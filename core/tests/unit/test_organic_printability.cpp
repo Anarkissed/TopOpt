@@ -142,6 +142,26 @@ double rooted_length_fraction(const std::vector<OrganicSpan>& spans) {
 // the air is held nowhere. Two cases, both measured (2026-09-05, after the prune
 // became "doomed only when NEITHER end is held").
 // ── S1: a dead wall gets a coherent synthetic field; a live one is untouched ────
+// ── P1: the probe's rooting measure ─────────────────────────────────────────────
+void test_probe_rooting() {
+  OrganicLattice lat;
+  lat.grid_origin = Vec3{0, 0, 0}; lat.grid_h = 1.0; lat.grid_nx = 20; lat.grid_ny = 4; lat.grid_nz = 12;
+  lat.part_solid.assign(static_cast<std::size_t>(20 * 4 * 12), 0);
+  for (int k = 0; k < 12; ++k) for (int j = 0; j < 4; ++j) for (int i = 0; i < 2; ++i)
+    lat.part_solid[(static_cast<std::size_t>(k) * 4 + j) * 20 + i] = 1;
+  add_curve(lat, {Vec3{2.2, 2.0, 1.0}, Vec3{6.0, 2.0, 1.0}}, 0.3);     // A touches the slab
+  add_curve(lat, {Vec3{10.0, 2.0, 1.0}, Vec3{14.0, 2.0, 1.0}}, 0.3);   // B floats
+  add_curve(lat, {Vec3{14.1, 2.0, 1.0}, Vec3{18.0, 2.0, 1.0}}, 0.3);   // C touches B
+  std::vector<int> rid(static_cast<std::size_t>(20 * 4 * 12), 1);
+  const OrganicProbeResult pr = probe_organic_rooting(lat, rid);
+  CHECK(pr.curves == 3, "P1: three curves measured");
+  CHECK(pr.components == 2, "P1: A alone, B+C welded by contact = two components");
+  CHECK(std::fabs(pr.rooted_mm - 3.8) < 1e-6, "P1: only A's 3.8 mm is rooted (touches the slab)");
+  CHECK(std::fabs(pr.traced_mm - (3.8 + 4.0 + 3.9)) < 1e-6, "P1: traced length is the sum");
+  CHECK(pr.regions.size() == 1 && pr.regions[0].region_id == 1 && pr.regions[0].curves == 3,
+        "P1: one region, id 1, holding all three curves");
+}
+
 void test_synthetic_focal_stress() {
   VoxelGrid grid;
   grid.nx = 20; grid.ny = 4; grid.nz = 12; grid.spacing = 1.0;
@@ -1078,6 +1098,7 @@ int main() {
   test_mat_survives_the_weld_raster();
   test_slenderness_reads_the_unsupported_span();
   test_stats_are_actually_populated();
+  test_probe_rooting();
   test_synthetic_focal_stress();
   test_bundle_is_not_support();
   test_chain_and_tee_survive();

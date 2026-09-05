@@ -1140,6 +1140,53 @@ SyntheticStressReport synthesize_focal_stress(
     const std::vector<SyntheticStressRegion>& regions, double dead_fraction,
     std::vector<double>& stress);
 
+// ── ★ THE CELL-SIZE PROBE'S MEASURE: how much of the traced length reaches the part
+// Curves are welded by node contact within r+r (the solver's rule) plus their own
+// polyline, union-find over vertices; a component is ROOTED when any vertex touches
+// part solid (`part_solid` on the lattice, grid geometry on the lattice). Reported
+// per include region (the region of a curve's first vertex) and in total. This is a
+// measurement of the TRACE, before emission, the support pass and the certificate;
+// its agreement with the certificate's untied fraction is what calibrates it.
+struct OrganicProbeRegion {
+  int region_id = 0;
+  std::size_t curves = 0;
+  std::size_t curves_per_family[3] = {0, 0, 0};
+  std::size_t components = 0;
+  double traced_mm = 0.0;
+  double rooted_mm = 0.0;
+};
+struct OrganicProbeResult {
+  std::vector<OrganicProbeRegion> regions;   // region_id 0 = outside every include region
+  std::size_t curves = 0;
+  std::size_t components = 0;
+  double traced_mm = 0.0;
+  double rooted_mm = 0.0;
+};
+// ★ WELD THE CROSSINGS. Streamlines of different families cross mid-segment and
+// share no vertex; the emission's node merge and tie pass make those junctions in
+// the run, but a probe of the RAW trace has none -- measured: traced 3-5 read 50-77 %
+// rooted and the certificate refused for disconnection before solving, where the
+// run certifies at 3.9. For every vertex, the nearest segment of another curve
+// within the two radii gets that vertex's foot inserted as a vertex of its own, so
+// both the contact weld and the beam network see the junction. Returns the number
+// of vertices inserted.
+std::size_t weld_curve_crossings(std::vector<OrganicCurve>& curves);
+// ★ TIE THE FREE ENDS, as the emission's tie pass does (kOrganicTieReachRatio x the
+// separation): a curve end with no foreign vertex within its two radii reaches for
+// the nearest foreign segment within `reach_mm`; the foot is inserted on that curve
+// and a straight two-point tie (family 1, the end's radius) is appended. Without
+// this a probe of a TRACED lattice reads 17-26 % untied and the certificate refuses
+// before solving, where the run certifies. Returns the number of ties added.
+std::size_t tie_curve_free_ends(std::vector<OrganicCurve>& curves, double reach_mm);
+// ★ DROP THE LEGS, as the support pass does: from every curve end a vertical ray
+// downward; the first foreign segment it passes within the two radii, up to
+// `reach_mm` below, gets the foot inserted and a straight vertical leg appended.
+// The emission adds thousands of these (12,402 on traced 3-5, 8,768 on grown), and
+// a probe without them predicted margins 2.7-5x under the run's. Returns legs added.
+std::size_t drop_curve_legs(std::vector<OrganicCurve>& curves, double reach_mm);
+OrganicProbeResult probe_organic_rooting(const OrganicLattice& lat,
+                                         const std::vector<int>& voxel_region_id);
+
 OrganicLattice trace_organic_lattice(const VoxelGrid& grid,
                                      const std::vector<char>& candidate,
                                      const std::vector<double>& stress,

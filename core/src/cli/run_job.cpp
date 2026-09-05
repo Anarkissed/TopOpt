@@ -4140,7 +4140,8 @@ OrganicOutcome run_organic_step(bool shell_is_written,
                                 // path: it advances a tip one layer at a time and asks
                                 // its support question in that discretisation. 0 = not
                                 // stated, and growth falls back to half a voxel.
-                                double layer_height_mm = 0.0) {
+                                double layer_height_mm = 0.0,
+                                bool probe_only = false) {
   OrganicOutcome oo;
   const std::size_t n = grid.voxel_count();
   // NO STRESS TENSOR, NO ORGANIC LATTICE. The whole method is the eigen-decomposition
@@ -4490,6 +4491,8 @@ OrganicOutcome run_organic_step(bool shell_is_written,
     std::size_t ns = 0; for (char c : oo.lat.part_solid) ns += c ? 1 : 0;
     std::fprintf(stderr, "[part-solid] %zu solid voxels outside the region (of %zu), iso %.4f\n", ns, n, printed_iso);
   }
+  // ★ THE PROBE STOPS HERE: the curves and the part's solid are what it measures.
+  if (probe_only) { oo.ran = true; return oo; }
   if (oo.net_skin_wanted) {
     oo.lat.net_skin_reach_mm = oo.lat.report.achieved_spacing_median_mm;
     oo.lat.net_skin_finish =
@@ -4689,6 +4692,12 @@ LatticeAlgorithm resolve_lattice_algorithm(const JobGrading& jg) {
 // grid and domain.bcs are the caller's BCs verbatim, so every existing caller is
 // byte-identical; with one, domain.grid is the EXPANDED grid, domain.bcs are the
 // remapped BCs, and part_grid is what "outside the original part" means.
+// quotes, backslashes and newlines out of a string headed into a JSON literal
+static std::string json_safe(std::string t) {
+  for (char& c : t) if (c == '"' || c == '\\' || c == '\n' || c == '\r') c = c == '"' ? '\'' : ' ';
+  return t;
+}
+
 LatticeVariantOutcome lattice_one_variant(
     const MinimizePlasticVariant& v, const JobDescription& job,
     const VoxelGrid& part_grid, const SolvedDesignDomain& domain,
@@ -4923,6 +4932,209 @@ LatticeVariantOutcome lattice_one_variant(
     gp.subfloor_aggregate_cap_fraction = job.grading.subfloor_aggregate_cap;
     gf = grade_lattice(solved_grid, dens, v.von_mises_field, &cand, gp,
                        printed_iso);
+    // ── ★ THE ORGANIC CELL-SIZE PROBE (see JobLattice::organic_probe_cells_mm) ──
+    // Runs here because everything it needs is in scope and already paid for: the
+    // one base solve (v.stress_tensor_field), the law's input candidates (`cand`),
+    // the law's params (`gp`) and the per-voxel include-region ids. Per candidate
+    // window: grade, trace/grow, weld, measure rooting. No emission, no support
+    // pass, no certificate. The normal run continues afterwards unchanged.
+    if (R.algorithm == LatticeAlgorithm::Organic &&
+        (!job.lattice.organic_probe_cells_mm.empty() ||
+         !job.lattice.organic_probe_grades_mm.empty())) {
+      struct Cand { double lo, hi; };
+      std::vector<Cand> cands;
+      for (double c : job.lattice.organic_probe_cells_mm) cands.push_back({c, c});
+      for (const auto& g : job.lattice.organic_probe_grades_mm) cands.push_back({g.first, g.second});
+      std::string pj = "{\n  \"organic_probe_version\": 1,\n  \"algorithm\": \"organic\",\n";
+      pj += "  \"growth\": " + std::string(job.grading.organic_growth ? "true" : "false") + ",\n";
+      pj += "  \"transfer_ties\": " + std::string(job.grading.organic_transfer_ties ? "true" : "false") + ",\n";
+      pj += "  \"rooted_gate\": 0.95, \"curves_per_family_gate\": 2, \"cells_across_advisory\": 4.0,\n";
+      pj += "  \"candidates\": [\n";
+      const std::vector<double> probe_stress = stress_tensor_for_organic(
+          job, solved_grid, cand, region_ids, v.stress_tensor_field, nullptr);
+      // ★ THE STRESS HALF (2026-09-05). Rooting alone saturates at 100 % on a wall
+      // whose every welded network touches the solid, and the certificate's margin
+      // is what "approved for structural" has to mean. So each candidate's RAW trace
+      // -- curves decimated to beam segments, no emission, no support pass -- goes
+      // through the same certificate the run will use, with the same loads, material
+      // and knockdown. It is a prediction: the support pass and the fill will change
+      // the network; its agreement with the run's certificate is the calibration.
+      const LatticeCertContext pcx = lattice_cert_context(v, part_grid, domain, options, material);
+      for (std::size_t ci = 0; ci < cands.size(); ++ci) {
+        const Cand& cc = cands[ci];
+        const double t0 = wall_seconds();
+        GradingLawParams alt = gp;
+        alt.min_cell_size_mm = cc.lo; alt.max_cell_size_mm = cc.hi;
+        alt.target_cell_size_mm = cc.hi;
+        JobGrading jg2 = job.grading;
+        jg2.cell_min_mm = cc.lo; jg2.cell_max_mm = cc.hi; jg2.cell_mm = cc.hi;
+        const GradedField agf = grade_lattice(solved_grid, dens, v.von_mises_field, &cand, alt, printed_iso);
+        OrganicOutcome po = run_organic_step(job.lattice.outer_finish != "skin", solved_grid, dens,
+                                             probe_stress, agf.posture.mask, agf.posture.relative_density,
+                                             agf.band_rho_min, agf.band_rho_max, jg2,
+                                             job.loads.present && job.loads.minimize_plastic,
+                                             v.applied_build_dir, printed_iso, 32,
+                                             job.loads.layer_height_mm, /*probe_only=*/true);
+        // ★ ONE welded polyline set feeds BOTH measures: thin to 2 mm keeping shared
+        // vertices, insert crossing junctions, then root and certify the same curves.
+        OrganicLattice plat = po.lat;
+        std::size_t crossings = 0;
+        {
+          std::unordered_map<long long, int> seen0;
+          auto vkey0 = [](const Vec3& q) {
+            const long long ix = static_cast<long long>(std::llround(q.x * 1e4));
+            const long long iy = static_cast<long long>(std::llround(q.y * 1e4));
+            const long long iz = static_cast<long long>(std::llround(q.z * 1e4));
+            return (ix * 73856093LL) ^ (iy * 19349663LL) ^ (iz * 83492791LL);
+          };
+          for (const OrganicCurve& cv : plat.curves) for (const Vec3& q : cv.points) ++seen0[vkey0(q)];
+          for (OrganicCurve& cv : plat.curves) {
+            if (cv.points.size() < 2) continue;
+            std::vector<Vec3> thin{cv.points.front()};
+            for (std::size_t k = 1; k < cv.points.size(); ++k) {
+              const bool end = (k + 1 == cv.points.size());
+              const bool weld = seen0[vkey0(cv.points[k])] > 1;
+              const double dx = cv.points[k].x - thin.back().x, dy = cv.points[k].y - thin.back().y, dz = cv.points[k].z - thin.back().z;
+              const double d = std::sqrt(dx * dx + dy * dy + dz * dz);
+              if (!end && !weld && d < 2.0) continue;
+              if (d > 1e-6) thin.push_back(cv.points[k]);
+            }
+            cv.points.swap(thin);
+            cv.seg_kind.clear();
+          }
+          crossings = weld_curve_crossings(plat.curves);
+        }
+        // the emission's free-end tie, at its reach (kOrganicTieReachRatio x the window)
+        const std::size_t free_ties = tie_curve_free_ends(plat.curves, kOrganicTieReachRatio * cc.hi);
+        // the support pass's legs: a vertical drop from every end onto the lattice below
+        const std::size_t legs = drop_curve_legs(plat.curves, 3.0 * cc.hi);
+        if (free_ties || legs) crossings += weld_curve_crossings(plat.curves);
+        const OrganicProbeResult pr = probe_organic_rooting(plat, region_ids);
+        const double secs = wall_seconds() - t0;
+        std::vector<BeamSegment> psegs;
+        for (const OrganicCurve& cv : plat.curves)
+          for (std::size_t k = 1; k < cv.points.size(); ++k) {
+            const double dx = cv.points[k].x - cv.points[k - 1].x, dy = cv.points[k].y - cv.points[k - 1].y, dz = cv.points[k].z - cv.points[k - 1].z;
+            if (dx * dx + dy * dy + dz * dz > 1e-12) psegs.push_back({cv.points[k - 1], cv.points[k], cv.radius_mm});
+          }
+        if (false) {
+          // ★ KEEP THE WELDS. A tie's vertex at a pillar IS that pillar's vertex; the
+          // beam network welds node-to-node, so thinning a pillar past that vertex
+          // leaves the tie landing mid-segment and unwelded -- the first probe
+          // predicted 0.46 where the run certified 1.55 for exactly this reason.
+          // Every vertex shared by two curves (exact match) is kept; the rest are
+          // thinned to 2 mm.
+          std::unordered_map<long long, int> seen;
+          auto vkey = [](const Vec3& q) {
+            const long long ix = static_cast<long long>(std::llround(q.x * 1e4));
+            const long long iy = static_cast<long long>(std::llround(q.y * 1e4));
+            const long long iz = static_cast<long long>(std::llround(q.z * 1e4));
+            return (ix * 73856093LL) ^ (iy * 19349663LL) ^ (iz * 83492791LL);
+          };
+          for (const OrganicCurve& cv : po.lat.curves)
+            for (const Vec3& q : cv.points) ++seen[vkey(q)];
+          auto dist = [](const Vec3& a, const Vec3& b) {
+            const double dx = a.x - b.x, dy = a.y - b.y, dz = a.z - b.z;
+            return std::sqrt(dx * dx + dy * dy + dz * dz);
+          };
+          for (const OrganicCurve& cv : po.lat.curves) {
+            if (cv.points.size() < 2) continue;
+            Vec3 last = cv.points.front();
+            for (std::size_t k = 1; k < cv.points.size(); ++k) {
+              const bool end = (k + 1 == cv.points.size());
+              const bool weld = seen[vkey(cv.points[k])] > 1;
+              const double d = dist(cv.points[k], last);
+              if (!end && !weld && d < 2.0) continue;
+              if (d > 1e-6) psegs.push_back({last, cv.points[k], cv.radius_mm});
+              last = cv.points[k];
+            }
+          }
+        }
+        std::string pred = "\"predicted\": {\"ran\": false, \"reason\": \"no segments\"}";
+        bool cert_ok = false;
+        if (!psegs.empty() && psegs.size() <= 600000) {
+          const double t1 = wall_seconds();
+          std::vector<char> hexm(solved_grid.voxel_count(), 0);
+          for (std::size_t e = 0; e < solved_grid.voxel_count(); ++e)
+            if (v.optimization.physical_density[e] > pcx.printed_iso && !agf.posture.mask[e]) hexm[e] = 1;
+          std::vector<OrganicLoadCase> pocs;
+          pocs.push_back({"job", bcs, pcx.loads});
+          const OrganicCertificate pc = certify_organic_structural(
+              solved_grid, hexm, psegs, pocs, material.youngs_modulus_mpa, material.poisson,
+              material.yield_strength_mpa, pcx.knockdown.infill_knockdown, cc.hi, true);
+          cert_ok = pc.verdict == OrganicCertificate::Verdict::Certified;
+          char pb[700];
+          std::snprintf(pb, sizeof pb,
+                        "\"predicted\": {\"ran\": true, \"verdict\": \"%s\", \"margin\": %.6g, "
+                        "\"p99_mpa\": %.6g, \"max_mpa\": %.6g, \"allowable_mpa\": %.6g, "
+                        "\"segments\": %zu, \"seconds\": %.3g, \"refusal\": \"%s\"}",
+                        cert_ok ? "certified" : "refused", pc.margin, pc.stress_p99_mpa,
+                        pc.stress_max_mpa, pc.allowable_used_mpa, psegs.size(), wall_seconds() - t1,
+                        json_safe(pc.refusal.substr(0, 160)).c_str());
+          pred = pb;
+          std::fprintf(stderr, "[probe]   stress: %s margin %.3g p99 %.3g (%zu segs, %.1fs)\n",
+                       cert_ok ? "certified" : "REFUSED", pc.margin, pc.stress_p99_mpa, psegs.size(),
+                       wall_seconds() - t1);
+        } else if (!psegs.empty()) {
+          pred = "\"predicted\": {\"ran\": false, \"reason\": \"" + std::to_string(psegs.size()) +
+                 " segments exceed the probe's 600000 cap\"}";
+        }
+        bool ok_s = true, ok_a = true;
+        std::string regs;
+        int include_index = 0;
+        for (const JobLatticeRegion& jr : job.lattice.regions) {
+          if (jr.role != "include") continue;
+          ++include_index;
+          const OrganicProbeRegion* R2 = nullptr;
+          for (const OrganicProbeRegion& q : pr.regions) if (q.region_id == include_index) R2 = &q;
+          const double rooted = (R2 && R2->traced_mm > 0.0) ? R2->rooted_mm / R2->traced_mm : 0.0;
+          const double across = jr.depth_mm > 0.0 && cc.hi > 0.0 ? jr.depth_mm / cc.hi : 0.0;
+          const std::size_t cpf_min = R2 ? std::min(R2->curves_per_family[0], R2->curves_per_family[1]) : 0;
+          std::string refs;
+          if (rooted < 0.95) refs += std::string("rooted ") + std::to_string(rooted) + " < 0.95";
+          if (cpf_min < 2) refs += (refs.empty() ? "" : "; ") + std::string("curves_per_family min ") + std::to_string(cpf_min) + " < 2";
+          const bool ok_aes = rooted >= 0.95 && cpf_min >= 2;
+          // ★ cells_across is ADVISORY, not a gate (measured 2026-09-05): on a 12 mm
+          // wall every candidate sits at 1.7-3.4 cells across, and the certificate
+          // CERTIFIED two of them (traced 3-5 at 7.46, grown 4.5-5.5 at 1.55). The
+          // four-cells rule is a continuum-stiffness criterion for periodic cells; an
+          // organic lattice is judged by its beam network, not by a homogenised
+          // modulus, so refusing here would refuse what the certificate certifies.
+          std::string advice;
+          if (across < 4.0) advice = "cells_across " + std::to_string(across) + " < 4 (advisory)";
+          const bool ok_str = ok_aes;
+          ok_s = ok_s && ok_str; ok_a = ok_a && ok_aes;
+          char buf[640];
+          std::snprintf(buf, sizeof buf,
+                        "        {\"face_id\": %d, \"region_id\": %d, \"depth_mm\": %.6g, \"cells_across\": %.4g, "
+                        "\"curves_per_family\": [%zu, %zu, %zu], \"components\": %zu, "
+                        "\"traced_length_mm\": %.6g, \"rooted_length_fraction\": %.6g, "
+                        "\"approved_structural\": %s, \"approved_aesthetic\": %s, \"refusals\": \"%s\", \"advice\": \"%s\"}",
+                        jr.face_id, include_index, jr.depth_mm, across,
+                        R2 ? R2->curves_per_family[0] : 0, R2 ? R2->curves_per_family[1] : 0, R2 ? R2->curves_per_family[2] : 0,
+                        R2 ? R2->components : 0, R2 ? R2->traced_mm : 0.0, rooted,
+                        ok_str ? "true" : "false", ok_aes ? "true" : "false", refs.c_str(), advice.c_str());
+          regs += std::string(regs.empty() ? "" : ",\n") + buf;
+        }
+        char head[400];
+        std::snprintf(head, sizeof head,
+                      "    {\"cell_min_mm\": %.6g, \"cell_max_mm\": %.6g, \"trace_seconds\": %.3g, "
+                      "\"curves\": %zu, \"components\": %zu, \"traced_length_mm\": %.6g, "
+                      "\"rooted_length_fraction\": %.6g, \"candidate_voxels\": %zu,\n      \"regions\": [\n",
+                      cc.lo, cc.hi, secs, pr.curves, pr.components, pr.traced_mm,
+                      pr.traced_mm > 0.0 ? pr.rooted_mm / pr.traced_mm : 0.0,
+                      static_cast<std::size_t>(std::count(agf.posture.mask.begin(), agf.posture.mask.end(), 1)));
+        const bool approved_structural = ok_s && cert_ok;
+        pj += head + regs + "\n      ],\n      " + pred + ",\n      \"approved_structural\": " +
+              (approved_structural ? "true" : "false") +
+              ", \"approved_aesthetic\": " + (ok_a ? "true" : "false") + "}" + (ci + 1 < cands.size() ? ",\n" : "\n");
+        std::fprintf(stderr, "[probe] cell %.3g-%.3g: %zu curves, %zu crossings welded, %zu free ends tied, %zu legs, rooted %.3f, %.1fs%s\n", cc.lo, cc.hi,
+                     pr.curves, crossings, free_ties, legs, pr.traced_mm > 0.0 ? pr.rooted_mm / pr.traced_mm : 0.0, secs,
+                     approved_structural ? "  APPROVED structural" : ok_a ? "  approved aesthetic only" : "  refused");
+      }
+      pj += "  ]\n}\n";
+      write_text_file(join_path(out_dir, "organic_probe.json"), pj);
+    }
 
     // ── STAGE E: THE PER-REGION REPORT (task 2026-08-05-lattice-cell-size-
     // adaptation). Everything below is READ-ONLY: it consumes `cand`, `region_ids`,

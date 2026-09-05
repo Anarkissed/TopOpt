@@ -1216,7 +1216,7 @@ JobDescription parse_job(const std::string& json_text) {
                          "emit_3mf", "skin", "min_extrudable_width_mm",
                          "outer_finish", "emit_welded_stl", "welded_pitch_mm", "emit_organic_spans",
                          "regions", "multiscale",
-                         "forecast_only",
+                         "forecast_only", "organic_probe_cells_mm", "organic_probe_grades_mm",
                          "require_lattice_void_reaches_exterior",
                          "require_no_midair_start"},
                         "lattice");
@@ -1498,6 +1498,27 @@ JobDescription parse_job(const std::string& json_text) {
         schema_fail("lattice \"forecast_only\" must be a boolean");
       job.lattice.forecast_only = (fo->num != 0.0);
     }
+    if (const JsonValue* pc = find_key(lat, "organic_probe_cells_mm")) {
+      if (pc->type != JsonValue::Type::Array)
+        schema_fail("lattice \"organic_probe_cells_mm\" must be an array of numbers");
+      for (const JsonValue& c : pc->arr) {
+        if (c.type != JsonValue::Type::Number || !(c.num > 0.0) || !std::isfinite(c.num))
+          schema_fail("lattice \"organic_probe_cells_mm\": every entry must be a finite number > 0");
+        job.lattice.organic_probe_cells_mm.push_back(c.num);
+      }
+    }
+    if (const JsonValue* pg = find_key(lat, "organic_probe_grades_mm")) {
+      if (pg->type != JsonValue::Type::Array)
+        schema_fail("lattice \"organic_probe_grades_mm\" must be an array of [lo, hi] pairs");
+      for (const JsonValue& g : pg->arr) {
+        if (g.type != JsonValue::Type::Array || g.arr.size() != 2 ||
+            g.arr[0].type != JsonValue::Type::Number || g.arr[1].type != JsonValue::Type::Number ||
+            !(g.arr[0].num > 0.0) || !(g.arr[1].num > g.arr[0].num) ||
+            !std::isfinite(g.arr[1].num))
+          schema_fail("lattice \"organic_probe_grades_mm\": every entry must be [lo, hi] with 0 < lo < hi");
+        job.lattice.organic_probe_grades_mm.push_back({g.arr[0].num, g.arr[1].num});
+      }
+    }
     // THE ENCLOSED-VOID RULE (task 2026-08-05-lattice-void-reaches-exterior).
     // Absent => false => every existing job runs, and writes, exactly as it did.
     if (const JsonValue* rv =
@@ -1778,6 +1799,10 @@ JobDescription parse_job(const std::string& json_text) {
     // false is still honoured, and the receipt reports which.
     if (organic_alg && !find_key(gr, "organic_shape_fit"))
       job.grading.organic_shape_fit = true;
+    if (!organic_alg && (!job.lattice.organic_probe_cells_mm.empty() ||
+                         !job.lattice.organic_probe_grades_mm.empty()))
+      schema_fail("lattice \"organic_probe_cells_mm\" / \"organic_probe_grades_mm\" are only "
+                  "allowed with grading algorithm \"organic\"");
     // ★ SYNTHETIC STRESS IS AESTHETIC-ONLY, AND ORGANIC-ONLY. A structural lattice
     // must follow the real load; the synthetic tensor exists so a wall that carries
     // nothing still gets a coherent weave, and nothing certified may read it.

@@ -702,6 +702,24 @@ static void test_organic_scale_and_gates() {
     CHECK(parse_job(organic_swept(", \"organic_transfer_ties\": true"))
               .grading.organic_transfer_ties,
           "organic_transfer_ties: true is honoured");
+    {
+      auto probe = [&](const std::string& lat_extra, const std::string& alg) {
+        return mutate("\"mesh_prefix\": \"variant\" }",
+                      "\"mesh_prefix\": \"variant\" },\n  \"lattice\": { " + lat_extra + " },\n"
+                      "  \"grading\": { \"topology\": \"octet\", \"min_extrudable_width_mm\": 0.4, "
+                      "\"algorithm\": \"" + alg + "\", \"intent\": \"aesthetic\", \"cell_mode\": \"swept\", "
+                      "\"cell_min_mm\": 3.0, \"cell_max_mm\": 6.0 }");
+      };
+      const JobDescription j = parse_job(probe("\"organic_probe_cells_mm\": [3, 4.5, 6], \"organic_probe_grades_mm\": [[3, 5]]", "organic"));
+      CHECK(j.lattice.organic_probe_cells_mm.size() == 3 && j.lattice.organic_probe_grades_mm.size() == 1 &&
+                j.lattice.organic_probe_grades_mm[0].second == 5.0,
+            "organic_probe: cells and grades parsed");
+      bool r1 = false, r2 = false;
+      try { (void)parse_job(probe("\"organic_probe_cells_mm\": [3]", "doubled")); } catch (const std::exception&) { r1 = true; }
+      try { (void)parse_job(probe("\"organic_probe_grades_mm\": [[5, 3]]", "organic")); } catch (const std::exception&) { r2 = true; }
+      CHECK(r1, "organic_probe: refused off the organic algorithm");
+      CHECK(r2, "organic_probe: a grade with hi <= lo is refused");
+    }
     CHECK(parse_job(organic_swept("")).grading.organic_tie_swirl == 1.0,
           "organic_tie_swirl: absent means 1.0 (full swirl)");
     CHECK(parse_job(organic_swept(", \"organic_tie_swirl\": 0.25")).grading.organic_tie_swirl == 0.25,

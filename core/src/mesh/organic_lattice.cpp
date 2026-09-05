@@ -325,6 +325,354 @@ SyntheticStressReport synthesize_focal_stress(
   return rep;
 }
 
+// ── weld the crossings (see the header) ─────────────────────────────────────────
+std::size_t weld_curve_crossings(std::vector<OrganicCurve>& curves) {
+  const std::size_t nc = curves.size();
+  if (nc < 2) return 0;
+  double rmax = 0.0;
+  for (const OrganicCurve& c : curves) rmax = std::max(rmax, c.radius_mm);
+  // hash SEGMENTS by the cells their bounding box touches
+  const double cell = std::max(4.0 * rmax, 1e-6);
+  struct Seg { std::size_t c, k; };   // curve, segment index k (points k, k+1)
+  std::unordered_map<long long, std::vector<Seg>> hash;
+  auto key = [cell](double x, double y, double z) {
+    const long long ix = static_cast<long long>(std::floor(x / cell));
+    const long long iy = static_cast<long long>(std::floor(y / cell));
+    const long long iz = static_cast<long long>(std::floor(z / cell));
+    return (ix * 73856093LL) ^ (iy * 19349663LL) ^ (iz * 83492791LL);
+  };
+  for (std::size_t c = 0; c < nc; ++c)
+    for (std::size_t k = 0; k + 1 < curves[c].points.size(); ++k) {
+      const Vec3& a = curves[c].points[k]; const Vec3& b = curves[c].points[k + 1];
+      const int i0 = int(std::floor(std::min(a.x, b.x) / cell)), i1 = int(std::floor(std::max(a.x, b.x) / cell));
+      const int j0 = int(std::floor(std::min(a.y, b.y) / cell)), j1 = int(std::floor(std::max(a.y, b.y) / cell));
+      const int k0 = int(std::floor(std::min(a.z, b.z) / cell)), k1 = int(std::floor(std::max(a.z, b.z) / cell));
+      for (int i = i0; i <= i1; ++i) for (int j = j0; j <= j1; ++j) for (int kk = k0; kk <= k1; ++kk)
+        hash[key((i + 0.5) * cell, (j + 0.5) * cell, (kk + 0.5) * cell)].push_back({c, k});
+    }
+  // for each vertex, the nearest foreign segment within r+r -> an insertion on it
+  struct Ins { std::size_t c, k; double t; Vec3 p; };
+  std::vector<Ins> ins;
+  for (std::size_t c = 0; c < nc; ++c) {
+    const double rc = curves[c].radius_mm;
+    for (const Vec3& v : curves[c].points) {
+      double best = 1e300; Ins bi{0, 0, 0.0, v}; bool found = false;
+      for (int dz = -1; dz <= 1; ++dz) for (int dy = -1; dy <= 1; ++dy) for (int dx = -1; dx <= 1; ++dx) {
+        auto it = hash.find(key(v.x + dx * cell, v.y + dy * cell, v.z + dz * cell));
+        if (it == hash.end()) continue;
+        for (const Seg& sg : it->second) {
+          if (sg.c == c) continue;
+          const Vec3& a = curves[sg.c].points[sg.k]; const Vec3& b = curves[sg.c].points[sg.k + 1];
+          const Vec3 ab = vsub(b, a); const double abab = vdot(ab, ab);
+          double t = abab > 0.0 ? vdot(vsub(v, a), ab) / abab : 0.0;
+          t = std::max(0.0, std::min(1.0, t));
+          if (t < 0.02 || t > 0.98) continue;             // an END already is a vertex
+          const Vec3 q = vadd(a, vmul(ab, t));
+          const double reach = rc + curves[sg.c].radius_mm;
+          const double d2 = vdot(vsub(q, v), vsub(q, v));
+          if (d2 <= reach * reach && d2 < best) { best = d2; bi = {sg.c, sg.k, t, q}; found = true; }
+        }
+      }
+      if (found) ins.push_back(bi);
+    }
+  }
+  if (ins.empty()) return 0;
+  // insert from the back of each curve so earlier indices stay valid
+  std::sort(ins.begin(), ins.end(), [](const Ins& x, const Ins& y) {
+    return x.c != y.c ? x.c < y.c : (x.k != y.k ? x.k > y.k : x.t > y.t);
+  });
+  std::size_t n_ins = 0;
+  for (const Ins& in : ins) {
+    OrganicCurve& cv = curves[in.c];
+    if (in.k + 1 >= cv.points.size()) continue;
+    // skip if a vertex already sits within a quarter radius of the foot
+    const double near = 0.25 * cv.radius_mm;
+    if (vlen(vsub(cv.points[in.k], in.p)) < near || vlen(vsub(cv.points[in.k + 1], in.p)) < near) continue;
+    cv.points.insert(cv.points.begin() + static_cast<std::ptrdiff_t>(in.k + 1), in.p);
+    if (!cv.seg_kind.empty() && in.k < cv.seg_kind.size())
+      cv.seg_kind.insert(cv.seg_kind.begin() + static_cast<std::ptrdiff_t>(in.k), cv.seg_kind[in.k]);
+    ++n_ins;
+  }
+  return n_ins;
+}
+
+// ── tie the free ends (see the header) ──────────────────────────────────────────
+std::size_t tie_curve_free_ends(std::vector<OrganicCurve>& curves, double reach_mm) {
+  const std::size_t nc = curves.size();
+  if (nc < 2 || !(reach_mm > 0.0)) return 0;
+  const double cell = std::max(reach_mm, 1e-6);
+  struct Seg { std::size_t c, k; };
+  std::unordered_map<long long, std::vector<Seg>> hash;
+  auto key = [cell](double x, double y, double z) {
+    const long long ix = static_cast<long long>(std::floor(x / cell));
+    const long long iy = static_cast<long long>(std::floor(y / cell));
+    const long long iz = static_cast<long long>(std::floor(z / cell));
+    return (ix * 73856093LL) ^ (iy * 19349663LL) ^ (iz * 83492791LL);
+  };
+  for (std::size_t c = 0; c < nc; ++c)
+    for (std::size_t k = 0; k + 1 < curves[c].points.size(); ++k) {
+      const Vec3& a = curves[c].points[k]; const Vec3& b = curves[c].points[k + 1];
+      const int i0 = int(std::floor(std::min(a.x, b.x) / cell)), i1 = int(std::floor(std::max(a.x, b.x) / cell));
+      const int j0 = int(std::floor(std::min(a.y, b.y) / cell)), j1 = int(std::floor(std::max(a.y, b.y) / cell));
+      const int k0 = int(std::floor(std::min(a.z, b.z) / cell)), k1 = int(std::floor(std::max(a.z, b.z) / cell));
+      for (int i = i0; i <= i1; ++i) for (int j = j0; j <= j1; ++j) for (int kk = k0; kk <= k1; ++kk)
+        hash[key((i + 0.5) * cell, (j + 0.5) * cell, (kk + 0.5) * cell)].push_back({c, k});
+    }
+  struct Tie { std::size_t c, k; double t; Vec3 foot; Vec3 tip; double r; bool held; };
+  std::vector<Tie> ties;
+  for (std::size_t c = 0; c < nc; ++c) {
+    const OrganicCurve& cv = curves[c];
+    if (cv.points.size() < 2) continue;
+    for (int e = 0; e < 2; ++e) {
+      const Vec3 tip = e ? cv.points.back() : cv.points.front();
+      double best = reach_mm * reach_mm; Tie bt{0, 0, 0.0, tip, tip, cv.radius_mm, false}; bool found = false;
+      bool held = false;
+      for (int dz = -1; dz <= 1 && !held; ++dz) for (int dy = -1; dy <= 1 && !held; ++dy) for (int dx = -1; dx <= 1 && !held; ++dx) {
+        auto it = hash.find(key(tip.x + dx * cell, tip.y + dy * cell, tip.z + dz * cell));
+        if (it == hash.end()) continue;
+        for (const Seg& sg : it->second) {
+          if (sg.c == c) continue;
+          const Vec3& a = curves[sg.c].points[sg.k]; const Vec3& b = curves[sg.c].points[sg.k + 1];
+          const Vec3 ab = vsub(b, a); const double abab = vdot(ab, ab);
+          double t = abab > 0.0 ? vdot(vsub(tip, a), ab) / abab : 0.0;
+          t = std::max(0.0, std::min(1.0, t));
+          const Vec3 q = vadd(a, vmul(ab, t));
+          const double d2 = vdot(vsub(q, tip), vsub(q, tip));
+          const double contact = cv.radius_mm + curves[sg.c].radius_mm;
+          if (d2 <= contact * contact) { held = true; break; }   // already touching
+          if (d2 < best) { best = d2; bt = {sg.c, sg.k, t, q, tip, cv.radius_mm, false}; found = true; }
+        }
+      }
+      if (!held && found) ties.push_back(bt);
+    }
+  }
+  if (ties.empty()) return 0;
+  std::sort(ties.begin(), ties.end(), [](const Tie& x, const Tie& y) {
+    return x.c != y.c ? x.c < y.c : (x.k != y.k ? x.k > y.k : x.t > y.t);
+  });
+  std::size_t n = 0;
+  for (const Tie& t2 : ties) {
+    OrganicCurve& tgt = curves[t2.c];
+    if (t2.k + 1 >= tgt.points.size()) continue;
+    Vec3 foot = t2.foot;
+    const double near = 0.25 * tgt.radius_mm;
+    if (vlen(vsub(tgt.points[t2.k], foot)) < near) foot = tgt.points[t2.k];
+    else if (vlen(vsub(tgt.points[t2.k + 1], foot)) < near) foot = tgt.points[t2.k + 1];
+    else {
+      tgt.points.insert(tgt.points.begin() + static_cast<std::ptrdiff_t>(t2.k + 1), foot);
+      if (!tgt.seg_kind.empty() && t2.k < tgt.seg_kind.size())
+        tgt.seg_kind.insert(tgt.seg_kind.begin() + static_cast<std::ptrdiff_t>(t2.k), tgt.seg_kind[t2.k]);
+    }
+    OrganicCurve tie;
+    tie.family = 1; tie.radius_mm = t2.r;
+    tie.points = {t2.tip, foot};
+    tie.length_mm = vlen(vsub(foot, t2.tip));
+    curves.push_back(std::move(tie));
+    ++n;
+  }
+  return n;
+}
+
+// ── drop the legs (see the header) ──────────────────────────────────────────────
+std::size_t drop_curve_legs(std::vector<OrganicCurve>& curves, double reach_mm) {
+  const std::size_t nc = curves.size();
+  if (nc < 2 || !(reach_mm > 0.0)) return 0;
+  double rmax = 0.0;
+  for (const OrganicCurve& c : curves) rmax = std::max(rmax, c.radius_mm);
+  // hash segments by xy cell (a vertical ray only needs xy)
+  const double cell = std::max(4.0 * rmax, 1e-6);
+  struct Seg { std::size_t c, k; };
+  std::unordered_map<long long, std::vector<Seg>> hash;
+  auto key = [cell](double x, double y) {
+    const long long ix = static_cast<long long>(std::floor(x / cell));
+    const long long iy = static_cast<long long>(std::floor(y / cell));
+    return (ix * 73856093LL) ^ (iy * 19349663LL);
+  };
+  for (std::size_t c = 0; c < nc; ++c)
+    for (std::size_t k = 0; k + 1 < curves[c].points.size(); ++k) {
+      const Vec3& a = curves[c].points[k]; const Vec3& b = curves[c].points[k + 1];
+      const int i0 = int(std::floor(std::min(a.x, b.x) / cell)), i1 = int(std::floor(std::max(a.x, b.x) / cell));
+      const int j0 = int(std::floor(std::min(a.y, b.y) / cell)), j1 = int(std::floor(std::max(a.y, b.y) / cell));
+      for (int i = i0; i <= i1; ++i) for (int j = j0; j <= j1; ++j)
+        hash[key((i + 0.5) * cell, (j + 0.5) * cell)].push_back({c, k});
+    }
+  struct Leg { std::size_t c, k; double t; Vec3 foot; Vec3 tip; double r; };
+  std::vector<Leg> legs;
+  for (std::size_t c = 0; c < nc; ++c) {
+    const OrganicCurve& cv = curves[c];
+    if (cv.points.size() < 2) continue;
+    for (int e = 0; e < 2; ++e) {
+      const Vec3 tip = e ? cv.points.back() : cv.points.front();
+      double best_drop = reach_mm; Leg bl{0, 0, 0.0, tip, tip, cv.radius_mm}; bool found = false;
+      for (int dy = -1; dy <= 1; ++dy) for (int dx = -1; dx <= 1; ++dx) {
+        auto it = hash.find(key(tip.x + dx * cell, tip.y + dy * cell));
+        if (it == hash.end()) continue;
+        for (const Seg& sg : it->second) {
+          if (sg.c == c) continue;
+          const Vec3& a = curves[sg.c].points[sg.k]; const Vec3& b = curves[sg.c].points[sg.k + 1];
+          // closest point of the segment to the vertical line through the tip (in xy)
+          const double abx = b.x - a.x, aby = b.y - a.y; const double ab2 = abx * abx + aby * aby;
+          double t = ab2 > 0.0 ? ((tip.x - a.x) * abx + (tip.y - a.y) * aby) / ab2 : 0.0;
+          t = std::max(0.0, std::min(1.0, t));
+          const Vec3 q{a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t, a.z + (b.z - a.z) * t};
+          const double dxy = std::sqrt((q.x - tip.x) * (q.x - tip.x) + (q.y - tip.y) * (q.y - tip.y));
+          const double contact = cv.radius_mm + curves[sg.c].radius_mm;
+          if (dxy > contact) continue;                 // the ray misses it
+          const double drop = tip.z - q.z;
+          if (drop <= contact) continue;                // above, or already touching
+          if (drop < best_drop) { best_drop = drop; bl = {sg.c, sg.k, t, q, tip, cv.radius_mm}; found = true; }
+        }
+      }
+      if (found) legs.push_back(bl);
+    }
+  }
+  if (legs.empty()) return 0;
+  std::sort(legs.begin(), legs.end(), [](const Leg& x, const Leg& y) {
+    return x.c != y.c ? x.c < y.c : (x.k != y.k ? x.k > y.k : x.t > y.t);
+  });
+  std::size_t n = 0;
+  for (const Leg& lg : legs) {
+    OrganicCurve& tgt = curves[lg.c];
+    if (lg.k + 1 >= tgt.points.size()) continue;
+    Vec3 foot = lg.foot;
+    const double near = 0.25 * tgt.radius_mm;
+    if (vlen(vsub(tgt.points[lg.k], foot)) < near) foot = tgt.points[lg.k];
+    else if (vlen(vsub(tgt.points[lg.k + 1], foot)) < near) foot = tgt.points[lg.k + 1];
+    else {
+      tgt.points.insert(tgt.points.begin() + static_cast<std::ptrdiff_t>(lg.k + 1), foot);
+      if (!tgt.seg_kind.empty() && lg.k < tgt.seg_kind.size())
+        tgt.seg_kind.insert(tgt.seg_kind.begin() + static_cast<std::ptrdiff_t>(lg.k), tgt.seg_kind[lg.k]);
+    }
+    OrganicCurve leg;
+    leg.family = 2; leg.radius_mm = lg.r;
+    leg.points = {lg.tip, Vec3{lg.tip.x, lg.tip.y, foot.z}, foot};
+    leg.length_mm = vlen(vsub(foot, lg.tip));
+    curves.push_back(std::move(leg));
+    ++n;
+  }
+  return n;
+}
+
+// ── the cell-size probe's measure (see the header) ──────────────────────────────
+OrganicProbeResult probe_organic_rooting(const OrganicLattice& lat,
+                                         const std::vector<int>& voxel_region_id) {
+  OrganicProbeResult out;
+  const std::size_t nc = lat.curves.size();
+  if (nc == 0) return out;
+  auto vox = [&](const Vec3& p, std::size_t* e) {
+    if (!(lat.grid_h > 0.0) || lat.grid_nx <= 0) return false;
+    const int i = static_cast<int>((p.x - lat.grid_origin.x) / lat.grid_h);
+    const int j = static_cast<int>((p.y - lat.grid_origin.y) / lat.grid_h);
+    const int k = static_cast<int>((p.z - lat.grid_origin.z) / lat.grid_h);
+    if (i < 0 || j < 0 || k < 0 || i >= lat.grid_nx || j >= lat.grid_ny || k >= lat.grid_nz)
+      return false;
+    *e = (static_cast<std::size_t>(k) * lat.grid_ny + j) * lat.grid_nx + i;
+    return true;
+  };
+  auto solid_near = [&](const Vec3& q, double r) {
+    if (lat.part_solid.empty()) return false;
+    const Vec3 probes[7] = {q, {q.x + r, q.y, q.z}, {q.x - r, q.y, q.z}, {q.x, q.y + r, q.z},
+                            {q.x, q.y - r, q.z}, {q.x, q.y, q.z + r}, {q.x, q.y, q.z - r}};
+    for (const Vec3& p : probes) {
+      std::size_t e = 0;
+      if (vox(p, &e) && e < lat.part_solid.size() && lat.part_solid[e]) return true;
+    }
+    return false;
+  };
+  // vertex ids: (curve, index) -> flat
+  std::vector<std::size_t> base(nc + 1, 0);
+  for (std::size_t c = 0; c < nc; ++c) base[c + 1] = base[c] + lat.curves[c].points.size();
+  const std::size_t nv = base[nc];
+  std::vector<int> par(nv);
+  for (std::size_t v = 0; v < nv; ++v) par[v] = static_cast<int>(v);
+  std::function<int(int)> find = [&](int a) {
+    while (par[static_cast<std::size_t>(a)] != a) {
+      par[static_cast<std::size_t>(a)] = par[static_cast<std::size_t>(par[static_cast<std::size_t>(a)])];
+      a = par[static_cast<std::size_t>(a)];
+    }
+    return a;
+  };
+  auto unite = [&](std::size_t a, std::size_t b) {
+    const int ra = find(static_cast<int>(a)), rb = find(static_cast<int>(b));
+    if (ra != rb) par[static_cast<std::size_t>(std::max(ra, rb))] = std::min(ra, rb);
+  };
+  double rmax = 0.0;
+  for (const OrganicCurve& c : lat.curves) rmax = std::max(rmax, c.radius_mm);
+  const double cell = std::max(2.0 * rmax, 1e-6);
+  std::unordered_map<long long, std::vector<std::size_t>> hash;
+  auto key = [cell](const Vec3& p) {
+    const long long ix = static_cast<long long>(std::floor(p.x / cell));
+    const long long iy = static_cast<long long>(std::floor(p.y / cell));
+    const long long iz = static_cast<long long>(std::floor(p.z / cell));
+    return (ix * 73856093LL) ^ (iy * 19349663LL) ^ (iz * 83492791LL);
+  };
+  for (std::size_t c = 0; c < nc; ++c) {
+    const OrganicCurve& cv = lat.curves[c];
+    for (std::size_t k = 0; k < cv.points.size(); ++k) {
+      if (k) unite(base[c] + k - 1, base[c] + k);
+      hash[key(cv.points[k])].push_back(base[c] + k);
+    }
+  }
+  auto curve_of = [&](std::size_t v) {
+    std::size_t lo = 0, hi = nc;
+    while (hi - lo > 1) { const std::size_t mid = (lo + hi) / 2; if (base[mid] <= v) lo = mid; else hi = mid; }
+    return lo;
+  };
+  for (std::size_t c = 0; c < nc; ++c) {
+    const OrganicCurve& cv = lat.curves[c];
+    for (std::size_t k = 0; k < cv.points.size(); ++k) {
+      const Vec3& p = cv.points[k];
+      for (int dz = -1; dz <= 1; ++dz)
+        for (int dy = -1; dy <= 1; ++dy)
+          for (int dx = -1; dx <= 1; ++dx) {
+            auto it = hash.find(key(Vec3{p.x + dx * cell, p.y + dy * cell, p.z + dz * cell}));
+            if (it == hash.end()) continue;
+            for (std::size_t w : it->second) {
+              const std::size_t oc = curve_of(w);
+              if (oc == c) continue;
+              const Vec3& q = lat.curves[oc].points[w - base[oc]];
+              const double reach = cv.radius_mm + lat.curves[oc].radius_mm;
+              const Vec3 d{p.x - q.x, p.y - q.y, p.z - q.z};
+              if (d.x * d.x + d.y * d.y + d.z * d.z <= reach * reach) unite(base[c] + k, w);
+            }
+          }
+    }
+  }
+  // rooted components
+  std::unordered_map<int, char> rooted;
+  for (std::size_t c = 0; c < nc; ++c)
+    for (const Vec3& p : lat.curves[c].points)
+      if (solid_near(p, lat.curves[c].radius_mm)) rooted[find(static_cast<int>(base[c]))] = 1;
+  std::unordered_map<int, char> comps;
+  std::map<int, OrganicProbeRegion> per;
+  for (std::size_t c = 0; c < nc; ++c) {
+    const OrganicCurve& cv = lat.curves[c];
+    double L = 0.0;
+    for (std::size_t k = 1; k < cv.points.size(); ++k) L += vlen(vsub(cv.points[k], cv.points[k - 1]));
+    const int root = find(static_cast<int>(base[c]));
+    comps[root] = 1;
+    int rid = 0; std::size_t e = 0;
+    if (!cv.points.empty() && vox(cv.points.front(), &e) && e < voxel_region_id.size()) rid = voxel_region_id[e];
+    OrganicProbeRegion& R = per[rid];
+    R.region_id = rid; ++R.curves;
+    if (cv.family >= 0 && cv.family < 3) ++R.curves_per_family[cv.family];
+    R.traced_mm += L; out.traced_mm += L; ++out.curves;
+    if (rooted.count(root)) { R.rooted_mm += L; out.rooted_mm += L; }
+  }
+  out.components = comps.size();
+  for (auto& kv : per) {
+    std::unordered_map<int, char> rc;
+    for (std::size_t c = 0; c < nc; ++c) {
+      int rid = 0; std::size_t e = 0;
+      if (!lat.curves[c].points.empty() && vox(lat.curves[c].points.front(), &e) && e < voxel_region_id.size()) rid = voxel_region_id[e];
+      if (rid == kv.first) rc[find(static_cast<int>(base[c]))] = 1;
+    }
+    kv.second.components = rc.size();
+    out.regions.push_back(kv.second);
+  }
+  return out;
+}
+
 OrganicLattice trace_organic_lattice(const VoxelGrid& grid,
                                      const std::vector<char>& candidate,
                                      const std::vector<double>& stress,

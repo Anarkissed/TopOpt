@@ -304,6 +304,14 @@ struct JobLattice {
   // emit at all, and EVALUATED counterfactuals for the remedies worth offering.
   // Default false => every existing job is byte-identical.
   bool forecast_only = false;
+  // ★ THE ORGANIC CELL-SIZE PROBE (maintainer, 2026-09-05: "a quick way to offer
+  // approved cell sizes"). The forecast has no stress field, so an organic probe
+  // cannot live there; it runs on the variant path after the ONE base solve: for
+  // each candidate window the law grades, the tracer traces (no emission, no support
+  // pass, no certificate), and the traced curves are welded and measured for how much
+  // of their length reaches part solid. Written to <out>/organic_probe.json.
+  std::vector<double> organic_probe_cells_mm;                 // uniform candidates
+  std::vector<std::pair<double, double>> organic_probe_grades_mm;  // [lo, hi] windows
 
   // THE ENCLOSED-VOID RULE (task 2026-08-05-lattice-void-reaches-exterior).
   //
