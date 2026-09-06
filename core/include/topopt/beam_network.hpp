@@ -353,6 +353,7 @@ struct CoupledLatticeSolve {
   std::size_t members_dropped = 0;
   double dropped_length_fraction = 0.0;
   std::size_t loads_on_shell = 0, loads_on_beam = 0;  // re-homed off the solid
+  std::size_t loads_distributed = 0;  // spread along incident members (distribute_beam_loads)
   // ★ HOW FAR A LOAD ACTUALLY HAD TO REACH to find material, in mm. `load_reach_mm`
   // is a single number and a GRADED lattice has no single cell, so the safe choice
   // is to pass the COARSEST cell -- the nearest material is always taken, so a
@@ -509,8 +510,30 @@ struct OrganicCertificate {
 
   // what it was judged against
   double allowable_mpa = 0.0;        // material yield
-  double knockdown_used = 1.0;       // the SAME scalar the solid path applies
-  double allowable_used_mpa = 0.0;   // allowable * knockdown
+  // ★ THE KNOCKDOWN IS THE INTERLAYER ONE, PER STRUT, BY ORIENTATION. The solid path
+  // (orient.cpp) penalises tension ACROSS the layer planes by the material's
+  // z_knockdown and leaves in-plane stress alone. A strut's axial stress crosses
+  // the layer plane by cos^2 of its angle to the build direction, so its
+  // allowable is yield * min(1, z_knockdown / cos^2): z_knockdown for a strut along
+  // the build axis, blending to 1.0 as it turns into the plane. The verdict reads
+  // the p99 of stress / allowable_i; `knockdown_used` is the value applied to the
+  // GOVERNING strut (the one at p99), never a lattice-wide scalar.
+  double knockdown_used = 1.0;       // z_knockdown / cos^2 (capped at 1) of the governing strut
+  std::string knockdown_source;      // "z_knockdown by orientation"
+  double z_knockdown_material = 1.0; // the material's, as supplied
+  double governing_cos2 = 0.0;       // (axis . build_dir)^2 of the governing strut
+  double allowable_used_mpa = 0.0;   // allowable * knockdown_used
+  // ★ THE MAX IS REPORTED UNDER BOTH LOAD MODELS. Loads land on the nearest strut
+  // END, and a point load at a strut end is a stress concentration the print does
+  // not see the same way. A second solve spreads every landed load along the
+  // members meeting at that node (uniform line load, consistent end forces and
+  // moments). If the max still exceeds its allowable under THAT model, the member
+  // is real and the verdict reads it.
+  double max_over_allowable = 0.0;             // max_i stress_i / allowable_i, point loads
+  double max_over_allowable_distributed = 0.0; // same, loads distributed along members
+  double stress_max_distributed_mpa = 0.0;
+  int worst_strut_distributed = -1;
+  bool max_exceeds_allowable = false;          // distributed max ratio > 1 -> refused
 
   // provenance
   std::size_t load_cases_run = 0;
@@ -545,8 +568,8 @@ struct OrganicLoadCase {
 OrganicCertificate certify_organic_structural(
     const VoxelGrid& grid, const std::vector<char>& hex_mask,
     const std::vector<BeamSegment>& spans, const std::vector<OrganicLoadCase>& cases,
-    double youngs_modulus, double poisson, double allowable_mpa, double knockdown,
-    double load_reach_mm, bool census_ok,
+    double youngs_modulus, double poisson, double allowable_mpa, double z_knockdown,
+    Vec3 build_dir, double load_reach_mm, bool census_ok,
     const std::vector<ShellPatch>* shells = nullptr);
 
 CoupledLatticeSolve solve_coupled_lattice(
@@ -566,7 +589,8 @@ CoupledLatticeSolve solve_coupled_lattice(
     // within it are counted and refused, never silently dropped.
     double load_reach_mm = -1.0,
     const CgProgress* progress = nullptr,
-    const SolveStage* stage = nullptr);
+    const SolveStage* stage = nullptr,
+    bool distribute_beam_loads = false);
 
 }  // namespace topopt
 

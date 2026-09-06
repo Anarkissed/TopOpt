@@ -1034,7 +1034,7 @@ CoupledLatticeSolve solve_coupled_lattice(
     double shear_k, double cg_tolerance, int cg_max_iterations,
     const std::vector<double>* hex_solid_fraction,
     const std::vector<ShellPatch>* shells, double load_reach_mm,
-    const CgProgress* progress, const SolveStage* stage) {
+    const CgProgress* progress, const SolveStage* stage, bool distribute_beam_loads) {
   CoupledLatticeSolve out;
   auto stage_t0 = std::chrono::steady_clock::now();
   auto mark = [&](const char* name, double size) {
@@ -1899,6 +1899,64 @@ CoupledLatticeSolve solve_coupled_lattice(
     for (const Vec3& q : {A4, B4, mid}) memb[cell_key(q)].push_back(static_cast<int>(m2));
   }
 
+  // ★ A LOAD LANDING ON A STRUT END, SPREAD ALONG THE STRUTS THAT MEET THERE.
+  // With `distribute_beam_loads` the load at a beam node is divided among its
+  // incident members by length and applied to each as a uniform line load: half
+  // the share at each end, and the consistent fixed-end moments +-(f L / 12)
+  // (ex x e_c) with ex pointing away from the landed node. Without the flag the
+  // load stays a point load at the node, which is the stress-concentration model.
+  std::vector<std::vector<int>> incident;
+  if (distribute_beam_loads) {
+    incident.assign(net.nodes.size(), {});
+    for (std::size_t m5 = 0; m5 < net.members.size(); ++m5) {
+      incident[static_cast<std::size_t>(net.members[m5].node_a)].push_back(static_cast<int>(m5));
+      incident[static_cast<std::size_t>(net.members[m5].node_b)].push_back(static_cast<int>(m5));
+    }
+  }
+  auto apply_point = [&](std::size_t b, int c, double val) {
+    const Map mm = map_of(b, c);
+    for (int x = 0; x < mm.n; ++x)
+      F[static_cast<std::size_t>(mm.dof[static_cast<std::size_t>(x)])] +=
+          val * mm.w[static_cast<std::size_t>(x)];
+  };
+  auto apply_beam_node = [&](std::size_t b, int c, double val) {
+    if (!distribute_beam_loads || c > 2 || incident[b].empty()) { apply_point(b, c, val); return; }
+    double Ltot = 0.0;
+    for (int m6 : incident[b]) {
+      const auto& mm6 = net.members[static_cast<std::size_t>(m6)];
+      const Vec3& A6 = net.nodes[static_cast<std::size_t>(mm6.node_a)];
+      const Vec3& B6 = net.nodes[static_cast<std::size_t>(mm6.node_b)];
+      Ltot += std::sqrt((B6.x-A6.x)*(B6.x-A6.x) + (B6.y-A6.y)*(B6.y-A6.y) + (B6.z-A6.z)*(B6.z-A6.z));
+    }
+    if (!(Ltot > 0.0)) { apply_point(b, c, val); return; }
+    for (int m6 : incident[b]) {
+      const auto& mm6 = net.members[static_cast<std::size_t>(m6)];
+      const std::size_t other = static_cast<std::size_t>(mm6.node_a) == b
+                                    ? static_cast<std::size_t>(mm6.node_b)
+                                    : static_cast<std::size_t>(mm6.node_a);
+      const Vec3& P0 = net.nodes[b];
+      const Vec3& P1 = net.nodes[other];
+      double ex[3] = {P1.x-P0.x, P1.y-P0.y, P1.z-P0.z};
+      const double L = std::sqrt(ex[0]*ex[0] + ex[1]*ex[1] + ex[2]*ex[2]);
+      if (!(L > 0.0)) continue;
+      for (double& v : ex) v /= L;
+      const double f = val * L / Ltot;
+      apply_point(b, c, 0.5 * f);
+      apply_point(other, c, 0.5 * f);
+      double ec[3] = {0.0, 0.0, 0.0};
+      ec[c] = 1.0;
+      const double cr[3] = {ex[1]*ec[2] - ex[2]*ec[1], ex[2]*ec[0] - ex[0]*ec[2],
+                            ex[0]*ec[1] - ex[1]*ec[0]};
+      const double mmag = f * L / 12.0;
+      for (int k = 0; k < 3; ++k) {
+        if (cr[k] == 0.0) continue;
+        apply_point(b, 3 + k, mmag * cr[k]);
+        apply_point(other, 3 + k, -mmag * cr[k]);
+      }
+    }
+    ++out.loads_distributed;
+  };
+
   for (const NodalLoad& l : loads) {
     load_all += std::fabs(l.value);
     if (l.component < 0 || l.component > 2) { ++out.loads_dropped; load_lost += std::fabs(l.value); continue; }
@@ -1941,11 +1999,14 @@ CoupledLatticeSolve solve_coupled_lattice(
     if (best_of[0] >= 0) { best_kind = 0; best_id = best_of[0]; }
     else if (best_of[1] >= 0) { best_kind = 1; best_id = best_of[1]; }
     if (best_kind >= 0) {
-      const Map mm = (best_kind == 0) ? shell_map(best_id, l.component)
-                                      : map_of(static_cast<std::size_t>(best_id), l.component);
-      for (int x = 0; x < mm.n; ++x)
-        F[static_cast<std::size_t>(mm.dof[static_cast<std::size_t>(x)])] +=
-            l.value * mm.w[static_cast<std::size_t>(x)];
+      if (best_kind == 0) {
+        const Map mm = shell_map(best_id, l.component);
+        for (int x = 0; x < mm.n; ++x)
+          F[static_cast<std::size_t>(mm.dof[static_cast<std::size_t>(x)])] +=
+              l.value * mm.w[static_cast<std::size_t>(x)];
+      } else {
+        apply_beam_node(static_cast<std::size_t>(best_id), l.component, l.value);
+      }
       ++nld;
       if (best_kind == 0) ++out.loads_on_shell; else ++out.loads_on_beam;
       out.load_reach_used_max =
@@ -1981,10 +2042,7 @@ CoupledLatticeSolve solve_coupled_lattice(
     const double wt[2] = {1.0 - hit_t, hit_t};
     for (int e2 = 0; e2 < 2; ++e2) {
       if (wt[e2] == 0.0) continue;
-      const Map mm4 = map_of(ends[e2], l.component);
-      for (int x = 0; x < mm4.n; ++x)
-        F[static_cast<std::size_t>(mm4.dof[static_cast<std::size_t>(x)])] +=
-            l.value * wt[e2] * mm4.w[static_cast<std::size_t>(x)];
+      apply_beam_node(ends[e2], l.component, l.value * wt[e2]);
     }
     ++nld;
     ++out.loads_on_beam;
@@ -2719,8 +2777,8 @@ constexpr double kUncarriedRefuseFraction = 0.05;
 OrganicCertificate certify_organic_structural(
     const VoxelGrid& grid, const std::vector<char>& hex_mask,
     const std::vector<BeamSegment>& spans, const std::vector<OrganicLoadCase>& cases,
-    double youngs_modulus, double poisson, double allowable_mpa, double knockdown,
-    double load_reach_mm, bool census_ok, const std::vector<ShellPatch>* shells) {
+    double youngs_modulus, double poisson, double allowable_mpa, double z_knockdown,
+    Vec3 build_dir, double load_reach_mm, bool census_ok, const std::vector<ShellPatch>* shells) {
   OrganicCertificate cert;
   const auto t0 = std::chrono::steady_clock::now();
   auto finish = [&](void) {
@@ -2747,24 +2805,46 @@ OrganicCertificate certify_organic_structural(
         "against nothing.");
   if (!(allowable_mpa > 0.0))
     return refuse("the material has no yield strength, so there is no allowable");
-  if (!(knockdown > 0.0 && knockdown <= 1.0))
-    return refuse("the interlayer knockdown must be in (0, 1]");
+  if (!(z_knockdown > 0.0 && z_knockdown <= 1.0))
+    return refuse("the material's interlayer knockdown (z_knockdown) must be in (0, 1]");
+  {
+    const double bl = std::sqrt(build_dir.x*build_dir.x + build_dir.y*build_dir.y + build_dir.z*build_dir.z);
+    if (!(bl > 0.0)) return refuse("the build direction is zero; the per-strut knockdown needs it");
+    build_dir = Vec3{build_dir.x / bl, build_dir.y / bl, build_dir.z / bl};
+  }
 
   cert.allowable_mpa = allowable_mpa;
-  cert.knockdown_used = knockdown;
-  cert.allowable_used_mpa = allowable_mpa * knockdown;
+  cert.z_knockdown_material = z_knockdown;
+  cert.knockdown_source = "z_knockdown by orientation";
 
   const BeamNetwork net = build_beam_network(spans);
   cert.members = net.member_count();
   if (cert.members == 0) return refuse("the spans welded into an empty network");
+  // Per-strut allowable: yield * min(1, z_knockdown / cos^2(axis, build_dir)).
+  std::vector<double> kd(net.members.size(), 1.0), cos2(net.members.size(), 0.0);
+  for (std::size_t i = 0; i < net.members.size(); ++i) {
+    const auto& A = net.nodes[static_cast<std::size_t>(net.members[i].node_a)];
+    const auto& B = net.nodes[static_cast<std::size_t>(net.members[i].node_b)];
+    const double dx = B.x-A.x, dy = B.y-A.y, dz = B.z-A.z;
+    const double L2 = dx*dx + dy*dy + dz*dz;
+    if (!(L2 > 0.0)) continue;
+    const double d = dx*build_dir.x + dy*build_dir.y + dz*build_dir.z;
+    cos2[i] = d * d / L2;
+    kd[i] = cos2[i] > z_knockdown ? z_knockdown / cos2[i] : 1.0;
+  }
 
   // ── EVERY load case, and the verdict is the WORST ───────────────────────────
   // The solid certificate runs them all; a lattice certified on one is certified
   // against a load the part will not only see.
+  double ratio_used = 0.0;  // p99 of stress/allowable_i, worst case
   for (const OrganicLoadCase& lc : cases) {
     const CoupledLatticeSolve r = solve_coupled_lattice(
         grid, hex_mask, net, lc.bcs, lc.loads, youngs_modulus, poisson, 0.9, 1e-8,
         100000, nullptr, shells, load_reach_mm);
+    // The same case with every landed load spread along the members at its node.
+    const CoupledLatticeSolve rd = solve_coupled_lattice(
+        grid, hex_mask, net, lc.bcs, lc.loads, youngs_modulus, poisson, 0.9, 1e-8,
+        100000, nullptr, shells, load_reach_mm, nullptr, nullptr, true);
     ++cert.load_cases_run;
     cert.worst_load_dropped_fraction =
         std::max(cert.worst_load_dropped_fraction, r.load_dropped_fraction);
@@ -2820,19 +2900,49 @@ OrganicCertificate certify_organic_structural(
       return refuse("load case \"" + lc.name +
                     "\": no strut carries any stress, which is not a lattice under "
                     "load — check that the load reached the geometry");
+    // ★ THE STATISTIC IS THE RATIO stress / allowable_i, per strut; percentiles of
+    // the raw stress are reported alongside. The governing strut is the one AT p99
+    // of the ratio, and the knockdown recorded is the one applied to it.
+    std::vector<std::pair<double, int>> rr;
+    rr.reserve(ss.size());
+    double max_ratio = 0.0, max_ratio_d = 0.0, max_d = 0.0;
+    int worst_d = -1;
+    for (std::size_t i = 0; i < r.member_stress_mpa.size(); ++i) {
+      if (i < r.member_dropped.size() && r.member_dropped[i]) continue;
+      const double ki = i < kd.size() ? kd[i] : 1.0;
+      if (r.member_stress_mpa[i] > 0.0) {
+        const double ratio = r.member_stress_mpa[i] / (allowable_mpa * ki);
+        rr.push_back({ratio, static_cast<int>(i)});
+        max_ratio = std::max(max_ratio, ratio);
+      }
+      if (i < rd.member_stress_mpa.size()) {
+        const double sd = rd.member_stress_mpa[i];
+        if (sd > max_d) { max_d = sd; worst_d = static_cast<int>(i); }
+        max_ratio_d = std::max(max_ratio_d, sd / (allowable_mpa * ki));
+      }
+    }
     std::sort(ss.begin(), ss.end());
+    std::sort(rr.begin(), rr.end());
     auto q = [&](double f) {
       return ss[static_cast<std::size_t>(f * static_cast<double>(ss.size() - 1))];
     };
-    const double p99 = q(0.99);
-    // ★ THE VERDICT READS p99, NOT THE MAX. The max is one member of tens of
-    // thousands and nodal loads land on strut ENDS, which is where an artificial
-    // peak appears; that artifact is not separated, so it is REPORTED and not read.
-    if (p99 > cert.stress_used_mpa) {
-      cert.stress_used_mpa = p99;
+    const auto& g99 = rr[static_cast<std::size_t>(0.99 * static_cast<double>(rr.size() - 1))];
+    cert.max_over_allowable = std::max(cert.max_over_allowable, max_ratio);
+    cert.max_over_allowable_distributed = std::max(cert.max_over_allowable_distributed, max_ratio_d);
+    if (max_d > cert.stress_max_distributed_mpa) {
+      cert.stress_max_distributed_mpa = max_d;
+      cert.worst_strut_distributed = worst_d;
+    }
+    if (g99.first > ratio_used) {
+      ratio_used = g99.first;
+      const std::size_t gi = static_cast<std::size_t>(g99.second);
+      cert.stress_used_mpa = r.member_stress_mpa[gi];
+      cert.knockdown_used = gi < kd.size() ? kd[gi] : 1.0;
+      cert.governing_cos2 = gi < cos2.size() ? cos2[gi] : 0.0;
+      cert.allowable_used_mpa = allowable_mpa * cert.knockdown_used;
       cert.stress_p50_mpa = q(0.50);
       cert.stress_p95_mpa = q(0.95);
-      cert.stress_p99_mpa = p99;
+      cert.stress_p99_mpa = q(0.99);
       cert.stress_max_mpa = ss.back();
       cert.governing_load_case = lc.name;
       int worst = -1;
@@ -2840,39 +2950,48 @@ OrganicCertificate certify_organic_structural(
       for (std::size_t i = 0; i < r.member_stress_mpa.size(); ++i)
         if (r.member_stress_mpa[i] > wv) { wv = r.member_stress_mpa[i]; worst = static_cast<int>(i); }
       cert.worst_strut = worst;
-      // ★ DUMP (env-gated): every member with its stress, for a heat map. The
-      // receipt's p50/p95/p99/max say HOW the lattice failed (concentration, not
-      // quantity); only a per-strut picture says WHERE.
       if (const char* dump = std::getenv("TOPOPT_ORGANIC_STRESS_DUMP")) {
         if (FILE* f = std::fopen(dump, "wb")) {
           for (std::size_t i = 0; i < r.member_stress_mpa.size() && i < net.members.size(); ++i) {
             const BeamNetwork::Member& mm = net.members[i];
             const auto& A = net.nodes[static_cast<std::size_t>(mm.node_a)];
             const auto& B = net.nodes[static_cast<std::size_t>(mm.node_b)];
-            std::fprintf(f, "SEG %.9g %.9g %.9g %.9g %.9g %.9g %.9g %.9g\n", A.x, A.y, A.z,
-                         B.x, B.y, B.z, mm.radius_mm, r.member_stress_mpa[i]);
+            std::fprintf(f, "SEG %.9g %.9g %.9g %.9g %.9g %.9g %.9g %.9g %.9g %.9g\n", A.x, A.y, A.z,
+                         B.x, B.y, B.z, mm.radius_mm, r.member_stress_mpa[i],
+                         i < rd.member_stress_mpa.size() ? rd.member_stress_mpa[i] : 0.0,
+                         i < kd.size() ? kd[i] : 1.0);
           }
           std::fclose(f);
         }
       }
     }
   }
-
   cert.verdict_statistic = "p99";
-  cert.margin = cert.stress_used_mpa > 0.0
-                    ? cert.allowable_used_mpa / cert.stress_used_mpa
-                    : 0.0;
-  cert.verdict = cert.margin >= 1.0 ? OrganicCertificate::Verdict::Certified
-                                    : OrganicCertificate::Verdict::Refused;
-  if (cert.verdict == OrganicCertificate::Verdict::Refused)
+  cert.margin = ratio_used > 0.0 ? 1.0 / ratio_used : 0.0;
+  cert.max_exceeds_allowable = cert.max_over_allowable_distributed > 1.0;
+  cert.verdict = (cert.margin >= 1.0 && !cert.max_exceeds_allowable)
+                     ? OrganicCertificate::Verdict::Certified
+                     : OrganicCertificate::Verdict::Refused;
+  if (cert.margin < 1.0)
     cert.refusal =
-        "the lattice is over its allowable: p99 strut stress " +
+        "the lattice is over its allowable: p99 of strut stress / allowable is " +
+        std::to_string(ratio_used) + " (governing strut " +
         std::to_string(cert.stress_used_mpa) + " MPa against " +
-        std::to_string(cert.allowable_used_mpa) + " MPa allowed (" +
-        std::to_string(allowable_mpa) + " yield x " + std::to_string(knockdown) +
-        " knockdown), governed by load case \"" + cert.governing_load_case +
+        std::to_string(cert.allowable_used_mpa) + " MPa allowed: " +
+        std::to_string(allowable_mpa) + " yield x " + std::to_string(cert.knockdown_used) +
+        " interlayer knockdown at cos^2 " + std::to_string(cert.governing_cos2) +
+        " to the build direction), load case \"" + cert.governing_load_case +
         "\", worst strut " + std::to_string(cert.worst_strut) + " at " +
         std::to_string(cert.stress_max_mpa) + " MPa.";
+  else if (cert.max_exceeds_allowable)
+    cert.refusal =
+        "the lattice's WORST strut is over its allowable even with the load spread "
+        "along the members at its node: max stress / allowable " +
+        std::to_string(cert.max_over_allowable_distributed) + " (strut " +
+        std::to_string(cert.worst_strut_distributed) + " at " +
+        std::to_string(cert.stress_max_distributed_mpa) + " MPa distributed, " +
+        std::to_string(cert.max_over_allowable) + " x allowable as a point load), load case \"" +
+        cert.governing_load_case + "\"; p99 passes at margin " + std::to_string(cert.margin) + ".";
   return finish();
 }
 

@@ -2026,6 +2026,9 @@ OrganicLattice grow_organic_lattice(const VoxelGrid& grid,
   const int GZ = static_cast<int>((zcap - lo.z) / layer) + 4;
   // ★ 400M, matching the support rasters (was 120M): above it the GROWER returned an
   // EMPTY lattice with no refusal -- a silent fallback the receipt could not see.
+  if (std::getenv("TOPOPT_ORGANIC_TRACE"))
+    std::fprintf(stderr, "[raster] growth support raster %d x %d x %d = %lld cells, 1 byte each (cap 400M)\n",
+                 GX, GY, GZ, static_cast<long long>(GX) * GY * GZ);
   if (static_cast<long long>(GX) * GY * GZ > 400000000LL) return out;
   std::vector<unsigned char> occ(static_cast<std::size_t>(GX) * GY * GZ, 0);
   auto gidx = [GX, GY](int i, int j, int k) {
@@ -4389,6 +4392,9 @@ OrganicGenStats generate_organic_lattice(const OrganicLattice& lat,
       // different situation from 119M against 120M, and only one of them is one size
       // step from losing the check.
       constexpr long long kOrganicSupportRasterCap = 400000000LL;
+      if (std::getenv("TOPOPT_ORGANIC_TRACE"))
+        std::fprintf(stderr, "[raster] island raster %d x %d x %d = %lld cells, 1-byte occ + 4-byte owner per cell = 5 B/cell (cap %lld)\n",
+                     RX, RY, RZ, static_cast<long long>(RX) * RY * RZ, kOrganicSupportRasterCap);
       st.support_raster_cells = static_cast<long long>(RX) * RY * RZ;
       st.support_raster_cap = kOrganicSupportRasterCap;
       if (std::getenv("TOPOPT_ORGANIC_SUPPORT_TRACE"))

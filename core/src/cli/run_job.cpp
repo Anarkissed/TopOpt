@@ -5189,20 +5189,34 @@ LatticeVariantOutcome lattice_one_variant(
           pocs.push_back({"job", bcs, pcx.loads});
           const OrganicCertificate pc = certify_organic_structural(
               solved_grid, hexm, psegs, pocs, material.youngs_modulus_mpa, material.poisson,
-              material.yield_strength_mpa, pcx.knockdown.infill_knockdown, cc.hi, true);
-          cert_ok = pc.verdict == OrganicCertificate::Verdict::Certified;
-          char pb[700];
+              material.yield_strength_mpa, material.z_knockdown, v.applied_build_dir, cc.hi, true);
+          // ★ THE PROBE FORECASTS THE p99. Its network is the raw traced curves --
+          // thinned, welded and legged, but not the run's -- so a point load at one
+          // of ITS strut ends is the probe's artefact, not the run's worst strut.
+          // The max rule (max_exceeds_allowable) is the RUN's gate; here it is
+          // reported beside the forecast, never read as the verdict.
+          cert_ok = pc.margin >= 1.0;
+          char pb[1100];
           std::snprintf(pb, sizeof pb,
                         "\"predicted\": {\"ran\": true, \"verdict\": \"%s\", \"margin\": %.6g, "
                         "\"p99_mpa\": %.6g, \"max_mpa\": %.6g, \"allowable_mpa\": %.6g, "
+                        "\"knockdown_used\": %.4g, \"knockdown_source\": \"%s\", "
+                        "\"max_over_allowable\": %.4g, \"max_over_allowable_distributed\": %.4g, "
+                        "\"max_exceeds_allowable\": %s, "
                         "\"segments\": %zu, \"seconds\": %.3g, \"refusal\": \"%s\"}",
                         cert_ok ? "certified" : "refused", pc.margin, pc.stress_p99_mpa,
-                        pc.stress_max_mpa, pc.allowable_used_mpa, psegs.size(), wall_seconds() - t1,
-                        json_safe(pc.refusal.substr(0, 160)).c_str());
+                        pc.stress_max_mpa, pc.allowable_used_mpa, pc.knockdown_used,
+                        pc.knockdown_source.c_str(), pc.max_over_allowable,
+                        pc.max_over_allowable_distributed,
+                        pc.max_exceeds_allowable ? "true" : "false", psegs.size(),
+                        wall_seconds() - t1, json_safe(pc.refusal.substr(0, 160)).c_str());
           pred = pb;
-          std::fprintf(stderr, "[probe]   stress: %s margin %.3g p99 %.3g (%zu segs, %.1fs)\n",
-                       cert_ok ? "certified" : "REFUSED", pc.margin, pc.stress_p99_mpa, psegs.size(),
-                       wall_seconds() - t1);
+          std::fprintf(stderr,
+                       "[probe]   stress: %s margin %.3g p99 %.3g  kd %.3g  max/allowable %.3g point "
+                       "%.3g distributed (%zu segs, %.1fs)\n",
+                       cert_ok ? "certified" : "REFUSED", pc.margin, pc.stress_p99_mpa,
+                       pc.knockdown_used, pc.max_over_allowable, pc.max_over_allowable_distributed,
+                       psegs.size(), wall_seconds() - t1);
         } else if (!psegs.empty()) {
           pred = "\"predicted\": {\"ran\": false, \"reason\": \"" + std::to_string(psegs.size()) +
                  " segments exceed the probe's 600000 cap\"}";
@@ -6366,19 +6380,26 @@ LatticeVariantOutcome lattice_one_variant(
     R.organic_cert = certify_organic_structural(
         solved_grid, hexm, segs, ocs, material.youngs_modulus_mpa,
         material.poisson, material.yield_strength_mpa,
-        // ★ THE SAME KNOCKDOWN THE SOLID PATH APPLIES. It is a known unsourced
-        // scalar; this does not source it, it uses the solid path's and RECORDS
-        // which, so the lattice verdict can never be more optimistic than the solid.
-        cx.knockdown.infill_knockdown, cell, census_ok);
+        // ★ THE INTERLAYER KNOCKDOWN, PER STRUT, BY ORIENTATION TO THE BUILD
+        // DIRECTION -- the same rule orient.cpp applies to a solid (tension across
+        // the layer planes is derated by z_knockdown, in-plane stress is not). The
+        // infill knockdown (f^1.5) that stood here before describes a sparse-infill
+        // solid, which a strut is not.
+        material.z_knockdown, v.applied_build_dir, cell, census_ok);
     std::printf(
         "organic structural certification: %s  margin %.4g  p99 %.4g MPa  max %.4g "
-        "MPa  (%zu case(s), %zu members, %.1f s)\n",
+        "MPa  (%zu case(s), %zu members, %.1f s)  knockdown %.3f (%s, cos^2 %.2f)  "
+        "max/allowable %.3f point, %.3f distributed (max %.4g MPa distributed)%s\n",
         R.organic_cert.verdict == OrganicCertificate::Verdict::Certified ? "CERTIFIED"
         : R.organic_cert.verdict == OrganicCertificate::Verdict::Refused ? "REFUSED"
                                                                         : "not run",
         R.organic_cert.margin, R.organic_cert.stress_p99_mpa,
         R.organic_cert.stress_max_mpa, R.organic_cert.load_cases_run,
-        R.organic_cert.members, R.organic_cert.seconds);
+        R.organic_cert.members, R.organic_cert.seconds, R.organic_cert.knockdown_used,
+        R.organic_cert.knockdown_source.c_str(), R.organic_cert.governing_cos2,
+        R.organic_cert.max_over_allowable, R.organic_cert.max_over_allowable_distributed,
+        R.organic_cert.stress_max_distributed_mpa,
+        R.organic_cert.max_exceeds_allowable ? "  MAX EXCEEDS ALLOWABLE" : "");
     if (!R.organic_cert.refusal.empty())
       std::printf("  %s\n", R.organic_cert.refusal.c_str());
   }
@@ -9066,6 +9087,13 @@ LatticeVariantJobResult lattice_variant_job(const JobDescription& job,
           gi.organic_structural_governing_load_case =
               R.organic_cert.governing_load_case;
           gi.organic_structural_knockdown_used = R.organic_cert.knockdown_used;
+          gi.organic_structural_knockdown_source = R.organic_cert.knockdown_source;
+          gi.organic_structural_governing_cos2 = R.organic_cert.governing_cos2;
+          gi.organic_structural_max_over_allowable = R.organic_cert.max_over_allowable;
+          gi.organic_structural_max_over_allowable_distributed =
+              R.organic_cert.max_over_allowable_distributed;
+          gi.organic_structural_max_distributed_mpa = R.organic_cert.stress_max_distributed_mpa;
+          gi.organic_structural_max_exceeds_allowable = R.organic_cert.max_exceeds_allowable;
           gi.organic_structural_load_cases =
               static_cast<long long>(R.organic_cert.load_cases_run);
           gi.organic_structural_seconds = R.organic_cert.seconds;

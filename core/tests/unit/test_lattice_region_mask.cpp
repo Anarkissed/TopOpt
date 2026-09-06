@@ -306,7 +306,47 @@ void a_thicker_region_measures_thicker() {
 
 }  // namespace
 
+
+// ★★ THE FACE OUTLINE — the region is the FACE, not its bounding box. The app
+// writes `outline_uv` as closed loops in the face's (u, w) frame; the slab is
+// clipped to their even-odd interior. Ported from the preview branch's
+// test (bce38a6c), which asserts the same L-shaped case on its flat
+// `outline_uw` representation; this branch keeps the nested loops.
+void the_outline_bounds_the_region() {
+  topopt::ClearanceGeometry g;
+  g.kind = topopt::ClearanceKind::Face;
+  g.valid = true;
+  g.origin = topopt::Vec3{0.0, 0.0, 0.0};
+  g.normal = topopt::Vec3{0.0, 0.0, 1.0};
+  g.u = topopt::Vec3{1.0, 0.0, 0.0};
+  g.w = topopt::Vec3{0.0, 1.0, 0.0};
+  g.u_lo = -10.0; g.u_hi = 10.0; g.w_lo = -10.0; g.w_hi = 10.0;
+  g.depth = 2.0;
+  const topopt::Vec3 mid{-5.0, -5.0, 1.0};     // solidly inside both shapes below
+  const topopt::Vec3 corner{5.0, 5.0, 1.0};    // inside the box, outside the L
+  // No outline: the rectangle alone, exactly as before.
+  CHECK(topopt::point_in_clearance_region(g, mid, 0.0), "the box contains its centre");
+  CHECK(topopt::point_in_clearance_region(g, corner, 0.0),
+        "the box contains its +u/+w quadrant when no outline is given");
+  // An L-shaped outline that excludes the +u/+w quadrant.
+  g.outline_uv = {{{-10, -10}, {10, -10}, {10, 0}, {0, 0}, {0, 10}, {-10, 10}}};
+  CHECK(topopt::point_in_clearance_region(g, mid, 0.0),
+        "★ the outline still contains the centre");
+  CHECK(!topopt::point_in_clearance_region(g, corner, 0.0),
+        "★ the outline EXCLUDES the quadrant the box alone would have latticed");
+  CHECK(!topopt::point_in_clearance_region(g, topopt::Vec3{-5.0, -5.0, 5.0}, 0.0),
+        "the slab depth still bounds the region above the face");
+  // A hole: an inner loop flips the parity, so its interior is excluded.
+  g.outline_uv = {{{-10, -10}, {10, -10}, {10, 10}, {-10, 10}},
+                  {{-8, -8}, {-2, -8}, {-2, -2}, {-8, -2}}};
+  CHECK(!topopt::point_in_clearance_region(g, mid, 0.0),
+        "★ an inner loop is a HOLE (even-odd): the centre of the hole is outside");
+  CHECK(topopt::point_in_clearance_region(g, corner, 0.0),
+        "...and the material around the hole is still inside");
+}
+
 int main() {
+  the_outline_bounds_the_region();
   the_depth_is_one_number();
   the_predicate_reads_the_mask();
   the_mask_answers_in_its_own_lattice();

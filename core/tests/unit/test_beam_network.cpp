@@ -1171,7 +1171,7 @@ void test_cert_overloaded_strut_refuses_and_names_it() {
   CertFixture f = cert_fixture(-20000.0);
   const topopt::OrganicCertificate c = topopt::certify_organic_structural(
       f.g, f.mask, f.spans, f.cases, 3500.0, 0.35, /*allowable*/ 55.0,
-      /*knockdown*/ 0.8, /*reach*/ 3.0, /*census_ok*/ true);
+      /*knockdown*/ 0.8, topopt::Vec3{0.0, 0.0, 1.0}, /*reach*/ 3.0, /*census_ok*/ true);
   std::printf("  C2 verdict=%d margin=%.4g p99=%.4g max=%.4g worst=%d\n",
               static_cast<int>(c.verdict), c.margin, c.stress_p99_mpa,
               c.stress_max_mpa, c.worst_strut);
@@ -1189,7 +1189,7 @@ void test_cert_dropped_load_refuses() {
   // put the load nowhere near any material: it cannot be placed
   for (auto& l : f.cases[0].loads) l.node = -1;
   const topopt::OrganicCertificate c = topopt::certify_organic_structural(
-      f.g, f.mask, f.spans, f.cases, 3500.0, 0.35, 55.0, 0.8, 3.0, true);
+      f.g, f.mask, f.spans, f.cases, 3500.0, 0.35, 55.0, 0.8, topopt::Vec3{0.0, 0.0, 1.0}, 3.0, true);
   CHECK(c.verdict == topopt::OrganicCertificate::Verdict::Refused,
         "C3: a load that cannot be placed REFUSES rather than certifying a quiet part");
   if (c.verdict == topopt::OrganicCertificate::Verdict::Refused)
@@ -1200,7 +1200,7 @@ void test_cert_dropped_load_refuses() {
 void test_cert_null_census_refuses() {
   CertFixture f = cert_fixture();
   const topopt::OrganicCertificate c = topopt::certify_organic_structural(
-      f.g, f.mask, f.spans, f.cases, 3500.0, 0.35, 55.0, 0.8, 3.0,
+      f.g, f.mask, f.spans, f.cases, 3500.0, 0.35, 55.0, 0.8, topopt::Vec3{0.0, 0.0, 1.0}, 3.0,
       /*census_ok*/ false);
   CHECK(c.verdict == topopt::OrganicCertificate::Verdict::Refused,
         "C4: a lattice whose pipeline cannot be shown to have run is NOT certifiable");
@@ -1213,7 +1213,7 @@ void test_cert_no_load_case_refuses() {
   CertFixture f = cert_fixture();
   f.cases.clear();
   const topopt::OrganicCertificate c = topopt::certify_organic_structural(
-      f.g, f.mask, f.spans, f.cases, 3500.0, 0.35, 55.0, 0.8, 3.0, true);
+      f.g, f.mask, f.spans, f.cases, 3500.0, 0.35, 55.0, 0.8, topopt::Vec3{0.0, 0.0, 1.0}, 3.0, true);
   CHECK(c.verdict == topopt::OrganicCertificate::Verdict::Refused,
         "C5: a certificate over ZERO load cases is a margin against nothing");
 }
@@ -1226,7 +1226,7 @@ void test_cert_worst_of_two_load_cases() {
   for (auto& l : heavy.loads) l.value *= 40.0;
   f.cases.push_back(heavy);
   const topopt::OrganicCertificate c = topopt::certify_organic_structural(
-      f.g, f.mask, f.spans, f.cases, 3500.0, 0.35, 55.0, 0.8, 3.0, true);
+      f.g, f.mask, f.spans, f.cases, 3500.0, 0.35, 55.0, 0.8, topopt::Vec3{0.0, 0.0, 1.0}, 3.0, true);
   std::printf("  C6 governing=%s p99=%.4g over %zu case(s)\n",
               c.governing_load_case.c_str(), c.stress_p99_mpa, c.load_cases_run);
   CHECK(c.load_cases_run == 2, "C6: every load case is run, not just the first");
@@ -1241,7 +1241,7 @@ void test_cert_worst_of_two_load_cases() {
 void test_cert_verdict_reads_p99_not_max() {
   CertFixture f = cert_fixture();
   const topopt::OrganicCertificate c = topopt::certify_organic_structural(
-      f.g, f.mask, f.spans, f.cases, 3500.0, 0.35, 55.0, 0.8, 3.0, true);
+      f.g, f.mask, f.spans, f.cases, 3500.0, 0.35, 55.0, 0.8, topopt::Vec3{0.0, 0.0, 1.0}, 3.0, true);
   if (c.verdict == topopt::OrganicCertificate::Verdict::Refused &&
       c.stress_used_mpa == 0.0) {
     std::fprintf(stderr, "  C7 precondition: %s\n", c.refusal.c_str());
@@ -1254,21 +1254,107 @@ void test_cert_verdict_reads_p99_not_max() {
         "C7: the max is REPORTED beside it, so nothing is hidden");
 }
 
-// ── C8: THE KNOCKDOWN IS APPLIED AND RECORDED ──────────────────────────────────
-// It must be consistent with the solid path, never more optimistic. It is a known
-// unsourced scalar; the certificate does not source it, it reports which one it used.
+// ── C8: THE KNOCKDOWN IS THE INTERLAYER ONE, PER STRUT, BY ORIENTATION ────────
+// The solid path (orient.cpp) derates tension ACROSS the layer planes by the
+// material's z_knockdown and leaves in-plane stress alone. A strut's allowable is
+// yield * min(1, z_knockdown / cos^2(axis, build_dir)); the certificate records the
+// value applied to the GOVERNING strut and names the rule.
 void test_cert_knockdown_applied_and_recorded() {
   CertFixture f = cert_fixture();
+  // Build direction ALONG the main struts (+x): they cross the layer planes.
   const topopt::OrganicCertificate a = topopt::certify_organic_structural(
-      f.g, f.mask, f.spans, f.cases, 3500.0, 0.35, 55.0, 1.0, 3.0, true);
+      f.g, f.mask, f.spans, f.cases, 3500.0, 0.35, 55.0, 1.0, topopt::Vec3{1.0, 0.0, 0.0}, 3.0, true);
   const topopt::OrganicCertificate b = topopt::certify_organic_structural(
-      f.g, f.mask, f.spans, f.cases, 3500.0, 0.35, 55.0, 0.5, 3.0, true);
-  std::printf("  C8 allowable_used: %.4g (kd 1.0) vs %.4g (kd 0.5)\n",
-              a.allowable_used_mpa, b.allowable_used_mpa);
-  CHECK(a.knockdown_used == 1.0 && b.knockdown_used == 0.5,
-        "C8: the certificate records WHICH knockdown it used");
-  CHECK(b.allowable_used_mpa < a.allowable_used_mpa,
-        "C8: a harsher knockdown lowers the allowable — never more optimistic");
+      f.g, f.mask, f.spans, f.cases, 3500.0, 0.35, 55.0, 0.5, topopt::Vec3{1.0, 0.0, 0.0}, 3.0, true);
+  std::printf("  C8 allowable_used: %.4g (z 1.0, kd %.3g) vs %.4g (z 0.5, kd %.3g, cos^2 %.2f)  "
+              "max/allowable %.4g vs %.4g\n",
+              a.allowable_used_mpa, a.knockdown_used, b.allowable_used_mpa, b.knockdown_used,
+              b.governing_cos2, a.max_over_allowable, b.max_over_allowable);
+  CHECK(a.knockdown_source == "z_knockdown by orientation" &&
+            b.knockdown_source == "z_knockdown by orientation",
+        "C8: the certificate names the rule it applied");
+  CHECK(a.z_knockdown_material == 1.0 && b.z_knockdown_material == 0.5,
+        "C8: ...and records the material's z_knockdown it was given");
+  CHECK(a.knockdown_used == 1.0 && b.knockdown_used >= 0.5 && b.knockdown_used <= 1.0,
+        "C8: the knockdown used is z_knockdown/cos^2 of the governing strut, in [z, 1]");
+  CHECK(b.allowable_used_mpa <= a.allowable_used_mpa && b.margin <= a.margin,
+        "C8: a harsher interlayer knockdown lowers the allowable — never more optimistic");
+  CHECK(b.max_over_allowable >= a.max_over_allowable,
+        "C8: and the max-over-allowable rises with it");
+}
+
+// ── C11: A STRUT IN THE PLANE OF THE LAYERS IS NOT DERATED ─────────────────────
+// Every strut of the fixture lies in x or y; with the build direction z none of
+// them crosses a layer plane, so z_knockdown must not touch the verdict at all.
+void test_cert_in_plane_struts_keep_full_allowable() {
+  CertFixture f = cert_fixture();
+  const topopt::OrganicCertificate a = topopt::certify_organic_structural(
+      f.g, f.mask, f.spans, f.cases, 3500.0, 0.35, 55.0, 1.0, topopt::Vec3{0.0, 0.0, 1.0}, 3.0, true);
+  const topopt::OrganicCertificate b = topopt::certify_organic_structural(
+      f.g, f.mask, f.spans, f.cases, 3500.0, 0.35, 55.0, 0.5, topopt::Vec3{0.0, 0.0, 1.0}, 3.0, true);
+  std::printf("  C11 in-plane: margin %.6g (z 1.0) vs %.6g (z 0.5), kd used %.3g / %.3g\n",
+              a.margin, b.margin, a.knockdown_used, b.knockdown_used);
+  CHECK(b.knockdown_used == 1.0 && b.governing_cos2 == 0.0,
+        "C11: a strut in the layer plane gets knockdown 1.0 whatever z_knockdown is");
+  CHECK(std::fabs(b.margin - a.margin) <= 1e-9 * a.margin &&
+            b.allowable_used_mpa == a.allowable_used_mpa,
+        "C11: ...so the verdict is identical to the undegraded one (to the solver's "
+        "last-digit thread ordering)");
+}
+
+// ── C12: THE MAX IS REPORTED UNDER BOTH LOAD MODELS ─────────────────────────────
+// A load lands on the nearest strut END. The second solve spreads it along the
+// members meeting there (uniform line load, consistent end forces and moments) and
+// the certificate reports that maximum beside the point-load one.
+void test_cert_reports_distributed_max() {
+  CertFixture f = cert_fixture();
+  // ★ THE STOCK FIXTURE IS SOLID EVERYWHERE, so every load lands on a hex node and
+  // no strut end is ever hit. Open a 2x2x2-cell void around the chain's start so
+  // the grid node at (cx, cy, cz) is interior to the void (no hex owns it), and
+  // extend the chain past the void wall so its far end is tied to the solid.
+  const int nx = 4, ny = 4, nz = 8;
+  const double h = 1.7;
+  for (int k = 3; k <= 4; ++k)
+    for (int j = 1; j <= 2; ++j)
+      for (int i = 1; i <= 2; ++i)
+        f.mask[static_cast<std::size_t>((k * ny + j) * nx + i)] = 0;
+  const double cx = 2 * h, cy = 2 * h, cz = 4 * h;
+  for (int i = 4; i < 8; ++i)
+    f.spans.push_back({Vec3{cx + 0.2 * i, cy, cz}, Vec3{cx + 0.2 * (i + 1), cy, cz}, 0.2});
+  const int NXn = nx + 1, NYn = ny + 1;
+  auto nod = [&](int i, int j, int k) {
+    return static_cast<int>((static_cast<std::size_t>(k) * NYn + j) * NXn + i); };
+  f.cases[0].loads.clear();
+  f.cases[0].loads.push_back({nod(2, 2, 4), 2, -5.0});   // exactly on the chain's start
+  (void)nz;
+  const topopt::BeamNetwork net = topopt::build_beam_network(f.spans);
+  const topopt::CoupledLatticeSolve rp = topopt::solve_coupled_lattice(
+      f.g, f.mask, net, f.cases[0].bcs, f.cases[0].loads, 3500.0, 0.35, 0.9, 1e-8, 100000,
+      nullptr, nullptr, 3.0, nullptr, nullptr, false);
+  const topopt::CoupledLatticeSolve rd = topopt::solve_coupled_lattice(
+      f.g, f.mask, net, f.cases[0].bcs, f.cases[0].loads, 3500.0, 0.35, 0.9, 1e-8, 100000,
+      nullptr, nullptr, 3.0, nullptr, nullptr, true);
+  double mp = 0.0, md = 0.0;
+  for (double v : rp.member_stress_mpa) mp = std::max(mp, v);
+  for (double v : rd.member_stress_mpa) md = std::max(md, v);
+  std::printf("  C12 loads: %zu applied, %zu distributed; dropped %.3g / %.3g; max %.4g MPa point vs "
+              "%.4g MPa distributed\n",
+              rd.loads_applied, rd.loads_distributed, rp.load_dropped_fraction,
+              rd.load_dropped_fraction, mp, md);
+  CHECK(rd.loads_distributed > 0, "C12: the distributed solve spread at least one landed load");
+  CHECK(rd.load_dropped_fraction == rp.load_dropped_fraction,
+        "C12: spreading a load along the members loses none of it");
+  CHECK(md > 0.0 && md != mp, "C12: the two load models give two different maxima");
+  const topopt::OrganicCertificate c = topopt::certify_organic_structural(
+      f.g, f.mask, f.spans, f.cases, 3500.0, 0.35, 55.0, 0.6, topopt::Vec3{0.0, 0.0, 1.0}, 3.0, true);
+  CHECK(c.stress_max_distributed_mpa > 0.0 && c.worst_strut_distributed >= 0,
+        "C12: the certificate reports the distributed max and names its strut");
+  CHECK(c.max_over_allowable > 0.0 && c.max_over_allowable_distributed > 0.0,
+        "C12: ...and both max-over-allowable factors");
+  CHECK(std::fabs(c.stress_max_distributed_mpa - md) < 1e-9 * std::max(1.0, md),
+        "C12: the certificate's distributed max IS the distributed solve's max");
+  CHECK(c.max_exceeds_allowable == (c.max_over_allowable_distributed > 1.0),
+        "C12: the flag reads the DISTRIBUTED max against the allowable");
 }
 
 // ── C10: MEMBERS THAT CARRY NOTHING REFUSE — THE POSITIVE CONTROL ─────────────
@@ -1297,7 +1383,7 @@ void test_cert_uncarried_members_refuse() {
   for (int i = 0; i < 3; ++i)
     f.spans.push_back({Vec3{0.0, 0.3 * i, 0.0}, Vec3{0.0, 0.3 * (i + 1), 0.0}, 0.2});
   const topopt::OrganicCertificate c = topopt::certify_organic_structural(
-      f.g, f.mask, f.spans, f.cases, 3500.0, 0.35, 55.0, 0.8, 3.0, true);
+      f.g, f.mask, f.spans, f.cases, 3500.0, 0.35, 55.0, 0.8, topopt::Vec3{0.0, 0.0, 1.0}, 3.0, true);
   std::printf("  C10 verdict=%d  carrying=%lld  zero_frac=%.4f  (%zu loaded spans + "
               "6 in the pinned base as an L, h=%.1f)\n",
               static_cast<int>(c.verdict), c.members_carrying,
@@ -1335,7 +1421,7 @@ void test_cert_hinged_solid_refuses() {
         if (lower || upper) f.mask[f.g.index(i, j, k)] = 1;
       }
   const topopt::OrganicCertificate c = topopt::certify_organic_structural(
-      f.g, f.mask, f.spans, f.cases, 3500.0, 0.35, 55.0, 0.8, 3.0, true);
+      f.g, f.mask, f.spans, f.cases, 3500.0, 0.35, 55.0, 0.8, topopt::Vec3{0.0, 0.0, 1.0}, 3.0, true);
   std::printf("  C9 verdict=%d  %.100s\n", static_cast<int>(c.verdict),
               c.refusal.c_str());
   CHECK(c.verdict != topopt::OrganicCertificate::Verdict::Certified,
@@ -1393,6 +1479,8 @@ int main() {
   test_cert_worst_of_two_load_cases();
   test_cert_verdict_reads_p99_not_max();
   test_cert_knockdown_applied_and_recorded();
+  test_cert_in_plane_struts_keep_full_allowable();
+  test_cert_reports_distributed_max();
   test_cert_hinged_solid_refuses();
   test_cert_uncarried_members_refuse();
   test_refusals();

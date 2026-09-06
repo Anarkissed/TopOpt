@@ -1484,6 +1484,17 @@ std::string run_info_json(const RunInfo& info) {
                 info.organic_structural_governing_load_case + "\"";
           gr += ", \"structural_knockdown_used\": " +
                 fmt(info.organic_structural_knockdown_used);
+          gr += ", \"structural_knockdown_source\": \"" +
+                info.organic_structural_knockdown_source + "\"";
+          gr += ", \"structural_governing_cos2\": " + fmt(info.organic_structural_governing_cos2);
+          gr += ", \"structural_max_over_allowable\": " +
+                fmt(info.organic_structural_max_over_allowable);
+          gr += ", \"structural_max_over_allowable_distributed\": " +
+                fmt(info.organic_structural_max_over_allowable_distributed);
+          gr += ", \"structural_max_distributed_mpa\": " +
+                fmt(info.organic_structural_max_distributed_mpa);
+          gr += std::string(", \"structural_max_exceeds_allowable\": ") +
+                (info.organic_structural_max_exceeds_allowable ? "true" : "false");
           gr += ", \"structural_load_cases\": " +
                 std::to_string(info.organic_structural_load_cases);
           gr += ", \"structural_seconds\": " + fmt(info.organic_structural_seconds);

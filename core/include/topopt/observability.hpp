@@ -1044,6 +1044,12 @@ struct RunInfo {
   double organic_structural_p99_mpa = 0.0;
   double organic_structural_max_mpa = 0.0;
   double organic_structural_knockdown_used = 0.0;
+  std::string organic_structural_knockdown_source;   // "z_knockdown by orientation"
+  double organic_structural_governing_cos2 = 0.0;
+  double organic_structural_max_over_allowable = 0.0;             // point loads at strut ends
+  double organic_structural_max_over_allowable_distributed = 0.0; // loads spread along members
+  double organic_structural_max_distributed_mpa = 0.0;
+  bool organic_structural_max_exceeds_allowable = false;
   double organic_structural_seconds = 0.0;
   long long organic_structural_worst_strut = -1;
   long long organic_structural_load_cases = 0;
