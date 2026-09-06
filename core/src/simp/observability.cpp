@@ -1495,6 +1495,8 @@ std::string run_info_json(const RunInfo& info) {
                 fmt(info.organic_structural_max_distributed_mpa);
           gr += std::string(", \"structural_max_exceeds_allowable\": ") +
                 (info.organic_structural_max_exceeds_allowable ? "true" : "false");
+          gr += ", \"support_raster_cells\": " + std::to_string(info.organic_support_raster_cells);
+          gr += ", \"support_raster_cap\": " + std::to_string(info.organic_support_raster_cap);
           if (info.organic_recommend_ran) {
             gr += ", \"recommend\": {\"mode\": \"" + info.organic_recommend_mode + "\"";
             gr += ", \"band_lo_mm\": " + fmt(info.organic_recommend_band_lo_mm);

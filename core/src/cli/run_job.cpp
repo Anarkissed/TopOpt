@@ -9160,6 +9160,8 @@ LatticeVariantJobResult lattice_variant_job(const JobDescription& job,
         gi.organic_ties_refused_reach = static_cast<long long>(R.oc.growth.growth_ties_refused_reach);
         gi.organic_xfer_tie_length_mm = R.oc.growth.growth_tie_length_mm;
         gi.organic_tie_swirl = job.grading.organic_tie_swirl;
+        gi.organic_support_raster_cells = R.oc.growth.support_raster_cells;
+        gi.organic_support_raster_cap = R.oc.growth.support_raster_cap;
         gi.organic_recommend_ran = R.organic_recommend_ran;
         if (R.organic_recommend_ran) {
           gi.organic_recommend_mode = R.organic_recommendation.mode;
