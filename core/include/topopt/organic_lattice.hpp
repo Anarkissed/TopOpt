@@ -1696,6 +1696,86 @@ TriangleMesh organic_weld(const std::vector<OrganicSpan>& spans, double pitch_mm
                           // the SOLID gives a flat face. -inf = no cut.
                           double floor_z = -1e30);
 
+
+// ── THE CELL-SIZE RECOMMENDATION (maintainer, 2026-09-06) ───────────────────
+// "Both algorithms create the Optimal decision based on the model's sizes, the
+// stresses, and the probe." Two pure pieces so they can be tested without a solve:
+//   1. `organic_recommend_band` — the candidate BAND from the model: the floor is
+//      the larger of the printability floor (the bead) and the resolution floor
+//      (voxels per cell); the ceiling is the smallest, over the include regions,
+//      of the member ceiling (wall depth / cells-per-member floor) and the extent
+//      ceiling (four cells across the face). A 3 m part with 100 mm walls lands
+//      near a 30 mm ceiling on its own; a thin wall collapses the band and the
+//      honest answer is SOLID, not a smaller cell. Candidates: `steps` geometric
+//      uniform cells across the band, graded pairs two steps apart plus the full
+//      band, and for the look-driven aesthetic branch the cell that puts
+//      `look_cells_across` cells across the shortest face, its grade spread by
+//      the stress range (sqrt of p99/p50, capped), and one step below as a
+//      fallback.
+//   2. `organic_recommend_select` — reads the probe's rows (one per candidate) and
+//      picks: structural FIT = the largest uniform cell that roots and certifies
+//      at >= target margin; structural AUTO = the certifying candidate with the
+//      least traced material (a grade earns its place only by saving material
+//      over the fit); aesthetic FIT = the look cell if it roots, else one step
+//      below, else the largest rooted uniform; aesthetic AUTO = the look pair if
+//      it roots, else the fit as a uniform. Every rejected candidate carries a
+//      reason so the UI can show why, not just hide it.
+struct OrganicRecommendRegion {
+  int face_id = -1;
+  double depth_mm = 0.0;          // wall thickness: the member the cell sits across
+  double extent_short_mm = 0.0;   // shortest in-plane extent of the face
+  double stress_p50 = 0.0, stress_p99 = 0.0;
+};
+struct OrganicRecommendCandidate {
+  double lo = 0.0, hi = 0.0;
+  std::string source;             // "grid" | "pair" | "look" | "look_pair" | "look_step"
+};
+struct OrganicRecommendBand {
+  double lo_mm = 0.0, hi_mm = 0.0;
+  double printability_floor_mm = 0.0, resolution_floor_mm = 0.0;
+  double member_ceiling_mm = 0.0, extent_ceiling_mm = 0.0;
+  bool collapsed = false;         // lo >= hi: no cell fits; the region should be solid
+  double look_cell_mm = 0.0;      // aesthetic: extent_short / look_cells_across, clamped
+  double grade_ratio = 1.0;       // aesthetic: sqrt(p99/p50) capped, 1 = no grade earned
+  std::vector<OrganicRecommendCandidate> candidates;
+};
+// `print_floor_mm` is the organic spacing print floor (0.5 x strut diameter x
+// sqrt(3 pi), the tracer's own), `voxel_mm` x `resolution_floor_voxels` its
+// resolution floor (OrganicParams::resolution_floor_voxels), and the member
+// ceiling is the wall depth over `cells_across_member` -- 2.0 by measurement: the
+// grown 4.5-5.5 window on the STAND's 12 mm wall (2.2 cells across) certifies at
+// 20.78. The octet cells-per-member law does not apply to a traced lattice.
+OrganicRecommendBand organic_recommend_band(const std::vector<OrganicRecommendRegion>& regions,
+                                            double print_floor_mm, double voxel_mm,
+                                            double resolution_floor_voxels,
+                                            double cells_across_member,
+                                            double look_cells_across, int steps);
+struct OrganicRecommendRow {
+  double lo = 0.0, hi = 0.0;
+  std::string source;
+  bool rooted_ok = false;         // rooted >= gate and curves-per-family gate (aesthetic approval)
+  bool certified = false;         // structural certificate ran and passed p99
+  double margin = 0.0;
+  double traced_mm = 0.0;
+};
+struct OrganicRecommendation {
+  std::string mode;               // "structural" | "aesthetic"
+  bool fit_found = false, auto_found = false;
+  double fit_mm = 0.0;
+  double auto_lo_mm = 0.0, auto_hi_mm = 0.0;
+  double fit_margin = 0.0, auto_margin = 0.0;
+  double fit_traced_mm = 0.0, auto_traced_mm = 0.0;
+  std::string fit_source, auto_source;
+  std::vector<std::pair<OrganicRecommendRow, std::string>> rejected;  // row, reason
+};
+OrganicRecommendation organic_recommend_select(const std::vector<OrganicRecommendRow>& rows,
+                                               const std::string& mode, double target_margin,
+                                               double look_cell_mm);
+constexpr double kOrganicRecommendCellsAcrossMember = 2.0; // member ceiling: two cells across the wall (measured)
+constexpr double kOrganicRecommendCellsAcrossFace = 4.0; // extent ceiling: 4 cells across the face
+constexpr double kOrganicRecommendGradeMin = 1.2;        // below this stress spread, no grade
+constexpr double kOrganicRecommendGradeMax = 2.5;        // and never wider than this
+
 }  // namespace topopt
 
 #endif  // TOPOPT_ORGANIC_LATTICE_HPP

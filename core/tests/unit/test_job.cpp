@@ -710,6 +710,22 @@ static void test_organic_scale_and_gates() {
                       "\"algorithm\": \"" + alg + "\", \"intent\": \"aesthetic\", \"cell_mode\": \"swept\", "
                       "\"cell_min_mm\": 3.0, \"cell_max_mm\": 6.0 }");
       };
+      {
+        const JobDescription jr = parse_job(probe("\"organic_recommend\": \"aesthetic\", \"organic_look_cells_across\": 10, "
+                                                   "\"organic_recommend_margin\": 2, \"organic_recommend_steps\": 6", "organic"));
+        CHECK(jr.lattice.organic_recommend == "aesthetic" && jr.lattice.organic_look_cells_across == 10.0 &&
+                  jr.lattice.organic_recommend_margin == 2.0 && jr.lattice.organic_recommend_steps == 6,
+              "organic_recommend + look/margin/steps parse");
+        const JobDescription jd = parse_job(probe("", "organic"));
+        CHECK(jd.lattice.organic_recommend == "off" && jd.lattice.organic_look_cells_across == 8.0 &&
+                  jd.lattice.organic_recommend_margin == 1.5 && jd.lattice.organic_recommend_steps == 5,
+              "organic_recommend defaults: off, 8 cells across, margin 1.5, 5 steps");
+        bool bad1 = false, bad2 = false, bad3 = false;
+        try { (void)parse_job(probe("\"organic_recommend\": \"best\"", "organic")); } catch (const std::exception&) { bad1 = true; }
+        try { (void)parse_job(probe("\"organic_recommend_margin\": 0.5", "organic")); } catch (const std::exception&) { bad2 = true; }
+        try { (void)parse_job(probe("\"organic_recommend_steps\": 9", "organic")); } catch (const std::exception&) { bad3 = true; }
+        CHECK(bad1 && bad2 && bad3, "organic_recommend rejects an unknown mode, a margin < 1, and steps > 8");
+      }
       const JobDescription j = parse_job(probe("\"organic_probe_cells_mm\": [3, 4.5, 6], \"organic_probe_grades_mm\": [[3, 5]]", "organic"));
       CHECK(j.lattice.organic_probe_cells_mm.size() == 3 && j.lattice.organic_probe_grades_mm.size() == 1 &&
                 j.lattice.organic_probe_grades_mm[0].second == 5.0,

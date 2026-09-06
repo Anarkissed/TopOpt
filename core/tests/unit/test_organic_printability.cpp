@@ -1085,6 +1085,116 @@ void test_census_counts_components_not_only_length() {
   }
 }
 
+
+// ── R1-R3: THE CELL-SIZE RECOMMENDATION, pure parts ─────────────────────────────
+void test_recommend_band_from_the_model() {
+  using namespace topopt;
+  // A 3 m tall, 1 m wide part with 100 mm walls, bead 0.4 (print floor 0.61 mm),
+  // 128^3 -> 23.4 mm voxels, 1 voxels per cell at the resolution floor.
+  std::vector<OrganicRecommendRegion> big{{1, 100.0, 1000.0, 1.0, 4.0}};
+  const OrganicRecommendBand b = organic_recommend_band(big, 0.61, 23.4, 1, 2.0, 8.0, 5);
+  std::printf("  R1 big part @128^3: band %.1f-%.1f (print %.2f, res %.1f, member %.1f, extent %.1f) look %.1f g %.2f, %zu cands\n",
+              b.lo_mm, b.hi_mm, b.printability_floor_mm, b.resolution_floor_mm, b.member_ceiling_mm,
+              b.extent_ceiling_mm, b.look_cell_mm, b.grade_ratio, b.candidates.size());
+  CHECK(std::fabs(b.member_ceiling_mm - 50) < 1e-9,
+        "R1: a 100 mm wall at two cells across gives a 50 mm ceiling -- the grade on a big part is tens of mm");
+  CHECK(std::fabs(b.resolution_floor_mm - 23.4) < 0.05,
+        "R1: the RESOLUTION floor binds on a big part: 1 voxels x 23.4 mm, not the 0.61 mm bead floor");
+  CHECK(!b.collapsed && std::fabs(b.hi_mm - 50.0) < 1e-9,
+        "R1: at 128^3 the band is 23.4-50 mm on this part");
+  CHECK(std::fabs(b.look_cell_mm - 50.0) < 1e-9,
+        "R1: 8 cells across a 1000 mm face wants 125 mm; clamped to the 50 mm ceiling");
+  CHECK(std::fabs(b.grade_ratio - 2.0) < 1e-9, "R1: stress spread p99/p50 = 4 -> grade ratio sqrt(4) = 2");
+  bool has_look = false, has_pair = false, has_step = false; std::size_t pair = 0;
+  std::string tags;
+  for (const auto& c : b.candidates) {
+    tags += c.source + " ";
+    if (c.source == "pair") ++pair;
+    has_look |= c.source == "look"; has_pair |= c.source == "look_pair"; has_step |= c.source == "look_step";
+  }
+  std::printf("  R1 tags: %s\n", tags.c_str());
+  CHECK(pair == 4 && has_look && has_pair && has_step && b.candidates.size() >= 9,
+        "R1: 5 uniform steps, 3 two-apart pairs + the full band, and look / look_pair / look_step");
+  // The same part at 512^3 (5.9 mm voxels): the resolution floor drops, the ceiling stays the wall's.
+  const OrganicRecommendBand b2 = organic_recommend_band(big, 0.61, 5.86, 1, 2.0, 8.0, 5);
+  CHECK(!b2.collapsed && std::fabs(b2.lo_mm - 5.86) < 0.05 && std::fabs(b2.hi_mm - 50.0) < 1e-9,
+        "R1: 512^3 opens the band to 5.9-50 mm; the wall, not the grid, sets the ceiling");
+  // The STAND's 12 mm wall at 1.707 mm voxels: band 1.71-6.0 -- the 4.5-5.5 window that certifies sits inside it.
+  std::vector<OrganicRecommendRegion> stand{{2, 12.0, 97.0, 1.0, 3.0}};
+  const OrganicRecommendBand b4 = organic_recommend_band(stand, 0.61, 1.707, 1, 2.0, 8.0, 5);
+  std::printf("  R1 STAND wall: band %.2f-%.2f look %.2f\n", b4.lo_mm, b4.hi_mm, b4.look_cell_mm);
+  CHECK(!b4.collapsed && b4.lo_mm <= 4.5 && b4.hi_mm >= 5.5,
+        "R1: the STAND's certified 4.5-5.5 window lies inside its band -- the band must not exclude what runs");
+  // A thin wall: 3 mm depth -> 1.5 mm ceiling, 0.26 mm voxels: band 0.61-1.5.
+  std::vector<OrganicRecommendRegion> thin{{3, 3.0, 40.0, 1.0, 1.1}};
+  const OrganicRecommendBand b3 = organic_recommend_band(thin, 0.61, 0.26, 1, 2.0, 8.0, 5);
+  CHECK(!b3.collapsed && std::fabs(b3.hi_mm - 1.5) < 1e-9 && std::fabs(b3.lo_mm - std::max(0.61, 1 * 0.26)) < 1e-9,
+        "R1: a 3 mm wall gets a ~0.6-1.5 mm band -- smaller part, smaller cell, by the wall not the height");
+  CHECK(b3.grade_ratio < kOrganicRecommendGradeMin,
+        "R1: a flat stress field (p99/p50 = 1.1) earns NO grade");
+  bool thin_pair = false; for (const auto& c : b3.candidates) thin_pair = thin_pair || c.source == "look_pair";
+  CHECK(!thin_pair, "R1: ...so no look_pair candidate is generated");
+  std::vector<OrganicRecommendRegion> none{{4, 1.0, 40.0, 1.0, 1.0}};
+  CHECK(organic_recommend_band(none, 0.61, 0.26, 1, 2.0, 8.0, 5).collapsed,
+        "R1: a 1 mm wall (0.5 mm ceiling under the 0.61 floor) collapses the band: the honest answer is solid");
+}
+
+void test_recommend_select_structural() {
+  using namespace topopt;
+  std::vector<OrganicRecommendRow> rows;
+  auto row = [&](double lo, double hi, const char* src, bool rooted, bool cert, double margin, double traced) {
+    OrganicRecommendRow r; r.lo = lo; r.hi = hi; r.source = src; r.rooted_ok = rooted; r.certified = cert;
+    r.margin = margin; r.traced_mm = traced; rows.push_back(r); };
+  row(3.0, 3.0, "grid", true, true, 4.0, 9000);
+  row(4.5, 4.5, "grid", true, true, 2.1, 6000);
+  row(6.0, 6.0, "grid", true, true, 1.2, 4000);     // certifies but under the 1.5 target
+  row(8.0, 8.0, "grid", false, false, 0.0, 2500);   // not rooted
+  row(3.0, 6.0, "pair", true, true, 1.8, 5200);     // graded: certifies AND saves material vs the fit
+  row(4.5, 8.0, "pair", true, false, 0.7, 3500);    // refused
+  const OrganicRecommendation r = organic_recommend_select(rows, "structural", 1.5, 0.0);
+  std::printf("  R2 structural: fit %.1f (m %.2f) auto %.1f-%.1f (%s, m %.2f, traced %.0f) rejected %zu\n",
+              r.fit_mm, r.fit_margin, r.auto_lo_mm, r.auto_hi_mm, r.auto_source.c_str(), r.auto_margin,
+              r.auto_traced_mm, r.rejected.size());
+  CHECK(r.fit_found && r.fit_mm == 4.5, "R2: FIT = the largest uniform cell certifying at >= target");
+  CHECK(r.auto_found && r.auto_lo_mm == 3.0 && r.auto_hi_mm == 6.0,
+        "R2: AUTO = the certifying candidate with the least material: the 3-6 grade beats the 4.5 fit");
+  CHECK(r.rejected.size() == 3, "R2: three rejected, each with a reason");
+  bool has_margin_reason = false, has_root = false, has_cert = false;
+  for (const auto& pr : r.rejected) {
+    has_margin_reason |= pr.second.find("below target") != std::string::npos;
+    has_root |= pr.second == "not rooted";
+    has_cert |= pr.second == "refused by the certificate";
+  }
+  CHECK(has_margin_reason && has_root && has_cert, "R2: the reasons name the gate that failed");
+  // If no grade saves material, AUTO collapses to the fit as a uniform window.
+  rows.clear();
+  row(4.5, 4.5, "grid", true, true, 2.1, 6000);
+  row(3.0, 6.0, "pair", true, true, 1.8, 7000);
+  const OrganicRecommendation r2 = organic_recommend_select(rows, "structural", 1.5, 0.0);
+  CHECK(r2.auto_lo_mm == 4.5 && r2.auto_hi_mm == 4.5, "R2: a grade that saves nothing is not chosen");
+}
+
+void test_recommend_select_aesthetic() {
+  using namespace topopt;
+  std::vector<OrganicRecommendRow> rows;
+  auto row = [&](double lo, double hi, const char* src, bool rooted) {
+    OrganicRecommendRow r; r.lo = lo; r.hi = hi; r.source = src; r.rooted_ok = rooted; rows.push_back(r); };
+  row(3.0, 3.0, "grid", true); row(5.0, 5.0, "grid", true); row(7.0, 7.0, "grid", false);
+  row(6.0, 6.0, "look", true); row(4.2, 8.5, "look_pair", true); row(5.2, 5.2, "look_step", true);
+  const OrganicRecommendation r = organic_recommend_select(rows, "aesthetic", 1.5, 6.0);
+  CHECK(r.fit_found && r.fit_mm == 6.0 && r.fit_source == "look",
+        "R3: aesthetic FIT = the look cell when it roots -- a look-driven target, not the largest cell");
+  CHECK(r.auto_found && r.auto_lo_mm == 4.2 && r.auto_hi_mm == 8.5,
+        "R3: aesthetic AUTO = the look pair, spread by the stress range");
+  rows.clear();
+  row(3.0, 3.0, "grid", true); row(6.0, 6.0, "look", false); row(4.2, 8.5, "look_pair", false);
+  row(5.2, 5.2, "look_step", true);
+  const OrganicRecommendation r2 = organic_recommend_select(rows, "aesthetic", 1.5, 6.0);
+  CHECK(r2.fit_mm == 5.2 && r2.auto_lo_mm == 5.2 && r2.auto_hi_mm == 5.2,
+        "R3: when the look cell does not root, one step below; and AUTO falls back to that uniform");
+  CHECK(r2.rejected.size() == 2, "R3: the unrooted look and pair are rejected with a reason");
+}
+
 int main() {
   test_growth_produces_curves();
   test_growth_does_not_fall_back();
@@ -1099,6 +1209,9 @@ int main() {
   test_slenderness_reads_the_unsupported_span();
   test_stats_are_actually_populated();
   test_probe_rooting();
+  test_recommend_band_from_the_model();
+  test_recommend_select_structural();
+  test_recommend_select_aesthetic();
   test_synthetic_focal_stress();
   test_bundle_is_not_support();
   test_chain_and_tee_survive();

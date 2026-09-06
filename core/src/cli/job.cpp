@@ -1217,6 +1217,8 @@ JobDescription parse_job(const std::string& json_text) {
                          "outer_finish", "emit_welded_stl", "welded_pitch_mm", "emit_organic_spans",
                          "regions", "multiscale",
                          "forecast_only", "organic_probe_cells_mm", "organic_probe_grades_mm",
+                         "organic_recommend", "organic_look_cells_across",
+                         "organic_recommend_margin", "organic_recommend_steps",
                          "require_lattice_void_reaches_exterior",
                          "require_no_midair_start"},
                         "lattice");
@@ -1514,6 +1516,28 @@ JobDescription parse_job(const std::string& json_text) {
       if (fo->type != JsonValue::Type::Bool)
         schema_fail("lattice \"forecast_only\" must be a boolean");
       job.lattice.forecast_only = (fo->num != 0.0);
+    }
+    if (const JsonValue* rc = find_key(lat, "organic_recommend")) {
+      if (rc->type != JsonValue::Type::String ||
+          (rc->str != "off" && rc->str != "structural" && rc->str != "aesthetic" && rc->str != "auto"))
+        schema_fail("lattice \"organic_recommend\" must be \"off\", \"structural\", \"aesthetic\" or \"auto\"");
+      job.lattice.organic_recommend = rc->str;
+    }
+    if (const JsonValue* lk = find_key(lat, "organic_look_cells_across")) {
+      if (lk->type != JsonValue::Type::Number || !(lk->num > 0.0) || !std::isfinite(lk->num))
+        schema_fail("lattice \"organic_look_cells_across\" must be a finite number > 0");
+      job.lattice.organic_look_cells_across = lk->num;
+    }
+    if (const JsonValue* rm = find_key(lat, "organic_recommend_margin")) {
+      if (rm->type != JsonValue::Type::Number || !(rm->num >= 1.0) || !std::isfinite(rm->num))
+        schema_fail("lattice \"organic_recommend_margin\" must be a finite number >= 1");
+      job.lattice.organic_recommend_margin = rm->num;
+    }
+    if (const JsonValue* rs = find_key(lat, "organic_recommend_steps")) {
+      if (rs->type != JsonValue::Type::Number || rs->num < 2.0 || rs->num > 8.0 ||
+          rs->num != std::floor(rs->num))
+        schema_fail("lattice \"organic_recommend_steps\" must be an integer in [2, 8]");
+      job.lattice.organic_recommend_steps = static_cast<int>(rs->num);
     }
     if (const JsonValue* pc = find_key(lat, "organic_probe_cells_mm")) {
       if (pc->type != JsonValue::Type::Array)
@@ -1823,6 +1847,8 @@ JobDescription parse_job(const std::string& json_text) {
     // false is still honoured, and the receipt reports which.
     if (organic_alg && !find_key(gr, "organic_shape_fit"))
       job.grading.organic_shape_fit = true;
+    if (!organic_alg && job.lattice.organic_recommend != "off")
+      schema_fail("lattice \"organic_recommend\" needs grading.algorithm \"organic\"");
     if (!organic_alg && (!job.lattice.organic_probe_cells_mm.empty() ||
                          !job.lattice.organic_probe_grades_mm.empty()))
       schema_fail("lattice \"organic_probe_cells_mm\" / \"organic_probe_grades_mm\" are only "

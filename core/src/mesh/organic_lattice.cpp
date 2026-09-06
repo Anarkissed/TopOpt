@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <limits>
 #include <cstddef>
 #include <cstdio>
 #include <cstdlib>
@@ -6435,6 +6436,132 @@ TriangleMesh organic_weld(const std::vector<OrganicSpan>& spans, double pitch_mm
   // codebase reports. This is the number that is comparable to a welded coupon's.
   stats.volume_mm3 = std::fabs(signed_volume(welded));
   return welded;
+}
+
+
+// ── THE CELL-SIZE RECOMMENDATION: band, then selection (see the header) ──────
+OrganicRecommendBand organic_recommend_band(const std::vector<OrganicRecommendRegion>& regions,
+                                            double print_floor_mm, double voxel_mm,
+                                            double resolution_floor_voxels,
+                                            double cells_across_member, double look_cells_across,
+                                            int steps) {
+  OrganicRecommendBand b;
+  b.printability_floor_mm = std::max(0.0, print_floor_mm);
+  b.resolution_floor_mm = std::max(0.0, resolution_floor_voxels * voxel_mm);
+  const double cells_per_member_min = cells_across_member;
+  b.lo_mm = std::max(b.printability_floor_mm, b.resolution_floor_mm);
+  b.member_ceiling_mm = std::numeric_limits<double>::infinity();
+  b.extent_ceiling_mm = std::numeric_limits<double>::infinity();
+  double look = std::numeric_limits<double>::infinity();
+  double spread = 1.0;
+  const double npm = cells_per_member_min > 0.0 ? cells_per_member_min : 1.0;
+  for (const OrganicRecommendRegion& r : regions) {
+    if (r.depth_mm > 0.0) b.member_ceiling_mm = std::min(b.member_ceiling_mm, r.depth_mm / npm);
+    if (r.extent_short_mm > 0.0) {
+      b.extent_ceiling_mm = std::min(b.extent_ceiling_mm,
+                                     r.extent_short_mm / kOrganicRecommendCellsAcrossFace);
+      if (look_cells_across > 0.0) look = std::min(look, r.extent_short_mm / look_cells_across);
+    }
+    if (r.stress_p50 > 0.0 && r.stress_p99 > r.stress_p50)
+      spread = std::max(spread, r.stress_p99 / r.stress_p50);
+  }
+  if (!std::isfinite(b.member_ceiling_mm)) b.member_ceiling_mm = 0.0;
+  if (!std::isfinite(b.extent_ceiling_mm)) b.extent_ceiling_mm = 0.0;
+  b.hi_mm = std::min(b.member_ceiling_mm > 0.0 ? b.member_ceiling_mm : b.extent_ceiling_mm,
+                     b.extent_ceiling_mm > 0.0 ? b.extent_ceiling_mm : b.member_ceiling_mm);
+  b.collapsed = !(b.hi_mm > b.lo_mm) || !(b.lo_mm > 0.0);
+  if (b.collapsed) return b;
+  const int n = std::max(2, std::min(8, steps));
+  std::vector<double> c(static_cast<std::size_t>(n));
+  for (int k = 0; k < n; ++k)
+    c[static_cast<std::size_t>(k)] =
+        b.lo_mm * std::pow(b.hi_mm / b.lo_mm, static_cast<double>(k) / static_cast<double>(n - 1));
+  auto add = [&](double lo, double hi, const char* src) {
+    lo = std::min(std::max(lo, b.lo_mm), b.hi_mm);
+    hi = std::min(std::max(hi, b.lo_mm), b.hi_mm);
+    if (hi < lo) std::swap(lo, hi);
+    for (OrganicRecommendCandidate& e : b.candidates)
+      if (std::fabs(e.lo - lo) < 1e-9 && std::fabs(e.hi - hi) < 1e-9) {
+        // A look candidate that lands on a grid cell keeps its LOOK tag: the
+        // aesthetic selector picks by tag, and the probe measures it once either way.
+        if (std::string(src).rfind("look", 0) == 0 && e.source.rfind("look", 0) != 0) e.source = src;
+        return;
+      }
+    b.candidates.push_back({lo, hi, src});
+  };
+  for (double v : c) add(v, v, "grid");
+  for (int k = 0; k + 2 < n; ++k) add(c[static_cast<std::size_t>(k)], c[static_cast<std::size_t>(k + 2)], "pair");
+  if (n >= 3) add(c.front(), c.back(), "pair");
+  // The look-driven branch: the cell the eye should read across the shortest face.
+  if (std::isfinite(look) && look > 0.0) {
+    b.look_cell_mm = std::min(std::max(look, b.lo_mm), b.hi_mm);
+    b.grade_ratio = std::min(kOrganicRecommendGradeMax, std::sqrt(std::max(1.0, spread)));
+    add(b.look_cell_mm, b.look_cell_mm, "look");
+    if (b.grade_ratio >= kOrganicRecommendGradeMin) {
+      const double g = std::sqrt(b.grade_ratio);
+      add(b.look_cell_mm / g, b.look_cell_mm * g, "look_pair");
+    }
+    const double step = std::pow(b.hi_mm / b.lo_mm, 1.0 / static_cast<double>(n - 1));
+    add(b.look_cell_mm / step, b.look_cell_mm / step, "look_step");
+  }
+  return b;
+}
+
+OrganicRecommendation organic_recommend_select(const std::vector<OrganicRecommendRow>& rows,
+                                               const std::string& mode, double target_margin,
+                                               double look_cell_mm) {
+  OrganicRecommendation out;
+  out.mode = mode;
+  auto uniform = [](const OrganicRecommendRow& r) { return std::fabs(r.hi - r.lo) < 1e-9; };
+  auto set_fit = [&](const OrganicRecommendRow& r) {
+    out.fit_found = true; out.fit_mm = r.hi; out.fit_margin = r.margin;
+    out.fit_traced_mm = r.traced_mm; out.fit_source = r.source;
+  };
+  auto set_auto = [&](const OrganicRecommendRow& r) {
+    out.auto_found = true; out.auto_lo_mm = r.lo; out.auto_hi_mm = r.hi; out.auto_margin = r.margin;
+    out.auto_traced_mm = r.traced_mm; out.auto_source = r.source;
+  };
+  if (mode == "structural") {
+    const OrganicRecommendRow* fit = nullptr;
+    const OrganicRecommendRow* best = nullptr;
+    for (const OrganicRecommendRow& r : rows) {
+      std::string why;
+      if (!r.rooted_ok) why = "not rooted";
+      else if (!r.certified) why = "refused by the certificate";
+      else if (r.margin < target_margin)
+        why = "margin " + std::to_string(r.margin) + " below target " + std::to_string(target_margin);
+      if (!why.empty()) { out.rejected.push_back({r, why}); continue; }
+      if (uniform(r) && (!fit || r.hi > fit->hi)) fit = &r;
+      if (!best || r.traced_mm < best->traced_mm) best = &r;
+    }
+    if (fit) set_fit(*fit);
+    if (best) {
+      set_auto(*best);
+      if (uniform(*best) && fit && best != fit)
+        out.rejected.push_back({*best, "uniform; the fit is the larger certifying cell"});
+    }
+    return out;
+  }
+  // aesthetic: look-driven
+  const OrganicRecommendRow* look = nullptr; const OrganicRecommendRow* step = nullptr;
+  const OrganicRecommendRow* pair = nullptr; const OrganicRecommendRow* grid = nullptr;
+  for (const OrganicRecommendRow& r : rows) {
+    if (!r.rooted_ok) { out.rejected.push_back({r, "not rooted"}); continue; }
+    if (r.source == "look") look = &r;
+    else if (r.source == "look_step") step = &r;
+    else if (r.source == "look_pair") pair = &r;
+    else if (uniform(r) && (!grid || r.hi > grid->hi)) grid = &r;
+  }
+  (void)look_cell_mm;
+  if (look) set_fit(*look);
+  else if (step) set_fit(*step);
+  else if (grid) set_fit(*grid);
+  if (pair) set_auto(*pair);
+  else if (out.fit_found) {
+    OrganicRecommendRow u; u.lo = u.hi = out.fit_mm; u.source = out.fit_source + " (uniform)";
+    u.traced_mm = out.fit_traced_mm; set_auto(u);
+  }
+  return out;
 }
 
 }  // namespace topopt

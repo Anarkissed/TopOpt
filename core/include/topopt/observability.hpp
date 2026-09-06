@@ -1050,6 +1050,15 @@ struct RunInfo {
   double organic_structural_max_over_allowable_distributed = 0.0; // loads spread along members
   double organic_structural_max_distributed_mpa = 0.0;
   bool organic_structural_max_exceeds_allowable = false;
+  // the cell-size recommendation (lattice.organic_recommend)
+  bool organic_recommend_ran = false;
+  std::string organic_recommend_mode;
+  double organic_recommend_band_lo_mm = 0.0, organic_recommend_band_hi_mm = 0.0;
+  bool organic_recommend_collapsed = false;
+  bool organic_recommend_fit_found = false;
+  double organic_recommend_fit_mm = 0.0;
+  bool organic_recommend_auto_found = false;
+  double organic_recommend_auto_lo_mm = 0.0, organic_recommend_auto_hi_mm = 0.0;
   double organic_structural_seconds = 0.0;
   long long organic_structural_worst_strut = -1;
   long long organic_structural_load_cases = 0;

@@ -1495,6 +1495,17 @@ std::string run_info_json(const RunInfo& info) {
                 fmt(info.organic_structural_max_distributed_mpa);
           gr += std::string(", \"structural_max_exceeds_allowable\": ") +
                 (info.organic_structural_max_exceeds_allowable ? "true" : "false");
+          if (info.organic_recommend_ran) {
+            gr += ", \"recommend\": {\"mode\": \"" + info.organic_recommend_mode + "\"";
+            gr += ", \"band_lo_mm\": " + fmt(info.organic_recommend_band_lo_mm);
+            gr += ", \"band_hi_mm\": " + fmt(info.organic_recommend_band_hi_mm);
+            gr += std::string(", \"collapsed\": ") + (info.organic_recommend_collapsed ? "true" : "false");
+            gr += std::string(", \"fit_found\": ") + (info.organic_recommend_fit_found ? "true" : "false");
+            gr += ", \"fit_mm\": " + fmt(info.organic_recommend_fit_mm);
+            gr += std::string(", \"auto_found\": ") + (info.organic_recommend_auto_found ? "true" : "false");
+            gr += ", \"auto_lo_mm\": " + fmt(info.organic_recommend_auto_lo_mm);
+            gr += ", \"auto_hi_mm\": " + fmt(info.organic_recommend_auto_hi_mm) + "}";
+          }
           gr += ", \"structural_load_cases\": " +
                 std::to_string(info.organic_structural_load_cases);
           gr += ", \"structural_seconds\": " + fmt(info.organic_structural_seconds);

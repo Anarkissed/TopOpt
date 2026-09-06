@@ -314,6 +314,14 @@ struct JobLattice {
   // of their length reaches part solid. Written to <out>/organic_probe.json.
   std::vector<double> organic_probe_cells_mm;                 // uniform candidates
   std::vector<std::pair<double, double>> organic_probe_grades_mm;  // [lo, hi] windows
+  // ★ THE CELL-SIZE RECOMMENDATION (maintainer, 2026-09-06). "off" | "structural" |
+  // "aesthetic" | "auto" (= the grading intent). Generates its own probe candidates
+  // from the model's band (see organic_recommend_band) and writes a "recommendation"
+  // block into organic_probe.json: the FIT cell and the AUTO [lo, hi] window.
+  std::string organic_recommend = "off";
+  double organic_look_cells_across = 8.0;   // aesthetic: cells the eye reads across the shortest face
+  double organic_recommend_margin = 1.5;    // structural: certificate margin the fit must clear
+  int organic_recommend_steps = 5;          // geometric steps across the band (2..8)
 
   // THE ENCLOSED-VOID RULE (task 2026-08-05-lattice-void-reaches-exterior).
   //

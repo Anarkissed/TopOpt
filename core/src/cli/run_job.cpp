@@ -3910,6 +3910,9 @@ struct LatticeVariantOutcome {
   LatticeCertOutcome cc;
   // ★ the ORGANIC structural certificate (beam network), when one was run
   OrganicCertificate organic_cert;
+  OrganicRecommendation organic_recommendation;   // organic_recommend != off
+  OrganicRecommendBand organic_recommend_band;
+  bool organic_recommend_ran = false;
   // ★ shape fit is ON by default for organic; the receipt must prove it RAN, from the
   // outcome's own counters rather than the default echoed back.
   bool organic_shape_fit_on = false;
@@ -5059,13 +5062,57 @@ LatticeVariantOutcome lattice_one_variant(
     // the law's params (`gp`) and the per-voxel include-region ids. Per candidate
     // window: grade, trace/grow, weld, measure rooting. No emission, no support
     // pass, no certificate. The normal run continues afterwards unchanged.
+    const std::string recommend_mode =
+        job.lattice.organic_recommend == "auto" ? job.grading.intent : job.lattice.organic_recommend;
+    const bool recommend_on = R.algorithm == LatticeAlgorithm::Organic && recommend_mode != "off";
     if (R.algorithm == LatticeAlgorithm::Organic &&
-        (!job.lattice.organic_probe_cells_mm.empty() ||
+        (recommend_on || !job.lattice.organic_probe_cells_mm.empty() ||
          !job.lattice.organic_probe_grades_mm.empty())) {
-      struct Cand { double lo, hi; };
+      struct Cand { double lo, hi; std::string src = "user"; };
       std::vector<Cand> cands;
       for (double c : job.lattice.organic_probe_cells_mm) cands.push_back({c, c});
       for (const auto& g : job.lattice.organic_probe_grades_mm) cands.push_back({g.first, g.second});
+      // ★ THE RECOMMENDATION'S OWN CANDIDATES, from the model's band: the floors from
+      // the bead and the voxel, the ceilings from the walls and the faces, the look
+      // cell from how many cells the eye should read across the shortest face, its
+      // grade from the stress range. Pure and unit-tested (organic_recommend_band).
+      if (recommend_on) {
+        std::vector<OrganicRecommendRegion> rr;
+        int inc = 0;
+        for (const JobLatticeRegion& jr : job.lattice.regions) {
+          if (jr.role != "include") continue;
+          ++inc;
+          OrganicRecommendRegion q;
+          q.face_id = jr.face_id;
+          q.depth_mm = jr.depth_mm;
+          q.extent_short_mm = 2.0 * std::min(jr.half_u_mm, jr.half_w_mm);
+          if (jr.kind == "bolt") { q.depth_mm = 2.0 * jr.radius_mm; q.extent_short_mm = 2.0 * jr.half_length_mm; }
+          std::vector<double> vm;
+          for (std::size_t e = 0; e < region_ids.size() && e < v.von_mises_field.size(); ++e)
+            if (region_ids[e] == inc && v.von_mises_field[e] > 0.0) vm.push_back(v.von_mises_field[e]);
+          if (!vm.empty()) {
+            std::sort(vm.begin(), vm.end());
+            q.stress_p50 = vm[vm.size() / 2];
+            q.stress_p99 = vm[static_cast<std::size_t>(0.99 * static_cast<double>(vm.size() - 1))];
+          }
+          rr.push_back(q);
+        }
+        // The organic tracer's own floors (organic_lattice.cpp: d_print_floor_mm and
+        // d_res_floor_mm), not the octet law's: the strut is the bead.
+        R.organic_recommend_band = organic_recommend_band(
+            rr, 0.5 * job.grading.min_extrudable_width_mm * std::sqrt(3.0 * 3.14159265358979323846),
+            solved_grid.spacing, OrganicParams{}.resolution_floor_voxels,
+            kOrganicRecommendCellsAcrossMember,
+            job.lattice.organic_look_cells_across, job.lattice.organic_recommend_steps);
+        const OrganicRecommendBand& B = R.organic_recommend_band;
+        std::fprintf(stderr, "[recommend] %s: band %.3g-%.3g mm (bead floor %.3g, resolution floor %.3g, member ceiling %.3g, "
+                     "extent ceiling %.3g)%s look %.3g grade x%.2f, %zu candidates\n",
+                     recommend_mode.c_str(), B.lo_mm, B.hi_mm, B.printability_floor_mm, B.resolution_floor_mm,
+                     B.member_ceiling_mm, B.extent_ceiling_mm, B.collapsed ? "  COLLAPSED: no cell fits, solid" : "",
+                     B.look_cell_mm, B.grade_ratio, B.candidates.size());
+        for (const OrganicRecommendCandidate& c : B.candidates) cands.push_back({c.lo, c.hi, c.source});
+      }
+      std::vector<OrganicRecommendRow> rec_rows;
       std::string pj = "{\n  \"organic_probe_version\": 1,\n  \"algorithm\": \"organic\",\n";
       pj += "  \"growth\": " + std::string(job.grading.organic_growth ? "true" : "false") + ",\n";
       pj += "  \"transfer_ties\": " + std::string(job.grading.organic_transfer_ties ? "true" : "false") + ",\n";
@@ -5180,7 +5227,16 @@ LatticeVariantOutcome lattice_one_variant(
         }
         std::string pred = "\"predicted\": {\"ran\": false, \"reason\": \"no segments\"}";
         bool cert_ok = false;
-        if (!psegs.empty() && psegs.size() <= 600000) {
+        double cert_margin = 0.0;
+        // ★ THE CERTIFICATE IS A STRUCTURAL QUESTION. On an aesthetic job nothing reads
+        // it (the aesthetic recommendation picks by look and rooting), and the probe's
+        // network under an aesthetic job's loads prints refusals at zero stress -- noise
+        // that cost 10 x 12 s on the M2 run. Run it only when structural intent or a
+        // structural recommendation will read the answer.
+        const bool want_cert = job.grading.intent == "structural" || recommend_mode == "structural";
+        if (!want_cert)
+          pred = "\"predicted\": {\"ran\": false, \"reason\": \"aesthetic intent: nothing reads a certificate\"}";
+        if (want_cert && !psegs.empty() && psegs.size() <= 600000) {
           const double t1 = wall_seconds();
           std::vector<char> hexm(solved_grid.voxel_count(), 0);
           for (std::size_t e = 0; e < solved_grid.voxel_count(); ++e)
@@ -5196,6 +5252,7 @@ LatticeVariantOutcome lattice_one_variant(
           // The max rule (max_exceeds_allowable) is the RUN's gate; here it is
           // reported beside the forecast, never read as the verdict.
           cert_ok = pc.margin >= 1.0;
+          cert_margin = pc.margin;
           char pb[1100];
           std::snprintf(pb, sizeof pb,
                         "\"predicted\": {\"ran\": true, \"verdict\": \"%s\", \"margin\": %.6g, "
@@ -5270,11 +5327,54 @@ LatticeVariantOutcome lattice_one_variant(
         pj += head + regs + "\n      ],\n      " + pred + ",\n      \"approved_structural\": " +
               (approved_structural ? "true" : "false") +
               ", \"approved_aesthetic\": " + (ok_a ? "true" : "false") + "}" + (ci + 1 < cands.size() ? ",\n" : "\n");
+        {
+          OrganicRecommendRow row;
+          row.lo = cc.lo; row.hi = cc.hi; row.source = cc.src; row.rooted_ok = ok_a;
+          row.certified = cert_ok; row.margin = cert_margin; row.traced_mm = pr.traced_mm;
+          rec_rows.push_back(row);
+        }
         std::fprintf(stderr, "[probe] cell %.3g-%.3g: %zu curves, %zu crossings welded, %zu free ends tied, %zu legs, rooted %.3f, %.1fs%s\n", cc.lo, cc.hi,
                      pr.curves, crossings, free_ties, legs, pr.traced_mm > 0.0 ? pr.rooted_mm / pr.traced_mm : 0.0, secs,
                      approved_structural ? "  APPROVED structural" : ok_a ? "  approved aesthetic only" : "  refused");
       }
-      pj += "  ]\n}\n";
+      // ★ THE RECOMMENDATION reads the rows the probe just measured.
+      std::string rj = "{\"ran\": false}";
+      if (recommend_on) {
+        const OrganicRecommendBand& B = R.organic_recommend_band;
+        R.organic_recommendation = organic_recommend_select(rec_rows, recommend_mode,
+                                                            job.lattice.organic_recommend_margin, B.look_cell_mm);
+        R.organic_recommend_ran = true;
+        const OrganicRecommendation& RC = R.organic_recommendation;
+        char rb[1200];
+        std::snprintf(rb, sizeof rb,
+                      "{\"ran\": true, \"mode\": \"%s\", \"band_lo_mm\": %.6g, \"band_hi_mm\": %.6g, "
+                      "\"collapsed\": %s, \"printability_floor_mm\": %.6g, \"resolution_floor_mm\": %.6g, "
+                      "\"member_ceiling_mm\": %.6g, \"extent_ceiling_mm\": %.6g, \"look_cell_mm\": %.6g, "
+                      "\"grade_ratio\": %.6g, \"look_cells_across\": %.6g, \"target_margin\": %.6g,\n"
+                      "    \"fit\": {\"found\": %s, \"cell_mm\": %.6g, \"margin\": %.6g, \"traced_mm\": %.6g, \"source\": \"%s\"},\n"
+                      "    \"auto\": {\"found\": %s, \"cell_min_mm\": %.6g, \"cell_max_mm\": %.6g, \"margin\": %.6g, "
+                      "\"traced_mm\": %.6g, \"source\": \"%s\"},\n    \"rejected\": [",
+                      RC.mode.c_str(), B.lo_mm, B.hi_mm, B.collapsed ? "true" : "false", B.printability_floor_mm,
+                      B.resolution_floor_mm, B.member_ceiling_mm, B.extent_ceiling_mm, B.look_cell_mm, B.grade_ratio,
+                      job.lattice.organic_look_cells_across, job.lattice.organic_recommend_margin,
+                      RC.fit_found ? "true" : "false", RC.fit_mm, RC.fit_margin, RC.fit_traced_mm, RC.fit_source.c_str(),
+                      RC.auto_found ? "true" : "false", RC.auto_lo_mm, RC.auto_hi_mm, RC.auto_margin, RC.auto_traced_mm,
+                      RC.auto_source.c_str());
+        rj = rb;
+        for (std::size_t i = 0; i < RC.rejected.size(); ++i) {
+          char e[300];
+          std::snprintf(e, sizeof e, "%s{\"cell_min_mm\": %.6g, \"cell_max_mm\": %.6g, \"source\": \"%s\", \"reason\": \"%s\"}",
+                        i ? ", " : "", RC.rejected[i].first.lo, RC.rejected[i].first.hi,
+                        RC.rejected[i].first.source.c_str(), json_safe(RC.rejected[i].second).c_str());
+          rj += e;
+        }
+        rj += "]}";
+        std::fprintf(stderr, "[recommend] %s: FIT %s%.3g mm (%s, margin %.3g)  AUTO %s%.3g-%.3g mm (%s, margin %.3g, traced %.0f vs %.0f mm)  %zu rejected\n",
+                     RC.mode.c_str(), RC.fit_found ? "" : "NONE ", RC.fit_mm, RC.fit_source.c_str(), RC.fit_margin,
+                     RC.auto_found ? "" : "NONE ", RC.auto_lo_mm, RC.auto_hi_mm, RC.auto_source.c_str(), RC.auto_margin,
+                     RC.auto_traced_mm, RC.fit_traced_mm, RC.rejected.size());
+      }
+      pj += "  ],\n  \"recommendation\": " + rj + "\n}\n";
       write_text_file(join_path(out_dir, "organic_probe.json"), pj);
     }
 
@@ -9060,6 +9160,18 @@ LatticeVariantJobResult lattice_variant_job(const JobDescription& job,
         gi.organic_ties_refused_reach = static_cast<long long>(R.oc.growth.growth_ties_refused_reach);
         gi.organic_xfer_tie_length_mm = R.oc.growth.growth_tie_length_mm;
         gi.organic_tie_swirl = job.grading.organic_tie_swirl;
+        gi.organic_recommend_ran = R.organic_recommend_ran;
+        if (R.organic_recommend_ran) {
+          gi.organic_recommend_mode = R.organic_recommendation.mode;
+          gi.organic_recommend_band_lo_mm = R.organic_recommend_band.lo_mm;
+          gi.organic_recommend_band_hi_mm = R.organic_recommend_band.hi_mm;
+          gi.organic_recommend_collapsed = R.organic_recommend_band.collapsed;
+          gi.organic_recommend_fit_found = R.organic_recommendation.fit_found;
+          gi.organic_recommend_fit_mm = R.organic_recommendation.fit_mm;
+          gi.organic_recommend_auto_found = R.organic_recommendation.auto_found;
+          gi.organic_recommend_auto_lo_mm = R.organic_recommendation.auto_lo_mm;
+          gi.organic_recommend_auto_hi_mm = R.organic_recommendation.auto_hi_mm;
+        }
         gi.organic_synthetic_by_region.clear();
         for (const SyntheticStressRegionReport& rr : R.organic_synthetic.per_region) {
           OrganicSyntheticRegionInfo ri;
