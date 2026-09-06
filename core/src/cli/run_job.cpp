@@ -4387,7 +4387,15 @@ OrganicOutcome run_organic_step(bool shell_is_written,
             ++shrunk;
             worst_ratio = std::min(worst_ratio, spacing[e] / before);
           }
-          bead[e] = organic_strut_diameter_for(spacing[e], relative_density[e]);
+          // ★ GRADE TO SHAPE IS GRADE TO SOLID (maintainer, 2026-09-05: "why aren't
+          // they the same thing?"). Recomputing the bead from the SHRUNK cell at the
+          // same relative density made the strut THINNER as the lattice approached
+          // the outline -- measured: shape fit OFF certified at 18.37 against 12.53
+          // ON, on the M2 stand -- and then a hard rim cliff to solid. A grade that
+          // ends in solid must RAISE the relative density as the cell closes, so the
+          // strut keeps the thickness the stress gave it while the cell shrinks
+          // around it; the rim is then where that ramp reaches density one. The bead
+          // stays as computed from the stress-driven cell; only the cell shrinks.
           if (!(bead[e] > jg.min_extrudable_width_mm))
             bead[e] = jg.min_extrudable_width_mm;
         }
@@ -4431,7 +4439,15 @@ OrganicOutcome run_organic_step(bool shell_is_written,
         // strut sized for a cell it is no longer in — the same class of defect as a
         // census measuring one representation while the pass measures another.
         if (have_window) {
-          bead[e] = organic_strut_diameter_for(spacing[e], relative_density[e]);
+          // ★ GRADE TO SHAPE IS GRADE TO SOLID (maintainer, 2026-09-05: "why aren't
+          // they the same thing?"). Recomputing the bead from the SHRUNK cell at the
+          // same relative density made the strut THINNER as the lattice approached
+          // the outline -- measured: shape fit OFF certified at 18.37 against 12.53
+          // ON, on the M2 stand -- and then a hard rim cliff to solid. A grade that
+          // ends in solid must RAISE the relative density as the cell closes, so the
+          // strut keeps the thickness the stress gave it while the cell shrinks
+          // around it; the rim is then where that ramp reaches density one. The bead
+          // stays as computed from the stress-driven cell; only the cell shrinks.
           if (!(bead[e] > jg.min_extrudable_width_mm))
             bead[e] = jg.min_extrudable_width_mm;
         }

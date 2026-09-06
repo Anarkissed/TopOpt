@@ -440,9 +440,10 @@ struct JobGrading {
   // repair is a choice: absent means on (nothing existing changes), false skips it.
   bool organic_overhang_fillet = true;
   // ★ grown only: transfer ties along the second principal direction, so the load
-  // has a member to turn along (Michell's orthogonal family). Default off until the
-  // maintainer has judged the look; see kOrganicXferTieMinorRatio.
-  bool organic_transfer_ties = false;
+  // has a member to turn along (Michell's orthogonal family). The maintainer judged
+  // the look on the M2 stand (2026-09-05, isostatic lines with the swirl at the
+  // pillar's radius): "I am a go for the tie look". Default ON; false switches it off.
+  bool organic_transfer_ties = true;
   double organic_tie_swirl = 1.0;   // 0..1: how much the ties wander (a look)
   // ★ GRADE TO SOLID AT THE OUTLINE (maintainer, 2026-09-05: "that has always been a
   // requirement for organic"). Inside every include region, the band within this

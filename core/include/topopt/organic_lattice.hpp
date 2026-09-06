@@ -286,7 +286,8 @@ inline constexpr double kOrganicShapeFitMinCellRatio = 0.5;
 
 // ★ 4 -> 2 (2026-09-05): at 4 the fill laid 20-32 mm straight horizontal bridges
 // across every empty stretch of a grown lattice (306 of them on the STAND), which
-// read as scaffolding, not growth. A taste call, flagged as such in the handoff.
+// read as scaffolding, not growth. The maintainer confirmed it ("the fill caps should
+// be ok") and may want it as a job input later; until then it is this constant.
 inline constexpr int kOrganicFillMaxReachCells = 2;
 inline constexpr int kOrganicFillMaxCells = 400000;
 

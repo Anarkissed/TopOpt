@@ -697,11 +697,11 @@ static void test_organic_scale_and_gates() {
       (void)parse_job(organic_swept(", \"organic_overhang_fillet\": 1"));
     } catch (const std::exception&) { refused = true; }
     CHECK(refused, "organic_overhang_fillet: a non-boolean is refused");
-    CHECK(!parse_job(organic_swept("")).grading.organic_transfer_ties,
-          "organic_transfer_ties: absent means OFF");
-    CHECK(parse_job(organic_swept(", \"organic_transfer_ties\": true"))
+    CHECK(parse_job(organic_swept("")).grading.organic_transfer_ties,
+          "organic_transfer_ties: absent means ON (the maintainer approved the look, 2026-09-05)");
+    CHECK(!parse_job(organic_swept(", \"organic_transfer_ties\": false"))
               .grading.organic_transfer_ties,
-          "organic_transfer_ties: true is honoured");
+          "organic_transfer_ties: false switches the ties off");
     {
       auto probe = [&](const std::string& lat_extra, const std::string& alg) {
         return mutate("\"mesh_prefix\": \"variant\" }",
