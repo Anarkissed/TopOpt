@@ -5117,6 +5117,26 @@ LatticeVariantOutcome lattice_one_variant(
       pj += "  \"growth\": " + std::string(job.grading.organic_growth ? "true" : "false") + ",\n";
       pj += "  \"transfer_ties\": " + std::string(job.grading.organic_transfer_ties ? "true" : "false") + ",\n";
       pj += "  \"rooted_gate\": 0.95, \"curves_per_family_gate\": 2, \"cells_across_advisory\": 4.0,\n";
+      // ★★ THE PROBE'S CALIBRATION, STATED IN ITS OWN RECEIPT (reviewer follow-up,
+      // 2026-09-06). The forecast is NOT within 20 % of the run, and it is NOT always
+      // conservative. Measured probe margin / run margin on five configurations of the
+      // STAND, all Release, all under the per-strut interlayer knockdown:
+      //     grown 4.5-4.5  27.12 / 35.64 = 0.76      grown 5.5-5.5  14.79 / 13.61 = 1.09
+      //     grown 6.5-6.5  13.97 / 27.01 = 0.52      grown 4.5-5.5  15.04 / 20.78 = 0.72
+      //     traced 3-5     15.67 / 35.59 = 0.44
+      // (Before the probe's certificate mask was fixed to the post-rim mask the same
+      // five read 0.27-0.63.) What remains is the NETWORK: the run's support pass,
+      // transfer ties, fill mat and re-seeding certify higher with FEWER members than
+      // the probe's raw curves plus its synthetic scaffolding. So: a probe approval at
+      // margin m means the run's margin is somewhere in [m/1.09, m/0.44]; requiring
+      // m >= 1.09 x the target is what makes an approval safe on this sample, and the
+      // recommendation's default target (1.5) already clears it.
+      pj += "  \"calibration\": {\"measured\": \"2026-09-06\", \"configurations\": 5, "
+            "\"probe_over_run_min\": 0.44, \"probe_over_run_max\": 1.09, "
+            "\"conservative_always\": false, \"safe_approval_factor\": 1.09, "
+            "\"note\": \"the forecast is not calibrated to 20 %: it may refuse a window the run "
+            "certifies (0.44x) and may read above the run (1.09x); require margin >= 1.09 x target "
+            "for an approval to imply the run certifies\"},\n";
       pj += "  \"candidates\": [\n";
       const std::vector<double> probe_stress = stress_tensor_for_organic(
           job, solved_grid, cand, region_ids, v.stress_tensor_field, nullptr);
@@ -5133,7 +5153,12 @@ LatticeVariantOutcome lattice_one_variant(
         const double t0 = wall_seconds();
         GradingLawParams alt = gp;
         alt.min_cell_size_mm = cc.lo; alt.max_cell_size_mm = cc.hi;
-        alt.target_cell_size_mm = cc.hi;
+        // ★ NOT alt.target_cell_size_mm = cc.hi. A target pins the law to one cell and
+        // one density, so every probe strut got the same bead (measured 2026-09-06:
+        // min == max radius in every window) while the run's struts grade with stress
+        // (0.27-0.73 mm on the same window). The run leaves the target as the job set
+        // it; so does the probe now. (Reviewer follow-up: the probe's under-forecast
+        // was its RADIUS, not its legs.)
         JobGrading jg2 = job.grading;
         jg2.cell_min_mm = cc.lo; jg2.cell_max_mm = cc.hi; jg2.cell_mm = cc.hi;
         const GradedField agf = grade_lattice(solved_grid, dens, v.von_mises_field, &cand, alt, printed_iso);
@@ -5180,18 +5205,26 @@ LatticeVariantOutcome lattice_one_variant(
           crossings = weld_curve_crossings(plat.curves);
         }
         // the emission's free-end tie, at its reach (kOrganicTieReachRatio x the window)
+        const std::size_t n_before_ties = plat.curves.size();
         const std::size_t free_ties = tie_curve_free_ends(plat.curves, kOrganicTieReachRatio * cc.hi);
         // the support pass's legs: a vertical drop from every end onto the lattice below
+        const std::size_t n_before_legs = plat.curves.size();
         const std::size_t legs = drop_curve_legs(plat.curves, 1.5 * cc.hi);
         if (free_ties || legs) crossings += weld_curve_crossings(plat.curves);
         const OrganicProbeResult pr = probe_organic_rooting(plat, region_ids);
         const double secs = wall_seconds() - t0;
         std::vector<BeamSegment> psegs;
-        for (const OrganicCurve& cv : plat.curves)
+        // ★ TAG THE PROBE'S SCAFFOLDING: curves appended by the free-end tie (2) and by
+        // the legs (1) are the probe's, not the run's; the certificate reports the p99
+        // with and without them (reviewer follow-up, 2026-09-06).
+        for (std::size_t ci2 = 0; ci2 < plat.curves.size(); ++ci2) {
+          const OrganicCurve& cv = plat.curves[ci2];
+          const int tag = ci2 >= n_before_legs ? 1 : ci2 >= n_before_ties ? 2 : 0;
           for (std::size_t k = 1; k < cv.points.size(); ++k) {
             const double dx = cv.points[k].x - cv.points[k - 1].x, dy = cv.points[k].y - cv.points[k - 1].y, dz = cv.points[k].z - cv.points[k - 1].z;
-            if (dx * dx + dy * dy + dz * dz > 1e-12) psegs.push_back({cv.points[k - 1], cv.points[k], cv.radius_mm});
+            if (dx * dx + dy * dy + dz * dz > 1e-12) psegs.push_back({cv.points[k - 1], cv.points[k], cv.radius_mm, tag});
           }
+        }
         if (false) {
           // ★ KEEP THE WELDS. A tie's vertex at a pillar IS that pillar's vertex; the
           // beam network welds node-to-node, so thinning a pillar past that vertex
@@ -5225,6 +5258,25 @@ LatticeVariantOutcome lattice_one_variant(
             }
           }
         }
+        // ★ DIAGNOSIS DUMP (reviewer follow-up): the probe's spans in the run's own
+        // ledger format, so radius and length can be compared with <prefix>_SPANS.txt.
+        if (const char* pd = std::getenv("TOPOPT_PROBE_SPANS_DUMP")) {
+          char pn[512];
+          std::snprintf(pn, sizeof pn, "%s/probe_%g_%g_SPANS.txt", pd, cc.lo, cc.hi);
+          if (FILE* f = std::fopen(pn, "w")) {
+            double rsum = 0.0, lsum = 0.0, rmin = 1e9, rmax = 0.0;
+            for (const BeamSegment& sg : psegs) {
+              const double dx = sg.b.x - sg.a.x, dy = sg.b.y - sg.a.y, dz = sg.b.z - sg.a.z;
+              const double L = std::sqrt(dx * dx + dy * dy + dz * dz);
+              rsum += sg.radius_mm * L; lsum += L; rmin = std::min(rmin, sg.radius_mm); rmax = std::max(rmax, sg.radius_mm);
+              std::fprintf(f, "SEG %.6g %.6g %.6g %.6g %.6g %.6g %.6g %d\n", sg.a.x, sg.a.y, sg.a.z, sg.b.x, sg.b.y, sg.b.z,
+                           sg.radius_mm, sg.tag);
+            }
+            std::fclose(f);
+            std::fprintf(stderr, "[probe]   spans: %zu, length %.0f mm, radius length-weighted mean %.4g (min %.4g max %.4g)\n",
+                         psegs.size(), lsum, lsum > 0.0 ? rsum / lsum : 0.0, rmin, rmax);
+          }
+        }
         std::string pred = "\"predicted\": {\"ran\": false, \"reason\": \"no segments\"}";
         bool cert_ok = false;
         double cert_margin = 0.0;
@@ -5240,7 +5292,13 @@ LatticeVariantOutcome lattice_one_variant(
           const double t1 = wall_seconds();
           std::vector<char> hexm(solved_grid.voxel_count(), 0);
           for (std::size_t e = 0; e < solved_grid.voxel_count(); ++e)
-            if (v.optimization.physical_density[e] > pcx.printed_iso && !agf.posture.mask[e]) hexm[e] = 1;
+            // ★ THE SOLID THE PROBE CERTIFIES AGAINST IS THE MASK ITS CURVES WERE TRACED
+            // ON -- `pmask`, after the solid rim -- not the grading mask before it. With
+            // the pre-rim mask the rim band was neither solid nor lattice in the probe's
+            // certificate: an unsupported lattice edge the run never has. Measured
+            // 2026-09-06: the probe's own network on the run's grid reads 0.80 of the run;
+            // the probe's own certificate read 0.63 -- this mask was the difference.
+            if (v.optimization.physical_density[e] > pcx.printed_iso && !pmask[e]) hexm[e] = 1;
           std::vector<OrganicLoadCase> pocs;
           pocs.push_back({"job", bcs, pcx.loads});
           const OrganicCertificate pc = certify_organic_structural(
@@ -5253,25 +5311,30 @@ LatticeVariantOutcome lattice_one_variant(
           // reported beside the forecast, never read as the verdict.
           cert_ok = pc.margin >= 1.0;
           cert_margin = pc.margin;
-          char pb[1100];
+          char pb[1400];
           std::snprintf(pb, sizeof pb,
                         "\"predicted\": {\"ran\": true, \"verdict\": \"%s\", \"margin\": %.6g, "
                         "\"p99_mpa\": %.6g, \"max_mpa\": %.6g, \"allowable_mpa\": %.6g, "
                         "\"knockdown_used\": %.4g, \"knockdown_source\": \"%s\", "
                         "\"max_over_allowable\": %.4g, \"max_over_allowable_distributed\": %.4g, "
                         "\"max_exceeds_allowable\": %s, "
+                        "\"margin_untagged\": %.6g, \"p99_untagged_mpa\": %.6g, \"members_tagged\": %zu, "
+                        "\"tagged_p99_mpa\": %.6g, \"tagged_ratio_p99\": %.6g, "
                         "\"segments\": %zu, \"seconds\": %.3g, \"refusal\": \"%s\"}",
                         cert_ok ? "certified" : "refused", pc.margin, pc.stress_p99_mpa,
                         pc.stress_max_mpa, pc.allowable_used_mpa, pc.knockdown_used,
                         pc.knockdown_source.c_str(), pc.max_over_allowable,
                         pc.max_over_allowable_distributed,
-                        pc.max_exceeds_allowable ? "true" : "false", psegs.size(),
+                        pc.max_exceeds_allowable ? "true" : "false",
+                        pc.margin_untagged, pc.stress_p99_untagged_mpa, pc.members_tagged,
+                        pc.tagged_p99_mpa, pc.tagged_ratio_p99, psegs.size(),
                         wall_seconds() - t1, json_safe(pc.refusal.substr(0, 160)).c_str());
           pred = pb;
           std::fprintf(stderr,
-                       "[probe]   stress: %s margin %.3g p99 %.3g  kd %.3g  max/allowable %.3g point "
-                       "%.3g distributed (%zu segs, %.1fs)\n",
+                       "[probe]   stress: %s margin %.3g p99 %.3g  (untagged: margin %.3g p99 %.3g; %zu tagged members, "
+                       "tagged p99 %.3g)  kd %.3g  max/allowable %.3g point %.3g distributed (%zu segs, %.1fs)\n",
                        cert_ok ? "certified" : "REFUSED", pc.margin, pc.stress_p99_mpa,
+                       pc.margin_untagged, pc.stress_p99_untagged_mpa, pc.members_tagged, pc.tagged_p99_mpa,
                        pc.knockdown_used, pc.max_over_allowable, pc.max_over_allowable_distributed,
                        psegs.size(), wall_seconds() - t1);
         } else if (!psegs.empty()) {
@@ -6489,7 +6552,8 @@ LatticeVariantOutcome lattice_one_variant(
     std::printf(
         "organic structural certification: %s  margin %.4g  p99 %.4g MPa  max %.4g "
         "MPa  (%zu case(s), %zu members, %.1f s)  knockdown %.3f (%s, cos^2 %.2f)  "
-        "max/allowable %.3f point, %.3f distributed (max %.4g MPa distributed)%s\n",
+        "max/allowable %.3f point, %.3f distributed (max %.4g MPa distributed)%s  "
+        "rss %.0f -> %.0f MB, peak %.0f MB\n",
         R.organic_cert.verdict == OrganicCertificate::Verdict::Certified ? "CERTIFIED"
         : R.organic_cert.verdict == OrganicCertificate::Verdict::Refused ? "REFUSED"
                                                                         : "not run",
@@ -6499,7 +6563,8 @@ LatticeVariantOutcome lattice_one_variant(
         R.organic_cert.knockdown_source.c_str(), R.organic_cert.governing_cos2,
         R.organic_cert.max_over_allowable, R.organic_cert.max_over_allowable_distributed,
         R.organic_cert.stress_max_distributed_mpa,
-        R.organic_cert.max_exceeds_allowable ? "  MAX EXCEEDS ALLOWABLE" : "");
+        R.organic_cert.max_exceeds_allowable ? "  MAX EXCEEDS ALLOWABLE" : "",
+        R.organic_cert.rss_before_mb, R.organic_cert.rss_after_mb, R.organic_cert.peak_rss_mb);
     if (!R.organic_cert.refusal.empty())
       std::printf("  %s\n", R.organic_cert.refusal.c_str());
   }
@@ -9211,6 +9276,10 @@ LatticeVariantJobResult lattice_variant_job(const JobDescription& job,
           gi.organic_structural_load_cases =
               static_cast<long long>(R.organic_cert.load_cases_run);
           gi.organic_structural_seconds = R.organic_cert.seconds;
+          gi.organic_structural_members = static_cast<long long>(R.organic_cert.members);
+          gi.organic_structural_rss_before_mb = R.organic_cert.rss_before_mb;
+          gi.organic_structural_rss_after_mb = R.organic_cert.rss_after_mb;
+          gi.organic_structural_peak_rss_mb = R.organic_cert.peak_rss_mb;
           gi.organic_structural_refusal = R.organic_cert.refusal;
           gi.organic_structural_members_carrying = R.organic_cert.members_carrying;
           gi.organic_structural_zero_stress_fraction =

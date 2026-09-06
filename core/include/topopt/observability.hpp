@@ -1066,6 +1066,10 @@ struct RunInfo {
   bool organic_recommend_auto_found = false;
   double organic_recommend_auto_lo_mm = 0.0, organic_recommend_auto_hi_mm = 0.0;
   double organic_structural_seconds = 0.0;
+  long long organic_structural_members = 0;          // members in the certified network
+  double organic_structural_rss_before_mb = -1.0;    // resident before the certificate
+  double organic_structural_rss_after_mb = -1.0;     // resident after
+  double organic_structural_peak_rss_mb = -1.0;      // process high-water mark after (getrusage)
   long long organic_structural_worst_strut = -1;
   long long organic_structural_load_cases = 0;
   long long organic_structural_members_carrying = -1;
