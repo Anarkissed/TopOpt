@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <memory>
@@ -89,6 +90,9 @@ struct ManualClearanceGeometry {
   Vec3 normal{0.0, 0.0, 0.0};
   double half_u_mm = 0.0;
   double half_w_mm = 0.0;
+  // ★ OUTLINE (the app's `outline_uv`): closed loops in the face's in-plane (u, w)
+  // basis, origin at `origin`. Empty = the rectangle. See ClearanceGeometry.
+  std::vector<std::vector<std::array<double, 2>>> outline_uv;
 };
 
 // ── Suggested default distances (design 095 STEP 1/2). ────────────────────
@@ -300,25 +304,14 @@ struct ClearanceGeometry {
   double w_lo = 0.0;
   double w_hi = 0.0;
   double depth = 0.0;
-
-  // ★★ THE FACE'S REAL OUTLINE, in the SAME (u, w) millimetres the rectangle
-  // above is measured in, relative to `origin`. Empty => the rectangle alone,
-  // byte-identical to every run before this field existed.
-  //
-  // ★ WHY IT EXISTS. The app derives a face region's in-plane extent from the
-  // face's bounding box, and on any face that is not a rectangle that box is
-  // much larger than the face: measured on the maintainer's own part, the box
-  // was 2.4x and 3.4x the face (41.2% and 29.8% of the emitted region actually
-  // WAS the face). Everything outside it is solid material the run would have
-  // latticed. The app's preview already clips to the outline; without this the
-  // JOB could not, and the picture and the run described different volumes.
-  //
-  // Stored flat as [u0,w0, u1,w1, …] per loop, with `outline_loop_start` giving
-  // each loop's first vertex index — one allocation, and a face with a HOLE is
-  // expressible (an even crossing count puts the hole outside, which is what
-  // `region_contains` relies on).
-  std::vector<double> outline_uw;
-  std::vector<std::size_t> outline_loop_start;
+  // ★ OUTLINE loops (2026-09-05). A face-prism is a POCKET whose outline follows the
+  // face -- the app has written `outline_uv` for months and core rejected the key,
+  // so no current app job could run through the CLI at all. When non-empty the
+  // slab is clipped to the even-odd interior of these loops in (u, w). `outline_frame`
+  // maps the app's pair to core's basis: bit0 swap, bit1 negate first, bit2 negate
+  // second -- measured, not assumed (TOPOPT_OUTLINE_UV_FRAME during calibration).
+  std::vector<std::vector<std::array<double, 2>>> outline_uv;
+  int outline_frame = 0;
 };
 
 // Resolve the predicate from B-rep face `face_id` of `model` (the AUTO path): the

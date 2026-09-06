@@ -27,7 +27,11 @@
 #include "topopt/organic_lattice.hpp"
 
 #include <cmath>
+#include <functional>
+#include <map>
+#include <set>
 #include <cstdio>
+#include <cstdlib>
 #include <string>
 #include <vector>
 
@@ -86,39 +90,211 @@ double seg_len(const OrganicSpan& s) {
   const Vec3 d{s.b.x - s.a.x, s.b.y - s.a.y, s.b.z - s.a.z};
   return std::sqrt(d.x * d.x + d.y * d.y + d.z * d.z);
 }
-
-// ── B1: a BUNDLE supports nothing ──────────────────────────────────────────────
-// Six struts fanning up from a common base plane and all ENDING at the same point
-// in the air. Every tip lies inside its siblings' solids, so the containment test
-// this file used to apply called all six supported. They are cantilevers and the
-// support test must cut them.
-void test_bundle_is_not_support() {
-  const double r = 0.21;
-  OrganicLattice lat;
-  const Vec3 apex{0.0, 0.0, 6.0};
-  for (int k = 0; k < 6; ++k) {
-    const double a = k * (2.0 * 3.14159265358979323846 / 6.0);
-    const Vec3 base{2.0 * std::cos(a), 2.0 * std::sin(a), 0.0};
-    add_curve(lat, {base, apex}, r);
+// Fraction of total span length lying in components (welded by node contact within
+// r+r, the solver's rule) that have at least one endpoint on the plate -- the
+// lowest z in the set, within one radius. "Rooted" in a fixture without part solid.
+double rooted_length_fraction(const std::vector<OrganicSpan>& spans) {
+  const std::size_t n = spans.size();
+  if (n == 0) return 0.0;
+  std::vector<int> par(2 * n);
+  for (std::size_t i = 0; i < 2 * n; ++i) par[i] = static_cast<int>(i);
+  std::function<int(int)> find = [&](int a) {
+    while (par[static_cast<std::size_t>(a)] != a) {
+      par[static_cast<std::size_t>(a)] = par[static_cast<std::size_t>(par[static_cast<std::size_t>(a)])];
+      a = par[static_cast<std::size_t>(a)];
+    }
+    return a;
+  };
+  auto unite = [&](int a, int b) { par[static_cast<std::size_t>(find(a))] = find(b); };
+  double zmin = spans[0].a.z;
+  for (const OrganicSpan& s : spans) zmin = std::min(zmin, std::min(s.a.z, s.b.z));
+  auto pt = [&](std::size_t k) { return (k & 1) ? spans[k >> 1].b : spans[k >> 1].a; };
+  for (std::size_t i = 0; i < n; ++i) unite(static_cast<int>(2 * i), static_cast<int>(2 * i + 1));
+  for (std::size_t i = 0; i < 2 * n; ++i)
+    for (std::size_t j = i + 1; j < 2 * n; ++j) {
+      const Vec3 p = pt(i), q = pt(j);
+      const double reach = spans[i >> 1].r + spans[j >> 1].r;
+      const Vec3 d{p.x - q.x, p.y - q.y, p.z - q.z};
+      if (d.x * d.x + d.y * d.y + d.z * d.z <= reach * reach)
+        unite(static_cast<int>(i), static_cast<int>(j));
+    }
+  std::map<int, double> len;
+  std::set<int> rooted;
+  double total = 0.0;
+  for (std::size_t i = 0; i < n; ++i) {
+    const int root = find(static_cast<int>(2 * i));
+    const double L = seg_len(spans[i]);
+    len[root] += L; total += L;
+    if (std::min(spans[i].a.z, spans[i].b.z) - zmin <= spans[i].r) rooted.insert(root);
   }
-  OrganicGenStats st;
-  const std::vector<OrganicSpan> spans = run(lat, st);
-  CHECK(st.free_ends == 0, "B1: a bundle must leave no free end behind");
-  double zmax = 0.0;
-  for (const OrganicSpan& s2 : spans) zmax = std::max(zmax, std::max(s2.a.z, s2.b.z));
-  CHECK(spans.empty(),
-        "B1: six struts meeting only each other at one tip hold nothing up and must "
-        "all be cut");
-  CHECK(zmax <= 0.5,
-        "B1: nothing may be left standing in the air once the bundle is cut");
-  CHECK(st.pruned_spans > 0, "B1: the prune must report what it cut");
+  double ok = 0.0;
+  for (int r : rooted) ok += len[r];
+  return total > 0.0 ? ok / total : 0.0;
 }
 
-// ── B2: what IS held must survive ──────────────────────────────────────────────
-// (a) a polyline continuing through its own interior vertices, and
-// (b) a strut landing on the BODY of a long member (a T on a beam).
-// Both are supported and neither may be pruned. This is the bar that stops the
-// support test from being "delete everything with a tip".
+// ── B1: a BUNDLE supports nothing -- but a TEPEE stands ───────────────────────
+// Six struts fanning up from a common base and all ENDING at the same point in the
+// air. Every tip lies inside its siblings' solids, so the containment test this file
+// used to apply called all six supported. The first version of this test then asked
+// for all six to be CUT -- and that was wrong physics: their bases are on the plate,
+// so each strut is held at one end and the six together are a tepee, which prints.
+// What the bundle cannot do is hold anything ELSE up, and a bundle whose bases are in
+// the air is held nowhere. Two cases, both measured (2026-09-05, after the prune
+// became "doomed only when NEITHER end is held").
+// ── S1: a dead wall gets a coherent synthetic field; a live one is untouched ────
+// ── P1: the probe's rooting measure ─────────────────────────────────────────────
+void test_probe_rooting() {
+  OrganicLattice lat;
+  lat.grid_origin = Vec3{0, 0, 0}; lat.grid_h = 1.0; lat.grid_nx = 20; lat.grid_ny = 4; lat.grid_nz = 12;
+  lat.part_solid.assign(static_cast<std::size_t>(20 * 4 * 12), 0);
+  for (int k = 0; k < 12; ++k) for (int j = 0; j < 4; ++j) for (int i = 0; i < 2; ++i)
+    lat.part_solid[(static_cast<std::size_t>(k) * 4 + j) * 20 + i] = 1;
+  add_curve(lat, {Vec3{2.2, 2.0, 1.0}, Vec3{6.0, 2.0, 1.0}}, 0.3);     // A touches the slab
+  add_curve(lat, {Vec3{10.0, 2.0, 1.0}, Vec3{14.0, 2.0, 1.0}}, 0.3);   // B floats
+  add_curve(lat, {Vec3{14.1, 2.0, 1.0}, Vec3{18.0, 2.0, 1.0}}, 0.3);   // C touches B
+  std::vector<int> rid(static_cast<std::size_t>(20 * 4 * 12), 1);
+  const OrganicProbeResult pr = probe_organic_rooting(lat, rid);
+  CHECK(pr.curves == 3, "P1: three curves measured");
+  CHECK(pr.components == 2, "P1: A alone, B+C welded by contact = two components");
+  CHECK(std::fabs(pr.rooted_mm - 3.8) < 1e-6, "P1: only A's 3.8 mm is rooted (touches the slab)");
+  CHECK(std::fabs(pr.traced_mm - (3.8 + 4.0 + 3.9)) < 1e-6, "P1: traced length is the sum");
+  CHECK(pr.regions.size() == 1 && pr.regions[0].region_id == 1 && pr.regions[0].curves == 3,
+        "P1: one region, id 1, holding all three curves");
+}
+
+void test_synthetic_focal_stress() {
+  VoxelGrid grid;
+  grid.nx = 20; grid.ny = 4; grid.nz = 12; grid.spacing = 1.0;
+  grid.origin = Vec3{0, 0, 0};
+  grid.tags.assign(static_cast<std::size_t>(20 * 4 * 12), VoxelTag::Interior);  // voxel_count() is tags.size()
+  const std::size_t n = grid.voxel_count();
+  std::vector<char> cand(n, 1);
+  std::vector<int> rid(n, 0);
+  std::vector<double> stress(6 * n, 0.0);
+  // region 1: x < 10 DEAD (zero tensor); region 2: x >= 10 LIVE (uniaxial 1.0 in z)
+  for (std::size_t e = 0; e < n; ++e) {
+    const int i = static_cast<int>(e % 20);
+    rid[e] = i < 10 ? 1 : 2;
+    if (i >= 10) stress[6 * e + 2] = 1.0;
+  }
+  std::vector<SyntheticStressRegion> cfg;
+  { SyntheticStressRegion c; c.region_id = 1; c.face_id = 7; c.foci = 4; cfg.push_back(c); }
+  const std::vector<double> before = stress;
+  const SyntheticStressReport rep =
+      synthesize_focal_stress(grid, cand, rid, cfg, 0.02, stress);
+  CHECK(rep.regions == 1, "S1: one configured region found");
+  CHECK(rep.per_region.size() == 1 && rep.per_region[0].face_id == 7 &&
+            rep.per_region[0].foci == 4 && rep.per_region[0].voxels == n / 2 &&
+            rep.per_region[0].fully_synthetic == n / 2 && rep.per_region[0].soft_mm > 0.0,
+        "S1: the per-region entry carries the face id, foci, counts and the resolved softening");
+  CHECK(rep.voxels_in_regions == n / 2, "S1: the region holds half the voxels");
+  CHECK(rep.voxels_fully_synthetic == n / 2,
+        "S1: every dead voxel is fully synthetic (real weight < 0.05)");
+  // the live region is byte-identical
+  bool live_same = true;
+  for (std::size_t e = 0; e < n; ++e)
+    if (rid[e] == 2)
+      for (int c = 0; c < 6; ++c)
+        if (stress[6 * e + c] != before[6 * e + c]) live_same = false;
+  CHECK(live_same, "S1: a live region is untouched");
+  // every dead voxel now has a non-degenerate principal frame, at LOW magnitude.
+  // (von Mises > 0 is exactly "not hydrostatic", i.e. the eigenvalues are not all
+  // equal and a principal direction exists -- the tracer's eigen routine is its own
+  // internal, so the test reads the invariant rather than the routine.)
+  std::size_t framed = 0, low = 0;
+  for (std::size_t e = 0; e < n; ++e) {
+    if (rid[e] != 1) continue;
+    double m[6]; for (int c = 0; c < 6; ++c) m[c] = stress[6 * e + c];
+    const double sxx = m[0], syy = m[1], szz = m[2];
+    const double vm = std::sqrt(std::max(0.0, 0.5 * ((sxx - syy) * (sxx - syy) +
+        (syy - szz) * (syy - szz) + (szz - sxx) * (szz - sxx)) +
+        3.0 * (m[3] * m[3] + m[4] * m[4] + m[5] * m[5])));
+    if (vm > 0.0) ++framed;
+    if (vm > 0.0 && vm <= 0.02 * 1.0 + 1e-9) ++low;
+  }
+  CHECK(framed == n / 2, "S1: every dead voxel has a principal direction after synthesis");
+  CHECK(low == n / 2, "S1: the synthetic magnitude is the dead threshold, not the peak");
+  // foci count is honoured: 1 focus gives a pure radial field -- the major direction
+  // at a voxel points along the ray from the focus, so two voxels on opposite sides of
+  // the region centre have major directions that differ; with the same seed the
+  // report says one region either way
+  std::vector<SyntheticStressRegion> cfg1;
+  { SyntheticStressRegion c; c.region_id = 1; c.foci = 1; cfg1.push_back(c); }
+  std::vector<double> s1(6 * n, 0.0);
+  const SyntheticStressReport r1 = synthesize_focal_stress(grid, cand, rid, cfg1, 0.02, s1);
+  CHECK(r1.regions == 1 && r1.voxels_fully_synthetic == n / 2,
+        "S1: a single focus is accepted and fills the dead region");
+  // nothing dead anywhere: no voxel changes
+  std::vector<double> live(6 * n, 0.0);
+  for (std::size_t e = 0; e < n; ++e) live[6 * e + 2] = 1.0;
+  const std::vector<double> live_before = live;
+  const SyntheticStressReport r2 = synthesize_focal_stress(grid, cand, rid, cfg, 0.02, live);
+  CHECK(r2.voxels_fully_synthetic == 0 && r2.voxels_blended == 0 && live == live_before,
+        "S1: a region that carries load is not touched at all");
+}
+void test_bundle_is_not_support() {
+  const double r = 0.21;
+  const double kPi = 3.14159265358979323846;
+  {
+    // (a) rooted tepee: six legs on the plate meeting at an apex. Stands.
+    OrganicLattice lat;
+    const Vec3 apex{0.0, 0.0, 6.0};
+    for (int k = 0; k < 6; ++k) {
+      const double a = k * (2.0 * kPi / 6.0);
+      const Vec3 base{2.0 * std::cos(a), 2.0 * std::sin(a), 0.0};
+      add_curve(lat, {base, apex}, r);
+    }
+    OrganicGenStats st;
+    const std::vector<OrganicSpan> spans = run(lat, st);
+    double zmax = 0.0, total = 0.0;
+    for (const OrganicSpan& s2 : spans) {
+      zmax = std::max(zmax, std::max(s2.a.z, s2.b.z));
+      total += seg_len(s2);
+    }
+    CHECK(!spans.empty(), "B1a: a tepee of six legs rooted on the plate must survive");
+    CHECK(zmax > 5.5, "B1a: the tepee must still reach its apex -- nothing unravelled");
+    CHECK(total > 0.9 * 6.0 * std::sqrt(2.0 * 2.0 + 6.0 * 6.0),
+          "B1a: essentially all six legs must be there (rooted material is not pruned)");
+  }
+  {
+    // (b) floating bundle: the same six struts lifted 3 mm off the plate, beside one
+    // rooted post that defines the plate. The bundle's bases are in the air and its
+    // apex is held only by its siblings folding back -- no end is held, so it is cut,
+    // and the post is not.
+    OrganicLattice lat;
+    add_curve(lat, {Vec3{10.0, 10.0, 0.0}, Vec3{10.0, 10.0, 6.0}}, r);
+    const Vec3 apex{0.0, 0.0, 9.0};
+    for (int k = 0; k < 6; ++k) {
+      const double a = k * (2.0 * kPi / 6.0);
+      const Vec3 base{2.0 * std::cos(a), 2.0 * std::sin(a), 3.0};
+      add_curve(lat, {base, apex}, r);
+    }
+    OrganicGenStats st;
+    const std::vector<OrganicSpan> spans = run(lat, st);
+    if (std::getenv("B1_DEBUG")) {
+      std::fprintf(stderr, "[B1b] pruned %zu stranded %zu cut %zu legs %zu out %zu\n",
+                   st.pruned_spans, st.stranded_spans_dropped, st.support_spans_cut,
+                   st.repair_legs_added, spans.size());
+      for (const OrganicSpan& s2 : spans)
+        std::fprintf(stderr, "[B1b]   (%.2f,%.2f,%.2f)-(%.2f,%.2f,%.2f) r %.2f\n",
+                     s2.a.x, s2.a.y, s2.a.z, s2.b.x, s2.b.y, s2.b.z, s2.r);
+    }
+    double zmax_bundle = 0.0;
+    for (const OrganicSpan& s2 : spans)
+      if (std::fabs(s2.a.x - 10.0) > 1.0 || std::fabs(s2.a.y - 10.0) > 1.0)
+        zmax_bundle = std::max(zmax_bundle, std::max(s2.a.z, s2.b.z));
+    CHECK(zmax_bundle <= 0.5,
+          "B1b: six struts in the air meeting only each other at one tip hold nothing "
+          "up and are held by nothing -- all six must be cut");
+    CHECK(st.pruned_spans + st.stranded_spans_dropped + st.support_spans_cut > 0,
+          "B1b: the pass that removed the floating bundle must report it");
+    bool post = false;
+    for (const OrganicSpan& s2 : spans)
+      if (std::fabs(s2.a.x - 10.0) <= 1.0 && std::fabs(s2.a.y - 10.0) <= 1.0 &&
+          std::max(s2.a.z, s2.b.z) > 5.5) post = true;
+    CHECK(post, "B1b: the rooted post beside the bundle must survive untouched");
+  }
+}
 void test_chain_and_tee_survive() {
   const double r = 0.21;
   OrganicLattice lat;
@@ -605,14 +781,14 @@ void test_growth_stays_connected() {
     for (double& sp : f.spacing) sp = sep;
     const OrganicLattice lat = grow_organic_lattice(f.grid, f.cand, f.stress, f.spacing,
                                                    nullptr, f.params, &grow_out);
-    run(lat, emit_out);                      // the EMITTER decides what ships
+    return run(lat, emit_out);               // the EMITTER decides what ships
   };
 
   // ── the sweep. Reported for every point, asserted where the bar applies. ────────
   bool any_survived = false;
   for (double sep : {4.0, 4.5, 5.0, 5.5, 6.0, 6.5, 7.0, 8.0}) {
     OrganicGenStats gs, es;
-    measure(sep, gs, es);
+    const std::vector<OrganicSpan> spans = measure(sep, gs, es);
     const double grown = es.census_grown_len_mm;
     const double wrote = es.census_len_mm[OrganicGenStats::CensusWritten];
     const double survival = grown > 0.0 ? wrote / grown : 0.0;
@@ -626,12 +802,17 @@ void test_growth_stays_connected() {
       any_survived = true;
       // ★ CONNECTIVITY IS ONLY ASSERTED WHERE THERE IS MATERIAL TO CONNECT. Asserting
       // it on 0.4 % of the lattice is what let separation 5.0 pass at 15 mm.
-      CHECK(es.emitted_components == 1,
-            "G8: where the material survives, the emitted geometry must be ONE "
-            "component");
-      CHECK(es.emitted_largest_length_fraction > 0.99,
-            "G8: where the material survives, essentially all of it must be in the "
-            "largest component");
+      // ★ ROOTED, NOT ONE. This bar used to demand a single component, which was a
+      // proxy for "nothing adrift" that also forbade what a grown lattice IS: pillars
+      // that stand on the plate and never join each other. Since 2026-09-05 the
+      // stranded drop keeps a rooted component, so the honest bar is the proxy's
+      // meaning: every millimetre that ships stands on the plate (this fixture has no
+      // part solid, so the plate is the part).
+      CHECK(rooted_length_fraction(spans) > 0.99,
+            "G8: where the material survives, essentially all of it must be in "
+            "components rooted on the plate -- nothing adrift");
+      CHECK(es.emitted_largest_length_fraction > 0.0,
+            "G8: the largest-component fraction must still be reported");
     }
   }
   CHECK(any_survived,
@@ -817,6 +998,51 @@ void test_growth_copy_path_drops_nothing() {
 // MEASURED on this fixture at separation 4.0: emitted 4331 mm / 26 components ->
 // node merge 4298 mm / 9 components. It removed 0.8% of the length and two thirds of
 // the pieces.
+// ── ★ A STAGE THAT RAN MUST NOT REPORT NULL ─────────────────────────────────────
+// -1 in the census is documented to mean THE PASS DID NOT RUN, and differencing
+// without checking is how an unrun pass reads as having deleted everything. Three
+// stages were declared in the enum with NO site ever calling census_at for them --
+// CensusGroundTie, CensusBranchSupport, CensusFillMat -- so they read -1 forever and
+// the receipt rendered null beside their own nonzero counters. Measured on the
+// maintainer's device: four stages doing it at once (ground_tie legs 8/22,
+// branch_support seeds 537/286, fill_mat struts 415/24, finish fillets 72/2).
+//
+// This fails if any stage is left unrecorded again: every declared stage must have a
+// call site, so a pass that runs can always say so.
+void test_every_census_stage_is_recorded() {
+  GrowFixture f = grow_fixture();
+  for (double& v : f.spacing) v = 4.0;
+  OrganicGenStats gs;
+  const OrganicLattice lat =
+      grow_organic_lattice(f.grid, f.cand, f.stress, f.spacing, nullptr, f.params, &gs);
+  OrganicGenStats st;
+  const std::vector<OrganicSpan> spans = run(lat, st);
+  CHECK(!spans.empty(), "census precondition: the fixture must emit geometry");
+  if (spans.empty()) return;
+
+  // Every stage that this run actually executed must carry BOTH numbers. A stage the
+  // run genuinely skipped may stay -1; a stage that recorded a length must also have
+  // recorded components, and vice versa -- a half-populated stage is the same defect
+  // wearing a different face.
+  int recorded = 0;
+  for (int i = 0; i < OrganicGenStats::kCensusStages; ++i) {
+    const bool has_len = st.census_len_mm[i] >= 0.0;
+    const bool has_comp = st.census_components[i] >= 0;
+    if (has_len || has_comp) ++recorded;
+    CHECK(has_len == has_comp,
+          "a census stage records LENGTH and COMPONENTS together, never one alone");
+    if (has_len != has_comp)
+      std::fprintf(stderr, "  stage %s: len %.1f components %d\n",
+                   organic_census_stage_name(i), st.census_len_mm[i],
+                   st.census_components[i]);
+  }
+  std::printf("  census: %d of %d stages recorded on this fixture\n", recorded,
+              static_cast<int>(OrganicGenStats::kCensusStages));
+  CHECK(recorded >= 4,
+        "a real run records several stages -- if only one or two appear, the census "
+        "is not being written and 'null' has stopped meaning 'did not run'");
+}
+
 void test_census_counts_components_not_only_length() {
   GrowFixture f = grow_fixture();
   for (double& v : f.spacing) v = 4.0;
@@ -859,6 +1085,116 @@ void test_census_counts_components_not_only_length() {
   }
 }
 
+
+// ── R1-R3: THE CELL-SIZE RECOMMENDATION, pure parts ─────────────────────────────
+void test_recommend_band_from_the_model() {
+  using namespace topopt;
+  // A 3 m tall, 1 m wide part with 100 mm walls, bead 0.4 (print floor 0.61 mm),
+  // 128^3 -> 23.4 mm voxels, 1 voxels per cell at the resolution floor.
+  std::vector<OrganicRecommendRegion> big{{1, 100.0, 1000.0, 1.0, 4.0}};
+  const OrganicRecommendBand b = organic_recommend_band(big, 0.61, 23.4, 1, 2.0, 8.0, 5);
+  std::printf("  R1 big part @128^3: band %.1f-%.1f (print %.2f, res %.1f, member %.1f, extent %.1f) look %.1f g %.2f, %zu cands\n",
+              b.lo_mm, b.hi_mm, b.printability_floor_mm, b.resolution_floor_mm, b.member_ceiling_mm,
+              b.extent_ceiling_mm, b.look_cell_mm, b.grade_ratio, b.candidates.size());
+  CHECK(std::fabs(b.member_ceiling_mm - 50) < 1e-9,
+        "R1: a 100 mm wall at two cells across gives a 50 mm ceiling -- the grade on a big part is tens of mm");
+  CHECK(std::fabs(b.resolution_floor_mm - 23.4) < 0.05,
+        "R1: the RESOLUTION floor binds on a big part: 1 voxels x 23.4 mm, not the 0.61 mm bead floor");
+  CHECK(!b.collapsed && std::fabs(b.hi_mm - 50.0) < 1e-9,
+        "R1: at 128^3 the band is 23.4-50 mm on this part");
+  CHECK(std::fabs(b.look_cell_mm - 50.0) < 1e-9,
+        "R1: 8 cells across a 1000 mm face wants 125 mm; clamped to the 50 mm ceiling");
+  CHECK(std::fabs(b.grade_ratio - 2.0) < 1e-9, "R1: stress spread p99/p50 = 4 -> grade ratio sqrt(4) = 2");
+  bool has_look = false, has_pair = false, has_step = false; std::size_t pair = 0;
+  std::string tags;
+  for (const auto& c : b.candidates) {
+    tags += c.source + " ";
+    if (c.source == "pair") ++pair;
+    has_look |= c.source == "look"; has_pair |= c.source == "look_pair"; has_step |= c.source == "look_step";
+  }
+  std::printf("  R1 tags: %s\n", tags.c_str());
+  CHECK(pair == 4 && has_look && has_pair && has_step && b.candidates.size() >= 9,
+        "R1: 5 uniform steps, 3 two-apart pairs + the full band, and look / look_pair / look_step");
+  // The same part at 512^3 (5.9 mm voxels): the resolution floor drops, the ceiling stays the wall's.
+  const OrganicRecommendBand b2 = organic_recommend_band(big, 0.61, 5.86, 1, 2.0, 8.0, 5);
+  CHECK(!b2.collapsed && std::fabs(b2.lo_mm - 5.86) < 0.05 && std::fabs(b2.hi_mm - 50.0) < 1e-9,
+        "R1: 512^3 opens the band to 5.9-50 mm; the wall, not the grid, sets the ceiling");
+  // The STAND's 12 mm wall at 1.707 mm voxels: band 1.71-6.0 -- the 4.5-5.5 window that certifies sits inside it.
+  std::vector<OrganicRecommendRegion> stand{{2, 12.0, 97.0, 1.0, 3.0}};
+  const OrganicRecommendBand b4 = organic_recommend_band(stand, 0.61, 1.707, 1, 2.0, 8.0, 5);
+  std::printf("  R1 STAND wall: band %.2f-%.2f look %.2f\n", b4.lo_mm, b4.hi_mm, b4.look_cell_mm);
+  CHECK(!b4.collapsed && b4.lo_mm <= 4.5 && b4.hi_mm >= 5.5,
+        "R1: the STAND's certified 4.5-5.5 window lies inside its band -- the band must not exclude what runs");
+  // A thin wall: 3 mm depth -> 1.5 mm ceiling, 0.26 mm voxels: band 0.61-1.5.
+  std::vector<OrganicRecommendRegion> thin{{3, 3.0, 40.0, 1.0, 1.1}};
+  const OrganicRecommendBand b3 = organic_recommend_band(thin, 0.61, 0.26, 1, 2.0, 8.0, 5);
+  CHECK(!b3.collapsed && std::fabs(b3.hi_mm - 1.5) < 1e-9 && std::fabs(b3.lo_mm - std::max(0.61, 1 * 0.26)) < 1e-9,
+        "R1: a 3 mm wall gets a ~0.6-1.5 mm band -- smaller part, smaller cell, by the wall not the height");
+  CHECK(b3.grade_ratio < kOrganicRecommendGradeMin,
+        "R1: a flat stress field (p99/p50 = 1.1) earns NO grade");
+  bool thin_pair = false; for (const auto& c : b3.candidates) thin_pair = thin_pair || c.source == "look_pair";
+  CHECK(!thin_pair, "R1: ...so no look_pair candidate is generated");
+  std::vector<OrganicRecommendRegion> none{{4, 1.0, 40.0, 1.0, 1.0}};
+  CHECK(organic_recommend_band(none, 0.61, 0.26, 1, 2.0, 8.0, 5).collapsed,
+        "R1: a 1 mm wall (0.5 mm ceiling under the 0.61 floor) collapses the band: the honest answer is solid");
+}
+
+void test_recommend_select_structural() {
+  using namespace topopt;
+  std::vector<OrganicRecommendRow> rows;
+  auto row = [&](double lo, double hi, const char* src, bool rooted, bool cert, double margin, double traced) {
+    OrganicRecommendRow r; r.lo = lo; r.hi = hi; r.source = src; r.rooted_ok = rooted; r.certified = cert;
+    r.margin = margin; r.traced_mm = traced; rows.push_back(r); };
+  row(3.0, 3.0, "grid", true, true, 4.0, 9000);
+  row(4.5, 4.5, "grid", true, true, 2.1, 6000);
+  row(6.0, 6.0, "grid", true, true, 1.2, 4000);     // certifies but under the 1.5 target
+  row(8.0, 8.0, "grid", false, false, 0.0, 2500);   // not rooted
+  row(3.0, 6.0, "pair", true, true, 1.8, 5200);     // graded: certifies AND saves material vs the fit
+  row(4.5, 8.0, "pair", true, false, 0.7, 3500);    // refused
+  const OrganicRecommendation r = organic_recommend_select(rows, "structural", 1.5, 0.0);
+  std::printf("  R2 structural: fit %.1f (m %.2f) auto %.1f-%.1f (%s, m %.2f, traced %.0f) rejected %zu\n",
+              r.fit_mm, r.fit_margin, r.auto_lo_mm, r.auto_hi_mm, r.auto_source.c_str(), r.auto_margin,
+              r.auto_traced_mm, r.rejected.size());
+  CHECK(r.fit_found && r.fit_mm == 4.5, "R2: FIT = the largest uniform cell certifying at >= target");
+  CHECK(r.auto_found && r.auto_lo_mm == 3.0 && r.auto_hi_mm == 6.0,
+        "R2: AUTO = the certifying candidate with the least material: the 3-6 grade beats the 4.5 fit");
+  CHECK(r.rejected.size() == 3, "R2: three rejected, each with a reason");
+  bool has_margin_reason = false, has_root = false, has_cert = false;
+  for (const auto& pr : r.rejected) {
+    has_margin_reason |= pr.second.find("below target") != std::string::npos;
+    has_root |= pr.second == "not rooted";
+    has_cert |= pr.second == "refused by the certificate";
+  }
+  CHECK(has_margin_reason && has_root && has_cert, "R2: the reasons name the gate that failed");
+  // If no grade saves material, AUTO collapses to the fit as a uniform window.
+  rows.clear();
+  row(4.5, 4.5, "grid", true, true, 2.1, 6000);
+  row(3.0, 6.0, "pair", true, true, 1.8, 7000);
+  const OrganicRecommendation r2 = organic_recommend_select(rows, "structural", 1.5, 0.0);
+  CHECK(r2.auto_lo_mm == 4.5 && r2.auto_hi_mm == 4.5, "R2: a grade that saves nothing is not chosen");
+}
+
+void test_recommend_select_aesthetic() {
+  using namespace topopt;
+  std::vector<OrganicRecommendRow> rows;
+  auto row = [&](double lo, double hi, const char* src, bool rooted) {
+    OrganicRecommendRow r; r.lo = lo; r.hi = hi; r.source = src; r.rooted_ok = rooted; rows.push_back(r); };
+  row(3.0, 3.0, "grid", true); row(5.0, 5.0, "grid", true); row(7.0, 7.0, "grid", false);
+  row(6.0, 6.0, "look", true); row(4.2, 8.5, "look_pair", true); row(5.2, 5.2, "look_step", true);
+  const OrganicRecommendation r = organic_recommend_select(rows, "aesthetic", 1.5, 6.0);
+  CHECK(r.fit_found && r.fit_mm == 6.0 && r.fit_source == "look",
+        "R3: aesthetic FIT = the look cell when it roots -- a look-driven target, not the largest cell");
+  CHECK(r.auto_found && r.auto_lo_mm == 4.2 && r.auto_hi_mm == 8.5,
+        "R3: aesthetic AUTO = the look pair, spread by the stress range");
+  rows.clear();
+  row(3.0, 3.0, "grid", true); row(6.0, 6.0, "look", false); row(4.2, 8.5, "look_pair", false);
+  row(5.2, 5.2, "look_step", true);
+  const OrganicRecommendation r2 = organic_recommend_select(rows, "aesthetic", 1.5, 6.0);
+  CHECK(r2.fit_mm == 5.2 && r2.auto_lo_mm == 5.2 && r2.auto_hi_mm == 5.2,
+        "R3: when the look cell does not root, one step below; and AUTO falls back to that uniform");
+  CHECK(r2.rejected.size() == 2, "R3: the unrooted look and pair are rejected with a reason");
+}
+
 int main() {
   test_growth_produces_curves();
   test_growth_does_not_fall_back();
@@ -872,12 +1208,18 @@ int main() {
   test_mat_survives_the_weld_raster();
   test_slenderness_reads_the_unsupported_span();
   test_stats_are_actually_populated();
+  test_probe_rooting();
+  test_recommend_band_from_the_model();
+  test_recommend_select_structural();
+  test_recommend_select_aesthetic();
+  test_synthetic_focal_stress();
   test_bundle_is_not_support();
   test_chain_and_tee_survive();
   test_node_merge_joins_near_misses();
   test_finish_does_not_change_the_structure();
   test_deterministic();
   test_one_cell_needs_a_finish();
+  test_every_census_stage_is_recorded();
   test_census_counts_components_not_only_length();
   std::printf("%s: %d checks, %d failures\n",
               g_failures == 0 ? "PASS" : "FAIL", g_checks, g_failures);

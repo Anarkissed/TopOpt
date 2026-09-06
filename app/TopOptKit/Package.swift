@@ -135,6 +135,14 @@ var packageTargets: [Target] = [
                 "-lTKTopAlgo", "-lTKGeomAlgo", "-lTKPrim", "-lTKBRep",
                 "-lTKGeomBase", "-lTKG3d", "-lTKG2d", "-lTKMath", "-lTKernel",
             ], .when(platforms: [.macOS])),
+            // ★ ACCELERATE: the core's beam network factorises with Apple's sparse
+            // solver (beam_network.cpp, since 8da3b62e). A static archive cannot
+            // carry `-framework Accelerate`; whoever links libtopopt must name it.
+            // It went unnoticed while nothing in the app pulled beam_network.o out
+            // of the archive; the organic certificate in run_job.cpp now does, and
+            // CI app-macos failed to link TopOptKitPackageTests on
+            // `_SparseFactor` and friends.
+            .linkedFramework("Accelerate"),
         ] + macOSLib3mfLinkerFlags
     ),
     .testTarget(
@@ -159,7 +167,7 @@ var packageTargets: [Target] = [
         // `swift test` could not link at all with lib3mf present, and 8 3MF tests
         // failed with "not available in this build" when it was absent. Gated on
         // the same disk presence, so an OCCT/3MF-free checkout is unchanged.
-        linkerSettings: macOSLib3mfLinkerFlags
+        linkerSettings: [.linkedFramework("Accelerate")] + macOSLib3mfLinkerFlags
     ),
     // M7.2 design system: SwiftUI-only, no C++ interop (so it needs none of
     // the bridge's Cxx build settings and stays cross-platform).
@@ -200,7 +208,7 @@ var packageTargets: [Target] = [
         // `swift test` could not link at all with lib3mf present, and 8 3MF tests
         // failed with "not available in this build" when it was absent. Gated on
         // the same disk presence, so an OCCT/3MF-free checkout is unchanged.
-        linkerSettings: macOSLib3mfLinkerFlags
+        linkerSettings: [.linkedFramework("Accelerate")] + macOSLib3mfLinkerFlags
     ),
     // Carrier for the iOS OCCT/lib3mf frameworks. The app's xcodeproj links the
     // `TopOptOCCT` product; the shim keeps that product valid on an OCCT-free

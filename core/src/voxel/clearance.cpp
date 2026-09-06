@@ -1,3 +1,4 @@
+#include <cstdlib>
 #include "topopt/clearance.hpp"
 
 #include <cmath>
@@ -21,6 +22,16 @@ double norm(const Vec3& a) { return std::sqrt(dot(a, a)); }
 // The in-plane orthonormal basis (u, w) spanning the plane whose UNIT normal is
 // `normal`, chosen deterministically so the auto and manual paths agree exactly.
 // Returns false only for a degenerate normal (the picked reference is parallel).
+// ★ the app's outline_uv frame relative to plane_basis: MEASURED 2026-09-05 on the
+// M2 verticalStand job, forecast_only under all eight frames (swap / negate first /
+// negate second), reading include-region void voxels -- the polygon that sits inside
+// the wall has the fewest:
+//     frame 0 [u,w] 11.9 % void | 1 [w,u] 114 % | 2 [-u,w] 226 % | 3 [-w,u] 133 %
+//     4 [u,-w] 64 % | 5 [w,-u] 129 % | 6 [-u,-w] 426 % | 7 [-w,-u] 101 %
+// The app writes core's own (u, w), unswapped, unsigned. TOPOPT_OUTLINE_UV_FRAME
+// overrides for re-measurement only.
+static constexpr int kOutlineUvFrame = 0;
+
 bool plane_basis(const Vec3& normal, Vec3& u, Vec3& w) {
   const Vec3 ref = std::fabs(normal.x) < 0.9 ? Vec3{1.0, 0.0, 0.0}
                                              : Vec3{0.0, 1.0, 0.0};
@@ -127,32 +138,21 @@ bool region_contains(const ClearanceGeometry& geom, const Vec3& p, double tol) {
   if (!(du >= geom.u_lo - tol && du <= geom.u_hi + tol &&
         dw >= geom.w_lo - tol && dw <= geom.w_hi + tol))
     return false;
-  // ★★ AND THE FACE'S REAL OUTLINE, when one was supplied. The rectangle above
-  // is the outline's BOUNDING BOX, so it is a necessary condition and a cheap
-  // reject; this is the sufficient one. See `ClearanceGeometry::outline_uw`.
-  //
-  // ★ `tol` IS NOT APPLIED TO THE POLYGON, for the same reason a mask ignores it
-  // (see the note at the top of this function): a polygon has no closed-form
-  // offset, so inflating it would mean a 2-D dilation per query. The consequence
-  // is the same and is one-directional — a positive tol asks for a region at
-  // least this big and gets exactly the outline, never MORE than it covers. The
-  // lattice-role membership calls all pass tol == 0.
-  if (geom.outline_uw.empty()) return true;
-  bool inside = false;
-  const std::size_t nloops = geom.outline_loop_start.size();
-  for (std::size_t L = 0; L < nloops; ++L) {
-    const std::size_t begin = geom.outline_loop_start[L];
-    const std::size_t end =
-        (L + 1 < nloops) ? geom.outline_loop_start[L + 1] : geom.outline_uw.size() / 2;
-    if (end <= begin + 2) continue;  // fewer than 3 vertices is not a loop
-    // Crossing count, the same rule the app's `LatticeFaceOutline.contains` uses.
-    for (std::size_t i = begin, j = end - 1; i < end; j = i++) {
-      const double xi = geom.outline_uw[2 * i], yi = geom.outline_uw[2 * i + 1];
-      const double xj = geom.outline_uw[2 * j], yj = geom.outline_uw[2 * j + 1];
-      if ((yi > dw) != (yj > dw)) {
-        const double dy = yj - yi;
-        if (std::fabs(dy) > 1e-12 && du < xi + (dw - yi) / dy * (xj - xi))
-          inside = !inside;
+  if (geom.outline_uv.empty()) return true;
+  // the app's pair (a, b) in core's (u, w): frame bits swap / negate
+  double a = du, b = dw;
+  if (geom.outline_frame & 1) std::swap(a, b);
+  if (geom.outline_frame & 2) a = -a;
+  if (geom.outline_frame & 4) b = -b;
+  bool inside = false;   // even-odd over every loop
+  for (const auto& loop : geom.outline_uv) {
+    const std::size_t n = loop.size();
+    if (n < 3) continue;
+    for (std::size_t i = 0, j = n - 1; i < n; j = i++) {
+      const double xi = loop[i][0], yi = loop[i][1], xj = loop[j][0], yj = loop[j][1];
+      if ((yi > b) != (yj > b)) {
+        const double x = xj + (b - yj) * (xi - xj) / (yi - yj);
+        if (a < x) inside = !inside;
       }
     }
   }
@@ -248,6 +248,9 @@ ClearanceGeometry resolve_clearance_manual(const ManualClearanceGeometry& geom,
     g.u_hi = geom.half_u_mm;
     g.w_lo = -geom.half_w_mm;
     g.w_hi = geom.half_w_mm;
+    g.outline_uv = geom.outline_uv;
+    if (const char* f = std::getenv("TOPOPT_OUTLINE_UV_FRAME")) g.outline_frame = std::atoi(f);
+    else g.outline_frame = kOutlineUvFrame;
     if (g.u_hi > g.u_lo && g.w_hi > g.w_lo) g.valid = true;
   }
   return g;

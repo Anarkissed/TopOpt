@@ -1214,9 +1214,11 @@ JobDescription parse_job(const std::string& json_text) {
     reject_unknown_keys(lat,
                         {"topology", "cell_mm", "strut_radius_mm", "emit_stl",
                          "emit_3mf", "skin", "min_extrudable_width_mm",
-                         "outer_finish", "emit_welded_stl", "welded_pitch_mm",
-                         "emit_organic_spans", "regions", "multiscale",
-                         "forecast_only",
+                         "outer_finish", "emit_welded_stl", "welded_pitch_mm", "emit_organic_spans",
+                         "regions", "multiscale",
+                         "forecast_only", "organic_probe_cells_mm", "organic_probe_grades_mm",
+                         "organic_recommend", "organic_look_cells_across",
+                         "organic_recommend_margin", "organic_recommend_steps",
                          "require_lattice_void_reaches_exterior",
                          "require_no_midair_start"},
                         "lattice");
@@ -1262,9 +1264,28 @@ JobDescription parse_job(const std::string& json_text) {
       for (const JsonValue& rv : regs->arr) {
         require_object(rv, "a lattice region");
         reject_unknown_keys(rv, {"role", "kind", "geometry", "face_id",
-                                 "region_id", "relative_density"},
+                                 "region_id", "relative_density",
+                                 "synthetic_stress", "synthetic_foci",
+                                 "synthetic_soft_mm"},
                             "a lattice region");
         JobLatticeRegion reg;
+        if (const JsonValue* sv = find_key(rv, "synthetic_stress")) {
+          if (sv->type != JsonValue::Type::Bool)
+            schema_fail("lattice region \"synthetic_stress\" must be a boolean");
+          reg.synthetic_stress = (sv->num != 0.0);
+        }
+        if (const JsonValue* fv = find_key(rv, "synthetic_foci")) {
+          if (fv->type != JsonValue::Type::Number || fv->num != std::floor(fv->num) ||
+              fv->num < 1.0 || fv->num > 5.0)
+            schema_fail("lattice region \"synthetic_foci\" must be an integer 1..5");
+          reg.synthetic_foci = static_cast<int>(fv->num);
+        }
+        if (const JsonValue* sm = find_key(rv, "synthetic_soft_mm")) {
+          if (sm->type != JsonValue::Type::Number || !(sm->num >= 0.0) ||
+              !std::isfinite(sm->num))
+            schema_fail("lattice region \"synthetic_soft_mm\" must be a finite number >= 0");
+          reg.synthetic_soft_mm = sm->num;
+        }
         // Optional provenance: the B-rep face this region was spawned from, so
         // the depth tie below can be CHECKED (task 2026-08-12 §0a).
         if (const JsonValue* fv = find_key(rv, "face_id")) {
@@ -1365,9 +1386,25 @@ JobDescription parse_job(const std::string& json_text) {
                         "zero-depth region marks nothing)");
         } else {  // face
           reject_unknown_keys(
-              gv, {"origin", "normal", "half_u_mm", "half_w_mm", "depth_mm",
-                   "outline_uv"},
+              gv, {"origin", "normal", "half_u_mm", "half_w_mm", "depth_mm", "outline_uv"},
               "a face lattice region geometry");
+          if (const JsonValue* ov = find_key(gv, "outline_uv")) {
+            if (ov->type != JsonValue::Type::Array)
+              schema_fail("a face lattice region \"outline_uv\" must be an array of loops");
+            for (const JsonValue& loop : ov->arr) {
+              if (loop.type != JsonValue::Type::Array || loop.arr.size() < 3)
+                schema_fail("a face lattice region \"outline_uv\" loop must hold at least 3 [u, w] points");
+              std::vector<std::array<double, 2>> pts;
+              for (const JsonValue& pt : loop.arr) {
+                if (pt.type != JsonValue::Type::Array || pt.arr.size() != 2 ||
+                    pt.arr[0].type != JsonValue::Type::Number || pt.arr[1].type != JsonValue::Type::Number ||
+                    !std::isfinite(pt.arr[0].num) || !std::isfinite(pt.arr[1].num))
+                  schema_fail("a face lattice region \"outline_uv\" point must be [u, w] finite numbers");
+                pts.push_back({pt.arr[0].num, pt.arr[1].num});
+              }
+              reg.outline_uv.push_back(std::move(pts));
+            }
+          }
           reg.origin = parse_vec3(
               require_key(gv, "origin", "a face lattice region geometry"),
               "lattice region origin");
@@ -1387,32 +1424,6 @@ JobDescription parse_job(const std::string& json_text) {
               !(reg.depth_mm > 0.0))
             schema_fail("a face lattice region half_u_mm/half_w_mm/depth_mm "
                         "must be > 0 (a zero-extent region marks nothing)");
-          // ★★ THE OUTLINE, OPTIONAL. [[u,w],…] per loop; the half-extents stay
-          // REQUIRED because they are the outline's bounding box and the cheap
-          // reject in `region_contains`. A face that is genuinely rectangular
-          // simply omits this and behaves exactly as before.
-          if (const JsonValue* ov = find_key(gv, "outline_uv")) {
-            if (ov->type != JsonValue::Type::Array)
-              schema_fail("a face lattice region \"outline_uv\" must be an array "
-                          "of loops");
-            for (const JsonValue& loop : ov->arr) {
-              if (loop.type != JsonValue::Type::Array)
-                schema_fail("each \"outline_uv\" entry must be a loop (an array "
-                            "of [u, w] pairs)");
-              if (loop.arr.size() < 3)
-                schema_fail("an \"outline_uv\" loop needs at least 3 points (got " +
-                            std::to_string(loop.arr.size()) + ")");
-              reg.outline_loop_start.push_back(reg.outline_uw.size() / 2);
-              for (const JsonValue& pt : loop.arr) {
-                if (pt.type != JsonValue::Type::Array || pt.arr.size() != 2)
-                  schema_fail("each \"outline_uv\" point must be [u, w]");
-                reg.outline_uw.push_back(
-                    require_number(pt.arr[0], "outline_uv u"));
-                reg.outline_uw.push_back(
-                    require_number(pt.arr[1], "outline_uv w"));
-              }
-            }
-          }
           const Vec3& nn = reg.normal;
           if (nn.x * nn.x + nn.y * nn.y + nn.z * nn.z <= 0.0)
             schema_fail("a face lattice region \"normal\" must be non-zero");
@@ -1469,10 +1480,15 @@ JobDescription parse_job(const std::string& json_text) {
         schema_fail("lattice \"emit_welded_stl\" must be a boolean");
       job.lattice.emit_welded_stl = (w->num != 0.0);
     }
-    if (const JsonValue* sp = find_key(lat, "emit_organic_spans")) {
-      if (sp->type != JsonValue::Type::Bool)
+    // ★ THE EMITTED SPANS, AS A FILE. Post-clip, post-prune, post-finish — exactly
+    // the geometry written into the mesh. Two consumers need it and neither can read
+    // it out of an STL: comparing core's tracer against the gc2 coupon, and
+    // certifying organic structurally through the beam-network solver, which already
+    // speaks this format. The app already emits this key on organic jobs.
+    if (const JsonValue* os = find_key(lat, "emit_organic_spans")) {
+      if (os->type != JsonValue::Type::Bool)
         schema_fail("lattice \"emit_organic_spans\" must be a boolean");
-      job.lattice.emit_organic_spans = (sp->num != 0.0);
+      job.lattice.emit_organic_spans = (os->num != 0.0);
     }
     if (const JsonValue* wp = find_key(lat, "welded_pitch_mm")) {
       job.lattice.welded_pitch_mm =
@@ -1500,6 +1516,49 @@ JobDescription parse_job(const std::string& json_text) {
       if (fo->type != JsonValue::Type::Bool)
         schema_fail("lattice \"forecast_only\" must be a boolean");
       job.lattice.forecast_only = (fo->num != 0.0);
+    }
+    if (const JsonValue* rc = find_key(lat, "organic_recommend")) {
+      if (rc->type != JsonValue::Type::String ||
+          (rc->str != "off" && rc->str != "structural" && rc->str != "aesthetic" && rc->str != "auto"))
+        schema_fail("lattice \"organic_recommend\" must be \"off\", \"structural\", \"aesthetic\" or \"auto\"");
+      job.lattice.organic_recommend = rc->str;
+    }
+    if (const JsonValue* lk = find_key(lat, "organic_look_cells_across")) {
+      if (lk->type != JsonValue::Type::Number || !(lk->num > 0.0) || !std::isfinite(lk->num))
+        schema_fail("lattice \"organic_look_cells_across\" must be a finite number > 0");
+      job.lattice.organic_look_cells_across = lk->num;
+    }
+    if (const JsonValue* rm = find_key(lat, "organic_recommend_margin")) {
+      if (rm->type != JsonValue::Type::Number || !(rm->num >= 1.0) || !std::isfinite(rm->num))
+        schema_fail("lattice \"organic_recommend_margin\" must be a finite number >= 1");
+      job.lattice.organic_recommend_margin = rm->num;
+    }
+    if (const JsonValue* rs = find_key(lat, "organic_recommend_steps")) {
+      if (rs->type != JsonValue::Type::Number || rs->num < 2.0 || rs->num > 8.0 ||
+          rs->num != std::floor(rs->num))
+        schema_fail("lattice \"organic_recommend_steps\" must be an integer in [2, 8]");
+      job.lattice.organic_recommend_steps = static_cast<int>(rs->num);
+    }
+    if (const JsonValue* pc = find_key(lat, "organic_probe_cells_mm")) {
+      if (pc->type != JsonValue::Type::Array)
+        schema_fail("lattice \"organic_probe_cells_mm\" must be an array of numbers");
+      for (const JsonValue& c : pc->arr) {
+        if (c.type != JsonValue::Type::Number || !(c.num > 0.0) || !std::isfinite(c.num))
+          schema_fail("lattice \"organic_probe_cells_mm\": every entry must be a finite number > 0");
+        job.lattice.organic_probe_cells_mm.push_back(c.num);
+      }
+    }
+    if (const JsonValue* pg = find_key(lat, "organic_probe_grades_mm")) {
+      if (pg->type != JsonValue::Type::Array)
+        schema_fail("lattice \"organic_probe_grades_mm\" must be an array of [lo, hi] pairs");
+      for (const JsonValue& g : pg->arr) {
+        if (g.type != JsonValue::Type::Array || g.arr.size() != 2 ||
+            g.arr[0].type != JsonValue::Type::Number || g.arr[1].type != JsonValue::Type::Number ||
+            !(g.arr[0].num > 0.0) || !(g.arr[1].num > g.arr[0].num) ||
+            !std::isfinite(g.arr[1].num))
+          schema_fail("lattice \"organic_probe_grades_mm\": every entry must be [lo, hi] with 0 < lo < hi");
+        job.lattice.organic_probe_grades_mm.push_back({g.arr[0].num, g.arr[1].num});
+      }
     }
     // THE ENCLOSED-VOID RULE (task 2026-08-05-lattice-void-reaches-exterior).
     // Absent => false => every existing job runs, and writes, exactly as it did.
@@ -1535,7 +1594,9 @@ JobDescription parse_job(const std::string& json_text) {
              "algorithm", "organic_strut_width_mm",
              "organic_overhang_angle_deg", "organic_boundary_finish",
              "organic_shape_fit", "organic_shape_fit_only",
-             "organic_scale", "organic_growth"},
+             "organic_scale", "organic_growth", "organic_overhang_fillet",
+             "organic_transfer_ties", "organic_tie_swirl", "organic_solid_rim_mm",
+             "organic_structural_certification"},
         "grading");
     job.grading.present = true;
     if (const JsonValue* t = find_key(gr, "topology")) {
@@ -1637,6 +1698,24 @@ JobDescription parse_job(const std::string& json_text) {
             "grading \"organic_overhang_angle_deg\" must be in [0, 90] "
             "(0 disarms the clamp)");
     }
+    // ★★ THE CAPABILITY SIGNAL FOR ORGANIC UNDER STRUCTURAL INTENT.
+    // A schema key, so the app can probe it with gradingSchemaAccepts() — the
+    // mechanism it already has — rather than needing a version number.
+    //
+    // It is REQUIRED when algorithm=organic and intent=structural, and refused
+    // otherwise, because it names WHICH instrument certified the lattice. The only
+    // accepted value is "beam_network": the emitted spans solved as a welded beam
+    // network tied into the solid, which is the one instrument that does not read a
+    // density against the octet tensor. A structural organic run certified against
+    // that tensor would report a margin for a material this lattice is not.
+    if (const JsonValue* v = find_key(gr, "organic_structural_certification")) {
+      job.grading.organic_structural_certification =
+          require_nonempty_string(*v, "grading.organic_structural_certification");
+      if (job.grading.organic_structural_certification != "beam_network")
+        schema_fail(
+            "grading \"organic_structural_certification\" must be \"beam_network\" "
+            "(got \"" + job.grading.organic_structural_certification + "\")");
+    }
     if (const JsonValue* v = find_key(gr, "organic_boundary_finish")) {
       if (!organic_alg)
         schema_fail(
@@ -1659,6 +1738,26 @@ JobDescription parse_job(const std::string& json_text) {
         schema_fail("grading \"intent\" must be \"structural\" or \"aesthetic\" (got \"" +
                     job.grading.intent + "\")");
     }
+    // ★★ THE KEY AND THE INTENT MUST AGREE, and the schema says so rather than the
+    // run discovering it later. Organic under STRUCTURAL intent must name its
+    // instrument; anything else must not carry the key at all, so a job cannot claim
+    // a certification it never asked to run.
+    {
+      const bool organic_structural =
+          job.grading.algorithm == "organic" && job.grading.intent == "structural";
+      if (organic_structural && job.grading.organic_structural_certification.empty())
+        schema_fail(
+            "grading \"organic_structural_certification\": \"beam_network\" is "
+            "REQUIRED for an organic lattice under structural intent. The certificate "
+            "for organic is the beam network solved over the emitted spans; the "
+            "density-against-octet-tensor path does not describe traced geometry.");
+      if (!organic_structural &&
+          !job.grading.organic_structural_certification.empty())
+        schema_fail(
+            "grading \"organic_structural_certification\" is only meaningful for an "
+            "organic lattice under structural intent (algorithm is \"" +
+            job.grading.algorithm + "\", intent is \"" + job.grading.intent + "\")");
+    }
     // ★★ SHAPE-FIT GRADING REQUIRES THE AESTHETIC INTENT, and is REFUSED under any
     // other, rather than being quietly dropped. Shape fit adds a second, GEOMETRIC
     // driver to the cell size — distance to the boundary alongside the stress
@@ -1673,17 +1772,44 @@ JobDescription parse_job(const std::string& json_text) {
     // Under an aesthetic intent the density is explicitly a look, and more plastic is
     // not a defect.
     //
-    // ★ ORGANIC ALREADY REQUIRES THE AESTHETIC INTENT — see refuse_organic_structural
-    // in run_job.cpp, which throws for a stronger reason than this one: traced struts
-    // follow the principal stress directions, so the lattice is anisotropic by
-    // construction, and the certification library holds one CUBIC tensor per topology.
-    // A structural density would be certified against a material this lattice is not.
-    //
-    // This check is therefore NOT what establishes the coupling, and does not pretend
-    // to be. It is kept for two narrow reasons: it fails at PARSE time naming the
-    // offending key, rather than at run time naming the algorithm; and it makes shape
-    // fit's own requirement stand on its own, so that if organic's rule is ever
-    // relaxed this key does not silently inherit the relaxation.
+    // ★ ORGANIC NO LONGER REQUIRES THE AESTHETIC INTENT. It once did, and the two
+    // organic shape-fit keys below carried their own copies of that requirement so
+    // they would not silently inherit a relaxation. The relaxation has now happened
+    // DELIBERATELY on all three: refuse_organic_structural admits a structural organic
+    // job that names "organic_structural_certification": "beam_network", and both
+    // shape-fit keys are admitted with it. Each key states its own reason below.
+    if (const JsonValue* tv = find_key(gr, "organic_transfer_ties")) {
+      if (tv->type != JsonValue::Type::Bool)
+        schema_fail("grading \"organic_transfer_ties\" must be a boolean");
+      if (!organic_alg)
+        schema_fail(
+            "grading \"organic_transfer_ties\" is only allowed with "
+            "algorithm \"organic\"");
+      job.grading.organic_transfer_ties = (tv->num != 0.0);
+    }
+    if (const JsonValue* rm = find_key(gr, "organic_solid_rim_mm")) {
+      if (rm->type != JsonValue::Type::Number || !(rm->num >= 0.0) || !std::isfinite(rm->num))
+        schema_fail("grading \"organic_solid_rim_mm\" must be a finite number >= 0 (0 = off)");
+      if (!organic_alg)
+        schema_fail("grading \"organic_solid_rim_mm\" is only allowed with algorithm \"organic\"");
+      job.grading.organic_solid_rim_mm = rm->num;
+    }
+    if (const JsonValue* sw = find_key(gr, "organic_tie_swirl")) {
+      if (sw->type != JsonValue::Type::Number || !(sw->num >= 0.0 && sw->num <= 1.0))
+        schema_fail("grading \"organic_tie_swirl\" must be a number in [0, 1]");
+      if (!organic_alg)
+        schema_fail("grading \"organic_tie_swirl\" is only allowed with algorithm \"organic\"");
+      job.grading.organic_tie_swirl = sw->num;
+    }
+    if (const JsonValue* fv = find_key(gr, "organic_overhang_fillet")) {
+      if (fv->type != JsonValue::Type::Bool)
+        schema_fail("grading \"organic_overhang_fillet\" must be a boolean");
+      if (!organic_alg)
+        schema_fail(
+            "grading \"organic_overhang_fillet\" is only allowed with "
+            "algorithm \"organic\"");
+      job.grading.organic_overhang_fillet = (fv->num != 0.0);
+    }
     if (const JsonValue* sv = find_key(gr, "organic_shape_fit")) {
       if (sv->type != JsonValue::Type::Bool)
         schema_fail("grading \"organic_shape_fit\" must be a boolean");
@@ -1692,13 +1818,53 @@ JobDescription parse_job(const std::string& json_text) {
             "grading \"organic_shape_fit\" is only allowed with "
             "algorithm \"organic\"");
       job.grading.organic_shape_fit = (sv->num != 0.0);
-      if (job.grading.organic_shape_fit && job.grading.intent != "aesthetic")
-        schema_fail(
-            "grading \"organic_shape_fit\" requires intent \"aesthetic\" (got \"" +
-            (job.grading.intent.empty() ? std::string("structural (default)")
-                                        : job.grading.intent) +
-            "\"): shape fit changes the density, which under a structural intent is "
-            "what the certificate is computed against");
+      // ★★ THE AESTHETIC-ONLY REQUIREMENT IS LIFTED (maintainer's call). It read:
+      // "shape fit changes the density, which under a structural intent is what the
+      // certificate is computed against". That was true of the DENSITY-KEYED
+      // certificate, which looks strength up as a function of relative density: change
+      // the density after the lookup and the lookup describes other geometry.
+      //
+      // It is not true of certify_organic_structural, which never reads density at
+      // all -- it solves the struts themselves as frame elements, so it certifies
+      // whatever geometry shape fit produced. And on the organic path the density-keyed
+      // certificate ALREADY reports tensor_out_of_regime, so the rule was guarding a
+      // number this path had already marked void.
+      //
+      // ★ SHAPE FIT CAN ONLY REFINE. Both caps (member width / n*, and twice the
+      // distance to the region boundary) are applied ONLY when smaller than the
+      // stress-driven cell -- see the `cap < spacing[e]` test in run_job.cpp. It
+      // shrinks cells and never enlarges one, and the bead is recomputed to match. So
+      // it ADDS material where members are thin or near a boundary, which is the
+      // strongest lattice-strength lever this project has measured (2.87 MPa at 6 mm
+      // cells vs 87.5 MPa at 3 mm: the coarse lattice stops SHARING load).
+    }
+    // ★★ SHAPE FIT IS ON FOR ORGANIC UNLESS THE JOB SAYS OTHERWISE. The maintainer's
+    // ruling: "I always felt like Shape fit was a requirement." It can only REFINE
+    // (both of its caps apply only when smaller than the stress-driven cell), so an
+    // absent key defaulting to OFF meant every organic job that did not spell it out
+    // ran without the one pass that fits the lattice to the shape -- including every
+    // measurement in the 2026-09-04 investigation. Absent now means on; an explicit
+    // false is still honoured, and the receipt reports which.
+    if (organic_alg && !find_key(gr, "organic_shape_fit"))
+      job.grading.organic_shape_fit = true;
+    if (!organic_alg && job.lattice.organic_recommend != "off")
+      schema_fail("lattice \"organic_recommend\" needs grading.algorithm \"organic\"");
+    if (!organic_alg && (!job.lattice.organic_probe_cells_mm.empty() ||
+                         !job.lattice.organic_probe_grades_mm.empty()))
+      schema_fail("lattice \"organic_probe_cells_mm\" / \"organic_probe_grades_mm\" are only "
+                  "allowed with grading algorithm \"organic\"");
+    // ★ SYNTHETIC STRESS IS AESTHETIC-ONLY, AND ORGANIC-ONLY. A structural lattice
+    // must follow the real load; the synthetic tensor exists so a wall that carries
+    // nothing still gets a coherent weave, and nothing certified may read it.
+    for (const JobLatticeRegion& rg : job.lattice.regions) {
+      if (!rg.synthetic_stress) continue;
+      if (!organic_alg)
+        schema_fail("lattice region \"synthetic_stress\" is only allowed with "
+                    "grading algorithm \"organic\"");
+      if (job.grading.intent != "aesthetic")
+        schema_fail("lattice region \"synthetic_stress\" is only allowed under "
+                    "grading intent \"aesthetic\" -- a structural lattice must "
+                    "follow the real load");
     }
     if (const JsonValue* gv = find_key(gr, "organic_growth")) {
       if (gv->type != JsonValue::Type::Bool)
@@ -1739,10 +1905,13 @@ JobDescription parse_job(const std::string& json_text) {
           schema_fail(
               "grading \"organic_shape_fit_only\" requires "
               "\"organic_shape_fit\": true");
-        if (job.grading.intent != "aesthetic")
-          schema_fail(
-              "grading \"organic_shape_fit_only\" requires intent \"aesthetic\": a "
-              "cell size that does not answer to demand makes no structural claim");
+        // ★★ ALSO LIFTED, and this one had a DIFFERENT reason: "a cell size that
+        // does not answer to demand makes no structural claim". That was right while
+        // nothing measured the result -- the claim could only be inferred from the
+        // density, so a cell chosen by shape alone supported no inference. The
+        // beam-network certificate MEASURES the finished struts, so the claim is no
+        // longer inferred from how the cell was chosen. A shape-driven lattice that
+        // is too weak is refused by the certificate, which names the governing strut.
         if (!(job.grading.cell_min_mm > 0.0 &&
               job.grading.cell_max_mm >= job.grading.cell_min_mm))
           schema_fail(

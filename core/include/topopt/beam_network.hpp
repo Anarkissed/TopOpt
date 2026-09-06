@@ -337,7 +337,23 @@ struct CoupledLatticeSolve {
   std::size_t bcs_applied = 0, bcs_dropped = 0;
   std::size_t loads_applied = 0, loads_dropped = 0;
   double load_dropped_fraction = 0.0;
+  // ★★ THE COMPONENTS THAT REACH NO TIE ARE DROPPED, NOT A DEATH FLAG.
+  // beam_network_restraint has always produced member_load_free / member_under-
+  // constrained "so a caller can DROP what cannot carry load rather than only being
+  // told how much of it there is" -- and for a while no caller read them, so a single
+  // floating component ended a run that was otherwise fine. A component that reaches
+  // no tie carries nothing and makes the system singular; that is a DEFECT IN THE
+  // GEOMETRY (material floating in space, unprintable as well as unsolvable), and the
+  // response to a defect is to remove it and say so.
+  //
+  // Dropping a LOT of the lattice is a different matter -- that means the geometry is
+  // mostly disconnected rather than speckled -- so past the refuse fraction this still
+  // refuses instead of quietly deleting the part. Exactly the solid-island rule.
+  std::vector<char> member_dropped;        // 1 = removed before solving
+  std::size_t members_dropped = 0;
+  double dropped_length_fraction = 0.0;
   std::size_t loads_on_shell = 0, loads_on_beam = 0;  // re-homed off the solid
+  std::size_t loads_distributed = 0;  // spread along incident members (distribute_beam_loads)
   // ★ HOW FAR A LOAD ACTUALLY HAD TO REACH to find material, in mm. `load_reach_mm`
   // is a single number and a GRADED lattice has no single cell, so the safe choice
   // is to pass the COARSEST cell -- the nearest material is always taken, so a
@@ -447,6 +463,115 @@ struct ShellPatch {
   double thickness_mm = 0.0;   // overrides mesh.thickness_mm when > 0
 };
 
+// ══════════════════════════════════════════════════════════════════════════════
+// ★★★ ORGANIC STRUCTURAL CERTIFICATION — the instrument that replaces the gate ★★★
+//
+// `refuse_organic_structural` exists because organic has no certificate. The solid
+// path reads a density against the OCTET tensor, and organic traces struts ALONG the
+// principal stress directions, so its geometry is anisotropic by construction and
+// nothing has ever measured a tensor for it. Certifying it against the octet's would
+// report a margin for a material this lattice is not.
+//
+// This certifies the geometry DIRECTLY instead: the emitted spans as a welded beam
+// network, tied into the solid, solved. No homogenised tensor is involved, so the
+// objection the gate encodes does not apply.
+//
+// ★ IT REFUSES RATHER THAN GUESSES. Every condition below returns a refusal with a
+// reason, never a number, because a margin that is wrong is worse than no margin:
+//   * dropped load above the threshold — a part that is not fully pushed is quiet,
+//     and the quiet reads as safe (measured: 32-54% of |F| once vanished silently);
+//   * a hinged solid — corner-touching voxels are a zero-energy null space and no
+//     solver can see past one;
+//   * a solve that did not converge, or a direct factorisation the residual gate
+//     rejected;
+//   * a census stage that is null or absent — a lattice whose own pipeline cannot be
+//     shown to have run is not certifiable.
+//
+// ★ WHAT THE VERDICT READS, AND WHY IT IS NOT THE MAX. Peak strut stress is a MAX
+// over tens of thousands of members, and nodal loads land on strut ENDS, which is
+// exactly where an artificial peak appears. That artifact has not been separated, so
+// the verdict reads p99 and the max is REPORTED BESIDE IT. `verdict_statistic` says
+// which was used, on every certificate, so this can never be silently changed.
+struct OrganicCertificate {
+  enum class Verdict { NotRun, Certified, Refused };
+  Verdict verdict = Verdict::NotRun;
+  std::string refusal;               // non-empty exactly when Refused
+
+  // the verdict's own numbers
+  double margin = 0.0;               // allowable_used / stress_used; > 1 passes
+  double stress_used_mpa = 0.0;      // the statistic the verdict read
+  std::string verdict_statistic;     // "p99" — max is reported, never read
+
+  // the distribution, always, so a single number is never the whole story
+  double stress_p50_mpa = 0.0, stress_p95_mpa = 0.0;
+  double stress_p99_mpa = 0.0, stress_max_mpa = 0.0;
+  int worst_strut = -1;
+  std::string governing_load_case;
+
+  // what it was judged against
+  double allowable_mpa = 0.0;        // material yield
+  // ★ THE KNOCKDOWN IS THE INTERLAYER ONE, PER STRUT, BY ORIENTATION. The solid path
+  // (orient.cpp) penalises tension ACROSS the layer planes by the material's
+  // z_knockdown and leaves in-plane stress alone. A strut's axial stress crosses
+  // the layer plane by cos^2 of its angle to the build direction, so its
+  // allowable is yield * min(1, z_knockdown / cos^2): z_knockdown for a strut along
+  // the build axis, blending to 1.0 as it turns into the plane. The verdict reads
+  // the p99 of stress / allowable_i; `knockdown_used` is the value applied to the
+  // GOVERNING strut (the one at p99), never a lattice-wide scalar.
+  double knockdown_used = 1.0;       // z_knockdown / cos^2 (capped at 1) of the governing strut
+  std::string knockdown_source;      // "z_knockdown by orientation"
+  double z_knockdown_material = 1.0; // the material's, as supplied
+  double governing_cos2 = 0.0;       // (axis . build_dir)^2 of the governing strut
+  double allowable_used_mpa = 0.0;   // allowable * knockdown_used
+  // ★ THE MAX IS REPORTED UNDER BOTH LOAD MODELS. Loads land on the nearest strut
+  // END, and a point load at a strut end is a stress concentration the print does
+  // not see the same way. A second solve spreads every landed load along the
+  // members meeting at that node (uniform line load, consistent end forces and
+  // moments). If the max still exceeds its allowable under THAT model, the member
+  // is real and the verdict reads it.
+  double max_over_allowable = 0.0;             // max_i stress_i / allowable_i, point loads
+  double max_over_allowable_distributed = 0.0; // same, loads distributed along members
+  double stress_max_distributed_mpa = 0.0;
+  int worst_strut_distributed = -1;
+  bool max_exceeds_allowable = false;          // distributed max ratio > 1 -> refused
+
+  // provenance
+  std::size_t load_cases_run = 0;
+  std::size_t members = 0;
+  double worst_load_dropped_fraction = 0.0;
+  // ★ THE MEMBERS THAT CARRY EXACTLY NOTHING, and why they are a REFUSAL and not a
+  // footnote. The percentile distribution below is taken over members that carry
+  // something, because a member at exactly 0.0 contributes no information about
+  // whether the lattice is over its allowable. But that same filter is how a
+  // certificate lies: a network in two pieces, only one of which the load reaches,
+  // has an entire component at exactly 0.0, and reading p99 over the loaded piece
+  // certifies HALF THE PART and reports the number as though it covered all of it.
+  // So the filtered fraction is recorded, reported, and gated.
+  long long members_carrying = 0;
+  std::size_t members_dropped = 0;      // reached no tie; removed before solving
+  double dropped_length_fraction = 0.0;
+  double zero_stress_fraction = 0.0;
+  double seconds = 0.0;
+};
+
+// `cases` is every load case in the job; the verdict is the WORST of them, as the
+// solid certificate does. `census_ok` is the caller's statement that every stage of
+// the emission census reported — false refuses, because a pipeline that cannot be
+// shown to have run cannot be certified. `load_reach_mm` is the lattice cell (see
+// solve_coupled_lattice): the cell is a design parameter and this must not guess it.
+struct OrganicLoadCase {
+  std::string name;
+  std::vector<DirichletBC> bcs;
+  std::vector<NodalLoad> loads;
+};
+
+OrganicCertificate certify_organic_structural(
+    const VoxelGrid& grid, const std::vector<char>& hex_mask,
+    const std::vector<BeamSegment>& spans, const std::vector<OrganicLoadCase>& cases,
+    double youngs_modulus, double poisson, double allowable_mpa, double z_knockdown,
+    Vec3 build_dir, double load_reach_mm, bool census_ok,
+    const std::vector<ShellPatch>* shells = nullptr);
+
 CoupledLatticeSolve solve_coupled_lattice(
     const VoxelGrid& grid, const std::vector<char>& hex_mask,
     const BeamNetwork& net, const std::vector<DirichletBC>& bcs,
@@ -464,7 +589,8 @@ CoupledLatticeSolve solve_coupled_lattice(
     // within it are counted and refused, never silently dropped.
     double load_reach_mm = -1.0,
     const CgProgress* progress = nullptr,
-    const SolveStage* stage = nullptr);
+    const SolveStage* stage = nullptr,
+    bool distribute_beam_loads = false);
 
 }  // namespace topopt
 
