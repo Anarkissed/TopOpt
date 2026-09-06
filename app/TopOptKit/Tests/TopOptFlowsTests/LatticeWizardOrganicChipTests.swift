@@ -61,6 +61,7 @@ final class LatticeWizardOrganicChipTests: XCTestCase {
     /// octet) is repaired the same way on appear — the sheet calls the same method.
     func testASavedSkinProjectIsRepairedToCleanAndFitted() throws {
         var settings = LatticeSettings(); settings.enabled = true; settings.stageMode = .aesthetic
+        settings.simulateStresses = true
         settings.algorithm = "organic"; settings.organicBoundaryFinish = .skin
         settings.organicShapeFit = false; settings.cellSizeMode = .swept
         var model = LatticeWizardModel(settings: settings)
@@ -69,14 +70,17 @@ final class LatticeWizardOrganicChipTests: XCTestCase {
         XCTAssertEqual(out.organicBoundaryFinish, .clean)
         XCTAssertTrue(out.organicShapeFit)
         XCTAssertEqual(out.cellSizeMode, .auto)
-        // ★ 2026-09-04: the simulation switch leaves the organic cell mode alone (core
-        // traces its own solved field either way)
+        // ★ 2026-09-05 (his rule, stated twice, superseding 2026-09-04): without a
+        // simulation Auto is a stress grading that cannot run, so the mode lands on
+        // FIT and "Shape fit only" stays on.
         var off = model; off.setSimulateStresses(false)
-        XCTAssertEqual(off.cellSizeMode, .auto)
+        XCTAssertEqual(off.cellSizeMode, .fit)
+        XCTAssertTrue(off.organicShapeFitOnly)
         var offSaved = settings; offSaved.simulateStresses = false; offSaved.cellSizeMode = .auto
         var m3 = LatticeWizardModel(settings: offSaved)
         m3.selectOrganic()
-        XCTAssertEqual(m3.cellSizeMode, .auto)
+        XCTAssertEqual(m3.cellSizeMode, .fit)
+        XCTAssertTrue(m3.organicShapeFitOnly)
         // Fit is the user's pick and SURVIVES (D2: never remapped)
         var fit = settings; fit.cellSizeMode = .fit
         var m2 = LatticeWizardModel(settings: fit)

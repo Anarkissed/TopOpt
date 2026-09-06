@@ -117,6 +117,15 @@ public struct LatticeSetupWizard: View {
             Text("Turn on Simulate Stresses to grade the lattice by stress. Without it, "
                  + "the lattice fits the shape only.")
         }
+        // ★ THE ORGANIC NOTICES (his items 2 and 6, 2026-09-05), presented from the
+        // page's root like the one above: a Structural size that is not expected to
+        // certify, and the shape-fit switch that cannot turn off without a simulation.
+        .alert(organicNotice?.title ?? "", isPresented: Binding(
+            get: { organicNotice != nil }, set: { if !$0 { organicNotice = nil } })) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(organicNotice?.message ?? "")
+        }
         .onChange(of: model.playToken) { _ in playCurrent() }
         // ★ §7b — …AND ON EVERY STAGE TRANSITION. A stage change swaps one cell
         // for a tiled block (or back), which is a different object at a different
@@ -146,6 +155,20 @@ public struct LatticeSetupWizard: View {
     /// "Grading needs a stress simulation" — shown when shape-fit-only is turned off
     /// with the simulation off (item 3.2).
     @State private var showGradeNeedsSimAlert = false
+    private struct OrganicNotice: Equatable { let title: String; let message: String }
+    @State private var organicNotice: OrganicNotice?
+    /// The last verdict on a typed organic size or grade (checked after entry),
+    /// with the label it was computed for — shown only while that is the value.
+    @State private var organicSizeVerdict: OrganicSizeCheck.Verdict?
+    @State private var organicSizeVerdictLabel: String = ""
+    private var organicCurrentSizeLabel: String {
+        model.simulateStresses
+            ? String(format: "%g–%g mm", organicGradeLo, organicGradeHi)
+            : String(format: "%g mm", model.organicPickedSeparationMM)
+    }
+    private var organicVerdictCurrent: OrganicSizeCheck.Verdict? {
+        organicSizeVerdictLabel == organicCurrentSizeLabel ? organicSizeVerdict : nil
+    }
     /// ★ "Show without repairs" (maintainer, 2026-09-05): the sample shows the traced
     /// curves instead of the file's repaired spans. A preview option, not a setting —
     /// the file always has the repairs, and the banner says which is shown.
@@ -682,6 +705,14 @@ public struct LatticeSetupWizard: View {
         + "chooses its own number of foci (1–5) in its row under Selections; a wall that "
         + "carries load never takes foci. Shown in the preview; the run carries it only on a "
         + "core whose schema accepts it."
+    static let infoSizeCheck = " A typed size is checked once you finish entering it, against the "
+        + "printable cell at this bead, whether one cell fits the thinnest wall, and the probe's "
+        + "verdict when it has that size. Your pick is kept and shown; it reaches the run once "
+        + "core accepts it."
+    static let infoNoSimulation = " Without a simulation the run still traces core's own solved "
+        + "field; the switch only takes Sim off the Density row. Auto grades the cell by the "
+        + "simulated stress, so it is offered only with a simulation; Fit lets core choose one "
+        + "size that fits the shape; Manual is your grade (with a simulation) or your one size."
     static let infoManualSizes = "Sizes certification approved: at each, the lattice ties to the part "
         + "(at least 95 % of its length rooted). Under an Aesthetic stage every size is offered; one marked * was "
         + "not approved: certification predicts it will not tie to the part (more than 5 % of "
@@ -736,16 +767,16 @@ public struct LatticeSetupWizard: View {
         let layerH = project.printParams.layerHeightMM
         let growthRefusal = LatticeSettings.organicGrowthRefusalReason(layerHeightMM: layerH)
         VStack(alignment: .leading, spacing: 5) {
-            sectionTitle("Organic lattice", info: "traced-grown", Self.infoTracedGrown)
+            // ★ NO CAPTIONS LONGER THAN A FEW WORDS (his item 8, 2026-09-05, said
+            // before): every explanation lives behind its (i).
+            sectionTitle("Organic lattice", info: "traced-grown",
+                         Self.infoTracedGrown + (growthRefusal.map { " Grown: " + $0 } ?? "")
+                         + (organicStructuralGateClosed ? " " + TopOptKit.organicStructuralGateMessage : ""))
                 .padding(.top, DS.Space.s)
-                // ★ FORCED ON LOAD TOO — a project saved with organic before this rule
-                // existed must not keep an un-fitted outline.
                 .onAppear {
-                    // ★ ONE rule for the chip and for a saved project: shape fit on,
-                    // finish CLEAN, an inherited swept/fit window reset (said aloud).
                     if model.selectOrganic() { organicWindowReset = true }
+                    model.enforceOrganicSimOffRules()
                 }
-            // ★ TRACED vs GROWN — two ARCHITECTURES, not a parameter (§1B).
             HStack(spacing: DS.Space.xs) {
                 organicPill("Traced", on: !model.organicGrowth, enabled: true) {
                     model.organicGrowth = false; rebuild()
@@ -755,21 +786,10 @@ public struct LatticeSetupWizard: View {
                     model.organicGrowth = true; rebuild()
                 }
             }
-            if let why = growthRefusal {
-                // ★ SAY WHY IT IS DISABLED (§2A) — a greyed control with no sentence is
-                // the failure the refusal reason exists to avoid.
-                Text(why).dsStyle(DS.TypeScale.caption2)
-                    .foregroundStyle(DS.Color.warning.color)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            // ★ PRINT FINE-TUNING, FOLDED AWAY, GROWN ONLY (maintainer, 2026-09-03,
-            // item 2.2: "the average person should not be fucking around with them").
-            // ★ The overhang limit is TRACE-ONLY in core (grown clamps to a compile-time
-            // 30°), so under grown the spacing scale is the live knob and the overhang
-            // is stated as fixed — no dead slider.
+            if growthRefusal != nil { shortNote("Needs a layer height", warning: true) }
             if model.organicGrowth, TopOptKit.gradingSchemaAccepts(key: "organic_scale") {
                 Button { showPrintTuning.toggle() } label: {
-                    Text(showPrintTuning ? "Hide print fine-tuning" : "Fine-tune for printing…")
+                    Text(showPrintTuning ? "Hide fine-tuning" : "Fine-tune for printing…")
                         .dsStyle(DS.TypeScale.caption2)
                         .foregroundStyle(DS.Color.accent.color)
                 }
@@ -781,80 +801,50 @@ public struct LatticeSetupWizard: View {
                              step: 0.05, range: 0.5...2) {
                         model.organicScale = $0; rebuild()
                     }
-                    Text("Overhang limit: fixed at 30° on the grown path.")
-                        .dsStyle(DS.TypeScale.caption2)
-                        .foregroundStyle(DS.Color.textQuaternary.color)
+                    shortNote("Overhang fixed 30°")
                 }
             }
-            // ★ D1: under Structural the controls stay live but the run will be refused
-            // by core until its organic certification is wired — say so HERE, in
-            // core's words, before he reaches the run button that carries the same.
-            if organicStructuralGateClosed {
-                Text(TopOptKit.organicStructuralGateMessage)
-                    .dsStyle(DS.TypeScale.caption2)
-                    .foregroundStyle(DS.Color.textQuaternary.color)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            // ★ 2026-09-04 (measured): the run traces core's OWN solved field for
-            // organic whether or not the app simulated, so the cell grading here is
-            // core's either way; the switch only governs the density preview.
-            if !model.simulateStresses {
-                Text("No simulation: the run still traces core's own solved field, so the "
-                     + "cell grading is core's; the switch only takes Sim off the Density row.")
-                    .dsStyle(DS.TypeScale.caption2)
-                    .foregroundStyle(DS.Color.textQuaternary.color)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            // ★★★ CELL SIZE: Auto (simulation on only) / Fit / Manual (item 3). For
-            // organic the cell is the SEPARATION field; a graded window is what makes a
-            // graded lattice. Core decides what fits; the receipt is what is displayed.
-            sectionTitle("Cell size", info: "cell-size", Self.infoCellSize)
-            if organicWindowReset {
-                Text("Reset to Auto: the lattice types' cell setting is not an organic mode.")
-                    .dsStyle(DS.TypeScale.caption2)
-                    .foregroundStyle(DS.Color.textQuaternary.color)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            // Core refuses `fit` on a job that declares no region to fit into
-            // (job.cpp: "a job that declares none states no requirement to fit").
+            if organicStructuralGateClosed { shortNote("Aesthetic only for now", warning: true) }
+
+            // ── Cell size (items 1, 3): Auto only WITH a simulation, Fit only WITHOUT ──
+            sectionTitle("Cell size", info: "cell-size", Self.infoCellSize + Self.infoNoSimulation)
             let fitPossible = project.latticeJobRegions().regions.contains(where: { $0.role == .include })
-            // ★ OFFER, NEVER SUBSTITUTE (maintainer ruling, Aug 5; re-stated 2026-09-03):
-            // Fit is DISABLED with its reason when no region is declared — the app never
-            // sends Auto for a Fit the user chose.
             HStack(spacing: DS.Space.xs) {
-                organicPill("Auto", on: model.cellSizeMode == .auto, enabled: true) {
-                    model.organicPickedSeparationMM = 0; model.organicPickedGradeMM = []
-                    model.organicShapeFitOnly = false
-                    model.setCellSizeMode(.auto); rebuild()
-                }
-                organicPill("Fit", on: model.cellSizeMode == .fit && !organicManual, enabled: fitPossible) {
-                    model.organicPickedSeparationMM = 0; model.organicPickedGradeMM = []
-                    model.organicShapeFitOnly = true
-                    model.setCellSizeMode(.fit); rebuild()
+                if model.simulateStresses {
+                    organicPill("Auto", on: model.cellSizeMode == .auto, enabled: true) {
+                        model.organicPickedSeparationMM = 0; model.organicPickedGradeMM = []
+                        organicSizeVerdict = nil
+                        model.setCellSizeMode(.auto); rebuild()
+                    }
+                } else {
+                    organicPill("Fit", on: model.cellSizeMode == .fit && !organicManual, enabled: fitPossible) {
+                        model.organicPickedSeparationMM = 0; model.organicPickedGradeMM = []
+                        organicSizeVerdict = nil
+                        model.setCellSizeMode(.fit); rebuild()
+                    }
                 }
                 organicPill("Manual", on: organicManual, enabled: fitPossible) {
-                    // the first approved choice, so the pill lights with a real pick
-                    if model.simulateStresses, let g = project.lattice.organicApprovedGradesMM.first, g.count == 2 {
-                        model.organicPickedGradeMM = g
-                    } else if let first = organicManualSizes.first {
-                        model.organicPickedSeparationMM = first.size
+                    if model.simulateStresses {
+                        if model.organicPickedGradeMM.count != 2 {
+                            model.organicPickedGradeMM = organicManualGrades.first?.grade
+                                ?? LatticeSettings.organicProbeGradesMM[0]
+                        }
+                        model.organicPickedSeparationMM = 0
+                    } else {
+                        if model.organicPickedSeparationMM <= 0 {
+                            model.organicPickedSeparationMM = organicManualSizes.first?.size ?? 4
+                        }
+                        model.organicPickedGradeMM = []
                     }
                     model.setCellSizeMode(.fit); rebuild()
                 }
             }
-            if !fitPossible {
-                Text("Fit and Manual need a declared lattice region; core refuses a fit with "
-                     + "none to fit into.")
-                    .dsStyle(DS.TypeScale.caption2)
-                    .foregroundStyle(DS.Color.textQuaternary.color)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
+            if !fitPossible { shortNote("Needs a lattice region") }
             if organicManual { organicManualLists(fitPossible: fitPossible) }
-            // ★★★ DENSITY (his item 2): from the print parameters, thickened on request,
-            // or left to the solve. Auto and Sim both leave `organic_strut_width_mm` at
-            // 0 (core derives it from the band and the cell); Thicker states a width.
+
+            // ── Density (item 5: "Manual", not "Thicker") ──
             sectionTitle("Density", info: "density", Self.infoDensity)
-            segmentRow(model.simulateStresses ? ["Auto", "Sim", "Thicker"] : ["Auto", "Thicker"],
+            segmentRow(model.simulateStresses ? ["Auto", "Sim", "Manual"] : ["Auto", "Manual"],
                        selected: organicDensityIndex) { i in
                 if model.simulateStresses {
                     switch i {
@@ -873,31 +863,15 @@ public struct LatticeSetupWizard: View {
                 scrubRow("organicStrut", value: model.organicStrutWidthMM, unit: " mm",
                          step: 0.1, range: 0.2...5) { model.organicStrutWidthMM = $0; rebuild() }
             }
-            // ★★★ FIT TO SHAPE IS THE WHOLE FINISH (his ruling, 2026-09-02, item 3; and
-            // 2026-09-03: no outline, only lattice): `organic_shape_fit` is forced on
-            // when Organic is chosen, the boundary finish is clean, and there is no
-            // picker. ★ Item 3.2: without a simulation the fit is SHAPE-ONLY — the
-            // switch refuses to turn off and the alert says why.
-            // ★ FLARE OVERHANGS FOR PRINTING — a JOB setting (maintainer wire-up,
-            // 2026-09-05: core `organic_overhang_fillet`, absent ⇒ on). Printability is
-            // user input, never a default: the user chooses. Disabled with its reason on
-            // a core whose schema does not carry the key (this build's does not yet).
+
+            // ── Flare overhangs (job switch, probe-gated) ──
             let filletKeyAccepted = TopOptKit.gradingSchemaAccepts(key: "organic_overhang_fillet")
             HStack(spacing: DS.Space.s) {
-                VStack(alignment: .leading, spacing: 1) {
-                    HStack(spacing: DS.Space.xs) {
-                        Text("Flare overhangs for printing").dsStyle(DS.TypeScale.caption)
-                            .foregroundStyle((filletKeyAccepted ? DS.Color.textPrimary : DS.Color.textQuaternary).color)
-                        infoButton("overhang-fillet", Self.infoOverhangFillet)
-                    }
-                    Text(!filletKeyAccepted
-                         ? "This build's core does not carry the overhang-fillet switch; the run flares them."
-                         : model.organicOverhangFillet
-                         ? "Struts over open air are thickened into a 45° fillet so they print."
-                         : "Struts are left exactly as traced/grown; unsupported runs are reported, not repaired.")
-                        .dsStyle(DS.TypeScale.caption2)
-                        .foregroundStyle(DS.Color.textQuaternary.color)
-                        .fixedSize(horizontal: false, vertical: true)
+                HStack(spacing: DS.Space.xs) {
+                    Text("Flare overhangs for printing").dsStyle(DS.TypeScale.caption)
+                        .foregroundStyle((filletKeyAccepted ? DS.Color.textPrimary : DS.Color.textQuaternary).color)
+                    infoButton("overhang-fillet", Self.infoOverhangFillet
+                               + " \"Not available yet\" means this build cannot turn the fillet off; the run flares them.")
                 }
                 Spacer(minLength: DS.Space.s)
                 GlassToggle(isOn: model.organicOverhangFillet) {
@@ -908,9 +882,9 @@ public struct LatticeSetupWizard: View {
                 .accessibilityLabel("Flare overhangs for printing")
                 .accessibilityIdentifier("wizard-organic-overhang-fillet")
             }
-            // ★ SHOW WITHOUT REPAIRS (2026-09-05) — PREVIEW ONLY. Default ON = the file.
-            // Off shows the traced curves (no merges, legs or fillets) so the topology
-            // can be judged; the banner says so. Distinct from the job switch above.
+            if !filletKeyAccepted { shortNote("Not available yet", warning: true) }
+
+            // ── Preview repairs (preview only) ──
             HStack(spacing: DS.Space.s) {
                 HStack(spacing: DS.Space.xs) {
                     Text("Preview: show print repairs").dsStyle(DS.TypeScale.caption)
@@ -922,55 +896,46 @@ public struct LatticeSetupWizard: View {
                     .accessibilityLabel("Show print repairs")
                     .accessibilityIdentifier("wizard-organic-show-repairs")
             }
-            if !organicShowRepairs {
-                Text("Showing the traced curves only. The printed file will have the arches, legs and node merges.")
-                    .dsStyle(DS.TypeScale.caption2)
-                    .foregroundStyle(DS.Color.warning.color)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            sectionTitle("Fit to shape", info: "fit-to-shape", Self.infoFitToShape)
+            if !organicShowRepairs { shortNote("Repairs hidden", warning: true) }
+
+            // ── Fit to shape (item 6): ALWAYS ON without a simulation ──
+            sectionTitle("Fit to shape", info: "fit-to-shape", Self.infoFitToShape
+                         + " Without a simulation there is no stress to grade by, so Shape fit only stays on.")
             if TopOptKit.gradingSchemaAccepts(key: "organic_shape_fit_only") {
+                let locked = !model.simulateStresses
                 HStack(spacing: DS.Space.s) {
                     Text("Shape fit only — no stress grading").dsStyle(DS.TypeScale.caption)
                         .foregroundStyle(DS.Color.textPrimary.color)
                     Spacer(minLength: DS.Space.s)
-                    // ★ the page's own switch (the same control as Simulate Stresses):
-                    // the action always runs, so the refusal can be SAID (item 3.2)
-                    // ★ WHAT THE SWITCH MEANS (2026-09-04): core can only honour "no
-                    // stress grading of the cell" as FIT — one separation, shape fit
-                    // kept (`organic_shape_fit_only` needs a swept window, which D2
-                    // forbids). So ON ⇔ Fit/Manual, OFF ⇔ Auto; with the simulation off
-                    // there is no Auto and the switch refuses, out loud.
-                    GlassToggle(isOn: model.cellSizeMode != .auto) {
-                        if model.cellSizeMode != .auto {
-                            model.organicShapeFitOnly = false; model.setCellSizeMode(.auto); rebuild()
-                        } else {
-                            model.organicShapeFitOnly = true
-                            model.organicPickedSeparationMM = 0; model.organicPickedGradeMM = []
-                            model.setCellSizeMode(.fit); rebuild()
+                    GlassToggle(isOn: locked || model.organicShapeFitOnly) {
+                        if locked {
+                            model.enforceOrganicSimOffRules()
+                            organicNotice = OrganicNotice(
+                                title: "Shape fit only stays on",
+                                message: "With Simulate Stresses off there is no stress field to "
+                                    + "grade by, so the lattice can only fit the shape. Turn "
+                                    + "Simulate Stresses on to grade it.")
+                            return
                         }
+                        // ★ ITS OWN SETTING (his correction, 2026-09-05: "Remove that
+                        // association entirely. They have nothing in common"): the
+                        // switch never touches the cell-size mode.
+                        model.organicShapeFitOnly.toggle(); rebuild()
                     }
+                    .opacity(locked ? 0.6 : 1)
                     .accessibilityLabel("Shape fit only")
                     .accessibilityIdentifier("wizard-organic-shape-fit-only")
                 }
+                if locked { shortNote("Locked while simulation is off") }
             }
-            // ★ UNLOADED WALLS (maintainer, 2026-09-05) — AESTHETIC MODE ONLY. A wall
-            // with no stress on it whatsoever may be given synthetic stresses with 1–5
-            // foci; the default count lives here, each wall's own under Selections.
-            if organicAesthetic {
+
+            // ── Unloaded walls (item 7): Aesthetic AND simulation only ──
+            if organicAesthetic, model.simulateStresses {
                 sectionTitle("Unloaded walls", info: "synthetic", Self.infoSynthetic)
                 let synthKeyAccepted = TopOptKit.organicSyntheticStressWired
                 HStack(spacing: DS.Space.s) {
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text("Synthetic stresses on unloaded walls").dsStyle(DS.TypeScale.caption)
-                            .foregroundStyle(DS.Color.textPrimary.color)
-                        Text(model.organicSyntheticStresses
-                             ? "Walls with no stress get a focal load so their struts sweep instead of wandering."
-                             : "Walls with no stress are traced as they are.")
-                            .dsStyle(DS.TypeScale.caption2)
-                            .foregroundStyle(DS.Color.textQuaternary.color)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
+                    Text("Synthetic stresses on unloaded walls").dsStyle(DS.TypeScale.caption)
+                        .foregroundStyle(DS.Color.textPrimary.color)
                     Spacer(minLength: DS.Space.s)
                     GlassToggle(isOn: model.organicSyntheticStresses) {
                         model.organicSyntheticStresses.toggle(); rebuild()
@@ -979,22 +944,18 @@ public struct LatticeSetupWizard: View {
                     .accessibilityIdentifier("wizard-organic-synthetic")
                 }
                 if model.organicSyntheticStresses {
-                    // ★ The count lives on each wall (his 2026-09-05 correction: "remove
-                    // the foci per wall in the lattice setting page since it's in the
-                    // face details") — nothing to pick here.
-                    Text("Set each unloaded wall's foci (1–5) in its row under Selections.")
-                        .dsStyle(DS.TypeScale.caption2)
-                        .foregroundStyle(DS.Color.textQuaternary.color)
-                        .fixedSize(horizontal: false, vertical: true)
-                    if !synthKeyAccepted {
-                        Text("This build's core does not carry synthetic stresses: the part preview shows them; the run traces the real field.")
-                            .dsStyle(DS.TypeScale.caption2)
-                            .foregroundStyle(DS.Color.warning.color)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
+                    shortNote("Per wall, in Selections")
+                    if !synthKeyAccepted { shortNote("Not available yet", warning: true) }
                 }
             }
         }
+    }
+
+    /// ★ A caption of a few words (his item 8). Anything longer belongs in an (i).
+    private func shortNote(_ text: String, warning: Bool = false) -> some View {
+        Text(text).dsStyle(DS.TypeScale.caption2)
+            .foregroundStyle((warning ? DS.Color.warning : DS.Color.textQuaternary).color)
+            .fixedSize(horizontal: false, vertical: true)
     }
 
     /// One Manual choice: a size, whether it is approved for the stage, whether it
@@ -1055,8 +1016,8 @@ public struct LatticeSetupWizard: View {
     /// `organic_probe.json`. Disabled with its reason when the linked core's schema
     /// lacks the keys or there is no worker / no variant to re-lattice.
     private var organicProbeRefusal: String? {
-        if !TopOptKit.organicProbeWired { return "this build's core has no organic cell-size probe" }
-        if probeDriver == nil { return "needs a worker and a finished optimisation to re-lattice" }
+        if !TopOptKit.organicProbeWired { return "Size checking is not available in this build." }
+        if probeDriver == nil { return "Size checking needs a worker and a finished optimization." }
         return nil
     }
     private var organicCheckSizesButton: some View {
@@ -1100,20 +1061,32 @@ public struct LatticeSetupWizard: View {
     }
 
     @ViewBuilder private func organicManualLists(fitPossible: Bool) -> some View {
-        // ── grades (simulation on) ──
+        let structural = !organicAesthetic
         if model.simulateStresses {
+            // ── item 2: a GRADE, "## mm to ## mm", never single values ──
             HStack(spacing: DS.Space.xs) {
-                Text("Approved grades").dsStyle(DS.TypeScale.caption2)
-                    .foregroundStyle(DS.Color.textTertiary.color)
-                infoButton("manual-grades", Self.infoManualGrades)
-            }
-            let grades = organicManualGrades
-            if grades.isEmpty {
-                Text("Certification has not reported approved grades yet.")
+                Text(organicProbePresent && structural ? "Likely to certify" : "Grade")
                     .dsStyle(DS.TypeScale.caption2)
-                    .foregroundStyle(DS.Color.textQuaternary.color)
-                    .fixedSize(horizontal: false, vertical: true)
-            } else {
+                    .foregroundStyle(DS.Color.textTertiary.color)
+                infoButton("manual-grades", (organicProbePresent
+                    ? (structural ? OrganicForecast.structuralMeaning : OrganicForecast.aestheticMeaning)
+                      + " " + OrganicForecast.notCertified
+                    : Self.infoManualGrades) + Self.infoSizeCheck)
+            }
+            let lo = organicGradeLo, hi = organicGradeHi
+            // ★ centred (his request, 2026-09-05)
+            HStack(spacing: DS.Space.xs) {
+                organicSizeField("organicGradeLo", value: lo) { v in commitOrganicGrade(lo: v, hi: hi) }
+                Text("to").dsStyle(DS.TypeScale.caption2).foregroundStyle(DS.Color.textTertiary.color)
+                organicSizeField("organicGradeHi", value: hi) { v in commitOrganicGrade(lo: lo, hi: v) }
+                organicVerdictStar
+                // ★ "Check sizes" to the RIGHT of the numbers, same line (his
+                // 2026-09-05), and only when it can act.
+                if organicProbeRefusal == nil { organicCheckSizesButton }
+            }
+            .frame(maxWidth: .infinity, alignment: .center)
+            let grades = organicManualGrades
+            if !grades.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: DS.Space.xs) {
                         ForEach(grades, id: \.self) { m in
@@ -1122,8 +1095,7 @@ public struct LatticeSetupWizard: View {
                                             + (m.margin.map { " · \($0)" } ?? ""),
                                         on: model.organicPickedGradeMM == g,
                                         enabled: fitPossible && m.selectable) {
-                                model.organicPickedGradeMM = g; model.organicPickedSeparationMM = 0
-                                model.setCellSizeMode(.fit); rebuild()
+                                commitOrganicGrade(lo: g[0], hi: g[1])
                             }
                             .opacity(m.selectable ? 1 : 0.4)
                             .modifier(OrganicProbeTintModifier(tint: m.tint))
@@ -1132,63 +1104,147 @@ public struct LatticeSetupWizard: View {
                     }
                 }
             }
-        }
-        // ── sizes ──
-        HStack(spacing: DS.Space.xs) {
-            Text(organicProbePresent ? (organicAesthetic ? "Sizes" : "Likely to certify")
-                                     : "Approved sizes").dsStyle(DS.TypeScale.caption2)
-                .foregroundStyle(DS.Color.textTertiary.color)
-            infoButton("manual-sizes", organicProbePresent
-                       ? (organicAesthetic ? OrganicForecast.aestheticMeaning : OrganicForecast.structuralMeaning)
-                         + " " + OrganicForecast.notCertified
-                       : Self.infoManualSizes)
-            Spacer(minLength: DS.Space.xs)
-            organicCheckSizesButton
+        } else {
+            // ── item 4: ONE size, "## mm", checked after the number is complete ──
+            HStack(spacing: DS.Space.xs) {
+                Text(organicProbePresent && structural ? "Likely to certify" : "Size")
+                    .dsStyle(DS.TypeScale.caption2)
+                    .foregroundStyle(DS.Color.textTertiary.color)
+                infoButton("manual-sizes", (organicProbePresent
+                    ? (structural ? OrganicForecast.structuralMeaning : OrganicForecast.aestheticMeaning)
+                      + " " + OrganicForecast.notCertified
+                    : Self.infoManualSizes) + Self.infoSizeCheck)
+            }
+            HStack(spacing: DS.Space.xs) {
+                organicSizeField("organicSize",
+                                 value: model.organicPickedSeparationMM > 0
+                                     ? model.organicPickedSeparationMM
+                                     : (organicManualSizes.first?.size ?? LatticeSettings.organicProbeCellsMM[0])) { v in
+                    commitOrganicSize(v)
+                }
+                organicVerdictStar
+                if organicProbeRefusal == nil { organicCheckSizesButton }
+            }
+            .frame(maxWidth: .infinity, alignment: .center)
+            // ★ ONE field, nothing else (his 2026-09-05: "The numbers appear under
+            // Manual when simulate stress = off"). The field's check consults the
+            // size probe when there is one; no list of sizes is offered.
         }
         if case let .failed(why) = organicProbeState {
-            Text(why).dsStyle(DS.TypeScale.caption2)
-                .foregroundStyle(DS.Color.warning.color)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        let sizes = organicManualSizes
-        if sizes.isEmpty {
-            Text("No approved sizes yet — run certification to find them.")
-                .dsStyle(DS.TypeScale.caption2)
-                .foregroundStyle(DS.Color.textQuaternary.color)
-                .fixedSize(horizontal: false, vertical: true)
-        } else {
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: DS.Space.xs) {
-                    ForEach(sizes, id: \.self) { m in
-                        organicPill(String(format: m.approved ? "%g mm" : "%g mm*", m.size)
-                                        + (m.margin.map { " · \($0)" } ?? ""),
-                                    on: abs(model.organicPickedSeparationMM - m.size) < 1e-6,
-                                    enabled: fitPossible && m.selectable) {
-                            model.organicPickedSeparationMM = m.size; model.organicPickedGradeMM = []
-                            model.setCellSizeMode(.fit); rebuild()
-                        }
-                        .opacity(m.selectable ? 1 : 0.4)
-                        .modifier(OrganicProbeTintModifier(tint: m.tint))
-                        .modifier(OrganicRefusalsModifier(refusals: m.hover.isEmpty ? m.refusals : [m.hover]))
-                    }
-                }
+            HStack(spacing: DS.Space.xs) {
+                shortNote("Check failed", warning: true)
+                infoButton("check-failed", why)
             }
-            if sizes.contains(where: { !$0.approved }) {
-                Text("* not approved by certification — predicted not to tie to the part (over 5 % of its length unrooted).")
-                    .dsStyle(DS.TypeScale.caption2)
-                    .foregroundStyle(DS.Color.textQuaternary.color)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
-        if !TopOptKit.gradingSchemaAccepts(key: "organic_separation_mm") {
-            Text("Your pick is kept and shown; it reaches the run once core accepts it.")
-                .dsStyle(DS.TypeScale.caption2)
-                .foregroundStyle(DS.Color.textQuaternary.color)
-                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
-    /// One pill of an organic segment — the same look as `gradeStyleRow`'s.
+    // MARK: the typed size / grade (items 2 and 4)
+
+    private var organicGradeLo: Double {
+        model.organicPickedGradeMM.count == 2 ? model.organicPickedGradeMM[0] : LatticeSettings.organicProbeGradesMM[0][0]
+    }
+    private var organicGradeHi: Double {
+        model.organicPickedGradeMM.count == 2 ? model.organicPickedGradeMM[1] : LatticeSettings.organicProbeGradesMM[0][1]
+    }
+
+    /// A number pill: tap to type; the value is committed ONCE, when the pad
+    /// closes — never per digit (his item 4).
+    private func organicSizeField(_ id: String, value: Double,
+                                  set: @escaping (Double) -> Void) -> some View {
+        Text(String(format: "%.2f mm", value))
+            .dsStyle(DS.TypeScale.bodyStrong).monospacedDigit()
+            .foregroundStyle(DS.Color.textPrimary.color)
+            .padding(.vertical, 7).padding(.horizontal, DS.Space.m)
+            .background(RoundedRectangle(cornerRadius: DS.Radius.pill)
+                .fill(DS.Color.fillSelected.color))
+            .contentShape(Rectangle())
+            .onTapGesture { numberPadField = id }
+            .numberPad(Binding(get: { numberPadField == id },
+                               set: { if !$0 { numberPadField = nil } }),
+                       config: .init(title: "", unit: "mm", allowsDecimal: true),
+                       seed: value) { v in
+                guard let v else { return }
+                set(v)
+            }
+            .accessibilityIdentifier("wizard-field-\(id)")
+    }
+
+    private var organicWalls: [OrganicSizeCheck.Wall] {
+        project.latticeJobRegions().regions
+            .filter { $0.role == .include }
+            .map { OrganicSizeCheck.Wall(key: $0.selectableKey ?? "", depthMM: $0.depthMM) }
+    }
+
+    private func organicVerdict(lo: Double, hi: Double) -> OrganicSizeCheck.Verdict {
+        let floor = TopOptKit.latticeCellBounds(topology: project.lattice.topologyID,
+                                                minExtrudableWidthMM: project.printParams.strutLineWidthMM)
+            .printabilityFloorMM
+        return OrganicSizeCheck.evaluate(cellMinMM: lo, cellMaxMM: hi, walls: organicWalls,
+                                         printabilityFloorMM: floor,
+                                         probe: project.lattice.organicForecast)
+    }
+
+    /// Checked AFTER the full number: Aesthetic ⇒ a red * with the reasons below;
+    /// Structural ⇒ a pop-up when it is not expected to certify. The pick is kept
+    /// either way — the run's certificate is the verdict.
+    private func commitOrganicGrade(lo: Double, hi: Double) {
+        guard lo > 0, hi > 0 else { return }
+        if hi <= lo {
+            model.organicPickedGradeMM = [lo, hi]; model.organicPickedSeparationMM = 0
+            let v = OrganicSizeCheck.Verdict(
+                allowed: false, likely: false,
+                reasons: ["The upper size must be larger than the lower size."], advice: [])
+            organicSizeVerdict = v
+            organicSizeVerdictLabel = organicCurrentSizeLabel
+            organicNoticeFor(label: String(format: "%g–%g mm", lo, hi), verdict: v)
+            return
+        }
+        model.organicPickedGradeMM = [lo, hi]; model.organicPickedSeparationMM = 0
+        model.setCellSizeMode(.fit)
+        let v = organicVerdict(lo: lo, hi: hi)
+        organicSizeVerdict = v
+        organicSizeVerdictLabel = organicCurrentSizeLabel
+        organicNoticeFor(label: String(format: "%g–%g mm", lo, hi), verdict: v)
+        rebuild()
+    }
+
+    private func commitOrganicSize(_ mm: Double) {
+        guard mm > 0 else { return }
+        model.organicPickedSeparationMM = mm; model.organicPickedGradeMM = []
+        model.setCellSizeMode(.fit)
+        let v = organicVerdict(lo: mm, hi: mm)
+        organicSizeVerdict = v
+        organicSizeVerdictLabel = organicCurrentSizeLabel
+        organicNoticeFor(label: String(format: "%g mm", mm), verdict: v)
+        rebuild()
+    }
+
+    /// The verdict as a POP-UP in both modes (his request, 2026-09-05: "make the red
+    /// notice a pop-up instead"). Aesthetic: what refused it; Structural: that core
+    /// settles it at build time and it is not expected to certify.
+    private func organicNoticeFor(label: String, verdict v: OrganicSizeCheck.Verdict) {
+        if organicAesthetic {
+            guard !v.allowed || !v.reasons.isEmpty else { return }
+            organicNotice = OrganicNotice(
+                title: v.allowed ? "About \(label)" : "\(label) cannot form a lattice",
+                message: v.text + (v.allowed ? "\nYou can keep this size." : ""))
+        } else if v.likely == false || !v.reasons.isEmpty {
+            organicNotice = OrganicNotice(
+                title: "\(label) may not certify",
+                message: OrganicSizeCheck.structuralNotice(label: label, verdict: v))
+        }
+    }
+
+    /// The red * (Aesthetic, item 2) — shown when the typed size is refused or
+    /// carries a reason; Structural says it in the pop-up instead.
+    @ViewBuilder private var organicVerdictStar: some View {
+        if organicAesthetic, let v = organicVerdictCurrent, !v.allowed || !v.reasons.isEmpty {
+            Text("*").font(.system(size: 16, weight: .heavy))
+                .foregroundStyle(Color.red)
+                .accessibilityIdentifier("wizard-organic-size-refused")
+        }
+    }
+
     private func organicPill(_ title: String, on: Bool, enabled: Bool,
                              _ pick: @escaping () -> Void) -> some View {
         Button { if enabled { pick() } } label: {

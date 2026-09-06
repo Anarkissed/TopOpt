@@ -3484,7 +3484,7 @@ public struct WorkspacePlaceholder: View {
         let path = file.path
         return { [self] cells, grades in
             guard let job = relatticeJobJSON(noteSkippedFaces: false) else {
-                throw RelatticeError("there is no re-lattice job to probe yet")
+                throw RelatticeError("There is nothing to check yet. Optimize the part first.")
             }
             let inputs = RelatticeRun.Inputs(
                 config: config, modelPath: path, jobJSON: job,

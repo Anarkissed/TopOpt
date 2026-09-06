@@ -311,6 +311,36 @@ public struct LatticeWizardModel: Equatable, Sendable {
         cellSizeMode = probe.cellSizeMode
         organicShapeFit = probe.organicShapeFit
         organicShapeFitOnly = probe.organicShapeFitOnly
+        enforceOrganicSimOffRules()
+    }
+
+    /// ★ HIS RULE (2026-09-05, stated twice): without a simulation an organic
+    /// lattice can only FIT the shape. Auto is a stress grading, so it is not
+    /// offered; Fit is the one automatic mode; "Shape fit only" stays ON and cannot
+    /// be turned off. Applied wherever the mode or the switch could drift.
+    public mutating func enforceOrganicSimOffRules() {
+        guard cellTransition == .organicGrade else { return }
+        if simulateStresses {
+            // With a simulation Manual is a GRADE: a lone size becomes the lower
+            // bound of one so the field is never empty.
+            if organicPickedGradeMM.count != 2, organicPickedSeparationMM > 0 {
+                organicPickedGradeMM = [organicPickedSeparationMM, organicPickedSeparationMM * 1.5]
+                organicPickedSeparationMM = 0
+            }
+            return
+        }
+        if cellSizeMode == .auto { cellSizeMode = .fit }
+        organicShapeFitOnly = true
+        // Without one Manual is ONE size: a grade's lower bound carries over.
+        if organicPickedSeparationMM <= 0, organicPickedGradeMM.count == 2 {
+            organicPickedSeparationMM = organicPickedGradeMM[0]
+        }
+        organicPickedGradeMM = []
+    }
+    /// The cell modes the organic pane offers: Auto only WITH a simulation, Fit
+    /// only WITHOUT one, Manual always.
+    public var organicCellModes: [LatticeCellSizeMode] {
+        simulateStresses ? [.auto, .fit] : [.fit]
     }
 
     /// ★ WHETHER THE SAVE SHOULD KICK OFF AN FEA. Same question, same answer as
@@ -533,6 +563,12 @@ public struct LatticeWizardModel: Equatable, Sendable {
 
     /// Auto CELL SIZE jumps straight to the sample and shows how it looks (§2 C).
     public mutating func setCellSizeMode(_ m: LatticeCellSizeMode) {
+        if m == .auto, cellTransition == .organicGrade, !simulateStresses {
+            // Auto is a stress grading; without a simulation the only automatic
+            // organic mode is Fit (his rule, 2026-09-05).
+            cellSizeMode = .fit
+            return
+        }
         cellSizeMode = m
         if m == .auto {
             stage = LatticeWizardSetting.cellSize.stage
@@ -554,6 +590,7 @@ public struct LatticeWizardModel: Equatable, Sendable {
         cellTransition = .organicGrade
         organicShapeFit = true
         organicBoundaryFinish = .clean
+        defer { enforceOrganicSimOffRules() }
         guard cellSizeMode != .auto && cellSizeMode != .fit else { return false }
         setCellSizeMode(.auto)
         return true

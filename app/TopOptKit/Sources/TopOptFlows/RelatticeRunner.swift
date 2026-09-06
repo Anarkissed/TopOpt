@@ -333,8 +333,8 @@ public enum RelatticeRun {
                                isCancelled: isCancelled)
         guard let data = result.probeJSON, let probe = OrganicForecast.parse(data) else {
             throw RelatticeError(
-                "the run wrote no organic_probe.json this build understands — this "
-                + "worker's core may predate the organic cell-size probe.")
+                "The worker did not return a size check this app understands. "
+                + "Its core may be older than the size check.")
         }
         return probe
     }
@@ -344,16 +344,16 @@ public enum RelatticeRun {
     public static func probeJob(_ jobJSON: Data, cellsMM: [Double], gradesMM: [[Double]]) throws -> Data {
         guard var obj = (try? JSONSerialization.jsonObject(with: jobJSON)) as? [String: Any],
               var lat = obj["lattice"] as? [String: Any] else {
-            throw RelatticeError("the re-lattice job has no lattice block to probe")
+            throw RelatticeError("There is no lattice to check.")
         }
         guard let grading = obj["grading"] as? [String: Any],
               (grading["algorithm"] as? String) == "organic" else {
-            throw RelatticeError("the organic cell-size probe needs an organic job")
+            throw RelatticeError("Size checking needs an organic lattice.")
         }
         let cells = cellsMM.filter { $0 > 0 }
         let grades = gradesMM.filter { $0.count == 2 && $0[0] > 0 && $0[0] < $0[1] }
         guard !cells.isEmpty || !grades.isEmpty else {
-            throw RelatticeError("no candidate sizes to probe")
+            throw RelatticeError("There are no sizes to check.")
         }
         if !cells.isEmpty { lat["organic_probe_cells_mm"] = cells }
         if !grades.isEmpty { lat["organic_probe_grades_mm"] = grades }

@@ -1005,3 +1005,73 @@ project `102117B9` ("M2 verticalStand", Ready) with `lattice.algorithm` set to
     pinned + probe + wizard + runner suites on the fix: 78/0. On device (dylib
     b2537a33768018a5, `v11_A`): "Check sizes" beside the Approved sizes header, disabled
     with its reason on this core, the fallback list unchanged.
+22. **His eight organic-pane items (2026-09-05, screenshot).** (1) Fit is hidden with
+    a simulation; (3) Auto is hidden without one — `LatticeWizardModel.organicCellModes`,
+    and `enforceOrganicSimOffRules()` (called from `setSimulateStresses`, `selectOrganic`,
+    `setCellSizeMode(.auto)`) lands the mode on FIT with "Shape fit only" ON whenever
+    the simulation is off. This SUPERSEDES the 2026-09-04 "the switch leaves the organic
+    cell mode alone" rule (his words: "This is the second time I've said this"); the
+    chip test is re-pinned to it. (2) Manual with a simulation is a GRADE — "## mm to
+    ## mm", two tap-to-type pills — never single values; (4) Manual without one is a
+    single "## mm" pill. Both are checked by `OrganicSizeCheck` (new) ONLY when the pad
+    closes, never per digit: the printable cell at this bead, one cell fitting the
+    thinnest declared wall, and the probe's verdict when it has that exact candidate;
+    cells across is advice, never a gate (core's brief). Aesthetic ⇒ a red * beside the
+    field and the reasons under it (his sanctioned exception to item 8); Structural ⇒
+    a pop-up (hoisted `organicNotice` alert): "Core settles this when it builds the
+    lattice. <size> is not expected to certify: … You can keep it; the run's
+    certificate is the verdict." (5) Density's "Thicker" is "Manual". (6) Without a
+    simulation the shape-fit switch shows ON, cannot turn off, and a tap explains in a
+    pop-up ("Shape fit only stays on"); caption "Always on: no simulation". (7) The
+    Unloaded-walls section is hidden without a simulation. (8) Every caption is ≤ 4
+    words ("Grown needs layer height", "Aesthetic only for now", "Needs a lattice
+    region", "Not in this core", "Repairs hidden", "Per wall, in Selections",
+    "* not approved", "Check failed" + (i)); every explanation moved into its (i)
+    (`infoNoSimulation`, `infoSizeCheck`, the fillet and shape-fit additions).
+    His correction while this was being built: "shape fit only = on changes cell size
+    to Fit? … Remove that association entirely. They have nothing in common." Done: the
+    switch reads and writes `organicShapeFitOnly` alone; the Auto/Fit/Manual pills and
+    the typed size no longer touch it; the model's Auto→Fit redirect without a
+    simulation moves only the mode. The sim-off LOCK (item 6) still holds the switch on
+    — by the simulation switch, never by the mode. Pinned by
+    `OrganicSizeCheckTests.testShapeFitOnlyAndCellSizeModeAreIndependent`.
+    On device (dylib e7756c0a7b523a88, `v12_A`–`v12_E`): simulation on = Auto | Manual,
+    Density Auto | Sim | Manual, "Grade · 3.00 mm to 5.00 mm"; typing 20 for the upper
+    bound fired the check ONLY on Done — red * and two reasons ("3 mm is under the
+    printable cell at this bead (4.93 mm)", "20 mm is larger than the thinnest wall
+    (11.0 mm)"); simulation off = Fit | Manual, Density Auto | Manual, Unloaded walls
+    gone, "Always on: no simulation", and a tap on the locked switch raised "Shape fit
+    only stays on". Two defects seen and fixed: the Size field read 0.00 mm after the
+    switch (a grade's lower bound now carries over, and a lone size becomes a grade's
+    lower bound the other way), and the grade's reasons stayed under the size field
+    (the verdict is now keyed to the label it was computed for). His two follow-ups the
+    same hour: the number pills are centred in their row, and the reasons are a POP-UP
+    in both modes (Aesthetic: "<size> is not a lattice here" + the reasons; Structural:
+    "<size> may not fit" + core settles it); the red * stays as the marker. Note: the
+    printable-cell floor is the octet cell bound at this bead (4.93 mm) — a proxy until
+    core states an organic one.
+23. **Notice copy reviewed (his 2026-09-05 review: "3–1 mm is not a lattice here …
+    There is no reason for 'here'").** Every user-facing notice in this work rewritten
+    in plain language, no placeless words, no jargon ("core", "probe", "bead"):
+    pop-ups "<size> cannot form a lattice" / "About <size>" / "<size> may not certify";
+    reasons "… is smaller than the smallest cell this nozzle can print (4.93 mm)",
+    "… is larger than the thinnest wall (11.0 mm), so not even one cell fits", "The
+    upper size must be larger than the lower size"; the Structural notice "<size> is
+    not expected to pass certification. … The final check happens when the lattice is
+    built. You can keep this size; the run's certificate decides."; the shape-fit
+    notice; captions "Needs a layer height", "Not available yet", "Locked while
+    simulation is off"; Check-sizes refusals and errors ("Size checking is not
+    available in this build.", "There is nothing to check yet. Optimize the part
+    first.", "The worker did not return a size check this app understands."); the
+    probe's "not the certificate" line. Tests re-pinned, one asserting no " here".
+    On device (dylib 14880acff6ded337, `v14_A`): the pop-up reads "3–1 mm cannot form
+    a lattice · The upper size must be larger than the lower size."; the caption reads
+    "Not available yet". His two notes on "Check sizes" the same hour: a barely visible
+    disabled button "shouldn't be there", and it belongs "to the right of the numbers
+    on the same line" — done: it is rendered only when this build can check sizes
+    (`organicProbeRefusal == nil`), inside the numbers row after the pills and the
+    star; nothing is shown otherwise. On this core the row is the numbers alone.
+    His next note: "The numbers appear under Manual when simulate stress = off" — the
+    starred ladder (2 mm*, 3 mm*, …) was the old fallback list still rendered under the
+    single field. Removed: Manual without a simulation is the one "## mm" field and
+    nothing else; the field's check still consults the size probe when there is one.

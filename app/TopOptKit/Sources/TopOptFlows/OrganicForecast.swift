@@ -199,10 +199,10 @@ public struct OrganicForecast: Equatable, Sendable, Codable {
         "Green: likely to certify. Amber: predicted to tie to the part but not to pass the "
         + "stress bar. Grey: refused. Every size may be chosen under Aesthetic."
     public static let notCertified =
-        "A prediction from the probe inside the run, not the certificate. The run's "
-        + "receipt is what certified means."
+        "This is a prediction made during the run, not the certificate. Only the run's "
+        + "certificate says a size certified."
     public static let checkSizesTitle = "Check sizes"
     public static let checkSizesHelp =
-        "Submits the run with the candidate sizes and reads the probe as soon as core "
-        + "writes it — about a minute for the solve plus 30 s per size — then stops the run."
+        "Starts the run with the candidate sizes, reads the size check as soon as it is "
+        + "written (about a minute for the solve plus 30 seconds per size), then stops the run."
 }
