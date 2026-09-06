@@ -57,6 +57,8 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <string>
+#include <utility>
 #include <vector>
 
 #include "topopt/mesh.hpp"   // Vec3
@@ -284,7 +286,11 @@ inline constexpr double kOrganicBaseMatRadiusRatio = 1.0;
 // back with a solid skin rather than a graded one.
 inline constexpr double kOrganicShapeFitMinCellRatio = 0.5;
 
-inline constexpr int kOrganicFillMaxReachCells = 4;
+// ★ 4 -> 2 (2026-09-05): at 4 the fill laid 20-32 mm straight horizontal bridges
+// across every empty stretch of a grown lattice (306 of them on the STAND), which
+// read as scaffolding, not growth. The maintainer confirmed it ("the fill caps should
+// be ok") and may want it as a job input later; until then it is this constant.
+inline constexpr int kOrganicFillMaxReachCells = 2;
 inline constexpr int kOrganicFillMaxCells = 400000;
 
 // ★★ THE VDI 3405-3-4:2019 DENSITY FLOOR, AND IT IS DERIVED, NOT CHOSEN.
@@ -456,6 +462,27 @@ inline constexpr double kOrganicGrowthRecordRadii = 6.0;
 // the way up. Bounded so a tip cannot ping-pong between two neighbours forever.
 inline constexpr int kOrganicGrowthMaxJoins = 6;
 
+// ★★ THE UPWARD BIAS -- "REACH FOR THE LIGHT". The maintainer's idea, and it answers a
+// real defect rather than adding a flourish. A grown curve that stops INSIDE the
+// material is a free end, and the dangling-end prune does not trim it, it UNRAVELS the
+// whole strand: remove the free span, the one below it becomes free, and so on to the
+// base. Measured on the STAND: 27,326 mm reached the prune and 374 mm survived it. A
+// curve that instead runs out of REGION reaches the part surface and is ANCHORED there
+// by the boundary clip -- so height is not decoration, it is how a curve earns its
+// attachment.
+//
+// A blunt version of this was tried first and REJECTED: a tip out of joins sprinting
+// straight up for the boundary. It attached (written length 374 -> 9483 mm) and
+// destroyed the weave -- 7,086 vertical columns, ~5 mm per span against the traced
+// path's 0.87 mm, a skeleton of long straight members instead of fabric. A plant does
+// not bolt for the ceiling when it stops branching; it drifts upward while still
+// growing sideways.
+//
+// So this is a constant preference blended into EVERY step alongside the field, not a
+// terminal mode. Tips keep following the stress, keep branching, keep weaving, and
+// gain height as they go.
+inline constexpr double kOrganicGrowthUpwardBias = 0.25;
+
 inline constexpr double kOrganicFilletAngleDeg = 45.0;
 
 // ★ AND A CAP, because the honest arithmetic is expensive: fully filleting a span of
@@ -473,6 +500,55 @@ inline constexpr double kOrganicFilletMaxRadiusRatio = 2.5;
 // How many segments a filleted span is emitted as. The taper is piecewise-constant in
 // radius, so this is the resolution of the underside's slope.
 inline constexpr int kOrganicFilletSegments = 12;
+
+// ★ TRANSFER TIES (2026-09-05). A grown lattice follows the MAJOR principal
+// direction only, so where the load has to turn it has no member to turn along and
+// the printability repairs (fill rows, mat stitches) become the load path: measured
+// on the STAND, every strut over p99 was one of those, one 0.27 mm stitch at 235 MPa
+// carrying the whole 44 N. Michell / Daynes: the orthogonal family IS the transfer
+// path. So, with `transfer_ties`, every pillar is walked at the local separation and
+// a short curve is launched along the SECOND principal direction, both ways; it is
+// kept only where it lands on another curve within `kOrganicXferTieReachRatio`
+// separations, and only where the minor principal stress is at least
+// `kOrganicXferTieMinorRatio` of the major -- where the load actually turns. Where the
+// field is straight and uniaxial no tie is placed, so the grove stays a grove.
+inline constexpr double kOrganicXferTieMinorRatio = 0.10;
+inline constexpr double kOrganicXferTieReachRatio = 1.5;
+// ★ ISOSTATIC TIES, NOT STUBS (maintainer, 2026-09-05: "much less geometric, more
+// fluid"). A tie that stops at the first pillar it touches is a few millimetres long
+// and cannot show a bend. Daynes' second family are isostatic LINES: they follow
+// the minor principal direction across every pillar, and their spacing is the
+// stress-driven separation -- his "spatial grading". So a tie now welds at each
+// pillar it crosses and keeps going, up to kOrganicXferTieMaxReachRatio separations,
+// until it leaves the region or comes within kOrganicTestRatio of another tie (the
+// same Jobard-Lefer rule the pillars obey). The minor-stress gate still decides
+// where a tie is SEEDED; the field decides where it goes.
+inline constexpr double kOrganicXferTieMaxReachRatio = 8.0;
+// ★ THE SWIRL (maintainer, 2026-09-05: "bending as organically as possible"). A tie
+// that follows the field exactly bends only where the stress bends, and in a smooth
+// field that is a smooth arc, which reads as drawn. What reads as GROWN is coherent
+// variation: neighbours lean together, wander a little, never repeat. This is the
+// coupon harness's swirl brought to the ties: the heading is rotated about the local
+// normal by an angle that varies smoothly with position (products of sines, NO
+// randomness -- two runs give the same part), amplitude kOrganicXferTieSwirlDeg at
+// a wavelength of kOrganicXferTieSwirlWavelengthRatio separations. Welds stay exact;
+// the swirl is a look, and it is bounded so the tie still reaches its neighbours.
+// grading.organic_tie_swirl scales it (0 = off, 1 = this amplitude).
+inline constexpr double kOrganicXferTieSwirlDeg = 28.0;
+inline constexpr double kOrganicXferTieSwirlWavelengthRatio = 3.5;
+// ★ VOID RE-SEEDING (maintainer, 2026-09-05: "seeds cannot grow to these thinnest
+// of areas"). Growth seeds only the region's FLOOR, so a tall thin neck far above it
+// fills only if a pillar happens to climb that far without dying to crowding or the
+// region edge -- and nothing re-seeds above a dead pillar. A seed placed high up
+// cannot stand (that is why farthest-point seeding once placed 0 seeds); so a void is
+// entered FROM BELOW: at a candidate voxel with no curve within
+// kOrganicReseedVoidRatio separations, a stub first grows DOWN along the field
+// until it lands on existing lattice or the plate. Only a stub that lands becomes a
+// seed; its climb is then an ordinary tip. Bounded by kOrganicReseedMaxSeeds per run
+// and kOrganicReseedRounds passes.
+inline constexpr double kOrganicReseedVoidRatio = 1.5;
+inline constexpr int kOrganicReseedMaxSeeds = 800;
+inline constexpr int kOrganicReseedRounds = 2;
 inline constexpr double kOrganicVdiDensityFloor =
     3.0 * 3.14159265358979323846 / (kOrganicVdiSlendernessMax *
                                     kOrganicVdiSlendernessMax * 4.0);
@@ -665,6 +741,12 @@ struct OrganicParams {
 
   // How many principal directions to trace. 3 = the full orthogonal set (Daynes).
   int families = 3;
+
+  // ★ grown only: launch transfer ties along the second principal direction from
+  // every pillar (see kOrganicXferTieMinorRatio). Job key grading.organic_transfer_ties.
+  bool transfer_ties = false;
+  double tie_swirl = 1.0;   // 0..1, scales kOrganicXferTieSwirlDeg
+  bool reseed_voids = true; // grown only: enter voids from below (kOrganicReseedVoidRatio)
 
   // Hard bounds so a degenerate field cannot run away. Exceeding either is REPORTED,
   // never silent (`seed_budget_exhausted` / `step_budget_hits`).
@@ -930,6 +1012,20 @@ struct OrganicLattice {
   // Grid-indexed: the separation the tracer actually used at each candidate voxel
   // (mm), i.e. the derived "cell size". 0 off the candidate set.
   std::vector<double> spacing_used_mm;
+  // ★ THE GEOMETRY THAT INDEXES THE THREE VECTORS ABOVE. Without it the emission stage
+  // could not ask "is this point in the lattice REGION" -- only "is it in the part" --
+  // and the fill pass laid struts through the solid gap between two regions 30 mm
+  // apart, joining them into one body. Set by trace and grow; read by generate.
+  Vec3 grid_origin{0, 0, 0};
+  double grid_h = 0.0;
+  int grid_nx = 0, grid_ny = 0, grid_nz = 0;
+  // ★ THE PART'S OWN SOLID, grid-indexed: voxels that are solid material OUTSIDE the
+  // lattice region. The support pass rasterises lattice only, so a column standing on
+  // the part's solid floor -- the arch underside, a wall top, anything above the build
+  // plate -- had NOTHING beneath it in the raster and was an island at its own base.
+  // MEASURED: the middle of one region (x 72-150 mm, on the arch) held 7,361 mm at
+  // node_merge and 0 mm after the support pass. Solid beneath a strut is support.
+  std::vector<char> part_solid;
   OrganicReport report;
 
   // ── ★★ THE NET-SKIN (organic's diagrid) ─────────────────────────────────────
@@ -955,6 +1051,9 @@ struct OrganicLattice {
   // height — without one there is no layer to test, and it does nothing rather than
   // guessing a pitch.
   bool trim_below_base = true;
+  // The overhang fillet (job key grading.organic_overhang_fillet). Off = spans over
+  // open air are left as drawn; the count of spans that WOULD have flared is kept.
+  bool overhang_fillet = true;
   // ★ EMIT A BASE MAT at the trimmed base plane — a crossed planar grid spanning the
   // footprint, so the first layer is a foundation rather than whatever the trace
   // happened to leave there. Needs a layer height and a boundary.
@@ -1008,6 +1107,103 @@ struct OrganicLattice {
 // Throws std::invalid_argument on a size mismatch, a non-positive spacing on the
 // candidate set, `min_extrudable_width_mm` <= 0 (the UNSET refusal, §2c), or a
 // non-finite / degenerate build direction.
+// ── ★ SYNTHETIC FOCAL STRESS FOR A DEAD WALL ───────────────────────────────────
+// A region whose von Mises is ~2 % of the part's peak has no principal directions --
+// they are rounding noise, and the tracer faithfully follows garbage. This stands in
+// a synthetic tensor there: `foci` points on the 80 % ellipse of the region's two
+// largest extents, weights alternating +1/-1 (half pull, half push, so the major
+// family arcs BETWEEN foci instead of starbursting), each contributing
+// w / (L^2 + soft^2) * (r (x) r). It is a TENSOR sum, so opposing foci make the
+// saddle between them rather than cancelling, and the saddle is the sweep. Blended by
+// a smoothstep of the real magnitude between 0.25*thr and thr (thr = `dead_fraction`
+// of the peak over all candidates), so a live wall is untouched and a dead one is
+// entirely synthetic; the synthetic tensor is scaled to magnitude thr so downstream
+// laws see "low stress", not zero. Voigt [xx,yy,zz,xy,yz,zx], the tracer's order.
+// Measured on the M2 stand (2026-08): back wall median vM 0.000422 MPa, 1.8 % of
+// peak, DEAD; the focal field gave it a coherent weave a swirl could not.
+struct SyntheticStressRegion {
+  int region_id = 0;        // 1-based declared include-region id (voxel_region_id)
+  int face_id = -1;         // the B-rep face the region was spawned from, for the receipt
+  int foci = 4;             // 1..5
+  double soft_mm = 0.0;     // 0 = a quarter of the region's largest extent
+};
+// ★ PER REGION, KEYED BY FACE (maintainer, 2026-09-05: "face ID is best"). The UI
+// addresses a wall by the face it came from, so the receipt says what happened to
+// THAT wall rather than summing every wall into one number.
+struct SyntheticStressRegionReport {
+  int region_id = 0;
+  int face_id = -1;
+  int foci = 0;
+  double soft_mm = 0.0;           // the softening actually used (resolved from 0)
+  std::size_t voxels = 0;
+  std::size_t fully_synthetic = 0;
+  std::size_t blended = 0;
+};
+struct SyntheticStressReport {
+  std::vector<SyntheticStressRegionReport> per_region;
+  std::size_t regions = 0;
+  std::size_t voxels_in_regions = 0;
+  std::size_t voxels_fully_synthetic = 0;   // blend weight < 0.05 real
+  std::size_t voxels_blended = 0;
+  double dead_threshold = 0.0;              // thr, in the tensor's units
+  double peak_von_mises = 0.0;
+};
+// Modifies `stress` (6 per voxel) in place for candidate voxels whose
+// `voxel_region_id` names a configured region. `dead_fraction` is the fraction of
+// the peak below which a voxel counts as dead (0.02 is the measured noise floor).
+SyntheticStressReport synthesize_focal_stress(
+    const VoxelGrid& grid, const std::vector<char>& candidate,
+    const std::vector<int>& voxel_region_id,
+    const std::vector<SyntheticStressRegion>& regions, double dead_fraction,
+    std::vector<double>& stress);
+
+// ── ★ THE CELL-SIZE PROBE'S MEASURE: how much of the traced length reaches the part
+// Curves are welded by node contact within r+r (the solver's rule) plus their own
+// polyline, union-find over vertices; a component is ROOTED when any vertex touches
+// part solid (`part_solid` on the lattice, grid geometry on the lattice). Reported
+// per include region (the region of a curve's first vertex) and in total. This is a
+// measurement of the TRACE, before emission, the support pass and the certificate;
+// its agreement with the certificate's untied fraction is what calibrates it.
+struct OrganicProbeRegion {
+  int region_id = 0;
+  std::size_t curves = 0;
+  std::size_t curves_per_family[3] = {0, 0, 0};
+  std::size_t components = 0;
+  double traced_mm = 0.0;
+  double rooted_mm = 0.0;
+};
+struct OrganicProbeResult {
+  std::vector<OrganicProbeRegion> regions;   // region_id 0 = outside every include region
+  std::size_t curves = 0;
+  std::size_t components = 0;
+  double traced_mm = 0.0;
+  double rooted_mm = 0.0;
+};
+// ★ WELD THE CROSSINGS. Streamlines of different families cross mid-segment and
+// share no vertex; the emission's node merge and tie pass make those junctions in
+// the run, but a probe of the RAW trace has none -- measured: traced 3-5 read 50-77 %
+// rooted and the certificate refused for disconnection before solving, where the
+// run certifies at 3.9. For every vertex, the nearest segment of another curve
+// within the two radii gets that vertex's foot inserted as a vertex of its own, so
+// both the contact weld and the beam network see the junction. Returns the number
+// of vertices inserted.
+std::size_t weld_curve_crossings(std::vector<OrganicCurve>& curves);
+// ★ TIE THE FREE ENDS, as the emission's tie pass does (kOrganicTieReachRatio x the
+// separation): a curve end with no foreign vertex within its two radii reaches for
+// the nearest foreign segment within `reach_mm`; the foot is inserted on that curve
+// and a straight two-point tie (family 1, the end's radius) is appended. Without
+// this a probe of a TRACED lattice reads 17-26 % untied and the certificate refuses
+// before solving, where the run certifies. Returns the number of ties added.
+std::size_t tie_curve_free_ends(std::vector<OrganicCurve>& curves, double reach_mm);
+// ★ DROP THE LEGS, as the support pass does: from every curve end a vertical ray
+// downward; the first foreign segment it passes within the two radii, up to
+// `reach_mm` below, gets the foot inserted and a straight vertical leg appended.
+// The emission adds thousands of these (12,402 on traced 3-5, 8,768 on grown), and
+// a probe without them predicted margins 2.7-5x under the run's. Returns legs added.
+std::size_t drop_curve_legs(std::vector<OrganicCurve>& curves, double reach_mm);
+OrganicProbeResult probe_organic_rooting(const OrganicLattice& lat,
+                                         const std::vector<int>& voxel_region_id);
+
 OrganicLattice trace_organic_lattice(const VoxelGrid& grid,
                                      const std::vector<char>& candidate,
                                      const std::vector<double>& stress,
@@ -1144,7 +1340,17 @@ struct OrganicGenStats {
   // ★ DID THE REPAIR FINISH, OR RUN OUT OF BUDGET? `support_rounds == 8` read like
   // "it worked eight times" when it meant "it never converged". A repair that exits on
   // its round cap must say so.
-  bool support_converged = false;
+  // ★ RENAMED, BECAUSE IT DESCRIBED AN INTERMEDIATE STATE. This is set inside the
+  // support ROUND LOOP the moment a round finds no islands. SEVEN passes then run
+  // before the census -- VDI slenderness, arching, the compaction of cuts, the
+  // stranded drop, the fill mat, the finish, the net-skin -- several of which move
+  // or delete geometry and can create new unsupported cells. A run could therefore
+  // report support_converged=true and still be refused by the raster gate, which is
+  // a green flag on a state that no longer exists by the time anything is written.
+  //
+  // The number that describes the SHIPPED geometry is unsupported_cells_remaining,
+  // measured at the census after every pass. This one now says only what it means.
+  bool support_rounds_converged = false;
   // Islands with no legal centreline anywhere beneath them — a vertical leg cannot
   // reach them without breaching the surface. Counted rather than skipped.
   std::size_t support_legs_impossible = 0;
@@ -1156,6 +1362,14 @@ struct OrganicGenStats {
   std::size_t branch_anchored_on_model = 0; // stopped on lattice, never reached base
   double branch_length_mm = 0.0;
   std::size_t support_post_stranded_dropped = 0;   // fragments the CUTS created
+  // ★ THE NO-FRAGMENTATION GUARD. Cutting creates orphans that the size-based drop
+  // above preserves; these record what the guard removed, so evisceration is VISIBLE
+  // in the receipt instead of surfacing three stages later as a singular solve.
+  int support_components_before = -1;    // -1 = the guard did not run
+  int support_components_after = -1;
+  int support_components_kept = -1;
+  std::size_t support_fragments_dropped = 0;
+  double support_fragment_length_mm = 0.0;
   // ── ★★ THE JOINT FIXED POINT ────────────────────────────────────────────────
   // Every span added or removed by ANY repair. A round that changes nothing is
   // quiescence, and that is the only state the census may be read in.
@@ -1166,6 +1380,28 @@ struct OrganicGenStats {
   // Tips left dangling BY those cuts, eroded afterwards. The mid-air repair must not
   // reintroduce the free ends the prune exists to remove.
   std::size_t support_cleanup_pruned = 0;
+  // ★ ENDPOINT CLEARANCE. A capsule ends in a spherical cap that reaches r in every
+  // direction, while the clip only certifies the centreline ALONG the segment. These
+  // count the ends walked inward to make the cap fit, and the spans dropped because
+  // no point on them could.
+  std::size_t endpoint_pulled_in = 0;
+  std::size_t endpoint_span_dropped = 0;
+  // ★ FIX (ii): spans deleted because the census found the cells they occupy hanging
+  // in air. Delete-only, so it always terminates; reported so a run cannot lose
+  // material silently.
+  std::size_t unsupported_spans_cut = 0;
+  double unsupported_length_cut_mm = 0.0;
+  double endpoint_min_margin_mm = 1e30;   // tightest (boundary_dist - r) over ends
+  // ★ HOW CLOSE THE SUPPORT RASTER CAME TO ITS CAP. Whether the pass ran at all is
+  // already `support_grid_too_large`, which the caller refuses on; what was missing
+  // is the MARGIN. The raster is sized by the thinnest strut in XY and the layer
+  // height in Z, so it grows with part size, strut fineness and layer resolution
+  // together — and a job one size step away from losing the support check entirely
+  // should not look identical to one with room to spare. MEASURED on the M2 stand at
+  // 128^3, 5-6 mm cell, 0.2 mm layers: 11.0M cells (427x117x221 at 0.4599 mm xy)
+  // against the 120M cap, so ~11x of headroom.
+  long long support_raster_cells = 0;      // RX*RY*RZ, whether or not the pass ran
+  long long support_raster_cap = 0;        // the cap it was compared against
   // ── ★★ THE BASE TRIM ────────────────────────────────────────────────────────
   double base_trim_z_mm = 0.0;          // the swirl's layer; 0 = nothing was cut
   // ── ★★ VDI 3405-3-4:2019 COMPLIANCE, MEASURED ON WHAT WAS EMITTED ───────────
@@ -1184,6 +1420,22 @@ struct OrganicGenStats {
   // Points where the lattice actually reaches the base plane; the mat is emitted
   // only around these, so "how much foundation" is legible next to "for how many feet".
   std::size_t base_mat_touchdowns = 0;
+  // ★ the crosses laid ON the touchdowns so the grid-snapped mat actually reaches the
+  // struts standing on it. Without them the mat missed by 0.89-3.54 mm.
+  std::size_t base_mat_stitches = 0;
+  // ★ how many separate mats were laid: one per cluster of touchdowns. Two lattice
+  // regions with nothing landing between them must read 2 here, never 1.
+  std::size_t base_mat_clusters = 0;
+  // ★ blobs the support pass would have called islands, held up by the PART'S SOLID
+  // beneath them (OrganicLattice::part_solid). Zero with a populated part_solid means
+  // the islands are not at the base -- look higher.
+  std::size_t islands_held_by_solid = 0;
+  // spans the fillet would have flared, left as drawn because the job switched it off
+  std::size_t fillet_skipped_spans = 0;
+  // raster voxels the repair-leg flood seeded from PART SOLID (not the plate)
+  std::size_t flood_seeds_on_solid = 0;
+  // components spared by the stranded drop because they stand on the plate or solid
+  std::size_t stranded_rooted_kept = 0;
   // ★ VDI SLENDERNESS PROPPING. `violating` counts struts over the l/D the standard
   // allows for their angle; `propped` those a leg could be dropped under; `impossible`
   // those with nothing beneath to stand on. Reported separately because a strut that
@@ -1233,6 +1485,17 @@ struct OrganicGenStats {
   // Branches offered, and how many were refused for want of support at their root.
   std::size_t growth_branches = 0;
   std::size_t growth_branch_refused = 0;
+  // ★ AND WHY, because the three causes want different fixes: outside the region is
+  // the shape's doing, unsupported is the printer's, and CROWDED is the seeding and
+  // spacing law's. Lumped together they read as a printability problem that the rest
+  // of the receipt contradicts.
+  std::size_t growth_branch_refused_region = 0;
+  std::size_t growth_branch_refused_support = 0;
+  std::size_t growth_branch_refused_crowded = 0;
+  // ★ ...and how many of those crowded branches became a CONNECTOR instead of nothing.
+  std::size_t growth_branch_joined = 0;
+  // ★ steps where the upward bias, not the stress field, decided the heading.
+  std::size_t growth_lifted = 0;
   // Tips that reached the neighbour they crowded instead of stopping beside it.
   std::size_t growth_joins = 0;
   // ★★ JOINS REFUSED FOR SPAN. A join segment lands on material at both ends, so it is
@@ -1240,6 +1503,17 @@ struct OrganicGenStats {
   // when the horizontal run of the join would exceed kOrganicMaxCantileverMm and the
   // tip was made to stop or deflect instead.
   std::size_t growth_join_refused_span = 0;
+  // transfer ties (kOrganicXferTieMinorRatio): launched, landed, and why not
+  std::size_t growth_ties_seeded = 0;
+  std::size_t growth_ties_landed = 0;
+  std::size_t growth_ties_refused_minor = 0;    // field too uniaxial here
+  std::size_t growth_ties_refused_reach = 0;    // nothing to land on within reach
+  double growth_tie_length_mm = 0.0;
+  // void re-seeding (kOrganicReseedVoidRatio): voids found, stubs that landed, length
+  std::size_t growth_reseed_voids = 0;
+  std::size_t growth_reseed_landed = 0;
+  std::size_t growth_reseed_failed = 0;
+  double growth_reseed_length_mm = 0.0;
   bool growth_tip_budget_hit = false;
   // ★ THE DISCRETISATION THIS RESULT WAS COMPUTED IN. Growth asks its support question
   // one layer at a time, so the answer is only meaningful alongside the layer height
@@ -1304,6 +1578,10 @@ struct OrganicGenStats {
   // ── ★★ THE FILL MAT ─────────────────────────────────────────────────────────
   std::size_t fill_mat_cells = 0;      // empty cells the tracer left behind
   std::size_t fill_mat_struts = 0;
+  // ★ empty cells fill SKIPPED because they lie outside the lattice region -- inside
+  // the part, but between regions or in solid the grading law kept. Measured before
+  // the gate: 4,143 mm of fill in a 30 mm gap between two face prisms.
+  std::size_t fill_mat_cells_outside_region = 0;
   double fill_mat_length_mm = 0.0;
   double support_cut_length_mm = 0.0;
   std::size_t unsupported_cells_found = 0;  // before any repair
@@ -1326,6 +1604,7 @@ struct OrganicSpan {
 };
 
 class LatticeBoundary;  // topopt/lattice_boundary.hpp
+class MeshDistance;     // topopt/mesh_distance.hpp — the EXPORTED shell's distance
 
 struct LatticeGenObserver;  // topopt/lattice_gen.hpp — the SAME read-only tap
 
@@ -1358,7 +1637,21 @@ OrganicGenStats generate_organic_lattice(const OrganicLattice& lat,
                                          const LatticeGenObserver* observer = nullptr,
                                          // Optional: the POST-CLIP spans, in emission
                                          // order. Non-null to weld them below.
-                                         std::vector<OrganicSpan>* emitted_out = nullptr);
+                                         std::vector<OrganicSpan>* emitted_out = nullptr,
+                                         // ★★ THE SHELL AS WRITTEN, so the generator
+                                         // and the export guard measure ONE surface.
+                                         // The clip erodes the analytic boundary; the
+                                         // guard measures the MESHED shell, and the
+                                         // two disagree — measured, 1.75 um on the M2
+                                         // stand, against a 0.1 um allowance. An
+                                         // endpoint 27.7 nm inside the boundary put
+                                         // its cap 1.73 um outside the shell and the
+                                         // export refused the file. Containment in a
+                                         // surface the clip never sees cannot be
+                                         // guaranteed, so it is handed the same
+                                         // MeshDistance the guard reads. Null keeps
+                                         // the old behaviour exactly.
+                                         const MeshDistance* shell = nullptr);
 
 // ── ★ THE WELDED, SINGLE-BODY VERSION ──────────────────────────────────────────
 //
@@ -1404,6 +1697,86 @@ TriangleMesh organic_weld(const std::vector<OrganicSpan>& spans, double pitch_mm
                           // plane — the very dots the base trim removes. Only a cut on
                           // the SOLID gives a flat face. -inf = no cut.
                           double floor_z = -1e30);
+
+
+// ── THE CELL-SIZE RECOMMENDATION (maintainer, 2026-09-06) ───────────────────
+// "Both algorithms create the Optimal decision based on the model's sizes, the
+// stresses, and the probe." Two pure pieces so they can be tested without a solve:
+//   1. `organic_recommend_band` — the candidate BAND from the model: the floor is
+//      the larger of the printability floor (the bead) and the resolution floor
+//      (voxels per cell); the ceiling is the smallest, over the include regions,
+//      of the member ceiling (wall depth / cells-per-member floor) and the extent
+//      ceiling (four cells across the face). A 3 m part with 100 mm walls lands
+//      near a 30 mm ceiling on its own; a thin wall collapses the band and the
+//      honest answer is SOLID, not a smaller cell. Candidates: `steps` geometric
+//      uniform cells across the band, graded pairs two steps apart plus the full
+//      band, and for the look-driven aesthetic branch the cell that puts
+//      `look_cells_across` cells across the shortest face, its grade spread by
+//      the stress range (sqrt of p99/p50, capped), and one step below as a
+//      fallback.
+//   2. `organic_recommend_select` — reads the probe's rows (one per candidate) and
+//      picks: structural FIT = the largest uniform cell that roots and certifies
+//      at >= target margin; structural AUTO = the certifying candidate with the
+//      least traced material (a grade earns its place only by saving material
+//      over the fit); aesthetic FIT = the look cell if it roots, else one step
+//      below, else the largest rooted uniform; aesthetic AUTO = the look pair if
+//      it roots, else the fit as a uniform. Every rejected candidate carries a
+//      reason so the UI can show why, not just hide it.
+struct OrganicRecommendRegion {
+  int face_id = -1;
+  double depth_mm = 0.0;          // wall thickness: the member the cell sits across
+  double extent_short_mm = 0.0;   // shortest in-plane extent of the face
+  double stress_p50 = 0.0, stress_p99 = 0.0;
+};
+struct OrganicRecommendCandidate {
+  double lo = 0.0, hi = 0.0;
+  std::string source;             // "grid" | "pair" | "look" | "look_pair" | "look_step"
+};
+struct OrganicRecommendBand {
+  double lo_mm = 0.0, hi_mm = 0.0;
+  double printability_floor_mm = 0.0, resolution_floor_mm = 0.0;
+  double member_ceiling_mm = 0.0, extent_ceiling_mm = 0.0;
+  bool collapsed = false;         // lo >= hi: no cell fits; the region should be solid
+  double look_cell_mm = 0.0;      // aesthetic: extent_short / look_cells_across, clamped
+  double grade_ratio = 1.0;       // aesthetic: sqrt(p99/p50) capped, 1 = no grade earned
+  std::vector<OrganicRecommendCandidate> candidates;
+};
+// `print_floor_mm` is the organic spacing print floor (0.5 x strut diameter x
+// sqrt(3 pi), the tracer's own), `voxel_mm` x `resolution_floor_voxels` its
+// resolution floor (OrganicParams::resolution_floor_voxels), and the member
+// ceiling is the wall depth over `cells_across_member` -- 2.0 by measurement: the
+// grown 4.5-5.5 window on the STAND's 12 mm wall (2.2 cells across) certifies at
+// 20.78. The octet cells-per-member law does not apply to a traced lattice.
+OrganicRecommendBand organic_recommend_band(const std::vector<OrganicRecommendRegion>& regions,
+                                            double print_floor_mm, double voxel_mm,
+                                            double resolution_floor_voxels,
+                                            double cells_across_member,
+                                            double look_cells_across, int steps);
+struct OrganicRecommendRow {
+  double lo = 0.0, hi = 0.0;
+  std::string source;
+  bool rooted_ok = false;         // rooted >= gate and curves-per-family gate (aesthetic approval)
+  bool certified = false;         // structural certificate ran and passed p99
+  double margin = 0.0;
+  double traced_mm = 0.0;
+};
+struct OrganicRecommendation {
+  std::string mode;               // "structural" | "aesthetic"
+  bool fit_found = false, auto_found = false;
+  double fit_mm = 0.0;
+  double auto_lo_mm = 0.0, auto_hi_mm = 0.0;
+  double fit_margin = 0.0, auto_margin = 0.0;
+  double fit_traced_mm = 0.0, auto_traced_mm = 0.0;
+  std::string fit_source, auto_source;
+  std::vector<std::pair<OrganicRecommendRow, std::string>> rejected;  // row, reason
+};
+OrganicRecommendation organic_recommend_select(const std::vector<OrganicRecommendRow>& rows,
+                                               const std::string& mode, double target_margin,
+                                               double look_cell_mm);
+constexpr double kOrganicRecommendCellsAcrossMember = 2.0; // member ceiling: two cells across the wall (measured)
+constexpr double kOrganicRecommendCellsAcrossFace = 4.0; // extent ceiling: 4 cells across the face
+constexpr double kOrganicRecommendGradeMin = 1.2;        // below this stress spread, no grade
+constexpr double kOrganicRecommendGradeMax = 2.5;        // and never wider than this
 
 }  // namespace topopt
 

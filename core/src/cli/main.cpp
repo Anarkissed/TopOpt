@@ -333,6 +333,16 @@ std::string dirname_of(const std::string& path) {
 }  // namespace
 
 int main(int argc, char** argv) {
+  // ── ★★ SAY WHICH BINARY THIS IS, ON EVERY SUBCOMMAND ──────────────────────
+  // TOPOPT_BUILD_FINGERPRINT is the git SHA at CONFIGURE time: it answers "which
+  // source era" and NOT "is this binary current", which is the failure that cost
+  // time here. `cmake --build --target topopt topopt-cli` reported success without
+  // relinking the CLI, so libtopopt.a carried a change topopt-cli did not — for 21
+  // minutes and three runs that read as "the code path is never reached", with the
+  // SHA correct throughout. __DATE__/__TIME__ are baked when THIS TU is compiled,
+  // so a stale binary announces itself before it does any work.
+  std::fprintf(stderr, "topopt-cli: core %s, built %s %s\n",
+               TOPOPT_BUILD_FINGERPRINT, __DATE__, __TIME__);
   // Version / build fingerprint, one parseable line, for the worker /health probe.
   if (argc >= 2 &&
       (std::string(argv[1]) == "--version" || std::string(argv[1]) == "version")) {
@@ -359,8 +369,22 @@ int main(int argc, char** argv) {
   std::string rules_path = TOPOPT_CLI_DEFAULT_RULES;
   // Handoff 114 — observability config. The build fingerprint (this binary's
   // TOPOPT_BUILD_FINGERPRINT) is stamped into run_info.json so the era is provable.
+  // (announce moved to the top of main -- every subcommand, not just `run`)
+  // ── ★★ SAY WHICH BINARY THIS IS, EVERY RUN ────────────────────────────────
+  // TOPOPT_BUILD_FINGERPRINT is the git SHA at CONFIGURE time. It answers "which
+  // source era" and it does NOT answer "is this binary current", which is the
+  // failure that actually cost time: `cmake --build --target topopt topopt-cli`
+  // reported success and did not relink the CLI, so libtopopt.a carried a change
+  // that topopt-cli did not, for 21 minutes and three runs that read as "the code
+  // path is never reached". The SHA was correct throughout.
+  //
+  // __DATE__/__TIME__ are baked when THIS translation unit is compiled, so a stale
+  // binary announces itself. Printed at startup and stamped into run_info.json, so
+  // the question "which core did that run use" is answered by the run itself rather
+  // than by `strings` after the fact.
   topopt::RunObservability obs;
   obs.fingerprint = TOPOPT_BUILD_FINGERPRINT;
+  obs.build_time = __DATE__ " " __TIME__;
   // ★ --threads N: HOW MUCH OF THE MACHINE THIS RUN MAY TAKE. 0 (the DEFAULT)
   // leaves the production rule alone — production_matfree_thread_count(), the
   // performance-core pin. It is a PURE PERFORMANCE CONTROL and cannot move a

@@ -527,6 +527,7 @@ std::string run_info_json(const RunInfo& info) {
 
   str("cli_version", info.cli_version);
   str("fingerprint", info.fingerprint);
+  str("build_time", info.build_time);
   str("mode", info.mode);
   // ★ THE CHECKBOX, WHICH `mode` ABOVE HAS NEVER CARRIED. `mode` is the job KIND
   // ("minimize_plastic" vs "analyze") and reads the same on every optimisation
@@ -1418,6 +1419,118 @@ std::string run_info_json(const RunInfo& info) {
                     : fmt(info.organic_census_len_mm[i]);
         }
         gr += "}";
+        // ★ AND THE COMPONENT CENSUS BESIDE IT. Same stages, same order, same null
+        // convention: a pass that did not run reports null in BOTH. Without this a
+        // receipt cannot distinguish "nothing else deleted material" from "nothing
+        // else changed the geometry", and the node merge is the counter-example --
+        // it fuses components while moving almost no length.
+        gr += ", \"support_components_before\": " +
+              std::to_string(info.organic_support_components_before);
+        gr += ", \"support_components_after\": " +
+              std::to_string(info.organic_support_components_after);
+        gr += ", \"support_fragments_dropped\": " +
+              std::to_string(info.organic_support_fragments_dropped);
+        gr += ", \"support_fragment_length_mm\": " +
+              fmt(info.organic_support_fragment_length_mm);
+        gr += ", \"base_mat_stitches\": " +
+              std::to_string(info.organic_base_mat_stitches);
+        gr += ", \"base_mat_clusters\": " +
+              std::to_string(info.organic_base_mat_clusters);
+        gr += ", \"fill_mat_cells_outside_region\": " +
+              std::to_string(info.organic_fill_mat_cells_outside_region);
+        gr += ", \"shape_fit_on\": " + std::string(info.organic_shape_fit_on ? "true" : "false");
+        gr += ", \"shape_fit_candidates\": " + std::to_string(info.organic_shape_fit_candidates);
+        gr += ", \"shape_fit_voxels_shrunk\": " + std::to_string(info.organic_shape_fit_voxels_shrunk);
+        gr += ", \"shape_fit_min_ratio\": " + fmt(info.organic_shape_fit_min_ratio);
+        gr += ", \"synthetic_stress_regions\": " + std::to_string(info.organic_synthetic_regions);
+        gr += ", \"synthetic_stress_voxels\": " + std::to_string(info.organic_synthetic_voxels);
+        gr += ", \"synthetic_stress_fully\": " + std::to_string(info.organic_synthetic_fully);
+        gr += ", \"synthetic_stress_blended\": " + std::to_string(info.organic_synthetic_blended);
+        gr += ", \"synthetic_stress_dead_threshold\": " + fmt(info.organic_synthetic_dead_threshold);
+        gr += ", \"synthetic_stress_by_region\": [";
+        for (std::size_t q = 0; q < info.organic_synthetic_by_region.size(); ++q) {
+          const OrganicSyntheticRegionInfo& ri = info.organic_synthetic_by_region[q];
+          gr += std::string(q ? ", " : "") + "{\"face_id\": " + std::to_string(ri.face_id) +
+                ", \"region_id\": " + std::to_string(ri.region_id) +
+                ", \"foci\": " + std::to_string(ri.foci) +
+                ", \"soft_mm\": " + fmt(ri.soft_mm) +
+                ", \"voxels\": " + std::to_string(ri.voxels) +
+                ", \"fully\": " + std::to_string(ri.fully) +
+                ", \"blended\": " + std::to_string(ri.blended) + "}";
+        }
+        gr += "]";
+        gr += ", \"solid_rim_mm\": " + fmt(info.organic_solid_rim_mm);
+        gr += ", \"solid_rim_voxels\": " + std::to_string(info.organic_solid_rim_voxels);
+        gr += ", \"overhang_fillet_on\": " + std::string(info.organic_overhang_fillet_on ? "true" : "false");
+        gr += ", \"fillet_skipped_spans\": " + std::to_string(info.organic_fillet_skipped_spans);
+        gr += ", \"transfer_ties_on\": " + std::string(info.organic_transfer_ties_on ? "true" : "false");
+        gr += ", \"ties_seeded\": " + std::to_string(info.organic_ties_seeded);
+        gr += ", \"ties_landed\": " + std::to_string(info.organic_ties_landed);
+        gr += ", \"ties_refused_minor_stress\": " + std::to_string(info.organic_ties_refused_minor);
+        gr += ", \"ties_refused_reach\": " + std::to_string(info.organic_ties_refused_reach);
+        gr += ", \"transfer_tie_length_mm\": " + fmt(info.organic_xfer_tie_length_mm);
+        gr += ", \"tie_swirl\": " + fmt(info.organic_tie_swirl);
+        if (!info.organic_structural_verdict.empty()) {
+          gr += ", \"structural_verdict\": \"" + info.organic_structural_verdict + "\"";
+          gr += ", \"structural_statistic\": \"" + info.organic_structural_statistic + "\"";
+          gr += ", \"structural_margin\": " + fmt(info.organic_structural_margin);
+          gr += ", \"structural_stress_p50_mpa\": " + fmt(info.organic_structural_p50_mpa);
+          gr += ", \"structural_stress_p95_mpa\": " + fmt(info.organic_structural_p95_mpa);
+          gr += ", \"structural_stress_p99_mpa\": " + fmt(info.organic_structural_p99_mpa);
+          gr += ", \"structural_stress_max_mpa\": " + fmt(info.organic_structural_max_mpa);
+          gr += ", \"structural_worst_strut\": " +
+                std::to_string(info.organic_structural_worst_strut);
+          gr += ", \"structural_governing_load_case\": \"" +
+                info.organic_structural_governing_load_case + "\"";
+          gr += ", \"structural_knockdown_used\": " +
+                fmt(info.organic_structural_knockdown_used);
+          gr += ", \"structural_knockdown_source\": \"" +
+                info.organic_structural_knockdown_source + "\"";
+          gr += ", \"structural_governing_cos2\": " + fmt(info.organic_structural_governing_cos2);
+          gr += ", \"structural_max_over_allowable\": " +
+                fmt(info.organic_structural_max_over_allowable);
+          gr += ", \"structural_max_over_allowable_distributed\": " +
+                fmt(info.organic_structural_max_over_allowable_distributed);
+          gr += ", \"structural_max_distributed_mpa\": " +
+                fmt(info.organic_structural_max_distributed_mpa);
+          gr += std::string(", \"structural_max_exceeds_allowable\": ") +
+                (info.organic_structural_max_exceeds_allowable ? "true" : "false");
+          if (info.organic_recommend_ran) {
+            gr += ", \"recommend\": {\"mode\": \"" + info.organic_recommend_mode + "\"";
+            gr += ", \"band_lo_mm\": " + fmt(info.organic_recommend_band_lo_mm);
+            gr += ", \"band_hi_mm\": " + fmt(info.organic_recommend_band_hi_mm);
+            gr += std::string(", \"collapsed\": ") + (info.organic_recommend_collapsed ? "true" : "false");
+            gr += std::string(", \"fit_found\": ") + (info.organic_recommend_fit_found ? "true" : "false");
+            gr += ", \"fit_mm\": " + fmt(info.organic_recommend_fit_mm);
+            gr += std::string(", \"auto_found\": ") + (info.organic_recommend_auto_found ? "true" : "false");
+            gr += ", \"auto_lo_mm\": " + fmt(info.organic_recommend_auto_lo_mm);
+            gr += ", \"auto_hi_mm\": " + fmt(info.organic_recommend_auto_hi_mm) + "}";
+          }
+          gr += ", \"structural_load_cases\": " +
+                std::to_string(info.organic_structural_load_cases);
+          gr += ", \"structural_seconds\": " + fmt(info.organic_structural_seconds);
+          gr += ", \"structural_members_carrying\": " +
+                std::to_string(info.organic_structural_members_carrying);
+          gr += ", \"structural_zero_stress_fraction\": " +
+                fmt(info.organic_structural_zero_stress_fraction);
+          if (!info.organic_structural_refusal.empty())
+            gr += ", \"structural_refusal\": \"" +
+                  json_escape(info.organic_structural_refusal) + "\"";
+        }
+        if (!info.organic_census_components.empty()) {
+          gr += ", \"component_census\": {";
+          bool first_cc = true;
+          for (std::size_t i = 0; i < info.organic_census_components.size(); ++i) {
+            if (!first_cc) gr += ", ";
+            first_cc = false;
+            gr += "\"" +
+                  std::string(organic_census_stage_name(static_cast<int>(i))) + "\": ";
+            gr += info.organic_census_components[i] < 0
+                      ? std::string("null")
+                      : std::to_string(info.organic_census_components[i]);
+          }
+          gr += "}";
+        }
         const double grown = info.organic_census_grown_len_mm;
         const double wrote = info.organic_census_len_mm.back();
         gr += ", \"length_survival\": " +
@@ -1458,8 +1571,8 @@ std::string run_info_json(const RunInfo& info) {
       gr += ", \"support_leg_length_mm\": " +
             fmt(info.organic_support_leg_length_mm);
       gr += ", \"support_rounds\": " + fmt_ll(info.organic_support_rounds);
-      gr += ", \"support_converged\": " +
-            std::string(info.organic_support_converged ? "true" : "false");
+      gr += ", \"support_rounds_converged\": " +
+            std::string(info.organic_support_rounds_converged ? "true" : "false");
       gr += ", \"fixed_point_rounds\": " + fmt_ll(info.organic_fixed_point_rounds);
       gr += ", \"fixed_point_converged\": " +
             std::string(info.organic_fixed_point_converged ? "true" : "false");
@@ -1659,8 +1772,15 @@ std::string run_info_json(const RunInfo& info) {
           (std::isfinite(info.grading_min_cells_per_member)
                ? fmt(info.grading_min_cells_per_member)
                : std::string("null"));
-    gr += ", \"min_strut_diameter_mm\": " + fmt(info.grading_min_strut_diameter_mm);
-    gr += ", \"max_strut_diameter_mm\": " + fmt(info.grading_max_strut_diameter_mm);
+    // ★ finite-or-null, like min_cells_per_member beside it. On the organic path no
+    // octet voxel feeds this aggregate, so it stays at its +inf initial value -- and
+    // a bare `inf` is not JSON: the whole receipt became unreadable.
+    gr += ", \"min_strut_diameter_mm\": " +
+          (std::isfinite(info.grading_min_strut_diameter_mm)
+               ? fmt(info.grading_min_strut_diameter_mm) : std::string("null"));
+    gr += ", \"max_strut_diameter_mm\": " +
+          (std::isfinite(info.grading_max_strut_diameter_mm)
+               ? fmt(info.grading_max_strut_diameter_mm) : std::string("null"));
     gr += ", \"any_strut_below_min\": " +
           bool_json(info.grading_any_strut_below_min);
     gr += ", \"region_ungradeable\": " + bool_json(info.grading_region_ungradeable);

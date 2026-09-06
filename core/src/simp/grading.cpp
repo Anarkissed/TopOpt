@@ -645,6 +645,16 @@ GradedField grade_lattice(const VoxelGrid& grid,
           density[e] > iso && (!region || (*region)[e] != 0);
       if (!candidate) continue;
       ++out.region_voxels;
+      // ★ ORGANIC: keep the voxel with its band-clamped density; the octet
+      // cells-per-member and strut-printability refusals below do not describe
+      // traced curves. See GradingLawParams::organic_geometry.
+      if (params.organic_geometry) {
+        const double rho_o = clamp_rho(e, rho_of(e));
+        post.mask[e] = 1;
+        post.relative_density[e] = rho_o;
+        ++out.latticed_voxels;
+        continue;
+      }
 
       // Cells-per-member ceiling (requirement 2): a +inf width (thicker than the EDT
       // cap) yields +inf cells-across and always clears the floor.
@@ -806,6 +816,29 @@ GradedField grade_lattice(const VoxelGrid& grid,
     double coarsest = 0.0;
     for (std::size_t e = 0; e < n; ++e) {
       if (!cand[e]) continue;
+      // ★ ORGANIC: every candidate voxel keeps its band-clamped density. The octet
+      // refusals below (member too thin for N* cells, octet strut unprintable, the
+      // percolation floor, the cells-per-member ceiling) are about octet cells and do
+      // not describe traced curves; organic applies its own floors downstream. See
+      // GradingLawParams::organic_geometry for the measurement that put this here.
+      if (params.organic_geometry) {
+        const double rho_o = clamp_rho(e, rho_of(e));
+        // ★ AND A CELL, or the octet reporter downstream throws on a zero. The
+        // plan's cell where it gave one; otherwise the window's smallest cell,
+        // then the target, then the plan's base. Organic derives its own spacing
+        // from rho in its candidate loop; this value only feeds the octet-posture
+        // receipt, which is already flagged tensor_out_of_regime for organic.
+        double cell_o = voxel_cell[e];
+        if (!(cell_o > 0.0)) cell_o = params.min_cell_size_mm;
+        if (!(cell_o > 0.0)) cell_o = params.target_cell_size_mm;
+        if (!(cell_o > 0.0)) cell_o = out.cell_plan.base_cell_mm;
+        voxel_cell[e] = cell_o;
+        coarsest = std::max(coarsest, cell_o);
+        post.mask[e] = 1;
+        post.relative_density[e] = rho_o;
+        ++out.latticed_voxels;
+        continue;
+      }
       const double ce = voxel_cell[e];
       if (!(ce > 0.0)) {
         // The octree left this base cell unlatticed (it is not wholly inside the
@@ -898,6 +931,29 @@ GradedField grade_lattice(const VoxelGrid& grid,
     double coarsest = 0.0;
     for (std::size_t e = 0; e < n; ++e) {
       if (!cand[e]) continue;
+      // ★ ORGANIC: every candidate voxel keeps its band-clamped density. The octet
+      // refusals below (member too thin for N* cells, octet strut unprintable, the
+      // percolation floor, the cells-per-member ceiling) are about octet cells and do
+      // not describe traced curves; organic applies its own floors downstream. See
+      // GradingLawParams::organic_geometry for the measurement that put this here.
+      if (params.organic_geometry) {
+        const double rho_o = clamp_rho(e, rho_of(e));
+        // ★ AND A CELL, or the octet reporter downstream throws on a zero. The
+        // plan's cell where it gave one; otherwise the window's smallest cell,
+        // then the target, then the plan's base. Organic derives its own spacing
+        // from rho in its candidate loop; this value only feeds the octet-posture
+        // receipt, which is already flagged tensor_out_of_regime for organic.
+        double cell_o = voxel_cell[e];
+        if (!(cell_o > 0.0)) cell_o = params.min_cell_size_mm;
+        if (!(cell_o > 0.0)) cell_o = params.target_cell_size_mm;
+        if (!(cell_o > 0.0)) cell_o = out.cell_plan.base_cell_mm;
+        voxel_cell[e] = cell_o;
+        coarsest = std::max(coarsest, cell_o);
+        post.mask[e] = 1;
+        post.relative_density[e] = rho_o;
+        ++out.latticed_voxels;
+        continue;
+      }
       const double ce = voxel_cell[e];
       if (!(ce > 0.0)) {
         // `solid_fallback_voxels` is incremented at each terminal fallback below
@@ -1093,7 +1149,13 @@ GradedField grade_lattice(const VoxelGrid& grid,
       // — that material is buildable and uncertifiable, and it is counted. What it
       // may NEVER do is emit below the PERCOLATION floor: there is no connected
       // network there, so anything emitted is debris and a bug in this law.
-      if (fit) {
+      if (params.organic_geometry) {
+        // ★ ORGANIC: the cells-per-member and percolation floors are OCTET
+        // invariants; organic keeps its own (curves-per-member, spacing floors) and
+        // audits them in run_organic_step. Auditing an organic voxel against the
+        // octet floor here threw on every organic job the moment the octet refusals
+        // were bypassed upstream -- the audit was the same octet law, once more.
+      } else if (fit) {
         if (!(width[e] / ce >= lattice_percolation_cells_per_member_min(topo)))
           throw std::logic_error(
               "grade_lattice: fit emitted lattice below the percolation floor");
@@ -1103,7 +1165,10 @@ GradedField grade_lattice(const VoxelGrid& grid,
       }
       if (retained) ++seen_subfloor;
     }
-    if (!(octet_strut_diameter_mm(rho, ce) >= params.min_extrudable_width_mm) &&
+    // ★ the octet strut width is not organic's strut width: organic's bead is
+    // floored at the extrudable width in its own candidate loop.
+    if (!params.organic_geometry &&
+        !(octet_strut_diameter_mm(rho, ce) >= params.min_extrudable_width_mm) &&
         (swept || fit))
       throw std::logic_error(
           "grade_lattice: plan emitted a strut under the stated minimum "

@@ -651,6 +651,124 @@ static void test_organic_scale_and_gates() {
                   "\"cell_max_mm\": 6.0" + extra + " }");
   };
   {
+    // Synthetic stress for a dead wall: per-region, organic AND aesthetic only, foci 1-5.
+    auto with_region = [&](const std::string& intent, const std::string& extra) {
+      return mutate("\"mesh_prefix\": \"variant\" }",
+                    "\"mesh_prefix\": \"variant\" },\n  \"lattice\": { "
+                    "\"regions\": [ { \"role\": \"include\", "
+                    "\"kind\": \"face\", \"geometry\": { \"origin\": [0,0,0], "
+                    "\"normal\": [1,0,0], \"half_u_mm\": 10.0, \"half_w_mm\": 8.0, "
+                    "\"depth_mm\": 5.0 }" + extra + " } ] },\n  \"grading\": { "
+                    "\"topology\": \"octet\", \"min_extrudable_width_mm\": 0.4, "
+                    "\"algorithm\": \"organic\", \"intent\": \"" + intent + "\", "
+                    "\"cell_mode\": \"swept\", \"cell_min_mm\": 3.0, \"cell_max_mm\": 6.0 }");
+    };
+    bool parsed = false;
+    try {
+      const JobDescription j = parse_job(with_region("aesthetic",
+          ", \"synthetic_stress\": true, \"synthetic_foci\": 3"));
+      parsed = j.lattice.regions.size() == 1 && j.lattice.regions[0].synthetic_stress &&
+               j.lattice.regions[0].synthetic_foci == 3;
+    } catch (const std::exception& ex) { std::fprintf(stderr, "  parse: %s\n", ex.what()); }
+    CHECK(parsed, "synthetic_stress: parsed per region with its foci under aesthetic organic");
+    auto refused = [&](const std::string& intent, const std::string& extra) {
+      try { (void)parse_job(with_region(intent, extra)); } catch (const std::exception&) { return true; }
+      return false;
+    };
+    CHECK(refused("structural", ", \"synthetic_stress\": true"),
+          "synthetic_stress: refused under structural intent");
+    CHECK(refused("aesthetic", ", \"synthetic_stress\": true, \"synthetic_foci\": 6"),
+          "synthetic_foci: 6 is refused (1..5)");
+    CHECK(refused("aesthetic", ", \"synthetic_stress\": true, \"synthetic_foci\": 0"),
+          "synthetic_foci: 0 is refused (1..5)");
+    CHECK(!refused("aesthetic", ", \"synthetic_foci\": 2"),
+          "synthetic_foci without synthetic_stress is accepted (inert)");
+  }
+  {
+    // The overhang fillet is a printability repair the job may decline: absent is on,
+    // false is honoured, and it is organic-only like the other organic keys.
+    CHECK(parse_job(organic_swept("")).grading.organic_overhang_fillet,
+          "organic_overhang_fillet: absent means ON");
+    CHECK(!parse_job(organic_swept(", \"organic_overhang_fillet\": false"))
+               .grading.organic_overhang_fillet,
+          "organic_overhang_fillet: false is honoured");
+    bool refused = false;
+    try {
+      (void)parse_job(organic_swept(", \"organic_overhang_fillet\": 1"));
+    } catch (const std::exception&) { refused = true; }
+    CHECK(refused, "organic_overhang_fillet: a non-boolean is refused");
+    CHECK(parse_job(organic_swept("")).grading.organic_transfer_ties,
+          "organic_transfer_ties: absent means ON (the maintainer approved the look, 2026-09-05)");
+    CHECK(!parse_job(organic_swept(", \"organic_transfer_ties\": false"))
+              .grading.organic_transfer_ties,
+          "organic_transfer_ties: false switches the ties off");
+    {
+      auto probe = [&](const std::string& lat_extra, const std::string& alg) {
+        return mutate("\"mesh_prefix\": \"variant\" }",
+                      "\"mesh_prefix\": \"variant\" },\n  \"lattice\": { " + lat_extra + " },\n"
+                      "  \"grading\": { \"topology\": \"octet\", \"min_extrudable_width_mm\": 0.4, "
+                      "\"algorithm\": \"" + alg + "\", \"intent\": \"aesthetic\", \"cell_mode\": \"swept\", "
+                      "\"cell_min_mm\": 3.0, \"cell_max_mm\": 6.0 }");
+      };
+      {
+        const JobDescription jr = parse_job(probe("\"organic_recommend\": \"aesthetic\", \"organic_look_cells_across\": 10, "
+                                                   "\"organic_recommend_margin\": 2, \"organic_recommend_steps\": 6", "organic"));
+        CHECK(jr.lattice.organic_recommend == "aesthetic" && jr.lattice.organic_look_cells_across == 10.0 &&
+                  jr.lattice.organic_recommend_margin == 2.0 && jr.lattice.organic_recommend_steps == 6,
+              "organic_recommend + look/margin/steps parse");
+        const JobDescription jd = parse_job(probe("", "organic"));
+        CHECK(jd.lattice.organic_recommend == "off" && jd.lattice.organic_look_cells_across == 8.0 &&
+                  jd.lattice.organic_recommend_margin == 1.5 && jd.lattice.organic_recommend_steps == 5,
+              "organic_recommend defaults: off, 8 cells across, margin 1.5, 5 steps");
+        bool bad1 = false, bad2 = false, bad3 = false;
+        try { (void)parse_job(probe("\"organic_recommend\": \"best\"", "organic")); } catch (const std::exception&) { bad1 = true; }
+        try { (void)parse_job(probe("\"organic_recommend_margin\": 0.5", "organic")); } catch (const std::exception&) { bad2 = true; }
+        try { (void)parse_job(probe("\"organic_recommend_steps\": 9", "organic")); } catch (const std::exception&) { bad3 = true; }
+        CHECK(bad1 && bad2 && bad3, "organic_recommend rejects an unknown mode, a margin < 1, and steps > 8");
+      }
+      const JobDescription j = parse_job(probe("\"organic_probe_cells_mm\": [3, 4.5, 6], \"organic_probe_grades_mm\": [[3, 5]]", "organic"));
+      CHECK(j.lattice.organic_probe_cells_mm.size() == 3 && j.lattice.organic_probe_grades_mm.size() == 1 &&
+                j.lattice.organic_probe_grades_mm[0].second == 5.0,
+            "organic_probe: cells and grades parsed");
+      bool r1 = false, r2 = false;
+      try { (void)parse_job(probe("\"organic_probe_cells_mm\": [3]", "doubled")); } catch (const std::exception&) { r1 = true; }
+      try { (void)parse_job(probe("\"organic_probe_grades_mm\": [[5, 3]]", "organic")); } catch (const std::exception&) { r2 = true; }
+      CHECK(r1, "organic_probe: refused off the organic algorithm");
+      CHECK(r2, "organic_probe: a grade with hi <= lo is refused");
+    }
+    {
+      auto with_outline = [&](const std::string& outline) {
+        return mutate("\"mesh_prefix\": \"variant\" }",
+                      "\"mesh_prefix\": \"variant\" },\n  \"lattice\": { \"regions\": [ { \"role\": \"include\", "
+                      "\"kind\": \"face\", \"geometry\": { \"origin\": [0,0,0], \"normal\": [1,0,0], "
+                      "\"half_u_mm\": 10.0, \"half_w_mm\": 8.0, \"depth_mm\": 5.0" + outline + " } } ] },\n"
+                      "  \"grading\": { \"topology\": \"octet\", \"min_extrudable_width_mm\": 0.4, "
+                      "\"algorithm\": \"organic\", \"intent\": \"aesthetic\", \"cell_mode\": \"swept\", "
+                      "\"cell_min_mm\": 3.0, \"cell_max_mm\": 6.0 }");
+      };
+      const JobDescription j = parse_job(with_outline(", \"outline_uv\": [[[ -5, -5 ], [ 5, -5 ], [ 5, 5 ], [ -5, 5 ]]]"));
+      CHECK(j.lattice.regions.size() == 1 && j.lattice.regions[0].outline_uv.size() == 1 &&
+                j.lattice.regions[0].outline_uv[0].size() == 4,
+            "outline_uv: one loop of four points parsed (the app's pocket outline)");
+      bool refused = false;
+      try { (void)parse_job(with_outline(", \"outline_uv\": [[[0, 0], [1, 1]]]")); } catch (const std::exception&) { refused = true; }
+      CHECK(refused, "outline_uv: a loop under three points is refused");
+    }
+    CHECK(parse_job(organic_swept("")).grading.organic_solid_rim_mm < 0.0,
+          "organic_solid_rim_mm: absent means one base cell (sentinel -1)");
+    CHECK(parse_job(organic_swept(", \"organic_solid_rim_mm\": 0")).grading.organic_solid_rim_mm == 0.0,
+          "organic_solid_rim_mm: 0 switches the rim off");
+    CHECK(parse_job(organic_swept("")).grading.organic_tie_swirl == 1.0,
+          "organic_tie_swirl: absent means 1.0 (full swirl)");
+    CHECK(parse_job(organic_swept(", \"organic_tie_swirl\": 0.25")).grading.organic_tie_swirl == 0.25,
+          "organic_tie_swirl: a value in [0,1] is honoured");
+    {
+      bool r2 = false;
+      try { (void)parse_job(organic_swept(", \"organic_tie_swirl\": 1.5")); } catch (const std::exception&) { r2 = true; }
+      CHECK(r2, "organic_tie_swirl: 1.5 is refused (0..1)");
+    }
+  }
+  {
     const JobDescription j = parse_job(organic_swept(
         ", \"organic_shape_fit\": true, \"organic_shape_fit_only\": true"));
     CHECK(j.grading.organic_shape_fit, "organic_shape_fit: parsed");
@@ -666,8 +784,52 @@ static void test_organic_scale_and_gates() {
           "organic_scale: applies in the aesthetic-only mode too — the factor lands "
           "on the window before any branch reads it, so both gradings scale");
   }
-  check_rejects(organic_swept(", \"organic_shape_fit_only\": true"),
-                "shape_fit_only without shape_fit must be refused");
+  // ★ SHAPE FIT IS ON BY DEFAULT FOR ORGANIC (the maintainer's ruling: it is a
+  // requirement, not a mode), so shape_fit_only ALONE is now legitimate -- the fit
+  // it depends on is present unless the job turns it off. The refusal that still
+  // stands is the contradictory one: fit-only with the fit explicitly disabled.
+  {
+    const JobDescription j = parse_job(organic_swept(", \"organic_shape_fit_only\": true"));
+    CHECK(j.grading.organic_shape_fit && j.grading.organic_shape_fit_only,
+          "shape_fit_only alone is accepted: shape fit defaults ON for organic");
+  }
+  {
+    const JobDescription j = parse_job(organic_swept(""));
+    CHECK(j.grading.organic_shape_fit,
+          "an organic job that says nothing about shape fit gets it ON");
+  }
+  check_rejects(organic_swept(", \"organic_shape_fit\": false, \"organic_shape_fit_only\": true"),
+                "shape_fit_only with shape_fit explicitly OFF must be refused");
+
+  // ★★ SHAPE FIT UNDER A STRUCTURAL INTENT — both keys, once refused, now ADMITTED.
+  // The refusal read "shape fit changes the density, which under a structural intent
+  // is what the certificate is computed against". True of the density-keyed
+  // certificate; not true of the beam-network one, which never reads density and
+  // solves the finished struts. Shape fit can only REFINE (both caps apply only when
+  // smaller than the stress-driven cell), so what it changes is more material where
+  // members are thin -- the strongest lattice-strength lever measured here.
+  //
+  // This test exists so the lift cannot silently regress into the old rule.
+  {
+    auto organic_structural = [](const std::string& extra) {
+      return mutate("\"mesh_prefix\": \"variant\" }",
+                    "\"mesh_prefix\": \"variant\" },\n  \"grading\": { \"topology\": "
+                    "\"octet\", \"min_extrudable_width_mm\": 0.4, "
+                    "\"algorithm\": \"organic\", \"intent\": \"structural\", "
+                    "\"organic_structural_certification\": \"beam_network\", "
+                    "\"cell_mode\": \"swept\", \"cell_min_mm\": 3.0, "
+                    "\"cell_max_mm\": 6.0" + extra + " }");
+    };
+    const JobDescription j = parse_job(organic_structural(
+        ", \"organic_shape_fit\": true, \"organic_shape_fit_only\": true"));
+    CHECK(j.grading.organic_shape_fit,
+          "shape fit is ACCEPTED under a structural intent -- the beam-network "
+          "certificate measures the struts rather than inferring from density");
+    CHECK(j.grading.organic_shape_fit_only,
+          "...and so is shape-fit-only: a cell chosen by shape alone still gets its "
+          "claim MEASURED, and refused by strut if it cannot carry the load");
+    CHECK(j.grading.intent == "structural", "...with the structural intent intact");
+  }
 
 }
 

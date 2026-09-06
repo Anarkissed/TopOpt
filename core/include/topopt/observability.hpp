@@ -262,9 +262,26 @@ class SnapshotCapture {
 // The 113 lesson: never again reconstruct "which build ran this" from inference.
 // The CLI stamps its fingerprint + the ACTUAL solver / warm / precision / thread
 // config it ran under into the job dir (run_info.json), so the era is provable.
+// ★ synthetic stress, one entry per region that asked, keyed by the B-rep face
+struct OrganicSyntheticRegionInfo {
+  int region_id = 0;
+  int face_id = -1;
+  int foci = 0;
+  double soft_mm = 0.0;
+  long long voxels = 0;
+  long long fully = 0;
+  long long blended = 0;
+};
+
 struct RunInfo {
   std::string cli_version;   // topopt::version()
   std::string fingerprint;   // TOPOPT_BUILD_FINGERPRINT (core git sha or "dev")
+  // ★ WHEN THIS BINARY WAS COMPILED (__DATE__ " " __TIME__ of the CLI's own
+  // translation unit). The SHA says which SOURCE ERA; this says whether the binary
+  // is actually current. A targeted build that reports success without relinking
+  // leaves the SHA correct and the binary stale, which is exactly the failure this
+  // exists to make visible.
+  std::string build_time;
   std::string mode;          // job.mode
   std::string material;      // job.material
   // The TRUE source format the user supplied ("step" | "stl" | "3mf"). When the
@@ -971,6 +988,82 @@ struct RunInfo {
   // RUN — it is not zero length, and differencing without checking is how an unrun
   // pass reads as having deleted everything.
   std::vector<double> organic_census_len_mm;
+  // ★ THE SAME CENSUS IN THE OTHER DIMENSION. A length census is blind to a pass that
+  // re-wires without deleting -- the node merge fuses components and moves 0.4-0.8%
+  // of the length -- so "the support prune is the sole deleter" is a statement about
+  // LENGTH only and says nothing about connectivity. Absent from the receipt until
+  // now, which is why that distinction could not be checked from a run.
+  std::vector<int> organic_census_components;
+  // the no-fragmentation guard, so what it did is visible instead of inferred
+  long long organic_support_components_before = -1;
+  long long organic_support_components_after = -1;
+  long long organic_support_fragments_dropped = 0;
+  double organic_support_fragment_length_mm = 0.0;
+  long long organic_base_mat_stitches = 0;
+  long long organic_base_mat_clusters = 0;   // separate mats laid; 2 regions apart must read 2
+  long long organic_fill_mat_cells_outside_region = 0;
+  // ★ shape fit is ON by default for organic; these prove from the receipt that it RAN
+  // and what it did, rather than leaving that to be assumed from a default.
+  bool organic_shape_fit_on = false;
+  long long organic_shape_fit_candidates = 0;
+  long long organic_shape_fit_voxels_shrunk = 0;
+  double organic_shape_fit_min_ratio = 1.0;
+  // ★ synthetic focal stress laid into dead walls (per-region opt-in, aesthetic only)
+  long long organic_synthetic_regions = 0;
+  long long organic_synthetic_voxels = 0;
+  long long organic_synthetic_fully = 0;
+  long long organic_synthetic_blended = 0;
+  double organic_synthetic_dead_threshold = 0.0;
+  std::vector<OrganicSyntheticRegionInfo> organic_synthetic_by_region;   // keyed by face_id
+  // ★ the overhang fillet (grading.organic_overhang_fillet) and the transfer ties
+  // (grading.organic_transfer_ties), so the receipt says what each did or declined
+  double organic_solid_rim_mm = 0.0;        // grade-to-solid band at the outline
+  long long organic_solid_rim_voxels = 0;
+  bool organic_overhang_fillet_on = true;
+  long long organic_fillet_skipped_spans = 0;
+  bool organic_transfer_ties_on = false;
+  long long organic_ties_seeded = 0;
+  long long organic_ties_landed = 0;
+  long long organic_ties_refused_minor = 0;
+  long long organic_ties_refused_reach = 0;
+  double organic_xfer_tie_length_mm = 0.0;
+  double organic_tie_swirl = 1.0;
+  // ★★ THE ORGANIC STRUCTURAL CERTIFICATE, under grading.organic.*. `verdict` is
+  // "certified" | "refused" | "not_run" — never absent, so a run that did not certify
+  // cannot be mistaken for one that did. `statistic` names WHICH number the verdict
+  // read: p99, because peak strut stress is a MAX over tens of thousands of members
+  // and nodal loads land on strut ENDS, where an artificial peak appears. The max is
+  // reported beside it and never read.
+  std::string organic_structural_verdict;      // empty = the key is omitted
+  std::string organic_structural_statistic;
+  std::string organic_structural_governing_load_case;
+  std::string organic_structural_refusal;
+  double organic_structural_margin = 0.0;
+  double organic_structural_p50_mpa = 0.0;
+  double organic_structural_p95_mpa = 0.0;
+  double organic_structural_p99_mpa = 0.0;
+  double organic_structural_max_mpa = 0.0;
+  double organic_structural_knockdown_used = 0.0;
+  std::string organic_structural_knockdown_source;   // "z_knockdown by orientation"
+  double organic_structural_governing_cos2 = 0.0;
+  double organic_structural_max_over_allowable = 0.0;             // point loads at strut ends
+  double organic_structural_max_over_allowable_distributed = 0.0; // loads spread along members
+  double organic_structural_max_distributed_mpa = 0.0;
+  bool organic_structural_max_exceeds_allowable = false;
+  // the cell-size recommendation (lattice.organic_recommend)
+  bool organic_recommend_ran = false;
+  std::string organic_recommend_mode;
+  double organic_recommend_band_lo_mm = 0.0, organic_recommend_band_hi_mm = 0.0;
+  bool organic_recommend_collapsed = false;
+  bool organic_recommend_fit_found = false;
+  double organic_recommend_fit_mm = 0.0;
+  bool organic_recommend_auto_found = false;
+  double organic_recommend_auto_lo_mm = 0.0, organic_recommend_auto_hi_mm = 0.0;
+  double organic_structural_seconds = 0.0;
+  long long organic_structural_worst_strut = -1;
+  long long organic_structural_load_cases = 0;
+  long long organic_structural_members_carrying = -1;
+  double organic_structural_zero_stress_fraction = 0.0;
   double organic_census_grown_len_mm = 0.0;
   long long organic_emitted_components = 0;
   // ★★ THE GROUND-TIE REPAIR. floating_after != 0 means material the printer cannot
@@ -1012,7 +1105,10 @@ struct RunInfo {
   long long organic_support_legs_added = 0;
   double organic_support_leg_length_mm = 0.0;
   long long organic_support_rounds = 0;
-  bool organic_support_converged = false;
+    // ★ the SUPPORT ROUNDS converged -- NOT the shipped geometry. Seven passes run
+  // after this is set and several move or delete material, so a true here can sit on
+  // a run the raster gate refuses. unsupported_cells_remaining is the shipped number.
+  bool organic_support_rounds_converged = false;
   long long organic_fixed_point_rounds = 0;
   bool organic_fixed_point_converged = false;
   long long organic_mutations = 0;

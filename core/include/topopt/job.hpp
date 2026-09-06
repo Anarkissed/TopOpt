@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <stdexcept>
+#include <array>
 #include <string>
 #include <vector>
 
@@ -173,6 +174,7 @@ struct JobLatticeRegion {
   double half_u_mm = 0.0;
   double half_w_mm = 0.0;
   double depth_mm = 0.0;
+  std::vector<std::vector<std::array<double, 2>>> outline_uv;   // the app's pocket outline
   // ★ WHICH B-REP FACE THIS REGION CAME FROM (task 2026-08-12 §0a). Optional,
   // -1 = "not from a face" (a hand-placed primitive). It exists so the ONE
   // number the user drags can be CHECKED: when a face region names a face that
@@ -194,6 +196,14 @@ struct JobLatticeRegion {
   // `min_extrudable_width_mm` REFUSES with the number rather than being clamped.
   // See the handoff §1(c).
   double relative_density = 0.0;
+  // ★ SYNTHETIC STRESS FOR A DEAD WALL (maintainer, 2026-09-05). A region whose
+  // stress is numerical noise has no field to trace; with this on, a synthetic focal
+  // tensor (a few pull/push foci, rank-one r (x) r summed, blended in by a smoothstep
+  // of the real magnitude) stands in where the real field is quiet. Organic and
+  // AESTHETIC intent only -- a structural lattice must follow real load. Foci 1-5.
+  bool synthetic_stress = false;
+  int synthetic_foci = 4;
+  double synthetic_soft_mm = 0.0;   // 0 = a quarter of the region's largest extent
 };
 
 struct JobLattice {
@@ -272,6 +282,12 @@ struct JobLattice {
   // The maintainer hit exactly that. The material is connected; the MESH is not one
   // object, and this is the file that is.
   bool emit_welded_stl = false;
+  // ★ WRITE THE EMITTED SPANS beside the mesh: <prefix>_<vf>_lattice_SPANS.txt, one
+  // SEG per span, AFTER every pass (clip, node merge, support, prune, stranded drop,
+  // finish, endpoint fit) — i.e. exactly the geometry in the file. gc2's own writer
+  // is not a substitute: it writes before the region-net drop and the prune rounds,
+  // so it describes the traced network and not the shipped part.
+  bool emit_organic_spans = false;
   // The weld raster pitch (mm). 0 (the DEFAULT) = half the thinnest emitted strut's
   // RADIUS, which resolves the strut properly and is what the volume measurement
   // wants. A coarser pitch trades surface fidelity for triangle count: the count
@@ -290,6 +306,22 @@ struct JobLattice {
   // emit at all, and EVALUATED counterfactuals for the remedies worth offering.
   // Default false => every existing job is byte-identical.
   bool forecast_only = false;
+  // ★ THE ORGANIC CELL-SIZE PROBE (maintainer, 2026-09-05: "a quick way to offer
+  // approved cell sizes"). The forecast has no stress field, so an organic probe
+  // cannot live there; it runs on the variant path after the ONE base solve: for
+  // each candidate window the law grades, the tracer traces (no emission, no support
+  // pass, no certificate), and the traced curves are welded and measured for how much
+  // of their length reaches part solid. Written to <out>/organic_probe.json.
+  std::vector<double> organic_probe_cells_mm;                 // uniform candidates
+  std::vector<std::pair<double, double>> organic_probe_grades_mm;  // [lo, hi] windows
+  // ★ THE CELL-SIZE RECOMMENDATION (maintainer, 2026-09-06). "off" | "structural" |
+  // "aesthetic" | "auto" (= the grading intent). Generates its own probe candidates
+  // from the model's band (see organic_recommend_band) and writes a "recommendation"
+  // block into organic_probe.json: the FIT cell and the AUTO [lo, hi] window.
+  std::string organic_recommend = "off";
+  double organic_look_cells_across = 8.0;   // aesthetic: cells the eye reads across the shortest face
+  double organic_recommend_margin = 1.5;    // structural: certificate margin the fit must clear
+  int organic_recommend_steps = 5;          // geometric steps across the band (2..8)
 
   // THE ENCLOSED-VOID RULE (task 2026-08-05-lattice-void-reaches-exterior).
   //
@@ -411,6 +443,22 @@ struct JobGrading {
   // tracing and then repairing. Requires organic; default off so every existing job is
   // byte-identical.
   bool organic_growth = false;
+  // ★ The overhang FILLET is a printability repair (a span over open air is re-emitted
+  // as a 12-segment flare up to 2.5x the bead). Printability is user input, so the
+  // repair is a choice: absent means on (nothing existing changes), false skips it.
+  bool organic_overhang_fillet = true;
+  // ★ grown only: transfer ties along the second principal direction, so the load
+  // has a member to turn along (Michell's orthogonal family). The maintainer judged
+  // the look on the M2 stand (2026-09-05, isostatic lines with the swirl at the
+  // pillar's radius): "I am a go for the tie look". Default ON; false switches it off.
+  bool organic_transfer_ties = true;
+  double organic_tie_swirl = 1.0;   // 0..1: how much the ties wander (a look)
+  // ★ GRADE TO SOLID AT THE OUTLINE (maintainer, 2026-09-05: "that has always been a
+  // requirement for organic"). Inside every include region, the band within this
+  // distance of a solid-backed IN-PLANE boundary (the pocket's side walls, not its
+  // floor or its open face) stays solid: the lattice grades into a solid frame it
+  // can tie to. Absent (-1) = one base cell (cell_min_mm); 0 = off.
+  double organic_solid_rim_mm = -1.0;
   double organic_scale = 1.0;
   bool organic_shape_fit = false;
   // ★★ SHAPE-FIT *ONLY* — the cell is a function of the SHAPE and nothing else; the
@@ -420,6 +468,11 @@ struct JobGrading {
   // no structural claim.
   bool organic_shape_fit_only = false;
   std::string organic_boundary_finish = "skin";
+  // ★ WHICH INSTRUMENT CERTIFIED AN ORGANIC LATTICE UNDER STRUCTURAL INTENT.
+  // Required there, refused elsewhere; the only value is "beam_network". Empty means
+  // no structural certification was asked for, which is the only legal state for an
+  // aesthetic run.
+  std::string organic_structural_certification;
 
   // ── ★ THE GRADING INTENT (amendment to 2026-08-20-lattice-only-grading) ──────
   // "structural" — density is a STRENGTH statement: demand against the material
@@ -1012,6 +1065,12 @@ struct RunObservability {
   int mg_algebraic_level1 = -1;
   int matfree_mixed_precision = -1;
   int mg_rearm_period = 0;
+  // ★ WHEN THIS BINARY WAS COMPILED (__DATE__ " " __TIME__ of the CLI's own TU).
+  // `fingerprint` is the git SHA at CONFIGURE time and says which SOURCE ERA; this
+  // says whether the binary is CURRENT. A targeted build that reports success
+  // without relinking leaves the SHA right and the binary stale — measured, that
+  // cost 21 minutes and three runs reading as "the code path is never reached".
+  std::string build_time;
 };
 
 // The outcome of run_job, exposing enough for callers (the CLI main and the
