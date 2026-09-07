@@ -31,6 +31,7 @@
 
 #include <cstddef>
 #include <array>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -44,12 +45,14 @@ namespace topopt {
 struct BeamSegment {
   Vec3 a{}, b{};
   double radius_mm = 0.0;
+  int tag = 0;   // research: 0 = structure, 1 = probe legs, 2 = probe ties
 };
 
 struct BeamNetwork {
   struct Member {
     int node_a = 0, node_b = 0;
     double radius_mm = 0.0;
+    int tag = 0;
   };
   std::vector<Vec3> nodes;
   std::vector<Member> members;
@@ -572,6 +575,57 @@ OrganicCertificate certify_organic_structural(
     Vec3 build_dir, double load_reach_mm, bool census_ok,
     const std::vector<ShellPatch>* shells = nullptr);
 
+
+// ── RESEARCH EXPORT (branch claude/research-device-certificate; nothing ships) ──
+// solve_coupled_lattice fills this, when given, with the FREE system exactly as the
+// direct solve sees it (before the RCM permutation), the full right-hand side, the
+// dof kinds, the solid dofs the beam ties touch (the solid-to-lattice interface), and
+// a closure that recovers member stresses from a full displacement vector. With
+// `skip_solve` the function returns right after filling it. The harness
+// (core/tools/cert_research.cpp) reduces this system its own ways and compares.
+struct CoupledResearchExport {
+  bool filled = false;
+  bool skip_solve = false;
+  int NF = 0, M = 0, SB = 0, SHB = 0;
+  std::vector<int> ptr, idx;          // CSR of the free-free matrix, free numbering, full symmetric
+  std::vector<double> val;
+  std::vector<int> from_free;         // free index -> full dof
+  std::vector<double> F;              // full RHS (size M)
+  std::vector<char> dof_is_beam;      // full numbering
+  std::vector<int> tie_host_dofs;     // full solid dofs interpolating a tied beam node (sorted, unique)
+  std::vector<double> solid_node_xyz; // 3 per numbered solid node (dof i/3), for submodel margins
+  std::size_t beam_nodes = 0, beam_nodes_tied = 0, members = 0;
+  std::function<std::vector<double>(const std::vector<double>&)> recover;   // u_full -> member stress
+  // u_full -> local end forces, 12 per member (N,Vy,Vz,T,My,Mz at A then at B): stress at any station
+  std::function<std::vector<double>(const std::vector<double>&)> recover_forces;
+  double assembly_seconds = 0.0;
+};
+struct ResearchDirectSolve {
+  bool ok = false;
+  double factor_gb = 0.0, seconds = 0.0;
+  std::vector<double> u;              // free numbering
+  std::string note;
+};
+// LDLT (Accelerate) of a symmetric matrix given as full CSR; the same options the
+// coupled solve uses. `F` is in the matrix's own numbering.
+ResearchDirectSolve research_direct_solve(int n, const std::vector<int>& ptr, const std::vector<int>& idx,
+                                          const std::vector<double>& val, const std::vector<double>& F);
+// A kept factorisation: factor once, solve many right-hand sides (Guyan / submodel).
+class ResearchFactor {
+ public:
+  ResearchFactor() = default;
+  ~ResearchFactor();
+  ResearchFactor(const ResearchFactor&) = delete;
+  ResearchFactor& operator=(const ResearchFactor&) = delete;
+  bool factor(int n, const std::vector<int>& ptr, const std::vector<int>& idx, const std::vector<double>& val);
+  void solve(std::vector<double>& rhs_in_out) const;   // in place
+  double factor_gb = 0.0, seconds = 0.0;
+  std::string note;
+  bool ok = false;
+ private:
+  void* impl_ = nullptr;
+};
+
 CoupledLatticeSolve solve_coupled_lattice(
     const VoxelGrid& grid, const std::vector<char>& hex_mask,
     const BeamNetwork& net, const std::vector<DirichletBC>& bcs,
@@ -590,7 +644,8 @@ CoupledLatticeSolve solve_coupled_lattice(
     double load_reach_mm = -1.0,
     const CgProgress* progress = nullptr,
     const SolveStage* stage = nullptr,
-    bool distribute_beam_loads = false);
+    bool distribute_beam_loads = false,
+    CoupledResearchExport* research = nullptr);
 
 }  // namespace topopt
 

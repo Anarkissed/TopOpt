@@ -74,12 +74,12 @@ BeamNetwork build_beam_network(const std::vector<BeamSegment>& segments) {
     rad.push_back(r);
     return id;
   };
-  struct Raw { int a, b; double r; };
+  struct Raw { int a, b; double r; int tag; };
   std::vector<Raw> raw;
   raw.reserve(segments.size());
   for (const BeamSegment& s : segments) {
     const int a = id_of(s.a, s.radius_mm), b = id_of(s.b, s.radius_mm);
-    if (a != b) raw.push_back({a, b, s.radius_mm});
+    if (a != b) raw.push_back({a, b, s.radius_mm, s.tag});
   }
 
   // Pass 2: label the CHAINS produced by pass 1, so the contact weld can be
@@ -152,7 +152,7 @@ BeamNetwork build_beam_network(const std::vector<BeamSegment>& segments) {
     if (dist(net.nodes[static_cast<std::size_t>(a)],
              net.nodes[static_cast<std::size_t>(b)]) <= kWeldEps)
       continue;  // welding averaged the two ends onto the same point
-    net.members.push_back({a, b, e.r});
+    net.members.push_back({a, b, e.r, e.tag});
   }
   return net;
 }
@@ -1034,7 +1034,8 @@ CoupledLatticeSolve solve_coupled_lattice(
     double shear_k, double cg_tolerance, int cg_max_iterations,
     const std::vector<double>* hex_solid_fraction,
     const std::vector<ShellPatch>* shells, double load_reach_mm,
-    const CgProgress* progress, const SolveStage* stage, bool distribute_beam_loads) {
+    const CgProgress* progress, const SolveStage* stage, bool distribute_beam_loads,
+    CoupledResearchExport* research) {
   CoupledLatticeSolve out;
   auto stage_t0 = std::chrono::steady_clock::now();
   auto mark = [&](const char* name, double size) {
@@ -2328,6 +2329,113 @@ CoupledLatticeSolve solve_coupled_lattice(
   // the residual a DIRECT factorisation must reach to be believed. Not a stopping
   // rule -- a factorisation does not iterate -- but an accuracy floor: below this the
   // answer is exact for engineering purposes, and above it something is wrong.
+  // ── RESEARCH EXPORT: the free system, the RHS, the interface, and the recovery ──
+  if (research) {
+    CoupledResearchExport& X = *research;
+    X.NF = NF; X.M = M; X.SB = SB; X.SHB = SHB;
+    X.ptr = Af.ptr; X.idx = Af.idx; X.val = Af.val;
+    X.from_free = from_free;
+    X.F = F;
+    X.dof_is_beam = dof_is_beam;
+    X.beam_nodes = NB; X.members = net.member_count();
+    X.solid_node_xyz.assign(static_cast<std::size_t>(NS) * 3, 0.0);
+    for (int k3 = 0; k3 <= grid.nz; ++k3)
+      for (int j3 = 0; j3 <= grid.ny; ++j3)
+        for (int i3 = 0; i3 <= grid.nx; ++i3) {
+          const int id3 = nid[node_index(i3, j3, k3)];
+          if (id3 < 0) continue;
+          X.solid_node_xyz[static_cast<std::size_t>(3 * id3)] = grid.origin.x + i3 * grid.spacing;
+          X.solid_node_xyz[static_cast<std::size_t>(3 * id3 + 1)] = grid.origin.y + j3 * grid.spacing;
+          X.solid_node_xyz[static_cast<std::size_t>(3 * id3 + 2)] = grid.origin.z + k3 * grid.spacing;
+        }
+    for (std::size_t b = 0; b < NB; ++b) {
+      if (!tied[b]) continue;
+      ++X.beam_nodes_tied;
+      for (int a = 0; a < 8; ++a)
+        for (int cc2 = 0; cc2 < 3; ++cc2)
+          X.tie_host_dofs.push_back(3 * tie_node[b][static_cast<std::size_t>(a)] + cc2);
+    }
+    std::sort(X.tie_host_dofs.begin(), X.tie_host_dofs.end());
+    X.tie_host_dofs.erase(std::unique(X.tie_host_dofs.begin(), X.tie_host_dofs.end()), X.tie_host_dofs.end());
+    bool any_weld = false;
+    for (std::size_t b = 0; b < NB; ++b) any_weld = any_weld || welded[b];
+    const std::vector<char> tied_c = tied;
+    const std::vector<FrameSolidTie> tie_w_c = tie_w;
+    const std::vector<std::array<int, 8>> tie_node_c = tie_node;
+    const std::vector<int> beam_dof_c = beam_dof;
+    const std::vector<std::array<double, 9>> member_R_c = member_R;
+    const std::vector<FrameStiffness> member_k_c = member_k;
+    const BeamNetwork net_c = net;
+    X.recover = [any_weld, tied_c, tie_w_c, tie_node_c, beam_dof_c, member_R_c, member_k_c, net_c](
+                    const std::vector<double>& u) {
+      std::vector<double> s(net_c.member_count(), 0.0);
+      if (any_weld) return s;   // shells: not exported (none in the eleven configurations)
+      auto dof_value = [&](std::size_t b, int c) {
+        if (c < 3 && tied_c[b]) {
+          double acc = 0.0;
+          for (int a = 0; a < 8; ++a)
+            acc += tie_w_c[b].weight[static_cast<std::size_t>(a)] *
+                   u[static_cast<std::size_t>(3 * tie_node_c[b][static_cast<std::size_t>(a)] + c)];
+          return acc;
+        }
+        return u[static_cast<std::size_t>(beam_dof_c[6 * b + static_cast<std::size_t>(c)])];
+      };
+      for (std::size_t mi = 0; mi < net_c.member_count(); ++mi) {
+        const BeamNetwork::Member& m = net_c.members[mi];
+        const std::size_t nodes2[2] = {static_cast<std::size_t>(m.node_a), static_cast<std::size_t>(m.node_b)};
+        std::array<double, 12> ug{};
+        for (int a = 0; a < 12; ++a) ug[static_cast<std::size_t>(a)] = dof_value(nodes2[a / 6], a % 6);
+        std::array<double, 12> ul{};
+        for (int blk = 0; blk < 4; ++blk)
+          for (int r2 = 0; r2 < 3; ++r2) {
+            double acc = 0.0;
+            for (int cc3 = 0; cc3 < 3; ++cc3)
+              acc += member_R_c[mi][static_cast<std::size_t>(3 * r2 + cc3)] * ug[static_cast<std::size_t>(3 * blk + cc3)];
+            ul[static_cast<std::size_t>(3 * blk + r2)] = acc;
+          }
+        s[mi] = frame_member_peak_stress(member_k_c[mi], ul, m.radius_mm);
+      }
+      return s;
+    };
+    X.recover_forces = [any_weld, tied_c, tie_w_c, tie_node_c, beam_dof_c, member_R_c, member_k_c, net_c](
+                           const std::vector<double>& u) {
+      std::vector<double> f(12 * net_c.member_count(), 0.0);
+      if (any_weld) return f;
+      auto dof_value = [&](std::size_t b, int c) {
+        if (c < 3 && tied_c[b]) {
+          double acc = 0.0;
+          for (int a = 0; a < 8; ++a)
+            acc += tie_w_c[b].weight[static_cast<std::size_t>(a)] *
+                   u[static_cast<std::size_t>(3 * tie_node_c[b][static_cast<std::size_t>(a)] + c)];
+          return acc;
+        }
+        return u[static_cast<std::size_t>(beam_dof_c[6 * b + static_cast<std::size_t>(c)])];
+      };
+      for (std::size_t mi = 0; mi < net_c.member_count(); ++mi) {
+        const BeamNetwork::Member& m = net_c.members[mi];
+        const std::size_t nodes2[2] = {static_cast<std::size_t>(m.node_a), static_cast<std::size_t>(m.node_b)};
+        std::array<double, 12> ug{};
+        for (int a = 0; a < 12; ++a) ug[static_cast<std::size_t>(a)] = dof_value(nodes2[a / 6], a % 6);
+        std::array<double, 12> ul{};
+        for (int blk = 0; blk < 4; ++blk)
+          for (int r2 = 0; r2 < 3; ++r2) {
+            double acc = 0.0;
+            for (int cc3 = 0; cc3 < 3; ++cc3)
+              acc += member_R_c[mi][static_cast<std::size_t>(3 * r2 + cc3)] * ug[static_cast<std::size_t>(3 * blk + cc3)];
+            ul[static_cast<std::size_t>(3 * blk + r2)] = acc;
+          }
+        for (int i = 0; i < 12; ++i) {
+          double acc = 0.0;
+          for (int j = 0; j < 12; ++j) acc += member_k_c[mi](i, j) * ul[static_cast<std::size_t>(j)];
+          f[12 * mi + static_cast<std::size_t>(i)] = acc;
+        }
+      }
+      return f;
+    };
+    X.assembly_seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - stage_t0).count();
+    X.filled = true;
+    if (X.skip_solve) { out.refusal = "research export only (skip_solve)"; return out; }
+  }
   constexpr double kDirectAcceptResidual = 1e-6;
   bool direct_ok = false;
   const char* direct_which = "Cholesky";
@@ -2773,6 +2881,117 @@ CoupledLatticeSolve solve_coupled_lattice(
 // the same 5% as the solid island rule above, and for the same reason: below it the
 // filter is removing noise, above it the filter is removing the part.
 constexpr double kUncarriedRefuseFraction = 0.05;
+
+
+// ── RESEARCH: a direct LDLT on any symmetric CSR (the coupled solve's options) ──
+ResearchDirectSolve research_direct_solve(int n, const std::vector<int>& ptr, const std::vector<int>& idx,
+                                          const std::vector<double>& val, const std::vector<double>& F) {
+  ResearchDirectSolve r;
+  const auto t0 = std::chrono::steady_clock::now();
+#if defined(TOPOPT_HAVE_ACCELERATE)
+  std::vector<int> ri, ci; std::vector<double> va;
+  ri.reserve(val.size() / 2 + static_cast<std::size_t>(n)); ci.reserve(ri.capacity()); va.reserve(ri.capacity());
+  for (int i = 0; i < n; ++i)
+    for (int k = ptr[static_cast<std::size_t>(i)]; k < ptr[static_cast<std::size_t>(i) + 1]; ++k) {
+      const int j = idx[static_cast<std::size_t>(k)];
+      if (j > i) continue;
+      ri.push_back(i); ci.push_back(j); va.push_back(val[static_cast<std::size_t>(k)]);
+    }
+  SparseAttributes_t attr{};
+  attr.kind = SparseSymmetric;
+  attr.triangle = SparseLowerTriangle;
+  SparseMatrix_Double Amat = SparseConvertFromCoordinate(n, n, static_cast<long>(va.size()), 1, attr, ri.data(), ci.data(), va.data());
+  SparseSymbolicFactorOptions sopt{};
+  sopt.control = SparseDefaultControl; sopt.orderMethod = SparseOrderAMD; sopt.order = nullptr;
+  sopt.ignoreRowsAndColumns = nullptr; sopt.malloc = malloc; sopt.free = free; sopt.reportError = nullptr;
+  SparseOpaqueSymbolicFactorization sym = SparseFactor(SparseFactorizationLDLT, Amat.structure, sopt);
+  if (sym.status != SparseStatusOK) { r.note = "symbolic factorization failed"; SparseCleanup(Amat); return r; }
+  r.factor_gb = static_cast<double>(sym.factorSize_Double) / (1024.0 * 1024.0 * 1024.0);
+  SparseNumericFactorOptions nopt{};
+  nopt.control = SparseDefaultControl; nopt.scalingMethod = SparseScalingDefault; nopt.scaling = nullptr;
+  nopt.pivotTolerance = 0.0; nopt.zeroTolerance = 0.0;
+  SparseOpaqueFactorization_Double fac = SparseFactor(sym, Amat, nopt);
+  if (fac.status != SparseStatusOK) { r.note = "numeric LDLT failed"; SparseCleanup(sym); SparseCleanup(Amat); return r; }
+  r.u = F;
+  DenseVector_Double xb{n, r.u.data()};
+  SparseSolve(fac, xb);
+  SparseCleanup(fac); SparseCleanup(sym); SparseCleanup(Amat);
+  r.ok = true;
+#else
+  r.note = "no Accelerate";
+#endif
+  r.seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+  return r;
+}
+
+
+// ── RESEARCH: a kept LDLT factorisation (factor once, solve many) ──
+#if defined(TOPOPT_HAVE_ACCELERATE)
+struct ResearchFactorImpl {
+  SparseMatrix_Double A{};
+  SparseOpaqueSymbolicFactorization sym{};
+  SparseOpaqueFactorization_Double fac{};
+  std::vector<int> ri, ci; std::vector<double> va;
+  bool have_sym = false, have_fac = false, have_A = false;
+};
+#endif
+ResearchFactor::~ResearchFactor() {
+#if defined(TOPOPT_HAVE_ACCELERATE)
+  if (auto* p = static_cast<ResearchFactorImpl*>(impl_)) {
+    if (p->have_fac) SparseCleanup(p->fac);
+    if (p->have_sym) SparseCleanup(p->sym);
+    if (p->have_A) SparseCleanup(p->A);
+    delete p;
+  }
+#endif
+}
+bool ResearchFactor::factor(int n, const std::vector<int>& ptr, const std::vector<int>& idx,
+                            const std::vector<double>& val) {
+  const auto t0 = std::chrono::steady_clock::now();
+#if defined(TOPOPT_HAVE_ACCELERATE)
+  auto* p = new ResearchFactorImpl();
+  impl_ = p;
+  p->ri.reserve(val.size() / 2 + static_cast<std::size_t>(n)); p->ci.reserve(p->ri.capacity()); p->va.reserve(p->ri.capacity());
+  for (int i = 0; i < n; ++i)
+    for (int k = ptr[static_cast<std::size_t>(i)]; k < ptr[static_cast<std::size_t>(i) + 1]; ++k) {
+      const int j = idx[static_cast<std::size_t>(k)];
+      if (j > i) continue;
+      p->ri.push_back(i); p->ci.push_back(j); p->va.push_back(val[static_cast<std::size_t>(k)]);
+    }
+  SparseAttributes_t attr{};
+  attr.kind = SparseSymmetric; attr.triangle = SparseLowerTriangle;
+  p->A = SparseConvertFromCoordinate(n, n, static_cast<long>(p->va.size()), 1, attr, p->ri.data(), p->ci.data(), p->va.data());
+  p->have_A = true;
+  SparseSymbolicFactorOptions sopt{};
+  sopt.control = SparseDefaultControl; sopt.orderMethod = SparseOrderAMD; sopt.order = nullptr;
+  sopt.ignoreRowsAndColumns = nullptr; sopt.malloc = malloc; sopt.free = free; sopt.reportError = nullptr;
+  p->sym = SparseFactor(SparseFactorizationLDLT, p->A.structure, sopt);
+  if (p->sym.status != SparseStatusOK) { note = "symbolic factorization failed"; return false; }
+  p->have_sym = true;
+  factor_gb = static_cast<double>(p->sym.factorSize_Double) / (1024.0 * 1024.0 * 1024.0);
+  SparseNumericFactorOptions nopt{};
+  nopt.control = SparseDefaultControl; nopt.scalingMethod = SparseScalingDefault; nopt.scaling = nullptr;
+  nopt.pivotTolerance = 0.0; nopt.zeroTolerance = 0.0;
+  p->fac = SparseFactor(p->sym, p->A, nopt);
+  if (p->fac.status != SparseStatusOK) { note = "numeric LDLT failed"; return false; }
+  p->have_fac = true;
+  ok = true;
+#else
+  note = "no Accelerate";
+#endif
+  seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+  return ok;
+}
+void ResearchFactor::solve(std::vector<double>& x) const {
+#if defined(TOPOPT_HAVE_ACCELERATE)
+  auto* p = static_cast<ResearchFactorImpl*>(impl_);
+  if (!p || !p->have_fac) return;
+  DenseVector_Double xb{static_cast<int>(x.size()), x.data()};
+  SparseSolve(p->fac, xb);
+#else
+  (void)x;
+#endif
+}
 
 OrganicCertificate certify_organic_structural(
     const VoxelGrid& grid, const std::vector<char>& hex_mask,

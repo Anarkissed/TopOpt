@@ -6477,6 +6477,34 @@ LatticeVariantOutcome lattice_one_variant(
           "unsupported material; a structural certificate cannot stand on it. "
           "Coarsen the strut floor or raise the raster cap and re-run.";
     } else
+    // ★ RESEARCH HOOK (branch claude/research-device-certificate, nothing ships):
+    // dump every input the certificate reads so a standalone harness can re-run the
+    // solve per variant, per process, under /usr/bin/time -l.
+    if (const char* dd = std::getenv("TOPOPT_CERT_DUMP_DIR")) {
+      const std::string path = std::string(dd) + "/" + job.output.mesh_prefix + "_cert.dump";
+      if (FILE* f = std::fopen(path.c_str(), "w")) {
+        std::fprintf(f, "GRID %d %d %d %.17g %.17g %.17g %.17g\n", solved_grid.nx, solved_grid.ny, solved_grid.nz,
+                     solved_grid.spacing, solved_grid.origin.x, solved_grid.origin.y, solved_grid.origin.z);
+        std::fprintf(f, "SCALARS %.17g %.17g %.17g %.17g %.17g %.17g %.17g %.17g %d\n", material.youngs_modulus_mpa,
+                     material.poisson, material.yield_strength_mpa, material.z_knockdown, v.applied_build_dir.x,
+                     v.applied_build_dir.y, v.applied_build_dir.z, cell, census_ok ? 1 : 0);
+        std::fprintf(f, "MASK %zu\n", hexm.size());
+        for (std::size_t e = 0; e < hexm.size(); ++e) std::fputc(hexm[e] ? '1' : '0', f);
+        std::fputc('\n', f);
+        std::fprintf(f, "SPANS %zu\n", segs.size());
+        for (const BeamSegment& sg : segs)
+          std::fprintf(f, "%.10g %.10g %.10g %.10g %.10g %.10g %.10g %d\n", sg.a.x, sg.a.y, sg.a.z, sg.b.x, sg.b.y,
+                       sg.b.z, sg.radius_mm, sg.tag);
+        std::fprintf(f, "CASES %zu\n", ocs.size());
+        for (const OrganicLoadCase& lc : ocs) {
+          std::fprintf(f, "CASE %s %zu %zu\n", lc.name.c_str(), lc.bcs.size(), lc.loads.size());
+          for (const DirichletBC& b : lc.bcs) std::fprintf(f, "%d %d %.17g\n", b.node, b.component, b.value);
+          for (const NodalLoad& l : lc.loads) std::fprintf(f, "%d %d %.17g\n", l.node, l.component, l.value);
+        }
+        std::fclose(f);
+        std::fprintf(stderr, "[cert-dump] wrote %s (%zu spans, %zu cases)\n", path.c_str(), segs.size(), ocs.size());
+      }
+    }
     R.organic_cert = certify_organic_structural(
         solved_grid, hexm, segs, ocs, material.youngs_modulus_mpa,
         material.poisson, material.yield_strength_mpa,

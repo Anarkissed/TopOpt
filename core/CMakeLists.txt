@@ -514,6 +514,9 @@ add_test(NAME frame_element COMMAND test_frame_element)
 # The beam network: contact welding and the restraint analysis. Pure C++/std.
 add_executable(test_beam_network tests/unit/test_beam_network.cpp)
 target_link_libraries(test_beam_network PRIVATE topopt)
+# RESEARCH harness (branch claude/research-device-certificate; nothing ships)
+add_executable(cert_research tools/cert_research.cpp)
+target_link_libraries(cert_research PRIVATE topopt)
 add_test(NAME beam_network COMMAND test_beam_network)
 
 # The DKT plate-bending triangle. Pure C++/std: rigid-body modes, the
