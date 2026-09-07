@@ -37,6 +37,7 @@ struct Dump {
   Vec3 build{0, 0, 1};
   double reach = 0;
   bool census_ok = true;
+  std::vector<double> opt_u;   // OPTU: 3 per grid FEA node, the optimizer's solid solve
 };
 
 static Dump load_dump(const char* path) {
@@ -65,6 +66,18 @@ static Dump load_dump(const char* path) {
     BeamSegment& s = d.spans[i];
     if (std::fscanf(f, "%lf %lf %lf %lf %lf %lf %lf %d", &s.a.x, &s.a.y, &s.a.z, &s.b.x, &s.b.y, &s.b.z,
                     &s.radius_mm, &s.tag) != 8) std::exit(7);
+  }
+  std::size_t nu = 0;
+  {   // OPTU (optional, older dumps lack it): the optimizer's own nodal displacement
+    const long pos = std::ftell(f);
+    char probe[32];
+    if (std::fscanf(f, "%31s %zu", probe, &nu) == 2 && std::strcmp(probe, "OPTU") == 0) {
+      d.opt_u.resize(nu);
+      for (std::size_t i = 0; i < nu; ++i)
+        if (std::fscanf(f, "%lf", &d.opt_u[i]) != 1) std::exit(12);
+    } else {
+      std::fseek(f, pos, SEEK_SET);
+    }
   }
   std::size_t nc;
   if (std::fscanf(f, "%31s %zu", tag, &nc) != 2) std::exit(8);
@@ -479,7 +492,34 @@ static int run_submodel(const Dump& d, const BeamNetwork& net, const std::string
   // a coarser global model): only its SOLID part [0, SB) is read, and that numbering is
   // shared. Every dropped dof is solid, so that is all the cut needs.
   std::vector<double> uref(static_cast<std::size_t>(X.M), 0.0);
-  { FILE* f = std::fopen(ref_u_path.c_str(), "rb"); if (!f) { std::printf("{\"variant\": \"%s\", \"error\": \"no reference u\"}\n", variant.c_str()); return 1; }
+  const char* src = "coupled_full";
+  if (ref_u_path == "optimizer") {
+    // ★ THE OPTIMIZER'S OWN FIELD ON THE CUT (item 1). opt_u is DOF-ordered over the
+    // grid's FEA nodes; the coupled solve's solid dofs are 3*nid[node]+c with nid a
+    // compaction. The exported solid node POSITIONS invert that: a numbered solid node
+    // at (x,y,z) is grid node (i,j,k) = round((xyz - origin)/h), whose FEA index is
+    // (k*nodes_y + j)*nodes_x + i -- the same formula both sides use.
+    if (d.opt_u.empty()) { std::printf("{\"variant\": \"%s\", \"error\": \"dump carries no OPTU block\"}\n", variant.c_str()); return 1; }
+    const int NXn = d.grid.nx + 1, NYn = d.grid.ny + 1, NZn = d.grid.nz + 1;
+    const std::size_t NS = X.solid_node_xyz.size() / 3;
+    std::size_t mapped = 0, missed = 0;
+    for (std::size_t sn = 0; sn < NS; ++sn) {
+      const double x = X.solid_node_xyz[3 * sn], y = X.solid_node_xyz[3 * sn + 1], z = X.solid_node_xyz[3 * sn + 2];
+      const long long i = std::llround((x - d.grid.origin.x) / d.grid.spacing);
+      const long long j = std::llround((y - d.grid.origin.y) / d.grid.spacing);
+      const long long k = std::llround((z - d.grid.origin.z) / d.grid.spacing);
+      if (i < 0 || j < 0 || k < 0 || i >= NXn || j >= NYn || k >= NZn) { ++missed; continue; }
+      const std::size_t fi = static_cast<std::size_t>((k * NYn + j) * NXn + i);
+      if (3 * fi + 2 >= d.opt_u.size()) { ++missed; continue; }
+      for (int c = 0; c < 3; ++c) uref[3 * sn + static_cast<std::size_t>(c)] = d.opt_u[3 * fi + static_cast<std::size_t>(c)];
+      ++mapped;
+    }
+    src = "optimizer";
+    std::fprintf(stderr, "[cert_research] optimizer field on the cut: %zu of %zu solid nodes mapped, %zu missed\n",
+                 mapped, NS, missed);
+    if (missed) { std::printf("{\"variant\": \"%s\", \"error\": \"%zu solid nodes did not map to a grid node\"}\n", variant.c_str(), missed); return 1; }
+  } else {
+    FILE* f = std::fopen(ref_u_path.c_str(), "rb"); if (!f) { std::printf("{\"variant\": \"%s\", \"error\": \"no reference u\"}\n", variant.c_str()); return 1; }
     const std::size_t got = std::fread(uref.data(), sizeof(double), static_cast<std::size_t>(X.SB), f); std::fclose(f);
     if (got != static_cast<std::size_t>(X.SB)) { std::printf("{\"variant\": \"%s\", \"error\": \"reference u shorter than the solid block: %zu < %d\"}\n", variant.c_str(), got, X.SB); return 1; } }
   // solid nodes within margin of any beam node: hash beam nodes on a grid of cell = margin*h
@@ -543,12 +583,12 @@ static int run_submodel(const Dump& d, const BeamNetwork& net, const std::string
   const Stat sm = statistic(net, st, nodrop, d.yield, d.zkd, d.build);
   Agreement ag; if (!ref_stress_path.empty()) ag = agree(read_stress(ref_stress_path), st);
   if (FILE* f = std::fopen((outp + ".stress").c_str(), "w")) { for (double v : st) std::fprintf(f, "%.9g\n", v); std::fclose(f); }
-  std::printf("{\"variant\": \"%s\", \"margin_vox\": %.3g, \"members\": %zu, \"dof_free\": %d, \"kept_dof\": %d, \"dropped_dof\": %zu, "
+  std::printf("{\"variant\": \"%s\", \"cut_field\": \"%s\", \"margin_vox\": %.3g, \"members\": %zu, \"dof_free\": %d, \"kept_dof\": %d, \"dropped_dof\": %zu, "
               "\"kept_solid_nodes\": %zu, \"cut_dofs\": %zu, \"kept_nnz\": %zu, \"factor_gb\": %.4f, \"solve_s\": %.2f, \"wall_s\": %.2f, "
               "\"rss_before_mb\": %.0f, \"rss_after_mb\": %.0f, \"peak_rss_mb\": %.0f, "
               "\"mem\": {\"n\": %zu, \"p99\": %.5g, \"max\": %.5g, \"margin\": %.4g, \"certified\": %s}, "
               "\"agree\": {\"n\": %zu, \"max_rel\": %.3g, \"over1pct\": %zu, \"over5pct\": %zu, \"p99_ref\": %.5g, \"p99_new\": %.5g}}\n",
-              variant.c_str(), margin_vox, net.members.size(), X.NF, nK, dropped, kept_nodes, cut_dofs, Kkk.val.size(), rr.factor_gb,
+              variant.c_str(), src, margin_vox, net.members.size(), X.NF, nK, dropped, kept_nodes, cut_dofs, Kkk.val.size(), rr.factor_gb,
               t_solve, wall, m0.rss_mb, m1.rss_mb, m1.peak_rss_mb, sm.n, sm.p99, sm.max, sm.margin, sm.certified ? "true" : "false",
               ag.n, ag.max_rel, ag.over1, ag.over5, ag.p99_ref, ag.p99_new);
   return 0;
@@ -639,6 +679,46 @@ static int run_blocks(const Dump& d, const BeamNetwork& net, const std::string& 
   return ok ? 0 : 1;
 }
 
+
+// fieldcmp: how far the optimizer's own displacement field is from the coupled
+// solve's, on the solid dofs they share. Answers "is the submodel's error the cut, or
+// the field?" without any cutting at all.
+static int run_fieldcmp(const Dump& d, const BeamNetwork& net, const std::string& ref_u_path) {
+  FreeSys fs = export_system(d, net);
+  const CoupledResearchExport& X = fs.X;
+  if (d.opt_u.empty()) { std::printf("{\"variant\": \"fieldcmp\", \"error\": \"no OPTU\"}\n"); return 1; }
+  std::vector<double> uc(static_cast<std::size_t>(X.M), 0.0);
+  { FILE* f = std::fopen(ref_u_path.c_str(), "rb");
+    if (!f) { std::printf("{\"variant\": \"fieldcmp\", \"error\": \"no coupled u\"}\n"); return 1; }
+    std::fread(uc.data(), sizeof(double), static_cast<std::size_t>(X.SB), f); std::fclose(f); }
+  const int NXn = d.grid.nx + 1, NYn = d.grid.ny + 1;
+  const std::size_t NS = X.solid_node_xyz.size() / 3;
+  double sc = 0, so = 0, sd = 0, worst = 0;   // magnitudes, per node
+  std::size_t n_cmp = 0;
+  std::vector<double> rel;
+  for (std::size_t sn = 0; sn < NS; ++sn) {
+    const long long i = std::llround((X.solid_node_xyz[3*sn] - d.grid.origin.x) / d.grid.spacing);
+    const long long j = std::llround((X.solid_node_xyz[3*sn+1] - d.grid.origin.y) / d.grid.spacing);
+    const long long k = std::llround((X.solid_node_xyz[3*sn+2] - d.grid.origin.z) / d.grid.spacing);
+    const std::size_t fi = static_cast<std::size_t>((k * NYn + j) * NXn + i);
+    if (3 * fi + 2 >= d.opt_u.size()) continue;
+    double c2 = 0, o2 = 0, d2 = 0;
+    for (int c = 0; c < 3; ++c) {
+      const double a = uc[3 * sn + static_cast<std::size_t>(c)], b = d.opt_u[3 * fi + static_cast<std::size_t>(c)];
+      c2 += a * a; o2 += b * b; d2 += (a - b) * (a - b);
+    }
+    sc += std::sqrt(c2); so += std::sqrt(o2); sd += std::sqrt(d2); ++n_cmp;
+    if (std::sqrt(c2) > 0) { const double r = std::sqrt(d2) / std::sqrt(c2); rel.push_back(r); worst = std::max(worst, r); }
+  }
+  std::sort(rel.begin(), rel.end());
+  auto q = [&](double f) { return rel.empty() ? 0.0 : rel[static_cast<std::size_t>(f * static_cast<double>(rel.size() - 1))]; };
+  std::printf("{\"variant\": \"fieldcmp\", \"nodes\": %zu, \"mean_coupled_mm\": %.6g, \"mean_optimizer_mm\": %.6g, "
+              "\"mean_abs_diff_mm\": %.6g, \"mean_rel\": %.4g, \"rel_p50\": %.4g, \"rel_p95\": %.4g, \"rel_max\": %.4g, "
+              "\"optimizer_over_coupled\": %.4g}\n",
+              n_cmp, sc / n_cmp, so / n_cmp, sd / n_cmp, sc > 0 ? sd / sc : 0.0, q(0.5), q(0.95), worst, sc > 0 ? so / sc : 0.0);
+  return 0;
+}
+
 int main(int argc, char** argv) {
   if (argc < 3) { std::fprintf(stderr, "usage: cert_research <dump> <variant> [out_prefix]\n"); return 1; }
   const std::string variant = argv[2];
@@ -649,6 +729,10 @@ int main(int argc, char** argv) {
     if (std::strcmp(argv[ai], "--spans") == 0) {
       d.spans = read_spans_ledger(argv[ai + 1]);
       std::fprintf(stderr, "[cert_research] spans overridden from %s: %zu\n", argv[ai + 1], d.spans.size());
+    } else if (std::strcmp(argv[ai], "--opt-scale") == 0) {
+      const double f = std::atof(argv[ai + 1]);
+      for (double& q : d.opt_u) q *= f;
+      std::fprintf(stderr, "[cert_research] optimizer field scaled x%g\n", f);
     } else if (std::strcmp(argv[ai], "--reach") == 0) {
       d.reach = std::atof(argv[ai + 1]);
       std::fprintf(stderr, "[cert_research] load reach overridden: %g mm\n", d.reach);
@@ -678,6 +762,7 @@ int main(int argc, char** argv) {
     return run_submodel(d, net, outp, variant, mv, ref_u, ref_st);
   }
   if (variant == "solidfactor" || variant == "beamblock") return run_blocks(d, net, variant);
+  if (variant == "fieldcmp") return run_fieldcmp(d, net, ref_u);
   if (variant.rfind("guyan", 0) == 0) {
     const std::size_t cap = variant.size() > 6 ? static_cast<std::size_t>(std::atof(variant.c_str() + 6)) : 6000;
     return run_guyan(d, net, outp, variant, cap, ref_st);

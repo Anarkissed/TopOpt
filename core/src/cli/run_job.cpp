@@ -6495,6 +6495,12 @@ LatticeVariantOutcome lattice_one_variant(
         for (const BeamSegment& sg : segs)
           std::fprintf(f, "%.10g %.10g %.10g %.10g %.10g %.10g %.10g %d\n", sg.a.x, sg.a.y, sg.a.z, sg.b.x, sg.b.y,
                        sg.b.z, sg.radius_mm, sg.tag);
+        // ★ THE OPTIMIZER'S OWN DISPLACEMENT FIELD (item 1): DOF-ordered over the grid's
+        // FEA nodes, 3*fea_node_count, the sibling of von_mises_field from the SAME
+        // penalized solid solve. The harness maps it into the coupled solve's solid dof
+        // numbering through the exported solid node positions.
+        std::fprintf(f, "OPTU %zu\n", v.displacement_field.size());
+        for (double q : v.displacement_field) std::fprintf(f, "%.10g\n", q);
         std::fprintf(f, "CASES %zu\n", ocs.size());
         for (const OrganicLoadCase& lc : ocs) {
           std::fprintf(f, "CASE %s %zu %zu\n", lc.name.c_str(), lc.bcs.size(), lc.loads.size());
