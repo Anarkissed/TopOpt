@@ -4,126 +4,88 @@ import TopOptKit
 @testable import TopOptFlows
 
 /// ★ SYNTHETIC STRESSES ON UNLOADED WALLS (maintainer, 2026-09-05; Aesthetic only).
+/// Since 2026-09-06 the preview calls CORE's `synthesize_focal_stress` through the
+/// bridge; the app plans the call and reads the report back.
 final class OrganicSyntheticStressTests: XCTestCase {
 
-    // A 20 × 20 × 20 mm block on a 1 mm grid, one slab region on its −Y wall.
     private static let dims = (20, 20, 20)
     private static let origin = SIMD3<Double>(0, 0, 0)
 
     private func wall(faceY: Double, normalY: Double, depth: Double = 4,
-                      foci: Int? = nil, key: String = "f:wall") -> LatticeRegionSpec {
+                      foci: Int? = nil, key: String, faceID: Int? = nil) -> LatticeRegionSpec {
         var s = LatticeRegionSpec(role: .include, kind: .face)
         s.origin = SIMD3<Double>(10, faceY, 10)
         s.normal = SIMD3<Double>(0, normalY, 0)
         s.halfUMM = 10; s.halfWMM = 10; s.depthMM = depth
+        // A real emitted face region carries its outline; the mask needs it when a
+        // face id is set (a rectangle alone is the primitive's shape, not a face's).
+        s.outlineLoops = [[SIMD2(-10, -10), SIMD2(10, -10), SIMD2(10, 10), SIMD2(-10, 10)]]
         s.syntheticFoci = foci
         s.selectableKey = key
+        s.faceID = faceID
         return s
     }
 
-    /// A field that is loaded everywhere EXCEPT the −Y slab (a uniform axial
-    /// stress of 10 MPa), with rounding noise in the slab.
-    private func loadedExceptWall() -> [Double] {
-        let (nx, ny, nz) = Self.dims
-        var t = [Double](repeating: 0, count: 6 * nx * ny * nz)
-        for k in 0..<nz { for j in 0..<ny { for i in 0..<nx {
-            let idx = (k * ny + j) * nx + i
-            let y = Double(j) + 0.5
-            if y < 4 { t[6 * idx] = 1e-4 * Double((i + k) % 3) }      // dead wall: noise
-            else { t[6 * idx + 2] = 10 }                                // zz = 10 MPa
-        } } }
-        return t
+    /// The plan numbers include regions 1-based in declaration order, tags each
+    /// voxel with the first region holding its centre, and carries the count the
+    /// wall states, else the lattice default.
+    func testThePlanNumbersRegionsAndTagsVoxels() {
+        let a = wall(faceY: 0, normalY: 1, key: "f:a", faceID: 2)
+        let b = wall(faceY: 20, normalY: -1, foci: 5, key: "f:b", faceID: 15)
+        let plan = OrganicSyntheticStress.plan(regions: [a, b], dims: Self.dims, originMM: Self.origin,
+                                               spacingMM: 1, defaultFoci: 4, statedFoci: [:])
+        XCTAssertEqual(plan.regionIDs.count, 8000)
+        XCTAssertEqual(plan.regionIDs.filter { $0 == 1 }.count, 20 * 20 * 4, "the −Y slab")
+        XCTAssertEqual(plan.regionIDs.filter { $0 == 2 }.count, 20 * 20 * 4, "the +Y slab")
+        XCTAssertEqual(plan.regionIDs.filter { $0 == 0 }.count, 8000 - 3200)
+        XCTAssertEqual(plan.regions.map(\.regionID), [1, 2])
+        XCTAssertEqual(plan.regions.map(\.faceID), [2, 15])
+        XCTAssertEqual(plan.regions.map(\.foci), [4, 5], "default, then the wall's own")
+        XCTAssertEqual(plan.keyByID, [1: "f:a", 2: "f:b"])
+        // A Selections-row count overrides the spec's.
+        let stated = OrganicSyntheticStress.plan(regions: [a, b], dims: Self.dims, originMM: Self.origin,
+                                                 spacingMM: 1, defaultFoci: 4, statedFoci: ["f:a": 2])
+        XCTAssertEqual(stated.regions.map(\.foci), [2, 5])
+        // Exclude regions and empty inputs plan nothing.
+        var ex = a; ex = LatticeRegionSpec(role: .exclude, kind: .face).with(ex)
+        XCTAssertTrue(OrganicSyntheticStress.plan(regions: [ex], dims: Self.dims, originMM: Self.origin,
+                                                  spacingMM: 1, defaultFoci: 4, statedFoci: [:]).isEmpty)
     }
 
-    func testADeadWallIsFilledAndALoadedOneIsLeftAlone() {
-        let t = loadedExceptWall()
-        let dead = wall(faceY: 0, normalY: 1, key: "f:dead")
-        let live = wall(faceY: 20, normalY: -1, key: "f:live")
-        let r = OrganicSyntheticStress.inject(tensor: t, dims: Self.dims, originMM: Self.origin,
-                                              spacingMM: 1, regions: [dead, live], defaultFoci: 3)
-        XCTAssertEqual(r.walls.count, 2)
-        let d = r.walls.first { $0.key == "f:dead" }!
-        let l = r.walls.first { $0.key == "f:live" }!
-        XCTAssertTrue(d.dead, "median \(d.medianVM) of peak \(d.peakVM)")
-        XCTAssertFalse(l.dead)
-        XCTAssertEqual(d.foci, 3, "the default count when the wall states none")
-        XCTAssertEqual(d.voxels, 20 * 20 * 4)
-        XCTAssertEqual(d.injected, d.voxels, "a wall that is noise everywhere goes fully synthetic")
-        XCTAssertEqual(l.injected, 0)
-        // The live half of the field is byte-identical.
-        let (nx, ny, nz) = Self.dims
-        for k in 0..<nz { for j in 4..<ny { for i in 0..<nx {
-            let b = 6 * ((k * ny + j) * nx + i)
-            for c in 0..<6 { XCTAssertEqual(r.tensor[b + c], t[b + c]) }
-        } } }
-        // The dead wall carries a real tensor now: von Mises comparable to the peak,
-        // and its principal directions are not all the same (a saddle, not a starburst).
-        var vmMax = 0.0, dirs = Set<String>()
-        for k in 0..<nz { for j in 0..<4 { for i in 0..<nx {
-            let b = 6 * ((k * ny + j) * nx + i)
-            let v = OrganicSyntheticStress.vonMises(r.tensor, b)
-            vmMax = max(vmMax, v)
-            let xx = r.tensor[b], zz = r.tensor[b + 2], zx = r.tensor[b + 5]
-            dirs.insert(String(format: "%.0f/%.0f/%.0f", xx.sign == .minus ? -1 : 1,
-                               zz.sign == .minus ? -1 : 1, zx.sign == .minus ? -1 : 1))
-        } } }
-        XCTAssertGreaterThan(vmMax, 0.1 * d.peakVM, "synthetic magnitude \(vmMax) vs peak \(d.peakVM)")
-        XCTAssertGreaterThan(dirs.count, 1, "the injected field must vary across the wall")
+    /// Core's report comes back keyed to the rows; a wall whose real share is
+    /// under a half is UNLOADED, the rest are loaded.
+    func testTheReportMapsBackToWalls() {
+        let a = wall(faceY: 0, normalY: 1, key: "f:a", faceID: 2)
+        let b = wall(faceY: 20, normalY: -1, key: "f:b", faceID: 15)
+        let plan = OrganicSyntheticStress.plan(regions: [a, b], dims: Self.dims, originMM: Self.origin,
+                                               spacingMM: 1, defaultFoci: 4, statedFoci: [:])
+        let report = TopOptKit.OrganicSyntheticReport(
+            regions: [
+                .init(regionID: 1, faceID: 2, foci: 4, softMM: 5, voxels: 1600, fullySynthetic: 0, blended: 40),
+                .init(regionID: 2, faceID: 15, foci: 4, softMM: 5, voxels: 1600, fullySynthetic: 1500, blended: 80),
+            ],
+            voxelsInRegions: 3200, fullySynthetic: 1500, blended: 120, deadThreshold: 0.02, peakVonMises: 31)
+        let walls = OrganicSyntheticStress.wallReports(from: report, plan: plan)
+        XCTAssertEqual(walls.count, 2)
+        let loaded = walls["f:a"]!, dead = walls["f:b"]!
+        XCTAssertFalse(loaded.dead)
+        XCTAssertEqual(loaded.realShare, 1 - 20.0 / 1600, accuracy: 1e-9)
+        XCTAssertTrue(loaded.statusText.hasPrefix("loaded"), loaded.statusText)
+        XCTAssertTrue(dead.dead)
+        XCTAssertEqual(dead.syntheticFraction, (1500 + 40) / 1600.0, accuracy: 1e-9)
+        XCTAssertTrue(dead.statusText.hasPrefix("unloaded"), dead.statusText)
+        XCTAssertEqual(dead.faceID, 15)
+        XCTAssertTrue(OrganicSyntheticStress.wallReports(from: nil, plan: plan).isEmpty)
     }
 
-    func testTheWallsOwnCountWinsOverTheDefaultAndIsClamped() {
-        let t = loadedExceptWall()
-        let stated = wall(faceY: 0, normalY: 1, foci: 5, key: "f:five")
-        let r = OrganicSyntheticStress.inject(tensor: t, dims: Self.dims, originMM: Self.origin,
-                                              spacingMM: 1, regions: [stated], defaultFoci: 2)
-        XCTAssertEqual(r.walls.first?.foci, 5)
-        let over = wall(faceY: 0, normalY: 1, foci: 9, key: "f:nine")
-        let r2 = OrganicSyntheticStress.inject(tensor: t, dims: Self.dims, originMM: Self.origin,
-                                               spacingMM: 1, regions: [over], defaultFoci: 2)
-        XCTAssertEqual(r2.walls.first?.foci, 5, "clamped to the 1…5 range")
+    func testTheConstantsAreTheRuns() {
+        XCTAssertEqual(OrganicSyntheticStress.deadFraction, 0.02, "run_job passes 0.02")
+        XCTAssertEqual(OrganicSyntheticStress.loadedRealShare, 0.5)
         XCTAssertEqual(OrganicSyntheticStress.clampFoci(0), 1)
+        XCTAssertEqual(OrganicSyntheticStress.clampFoci(9), 5)
     }
 
-    /// A LOADED wall is never injected, whatever count it states (his rule,
-    /// 2026-09-05: "it should never be able to add foci to loaded walls").
-    func testAStatedCountNeverInjectsALoadedWall() {
-        let t = loadedExceptWall()
-        let live = wall(faceY: 20, normalY: -1, foci: 3, key: "f:live-stated")
-        let r = OrganicSyntheticStress.inject(tensor: t, dims: Self.dims, originMM: Self.origin,
-                                              spacingMM: 1, regions: [live], defaultFoci: 2)
-        let w = r.walls.first!
-        XCTAssertFalse(w.dead, "it carries the full load")
-        XCTAssertEqual(w.injected, 0)
-        XCTAssertEqual(r.tensor, t, "byte-identical")
-        XCTAssertTrue(w.statusText.hasPrefix("loaded"), w.statusText)
-    }
-
-    func testAnAllZeroFieldTreatsEveryWallAsDead() {
-        let (nx, ny, nz) = Self.dims
-        let t = [Double](repeating: 0, count: 6 * nx * ny * nz)
-        let r = OrganicSyntheticStress.inject(tensor: t, dims: Self.dims, originMM: Self.origin,
-                                              spacingMM: 1, regions: [wall(faceY: 0, normalY: 1)],
-                                              defaultFoci: 1)
-        XCTAssertTrue(r.walls.first?.dead ?? false)
-        XCTAssertGreaterThan(r.injectedVoxels, 0)
-        XCTAssertNotEqual(r.tensor, t)
-    }
-
-    func testExcludeRegionsAndBadInputsAreIgnored() {
-        let t = loadedExceptWall()
-        var ex = wall(faceY: 0, normalY: 1)
-        ex = LatticeRegionSpec(role: .exclude, kind: .face).with(ex)
-        let r = OrganicSyntheticStress.inject(tensor: t, dims: Self.dims, originMM: Self.origin,
-                                              spacingMM: 1, regions: [ex], defaultFoci: 2)
-        XCTAssertTrue(r.walls.isEmpty)
-        XCTAssertEqual(r.tensor, t)
-        let short = OrganicSyntheticStress.inject(tensor: [1, 2, 3], dims: Self.dims, originMM: Self.origin,
-                                                  spacingMM: 1, regions: [wall(faceY: 0, normalY: 1)],
-                                                  defaultFoci: 2)
-        XCTAssertTrue(short.walls.isEmpty)
-    }
-
-    // MARK: settings, emission, drawer, job
+    // MARK: settings, project, drawer, job
 
     func testSettingsRoundTripAndDefaults() throws {
         var l = LatticeSettings()
@@ -134,14 +96,13 @@ final class OrganicSyntheticStressTests: XCTestCase {
         l.organicSyntheticStresses = true
         l.organicSyntheticFoci = 3
         l.selectableSyntheticFoci["f:a:1"] = 5
-        l.selectableWallStressFraction["f:a:1"] = 0.035
+        l.selectableWallStressFraction["f:a:1"] = 0.1
         let data = try JSONEncoder().encode(l)
         let back = try JSONDecoder().decode(LatticeSettings.self, from: data)
         XCTAssertTrue(back.organicSyntheticStresses)
         XCTAssertEqual(back.organicSyntheticFoci, 3)
         XCTAssertEqual(back.selectableSyntheticFoci["f:a:1"], 5)
-        XCTAssertEqual(back.selectableWallStressFraction["f:a:1"], 0.035)
-        // An older snapshot without the keys decodes to the defaults.
+        XCTAssertEqual(back.selectableWallStressFraction["f:a:1"], 0.1)
         var obj = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
         obj.removeValue(forKey: "organicSyntheticStresses")
         obj.removeValue(forKey: "organicSyntheticFoci")
@@ -167,22 +128,19 @@ final class OrganicSyntheticStressTests: XCTestCase {
         XCTAssertNil(p.latticeSelectableSyntheticFoci(ref), "out of 1…5 is refused, not clamped")
         p.writeLatticeSyntheticFoci(ref, foci: 1)
         XCTAssertEqual(p.latticeSelectableSyntheticFoci(ref), 1)
-        // A wall the bake measured as LOADED refuses the write; unloaded accepts it.
+        // A wall the bake measured as LOADED (real share ≥ ½) refuses the write.
         p.writeLatticeSyntheticFoci(ref, foci: nil)
-        p.recordLatticeWallStress([ref.key: 0.26])
+        p.recordLatticeWallStress([ref.key: 0.9])
         XCTAssertEqual(p.latticeWallLoaded(ref), true)
         p.writeLatticeSyntheticFoci(ref, foci: 3)
         XCTAssertNil(p.latticeSelectableSyntheticFoci(ref), "never foci on a loaded wall")
-        p.recordLatticeWallStress([ref.key: 0.035])
+        p.recordLatticeWallStress([ref.key: 0.1])
         XCTAssertEqual(p.latticeWallLoaded(ref), false)
         p.writeLatticeSyntheticFoci(ref, foci: 3)
         XCTAssertEqual(p.latticeSelectableSyntheticFoci(ref), 3)
-        let unmeasured = LatticeSelectableRef.face(group: UUID(), face: 9)
-        XCTAssertNil(p.latticeWallLoaded(unmeasured))
+        XCTAssertNil(p.latticeWallLoaded(LatticeSelectableRef.face(group: UUID(), face: 9)))
     }
 
-    /// The job marks only walls the bake measured as unloaded, only under an organic
-    /// Aesthetic lattice with the switch on.
     @MainActor func testTheJobMarksOnlyUnloadedWalls() throws {
         guard TopOptKit.latticeAlgorithmIsKnown("organic") else { throw XCTSkip("no organic on this core") }
         let p = ProjectModel(id: UUID(), name: "P", material: "PLA", process: .fdm,
@@ -192,7 +150,7 @@ final class OrganicSyntheticStressTests: XCTestCase {
         p.lattice.algorithm = "organic"
         p.lattice.stageMode = .aesthetic
         p.lattice.organicSyntheticStresses = true
-        p.recordLatticeWallStress([dead.key: 0.035, live.key: 0.26])
+        p.recordLatticeWallStress([dead.key: 0.1, live.key: 0.9])
         p.writeLatticeSyntheticFoci(dead, foci: 2)
         XCTAssertEqual(p.latticeSyntheticWalls(), [dead.key: 2])
         p.writeLatticeSyntheticFoci(dead, foci: nil)
@@ -204,9 +162,7 @@ final class OrganicSyntheticStressTests: XCTestCase {
         XCTAssertTrue(p.latticeSyntheticWalls().isEmpty, "switch off")
     }
 
-    /// Core's contract is per REGION (`synthetic_stress` + `synthetic_foci`); no
-    /// grading key exists, and the region keys travel only when the linked core's
-    /// schema accepts them — a whole-job probe with a control.
+    /// Core's per-region keys travel only when the linked core's schema accepts them.
     func testJobKeysArePerRegionAndProbeGated() throws {
         var s = LatticeSpec(topologyID: "octet", cellMM: 6, strutRadiusMM: 0.6,
                             generateRelativeDensity: 0.2, minRelativeDensity: 0.05,
@@ -217,9 +173,7 @@ final class OrganicSyntheticStressTests: XCTestCase {
         s.stageMode = .aesthetic
         let g = try XCTUnwrap(s.gradingDictionary())
         XCTAssertNil(g["organic_synthetic_stresses"], "no grading key in core's contract")
-        XCTAssertNil(g["organic_synthetic_foci"])
-        var region = wall(faceY: 0, normalY: 1, foci: 4)
-        region.faceID = 7
+        var region = wall(faceY: 0, normalY: 1, foci: 4, key: "f:a", faceID: 7)
         XCTAssertNil(region.wireDictionary["synthetic_stress"], "not marked ⇒ nothing")
         region.syntheticStress = true
         let entry = region.wireDictionary
@@ -240,25 +194,23 @@ final class OrganicSyntheticStressTests: XCTestCase {
         let plain = LatticeRegionDrawer.make(card: card, depthMM: 5, held: false)
         XCTAssertNil(plain.rows.first { $0.label == "Foci" })
         let withFoci = LatticeRegionDrawer.make(card: card, depthMM: 5, held: false,
-                                                syntheticFoci: "Auto · 2 · unloaded · 0.4% of peak")
+                                                syntheticFoci: "Auto · 4")
         let i = withFoci.rows.firstIndex { $0.label == "Foci" }
         let d = withFoci.rows.firstIndex { $0.label == "Density" }
         XCTAssertNotNil(i)
         XCTAssertEqual(i, d.map { $0 + 1 }, "Foci sits directly below Density")
         XCTAssertEqual(withFoci.rows[i!].kind, .foci)
         XCTAssertTrue(withFoci.rows[i!].modifiable)
-        XCTAssertEqual(withFoci.rows[i!].unit, "")
         XCTAssertNil(withFoci.rows.first { $0.label == "Stress on wall" }, "no bake yet ⇒ no verdict row")
         let measured = LatticeRegionDrawer.make(card: card, depthMM: 5, held: false,
-                                                syntheticFoci: "3", wallStress: "unloaded · 3.5% of peak")
+                                                syntheticFoci: "3", wallStress: "unloaded · 96% synthetic")
         let si = measured.rows.firstIndex { $0.label == "Stress on wall" }
         XCTAssertEqual(si, measured.rows.firstIndex { $0.label == "Foci" }.map { $0 + 1 })
         XCTAssertEqual(measured.rows[si!].kind, .fact)
-        XCTAssertEqual(measured.rows[si!].value, "unloaded · 3.5% of peak")
         XCTAssertFalse(measured.rows.first { $0.label == "Foci" }!.disabled)
         let loaded = LatticeRegionDrawer.make(card: card, depthMM: 5, held: false,
                                               syntheticFoci: "—", fociDisabled: true,
-                                              wallStress: "loaded · 26% of peak")
+                                              wallStress: "loaded · 99% real")
         XCTAssertTrue(loaded.rows.first { $0.label == "Foci" }!.disabled, "greyed on a loaded wall")
     }
 
@@ -276,13 +228,12 @@ final class OrganicSyntheticStressTests: XCTestCase {
 }
 
 private extension LatticeRegionSpec {
-    /// Copy every geometric field of `other` onto a spec with THIS role/kind.
     func with(_ other: LatticeRegionSpec) -> LatticeRegionSpec {
         var s = self
         s.origin = other.origin; s.normal = other.normal
         s.halfUMM = other.halfUMM; s.halfWMM = other.halfWMM; s.depthMM = other.depthMM
         s.syntheticFoci = other.syntheticFoci; s.selectableKey = other.selectableKey
-        s.syntheticStress = other.syntheticStress
+        s.syntheticStress = other.syntheticStress; s.faceID = other.faceID
         return s
     }
 }

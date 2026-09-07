@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cctype>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <exception>
@@ -2359,6 +2360,11 @@ std::vector<double> organic_spans_field(const double* spans7, std::size_t span_c
 //   stranded_drop, ground_tie, branch_support, dangling, stranded_drop_2, fill_mat,
 //   finish, written] (−1 = the pass did not run), [45] written components,
 //   [46] 1 = emission ran, [47] filleted (arched) spans
+//   ★ THE PHASE CLOCK (2026-09-06: his part sat 12 min 26 s at "Rebuilding the
+//   lattice" and only a `sample` of the process could say where; now the header
+//   says): [56] trace/grow seconds, [57] emission seconds (node merge, base cut,
+//   support raster and arches, ties, finish — the run's own passes), [58] bake
+//   seconds (the capsule stamp into the two fields). Wall clock, this thread.
 //   [48 ..]                    the CENTRELINE distance field, [4] doubles (mm, ≥ 0,
 //                              clamped at [8] = reach = band + largest radius)
 //   [48 + field ..]            per-voxel relative density on the DESIGN grid, n doubles
@@ -2395,13 +2401,19 @@ std::vector<double> organic_preview_field(
     // when this core's `OrganicLattice` carries `overhang_fillet`; ignored (with the
     // Swift side told so through the schema probe) when it does not.
     int overhang_fillet,
+    // ★ SYNTHETIC STRESS ON UNLOADED WALLS — core's own function (2026-09-06). See the
+    // header. region_id per voxel (0 = none), synth rows of 4, the run's dead fraction.
+    const int* region_id, std::size_t region_id_count,
+    const double* synth, std::size_t synth_count, double synth_dead_fraction,
     // The field to bake the traced capsules into: its own grid, which is the REGION's
     // bbox rather than the part's, so the voxel can be a fraction of the design grid's.
     int fnx, int fny, int fnz, double fspacing,
     double fox, double foy, double foz, double band_mm) {
   const std::size_t n = static_cast<std::size_t>(nx) * static_cast<std::size_t>(ny) *
                         static_cast<std::size_t>(nz);
-  std::vector<double> out(48, 0.0);
+  // ★ 64-double header (was 48): [48..55] the synthetic-stress report, then
+  // out[55] rows of 7 per region BEFORE the field.
+  std::vector<double> out(64, 0.0);
   if (nx <= 0 || ny <= 0 || nz <= 0 || !(spacing > 0.0)) return out;
   if (candidate == nullptr || candidate_count != n) return out;
   if (tensor == nullptr || tensor_count != 6 * n) return out;
@@ -2431,6 +2443,41 @@ std::vector<double> organic_preview_field(
 
   std::vector<double> stress(tensor, tensor + 6 * n);
 
+  // ★ SYNTHETIC STRESS ON UNLOADED WALLS — CORE'S OWN FUNCTION, the same one
+  // run_job calls (`synthesize_focal_stress(grid, candidate, voxel_region_id, cfg,
+  // 0.02, out)`), on the same per-region config the job carries. The app used to
+  // inject its own field here; two recipes cannot agree, so the app's is gone.
+  topopt::SyntheticStressReport srep;
+  bool synth_ran = false;
+  if (region_id != nullptr && region_id_count == n && synth != nullptr &&
+      synth_count >= 4 && synth_dead_fraction > 0.0) {
+    std::vector<int> vr(region_id, region_id + n);
+    std::vector<topopt::SyntheticStressRegion> cfg;
+    for (std::size_t k = 0; k + 3 < synth_count; k += 4) {
+      topopt::SyntheticStressRegion r;
+      r.region_id = static_cast<int>(synth[k]);
+      r.face_id = static_cast<int>(synth[k + 1]);
+      r.foci = static_cast<int>(synth[k + 2]);
+      r.soft_mm = synth[k + 3];
+      cfg.push_back(r);
+    }
+    try {
+      srep = topopt::synthesize_focal_stress(grid, cand, vr, cfg, synth_dead_fraction, stress);
+      synth_ran = true;
+    } catch (...) {
+      synth_ran = false;
+    }
+  }
+  std::vector<double> synth_rows;
+  if (synth_ran) {
+    for (const topopt::SyntheticStressRegionReport& r : srep.per_region) {
+      synth_rows.insert(synth_rows.end(),
+                        {static_cast<double>(r.region_id), static_cast<double>(r.face_id),
+                         static_cast<double>(r.foci), r.soft_mm, static_cast<double>(r.voxels),
+                         static_cast<double>(r.fully_synthetic), static_cast<double>(r.blended)});
+    }
+  }
+
   topopt::OrganicParams p;
   p.build_dir = topopt::Vec3{build_x, build_y, build_z};
   p.min_extrudable_width_mm = min_extrudable_width_mm;
@@ -2445,6 +2492,12 @@ std::vector<double> organic_preview_field(
   topopt::OrganicGenStats gstats;   // the grower's own counters (run_job: `&oo.growth`)
   topopt::OrganicGenStats emit_stats;  // the emission's census (what the file is built from)
   bool emit_ran = false;
+  using phase_clock = std::chrono::steady_clock;
+  auto phase_seconds = [](phase_clock::time_point t0) {
+    return std::chrono::duration<double>(phase_clock::now() - t0).count();
+  };
+  double trace_seconds = 0.0, emit_seconds = 0.0, bake_seconds = 0.0;
+  const phase_clock::time_point trace_t0 = phase_clock::now();
   try {
     // ★ THE SAME BRANCH THE RUN TAKES (run_job.cpp: `oo.lat = jg.organic_growth ?
     // grow_organic_lattice(...) : trace_organic_lattice(...)`).
@@ -2454,6 +2507,7 @@ std::vector<double> organic_preview_field(
   } catch (...) {
     return out;   // core refused; the caller says so rather than drawing something
   }
+  trace_seconds = phase_seconds(trace_t0);
 
   // ── ★★★ THE CAPSULES, BAKED TO A DISTANCE FIELD ─────────────────────────────
   //
@@ -2513,15 +2567,23 @@ std::vector<double> organic_preview_field(
     for (std::size_t i = 0; i < sep.size(); ++i)
       if (cand[i] && sep[i] > sep_hi) sep_hi = sep[i];
     boundary.set_voxel_base(&grid, &boundary_density, 0.5, 2.0 * (sep_hi > 0.0 ? sep_hi : spacing));
-    try {
-      emit_stats = topopt::generate_organic_lattice(lat, sink, &boundary, 8, nullptr, &emitted);   // run_job passes 8
-      emit_ran = true;
-    } catch (...) {
-      emitted.clear();
+    const phase_clock::time_point emit_t0 = phase_clock::now();
+    // ★ THE EMISSION IS THE WAIT (measured 2026-09-06 on his part: trace 0.2 s,
+    // emission 186–191 s, stamp 0.3 s). With repairs hidden it is not drawn, so it is
+    // not run: the traced picture lands in seconds, and the census says the emission
+    // did not run rather than pretending. A caller that wants both draws the traced
+    // set first and asks again with repairs on (the two-stage bake).
+    if (emit_repairs != 0) {
+      try {
+        emit_stats = topopt::generate_organic_lattice(lat, sink, &boundary, 8, nullptr, &emitted);   // run_job passes 8
+        emit_ran = true;
+      } catch (...) {
+        emitted.clear();
+      }
     }
+    emit_seconds = phase_seconds(emit_t0);
     if (emit_repairs == 0) {
       // ★ WITHOUT REPAIRS: the curves and connectors as traced, not the emitted set.
-      // The emission above still ran so the census can say what the file adds.
       emitted.clear();
       for (const topopt::OrganicCurve& c : lat.curves) {
         for (std::size_t t = 1; t < c.points.size(); ++t)
@@ -2533,12 +2595,14 @@ std::vector<double> organic_preview_field(
     double rmax = 0.0;
     for (const topopt::OrganicSpan& sp : emitted) rmax = std::max(rmax, sp.r);
     reach_all = band_mm + rmax;
+    const phase_clock::time_point bake_t0 = phase_clock::now();
     field.assign(fn, reach_all);
     surface_field.assign(fn, band_mm);
     for (const topopt::OrganicSpan& sp : emitted) {
       if (!(sp.r > 0.0)) continue;
       stamp(sp.a, sp.b, sp.r);
     }
+    bake_seconds = phase_seconds(bake_t0);
   }
 
   double lo = 0.0, hi = 0.0;
@@ -2598,6 +2662,18 @@ std::vector<double> organic_preview_field(
   out[29] = static_cast<double>(lat.report.seeds_too_close);
   out[30] = static_cast<double>(lat.report.curves_too_short);
   out[31] = static_cast<double>(lat.report.step_budget_hits);
+  out[48] = synth_ran ? 1.0 : 0.0;
+  out[49] = static_cast<double>(srep.regions);
+  out[50] = static_cast<double>(srep.voxels_in_regions);
+  out[51] = static_cast<double>(srep.voxels_fully_synthetic);
+  out[52] = static_cast<double>(srep.voxels_blended);
+  out[53] = srep.dead_threshold;
+  out[54] = srep.peak_von_mises;
+  out[55] = static_cast<double>(synth_rows.size() / 7);
+  out[56] = trace_seconds;
+  out[57] = emit_seconds;
+  out[58] = bake_seconds;
+  out.insert(out.end(), synth_rows.begin(), synth_rows.end());
   out.insert(out.end(), field.begin(), field.end());
   if (lat.relative_density.size() == n) {
     out.insert(out.end(), lat.relative_density.begin(), lat.relative_density.end());
@@ -2612,6 +2688,62 @@ std::vector<double> organic_preview_field(
   for (const topopt::OrganicSpan& sp : emitted) {
     if (!(sp.r > 0.0)) continue;
     out.insert(out.end(), {sp.a.x, sp.a.y, sp.a.z, sp.b.x, sp.b.y, sp.b.z, sp.r});
+  }
+  return out;
+}
+
+// ★★ CORE'S OWN CELL-SIZE BAND FOR ORGANIC, READ BY THE PREVIEW (maintainer,
+// 2026-09-06: "auto cell grade looked incredibly sparse — is it using the octet
+// preview settings?" It was: with nothing picked the trace read the octet window).
+// This forwards `organic_recommend_band` — the pure function run_job calls with the
+// same arguments (run_job.cpp `[recommend]`): the tracer's print floor
+// 0.5·bead·√(3π), the solve voxel, `OrganicParams::resolution_floor_voxels`,
+// `kOrganicRecommendCellsAcrossMember`, the look and the steps. Nothing is derived here.
+//
+//   regions: rows of 5 — face_id, depth_mm, extent_short_mm, stress_p50, stress_p99
+//   out: [0] lo_mm [1] hi_mm [2] printability_floor [3] resolution_floor
+//        [4] member_ceiling [5] extent_ceiling [6] collapsed [7] look_cell_mm
+//        [8] grade_ratio [9] candidate count N, then N rows of 3: lo, hi, source
+//        (0 grid, 1 pair, 2 look, 3 look_pair, 4 look_step, 5 other)
+std::vector<double> organic_recommend_band(const double* regions, std::size_t region_count,
+                                           double min_extrudable_width_mm, double voxel_mm,
+                                           double look_cells_across, int steps) {
+  std::vector<double> out(10, 0.0);
+  if (regions == nullptr || region_count == 0 || !(min_extrudable_width_mm > 0.0) ||
+      !(voxel_mm > 0.0)) return out;
+  std::vector<topopt::OrganicRecommendRegion> rr;
+  for (std::size_t i = 0; i < region_count; ++i) {
+    topopt::OrganicRecommendRegion q;
+    q.face_id = static_cast<int>(regions[5 * i]);
+    q.depth_mm = regions[5 * i + 1];
+    q.extent_short_mm = regions[5 * i + 2];
+    q.stress_p50 = regions[5 * i + 3];
+    q.stress_p99 = regions[5 * i + 4];
+    rr.push_back(q);
+  }
+  topopt::OrganicRecommendBand B;
+  try {
+    B = topopt::organic_recommend_band(
+        rr, 0.5 * min_extrudable_width_mm * std::sqrt(3.0 * 3.14159265358979323846),
+        voxel_mm, topopt::OrganicParams{}.resolution_floor_voxels,
+        topopt::kOrganicRecommendCellsAcrossMember, look_cells_across, steps);
+  } catch (...) {
+    return out;
+  }
+  out[0] = B.lo_mm; out[1] = B.hi_mm;
+  out[2] = B.printability_floor_mm; out[3] = B.resolution_floor_mm;
+  out[4] = B.member_ceiling_mm; out[5] = B.extent_ceiling_mm;
+  out[6] = B.collapsed ? 1.0 : 0.0;
+  out[7] = B.look_cell_mm; out[8] = B.grade_ratio;
+  out[9] = static_cast<double>(B.candidates.size());
+  for (const topopt::OrganicRecommendCandidate& c : B.candidates) {
+    double src = 5.0;
+    if (c.source == "grid") src = 0.0;
+    else if (c.source == "pair") src = 1.0;
+    else if (c.source == "look") src = 2.0;
+    else if (c.source == "look_pair") src = 3.0;
+    else if (c.source == "look_step") src = 4.0;
+    out.insert(out.end(), {c.lo, c.hi, src});
   }
   return out;
 }

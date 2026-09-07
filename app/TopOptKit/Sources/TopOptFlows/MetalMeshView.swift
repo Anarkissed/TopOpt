@@ -1421,6 +1421,12 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     /// broken frame.
     private let latticeGBufferPipeline: MTLRenderPipelineState?
     private let latticeShadePipeline: MTLRenderPipelineState?
+    /// ★★★ ORGANIC AS CAPSULE IMPOSTORS (2026-09-06): one instanced draw of the
+    /// scene's spans into the same G-buffer, replacing the organic field march. nil ⇒
+    /// the field march draws organic as before.
+    private let organicCapsulePipeline: MTLRenderPipelineState?
+    var organicCapsulePipelineDidBuild: Bool { organicCapsulePipeline != nil }
+    static var organicCapsuleShaderSourceForTesting: String { organicCapsuleShaderSource }
     /// True on a real GPU when both unified lattice pipelines built. Pinned by a test
     /// — a typo in that MSL would silently take the lattice out of the frame entirely,
     /// and "the preview stopped appearing" is a worse failure than a red build.
@@ -2150,6 +2156,20 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
             spd2.rasterSampleCount = raster      // §3b — it lands in the multisampled pass
             latShadePipe = try? device.makeRenderPipelineState(descriptor: spd2)
         }
+        // ★ The organic capsule impostors: its own library, the G-buffer's attachments.
+        var capPipe: MTLRenderPipelineState? = nil
+        if let cLib = try? device.makeLibrary(source: organicCapsuleShaderSource, options: nil),
+           let cvf = cLib.makeFunction(name: "capsule_vertex"),
+           let cff = cLib.makeFunction(name: "capsule_gbuffer") {
+            let cpd = MTLRenderPipelineDescriptor()
+            cpd.vertexFunction = cvf
+            cpd.fragmentFunction = cff
+            cpd.colorAttachments[0].pixelFormat = Self.sceneDepthFormat
+            cpd.colorAttachments[1].pixelFormat = Self.gbufferNormalFormat
+            cpd.colorAttachments[2].pixelFormat = Self.gbufferAlbedoFormat
+            cpd.depthAttachmentPixelFormat = Self.depthFormat
+            capPipe = try? device.makeRenderPipelineState(descriptor: cpd)
+        }
 
         // Translucent body depth: test against the part but write nothing, so back
         // walls show through the front — the x-ray read.
@@ -2189,6 +2209,7 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         self.shadowPipeline = shadowPipe
         self.latticeGBufferPipeline = latGPipe
         self.latticeShadePipeline = latShadePipe
+        self.organicCapsulePipeline = capPipe
         self.sampleCount = raster
         super.init()
     }
@@ -3662,6 +3683,8 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
                 fresh.steppedShapeFit = latticeDesired.steppedShapeFit
                 fresh.steppedDyadicSteps = latticeDesired.steppedDyadicSteps
                 fresh.steppedCellStated = latticeDesired.steppedCellStated
+                // ★ organic draws as capsules whenever this device built the pipeline
+                fresh.drawOrganicCapsules = organicCapsulePipeline != nil
             }
             latticeLayer = fresh
             latticeSceneToken = -1
@@ -4226,7 +4249,7 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
             penc.setFragmentTexture(shellClipTexture, index: 4)
             countedDraw(penc, .triangle, vertexDrawCount)
         }
-        if let lattice, let lpipe = latticeGBufferPipeline {
+        if let lattice {
             // The lattice marches in the SAME encoder, against the SAME depth
             // attachment: where the shell is nearer, the depth test throws the strut
             // away, and where a strut is nearer it replaces the wall. That per-pixel
@@ -4245,11 +4268,29 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
                                                  clipFromModel: uniforms.mvp,
                                                  eyeFromModel: uniforms.modelView,
                                                  eyeNormalBasis: uniforms.normalMatrix)
-            penc.setRenderPipelineState(lpipe)
-            penc.setDepthStencilState(depthState)   // .less, write on
-            penc.setCullMode(.none)
-            lattice.bindFragment(penc, &lu)
-            countedDraw(penc, .triangle, 3)
+            if let lpipe = latticeGBufferPipeline {
+                penc.setRenderPipelineState(lpipe)
+                penc.setDepthStencilState(depthState)   // .less, write on
+                penc.setCullMode(.none)
+                lattice.bindFragment(penc, &lu)
+                countedDraw(penc, .triangle, 3)
+            }
+            // ★★★ ORGANIC AS CAPSULES (2026-09-06): the scene's spans, one box each,
+            // ray-cast in the fragment into the SAME attachments — the march above
+            // has its organic field switched off and its step budget zeroed by the
+            // same flag, so nothing is drawn twice. Culling OFF: the box's far face
+            // yields the same hit as its near face, and a camera inside a box still
+            // sees the strut. The depth test is the shell's (.less, write on).
+            if lattice.capsulesReplaceField, let cpipe = organicCapsulePipeline {
+                penc.setRenderPipelineState(cpipe)
+                penc.setDepthStencilState(depthState)
+                penc.setCullMode(.none)
+                lattice.bindCapsules(penc, &lu)
+                frameDrawCalls += 1
+                frameVertices += 36 * lattice.capsuleCount
+                penc.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 36,
+                                    instanceCount: lattice.capsuleCount)
+            }
         }
         penc.endEncoding()
         return (tex.color, tex.normal, tex.albedo)

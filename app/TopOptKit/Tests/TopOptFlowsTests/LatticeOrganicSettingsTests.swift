@@ -11,6 +11,8 @@ final class LatticeOrganicSettingsTests: XCTestCase {
     private static let organicKeys = [
         "organic_strut_width_mm", "organic_overhang_angle_deg", "organic_boundary_finish",
         "organic_shape_fit", "organic_shape_fit_only", "organic_scale", "organic_growth",
+        "organic_transfer_ties", "organic_tie_swirl", "organic_solid_rim_mm",
+        "organic_structural_certification",
     ]
 
     private func spec(algorithm: String) -> LatticeSpec {

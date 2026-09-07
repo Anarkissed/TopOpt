@@ -260,6 +260,11 @@ public struct LatticeWizardModel: Equatable, Sendable {
     /// ★ Synthetic stresses on unloaded walls (Aesthetic only, 2026-09-05).
     public var organicSyntheticStresses: Bool = false
     public var organicSyntheticFoci: Int = 4
+    /// ★ PR 355 keys (2026-09-06).
+    public var organicTransferTies: Bool = true
+    public var organicTieSwirl: Double = 1.0
+    public var organicSolidRimMM: Double = -1
+    public var organicLookCellsAcross: Int = 8
     public var organicScale: Double = 1.0
 
     /// ★★★ THE CELL SIZES THAT CAN FIT THE SELECTED REGIONS (his item 1, 2026-09-02):
@@ -381,6 +386,10 @@ public struct LatticeWizardModel: Equatable, Sendable {
         self.organicOverhangFillet = s.organicOverhangFillet
         self.organicSyntheticStresses = s.organicSyntheticStresses
         self.organicSyntheticFoci = s.organicSyntheticFoci
+        self.organicTransferTies = s.organicTransferTies
+        self.organicTieSwirl = s.organicTieSwirl
+        self.organicSolidRimMM = s.organicSolidRimMM
+        self.organicLookCellsAcross = s.organicLookCellsAcross
         self.organicScale = s.organicScale
     }
 
@@ -431,6 +440,10 @@ public struct LatticeWizardModel: Equatable, Sendable {
         out.organicOverhangFillet = organicOverhangFillet
         out.organicSyntheticStresses = organicSyntheticStresses
         out.organicSyntheticFoci = OrganicSyntheticStress.clampFoci(organicSyntheticFoci)
+        out.organicTransferTies = organicTransferTies
+        out.organicTieSwirl = Swift.min(1, Swift.max(0, organicTieSwirl))
+        out.organicSolidRimMM = organicSolidRimMM
+        out.organicLookCellsAcross = Swift.min(16, Swift.max(2, organicLookCellsAcross))
         out.organicScale = organicScale
         if out.singleCellMembers, out.boundary == .none || out.boundary == .rim {
             out.boundary = .fullSkin

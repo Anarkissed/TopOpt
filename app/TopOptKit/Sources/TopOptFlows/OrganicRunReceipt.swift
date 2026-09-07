@@ -48,6 +48,100 @@ public struct OrganicRunReceipt: Equatable, Sendable {
     public var structuralWorstStrut: String? = nil
     public var structuralGoverningLoadCase: String? = nil
     public var structuralKnockdownUsed: Double? = nil
+    // ★ PR 355 receipt (2026-09-06), read against core/src/simp/observability.cpp.
+    public var structuralRefusal: String? = nil
+    public var structuralStatistic: String? = nil
+    public var structuralKnockdownSource: String? = nil
+    public var structuralGoverningCos2: Double? = nil
+    public var structuralMaxOverAllowable: Double? = nil
+    public var structuralMaxOverAllowableDistributed: Double? = nil
+    public var structuralMaxDistributedMPa: Double? = nil
+    public var structuralMaxExceedsAllowable: Bool? = nil
+    public var transferTiesOn: Bool? = nil
+    public var tieSwirl: Double? = nil
+    public var tiesSeeded: Int? = nil
+    public var tiesLanded: Int? = nil
+    public var tiesRefusedReach: Int? = nil
+    public var tiesRefusedMinorStress: Int? = nil
+    public var overhangFilletOn: Bool? = nil
+    public var filletedSpans: Int? = nil
+    public var filletSkippedSpans: Int? = nil
+    public var solidRimMM: Double? = nil
+    public var shapeFitOn: Bool? = nil
+    public var shapeFitVoxelsShrunk: Int? = nil
+    public var spacingPrintFloorMM: Double? = nil
+    public var spacingResolutionFloorMM: Double? = nil
+    public var supportGridTooLarge: Bool? = nil
+    public var tensorNote: String? = nil
+    public var recommendFitFound: Bool? = nil
+    public var recommendFitMM: Double? = nil
+    public var recommendAutoFound: Bool? = nil
+    public var recommendAutoLoMM: Double? = nil
+    public var recommendAutoHiMM: Double? = nil
+    public var recommendBandLoMM: Double? = nil
+    public var recommendBandHiMM: Double? = nil
+    public var recommendCollapsed: Bool? = nil
+    public var syntheticStressRegions: Int? = nil
+    public var syntheticStressVoxels: Int? = nil
+    public var syntheticStressFully: Int? = nil
+    public var syntheticStressBlended: Int? = nil
+    /// Per face_id — receipt C, keyed by face.
+    public struct SyntheticStressRow: Equatable, Sendable {
+        public let foci: Int
+        public let voxels: Int
+        public let fully: Int
+        public let blended: Int
+        public init(foci: Int, voxels: Int, fully: Int, blended: Int) {
+            self.foci = foci; self.voxels = voxels; self.fully = fully; self.blended = blended
+        }
+        /// "synthetic field: 4 foci, 12,480 of 12,480 voxels" / "carried load, untouched".
+        public var text: String {
+            if fully == 0 && blended == 0 { return "carried load, untouched" }
+            return "synthetic field: \(foci) foci, \(fully) of \(voxels) voxels"
+        }
+    }
+    public var syntheticStressByFace: [Int: SyntheticStressRow] = [:]
+
+    /// ★ THE SMALLEST CELL, from the run: max(bead floor, one voxel) (brief §0).
+    public var floorMM: Double? {
+        guard let p = spacingPrintFloorMM ?? spacingResolutionFloorMM else { return nil }
+        return Swift.max(p, spacingResolutionFloorMM ?? 0)
+    }
+
+    /// ★ THE CERTIFICATE, in the brief's display rule: the margin is the p99 number;
+    /// the worst strut against its allowable comes from the DISTRIBUTED factor; a
+    /// refusal names its gate. Never "likely": this is the run's own verdict.
+    public var certificateLine: String? {
+        guard let v = structuralVerdict, v != "not run", v != "not_run" else { return nil }
+        var s: String
+        switch v {
+        case "certified":
+            s = structuralMargin.map { String(format: "Certified · margin %.2f (p99)", $0) } ?? "Certified"
+        case "refused":
+            s = "Refused"
+            if let m = structuralMargin { s += String(format: " · margin %.2f (p99)", m) }
+            if let why = structuralRefusal, !why.isEmpty { s += " · " + why }
+            else if structuralMaxExceedsAllowable == true { s += " · the worst strut exceeds its allowable" }
+        default:
+            s = "Certificate: \(v)"
+        }
+        if let f = structuralMaxOverAllowableDistributed, f > 0 {
+            s += String(format: " · worst strut %.2f× allowable", f)
+        }
+        return s
+    }
+
+    /// The repairs the run applied, in one line.
+    public var repairsLine: String? {
+        var parts: [String] = []
+        if let on = overhangFilletOn {
+            if on, let n = filletedSpans { parts.append("\(n) spans flared") }
+            if !on, let n = filletSkippedSpans { parts.append("\(n) spans left over air") }
+        }
+        if let on = transferTiesOn, on, let l = tiesLanded { parts.append("\(l) ties landed") }
+        if let big = supportGridTooLarge, big { parts.append("support pass skipped (grid too large)") }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
 
     /// ★ D2, SAID IN ONE LINE — what core chose and from what, then what it achieved,
     /// then its Structural verdict. Displayed, never judged; absent fields are absent.
@@ -145,7 +239,14 @@ public struct OrganicRunReceipt: Equatable, Sendable {
         func ds(_ k: String) -> [Double]? {
             (g[k] as? [Any])?.compactMap { ($0 as? NSNumber)?.doubleValue }
         }
+        // ★ On main the approved separation arrives as the recommendation's FIT
+        // (`recommend.fit_mm`); the older `fitting_separations_mm` stays as a fallback.
         fittingSeparationsMM = ds("fitting_separations_mm")
+            ?? ((g["recommend"] as? [String: Any]).flatMap { r -> [Double]? in
+                guard (r["fit_found"] as? NSNumber)?.boolValue == true,
+                      let mm = (r["fit_mm"] as? NSNumber)?.doubleValue, mm > 0 else { return nil }
+                return [mm]
+            })
         fitSurvivalBar = d("fit_survival_bar")
         selectedWindowMM = ds("selected_window_mm")
         selectedSeparationMM = d("selected_separation_mm")
@@ -158,6 +259,46 @@ public struct OrganicRunReceipt: Equatable, Sendable {
         structuralWorstStrut = g["structural_worst_strut"].map { "\($0)" }
         structuralGoverningLoadCase = g["structural_governing_load_case"].map { "\($0)" }
         structuralKnockdownUsed = d("structural_knockdown_used")
+        structuralRefusal = g["structural_refusal"] as? String
+        structuralStatistic = g["structural_statistic"] as? String
+        structuralKnockdownSource = g["structural_knockdown_source"] as? String
+        structuralGoverningCos2 = d("structural_governing_cos2")
+        structuralMaxOverAllowable = d("structural_max_over_allowable")
+        structuralMaxOverAllowableDistributed = d("structural_max_over_allowable_distributed")
+        structuralMaxDistributedMPa = d("structural_max_distributed_mpa")
+        structuralMaxExceedsAllowable = b("structural_max_exceeds_allowable")
+        transferTiesOn = b("transfer_ties_on"); tieSwirl = d("tie_swirl")
+        tiesSeeded = i("ties_seeded"); tiesLanded = i("ties_landed")
+        tiesRefusedReach = i("ties_refused_reach"); tiesRefusedMinorStress = i("ties_refused_minor_stress")
+        overhangFilletOn = b("overhang_fillet_on"); filletedSpans = i("filleted_spans")
+        filletSkippedSpans = i("fillet_skipped_spans")
+        solidRimMM = d("solid_rim_mm"); shapeFitOn = b("shape_fit_on")
+        shapeFitVoxelsShrunk = i("shape_fit_voxels_shrunk")
+        spacingPrintFloorMM = d("spacing_print_floor_mm")
+        spacingResolutionFloorMM = d("spacing_resolution_floor_mm")
+        supportGridTooLarge = b("support_grid_too_large")
+        tensorNote = g["tensor_note"] as? String
+        if let rec = g["recommend"] as? [String: Any] {
+            func rd(_ k: String) -> Double? { (rec[k] as? NSNumber)?.doubleValue }
+            func rb(_ k: String) -> Bool? { (rec[k] as? NSNumber)?.boolValue }
+            recommendFitFound = rb("fit_found"); recommendFitMM = rd("fit_mm")
+            recommendAutoFound = rb("auto_found")
+            recommendAutoLoMM = rd("auto_lo_mm"); recommendAutoHiMM = rd("auto_hi_mm")
+            recommendBandLoMM = rd("band_lo_mm"); recommendBandHiMM = rd("band_hi_mm")
+            recommendCollapsed = rb("collapsed")
+        }
+        syntheticStressRegions = i("synthetic_stress_regions"); syntheticStressVoxels = i("synthetic_stress_voxels")
+        syntheticStressFully = i("synthetic_stress_fully"); syntheticStressBlended = i("synthetic_stress_blended")
+        if let rows = g["synthetic_stress_by_region"] as? [[String: Any]] {
+            for r in rows {
+                guard let f = (r["face_id"] as? NSNumber)?.intValue, f >= 0 else { continue }
+                syntheticStressByFace[f] = SyntheticStressRow(
+                    foci: (r["foci"] as? NSNumber)?.intValue ?? 0,
+                    voxels: (r["voxels"] as? NSNumber)?.intValue ?? 0,
+                    fully: (r["fully"] as? NSNumber)?.intValue ?? 0,
+                    blended: (r["blended"] as? NSNumber)?.intValue ?? 0)
+            }
+        }
         lengthSurvival = d("length_survival"); emittedComponents = i("emitted_components")
         emittedLargestLengthFraction = d("emitted_largest_length_fraction")
         emittedStrandedLengthMM = d("emitted_stranded_length_mm")

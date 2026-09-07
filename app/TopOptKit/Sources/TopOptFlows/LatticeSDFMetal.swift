@@ -154,10 +154,28 @@ public struct OrganicBakedFields: Sendable {
     public let summary: String
     public let spanCount: Int
     public let lengthMM: Double
+    /// ★ The capsules the fields were baked from (2026-09-06) — what the impostor pass
+    /// draws. Empty on a caller that only has fields.
+    public let capsules: [OrganicCapsule]
     public init(distance: LatticeVoxelGrid, surface: LatticeVoxelGrid, reachMM: Double,
-                summary: String, spanCount: Int, lengthMM: Double) {
+                summary: String, spanCount: Int, lengthMM: Double,
+                capsules: [OrganicCapsule] = []) {
         self.distance = distance; self.surface = surface; self.reachMM = reachMM
         self.summary = summary; self.spanCount = spanCount; self.lengthMM = lengthMM
+        self.capsules = capsules
+    }
+}
+
+/// ★★★ ONE ORGANIC STRUT AS THE GPU DRAWS IT (maintainer, 2026-09-06: "switch the
+/// previews to GPU capsule impostors"): a sphere-swept segment in model millimetres.
+/// The run's emitted spans, the 3MF variants and the span file all reduce to this.
+public struct OrganicCapsule: Sendable, Equatable {
+    public var a: SIMD3<Float>
+    public var b: SIMD3<Float>
+    public var r: Float
+    public init(a: SIMD3<Float>, b: SIMD3<Float>, r: Float) { self.a = a; self.b = b; self.r = r }
+    public init(_ s: (a: SIMD3<Double>, b: SIMD3<Double>, r: Double)) {
+        self.init(a: SIMD3<Float>(s.a), b: SIMD3<Float>(s.b), r: Float(s.r))
     }
 }
 
@@ -184,8 +202,8 @@ public struct LatticeOrganicInput: Sendable {
     public let buildDirection: SIMD3<Double>
     /// The separation window the demand is mapped onto — organic's cell size is an
     /// OUTPUT read off the achieved spacing, so this is the control that drives it.
-    public let separationMinMM: Double
-    public let separationMaxMM: Double
+    public var separationMinMM: Double
+    public var separationMaxMM: Double
     public let rhoMin: Double
     public let rhoMax: Double
 
@@ -214,6 +232,20 @@ public struct LatticeOrganicInput: Sendable {
     /// ★ core `organic_overhang_fillet` (2026-09-05): false ⇒ spans over air are left
     /// as drawn. Honoured by the preview's emission when this core carries the field.
     public var overhangFillet: Bool = true
+    /// ★ CORE'S SYNTHETIC STRESS ON UNLOADED WALLS (2026-09-06): per-voxel region id
+    /// (0 = none, else the 1-based include region) and the per-region config the job
+    /// carries; the bridge calls `synthesize_focal_stress` — the run's own function.
+    public var regionIDs: [Int32] = []
+    public var syntheticRegions: [TopOptKit.OrganicSyntheticRegionSpec] = []
+    public var syntheticDeadFraction: Double = OrganicSyntheticStress.deadFraction
+    /// ★ THE SOLID RIM (maintainer, 2026-09-06: "Fit to shape means grade to solid at
+    /// the edges. Always. And always on the *sides* … creating a solid outline"). The
+    /// run's `apply_organic_solid_rim` turns the candidates within this many mm of the
+    /// region's SIDE neighbours solid (never along the normal). The preview takes the
+    /// same number — the job's `organic_solid_rim_mm`, −1 ⇒ the window's low end — and
+    /// erodes each include face region IN-PLANE by it, so the shell keeps that band and
+    /// no strut is traced there. 0 ⇒ no rim.
+    public var solidRimMM: Double = 0
 
     public init(tensor: [Double], dims: (Int, Int, Int), originMM: SIMD3<Double>,
                 spacingMM: Double, minExtrudableWidthMM: Double,
@@ -330,10 +362,20 @@ public struct LatticeSDFScene {
     /// ★ The emitted spans the trace path baked (nil on the cached and run-spans
     /// paths) — what the variant cache stores as a beam-lattice 3MF.
     public let organicEmittedSpans: [(a: SIMD3<Double>, b: SIMD3<Double>, r: Double)]?
+    /// ★★★ THE CAPSULES THE IMPOSTOR PASS DRAWS (2026-09-06) — every organic source
+    /// (pre-baked variant, span file, cached 3MF, live trace) fills this; the field is
+    /// still baked for the probes, but when the host's capsule pipeline exists the
+    /// march leaves organic alone and these are drawn instead. Empty ⇒ not organic.
+    public let organicCapsules: [OrganicCapsule]
     /// ★ WHY organic was NOT drawn, when it was asked for and `organicField` is nil —
     /// the banner prints it (maintainer, 2026-09-05: a silent ladder under an organic
     /// name looked like "not implemented"). nil when organic was drawn or not asked.
     public let organicNotDrawnReason: String?
+    /// ★ Wall-clock seconds of the three bridge phases (trace, core emission, stamp)
+    /// for a preview that was traced here; nil for a cached or run-supplied one.
+    public let organicPhaseSeconds: (trace: Double, emit: Double, bake: Double)?
+    /// ★ Core's synthetic-stress report for this bake (nil when no wall asked).
+    public let organicSyntheticReport: TopOptKit.OrganicSyntheticReport?
     /// ★ WHAT THE FIELD WAS BAKED FROM when it came from a span file: (count, total
     /// length mm) — the numbers to hold against the run's receipt (§10). nil when the
     /// field was traced at preview time or there is no organic field.
@@ -497,6 +539,20 @@ public struct LatticeSDFScene {
         // ★★ THE PART'S INTERIOR AND THE LATTICED INTERIOR ARE TWO DIFFERENT
         // NUMBERS, and the banner needs both to tell the truth.
         //
+        // ★ THE SOLID RIM, IN-PLANE (2026-09-06): an organic scene erodes each include
+        // face region by the rim before anything is baked from it — the hole in the
+        // shell, the occupancy the tracer is handed, the region field the march and the
+        // capsules clip against. Depth is untouched (the run's rule: never along the
+        // normal). Manual primitives and bolts carry no outline and are left alone.
+        let regions: [LatticeRegionSpec] = {
+            guard algorithm == "organic", let o = organic, o.solidRimMM > 0 else { return regions }
+            return regions.map { r in
+                guard r.role == .include, r.kind == .face, !r.outlineLoops.isEmpty else { return r }
+                var e = r
+                e.inPlaneOffsetMM -= o.solidRimMM
+                return e
+            }
+        }()
         // ★ "No inside to fill" and "your regions matched nothing" are different
         // findings with different fixes — one is a broken import, the other is a
         // depth set too shallow. Counting only the MASKED grid would report the
@@ -686,6 +742,9 @@ public struct LatticeSDFScene {
         var organicSurfaceOut: LatticeVoxelGrid?
         var organicEmittedOut: [(a: SIMD3<Double>, b: SIMD3<Double>, r: Double)]? = nil
         var organicWhyNot: String? = nil
+        var organicSyntheticOut: TopOptKit.OrganicSyntheticReport? = nil
+        var organicPhaseOut: (trace: Double, emit: Double, bake: Double)? = nil
+        var organicCapsOut: [OrganicCapsule] = []
         var organicBand = 0.0
         var organicSaid = ""
         // ★★★ SPANS FIRST. A span file is the run's own emitted geometry; a trace is a
@@ -699,6 +758,7 @@ public struct LatticeSDFScene {
             organicBand = baked.reachMM
             organicSaid = baked.summary
             organicSpanReceipt = (baked.spanCount, baked.lengthMM)
+            organicCapsOut = baked.capsules
         }
         if organicOut == nil, algorithm == "organic", let sp = organicSpans {
             let mn = sp.indexOrigin
@@ -722,6 +782,7 @@ public struct LatticeSDFScene {
                                                     spacing: SIMD3<Float>(repeating: Float(fs)), values: baked.surfaceField)
                 organicBand = baked.reachMM
             }
+            organicCapsOut = sp.segments.map { OrganicCapsule(a: $0.a, b: $0.b, r: $0.r) }
             organicSaid = "\(sp.count) struts, "
                 + String(format: "%.0f mm — the run's emitted spans", sp.totalLengthMM)
             organicSpanReceipt = (sp.count, sp.totalLengthMM)
@@ -839,6 +900,7 @@ public struct LatticeSDFScene {
                     organicSurfaceOut = LatticeVoxelGrid(nx: fnx, ny: fny, nz: fnz, origin: SIMD3<Float>(mn), spacing: sp, values: b.surfaceField)
                     organicBand = b.reachMM
                     organicWhyNot = nil
+                    organicCapsOut = cached.doc.spans.map { OrganicCapsule($0) }
                     let census = cached.doc.metadata["census"] ?? ""
                     organicSaid = "\(b.spanCount) struts, " + String(format: "%.0f mm — %@ (3MF beam lattice)", cached.doc.totalLengthMM, cached.sourceLabel)
                         + (census.isEmpty ? "" : " · " + census)
@@ -854,9 +916,14 @@ public struct LatticeSDFScene {
                     rhoMin: o.rhoMin, rhoMax: o.rhoMax,
                     strutDiameterMM: o.strutDiameterMM, grow: o.grow,
                     layerHeightMM: o.layerHeightMM, anchorAtBoundary: o.anchorAtBoundary,
-                    showRepairs: o.showRepairs, overhangFillet: o.overhangFillet),
+                    showRepairs: o.showRepairs, overhangFillet: o.overhangFillet,
+                    regionIDs: o.regionIDs, syntheticRegions: o.syntheticRegions,
+                    syntheticDeadFraction: o.syntheticDeadFraction),
                    t.field.count == fnx * fny * fnz {
                     organicEmittedOut = t.spans
+                    organicCapsOut = t.spans.map { OrganicCapsule($0) }
+                    organicSyntheticOut = t.synthetic
+                    organicPhaseOut = (t.traceSeconds, t.emitSeconds, t.bakeSeconds)
                     organicWhyNot = nil
                     organicSurfaceOut = LatticeVoxelGrid(
                         nx: fnx, ny: fny, nz: fnz, origin: SIMD3<Float>(mn),
@@ -867,6 +934,7 @@ public struct LatticeSDFScene {
                     organicBand = Double(t.bandMM)
                     // ★ the counters ride the census (reviewer, 2026-09-04)
                     let counters = (t.growth.map { " · " + $0.summary } ?? "") + " · " + t.stops.summary + " · " + t.census.summary
+                        + " · " + t.phaseSummary
                         + (o.showRepairs ? "" : " · ★ REPAIRS HIDDEN: the traced curves are shown; the file has the arches, legs and merges above")
                     organicSaid = "\(t.curveCount) curves, \(t.connectorCount) connectors, "
                         + String(format: "%.2f–%.2f mm spacing",
@@ -878,9 +946,13 @@ public struct LatticeSDFScene {
         self.organicSurfaceField = organicSurfaceOut
         self.organicEmittedSpans = organicEmittedOut
         self.organicNotDrawnReason = (algorithm == "organic" && organicOut == nil) ? (organicWhyNot ?? "no stress tensor reached the tracer (the stage's solve has not produced one)") : nil
+        self.organicSyntheticReport = organicSyntheticOut
+        self.organicPhaseSeconds = organicPhaseOut
+        self.organicCapsules = organicCapsOut
         self.organicSpanSource = organicSpanReceipt
         self.organicReceiptMismatch = organicMismatch
-        let receiptLines = [organicReceipt?.contiguityLine, organicReceipt?.spacingLine]
+        let receiptLines = [organicReceipt?.certificateLine, organicReceipt?.contiguityLine,
+                            organicReceipt?.spacingLine, organicReceipt?.repairsLine]
             .compactMap { $0 }
         self.organicReceiptSummary = receiptLines.isEmpty ? nil : receiptLines.joined(separator: " · ")
         self.organicBandMM = organicBand
@@ -1384,6 +1456,7 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
         organicTex = scene.organicField.flatMap { d in
             scene.organicSurfaceField.map { makeCentrelineTexture(d, surface: $0) } ?? makeVolumeTexture(d)
         }
+        uploadCapsules(scene.organicCapsules)
         stressTex = scene.stressRGB.flatMap { makeTintTexture($0, like: scene.partSDF) }
         tintTex = nil          // stale mesh/grid — the host re-applies tints after setScene
         rebakeCellField()
@@ -2440,7 +2513,8 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
                                      ? params.uniformRelativeDensity
                                      : params.densitySpan.lo),
                                hasDemand, 0.03,
-                               Float(debugMaxSteps)),
+                               // ★ no march at all while the capsules draw organic
+                               Float(capsulesReplaceField ? 0 : debugMaxSteps)),
             // stepParams.y = the trim's inward EROSION (mm). Near creases the trilinear
             // SDF underestimates true distance (min-of-planes is concave), so its zero
             // surface bulges outward in a lumpy per-voxel pattern — strut slivers
@@ -2504,7 +2578,8 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
                 return simd_length(b) > 0.5 ? SIMD4<Float>(SIMD3<Float>(b), 0) : .zero
             }(),
             organicOrigin: {
-                guard let g = scene?.organicField, organicTex != nil else { return .zero }
+                // ★ OFF when the capsules draw organic: the march must not draw it too.
+                guard let g = scene?.organicField, organicTex != nil, !capsulesReplaceField else { return .zero }
                 return SIMD4(g.origin, 1)
             }(),
             organicSpacing: {
@@ -2527,7 +2602,9 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
             organicRadius: {
                 let reach = Float(scene?.organicBandMM ?? 0)
                 // never past 90 % of the reach: beyond it the clamp would lie
-                let live = organicRadiusMM > 0 ? Swift.min(organicRadiusMM, 0.9 * reach) : 0
+                // ★ the capsules have no reach to respect: the live radius is exact
+                let live = organicRadiusMM > 0
+                    ? (capsulesReplaceField ? organicRadiusMM : Swift.min(organicRadiusMM, 0.9 * reach)) : 0
                 return SIMD4(live, reach, Float(LatticeSDFScene.organicBakeHeadroomMM), 0)
             }())
     }
@@ -2721,6 +2798,38 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
     /// this renderer's march samples, so the hole and the struts are one volume.
     var regionTexture: MTLTexture? { regionTex }
     private var organicTex: MTLTexture?
+    // ── ★★★ THE CAPSULE IMPOSTORS (2026-09-06) ─────────────────────────────────
+    /// The scene's organic capsules, packed (a.xyz, r) (b.xyz, 0) for the vertex and
+    /// fragment stages of `organicCapsuleShaderSource`.
+    private var capsuleBuffer: MTLBuffer?
+    private(set) var capsuleCount = 0
+    /// Set by the HOST once its capsule pipeline built. Until then the march draws
+    /// the baked field as before, so a device whose MSL failed loses nothing.
+    var drawOrganicCapsules = false
+    /// True when this frame draws organic as capsules: the march's organic field is
+    /// switched off in the uniforms and its step budget is zeroed, so nothing is
+    /// drawn twice and no ladder stands in.
+    var capsulesReplaceField: Bool { drawOrganicCapsules && capsuleCount > 0 && capsuleBuffer != nil }
+    private func uploadCapsules(_ caps: [OrganicCapsule]) {
+        capsuleCount = caps.count
+        guard capsuleCount > 0 else { capsuleBuffer = nil; return }
+        var packed = [SIMD4<Float>]()
+        packed.reserveCapacity(capsuleCount * 2)
+        for c in caps { packed.append(SIMD4(c.a, c.r)); packed.append(SIMD4(c.b, 0)) }
+        capsuleBuffer = device.makeBuffer(bytes: packed,
+                                          length: MemoryLayout<SIMD4<Float>>.stride * packed.count,
+                                          options: .storageModeShared)
+    }
+    /// Everything `capsule_vertex` / `capsule_gbuffer` declare: the fragment table is
+    /// `bindFragment`'s (so the clip, the region and the tints are the march's), plus
+    /// the capsule buffer at fragment buffer 2 and, for the vertex stage, the capsules
+    /// at 0 and the uniforms at 1.
+    func bindCapsules(_ enc: MTLRenderCommandEncoder, _ u: inout LSDFUniforms) {
+        bindFragment(enc, &u)
+        enc.setVertexBuffer(capsuleBuffer, offset: 0, index: 0)
+        enc.setVertexBytes(&u, length: MemoryLayout<LSDFUniforms>.stride, index: 1)
+        enc.setFragmentBuffer(capsuleBuffer, offset: 0, index: 2)
+    }
     /// A 1×1×1 volume reading +1e9 — "no strut anywhere", so a bound-but-unread
     /// texture cannot draw geometry. Metal requires the binding to exist.
     private var neutralOrganicTex: MTLTexture?

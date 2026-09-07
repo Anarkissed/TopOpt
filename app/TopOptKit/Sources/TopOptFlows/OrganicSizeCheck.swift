@@ -32,8 +32,41 @@ public enum OrganicSizeCheck {
     /// doubtful — ADVICE only (measured: 1.7–3.4 cells across certified).
     public static let cellsAcrossAdvisory = 4.0
 
+    /// ★ THE ORGANIC FLOOR (brief §0, 2026-09-06): core's print floor is
+    /// 0.5 × bead × √(3π) = 1.535 × bead, and the resolution floor is one voxel of
+    /// the solve grid; the smallest cell is the larger. The octet cell bound
+    /// (4.93 mm at a 0.45 mm bead) is NOT the organic floor and is never shown.
+    public struct Floor: Equatable, Sendable {
+        public let mm: Double
+        public let beadFloorMM: Double
+        public let voxelMM: Double
+        public var resolutionBound: Bool { voxelMM > beadFloorMM + 1e-9 }
+        public init(mm: Double, beadFloorMM: Double, voxelMM: Double) {
+            self.mm = mm; self.beadFloorMM = beadFloorMM; self.voxelMM = voxelMM
+        }
+    }
+    public static let printFloorPerBead = 0.5 * (3 * Double.pi).squareRoot()   // 1.535
+
+    public static func floor(beadMM: Double, voxelMM: Double) -> Floor {
+        let bead = beadMM > 0 ? printFloorPerBead * beadMM : 0
+        let vox = Swift.max(0, voxelMM)
+        return Floor(mm: Swift.max(bead, vox), beadFloorMM: bead, voxelMM: vox)
+    }
+    /// The floor a recommendation states, once a probe has run.
+    public static func floor(from rec: OrganicForecast.Recommendation) -> Floor {
+        Floor(mm: rec.floorMM, beadFloorMM: rec.printabilityFloorMM, voxelMM: rec.resolutionFloorMM)
+    }
+
     public static func evaluate(cellMinMM: Double, cellMaxMM: Double,
                                 walls: [Wall], printabilityFloorMM: Double,
+                                probe: OrganicForecast?) -> Verdict {
+        evaluate(cellMinMM: cellMinMM, cellMaxMM: cellMaxMM, walls: walls,
+                 floor: Floor(mm: printabilityFloorMM, beadFloorMM: printabilityFloorMM, voxelMM: 0),
+                 probe: probe)
+    }
+
+    public static func evaluate(cellMinMM: Double, cellMaxMM: Double,
+                                walls: [Wall], floor: Floor,
                                 probe: OrganicForecast?) -> Verdict {
         var reasons: [String] = []
         var advice: [String] = []
@@ -41,9 +74,14 @@ public enum OrganicSizeCheck {
         guard lo > 0 else {
             return Verdict(allowed: false, likely: false, reasons: ["Enter a size greater than 0 mm."], advice: [])
         }
-        if printabilityFloorMM > 0, lo < printabilityFloorMM - 1e-9 {
-            reasons.append(String(format: "%g mm is smaller than the smallest cell this nozzle can print (%.2f mm).",
-                                  lo, printabilityFloorMM))
+        if floor.mm > 0, lo < floor.mm - 1e-9 {
+            if floor.resolutionBound {
+                reasons.append(String(format: "%g mm is smaller than one cell of the solve grid (%.2f mm). A finer quality setting makes the grid finer.",
+                                      lo, floor.mm))
+            } else {
+                reasons.append(String(format: "%g mm is smaller than the smallest cell this nozzle can print (%.2f mm).",
+                                      lo, floor.mm))
+            }
         }
         if let thinnest = walls.min(by: { $0.depthMM < $1.depthMM }), thinnest.depthMM > 0,
            hi > thinnest.depthMM + 1e-9 {
@@ -83,7 +121,7 @@ public enum OrganicSizeCheck {
     /// The two local rules are hard refusals everywhere: below the printable cell,
     /// or bigger than the thinnest wall.
     private static func hardRefused(_ reasons: [String]) -> Bool {
-        reasons.contains { $0.contains("smallest cell") || $0.contains("thinnest wall") }
+        reasons.contains { $0.contains("smallest cell") || $0.contains("solve grid") || $0.contains("thinnest wall") }
     }
 
     /// The Structural pop-up's words (his item 2: "it will confirm when the actual

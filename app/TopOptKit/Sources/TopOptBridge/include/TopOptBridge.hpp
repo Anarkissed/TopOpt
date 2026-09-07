@@ -1124,6 +1124,12 @@ LatticeLimits lattice_limits(const std::string& topology);
 /// Header then payload: [ok, nx, ny, nz, ox, oy, oz, base_cell_mm, max_level,
 /// level per base cell (x fastest, -1 = not latticed)]. Empty ⇒ core refused.
 /// The base-cell grid it reports is the ONLY grid the levels are aligned to.
+// ★ core's organic cell-size BAND (organic_recommend_band), rows of 5 per include
+// region: face_id, depth_mm, extent_short_mm, stress_p50, stress_p99. See bridge.cpp.
+std::vector<double> organic_recommend_band(const double* regions, std::size_t region_count,
+                                           double min_extrudable_width_mm, double voxel_mm,
+                                           double look_cells_across, int steps);
+
 std::vector<double> lattice_cell_size_plan(
     int nx, int ny, int nz, double spacing, double ox, double oy, double oz,
     const std::uint8_t* candidate, std::size_t candidate_count,
@@ -1279,6 +1285,14 @@ std::vector<double> organic_preview_field(
     int anchor_at_boundary,
     int emit_repairs,
     int overhang_fillet,
+    // ★ SYNTHETIC STRESS ON UNLOADED WALLS — CORE'S OWN FUNCTION (brief 2026-09-05,
+    // B.5: "the preview bridge ... must call synthesize_focal_stress() on its tensor
+    // with the same per-region config, or preview and run disagree on a dead wall").
+    // region_id: one int per voxel, 0 = none, else the 1-based include region.
+    // synth: rows of 4 doubles [region_id, face_id, foci, soft_mm]. dead_fraction:
+    // the run's 0.02. Nothing runs when region_id_count != n or synth_count == 0.
+    const int* region_id, std::size_t region_id_count,
+    const double* synth, std::size_t synth_count, double synth_dead_fraction,
     int fnx, int fny, int fnz, double fspacing,
     double fox, double foy, double foz, double band_mm);
 

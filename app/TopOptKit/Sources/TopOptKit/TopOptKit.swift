@@ -1087,6 +1087,51 @@ public enum TopOptKit {
     /// `spacingMM` is the SEPARATION field, and for organic it is the INPUT the whole
     /// method turns on: cell size is derived FROM it, never the other way round.
     /// Returns `nil` when core refused (bad sizes, no candidate, no stated bead).
+    /// ★ ONE WALL'S SYNTHETIC-STRESS CONFIG for the preview bridge — the same fields
+    /// core's `SyntheticStressRegion` carries (region id 1-based, the B-rep face for
+    /// the receipt, 1…5 foci, softening 0 = a quarter of the largest extent).
+    public struct OrganicSyntheticRegionSpec: Sendable, Equatable {
+        public let regionID: Int
+        public let faceID: Int
+        public let foci: Int
+        public let softMM: Double
+        public init(regionID: Int, faceID: Int, foci: Int, softMM: Double = 0) {
+            self.regionID = regionID; self.faceID = faceID; self.foci = foci; self.softMM = softMM
+        }
+    }
+
+    /// ★ CORE'S REPORT of what it synthesised (`SyntheticStressReport`): per region,
+    /// the voxels it looked at, how many went fully synthetic (real weight < 0.05)
+    /// and how many blended — the run's receipt says the same in the same words.
+    public struct OrganicSyntheticReport: Sendable, Equatable {
+        public struct Region: Sendable, Equatable {
+            public let regionID: Int
+            public let faceID: Int
+            public let foci: Int
+            public let softMM: Double
+            public let voxels: Int
+            public let fullySynthetic: Int
+            public let blended: Int
+            public init(regionID: Int, faceID: Int, foci: Int, softMM: Double,
+                        voxels: Int, fullySynthetic: Int, blended: Int) {
+                self.regionID = regionID; self.faceID = faceID; self.foci = foci; self.softMM = softMM
+                self.voxels = voxels; self.fullySynthetic = fullySynthetic; self.blended = blended
+            }
+        }
+        public let regions: [Region]
+        public let voxelsInRegions: Int
+        public let fullySynthetic: Int
+        public let blended: Int
+        public let deadThreshold: Double
+        public let peakVonMises: Double
+        public init(regions: [Region], voxelsInRegions: Int, fullySynthetic: Int, blended: Int,
+                    deadThreshold: Double, peakVonMises: Double) {
+            self.regions = regions; self.voxelsInRegions = voxelsInRegions
+            self.fullySynthetic = fullySynthetic; self.blended = blended
+            self.deadThreshold = deadThreshold; self.peakVonMises = peakVonMises
+        }
+    }
+
     public struct OrganicTrace: Sendable {
         /// ★ THE TRACED CAPSULES AS A DISTANCE FIELD (mm, negative inside a strut),
         /// on the grid the caller asked for — the REGION's bbox, so its voxel can be a
@@ -1180,6 +1225,19 @@ public enum TopOptKit {
             }
         }
         public let census: LengthCensus
+        /// ★ Core's synthetic-stress report for this preview (2026-09-06), nil when
+        /// no wall asked for it. The same function and config the run uses.
+        public var synthetic: OrganicSyntheticReport? = nil
+        /// ★ THE PHASE CLOCK (2026-09-06): wall-clock seconds the bridge spent in the
+        /// trace (or growth), in core's emission passes, and in the capsule stamp.
+        /// His part sat 12 min 26 s at "Rebuilding the lattice" and only a `sample`
+        /// of the process could say the emission's support raster was all of it.
+        public var traceSeconds: Double = 0
+        public var emitSeconds: Double = 0
+        public var bakeSeconds: Double = 0
+        public var phaseSummary: String {
+            String(format: "trace %.1f s · repairs %.1f s · bake %.1f s", traceSeconds, emitSeconds, bakeSeconds)
+        }
     }
 
     /// ★ ORGANIC'S OWN STRUT LAW — `t = 2·d·√(rho/3π)`. NOT the octet's measured
@@ -1204,6 +1262,72 @@ public enum TopOptKit {
 
     /// ★ Bake a span list alone into the two channels (centreline distance, surface
     /// distance) — a cached variant or a run's emitted spans; no trace, no emission.
+    /// ★ CORE'S OWN CELL-SIZE BAND FOR ORGANIC (2026-09-06) — `organic_recommend_band`
+    /// with the run's own arguments. The preview's Auto window is read from here, not
+    /// from the octet window. `regions`: one row per include region.
+    public struct OrganicRecommendBandResult: Sendable, Equatable {
+        public struct Candidate: Sendable, Equatable {
+            public let loMM: Double, hiMM: Double
+            /// "grid" | "pair" | "look" | "look_pair" | "look_step" | "other"
+            public let source: String
+            public init(loMM: Double, hiMM: Double, source: String) {
+                self.loMM = loMM; self.hiMM = hiMM; self.source = source
+            }
+        }
+        public let loMM: Double, hiMM: Double
+        public let printabilityFloorMM: Double, resolutionFloorMM: Double
+        public let memberCeilingMM: Double, extentCeilingMM: Double
+        public let collapsed: Bool
+        public let lookCellMM: Double, gradeRatio: Double
+        public let candidates: [Candidate]
+        public init(loMM: Double, hiMM: Double, printabilityFloorMM: Double, resolutionFloorMM: Double,
+                    memberCeilingMM: Double, extentCeilingMM: Double, collapsed: Bool,
+                    lookCellMM: Double, gradeRatio: Double, candidates: [Candidate]) {
+            self.loMM = loMM; self.hiMM = hiMM
+            self.printabilityFloorMM = printabilityFloorMM; self.resolutionFloorMM = resolutionFloorMM
+            self.memberCeilingMM = memberCeilingMM; self.extentCeilingMM = extentCeilingMM
+            self.collapsed = collapsed; self.lookCellMM = lookCellMM; self.gradeRatio = gradeRatio
+            self.candidates = candidates
+        }
+        public var summary: String {
+            collapsed
+                ? String(format: "core's band collapsed (floor %.2f mm ≥ ceiling %.2f mm): solid", loMM, hiMM)
+                : String(format: "core's band %.2f–%.2f mm · look %.2f mm ×%.2f", loMM, hiMM, lookCellMM, gradeRatio)
+        }
+    }
+    public struct OrganicRecommendRegionRow: Sendable, Equatable {
+        public let faceID: Int, depthMM: Double, extentShortMM: Double
+        public let stressP50: Double, stressP99: Double
+        public init(faceID: Int, depthMM: Double, extentShortMM: Double, stressP50: Double, stressP99: Double) {
+            self.faceID = faceID; self.depthMM = depthMM; self.extentShortMM = extentShortMM
+            self.stressP50 = stressP50; self.stressP99 = stressP99
+        }
+    }
+    public static func organicRecommendBand(regions: [OrganicRecommendRegionRow],
+                                            minExtrudableWidthMM: Double, voxelMM: Double,
+                                            lookCellsAcross: Double, steps: Int) -> OrganicRecommendBandResult? {
+        guard !regions.isEmpty, minExtrudableWidthMM > 0, voxelMM > 0 else { return nil }
+        var flat = [Double](); flat.reserveCapacity(regions.count * 5)
+        for r in regions { flat += [Double(r.faceID), r.depthMM, r.extentShortMM, r.stressP50, r.stressP99] }
+        let raw: [Double] = flat.withUnsafeBufferPointer { fp in
+            topoptbridge.organic_recommend_band(fp.baseAddress, regions.count, minExtrudableWidthMM,
+                                                voxelMM, lookCellsAcross, Int32(steps)).map { Double($0) }
+        }
+        guard raw.count >= 10, raw[1] > 0 || raw[6] > 0.5 else { return nil }
+        let names = ["grid", "pair", "look", "look_pair", "look_step", "other"]
+        var cands: [OrganicRecommendBandResult.Candidate] = []
+        let n = Int(raw[9])
+        for i in 0..<n where raw.count >= 10 + 3 * (i + 1) {
+            let o = 10 + 3 * i
+            cands.append(.init(loMM: raw[o], hiMM: raw[o + 1],
+                               source: names[Swift.min(Swift.max(Int(raw[o + 2]), 0), 5)]))
+        }
+        return OrganicRecommendBandResult(
+            loMM: raw[0], hiMM: raw[1], printabilityFloorMM: raw[2], resolutionFloorMM: raw[3],
+            memberCeilingMM: raw[4], extentCeilingMM: raw[5], collapsed: raw[6] > 0.5,
+            lookCellMM: raw[7], gradeRatio: raw[8], candidates: cands)
+    }
+
     public static func organicSpansField(spans: [(a: SIMD3<Double>, b: SIMD3<Double>, r: Double)],
                                          fieldDims: (Int, Int, Int), fieldOrigin: SIMD3<Double>,
                                          fieldSpacingMM: Double, bandMM: Double)
@@ -1248,7 +1372,12 @@ public enum TopOptKit {
                                     // file's repaired spans (2026-09-05)
                                     showRepairs: Bool = true,
                                     // ★ core `organic_overhang_fillet` (2026-09-05)
-                                    overhangFillet: Bool = true)
+                                    overhangFillet: Bool = true,
+                                    // ★ core's synthetic stress on unloaded walls (2026-09-06):
+                                    // per-voxel region id (0 = none) and per-region config
+                                    regionIDs: [Int32] = [],
+                                    syntheticRegions: [OrganicSyntheticRegionSpec] = [],
+                                    syntheticDeadFraction: Double = 0.02)
         -> OrganicTrace? {
         let n = nx * ny * nz
         let (fnx, fny, fnz) = fieldDims
@@ -1259,9 +1388,15 @@ public enum TopOptKit {
               fnx > 0, fny > 0, fnz > 0, fieldSpacingMM > 0, bandMM > 0 else { return nil }
         var flags = [UInt8](repeating: 0, count: n)
         for i in 0..<n where candidate[i] { flags[i] = 1 }
+        let rids: [Int32] = regionIDs.count == n ? regionIDs : []
+        let synthRows: [Double] = rids.isEmpty ? [] : syntheticRegions.flatMap {
+            [Double($0.regionID), Double($0.faceID), Double($0.foci), $0.softMM]
+        }
         let raw: [Double] = flags.withUnsafeBufferPointer { cb in
             stressTensor.withUnsafeBufferPointer { tb in
                 separationMM.withUnsafeBufferPointer { sb in
+                  rids.withUnsafeBufferPointer { rb in
+                   synthRows.withUnsafeBufferPointer { yb in
                     topoptbridge.organic_preview_field(
                         Int32(nx), Int32(ny), Int32(nz), spacingMM,
                         origin.x, origin.y, origin.z,
@@ -1275,14 +1410,36 @@ public enum TopOptKit {
                         anchorAtBoundary ? Int32(1) : Int32(0),
                         showRepairs ? Int32(1) : Int32(0),
                         overhangFillet ? Int32(1) : Int32(0),
+                        rb.baseAddress, rb.count,
+                        yb.baseAddress, yb.count, syntheticDeadFraction,
                         Int32(fnx), Int32(fny), Int32(fnz), fieldSpacingMM,
                         fieldOrigin.x, fieldOrigin.y, fieldOrigin.z,
                         bandMM).map { Double($0) }
+                   }
+                  }
                 }
             }
         }
-        guard raw.count >= 48, raw[0] > 0.5 else { return nil }
-        let head = 48
+        guard raw.count >= 64, raw[0] > 0.5 else { return nil }
+        // ★ 64-double header (2026-09-06), then out[55] rows of 7: core's
+        // synthetic-stress report per region, BEFORE the field.
+        let synthRowCount = Int(raw[55])
+        let head = 64 + 7 * synthRowCount
+        guard raw.count >= head else { return nil }
+        var synthetic: OrganicSyntheticReport? = nil
+        if raw[48] > 0.5 {
+            var rows: [OrganicSyntheticReport.Region] = []
+            for r in 0..<synthRowCount {
+                let o = 64 + 7 * r
+                rows.append(OrganicSyntheticReport.Region(
+                    regionID: Int(raw[o]), faceID: Int(raw[o + 1]), foci: Int(raw[o + 2]),
+                    softMM: raw[o + 3], voxels: Int(raw[o + 4]),
+                    fullySynthetic: Int(raw[o + 5]), blended: Int(raw[o + 6])))
+            }
+            synthetic = OrganicSyntheticReport(
+                regions: rows, voxelsInRegions: Int(raw[50]), fullySynthetic: Int(raw[51]),
+                blended: Int(raw[52]), deadThreshold: raw[53], peakVonMises: raw[54])
+        }
         let count = Int(raw[4])
         guard count == fn, raw.count >= head + fn else { return nil }
         let field = (0..<fn).map { Float(raw[head + $0]) }
@@ -1328,7 +1485,9 @@ public enum TopOptKit {
                                 stages: zip(OrganicTrace.LengthCensus.stageNames, (0..<12).map { raw[33 + $0] })
                                     .map { (name: $0, lengthMM: $1) },
                                 writtenComponents: Int(raw[45]), emissionRan: raw[46] > 0.5,
-                                filletedSpans: Int(raw[47])))
+                                filletedSpans: Int(raw[47])),
+                            synthetic: synthetic,
+                            traceSeconds: raw[56], emitSeconds: raw[57], bakeSeconds: raw[58])
     }
 
     public static func latticeMemberThicknessMM(nx: Int, ny: Int, nz: Int,
@@ -1730,7 +1889,7 @@ public enum TopOptKit {
     public static let organicStructuralCertificationWired: Bool = {
         let text = latticeProbeBaseJob.replacingOccurrences(
             of: #""output":"#,
-            with: #""grading": {"topology": "octet", "min_extrudable_width_mm": 0.4, "algorithm": "organic", "intent": "structural", "organic_structural_certification": "beam_network"}, "output":"#)
+            with: #""grading": {"topology": "octet", "min_extrudable_width_mm": 0.4, "cell_mm": 3.0, "algorithm": "organic", "intent": "structural", "organic_structural_certification": "beam_network"}, "output":"#)
         return jobSchemaError(Data(text.utf8)) == nil
     }()
     /// The gate's own words, surfaced wherever an organic + Structural run would start.
@@ -1747,7 +1906,7 @@ public enum TopOptKit {
         func job(_ extra: String) -> Data {
             let text = latticeProbeBaseJob.replacingOccurrences(
                 of: #""output":"#,
-                with: #""grading": {"topology": "octet", "min_extrudable_width_mm": 0.4, "algorithm": "organic", "intent": "aesthetic"}, "lattice": {"topology": "octet", "cell_mm": 3.0, "strut_radius_mm": 0.4, "regions": [{"role": "include", "kind": "face", "geometry": {"origin": [0, 0, 0], "normal": [0, 0, 1], "half_u_mm": 10, "half_w_mm": 10, "depth_mm": 5}"#
+                with: #""grading": {"topology": "octet", "min_extrudable_width_mm": 0.4, "cell_mm": 3.0, "algorithm": "organic", "intent": "aesthetic"}, "lattice": {"topology": "octet", "regions": [{"role": "include", "kind": "face", "geometry": {"origin": [0, 0, 0], "normal": [0, 0, 1], "half_u_mm": 10, "half_w_mm": 10, "depth_mm": 5}"#
                     + extra + #"}]}, "output":"#)
             return Data(text.utf8)
         }
@@ -1764,7 +1923,7 @@ public enum TopOptKit {
         func job(_ extra: String) -> Data {
             let text = latticeProbeBaseJob.replacingOccurrences(
                 of: #""output":"#,
-                with: #""grading": {"topology": "octet", "min_extrudable_width_mm": 0.4, "algorithm": "organic", "intent": "aesthetic"}, "lattice": {"topology": "octet""#
+                with: #""grading": {"topology": "octet", "min_extrudable_width_mm": 0.4, "cell_mm": 3.0, "algorithm": "organic", "intent": "aesthetic"}, "lattice": {"topology": "octet""#
                     + extra + #"}, "output":"#)
             return Data(text.utf8)
         }

@@ -321,10 +321,24 @@ public enum RelatticeRun {
     /// soon as the worker serves it, then CANCELS the run — a "Check sizes" is a
     /// question, not a run nobody asked for. A worker that serves files only when
     /// done still answers: the file is read at "done" instead.
+    /// ★ `organic_recommend` (brief 2026-09-06): core generates its own candidates
+    /// across the band and returns FIT and AUTO picks; the look target is the
+    /// Aesthetic lever, the margin the Structural one.
+    public struct Recommend: Equatable, Sendable {
+        public let mode: String            // "auto" = grading.intent
+        public let lookCellsAcross: Int
+        public let margin: Double
+        public let steps: Int
+        public init(mode: String = "auto", lookCellsAcross: Int = 8, margin: Double = 1.5, steps: Int = 5) {
+            self.mode = mode; self.lookCellsAcross = lookCellsAcross; self.margin = margin; self.steps = steps
+        }
+    }
+
     public static func probe(_ inputs: Inputs, cellsMM: [Double], gradesMM: [[Double]],
+                             recommend: Recommend? = nil,
                              isCancelled: @escaping () -> Bool = { false })
         throws -> OrganicForecast {
-        let patched = try probeJob(inputs.jobJSON, cellsMM: cellsMM, gradesMM: gradesMM)
+        let patched = try probeJob(inputs.jobJSON, cellsMM: cellsMM, gradesMM: gradesMM, recommend: recommend)
         let probeInputs = Inputs(config: inputs.config, modelPath: inputs.modelPath,
                                  jobJSON: patched, designBin: inputs.designBin,
                                  projectName: inputs.projectName,
@@ -341,7 +355,8 @@ public enum RelatticeRun {
 
     /// The job with the probe keys — pure, so it can be pinned. Refuses a job whose
     /// grading is not organic (core refuses the keys there) and empty candidates.
-    public static func probeJob(_ jobJSON: Data, cellsMM: [Double], gradesMM: [[Double]]) throws -> Data {
+    public static func probeJob(_ jobJSON: Data, cellsMM: [Double], gradesMM: [[Double]],
+                                recommend: Recommend? = nil) throws -> Data {
         guard var obj = (try? JSONSerialization.jsonObject(with: jobJSON)) as? [String: Any],
               var lat = obj["lattice"] as? [String: Any] else {
             throw RelatticeError("There is no lattice to check.")
@@ -352,11 +367,17 @@ public enum RelatticeRun {
         }
         let cells = cellsMM.filter { $0 > 0 }
         let grades = gradesMM.filter { $0.count == 2 && $0[0] > 0 && $0[0] < $0[1] }
-        guard !cells.isEmpty || !grades.isEmpty else {
+        guard !cells.isEmpty || !grades.isEmpty || recommend != nil else {
             throw RelatticeError("There are no sizes to check.")
         }
         if !cells.isEmpty { lat["organic_probe_cells_mm"] = cells }
         if !grades.isEmpty { lat["organic_probe_grades_mm"] = grades }
+        if let r = recommend {
+            lat["organic_recommend"] = r.mode
+            lat["organic_look_cells_across"] = Swift.max(2, r.lookCellsAcross)
+            lat["organic_recommend_margin"] = Swift.max(1, r.margin)
+            lat["organic_recommend_steps"] = Swift.min(8, Swift.max(2, r.steps))
+        }
         obj["lattice"] = lat
         return try JSONSerialization.data(withJSONObject: obj, options: [.sortedKeys])
     }

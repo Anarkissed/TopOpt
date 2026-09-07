@@ -120,3 +120,41 @@ Printability never fired: zero steps refused by the support rule, zero tips clam
 - Simulator, dylib 14880acff6ded337 (21:59): v14_A_popup_rewritten.png — "3–1 mm cannot form a lattice · The upper size must be larger than the lower size."; "Not available yet" replaces "Not in this core". Next dylib: "Check sizes" gone from the header (shown beside the numbers only when this build can check sizes).
 - Simulator, dylib 82e4dfa92fb778d6 (22:04): v14_B_check_sizes_gone_when_unavailable.png — Manual with the simulation on: "Grade · 3.00 mm to 5.00 mm" and nothing else; the disabled "Check sizes" is gone (it renders beside the numbers only when this build can check sizes). His project.json restored (sha d6d1d335024d418e); app terminated first.
 - Simulator, dylib 793bf97c18b0ef19 (22:11): v14_C_sim_off_manual_single_field.png — simulation off, Manual: "Size · 2.00 mm", one centred field, no list under it. His project.json restored (sha d6d1d335024d418e); app terminated first.
+
+## Round 9 — 2026-09-06: the UI wired to core main (PR 355 merged, f08c1af8)
+- Merged main; core taken from main wholesale (the branch's core diff is zero lines); xcframework rebuilt; CoreFingerprint set by hand to f08c1af81098. All five schema probes pass (fillet, transfer ties, per-region synthetic stress, organic_probe_cells_mm, beam_network certificate) once the probe skeletons carried `cell_mm` in grading and no cell keys in the lattice block.
+- The preview now calls core's `synthesize_focal_stress` through the bridge with the same per-region config the job carries (the app-side injector is deleted); core's per-region report comes back as the drawer's verdict (real share ≥ ½ = loaded).
+- Job keys, floor, recommendation and receipt per the brief (handoff items 24–29). Organic suites on the Mac: 105/0 (Debug). The four bundled sample variants are being regenerated for the new core SHA; the device walk follows.
+
+## Round 10 — 2026-09-06 evening, his walk of the main-wired build (Debug, iPad sim, dylib af8bc1831f4af5cd)
+
+- `v15_A_part_organic_2to4mm_after_two_bakes.png` — the M2 stand after the second
+  of two identical 12-minute bakes (12 min 26 s, 12 min 37 s; both 100 % in core's
+  support raster by `sample`). Wizard said "2.00 mm to 4.00 mm"; the bake traced the
+  octet window 4–8 mm (bug, fixed). Sim density on a 0.031 MPa peak ⇒ the thin end
+  of the ramp everywhere (0.73 mm struts) on a 0.35 mm field voxel ⇒ threads. His
+  verdict: "seriously wrong … looks horrible". See handoff items 30–38.
+- Fix build installed 18:2x: dylib 312ef5d375933b0d — no second bake, the typed
+  grade traced, caption + (i) banner, phase clock in the log. Not yet photographed
+  (he was walking the simulator).
+
+## Round 11 — 2026-09-06 evening, organic as capsule impostors (Mac offscreen, Debug)
+
+- `v16_mac_capsules_traced_fit.png`, `v16_mac_capsules_grown_auto.png` — the two
+  shipped variants (26,876 and 124,503 spans) drawn by `capsule_gbuffer` at 900² on
+  the Mac (`OrganicCapsuleEvidenceGen`), body hidden. Round struts at every zoom; the
+  beads on the traced variant are the FILE's fillet flares (median radius 0.21 mm,
+  top 10 % at 0.44–0.50 mm, median segment 0.13 mm), not a rendering artefact — the
+  12 mm test strut wins 1800 px at 384², which only a full cylinder body can.
+- Mac, not the iPad: the simulator screenshot is the verdict. Build installed, not
+  launched: dylib 14d0bf46c02f0607 (18:56).
+
+## Round 12 — 2026-09-06 late evening, his second walk (Debug, iPad sim, dylib 14d0bf46c02f0607)
+
+- His screenshots at 19:13 / 19:16 / 19:25: capsules on the part (Auto, then 2–4 mm,
+  then look 8). Phase clock: trace ≤ 0.2 s, emission 42 s / 191 s / 186 s, bake ≤ 0.4 s.
+  Auto looked sparse because the trace read the octet window (4–8 mm). No solid rim
+  showed. Both walls still "loaded" (peak 0.031 MPa; core report, item 39).
+- Fix build (see handoff 41–44): two-stage bake, emission skipped when repairs are
+  hidden, Auto from core's band, in-plane rim. Installed once the build lands; the
+  simulator screenshots are his to take on launch.

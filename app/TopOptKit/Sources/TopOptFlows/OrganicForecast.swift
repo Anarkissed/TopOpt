@@ -45,7 +45,62 @@ public struct OrganicForecast: Equatable, Sendable, Codable {
         public let seconds: Double
         public let refusal: String          // when refused
         public let reason: String           // when !ran (segment cap hit)
+        public var knockdownUsed: Double = 0
+        public var knockdownSource: String = ""
+        public var maxOverAllowable: Double = 0
+        public var maxOverAllowableDistributed: Double = 0
+        public var maxExceedsAllowable: Bool = false
         public var certified: Bool { ran && verdict == "certified" }
+    }
+
+    /// ★ THE RECOMMENDATION (`organic_recommend` ≠ "off"): the band the WALLS, the
+    /// shortest FACE, the BEAD and the VOXEL bound, and core's FIT and AUTO picks.
+    public struct Recommendation: Equatable, Sendable, Codable {
+        public struct Fit: Equatable, Sendable, Codable {
+            public let found: Bool
+            public let cellMM: Double
+            public let margin: Double
+            public let tracedMM: Double
+            public let source: String
+        }
+        public struct Auto: Equatable, Sendable, Codable {
+            public let found: Bool
+            public let cellMinMM: Double
+            public let cellMaxMM: Double
+            public let margin: Double
+            public let tracedMM: Double
+            public let source: String
+        }
+        public struct Rejected: Equatable, Sendable, Codable {
+            public let cellMinMM: Double
+            public let cellMaxMM: Double
+            public let source: String
+            public let reason: String
+        }
+        public let ran: Bool
+        public let mode: String
+        public let bandLoMM: Double
+        public let bandHiMM: Double
+        public let collapsed: Bool
+        public let printabilityFloorMM: Double
+        public let resolutionFloorMM: Double
+        public let memberCeilingMM: Double
+        public let extentCeilingMM: Double
+        public let lookCellMM: Double
+        public let gradeRatio: Double
+        public let lookCellsAcross: Double
+        public let targetMargin: Double
+        public let fit: Fit?
+        public let auto: Auto?
+        public let rejected: [Rejected]
+        /// The smallest cell: the larger of the bead floor and the grid's voxel.
+        public var floorMM: Double { Swift.max(printabilityFloorMM, resolutionFloorMM) }
+        public var floorIsResolutionBound: Bool { resolutionFloorMM > printabilityFloorMM + 1e-9 }
+        /// Which of the four bounds hold the band, for the "no cell fits" copy.
+        public var boundsText: String {
+            String(format: "bead floor %.2f mm · grid %.2f mm · wall ceiling %.1f mm · face ceiling %.1f mm",
+                   printabilityFloorMM, resolutionFloorMM, memberCeilingMM, extentCeilingMM)
+        }
     }
 
     public struct Candidate: Equatable, Sendable, Codable {
@@ -111,6 +166,7 @@ public struct OrganicForecast: Equatable, Sendable, Codable {
     public let curvesPerFamilyGate: Int
     public let cellsAcrossAdvisory: Double
     public let candidates: [Candidate]
+    public var recommendation: Recommendation? = nil
 
     public var sizes: [Candidate] { candidates.filter { !$0.isGrade } }
     public var grades: [Candidate] { candidates.filter { $0.isGrade } }
@@ -152,12 +208,18 @@ public struct OrganicForecast: Equatable, Sendable, Codable {
                               advice: r["advice"] as? String ?? "")
             }
             let predicted: Predicted? = (c["predicted"] as? [String: Any]).map { p in
-                Predicted(ran: p["ran"] as? Bool ?? false,
+                var pr = Predicted(ran: p["ran"] as? Bool ?? false,
                           verdict: p["verdict"] as? String ?? "",
                           margin: d(p["margin"]), p99MPa: d(p["p99_mpa"]), maxMPa: d(p["max_mpa"]),
                           allowableMPa: d(p["allowable_mpa"]), segments: i(p["segments"]),
                           seconds: d(p["seconds"]), refusal: p["refusal"] as? String ?? "",
                           reason: p["reason"] as? String ?? "")
+                pr.knockdownUsed = d(p["knockdown_used"])
+                pr.knockdownSource = p["knockdown_source"] as? String ?? ""
+                pr.maxOverAllowable = d(p["max_over_allowable"])
+                pr.maxOverAllowableDistributed = d(p["max_over_allowable_distributed"])
+                pr.maxExceedsAllowable = p["max_exceeds_allowable"] as? Bool ?? false
+                return pr
             }
             return Candidate(cellMinMM: cellMin, cellMaxMM: cellMax,
                              traceSeconds: d(c["trace_seconds"]), curves: i(c["curves"]),
@@ -167,14 +229,43 @@ public struct OrganicForecast: Equatable, Sendable, Codable {
                              predicted: predicted,
                              approvedStructural: structural, approvedAesthetic: aesthetic)
         }
-        return OrganicForecast(probeVersion: version,
-                               algorithm: o["algorithm"] as? String ?? "organic",
-                               growth: o["growth"] as? Bool ?? false,
-                               transferTies: o["transfer_ties"] as? Bool ?? false,
-                               rootedGate: d(o["rooted_gate"]),
-                               curvesPerFamilyGate: i(o["curves_per_family_gate"]),
-                               cellsAcrossAdvisory: d(o["cells_across_advisory"]),
-                               candidates: candidates)
+        var out = OrganicForecast(probeVersion: version,
+                                  algorithm: o["algorithm"] as? String ?? "organic",
+                                  growth: o["growth"] as? Bool ?? false,
+                                  transferTies: o["transfer_ties"] as? Bool ?? false,
+                                  rootedGate: d(o["rooted_gate"]),
+                                  curvesPerFamilyGate: i(o["curves_per_family_gate"]),
+                                  cellsAcrossAdvisory: d(o["cells_across_advisory"]),
+                                  candidates: candidates)
+        if let r = o["recommendation"] as? [String: Any] {
+            let fit: Recommendation.Fit? = (r["fit"] as? [String: Any]).map { f in
+                Recommendation.Fit(found: f["found"] as? Bool ?? false, cellMM: d(f["cell_mm"]),
+                                   margin: d(f["margin"]), tracedMM: d(f["traced_mm"]),
+                                   source: f["source"] as? String ?? "")
+            }
+            let auto: Recommendation.Auto? = (r["auto"] as? [String: Any]).map { a in
+                Recommendation.Auto(found: a["found"] as? Bool ?? false,
+                                    cellMinMM: d(a["cell_min_mm"]), cellMaxMM: d(a["cell_max_mm"]),
+                                    margin: d(a["margin"]), tracedMM: d(a["traced_mm"]),
+                                    source: a["source"] as? String ?? "")
+            }
+            let rejected: [Recommendation.Rejected] = (r["rejected"] as? [[String: Any]] ?? []).map { x in
+                Recommendation.Rejected(cellMinMM: d(x["cell_min_mm"]), cellMaxMM: d(x["cell_max_mm"]),
+                                        source: x["source"] as? String ?? "",
+                                        reason: x["reason"] as? String ?? "")
+            }
+            out.recommendation = Recommendation(
+                ran: r["ran"] as? Bool ?? false, mode: r["mode"] as? String ?? "",
+                bandLoMM: d(r["band_lo_mm"]), bandHiMM: d(r["band_hi_mm"]),
+                collapsed: r["collapsed"] as? Bool ?? false,
+                printabilityFloorMM: d(r["printability_floor_mm"]),
+                resolutionFloorMM: d(r["resolution_floor_mm"]),
+                memberCeilingMM: d(r["member_ceiling_mm"]), extentCeilingMM: d(r["extent_ceiling_mm"]),
+                lookCellMM: d(r["look_cell_mm"]), gradeRatio: d(r["grade_ratio"]),
+                lookCellsAcross: d(r["look_cells_across"]), targetMargin: d(r["target_margin"]),
+                fit: fit, auto: auto, rejected: rejected)
+        }
+        return out
     }
 
     // MARK: - the menu's law (pure, tested)

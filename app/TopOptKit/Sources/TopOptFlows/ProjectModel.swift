@@ -705,6 +705,26 @@ public final class ProjectModel: ObservableObject {
     /// stated number, else its group's, else the MODE's answer (Uniform states
     /// one; Auto and Per-region-with-nothing-stated state none and core derives).
     /// nil ⇒ AUTO ⇒ no `relative_density` key on the wire.
+    /// ★ ONE VOXEL OF THE SOLVE GRID (brief §0, 2026-09-06): the run's resolution
+    /// spans the part's longest extent, so a voxel is that extent over the quality's
+    /// resolution. 0 when the part is not loaded yet.
+    public var solveVoxelMM: Double {
+        guard let m = viewerMesh, !m.bounds.isEmpty else { return 0 }
+        let e = m.bounds.max - m.bounds.min
+        let longest = Double(Swift.max(e.x, Swift.max(e.y, e.z)))
+        let res = Double(quality.resolution)
+        return longest > 0 && res > 0 ? longest / res : 0
+    }
+
+    /// ★ THE ORGANIC FLOOR for this part: the probe's when it has run, else
+    /// max(1.535 × bead, one voxel) computed here.
+    public var organicFloor: OrganicSizeCheck.Floor {
+        if let rec = lattice.organicForecast?.recommendation, rec.ran {
+            return OrganicSizeCheck.floor(from: rec)
+        }
+        return OrganicSizeCheck.floor(beadMM: printParams.strutLineWidthMM, voxelMM: solveVoxelMM)
+    }
+
     /// ★ THE SYNTHETIC FOCI ONE WALL STATES (2026-09-05, Aesthetic only): its own
     /// count, or nil ⇒ the lattice's default (`organicSyntheticFoci`).
     public func latticeSelectableSyntheticFoci(_ ref: LatticeSelectableRef) -> Int? {
@@ -727,7 +747,7 @@ public final class ProjectModel: ObservableObject {
     /// Whether the last bake found real stress on this wall: true = loaded (no foci
     /// allowed), false = unloaded, nil = not measured yet.
     public func latticeWallLoaded(_ ref: LatticeSelectableRef) -> Bool? {
-        lattice.selectableWallStressFraction[ref.key].map { $0 >= OrganicSyntheticStress.deadFraction }
+        lattice.selectableWallStressFraction[ref.key].map { $0 >= OrganicSyntheticStress.loadedRealShare }
     }
 
     /// ★ THE WALLS THE JOB MAY SYNTHESISE ON: only under an organic Aesthetic lattice
@@ -738,7 +758,7 @@ public final class ProjectModel: ObservableObject {
         guard lat.isOrganic, lat.organicSyntheticStresses,
               (lat.stageMode ?? .structural) == .aesthetic else { return [:] }
         var out: [String: Int] = [:]
-        for (key, frac) in lat.selectableWallStressFraction where frac < OrganicSyntheticStress.deadFraction {
+        for (key, frac) in lat.selectableWallStressFraction where frac < OrganicSyntheticStress.loadedRealShare {
             out[key] = OrganicSyntheticStress.clampFoci(lat.selectableSyntheticFoci[key] ?? lat.organicSyntheticFoci)
         }
         return out

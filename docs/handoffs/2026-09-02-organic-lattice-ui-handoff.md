@@ -1075,3 +1075,196 @@ project `102117B9` ("M2 verticalStand", Ready) with `lattice.algorithm` set to
     starred ladder (2 mm*, 3 mm*, …) was the old fallback list still rendered under the
     single field. Removed: Manual without a simulation is the one "## mm" field and
     nothing else; the field's check still consults the size probe when there is one.
+
+## 2026-09-06 — the UI wired to core main (PR 355 merged at f08c1af8)
+24. **Merge and core.** `origin/main` merged (053e7ddb); the three core conflicts were
+    this branch's STALE core deltas (an older `outline_uw`), so `core/` was taken from
+    main wholesale — the branch's core diff against main is zero lines. build_core.sh
+    rebuilt the xcframework; `CoreFingerprint.value` set by hand to main's core commit
+    `f08c1af81098` (the generator stamps the merge SHA, but the worker compares its
+    own main checkout). All five schema probes pass now; the whole-job probes needed
+    `cell_mm` in their grading skeleton (main requires it) and no `cell_mm`/
+    `strut_radius_mm` beside a grading block (the brief's stated rule).
+25. **Preview parity for synthetic stress (brief B.5).** The bridge now calls core's
+    `synthesize_focal_stress(grid, candidate, voxel_region_id, cfg, 0.02, stress)` —
+    the run's own function — on a plan the app builds (`OrganicSyntheticStress.plan`:
+    include regions numbered 1-based in declaration order, each voxel tagged by the
+    first region holding its centre, foci = the row's count else the default 4). The
+    app-side injector is deleted. Core's report rides the bridge header (64 doubles
+    now, then a row of 7 per region before the field) and comes back as per-wall
+    verdicts: a wall is LOADED when its real share (1 − fully − ½ blended, over its
+    voxels) is ≥ ½ — the persisted number is that real share. The Selections row
+    prefers receipt C's own entry after a run ("run: synthetic field: 4 foci, 12480
+    of 12480 voxels" / "carried load, untouched").
+26. **Job keys (§1).** Manual on the wire: one size ⇒ `cell_mode fit` + `cell_mm`, a
+    grade ⇒ `cell_mode auto` + `cell_min_mm`/`cell_max_mm` (main has no
+    `organic_separation_mm`/`organic_window_mm`; those puts are gone). New settings:
+    `organicTransferTies` (default on, written only when off, grown path only),
+    `organicTieSwirl` (0…1, written when ≠ 1), `organicSolidRimMM` (−1 = one base cell,
+    written when changed), `organicLookCellsAcross` (8, the Aesthetic look target).
+    `organic_structural_certification: "beam_network"` is written whenever the intent
+    is structural (required). Wizard: "Transfer ties" + "Tie swirl" under the Grown
+    fine-tune; "Solid rim at edges" under Fit to shape; "Look" (cells across) under
+    Aesthetic.
+27. **The floor (§0).** `OrganicSizeCheck.floor(beadMM:voxelMM:)` = max(1.535 × bead,
+    one voxel); `ProjectModel.solveVoxelMM` = longest extent / quality resolution;
+    `organicFloor` prefers the probe's recommendation floors once it has run. The
+    reason names which bound: "smaller than one cell of the solve grid (1.71 mm). A
+    finer quality setting makes the grid finer." vs "smaller than the smallest cell
+    this nozzle can print (0.69 mm)". The octet 4.93 mm bound is gone from organic.
+28. **Recommendation (§3).** "Check sizes" adds `organic_recommend: "auto"`,
+    `organic_look_cells_across`, `organic_recommend_margin` 1.5, `organic_recommend_steps`
+    5 to the probe job; `OrganicForecast.recommendation` parses band/floors/ceilings,
+    fit, auto, rejected; predicted gains the knockdown fields. Menu: with a simulation
+    the AUTO pick ("Auto 3–4.8 mm · 1.60", green) applies as a grade; without one the
+    FIT pick ("Fit 3 mm · 1.84") applies as the size — Fit is never offered with a
+    simulation nor Auto without (his items 1 and 3). Collapsed ⇒ "No cell fits: solid"
+    with the four bounds behind the (i).
+29. **Receipt (§2).** `OrganicRunReceipt` reads the certificate block (verdict, margin,
+    refusal, statistic, knockdown used/source, cos², max-over-allowable point and
+    DISTRIBUTED, exceeds), ties, fillet, rim, shape fit, the two floors,
+    `support_grid_too_large`, `tensor_note`, `recommend`, and the synthetic block with
+    `synthetic_stress_by_region` keyed by face. `certificateLine` follows the display
+    rule ("Certified · margin 2.31 (p99) · worst strut 0.43× allowable"; a refusal
+    names its gate); `repairsLine` counts flared/skipped spans and landed ties. The
+    preview banner shows both. The approved separation now comes from
+    `recommend.fit_mm` (the old `fitting_separations_mm` stays as a fallback).
+
+## 2026-09-06 evening — his walk: the picture, the 12 minutes, the banner
+
+Build type for every number below: Debug, iPhone Simulator (iPad Pro 13-inch M5,
+iOS 26.5), dylib af8bc1831f4af5cd; Mac suites Debug.
+
+30. **Where the 12 minutes go (measured, not guessed).** M2 stand, Organic Traced,
+    sim on, Manual "2.00 mm to 4.00 mm", synthetic on, look 2, ties on, rim −1.
+    Stage solve 17:50:27→17:50:40 (14 s, ACCEPTED 1173.63). Bridge call
+    17:50:41→18:03:06 = **12 min 26 s**. Two `sample`s of the process (8 s at 18:08,
+    3 s at 18:09:33): 0 frames in `trace_organic_lattice`, 0 in the capsule stamp,
+    100 % in `generate_organic_lattice` — the support raster's `covers` lambda
+    (`core/src/mesh/organic_lattice.cpp:4427`: nine point-to-segment distances per
+    raster cell of every emitted segment's bounding box, re-stamped every support
+    round via `stamp_all`, with per-island `unordered_map`s allocated inside the
+    layer loop). That is the run's own emission — the preview cannot be faster than
+    the run's repairs while it runs them. CORE REPORT, no core change: the pass is
+    O(rounds × Σ_segments bbox cells × 9); a segment-bbox on a diagonal strut is
+    many times its capsule; `own`/`occ` are refilled whole each round.
+31. **A second identical bake, armed by the first.** `DIAG synthetic(core)` at
+    18:03:06, then `regionCell`/`stepped NOT RUN` at 18:03:08–10 (the bake's own
+    preamble), then a second `DIAG synthetic(core)` at 18:15:47 — 12 min 37 s, same
+    numbers. Cause: the completion writes `recordLatticeWallStress` (the shares it
+    just measured: face 15 83 % real, face 2 90 % real) into `project.lattice`, and
+    `.onChange(of: project.lattice)` rebakes on any change. FIX (app):
+    `LatticeSettings.previewBakeInputs` strips the two fields a bake WRITES
+    (`selectableWallStressFraction`, `organicForecast`); the trigger compares that
+    against `latticeInputsLastBaked`. Test: `OrganicPreviewBakeInputsTests`.
+32. **The preview traced the octet window, not his grade.** `organicForBake` read
+    `cellMinMM/cellMaxMM` (4/8 in his project.json) while the job writes
+    `organicPickedGradeMM` ([2, 4]). FIX: `LatticeSettings.organicPreviewSeparationWindowMM`
+    is the job's mapping (single size ⇒ (s, s); grade ⇒ (lo, hi); nothing picked ⇒
+    the window); the bake reads it. So the 12 minutes above were at 4–8 mm; at the
+    2–4 mm he typed the emission has more segments, not fewer.
+33. **The phase clock.** Bridge header [56] trace s, [57] emission s, [58] stamp s;
+    `OrganicTrace.traceSeconds/emitSeconds/bakeSeconds`, `phaseSummary` on the
+    banner's (i), `DIAG organic phases:` in the log. The next long bake is a number,
+    not a `sample`.
+34. **Why the SDF picture looks the way it does (his "not good at all").** The
+    organic field is baked at `max(0.35 mm, longest/384)` = 0.35 mm on both the cube
+    and the stand. The cube's grade-fit variant has strut radius 0.21 mm
+    (`9eefe6f4…3mf`, `radius="0.210000"`): 0.6 voxels per radius. The stand's legend
+    says 0.73–3.07 mm struts ⇒ 1.0–4.4 voxels per radius. A trilinear distance field
+    cannot hold a round tube thinner than its own voxel: the surface channel flattens
+    into ribbons whose width follows the grid, the march stops within
+    `epsO = max(0.02, 0.25 × voxel)` = 0.0875 mm of the surface (42 % of the cube's
+    radius), and the normal is a finite difference across ~1 voxel, so the shading is
+    flat. With repairs shown the node merges and arches add fat blobs at the same
+    resolution. A voxel of r/3 on the stand (0.07 mm over 130 × 100 × 12 mm) would be
+    ~450 M voxels × 2 channels: not a texture the iPad can hold. The resolution is the
+    representation's ceiling, not a knob.
+35. **Alternative (recommended, not built): draw the spans as analytic capsules.**
+    `OrganicTrace.spans` and the 3MF variants already carry every emitted capsule
+    (a, b, r) — no bridge or core work. One instanced draw of N bounding quads; the
+    fragment shader ray-casts the capsule (a sphere-swept segment; the same quadric
+    trick molecular viewers use for millions of bonds), writes depth + normal into the
+    unified G-buffer the march already uses, and clips per fragment against the part
+    and region SDF textures already bound at 5/… so struts end at the shell exactly as
+    the march's clip ends them. Exact round struts at any zoom, no bake, no 12 M-voxel
+    cap, the Thicker slider a uniform, joints read as welded because spherical ends
+    overlap. Cost is the trace/emission only. Estimated a few days of Metal work; the
+    two G-buffer traps in memory (byte-offset uniforms, declared attachments) apply.
+36. **For the wait itself, two app-side options (not built).** (a) Two-stage bake:
+    trace first (the 14 s solve + the trace) and draw the traced curves — the
+    "repairs hidden" picture — then run the emission and swap in the emitted set when
+    it lands; with capsules the swap is instant. (b) Nothing hides the emission's
+    cost: the file will take the same repairs. The core report in item 30 is the
+    only lever on the number itself.
+37. **The banner.** `LatticePreviewBanner.caption` — "Lattice preview · not the
+    export" / "Lattice preview · stand-in" / "★ Preview differs from run"; an
+    `.empty` reason unchanged — drawn in the notice, capped at
+    `noticeMaxWidthPT` = 280 pt, with the whole sentence (every counter, the phase
+    clock) behind an (i) popover. `LatticePreviewNoticeCaptionTests`.
+38. **Also seen on his walk.** With core's own synthesis both walls read LOADED
+    (83 % and 90 % real) where the app-side injection had called face 15 unloaded at
+    3.5 %: core's dead threshold is 2 % of the peak von Mises (0.000625 of 0.0312 MPa)
+    and only 560 of 6,751 voxels sit under it. Reported, not judged.
+39. **CORE REPORT — the dead-voxel test is relative to the part's peak.** His walk:
+    "one wall definitely doesn't have a stress and yet I'm unable to add a synthetic
+    stress." `synthesize_focal_stress` marks a voxel dead below `dead_fraction` (0.02)
+    × the part's peak von Mises. On the M2 stand the peak is 0.031 MPa (margin 1173
+    against 31 MPa), so the threshold is 0.0006 MPa; both walls read 83 % and 90 %
+    "real" while carrying under 0.1 % of allowable. The app greys the foci on that
+    share (his rule: never foci on a loaded wall) and, even if it did not, the run
+    would synthesise only the 17 % core calls dead. Needed in core: an absolute or
+    allowable-relative floor in the dead test (e.g. dead also when vm < ~0.5 % of
+    allowable), or a per-region "synthetic wins" mode. No app change can produce the
+    synthesis. UI: the wall's status now names the peak ("loaded · 83 % real · peak
+    0.031 MPa") so the number is on the screen. No threshold is exposed as a setting.
+40. **Organic as capsule impostors (his instruction, 2026-09-06 evening).**
+    `organicCapsuleShaderSource` (its own library: material + field sources +
+    `capsule_vertex`/`capsule_gbuffer`); `MeshRenderer.organicCapsulePipeline` built
+    with `try?` beside the lattice pipelines; drawn in `encodeDepthPrepass` after the
+    march as one instanced draw (36 vertices per span, culling off, permissive depth
+    write because the fragment may come from the box's far face). Fragment: analytic
+    ray–capsule from the model-space eye, the march's exact clip (eroded part SDF ∧
+    bbox ∧ region), the far-side re-hit when the near side is cut, the shell depth
+    bias, the same three attachments — `lsdf_shade` lights it unchanged. Scene:
+    `organicCapsules` from every source (pre-baked variant via
+    `OrganicBakedFields.capsules`, span file, cached 3MF, live trace). Layer:
+    `drawOrganicCapsules` (set by the host when the pipeline built),
+    `capsulesReplaceField` ⇒ `organicOrigin.w = 0` and the march's step budget 0, the
+    live radius unclamped. Periodic lattices untouched. The organic FIELD is still
+    baked for the probes and the cached-variant path; it is no longer what is drawn.
+    Tests: `OrganicCapsuleImpostorTests` (scene carries capsules; GPU: reaches pixels,
+    clipped outside the part, hidden by the opaque shell, fattened by the live radius,
+    the march draws nothing; call sites pinned), the compile guard and the ShellClip
+    guard extended to the fifth source.
+41. **His timings, decoded by the phase clock (Debug, iPad sim, 19:00–19:24).** Part
+    previews: trace 0.0–0.2 s, bake 0.1–0.4 s, core's emission 41.9 s (Auto, 16,260
+    spans), 190.6 s and 186.3 s (2–4 mm, 55,837 spans). The 1:26 / 3:37 / 3:31 he
+    measured are the stage solve (11 s) + the emission + UI. The sample's 46–53 s is
+    the same emission on the cube. CORE REPORT: emission time is superlinear in the
+    span count (16 k → 42 s, 56 k → 190 s); the support raster is the pass (item 30).
+42. **Two stages, and the emission only when it is drawn.** The bridge now skips
+    `generate_organic_lattice` when repairs are hidden (`emit_repairs == 0`; the
+    census says "emission did not run"). `buildStrutScene` bakes the traced picture
+    first (seconds), then — when repairs are on — the emitted set replaces it when
+    core is done; `strutBakeGeneration` retires a stale stage. The wizard's sample
+    does the same (`quick.showRepairs = false`, status "Traced. Adding the file's
+    repairs…"). Tests: `testHiddenRepairsSkipTheEmission`, the call-site pins.
+43. **Auto was the octet window.** With nothing picked the trace read
+    `cellMinMM/cellMaxMM` (4–8 mm on his file) — the sparse Auto he saw. Now: the
+    probe's Auto answer when it has one, else core's own `organic_recommend_band`
+    through the bridge (`TopOptKit.organicRecommendBand`, rows per include region:
+    depth, shortest in-plane extent, p50/p99 of the solve's von Mises — the rows
+    run_job builds), the run's pick among its candidates (Aesthetic ⇒ the look pair,
+    Structural ⇒ the band; `OrganicAutoWindow`). Collapsed ⇒ the stand-in stays and
+    the log says so. `DIAG organic window:` names the window and its source.
+    Measured: 12 mm wall, 1.7 mm voxel, 0.45 bead, look 8 ⇒ band 1.70–6.00 mm.
+44. **The solid rim, in the preview.** "Fit to shape means grade to solid at the
+    edges. Always. And always on the *sides*." The run's `apply_organic_solid_rim`
+    turns candidates within `rim` of a SIDE neighbour solid (never along the normal);
+    rim = `organic_solid_rim_mm`, −1 ⇒ the window's low end. The preview now erodes
+    each include face region IN-PLANE by that number (`LatticeRegionSpec.inPlaneOffsetMM`,
+    the Expand channel, negative) before anything is baked from it, so the shell keeps
+    the band, no strut is traced in it, and depth is untouched.
+    `LatticeOrganicInput.solidRimMM`; test `testTheRimErodesTheRegionInPlaneButNotInDepth`.
+    Not photographed on the simulator yet.

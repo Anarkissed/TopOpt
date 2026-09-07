@@ -62,7 +62,8 @@ public struct LatticeSetupWizard: View {
     /// ★ "Check sizes" (final contract 2026-09-05): submits the re-lattice job with the
     /// candidate list and returns core's `organic_probe.json` answer. nil ⇒ no worker
     /// or nothing to re-lattice; the button says so.
-    public typealias ProbeDriver = @MainActor (_ cellsMM: [Double], _ gradesMM: [[Double]]) async throws -> OrganicForecast
+    public typealias ProbeDriver = @MainActor (_ cellsMM: [Double], _ gradesMM: [[Double]],
+                                               _ recommend: RelatticeRun.Recommend?) async throws -> OrganicForecast
     private var probeDriver: ProbeDriver? = nil
     private enum ProbeState: Equatable { case idle, running, failed(String) }
     @State private var organicProbeState: ProbeState = .idle
@@ -713,6 +714,13 @@ public struct LatticeSetupWizard: View {
         + "field; the switch only takes Sim off the Density row. Auto grades the cell by the "
         + "simulated stress, so it is offered only with a simulation; Fit lets core choose one "
         + "size that fits the shape; Manual is your grade (with a simulation) or your one size."
+    static let infoTransferTies = "On the grown lattice, ties run across the pillars along the second "
+        + "stress family, welded at each pillar. They carried the structural certificate on the "
+        + "test stand (p99 23.4 → 2.78 MPa). Off leaves the pillars alone."
+    static let infoSolidRim = "A ring of solid one base cell wide inside each face outline, so the "
+        + "lattice grades into the part's edge instead of ending on it. Off removes the ring."
+    static let infoLook = "How many cells the eye should read across the shortest face. The size "
+        + "check uses it to pick the look under Aesthetic; larger means finer."
     static let infoManualSizes = "Sizes certification approved: at each, the lattice ties to the part "
         + "(at least 95 % of its length rooted). Under an Aesthetic stage every size is offered; one marked * was "
         + "not approved: certification predicts it will not tie to the part (more than 5 % of "
@@ -802,6 +810,28 @@ public struct LatticeSetupWizard: View {
                         model.organicScale = $0; rebuild()
                     }
                     shortNote("Overhang fixed 30°")
+                    // ★ PR 355: Michell second-family ties across the pillars (default
+                    // on) and how much they wander (0 = straight).
+                    HStack(spacing: DS.Space.s) {
+                        HStack(spacing: DS.Space.xs) {
+                            Text("Transfer ties").dsStyle(DS.TypeScale.caption)
+                                .foregroundStyle(DS.Color.textPrimary.color)
+                            infoButton("transfer-ties", Self.infoTransferTies)
+                        }
+                        Spacer(minLength: DS.Space.s)
+                        GlassToggle(isOn: model.organicTransferTies) {
+                            model.organicTransferTies.toggle(); rebuild()
+                        }
+                        .accessibilityLabel("Transfer ties")
+                        .accessibilityIdentifier("wizard-organic-transfer-ties")
+                    }
+                    if model.organicTransferTies {
+                        shortNote("Tie swirl")
+                        scrubRow("organicTieSwirl", value: model.organicTieSwirl, unit: "",
+                                 step: 0.02, range: 0...1) {
+                            model.organicTieSwirl = $0; rebuild()
+                        }
+                    }
                 }
             }
             if organicStructuralGateClosed { shortNote("Aesthetic only for now", warning: true) }
@@ -928,6 +958,34 @@ public struct LatticeSetupWizard: View {
                 }
                 if locked { shortNote("Locked while simulation is off") }
             }
+            // ★ PR 355: the grade-to-solid ring inside the face outline (−1 = one
+            // base cell, core's default; 0 = none).
+            HStack(spacing: DS.Space.s) {
+                HStack(spacing: DS.Space.xs) {
+                    Text("Solid rim at edges").dsStyle(DS.TypeScale.caption)
+                        .foregroundStyle(DS.Color.textPrimary.color)
+                    infoButton("solid-rim", Self.infoSolidRim)
+                }
+                Spacer(minLength: DS.Space.s)
+                GlassToggle(isOn: model.organicSolidRimMM != 0) {
+                    model.organicSolidRimMM = model.organicSolidRimMM != 0 ? 0 : -1; rebuild()
+                }
+                .accessibilityLabel("Solid rim at edges")
+                .accessibilityIdentifier("wizard-organic-solid-rim")
+            }
+            // ★ THE LOOK (Aesthetic): cells the eye reads across the shortest face —
+            // the recommendation's target when sizes are checked.
+            if organicAesthetic {
+                HStack(spacing: DS.Space.xs) {
+                    Text("Look").dsStyle(DS.TypeScale.caption2)
+                        .foregroundStyle(DS.Color.textTertiary.color)
+                    infoButton("look", Self.infoLook)
+                }
+                scrubRow("organicLook", value: Double(model.organicLookCellsAcross), unit: " cells across",
+                         step: 0.05, range: 2...16) {
+                    model.organicLookCellsAcross = Int($0.rounded()); rebuild()
+                }
+            }
 
             // ── Unloaded walls (item 7): Aesthetic AND simulation only ──
             if organicAesthetic, model.simulateStresses {
@@ -1035,9 +1093,16 @@ public struct LatticeSetupWizard: View {
                 grades.append(model.organicPickedGradeMM)
             }
             organicProbeState = .running
+            // ★ AND THE RECOMMENDATION (brief 2026-09-06): core generates its own
+            // candidates across the band and returns FIT and AUTO picks; the look
+            // target is the Aesthetic lever, the margin the Structural one.
+            let recommend = RelatticeRun.Recommend(
+                mode: "auto", lookCellsAcross: model.organicLookCellsAcross,
+                margin: LatticeSettings.organicRecommendMargin,
+                steps: LatticeSettings.organicRecommendSteps)
             Task { @MainActor in
                 do {
-                    let probe = try await drive(cells.sorted(), grades)
+                    let probe = try await drive(cells.sorted(), grades, recommend)
                     project.lattice.organicForecast = probe
                     organicProbeState = .idle
                 } catch {
@@ -1085,6 +1150,7 @@ public struct LatticeSetupWizard: View {
                 if organicProbeRefusal == nil { organicCheckSizesButton }
             }
             .frame(maxWidth: .infinity, alignment: .center)
+            organicRecommendationRow(structural: structural)
             let grades = organicManualGrades
             if !grades.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
@@ -1126,6 +1192,7 @@ public struct LatticeSetupWizard: View {
                 if organicProbeRefusal == nil { organicCheckSizesButton }
             }
             .frame(maxWidth: .infinity, alignment: .center)
+            organicRecommendationRow(structural: structural)
             // ★ ONE field, nothing else (his 2026-09-05: "The numbers appear under
             // Manual when simulate stress = off"). The field's check consults the
             // size probe when there is one; no list of sizes is offered.
@@ -1134,6 +1201,45 @@ public struct LatticeSetupWizard: View {
             HStack(spacing: DS.Space.xs) {
                 shortNote("Check failed", warning: true)
                 infoButton("check-failed", why)
+            }
+        }
+    }
+
+    /// ★ THE RECOMMENDATION (brief 2026-09-06, §3 menu wiring): with a simulation the
+    /// AUTO pick (a graded window → cell_mode auto + min/max); without one the FIT
+    /// pick (one size → cell_mode fit + cell_mm). Fit is never offered with a
+    /// simulation (his item 1) and Auto never without (item 3). Collapsed ⇒ "no cell
+    /// fits this wall — solid", with the bounds behind the (i).
+    @ViewBuilder private func organicRecommendationRow(structural: Bool) -> some View {
+        if let rec = project.lattice.organicForecast?.recommendation, rec.ran {
+            if rec.collapsed {
+                HStack(spacing: DS.Space.xs) {
+                    shortNote("No cell fits: solid", warning: true)
+                    infoButton("rec-collapsed", String(format: "No cell size fits this wall, so it stays solid. Band %.2f–%.2f mm; %@.",
+                                                       rec.bandLoMM, rec.bandHiMM, rec.boundsText))
+                }
+            } else if model.simulateStresses, let a = rec.auto, a.found {
+                HStack(spacing: DS.Space.xs) {
+                    shortNote("Recommended")
+                    organicPill(String(format: "Auto %g–%g mm · %.2f", a.cellMinMM, a.cellMaxMM, a.margin),
+                                on: model.organicPickedGradeMM == [a.cellMinMM, a.cellMaxMM], enabled: true) {
+                        commitOrganicGrade(lo: a.cellMinMM, hi: a.cellMaxMM)
+                    }
+                    .modifier(OrganicProbeTintModifier(tint: .green))
+                    infoButton("rec-auto", String(format: "Core's graded pick across the band %.2f–%.2f mm (%@). Predicted margin %.2f. ",
+                                                  rec.bandLoMM, rec.bandHiMM, a.source, a.margin) + OrganicForecast.notCertified)
+                }
+            } else if !model.simulateStresses, let f = rec.fit, f.found {
+                HStack(spacing: DS.Space.xs) {
+                    shortNote("Recommended")
+                    organicPill(String(format: "Fit %g mm · %.2f", f.cellMM, f.margin),
+                                on: abs(model.organicPickedSeparationMM - f.cellMM) < 1e-6, enabled: true) {
+                        commitOrganicSize(f.cellMM)
+                    }
+                    .modifier(OrganicProbeTintModifier(tint: .green))
+                    infoButton("rec-fit", String(format: "Core's one-size pick across the band %.2f–%.2f mm (%@). Predicted margin %.2f. ",
+                                                 rec.bandLoMM, rec.bandHiMM, f.source, f.margin) + OrganicForecast.notCertified)
+                }
             }
         }
     }
@@ -1176,12 +1282,11 @@ public struct LatticeSetupWizard: View {
     }
 
     private func organicVerdict(lo: Double, hi: Double) -> OrganicSizeCheck.Verdict {
-        let floor = TopOptKit.latticeCellBounds(topology: project.lattice.topologyID,
-                                                minExtrudableWidthMM: project.printParams.strutLineWidthMM)
-            .printabilityFloorMM
-        return OrganicSizeCheck.evaluate(cellMinMM: lo, cellMaxMM: hi, walls: organicWalls,
-                                         printabilityFloorMM: floor,
-                                         probe: project.lattice.organicForecast)
+        // ★ THE ORGANIC FLOOR (brief §0): max(1.535 × bead, one voxel) — never the
+        // octet cell bound. From the probe once it has run.
+        OrganicSizeCheck.evaluate(cellMinMM: lo, cellMaxMM: hi, walls: organicWalls,
+                                  floor: project.organicFloor,
+                                  probe: project.lattice.organicForecast)
     }
 
     /// Checked AFTER the full number: Aesthetic ⇒ a red * with the reasons below;
@@ -1974,6 +2079,24 @@ public struct LatticeSetupWizard: View {
         organicSampleStatus = organicScene == nil
             ? "Solving the test cube, then tracing it with your settings…"
             : "Re-tracing the test cube with your settings…"
+        // ★★ THE TRACED CUBE FIRST (2026-09-06: 46–53 s per sample, all of it core's
+        // emission). With repairs hidden the bridge skips the emission, so this stage
+        // is the solve plus a sub-second trace; the repaired cube replaces it when
+        // core is done. A newer pick cancels both.
+        if picks.showRepairs {
+            var quick = picks
+            quick.showRepairs = false
+            let first = await OrganicSampleCube.baked(picks: quick, latticeID: model.topologyID)
+            guard !Task.isCancelled, organicSamplePicks == picks else { return }
+            if let b = first {
+                let wasEmpty = organicScene == nil
+                organicScene = b.scene; organicSceneToken += 1
+                organicSampleMeasurement = b.measurement
+                mesh = b.mesh
+                if wasEmpty { frameSample() }
+                organicSampleStatus = "Traced. Adding the file's repairs…"
+            }
+        }
         let baked = await OrganicSampleCube.baked(picks: picks, latticeID: model.topologyID)
         guard !Task.isCancelled, organicSamplePicks == picks else { return }
         if let b = baked {

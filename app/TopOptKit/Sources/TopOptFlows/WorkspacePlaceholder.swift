@@ -98,6 +98,14 @@ public struct WorkspacePlaceholder: View {
     /// the one case the user actually waits through was the one case that said
     /// nothing at all.
     @State private var strutBakeInFlight = false
+    /// ★ Which bake is current: a stage-2 (repairs) picture from an older bake, or a
+    /// bake finishing after a newer one started, is dropped by comparing this.
+    @State private var strutBakeGeneration = 0
+    /// The (i) beside the preview caption: the whole banner sentence, on demand.
+    @State private var latticeNoticeInfoShown = false
+    /// ★ The lattice settings the strut preview was last baked FROM, with the
+    /// fields a bake writes stripped (`LatticeSettings.previewBakeInputs`).
+    @State private var latticeInputsLastBaked: LatticeSettings? = nil
     /// ★ THE DEAD-WALL REPORT of the last organic bake (2026-09-05): per selectable
     /// key, whether the wall carried real stress and what was injected. Read by the
     /// Selections drawer's Foci row.
@@ -2847,7 +2855,15 @@ public struct WorkspacePlaceholder: View {
                 // so the picture lands once, when the value settles.
                 if draggingExpandPlane == nil, draggingDepthPlane == nil,
                    latticeDepthDragSeed == nil, latticeRowScrubSeed == nil {
-                    buildStrutScene()
+                    // ★ NOT FOR A WRITE THE BAKE ITSELF MADE (2026-09-06). The
+                    // completion records the wall-stress shares it measured; that
+                    // write lands here and, compared whole, re-armed a second
+                    // 12-minute bake on his part. Compare what a bake READS.
+                    let inputs = project.lattice.previewBakeInputs
+                    if inputs != latticeInputsLastBaked {
+                        latticeInputsLastBaked = inputs
+                        buildStrutScene()
+                    }
                 }
             }
         }
@@ -3482,7 +3498,7 @@ public struct WorkspacePlaceholder: View {
         let name = project.name
         let designBin = art.designBin
         let path = file.path
-        return { [self] cells, grades in
+        return { [self] cells, grades, recommend in
             guard let job = relatticeJobJSON(noteSkippedFaces: false) else {
                 throw RelatticeError("There is nothing to check yet. Optimize the part first.")
             }
@@ -3491,7 +3507,7 @@ public struct WorkspacePlaceholder: View {
                 designBin: designBin, projectName: name,
                 requestedVolumeFraction: vf)
             return try await Task.detached(priority: .utility) {
-                try RelatticeRun.probe(inputs, cellsMM: cells, gradesMM: grades)
+                try RelatticeRun.probe(inputs, cellsMM: cells, gradesMM: grades, recommend: recommend)
             }.value
         }
     }
@@ -4749,8 +4765,9 @@ public struct WorkspacePlaceholder: View {
             let lat = project.lattice
             // The cell window is read as the SPACING window — organic derives its cell
             // from the achieved separation, never the other way round.
-            let lo = lat.cellMinMM > 0 ? lat.cellMinMM : lat.cellMM
-            let hi = lat.cellMaxMM > 0 ? lat.cellMaxMM : lat.cellMM
+            // ★ THE JOB'S NUMBERS, not the octet window (2026-09-06): the wizard's
+            // typed grade/size is what the run grades at, so it is what is traced.
+            let (lo, hi) = lat.organicPreviewSeparationWindowMM
             // The same band the preview grades between — read from the proxy so the
             // tracer clamps into exactly what the legend shows.
             let band = latticeProxy.params.densitySpan
@@ -4772,6 +4789,17 @@ public struct WorkspacePlaceholder: View {
                 anchorAtBoundary: lat.boundary == .covered,
                 overhangFillet: lat.organicOverhangFillet)
         }()
+        // ★ NOTHING PICKED ⇒ the window above is the octet window standing in; the
+        // bake replaces it below with core's own band (or the probe's Auto answer).
+        let organicAutoWindow = project.lattice.organicPreviewWindowIsFallback
+        let organicForecastAuto: (lo: Double, hi: Double)? = {
+            guard let a = project.lattice.organicForecast?.recommendation?.auto, a.found,
+                  a.cellMinMM > 0, a.cellMaxMM >= a.cellMinMM else { return nil }
+            return (a.cellMinMM, a.cellMaxMM)
+        }()
+        let organicLook = project.lattice.organicLookCellsAcross
+        let organicRimSetting = project.lattice.organicSolidRimMM
+        let organicIsStructural = stageMode == .structural
         let spansForBake = latticeOrganicSpans
         let receiptForBake = latticeOrganicReceipt
         // ★ SYNTHETIC STRESSES ON UNLOADED WALLS (maintainer, 2026-09-05; Aesthetic
@@ -4779,21 +4807,64 @@ public struct WorkspacePlaceholder: View {
         let synthOn = project.lattice.organicSyntheticStresses
             && stageMode == .aesthetic && organicForBake != nil
         let synthDefaultFoci = project.lattice.organicSyntheticFoci
+        let synthStatedFoci = project.lattice.selectableSyntheticFoci
         strutBakeInFlight = true
+        strutBakeGeneration += 1
+        let bakeGeneration = strutBakeGeneration
         DispatchQueue.global(qos: .userInitiated).async {
             var organicIn = organicForBake
-            var wallReports: [String: OrganicSyntheticStress.WallReport] = [:]
-            if synthOn, let o = organicIn {
-                let r = OrganicSyntheticStress.inject(
-                    tensor: o.tensor, dims: o.dims, originMM: o.originMM,
-                    spacingMM: o.spacingMM, regions: regions, defaultFoci: synthDefaultFoci)
-                organicIn?.tensor = r.tensor
-                for w in r.walls { if let k = w.key { wallReports[k] = w } }
-                NSLog("DIAG synthetic: walls=%d dead=%d injected=%d voxels · %@",
-                      r.walls.count, r.deadWalls, r.injectedVoxels,
-                      r.walls.map { "\($0.key ?? "?"): \($0.statusText) foci=\($0.foci) inj=\($0.injected)/\($0.voxels)" }
-                          .joined(separator: " | "))
+            // ★★ THE WINDOW UNDER AUTO (2026-09-06): the probe's Auto answer when it has
+            // one, else core's own band from the walls, the bead, the voxel and the
+            // look — `organic_recommend_band`, the function the run calls — never the
+            // octet window. In Aesthetic the run takes the look pair; in Structural the
+            // band. Collapsed ⇒ the run leaves the region solid; the preview keeps the
+            // window it had and says so.
+            var organicWindowNote = ""
+            if organicAutoWindow, var o = organicIn {
+                if let f = organicForecastAuto {
+                    o.separationMinMM = f.lo; o.separationMaxMM = f.hi
+                    organicWindowNote = String(format: "auto window %.2f–%.2f mm from the probe", f.lo, f.hi)
+                } else if let band = OrganicAutoWindow.band(regions: regions, input: o,
+                                                            lookCellsAcross: Double(organicLook)) {
+                    if let w = OrganicAutoWindow.window(from: band, structural: organicIsStructural) {
+                        o.separationMinMM = w.lo; o.separationMaxMM = w.hi
+                        organicWindowNote = String(format: "auto window %.2f–%.2f mm · %@", w.lo, w.hi, band.summary)
+                    } else {
+                        organicWindowNote = "auto window kept the stand-in · " + band.summary
+                    }
+                }
+                organicIn = o
             }
+            // ★ THE SOLID RIM: the job's number, −1 ⇒ the window's low end (run_job).
+            if var o = organicIn {
+                o.solidRimMM = organicRimSetting < 0 ? Swift.min(o.separationMinMM, o.separationMaxMM) : organicRimSetting
+                organicIn = o
+            }
+            if let o = organicIn {
+                NSLog("DIAG organic window: %.2f–%.2f mm · rim %.2f mm%@", o.separationMinMM, o.separationMaxMM,
+                      o.solidRimMM, organicWindowNote.isEmpty ? "" : " · " + organicWindowNote)
+            }
+            var synthPlan = OrganicSyntheticStress.Plan(regionIDs: [], regions: [], keyByID: [:])
+            if synthOn, let o = organicIn {
+                // ★ CORE'S OWN SYNTHESIS (2026-09-06): the bridge calls
+                // synthesize_focal_stress with this plan — the same function and the
+                // same per-region config the run gets. The app injects nothing.
+                synthPlan = OrganicSyntheticStress.plan(
+                    regions: regions, dims: o.dims, originMM: o.originMM, spacingMM: o.spacingMM,
+                    defaultFoci: synthDefaultFoci, statedFoci: synthStatedFoci)
+                organicIn?.regionIDs = synthPlan.regionIDs
+                organicIn?.syntheticRegions = synthPlan.regions
+            }
+            // ★★★ TWO STAGES (his timings, 2026-09-06: trace 0.2 s, core's emission
+            // 186–191 s). The traced picture first — the bridge skips the emission when
+            // repairs are hidden — then, when repairs are wanted, the emitted set
+            // replaces it when core is done. A newer bake retires both.
+            let stages: [Bool] = (organicIn?.showRepairs == true) ? [false, true] : [organicIn?.showRepairs ?? true]
+            for (stageIndex, stageRepairs) in stages.enumerated() {
+            if stageIndex > 0, !(DispatchQueue.main.sync { bakeGeneration == strutBakeGeneration }) { break }
+            var stageIn = organicIn
+            stageIn?.showRepairs = stageRepairs
+            let isLastStage = stageIndex == stages.count - 1
             let scene = LatticeSDFScene(mesh: mesh, field: field,
                                         latticeID: latticeID,
                                         organicSpans: spansForBake,
@@ -4846,7 +4917,7 @@ public struct WorkspacePlaceholder: View {
                                         // `LatticeSettings.singleCellMembers`.
                                         boundaryFinishWritten:
                                             project.lattice.singleCellMembers,
-                                        organic: organicIn,
+                                        organic: stageIn,
                                         regions: regions,
                                         rhoMin: span.lo, rhoMax: span.hi,
                                         gamma: gamma,
@@ -4858,18 +4929,36 @@ public struct WorkspacePlaceholder: View {
                                         skinMM: skinMM,
                                         skippedFaces: skippedFaces)
             DispatchQueue.main.async {
+                // ★ a newer bake has started: this picture is stale, drop it
+                guard bakeGeneration == strutBakeGeneration else { return }
                 strutScene = scene
                 strutSceneToken += 1
-                strutBakeInFlight = false
+                strutBakeInFlight = !isLastStage
+                let wallReports = OrganicSyntheticStress.wallReports(
+                    from: scene.organicSyntheticReport, plan: synthPlan)
                 latticeDeadWalls = wallReports
+                // ★ THE PHASE CLOCK, IN THE LOG (2026-09-06): where a long bake went.
+                if let ph = scene.organicPhaseSeconds {
+                    NSLog("DIAG organic phases: trace %.1f s · repairs (core emission) %.1f s · bake %.1f s · %d spans emitted",
+                          ph.trace, ph.emit, ph.bake, scene.organicEmittedSpans?.count ?? -1)
+                }
+                if synthOn, let rep = scene.organicSyntheticReport {
+                    NSLog("DIAG synthetic(core): regions=%d voxels=%d fully=%d blended=%d thr=%.4g peak=%.4g · %@",
+                          rep.regions.count, rep.voxelsInRegions, rep.fullySynthetic, rep.blended,
+                          rep.deadThreshold, rep.peakVonMises,
+                          wallReports.values.map { "\($0.key ?? "?"): \($0.statusText) foci=\($0.foci) \($0.fullySynthetic)/\($0.voxels)" }
+                              .joined(separator: " | "))
+                }
                 // ★ The measurement outlives the bake: the drawer greys loaded walls
-                // and the job marks only unloaded ones (both read the project).
+                // and the job marks only unloaded ones (both read the project). Stored
+                // as the wall's REAL share (1 − synthetic).
                 if synthOn {
                     var fractions = project.lattice.selectableWallStressFraction
-                    for (k, w) in wallReports where w.voxels > 0 { fractions[k] = w.medianFraction }
+                    for (k, w) in wallReports where w.voxels > 0 { fractions[k] = w.realShare }
                     project.recordLatticeWallStress(fractions)
                 }
             }
+            }   // stages
         }
     }
 
@@ -8614,16 +8703,44 @@ public struct WorkspacePlaceholder: View {
             if let banner = LatticePreviewBanner.make(previewOn: showStrutPreview,
                                                       hasModel: viewerMesh != nil,
                                                       scene: strutScene) {
-                Text(banner.text)
-                    .dsStyle(DS.TypeScale.caption2)
-                    .foregroundStyle((banner.isEmpty ? DS.Color.textPrimary
-                                                     : DS.Color.textSecondary).color)
-                    .padding(.vertical, DS.Space.xs)
-                    .padding(.horizontal, DS.Space.s)
-                    .background(Capsule().fill(DS.Surface.panel.color.opacity(0.9))
-                        .overlay(Capsule().strokeBorder(
-                            DS.Color.strokePanel.color, lineWidth: 1)))
-                    .accessibilityIdentifier("lattice-preview-notice")
+                // ★ A CAPTION, AND THE SENTENCE BEHIND (i) (maintainer, 2026-09-06:
+                // the full sentence ran across the iPad and Print Parameters chips).
+                // Capped to the Selections column; an `.empty` reason wraps inside it.
+                HStack(alignment: .firstTextBaseline, spacing: DS.Space.xs) {
+                    Text(banner.caption)
+                        .dsStyle(DS.TypeScale.caption2)
+                        .foregroundStyle((banner.isEmpty ? DS.Color.textPrimary
+                                                         : DS.Color.textSecondary).color)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if !banner.isEmpty {
+                        Button { latticeNoticeInfoShown = true } label: {
+                            Image(systemName: "info.circle")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(DS.Color.textTertiary.color)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("About the lattice preview")
+                        .accessibilityIdentifier("lattice-preview-notice-info")
+                        .popover(isPresented: $latticeNoticeInfoShown) {
+                            ScrollView {
+                                Text(banner.text)
+                                    .dsStyle(DS.TypeScale.footnote)
+                                    .foregroundStyle(DS.Color.textPrimary.color)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                    .textSelection(.enabled)
+                                    .padding(16)
+                            }
+                            .frame(maxWidth: 360, maxHeight: 420)
+                        }
+                    }
+                }
+                .padding(.vertical, DS.Space.xs)
+                .padding(.horizontal, DS.Space.s)
+                .background(Capsule().fill(DS.Surface.panel.color.opacity(0.9))
+                    .overlay(Capsule().strokeBorder(
+                        DS.Color.strokePanel.color, lineWidth: 1)))
+                .frame(maxWidth: CGFloat(LatticePreviewBanner.noticeMaxWidthPT), alignment: .leading)
+                .accessibilityIdentifier("lattice-preview-notice")
             }
         }
     }
@@ -9845,8 +9962,11 @@ public struct WorkspacePlaceholder: View {
             expandMM: project.latticeExpandMM(ref),
             syntheticFoci: latticeSyntheticFociRow(ref),
             fociDisabled: project.latticeWallLoaded(ref) == true,
+            // ★ Receipt C (brief 2026-09-06): after a run the wall's own entry, keyed
+            // by face, outranks the preview's measurement — "never assume the toggle
+            // did something; read the entry".
             wallStress: latticeSyntheticFociRow(ref) == nil ? nil
-                : latticeDeadWalls[ref.key]?.statusText)
+                : (latticeReceiptWallText(ref) ?? latticeDeadWalls[ref.key]?.statusText))
         latticeDrawerBody(drawer, depthDrag: latticePrimitiveDepthDrag(g, ref),
                           identifier: "lattice-drawer-\(ref.key)",
                           writeDepth: { mm in
@@ -9893,6 +10013,14 @@ public struct WorkspacePlaceholder: View {
                               if showStrutPreview, project.lattice.enabled { buildStrutScene() }
                           })
             .padding(.leading, DS.Space.m)
+    }
+
+    /// The run receipt's per-face synthetic entry for this wall, when the run had one.
+    private func latticeReceiptWallText(_ ref: LatticeSelectableRef) -> String? {
+        guard let receipt = latticeOrganicReceipt, !receipt.syntheticStressByFace.isEmpty,
+              let fid = project.latticeJobRegions().regions.first(where: { $0.selectableKey == ref.key })?.faceID,
+              let row = receipt.syntheticStressByFace[fid] else { return nil }
+        return "run: " + row.text
     }
 
     /// ★ THE FOCI ROW'S TEXT, or nil when the row must not exist: only an organic

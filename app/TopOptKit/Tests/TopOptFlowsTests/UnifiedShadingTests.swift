@@ -129,7 +129,10 @@ final class UnifiedShadingTests: XCTestCase {
                             ("standalone lattice",
                              MeshRenderer.standaloneLatticeShaderSourceForTesting),
                             ("viewer", MeshRenderer.viewerShaderSourceForTesting),
-                            ("stage", MeshRenderer.stageShaderSourceForTesting)] {
+                            ("stage", MeshRenderer.stageShaderSourceForTesting),
+                            // ★ the organic capsule impostors (2026-09-06): a FIFTH
+                            // library, built with `try?` like the others
+                            ("organic capsules", MeshRenderer.organicCapsuleShaderSourceForTesting)] {
             do {
                 _ = try device.makeLibrary(source: src, options: nil)
             } catch {
@@ -234,6 +237,7 @@ final class UnifiedShadingTests: XCTestCase {
             ("ao", MeshRenderer.aoShaderSourceForTesting),
             ("stage", MeshRenderer.stageShaderSourceForTesting),
             ("lattice", MeshRenderer.latticeShaderSourceForTesting),
+            ("organic capsules", MeshRenderer.organicCapsuleShaderSourceForTesting),
         ]
         var used = 0
         for (name, src) in sources where src.contains("ShellClip") {

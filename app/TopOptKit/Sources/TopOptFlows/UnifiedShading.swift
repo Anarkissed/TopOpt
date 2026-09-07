@@ -1479,3 +1479,191 @@ fragment LatShadeOut lsdf_shade(VOut in [[stage_in]],
     return o;
 }
 """
+
+// ★★★ ORGANIC AS CAPSULES, NOT AS A FIELD (maintainer, 2026-09-06: "leave the SDF for
+// the regular lattice section. Once Organic is selected, switch the previews to GPU
+// capsule impostors").
+//
+// ★ WHY. The organic field was baked at 0.35 mm voxels while the struts it held were
+// 0.21–0.37 mm in radius — one voxel or less across. A trilinear distance field cannot
+// hold a round tube thinner than its own voxel: the sample's struts flattened into
+// grid-aligned ribbons, the part's into threads, and the normals were one-voxel
+// differences. The spans themselves — (a, b, r), the run's own emitted capsules —
+// already cross the bridge and sit in the 3MF variants; drawing THEM is exact at any
+// zoom and needs no bake.
+//
+// ★ HOW. One instanced draw: 36 vertices (a box) per capsule, built in the vertex
+// shader around the segment at the LIVE radius. The fragment shader ray-casts the
+// sphere-swept segment analytically from the model-space eye, applies the SAME clip the
+// march applies (eroded part SDF ∧ exact part bbox ∧ declared region), the same shell
+// depth bias, and writes the same three G-buffer attachments — so `lsdf_shade` lights
+// it, the deferred AO reads it, and the shell's depth buffer occludes it, with no
+// second lighting model anywhere.
+//
+// ★ ITS OWN LIBRARY, by the house rule (one `*ShaderSource`, one `makeLibrary`), so it
+// interpolates the material and the field sources it needs rather than copying them.
+// The depth attribute here is the permissive one on purpose: the box is drawn with
+// culling OFF, a fragment may come from the box's far face, and the true hit is then
+// NEARER than the rasterised depth — a conservative declaration would be a lie for
+// that fragment. Early-Z is not worth a wrong picture; the ray-cast is a few dozen
+// flops. (`testFragmentDepthWritesAreDeclaredConservative` counts the lattice source
+// only; this is a separate string.)
+let organicCapsuleShaderSource = """
+#include <metal_stdlib>
+using namespace metal;
+
+\(unifiedMaterialSource)
+
+\(latticeFieldSource)
+
+struct CapVOut {
+    float4 pos [[position]];
+    float3 mp;                    // model-space position on the bounding box
+    uint   iid [[flat]];
+};
+
+// The box around capsule `iid`: end caps pushed out by R along the axis, ±R across.
+vertex CapVOut capsule_vertex(uint vid [[vertex_id]], uint iid [[instance_id]],
+                              const device float4* caps [[buffer(0)]],
+                              constant LSDFUniforms& U [[buffer(1)]]) {
+    float4 A = caps[2 * iid], B = caps[2 * iid + 1];
+    float R = U.organicRadius.x > 0.0 ? U.organicRadius.x : A.w;
+    R = max(R, 1e-4);
+    float3 ax = B.xyz - A.xyz;
+    float len = length(ax);
+    float3 u = len > 1e-6 ? ax / len : float3(0.0, 0.0, 1.0);
+    float3 hlp = abs(u.x) < 0.9 ? float3(1.0, 0.0, 0.0) : float3(0.0, 1.0, 0.0);
+    float3 v = normalize(cross(u, hlp));
+    float3 w = cross(u, v);
+    // 12 triangles over the 8 corners; corner bits: 1 = far end, 2 = +v, 4 = +w
+    const int idx[36] = { 0,1,2, 2,1,3, 4,6,5, 5,6,7, 0,4,1, 1,4,5,
+                          2,3,6, 6,3,7, 0,2,4, 4,2,6, 1,5,3, 3,5,7 };
+    int c = idx[vid % 36];
+    float3 e = (c & 1) ? (B.xyz + u * R) : (A.xyz - u * R);
+    float3 p = e + ((c & 2) ? v * R : -v * R) + ((c & 4) ? w * R : -w * R);
+    CapVOut o;
+    o.pos = U.clipFromModel * float4(p, 1.0);
+    o.mp = p;
+    o.iid = iid;
+    return o;
+}
+
+// Ray vs one end sphere: the near root, which is negative when the ray starts inside.
+static float cap_sphere(float3 ro, float3 rd, float3 c, float r) {
+    float3 oc = ro - c;
+    float b = dot(rd, oc);
+    float cc = dot(oc, oc) - r * r;
+    float h = b * b - cc;
+    if (h < 0.0) { return -1.0; }
+    return -b - sqrt(h);
+}
+
+// Ray vs sphere-swept segment (iq's capIntersect, with the axis-parallel case handled).
+// Returns t ≥ 0, or −1 for a miss or a ray that starts inside.
+static float cap_intersect(float3 ro, float3 rd, float3 pa, float3 pb, float r) {
+    float3 ba = pb - pa;
+    float3 oa = ro - pa;
+    float baba = dot(ba, ba), bard = dot(ba, rd), baoa = dot(ba, oa);
+    float rdoa = dot(rd, oa), oaoa = dot(oa, oa);
+    float a = baba - bard * bard;
+    float b = baba * rdoa - baoa * bard;
+    float c = baba * oaoa - baoa * baoa - r * r * baba;
+    float h = b * b - a * c;
+    float t = -1.0;
+    if (a > 1e-7 * max(baba, 1e-9)) {
+        if (h < 0.0) { return -1.0; }
+        t = (-b - sqrt(h)) / a;
+        float y = baoa + t * bard;
+        if (y > 0.0 && y < baba) { return t >= 0.0 ? t : -1.0; }
+        t = cap_sphere(ro, rd, (y <= 0.0) ? pa : pb, r);
+    } else {
+        // parallel to the axis: only the two end spheres can be hit
+        float ta = cap_sphere(ro, rd, pa, r), tb = cap_sphere(ro, rd, pb, r);
+        t = (ta < 0.0) ? tb : ((tb < 0.0) ? ta : min(ta, tb));
+    }
+    return t >= 0.0 ? t : -1.0;
+}
+
+static float3 cap_normal(float3 p, float3 pa, float3 pb, float r) {
+    float3 ba = pb - pa;
+    float h = clamp(dot(p - pa, ba) / max(dot(ba, ba), 1e-9), 0.0, 1.0);
+    return normalize(p - pa - h * ba);
+}
+
+// The march's clip, at one point: eroded part SDF ∧ exact part bbox ∧ declared region
+// (which already carries the skin). True where a strut may be drawn.
+static bool cap_inside_clip(constant LSDFUniforms& U, texture3d<float> sdfTex,
+                            texture3d<float> regionTex, sampler samp,
+                            constant ShellClip& RC, constant float4* decls, float3 p) {
+    float3 sdfDims = max(U.sdfDims.xyz, float3(1.0));
+    float3 stc = ((p - U.sdfOrigin.xyz) / U.sdfSpacing.xyz + 0.5) / sdfDims;
+    float delta = U.stepParams.y;
+    float dPart = sdfTex.sample(samp, stc).r + delta;
+    float3 bc = 0.5 * (U.bboxMin.xyz + U.bboxMax.xyz);
+    float3 be = 0.5 * (U.bboxMax.xyz - U.bboxMin.xyz);
+    float3 qb = abs(p - bc) - be;
+    float dBox = length(max(qb, 0.0)) + min(max(qb.x, max(qb.y, qb.z)), 0.0);
+    float dRegion = regionTex.sample(samp, stc).r;
+    float dClip = max(max(lsdf_part_clip(U, sdfTex, regionTex, samp, RC, decls, p, dPart),
+                          dBox), dRegion);
+    return dClip < 0.02;
+}
+
+struct CapGBuf {
+    float  eyeZ    [[color(0)]];
+    float4 enormal [[color(1)]];
+    float4 albedo  [[color(2)]];
+    float  depth   [[depth(any)]];
+};
+
+fragment CapGBuf capsule_gbuffer(CapVOut in [[stage_in]],
+                                 constant LSDFUniforms& U [[buffer(0)]],
+                                 const device float4* caps [[buffer(2)]],
+                                 texture3d<float> sdfTex [[texture(1)]],
+                                 texture3d<float> tintTex [[texture(2)]],
+                                 texture3d<float> regionTex [[texture(3)]],
+                                 texture3d<float> stressTex [[texture(4)]],
+                                 sampler samp [[sampler(0)]],
+                                 constant ShellClip& RC [[buffer(4)]],
+                                 constant float4* shellDecls [[buffer(5)]]) {
+    float4 A = caps[2 * in.iid], B = caps[2 * in.iid + 1];
+    float R = U.organicRadius.x > 0.0 ? U.organicRadius.x : A.w;
+    R = max(R, 1e-4);
+    float3 ro = U.eye.xyz;
+    float3 rd = normalize(in.mp - ro);
+    float t = cap_intersect(ro, rd, A.xyz, B.xyz, R);
+    if (t < 0.0) { discard_fragment(); }
+    float3 p = ro + rd * t;
+    float3 n = cap_normal(p, A.xyz, B.xyz, R);
+    if (!cap_inside_clip(U, sdfTex, regionTex, samp, RC, shellDecls, p)) {
+        // The near side is cut away (outside the part, the region or the shell's
+        // survivors): the ray may still leave the SAME strut inside the clip — that
+        // exit is where the march would have stopped. Cast back from beyond the strut.
+        float3 mid = 0.5 * (A.xyz + B.xyz);
+        float T = dot(mid - ro, rd) + 0.5 * length(B.xyz - A.xyz) + R + 1.0;
+        float tb = cap_intersect(ro + rd * T, -rd, A.xyz, B.xyz, R);
+        if (tb < 0.0) { discard_fragment(); }
+        float t2 = T - tb;
+        if (t2 <= t + 1e-4) { discard_fragment(); }
+        p = ro + rd * t2;
+        n = -cap_normal(p, A.xyz, B.xyz, R);
+        if (!cap_inside_clip(U, sdfTex, regionTex, samp, RC, shellDecls, p)) { discard_fragment(); }
+    }
+    // The same depth bias the march applies where the shell still owns the boundary.
+    float3 posForDepth = p;
+    if (!shell_is_latticed(p, n, RC, shellDecls, regionTex)) {
+        float voxel = max(max(U.sdfSpacing.x, U.sdfSpacing.y), U.sdfSpacing.z);
+        posForDepth += rd * (\(latticeSurfaceInsetMSL));
+    }
+    float4 clip = U.clipFromModel * float4(posForDepth, 1.0);
+    float3 eyeP = (U.eyeFromModel * float4(posForDepth, 1.0)).xyz;
+    float3 eyeN = normalize((U.eyeNormalBasis * float4(n, 0.0)).xyz);
+    if (eyeN.z < 0.0) { eyeN = -eyeN; }
+    CapGBuf o;
+    o.eyeZ = -eyeP.z;
+    o.enormal = float4(eyeN, 0.0);
+    o.albedo = float4(lsdf_albedo(U, tintTex, stressTex, samp, p, U.shadeParams.x, 0.0, 0.0), 1.0);
+    o.depth = clamp(clip.z / max(clip.w, 1e-6), 0.0, 1.0);
+    return o;
+}
+"""

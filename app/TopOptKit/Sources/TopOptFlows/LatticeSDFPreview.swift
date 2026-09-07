@@ -145,6 +145,24 @@ public enum LatticePreviewBanner: Equatable, Sendable {
         }
     }
 
+    /// ★ THE CAPTION ON SCREEN (maintainer, 2026-09-06: "a massive squircle of text
+    /// that is over a bunch of other assets … only above the minimized Selections
+    /// window"). Three or four words over the Selections chip; `text` — the whole
+    /// sentence, every counter and reason — sits behind the (i) beside it. An
+    /// `.empty` reason is already one short sentence and is shown as it is.
+    public var caption: String {
+        switch self {
+        case .empty(let t): return t
+        case .drawing(let t):
+            if t.hasPrefix("★") { return "★ Preview differs from run" }
+            if t.contains("shown as the doubled ladder") { return "Lattice preview · stand-in" }
+            return "Lattice preview · not the export"
+        }
+    }
+    /// The notice's width cap, in points: the Selections chip's column, short of the
+    /// iPad chip that starts ~310 pt from the left edge on the 13-inch iPad.
+    public static let noticeMaxWidthPT: Double = 280
+
     public var isEmpty: Bool {
         if case .empty = self { return true }
         return false

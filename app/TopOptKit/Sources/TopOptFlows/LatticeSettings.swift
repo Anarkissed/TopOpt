@@ -602,6 +602,12 @@ public struct LatticeSpec: Equatable, Sendable {
     /// ★ UNLOADED WALLS get synthetic stresses (Aesthetic only, 2026-09-05).
     public var organicSyntheticStresses: Bool = false
     public var organicSyntheticFoci: Int = 4
+    /// ★ PR 355 keys (2026-09-06): Michell second-family ties on the GROWN path
+    /// (default on), how much they wander (0 = straight), the grade-to-solid ring
+    /// inside the face outline (−1 = one base cell, 0 = none).
+    public var organicTransferTies: Bool = true
+    public var organicTieSwirl: Double = 1.0
+    public var organicSolidRimMM: Double = -1
     public var organicScale: Double = 1
     /// The user's pick among certification's separations (0 ⇒ none; Fit lets core choose).
     public var organicPickedSeparationMM: Double = 0
@@ -754,6 +760,17 @@ public struct LatticeSpec: Equatable, Sendable {
             if organicShapeFit { put("organic_shape_fit", true) }
             // ★ absent ⇒ true in core; write only the OFF state (maintainer, 2026-09-05)
             if !organicOverhangFillet { put("organic_overhang_fillet", false) }
+            // ★ PR 355 (2026-09-06): ties and their swirl ride the GROWN path only; the
+            // solid rim's default (−1 = one base cell) is core's own, written only when
+            // changed; the structural certificate is REQUIRED with a structural intent.
+            if organicGrowth {
+                if !organicTransferTies { put("organic_transfer_ties", false) }
+                if organicTransferTies, abs(organicTieSwirl - 1.0) > 1e-9 {
+                    put("organic_tie_swirl", Swift.min(1, Swift.max(0, organicTieSwirl)))
+                }
+            }
+            if abs(organicSolidRimMM + 1) > 1e-9 { put("organic_solid_rim_mm", Swift.max(0, organicSolidRimMM)) }
+            if stageMode == .structural { put("organic_structural_certification", "beam_network") }
             // ★ SYNTHETIC STRESSES ON UNLOADED WALLS (maintainer, 2026-09-05) carry NO
             // grading key: core's contract is per REGION (`synthetic_stress`,
             // `synthetic_foci`), written by `LatticeRegionSpec.wireDictionary` for the
@@ -777,9 +794,20 @@ public struct LatticeSpec: Equatable, Sendable {
             // ★ The user's pick among certification's separations (maintainer,
             // 2026-09-03). `put` refuses it until core's schema accepts the key, so a
             // pick is stored and shown but never sent to a core that would refuse.
-            if organicPickedSeparationMM > 0 { put("organic_separation_mm", organicPickedSeparationMM) }
-            if organicPickedGradeMM.count == 2, organicPickedGradeMM[0] > 0, organicPickedGradeMM[1] >= organicPickedGradeMM[0] {
-                put("organic_window_mm", organicPickedGradeMM)
+            // ★ MANUAL ON THE WIRE (brief 2026-09-06): core has no organic size keys;
+            // a single size is `cell_mode: "fit"` + `cell_mm`, a grade is
+            // `cell_mode: "auto"` + `cell_min_mm`/`cell_max_mm` — the same keys the
+            // recommendation's FIT and AUTO buttons write.
+            if organicPickedSeparationMM > 0 {
+                grading["cell_mode"] = LatticeCellSizeMode.fit.rawValue
+                grading["cell_mm"] = organicPickedSeparationMM
+                grading.removeValue(forKey: "cell_min_mm"); grading.removeValue(forKey: "cell_max_mm")
+            } else if organicPickedGradeMM.count == 2, organicPickedGradeMM[0] > 0,
+                      organicPickedGradeMM[1] > organicPickedGradeMM[0] {
+                grading["cell_mode"] = LatticeCellSizeMode.auto.rawValue
+                grading["cell_min_mm"] = organicPickedGradeMM[0]
+                grading["cell_max_mm"] = organicPickedGradeMM[1]
+                grading.removeValue(forKey: "cell_mm")
             }
             // ★★★ GROWTH NEEDS A STATED LAYER HEIGHT — a SCHEMA REFUSAL since the
             // PR 353 amendment, not a fallback. Without one core would substitute half
@@ -798,6 +826,48 @@ public struct LatticeSpec: Equatable, Sendable {
 /// (part of the run-request identity, so an edit re-enables Optimize). OFF by default
 /// ⇒ byte-identical to a non-lattice project (BAR U1).
 public struct LatticeSettings: Codable, Equatable, Sendable {
+
+    /// ★ THE PREVIEW TRACES AT THE JOB'S NUMBERS (2026-09-06). The bake used to read
+    /// `cellMinMM`/`cellMaxMM` while the job wrote `organicPickedGradeMM` — on his
+    /// part the wizard said "2.00 mm to 4.00 mm" and the preview traced 4–8 mm. One
+    /// mapping, the same one `LatticeSpec.gradingDictionary` writes: a single size ⇒
+    /// (s, s); a grade ⇒ (lo, hi); nothing picked ⇒ the window as before, which is
+    /// what a core left to decide (`cell_mode auto` without numbers) is shown as.
+    /// True when nothing was picked and the window above is the OCTET window standing
+    /// in — the case the bake must replace by core's own band (his walk, 2026-09-06:
+    /// "auto cell grade looked incredibly sparse — is it using the octet preview
+    /// settings?"). The job carries no numbers then; core decides in the run.
+    public var organicPreviewWindowIsFallback: Bool {
+        !(organicPickedSeparationMM > 0)
+            && !(organicPickedGradeMM.count == 2 && organicPickedGradeMM[0] > 0
+                 && organicPickedGradeMM[1] > organicPickedGradeMM[0])
+    }
+
+    public var organicPreviewSeparationWindowMM: (lo: Double, hi: Double) {
+        if organicPickedSeparationMM > 0 {
+            return (organicPickedSeparationMM, organicPickedSeparationMM)
+        }
+        if organicPickedGradeMM.count == 2, organicPickedGradeMM[0] > 0,
+           organicPickedGradeMM[1] > organicPickedGradeMM[0] {
+            return (organicPickedGradeMM[0], organicPickedGradeMM[1])
+        }
+        return (cellMinMM > 0 ? cellMinMM : cellMM, cellMaxMM > 0 ? cellMaxMM : cellMM)
+    }
+
+    /// ★ WHAT A BAKE READS — with what a bake WRITES stripped out. The strut bake's
+    /// completion records the wall-stress shares it measured
+    /// (`recordLatticeWallStress`), and the probe records its answer; neither changes
+    /// the picture, but both are fields of this value, and the preview rebakes on
+    /// `.onChange(of: project.lattice)`. Measured 2026-09-06 on his part: one change,
+    /// two 12-minute bakes — the second armed by the first's own write. The trigger
+    /// compares THIS, so a write of a measurement can never re-arm the bake it came
+    /// from.
+    public var previewBakeInputs: LatticeSettings {
+        var s = self
+        s.selectableWallStressFraction = [:]
+        s.organicForecast = nil
+        return s
+    }
     /// LATTICE MODE. Off (the default) ⇒ no lattice block reaches the job and the
     /// proxy is inert — the project produces exactly today's job.
     public var enabled: Bool
@@ -941,6 +1011,15 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
     /// The count an unloaded wall gets when it states none — 4, core's measured recipe.
     public var organicSyntheticFoci: Int = 4
     public var selectableSyntheticFoci: [String: Int] = [:]
+    /// ★ PR 355 keys (2026-09-06): grown-path transfer ties and their swirl, the solid
+    /// rim inside the outline (−1 = one base cell), and the Aesthetic LOOK target for
+    /// the size recommendation (cells the eye reads across the shortest face).
+    public var organicTransferTies: Bool = true
+    public var organicTieSwirl: Double = 1.0
+    public var organicSolidRimMM: Double = -1
+    public var organicLookCellsAcross: Int = 8
+    public static let organicRecommendSteps = 5
+    public static let organicRecommendMargin = 1.5
     /// ★ THE LAST BAKE'S MEASUREMENT per wall: median von Mises as a fraction of the
     /// field's peak. A cache of a measurement, not a choice — it decides which walls
     /// may take foci (below `OrganicSyntheticStress.deadFraction`) and which regions
@@ -1519,6 +1598,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         case organicApprovedGradesMM, organicPickedGradeMM
         case organicSyntheticStresses, organicSyntheticFoci, selectableSyntheticFoci
         case selectableWallStressFraction
+        case organicTransferTies, organicTieSwirl, organicSolidRimMM, organicLookCellsAcross
         case organicForecast
     }
 
@@ -1554,6 +1634,10 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         selectableSyntheticFoci = (try c.decodeIfPresent([String: Int].self, forKey: .selectableSyntheticFoci) ?? [:])
             .filter { OrganicSyntheticStress.fociRange.contains($0.value) }
         selectableWallStressFraction = try c.decodeIfPresent([String: Double].self, forKey: .selectableWallStressFraction) ?? [:]
+        organicTransferTies = try c.decodeIfPresent(Bool.self, forKey: .organicTransferTies) ?? true
+        organicTieSwirl = try c.decodeIfPresent(Double.self, forKey: .organicTieSwirl) ?? 1.0
+        organicSolidRimMM = try c.decodeIfPresent(Double.self, forKey: .organicSolidRimMM) ?? -1
+        organicLookCellsAcross = try c.decodeIfPresent(Int.self, forKey: .organicLookCellsAcross) ?? 8
         organicForecast = try c.decodeIfPresent(OrganicForecast.self, forKey: .organicForecast)
         organicApprovedGradesMM = try c.decodeIfPresent([[Double]].self, forKey: .organicApprovedGradesMM) ?? []
         organicPickedGradeMM = try c.decodeIfPresent([Double].self, forKey: .organicPickedGradeMM) ?? []
@@ -1668,6 +1752,10 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         try c.encode(organicSyntheticStresses, forKey: .organicSyntheticStresses)
         try c.encode(organicSyntheticFoci, forKey: .organicSyntheticFoci)
         try c.encode(selectableSyntheticFoci, forKey: .selectableSyntheticFoci)
+        try c.encode(organicTransferTies, forKey: .organicTransferTies)
+        try c.encode(organicTieSwirl, forKey: .organicTieSwirl)
+        try c.encode(organicSolidRimMM, forKey: .organicSolidRimMM)
+        try c.encode(organicLookCellsAcross, forKey: .organicLookCellsAcross)
         if !selectableWallStressFraction.isEmpty {
             try c.encode(selectableWallStressFraction, forKey: .selectableWallStressFraction)
         }
@@ -2036,6 +2124,9 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
             spec.organicOverhangFillet = organicOverhangFillet
             spec.organicSyntheticStresses = organicSyntheticStresses
             spec.organicSyntheticFoci = organicSyntheticFoci
+            spec.organicTransferTies = organicTransferTies
+            spec.organicTieSwirl = organicTieSwirl
+            spec.organicSolidRimMM = organicSolidRimMM
             spec.organicScale = organicScale
             spec.organicPickedSeparationMM = organicPickedSeparationMM
             spec.organicPickedGradeMM = organicPickedGradeMM
@@ -2096,6 +2187,9 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         spec2.organicOverhangFillet = organicOverhangFillet
         spec2.organicSyntheticStresses = organicSyntheticStresses
         spec2.organicSyntheticFoci = organicSyntheticFoci
+        spec2.organicTransferTies = organicTransferTies
+        spec2.organicTieSwirl = organicTieSwirl
+        spec2.organicSolidRimMM = organicSolidRimMM
         spec2.organicScale = organicScale
         spec2.organicPickedSeparationMM = organicPickedSeparationMM
         spec2.organicPickedGradeMM = organicPickedGradeMM

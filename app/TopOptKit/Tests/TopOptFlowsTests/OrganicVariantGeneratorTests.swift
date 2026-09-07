@@ -45,16 +45,25 @@ final class OrganicVariantGeneratorTests: XCTestCase {
                 Self.repoRoot.appendingPathComponent("core/src/settings/rules.json").path)
             try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
             let exp = expectation(description: "generate")
+            // ★ GENERATE_ORGANIC_VARIANTS_ONLY=traced-auto,traced-fit re-traces a subset
+            // (a grown Auto alone is ~14 min on the Mac).
+            let only = (ProcessInfo.processInfo.environment["GENERATE_ORGANIC_VARIANTS_ONLY"] ?? "")
+                .split(separator: ",").map { String($0).trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
             Task {
-                for (name, picks) in Self.defaultPicks() {
+                for (name, picks) in Self.defaultPicks() where only.isEmpty || only.contains(name) {
                     let key = OrganicVariantCache.key(picks: picks, fieldIdentity: OrganicSampleCube.fieldIdentity)
                     try? FileManager.default.removeItem(at: OrganicVariantCache.cachedURL(for: key))
                     let t0 = Date()
                     guard let b = await OrganicSampleCube.baked(picks: picks, latticeID: "octet") else { print("GEN \(name): FAILED"); continue }
                     let src = OrganicVariantCache.cachedURL(for: key)
                     let dst = dir.appendingPathComponent("\(key).3mf")
-                    try? FileManager.default.removeItem(at: dst)
-                    try? FileManager.default.copyItem(at: src, to: dst)
+                    // ★ Never erase a shipped file without a source to replace it
+                    // (2026-09-06: a cache HIT on the bundled variant has no cached
+                    // copy, and this deleted the two traced variants from the bundle).
+                    if FileManager.default.fileExists(atPath: src.path) {
+                        try? FileManager.default.removeItem(at: dst)
+                        try? FileManager.default.copyItem(at: src, to: dst)
+                    }
                     let size = (try? FileManager.default.attributesOfItem(atPath: dst.path)[.size] as? Int) ?? -1
                     print("GEN \(name): \(key) \(size) bytes " + String(format: "%.0f s · ", Date().timeIntervalSince(t0)) + String(b.measurement.prefix(120)))
                 }

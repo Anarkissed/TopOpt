@@ -60,6 +60,11 @@ final class LatticeOrganicTraceTests: XCTestCase {
         // has always pinned. The centreline channel is the one a live radius offsets.
         XCTAssertEqual(t.surfaceField.count, t.field.count, "★ both channels, one grid")
         XCTAssertTrue(t.field.allSatisfy { $0 >= 0 }, "★ a centreline distance is never negative")
+        // ★ THE PHASE CLOCK (2026-09-06): three non-negative wall-clock readings that
+        // fit inside the call. Debug build; the numbers are printed, never asserted.
+        XCTAssertGreaterThanOrEqual(t.traceSeconds, 0); XCTAssertGreaterThanOrEqual(t.emitSeconds, 0)
+        XCTAssertGreaterThanOrEqual(t.bakeSeconds, 0)
+        XCTAssertTrue(t.phaseSummary.hasPrefix("trace "), t.phaseSummary)
         let inside = t.surfaceField.filter { $0 < 0 }.count
         let atBand = t.field.filter { $0 >= t.bandMM - 1e-6 }.count
         // inside a strut the centreline is closer than the surface plus the radius
@@ -109,6 +114,32 @@ final class LatticeOrganicTraceTests: XCTestCase {
 
     /// ★ THE FIELD IS SAFE TO SPHERE TRACE. Clamping is an UNDER-estimate, so no value
     /// may exceed the band — a value above it would let a march step past a strut.
+    /// ★ HIDDEN REPAIRS SKIP THE EMISSION (2026-09-06: on his part the trace took
+    /// 0.2 s and core's emission 186–191 s; the traced picture must not wait for
+    /// passes it does not draw). The census then says so instead of pretending.
+    func testHiddenRepairsSkipTheEmission() throws {
+        let n = 24, spacing = 1.0
+        let (cand, tensor, sep) = block(n: n, spacing: spacing)
+        let f = 24, fs = 1.0
+        let t = try XCTUnwrap(TopOptKit.organicTrace(
+            nx: n, ny: n, nz: n, spacingMM: spacing, origin: .zero,
+            candidate: cand, stressTensor: tensor, separationMM: sep,
+            minExtrudableWidthMM: 0.42, buildDirection: SIMD3(0, 0, 1),
+            fieldDims: (f, f, f), fieldOrigin: .zero, fieldSpacingMM: fs,
+            bandMM: 3.0, showRepairs: false))
+        XCTAssertFalse(t.census.emissionRan, "★ no emission when repairs are hidden")
+        XCTAssertLessThan(t.emitSeconds, 0.05, "★ …and no time spent in it: \(t.emitSeconds) s")
+        XCTAssertEqual(t.spanCount, t.tracedSegmentCount, "the traced set is what is baked")
+        XCTAssertGreaterThan(t.spanCount, 0)
+        let with = try XCTUnwrap(TopOptKit.organicTrace(
+            nx: n, ny: n, nz: n, spacingMM: spacing, origin: .zero,
+            candidate: cand, stressTensor: tensor, separationMM: sep,
+            minExtrudableWidthMM: 0.42, buildDirection: SIMD3(0, 0, 1),
+            fieldDims: (f, f, f), fieldOrigin: .zero, fieldSpacingMM: fs,
+            bandMM: 3.0, showRepairs: true))
+        XCTAssertTrue(with.census.emissionRan, "positive control: repairs on ⇒ the emission runs")
+    }
+
     func testNoValueExceedsTheBand() throws {
         let n = 20, spacing = 1.0
         let (cand, tensor, sep) = block(n: n, spacing: spacing)
