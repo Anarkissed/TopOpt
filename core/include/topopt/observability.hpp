@@ -1051,6 +1051,12 @@ struct RunInfo {
   double organic_structural_max_distributed_mpa = 0.0;
   bool organic_structural_max_exceeds_allowable = false;
   // the cell-size recommendation (lattice.organic_recommend)
+  // the support raster's size against its cap (organic_lattice.cpp, OrganicGenStats):
+  // cells = (Lx/rmin)(Ly/rmin)(Lz/layer); above the cap the pass is SKIPPED. At 5 B/cell
+  // (occupancy + owner) the island pass needs 2.0 GB at the 400M cap -- this is how a
+  // device run says whether it went near it.
+  long long organic_support_raster_cells = 0;
+  long long organic_support_raster_cap = 0;
   bool organic_recommend_ran = false;
   std::string organic_recommend_mode;
   double organic_recommend_band_lo_mm = 0.0, organic_recommend_band_hi_mm = 0.0;
@@ -1060,6 +1066,10 @@ struct RunInfo {
   bool organic_recommend_auto_found = false;
   double organic_recommend_auto_lo_mm = 0.0, organic_recommend_auto_hi_mm = 0.0;
   double organic_structural_seconds = 0.0;
+  long long organic_structural_members = 0;          // members in the certified network
+  double organic_structural_rss_before_mb = -1.0;    // resident before the certificate
+  double organic_structural_rss_after_mb = -1.0;     // resident after
+  double organic_structural_peak_rss_mb = -1.0;      // process high-water mark after (getrusage)
   long long organic_structural_worst_strut = -1;
   long long organic_structural_load_cases = 0;
   long long organic_structural_members_carrying = -1;

@@ -1,4 +1,5 @@
 #include "topopt/beam_network.hpp"
+#include "topopt/observability.hpp"   // process_memory(): what the certificate cost
 
 #include <algorithm>
 #include <cassert>
@@ -74,12 +75,12 @@ BeamNetwork build_beam_network(const std::vector<BeamSegment>& segments) {
     rad.push_back(r);
     return id;
   };
-  struct Raw { int a, b; double r; };
+  struct Raw { int a, b; double r; int tag; };
   std::vector<Raw> raw;
   raw.reserve(segments.size());
   for (const BeamSegment& s : segments) {
     const int a = id_of(s.a, s.radius_mm), b = id_of(s.b, s.radius_mm);
-    if (a != b) raw.push_back({a, b, s.radius_mm});
+    if (a != b) raw.push_back({a, b, s.radius_mm, s.tag});
   }
 
   // Pass 2: label the CHAINS produced by pass 1, so the contact weld can be
@@ -152,7 +153,7 @@ BeamNetwork build_beam_network(const std::vector<BeamSegment>& segments) {
     if (dist(net.nodes[static_cast<std::size_t>(a)],
              net.nodes[static_cast<std::size_t>(b)]) <= kWeldEps)
       continue;  // welding averaged the two ends onto the same point
-    net.members.push_back({a, b, e.r});
+    net.members.push_back({a, b, e.r, e.tag});
   }
   return net;
 }
@@ -2781,9 +2782,13 @@ OrganicCertificate certify_organic_structural(
     Vec3 build_dir, double load_reach_mm, bool census_ok, const std::vector<ShellPatch>* shells) {
   OrganicCertificate cert;
   const auto t0 = std::chrono::steady_clock::now();
+  cert.rss_before_mb = process_memory().rss_mb;
   auto finish = [&](void) {
     cert.seconds =
         std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+    const ProcessMemory pm = process_memory();
+    cert.rss_after_mb = pm.rss_mb;
+    cert.peak_rss_mb = pm.peak_rss_mb;
     return cert;
   };
   auto refuse = [&](const std::string& why) {
@@ -2820,6 +2825,7 @@ OrganicCertificate certify_organic_structural(
   const BeamNetwork net = build_beam_network(spans);
   cert.members = net.member_count();
   if (cert.members == 0) return refuse("the spans welded into an empty network");
+  for (const BeamNetwork::Member& mm : net.members) if (mm.tag != 0) ++cert.members_tagged;
   // Per-strut allowable: yield * min(1, z_knockdown / cos^2(axis, build_dir)).
   std::vector<double> kd(net.members.size(), 1.0), cos2(net.members.size(), 0.0);
   for (std::size_t i = 0; i < net.members.size(); ++i) {
@@ -2905,15 +2911,19 @@ OrganicCertificate certify_organic_structural(
     // of the ratio, and the knockdown recorded is the one applied to it.
     std::vector<std::pair<double, int>> rr;
     rr.reserve(ss.size());
+    std::vector<double> ru, su, rt, st;   // untagged / tagged: ratios and stresses
     double max_ratio = 0.0, max_ratio_d = 0.0, max_d = 0.0;
     int worst_d = -1;
     for (std::size_t i = 0; i < r.member_stress_mpa.size(); ++i) {
       if (i < r.member_dropped.size() && r.member_dropped[i]) continue;
       const double ki = i < kd.size() ? kd[i] : 1.0;
+      const bool tagged = i < net.members.size() && net.members[i].tag != 0;
       if (r.member_stress_mpa[i] > 0.0) {
         const double ratio = r.member_stress_mpa[i] / (allowable_mpa * ki);
         rr.push_back({ratio, static_cast<int>(i)});
         max_ratio = std::max(max_ratio, ratio);
+        if (tagged) { rt.push_back(ratio); st.push_back(r.member_stress_mpa[i]); }
+        else        { ru.push_back(ratio); su.push_back(r.member_stress_mpa[i]); }
       }
       if (i < rd.member_stress_mpa.size()) {
         const double sd = rd.member_stress_mpa[i];
@@ -2932,6 +2942,20 @@ OrganicCertificate certify_organic_structural(
     if (max_d > cert.stress_max_distributed_mpa) {
       cert.stress_max_distributed_mpa = max_d;
       cert.worst_strut_distributed = worst_d;
+    }
+    {
+      auto q99 = [](std::vector<double>& v) {
+        if (v.empty()) return 0.0;
+        std::sort(v.begin(), v.end());
+        return v[static_cast<std::size_t>(0.99 * static_cast<double>(v.size() - 1))];
+      };
+      const double ru99 = q99(ru), su99 = q99(su), rt99 = q99(rt), st99 = q99(st);
+      if (ru99 > 0.0 && (cert.margin_untagged == 0.0 || 1.0 / ru99 < cert.margin_untagged)) {
+        cert.margin_untagged = 1.0 / ru99;
+        cert.stress_p99_untagged_mpa = su99;
+      }
+      cert.tagged_p99_mpa = std::max(cert.tagged_p99_mpa, st99);
+      cert.tagged_ratio_p99 = std::max(cert.tagged_ratio_p99, rt99);
     }
     if (g99.first > ratio_used) {
       ratio_used = g99.first;

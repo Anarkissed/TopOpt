@@ -1495,6 +1495,8 @@ std::string run_info_json(const RunInfo& info) {
                 fmt(info.organic_structural_max_distributed_mpa);
           gr += std::string(", \"structural_max_exceeds_allowable\": ") +
                 (info.organic_structural_max_exceeds_allowable ? "true" : "false");
+          gr += ", \"support_raster_cells\": " + std::to_string(info.organic_support_raster_cells);
+          gr += ", \"support_raster_cap\": " + std::to_string(info.organic_support_raster_cap);
           if (info.organic_recommend_ran) {
             gr += ", \"recommend\": {\"mode\": \"" + info.organic_recommend_mode + "\"";
             gr += ", \"band_lo_mm\": " + fmt(info.organic_recommend_band_lo_mm);
@@ -1509,6 +1511,10 @@ std::string run_info_json(const RunInfo& info) {
           gr += ", \"structural_load_cases\": " +
                 std::to_string(info.organic_structural_load_cases);
           gr += ", \"structural_seconds\": " + fmt(info.organic_structural_seconds);
+          gr += ", \"structural_members\": " + std::to_string(info.organic_structural_members);
+          gr += ", \"structural_rss_before_mb\": " + fmt(info.organic_structural_rss_before_mb);
+          gr += ", \"structural_rss_after_mb\": " + fmt(info.organic_structural_rss_after_mb);
+          gr += ", \"structural_peak_rss_mb\": " + fmt(info.organic_structural_peak_rss_mb);
           gr += ", \"structural_members_carrying\": " +
                 std::to_string(info.organic_structural_members_carrying);
           gr += ", \"structural_zero_stress_fraction\": " +

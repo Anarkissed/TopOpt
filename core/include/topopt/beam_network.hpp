@@ -44,12 +44,19 @@ namespace topopt {
 struct BeamSegment {
   Vec3 a{}, b{};
   double radius_mm = 0.0;
+  // ★ A TAG THE CERTIFICATE CAN SEPARATE ON. 0 = the structure. The probe tags its
+  // synthetic scaffolding (1 = legs dropped to a contact, 2 = free-end ties) so the
+  // p99 can be reported with and without it (reviewer follow-up, 2026-09-06: the
+  // probe under-forecast the run by 37-73 %). The solve carries every member; only
+  // the STATISTIC reads the tag.
+  int tag = 0;
 };
 
 struct BeamNetwork {
   struct Member {
     int node_a = 0, node_b = 0;
     double radius_mm = 0.0;
+    int tag = 0;   // BeamSegment::tag, carried through the weld
   };
   std::vector<Vec3> nodes;
   std::vector<Member> members;
@@ -534,6 +541,16 @@ struct OrganicCertificate {
   double stress_max_distributed_mpa = 0.0;
   int worst_strut_distributed = -1;
   bool max_exceeds_allowable = false;          // distributed max ratio > 1 -> refused
+  // ★ THE STATISTIC WITH THE TAGGED MEMBERS SEPARATED (the probe's scaffolding).
+  std::size_t members_tagged = 0;              // members with tag != 0
+  double stress_p99_untagged_mpa = 0.0;        // p99 of stress over tag == 0 members
+  double margin_untagged = 0.0;                // 1 / p99 of (stress_i / allowable_i) over tag == 0
+  double tagged_p99_mpa = 0.0;                 // p99 of stress over the tagged members alone
+  double tagged_ratio_p99 = 0.0;               // p99 of stress_i / allowable_i over the tagged members
+  // ★ WHAT THE CERTIFICATE COST, beside `seconds`: resident size before and after,
+  // and the process high-water mark after (getrusage). The direct LDLT is the
+  // device limit, not the raster (reviewer follow-up, 2026-09-06).
+  double rss_before_mb = -1.0, rss_after_mb = -1.0, peak_rss_mb = -1.0;
 
   // provenance
   std::size_t load_cases_run = 0;
