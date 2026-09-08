@@ -961,9 +961,70 @@ static int run_softcut(const Dump& d, const BeamNetwork& net, const std::string&
 // in ~7 iterations plain and 2-3 with SR1 acceleration.
 
 
+
+// ── Jacobi-preconditioned CG on the global model, so it is never factorized ─────
+// The 9.73 GB global factor was the whole cost of the direct version: 146 s to build
+// and 23-27 s per back-substitution. Iteratively the operator is only ever APPLIED, so
+// the memory is the matrix plus a handful of vectors. (The assembled CSR is kept here
+// for simplicity -- ~60 MB, negligible beside a factor; a production version would
+// apply the operator element by element and store nothing.)
+struct CgResult { int iters = 0; double resid = 0.0; double seconds = 0.0; bool ok = false; };
+static CgResult cg_solve(int n, const std::vector<int>& ptr, const std::vector<int>& idx,
+                         const std::vector<double>& val, const std::vector<double>& b,
+                         std::vector<double>& x, double tol, int maxit) {
+  const auto t0 = std::chrono::steady_clock::now();
+  CgResult out;
+  std::vector<double> diag(static_cast<std::size_t>(n), 1.0);
+  for (int i = 0; i < n; ++i)
+    for (int k = ptr[static_cast<std::size_t>(i)]; k < ptr[static_cast<std::size_t>(i) + 1]; ++k)
+      if (idx[static_cast<std::size_t>(k)] == i) { const double v = val[static_cast<std::size_t>(k)];
+        diag[static_cast<std::size_t>(i)] = v > 0.0 ? v : 1.0; }
+  auto matvec = [&](const std::vector<double>& v, std::vector<double>& o) {
+    for (int i = 0; i < n; ++i) {
+      double acc = 0.0;
+      for (int k = ptr[static_cast<std::size_t>(i)]; k < ptr[static_cast<std::size_t>(i) + 1]; ++k)
+        acc += val[static_cast<std::size_t>(k)] * v[static_cast<std::size_t>(idx[static_cast<std::size_t>(k)])];
+      o[static_cast<std::size_t>(i)] = acc; } };
+  std::vector<double> r(static_cast<std::size_t>(n)), z(static_cast<std::size_t>(n)),
+      pv(static_cast<std::size_t>(n)), Ap(static_cast<std::size_t>(n));
+  x.assign(static_cast<std::size_t>(n), 0.0);
+  double bn = 0.0;
+  for (int i = 0; i < n; ++i) bn += b[static_cast<std::size_t>(i)] * b[static_cast<std::size_t>(i)];
+  bn = std::sqrt(bn);
+  if (!(bn > 0.0)) { out.ok = true; return out; }
+  r = b;
+  for (int i = 0; i < n; ++i) z[static_cast<std::size_t>(i)] = r[static_cast<std::size_t>(i)] / diag[static_cast<std::size_t>(i)];
+  pv = z;
+  double rz = 0.0;
+  for (int i = 0; i < n; ++i) rz += r[static_cast<std::size_t>(i)] * z[static_cast<std::size_t>(i)];
+  for (int it = 1; it <= maxit; ++it) {
+    matvec(pv, Ap);
+    double pAp = 0.0;
+    for (int i = 0; i < n; ++i) pAp += pv[static_cast<std::size_t>(i)] * Ap[static_cast<std::size_t>(i)];
+    if (!(std::fabs(pAp) > 0.0)) break;
+    const double alpha = rz / pAp;
+    double rn = 0.0;
+    for (int i = 0; i < n; ++i) {
+      x[static_cast<std::size_t>(i)] += alpha * pv[static_cast<std::size_t>(i)];
+      r[static_cast<std::size_t>(i)] -= alpha * Ap[static_cast<std::size_t>(i)];
+      rn += r[static_cast<std::size_t>(i)] * r[static_cast<std::size_t>(i)]; }
+    rn = std::sqrt(rn);
+    out.iters = it; out.resid = rn / bn;
+    if (out.resid <= tol) { out.ok = true; break; }
+    for (int i = 0; i < n; ++i) z[static_cast<std::size_t>(i)] = r[static_cast<std::size_t>(i)] / diag[static_cast<std::size_t>(i)];
+    double rz2 = 0.0;
+    for (int i = 0; i < n; ++i) rz2 += r[static_cast<std::size_t>(i)] * z[static_cast<std::size_t>(i)];
+    const double beta = rz2 / rz;
+    rz = rz2;
+    for (int i = 0; i < n; ++i) pv[static_cast<std::size_t>(i)] = z[static_cast<std::size_t>(i)] + beta * pv[static_cast<std::size_t>(i)];
+  }
+  out.seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+  return out;
+}
+
 static int run_igl(const Dump& d, const BeamNetwork& net, const std::string& outp,
                    const std::string& variant, double f, double margin_vox, int iters,
-                   const std::string& ref_stress_path) {
+                   const std::string& ref_stress_path, bool matrix_free) {
   const ProcessMemory m0 = process_memory();
   const auto t0 = std::chrono::steady_clock::now();
   const int nx = d.grid.nx, ny = d.grid.ny, nz = d.grid.nz;
@@ -1011,9 +1072,32 @@ static int run_igl(const Dump& d, const BeamNetwork& net, const std::string& out
                               d.E, d.nu, 0.9, 1e-8, 100000, &frac, nullptr, nullptr, d.reach,
                               nullptr, nullptr, false, &XG);
   if (!XG.filled) { std::printf("{\"variant\": \"%s\", \"error\": \"global export failed\"}\n", variant.c_str()); return 1; }
+  const double t_gasm = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
   ResearchFactor FG;
-  if (!FG.factor(XG.NF, XG.ptr, XG.idx, XG.val)) {
-    std::printf("{\"variant\": \"%s\", \"error\": \"global factor: %s\"}\n", variant.c_str(), FG.note.c_str()); return 1; }
+  double t_gfac = 0.0;
+  int cg_total = 0;
+  double cg_seconds = 0.0;
+  // ★ THE GLOBAL SOLVE IS A PRECONDITIONER, NOT AN ANSWER. Gendre's global correction
+  // only has to move u_G toward equilibrium; the LOCAL model and the interface residual
+  // decide the result. So it does not need nine digits -- the "inexact solver strategy"
+  // of arXiv:2404.15299. TOPOPT_IGL_CGTOL sets it; the default is deliberately loose.
+  const double kCgTol = std::getenv("TOPOPT_IGL_CGTOL") ? std::atof(std::getenv("TOPOPT_IGL_CGTOL")) : 1e-4;
+  const int kCgMax = 20000;
+  if (!matrix_free) {
+    if (!FG.factor(XG.NF, XG.ptr, XG.idx, XG.val)) {
+      std::printf("{\"variant\": \"%s\", \"error\": \"global factor: %s\"}\n", variant.c_str(), FG.note.c_str()); return 1; }
+    t_gfac = FG.seconds;
+  }
+  auto global_solve = [&](std::vector<double>& v) {
+    if (!matrix_free) { FG.solve(v); return; }
+    std::vector<double> x;
+    const CgResult cr = cg_solve(XG.NF, XG.ptr, XG.idx, XG.val, v, x, kCgTol, kCgMax);
+    cg_total += cr.iters; cg_seconds += cr.seconds;
+    std::fprintf(stderr, "[igl-cg] %d iterations, relative residual %.2e, %.2f s%s\n",
+                 cr.iters, cr.resid, cr.seconds, cr.ok ? "" : "  DID NOT REACH TOLERANCE");
+    v = x;
+  };
+  const auto t_ref0 = std::chrono::steady_clock::now();
   // ── the reference (real) coupled system, and the local partition ──
   FreeSys fs = export_system(d, net);
   const CoupledResearchExport& X = fs.X;
@@ -1080,6 +1164,7 @@ static int run_igl(const Dump& d, const BeamNetwork& net, const std::string& out
     const int full = X.from_free[static_cast<std::size_t>(i)];
     if (X.dof_is_beam[static_cast<std::size_t>(full)] || (full < X.SB && keep_node[static_cast<std::size_t>(full / 3)])) kmap[static_cast<std::size_t>(i)] = nK++; }
   Sub Kkk = sub_csr(X, kmap, nK);
+  const double t_lasm = std::chrono::duration<double>(std::chrono::steady_clock::now() - t_ref0).count();
   ResearchFactor FL;
   if (!FL.factor(Kkk.n, Kkk.ptr, Kkk.idx, Kkk.val)) {
     std::printf("{\"variant\": \"%s\", \"error\": \"local factor: %s\"}\n", variant.c_str(), FL.note.c_str()); return 1; }
@@ -1093,7 +1178,7 @@ static int run_igl(const Dump& d, const BeamNetwork& net, const std::string& out
   // ── iteration 0: the global solve ──
   std::vector<double> uG_free(static_cast<std::size_t>(XG.NF), 0.0);
   for (int i = 0; i < XG.NF; ++i) uG_free[static_cast<std::size_t>(i)] = XG.F[static_cast<std::size_t>(XG.from_free[static_cast<std::size_t>(i)])];
-  FG.solve(uG_free);
+  global_solve(uG_free);
   std::vector<double> uG_full(static_cast<std::size_t>(XG.M), 0.0);
   for (int i = 0; i < XG.NF; ++i) uG_full[static_cast<std::size_t>(XG.from_free[static_cast<std::size_t>(i)])] = uG_free[static_cast<std::size_t>(i)];
   const double t_setup = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
@@ -1118,15 +1203,20 @@ static int run_igl(const Dump& d, const BeamNetwork& net, const std::string& out
         if (kmap[static_cast<std::size_t>(j)] >= 0) continue;
         acc -= X.val[static_cast<std::size_t>(k)] * uref[static_cast<std::size_t>(X.from_free[static_cast<std::size_t>(j)])]; }
       Fk[static_cast<std::size_t>(a)] = acc; }
+    const auto ta = std::chrono::steady_clock::now();
     std::vector<double> uK = Fk;
     FL.solve(uK);
+    const double t_loc = std::chrono::duration<double>(std::chrono::steady_clock::now() - ta).count();
     // the composite field of Eq. 5, then the certificate statistic on it
     std::vector<double> uGL = uref;
     for (int i = 0; i < X.NF; ++i) if (kmap[static_cast<std::size_t>(i)] >= 0)
       uGL[static_cast<std::size_t>(X.from_free[static_cast<std::size_t>(i)])] = uK[static_cast<std::size_t>(kmap[static_cast<std::size_t>(i)])];
+    const auto tb = std::chrono::steady_clock::now();
     const std::vector<double> st = X.recover(uGL);
     const std::vector<char> nodrop;
     const Stat sm = statistic(net, st, nodrop, d.yield, d.zkd, d.build);
+    const double t_stat = std::chrono::duration<double>(std::chrono::steady_clock::now() - tb).count();
+    const auto tc = std::chrono::steady_clock::now();
     // the interface residual, Eq. 24: r = (F - K_ref u_GL) restricted to Gamma
     std::vector<double> r(static_cast<std::size_t>(X.NF), 0.0);
     double rn = 0.0, rn_off = 0.0;
@@ -1139,6 +1229,8 @@ static int run_igl(const Dump& d, const BeamNetwork& net, const std::string& out
       else if (kmap[static_cast<std::size_t>(i)] < 0) rn_off += v*v;
     }
     rn = std::sqrt(rn); rn_off = std::sqrt(rn_off);
+    const double t_res = std::chrono::duration<double>(std::chrono::steady_clock::now() - tc).count();
+    const auto td = std::chrono::steady_clock::now();
     double agree = -1.0;
     if (!ref_stress.empty()) { const Agreement ag = agree_stats(ref_stress, st); agree = ag.max_rel; }
     char line[300];
@@ -1162,17 +1254,23 @@ static int run_igl(const Dump& d, const BeamNetwork& net, const std::string& out
         rg_full[static_cast<std::size_t>(3 * ref_to_g[static_cast<std::size_t>(sn)] + c)] += r[static_cast<std::size_t>(i)]; }
       for (int i = 0; i < XG.NF; ++i) rg_free[static_cast<std::size_t>(i)] = rg_full[static_cast<std::size_t>(XG.from_free[static_cast<std::size_t>(i)])];
     }
-    FG.solve(rg_free);
+    global_solve(rg_free);
     for (int i = 0; i < XG.NF; ++i) uG_full[static_cast<std::size_t>(XG.from_free[static_cast<std::size_t>(i)])] += rg_free[static_cast<std::size_t>(i)];
+    std::fprintf(stderr, "[igl-cost] it %d: local solve %.2f s, residual+matvec %.2f s, global solve %.2f s | "
+                 "stress+statistic %.2f s (REPORTING ONLY, once in production)\n",
+                 it, t_loc, t_res, std::chrono::duration<double>(std::chrono::steady_clock::now() - td).count(), t_stat);
   }
   const double wall = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
   const ProcessMemory m1 = process_memory();
   if (FILE* fo = std::fopen((outp + ".stress").c_str(), "w")) { for (double v : best_stress) std::fprintf(fo, "%.9g\n", v); std::fclose(fo); }
   std::printf("{\"variant\": \"%s\", \"f\": %.4g, \"collar\": %.3g, \"iters\": %d, \"members\": %zu, \"kept_dof\": %d, "
-              "\"gamma_dof\": %zu, \"unmapped_solid_nodes\": %zu, \"global_factor_gb\": %.4f, \"local_factor_gb\": %.4f, "
+              "\"gamma_dof\": %zu, \"unmapped_solid_nodes\": %zu, \"matrix_free\": %s, \"cg_iterations_total\": %d, "
+              "\"cg_seconds_total\": %.2f, \"global_factor_gb\": %.4f, \"local_factor_gb\": %.4f, "
+              "\"global_assembly_s\": %.2f, \"global_factor_s\": %.2f, \"local_assembly_s\": %.2f, \"local_factor_s\": %.2f, "
               "\"setup_s\": %.2f, \"wall_s\": %.2f, \"rss_before_mb\": %.0f, \"peak_rss_mb\": %.0f, \"history\": [%s]}\n",
               variant.c_str(), f, margin_vox, iters, net.members.size(), nK, n_gamma, unmapped,
-              FG.factor_gb, FL.factor_gb, t_setup, wall, m0.rss_mb, m1.peak_rss_mb, hist.c_str());
+              matrix_free ? "true" : "false", cg_total, cg_seconds,
+              FG.factor_gb, FL.factor_gb, t_gasm, t_gfac, t_lasm, FL.seconds, t_setup, wall, m0.rss_mb, m1.peak_rss_mb, hist.c_str());
   return 0;
 }
 
@@ -1220,13 +1318,13 @@ int main(int argc, char** argv) {
   }
   if (variant == "solidfactor" || variant == "beamblock") return run_blocks(d, net, variant);
   if (variant == "fieldcmp") return run_fieldcmp(d, net, ref_u);
-  if (variant.rfind("iglcut", 0) == 0) {
+  if (variant.rfind("iglcut", 0) == 0 || variant.rfind("iglmf", 0) == 0) {
     double ff = 0.05, mv = 2.0; int iters = 6;
-    const char* c = variant.c_str() + 6;
+    const char* c = variant.c_str() + (variant.rfind("iglmf", 0) == 0 ? 5 : 6);
     if (*c == ':') { ff = std::atof(c + 1);
       const char* c2 = std::strchr(c + 1, ':');
       if (c2) { mv = std::atof(c2 + 1); const char* c3 = std::strchr(c2 + 1, ':'); if (c3) iters = std::atoi(c3 + 1); } }
-    return run_igl(d, net, outp, variant, ff, mv, iters, ref_st);
+    return run_igl(d, net, outp, variant, ff, mv, iters, ref_st, variant.rfind("iglmf", 0) == 0);
   }
   if (variant.rfind("anisocut", 0) == 0) {
     double beta = 0.05, mv = 2.0, gam = 1.0;
