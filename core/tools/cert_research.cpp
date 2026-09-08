@@ -23,6 +23,7 @@
 #include <cstring>
 #include <functional>
 #include <map>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -1024,7 +1025,7 @@ static CgResult cg_solve(int n, const std::vector<int>& ptr, const std::vector<i
 
 static int run_igl(const Dump& d, const BeamNetwork& net, const std::string& outp,
                    const std::string& variant, double f, double margin_vox, int iters,
-                   const std::string& ref_stress_path, bool matrix_free) {
+                   const std::string& ref_stress_path, bool matrix_free, int coarsen) {
   const ProcessMemory m0 = process_memory();
   const auto t0 = std::chrono::steady_clock::now();
   const int nx = d.grid.nx, ny = d.grid.ny, nz = d.grid.nz;
@@ -1065,11 +1066,86 @@ static int run_igl(const Dump& d, const BeamNetwork& net, const std::string& out
     soft_mask[e] = (d.mask[e] || lat[e]) ? 1 : 0;
     frac[e] = d.mask[e] ? 1.0 : (lat[e] ? f : 1.0);
   }
+  // ── the GLOBAL model, optionally on a COARSER grid ─────────────────────────────
+  // Gendre's global model is a coarse mesh; ours has been the fine one, which is why
+  // its factor was 9.7 GB and its CG needed 3,000 iterations. Coarsening by `coarsen`
+  // in each direction gives coarsen^3 fewer cells. The published method assumes the two
+  // meshes MATCH at the interface; they no longer do, so the transfer is the
+  // variationally consistent pair: trilinear interpolation P carries coarse
+  // displacements down to the fine interface, and its transpose P^T carries fine
+  // interface forces (and the applied loads) back up. P^T is what keeps the coupling
+  // energetically consistent -- using anything else would leak work at the interface.
+  VoxelGrid cg_grid = d.grid;
+  std::vector<char> cg_mask;
+  std::vector<double> cg_frac;
+  std::vector<DirichletBC> cg_bcs;
+  std::vector<NodalLoad> cg_loads;
+  const int CX = (nx + coarsen - 1) / coarsen, CY = (ny + coarsen - 1) / coarsen, CZ = (nz + coarsen - 1) / coarsen;
+  const double hc = h * coarsen;
+  // trilinear weights of a point over the 8 corners of its coarse cell
+  auto coarse_weights = [&](double x, double y, double z, int ci[8], double w[8]) {
+    const double fx = (x - d.grid.origin.x) / hc, fy = (y - d.grid.origin.y) / hc, fz = (z - d.grid.origin.z) / hc;
+    int I = static_cast<int>(std::floor(fx)), J = static_cast<int>(std::floor(fy)), K = static_cast<int>(std::floor(fz));
+    I = std::min(std::max(I, 0), CX - 1); J = std::min(std::max(J, 0), CY - 1); K = std::min(std::max(K, 0), CZ - 1);
+    const double sx = std::min(1.0, std::max(0.0, fx - I)), sy = std::min(1.0, std::max(0.0, fy - J)), sz = std::min(1.0, std::max(0.0, fz - K));
+    const int NXc = CX + 1, NYc = CY + 1;
+    int at = 0;
+    for (int dk = 0; dk < 2; ++dk) for (int dj = 0; dj < 2; ++dj) for (int di = 0; di < 2; ++di) {
+      ci[at] = ((K + dk) * NYc + (J + dj)) * NXc + (I + di);
+      w[at] = (di ? sx : 1.0 - sx) * (dj ? sy : 1.0 - sy) * (dk ? sz : 1.0 - sz);
+      ++at; } };
+  if (coarsen > 1) {
+    cg_grid.nx = CX; cg_grid.ny = CY; cg_grid.nz = CZ; cg_grid.spacing = hc;
+    cg_grid.tags.assign(static_cast<std::size_t>(CX) * CY * CZ, VoxelTag{});
+    cg_mask.assign(static_cast<std::size_t>(CX) * CY * CZ, 0);
+    cg_frac.assign(static_cast<std::size_t>(CX) * CY * CZ, 1.0);
+    // a coarse cell is meshed if any fine cell in it is; its stiffness is the volume
+    // average of the fine fractions (empty fine cells count as zero, so a mostly-void
+    // coarse cell comes out soft -- which is what it is)
+    for (int K = 0; K < CZ; ++K) for (int J = 0; J < CY; ++J) for (int I = 0; I < CX; ++I) {
+      double acc = 0.0; int meshed = 0;
+      for (int dk = 0; dk < coarsen; ++dk) for (int dj = 0; dj < coarsen; ++dj) for (int di = 0; di < coarsen; ++di) {
+        const int i = I * coarsen + di, j = J * coarsen + dj, k = K * coarsen + dk;
+        if (i >= nx || j >= ny || k >= nz) continue;
+        const std::size_t e = static_cast<std::size_t>((k * ny + j) * nx + i);
+        if (!soft_mask[e]) continue;
+        acc += frac[e]; ++meshed; }
+      const std::size_t ce = static_cast<std::size_t>((K * CY + J) * CX + I);
+      if (meshed) { cg_mask[ce] = 1;
+        cg_frac[ce] = acc / static_cast<double>(coarsen * coarsen * coarsen); } }
+    // BCs: constrain the coarse node nearest each fine constrained node
+    {
+      const int NXf = nx + 1, NYf = ny + 1, NXc = CX + 1, NYc = CY + 1;
+      std::set<std::pair<int, int>> seen;
+      for (const DirichletBC& b : d.cases[0].bcs) {
+        const int i = b.node % NXf, j = (b.node / NXf) % NYf, k = b.node / (NXf * NYf);
+        const int I = std::min(CX, (i + coarsen / 2) / coarsen), J = std::min(CY, (j + coarsen / 2) / coarsen),
+                  K = std::min(CZ, (k + coarsen / 2) / coarsen);
+        const int cn = (K * NYc + J) * NXc + I;
+        if (seen.insert({cn, b.component}).second) cg_bcs.push_back({cn, b.component, 0.0}); }
+    }
+    // loads: P^T, so the coarse model carries the same total force and the same work
+    {
+      const int NXf = nx + 1, NYf = ny + 1;
+      std::map<std::pair<int, int>, double> acc;
+      for (const NodalLoad& l : d.cases[0].loads) {
+        const int i = l.node % NXf, j = (l.node / NXf) % NYf, k = l.node / (NXf * NYf);
+        int ci[8]; double w[8];
+        coarse_weights(d.grid.origin.x + i * h, d.grid.origin.y + j * h, d.grid.origin.z + k * h, ci, w);
+        for (int a = 0; a < 8; ++a) if (w[a] != 0.0) acc[{ci[a], l.component}] += w[a] * l.value; }
+      for (const auto& kv : acc) cg_loads.push_back({kv.first.first, kv.first.second, kv.second});
+    }
+  }
+  const std::vector<char>& g_mask = coarsen > 1 ? cg_mask : soft_mask;
+  const std::vector<double>& g_frac = coarsen > 1 ? cg_frac : frac;
+  const std::vector<DirichletBC>& g_bcs = coarsen > 1 ? cg_bcs : d.cases[0].bcs;
+  const std::vector<NodalLoad>& g_loads = coarsen > 1 ? cg_loads : d.cases[0].loads;
   const BeamNetwork empty_net;
   CoupledResearchExport XG;
   XG.skip_solve = true;
-  (void)solve_coupled_lattice(d.grid, soft_mask, empty_net, d.cases[0].bcs, d.cases[0].loads,
-                              d.E, d.nu, 0.9, 1e-8, 100000, &frac, nullptr, nullptr, d.reach,
+  (void)solve_coupled_lattice(cg_grid, g_mask, empty_net, g_bcs, g_loads,
+                              d.E, d.nu, 0.9, 1e-8, 100000, &g_frac, nullptr, nullptr,
+                              coarsen > 1 ? d.reach * coarsen : d.reach,
                               nullptr, nullptr, false, &XG);
   if (!XG.filled) { std::printf("{\"variant\": \"%s\", \"error\": \"global export failed\"}\n", variant.c_str()); return 1; }
   const double t_gasm = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
@@ -1106,14 +1182,36 @@ static int run_igl(const Dump& d, const BeamNetwork& net, const std::string& out
     return std::array<long long, 3>{std::llround((xyz[3*sn] - d.grid.origin.x) / h),
                                     std::llround((xyz[3*sn+1] - d.grid.origin.y) / h),
                                     std::llround((xyz[3*sn+2] - d.grid.origin.z) / h)}; };
+  // ── P and P^T between the fine (reference) and global solid meshes ─────────────
+  // coarse GRID node -> coarse SOLID node id
   std::map<std::array<long long, 3>, int> g_of;
-  for (std::size_t sn = 0; sn < XG.solid_node_xyz.size() / 3; ++sn) g_of[keyof(XG.solid_node_xyz, sn)] = static_cast<int>(sn);
-  std::vector<int> ref_to_g(X.solid_node_xyz.size() / 3, -1);
+  {
+    const double hg = coarsen > 1 ? hc : h;
+    for (std::size_t sn = 0; sn < XG.solid_node_xyz.size() / 3; ++sn)
+      g_of[{std::llround((XG.solid_node_xyz[3*sn] - d.grid.origin.x) / hg),
+            std::llround((XG.solid_node_xyz[3*sn+1] - d.grid.origin.y) / hg),
+            std::llround((XG.solid_node_xyz[3*sn+2] - d.grid.origin.z) / hg)}] = static_cast<int>(sn);
+  }
+  struct Stencil { int id[8]; double w[8]; int n; };
+  std::vector<Stencil> P(X.solid_node_xyz.size() / 3);
   std::size_t unmapped = 0;
-  for (std::size_t sn = 0; sn < ref_to_g.size(); ++sn) {
-    const auto it = g_of.find(keyof(X.solid_node_xyz, sn));
-    if (it == g_of.end()) { ++unmapped; continue; }
-    ref_to_g[sn] = it->second; }
+  {
+    const int NXc = CX + 1, NYc = CY + 1;
+    for (std::size_t sn = 0; sn < P.size(); ++sn) {
+      Stencil st{}; st.n = 0;
+      int ci[8]; double w[8];
+      coarse_weights(X.solid_node_xyz[3*sn], X.solid_node_xyz[3*sn+1], X.solid_node_xyz[3*sn+2], ci, w);
+      double tot = 0.0;
+      for (int a = 0; a < 8; ++a) {
+        if (w[a] == 0.0) continue;
+        const int I = ci[a] % NXc, J = (ci[a] / NXc) % NYc, K = ci[a] / (NXc * NYc);
+        const auto it = g_of.find({I, J, K});
+        if (it == g_of.end()) continue;               // that coarse corner is not meshed
+        st.id[st.n] = it->second; st.w[st.n] = w[a]; ++st.n; tot += w[a]; }
+      if (st.n == 0 || !(tot > 0.0)) { ++unmapped; P[sn] = st; continue; }
+      for (int a = 0; a < st.n; ++a) st.w[a] /= tot;   // renormalize over the meshed corners
+      P[sn] = st; }
+  }
   // kept set (collar) in the reference model
   const double Rr = margin_vox * h, cell = std::max(Rr, h);
   std::map<long long, std::vector<int>> hash;
@@ -1190,8 +1288,10 @@ static int run_igl(const Dump& d, const BeamNetwork& net, const std::string& out
     // the cut field: the global solution carried onto the reference model's solid dofs
     std::vector<double> uref(static_cast<std::size_t>(X.M), 0.0);
     for (std::size_t sn = 0; sn < NS; ++sn) {
-      if (ref_to_g[sn] < 0) continue;
-      for (int c = 0; c < 3; ++c) uref[3*sn + static_cast<std::size_t>(c)] = uG_full[static_cast<std::size_t>(3 * ref_to_g[sn] + c)]; }
+      const Stencil& st = P[sn];
+      for (int a = 0; a < st.n; ++a)
+        for (int c = 0; c < 3; ++c)
+          uref[3*sn + static_cast<std::size_t>(c)] += st.w[a] * uG_full[static_cast<std::size_t>(3 * st.id[a] + c)]; }
     // local solve on the kept region
     std::vector<double> Fk(static_cast<std::size_t>(nK), 0.0);
     for (int i = 0; i < X.NF; ++i) {
@@ -1225,7 +1325,8 @@ static int run_igl(const Dump& d, const BeamNetwork& net, const std::string& out
       for (int k = X.ptr[static_cast<std::size_t>(i)]; k < X.ptr[static_cast<std::size_t>(i) + 1]; ++k)
         acc += X.val[static_cast<std::size_t>(k)] * uGL[static_cast<std::size_t>(X.from_free[static_cast<std::size_t>(X.idx[static_cast<std::size_t>(k)])])];
       const double v = fs.Ff[static_cast<std::size_t>(i)] - acc;
-      if (is_gamma[static_cast<std::size_t>(i)]) { r[static_cast<std::size_t>(i)] = v; rn += v*v; }
+      if (kmap[static_cast<std::size_t>(i)] < 0) r[static_cast<std::size_t>(i)] = v;
+      if (is_gamma[static_cast<std::size_t>(i)]) rn += v*v;
       else if (kmap[static_cast<std::size_t>(i)] < 0) rn_off += v*v;
     }
     rn = std::sqrt(rn); rn_off = std::sqrt(rn_off);
@@ -1245,17 +1346,33 @@ static int run_igl(const Dump& d, const BeamNetwork& net, const std::string& out
     std::vector<double> rg_free(static_cast<std::size_t>(XG.NF), 0.0);
     {
       std::vector<double> rg_full(static_cast<std::size_t>(XG.M), 0.0);
+      // ★ WITH A COARSER GLOBAL MESH THE COMPLEMENT IS NO LONGER IN EQUILIBRIUM, so
+      // correcting only on Gamma is inconsistent: the interpolated coarse field does not
+      // satisfy the FINE complement's equations, the off-interface residual sits at ~1
+      // instead of 1e-13, and the iteration oscillates instead of converging. Correcting
+      // on EVERY non-local dof turns the scheme into a preconditioned Richardson
+      // iteration on the fine reference system, with the coarse model as the
+      // preconditioner -- a coarse-grid correction, which is what it should have been.
+      // TOPOPT_IGL_GAMMA_ONLY=1 restores the interface-only correction for comparison.
+      const bool gamma_only = std::getenv("TOPOPT_IGL_GAMMA_ONLY") != nullptr;
       for (int i = 0; i < X.NF; ++i) {
-        if (!is_gamma[static_cast<std::size_t>(i)]) continue;
+        if (gamma_only ? !is_gamma[static_cast<std::size_t>(i)]
+                       : kmap[static_cast<std::size_t>(i)] >= 0) continue;
         const int full = X.from_free[static_cast<std::size_t>(i)];
         if (full >= X.SB) continue;                       // beams have no global counterpart
         const int sn = full / 3, c = full % 3;
-        if (ref_to_g[static_cast<std::size_t>(sn)] < 0) continue;
-        rg_full[static_cast<std::size_t>(3 * ref_to_g[static_cast<std::size_t>(sn)] + c)] += r[static_cast<std::size_t>(i)]; }
+        const Stencil& st = P[static_cast<std::size_t>(sn)];
+        for (int a = 0; a < st.n; ++a)
+          rg_full[static_cast<std::size_t>(3 * st.id[a] + c)] += st.w[a] * r[static_cast<std::size_t>(i)]; }
       for (int i = 0; i < XG.NF; ++i) rg_free[static_cast<std::size_t>(i)] = rg_full[static_cast<std::size_t>(XG.from_free[static_cast<std::size_t>(i)])];
     }
     global_solve(rg_free);
-    for (int i = 0; i < XG.NF; ++i) uG_full[static_cast<std::size_t>(XG.from_free[static_cast<std::size_t>(i)])] += rg_free[static_cast<std::size_t>(i)];
+    // ★ RELAXATION. The plain scheme is a Richardson iteration whose matrix is
+    // I - M^-1 K; it converges only while the spectral radius is below one. Measured:
+    // coarsen 2 converges, coarsen 3 and 4 DIVERGE (eta_r 18 -> 29, and 2.6e4 -> 9.1e4).
+    // Damping the correction shrinks that radius. TOPOPT_IGL_RELAX sets it.
+    const double relax = std::getenv("TOPOPT_IGL_RELAX") ? std::atof(std::getenv("TOPOPT_IGL_RELAX")) : 1.0;
+    for (int i = 0; i < XG.NF; ++i) uG_full[static_cast<std::size_t>(XG.from_free[static_cast<std::size_t>(i)])] += relax * rg_free[static_cast<std::size_t>(i)];
     std::fprintf(stderr, "[igl-cost] it %d: local solve %.2f s, residual+matvec %.2f s, global solve %.2f s | "
                  "stress+statistic %.2f s (REPORTING ONLY, once in production)\n",
                  it, t_loc, t_res, std::chrono::duration<double>(std::chrono::steady_clock::now() - td).count(), t_stat);
@@ -1264,12 +1381,12 @@ static int run_igl(const Dump& d, const BeamNetwork& net, const std::string& out
   const ProcessMemory m1 = process_memory();
   if (FILE* fo = std::fopen((outp + ".stress").c_str(), "w")) { for (double v : best_stress) std::fprintf(fo, "%.9g\n", v); std::fclose(fo); }
   std::printf("{\"variant\": \"%s\", \"f\": %.4g, \"collar\": %.3g, \"iters\": %d, \"members\": %zu, \"kept_dof\": %d, "
-              "\"gamma_dof\": %zu, \"unmapped_solid_nodes\": %zu, \"matrix_free\": %s, \"cg_iterations_total\": %d, "
+              "\"gamma_dof\": %zu, \"unmapped_solid_nodes\": %zu, \"coarsen\": %d, \"global_dof\": %d, \"matrix_free\": %s, \"cg_iterations_total\": %d, "
               "\"cg_seconds_total\": %.2f, \"global_factor_gb\": %.4f, \"local_factor_gb\": %.4f, "
               "\"global_assembly_s\": %.2f, \"global_factor_s\": %.2f, \"local_assembly_s\": %.2f, \"local_factor_s\": %.2f, "
               "\"setup_s\": %.2f, \"wall_s\": %.2f, \"rss_before_mb\": %.0f, \"peak_rss_mb\": %.0f, \"history\": [%s]}\n",
               variant.c_str(), f, margin_vox, iters, net.members.size(), nK, n_gamma, unmapped,
-              matrix_free ? "true" : "false", cg_total, cg_seconds,
+              coarsen, XG.NF, matrix_free ? "true" : "false", cg_total, cg_seconds,
               FG.factor_gb, FL.factor_gb, t_gasm, t_gfac, t_lasm, FL.seconds, t_setup, wall, m0.rss_mb, m1.peak_rss_mb, hist.c_str());
   return 0;
 }
@@ -1319,12 +1436,13 @@ int main(int argc, char** argv) {
   if (variant == "solidfactor" || variant == "beamblock") return run_blocks(d, net, variant);
   if (variant == "fieldcmp") return run_fieldcmp(d, net, ref_u);
   if (variant.rfind("iglcut", 0) == 0 || variant.rfind("iglmf", 0) == 0) {
-    double ff = 0.05, mv = 2.0; int iters = 6;
+    double ff = 0.05, mv = 2.0; int iters = 6, co = 1;
     const char* c = variant.c_str() + (variant.rfind("iglmf", 0) == 0 ? 5 : 6);
     if (*c == ':') { ff = std::atof(c + 1);
       const char* c2 = std::strchr(c + 1, ':');
-      if (c2) { mv = std::atof(c2 + 1); const char* c3 = std::strchr(c2 + 1, ':'); if (c3) iters = std::atoi(c3 + 1); } }
-    return run_igl(d, net, outp, variant, ff, mv, iters, ref_st, variant.rfind("iglmf", 0) == 0);
+      if (c2) { mv = std::atof(c2 + 1); const char* c3 = std::strchr(c2 + 1, ':');
+        if (c3) { iters = std::atoi(c3 + 1); const char* c4 = std::strchr(c3 + 1, ':'); if (c4) co = std::max(1, std::atoi(c4 + 1)); } } }
+    return run_igl(d, net, outp, variant, ff, mv, iters, ref_st, variant.rfind("iglmf", 0) == 0, co);
   }
   if (variant.rfind("anisocut", 0) == 0) {
     double beta = 0.05, mv = 2.0, gam = 1.0;
