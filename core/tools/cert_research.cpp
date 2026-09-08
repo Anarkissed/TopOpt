@@ -240,7 +240,7 @@ static std::vector<double> to_full(const CoupledResearchExport& X, const std::ve
   return u;
 }
 struct Agreement { double max_rel = 0, p99_ref = 0, p99_new = 0; std::size_t over1 = 0, over5 = 0, n = 0; };
-static Agreement agree(const std::vector<double>& ref, const std::vector<double>& nw) {
+static Agreement agree_stats(const std::vector<double>& ref, const std::vector<double>& nw) {
   Agreement a;
   std::vector<double> r = ref; std::sort(r.begin(), r.end());
   a.p99_ref = r.empty() ? 0 : r[static_cast<std::size_t>(0.99 * static_cast<double>(r.size() - 1))];
@@ -466,7 +466,7 @@ static int run_guyan(const Dump& d, const BeamNetwork& net, const std::string& o
   const ProcessMemory m1 = process_memory();
   const std::vector<char> nodrop;
   const Stat sm = statistic(net, st, nodrop, d.yield, d.zkd, d.build);
-  Agreement ag; if (!ref_stress_path.empty()) ag = agree(read_stress(ref_stress_path), st);
+  Agreement ag; if (!ref_stress_path.empty()) ag = agree_stats(read_stress(ref_stress_path), st);
   if (FILE* f = std::fopen((outp + ".stress").c_str(), "w")) { for (double v : st) std::fprintf(f, "%.9g\n", v); std::fclose(f); }
   std::printf("{\"variant\": \"%s\", \"members\": %zu, \"dof_free\": %d, \"interior_solid\": %zu, \"interface\": %zu, \"beam\": %zu, "
               "\"beam_interior_entries\": %zu, \"kee_factor_gb\": %.4f, \"kee_factor_s\": %.2f, \"schur_s\": %.2f, \"schur_dense_mb\": %.0f, "
@@ -599,7 +599,7 @@ static int submodel_with_field(const Dump& d, const BeamNetwork& net, const Coup
   const ProcessMemory m1 = process_memory();
   const std::vector<char> nodrop;
   const Stat sm = statistic(net, st, nodrop, d.yield, d.zkd, d.build);
-  Agreement ag; if (!ref_stress_path.empty()) ag = agree(read_stress(ref_stress_path), st);
+  Agreement ag; if (!ref_stress_path.empty()) ag = agree_stats(read_stress(ref_stress_path), st);
   if (FILE* f = std::fopen((outp + ".stress").c_str(), "w")) { for (double v : st) std::fprintf(f, "%.9g\n", v); std::fclose(f); }
   std::printf("{\"variant\": \"%s\", \"cut_field\": \"%s\", \"margin_vox\": %.3g, \"members\": %zu, \"dof_free\": %d, \"kept_dof\": %d, \"dropped_dof\": %zu, "
               "\"kept_solid_nodes\": %zu, \"cut_dofs\": %zu, \"kept_nnz\": %zu, \"factor_gb\": %.4f, \"solve_s\": %.2f, \"wall_s\": %.2f, "
@@ -928,6 +928,254 @@ static int run_softcut(const Dump& d, const BeamNetwork& net, const std::string&
   return r;
 }
 
+
+// ── iglcut:<f>:<collar>:<iters> — NON-INVASIVE ITERATIVE GLOBAL/LOCAL COUPLING ──
+// Gendre, Allix, Gosselet & Comte, Comput. Mech. 44(2):233-245 (2009). What we have
+// been calling "the submodel" is iteration ONE of this: a one-way displacement transfer
+// with no feedback. Closing the loop converges to the EXACT reference solution.
+//
+// Their Eq. 24 identifies the interface residual as the residual of the CONDENSED
+// reference problem, r = b^R - S^R u_Gamma, and the text gives the practical recipe:
+// "the sum of the FE nodal reaction forces exerted on each of the two subdomains across
+// Gamma". Because our complement region is plain solid in BOTH models -- identical
+// material, identical elements -- those complement reactions cancel, and the residual
+// reduces to something we can evaluate with one sparse product:
+//
+//     r|_Gamma = ( F - K_reference u_GL ) |_Gamma
+//
+// with u_GL the composite field of Eq. 5: the LOCAL solution inside Omega_I, the GLOBAL
+// one outside. K_reference is the real coupled system, which the harness already
+// exports. No operator splitting, no separate complement assembly.
+//
+//   u_G = K_G^-1 F                        global, soft continuum, FACTORED ONCE
+//   repeat:
+//     solve LOCAL with u_G on the cut     -> u_K   (kept dofs, real struts)
+//     u_GL = u_K on kept, u_G elsewhere
+//     r = (F - K_ref u_GL)|_Gamma         Eq. 24
+//     stop if ||r|| / ||F|| small          their eta_r, Eq. 30
+//     u_G += K_G^-1 r                     Eq. 15: one back-substitution
+//
+// Gendre Eq. 32: the iteration matrix is I - S^G^-1 S^R, so the rate depends on the
+// change in stiffness the local model introduces -- i.e. on how good the homogenized
+// surrogate is. It sets the ITERATION COUNT, never the answer. Their examples converge
+// in ~7 iterations plain and 2-3 with SR1 acceleration.
+
+
+static int run_igl(const Dump& d, const BeamNetwork& net, const std::string& outp,
+                   const std::string& variant, double f, double margin_vox, int iters,
+                   const std::string& ref_stress_path) {
+  const ProcessMemory m0 = process_memory();
+  const auto t0 = std::chrono::steady_clock::now();
+  const int nx = d.grid.nx, ny = d.grid.ny, nz = d.grid.nz;
+  const double h = d.grid.spacing;
+  // ── the soft global model: strut cells softened to f, dilated to cover the region ──
+  std::vector<char> lat(d.mask.size(), 0);
+  auto mark = [&](const Vec3& p) {
+    const long long i = static_cast<long long>((p.x - d.grid.origin.x) / h);
+    const long long j = static_cast<long long>((p.y - d.grid.origin.y) / h);
+    const long long k = static_cast<long long>((p.z - d.grid.origin.z) / h);
+    if (i < 0 || j < 0 || k < 0 || i >= nx || j >= ny || k >= nz) return;
+    lat[static_cast<std::size_t>((k * ny + j) * nx + i)] = 1;
+  };
+  for (const BeamSegment& sg : d.spans) {
+    const double dx = sg.b.x - sg.a.x, dy = sg.b.y - sg.a.y, dz = sg.b.z - sg.a.z;
+    const double L = std::sqrt(dx*dx + dy*dy + dz*dz);
+    const int n = std::max(1, static_cast<int>(std::ceil(2.0 * L / h)));
+    for (int t = 0; t <= n; ++t) { const double u = static_cast<double>(t) / n;
+      mark(Vec3{sg.a.x + u*dx, sg.a.y + u*dy, sg.a.z + u*dz}); }
+  }
+  for (int pass = 0; pass < 2; ++pass) {
+    std::vector<char> nxt = lat;
+    for (int k = 0; k < nz; ++k) for (int j = 0; j < ny; ++j) for (int i = 0; i < nx; ++i) {
+      const std::size_t e = static_cast<std::size_t>((k * ny + j) * nx + i);
+      if (lat[e]) continue;
+      bool near = false;
+      for (int dk = -1; dk <= 1 && !near; ++dk) for (int dj = -1; dj <= 1 && !near; ++dj)
+        for (int di = -1; di <= 1 && !near; ++di) {
+          const int a = i + di, b2 = j + dj, c = k + dk;
+          if (a < 0 || b2 < 0 || c < 0 || a >= nx || b2 >= ny || c >= nz) continue;
+          if (lat[static_cast<std::size_t>((c * ny + b2) * nx + a)]) near = true; }
+      if (near) nxt[e] = 1; }
+    lat.swap(nxt);
+  }
+  std::vector<char> soft_mask(d.mask.size(), 0);
+  std::vector<double> frac(d.mask.size(), 1.0);
+  for (std::size_t e = 0; e < d.mask.size(); ++e) {
+    soft_mask[e] = (d.mask[e] || lat[e]) ? 1 : 0;
+    frac[e] = d.mask[e] ? 1.0 : (lat[e] ? f : 1.0);
+  }
+  const BeamNetwork empty_net;
+  CoupledResearchExport XG;
+  XG.skip_solve = true;
+  (void)solve_coupled_lattice(d.grid, soft_mask, empty_net, d.cases[0].bcs, d.cases[0].loads,
+                              d.E, d.nu, 0.9, 1e-8, 100000, &frac, nullptr, nullptr, d.reach,
+                              nullptr, nullptr, false, &XG);
+  if (!XG.filled) { std::printf("{\"variant\": \"%s\", \"error\": \"global export failed\"}\n", variant.c_str()); return 1; }
+  ResearchFactor FG;
+  if (!FG.factor(XG.NF, XG.ptr, XG.idx, XG.val)) {
+    std::printf("{\"variant\": \"%s\", \"error\": \"global factor: %s\"}\n", variant.c_str(), FG.note.c_str()); return 1; }
+  // ── the reference (real) coupled system, and the local partition ──
+  FreeSys fs = export_system(d, net);
+  const CoupledResearchExport& X = fs.X;
+  // grid node -> solid node id, both models
+  auto keyof = [&](const std::vector<double>& xyz, std::size_t sn) {
+    return std::array<long long, 3>{std::llround((xyz[3*sn] - d.grid.origin.x) / h),
+                                    std::llround((xyz[3*sn+1] - d.grid.origin.y) / h),
+                                    std::llround((xyz[3*sn+2] - d.grid.origin.z) / h)}; };
+  std::map<std::array<long long, 3>, int> g_of;
+  for (std::size_t sn = 0; sn < XG.solid_node_xyz.size() / 3; ++sn) g_of[keyof(XG.solid_node_xyz, sn)] = static_cast<int>(sn);
+  std::vector<int> ref_to_g(X.solid_node_xyz.size() / 3, -1);
+  std::size_t unmapped = 0;
+  for (std::size_t sn = 0; sn < ref_to_g.size(); ++sn) {
+    const auto it = g_of.find(keyof(X.solid_node_xyz, sn));
+    if (it == g_of.end()) { ++unmapped; continue; }
+    ref_to_g[sn] = it->second; }
+  // kept set (collar) in the reference model
+  const double Rr = margin_vox * h, cell = std::max(Rr, h);
+  std::map<long long, std::vector<int>> hash;
+  auto key3 = [&](double x, double y, double z) {
+    const long long i = static_cast<long long>(std::floor(x / cell)), j = static_cast<long long>(std::floor(y / cell)),
+                    k = static_cast<long long>(std::floor(z / cell));
+    return (i * 73856093LL) ^ (j * 19349663LL) ^ (k * 83492791LL); };
+  for (std::size_t n2 = 0; n2 < net.nodes.size(); ++n2) hash[key3(net.nodes[n2].x, net.nodes[n2].y, net.nodes[n2].z)].push_back(static_cast<int>(n2));
+  // ★ Omega_C MUST BE IDENTICAL IN BOTH MODELS, or the complement reactions do not
+  // cancel and the residual of Eq. 24 is not the residual of the reference problem.
+  // The first attempt kept "solid nodes within the collar of a beam node", which did not
+  // contain the softened region: cells that are soft hex in the global model but beams
+  // (or nothing) in the reference ended up OUTSIDE Omega_I. Measured signature: an
+  // off-interface residual of 0.30-0.41 of the load norm, growing, and an iteration that
+  // decreased then diverged. Omega_I is therefore built FROM the softened region --
+  // every soft cell, dilated by the collar -- so no soft cell can fall in Omega_C.
+  std::vector<char> omega_cell = lat;
+  const int collar_passes = std::max(1, static_cast<int>(std::ceil(margin_vox)));
+  for (int pass = 0; pass < collar_passes; ++pass) {
+    std::vector<char> nxt = omega_cell;
+    for (int k = 0; k < nz; ++k) for (int j = 0; j < ny; ++j) for (int i = 0; i < nx; ++i) {
+      const std::size_t e = static_cast<std::size_t>((k * ny + j) * nx + i);
+      if (omega_cell[e]) continue;
+      bool near = false;
+      for (int dk = -1; dk <= 1 && !near; ++dk) for (int dj = -1; dj <= 1 && !near; ++dj)
+        for (int di = -1; di <= 1 && !near; ++di) {
+          const int a = i + di, b2 = j + dj, c = k + dk;
+          if (a < 0 || b2 < 0 || c < 0 || a >= nx || b2 >= ny || c >= nz) continue;
+          if (omega_cell[static_cast<std::size_t>((c * ny + b2) * nx + a)]) near = true; }
+      if (near) nxt[e] = 1; }
+    omega_cell.swap(nxt);
+  }
+  const std::size_t NS = X.solid_node_xyz.size() / 3;
+  std::vector<char> keep_node(NS, 0);
+  {
+    std::map<std::array<long long, 3>, int> ref_of;
+    for (std::size_t sn = 0; sn < NS; ++sn) ref_of[keyof(X.solid_node_xyz, sn)] = static_cast<int>(sn);
+    for (int k = 0; k < nz; ++k) for (int j = 0; j < ny; ++j) for (int i = 0; i < nx; ++i) {
+      if (!omega_cell[static_cast<std::size_t>((k * ny + j) * nx + i)]) continue;
+      for (int dk = 0; dk < 2; ++dk) for (int dj = 0; dj < 2; ++dj) for (int di = 0; di < 2; ++di) {
+        const auto it = ref_of.find({i + di, j + dj, k + dk});
+        if (it != ref_of.end()) keep_node[static_cast<std::size_t>(it->second)] = 1; } }
+  }
+  (void)Rr; (void)hash; (void)key3;
+  std::vector<int> kmap(static_cast<std::size_t>(X.NF), -1);
+  int nK = 0;
+  for (int i = 0; i < X.NF; ++i) {
+    const int full = X.from_free[static_cast<std::size_t>(i)];
+    if (X.dof_is_beam[static_cast<std::size_t>(full)] || (full < X.SB && keep_node[static_cast<std::size_t>(full / 3)])) kmap[static_cast<std::size_t>(i)] = nK++; }
+  Sub Kkk = sub_csr(X, kmap, nK);
+  ResearchFactor FL;
+  if (!FL.factor(Kkk.n, Kkk.ptr, Kkk.idx, Kkk.val)) {
+    std::printf("{\"variant\": \"%s\", \"error\": \"local factor: %s\"}\n", variant.c_str(), FL.note.c_str()); return 1; }
+  // Gamma = dropped free dofs coupled to a kept one
+  std::vector<char> is_gamma(static_cast<std::size_t>(X.NF), 0);
+  std::size_t n_gamma = 0;
+  for (int i = 0; i < X.NF; ++i) {
+    if (kmap[static_cast<std::size_t>(i)] >= 0) continue;
+    for (int k = X.ptr[static_cast<std::size_t>(i)]; k < X.ptr[static_cast<std::size_t>(i) + 1]; ++k)
+      if (kmap[static_cast<std::size_t>(X.idx[static_cast<std::size_t>(k)])] >= 0) { is_gamma[static_cast<std::size_t>(i)] = 1; ++n_gamma; break; } }
+  // ── iteration 0: the global solve ──
+  std::vector<double> uG_free(static_cast<std::size_t>(XG.NF), 0.0);
+  for (int i = 0; i < XG.NF; ++i) uG_free[static_cast<std::size_t>(i)] = XG.F[static_cast<std::size_t>(XG.from_free[static_cast<std::size_t>(i)])];
+  FG.solve(uG_free);
+  std::vector<double> uG_full(static_cast<std::size_t>(XG.M), 0.0);
+  for (int i = 0; i < XG.NF; ++i) uG_full[static_cast<std::size_t>(XG.from_free[static_cast<std::size_t>(i)])] = uG_free[static_cast<std::size_t>(i)];
+  const double t_setup = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+  const double Fnorm = [&]{ double a2 = 0; for (int i = 0; i < X.NF; ++i) { const double v = fs.Ff[static_cast<std::size_t>(i)]; a2 += v*v; } return std::sqrt(a2); }();
+  const std::vector<double> ref_stress = read_stress(ref_stress_path);
+  std::string hist;
+  std::vector<double> best_stress;
+  for (int it = 0; it <= iters; ++it) {
+    // the cut field: the global solution carried onto the reference model's solid dofs
+    std::vector<double> uref(static_cast<std::size_t>(X.M), 0.0);
+    for (std::size_t sn = 0; sn < NS; ++sn) {
+      if (ref_to_g[sn] < 0) continue;
+      for (int c = 0; c < 3; ++c) uref[3*sn + static_cast<std::size_t>(c)] = uG_full[static_cast<std::size_t>(3 * ref_to_g[sn] + c)]; }
+    // local solve on the kept region
+    std::vector<double> Fk(static_cast<std::size_t>(nK), 0.0);
+    for (int i = 0; i < X.NF; ++i) {
+      const int a = kmap[static_cast<std::size_t>(i)];
+      if (a < 0) continue;
+      double acc = fs.Ff[static_cast<std::size_t>(i)];
+      for (int k = X.ptr[static_cast<std::size_t>(i)]; k < X.ptr[static_cast<std::size_t>(i) + 1]; ++k) {
+        const int j = X.idx[static_cast<std::size_t>(k)];
+        if (kmap[static_cast<std::size_t>(j)] >= 0) continue;
+        acc -= X.val[static_cast<std::size_t>(k)] * uref[static_cast<std::size_t>(X.from_free[static_cast<std::size_t>(j)])]; }
+      Fk[static_cast<std::size_t>(a)] = acc; }
+    std::vector<double> uK = Fk;
+    FL.solve(uK);
+    // the composite field of Eq. 5, then the certificate statistic on it
+    std::vector<double> uGL = uref;
+    for (int i = 0; i < X.NF; ++i) if (kmap[static_cast<std::size_t>(i)] >= 0)
+      uGL[static_cast<std::size_t>(X.from_free[static_cast<std::size_t>(i)])] = uK[static_cast<std::size_t>(kmap[static_cast<std::size_t>(i)])];
+    const std::vector<double> st = X.recover(uGL);
+    const std::vector<char> nodrop;
+    const Stat sm = statistic(net, st, nodrop, d.yield, d.zkd, d.build);
+    // the interface residual, Eq. 24: r = (F - K_ref u_GL) restricted to Gamma
+    std::vector<double> r(static_cast<std::size_t>(X.NF), 0.0);
+    double rn = 0.0, rn_off = 0.0;
+    for (int i = 0; i < X.NF; ++i) {
+      double acc = 0.0;
+      for (int k = X.ptr[static_cast<std::size_t>(i)]; k < X.ptr[static_cast<std::size_t>(i) + 1]; ++k)
+        acc += X.val[static_cast<std::size_t>(k)] * uGL[static_cast<std::size_t>(X.from_free[static_cast<std::size_t>(X.idx[static_cast<std::size_t>(k)])])];
+      const double v = fs.Ff[static_cast<std::size_t>(i)] - acc;
+      if (is_gamma[static_cast<std::size_t>(i)]) { r[static_cast<std::size_t>(i)] = v; rn += v*v; }
+      else if (kmap[static_cast<std::size_t>(i)] < 0) rn_off += v*v;
+    }
+    rn = std::sqrt(rn); rn_off = std::sqrt(rn_off);
+    double agree = -1.0;
+    if (!ref_stress.empty()) { const Agreement ag = agree_stats(ref_stress, st); agree = ag.max_rel; }
+    char line[300];
+    std::snprintf(line, sizeof line, "%s{\"it\": %d, \"p99\": %.6g, \"margin\": %.6g, \"eta_r\": %.4g, \"resid_offgamma\": %.4g}",
+                  it ? ", " : "", it, sm.p99, sm.margin, Fnorm > 0 ? rn / Fnorm : 0.0, Fnorm > 0 ? rn_off / Fnorm : 0.0);
+    hist += line;
+    std::fprintf(stderr, "[igl] it %d: p99 %.5g  margin %.4g  eta_r %.3g  (off-Gamma %.2g)\n",
+                 it, sm.p99, sm.margin, Fnorm > 0 ? rn / Fnorm : 0.0, Fnorm > 0 ? rn_off / Fnorm : 0.0);
+    best_stress = st;
+    if (it == iters) break;
+    // global correction, Eq. 15: u_G += K_G^-1 r   (one back-substitution)
+    std::vector<double> rg_free(static_cast<std::size_t>(XG.NF), 0.0);
+    {
+      std::vector<double> rg_full(static_cast<std::size_t>(XG.M), 0.0);
+      for (int i = 0; i < X.NF; ++i) {
+        if (!is_gamma[static_cast<std::size_t>(i)]) continue;
+        const int full = X.from_free[static_cast<std::size_t>(i)];
+        if (full >= X.SB) continue;                       // beams have no global counterpart
+        const int sn = full / 3, c = full % 3;
+        if (ref_to_g[static_cast<std::size_t>(sn)] < 0) continue;
+        rg_full[static_cast<std::size_t>(3 * ref_to_g[static_cast<std::size_t>(sn)] + c)] += r[static_cast<std::size_t>(i)]; }
+      for (int i = 0; i < XG.NF; ++i) rg_free[static_cast<std::size_t>(i)] = rg_full[static_cast<std::size_t>(XG.from_free[static_cast<std::size_t>(i)])];
+    }
+    FG.solve(rg_free);
+    for (int i = 0; i < XG.NF; ++i) uG_full[static_cast<std::size_t>(XG.from_free[static_cast<std::size_t>(i)])] += rg_free[static_cast<std::size_t>(i)];
+  }
+  const double wall = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+  const ProcessMemory m1 = process_memory();
+  if (FILE* fo = std::fopen((outp + ".stress").c_str(), "w")) { for (double v : best_stress) std::fprintf(fo, "%.9g\n", v); std::fclose(fo); }
+  std::printf("{\"variant\": \"%s\", \"f\": %.4g, \"collar\": %.3g, \"iters\": %d, \"members\": %zu, \"kept_dof\": %d, "
+              "\"gamma_dof\": %zu, \"unmapped_solid_nodes\": %zu, \"global_factor_gb\": %.4f, \"local_factor_gb\": %.4f, "
+              "\"setup_s\": %.2f, \"wall_s\": %.2f, \"rss_before_mb\": %.0f, \"peak_rss_mb\": %.0f, \"history\": [%s]}\n",
+              variant.c_str(), f, margin_vox, iters, net.members.size(), nK, n_gamma, unmapped,
+              FG.factor_gb, FL.factor_gb, t_setup, wall, m0.rss_mb, m1.peak_rss_mb, hist.c_str());
+  return 0;
+}
+
 int main(int argc, char** argv) {
   if (argc < 3) { std::fprintf(stderr, "usage: cert_research <dump> <variant> [out_prefix]\n"); return 1; }
   const std::string variant = argv[2];
@@ -972,6 +1220,14 @@ int main(int argc, char** argv) {
   }
   if (variant == "solidfactor" || variant == "beamblock") return run_blocks(d, net, variant);
   if (variant == "fieldcmp") return run_fieldcmp(d, net, ref_u);
+  if (variant.rfind("iglcut", 0) == 0) {
+    double ff = 0.05, mv = 2.0; int iters = 6;
+    const char* c = variant.c_str() + 6;
+    if (*c == ':') { ff = std::atof(c + 1);
+      const char* c2 = std::strchr(c + 1, ':');
+      if (c2) { mv = std::atof(c2 + 1); const char* c3 = std::strchr(c2 + 1, ':'); if (c3) iters = std::atoi(c3 + 1); } }
+    return run_igl(d, net, outp, variant, ff, mv, iters, ref_st);
+  }
   if (variant.rfind("anisocut", 0) == 0) {
     double beta = 0.05, mv = 2.0, gam = 1.0;
     const char* c = variant.c_str() + 8;
