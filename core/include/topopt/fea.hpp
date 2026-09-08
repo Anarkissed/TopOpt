@@ -246,6 +246,12 @@ Hex8Stiffness hex8_stiffness(double youngs_modulus, double poisson,
 Hex8Stiffness hex8_stiffness_transverse(double youngs_modulus, double poisson,
                                         double element_size, double z_knockdown);
 
+// RESEARCH ONLY (branch claude/research-device-certificate). The same 2x2x2
+// integrator with an ARBITRARY constitutive matrix, so a per-cell homogenized
+// lattice tensor can be used as the element material. `D` is row-major 6x6 in the
+// same Voigt order [xx,yy,zz,gxy,gyz,gzx] with engineering shear.
+Hex8Stiffness hex8_stiffness_general(const std::array<double, 36>& D, double element_size);
+
 // Cubic (anisotropic) 8-node hexahedral element stiffness (lattice certification,
 // handoff 2026-07-27-lattice-certification). The constitutive law is a CUBIC
 // material — three independent constants C11, C12, C44 in Voigt order

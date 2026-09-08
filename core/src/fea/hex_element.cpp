@@ -1,5 +1,6 @@
 #include "topopt/fea.hpp"
 
+#include <array>
 #include <cmath>
 #include <stdexcept>
 #include <string>
@@ -110,6 +111,15 @@ Hex8Stiffness hex8_stiffness(double youngs_modulus, double poisson,
   const double G = c * (1.0 - 2.0 * nu) / 2.0;  // = E / (2 (1 + nu))
   D[3][3] = D[4][4] = D[5][5] = G;
 
+  return integrate_hex8(D, h);
+}
+
+Hex8Stiffness hex8_stiffness_general(const std::array<double, 36>& Din, double h) {
+  if (!(h > 0.0))
+    throw std::invalid_argument("hex8_stiffness_general: element_size must be > 0");
+  double D[6][6];
+  for (int i = 0; i < 6; ++i)
+    for (int j = 0; j < 6; ++j) D[i][j] = Din[static_cast<std::size_t>(6 * i + j)];
   return integrate_hex8(D, h);
 }
 

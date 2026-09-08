@@ -229,7 +229,7 @@ static FreeSys export_system(const Dump& d, const BeamNetwork& net) {
   FreeSys fs;
   fs.X.skip_solve = true;
   (void)solve_coupled_lattice(d.grid, d.mask, net, d.cases[0].bcs, d.cases[0].loads, d.E, d.nu, 0.9, 1e-8, 100000,
-                              nullptr, nullptr, d.reach, nullptr, nullptr, false, &fs.X);
+                              nullptr, nullptr, nullptr, d.reach, nullptr, nullptr, false, &fs.X);
   fs.Ff.assign(static_cast<std::size_t>(fs.X.NF), 0.0);
   for (int i = 0; i < fs.X.NF; ++i) fs.Ff[static_cast<std::size_t>(i)] = fs.X.F[static_cast<std::size_t>(fs.X.from_free[static_cast<std::size_t>(i)])];
   return fs;
@@ -751,7 +751,8 @@ static int run_fieldcmp(const Dump& d, const BeamNetwork& net, const std::string
 // field is carried across by POSITION through the exported solid node coordinates.
 static int run_softcut(const Dump& d, const BeamNetwork& net, const std::string& outp,
                        const std::string& variant, double f, double margin_vox,
-                       const std::string& ref_stress_path) {
+                       const std::string& ref_stress_path, double aniso_beta = -1.0,
+                       double aniso_gamma = 1.0) {
   const ProcessMemory m0 = process_memory();
   const auto t0 = std::chrono::steady_clock::now();
   // ── stage 1: which cells carry a strut ───────────────────────────────────────
@@ -806,13 +807,81 @@ static int run_softcut(const Dump& d, const BeamNetwork& net, const std::string&
     soft_mask[e] = (d.mask[e] || lat[e]) ? 1 : 0;
     frac[e] = d.mask[e] ? 1.0 : (lat[e] ? f : 1.0);
   }
+  // ── the per-cell homogenized tensor (aniso_beta >= 0) ────────────────────────
+  // A pin-jointed strut network's effective stiffness is the sum over struts of
+  //     C_ijkl = (1/V) sum_s (E A L)_s n_i n_j n_k n_l
+  // which in Voigt with engineering shear is a RANK-ONE 6x6 per strut:
+  //     D += (E A L / V) * m (x) m,   m = [nx^2, ny^2, nz^2, nx ny, ny nz, nz nx]
+  // (no factors: sigma_a = D_ab eps_b with eps_[3..5] the engineering shears.)
+  // This is directional by construction, needs no unit cell, and needs no scaling
+  // law -- it reads the struts that are actually there.
+  // A pin-jointed network carries NO shear and no transverse normal stress, so a
+  // cell with one strut is rank one and the element would be singular. Real joints
+  // are rigid and the struts bend, which a truss model omits; `aniso_beta` adds that
+  // back as a stated isotropic fraction of the cell's own density:
+  //     D_final = D_truss + beta * D_iso(E_s * rho_cell, nu)
+  std::vector<std::array<double, 36>> hexmat;
+  const std::vector<std::array<double, 36>>* hexmat_p = nullptr;
+  std::size_t aniso_cells = 0;
+  if (aniso_beta >= 0.0) {
+    hexmat.assign(d.mask.size(), std::array<double, 36>{});
+    const double Vc = h * h * h;
+    std::vector<double> rho_cell(d.mask.size(), 0.0);
+    for (const BeamSegment& sg : d.spans) {
+      const double dx = sg.b.x - sg.a.x, dy = sg.b.y - sg.a.y, dz = sg.b.z - sg.a.z;
+      const double L = std::sqrt(dx*dx + dy*dy + dz*dz);
+      if (!(L > 0.0)) continue;
+      const double nxv = dx / L, nyv = dy / L, nzv = dz / L;
+      const double A = 3.14159265358979323846 * sg.radius_mm * sg.radius_mm;
+      const int n = std::max(1, static_cast<int>(std::ceil(4.0 * L / h)));
+      const double dl = L / n;
+      const double m[6] = {nxv*nxv, nyv*nyv, nzv*nzv, nxv*nyv, nyv*nzv, nzv*nxv};
+      for (int t = 0; t < n; ++t) {
+        const double u = (t + 0.5) / n;
+        const double px = sg.a.x + u*dx, py = sg.a.y + u*dy, pz = sg.a.z + u*dz;
+        const long long i = static_cast<long long>((px - d.grid.origin.x) / h);
+        const long long j = static_cast<long long>((py - d.grid.origin.y) / h);
+        const long long k = static_cast<long long>((pz - d.grid.origin.z) / h);
+        if (i < 0 || j < 0 || k < 0 || i >= nx || j >= ny || k >= nz) continue;
+        const std::size_t e = static_cast<std::size_t>((k * ny + j) * nx + i);
+        if (d.mask[e]) continue;                 // real solid keeps its own material
+        // gamma scales the whole truss tensor. The rank-one sum is the VOIGT (upper)
+        // bound: it assumes every strut stretches affinely with the macroscopic
+        // strain. A network that is not fully triangulated bends instead and is
+        // softer, so the bound is not tight and gamma is how far below it this
+        // lattice actually sits. gamma = 1 is the raw bound.
+        const double w = aniso_gamma * d.E * A * dl / Vc;
+        for (int a = 0; a < 6; ++a)
+          for (int b = 0; b < 6; ++b) hexmat[e][static_cast<std::size_t>(6*a + b)] += w * m[a] * m[b];
+        rho_cell[e] += A * dl / Vc;
+      }
+    }
+    // the isotropic joint/bending floor, and a hard floor so no cell is singular
+    for (std::size_t e = 0; e < hexmat.size(); ++e) {
+      bool any = false;
+      for (double v : hexmat[e]) if (v != 0.0) { any = true; break; }
+      if (!any) continue;
+      ++aniso_cells;
+      const double rho = std::max(rho_cell[e], 1e-6);
+      const double Ei = std::max(aniso_beta * d.E * rho, kHexFractionFloor * d.E);
+      const double nu = d.nu;
+      const double cc = Ei / ((1.0 + nu) * (1.0 - 2.0 * nu));
+      const double Gi = cc * (1.0 - 2.0 * nu) / 2.0;
+      for (int a = 0; a < 3; ++a) {
+        hexmat[e][static_cast<std::size_t>(6*a + a)] += cc * (1.0 - nu);
+        for (int b = 0; b < 3; ++b) if (a != b) hexmat[e][static_cast<std::size_t>(6*a + b)] += cc * nu;
+      }
+      for (int a = 3; a < 6; ++a) hexmat[e][static_cast<std::size_t>(6*a + a)] += Gi;
+    }
+    hexmat_p = &hexmat;
+  }
   const BeamNetwork empty_net;
   CoupledResearchExport XS;
   XS.skip_solve = false;
   const auto t1 = std::chrono::steady_clock::now();
   const CoupledLatticeSolve rs = solve_coupled_lattice(
       d.grid, soft_mask, empty_net, d.cases[0].bcs, d.cases[0].loads, d.E, d.nu, 0.9, 1e-8,
-      100000, &frac, nullptr, d.reach, nullptr, nullptr, false, &XS);
+      100000, &frac, hexmat_p, nullptr, d.reach, nullptr, nullptr, false, &XS);
   const double t_soft = std::chrono::duration<double>(std::chrono::steady_clock::now() - t1).count();
   if (!rs.converged) {
     std::printf("{\"variant\": \"%s\", \"error\": \"soft global solve did not converge: %s\"}\n",
@@ -849,11 +918,13 @@ static int run_softcut(const Dump& d, const BeamNetwork& net, const std::string&
       ++mapped;
     }
   }
-  std::fprintf(stderr, "[softcut] f=%g: lattice cells %zu, solid cells %zu (overlap %zu); soft solve %.1f s, "
-               "%zu of %zu cut-side nodes mapped, %zu missed\n", f, n_lat, n_solid, n_both, t_soft,
+  std::fprintf(stderr, "[softcut] %s cells %zu; f=%g: lattice cells %zu, solid cells %zu (overlap %zu); soft solve %.1f s, "
+               "%zu of %zu cut-side nodes mapped, %zu missed\n",
+               aniso_beta >= 0.0 ? "ANISOTROPIC" : "isotropic", aniso_cells, f, n_lat, n_solid, n_both, t_soft,
                mapped, mapped + missed, missed);
   const int r = submodel_with_field(d, net, X, fs, uref, outp, variant, margin_vox, ref_stress_path,
-                                    "soft_continuum", m0, t0, t_soft, f, n_lat, missed);
+                                    aniso_beta >= 0.0 ? "aniso_truss_tensor" : "soft_continuum",
+                                    m0, t0, t_soft, f, n_lat, missed);
   return r;
 }
 
@@ -901,6 +972,16 @@ int main(int argc, char** argv) {
   }
   if (variant == "solidfactor" || variant == "beamblock") return run_blocks(d, net, variant);
   if (variant == "fieldcmp") return run_fieldcmp(d, net, ref_u);
+  if (variant.rfind("anisocut", 0) == 0) {
+    double beta = 0.05, mv = 2.0, gam = 1.0;
+    const char* c = variant.c_str() + 8;
+    if (*c == ':') {
+      beta = std::atof(c + 1);
+      const char* c2 = std::strchr(c + 1, ':');
+      if (c2) { mv = std::atof(c2 + 1); const char* c3 = std::strchr(c2 + 1, ':'); if (c3) gam = std::atof(c3 + 1); }
+    }
+    return run_softcut(d, net, outp, variant, 0.04, mv, ref_st, beta, gam);
+  }
   if (variant.rfind("softcut", 0) == 0) {
     double f = 0.04, mv = 2.0;
     const char* c = variant.c_str() + 7;
@@ -922,7 +1003,7 @@ int main(int argc, char** argv) {
     X.skip_solve = true;
     const ProcessMemory a0 = process_memory();
     (void)solve_coupled_lattice(d.grid, d.mask, net, d.cases[0].bcs, d.cases[0].loads, d.E, d.nu, 0.9, 1e-8, 100000,
-                                nullptr, nullptr, d.reach, nullptr, nullptr, false, &X);
+                                nullptr, nullptr, nullptr, d.reach, nullptr, nullptr, false, &X);
     const ProcessMemory a1 = process_memory();
     std::size_t nnz = X.val.size(), beam_free = 0;
     for (int i = 0; i < X.NF; ++i) beam_free += X.dof_is_beam[static_cast<std::size_t>(X.from_free[static_cast<std::size_t>(i)])] ? 1 : 0;
@@ -948,7 +1029,7 @@ int main(int argc, char** argv) {
   const ProcessMemory m0 = process_memory();
   const auto t0 = std::chrono::steady_clock::now();
   const CoupledLatticeSolve r = solve_coupled_lattice(d.grid, d.mask, net, d.cases[0].bcs, d.cases[0].loads, d.E, d.nu,
-                                                      0.9, 1e-8, 100000, nullptr, nullptr, d.reach, nullptr, &stage);
+                                                      0.9, 1e-8, 100000, nullptr, nullptr, nullptr, d.reach, nullptr, &stage);
   const double wall = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
   const ProcessMemory m1 = process_memory();
 

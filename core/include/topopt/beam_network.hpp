@@ -632,6 +632,11 @@ CoupledLatticeSolve solve_coupled_lattice(
     const std::vector<NodalLoad>& loads, double youngs_modulus, double poisson,
     double shear_k, double cg_tolerance, int cg_max_iterations,
     const std::vector<double>* hex_solid_fraction = nullptr,
+    // RESEARCH: per-cell 6x6 constitutive matrix (grid-indexed, row-major). Where a
+    // cell has one, it REPLACES the isotropic material (and hex_solid_fraction is not
+    // applied to it -- the tensor already carries the lattice's density). Empty or
+    // all-zero entries fall back to the isotropic path.
+    const std::vector<std::array<double, 36>>* hex_material = nullptr,
     const std::vector<ShellPatch>* shells = nullptr,
     // ★ HOW FAR A LOAD MAY REACH TO FIND MATERIAL. A load is declared on a GRID
     // NODE, but where the model carries a lattice the material under that node is a

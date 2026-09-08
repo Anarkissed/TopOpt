@@ -1033,6 +1033,7 @@ CoupledLatticeSolve solve_coupled_lattice(
     const std::vector<NodalLoad>& loads, double youngs_modulus, double poisson,
     double shear_k, double cg_tolerance, int cg_max_iterations,
     const std::vector<double>* hex_solid_fraction,
+    const std::vector<std::array<double, 36>>* hex_material,
     const std::vector<ShellPatch>* shells, double load_reach_mm,
     const CgProgress* progress, const SolveStage* stage, bool distribute_beam_loads,
     CoupledResearchExport* research) {
@@ -1690,6 +1691,21 @@ CoupledLatticeSolve solve_coupled_lattice(
       fill = (*hex_solid_fraction)[e];
       if (!(fill > kHexFractionFloor)) fill = kHexFractionFloor;
       if (fill > 1.0) fill = 1.0;
+    }
+    // RESEARCH: a per-cell homogenized lattice tensor replaces the isotropic material.
+    const std::array<double, 36>* Dcell = nullptr;
+    if (hex_material && e < hex_material->size()) {
+      const std::array<double, 36>& cand = (*hex_material)[e];
+      for (double v : cand) if (v != 0.0) { Dcell = &cand; break; }
+    }
+    if (Dcell) {
+      const Hex8Stiffness Ka = hex8_stiffness_general(*Dcell, grid.spacing);
+      for (int a = 0; a < 8; ++a)
+        for (int ca = 0; ca < 3; ++ca)
+          for (int b2 = 0; b2 < 8; ++b2)
+            for (int cb = 0; cb < 3; ++cb)
+              K.add(3 * n8[a] + ca, 3 * n8[b2] + cb, Ka(3 * a + ca, 3 * b2 + cb));
+      continue;
     }
     for (int a = 0; a < 8; ++a)
       for (int ca = 0; ca < 3; ++ca)
@@ -3059,11 +3075,11 @@ OrganicCertificate certify_organic_structural(
   for (const OrganicLoadCase& lc : cases) {
     const CoupledLatticeSolve r = solve_coupled_lattice(
         grid, hex_mask, net, lc.bcs, lc.loads, youngs_modulus, poisson, 0.9, 1e-8,
-        100000, nullptr, shells, load_reach_mm);
+        100000, nullptr, nullptr, shells, load_reach_mm);
     // The same case with every landed load spread along the members at its node.
     const CoupledLatticeSolve rd = solve_coupled_lattice(
         grid, hex_mask, net, lc.bcs, lc.loads, youngs_modulus, poisson, 0.9, 1e-8,
-        100000, nullptr, shells, load_reach_mm, nullptr, nullptr, true);
+        100000, nullptr, nullptr, shells, load_reach_mm, nullptr, nullptr, true);
     ++cert.load_cases_run;
     cert.worst_load_dropped_fraction =
         std::max(cert.worst_load_dropped_fraction, r.load_dropped_fraction);
