@@ -482,6 +482,13 @@ static int run_guyan(const Dump& d, const BeamNetwork& net, const std::string& o
 }
 
 // SUBMODEL: keep solid dofs within margin voxels of any beam node; prescribe the rest from the reference u.
+static int submodel_with_field(const Dump& d, const BeamNetwork& net, const CoupledResearchExport& X,
+                               FreeSys& fs, const std::vector<double>& uref, const std::string& outp,
+                               const std::string& variant, double margin_vox, const std::string& ref_stress_path,
+                               const char* src, const ProcessMemory& m0,
+                               const std::chrono::steady_clock::time_point& t0,
+                               double extra_seconds, double soft_f, std::size_t lat_cells, std::size_t missed);
+
 static int run_submodel(const Dump& d, const BeamNetwork& net, const std::string& outp, const std::string& variant,
                         double margin_vox, const std::string& ref_u_path, const std::string& ref_stress_path) {
   const ProcessMemory m0 = process_memory();
@@ -522,6 +529,17 @@ static int run_submodel(const Dump& d, const BeamNetwork& net, const std::string
     FILE* f = std::fopen(ref_u_path.c_str(), "rb"); if (!f) { std::printf("{\"variant\": \"%s\", \"error\": \"no reference u\"}\n", variant.c_str()); return 1; }
     const std::size_t got = std::fread(uref.data(), sizeof(double), static_cast<std::size_t>(X.SB), f); std::fclose(f);
     if (got != static_cast<std::size_t>(X.SB)) { std::printf("{\"variant\": \"%s\", \"error\": \"reference u shorter than the solid block: %zu < %d\"}\n", variant.c_str(), got, X.SB); return 1; } }
+  return submodel_with_field(d, net, X, fs, uref, outp, variant, margin_vox, ref_stress_path, src, m0, t0,
+                             0.0, 0.0, 0, 0);
+}
+
+static int submodel_with_field(const Dump& d, const BeamNetwork& net, const CoupledResearchExport& X,
+                               FreeSys& fs, const std::vector<double>& uref, const std::string& outp,
+                               const std::string& variant, double margin_vox, const std::string& ref_stress_path,
+                               const char* src, const ProcessMemory& m0,
+                               const std::chrono::steady_clock::time_point& t0,
+                               double extra_seconds, double soft_f, std::size_t lat_cells, std::size_t missed) {
+  (void)extra_seconds; (void)soft_f; (void)lat_cells; (void)missed;
   // solid nodes within margin of any beam node: hash beam nodes on a grid of cell = margin*h
   const double h = d.grid.spacing, R = margin_vox * h, cell = std::max(R, h);
   std::map<long long, std::vector<int>> hash;
@@ -719,6 +737,126 @@ static int run_fieldcmp(const Dump& d, const BeamNetwork& net, const std::string
   return 0;
 }
 
+
+// ── softcut:<E_eff/E_s>[:margin] ────────────────────────────────────────────────
+// THE EXPERIMENT. Idea one, measured. Build the cheap global model the way the
+// literature says to (Georges et al. 2023; Somnic & Jo 2022): the lattice region is
+// NOT bulk and NOT beams, it is a soft continuum at the lattice's effective modulus.
+// Solve that once, prescribe ITS displacements on the submodel's cut, and compare the
+// certificate's p99 and margin against the FULL coupled solve.
+//   stage 1  solid-only solve; cells carrying a strut get stiffness scale f, the real
+//            solid keeps 1.0 (hex_solid_fraction is exactly a per-cell modulus scale)
+//   stage 2  the real coupled system, cut at `margin` voxels, stage 1's field on the cut
+// The two solves number their solid nodes differently (different meshed sets), so the
+// field is carried across by POSITION through the exported solid node coordinates.
+static int run_softcut(const Dump& d, const BeamNetwork& net, const std::string& outp,
+                       const std::string& variant, double f, double margin_vox,
+                       const std::string& ref_stress_path) {
+  const ProcessMemory m0 = process_memory();
+  const auto t0 = std::chrono::steady_clock::now();
+  // ── stage 1: which cells carry a strut ───────────────────────────────────────
+  const int nx = d.grid.nx, ny = d.grid.ny, nz = d.grid.nz;
+  const double h = d.grid.spacing;
+  std::vector<char> lat(d.mask.size(), 0);
+  auto mark = [&](const Vec3& p) {
+    const long long i = static_cast<long long>((p.x - d.grid.origin.x) / h);
+    const long long j = static_cast<long long>((p.y - d.grid.origin.y) / h);
+    const long long k = static_cast<long long>((p.z - d.grid.origin.z) / h);
+    if (i < 0 || j < 0 || k < 0 || i >= nx || j >= ny || k >= nz) return;
+    lat[static_cast<std::size_t>((k * ny + j) * nx + i)] = 1;
+  };
+  for (const BeamSegment& sg : d.spans) {
+    const double dx = sg.b.x - sg.a.x, dy = sg.b.y - sg.a.y, dz = sg.b.z - sg.a.z;
+    const double L = std::sqrt(dx*dx + dy*dy + dz*dz);
+    const int n = std::max(1, static_cast<int>(std::ceil(2.0 * L / h)));
+    for (int t = 0; t <= n; ++t) {
+      const double u = static_cast<double>(t) / n;
+      mark(Vec3{sg.a.x + u*dx, sg.a.y + u*dy, sg.a.z + u*dz});
+    }
+  }
+  // Dilate: the lattice REGION is what the homogenized model must cover, not only the
+  // cells a strut happens to pass through. Pores between struts, and the load nodes
+  // sitting in them, belong to the region too.
+  for (int pass = 0; pass < 2; ++pass) {
+    std::vector<char> nxt = lat;
+    for (int k = 0; k < nz; ++k)
+      for (int j = 0; j < ny; ++j)
+        for (int i = 0; i < nx; ++i) {
+          const std::size_t e = static_cast<std::size_t>((k * ny + j) * nx + i);
+          if (lat[e]) continue;
+          bool near = false;
+          for (int dk = -1; dk <= 1 && !near; ++dk)
+            for (int dj = -1; dj <= 1 && !near; ++dj)
+              for (int di = -1; di <= 1 && !near; ++di) {
+                const int a = i + di, b = j + dj, c = k + dk;
+                if (a < 0 || b < 0 || c < 0 || a >= nx || b >= ny || c >= nz) continue;
+                if (lat[static_cast<std::size_t>((c * ny + b) * nx + a)]) near = true;
+              }
+          if (near) nxt[e] = 1;
+        }
+    lat.swap(nxt);
+  }
+  std::size_t n_lat = 0, n_solid = 0, n_both = 0;
+  std::vector<char> soft_mask(d.mask.size(), 0);
+  std::vector<double> frac(d.mask.size(), 1.0);
+  for (std::size_t e = 0; e < d.mask.size(); ++e) {
+    if (d.mask[e]) ++n_solid;
+    if (lat[e]) ++n_lat;
+    if (d.mask[e] && lat[e]) ++n_both;
+    soft_mask[e] = (d.mask[e] || lat[e]) ? 1 : 0;
+    frac[e] = d.mask[e] ? 1.0 : (lat[e] ? f : 1.0);
+  }
+  const BeamNetwork empty_net;
+  CoupledResearchExport XS;
+  XS.skip_solve = false;
+  const auto t1 = std::chrono::steady_clock::now();
+  const CoupledLatticeSolve rs = solve_coupled_lattice(
+      d.grid, soft_mask, empty_net, d.cases[0].bcs, d.cases[0].loads, d.E, d.nu, 0.9, 1e-8,
+      100000, &frac, nullptr, d.reach, nullptr, nullptr, false, &XS);
+  const double t_soft = std::chrono::duration<double>(std::chrono::steady_clock::now() - t1).count();
+  if (!rs.converged) {
+    std::printf("{\"variant\": \"%s\", \"error\": \"soft global solve did not converge: %s\"}\n",
+                variant.c_str(), rs.refusal.c_str());
+    return 1;
+  }
+  // position -> displacement, from the soft solve's own numbering
+  std::map<std::array<long long, 3>, std::array<double, 3>> field;
+  {
+    const std::size_t NS = XS.solid_node_xyz.size() / 3;
+    for (std::size_t sn = 0; sn < NS; ++sn) {
+      const std::array<long long, 3> key{
+          std::llround((XS.solid_node_xyz[3*sn] - d.grid.origin.x) / h),
+          std::llround((XS.solid_node_xyz[3*sn+1] - d.grid.origin.y) / h),
+          std::llround((XS.solid_node_xyz[3*sn+2] - d.grid.origin.z) / h)};
+      field[key] = {rs.solid_displacement[3*sn], rs.solid_displacement[3*sn+1], rs.solid_displacement[3*sn+2]};
+    }
+  }
+  // ── stage 2: the real coupled system, cut, with stage 1's field on it ────────
+  FreeSys fs = export_system(d, net);
+  const CoupledResearchExport& X = fs.X;
+  std::vector<double> uref(static_cast<std::size_t>(X.M), 0.0);
+  std::size_t mapped = 0, missed = 0;
+  {
+    const std::size_t NS = X.solid_node_xyz.size() / 3;
+    for (std::size_t sn = 0; sn < NS; ++sn) {
+      const std::array<long long, 3> key{
+          std::llround((X.solid_node_xyz[3*sn] - d.grid.origin.x) / h),
+          std::llround((X.solid_node_xyz[3*sn+1] - d.grid.origin.y) / h),
+          std::llround((X.solid_node_xyz[3*sn+2] - d.grid.origin.z) / h)};
+      const auto it = field.find(key);
+      if (it == field.end()) { ++missed; continue; }
+      for (int c = 0; c < 3; ++c) uref[3*sn + static_cast<std::size_t>(c)] = it->second[static_cast<std::size_t>(c)];
+      ++mapped;
+    }
+  }
+  std::fprintf(stderr, "[softcut] f=%g: lattice cells %zu, solid cells %zu (overlap %zu); soft solve %.1f s, "
+               "%zu of %zu cut-side nodes mapped, %zu missed\n", f, n_lat, n_solid, n_both, t_soft,
+               mapped, mapped + missed, missed);
+  const int r = submodel_with_field(d, net, X, fs, uref, outp, variant, margin_vox, ref_stress_path,
+                                    "soft_continuum", m0, t0, t_soft, f, n_lat, missed);
+  return r;
+}
+
 int main(int argc, char** argv) {
   if (argc < 3) { std::fprintf(stderr, "usage: cert_research <dump> <variant> [out_prefix]\n"); return 1; }
   const std::string variant = argv[2];
@@ -763,6 +901,12 @@ int main(int argc, char** argv) {
   }
   if (variant == "solidfactor" || variant == "beamblock") return run_blocks(d, net, variant);
   if (variant == "fieldcmp") return run_fieldcmp(d, net, ref_u);
+  if (variant.rfind("softcut", 0) == 0) {
+    double f = 0.04, mv = 2.0;
+    const char* c = variant.c_str() + 7;
+    if (*c == ':') { f = std::atof(c + 1); const char* c2 = std::strchr(c + 1, ':'); if (c2) mv = std::atof(c2 + 1); }
+    return run_softcut(d, net, outp, variant, f, mv, ref_st);
+  }
   if (variant.rfind("guyan", 0) == 0) {
     const std::size_t cap = variant.size() > 6 ? static_cast<std::size_t>(std::atof(variant.c_str() + 6)) : 6000;
     return run_guyan(d, net, outp, variant, cap, ref_st);
