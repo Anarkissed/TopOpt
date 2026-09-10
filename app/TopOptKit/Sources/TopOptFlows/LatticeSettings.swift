@@ -27,6 +27,74 @@ public enum LatticeBoundaryTreatment: String, Codable, CaseIterable, Equatable, 
     case rim
     /// Rim + woven face skin — the anchored diagrid (`skin: "diagrid"`).
     case fullSkin
+    /// ★★ A SOLID OUTER SHELL OVER THE LATTICE (maintainer, 2026-08-19: "It might
+    /// be worth adding a 'Covered' finish? For anyone who doesn't care about
+    /// seeing the lattice?").
+    ///
+    /// ★ IT IS A DIFFERENT AXIS FROM THE OTHER THREE, AND CORE ALREADY HAS IT.
+    /// `skin` is what happens at the lattice's BOUNDARY (none / rim / diagrid);
+    /// `outer_finish` is what the OUTER SURFACE is (shell / skin / shell+skin) —
+    /// core/src/cli/job.cpp:1433. A solid cover is `outer_finish: "shell"`, and
+    /// the app has never sent that field at all, so this exposes a capability
+    /// rather than inventing one.
+    ///
+    /// ★ AND IT IS WHAT THE WITHDRAWN "SKIN" CUT ACTUALLY BUILT — the lattice
+    /// eroded by the printed wall ring, leaving a solid slab. Right geometry,
+    /// wrong name. It moves here where it is honest.
+    case covered
+
+    /// ★★ THIS IS NOT A SOLID WALL, AND THE FIRST CUT MADE IT ONE (maintainer,
+    /// 2026-08-19: "The skin is incorrect. It's adding a FULL skin back onto the
+    /// lattice. There is no point in doing that. The skin is supposed to be like
+    /// it is in the settings: a covering across all edges/corners. Meanwhile, rim
+    /// is supposed to be around only the outside edges").
+    ///
+    /// ★ WHAT THE TWO TREATMENTS ACTUALLY ARE, as the wizard's own sample block
+    /// draws them and as core builds them:
+    ///
+    ///   rim ....... thickened struts along the region's boundary EDGES only —
+    ///               a frame around the block, faces left open.
+    ///   fullSkin .. that rim PLUS a woven DIAGRID across the faces — a surface
+    ///               LATTICE, still open, not a slab.
+    ///
+    /// ★ THE FIRST CUT READ "skin" AS "solid offset shell" and returned the
+    /// printed wall ring as a thickness to erode the lattice by. That produced a
+    /// solid wall over the struts, which is not what core makes, not what the
+    /// sample block shows, and hides the very thing the preview exists to show.
+    /// It is withdrawn rather than left in as an approximation: a preview that
+    /// draws a slab where the run builds a diagrid is a confident wrong answer.
+    ///
+    /// Returning 0 means the preview does not yet DRAW either treatment — an
+    /// honest absence. The plumbing that carries the choice to the bake stays, so
+    /// the diagrid and the rim have somewhere to land.
+    /// ★ ONLY `covered` HAS A THICKNESS. `rim` and `fullSkin` are LATTICE
+    /// geometry — a frame of edge struts, and a diagrid woven across the faces —
+    /// and neither is an offset the preview can express by eroding, which is what
+    /// made the first cut wrong. They return 0 and are drawn by D1.
+    ///
+    /// The number for `covered` is the ring the slicer lays down,
+    /// `PrintParams.wallRingMM`: a cover thinner than the printer's own walls
+    /// would promise a part the machine cannot make.
+    public func faceSkinMM(wallRingMM: Double) -> Double {
+        self == .covered ? Swift.max(0, wallRingMM) : 0
+    }
+
+    /// ★ THE PREVIEW'S DRESSING LEVEL: 0 none · 1 rim (edges only) · 2 diagrid
+    /// (the whole boundary). `covered` dresses nothing — it is a solid wall over
+    /// the lattice, drawn by the skin field, not a heavier strut.
+    public var previewDressingLevel: Float {
+        switch self {
+        case .none, .covered: return 0
+        case .rim: return 1
+        case .fullSkin: return 2
+        }
+    }
+
+    /// ★ `job.lattice.outer_finish` — "shell" for a cover, nil otherwise so every
+    /// pre-existing job stays byte-identical. Core refuses "skin"/"shell+skin"
+    /// unless `skin == "diagrid"` (job.cpp:1438), so only the unambiguous value
+    /// is ever emitted here.
+    public var jobOuterFinish: String? { self == .covered ? "shell" : nil }
 
     /// The exact core job-schema value (`job.lattice.skin`).
     public var jobSkinValue: String {
@@ -34,6 +102,10 @@ public enum LatticeBoundaryTreatment: String, Codable, CaseIterable, Equatable, 
         case .none: return "none"
         case .rim: return "rim"
         case .fullSkin: return "diagrid"
+        // ★ A COVER IS AN OUTER FINISH, NOT A BOUNDARY TREATMENT — the lattice
+        // underneath still runs to the edge, so `skin` stays "none" and
+        // `jobOuterFinish` carries the cover.
+        case .covered: return "none"
         }
     }
 }
@@ -51,6 +123,44 @@ public enum LatticeGroupRole: String, Codable, Equatable, Sendable {
 /// One `lattice.regions` entry, exactly the wire shape core's job.cpp accepts
 /// (role ∈ include|exclude, kind ∈ bolt|face, geometry with every extent > 0).
 /// Values are model-space mm, the same frame as a manual clearance.
+/// ★★★ THE GRADING OPTIONS (his request, 2026-08-25: "add two new settings for
+/// the grading options"). How the CELL is allowed to vary inside a region —
+/// STEPPED algorithm only; Default's dyadic ladder is untouched by his ruling.
+///
+///   full      everything shipped so far: the cells grade to fit the face's
+///             shape near the outline AND the density follows the stress field
+///             where one governs.
+///   fitShape  "Grade to fit Shape" — the cells grade near the outline only;
+///             the density is ONE number everywhere (the dial, or Auto).
+///   none      "No grade" — one cell, one density; the per-face Cell size is
+///             the dial. (The per-spot material rule still applies — a cell
+///             never exceeds its own wall; that is sizing, not grading.)
+public enum LatticeGradingMode: String, Equatable, Sendable, Codable {
+    /// Stress + shape — the density follows the solve AND the cells fit the outline.
+    case full
+    /// Shape only — the cells fit the outline; one density everywhere.
+    case fitShape
+    /// ★ Stress only (his 2026-08-25 restructure): the density follows the solve,
+    /// the cell stays one size. No shape band applies.
+    case stressOnly
+    /// No grade at all — one cell, one density.
+    case none
+
+    /// Does this mode grade the CELL to the face's outline? Only these two offer
+    /// the shape band.
+    public var fitsShape: Bool { self == .full || self == .fitShape }
+    /// Does the SOLVE decide the density here?
+    public var followsStress: Bool { self == .full || self == .stressOnly }
+}
+
+/// ★ HOW THE FIT-SHAPE GRADE STEPS DOWN — his "either stepped or default
+/// (dyadic) options": stepped admits every integer divisor (S/2, S/3, S/4 …),
+/// dyadic halves (S/2, S/4, S/8) so every graded cell shares nodes with its
+/// parent.
+public enum LatticeGradeStepStyle: String, Equatable, Sendable, Codable {
+    case stepped, dyadic
+}
+
 public struct LatticeRegionSpec: Equatable, Sendable {
     public enum Kind: String, Equatable, Sendable { case bolt, face }
     public let role: LatticeGroupRole
@@ -66,6 +176,18 @@ public struct LatticeRegionSpec: Equatable, Sendable {
     public var halfUMM: Double = 0
     public var halfWMM: Double = 0
     public var depthMM: Double = 0
+    /// ★★ THE FACE'S REAL OUTLINE, in the plane's (u, v) mm relative to `origin`
+    /// — see `LatticeFaceOutline` for the measurement that made this necessary.
+    /// EMPTY means "no outline was available", and then the region is the
+    /// rectangle `halfUMM`×`halfWMM` exactly as it always was, which is what a
+    /// bolt, a hand-placed primitive and every pre-outline project get.
+    public var outlineLoops: [[SIMD2<Double>]] = []
+    /// ★ THE IN-PLANE REACH, kept as its own number instead of being folded into
+    /// the half-extents. Against an OUTLINE the expand is Minkowski dilation by a
+    /// ball — `signedDistance <= inPlaneOffsetMM` — which is precisely what
+    /// `FaceOffsetShell.dilated` does to the primitive on screen. Folding it into
+    /// halfU/halfW could only ever grow a rectangle.
+    public var inPlaneOffsetMM: Double = 0
     /// ★ The B-rep face this region was spawned from (task 2026-08-12 §0a), or
     /// nil for a hand-placed primitive. Emitted as the job's `face_id` so CORE
     /// can check the depth tie: a face that is both protected and latticed must
@@ -76,6 +198,15 @@ public struct LatticeRegionSpec: Equatable, Sendable {
     /// job's `relative_density`; absent when nil, so a job with no override is
     /// byte-identical to a pre-task one. Never set on an exclude region.
     public var relativeDensity: Double? = nil
+    /// ★ SYNTHETIC STRESS FOR AN UNLOADED WALL (maintainer, 2026-09-05; Aesthetic
+    /// only). `syntheticStress` is set by the emission ONLY for a wall the last bake
+    /// measured as unloaded (never a loaded one — his rule); `syntheticFoci` is then
+    /// the count to use (the wall's own, else the lattice default). Core's contract:
+    /// per-region `synthetic_stress` + `synthetic_foci` (1…5). The selectable key
+    /// rides along so the bake's report can name the row; it never reaches the job.
+    public var syntheticStress: Bool = false
+    public var syntheticFoci: Int? = nil
+    public var selectableKey: String? = nil
 
     public init(role: LatticeGroupRole, kind: Kind) {
         self.role = role
@@ -95,14 +226,34 @@ public struct LatticeRegionSpec: Equatable, Sendable {
     /// from manual primitives and never sets `faceID`, so the key was nil there
     /// and stays absent. Its bytes do not move.
     public var wireDictionary: [String: Any] {
+        // ★★ THE OUTLINE GOES ON THE WIRE, and core now reads it. The first
+        // attempt was withdrawn because `topopt-cli` rejected the key outright
+        // ("unknown key \"in_plane_offset_mm\""); core's schema accepts
+        // `outline_uv` as of this change, and `region_contains` tests it.
+        //
+        // ★ THE HALF-EXTENTS STAY, and are still required: they are the outline's
+        // BOUNDING BOX, which core uses as the cheap reject before the polygon
+        // test. A genuinely rectangular face omits the outline and behaves exactly
+        // as it always did.
+        //
+        // ★ AND THE (u, w) FRAME IS CORE'S — see `LatticeRegionMask.basis`. The
+        // app moved onto core's `plane_basis` order rather than negating here,
+        // because a conversion at the boundary is a second place for the sign to
+        // be wrong.
+        var faceGeometry: [String: Any] = [
+            "origin": [origin.x, origin.y, origin.z],
+            "normal": [normal.x, normal.y, normal.z],
+            "half_u_mm": halfUMM,
+            "half_w_mm": halfWMM,
+            "depth_mm": depthMM,
+        ]
+        if !outlineLoops.isEmpty {
+            faceGeometry["outline_uv"] = outlineLoops.map { loop in
+                loop.map { [$0.x, $0.y] }
+            }
+        }
         let geometry: [String: Any] = kind == .face
-            ? [
-                "origin": [origin.x, origin.y, origin.z],
-                "normal": [normal.x, normal.y, normal.z],
-                "half_u_mm": halfUMM,
-                "half_w_mm": halfWMM,
-                "depth_mm": depthMM,
-            ]
+            ? faceGeometry
             : [
                 "axis_point": [axisPoint.x, axisPoint.y, axisPoint.z],
                 "axis_dir": [axisDir.x, axisDir.y, axisDir.z],
@@ -118,6 +269,13 @@ public struct LatticeRegionSpec: Equatable, Sendable {
         // The DIALLED density. Absent means AUTO means core derives, so a project
         // that never touched it produces the identical job (bar R1).
         if let rho = relativeDensity { entry["relative_density"] = rho }
+        // ★ Core's per-region keys travel only when the linked core's schema accepts
+        // them (`organicSyntheticStressWired`, a whole-job probe with a control) —
+        // a core that has never heard of them must see the job it always has.
+        if syntheticStress, let n = syntheticFoci, TopOptKit.organicSyntheticStressWired {
+            entry["synthetic_stress"] = true
+            entry["synthetic_foci"] = OrganicSyntheticStress.clampFoci(n)
+        }
         return entry
     }
 
@@ -218,6 +376,105 @@ public enum LatticeDensityMode: String, Codable, Equatable, Sendable {
 /// `fit` (task 2026-08-07-cell-mode-fit-and-swept-floor) derives the cell PER
 /// DECLARED REGION from that region's own thickness — core has carried it since
 /// PR 302 and the device had no way to select it.
+/// ★★ HOW AUTO CHANGES THE CELL FROM PLACE TO PLACE (maintainer, 2026-08-20: "If
+/// 'Auto' is selected for cell size, a secondary question needs to become visible:
+/// 1. Stepped 2. Default Grade 3. Organic Grade").
+///
+/// ★★★ ALL THREE ARE NOW WIRED (maintainer, 2026-08-21: "Please connect the Stepped
+/// and Organic algos"). This enum IS core's `LatticeAlgorithm`, in the app's words:
+///
+///     stepped      -> "stepped"   one cell per declared region, taken VERBATIM
+///     defaultGrade -> "doubled"   the dyadic ladder — THE DEFAULT
+///     organicGrade -> "organic"   struts traced along the stress field
+///
+/// ★ THE PREVIOUS DOCTRINE HERE IS SUPERSEDED, NOT DELETED, AND THIS RECORDS WHY. It
+/// said the other two were "not wired yet" and gave two reasons: stepped needs a rule
+/// for what happens at an unshared seam, and organic needs cells off the ladder that
+/// stop being cubic. BOTH REASONS WERE TRUE AND BOTH ARE NOW ANSWERED IN CORE, not
+/// argued away here:
+///
+///   * `stepped` does not pretend the seam is fine — core COUNTS the floating strut
+///     ends it produces (`LatticeSteppedStats::floating_ends`) and puts them on the
+///     receipt. Measured on main: 4 of 5 abutting region pairs come out mechanically
+///     disconnected. That is a number the user gets to see, not a silent reject.
+///   * `organic` is exactly why the AESTHETIC mode exists. A traced lattice is
+///     anisotropic by construction, so `run_job` REFUSES it under a structural claim
+///     rather than certifying against a cubic tensor that does not describe it. The
+///     old note's "one cubic tensor per topology" is that refusal, now enforced by
+///     core and surfaced at the picker (`LatticeSettings.algorithmRefusalReason`).
+///
+/// So the availability rule below is no longer a hard-coded "not yet": it ASKS CORE.
+public enum LatticeCellTransition: String, Codable, Hashable, Sendable, CaseIterable {
+    case stepped
+    case defaultGrade
+    case organicGrade
+
+    public var title: String {
+        switch self {
+        case .stepped: return "Stepped"
+        case .defaultGrade: return "Default Grade"
+        case .organicGrade: return "Organic Grade"
+        }
+    }
+
+    /// ★★ CORE'S OWN ALGORITHM NAME. The one place the two vocabularies meet, so a
+    /// picker built on this enum and a job built on that string cannot drift.
+    public var coreAlgorithm: String {
+        switch self {
+        case .stepped:      return "stepped"
+        case .defaultGrade: return "doubled"
+        case .organicGrade: return "organic"
+        }
+    }
+
+    /// nil ⇒ available. ★ ASKED OF CORE, never hard-coded: an algorithm core does not
+    /// know is unavailable, and the reason names what is missing rather than promising
+    /// a date. Replaces the old "not wired yet" pair — see the type's note for why both
+    /// of those reasons are now answered in core.
+    public var unavailableReason: String? {
+        guard !TopOptKit.latticeAlgorithmIsKnown(coreAlgorithm) else { return nil }
+        return "This build's core does not carry the \(title.lowercased()) algorithm."
+    }
+
+    public var body: String {
+        switch self {
+        case .stepped:
+            return "One cell size per region, changing abruptly at the boundary."
+        case .defaultGrade:
+            return "Cell sizes double and halve on core's ladder, so coarse and fine "
+                 + "cells meet at shared nodes."
+        case .organicGrade:
+            return "Cell size varies continuously with the stress."
+        }
+    }
+}
+
+/// ★★★ ORGANIC'S BOUNDARY FINISH — core's `organic_boundary_finish`, as its own name.
+///
+/// ★ A FINISH IS A LOOK, NOT A REPAIR (his ruling, and core honours it): the finish
+/// runs LAST and the structural core of all three is byte-identical. So this changes
+/// what the edge looks like and never what the lattice IS.
+///
+/// ★ `skin` IS THE DEFAULT AND IT IS THE SHARP ONE. It drops the shell, so every
+/// clipped strut end becomes a cantilever unless the net-skin picks it up. That is
+/// core's default, not a choice this app makes, and it is restated here only so the
+/// picker can show it — the key is still written only when the user has moved it.
+public enum LatticeOrganicFinish: String, Codable, Equatable, Sendable, CaseIterable {
+    case clean, rim, skin
+
+    /// Exactly core's spelling. One source for the picker and the job document, so
+    /// they cannot drift.
+    public var jobValue: String { rawValue }
+
+    public var title: String {
+        switch self {
+        case .clean: return "Clean"
+        case .rim:   return "Rim"
+        case .skin:  return "Skin"
+        }
+    }
+}
+
 public enum LatticeCellSizeMode: String, Codable, Equatable, Sendable {
     case auto
     case fixed
@@ -322,6 +579,51 @@ public struct LatticeSpec: Equatable, Sendable {
     /// DefaultArmingTests rather than trusted.
     public let requireVoidReachesExterior: Bool
 
+    /// ★ `job.lattice.outer_finish` — "shell" when the user picked **Covered**,
+    /// nil otherwise so every job that does not use it is BYTE-IDENTICAL to the
+    /// one before the option existed. See `LatticeBoundaryTreatment.covered`.
+    public var outerFinish: String? = nil
+    /// ★★ CORE'S `LatticeAlgorithm`, as its own name — "" means NOT STATED, so no key
+    /// is written and core resolves it to doubled. A `var` with an empty default so
+    /// every existing `LatticeSpec(...)` call is unchanged and produces the same job.
+    public var algorithm: String = ""
+
+    // ★ ORGANIC's seven keys, carried the same way `algorithm` is: plain `var`s with
+    // core's own defaults, so every existing `LatticeSpec(...)` call site is unchanged
+    // and produces the same job document. `gradingDictionary()` decides what is
+    // actually written; nothing here is emitted merely by being set.
+    public var organicGrowth: Bool = false
+    public var organicStrutWidthMM: Double = 0
+    public var organicOverhangDeg: Double = 0
+    public var organicBoundaryFinish: String = LatticeOrganicFinish.skin.jobValue
+    public var organicShapeFit: Bool = false
+    public var organicShapeFitOnly: Bool = false
+    public var organicOverhangFillet: Bool = true
+    /// ★ UNLOADED WALLS get synthetic stresses (Aesthetic only, 2026-09-05).
+    public var organicSyntheticStresses: Bool = false
+    public var organicSyntheticFoci: Int = 4
+    /// ★ PR 355 keys (2026-09-06): Michell second-family ties on the GROWN path
+    /// (default on), how much they wander (0 = straight), the grade-to-solid ring
+    /// inside the face outline (−1 = one base cell, 0 = none).
+    public var organicTransferTies: Bool = true
+    public var organicTieSwirl: Double = 1.0
+    public var organicSolidRimMM: Double = -1
+    public var organicScale: Double = 1
+    /// The user's pick among certification's separations (0 ⇒ none; Fit lets core choose).
+    public var organicPickedSeparationMM: Double = 0
+    public var organicPickedGradeMM: [Double] = []
+    /// ★ THE LAYER HEIGHT THIS JOB WILL CARRY, for the growth precondition only.
+    /// `organic_growth` is a SCHEMA REFUSAL without a stated `loads.layer_height_mm`,
+    /// so the key is not written unless one is really there — the job document is the
+    /// last place that rule can be enforced, and enforcing it only in the UI would let
+    /// any other caller build a job that dies at parse.
+    public var layerHeightMM: Double = 0
+    /// The stage's Structural/Aesthetic choice, mirrored for the job's `intent`.
+    /// Core refuses ORGANIC unless the job states `"intent": "aesthetic"` itself
+    /// (run_job.cpp `refuse_organic_structural`), and no other algorithm reads it
+    /// here, so an untouched project still emits byte-identically.
+    public var stageMode: LatticeStageMode? = nil
+
     public init(topologyID: String, cellMM: Double, strutRadiusMM: Double,
                 generateRelativeDensity: Double, minRelativeDensity: Double,
                 maxRelativeDensity: Double, emitSTL: Bool = true, emit3MF: Bool = false,
@@ -416,6 +718,105 @@ public struct LatticeSpec: Equatable, Sendable {
         // Decision-free and independent of retention: it feeds no mask, cell,
         // density or verdict — it only adds the per-region rows to the receipt.
         if reportRegionCells { grading["report_region_cells"] = true }
+        // ★★ THE ALGORITHM, ONLY WHEN STATED. An absent key is core's "not stated" and
+        // resolves to doubled, so an untouched project's job is byte-identical to one
+        // built before the selector existed. A name core does not know is never
+        // written: `reject_unknown_keys` would kill the whole job over it, and a
+        // job that dies after the solve is the worst place to learn about a typo.
+        if TopOptKit.latticeAlgorithmIsKnown(algorithm) {
+            grading["algorithm"] = algorithm
+        }
+        // ══════════════════════════════════════════════════════════════════════
+        // ORGANIC — the seven keys, each written only when ALL of these hold.
+        //
+        // ★★★ NOTE FOR ANYONE LOOKING FOR A TOPOLOGY SWITCH: there isn't one.
+        // Organic is chosen by `grading.algorithm`, NOT by `grading.topology` —
+        // core SCHEMA-REFUSES any topology but "octet" (job.cpp ~1509), so an
+        // organic run still says octet and that is correct, not a leftover.
+        //
+        //   1. THE USER CHOSE ORGANIC. Core refuses each of these keys under any
+        //      other algorithm ("only allowed with algorithm organic"), so one of
+        //      them beside octet kills the whole job after the solve.
+        //   2. THE LINKED CORE KNOWS THE KEY. Runs use `reject_unknown_keys`, and
+        //      this app is built against cores carrying three of these seven and
+        //      cores carrying all seven. The probe is the only honest test.
+        //   3. THE USER MOVED IT off core's own default. Restating a default is a
+        //      DIFFERENT DOCUMENT from omitting it, and bar U1 is that an untouched
+        //      project emits byte-identically to before organic existed.
+        if algorithm == "organic" {
+            func put(_ key: String, _ value: Any) {
+                guard TopOptKit.gradingSchemaAccepts(key: key) else { return }
+                grading[key] = value
+            }
+            if organicStrutWidthMM > 0 { put("organic_strut_width_mm", organicStrutWidthMM) }
+            if organicOverhangDeg > 0 {
+                // ★ TRACE ONLY — grown clamps to a compile-time 30 deg that no job key
+                // reaches, so writing it under growth states a number core will ignore.
+                if !organicGrowth { put("organic_overhang_angle_deg", organicOverhangDeg) }
+            }
+            if organicBoundaryFinish != LatticeOrganicFinish.skin.jobValue {
+                put("organic_boundary_finish", organicBoundaryFinish)
+            }
+            if organicShapeFit { put("organic_shape_fit", true) }
+            // ★ absent ⇒ true in core; write only the OFF state (maintainer, 2026-09-05)
+            if !organicOverhangFillet { put("organic_overhang_fillet", false) }
+            // ★ PR 355 (2026-09-06): ties and their swirl ride the GROWN path only; the
+            // solid rim's default (−1 = one base cell) is core's own, written only when
+            // changed; the structural certificate is REQUIRED with a structural intent.
+            if organicGrowth {
+                if !organicTransferTies { put("organic_transfer_ties", false) }
+                if organicTransferTies, abs(organicTieSwirl - 1.0) > 1e-9 {
+                    put("organic_tie_swirl", Swift.min(1, Swift.max(0, organicTieSwirl)))
+                }
+            }
+            if abs(organicSolidRimMM + 1) > 1e-9 { put("organic_solid_rim_mm", Swift.max(0, organicSolidRimMM)) }
+            if stageMode == .structural { put("organic_structural_certification", "beam_network") }
+            // ★ SYNTHETIC STRESSES ON UNLOADED WALLS (maintainer, 2026-09-05) carry NO
+            // grading key: core's contract is per REGION (`synthetic_stress`,
+            // `synthetic_foci`), written by `LatticeRegionSpec.wireDictionary` for the
+            // walls the bake measured as unloaded.
+            // ★ NEVER `organic_shape_fit_only` ON AN ORGANIC JOB: core accepts it only
+            // with a cell window, and windows only on the SWEPT path (job.cpp), which
+            // D2 forbids for organic — a job carrying it is refused at validation
+            // (measured 2026-09-04 against job.cpp). For the RUN the switch means
+            // Fit: one separation, no stress grading of the cell, shape fit kept.
+            // ★ INTENT, STATED. Core refuses organic unless the job SAYS
+            // "intent": "aesthetic" (run_job.cpp `refuse_organic_structural`): the
+            // traced lattice is anisotropic and the certification library holds one
+            // CUBIC tensor per topology, so a structural density would be certified
+            // against a material this lattice is not. The stage's own word travels —
+            // "aesthetic" runs; "structural" is refused by core with core's reason,
+            // never quietly upgraded here. Measured on-device 2026-09-02: without
+            // this key the organic run died at core's validation ("this job says
+            // nothing").
+            if let m = stageMode { put("intent", m == .structural ? "structural" : "aesthetic") }
+            if organicScale != 1 { put("organic_scale", organicScale) }
+            // ★ The user's pick among certification's separations (maintainer,
+            // 2026-09-03). `put` refuses it until core's schema accepts the key, so a
+            // pick is stored and shown but never sent to a core that would refuse.
+            // ★ MANUAL ON THE WIRE (brief 2026-09-06): core has no organic size keys;
+            // a single size is `cell_mode: "fit"` + `cell_mm`, a grade is
+            // `cell_mode: "auto"` + `cell_min_mm`/`cell_max_mm` — the same keys the
+            // recommendation's FIT and AUTO buttons write.
+            if organicPickedSeparationMM > 0 {
+                grading["cell_mode"] = LatticeCellSizeMode.fit.rawValue
+                grading["cell_mm"] = organicPickedSeparationMM
+                grading.removeValue(forKey: "cell_min_mm"); grading.removeValue(forKey: "cell_max_mm")
+            } else if organicPickedGradeMM.count == 2, organicPickedGradeMM[0] > 0,
+                      organicPickedGradeMM[1] > organicPickedGradeMM[0] {
+                grading["cell_mode"] = LatticeCellSizeMode.auto.rawValue
+                grading["cell_min_mm"] = organicPickedGradeMM[0]
+                grading["cell_max_mm"] = organicPickedGradeMM[1]
+                grading.removeValue(forKey: "cell_mm")
+            }
+            // ★★★ GROWTH NEEDS A STATED LAYER HEIGHT — a SCHEMA REFUSAL since the
+            // PR 353 amendment, not a fallback. Without one core would substitute half
+            // a voxel (0.85 mm on the M2's 1.705 mm grid, roughly four times a real
+            // layer) and compute the whole printability argument in the wrong
+            // discretisation. So the key is simply not written without one, and the UI
+            // disables the control and says why (`organicGrowthRefusalReason`).
+            if organicGrowth, layerHeightMM > 0 { put("organic_growth", true) }
+        }
         return grading
     }
 }
@@ -425,6 +826,48 @@ public struct LatticeSpec: Equatable, Sendable {
 /// (part of the run-request identity, so an edit re-enables Optimize). OFF by default
 /// ⇒ byte-identical to a non-lattice project (BAR U1).
 public struct LatticeSettings: Codable, Equatable, Sendable {
+
+    /// ★ THE PREVIEW TRACES AT THE JOB'S NUMBERS (2026-09-06). The bake used to read
+    /// `cellMinMM`/`cellMaxMM` while the job wrote `organicPickedGradeMM` — on his
+    /// part the wizard said "2.00 mm to 4.00 mm" and the preview traced 4–8 mm. One
+    /// mapping, the same one `LatticeSpec.gradingDictionary` writes: a single size ⇒
+    /// (s, s); a grade ⇒ (lo, hi); nothing picked ⇒ the window as before, which is
+    /// what a core left to decide (`cell_mode auto` without numbers) is shown as.
+    /// True when nothing was picked and the window above is the OCTET window standing
+    /// in — the case the bake must replace by core's own band (his walk, 2026-09-06:
+    /// "auto cell grade looked incredibly sparse — is it using the octet preview
+    /// settings?"). The job carries no numbers then; core decides in the run.
+    public var organicPreviewWindowIsFallback: Bool {
+        !(organicPickedSeparationMM > 0)
+            && !(organicPickedGradeMM.count == 2 && organicPickedGradeMM[0] > 0
+                 && organicPickedGradeMM[1] > organicPickedGradeMM[0])
+    }
+
+    public var organicPreviewSeparationWindowMM: (lo: Double, hi: Double) {
+        if organicPickedSeparationMM > 0 {
+            return (organicPickedSeparationMM, organicPickedSeparationMM)
+        }
+        if organicPickedGradeMM.count == 2, organicPickedGradeMM[0] > 0,
+           organicPickedGradeMM[1] > organicPickedGradeMM[0] {
+            return (organicPickedGradeMM[0], organicPickedGradeMM[1])
+        }
+        return (cellMinMM > 0 ? cellMinMM : cellMM, cellMaxMM > 0 ? cellMaxMM : cellMM)
+    }
+
+    /// ★ WHAT A BAKE READS — with what a bake WRITES stripped out. The strut bake's
+    /// completion records the wall-stress shares it measured
+    /// (`recordLatticeWallStress`), and the probe records its answer; neither changes
+    /// the picture, but both are fields of this value, and the preview rebakes on
+    /// `.onChange(of: project.lattice)`. Measured 2026-09-06 on his part: one change,
+    /// two 12-minute bakes — the second armed by the first's own write. The trigger
+    /// compares THIS, so a write of a measurement can never re-arm the bake it came
+    /// from.
+    public var previewBakeInputs: LatticeSettings {
+        var s = self
+        s.selectableWallStressFraction = [:]
+        s.organicForecast = nil
+        return s
+    }
     /// LATTICE MODE. Off (the default) ⇒ no lattice block reaches the job and the
     /// proxy is inert — the project produces exactly today's job.
     public var enabled: Bool
@@ -433,18 +876,238 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
     /// (`TopOptKit.latticeCertifiableTopologies`) reaches a run — the rest are
     /// preview-only, and the UI says so.
     public var topologyID: String
+    /// ★★★ WHICH QUESTION THIS LATTICE ANSWERS — asked ONCE, on entering the stage,
+    /// and never editable afterwards (`LatticeStageMode`). nil ⇒ not yet chosen, which
+    /// is what makes the modal appear; it is deliberately NOT defaulted, because a
+    /// default would silently pick which claim the receipt makes.
+    public var stageMode: LatticeStageMode?
+
+    /// ★★★ WHICH KIND OF LATTICE IS LAID DOWN — core's `LatticeAlgorithm`, as its own
+    /// name string. ORTHOGONAL to `cellSizeMode`: that says how the cell is CHOSEN,
+    /// this says what is built.
+    ///
+    ///   "doubled" — the dyadic ladder. Cells of different size meet at SHARED NODES.
+    ///   "stepped" — one cell per declared region, verbatim, NO transition handling;
+    ///               abutting regions do not share nodes and core COUNTS the floating
+    ///               strut ends rather than pretending otherwise.
+    ///   "organic" — struts traced along the stress field.
+    ///
+    /// ★ EMPTY IS THE DEFAULT AND IT IS NOT "doubled". An empty string means NOT
+    /// STATED: no `algorithm` key is written, so a job from untouched controls stays
+    /// byte-identical to one built before the selector existed (bar U1). Core resolves
+    /// an absent key to doubled itself.
+    public var algorithm: String = ""
+
+    /// ★★ THE ALGORITHM THE RUN WILL ACTUALLY USE, with "not stated" resolved — for
+    /// display and for the preview, never for the job (which must keep the key absent).
+    /// Falls back to core's first name rather than a Swift literal "doubled".
+    public var resolvedAlgorithm: String {
+        TopOptKit.latticeAlgorithmIsKnown(algorithm)
+            ? algorithm : (TopOptKit.latticeAlgorithmNames.first ?? "doubled")
+    }
+
+    /// ★★★ WHY A CHOICE MAY BE REFUSED, in core's terms — nil when the pair is fine.
+    ///
+    /// `run_job` REFUSES organic under a structural claim: a traced lattice is
+    /// anisotropic by construction and the certification library carries exactly one
+    /// CUBIC tensor per topology, so there is nothing for the claim to be checked
+    /// against. Surfacing it HERE means the user is told at the picker instead of by a
+    /// job that dies after the solve — and the permission is core's answer, not a Swift
+    /// `== "organic"`.
+    public var algorithmRefusalReason: String? {
+        guard TopOptKit.latticeAlgorithmIsKnown(algorithm) else { return nil }
+        guard stageMode == .structural else { return nil }
+        guard !TopOptKit.latticeAlgorithmAllowsStructural(algorithm) else { return nil }
+        return "\(algorithm.capitalized) traces struts along the stress field, so the "
+             + "lattice is anisotropic by construction — the certification library "
+             + "holds one cubic stiffness per topology and there is nothing for a "
+             + "strength claim to be checked against. It needs the Aesthetic mode."
+    }
+
     /// Cell size (mm). Freely edited by the user; its certifiable CEILING (cells per
     /// member) is read from core at use, never stored here. The starting value is the
     /// print-tested octet cell reused from the proxy default — a start, not a limit.
     public var cellMM: Double
     /// How the cell size is chosen (bar R6). `.fixed` is the DEFAULT — the shipped
     /// legacy path, so an untouched project emits exactly today's job.
+    /// How Auto varies the cell across the part — see `LatticeCellTransition`.
+    /// Meaningful only when `cellSizeMode == .auto`; the other modes carry their own
+    /// answer (Fit is per region, Swept is the ladder over the user's window).
+    ///
+    /// ★★★ COMPUTED OVER `algorithm`, NOT A SECOND STORED FIELD (2026-08-24). It was
+    /// stored, and NOT in `CodingKeys` — so it decoded to `.defaultGrade` on every
+    /// project load while `algorithm` decoded to what the user chose. The settings
+    /// page then stamped `algorithm = cellTransition.coreAlgorithm` on save, and a
+    /// project saved with "stepped" quietly became "doubled" the first time its
+    /// settings page was SAVED after a relaunch — measured live: project.json said
+    /// `algorithm = stepped`, the running guard said `algo='doubled'`. One value with
+    /// two homes is how they drifted; now the algorithm string is the one home, and
+    /// the picker state is a reading of it. `""` (not stated) reads as
+    /// `.defaultGrade`, which is exactly how core resolves an unstated algorithm.
+    public var cellTransition: LatticeCellTransition {
+        get {
+            LatticeCellTransition.allCases.first { $0.coreAlgorithm == algorithm }
+                ?? .defaultGrade
+        }
+        set { algorithm = newValue.coreAlgorithm }
+    }
+    // ══════════════════════════════════════════════════════════════════════════
+    // ORGANIC — the seven `organic_*` job keys.
+    //
+    // ★★★ EVERY ONE IS GATED TWICE and the gates are NOT the same question:
+    //   1. the user chose organic  (`isOrganic`) — core REFUSES an organic_* key
+    //      under any other algorithm (job.cpp: "only allowed with algorithm organic"),
+    //      so emitting one beside octet kills the whole job;
+    //   2. the LINKED core knows the key (`TopOptKit.gradingSchemaAccepts`) — runs use
+    //      `reject_unknown_keys`, and this app is built against cores that carry three
+    //      of these seven and cores that carry all seven.
+    // Both live in `gradingBlock`, never here: this struct stores the user's raw pick
+    // and nothing else, the same rule `cellSizeMode` follows.
+    //
+    // ★ NOT EXPOSED, DELIBERATELY. `OrganicParams` internals that no job key reaches —
+    // test_ratio, seed_ratio, connect_ratio, step_ratio, thin_ratio, min_length_ratio,
+    // families, max_curves, max_steps_per_curve, resolution_floor_voxels,
+    // anchor_at_region_boundary, rho_min/rho_max. The UI must not invent them.
+
+    /// ★★★ TRACED (false) vs GROWN (true) — core's `organic_growth`.
+    ///
+    /// ★ A DIFFERENT ARCHITECTURE, NOT A PARAMETER. Traced curves follow the stress
+    /// field; grown ones are laid down in LAYER ORDER and refuse any step whose
+    /// underside is unsupported. They share a name and nothing else.
+    ///
+    /// ★ AND IT HAS A HARD PRECONDITION — see `organicGrowthRefusalReason`. Growth asks
+    /// its support question one layer at a time, so core SCHEMA-REFUSES it without a
+    /// stated `loads.layer_height_mm` rather than substituting half a voxel (0.85 mm on
+    /// the M2's 1.705 mm grid — about four times a real layer, which would compute the
+    /// entire printability argument in the wrong discretisation).
+    public var organicGrowth: Bool = false
+    /// Strut width (mm). 0 ⇒ DERIVE from the density band and cell, which is core's
+    /// own default; core refuses a stated value that is not > 0.
+    public var organicStrutWidthMM: Double = 0
+    /// Overhang limit, degrees, [0, 90].
+    /// ★ TRACE ONLY. Grown clamps to a compile-time 30 deg that no job key reaches, so
+    /// this control is DEAD in grown mode — see `organicOverhangIsLive`.
+    public var organicOverhangDeg: Double = 0
+    /// The edge treatment — see `LatticeOrganicFinish`. Core's default is `.skin`.
+    public var organicBoundaryFinish: LatticeOrganicFinish = .skin
+    /// Pull cells toward the region boundary.
+    public var organicShapeFit: Bool = false
+    /// Shape fit WITHOUT the stress grading.
+    public var organicShapeFitOnly: Bool = false
+    /// Uniform scale on the derived spacing.
+    public var organicScale: Double = 1.0
+    /// ★ FLARE OVERHANGS FOR PRINTING (core `organic_overhang_fillet`, maintainer
+    /// wire-up 2026-09-05): ON (core's default, absent in the job) re-emits every span
+    /// over open air as a 45° fillet up to 2.5× the bead so it prints; OFF leaves the
+    /// struts exactly as traced/grown and core reports the unsupported runs. Written
+    /// only when false, only for organic, only when core's schema accepts the key.
+    public var organicOverhangFillet: Bool = true
+    /// ★ SYNTHETIC STRESSES ON UNLOADED WALLS (maintainer, 2026-09-05; Aesthetic
+    /// mode only). A wall that carries no stress whatsoever has no field to trace;
+    /// with this on, every such wall gets a synthetic focal load — `organicSyntheticFoci`
+    /// foci unless the wall states its own count in Selections
+    /// (`selectableSyntheticFoci`, keyed like the role and the depth, 1…5).
+    public var organicSyntheticStresses: Bool = false
+    /// The count an unloaded wall gets when it states none — 4, core's measured recipe.
+    public var organicSyntheticFoci: Int = 4
+    public var selectableSyntheticFoci: [String: Int] = [:]
+    /// ★ PR 355 keys (2026-09-06): grown-path transfer ties and their swirl, the solid
+    /// rim inside the outline (−1 = one base cell), and the Aesthetic LOOK target for
+    /// the size recommendation (cells the eye reads across the shortest face).
+    public var organicTransferTies: Bool = true
+    public var organicTieSwirl: Double = 1.0
+    public var organicSolidRimMM: Double = -1
+    public var organicLookCellsAcross: Int = 8
+    public static let organicRecommendSteps = 5
+    public static let organicRecommendMargin = 1.5
+    /// ★ THE LAST BAKE'S MEASUREMENT per wall: median von Mises as a fraction of the
+    /// field's peak. A cache of a measurement, not a choice — it decides which walls
+    /// may take foci (below `OrganicSyntheticStress.deadFraction`) and which regions
+    /// the job marks `synthetic_stress`. Absent ⇒ unmeasured.
+    public var selectableWallStressFraction: [String: Double] = [:]
+    public static let organicSyntheticFociRange = OrganicSyntheticStress.fociRange
+    /// ★ THE ORGANIC CELL-SIZE PROBE'S LAST ANSWER (contract 2026-09-05), stored so
+    /// the wizard's Manual list can offer it; nil until core writes the block.
+    public var organicForecast: OrganicForecast? = nil
+    /// The window presets "Check sizes" probes (the contract's example set); the
+    /// user's current pick is added to them. Sent only for organic, only when the
+    /// linked core's schema accepts the keys.
+    public static let organicProbeCellsMM: [Double] = [3.5, 4.5, 5.5, 6.5]
+    public static let organicProbeGradesMM: [[Double]] = [[3, 5], [4.5, 5.5]]
+    /// ★ THE SEPARATIONS CERTIFICATION FOUND (maintainer, 2026-09-03): after a run,
+    /// core's receipt lists the separations that certified (`fitting_separations_mm`,
+    /// D2); they are stored here so Settings can show them as the factored choices,
+    /// and the pop-up can offer them. Empty until a run's receipt carries them.
+    public var organicFittingSeparationsMM: [Double] = []
+    /// The user's pick among those (0 ⇒ none picked; core chooses under Fit). Travels
+    /// as `organic_separation_mm` the day core's schema accepts that key — gated in
+    /// `gradingDictionary()` like every organic key, never sent to a core that refuses.
+    public var organicPickedSeparationMM: Double = 0
+    /// ★ THE GRADES CERTIFICATION APPROVES (maintainer, 2026-09-03, item 3.1): with the
+    /// simulation on, a Manual pick among the windows core reports as certifying —
+    /// each `[lo, hi]` in mm. Core does not report them yet (receipt key
+    /// `fitting_windows_mm`, pending); empty until it does, and the pane says so.
+    public var organicApprovedGradesMM: [[Double]] = []
+    /// The user's picked grade (empty ⇒ none). Travels as `organic_window_mm` once
+    /// core's schema accepts that key — probe-gated like every organic key.
+    public var organicPickedGradeMM: [Double] = []
+
+    /// ★ THE MANUAL SIZE LADDER (maintainer, 2026-09-03, item 3): with the simulation
+    /// off, "Manual" offers the approved sizes; under an Aesthetic stage every size
+    /// is offered, and one not in the approved set carries a "*" — it may leave the
+    /// lattice unrooted (over 5 % of its length not tied to the part — one piece is not
+    /// the bar). The ladder is the app's; the approval is core's.
+    public static let organicManualSizeLadderMM: [Double] = [2, 3, 4, 5, 6, 8, 10]
+
+    /// Is organic the chosen algorithm? Asked of the RESOLVED name, so "not stated"
+    /// (which core resolves to doubled) is correctly not organic.
+    public var isOrganic: Bool { resolvedAlgorithm == "organic" }
+
+    /// ★★★ WHY GROWTH IS UNAVAILABLE — nil when it can be offered.
+    ///
+    /// The layer height travels in the job's `loads` block and is always written, so
+    /// "stated" means a real number: a 0 reaches core as a stated zero and growth's
+    /// support question has no discretisation to ask in. The UI disables the control
+    /// and shows this, rather than letting the user arm a job that dies at parse.
+    public func organicGrowthRefusalReason(layerHeightMM: Double) -> String? {
+        Self.organicGrowthRefusalReason(layerHeightMM: layerHeightMM)
+    }
+    /// The same answer with no settings in hand — the wizard asks it of a draft.
+    public static func organicGrowthRefusalReason(layerHeightMM: Double) -> String? {
+        if !TopOptKit.gradingSchemaAccepts(key: "organic_growth") {
+            return "This build's core does not carry the grown organic lattice."
+        }
+        if !(layerHeightMM > 0) {
+            return "Grown organic lays the lattice down one printed layer at a time, "
+                 + "so it needs the layer height. Set it in Print Parameters."
+        }
+        return nil
+    }
+
+    /// ★ IS THE OVERHANG CONTROL LIVE? Grown clamps to a compile-time constant no job
+    /// key reaches, so offering the slider there is a dead knob.
+    public var organicOverhangIsLive: Bool { isOrganic && !organicGrowth }
+
+    public static let defaultShapeFitBandCells: Double = 1
     public var cellSizeMode: LatticeCellSizeMode
     /// The sweep window's ends (mm), used only in `.swept`. Stored as the user's raw
     /// pick; the lower end is clamped to CORE's printability floor at use
     /// (`LatticeBounds.cellFloorMM`), never to a number written here.
     public var cellMinMM: Double
     public var cellMaxMM: Double
+    /// ★★★ HOW WIDE THE SHAPE-FIT GRADE IS, IN CELLS (his request, 2026-08-23: *"under
+    /// the grading selection, include a slider/numeric input that sets a rim band that
+    /// lets the user change how much of a gradient there is to fit the shape"*).
+    ///
+    /// The lattice already subdivides wherever a cell will not FIT inside the face's
+    /// outline — that part is geometry and is not negotiable. This is the band on TOP of
+    /// it: within `shapeFitBandMM` cells of the outline the lattice steps down a
+    /// further level, so the grade reads as deliberate rather than only where the
+    /// geometry forces it.
+    ///
+    /// MILLIMETRES in from the outline. 0 ⇒ fit only, no extra band (the strict
+    /// geometric answer).
+    public var shapeFitBandMM: Double
     /// The density RANGE the lattice grades between (relative density, dimensionless).
     /// Stored as the user's raw pick; CLAMPED to the core band [rhoMin, rhoMax] at use
     /// (`LatticeBounds`). The neutral open defaults (0…1) carry no band number.
@@ -458,6 +1121,20 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
     /// is the LEGACY store (kept for old snapshots + the region gizmo plumbing).
     public var includePrimitives: [ManualPrimitive]
     /// Boundary treatment (three-way; maps 1:1 onto `job.lattice.skin`, bar B7).
+    /// ★ THE OUTER SURFACE UNDER ORGANIC — "the shape to fit does not include an
+    /// outline and is ONLY lattice" (maintainer, 2026-09-03). Core's default
+    /// `outer_finish` is a SOLID SHELL, which is an outline, so an organic job writes
+    /// the bare surface ("skin") unless the user picked Covered. A bare surface is
+    /// only schema-legal with `skin: "diagrid"` (job.cpp: "the diagrid IS the outer
+    /// finish that replaces or dresses the shell"); on the organic path core never
+    /// hands that skin spec to the generator (run_job.cpp: `generate_organic_lattice(
+    /// *organic, w, &boundary, …)` takes no `skin`), so the key unlocks the bare
+    /// surface and draws nothing — the organic surface is `organic_boundary_finish`
+    /// alone, and the wizard sets that to "clean". Non-organic jobs: byte-identical.
+    public var jobOuterFinishResolved: String? {
+        isOrganic ? (boundary == .covered ? "shell" : "skin") : boundary.jobOuterFinish
+    }
+    public var jobSkinResolved: String { isOrganic ? "diagrid" : boundary.jobSkinValue }
     public var boundary: LatticeBoundaryTreatment
     /// Density mode (uniform run fill vs field-graded preview, bar B6).
     public var densityMode: LatticeDensityMode
@@ -488,6 +1165,56 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
     /// every existing project's lattice.
     public var simulateStresses: Bool
 
+    /// ★★ THE MANUAL STRUT THICKNESS, in mm (maintainer, 2026-08-19: "there should
+    /// also be a way to manually override the sim's thickness control to whatever
+    /// the user sets. Please make it so there is an on/off switch that turns on
+    /// the Sim control. Off makes a sliding number value visible; controlling the
+    /// thickness of the cell on screen").
+    ///
+    /// `nil` ⇒ derived, which is every project written before this and every
+    /// project with `simulateStresses` on.
+    ///
+    /// ★ IT IS A THICKNESS, STORED AS A THICKNESS, BUT IT DOES NOT BECOME A
+    /// SECOND SOURCE OF TRUTH. The renderer grades from relative DENSITY and
+    /// nothing else; a strut radius is `L·√(ρ/K)` and that map is invertible
+    /// (`LatticeType.relativeDensity(strutRadiusMM:cellMM:)`). So the slider's
+    /// millimetres are converted to the density that produces them and the band
+    /// is pinned there. One mechanism, two ways of typing into it — rather than a
+    /// thickness path and a density path that can disagree.
+    public var manualStrutThicknessMM: Double? = nil
+
+    /// ★ THE RANGE THE THICKNESS SLIDER MAY OFFER, in mm of strut DIAMETER.
+    ///
+    /// The bottom is one extruded bead — thinner cannot be printed. The top is the
+    /// thickness at the certifiable density ceiling, `2·L·√(ρmax/K)`: past it the
+    /// struts have merged into something core will not certify as this lattice.
+    /// Both ends therefore come from the same two laws the rest of this file uses,
+    /// so the slider cannot offer a value the run would refuse.
+    public func manualThicknessRangeMM(limits: TopOptKit.LatticeLimits,
+                                       lineWidthMM: Double) -> ClosedRange<Double> {
+        let lo = Swift.max(0.05, lineWidthMM > 0 ? lineWidthMM : 0.4)
+        let rhoMax = limits.certifiable && limits.rhoMax > 0 ? limits.rhoMax : 0.9
+        let hi = Swift.max(lo + 0.05, 2 * lattice.strutRadiusMM(relativeDensity: rhoMax,
+                                                                cellMM: cellMM))
+        return lo...hi
+    }
+
+    /// The relative density a hand-set strut thickness produces at this cell —
+    /// or nil when the thickness is not in play (the sim is on, or none is set).
+    ///
+    /// ★ CLAMPED TO THE PRINTABLE FLOOR AND THE CERTIFIABLE CEILING, because a
+    /// slider that can ask for a strut the printer cannot lay is a slider that
+    /// produces a refused run. The floor is `lineWidth/2` expressed as a density
+    /// (see `LatticeType.printabilityDensityFloor`), which is exactly where the
+    /// slider's own minimum sits, so the clamp only ever bites on a stale value.
+    public func manualThicknessDensity(limits: TopOptKit.LatticeLimits) -> Double? {
+        guard !simulateStresses, let mm = manualStrutThicknessMM, mm > 0 else { return nil }
+        let rho = lattice.relativeDensity(strutRadiusMM: mm / 2, cellMM: cellMM)
+        let floor = lattice.printabilityDensityFloor(lineWidthMM: 0, cellMM: cellMM)
+        let hi = limits.certifiable && limits.rhoMax > 0 ? limits.rhoMax : 1
+        return Swift.max(Swift.max(0.0001, floor), Swift.min(hi, rho))
+    }
+
     /// ★ THE DEMAND⇢DENSITY CURVE'S EXPONENT — core's `grading.demand_exponent`.
     ///
     ///     rho = rho_hi · (demand / demand_max) ^ gamma
@@ -511,14 +1238,23 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         if densityMode.needsSimulation { densityMode = .uniform }
         // Cell size: `swept` IS the stress-graded cell ladder.
         if cellSizeMode == .swept { cellSizeMode = .fixed }
+        // ★ ORGANIC IS UNTOUCHED BY THIS SWITCH (2026-09-04, measured): core's run
+        // traces its OWN solved field for organic whatever the app simulated
+        // (run_job.cpp `run_organic_step(... v.stress_tensor_field ...)`), and Auto is
+        // core's FEA-derived window, not the app's. Forcing Fit here (2026-09-03,
+        // item 3) made the sample show a one-separation lattice the run never
+        // builds. What the switch still governs for organic is the DENSITY preview
+        // (`.sim` ⇒ `.uniform` above).
     }
 
     /// ★ WHETHER A SOLVE IS ACTUALLY NEEDED — the permission AND at least one
     /// axis taking it up. The switch being on with every axis pinned by hand is
     /// a legitimate state, and it needs no FEA.
     public var needsStressSolve: Bool {
+        // ★ ORGANIC TRACES THE FIELD (2026-09-05): the part preview has nothing to
+        // trace without the stage's tensor, whatever the density mode says.
         simulateStresses
-            && (densityMode.needsSimulation || cellSizeMode == .swept)
+            && (densityMode.needsSimulation || cellSizeMode == .swept || isOrganic)
     }
     /// Faces painted "Material, latticed" (lattice-include). Preview-scope legacy
     /// store (the unified library's group roles are the carrier now). The EXCLUDE
@@ -620,8 +1356,60 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
     public var subfloorStressFraction: Double?
     /// Decide region by region rather than over the union of them.
     public var subfloorPerRegion: Bool
+
+    /// ★★★ "ALLOW SINGLE-CELL MEMBERS" (maintainer, 2026-08-22: "I'd much rather a
+    /// specific button to set that allows for a singular cell/member which
+    /// automatically requires finish=skin").
+    ///
+    /// ★ WHY IT IS ITS OWN SWITCH AND NOT A CONSEQUENCE OF THE FINISH. Core lets the
+    /// aesthetic floor reach ONE cell only where a boundary finish re-ties the struts a
+    /// one-cell-wide member severs — so a finish is REQUIRED. But it is not SUFFICIENT
+    /// as a signal: a user picks a finish because they want the look, and acquiring a
+    /// structural relaxation as a side effect of a cosmetic choice is the "the picture
+    /// changed and nothing said so" failure this branch keeps paying down. One cell
+    /// across a member is a real reduction in what the lattice claims; it should be
+    /// asked for.
+    ///
+    /// ★ AND TURNING IT ON WRITES THE FINISH. The dependency is real and one-way, so
+    /// the switch satisfies it rather than refusing and making the user go find it —
+    /// `none` and `rim` cannot re-tie a severed strut, and Skin is the pattern core
+    /// builds. Turning it OFF leaves the finish alone: he may well want the skin for
+    /// its own sake.
+    /// ★★★ AND IN THE PREVIEW IT NEEDS NO FINISH (2026-08-26).
+    ///
+    /// Every preview call site used to gate core's one-cell floor on
+    /// `singleCellMembers && boundary != .none`, because core will only allow one
+    /// cell across a member when a finish re-ties the struts a one-cell member
+    /// severs. The effect on screen was that setting **Finish = None** silently
+    /// halved every cell on the part — his 12.03 mm wall came back at 6.00 mm and
+    /// his 10.31 mm wall at 5.16 mm, twice as many cells each carrying a one-bead
+    /// strut — with nothing in the UI saying the toggle had been overruled. Those
+    /// are exactly the two numbers his tap callouts kept reporting while he was
+    /// calling the wall quilted.
+    ///
+    /// His rule, stated 2026-08-26, carries no such caveat: *"single-cell/member
+    /// means make the largest single cell across the entire model — per voxel."*
+    /// And on the same day: *"The algo has not been updated with the needs I've
+    /// created in this UI so for now, you can't just pass the algo onto the
+    /// preview."* So the PREVIEW honours the toggle as written. Core's own floor is
+    /// unchanged — this property is read by the preview's four call sites only, and
+    /// the job still asks core.
+    public var singleCellMembers: Bool = false
     /// Ask the run for the per-region breakdown in its receipt.
     public var reportRegionCells: Bool
+
+    /// ★ THE GRADING OPTIONS (2026-08-25). `.full` is every existing project's
+    /// behaviour; absent from every older snapshot ⇒ decodes to `.full`.
+    public var gradingMode: LatticeGradingMode = .full
+    /// How the fit-shape grade steps — stepped divisors or dyadic halving.
+    public var gradeStepStyle: LatticeGradeStepStyle = .stepped
+    /// ★ THE PER-FACE CELL (mm), stated by the user — the dial the two new
+    /// grading modes expose ("include a cell size value above density").
+    /// Keyed by `LatticeSelectableRef.key`, like the density beside it. Absent
+    /// ⇒ derived, and the key is not stored at all. Never a licence to
+    /// overshoot: the bake still caps every cell at min(declared depth, its
+    /// own wall).
+    public var selectableCellMM: [String: Double] = [:]
 
     /// ★ THE ENCLOSED-VOID RULE — the OFF control (task
     /// 2026-08-06-arm-projection-and-void-check, S2c). DEFAULT TRUE, matching
@@ -690,6 +1478,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
                 cellSizeMode: LatticeCellSizeMode = .auto,
                 cellMinMM: Double = LatticeSettings.defaultCellMinMM,
                 cellMaxMM: Double = LatticeSettings.defaultCellMaxMM,
+                shapeFitBandMM: Double = LatticeSettings.defaultShapeFitBandCells,
                 minRelativeDensity: Double = 0, maxRelativeDensity: Double = 1,
                 region: ManualPrimitive? = nil,
                 includePrimitives: [ManualPrimitive] = [],
@@ -740,6 +1529,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         self.cellMM = cellMM
         self.cellSizeMode = cellSizeMode
         self.cellMinMM = cellMinMM
+        self.shapeFitBandMM = shapeFitBandMM
         self.cellMaxMM = cellMaxMM
         self.minRelativeDensity = minRelativeDensity
         self.maxRelativeDensity = maxRelativeDensity
@@ -766,6 +1556,9 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
     // guards the older layer of the same rule).
     private enum CodingKeys: String, CodingKey {
         case enabled, topologyID, cellMM, minRelativeDensity, maxRelativeDensity
+        case stageMode                  // Structural / Aesthetic — chosen once (nil ⇒ unasked)
+        case algorithm                  // core's LatticeAlgorithm name ("" ⇒ not stated)
+        case manualStrutThicknessMM      // the hand-set thickness (nil ⇒ derived)
         case region                     // legacy single-region snapshots
         case includePrimitives, boundary, densityMode, paintedIncludeFaces, paintDepthMM
         case groupRoles
@@ -779,18 +1572,34 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         case selectableExpandMM
         case primitiveRoles, primitiveDepthMM     // legacy names, decode only
         case cellSizeMode, cellMinMM, cellMaxMM   // cell-size sweep (bar R6)
+        // ★ Absent from every older snapshot ⇒ decodes to its default, so an existing
+        // project keeps the grade it has always had.
+        case shapeFitBandMM
         // ★ The Sim permission (2026-08-17). Absent from every older
         // snapshot ⇒ decodes to its TRUE default ⇒ an existing project
         // keeps asking for the solve it has always asked for.
         case simulateStresses
         // sub-floor retention (task 2026-08-05-lattice-retention-app-control)
-        case retainSubfloorInUnloadedRegions, subfloorStressFraction
+        case retainSubfloorInUnloadedRegions, subfloorStressFraction, singleCellMembers
         case subfloorPerRegion, reportRegionCells
         // the enclosed-void rule's OFF control
         // (task 2026-08-06-arm-projection-and-void-check)
         case requireVoidReachesExterior
         // the per-region lattice density (task 2026-08-13-lattice-as-a-material)
         case frozenRegionDensity
+        // the grading options (2026-08-25) — absent ⇒ full / stepped / none stated
+        case gradingMode, gradeStepStyle, selectableCellMM
+        // ★ ORGANIC (2026-09-02). Absent from every earlier snapshot ⇒ each decodes to
+        // its own default ⇒ an existing project emits exactly the job it always has.
+        case organicGrowth, organicStrutWidthMM, organicOverhangDeg
+        case organicBoundaryFinish, organicShapeFit, organicShapeFitOnly, organicScale
+        case organicFittingSeparationsMM, organicPickedSeparationMM
+        case organicOverhangFillet
+        case organicApprovedGradesMM, organicPickedGradeMM
+        case organicSyntheticStresses, organicSyntheticFoci, selectableSyntheticFoci
+        case selectableWallStressFraction
+        case organicTransferTies, organicTieSwirl, organicSolidRimMM, organicLookCellsAcross
+        case organicForecast
     }
 
     public init(from decoder: Decoder) throws {
@@ -798,10 +1607,46 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         enabled = try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? false
         topologyID = try c.decodeIfPresent(String.self, forKey: .topologyID) ?? LatticeType.octet.id
         cellMM = try c.decodeIfPresent(Double.self, forKey: .cellMM) ?? LatticeSettings.defaultCellMM
+        // ★ ABSENT ⇒ NOT YET ASKED. A pre-mode snapshot must reopen the modal rather
+        // than inherit a mode nobody chose — the choice decides what the receipt claims.
+        stageMode = try c.decodeIfPresent(LatticeStageMode.self, forKey: .stageMode)
+        // Absent in every project saved before the selector existed, and "" is exactly
+        // what those projects mean: not stated, so core takes doubled.
+        algorithm = try c.decodeIfPresent(String.self, forKey: .algorithm) ?? ""
+        // ★ ORGANIC — absent in every snapshot written before these existed, and each
+        // default is CORE's own, so a project that never chose organic decodes to the
+        // state that writes no organic_* key at all.
+        organicGrowth = try c.decodeIfPresent(Bool.self, forKey: .organicGrowth) ?? false
+        organicStrutWidthMM = try c.decodeIfPresent(Double.self, forKey: .organicStrutWidthMM) ?? 0
+        organicOverhangDeg = try c.decodeIfPresent(Double.self, forKey: .organicOverhangDeg) ?? 0
+        organicBoundaryFinish = try c.decodeIfPresent(
+            LatticeOrganicFinish.self, forKey: .organicBoundaryFinish) ?? .skin
+        organicShapeFit = try c.decodeIfPresent(Bool.self, forKey: .organicShapeFit) ?? false
+        organicShapeFitOnly = try c.decodeIfPresent(Bool.self, forKey: .organicShapeFitOnly) ?? false
+        organicScale = try c.decodeIfPresent(Double.self, forKey: .organicScale) ?? 1.0
+        organicFittingSeparationsMM = try c.decodeIfPresent([Double].self, forKey: .organicFittingSeparationsMM) ?? []
+        organicPickedSeparationMM = try c.decodeIfPresent(Double.self, forKey: .organicPickedSeparationMM) ?? 0
+        organicOverhangFillet = try c.decodeIfPresent(Bool.self, forKey: .organicOverhangFillet) ?? true
+        // Absent from every earlier snapshot ⇒ off ⇒ the job it always emitted.
+        organicSyntheticStresses = try c.decodeIfPresent(Bool.self, forKey: .organicSyntheticStresses) ?? false
+        organicSyntheticFoci = OrganicSyntheticStress.clampFoci(
+            try c.decodeIfPresent(Int.self, forKey: .organicSyntheticFoci) ?? 4)
+        selectableSyntheticFoci = (try c.decodeIfPresent([String: Int].self, forKey: .selectableSyntheticFoci) ?? [:])
+            .filter { OrganicSyntheticStress.fociRange.contains($0.value) }
+        selectableWallStressFraction = try c.decodeIfPresent([String: Double].self, forKey: .selectableWallStressFraction) ?? [:]
+        organicTransferTies = try c.decodeIfPresent(Bool.self, forKey: .organicTransferTies) ?? true
+        organicTieSwirl = try c.decodeIfPresent(Double.self, forKey: .organicTieSwirl) ?? 1.0
+        organicSolidRimMM = try c.decodeIfPresent(Double.self, forKey: .organicSolidRimMM) ?? -1
+        organicLookCellsAcross = try c.decodeIfPresent(Int.self, forKey: .organicLookCellsAcross) ?? 8
+        organicForecast = try c.decodeIfPresent(OrganicForecast.self, forKey: .organicForecast)
+        organicApprovedGradesMM = try c.decodeIfPresent([[Double]].self, forKey: .organicApprovedGradesMM) ?? []
+        organicPickedGradeMM = try c.decodeIfPresent([Double].self, forKey: .organicPickedGradeMM) ?? []
         // Absent from every pre-R6 snapshot ⇒ `.fixed` ⇒ those projects keep emitting
         // exactly the job they emitted before (bar R1).
         cellSizeMode = try c.decodeIfPresent(LatticeCellSizeMode.self, forKey: .cellSizeMode) ?? .fixed
         cellMinMM = try c.decodeIfPresent(Double.self, forKey: .cellMinMM) ?? LatticeSettings.defaultCellMinMM
+        shapeFitBandMM = try c.decodeIfPresent(Double.self, forKey: .shapeFitBandMM)
+            ?? LatticeSettings.defaultShapeFitBandCells
         cellMaxMM = try c.decodeIfPresent(Double.self, forKey: .cellMaxMM) ?? LatticeSettings.defaultCellMaxMM
         minRelativeDensity = try c.decodeIfPresent(Double.self, forKey: .minRelativeDensity) ?? 0
         maxRelativeDensity = try c.decodeIfPresent(Double.self, forKey: .maxRelativeDensity) ?? 1
@@ -826,6 +1671,10 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         // so those projects have always been asking for a solve. Defaulting
         // false here would silently change every one of their lattices.
         simulateStresses = try c.decodeIfPresent(Bool.self, forKey: .simulateStresses) ?? true
+        // ★ ABSENT ⇒ DERIVED, so every project written before the control existed
+        // decodes to exactly the behaviour it had.
+        manualStrutThicknessMM = try c.decodeIfPresent(Double.self,
+                                                       forKey: .manualStrutThicknessMM)
         paintedIncludeFaces = try c.decodeIfPresent([Int].self, forKey: .paintedIncludeFaces) ?? []
         paintDepthMM = try c.decodeIfPresent(Double.self, forKey: .paintDepthMM) ?? 4
         groupRoles = try c.decodeIfPresent([UUID: LatticeGroupRole].self, forKey: .groupRoles) ?? [:]
@@ -866,6 +1715,8 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         subfloorStressFraction = try c.decodeIfPresent(
             Double.self, forKey: .subfloorStressFraction)
         subfloorPerRegion = try c.decodeIfPresent(Bool.self, forKey: .subfloorPerRegion) ?? false
+        // Absent from every older snapshot ⇒ off ⇒ core's floor of 2, unchanged.
+        singleCellMembers = try c.decodeIfPresent(Bool.self, forKey: .singleCellMembers) ?? false
         reportRegionCells = try c.decodeIfPresent(Bool.self, forKey: .reportRegionCells) ?? false
         // ★ nil → TRUE, and the asymmetry with the four lines above is the point.
         // Those decode to "off" because absent meant off when they were written.
@@ -874,6 +1725,14 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         // existing project out of a rule the maintainer turned on, silently.
         requireVoidReachesExterior = try c.decodeIfPresent(
             Bool.self, forKey: .requireVoidReachesExterior) ?? true
+        // Absent from every older snapshot ⇒ `.full` / `.stepped` / nothing
+        // stated ⇒ existing projects keep the behaviour they have always had.
+        gradingMode = try c.decodeIfPresent(LatticeGradingMode.self,
+                                            forKey: .gradingMode) ?? .full
+        gradeStepStyle = try c.decodeIfPresent(LatticeGradeStepStyle.self,
+                                               forKey: .gradeStepStyle) ?? .stepped
+        selectableCellMM = try c.decodeIfPresent([String: Double].self,
+                                                 forKey: .selectableCellMM) ?? [:]
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -881,8 +1740,48 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         try c.encode(enabled, forKey: .enabled)
         try c.encode(topologyID, forKey: .topologyID)
         try c.encode(cellMM, forKey: .cellMM)
+        // ★ ORGANIC — written ALWAYS, decoded with defaults: a snapshot round-trips even
+        // when the user left a key at core's default. (The job document is where
+        // defaults are omitted; the snapshot is not the job.)
+        try c.encode(organicGrowth, forKey: .organicGrowth)
+        try c.encode(organicStrutWidthMM, forKey: .organicStrutWidthMM)
+        try c.encode(organicOverhangDeg, forKey: .organicOverhangDeg)
+        try c.encode(organicBoundaryFinish, forKey: .organicBoundaryFinish)
+        try c.encode(organicShapeFit, forKey: .organicShapeFit)
+        try c.encode(organicOverhangFillet, forKey: .organicOverhangFillet)
+        try c.encode(organicSyntheticStresses, forKey: .organicSyntheticStresses)
+        try c.encode(organicSyntheticFoci, forKey: .organicSyntheticFoci)
+        try c.encode(selectableSyntheticFoci, forKey: .selectableSyntheticFoci)
+        try c.encode(organicTransferTies, forKey: .organicTransferTies)
+        try c.encode(organicTieSwirl, forKey: .organicTieSwirl)
+        try c.encode(organicSolidRimMM, forKey: .organicSolidRimMM)
+        try c.encode(organicLookCellsAcross, forKey: .organicLookCellsAcross)
+        if !selectableWallStressFraction.isEmpty {
+            try c.encode(selectableWallStressFraction, forKey: .selectableWallStressFraction)
+        }
+        try c.encodeIfPresent(organicForecast, forKey: .organicForecast)
+        try c.encode(organicShapeFitOnly, forKey: .organicShapeFitOnly)
+        try c.encode(organicScale, forKey: .organicScale)
+        // Written only when set, so an untouched project's file is byte-identical.
+        if !organicFittingSeparationsMM.isEmpty {
+            try c.encode(organicFittingSeparationsMM, forKey: .organicFittingSeparationsMM)
+        }
+        if !organicApprovedGradesMM.isEmpty {
+            try c.encode(organicApprovedGradesMM, forKey: .organicApprovedGradesMM)
+        }
+        if !organicPickedGradeMM.isEmpty {
+            try c.encode(organicPickedGradeMM, forKey: .organicPickedGradeMM)
+        }
+        if organicPickedSeparationMM > 0 {
+            try c.encode(organicPickedSeparationMM, forKey: .organicPickedSeparationMM)
+        }
+        try c.encodeIfPresent(stageMode, forKey: .stageMode)
+        // Written only when stated, so an untouched project's file is byte-identical
+        // to one saved before the selector existed (bar U1).
+        if !algorithm.isEmpty { try c.encode(algorithm, forKey: .algorithm) }
         try c.encode(cellSizeMode, forKey: .cellSizeMode)
         try c.encode(cellMinMM, forKey: .cellMinMM)
+        try c.encode(shapeFitBandMM, forKey: .shapeFitBandMM)
         try c.encode(cellMaxMM, forKey: .cellMaxMM)
         try c.encode(minRelativeDensity, forKey: .minRelativeDensity)
         try c.encode(maxRelativeDensity, forKey: .maxRelativeDensity)
@@ -890,6 +1789,8 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         try c.encode(boundary, forKey: .boundary)
         try c.encode(densityMode, forKey: .densityMode)
         try c.encode(simulateStresses, forKey: .simulateStresses)
+        // Encoded only when set — an untouched project's bytes do not move.
+        try c.encodeIfPresent(manualStrutThicknessMM, forKey: .manualStrutThicknessMM)
         try c.encode(paintedIncludeFaces, forKey: .paintedIncludeFaces)
         try c.encode(paintDepthMM, forKey: .paintDepthMM)
         try c.encode(groupRoles, forKey: .groupRoles)
@@ -902,6 +1803,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         try c.encode(selectableExpandMM, forKey: .selectableExpandMM)
         try c.encode(retainSubfloorInUnloadedRegions,
                      forKey: .retainSubfloorInUnloadedRegions)
+        try c.encode(singleCellMembers, forKey: .singleCellMembers)
         // encodeIfPresent: "the user has not moved it" must round-trip as ABSENT,
         // not as core's number written into the project — the whole point of the
         // nil is that the app never becomes the author of that constant.
@@ -909,6 +1811,14 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         try c.encode(subfloorPerRegion, forKey: .subfloorPerRegion)
         try c.encode(reportRegionCells, forKey: .reportRegionCells)
         try c.encode(requireVoidReachesExterior, forKey: .requireVoidReachesExterior)
+        // Written only when moved off the default, so an untouched project's
+        // bytes do not move (bar U1).
+        if gradingMode != .full { try c.encode(gradingMode, forKey: .gradingMode) }
+        if gradeStepStyle != .stepped {
+            try c.encode(gradeStepStyle, forKey: .gradeStepStyle)        }
+        if !selectableCellMM.isEmpty {
+            try c.encode(selectableCellMM, forKey: .selectableCellMM)
+        }
     }
 
     /// The starting cell size (mm): the octet cell PR-201 print-tested, reused from the
@@ -921,6 +1831,67 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
     /// floor, applied by `LatticeBounds.compute` (`cellFloorMM`).
     public static let defaultCellMinMM: Double = 4
     public static let defaultCellMaxMM: Double = 8
+
+    /// ★★ WHAT "AUTO" ACTUALLY MEANS NOW (maintainer, 2026-08-19: "Cell size =
+    /// Auto should absolutely be *any* number - as needed based on the stress map,
+    /// not just a single cell size. Swept should limit it to a smaller range but
+    /// still automatically selected based on the sim, and only *manual* should
+    /// force a single number through the entire lattice").
+    ///
+    /// ★ CORE'S OWN `auto` IS ONE UNIFORM CELL, and says so in a throw:
+    /// `plan_cell_sizes` refuses any mode but `Swept` — "the Fixed and Auto paths
+    /// are one uniform cell and stay in grade_lattice" (core/src/simp/
+    /// cell_plan.cpp:114). So the app's Auto cannot be core's auto and mean what
+    /// he asked for.
+    ///
+    /// ★ BUT CORE ALREADY GRADES, under `swept`: a dyadic ladder `S0·2^L`, and a
+    /// block takes the COARSEST level printability asks for, bounded by the
+    /// cells-per-member ceiling. That is precisely "coarse where there is no
+    /// stress" — low stress ⇒ low density ⇒ thin strut ⇒ unprintable at a fine
+    /// cell ⇒ the plan coarsens until it prints. Auto therefore maps onto SWEPT
+    /// with a window the app derives, and no new grading law is invented.
+    ///
+    /// ★ AND THE OBJECTIVE PICKS THE WINDOW (maintainer: "If 'minimize_plastic'
+    /// is on, then the goal of the lattice should be to minimize the amount of
+    /// plastic used, meaning cells as large as possible and as least dense as
+    /// possible … If minimize_plastic is off then the goal is to make it as strong
+    /// as possible"):
+    ///
+    ///   minimize plastic ON  → the full ladder, floor … the coarsest cell that
+    ///                          still certifies. The plan then coarsens wherever
+    ///                          the stress permits, which is where the material is
+    ///                          saved.
+    ///   minimize plastic OFF → a degenerate window at the FLOOR: the finest
+    ///                          printable cell everywhere, with density still
+    ///                          graded from the stress.
+    public struct ResolvedCellPlan: Equatable, Sendable {
+        public let mode: LatticeCellSizeMode
+        public let loMM: Double
+        public let hiMM: Double
+    }
+
+    public func resolvedCellPlan(bounds b: LatticeBounds,
+                                 minimizePlastic: Bool) -> ResolvedCellPlan {
+        let floor = LatticeCellEntry.entryFloorMM(b)
+        switch cellSizeMode {
+        case .fixed, .fit:
+            return .init(mode: cellSizeMode, loMM: 0, hiMM: 0)
+        case .swept:
+            let lo = Swift.max(cellMinMM, floor)
+            return .init(mode: .swept, loMM: lo, hiMM: Swift.max(cellMaxMM, lo))
+        case .auto:
+            // ★ THE COARSE END. The cells-per-member ceiling is the honest cap when
+            // core has certified one; without it, three dyadic levels (8×) is the
+            // ladder a sweep can actually use before the cell outgrows any real
+            // member. Never below the floor.
+            let lo = floor
+            guard minimizePlastic else {
+                return .init(mode: .swept, loMM: lo, hiMM: lo)
+            }
+            let ceiling = b.cellCeilingMM ?? (lo * 8)
+            return .init(mode: .swept, loMM: lo, hiMM: Swift.max(lo, ceiling))
+        }
+    }
 
     /// The resolved topology (never nil — an unknown id falls back to octet, matching
     /// `LatticeType.named`).
@@ -988,7 +1959,15 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
                         emit3MF: Bool = false,
                         regions: [LatticeRegionSpec] = [],
                         capability: LatticeRetentionCapability = .fromCore,
-                        cellModes: LatticeCellModeCapability = .fromCore)
+                        cellModes: LatticeCellModeCapability = .fromCore,
+                        // ★ THE OBJECTIVE SHAPES "AUTO" — see `resolvedCellPlan`.
+                        // Defaults to the app's own default so every existing call
+                        // site keeps the minimise-plastic behaviour it had.
+                        minimizePlastic: Bool = true,
+                        // ★ THE LAYER HEIGHT THE JOB WILL CARRY — only the growth
+                        // precondition reads it. Defaulted so every existing call site
+                        // is unchanged; a 0 here means growth is simply not written.
+                        layerHeightMM: Double = 0)
         -> LatticeSpec? {
         guard enabled else { return nil }
         let b = LatticeBounds.compute(settings: self, limits: limits,
@@ -1048,18 +2027,39 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
             // since. So the control accepted 2.0 mm and the emission threw it
             // away: two floors, two answers, one silent overwrite. There is one
             // floor now, and it is the one the control is bounded by.
-            let floor = LatticeCellEntry.entryFloorMM(b)
-            let lo = Swift.max(cellMinMM, floor)
-            let hi = Swift.max(cellMaxMM, lo)
+            // ★ THE ONE PLAN — see `resolvedCellPlan`. Auto is core's SWEPT with a
+            // window this app derives from the objective, because core's own
+            // `auto` is a single uniform cell and cannot grade.
+            let plan = resolvedCellPlan(bounds: b, minimizePlastic: minimizePlastic)
+            var lo = plan.loMM
+            var hi = plan.hiMM
             // Core refuses a non-positive ladder end, so a snapshot carrying one falls
             // back to the fixed cell rather than shipping a job the schema rejects.
             // FIT falls back the same way when the LINKED core does not carry the
             // value: an unknown cell_mode kills the whole job at validation, exactly
             // as an unknown grading key does, so a project snapshot saved against a
             // newer core degrades to the fixed cell instead of dying at the worker.
-            var mode: LatticeCellSizeMode = (cellSizeMode == .swept && !(lo > 0))
-                ? .fixed : cellSizeMode
+            var mode: LatticeCellSizeMode = (plan.mode == .swept && !(lo > 0))
+                ? .fixed : plan.mode
             if mode == .fit && !cellModes.fit { mode = .fixed }
+            // ★★ ORGANIC DOES NOT INHERIT THE OCTET'S WINDOW (reviewer, 2026-09-03).
+            // The plan above turns an Auto pick into the octet ladder's per-member
+            // SWEPT window. Measured on-device 2026-09-02: the project said
+            // `cellSizeMode: auto`, the pane lit "Auto · grade", and the organic job
+            // carried `cell_mode: swept, 5.5–6 mm`. For organic that window IS the
+            // separation field and the M2's cliff is unmeasured (the fixture
+            // fragmented at 5.5–6.0; only 4.0 gave one component). Until the maintainer
+            // picks a default, Auto travels as core's own `auto` — a single derived
+            // separation, stated as such — and only an EXPLICIT size or window is
+            // ever sent. The octet path is untouched (bar U1: byte-identical).
+            // ★★ D2 (maintainer, 2026-09-03): ORGANIC CELL MODES ARE AUTO AND FIT.
+            // AUTO travels as core's `auto` (core builds the FEA-driven window from
+            // the smallest fitting separation to the largest); FIT travels as core's
+            // `fit` (one separation, the middle of what fits). Nothing else is an
+            // organic mode: an inherited swept window or a fixed cell — and the fit
+            // fallbacks above, which degrade to FIXED for the octet — become AUTO here,
+            // never a size. No octet window reaches an organic job by this path.
+            // (the organic rule is applied once, AFTER every fallback — see below)
             // ★ FIT DERIVES FROM A DECLARED REGION, so core REFUSES the mode on a job
             // that declares none (job.cpp: "a job that declares none states no
             // requirement to fit"). Caught by this task's own schema test, which
@@ -1069,19 +2069,30 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
             if mode == .fit && !regions.contains(where: { $0.role == .include }) {
                 mode = .fixed
             }
+            // ★★ D2 (maintainer, 2026-09-03), applied ONCE after every fallback:
+            // ORGANIC CELL MODES ARE AUTO AND FIT. The user's Fit stays Fit — core's
+            // `fit` — and is NEVER substituted (ruling, Aug 5: offer, never substitute;
+            // the wizard disables Fit with its reason where no region is declared, and
+            // the run button refuses it). Anything else — an inherited swept window, a
+            // fixed cell, the octet's fit→FIXED fallbacks above — travels as Auto,
+            // core's `auto`, with no window and never a size.
+            if algorithm == "organic" {
+                mode = (cellSizeMode == .fit) ? .fit : .auto
+                lo = 0; hi = 0
+            }
             // Sub-floor retention rides the GRADED path only — the keys live in the
             // `grading` block, and a uniform lattice job has no grading block at
             // all, so there is nothing for core to read there. The control says so.
             // `mode` (not `cellSizeMode`) carries the fit exclusion, so a spec that
             // fell back to fixed can still arm retention.
             let sub = resolvedSubfloor(capability: capability, cellMode: mode)
-            return LatticeSpec(topologyID: topologyID, cellMM: cellMM, strutRadiusMM: 0,
+            var spec = LatticeSpec(topologyID: topologyID, cellMM: cellMM, strutRadiusMM: 0,
                                generateRelativeDensity: 0,
                                minRelativeDensity: b.densityLo,
                                maxRelativeDensity: b.densityHi,
                                emitSTL: emitSTL, emit3MF: emit3MF,
                                regionScoped: region != nil || !regions.isEmpty,
-                               skin: boundary.jobSkinValue,
+                               skin: jobSkinResolved,
                                minExtrudableWidthMM: lineWidthMM,
                                graded: true,
                                regions: regions,
@@ -1097,24 +2108,94 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
                                // keys need the probe because they were added to
                                // `grading` after some cores were built.
                                requireVoidReachesExterior: requireVoidReachesExterior)
+            spec.outerFinish = jobOuterFinishResolved
+            // ★ THE ALGORITHM RIDES THE GRADED SPEC. Carried as the raw string,
+            // including "" — `gradingDictionary` is the single place that decides
+            // whether a key is written, so "not stated" cannot become "doubled" here.
+            spec.algorithm = algorithm
+
+            // ★ ORGANIC — copied verbatim; `gradingDictionary()` owns every emission gate.
+            spec.organicGrowth = organicGrowth
+            spec.organicStrutWidthMM = organicStrutWidthMM
+            spec.organicOverhangDeg = organicOverhangDeg
+            spec.organicBoundaryFinish = organicBoundaryFinish.jobValue
+            spec.organicShapeFit = organicShapeFit
+            spec.organicShapeFitOnly = organicShapeFitOnly
+            spec.organicOverhangFillet = organicOverhangFillet
+            spec.organicSyntheticStresses = organicSyntheticStresses
+            spec.organicSyntheticFoci = organicSyntheticFoci
+            spec.organicTransferTies = organicTransferTies
+            spec.organicTieSwirl = organicTieSwirl
+            spec.organicSolidRimMM = organicSolidRimMM
+            spec.organicScale = organicScale
+            spec.organicPickedSeparationMM = organicPickedSeparationMM
+            spec.organicPickedGradeMM = organicPickedGradeMM
+            spec.layerHeightMM = layerHeightMM
+            spec.stageMode = stageMode
+            return spec
         }
         let genRho = b.generateRelativeDensity
         let radius = lattice.strutRadiusMM(relativeDensity: genRho, cellMM: cellMM)
         guard radius > 0 else { return nil }
-        return LatticeSpec(topologyID: topologyID, cellMM: cellMM, strutRadiusMM: radius,
+        var spec2 = LatticeSpec(topologyID: topologyID, cellMM: cellMM, strutRadiusMM: radius,
                            generateRelativeDensity: genRho,
                            minRelativeDensity: b.densityLo, maxRelativeDensity: b.densityHi,
                            emitSTL: emitSTL, emit3MF: emit3MF,
                            regionScoped: region != nil || !regions.isEmpty,
-                           skin: boundary.jobSkinValue,
+                           skin: jobSkinResolved,
                            minExtrudableWidthMM: lineWidthMM > 0 ? lineWidthMM : nil,
+                           // ★★ AN ORGANIC JOB ALWAYS CARRIES THE GRADING BLOCK. Its
+                           // algorithm, intent, mode and every organic_* key live there,
+                           // and `gradingDictionary()` returns nil for a non-graded spec —
+                           // measured 2026-09-03 (D2 test, uniform path): an organic job
+                           // under "Density: Auto/Thicker" carried NO grading block, so
+                           // core would have run the DEFAULT lattice in silence.
+                           graded: algorithm == "organic",
                            regions: regions,
+                           // ★ D2 ON THE UNIFORM PATH TOO: an organic job never carries
+                           // a fixed cell. The user's Fit stays Fit (never substituted —
+                           // the wizard disables it with its reason where no region is
+                           // declared, and the run button refuses it); anything else is
+                           // Auto.
+                           cellSizeMode: algorithm == "organic"
+                               ? (cellSizeMode == .fit ? LatticeCellSizeMode.fit.rawValue
+                                                       : LatticeCellSizeMode.auto.rawValue)
+                               : LatticeCellSizeMode.fixed.rawValue,
                            // The UNIFORM path carries it too. The enclosed-void
                            // rule is about the lattice's pore space, which a
                            // uniform lattice has exactly as much of as a graded
                            // one — carrying it on only one path would make the
                            // rule silently depend on the density mode.
                            requireVoidReachesExterior: requireVoidReachesExterior)
+        // ★ THE SOLID COVER RIDES ON `outer_finish`, NOT `skin` — the two are
+        // independent axes in core's schema. Set on BOTH construction paths, so
+        // a graded job and a uniform one cannot disagree about the cover.
+        spec2.outerFinish = jobOuterFinishResolved
+        // ★ THE ALGORITHM ON THIS PATH TOO (2026-09-02). `spec` carried it and `spec2`
+        // did not, so a stated algorithm was silently dropped from the job on the
+        // generatable-topology path — and organic can only be emitted through it.
+        // "" is still not written, so an untouched project is unchanged.
+        spec2.algorithm = algorithm
+
+        // ★ ORGANIC — copied verbatim; `gradingDictionary()` owns every emission gate.
+        spec2.organicGrowth = organicGrowth
+        spec2.organicStrutWidthMM = organicStrutWidthMM
+        spec2.organicOverhangDeg = organicOverhangDeg
+        spec2.organicBoundaryFinish = organicBoundaryFinish.jobValue
+        spec2.organicShapeFit = organicShapeFit
+        spec2.organicShapeFitOnly = organicShapeFitOnly
+        spec2.organicOverhangFillet = organicOverhangFillet
+        spec2.organicSyntheticStresses = organicSyntheticStresses
+        spec2.organicSyntheticFoci = organicSyntheticFoci
+        spec2.organicTransferTies = organicTransferTies
+        spec2.organicTieSwirl = organicTieSwirl
+        spec2.organicSolidRimMM = organicSolidRimMM
+        spec2.organicScale = organicScale
+        spec2.organicPickedSeparationMM = organicPickedSeparationMM
+        spec2.organicPickedGradeMM = organicPickedGradeMM
+        spec2.layerHeightMM = layerHeightMM
+        spec2.stageMode = stageMode
+        return spec2
     }
 
     /// Convenience: read the certifiable limits AND the generatable set from core
@@ -1126,7 +2207,11 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
                         emit3MF: Bool = false,
                         regions: [LatticeRegionSpec] = [],
                         capability: LatticeRetentionCapability = .fromCore,
-                        cellModes: LatticeCellModeCapability = .fromCore)
+                        cellModes: LatticeCellModeCapability = .fromCore,
+                        // ★ LAST, matching the other `runSpec` — see
+                        // `resolvedCellPlan`.
+                        minimizePlastic: Bool = true,
+                        layerHeightMM: Double = 0)
         -> LatticeSpec? {
         let id = topology ?? topologyID
         let limits = TopOptKit.latticeLimits(topology: id)
@@ -1134,15 +2219,52 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         return runSpec(limits: limits, generatable: generatable, memberMM: memberMM,
                        lineWidthMM: lineWidthMM, emitSTL: emitSTL, emit3MF: emit3MF,
                        regions: regions, capability: capability,
-                       cellModes: cellModes)
+                       cellModes: cellModes, minimizePlastic: minimizePlastic,
+                       layerHeightMM: layerHeightMM)
     }
 
     /// The proxy grading parameters for the current settings, with the density range
     /// already clamped to the core band, so the viewer proxy (requirement 5) shows the
     /// SAME numbers the run would use. `limits` is read from core.
-    public func proxyParams(limits: TopOptKit.LatticeLimits) -> LatticeProxyParams {
-        let b = LatticeBounds.compute(settings: self, limits: limits)
+    /// ★★ `lineWidthMM` IS THE PRINTER'S BEAD, AND LEAVING IT AT 0 WAS THE
+    /// UNDERSIDE SPECKLE (task 2026-08-20, item 2; maintainer's original report of
+    /// specks on the underside of his part).
+    ///
+    /// ★ THE PREVIEW WAS GRADING BELOW WHAT THE MACHINE CAN LAY. `LatticeBounds`
+    /// has always raised the band's floor to the printability floor when given a
+    /// line width — "stating a line width must RAISE the floor" — and this call
+    /// never gave it one. So the band's bottom fell to core's certifiable minimum
+    /// (5.0%), the thin end of the ramp landed inside a declared region, and the
+    /// struts there came out THINNER THAN ONE BEAD: sub-pixel geometry that
+    /// rendered as speckle and that the run does not build at all. Measured on his
+    /// part, 0 -> 54 specks as the thin end moved into the region.
+    ///
+    /// ★ THE REMEDY IS DENSIFICATION, NOT DELETION, and that is core's order too:
+    /// the band floor rises so those cells print, and only a cell that cannot print
+    /// at ANY certifiable density is left solid (`fallback_strut_unprintable`).
+    /// Deleting first would have shown him less lattice than the run builds.
+    ///
+    /// Callers with print parameters MUST pass it. The default is 0 so a caller
+    /// that genuinely has no printer — the settings page's sample block — still
+    /// gets the raw band rather than a floor invented from a guessed nozzle.
+    public func proxyParams(limits: TopOptKit.LatticeLimits,
+                            lineWidthMM: Double = 0) -> LatticeProxyParams {
+        let b = LatticeBounds.compute(settings: self, limits: limits,
+                                      lineWidthMM: lineWidthMM)
+        // ★★ A HAND-SET THICKNESS PINS THE BAND (maintainer, 2026-08-19). With the
+        // sim off there is no field to grade by, so a graded band would be a ramp
+        // between two numbers nothing chooses between — the preview must show the
+        // ONE lattice the user asked for. Converted through the same law the
+        // renderer uses, then clamped to what the machine can actually print.
+        if let t = manualThicknessDensity(limits: limits) {
+            return LatticeProxyParams(latticeID: topologyID, cellMM: cellMM,
+                                      shapeFitBandMM: shapeFitBandMM,
+                                      minRelativeDensity: t, maxRelativeDensity: t,
+                                      gamma: demandExponent,
+                                      uniformRelativeDensity: t)
+        }
         return LatticeProxyParams(latticeID: topologyID, cellMM: cellMM,
+                                  shapeFitBandMM: shapeFitBandMM,
                                   minRelativeDensity: b.densityLo,
                                   maxRelativeDensity: b.densityHi,
                                   // ★ CORE'S OWN EXPONENT, NOT A HARDCODED 1
@@ -1368,6 +2490,22 @@ public struct LatticeBounds: Equatable, Sendable {
         if limits.certifiable && bandHi > bandLo {
             if lo < bandLo { lo = bandLo; loReason = "below the certifiable density range (≥ \(pct(bandLo)))" }
             if hi > bandHi { hi = bandHi; hiReason = "above the certifiable density range (≤ \(pct(bandHi)))" }
+            if hi < lo { hi = lo }
+        }
+        // ★★ AND THE PRINTABILITY FLOOR, WHICH MOVES WITH THE NOZZLE (maintainer,
+        // 2026-08-19). Below it the strut is thinner than one extruded bead, so it
+        // is not a lattice the machine can make at all — a stricter bound than
+        // core's certifiable band and, at a fine cell, a much higher one.
+        //
+        // ★ IT DEPENDS ON THE CELL TOO, quadratically: see
+        // `LatticeType.printabilityDensityFloor`. Both bounds apply, so the floor
+        // is whichever is higher, and the reason says which one bit.
+        let printFloor = topo.printabilityDensityFloor(lineWidthMM: lineWidthMM,
+                                                       cellMM: settings.cellMM)
+        if printFloor > lo {
+            lo = min(1, printFloor)
+            loReason = "thinner than one \(mm(lineWidthMM)) extrusion at a \(mm(settings.cellMM)) cell "
+                + "— the printer cannot lay a strut that thin (≥ \(pct(printFloor)))"
             if hi < lo { hi = lo }
         }
 

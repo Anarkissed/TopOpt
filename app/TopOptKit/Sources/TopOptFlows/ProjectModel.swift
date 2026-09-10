@@ -705,6 +705,72 @@ public final class ProjectModel: ObservableObject {
     /// stated number, else its group's, else the MODE's answer (Uniform states
     /// one; Auto and Per-region-with-nothing-stated state none and core derives).
     /// nil ⇒ AUTO ⇒ no `relative_density` key on the wire.
+    /// ★ ONE VOXEL OF THE SOLVE GRID (brief §0, 2026-09-06): the run's resolution
+    /// spans the part's longest extent, so a voxel is that extent over the quality's
+    /// resolution. 0 when the part is not loaded yet.
+    public var solveVoxelMM: Double {
+        guard let m = viewerMesh, !m.bounds.isEmpty else { return 0 }
+        let e = m.bounds.max - m.bounds.min
+        let longest = Double(Swift.max(e.x, Swift.max(e.y, e.z)))
+        let res = Double(quality.resolution)
+        return longest > 0 && res > 0 ? longest / res : 0
+    }
+
+    /// ★ THE ORGANIC FLOOR for this part: the probe's when it has run, else
+    /// max(1.535 × bead, one voxel) computed here.
+    public var organicFloor: OrganicSizeCheck.Floor {
+        if let rec = lattice.organicForecast?.recommendation, rec.ran {
+            return OrganicSizeCheck.floor(from: rec)
+        }
+        return OrganicSizeCheck.floor(beadMM: printParams.strutLineWidthMM, voxelMM: solveVoxelMM)
+    }
+
+    /// ★ THE SYNTHETIC FOCI ONE WALL STATES (2026-09-05, Aesthetic only): its own
+    /// count, or nil ⇒ the lattice's default (`organicSyntheticFoci`).
+    public func latticeSelectableSyntheticFoci(_ ref: LatticeSelectableRef) -> Int? {
+        lattice.selectableSyntheticFoci[ref.key]
+    }
+
+    /// Write one wall's synthetic-foci count. nil, 0, or a value outside 1…5
+    /// CLEARS it back to the default — "no number stated" must be spellable. A wall
+    /// the last bake measured as LOADED refuses the write (his rule, 2026-09-05:
+    /// "it should never be able to add foci to loaded walls").
+    public func writeLatticeSyntheticFoci(_ ref: LatticeSelectableRef, foci: Int?) {
+        guard let n = foci, OrganicSyntheticStress.fociRange.contains(n) else {
+            lattice.selectableSyntheticFoci.removeValue(forKey: ref.key)
+            return
+        }
+        guard latticeWallLoaded(ref) != true else { return }
+        lattice.selectableSyntheticFoci[ref.key] = n
+    }
+
+    /// Whether the last bake found real stress on this wall: true = loaded (no foci
+    /// allowed), false = unloaded, nil = not measured yet.
+    public func latticeWallLoaded(_ ref: LatticeSelectableRef) -> Bool? {
+        lattice.selectableWallStressFraction[ref.key].map { $0 >= OrganicSyntheticStress.loadedRealShare }
+    }
+
+    /// ★ THE WALLS THE JOB MAY SYNTHESISE ON: only under an organic Aesthetic lattice
+    /// with the switch on, only walls the bake measured as UNLOADED — each with its
+    /// own count, else the lattice default. Loaded and unmeasured walls are absent.
+    public func latticeSyntheticWalls() -> [String: Int] {
+        let lat = lattice
+        guard lat.isOrganic, lat.organicSyntheticStresses,
+              (lat.stageMode ?? .structural) == .aesthetic else { return [:] }
+        var out: [String: Int] = [:]
+        for (key, frac) in lat.selectableWallStressFraction where frac < OrganicSyntheticStress.loadedRealShare {
+            out[key] = OrganicSyntheticStress.clampFoci(lat.selectableSyntheticFoci[key] ?? lat.organicSyntheticFoci)
+        }
+        return out
+    }
+
+    /// The bake's per-wall measurement, stored so the drawer and the job agree on
+    /// which walls are unloaded. Only writes when something changed.
+    public func recordLatticeWallStress(_ fractions: [String: Double]) {
+        guard fractions != lattice.selectableWallStressFraction else { return }
+        lattice.selectableWallStressFraction = fractions
+    }
+
     public func latticeSelectableDensity(_ ref: LatticeSelectableRef,
                                          in group: UUID) -> Double? {
         if let d = lattice.selectableDensity[ref.key], d.isFinite, d > 0 { return d }
@@ -714,16 +780,149 @@ public final class ProjectModel: ObservableObject {
     /// Write one selectable's density. `nil` (or a non-positive value) CLEARS it
     /// back to the group's/mode's answer — "no number stated" must be spellable,
     /// because core's own sentinel for "derive it" is exactly the absence of a key.
-    public func writeLatticeDensity(_ ref: LatticeSelectableRef, fraction: Double?) {
+    /// - Parameter cellMM: the face's own cell, for the AESTHETIC floor. 0 ⇒ the
+    ///   certifiable band's own floor stands in.
+    public func writeLatticeDensity(_ ref: LatticeSelectableRef, fraction: Double?,
+                                    cellMM: Double = 0) {
         guard let f = fraction, f.isFinite, f > 0 else {
             lattice.selectableDensity.removeValue(forKey: ref.key)
             return
         }
         let limits = TopOptKit.latticeLimits(topology: lattice.topologyID)
-        // Clamped into core's certifiable band — there is no certificate outside
-        // it, and a value core would refuse must not be storable from a keypad.
-        lattice.selectableDensity[ref.key] =
-            Swift.min(Swift.max(f, limits.rhoMin), limits.rhoMax)
+        // ★★ TWO BANDS, BY STAGE MODE (his spec, 2026-08-24 evening: a per-face
+        // density control in Aesthetic, "the low end should be the printable
+        // limit… the upper limit is making it a solid").
+        //
+        //   STRUCTURAL: core's certifiable band, unchanged — there is no
+        //     certificate outside it, and a value core would refuse must not be
+        //     storable from a keypad.
+        //   AESTHETIC: no certificate is claimed, so the honest bounds are the
+        //     physical ones — the density at which this face's cell prints one
+        //     bead, up to 1.0 (solid).
+        if (lattice.stageMode ?? .structural) == .aesthetic {
+            let band = latticeAestheticDensityBand(cellMM: cellMM)
+            lattice.selectableDensity[ref.key] =
+                Swift.min(Swift.max(f, band.lo), band.hi)
+        } else {
+            lattice.selectableDensity[ref.key] =
+                Swift.min(Swift.max(f, limits.rhoMin), limits.rhoMax)
+        }
+    }
+
+    /// ★ THE PER-FACE CELL IN FORCE (2026-08-25, the grading options): the
+    /// user's own number, or nil ⇒ derived. No group fallback — a cell is a
+    /// property of the face's own wall.
+    public func latticeSelectableCellMM(_ ref: LatticeSelectableRef) -> Double? {
+        if let v = lattice.selectableCellMM[ref.key], v.isFinite, v > 0 { return v }
+        return nil
+    }
+
+    /// Write one selectable's cell (mm). nil / non-positive CLEARS back to
+    /// derived — absence is core's own "derive it" sentinel, same as the
+    /// density beside it. Clamped into what can exist: never past the declared
+    /// depth (the bake further caps per voxel at the local wall —
+    /// never-overshoot), never below two beads (no strut prints down there).
+    public func writeLatticeCellMM(_ ref: LatticeSelectableRef, mm: Double?,
+                                   declaredDepthMM: Double = 0) {
+        guard let v = mm, v.isFinite, v > 0 else {
+            lattice.selectableCellMM.removeValue(forKey: ref.key)
+            return
+        }
+        let lo = Swift.max(0.5, 2 * printParams.strutLineWidthMM)
+        let hi = declaredDepthMM > 0 ? Swift.max(lo, declaredDepthMM) : 1e3
+        lattice.selectableCellMM[ref.key] = Swift.min(Swift.max(v, lo), hi)
+    }
+
+    /// ★★★ THE DIAL IS LINEAR IN STRUT WIDTH, NOT IN DENSITY (his ruling,
+    /// 2026-08-25: "Make 1% be the printability floor. Make 100% be the quilt" —
+    /// after "density is set to nearly double … and there's no difference").
+    ///
+    /// ★ MEASURED, ON HIS OWN 13 mm CELL. Mapping the dial through RHO puts most of
+    /// it where nothing happens: core's strut law saturates, so
+    ///
+    ///     33% → Ø 3.37 mm    62% → Ø 4.99 mm    75/90/100% → Ø 4.99 mm
+    ///
+    /// The top 38 % of the control is mechanically dead — no setting in it can
+    /// change a pixel — which is exactly the "no difference" he photographed. And
+    /// the band it mapped through came back rho [0.000, 1.000] at that cell, so the
+    /// printable floor and the quilt he ruled were not in force at all.
+    ///
+    /// So the dial's ends are the two WIDTHS he named — one extruded bead, and the
+    /// width at which neighbouring struts fuse — and the percentage runs linearly
+    /// between them. Every step moves the picture by the same amount, and 100 % is
+    /// the fattest strut the law can actually produce rather than a number the
+    /// geometry ignores.
+    public func latticeDensityBandDiametersMM(cellMM: Double) -> (lo: Double, hi: Double) {
+        let lat = LatticeType.named(lattice.topologyID)
+        let bead = Swift.max(0.05, printParams.strutLineWidthMM)
+        // The law's own ceiling: what a fully dense cell of this size produces.
+        let solid = 2 * lat.strutRadiusMM(relativeDensity: 1, cellMM: cellMM)
+        // The quilt: neighbouring struts meet when the diameter reaches half the
+        // cell. Whichever comes first is the top of the dial.
+        let quilt = Swift.min(cellMM / 2, solid)
+        // ★ AND THE BOTTOM IS WHAT THE LAW CAN ACTUALLY DRAW. A bead is the
+        // PRINTABLE floor, but on a coarse cell core's curve cannot produce a
+        // strut that thin at any density — at 13 mm its thinnest is 1.18 mm — so
+        // anchoring the dial at 0.45 mm spent its first tenth on a width nothing
+        // can render. The floor is the thinner of the two, measured, not assumed.
+        let floorRho = lat.printabilityDensityFloor(lineWidthMM: bead, cellMM: cellMM)
+        let thinnest = 2 * lat.strutRadiusMM(relativeDensity: floorRho, cellMM: cellMM)
+        let lo = Swift.max(bead, thinnest)
+        return (Swift.min(lo, quilt * 0.5), Swift.max(quilt, lo * 2))
+    }
+
+    /// A stored density → the percent to SHOW, 1…100 across the width band.
+    public func latticeDensityPercent(rho: Double, cellMM: Double) -> Double {
+        guard cellMM > 0 else { return 1 }
+        let b = latticeDensityBandDiametersMM(cellMM: cellMM)
+        guard b.hi > b.lo else { return 1 }
+        let d = 2 * LatticeType.named(lattice.topologyID)
+            .strutRadiusMM(relativeDensity: rho, cellMM: cellMM)
+        let t = (d - b.lo) / (b.hi - b.lo)
+        return 1 + 99 * Swift.max(0, Swift.min(1, t))
+    }
+
+    /// A typed percent → the density to STORE. The inverse of the above, through
+    /// core's own curve (`relativeDensity(strutRadiusMM:)` bisects it), so the
+    /// number he types is the strut he gets.
+    public func latticeDensityForPercent(_ pct: Double, cellMM: Double) -> Double {
+        guard cellMM > 0 else { return 0 }
+        let b = latticeDensityBandDiametersMM(cellMM: cellMM)
+        let t = Swift.max(0, Swift.min(1, (pct - 1) / 99))
+        let d = b.lo + t * (b.hi - b.lo)
+        let rho = LatticeType.named(lattice.topologyID)
+            .relativeDensity(strutRadiusMM: d / 2, cellMM: cellMM)
+        return Swift.min(1, Swift.max(0, rho))
+    }
+
+    /// ★ WHERE "AUTO" SITS — his ruling: "Place Auto in the middle - whatever looks
+    /// nicest (not necessarily 50%)." 45 % of the width band draws a truss with
+    /// real material in it and windows still clearly open; the floor drew a wall you
+    /// could see straight through, which is what made a fresh face look empty.
+    public static let latticeAutoDensityPercent: Double = 45
+
+    /// ★★★ THE AESTHETIC DENSITY BAND FOR A FACE (his ruling, 2026-08-24 night):
+    /// the low end is the printable limit at that face's cell, "the max is the
+    /// QUILT" — the density where the struts fuse and the windows close — never
+    /// 1.0 solid. The per-face control clamps into this band, and its PERCENT is
+    /// displayed relative to it: 0% = the thinnest printable lattice, 100% = the
+    /// quilt. Both ends from core's own strut law, nothing invented here.
+    public func latticeAestheticDensityBand(cellMM: Double)
+        -> (lo: Double, hi: Double) {
+        let lat = LatticeType.named(lattice.topologyID)
+        let limits = TopOptKit.latticeLimits(topology: lattice.topologyID)
+        var lo = limits.rhoMin
+        var hi = 1.0
+        if cellMM > 0 {
+            if printParams.strutLineWidthMM > 0 {
+                let f0 = lat.printabilityDensityFloor(
+                    lineWidthMM: printParams.strutLineWidthMM, cellMM: cellMM)
+                if f0 > 0 { lo = f0 }
+            }
+            hi = lat.quiltDensityCeiling(cellMM: cellMM)
+        }
+        if hi <= lo { hi = Swift.min(1.0, lo + 1e-3) }
+        return (lo, hi)
     }
 
     /// ★ THE IN-PLANE EXPAND IN FORCE FOR ONE SELECTABLE (maintainer,
@@ -2131,6 +2330,7 @@ public final class ProjectModel: ObservableObject {
             // and `LatticeSlabExpandTests` caught this one missing.
             selectableDensity: lattice.selectableDensity,
             selectableExpandMM: lattice.selectableExpandMM,
+            syntheticWalls: latticeSyntheticWalls(),
             resolve: resolvedLatticeFace)
     }
 
@@ -2150,11 +2350,13 @@ public final class ProjectModel: ObservableObject {
                                      spanLoMM: Double(span.lo), spanHiMM: Double(span.hi))
                 }
                 if geo.isPlane {
-                    guard let o = mesh.facePlaneOutline(
-                        f, planeNormal: SIMD3<Float>(geo.planeNormal),
-                        planeOrigin: SIMD3<Float>(geo.planeOrigin)) else { return nil }
-                    return .plane(center: SIMD3<Double>(o.center), normal: geo.planeNormal,
-                                  halfUMM: Double(o.halfU), halfWMM: Double(o.halfV))
+                    // ★ THE ONE BUILDER — see `LatticeRegionEmission.planeFor`. It
+                    // owns the frame the outline is expressed in, so production and
+                    // the tests cannot construct it differently. They did: the loops
+                    // were built on the OUTWARD normal while containment is tested
+                    // on the INWARD one, and `basis` flips `u` with the normal, so
+                    // the region landed mirrored.
+                    return LatticeRegionEmission.planeFor(face: f, in: mesh)
                 }
                 return nil
         }
@@ -2192,6 +2394,7 @@ public final class ProjectModel: ObservableObject {
                     groupDensities: self.lattice.groupDensities,
                     selectableDensity: self.lattice.selectableDensity,
                     selectableExpandMM: self.lattice.selectableExpandMM,
+                    syntheticWalls: self.latticeSyntheticWalls(),
                     resolve: { [weak self] f in self?.resolvedLatticeFace(f) }).regions
             },
             topology: lattice.topologyID,
@@ -2650,7 +2853,27 @@ public final class ProjectModel: ObservableObject {
                                minimizePlastic: minimizePlastic, quality: quality,
                                optimized: hasResults, printParams: printParams,
                                designBox: designBox,
-                               lattice: lattice.enabled ? lattice : nil,
+                               // ★★★ PERSIST WHAT HE CONFIGURED, NOT ONLY WHAT HE ARMED
+                               // (maintainer, 2026-08-21). This was
+                               // `lattice.enabled ? lattice : nil`, so a project with
+                               // the lattice page fully set up — cell mode, density
+                               // mode, per-face depths, roles, retention — but
+                               // `enabled` still false wrote NO lattice block at all
+                               // and lost every one of those on the next load.
+                               //
+                               // ★ MEASURED ON HIS OWN DEVICE. `M2 verticalStand THICK`
+                               // had two declared regions on screen and NO `lattice` key
+                               // in its project.json, while his two older projects had
+                               // full blocks. Everything he set there was being answered
+                               // from defaults, which is why changing a setting could
+                               // look like it did nothing.
+                               //
+                               // ★ AND THE INVARIANT THAT LINE EXISTED FOR IS KEPT. The
+                               // point of the nil was that a project which never touched
+                               // the lattice writes a file byte-identical to a
+                               // pre-lattice one. "Never touched" is `== the default`,
+                               // which is what is asked here — not "not armed".
+                               lattice: lattice == LatticeSettings() ? nil : lattice,
                                // Written ALWAYS, including when it is at the
                                // default — this is a setting the user can turn
                                // off, and "absent" already means ON, so an

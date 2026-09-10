@@ -1,0 +1,90 @@
+// ShellClipLayoutTests — ★★★ THE UNIFORM AND ITS MSL TWIN ARE MATCHED BY BYTE OFFSET.
+//
+// ★ THIS HAS BITTEN THIS FILE BEFORE. A field added to the Swift struct alone shifts
+// every field after it, and the shader then reads a NEIGHBOURING uniform as this one —
+// on the last occurrence the lattice shader read `lightDir` as the overlay flags. There
+// is no compiler on either side of that boundary; the only guard is a test.
+//
+// ★ SO THIS PINS BOTH SIDES: the Swift struct's size and field offsets, and the MSL
+// text's field list and order. A one-sided edit fails here rather than on the GPU.
+
+import XCTest
+import simd
+@testable import TopOptFlows
+
+final class ShellClipLayoutTests: XCTestCase {
+
+    /// ★ FIVE, NOT FOUR — and this test was RED at `1320715f`.
+    ///
+    /// `7885e3cd` ("only the cap you are looking at") added the `eye` field so the
+    /// shell could tell which side of a wall is being viewed, and did not update the
+    /// two assertions here. The struct has been 80 bytes since; the test still said
+    /// 64, so the ONE guard against a one-sided edit of this boundary has been
+    /// failing ever since — which is exactly the failure mode its own header warns
+    /// about ("there is no compiler on either side of that boundary; the only guard
+    /// is a test"). Brought back in line with the struct and the MSL, both of which
+    /// already agree with each other.
+    func testTheSwiftStructIsFiveFloat4s() {
+        XCTAssertEqual(MemoryLayout<ShellClipUniform>.size, 80)
+        XCTAssertEqual(MemoryLayout<ShellClipUniform>.stride, 80)
+        XCTAssertEqual(MemoryLayout<ShellClipUniform>.alignment, 16)
+        // The offsets the shader reads, in the shader's own order.
+        XCTAssertEqual(MemoryLayout<ShellClipUniform>.offset(of: \.grid), 0)
+        XCTAssertEqual(MemoryLayout<ShellClipUniform>.offset(of: \.spacing), 16)
+        XCTAssertEqual(MemoryLayout<ShellClipUniform>.offset(of: \.dims), 32)
+        XCTAssertEqual(MemoryLayout<ShellClipUniform>.offset(of: \.gate), 48)
+        XCTAssertEqual(MemoryLayout<ShellClipUniform>.offset(of: \.eye), 64)
+    }
+
+    func testTheMSLDeclaresTheSameFieldsInTheSameOrder() {
+        // The struct body, verbatim from the shared source both libraries interpolate.
+        guard let open = shellClipMSL.range(of: "struct ShellClip {"),
+              let close = shellClipMSL.range(of: "};", range: open.upperBound..<shellClipMSL.endIndex)
+        else { return XCTFail("`struct ShellClip` not found in shellClipMSL") }
+        let body = shellClipMSL[open.upperBound..<close.lowerBound]
+        let fields = body.split(separator: "\n").compactMap { line -> String? in
+            let t = line.trimmingCharacters(in: .whitespaces)
+            guard t.hasPrefix("float4 ") else { return nil }
+            return String(t.dropFirst("float4 ".count).prefix(while: { $0 != ";" }))
+        }
+        XCTAssertEqual(fields, ["origin", "spacing", "dims", "gate", "eye"],
+                       "the MSL struct moved; `ShellClipUniform` must move with it")
+    }
+
+    /// ★ THE DECLARATION BUFFER'S STRIDE. The list rides in its own buffer precisely so
+    /// this struct can stay a fixed size — but the buffer has a stride of its own,
+    /// and the shader indexes it with `SHELL_DECL_STRIDE`.
+    func testTheDeclarationStrideAgreesWithTheShader() {
+        XCTAssertTrue(shellClipMSL.contains("#define SHELL_DECL_STRIDE 3"),
+                      "the shader's declaration stride changed")
+        // Three float4s per declaration, which is what the Swift builder appends.
+        XCTAssertEqual(MemoryLayout<ShellDeclUniform>.size, 48)
+        XCTAssertEqual(MemoryLayout<ShellDeclUniform>.stride, 48)
+        XCTAssertEqual(3 * MemoryLayout<SIMD4<Float>>.stride,
+                       MemoryLayout<ShellDeclUniform>.stride)
+    }
+
+    /// ★ THE RULE ITSELF, STATED ONCE IN MSL — this only pins that it still reads the
+    /// fragment's normal and the region field, because a rule that quietly reverts to
+    /// "is the owning cell active" is exactly the regression this task exists to undo.
+    func testTheRuleTestsTheFragmentNormalAndTheRegionField() {
+        XCTAssertTrue(shellClipMSL.contains("float3 mnormal"),
+                      "the shell rule no longer takes the fragment's own normal")
+        XCTAssertTrue(shellClipMSL.contains("regionTex.sample"),
+                      "the shell rule no longer reads the declared region's field")
+        // ★ THE GATE IS NOW TWO TESTS, NOT ONE REJECT — and that is the fix, not a
+        // regression. It read `dot(sn, -inward) < c.gate.x` and rejected: the NEAR cap
+        // only, so the far side of the very wall he declared — whose normal is the exact
+        // opposite — could never open. The prism has two caps and both are the wall he
+        // marked, so each is gated on its own agreement and the sign is carried into the
+        // sample nudge. What must never come back is a rule that ignores the fragment's
+        // normal altogether, which is what these three assertions pin.
+        XCTAssertTrue(shellClipMSL.contains("dot(sn, -inward) >= c.gate.x"),
+                      "the NEAR cap's normal-agreement gate is gone")
+        XCTAssertTrue(shellClipMSL.contains("dot(sn, inward) >= c.gate.x"),
+                      "the FAR cap's normal-agreement gate is gone — the back of a "
+                      + "declared wall is not a bystander")
+        XCTAssertTrue(shellClipMSL.contains("capSign"),
+                      "the cap the fragment belongs to no longer steers the nudge")
+    }
+}

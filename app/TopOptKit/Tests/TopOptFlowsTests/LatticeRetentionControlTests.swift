@@ -495,12 +495,36 @@ final class LatticeRetentionControlTests: XCTestCase {
         XCTAssertEqual(moved.ceilingText, "12%")
     }
 
+    /// ★★ REPLACED, NOT RELAXED (2026-08-21). This required the literal phrase
+    /// "Density mode to Auto". There is no Auto in the Density row — its chips are
+    /// Sim, Uniform and Per region — so the assertion was pinning an instruction to
+    /// press a button that does not exist, and it held that copy in place while the
+    /// maintainer hunted for the control ("then I change to 'per region' and it says
+    /// to go back to Auto! What the fuck is with this shit?").
+    ///
+    /// The bar the old line was reaching for — a uniform run must say what to change,
+    /// in words that are on screen — is asserted here in full, in the same shape
+    /// `LatticeWizardRetentionTests` and `LatticeCellFitModeTests` now use: the mode
+    /// named must be a REAL CHIP, and the reason must fit in two sentences.
     func testAUniformRunSaysWhyRetentionIsUnavailable() throws {
+        let densityChips = ["Sim", "Uniform", "Per region"]
         let c = LatticeRetentionControl.compute(
             armed: false, graded: false, capability: .all, belowFloorVoxels: nil,
             regionVoxels: nil, ceilingFraction: nil, coreCeilingFraction: 0.2)
         XCTAssertFalse(c.enabled)
-        XCTAssertTrue(try XCTUnwrap(c.disabledReason).contains("Density mode to Auto"))
+        let why = try XCTUnwrap(c.disabledReason)
+        // ★ It must name a chip that is actually in the Density row.
+        let named = densityChips.filter { why.contains($0) }
+        XCTAssertFalse(named.isEmpty,
+                       "a uniform run must name the DENSITY chip to set — one of "
+                       + "\(densityChips): \(why)")
+        // ★ AND NOT one that isn't. "Auto" is the label this copy used to name, and
+        // the Density row has never had it.
+        XCTAssertFalse(why.contains("Auto"),
+                       "★ there is no Auto in the Density row — naming it is the "
+                       + "defect this test now guards: \(why)")
+        XCTAssertLessThan(why.count, 160,
+                          "★ two sentences, not a paragraph: \(why)")
     }
 
     func testAnOlderCoreSaysSoRatherThanFailingSilently() throws {

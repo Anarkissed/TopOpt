@@ -4,11 +4,13 @@
 // to BridgeError so nothing throws across the language boundary.
 #include "TopOptBridge.hpp"
 
+#include "topopt/lattice_boundary.hpp"
 #include "topopt/grading.hpp"
 
 #include <algorithm>
 #include <atomic>
 #include <cctype>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <exception>
@@ -24,9 +26,11 @@
 
 #include "topopt/analyze.hpp"
 #include "topopt/build_orientation.hpp"
+#include "topopt/cell_plan.hpp"
 #include "topopt/clearance.hpp"
 #include "topopt/face_overrides.hpp"
 #include "topopt/fea.hpp"
+#include "topopt/lattice_algorithm.hpp"
 #include "topopt/lattice.hpp"
 #include "topopt/lattice_gen.hpp"
 #include "topopt/loadcase.hpp"
@@ -34,6 +38,7 @@
 #include "topopt/job.hpp"
 #include "topopt/materials.hpp"
 #include "topopt/mesh.hpp"
+#include "topopt/organic_lattice.hpp"
 #include "topopt/part.hpp"
 #include "topopt/pipeline.hpp"
 #include "topopt/production.hpp"
@@ -1218,6 +1223,12 @@ AnalyzeResult analyze_selfweight(const std::string& model_path,
     result.voxel_volume_mm3 = design_grid.voxel_volume();
     result.von_mises_field.assign(a.von_mises_field.begin(),
                                   a.von_mises_field.end());
+    // ★★★ AND THE TENSOR — the input the ORGANIC tracer eigen-decomposes. Core has
+    // computed it all along (`FixedDesignAnalysis::stress_tensor_field`); the analyze
+    // path simply never carried it out, which is the last hop that kept organic off the
+    // lattice STAGE. Six per voxel, Voigt [xx,yy,zz,xy,yz,zx], TRUE shear, MPa.
+    result.stress_tensor_field.assign(a.stress_tensor_field.begin(),
+                                      a.stress_tensor_field.end());
     result.displacement_field.assign(a.displacement_field.begin(),
                                      a.displacement_field.end());
     bridge_log("analyze: verdict=" +
@@ -1543,6 +1554,12 @@ AnalyzeResult analyze_loadcase(const std::string& model_path,
     result.voxel_volume_mm3 = design_grid.voxel_volume();
     result.von_mises_field.assign(a.von_mises_field.begin(),
                                   a.von_mises_field.end());
+    // ★★★ AND THE TENSOR — the input the ORGANIC tracer eigen-decomposes. Core has
+    // computed it all along (`FixedDesignAnalysis::stress_tensor_field`); the analyze
+    // path simply never carried it out, which is the last hop that kept organic off the
+    // lattice STAGE. Six per voxel, Voigt [xx,yy,zz,xy,yz,zx], TRUE shear, MPa.
+    result.stress_tensor_field.assign(a.stress_tensor_field.begin(),
+                                      a.stress_tensor_field.end());
     result.displacement_field.assign(a.displacement_field.begin(),
                                      a.displacement_field.end());
     bridge_log("analyze_loadcase: verdict=" +
@@ -2141,6 +2158,762 @@ bool lattice_topology_from_name(const std::string& name,
 }
 }  // namespace
 
+std::vector<double> lattice_member_thickness_mm(int nx, int ny, int nz, double spacing,
+                                                const std::uint8_t* solid,
+                                                std::size_t solid_count,
+                                                int cap_radius_voxels) {
+  const std::size_t want =
+      static_cast<std::size_t>(nx) * static_cast<std::size_t>(ny) *
+      static_cast<std::size_t>(nz);
+  if (nx <= 0 || ny <= 0 || nz <= 0) return {};
+  if (!(spacing > 0.0) || cap_radius_voxels <= 0) return {};
+  if (solid == nullptr || solid_count != want) return {};
+
+  topopt::VoxelGrid grid;
+  grid.nx = nx; grid.ny = ny; grid.nz = nz;
+  grid.spacing = spacing;
+  grid.origin = topopt::Vec3{0.0, 0.0, 0.0};   // thickness is translation-invariant
+  grid.tags.resize(want, topopt::VoxelTag::Empty);
+  // The opening is driven by a DENSITY field thresholded at `iso`, not by the tags —
+  // so the occupancy is handed over as 1/0 and cut at 0.5.
+  std::vector<double> density(want, 0.0);
+  for (std::size_t i = 0; i < want; ++i) {
+    const bool s = solid[i] != 0;
+    grid.tags[i] = s ? topopt::VoxelTag::Interior : topopt::VoxelTag::Empty;
+    density[i] = s ? 1.0 : 0.0;
+  }
+
+  try {
+    return topopt::local_member_thickness_mm(grid, density, 0.5, cap_radius_voxels);
+  } catch (...) {
+    return {};   // core refused; the caller says it has no number
+  }
+}
+
+
+
+// ★★★ ORGANIC'S OWN (SPACING, DENSITY, STRUT) LAW — FORWARDED, NEVER RE-DERIVED.
+//
+// ★ ORGANIC IS NOT AN OCTET AND ITS STRUT IS NOT AN OCTET'S. `t = 2 d sqrt(rho/3pi)`
+// against the octet's measured table: the two disagree by whatever they disagree by, and
+// the preview was reporting the OCTET diameter for an organic lattice — a number
+// describing geometry that is not on screen. Same class as the strut law the app
+// re-derived once and got 1.4-1.7x wrong.
+//
+// ★ AND PRINTABILITY IS THE FLOOR ON THE SEPARATION, NOT THE CEILING. `t` grows WITH
+// `d` at fixed rho (a wider spacing means more material per curve), so the bead puts a
+// LOWER bound on the separation: below `d_print` the curve is thinner than one
+// extrusion and the run cannot lay it.
+double organic_strut_diameter_mm(double spacing_mm, double rho) {
+  if (!(spacing_mm > 0.0) || !(rho > 0.0)) return 0.0;
+  return topopt::organic_strut_diameter_for(spacing_mm, rho);
+}
+
+double organic_spacing_for_mm(double rho, double strut_diameter_mm) {
+  if (!(rho > 0.0) || !(strut_diameter_mm > 0.0)) return 0.0;
+  return topopt::organic_spacing_for(rho, strut_diameter_mm);
+}
+
+// The smallest separation whose strut still reaches one extrusion at `rho`. Inverting
+// `t = 2 d sqrt(rho/3pi)` at `t = min_extrudable_width_mm`.
+double organic_min_printable_spacing_mm(double rho, double min_extrudable_width_mm) {
+  if (!(rho > 0.0) || !(min_extrudable_width_mm > 0.0)) return 0.0;
+  return topopt::organic_spacing_for(rho, min_extrudable_width_mm);
+}
+
+// Core's own DEFAULT bead for a traced lattice — already max(t, the stated extrusion
+// width), and NOT the nozzle: it puts the densest lattice in the band exactly on the
+// resolution floor, which is the one that actually binds on a real part.
+double organic_default_strut_diameter_mm(double grid_spacing_mm,
+                                         double resolution_floor_voxels, double rho_max,
+                                         double min_extrudable_width_mm) {
+  return topopt::organic_default_strut_diameter_mm(
+      grid_spacing_mm, resolution_floor_voxels, rho_max, min_extrudable_width_mm);
+}
+
+// ★★★ THE CENTRELINE FIELD (2026-09-04, "topology / thickness split"). The preview
+// field used to be the SURFACE distance (centreline distance minus the strut radius),
+// so every thickness change re-baked — and, because the picks hashed the strut width,
+// re-TRACED. Now two channels are baked once per topology: the distance to the nearest
+// centreline, and the SURFACE distance (min over spans of centreline − radius). At the
+// baked thickness the march reads the surface channel — exact even where radii vary,
+// which "nearest centreline minus its radius" is not (measured 2026-09-04: 366 voxels
+// off on a three-radius fixture). Under a LIVE override r′ the march reads
+// centreline − r′, exact because every strut then has the same radius. The centreline
+// channel is clamped at `reach` = band + the largest radius and the surface channel at
+// `band`: outside a span's footprint both are lower bounds, never a false hit.
+static void stamp_centreline_span(std::vector<double>& field, std::vector<double>& surface,
+                                  int fnx, int fny, int fnz, double fspacing,
+                                  double fox, double foy, double foz,
+                                  const topopt::Vec3& a, const topopt::Vec3& b,
+                                  double r, double reach) {
+  int i0 = static_cast<int>(std::floor((std::min(a.x, b.x) - reach - fox) / fspacing));
+  int i1 = static_cast<int>(std::ceil((std::max(a.x, b.x) + reach - fox) / fspacing));
+  int j0 = static_cast<int>(std::floor((std::min(a.y, b.y) - reach - foy) / fspacing));
+  int j1 = static_cast<int>(std::ceil((std::max(a.y, b.y) + reach - foy) / fspacing));
+  int k0 = static_cast<int>(std::floor((std::min(a.z, b.z) - reach - foz) / fspacing));
+  int k1 = static_cast<int>(std::ceil((std::max(a.z, b.z) + reach - foz) / fspacing));
+  i0 = std::max(i0, 0); j0 = std::max(j0, 0); k0 = std::max(k0, 0);
+  i1 = std::min(i1, fnx - 1); j1 = std::min(j1, fny - 1); k1 = std::min(k1, fnz - 1);
+  const double bax = b.x - a.x, bay = b.y - a.y, baz = b.z - a.z;
+  const double bb = bax * bax + bay * bay + baz * baz;
+  for (int k = k0; k <= k1; ++k) {
+    const double pz = foz + k * fspacing;
+    for (int j = j0; j <= j1; ++j) {
+      const double py = foy + j * fspacing;
+      const std::size_t row = (static_cast<std::size_t>(k) * fny + j) * fnx;
+      for (int i = i0; i <= i1; ++i) {
+        const double px = fox + i * fspacing;
+        const double pax = px - a.x, pay = py - a.y, paz = pz - a.z;
+        double h = bb > 1e-12 ? (pax * bax + pay * bay + paz * baz) / bb : 0.0;
+        h = h < 0.0 ? 0.0 : (h > 1.0 ? 1.0 : h);
+        const double dx = pax - bax * h, dy = pay - bay * h, dz = paz - baz * h;
+        const double d = std::sqrt(dx * dx + dy * dy + dz * dz);
+        double& slot = field[row + i];
+        if (d < slot) slot = d;
+        double& srf = surface[row + i];
+        if (d - r < srf) srf = d - r;
+      }
+    }
+  }
+}
+
+// ★ `OrganicLattice::overhang_fillet` exists on cores from branch
+// claude/traced-organic-refusals onward; this bridge compiles against either.
+template <typename T, typename = void>
+struct has_overhang_fillet : std::false_type {};
+template <typename T>
+struct has_overhang_fillet<T, std::void_t<decltype(std::declval<T&>().overhang_fillet)>> : std::true_type {};
+template <typename T>
+static void set_overhang_fillet_if_present(T& lat, bool on) {
+  if constexpr (has_overhang_fillet<T>::value) lat.overhang_fillet = on;
+  else (void)on;
+}
+
+// ★ BAKE A SPAN LIST ALONE — for a cached variant (a beam-lattice 3MF) or a run's
+// emitted spans: no trace, no emission, the same two channels. Layout: [0] 1 = ok,
+// [1] span count, [4] field cell count, [8] reach (mm), [9] band (mm), [16 ..] the
+// centreline distance field, then the SURFACE distance field (both fn doubles).
+std::vector<double> organic_spans_field(const double* spans7, std::size_t span_count,
+                                        int fnx, int fny, int fnz, double fspacing,
+                                        double fox, double foy, double foz, double band_mm) {
+  std::vector<double> out(16, 0.0);
+  if (fnx <= 0 || fny <= 0 || fnz <= 0 || !(fspacing > 0.0) || !(band_mm > 0.0)) return out;
+  const std::size_t fn = static_cast<std::size_t>(fnx) * fny * fnz;
+  double rmax = 0.0;
+  for (std::size_t i = 0; i < span_count; ++i) rmax = std::max(rmax, spans7[7 * i + 6]);
+  const double reach = band_mm + rmax;
+  std::vector<double> field(fn, reach), surface(fn, band_mm);
+  std::size_t stamped = 0;
+  for (std::size_t i = 0; i < span_count; ++i) {
+    const double* q = spans7 + 7 * i;
+    if (!(q[6] > 0.0)) continue;
+    stamp_centreline_span(field, surface, fnx, fny, fnz, fspacing, fox, foy, foz,
+                          topopt::Vec3{q[0], q[1], q[2]}, topopt::Vec3{q[3], q[4], q[5]},
+                          q[6], reach);
+    ++stamped;
+  }
+  out[0] = 1.0; out[1] = static_cast<double>(stamped); out[4] = static_cast<double>(fn); out[8] = reach; out[9] = band_mm;
+  out.insert(out.end(), field.begin(), field.end());
+  out.insert(out.end(), surface.begin(), surface.end());
+  return out;
+}
+
+// ★★★ THE ORGANIC LATTICE, AS THE PREVIEW NEEDS IT (task 2026-08-22).
+//
+// ★ WHY THE PREVIEW CAN HAVE THIS AT ALL. The standing note said the strut preview
+// could draw only DOUBLED, organic having "no cells at all, only traced curves". The
+// gate was never the curves — it was the INPUT: `trace_organic_lattice` wants the full
+// per-voxel stress TENSOR (6 components, Voigt, MPa), and the preview only ever held
+// the von Mises SCALAR. But the tensor already crosses this bridge for the load-flow
+// overlay (`OptimizeVariant::stress_tensor_field`), so nothing new has to be solved or
+// exported — it only has to be handed to the tracer.
+//
+// ★ CURVES OUT, NOT GEOMETRY. `generate_organic_lattice` sweeps solids and welds them;
+// that is for the exporter. A preview wants CENTRELINES and radii, which the tracer
+// already produced — every polyline segment and every connector, as capsules. The part
+// and region clip is applied by the renderer's own field, exactly as it is for the
+// octet march, so no clip is duplicated here.
+//
+// ★ ONE FLAT ARRAY OUT, header then payload — a POD struct does not survive this
+// boundary and `std::vector` INPUTS do not either (see `lattice_member_thickness_mm`).
+//
+//   [0]  1 = traced, 0 = refused (bad sizes / core threw)
+//   [1]  span count            [2]  curve count        [3]  connector count
+//   [4]  FIELD cell count      [5]  min spacing used   [6]  max spacing used
+//   [7]  degenerate fraction   [8]  band (mm)          [9]  design-grid voxel count n
+//   [10]  traced segment count (curves' segments + connectors)
+//   ★ THE COUNTERS (reviewer, 2026-09-04: "dump these for the cube run" — the grower's
+//   own counters, `OrganicGenStats.growth_*`, and the tracer's stop counters,
+//   `OrganicReport.stop_*`; a preview that shows a shape must also say WHY it stopped):
+//   [11] growth_seeds        [12] growth_curves       [13] growth_steps
+//   [14] growth_blocked      [15] growth_clamped      [16] growth_branches
+//   [17] growth_branch_refused [18] growth_joins      [19] growth_join_refused_span
+//   [20] growth_tip_budget_hit (0/1)   [21..31] on the TRACED report:
+//   [21] stop_left_region    [22] stop_hit_d_test     [23] stop_no_direction
+//   [24] stop_step_budget    [25] stop_turned_too_far [26] stop_self_revisit
+//   [27] seeds_offered       [28] seeds_traced        [29] seeds_too_close
+//   [30] curves_too_short    [31] step_budget_hits
+//   ★ THE LENGTH CENSUS of the EMISSION the preview bakes (OrganicGenStats.census_*;
+//   the same stages the run's receipt names): [32] grown/traced input length,
+//   [33..44] census_len_mm[emitted, node_merge, base_cut, support_prune,
+//   stranded_drop, ground_tie, branch_support, dangling, stranded_drop_2, fill_mat,
+//   finish, written] (−1 = the pass did not run), [45] written components,
+//   [46] 1 = emission ran, [47] filleted (arched) spans
+//   ★ THE PHASE CLOCK (2026-09-06: his part sat 12 min 26 s at "Rebuilding the
+//   lattice" and only a `sample` of the process could say where; now the header
+//   says): [56] trace/grow seconds, [57] emission seconds (node merge, base cut,
+//   support raster and arches, ties, finish — the run's own passes), [58] bake
+//   seconds (the capsule stamp into the two fields). Wall clock, this thread.
+//   [48 ..]                    the CENTRELINE distance field, [4] doubles (mm, ≥ 0,
+//                              clamped at [8] = reach = band + largest radius)
+//   [48 + field ..]            per-voxel relative density on the DESIGN grid, n doubles
+//   [48 + field + n ..]        the SURFACE distance field, [4] doubles (min over spans of
+//                              centreline − radius, clamped at the band)
+//   then                       the emitted spans, 7 doubles each (a, b, r)
+std::vector<double> organic_preview_field(
+    int nx, int ny, int nz, double spacing, double ox, double oy, double oz,
+    const std::uint8_t* candidate, std::size_t candidate_count,
+    const double* tensor, std::size_t tensor_count,
+    const double* spacing_mm, std::size_t spacing_count,
+    double min_extrudable_width_mm,
+    double build_x, double build_y, double build_z,
+    double overhang_angle_deg, double rho_min, double rho_max,
+    // ★ THE USER'S OTHER ORGANIC PICKS (maintainer, 2026-09-03: the sample re-traces
+    // with every setting): an explicit strut diameter (0 ⇒ core derives it from the
+    // density band), and GROWN with its layer height (grow == 0 ⇒ traced). Both go to
+    // the same production functions the run uses — trace_organic_lattice /
+    // grow_organic_lattice — nothing preview-only.
+    double strut_diameter_mm, int grow, double layer_height_mm,
+    // ★ WHETHER A CURVE END THAT LEFT THE REGION IS AN ANCHOR — run_job's rule
+    // (`op.anchor_at_region_boundary = shell_is_written`, `outer_finish != "skin"`):
+    // on a BARE lattice there is no shell to land on, the end is not an anchor, and
+    // the dangling-end trim cuts it back to its last connector. A preview that
+    // assumed anchors drew a crisper face than the bare run builds.
+    int anchor_at_boundary,
+    // ★ 1 = bake what the FILE contains (the emission's post-pass spans: node merge,
+    // base cut, support arches, ties); 0 = bake the TRACED/GROWN curves themselves,
+    // before any repair — the "show without repairs" preview (maintainer,
+    // 2026-09-05). The census still names how many spans the repairs would arch.
+    int emit_repairs,
+    // ★ core `organic_overhang_fillet` (maintainer wire-up, 2026-09-05): 1 ⇒ core's
+    // default (flare spans over air), 0 ⇒ leave them as drawn. Set on the lattice
+    // when this core's `OrganicLattice` carries `overhang_fillet`; ignored (with the
+    // Swift side told so through the schema probe) when it does not.
+    int overhang_fillet,
+    // ★ SYNTHETIC STRESS ON UNLOADED WALLS — core's own function (2026-09-06). See the
+    // header. region_id per voxel (0 = none), synth rows of 4, the run's dead fraction.
+    const int* region_id, std::size_t region_id_count,
+    const double* synth, std::size_t synth_count, double synth_dead_fraction,
+    // The field to bake the traced capsules into: its own grid, which is the REGION's
+    // bbox rather than the part's, so the voxel can be a fraction of the design grid's.
+    int fnx, int fny, int fnz, double fspacing,
+    double fox, double foy, double foz, double band_mm) {
+  const std::size_t n = static_cast<std::size_t>(nx) * static_cast<std::size_t>(ny) *
+                        static_cast<std::size_t>(nz);
+  // ★ 64-double header (was 48): [48..55] the synthetic-stress report, then
+  // out[55] rows of 7 per region BEFORE the field.
+  std::vector<double> out(64, 0.0);
+  if (nx <= 0 || ny <= 0 || nz <= 0 || !(spacing > 0.0)) return out;
+  if (candidate == nullptr || candidate_count != n) return out;
+  if (tensor == nullptr || tensor_count != 6 * n) return out;
+  if (spacing_mm == nullptr || spacing_count != n) return out;
+  if (!(min_extrudable_width_mm > 0.0)) return out;   // §2c: printability is user input
+
+  topopt::VoxelGrid grid;
+  grid.nx = nx; grid.ny = ny; grid.nz = nz;
+  grid.spacing = spacing;
+  grid.origin = topopt::Vec3{ox, oy, oz};
+  grid.tags.assign(n, topopt::VoxelTag::Empty);
+
+  std::vector<char> cand(n, 0);
+  std::vector<double> sep(n, 0.0);
+  bool any = false;
+  for (std::size_t i = 0; i < n; ++i) {
+    // ★ A CANDIDATE NEEDS A SEPARATION. Core throws on a non-positive spacing anywhere
+    // on the candidate set, so a voxel the caller marked but gave no spacing for is
+    // dropped here rather than turned into an exception the UI cannot act on.
+    const bool c = candidate[i] != 0 && spacing_mm[i] > 0.0;
+    cand[i] = c ? 1 : 0;
+    sep[i] = c ? spacing_mm[i] : 0.0;
+    grid.tags[i] = c ? topopt::VoxelTag::Interior : topopt::VoxelTag::Empty;
+    any = any || c;
+  }
+  if (!any) return out;
+
+  std::vector<double> stress(tensor, tensor + 6 * n);
+
+  // ★ SYNTHETIC STRESS ON UNLOADED WALLS — CORE'S OWN FUNCTION, the same one
+  // run_job calls (`synthesize_focal_stress(grid, candidate, voxel_region_id, cfg,
+  // 0.02, out)`), on the same per-region config the job carries. The app used to
+  // inject its own field here; two recipes cannot agree, so the app's is gone.
+  topopt::SyntheticStressReport srep;
+  bool synth_ran = false;
+  if (region_id != nullptr && region_id_count == n && synth != nullptr &&
+      synth_count >= 4 && synth_dead_fraction > 0.0) {
+    std::vector<int> vr(region_id, region_id + n);
+    std::vector<topopt::SyntheticStressRegion> cfg;
+    for (std::size_t k = 0; k + 3 < synth_count; k += 4) {
+      topopt::SyntheticStressRegion r;
+      r.region_id = static_cast<int>(synth[k]);
+      r.face_id = static_cast<int>(synth[k + 1]);
+      r.foci = static_cast<int>(synth[k + 2]);
+      r.soft_mm = synth[k + 3];
+      cfg.push_back(r);
+    }
+    try {
+      srep = topopt::synthesize_focal_stress(grid, cand, vr, cfg, synth_dead_fraction, stress);
+      synth_ran = true;
+    } catch (...) {
+      synth_ran = false;
+    }
+  }
+  std::vector<double> synth_rows;
+  if (synth_ran) {
+    for (const topopt::SyntheticStressRegionReport& r : srep.per_region) {
+      synth_rows.insert(synth_rows.end(),
+                        {static_cast<double>(r.region_id), static_cast<double>(r.face_id),
+                         static_cast<double>(r.foci), r.soft_mm, static_cast<double>(r.voxels),
+                         static_cast<double>(r.fully_synthetic), static_cast<double>(r.blended)});
+    }
+  }
+
+  topopt::OrganicParams p;
+  p.build_dir = topopt::Vec3{build_x, build_y, build_z};
+  p.min_extrudable_width_mm = min_extrudable_width_mm;
+  p.overhang_angle_deg = overhang_angle_deg;
+  p.rho_min = rho_min;
+  p.rho_max = rho_max;
+  p.strut_diameter_mm = strut_diameter_mm > 0.0 ? strut_diameter_mm : 0.0;
+  p.layer_hint_mm = (grow != 0 && layer_height_mm > 0.0) ? layer_height_mm : 0.0;
+  p.anchor_at_region_boundary = anchor_at_boundary != 0;
+
+  topopt::OrganicLattice lat;
+  topopt::OrganicGenStats gstats;   // the grower's own counters (run_job: `&oo.growth`)
+  topopt::OrganicGenStats emit_stats;  // the emission's census (what the file is built from)
+  bool emit_ran = false;
+  using phase_clock = std::chrono::steady_clock;
+  auto phase_seconds = [](phase_clock::time_point t0) {
+    return std::chrono::duration<double>(phase_clock::now() - t0).count();
+  };
+  double trace_seconds = 0.0, emit_seconds = 0.0, bake_seconds = 0.0;
+  const phase_clock::time_point trace_t0 = phase_clock::now();
+  try {
+    // ★ THE SAME BRANCH THE RUN TAKES (run_job.cpp: `oo.lat = jg.organic_growth ?
+    // grow_organic_lattice(...) : trace_organic_lattice(...)`).
+    lat = (grow != 0 && layer_height_mm > 0.0)
+              ? topopt::grow_organic_lattice(grid, cand, stress, sep, nullptr, p, &gstats)
+              : topopt::trace_organic_lattice(grid, cand, stress, sep, nullptr, p);
+  } catch (...) {
+    return out;   // core refused; the caller says so rather than drawing something
+  }
+  trace_seconds = phase_seconds(trace_t0);
+
+  // ── ★★★ THE CAPSULES, BAKED TO A DISTANCE FIELD ─────────────────────────────
+  //
+  // ★ WHY A FIELD AND NOT THE SPANS THEMSELVES. The renderer already sphere-traces
+  // volume textures (the part SDF, the region SDF) and clips against them; a strut
+  // field drops straight into that machinery as one more `max()` term. The
+  // alternative — shipping ~100k centreline segments to the GPU with a uniform-grid
+  // index and marching them in world space — is a second renderer for a picture the
+  // existing one can already draw.
+  //
+  // ★ AND WHY THE BAKE IS HERE RATHER THAN IN SWIFT. It is a SCATTER: every span
+  // stamps its own bounding box. On his part that is ~10^8 distance evaluations, which
+  // is a second of C++ and a minute of Swift. Nothing about it is rendering policy —
+  // it is the distance to a union of capsules.
+  //
+  // ★ THE FIELD IS CLAMPED AT `band_mm`, WHICH IS SAFE IN THE ONE DIRECTION THAT
+  // MATTERS. A clamped value is an UNDER-estimate of the true distance, so a sphere
+  // trace against it takes a shorter step and can never overshoot a strut. It only
+  // costs steps in empty space — and inside a region the curve separation is a few mm,
+  // so almost every point is within the band anyway.
+  const std::size_t fn = static_cast<std::size_t>(fnx) * static_cast<std::size_t>(fny) *
+                         static_cast<std::size_t>(fnz);
+  std::vector<double> field, surface_field;
+  std::size_t span_count = 0;
+  double reach_all = band_mm;
+  // Function scope: the FIELD is optional (a caller may want only the spans) but the
+  // span list is returned either way.
+  std::vector<topopt::OrganicSpan> emitted;
+  if (fnx > 0 && fny > 0 && fnz > 0 && fspacing > 0.0 && band_mm > 0.0 && fn > 0) {
+    auto stamp = [&](const topopt::Vec3& a, const topopt::Vec3& b, double r) {
+      ++span_count;
+      stamp_centreline_span(field, surface_field, fnx, fny, fnz, fspacing, fox, foy, foz,
+                            a, b, r, reach_all);
+    };
+    struct NullSink : topopt::TriangleSink {
+      void add_triangle(const topopt::Vec3&, const topopt::Vec3&,
+                        const topopt::Vec3&) override {}
+    } sink;
+    // ★ THE LAYER HEIGHT THE MACHINE WILL USE (run_job.cpp: `organic.lat.layer_height_mm
+    // = job.loads.layer_height_mm`, set on BOTH paths before emission). Without it the
+    // base trim (`trim_below_base && layer_height_mm > 0`) and the mid-air-start raster
+    // are SKIPPED, and the preview keeps material the file cuts (measured 2026-09-04).
+    lat.layer_height_mm = layer_height_mm > 0.0 ? layer_height_mm : 0.0;
+    set_overhang_fillet_if_present(lat, overhang_fillet != 0);
+    // ★ THE BOUNDARY THE PASSES READ (run_job.cpp `lattice_boundary_for`: a voxel base
+    // at iso 0.5 with a 2·cell window, plus the shell where one is written). Without
+    // it the emission's breach checks (`boundary->signed_distance(c) < rmin`) and the
+    // span clip never ran in the preview, and the support pass laid legs the file
+    // cannot contain — measured 2026-09-04: the sample's support stage ADDED 70 % where
+    // core's own run on the cube CUT 42 %. The region's candidate set IS the base here
+    // (the sample's box; a part's declared region); a written shell has no preview
+    // object yet, so a bare job is what this mirrors.
+    topopt::LatticeBoundary boundary;
+    std::vector<double> boundary_density(cand.size(), 0.0);
+    for (std::size_t i = 0; i < cand.size(); ++i) boundary_density[i] = cand[i] ? 1.0 : 0.0;
+    double sep_hi = 0.0;
+    for (std::size_t i = 0; i < sep.size(); ++i)
+      if (cand[i] && sep[i] > sep_hi) sep_hi = sep[i];
+    boundary.set_voxel_base(&grid, &boundary_density, 0.5, 2.0 * (sep_hi > 0.0 ? sep_hi : spacing));
+    const phase_clock::time_point emit_t0 = phase_clock::now();
+    // ★ THE EMISSION IS THE WAIT (measured 2026-09-06 on his part: trace 0.2 s,
+    // emission 186–191 s, stamp 0.3 s). With repairs hidden it is not drawn, so it is
+    // not run: the traced picture lands in seconds, and the census says the emission
+    // did not run rather than pretending. A caller that wants both draws the traced
+    // set first and asks again with repairs on (the two-stage bake).
+    if (emit_repairs != 0) {
+      try {
+        emit_stats = topopt::generate_organic_lattice(lat, sink, &boundary, 8, nullptr, &emitted);   // run_job passes 8
+        emit_ran = true;
+      } catch (...) {
+        emitted.clear();
+      }
+    }
+    emit_seconds = phase_seconds(emit_t0);
+    if (emit_repairs == 0) {
+      // ★ WITHOUT REPAIRS: the curves and connectors as traced, not the emitted set.
+      emitted.clear();
+      for (const topopt::OrganicCurve& c : lat.curves) {
+        for (std::size_t t = 1; t < c.points.size(); ++t)
+          emitted.push_back({c.points[t - 1], c.points[t], c.radius_mm});
+      }
+      for (const topopt::OrganicConnector& cn : lat.connectors)
+        emitted.push_back({cn.a, cn.b, cn.radius_mm > 0.0 ? cn.radius_mm : 0.5 * p.min_extrudable_width_mm});
+    }
+    double rmax = 0.0;
+    for (const topopt::OrganicSpan& sp : emitted) rmax = std::max(rmax, sp.r);
+    reach_all = band_mm + rmax;
+    const phase_clock::time_point bake_t0 = phase_clock::now();
+    field.assign(fn, reach_all);
+    surface_field.assign(fn, band_mm);
+    for (const topopt::OrganicSpan& sp : emitted) {
+      if (!(sp.r > 0.0)) continue;
+      stamp(sp.a, sp.b, sp.r);
+    }
+    bake_seconds = phase_seconds(bake_t0);
+  }
+
+  double lo = 0.0, hi = 0.0;
+  bool first = true;
+  for (std::size_t i = 0; i < lat.spacing_used_mm.size() && i < n; ++i) {
+    const double s = lat.spacing_used_mm[i];
+    if (!(s > 0.0)) continue;
+    if (first) { lo = hi = s; first = false; }
+    else { lo = std::min(lo, s); hi = std::max(hi, s); }
+  }
+
+  out[0] = 1.0;
+  out[1] = static_cast<double>(span_count);   // EMITTED spans, post-clip
+  out[2] = static_cast<double>(lat.curves.size());
+  out[3] = static_cast<double>(lat.connectors.size());
+  out[4] = static_cast<double>(field.size());
+  out[5] = lo;
+  out[6] = hi;
+  out[7] = lat.report.degenerate_fraction;
+  out[8] = reach_all;   // the clamp of BOTH channels
+  out[9] = static_cast<double>(n);
+  // ★ THE TRACED SEGMENT COUNT, so the gap between what was TRACED and what is
+  // EMITTED is a number on the receipt rather than a claim. The four post-trace passes
+  // (node merge, free-end tie, support prune, stranded drop) live in that gap; a
+  // preview that shows the traced set is showing struts the file does not contain.
+  {
+    std::size_t traced = lat.connectors.size();
+    for (const topopt::OrganicCurve& c : lat.curves) {
+      if (c.points.size() > 1) traced += c.points.size() - 1;
+    }
+    out[10] = static_cast<double>(traced);
+  }
+  out[32] = emit_stats.census_grown_len_mm;
+  for (int c = 0; c < topopt::OrganicGenStats::kCensusStages && c < 12; ++c)
+    out[33 + c] = emit_stats.census_len_mm[c];
+  out[45] = static_cast<double>(emit_stats.census_components[topopt::OrganicGenStats::CensusWritten]);
+  out[46] = emit_ran ? 1.0 : 0.0;
+  out[47] = static_cast<double>(emit_stats.filleted_spans);   // the support pass's arches
+  out[11] = static_cast<double>(gstats.growth_seeds);
+  out[12] = static_cast<double>(gstats.growth_curves);
+  out[13] = static_cast<double>(gstats.growth_steps);
+  out[14] = static_cast<double>(gstats.growth_blocked);
+  out[15] = static_cast<double>(gstats.growth_clamped);
+  out[16] = static_cast<double>(gstats.growth_branches);
+  out[17] = static_cast<double>(gstats.growth_branch_refused);
+  out[18] = static_cast<double>(gstats.growth_joins);
+  out[19] = static_cast<double>(gstats.growth_join_refused_span);
+  out[20] = gstats.growth_tip_budget_hit ? 1.0 : 0.0;
+  out[21] = static_cast<double>(lat.report.stop_left_region);
+  out[22] = static_cast<double>(lat.report.stop_hit_d_test);
+  out[23] = static_cast<double>(lat.report.stop_no_direction);
+  out[24] = static_cast<double>(lat.report.stop_step_budget);
+  out[25] = static_cast<double>(lat.report.stop_turned_too_far);
+  out[26] = static_cast<double>(lat.report.stop_self_revisit);
+  out[27] = static_cast<double>(lat.report.seeds_offered);
+  out[28] = static_cast<double>(lat.report.seeds_traced);
+  out[29] = static_cast<double>(lat.report.seeds_too_close);
+  out[30] = static_cast<double>(lat.report.curves_too_short);
+  out[31] = static_cast<double>(lat.report.step_budget_hits);
+  out[48] = synth_ran ? 1.0 : 0.0;
+  out[49] = static_cast<double>(srep.regions);
+  out[50] = static_cast<double>(srep.voxels_in_regions);
+  out[51] = static_cast<double>(srep.voxels_fully_synthetic);
+  out[52] = static_cast<double>(srep.voxels_blended);
+  out[53] = srep.dead_threshold;
+  out[54] = srep.peak_von_mises;
+  out[55] = static_cast<double>(synth_rows.size() / 7);
+  out[56] = trace_seconds;
+  out[57] = emit_seconds;
+  out[58] = bake_seconds;
+  out.insert(out.end(), synth_rows.begin(), synth_rows.end());
+  out.insert(out.end(), field.begin(), field.end());
+  if (lat.relative_density.size() == n) {
+    out.insert(out.end(), lat.relative_density.begin(), lat.relative_density.end());
+  } else {
+    out.insert(out.end(), n, 0.0);
+  }
+  out.insert(out.end(), surface_field.begin(), surface_field.end());
+  // ★ THE EMITTED SPANS THEMSELVES, LAST — 7 doubles each (a, b, r). The FIELD is what
+  // the march samples; these are for a caller that wants the geometry directly, e.g.
+  // the settings sample, which builds capsules rather than sphere-tracing a volume.
+  // Post-clip, same list the field was stamped from, so the two cannot disagree.
+  for (const topopt::OrganicSpan& sp : emitted) {
+    if (!(sp.r > 0.0)) continue;
+    out.insert(out.end(), {sp.a.x, sp.a.y, sp.a.z, sp.b.x, sp.b.y, sp.b.z, sp.r});
+  }
+  return out;
+}
+
+// ★★ CORE'S OWN CELL-SIZE BAND FOR ORGANIC, READ BY THE PREVIEW (maintainer,
+// 2026-09-06: "auto cell grade looked incredibly sparse — is it using the octet
+// preview settings?" It was: with nothing picked the trace read the octet window).
+// This forwards `organic_recommend_band` — the pure function run_job calls with the
+// same arguments (run_job.cpp `[recommend]`): the tracer's print floor
+// 0.5·bead·√(3π), the solve voxel, `OrganicParams::resolution_floor_voxels`,
+// `kOrganicRecommendCellsAcrossMember`, the look and the steps. Nothing is derived here.
+//
+//   regions: rows of 5 — face_id, depth_mm, extent_short_mm, stress_p50, stress_p99
+//   out: [0] lo_mm [1] hi_mm [2] printability_floor [3] resolution_floor
+//        [4] member_ceiling [5] extent_ceiling [6] collapsed [7] look_cell_mm
+//        [8] grade_ratio [9] candidate count N, then N rows of 3: lo, hi, source
+//        (0 grid, 1 pair, 2 look, 3 look_pair, 4 look_step, 5 other)
+std::vector<double> organic_recommend_band(const double* regions, std::size_t region_count,
+                                           double min_extrudable_width_mm, double voxel_mm,
+                                           double look_cells_across, int steps) {
+  std::vector<double> out(10, 0.0);
+  if (regions == nullptr || region_count == 0 || !(min_extrudable_width_mm > 0.0) ||
+      !(voxel_mm > 0.0)) return out;
+  std::vector<topopt::OrganicRecommendRegion> rr;
+  for (std::size_t i = 0; i < region_count; ++i) {
+    topopt::OrganicRecommendRegion q;
+    q.face_id = static_cast<int>(regions[5 * i]);
+    q.depth_mm = regions[5 * i + 1];
+    q.extent_short_mm = regions[5 * i + 2];
+    q.stress_p50 = regions[5 * i + 3];
+    q.stress_p99 = regions[5 * i + 4];
+    rr.push_back(q);
+  }
+  topopt::OrganicRecommendBand B;
+  try {
+    B = topopt::organic_recommend_band(
+        rr, 0.5 * min_extrudable_width_mm * std::sqrt(3.0 * 3.14159265358979323846),
+        voxel_mm, topopt::OrganicParams{}.resolution_floor_voxels,
+        topopt::kOrganicRecommendCellsAcrossMember, look_cells_across, steps);
+  } catch (...) {
+    return out;
+  }
+  out[0] = B.lo_mm; out[1] = B.hi_mm;
+  out[2] = B.printability_floor_mm; out[3] = B.resolution_floor_mm;
+  out[4] = B.member_ceiling_mm; out[5] = B.extent_ceiling_mm;
+  out[6] = B.collapsed ? 1.0 : 0.0;
+  out[7] = B.look_cell_mm; out[8] = B.grade_ratio;
+  out[9] = static_cast<double>(B.candidates.size());
+  for (const topopt::OrganicRecommendCandidate& c : B.candidates) {
+    double src = 5.0;
+    if (c.source == "grid") src = 0.0;
+    else if (c.source == "pair") src = 1.0;
+    else if (c.source == "look") src = 2.0;
+    else if (c.source == "look_pair") src = 3.0;
+    else if (c.source == "look_step") src = 4.0;
+    out.insert(out.end(), {c.lo, c.hi, src});
+  }
+  return out;
+}
+
+// ★★ CORE'S OWN DYADIC CELL PLAN, READ BY THE PREVIEW (task item 3: "Is there *NO*
+// way to make the *PREVIEW* lattice grade cell size?").
+//
+// The preview drew ONE cell size for the whole part while a swept run gives every
+// region the coarsest dyadic cell its own member can hold. This forwards
+// `plan_cell_sizes` verbatim — the app decides nothing about which cell goes where,
+// exactly as `lattice_member_thickness_mm` above forwards the width law.
+//
+// ★ THE RETURN IS ONE FLAT ARRAY, header then payload, because the alternative is a
+// POD struct across the Swift/C++ boundary and this file already learned what that
+// costs (`std::vector` INPUTS do not survive it). Layout:
+//
+//     [0] ok            1, or the array is empty
+//     [1..3] nx ny nz   BASE-CELL grid dims (NOT the voxel grid)
+//     [4..6] ox oy oz   base-cell grid origin, model mm
+//     [7] base_cell_mm  S0
+//     [8] max_level     levels run 0..max_level; cell(L) = S0 * 2^L
+//     [9 ..]            one level per base cell, x fastest, -1 = not latticed
+//     [9+N ..]          one reject reason per base cell: 0 latticed / not a
+//                       candidate, 1 MEMBER TOO THIN, 2 STRUT UNPRINTABLE
+//
+// The caller MUST take the origin, dims and S0 from here rather than deriving its
+// own: the whole reason coarse and fine cells meet at shared nodes is that every
+// level-L cell sits on an ALIGNED 2^L block of THIS grid. A base grid half a cell
+// off would put a strut end in the middle of a neighbour's face — a floating end,
+// which is the one thing the dyadic ladder exists to prevent.
+std::vector<double> lattice_cell_size_plan(
+    int nx, int ny, int nz, double spacing, double ox, double oy, double oz,
+    const std::uint8_t* candidate, std::size_t candidate_count,
+    const double* rho, std::size_t rho_count,
+    const double* width, std::size_t width_count,
+    double min_cell_mm, double max_cell_mm, double min_extrudable_width_mm,
+    int cap_radius_voxels, const std::string& topology,
+    const double* desired_cell_mm, std::size_t desired_count,
+    double cells_per_member_floor) {
+  const std::size_t want =
+      static_cast<std::size_t>(nx) * static_cast<std::size_t>(ny) *
+      static_cast<std::size_t>(nz);
+  if (nx <= 0 || ny <= 0 || nz <= 0) return {};
+  if (!(spacing > 0.0)) return {};
+  if (candidate == nullptr || rho == nullptr || width == nullptr) return {};
+  if (candidate_count != want || rho_count != want || width_count != want) return {};
+  if (!(min_cell_mm > 0.0) || !(max_cell_mm >= min_cell_mm)) return {};
+  if (!(min_extrudable_width_mm > 0.0) || cap_radius_voxels <= 0) return {};
+
+  topopt::LatticeTopology topo;
+  if (!lattice_topology_from_name(topology, topo)) return {};
+
+  topopt::VoxelGrid grid;
+  grid.nx = nx; grid.ny = ny; grid.nz = nz;
+  grid.spacing = spacing;
+  grid.origin = topopt::Vec3{ox, oy, oz};
+  grid.tags.assign(want, topopt::VoxelTag::Empty);
+
+  std::vector<char> cand(want, 0);
+  std::vector<double> rho_v(want, 0.0), width_v(want, 0.0);
+  for (std::size_t i = 0; i < want; ++i) {
+    const bool c = candidate[i] != 0;
+    cand[i] = c ? 1 : 0;
+    grid.tags[i] = c ? topopt::VoxelTag::Interior : topopt::VoxelTag::Empty;
+    rho_v[i] = rho[i];
+    width_v[i] = width[i];
+  }
+
+  topopt::CellPlanParams pp;
+  pp.topology = topo;
+  pp.mode = topopt::CellSizeMode::Swept;
+  pp.min_cell_size_mm = min_cell_mm;
+  pp.max_cell_size_mm = max_cell_mm;
+  pp.min_extrudable_width_mm = min_extrudable_width_mm;
+  pp.thickness_cap_voxels = cap_radius_voxels;
+  // ★★★ THE FLOOR THE PLANNER CULLS BY, AND IT IS THE LAST CONSUMER OF IT
+  // (maintainer, 2026-08-22: "Why is there only lattice in the back of these walls??").
+  //
+  // ★ CORE CULLS A CELL WHOSE MEMBER CANNOT HOLD `N*` OF IT, and with this left at 0
+  // that N* is `lattice_cells_per_member_min(topology)` — the ACCURACY floor of 5 —
+  // however far the stage mode had relaxed. So the app asked for a 4.4 mm cell in his
+  // 11 mm wall, core required 5 x 4.4 = 22.0 mm of member to keep it, and culled the
+  // whole wall to SOLID. The only material that survived was the thick spine behind
+  // it, which is precisely "only lattice in the back".
+  //
+  // ★ THE FLOOR HAD FOUR CONSUMERS AND THIS WAS THE FOURTH: the per-region derivation,
+  // the Auto window's ceiling, the scene's own `minCellsPerMember`, and this. Fixing
+  // the first three moved the numbers the app computes and left the one that decides
+  // what is actually KEPT still dividing by 5.
+  //
+  // 0 keeps the accuracy floor, so every pre-existing caller is unchanged.
+  pp.cells_per_member_floor_override = cells_per_member_floor;
+
+  // ★★ FIT IS THE OTHER PLANNER, AND FOR A THIN WALL IT IS THE RIGHT ONE
+  // (maintainer, 2026-08-20: "I set the cell size to Fit and it still looks like
+  // shit"). Fit picks S = W / N* per declared region — the cell is CHOSEN so exactly
+  // N* fit across the member, so the cells-per-member floor is satisfied BY
+  // CONSTRUCTION and nothing is culled. That is why core is content to refuse Fit
+  // alongside sub-floor retention: Fit does not need it.
+  //
+  // `desired_cell_mm` is grid-indexed — the S_want of the region owning each
+  // candidate voxel, which the caller gets from `lattice_derive_cell_for_member`.
+  // Absent ⇒ the swept planner, exactly as before.
+  topopt::CellSizePlan plan;
+  const bool fit = desired_cell_mm != nullptr && desired_count == want;
+  if (fit) {
+    pp.mode = topopt::CellSizeMode::Fit;
+    std::vector<double> want_v(desired_cell_mm, desired_cell_mm + want);
+    try {
+      plan = topopt::plan_cell_sizes_fit(grid, rho_v, cand, width_v, want_v, pp);
+    } catch (...) {
+      return {};
+    }
+  } else {
+    try {
+      plan = topopt::plan_cell_sizes(grid, rho_v, cand, width_v, pp);
+    } catch (...) {
+      return {};   // core refused the inputs; the caller says it has no plan
+    }
+  }
+
+  const std::size_t cells =
+      static_cast<std::size_t>(plan.nx) * static_cast<std::size_t>(plan.ny) *
+      static_cast<std::size_t>(plan.nz);
+  if (cells == 0 || plan.level.size() != cells) return {};
+
+  std::vector<double> out;
+  out.reserve(9 + 2 * cells);
+  out.push_back(1.0);
+  out.push_back(static_cast<double>(plan.nx));
+  out.push_back(static_cast<double>(plan.ny));
+  out.push_back(static_cast<double>(plan.nz));
+  out.push_back(plan.origin.x);
+  out.push_back(plan.origin.y);
+  out.push_back(plan.origin.z);
+  out.push_back(plan.base_cell_mm);
+  out.push_back(static_cast<double>(plan.max_level));
+  for (std::size_t i = 0; i < cells; ++i) {
+    out.push_back(static_cast<double>(plan.level[i]));
+  }
+  // …then WHY each rejected cell was rejected, which sub-floor retention needs:
+  // reason 1 (member too thin) is the only one retention may overrule; reason 2
+  // (strut unprintable) is a fact about the printer and is never rescued.
+  for (std::size_t i = 0; i < cells; ++i) {
+    out.push_back(i < plan.reject_reason.size()
+                      ? static_cast<double>(plan.reject_reason[i]) : 0.0);
+  }
+  return out;
+}
+
+// Core's own sub-floor retention ceiling — the fraction of the part's peak stress a
+// region must stay under before lattice may be kept below the cells-per-member floor.
+// Read, never hardcoded: it is a measured constant and it is core's to move.
+double lattice_subfloor_retention_fraction() {
+  return topopt::lattice_subfloor_retention_stress_fraction();
+}
+
+double lattice_strut_diameter_mm(const std::string& topology, double rho,
+                                 double cell_size_mm) {
+  topopt::LatticeTopology topo;
+  if (!lattice_topology_from_name(topology, topo)) return 0.0;
+  // Core carries a measured diameter law for OCTET only. Anything else gets 0 and
+  // the caller reports "no core number" — inventing one here is exactly how the app
+  // ended up with a second law in the first place.
+  if (topo != topopt::LatticeTopology::Octet) return 0.0;
+  if (!(cell_size_mm > 0.0)) return 0.0;
+  if (!std::isfinite(rho) || rho < 0.0) return 0.0;
+  return topopt::octet_strut_diameter_mm(rho, cell_size_mm);
+}
+
 LatticeLimits lattice_limits(const std::string& topology) {
   LatticeLimits lim;
   topopt::LatticeTopology topo;
@@ -2192,7 +2965,8 @@ LatticeCellBounds lattice_cell_bounds(const std::string& topology,
 
 LatticeRegionDerivation lattice_region_derivation(
     const std::string& topology, double member_width_mm,
-    double min_extrudable_width_mm, double stated_relative_density) {
+    double min_extrudable_width_mm, double stated_relative_density,
+    double cells_per_member_floor) {
   LatticeRegionDerivation d;
   topopt::LatticeTopology topo;
   if (!lattice_topology_from_name(topology, topo)) return d;
@@ -2200,12 +2974,26 @@ LatticeRegionDerivation lattice_region_derivation(
   d.valid = true;
   d.rho_max = topopt::lattice_rho_max(topo);
   const topopt::LatticeCellDerivation w = topopt::lattice_derive_cell_for_member(
-      topo, member_width_mm, min_extrudable_width_mm);
+      topo, member_width_mm, min_extrudable_width_mm, cells_per_member_floor);
   // FEASIBLE is percolation, not accuracy — the same boundary run_job draws, and
   // for the same reason: buildable-and-uncertifiable is a verdict, not a refusal.
   d.feasible = w.feasible_percolation;
   if (!d.feasible) return d;
-  const double n_star = topopt::lattice_cells_per_member_min(topo);
+  // ★★★ THE FLOOR THE CALLER ASKED FOR — NOT ALWAYS THE ACCURACY ONE (maintainer,
+  // 2026-08-22: "the cell size is stuck at 2.2mm which doesn't make sense unless that
+  // wall is only 4.4mm thick?").
+  //
+  // ★ IT WAS 11.0 / 5. This line read `lattice_cells_per_member_min(topo)` — a hard 5,
+  // the ACCURACY floor — no matter what the caller had chosen. On his 11 mm wall that
+  // is exactly the 2.20 mm he measured. Core's own `lattice_derive_cell_for_member`
+  // has taken a floor as a parameter all along; this bridge simply never passed one,
+  // so the aesthetic relaxation reached the per-voxel planner and never reached the
+  // PER-REGION cell that Fit and Stepped are both built from.
+  //
+  // 0 keeps the accuracy floor, so every existing caller is unchanged.
+  const double n_star = cells_per_member_floor > 0.0
+                            ? cells_per_member_floor
+                            : topopt::lattice_cells_per_member_min(topo);
   d.cell_mm = std::max(member_width_mm / n_star, w.min_printable_cell_mm);
   const double rho = topopt::lattice_min_density_for_strut(topo, d.cell_mm,
                                                            min_extrudable_width_mm);
@@ -2419,6 +3207,62 @@ void grading_demand_fraction_into(const float* von_mises, std::size_t n, int int
     out[i] = static_cast<float>(
         topopt::grading_demand_fraction(gi, v, ref, utilisation_target));
   }
+}
+
+// ── ★ THE AESTHETIC CELLS-PER-MEMBER FLOOR — CORE'S, FORWARDED ────────────────
+// See the header. The app must never derive this: the strut-diameter law was
+// re-derived in Swift once and came out 1.4-1.7x adrift, and this floor decides
+// whether material is latticed at all.
+double lattice_aesthetic_cells_per_member_floor(const std::string& topology,
+                                                double utilisation,
+                                                double error_budget) {
+  topopt::LatticeTopology topo;
+  if (!lattice_topology_from_name(topology, topo)) return 0.0;
+  const double budget = error_budget > 0.0
+                            ? error_budget
+                            : topopt::kAestheticHomogenisationErrorBudget;
+  try {
+    return topopt::aesthetic_cells_per_member_floor(topo, utilisation, budget);
+  } catch (...) {
+    return 0.0;   // core refused; the caller says it has no number
+  }
+}
+
+double lattice_aesthetic_cells_per_member_hard_floor(const std::string& topology,
+                                                     bool boundary_finish_written) {
+  topopt::LatticeTopology topo;
+  if (!lattice_topology_from_name(topology, topo)) return 0.0;
+  try {
+    return topopt::aesthetic_cells_per_member_hard_floor(topo, boundary_finish_written);
+  } catch (...) {
+    return 0.0;
+  }
+}
+
+double lattice_aesthetic_error_budget_default() {
+  return topopt::kAestheticHomogenisationErrorBudget;
+}
+
+std::string lattice_aesthetic_density_meaning() {
+  return std::string(topopt::kAestheticDensityMeaning);
+}
+
+std::vector<std::string> lattice_algorithm_names() {
+  return topopt::lattice_algorithm_names();
+}
+
+bool lattice_algorithm_is_known(const std::string& name) {
+  topopt::LatticeAlgorithm a{};
+  return topopt::lattice_algorithm_from_name(name.c_str(), a);
+}
+
+bool lattice_algorithm_allows_structural(const std::string& name) {
+  topopt::LatticeAlgorithm a{};
+  // An unknown name gets no permission — the caller must resolve it first.
+  if (!topopt::lattice_algorithm_from_name(name.c_str(), a)) return false;
+  // ★ ORGANIC IS THE ONE core refuses under a structural claim, and the reason is
+  // the certification library's cubic tensor rather than anything about tracing.
+  return a != topopt::LatticeAlgorithm::Organic;
 }
 
 }  // namespace topoptbridge

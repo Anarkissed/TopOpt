@@ -1050,6 +1050,653 @@ public enum TopOptKit {
 
     /// The core's certifiable limits for a lattice topology named as the job schema
     /// names it (`"octet"`). Forwards `topoptbridge::lattice_limits`; never throws.
+    /// ★★ CORE'S MEASURED STRUT DIAMETER (mm) at a relative density and cell size.
+    /// 0 when core carries no law for the topology (only octet today), the cell is
+    /// non-positive, or rho is not finite and >= 0 — the caller then says it has no
+    /// core number rather than substituting its own.
+    ///
+    /// ★ WHY THIS EXISTS. The app carried `r = cell * sqrt(rho / K)`, K = 48. Core
+    /// interpolates a table measured at vpc48. They disagree by 1.4-1.7x, widening
+    /// with density, so the preview drew every strut far thinner than the run builds
+    /// and printed those numbers in millimetres beside it.
+    public static func latticeStrutDiameterMM(topology: String, relativeDensity rho: Double,
+                                              cellMM: Double) -> Double {
+        topoptbridge.lattice_strut_diameter_mm(std.string(topology), rho, cellMM)
+    }
+
+    /// ★★ CORE'S LOCAL MEMBER THICKNESS (mm per voxel), for the preview.
+    ///
+    /// Core leaves a member too thin to hold `minCellsPerMember` cells SOLID rather
+    /// than latticing it (grading.hpp bar L4). The preview had no notion of member
+    /// width, so it drew lattice on ribs the run leaves solid. This forwards core's
+    /// granulometric opening rather than re-implementing it — the app already grew a
+    /// second strut law that way once.
+    ///
+    /// `solid` is one flag per voxel in x-fastest order. `+infinity` means "thicker
+    /// than the cap measured" and clears any ceiling. Returns EMPTY when core has no
+    /// answer — including when the grid is NOT cubic, which core requires: the caller
+    /// must then say so rather than pretend.
+    /// ★★★ THE ORGANIC LATTICE'S TRACED CENTRELINES — core's own tracer, for the
+    /// preview. See `bridge.cpp` for the flat layout.
+    ///
+    /// ★ THE TENSOR IS THE GATE. `trace_organic_lattice` needs the full per-voxel
+    /// Cauchy stress in core's Voigt order `[xx,yy,zz,xy,yz,zx]`, TRUE shear, MPa —
+    /// not the von Mises scalar the preview normally holds. `StressTensorField` already
+    /// carries exactly that convention, which is why organic is reachable at all.
+    ///
+    /// `spacingMM` is the SEPARATION field, and for organic it is the INPUT the whole
+    /// method turns on: cell size is derived FROM it, never the other way round.
+    /// Returns `nil` when core refused (bad sizes, no candidate, no stated bead).
+    /// ★ ONE WALL'S SYNTHETIC-STRESS CONFIG for the preview bridge — the same fields
+    /// core's `SyntheticStressRegion` carries (region id 1-based, the B-rep face for
+    /// the receipt, 1…5 foci, softening 0 = a quarter of the largest extent).
+    public struct OrganicSyntheticRegionSpec: Sendable, Equatable {
+        public let regionID: Int
+        public let faceID: Int
+        public let foci: Int
+        public let softMM: Double
+        public init(regionID: Int, faceID: Int, foci: Int, softMM: Double = 0) {
+            self.regionID = regionID; self.faceID = faceID; self.foci = foci; self.softMM = softMM
+        }
+    }
+
+    /// ★ CORE'S REPORT of what it synthesised (`SyntheticStressReport`): per region,
+    /// the voxels it looked at, how many went fully synthetic (real weight < 0.05)
+    /// and how many blended — the run's receipt says the same in the same words.
+    public struct OrganicSyntheticReport: Sendable, Equatable {
+        public struct Region: Sendable, Equatable {
+            public let regionID: Int
+            public let faceID: Int
+            public let foci: Int
+            public let softMM: Double
+            public let voxels: Int
+            public let fullySynthetic: Int
+            public let blended: Int
+            public init(regionID: Int, faceID: Int, foci: Int, softMM: Double,
+                        voxels: Int, fullySynthetic: Int, blended: Int) {
+                self.regionID = regionID; self.faceID = faceID; self.foci = foci; self.softMM = softMM
+                self.voxels = voxels; self.fullySynthetic = fullySynthetic; self.blended = blended
+            }
+        }
+        public let regions: [Region]
+        public let voxelsInRegions: Int
+        public let fullySynthetic: Int
+        public let blended: Int
+        public let deadThreshold: Double
+        public let peakVonMises: Double
+        public init(regions: [Region], voxelsInRegions: Int, fullySynthetic: Int, blended: Int,
+                    deadThreshold: Double, peakVonMises: Double) {
+            self.regions = regions; self.voxelsInRegions = voxelsInRegions
+            self.fullySynthetic = fullySynthetic; self.blended = blended
+            self.deadThreshold = deadThreshold; self.peakVonMises = peakVonMises
+        }
+    }
+
+    public struct OrganicTrace: Sendable {
+        /// ★ THE TRACED CAPSULES AS A DISTANCE FIELD (mm, negative inside a strut),
+        /// on the grid the caller asked for — the REGION's bbox, so its voxel can be a
+        /// fraction of the design grid's and a 1-3 mm strut is several voxels across.
+        /// Clamped at `bandMM`, which is an UNDER-estimate and therefore safe to sphere
+        /// trace against.
+        /// ★ The CENTRELINE distance (mm, ≥ 0), clamped at `bandMM` = reach.
+        public let field: [Float]
+        /// The SURFACE distance per field voxel (min over spans of centreline − radius,
+        /// clamped at the band) — what the march reads at the baked thickness; under a
+        /// live radius it reads `field` − radius instead.
+        public let surfaceField: [Float]
+        public let fieldDims: (Int, Int, Int)
+        public let fieldOrigin: SIMD3<Float>
+        public let fieldSpacingMM: Float
+        public let bandMM: Float
+        /// EMITTED spans — post node-merge, free-end tie, support prune and stranded
+        /// drop. These are what the exported body is built from.
+        public let spanCount: Int
+        /// What the tracer produced BEFORE those passes. The gap is the trap.
+        public let tracedSegmentCount: Int
+        public let curveCount: Int
+        public let connectorCount: Int
+        /// The separation the tracer ACHIEVED — organic's derived "cell size".
+        public let spacingUsedMinMM: Double
+        public let spacingUsedMaxMM: Double
+        /// Where the top two |eigenvalues| were too close to rank the frame. Non-zero
+        /// is a real finding about the field, not a failure — core counts it so the
+        /// swirl can be named rather than explained away.
+        public let degenerateFraction: Double
+        /// Grid-indexed measured relative density, clamped into the band when one was
+        /// supplied — what the preview grades its colour ramp by.
+        public let relativeDensity: [Double]
+        /// The EMITTED capsules — a, b (model mm) and radius. Post-clip, the same list
+        /// the field was stamped from.
+        public let spans: [(a: SIMD3<Double>, b: SIMD3<Double>, r: Double)]
+        /// ★ THE GROWER'S OWN COUNTERS (`OrganicGenStats.growth_*`), nil on the traced
+        /// path. `blocked` = a step the support rule refused; `joins`/`joinRefusedSpan`
+        /// = the join budget's side; `branches`/`branchRefused` the branching.
+        public struct GrowthCounters: Sendable, Equatable {
+            public let seeds: Int, curves: Int, steps: Int, blocked: Int, clamped: Int
+            public let branches: Int, branchRefused: Int, joins: Int, joinRefusedSpan: Int
+            public let tipBudgetHit: Bool
+            public var summary: String {
+                "grown \(curves) curves from \(seeds) seeds in \(steps) steps · blocked by support \(blocked) · "
+                + "clamped to the cone \(clamped) · joins \(joins) (refused \(joinRefusedSpan)) · "
+                + "branches \(branches) (refused \(branchRefused))\(tipBudgetHit ? " · TIP BUDGET HIT" : "")"
+            }
+        }
+        /// The TRACED report's stop counters (`OrganicReport.stop_*`) — on the grown
+        /// path these describe the field pass the grower ran first.
+        public struct StopCounters: Sendable, Equatable {
+            public let leftRegion: Int, hitDTest: Int, noDirection: Int, stepBudget: Int
+            public let turnedTooFar: Int, selfRevisit: Int
+            public let seedsOffered: Int, seedsTraced: Int, seedsTooClose: Int
+            public let curvesTooShort: Int, stepBudgetHits: Int
+            public var summary: String {
+                "stops: left region \(leftRegion), d_test \(hitDTest), no direction \(noDirection), "
+                + "step budget \(stepBudget), turned \(turnedTooFar), self-revisit \(selfRevisit) · "
+                + "seeds \(seedsTraced)/\(seedsOffered) (too close \(seedsTooClose)) · too short \(curvesTooShort)"
+            }
+        }
+        public let growth: GrowthCounters?
+        public let stops: StopCounters
+        /// ★ THE LENGTH CENSUS of the emission the preview bakes — the same stages the
+        /// run's receipt names (`length_census_mm`). A stage at −1 did not run.
+        public struct LengthCensus: Sendable, Equatable {
+            public static let stageNames = ["emitted", "node_merge", "base_cut", "support_prune", "stranded_drop",
+                                            "ground_tie", "branch_support", "dangling", "stranded_drop_2",
+                                            "fill_mat", "finish", "written"]
+            public let inputLengthMM: Double
+            public let stages: [(name: String, lengthMM: Double)]
+            public let writtenComponents: Int
+            public let emissionRan: Bool
+            /// The support pass's ARCHES — spans flared into fillets (12 short fat
+            /// segments each) because they ran over air. 0 in core's own run on the
+            /// cube; the fat blobs in the preview when it is not.
+            public let filletedSpans: Int
+            public static func == (a: LengthCensus, b: LengthCensus) -> Bool {
+                a.inputLengthMM == b.inputLengthMM && a.writtenComponents == b.writtenComponents
+                    && a.emissionRan == b.emissionRan && a.filletedSpans == b.filletedSpans
+                    && a.stages.map { $0.lengthMM } == b.stages.map { $0.lengthMM }
+            }
+            public var writtenMM: Double { stages.last?.lengthMM ?? -1 }
+            public var summary: String {
+                guard emissionRan else { return "census: emission did not run" }
+                let ran = stages.filter { $0.lengthMM >= 0 }.map { String(format: "%@ %.0f", $0.name, $0.lengthMM) }
+                let survival = inputLengthMM > 0 && writtenMM >= 0 ? String(format: " (%.0f%% of %.0f mm)", 100 * writtenMM / inputLengthMM, inputLengthMM) : ""
+                return "census mm: " + ran.joined(separator: " → ") + survival + " · \(writtenComponents) written component\(writtenComponents == 1 ? "" : "s")"
+                    + " · arched (filleted) spans \(filletedSpans)"
+            }
+        }
+        public let census: LengthCensus
+        /// ★ Core's synthetic-stress report for this preview (2026-09-06), nil when
+        /// no wall asked for it. The same function and config the run uses.
+        public var synthetic: OrganicSyntheticReport? = nil
+        /// ★ THE PHASE CLOCK (2026-09-06): wall-clock seconds the bridge spent in the
+        /// trace (or growth), in core's emission passes, and in the capsule stamp.
+        /// His part sat 12 min 26 s at "Rebuilding the lattice" and only a `sample`
+        /// of the process could say the emission's support raster was all of it.
+        public var traceSeconds: Double = 0
+        public var emitSeconds: Double = 0
+        public var bakeSeconds: Double = 0
+        public var phaseSummary: String {
+            String(format: "trace %.1f s · repairs %.1f s · bake %.1f s", traceSeconds, emitSeconds, bakeSeconds)
+        }
+    }
+
+    /// ★ ORGANIC'S OWN STRUT LAW — `t = 2·d·√(rho/3π)`. NOT the octet's measured
+    /// table: reporting one for the other describes geometry that is not on screen.
+    public static func organicStrutDiameterMM(spacingMM: Double, relativeDensity: Double)
+        -> Double {
+        topoptbridge.organic_strut_diameter_mm(spacingMM, relativeDensity)
+    }
+    /// The smallest separation whose strut still reaches one extrusion at `rho`.
+    /// Printability is a FLOOR on the separation: `t` grows with `d`.
+    public static func organicMinPrintableSpacingMM(relativeDensity: Double,
+                                                    minExtrudableWidthMM: Double) -> Double {
+        topoptbridge.organic_min_printable_spacing_mm(relativeDensity, minExtrudableWidthMM)
+    }
+    /// Core's own default traced-strut bead — already `max(t, the stated width)`.
+    public static func organicDefaultStrutDiameterMM(
+        gridSpacingMM: Double, resolutionFloorVoxels: Double, rhoMax: Double,
+        minExtrudableWidthMM: Double) -> Double {
+        topoptbridge.organic_default_strut_diameter_mm(
+            gridSpacingMM, resolutionFloorVoxels, rhoMax, minExtrudableWidthMM)
+    }
+
+    /// ★ Bake a span list alone into the two channels (centreline distance, surface
+    /// distance) — a cached variant or a run's emitted spans; no trace, no emission.
+    /// ★ CORE'S OWN CELL-SIZE BAND FOR ORGANIC (2026-09-06) — `organic_recommend_band`
+    /// with the run's own arguments. The preview's Auto window is read from here, not
+    /// from the octet window. `regions`: one row per include region.
+    public struct OrganicRecommendBandResult: Sendable, Equatable {
+        public struct Candidate: Sendable, Equatable {
+            public let loMM: Double, hiMM: Double
+            /// "grid" | "pair" | "look" | "look_pair" | "look_step" | "other"
+            public let source: String
+            public init(loMM: Double, hiMM: Double, source: String) {
+                self.loMM = loMM; self.hiMM = hiMM; self.source = source
+            }
+        }
+        public let loMM: Double, hiMM: Double
+        public let printabilityFloorMM: Double, resolutionFloorMM: Double
+        public let memberCeilingMM: Double, extentCeilingMM: Double
+        public let collapsed: Bool
+        public let lookCellMM: Double, gradeRatio: Double
+        public let candidates: [Candidate]
+        public init(loMM: Double, hiMM: Double, printabilityFloorMM: Double, resolutionFloorMM: Double,
+                    memberCeilingMM: Double, extentCeilingMM: Double, collapsed: Bool,
+                    lookCellMM: Double, gradeRatio: Double, candidates: [Candidate]) {
+            self.loMM = loMM; self.hiMM = hiMM
+            self.printabilityFloorMM = printabilityFloorMM; self.resolutionFloorMM = resolutionFloorMM
+            self.memberCeilingMM = memberCeilingMM; self.extentCeilingMM = extentCeilingMM
+            self.collapsed = collapsed; self.lookCellMM = lookCellMM; self.gradeRatio = gradeRatio
+            self.candidates = candidates
+        }
+        public var summary: String {
+            collapsed
+                ? String(format: "core's band collapsed (floor %.2f mm ≥ ceiling %.2f mm): solid", loMM, hiMM)
+                : String(format: "core's band %.2f–%.2f mm · look %.2f mm ×%.2f", loMM, hiMM, lookCellMM, gradeRatio)
+        }
+    }
+    public struct OrganicRecommendRegionRow: Sendable, Equatable {
+        public let faceID: Int, depthMM: Double, extentShortMM: Double
+        public let stressP50: Double, stressP99: Double
+        public init(faceID: Int, depthMM: Double, extentShortMM: Double, stressP50: Double, stressP99: Double) {
+            self.faceID = faceID; self.depthMM = depthMM; self.extentShortMM = extentShortMM
+            self.stressP50 = stressP50; self.stressP99 = stressP99
+        }
+    }
+    public static func organicRecommendBand(regions: [OrganicRecommendRegionRow],
+                                            minExtrudableWidthMM: Double, voxelMM: Double,
+                                            lookCellsAcross: Double, steps: Int) -> OrganicRecommendBandResult? {
+        guard !regions.isEmpty, minExtrudableWidthMM > 0, voxelMM > 0 else { return nil }
+        var flat = [Double](); flat.reserveCapacity(regions.count * 5)
+        for r in regions { flat += [Double(r.faceID), r.depthMM, r.extentShortMM, r.stressP50, r.stressP99] }
+        let raw: [Double] = flat.withUnsafeBufferPointer { fp in
+            topoptbridge.organic_recommend_band(fp.baseAddress, regions.count, minExtrudableWidthMM,
+                                                voxelMM, lookCellsAcross, Int32(steps)).map { Double($0) }
+        }
+        guard raw.count >= 10, raw[1] > 0 || raw[6] > 0.5 else { return nil }
+        let names = ["grid", "pair", "look", "look_pair", "look_step", "other"]
+        var cands: [OrganicRecommendBandResult.Candidate] = []
+        let n = Int(raw[9])
+        for i in 0..<n where raw.count >= 10 + 3 * (i + 1) {
+            let o = 10 + 3 * i
+            cands.append(.init(loMM: raw[o], hiMM: raw[o + 1],
+                               source: names[Swift.min(Swift.max(Int(raw[o + 2]), 0), 5)]))
+        }
+        return OrganicRecommendBandResult(
+            loMM: raw[0], hiMM: raw[1], printabilityFloorMM: raw[2], resolutionFloorMM: raw[3],
+            memberCeilingMM: raw[4], extentCeilingMM: raw[5], collapsed: raw[6] > 0.5,
+            lookCellMM: raw[7], gradeRatio: raw[8], candidates: cands)
+    }
+
+    public static func organicSpansField(spans: [(a: SIMD3<Double>, b: SIMD3<Double>, r: Double)],
+                                         fieldDims: (Int, Int, Int), fieldOrigin: SIMD3<Double>,
+                                         fieldSpacingMM: Double, bandMM: Double)
+        -> (field: [Float], surfaceField: [Float], reachMM: Double, bandMM: Double, spanCount: Int)? {
+        let (fnx, fny, fnz) = fieldDims
+        let fn = fnx * fny * fnz
+        guard fn > 0, bandMM > 0 else { return nil }
+        var flat = [Double](); flat.reserveCapacity(spans.count * 7)
+        for s in spans { flat += [s.a.x, s.a.y, s.a.z, s.b.x, s.b.y, s.b.z, s.r] }
+        let raw: [Double] = flat.withUnsafeBufferPointer { fp in
+            topoptbridge.organic_spans_field(fp.baseAddress, spans.count,
+                                             Int32(fnx), Int32(fny), Int32(fnz), fieldSpacingMM,
+                                             fieldOrigin.x, fieldOrigin.y, fieldOrigin.z, bandMM)
+                .map { Double($0) }
+        }
+        guard raw.count >= 16 + 2 * fn, raw[0] > 0.5, Int(raw[4]) == fn else { return nil }
+        let field = (0..<fn).map { Float(raw[16 + $0]) }
+        let surface = (0..<fn).map { Float(raw[16 + fn + $0]) }
+        return (field, surface, raw[8], raw[9], Int(raw[1]))
+    }
+
+    public static func organicTrace(nx: Int, ny: Int, nz: Int, spacingMM: Double,
+                                    origin: SIMD3<Double>,
+                                    candidate: [Bool],
+                                    stressTensor: [Double],
+                                    separationMM: [Double],
+                                    minExtrudableWidthMM: Double,
+                                    buildDirection: SIMD3<Double>,
+                                    fieldDims: (Int, Int, Int),
+                                    fieldOrigin: SIMD3<Double>,
+                                    fieldSpacingMM: Double,
+                                    bandMM: Double,
+                                    overhangAngleDeg: Double = 0,
+                                    rhoMin: Double = 0, rhoMax: Double = 0,
+                                    // ★ 2026-09-03: the user's other organic picks —
+                                    // an explicit strut diameter (0 ⇒ core derives it)
+                                    // and GROWN with its layer height (false ⇒ traced).
+                                    strutDiameterMM: Double = 0,
+                                    grow: Bool = false, layerHeightMM: Double = 0,
+                                    anchorAtBoundary: Bool = true,
+                                    // ★ false ⇒ bake the traced curves, not the
+                                    // file's repaired spans (2026-09-05)
+                                    showRepairs: Bool = true,
+                                    // ★ core `organic_overhang_fillet` (2026-09-05)
+                                    overhangFillet: Bool = true,
+                                    // ★ core's synthetic stress on unloaded walls (2026-09-06):
+                                    // per-voxel region id (0 = none) and per-region config
+                                    regionIDs: [Int32] = [],
+                                    syntheticRegions: [OrganicSyntheticRegionSpec] = [],
+                                    syntheticDeadFraction: Double = 0.02)
+        -> OrganicTrace? {
+        let n = nx * ny * nz
+        let (fnx, fny, fnz) = fieldDims
+        let fn = fnx * fny * fnz
+        guard nx > 0, ny > 0, nz > 0, spacingMM > 0, minExtrudableWidthMM > 0,
+              candidate.count == n, stressTensor.count == 6 * n,
+              separationMM.count == n,
+              fnx > 0, fny > 0, fnz > 0, fieldSpacingMM > 0, bandMM > 0 else { return nil }
+        var flags = [UInt8](repeating: 0, count: n)
+        for i in 0..<n where candidate[i] { flags[i] = 1 }
+        let rids: [Int32] = regionIDs.count == n ? regionIDs : []
+        let synthRows: [Double] = rids.isEmpty ? [] : syntheticRegions.flatMap {
+            [Double($0.regionID), Double($0.faceID), Double($0.foci), $0.softMM]
+        }
+        let raw: [Double] = flags.withUnsafeBufferPointer { cb in
+            stressTensor.withUnsafeBufferPointer { tb in
+                separationMM.withUnsafeBufferPointer { sb in
+                  rids.withUnsafeBufferPointer { rb in
+                   synthRows.withUnsafeBufferPointer { yb in
+                    topoptbridge.organic_preview_field(
+                        Int32(nx), Int32(ny), Int32(nz), spacingMM,
+                        origin.x, origin.y, origin.z,
+                        cb.baseAddress, cb.count,
+                        tb.baseAddress, tb.count,
+                        sb.baseAddress, sb.count,
+                        minExtrudableWidthMM,
+                        buildDirection.x, buildDirection.y, buildDirection.z,
+                        overhangAngleDeg, rhoMin, rhoMax,
+                        strutDiameterMM, grow ? Int32(1) : Int32(0), layerHeightMM,
+                        anchorAtBoundary ? Int32(1) : Int32(0),
+                        showRepairs ? Int32(1) : Int32(0),
+                        overhangFillet ? Int32(1) : Int32(0),
+                        rb.baseAddress, rb.count,
+                        yb.baseAddress, yb.count, syntheticDeadFraction,
+                        Int32(fnx), Int32(fny), Int32(fnz), fieldSpacingMM,
+                        fieldOrigin.x, fieldOrigin.y, fieldOrigin.z,
+                        bandMM).map { Double($0) }
+                   }
+                  }
+                }
+            }
+        }
+        guard raw.count >= 64, raw[0] > 0.5 else { return nil }
+        // ★ 64-double header (2026-09-06), then out[55] rows of 7: core's
+        // synthetic-stress report per region, BEFORE the field.
+        let synthRowCount = Int(raw[55])
+        let head = 64 + 7 * synthRowCount
+        guard raw.count >= head else { return nil }
+        var synthetic: OrganicSyntheticReport? = nil
+        if raw[48] > 0.5 {
+            var rows: [OrganicSyntheticReport.Region] = []
+            for r in 0..<synthRowCount {
+                let o = 64 + 7 * r
+                rows.append(OrganicSyntheticReport.Region(
+                    regionID: Int(raw[o]), faceID: Int(raw[o + 1]), foci: Int(raw[o + 2]),
+                    softMM: raw[o + 3], voxels: Int(raw[o + 4]),
+                    fullySynthetic: Int(raw[o + 5]), blended: Int(raw[o + 6])))
+            }
+            synthetic = OrganicSyntheticReport(
+                regions: rows, voxelsInRegions: Int(raw[50]), fullySynthetic: Int(raw[51]),
+                blended: Int(raw[52]), deadThreshold: raw[53], peakVonMises: raw[54])
+        }
+        let count = Int(raw[4])
+        guard count == fn, raw.count >= head + fn else { return nil }
+        let field = (0..<fn).map { Float(raw[head + $0]) }
+        let dOff = head + fn
+        let density = raw.count >= dOff + n ? Array(raw[dOff..<(dOff + n)]) : []
+        let rOff = dOff + n
+        let surfaceField = raw.count >= rOff + fn ? (0..<fn).map { Float(raw[rOff + $0]) } : []
+        var spans: [(a: SIMD3<Double>, b: SIMD3<Double>, r: Double)] = []
+        let sOff = rOff + fn
+        if raw.count > sOff {
+            let avail = (raw.count - sOff) / 7
+            spans.reserveCapacity(avail)
+            for i in 0..<avail {
+                let o = sOff + 7 * i
+                spans.append((a: SIMD3(raw[o], raw[o + 1], raw[o + 2]),
+                              b: SIMD3(raw[o + 3], raw[o + 4], raw[o + 5]),
+                              r: raw[o + 6]))
+            }
+        }
+        return OrganicTrace(field: field, surfaceField: surfaceField, fieldDims: fieldDims,
+                            fieldOrigin: SIMD3<Float>(fieldOrigin),
+                            fieldSpacingMM: Float(fieldSpacingMM),
+                            bandMM: Float(raw[8]),
+                            spanCount: Int(raw[1]),
+                            tracedSegmentCount: Int(raw[10]),
+                            curveCount: Int(raw[2]), connectorCount: Int(raw[3]),
+                            spacingUsedMinMM: raw[5], spacingUsedMaxMM: raw[6],
+                            degenerateFraction: raw[7], relativeDensity: density,
+                            spans: spans,
+                            growth: grow ? OrganicTrace.GrowthCounters(
+                                seeds: Int(raw[11]), curves: Int(raw[12]), steps: Int(raw[13]),
+                                blocked: Int(raw[14]), clamped: Int(raw[15]),
+                                branches: Int(raw[16]), branchRefused: Int(raw[17]),
+                                joins: Int(raw[18]), joinRefusedSpan: Int(raw[19]),
+                                tipBudgetHit: raw[20] > 0.5) : nil,
+                            stops: OrganicTrace.StopCounters(
+                                leftRegion: Int(raw[21]), hitDTest: Int(raw[22]), noDirection: Int(raw[23]),
+                                stepBudget: Int(raw[24]), turnedTooFar: Int(raw[25]), selfRevisit: Int(raw[26]),
+                                seedsOffered: Int(raw[27]), seedsTraced: Int(raw[28]), seedsTooClose: Int(raw[29]),
+                                curvesTooShort: Int(raw[30]), stepBudgetHits: Int(raw[31])),
+                            census: OrganicTrace.LengthCensus(
+                                inputLengthMM: raw[32],
+                                stages: zip(OrganicTrace.LengthCensus.stageNames, (0..<12).map { raw[33 + $0] })
+                                    .map { (name: $0, lengthMM: $1) },
+                                writtenComponents: Int(raw[45]), emissionRan: raw[46] > 0.5,
+                                filletedSpans: Int(raw[47])),
+                            synthetic: synthetic,
+                            traceSeconds: raw[56], emitSeconds: raw[57], bakeSeconds: raw[58])
+    }
+
+    public static func latticeMemberThicknessMM(nx: Int, ny: Int, nz: Int,
+                                                spacing: SIMD3<Float>,
+                                                solid: [Bool],
+                                                capRadiusVoxels: Int = 32) -> [Double] {
+        guard nx > 0, ny > 0, nz > 0, solid.count == nx * ny * nz else { return [] }
+        let sx = Double(spacing.x), sy = Double(spacing.y), sz = Double(spacing.z)
+        guard sx > 0, sy > 0, sz > 0 else { return [] }
+        // ★ CORE TAKES ONE CUBIC SPACING. The preview's occupancy is built with dims
+        // proportional to the extents, so its axes agree to rounding — but "agree to
+        // rounding" is a claim worth checking, not assuming. 2% is far tighter than
+        // any real distortion and far looser than float rounding.
+        let mean = (sx + sy + sz) / 3
+        let worst = max(abs(sx - mean), max(abs(sy - mean), abs(sz - mean))) / mean
+        guard worst <= 0.02 else { return [] }
+        var flags = [UInt8](repeating: 0, count: solid.count)
+        for i in 0..<solid.count where solid[i] { flags[i] = 1 }
+        let out = flags.withUnsafeBufferPointer { buf in
+            topoptbridge.lattice_member_thickness_mm(
+                Int32(nx), Int32(ny), Int32(nz), mean,
+                buf.baseAddress, buf.count, Int32(capRadiusVoxels))
+        }
+        return out.map { Double($0) }
+    }
+
+    /// ★★ CORE'S DYADIC CELL-SIZE PLAN — the levels, on core's own base grid.
+    ///
+    /// The preview drew one cell size for the whole part; a swept run gives every
+    /// region the coarsest dyadic cell its own member can hold. This is that plan,
+    /// read from `plan_cell_sizes` — the app chooses nothing here.
+    ///
+    /// `candidate` marks the lattice set, `rho` is the density the preview will
+    /// actually render at, `width` is the local member width from
+    /// `latticeMemberThicknessMM` (the SAME field the cells-per-member floor reads,
+    /// measured once and shared, exactly as core shares it between its two laws).
+    ///
+    /// Returns nil when core has no plan — a non-cubic grid, a refused parameter,
+    /// or nothing latticed. The caller must then draw the uniform cell and say so.
+    public static func latticeCellSizePlan(nx: Int, ny: Int, nz: Int,
+                                           spacing: SIMD3<Float>,
+                                           origin: SIMD3<Float>,
+                                           candidate: [Bool],
+                                           relativeDensity: [Double],
+                                           memberWidthMM: [Double],
+                                           minCellMM: Double, maxCellMM: Double,
+                                           minExtrudableWidthMM: Double,
+                                           capRadiusVoxels: Int = 32,
+                                           topology: String = "octet",
+                                           /// ★ FIT: the S_want of the region owning
+                                           /// each candidate voxel. Empty ⇒ the swept
+                                           /// planner. See `plan_cell_sizes_fit` —
+                                           /// the cell is chosen so exactly N* fit
+                                           /// across the member, which satisfies the
+                                           /// cells-per-member floor by construction.
+                                           desiredCellMM: [Double] = [],
+                                           /// ★★★ THE FLOOR CORE CULLS BY. 0 keeps its
+                                           /// ACCURACY floor of 5. This is what decides
+                                           /// whether a cell SURVIVES in a member, so
+                                           /// leaving it unstated culled an 11 mm wall
+                                           /// that the mode had already relaxed to 2.
+                                           cellsPerMemberFloor: Double = 0)
+        -> LatticeCellSizePlan? {
+        let n = nx * ny * nz
+        guard nx > 0, ny > 0, nz > 0, candidate.count == n,
+              relativeDensity.count == n, memberWidthMM.count == n else { return nil }
+        let sx = Double(spacing.x), sy = Double(spacing.y), sz = Double(spacing.z)
+        guard sx > 0, sy > 0, sz > 0 else { return nil }
+        // Core takes ONE cubic spacing — the same 2% check the width law makes, and
+        // for the same reason: the preview's grid agrees to rounding, and "agrees to
+        // rounding" is a claim to check rather than assume.
+        let mean = (sx + sy + sz) / 3
+        let worst = max(abs(sx - mean), max(abs(sy - mean), abs(sz - mean))) / mean
+        guard worst <= 0.02 else { return nil }
+
+        var flags = [UInt8](repeating: 0, count: n)
+        for i in 0..<n where candidate[i] { flags[i] = 1 }
+        let desired = (desiredCellMM.count == n) ? desiredCellMM : []
+        let flat: [Double] = flags.withUnsafeBufferPointer { cb in
+            relativeDensity.withUnsafeBufferPointer { rb in
+                memberWidthMM.withUnsafeBufferPointer { wb in
+                    desired.withUnsafeBufferPointer { db in
+                        topoptbridge.lattice_cell_size_plan(
+                            Int32(nx), Int32(ny), Int32(nz), mean,
+                            Double(origin.x), Double(origin.y), Double(origin.z),
+                            cb.baseAddress, cb.count,
+                            rb.baseAddress, rb.count,
+                            wb.baseAddress, wb.count,
+                            minCellMM, maxCellMM, minExtrudableWidthMM,
+                            Int32(capRadiusVoxels), std.string(topology),
+                            desired.isEmpty ? nil : db.baseAddress, desired.count,
+                            cellsPerMemberFloor)
+                    }
+                }
+            }
+        }.map { Double($0) }
+
+        // Header: ok, nx, ny, nz, ox, oy, oz, base_cell_mm, max_level.
+        guard flat.count > 9, flat[0] == 1 else { return nil }
+        let cx = Int(flat[1]), cy = Int(flat[2]), cz = Int(flat[3])
+        let cells = cx * cy * cz
+        guard cx > 0, cy > 0, cz > 0, flat.count == 9 + 2 * cells else { return nil }
+        let base = flat[7]
+        guard base > 0 else { return nil }
+        var levels = [Int8](repeating: -1, count: cells)
+        var reasons = [Int8](repeating: 0, count: cells)
+        for i in 0..<cells {
+            let v = flat[9 + i]
+            levels[i] = (v >= 0 && v < 127) ? Int8(v) : -1
+            let r = flat[9 + cells + i]
+            reasons[i] = (r >= 0 && r < 127) ? Int8(r) : 0
+        }
+        return LatticeCellSizePlan(
+            nx: cx, ny: cy, nz: cz,
+            origin: SIMD3<Double>(flat[4], flat[5], flat[6]),
+            baseCellMM: base, maxLevel: Int(flat[8]), level: levels,
+            rejectReason: reasons)
+    }
+
+    /// The same law SAMPLED across a density band — one call, so a caller that needs
+    /// the curve many times (a legend, a shader upload) pays for it once.
+    /// Returns `count` diameters at evenly spaced densities from `lo` to `hi`
+    /// inclusive; empty when core has no law for the topology.
+    public static func latticeStrutDiameterCurve(topology: String, lo: Double, hi: Double,
+                                                 cellMM: Double, count: Int) -> [Double] {
+        guard count > 1, hi >= lo, cellMM > 0 else { return [] }
+        var out: [Double] = []
+        out.reserveCapacity(count)
+        for i in 0..<count {
+            let rho = lo + (hi - lo) * Double(i) / Double(count - 1)
+            let d = latticeStrutDiameterMM(topology: topology, relativeDensity: rho,
+                                           cellMM: cellMM)
+            if d <= 0 { return [] }     // no core law — say so, do not half-fill
+            out.append(d)
+        }
+        return out
+    }
+
+    /// ★★ THE AESTHETIC CELLS-PER-MEMBER FLOOR, READ FROM CORE.
+    ///
+    /// The fixed floor of 5 is an ACCURACY threshold — where the homogenised model's
+    /// transverse-stiffness error crosses a 2.4 % band — and NOT a buildability one.
+    /// For a lattice graded for looks, that accuracy is worth exactly as much as the
+    /// load the material carries, so core computes the floor from its measured error
+    /// curve and the voxel's own utilisation:
+    ///
+    ///     1 cell +48.5 %   2 cells +8.5 %   3 cells +4.1 %   4 +2.59 %   5 +1.78 %
+    ///
+    /// - Parameter utilisation: the voxel's demand as a fraction of the allowable. A
+    ///   non-finite or non-positive value returns the ACCURACY floor — absence of
+    ///   measurement is not permission to relax.
+    /// - Parameter errorBudget: 0 takes core's own policy (1 %).
+    /// - Returns: 0 when core has no answer for the topology, which the caller must
+    ///   report rather than substitute a guess for.
+    public static func latticeAestheticCellsPerMemberFloor(
+        topology: String, utilisation: Double, errorBudget: Double = 0) -> Double {
+        topoptbridge.lattice_aesthetic_cells_per_member_floor(
+            std.string(topology), utilisation, errorBudget)
+    }
+
+    /// The lowest the adaptive rule may ever go — 2, because that is the lowest cell
+    /// count MEASURED under the same bending case the accuracy floor uses (+8.5 %).
+    /// Deliberately NOT the percolation floor of 1.0, which core's own declaration
+    /// warns was measured axially at rho ≈ 0.199 and "must not be quoted
+    /// unconditionally".
+    /// ★ `boundaryFinishWritten` — core lets the floor reach ONE cell only where a
+    /// finish re-ties the struts a one-cell member severs; without one it stays 2.
+    public static func latticeAestheticCellsPerMemberHardFloor(
+        topology: String, boundaryFinishWritten: Bool = false) -> Double {
+        topoptbridge.lattice_aesthetic_cells_per_member_hard_floor(
+            std.string(topology), boundaryFinishWritten)
+    }
+
+    /// Core's default error budget for the adaptive floor, so the app can SHOW it
+    /// without authoring it.
+    public static var latticeAestheticErrorBudgetDefault: Double {
+        topoptbridge.lattice_aesthetic_error_budget_default()
+    }
+
+    /// ★ What an aesthetic density MEANS, in core's own words. Shown verbatim wherever
+    /// the app offers the mode, so the chooser's promise and the receipt's promise are
+    /// literally the same sentence.
+    public static var latticeAestheticDensityMeaning: String {
+        String(topoptbridge.lattice_aesthetic_density_meaning())
+    }
+
+    /// ★★ THE THREE LATTICE ALGORITHMS, in core's own enum order: `["doubled",
+    /// "stepped", "organic"]`. The picker reads THIS — a Swift enum listing them would
+    /// drift the moment core gains a fourth.
+    public static var latticeAlgorithmNames: [String] {
+        topoptbridge.lattice_algorithm_names().map { String($0) }
+    }
+
+    /// True iff core would accept `name`. `""` is FALSE here: the job schema reads an
+    /// empty string as "not stated" (and resolves it to doubled), but a picker must
+    /// never offer it as a choice.
+    public static func latticeAlgorithmIsKnown(_ name: String) -> Bool {
+        topoptbridge.lattice_algorithm_is_known(std.string(name))
+    }
+
+    /// ★★★ Whether this algorithm may run under a STRUCTURAL claim. Core refuses
+    /// organic + structural — a traced lattice is anisotropic by construction and the
+    /// certification library carries one CUBIC tensor per topology, so there is nothing
+    /// for the claim to be checked against. Asked of core so a future algorithm with
+    /// the same property needs no app change.
+    public static func latticeAlgorithmAllowsStructural(_ name: String) -> Bool {
+        topoptbridge.lattice_algorithm_allows_structural(std.string(name))
+    }
+
     public static func latticeLimits(topology: String) -> LatticeLimits {
         let lim = topoptbridge.lattice_limits(std.string(topology))
         return LatticeLimits(rhoMin: lim.rho_min, rhoMax: lim.rho_max,
@@ -1147,10 +1794,14 @@ public enum TopOptKit {
     /// `memberWidthMM`. `statedRelativeDensity <= 0` means AUTO. Never throws.
     public static func latticeRegionDerivation(
         topology: String, memberWidthMM: Double, minExtrudableWidthMM: Double,
-        statedRelativeDensity: Double = 0) -> LatticeRegionDerivation {
+        statedRelativeDensity: Double = 0,
+        // ★ THE FLOOR THE CELL IS DERIVED AGAINST. 0 = core's accuracy floor (5), the
+        // default every pre-existing caller had. The cell is `width / floor`, so this
+        // is the difference between a 2.20 mm and a 5.50 mm cell on an 11 mm wall.
+        cellsPerMemberFloor: Double = 0) -> LatticeRegionDerivation {
         let d = topoptbridge.lattice_region_derivation(
             std.string(topology), memberWidthMM, minExtrudableWidthMM,
-            statedRelativeDensity)
+            statedRelativeDensity, cellsPerMemberFloor)
         return LatticeRegionDerivation(
             valid: d.valid, feasible: d.feasible, cellMM: d.cell_mm,
             derivedRelativeDensity: d.derived_relative_density,
@@ -1201,6 +1852,97 @@ public enum TopOptKit {
     /// Whether the schema probe proved itself on this build — a key core has always
     /// accepted probes true AND a nonsense key probes false. False ⇒ every
     /// `gradingSchemaAccepts` answer is a conservative false.
+    /// ★★★ DOES THE LINKED CORE ACCEPT A `lattice`-BLOCK KEY? (2026-09-02)
+    ///
+    /// Runs use `reject_unknown_keys`, so a lattice key the linked core does not know
+    /// kills the whole job after the solve. `gradingSchemaAccepts` answers this for the
+    /// grading block through a dedicated bridge call; the lattice block has none, and
+    /// none is needed: `jobSchemaError` parses a WHOLE job through core's own schema, so
+    /// a minimal job carrying the key, asked of it, is the same question asked of the
+    /// same code. Accepted ⇔ the schema raises no error naming the key.
+    ///
+    /// The skeleton is the one core's own `test_job.cpp` treats as valid. It is parsed,
+    /// not run — no file has to exist.
+    /// ★ THE SKELETON IS core's OWN VALID BASE JOB (lifted from test_job.cpp's `mutate`
+    /// base), because a hand-written one was refused for `fixture_faces` before any
+    /// lattice key was looked at — and then EVERY key probed false, the span export
+    /// silently never being asked for. The lattice block is appended to it.
+    static let latticeProbeBaseJob = #"{"model": "part.step", "material": "PLA", "mode": "minimize_plastic", "resolution": 48, "fixture_faces": [{"kind": "cylindrical", "radius_mm": 2.5}], "gravity": {"direction": [0.0, 0.0, -1.0], "magnitude_mm_s2": 9810.0}, "ladder": [0.7, 0.5, 0.3], "margin_stop": 1.5, "simp": {"max_iterations": 30}, "output": {"report": "report.json", "mesh_format": "3mf", "mesh_prefix": "variant"}}"#
+
+    private static func latticeProbeJob(key: String) -> Data {
+        var text = latticeProbeBaseJob
+        text.removeLast()   // the closing brace
+        text += #", "lattice": {"topology": "octet", "cell_mm": 3.0, "strut_radius_mm": 0.4, ""#
+            + key + #"": true}}"#
+        return Data(text.utf8)
+    }
+
+    /// ★ D1 (maintainer, 2026-09-03; names confirmed the same day): organic runs
+    /// under BOTH intents, but core refuses an organic job under a Structural intent
+    /// at runtime until its structural certification for organic lands. THE SIGNAL is
+    /// core's own schema: the grading key `organic_structural_certification` with the
+    /// value `"beam_network"` is accepted only once the instrument exists. The bridge's
+    /// key probe sends `true`, so this is a WHOLE-JOB probe through `jobSchemaError`
+    /// (the same route `latticeSchemaAccepts` uses) carrying the confirmed string. No
+    /// new mechanism. FALSE ⇒ the app must not EMIT the job — the controls stay
+    /// enabled, the run button carries the gate's message. Probed once per launch.
+    public static let organicStructuralCertificationWired: Bool = {
+        let text = latticeProbeBaseJob.replacingOccurrences(
+            of: #""output":"#,
+            with: #""grading": {"topology": "octet", "min_extrudable_width_mm": 0.4, "cell_mm": 3.0, "algorithm": "organic", "intent": "structural", "organic_structural_certification": "beam_network"}, "output":"#)
+        return jobSchemaError(Data(text.utf8)) == nil
+    }()
+    /// The gate's own words, surfaced wherever an organic + Structural run would start.
+    public static let organicStructuralGateMessage =
+        "organic structural certification is not yet wired — core refuses an organic "
+        + "lattice under a Structural intent today. Run it under Aesthetic, or wait for "
+        + "the core task."
+
+    /// ★ SYNTHETIC STRESS ON A LATTICE REGION (core contract 2026-09-05: per region
+    /// `synthetic_stress` bool + `synthetic_foci` 1…5, organic + Aesthetic only). A
+    /// WHOLE-JOB probe with its own CONTROL: the same job without the two keys must
+    /// pass, or the verdict is "unreliable", never "wired". Probed once per launch.
+    public static let organicSyntheticStressWired: Bool = {
+        func job(_ extra: String) -> Data {
+            let text = latticeProbeBaseJob.replacingOccurrences(
+                of: #""output":"#,
+                with: #""grading": {"topology": "octet", "min_extrudable_width_mm": 0.4, "cell_mm": 3.0, "algorithm": "organic", "intent": "aesthetic"}, "lattice": {"topology": "octet", "regions": [{"role": "include", "kind": "face", "geometry": {"origin": [0, 0, 0], "normal": [0, 0, 1], "half_u_mm": 10, "half_w_mm": 10, "depth_mm": 5}"#
+                    + extra + #"}]}, "output":"#)
+            return Data(text.utf8)
+        }
+        guard jobSchemaError(job("")) == nil else { return false }   // the control
+        return jobSchemaError(job(#", "synthetic_stress": true, "synthetic_foci": 2"#)) == nil
+    }()
+
+    /// ★ THE ORGANIC CELL-SIZE PROBE (final contract 2026-09-05): does the linked
+    /// core's schema accept `lattice.organic_probe_cells_mm` / `organic_probe_grades_mm`
+    /// on an organic Aesthetic lattice-variant job? Whole-job probe with a control (the
+    /// same job without the two keys must pass). FALSE ⇒ "Check sizes" is disabled with
+    /// its reason and no organic approvals are shown.
+    public static let organicProbeWired: Bool = {
+        func job(_ extra: String) -> Data {
+            let text = latticeProbeBaseJob.replacingOccurrences(
+                of: #""output":"#,
+                with: #""grading": {"topology": "octet", "min_extrudable_width_mm": 0.4, "cell_mm": 3.0, "algorithm": "organic", "intent": "aesthetic"}, "lattice": {"topology": "octet""#
+                    + extra + #"}, "output":"#)
+            return Data(text.utf8)
+        }
+        guard jobSchemaError(job("")) == nil else { return false }   // the control
+        return jobSchemaError(job(#", "organic_probe_cells_mm": [3.5, 4.5], "organic_probe_grades_mm": [[3, 5]]"#)) == nil
+    }()
+
+    public static func latticeSchemaAccepts(key: String) -> Bool {
+        // ★ STRICT: accepted ⇔ core's schema raises NO error on the base job carrying
+        // the key. A test that merely asked "does the error name the key" passed a
+        // nonsense key when the skeleton itself was refused for another reason.
+        jobSchemaError(latticeProbeJob(key: key)) == nil
+    }
+
+    /// The raw schema verdict for a lattice key — for the probe's own controls.
+    public static func latticeSchemaError(key: String) -> String? {
+        jobSchemaError(latticeProbeJob(key: key))
+    }
+
     public static var gradingSchemaProbeIsReliable: Bool {
         topoptbridge.grading_schema_probe_is_reliable()
     }
@@ -1414,19 +2156,33 @@ public enum TopOptKit {
                                       result: LatticeJobOutcome)
         throws -> OptimizeOutcome {
         let mesh = try importMesh(path: meshPath)
+        return latticeOutcome(result: result,
+                              meshVertices: mesh.vertices, meshIndices: mesh.indices)
+    }
+
+    /// The outcome from vertices the CALLER already holds — split out so the
+    /// on-device lattice runner can fall back to a raw soup parse when core's
+    /// manifold importer refuses the lattice STL (see `latticeBridgeRunner`):
+    /// that file is a deliberately union-less strut soup, and with two
+    /// overlapping declared regions it carries duplicated sheets and T-junction
+    /// edges no solid repair can disambiguate. The certification behind
+    /// `result` already ran in core; the vertices here are only the picture.
+    public static func latticeOutcome(result: LatticeJobOutcome,
+                                      meshVertices: [Float],
+                                      meshIndices: [Int32]) -> OptimizeOutcome {
         let v = OptimizeVariant(
             requestedVolumeFraction: result.achievedVolumeFraction,
             achievedVolumeFraction: result.achievedVolumeFraction,
             massGrams: 0,
             supportVolumeVoxels: 0,
-            meshTriangleCount: mesh.indices.count / 3,
+            meshTriangleCount: meshIndices.count / 3,
             worstCaseMargin: result.marginWorstCase,
             // ★ ACCEPTED IS THE MARGIN'S OWN VERDICT, not a default. A lattice
             // job that ran to completion still has a certification behind it.
             accepted: result.marginWorstCase > 0,
             v3Passes: result.marginWorstCase > 0,
-            meshVertices: mesh.vertices,
-            meshIndices: mesh.indices)
+            meshVertices: meshVertices,
+            meshIndices: meshIndices)
         return OptimizeOutcome(variants: [v], stoppedOnMargin: false,
                                cancelled: false,
                                acceptedCount: v.accepted ? 1 : 0,
@@ -1750,6 +2506,39 @@ public enum TopOptKit {
         widthMM
     }
 
+    /// ★ THE REGION LAYER, ONE WRITER (2026-09-05). The optimize wrapper filled the
+    /// load case's region arrays and the stage's SIM wrapper did not — so a load
+    /// painted as a REGION reached the run but never the stage's solve, core threw
+    /// "every declared load group contributed nothing", the sim failed silently, and
+    /// the organic preview had no tensor (measured on the M2 stand: Group B, 4 regions,
+    /// 0 faces). Both wrappers call this now; empty inputs leave the POD byte-identical.
+    static func applyRegionLayer(_ lc: inout topoptbridge.BridgeLoadCase,
+                                 faceRegions: [FaceRegionSpec], anchorRegionIDs: [Int]) {
+        for r in faceRegions {
+            lc.region_ids.push_back(Int32(r.id))
+            lc.region_parent_ids.push_back(Int32(r.parentID))
+            lc.region_add_sizes.push_back(Int32(r.addFaces.count))
+            for f in r.addFaces { lc.region_add_faces.push_back(Int32(f)) }
+            lc.region_remove_sizes.push_back(Int32(r.removeFaces.count))
+            for f in r.removeFaces { lc.region_remove_faces.push_back(Int32(f)) }
+            lc.region_cut_sizes.push_back(Int32(r.cuts.count))
+            for c in r.cuts {
+                for v in [c.point.x, c.point.y, c.point.z] { lc.region_cut_point_xyz.push_back(v) }
+                for v in [c.normal.x, c.normal.y, c.normal.z] { lc.region_cut_normal_xyz.push_back(v) }
+                lc.region_cut_strict.push_back(c.strict ? 1 : 0)
+            }
+            lc.region_filter_max_area_mm2.push_back(r.maxAreaMM2)
+            lc.region_filter_min_area_mm2.push_back(r.minAreaMM2)
+            lc.region_filter_min_larger_neighbours.push_back(Int32(r.minLargerNeighbours))
+            lc.region_filter_larger_ratio.push_back(r.largerRatio)
+            lc.region_filter_kind.push_back(Int32(r.kindCode))
+            lc.region_filter_cyl_radius_mm.push_back(r.cylinderRadiusMM)
+            lc.region_filter_cyl_tol_mm.push_back(r.cylinderRadiusTolMM)
+            lc.region_filter_matched_at_author.push_back(Int32(r.filterMatchedAtAuthor))
+        }
+        for r in anchorRegionIDs { lc.anchor_region_ids.push_back(Int32(r)) }
+    }
+
     public static func minimizePlasticLoadCase(
         stepPath: String, material: String, materialsPath: String, rulesPath: String,
         resolution: Int, anchorFaceIDs: [Int], loadGroups: [LoadGroupSpec],
@@ -1776,29 +2565,7 @@ public enum TopOptKit {
         // then taps Optimize locally would get a run that ignored every one of
         // them — the "green run that measures nothing" shape. Empty => the POD is
         // byte-identical to before.
-        for r in faceRegions {
-            lc.region_ids.push_back(Int32(r.id))
-            lc.region_parent_ids.push_back(Int32(r.parentID))
-            lc.region_add_sizes.push_back(Int32(r.addFaces.count))
-            for f in r.addFaces { lc.region_add_faces.push_back(Int32(f)) }
-            lc.region_remove_sizes.push_back(Int32(r.removeFaces.count))
-            for f in r.removeFaces { lc.region_remove_faces.push_back(Int32(f)) }
-            lc.region_cut_sizes.push_back(Int32(r.cuts.count))
-            for c in r.cuts {
-                for v in [c.point.x, c.point.y, c.point.z] { lc.region_cut_point_xyz.push_back(v) }
-                for v in [c.normal.x, c.normal.y, c.normal.z] { lc.region_cut_normal_xyz.push_back(v) }
-                lc.region_cut_strict.push_back(c.strict ? 1 : 0)
-            }
-            lc.region_filter_max_area_mm2.push_back(r.maxAreaMM2)
-            lc.region_filter_min_area_mm2.push_back(r.minAreaMM2)
-            lc.region_filter_min_larger_neighbours.push_back(Int32(r.minLargerNeighbours))
-            lc.region_filter_larger_ratio.push_back(r.largerRatio)
-            lc.region_filter_kind.push_back(Int32(r.kindCode))
-            lc.region_filter_cyl_radius_mm.push_back(r.cylinderRadiusMM)
-            lc.region_filter_cyl_tol_mm.push_back(r.cylinderRadiusTolMM)
-            lc.region_filter_matched_at_author.push_back(Int32(r.filterMatchedAtAuthor))
-        }
-        for r in anchorRegionIDs { lc.anchor_region_ids.push_back(Int32(r)) }
+        Self.applyRegionLayer(&lc, faceRegions: faceRegions, anchorRegionIDs: anchorRegionIDs)
         for r in faceProtectionRegionIDs { lc.face_protection_region_ids.push_back(Int32(r)) }
         for d in faceProtectionRegionDepthsMM { lc.face_protection_region_depths_mm.push_back(d) }
         // `load_group_region_sizes` is emitted ONLY when some group names a
@@ -2084,5 +2851,44 @@ public enum TopOptKit {
 
     private static func throwIfFailed(_ err: topoptbridge.BridgeError) throws {
         if !err.ok { throw TopOptError(message: String(err.message)) }
+    }
+}
+
+/// ★ CORE'S DYADIC CELL PLAN, as the preview needs it: a level per BASE CELL on
+/// core's own base grid. `cell(L) = baseCellMM * 2^L`, and every level-L cell sits
+/// on an ALIGNED 2^L block of this grid — which is the whole reason coarse and fine
+/// cells meet at shared nodes instead of leaving floating strut ends. A caller that
+/// re-derives the grid instead of taking `origin`/`baseCellMM` from here breaks that
+/// alignment and the ladder stops meaning anything.
+public struct LatticeCellSizePlan: Equatable, Sendable {
+    public let nx: Int, ny: Int, nz: Int
+    public let origin: SIMD3<Double>
+    public let baseCellMM: Double
+    public let maxLevel: Int
+    /// Base-cell indexed, x fastest. -1 ⇒ not latticed (the per-cell L4 fallback:
+    /// nothing on the ladder is both printable and homogenizable there, so the run
+    /// leaves it SOLID).
+    public let level: [Int8]
+    /// Why a base cell got no level, base-cell indexed: 0 latticed or not a
+    /// candidate · 1 MEMBER TOO THIN · 2 STRUT UNPRINTABLE. The two have opposite
+    /// remedies, and only the first is one sub-floor retention may overrule —
+    /// printability is a fact about the printer, not about load.
+    public let rejectReason: [Int8]
+
+    public var count: Int { nx * ny * nz }
+    public func index(_ i: Int, _ j: Int, _ k: Int) -> Int { (k * ny + j) * nx + i }
+    /// The cell size (mm) at a level; 0 for "not latticed".
+    public func cellMM(atLevel L: Int8) -> Double {
+        L < 0 ? 0 : baseCellMM * pow(2, Double(L))
+    }
+}
+
+
+extension TopOptKit {
+    /// ★ CORE'S SUB-FLOOR RETENTION CEILING. A region may keep lattice below the
+    /// cells-per-member floor only if its MEASURED peak stress is at or under this
+    /// fraction of the part's peak. Read from core; the app never states it.
+    public static func latticeSubfloorRetentionStressFraction() -> Double {
+        topoptbridge.lattice_subfloor_retention_fraction()
     }
 }

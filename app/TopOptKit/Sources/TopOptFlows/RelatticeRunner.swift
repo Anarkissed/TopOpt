@@ -144,6 +144,19 @@ public enum RelatticeJobBuilder {
         // Absent unless asked for, so a real re-lattice job is byte-identical to
         // the one this builder has always produced.
         if forecastOnly { block["forecast_only"] = true }
+        // ★ THE SOLID COVER (maintainer, 2026-08-19). Only when the user picked
+        // **Covered**: an absent key leaves the job BYTE-IDENTICAL to one written
+        // before the option existed. Core validates it against
+        // "shell" / "skin" / "shell+skin" (core/src/cli/job.cpp:1433) and refuses
+        // the latter two unless `skin == "diagrid"`, which is why only the
+        // unambiguous "shell" is ever emitted.
+        if let of = lat.outerFinish { block["outer_finish"] = of }
+        // ★ ASK FOR THE EMITTED SPANS when the lattice is organic (2026-09-02): the
+        // preview draws the organic field from them. Gated on the linked core knowing
+        // the key — `reject_unknown_keys` kills the whole job over one it does not.
+        if lat.algorithm == "organic", TopOptKit.latticeSchemaAccepts(key: "emit_organic_spans") {
+            block["emit_organic_spans"] = true
+        }
         job["lattice"] = block
         return try JSONSerialization.data(withJSONObject: job,
                                           options: [.sortedKeys])
@@ -208,6 +221,9 @@ public struct RelatticeResult {
     /// screen can show the composite margins and the strut-strength report the
     /// same way a lattice optimize run's does.
     public let receiptJSON: Data?
+    /// ★ THE RUN'S EMITTED SPANS, verbatim — `<mesh>_SPANS.txt` when the job asked for
+    /// it (organic). nil when it did not, or the file is absent.
+    public let spanText: String?
     /// The job's own provenance record — the no-ladder facts and the
     /// reproduction proof.
     public let provenanceJSON: Data?
@@ -215,11 +231,16 @@ public struct RelatticeResult {
     /// 2026-08-03-variant-postprocessing-fix). nil on a real re-lattice, whose
     /// outcome is the latticed object itself.
     public var forecastJSON: Data?
+    /// ★ `<out>/organic_probe.json` (final contract 2026-09-05), read mid-run.
+    public var probeJSON: Data?
 
     public init(outcome: OptimizeOutcome, receiptJSON: Data?,
-                provenanceJSON: Data?, forecastJSON: Data? = nil) {
+                provenanceJSON: Data?, forecastJSON: Data? = nil, spanText: String? = nil,
+                probeJSON: Data? = nil) {
+        self.probeJSON = probeJSON
         self.outcome = outcome
         self.receiptJSON = receiptJSON
+        self.spanText = spanText
         self.provenanceJSON = provenanceJSON
         self.forecastJSON = forecastJSON
     }
@@ -293,7 +314,76 @@ public enum RelatticeRun {
         try drive(inputs, forecastOnly: false, isCancelled: isCancelled)
     }
 
+    /// ★ THE ORGANIC CELL-SIZE PROBE (final contract 2026-09-05). NOT a forecast:
+    /// it runs INSIDE a lattice-variant run right after the base solve. The job
+    /// carries the candidate list; core writes `<out>/organic_probe.json` before
+    /// emission (≈ 1–2 min solve + ≈ 30 s per candidate). This reads the file as
+    /// soon as the worker serves it, then CANCELS the run — a "Check sizes" is a
+    /// question, not a run nobody asked for. A worker that serves files only when
+    /// done still answers: the file is read at "done" instead.
+    /// ★ `organic_recommend` (brief 2026-09-06): core generates its own candidates
+    /// across the band and returns FIT and AUTO picks; the look target is the
+    /// Aesthetic lever, the margin the Structural one.
+    public struct Recommend: Equatable, Sendable {
+        public let mode: String            // "auto" = grading.intent
+        public let lookCellsAcross: Int
+        public let margin: Double
+        public let steps: Int
+        public init(mode: String = "auto", lookCellsAcross: Int = 8, margin: Double = 1.5, steps: Int = 5) {
+            self.mode = mode; self.lookCellsAcross = lookCellsAcross; self.margin = margin; self.steps = steps
+        }
+    }
+
+    public static func probe(_ inputs: Inputs, cellsMM: [Double], gradesMM: [[Double]],
+                             recommend: Recommend? = nil,
+                             isCancelled: @escaping () -> Bool = { false })
+        throws -> OrganicForecast {
+        let patched = try probeJob(inputs.jobJSON, cellsMM: cellsMM, gradesMM: gradesMM, recommend: recommend)
+        let probeInputs = Inputs(config: inputs.config, modelPath: inputs.modelPath,
+                                 jobJSON: patched, designBin: inputs.designBin,
+                                 projectName: inputs.projectName,
+                                 requestedVolumeFraction: inputs.requestedVolumeFraction)
+        let result = try drive(probeInputs, forecastOnly: false, probing: true,
+                               isCancelled: isCancelled)
+        guard let data = result.probeJSON, let probe = OrganicForecast.parse(data) else {
+            throw RelatticeError(
+                "The worker did not return a size check this app understands. "
+                + "Its core may be older than the size check.")
+        }
+        return probe
+    }
+
+    /// The job with the probe keys — pure, so it can be pinned. Refuses a job whose
+    /// grading is not organic (core refuses the keys there) and empty candidates.
+    public static func probeJob(_ jobJSON: Data, cellsMM: [Double], gradesMM: [[Double]],
+                                recommend: Recommend? = nil) throws -> Data {
+        guard var obj = (try? JSONSerialization.jsonObject(with: jobJSON)) as? [String: Any],
+              var lat = obj["lattice"] as? [String: Any] else {
+            throw RelatticeError("There is no lattice to check.")
+        }
+        guard let grading = obj["grading"] as? [String: Any],
+              (grading["algorithm"] as? String) == "organic" else {
+            throw RelatticeError("Size checking needs an organic lattice.")
+        }
+        let cells = cellsMM.filter { $0 > 0 }
+        let grades = gradesMM.filter { $0.count == 2 && $0[0] > 0 && $0[0] < $0[1] }
+        guard !cells.isEmpty || !grades.isEmpty || recommend != nil else {
+            throw RelatticeError("There are no sizes to check.")
+        }
+        if !cells.isEmpty { lat["organic_probe_cells_mm"] = cells }
+        if !grades.isEmpty { lat["organic_probe_grades_mm"] = grades }
+        if let r = recommend {
+            lat["organic_recommend"] = r.mode
+            lat["organic_look_cells_across"] = Swift.max(2, r.lookCellsAcross)
+            lat["organic_recommend_margin"] = Swift.max(1, r.margin)
+            lat["organic_recommend_steps"] = Swift.min(8, Swift.max(2, r.steps))
+        }
+        obj["lattice"] = lat
+        return try JSONSerialization.data(withJSONObject: obj, options: [.sortedKeys])
+    }
+
     private static func drive(_ inputs: Inputs, forecastOnly: Bool,
+                              probing: Bool = false,
                               isCancelled: @escaping () -> Bool)
         throws -> RelatticeResult {
         let session = URLSession(configuration: {
@@ -404,12 +494,30 @@ public enum RelatticeRun {
         let jobURL = base.appendingPathComponent("jobs").appendingPathComponent(jobID)
         let deadline = Date().addingTimeInterval(ceilingSeconds)
         var state = "queued"
+        func cancelOnWorker() {
+            var del = URLRequest(url: jobURL)
+            del.httpMethod = "DELETE"
+            session.dataTask(with: del).resume()
+        }
         while Date() < deadline {
             if isCancelled() {
-                var del = URLRequest(url: jobURL)
-                del.httpMethod = "DELETE"
-                session.dataTask(with: del).resume()
+                cancelOnWorker()
                 throw RelatticeError("cancelled")
+            }
+            // ★ PROBING: the answer is a file written before emission. Read it the
+            // moment the worker serves it, stop the run, return.
+            if probing {
+                let probeURL = jobURL.appendingPathComponent("files")
+                    .appendingPathComponent("organic_probe.json")
+                if let (pd, pc) = try? get(probeURL), pc == 200, !pd.isEmpty,
+                   OrganicForecast.parse(pd) != nil {
+                    cancelOnWorker()
+                    return RelatticeResult(
+                        outcome: OptimizeOutcome(variants: [], stoppedOnMargin: false,
+                                                 cancelled: true, acceptedCount: 0,
+                                                 computedRemotely: true),
+                        receiptJSON: nil, provenanceJSON: nil, probeJSON: pd)
+                }
             }
             let (d, code) = try get(jobURL)
             guard code == 200,
@@ -436,6 +544,14 @@ public enum RelatticeRun {
                 return nil
             }
             return d
+        }
+        if probing {
+            // The worker served files only at "done": the probe is still there.
+            return RelatticeResult(
+                outcome: OptimizeOutcome(variants: [], stoppedOnMargin: false,
+                                         cancelled: false, acceptedCount: 0,
+                                         computedRemotely: true),
+                receiptJSON: nil, provenanceJSON: nil, probeJSON: file("organic_probe.json"))
         }
         if forecastOnly {
             // No mesh, no receipt, no solve — one document.
@@ -464,6 +580,9 @@ public enum RelatticeRun {
                 + "(\(meshData.count) bytes) — not showing an empty part.")
         }
         let receipt = file("variant_\(vfTag)_lattice.report.json")
+        // Core writes the spans beside the mesh as `<base>_SPANS.txt`.
+        let spanText = file("variant_\(vfTag)_lattice_SPANS.txt")
+            .flatMap { String(data: $0, encoding: .utf8) }
         let provenance = file("lattice_variant.json")
         let fields = file("fields.bin").flatMap { RemoteFieldsContainer.parse($0) }
         let block = fields?.variants.first
@@ -499,6 +618,6 @@ public enum RelatticeRun {
             gridOrigin: fields?.gridOrigin ?? .zero, spacing: fields?.spacing ?? 0,
             computedRemotely: true)
         return RelatticeResult(outcome: outcome, receiptJSON: receipt,
-                               provenanceJSON: provenance)
+                               provenanceJSON: provenance, spanText: spanText)
     }
 }

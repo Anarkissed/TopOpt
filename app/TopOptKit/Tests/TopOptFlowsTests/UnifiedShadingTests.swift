@@ -59,8 +59,23 @@ final class UnifiedShadingTests: XCTestCase {
         return StressField(nx: n, ny: n, nz: n, origin: bounds.min, spacing: sp, values: vals)
     }
 
+    /// ★★ AESTHETIC WITH A FINISH, so this fixture actually HAS struts to occlude.
+    ///
+    /// ★ IT USED TO GET A FREE PASS. `lattice_member_thickness_mm` refuses a grid whose
+    /// axes disagree by more than 2% and returns an EMPTY array; the preview's voxels
+    /// were bricks (5.63% deviation at the coarse end), so on this fixture the array was
+    /// empty and the cells-per-member floor never applied at all. Making the voxel a
+    /// cube armed the floor — and at an 8 mm cell under the STRUCTURAL floor of 5 this
+    /// bracket needs 40 mm of member, so every one of its 2,916 cells is now correctly
+    /// refused and the frame contains no struts to occlude.
+    ///
+    /// These tests are about SHADING — occlusion, AO, the shared depth buffer — and all
+    /// of them need struts on screen. Aesthetic with a finish is the mode that puts them
+    /// there honestly (core's floor is then 1), rather than a grid distortion that
+    /// happened to switch the floor off.
     static func latticeScene(_ mesh: ViewerMesh) -> LatticeSDFScene {
-        LatticeSDFScene(mesh: mesh, field: gradedField(mesh.bounds), latticeID: "octet")
+        LatticeSDFScene(mesh: mesh, field: gradedField(mesh.bounds), latticeID: "octet",
+                        stageMode: .aesthetic, boundaryFinishWritten: true)
     }
 
     /// A renderer framed on the bracket with the lattice layer installed, at the
@@ -84,6 +99,48 @@ final class UnifiedShadingTests: XCTestCase {
             r.setBodyAlpha(0)
         }
         return r
+    }
+
+    // MARK: - the shaders must COMPILE, not merely read correctly
+
+    /// ★★ THE ONE TEST THAT WOULD HAVE CAUGHT IT (2026-08-19). A parameter was added
+    /// to the wrong MSL function — `lsdf_normal` got it, `lsdf_albedo` used it
+    /// undeclared — and the lattice DISAPPEARED from the app. Nothing went red:
+    ///
+    ///   * the pipelines are built with `try?`, so a compile error is a nil pipeline
+    ///     and never an exception;
+    ///   * every lattice GPU test opens with
+    ///     `XCTSkipUnless(renderer.latticePipelinesDidBuild)`, so the moment the
+    ///     shader stops compiling they all SKIP — and a skip reads as green;
+    ///   * every other shader test scans the source as TEXT, which a syntax error
+    ///     passes happily.
+    ///
+    /// So the suite could be entirely green while the app drew no struts at all.
+    /// This compiles the real source and FAILS on a diagnostic.
+    func testTheShaderSourcesActuallyCompile() throws {
+        guard let device = MTLCreateSystemDefaultDevice() else {
+            throw XCTSkip("no Metal device")
+        }
+        // ★★ ALL FOUR, INCLUDING THE STANDALONE PREVIEW. Leaving it out is exactly
+        // how a broken `lsdf_albedo` signature reached the full suite as two SKIPS
+        // (LatticeSDFEvidenceGen, LatticeSDFProfileTests both open with
+        // `XCTSkipUnless`/skip-on-init) instead of a red test.
+        for (name, src) in [("lattice", MeshRenderer.latticeShaderSourceForTesting),
+                            ("standalone lattice",
+                             MeshRenderer.standaloneLatticeShaderSourceForTesting),
+                            ("viewer", MeshRenderer.viewerShaderSourceForTesting),
+                            ("stage", MeshRenderer.stageShaderSourceForTesting),
+                            // ★ the organic capsule impostors (2026-09-06): a FIFTH
+                            // library, built with `try?` like the others
+                            ("organic capsules", MeshRenderer.organicCapsuleShaderSourceForTesting)] {
+            do {
+                _ = try device.makeLibrary(source: src, options: nil)
+            } catch {
+                XCTFail("★ the \(name) MSL does not compile, and NOTHING else in this "
+                        + "suite will tell you: the pipeline is built with `try?` and "
+                        + "the GPU tests SKIP when it is nil. \(error)")
+            }
+        }
     }
 
     // MARK: - §1(d): ONE material, not two
@@ -180,6 +237,7 @@ final class UnifiedShadingTests: XCTestCase {
             ("ao", MeshRenderer.aoShaderSourceForTesting),
             ("stage", MeshRenderer.stageShaderSourceForTesting),
             ("lattice", MeshRenderer.latticeShaderSourceForTesting),
+            ("organic capsules", MeshRenderer.organicCapsuleShaderSourceForTesting),
         ]
         var used = 0
         for (name, src) in sources where src.contains("ShellClip") {

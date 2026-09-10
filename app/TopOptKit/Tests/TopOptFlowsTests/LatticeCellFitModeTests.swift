@@ -214,20 +214,58 @@ final class LatticeCellFitModeTests: XCTestCase {
 
     /// The CONTROL says which to use when, because from where the user sits the two
     /// solve the same problem.
+    ///
+    /// ★★ REPLACED, NOT RELAXED (2026-08-21). This used to require the words "Per
+    /// region" and either "use per region when" or "differ in thickness". Both were
+    /// assertions about a paragraph the maintainer could not act on: the cell-size chip
+    /// is labelled **Fit**, not "Per region", so the copy sent him hunting for a control
+    /// the app does not have ("then I change to 'per region' and it says to go back to
+    /// Auto! What the fuck is with this shit?"), and the explanation ran long enough
+    /// that he could not parse it ("what is with that paragraph of text?!?!?!").
+    ///
+    /// The old bars pinned the exact wrong words, so they could only ever be satisfied
+    /// by keeping the defect. The bar underneath them — say WHICH control to use, and
+    /// say it in words that are on screen — is what is asserted now, at full strength
+    /// and in the same shape `LatticeWizardRetentionTests.testTheWizardsGateIsTheSharedOne`
+    /// took: every mode a disabled reason names must be a REAL CHIP, and the whole
+    /// reason must fit in two sentences.
     func testTheRetentionControlExplainsTheExclusion() throws {
+        /// The chips that actually exist on the lattice page, by their on-screen
+        /// labels. A reason naming anything outside this list is naming a control the
+        /// user cannot find.
+        let chips = ["Auto", "Swept", "Manual", "Fit",        // Cell size
+                     "Sim", "Uniform", "Per region"]          // Density
+
         let c = LatticeRetentionControl.compute(
             armed: false, graded: true, capability: .all,
             belowFloorVoxels: 100, regionVoxels: 1000, ceilingFraction: nil,
             coreCeilingFraction: 0.2, cellMode: .fit)
         XCTAssertFalse(c.enabled, "retention cannot be armed while fit is selected")
         let why = try XCTUnwrap(c.disabledReason)
-        XCTAssertTrue(why.contains("Per region"),
-                      "the reason must name the control that is winning: \(why)")
-        XCTAssertTrue(why.lowercased().contains("use per region when")
-                      || why.contains("differ in thickness"),
-                      "it must say WHICH to use WHEN, not only that they conflict: \(why)")
+
+        // ★ CALL THE WINNING CONTROL WHAT ITS CHIP CALLS IT.
+        XCTAssertTrue(why.contains("Fit"),
+                      "the reason must name the control that is winning, by the label "
+                      + "on its chip: \(why)")
+        // ★ AND SAY WHICH TO USE INSTEAD — the half the old "use per region when" bar
+        // was reaching for. At least one OTHER real chip has to appear, or the copy
+        // says only that the two conflict and leaves him nowhere to go.
+        let alternatives = chips.filter { $0 != "Fit" && why.contains($0) }
+        XCTAssertFalse(alternatives.isEmpty,
+                       "it must say WHICH control to use instead, not only that they "
+                       + "conflict: \(why)")
+        // ★ EVERY mode named is a real chip — no invented "Per region", no "Auto" in a
+        // row that has no Auto. This is the bar that would have caught the old copy.
+        for word in ["Per region", "Auto", "Swept", "Manual", "Sim", "Uniform"]
+        where why.contains(word) {
+            XCTAssertTrue(chips.contains(word),
+                          "\(word) must be a chip that exists: \(why)")
+        }
+        XCTAssertLessThan(why.count, 160,
+                          "★ two sentences, not a paragraph he cannot parse: \(why)")
         XCTAssertFalse(why.lowercased().contains("advanced"))
         XCTAssertFalse(why.lowercased().contains("expert"))
+
         // And on any other mode the control is operable.
         let ok = LatticeRetentionControl.compute(
             armed: false, graded: true, capability: .all,

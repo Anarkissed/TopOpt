@@ -354,9 +354,28 @@ final class LatticeSDFAlignmentTests: XCTestCase {
         let plain = try meanGreenMinusRed()
         renderer.setFaceTints(tints)
         let tinted = try meanGreenMinusRed()
-        print(String(format: "A4 mean(G−R) facing the anchor-tinted face: plain %.2f → tinted %.2f", plain, tinted))
-        XCTAssertGreaterThan(tinted, plain + 8,
-                             "the anchor-green tint must visibly reach the lattice pixels")
+
+        // ★★ REPLACED, AND THE RULE IS NOW THE OPPOSITE (2026-08-19). This used to
+        // assert `tinted > plain + 8` — that a group's colour visibly reached the
+        // STRUTS. It did, and that was the defect: the maintainer read the greens and
+        // blues as lattice STRUCTURE ("I thought they were tinted for different
+        // *types* of lattice structures. Something like the Rim was blue, the regular
+        // cells were purple, the weight taking cells were green"), when they only
+        // ever said which faces he had selected — a fact the Selections list already
+        // shows, and one that says nothing about the lattice.
+        //
+        // Hue on a strut now means what the strut IS (see `LatticeStructureColour`:
+        // rim / interior / load-carrying), with density as lightness inside each hue.
+        // So `lsdf_albedo` deliberately no longer mixes `tintTex`, and the group
+        // colour must NOT move a strut's pixels.
+        //
+        // ★ WHAT IS STILL ASSERTED, AND WHY THE TEST KEEPS ITS NAME: the volume
+        // itself must still bake in lockstep with the part's grid — the whole first
+        // half above — because it remains the SHELL's tint source. Only the lattice
+        // stopped reading it.
+        XCTAssertEqual(tinted, plain, accuracy: 1.5,
+                       "★ a group tint must no longer reach the struts: hue belongs to "
+                       + "the lattice's STRUCTURE now (plain \(plain) → tinted \(tinted))")
     }
 
     // MARK: - A7: no bake across draws (the P2 claim, now actually asserted)

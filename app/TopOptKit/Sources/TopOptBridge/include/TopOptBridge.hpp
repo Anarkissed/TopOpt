@@ -526,6 +526,9 @@ struct AnalyzeResult {
   // state the analyzed-vs-printed gap rather than assume it away.
   int64_t solid_voxels = 0;
   std::vector<float> von_mises_field;    // grid-indexed, MPa (0 off the printed set)
+  // ★ The per-voxel Cauchy tensor `von_mises_field` is derived from — 6 per voxel,
+  // Voigt [xx,yy,zz,xy,yz,zx], TRUE shear, MPa. The ORGANIC tracer's required input.
+  std::vector<double> stress_tensor_field;
   std::vector<float> displacement_field; // DOF-ordered (3*node), mm
 
   // Constrained-smoothing receipt (handoff 2026-07-26-constrained-smooth-ui).
@@ -1099,6 +1102,75 @@ struct LatticeLimits {
 // with a zero band (the UI greys that topology and says why). Never throws.
 LatticeLimits lattice_limits(const std::string& topology);
 
+// ★★ THE STRUT DIAMETER, FROM CORE'S MEASURED LAW (task 2026-08-20).
+//
+// The app had its own closed form — `r = cell * sqrt(rho / K)`, K = 48 — while core
+// interpolates `kOctetDia`, a table MEASURED at vpc48 (see
+// evidence/2026-07-28-graded-cell-size-phase0/b3_printability.csv). They are not the
+// same function, and the gap is not a constant:
+//
+//     rho    core d(4mm)   app d(4mm)   app/core
+//     0.05     0.3632        0.2582       0.71
+//     0.20     0.7592        0.5164       0.68
+//     0.60     1.5343        0.8944       0.58
+//
+// So the preview drew every strut 1.4-1.7x thinner than the run builds, and quoted
+// those thin numbers in millimetres. This forwards the real law.
+//
+// Returns 0 for a topology core carries no diameter law for (only octet today), for
+// a non-positive cell, or for a non-finite / negative rho — the caller then says it
+// has no core number rather than substituting one.
+/// Core's dyadic cell-size plan (`plan_cell_sizes`, Swept), flattened.
+/// Header then payload: [ok, nx, ny, nz, ox, oy, oz, base_cell_mm, max_level,
+/// level per base cell (x fastest, -1 = not latticed)]. Empty ⇒ core refused.
+/// The base-cell grid it reports is the ONLY grid the levels are aligned to.
+// ★ core's organic cell-size BAND (organic_recommend_band), rows of 5 per include
+// region: face_id, depth_mm, extent_short_mm, stress_p50, stress_p99. See bridge.cpp.
+std::vector<double> organic_recommend_band(const double* regions, std::size_t region_count,
+                                           double min_extrudable_width_mm, double voxel_mm,
+                                           double look_cells_across, int steps);
+
+std::vector<double> lattice_cell_size_plan(
+    int nx, int ny, int nz, double spacing, double ox, double oy, double oz,
+    const std::uint8_t* candidate, std::size_t candidate_count,
+    const double* rho, std::size_t rho_count,
+    const double* width, std::size_t width_count,
+    double min_cell_mm, double max_cell_mm, double min_extrudable_width_mm,
+    int cap_radius_voxels, const std::string& topology,
+    const double* desired_cell_mm = nullptr, std::size_t desired_count = 0,
+    // ★ The floor core CULLS by. 0 keeps its accuracy floor (5). See bridge.cpp.
+    double cells_per_member_floor = 0.0);
+
+/// Core's sub-floor retention stress-fraction ceiling (see grading.hpp).
+double lattice_subfloor_retention_fraction();
+
+double lattice_strut_diameter_mm(const std::string& topology, double rho,
+                                 double cell_size_mm);
+
+// ★★ CORE'S LOCAL MEMBER THICKNESS, for the preview (task 2026-08-20).
+//
+// Core refuses to lattice a member too thin to hold `lattice_cells_per_member_min`
+// cells — it stays SOLID (grading.hpp bar L4). The preview had no notion of member
+// width at all, so it drew lattice on thin ribs the run leaves solid.
+//
+// Rather than re-implement the granulometric opening app-side (which is how the app
+// ended up with a second strut law), this forwards `topopt::local_member_thickness_mm`
+// over a grid built from the caller's own occupancy.
+//
+// `solid` is one byte per voxel, non-zero = solid, in x-fastest order matching
+// nx/ny/nz. Returns one thickness in mm per voxel; +inf means "thicker than the cap
+// measured", which callers must treat as clearing any ceiling. Returns EMPTY on a
+// size mismatch, a non-positive spacing or cap, or if core throws — the caller then
+// says it has no core answer rather than inventing one.
+//
+// NOTE the grid core takes is CUBIC (one `spacing`). The preview's occupancy is built
+// with dims proportional to the extents, so its per-axis spacings agree to rounding;
+// the Swift wrapper checks that before calling and refuses otherwise.
+std::vector<double> lattice_member_thickness_mm(int nx, int ny, int nz, double spacing,
+                                                const std::uint8_t* solid,
+                                                std::size_t solid_count,
+                                                int cap_radius_voxels);
+
 // The topology names the core certification library covers (can be RUN and
 // certified), in the core's own order — the seven cubic topologies today. The UI
 // reads this to know which picker entries are certifiable rather than assuming a
@@ -1182,9 +1254,53 @@ struct LatticeRegionDerivation {
   // the field can say so before the run rather than after.
   bool prints = false;
 };
+// ★ `cells_per_member_floor` — 0 keeps core's ACCURACY floor (5), which is what every
+// pre-existing caller gets. Pass the mode's own floor to derive the cell the mode
+// actually allows: on an 11 mm wall, 5 gives a 2.20 mm cell and 2 gives 5.50 mm.
 LatticeRegionDerivation lattice_region_derivation(
     const std::string& topology, double member_width_mm,
-    double min_extrudable_width_mm, double stated_relative_density);
+    double min_extrudable_width_mm, double stated_relative_density,
+    double cells_per_member_floor);
+
+// ★★★ THE ORGANIC LATTICE'S TRACED CENTRELINES, for the preview. See bridge.cpp for
+// the flat layout and for why the tensor — not a scalar — is the input that gates this.
+// ★ Organic's own (spacing, density, strut) law and its printability floor — see
+// bridge.cpp. Organic's strut is NOT an octet's and must never be reported as one.
+double organic_strut_diameter_mm(double spacing_mm, double rho);
+double organic_spacing_for_mm(double rho, double strut_diameter_mm);
+double organic_min_printable_spacing_mm(double rho, double min_extrudable_width_mm);
+double organic_default_strut_diameter_mm(double grid_spacing_mm,
+                                         double resolution_floor_voxels, double rho_max,
+                                         double min_extrudable_width_mm);
+
+std::vector<double> organic_preview_field(
+    int nx, int ny, int nz, double spacing, double ox, double oy, double oz,
+    const std::uint8_t* candidate, std::size_t candidate_count,
+    const double* tensor, std::size_t tensor_count,
+    const double* spacing_mm, std::size_t spacing_count,
+    double min_extrudable_width_mm,
+    double build_x, double build_y, double build_z,
+    double overhang_angle_deg, double rho_min, double rho_max,
+    double strut_diameter_mm, int grow, double layer_height_mm,
+    int anchor_at_boundary,
+    int emit_repairs,
+    int overhang_fillet,
+    // ★ SYNTHETIC STRESS ON UNLOADED WALLS — CORE'S OWN FUNCTION (brief 2026-09-05,
+    // B.5: "the preview bridge ... must call synthesize_focal_stress() on its tensor
+    // with the same per-region config, or preview and run disagree on a dead wall").
+    // region_id: one int per voxel, 0 = none, else the 1-based include region.
+    // synth: rows of 4 doubles [region_id, face_id, foci, soft_mm]. dead_fraction:
+    // the run's 0.02. Nothing runs when region_id_count != n or synth_count == 0.
+    const int* region_id, std::size_t region_id_count,
+    const double* synth, std::size_t synth_count, double synth_dead_fraction,
+    int fnx, int fny, int fnz, double fspacing,
+    double fox, double foy, double foz, double band_mm);
+
+// Bake a span list (7 doubles each: a, b, r) into the two-channel centreline field —
+// see `organic_spans_field` in bridge.cpp for the layout.
+std::vector<double> organic_spans_field(const double* spans7, std::size_t span_count,
+                                        int fnx, int fny, int fnz, double fspacing,
+                                        double fox, double foy, double foz, double band_mm);
 
 std::vector<std::string> lattice_certifiable_topologies();
 
@@ -1277,5 +1393,63 @@ void grading_demand_fraction_into(const float* von_mises, std::size_t n, int int
 // compare it against core's receipt to the digit (bar R15).
 double grading_demand_reference(const float* von_mises, std::size_t n, int intent,
                                 double allowable_mpa, double percentile);
+
+// ── ★ THE AESTHETIC CELLS-PER-MEMBER FLOOR, FORWARDED (never restated) ─────────
+// The fixed floor of 5 is an ACCURACY threshold — where the homogenised model's
+// transverse-stiffness error crosses a 2.4 % band — not a buildability one. For a
+// lattice graded for LOOKS the accuracy it buys is worth exactly as much as the load
+// the material carries, so core computes the floor from the measured error curve and
+// the voxel's own utilisation (`aesthetic_cells_per_member_floor`, lattice.hpp).
+//
+// ★ THE APP MUST NOT DERIVE THIS. The strut-diameter law was re-derived in Swift once
+// and came out 1.4-1.7x adrift; the same discipline applies here. These forward core's
+// own functions so the preview's floor and the run's floor are one number.
+//
+// `utilisation` is the voxel's demand as a fraction of the allowable. A non-finite or
+// non-positive utilisation returns the ACCURACY floor — absence of measurement is not
+// permission to relax. `error_budget <= 0` takes core's own default policy.
+// Never throws; returns 0 when the topology is unknown.
+double lattice_aesthetic_cells_per_member_floor(const std::string& topology,
+                                                double utilisation,
+                                                double error_budget);
+
+// The lowest the adaptive rule may ever go: 2, because that is the lowest cell count
+// MEASURED under the same bending case the accuracy floor uses (+8.5 %). Notably NOT
+// the percolation floor of 1.0, whose own declaration warns it was measured axially at
+// rho ~= 0.199 and "must not be quoted unconditionally".
+double lattice_aesthetic_cells_per_member_hard_floor(const std::string& topology,
+                                                     bool boundary_finish_written = false);
+
+// Core's default error budget for the rule above, so the app can SHOW it without
+// authoring it.
+double lattice_aesthetic_error_budget_default();
+
+// ★ WHAT AN AESTHETIC DENSITY MEANS, IN CORE'S OWN WORDS (`kAestheticDensityMeaning`).
+// The app shows this sentence verbatim wherever it offers the aesthetic mode, so what
+// the chooser promises and what the receipt promises cannot drift apart. Paraphrasing
+// it in Swift would be the same class of duplication as re-deriving the strut law.
+std::string lattice_aesthetic_density_meaning();
+
+// ── ★ THE THREE LATTICE ALGORITHMS, FORWARDED (never restated) ─────────────────
+// `lattice_algorithm.hpp`'s own enum order: "doubled" (the dyadic ladder, and the
+// DEFAULT), "stepped" (one cell per declared region, verbatim, no transition
+// handling), "organic" (struts traced along the stress field).
+//
+// ★ THE APP MUST NOT HOLD ITS OWN LIST. A picker built from a Swift enum drifts the
+// moment core gains a fourth; this is core's `lattice_algorithm_names()` verbatim.
+std::vector<std::string> lattice_algorithm_names();
+
+// True iff `name` is one core will accept. False for anything else — including "",
+// which the JOB treats as "not stated" but a PICKER must never present as a choice.
+bool lattice_algorithm_is_known(const std::string& name);
+
+// ★★ WHETHER THE ALGORITHM MAY BE RUN UNDER A STRUCTURAL CLAIM.
+//
+// `run_job` REFUSES organic + structural: a traced lattice is anisotropic by
+// construction and the certification library carries exactly one CUBIC tensor per
+// topology, so there is nothing for a structural claim to certify against. The app
+// asks core rather than encoding "organic is special" in Swift, so a future
+// algorithm with the same property is handled without an app change.
+bool lattice_algorithm_allows_structural(const std::string& name);
 
 }  // namespace topoptbridge

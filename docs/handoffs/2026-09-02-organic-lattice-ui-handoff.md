@@ -1,0 +1,1270 @@
+# Organic lattice in the Lattice Stage UI — handoff (in progress)
+
+> ## ★ 2026-09-05 — the part preview drew the ladder because the stage's solve never landed; two switches
+>
+> **"Have you implemented the organic lattices on the part preview yet?"** Yes, since
+> 2026-08-22 — and the banner said it was not drawn: "shown as the doubled ladder; the
+> run builds the organic lattice". The device log names why: Save & Exit at 00:07:17,
+> the stage's `analyze_loadcase ENTER res=64` at 00:07:22, the part bake at 00:07:33
+> (before the solve could finish), and NO verdict line for that solve in the next hour
+> while the app sat at 0 % CPU. The organic tracer needs the tensor; without a landed
+> solve the scene falls back to the ladder. A `.failed` sim was never surfaced on the
+> workspace (only `.running` is). Fixed on the preview side: the scene now records WHY
+> organic was not drawn (`organicNotDrawnReason`: no tensor / solve failed / no
+> extrudable width / empty region / trace refused) and the banner prints it. Whether the
+> M2 solve fails or merely dies is being replayed on the Mac through the app's own
+> context (`ZZM2SimReplayTests`, temporary) — result in the README when it lands.
+>
+> **Two switches, both built:**
+> - **"Flare overhangs for printing"** — the maintainer's wire-up: `organicOverhangFillet`
+>   (settings, persisted; spec + wizard mirrors), written to the job as
+>   `organic_overhang_fillet: false` ONLY when off, only for organic, only when core's
+>   schema accepts the key; absent ⇒ on, as specified. The preview passes it to the
+>   bridge, which sets `OrganicLattice::overhang_fillet` when the linked core has the
+>   member (a `void_t` detection guard keeps the bridge compiling on either core). This
+>   worktree's core (`ca56654d2805`) predates the key, so the row shows DISABLED with
+>   its reason until the app links the `claude/traced-organic-refusals` core; the
+>   schema probe is the gate, as for every organic key.
+> - **"Preview: show print repairs"** (the maintainer's earlier ask) — preview-only,
+>   default on. Off bakes the traced/grown curves themselves (bridge `emit_repairs = 0`)
+>   instead of the emitted spans: no merges, legs or fillets. A topology pick, so it
+>   keys the variant cache (`repairs=0`); the banner's census says "REPAIRS HIDDEN".
+>
+> The two are distinct on purpose (the maintainer: do not fold the fillet into a global
+> printability switch).
+
+> ## ★ 2026-09-04 (night) — "ribbons again": the blobs are the support pass's arches, and they are in the file
+>
+> Measured on the shipped traced-Auto variant (evidence README, round 6): half the beams
+> are fatter than the bead (radius p50 0.25, p90 0.47, cap 0.50 mm), all tiny (median
+> 0.064 mm), a third of the material by volume. They are the emission's ARCH repair:
+> any span over air by more than `kOrganicArchMinUnsupportedMm` (0.01 mm) is flared into
+> a 12-segment fillet up to 2.5 × the bead. 1938 arched spans on this cube (counter now
+> on the bridge header [47] and in the census). Not the prism sides, not the weld pitch
+> (A/B: identical census). ★ It is the file: every app job states
+> `loads.layer_height_mm` (0.2 mm) and the pass is gated on it; the printed PR 353
+> cube's job predates that key, which is why the photo shows clean beams. No job key
+> controls the pass. Core item for the core agent: the 0.01 mm threshold and the 2.5×
+> cap. App-side there is no honest lever; a labelled "show without repairs" preview
+> toggle is possible if the maintainer wants it, default off.
+
+> ## ★ 2026-09-04 (evening) — topology/thickness split, the 3MF variant cache, and a correction
+>
+> **Correction first.** The 04:00 block says the shape-fit mirror's floor was "corrected
+> (`window: nil`)". It was not: that edit's anchor text did not match, the script stopped
+> before it, and I reported the intended change as done. HEAD 3990bc51 still passed the
+> preview window as the floor. It is landed now (LatticeSDFMetal.swift, `window: nil,
+> only: false`), and the sample changed as core's rule says it must: sim-on traced Auto
+> is now **492 curves, 2340 connectors, 1.50–4.29 mm** (was 197 / 851 / 3.00–4.29) —
+> spacing halves at the walls, which is `kOrganicShapeFitMinCellRatio` doing its work.
+> The 04:28 "approved cube" screenshot (v3_A) was the un-corrected mirror.
+>
+> **The split (maintainer: "do the topology/thickness split and the on-disk cache
+> first, with the beam lattice 3MF as the cache format").**
+> - The bridge now bakes TWO channels per organic voxel: the CENTRELINE distance
+>   (clamped at reach = 1 mm headroom + largest radius) and the SURFACE distance
+>   (clamped at the headroom). At the baked thickness the march reads the surface
+>   channel — exact; under the Thicker slider it reads centreline − r′, a uniform
+>   (`organicRadius`, appended last on both sides). Thicker never re-bakes or
+>   re-traces: `Picks` no longer hashes the strut width. The live radius is capped at
+>   90 % of the reach (≈ 1.1 mm radius on a 0.42 bead); beyond that a rebake would be
+>   needed and is not yet wired.
+> - Why two channels and not "nearest centreline minus its radius": pinned by
+>   `OrganicCentrelineFieldTests` — the first design was off on 366 voxels of a
+>   three-radius fixture; the surface channel equals the old `bakeField` exactly.
+> - The bake reach is thickness HEADROOM, not the window: with the 6 mm window as the
+>   band, 26,773 spans took 154 s to bake on the Mac; at 1 mm headroom 16.6 s.
+>
+> **The cache.** `OrganicBeamLattice3MF` writes/reads a 3MF beam lattice (STORED zip,
+> welded vertices, a radius per beam end, metadata: census, core SHA, picks); the key
+> is SHA-256 of the topology picks + core SHA + field identity + layout version
+> (`OrganicVariantCache`); lookup bundle → Application Support → trace-then-store. The
+> scene bakes a cached document on ITS OWN grid (`organicCached:`), and the field it
+> produces is identical to the trace's (max |Δ| 0.0000 mm, same dims/origin). Mac:
+> trace+emission+store 105 s; bake from the 3MF 16.6 s (3.08 MB for 26,773 spans).
+> Bundled defaults: traced/grown × Auto/Fit for the wizard's default picks
+> (`OrganicVariantGeneratorTests`, `GENERATE_ORGANIC_VARIANTS=1`), keyed on core's
+> SHA so a new core misses cleanly and re-traces.
+>
+> **On the iPad (simulator, dylib 466db7e845fc3e29, evidence v6_*):** Thicker → 0.90 mm
+> re-rendered within one screenshot interval with no re-trace banner (v6_B); with the
+> device cache cleared, Organic on → the shipped variant was on screen inside 25 s
+> INCLUDING the once-per-launch 16 s solve, census "26773 struts, 6903 mm — the shipped
+> variant (3MF beam lattice)", nothing stored (v6_C). A miss (trace + emission + bake +
+> store) took ≈ 75 s on the iPad. The first shipped set missed because the stage flag
+> was in the key while the sample never receives an allowable stress; the key is v4
+> without it, pinned, and the four variants were regenerated (7 MB in the bundle).
+>
+> **Re-pinned, not loosened:** `LatticeOrganicTraceTests` counted "inside a strut" as
+> negative values of the organic field; that meaning now lives in the surface channel
+> and the test reads it there, and additionally pins the centreline channel ≥ 0.
+>
+> **Still slow, and where the next second goes:** the CPU stamp of 26 k spans into
+> 7.5 M voxels is most of a cache hit's time; a Metal compute bake or a per-thread stamp
+> would take it under a second. Not done tonight.
+>
+> Full app suite (Debug, SwiftPM): 2310 tests, 30 skipped, 0 failures, 3757 s.
+
+> ## ★ 2026-09-04 (later) — the grower's counters answer the reviewer: it is the joining, not the cone
+>
+> **Reviewer's three points, measured** (evidence README round 4, `cli_cube20/auto_*`):
+> 1. Not the pruner — agreed. Correction to my own note: the bridge already bakes the
+>    EMITTED spans (it calls `generate_organic_lattice` with a NullSink), so the preview
+>    was never the raw curves. It ran without `lat.layer_height_mm` (run_job sets it on
+>    both paths), so the base trim and the mid-air raster were skipped; fixed.
+> 2. Counters — the grower's own (`growth_*`) now cross the bridge (header [11..20]),
+>    with the tracer's `stop_*` [21..31] and the emission's length census [32..46], and
+>    ride the sample's census behind the (i). On the cube: **blocked by support 0,
+>    clamped to the cone 0** in every run; 874 curves / 2818 joins / 1222 branches
+>    (604 refused) at 4.5 mm; a curve averages 9 steps ≈ 3 mm. Printability never
+>    bound. What is counted says joining/seeding. ★ Core item: four of the five tip-loop
+>    exits are uncounted (`!in_region`, no direction, the join-budget break, MAXSTEP);
+>    the receipt's `stop_*` on the grown path are the traced field pass.
+> 3. Emitted spans — already the case (see 1); the layer-height fix is the real gap.
+>
+> **And the finding that matters most:** core's CLI under the app's ACTUAL job
+> (`cell_mode: auto`, D2) derives a 0.47–2.37 mm window on this cube (median 1.0 mm):
+> traced writes 15.6 km of struts, grown 40 km, grown 73 % of surface in the bottom
+> third. The sample is told the printed 3–6 mm window, so today it cannot mirror what
+> core's Auto would build — D2 is ahead of core, as the pane says. The sim-on traced
+> Auto cube the maintainer approved is the 3–6 mm window's look (the printed job's
+> swept semantics), which is exactly what a run cannot yet be asked for under D2.
+>
+> **The emission in the preview now runs as the run's does (two app fixes):** the bridge
+> sets `lat.layer_height_mm` before emission (base trim and mid-air raster were skipped)
+> and builds a `LatticeBoundary` voxel base on the candidate grid (breach checks and the
+> span clip never ran). Consequence, measured (README): the traced Auto sample's census is
+> now emitted 2810 → base_cut 2719 → support_prune 4182 → written 4182 mm — the support
+> pass ADDS legs and node balls, as core's file has them — so the approved clean-curves
+> cube now shows those legs (screenshot v5_A). That is the file. ★ Residual: the sample's
+> support stage adds +54 % where core's own swept run cuts −42 %; different lattices, so
+> not attributable without the same curves through both emitters (core hook). Cost: the
+> traced bake 27 → 80 s on the Mac.
+>
+> **Not done, per the reviewer:** no support/self-support tuning.
+>
+> Full app suite (Debug, SwiftPM): 2304 tests, 30 skipped, 0 failures, 3730 s.
+
+> ## ★ 2026-09-04 — "these aren't cubes": what was the app's, what is core's (measured)
+>
+> **Maintainer:** grown (sim on and off) and the sim-off traced sample "aren't cubes";
+> "test EVERY version and take screenshots before calling anything complete."
+>
+> **Grown is core's grower, and the app is faithful to it.** Core's own CLI on
+> `TestCube20.stl` with the printed job's grading (evidence `cli_cube20/`): grown writes
+> MORE length than traced (1338 vs 1008 mm) but puts 59 % of its surface in the bottom
+> third (traced 30 %). Bridge-direct probes on the sample's field: the density band
+> (0–1 vs 0.05–0.12 vs 0.08–0.55) changes NOTHING; every span radius is the bead; layer
+> height 0.12/0.2/0.28 all bottom-heavy. Parameter parity with run_job checked (only the
+> per-voxel bead field is not passed, and it only sets strut radius). So the base slab
+> with a few columns IS what `grow_organic_lattice` builds on this cube, before the
+> run's pruning. Reported, not gated; Grown stays the user's opt-in (Aug 5).
+>
+> **Two app bugs found on the way, both fixed:**
+> 1. The shape-fit mirror floored the cap at the preview window's low end; core floors
+>    it at `kOrganicShapeFitMinCellRatio × spacing` whenever the job has no swept window
+>    — which for organic under D2 is always. Corrected (`window: nil`). On this cube the
+>    tracer's resolution floor binds first, so the sim-on traced Auto sample is
+>    unchanged: 197 curves, 851 connectors — the one the maintainer called "exactly
+>    what organic looks like" (its only change since is standing on its base).
+> 2. `organic_shape_fit_only` was written on organic jobs; core refuses it without a
+>    cell window, and windows are only legal with `cell_mode: swept` (job.cpp), which D2
+>    forbids. Never written now (re-pinned). The "Shape fit only" switch means Fit (one
+>    separation, shape fit kept) vs Auto — the only reading core can honour.
+>
+> **The sim-off rule is reverted (3.1/3.2 as literally specified made the sample lie).**
+> Core's run traces its OWN solved field for organic regardless of the app's Simulate
+> Stresses switch (`run_organic_step(... v.stress_tensor_field ...)`), and Auto is
+> core's FEA-derived window, not the app's. Hiding Auto and forcing Fit under sim off
+> produced the one-separation "birdcage" (the axial field's hoop family at 4.5 mm),
+> a lattice the run would never build for those settings. Now: sim off leaves the
+> organic cell mode alone (Auto/Fit/Manual all offered), the Density row loses Sim, and
+> the pane says why. The alert is kept for a future gate but no longer fires.
+>
+> **Every version, screenshotted on the simulator (see the README list):** sim on ×
+> {traced Auto, traced Fit, grown Auto}; sim off × {traced Auto, grown Auto}.
+> Full app suite (Debug, SwiftPM): 2304 tests, 30 skipped, 0 failures, 3544 s.
+
+> ## ★ 2026-09-03 (night) — the seven items: whole cube, sim on/off, the pane rebuilt
+>
+> **Maintainer's seven items and what shipped (app only, no core change):**
+> 1. **Banner** — "A 20 mm test cube, re-traced with your settings. Your part will differ."
+>    No PR number anywhere in the UI (pinned). The census (curves, connectors, spacing,
+>    shape-fit shrink, field, path, window, voxel) sits behind an (i) on the banner.
+> 2. **Pane text** — every row is a short title + (i) popover (`infoButton`, one open
+>    at a time); the explanations moved into `LatticeSetupWizard.info*` strings.
+>    Traced/Grown stay as pills (his 2. ruling) with an (i) on how they print.
+>    **Fine-tune for printing…** is a link under GROWN only that unfolds the spacing
+>    scale; the overhang limit is stated as fixed at 30° there — in core it is a
+>    TRACED-only key (`organic_overhang_angle_deg`; grown clamps to a compile-time
+>    30°), so under grown there is no live overhang knob to show. If he wants the
+>    overhang slider back under Traced, it is one line.
+> 3. **Simulate Stresses OFF** — `LatticeSettings.setSimulateStresses` (and the wizard
+>    model's borrowed copy, plus `selectOrganic`) now: Auto ⇒ Fit, `organicShapeFit`
+>    and `organicShapeFitOnly` forced on. Cell size shows Fit / **Manual**; Manual
+>    lists the approved sizes (`organicFittingSeparationsMM`, certification's) and,
+>    under an Aesthetic stage, the app's ladder 2/3/4/5/6/8/10 mm with a "*" on every
+>    size not approved + the note "may leave the lattice in more than one piece". A
+>    Manual pick is a Fit with a stated `organic_separation_mm` (D2 unchanged).
+>    3.1 (sim ON): Manual also lists **approved grades** — `organicApprovedGradesMM`
+>    `[[lo, hi]]`, `organicPickedGradeMM` → `organic_window_mm` (probe-gated). Core
+>    reports neither list yet; the pane says so. 3.2: turning "Shape fit only" off
+>    with the simulation off shows the alert "Grading needs a stress simulation" and
+>    the switch stays on (`GlassToggle` + `.alert` hoisted to the page root — a
+>    SwiftUI alert attached inside the panel never presented; measured on device).
+> 4. **Gizmo** — the workspace now OWNS the wizard's camera and binds its ONE gizmo to
+>    it while the wizard is up (a first cut hid the workspace gizmo under the wizard
+>    and drew a second — `SmoothingPageTests` pins one definition, one mesh-only
+>    placement, and it failed; this keeps L2 intact); the cube and the widget mirror
+>    each other. **Orientation ("top face should be the left side")** — the
+>    real cause: the viewer is Y-UP (+Y is the gizmo's "Top", +Z its "Front"), and the
+>    workspace settles every part with `ForceModel.settleRotation` (gravity → viewer
+>    −Y); the wizard's stage passed NO settle rotation, so the Z-up cube (its FEA, its
+>    STL, the block) was drawn raw with its +Z top facing the camera. Fixed by passing
+>    `settleZUp = quat(−Z → −Y)` to the wizard's `MetalMeshView`; the lattice layer
+>    takes the same model rotation (MetalMeshView ~4229), so struts and box turn
+>    together, and the settled bbox puts the cube's bottom face on the floor.
+> 5. **Organic switch** — a full-width `GlassToggle` row "Organic lattice (i)"; on, the
+>    three type chips grey out and are disabled; off returns to the last grade style.
+>    Also: the octet's Thickness scrub no longer leaks onto the Sample tab under
+>    Organic (`organicPaneOwns(.thickness)` on both tabs) — density is the organic
+>    pane's row.
+> 6. **Holes** — the sample is now a WHOLE 20 mm cube (`TestCube20.stl`: the 40 mm
+>    fixture scaled 0.5, same face order, so face IDs and the load case carry over).
+>    Sim ON traced: "197 curves, 851 connectors, 3.00–4.29 mm · shape-fit: 97502
+>    voxels shrunk (depth 32)" — every corner present, reads as a cube
+>    (`whole_cube_sim_on_traced.png`).
+> 7. **Sim ON = graded by the cube's field (waves); sim OFF = the same field,
+>    UNGRADED** — the maintainer's first ruling was a uniform build-axis field for
+>    sim OFF; built, shown (`whole_cube_sim_off_uniform.png`: a bare cubic grid) and
+>    rejected the same night ("way too uniform — bring back the way you had it last
+>    time"). Sim OFF now traces the cube's own solved field with shape-fit-ONLY (one
+>    spacing, no stress grading) — which is exactly what core's run does with
+>    `organic_shape_fit_only`, so sample and run agree and no uniform-field key is
+>    needed. The synthetic tensor is gone from the code. Maintainer, later that night:
+>    the ungraded trace "is exactly how Sim off should look like", and the graded one
+>    — "arcs on the sides", like the printed cube — is Sim on. Both as built.
+>
+> **Core-side, reported not gated:** (a) GROWN on the rejected uniform field rendered
+> ONE branched strut while the summary said "720 curves, 348 connectors"
+> (`whole_cube_sim_off_grown_finetune.png`) — the grower on a field with no gradient,
+> and the traced-set count on the grown receipt (the known gap); kept as a data point.
+> (b) With Fit the window is one separation, so shape-fit-ONLY has nothing to ramp
+> (0 voxels shrunk, by core's own rule). (c) Certification does not yet report
+> `fitting_separations_mm` / `fitting_windows_mm`; the Manual lists fill in when it does.
+>
+> **Tests:** targeted 58/0 (Debug SwiftPM; sample picks incl. sim-off lock and the
+> uniform field's numbers, label names no PR, settings round-trip of the grade
+> fields, chip rule incl. sim-off). Full app suite (Debug, SwiftPM): 2304 tests, 30
+> skipped, 0 failures, 3669 s — after one red on the way (`SmoothingPageTests` gizmo
+> pin), fixed by design rather than re-pinned.
+>
+> Evidence: `evidence/2026-09-02-organic-on-device/sample_shape_fit_2026-09-03/`
+> (README + 7 screenshots; Debug dylibs 5744aa3148150ed0 / e91f93ec505fa0a3, core
+> `ca56654d2805`).
+
+> ## ★ 2026-09-03 (late) — shape fit in the sample; "no outline, ONLY lattice"
+>
+> **Asked (maintainer):** the sample cube had no "Fit to shape", "otherwise they would
+> look like a cube"; and "ensure that the shape to fit does not include an outline and
+> is ONLY lattice".
+>
+> **Shape fit in the sample — a MIRROR, named as one.** Core applies organic shape fit
+> inline in the CLI (`core/src/cli/run_job.cpp` ~4160–4290), not in a function the
+> bridge can call, and this PR makes no core change. `OrganicShapeFit.swift` reproduces
+> the rule on the preview's separation field: two-pass chamfer distance to the region
+> boundary (grid faces count), then either the shape-fit-ONLY ramp
+> `cell_min + (cell_max−cell_min)·dist/dmax` (stress map unread) or the cap
+> `min(spacing, max(2·dist·voxel, cell_min))`. The member-width term of core's cap
+> (`member_width / n★`) needs the run's per-voxel member width, which the preview does
+> not have — only the boundary cap is applied, and the code says so. Pinned by
+> `OrganicShapeFitTests` (4 tests, hand-computed on a 5³ block). ★ Honest end state: ONE
+> core function shared by run_job and the bridge; until then any change to core's rule
+> must be mirrored here or the sample lies. `LatticeOrganicInput` carries
+> `shapeFit/shapeFitOnly`; the wizard already forces shape fit on under organic.
+>
+> **"No outline, only lattice" is THREE job keys, and the app wrote none of them.**
+> (1) `lattice.outer_finish` — core's DEFAULT is `"shell"`, a solid shell = an outline
+> (job.hpp:271); an organic job now writes `"skin"` (bare) unless the user picked
+> Covered. (2) `lattice.skin: "diagrid"` — the only value that makes a non-shell
+> outer_finish schema-legal (job.cpp ~1492); on the organic path core never hands the
+> skin spec to the generator (`generate_organic_lattice(*organic, w, &boundary, …)`,
+> run_job.cpp ~2111), so the key unlocks the bare surface and draws nothing.
+> (3) `grading.organic_boundary_finish: "clean"` — core defaults to `"skin"`, a net over
+> the bare surface (the printed PR 353 cube had it), and the sheet had no control for it.
+> `LatticeWizardModel.selectOrganic()` now carries the organic rule (shape fit on, finish
+> clean, inherited swept/fixed window → Auto) for the chip AND the on-appear repair of an
+> older project; `LatticeSettings.jobOuterFinishResolved/jobSkinResolved` write (1)+(2)
+> on both spec paths; non-organic jobs are byte-identical (pinned).
+>
+> **Fidelity trap found on the way — mirrored, measured small.** run_job sets
+> `anchor_at_region_boundary = (outer_finish != "skin")`, and the dangling-end trim
+> (organic_lattice.cpp ~1066) cuts an un-anchored end that left the region back to its
+> last connector — a BARE run's faces are fuzzier than a preview that assumes anchors.
+> The bridge now takes `anchor_at_boundary`; the sample passes `boundary == .covered`,
+> the part preview the same. Measured on the 20 mm corner (Debug, Mac, six bakes,
+> `evidence/2026-09-02-organic-on-device/sample_shape_fit_2026-09-03/README.md`):
+> traced fit bare 211 mm³ vs fit covered 208 mm³ (≤1.5 %); grown fit bare 88 = fit
+> covered 88 mm³ (no effect).
+>
+> **What the sample shows now (simulator, Debug dylib `883494cf71a9c504`, core
+> `ca56654d2805`).** Traced: "162 curves, 811 connectors, 3.00–4.43 mm spacing ·
+> shape-fit: 11039 voxels shrunk (min ratio 0.50, depth 16) · traced, shape-fit, bare
+> (no outline; ends trimmed)" — reads as a cube, struts only, no shell/net
+> (`traced_shape_fit_bare.png`). Grown: "2819 curves … grown, shape-fit, bare" — does
+> NOT read as a cube: a sparse frame, plate-like ribbons near the top, a few long struts
+> at the bottom (`grown_shape_fit_bare.png`). The probe says why: shape fit thins the
+> GROWN sample by 34 % (134 → 88 mm³) and the grower is bottom-heavy either way
+> (no-fit: 81 % of occupied voxels in the bottom third; fit: 50/40/10 %). Traced without
+> fit was 225 mm³. That is core's grower on this field with these picks, rendered as-is;
+> grown is the user's opt-in (Aug 5 ruling), not a fix — reported, not gated.
+>
+> **Core-side observations (report, not touched):** the grown branch's summary carries
+> the TRACED connector count (811 on both paths — `lat.connectors.size()` after
+> `grow_organic_lattice`), the known growth-receipt gap; shape fit is CLI-inline (above).
+>
+> **Tests:** targeted 49/0 (Debug SwiftPM: OrganicShapeFit, OrganicSampleCube incl. the
+> covered/shape-fit picks, LatticeWizardOrganicChip incl. clean finish + bare surface +
+> Covered + octet byte-identical + saved-project repair, OrganicRunReceipt, LatticePage).
+> Full app suite (Debug, SwiftPM, `swift test`): 2302 tests, 30 skipped, 0 failures, 3655 s.
+
+> ## ★ 2026-09-03 (evening) — the sample is LIVE: the PR 353 cube re-traced with the user's settings
+>
+> **What was wrong (maintainer):** the sample looked like ribbons, not beams — the bake
+> voxel floor (0.35 mm) against r ≈ 0.26–0.39 mm struts; and it was a fixed artifact
+> where it should be a base that follows every setting.
+>
+> **What it is now.** `OrganicSampleCube` solves the bundled `PR353_cube40.stl` with
+> the app's OWN FEA (`TopOptKit.analyzeSolidLoadCase`, the printed job's load: anchor
+> face 0, −200 N on face 1, PLA, 64³) once per launch, then re-traces a **20 mm corner**
+> of that field through the preview bridge — which calls the production
+> `trace_organic_lattice` / `grow_organic_lattice` (bridge.cpp) — every time an organic
+> pick changes (`.task(id: Picks)`, off the main thread). Picks: Traced/Grown (+ layer
+> height), the window = the printed job's 3–6 mm × spacing scale (Fit ⇒ one separation:
+> the user's certified pick, else the middle), density band, Thicker's strut diameter,
+> overhang (traced only). Bake voxel = r_min/2 (0.105 mm at the 0.42 bead) — the
+> sample-only rule the maintainer confirmed; the part preview keeps its own rule (he
+> wants that realistic by another route: analytic capsule march pre-run, the run's
+> welded STL post-run — proposed, not built). The 20 mm cut keeps strut-to-spacing;
+> the label says so. Bridge extension (app-side, `TopOptBridge`): `strut_diameter_mm`,
+> `grow`, `layer_height_mm` now cross to `OrganicParams`; grown goes to
+> `grow_organic_lattice`. `LatticeSDFScene` gained `organicBakeVoxelMM` (nil ⇒ old rule).
+>
+> **Measured on the simulator (Debug dylib `4f0c31195798cc73`, core `ca56654d2805`):**
+> FEA + first trace 16 s wall (peak 100 % CPU, sheet live); traced: "148 curves, 694
+> connectors, 3.00–6.00 mm spacing · voxel 0.10 mm" — individual beams with free tips,
+> no ribbons (17:32 screenshot); tap Grown → re-trace 14 s → "2134 curves, 694
+> connectors …" — the layer-ordered columnar look with free tips (17:34). The banner
+> carries the census; "Sample" is the first tab under organic.
+>
+> **The certification pop-up (maintainer item 4).** When a run's receipt carries
+> `fitting_separations_mm`, the workspace stores them on the project
+> (`organicFittingSeparationsMM`) and, under a Structural stage, shows a confirmation
+> dialog — "After running certification, only 2 mm, 3 mm, 5 mm are available for use.
+> Please select which you'd prefer — you can always change this in the settings" —
+> with a button per size; the pick lands in `organicPickedSeparationMM` (+ Fit). Settings
+> shows the factored sizes as pills under Cell size with "Let core pick". The pick
+> travels as `organic_separation_mm` only when core's schema accepts it (probe-gated
+> like every organic key; today it does not, and the pane says so). Nothing fires until
+> core writes the key — wired and unit-tested, not device-driven.
+>
+> **Closing suite (Debug, SwiftPM): 2296 tests, 30 skipped, 0 failures, 3602 s.**
+>
+> Tests: `OrganicSampleCubeTests` (picks mapping, grown needs a layer height and drops
+> the overhang, bake voxel ≤ r_min/2 under the cap, hashable picks, the two fields'
+> round trip and byte-identity, the gated emission). Render fixture unchanged
+> (`testThePrintedCubeIsHitAtItsOwnRadius` still on the bundled printed spans).
+
+> ## ★ 2026-09-03 (latest) — the sample IS the PR 353 cube; the thin-strut fixture measured
+>
+> **The sample.** The wizard's organic sample is now CUBE_FINAL — PR 353 round 4, the
+> job the printed cube came from (`evidence/2026-08-21-organic-lattice/cube/final_organic.json`:
+> TRACED, aesthetic, swept 3–6 mm, 40 mm, 64³, axial −200 N). Its spans were regenerated
+> from that job with `emit_organic_spans` (Release core `ca56654d2805`, 76.7 s):
+> `evidence/2026-08-21-organic-lattice/cube/final_organic_replay_2026-09-03/` — **12,434
+> spans, 20,233.09 mm, ONE component, strut diameter 0.42 mm (file radii 0.263–0.391),
+> 748 support legs, free tips kept**. Only the traced set exists (the printed one); no
+> grown set was generated, so the Traced | Grown segment does not switch the sample.
+> Bundled as `TopOptFlows/OrganicSample/` (SwiftPM resources; the folder must not be
+> named `Resources` — a shallow iOS bundle with that top-level folder fails CodeSign,
+> "bundle format unrecognized"). Rendered through the SAME path a run's spans take
+> (`OrganicSpanIndex` bake + the march via `LatticeSDFScene`, `latticeLayer` on the
+> wizard's `MetalMeshView`, box at body alpha 0), at the radius in the file, 40 mm, no
+> rescale. Label: "The PR 353 test cube, as printed. Your part will differ." + the
+> measurement; first tab "Sample" under organic. The bake (12,434 spans → 150³) runs
+> off the main thread once per launch — synchronously it pinned the app at 100 % CPU
+> with the sheet frozen mid-animation (measured, fixed).
+>
+> **On device (Debug dylib `b8094ef35d7bb700`, band 4 mm, 09:05):** the sheet opens on
+> "Sample" with the banner "Baking the printed cube — 12,434 struts through the run's
+> own preview path…" and stays live (the bake is off-thread); ~4 min later the cube
+> renders through the march with the banner reading "The PR 353 test cube, as printed.
+> Your part will differ. 12434 struts, 20233 mm indexed — matches the run's receipt."
+> WHAT IT SHOWS: at the app's 0.35 mm voxel floor (`fs = max(0.35, longest/384)`) with
+> file radii 0.26–0.39 mm, neighbouring struts merge into sheets where the print shows
+> separate fine struts — the same bake-resolution question as the thin-strut rule (the
+> 12 M cap alone would allow ~0.19 mm here). Reported, not changed. The 2 mm sample
+> index (band 2 mm, ~8× fewer stamps) ships in dylib `8841c7597f87598e`: measured on the
+> simulator (Debug) the bake ran **22 s** wall (app CPU >50 % then back to 0.1 %) from
+> the Settings tap to the cube on screen, sheet live throughout; the banner then reads
+> "12434 struts, 20233 mm indexed — matches the run's receipt." (09:08 screenshot). The
+> merged-sheet look at the 0.35 mm voxel floor is unchanged by the band (it is the
+> voxel, not the band).
+>
+> **Measured (f):** the bundled receipt says span_count 12434 / span_length_mm
+> 20233.09307; the bake indexes 12434 spans / 20233.1 mm — `mismatch()` nil. Pinned by
+> `testThePrintedCubeIsHitAtItsOwnRadius` (which also marches it: see below).
+>
+> **Overhang under Grown:** confirmed hidden — the row shows "Grown organic holds a
+> fixed 30° overhang; the limit is not adjustable there" in place of the scrub
+> (`LatticeSetupWizard.swift` ~734).
+>
+> **Closing suite for this round (Debug, SwiftPM): 2289 tests, 30 skipped, 0 failures,
+> 3742 s.** The thin-strut app-bake case runs as a strict expected failure inside
+> `OrganicRenderMarchTests` and prints its numbers; nothing else is red.
+>
+> **The thin-strut fixture (reviewer §2), 3000 rays each, exact shader replica:**
+>
+> | case | voxel | epsO | reached | hit | through | missed |
+> |---|---|---|---|---|---|---|
+> | run-2 spans, own radii (0.43–2.05) | 0.521 | 0.130 | 1605 | 1605 | 0 | 0 |
+> | PR 353 cube, printed radius (0.26–0.39) | 0.350 | 0.088 | 2592 | 2592 | 0 | 0 |
+> | run-2 re-baked at r = 0.225, APP BAKE | 0.521 | 0.130 | 1536 | 1422 | **9** | **105** |
+> | candidate (a): voxel = r_min | 0.225 | 0.056 | 1525 | 1525 | 0 | 0 |
+> | candidate (b): epsO = ½ diagonal | 0.521 | 0.451 | 1546 | 1546 | 0 | 0 |
+>
+> The reviewer's arithmetic is confirmed: at the schema floor on the M2's voxel, 7.4 %
+> of rays that reach a capsule find no surface (114 of 1536). The printed cube at its
+> own radius is whole. Both candidate BAKE rules close the holes: (a) costs
+> 890×268×215 = 51 M voxels (the app caps at 12 M and would coarsen back); (b) costs
+> surfaces read up to 0.45 mm fat. Not chosen — the maintainer's call. The app-bake
+> thin case is a STRICT `XCTExpectFailure` in `OrganicRenderMarchTests` (prints its
+> numbers; flips to a failure the day a rule lands without updating it); the two
+> candidates print theirs. The pass-through criterion now counts a real crossing only
+> (chord > 2·epsO, hit > epsO past the exit); tangent grazes (chord ≈ 0, hit within
+> epsO of the touch) are tallied separately — the closing suite of the previous round
+> had caught two such grazes as "holes" with "largest chord skipped 0.0 mm".
+
+> ## ★ 2026-09-03 (later) — names confirmed, substitution closed, SHA answered
+>
+> **The core SHA.** `ca56654d2805` is a COMMIT on this branch
+> (`claude/topopt-lattice-preview-holes-5ab466`): `ca56654d2805e8d8…`, 2026-09-02
+> 19:59:24 −0400, "Handoff: organic lattice UI — what landed". It is not on origin
+> because the branch has never been pushed; it is not a content hash. `b27e5af`
+> (2026-09-02 07:08, "Contiguity follow-up: the verdict, the resi…") **is an
+> ancestor** of it (`git merge-base --is-ancestor` → yes), so the vendored core
+> includes b27e5af. `build_core.sh` stamps `git -C core rev-parse --short=12 HEAD`,
+> i.e. the worktree HEAD at re-vendor time — the core/ tree of that commit.
+>
+> **D1 capability, as named:** `organicStructuralCertificationWired` is now the
+> schema probe for grading key `organic_structural_certification` with value
+> `"beam_network"` — a whole-job `jobSchemaError` probe (the bridge's key probe only
+> sends `true`), the same route `latticeSchemaAccepts` already uses. No new
+> mechanism. False on core `ca56654d2805`; flips the day core accepts the key.
+>
+> **D2 receipt keys, as named** (all `grading.organic.*`): `fitting_separations_mm`,
+> `fit_survival_bar`, `selected_window_mm` (auto), `selected_separation_mm` (fit),
+> `structural_verdict` ("certified" | "refused" | "not_run"), `structural_margin`,
+> `structural_stress_{p50,p95,p99,max}_mpa`, `structural_worst_strut`,
+> `structural_governing_load_case`, `structural_knockdown_used`. The proposed
+> `structural_certified` bool is dropped; the confirmation is
+> `structural_verdict == "certified"`. Read verbatim into `OrganicRunReceipt`;
+> `spacingLine` shows "core chose window/separation … · from … that fit · achieved …
+> · structural: verdict (margin)". Pinned by `testTheConfirmedD2KeysAreReadVerbatim`.
+>
+> **The substitution is closed.** "Fit → auto when no region" is gone from both
+> `runSpec` paths: a chosen Fit travels as core's `fit`, always. Where no region is
+> declared the wizard's Fit pill is DISABLED with its reason, and the lattice-stage
+> run button refuses in words ("organic Fit needs a declared lattice region — pick
+> Auto or declare one"). Offer, never substitute. Pinned:
+> `testOrganicCellModesAreAutoAndFitOnlyOnBothPaths` (Fit stays Fit with and without
+> a region).
+>
+> **D2 is ahead of core — said in the pane:** "core's organic Auto/Fit is still being
+> wired. Today an organic Fit runs core's existing fit path (one cell per region,
+> job.cpp), and the receipt does not yet report the fitting set." Core's organic
+> auto/fit semantics are a pending core item (`job.cpp:1937` runs the octet fit path
+> for `cell_mode: fit` on an organic job today).
+>
+> **On-device (Debug dylib `1c5c0e3e442be106`, 06:17, core `ca56654d2805`), project set
+> organic + Fit by file, regions declared:** the run button stays live ("2 regions ·
+> no optimization" — Fit with a region is not refused); the pane shows the Fit pill
+> lit, its caption, and the "core's organic Auto/Fit is still being wired" note; no
+> sizes anywhere (06:18 screenshots). The Fit-without-region refusal is a computed
+> property (`organicFitWithoutRegion`) exercised by construction; not driven on device
+> because the M2 always declares its two regions.
+>
+> **Full app suite for this round (Debug, SwiftPM): 2286 tests, 30 skipped, 2 failures,
+> both named — two assertions of ONE test, `OrganicSpanIndexTests.
+> testTheIndexFindsEveryCapsuleAQueryTouches` (index 2.98 vs brute 2.05; 2.69 vs 2.54
+> on random points). Diagnosis: a segment is stamped into the cells its CAPSULE
+> (endpoints ± r) covers and a query reads one cell, so `distance` is EXACT inside
+> any capsule and an UPPER BOUND outside; the test claimed exactness "everywhere
+> the index has cells" and passed three full runs only by the luck of 500 random
+> points (this is also the shape of the first run's two unnamed failures).
+> Re-pinned to the true contract, stricter where it matters: never nearer than
+> brute force; exact inside a capsule; and whenever looser, the nearest segment's
+> stamped cell range must exclude the query cell (a real stamping bug still
+> fails). 5 consecutive runs green. The preview bake does not depend on the
+> outside case (`bakeField` stamps its own `r + bandMM` reach).
+>
+> **The index re-pin's condition (reviewer): the render cannot have holes — proved at
+> the march.** (1) The step IS clamped to the bake's band: the march steps
+> `clamp(F2 * stepScale, 0.05 * voxel, 0.7 * cellHere)` (`UnifiedShading.swift:707`)
+> with `F2 = max(dOrg, dClip)`; `dOrg` is the baked field, whose empty voxels are
+> filled with `bandMM` and whose stamped voxels are mins (`OrganicSpanIndex.bakeField`,
+> reach `r + band`), so `dOrg ≤ band` everywhere and the step ≤ 0.95 × band
+> (`stepScale = 0.95`, `LatticeSDFMetal.swift:2262`). What the GPU marches is that
+> baked field, a LOWER bound at voxel centres — not the index's `distance`. The only
+> over-estimate is the linear sampler between centres (`LatticeSDFMetal.swift:1169`),
+> ≤ ½ voxel diagonal. (2) RENDER-LEVEL TEST `OrganicRenderMarchTests`: an exact CPU
+> replica of the shader's sampling, epsilon and step, marched through the run-2
+> spans baked with the app's own parameters (386×117×94, voxel 0.521 mm, band 4.0 mm)
+> against analytic ray–capsule intersections, 3000 rays (1500 random + 1500 grazing).
+> Measured: rays reaching a capsule 1621 — hit before leaving it 1621, passed through
+> 0, missed 0, smallest chord hit 0.066 mm; first capsules OUTSIDE the span index's
+> stamp at the sampled cell: 1370, all hit; hits claiming a surface where none is
+> (true distance > eps + ½ diagonal): 0. Fixture: `evidence/…/run2_replay_gate_off_SPANS.txt`.
+>
+> **The graded:false gap, generalised:**
+> `testEveryPathThatYieldsAnOrganicSpecWritesTheAlgorithm` sweeps both `runSpec`
+> overloads × {sim, uniform} × {auto, fit, fixed, swept} × generatable on/off × with/
+> without a declared region, and FAILS if any organic spec's job lacks
+> `algorithm: organic`, carries a size, or has a cell mode other than auto/fit — and
+> if any organic path returns nil where the same octet settings build a spec.
+
+> ## ★ 2026-09-03 — maintainer decisions D1/D2 applied (app only; `git status core/` clean)
+>
+> **Core SHA the device builds linked:** `ca56654d2805` (12-char, from
+> `CoreFingerprint.generated.swift`, written by `build_core.sh` at the 2026-09-02
+> 20:40 re-vendor; the xcframework's mtime is 20:40:19). Device dylibs of this
+> session: `f49df957ac923314`, `982516d3e5017957`, `a1a498bc36f5cb39`,
+> `f84512590c1a71e5`, `564db78a1220c5b7` — all Debug, all against that core. The
+> Mac replays used the Release CLI in `build/` from the same worktree; whether
+> `growth_ran=false` and the missing `census_components[]` are skew or defects is
+> for core to say with that SHA in hand.
+>
+> **§1 evidence committed:** `evidence/2026-09-02-organic-on-device/` — run-2 and
+> run-3 job bytes, the gate-off replay job, both receipts, and the exact
+> `topopt-cli lattice-variant` command (README). The shell guard did NOT fire on
+> run-2 bytes without shape fit (neither on device nor on the gate-off replay,
+> which exported 1240 spans clean); it fired only on run 3 with
+> `organic_shape_fit: true`.
+>
+> **D1 — Organic under Structural (UI enablement, emission gated).** The chip is
+> selectable under Structural with the same controls as Aesthetic. Core still
+> refuses the job at runtime (`refuse_organic_structural`), and that is not a
+> schema key, so `gradingSchemaAccepts` cannot see it: the app carries its own
+> statement `TopOptKit.organicStructuralCertificationWired` (FALSE today; to be
+> bound to core's capability signal — coordination with the core agent pending)
+> and the gate's words `organicStructuralGateMessage`. While false: the organic
+> pane shows the message under Structural, and the lattice-stage run button is
+> DISABLED with the same message (`canLatticeThis` / `latticeThisSummary`), so the
+> UI never writes a job core refuses. No core edit.
+>
+> **D2 — organic cell modes are AUTO and FIT.** The organic "Cell size" segment is
+> `["Auto", "Fit"]`; the candidate list, the size pills and the scrub are gone (no
+> "fits" computed in the app). AUTO → core's `cell_mode: auto`, no window; FIT →
+> core's `cell_mode: fit` where a region is declared (core refuses `fit` with
+> none) and Auto otherwise — never a fixed cell. Enforced on BOTH builder paths in
+> `runSpec` (graded/sim and uniform) and in `LatticeAutoPosture` (F2), so no octet
+> window or size reaches an organic job by any path; pinned by
+> `testOrganicCellModesAreAutoAndFitOnlyOnBothPaths` and the posture test. The
+> receipt now carries the window/separation core chose
+> (`requested_spacing_*`, `achieved_spacing_*` → `spacingLine`) and reads
+> `structural_certified` when core writes it (key name to coordinate) — displayed
+> on the preview label, never inferred. What "the fitting set" looks like in the
+> receipt is core's addition; the reader will show it when the key exists.
+>
+> **On-device proof (Debug dylib `77a13857ba095c55`, 04:08, core `ca56654d2805`),
+> project set to `stageMode: structural` + `algorithm: organic` by file:**
+> - the lattice stage stays live under Structural; the run button is DISABLED and
+>   reads core's words: "organic structural certification is not yet wired — core
+>   refuses an organic lattice under a Structural intent today. Run it under
+>   Aesthetic, or wait for the core task." (04:12 screenshot);
+> - the organic pane shows the same caption above "Cell size", with every control
+>   enabled; the segment is `Auto | Fit`, no sizes, no pills (04:10 and 04:12);
+> - the mode sheet's "Traced (organic) lattices need this mode" row is rewritten to
+>   D1's wording (post-dates the on-device build; compiled by the next build).
+>
+> **A gap D2's test caught, fixed:** on the UNIFORM-density path (`Density: Auto /
+> Thicker` set `.uniform`) `runSpec` built `graded: false`, and `gradingDictionary()`
+> returns nil for a non-graded spec — an organic job on that path carried NO grading
+> block, hence no `algorithm`, and core would have run the default lattice in
+> silence. An organic job now always builds `graded: true`. And the sim path's fit
+> fallback (fit → FIXED for the octet) ran after the first organic rule, letting
+> `cell_mm: 6.0` through; the organic rule is applied again after it. Pinned by
+> `testOrganicCellModesAreAutoAndFitOnlyOnBothPaths` (fixed → auto, swept → auto,
+> fit-without-region → auto, no size, both paths).
+>
+> **Full app suite for this round (Debug, SwiftPM): 2284 tests, 30 skipped, 1 failure,
+> named — `StrutLineWidthTests.testNoLatticeLineWidthSiteReadsAWallBead`, the audit of
+> `strutLineWidthMM` call sites (14 → 13: the organic candidate-size site is gone by
+> D2). Re-pinned per the test's own instruction; 12/12 after. The two earlier-round
+> failures did not reproduce in any of the three full runs since.
+>
+> ### §3 — census beside its counters (null is NOT "did not run")
+> From the two replay receipts (same job bytes; Release CLI, core `ca56654d2805`):
+>
+> | stage | census TRACED | counters TRACED | census GROWN | counters GROWN |
+> |---|---|---|---|---|
+> | base_cut | null | base_trim_found false, cut 0, clipped 0 | null | same |
+> | support_prune | 783.28 | legs 7343, cuts 607, cleanup_pruned 8492 | 85.71 | legs 1834, cuts 462, cleanup 2311 |
+> | stranded_drop | 783.28 | comps 8, spans 356 | 85.71 | comps 17, spans 377 |
+> | ground_tie | **null** | legs 8, rounds 5, ties 314 **← disagree** | **null** | legs 22, rounds 4, ties 2044 **← disagree** |
+> | branch_support | **null** | seeds 537, trunks 231, merges 35 **← disagree** | **null** | seeds 286, trunks 136, merges 54 **← disagree** |
+> | dangling | 783.28 | trimmed 17, rounds 1 | 85.71 | trimmed 17, rounds 1 |
+> | fill_mat | **null** | struts 415, cells 1485 **← disagree** | **null** | struts 24, cells 1121 **← disagree** |
+> | finish | **null** | filleted 72, net_skin 0 **← disagree** | **null** | filleted 2 **← disagree** |
+>
+> Four stages carry `null` beside nonzero counters in both receipts, so the
+> census `null` cannot be read as "stage did not run" until core confirms the
+> sentinel. `census_components[]` is absent altogether.
+
+> ## ★ STATE AT 2026-09-03 — REVERTED: no core change in this PR
+> On 2026-09-02 the maintainer said organic should be available under Structural;
+> the agent read that as a core instruction and retired two core gates on disk
+> (`run_job.cpp refuse_organic_structural`, `job.cpp` shape-fit intent check). The
+> reviewer ruled that a deleted assertion is forbidden regardless of who asked:
+> core has NO INSTRUMENT to certify organic geometry under a structural intent (the
+> certificate reads density against the OCTET tensor; nothing has measured a tensor
+> for traced geometry). **Reverted** — `git status core/` is clean at commit
+> `94313e30`. The UI keeps the committed behaviour: the Organic chip is offered in
+> both intents, DISABLED under Structural with the reason shown, never hidden,
+> never silently switched; it never writes a job core refuses. Making organic
+> certifiable under Structural is a CORE task (resolved beam-network certification
+> over the GRID/SKIN/SEG span export) — out of scope here.
+>
+> Also per the reviewer: the traced path's refusals are the traced path behaving as
+> known (trace-then-repair cannot be made clean by adding passes —
+> `organic_lattice.cpp:2477-2479`; traced 40 mm cube 8,793 legs vs GROWN 0). Fix (a)
+> "re-run support after cleanup" is DECLINED. `support_converged = true` in the
+> receipt describes the state BEFORE cleanup changed it and is not a printability
+> claim. The next measurements are the GROWN path on the same job bytes and the
+> M2's own separation cliff (§14 below when written).
+>
+> UI fixes on disk (uncommitted until the suite names its failures):
+> - **The octet window no longer rides into organic — at its real source, measured
+>   twice.** The on-disk project said `cellSizeMode: auto` (window 4–8); the job
+>   carried `swept 5.5–6`. First fix (a guard in `runSpec`, commit e7e8fc45) passed
+>   its unit test and STILL shipped the window on device (Debug dylib
+>   `f84512590c1a71e5`, 01:17: job `cell_mode: swept, 5.5–6`) — because the on-device
+>   request runs `LatticeAutoPosture.applied` BEFORE `runSpec`, and that posture had
+>   already rewritten Auto into the octet's per-member swept window. The posture now
+>   leaves an organic Auto alone (`LatticeAutoPosture.swift`, one line). Proof on
+>   device (Debug dylib `564db78a1220c5b7`, 01:29, container `DC305934…`, new write):
+>   `grading = {intent aesthetic, algorithm organic, organic_shape_fit true, topology
+>   octet, cell_mode auto}` — no window. Tests:
+>   `testTheAutoPostureLeavesAnOrganicAutoAlone` (octet control still derives) and
+>   `testOrganicAutoDoesNotInheritTheOctetsDerivedWindow`. The wizard row additionally
+>   resets an inherited swept/fit mode to Auto out loud and lights nothing for one.
+>   Note the value judgement is NOT made: core's `auto` is "a single uniform cell"
+>   per the plan's own comment; what organic should do with Auto is the maintainer's
+>   default to pick — the UI only stopped sending a window nobody chose.
+> - **Section 6(i) struck from the UI** (addendum A): the "up to 4 mm stayed one
+>   lattice / 5 mm left 40 % dust / 6 mm 85 %" captions were gc2's inline tracer, not
+>   `trace_organic_lattice`; both captions are now neutral. No cell-size verdicts or
+>   thresholds remain in the organic pane.
+> - **The receipt's four fields are carried, not judged:** `OrganicRunReceipt`
+>   gains `growthJoinRefusedSpan` and a one-line `contiguityLine` (survival · pieces
+>   (largest %) · joins refused); the scene exposes it as `organicReceiptSummary` and
+>   the preview label appends it. Pinned in `OrganicRunReceiptTests`.
+>
+> ### E. The census — every organic run in this handoff (Release core `build/topopt-cli`, 2026-09-02/03)
+> `length_census_mm` per stage (mm). **`census_components[]` is NOT in the receipt
+> this core build writes** — every stage's component count is absent, not null;
+> the length census is what exists. `null` = stage did not run.
+>
+> | stage | TRACED, run-2 bytes, gate off | GROWN, run-2 bytes + `organic_growth` |
+> |---|---|---|
+> | grown (initial curves) | 6016.08 | 15646.75 |
+> | emitted | 7683.25 | 16073.25 |
+> | node_merge | 7211.25 | 13533.31 |
+> | base_cut | null | null |
+> | support_prune | 783.28 | 85.71 |
+> | stranded_drop | 783.28 | 85.71 |
+> | ground_tie | null (yet `ground_tie_legs_added` = 8) | null |
+> | branch_support | null | null |
+> | dangling | 783.28 | 85.71 |
+> | stranded_drop_2 | 783.28 | 85.71 |
+> | fill_mat | null | null |
+> | finish | null | null |
+> | written | 783.28 | 85.71 |
+>
+> Traced receipt: survival 0.130, 1240 spans, 5 pieces, largest 45.2 %, stranded
+> 429.3 mm, legs 7343, cuts 607, `unsupported_cells_remaining` 17 (the run-2
+> refusal). Grown receipt (report only — addendum B withdraws "switch to grown";
+> traced ships): survival 0.0055, 103 spans, 6 pieces, largest 37.7 %, stranded
+> 53.4 mm, legs 1834, cuts 462, `unsupported_cells_remaining` 0; the support prune
+> took 13,533 → 85.7 mm. **Receipt defect to report:** `growth_ran` reads `false`
+> although the grown branch ran (the "grown" census row is 2.6× the traced one and
+> `oo.lat = jg.organic_growth ? grow… : trace…` is unambiguous) — on the
+> lattice-variant path `R.oc.growth_ran` reaches the receipt unset. The separation
+> sweep (3.0–6.0) was started under the earlier instruction and STOPPED at its first
+> point when the addendum withdrew it; no sweep numbers exist.
+>
+> **The organic SAMPLE preview is NOT built.** The wizard's sample is still
+> `LatticeSamplePatch` (an octet patch); it has no organic branch, so what he saw
+> is not an organic lattice. Plan: generate the 40 mm cube's spans with the recipe's
+> bending load (`scratchpad/cube/job.json` is written: `cube40.stl`, force
+> `[200, 0, −100]`, `emit_organic_spans`, res 64), bundle the `_SPANS.txt` as a
+> `TopOptFlows` resource (Package.swift has no `resources:` yet), and add an
+> organic branch to `stageMesh` that draws capsules from `OrganicSpanIndex` — no
+> tube/capsule mesh helper exists in the app yet. The run itself was blocked:
+> `cd <scratchpad>/cube && ../../build/topopt-cli lattice-variant job.json --out out`.
+>
+> **The real-part preview from a run's spans IS wired** (`organicSpans` →
+> `bakeField` → capsule-min field; label names the span count) but has never been
+> exercised on device because no on-device organic run has yet completed (three
+> endings, §9). The Mac replay proves core's side (§10).
+
+**Branch:** `claude/topopt-lattice-preview-holes-5ab466` (merged `origin/main` @ PR 353 at `de96877d`)
+**Last green commit:** `dbcb356e` (settings, keys, gates, wizard row — 7/7 tests)
+**§2 now compiles and its 15 tests are green** (OrganicSpanIndex ×4, OrganicRunReceipt ×2,
+LatticeSchemaProbe ×1, LatticeOrganicSettings ×7 + the settings tests). Read §4 for what is
+still unverified.
+
+## 1. Landed and tested (dbcb356e)
+- `LatticeSettings` + `LatticeSpec`: the seven `organic_*` keys, core's defaults, CodingKeys,
+  decode AND encode (unconditional). `gradingDictionary()` writes a key only if (1) algorithm is
+  organic, (2) `gradingSchemaAccepts` (this core: all seven true), (3) moved off core's default.
+  `organic_growth` never without `layerHeightMM > 0` (§2A); overhang never under growth (§2C).
+- `runSpec(layerHeightMM:)` threaded from `project.printParams` at all three callers.
+- Wizard model mirrors the seven in/out. `LatticeOrganicSettingsTests` ×7.
+
+## 2. Landed, NOT yet compiled (after dbcb356e)
+- **Core**: `lattice.emit_organic_spans` (job.hpp/job.cpp), span ledger collected for weld OR
+  spans (§2B), `_SPANS.txt` written post-emission (`GRID` + `SEG`, no `SKIN` — nothing in scope
+  states a designed rim), **refuse-on-empty via `JobError`**, receipt `span_count / span_length_mm
+  / span_path` under `grading`. `test_job.cpp`: S1 schema test.
+- **App**: `OrganicSpanIndex` (parse, uniform 4 mm index, `distance`, `bakeField`) + tests;
+  `OrganicRunReceipt` (§5 fields, null-tolerant census, `mismatch(...)`, `contiguityReport`) +
+  tests; `TopOptKit.latticeSchemaAccepts(key:)` + controls test; `LatticeVariantAlternative.spanText`
+  and `RelatticeResult.spanText` fetched beside the mesh; both job builders set
+  `emit_organic_spans` when organic; `LatticeSDFScene(organicSpans:organicReceipt:)` bakes the
+  organic field from spans FIRST (trace only when none) and exposes `organicSpanSource` +
+  `organicReceiptMismatch`; preview label appends the source and SHOUTS a mismatch; workspace
+  stashes spans+receipt from on-device (`RelatticeRun`) and remote (`openLatticePage`) runs, folds
+  them into the bake key, and rebakes on run change.
+- **Wizard UI (his 2026-09-02 spec)**: "Organic" chip at the TYPE level (sets
+  `cellTransition = .organicGrade`; tapping a lattice type leaves organic); a separate organic
+  "In the part" pane: Traced/Grown (Grown disabled WITH reason), Cell size Auto·grade / Fit·one
+  size / Pick a size (list from `regionMemberMM` ÷ k, printability-filtered), Density
+  Auto / Sim / Thicker (+ strut width), FIXED finish "grade to fit the outline"
+  (`organic_shape_fit` forced on select and on load), overhang (hidden under growth), spacing
+  scale with the §6 note as ADVISORY.
+
+## 3. Open questions put to the maintainer (unanswered)
+1. Structural-mode cell list: hard filter to the measured-lattice band, or advisory (§6/§8)?
+   Grown list its own set?
+2. "No finish on the faces": `organic_boundary_finish = "clean"` (drops the net-skin, clipped
+   ends become cantilevers) or keep core's `skin`? Currently: NOT written (core default).
+3. Remove the "Organic Grade" pill from Grade style now that Organic is a Type-level chip?
+   Currently: still there.
+
+## 4. Not done / caveats
+- **The lattice-key probe reads the VENDORED xcframework.** `latticeSchemaAccepts("emit_organic_spans")`
+  printed `false` in the test run because `app/TopOptKit/vendor` was built before the core change;
+  `build_core.sh` was re-run afterwards. Until the app is rebuilt against it the job builders will
+  NOT ask for the span file — by design, that is the probe doing its job. Re-run
+  `LatticeSchemaProbeTests` after `build_core.sh` and expect `true`.
+- ctest (Release) #1: every test passed except `cli_demo` (= `test_cli`, a validation binary that
+  shells out per case), which sat at 0% CPU for 30 min after 36 CPU-min and was killed. Its solo
+  rerun is in flight; its source does not reference lattice/welded/organic (see grep in the
+  session), so the span export is not in its path. `job_schema` (with S1) passes.
+- Compile + tests of §2; ctest Release #2 (with S1); `build_core.sh` re-run (chained);
+  device verification (an organic on-device run → label shows "N struts from the run's
+  emitted spans", no MISMATCH).
+- **Persistence gap**: `spanText` is NOT in `LatticeAlternativeDTO` (OutcomeStore) — a reopened
+  project loses the run's spans and the preview falls back to the trace (and says so). Persist
+  the file to the sidecar dir and store a path rather than the text.
+- Step 3 (in-shader capsule-min over the index) — deferred; the baked field is the enabler,
+  the shader path is the fidelity upgrade. Blocker 1 in the task doc is stale on this tree.
+- §7: multi-component grown is REPORTED (`contiguityReport`), never judged.
+- Organic Grade pill + `LatticePage.algorithmCard` (dead) untouched pending Q3.
+
+## On-device, 2026-09-02 evening — what the simulator actually showed
+
+Measured on `A030C20C…` (iPad Pro 13", 1032×1376 pt), build hash `60f9dc2dbd24fb7c`,
+project `102117B9` ("M2 verticalStand", Ready) with `lattice.algorithm` set to
+`"organic"` by hand (backup: scratchpad `project.json.BACKUP2`, sha `d6d1d335…`).
+
+1. **The Organic chip is real and the state round-trips.** With the project saying
+   organic, the wizard opens with Organic selected (filled chip, its "on" caption).
+   The "chip won't select" lead from earlier tonight was a HARNESS SCALE error:
+   the screenshot is ~1500 px wide for 1032 pt, so pt = px × 0.688, not ÷2 — every
+   tap landed at 73 % of its target (a control chip missed the same way). Fixed in
+   memory; no code was wrong.
+2. **The organic run died at core's validation** (screenshot 21:07): `organic
+   requires "intent": "aesthetic", stated explicitly (this job says nothing)`. The
+   app never wrote `grading.intent`. Fixed: `LatticeSpec.stageMode` mirrors the
+   stage's Structural/Aesthetic choice and the organic block emits `intent` from
+   it (`"aesthetic"` runs; `"structural"` travels as the stage's own word so core's
+   refusal stays faithful; a non-organic job still emits no `intent` — bar U1).
+   Test: `LatticeWizardOrganicChipTests` (positive, structural, and no-key controls).
+3. **Core makes organic AESTHETIC-ONLY** (`run_job.cpp refuse_organic_structural`:
+   one cubic tensor per topology, none measured for traced struts). So Q1 is not
+   an app choice: under a Structural stage the Organic chip is now DISABLED with
+   that reason as its caption. His item (1) "Structural shows only true lattices"
+   cannot arise inside Organic — it must be his call whether Structural+Organic
+   should instead flip the stage to Aesthetic.
+4. **"In the part" was showing BOTH sections** (screenshot 21:12): the octet Cell
+   size / Density / Finish rows above the organic block. Fixed: under Organic the
+   stage's three rows are dropped and `organicRow` carries them.
+5. The results screen's Lattice entry is BLOCKED for on-device runs (same "re-run
+   on a Mac worker" refusal as Smooth) and the blocked Smooth caption pushes the
+   Lattice chip OFF-SCREEN to the right on portrait 13" (Smooth's VStack is up to
+   260 pt wide). Not touched tonight — the lattice stage is reached from the
+   workspace's top-right "Lattice" chip → "Settings"; noted for QA.
+6. Two iPads were booted; `screenshot`/`tap` without `udid` go to the OTHER one.
+   Always pass `udid`.
+
+7. **After the rebuild (dylib `f49df957ac923314`, 21:30) the captured job document**
+   (`lattice_job.json`, copied while it existed) carries
+   `grading: {algorithm: organic, intent: aesthetic, topology: octet, cell_mode: swept,
+   cell_min 5.5 / cell_max 6, min_extrudable_width_mm 0.45}` and
+   `lattice.emit_organic_spans: true`, `loads.layer_height_mm: 0.2`. The run passed
+   core's validation (it died there at 21:07; at 21:34 it was 2:26 into the solve).
+   NOT in the job: `organic_shape_fit` — the wizard forces it in the model, but
+   `project.json` still has the 20:56 mtime after Save & Exit, so persistence of the
+   forced pick is an OPEN question (check the project store's write path).
+8. `LatticeWizardOrganicChipTests` first SKIPPED silently: the guard used
+   `latticeSchemaAccepts` (the lattice-block probe) on a GRADING key. A skip reads
+   as green in a filtered run — read the "skipped" count, not the exit code.
+9. **Three on-device organic runs, three different endings — all core's own words:**
+   - run #1 (21:07, no `intent`): refused at validation — fixed in the app.
+   - run #2 (21:37, `intent` present, no shape-fit because Save & Exit had not
+     persisted): passed validation, solved, refused at the PRINTABILITY gate —
+     "17 raster cells (0.627 mm³, 2 regions) would be extruded into open air at
+     0.2 mm; 7343 support legs added, 607 spans cut; these defeated both. Set
+     `require_no_midair_start: false` or change geometry." The app exposes NO such
+     key — whether to offer "export anyway" is HIS call.
+   - run #3 (21:49, persisted picks incl. `organic_shape_fit: true`): passed the
+     printability gate (!) and was refused at the EXPORT guard — "5 of 237,996
+     lattice vertices lie OUTSIDE the solid shell, worst by 0.0318 mm at
+     (25.947, −48.942, 14.680), interior strut pass, allowance 0.0001 mm." A core
+     clip-vs-shell escape on the shape-fit path — the strut-clip family, not the
+     Organic algorithm, and not touched tonight.
+10. **Core's span export works on his real part.** The SAME job bytes as run #2,
+    replayed on the Mac with `topopt-cli lattice-variant` and the gate off:
+    `variant_024_lattice_SPANS.txt` = 1240 SEG lines, 783.28 mm recomputed from the
+    file, radii 0.430–2.052 mm; `run_info.json grading.organic.span_count = 1240`,
+    `span_length_mm = 783.27785`, `length_survival = 0.130`, `tensor_out_of_regime =
+    true`. Receipt and file agree — the §10 check, done by hand on real data.
+11. **The receipt read the wrong level.** `OrganicRunReceipt(info:)` read
+    `grading.span_count`; core writes `grading.organic.span_count` (every organic
+    field is nested). On a real run the receipt was EMPTY and the "PREVIEW DOES NOT
+    MATCH THE RUN" guard could never fire. Fixed (nested first, flat fallback) and
+    pinned with the replay's numbers; the original test had built a flat dictionary
+    and so passed against the broken reader.
+12. Restored his `project.json` from the session backup (`BACKUP2`, sha `d6d1d335…`)
+    into the current data container after the runs; the app was relaunched to the
+    project list.
+14. **CORE TASK, REPORTED NOT FIXED (reviewer §4b): the 0.0318 mm shell escape under
+    shape fit is a real traced-path bug.** Measurement site: the per-element observer in
+    `run_job.cpp` (~2136–2190) records `max_out` per pass into `oc.max_protrusion_mm`
+    with `worst_protrusion_pass` ("interior strut" here — organic feeds the same
+    observer as octet); the guard at `run_job.cpp:5597` refuses when
+    `max_protrusion_mm > protrusion_allowance_mm` (0.0001 mm on an ordinary run).
+    On run 3 (organic, `organic_shape_fit: true`): 5 of 237,996 vertices out, worst
+    0.0318 mm at (25.947, −48.942, 14.680). Where organic ENDS are clipped to the shell
+    before emission was not traced; open whether the shape-fit pull moves an end past
+    the clip or a capsule cap is unclipped.
+15. **Reviewer §3 — components, reported not changed.** `kOrganicStrandedKeepFraction
+    = 0.02` kept 5 pieces on a 2-region part (receipt: `emitted_components 5`, largest
+    45.2 % of 783.28 mm, `emitted_stranded_length_mm 429.3`, 8 components / 115.1 mm
+    dropped). An endpoint-exact union over the SPANS file (no capsule overlap) splits
+    finer — 30 pieces: 335.0 / 184.7 / 132.8 / 50.3 / 13.3 mm then 25 pieces under
+    13 mm — so the receipt's 5 are welded-overlap components, not shared-endpoint
+    ones. Keep-by-fraction vs keep-by-attachment is the maintainer's decision.
+13. OPEN (QA): the organic pane showed "Cell size · Auto·grade" lit while both captured
+    jobs carried the OCTET's window — `cell_mode: swept, cell_min 5.5, cell_max 6` —
+    inherited from the project's earlier octet settings. `organicCellIndex` reads
+    `model.cellSizeMode == .auto` for index 0; the display and the emitted
+    `cell_mode` need one source of truth under Organic (what should "Auto·grade"
+    write — `cell_mode: auto`? — is a mapping question for the spec's item 1).
+
+## 2026-09-05 (00:40–01:00) — the part preview draws organic; the region layer; unloaded walls
+16. **The part preview's octet ladder was the stage solve never getting the region
+    layer.** His Group B load is region-defined (faces [], regionIDs [103,105,106,100],
+    project regions 100–107); `analyzeSolidLoadCase` sent faces only → core: "every
+    declared load group contributed nothing" → no tensor → the scene fell back to the
+    ladder. Fix (app only): `TopOptKit.applyRegionLayer(&lc, faceRegions:anchorRegionIDs:)`
+    extracted from the optimize wrapper and called by `analyzeSolidLoadCase`, which now
+    also pushes `load_region_ids`/`load_group_region_sizes`; `LatticeSimModel.Context`
+    + `LatticeSimFingerprint` carry `faceRegions`/`anchorRegionIDs`; `FaceRegion.kitSpec`;
+    `AppModel.makeLatticeSimContext` passes `project.faceRegions.regions` and
+    `lc.anchorRegionIDs`. Replay on the Mac: solve 7 s, tensor 362,496 = 6·64·16·59.
+    On device (dylib 02cf28d39e1b8fd9): verdict ACCEPTED margin 1173.63 in 8 s; the part
+    preview shows traced organic curves (`v7_part_preview_organic_sim_on.png`).
+17. **Two more gates, stated:** the part bake only runs while the strut preview is armed
+    (box icon) — the field landing rebakes nothing otherwise, by design; and
+    `needsStressSolve` now includes `isOrganic` (an organic job under Uniform density
+    never solved, so its part preview could never trace).
+18. **Unloaded walls → synthetic stresses (his 2026-09-05 request, Aesthetic only).**
+    `OrganicSyntheticStress` (new): per INCLUDE region, median von Mises under 2 % of
+    the field's peak ⇒ dead ⇒ foci (1–5) along the wall's longer in-plane axis at
+    mid-depth, alternating ±, tensor sum `w/(r²+s²)·r̂⊗r̂`, scaled to 0.5·peak, smoothstep
+    blend. Runs in `buildStrutScene` off the main actor when the lattice is organic, the
+    stage Aesthetic and the switch on; the report (per selectable key) feeds the
+    Selections drawer's new **Foci** row (Auto/1…5 pills, "unloaded · 0.4 % of peak").
+    Settings: `organicSyntheticStresses` (off), `organicSyntheticFoci` (2),
+    `selectableSyntheticFoci` (1…5, per key) — Codable with defaults, spec mirrors,
+    wizard model mirrors; emission stamps `syntheticFoci` + `selectableKey` on each spec.
+    Wizard: "Unloaded walls" section (organic + Aesthetic) with the switch, the default
+    foci pills and the (i). Job: `organic_synthetic_stresses`, `organic_synthetic_foci`
+    and region `synthetic_foci` are written only when core's grading schema accepts the
+    first key — this core does not, the wizard says so, the run traces the real field.
+    On device the M2's two declared walls measured 26 % and 3 % of the stage solve's
+    peak (`DIAG synthetic` line, 01:05:20), so the Auto threshold is 5 % and a wall
+    with its own stated count is injected regardless ("forced" in its row).
+    Verified on device (dylib 9402e625ba8f35fe): face 15 unloaded · 3.5 % ⇒ 4086/4356
+    voxels injected with 2 foci; "3" tapped on face 2 ⇒ forced, 4188/4188 injected
+    (`v8_D`, `v8_F`). Open: a Foci pill tap triggers TWO identical bakes 28 ms apart
+    (the pill's `buildStrutScene()` plus a second trigger) — wasteful, not wrong.
+    **CORE REQUEST:** accept the three keys and synthesise the same field on the run
+    (recipe in memory note `dead-wall-needs-a-synthetic-focal-load`).
+19. **His correction (01:20) and the core brief (01:25), applied.** (a) The "Foci per
+    wall" pills are GONE from the Lattice settings page — the section keeps only the
+    switch and its (i); each wall's count lives in its Selections row. (b) Foci are
+    NEVER allowed on a loaded wall: the last bake's per-wall measurement is persisted
+    (`selectableWallStressFraction`, a cache not a choice); a wall at ≥ 5 % of peak
+    shows its Foci row greyed (value "—", taps ignored, the write refused in
+    `writeLatticeSyntheticFoci`) and the injector never touches it whatever it states
+    (the "forced" rule of item 18 is withdrawn). (c) Core's contract per the brief:
+    per-REGION `synthetic_stress` + `synthetic_foci` (1…5, default 4) — no grading key.
+    `LatticeRegionSpec.wireDictionary` writes them only for walls the bake measured as
+    unloaded (`ProjectModel.latticeSyntheticWalls()`), only organic + Aesthetic, only
+    when `TopOptKit.organicSyntheticStressWired` (a whole-job probe with a control:
+    the same region without the keys must pass). Default count 4 (core's measured
+    recipe). (d) Preview recipe aligned to core's: foci on the 80 % ellipse of the
+    wall's two in-plane extents, softening a quarter of the largest extent.
+    Divergences to state: the brief says "do not apply at part level" — his own ask is
+    a section switch under Lattice settings with the per-wall count in the face rows,
+    and that is what ships (the switch arms nothing on a loaded wall). The brief's
+    dead threshold is 2 %; the app greys at 5 % because his back wall measured 3.5 % on
+    the stage solve (res 64) — core's 2 % smoothstep on the run may blend that wall
+    rather than replace it; read receipt C (`synthetic_stress_by_region`, keyed by
+    face) to know. Receipt C is not yet consumed by the app (core commit still queued).
+    `synthetic_soft_mm` has no UI (blank = core's auto).
+    Verified on device (dylib bb0ed829eac8f6bb, 01:45–01:48): the section shows the
+    switch alone (`v9_A`); Face 2 (loaded · 26 %) has its Foci pills greyed and a tap
+    on "3" produced no bake (`v9_B`); Face 15 (unloaded · 3.5 %) keeps live pills with
+    Auto lit and "Stress on wall · unloaded · 3.5% of peak" (`v9_C`). Bake line 01:45:56:
+    face 15 inj 4086/4356 with the default 4 foci; face 2 untouched.
+20. **Cell-size approval for organic — coded against the contract, gated on the
+    block (02:00).** `OrganicForecast` (new) parses `lattice_forecast.json`'s
+    `"organic"` block — version-gated to `organic_probe_version == 1`; absent,
+    malformed or any other version ⇒ nil ⇒ today's octet forecast alone, no organic
+    approvals, no guessing. `LatticeForecast.organic` carries it; the workspace stores
+    a landed block on `lattice.organicForecast` (Codable, absent key when nil). The
+    forecast request adds `forecast_cells_mm` [3, 3.5, 4, 4.5, 5, 6] and
+    `forecast_grades_mm` [[3,5],[4,6]] ONLY for an organic job and ONLY when
+    `TopOptKit.organicForecastProbeWired` (whole-job probe with a control; false on
+    this core, so the request is byte-identical to before). Wizard Manual list with
+    the block present: Structural offers only `approved_structural` (others greyed,
+    not selectable), Aesthetic offers all and badges `*` by `approved_aesthetic`;
+    refusals verbatim on pointer hover (`.help`) and long-press (`.contextMenu`);
+    grades likewise. Copy: "Likely to certify … will not be refused for
+    disconnection. Stress margin needs the run." — never "certified", never "a single
+    contiguous lattice" (pinned by OrganicForecastTests). Never calls the certificate.
+    Nothing to photograph until core writes the block; the fallback list is unchanged.
+    On device (dylib 42721a3cfaf66c6d, `v10_A`): with the block absent the Manual list is
+    the fallback, unchanged. Found while photographing it: the pre-existing badge caption
+    and both (i) strings promised "a single, contiguous lattice" / "more than one piece"
+    — contradicting the contract's criterion. Rewritten: approved = ties to the part
+    (≥ 95 % of length rooted); one piece is not the bar.
+21. **Organic cell-size probe — FINAL contract (core built, calibrated; 05:00).** The
+    probe is NOT a forecast: it runs inside a lattice-variant run after the base solve,
+    keyed by `lattice.organic_probe_cells_mm` / `organic_probe_grades_mm` (organic
+    only), and writes `<out>/organic_probe.json` before emission. App: `OrganicForecast`
+    rewritten to the final shape (cell_min/max, curves, components, rooted fraction,
+    per-region refusals/advice as text, `predicted` {ran, verdict, margin, p99, max,
+    allowable, segments, seconds, refusal | reason}, top-level gates); version-gated to
+    1; the old forecast-only keys and `LatticeForecast.organic` are gone.
+    `RelatticeRun.probe(inputs, cellsMM:, gradesMM:)` submits the re-lattice job with
+    the keys (`probeJob`, pure, refuses non-organic and empty candidates), polls, reads
+    `files/organic_probe.json` the moment the worker serves it, CANCELS the run (a
+    "Check sizes" is a question, not a run nobody asked for) and returns; a worker that
+    serves files only at done still answers at done. Wizard: a "Check sizes" button in
+    the Manual section (presets [3.5, 4.5, 5.5, 6.5] + [[3,5],[4.5,5.5]] plus the user's
+    current pick), disabled with its reason when `TopOptKit.organicProbeWired` is false
+    (whole-job probe with a control — false on this core) or there is no worker/variant;
+    the menu fills from the file: green dot = approved_structural, amber = aesthetic
+    only, grey = refused; predicted margin beside the size; hover/long-press = refusals
+    + the prediction. Structural selects only green; Aesthetic all. cells_across is
+    advice text only, never gated (pinned: the approval copy never mentions it). Copy:
+    "Likely to certify … about 20 % conservative … the margin shown is predicted; the
+    run's certificate is the verdict." Untested against a real worker (none serves the
+    key yet): the mid-run file read is the one path that needs the first real probe.
+    Full app suite on the probe sources (Debug, Mac): 2329 tests, 30 skipped, ONE
+    failure — `LatticeSimSolveTriggerTests.testSaveAndExitIsWhatCallsIt`, which pins the
+    literal `LatticeSetupWizard(project: project)` at the call site; my `probeDriver:`
+    argument had changed it. Fixed in the SOURCE (the driver is attached by a
+    `.organicProbeDriver(...)` modifier after the closure; the test is untouched);
+    pinned + probe + wizard + runner suites on the fix: 78/0. On device (dylib
+    b2537a33768018a5, `v11_A`): "Check sizes" beside the Approved sizes header, disabled
+    with its reason on this core, the fallback list unchanged.
+22. **His eight organic-pane items (2026-09-05, screenshot).** (1) Fit is hidden with
+    a simulation; (3) Auto is hidden without one — `LatticeWizardModel.organicCellModes`,
+    and `enforceOrganicSimOffRules()` (called from `setSimulateStresses`, `selectOrganic`,
+    `setCellSizeMode(.auto)`) lands the mode on FIT with "Shape fit only" ON whenever
+    the simulation is off. This SUPERSEDES the 2026-09-04 "the switch leaves the organic
+    cell mode alone" rule (his words: "This is the second time I've said this"); the
+    chip test is re-pinned to it. (2) Manual with a simulation is a GRADE — "## mm to
+    ## mm", two tap-to-type pills — never single values; (4) Manual without one is a
+    single "## mm" pill. Both are checked by `OrganicSizeCheck` (new) ONLY when the pad
+    closes, never per digit: the printable cell at this bead, one cell fitting the
+    thinnest declared wall, and the probe's verdict when it has that exact candidate;
+    cells across is advice, never a gate (core's brief). Aesthetic ⇒ a red * beside the
+    field and the reasons under it (his sanctioned exception to item 8); Structural ⇒
+    a pop-up (hoisted `organicNotice` alert): "Core settles this when it builds the
+    lattice. <size> is not expected to certify: … You can keep it; the run's
+    certificate is the verdict." (5) Density's "Thicker" is "Manual". (6) Without a
+    simulation the shape-fit switch shows ON, cannot turn off, and a tap explains in a
+    pop-up ("Shape fit only stays on"); caption "Always on: no simulation". (7) The
+    Unloaded-walls section is hidden without a simulation. (8) Every caption is ≤ 4
+    words ("Grown needs layer height", "Aesthetic only for now", "Needs a lattice
+    region", "Not in this core", "Repairs hidden", "Per wall, in Selections",
+    "* not approved", "Check failed" + (i)); every explanation moved into its (i)
+    (`infoNoSimulation`, `infoSizeCheck`, the fillet and shape-fit additions).
+    His correction while this was being built: "shape fit only = on changes cell size
+    to Fit? … Remove that association entirely. They have nothing in common." Done: the
+    switch reads and writes `organicShapeFitOnly` alone; the Auto/Fit/Manual pills and
+    the typed size no longer touch it; the model's Auto→Fit redirect without a
+    simulation moves only the mode. The sim-off LOCK (item 6) still holds the switch on
+    — by the simulation switch, never by the mode. Pinned by
+    `OrganicSizeCheckTests.testShapeFitOnlyAndCellSizeModeAreIndependent`.
+    On device (dylib e7756c0a7b523a88, `v12_A`–`v12_E`): simulation on = Auto | Manual,
+    Density Auto | Sim | Manual, "Grade · 3.00 mm to 5.00 mm"; typing 20 for the upper
+    bound fired the check ONLY on Done — red * and two reasons ("3 mm is under the
+    printable cell at this bead (4.93 mm)", "20 mm is larger than the thinnest wall
+    (11.0 mm)"); simulation off = Fit | Manual, Density Auto | Manual, Unloaded walls
+    gone, "Always on: no simulation", and a tap on the locked switch raised "Shape fit
+    only stays on". Two defects seen and fixed: the Size field read 0.00 mm after the
+    switch (a grade's lower bound now carries over, and a lone size becomes a grade's
+    lower bound the other way), and the grade's reasons stayed under the size field
+    (the verdict is now keyed to the label it was computed for). His two follow-ups the
+    same hour: the number pills are centred in their row, and the reasons are a POP-UP
+    in both modes (Aesthetic: "<size> is not a lattice here" + the reasons; Structural:
+    "<size> may not fit" + core settles it); the red * stays as the marker. Note: the
+    printable-cell floor is the octet cell bound at this bead (4.93 mm) — a proxy until
+    core states an organic one.
+23. **Notice copy reviewed (his 2026-09-05 review: "3–1 mm is not a lattice here …
+    There is no reason for 'here'").** Every user-facing notice in this work rewritten
+    in plain language, no placeless words, no jargon ("core", "probe", "bead"):
+    pop-ups "<size> cannot form a lattice" / "About <size>" / "<size> may not certify";
+    reasons "… is smaller than the smallest cell this nozzle can print (4.93 mm)",
+    "… is larger than the thinnest wall (11.0 mm), so not even one cell fits", "The
+    upper size must be larger than the lower size"; the Structural notice "<size> is
+    not expected to pass certification. … The final check happens when the lattice is
+    built. You can keep this size; the run's certificate decides."; the shape-fit
+    notice; captions "Needs a layer height", "Not available yet", "Locked while
+    simulation is off"; Check-sizes refusals and errors ("Size checking is not
+    available in this build.", "There is nothing to check yet. Optimize the part
+    first.", "The worker did not return a size check this app understands."); the
+    probe's "not the certificate" line. Tests re-pinned, one asserting no " here".
+    On device (dylib 14880acff6ded337, `v14_A`): the pop-up reads "3–1 mm cannot form
+    a lattice · The upper size must be larger than the lower size."; the caption reads
+    "Not available yet". His two notes on "Check sizes" the same hour: a barely visible
+    disabled button "shouldn't be there", and it belongs "to the right of the numbers
+    on the same line" — done: it is rendered only when this build can check sizes
+    (`organicProbeRefusal == nil`), inside the numbers row after the pills and the
+    star; nothing is shown otherwise. On this core the row is the numbers alone.
+    His next note: "The numbers appear under Manual when simulate stress = off" — the
+    starred ladder (2 mm*, 3 mm*, …) was the old fallback list still rendered under the
+    single field. Removed: Manual without a simulation is the one "## mm" field and
+    nothing else; the field's check still consults the size probe when there is one.
+
+## 2026-09-06 — the UI wired to core main (PR 355 merged at f08c1af8)
+24. **Merge and core.** `origin/main` merged (053e7ddb); the three core conflicts were
+    this branch's STALE core deltas (an older `outline_uw`), so `core/` was taken from
+    main wholesale — the branch's core diff against main is zero lines. build_core.sh
+    rebuilt the xcframework; `CoreFingerprint.value` set by hand to main's core commit
+    `f08c1af81098` (the generator stamps the merge SHA, but the worker compares its
+    own main checkout). All five schema probes pass now; the whole-job probes needed
+    `cell_mm` in their grading skeleton (main requires it) and no `cell_mm`/
+    `strut_radius_mm` beside a grading block (the brief's stated rule).
+25. **Preview parity for synthetic stress (brief B.5).** The bridge now calls core's
+    `synthesize_focal_stress(grid, candidate, voxel_region_id, cfg, 0.02, stress)` —
+    the run's own function — on a plan the app builds (`OrganicSyntheticStress.plan`:
+    include regions numbered 1-based in declaration order, each voxel tagged by the
+    first region holding its centre, foci = the row's count else the default 4). The
+    app-side injector is deleted. Core's report rides the bridge header (64 doubles
+    now, then a row of 7 per region before the field) and comes back as per-wall
+    verdicts: a wall is LOADED when its real share (1 − fully − ½ blended, over its
+    voxels) is ≥ ½ — the persisted number is that real share. The Selections row
+    prefers receipt C's own entry after a run ("run: synthetic field: 4 foci, 12480
+    of 12480 voxels" / "carried load, untouched").
+26. **Job keys (§1).** Manual on the wire: one size ⇒ `cell_mode fit` + `cell_mm`, a
+    grade ⇒ `cell_mode auto` + `cell_min_mm`/`cell_max_mm` (main has no
+    `organic_separation_mm`/`organic_window_mm`; those puts are gone). New settings:
+    `organicTransferTies` (default on, written only when off, grown path only),
+    `organicTieSwirl` (0…1, written when ≠ 1), `organicSolidRimMM` (−1 = one base cell,
+    written when changed), `organicLookCellsAcross` (8, the Aesthetic look target).
+    `organic_structural_certification: "beam_network"` is written whenever the intent
+    is structural (required). Wizard: "Transfer ties" + "Tie swirl" under the Grown
+    fine-tune; "Solid rim at edges" under Fit to shape; "Look" (cells across) under
+    Aesthetic.
+27. **The floor (§0).** `OrganicSizeCheck.floor(beadMM:voxelMM:)` = max(1.535 × bead,
+    one voxel); `ProjectModel.solveVoxelMM` = longest extent / quality resolution;
+    `organicFloor` prefers the probe's recommendation floors once it has run. The
+    reason names which bound: "smaller than one cell of the solve grid (1.71 mm). A
+    finer quality setting makes the grid finer." vs "smaller than the smallest cell
+    this nozzle can print (0.69 mm)". The octet 4.93 mm bound is gone from organic.
+28. **Recommendation (§3).** "Check sizes" adds `organic_recommend: "auto"`,
+    `organic_look_cells_across`, `organic_recommend_margin` 1.5, `organic_recommend_steps`
+    5 to the probe job; `OrganicForecast.recommendation` parses band/floors/ceilings,
+    fit, auto, rejected; predicted gains the knockdown fields. Menu: with a simulation
+    the AUTO pick ("Auto 3–4.8 mm · 1.60", green) applies as a grade; without one the
+    FIT pick ("Fit 3 mm · 1.84") applies as the size — Fit is never offered with a
+    simulation nor Auto without (his items 1 and 3). Collapsed ⇒ "No cell fits: solid"
+    with the four bounds behind the (i).
+29. **Receipt (§2).** `OrganicRunReceipt` reads the certificate block (verdict, margin,
+    refusal, statistic, knockdown used/source, cos², max-over-allowable point and
+    DISTRIBUTED, exceeds), ties, fillet, rim, shape fit, the two floors,
+    `support_grid_too_large`, `tensor_note`, `recommend`, and the synthetic block with
+    `synthetic_stress_by_region` keyed by face. `certificateLine` follows the display
+    rule ("Certified · margin 2.31 (p99) · worst strut 0.43× allowable"; a refusal
+    names its gate); `repairsLine` counts flared/skipped spans and landed ties. The
+    preview banner shows both. The approved separation now comes from
+    `recommend.fit_mm` (the old `fitting_separations_mm` stays as a fallback).
+
+## 2026-09-06 evening — his walk: the picture, the 12 minutes, the banner
+
+Build type for every number below: Debug, iPhone Simulator (iPad Pro 13-inch M5,
+iOS 26.5), dylib af8bc1831f4af5cd; Mac suites Debug.
+
+30. **Where the 12 minutes go (measured, not guessed).** M2 stand, Organic Traced,
+    sim on, Manual "2.00 mm to 4.00 mm", synthetic on, look 2, ties on, rim −1.
+    Stage solve 17:50:27→17:50:40 (14 s, ACCEPTED 1173.63). Bridge call
+    17:50:41→18:03:06 = **12 min 26 s**. Two `sample`s of the process (8 s at 18:08,
+    3 s at 18:09:33): 0 frames in `trace_organic_lattice`, 0 in the capsule stamp,
+    100 % in `generate_organic_lattice` — the support raster's `covers` lambda
+    (`core/src/mesh/organic_lattice.cpp:4427`: nine point-to-segment distances per
+    raster cell of every emitted segment's bounding box, re-stamped every support
+    round via `stamp_all`, with per-island `unordered_map`s allocated inside the
+    layer loop). That is the run's own emission — the preview cannot be faster than
+    the run's repairs while it runs them. CORE REPORT, no core change: the pass is
+    O(rounds × Σ_segments bbox cells × 9); a segment-bbox on a diagonal strut is
+    many times its capsule; `own`/`occ` are refilled whole each round.
+31. **A second identical bake, armed by the first.** `DIAG synthetic(core)` at
+    18:03:06, then `regionCell`/`stepped NOT RUN` at 18:03:08–10 (the bake's own
+    preamble), then a second `DIAG synthetic(core)` at 18:15:47 — 12 min 37 s, same
+    numbers. Cause: the completion writes `recordLatticeWallStress` (the shares it
+    just measured: face 15 83 % real, face 2 90 % real) into `project.lattice`, and
+    `.onChange(of: project.lattice)` rebakes on any change. FIX (app):
+    `LatticeSettings.previewBakeInputs` strips the two fields a bake WRITES
+    (`selectableWallStressFraction`, `organicForecast`); the trigger compares that
+    against `latticeInputsLastBaked`. Test: `OrganicPreviewBakeInputsTests`.
+32. **The preview traced the octet window, not his grade.** `organicForBake` read
+    `cellMinMM/cellMaxMM` (4/8 in his project.json) while the job writes
+    `organicPickedGradeMM` ([2, 4]). FIX: `LatticeSettings.organicPreviewSeparationWindowMM`
+    is the job's mapping (single size ⇒ (s, s); grade ⇒ (lo, hi); nothing picked ⇒
+    the window); the bake reads it. So the 12 minutes above were at 4–8 mm; at the
+    2–4 mm he typed the emission has more segments, not fewer.
+33. **The phase clock.** Bridge header [56] trace s, [57] emission s, [58] stamp s;
+    `OrganicTrace.traceSeconds/emitSeconds/bakeSeconds`, `phaseSummary` on the
+    banner's (i), `DIAG organic phases:` in the log. The next long bake is a number,
+    not a `sample`.
+34. **Why the SDF picture looks the way it does (his "not good at all").** The
+    organic field is baked at `max(0.35 mm, longest/384)` = 0.35 mm on both the cube
+    and the stand. The cube's grade-fit variant has strut radius 0.21 mm
+    (`9eefe6f4…3mf`, `radius="0.210000"`): 0.6 voxels per radius. The stand's legend
+    says 0.73–3.07 mm struts ⇒ 1.0–4.4 voxels per radius. A trilinear distance field
+    cannot hold a round tube thinner than its own voxel: the surface channel flattens
+    into ribbons whose width follows the grid, the march stops within
+    `epsO = max(0.02, 0.25 × voxel)` = 0.0875 mm of the surface (42 % of the cube's
+    radius), and the normal is a finite difference across ~1 voxel, so the shading is
+    flat. With repairs shown the node merges and arches add fat blobs at the same
+    resolution. A voxel of r/3 on the stand (0.07 mm over 130 × 100 × 12 mm) would be
+    ~450 M voxels × 2 channels: not a texture the iPad can hold. The resolution is the
+    representation's ceiling, not a knob.
+35. **Alternative (recommended, not built): draw the spans as analytic capsules.**
+    `OrganicTrace.spans` and the 3MF variants already carry every emitted capsule
+    (a, b, r) — no bridge or core work. One instanced draw of N bounding quads; the
+    fragment shader ray-casts the capsule (a sphere-swept segment; the same quadric
+    trick molecular viewers use for millions of bonds), writes depth + normal into the
+    unified G-buffer the march already uses, and clips per fragment against the part
+    and region SDF textures already bound at 5/… so struts end at the shell exactly as
+    the march's clip ends them. Exact round struts at any zoom, no bake, no 12 M-voxel
+    cap, the Thicker slider a uniform, joints read as welded because spherical ends
+    overlap. Cost is the trace/emission only. Estimated a few days of Metal work; the
+    two G-buffer traps in memory (byte-offset uniforms, declared attachments) apply.
+36. **For the wait itself, two app-side options (not built).** (a) Two-stage bake:
+    trace first (the 14 s solve + the trace) and draw the traced curves — the
+    "repairs hidden" picture — then run the emission and swap in the emitted set when
+    it lands; with capsules the swap is instant. (b) Nothing hides the emission's
+    cost: the file will take the same repairs. The core report in item 30 is the
+    only lever on the number itself.
+37. **The banner.** `LatticePreviewBanner.caption` — "Lattice preview · not the
+    export" / "Lattice preview · stand-in" / "★ Preview differs from run"; an
+    `.empty` reason unchanged — drawn in the notice, capped at
+    `noticeMaxWidthPT` = 280 pt, with the whole sentence (every counter, the phase
+    clock) behind an (i) popover. `LatticePreviewNoticeCaptionTests`.
+38. **Also seen on his walk.** With core's own synthesis both walls read LOADED
+    (83 % and 90 % real) where the app-side injection had called face 15 unloaded at
+    3.5 %: core's dead threshold is 2 % of the peak von Mises (0.000625 of 0.0312 MPa)
+    and only 560 of 6,751 voxels sit under it. Reported, not judged.
+39. **CORE REPORT — the dead-voxel test is relative to the part's peak.** His walk:
+    "one wall definitely doesn't have a stress and yet I'm unable to add a synthetic
+    stress." `synthesize_focal_stress` marks a voxel dead below `dead_fraction` (0.02)
+    × the part's peak von Mises. On the M2 stand the peak is 0.031 MPa (margin 1173
+    against 31 MPa), so the threshold is 0.0006 MPa; both walls read 83 % and 90 %
+    "real" while carrying under 0.1 % of allowable. The app greys the foci on that
+    share (his rule: never foci on a loaded wall) and, even if it did not, the run
+    would synthesise only the 17 % core calls dead. Needed in core: an absolute or
+    allowable-relative floor in the dead test (e.g. dead also when vm < ~0.5 % of
+    allowable), or a per-region "synthetic wins" mode. No app change can produce the
+    synthesis. UI: the wall's status now names the peak ("loaded · 83 % real · peak
+    0.031 MPa") so the number is on the screen. No threshold is exposed as a setting.
+40. **Organic as capsule impostors (his instruction, 2026-09-06 evening).**
+    `organicCapsuleShaderSource` (its own library: material + field sources +
+    `capsule_vertex`/`capsule_gbuffer`); `MeshRenderer.organicCapsulePipeline` built
+    with `try?` beside the lattice pipelines; drawn in `encodeDepthPrepass` after the
+    march as one instanced draw (36 vertices per span, culling off, permissive depth
+    write because the fragment may come from the box's far face). Fragment: analytic
+    ray–capsule from the model-space eye, the march's exact clip (eroded part SDF ∧
+    bbox ∧ region), the far-side re-hit when the near side is cut, the shell depth
+    bias, the same three attachments — `lsdf_shade` lights it unchanged. Scene:
+    `organicCapsules` from every source (pre-baked variant via
+    `OrganicBakedFields.capsules`, span file, cached 3MF, live trace). Layer:
+    `drawOrganicCapsules` (set by the host when the pipeline built),
+    `capsulesReplaceField` ⇒ `organicOrigin.w = 0` and the march's step budget 0, the
+    live radius unclamped. Periodic lattices untouched. The organic FIELD is still
+    baked for the probes and the cached-variant path; it is no longer what is drawn.
+    Tests: `OrganicCapsuleImpostorTests` (scene carries capsules; GPU: reaches pixels,
+    clipped outside the part, hidden by the opaque shell, fattened by the live radius,
+    the march draws nothing; call sites pinned), the compile guard and the ShellClip
+    guard extended to the fifth source.
+41. **His timings, decoded by the phase clock (Debug, iPad sim, 19:00–19:24).** Part
+    previews: trace 0.0–0.2 s, bake 0.1–0.4 s, core's emission 41.9 s (Auto, 16,260
+    spans), 190.6 s and 186.3 s (2–4 mm, 55,837 spans). The 1:26 / 3:37 / 3:31 he
+    measured are the stage solve (11 s) + the emission + UI. The sample's 46–53 s is
+    the same emission on the cube. CORE REPORT: emission time is superlinear in the
+    span count (16 k → 42 s, 56 k → 190 s); the support raster is the pass (item 30).
+42. **Two stages, and the emission only when it is drawn.** The bridge now skips
+    `generate_organic_lattice` when repairs are hidden (`emit_repairs == 0`; the
+    census says "emission did not run"). `buildStrutScene` bakes the traced picture
+    first (seconds), then — when repairs are on — the emitted set replaces it when
+    core is done; `strutBakeGeneration` retires a stale stage. The wizard's sample
+    does the same (`quick.showRepairs = false`, status "Traced. Adding the file's
+    repairs…"). Tests: `testHiddenRepairsSkipTheEmission`, the call-site pins.
+43. **Auto was the octet window.** With nothing picked the trace read
+    `cellMinMM/cellMaxMM` (4–8 mm on his file) — the sparse Auto he saw. Now: the
+    probe's Auto answer when it has one, else core's own `organic_recommend_band`
+    through the bridge (`TopOptKit.organicRecommendBand`, rows per include region:
+    depth, shortest in-plane extent, p50/p99 of the solve's von Mises — the rows
+    run_job builds), the run's pick among its candidates (Aesthetic ⇒ the look pair,
+    Structural ⇒ the band; `OrganicAutoWindow`). Collapsed ⇒ the stand-in stays and
+    the log says so. `DIAG organic window:` names the window and its source.
+    Measured: 12 mm wall, 1.7 mm voxel, 0.45 bead, look 8 ⇒ band 1.70–6.00 mm.
+44. **The solid rim, in the preview.** "Fit to shape means grade to solid at the
+    edges. Always. And always on the *sides*." The run's `apply_organic_solid_rim`
+    turns candidates within `rim` of a SIDE neighbour solid (never along the normal);
+    rim = `organic_solid_rim_mm`, −1 ⇒ the window's low end. The preview now erodes
+    each include face region IN-PLANE by that number (`LatticeRegionSpec.inPlaneOffsetMM`,
+    the Expand channel, negative) before anything is baked from it, so the shell keeps
+    the band, no strut is traced in it, and depth is untouched.
+    `LatticeOrganicInput.solidRimMM`; test `testTheRimErodesTheRegionInPlaneButNotInDepth`.
+    Not photographed on the simulator yet.

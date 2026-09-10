@@ -196,7 +196,15 @@ public enum LatticeFaceCardDerivation {
                             // 3x. 0 means UNKNOWN, and an unknown printability
                             // does not certify: the card falls to `outOfRegime`
                             // rather than quietly passing the strut test.
-                            minExtrudableWidthMM: Double) -> LatticeFaceCard {
+                            minExtrudableWidthMM: Double,
+                            // ★★★ THE STAGE'S OWN FLOOR (2026-08-24 night). 0 =
+                            // core's accuracy floor of 5 — which is what every
+                            // card silently derived at while the AESTHETIC stage
+                            // baked at 1: his card said "Cell 2.40 · Density 20%
+                            // · Out of regime 5.0 cells across" about a face the
+                            // bake was laying at 12 mm and 5%. The card must be
+                            // derived under the same law as the picture.
+                            cellsPerMemberFloor: Double = 0) -> LatticeFaceCard {
         let voxelMM3 = spacingMM * spacingMM * spacingMM
         let volume = Double(heldVoxels) * voxelMM3
         let mass = volume * densityGCM3 / 1000.0          // mm³ · g/cm³ → g
@@ -263,9 +271,14 @@ public enum LatticeFaceCardDerivation {
             // the band first — there is no certificate outside it — but its
             // PRINTABILITY is never clamped: core reports the strut it really
             // makes and `prints` says whether it comes out of the nozzle.
+            // ★ AESTHETIC states densities OUTSIDE the certifiable band by
+            // design (the control's ceiling is the quilt, not rhoMax), so with
+            // a relaxed floor in force the stated number rides unclamped.
             statedRelativeDensity: declaredDensity.map {
-                min(max($0, limits.rhoMin), limits.rhoMax)
-            } ?? 0)
+                cellsPerMemberFloor > 0 ? $0
+                    : min(max($0, limits.rhoMin), limits.rhoMax)
+            } ?? 0,
+            cellsPerMemberFloor: cellsPerMemberFloor)
 
         // ★ NO CORE NUMBER IS NOT A PASS (bar R2). An unknown extrusion width, a
         // topology core carries no law for, or a member no (cell, density) pair

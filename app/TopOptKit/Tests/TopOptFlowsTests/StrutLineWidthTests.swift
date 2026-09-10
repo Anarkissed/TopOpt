@@ -271,10 +271,77 @@ final class StrutLineWidthTests: XCTestCase {
         // lattice questions about a lone unsupported extrusion. A wall bead here
         // would put the card's density on the wrong printability floor and make
         // it disagree with the run. `strutLineWidthMM` is correct.
-        XCTAssertEqual(strutSites, 6,
-                       "the six audited lattice sites (AppModel 1, LatticePage 2, "
-                       + "WorkspacePlaceholder 2, ProjectModel 1). If this number "
-                       + "moved, audit the new site and update the count.")
+        // ★ SEVEN SINCE 2026-08-19 (the manual strut-thickness control), and the
+        // seventh was AUDITED, not bumped.
+        //
+        // NEW SITE: `LatticeSetupWizard.thicknessRangeMM` (LatticeSetupWizard.swift).
+        // It bounds the MANUAL THICKNESS SLIDER the maintainer asked for ("there
+        // should also be a way to manually override the sim's thickness control"),
+        // by calling `LatticeSettings.manualThicknessRangeMM`. That range's floor is
+        // the STRUT printability floor — the thinnest strut this nozzle can lay as a
+        // lone unsupported extrusion — and its ceiling is core's certified band for
+        // the topology. Both ends are questions about a strut, not about a wall
+        // loop: the slider sets strut thickness and nothing else. A wall bead here
+        // would let the slider offer a thickness the printer cannot lay as a strut,
+        // which is the exact failure `offenders` exists to catch.
+        // ★ TEN SINCE 2026-08-20 (the printability floor reaching the preview), and
+        // the three new sites were AUDITED, not bumped. All three are in
+        // WorkspacePlaceholder and all three ask a question about a STRUT:
+        //
+        // NEW SITE: `latticeProxyTints` -> `proxyParams(limits:lineWidthMM:)`. This
+        // is the call that actually feeds the preview, and it passed NO width at all
+        // — which was the underside-speckle defect. `LatticeBounds` raises the
+        // band's floor to the STRUT printability floor from it, so the thinnest
+        // strut drawn is one bead. A wall bead here would put the whole preview band
+        // on the wrong floor.
+        //
+        // NEW SITE: `syncLatticeProxy` -> the same call for the LEGEND's params. It
+        // must be the same number as the line above or the key and the part disagree
+        // about the sparsest lattice on screen.
+        //
+        // NEW SITE: `LatticeLayerInputs(lineWidthMM:)`. The renderer refuses a cell
+        // no certifiable density can print at (core's `fallback_strut_unprintable`),
+        // which is `printabilityDensityFloor` against the strut radius — a lone
+        // unsupported extrusion, never a wall loop.
+        //
+        // ★ AND KEEP THEM ON ONE LINE. This walk reads line by line, so a wrapped
+        // site names no bead and lands in `offenders` — it fails CLOSED, which is
+        // correct, and cost one full-suite cycle to learn.
+        // ★ ELEVEN SINCE 2026-08-20 (Auto's derived swept window), AUDITED:
+        //
+        // NEW SITE: `AppModel` -> `LatticeAutoPosture.applied(lineWidthMM:)`. Auto is
+        // swept-without-typing, and both ends of the window it derives are STRUT
+        // questions: the fine end is `bead / phi(rho_max)` — the finest cell whose
+        // strut prints as a lone unsupported extrusion — and the coarse end is
+        // `lattice_derive_cell_for_member`, which is the same printability frontier
+        // against a member width. A wall bead here would hand every region a cell it
+        // cannot hold and grade the part back to solid.
+        // ★ THIRTEEN SINCE 2026-08-24 EVENING (the per-face density floor), AUDITED:
+        //
+        // TWELFTH SITE: `LatticeSetupWizard.shapeFitSteps`. It answers "how many cell
+        // sizes can the shape fit actually use here" as `cell / finest printable cell`,
+        // and the floor it walks down to is `printabilityDensityFloor` — one lone
+        // unsupported STRUT extrusion, never a wall loop. A wall bead here would
+        // overstate the ladder and promise a gradient the printer cannot lay.
+        //
+        // THIRTEENTH SITE: `ProjectModel.writeLatticeDensity` — the AESTHETIC per-face
+        // density control's low bound is the printability floor at that face's cell,
+        // and the maintainer confirmed it in his own words (2026-08-24 evening: "yes,
+        // I meant line width (0.45)"). A wall bead here would let the slider store a
+        // density whose strut cannot extrude.
+        // ★ RE-PINNED 13 -> 14 (2026-09-02): the wizard's ORGANIC pane reads the strut
+        // bead for its candidate cell sizes and the "Thicker" default — audited: it is
+        // `strutLineWidthMM`, the STRUT bead, which is exactly what those two numbers
+        // must be derived from. Never a wall bead.
+        // ★ RE-PINNED 14 -> 13 (2026-09-03, maintainer D2): the organic pane's
+        // candidate-size list is GONE — core decides what fits, the app computes no
+        // sizes — so the wizard's second organic site (candidates from the strut bead)
+        // no longer exists. The "Thicker" default site remains and still reads the
+        // STRUT bead. A removed site is the simplest audit there is.
+        XCTAssertEqual(strutSites, 13,
+                       "the thirteen audited lattice sites (AppModel 2, LatticePage 2, "
+                       + "WorkspacePlaceholder 5, ProjectModel 2, LatticeSetupWizard 2). "
+                       + "If this number moved, audit the new site and update the count.")
         XCTAssertTrue(offenders.isEmpty,
                       "lattice lineWidthMM site(s) reading a WALL bead:\n"
                       + offenders.joined(separator: "\n"))

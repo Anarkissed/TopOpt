@@ -39,6 +39,40 @@ public enum LatticeRegionMask {
     /// symmetric in both, so which pair does not matter, only that they are
     /// perpendicular and unit.
     public static func contains(_ p: SIMD3<Double>, region: LatticeRegionSpec) -> Bool {
+        contains(p, region: region, inPlaneReachMM: 0)
+    }
+
+    /// ★★★ `contains`, WITH THE IN-PLANE TEST RELAXED BY `inPlaneReachMM` — for
+    /// deciding which base cells a face OWNS, as distinct from where its material is
+    /// (2026-08-27).
+    ///
+    /// ★ WHY OWNERSHIP IS A WIDER QUESTION THAN CONTAINMENT. The cell field is one
+    /// value per base cell, and a cell is emitted only if its centre passes this test.
+    /// A base cell straddling the face's outline — centre just outside, most of its
+    /// volume inside — was therefore not owned by anybody, emitted nothing, and left a
+    /// band up to half a cell wide with no struts in it. That is the "empty areas just
+    /// at the ends" (maintainer, 2026-08-27), and his rule for it is:
+    ///
+    ///     "this is where the grade to fit should go in if it's applied — if it's not
+    ///      applied, the cell should just be cut off where it ends."
+    ///
+    /// Both halves fall out of simply OWNING the cell. With grade to shape on, the fit
+    /// distance at such a centre is 0, so the ladder runs to its cap and the cell goes
+    /// SOLID — "graded until it becomes a solid". With it off the cell keeps its full
+    /// size and the march's `dClip` (which unions the region's own SDF) cuts its struts
+    /// flush at the outline — "cut off where it ends".
+    ///
+    /// ★ AND WIDENING THE PAINT CANNOT LEAK MATERIAL. `dClip` is `max(partClip, bbox,
+    /// dRegion)` and `dRegion` is sampled from the SAME field the shell's hole is cut
+    /// from — untouched by this. A wider owner can therefore only ADD material inside
+    /// the declared face where there was none; it can never place a strut outside it.
+    ///
+    /// ★ THE DEPTH SLAB IS NOT RELAXED. His ruling: *"the face-prism only makes what's
+    /// solid into lattice, it cannot make walls thicker."* The cap planes stay flush by
+    /// construction, so the reach is in-plane ONLY.
+    public static func contains(_ p: SIMD3<Double>, region: LatticeRegionSpec,
+                                inPlaneReachMM: Double) -> Bool {
+        let reach = Swift.max(0, inPlaneReachMM)
         switch region.kind {
         case .face:
             let n = unit(region.normal)
@@ -47,16 +81,104 @@ public enum LatticeRegionMask {
             let s = simd_dot(d, n)
             guard s >= 0, s <= region.depthMM else { return false }
             let (u, v) = basis(n)
-            let du = abs(simd_dot(d, u)), dv = abs(simd_dot(d, v))
-            return du <= region.halfUMM && dv <= region.halfWMM
+            let uv = SIMD2<Double>(simd_dot(d, u), simd_dot(d, v))
+            // ★★ THE OUTLINE WINS WHEN THERE IS ONE. The rectangle was the face's
+            // BOUNDING BOX — 41.2% and 29.8% of the emitted region was actually
+            // the face on his two lattice walls, and the rest was solid material
+            // the struts were drawn into. See `LatticeFaceOutline`.
+            if !region.outlineLoops.isEmpty {
+                return LatticeFaceOutline.signedDistance(uv, loops: region.outlineLoops)
+                    <= region.inPlaneOffsetMM + reach
+            }
+            // ★★★ THE RECTANGLE IS A MANUAL PRIMITIVE'S OWN SHAPE, AND NOTHING ELSE'S.
+            // A primitive the user placed and dragged IS a box — measuring it as one is
+            // exact. A B-REP FACE is not: its rectangle is a bounding box that was 41.2%
+            // and 29.8% face on his two lattice walls, so falling back to it declares
+            // material he never marked. A face-derived region reaches this line only if
+            // its outline could not be built, and `LatticeRegionEmission` now refuses to
+            // emit that region at all — so it is counted as skipped and SAID, rather
+            // than silently replaced with a shape 2.4x too big. See `faceID`.
+            guard region.faceID == nil else { return false }
+            return abs(uv.x) <= region.halfUMM + reach
+                && abs(uv.y) <= region.halfWMM + reach
         case .bolt:
             let a = unit(region.axisDir)
             guard simd_length(a) > 0.5, region.radiusMM > 0 else { return false }
             let d = p - region.axisPoint
             let t = simd_dot(d, a)
+            // A bolt's "in-plane" is radial; its length is the depth axis.
             guard abs(t) <= region.halfLengthMM else { return false }
-            return simd_length(d - a * t) <= region.radiusMM
+            return simd_length(d - a * t) <= region.radiusMM + reach
         }
+    }
+
+    /// ★ SIGNED DISTANCE (mm, negative inside) to ONE region — the same set
+    /// `contains` describes, as a distance so it can be baked into a field and
+    /// sphere-traced. Extrusion of the in-plane shape along the depth axis:
+    /// `length(max(q,0)) + min(max(q),0)` with q = (in-plane, along-depth).
+    public static func signedDistance(_ p: SIMD3<Double>,
+                                      region: LatticeRegionSpec) -> Double {
+        let big = 1e9
+        switch region.kind {
+        case .face:
+            let n = unit(region.normal)
+            guard simd_length(n) > 0.5, region.depthMM > 0 else { return big }
+            let d = p - region.origin
+            let s = simd_dot(d, n)
+            let along = abs(s - 0.5 * region.depthMM) - 0.5 * region.depthMM
+            // ★ THE OUTLINE DISTANCE IS THE EXPENSIVE TERM — O(outline vertices)
+            // per voxel, and the field is baked over the whole part bbox. Measured
+            // on his face 15 (63 vertices) it took the scene bake from 3.70 s to
+            // 17.45 s, a 4.7x regression on something that rebakes whenever a
+            // setting moves.
+            //
+            // ★ OUTSIDE THE DEPTH SLAB IT IS NOT NEEDED. The extrusion is
+            // `length(max(q,0)) + min(max(q),0)` with q = (inPlane, along), so
+            // whenever `along > 0` the true distance is at least `along`.
+            // Returning `along` there is an UNDER-estimate of a distance, which is
+            // the safe direction for both readers: a sphere trace takes a shorter
+            // step (never overshoots), and the `<= 0` inside-test is unaffected
+            // because `along > 0` already means outside. Most of the bbox is far
+            // from an 11 mm slab, so this skips the polygon for the large majority
+            // of voxels.
+            if along > 0 { return along }
+            let (u, v) = basis(n)
+            let uv = SIMD2<Double>(simd_dot(d, u), simd_dot(d, v))
+            let inPlane: Double
+            if !region.outlineLoops.isEmpty {
+                inPlane = LatticeFaceOutline.signedDistance(uv, loops: region.outlineLoops)
+                    - region.inPlaneOffsetMM
+            } else if region.faceID == nil {
+                // A manual primitive's own box — see `contains` for why a FACE never
+                // gets this fallback.
+                let q = SIMD2<Double>(abs(uv.x) - region.halfUMM, abs(uv.y) - region.halfWMM)
+                inPlane = simd_length(simd_max(q, .zero)) + Swift.min(Swift.max(q.x, q.y), 0)
+            } else {
+                return big
+            }
+            let q = SIMD2<Double>(inPlane, along)
+            return simd_length(simd_max(q, .zero)) + Swift.min(Swift.max(q.x, q.y), 0)
+        case .bolt:
+            let a = unit(region.axisDir)
+            guard simd_length(a) > 0.5, region.radiusMM > 0 else { return big }
+            let d = p - region.axisPoint
+            let t = simd_dot(d, a)
+            let q = SIMD2<Double>(simd_length(d - a * t) - region.radiusMM,
+                                  abs(t) - region.halfLengthMM)
+            return simd_length(simd_max(q, .zero)) + Swift.min(Swift.max(q.x, q.y), 0)
+        }
+    }
+
+    /// The UNION of the include regions, as a distance. `+big` when nothing is
+    /// declared — the caller decides what "no regions" means (see
+    /// `EmptyRegionPolicy`), this function only reports the geometry.
+    public static func signedDistance(_ p: SIMD3<Double>,
+                                      regions: [LatticeRegionSpec]) -> Double {
+        var best = 1e9
+        for r in regions where r.role == .include {
+            best = Swift.min(best, signedDistance(p, region: r))
+        }
+        return best
     }
 
     /// True when `p` is inside ANY of the regions that will actually be latticed.
@@ -199,9 +321,30 @@ public enum LatticeRegionMask {
     }
 
     /// Any orthonormal pair perpendicular to `n`.
+    /// ★★ CORE'S CONVENTION, EXACTLY — `u = cross(ref, n)`, not `cross(n, ref)`.
+    ///
+    /// ★ WHY THE ORDER IS LOAD-BEARING NOW. It never was: every quantity measured
+    /// on this basis used to be a SYMMETRIC half-extent, and `±u` gives the same
+    /// answer for `|u| <= halfU`. A face OUTLINE is not symmetric. Core resolves
+    /// its own in-plane basis in `plane_basis` (core/src/voxel/clearance.cpp:24)
+    /// as `u = normalize(cross(ref, normal))`, `w = cross(normal, u)`, and this
+    /// was the mirror of it — so a polygon expressed here and tested there would
+    /// arrive rotated 180° about the origin, latticing the wrong half of the
+    /// face while every rectangle-based test stayed green.
+    ///
+    /// ★ SO THE APP MOVED TO CORE'S ORDER rather than negating at the wire. One
+    /// convention, asserted against core's own formula in
+    /// `LatticeOutlineWireTests` — a conversion at the boundary would have been a
+    /// second place for the sign to be wrong.
+    /// The same basis, reachable from tests. `basis` is the ONE pair containment is
+    /// measured in, so a probe that builds its own would be measuring a different plane.
+    static func basisForTests(_ n: SIMD3<Double>) -> (SIMD3<Double>, SIMD3<Double>) {
+        basis(n)
+    }
+
     static func basis(_ n: SIMD3<Double>) -> (SIMD3<Double>, SIMD3<Double>) {
         let a = abs(n.x) < 0.9 ? SIMD3<Double>(1, 0, 0) : SIMD3<Double>(0, 1, 0)
-        let u = unit(simd_cross(n, a))
+        let u = unit(simd_cross(a, n))
         return (u, unit(simd_cross(n, u)))
     }
 }

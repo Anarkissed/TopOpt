@@ -179,6 +179,12 @@ public struct LatticeWizardModel: Equatable, Sendable {
     /// and `applied(to:)` handed the project back whatever it already had.
     public var cellMinMM: Double
     public var cellMaxMM: Double
+    /// How far in from a face's outline the shape-fit grade keeps stepping down, in
+    /// cells. See `LatticeSettings.shapeFitBandMM`.
+    public var shapeFitBandMM: Double
+    /// The hand-set strut thickness (mm), or nil for derived — see
+    /// `LatticeSettings.manualStrutThicknessMM`.
+    public var manualStrutThicknessMM: Double?
     public var boundary: LatticeBoundaryTreatment
 
     /// ★★ THE SIM PERMISSION (maintainer, 2026-08-17) — "a dark glass on/off
@@ -201,21 +207,94 @@ public struct LatticeWizardModel: Equatable, Sendable {
                 densityMode: LatticeDensityMode = .sim,
                 cellSizeMode: LatticeCellSizeMode = .auto,
                 cellMinMM: Double = LatticeSettings.defaultCellMinMM,
+                shapeFitBandMM: Double = LatticeSettings.defaultShapeFitBandCells,
                 cellMaxMM: Double = LatticeSettings.defaultCellMaxMM,
                 // ★ DEFAULT NONE (maintainer, 2026-08-14): "it should
                 // default to 'none'". A bare lattice is what the page
                 // should open on; a dressing is something you add.
                 boundary: LatticeBoundaryTreatment = .none,
-                simulateStresses: Bool = true) {
+                manualStrutThicknessMM: Double? = nil,
+                simulateStresses: Bool = true,
+                retainSubfloor: Bool = false) {
         self.topologyID = topologyID
         self.cellMM = cellMM
         self.relativeDensity = relativeDensity
         self.densityMode = densityMode
         self.cellSizeMode = cellSizeMode
         self.cellMinMM = cellMinMM
+        self.shapeFitBandMM = shapeFitBandMM
         self.cellMaxMM = cellMaxMM
         self.boundary = boundary
+        self.manualStrutThicknessMM = manualStrutThicknessMM
         self.simulateStresses = simulateStresses
+        self.retainSubfloor = retainSubfloor
+    }
+
+    /// ★★ KEEP THE LATTICE WHERE THE PART IS TOO THIN TO CERTIFY IT.
+    ///
+    /// The switch existed, on the results page, behind a completed run — so the
+    /// setting that decides whether half a part is lattice or solid could not be
+    /// reached from the page where the lattice is set up. It is a lattice SETTING and
+    /// it belongs with the others.
+    public var retainSubfloor: Bool = false
+
+    /// ★ HOW AUTO VARIES THE CELL — the secondary question that appears only when the
+    /// cell size is Auto. Only `defaultGrade` is wired; see `LatticeCellTransition`.
+    public var cellTransition: LatticeCellTransition = .defaultGrade
+    /// ★ THE GRADING OPTIONS (2026-08-25) — see `LatticeGradingMode`.
+    public var gradingMode: LatticeGradingMode = .full
+    public var gradeStepStyle: LatticeGradeStepStyle = .stepped
+    /// ★ ORGANIC — mirrored from `LatticeSettings` verbatim; the settings struct and
+    /// `gradingDictionary()` own every gate, this only carries the user's picks
+    /// through the sheet. Defaults are core's own.
+    public var organicGrowth: Bool = false
+    public var organicStrutWidthMM: Double = 0
+    /// The user's pick among certification's separations (0 ⇒ none; core chooses).
+    public var organicPickedSeparationMM: Double = 0
+    public var organicPickedGradeMM: [Double] = []
+    public var organicOverhangDeg: Double = 0
+    public var organicBoundaryFinish: LatticeOrganicFinish = .skin
+    public var organicShapeFit: Bool = false
+    public var organicShapeFitOnly: Bool = false
+    public var organicOverhangFillet: Bool = true
+    /// ★ Synthetic stresses on unloaded walls (Aesthetic only, 2026-09-05).
+    public var organicSyntheticStresses: Bool = false
+    public var organicSyntheticFoci: Int = 4
+    /// ★ PR 355 keys (2026-09-06).
+    public var organicTransferTies: Bool = true
+    public var organicTieSwirl: Double = 1.0
+    public var organicSolidRimMM: Double = -1
+    public var organicLookCellsAcross: Int = 8
+    public var organicScale: Double = 1.0
+
+    /// ★★★ THE CELL SIZES THAT CAN FIT THE SELECTED REGIONS (his item 1, 2026-09-02):
+    /// the region's thinnest member divided by 1, 2, 3 ..., keeping only sizes whose
+    /// printability floor is inside the density band — the same law
+    /// (`printabilityDensityFloor`) the ladder uses. Largest first. Geometry and the
+    /// bead only; CONTIGUITY is not computable before the run and is reported from the
+    /// receipt, never guessed here.
+    public func organicCellCandidates(memberMM: Double?, lineWidthMM: Double,
+                                      densityCeiling: Double) -> [Double] {
+        guard let w = memberMM, w > 0, lineWidthMM > 0 else { return [] }
+        let lat = LatticeType.named(topologyID)
+        var out: [Double] = []
+        for k in 1...12 {
+            let c = w / Double(k)
+            guard c >= 1.0 else { break }
+            guard lat.printabilityDensityFloor(lineWidthMM: lineWidthMM, cellMM: c)
+                    <= densityCeiling + 1e-9 else { break }
+            out.append((c * 100).rounded() / 100)
+        }
+        return out
+    }
+    /// ★ "Allow single-cell members" — see `LatticeSettings.singleCellMembers`. Setting
+    /// it TRUE also writes the finish, because core's one-cell floor requires one.
+    public var singleCellMembers: Bool = false {
+        didSet {
+            if singleCellMembers, boundary == .none || boundary == .rim {
+                boundary = .fullSkin
+            }
+        }
     }
 
     /// ★ THE PERMISSION'S SETTER, AND IT DELEGATES. The migration rule (density
@@ -227,10 +306,46 @@ public struct LatticeWizardModel: Equatable, Sendable {
         var probe = LatticeSettings(enabled: true)
         probe.densityMode = densityMode
         probe.cellSizeMode = cellSizeMode
+        // ★ the organic rule rides the same borrowed function (item 3, 2026-09-03)
+        probe.algorithm = cellTransition == .organicGrade ? "organic" : ""
+        probe.organicShapeFit = organicShapeFit
+        probe.organicShapeFitOnly = organicShapeFitOnly
         probe.setSimulateStresses(on)
         simulateStresses = probe.simulateStresses
         densityMode = probe.densityMode
         cellSizeMode = probe.cellSizeMode
+        organicShapeFit = probe.organicShapeFit
+        organicShapeFitOnly = probe.organicShapeFitOnly
+        enforceOrganicSimOffRules()
+    }
+
+    /// ★ HIS RULE (2026-09-05, stated twice): without a simulation an organic
+    /// lattice can only FIT the shape. Auto is a stress grading, so it is not
+    /// offered; Fit is the one automatic mode; "Shape fit only" stays ON and cannot
+    /// be turned off. Applied wherever the mode or the switch could drift.
+    public mutating func enforceOrganicSimOffRules() {
+        guard cellTransition == .organicGrade else { return }
+        if simulateStresses {
+            // With a simulation Manual is a GRADE: a lone size becomes the lower
+            // bound of one so the field is never empty.
+            if organicPickedGradeMM.count != 2, organicPickedSeparationMM > 0 {
+                organicPickedGradeMM = [organicPickedSeparationMM, organicPickedSeparationMM * 1.5]
+                organicPickedSeparationMM = 0
+            }
+            return
+        }
+        if cellSizeMode == .auto { cellSizeMode = .fit }
+        organicShapeFitOnly = true
+        // Without one Manual is ONE size: a grade's lower bound carries over.
+        if organicPickedSeparationMM <= 0, organicPickedGradeMM.count == 2 {
+            organicPickedSeparationMM = organicPickedGradeMM[0]
+        }
+        organicPickedGradeMM = []
+    }
+    /// The cell modes the organic pane offers: Auto only WITH a simulation, Fit
+    /// only WITHOUT one, Manual always.
+    public var organicCellModes: [LatticeCellSizeMode] {
+        simulateStresses ? [.auto, .fit] : [.fit]
     }
 
     /// ★ WHETHER THE SAVE SHOULD KICK OFF AN FEA. Same question, same answer as
@@ -249,8 +364,33 @@ public struct LatticeWizardModel: Equatable, Sendable {
         self.init(topologyID: s.topologyID, cellMM: s.cellMM,
                   relativeDensity: max(0.05, s.maxRelativeDensity),
                   densityMode: s.densityMode, cellSizeMode: s.cellSizeMode,
-                  cellMinMM: s.cellMinMM, cellMaxMM: s.cellMaxMM,
-                  boundary: s.boundary, simulateStresses: s.simulateStresses)
+                  cellMinMM: s.cellMinMM,
+                  shapeFitBandMM: s.shapeFitBandMM,
+                  cellMaxMM: s.cellMaxMM,
+                  boundary: s.boundary,
+                  manualStrutThicknessMM: s.manualStrutThicknessMM,
+                  simulateStresses: s.simulateStresses,
+                  retainSubfloor: s.retainSubfloorInUnloadedRegions)
+        self.cellTransition = s.cellTransition
+        self.singleCellMembers = s.singleCellMembers
+        self.gradingMode = s.gradingMode
+        self.gradeStepStyle = s.gradeStepStyle
+        self.organicGrowth = s.organicGrowth
+        self.organicStrutWidthMM = s.organicStrutWidthMM
+        self.organicPickedSeparationMM = s.organicPickedSeparationMM
+        self.organicPickedGradeMM = s.organicPickedGradeMM
+        self.organicOverhangDeg = s.organicOverhangDeg
+        self.organicBoundaryFinish = s.organicBoundaryFinish
+        self.organicShapeFit = s.organicShapeFit
+        self.organicShapeFitOnly = s.organicShapeFitOnly
+        self.organicOverhangFillet = s.organicOverhangFillet
+        self.organicSyntheticStresses = s.organicSyntheticStresses
+        self.organicSyntheticFoci = s.organicSyntheticFoci
+        self.organicTransferTies = s.organicTransferTies
+        self.organicTieSwirl = s.organicTieSwirl
+        self.organicSolidRimMM = s.organicSolidRimMM
+        self.organicLookCellsAcross = s.organicLookCellsAcross
+        self.organicScale = s.organicScale
     }
 
     /// Write the selections back. Only the fields this page owns move.
@@ -264,9 +404,71 @@ public struct LatticeWizardModel: Equatable, Sendable {
         // ★ §9(a) — and the window goes back with them, so a range typed in the
         // wizard is the range the job carries.
         out.cellMinMM = cellMinMM
+        out.shapeFitBandMM = shapeFitBandMM
         out.cellMaxMM = cellMaxMM
         out.boundary = boundary
+        out.manualStrutThicknessMM = manualStrutThicknessMM
         out.simulateStresses = simulateStresses
+        // ★★ SUB-FLOOR RETENTION, SET HERE (maintainer, 2026-08-20: "If you're
+        // saying I need to actually first optimize a part THEN go to a lattice page,
+        // you're out of your fucking mind. That's untenable. Add it to the settings
+        // of the lattice stage").
+        //
+        // ★ AND IT CANNOT RIDE ALONGSIDE "fit". Core THROWS on the pair
+        // (grading.cpp:66-70) — two mechanisms deciding the same material, two
+        // receipts — so the wizard drops it exactly as `LatticeAutoPosture` does
+        // rather than letting the page author a job core will refuse.
+        // ★ AND ONLY A WIRED TRANSITION REACHES THE JOB. An unavailable one would
+        // otherwise ride along as `defaultGrade`'s behaviour under another name.
+        out.cellTransition = cellTransition.unavailableReason == nil
+            ? cellTransition : .defaultGrade
+        // ★ AND THE FINISH IT REQUIRES TRAVELS WITH IT. `singleCellMembers` already
+        // wrote `boundary` when it was switched on; carrying both keeps the pair
+        // consistent on the wire, so a job can never ask for a one-cell floor without
+        // the finish core needs to grant it.
+        out.singleCellMembers = singleCellMembers
+        // ★ ORGANIC picks travel whatever the algorithm; `gradingDictionary()` writes
+        // none of them unless organic was chosen and the linked core accepts the key.
+        out.organicGrowth = organicGrowth
+        out.organicStrutWidthMM = organicStrutWidthMM
+        out.organicPickedSeparationMM = organicPickedSeparationMM
+        out.organicPickedGradeMM = organicPickedGradeMM
+        out.organicOverhangDeg = organicOverhangDeg
+        out.organicBoundaryFinish = organicBoundaryFinish
+        out.organicShapeFit = organicShapeFit
+        out.organicShapeFitOnly = organicShapeFitOnly
+        out.organicOverhangFillet = organicOverhangFillet
+        out.organicSyntheticStresses = organicSyntheticStresses
+        out.organicSyntheticFoci = OrganicSyntheticStress.clampFoci(organicSyntheticFoci)
+        out.organicTransferTies = organicTransferTies
+        out.organicTieSwirl = Swift.min(1, Swift.max(0, organicTieSwirl))
+        out.organicSolidRimMM = organicSolidRimMM
+        out.organicLookCellsAcross = Swift.min(16, Swift.max(2, organicLookCellsAcross))
+        out.organicScale = organicScale
+        if out.singleCellMembers, out.boundary == .none || out.boundary == .rim {
+            out.boundary = .fullSkin
+        }
+        // ★★★ AND THE CHOICE NOW REACHES THE JOB (maintainer, 2026-08-21: "Please
+        // connect the Stepped and Organic algos"). `cellTransition` was a control that
+        // set a stored value nothing downstream read — the decorative-control defect
+        // its own note warned about, in the file that warned about it. It is core's
+        // `LatticeAlgorithm`, so it is written as core's own name and `gradingDictionary`
+        // decides whether a key appears at all.
+        out.algorithm = out.cellTransition.coreAlgorithm
+        // ★ The grading options ride with the algorithm choice (2026-08-25).
+        out.gradingMode = gradingMode
+        // ★ THE STEP STYLE IS THE ALGORITHM, not a second control beside it (his
+        // 2026-08-25 restructure): Default Grade IS core's dyadic ladder, Stepped
+        // IS the any-whole-division one. Deriving it here removes the orphaned
+        // chip that used to sit under Stepped only.
+        out.gradeStepStyle = cellTransition == .defaultGrade ? .dyadic : .stepped
+        out.retainSubfloorInUnloadedRegions =
+            (cellSizeMode == .fit) ? false : retainSubfloor
+        if !out.retainSubfloorInUnloadedRegions {
+            // Core's schema refuses the dependents without the switch.
+            out.subfloorPerRegion = false
+            out.subfloorStressFraction = nil
+        }
         out.enabled = true
         return out
     }
@@ -374,11 +576,37 @@ public struct LatticeWizardModel: Equatable, Sendable {
 
     /// Auto CELL SIZE jumps straight to the sample and shows how it looks (§2 C).
     public mutating func setCellSizeMode(_ m: LatticeCellSizeMode) {
+        if m == .auto, cellTransition == .organicGrade, !simulateStresses {
+            // Auto is a stress grading; without a simulation the only automatic
+            // organic mode is Fit (his rule, 2026-09-05).
+            cellSizeMode = .fit
+            return
+        }
         cellSizeMode = m
         if m == .auto {
             stage = LatticeWizardSetting.cellSize.stage
             play(.jumpToSample)
         }
+    }
+
+    /// ★ ORGANIC IS CHOSEN HERE, AND ONLY HERE — the chip and the on-appear repair of
+    /// an older project both call it, so a test on the model reaches the rule the
+    /// view runs. (a) Shape fit is always on (his item 3). (b) The finish is CLEAN:
+    /// "the shape to fit does not include an outline and is ONLY lattice"
+    /// (maintainer, 2026-09-03). Core defaults `organic_boundary_finish` to "skin", a
+    /// net over the bare lattice's surface, and that net is the outline — there is no
+    /// control for it on the sheet, so it was riding in silently. (c) A swept/fixed
+    /// window inherited from the lattice types resets to Auto (reviewer, 2026-09-03).
+    /// Returns true when (c) fired, so the pane can say so.
+    @discardableResult
+    public mutating func selectOrganic() -> Bool {
+        cellTransition = .organicGrade
+        organicShapeFit = true
+        organicBoundaryFinish = .clean
+        defer { enforceOrganicSimOffRules() }
+        guard cellSizeMode != .auto && cellSizeMode != .fit else { return false }
+        setCellSizeMode(.auto)
+        return true
     }
 
     /// The boundary finishes are SHOWN on the part, switchable (§2 C).
@@ -406,19 +634,61 @@ public struct LatticeWizardModel: Equatable, Sendable {
 
     /// The mesh the centre stage shows right now: one cell in Stage A, the tiled
     /// block in Stage B. `progress` in [0, 1] drives the tile expansion.
-    public func stageMesh(progress: Double = 1) -> ViewerMesh {
+    /// - Parameter derivedCellMM: the cell CORE'S OWN DERIVATION gives the declared
+    ///   member under the CURRENT floor — supplied by the page, which owns the print
+    ///   bead and the declared depths this model does not carry. Non-nil ⇒ the sample
+    ///   is drawn at that cell, so the single-cell/member toggle (floor 2 → 1) is
+    ///   VISIBLE on the sample instead of decorative (his backlog, 2026-08-24: "the
+    ///   settings-page sample patch does not change when the single-cell/member
+    ///   toggle moves"). nil ⇒ the stored `cellMM`, exactly as before.
+    public func stageMesh(progress: Double = 1,
+                          derivedCellMM: Double? = nil,
+                          // ★ The single-cell floor, for the stepped sample's
+                          // coarse half (1 ⇒ one cell fills it). nil ⇒ legacy.
+                          steppedCoarsePerHalf: Int? = nil,
+                          /// ★ Dyadic stepping — the sample run grades in twos.
+                          dyadicSteps: Bool = false) -> ViewerMesh {
+        let cellMM = derivedCellMM ?? self.cellMM
         let cells = stage == .cell
             ? 1
             : max(1, Int((Double(cellsAcross) * max(0, min(1, progress))).rounded()))
+        // ★ THE SAMPLE, SAID OUT LOUD — the 2026-08-25 round burned an hour on a
+        // sample that never changed while every control claimed it should.
+        NSLog("DIAG sampleMesh stage=\(stage) transition=\(cellTransition.rawValue) "
+              + "k=\(steppedCoarsePerHalf.map(String.init) ?? "nil") cells=\(cells) "
+              + "cellMM=\(String(format: "%.2f", cellMM)) derived=\(derivedCellMM != nil)")
         // ★ §10 — THE FINISH REACHES THE GEOMETRY. This call omitted `boundary`
         // entirely, so None / Rim / Skin all produced the same mesh and the chips
         // were decoration. The lone cell shows no boundary — a single cell has no
         // block to dress — so the finish appears in the IN THE PART view, which is
         // also the view its control now lives in.
+        // ★ AND THE GRADE REACHES IT TOO. A single cell has no transition to show, so
+        // the cell view stays the one cell; the IN THE PART view is where the three
+        // algorithms differ, which is also where the control lives.
         return LatticeSamplePatch.mesh(lattice: lattice, cellMM: cellMM,
                                        cells: cells,
-                                       relativeDensity: relativeDensity,
-                                       boundary: stage == .cell ? .none : boundary)
+                                       // ★ CLAMPED FOR LEGIBILITY, DISPLAY-ONLY,
+                                       // IN-THE-PART ONLY (2026-08-25): his
+                                       // aesthetic band stores max = 1.0, and at
+                                       // solid density every strut fuses — the
+                                       // block sample WAS the quilt ("It looks
+                                       // terrible"). The block's job is
+                                       // STRUCTURE, so its struts draw at a
+                                       // density that never fuses. The ONE CELL
+                                       // view keeps the honest thickness (that
+                                       // view exists to show it), and the
+                                       // model's own value round-trips to
+                                       // maxRelativeDensity on Save & Exit and
+                                       // must not move.
+                                       relativeDensity: stage == .cell
+                                           ? relativeDensity
+                                           : min(0.35, relativeDensity),
+                                       boundary: stage == .cell ? .none : boundary,
+                                       transition: stage == .cell
+                                           ? .defaultGrade : cellTransition,
+                                       steppedCoarsePerHalf: stage == .cell
+                                           ? nil : steppedCoarsePerHalf,
+                                       dyadicSteps: dyadicSteps)
     }
 
     /// The triangle count the current stage will draw — the latency budget, known

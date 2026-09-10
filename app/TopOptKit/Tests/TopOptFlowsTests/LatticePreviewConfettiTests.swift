@@ -109,6 +109,55 @@ final class LatticePreviewConfettiTests: XCTestCase {
         hisSettings().proxyParams(limits: TopOptKit.latticeLimits(topology: hisSettings().topologyID))
     }
 
+    // MARK: - ★★ a cell his part can actually hold (task 2026-08-21)
+
+    /// ★★ WHY THE RENDER FIXTURES NEEDED A SECOND CELL, measured before it was changed
+    /// (`LatticePreviewFloorVsCoreTests`, which is the whole argument for this constant).
+    ///
+    /// `hisParams()` leaves `cellMM` at the shipped DEFAULT of 8.00 mm — his photographed
+    /// screen said Cell size AUTO, and Auto resolves its cell from a swept window that
+    /// only the production wiring supplies. These offscreen fixtures never set
+    /// `renderer.cellSweep`, so they fall through to the uniform path and take that 8 mm
+    /// default verbatim. That is a harness gap, not his configuration.
+    ///
+    /// And at 8 mm, core builds NOTHING here. N* = 5 means an 8 mm cell needs a 40 mm
+    /// member; the widest material anywhere under his face-15 region measures 10.39 mm:
+    ///
+    ///     cell mm    core latticeS (of 30,676 voxels)    preview cells drawn
+    ///        8.00                                   0                      0
+    ///        4.00                                   0                      0
+    ///        2.50                                   0                      0
+    ///        2.00                              30,321                 23,233
+    ///        1.00                              30,610                184,695
+    ///
+    /// Core's own ceiling is W / N* = 10.39 / 5 = **2.08 mm**, and the cliff in that
+    /// table sits exactly there. Every render fixture that needs a lattice TO EXIST
+    /// before it can measure anything about it uses this cell instead.
+    ///
+    /// ★ IT IS DERIVED, NOT TUNED. 2.00 mm is the round value under core's ceiling on
+    /// this fixture's own material, and
+    /// `LatticePreviewFloorVsCoreTests.testTheRenderFixtureCellStaysUnderCoresCeiling`
+    /// re-measures that ceiling from core and fails if this constant ever rises above
+    /// it. If the mesh, N*, or core's width law moves, that guard fires — instead of
+    /// five render fixtures silently going empty again, which is exactly what happened.
+    static let renderableCellMM: Double = 2.0
+
+    /// His settings at a cell core will actually lattice — the same band, gamma and
+    /// topology, only the cell moved. Use this wherever the assertion is about the
+    /// PICTURE (dressing, masking, clipping) rather than about the cell policy itself.
+    ///
+    /// The default suits a region reaching ~11 mm into his part (ceiling 2.08 mm). A
+    /// DEEPER region reaches thicker material and takes a coarser cell — face 15 at
+    /// 20 mm measures 20.78 mm and so allows 4.16 mm — and a caller that declares such
+    /// a region passes its own number. Each call site's cell is core's ceiling for the
+    /// region THAT call site declares; none of them is a tuned constant.
+    static func hisParamsAtACellHisPartCanHold(cellMM: Double = renderableCellMM)
+        -> LatticeProxyParams {
+        var s = hisSettings()
+        s.cellMM = cellMM
+        return s.proxyParams(limits: TopOptKit.latticeLimits(topology: s.topologyID))
+    }
+
     // MARK: - §2: THE NUMBER, BEFORE ANY FIX
 
     /// ★ IS THERE LATTICE GEOMETRY TO DRAW? Reported as counts, on his own part, at
@@ -426,11 +475,15 @@ final class LatticePreviewRegionMaskTests: XCTestCase {
                                  spanLoMM: Double(span.lo), spanHiMM: Double(span.hi))
             }
             if geo.isPlane {
-                guard let o = mesh.facePlaneOutline(
-                    f, planeNormal: SIMD3<Float>(geo.planeNormal),
-                    planeOrigin: SIMD3<Float>(geo.planeOrigin)) else { return nil }
-                return .plane(center: SIMD3<Double>(o.center), normal: geo.planeNormal,
-                              halfUMM: Double(o.halfU), halfWMM: Double(o.halfV))
+                // ★★ THE ONE BUILDER, as production uses (`ProjectModel
+                // .resolvedLatticeFace` -> `planeFor`). This fixture used to assemble
+                // the plane by hand WITHOUT `outlineLoops`, i.e. as the face's BOUNDING
+                // BOX — 41.2% and 29.8% face on his two walls. The emission now refuses
+                // a B-rep face with no outline rather than declaring material he never
+                // marked, so a hand-built rectangle emits nothing and the fixture went
+                // vacuous. Going through `planeFor` is what makes this test exercise the
+                // shape production actually emits.
+                return LatticeRegionEmission.planeFor(face: f, in: mesh)
             }
             return nil
         }

@@ -33,8 +33,47 @@ public enum LatticeRegionEmission {
         case cylinder(axisPoint: SIMD3<Double>, axisDir: SIMD3<Double>,
                       radiusMM: Double, spanLoMM: Double, spanHiMM: Double)
         /// A planar face: its fitted outline centre, outward normal, half-extents.
+        /// ★ `outlineLoops` IS THE FACE ITSELF, in the plane's (u, v) mm relative
+        /// to `center` — see `LatticeFaceOutline`. The half-extents are its
+        /// BOUNDING BOX and are kept because core still reads them; on a face with
+        /// anything cut out of it they overstate the region badly (41.2% and 29.8%
+        /// correct on his two lattice walls), which is why the loops now ride
+        /// along. Empty ⇒ the rectangle, exactly as before.
         case plane(center: SIMD3<Double>, normal: SIMD3<Double>,
-                   halfUMM: Double, halfWMM: Double)
+                   halfUMM: Double, halfWMM: Double,
+                   outlineLoops: [[SIMD2<Double>]] = [])
+    }
+
+    /// The planar `ResolvedFace` the app builds, in ONE place, so a test cannot
+    /// accidentally construct it in a different frame from production's.
+    public static func planeFor(face: FaceID, in mesh: ViewerMesh) -> ResolvedFace? {
+        guard let geo = mesh.faceGeometry(Int32(face)), geo.isPlane,
+              let o = mesh.facePlaneOutline(face,
+                                            planeNormal: SIMD3<Float>(geo.planeNormal),
+                                            planeOrigin: SIMD3<Float>(geo.planeOrigin))
+        else { return nil }
+        return .plane(center: SIMD3<Double>(o.center), normal: geo.planeNormal,
+                      halfUMM: Double(o.halfU), halfWMM: Double(o.halfV),
+                      // ★★★ IN THE **FACE'S** FRAME, WHICH IS WHAT `spec` ASSUMES — and
+                      // this passed the INWARD normal, so the mirror was applied TWICE.
+                      //
+                      // ★ `LatticeFaceOutline.loops` projects into `basis(whatever it is
+                      // handed)`. Handed `-planeNormal` it produces loops already in the
+                      // SLAB's frame; `spec(for:.plane:)` then re-expresses them from
+                      // `basis(+normal)` into `basis(-normal)` a second time. Two
+                      // mirrors where one was intended is a mirror, so the outline
+                      // landed reflected about v — on his own faces, 33 of 61 and 31 of
+                      // 73 of each face's OWN centroids fell OUTSIDE the region that
+                      // face declares. Near chance, which is the reflected signature
+                      // (`testTheFacesOwnSurfaceIsInsideItsOwnRegion`).
+                      //
+                      // ★ THE CONVERSION IN `spec` IS THE RIGHT PLACE FOR IT — it is
+                      // written down, argued and tested there. This side simply has to
+                      // hand it what it says it takes: the face's own outward frame.
+                      outlineLoops: LatticeFaceOutline.loops(
+                          face: face, in: mesh,
+                          normal: ManualPrimitive.unit(geo.planeNormal),
+                          origin: SIMD3<Double>(o.center)))
     }
 
     public struct Result: Equatable, Sendable {
@@ -95,7 +134,18 @@ public enum LatticeRegionEmission {
             s.radiusMM = radius
             s.halfLengthMM = 0.5 * (hi - lo)
             return s.isValid ? s : nil
-        case .plane(let center, let normal, let halfU, let halfW):
+        case .plane(let center, let normal, let halfU, let halfW, let loops):
+            // ★★★ NO OUTLINE, NO REGION — for a B-REP FACE. The half-extents are a
+            // BOUNDING BOX (41.2% / 29.8% face on his two lattice walls), so emitting
+            // one in place of an outline declares material he never marked, which the
+            // ruling of 2026-08-21 forbids outright. The caller counts a nil as a
+            // SKIPPED face and the surface says so — drawing less than he marked, out
+            // loud, beats drawing 2.4x more than he marked in silence.
+            //
+            // A region with no `faceID` is a manual primitive, whose shape genuinely IS
+            // the rectangle; it never reaches here (it comes through `spec(for:
+            // ManualPrimitive)` above).
+            if faceID != nil, loops.isEmpty { return nil }
             var s = LatticeRegionSpec(role: role, kind: .face)
             s.faceID = faceID
             // Core's slab runs origin + s·normal, s ∈ [0, depth]. The part's
@@ -104,9 +154,71 @@ public enum LatticeRegionEmission {
             s.origin = center
             s.normal = -ManualPrimitive.unit(normal)
             // ★ IN PLANE ONLY. `depthMM` is untouched below.
-            let e = expandMM.isFinite && expandMM > 0 ? expandMM : 0
-            s.halfUMM = halfU + e
-            s.halfWMM = halfW + e
+            // ★★ AND THE SIGN IS THE USER'S (maintainer, 2026-08-18, having typed
+            // one: "I did a test where I did a negative expansion to make the
+            // edges of the model's walls visible and the lattice only in the
+            // centre … the lattice doesn't change and allow for that extra
+            // space. There needs to be this type of fidelity and control").
+            //
+            // ★ THE DEFECT WAS A HAND-ROLLED DUPLICATE. This line read
+            // `expandMM > 0 ? expandMM : 0` — it clamped every SHRINK to zero,
+            // so the one control the user reached for could not reach the slab
+            // at all. `LatticeSlabExpand.expanded` has handled the negative case
+            // correctly since the sign was freed (`testItIsClampedAndNowShrinks-
+            // OnPurpose`, `testANegativeMarginShrinksBothInPlaneAxes`), floors
+            // each axis independently so a shrink past the face collapses to a
+            // sliver instead of inverting — and was simply not called here.
+            // There is now ONE expander, and the emission goes through it.
+            let e = LatticeSlabExpand.expanded(halfUMM: halfU, halfWMM: halfW,
+                                               by: expandMM)
+            s.halfUMM = e.halfUMM
+            s.halfWMM = e.halfWMM
+            // ★★ AND THE REAL OUTLINE, WITH THE REACH AS ITS OWN NUMBER. Against
+            // an outline the expand is Minkowski dilation by a ball — the same
+            // operation `FaceOffsetShell.dilated` applies to the primitive on
+            // screen — so the shape the user drags and the region the run
+            // latticed are one shape, not two that happen to agree on a
+            // rectangle. The half-extents above still ship for core's reader.
+            // ★★★ THE OUTLINE IS RE-EXPRESSED IN THE SLAB'S OWN FRAME — the fix for
+            // three of his reports at once (2026-08-21: the declared wall renders
+            // solid; the lattice runs past the face into the chamfer; the lattice view
+            // cuts the top faces away).
+            //
+            // ★★ THE OUTLINE WAS BEING MEASURED MIRRORED. `LatticeFaceOutline.loops`
+            // projects the face into `LatticeRegionMask.basis(n)` for the FACE normal.
+            // The slab then carries `-n`, and `LatticeRegionMask.contains` measures the
+            // very same loops in `basis(-n)`. Those are NOT the same frame:
+            //
+            //     basis(+Y) = (u = (0,0, 1), v = (1,0,0))
+            //     basis(-Y) = (u = (0,0,-1), v = (1,0,0))
+            //
+            // u flips and v does not, so the polygon is reflected about v. Measured on
+            // his own two regions, face 15 and face 2 — both mirrored, and on face 15
+            // the reflection moves the outline clean off the wall: EVERY sample taken
+            // at a point genuinely on that face reported OUTSIDE the region (0 of 22).
+            //
+            // ★ WHICH IS ALL THREE SYMPTOMS, from one defect. The wall he declared is
+            // not in the region, so it is left solid. The reflected outline lands on
+            // material he never marked — the chamfer, the top faces — so the lattice
+            // "expands when I have not set it to", and the SHELL, which discards
+            // wherever this same field says "latticed", cuts those top faces away.
+            //
+            // ★ AND WHY NO TEST CAUGHT IT: a reflection preserves AREA. Every bar on
+            // this outline compares areas or half-extents, and all of them still pass
+            // on a mirrored polygon. The check that finds it has to be positional.
+            //
+            // The conversion is exact and assumes nothing about the mirror: rebuild
+            // each point's 3D offset in the frame it was written in, then re-read it
+            // in the frame it will be measured in.
+            let (uFace, vFace) = LatticeRegionMask.basisForTests(ManualPrimitive.unit(normal))
+            let (uSlab, vSlab) = LatticeRegionMask.basisForTests(s.normal)
+            s.outlineLoops = loops.map { loop in
+                loop.map { p -> SIMD2<Double> in
+                    let d = uFace * p.x + vFace * p.y
+                    return SIMD2<Double>(simd_dot(d, uSlab), simd_dot(d, vSlab))
+                }
+            }
+            s.inPlaneOffsetMM = loops.isEmpty ? 0 : LatticeSlabExpand.clamp(expandMM)
             s.depthMM = depthMM
             return s.isValid ? s : nil
         }
@@ -152,6 +264,10 @@ public enum LatticeRegionEmission {
                                // (maintainer, 2026-08-17). Empty ⇒ 0 ⇒ the slab
                                // is exactly the face, byte-identical to before.
                                selectableExpandMM: [String: Double] = [:],
+                               // ★ THE UNLOADED WALLS (2026-09-05): selectable key →
+                               // foci count, ONLY for walls the bake measured as
+                               // unloaded with the switch on (ProjectModel resolves).
+                               syntheticWalls: [String: Int] = [:],
                                resolve: (FaceID) -> ResolvedFace?) -> Result {
         var out: [LatticeRegionSpec] = []
         var skipped = 0
@@ -189,6 +305,8 @@ public enum LatticeRegionEmission {
                     s.relativeDensity = density(
                         for: g.id, role: role, densities: groupDensities,
                         stated: selectableDensity[LatticeSelectableRef.primitive(p.id).key])
+                    s.selectableKey = ref.key
+                    if let n = syntheticWalls[ref.key] { s.syntheticStress = true; s.syntheticFoci = n }
                     out.append(s)
                 }
             }
@@ -206,6 +324,8 @@ public enum LatticeRegionEmission {
                     s.relativeDensity = density(
                         for: g.id, role: role, densities: groupDensities,
                         stated: selectableDensity[ref.key])
+                    s.selectableKey = ref.key
+                    if let n = syntheticWalls[ref.key] { s.syntheticStress = true; s.syntheticFoci = n }
                     out.append(s)
                 } else {
                     skipped += 1

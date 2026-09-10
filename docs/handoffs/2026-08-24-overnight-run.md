@@ -1,0 +1,274 @@
+# Overnight run — 2026-08-24 (Claude, while you slept)
+
+Branch: `claude/topopt-lattice-preview-1b7355` (this worktree). Every fix has tests;
+the sim build installed on the iPad is from this branch tip.
+
+## DECISIONS YOU ASKED ME TO LEAVE FOR YOU
+
+1. **Width statistic** — you said "read the actual depth of that area, preferably per
+   voxel". Implemented exactly that (see below). The one judgement call inside it:
+   the per-cell divisor uses the same nearest-whole-fit `round` as the region rule
+   (so a 13 mm cell on a 12.03 mm wall stays one cell), and the "never S/2" bump is
+   NOT applied to the width-driven divisor — S/2 is exactly what a half-thick wall
+   holds. Say the word if you want ceil (stricter) or the S/2 ban there too.
+2. **Solid outline vs your attached-walls-only rule** — the outline rim currently
+   draws along the WHOLE face outline (the in-plane distance field has no notion of
+   "attached vs open to the world"). With fullSkin on, open faces are skinned anyway,
+   so tonight it reads fine — but the attached-only refinement is still open.
+3. **The lattice-variant STL is a triangle soup** (by design, slicer-targeted). I made
+   the app display it raw instead of dying (details below). If you want the FILE
+   itself manifold (17k duplicated triangles from the two overlapping regions), that
+   is a core-side mesh-emission change — not done tonight.
+4. My driving ran the Lattice pipeline on **M2 verticalStand**, so the project now
+   shows "Optimized" with a lattice variant result (the app persists run outcomes
+   itself). Settings/roles/depths are untouched (verified in project.json).
+
+## FIXED TONIGHT (each committed with tests)
+
+### 1. The 12.00/6.50 single-cell asymmetry — was a SWAPPED-DEPTH red herring, then his real fix
+- The handoff had the faces' depths swapped; project.json says face 15 → 12,
+  face 2 → 13. With true depths every logged bake reproduced exactly.
+- Root cause of the visible 6.50: the p05 width statistic (8.59 = face 2's thinnest
+  sliver; median 12.03) crossing the n=1.5 rounding boundary.
+- **Per your ruling**: width is now a per-voxel FIELD
+  (`wallWidthFieldAlongNormalMM`); the stepped region cell anchors on the MEDIAN and
+  each painted cell divides to what its OWN wall holds (round, not ceil).
+- **Verified in-sim**: `DIAG regionCell` shows both faces at floor 1 → one cell
+  through each wall (stated [12.0, 13.0]); the sliver got exactly 40 local 6.5 mm
+  cells (`w[min=8.59 … shrunk=40]`). Visually: clean truss, flush caps, no quilt.
+
+### 2. Entering the lattice stage KILLED the run on its own mesh
+- Fresh session → Lattice → the on-device lattice job ran, core certified it, then
+  the run FAILED: "cannot import … non-manifold edges". The lattice STL is a
+  deliberate union-less soup; with two overlapping regions it has 17,172 duplicated
+  triangles + 194 true T-junction edges. The solid importer is right to refuse — and
+  nothing at that call site needs a solid. Now falls back to the raw soup parse the
+  RELATTICE path always used. Run completes; certification verdict is core's.
+
+### 3. A loaded "stepped" project silently became "doubled" (the night's big one)
+- `cellTransition` (the settings-page picker state) was stored but NEVER persisted;
+  every load reset it to Default Grade while `algorithm` loaded correctly. The
+  settings page save then stamped `algorithm = cellTransition.coreAlgorithm` —
+  quietly rewriting stepped → doubled. Measured live: project.json said stepped, the
+  runtime guard printed `algo='doubled'`, the preview silently drew the ladder.
+- `cellTransition` is now COMPUTED over `algorithm` (setter writes it). One home.
+- This would have hit you on every app relaunch → settings page → save.
+
+## VERIFIED (your backlog items 1–3 of the night)
+- **Quilt / single-cell confirmation**: stated [12,13] at floor 1, flush caps, no
+  quilt on either wall (screenshots in the scratchpad, and the sizes histogram is
+  12.00×105 + 13.00×92 with only sliver/rim shrinks).
+- **Solid outline**: baked (solidRim=18, outline band 1.72 mm) and visible on screen
+  along wall boundaries.
+- **Blank spots (front-left)**: the complaint was against the old 6.5 mm layout;
+  at the new one-cell layout coverage is full. Re-check with your own eyes.
+
+## LATER IN THE NIGHT
+
+### Grade-to-fit-shape on Default Grade (doubled) — the distance was the wall's thickness
+The doubled ladder ALREADY had a shape ceiling (applied to `desired`, all modes) —
+but driven by the 3-D distance to the candidate set's edge, which reaches 0 at the
+DEPTH CAPS: through a 12 mm wall it reads ~6 mm everywhere. At the one-cell sizes
+single-cell now produces, `S ≤ 2d` bound mid-wall. `perVoxelForGrading` now hands
+each voxel its OWNING region's in-plane distance (3-D only where no axis-aligned
+face region owns it — bolt regions and whole-part lattices are byte-identical).
+Tested headlessly on your part, AND eyeballed in the sim on a copy: the app has
+no Duplicate (long-press offers only Rename/Delete), so I duplicated the project
+DIRECTORY in the container — **"DOUBLED test (Claude copy)"** now sits in your
+project list (its internal id rewritten; the store lists by scanning, and a
+copied id collides silently in the UI — small app bug, noted). The copy bakes
+the doubled ladder end-to-end with the new in-plane field: guard prints
+`algo='doubled'`, preview draws a clean fine ladder on both walls, no crash. At
+ladder-fine cells the ceiling barely binds (as the 2.9% measurement predicted),
+so the headless test remains the sharp evidence for the cap-band fix. Delete the
+copy whenever — it is yours to keep or drop.
+
+### Organic — deliberately NOT touched here
+The organic-look work is actively owned on other branches (newest:
+"Thin beads, level bridges, a flattened roof — the fabric the traced cube was
+loved for" on `claude/organic-lattice-beauty-print-9721c9`, plus
+`claude/organic-growth-generator`). Redoing it on this branch would collide.
+PR 352 (core printability) is OPEN and reviewed — findings at the bottom of this
+doc once the review agent lands them.
+
+### Grading from stress + the overlay — WORKS, and the flatness is physics
+The waveform icon in the lattice-stage viewport toggles the stress view; the part
+paints by von Mises with a legend. On M2 verticalStand at your 5.5 lbs the field
+tops out at ~0.02 MPa against a ~30 MPa allowable — utilisation ~0.1% — so an
+honest utilisation-driven grade is uniform at the band's low end, and the interior
+fill rightly shows no variation. The machinery is wired; this part just is not
+working hard. If you want the grade RELATIVE to the field's own range (visible
+variation even at negligible absolute stress), that is a product decision — say so.
+
+### Sample responds to single-cell — wired
+The settings-page sample now derives its cell through core's own derivation at the
+mode's floor (member = smallest declared include depth, the bake's own
+pre-measurement fallback), so toggling single-cell doubles the sample's cell on
+screen. Chain: `derivedSampleCellMM` (LatticeSetupWizard) →
+`stageMesh(derivedCellMM:)`. Test: LatticeSampleSingleCellTests.
+
+### Full test-suite re-run — GREEN
+**2194 tests, 30 skipped, 0 failures, exit 0** (the count is up from 2179: tonight
+added ~18 tests and the suite total moved with main's earlier merges). Three
+earlier attempts were void — one piped through `tail` (exit code was tail's, a
+green run measuring nothing), one died on a compile error in a new test, one was
+crashed BY my first attached-rim test indexing an empty field. The final run has
+the real exit code and the totals captured.
+
+### The attached-only rim (your unscheduled solid-edges rule) — DONE, and it found two real bugs
+The rim now keys on an in-plane field seeded only by part material OUTSIDE the
+latticed set: junction edges rim, open edges don't (the finish owns them). In-sim:
+solidRim went 18 → 11 with every other number byte-identical. On the way it
+uncovered (a) `partSDF` is misnamed — its SIGN is the region-clipped occupancy's,
+so nothing outside the regions is ever negative (the seed now reads
+`memberThicknessMM`, the whole-part field); and (b) the distance transform mapped
+UNREACHABLE voxels to 0, which downstream means "on the boundary" — the exact
+two-meanings-of-zero inversion again; unreached is now `kFarMM`.
+
+**Latent gap worth knowing (deliberately not "fixed"):** because `partSDF` is
+clip-signed, the along-normal width walk still stops at a region's own caps
+wherever no OTHER region continues the material — a single declared face into a
+deeper wall reads its declared depth. But note the trade before changing it:
+walking the WHOLE-part solid instead would balloon at junctions (along the front
+wall's normal, the base plate reads as the part's full ~49 mm depth — the same
+junction inflation that made the isotropic measure quilt). The cap-stop is
+partly protective. If this ever needs solving, it needs a junction-aware rule,
+not a substrate swap — one for your eyes, not for 3 a.m.
+
+## PR 352 REVIEW — "Organic lattice: printability, shape fit, and a scale"
+
+**Verdict: not merge-ready.** The full 13-finding review is condensed here (I did
+not post to GitHub — say the word and I will). The headline guarantee — mid-air
+starts refused — holds only on the re-lattice-variant path, only AFTER the refused
+meshes are already written, and only when the job states a `layer_height_mm`.
+
+Ship-blockers:
+1. `require_no_midair_start` enforced only in `lattice_variant_job`; the main
+   optimize run's `emit_lattice` → `lattice_one_variant` path exports the same
+   files with no check.
+2. The refusal throws after the STL/3MF/_WELDED files are on disk — nothing
+   deletes or withholds them.
+3. With `loads.layer_height_mm` unset (default 0), the mid-air census is skipped
+   and the guard passes vacuously — the default config silently disarms it.
+4. The branch-support fallback can't tell anchored/merged tips from dead ones
+   (no flag; all end `alive=false`), so it deletes real lattice material wherever
+   branched support SUCCEEDED.
+5. The fill mat runs on round 0, not at quiescence (unlike slenderness), and its
+   struts are uncuttable — mis-placed fill is permanent.
+6. Pad-under-touchdowns is armed by default with no guard: if no span endpoint is
+   within 1.5·rmat of the cut plane, ZERO mat is emitted, silently (the author's
+   own admission, confirmed reachable in shipped configs).
+7. The flat-base cut applies only to the welded file; the always-written span-soup
+   STL keeps the sub-base capsule caps ("dots").
+8. `organic_scale` is silently inert with plain `cell_mm` (no swept window):
+   multiplies two zeros, no refusal.
+
+Smaller: `curves_kept_for_coverage` plumbed but never incremented (permanent 0 on
+the receipt); base-plane sentinel is value-based (z ≤ 0 base silently skips the
+weld cut); fixed-point cap exits silent (`fixed_point_converged=false` only);
+prune budget is cumulative across rounds then silently skips;
+`organic_shape_fit_only` can COARSEN cells and ignores W/N*, contradicting its
+own header; B9 lacks a positive control (can pass vacuously);
+`TOPOPT_ORGANIC_NO_BASE_MAT` changes shipped geometry with no receipt marker;
+`[scale]/[vdi]/[base-mat]` stderr scaffolding still unconditional.
+
+Minimum to merge: move the refusal before the writes and onto both export paths;
+census must run (or refuse as unverified) when layer_height is 0; per-tip
+anchored/merged flags; gate fill mat on quiescence; fix or remove the pad logic;
+refuse scale without a window; apply the base cut to the soup STL or document it.
+
+---
+
+# EVENING SESSION (after his desk review, 2026-08-24 ~18:00–20:00)
+
+His review found real failures; each was measured, fixed, tested, shipped to the
+sim. Eleven commits since the morning. The DOUBLED test copy's saved state was
+left untouched (wizard changes made during verification were never saved).
+
+## Fixed, with the measurement that found it
+1. **Tap callout lied** ("5% · 0.18 mm at a 2.00 mm cell"): the BAKE was right —
+   LatticeLiftProbe shows every graded size lifted exactly to its printability
+   floor (struts 0.45 mm) — the callout re-baked its own unlifted field. It now
+   reads the renderer's own activation (`bakedActivationAt`, same owning-cell
+   search as the size).
+2. **Default Grade's 2 mm haze**: ladder base was min(wants) — one 3.44 mm sliver
+   class (want 1.72 mm = his measured cells) pulled the whole ladder down. Base
+   now anchors at the wants' p05 (5.16 mm here); sub-p05 slivers go SOLID.
+3. **Stress overlay flat blue**: strut paint was baked from the GRADING demand
+   (utilisation-capped ≈ 0); now from stressDemand, the measured field on the
+   same percentile ramp as the solid plot. Verified in his own screenshots.
+4. **Never-overshoot (his ruling)**: fit divides min(depth, measured wall) — his
+   faces now derive 10.31/12.03 (verified in-app: stated=[10.312, 12.031]).
+   Local divisor round→ceil with 1e-6 slack, reading the wall at the cell's own
+   CENTRE. Two traps found on the way: footprint-MIN + ceil divided 140/150
+   cells (every footprint near a curved outline touches a short read), and an
+   unmeasured centre must mean "unconstrained", not "thin". Invariant test:
+   0 overshoots, 209 exact fits kept.
+5. **Mid-bake quilt hidden** (his request): a `hidden` flag rides the lattice
+   layer while a scene bakes, and the update pass now applies PARAMS BEFORE the
+   scene — the first bake of a scene is the right bake (the quilt was the old
+   params' bake flashing until the diffs landed).
+6. **Legend cell line**: it was emitted and a one-line limit ate it. Fixed.
+7. **Per-face Density control, Aesthetic only** (his spec): the Density row in
+   each face's drawer is now a control in aesthetic mode (scrub + keypad),
+   clamped [printable floor at that face's cell → 100% solid]; a user-stated
+   face density governs over the sim field. Structural keeps the certifiable
+   band. He confirmed the floor keys on the strut LINE WIDTH (0.45), which is
+   what core's law uses.
+8. **Stepped sample answers the floor with STRUCTURE**: coarse half = the
+   floor's worth of derived cells (single-cell ⇒ 2×2×2 block, half at the full
+   derived cell) vs a finer non-dyadic half, at constant block size. NOTE: a
+   literal "ONE cell filling half the cube" needs a non-cubic sample block —
+   the generator builds cubes; say the word and I'll reshape it.
+
+## Still open
+- **Rim at attached edges — DOUBLED half done**: the ladder's decided-solid
+  cells (shape-fit wants trimmed below the base rung) now RENDER solid — the
+  march unions dClip wherever the sample's own cell is inactive, no new texture
+  channel, gated on rimParams.z so every other path is byte-identical. Verified
+  on the copy: solid margins along the wall outlines, the chamfered corner meets
+  material instead of floating. STILL YOURS TO RULE: the stepped rim band is
+  ~1.3–1.7 mm (may read too thin even when drawn) — if you want a chunkier solid
+  edge, name the width (a fraction of the local cell? fixed mm?).
+- **Lattice depth vs chamfer** (his img 5): MEASURED, and it is by-construction,
+  not a clip bug. The chamfer is its own CAD face, so the declared face's
+  outline — and the prism — stops where the bevel starts. Exactly a ~3 mm band
+  of material sits outside the prism (face 15: +3,834 voxels, face 2: +4,151;
+  expansion saturates at +3 mm — +5 mm adds nothing). Remedies: the existing
+  per-face EXPAND control at 3 mm covers it today; or an auto-rule that absorbs
+  adjacent chamfer faces into the region — your call. Probe:
+  LatticeChamferGapProbe.
+- **His answers logged**: watertight lattice STL = core-side boolean, queued;
+  stress display = relative in Aesthetic / absolute in Structural (structural
+  half not yet wired); organic = hands off until he says.
+
+## Late round (his 8 items, 2026-08-24 evening) — commits ac0dcefe..977fee72
+1. **Stepped sample re-made from scratch** (his verdict + spec): centre-and-shell —
+   one envelope two members across, centre = the floor's worth of derived cells
+   (single-cell ⇒ ONE big cell "filling half the cube", floor 2 ⇒ 2×2×2), wrapped
+   by a one-step-finer shell ("the grade around"). The toggle changes STRUCTURE at
+   constant block size. `LatticeSamplePatch.centreAndShell`, test holds the envelope.
+2. **"Quilt is back on default density" root-caused**: the old clamp bug left a
+   STORED 20% on that face, and stored beats derived. Now an undialled face shows
+   "Auto · N%" and typing 0 clears the override back to Auto — that face needs one
+   0-entry to shed the stale 20%.
+3. **Aesthetic "Won't certify" popup gone**: `latticeDiagnosis` keys on the STAGE
+   floor, not core's accuracy floor of 5.
+4. **2-cell flash**: the 128³ wall walk ran on every SwiftUI body evaluation; now
+   memoised per scene token + input fingerprint (`LatticeRegionCellMemo`). The
+   mid-bake `hidden` gate from earlier stands.
+5. **Retention switch is structural-only** (his "REMOVE the too-thin-to-certify
+   button from the aesthetic mode").
+6. **Labels**: ALL modifiable rows white + bold (his final ruling after one
+   round-trip both ways); Density's VALUE keeps its extra size/weight.
+7. **Density editability (his item 7)**: kept editable, per-face, aesthetic only,
+   clamped into [printable floor, quilt] with relative % display and Auto/0-clear —
+   it cannot select an unprintable or quilted value, so no grey-out needed.
+
+Full suite 2199 green. Installed to the iPad sim (Debug, over com.nadim.topopt).
+
+**Still open from this round**: holes in the stepped lattice + the stepped solid
+rim at the chamfer (his img 5) — needs the live bake's `DIAG rim` /
+`DIAG steppedGrade` lines from HIS part; the attached-only rim seeding is the
+suspect (a seed miss ⇒ every distance is the far sentinel ⇒ zero solid). Open the
+stepped copy and arm the preview; I read the log passively.

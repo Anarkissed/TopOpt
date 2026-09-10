@@ -199,6 +199,9 @@ public final class AppModel: ObservableObject {
     ) {
         self.materialsPath = materialsPath
         self.rulesPath = rulesPath
+        // ★ The wizard's organic sample solves the PR 353 cube with the app's own FEA
+        // (2026-09-03); it needs the same materials/rules this model was handed.
+        if let m = materialsPath, let r = rulesPath { OrganicSampleCube.configPaths = (m, r) }
         self.materialsLoader = materialsLoader
         self.importer = importer
         self.inspector = inspector
@@ -240,7 +243,10 @@ public final class AppModel: ObservableObject {
             materialsPath: materialsPath, rulesPath: rulesPath,
             resolution: resolution,
             anchorFaceIDs: lc.anchorFaceIDs, loadGroups: lc.loadGroups,
-            buildDirection: lc.buildDirection)
+            buildDirection: lc.buildDirection,
+            // ★ the same region layer the run request sends (2026-09-05)
+            faceRegions: project.faceRegions.regions.map(\.kitSpec),
+            anchorRegionIDs: lc.anchorRegionIDs)
     }
 
     /// The materials / rules files the certification engine needs (handoff
@@ -285,15 +291,27 @@ public final class AppModel: ObservableObject {
         // usable B-rep geometry cannot select a mode with nothing to fit into.
         let emitted = project.latticeJobRegions()
         let includeCount = emitted.regions.filter { $0.role == .include }.count
-        let resolvedLattice = LatticeAutoPosture.applied(to: project.lattice,
-                                                         includeRegionCount: includeCount)
+        // ★ Auto's swept window is DERIVED, so the posture needs the two things it is
+        // derived from: what each declared region has to fit into, and the bead.
+        let resolvedLattice = LatticeAutoPosture.applied(
+            to: project.lattice,
+            includeRegionCount: includeCount,
+            regionWidthsMM: emitted.regions.filter { $0.role == .include }
+                .map { $0.depthMM },
+            lineWidthMM: project.printParams.strutLineWidthMM)
         let latticeSpec = resolvedLattice.runSpec(
             topology: project.lattice.topologyID,
             memberMM: project.lattice.regionMemberMM ?? 0,
             lineWidthMM: project.printParams.strutLineWidthMM,
             // Round-2 (M3): the include/exclude regions — role groups' primitives +
             // faces and the legacy include primitives — ride `lattice.regions`.
-            regions: emitted.regions)
+            regions: emitted.regions,
+            // ★ THE OBJECTIVE SHAPES "AUTO" (maintainer, 2026-08-19): minimise
+            // plastic ⇒ the coarsest, sparsest cell the sim will certify; off ⇒
+            // the finest printable cell. See `LatticeSettings.resolvedCellPlan`.
+            minimizePlastic: project.minimizePlastic,
+            // ★ growth's precondition (§2A): organic_growth is written only with a layer height
+            layerHeightMM: project.printParams.layerHeightMM)
         return RunRequest(modelPath: file.path, material: project.material,
                           materialsPath: materialsPath, rulesPath: rulesPath,
                           resolution: project.quality.resolution,

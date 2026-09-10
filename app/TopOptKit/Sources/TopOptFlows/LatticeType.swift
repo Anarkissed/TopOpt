@@ -24,6 +24,7 @@
 
 import Foundation
 import simd
+import TopOptKit
 
 /// One strut lattice, defined exactly as the worker defines it: an integer
 /// denominator `S` (node coordinates are integers in units of `L/S`, so the cell is
@@ -53,21 +54,203 @@ public struct LatticeType: Equatable, Sendable, Identifiable, Hashable {
     public let nodes: [Node]         // canonical cell nodes (for the node blobs)
     public let densityCoefficient: Double  // K in ρ ≈ K·(r/L)²
 
+    // MARK: - ★★★ WHERE THE LATTICE FUSES
+
+    private static let separationCache = NSCache<NSString, NSNumber>()
+
+    /// ★★★ THE DIAMETER, AS A FRACTION OF THE CELL, AT WHICH THIS TOPOLOGY'S STRUTS
+    /// TOUCH — the quilt, expressed geometrically.
+    ///
+    /// ★ IT IS NOT `1/2`, AND ASSUMING SO IS WHY THE QUILT SURVIVED EVERY SETTING
+    /// (his 2026-08-25). An octet's struts lie on the FACE DIAGONALS, so a pair of
+    /// neighbouring parallel struts is `cell/(2√2)` apart — they meet a full √2
+    /// before a diameter of `cell/2`. A simple cubic's struts DO run along the
+    /// edges and meet at `cell`. One number cannot serve both.
+    ///
+    /// So it is MEASURED off the topology's own canonical struts: the smallest
+    /// distance between two struts that do not share an endpoint, taken over the
+    /// cell and its immediate neighbours (a strut's closest companion is often in
+    /// the next cell, not its own). Cached — the answer is a property of the
+    /// topology, not of the call.
+    public var separationFactor: Double {
+        if let hit = Self.separationCache.object(forKey: id as NSString) {
+            return hit.doubleValue
+        }
+        let S = Double(denominator)
+        func p(_ n: Node) -> SIMD3<Double> {
+            SIMD3(Double(n.x) / S, Double(n.y) / S, Double(n.z) / S)
+        }
+        /// Distance between two segments, and whether they share an endpoint.
+        func gap(_ a0: SIMD3<Double>, _ a1: SIMD3<Double>,
+                 _ b0: SIMD3<Double>, _ b1: SIMD3<Double>) -> Double {
+            let u = a1 - a0, v = b1 - b0, w = a0 - b0
+            let a = simd_dot(u, u), b = simd_dot(u, v), c = simd_dot(v, v)
+            let d = simd_dot(u, w), e = simd_dot(v, w)
+            let den = a * c - b * b
+            var s = 0.0, t = 0.0
+            if den > 1e-12 {
+                s = Swift.max(0, Swift.min(1, (b * e - c * d) / den))
+                t = Swift.max(0, Swift.min(1, (a * e - b * d) / den))
+                // one refinement, so a clamped pair still reports its true gap
+                s = Swift.max(0, Swift.min(1, (b * t - d) / Swift.max(a, 1e-12)))
+                t = Swift.max(0, Swift.min(1, (b * s + e) / Swift.max(c, 1e-12)))
+            } else {
+                t = Swift.max(0, Swift.min(1, e / Swift.max(c, 1e-12)))
+            }
+            return simd_length(w + u * s - v * t)
+        }
+        let base = struts.map { (p($0.a), p($0.b)) }
+        var best = Double.infinity
+        for dz in -1...1 { for dy in -1...1 { for dx in -1...1 {
+            let off = SIMD3<Double>(Double(dx), Double(dy), Double(dz))
+            for (i, s) in base.enumerated() {
+                for (j, t) in base.enumerated() {
+                    if dx == 0, dy == 0, dz == 0, j <= i { continue }
+                    let b0 = t.0 + off, b1 = t.1 + off
+                    // Struts that MEET are not candidates — a shared node is a
+                    // junction, not a collision.
+                    let shares = [s.0, s.1].contains { q in
+                        simd_length(q - b0) < 1e-9 || simd_length(q - b1) < 1e-9
+                    }
+                    if shares { continue }
+                    let g = gap(s.0, s.1, b0, b1)
+                    if g > 1e-9, g < best { best = g }
+                }
+            }
+        } } }
+        // The gap is centre-to-centre, so the struts touch when the DIAMETER
+        // reaches it. Fall back to the cell side if a topology reports nothing.
+        let f = best.isFinite ? best : 1.0
+        Self.separationCache.setObject(NSNumber(value: f), forKey: id as NSString)
+        return f
+    }
+
     // MARK: relative-density ↔ strut-radius grading (the map the proxy shades by)
 
-    /// The strut radius (mm) that gives relative density `rho` at cell size `cellMM`,
-    /// inverting ρ ≈ K·(r/L)²: r = L·√(ρ/K). This is the exact worker grading law in
-    /// the low-density limit (density.txt: mesh matches analytic to ≤1.5e-15). `rho`
-    /// is clamped to [0, 1]; K > 0 for every table entry.
+    /// The strut radius (mm) that gives relative density `rho` at cell size `cellMM`.
+    ///
+    /// ★★ THIS ASKS CORE, AND ONLY FALLS BACK TO THE CLOSED FORM WHEN CORE HAS NO LAW
+    /// (task 2026-08-20). It used to invert ρ ≈ K·(r/L)² unconditionally — exact in
+    /// the low-density limit, and increasingly wrong outside it. Core interpolates a
+    /// table MEASURED at vpc48, and the two disagree by 1.4-1.7x, WIDENING with
+    /// density:
+    ///
+    ///     rho    core d(4mm)   closed form   ratio
+    ///     0.05     0.3632        0.2582      0.71
+    ///     0.20     0.7592        0.5164      0.68
+    ///     0.60     1.5343        0.8944      0.58
+    ///
+    /// The preview therefore drew every strut far thinner than the run builds, and
+    /// printed those thin numbers in millimetres beside it. Core is the authority on
+    /// what the printer lays; the app is not entitled to a second opinion.
+    ///
+    /// ★ THE FALLBACK IS NOT A SILENT ONE. Core carries a diameter law for OCTET
+    /// only; for any other topology `latticeStrutDiameterMM` returns 0 and this
+    /// returns the analytic estimate — which is the honest thing to do for a
+    /// topology nothing has measured, and is exactly what `densityCoefficient`
+    /// documents itself as.
     public func strutRadiusMM(relativeDensity rho: Double, cellMM: Double) -> Double {
         let r = max(0, min(1, rho))
+        let d = TopOptKit.latticeStrutDiameterMM(topology: id, relativeDensity: r,
+                                                 cellMM: cellMM)
+        if d > 0 { return d / 2 }
         return cellMM * (r / densityCoefficient).squareRoot()
     }
 
     /// The relative density a given strut radius produces at this cell size — the
     /// forward map ρ = K·(r/L)², for reporting a patch's true density back.
+    /// ★★ THE PRINTABILITY FLOOR (maintainer, 2026-08-19: "It should be based on
+    /// the printing parameters. I have mine set at a 0.42 line width, so 0.5-0.95
+    /// makes sense. But if I change to a 0.2 nozzle that can change, so I would
+    /// expect the floor to change with it: to 0.25. Does that make sense?").
+    ///
+    /// ★ IT DOES, AND THE NUMBER FALLS OUT OF THE LAW RATHER THAN BEING TYPED.
+    /// The thinnest strut a printer can lay is ONE BEAD WIDE, so its radius is
+    /// `lineWidth / 2`; the density that produces is `ρ = K·(r/L)²`. Measured for
+    /// octet (K = 48):
+    ///
+    ///     line 0.42 mm · cell 2.20 mm → 43.7%     ← his settings
+    ///     line 0.42 mm · cell 8.00 mm →  3.3%
+    ///     line 0.20 mm · cell 2.20 mm →  9.9%
+    ///
+    /// ★ SO HIS 0.5 WAS ALMOST EXACTLY RIGHT AT HIS OWN CELL, and the one
+    /// correction worth stating is that the law is QUADRATIC in the width, not
+    /// linear: a 0.2 mm nozzle gives 9.9%, not the ~0.25 a linear scaling
+    /// suggests. It also moves with the CELL — a coarser cell can print a much
+    /// lower density, which is why the unloaded wall wants a coarse cell.
+    /// ★★★ THE QUILT CEILING — the density at which the lattice stops being a
+    /// lattice (his ruling, 2026-08-24 night: "saying the max is solid is wrong.
+    /// The max is the quilt"). As the density rises the struts fatten until the
+    /// windows between them close and the face reads as a quilt of bosses; past
+    /// that point more density is not more lattice, it is a worse solid. The
+    /// geometric proxy: the strut DIAMETER reaching half the cell — neighbouring
+    /// struts' surfaces meet and the openings are gone. Inverted from the same
+    /// measured strut law everything else uses, by bisection (the law is
+    /// monotone in rho). Returns 1.0 when even solid stays under the bound (a
+    /// huge cell), so the ceiling can never fall below the printable floor.
+    public func quiltDensityCeiling(cellMM: Double) -> Double {
+        guard cellMM > 0 else { return 1 }
+        // ★★★ THE STRUTS MEET A FULL √2 EARLIER THAN cell/2 (his 2026-08-25:
+        // "even the default grade with single-cell/member=off is quilted!!! …
+        // It's in *every* setting!").
+        //
+        // ★ THE OLD BOUND WAS THE CELL'S SIDE, AND THE STRUTS DO NOT RUN ALONG IT.
+        // An octet's struts lie on the FACE DIAGONALS, so the perpendicular gap
+        // between neighbouring parallel struts is `cell/(2√2)`, not `cell/2`. Asked
+        // for the wrong bound the ceiling almost never bound at all: measured on his
+        // own part it returned 1.0 — solid — at 5, 8 and 13 mm alike, so the top of
+        // the density band was a FUSED lattice in every algorithm, and the sim's
+        // grading (which normalises to the part's own peak, and so drives most of a
+        // wall near the top) mapped straight into it. That is the quilt, and it is
+        // why it appeared under Default and Stepped, single-cell on or off.
+        //
+        // `separationFactor` is the topology's own answer — see the family table —
+        // so a lattice whose struts DO run along the side keeps the old bound.
+        let target = cellMM * separationFactor / 2
+        guard strutRadiusMM(relativeDensity: 1.0, cellMM: cellMM) > target
+        else { return 1 }
+        var lo = 0.0, hi = 1.0
+        for _ in 0..<64 {
+            let mid = 0.5 * (lo + hi)
+            if strutRadiusMM(relativeDensity: mid, cellMM: cellMM) >= target {
+                hi = mid
+            } else {
+                lo = mid
+            }
+        }
+        return hi
+    }
+
+    public func printabilityDensityFloor(lineWidthMM: Double, cellMM: Double) -> Double {
+        guard lineWidthMM > 0, cellMM > 0 else { return 0 }
+        return min(1, relativeDensity(strutRadiusMM: lineWidthMM / 2, cellMM: cellMM))
+    }
+
+    /// ★★ AND THE INVERSE IS CORE'S CURVE INVERTED, not the closed form (2026-08-20).
+    ///
+    /// `strutRadiusMM` was moved onto core's measured law; this was left on
+    /// `ρ = K·(r/L)²`, so the two stopped being a pair — a radius round-tripped
+    /// through them came back 1.4x wrong, and `printabilityDensityFloor` (which is
+    /// nothing but this function at one bead) reported a floor the run does not use.
+    /// A monotone law has exactly one inverse, so it is found by bisection on core's
+    /// own answer rather than by writing a second law down.
     public func relativeDensity(strutRadiusMM radius: Double, cellMM: Double) -> Double {
-        guard cellMM > 0 else { return 0 }
+        guard cellMM > 0, radius > 0 else { return 0 }
+        let want = 2 * radius
+        // Does core carry a law for this topology at all? The top of the band is the
+        // cheapest question that says so — 0 means "no core law", not "no strut".
+        if TopOptKit.latticeStrutDiameterMM(topology: id, relativeDensity: 1,
+                                            cellMM: cellMM) > 0 {
+            var lo = 0.0, hi = 1.0
+            for _ in 0..<24 {          // 1 / 2^24 ≈ 6e-8 in ρ — far below any display
+                let mid = 0.5 * (lo + hi)
+                let d = TopOptKit.latticeStrutDiameterMM(topology: id,
+                                                         relativeDensity: mid,
+                                                         cellMM: cellMM)
+                if d < want { lo = mid } else { hi = mid }
+            }
+            return min(1, 0.5 * (lo + hi))
+        }
         let rl = radius / cellMM
         return densityCoefficient * rl * rl
     }
