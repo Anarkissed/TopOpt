@@ -4115,12 +4115,14 @@ static std::vector<double> stress_tensor_for_organic(
   }
   std::vector<double> out = real;
   const SyntheticStressReport rep =
-      synthesize_focal_stress(grid, candidate, voxel_region_id, cfg, 0.02, out);
+      synthesize_focal_stress(grid, candidate, voxel_region_id, cfg, 0.02, out,
+                              kOrganicSyntheticDeadFloorMPa);
   if (rep_out) *rep_out = rep;
   std::fprintf(stderr, "[synthetic] %zu region(s): %zu voxels, %zu fully synthetic, "
-                       "%zu blended; dead threshold %.4g (peak %.4g)\n",
+                       "%zu blended; dead threshold %.4g (peak %.4g, %s rule)\n",
                rep.regions, rep.voxels_in_regions, rep.voxels_fully_synthetic,
-               rep.voxels_blended, rep.dead_threshold, rep.peak_von_mises);
+               rep.voxels_blended, rep.dead_threshold, rep.peak_von_mises,
+               rep.dead_floor_bound ? "ABSOLUTE 0.005 MPa" : "2% of peak");
   return out;
 }
 
@@ -9214,6 +9216,7 @@ LatticeVariantJobResult lattice_variant_job(const JobDescription& job,
         gi.organic_synthetic_fully = static_cast<long long>(R.organic_synthetic.voxels_fully_synthetic);
         gi.organic_synthetic_blended = static_cast<long long>(R.organic_synthetic.voxels_blended);
         gi.organic_synthetic_dead_threshold = R.organic_synthetic.dead_threshold;
+        gi.organic_synthetic_dead_floor_bound = R.organic_synthetic.dead_floor_bound;
         gi.organic_solid_rim_mm = R.organic_solid_rim_mm;
         gi.organic_solid_rim_voxels = R.organic_solid_rim_voxels;
         gi.organic_overhang_fillet_on = job.grading.organic_overhang_fillet;

@@ -1447,6 +1447,7 @@ std::string run_info_json(const RunInfo& info) {
         gr += ", \"synthetic_stress_fully\": " + std::to_string(info.organic_synthetic_fully);
         gr += ", \"synthetic_stress_blended\": " + std::to_string(info.organic_synthetic_blended);
         gr += ", \"synthetic_stress_dead_threshold\": " + fmt(info.organic_synthetic_dead_threshold);
+        gr += ", \"synthetic_stress_dead_floor_bound\": " + std::string(info.organic_synthetic_dead_floor_bound ? "true" : "false");
         gr += ", \"synthetic_stress_by_region\": [";
         for (std::size_t q = 0; q < info.organic_synthetic_by_region.size(); ++q) {
           const OrganicSyntheticRegionInfo& ri = info.organic_synthetic_by_region[q];

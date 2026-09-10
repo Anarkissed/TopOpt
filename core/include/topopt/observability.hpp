@@ -1014,6 +1014,8 @@ struct RunInfo {
   long long organic_synthetic_fully = 0;
   long long organic_synthetic_blended = 0;
   double organic_synthetic_dead_threshold = 0.0;
+  // ★ which rule set that threshold: the absolute floor, or 2 % of the part's peak.
+  bool organic_synthetic_dead_floor_bound = false;
   std::vector<OrganicSyntheticRegionInfo> organic_synthetic_by_region;   // keyed by face_id
   // ★ the overhang fillet (grading.organic_overhang_fillet) and the transfer ties
   // (grading.organic_transfer_ties), so the receipt says what each did or declined
