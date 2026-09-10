@@ -1296,10 +1296,13 @@ void test_cert_in_plane_struts_keep_full_allowable() {
               a.margin, b.margin, a.knockdown_used, b.knockdown_used);
   CHECK(b.knockdown_used == 1.0 && b.governing_cos2 == 0.0,
         "C11: a strut in the layer plane gets knockdown 1.0 whatever z_knockdown is");
-  CHECK(std::fabs(b.margin - a.margin) <= 1e-9 * a.margin &&
+  // ★ 1e-6 RELATIVE, not 1e-9: the two solves are identical systems, but the direct
+  // solver's threaded reductions reorder under load. At 1e-9 this check failed once
+  // on a machine running three other solves and passed in five quiet reruns.
+  CHECK(std::fabs(b.margin - a.margin) <= 1e-6 * a.margin &&
             b.allowable_used_mpa == a.allowable_used_mpa,
         "C11: ...so the verdict is identical to the undegraded one (to the solver's "
-        "last-digit thread ordering)");
+        "thread ordering, 1e-6 relative)");
 }
 
 // ── C12: THE MAX IS REPORTED UNDER BOTH LOAD MODELS ─────────────────────────────

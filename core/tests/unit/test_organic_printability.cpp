@@ -181,7 +181,7 @@ void test_synthetic_focal_stress() {
   { SyntheticStressRegion c; c.region_id = 1; c.face_id = 7; c.foci = 4; cfg.push_back(c); }
   const std::vector<double> before = stress;
   const SyntheticStressReport rep =
-      synthesize_focal_stress(grid, cand, rid, cfg, 0.02, stress);
+      synthesize_focal_stress(grid, cand, rid, cfg, 0.02, stress, kOrganicSyntheticDeadFloorMPa);
   CHECK(rep.regions == 1, "S1: one configured region found");
   CHECK(rep.per_region.size() == 1 && rep.per_region[0].face_id == 7 &&
             rep.per_region[0].foci == 4 && rep.per_region[0].voxels == n / 2 &&
@@ -221,14 +221,14 @@ void test_synthetic_focal_stress() {
   std::vector<SyntheticStressRegion> cfg1;
   { SyntheticStressRegion c; c.region_id = 1; c.foci = 1; cfg1.push_back(c); }
   std::vector<double> s1(6 * n, 0.0);
-  const SyntheticStressReport r1 = synthesize_focal_stress(grid, cand, rid, cfg1, 0.02, s1);
+  const SyntheticStressReport r1 = synthesize_focal_stress(grid, cand, rid, cfg1, 0.02, s1, kOrganicSyntheticDeadFloorMPa);
   CHECK(r1.regions == 1 && r1.voxels_fully_synthetic == n / 2,
         "S1: a single focus is accepted and fills the dead region");
   // nothing dead anywhere: no voxel changes
   std::vector<double> live(6 * n, 0.0);
   for (std::size_t e = 0; e < n; ++e) live[6 * e + 2] = 1.0;
   const std::vector<double> live_before = live;
-  const SyntheticStressReport r2 = synthesize_focal_stress(grid, cand, rid, cfg, 0.02, live);
+  const SyntheticStressReport r2 = synthesize_focal_stress(grid, cand, rid, cfg, 0.02, live, kOrganicSyntheticDeadFloorMPa);
   CHECK(r2.voxels_fully_synthetic == 0 && r2.voxels_blended == 0 && live == live_before,
         "S1: a region that carries load is not touched at all");
 }
@@ -1195,6 +1195,120 @@ void test_recommend_select_aesthetic() {
   CHECK(r2.rejected.size() == 2, "R3: the unrooted look and pair are rejected with a reason");
 }
 
+// ── S2: THE ABSOLUTE DEAD FLOOR (maintainer, 2026-09-08) ──────────────────────────
+// "2 % of peak OR below 0.005 MPa, whichever comes first." As a wall's stress falls it
+// meets the LARGER of the two thresholds first, so that is the one that binds. On a
+// heavily loaded part the 2 % rule still governs; on a lightly loaded one, where 2 % of
+// the peak is a number no material cares about, the absolute floor takes over.
+void test_synthetic_dead_floor() {
+  using namespace topopt;
+  VoxelGrid grid;
+  grid.nx = 20; grid.ny = 4; grid.nz = 12; grid.spacing = 1.0;
+  grid.origin = Vec3{0, 0, 0};
+  grid.tags.assign(static_cast<std::size_t>(20 * 4 * 12), VoxelTag::Interior);
+  const std::size_t n = grid.voxel_count();
+  std::vector<char> cand(n, 1);
+  std::vector<int> rid(n, 0);
+  std::vector<SyntheticStressRegion> cfg;
+  { SyntheticStressRegion c; c.region_id = 1; c.face_id = 7; c.foci = 3; cfg.push_back(c); }
+  auto build = [&](double live_mpa) {
+    std::vector<double> st(6 * n, 0.0);
+    for (std::size_t e = 0; e < n; ++e) {
+      const int i = static_cast<int>(e % 20);
+      rid[e] = i < 10 ? 1 : 2;
+      if (i >= 10) st[6 * e + 2] = live_mpa; }
+    return st; };
+  // heavily loaded: peak 1 MPa, so 2 % = 0.02 MPa, far above the 0.005 floor
+  {
+    std::vector<double> st = build(1.0);
+    const SyntheticStressReport r = synthesize_focal_stress(grid, cand, rid, cfg, 0.02, st, kOrganicSyntheticDeadFloorMPa);
+    std::printf("  S2 peak %.4g -> threshold %.5g (%s)\n", r.peak_von_mises, r.dead_threshold,
+                r.dead_floor_bound ? "floor" : "2% of peak");
+    CHECK(std::fabs(r.dead_threshold - 0.02) < 1e-12 && !r.dead_floor_bound,
+          "S2: at a 1 MPa peak the 2 % rule binds (0.02 MPa) and the floor is irrelevant");
+  }
+  // lightly loaded: peak 0.1 MPa, so 2 % = 0.002 MPa -- BELOW the floor, which takes over
+  {
+    std::vector<double> st = build(0.1);
+    const SyntheticStressReport r = synthesize_focal_stress(grid, cand, rid, cfg, 0.02, st, kOrganicSyntheticDeadFloorMPa);
+    std::printf("  S2 peak %.4g -> threshold %.5g (%s)\n", r.peak_von_mises, r.dead_threshold,
+                r.dead_floor_bound ? "floor" : "2% of peak");
+    CHECK(std::fabs(r.dead_threshold - kOrganicSyntheticDeadFloorMPa) < 1e-12 && r.dead_floor_bound,
+          "S2: at a 0.1 MPa peak 2 % is 0.002 MPa, so the ABSOLUTE 0.005 MPa floor binds");
+    CHECK(r.voxels_fully_synthetic + r.voxels_blended > 0,
+          "S2: ...and the dead region is still filled, not skipped");
+  }
+  // ★ THE MAINTAINER'S OWN CASE (2026-09-08): "if the peak stress of the model is at
+  // 0.1 MPa, and a wall has 0.005 MPa it should STILL be a candidate for synthetic
+  // stresses." Peak 0.1 -> 2 % is 0.002, so the OLD rule called 0.005 alive. The floor
+  // makes the threshold 0.005, and the wall is a candidate.
+  {
+    for (double wall : {0.005, 0.004, 0.002, 0.006}) {
+      std::vector<double> st = build(0.1);
+      for (std::size_t e = 0; e < n; ++e)
+        if (static_cast<int>(e % 20) < 10) st[6 * e + 2] = wall;
+      const std::vector<double> before2 = st;
+      const SyntheticStressReport r = synthesize_focal_stress(grid, cand, rid, cfg, 0.02, st, kOrganicSyntheticDeadFloorMPa);
+      std::size_t touched = 0;
+      for (std::size_t e = 0; e < n; ++e) {
+        if (static_cast<int>(e % 20) >= 10) continue;
+        for (int c2 = 0; c2 < 6; ++c2)
+          if (std::fabs(st[6*e+c2] - before2[6*e+c2]) > 1e-15) { ++touched; break; } }
+      std::printf("  S2 peak 0.1, wall %.4g MPa -> threshold %.4g, %zu of %zu voxels given "
+                  "synthetic stress (%zu fully)\n", wall, r.dead_threshold, touched,
+                  n / 2, r.voxels_fully_synthetic);
+      if (wall <= 0.005) {
+        CHECK(touched > 0, "S2: a wall at or below 0.005 MPa IS a candidate for synthetic stress");
+        CHECK(r.voxels_fully_synthetic == touched,
+              "S2: ...and at or below the floor it is dead outright -- the synthetic field in "
+              "FULL, not a token blend");
+      } else {
+        CHECK(touched == 0, "S2: a wall above the threshold is left alone");
+      }
+    }
+  }
+  // a wall between the two rules is dead under the floor and would NOT be under 2 % alone
+  {
+    std::vector<double> st = build(0.1);
+    for (std::size_t e = 0; e < n; ++e)
+      if (static_cast<int>(e % 20) < 10) st[6 * e + 2] = 0.003;   // above 2 % (0.002), below the floor
+    const SyntheticStressReport r = synthesize_focal_stress(grid, cand, rid, cfg, 0.02, st, kOrganicSyntheticDeadFloorMPa);
+    CHECK(r.dead_floor_bound && r.voxels_fully_synthetic + r.voxels_blended > 0,
+          "S2: a wall at 0.003 MPa clears the 2 % rule but is inert, and the floor catches it");
+  }
+  // ★ S3 — THE FOCI MUST BE VISIBLE. The old code rescaled EVERY synthetic voxel so its
+  // von Mises equalled the target exactly, which divided the 1/(L^2 + soft^2) falloff
+  // straight back out: only the tensor's DIRECTION varied, so a von Mises map of a
+  // synthesised wall was flat by construction and no renderer could show a peak at a
+  // focus. Normalising once per region keeps the shape. A flat field is the regression
+  // this guards, so assert the SPREAD, not just that something was written.
+  {
+    std::vector<double> st = build(0.1);
+    for (std::size_t e = 0; e < n; ++e) st[6 * e + 2] = 0.0;   // wholly dead wall
+    const SyntheticStressReport r =
+        synthesize_focal_stress(grid, cand, rid, cfg, 0.02, st, kOrganicSyntheticDeadFloorMPa);
+    CHECK(r.per_region_normalisation, "S3: the report names the per-region normalisation");
+    auto vm6 = [](const double* t) {
+      return std::sqrt(0.5 * ((t[0] - t[1]) * (t[0] - t[1]) + (t[1] - t[2]) * (t[1] - t[2]) +
+                              (t[2] - t[0]) * (t[2] - t[0])) +
+                       3.0 * (t[3] * t[3] + t[4] * t[4] + t[5] * t[5])); };
+    std::vector<double> vm;
+    for (std::size_t e = 0; e < n; ++e)
+      if (cand[e] && rid[e] == cfg[0].region_id) vm.push_back(vm6(&st[6 * e]));
+    CHECK(vm.size() > 50, "S3: the wall has voxels to measure");
+    std::sort(vm.begin(), vm.end());
+    const double vmed = vm[vm.size() / 2], vmax = vm.back();
+    std::printf("  S3 synthetic von Mises: median %.6g, max %.6g, ratio %.2f\n",
+                vmed, vmax, vmed > 0.0 ? vmax / vmed : 0.0);
+    CHECK(vmax > 0.0, "S3: the synthetic field is non-zero");
+    CHECK(vmed > 0.0 && vmax / vmed > 1.5,
+          "S3: the field VARIES across the wall -- it peaks near the foci instead of "
+          "being flattened to the threshold everywhere");
+    CHECK(r.per_region.size() == 1 && r.per_region[0].region_scale > 0.0,
+          "S3: the region's single scale factor is reported");
+  }
+}
+
 int main() {
   test_growth_produces_curves();
   test_growth_does_not_fall_back();
@@ -1221,6 +1335,7 @@ int main() {
   test_one_cell_needs_a_finish();
   test_every_census_stage_is_recorded();
   test_census_counts_components_not_only_length();
+  test_synthetic_dead_floor();
   std::printf("%s: %d checks, %d failures\n",
               g_failures == 0 ? "PASS" : "FAIL", g_checks, g_failures);
   return g_failures == 0 ? 0 : 1;

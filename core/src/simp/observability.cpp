@@ -1447,6 +1447,7 @@ std::string run_info_json(const RunInfo& info) {
         gr += ", \"synthetic_stress_fully\": " + std::to_string(info.organic_synthetic_fully);
         gr += ", \"synthetic_stress_blended\": " + std::to_string(info.organic_synthetic_blended);
         gr += ", \"synthetic_stress_dead_threshold\": " + fmt(info.organic_synthetic_dead_threshold);
+        gr += ", \"synthetic_stress_dead_floor_bound\": " + std::string(info.organic_synthetic_dead_floor_bound ? "true" : "false");
         gr += ", \"synthetic_stress_by_region\": [";
         for (std::size_t q = 0; q < info.organic_synthetic_by_region.size(); ++q) {
           const OrganicSyntheticRegionInfo& ri = info.organic_synthetic_by_region[q];
@@ -1495,6 +1496,8 @@ std::string run_info_json(const RunInfo& info) {
                 fmt(info.organic_structural_max_distributed_mpa);
           gr += std::string(", \"structural_max_exceeds_allowable\": ") +
                 (info.organic_structural_max_exceeds_allowable ? "true" : "false");
+          gr += ", \"support_raster_cells\": " + std::to_string(info.organic_support_raster_cells);
+          gr += ", \"support_raster_cap\": " + std::to_string(info.organic_support_raster_cap);
           if (info.organic_recommend_ran) {
             gr += ", \"recommend\": {\"mode\": \"" + info.organic_recommend_mode + "\"";
             gr += ", \"band_lo_mm\": " + fmt(info.organic_recommend_band_lo_mm);
@@ -1509,6 +1512,10 @@ std::string run_info_json(const RunInfo& info) {
           gr += ", \"structural_load_cases\": " +
                 std::to_string(info.organic_structural_load_cases);
           gr += ", \"structural_seconds\": " + fmt(info.organic_structural_seconds);
+          gr += ", \"structural_members\": " + std::to_string(info.organic_structural_members);
+          gr += ", \"structural_rss_before_mb\": " + fmt(info.organic_structural_rss_before_mb);
+          gr += ", \"structural_rss_after_mb\": " + fmt(info.organic_structural_rss_after_mb);
+          gr += ", \"structural_peak_rss_mb\": " + fmt(info.organic_structural_peak_rss_mb);
           gr += ", \"structural_members_carrying\": " +
                 std::to_string(info.organic_structural_members_carrying);
           gr += ", \"structural_zero_stress_fraction\": " +

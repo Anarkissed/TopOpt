@@ -221,7 +221,7 @@ SyntheticStressReport synthesize_focal_stress(
     const VoxelGrid& grid, const std::vector<char>& candidate,
     const std::vector<int>& voxel_region_id,
     const std::vector<SyntheticStressRegion>& regions, double dead_fraction,
-    std::vector<double>& stress) {
+    std::vector<double>& stress, double dead_floor) {
   SyntheticStressReport rep;
   const std::size_t n = grid.voxel_count();
   if (candidate.size() != n || voxel_region_id.size() != n || stress.size() != 6 * n)
@@ -232,8 +232,12 @@ SyntheticStressReport synthesize_focal_stress(
   for (std::size_t e = 0; e < n; ++e)
     if (candidate[e]) peak = std::max(peak, organic_von_mises6(&stress[6 * e]));
   rep.peak_von_mises = peak;
-  const double thr = std::max(dead_fraction, 0.0) * peak;
+  // "2 % of peak OR below the floor, whichever comes first": as a wall's stress falls it
+  // meets the LARGER of the two first, so that is the threshold.
+  const double thr_rel = std::max(dead_fraction, 0.0) * peak;
+  const double thr = std::max(thr_rel, std::max(dead_floor, 0.0));
   rep.dead_threshold = thr;
+  rep.dead_floor_bound = thr > thr_rel;
   auto centre = [&](std::size_t e) {
     const int i = static_cast<int>(e % static_cast<std::size_t>(grid.nx));
     const int j = static_cast<int>((e / static_cast<std::size_t>(grid.nx)) %
@@ -286,6 +290,19 @@ SyntheticStressReport synthesize_focal_stress(
     }
     // a single focus is a pure radial field -- push everywhere; with one focus the
     // weight sign is irrelevant (r (x) r is sign-invariant)
+    // ★★ NORMALISE THE REGION ONCE, NOT EACH VOXEL ★★
+    // The focal tensor below carries a real 1/(L^2 + soft^2) falloff, and the old code
+    // then rescaled EVERY synthetic voxel so its von Mises equalled the target exactly.
+    // That divided the spatial variation straight back out: what still varied across a
+    // synthesised wall was the tensor's DIRECTION, never its magnitude, so a von Mises
+    // map came out flat by construction and the foci the user placed could not be seen
+    // at any point downstream. Two passes instead -- build the field, find the region's
+    // own maximum, then apply ONE factor so that maximum lands on the target. The shape
+    // survives, downstream laws still see a low stress, and the field peaks where the
+    // foci are.
+    struct SynthVox { std::size_t e; double w; double T[6]; };
+    std::vector<SynthVox> synth;
+    double region_tvm_max = 0.0;
     for (std::size_t e = 0; e < n; ++e) {
       if (!candidate[e] || voxel_region_id[e] != cfg.region_id) continue;
       double* m = &stress[6 * e];
@@ -299,6 +316,14 @@ SyntheticStressReport synthesize_focal_stress(
       } else {
         w = vm > 0.0 ? 1.0 : 0.0;
       }
+      // ★ THE ABSOLUTE FLOOR IS A HARD CLASSIFICATION, not another ramp (maintainer,
+      // 2026-09-08): "at 0.005 MPa and lower, it is not [a stressed wall]". So at or
+      // below it the wall is dead outright and takes the synthetic field in full --
+      // being inside a blend band and receiving almost nothing would still be treating
+      // it as stressed. Above the floor the 2 %-of-peak ramp governs exactly as before,
+      // and where the relative rule binds the two coincide (its band already starts at
+      // 0.25 x thr, which is the floor when thr = 4 x floor).
+      if (dead_floor > 0.0 && vm <= dead_floor) w = 0.0;
       if (w >= 1.0) continue;   // live: untouched
       const Vec3 q = centre(e);
       double T[6] = {0, 0, 0, 0, 0, 0};
@@ -313,12 +338,20 @@ SyntheticStressReport synthesize_focal_stress(
       }
       const double tvm = organic_von_mises6(T);
       if (!(tvm > 0.0)) continue;
-      // scale the synthetic tensor to the dead threshold (or, with no peak at all, to
-      // unit magnitude) so downstream laws see LOW stress rather than none
-      const double target = thr > 0.0 ? thr : 1.0;
-      const double sc = target / tvm;
-      for (int cc = 0; cc < 6; ++cc) m[cc] = w * m[cc] + (1.0 - w) * sc * T[cc];
-      if (w < 0.05) { ++rep.voxels_fully_synthetic; ++rr.fully_synthetic; }
+      region_tvm_max = std::max(region_tvm_max, tvm);
+      SynthVox sv; sv.e = e; sv.w = w;
+      for (int cc = 0; cc < 6; ++cc) sv.T[cc] = T[cc];
+      synth.push_back(sv);
+    }
+    // ONE factor for the whole region: its peak becomes the target, its shape is kept.
+    const double target = thr > 0.0 ? thr : 1.0;
+    const double sc = region_tvm_max > 0.0 ? target / region_tvm_max : 0.0;
+    rr.region_scale = sc;
+    for (const SynthVox& sv : synth) {
+      double* m = &stress[6 * sv.e];
+      for (int cc = 0; cc < 6; ++cc)
+        m[cc] = sv.w * m[cc] + (1.0 - sv.w) * sc * sv.T[cc];
+      if (sv.w < 0.05) { ++rep.voxels_fully_synthetic; ++rr.fully_synthetic; }
       else { ++rep.voxels_blended; ++rr.blended; }
     }
     rep.per_region.push_back(rr);
