@@ -25,6 +25,8 @@
 #include "topopt/lattice.hpp"
 #include "topopt/observability.hpp"
 #include "topopt/organic_lattice.hpp"
+#include "topopt/lattice_union_volume.hpp"
+#include "topopt/lattice_dc.hpp"
 
 #include <cmath>
 #include <functional>
@@ -181,7 +183,7 @@ void test_synthetic_focal_stress() {
   { SyntheticStressRegion c; c.region_id = 1; c.face_id = 7; c.foci = 4; cfg.push_back(c); }
   const std::vector<double> before = stress;
   const SyntheticStressReport rep =
-      synthesize_focal_stress(grid, cand, rid, cfg, 0.02, stress);
+      synthesize_focal_stress(grid, cand, rid, cfg, 0.02, stress, kOrganicSyntheticDeadFloorMPa);
   CHECK(rep.regions == 1, "S1: one configured region found");
   CHECK(rep.per_region.size() == 1 && rep.per_region[0].face_id == 7 &&
             rep.per_region[0].foci == 4 && rep.per_region[0].voxels == n / 2 &&
@@ -221,14 +223,14 @@ void test_synthetic_focal_stress() {
   std::vector<SyntheticStressRegion> cfg1;
   { SyntheticStressRegion c; c.region_id = 1; c.foci = 1; cfg1.push_back(c); }
   std::vector<double> s1(6 * n, 0.0);
-  const SyntheticStressReport r1 = synthesize_focal_stress(grid, cand, rid, cfg1, 0.02, s1);
+  const SyntheticStressReport r1 = synthesize_focal_stress(grid, cand, rid, cfg1, 0.02, s1, kOrganicSyntheticDeadFloorMPa);
   CHECK(r1.regions == 1 && r1.voxels_fully_synthetic == n / 2,
         "S1: a single focus is accepted and fills the dead region");
   // nothing dead anywhere: no voxel changes
   std::vector<double> live(6 * n, 0.0);
   for (std::size_t e = 0; e < n; ++e) live[6 * e + 2] = 1.0;
   const std::vector<double> live_before = live;
-  const SyntheticStressReport r2 = synthesize_focal_stress(grid, cand, rid, cfg, 0.02, live);
+  const SyntheticStressReport r2 = synthesize_focal_stress(grid, cand, rid, cfg, 0.02, live, kOrganicSyntheticDeadFloorMPa);
   CHECK(r2.voxels_fully_synthetic == 0 && r2.voxels_blended == 0 && live == live_before,
         "S1: a region that carries load is not touched at all");
 }
@@ -1195,6 +1197,284 @@ void test_recommend_select_aesthetic() {
   CHECK(r2.rejected.size() == 2, "R3: the unrooted look and pair are rejected with a reason");
 }
 
+
+// ── S2: THE ABSOLUTE DEAD FLOOR (maintainer, 2026-09-08) ──────────────────────────
+// "2 % of peak OR below 0.005 MPa, whichever comes first." As a wall's stress falls it
+// meets the LARGER of the two thresholds first, so that is the one that binds. On a
+// heavily loaded part the 2 % rule still governs; on a lightly loaded one, where 2 % of
+// the peak is a number no material cares about, the absolute floor takes over.
+void test_synthetic_dead_floor() {
+  using namespace topopt;
+  VoxelGrid grid;
+  grid.nx = 20; grid.ny = 4; grid.nz = 12; grid.spacing = 1.0;
+  grid.origin = Vec3{0, 0, 0};
+  grid.tags.assign(static_cast<std::size_t>(20 * 4 * 12), VoxelTag::Interior);
+  const std::size_t n = grid.voxel_count();
+  std::vector<char> cand(n, 1);
+  std::vector<int> rid(n, 0);
+  std::vector<SyntheticStressRegion> cfg;
+  { SyntheticStressRegion c; c.region_id = 1; c.face_id = 7; c.foci = 3; cfg.push_back(c); }
+  auto build = [&](double live_mpa) {
+    std::vector<double> st(6 * n, 0.0);
+    for (std::size_t e = 0; e < n; ++e) {
+      const int i = static_cast<int>(e % 20);
+      rid[e] = i < 10 ? 1 : 2;
+      if (i >= 10) st[6 * e + 2] = live_mpa; }
+    return st; };
+  // heavily loaded: peak 1 MPa, so 2 % = 0.02 MPa, far above the 0.005 floor
+  {
+    std::vector<double> st = build(1.0);
+    const SyntheticStressReport r = synthesize_focal_stress(grid, cand, rid, cfg, 0.02, st, kOrganicSyntheticDeadFloorMPa);
+    std::printf("  S2 peak %.4g -> threshold %.5g (%s)\n", r.peak_von_mises, r.dead_threshold,
+                r.dead_floor_bound ? "floor" : "2% of peak");
+    CHECK(std::fabs(r.dead_threshold - 0.02) < 1e-12 && !r.dead_floor_bound,
+          "S2: at a 1 MPa peak the 2 % rule binds (0.02 MPa) and the floor is irrelevant");
+  }
+  // lightly loaded: peak 0.1 MPa, so 2 % = 0.002 MPa -- BELOW the floor, which takes over
+  {
+    std::vector<double> st = build(0.1);
+    const SyntheticStressReport r = synthesize_focal_stress(grid, cand, rid, cfg, 0.02, st, kOrganicSyntheticDeadFloorMPa);
+    std::printf("  S2 peak %.4g -> threshold %.5g (%s)\n", r.peak_von_mises, r.dead_threshold,
+                r.dead_floor_bound ? "floor" : "2% of peak");
+    CHECK(std::fabs(r.dead_threshold - kOrganicSyntheticDeadFloorMPa) < 1e-12 && r.dead_floor_bound,
+          "S2: at a 0.1 MPa peak 2 % is 0.002 MPa, so the ABSOLUTE 0.005 MPa floor binds");
+    CHECK(r.voxels_fully_synthetic + r.voxels_blended > 0,
+          "S2: ...and the dead region is still filled, not skipped");
+  }
+  // ★ THE MAINTAINER'S OWN CASE (2026-09-08): "if the peak stress of the model is at
+  // 0.1 MPa, and a wall has 0.005 MPa it should STILL be a candidate for synthetic
+  // stresses." Peak 0.1 -> 2 % is 0.002, so the OLD rule called 0.005 alive. The floor
+  // makes the threshold 0.005, and the wall is a candidate.
+  {
+    for (double wall : {0.005, 0.004, 0.002, 0.006}) {
+      std::vector<double> st = build(0.1);
+      for (std::size_t e = 0; e < n; ++e)
+        if (static_cast<int>(e % 20) < 10) st[6 * e + 2] = wall;
+      const std::vector<double> before2 = st;
+      const SyntheticStressReport r = synthesize_focal_stress(grid, cand, rid, cfg, 0.02, st, kOrganicSyntheticDeadFloorMPa);
+      std::size_t touched = 0;
+      for (std::size_t e = 0; e < n; ++e) {
+        if (static_cast<int>(e % 20) >= 10) continue;
+        for (int c2 = 0; c2 < 6; ++c2)
+          if (std::fabs(st[6*e+c2] - before2[6*e+c2]) > 1e-15) { ++touched; break; } }
+      std::printf("  S2 peak 0.1, wall %.4g MPa -> threshold %.4g, %zu of %zu voxels given "
+                  "synthetic stress (%zu fully)\n", wall, r.dead_threshold, touched,
+                  n / 2, r.voxels_fully_synthetic);
+      if (wall <= 0.005) {
+        CHECK(touched > 0, "S2: a wall at or below 0.005 MPa IS a candidate for synthetic stress");
+        CHECK(r.voxels_fully_synthetic == touched,
+              "S2: ...and at or below the floor it is dead outright -- the synthetic field in "
+              "FULL, not a token blend");
+      } else {
+        CHECK(touched == 0, "S2: a wall above the threshold is left alone");
+      }
+    }
+  }
+  // a wall between the two rules is dead under the floor and would NOT be under 2 % alone
+  {
+    std::vector<double> st = build(0.1);
+    for (std::size_t e = 0; e < n; ++e)
+      if (static_cast<int>(e % 20) < 10) st[6 * e + 2] = 0.003;   // above 2 % (0.002), below the floor
+    const SyntheticStressReport r = synthesize_focal_stress(grid, cand, rid, cfg, 0.02, st, kOrganicSyntheticDeadFloorMPa);
+    CHECK(r.dead_floor_bound && r.voxels_fully_synthetic + r.voxels_blended > 0,
+          "S2: a wall at 0.003 MPa clears the 2 % rule but is inert, and the floor catches it");
+  }
+  // ★ S3 — THE FOCI MUST BE VISIBLE. The old code rescaled EVERY synthetic voxel so its
+  // von Mises equalled the target exactly, which divided the 1/(L^2 + soft^2) falloff
+  // straight back out: only the tensor's DIRECTION varied, so a von Mises map of a
+  // synthesised wall was flat by construction and no renderer could show a peak at a
+  // focus. Normalising once per region keeps the shape. A flat field is the regression
+  // this guards, so assert the SPREAD, not just that something was written.
+  {
+    std::vector<double> st = build(0.1);
+    for (std::size_t e = 0; e < n; ++e) st[6 * e + 2] = 0.0;   // wholly dead wall
+    const SyntheticStressReport r =
+        synthesize_focal_stress(grid, cand, rid, cfg, 0.02, st, kOrganicSyntheticDeadFloorMPa);
+    CHECK(r.per_region_normalisation, "S3: the report names the per-region normalisation");
+    auto vm6 = [](const double* t) {
+      return std::sqrt(0.5 * ((t[0] - t[1]) * (t[0] - t[1]) + (t[1] - t[2]) * (t[1] - t[2]) +
+                              (t[2] - t[0]) * (t[2] - t[0])) +
+                       3.0 * (t[3] * t[3] + t[4] * t[4] + t[5] * t[5])); };
+    std::vector<double> vm;
+    for (std::size_t e = 0; e < n; ++e)
+      if (cand[e] && rid[e] == cfg[0].region_id) vm.push_back(vm6(&st[6 * e]));
+    CHECK(vm.size() > 50, "S3: the wall has voxels to measure");
+    std::sort(vm.begin(), vm.end());
+    const double vmed = vm[vm.size() / 2], vmax = vm.back();
+    std::printf("  S3 synthetic von Mises: median %.6g, max %.6g, ratio %.2f\n",
+                vmed, vmax, vmed > 0.0 ? vmax / vmed : 0.0);
+    CHECK(vmax > 0.0, "S3: the synthetic field is non-zero");
+    CHECK(vmed > 0.0 && vmax / vmed > 1.5,
+          "S3: the field VARIES across the wall -- it peaks near the foci instead of "
+          "being flattened to the threshold everywhere");
+    CHECK(r.per_region.size() == 1 && r.per_region[0].region_scale > 0.0,
+          "S3: the region's single scale factor is reported");
+  }
+}
+
+
+// ★★ THE UNION VOLUME, AGAINST CASES WITH EXACT ANSWERS ★★
+// The lattice's true volume is the measure of the UNION of its capsules, and every route
+// through a mesh was compromised: the naive sum counts each joint overlap twice, the
+// marching-cubes weld drops struts thinner than its voxel, and the analytic mesh carries
+// non-manifold edges that make the divergence theorem over-count where it self-overlaps.
+// This estimator measures the SET instead, by assigning each point of the union to the
+// lowest-indexed capsule containing it and sampling inside each capsule. The controls
+// below are the ones with closed forms, including two where the answer must come out
+// EXACT (no variance) because every sample is owned or none is.
+void test_union_volume() {
+  using namespace topopt;
+  const double r = 1.0, L = 10.0;
+  const double ball = (4.0 / 3.0) * M_PI * r * r * r;
+  const double one = M_PI * r * r * L + ball;          // one capsule, closed form
+
+  {
+    LatticeUnionVolume v = lattice_union_volume({{{0,0,0},{L,0,0},r}}, 200000);
+    CHECK(std::fabs(v.volume_mm3 - one) < 1e-9,
+          "union volume: a single capsule is exact -- every sample is owned");
+    CHECK(v.std_error_mm3 == 0.0, "union volume: and carries no sampling error");
+  }
+  {   // the same capsule twice: the union is one capsule, and half the sum is overlap
+    LatticeUnionVolume v =
+        lattice_union_volume({{{0,0,0},{L,0,0},r},{{0,0,0},{L,0,0},r}}, 200000);
+    CHECK(std::fabs(v.volume_mm3 - one) < 1e-9,
+          "union volume: a capsule counted twice is still one capsule");
+    CHECK(std::fabs(v.overlap_fraction - 0.5) < 1e-9,
+          "union volume: and the naive sum is reported as 50 % overlap");
+  }
+  {   // two halves meeting end to end are exactly one capsule of the full length
+    LatticeUnionVolume v =
+        lattice_union_volume({{{0,0,0},{5,0,0},r},{{5,0,0},{L,0,0},r}}, 400000);
+    std::printf("  UV two collinear halves: %.4f +/- %.4f vs exact %.4f\n",
+                v.volume_mm3, v.std_error_mm3, one);
+    CHECK(std::fabs(v.volume_mm3 - one) < 5.0 * v.std_error_mm3 + 1e-9,
+          "union volume: two collinear halves make one capsule, within sampling error");
+  }
+  {   // far apart: no overlap, so the union IS the sum, exactly
+    LatticeUnionVolume v =
+        lattice_union_volume({{{0,0,0},{L,0,0},r},{{0,50,0},{L,50,0},r}}, 200000);
+    CHECK(std::fabs(v.volume_mm3 - 2.0 * one) < 1e-9,
+          "union volume: disjoint capsules sum exactly");
+    CHECK(v.overlap_fraction < 1e-12, "union volume: and report no overlap");
+  }
+  {
+    // ★ THE OVERLAP FRACTION IS NOT A CONSTANT, which is why the bead calibration cannot
+    // simply be corrected by a factor measured once. Fatten every strut and the joints
+    // swallow proportionally more: measured on the M2 lattice, 31.4 % at k = 0.6 rising
+    // to 51.8 % at k = 1.4. Here the same monotonicity is asserted on a small cross.
+    std::vector<OrganicSpan> cross = {{{-5,0,0},{5,0,0},1.0}, {{0,-5,0},{0,5,0},1.0}};
+    double prev = -1.0;
+    for (double k : {0.5, 1.0, 1.5}) {
+      std::vector<OrganicSpan> q = cross;
+      for (OrganicSpan& x : q) x.r *= k;
+      const LatticeUnionVolume v = lattice_union_volume(q, 200000);
+      CHECK(v.overlap_fraction > prev,
+            "union volume: the overlap fraction RISES with the bead scale");
+      prev = v.overlap_fraction;
+    }
+  }
+}
+
+
+// ★★ THE LATTICE AS AN ISOSURFACE OF ITS OWN SDF ★★
+// A union has no joints: d(p) = min_i (dist to segment_i - r_i) handles every junction,
+// at any valence and any mix of radii, with no stitching. What has to be proved is that
+// contouring it gives a CLOSED, MANIFOLD surface whose volume is the right one -- and
+// the right one is known independently, from lattice_union_volume, which never builds a
+// mesh and so cannot share a mesh's defects.
+void test_dual_contour() {
+  using namespace topopt;
+  auto check = [&](const char* name, const std::vector<OrganicSpan>& sp) {
+    const LatticeUnionVolume u = lattice_union_volume(sp, 1000000);
+    double prev_err = 1e9;
+    for (double h : {0.5, 0.25}) {
+      LatticeDcOptions o; o.cell_mm = h;
+      // the UNIFORM grid: this is the convergence reference, and the octree is measured
+      // against it rather than replacing it
+      o.adaptive = false;
+      LatticeDcStats st;
+      const TriangleMesh m = lattice_dual_contour(sp, o, st);
+      const double err = std::fabs(st.volume_mm3 - u.volume_mm3) / u.volume_mm3;
+      std::printf("  DC %-20s h=%.3f tris %6zu bnd %3zu nonmf %3zu split %4zu  "
+                  "V %8.3f vs %8.3f (%+.2f %%)\n",
+                  name, h, st.triangles, st.boundary_edges, st.nonmanifold_edges,
+                  st.cells_split, st.volume_mm3, u.volume_mm3, 100.0 * err);
+      CHECK(!m.triangles.empty(), "dual contour: it produced a surface");
+      CHECK(st.boundary_edges == 0, "dual contour: CLOSED -- no edge used only once");
+      // ★ the manifold criterion: a cell carrying two sheets is split rather than
+      // pinched through one vertex, which is what leaves an edge on three triangles.
+      CHECK(st.nonmanifold_edges == 0,
+            "dual contour: MANIFOLD -- no edge used more than twice");
+      CHECK(err < 0.08, "dual contour: the volume matches the mesh-free union volume");
+      CHECK(err < prev_err, "dual contour: and converges as the cell shrinks");
+      prev_err = err;
+    }
+  };
+  check("one capsule", {{{0,0,0},{10,0,0},1.0}});
+  check("perpendicular cross", {{{-5,0,0},{5,0,0},1.0},{{0,-5,0},{0,5,0},1.0}});
+  // five arms of four different radii: the case that needed the cell splitting
+  check("5-way, mixed radii", {{{0,0,0},{5,0,0},1.0},{{0,0,0},{-5,0,0},0.7},
+                               {{0,0,0},{0,5,0},1.0},{{0,0,0},{0,0,5},0.5},
+                               {{0,0,0},{3,3,3},0.8}});
+}
+
+// ── the octree: it must SHRINK the mesh without opening or tearing it ─────────
+// The merge is the size dial, so what is asserted here is the dial itself: raising the
+// tolerance must cost triangles and nothing else. Every run is also checked to have
+// actually merged something -- a tolerance so tight that the tree stays uniform would
+// pass every other assertion below while measuring nothing at all.
+void test_dual_contour_octree() {
+  using namespace topopt;
+  auto check = [&](const char* name, const std::vector<OrganicSpan>& sp) {
+    const LatticeUnionVolume u = lattice_union_volume(sp, 1000000);
+    const double h = 0.25;
+    LatticeDcOptions ref; ref.cell_mm = h; ref.adaptive = false;
+    LatticeDcStats rst;
+    lattice_dual_contour(sp, ref, rst);
+
+    std::size_t prev_tris = rst.triangles;
+    for (double tol : {0.01, 0.04, 0.10}) {
+      LatticeDcOptions o;
+      o.cell_mm = h; o.adaptive = true; o.simplify_tolerance_mm = tol;
+      LatticeDcStats st;
+      const TriangleMesh m = lattice_dual_contour(sp, o, st);
+      const double err = std::fabs(st.volume_mm3 - u.volume_mm3) / u.volume_mm3;
+      std::printf("  DC/oct %-20s tol=%.3f leaf %.3f-%.3f merged %5zu tris %6zu "
+                  "(uniform %6zu) bnd %3zu nonmf %3zu drop %3zu  V %8.3f (%+.2f %%)\n",
+                  name, tol, st.finest_leaf_mm, st.coarsest_leaf_mm, st.cells_merged,
+                  st.triangles, rst.triangles, st.boundary_edges, st.nonmanifold_edges,
+                  st.quads_dropped, st.volume_mm3, 100.0 * err);
+      CHECK(!m.triangles.empty(), "dc octree: it produced a surface");
+      CHECK(st.cells_merged > 0, "dc octree: the merge actually fired");
+      CHECK(st.coarsest_leaf_mm > st.cell_mm,
+            "dc octree: and left leaves coarser than the base cell");
+      CHECK(st.finest_leaf_mm >= st.cell_mm - 1e-12,
+            "dc octree: no leaf is FINER than the base cell -- the tree only goes up");
+      CHECK(st.boundary_edges == 0, "dc octree: CLOSED across every level change");
+      CHECK(st.nonmanifold_edges == 0, "dc octree: MANIFOLD across every level change");
+      CHECK(st.quads_dropped == 0,
+            "dc octree: no quad dropped -- every merged leaf answered for its neighbours");
+      CHECK(st.triangles <= rst.triangles,
+            "dc octree: never more triangles than the uniform grid it was built from");
+      CHECK(st.triangles <= prev_tris,
+            "dc octree: and a looser tolerance never costs MORE triangles");
+      // A merge at a cell the surface only clips can move a vertex without removing a
+      // quad, so a tight tolerance may cost nothing. The DIAL is what has to work: by the
+      // loosest setting the mesh must be substantially smaller, or this measures nothing.
+      if (tol > 0.09)
+        CHECK(st.triangles < rst.triangles * 4 / 5,
+              "dc octree: the loosest tolerance sheds at least a fifth of the triangles");
+      CHECK(err < 0.08, "dc octree: the volume still matches the mesh-free union volume");
+      prev_tris = st.triangles;
+    }
+  };
+  check("one capsule", {{{0,0,0},{10,0,0},1.0}});
+  check("perpendicular cross", {{{-5,0,0},{5,0,0},1.0},{{0,-5,0},{0,5,0},1.0}});
+  check("5-way, mixed radii", {{{0,0,0},{5,0,0},1.0},{{0,0,0},{-5,0,0},0.7},
+                               {{0,0,0},{0,5,0},1.0},{{0,0,0},{0,0,5},0.5},
+                               {{0,0,0},{3,3,3},0.8}});
+}
+
 int main() {
   test_growth_produces_curves();
   test_growth_does_not_fall_back();
@@ -1213,6 +1493,10 @@ int main() {
   test_recommend_select_structural();
   test_recommend_select_aesthetic();
   test_synthetic_focal_stress();
+  test_synthetic_dead_floor();
+  test_union_volume();
+  test_dual_contour();
+  test_dual_contour_octree();
   test_bundle_is_not_support();
   test_chain_and_tee_survive();
   test_node_merge_joins_near_misses();

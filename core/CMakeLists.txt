@@ -99,6 +99,9 @@ add_library(topopt
   src/mesh/surface_operator.cpp
   src/mesh/lattice_gen.cpp
   src/mesh/organic_lattice.cpp
+  src/mesh/lattice_lslt.cpp
+  src/mesh/lattice_union_volume.cpp
+  src/mesh/lattice_dc.cpp
   src/mesh/lattice_boundary.cpp
   src/mesh/lattice_void.cpp
   src/voxel/voxelize.cpp
@@ -2326,3 +2329,6 @@ if(OpenCASCADE_FOUND AND Eigen3_FOUND)
     add_test(NAME threemf_import COMMAND test_3mf_import)
   endif()
 endif()
+
+add_executable(lslt_probe EXCLUDE_FROM_ALL tests/tools/lslt_probe.cpp)
+target_link_libraries(lslt_probe PRIVATE topopt)

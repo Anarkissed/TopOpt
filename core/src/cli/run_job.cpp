@@ -656,7 +656,10 @@ struct LatticeExportOutcome {
   long long organic_base_mat_stitches = 0;
   long long organic_base_mat_clusters = 0;
   long long organic_fill_mat_cells_outside_region = 0;
-  long long organic_fillet_skipped_spans = 0;   // spans the fillet would have flared, declined by the job
+  // ★ spans that run over open air. The overhang fillet that used to flare them was
+  // removed (it deposited blobs up to nine times the strut); the count remains so the
+  // receipt still says how much of the lattice is unsupported.
+  long long organic_unsupported_spans = 0;
   bool organic_shape_fit_on = false;
   long long organic_shape_fit_candidates = 0;
   long long organic_shape_fit_voxels_shrunk = 0;
@@ -742,7 +745,6 @@ struct LatticeExportOutcome {
   long long organic_arched_spans = 0;
   double organic_arch_rise = 0.0;
   long long organic_filleted = 0;
-  long long organic_fillet_unresolved = 0;
   double organic_fillet_radius = 0.0;
   double organic_base_mat_len = 0.0;
   double organic_base_mat_z = 0.0;
@@ -1806,7 +1808,11 @@ LatticeExportOutcome export_latticed_variant(
     // ★ STEPPED (§4). Null on every other run. Non-null => one ORDINARY generator
     // pass per declared region at that region's OWN cell, no ladder and no stitching
     // (lattice_gen.hpp's generate_lattice_stepped states what that gives up).
-    const std::vector<LatticeSteppedPass>* stepped = nullptr) {
+    const std::vector<LatticeSteppedPass>* stepped = nullptr,
+    // ★ Drive free organic strut ends this far into the solid, then intersect the
+    // welded field with the part (organic_weld). 0 = neither. A grading key, so it
+    // arrives separately from JobLattice.
+    double organic_strut_embed_mm = 0.0) {
   // ── M4: A SKIN MODE THAT PRODUCES NO GEOMETRY MUST SAY SO, NOT RETURN ZERO.
   //
   // ★ THE PREDICATE IS THE MEASURED COUNT, NOT A PREDICTION — and the first version
@@ -2086,7 +2092,6 @@ LatticeExportOutcome export_latticed_variant(
     oc.organic_support_fragment_length_mm = g.support_fragment_length_mm;
     oc.organic_base_mat_stitches = static_cast<long long>(g.base_mat_stitches);
     oc.organic_base_mat_clusters = static_cast<long long>(g.base_mat_clusters);
-    oc.organic_fillet_skipped_spans = static_cast<long long>(g.fillet_skipped_spans);
     oc.organic_fill_mat_cells_outside_region =
         static_cast<long long>(g.fill_mat_cells_outside_region);
 
@@ -2151,9 +2156,6 @@ LatticeExportOutcome export_latticed_variant(
     oc.organic_cantilever_islands = static_cast<long long>(g.cantilever_islands);
     oc.organic_arched_spans = static_cast<long long>(g.arched_spans);
     oc.organic_arch_rise = g.arch_max_rise_mm;
-    oc.organic_filleted = static_cast<long long>(g.filleted_spans);
-    oc.organic_fillet_unresolved = static_cast<long long>(g.fillet_unresolved);
-    oc.organic_fillet_radius = g.fillet_max_radius_mm;
     oc.organic_base_mat_len = g.base_mat_length_mm;
     oc.organic_base_mat_z = g.base_mat_z_mm;
     oc.organic_fill_cells = static_cast<long long>(g.fill_mat_cells);
@@ -2394,9 +2396,24 @@ LatticeExportOutcome export_latticed_variant(
     // scatter below the base, but each clipped capsule still carries a hemispherical
     // cap a radius under the plane — 0.5 mm of it on the cube — and those caps ARE
     // the dots. Only the marched field can be cut flat.
+    // ★ THE PART, HANDED TO THE WELD so it can drive free ends into the solid and then
+    // cut back everything that leaves. The density field is the same one the solid's own
+    // surface is built from, which is why the trim lands on that surface rather than a
+    // voxel boundary; see OrganicWeldPart.
+    OrganicWeldPart wpart;
+    wpart.origin = sg.origin; wpart.h = sg.spacing;
+    wpart.nx = sg.nx; wpart.ny = sg.ny; wpart.nz = sg.nz;
+    wpart.density = &dens; wpart.iso = printed_iso;
+    wpart.embed_mm = organic_strut_embed_mm;
     TriangleMesh welded =
         organic_weld(organic_spans, lat.welded_pitch_mm, 40000000LL, ws,
-                     organic_base_trim_z > 0.0 ? organic_base_trim_z : -1e30);
+                     organic_base_trim_z > 0.0 ? organic_base_trim_z : -1e30, wpart);
+    if (std::getenv("TOPOPT_ORGANIC_TRACE"))
+      std::fprintf(stderr,
+                   "[weld] embed %.2f mm: %lld free ends driven into the solid; "
+                   "part clip %s, %lld raster voxels removed for leaving the part\n",
+                   ws.embed_mm, ws.ends_embedded, ws.part_clip_ran ? "RAN" : "did not run",
+                   ws.trimmed_voxels);
     // The SAME rigid motion the streamed soup is rotated by, from the same helper —
     // vertex order and winding preserved (det +1), so the two files describe one
     // placement of one object.
@@ -2406,6 +2423,20 @@ LatticeExportOutcome export_latticed_variant(
     oc.paths.push_back(path);
     oc.weld = ws;
     oc.welded = true;
+    // ★ THE SOLID COMPANION, BESIDE THE WELDED LATTICE (maintainer, 2026-09-08).
+    // The welded file is the lattice ALONE and the interpenetrating soup is the solid
+    // and the lattice fused into one unusable-for-inspection body, so neither file on
+    // its own shows a strut meeting material. This writes the SAME companion body the
+    // soup already contains, unmodified and separately, so the two can be opened
+    // together and the junction judged without anyone reconstructing anything. It is
+    // the same `comp_mesh` and the same rigid motion, so the pair is one placement of
+    // one object.
+    if (!comp_mesh.vertices.empty()) {
+      TriangleMesh solid_out = bake ? rotate_mesh(comp_mesh, *bake) : comp_mesh;
+      const std::string spath = base + "_SOLID.stl";
+      write_stl_file(spath, solid_out);
+      oc.paths.push_back(spath);
+    }
   }
 
   // The latticed region's SOLID voxel count (the region actually filled): every
@@ -4118,9 +4149,10 @@ static std::vector<double> stress_tensor_for_organic(
       synthesize_focal_stress(grid, candidate, voxel_region_id, cfg, 0.02, out);
   if (rep_out) *rep_out = rep;
   std::fprintf(stderr, "[synthetic] %zu region(s): %zu voxels, %zu fully synthetic, "
-                       "%zu blended; dead threshold %.4g (peak %.4g)\n",
+                       "%zu blended; dead threshold %.4g (peak %.4g, %s rule)\n",
                rep.regions, rep.voxels_in_regions, rep.voxels_fully_synthetic,
-               rep.voxels_blended, rep.dead_threshold, rep.peak_von_mises);
+               rep.voxels_blended, rep.dead_threshold, rep.peak_von_mises,
+               rep.dead_floor_bound ? "ABSOLUTE 0.005 MPa" : "2% of peak");
   return out;
 }
 
@@ -4768,8 +4800,10 @@ LatticeAlgorithm resolve_lattice_algorithm(const JobGrading& jg) {
 // seeds a 6-connected flood walks inward through lattice voxels up to `rim_mm`
 // (voxel steps x spacing); everything it reaches leaves the mask and prints solid.
 // Returns the voxels turned solid.
+// ★ `density` and `printed_iso` USED TO BE ARGUMENTS. They were only ever read by the
+// seed's "the neighbour must be solid" test, which is the bug fixed below; with the seed
+// keyed on the lattice mask alone the rim no longer consults the density field at all.
 static std::size_t apply_organic_solid_rim(const VoxelGrid& grid, std::vector<char>& mask,
-                                           const std::vector<double>& density, double printed_iso,
                                            const std::vector<int>& region_ids,
                                            const std::vector<Vec3>& region_normals, double rim_mm) {
   const std::size_t n = grid.voxel_count();
@@ -4787,12 +4821,22 @@ static std::size_t apply_organic_solid_rim(const VoxelGrid& grid, std::vector<ch
         const Vec3& nrm = region_normals[static_cast<std::size_t>(rid - 1)];
         const double nl = std::sqrt(nrm.x * nrm.x + nrm.y * nrm.y + nrm.z * nrm.z);
         for (int d = 0; d < 6; ++d) {
-          const int i2 = i + di[d], j2 = j + dj[d], k2 = k + dk[d];
-          if (i2 < 0 || j2 < 0 || k2 < 0 || i2 >= grid.nx || j2 >= grid.ny || k2 >= grid.nz) continue;
-          const std::size_t e2 = grid.index(i2, j2, k2);
-          if (mask[e2] || !(density[e2] > printed_iso)) continue;
           const double dot = nl > 0.0 ? (di[d] * nrm.x + dj[d] * nrm.y + dk[d] * nrm.z) / nl : 0.0;
-          if (std::fabs(dot) >= 0.5) continue;   // along the normal: floor or open face
+          if (std::fabs(dot) >= 0.5) continue;   // along the normal: the open faces
+          const int i2 = i + di[d], j2 = j + dj[d], k2 = k + dk[d];
+          const bool outside_grid =
+              i2 < 0 || j2 < 0 || k2 < 0 || i2 >= grid.nx || j2 >= grid.ny || k2 >= grid.nz;
+          // ★ THE OUTLINE ENDS WHEREVER THE LATTICE ENDS -- NOT ONLY AGAINST MATERIAL.
+          // (maintainer, 2026-09-08.) This used to require the neighbour to be SOLID
+          // (`density[e2] > printed_iso`), which works for a pocket cut into a wall and
+          // silently refuses every edge where the region runs out at the PART'S OWN
+          // SURFACE, because the neighbour there is air. On a face prism asked for with
+          // only its front and back open, that is precisely the top and bottom edges:
+          // they got no band at all, so the "outline" was three-sided at best. The seed
+          // now asks only whether the neighbour is outside the lattice, with the face
+          // normal as the single exemption so the open faces stay open. Air off the end
+          // of the grid counts too -- it is the same situation.
+          if (!outside_grid && mask[grid.index(i2, j2, k2)]) continue;   // still lattice
           dist[e] = 0; q.push_back(e); break;
         }
       }
@@ -5167,7 +5211,7 @@ LatticeVariantOutcome lattice_one_variant(
           const double rim = job.grading.organic_solid_rim_mm < 0.0 ? cc.lo : job.grading.organic_solid_rim_mm;
           std::vector<Vec3> nrms;
           for (const JobLatticeRegion& r : job.lattice.regions) if (r.role == "include") nrms.push_back(r.normal);
-          apply_organic_solid_rim(solved_grid, pmask, dens, printed_iso, region_ids, nrms, rim);
+          apply_organic_solid_rim(solved_grid, pmask, region_ids, nrms, rim);
         }
         OrganicOutcome po = run_organic_step(job.lattice.outer_finish != "skin", solved_grid, dens,
                                              probe_stress, pmask, agf.posture.relative_density,
@@ -5643,7 +5687,7 @@ LatticeVariantOutcome lattice_one_variant(
       if (r.role == "include") nrms.push_back(r.normal);
     R.organic_solid_rim_mm = rim;
     R.organic_solid_rim_voxels = static_cast<long long>(apply_organic_solid_rim(
-        solved_grid, mask, dens, printed_iso, region_ids_for_stepped, nrms, rim));
+        solved_grid, mask, region_ids_for_stepped, nrms, rim));
     if (std::getenv("TOPOPT_ORGANIC_TRACE"))
       std::fprintf(stderr, "[rim] SOLID_RIM %.3g mm: %lld lattice voxels turned solid at the outline\n",
                    rim, R.organic_solid_rim_voxels);
@@ -5682,12 +5726,15 @@ LatticeVariantOutcome lattice_one_variant(
     // a mat under a voxel tall is erased silently — which is how a deliberately
     // thinned mat vanished from the slice entirely while every stat still read green.
     organic.lat.weld_pitch_hint_mm = job.lattice.welded_pitch_mm;
-    organic.lat.overhang_fillet = job.grading.organic_overhang_fillet;
     // ★ THE LAYER HEIGHT THE MACHINE WILL ACTUALLY USE. The mid-air-start check
     // rasters Z at this pitch; without it the check is COARSER THAN THE PRINTER
     // and passes parts that float for two real layers. 0 = not stated, and the
     // check says so on the receipt rather than inferring one.
     organic.lat.layer_height_mm = job.loads.layer_height_mm;
+    // printability repairs: stated, or they do not run (see OrganicLattice)
+    organic.lat.base_mat = job.grading.organic_base_mat;
+    organic.lat.fill_mat = job.grading.organic_fill_mat;
+    organic.lat.trim_below_base = job.grading.organic_trim_below_base;
     if (!organic.ran || organic.lat.report.latticed_voxels == 0) {
       // Same posture as the law's own L4 refusal: no object was produced, nothing
       // was written, and the caller decides whether that kills the run or skips a
@@ -6277,7 +6324,8 @@ LatticeVariantOutcome lattice_one_variant(
       levels.empty() ? nullptr : &levels,
       levels.empty() ? 0.0 : gf.cell_plan.base_cell_mm, printed_iso,
       organic.ran ? &organic.lat : nullptr,
-      stepped_passes.empty() ? nullptr : &stepped_passes);
+      stepped_passes.empty() ? nullptr : &stepped_passes,
+      job.grading.organic_strut_embed_mm);
   // ★ THE EXPORT'S RETURN REPLACES THE WHOLE OUTCOME, and the growth stats copied
   // onto it above went with it -- the receipt read growth_ran: false and zero ties on
   // every grown run until 2026-09-05. Copy them again, after the replacement.
@@ -8211,12 +8259,14 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
     // a mat under a voxel tall is erased silently — which is how a deliberately
     // thinned mat vanished from the slice entirely while every stat still read green.
     an_org.lat.weld_pitch_hint_mm = job.lattice.welded_pitch_mm;
-    an_org.lat.overhang_fillet = job.grading.organic_overhang_fillet;
     // ★ THE LAYER HEIGHT THE MACHINE WILL ACTUALLY USE. The mid-air-start check
     // rasters Z at this pitch; without it the check is COARSER THAN THE PRINTER
     // and passes parts that float for two real layers. 0 = not stated, and the
     // check says so on the receipt rather than inferring one.
     an_org.lat.layer_height_mm = job.loads.layer_height_mm;
+    an_org.lat.base_mat = job.grading.organic_base_mat;
+    an_org.lat.fill_mat = job.grading.organic_fill_mat;
+    an_org.lat.trim_below_base = job.grading.organic_trim_below_base;
 
     RunInfo gi = build_run_info(job, options, RunObservability{});
     gi.grading_present = true;
@@ -9214,10 +9264,10 @@ LatticeVariantJobResult lattice_variant_job(const JobDescription& job,
         gi.organic_synthetic_fully = static_cast<long long>(R.organic_synthetic.voxels_fully_synthetic);
         gi.organic_synthetic_blended = static_cast<long long>(R.organic_synthetic.voxels_blended);
         gi.organic_synthetic_dead_threshold = R.organic_synthetic.dead_threshold;
+        gi.organic_synthetic_dead_floor_bound = R.organic_synthetic.dead_floor_bound;
         gi.organic_solid_rim_mm = R.organic_solid_rim_mm;
         gi.organic_solid_rim_voxels = R.organic_solid_rim_voxels;
-        gi.organic_overhang_fillet_on = job.grading.organic_overhang_fillet;
-        gi.organic_fillet_skipped_spans = R.oc.organic_fillet_skipped_spans;
+        gi.organic_unsupported_spans = R.oc.organic_unsupported_spans;
         gi.organic_transfer_ties_on = job.grading.organic_transfer_ties;
         gi.organic_ties_seeded = static_cast<long long>(R.oc.growth.growth_ties_seeded);
         gi.organic_ties_landed = static_cast<long long>(R.oc.growth.growth_ties_landed);
@@ -9351,7 +9401,6 @@ LatticeVariantJobResult lattice_variant_job(const JobDescription& job,
         gi.organic_arched_spans = R.oc.organic_arched_spans;
         gi.organic_arch_rise = R.oc.organic_arch_rise;
         gi.organic_filleted = R.oc.organic_filleted;
-        gi.organic_fillet_unresolved = R.oc.organic_fillet_unresolved;
         gi.organic_fillet_radius = R.oc.organic_fillet_radius;
         gi.organic_base_mat_length_mm = R.oc.organic_base_mat_len;
         gi.organic_base_mat_z_mm = R.oc.organic_base_mat_z;

@@ -1014,13 +1014,12 @@ struct RunInfo {
   long long organic_synthetic_fully = 0;
   long long organic_synthetic_blended = 0;
   double organic_synthetic_dead_threshold = 0.0;
+  bool organic_synthetic_dead_floor_bound = false;   // the absolute 0.005 MPa rule bound, not 2 % of peak
   std::vector<OrganicSyntheticRegionInfo> organic_synthetic_by_region;   // keyed by face_id
-  // ★ the overhang fillet (grading.organic_overhang_fillet) and the transfer ties
-  // (grading.organic_transfer_ties), so the receipt says what each did or declined
   double organic_solid_rim_mm = 0.0;        // grade-to-solid band at the outline
   long long organic_solid_rim_voxels = 0;
-  bool organic_overhang_fillet_on = true;
-  long long organic_fillet_skipped_spans = 0;
+  // spans over open air, counted and NOT repaired (the fillet was removed)
+  long long organic_unsupported_spans = 0;
   bool organic_transfer_ties_on = false;
   long long organic_ties_seeded = 0;
   long long organic_ties_landed = 0;
@@ -1147,7 +1146,6 @@ struct RunInfo {
   long long organic_arched_spans = 0;
   double organic_arch_rise = 0.0;
   long long organic_filleted = 0;
-  long long organic_fillet_unresolved = 0;
   double organic_fillet_radius = 0.0;
   // ── ★★ GROWTH TELEMETRY (task PR-353 amendment §1) ──────────────────────────
   // `growth_ran` distinguishes "growth measured zero" from "growth never ran": a

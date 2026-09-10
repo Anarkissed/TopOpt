@@ -687,16 +687,18 @@ static void test_organic_scale_and_gates() {
   {
     // The overhang fillet is a printability repair the job may decline: absent is on,
     // false is honoured, and it is organic-only like the other organic keys.
-    CHECK(parse_job(organic_swept("")).grading.organic_overhang_fillet,
-          "organic_overhang_fillet: absent means ON");
-    CHECK(!parse_job(organic_swept(", \"organic_overhang_fillet\": false"))
-               .grading.organic_overhang_fillet,
-          "organic_overhang_fillet: false is honoured");
-    bool refused = false;
-    try {
-      (void)parse_job(organic_swept(", \"organic_overhang_fillet\": 1"));
-    } catch (const std::exception&) { refused = true; }
-    CHECK(refused, "organic_overhang_fillet: a non-boolean is refused");
+    // ★ THE OVERHANG FILLET KEY IS GONE (maintainer, 2026-09-08). The repair flared
+    // every span over open air -- 3,720 of them on the M2 stand, to an end radius of
+    // 2.56 mm against a 0.615 mm median strut, leaving 2,789 unresolved at its own cap.
+    // The key is refused rather than ignored so a job carrying it fails loudly instead
+    // of silently losing a setting it thinks is in force.
+    {
+      bool refused = false;
+      try {
+        (void)parse_job(organic_swept(", \"organic_overhang_fillet\": false"));
+      } catch (const JobError&) { refused = true; }
+      CHECK(refused, "organic_overhang_fillet: the key is refused, the repair is gone");
+    }
     CHECK(parse_job(organic_swept("")).grading.organic_transfer_ties,
           "organic_transfer_ties: absent means ON (the maintainer approved the look, 2026-09-05)");
     CHECK(!parse_job(organic_swept(", \"organic_transfer_ties\": false"))

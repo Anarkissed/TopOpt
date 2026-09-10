@@ -443,10 +443,6 @@ struct JobGrading {
   // tracing and then repairing. Requires organic; default off so every existing job is
   // byte-identical.
   bool organic_growth = false;
-  // ★ The overhang FILLET is a printability repair (a span over open air is re-emitted
-  // as a 12-segment flare up to 2.5x the bead). Printability is user input, so the
-  // repair is a choice: absent means on (nothing existing changes), false skips it.
-  bool organic_overhang_fillet = true;
   // ★ grown only: transfer ties along the second principal direction, so the load
   // has a member to turn along (Michell's orthogonal family). The maintainer judged
   // the look on the M2 stand (2026-09-05, isostatic lines with the swirl at the
@@ -458,7 +454,18 @@ struct JobGrading {
   // distance of a solid-backed IN-PLANE boundary (the pocket's side walls, not its
   // floor or its open face) stays solid: the lattice grades into a solid frame it
   // can tie to. Absent (-1) = one base cell (cell_min_mm); 0 = off.
+  // ★ PRINTABILITY REPAIRS, ORGANIC. Each alters the geometry to help it print and each
+  // is OFF unless stated: `base_mat`/`fill_mat` add material to root the lattice,
+  // `trim_below_base` cuts what falls under the plate. They used to be hardcoded ON with
+  // no key at all.
+  bool organic_base_mat = false;
+  bool organic_fill_mat = false;
+  bool organic_trim_below_base = false;
   double organic_solid_rim_mm = -1.0;
+  // ★ Drive free organic strut ends this far INTO the solid they meet, then intersect
+  // the welded field with the part so nothing escapes a far face (organic_weld).
+  // 0 = off. Organic only.
+  double organic_strut_embed_mm = 0.0;
   double organic_scale = 1.0;
   bool organic_shape_fit = false;
   // ★★ SHAPE-FIT *ONLY* — the cell is a function of the SHAPE and nothing else; the

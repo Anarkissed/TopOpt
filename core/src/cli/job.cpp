@@ -1594,8 +1594,10 @@ JobDescription parse_job(const std::string& json_text) {
              "algorithm", "organic_strut_width_mm",
              "organic_overhang_angle_deg", "organic_boundary_finish",
              "organic_shape_fit", "organic_shape_fit_only",
-             "organic_scale", "organic_growth", "organic_overhang_fillet",
+             "organic_scale", "organic_growth",
              "organic_transfer_ties", "organic_tie_swirl", "organic_solid_rim_mm",
+             "organic_base_mat", "organic_fill_mat", "organic_trim_below_base",
+             "organic_strut_embed_mm",
              "organic_structural_certification"},
         "grading");
     job.grading.present = true;
@@ -1787,6 +1789,37 @@ JobDescription parse_job(const std::string& json_text) {
             "algorithm \"organic\"");
       job.grading.organic_transfer_ties = (tv->num != 0.0);
     }
+    if (const JsonValue* em = find_key(gr, "organic_strut_embed_mm")) {
+      if (em->type != JsonValue::Type::Number || !std::isfinite(em->num) || em->num < 0.0)
+        schema_fail(
+            "grading \"organic_strut_embed_mm\" must be a finite number >= 0 (0 = off)");
+      if (!organic_alg)
+        schema_fail(
+            "grading \"organic_strut_embed_mm\" is only allowed with "
+            "algorithm \"organic\"");
+      job.grading.organic_strut_embed_mm = em->num;
+    }
+    if (const JsonValue* pv = find_key(gr, "organic_base_mat")) {
+      if (pv->type != JsonValue::Type::Bool)
+        schema_fail("grading \"organic_base_mat\" must be a boolean");
+      if (!organic_alg)
+        schema_fail("grading \"organic_base_mat\" is only allowed with algorithm \"organic\"");
+      job.grading.organic_base_mat = (pv->num != 0.0);
+    }
+    if (const JsonValue* pv = find_key(gr, "organic_fill_mat")) {
+      if (pv->type != JsonValue::Type::Bool)
+        schema_fail("grading \"organic_fill_mat\" must be a boolean");
+      if (!organic_alg)
+        schema_fail("grading \"organic_fill_mat\" is only allowed with algorithm \"organic\"");
+      job.grading.organic_fill_mat = (pv->num != 0.0);
+    }
+    if (const JsonValue* pv = find_key(gr, "organic_trim_below_base")) {
+      if (pv->type != JsonValue::Type::Bool)
+        schema_fail("grading \"organic_trim_below_base\" must be a boolean");
+      if (!organic_alg)
+        schema_fail("grading \"organic_trim_below_base\" is only allowed with algorithm \"organic\"");
+      job.grading.organic_trim_below_base = (pv->num != 0.0);
+    }
     if (const JsonValue* rm = find_key(gr, "organic_solid_rim_mm")) {
       if (rm->type != JsonValue::Type::Number || !(rm->num >= 0.0) || !std::isfinite(rm->num))
         schema_fail("grading \"organic_solid_rim_mm\" must be a finite number >= 0 (0 = off)");
@@ -1800,15 +1833,6 @@ JobDescription parse_job(const std::string& json_text) {
       if (!organic_alg)
         schema_fail("grading \"organic_tie_swirl\" is only allowed with algorithm \"organic\"");
       job.grading.organic_tie_swirl = sw->num;
-    }
-    if (const JsonValue* fv = find_key(gr, "organic_overhang_fillet")) {
-      if (fv->type != JsonValue::Type::Bool)
-        schema_fail("grading \"organic_overhang_fillet\" must be a boolean");
-      if (!organic_alg)
-        schema_fail(
-            "grading \"organic_overhang_fillet\" is only allowed with "
-            "algorithm \"organic\"");
-      job.grading.organic_overhang_fillet = (fv->num != 0.0);
     }
     if (const JsonValue* sv = find_key(gr, "organic_shape_fit")) {
       if (sv->type != JsonValue::Type::Bool)

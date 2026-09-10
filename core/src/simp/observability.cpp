@@ -1447,6 +1447,8 @@ std::string run_info_json(const RunInfo& info) {
         gr += ", \"synthetic_stress_fully\": " + std::to_string(info.organic_synthetic_fully);
         gr += ", \"synthetic_stress_blended\": " + std::to_string(info.organic_synthetic_blended);
         gr += ", \"synthetic_stress_dead_threshold\": " + fmt(info.organic_synthetic_dead_threshold);
+        gr += std::string(", \"synthetic_stress_dead_floor_bound\": ") +
+              (info.organic_synthetic_dead_floor_bound ? "true" : "false");
         gr += ", \"synthetic_stress_by_region\": [";
         for (std::size_t q = 0; q < info.organic_synthetic_by_region.size(); ++q) {
           const OrganicSyntheticRegionInfo& ri = info.organic_synthetic_by_region[q];
@@ -1461,8 +1463,7 @@ std::string run_info_json(const RunInfo& info) {
         gr += "]";
         gr += ", \"solid_rim_mm\": " + fmt(info.organic_solid_rim_mm);
         gr += ", \"solid_rim_voxels\": " + std::to_string(info.organic_solid_rim_voxels);
-        gr += ", \"overhang_fillet_on\": " + std::string(info.organic_overhang_fillet_on ? "true" : "false");
-        gr += ", \"fillet_skipped_spans\": " + std::to_string(info.organic_fillet_skipped_spans);
+        gr += ", \"unsupported_spans\": " + std::to_string(info.organic_unsupported_spans);
         gr += ", \"transfer_ties_on\": " + std::string(info.organic_transfer_ties_on ? "true" : "false");
         gr += ", \"ties_seeded\": " + std::to_string(info.organic_ties_seeded);
         gr += ", \"ties_landed\": " + std::to_string(info.organic_ties_landed);
@@ -1645,9 +1646,6 @@ std::string run_info_json(const RunInfo& info) {
       }
       gr += ", \"arched_spans\": " + fmt_ll(info.organic_arched_spans);
       gr += ", \"arch_max_rise_mm\": " + fmt(info.organic_arch_rise);
-      gr += ", \"filleted_spans\": " + fmt_ll(info.organic_filleted);
-      gr += ", \"fillet_unresolved\": " + fmt_ll(info.organic_fillet_unresolved);
-      gr += ", \"fillet_max_radius_mm\": " + fmt(info.organic_fillet_radius);
       gr += ", \"base_mat_length_mm\": " + fmt(info.organic_base_mat_length_mm);
       gr += ", \"base_mat_z_mm\": " + fmt(info.organic_base_mat_z_mm);
       gr += ", \"fill_mat_cells\": " + fmt_ll(info.organic_fill_mat_cells);
