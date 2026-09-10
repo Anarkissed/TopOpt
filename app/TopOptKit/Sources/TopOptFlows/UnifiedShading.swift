@@ -228,7 +228,8 @@ struct LSDFUniforms {
     // x = solid rim (mm) inward from the region boundary; see Swift `rimParams`.
     float4 rimParams;
     // ★ ORGANIC THICKNESS (2026-09-04): x = live strut radius (mm, 0 = baked), y = the
-    // centreline channel's reach, z = the surface channel's band. Same slot as Swift.
+    // centreline channel's reach, z = the surface channel's band, w = the WETTED JOIN's
+    // fillet as a multiple of the strut radius (0 = off). Same slot as Swift.
     float4 organicRadius;
 };
 
@@ -1529,6 +1530,10 @@ vertex CapVOut capsule_vertex(uint vid [[vertex_id]], uint iid [[instance_id]],
     float4 A = caps[2 * iid], B = caps[2 * iid + 1];
     float R = U.organicRadius.x > 0.0 ? U.organicRadius.x : A.w;
     R = max(R, 1e-4);
+    // ★ THE BOX HAS TO HOLD THE FILLET (2026-09-08). The wetted surface bulges out to
+    // R + fillet near the solid; a box built at R alone would clip the bead away at the
+    // very join it exists to draw.
+    R = R * (1.0 + max(U.organicRadius.w, 0.0));
     float3 ax = B.xyz - A.xyz;
     float len = length(ax);
     float3 u = len > 1e-6 ? ax / len : float3(0.0, 0.0, 1.0);
@@ -1592,21 +1597,166 @@ static float3 cap_normal(float3 p, float3 pa, float3 pb, float r) {
 
 // The march's clip, at one point: eroded part SDF ∧ exact part bbox ∧ declared region
 // (which already carries the skin). True where a strut may be drawn.
-static bool cap_inside_clip(constant LSDFUniforms& U, texture3d<float> sdfTex,
+// ★★★ THE CLIP FIELD ITSELF, not just the yes/no (2026-09-08). A capsule cut by the
+// part, the region or the shell has to be shaded on the CUT, and a cut needs the
+// clipping surface's own distance and gradient — so the composition lives here and
+// `cap_inside_clip` is a thin test over it.
+static float cap_clip_field(constant LSDFUniforms& U, texture3d<float> sdfTex,
                             texture3d<float> regionTex, sampler samp,
-                            constant ShellClip& RC, constant float4* decls, float3 p) {
+                            constant ShellClip& RC, constant float4* decls, float3 p,
+                            float embed) {
     float3 sdfDims = max(U.sdfDims.xyz, float3(1.0));
     float3 stc = ((p - U.sdfOrigin.xyz) / U.sdfSpacing.xyz + 0.5) / sdfDims;
-    float delta = U.stepParams.y;
-    float dPart = sdfTex.sample(samp, stc).r + delta;
+    // ★★★ NO TRIM EROSION HERE (his walk, 2026-09-07: "There is still a gap between the
+    // rim and the lattice"). `stepParams.y` erodes the part by up to 0.35 mm and exists
+    // for ONE reason: near a crease the trilinear SDF under-estimates the true distance,
+    // so the MARCH bulges slivers through the surface. A capsule is analytic geometry —
+    // it has no sliver to trim — so applying the march's erosion here simply shaved
+    // 0.35 mm off every boundary of every declared face, on top of everything else.
+    float dPart = sdfTex.sample(samp, stc).r;
     float3 bc = 0.5 * (U.bboxMin.xyz + U.bboxMax.xyz);
     float3 be = 0.5 * (U.bboxMax.xyz - U.bboxMin.xyz);
     float3 qb = abs(p - bc) - be;
     float dBox = length(max(qb, 0.0)) + min(max(qb.x, max(qb.y, qb.z)), 0.0);
-    float dRegion = regionTex.sample(samp, stc).r;
-    float dClip = max(max(lsdf_part_clip(U, sdfTex, regionTex, samp, RC, decls, p, dPart),
-                          dBox), dRegion);
-    return dClip < 0.02;
+    // ★ THE REGION, RELAXED BY THE EMBED (2026-09-08). The strut does not stop at the
+    // wall it lands on; it runs `embed` millimetres into the solid, which is where the
+    // run welds it. The PART and its bounding box are never relaxed — material outside
+    // the part is not material.
+    float dRegion = regionTex.sample(samp, stc).r - embed;
+    return max(max(lsdf_part_clip(U, sdfTex, regionTex, samp, RC, decls, p, dPart),
+                   dBox), dRegion);
+}
+
+static bool cap_inside_clip(constant LSDFUniforms& U, texture3d<float> sdfTex,
+                            texture3d<float> regionTex, sampler samp,
+                            constant ShellClip& RC, constant float4* decls, float3 p) {
+    return cap_clip_field(U, sdfTex, regionTex, samp, RC, decls, p, 0.0) < 0.02;
+}
+
+// The outward normal of the clipping surface — the gradient of the field above. This is
+// what a CUT through solid material looks like: it is shaded by the plane that cut it,
+// never by the tube it went through.
+static float3 cap_clip_normal(constant LSDFUniforms& U, texture3d<float> sdfTex,
+                              texture3d<float> regionTex, sampler samp,
+                              constant ShellClip& RC, constant float4* decls, float3 p) {
+    float h = 0.5 * max(max(U.sdfSpacing.x, U.sdfSpacing.y), U.sdfSpacing.z);
+    h = max(h, 1e-4);
+    float3 g;
+    g.x = cap_clip_field(U, sdfTex, regionTex, samp, RC, decls, p + float3(h, 0, 0), 0.0)
+        - cap_clip_field(U, sdfTex, regionTex, samp, RC, decls, p - float3(h, 0, 0), 0.0);
+    g.y = cap_clip_field(U, sdfTex, regionTex, samp, RC, decls, p + float3(0, h, 0), 0.0)
+        - cap_clip_field(U, sdfTex, regionTex, samp, RC, decls, p - float3(0, h, 0), 0.0);
+    g.z = cap_clip_field(U, sdfTex, regionTex, samp, RC, decls, p + float3(0, 0, h), 0.0)
+        - cap_clip_field(U, sdfTex, regionTex, samp, RC, decls, p - float3(0, 0, h), 0.0);
+    float L = length(g);
+    return L > 1e-9 ? g / L : float3(0.0, 0.0, 1.0);
+}
+
+// ★★★ THE WETTED JOIN (his instruction, 2026-09-08: "making it so the struts continue to
+// the solid part (into it, preferably) and then have fillets on either side of it
+// regardless of what angle they come in at — as long as they are pointing towards the
+// solid, they should go through it and be filleted", with image 8: a plate standing in
+// liquid, the surface climbing it).
+//
+// ★ ONE FIELD, THREE BEHAVIOURS. The drawn surface is
+//
+//     f(p) = max( capsule(p) − fillet(p),  clip(p, embed) )
+//
+// and everything falls out of it: away from the solid `fillet` is 0 and the surface is
+// the capsule exactly as before; approaching the solid the strut FATTENS into a
+// meniscus; past the region boundary the clip is relaxed by `embed` so the strut runs
+// INTO the solid instead of stopping at it; and where the part itself ends the `max`
+// takes over and the surface is the cut, shaded by the part's own gradient. A single
+// gradient shades all three, so there is no seam between them.
+//
+// ★ AND IT DOES NOT CARE ABOUT THE ANGLE. `fillet` is a function of the DISTANCE to the
+// solid, nothing else — so a strut arriving square, at 20° or along the wall gets the
+// same bead where it meets material, which is what a wetting line does.
+
+// Signed distance to the sphere-swept segment.
+static float cap_sd(float3 p, float3 pa, float3 pb, float r) {
+    float3 ba = pb - pa, pa2 = p - pa;
+    float h = clamp(dot(pa2, ba) / max(dot(ba, ba), 1e-9), 0.0, 1.0);
+    return length(pa2 - ba * h) - r;
+}
+
+// How much to fatten the strut at `p`: full at the solid's surface, gone `reach` away
+// from it, and nothing at all where there is no material to wet (outside the part).
+static float cap_wet_flare(constant LSDFUniforms& U, texture3d<float> sdfTex,
+                           texture3d<float> regionTex, sampler samp,
+                           constant ShellClip& RC, constant float4* decls,
+                           float3 p, float reach) {
+    if (reach <= 0.0) { return 0.0; }
+    float3 sdfDims = max(U.sdfDims.xyz, float3(1.0));
+    float3 stc = ((p - U.sdfOrigin.xyz) / U.sdfSpacing.xyz + 0.5) / sdfDims;
+    float dPart = sdfTex.sample(samp, stc).r;
+    // A meniscus needs something to climb. Well inside the part this is 1; at the part's
+    // own surface it is 0, so a strut breaking out into AIR gets a clean cut, not a bead.
+    float solid = 1.0 - smoothstep(-reach, 0.0, dPart);
+    if (solid <= 0.0) { return 0.0; }
+    // Distance to the boundary between "lattice may be here" and "solid material":
+    // NEGATIVE where the lattice lives, POSITIVE inside the solid.
+    float s = cap_clip_field(U, sdfTex, regionTex, samp, RC, decls, p, 0.0);
+    // ★★★ EASES IN AND OUT, AND IS TIGHT TO THE JOINT (his corrections, 2026-09-08:
+    // first "the fillet is happening too far *above* the rim … we should not be able to
+    // see the inwards slant", then "These fillets are going the wrong way, They should
+    // also ease in and out, not be hard lines").
+    //
+    // ★ TWO WRONG SHAPES BEFORE THIS ONE. Symmetric `abs(s)` over a long reach put a
+    // trumpet a full bead's width up the strut — the visible neck. Clamping it to
+    // `s > 0` removed the neck and introduced something worse: the weight jumps from 0
+    // to 1 across the surface, and a step in the radius is a HARD EDGE, which is the
+    // flat-rimmed foot in his screenshot.
+    //
+    // ★ THE SHAPE THAT IS NEITHER. Full at the joint and easing away on BOTH sides,
+    // with a short reach above and a longer one below. `smoothstep` has zero slope at
+    // both ends, so the two halves meet at s = 0 with matching derivatives: no edge, no
+    // step, and the bead stays where the strut meets material instead of climbing it.
+    // ★★★ AND ITS WIDEST POINT IS BURIED, NOT ON THE SURFACE (his correction,
+    // 2026-09-08: "the strut fillet ends are poking OUT of the solid. It should be half
+    // inside the solid, where only the outward fillet is seen OUTSIDE of the solid").
+    //
+    // ★ THE PEAK WAS AT s = 0 — EXACTLY THE SURFACE — so the fattest ring of the bead
+    // sat in the plane of the wall and read as a flat pad lying on top of it, which is
+    // the oval foot under every strut in his screenshot. Moving the peak half a fillet
+    // INTO the solid buries the widest part: outside the wall a viewer sees only the
+    // outward-curving flank on its way in, and the disc is gone because the disc is
+    // underground.
+    const float peak = 0.5 * reach;          // how far inside the widest point sits
+    const float aboveReach = peak + 0.35 * reach;   // fades out just above the surface
+    float d = s - peak;
+    if (d < 0.0) { return solid * (1.0 - smoothstep(0.0, aboveReach, -d)); }
+    return solid * (1.0 - smoothstep(0.0, reach, d));
+}
+
+// The surface actually drawn: the fattened strut, intersected with where material may be.
+static float cap_wet_field(constant LSDFUniforms& U, texture3d<float> sdfTex,
+                           texture3d<float> regionTex, sampler samp,
+                           constant ShellClip& RC, constant float4* decls,
+                           float3 p, float3 pa, float3 pb, float r,
+                           float fillet, float embed) {
+    float d = cap_sd(p, pa, pb, r);
+    if (fillet > 0.0) {
+        d -= fillet * cap_wet_flare(U, sdfTex, regionTex, samp, RC, decls, p, 2.0 * fillet);
+    }
+    return max(d, cap_clip_field(U, sdfTex, regionTex, samp, RC, decls, p, embed));
+}
+
+static float3 cap_wet_normal(constant LSDFUniforms& U, texture3d<float> sdfTex,
+                             texture3d<float> regionTex, sampler samp,
+                             constant ShellClip& RC, constant float4* decls,
+                             float3 p, float3 pa, float3 pb, float r,
+                             float fillet, float embed) {
+    float h = max(0.15 * r, 1e-4);
+    float3 g;
+    g.x = cap_wet_field(U, sdfTex, regionTex, samp, RC, decls, p + float3(h, 0, 0), pa, pb, r, fillet, embed)
+        - cap_wet_field(U, sdfTex, regionTex, samp, RC, decls, p - float3(h, 0, 0), pa, pb, r, fillet, embed);
+    g.y = cap_wet_field(U, sdfTex, regionTex, samp, RC, decls, p + float3(0, h, 0), pa, pb, r, fillet, embed)
+        - cap_wet_field(U, sdfTex, regionTex, samp, RC, decls, p - float3(0, h, 0), pa, pb, r, fillet, embed);
+    g.z = cap_wet_field(U, sdfTex, regionTex, samp, RC, decls, p + float3(0, 0, h), pa, pb, r, fillet, embed)
+        - cap_wet_field(U, sdfTex, regionTex, samp, RC, decls, p - float3(0, 0, h), pa, pb, r, fillet, embed);
+    float L = length(g);
+    return L > 1e-9 ? g / L : float3(0.0, 0.0, 1.0);
 }
 
 struct CapGBuf {
@@ -1631,23 +1781,82 @@ fragment CapGBuf capsule_gbuffer(CapVOut in [[stage_in]],
     R = max(R, 1e-4);
     float3 ro = U.eye.xyz;
     float3 rd = normalize(in.mp - ro);
-    float t = cap_intersect(ro, rd, A.xyz, B.xyz, R);
-    if (t < 0.0) { discard_fragment(); }
-    float3 p = ro + rd * t;
-    float3 n = cap_normal(p, A.xyz, B.xyz, R);
-    if (!cap_inside_clip(U, sdfTex, regionTex, samp, RC, shellDecls, p)) {
-        // The near side is cut away (outside the part, the region or the shell's
-        // survivors): the ray may still leave the SAME strut inside the clip — that
-        // exit is where the march would have stopped. Cast back from beyond the strut.
+    // ★ THE WETTING SCALE, 0 = off. The fillet and the embed are both a multiple of the
+    // strut's own radius, so a thin strut gets a small bead and a fat one a big one —
+    // there is no absolute length here to be wrong at another scale.
+    float wet = max(U.organicRadius.w, 0.0);
+    float fillet = wet * R;
+    float embed = fillet;
+
+    // ★ THE CHEAP GATE. The blended surface never leaves the segment by more than
+    // R + fillet, so a ray that misses that fatter capsule cannot be on it. This is what
+    // keeps the march below off almost every fragment of the impostor box.
+    float tw = cap_intersect(ro, rd, A.xyz, B.xyz, R + fillet);
+    if (tw < 0.0) { discard_fragment(); }
+
+    float3 p;
+    float3 n;
+    if (wet <= 0.0) {
+        // The analytic path, unchanged: an exact ray–capsule hit, and where the near
+        // wall is cut away, the first point along the ray at which material may exist —
+        // the CUT FACE, shaded by the surface that cut it (2026-09-08).
+        float t = cap_intersect(ro, rd, A.xyz, B.xyz, R);
+        if (t < 0.0) { discard_fragment(); }
+        p = ro + rd * t;
+        n = cap_normal(p, A.xyz, B.xyz, R);
+        if (!cap_inside_clip(U, sdfTex, regionTex, samp, RC, shellDecls, p)) {
+            float3 mid = 0.5 * (A.xyz + B.xyz);
+            float T = dot(mid - ro, rd) + 0.5 * length(B.xyz - A.xyz) + R + 1.0;
+            float tb = cap_intersect(ro + rd * T, -rd, A.xyz, B.xyz, R);
+            if (tb < 0.0) { discard_fragment(); }
+            float tExit = T - tb;
+            if (tExit <= t + 1e-4) { discard_fragment(); }
+            const int CAP_WALK = 24;
+            float lo = t, hi = -1.0;
+            for (int i = 1; i <= CAP_WALK; ++i) {
+                float ts = mix(t, tExit, float(i) / float(CAP_WALK));
+                if (cap_inside_clip(U, sdfTex, regionTex, samp, RC, shellDecls, ro + rd * ts)) {
+                    hi = ts;
+                    break;
+                }
+                lo = ts;
+            }
+            if (hi < 0.0) { discard_fragment(); }
+            for (int i = 0; i < 12; ++i) {
+                float m2 = 0.5 * (lo + hi);
+                if (cap_inside_clip(U, sdfTex, regionTex, samp, RC, shellDecls, ro + rd * m2)) {
+                    hi = m2;
+                } else {
+                    lo = m2;
+                }
+            }
+            p = ro + rd * hi;
+            n = cap_clip_normal(U, sdfTex, regionTex, samp, RC, shellDecls, p);
+            if (dot(n, rd) > 0.0) { n = -n; }
+        }
+    } else {
+        // ★★★ ONE MARCH OVER ONE FIELD. The fattened strut intersected with where
+        // material may be: the fillet, the embed into the solid and the cut are all the
+        // same surface, so one gradient shades all of them and there is no seam.
         float3 mid = 0.5 * (A.xyz + B.xyz);
-        float T = dot(mid - ro, rd) + 0.5 * length(B.xyz - A.xyz) + R + 1.0;
-        float tb = cap_intersect(ro + rd * T, -rd, A.xyz, B.xyz, R);
-        if (tb < 0.0) { discard_fragment(); }
-        float t2 = T - tb;
-        if (t2 <= t + 1e-4) { discard_fragment(); }
-        p = ro + rd * t2;
-        n = -cap_normal(p, A.xyz, B.xyz, R);
-        if (!cap_inside_clip(U, sdfTex, regionTex, samp, RC, shellDecls, p)) { discard_fragment(); }
+        float span = 0.5 * length(B.xyz - A.xyz) + R + fillet;
+        float tFar = dot(mid - ro, rd) + span;
+        float t = max(tw - fillet, 0.0);
+        float eps = max(0.02 * R, 1e-4);
+        bool hit = false;
+        for (int i = 0; i < 48; ++i) {
+            float3 q = ro + rd * t;
+            float d = cap_wet_field(U, sdfTex, regionTex, samp, RC, shellDecls,
+                                    q, A.xyz, B.xyz, R, fillet, embed);
+            if (d < eps) { hit = true; break; }
+            t += max(d, 0.5 * eps);
+            if (t > tFar) { break; }
+        }
+        if (!hit) { discard_fragment(); }
+        p = ro + rd * t;
+        n = cap_wet_normal(U, sdfTex, regionTex, samp, RC, shellDecls,
+                           p, A.xyz, B.xyz, R, fillet, embed);
+        if (dot(n, rd) > 0.0) { n = -n; }
     }
     // The same depth bias the march applies where the shell still owns the boundary.
     float3 posForDepth = p;

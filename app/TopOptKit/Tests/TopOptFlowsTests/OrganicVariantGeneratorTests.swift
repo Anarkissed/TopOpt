@@ -26,6 +26,15 @@ final class OrganicVariantGeneratorTests: XCTestCase {
                                    ("grown-auto", true, .auto), ("grown-fit", true, .fit)] {
             var v = base; v.organicGrowth = grow; v.cellSizeMode = mode
             out.append((name, OrganicSampleCube.Picks(settings: v, layerHeightMM: layer)))
+            // ★★★ AND THE SAME FOUR WITH THE REPAIRS HIDDEN (2026-09-07). "Preview: show
+            // print repairs" is a topology pick — it decides whether the picture is
+            // core's emitted spans or the traced curves — so it is in the cache key, and
+            // the four shipped cubes only ever covered the ON side. He works with it
+            // OFF, so every visit missed the cache and re-traced. These cost almost
+            // nothing to generate (with repairs hidden the emission does not run) and
+            // they are the half he actually looks at.
+            out.append((name + "-no-repairs",
+                        OrganicSampleCube.Picks(settings: v, layerHeightMM: layer, showRepairs: false)))
         }
         return out
     }
@@ -56,6 +65,14 @@ final class OrganicVariantGeneratorTests: XCTestCase {
                     let t0 = Date()
                     guard let b = await OrganicSampleCube.baked(picks: picks, latticeID: "octet") else { print("GEN \(name): FAILED"); continue }
                     let src = OrganicVariantCache.cachedURL(for: key)
+                    // ★ THE CACHE WRITE IS DETACHED NOW (2026-09-07: it was half the
+                    // wait for a picture nothing on screen depends on), so the file
+                    // lands a moment after `baked` returns. Wait for it rather than
+                    // copying a file that is not there yet — the run before this one
+                    // wrote "-1 bytes" for all eight.
+                    for _ in 0..<200 where !FileManager.default.fileExists(atPath: src.path) {
+                        try? await Task.sleep(nanoseconds: 100_000_000)
+                    }
                     let dst = dir.appendingPathComponent("\(key).3mf")
                     // ★ Never erase a shipped file without a source to replace it
                     // (2026-09-06: a cache HIT on the bundled variant has no cached

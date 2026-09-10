@@ -55,6 +55,18 @@ public struct LatticeSetupWizard: View {
     /// previous task — kept, because it is the page's own honesty about latency).
     @State private var lastLatencyMS: Double = 0
     @State private var mesh: ViewerMesh?
+    // ★★★ THE SAMPLE REFRESHES WHEN HE ASKS (his instruction, 2026-09-07: "we need to
+    // have it so there is a 'Refresh Cube' button that brings in the latest
+    // modifications since the previous refresh — this way we don't have to do 6
+    // different bakes simultaneously after changing 6 settings"). Bumping this is the
+    // only thing that re-traces; every control below simply marks the sample stale.
+    @State private var sampleRefreshToken = 0
+    /// Settings have moved since the last refresh — the button says so.
+    @State private var sampleIsStale = false
+    /// The picks the cube on screen was traced with, so a refresh that changes nothing
+    /// is not offered as one.
+    @State private var appliedOrganicPicks: OrganicSampleCube.Picks?
+    @State private var refreshInfoShown = false
     /// ★ §5 — which numeric field has the keypad open. One at a time, keyed by the
     /// field's id, so every number on this page types as well as drags.
     @State private var numberPadField: String?
@@ -106,11 +118,12 @@ public struct LatticeSetupWizard: View {
                     .modifier(WizardModalPlacement(canvasHeight: geo.size.height))
                 disclaimer
                 saveAndExit
+                refreshSample
             }
         }
         // ★ §7b — FRAME THE SAMPLE ON ENTRY, at a sensible size, whatever the
         // camera was doing before.
-        .onAppear { rebuild(); frameSample() }
+        .onAppear { rebuild(force: true); frameSample() }
         // ★ item 3.2 — presented from the page's root, where an alert always can be
         .alert("Grading needs a stress simulation", isPresented: $showGradeNeedsSimAlert) {
             Button("OK", role: .cancel) {}
@@ -131,7 +144,7 @@ public struct LatticeSetupWizard: View {
         // ★ §7b — …AND ON EVERY STAGE TRANSITION. A stage change swaps one cell
         // for a tiled block (or back), which is a different object at a different
         // scale, and the previous stage may have left the camera mid-dive.
-        .onChange(of: model.stage) { _ in rebuild(); frameSample() }
+        .onChange(of: model.stage) { _ in rebuild(force: true); frameSample() }
     }
 
     // MARK: the centre — the object
@@ -173,7 +186,8 @@ public struct LatticeSetupWizard: View {
     /// ★ "Show without repairs" (maintainer, 2026-09-05): the sample shows the traced
     /// curves instead of the file's repaired spans. A preview option, not a setting —
     /// the file always has the repairs, and the banner says which is shown.
-    @State private var organicShowRepairs = true
+    /// ★ THE SETTING, NOT VIEW STATE (2026-09-07) — see `LatticeSettings.organicShowRepairs`.
+    private var organicShowRepairs: Bool { project.lattice.organicShowRepairs }
     private var organicSampleShown: Bool { model.cellTransition == .organicGrade }
 
     private var stageView: some View {
@@ -203,8 +217,13 @@ public struct LatticeSetupWizard: View {
                                                                     ? model.organicStrutWidthMM / 2 : 0))
                       })
             .ignoresSafeArea()
-            // ★ The cube re-traces off the main thread whenever a pick changes.
-            .task(id: organicSamplePicks) { await loadOrganicSample(organicSamplePicks) }
+            // ★ ONLY ON REFRESH (2026-09-07). The task used to be keyed to the PICKS,
+            // so every control re-keyed it — and while SwiftUI cancels the outer task,
+            // the DETACHED trace inside `OrganicSampleCube.baked` runs to completion
+            // regardless, so six changes left six traces grinding at once. (The old key
+            // is not named here: a source-text guard counts comments, and this file has
+            // paid that toll before.)
+            .task(id: sampleRefreshToken) { await loadOrganicSample(organicSamplePicks) }
     }
 
     /// Model −Z (gravity, build plate down) → viewer −Y: the same map the workspace
@@ -705,7 +724,18 @@ public struct LatticeSetupWizard: View {
         + "alternating pull and push, so the struts sweep between them. Each unloaded wall "
         + "chooses its own number of foci (1–5) in its row under Selections; a wall that "
         + "carries load never takes foci. Shown in the preview; the run carries it only on a "
-        + "core whose schema accepts it."
+        + "core whose schema accepts it. "
+        // ★ HIS INSTRUCTION, 2026-09-08: say what the stress map does with this on.
+        + "The stress map reads each declared face on its OWN range, apart from the rest "
+        + "of the body — so a wall carrying a thousandth of the part's peak still shows "
+        + "where its foci are. Colours are comparable within a face, never between two."
+    static let infoDepthStagger = "A TEST, not a setting. The preview calls core's own "
+        + "tracer, so its curves are the ones the run builds — and the tracer lays every "
+        + "depth layer on the same tracks, which is why a window in the front layer is a "
+        + "window all the way through. With this on the preview OFFSETS each layer after "
+        + "tracing, so the weave interleaves. It is here to judge a proposed change to "
+        + "the tracer before it is made. The run builds the un-staggered weave, and the "
+        + "banner says so while it is on."
     static let infoSizeCheck = " A typed size is checked once you finish entering it, against the "
         + "printable cell at this bead, whether one cell fits the thinnest wall, and the probe's "
         + "verdict when it has that size. Your pick is kept and shown; it reaches the run once "
@@ -890,8 +920,45 @@ public struct LatticeSetupWizard: View {
             }
             if model.organicStrutWidthMM > 0,
                TopOptKit.gradingSchemaAccepts(key: "organic_strut_width_mm") {
-                scrubRow("organicStrut", value: model.organicStrutWidthMM, unit: " mm",
-                         step: 0.1, range: 0.2...5) { model.organicStrutWidthMM = $0; rebuild() }
+                // ★★★ NEVER THINNER THAN ONE BEAD (his walk, 2026-09-07: setting Manual
+                // density dropped the part preview out of Organic and back to the
+                // regular ladder). A strut narrower than one extrusion is not printable
+                // and core refuses the trace; the preview then had no curves, fell
+                // through to the doubled ladder, and said so only in the caption's (i).
+                // The control simply cannot ask for it now.
+                let beadMM = Swift.max(0.05, project.printParams.strutLineWidthMM)
+                scrubRow("organicStrut", value: Swift.max(model.organicStrutWidthMM, beadMM),
+                         unit: " mm", step: 0.1, range: beadMM...5) {
+                    model.organicStrutWidthMM = Swift.max($0, beadMM); rebuild()
+                }
+            }
+
+            // ★★★ THE DEPTH-STAGGER TEST — AFTER DENSITY, AND FOR BOTH PATHS (his
+            // correction, 2026-09-08: "The depth variation is only available in Grown
+            // Lattice mode. NOT in Traced. Please move it OUTSIDE of the 'Print
+            // fine-tuning' section and place it after the density selection").
+            //
+            // ★ IT WAS BESIDE THE TIES, which sit inside `if model.organicGrowth` and
+            // behind the fine-tuning disclosure — so a traced lattice, the one he was
+            // looking at, could not reach it at all. The deformation has nothing to do
+            // with growth: it bins whatever the tracer returned by depth and offsets the
+            // layers, which is the same operation on either path.
+            HStack(spacing: DS.Space.s) {
+                HStack(spacing: DS.Space.xs) {
+                    Text("Depth variation (test)").dsStyle(DS.TypeScale.caption)
+                        .foregroundStyle(DS.Color.textPrimary.color)
+                    infoButton("depth-stagger", Self.infoDepthStagger)
+                }
+                Spacer(minLength: DS.Space.s)
+                GlassToggle(isOn: model.organicDepthStagger) {
+                    model.organicDepthStagger.toggle(); rebuild()
+                }
+                .accessibilityLabel("Depth variation test")
+                .accessibilityIdentifier("wizard-organic-depth-stagger")
+            }
+            if model.organicDepthStagger {
+                shortNote("Preview only — the run builds the un-staggered weave",
+                          warning: true)
             }
 
             // ── Flare overhangs (job switch, probe-gated) ──
@@ -922,7 +989,9 @@ public struct LatticeSetupWizard: View {
                     infoButton("repairs", Self.infoRepairs)
                 }
                 Spacer(minLength: DS.Space.s)
-                GlassToggle(isOn: organicShowRepairs) { organicShowRepairs.toggle(); rebuild() }
+                GlassToggle(isOn: organicShowRepairs) {
+                    project.lattice.organicShowRepairs.toggle(); rebuild()
+                }
                     .accessibilityLabel("Show print repairs")
                     .accessibilityIdentifier("wizard-organic-show-repairs")
             }
@@ -981,9 +1050,39 @@ public struct LatticeSetupWizard: View {
                         .foregroundStyle(DS.Color.textTertiary.color)
                     infoButton("look", Self.infoLook)
                 }
-                scrubRow("organicLook", value: Double(model.organicLookCellsAcross), unit: " cells across",
-                         step: 0.05, range: 2...16) {
-                    model.organicLookCellsAcross = Int($0.rounded()); rebuild()
+                // ★★★ A PERCENTAGE, AND IT SETS THE CELL (his instruction, 2026-09-07).
+                // 1 % = the largest cell the wall can hold, 100 % = the smallest core
+                // will print. The slider maps into core's own band and writes the window
+                // it picks, so the run builds what is shown; the cells-across value it
+                // replaced was clamped by the member ceiling on his part and moved
+                // nothing at all between 4 and 8.
+                // ★ A SLIDER, WITH SOMETHING TO HOLD (his walk, 2026-09-07: "Look needs
+                // to be a slider, I don't see anything to hold"). The scrub row it
+                // replaced was a drag-anywhere field with no thumb and no track.
+                HStack(spacing: DS.Space.s) {
+                    Text("1%").dsStyle(DS.TypeScale.caption2)
+                        .foregroundStyle(DS.Color.textQuaternary.color)
+                    Slider(value: Binding(
+                        get: { project.lattice.organicLookPercent },
+                        set: { pct in
+                            project.lattice.organicLookPercent = pct
+                            applyLookPercent(pct)
+                        }), in: 1...100, step: 1) { editing in
+                        if !editing { rebuild() }
+                    }
+                    .tint(DS.Color.accent.color)
+                    .accessibilityIdentifier("wizard-organic-look")
+                    Text("100%").dsStyle(DS.TypeScale.caption2)
+                        .foregroundStyle(DS.Color.textQuaternary.color)
+                    Text(String(format: "%.0f%%", project.lattice.organicLookPercent))
+                        .dsStyle(DS.TypeScale.caption).monospacedDigit()
+                        .foregroundStyle(DS.Color.textPrimary.color)
+                        .frame(minWidth: 38, alignment: .trailing)
+                }
+                if let w = lookWindowMM {
+                    shortNote(String(format: "%.2f–%.2f mm cells", w.lo, w.hi))
+                } else {
+                    shortNote("Mark a wall to size the cells", warning: true)
                 }
             }
 
@@ -994,6 +1093,9 @@ public struct LatticeSetupWizard: View {
                 HStack(spacing: DS.Space.s) {
                     Text("Synthetic stresses on unloaded walls").dsStyle(DS.TypeScale.caption)
                         .foregroundStyle(DS.Color.textPrimary.color)
+                    // ★ The (i) he asked for: the stress map reads each face on its own
+                    // range with this on, and that is not derivable from the row's words.
+                    infoButton("synthetic-map", Self.infoSynthetic)
                     Spacer(minLength: DS.Space.s)
                     GlassToggle(isOn: model.organicSyntheticStresses) {
                         model.organicSyntheticStresses.toggle(); rebuild()
@@ -2006,11 +2108,11 @@ public struct LatticeSetupWizard: View {
         }
     }
 
+    /// ★ SAVE & EXIT MOVED TO THE TOP LEFT (his instruction, 2026-09-07) so the
+    /// bottom-right corner carries the button he reaches for while working: Refresh.
     private var saveAndExit: some View {
         VStack {
-            Spacer()
             HStack {
-                Spacer()
                 Button { saveAndClose() } label: {
                     Text("Save & Exit")
                         .dsStyle(DS.TypeScale.bodyStrong).fontWeight(.semibold)
@@ -2020,8 +2122,91 @@ public struct LatticeSetupWizard: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityIdentifier("wizard-save-exit")
+                Spacer()
+            }
+            Spacer()
+        }
+        .padding(PageChrome.edge)
+    }
+
+    /// Is there anything a refresh would change?
+    private var sampleNeedsRefresh: Bool {
+        sampleIsStale || (organicSampleShown && organicSamplePicks != appliedOrganicPicks)
+    }
+
+    /// ★★★ REFRESH THE SAMPLE — the one control that starts work. Bottom right, where
+    /// Save & Exit used to be, with the (i) that says what it does.
+    private var refreshSample: some View {
+        VStack {
+            Spacer()
+            HStack {
+                Spacer()
+                HStack(spacing: DS.Space.s) {
+                    Button {
+                        rebuild(force: true)
+                        appliedOrganicPicks = organicSamplePicks
+                        sampleRefreshToken += 1
+                    } label: {
+                        HStack(spacing: DS.Space.s) {
+                            Image(systemName: "arrow.clockwise")
+                                .font(.system(size: 15, weight: .bold))
+                            Text(organicSampleShown ? "Refresh cube" : "Refresh sample")
+                                .dsStyle(DS.TypeScale.bodyStrong).fontWeight(.semibold)
+                        }
+                        .foregroundStyle(DS.Color.textPrimary.color)
+                        .padding(.vertical, 12).padding(.horizontal, DS.Space.xl4)
+                        .background(Capsule().fill((sampleNeedsRefresh ? DS.Color.accent
+                                                    : DS.Color.textTertiary).color))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("wizard-refresh-sample")
+                    infoButton("refresh", Self.infoRefresh)
+                }
             }
             .padding(PageChrome.edge)
+        }
+    }
+
+    static let infoRefresh =
+        "Refresh rebuilds the sample with the settings you have entered since the last "
+        + "refresh.\n\nNothing is rebuilt while you are still choosing, so you can set "
+        + "several things, turn the sample and leave the page without waiting. Your "
+        + "settings are saved whether or not you refresh — the sample is a picture of "
+        + "them, not the record of them.\n\nA lattice traced from your own part's "
+        + "stresses can take minutes to build; this cube is 20 mm and stands in for it." 
+
+    /// The window the Look slider is asking for, from the part's declared walls, the
+    /// bead and the solve grid — core's band, mapped by the percentage.
+    private var lookWindowMM: (lo: Double, hi: Double)? {
+        OrganicAutoWindow.lookWindow(
+            percent: project.lattice.organicLookPercent,
+            regions: project.latticeJobRegions().regions,
+            beadMM: project.printParams.strutLineWidthMM,
+            voxelMM: project.solveVoxelMM,
+            lookCellsAcross: Double(model.organicLookCellsAcross))
+    }
+
+    /// ★ THE SLIDER WRITES THE JOB'S OWN CELL KEYS. Anything else would be a preview
+    /// that shows a lattice the run will not build — under Auto the job carries no cell
+    /// numbers at all and core picks for itself.
+    private func applyLookPercent(_ pct: Double) {
+        guard let w = OrganicAutoWindow.lookWindow(
+            percent: pct, regions: project.latticeJobRegions().regions,
+            beadMM: project.printParams.strutLineWidthMM,
+            voxelMM: project.solveVoxelMM,
+            lookCellsAcross: Double(model.organicLookCellsAcross)) else { return }
+        // ★ A DEGENERATE WINDOW IS A SINGLE SIZE, AND MUST BE WRITTEN AS ONE. The band's
+        // grading spread comes from the stress range; with none it is 1 and lo == hi.
+        // `gradingDictionary` refuses a grade whose ends are equal, so writing it as a
+        // grade left the job with NO cell keys at all and core chose for itself — the
+        // preview would then show a lattice the run does not build. A single size is
+        // `cell_mode fit` + `cell_mm`, which core honours exactly.
+        if w.hi > w.lo + 1e-9 {
+            model.organicPickedSeparationMM = 0
+            model.organicPickedGradeMM = [w.lo, w.hi]
+        } else {
+            model.organicPickedGradeMM = []
+            model.organicPickedSeparationMM = w.lo
         }
     }
 
@@ -2034,7 +2219,15 @@ public struct LatticeSetupWizard: View {
 
     /// Rebuild the centre object and MEASURE it. Everything the page draws goes
     /// through here, so the number on screen is the number for every change.
-    private func rebuild() {
+    /// ★ `force` is the refresh (and the two moments that are not a settings change:
+    /// opening the page, and switching sheet). Everything else marks the sample stale
+    /// and waits — his rule, and it is what stops the pile-up.
+    private func rebuild(force: Bool = false) {
+        guard force else {
+            sampleIsStale = true
+            return
+        }
+        sampleIsStale = false
         let t0 = CFAbsoluteTimeGetCurrent()
         mesh = model.stageMesh(progress: tileProgress,
                                derivedCellMM: derivedSampleCellMM,
@@ -2050,7 +2243,13 @@ public struct LatticeSetupWizard: View {
         // The bake itself is OFF the main thread and cached (`OrganicSampleCube.baked`,
         // kicked by `.task` on the stage view); here we only show what has landed.
         if organicSampleShown {
+            // ★★★ A CUBE FROM THE FIRST FRAME (his walk, 2026-09-07: "the cube is not
+            // rendered for quite some time at the start … we need to start with a basic
+            // Organic cube that is always loaded"). The plain 20 mm block is the same
+            // body the traced sample is clipped to, so it costs nothing and the page
+            // can be turned, set and left while the trace is still to be asked for.
             if let scene = organicScene { mesh = scene.mesh }
+            else { mesh = LatticeWizardSample.cube(edgeMM: OrganicSampleCube.edgeMM, at: .zero) }
         } else if organicScene != nil {
             organicScene = nil; organicSampleMeasurement = nil; organicSampleStatus = nil
         }
@@ -2071,6 +2270,7 @@ public struct LatticeSetupWizard: View {
     /// thread (the cube's FEA is solved once per launch and cached), then publishes the
     /// scene. Cancels cleanly if the picks change again meanwhile.
     private func loadOrganicSample(_ picks: OrganicSampleCube.Picks?) async {
+        let token = sampleRefreshToken
         guard let picks else {
             if organicScene != nil { organicScene = nil; organicSampleMeasurement = nil }
             organicSampleStatus = nil
@@ -2079,6 +2279,16 @@ public struct LatticeSetupWizard: View {
         organicSampleStatus = organicScene == nil
             ? "Solving the test cube, then tracing it with your settings…"
             : "Re-tracing the test cube with your settings…"
+        // ★★★ ONE CUBE, NOT TWO (his walk, 2026-09-07, 22:27: "took ~30 seconds for
+        // the first image to show up. It then changed to image 2 after some more time.
+        // This shouldn't happen. It should be a singular sample cube").
+        //
+        // ★ AN HOUR EARLIER I ADDED A SHIPPED CUBE HERE as a stand-in while his own
+        // traced, on the reasoning that a picture beats a wait. He is right and I was
+        // wrong: a cube that is replaced by a DIFFERENT cube is not a faster first
+        // picture, it is two pictures, and the first one describes settings that are not
+        // his. It is gone. The cost belongs where it actually is — see the two-stage
+        // bake below and `OrganicSampleCube.baked`.
         // ★★ THE TRACED CUBE FIRST (2026-09-06: 46–53 s per sample, all of it core's
         // emission). With repairs hidden the bridge skips the emission, so this stage
         // is the solve plus a sub-second trace; the repaired cube replaces it when
@@ -2087,7 +2297,7 @@ public struct LatticeSetupWizard: View {
             var quick = picks
             quick.showRepairs = false
             let first = await OrganicSampleCube.baked(picks: quick, latticeID: model.topologyID)
-            guard !Task.isCancelled, organicSamplePicks == picks else { return }
+            guard !Task.isCancelled, sampleRefreshToken == token else { return }
             if let b = first {
                 let wasEmpty = organicScene == nil
                 organicScene = b.scene; organicSceneToken += 1
@@ -2098,13 +2308,14 @@ public struct LatticeSetupWizard: View {
             }
         }
         let baked = await OrganicSampleCube.baked(picks: picks, latticeID: model.topologyID)
-        guard !Task.isCancelled, organicSamplePicks == picks else { return }
+        guard !Task.isCancelled, sampleRefreshToken == token else { return }
         if let b = baked {
             let first = organicScene == nil
             organicScene = b.scene; organicSceneToken += 1
             organicSampleMeasurement = b.measurement
             organicSampleStatus = nil
             mesh = b.mesh
+            appliedOrganicPicks = picks
             if first { frameSample() }
         } else {
             organicSampleStatus = "The cube could not be traced with these settings."

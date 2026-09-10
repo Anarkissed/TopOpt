@@ -1232,6 +1232,10 @@ public enum TopOptKit {
         /// trace (or growth), in core's emission passes, and in the capsule stamp.
         /// His part sat 12 min 26 s at "Rebuilding the lattice" and only a `sample`
         /// of the process could say the emission's support raster was all of it.
+        /// ★ The von Mises the tracer actually saw, on the design grid — core's own
+        /// synthesis included. Empty when no wall asked for synthetic stress. The
+        /// stress map paints THIS, so the picture and the trace agree (2026-09-07).
+        public var syntheticVonMises: [Double] = []
         public var traceSeconds: Double = 0
         public var emitSeconds: Double = 0
         public var bakeSeconds: Double = 0
@@ -1368,6 +1372,12 @@ public enum TopOptKit {
                                     strutDiameterMM: Double = 0,
                                     grow: Bool = false, layerHeightMM: Double = 0,
                                     anchorAtBoundary: Bool = true,
+                                    /// ★ The ties the RUN applies (`organic_transfer_ties`). Core's own default is
+                                    /// FALSE and the preview never set it — grown previews had no cross-members.
+                                    transferTies: Bool = true, tieSwirl: Double = 1.0,
+                                    /// ★ One strut diameter per voxel — the run's
+                                    /// `strut_diameter_field`. Empty ⇒ the scalar.
+                                    beadMM: [Double] = [],
                                     // ★ false ⇒ bake the traced curves, not the
                                     // file's repaired spans (2026-09-05)
                                     showRepairs: Bool = true,
@@ -1377,7 +1387,10 @@ public enum TopOptKit {
                                     // per-voxel region id (0 = none) and per-region config
                                     regionIDs: [Int32] = [],
                                     syntheticRegions: [OrganicSyntheticRegionSpec] = [],
-                                    syntheticDeadFraction: Double = 0.02)
+                                    syntheticDeadFraction: Double = 0.02,
+                                    /// ★ An absolute floor under the dead test (MPa):
+                                    /// the threshold is `max(fraction · peak, this)`.
+                                    syntheticDeadMPa: Double = 0)
         -> OrganicTrace? {
         let n = nx * ny * nz
         let (fnx, fny, fnz) = fieldDims
@@ -1389,6 +1402,7 @@ public enum TopOptKit {
         var flags = [UInt8](repeating: 0, count: n)
         for i in 0..<n where candidate[i] { flags[i] = 1 }
         let rids: [Int32] = regionIDs.count == n ? regionIDs : []
+        let beads: [Double] = beadMM.count == n ? beadMM : []
         let synthRows: [Double] = rids.isEmpty ? [] : syntheticRegions.flatMap {
             [Double($0.regionID), Double($0.faceID), Double($0.foci), $0.softMM]
         }
@@ -1397,6 +1411,7 @@ public enum TopOptKit {
                 separationMM.withUnsafeBufferPointer { sb in
                   rids.withUnsafeBufferPointer { rb in
                    synthRows.withUnsafeBufferPointer { yb in
+                    beads.withUnsafeBufferPointer { bb in
                     topoptbridge.organic_preview_field(
                         Int32(nx), Int32(ny), Int32(nz), spacingMM,
                         origin.x, origin.y, origin.z,
@@ -1408,13 +1423,16 @@ public enum TopOptKit {
                         overhangAngleDeg, rhoMin, rhoMax,
                         strutDiameterMM, grow ? Int32(1) : Int32(0), layerHeightMM,
                         anchorAtBoundary ? Int32(1) : Int32(0),
+                        transferTies ? Int32(1) : Int32(0), tieSwirl,
+                        bb.baseAddress, bb.count,
                         showRepairs ? Int32(1) : Int32(0),
                         overhangFillet ? Int32(1) : Int32(0),
                         rb.baseAddress, rb.count,
-                        yb.baseAddress, yb.count, syntheticDeadFraction,
+                        yb.baseAddress, yb.count, syntheticDeadFraction, syntheticDeadMPa,
                         Int32(fnx), Int32(fny), Int32(fnz), fieldSpacingMM,
                         fieldOrigin.x, fieldOrigin.y, fieldOrigin.z,
                         bandMM).map { Double($0) }
+                    }
                    }
                   }
                 }
@@ -1447,8 +1465,15 @@ public enum TopOptKit {
         let density = raw.count >= dOff + n ? Array(raw[dOff..<(dOff + n)]) : []
         let rOff = dOff + n
         let surfaceField = raw.count >= rOff + fn ? (0..<fn).map { Float(raw[rOff + $0]) } : []
+        // ★ the synthesised von Mises, when core ran the synthesis (header [59])
+        var synthVM: [Double] = []
+        var vmOff = rOff + fn
+        if raw.count >= vmOff + n, raw[59] > 0.5 {
+            synthVM = Array(raw[vmOff..<(vmOff + n)])
+            vmOff += n
+        }
         var spans: [(a: SIMD3<Double>, b: SIMD3<Double>, r: Double)] = []
-        let sOff = rOff + fn
+        let sOff = vmOff
         if raw.count > sOff {
             let avail = (raw.count - sOff) / 7
             spans.reserveCapacity(avail)
@@ -1486,7 +1511,7 @@ public enum TopOptKit {
                                     .map { (name: $0, lengthMM: $1) },
                                 writtenComponents: Int(raw[45]), emissionRan: raw[46] > 0.5,
                                 filletedSpans: Int(raw[47])),
-                            synthetic: synthetic,
+                            synthetic: synthetic, syntheticVonMises: synthVM,
                             traceSeconds: raw[56], emitSeconds: raw[57], bakeSeconds: raw[58])
     }
 

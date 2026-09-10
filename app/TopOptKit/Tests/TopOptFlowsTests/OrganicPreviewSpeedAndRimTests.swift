@@ -69,7 +69,11 @@ final class OrganicPreviewSpeedAndRimTests: XCTestCase {
 
     func testTheRowsCarryDepthExtentAndTheStressPercentiles() {
         let w = wall(depth: 8, faceID: 2)
-        let rows = OrganicAutoWindow.rows(regions: [w], input: input(n: 8, spacing: 2.5, sxx: 10))
+        let inp = input(n: 8, spacing: 2.5, sxx: 10)
+        let plan = OrganicSyntheticStress.plan(regions: [w], dims: inp.dims,
+                                               originMM: inp.originMM, spacingMM: inp.spacingMM,
+                                               defaultFoci: 4, statedFoci: [:])
+        let rows = OrganicAutoWindow.rows(regions: [w], input: inp, plan: plan)
         XCTAssertEqual(rows.count, 1)
         XCTAssertEqual(rows[0].faceID, 2)
         XCTAssertEqual(rows[0].depthMM, 8)
@@ -94,7 +98,14 @@ final class OrganicPreviewSpeedAndRimTests: XCTestCase {
                                      regions: [w], whenEmpty: .latticeNothing)
         func occupied(_ s: LatticeSDFScene) -> Int { s.occupancy.values.filter { $0 > 0.5 }.count }
         XCTAssertGreaterThan(occupied(plain), 0)
-        XCTAssertLessThan(occupied(rimmed), occupied(plain), "★ the rim removes the outline band from the lattice")
+        // ★★★ REVERSED 2026-09-08. The rim used to REMOVE the band from the occupancy,
+        // and that removal is what left a strip of nothing between the struts and the
+        // wall: "you are cutting out WHOLE cells. don't do that. Continue the lattice
+        // passed the edge INTO the solid and union the two." Membership is untouched now
+        // — only the region FIELD is pulled back, so the shell draws the wall over
+        // curves that run into it.
+        XCTAssertEqual(occupied(rimmed), occupied(plain),
+                       "★ the rim must not take a single voxel out of the lattice")
         // the region field: 1 mm inside the outline's edge is OUT with the rim, IN without
         func region(_ s: LatticeSDFScene, at p: SIMD3<Float>) -> Float {
             let g = s.regionSDF!
@@ -122,11 +133,27 @@ final class OrganicPreviewSpeedAndRimTests: XCTestCase {
         let ws = try String(contentsOf: root.appendingPathComponent("TopOptFlows/WorkspacePlaceholder.swift"), encoding: .utf8)
         XCTAssertTrue(ws.contains("let stages: [Bool] = (organicIn?.showRepairs == true) ? [false, true]"),
                       "★ the traced picture first, the repaired one after")
-        XCTAssertTrue(ws.contains("guard bakeGeneration == strutBakeGeneration else { return }"),
+        XCTAssertTrue(ws.contains("guard bakeGeneration == strutBakeGeneration else {"),
                       "★ a newer bake retires an older stage")
+        // ★ ONE BAKE AT A TIME, and the traced picture is DRAWN while core repairs it
+        // (his walk, 2026-09-07: everything frozen; a 2–4 mm preview that never came).
+        XCTAssertTrue(ws.contains("guard !strutBakeInFlight, !strutRefining else { strutRebakePending = true; return }"),
+                      "★ a change during a bake queues one rebake, it does not start a second")
+        XCTAssertTrue(ws.contains("strutBakeInFlight = false\n                strutRefining = !isLastStage"),
+                      "★ stage one is a picture: in flight means nothing to show, refining means a better one is coming")
+        XCTAssertFalse(ws.contains("DispatchQueue.main.sync { bakeGeneration == strutBakeGeneration }"),
+                       "★ a bake thread must never block on main")
         XCTAssertTrue(ws.contains("OrganicAutoWindow.band(regions: regions, input: o,"), "★ core's band under Auto")
-        XCTAssertTrue(ws.contains("o.solidRimMM = organicRimSetting < 0 ? Swift.min(o.separationMinMM, o.separationMaxMM) : organicRimSetting"),
-                      "★ the job's rim number: −1 ⇒ the window's low end")
+        // ★ SUPERSEDED TWICE. First: −1 does not mean the window's low end. Then
+        // (2026-09-07 evening, his "HUGE rim"): it does not mean a CELL either. It is an
+        // outline one STRUT wide, one rule for every mode, and the job carries the
+        // number so the run rims what the preview drew.
+        XCTAssertTrue(ws.contains("let organicRimSetting = project.lattice.organicRunSolidRimMM("),
+                      "★ the bake takes the rim the RUN will apply")
+        XCTAssertTrue(ws.contains("o.solidRimMM = Swift.max(0, organicRimSetting)"),
+                      "★ one rule for every mode")
+        XCTAssertFalse(ws.contains("? Swift.min(o.separationMinMM, o.separationMaxMM) : 0)"),
+                       "★ the window's low end is not a rim anywhere")
         let wz = try String(contentsOf: root.appendingPathComponent("TopOptFlows/LatticeSetupWizard.swift"), encoding: .utf8)
         XCTAssertTrue(wz.contains("quick.showRepairs = false"), "★ the sample cube traces first too")
         let br = try String(contentsOf: root.appendingPathComponent("TopOptBridge/bridge.cpp"), encoding: .utf8)

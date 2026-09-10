@@ -2360,6 +2360,8 @@ std::vector<double> organic_spans_field(const double* spans7, std::size_t span_c
 //   stranded_drop, ground_tie, branch_support, dangling, stranded_drop_2, fill_mat,
 //   finish, written] (−1 = the pass did not run), [45] written components,
 //   [46] 1 = emission ran, [47] filleted (arched) spans
+//   ★ [59] 1 = the SYNTHESISED von Mises (n doubles) follows the surface field, before
+//   the spans — what the tracer actually saw, so the stress map can paint it.
 //   ★ THE PHASE CLOCK (2026-09-06: his part sat 12 min 26 s at "Rebuilding the
 //   lattice" and only a `sample` of the process could say where; now the header
 //   says): [56] trace/grow seconds, [57] emission seconds (node merge, base cut,
@@ -2391,6 +2393,20 @@ std::vector<double> organic_preview_field(
     // the dangling-end trim cuts it back to its last connector. A preview that
     // assumed anchors drew a crisper face than the bare run builds.
     int anchor_at_boundary,
+    // ★★★ THE TIES (his walk, 2026-09-07: "There are no horizontal struts whatsoever …
+    // none of these vertical struts are connected … That means half the algorithm isn't
+    // running"). He was exactly right. `OrganicParams::transfer_ties` DEFAULTS TO FALSE;
+    // run_job sets it from the job (`op.transfer_ties = jg.organic_transfer_ties`, and
+    // the app's default is ON) and this preview never set it at all — so every grown
+    // picture the app has ever drawn was pillars with nothing across them, while the run
+    // built the cross-members. `tie_swirl` rode along for the same reason.
+    int transfer_ties, double tie_swirl,
+    // ★★★ THE PER-VOXEL BEAD (`op.strut_diameter_field = &bead` in run_job). The run
+    // computes a strut diameter for EVERY candidate from the mass coupling at that
+    // voxel's (spacing, density), floored at the stated minimum extrudable width; the
+    // preview passed only the scalar, so it drew ONE thickness everywhere while the
+    // file varies. Null, or the wrong length, ⇒ the scalar, as core documents.
+    const double* bead_mm, std::size_t bead_count,
     // ★ 1 = bake what the FILE contains (the emission's post-pass spans: node merge,
     // base cut, support arches, ties); 0 = bake the TRACED/GROWN curves themselves,
     // before any repair — the "show without repairs" preview (maintainer,
@@ -2405,6 +2421,18 @@ std::vector<double> organic_preview_field(
     // header. region_id per voxel (0 = none), synth rows of 4, the run's dead fraction.
     const int* region_id, std::size_t region_id_count,
     const double* synth, std::size_t synth_count, double synth_dead_fraction,
+    // ★★★ AN ABSOLUTE FLOOR UNDER THE DEAD TEST (his ruling, 2026-09-07: "I want you to
+    // change the dead test to 2% OR 0.005MPa - whichever comes first").
+    //
+    // ★ CORE'S TEST IS PURELY RELATIVE: `thr = dead_fraction × peak`, the peak taken
+    // over every candidate. On a part that carries almost nothing — his stand peaks at
+    // 0.03 MPa against a 31 MPa allowable — 2 % of that peak is 0.0006 MPa, and a wall
+    // holding 0.004 MPa clears it comfortably. Core replaces nothing, the foci he set do
+    // nothing, and no message anywhere says why. The fix is a threshold that is also an
+    // ABSOLUTE stress, and `dead_fraction` is a parameter core exposes: converting the
+    // millimetre-of-mercury into core's own units here (`max(fraction, mpa / peak)`)
+    // uses `synthesize_focal_stress` exactly as written. 0 ⇒ the relative test alone.
+    double synth_dead_mpa,
     // The field to bake the traced capsules into: its own grid, which is the REGION's
     // bbox rather than the part's, so the voxel can be a fraction of the design grid's.
     int fnx, int fny, int fnz, double fspacing,
@@ -2461,8 +2489,27 @@ std::vector<double> organic_preview_field(
       r.soft_mm = synth[k + 3];
       cfg.push_back(r);
     }
+    // ★ HIS RULE, IN CORE'S OWN UNITS: whichever threshold fires FIRST. The peak is
+    // core's — the maximum von Mises over every candidate, the same loop
+    // `synthesize_focal_stress` runs — so `mpa / peak` is exactly the fraction that
+    // makes core's `dead_fraction × peak` equal to the stated millipascals.
+    // `organic_von_mises6` is file-static in core, so the formula is written out here —
+    // core's exactly, Voigt [xx, yy, zz, xy, yz, zx] with TRUE shear.
+    auto vm6 = [](const double* m) {
+      const double sxx = m[0], syy = m[1], szz = m[2], sxy = m[3], syz = m[4], szx = m[5];
+      const double d = 0.5 * ((sxx - syy) * (sxx - syy) + (syy - szz) * (syy - szz) +
+                              (szz - sxx) * (szz - sxx)) +
+                       3.0 * (sxy * sxy + syz * syz + szx * szx);
+      return std::sqrt(std::max(0.0, d));
+    };
+    double synth_peak = 0.0;
+    for (std::size_t e = 0; e < n; ++e)
+      if (cand[e]) synth_peak = std::max(synth_peak, vm6(&stress[6 * e]));
+    double dead_fraction = synth_dead_fraction;
+    if (synth_dead_mpa > 0.0 && synth_peak > 0.0)
+      dead_fraction = std::max(dead_fraction, synth_dead_mpa / synth_peak);
     try {
-      srep = topopt::synthesize_focal_stress(grid, cand, vr, cfg, synth_dead_fraction, stress);
+      srep = topopt::synthesize_focal_stress(grid, cand, vr, cfg, dead_fraction, stress);
       synth_ran = true;
     } catch (...) {
       synth_ran = false;
@@ -2487,6 +2534,19 @@ std::vector<double> organic_preview_field(
   p.strut_diameter_mm = strut_diameter_mm > 0.0 ? strut_diameter_mm : 0.0;
   p.layer_hint_mm = (grow != 0 && layer_height_mm > 0.0) ? layer_height_mm : 0.0;
   p.anchor_at_region_boundary = anchor_at_boundary != 0;
+  p.transfer_ties = transfer_ties != 0;
+  p.tie_swirl = tie_swirl;
+  // ★ AND THE RUN'S OWN DENSITY FLOOR: `op.rho_min = max(band_rho_min,
+  // kOrganicVdiDensityFloor)` (run_job.cpp). Passing the band raw let the preview grade
+  // below a density the run will not build.
+  p.rho_min = std::max(p.rho_min, topopt::kOrganicVdiDensityFloor);
+  // ★ the run's per-voxel bead, when the caller computed one (see above). The vector
+  // must outlive the trace, so it is declared here and never reallocated.
+  std::vector<double> bead;
+  if (bead_mm != nullptr && bead_count == n) {
+    bead.assign(bead_mm, bead_mm + n);
+    p.strut_diameter_field = &bead;
+  }
 
   topopt::OrganicLattice lat;
   topopt::OrganicGenStats gstats;   // the grower's own counters (run_job: `&oo.growth`)
@@ -2681,6 +2741,24 @@ std::vector<double> organic_preview_field(
     out.insert(out.end(), n, 0.0);
   }
   out.insert(out.end(), surface_field.begin(), surface_field.end());
+  // ★★★ THE SYNTHESISED VON MISES (his walk, 2026-09-07: "The synthetic stresses do
+  // not seem to exist on the back wall — that, or they are not being visualized").
+  // They existed: core replaced them in `stress` above and the tracer used them. But
+  // the app's stress map is painted from the SOLVE's field, so the synthetic load was
+  // invisible in the one view that exists to show where the part is working. Returning
+  // the field the tracer actually saw is the only way the picture and the trace can
+  // agree about it. Voigt with TRUE shear, core's own convention.
+  if (synth_ran) {
+    out[59] = 1.0;
+    out.reserve(out.size() + n);
+    for (std::size_t i = 0; i < n; ++i) {
+      const double* m = &stress[6 * i];
+      const double a = (m[0] - m[1]) * (m[0] - m[1]) + (m[1] - m[2]) * (m[1] - m[2]) +
+                       (m[2] - m[0]) * (m[2] - m[0]);
+      const double b = 3.0 * (m[3] * m[3] + m[4] * m[4] + m[5] * m[5]);
+      out.push_back(std::sqrt(0.5 * a + b));
+    }
+  }
   // ★ THE EMITTED SPANS THEMSELVES, LAST — 7 doubles each (a, b, r). The FIELD is what
   // the march samples; these are for a caller that wants the geometry directly, e.g.
   // the settings sample, which builds capsules rather than sphere-tracing a volume.

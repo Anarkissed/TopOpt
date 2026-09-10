@@ -23,8 +23,23 @@ final class OrganicCapsuleEvidenceGen: XCTestCase {
         let evidence = root.deletingLastPathComponent().deletingLastPathComponent()
             .appendingPathComponent("evidence/2026-09-02-organic-on-device/sample_shape_fit_2026-09-03")
         let mesh = LatticeWizardSample.cube(edgeMM: 20, at: .zero)
-        for (name, file) in [("traced_fit", "9eefe6f45b88780552ddec25.3mf"),
-                             ("grown_auto", "b4fa2779cd2ebf538a95b971.3mf")] {
+        // ★ WHATEVER THIS BUILD SHIPS, NOT A FILENAME FROM A PAST ONE (2026-09-07).
+        // The keys are a hash of the picks, core's fingerprint and the bake layout, so
+        // every change to any of those renames all of them — and this generator then
+        // failed on a file that no longer exists, which says nothing about capsules.
+        // Two of whatever is there, largest first, so the picture is worth looking at.
+        let shipped = ((try? FileManager.default.contentsOfDirectory(atPath: variants.path)) ?? [])
+            .filter { $0.hasSuffix(".3mf") }
+            .sorted {
+                let a = (try? FileManager.default.attributesOfItem(
+                    atPath: variants.appendingPathComponent($0).path)[.size]) as? Int ?? 0
+                let b = (try? FileManager.default.attributesOfItem(
+                    atPath: variants.appendingPathComponent($1).path)[.size]) as? Int ?? 0
+                return a > b
+            }
+        try XCTSkipIf(shipped.isEmpty, "this build ships no organic sample variants")
+        for (i, file) in shipped.prefix(2).enumerated() {
+            let name = "shipped_\(i)"
             let data = try Data(contentsOf: variants.appendingPathComponent(file))
             let doc = try XCTUnwrap(OrganicBeamLattice3MF.read(data), "\(file) reads")
             let caps = doc.spans.map { OrganicCapsule($0) }

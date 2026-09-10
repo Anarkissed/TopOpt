@@ -63,9 +63,22 @@ public enum OrganicShapeFit {
     /// `candidate` the region mask, `voxelMM` the grid pitch, `window` the job's
     /// cell_min/cell_max (nil ⇒ no window: shape-fit-only cannot run, the cap floor is
     /// `kOrganicShapeFitMinCellRatio × spacing`).
+    /// ★ Core's cells-across-a-member floor for a TRACED lattice
+    /// (`kOrganicRecommendCellsAcrossMember`): two cells across the wall.
+    public static let cellsAcrossMember = 2.0
+
+    /// - Parameters:
+    ///   - memberMM: core's per-voxel member width (`lattice_member_thickness_mm`).
+    ///     Empty ⇒ only the boundary term applies, which is what this mirror did
+    ///     before 2026-09-07 and why shape fit looked inert: the boundary cap
+    ///     `2 · dist · voxel` first bites one voxel from the edge, so on a 1.6 mm grid
+    ///     it never touched a 4–5.5 mm separation except in the outermost ring.
+    ///   - cellsAcrossMember: n★ in `member / n★`.
     public static func apply(spacing: [Double], candidate: [Bool], nx: Int, ny: Int, nz: Int,
                              voxelMM: Double, window: (lo: Double, hi: Double)?,
-                             only: Bool, minCellRatio: Double = 0.5) -> Result {
+                             only: Bool, minCellRatio: Double = 0.5,
+                             memberMM: [Double] = [],
+                             cellsAcrossMember: Double = cellsAcrossMember) -> Result {
         var out = spacing
         let dist = boundaryDistance(candidate: candidate, nx: nx, ny: ny, nz: nz)
         let big = Int(1) << 30
@@ -80,9 +93,14 @@ public enum OrganicShapeFit {
                 if out[e] < before { shrunk += 1; worst = min(worst, out[e] / before) }
             }
         } else {
+            let haveMember = memberMM.count == candidate.count && cellsAcrossMember > 0
             for e in 0..<candidate.count where candidate[e] {
                 let capBoundary = 2.0 * Double(dist[e]) * voxelMM
+                // ★ core's OTHER term: the wall must hold n★ cells across it.
                 var cap = capBoundary
+                if haveMember, memberMM[e] > 0 {
+                    cap = Swift.min(cap, memberMM[e] / cellsAcrossMember)
+                }
                 let floorMM = window.map { $0.lo } ?? (minCellRatio * out[e])
                 if cap < floorMM { cap = floorMM }
                 guard cap > 0, cap < out[e] else { continue }

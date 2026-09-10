@@ -262,6 +262,8 @@ public struct LatticeWizardModel: Equatable, Sendable {
     public var organicSyntheticFoci: Int = 4
     /// ★ PR 355 keys (2026-09-06).
     public var organicTransferTies: Bool = true
+    /// ★ Preview-only depth-stagger TEST (2026-09-08). See `OrganicDepthStagger`.
+    public var organicDepthStagger: Bool = false
     public var organicTieSwirl: Double = 1.0
     public var organicSolidRimMM: Double = -1
     public var organicLookCellsAcross: Int = 8
@@ -387,6 +389,7 @@ public struct LatticeWizardModel: Equatable, Sendable {
         self.organicSyntheticStresses = s.organicSyntheticStresses
         self.organicSyntheticFoci = s.organicSyntheticFoci
         self.organicTransferTies = s.organicTransferTies
+        self.organicDepthStagger = s.organicDepthStagger
         self.organicTieSwirl = s.organicTieSwirl
         self.organicSolidRimMM = s.organicSolidRimMM
         self.organicLookCellsAcross = s.organicLookCellsAcross
@@ -441,6 +444,7 @@ public struct LatticeWizardModel: Equatable, Sendable {
         out.organicSyntheticStresses = organicSyntheticStresses
         out.organicSyntheticFoci = OrganicSyntheticStress.clampFoci(organicSyntheticFoci)
         out.organicTransferTies = organicTransferTies
+        out.organicDepthStagger = organicDepthStagger
         out.organicTieSwirl = Swift.min(1, Swift.max(0, organicTieSwirl))
         out.organicSolidRimMM = organicSolidRimMM
         out.organicLookCellsAcross = Swift.min(16, Swift.max(2, organicLookCellsAcross))

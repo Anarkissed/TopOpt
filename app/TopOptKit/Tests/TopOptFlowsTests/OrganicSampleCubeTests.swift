@@ -49,14 +49,21 @@ final class OrganicSampleCubeTests: XCTestCase {
         var s = organic()
         let bead = OrganicSampleCube.Picks(settings: s, layerHeightMM: 0.2)
         XCTAssertEqual(bead.thinnestRadiusMM, 0.21, accuracy: 1e-9)      // 0.42 / 2
-        XCTAssertEqual(bead.bakeVoxelMM, 0.105, accuracy: 1e-9)          // ≤ r_min / 2
+        // ★★★ THE BAKE VOXEL FOLLOWS THE CELL, NOT THE STRUT (2026-09-07). It was
+        // r_min / 2 = 0.105 mm, chosen when the DISTANCE FIELD was what the renderer
+        // drew; organic is drawn by capsule impostors and the field is only a fallback,
+        // so a 20 mm cube no longer allocates twelve million cells to describe it. Half
+        // a cell resolves the strut spacing, which is what a fallback has to convey.
+        XCTAssertEqual(bead.bakeVoxelMM, Swift.max(bead.separationMinMM, bead.separationMaxMM) / 8,
+                       accuracy: 1e-9)
         s.organicStrutWidthMM = 1.0
         let thick = OrganicSampleCube.Picks(settings: s, layerHeightMM: 0.2)
         // ★ 2026-09-04: the strut width is a live radius on the march, not a pick —
-        // the same picks ⇒ the same trace, and the bake voxel follows the bead
+        // the same picks ⇒ the same trace. The RIM does not read it either, precisely
+        // so that this stays true (2026-09-07).
         XCTAssertEqual(thick, bead, "Thicker must not re-trace the sample")
-        XCTAssertEqual(thick.bakeVoxelMM, 0.105, accuracy: 1e-9)
-        // a 20 mm corner at the bead voxel stays under the 12 M cap
+        XCTAssertEqual(thick.bakeVoxelMM, bead.bakeVoxelMM, accuracy: 1e-9)
+        // the cube stays far under the 12 M cap
         let n = Int(OrganicSampleCube.edgeMM / bead.bakeVoxelMM) + 2
         XCTAssertLessThan(n * n * n, 12_000_000)
     }

@@ -101,11 +101,31 @@ public struct WorkspacePlaceholder: View {
     /// ★ Which bake is current: a stage-2 (repairs) picture from an older bake, or a
     /// bake finishing after a newer one started, is dropped by comparing this.
     @State private var strutBakeGeneration = 0
+    /// ★★★ A BETTER PICTURE IS COMING, AND THE ONE ON SCREEN IS CURRENT (2026-09-07).
+    /// Distinct from `strutBakeInFlight`, which means "there is NO current picture" and
+    /// hides the layer. Stage one (the traced curves) lands in a second or two and is
+    /// drawn; stage two (core's repairs) can take minutes and only replaces it.
+    @State private var strutRefining = false
+    /// ★★★ ONE BAKE AT A TIME (his walk, 2026-09-07: everything frozen, and a 2–4 mm
+    /// preview that never arrived). Measured: two bakes started 0.9 s apart, each
+    /// tracing 38,099 spans and then running core's emission on them, on every core the
+    /// device has. A change while one runs no longer starts a second — it sets this,
+    /// and the running bake starts one more when it lands.
+    @State private var strutRebakePending = false
     /// The (i) beside the preview caption: the whole banner sentence, on demand.
     @State private var latticeNoticeInfoShown = false
     /// ★ The lattice settings the strut preview was last baked FROM, with the
     /// fields a bake writes stripped (`LatticeSettings.previewBakeInputs`).
     @State private var latticeInputsLastBaked: LatticeSettings? = nil
+    /// ★★★ WHAT THE LAST ORGANIC BAKE WAS BUILT FROM (his walk, 2026-09-07: "If no
+    /// changes were made in the lattice settings, then do *not* rebake the lattice").
+    /// Sixteen call sites reach `buildStrutScene()`, and most of them are events, not
+    /// changes: leaving a sheet, a selection re-armed, a preview toggled back on. Each
+    /// one paid for a full organic trace. This is the fingerprint of everything the bake
+    /// READS; when it has not moved and a picture is already on screen, the rebake is
+    /// skipped. Organic only — a periodic bake is about a second and its call sites are
+    /// long settled, and nothing about the regular lattice's timing is being changed.
+    @State private var organicBakeFingerprint: OrganicBakeKey? = nil
     /// ★ THE DEAD-WALL REPORT of the last organic bake (2026-09-05): per selectable
     /// key, whether the wall carried real stress and what was injected. Read by the
     /// Selections drawer's Foci row.
@@ -1263,7 +1283,7 @@ public struct WorkspacePlaceholder: View {
                 // both sit top-centre, and two capsules in one place is worse
                 // than the more specific one winning. The solve is the longer
                 // wait and the more surprising, so it takes precedence.
-                if strutBakeInFlight, showStrutPreview,
+                if strutBakeInFlight || strutRefining, showStrutPreview,
                    !(latticeSimIsRunning && !simBannerDismissed) { strutBakingBanner }
             }
             // ★ AND NEITHER ARE THE LOAD PILLS — the weight readout and its
@@ -3678,7 +3698,9 @@ public struct WorkspacePlaceholder: View {
                     // settings — a fresh strut-scene bake + proxy sync.
                     onRefreshPreview: {
                         syncLatticeProxy()
-                        buildStrutScene()
+                        // ★ A REFRESH IS A REQUEST, NOT A CHANGE — it rebuilds even when
+                        // nothing moved, which is exactly what the button is for.
+                        buildStrutScene(forceRebuild: true)
                     },
                     // BAR F3's CALL SITE, from this side: the model outlives the
                     // page (close and reopen and the answer is still there), the
@@ -3790,10 +3812,15 @@ public struct WorkspacePlaceholder: View {
                 .controlSize(.small)
                 .tint(DS.Color.accent.color)
             VStack(alignment: .leading, spacing: 1) {
-                Text("Rebuilding the lattice")
+                // ★ WHICH STAGE (2026-09-07): the traced picture is already on
+                // screen while core's repair passes run, and those can take minutes —
+                // saying "rebuilding" over a drawn lattice reads as a hang.
+                Text(strutRefining ? "Adding the print repairs" : "Rebuilding the lattice")
                     .font(.system(size: 12, weight: .bold))
                     .foregroundStyle(DS.Color.textPrimary.color)
-                Text("Your change is being applied to the strut preview.")
+                Text(strutRefining
+                     ? "The traced struts are shown. The arches, legs and merges are still being built."
+                     : "Your change is being applied to the strut preview.")
                     .dsStyle(DS.TypeScale.caption2)
                     .foregroundStyle(DS.Color.textTertiary.color)
                     .fixedSize(horizontal: false, vertical: true)
@@ -3945,12 +3972,28 @@ public struct WorkspacePlaceholder: View {
                 .padding(.leading, leading)
                 .padding(.trailing, trailing)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                // ★★★ THE PAGE-WIDE TAP EATER (his walk, 2026-09-07: "it has created
+                // some sort of consistent error that made the entire page untouchable
+                // when [the repairs banner] came up").
+                //
+                // This modifier expands its content to the WHOLE viewport so the
+                // capsule can be centred in the gap between the top clusters, and the
+                // measuring background is a `Color.clear` over that full-screen frame.
+                // `Color.clear` is a SHAPE: it hit-tests. So while any banner using
+                // this modifier was up, an invisible full-screen surface sat over the
+                // model and swallowed every touch — orbit, tap, the Selections panel,
+                // everything. It was invisible for a year because the bake banner was
+                // up for about a second; the repair banner stays up for minutes, and
+                // the defect became the whole page.
+                //
+                // The measurement wants geometry, not touches.
                 .background(GeometryReader { g in
                     Color.clear.preference(
                         key: TopClusterEdgeKey.self,
                         value: .init(left: 0, right: .greatestFiniteMagnitude,
                                      width: g.frame(in: .global).width))
-                })
+                }
+                .allowsHitTesting(false))
         }
         /// Out to the left cluster's trailing edge, plus a margin.
         private var leading: CGFloat {
@@ -4679,8 +4722,43 @@ public struct WorkspacePlaceholder: View {
         return h.finalize()
     }
 
-    private func buildStrutScene() {
+    private func buildStrutScene(forceRebuild: Bool = false) {
+        // ★ ONE AT A TIME. Sixteen call sites lead here and a settings sheet moves
+        // several at once; without this they all bake at once and fight for the CPU.
+        guard !strutBakeInFlight, !strutRefining else { strutRebakePending = true; return }
         guard let mesh = viewerMesh else { return }
+        // ★★★ NOTHING MOVED ⇒ NOTHING IS REBUILT (see `organicBakeFingerprint`). The
+        // comparison is the WHOLE of what a bake reads — `previewBakeInputs`, which is
+        // every lattice setting with the two fields a bake WRITES stripped out, plus the
+        // region key — rather than a hand-listed subset. A subset is a stale picture
+        // waiting to happen: the one setting nobody remembered to add is the one that
+        // stops taking effect. `forceRebuild` is the Refresh button, a request rather
+        // than a change.
+        //
+        // ★★★ AND THE SOLVE IS AN INPUT (his walk, 2026-09-07, 22:29: "Grown lattice was
+        // set — the preview returned octet truss. What?!"). It was MY guard. The first
+        // bake on entering the stage runs before the stage's solve has landed, so
+        // `organicForBake` is nil, the scene falls back to the ladder, and the
+        // fingerprint is recorded. The solve then arrives — and it is not a lattice
+        // SETTING, so nothing in `previewBakeInputs` moves and the rebake that would
+        // have drawn the organic lattice was skipped. He was left on the octet stand-in
+        // until he tapped Refresh. The field's own key and whether the tracer had its
+        // inputs at all are part of what a bake reads, so both belong here.
+        if project.lattice.resolvedAlgorithm == "organic" {
+            let now = OrganicBakeKey(region: latticeRegionInputsKey,
+                                     stress: latticeStressFieldKey,
+                                     tensor: latticeStressField?.stressTensor.count ?? -1,
+                                     inputs: project.lattice.previewBakeInputs)
+            if !forceRebuild, strutScene != nil, organicBakeFingerprint == now {
+                NSLog("DIAG organic bake: skipped — no lattice setting changed since the last one")
+                return
+            }
+            // Recorded on EVERY organic bake, forced or not: a forced rebuild that did
+            // not record one would let the very next event through as "changed".
+            organicBakeFingerprint = now
+        } else {
+            organicBakeFingerprint = nil
+        }
         let latticeID = latticeProxy.params.latticeID
         // Auto density on the lattice page grades the preview from the page's OWN
         // demand field (the variant's field on the variants entry, else the sim's) —
@@ -4784,9 +4862,23 @@ public struct WorkspacePlaceholder: View {
                 strutDiameterMM: lat.organicStrutWidthMM, grow: lat.organicGrowth,
                 layerHeightMM: project.printParams.layerHeightMM,
                 overhangAngleDeg: lat.organicGrowth ? 0 : lat.organicOverhangDeg,
+                // ★★★ THE TIES THE RUN WRITES (his walk, 2026-09-07: "There are no
+                // horizontal struts whatsoever … none of these vertical struts are
+                // connected"). `organic_transfer_ties` goes into the job and the run
+                // sets it on the tracer; the preview never did, and core's own struct
+                // default is FALSE — so the picture was pillars and the print was a
+                // lattice. Grown-path only, so the traced picture is untouched.
+                transferTies: lat.organicTransferTies, tieSwirl: lat.organicTieSwirl,
                 shapeFit: lat.organicShapeFit, shapeFitOnly: lat.organicShapeFitOnly,
                 // ★ the run's anchoring rule: a shell only under Covered
                 anchorAtBoundary: lat.boundary == .covered,
+                // ★★★ THE REPAIRS SWITCH REACHES THE PART PREVIEW (his walk, 2026-09-07:
+                // "Why is the 'adding print repairs' showing up when I have not set it
+                // to???"). It never did: this initialiser left `showRepairs` at its
+                // default of true, so the part ALWAYS ran core's emission — the long
+                // pass — and always showed the second-stage banner, whatever the switch
+                // said. Only the wizard's sample honoured it.
+                showRepairs: lat.organicShowRepairs,
                 overhangFillet: lat.organicOverhangFillet)
         }()
         // ★ NOTHING PICKED ⇒ the window above is the octet window standing in; the
@@ -4798,7 +4890,15 @@ public struct WorkspacePlaceholder: View {
             return (a.cellMinMM, a.cellMaxMM)
         }()
         let organicLook = project.lattice.organicLookCellsAcross
-        let organicRimSetting = project.lattice.organicSolidRimMM
+        let organicLookPercent = project.lattice.organicLookPercent
+        // ★ THE RIM THE RUN WILL APPLY — see `organicRunSolidRimMM`. Under Auto and
+        // under a single Manual size the job carries no `cell_min_mm`, so the run's rim
+        // is 0 and the preview must not remove a band the run keeps.
+        // ★ THE PRINTABILITY FLOOR, not the bead — `max(1.535 × bead, one design voxel)`,
+        // the probe's own number once it has run (his ruling, 2026-09-08).
+        let organicRimSetting = project.lattice.organicRunSolidRimMM(
+            floorMM: project.organicFloor.mm)
+        let organicDepthStagger = project.lattice.organicDepthStagger
         let organicIsStructural = stageMode == .structural
         let spansForBake = latticeOrganicSpans
         let receiptForBake = latticeOrganicReceipt
@@ -4813,46 +4913,79 @@ public struct WorkspacePlaceholder: View {
         let bakeGeneration = strutBakeGeneration
         DispatchQueue.global(qos: .userInitiated).async {
             var organicIn = organicForBake
+            // Set on main when a newer bake takes over, read by the stage loop.
+            let cancelledStages = LatticeBakeFlag()
             // ★★ THE WINDOW UNDER AUTO (2026-09-06): the probe's Auto answer when it has
             // one, else core's own band from the walls, the bead, the voxel and the
             // look — `organic_recommend_band`, the function the run calls — never the
             // octet window. In Aesthetic the run takes the look pair; in Structural the
             // band. Collapsed ⇒ the run leaves the region solid; the preview keeps the
             // window it had and says so.
+            // ★★★ ONE PLAN PER BAKE (2026-09-07). It tags every voxel by point-in-polygon
+            // against each face's outline; two callers wanted it and each built its own.
+            var synthPlan = OrganicSyntheticStress.Plan(regionIDs: [], regions: [], keyByID: [:])
+            if let o = organicIn {
+                synthPlan = OrganicSyntheticStress.plan(
+                    regions: regions, dims: o.dims, originMM: o.originMM, spacingMM: o.spacingMM,
+                    defaultFoci: synthDefaultFoci, statedFoci: synthStatedFoci)
+            }
             var organicWindowNote = ""
             if organicAutoWindow, var o = organicIn {
                 if let f = organicForecastAuto {
                     o.separationMinMM = f.lo; o.separationMaxMM = f.hi
                     organicWindowNote = String(format: "auto window %.2f–%.2f mm from the probe", f.lo, f.hi)
                 } else if let band = OrganicAutoWindow.band(regions: regions, input: o,
+                                                            plan: synthPlan,
                                                             lookCellsAcross: Double(organicLook)) {
-                    if let w = OrganicAutoWindow.window(from: band, structural: organicIsStructural) {
+                    // ★ THE LOOK SLIDER PICKS IT (2026-09-07): 1 % the largest cell the
+                    // wall holds, 100 % the smallest core will print. Structural keeps
+                    // core's own pick — the look is the Aesthetic lever.
+                    let picked = organicIsStructural
+                        ? OrganicAutoWindow.window(from: band, structural: true)
+                        : OrganicAutoWindow.window(percent: organicLookPercent, band: band)
+                    if let w = picked {
                         o.separationMinMM = w.lo; o.separationMaxMM = w.hi
-                        organicWindowNote = String(format: "auto window %.2f–%.2f mm · %@", w.lo, w.hi, band.summary)
+                        organicWindowNote = String(format: "auto window %.2f–%.2f mm · look %.0f%% · %@",
+                                                   w.lo, w.hi, organicLookPercent, band.summary)
                     } else {
                         organicWindowNote = "auto window kept the stand-in · " + band.summary
                     }
                 }
                 organicIn = o
             }
-            // ★ THE SOLID RIM: the job's number, −1 ⇒ the window's low end (run_job).
+            // ★ THE SOLID RIM: the job's number. −1 means "one base cell", and the base
+            // cell is `cell_min_mm` — which under Auto the job carries only once the Look
+            // slider has written the window it picked. When the bake derived that window
+            // itself (Auto, nothing picked yet) the rim is that window's low end, which
+            // is exactly what the job will carry once it is saved.
             if var o = organicIn {
-                o.solidRimMM = organicRimSetting < 0 ? Swift.min(o.separationMinMM, o.separationMaxMM) : organicRimSetting
+                // ★★★ AND THE AUTO FALLBACK IS GONE (2026-09-07). It handed the rim
+                // the WINDOW'S LOW END — a whole cell — which is the huge hard-edged
+                // band he photographed. `organicRunSolidRimMM(beadMM:)` answers for
+                // every mode now, and the job carries the same number.
+                o.solidRimMM = Swift.max(0, organicRimSetting)
+                // ★ THE DEPTH-STAGGER EXPERIMENT (2026-09-08), scaled to the window the
+                // lattice is graded to. Preview only; never written to the job.
+                o.depthStaggerCellMM = organicDepthStagger
+                    ? Swift.max(o.separationMinMM, o.separationMaxMM) : 0
                 organicIn = o
             }
             if let o = organicIn {
                 NSLog("DIAG organic window: %.2f–%.2f mm · rim %.2f mm%@", o.separationMinMM, o.separationMaxMM,
                       o.solidRimMM, organicWindowNote.isEmpty ? "" : " · " + organicWindowNote)
             }
-            var synthPlan = OrganicSyntheticStress.Plan(regionIDs: [], regions: [], keyByID: [:])
-            if synthOn, let o = organicIn {
+            // ★★★ THE EXACT REGION MEMBERSHIP, ALWAYS (2026-09-07). The scene used to
+            // decide which voxels are candidates by NEAREST-NEIGHBOUR sampling the
+            // occupancy grid — a different grid, a different origin — so a voxel whose
+            // centre rounded just outside was dropped even when most of it was inside.
+            // That loses up to half a voxel at EVERY boundary of every face, and the run
+            // has no such loss: it reads the region ids on its own grid. The plan above
+            // is exactly those ids, so hand them over whether or not synthesis is on.
+            organicIn?.regionIDs = synthPlan.regionIDs
+            if synthOn, organicIn != nil {
                 // ★ CORE'S OWN SYNTHESIS (2026-09-06): the bridge calls
-                // synthesize_focal_stress with this plan — the same function and the
-                // same per-region config the run gets. The app injects nothing.
-                synthPlan = OrganicSyntheticStress.plan(
-                    regions: regions, dims: o.dims, originMM: o.originMM, spacingMM: o.spacingMM,
-                    defaultFoci: synthDefaultFoci, statedFoci: synthStatedFoci)
-                organicIn?.regionIDs = synthPlan.regionIDs
+                // synthesize_focal_stress with the plan built above — the same function
+                // and the same per-region config the run gets. The app injects nothing.
                 organicIn?.syntheticRegions = synthPlan.regions
             }
             // ★★★ TWO STAGES (his timings, 2026-09-06: trace 0.2 s, core's emission
@@ -4861,7 +4994,12 @@ public struct WorkspacePlaceholder: View {
             // replaces it when core is done. A newer bake retires both.
             let stages: [Bool] = (organicIn?.showRepairs == true) ? [false, true] : [organicIn?.showRepairs ?? true]
             for (stageIndex, stageRepairs) in stages.enumerated() {
-            if stageIndex > 0, !(DispatchQueue.main.sync { bakeGeneration == strutBakeGeneration }) { break }
+            // ★ NEVER `DispatchQueue.main.sync` FROM HERE. The first cut did, to read
+            // the generation; a bake thread that blocks on main while main is waiting
+            // on anything this thread holds is a deadlock, and reading @State off the
+            // main actor is undefined besides. The generation is checked on main, in
+            // the completion, where it is safe to read.
+            if stageIndex > 0, cancelledStages.value { break }
             var stageIn = organicIn
             stageIn?.showRepairs = stageRepairs
             let isLastStage = stageIndex == stages.count - 1
@@ -4930,12 +5068,26 @@ public struct WorkspacePlaceholder: View {
                                         skippedFaces: skippedFaces)
             DispatchQueue.main.async {
                 // ★ a newer bake has started: this picture is stale, drop it
-                guard bakeGeneration == strutBakeGeneration else { return }
+                guard bakeGeneration == strutBakeGeneration else {
+                    cancelledStages.value = true
+                    return
+                }
                 strutScene = scene
                 strutSceneToken += 1
-                strutBakeInFlight = !isLastStage
+                // ★★★ THE TRACED PICTURE IS A PICTURE (2026-09-07). This read
+                // `strutBakeInFlight = !isLastStage`, and `latticeLayerIsDrawn` hides
+                // the layer while that is true — so stage one baked a lattice and then
+                // hid it, and he watched an empty part for a quarter of an hour while
+                // core's emission ran. In flight now means "nothing to show"; refining
+                // means "this is current, a better one is coming".
+                strutBakeInFlight = false
+                strutRefining = !isLastStage
+                // ★ THE WALL'S OWN STRESS, from the tensor the tracer was handed.
+                let wallStress = OrganicSyntheticStress.wallStress(
+                    tensor: organicIn?.tensor ?? [], regionIDs: synthPlan.regionIDs)
                 let wallReports = OrganicSyntheticStress.wallReports(
-                    from: scene.organicSyntheticReport, plan: synthPlan)
+                    from: scene.organicSyntheticReport, plan: synthPlan,
+                    stressByRegion: wallStress, allowableMPa: allowableMPa)
                 latticeDeadWalls = wallReports
                 // ★ THE PHASE CLOCK, IN THE LOG (2026-09-06): where a long bake went.
                 if let ph = scene.organicPhaseSeconds {
@@ -4943,19 +5095,40 @@ public struct WorkspacePlaceholder: View {
                           ph.trace, ph.emit, ph.bake, scene.organicEmittedSpans?.count ?? -1)
                 }
                 if synthOn, let rep = scene.organicSyntheticReport {
-                    NSLog("DIAG synthetic(core): regions=%d voxels=%d fully=%d blended=%d thr=%.4g peak=%.4g · %@",
+                    NSLog("DIAG synthetic(core): regions=%d voxels=%d fully=%d blended=%d thr=%.4g partPeak=%.4g · %@",
                           rep.regions.count, rep.voxelsInRegions, rep.fullySynthetic, rep.blended,
                           rep.deadThreshold, rep.peakVonMises,
-                          wallReports.values.map { "\($0.key ?? "?"): \($0.statusText) foci=\($0.foci) \($0.fullySynthetic)/\($0.voxels)" }
-                              .joined(separator: " | "))
+                          wallReports.values.map {
+                              String(format: "%@: p99 %.4g max %.4g = %.1f%% of peak → %@ (core synth %d/%d)",
+                                     $0.key ?? "?", $0.wallP99MPa, $0.wallMaxMPa, 100 * $0.stressShare,
+                                     $0.dead ? "UNLOADED" : "loaded", $0.fullySynthetic, $0.voxels)
+                          }.joined(separator: " | "))
                 }
                 // ★ The measurement outlives the bake: the drawer greys loaded walls
                 // and the job marks only unloaded ones (both read the project). Stored
                 // as the wall's REAL share (1 − synthetic).
                 if synthOn {
                     var fractions = project.lattice.selectableWallStressFraction
-                    for (k, w) in wallReports where w.voxels > 0 { fractions[k] = w.realShare }
+                    // ★★★ THE VERDICT, NOT THE RAW SHARE (his walk, 2026-09-07: the row
+                    // said "unloaded" and the pills stayed grey). Two paths were judging
+                    // the same wall: the ROW read the live report, which knows the part's
+                    // peak and the material's allowable and therefore knows the part is
+                    // idle; the GATE read this stored number and re-applied the share
+                    // test alone, with no idea the part carries nothing. 0.84 ≥ 0.15, so
+                    // it said "loaded" under a row that said "unloaded".
+                    //
+                    // One number, already judged: the share when the wall really carries
+                    // load, 0 when it does not. `latticeWallLoaded` then needs no context
+                    // it does not have.
+                    for (k, w) in wallReports where w.voxels > 0 {
+                        fractions[k] = w.carriesLoad ? w.stressShare : 0
+                    }
                     project.recordLatticeWallStress(fractions)
+                }
+                // ★ the change that arrived while this bake ran
+                if isLastStage {
+                    strutRefining = false
+                    if strutRebakePending { strutRebakePending = false; buildStrutScene() }
                 }
             }
             }   // stages

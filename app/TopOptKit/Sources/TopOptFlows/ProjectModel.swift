@@ -747,7 +747,10 @@ public final class ProjectModel: ObservableObject {
     /// Whether the last bake found real stress on this wall: true = loaded (no foci
     /// allowed), false = unloaded, nil = not measured yet.
     public func latticeWallLoaded(_ ref: LatticeSelectableRef) -> Bool? {
-        lattice.selectableWallStressFraction[ref.key].map { $0 >= OrganicSyntheticStress.loadedRealShare }
+        // ★ THE STORED NUMBER IS THE WALL'S STRESS SHARE (2026-09-07) — what share of
+        // the part's peak von Mises this wall carries. It was core's synthesis share,
+        // which answers a different question and called a spill-loaded wall "loaded".
+        lattice.selectableWallStressFraction[ref.key].map { $0 >= OrganicSyntheticStress.loadedStressShare }
     }
 
     /// ★ THE WALLS THE JOB MAY SYNTHESISE ON: only under an organic Aesthetic lattice
@@ -758,7 +761,7 @@ public final class ProjectModel: ObservableObject {
         guard lat.isOrganic, lat.organicSyntheticStresses,
               (lat.stageMode ?? .structural) == .aesthetic else { return [:] }
         var out: [String: Int] = [:]
-        for (key, frac) in lat.selectableWallStressFraction where frac < OrganicSyntheticStress.loadedRealShare {
+        for (key, frac) in lat.selectableWallStressFraction where frac < OrganicSyntheticStress.loadedStressShare {
             out[key] = OrganicSyntheticStress.clampFoci(lat.selectableSyntheticFoci[key] ?? lat.organicSyntheticFoci)
         }
         return out

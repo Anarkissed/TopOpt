@@ -1283,6 +1283,10 @@ std::vector<double> organic_preview_field(
     double overhang_angle_deg, double rho_min, double rho_max,
     double strut_diameter_mm, int grow, double layer_height_mm,
     int anchor_at_boundary,
+    // ★ the ties the RUN applies — `OrganicParams::transfer_ties` defaults FALSE
+    int transfer_ties, double tie_swirl,
+    // ★ the run's per-voxel bead (`op.strut_diameter_field`); null ⇒ the scalar
+    const double* bead_mm, std::size_t bead_count,
     int emit_repairs,
     int overhang_fillet,
     // ★ SYNTHETIC STRESS ON UNLOADED WALLS — CORE'S OWN FUNCTION (brief 2026-09-05,
@@ -1293,6 +1297,8 @@ std::vector<double> organic_preview_field(
     // the run's 0.02. Nothing runs when region_id_count != n or synth_count == 0.
     const int* region_id, std::size_t region_id_count,
     const double* synth, std::size_t synth_count, double synth_dead_fraction,
+    // ★ an absolute floor under the dead test, in MPa: `thr = max(fraction·peak, mpa)`
+    double synth_dead_mpa,
     int fnx, int fny, int fnz, double fspacing,
     double fox, double foy, double foz, double band_mm);
 

@@ -1268,3 +1268,283 @@ iOS 26.5), dylib af8bc1831f4af5cd; Mac suites Debug.
     the band, no strut is traced in it, and depth is untouched.
     `LatticeOrganicInput.solidRimMM`; test `testTheRimErodesTheRegionInPlaneButNotInDepth`.
     Not photographed on the simulator yet.
+
+## 2026-09-07 — his second walk: the freeze, the vanished preview, the two identical MPa
+
+45. **The traced picture was baked and then HIDDEN.** `latticeLayerIsDrawn` is
+    `showStrutPreview && !strutBakeInFlight …`, and the two-stage bake set
+    `strutBakeInFlight = !isLastStage` — true for stage one. So stage one traced
+    38,099 spans in 14 s, assigned the scene, and the layer stayed hidden while core's
+    emission ran; he watched an empty part for 15 minutes. FIX: `strutBakeInFlight`
+    now means "no current picture" (stage one clears it); the new `strutRefining`
+    means "this is current, a better one is coming" and does NOT hide the layer. The
+    banner says "Adding the print repairs" over the drawn traced lattice.
+46. **Bakes ran concurrently.** Log, 03:54: window at :19, stage-one phases at :33,
+    and a SECOND bake's window at :33.9 — two traces of 38,099 spans, then two of
+    core's emissions, on every core the device has. Sixteen call sites reach
+    `buildStrutScene()` and a settings sheet moves several at once. FIX: one bake at
+    a time — a change during a bake sets `strutRebakePending` and the running bake
+    starts one more when it lands. Also removed the `DispatchQueue.main.sync` the
+    stage loop used to read the generation (a bake thread must never block on main);
+    the completion sets a lock-guarded `LatticeBakeFlag` instead.
+47. **Both walls read the same MPa because the row printed the PART's peak.** Mine,
+    from item 39. FIX: `OrganicSyntheticStress.wallStress` measures each wall's own
+    p99/max von Mises from the tensor the tracer is handed; the row reads
+    "unloaded · 0.4 MPa · 1 % of the part's peak". And the foci gate is now that
+    share (`loadedStressShare` = 0.15) rather than core's synthesis share — core's
+    share answers "how much did core replace", under a threshold that is 2 % of the
+    part's peak, which on a 0.024 MPa part called a spill-loaded wall 88 % real.
+    The core report (item 39) still stands for how much the RUN synthesises.
+48. **The sample refreshes when he asks (his instruction).** `.task` is keyed to
+    `sampleRefreshToken`, not to the picks — the old key re-keyed on every control,
+    and the DETACHED trace inside `OrganicSampleCube.baked` survives the outer task's
+    cancellation, so six changes left six traces running. `rebuild(force:)` gates the
+    regular sample the same way. "Refresh cube" / "Refresh sample" sits bottom-right
+    with an arrow.clockwise icon and an (i); Save & Exit moved to the top left. The
+    plain 20 mm block is on the stage from the first frame, so the page can be
+    turned, set and left before anything is traced. `LatticeSampleRefreshTests`.
+49. **CORE REPORT — Auto is the coarsest cell, and the Look control is inert.**
+    Measured on his stand: `DIAG organic window: 3.96–5.50 mm · core's band
+    3.41–5.50 · look 5.50 ×1.93`. The member ceiling is depth / 2
+    (`kOrganicRecommendCellsAcrossMember` = 2.0) = 5.50 mm on the 11 mm wall, and the
+    look cell is `extent_short / look_cells_across` CLAMPED to that ceiling — his
+    face's shortest extent is far more than 4 × 5.5 mm, so the clamp always binds and
+    4 vs 8 cells across produced the same window (and the same 3:37 / 3:31 timings).
+    Auto therefore gives 2 cells across the wall, which is the sparse picture he
+    photographed. Needs core: a member ceiling that admits more cells across a wall
+    under Aesthetic, or a look rule measured across the WALL rather than the face.
+    The app must not reinterpret `organic_look_cells_across` — the job sends it to
+    core, and a preview that read it differently would draw a lattice the run will
+    not build.
+
+## 2026-09-07 — the full review he asked for: eleven bugs behind three symptoms
+
+50. **THE PAGE-WIDE TAP EATER.** `TopBannerGapCentred` expands its content to the
+    whole viewport (so the capsule can be centred between the top clusters) and
+    measures with a `Color.clear` background over that frame. `Color.clear` HIT-TESTS.
+    So while ANY top banner was up, an invisible full-screen surface swallowed every
+    touch. Invisible for a year because the bake banner lived ~1.4 s; the repair
+    banner lives for minutes, and the whole page went dead. `.allowsHitTesting(false)`
+    on the measuring background. Test: `testTheTopBannerDoesNotSwallowTheWholePage`.
+51. **"Preview: show print repairs" was `@State` on the wizard view** — reborn `true`
+    every time the page was built. Now `LatticeSettings.organicShowRepairs`, persisted,
+    absent from an untouched file. It writes no job key; it is a picture preference.
+52. **AUTO CELL-GRADE WAS NOT GRADING (the headline).** The organic separation read
+    `demand`, and `demand` is nil under Auto: the bake hands a stress field to the
+    scene only when the DENSITY mode is Sim (`densityMode.needsSimulation` is `self ==
+    .sim`); on Auto it asks for the optimise run's field, which is nil before a run.
+    `d` then fell back to 0, and 0 means the WIDEST end of the window — so every voxel
+    got the coarsest separation, uniformly, over the whole part. A stated per-region
+    density was no better: one number per region is one separation per region. FIX: the
+    separation is graded from the tracer's OWN tensor (`o.tensor`, guaranteed present,
+    same grid, no resampling), normalised p05…p95 over the candidate set. lo == hi
+    still means uniform. `DIAG organic window` now also reports the graded band.
+53. **SHAPE FIT HAD ONLY HALF OF CORE'S RULE.** Core caps the spacing at
+    `min(member_width / n★, 2·dist·voxel)`; `OrganicShapeFit` implemented only the
+    boundary term and its own note said the member width was unavailable. It is
+    available: `lattice_member_thickness_mm` takes exactly the candidate mask and grid
+    the organic loop has just built. Without it, at a 1.6 mm voxel the boundary cap
+    first drops below a 5.5 mm separation ONE voxel from the edge — so shape fit shrank
+    a single outermost ring and looked switched off. `memberMM:`/`cellsAcrossMember:`
+    added; n★ = 2.0 (`kOrganicRecommendCellsAcrossMember`).
+54. **THE FOCI RULE NEEDED AN ABSOLUTE TERM.** A share of the part's PEAK only ranks
+    walls against each other. His stand peaks at 0.024 MPa against 31 MPa allowable —
+    the whole part is idle — and the back wall at 0.00411 MPa came back "loaded" for
+    being 17 % of a very small number (the threshold is 15 %). Added
+    `partLoadedAllowableShare` = 0.02: no wall on a part whose peak is under 2 % of
+    allowable is loaded. The row says so when it applies.
+55. **AND THE STORED NUMBER CHANGED MEANING WITHOUT A MIGRATION.** The same key held
+    core's synthesis share (0.8–0.9 on an idle wall) and now holds the stress share,
+    against a 0.15 test — every wall in every older project would refuse foci forever.
+    The coding key is renamed to `selectableWallStressShare`, so old values are not
+    read and the wall reads "unmeasured" until a bake measures it.
+56. **THE CACHED CUBE WAITED ON A SOLVE IT DID NOT NEED (the 18 s).**
+    `OrganicSampleCube.baked` called `field()` — a 64³ finite-element solve of the
+    cube, once per launch — BEFORE consulting the variant cache, and then the cached
+    path threw the tensor away: the spans come from the file and the grid was used only
+    to size the bake. A cache hit now bakes the file's spans on a grid derived from the
+    cube's own bounds and hands them over as `organicBaked:`, which needs no tensor and
+    no solve. The solve remains for a topology nobody has traced.
+57. **Still open, and stated rather than fixed.** The bare band at the walls is the
+    solid rim (an in-plane erosion, correct: the body draws at full opacity under the
+    lattice, so that band IS the part's own wall) PLUS the tracer's seeding distance,
+    which is about one separation. Items 52 and 53 shrink the separation near the walls,
+    so the band should shrink with it; that needs measuring on the next walk. The
+    nearest-neighbour resample from the tensor grid onto the occupancy grid also costs
+    up to half a voxel at every boundary and has not been changed.
+58. **THE FOCI GATE AND THE FOCI ROW WERE JUDGING FROM DIFFERENT DATA** (his walk,
+    2026-09-07: the row read "unloaded" and the pills stayed grey). The ROW reads the
+    live `WallReport`, which carries the part's peak and the material's allowable and
+    therefore knows the part is idle. The GATE reads the persisted
+    `selectableWallStressFraction` and re-applied the 15 % share test alone, with none
+    of that context: 0.84 ≥ 0.15, so "loaded". FIX: the stored number is the VERDICT —
+    the share when the wall really carries load, 0 when it does not — so
+    `latticeWallLoaded` needs no context it does not have.
+59. **THE PREVIEW APPLIED A SOLID RIM THE RUN DOES NOT.** run_job:
+    `rim = organic_solid_rim_mm < 0 ? job.grading.cell_min_mm : organic_solid_rim_mm`,
+    and `apply_organic_solid_rim` returns immediately unless `rim > 0`. `cell_min_mm`
+    defaults to 0 and this app writes it ONLY when a GRADE was picked — so under Auto,
+    and under a single Manual size, THE RUN RIMS NOTHING. The preview was taking the
+    window's low end (3.96 mm on his stand) and eroding every face region by it, all
+    the way round. `LatticeSettings.organicRunSolidRimMM` mirrors the job.
+60. **AND THE ANCHOR RULE WAS HALF OF CORE'S — the bare band at the top and bottom.**
+    Core: `op.anchor_at_region_boundary = shell_is_written || boundary_solid_fraction
+    > 0.5` (run_job.cpp:4519). The preview passed the SHELL half alone
+    (`boundary == .covered`), so on his bare job the ends that left the region were not
+    anchors, and the dangling-end trim cut every one of them back to its last
+    connector — at the top, the bottom and both sides. His face prisms are cut into a
+    solid wall, so core anchors and the run has no such band. The preview now mirrors
+    core's own arithmetic on its own grids.
+    CORE NOTE (not acted on): in that loop `edge` is set only when a non-lattice
+    neighbour is SOLID, so `backed == on_boundary` and `boundary_solid_fraction` can
+    only ever be 0 or 1 — the comment above it describes a proportion the code cannot
+    produce. Mirrored as written, because the picture must match the run; flagged here
+    because the two disagree.
+61. **The wall row is two facts.** "unloaded · 0.0203 MPa". The percentage of the
+    part's peak, the peak itself and the allowable were three more numbers on a row
+    that answers one question (his walk: "way too much text in that area").
+
+## 2026-09-07 evening — eight more, found by reading each path end to end
+
+62. **The sample went back to the distance field.** `OrganicVariantCache.bake` builds
+    `OrganicBakedFields` and never filled `capsules:`, so my new cache-hit fast path
+    (item 56) handed the scene a variant with no capsules and the march drew the field.
+    The ribbons were back the moment the cached cube became the fast path.
+63. **A bake stage reporting 0.3 s of bridge work took 124 s.**
+    `OrganicSyntheticStress.plan` tags every voxel by point-in-polygon against each
+    face's outline — millions of voxels against 63-vertex loops — and it was built
+    TWICE per bake: once inside `OrganicAutoWindow.rows` for the band's stress
+    percentiles, once for the synthesis. One plan per bake now, passed to both.
+64. **Synthetic stress could never appear in the stress map.** Core replaces the field
+    inside the bridge and the tracer uses it; the app's overlay is painted from
+    `stressDemand`, built from the SOLVE's von Mises. So the synthetic load was
+    invisible in the one view that shows where the part is working. The bridge now
+    returns the synthesised von Mises (header [59], n doubles after the surface field)
+    and `stressDemand` prefers it.
+65. **Manual density dropped the part preview out of Organic.** The strut-width scrub
+    ranged from 0.20 mm; below one bead (0.45 mm here) core refuses the trace, the
+    scene had no curves, and the preview fell through to the doubled ladder — saying so
+    only inside the caption's (i). The control's floor is the bead now.
+66. **Look is a percentage (his instruction).** `organicLookPercent` (1…100, persisted);
+    `OrganicAutoWindow.window(percent:band:)` maps it into core's own band — 1 % the
+    largest cell the wall holds, 100 % the smallest core will print — and the wizard
+    WRITES the resulting window to the job (`cell_min_mm`/`cell_max_mm`, or `cell_mm`
+    when the band's spread is 1). Measured on his 11 mm wall: 1 % → 5.50 mm,
+    100 % → 1.70 mm. The cells-across control it replaced was clamped by the member
+    ceiling and produced the same window at 4 and at 8.
+67. **A collapsed window carried NO cell keys.** `gradingDictionary` refuses a grade
+    whose ends are equal, so a Look at 100 % (spread 1) wrote nothing and core chose
+    for itself — preview ≠ run. Written as a single size now.
+68. **The capsule clip applied the march's trim erosion.** `stepParams.y` (up to
+    0.35 mm) exists because a trilinear SDF bulges slivers through a crease during a
+    MARCH. A capsule is analytic; it has no sliver. The erosion was shaving 0.35 mm off
+    every boundary of every declared face.
+69. **The candidate set was a NEAREST-NEIGHBOUR RESAMPLE of the occupancy.** The scene
+    decided which voxels the tracer gets by rounding each tensor-grid voxel's centre
+    onto the occupancy grid — a different grid with a different origin — so a voxel
+    whose centre landed just outside was dropped even when most of it was inside. Up to
+    half a voxel lost at EVERY boundary; the run has no such loss, it reads the region
+    ids on its own grid. `o.regionIDs` (the plan of item 63) is now handed over whether
+    or not synthesis is on, and the occupancy is asked only whether there is material.
+70. **STILL OPEN, and stated rather than claimed.** There is no GRADE TO SOLID in the
+    organic preview at all. In the run a cell that grades past the printable floor is
+    filled with solid material; the preview traces every candidate voxel and has no
+    equivalent, so the band where core would put solid is drawn empty. Nor does the
+    member term grade toward an edge: the member width of a flat wall is the same at
+    its middle and at its rim, so `member / n★` caps the whole wall at one value and
+    only the boundary term tapers. That is the "there should be more of a grade between
+    them" he is asking for and it is not built.
+
+## 2026-09-07 — GRADE TO SOLID, built (his instruction)
+
+71. **What core actually does, established before writing anything.**
+    `grade_lattice` is where a voxel goes solid — a member too thin to hold
+    `cells_per_member_floor` cells stays solid — and grading.cpp SKIPS that law for
+    organic outright ("the cells-per-member and percolation floors are OCTET
+    invariants; organic keeps its own … and audits them in run_organic_step").
+    Organic's own spacing floors RAISE the separation rather than solidifying anything.
+    So a traced lattice has exactly ONE grade-to-solid in the whole run:
+    `apply_organic_solid_rim`.
+72. **`OrganicSolidRim`** mirrors it arithmetic for arithmetic on the preview's grid:
+    seeds are candidate voxels with a 6-neighbour that is solid material and NOT along
+    the region normal (|dot| < 0.5 — along the normal is the floor or the open face);
+    a BFS then spreads `floor(rim / voxel)` steps through the candidate set. Those
+    voxels leave the candidate set, so no curve is traced there, and the region field
+    excludes the SAME band (rounded down to whole voxels, so the two agree) — which is
+    what makes the shell survive and draw that band as the wall it is.
+73. **And it now exists under Auto.** The rim is `cell_min_mm`, which the job carried
+    only under a Manual grade. The Look slider (item 66) writes the window it picks, so
+    Auto has a `cell_min` and therefore a rim; when the bake derives the window itself
+    the rim is that window's low end — the number the job will carry once saved.
+74. **The taper he asked for is NOT the rim.** "More of a grade between them" is the
+    SEPARATION shrinking as the edge approaches — shape fit's boundary term
+    (`2·dist·voxel`), now joined by the member term (item 53). The rim is the last
+    step: lattice, graded finer, then solid. Said in the file so the two are not
+    confused again.
+    Tests: `OrganicSolidRimTests` (side band, never along the normal, core's step
+    count, air is not a wall, the scene and the shell agree, Auto has a rim).
+
+## 2026-09-07 late — the regression I caused, and what it hid
+
+75. **THE BRIDGE'S SURFACE FIELD WAS DROPPED FROM THE PAYLOAD, BY MY OWN EDIT.**
+    `organic_preview_field` returns one flat array whose blocks are found by adding the
+    lengths of the ones before: header, synthetic rows, centreline field, relative
+    density, SURFACE field, synthesised von Mises, spans. Adding the synthesised field
+    (item 64) replaced the text `out.insert(... surface_field ...)` + the spans comment
+    with the new block + the comment — deleting the surface field's append. Everything
+    after it then parsed from the wrong offset: `surfaceField` read the spans' bytes and
+    `spans` came back EMPTY.
+    Consequences, all of which he reported as separate faults: no capsules, so the
+    sample "went back to SDF"; no capsules AND a nonsense surface field, so the part
+    fell through to the doubled ladder ("On organic and an octet lattice is in the
+    preview"); `0 spans emitted` in the log; and the synthesised von Mises read from the
+    wrong place, so the foci never reached the stress map.
+    EVERY TEST PASSED: they check the header and the field's LENGTH, both of which were
+    still right. `OrganicCandidateSetProbe` is the guard that would have caught it — it
+    traces a real block and requires geometry to come out the other end, block by block.
+76. **CORE'S VOXEL CENTRE IS `origin + (i + 0.5)·spacing`** (`VoxelGrid::voxel_center`,
+    voxel.hpp:87). The scene's candidate loop had always read the CORNER, so the mask
+    handed to the tracer was half a voxel out of step with what core believes it
+    describes — and out of step with the region tags built for the synthesis, which did
+    use core's convention. Both now use core's. (Measured on a 4 mm slab over a 1 mm
+    grid: the corner convention made it FIVE voxels deep.)
+77. **The part preview never honoured "show print repairs".** `organicForBake` left
+    `showRepairs` at its default of true, so the part always ran core's emission — the
+    long pass — and always showed the second-stage banner, whatever the switch said.
+    Only the wizard's sample honoured it.
+78. **Look is a slider with a thumb and a track**, 1 % to 100 %, ends labelled, value
+    shown. The scrub row it replaced had nothing to hold.
+79. **Nothing in the regular lattice's own code was touched** (his instruction,
+    2026-09-07): `LatticeSDFPreview`, `LatticePreviewOccupancy`, `LatticeRegionMask`,
+    `LatticeSamplePatch`, `LatticeWizardSample` are unchanged, and the only shader edit
+    is inside `cap_inside_clip`, a function that exists only for the capsule pass —
+    `lsdf_march` and `lsdf_gbuffer` are untouched. The shared code that DID change is
+    named here so it can be vetoed: the top-banner hit-testing fix (item 50, which the
+    regular lattice was also losing taps to), the one-bake-at-a-time serialisation
+    (item 46), and the wizard's Refresh gate (item 48, which he asked for on both
+    sides).
+
+## 2026-09-07 — the two he asked for next
+
+80. **THE CUBE IS SOLVED ONCE, NOT ONCE PER LAUNCH.** A variant-cache HIT already
+    skipped the solve (item 56); a MISS still ran the 64³ finite-element solve, and the
+    only cache was a static in memory — so the first setting he changed after opening
+    the app paid the whole solve again for a field that never changes. It is a pure
+    function of the bundled cube, the material and one load case, all named by
+    `fieldIdentity`. Written to Application Support as a small binary blob and read in
+    milliseconds thereafter.
+    ★ THE TRAP, CAUGHT BEFORE IT SHIPPED: the first cut named the file from
+    `fieldIdentity.hashValue`, and Swift seeds String hashing PER PROCESS — the file
+    would be written under one name and looked for under another every launch, a cache
+    that never hits and grows without bound. The name is the sanitised identity.
+    `OrganicSampleFieldCacheTests`.
+81. **THE SAMPLE CUBE GETS EDGES, NOT WALLS** (his rule: "In the sample cube, cover the
+    edges of the cube … NEVER OBSTRUCT THE VIEW OF THE LATTICE"). A block has no
+    outline to band, so `OrganicSolidRim.edgeVoxels` seeds only where a voxel is open on
+    TWO different axes — the twelve edges. A voxel in the middle of a face is open on
+    one and is left alone, so every face still sees through. The face-prism path is
+    unchanged: there the outline is the band, which is core's own rule.
+82. **And the shipped variants survive it.** The rim changes the traced geometry, so it
+    belongs in the cache key — but adding it unconditionally would change every key and
+    orphan all four bundled variants. It is appended only when non-zero, and a sample
+    with no cell window stated has none, so the default state still hits the bundle.

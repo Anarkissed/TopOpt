@@ -19,20 +19,47 @@ import simd
 
 public enum OrganicVariantCache {
     /// Bump when the bake layout or the key's meaning changes.
-    public static let layoutVersion = 4
+    /// ★ 5 (2026-09-07): the preview now hands core the run's TRANSFER TIES, its
+    /// per-voxel BEAD and its density floor — three parameters the bridge never set. All
+    /// three change the geometry core emits, so every variant baked before them
+    /// describes a lattice this build no longer draws. The key cannot detect that on its
+    /// own (they are not picks), so the version retires them.
+    public static let layoutVersion = 5
 
     /// The cache key for a sample's topology picks on a named field.
     public static func key(picks: OrganicSampleCube.Picks, fieldIdentity: String) -> String {
         var s = "v\(layoutVersion)|core=\(CoreFingerprint.value)|field=\(fieldIdentity)"
         // ★ NOT in the key: the stage (it only moves the organic spacing through the
         // allowable stress, which the sample never passes — measured 2026-09-04: a
-        // Structural project missed the Aesthetic-keyed shipped variant for nothing)
-        // and the strut width (live). Everything the trace reads is here.
+        // Structural project missed the Aesthetic-keyed shipped variant for nothing).
+        // ★★★ THE STRUT WIDTH IS IN THE KEY NOW (2026-09-09). It was left out as "live"
+        // — a radius uniform on the draw — but the trace and the emission both read it,
+        // and a cube traced at core's derived bead is a DIFFERENT cube from one traced
+        // at the width he typed. Appended only when he has stated one, so the variants
+        // this build ships keep their keys.
         s += String(format: "|grow=%d|layer=%.4f|sep=%.4f-%.4f|overhang=%.2f|rho=%.4f-%.4f|fit=%d|only=%d|covered=%d|voxel=%.4f|repairs=%d|fillet=%d",
                     picks.grow ? 1 : 0, picks.layerHeightMM, picks.separationMinMM, picks.separationMaxMM,
                     picks.overhangDeg, picks.rhoMin, picks.rhoMax,
                     picks.shapeFit ? 1 : 0, picks.shapeFitOnly ? 1 : 0, picks.covered ? 1 : 0, picks.bakeVoxelMM,
                     picks.showRepairs ? 1 : 0, picks.overhangFillet ? 1 : 0)
+        // ★ APPENDED ONLY WHEN THERE IS ONE (2026-09-07): the rim changes the traced
+        // geometry, so it belongs in the key — but adding it unconditionally would
+        // change EVERY key and orphan the four variants this build ships.
+        if picks.solidRimMM > 0 { s += String(format: "|rim=%.4f", picks.solidRimMM) }
+        // ★★★ THE TIES, ON THE GROWN PATH ONLY (2026-09-07). Core applies transfer ties
+        // inside the growth pass (`transfer_ties && !grown.empty()`), so a traced
+        // variant is byte-identical with them on or off and must keep its key. A GROWN
+        // one is not: the two grown variants this build shipped were baked while the
+        // preview left `transfer_ties` at core's false default, so they hold pillars
+        // with nothing across them. Keying them here retires exactly those two.
+        // ★ THE DEPTH-VARIATION TEST changes the drawn geometry, so a cube traced
+        // without it must not answer for one traced with it. Appended only when ON, so
+        // every variant this build ships keeps its key.
+        if picks.depthStagger { s += "|stagger=1" }
+        if picks.strutWidthMM > 0 { s += String(format: "|strut=%.4f", picks.strutWidthMM) }
+        if picks.grow {
+            s += String(format: "|ties=%d|swirl=%.3f", picks.transferTies ? 1 : 0, picks.tieSwirl)
+        }
         let digest = SHA256.hash(data: Data(s.utf8))
         return digest.map { String(format: "%02x", $0) }.joined().prefix(24).description
     }
@@ -84,7 +111,13 @@ public enum OrganicVariantCache {
         let summary = "\(b.spanCount) struts, " + String(format: "%.0f mm — from the %@ (3MF beam lattice)", doc.totalLengthMM,
                                                           source == .bundle ? "shipped variant" : "device cache")
             + (census.isEmpty ? "" : " · " + census)
+        // ★★★ AND ITS CAPSULES (his walk, 2026-09-07: "why is the sample back to SDF?").
+        // The impostor pass draws `LatticeSDFScene.organicCapsules`; a scene built from
+        // pre-baked fields takes them from here. This returned none, so the cached cube
+        // had nothing to draw as capsules and the march fell back to the distance field
+        // — the ribbons and blobs the capsules exist to replace.
         return OrganicBakedFields(distance: dist, surface: srf, reachMM: b.reachMM, summary: summary,
-                                  spanCount: b.spanCount, lengthMM: doc.totalLengthMM)
+                                  spanCount: b.spanCount, lengthMM: doc.totalLengthMM,
+                                  capsules: doc.spans.map { OrganicCapsule($0) })
     }
 }

@@ -53,7 +53,15 @@ final class OrganicMainWiringTests: XCTestCase {
         var t = spec(structural: false)
         t.organicPickedGradeMM = [3, 5]
         let h = try XCTUnwrap(t.gradingDictionary())
-        XCTAssertEqual(h["cell_mode"] as? String, "auto")
+        // ★★★ "swept", NOT "auto" (corrected 2026-09-08). This test DID build a graded
+        // organic job and asserted the mode the app was writing — so it pinned the
+        // defect rather than catching it: core parses `cell_min_mm`/`cell_max_mm` only
+        // under swept and REFUSES them under auto, and the whole lattice stage died on
+        // that refusal the moment the Look slider landed on a real range. A dictionary
+        // this app writes is not evidence of what core will accept; see
+        // `testAGradedOrganicJobUsesTheSweptWindowCoreParses`, which reads core's own
+        // rule.
+        XCTAssertEqual(h["cell_mode"] as? String, "swept")
         XCTAssertEqual(h["cell_min_mm"] as? Double, 3)
         XCTAssertEqual(h["cell_max_mm"] as? Double, 5)
         XCTAssertNil(h["cell_mm"]); XCTAssertNil(h["organic_window_mm"])
@@ -166,5 +174,44 @@ final class OrganicMainWiringTests: XCTestCase {
         XCTAssertTrue(TopOptKit.organicSyntheticStressWired, "per-region synthetic_stress/foci")
         XCTAssertTrue(TopOptKit.organicProbeWired, "organic_probe_cells_mm / grades")
         XCTAssertTrue(TopOptKit.organicStructuralCertificationWired, "beam_network certificate")
+    }
+
+    /// ★★★ A GRADED ORGANIC JOB MUST OPEN (his walk, 2026-09-08: the lattice stage died
+    /// on `job.json: grading "cell_min_mm" / "cell_max_mm" are only allowed with
+    /// "cell_mode": "swept"`).
+    ///
+    /// The Look slider writes a window, and the window was being sent under
+    /// `cell_mode: "auto"` — which core refuses outright, and which would have dropped
+    /// the window even if it had not. No test had ever built a graded organic job, so
+    /// the whole stage was unreachable the moment the slider landed on a real range.
+    func testAGradedOrganicJobUsesTheSweptWindowCoreParses() throws {
+        var s = spec(structural: false)
+        s.organicPickedSeparationMM = 0
+        s.organicPickedGradeMM = [1.81, 3.62]
+        let g = try XCTUnwrap(s.gradingDictionary())
+        XCTAssertEqual(g["cell_mode"] as? String, "swept",
+                       "★ core parses cell_min_mm/cell_max_mm ONLY under swept")
+        XCTAssertEqual(g["cell_min_mm"] as? Double, 1.81)
+        XCTAssertEqual(g["cell_max_mm"] as? Double, 3.62)
+        XCTAssertNil(g["cell_mm"], "a target alongside a ladder is a conflict core refuses")
+        // A single size is still fit + cell_mm, and carries no window at all.
+        var one = spec(structural: false)
+        one.organicPickedSeparationMM = 3.5
+        one.organicPickedGradeMM = []
+        let f = try XCTUnwrap(one.gradingDictionary())
+        XCTAssertEqual(f["cell_mode"] as? String, "fit")
+        XCTAssertEqual(f["cell_mm"] as? Double, 3.5)
+        XCTAssertNil(f["cell_min_mm"]); XCTAssertNil(f["cell_max_mm"])
+        // ★ AND THE RULE ITSELF, READ FROM CORE rather than restated here: the refusal
+        // this test exists for is a literal in job.cpp.
+        let root: URL = {
+            var u = URL(fileURLWithPath: #filePath); for _ in 0..<5 { u.deleteLastPathComponent() }
+            return u
+        }()
+        let jobCpp = try String(contentsOf: root.appendingPathComponent("core/src/cli/job.cpp"),
+                                encoding: .utf8)
+        XCTAssertTrue(jobCpp.contains("are only allowed with "),
+                      "★ core still refuses a window outside swept; if this line goes, "
+                      + "re-read the rule before relaxing the app")
     }
 }

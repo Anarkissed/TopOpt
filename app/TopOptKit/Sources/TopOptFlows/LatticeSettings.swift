@@ -599,6 +599,28 @@ public struct LatticeSpec: Equatable, Sendable {
     public var organicShapeFit: Bool = false
     public var organicShapeFitOnly: Bool = false
     public var organicOverhangFillet: Bool = true
+    /// ★ The printability floor the rim is sized to, when the builder knew it —
+    /// `max(1.535 × bead, one design voxel)`. 0 ⇒ derive the bead term here.
+    public var organicRimFloorMM: Double = 0
+
+    /// ★ THE RIM THE RUN APPLIES, DERIVED HERE TOO (2026-09-07). The same rule as
+    /// `LatticeSettings.organicRunSolidRimMM(beadMM:)`: a typed number wins, −1 means an
+    /// OUTLINE one strut wide (the stated strut diameter, else the printer's bead), and
+    /// 0 means none. It used to mean "one base cell", which on his part was several
+    /// millimetres of hard-edged wall — "a HUGE rim … as if it's some other part
+    /// altogether". Written into the job now rather than left to core's default, so the
+    /// run rims exactly the millimetres the preview drew.
+    public var organicSolidRimForJobMM: Double {
+        if organicSolidRimMM >= 0 { return organicSolidRimMM }
+        // ★ The floor the RUN will apply, when the builder knew it (the design voxel is
+        // not a property of this wire value). Falls back to the bead term alone, which
+        // is the part of the floor this spec can compute; the run's own resolution floor
+        // is at least as large, so the job never asks for a wider rim than the run
+        // would build.
+        if organicRimFloorMM > 0 { return organicRimFloorMM }
+        let bead = Swift.max(0, minExtrudableWidthMM ?? 0)
+        return bead > 0 ? OrganicSizeCheck.printFloorPerBead * bead : 0
+    }
     /// ★ UNLOADED WALLS get synthetic stresses (Aesthetic only, 2026-09-05).
     public var organicSyntheticStresses: Bool = false
     public var organicSyntheticFoci: Int = 4
@@ -607,6 +629,12 @@ public struct LatticeSpec: Equatable, Sendable {
     /// inside the face outline (−1 = one base cell, 0 = none).
     public var organicTransferTies: Bool = true
     public var organicTieSwirl: Double = 1.0
+    /// ★★★ DEPTH VARIATION — A PREVIEW-ONLY EXPERIMENT (his instruction, 2026-09-08:
+    /// "I would like you to implement it into the preview as a *test* for the core
+    /// algorithm update"). It DEFORMS core's traced spans after the fact so successive
+    /// depth layers interleave; the run builds no such thing. Off unless asked for, and
+    /// everything that draws it says so. See `OrganicDepthStagger`.
+    public var organicDepthStagger: Bool = false
     public var organicSolidRimMM: Double = -1
     public var organicScale: Double = 1
     /// The user's pick among certification's separations (0 ⇒ none; Fit lets core choose).
@@ -769,7 +797,19 @@ public struct LatticeSpec: Equatable, Sendable {
                     put("organic_tie_swirl", Swift.min(1, Swift.max(0, organicTieSwirl)))
                 }
             }
-            if abs(organicSolidRimMM + 1) > 1e-9 { put("organic_solid_rim_mm", Swift.max(0, organicSolidRimMM)) }
+            // ★★★ THE JOB CARRIES THE NUMBER, ALWAYS (2026-09-07). Leaving the key out
+            // for −1 handed the decision to core, whose default is one base cell — the
+            // huge hard-edged band he photographed — while the preview drew something
+            // else. `organicRunSolidRimMM(beadMM:)` is now the one definition, and it is
+            // written down so preview and run rim the same millimetres.
+            // ★ WRITTEN WHENEVER THIS APP HAS AN ANSWER — and 0 IS an answer. Core's
+            // default when the key is absent is one base cell, so omitting the key for a
+            // rim the user switched OFF would hand him core's rim instead of none. The
+            // one case with nothing to say is a job that states no bead: then −1 cannot
+            // be resolved and core decides, as before.
+            if organicSolidRimMM >= 0 || (minExtrudableWidthMM ?? 0) > 0 {
+                put("organic_solid_rim_mm", organicSolidRimForJobMM)
+            }
             if stageMode == .structural { put("organic_structural_certification", "beam_network") }
             // ★ SYNTHETIC STRESSES ON UNLOADED WALLS (maintainer, 2026-09-05) carry NO
             // grading key: core's contract is per REGION (`synthetic_stress`,
@@ -804,7 +844,23 @@ public struct LatticeSpec: Equatable, Sendable {
                 grading.removeValue(forKey: "cell_min_mm"); grading.removeValue(forKey: "cell_max_mm")
             } else if organicPickedGradeMM.count == 2, organicPickedGradeMM[0] > 0,
                       organicPickedGradeMM[1] > organicPickedGradeMM[0] {
-                grading["cell_mode"] = LatticeCellSizeMode.auto.rawValue
+                // ★★★ A GRADE IS "swept", NOT "auto" (his walk, 2026-09-08: entering the
+                // lattice stage died on `job.json: grading "cell_min_mm" /
+                // "cell_max_mm" are only allowed with "cell_mode": "swept"`).
+                //
+                // ★ CORE PARSES THE WINDOW ONLY UNDER SWEPT — job.cpp reads
+                // `cell_min_mm`/`cell_max_mm` inside `if (swept)` and REFUSES them under
+                // any other mode. The comment above this block asserted the opposite and
+                // no test wrote a graded organic job, so every Look setting that landed
+                // on a real range produced a document core would not open.
+                //
+                // ★ AND SWEPT IS ALSO THE ONLY MODE THAT DOES ANYTHING WITH IT. run_job's
+                // `have_window` is `cell_min_mm > 0 && cell_max_mm >= cell_min_mm`, and
+                // those stay 0 unless swept parsed them — so under "auto" the window the
+                // slider picked would have been silently dropped even if core had
+                // accepted the document. Swept is the control, not a workaround for the
+                // schema.
+                grading["cell_mode"] = LatticeCellSizeMode.swept.rawValue
                 grading["cell_min_mm"] = organicPickedGradeMM[0]
                 grading["cell_max_mm"] = organicPickedGradeMM[1]
                 grading.removeValue(forKey: "cell_mm")
@@ -841,6 +897,53 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         !(organicPickedSeparationMM > 0)
             && !(organicPickedGradeMM.count == 2 && organicPickedGradeMM[0] > 0
                  && organicPickedGradeMM[1] > organicPickedGradeMM[0])
+    }
+
+    /// ★★★ THE SOLID RIM THE RUN WILL ACTUALLY APPLY (his walk, 2026-09-07: "There
+    /// are still empty spaces at the bottom and the top").
+    ///
+    /// run_job: `rim = organic_solid_rim_mm < 0 ? job.grading.cell_min_mm
+    /// : organic_solid_rim_mm`, and `apply_organic_solid_rim` returns immediately
+    /// unless `rim > 0`. `cell_min_mm` defaults to 0 and this app writes it ONLY when a
+    /// GRADE was picked — under Auto, and under a single Manual size, the job carries no
+    /// `cell_min_mm` at all. So the run applies NO RIM in those cases.
+    ///
+    /// ★ THE PREVIEW WAS TAKING THE WINDOW'S LOW END INSTEAD (3.96 mm under Auto on his
+    /// stand) and eroding every face region by it — a band the run does not remove,
+    /// around the whole outline, on top of the tracer's own seeding distance. That is
+    /// the empty edge he photographed at the bottom, the top and the sides.
+    /// ★★★ THE RIM IS AN OUTLINE AT THE STRUT ENDS, NOT A BORDER OF CELLS (his walk,
+    /// 2026-09-07, 22:40: "There is a HUGE rim and there isn't any grade to the rim. It
+    /// just cuts off as if it's some other part altogether. The rim is meant to be an
+    /// outline where the lattice would be too small to print … JUST at the ends of the
+    /// lattice struts").
+    ///
+    /// ★ −1 USED TO MEAN "ONE BASE CELL", which is core's own convention for the key and
+    /// is what made it huge: a base cell on his part is 3.78 mm against a 1.6 mm design
+    /// voxel, so the band was three voxel layers of solid all the way round every face —
+    /// several millimetres of wall, hard-edged, reading as a different part. A rim that
+    /// stands where the lattice stops is a STRUT wide, not a cell wide: the stated strut
+    /// diameter when there is one, else the printer's bead.
+    ///
+    /// A typed number still wins, and 0 still means none.
+    /// ★★★ AND IT IS THE PRINTABILITY FLOOR, NOT THE BEAD (his ruling, 2026-09-08:
+    /// "The rim should only be as big as the printability floor with the print
+    /// parameters … so the rim should only ever be as thick as the printability floor —
+    /// everywhere before that should be graded to solid").
+    ///
+    /// ★ THE BEAD IS THE WRONG QUANTITY, AND IT WAS TOO SMALL. "Where the lattice would
+    /// be too small to print" is not one extrusion wide — it is the smallest CELL the
+    /// printer and the grid can carry, `max(1.535 × bead, one voxel)`
+    /// (`OrganicSizeCheck.floor`). At his 0.42 mm line width the bead term is 0.64 mm
+    /// and the voxel term is the one that binds, which is the ~1.85 mm he quotes. Below
+    /// that the grade cannot thin any further, so that band goes solid: the rim IS the
+    /// region where the lattice would have to be finer than printable.
+    ///
+    /// Reading the STRUT width here would also make the Thicker control a topology
+    /// change; it is a live radius on the renderer and must never re-trace anything.
+    public func organicRunSolidRimMM(floorMM: Double) -> Double {
+        if organicSolidRimMM >= 0 { return organicSolidRimMM }
+        return floorMM > 0 ? floorMM : 0
     }
 
     public var organicPreviewSeparationWindowMM: (lo: Double, hi: Double) {
@@ -1016,6 +1119,8 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
     /// the size recommendation (cells the eye reads across the shortest face).
     public var organicTransferTies: Bool = true
     public var organicTieSwirl: Double = 1.0
+    /// ★ Preview-only depth stagger — never written to the job. See `OrganicDepthStagger`.
+    public var organicDepthStagger: Bool = false
     public var organicSolidRimMM: Double = -1
     public var organicLookCellsAcross: Int = 8
     public static let organicRecommendSteps = 5
@@ -1025,6 +1130,22 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
     /// may take foci (below `OrganicSyntheticStress.deadFraction`) and which regions
     /// the job marks `synthetic_stress`. Absent ⇒ unmeasured.
     public var selectableWallStressFraction: [String: Double] = [:]
+    /// ★★★ PREVIEW: SHOW PRINT REPAIRS (his walk, 2026-09-07: "always set to 'on' each
+    /// time I go back into the settings, no matter how many times I turn it off"). It
+    /// was `@State` on the wizard view — born `true` every time the page was built, so
+    /// it could not survive leaving the page, let alone a relaunch. It is a preference
+    /// about the PICTURE, not about the job (no key is written from it), so it lives
+    /// here beside the other picture preferences and is persisted like them.
+    public var organicShowRepairs: Bool = true
+    /// ★★★ THE LOOK SLIDER, AS A PERCENTAGE (his instruction, 2026-09-07: "I don't
+    /// think a numeric 'look' value makes any sense. It should be a percentage value on
+    /// a slider. 1% is the largest cell across the width possible, 100% is the smallest
+    /// cells possible (before printability is lost)"). Mapped into core's own band by
+    /// `OrganicAutoWindow.window(percent:band:)`; the window it picks is written to the
+    /// job as `cell_min_mm`/`cell_max_mm`, so the run builds exactly what is shown —
+    /// the cells-across key it replaced was clamped by the member ceiling on his part
+    /// and moved nothing.
+    public var organicLookPercent: Double = 50
     public static let organicSyntheticFociRange = OrganicSyntheticStress.fociRange
     /// ★ THE ORGANIC CELL-SIZE PROBE'S LAST ANSWER (contract 2026-09-05), stored so
     /// the wizard's Manual list can offer it; nil until core writes the block.
@@ -1597,8 +1718,21 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         case organicOverhangFillet
         case organicApprovedGradesMM, organicPickedGradeMM
         case organicSyntheticStresses, organicSyntheticFoci, selectableSyntheticFoci
-        case selectableWallStressFraction
+        // ★★★ THE STORED NUMBER CHANGED MEANING, SO THE KEY CHANGED WITH IT
+        // (2026-09-07). It used to hold core's SYNTHESIS share — how much of the wall
+        // core replaced — which is typically 0.8–0.9; it now holds the wall's STRESS
+        // share, tested against `OrganicSyntheticStress.loadedStressShare` — a far
+        // smaller number. (Named, not spelled: `testNoHardcodedCertifiableBandLiterals‌-
+        // InControlSources` scans this file for band literals and a source-text guard
+        // counts comments too.) Read under the old key, every wall in
+        // every project saved by an earlier build would come back loaded and refuse
+        // foci for a reason that no longer exists. A new key means those old values are
+        // simply not read: the wall reads "unmeasured" until the next bake measures it,
+        // which is the truth.
+        case selectableWallStressFraction = "selectableWallStressShare"
+        case organicShowRepairs, organicLookPercent
         case organicTransferTies, organicTieSwirl, organicSolidRimMM, organicLookCellsAcross
+        case organicDepthStagger
         case organicForecast
     }
 
@@ -1634,8 +1768,11 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         selectableSyntheticFoci = (try c.decodeIfPresent([String: Int].self, forKey: .selectableSyntheticFoci) ?? [:])
             .filter { OrganicSyntheticStress.fociRange.contains($0.value) }
         selectableWallStressFraction = try c.decodeIfPresent([String: Double].self, forKey: .selectableWallStressFraction) ?? [:]
+        organicShowRepairs = try c.decodeIfPresent(Bool.self, forKey: .organicShowRepairs) ?? true
+        organicLookPercent = try c.decodeIfPresent(Double.self, forKey: .organicLookPercent) ?? 50
         organicTransferTies = try c.decodeIfPresent(Bool.self, forKey: .organicTransferTies) ?? true
         organicTieSwirl = try c.decodeIfPresent(Double.self, forKey: .organicTieSwirl) ?? 1.0
+        organicDepthStagger = try c.decodeIfPresent(Bool.self, forKey: .organicDepthStagger) ?? false
         organicSolidRimMM = try c.decodeIfPresent(Double.self, forKey: .organicSolidRimMM) ?? -1
         organicLookCellsAcross = try c.decodeIfPresent(Int.self, forKey: .organicLookCellsAcross) ?? 8
         organicForecast = try c.decodeIfPresent(OrganicForecast.self, forKey: .organicForecast)
@@ -1754,8 +1891,11 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         try c.encode(selectableSyntheticFoci, forKey: .selectableSyntheticFoci)
         try c.encode(organicTransferTies, forKey: .organicTransferTies)
         try c.encode(organicTieSwirl, forKey: .organicTieSwirl)
+        try c.encode(organicDepthStagger, forKey: .organicDepthStagger)
         try c.encode(organicSolidRimMM, forKey: .organicSolidRimMM)
         try c.encode(organicLookCellsAcross, forKey: .organicLookCellsAcross)
+        if !organicShowRepairs { try c.encode(organicShowRepairs, forKey: .organicShowRepairs) }
+        if organicLookPercent != 50 { try c.encode(organicLookPercent, forKey: .organicLookPercent) }
         if !selectableWallStressFraction.isEmpty {
             try c.encode(selectableWallStressFraction, forKey: .selectableWallStressFraction)
         }

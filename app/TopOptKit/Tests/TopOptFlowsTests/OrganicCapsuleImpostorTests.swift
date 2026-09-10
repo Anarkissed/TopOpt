@@ -72,6 +72,26 @@ final class OrganicCapsuleImpostorTests: XCTestCase {
         return d.covered
     }
 
+    /// The same render, handing back the whole dump — the mask and the shaded bytes, so
+    /// a caller can ask what the pixels LOOK like and not only how many there are.
+    @MainActor
+    private func dump(capsules: [OrganicCapsule], bodyAlpha: Float = 0,
+                      radiusMM: Float = 0, size: Int = 384) throws -> MeshRenderer.LatticeMaskDump {
+        guard let device = MTLCreateSystemDefaultDevice() else { throw XCTSkip("no Metal device") }
+        let mesh = LatticeWizardSample.cube(edgeMM: Self.edgeMM, at: .zero)
+        guard let renderer = MeshRenderer(device: device, sampleCount: 1) else {
+            throw XCTSkip("MeshRenderer init: \(MeshRenderer.lastInitError ?? "?")")
+        }
+        try XCTSkipUnless(renderer.latticePipelinesDidBuild, "lattice MSL must compile")
+        try XCTSkipUnless(renderer.organicCapsulePipelineDidBuild)
+        renderer.setMesh(mesh)
+        renderer.camera.setOrientation(azimuth: 0.7, elevation: 0.4)
+        renderer.setBodyAlpha(bodyAlpha)
+        renderer.latticeOrganicRadiusMM = radiusMM
+        renderer.setLatticeScene(Self.scene(capsules: capsules, mesh: mesh), token: 1)
+        return try XCTUnwrap(renderer.latticeMaskDump(size: size), "the lattice must be in the G-buffer")
+    }
+
     /// The headline: a capsule inside the part reaches pixels; one outside is clipped by
     /// the part field; the opaque shell hides one inside; the live radius fattens it.
     @MainActor
@@ -100,6 +120,69 @@ final class OrganicCapsuleImpostorTests: XCTestCase {
         XCTAssertGreaterThan(fat, seen, "★ the Thicker radius is a uniform on the capsules")
         XCTAssertEqual(none, 0, "★ with organic drawn as capsules the march draws nothing")
     }
+
+    /// ★★★ A CUT STRUT IS SOLID, NOT A PIPE (his walk, 2026-09-08: "The cut off tubes are
+    /// see-through — is there no way to make them completely filled?").
+    ///
+    /// Where a strut crossed the part's surface the shader used to cast back and shade
+    /// the capsule's FAR wall with an inverted normal — the inside of the tube, bore
+    /// toward the camera. The cut is shaded by the CLIPPING surface now, which is what a
+    /// solid rod sliced by a plane actually looks like. The measurement: a strut poking
+    /// out of the cube must win at least as many pixels as the same strut fully inside
+    /// (a filled section covers its silhouette; an open bore loses the middle), and the
+    /// pixels it wins must not be dominated by the dark interior of a tube.
+    @MainActor
+    func testAStrutCutByThePartIsFilledNotHollow() throws {
+        let mesh = LatticeWizardSample.cube(edgeMM: Self.edgeMM, at: .zero)
+        let c = 0.5 * (mesh.bounds.min + mesh.bounds.max)
+        let half = Float(Self.edgeMM) * 0.5
+        // Straight out through the +x face, so half of it is cut away.
+        let straddling = OrganicCapsule(a: c, b: c + SIMD3(half + 6, 0, 0), r: 1.6)
+        let contained = OrganicCapsule(a: c, b: c + SIMD3(half - 3, 0, 0), r: 1.6)
+        let cut = try dump(capsules: [straddling])
+        let whole = try dump(capsules: [contained])
+        // ★ SEE-THROUGH, MEASURED AS SEE-THROUGH. A first cut of this counted DARK
+        // pixels, on the theory that a tube's bore is unlit — and it read 100 % for the
+        // strut that is entirely inside the part and cannot be hollow. The dump carries
+        // albedo, not shaded colour, so that number was measuring nothing. A hole is a
+        // hole: a pixel the lattice did NOT win with lattice on both sides of it,
+        // horizontally and vertically. That is exactly what looking through an open pipe
+        // puts on screen, and it needs no lighting to detect.
+        func holes(_ d: MeshRenderer.LatticeMaskDump) -> Int {
+            var n = 0
+            for y in 1..<(d.height - 1) {
+                for x in 1..<(d.width - 1) {
+                    let i = y * d.width + x
+                    guard !d.mask[i] else { continue }
+                    if d.mask[i - 1], d.mask[i + 1],
+                       d.mask[i - d.width], d.mask[i + d.width] { n += 1 }
+                }
+            }
+            return n
+        }
+        print("""
+
+        ── a strut cut by the part's surface ────────────────────────────────
+        fully inside the cube ....... \(whole.covered) px · \(holes(whole)) enclosed holes
+        poking out through +x ....... \(cut.covered) px · \(holes(cut)) enclosed holes
+        """)
+        XCTAssertGreaterThan(whole.covered, 200, "positive control: the strut is on screen")
+        XCTAssertGreaterThanOrEqual(cut.covered, whole.covered,
+                                    "★ a filled cross-section covers its own silhouette; "
+                                    + "an open bore loses the middle of it")
+        XCTAssertLessThanOrEqual(holes(cut), holes(whole) + 2,
+                                 "★ the cut must not open a hole the uncut strut does not have")
+        // ★ AND THE SHADER ITSELF: the far-side re-hit with an INVERTED capsule normal
+        // was the bore. It is gone, and the cut is shaded by the clipping surface.
+        let msl = try String(contentsOf: URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("Sources/TopOptFlows/UnifiedShading.swift"), encoding: .utf8)
+        XCTAssertFalse(msl.contains("n = -cap_normal("),
+                       "★ nothing may be shaded with the inside of a tube")
+        XCTAssertTrue(msl.contains("n = cap_clip_normal("),
+                      "★ a cut is shaded by the surface that cut it")
+    }
+
     #endif
 
     /// The call sites, pinned by text: the march is switched off by the same flag that

@@ -140,8 +140,9 @@ struct LSDFUniforms {
     var rimParams: SIMD4<Float> = .zero
     /// ★★★ ORGANIC THICKNESS, APPENDED LAST (2026-09-04): x = a LIVE strut radius in
     /// mm (0 ⇒ the baked thickness, read from the surface channel), y = the centreline
-    /// channel's reach, z = the surface channel's band (the outside values). The MSL
-    /// twin declares the same slot.
+    /// channel's reach, z = the surface channel's band (the outside values), w = the
+    /// WETTED JOIN's fillet as a multiple of the strut radius (0 = off). The MSL twin
+    /// declares the same slot.
     var organicRadius: SIMD4<Float> = .zero
 }
 
@@ -213,6 +214,21 @@ public struct LatticeOrganicInput: Sendable {
     public var strutDiameterMM: Double = 0
     public var grow: Bool = false
     public var layerHeightMM: Double = 0
+    /// ★★★ THE TRANSFER TIES — the cross-members that connect the grown pillars
+    /// (core `OrganicParams::transfer_ties`, job key `organic_transfer_ties`, and the
+    /// swirl that scales how far they wander). Core's own struct default is FALSE and
+    /// the run overrides it from the job, so a preview that did not set it drew pillars
+    /// with NOTHING across them while the run built the ties — his 2026-09-07 walk:
+    /// "There are no horizontal struts whatsoever … half the algorithm isn't running".
+    /// Ties are a GROWN-path pass (organic_lattice.cpp: `transfer_ties && !grown`),
+    /// so they change nothing on the traced picture.
+    public var transferTies: Bool = true
+    public var tieSwirl: Double = 1.0
+    /// ★★★ PREVIEW-ONLY DEPTH STAGGER (2026-09-08). Deforms core's traced spans so
+    /// successive depth layers interleave — a TEST for a proposed tracer change, never
+    /// what the run builds. 0 = off; otherwise the cell the stagger is scaled to.
+    /// See `OrganicDepthStagger`.
+    public var depthStaggerCellMM: Double = 0
     public var overhangAngleDeg: Double = 0
     /// ★ SHAPE FIT (maintainer, 2026-09-03: "otherwise they would look like a cube"):
     /// core's `organic_shape_fit` shrinks the separation toward the walls so the
@@ -238,6 +254,8 @@ public struct LatticeOrganicInput: Sendable {
     public var regionIDs: [Int32] = []
     public var syntheticRegions: [TopOptKit.OrganicSyntheticRegionSpec] = []
     public var syntheticDeadFraction: Double = OrganicSyntheticStress.deadFraction
+    /// ★ The absolute floor under that test, in MPa — see `deadMPaFloor`.
+    public var syntheticDeadMPa: Double = OrganicSyntheticStress.deadMPaFloor
     /// ★ THE SOLID RIM (maintainer, 2026-09-06: "Fit to shape means grade to solid at
     /// the edges. Always. And always on the *sides* … creating a solid outline"). The
     /// run's `apply_organic_solid_rim` turns the candidates within this many mm of the
@@ -254,6 +272,7 @@ public struct LatticeOrganicInput: Sendable {
                 rhoMin: Double, rhoMax: Double,
                 strutDiameterMM: Double = 0, grow: Bool = false,
                 layerHeightMM: Double = 0, overhangAngleDeg: Double = 0,
+                transferTies: Bool = true, tieSwirl: Double = 1.0,
                 shapeFit: Bool = false, shapeFitOnly: Bool = false,
                 anchorAtBoundary: Bool = true, showRepairs: Bool = true,
                 overhangFillet: Bool = true) {
@@ -264,6 +283,7 @@ public struct LatticeOrganicInput: Sendable {
         self.rhoMin = rhoMin; self.rhoMax = rhoMax
         self.strutDiameterMM = strutDiameterMM; self.grow = grow
         self.layerHeightMM = layerHeightMM; self.overhangAngleDeg = overhangAngleDeg
+        self.transferTies = transferTies; self.tieSwirl = tieSwirl
         self.shapeFit = shapeFit; self.shapeFitOnly = shapeFitOnly
         self.anchorAtBoundary = anchorAtBoundary
         self.showRepairs = showRepairs
@@ -544,12 +564,51 @@ public struct LatticeSDFScene {
         // shell, the occupancy the tracer is handed, the region field the march and the
         // capsules clip against. Depth is untouched (the run's rule: never along the
         // normal). Manual primitives and bolts carry no outline and are left alone.
-        let regions: [LatticeRegionSpec] = {
-            guard algorithm == "organic", let o = organic, o.solidRimMM > 0 else { return regions }
+        // ★★★ THE EROSION IS A DRAWING DECISION, NOT A MEMBERSHIP ONE (2026-09-08).
+        // It used to replace `regions` outright, so the OCCUPANCY was clipped by the
+        // eroded shape too — and the candidate loop asks the occupancy whether there is
+        // material at a voxel. That quietly took the band's outermost ring out of the
+        // candidate set even after the explicit deletion was removed, which is the same
+        // gap by another route (measured: 3149 capsules without a rim, 2353 with).
+        // `regions` stays whole; `wallRegions` is the eroded copy, and only the region
+        // FIELD — the thing the shell and the march clip against — reads it.
+        let wallRegions: [LatticeRegionSpec] = {
+            guard algorithm == "organic", let o = organic, o.solidRimMM > 0,
+                  o.spacingMM > 0 else { return regions }
+            // ★★★ THE SAME BAND THE VOXEL BFS BUILDS (`OrganicSolidRim`) — AND IT IS
+            // ONE LAYER WIDER THAN `floor(rim / voxel)` (his walk, 2026-09-07: "I
+            // removed the rim and nothing changed. The rim is a failure", and before
+            // that "there is still a gap between the rim and the lattice … And the solid
+            // is never created").
+            //
+            // ★ THE TWO HALVES DISAGREED BY EXACTLY THE SEED LAYER. Core's
+            // `apply_organic_solid_rim` marks every candidate that touches solid
+            // sideways at distance 0 and turns it solid WHATEVER `max_steps` is, then
+            // walks `max_steps` further — so the solid band is `floor(rim / voxel) + 1`
+            // voxel layers. This erosion used `floor(rim / voxel)` layers, which is one
+            // too few, and is ZERO whenever the rim is narrower than a voxel. On his
+            // part that is the common case: the rim comes from the window's low end
+            // (~1.8 mm) against a design voxel of the same order. The candidate BFS
+            // still removed the band, so the lattice stopped short — and the region
+            // still reached its own outline, so the shell was cut there and nothing was
+            // drawn in the gap. A hole, exactly where he asked for a wall.
+            // ★★★ THE BAND IS THE MILLIMETRES ASKED FOR, NOT A WHOLE DESIGN VOXEL
+            // (his walk, 2026-09-08: "also, the rim looks way too big?"). It was.
+            //
+            // ★ THE QUANTISATION EXISTED TO MATCH A DELETION THAT NO LONGER HAPPENS.
+            // While the candidate BFS removed the band, the drawn band had to land on
+            // the same whole voxels or the shell would have covered lattice the run
+            // keeps — so it was rounded to `floor(rim / voxel) + 1` LAYERS. On his part
+            // the design voxel is ~1.6 mm and the rim is one bead, 0.42 mm: that rounding
+            // drew a band nearly four times the width he asked for. The band is now
+            // continuous, because the erosion is a distance and the shell reads a
+            // distance field; nothing downstream needs it on a voxel any more.
+            let band = o.solidRimMM
+            guard band > 0 else { return regions }
             return regions.map { r in
                 guard r.role == .include, r.kind == .face, !r.outlineLoops.isEmpty else { return r }
                 var e = r
-                e.inPlaneOffsetMM -= o.solidRimMM
+                e.inPlaneOffsetMM -= band
                 return e
             }
         }()
@@ -557,6 +616,13 @@ public struct LatticeSDFScene {
         // findings with different fixes — one is a broken import, the other is a
         // depth set too shallow. Counting only the MASKED grid would report the
         // first for both, which is a confident wrong answer.
+        // ★★★ A CLOCK ON THE SCENE ITSELF (his walk, 2026-09-07: "took ~30 seconds for
+        // the first image"). The bridge's own phase clock accounted for 0.7 s of a 9.5 s
+        // sample bake — every other second is Swift-side scene work, and until this
+        // there was no number saying which part. Four spans: the mesh's occupancy and
+        // signed distance, the region field, the organic trace, and everything else.
+        let sceneT0 = Date()
+        var tOccupancy = 0.0, tRegionField = 0.0, tOrganic = 0.0
         let solid = LatticePreviewOccupancy.occupancy(
             positions: mesh.positions, indices: mesh.indices,
             bounds: mesh.bounds, maxDim: maxDim)
@@ -570,6 +636,7 @@ public struct LatticeSDFScene {
             solid, to: regions, whenEmpty: whenEmpty)
         self.partSDF = LatticePreviewOccupancy.signedDistance(
             positions: mesh.positions, indices: mesh.indices, like: occupancy)
+        tOccupancy = Date().timeIntervalSince(sceneT0)
 
 
         // ★ Baked from the SAME list the occupancy was masked by, on the same
@@ -618,7 +685,8 @@ public struct LatticeSDFScene {
                         // stops `skinMM` short of the surface, and the shell —
                         // which discards where this field is negative — SURVIVES
                         // in that band. That surviving band IS the solid wall.
-                        let region = LatticeRegionMask.signedDistance(p, regions: regions)
+                        // ★ the ERODED list: the band the shell keeps and draws solid
+                        let region = LatticeRegionMask.signedDistance(p, regions: wallRegions)
                         // ★ AND ONLY WHEN THERE IS A SKIN — the finish's own number, 0
                         // for every finish but `covered`.
                         //
@@ -659,6 +727,7 @@ public struct LatticeSDFScene {
         } else {
             self.regionSDF = nil
         }
+        tRegionField = Date().timeIntervalSince(sceneT0) - tOccupancy
         // ★ A STATED PER-REGION DENSITY OUTRANKS THE STRESS FIELD. It is the
         // user's own number for that region; grading it by stress instead would
         // draw struts at a density they did not ask for and the run will not
@@ -745,6 +814,8 @@ public struct LatticeSDFScene {
         var organicSyntheticOut: TopOptKit.OrganicSyntheticReport? = nil
         var organicPhaseOut: (trace: Double, emit: Double, bake: Double)? = nil
         var organicCapsOut: [OrganicCapsule] = []
+        /// ★ The field the tracer saw, synthesis included — what the stress map paints.
+        var organicSynthFieldOut: StressField? = nil
         var organicBand = 0.0
         var organicSaid = ""
         // ★★★ SPANS FIRST. A span file is the run's own emitted geometry; a trace is a
@@ -801,23 +872,48 @@ public struct LatticeSDFScene {
             // the grid core traces on, and resampling the declaration onto it is what
             // keeps "where he marked" and "where it traced" the same set.
             let (tnx, tny, tnz) = o.dims
+            let exactRegions = o.regionIDs.count == tnx * tny * tnz
+            let sdfForSolid = self.partSDF
+            func partSolidAt(_ q: SIMD3<Float>) -> Bool {
+                let gg = (q - sdfForSolid.origin) / sdfForSolid.spacing
+                let a2 = Int(gg.x.rounded()), b2 = Int(gg.y.rounded()), c2 = Int(gg.z.rounded())
+                guard a2 >= 0, b2 >= 0, c2 >= 0,
+                      a2 < sdfForSolid.nx, b2 < sdfForSolid.ny, c2 < sdfForSolid.nz else { return false }
+                return sdfForSolid.values[(c2 * sdfForSolid.ny + b2) * sdfForSolid.nx + a2] < 0
+            }
             var cand = [Bool](repeating: false, count: tnx * tny * tnz)
             var sep = [Double](repeating: 0, count: tnx * tny * tnz)
             let lo = Swift.min(o.separationMinMM, o.separationMaxMM)
             let hi = Swift.max(o.separationMinMM, o.separationMaxMM)
             var n = 0
             for k in 0..<tnz { for j in 0..<tny { for i in 0..<tnx {
+                // ★★★ CORE'S VOXEL CENTRE (2026-09-07). This read `origin + i·h`, the
+                // CORNER, while core defines voxel i's position as
+                // `origin + (i + 0.5)·h` (`VoxelGrid::voxel_center`). So the mask handed
+                // to the tracer was half a voxel out of step with what core believes it
+                // describes — material lost along one boundary of every region and
+                // claimed along the opposite one — and the region tags built for the
+                // synthesis, which DID use core's convention, disagreed with it.
                 let p = SIMD3<Float>(
-                    Float(o.originMM.x + Double(i) * o.spacingMM),
-                    Float(o.originMM.y + Double(j) * o.spacingMM),
-                    Float(o.originMM.z + Double(k) * o.spacingMM))
+                    Float(o.originMM.x + (Double(i) + 0.5) * o.spacingMM),
+                    Float(o.originMM.y + (Double(j) + 0.5) * o.spacingMM),
+                    Float(o.originMM.z + (Double(k) + 0.5) * o.spacingMM))
                 let g = (p - occ.origin) / occ.spacing
                 let a = Int(g.x.rounded()), b = Int(g.y.rounded()), c = Int(g.z.rounded())
                 guard a >= 0, b >= 0, c >= 0, a < occ.nx, b < occ.ny, c < occ.nz else { continue }
                 let oi = (c * occ.ny + b) * occ.nx + a
-                guard occ.values[oi] > 0.5 else { continue }
-                let d = self.demand.map { Double($0.values[oi]) } ?? 0
                 let idx = (k * tny + j) * tnx + i
+                // ★★★ THE REGION IS ASKED EXACTLY, NOT RESAMPLED (2026-09-07). Rounding
+                // this voxel's centre onto the occupancy grid dropped it whenever the
+                // centre landed just outside — up to half a voxel lost at every boundary
+                // of every face, which the run does not lose. `o.regionIDs` is the
+                // region membership computed on THIS grid; the occupancy is then only
+                // asked whether there is material here at all.
+                if exactRegions {
+                    guard o.regionIDs[idx] >= 1, occ.values[oi] > 0.5 || partSolidAt(p) else { continue }
+                } else {
+                    guard occ.values[oi] > 0.5 else { continue }
+                }
                 cand[idx] = true
                 // Dense where it works hardest: demand 1 ⇒ the tight end.
                 // ★★ THE REQUESTED SEPARATION ONLY — CORE RAISES IT.
@@ -831,9 +927,169 @@ public struct LatticeSDFScene {
                 // a real part (1.705 mm against a 0.645 mm printability floor on his).
                 // Applying either here would put a second copy of core's law in the app
                 // — the mistake that left the octet strut law 1.4-1.7x adrift.
-                sep[idx] = hi - (hi - lo) * Swift.min(Swift.max(d, 0), 1)
                 n += 1
             } } }
+            // ★★★ THE LATTICE RUNS INTO THE RIM — IT IS NOT CUT BACK FROM IT (his walk,
+            // 2026-09-08, looking at the front face's bottom edge: "The struts are not
+            // continuing INTO the solid rim. Currently you are cutting out WHOLE cells.
+            // don't do that. Continue the lattice passed the edge INTO the solid and
+            // union the two. This will get rid of the empty space between the lattice
+            // and the rim. This will also provide the struts for the filleting … can't
+            // exactly make that work if the lattice stops without TOUCHING the rim").
+            //
+            // ★ WHAT THIS USED TO DO, AND WHY IT LEFT A GAP. It deleted the band's
+            // voxels from the candidate set before tracing — core's own
+            // `apply_organic_solid_rim`, mirrored. So the tracer never entered the band,
+            // every curve was cut back to the eroded boundary, and the trim then took
+            // another bite off each end. The rim was drawn starting where the region
+            // ended, and between the two sat a strip of nothing: whole cells removed, as
+            // he says, and no strut anywhere near the wall it was supposed to join.
+            //
+            // ★ THE BAND STAYS A CANDIDATE NOW. The tracer runs through it and out into
+            // the solid; the band is still DRAWN as solid on top, so the two are unioned
+            // by the depth buffer — the struts disappear into the wall instead of
+            // stopping in front of it, which is the only arrangement in which a fillet
+            // has two surfaces to blend. The count is kept for the banner because "how
+            // wide is the rim" is still a question worth answering.
+            //
+            // ★ AND THE RUN HAS TO FOLLOW. Core still deletes the band
+            // (`apply_organic_solid_rim` sets `mask[e] = 0`), so until the wetted-join
+            // work lands there the preview shows struts entering the wall that the run
+            // will still cut back. Named in the handoff, not hidden here.
+            var solidRimVoxels = 0
+            // ★ NO DECLARED FACE ⇒ NO OUTLINE, so the block's EDGES take the band
+            // instead — the sample cube's twelve bars, never its faces (his rule,
+            // 2026-09-07: "NEVER OBSTRUCT THE VIEW OF THE LATTICE").
+            if n > 0, o.solidRimMM > 0, !exactRegions {
+                solidRimVoxels = OrganicSolidRim.edgeVoxels(
+                    candidate: cand, nx: tnx, ny: tny, nz: tnz,
+                    voxelMM: o.spacingMM, rimMM: o.solidRimMM).count
+            }
+            if n > 0, o.solidRimMM > 0, exactRegions {
+                // ★ ONLY WHERE THE RIM CAN READ IT (2026-09-07). `OrganicSolidRim`
+                // asks `solid` about the SIX NEIGHBOURS of a candidate and nothing else,
+                // so sampling the part's distance field at every voxel of the grid did
+                // 262,144 lookups to answer a few thousand questions. On a Debug build
+                // that is seconds of a bake he is waiting on.
+                var isSolid = [Bool](repeating: false, count: tnx * tny * tnz)
+                let rdi = [1, -1, 0, 0, 0, 0], rdj = [0, 0, 1, -1, 0, 0], rdk = [0, 0, 0, 0, 1, -1]
+                var asked = [Bool](repeating: false, count: tnx * tny * tnz)
+                for k in 0..<tnz { for j in 0..<tny { for i in 0..<tnx {
+                    guard cand[(k * tny + j) * tnx + i] else { continue }
+                    for d in 0..<6 {
+                        let i2 = i + rdi[d], j2 = j + rdj[d], k2 = k + rdk[d]
+                        guard i2 >= 0, j2 >= 0, k2 >= 0, i2 < tnx, j2 < tny, k2 < tnz else { continue }
+                        let e2 = (k2 * tny + j2) * tnx + i2
+                        guard !asked[e2] else { continue }
+                        asked[e2] = true
+                        isSolid[e2] = partSolidAt(SIMD3<Float>(
+                            Float(o.originMM.x + (Double(i2) + 0.5) * o.spacingMM),
+                            Float(o.originMM.y + (Double(j2) + 0.5) * o.spacingMM),
+                            Float(o.originMM.z + (Double(k2) + 0.5) * o.spacingMM)))
+                    }
+                } } }
+                let normals = regions.filter { $0.role == .include && $0.isValid }.map { $0.normal }
+                let rim = OrganicSolidRim.voxels(
+                    candidate: cand, solid: isSolid, regionID: o.regionIDs, normals: normals,
+                    nx: tnx, ny: tny, nz: tnz, voxelMM: o.spacingMM, rimMM: o.solidRimMM)
+                // ★ COUNTED, NOT DELETED — see the note above. The band stays a
+                // candidate so the curves run through it into the solid.
+                solidRimVoxels = rim.count
+            }
+            // ★★★ ARE THE CURVE ENDS ANCHORED AT THE REGION BOUNDARY? (his walk,
+            // 2026-09-07: "There are still empty spaces at the bottom and the top".)
+            //
+            // ★ THE PREVIEW ASKED THE WRONG HALF OF THE QUESTION. It passed
+            // `anchorAtBoundary = (boundary == .covered)` — the SHELL rule alone. Core
+            // (run_job.cpp, `op.anchor_at_region_boundary`) is
+            // `shell_is_written || boundary_solid_fraction > 0.5`: a region cut into
+            // SOLID MATERIAL anchors on that material whether or not a shell is drawn.
+            // With anchors off, every curve end that leaves the region is a dangling end
+            // and the trim cuts it back to its last connector — all the way round, top,
+            // bottom and sides. That is the bare band, and the run does not have it: his
+            // face prisms are cut into a solid wall, so core anchors.
+            //
+            // ★ MIRRORED EXACTLY, QUIRK INCLUDED. Core sets `edge` only when a
+            // non-lattice neighbour is SOLID, so `backed == on_boundary` and the
+            // fraction can only be 0 or 1 — "does the region touch solid anywhere".
+            // Reproducing core's arithmetic rather than the sentence in its comment is
+            // the only way the picture and the run can agree; the quirk is core's to
+            // decide about, and it is named in the handoff rather than silently
+            // "corrected" here.
+            var anchorAtBoundary = o.anchorAtBoundary
+            if n > 0, !anchorAtBoundary {
+                let sdf = self.partSDF
+                var onBoundary = 0, backed = 0
+                let di = [1, -1, 0, 0, 0, 0], dj = [0, 0, 1, -1, 0, 0], dk = [0, 0, 0, 0, 1, -1]
+                for k in 0..<tnz { for j in 0..<tny { for i in 0..<tnx {
+                    guard cand[(k * tny + j) * tnx + i] else { continue }
+                    var edge = false
+                    for d in 0..<6 {
+                        let i2 = i + di[d], j2 = j + dj[d], k2 = k + dk[d]
+                        guard i2 >= 0, j2 >= 0, k2 >= 0, i2 < tnx, j2 < tny, k2 < tnz else { continue }
+                        if cand[(k2 * tny + j2) * tnx + i2] { continue }
+                        // Is that neighbour SOLID part material? (core: density > iso)
+                        let q = SIMD3<Float>(
+                            Float(o.originMM.x + (Double(i2) + 0.5) * o.spacingMM),
+                            Float(o.originMM.y + (Double(j2) + 0.5) * o.spacingMM),
+                            Float(o.originMM.z + (Double(k2) + 0.5) * o.spacingMM))
+                        let gg = (q - sdf.origin) / sdf.spacing
+                        let a2 = Int(gg.x.rounded()), b2 = Int(gg.y.rounded()), c2 = Int(gg.z.rounded())
+                        guard a2 >= 0, b2 >= 0, c2 >= 0, a2 < sdf.nx, b2 < sdf.ny, c2 < sdf.nz else { continue }
+                        if sdf.values[(c2 * sdf.ny + b2) * sdf.nx + a2] < 0 { edge = true }
+                    }
+                    if edge { onBoundary += 1; backed += 1 }
+                } } }
+                let frac = onBoundary > 0 ? Double(backed) / Double(onBoundary) : 0
+                if frac > 0.5 { anchorAtBoundary = true }
+            }
+            // ★★★ THE SEPARATION IS GRADED FROM THE TRACER'S OWN STRESS (his walk,
+            // 2026-09-07: "This was what Auto cell-grading looks like. It's awful").
+            //
+            // ★ IT USED TO READ `demand`, AND UNDER AUTO THERE IS NO DEMAND. The bake
+            // hands a stress field to the scene only when the DENSITY mode is Sim; on
+            // Auto it asks for the optimise run's field, which is nil before a run. So
+            // `demand` was nil, `d` fell back to 0, and 0 means the WIDEST spacing —
+            // every voxel got the coarsest end of the window, uniformly, over the whole
+            // part. That is not a grade at all, and "Auto cell-grade" is the control
+            // that promises one. A stated per-region density did no better: one number
+            // per region is still one separation per region.
+            //
+            // ★ THE FIELD IS RIGHT HERE. Organic is traced from the full Cauchy tensor,
+            // so `o.tensor` is guaranteed present on THIS grid — no resampling, no
+            // second provenance, nothing to be nil. Its von Mises, normalised over the
+            // candidate set between the 5th and 95th percentile (robust to the one hot
+            // voxel at an anchor), is the demand: 1 where the part works hardest ⇒ the
+            // tight end of the window, 0 where it idles ⇒ the open end.
+            //
+            // ★ A SINGLE SIZE IS STILL A SINGLE SIZE. lo == hi ⇒ uniform, which is what
+            // Manual with one number means.
+            var gradedNote = ""
+            if n > 0 {
+                if hi - lo < 1e-9 {
+                    for e in 0..<cand.count where cand[e] { sep[e] = lo }
+                    gradedNote = String(format: " · uniform %.2f mm", lo)
+                } else {
+                    var vm = [Double](repeating: 0, count: cand.count)
+                    var sorted: [Double] = []
+                    sorted.reserveCapacity(n)
+                    for e in 0..<cand.count where cand[e] {
+                        let v = OrganicSyntheticStress.vonMises(o.tensor, at: e)
+                        vm[e] = v
+                        sorted.append(v)
+                    }
+                    sorted.sort()
+                    let p05 = sorted[Int(0.05 * Double(sorted.count - 1))]
+                    let p95 = sorted[Int(0.95 * Double(sorted.count - 1))]
+                    let span = Swift.max(p95 - p05, 1e-12)
+                    for e in 0..<cand.count where cand[e] {
+                        let t = Swift.min(Swift.max((vm[e] - p05) / span, 0), 1)
+                        sep[e] = hi - (hi - lo) * t
+                    }
+                    gradedNote = String(format: " · graded %.2f–%.2f mm by stress (p05 %.4g, p95 %.4g MPa)",
+                                        lo, hi, p05, p95)
+                }
+            }
             // ★ SHAPE FIT (maintainer, 2026-09-03): the separation shrinks toward the
             // walls so the lattice fits the outline — core's rule, mirrored in
             // `OrganicShapeFit` because it lives inline in the CLI. Applied to the same
@@ -849,13 +1105,69 @@ public struct LatticeSDFScene {
                 // floor is `kOrganicShapeFitMinCellRatio × spacing` (run_job.cpp), and
                 // the ONLY-mode ramp never runs. Passing (lo, hi) here floored the cap
                 // at `lo` — a swept-window behaviour no organic job can ask for.
+                // ★★★ CORE'S SHAPE FIT HAS TWO TERMS AND THE PREVIEW ONLY HAD ONE
+                // (his walk, 2026-09-07: "There should be a Grade to Shape that is
+                // always on"). Core caps the spacing at `min(member_width / n★,
+                // 2 · dist · voxel)`; this file's own note said the member term "needs
+                // the run's per-voxel member width, which the preview does not have".
+                // It does have it: `lattice_member_thickness_mm` is the same core
+                // function the octet path already calls through the bridge, and it takes
+                // exactly the candidate mask and the grid this loop just built.
+                //
+                // Without it the only cap was `2 · dist · voxel`, which at a 1.6 mm
+                // voxel first drops below a 5.5 mm separation at ONE voxel from the
+                // edge — so shape fit shrank a single outermost ring and left the rest
+                // of the wall untouched. That is why it looked switched off.
+                let member = TopOptKit.latticeMemberThicknessMM(
+                    nx: tnx, ny: tny, nz: tnz,
+                    spacing: SIMD3<Float>(repeating: Float(o.spacingMM)),
+                    solid: cand)
                 let fit = OrganicShapeFit.apply(spacing: sep, candidate: cand,
                                                 nx: tnx, ny: tny, nz: tnz,
                                                 voxelMM: o.spacingMM,
-                                                window: nil, only: false)
+                                                window: nil, only: false,
+                                                memberMM: member.count == cand.count ? member : [],
+                                                cellsAcrossMember: OrganicShapeFit.cellsAcrossMember)
                 sep = fit.spacing
-                fitNote = String(format: " · shape-fit: %d voxels shrunk (min ratio %.2f, depth %d)",
-                                 fit.shrunk, fit.minRatio, fit.depthVoxels)
+                fitNote = String(format: " · shape-fit: %d voxels shrunk (min ratio %.2f, depth %d, member %@)",
+                                 fit.shrunk, fit.minRatio, fit.depthVoxels,
+                                 member.count == cand.count ? "yes" : "UNAVAILABLE")
+            }
+            // ── ★★★ THE PER-VOXEL BEAD, THE WAY THE RUN BUILDS IT ────────────────
+            //
+            // run_job.cpp, in the same loop that writes the separation:
+            //     bead[e] = organic_strut_diameter_for(d, rho);
+            //     if (!(bead[e] > min_extrudable_width_mm)) bead[e] = min_extrudable_width_mm;
+            // and then `op.strut_diameter_field = &bead`. The preview handed core the
+            // SCALAR only, so every curve in the picture was one thickness while the
+            // file's vary with the local cell — the last of the run's organic
+            // parameters the preview did not carry. A stated strut width is a fixed
+            // bead in the run too (`bead[e] = t_fixed`), so it keeps the scalar.
+            var beadMM: [Double] = []
+            if n > 0, o.strutDiameterMM <= 0, hi - lo > 1e-9 {
+                let rhoLo = o.rhoMin, rhoHi = Swift.max(o.rhoMax, o.rhoMin)
+                // ★ CORE'S FUNCTION, TABULATED (2026-09-07). Both the separation and the
+                // density are straight lines in the same parameter, so the bead is a
+                // function of that one number — and calling across the bridge once per
+                // voxel was 262,144 C++ calls per bake. The table is core's own function
+                // evaluated at 1024 points of the window; a bead quantised to a
+                // thousandth of the window is orders below anything a printer resolves,
+                // and no law is re-derived here.
+                let steps = 1024
+                var table = [Double](repeating: 0, count: steps + 1)
+                for k in 0...steps {
+                    let f = Double(k) / Double(steps)
+                    let d = hi - (hi - lo) * f
+                    let rho = rhoLo + (rhoHi - rhoLo) * f
+                    let b = TopOptKit.organicStrutDiameterMM(spacingMM: d, relativeDensity: rho)
+                    table[k] = b > o.minExtrudableWidthMM ? b : o.minExtrudableWidthMM
+                }
+                beadMM = [Double](repeating: 0, count: cand.count)
+                let span = hi - lo
+                for e in 0..<cand.count where cand[e] && sep[e] > 0 {
+                    let f = Swift.min(Swift.max((hi - sep[e]) / span, 0), 1)
+                    beadMM[e] = table[Int((f * Double(steps)).rounded())]
+                }
             }
             if n == 0 { organicWhyNot = "no candidate voxel: the declared region is empty on the solve's grid" }
             if n > 0 {
@@ -915,15 +1227,24 @@ public struct LatticeSDFScene {
                     bandMM: band, overhangAngleDeg: o.overhangAngleDeg,
                     rhoMin: o.rhoMin, rhoMax: o.rhoMax,
                     strutDiameterMM: o.strutDiameterMM, grow: o.grow,
-                    layerHeightMM: o.layerHeightMM, anchorAtBoundary: o.anchorAtBoundary,
+                    layerHeightMM: o.layerHeightMM, anchorAtBoundary: anchorAtBoundary,
+                    // ★ the ties, at last — see `LatticeOrganicInput.transferTies`
+                    transferTies: o.transferTies, tieSwirl: o.tieSwirl, beadMM: beadMM,
                     showRepairs: o.showRepairs, overhangFillet: o.overhangFillet,
                     regionIDs: o.regionIDs, syntheticRegions: o.syntheticRegions,
-                    syntheticDeadFraction: o.syntheticDeadFraction),
+                    syntheticDeadFraction: o.syntheticDeadFraction,
+                    syntheticDeadMPa: o.syntheticDeadMPa),
                    t.field.count == fnx * fny * fnz {
                     organicEmittedOut = t.spans
                     organicCapsOut = t.spans.map { OrganicCapsule($0) }
                     organicSyntheticOut = t.synthetic
                     organicPhaseOut = (t.traceSeconds, t.emitSeconds, t.bakeSeconds)
+                    if t.syntheticVonMises.count == tnx * tny * tnz {
+                        organicSynthFieldOut = StressField(
+                            nx: tnx, ny: tny, nz: tnz,
+                            origin: SIMD3<Float>(o.originMM), spacing: Float(o.spacingMM),
+                            values: t.syntheticVonMises.map { Float($0) })
+                    }
                     organicWhyNot = nil
                     organicSurfaceOut = LatticeVoxelGrid(
                         nx: fnx, ny: fny, nz: fnz, origin: SIMD3<Float>(mn),
@@ -938,16 +1259,43 @@ public struct LatticeSDFScene {
                         + (o.showRepairs ? "" : " · ★ REPAIRS HIDDEN: the traced curves are shown; the file has the arches, legs and merges above")
                     organicSaid = "\(t.curveCount) curves, \(t.connectorCount) connectors, "
                         + String(format: "%.2f–%.2f mm spacing",
-                                 t.spacingUsedMinMM, t.spacingUsedMaxMM) + fitNote + counters
+                                 t.spacingUsedMinMM, t.spacingUsedMaxMM)
+                        + gradedNote + fitNote
+                        + (solidRimVoxels > 0
+                           ? String(format: " · solid rim %.2f mm (%d voxels)", o.solidRimMM, solidRimVoxels)
+                           : "")
+                        + counters
                 }
             }
         }
+        tOrganic = Date().timeIntervalSince(sceneT0) - tOccupancy - tRegionField
         self.organicField = organicOut
         self.organicSurfaceField = organicSurfaceOut
         self.organicEmittedSpans = organicEmittedOut
         self.organicNotDrawnReason = (algorithm == "organic" && organicOut == nil) ? (organicWhyNot ?? "no stress tensor reached the tracer (the stage's solve has not produced one)") : nil
         self.organicSyntheticReport = organicSyntheticOut
         self.organicPhaseSeconds = organicPhaseOut
+        // ★★★ THE DEPTH-STAGGER EXPERIMENT, APPLIED ONCE, AFTER EVERY PATH (his walk,
+        // 2026-09-08: "the depth variation was ON for images 2 and 3. And OFF for 4 and
+        // 5. Yet there is no difference").
+        //
+        // ★ IT WAS APPLIED INSIDE THE TRACE BRANCH ONLY. Four paths produce these
+        // capsules — a pre-baked field, the run's own emitted spans, a cached 3MF
+        // variant, and a fresh trace — and the part preview he was looking at does not
+        // take the fourth. The toggle moved nothing because the deformation was sitting
+        // in the one branch his picture never went through. It belongs here, where every
+        // path has already put its geometry in one place.
+        if let o = organic, o.depthStaggerCellMM > 0, !organicCapsOut.isEmpty {
+            let staggered = OrganicDepthStagger.apply(
+                spans: organicCapsOut.map {
+                    (a: SIMD3<Double>($0.a), b: SIMD3<Double>($0.b), r: Double($0.r))
+                },
+                regions: regions, cellMM: o.depthStaggerCellMM,
+                // ★ the sample cube declares no face; the build direction is its depth
+                fallbackAxis: o.buildDirection)
+            organicCapsOut = staggered.map { OrganicCapsule($0) }
+            organicEmittedOut = staggered
+        }
         self.organicCapsules = organicCapsOut
         self.organicSpanSource = organicSpanReceipt
         self.organicReceiptMismatch = organicMismatch
@@ -956,7 +1304,13 @@ public struct LatticeSDFScene {
             .compactMap { $0 }
         self.organicReceiptSummary = receiptLines.isEmpty ? nil : receiptLines.joined(separator: " · ")
         self.organicBandMM = organicBand
+        // ★ THE EXPERIMENT NAMES ITSELF WHEREVER THE LATTICE IS DESCRIBED.
+        if let o = organic, o.depthStaggerCellMM > 0, !organicSaid.isEmpty {
+            organicSaid += " · ★ DEPTH-STAGGER TEST: the drawn layers are offset after "
+                + "tracing; the run builds the un-staggered weave"
+        }
         self.organicSummary = organicSaid
+
         // ★★ AND WHETHER THAT DEMAND IS A MEASUREMENT (task 2026-08-20). `demand` has
         // TWO sources and they are not interchangeable: an FEA field, or a per-region
         // density the user STATED, inverted back into demand so the shader draws the
@@ -976,9 +1330,94 @@ public struct LatticeSDFScene {
         // it must not be routed through a value the user can overwrite. The stage
         // already ran the FEA; keeping it here is what makes the stage sufficient on
         // its own, with no variant and no results page.
-        self.stressDemand = LatticePreviewOccupancy.demand(like: occupancy,
-                                                           field: stressField ?? field)
+        // ★★★ THE MAP PAINTS WHAT THE TRACER SAW (2026-09-07). When a wall asked for
+        // synthetic stress, core replaced that wall's field before tracing; painting the
+        // SOLVE's field instead left the synthetic load invisible in the only view that
+        // shows where the part is working, and he reasonably read that as "it is not
+        // happening". Falls back to the solve's field when no wall asked.
+        let tDemandT0 = Date()
+        self.stressDemand = LatticePreviewOccupancy.demand(
+            like: occupancy, field: organicSynthFieldOut ?? stressField ?? field)
         self.demandIsMeasuredStress = self.stressDemand != nil
+        // ★★★ EACH DECLARED FACE IS NORMALISED ON ITS OWN RANGE (his instruction,
+        // 2026-09-08: "The front is relative - I'd like the back to be relative as well.
+        // I want to be able to easily point to the actual foci!").
+        //
+        // ★ BOTH FACES WERE ALREADY IN THE SAME MODE. The map is one normalisation taken
+        // across the WHOLE part, so a wall carrying 0.004 MPa beside one carrying 0.03
+        // collapses into the bottom of a shared scale — every voxel on it the same
+        // colour, and the synthetic foci, which are the whole reason the wall has a
+        // field at all, unpointable. Giving each region its own p05…p95 makes the foci
+        // legible on every wall.
+        //
+        // ★ AND IT CHANGES WHAT THE COLOUR MEANS, so it is said out loud: two walls can
+        // no longer be compared by hue. The (i) beside "Synthetic stresses on unloaded
+        // walls" carries that sentence.
+        //
+        // Region membership comes from the ids already computed on the TRACER's grid —
+        // nearest-neighbour into it, one lookup per occupancy voxel. Re-deriving it here
+        // would be a second point-in-polygon sweep over millions of voxels, which is the
+        // 124-second bake this file already paid for once.
+        if let o = organic, o.regionIDs.count == o.dims.0 * o.dims.1 * o.dims.2,
+           var d = self.stressDemand {
+            let (tnx, tny, tnz) = o.dims
+            var idOf = [Int32](repeating: 0, count: d.values.count)
+            var i = 0
+            for k in 0..<d.nz {
+                for j in 0..<d.ny {
+                    for ii in 0..<d.nx {
+                        let p = d.origin + SIMD3<Float>(Float(ii), Float(j), Float(k)) * d.spacing
+                        let g = (SIMD3<Double>(p) - o.originMM) / o.spacingMM
+                        let a = Int(g.x.rounded()), b = Int(g.y.rounded()), c = Int(g.z.rounded())
+                        if a >= 0, b >= 0, c >= 0, a < tnx, b < tny, c < tnz {
+                            idOf[i] = o.regionIDs[(c * tny + b) * tnx + a]
+                        }
+                        i += 1
+                    }
+                }
+            }
+            // The percentiles from a stride: a 128³ grid is 2.1 M values and the ends of
+            // the ramp do not move between neighbours.
+            var samples: [Int32: [Float]] = [:]
+            let stride = Swift.max(1, d.values.count / 200_000)
+            var s2 = 0
+            while s2 < d.values.count {
+                let id = idOf[s2]
+                if id >= 1 { samples[id, default: []].append(d.values[s2]) }
+                s2 += stride
+            }
+            var loHi: [Int32: (Float, Float)] = [:]
+            for (id, var v) in samples where v.count >= 8 {
+                v.sort()
+                let lo = v[Int(0.05 * Double(v.count - 1))]
+                let hi = v[Int(0.95 * Double(v.count - 1))]
+                // ★★★ A FLAT FIELD IS NOT STRETCHED (his walk, 2026-09-08: "the synthetic
+                // stress doesn't really show the foci as easily as expected … Why is it
+                // so jumbled up? Shouldn't the red be ONLY in the center of the foci?").
+                //
+                // ★ CORE NORMALISES EVERY SYNTHETIC VOXEL TO THE SAME MAGNITUDE.
+                // `synthesize_focal_stress` builds the focal tensor, then scales it by
+                // `target / tvm` so its von Mises equals the dead threshold EXACTLY —
+                // the spatial variation is divided out on purpose, and what is left
+                // varying is the tensor's DIRECTION, not its size. A von Mises map of
+                // that wall is therefore flat by construction: there is no magnitude
+                // peak at a focus to find.
+                //
+                // Stretching p05…p95 of a flat field across the full ramp is stretching
+                // ROUNDING NOISE, which is the speckle he is looking at — my own
+                // per-region normalisation made it worse, not better. So the region is
+                // only renormalised when it has a real spread to show.
+                if hi > lo, Double(hi - lo) > 0.05 * Double(abs(hi)) { loHi[id] = (lo, hi) }
+            }
+            if !loHi.isEmpty {
+                for e in 0..<d.values.count {
+                    guard let r = loHi[idOf[e]] else { continue }
+                    d.values[e] = Swift.min(Swift.max((d.values[e] - r.0) / (r.1 - r.0), 0), 1)
+                }
+                self.stressDemand = d
+            }
+        }
+        let tDemand = Date().timeIntervalSince(tDemandT0)
 
         // ★★ AFTER `demand` IS ASSIGNED, and that is the whole of a bug this very
         // nearly shipped. `demand` is a `var` with an implicit nil, so baking the
@@ -1003,18 +1442,40 @@ public struct LatticeSDFScene {
         // says it: "it answers 'where is this part working hardest', which is
         // the right question for the colour ramp". The grading keeps reading
         // `demand`; only the PAINT reads the measurement.
+        var tTint = 0.0
+        let tTintT0 = Date()
         if let d = self.stressDemand ?? self.demand {
             // RGBA8, matching `makeTintTexture` — the same upload path the
             // face-role tints already use, so there is one volume format here.
+            // ★★★ THE RAMP IS A LOOKUP, NOT A FUNCTION CALL PER VOXEL (measured
+            // 2026-09-07: 4.46 s of a 9.1 s sample bake, on a 128³ grid — 2.1 million
+            // calls into `LatticeStressTint.colour` in a Debug build, for a texture with
+            // 256 distinguishable values in it). The table is that same function,
+            // sampled 256 times; the colours are identical to within a byte because a
+            // byte is what they become.
+            var lut = [UInt8](repeating: 0, count: 256 * 3)
+            for k in 0..<256 {
+                let c = LatticeStressTint.colour(fraction: Double(k) / 255.0)
+                lut[k * 3] = UInt8(max(0, min(255, c.x * 255)))
+                lut[k * 3 + 1] = UInt8(max(0, min(255, c.y * 255)))
+                lut[k * 3 + 2] = UInt8(max(0, min(255, c.z * 255)))
+            }
             var rgb = [UInt8](repeating: 0, count: d.values.count * 4)
-            for i in 0..<d.values.count {
-                let c = LatticeStressTint.colour(fraction: Double(d.values[i]))
-                rgb[i * 4] = UInt8(max(0, min(255, c.x * 255)))
-                rgb[i * 4 + 1] = UInt8(max(0, min(255, c.y * 255)))
-                rgb[i * 4 + 2] = UInt8(max(0, min(255, c.z * 255)))
-                rgb[i * 4 + 3] = 255
+            rgb.withUnsafeMutableBufferPointer { out in
+                lut.withUnsafeBufferPointer { t in
+                    d.values.withUnsafeBufferPointer { v in
+                        for i in 0..<v.count {
+                            let k = Int(max(0, min(255, v[i] * 255)).rounded())
+                            out[i * 4] = t[k * 3]
+                            out[i * 4 + 1] = t[k * 3 + 1]
+                            out[i * 4 + 2] = t[k * 3 + 2]
+                            out[i * 4 + 3] = 255
+                        }
+                    }
+                }
             }
             self.stressRGB = rgb
+            tTint = Date().timeIntervalSince(tTintT0)
         } else {
             self.stressRGB = nil
         }
@@ -1116,6 +1577,13 @@ public struct LatticeSDFScene {
         var inside = 0
         for v in occupancy.values where v > 0.5 { inside += 1 }
         self.interiorVoxelCount = inside
+        if algorithm == "organic" {
+            let total = Date().timeIntervalSince(sceneT0)
+            NSLog("DIAG scene phases: occupancy+partSDF %.2f s · region field %.2f s · organic %.2f s · demand \(String(format: "%.2f", tDemand)) s · tint \(String(format: "%.2f", tTint)) s · rest %.2f s · total %.2f s (grid %dx%dx%d)",
+                  tOccupancy, tRegionField, tOrganic,
+                  total - tOccupancy - tRegionField - tOrganic, total,
+                  occupancy.nx, occupancy.ny, occupancy.nz)
+        }
     }
 }
 
@@ -2605,7 +3073,14 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
                 // ★ the capsules have no reach to respect: the live radius is exact
                 let live = organicRadiusMM > 0
                     ? (capsulesReplaceField ? organicRadiusMM : Swift.min(organicRadiusMM, 0.9 * reach)) : 0
-                return SIMD4(live, reach, Float(LatticeSDFScene.organicBakeHeadroomMM), 0)
+                // ★★★ THE WETTED JOIN (his instruction, 2026-09-08: "make the fillet
+                // equal to the radius of the strut"). .w is the fillet as a MULTIPLE of
+                // the strut's radius, so it scales with the strut and there is no
+                // absolute length to be wrong at another size. 1 = one radius; 0 turns
+                // the whole thing off and the analytic capsule is drawn exactly as
+                // before. Capsules only — the march has no join to wet.
+                return SIMD4(live, reach, Float(LatticeSDFScene.organicBakeHeadroomMM),
+                             capsulesReplaceField ? 1 : 0)
             }())
     }
 
