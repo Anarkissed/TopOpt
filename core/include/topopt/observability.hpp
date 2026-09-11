@@ -1014,7 +1014,8 @@ struct RunInfo {
   long long organic_synthetic_fully = 0;
   long long organic_synthetic_blended = 0;
   double organic_synthetic_dead_threshold = 0.0;
-  bool organic_synthetic_dead_floor_bound = false;   // the absolute 0.005 MPa rule bound, not 2 % of peak
+  // ★ which rule set that threshold: the absolute floor, or 2 % of the part's peak.
+  bool organic_synthetic_dead_floor_bound = false;
   std::vector<OrganicSyntheticRegionInfo> organic_synthetic_by_region;   // keyed by face_id
   double organic_solid_rim_mm = 0.0;        // grade-to-solid band at the outline
   long long organic_solid_rim_voxels = 0;

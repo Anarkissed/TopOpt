@@ -1181,6 +1181,15 @@ struct OrganicLattice {
 // laws see "low stress", not zero. Voigt [xx,yy,zz,xy,yz,zx], the tracer's order.
 // Measured on the M2 stand (2026-08): back wall median vM 0.000422 MPa, 1.8 % of
 // peak, DEAD; the focal field gave it a coherent weave a swirl could not.
+// ★ THE ABSOLUTE FLOOR ON "DEAD" (maintainer, 2026-09-08). A pure fraction of the peak
+// is the wrong rule on a lightly loaded part: if the peak is itself small, 2 % of it is a
+// number no material cares about, and walls carrying genuinely inert stress are not
+// recognised as dead. The rule is now "2 % of peak OR below this, whichever comes
+// first" -- i.e. the threshold is the LARGER of the two, so the absolute floor takes over
+// exactly when the relative one has become meaningless. 0.005 MPa is the maintainer's
+// number: below it the stresses are inert.
+inline constexpr double kOrganicSyntheticDeadFloorMPa = 0.005;
+
 struct SyntheticStressRegion {
   int region_id = 0;        // 1-based declared include-region id (voxel_region_id)
   int face_id = -1;         // the B-rep face the region was spawned from, for the receipt
@@ -1210,20 +1219,13 @@ struct SyntheticStressReport {
   std::size_t voxels_blended = 0;
   double dead_threshold = 0.0;              // thr, in the tensor's units (the LARGER rule)
   double peak_von_mises = 0.0;
+  // ★ true when the ABSOLUTE floor was the binding rule rather than the fraction.
   bool dead_floor_bound = false;
   // ★ WHICH NORMALISATION RAN, so a preview can tell which core it is talking to.
   // false = the old per-voxel rescale (every synthetic voxel forced to the target,
   // which flattened the foci); true = one factor per region, falloff preserved.
   bool per_region_normalisation = true;
 };
-// ★ THE ABSOLUTE FLOOR ON "DEAD" (maintainer, 2026-09-08). A pure fraction of the peak
-// is the wrong rule on a lightly loaded part: if the peak is itself small, 2 % of it is a
-// number no material cares about, and walls carrying genuinely inert stress are not
-// recognised as dead. The rule is now "2 % of peak OR below this, whichever comes
-// first" -- i.e. the threshold is the LARGER of the two, so the absolute floor takes over
-// exactly when the relative one has become meaningless. 0.005 MPa is the maintainer's
-// number: below it the stresses are inert.
-inline constexpr double kOrganicSyntheticDeadFloorMPa = 0.005;
 
 // ── the bead calibration's root-find ────────────────────────────────────────────
 // The factor is solved so the lattice's UNION volume matches the volume the grading law
@@ -1246,13 +1248,13 @@ SyntheticStressReport synthesize_focal_stress(
     const std::vector<int>& voxel_region_id,
     const std::vector<SyntheticStressRegion>& regions, double dead_fraction,
     std::vector<double>& stress,
-    // ★ `dead_floor` (MPa) is the ABSOLUTE half of the dead test: thr = max(dead_fraction
-// x peak, dead_floor), whichever fires first. DEFAULT 0.0 preserves the purely relative
-// behaviour exactly; the in-run caller passes kOrganicSyntheticDeadFloorMPa. It exists
-// because a relative test is meaningless on a lightly loaded part -- the M2 stand peaks
-// at 0.031 MPa against a 31 MPa allowable, so 2 % of peak is 0.0006 MPa and a wall at
-// 0.004 MPa read "alive". The threshold actually used is reported as `dead_threshold`.
-                       double dead_floor = 0.0);
+                       // ★ `dead_floor` (MPa) is the ABSOLUTE half of the dead test: thr = max(dead_fraction
+                       // x peak, dead_floor), whichever fires first. DEFAULT 0.0 preserves the purely relative
+                       // behaviour exactly; the in-run caller passes kOrganicSyntheticDeadFloorMPa. It exists
+                       // because a relative test is meaningless on a lightly loaded part -- the M2 stand peaks
+                       // at 0.031 MPa against a 31 MPa allowable, so 2 % of peak is 0.0006 MPa and a wall at
+                       // 0.004 MPa read "alive". The threshold actually used is reported as `dead_threshold`.
+                                              double dead_floor = 0.0);
 
 // ── ★ THE CELL-SIZE PROBE'S MEASURE: how much of the traced length reaches the part
 // Curves are welded by node contact within r+r (the solver's rule) plus their own
