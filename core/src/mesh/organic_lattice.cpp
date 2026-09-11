@@ -733,6 +733,106 @@ OrganicProbeResult probe_organic_rooting(const OrganicLattice& lat,
   return out;
 }
 
+// ── §4(a)'s per-voxel density, on any span set (see the header) ───────────────
+// Byte for byte the computation that used to sit inline in the tracer: the deposit walks
+// each span in quarter-voxel steps and adds pi*r^2*dl to the voxel holding the midpoint,
+// then two summed-area tables give the box sums exactly and in O(1) per voxel at any
+// window size. Nothing here was changed in the extraction -- it is lifted so the field
+// can also be built from the spans that SHIP.
+OrganicDensityField organic_relative_density(const VoxelGrid& grid,
+                                             const std::vector<char>& candidate,
+                                             const std::vector<double>& separation_mm,
+                                             const std::vector<OrganicSpan>& spans,
+                                             double rho_min, double rho_max) {
+  OrganicDensityField out;
+  const std::size_t n = grid.voxel_count();
+  const double h = grid.spacing;
+  out.mask.assign(n, 0);
+  out.relative_density.assign(n, 0.0);
+  if (candidate.size() != n || separation_mm.size() != n) return out;
+
+  std::vector<double> vol(n, 0.0);
+  auto voxel_of = [&](const Vec3& p, int& i, int& j, int& k) {
+    i = static_cast<int>(std::floor((p.x - grid.origin.x) / h));
+    j = static_cast<int>(std::floor((p.y - grid.origin.y) / h));
+    k = static_cast<int>(std::floor((p.z - grid.origin.z) / h));
+  };
+  for (const OrganicSpan& sp : spans) {
+    const double area = M_PI * sp.r * sp.r;
+    const double L = vlen(vsub(sp.b, sp.a));
+    if (!(L > 0.0)) continue;
+    const int m = std::max(1, static_cast<int>(std::ceil(L / (0.25 * h))));
+    const double dl = L / m;
+    for (int t = 0; t < m; ++t) {
+      const double u = (t + 0.5) / m;
+      const Vec3 p = vadd(sp.a, vmul(vsub(sp.b, sp.a), u));
+      int i, j, k;
+      voxel_of(p, i, j, k);
+      if (i < 0 || j < 0 || k < 0 || i >= grid.nx || j >= grid.ny || k >= grid.nz) continue;
+      vol[grid.index(i, j, k)] += area * dl;
+    }
+    out.deposited_mm3 += area * L;
+  }
+
+  const std::size_t sx = static_cast<std::size_t>(grid.nx) + 1;
+  const std::size_t sy = static_cast<std::size_t>(grid.ny) + 1;
+  const std::size_t sz = static_cast<std::size_t>(grid.nz) + 1;
+  std::vector<double> sat_v(sx * sy * sz, 0.0), sat_c(sx * sy * sz, 0.0);
+  auto S = [sx, sy](int i, int j, int k) {
+    return (static_cast<std::size_t>(k) * sy + j) * sx + i;
+  };
+  for (int k = 1; k < static_cast<int>(sz); ++k)
+    for (int j = 1; j < static_cast<int>(sy); ++j)
+      for (int i = 1; i < static_cast<int>(sx); ++i) {
+        const std::size_t e = grid.index(i - 1, j - 1, k - 1);
+        const double add_v = vol[e];
+        const double add_c = candidate[e] ? 1.0 : 0.0;
+        sat_v[S(i, j, k)] = add_v + sat_v[S(i - 1, j, k)] + sat_v[S(i, j - 1, k)] +
+                            sat_v[S(i, j, k - 1)] - sat_v[S(i - 1, j - 1, k)] -
+                            sat_v[S(i - 1, j, k - 1)] - sat_v[S(i, j - 1, k - 1)] +
+                            sat_v[S(i - 1, j - 1, k - 1)];
+        sat_c[S(i, j, k)] = add_c + sat_c[S(i - 1, j, k)] + sat_c[S(i, j - 1, k)] +
+                            sat_c[S(i, j, k - 1)] - sat_c[S(i - 1, j - 1, k)] -
+                            sat_c[S(i - 1, j, k - 1)] - sat_c[S(i, j - 1, k - 1)] +
+                            sat_c[S(i - 1, j - 1, k - 1)];
+      }
+  auto box = [&](const std::vector<double>& T, int i0, int j0, int k0, int i1, int j1,
+                 int k1) {
+    return T[S(i1, j1, k1)] - T[S(i0, j1, k1)] - T[S(i1, j0, k1)] - T[S(i1, j1, k0)] +
+           T[S(i0, j0, k1)] + T[S(i0, j1, k0)] + T[S(i1, j0, k0)] - T[S(i0, j0, k0)];
+  };
+
+  const double vox = h * h * h;
+  std::vector<double> rhos;
+  for (int k = 0; k < grid.nz; ++k)
+    for (int j = 0; j < grid.ny; ++j)
+      for (int i = 0; i < grid.nx; ++i) {
+        const std::size_t e = grid.index(i, j, k);
+        if (!candidate[e]) continue;
+        const int rad = std::max(1, static_cast<int>(std::llround(0.5 * separation_mm[e] / h)));
+        const int i0 = std::max(0, i - rad), i1 = std::min(grid.nx, i + rad + 1);
+        const int j0 = std::max(0, j - rad), j1 = std::min(grid.ny, j + rad + 1);
+        const int k0 = std::max(0, k - rad), k1 = std::min(grid.nz, k + rad + 1);
+        const double v = box(sat_v, i0, j0, k0, i1, j1, k1);
+        const double c = box(sat_c, i0, j0, k0, i1, j1, k1);
+        if (!(v > 0.0) || !(c > 0.0)) continue;
+        double rho = v / (c * vox);
+        if (rho_max > 0.0 && rho > rho_max) { rho = rho_max; ++out.clamped_hi_voxels; }
+        if (rho_min > 0.0 && rho < rho_min) { rho = rho_min; ++out.clamped_lo_voxels; }
+        out.mask[e] = 1;
+        out.relative_density[e] = rho;
+        rhos.push_back(rho);
+      }
+  out.latticed_voxels = rhos.size();
+  if (!rhos.empty()) {
+    std::sort(rhos.begin(), rhos.end());   // full sort, never a sample
+    out.rho_min_emitted = rhos.front();
+    out.rho_max_emitted = rhos.back();
+    out.rho_median_emitted = rhos[rhos.size() / 2];
+  }
+  return out;
+}
+
 OrganicLattice trace_organic_lattice(const VoxelGrid& grid,
                                      const std::vector<char>& candidate,
                                      const std::vector<double>& stress,
@@ -1920,98 +2020,24 @@ OrganicLattice trace_organic_lattice(const VoxelGrid& grid,
   // Both sums come off SUMMED-AREA TABLES (3D prefix sums) in one fixed traversal —
   // exact, O(1) per query at any window size, no sampling anywhere (§5b).
   {
-    std::vector<double> vol(n, 0.0);
-    auto deposit = [&](const Vec3& a, const Vec3& b, double r) {
-      const double area = M_PI * r * r;
-      const double L = vlen(vsub(b, a));
-      if (!(L > 0.0)) return;
-      const int m = std::max(1, static_cast<int>(std::ceil(L / (0.25 * h))));
-      const double dl = L / m;
-      for (int s = 0; s < m; ++s) {
-        const double u = (s + 0.5) / m;
-        const Vec3 p = vadd(a, vmul(vsub(b, a), u));
-        int i, j, k;
-        voxel_of(p, i, j, k);
-        if (i < 0 || j < 0 || k < 0 || i >= grid.nx || j >= grid.ny ||
-            k >= grid.nz)
-          continue;
-        vol[grid.index(i, j, k)] += area * dl;
-      }
-      rep.emitted_volume_mm3 += area * L;
-    };
+    std::vector<OrganicSpan> emitted;
+    emitted.reserve(out.connectors.size() + 4 * out.curves.size());
     for (const OrganicCurve& cv : out.curves)
       for (std::size_t t = 1; t < cv.points.size(); ++t)
-        deposit(cv.points[t - 1], cv.points[t], cv.radius_mm);
+        emitted.push_back(OrganicSpan{cv.points[t - 1], cv.points[t], cv.radius_mm});
     for (const OrganicConnector& cn : out.connectors)
-      deposit(cn.a, cn.b, cn.radius_mm);
-
-    // Summed-area tables over (nx+1)(ny+1)(nz+1), inclusive prefix sums.
-    const std::size_t sx = static_cast<std::size_t>(grid.nx) + 1;
-    const std::size_t sy = static_cast<std::size_t>(grid.ny) + 1;
-    const std::size_t sz = static_cast<std::size_t>(grid.nz) + 1;
-    std::vector<double> sat_v(sx * sy * sz, 0.0), sat_c(sx * sy * sz, 0.0);
-    auto S = [sx, sy](int i, int j, int k) {
-      return (static_cast<std::size_t>(k) * sy + j) * sx + i;
-    };
-    for (int k = 1; k < static_cast<int>(sz); ++k)
-      for (int j = 1; j < static_cast<int>(sy); ++j)
-        for (int i = 1; i < static_cast<int>(sx); ++i) {
-          const std::size_t e = grid.index(i - 1, j - 1, k - 1);
-          const double add_v = vol[e];
-          const double add_c = candidate[e] ? 1.0 : 0.0;
-          sat_v[S(i, j, k)] = add_v + sat_v[S(i - 1, j, k)] + sat_v[S(i, j - 1, k)] +
-                              sat_v[S(i, j, k - 1)] - sat_v[S(i - 1, j - 1, k)] -
-                              sat_v[S(i - 1, j, k - 1)] - sat_v[S(i, j - 1, k - 1)] +
-                              sat_v[S(i - 1, j - 1, k - 1)];
-          sat_c[S(i, j, k)] = add_c + sat_c[S(i - 1, j, k)] + sat_c[S(i, j - 1, k)] +
-                              sat_c[S(i, j, k - 1)] - sat_c[S(i - 1, j - 1, k)] -
-                              sat_c[S(i - 1, j, k - 1)] - sat_c[S(i, j - 1, k - 1)] +
-                              sat_c[S(i - 1, j - 1, k - 1)];
-        }
-    auto box = [&](const std::vector<double>& T, int i0, int j0, int k0, int i1,
-                   int j1, int k1) {
-      return T[S(i1, j1, k1)] - T[S(i0, j1, k1)] - T[S(i1, j0, k1)] -
-             T[S(i1, j1, k0)] + T[S(i0, j0, k1)] + T[S(i0, j1, k0)] +
-             T[S(i1, j0, k0)] - T[S(i0, j0, k0)];
-    };
-
-    const double vox = h * h * h;
-    std::vector<double> rhos;
-    for (int k = 0; k < grid.nz; ++k)
-      for (int j = 0; j < grid.ny; ++j)
-        for (int i = 0; i < grid.nx; ++i) {
-          const std::size_t e = grid.index(i, j, k);
-          if (!candidate[e]) continue;
-          // HALF-WINDOW = half the local separation, so the window is one repeat of
-          // the lattice across. At least one voxel either side, or the "homogenised"
-          // figure degenerates back into the occupancy this block exists to avoid.
-          const int rad = std::max(1, static_cast<int>(std::llround(0.5 * dsep[e] / h)));
-          const int i0 = std::max(0, i - rad), i1 = std::min(grid.nx, i + rad + 1);
-          const int j0 = std::max(0, j - rad), j1 = std::min(grid.ny, j + rad + 1);
-          const int k0 = std::max(0, k - rad), k1 = std::min(grid.nz, k + rad + 1);
-          const double v = box(sat_v, i0, j0, k0, i1, j1, k1);
-          const double c = box(sat_c, i0, j0, k0, i1, j1, k1);
-          if (!(v > 0.0) || !(c > 0.0)) continue;
-          double rho = v / (c * vox);
-          if (params.rho_max > 0.0 && rho > params.rho_max) {
-            rho = params.rho_max;
-            ++rep.rho_clamped_hi_voxels;
-          }
-          if (params.rho_min > 0.0 && rho < params.rho_min) {
-            rho = params.rho_min;
-            ++rep.rho_clamped_lo_voxels;
-          }
-          out.mask[e] = 1;
-          out.relative_density[e] = rho;
-          rhos.push_back(rho);
-        }
-    rep.latticed_voxels = rhos.size();
-    if (!rhos.empty()) {
-      std::sort(rhos.begin(), rhos.end());  // full sort, never a sample
-      rep.rho_min_emitted = rhos.front();
-      rep.rho_max_emitted = rhos.back();
-      rep.rho_median_emitted = rhos[rhos.size() / 2];
-    }
+      emitted.push_back(OrganicSpan{cn.a, cn.b, cn.radius_mm});
+    const OrganicDensityField df = organic_relative_density(
+        grid, candidate, dsep, emitted, params.rho_min, params.rho_max);
+    out.mask = df.mask;
+    out.relative_density = df.relative_density;
+    rep.emitted_volume_mm3 += df.deposited_mm3;
+    rep.rho_clamped_hi_voxels += df.clamped_hi_voxels;
+    rep.rho_clamped_lo_voxels += df.clamped_lo_voxels;
+    rep.latticed_voxels = df.latticed_voxels;
+    rep.rho_min_emitted = df.rho_min_emitted;
+    rep.rho_max_emitted = df.rho_max_emitted;
+    rep.rho_median_emitted = df.rho_median_emitted;
   }
 
   // ── §3(a) / R7: THE CURVE-CROSSING COUNT ───────────────────────────────────

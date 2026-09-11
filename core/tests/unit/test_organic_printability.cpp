@@ -716,6 +716,57 @@ void test_bead_calibration_hits_the_union_volume() {
         "the union is -- which is the whole reason the model changed");
 }
 
+// ── THE CERTIFIED DENSITY MUST FOLLOW THE GEOMETRY THAT SHIPS ───────────────────
+// It used to be the tracer's own snapshot, taken before the clip to the part, the node
+// merge, the support pass, the prune, the stranded drop and the finish -- all of which
+// run afterwards, on a separate span list, and remove material. Nothing refreshed it, so
+// whatever they removed the certificate still believed was there, in the UNSAFE
+// direction: more material reads as stiffer. Measured on the M2 stand, the certificate
+// was handed 77,336 mm3 where the shipped file holds 41,955, and the certified margin
+// fell from 1,671 to 1,142 once it was taken on what ships. The property that has to hold
+// is simply this: REMOVE GEOMETRY, AND THE MEASURED DENSITY MUST FALL.
+void test_certified_density_follows_the_shipped_spans() {
+  using namespace topopt;
+  GrowFixture f = grow_fixture();
+  std::vector<double> bead(f.grid.voxel_count(), 0.8);
+  f.params.strut_diameter_field = &bead;
+  f.params.bead_is_stated = true;
+  const OrganicLattice lat =
+      trace_organic_lattice(f.grid, f.cand, f.stress, f.spacing, nullptr, f.params);
+  CHECK(!lat.curves.empty(), "certified density: it traced something");
+
+  std::vector<OrganicSpan> all;
+  for (const OrganicCurve& cv : lat.curves)
+    for (std::size_t i = 1; i < cv.points.size(); ++i)
+      all.push_back(OrganicSpan{cv.points[i - 1], cv.points[i], cv.radius_mm});
+  for (const OrganicConnector& cn : lat.connectors)
+    all.push_back(OrganicSpan{cn.a, cn.b, cn.radius_mm});
+  CHECK(all.size() > 8, "certified density: there are spans to remove");
+
+  const double vox = f.grid.spacing * f.grid.spacing * f.grid.spacing;
+  auto material = [&](const std::vector<OrganicSpan>& sp) {
+    const OrganicDensityField d = organic_relative_density(
+        f.grid, f.cand, lat.spacing_used_mm, sp, 0.0, 0.0);
+    double v = 0.0;
+    for (std::size_t e = 0; e < d.relative_density.size(); ++e)
+      if (d.mask[e]) v += d.relative_density[e];
+    return v * vox;
+  };
+  // a THIRD of the network removed, which is about what the trim passes take off the
+  // M2 stand
+  std::vector<OrganicSpan> trimmed(all.begin(), all.begin() + (all.size() * 2) / 3);
+  const double full = material(all), cut = material(trimmed);
+  std::printf("  certified density: %zu spans -> %.2f mm3, %zu spans -> %.2f mm3\n",
+              all.size(), full, trimmed.size(), cut);
+  CHECK(full > 0.0, "certified density: the full network measures something");
+  CHECK(cut < full,
+        "certified density: removing a third of the spans LOWERS the measured material -- "
+        "the snapshot it used to certify could not do this");
+  CHECK(material(all) == full,
+        "certified density: and the measurement is deterministic, so a re-measure after "
+        "the trim passes cannot itself move the verdict");
+}
+
 // ── G2: NO SILENT FALLBACK TO THE TRACED CURVES ─────────────────────────────────
 void test_growth_does_not_fall_back() {
   GrowFixture f = grow_fixture();
@@ -1572,6 +1623,7 @@ int main() {
   test_growth_produces_curves();
   test_stated_strut_width_is_exact();
   test_bead_calibration_hits_the_union_volume();
+  test_certified_density_follows_the_shipped_spans();
   test_growth_does_not_fall_back();
   test_growth_is_supported();
   test_growth_respects_the_cone();

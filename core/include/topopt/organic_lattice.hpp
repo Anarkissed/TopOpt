@@ -1707,6 +1707,28 @@ struct OrganicSpan {
   Vec3 a{0, 0, 0}, b{0, 0, 0};
   double r = 0.0;
 };
+// ── §4(a)'s per-voxel density, callable on ANY span set ─────────────────────────
+// Extracted so the field can be recomputed from the spans that actually SHIP, not only
+// from the ones the tracer drew. It is a HOMOGENISED density, not an occupancy: the
+// deposited volume is box-filtered over a window one local separation across and
+// normalised by the CANDIDATE volume in that window, so a voxel at a region's edge is not
+// reported thinner merely for sitting there. `separation_mm` is the tracer's own
+// `spacing_used_mm` -- 0 marks a voxel off the candidate set, which is how the candidate
+// set is recovered. rho_min/rho_max are the grading band, 0 = unclamped.
+struct OrganicDensityField {
+  std::vector<char> mask;
+  std::vector<double> relative_density;
+  std::size_t latticed_voxels = 0;
+  double rho_min_emitted = 0.0, rho_max_emitted = 0.0, rho_median_emitted = 0.0;
+  std::size_t clamped_lo_voxels = 0, clamped_hi_voxels = 0;
+  double deposited_mm3 = 0.0;     // sum of pi*r^2*L, overlaps counted twice
+};
+OrganicDensityField organic_relative_density(const VoxelGrid& grid,
+                                             const std::vector<char>& candidate,
+                                             const std::vector<double>& separation_mm,
+                                             const std::vector<OrganicSpan>& spans,
+                                             double rho_min, double rho_max);
+
 
 class LatticeBoundary;  // topopt/lattice_boundary.hpp
 class MeshDistance;     // topopt/mesh_distance.hpp — the EXPORTED shell's distance
