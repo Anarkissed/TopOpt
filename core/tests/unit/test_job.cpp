@@ -704,6 +704,38 @@ static void test_organic_scale_and_gates() {
     CHECK(!parse_job(organic_swept(", \"organic_transfer_ties\": false"))
               .grading.organic_transfer_ties,
           "organic_transfer_ties: false switches the ties off");
+    // ── the dual-contour keys ──────────────────────────────────────────────────
+    // OFF by default and additive: nothing already emitted changes when they are absent,
+    // which is the whole reason the mesher went in as a key rather than a replacement.
+    {
+      const auto d = parse_job(organic_swept(""));
+      CHECK(!d.grading.organic_dual_contour,
+            "organic_dual_contour: absent means OFF -- the welded pair is unchanged");
+      CHECK(d.grading.organic_dc_cell_mm == 0.0 && d.grading.organic_dc_tolerance_mm == 0.0,
+            "organic_dc_*: absent means 0, i.e. derived");
+    }
+    {
+      const auto d = parse_job(organic_swept(
+          ", \"organic_dual_contour\": true, \"organic_dc_cell_mm\": 0.2, "
+          "\"organic_dc_tolerance_mm\": 0.02"));
+      CHECK(d.grading.organic_dual_contour, "organic_dual_contour: true is honoured");
+      CHECK(d.grading.organic_dc_cell_mm == 0.2,
+            "organic_dc_cell_mm: the stated base cell arrives");
+      CHECK(d.grading.organic_dc_tolerance_mm == 0.02,
+            "organic_dc_tolerance_mm: the stated size dial arrives");
+    }
+    for (const char* bad : {", \"organic_dc_cell_mm\": -1",
+                            ", \"organic_dc_tolerance_mm\": -0.5"}) {
+      bool refused = false;
+      try { (void)parse_job(organic_swept(bad)); } catch (const JobError&) { refused = true; }
+      CHECK(refused, "organic_dc_*: a negative is refused, not clamped");
+    }
+    {
+      bool refused = false;
+      try { (void)parse_job(organic_swept(", \"organic_dual_contour\": 1")); }
+      catch (const JobError&) { refused = true; }
+      CHECK(refused, "organic_dual_contour: a number is refused -- it is a boolean");
+    }
     {
       auto probe = [&](const std::string& lat_extra, const std::string& alg) {
         return mutate("\"mesh_prefix\": \"variant\" }",

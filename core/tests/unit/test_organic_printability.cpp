@@ -623,6 +623,99 @@ void test_growth_produces_curves() {
         "the run still reported ACCEPTED");
 }
 
+// ── A STATED STRUT WIDTH IS THE WIDTH, EXACTLY, EVERYWHERE ──────────────────────
+// `organic_strut_width_mm` used to be read only when there was NO cell window. Under a
+// swept window the bead was re-derived per voxel from the mass coupling and then scaled
+// AGAIN by the global calibration, so the stated number reached the geometry nowhere.
+// Measured on the M2 stand asking for 0.8 mm: 0.760 mm median on one wall, 1.209 on the
+// other, 1.646 at the top -- a 2x spread around a number the job had stated exactly. The
+// preview has always taken a stated width as a constant; this is core agreeing with it.
+void test_stated_strut_width_is_exact() {
+  GrowFixture f = grow_fixture();
+  const std::size_t n = f.grid.voxel_count();
+  const double stated = 0.8;
+  std::vector<double> bead(n, stated);
+  f.params.strut_diameter_field = &bead;
+
+  // The control FIRST, and it matters: if the calibration happened to leave the radii
+  // alone on this fixture, the assertion below would pass while measuring nothing.
+  f.params.bead_is_stated = false;
+  const OrganicLattice calibrated =
+      trace_organic_lattice(f.grid, f.cand, f.stress, f.spacing, nullptr, f.params);
+  bool calibration_moved_it = false;
+  for (const OrganicCurve& cv : calibrated.curves)
+    if (std::fabs(2.0 * cv.radius_mm - stated) > 1e-9) { calibration_moved_it = true; break; }
+  CHECK(!calibrated.curves.empty(), "stated width: the control traced something");
+  CHECK(calibration_moved_it,
+        "stated width CONTROL: the calibration does move the radius off the bead field -- "
+        "without this the test below could pass on a fixture where nothing was scaled");
+
+  f.params.bead_is_stated = true;
+  const OrganicLattice pinned =
+      trace_organic_lattice(f.grid, f.cand, f.stress, f.spacing, nullptr, f.params);
+  CHECK(!pinned.curves.empty(), "stated width: it traced something");
+  double lo = 1e30, hi = 0.0;
+  for (const OrganicCurve& cv : pinned.curves) {
+    lo = std::min(lo, 2.0 * cv.radius_mm); hi = std::max(hi, 2.0 * cv.radius_mm);
+  }
+  for (const OrganicConnector& cn : pinned.connectors) {
+    lo = std::min(lo, 2.0 * cn.radius_mm); hi = std::max(hi, 2.0 * cn.radius_mm);
+  }
+  std::printf("  stated width: asked %.4f, emitted %.4f..%.4f over %zu curve(s)\n",
+              stated, lo, hi, pinned.curves.size());
+  CHECK(std::fabs(lo - stated) < 1e-9 && std::fabs(hi - stated) < 1e-9,
+        "stated width: EVERY emitted strut is the stated diameter, to the last decimal");
+}
+
+// ── THE MASS CALIBRATION MUST AIM AT A VOLUME THAT EXISTS ───────────────────────
+// It used to solve k^2*P + k^3*N = target with P the sum of pi*r^2*L over every segment
+// and N a ball at every polyline vertex -- a sum that counts every overlap TWICE, and on
+// the M2 lattice 42.6 % of it was material occupying the same space as other material.
+// So the factor was chosen to hit a number that does not exist, and every organic run's
+// mass was set against it. It now solves against the UNION volume, measured with no mesh.
+void test_bead_calibration_hits_the_union_volume() {
+  using namespace topopt;
+  GrowFixture f = grow_fixture();
+  std::vector<double> bead(f.grid.voxel_count(), 0.8);
+  f.params.strut_diameter_field = &bead;
+  f.params.bead_is_stated = false;          // the calibration must actually run
+  const OrganicLattice lat =
+      trace_organic_lattice(f.grid, f.cand, f.stress, f.spacing, nullptr, f.params);
+  CHECK(!lat.curves.empty(), "bead calibration: it traced something");
+  CHECK(lat.report.bead_calibration_iterations > 0,
+        "bead calibration: the root-find ran -- a zero here means it was never asked");
+  const double target = lat.report.bead_calibration_target_mm3;
+  CHECK(target > 0.0, "bead calibration: the grading law asked for a volume");
+
+  // Measure the SHIPPED geometry independently, and at a different sample budget from
+  // the one the calibration used, so this is not the calibration marking its own work.
+  std::vector<OrganicSpan> spans;
+  for (const OrganicCurve& cv : lat.curves)
+    for (std::size_t i = 1; i < cv.points.size(); ++i)
+      spans.push_back(OrganicSpan{cv.points[i - 1], cv.points[i], cv.radius_mm});
+  for (const OrganicConnector& cn : lat.connectors)
+    spans.push_back(OrganicSpan{cn.a, cn.b, cn.radius_mm});
+  const LatticeUnionVolume u = lattice_union_volume(spans, 2000000, 0xD1B54A32D192ED03ull);
+  const double err = std::fabs(u.volume_mm3 - target) / target;
+  std::printf("  bead calibration: k %.4f in %d step(s); target %.2f, union %.2f "
+              "(%+.2f %%), naive %.2f, overlap %.1f %%\n",
+              lat.report.bead_calibration, lat.report.bead_calibration_iterations,
+              target, u.volume_mm3, 100.0 * (u.volume_mm3 - target) / target,
+              u.naive_sum_mm3, 100.0 * u.overlap_fraction);
+  CHECK(err < 0.03,
+        "bead calibration: the SHIPPED lattice occupies the volume the grading law asked "
+        "for, measured without a mesh");
+  // ★ THE CONTROL. On a lattice with no self-overlap the old sum would have been right,
+  // and this test would pass while proving nothing. Assert the overlap is real and large.
+  CHECK(u.overlap_fraction > 0.05,
+        "bead calibration CONTROL: the lattice really does overlap itself, so a sum of "
+        "the parts genuinely over-counts -- without this the check above is vacuous");
+  const double naive_err = std::fabs(u.naive_sum_mm3 - target) / target;
+  CHECK(naive_err > err,
+        "bead calibration: the naive sum of the parts is FURTHER from the target than "
+        "the union is -- which is the whole reason the model changed");
+}
+
 // ── G2: NO SILENT FALLBACK TO THE TRACED CURVES ─────────────────────────────────
 void test_growth_does_not_fall_back() {
   GrowFixture f = grow_fixture();
@@ -1477,6 +1570,8 @@ void test_dual_contour_octree() {
 
 int main() {
   test_growth_produces_curves();
+  test_stated_strut_width_is_exact();
+  test_bead_calibration_hits_the_union_volume();
   test_growth_does_not_fall_back();
   test_growth_is_supported();
   test_growth_respects_the_cone();

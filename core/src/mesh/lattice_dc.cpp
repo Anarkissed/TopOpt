@@ -64,6 +64,7 @@ struct Cap {
 struct Field {
   std::vector<Cap> caps;
   double cell = 0.0;            // spatial-hash cell, sized on the largest capsule
+  double clip_z = -1e30;        // the base plane: everything below it is outside
   std::unordered_map<long long, std::vector<int>> grid;
   mutable std::size_t evals = 0;
 
@@ -91,12 +92,15 @@ struct Field {
           }
         }
     if (which) *which = bi;
-    return bi < 0 ? 1e30 : best;      // nothing near: far outside, which is all we need
+    if (bi < 0) return 1e30;          // nothing near: far outside, which is all we need
+    const double below = clip_z - p.z;      // the half-space, intersected with the union
+    return below > best ? below : best;
   }
   Vec3 gradient(const Vec3& p) const {
     int m = -1;
-    eval(p, &m);
+    const double here = eval(p, &m);
     if (m < 0) return Vec3{0, 0, 1};
+    if (clip_z > -1e29 && here == clip_z - p.z) return Vec3{0, 0, -1};  // on the base plane
     const Cap& c = caps[static_cast<std::size_t>(m)];
     const Vec3 ap = sub(p, c.a);
     double t = c.ab2 > 0.0 ? dot(ap, c.ab) / c.ab2 : 0.0;
@@ -849,9 +853,22 @@ TriangleMesh lattice_dual_contour(const std::vector<OrganicSpan>& spans,
   stats.capsules = F.caps.size();
   if (F.caps.empty()) return TriangleMesh{};
 
-  const double h = opt.cell_mm > 0.0
-                       ? opt.cell_mm
-                       : (2.0 * rmin) / std::max(1, opt.cells_across_thinnest);
+  F.clip_z = opt.clip_below_z;
+  double h = opt.cell_mm > 0.0
+                 ? opt.cell_mm
+                 : (2.0 * rmin) / std::max(1, opt.cells_across_thinnest);
+  stats.cell_mm_requested = h;
+  // ★ THE CELL IS RAISED TO FIT THE BUDGET BEFORE ANYTHING IS ALLOCATED. The active-cell
+  // count is about (capsule surface area)/cell^2 -- measured at 3.18 M against an estimate
+  // of 2.64 M on the M2 lattice, so the estimate is the right order and errs low by ~20 %,
+  // which the budget absorbs. Without this, an automatic cell derived from the THINNEST
+  // strut asks a 16 GB machine for a 20 GB corner cache and the run dies half way.
+  if (opt.max_active_cells > 0) {
+    double area = 0.0;
+    for (const Cap& c : F.caps) area += 2.0 * M_PI * c.r * (std::sqrt(c.ab2) + 2.0 * c.r);
+    const double hmin = std::sqrt(1.2 * area / static_cast<double>(opt.max_active_cells));
+    if (h < hmin) h = hmin;
+  }
   stats.cell_mm = h;
   TriangleMesh mesh = opt.adaptive ? contour_octree(F, h, opt, stats)
                                    : contour_uniform(F, h, opt, stats);

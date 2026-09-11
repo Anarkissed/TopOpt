@@ -744,6 +744,14 @@ struct OrganicParams {
   // always, at the stated minimum extrudable width.
   const std::vector<double>* strut_diameter_field = nullptr;
 
+  // ★ THE BEAD WAS ASKED FOR BY NAME, SO DO NOT CALIBRATE IT (maintainer, 2026-09-10:
+  // "please implement a way to actually make organic_strut_width_mm mean what it actually
+  // says it does"). The calibration below re-derives one global factor from the TRACED
+  // length so the emitted mass matches what the grading law asked for -- correct when the
+  // bead came from that same law, and wrong when the bead is a number the user stated.
+  // With this set, radii leave the tracer exactly as the diameter field specified them.
+  bool bead_is_stated = false;
+
   // The Jobard-Lefer ratios and the integrator step. See the constants above.
   double test_ratio = kOrganicTestRatio;
   double seed_ratio = kOrganicSeedRatio;
@@ -978,6 +986,20 @@ struct OrganicReport {
   // families model over-estimates the bead). 1.0 = the model was right.
   double bead_calibration = 1.0;
   bool bead_calibration_floored = false;  // the minimum extrudable width won
+  // The job stated organic_strut_width_mm, so no factor was derived and none applied.
+  bool bead_calibration_skipped_stated = false;
+  // ── what the calibration actually solved against ───────────────────────────
+  // The target is the volume the grading law asked for; `union` is the volume the
+  // calibrated lattice really occupies, measured without a mesh; `naive` is the sum of
+  // the capsules with every overlap counted twice, which is what the calibration used to
+  // solve against. `overlap_fraction` is 1 - union/naive: the share of that sum that was
+  // material counted in two places at once, and therefore the size of the error.
+  double bead_calibration_target_mm3 = 0.0;
+  double bead_calibration_union_mm3 = 0.0;
+  double bead_calibration_naive_mm3 = 0.0;
+  double bead_calibration_overlap_fraction = 0.0;
+  int bead_calibration_iterations = 0;
+  bool bead_calibration_converged = false;
   double min_extrudable_width_mm = 0.0;
   std::size_t spacing_raised_for_print_voxels = 0;       // d below the printable floor
   std::size_t spacing_raised_for_resolution_voxels = 0;  // d below one voxel
@@ -1202,6 +1224,17 @@ struct SyntheticStressReport {
 // exactly when the relative one has become meaningless. 0.005 MPa is the maintainer's
 // number: below it the stresses are inert.
 inline constexpr double kOrganicSyntheticDeadFloorMPa = 0.005;
+
+// ── the bead calibration's root-find ────────────────────────────────────────────
+// The factor is solved so the lattice's UNION volume matches the volume the grading law
+// asked for. Samples buy precision in the volume: at this budget the standard error on
+// the M2 lattice is about 0.1 % of the volume, against the 42.6 % overlap error the
+// naive sum carried, so the measurement is no longer the limiting term. The seed inside
+// lattice_union_volume is fixed, so the same lattice always calibrates to the same
+// factor. `Tol` is on log volume, i.e. a relative tolerance on the volume itself.
+inline constexpr std::size_t kOrganicBeadCalibrationSamples = 300000;
+inline constexpr int kOrganicBeadCalibrationSteps = 6;
+inline constexpr double kOrganicBeadCalibrationTol = 0.002;
 
 // Modifies `stress` (6 per voxel) in place for candidate voxels whose
 // `voxel_region_id` names a configured region. A voxel is DEAD when its von Mises is

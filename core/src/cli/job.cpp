@@ -1598,6 +1598,7 @@ JobDescription parse_job(const std::string& json_text) {
              "organic_transfer_ties", "organic_tie_swirl", "organic_solid_rim_mm",
              "organic_base_mat", "organic_fill_mat", "organic_trim_below_base",
              "organic_strut_embed_mm",
+             "organic_dual_contour", "organic_dc_cell_mm", "organic_dc_tolerance_mm",
              "organic_structural_certification"},
         "grading");
     job.grading.present = true;
@@ -1798,6 +1799,27 @@ JobDescription parse_job(const std::string& json_text) {
             "grading \"organic_strut_embed_mm\" is only allowed with "
             "algorithm \"organic\"");
       job.grading.organic_strut_embed_mm = em->num;
+    }
+    if (const JsonValue* dcv = find_key(gr, "organic_dual_contour")) {
+      if (dcv->type != JsonValue::Type::Bool)
+        schema_fail("grading \"organic_dual_contour\" must be a boolean");
+      if (!organic_alg)
+        schema_fail(
+            "grading \"organic_dual_contour\" is only allowed with "
+            "algorithm \"organic\"");
+      job.grading.organic_dual_contour = (dcv->num != 0.0);
+    }
+    for (const char* k : {"organic_dc_cell_mm", "organic_dc_tolerance_mm"}) {
+      const JsonValue* v = find_key(gr, k);
+      if (!v) continue;
+      if (v->type != JsonValue::Type::Number || !std::isfinite(v->num) || v->num < 0.0)
+        schema_fail(std::string("grading \"") + k +
+                    "\" must be a finite number >= 0 (0 = derived)");
+      if (!organic_alg)
+        schema_fail(std::string("grading \"") + k +
+                    "\" is only allowed with algorithm \"organic\"");
+      if (std::string(k) == "organic_dc_cell_mm") job.grading.organic_dc_cell_mm = v->num;
+      else job.grading.organic_dc_tolerance_mm = v->num;
     }
     if (const JsonValue* pv = find_key(gr, "organic_base_mat")) {
       if (pv->type != JsonValue::Type::Bool)

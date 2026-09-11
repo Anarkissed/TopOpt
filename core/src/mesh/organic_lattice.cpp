@@ -4,6 +4,8 @@
 
 #include "topopt/organic_lattice.hpp"
 
+#include "topopt/lattice_union_volume.hpp"
+
 #include "topopt/mesh_distance.hpp"
 
 #include <algorithm>
@@ -1810,48 +1812,91 @@ OrganicLattice trace_organic_lattice(const VoxelGrid& grid,
   // factor, applied to every radius, so the GRADE is untouched (all radii scale
   // together and their ratios are preserved) and only the mass moves. Reported, never
   // silent, and floored at the stated minimum extrudable width like everything else.
-  {
+  if (params.bead_is_stated) {
+    // Stated by the job: the calibration is skipped entirely and the report says so, so
+    // a receipt can never show a factor that was not applied.
+    rep.bead_calibration = 1.0;
+    rep.bead_calibration_skipped_stated = true;
+  } else {
+    // ★ SOLVED AGAINST THE UNION VOLUME, NOT A SUM OF THE PARTS (maintainer, 2026-09-10).
+    // The previous model added up pi*r^2*L over every segment plus a ball at every
+    // polyline vertex, and that sum counts every overlap TWICE. It is not a small
+    // correction: measured on the M2 lattice, 42.6 % of the naive sum is material
+    // occupying the same space as other material -- and the share is not even constant,
+    // running 31.4 % at k=0.6 to 51.8 % at k=1.4, so no fixed fudge factor could stand in
+    // for it. Solving k^2*P + k^3*N = target therefore aimed at a number that does not
+    // exist, and every organic run's mass was set against it.
+    //
+    // The lattice's real volume is now measured directly -- lattice_union_volume, which
+    // decomposes the union by ownership and importance-samples each capsule, so it builds
+    // no mesh and cannot inherit a mesh's defects. V(k) is monotone in k and close to a
+    // power law between k^2 (a prism) and k^3 (a ball), so the root is found by secant in
+    // log-log, which needs a handful of evaluations. The SEED IS FIXED, so the same
+    // lattice calibrates to the same factor every time and the same noise appears in
+    // every evaluation -- common random numbers, which is what makes the ratio the
+    // iteration is chasing far steadier than either volume alone.
     double traced_len = 0.0;
     for (const OrganicCurve& cv : out.curves) traced_len += cv.length_mm;
     for (const OrganicConnector& cn : out.connectors) traced_len += cn.length_mm;
     double target_vol = 0.0;   // the volume the grading law asked for
-    double model_vol = 0.0;    // the volume the un-calibrated beads would emit
     const double vox = h * h * h;
     for (std::size_t e = 0; e < n; ++e)
       if (candidate[e]) target_vol += spacing_mm_target_rho(e) * vox;
-    for (const OrganicCurve& cv : out.curves)
-      model_vol += M_PI * cv.radius_mm * cv.radius_mm * cv.length_mm;
-    for (const OrganicConnector& cn : out.connectors)
-      model_vol += M_PI * cn.radius_mm * cn.radius_mm * cn.length_mm;
-    // ★ THE NODE BALLS ARE A QUARTER OF THE EMITTED SOLID AND THE FIRST VERSION OF
-    // THIS LEFT THEM OUT. One icosahedron per polyline vertex and two per connector,
-    // measured at 1,816 mm^3 against 5,500 mm^3 of prism on the cube. They scale as
-    // k^3 where the prisms scale as k^2, so the calibration is not a square root but
-    // the root of k^2*P + k^3*N = target — solved by a few fixed-point steps, which
-    // is deterministic and converges in three for any k near 1.
-    double node_vol = 0.0;
-    for (const OrganicCurve& cv : out.curves)
-      node_vol += static_cast<double>(cv.points.size()) *
-                  lattice_node_volume_mm3(cv.radius_mm);
-    for (const OrganicConnector& cn : out.connectors)
-      node_vol += 2.0 * lattice_node_volume_mm3(cn.radius_mm);
     rep.bead_calibration = 1.0;
-    if (traced_len > 0.0 && model_vol > 0.0 && target_vol > 0.0) {
-      double k = std::sqrt(target_vol / model_vol);
-      for (int it = 0; it < 8; ++it) {
-        const double f = k * k * model_vol + k * k * k * node_vol - target_vol;
-        const double df = 2.0 * k * model_vol + 3.0 * k * k * node_vol;
-        if (!(std::fabs(df) > 0.0)) break;
-        const double kn = k - f / df;
-        if (!(kn > 0.0) || !std::isfinite(kn)) break;
-        k = kn;
+    rep.bead_calibration_target_mm3 = target_vol;
+
+    // the emitted solid, as the capsules it actually is: one per polyline segment, one
+    // per connector. The union already carries the joints -- a capsule's end cap IS the
+    // node ball -- so nothing is added for them, which is the other half of the
+    // double-count the old model carried.
+    std::vector<OrganicSpan> spans;
+    spans.reserve(out.connectors.size() + 4 * out.curves.size());
+    for (const OrganicCurve& cv : out.curves)
+      for (std::size_t i = 1; i < cv.points.size(); ++i)
+        spans.push_back(OrganicSpan{cv.points[i - 1], cv.points[i], cv.radius_mm});
+    for (const OrganicConnector& cn : out.connectors)
+      spans.push_back(OrganicSpan{cn.a, cn.b, cn.radius_mm});
+
+    if (traced_len > 0.0 && target_vol > 0.0 && !spans.empty()) {
+      auto union_at = [&](double k) {
+        std::vector<OrganicSpan> q = spans;
+        for (OrganicSpan& sp : q) sp.r *= k;
+        return lattice_union_volume(q, kOrganicBeadCalibrationSamples);
+      };
+      const double lt = std::log(target_vol);
+      double lk0 = 0.0, lv0 = std::log(std::max(union_at(1.0).volume_mm3, 1e-12));
+      // the first step assumes V ~ k^2.3, between a prism's square and a ball's cube
+      double lk1 = lk0 + (lt - lv0) / 2.3;
+      double k = std::exp(lk1);
+      LatticeUnionVolume uv{};
+      for (int it = 0; it < kOrganicBeadCalibrationSteps; ++it) {
+        uv = union_at(std::exp(lk1));
+        ++rep.bead_calibration_iterations;
+        const double lv1 = std::log(std::max(uv.volume_mm3, 1e-12));
+        if (std::fabs(lv1 - lt) < kOrganicBeadCalibrationTol) {
+          rep.bead_calibration_converged = true;
+          break;
+        }
+        double slope = (lk1 - lk0) != 0.0 ? (lv1 - lv0) / (lk1 - lk0) : 2.3;
+        if (!std::isfinite(slope) || slope < 1.0 || slope > 4.0) slope = 2.3;
+        const double lk2 = lk1 + (lt - lv1) / slope;
+        lk0 = lk1; lv0 = lv1; lk1 = lk2;
+        if (!std::isfinite(lk1)) { lk1 = lk0; break; }
       }
+      k = std::exp(lk1);
+      if (!(k > 0.0) || !std::isfinite(k)) k = 1.0;
       // Never below the machine: the floor is user input and outranks the calibration.
       double kmin = 0.0;
       for (const OrganicCurve& cv : out.curves)
         kmin = std::max(kmin, params.min_extrudable_width_mm / (2.0 * cv.radius_mm));
       if (k < kmin) { k = kmin; rep.bead_calibration_floored = true; }
       rep.bead_calibration = k;
+      // Report the volume of what is actually being SHIPPED, so a receipt can never
+      // quote a figure for a factor that was then floored away.
+      uv = union_at(k);
+      rep.bead_calibration_union_mm3 = uv.volume_mm3;
+      rep.bead_calibration_naive_mm3 = uv.naive_sum_mm3;
+      rep.bead_calibration_overlap_fraction = uv.overlap_fraction;
       for (OrganicCurve& cv : out.curves) cv.radius_mm *= k;
       for (OrganicConnector& cn : out.connectors) cn.radius_mm *= k;
     }

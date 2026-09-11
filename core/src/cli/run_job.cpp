@@ -1,4 +1,5 @@
 #include "topopt/job.hpp"
+#include "topopt/lattice_dc.hpp"
 
 #include <algorithm>
 #include <array>
@@ -1812,7 +1813,11 @@ LatticeExportOutcome export_latticed_variant(
     // ★ Drive free organic strut ends this far into the solid, then intersect the
     // welded field with the part (organic_weld). 0 = neither. A grading key, so it
     // arrives separately from JobLattice.
-    double organic_strut_embed_mm = 0.0) {
+    double organic_strut_embed_mm = 0.0,
+    // ★ Mesh the lattice by dual contouring its own SDF, into <prefix>_DC.stl beside the
+    // welded pair. Grading keys, so they arrive separately from JobLattice.
+    bool organic_dual_contour = false, double organic_dc_cell_mm = 0.0,
+    double organic_dc_tolerance_mm = 0.0) {
   // ── M4: A SKIN MODE THAT PRODUCES NO GEOMETRY MUST SAY SO, NOT RETURN ZERO.
   //
   // ★ THE PREDICATE IS THE MEASURED COUNT, NOT A PREDICTION — and the first version
@@ -2437,6 +2442,36 @@ LatticeExportOutcome export_latticed_variant(
       write_stl_file(spath, solid_out);
       oc.paths.push_back(spath);
     }
+  }
+
+  // ── ★ THE LATTICE, DUAL CONTOURED FROM ITS OWN SDF ─────────────────────────
+  // Additive and off unless asked for: the welded pair above is untouched. The weld
+  // marches a sampled field and its enclosed volume came out 67 % under the true union;
+  // this contours the exact capsule union instead, and reproduces that volume to within
+  // 1 % while staying watertight. It costs minutes rather than seconds, which is why it
+  // is a key and not the default. See topopt/lattice_dc.hpp.
+  if (organic_dual_contour && !organic_spans.empty()) {
+    LatticeDcOptions dopt;
+    dopt.cell_mm = organic_dc_cell_mm;
+    dopt.simplify_tolerance_mm = organic_dc_tolerance_mm;
+    // The SAME base plane the weld cuts on, so the two files describe one object rather
+    // than differing by a hemispherical cap under the plate on every clipped strut.
+    if (organic_base_trim_z > 0.0) dopt.clip_below_z = organic_base_trim_z;
+    LatticeDcStats dst;
+    TriangleMesh dc = lattice_dual_contour(organic_spans, dopt, dst);
+    std::printf(
+        "[dc] cell %.4f mm (asked %.4f) tol %.4f | leaves %zu (%zu merged, %zu split) | "
+        "%zu tris | boundary %zu nonmanifold %zu dropped %zu | %s | volume %.1f mm3 | "
+        "%.1f s\n",
+        dst.cell_mm, dst.cell_mm_requested, dst.simplify_tolerance_mm, dst.cells_active,
+        dst.cells_merged, dst.cells_split, dst.triangles, dst.boundary_edges,
+        dst.nonmanifold_edges, dst.quads_dropped,
+        dst.manifold ? "MANIFOLD" : (dst.watertight ? "closed" : "OPEN"),
+        dst.volume_mm3, dst.seconds);
+    if (bake && !dc.vertices.empty()) dc = rotate_mesh(dc, *bake);
+    const std::string dpath = base + "_DC.stl";
+    write_stl_file(dpath, dc);
+    oc.paths.push_back(dpath);
   }
 
   // The latticed region's SOLID voxel count (the region actually filled): every
@@ -4096,6 +4131,9 @@ struct OrganicOutcome {
   // that grew and produced nothing is a different fact from a traced run, and the
   // counters above are meaningless in the second case.
   bool growth_ran = false;
+  // ★ The job stated organic_strut_width_mm, so the bead is that number everywhere and
+  // neither the mass coupling nor the calibration touched it.
+  bool bead_is_stated = false;
   // ★★ SHAPE-FIT REPORTING. Reported whether or not the feature is on, so "it did
   // nothing" and "it was never asked to run" are distinguishable in the receipt — a
   // zero that was never measured is not a passing zero.
@@ -4146,7 +4184,8 @@ static std::vector<double> stress_tensor_for_organic(
   }
   std::vector<double> out = real;
   const SyntheticStressReport rep =
-      synthesize_focal_stress(grid, candidate, voxel_region_id, cfg, 0.02, out);
+      synthesize_focal_stress(grid, candidate, voxel_region_id, cfg, 0.02, out,
+                              kOrganicSyntheticDeadFloorMPa);
   if (rep_out) *rep_out = rep;
   std::fprintf(stderr, "[synthetic] %zu region(s): %zu voxels, %zu fully synthetic, "
                        "%zu blended; dead threshold %.4g (peak %.4g, %s rule)\n",
@@ -4261,12 +4300,21 @@ OrganicOutcome run_organic_step(bool shell_is_written,
   // The constant-bead law still stands when there is NO window (fixed/auto/fit cell
   // modes): see organic_default_strut_diameter_mm for why its default is not the
   // nozzle width.
+  // ★ A STATED STRUT WIDTH IS THE WIDTH, EVERYWHERE (maintainer, 2026-09-10). It used
+  // to be honoured only when there was NO cell window: under a swept window the bead was
+  // re-derived per voxel from the mass coupling and the stated number was never read at
+  // all. Measured on the M2 stand asking for 0.8 mm: the quiet wall came out at a 0.760
+  // mm median and the loaded one at 1.209 -- a 59 % spread around a number the job had
+  // stated exactly. The preview has always taken a stated width as a constant and turned
+  // the bead grading off; core now does the same, so the two describe one object. The
+  // CELL is still graded by the window -- only the strut thickness is pinned.
+  const bool bead_is_stated = jg.organic_strut_width_mm > 0.0;
   const double t_fixed =
-      jg.organic_strut_width_mm > 0.0
-          ? jg.organic_strut_width_mm
-          : organic_default_strut_diameter_mm(grid.spacing, 1.0, band_rho_max,
-                                              jg.min_extrudable_width_mm);
+      bead_is_stated ? jg.organic_strut_width_mm
+                     : organic_default_strut_diameter_mm(grid.spacing, 1.0, band_rho_max,
+                                                         jg.min_extrudable_width_mm);
   oo.strut_diameter_mm = t_fixed;
+  oo.bead_is_stated = bead_is_stated;
   oo.window_governed = have_window;
   std::vector<char> cand(n, 0);
   std::vector<double> spacing(n, 0.0);
@@ -4281,12 +4329,17 @@ OrganicOutcome run_organic_step(bool shell_is_written,
       double f = rho_span > 0.0 ? (rho - rho_lo) / rho_span : 0.0;
       f = std::pow(std::min(1.0, std::max(0.0, f)), f_exponent);
       d = cell_max_mm - (cell_max_mm - cell_min_mm) * f;
-      // The bead the mass coupling asks for at this (rho, d) — floored, always, at the
-      // stated minimum extrudable width. Printability is user input and outranks the
-      // coupling; voxels the floor raised are counted by the tracer.
-      bead[e] = organic_strut_diameter_for(d, rho);
-      if (!(bead[e] > jg.min_extrudable_width_mm))
-        bead[e] = jg.min_extrudable_width_mm;
+      if (bead_is_stated) {
+        // Asked for by name: no coupling, no floor, no grading. The number is the number.
+        bead[e] = t_fixed;
+      } else {
+        // The bead the mass coupling asks for at this (rho, d) — floored, always, at the
+        // stated minimum extrudable width. Printability is user input and outranks the
+        // coupling; voxels the floor raised are counted by the tracer.
+        bead[e] = organic_strut_diameter_for(d, rho);
+        if (!(bead[e] > jg.min_extrudable_width_mm))
+          bead[e] = jg.min_extrudable_width_mm;
+      }
     } else {
       d = organic_spacing_for(rho, t_fixed);
       bead[e] = t_fixed;
@@ -4430,8 +4483,9 @@ OrganicOutcome run_organic_step(bool shell_is_written,
           // ends in solid must RAISE the relative density as the cell closes, so the
           // strut keeps the thickness the stress gave it while the cell shrinks
           // around it; the rim is then where that ramp reaches density one. The bead
-          // stays as computed from the stress-driven cell; only the cell shrinks.
-          if (!(bead[e] > jg.min_extrudable_width_mm))
+          // stays as computed from the stress-driven cell; only the cell shrinks. A
+          // STATED bead is not touched here at all -- not even by the printable floor.
+          if (!bead_is_stated && !(bead[e] > jg.min_extrudable_width_mm))
             bead[e] = jg.min_extrudable_width_mm;
         }
         oo.shape_fit_voxels_shrunk = shrunk;
@@ -4482,8 +4536,9 @@ OrganicOutcome run_organic_step(bool shell_is_written,
           // ends in solid must RAISE the relative density as the cell closes, so the
           // strut keeps the thickness the stress gave it while the cell shrinks
           // around it; the rim is then where that ramp reaches density one. The bead
-          // stays as computed from the stress-driven cell; only the cell shrinks.
-          if (!(bead[e] > jg.min_extrudable_width_mm))
+          // stays as computed from the stress-driven cell; only the cell shrinks. A
+          // STATED bead is not touched here at all -- not even by the printable floor.
+          if (!bead_is_stated && !(bead[e] > jg.min_extrudable_width_mm))
             bead[e] = jg.min_extrudable_width_mm;
         }
       }
@@ -4562,6 +4617,7 @@ OrganicOutcome run_organic_step(bool shell_is_written,
   op.min_extrudable_width_mm = jg.min_extrudable_width_mm;
   op.strut_diameter_mm = t_fixed;
   op.strut_diameter_field = &bead;
+  op.bead_is_stated = bead_is_stated;
   // ★★ THE VDI FLOOR OUTRANKS THE LIBRARY BAND. The library's 0.05047 is a
   // CERTIFIABILITY limit — the lightest lattice the tensor library can describe. It
   // says nothing about whether the bar can be BUILT, and at that density the slenderness
@@ -4629,6 +4685,30 @@ void fill_organic_run_info(RunInfo& gi, const OrganicOutcome& oo) {
   const OrganicReport& r = oo.lat.report;
   gi.organic_present = true;
   gi.organic_strut_diameter_mm = r.strut_diameter_mm;
+  // ★ THE CALIBRATION IS NOW VISIBLE. It reached no receipt and no log at all, so for
+  // every organic run to date there was no way to see what factor had been applied to
+  // every strut in the part, nor what volume it was aiming at. Printed on the same terms
+  // as [synthetic] and [dc]: the target the grading law asked for, the volume the lattice
+  // really occupies, and how much of the naive sum of its parts was double-counted
+  // overlap -- which is the error the old model was solving against.
+  if (r.bead_calibration_skipped_stated) {
+    std::fprintf(stderr,
+                 "[bead] %.4f mm stated by the job: no calibration, no coupling, "
+                 "no floor -- every strut is that diameter\n", r.strut_diameter_mm);
+  } else if (r.bead_calibration_iterations > 0) {
+    std::fprintf(stderr,
+                 "[bead] calibration x%.4f in %d step(s)%s: target %.1f mm3, union "
+                 "%.1f mm3 (%+.2f %%), naive sum %.1f mm3 (%.1f %% of it overlap)\n",
+                 r.bead_calibration, r.bead_calibration_iterations,
+                 r.bead_calibration_floored ? " (FLOORED at the extrudable width)" : "",
+                 r.bead_calibration_target_mm3, r.bead_calibration_union_mm3,
+                 r.bead_calibration_target_mm3 > 0.0
+                     ? 100.0 * (r.bead_calibration_union_mm3 - r.bead_calibration_target_mm3) /
+                           r.bead_calibration_target_mm3
+                     : 0.0,
+                 r.bead_calibration_naive_mm3,
+                 100.0 * r.bead_calibration_overlap_fraction);
+  }
   gi.organic_trace_seconds = oo.trace_seconds;
   copy_growth_stats(gi, oo.growth, oo.growth_ran);
   gi.organic_candidate_voxels = static_cast<long long>(r.candidate_voxels);
@@ -6325,7 +6405,8 @@ LatticeVariantOutcome lattice_one_variant(
       levels.empty() ? 0.0 : gf.cell_plan.base_cell_mm, printed_iso,
       organic.ran ? &organic.lat : nullptr,
       stepped_passes.empty() ? nullptr : &stepped_passes,
-      job.grading.organic_strut_embed_mm);
+      job.grading.organic_strut_embed_mm, job.grading.organic_dual_contour,
+      job.grading.organic_dc_cell_mm, job.grading.organic_dc_tolerance_mm);
   // ★ THE EXPORT'S RETURN REPLACES THE WHOLE OUTCOME, and the growth stats copied
   // onto it above went with it -- the receipt read growth_ran: false and zero ties on
   // every grown run until 2026-09-05. Copy them again, after the replacement.

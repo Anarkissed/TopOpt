@@ -466,6 +466,20 @@ struct JobGrading {
   // the welded field with the part so nothing escapes a far face (organic_weld).
   // 0 = off. Organic only.
   double organic_strut_embed_mm = 0.0;
+  // ★ MESH THE LATTICE BY DUAL CONTOURING ITS OWN SDF instead of (as well as) welding a
+  // marching-cubes field, writing <prefix>_DC.stl beside the welded pair. OFF by default
+  // and additive: nothing already emitted changes. The weld under-reports the true union
+  // volume by 67 % and the analytic LSLT mesh by 28 %; this one reproduces it to within
+  // 1 %, and is watertight, at the cost of minutes rather than seconds. See
+  // topopt/lattice_dc.hpp.
+  bool organic_dual_contour = false;
+  // The base cell. 0 => derived from the thinnest strut, then raised if that would
+  // exceed the cell budget (the run reports which it used).
+  double organic_dc_cell_mm = 0.0;
+  // How far the fine surface may sit off a merged cell's vertex, in mm. This is the FILE
+  // SIZE dial: 0 => a tenth of the base cell, which on the M2 lattice was 40 % smaller
+  // than an unmerged mesh with no visible change.
+  double organic_dc_tolerance_mm = 0.0;
   double organic_scale = 1.0;
   bool organic_shape_fit = false;
   // ★★ SHAPE-FIT *ONLY* — the cell is a function of the SHAPE and nothing else; the

@@ -76,6 +76,19 @@ struct LatticeDcOptions {
   // crossing planes are allowed to sit off the merged cell's single vertex. 0 => a tenth
   // of cell_mm. This is the size dial: raise it for a smaller file, lower it for fidelity.
   double simplify_tolerance_mm = 0.0;
+  // ── the two guards a real job needs ─────────────────────────────────────────
+  // Cut everything below this z, exactly as the weld's base trim does. A clipped capsule
+  // otherwise keeps a hemispherical cap a radius under the build plane, and those caps
+  // are the dots. Implemented as a half-space intersected with the union, so it stays an
+  // exact distance field and the flat face is contoured like any other surface.
+  double clip_below_z = -1e30;
+  // A ceiling on the base grid, so an automatic cell size cannot ask for more memory than
+  // the machine has. The active-cell count is about (capsule surface area)/cell^2, which
+  // is known before any of them are visited, so the cell is raised to fit rather than the
+  // run being discovered to be impossible half way through. stats.cell_mm reports what was
+  // actually used.
+  std::size_t max_active_cells = 6000000;
+
   // A ceiling on how coarse a leaf may become, as a multiple of cell_mm (a power of two is
   // used, rounded down). Keeps a flat slab from collapsing into one enormous cell whose
   // vertex then drags long slivers to its finer neighbours.
@@ -83,7 +96,8 @@ struct LatticeDcOptions {
 };
 
 struct LatticeDcStats {
-  double cell_mm = 0.0;               // the base cell asked for
+  double cell_mm = 0.0;               // the base cell ACTUALLY used
+  double cell_mm_requested = 0.0;     // before the max_active_cells ceiling raised it
   double finest_leaf_mm = 0.0;        // after refinement
   double coarsest_leaf_mm = 0.0;      // after simplification
   double simplify_tolerance_mm = 0.0;
