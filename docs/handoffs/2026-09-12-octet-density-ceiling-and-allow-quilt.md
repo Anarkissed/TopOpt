@@ -95,5 +95,10 @@ Earlier in the session the same subset found and I re-pinned: `LatticeAcceptance
 `LatticeGradingWiringTests` (2), `LatticeThicknessAndFloorTests` (2),
 `LatticeAestheticDensityControlTests`; `LatticeCellGradingTests` and
 `LatticeProbeSamplingTests` went green once the raw map was restored for the planners.
-Evidence files rewritten by the suite were reverted before committing. The full app
-suite was started after the commit; its result is reported in the session.
+Evidence files rewritten by the suite were reverted before committing.
+
+**Full app suite** (`swift test`, Debug, macOS, 3729 s): **2427 tests, 31 skipped, 5 failing
+test cases** — exactly the five proven pre-existing on a clean `d5a90120` checkout the
+night before (`AppModelTests` 3MF ×3 — lib3mf in a worktree; `OrganicSampleCubeTests
+.testThickerIsLiveAndNeverRetraces`; `OrganicVariantCacheTests.testTheKeyIgnoresThicknessAndFollowsCoreAndTopology`).
+No lattice test fails.
