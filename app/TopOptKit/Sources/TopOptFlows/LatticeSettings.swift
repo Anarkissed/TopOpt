@@ -1314,7 +1314,9 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
     public func manualThicknessRangeMM(limits: TopOptKit.LatticeLimits,
                                        lineWidthMM: Double) -> ClosedRange<Double> {
         let lo = Swift.max(0.05, lineWidthMM > 0 ? lineWidthMM : 0.4)
-        let rhoMax = limits.certifiable && limits.rhoMax > 0 ? limits.rhoMax : 0.9
+        var rhoMax = limits.certifiable && limits.rhoMax > 0 ? limits.rhoMax : 0.9
+        // ★ the slider cannot offer a quilt unless Allow quilt is on (octet only)
+        if !allowQuilt { rhoMax = Swift.min(rhoMax, lattice.aestheticDensityCeiling(cellMM: cellMM)) }
         let hi = Swift.max(lo + 0.05, 2 * lattice.strutRadiusMM(relativeDensity: rhoMax,
                                                                 cellMM: cellMM))
         return lo...hi
@@ -1332,7 +1334,9 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         guard !simulateStresses, let mm = manualStrutThicknessMM, mm > 0 else { return nil }
         let rho = lattice.relativeDensity(strutRadiusMM: mm / 2, cellMM: cellMM)
         let floor = lattice.printabilityDensityFloor(lineWidthMM: 0, cellMM: cellMM)
-        let hi = limits.certifiable && limits.rhoMax > 0 ? limits.rhoMax : 1
+        var hi = limits.certifiable && limits.rhoMax > 0 ? limits.rhoMax : 1
+        // ★ the aesthetic ceiling holds on the manual thickness too, unless Allow quilt
+        if !allowQuilt { hi = Swift.min(hi, lattice.aestheticDensityCeiling(cellMM: cellMM)) }
         return Swift.max(Swift.max(0.0001, floor), Swift.min(hi, rho))
     }
 
@@ -1516,6 +1520,12 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
     /// unchanged — this property is read by the preview's four call sites only, and
     /// the job still asks core.
     public var singleCellMembers: Bool = false
+    /// ★★★ ALLOW QUILT (his ruling, 2026-09-12). Octet only. Off: every density on this
+    /// project — simulated, automatic, uniform, per-region — is held under
+    /// `LatticeType.aestheticDensityCeiling` (strut = 0.20 of the cell, windows half
+    /// open). On: the MANUAL methods (uniform thickness, a stated per-region density) may
+    /// go past it up to the certifiable top; simulated and automatic densities never do.
+    public var allowQuilt: Bool = false
     /// Ask the run for the per-region breakdown in its receipt.
     public var reportRegionCells: Bool
 
@@ -1702,6 +1712,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         case simulateStresses
         // sub-floor retention (task 2026-08-05-lattice-retention-app-control)
         case retainSubfloorInUnloadedRegions, subfloorStressFraction, singleCellMembers
+        case allowQuilt
         case subfloorPerRegion, reportRegionCells
         // the enclosed-void rule's OFF control
         // (task 2026-08-06-arm-projection-and-void-check)
@@ -1854,6 +1865,8 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         subfloorPerRegion = try c.decodeIfPresent(Bool.self, forKey: .subfloorPerRegion) ?? false
         // Absent from every older snapshot ⇒ off ⇒ core's floor of 2, unchanged.
         singleCellMembers = try c.decodeIfPresent(Bool.self, forKey: .singleCellMembers) ?? false
+        // Absent from every older snapshot ⇒ off ⇒ the ceiling holds, as it should.
+        allowQuilt = try c.decodeIfPresent(Bool.self, forKey: .allowQuilt) ?? false
         reportRegionCells = try c.decodeIfPresent(Bool.self, forKey: .reportRegionCells) ?? false
         // ★ nil → TRUE, and the asymmetry with the four lines above is the point.
         // Those decode to "off" because absent meant off when they were written.
@@ -1944,6 +1957,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         try c.encode(retainSubfloorInUnloadedRegions,
                      forKey: .retainSubfloorInUnloadedRegions)
         try c.encode(singleCellMembers, forKey: .singleCellMembers)
+        try c.encode(allowQuilt, forKey: .allowQuilt)
         // encodeIfPresent: "the user has not moved it" must round-trip as ABSENT,
         // not as core's number written into the project — the whole point of the
         // nil is that the app never becomes the author of that constant.
@@ -2025,9 +2039,9 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
             // ladder a sweep can actually use before the cell outgrows any real
             // member. Never below the floor.
             let lo = floor
-            guard minimizePlastic else {
-                return .init(mode: .swept, loMM: lo, hiMM: lo)
-            }
+            // ★ Minimize plastic no longer steers the lattice (his ruling, 2026-09-12):
+            // Auto always sweeps floor → ceiling, whichever ladder the optimizer runs.
+            _ = minimizePlastic
             let ceiling = b.cellCeilingMM ?? (lo * 8)
             return .init(mode: .swept, loMM: lo, hiMM: Swift.max(lo, ceiling))
         }
@@ -2416,7 +2430,15 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
                                   // the preview reads the SAME number the job
                                   // carries and a future control moves both.
                                   gamma: demandExponent,
-                                  uniformRelativeDensity: 0.5 * (b.densityLo + b.densityHi))
+                                  // ★ THE UNIFORM DEFAULT IS AN AUTOMATIC DENSITY: the
+                                  // band's midpoint (0.475 on the certifiable band) sits
+                                  // far past the point where octet struts fuse, so it is
+                                  // held under the aesthetic ceiling; Allow quilt lifts
+                                  // it (his 2026-09-12 ruling). The BAND is untouched —
+                                  // grade-to-shape reads its ends.
+                                  uniformRelativeDensity: Swift.max(b.densityLo, Swift.min(
+                                      0.5 * (b.densityLo + b.densityHi),
+                                      allowQuilt ? 1.0 : lattice.aestheticDensityCeiling(cellMM: cellMM))))
     }
 }
 

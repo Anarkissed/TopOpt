@@ -221,6 +221,37 @@ public struct LatticeType: Equatable, Sendable, Identifiable, Hashable {
         return hi
     }
 
+    /// ★★★ THE AESTHETIC CEILING, AS A STRUT-TO-CELL RATIO (his ruling, 2026-09-12:
+    /// "The density does not properly scale with the size of the lattice cell … We set
+    /// the minimum - but never the maximum. We need to implement a maximum and allow for
+    /// thickness/density to play only between those two numbers").
+    ///
+    /// What a lattice LOOKS like is a function of one number, strut diameter over cell
+    /// size. Measured on the octet cell (exact union of its 24 struts, 128³ voxels):
+    /// at d/L = 0.20 the triangular windows are still half open; at 0.354 neighbouring
+    /// parallel struts touch (the quilt); at 0.408 the windows close. Core's measured
+    /// strut law is linear in the cell, so a d/L ceiling is ONE density ceiling at every
+    /// cell size — that is what makes the look consistent across the whole range.
+    ///
+    /// Every AUTOMATIC or SIMULATED density maps into [printable floor, this]. Only a
+    /// manual, per-face density may go above it ("we SHOULD allow *one* method to go to
+    /// that maximum … a purely manual method").
+    public static let aestheticStrutRatioCeiling: Double = 0.20
+
+    /// The relative density at which this topology's strut is `aestheticStrutRatioCeiling`
+    /// of the cell — independent of the cell size under core's linear law (≈ 0.22 for
+    /// octet on the measured table).
+    /// Only the octet truss has this ceiling (his ruling: "this is only for OCTET TRUSS");
+    /// every other topology reports 1, i.e. nothing is capped.
+    public var hasAestheticCeiling: Bool { id == "octet" }
+
+    public func aestheticDensityCeiling(cellMM: Double = 4) -> Double {
+        guard hasAestheticCeiling, cellMM > 0 else { return 1 }
+        let rho = relativeDensity(strutRadiusMM: 0.5 * Self.aestheticStrutRatioCeiling * cellMM,
+                                  cellMM: cellMM)
+        return Swift.min(1, Swift.max(0, rho))
+    }
+
     public func printabilityDensityFloor(lineWidthMM: Double, cellMM: Double) -> Double {
         guard lineWidthMM > 0, cellMM > 0 else { return 0 }
         return min(1, relativeDensity(strutRadiusMM: lineWidthMM / 2, cellMM: cellMM))

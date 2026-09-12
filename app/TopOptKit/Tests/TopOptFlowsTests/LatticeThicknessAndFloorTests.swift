@@ -40,17 +40,37 @@ final class LatticeThicknessAndFloorTests: XCTestCase {
         XCTAssertEqual(pinned.minRelativeDensity, pinned.maxRelativeDensity, accuracy: 1e-9,
                        "★ a hand-set thickness is ONE lattice, not a graded band")
         // ★ …and it is the density that law produces for a 0.60 mm strut.
-        let expect = LatticeType.octet.relativeDensity(strutRadiusMM: 0.30, cellMM: 2.20)
+        // ★ RE-PINNED 2026-09-12: a hand-set thickness converts through the same law, but
+        // is HELD under the octet's aesthetic ceiling unless Allow quilt is on (0.60 mm on
+        // a 2.20 mm cell is 0.27 of the cell — past the 0.20 where the windows are half
+        // open). With Allow quilt the exact law is honoured.
+        var quilt = s; quilt.allowQuilt = true
+        let free = quilt.proxyParams(limits: limits)
+        let law = LatticeType.octet.relativeDensity(strutRadiusMM: 0.30, cellMM: 2.20)
+        XCTAssertEqual(free.uniformRelativeDensity, law, accuracy: 1e-6,
+                       "★ with Allow quilt the slider's millimetres convert through the SAME law")
+        let expect = Swift.min(law, LatticeType.octet.aestheticDensityCeiling(cellMM: 2.20))
         XCTAssertEqual(pinned.uniformRelativeDensity, expect, accuracy: 1e-6,
                        "★ the slider's millimetres must convert through the SAME law "
                        + "the renderer inverts, not a second one")
-        XCTAssertNotEqual(derived.uniformRelativeDensity, pinned.uniformRelativeDensity,
-                          "★ it must actually MOVE the preview")
+        // ★ RE-PINNED 2026-09-12: 0.60 mm and 0.80 mm on a 2.20 mm cell are both past the
+        // ceiling, so without Allow quilt they are held at ONE density (the ceiling) —
+        // that is the rule. The slider still MOVES the preview where the law says it
+        // should: with Allow quilt on.
+        XCTAssertEqual(pinned.uniformRelativeDensity,
+                       LatticeType.octet.aestheticDensityCeiling(cellMM: 2.20), accuracy: 1e-6,
+                       "★ held at the ceiling without Allow quilt")
+        XCTAssertNotEqual(derived.uniformRelativeDensity, free.uniformRelativeDensity,
+                          "★ with Allow quilt the hand-set thickness MOVES the preview")
 
         // Thicker strut ⇒ denser lattice, monotonically.
         s.manualStrutThicknessMM = 0.80
-        XCTAssertGreaterThan(s.proxyParams(limits: limits).uniformRelativeDensity,
-                             pinned.uniformRelativeDensity)
+        XCTAssertEqual(s.proxyParams(limits: limits).uniformRelativeDensity,
+                       pinned.uniformRelativeDensity, accuracy: 1e-6,
+                       "★ thicker still, still held at the ceiling")
+        quilt.manualStrutThicknessMM = 0.80
+        XCTAssertGreaterThan(quilt.proxyParams(limits: limits).uniformRelativeDensity,
+                             free.uniformRelativeDensity, "★ …and with Allow quilt thicker is denser")
     }
 
     /// ★ AND IT IS IGNORED WHILE THE SIM IS ON — the FEA owns the density then,
@@ -75,10 +95,18 @@ final class LatticeThicknessAndFloorTests: XCTestCase {
         XCTAssertEqual(r.lowerBound, 0.42, accuracy: 1e-9,
                        "★ the thinnest strut is ONE extruded bead")
         // The top is the thickness at core's certifiable ceiling.
-        let top = 2 * LatticeType.octet.strutRadiusMM(relativeDensity: limits.rhoMax,
-                                                      cellMM: 2.20)
+        // ★ RE-PINNED 2026-09-12: the thickest the slider offers is the octet's AESTHETIC
+        // ceiling (strut a fifth of the cell); Allow quilt raises it to core's own top.
+        // (never thinner than one bead plus the slider's own 0.05 mm margin — on a
+        // 2.20 mm cell the ceiling strut, 0.44 mm, is under that)
+        let top = Swift.max(r.lowerBound + 0.05, 2 * LatticeType.octet.strutRadiusMM(
+            relativeDensity: LatticeType.octet.aestheticDensityCeiling(cellMM: 2.20), cellMM: 2.20))
         XCTAssertEqual(r.upperBound, top, accuracy: 1e-9,
-                       "★ …and the thickest is core's own density ceiling")
+                       "★ …and the thickest is the aesthetic ceiling")
+        var quilt = s; quilt.allowQuilt = true
+        let coreTop = 2 * LatticeType.octet.strutRadiusMM(relativeDensity: limits.rhoMax, cellMM: 2.20)
+        XCTAssertEqual(quilt.manualThicknessRangeMM(limits: limits, lineWidthMM: 0.42).upperBound,
+                       coreTop, accuracy: 1e-9, "★ Allow quilt: the thickest is core's own ceiling")
         // A finer nozzle lowers the floor.
         let fine = s.manualThicknessRangeMM(limits: limits, lineWidthMM: 0.20)
         XCTAssertLessThan(fine.lowerBound, r.lowerBound)

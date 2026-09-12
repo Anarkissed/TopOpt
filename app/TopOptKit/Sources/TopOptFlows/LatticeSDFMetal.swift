@@ -208,6 +208,7 @@ public struct LatticeOrganicInput: Sendable {
     public let rhoMin: Double
     public let rhoMax: Double
 
+
     /// ★ The user's other organic picks (2026-09-03): an explicit strut diameter
     /// (0 ⇒ core derives it from the band), GROWN with its layer height (false ⇒
     /// traced), and the overhang limit (trace-only; 0 leaves it to core).
@@ -295,6 +296,21 @@ public struct LatticeOrganicInput: Sendable {
 /// (occupancy) and the field (demand) — never on the interactive params — so it is
 /// built once on a data change (bar P2 / V3).
 public struct LatticeSDFScene {
+    /// ★ The demand the struts are DRAWN at — `demand` held under the aesthetic ceiling
+    /// (see the init). Planners read `demand`; the cell texture's activation reads this.
+    public let drawnDemand: LatticeVoxelGrid?
+    /// The density band `drawnDemand` was capped against (the init's `rhoMin`/`rhoMax`).
+    public let drawnBand: (lo: Double, hi: Double)
+    /// The demand (0…1, in the shader's `rho = lo + (hi − lo)·demand^gamma` law) at which
+    /// the drawn density reaches `ceilingRho`. 1 when the ceiling is at or above the band's
+    /// top (nothing to cap); 0 when the ceiling is at or below the floor.
+    public static func aestheticDemandCap(rhoMin: Double, rhoMax: Double, gamma: Double,
+                                          ceilingRho: Double) -> Double {
+        guard rhoMax > rhoMin, ceilingRho < rhoMax else { return 1 }
+        guard ceilingRho > rhoMin else { return 0 }
+        let t = (ceilingRho - rhoMin) / (rhoMax - rhoMin)
+        return gamma > 0 ? pow(t, 1.0 / gamma) : t
+    }
     public var preview: LatticeSDFPreview
     public var occupancy: LatticeVoxelGrid
     /// Truncated signed distance of the part (mm, negative inside) — the flush
@@ -470,6 +486,9 @@ public struct LatticeSDFScene {
                 // solve governs; the stated-density path is for the modes where he
                 // actually states one.
                 statedDensityGoverns: Bool = true,
+                /// ★ Allow quilt (octet): stated per-region densities may pass the
+                /// aesthetic ceiling. Simulated/automatic densities never do.
+                allowQuilt: Bool = false,
                 // ★★★ STRUCTURAL OR AESTHETIC (maintainer, 2026-08-21). Defaults to
                 // structural so every pre-existing call — and every test — keeps the
                 // certified floor it was written against.
@@ -778,19 +797,62 @@ public struct LatticeSDFScene {
         // the pattern still follows the field, and no voxel is drawn denser than the
         // load actually justifies. It can only ever remove material, never add it, so
         // it cannot make the picture overstate strength. Unticked, nothing changes.
-        var graded = relative
-        if minimizePlastic, stageMode == .aesthetic, allowableMPa > 0,
-           let rel = relative,
-           let absolute = LatticePreviewOccupancy.demand(
-               like: occupancy, field: field, intent: 0, allowableMPa: allowableMPa),
-           absolute.values.count == rel.values.count {
-            var capped = rel
-            for i in 0..<capped.values.count {
-                capped.values[i] = Swift.min(rel.values[i], absolute.values[i])
+        // ★★★ MINIMIZE PLASTIC HAS NO BEARING ON THE LATTICE (his ruling, 2026-09-12:
+        // "minimize_plastic on/off should not have any bearing on the lattice
+        // whatsoever … ONLY affects the optimization of the model"). The utilisation cap
+        // that used to ride on that chip is GONE; the aesthetic ceiling below is the
+        // lattice's one density cap, identical under either ladder. `minimizePlastic`
+        // stays in the signature only so call sites need not change; it is not read.
+        _ = minimizePlastic
+        let graded = relative
+        // ★★★ THE AESTHETIC CEILING ON EVERY AUTOMATIC DENSITY (his ruling, 2026-09-12).
+        // The shader draws rho = lo + (hi − lo)·demand^gamma with `hi` at the certifiable
+        // top (0.90), and core's strut law is flat past 0.60 — so the top two thirds of
+        // the simulated range drew the same 0.38·L strut, a sheet with holes (his 63 %
+        // front wall). The relative or utilisation-capped map is clamped here to the
+        // demand that lands on `LatticeType.aestheticDensityCeiling` (strut = 0.20 of
+        // the cell, windows half open). A STATED per-face density is not clamped: that
+        // is the one manual way past the ceiling. Nothing about grade-to-shape moves.
+        let ceilingRho = LatticeType.named(latticeID).aestheticDensityCeiling()
+        let demandCap = Self.aestheticDemandCap(rhoMin: rhoMin, rhoMax: rhoMax, gamma: gamma,
+                                                ceilingRho: ceilingRho)
+        func cap(_ grid: LatticeVoxelGrid?) -> (LatticeVoxelGrid?, Int) {
+            guard var g = grid, demandCap < 1 else { return (grid, 0) }
+            var n = 0
+            for i in 0..<g.values.count where g.values[i] > Float(demandCap) {
+                g.values[i] = Float(demandCap); n += 1
             }
-            graded = capped
+            return (g, n)
         }
+        // ★ THE SIMULATED MAP IS RESCALED INTO [floor, ceiling], NOT CLIPPED: multiplying
+        // the demand by the cap puts demand 1 exactly on the ceiling and keeps the whole
+        // contrast of the field (with the shader's gamma law this is exact:
+        // lo + (hi−lo)·(d·cap)^γ = lo + (ceiling−lo)·d^γ). A clip would flatten every
+        // voxel above 22 % of the reference stress to one density.
+        func scale(_ grid: LatticeVoxelGrid?) -> (LatticeVoxelGrid?, Int) {
+            guard var g = grid, demandCap < 1 else { return (grid, 0) }
+            for i in 0..<g.values.count { g.values[i] *= Float(demandCap) }
+            return (g, g.values.count)
+        }
+        let (cappedGraded, cappedGradedCount) = scale(graded)
+        // ★ A STATED density is a NUMBER the user typed: it is held AT the ceiling (clipped),
+        // never rescaled — and Allow quilt is the one manual way past it.
+        let (cappedStated, cappedStatedCount) = allowQuilt ? (statedDemand, 0) : cap(statedDemand)
+        if graded != nil || statedDemand != nil {
+            NSLog(String(format: "DIAG densityCeiling rho=%.3f (strut/cell %.2f, octet=%@) band=[%.3f, %.3f] gamma=%.2f demandCap=%.3f cappedGraded=%d cappedStated=%d allowQuilt=%@",
+                         ceilingRho, LatticeType.aestheticStrutRatioCeiling,
+                         LatticeType.named(latticeID).hasAestheticCeiling ? "yes" : "no",
+                         rhoMin, rhoMax, gamma, demandCap, cappedGradedCount, cappedStatedCount,
+                         allowQuilt ? "yes" : "no"))
+        }
+        // ★ TWO MAPS. `demand` is the RAW map every planner reads (the dyadic ladder's cell
+        // plan, retention, the stress overlay) — grade-to-shape and the cell ladder are
+        // untouched by the ceiling (his ruling: "leave the grade to shape alone").
+        // `drawnDemand` is what the texture's activation is baked from — the density the
+        // struts are DRAWN at — and that is where the ceiling lives.
         self.demand = statedDemand ?? graded
+        self.drawnDemand = cappedStated ?? cappedGraded
+        self.drawnBand = (rhoMin, rhoMax)
 
         // ── ★★★ ORGANIC: TRACE, THEN BAKE THE CAPSULES TO A FIELD ───────────────────
         //
@@ -2190,7 +2252,7 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
             let stated = steppedCellMM.filter { $0 > 0 }
             if let finest = stated.min(), finest > 0 {
                 baked = LatticePreviewOccupancy.steppedCellField(
-                    occupancy: scene.occupancy, demand: scene.demand,
+                    occupancy: scene.occupancy, demand: scene.drawnDemand ?? scene.demand,
                     regions: scene.regions, cellMM: steppedCellMM,
                     baseCellMM: finest,
                     regionPhase: Self.faceTilingPhase(
@@ -2737,7 +2799,7 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
             cellsPerMemberFloor: retains ? 0 : scene.minCellsPerMember) else { return nil }
 
         let field = LatticePreviewOccupancy.gradedCellField(
-            occupancy: occ, demand: scene.demand, plan: plan)
+            occupancy: occ, demand: scene.drawnDemand ?? scene.demand, plan: plan)
         guard retains else { return field }
         return LatticePreviewOccupancy.retainSubfloorCells(
             field, plan: plan, demand: scene.demand,

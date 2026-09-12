@@ -923,6 +923,8 @@ public final class ProjectModel: ObservableObject {
                 if f0 > 0 { lo = f0 }
             }
             hi = lat.quiltDensityCeiling(cellMM: cellMM)
+            // ★ the aesthetic ceiling (octet), unless Allow quilt — his 2026-09-12 ruling
+            if !lattice.allowQuilt { hi = Swift.min(hi, lat.aestheticDensityCeiling(cellMM: cellMM)) }
         }
         if hi <= lo { hi = Swift.min(1.0, lo + 1e-3) }
         return (lo, hi)

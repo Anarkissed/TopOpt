@@ -59,13 +59,15 @@ final class LatticeCellPlanTests: XCTestCase {
         let b = bounds(s)
         let strong = s.resolvedCellPlan(bounds: b, minimizePlastic: false)
         let light = s.resolvedCellPlan(bounds: b, minimizePlastic: true)
-        XCTAssertEqual(strong.loMM, strong.hiMM, accuracy: 1e-9,
-                       "★ strength first ⇒ one level ⇒ the finest printable cell "
-                       + "everywhere, with the density still graded")
-        XCTAssertEqual(strong.loMM, light.loMM, accuracy: 1e-9,
-                       "both start at the same floor — the objective moves the CEILING")
-        XCTAssertGreaterThan(light.hiMM, strong.hiMM,
-                             "★ minimising plastic must allow coarser cells")
+        // ★ RE-PINNED 2026-09-12 (his ruling: "minimize_plastic on/off should not have any
+        // bearing on the lattice whatsoever"). The optimizer's objective no longer steers
+        // the cell plan: Auto sweeps the printable floor up to the cells-per-member
+        // ceiling under EITHER objective, identically.
+        XCTAssertEqual(strong.loMM, light.loMM, accuracy: 1e-9)
+        XCTAssertEqual(strong.hiMM, light.hiMM, accuracy: 1e-9,
+                       "★ the objective must not move the lattice's cell window")
+        XCTAssertGreaterThan(light.hiMM, light.loMM,
+                             "positive control: Auto still sweeps a real window")
     }
 
     /// Swept keeps the user's window; Manual and Fit stay single-valued.
@@ -95,8 +97,12 @@ final class LatticeCellPlanTests: XCTestCase {
                                              lineWidthMM: 0.42, minimizePlastic: false))
         XCTAssertEqual(light.cellSizeMode, "swept")
         XCTAssertEqual(strong.cellSizeMode, "swept")
-        XCTAssertGreaterThan(light.cellMaxMM, strong.cellMaxMM,
-                             "★ the objective must change the WINDOW core receives")
-        XCTAssertEqual(strong.cellMinMM, strong.cellMaxMM, accuracy: 1e-9)
+        // ★ RE-PINNED 2026-09-12: the objective must NOT change the window core receives
+        // — the lattice spec is identical under either ladder (his ruling above).
+        XCTAssertEqual(light.cellMaxMM, strong.cellMaxMM, accuracy: 1e-9,
+                       "★ the objective must not change the WINDOW core receives")
+        XCTAssertEqual(light.cellMinMM, strong.cellMinMM, accuracy: 1e-9)
+        XCTAssertGreaterThan(light.cellMaxMM, light.cellMinMM,
+                             "positive control: Auto still sweeps a real window")
     }
 }

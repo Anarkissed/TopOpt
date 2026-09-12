@@ -1780,6 +1780,28 @@ public struct LatticeSetupWizard: View {
                         .foregroundStyle(DS.Color.warning.color)
                         .accessibilityIdentifier("wizard-per-region-gap")
                 }
+                // ★★★ ALLOW QUILT (his ruling, 2026-09-12) — octet only. Off, every
+                // density is held under the aesthetic ceiling (strut a fifth of the
+                // cell). On, the manual methods may go past it; simulated ones never.
+                if LatticeType.named(model.topologyID).hasAestheticCeiling {
+                    HStack(spacing: DS.Space.s) {
+                        Text("Allow quilt").dsStyle(DS.TypeScale.caption)
+                            .foregroundStyle(DS.Color.textPrimary.color)
+                        Spacer(minLength: DS.Space.s)
+                        GlassToggle(isOn: project.lattice.allowQuilt) {
+                            project.lattice.allowQuilt.toggle(); rebuild()
+                        }
+                        .accessibilityLabel("Allow quilt")
+                        .accessibilityIdentifier("wizard-allow-quilt")
+                    }
+                    Text(project.lattice.allowQuilt
+                         ? "Manual densities may pass the point where octet struts fuse."
+                         : "Every density stays under the point where octet struts fuse "
+                           + "(strut a fifth of the cell).")
+                        .dsStyle(DS.TypeScale.caption2)
+                        .foregroundStyle(DS.Color.textTertiary.color)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             case .finish:
                 // ★ FOUR NOW — "Covered" is the solid outer shell.
                 segmentRow(["None", "Rim", "Skin", "Covered"],
@@ -1962,10 +1984,8 @@ public struct LatticeSetupWizard: View {
     private var autoCellNote: String {
         let head = "The solve picks the cell everywhere — coarse where there is no "
             + "stress, fine where there is. "
-        let tail = project.minimizePlastic
-            ? "Minimising plastic, so it coarsens as far as the certification allows."
-            : "Strength first, so it holds the finest printable cell and grades the "
-                + "density instead."
+        // ★ no longer a function of Minimize plastic (his ruling, 2026-09-12)
+        let tail = "It coarsens as far as the certification allows."
         return head + tail
     }
 

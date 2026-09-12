@@ -3481,8 +3481,7 @@ public struct WorkspacePlaceholder: View {
             regions: emission.regions,
             // ★ THE OBJECTIVE SHAPES "AUTO" (maintainer, 2026-08-19): minimise
             // plastic ⇒ the coarsest, sparsest cell the sim will certify; off ⇒
-            // the finest printable cell. See `LatticeSettings.resolvedCellPlan`.
-            minimizePlastic: project.minimizePlastic,
+            // (Minimize plastic no longer steers the lattice — 2026-09-12.)
             // ★ growth's precondition (§2A): organic_growth is written only with a layer height
             layerHeightMM: project.printParams.layerHeightMM)
         // THE VARIANT'S OWN IDENTITY AND ITS OWN NUMBER (task
@@ -3605,8 +3604,7 @@ public struct WorkspacePlaceholder: View {
             regions: project.variantLatticeJobRegions().regions,
             // ★ THE OBJECTIVE SHAPES "AUTO" (maintainer, 2026-08-19): minimise
             // plastic ⇒ the coarsest, sparsest cell the sim will certify; off ⇒
-            // the finest printable cell. See `LatticeSettings.resolvedCellPlan`.
-            minimizePlastic: project.minimizePlastic,
+            // (Minimize plastic no longer steers the lattice — 2026-09-12.)
             // ★ growth's precondition (§2A): organic_growth is written only with a layer height
             layerHeightMM: project.printParams.layerHeightMM)
         run.runner = { _, _, _ in
@@ -4707,7 +4705,8 @@ public struct WorkspacePlaceholder: View {
         // Both feed `LatticeSDFScene.demand`, which is baked once per scene; a value
         // read by the bake and absent from the bake's fingerprint is a stale picture by
         // construction.
-        h.combine(project.minimizePlastic)
+        // minimizePlastic is no longer a lattice input (2026-09-12) — flipping the chip
+        // must not rebake
         h.combine(project.material)
         // ★ THE ORGANIC RUN'S SPANS ARE A BAKE INPUT (2026-09-02): a new run with the
         // same settings is a different picture. Count + length identify the file.
@@ -5024,6 +5023,7 @@ public struct WorkspacePlaceholder: View {
                                         // derives into it any more.
                                         statedDensityGoverns: !gradesFromSim
                                             || stageMode == .aesthetic,
+                                        allowQuilt: project.lattice.allowQuilt,
                                         // ★ Structural or aesthetic — it decides the
                                         // cells-per-member floor the preview draws to,
                                         // so the picture and the run agree about which
@@ -5041,9 +5041,7 @@ public struct WorkspacePlaceholder: View {
                                         algorithm: algorithmForBake,
                                         allowableMPa: allowableMPa,
                                         // ★ The checkbox reaches the lattice at last —
-                                        // see the scene's own note for what it does and
-                                        // why it is not core's `utilisationTarget`.
-                                        minimizePlastic: project.minimizePlastic,
+                                        // (Minimize plastic no longer steers the lattice — 2026-09-12.)
                                         // ★ A finish is what lets core's aesthetic
                                         // floor reach ONE cell across a member — it is
                                         // what re-ties the struts a one-cell member

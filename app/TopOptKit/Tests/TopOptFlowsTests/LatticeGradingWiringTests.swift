@@ -87,16 +87,19 @@ final class LatticeGradingWiringTests: XCTestCase {
         let off = scene(false), on = scene(true)
         let a = try XCTUnwrap(off.demand), b = try XCTUnwrap(on.demand)
         XCTAssertEqual(a.values.count, b.values.count)
-        var lowered = 0
-        for i in 0..<a.values.count {
-            XCTAssertLessThanOrEqual(b.values[i], a.values[i] + 1e-6,
-                                     "★ minimize plastic ADDED material at \(i)")
-            if b.values[i] < a.values[i] - 1e-6 { lowered += 1 }
-        }
-        print("── minimize plastic lowered \(lowered) of \(a.values.count) demands "
+        // ★ RE-PINNED 2026-09-12 (his ruling: "minimize_plastic on/off should not have any
+        // bearing on the lattice whatsoever"). The chip is no longer wired to the density:
+        // ON and OFF must produce the SAME demand, voxel for voxel, on both the raw map
+        // and the drawn one. The aesthetic ceiling — not this chip — is what holds the
+        // density down (see LatticeAestheticDensityCeilingTests).
+        var changed = 0
+        for i in 0..<a.values.count where abs(b.values[i] - a.values[i]) > 1e-6 { changed += 1 }
+        let da = try XCTUnwrap(off.drawnDemand), db = try XCTUnwrap(on.drawnDemand)
+        for i in 0..<da.values.count where abs(db.values[i] - da.values[i]) > 1e-6 { changed += 1 }
+        print("── minimize plastic changed \(changed) of \(a.values.count) demands "
             + "(off max \(a.values.max() ?? 0), on max \(b.values.max() ?? 0))")
-        XCTAssertGreaterThan(lowered, 0,
-            "★ the checkbox changed NOTHING — it is still not wired to the density")
+        XCTAssertEqual(changed, 0,
+            "★ the chip changed the lattice's demand — it must have no bearing on it")
     }
 
     /// ★★★ LINK 3: the cells-per-member floor reaches CORE'S PLANNER, which is what
@@ -143,8 +146,11 @@ final class LatticeGradingWiringTests: XCTestCase {
                                   range: r.upperBound..<src.endIndex)
         else { return XCTFail("`latticeRegionInputsKey` not found") }
         let body = String(src[r.upperBound..<end.lowerBound])
-        XCTAssertTrue(body.contains("h.combine(project.minimizePlastic)"),
-                      "★ minimizePlastic feeds the demand and is not in the fingerprint")
+        // ★ RE-PINNED 2026-09-12 (his ruling: "minimize_plastic on/off should not have any
+        // bearing on the lattice whatsoever"): the chip is no longer a lattice input, so
+        // it must NOT be in the fingerprint — flipping it must not rebake.
+        XCTAssertFalse(body.contains("h.combine(project.minimizePlastic)"),
+                       "★ minimizePlastic is not a lattice input and must not rebake")
         XCTAssertTrue(body.contains("h.combine(project.material)"),
                       "★ the material IS the allowable, and is not in the fingerprint")
         XCTAssertTrue(body.contains("h.combine(l.stageMode)"),

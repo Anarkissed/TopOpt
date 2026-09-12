@@ -30,9 +30,23 @@ final class LatticeAestheticDensityControlTests: XCTestCase {
         XCTAssertEqual(p.lattice.selectableDensity[ref.key] ?? 0, floor,
                        accuracy: 1e-9)
         // …and SOLID is reachable — the certifiable rhoMax must not cap it.
+        // ★ RE-PINNED 2026-09-12: the top of the aesthetic band is no longer solid. It
+        // is the octet's aesthetic ceiling (strut a fifth of the cell) unless Allow quilt
+        // is on, in which case it is the point where the struts touch — never 1.0 from
+        // an automatic clamp (his ruling: "We set the minimum - but never the maximum").
         p.writeLatticeDensity(ref, fraction: 1.0, cellMM: 2.0)
-        XCTAssertEqual(p.lattice.selectableDensity[ref.key] ?? 0, 1.0,
-                       accuracy: 1e-9)
+        let held = p.lattice.selectableDensity[ref.key] ?? 0
+        let ceiling = LatticeType.named(p.lattice.topologyID).aestheticDensityCeiling(cellMM: 2.0)
+        XCTAssertEqual(held, p.latticeAestheticDensityBand(cellMM: 2.0).hi, accuracy: 1e-9)
+        // at a 2 mm cell one bead is already past the ceiling: the printable floor wins
+        // (a cell that small cannot be under the ceiling at all), so the top is the
+        // greater of the two
+        XCTAssertLessThanOrEqual(held, Swift.max(ceiling, floor + 1e-3) + 1e-9)
+        p.lattice.allowQuilt = true
+        p.writeLatticeDensity(ref, fraction: 1.0, cellMM: 2.0)
+        let allowed = p.lattice.selectableDensity[ref.key] ?? 0
+        XCTAssertGreaterThan(allowed, held, "Allow quilt is the one way past the ceiling")
+        XCTAssertEqual(allowed, p.latticeAestheticDensityBand(cellMM: 2.0).hi, accuracy: 1e-9)
     }
 
     @MainActor func testStructuralKeepsTheCertifiableBand() {

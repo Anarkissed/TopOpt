@@ -107,7 +107,8 @@ final class LatticeAcceptanceTests: XCTestCase {
                             maxDim: 64, regions: regions, whenEmpty: .latticeNothing)
         }
         let off = scene(false), on = scene(true)
-        let dOff = try XCTUnwrap(off.demand), dOn = try XCTUnwrap(on.demand)
+        // the DRAWN map carries the ceiling; the raw `demand` stays the planners' input
+        let dOff = try XCTUnwrap(off.drawnDemand), dOn = try XCTUnwrap(on.drawnDemand)
 
         // The band the preview grades between, and the strut each end produces at the
         // cell Auto would pick. rho = lo + (hi - lo) * demand^gamma with gamma 1.
@@ -126,13 +127,25 @@ final class LatticeAcceptanceTests: XCTestCase {
 
         """, maxOff, maxOn, strut(maxOff), strut(maxOn), cell))
 
-        XCTAssertEqual(Double(maxOff), 1.0, accuracy: 1e-3,
-                       "positive control: unanchored, a uniform field reads its own "
-                     + "percentile everywhere and takes the top of the band")
-        XCTAssertLessThan(Double(maxOn), 0.15,
-                          "★ minimize plastic must cap the demand at the TRUE "
-                        + "utilisation — 4 / 50 = 0.08, not 1.0")
-        XCTAssertLessThan(strut(maxOn), 0.4 * strut(maxOff),
-                          "★ and the strut it produces must be far thinner")
+        // ★ RE-PINNED 2026-09-12 (his ruling: "minimize_plastic on/off should not have
+        // any bearing on the lattice whatsoever"). The chip no longer caps the demand;
+        // the AESTHETIC CEILING does, identically under either ladder: no automatic
+        // density may pass the strut-to-cell ratio where an octet stops reading as a
+        // lattice (`LatticeType.aestheticDensityCeiling`, ≈ 0.22 on core's table).
+        XCTAssertEqual(Double(maxOff), Double(maxOn), accuracy: 1e-6,
+                       "★ minimize plastic must not change the lattice's demand at all")
+        // the cap is defined on the SCENE's own band (its init defaults are 0…1 here),
+        // not on the 0.05…0.90 band this file uses for its strut arithmetic
+        let ceiling = LatticeType.named("octet").aestheticDensityCeiling(cellMM: cell)
+        let cap = LatticeSDFScene.aestheticDemandCap(rhoMin: on.drawnBand.lo, rhoMax: on.drawnBand.hi,
+                                                     gamma: 1, ceilingRho: ceiling)
+        XCTAssertLessThanOrEqual(Double(maxOn), cap + 1e-6,
+                                 "★ the automatic demand is held under the aesthetic ceiling")
+        XCTAssertGreaterThan(Double(maxOn), 0.05, "positive control: the field is not empty")
+        let drawnRho = on.drawnBand.lo + (on.drawnBand.hi - on.drawnBand.lo) * Double(maxOn)
+        let drawnStrut = TopOptKit.latticeStrutDiameterMM(topology: "octet",
+                                                          relativeDensity: drawnRho, cellMM: cell)
+        XCTAssertLessThanOrEqual(drawnStrut / cell, LatticeType.aestheticStrutRatioCeiling + 0.01,
+                                 "★ the strut it draws is at most a fifth of the cell")
     }
 }
