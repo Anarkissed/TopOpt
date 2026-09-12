@@ -89,8 +89,32 @@ final class LatticeSteppedGradeProbe: XCTestCase {
                           "nothing was graded finer than the region's own cell")
         // ★ THE INTERIOR KEEPS THE BIGGEST CELL — "the main cells should be as large as
         // possible". A grade that takes the whole face is the ramp defect, not a grade.
-        XCTAssertEqual(sizes[Float(regionCell)] ?? 0, sizes.values.max() ?? 0,
-                       "the region's own cell must still be the most common one")
+        //
+        // ★ RE-PINNED 2026-09-12: this used to demand the region's own cell be the MOST
+        // COMMON size. It was, only because the stepped style silently dropped the outer
+        // part of the band (a ramp of 2 was "a rung the ladder cannot express" and became
+        // no step at all), so a 12 mm dial graded ~5 mm. Now the band does what it says
+        // — every row within the dialled reach steps, the row against the ring finest —
+        // and 12 mm from each edge of a wall ~38 mm across is most of the wall; the base
+        // cell cannot be the most common at THAT dial. The defect this guards against is
+        // the band SPILLING past what he dialled, so that is what is pinned: no cell
+        // finer than the region's own sits beyond the band, and the base cell is what
+        // fills everything beyond it.
+        let bandMM = 12.0
+        let outlineMM = baked.level
+        var finerBeyond = 0, baseBeyond = 0, baseTotal = 0
+        for n in 0..<baked.steppedCellMM.count where baked.steppedCellMM[n] > 0 {
+            let sMM = Double(baked.steppedCellMM[n])
+            if abs(sMM - regionCell) < 1e-3 { baseTotal += 1 }
+            let d = Double(outlineMM[n])
+            guard d > 0, d < 1e3, d > bandMM + 0.5 * regionCell else { continue }
+            if sMM < regionCell - 1e-3 { finerBeyond += 1 } else { baseBeyond += 1 }
+        }
+        XCTAssertEqual(finerBeyond, 0,
+                       "\(finerBeyond) cells finer than the region's own sit beyond the "
+                       + "\(bandMM) mm band — the band is spilling past what he dialled")
+        XCTAssertGreaterThan(baseBeyond, 0, "nothing beyond the band — vacuous")
+        XCTAssertGreaterThan(baseTotal, 0, "the region's own cell must still be drawn")
         // ★ AND THE SOLID OUTLINE EXISTS — as a BAKED DISTANCE, which is the only
         // mechanism that can work. Deactivating a cell cannot: `anyActive` in the march
         // is a NEIGHBOURHOOD property, so a one-cell-wide inactive ring is surrounded by

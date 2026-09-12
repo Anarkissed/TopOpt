@@ -188,6 +188,29 @@ public struct LatticeType: Equatable, Sendable, Identifiable, Hashable {
     /// measured strut law everything else uses, by bisection (the law is
     /// monotone in rho). Returns 1.0 when even solid stays under the bound (a
     /// huge cell), so the ceiling can never fall below the printable floor.
+    /// ★ THE DENSEST LATTICE THE STRUT LAW CAN DRAW — the relative density at which
+    /// the measured strut table saturates (octet: ≈ 0.60, d/L 0.384, windows 7 % open;
+    /// core's table is FLAT above it, so 0.60 and 1.0 draw the same strut). One step
+    /// short of solid: the quilt the grade-to-solid band lands on in the row against
+    /// the ring (2026-09-12). Not `quiltDensityCeiling`, whose separation target
+    /// (0.25·L for the octet) lies above the table's top radius (0.19·L) and so
+    /// answers 1 at every cell size.
+    public func quiltRowDensity(cellMM: Double) -> Double {
+        guard cellMM > 0 else { return 1 }
+        let rMax = strutRadiusMM(relativeDensity: 1.0, cellMM: cellMM)
+        guard rMax > 0 else { return 1 }
+        var lo = 0.0, hi = 1.0
+        for _ in 0..<64 {
+            let mid = 0.5 * (lo + hi)
+            if strutRadiusMM(relativeDensity: mid, cellMM: cellMM) >= rMax * (1 - 1e-3) {
+                hi = mid
+            } else {
+                lo = mid
+            }
+        }
+        return hi
+    }
+
     public func quiltDensityCeiling(cellMM: Double) -> Double {
         guard cellMM > 0 else { return 1 }
         // ★★★ THE STRUTS MEET A FULL √2 EARLIER THAN cell/2 (his 2026-08-25:

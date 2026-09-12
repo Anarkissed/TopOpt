@@ -793,10 +793,10 @@ public struct WorkspacePlaceholder: View {
                           // ★ Only while drilled in — the PRESENCE of this closure is
                           // what makes a tap read a strut instead of selecting a face.
                           onLatticeProbe: latticeLegendMode.drilledIn
-                              ? { model, world, cellMM, activation in
+                              ? { model, world, cellMM, density in
                                   setLatticeProbe(at: model, world: world,
                                                   bakedCellMM: cellMM,
-                                                  bakedActivation: activation)
+                                                  bakedDensity: density)
                               } : nil,
                           // ★ …and the way back out, from anywhere on the viewport.
                           onLatticeProbeExit: latticeLegendMode.drilledIn
@@ -4140,10 +4140,14 @@ public struct WorkspacePlaceholder: View {
     /// being drawn rather than a second estimate that can drift from it.
     private func setLatticeProbe(at point: SIMD3<Float>, world: SIMD3<Float>,
                                  bakedCellMM: Double,
-                                 // ★ The shader's own activation at the owning cell
-                                 // (−1 ⇒ unknown). See below for why this must come
-                                 // from the RENDERER's field and not a re-bake.
-                                 bakedActivation: Float = -1) {
+                                 // ★ The relative density the shader DRAWS at the
+                                 // owning cell (−1 ⇒ unknown), already mapped over the
+                                 // span the renderer draws with — never re-map it with
+                                 // the stated span here (the grade-to-solid band widens
+                                 // a point span to reach its quilt row, 2026-09-12). See
+                                 // below for why this must come from the RENDERER's
+                                 // field and not a re-bake.
+                                 bakedDensity: Float = -1) {
         guard let scene = strutScene else { return }
         // ★★★ THE CELL THE BAKE LAID DOWN HERE, NOT THE ONE IN THE SETTINGS
         // (maintainer, 2026-08-22: "The legend is still saying it's 2.2mm cells - which
@@ -4166,9 +4170,9 @@ public struct WorkspacePlaceholder: View {
         // about. The renderer's activation is what the march actually draws; a
         // −1 (no renderer field yet) falls back to the raw demand read so the
         // callout still answers, stated at the band floor it really is.
-        let v: Float
-        if bakedActivation >= 0 {
-            v = bakedActivation
+        let rho: Double
+        if bakedDensity >= 0 {
+            rho = Double(bakedDensity)
         } else {
             let grid = LatticePreviewOccupancy.cellField(
                 occupancy: scene.occupancy, demand: scene.demand, cellMM: cellMM)
@@ -4180,12 +4184,11 @@ public struct WorkspacePlaceholder: View {
             // A negative cell is an INACTIVE one — no lattice there, and reporting
             // a density for it would invent a strut he cannot see.
             guard raw >= 0 else { latticeLegendProbe = nil; return }
-            v = raw
+            let span = latticeProxy.params.densitySpan
+            let gamma = Swift.max(0.05, latticeProxy.params.gamma)
+            rho = span.lo + (span.hi - span.lo)
+                * pow(Double(Swift.min(Swift.max(raw, 0), 1)), gamma)
         }
-        let span = latticeProxy.params.densitySpan
-        let gamma = Swift.max(0.05, latticeProxy.params.gamma)
-        let rho = span.lo + (span.hi - span.lo)
-            * pow(Double(Swift.min(Swift.max(v, 0), 1)), gamma)
         // ★★ ORGANIC'S STRUT IS NOT AN OCTET'S. `t = 2·d·√(rho/3π)` against the
         // octet's measured table — reporting one for the other puts a number on the card
         // that describes geometry which is not on screen. The separation the tracer

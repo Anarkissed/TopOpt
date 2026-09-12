@@ -102,3 +102,65 @@ test cases** — exactly the five proven pre-existing on a clean `d5a90120` chec
 night before (`AppModelTests` 3MF ×3 — lib3mf in a worktree; `OrganicSampleCubeTests
 .testThickerIsLiveAndNeverRetraces`; `OrganicVariantCacheTests.testTheKeyIgnoresThicknessAndFollowsCoreAndTopology`).
 No lattice test fails.
+
+## 7. Evening: the grade-to-solid band, "attaching the lattice to the chamfer outline"
+
+His screenshot (holes against the curved outline) and ruling: *"This is where I want to
+see smaller lattice, to quilt, to solid outline all the way around the lattice."*
+
+**What was actually on screen (build 16:03, Fine project, Grade to fit shape, band 5 mm,
+single-cell off):** the ring WAS there — 875 solid cells, drawn flat in rim colour (the pale
+band along the curve). Against it sat open 6 mm cells at 22 % (callout: 22 % · 1.20 mm ·
+6.00 mm). Three things in `LatticePreviewOccupancy.steppedCellField` kept the band from
+doing anything there:
+
+1. **The band was measured from the outline, and the ring ate it.** Ring depth is
+   `(solidRingCells − 0.5)·cell` = 3 mm of a 5 mm band on a 6 mm cell; row centres are 6 mm
+   apart, so only the tiling's phase decided whether a row fell in the 2 mm left —
+   `n2=125` of 3,369. The band's reach is still his millimetres FROM THE OUTLINE, but it
+   is never narrower than the ring plus one row (`reach = max(band, ringDepth + cell)`),
+   and its rows are counted from the ring's inner face (`dOutlineExact − ringDepth`, the
+   same measure the ring decision uses) so row 0 always touches the solid and a curve
+   reads the same all the way round. (A first cut counted the whole band from the ring;
+   that widened a 12 mm dial to 15 mm per edge and failed `LatticeSteppedGradeProbe` —
+   reverted to the dial's meaning.)
+2. **The stepped style discarded a halving** (`rung = 1 when ramp == 2`); with one
+   printable rung (`nCap = 2`) the band could never step (`bandRows=1950, n2=125` on the
+   first build). Now `n = max(n, ramp)`; the style rule turns 2 into 3 and the ladder cap
+   bounds it to what prints.
+3. **A point span drew nothing.** Manual thickness hands the bake `densitySpan =
+   (0.219, 0.219)`; the shader maps every activation back to `lo`, so a raised activation
+   is invisible (`quiltRaised=0`). The bake now re-encodes every activation over
+   `(lo, max(hi, quilt))` and returns `LatticeCellField.drawnDensityHi`;
+   `LatticeSDFRenderer.drawnDensitySpan` feeds `gradeParams` and the strut curve, and the
+   callout receives `bakedDensityAt` (already mapped) instead of re-mapping an activation
+   with the stated span.
+
+**The quilt number.** `LatticeType.quiltDensityCeiling` (parallel struts touch; the octet's
+separation is 0.5·L ⇒ a 0.25·L radius) lies ABOVE core's table top (0.19·L) and answers
+**1 at every cell size** — the first build raised the row to 100 %. The row lands on
+`quiltRowDensity(cellMM:)`: where the measured strut table saturates (octet ≈ 0.60, d/L
+0.384, windows 7 % open; flat above, so 0.60 and 1.0 draw the same strut). This row is
+the one place the aesthetic ceiling does not apply — his "leave the grade to shape alone".
+
+**Verified on device (build 18:45):** DIAG
+`bandMM=5.0 bandRows=1950 quiltRaised=1950 span=[0.219,0.219] drawnHi=0.599
+n=[n1=1446 n2=1923] sizes=[2.58=902 3.00=1021 4.30=34 5.16=862 6.00=550]`; callout on
+the row against the ring: **60 % · 1.15 mm strut · 3.00 mm cell**; one row in: 22 % ·
+1.20 mm · 6.00 mm. Before/after crops of the face-2 chamfer were sent in the session.
+
+**Tests:** `LatticeGradeToSolidBandTests` (7: the row against the ring always steps and
+quilts; band 0 leaves it alone; a wider band grades row by row; no open base cell between
+the ring and the stepped row; a point span is widened and every other cell still draws
+at the stated density; a real span is left alone; the quilt row is where the octet law
+saturates and `quiltDensityCeiling` is 1). Re-ran `LatticeGradingOptionsTests`,
+`LatticeSteppedShrunkPhaseTests`, `LatticeAestheticDensityCeilingTests`, `LatticeLiftProbe`:
+green. Wizard caption for the band updated. `LatticeSteppedGradeProbe` re-pinned: it
+demanded the base cell be the MOST COMMON size at a 12 mm dial on his ~38 mm wall, which
+only held because the stepped style silently dropped the outer part of the band; it now
+pins what it was guarding — no cell finer than the region's own beyond the dialled reach.
+
+**His call:** one row at minimum on a 38 mm wall is ~58 % of the face (two edges + the
+curve). A narrower transition means a smaller ring (`TOPOPT_LATTICE_SOLID_RING`) or a
+smaller base cell — not a smaller band. The quilt density (0.60) is derived from the law,
+not dialled; 0.53 (parallel struts just touching, 13 % open) is the other defensible top.

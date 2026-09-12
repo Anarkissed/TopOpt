@@ -553,6 +553,11 @@ public struct LatticeCellField: Sendable {
     /// preview says which, because "core had no plan" and "core planned one level"
     /// look identical in the picture and are not the same fact.
     public let fromCorePlan: Bool
+    /// ★ THE TOP OF THE SPAN THE ACTIVATION IS ENCODED OVER when it is wider than
+    /// the stated one — the grade-to-solid band drawing its quilt row above a
+    /// POINT span (manual thickness: lo == hi). 0 ⇒ the stated span. The renderer's
+    /// uniforms, its strut curve and the callout must all read the same span.
+    public var drawnDensityHi: Double = 0
 }
 
 extension LatticePreviewOccupancy {
@@ -859,6 +864,29 @@ extension LatticePreviewOccupancy {
         // A copy of the activation, so a cell the outline cannot hold at any printable
         // size can be turned OFF here and left as solid material.
         var activation = grid.values
+        // ★★★ THE DRAWN SPAN REACHES THE QUILT (2026-09-12). The manual-thickness
+        // path hands the bake a POINT span — lo == hi == the stated density (his
+        // Fine project: [0.219, 0.219]) — and a point span cannot express a row
+        // thicker than the rest: the shader maps every activation back to lo, and
+        // so does the callout. So while the band is on, every activation is
+        // re-encoded over (lo, max(hi, quilt)) and the field carries that top out
+        // in `drawnDensityHi` for the renderer and the callout to read.
+        let quiltTop: Double = (shapeFit && shapeFitBandMM > 0 && !latticeID.isEmpty
+                                && densityHi > 0 && baseCellMM > 0)
+            ? Swift.min(1, LatticeType.named(latticeID).quiltRowDensity(cellMM: baseCellMM))
+            : 0
+        let drawnHi = Swift.max(densityHi, quiltTop)
+        let gammaDrawn = densityGamma > 0 ? densityGamma : 1
+        if drawnHi > densityHi + 1e-9 {
+            for n in 0..<activation.count where activation[n] >= 0 {
+                let a = Double(Swift.min(1, activation[n]))
+                let rho = densityHi > densityLo
+                    ? densityLo + (densityHi - densityLo) * pow(a, gammaDrawn)
+                    : densityLo
+                let u = Swift.max(0, Swift.min(1, (rho - densityLo) / (drawnHi - densityLo)))
+                activation[n] = Float(pow(u, 1 / gammaDrawn))
+            }
+        }
         /// ★ ANY PART MATERIAL WITHIN HALF A BASE CELL OF THIS BASE CELL'S CENTRE.
         /// The occupancy grid is much finer than the cell grid (1.72 mm against 5–12 mm
         /// on his part), so this asks "does the cell overlap the part at all", which is
@@ -1031,6 +1059,8 @@ extension LatticePreviewOccupancy {
         // ladder may go, which is what actually writes the 0 marker.
         var dbgSolid = 0
         var solidRim = 0
+        var dbgBand = 0
+        var dbgQuilt = 0
         var dbgCentre: [Double] = []
         var dbgW: [Double] = []
         var dbgWidthShrunk = 0
@@ -1265,6 +1295,7 @@ extension LatticePreviewOccupancy {
                             if boundaryDistancePerRegion.isEmpty || finestCellMM <= 0 {
                                 dbgSkipped += 1
                             }
+                            var bandT: Double? = nil
                             if !boundaryDistancePerRegion.isEmpty, finestCellMM > 0 {
                                 // ★★★ THE FOOTPRINT'S OWN HALF-EXTENT COMES BACK OFF —
                                 // and this is the EMPTY SPACE at the wall's edge.
@@ -1420,120 +1451,70 @@ extension LatticePreviewOccupancy {
                                 // Inside the band the divisor ramps from the finest
                                 // printable at the outline to 1 at the band's inner edge,
                                 // so the grade is visible AND confined to the band he set.
+                                // ★★★ THE BAND STARTS AT THE SOLID RING AND IS NEVER NARROWER
+                                // THAN ONE ROW (his 2026-09-12 screenshot: *"holes next to the
+                                // curved outline … This is where I want to see smaller lattice,
+                                // to quilt, to solid outline all the way around the lattice"*).
+                                //
+                                // ★ MEASURED FROM THE OUTLINE, THE RING ATE THE BAND. A 5 mm band
+                                // on a 6 mm cell: the ring is the first 3 mm, so 2 mm were left,
+                                // and a row of cells landed in them only where the tiling's phase
+                                // happened to drop a centre there — 125 of 3,369 cells (n2=125 in
+                                // the DIAG). Round most of his curve the ring had open 6 mm cells
+                                // against it. The band is still his millimetres (2026-08-23), but
+                                // counted INWARD FROM THE RING'S INNER FACE, never narrower than
+                                // one row of the base cell, and quantised by ROWS so a curve reads
+                                // the same all the way round instead of by phase. The exact outline
+                                // distance is the same measure the ring decision uses below, so the
+                                // two cannot disagree; a region with no outline falls back to the
+                                // voxel field, as the ring does.
+                                //
+                                // ★ THE DIAL STAYS "N MM FROM THE OUTLINE". A first cut counted the
+                                // band from the ring's inner face, which silently widened his 12 mm
+                                // to 15 mm per edge and broke the probe that pins the region's own
+                                // cell as the most common (`LatticeSteppedGradeProbe`, 354 vs 568).
+                                // The band's REACH is his millimetres from the outline; only its
+                                // floor moved — never less than the ring plus one row — and the
+                                // rows are counted from the ring so row 0 is always the one that
+                                // touches the solid.
+                                var dOutlineExact = Double.nan
+                                if region.kind == .face, !region.outlineLoops.isEmpty {
+                                    let rn = LatticeRegionMask.unit(region.normal)
+                                    let (bu, bv) = LatticeRegionMask.basis(rn)
+                                    let rel = p - region.origin
+                                    // `signedDistance` is negative INSIDE, so negate to
+                                    // get "how far in from the outline this centre sits".
+                                    dOutlineExact = -(LatticeFaceOutline.signedDistance(
+                                        SIMD2<Double>(simd_dot(rel, bu), simd_dot(rel, bv)),
+                                        loops: region.outlineLoops) - region.inPlaneOffsetMM)
+                                }
                                 if shapeFit, shapeFitBandMM > 0 {
-                                    // ★★★ THE BAND IS A DISTANCE IN MILLIMETRES (his
-                                    // ruling, 2026-08-23), and it is measured that way
-                                    // because BOTH cell-counted readings failed on his
-                                    // own face and for opposite reasons:
-                                    //
-                                    //   band x BASE cell   4 x 6.0  = 24 mm -> the fine
-                                    //     cells took the space the 6 mm cells should
-                                    //     have had, on a face only ~38 mm deep.
-                                    //   band x FINEST cell 4 x 1.5  =  6 mm -> a border
-                                    //     3% of the face; reads as no grade at all.
-                                    //
-                                    // A millimetre cannot drift when the cell changes,
-                                    // and it is the only reading he can dial to what he
-                                    // can actually see.
-                                    let reach = shapeFitBandMM
-                                    if d < reach {
-                                        let t = Swift.max(0, Swift.min(1, d / reach))
-                                        // ★★★ THE WHOLE BAND STEPS DOWN, NOT HALF OF IT.
-                                        //
-                                        // ★ ROUNDING THE RAMP THREW AWAY MOST OF THE BAND
-                                        // WHENEVER THERE WERE FEW LEVELS. With `nCap = 2`
-                                        // — which is what his printer and density band
-                                        // actually allow — `round(2 - t)` only reaches 2
-                                        // while t <= 0.5, so a 10 mm band graded 5 mm and
-                                        // touched 4.6% of the face. Every tap landed on
-                                        // the base cell and it read as no grade at all.
-                                        //
-                                        // `ceil` over the levels ABOVE the base instead:
-                                        // at the outline it is `nCap`, and it stays >= 2
-                                        // right up to the band's inner edge, returning to
-                                        // the full cell only OUTSIDE the band. That is
-                                        // what "a band N mm wide" has to mean.
-                                        // ★★★ THE BAND SMOOTHS; IT DOES NOT DRIVE TO
-                                        // THE FLOOR (his 2026-08-25 tap: a 12.03 mm
-                                        // region cell reading 2.01 mm — S/6 — with a
-                                        // 0.45 mm strut, one bead, over most of the
-                                        // face. That is the quilt: a correctly meshed
-                                        // lattice subdivided into bead-thin threads).
-                                        //
-                                        // ★ THE RAMP RAN TO `nCap`, the FINEST PRINTABLE
-                                        // cell. With his 10 mm reach on a face only a few
-                                        // tens of millimetres across, most of the wall sits
-                                        // inside the band, so most of the wall went to the
-                                        // floor — under every algorithm and every toggle,
-                                        // because the band does not read either.
-                                        //
-                                        // The FIT term above is the one that must be free:
-                                        // it subdivides exactly where a cell will not fit
-                                        // inside the outline, which is geometry. This ramp
-                                        // is the aesthetic on top of it — "fit first, then
-                                        // smooth" — so it is capped at a couple of steps.
-                                        // The shape is still fitted; the wall is no longer
-                                        // fabric.
-                                        //
-                                        // ★★★ AND THAT CAP IS GONE (2026-08-26). It was
-                                        // fighting the WRONG FABRIC.
-                                        //
-                                        // The fabric `00af9728` capped this against was
-                                        // the band COMPOUNDING with a per-spot rule that
-                                        // was halving 51% of the wall on 260 nanometres of
-                                        // half-float rounding (see `exact` at the top of
-                                        // this function). With that fixed the band no
-                                        // longer has a spurious halving to multiply, and
-                                        // the cap's only remaining effect was to FLATTEN
-                                        // THE GRADE: `ramp >= 3` as soon as
-                                        // `d <= 0.714 * reach`, so 86% of the band sat at
-                                        // exactly S/3 — one wide ring, not a grade.
-                                        //
-                                        // ★ AND A WIDE RING OF S/3 IS NOT WHAT HE ASKED
-                                        // FOR (2026-08-26): "the grade is to SOLID. We
-                                        // want the shape to be exact to the face-prism. So
-                                        // as it gets closer, it is graded more and more,
-                                        // until it becomes a solid and connects the
-                                        // sides." Uncapped, each rung occupies
-                                        // `reach / (nCap - 1)` of the band — on his 10 mm
-                                        // band that is 1.4 mm per rung — so the finest
-                                        // cells are a thin ring AT the outline and the
-                                        // solid rim closes it. That is a grade; S/3
-                                        // everywhere was a step.
+                                    let ringDepthMM = (Double(Self.solidRingCells) - 0.5) * s
+                                    let dRing = dOutlineExact.isNaN ? d : dOutlineExact
+                                    let dInner = Swift.max(0, dRing - ringDepthMM)
+                                    let reach = Swift.max(shapeFitBandMM, ringDepthMM + s)
+                                    let pastRing = reach - ringDepthMM
+                                    if dRing < reach {
+                                        let rows = Swift.max(1, Int((pastRing / s).rounded(.up)))
+                                        let row = Swift.min(rows - 1, Int((dInner / s).rounded(.down)))
+                                        // Row 0 sits against the ring: the finest rung the ladder
+                                        // has, and (below) the quilt. Each row further in is one
+                                        // rung coarser and one step thinner, back to the base cell
+                                        // and the cell's own density outside the band.
+                                        let t = Double(row) / Double(rows)
                                         let levels = Double(nCap - 1) * (1 - t)
                                         let ramp = 1 + Int(levels.rounded(.up))
-                                        // ★★★ THE BAND'S FIRST RUNG IS S/3, AND IT IS
-                                        // NOT TAKEN TWICE (2026-08-26).
-                                        //
-                                        // On the stepped path S/2 is not a size he
-                                        // allows ("any number but 1/2 is ok"), so the
-                                        // `n == 2 -> n = 3` bump below turns the ramp's
-                                        // FIRST rung into a third as well as its second
-                                        // — two adjacent rungs both landing on S/3, i.e.
-                                        // a DOUBLE-WIDTH ring of the finest step the
-                                        // ladder can take. On a wall whose cell is
-                                        // already half the material (single-cell OFF,
-                                        // where `nCap` is only 4) that ring is two
-                                        // thirds of the band, and 1.72 mm cells with
-                                        // one-bead struts covered 333 of ~3,285 painted
-                                        // cells — measured, and it reads as fabric.
-                                        //
-                                        // A rung the ladder cannot express is not a
-                                        // rung: where the ramp asks for a HALVING the
-                                        // cell simply does not step yet. The grade then
-                                        // starts where a third is genuinely called for,
-                                        // which is also what he asked of it — "as it
-                                        // gets closer, it is graded more and more".
-                                        // Strictly coarser than before, never finer, so
-                                        // it cannot reintroduce fabric anywhere.
-                                        //
-                                        // ★ THE FIT TERM IS UNTOUCHED. `n` already
-                                        // carries the geometric requirement (a cell that
-                                        // will not fit inside the outline), and that is
-                                        // not negotiable — this only declines to ADD an
-                                        // aesthetic step the ladder cannot take.
-                                        let rung = (!dyadicSteps && ramp == 2) ? 1 : ramp
-                                        n = Swift.max(n, rung)
+                                        // The style rule below turns a 2 into the
+                                        // stepped ladder's 3, and the ladder cap bounds
+                                        // both to what this cell can print — so the row
+                                        // against the ring always takes the finest rung
+                                        // the ladder HAS. (It used to decline a halving
+                                        // under the stepped style, which with one
+                                        // printable rung meant the band never stepped:
+                                        // bandRows=1950, n2=125 on his part.)
+                                        n = Swift.max(n, ramp)
+                                        bandT = t
+                                        dbgBand += 1
                                     }
                                 }
                                 if dyadicSteps {
@@ -1706,17 +1687,6 @@ extension LatticePreviewOccupancy {
                                 // rounding is the identity, so it changed nothing. The
                                 // granularity was the mismatch, not the rounding.
                                 let drawnCellMM = s
-                                var dOutlineExact = Double.nan
-                                if region.kind == .face, !region.outlineLoops.isEmpty {
-                                    let rn = LatticeRegionMask.unit(region.normal)
-                                    let (bu, bv) = LatticeRegionMask.basis(rn)
-                                    let rel = p - region.origin
-                                    // `signedDistance` is negative INSIDE, so negate to
-                                    // get "how far in from the outline this centre sits".
-                                    dOutlineExact = -(LatticeFaceOutline.signedDistance(
-                                        SIMD2<Double>(simd_dot(rel, bu), simd_dot(rel, bv)),
-                                        loops: region.outlineLoops) - region.inPlaneOffsetMM)
-                                }
                                 // ★ THE RING DEPTH, IN WHOLE CELLS. One ring is exactly
                                 // the cells the outline CUTS — centre within half a cell
                                 // of it — which is the set that provably cannot hold a
@@ -1871,18 +1841,21 @@ extension LatticePreviewOccupancy {
                                 // rather than drawing something unprintable — coarsening
                                 // is always available, and a coarser cell needs LESS
                                 // density, so this terminates.
-                                if lineWidthMM > 0, densityHi > densityLo, !latticeID.isEmpty {
+                                if lineWidthMM > 0, drawnHi > densityLo, !latticeID.isEmpty {
+                                    // The printable band is the STATED one outside the grade-to-solid
+                                    // band; inside it the row is drawn at the quilt anyway.
+                                    let printHi = bandT != nil ? drawnHi : densityHi
                                     let lat = LatticeType.named(latticeID)
                                     var rhoStar = lat.printabilityDensityFloor(
                                         lineWidthMM: lineWidthMM, cellMM: s)
-                                    while rhoStar > densityHi + 1e-9, n > 1 {
+                                    while rhoStar > printHi + 1e-9, n > 1 {
                                         n -= 1
                                         s = sBase / Double(n)
                                         rhoStar = lat.printabilityDensityFloor(
                                             lineWidthMM: lineWidthMM, cellMM: s)
                                     }
                                     if rhoStar > densityLo {
-                                        let t = (rhoStar - densityLo) / (densityHi - densityLo)
+                                        let t = (rhoStar - densityLo) / (drawnHi - densityLo)
                                         let clamped = Swift.max(0, Swift.min(1, t))
                                         let dem = densityGamma > 0
                                             ? pow(clamped, 1 / densityGamma) : clamped
@@ -1890,6 +1863,30 @@ extension LatticePreviewOccupancy {
                                         // field still owns the upper hand.
                                         activation[i] = Swift.max(activation[i], Float(dem))
                                     }
+                                }
+                            }
+                            // ★★★ THE BAND GRADES TO SOLID THROUGH THE QUILT (his 2026-09-12
+                            // rulings: *"leave the grade to shape alone. Mainly because I like
+                            // the look of a quilt as part of the grade to solid"*, and *"smaller
+                            // lattice, to quilt, to solid outline all the way around"*). Inside
+                            // the band the DRAWN density climbs, row by row, from the cell's own
+                            // value to the quilt — the densest lattice the strut law draws, one
+                            // step short of solid —
+                            // — in the row against the ring. This is the one place the octet
+                            // aesthetic ceiling does not apply: it is the transition INTO solid,
+                            // not a lattice look, and `LatticeSDFScene` caps only what it hands
+                            // in; the raise happens here, after the cap.
+                            if let t = bandT, drawnHi > densityLo, !latticeID.isEmpty {
+                                let lat = LatticeType.named(latticeID)
+                                let quilt = Swift.min(drawnHi, lat.quiltRowDensity(cellMM: s))
+                                let g = densityGamma > 0 ? densityGamma : 1
+                                let actNow = Double(Swift.max(0, Swift.min(1, activation[i])))
+                                let rhoNow = densityLo + (drawnHi - densityLo) * pow(actNow, g)
+                                let rhoBand = rhoNow + (quilt - rhoNow) * (1 - t)
+                                if rhoBand > rhoNow + 1e-9 {
+                                    let u = Swift.max(0, Swift.min(1, (rhoBand - densityLo) / (drawnHi - densityLo)))
+                                    activation[i] = Swift.max(activation[i], Float(pow(u, 1 / g)))
+                                    dbgQuilt += 1
                                 }
                             }
                             stepped[i] = halfRepresentable(Float(s)); painted += 1
@@ -1942,7 +1939,7 @@ extension LatticePreviewOccupancy {
                   + "p50=\(String(format: "%.2f", q(0.5))) "
                   + "max=\(String(format: "%.2f", sorted.last!))] "
                   + "finest=\(String(format: "%.3f", finestCellMM)) "
-                  + "bandMM=\(shapeFitBandMM) solidRim=\(solidRim) gradedToSolid=\(dbgSolid) ladderCap=\(Self.shapeLadderCap) fitOff=\(Self.fitCorrectionDisabled) "
+                  + "bandMM=\(shapeFitBandMM) bandRows=\(dbgBand) quiltRaised=\(dbgQuilt) lat=\(latticeID) span=[\(densityLo),\(densityHi)] drawnHi=\(drawnHi) g=\(densityGamma) solidRim=\(solidRim) gradedToSolid=\(dbgSolid) ladderCap=\(Self.shapeLadderCap) fitOff=\(Self.fitCorrectionDisabled) "
                   + "dCentre[min=\(String(format: "%.2f", dbgCentre.min() ?? -1)) "
                   + "n=\(dbgCentre.count)] n=[\(ns)] "
                   + "w[min=\(String(format: "%.2f", dbgW.min() ?? -1)) "
@@ -1979,7 +1976,8 @@ extension LatticePreviewOccupancy {
                                     return ratio > 1
                                         ? Int(log2(ratio).rounded(.up)) : 0
                                 }(),
-                                fromCorePlan: false)
+                                fromCorePlan: false,
+                                drawnDensityHi: drawnHi > densityHi + 1e-9 ? drawnHi : 0)
     }
 
     /// Round to the nearest value an IEEE half can hold exactly — see

@@ -4824,10 +4824,13 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     /// field the march samples — never re-derived. 0 when nothing was baked there.
     struct LatticeProbeHit { let model: SIMD3<Float>; let world: SIMD3<Float>
                              let cellMM: Double
-                             /// The shader's own activation at the owning cell
-                             /// (−1 ⇒ unknown) — the density half of the callout,
-                             /// read from the SAME field as `cellMM`.
-                             let activation: Float }
+                             /// The RELATIVE DENSITY the shader draws at the owning
+                             /// cell (−1 ⇒ unknown) — the density half of the callout,
+                             /// read from the SAME field as `cellMM` and mapped over
+                             /// the span that field is drawn with (the grade-to-solid
+                             /// band widens it past a point span; the workspace must
+                             /// not re-map it with the stated one).
+                             let density: Float }
 
     /// ★★ THE TAP PROBE — THE STRUT UNDER THE FINGER, NOT THE FACE BEHIND IT
     /// (maintainer, 2026-08-19: "I attempted to touch the green 'Load bearing' area.
@@ -4980,7 +4983,7 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         return LatticeProbeHit(model: m,
                                world: SIMD3<Float>(world.x, world.y, world.z),
                                cellMM: latticeLayer?.bakedCellMMAt(m) ?? 0,
-                               activation: latticeLayer?.bakedActivationAt(m) ?? -1)
+                               density: latticeLayer?.bakedDensityAt(m) ?? -1)
     }
 
     func pickFacePass(atNormalizedPoint p: CGPoint, width: Int, height: Int) -> FaceIDPass {
@@ -6332,7 +6335,7 @@ extension MetalMeshView {
             if deliver == nil, let probe = onLatticeProbe {
                 if let hit = renderer.latticeProbe(atNormalizedPoint: normalized,
                                                    width: w, height: h) {
-                    probe(hit.model, hit.world, hit.cellMM, hit.activation)
+                    probe(hit.model, hit.world, hit.cellMM, hit.density)
                     return
                 }
             }

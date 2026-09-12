@@ -2978,7 +2978,7 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
         // Cell origin = part min corner, so cells tile from a stable anchor.
         let cell = Float(max(0.1, cellField?.baseCellMM ?? params.cellMM))
         let cellOrigin = cellGrid?.origin ?? bmin
-        let (lo, hi) = params.densitySpan
+        let (lo, hi) = drawnDensitySpan
         let K = Float(max(1e-3, params.lattice.densityCoefficient))
         let hasDemand: Float = scene?.demand != nil ? 1 : 0
         let sdfSp = scene?.partSDF.spacing ?? SIMD3<Float>(repeating: 1)
@@ -3174,7 +3174,7 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
 
     private var strutCurveUniforms: (SIMD4<Float>, SIMD4<Float>, SIMD4<Float>, SIMD4<Float>,
                                      SIMD4<Float>, SIMD4<Float>, SIMD4<Float>, SIMD4<Float>) {
-        let lo = params.densitySpan.lo, hi = params.densitySpan.hi
+        let (lo, hi) = drawnDensitySpan
         let key = "\(params.latticeID)|\(lo)|\(hi)"
         let rows: [SIMD4<Float>]
         if let c = strutCurveCache, c.key == key {
@@ -3305,6 +3305,26 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
     /// one field over). Same owning-cell search as the size, so the two halves of
     /// the callout describe ONE cell. Returns −1 when no active cell owns the
     /// point — the caller falls back rather than inventing a density.
+    /// ★ THE SPAN THE CELL TEXTURE IS DRAWN OVER. The stated span, unless the
+    /// stepped bake widened it to reach its grade-to-solid quilt row
+    /// (`LatticeCellField.drawnDensityHi`) — the uniforms' `gradeParams`, the strut
+    /// curve and the callout all read THIS, so a texel means one density everywhere.
+    var drawnDensitySpan: (lo: Double, hi: Double) {
+        let s = params.densitySpan
+        if let f = cellField, f.drawnDensityHi > s.hi + 1e-9 { return (s.lo, f.drawnDensityHi) }
+        return s
+    }
+
+    /// The relative density the shader draws at `p` (−1 ⇒ unknown): the baked
+    /// activation mapped over `drawnDensitySpan` with the shader's own law.
+    func bakedDensityAt(_ p: SIMD3<Float>) -> Float {
+        let a = bakedActivationAt(p)
+        guard a >= 0 else { return -1 }
+        let (lo, hi) = drawnDensitySpan
+        let g = max(0.05, params.gamma)
+        return Float(lo + (hi - lo) * pow(Double(min(max(a, 0), 1)), g))
+    }
+
     func bakedActivationAt(_ p: SIMD3<Float>) -> Float {
         guard let f = cellField else { return -1 }
         let g = f.field
