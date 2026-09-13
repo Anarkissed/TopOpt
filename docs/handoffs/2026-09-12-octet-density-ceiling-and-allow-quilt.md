@@ -164,3 +164,10 @@ pins what it was guarding — no cell finer than the region's own beyond the dia
 curve). A narrower transition means a smaller ring (`TOPOPT_LATTICE_SOLID_RING`) or a
 smaller base cell — not a smaller band. The quilt density (0.60) is derived from the law,
 not dialled; 0.53 (parallel struts just touching, 13 % open) is the other defensible top.
+
+**Full app suite after the band change** (`swift test`, Debug, macOS, 3777 s): **2434
+tests, 31 skipped, 5 failing test cases** — the same five pre-existing ones
+(`AppModelTests` 3MF ×3; `OrganicSampleCubeTests.testThickerIsLiveAndNeverRetraces`;
+`OrganicVariantCacheTests.testTheKeyIgnoresThicknessAndFollowsCoreAndTopology`). No
+lattice test fails. Evidence files the suite rewrites were reverted before committing.
+Committed as `f462a39b` (+ this note).
