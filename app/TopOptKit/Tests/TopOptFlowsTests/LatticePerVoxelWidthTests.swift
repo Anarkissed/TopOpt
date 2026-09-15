@@ -63,77 +63,65 @@ final class LatticePerVoxelWidthTests: XCTestCase {
     func testASliverNoLongerPinsTheWholeFace() throws {
         let (scene, specs) = try hisScene()
         let occ = scene.occupancy
-        let cand = occ.values.map { $0 > 0.5 }
-        let boundary = LatticeBoundaryDistance.inPlanePerRegion(
-            regions: [specs[1]], candidate: cand,
-            nx: occ.nx, ny: occ.ny, nz: occ.nz, spacing: occ.spacing)
-        let widths = [Optional(LatticeMeasuredRegionWidth.wallWidthFieldAlongNormalMM(
-            region: specs[1], occupancy: occ, partSDF: scene.partSDF))]
+        let widths = LatticeMeasuredRegionWidth.wallWidthFieldAlongNormalMM(
+            region: specs[1], occupancy: occ, partSDF: scene.partSDF)
         // ★ NEVER-OVERSHOOT (his ruling, 2026-08-24 evening): the fit depth clamps
         // to the material, so the region cell is the wall's median 12.03 — never
         // the declared 13.0 that used to sit on a 12 mm wall.
         let regionCell = 12.03
-        guard let baked = LatticePreviewOccupancy.steppedCellField(
+        // ★ THE OCTREE BAKE (2026-09-14) is what the app draws: the region's own cell
+        // wherever its corners fit inside the outline AND the material, split into the
+        // nesting rungs where they do not. A thin spot therefore gets a smaller cell
+        // of ITS OWN ladder, and the bulk keeps the region cell; nothing is a division
+        // of some other wall's cell. (His 2026-08-26 ban on S/2 was lifted on
+        // 2026-09-14 — "why is it ALWAYS 1/2?" was answered with the nesting rule and
+        // he accepted 12 → 6 → 2 — so the rungs here are 12.03 → 6.015 → 2.005.)
+        var st = LatticePreviewOccupancy.OctreeBakeStats()
+        guard let baked = LatticePreviewOccupancy.octreeCellField(
             occupancy: occ, demand: scene.demand, regions: [specs[1]],
-            cellMM: [regionCell], baseCellMM: regionCell,
-            minCellsPerMember: 1,
-            boundaryDistancePerRegion: boundary,
-            widthPerRegion: widths,
-            finestCellMM: 1.625) else {
-            return XCTFail("stepped bake produced nothing")
+            cellMM: [regionCell], lineWidthMM: 0.45, realFloorMM: 1.625,
+            shapeFitBandMM: 0, shapeFit: false,
+            densityLo: 0.05, densityHi: 0.9, densityGamma: 1, latticeID: "octet",
+            stats: &st) else {
+            return XCTFail("octree bake produced nothing")
         }
         var hist: [Float: Int] = [:]
         for v in baked.steppedCellMM where v > 0 { hist[v, default: 0] += 1 }
-        let full = hist.filter { abs(Double($0.key) - 12.03) < 0.1 }.values.reduce(0, +)
+        let full = hist.filter { abs(Double($0.key) - regionCell) < 0.1 }.values.reduce(0, +)
         XCTAssertGreaterThan(full, 0, "the bulk must keep the 12.03 mm cell; sizes=\(hist)")
-        XCTAssertGreaterThan(full, hist.values.reduce(0, +) / 2,
-                             "most of the face is ~12 mm thick and must carry the "
-                             + "region's own cell; sizes=\(hist)")
-        // ★★★ SUPERSEDED 2026-08-26 — THE WHOLE-NUMBER-DIVISION RULE IS GONE.
-        //
-        // This used to assert that every size is `regionCell / n` for whole n, on the
-        // reasoning that only then do neighbouring cells share nodes. He replaced the
-        // rule directly:
-        //
-        //   "single-cell/member means make the largest single cell across the entire
-        //    model — per voxel. So this will change based on the thickness of the area
-        //    it's in. If the area is 13 mm, the cell is 13 mm, if the area next to it
-        //    is 12 mm the cell next to it is 12 mm."
-        //
-        // The S/n ladder could not express that: a 10.31 mm wall under a 12.03 mm
-        // region cell had no permitted size between 12.03 (overshoot) and 6.02 (HALF
-        // the wall), so it took 6.02 — and a wall carrying S beside S/2 beside S/3 is
-        // the quilt. What is asserted instead is the rule he actually stated, plus the
-        // one he stated in the same breath about which divisors stepped may use.
-        let floorAcross = 1.0                       // single-cell: one cell across
+        XCTAssertGreaterThan(st.slotsKept[regionCell] ?? 0, 10,
+                             "the 8.59 mm sliver must not pin the face: whole 12.03 mm cells "
+                             + "are expected over the 12 mm bulk; kept=\(st.slotsKept)")
+        let rungs = [12.03, 6.015, 2.005]
         for (size, count) in hist {
             let mm = Double(size)
-            // ★ NEVER OVERSHOOT (§8) — still binding, and now by construction: the
-            // cell is min(declared depth, local wall) / cellsAcross, so it can never
-            // exceed the material. 13.0 is face 2's declared depth and is the cap.
             XCTAssertLessThanOrEqual(
-                mm, 13.0 / floorAcross + 1e-6,
+                mm, 13.0 + 1e-6,
                 "\(count) cells at \(size) mm exceed the declared depth — "
                 + "the face prism cannot make a wall thicker than it is")
-            // ★ AND S/2 IS NEVER A STEPPED SIZE (his 2026-08-26 rule: "Stepped grade
-            // means NOT dyadic (any number but 1/2 is ok)"). This is the size his tap
-            // callouts kept reporting while the wall looked like fabric.
-            XCTAssertGreaterThan(
-                abs(mm - regionCell / 2), 0.05,
-                "\(count) cells sit at exactly half the \(regionCell) mm region "
-                + "cell — S/2 is the one divisor stepped may never produce")
+            XCTAssertTrue(rungs.contains { abs($0 - mm) < 0.02 },
+                          "\(count) cells at \(size) mm are not a rung of the region's own ladder "
+                          + "\(rungs) — a division of someone else's cell")
         }
-        // ★ AND THE BODY OF THE FACE FOLLOWS ITS OWN WALL. Face 2 measures ~12.03 mm
-        // over most of its area and reaches the declared 13.0 where the material is
-        // thicker; both are legitimate, and neither is a division of the other.
-        let followsWall = hist.filter {
-            let mm = Double($0.key)
-            return mm >= 10.0 && mm <= 13.01
-        }.values.reduce(0, +)
-        XCTAssertGreaterThan(
-            followsWall, hist.values.reduce(0, +) / 2,
-            "most of the face must carry a cell that spans its OWN wall, not a "
-            + "division of someone else's; sizes=\(hist)")
+        // ★ AND OVER THE SLIVER the region cell cannot stand: a 12.03 mm cell's far
+        // corners lie outside an 8.59 mm wall, so those texels carry a smaller rung.
+        let g = baked.field
+        var overSliver = 0, overSliverFull = 0
+        for k in 0..<g.nz { for j in 0..<g.ny { for i in 0..<g.nx {
+            let idx = (k * g.ny + j) * g.nx + i
+            guard baked.steppedCellMM[idx] > 0 else { continue }
+            let mid = SIMD3<Double>(g.origin) + (SIMD3<Double>(Double(i), Double(j), Double(k)) + 0.5) * Double(g.spacing.x)
+            let r = (SIMD3<Float>(mid) - occ.origin) / occ.spacing
+            let vi = Int(r.x.rounded()), vj = Int(r.y.rounded()), vk = Int(r.z.rounded())
+            guard vi >= 0, vj >= 0, vk >= 0, vi < occ.nx, vj < occ.ny, vk < occ.nz else { continue }
+            let w = widths[(vk * occ.ny + vj) * occ.nx + vi]
+            guard w > 0, w < 9.5 else { continue }
+            overSliver += 1
+            if abs(Double(baked.steppedCellMM[idx]) - regionCell) < 0.1 { overSliverFull += 1 }
+        }}}
+        XCTAssertGreaterThan(overSliver, 0, "the sliver must be measured — vacuous otherwise")
+        XCTAssertLessThan(Double(overSliverFull), 0.05 * Double(overSliver) + 1,
+                          "\(overSliverFull) of \(overSliver) texels over the thin sliver carry the full 12.03 mm cell")
     }
 
     /// ★ THE NEVER-OVERSHOOT INVARIANT ITSELF (his ruling, 2026-08-24 evening: "a

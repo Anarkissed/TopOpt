@@ -151,4 +151,31 @@ face (one 10.31 mm cell).
 
 ## 6. Suite
 
-(filled in below after the full package run)
+`swift test` in `app/TopOptKit`, Debug, macOS, on `5910110f`: **2434 tests, 31 skipped,
+10 failing test cases** (103 min). Five are the known pre-existing ones (`AppModelTests`
+3MF ×3 — lib3mf in a worktree; `OrganicSampleCubeTests.testThickerIsLiveAndNeverRetraces`;
+`OrganicVariantCacheTests.testTheKeyIgnoresThicknessAndFollowsCoreAndTopology`). Five
+were lattice tests pinned to rules this change replaced, all re-pinned in the follow-up
+commit and green individually:
+- `LatticeCurvedOutlineBandProbe.testTheSolidTerminusIsARingNotADottedLine` and
+  `.testSweepEverySettingPermutation`: measured the OLD stepped bake's ring
+  (`level == 0`). Now bake through `LatticeQuiltBakeProbe.bakeOctree` (the app's bake),
+  solid = `solidDepthMM`, texels by `floor`. On the octree: ring **98 %** on every
+  permutation (face 2 100 %, face 15 95 %), unpainted 0.0 %, not-owned 0.0 %; the Skin
+  rows measure 0.3 / 0.6 / 0.3 % painted-but-clipped (the 0.9 mm skin clipping whole cells
+  the octree places against the outline with the grade off — the shell's skin on screen,
+  not empty space), so Skin rows get a 1 % bound; every other row 0.0 % against 0.5 %.
+- `LatticePerVoxelWidthTests.testASliverNoLongerPinsTheWholeFace`: rewritten on the
+  octree — the 12.03 mm cell is kept over the 12 mm bulk (`slotsKept` > 10), never over
+  the 8.59 mm sliver, every size ≤ 13.0 and a rung of the region's own ladder
+  (12.03 → 6.015 → 2.005). Its S/2 ban is gone: he accepted nesting halves on
+  2026-09-14.
+- `LatticeSolidFillTests.testTheSolidUsesTheSameClipTheStrutsDo`: pinned the outline's
+  solid to `dClip`; now pins it to the prism ∩ raw part clip and asserts `dClip` is NOT
+  used there.
+- `LatticeSteppedPhaseTests.testTheShaderSourceDerivesTheSteppedBlockFromTheUnroundedCoord`:
+  source pins updated to `blkP` / `o.blk = blkP` and the two `LC.phase` derivations.
+
+`LatticeGradeToSolidBandTests` 7/7, `UnifiedShadingTests` 11/11. The stepped bake
+(`steppedCellField`) still runs before the octree in `LatticeSDFRenderer` and is then
+discarded — a bake-time cost worth removing once the octree is accepted.

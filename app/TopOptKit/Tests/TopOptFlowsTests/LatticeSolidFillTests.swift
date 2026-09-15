@@ -68,9 +68,18 @@ final class LatticeSolidFillTests: XCTestCase {
         // ★ AND SO MUST THE OUTLINE'S SOLID BAND, which is the OTHER way a hit can be
         // solid. It is clipped by the same `dClip`, so the grade's terminus ends exactly
         // where the struts it replaces would have.
+        // ★ REVERSED FOR THE OUTLINE'S SOLID (2026-09-14). `dClip` is the voxel-eroded
+        // part SDF plus the trim plus `lsdf_part_clip`'s hold — it never reaches the
+        // face outline, and every solid the bake wrote there vanished behind it (his
+        // "those are holes, there is NOTHING there"). The outline's solid is bounded by
+        // the region PRISM's exact wall, the ray box, and the RAW part surface let out by
+        // a third of a voxel — never by `dClip`.
         XCTAssertTrue(
-            march.contains("Fsolid = min(Fsolid, max(dClip, dOutline - outlineBand));"),
-            "★ the outline's solid band must be bounded by the same clip")
+            march.contains("Fsolid = min(Fsolid, max(max(dBox, regionTex.sample(samp, stc).b), dPartRaw));"),
+            "★ the outline's solid must be clipped by the prism and the raw part, not dClip")
+        XCTAssertFalse(
+            march.contains("Fsolid = min(Fsolid, max(dClip, dOutline"),
+            "★ the outline's solid is behind the eroded clip again")
     }
 
     /// ★★ THE HIT CARRIES WHICH IT IS. Without this the albedo would have to guess from

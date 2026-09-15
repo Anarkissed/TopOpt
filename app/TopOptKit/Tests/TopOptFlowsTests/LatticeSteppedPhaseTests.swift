@@ -65,7 +65,11 @@ final class LatticeSteppedPhaseTests: XCTestCase {
         // ★ STILL THE UNROUNDED `cb`, now less the region's own tiling phase
         // (`LatticeCellField.steppedPhase`) — the guarantee this test was written for is
         // that `blk` is NOT derived from the rounded base index, and that is unchanged.
-        XCTAssertTrue(src.contains("o.blk = floor((cb - o.phase) / max(o.m, 1e-6));"),
+        // ★ 2026-09-14: the frame builder computes the point's block as `blkP` from the
+        // UNROUNDED `cb` less the phase (and re-reads the neighbouring texel when that
+        // block is not the read texel's own, `home`), then assigns it.
+        XCTAssertTrue(src.contains("float3 blkP = floor((cb - phase) / max(m, 1e-6));")
+                      && src.contains("o.blk = blkP;"),
                       "stepped block index is not taken from the unrounded base coord")
         XCTAssertFalse(src.contains("o.blk = floor(max(bi, float3(0.0)) / max(o.m, 1e-6));"),
                        "the dyadic-phase block index is still on the stepped path")
@@ -76,7 +80,9 @@ final class LatticeSteppedPhaseTests: XCTestCase {
         // it every step; adding the phase to one and not the other put the ray in a
         // different cell from the one it prefetched, which is the same class of defect
         // this whole file exists for. Caught by exactly this test.
-        XCTAssertEqual(src.components(separatedBy: "- LC.phase) / max(LC.m").count - 1, 1)
+        // Two: the march's per-step re-derivation, and its straddle test against
+        // `LC.home` — both must be the same expression as the frame builder's.
+        XCTAssertEqual(src.components(separatedBy: "- LC.phase) / max(LC.m").count - 1, 2)
         XCTAssertTrue(src.contains("rel = (p - U.latticeOrigin.xyz) / c.stepped"),
                       "q must still tile from the lattice origin by the stated cell")
     }

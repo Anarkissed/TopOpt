@@ -175,6 +175,26 @@ final class LatticeQuiltBakeProbe: XCTestCase {
                       widths: widths, phase: phase, finest: floorMM, h: h)
     }
 
+    /// ★ THE BAKE THE APP DRAWS SINCE 2026-09-14: the octree (`LatticeSDFRenderer
+    /// .octreeBake`), with the same inputs the renderer hands it. `bake` below is the
+    /// stepped bake it replaced — still the revert path, and what the older probes in
+    /// this file were written against.
+    static func bakeOctree(_ i: Inputs) -> LatticeCellField? {
+        var st = LatticePreviewOccupancy.OctreeBakeStats()
+        return LatticePreviewOccupancy.octreeCellField(
+            occupancy: i.scene.occupancy, demand: nil, regions: i.scene.regions,
+            cellMM: i.cells, lineWidthMM: i.h.lineWidthMM,
+            realFloorMM: LatticeSDFRenderer.printableFloorBeads * i.h.lineWidthMM,
+            shapeFitBandMM: i.h.shapeFitBandMM, shapeFit: i.h.shapeFit,
+            densityLo: i.h.rhoMin, densityHi: i.h.rhoMax, densityGamma: i.h.gamma,
+            latticeID: "octet", stats: &st)
+    }
+
+    /// Solid on the octree field: the cut cell's whole depth (`solidDepthMM` 1e3).
+    static func isSolid(_ cf: LatticeCellField, _ k: Int) -> Bool {
+        k < cf.solidDepthMM.count && cf.solidDepthMM[k] >= 999
+    }
+
     static func bake(_ i: Inputs) -> LatticeCellField? {
         LatticePreviewOccupancy.steppedCellField(
             occupancy: i.scene.occupancy, demand: nil, regions: i.scene.regions,
