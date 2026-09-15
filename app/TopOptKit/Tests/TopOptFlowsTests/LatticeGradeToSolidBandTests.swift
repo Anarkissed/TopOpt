@@ -249,42 +249,40 @@ final class LatticeGradeToSolidBandTests: XCTestCase {
 
     // MARK: - The band: from the finest cell at the outline to the base cell
 
-    /// A 5 mm band on a 6 mm cell: no 6 mm cell stands within the band, the 3 mm
-    /// rung fills it, and beyond band + one base cell the 6 mm cell stands again.
-    /// The cells against the solid thicken toward the quilt; the base cell keeps its
-    /// own density.
-    func testTheBandStepsDownToTheFinestCellAndThickensTowardTheSolid() throws {
+    /// The band never caps a cell (his 2026-09-15 reading): a 5 mm band places
+    /// exactly the cells band 0 does — the largest that fits, everywhere — and only
+    /// thickens the cells whose nearest corner lies within it, toward the quilt at
+    /// the solid. Beyond it the base cell keeps its own density.
+    func testTheBandOnlyThickensAndNeverCapsTheCell() throws {
         let f = slabs([(6, 0, 60)])
         let band = 5.0
+        let (baked0, _) = try bake(f, band: 0)
         let (baked, _) = try bake(f, band: band)
+        XCTAssertEqual(baked.steppedCellMM, baked0.steppedCellMM,
+                       "the band moved a cell: placement must not depend on the band")
+        XCTAssertEqual(baked.solidDepthMM.map { $0 >= 999 }, baked0.solidDepthMM.map { $0 >= 999 },
+                       "the band changed which texels are solid")
         let all = texels(baked, f).filter { $0.depth > 0 && $0.depth < depth && $0.cellMM > 0 && !$0.solid }
-        let sixes = all.filter { abs($0.cellMM - 6) < 0.02 }
-        let threes = all.filter { abs($0.cellMM - 3) < 0.02 }
-        XCTAssertFalse(sixes.isEmpty); XCTAssertFalse(threes.isEmpty, "vacuous")
-        for t in sixes {
-            XCTAssertGreaterThanOrEqual(t.dOutline, band - 1e-6,
-                "a 6 mm cell inside the band; its texel sits \(t.dOutline) mm in")
-        }
-        for t in threes {
-            XCTAssertLessThan(t.dOutline, band + 6,
-                "a 3 mm cell beyond the band and one base cell; its texel sits \(t.dOutline) mm in")
-        }
+        // The 6 mm cells nearest the outline have their corner 3.5 mm in (slot at
+        // 6.37 against an outline at 2.87), inside the band; their texel middles sit
+        // from 5.0 mm in.
+        let sixInBand = all.filter { abs($0.cellMM - 6) < 0.02 && $0.dOutline < band + 2 }
+        XCTAssertFalse(sixInBand.isEmpty,
+                       "the fixture must have a 6 mm cell whose corner reaches into the band — vacuous otherwise")
         let deep = all.filter { $0.dOutline >= band + 6 }
         XCTAssertFalse(deep.isEmpty, "the fixture must have cells beyond the band — vacuous otherwise")
         for t in deep {
-            XCTAssertEqual(t.cellMM, 6, accuracy: 0.02, "beyond the band the base cell stands; at \(t.dOutline) mm it drew \(t.cellMM)")
             XCTAssertEqual(t.activation, ambient, accuracy: 0.01, "beyond the band the cell's own density stands; at \(t.dOutline) mm it is \(t.activation)")
         }
-        let against = threes.filter { $0.dOutline < 3 }
+        let against = all.filter { abs($0.cellMM - 3) < 0.02 && $0.dOutline < 3 }
         XCTAssertFalse(against.isEmpty, "vacuous")
         let quilt = quiltActivation(cell: 3, lo: lo, hi: hi)
         for t in against {
             XCTAssertGreaterThan(t.activation, ambient + 0.2, "the cells against the solid thicken; at \(t.dOutline) mm it is \(t.activation)")
             XCTAssertGreaterThanOrEqual(t.activation, quilt - 0.1, "…toward the quilt (\(quilt)); at \(t.dOutline) mm it is \(t.activation)")
         }
-        let farther = threes.filter { $0.dOutline > 3.5 && $0.dOutline < band }
-        if let a = against.map({ $0.activation }).min(), let b = farther.map({ $0.activation }).max() {
-            XCTAssertLessThan(b, a, "the next row in is thinner than the row against the solid: \(b) vs \(a)")
+        for t in sixInBand {
+            XCTAssertGreaterThan(t.activation, ambient + 0.02, "a cell inside the band is thickened; at \(t.dOutline) mm (\(t.cellMM) mm) it is \(t.activation)")
         }
     }
 

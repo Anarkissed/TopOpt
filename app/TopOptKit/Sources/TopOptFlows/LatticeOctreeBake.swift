@@ -16,8 +16,9 @@ import simd
 // lattice origin, along the normal at the face plane), so a coarse cell's corners
 // are fine-cell corners and no cell is ever cut mid-way by a neighbour of another
 // size. Top-down per slot: keep the region's cell wherever it fits whole inside the
-// outline and the grade allows it; otherwise split that slot alone and try the next
-// rung; a slot still cut at the floor is the solid outline's. Texels are laid at the
+// outline; otherwise split that slot alone and try the next rung; a slot still cut
+// at the floor is the solid outline's. The band never caps a cell's size; it is the
+// distance over which the cells thicken toward the solid. Texels are laid at the
 // finest rung of all ladders, one cell size per texel, each texel belonging to the
 // cell its MIDDLE is in; the stepped march draws that.
 //
@@ -216,11 +217,14 @@ extension LatticePreviewOccupancy {
                 }}}
                 return (ok, nearest, farthest)
             }
-            func capAt(_ x: Double) -> Double {
-                guard shapeFit, shapeFitBandMM > 0 else { return sBase }
-                let t = Swift.max(0, Swift.min(1, x / shapeFitBandMM))
-                return f * pow(sBase / f, t)
-            }
+            // ★ THE BAND DOES NOT CAP THE CELL (2026-09-15). It used to: a 12 mm cell
+            // had to sit 5 mm from the outline to be kept, so a 5 mm band on his arm
+            // was two rows of 6 mm cells where 12 mm cells fit whole. His reading: "the
+            // grade is meant to be a grade from largest to smallest, so this is still
+            // allowed … they connect the two sizes of cells together via the walls."
+            // The largest cell that fits stands anywhere; the sizes step down only
+            // where the geometry forces them, and the band drives the thickening
+            // toward the solid (`bandT`) and the solid's bleed.
             // In-plane inward direction of the outline distance at `p` (unit, in the
             // face's own basis), by central differences on the exact polygon.
             func inward(_ p: SIMD3<Double>) -> SIMD3<Double> {
@@ -313,10 +317,10 @@ extension LatticePreviewOccupancy {
                 if dc < -0.87 * S { return }                       // no corner can be inside
                 let (ok, nearest, farthest) = fits(lo, S)
                 if level == 0 {
-                    let key = "r\(ladder.region)/" + (ok ? (S <= capAt(nearest) + 1e-9 ? "kept" : "cap") : lastFail)
+                    let key = "r\(ladder.region)/" + (ok ? "kept" : lastFail)
                     stats.why[key, default: 0] += 1
                 }
-                if ok && S <= capAt(nearest) + 1e-9 {
+                if ok {
                     paint(lo, S, level: level, cut: false, nearest: nearest)
                     return
                 }

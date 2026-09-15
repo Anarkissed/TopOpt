@@ -717,8 +717,13 @@ public struct LatticeSDFScene {
                         // ★ the ERODED list: the band the shell keeps and draws solid
                         let region = LatticeRegionMask.signedDistance(p, regions: wallRegions)
                         q.values[i] = Float(Swift.max(-1e3, Swift.min(1e3, region)))
+                        // ★ TWO VOXELS PAST THE CAPS, or the trilinear sample in the
+                        // first voxel under the face blends with 1e3 and the outline's
+                        // solid skin is missing in the very layer seen face-on.
                         o.values[i] = region < 3.0
-                            ? Float(Swift.min(1e3, LatticeRegionMask.outlineDistance(p, regions: wallRegions)))
+                            ? Float(Swift.min(1e3, LatticeRegionMask.outlineDistance(
+                                p, regions: wallRegions,
+                                slabMarginMM: 2.0 * Double(Swift.max(solid.spacing.x, Swift.max(solid.spacing.y, solid.spacing.z))))))
                             : 1e3
                         // ★ AND ONLY WHEN THERE IS A SKIN — the finish's own number, 0
                         // for every finish but `covered`.

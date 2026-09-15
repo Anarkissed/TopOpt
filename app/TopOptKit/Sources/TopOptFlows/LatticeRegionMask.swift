@@ -122,8 +122,13 @@ public enum LatticeRegionMask {
     /// (his 2026-09-14 rule: "a solid outline that wraps the lattice in the shape of
     /// the face-prism's outline"), against the raw part surface — never through the
     /// strut clip's surface hold, which is what swallowed every "solid" cell before.
+    /// `slabMarginMM` extends the slab test past the caps: the value is baked per
+    /// VOXEL and sampled trilinearly, so a "far" voxel just outside the face plane
+    /// blends into the first voxel under it and the solid skin vanished exactly in
+    /// the layer seen face-on (his "the solid is barely visible", 2026-09-15).
     public static func outlineDistance(_ p: SIMD3<Double>,
-                                       regions: [LatticeRegionSpec]) -> Double {
+                                       regions: [LatticeRegionSpec],
+                                       slabMarginMM: Double = 0) -> Double {
         var best = 1e3
         for region in regions where region.role == .include && region.kind == .face
             && !region.outlineLoops.isEmpty {
@@ -132,7 +137,7 @@ public enum LatticeRegionMask {
             let d = p - region.origin
             let s = simd_dot(d, n)
             let along = abs(s - 0.5 * region.depthMM) - 0.5 * region.depthMM
-            guard along <= 0 else { continue }
+            guard along <= slabMarginMM else { continue }
             let (u, v) = basis(n)
             let uv = SIMD2<Double>(simd_dot(d, u), simd_dot(d, v))
             let inside = -(LatticeFaceOutline.signedDistance(uv, loops: region.outlineLoops)

@@ -179,3 +179,48 @@ commit and green individually:
 `LatticeGradeToSolidBandTests` 7/7, `UnifiedShadingTests` 11/11. The stepped bake
 (`steppedCellField`) still runs before the octree in `LatticeSDFRenderer` and is then
 discarded — a bake-time cost worth removing once the octree is accepted.
+
+## 7. 2026-09-15 afternoon: his three notes on the octree build, and the answers
+
+Screenshots at 1:14 AM (band 5, lattice-only), 3:35 PM (his red 12 mm cells drawn
+inside the band), 3:42 PM (top view, "solid barely visible between the steps"), 3:50 PM
+(band 0, "quilted" cells circled at the part's edges).
+
+**1. "Still quite a bit of stepping; the solid should be on top of the steps too."** The
+outline's solid skin exists (`dOutV < depth`), but `dOutV` is the region texture's `g`
+channel, baked per VOXEL from `LatticeRegionMask.outlineDistance`, which answered 1e3 for
+any voxel outside the region's slab. A voxel centre just above the face plane is outside
+the slab, the trilinear sample in the first voxel UNDER the face blends with 1e3, and the
+skin was never drawn in the very layer he looks at face-on. The cut texels are solid
+through their whole depth, so they showed as steps with nothing between them. Now
+`outlineDistance(…, slabMarginMM:)` is evaluated two voxels past the caps, and the skin
+is never thinner than one texel plus two beads (`S0 + 4·overlayParams.z`) so it sits on
+top of the stair steps with a smooth inner face — the "two printed top layers".
+
+**2. "I am still seeing the 12 mm cells cut up … these sections are available."** They
+were not cut; they were never placed. The band capped the cell size
+(`capAt(nearest) = f·(s/f)^(nearest/band)`): a 12 mm cell had to sit 5 mm from the
+outline to be kept, so two rows of 6 mm cells stood where 12 mm cells fit whole. His
+reading — "the grade is meant to be a grade from largest to smallest, so this is still
+allowed … they connect the two sizes via the walls" — is now the rule: the band never
+caps a cell; the largest cell that fits stands anywhere, sizes step down only where the
+geometry forces them, and the band drives the thickening toward the solid (`bandT`) and
+the solid's bleed. `LatticeGradeToSolidBandTests.testTheBandOnlyThickensAndNeverCapsTheCell`
+pins placement at band 5 == placement at band 0 (sizes and solid texels identical) with
+the thickening inside the band only.
+
+**3. "Quilted areas at band 0 — quilting should only be in the smallest printable
+cells."** Both circled spots are at the part's edges (the stem's top-left corner, the
+base's right end). That is the Rim & skin DRESSING: `edge = (1 − |dPart|/band)(1 −
+|dRegion|/band)` fattens boundary struts 1.6×, and with the band at 0 the 12 mm cells
+stand right against the outline, so their boundary struts are dressed — on a 1.39 mm
+strut that reads as a quilted cell. On the stepped path the dressing is now applied
+only to cells at the finest rung (`LC.S ≤ 1.01·S0`); the solid outline is the rim for
+the rest. This one is a reading of the picture, not a measurement — if the circled
+cells are still fat on the 18:21 build, it is something else.
+
+Also: the wizard's band caption says the band thickens and never sizes.
+Subset after the change: `LatticeGradeToSolidBandTests` 7/7, `UnifiedShadingTests`
+11/11 (shader compiles), `LatticeCurvedOutlineBandProbe.testTheSolidTerminusIsARingNotADottedLine`
+100 % / 95 %, `LatticePerVoxelWidthTests`, `LatticeSolidFillTests`,
+`LatticeSteppedPhaseTests`, `LatticeSteppedGradeProbe` pass. Installed 18:21.

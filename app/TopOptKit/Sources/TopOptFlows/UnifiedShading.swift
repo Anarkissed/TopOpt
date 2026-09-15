@@ -774,6 +774,12 @@ static LSDFHit lsdf_march(constant LSDFUniforms& U,
             if (U.overlayParams.y > 1.5) {
                 dressing = max(dressing, max(0.0, 1.0 - abs(dClip) / band));
             }
+            // ★ ONLY THE FINEST CELLS ARE DRESSED ON THE STEPPED PATH (2026-09-15:
+            // "Quilting should only be allowed in the smallest printable cells — never
+            // for larger cells"). With the band at 0 the largest cells stand right
+            // against the outline, and the rim's 1.6x on a 12 mm cell's boundary
+            // struts read as a quilted cell. The solid outline is the rim there.
+            if (U.rimParams.y > 0.0 && LC.stepped > 0.0 && LC.S > 1.01 * S0) { dressing = 0.0; }
         }
 
         if (any(baseCell != cachedBase) || LC.m != cachedM || any(LC.phase != cachedPhase)) {
@@ -1037,7 +1043,14 @@ static LSDFHit lsdf_march(constant LSDFUniforms& U,
         // what turned every "solid" cell into a see-through strip.
         if (LC.stepped > 0.0 && U.rimParams.y > 0.0 && LC.S > 0.0) {
             float dOutV = regionTex.sample(samp, stc).g;
-            float depth = max(2.0 * U.overlayParams.z, lsdf_outline_mm(U, cellTex, p));
+            // ★ THE SKIN SITS ON TOP OF THE STEPS (2026-09-15: "not just in the middle
+            // of the steps but on top of them too … two printed top layers"). The cut
+            // texels reach up to one texel (S0) in from the outline as stair steps, and
+            // the kept cells beside them stop at the part clip's hold; the solid skin
+            // is therefore never thinner than one texel plus two beads, measured on the
+            // smooth in-plane outline distance — so its inner face is the outline's
+            // shape, offset, whatever the texels did.
+            float depth = max(S0 + 4.0 * U.overlayParams.z, lsdf_outline_mm(U, cellTex, p));
             if (cachedCut || dOutV < depth) {
                 // Clip to the region PRISM (its lateral wall is the face outline), the
                 // ray box, and the RAW part surface let out by a third of a voxel —
