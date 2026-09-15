@@ -1480,9 +1480,9 @@ public struct LatticeSetupWizard: View {
                 model.shapeFitBandMM = $0
                 rebuild()
             }
-            Text("How far in from the face's outline the lattice thickens toward the "
-                 + "solid outline, in millimetres. Cell sizes follow the space either way: "
-                 + "the largest that fits, smaller only where it has to.")
+            Text("How far in from the face's outline the cells grade down toward the "
+                 + "solid outline, in millimetres. A cell stands where its centre is far "
+                 + "enough in for its size; the smallest cells always reach the outline.")
                 .dsStyle(DS.TypeScale.caption2)
                 .foregroundStyle(DS.Color.textQuaternary.color)
                 .fixedSize(horizontal: false, vertical: true)

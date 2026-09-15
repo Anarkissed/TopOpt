@@ -190,9 +190,12 @@ final class LatticeQuiltBakeProbe: XCTestCase {
             latticeID: "octet", stats: &st)
     }
 
-    /// Solid on the octree field: the cut cell's whole depth (`solidDepthMM` 1e3).
-    static func isSolid(_ cf: LatticeCellField, _ k: Int) -> Bool {
-        k < cf.solidDepthMM.count && cf.solidDepthMM[k] >= 999
+    /// Solid on the octree field at a point `dOut` mm inside the outline: within the
+    /// band of one width the shader draws (`solidBandMM`), the texel's bleed, or a
+    /// texel the old stepped bake marked solid (1e3).
+    static func isSolid(_ cf: LatticeCellField, _ k: Int, dOut: Double = 0.1) -> Bool {
+        let depth = Swift.max(cf.solidBandMM, k < cf.solidDepthMM.count ? Double(cf.solidDepthMM[k]) : 0)
+        return dOut < depth
     }
 
     static func bake(_ i: Inputs) -> LatticeCellField? {

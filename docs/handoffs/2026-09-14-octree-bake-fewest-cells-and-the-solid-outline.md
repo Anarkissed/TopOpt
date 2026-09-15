@@ -274,3 +274,38 @@ Tests: `LatticeGradeToSolidBandTests` (7, now passing `solidBandMM: bead` so the
 geometry holds; the 60 mm slab's outline moved in to 52.9 mm because the anchor fits
 nine 6 mm cells into 55 mm exactly), `LatticeSolidFillTests` source pin updated to the
 field form.
+
+## 9. 2026-09-15 night: his rules for the outline and the band, stated plainly
+
+His words: *"I want a singular flat outline around the entire lattice that curves and
+has no 'pixels' (cells). I want it to be a completely separate thing from the lattice —
+an outline that always appears to hold things together and connect it to the rest of
+the body; only when the shape grade is on."* And on the band: *"if a larger cell has 1/2
+its body in the graded area it is to be ok, but anything more than 1/2 it needs to be
+split up into smaller cells"* — accepted with the scaling below, and *"I'm fine with band
+5 not changing the sizes of a 12mm lattice."* The widening solid *"couldn't be the ONLY
+thing changing."*
+
+**The outline** is the shader's band of one width (`solidBandMM`, `rimParams.w`),
+drawn as a field over everything, shape grade on only. **Nothing in the bake is solid
+any more**: a finest cell the outline cuts is painted as a plain cell wherever any of its
+extent lies inside the outline (`edge` in `paint`), its struts end inside the band, and
+the band's inner face is the outline offset by its width — no 2 mm blocks (§8's
+"stepping", his 7:00 PM image 1). `solidDepthMM` now carries only the bleed.
+
+**The centre rule, scaled by size** (`centreOK` in `place`): a cell of size S is kept
+only if its centre sits at least `band · (S − f)/(base − f)` from the outline; the finest
+rung is never held back. Literal half-body would be one test for every size and let a
+12 mm cell nearer the outline than a 2 mm one. On 12 → 6 → 2: band 5 moves nothing;
+band 10 holds 12 mm cells to a nearest edge 4 mm in and 6 mm cells to 1 mm; band 13 to
+7 and 2.2; band 20 to 14 and 5.8. DIAG `why=[…/band=n]` counts base slots the rule
+split.
+
+**The bleed** is zero under a 15 mm band and half the excess above it (his "20–30 mm"
+rule); it used to be 0.44 × band, which is what he saw as the only thing moving.
+
+Tests: `LatticeGradeToSolidBandTests` gains
+`testTheCentreRuleGradesTheBandAndHalfABaseCellChangesNothing` (band 10 on 6 → 3 holds
+6 mm cells to 8.5 mm texel middles, band 5 == band 0, no bleed at 10, 2.5 mm at 20); the
+outline test asserts nothing solid in the bake and no 6 mm cell inside the band; the
+curved-outline probes' "solid" is now a point within the band (`isSolid(cf, k, dOut:)`).

@@ -16,9 +16,10 @@ import simd
 // lattice origin, along the normal at the face plane), so a coarse cell's corners
 // are fine-cell corners and no cell is ever cut mid-way by a neighbour of another
 // size. Top-down per slot: keep the region's cell wherever it fits whole inside the
-// outline; otherwise split that slot alone and try the next rung; a slot still cut
-// at the floor is the solid outline's. The band never caps a cell's size; it is the
-// distance over which the cells thicken toward the solid. Texels are laid at the
+// outline and its centre far enough in for the band; otherwise split that slot
+// alone and try the next rung; a finest slot the outline still cuts is painted where
+// it lies inside and attaches to the solid outline — a band of one width the shader
+// draws over everything, the lattice's separate frame. Texels are laid at the
 // finest rung of all ladders, one cell size per texel, each texel belonging to the
 // cell its MIDDLE is in; the stepped march draws that.
 //
@@ -29,7 +30,7 @@ extension LatticePreviewOccupancy {
 
     public struct OctreeBakeStats {
         public var slotsKept: [Double: Int] = [:]   // cell size → whole cells kept
-        public var slotsCut = 0                    // finest slots the outline cuts (solid)
+        public var slotsCut = 0                    // finest slots the outline cuts (attached to the band)
         public var texelsPainted = 0
         public var pitchMM: Double = 0
         public var seconds: Double = 0
@@ -290,7 +291,6 @@ extension LatticePreviewOccupancy {
         let gorigin = SIMD3<Double>(grid.origin)
         var size = [Float](repeating: 0, count: grid.count)
         var phase = [Float](repeating: 0, count: grid.count)
-        var cutFlag = [Bool](repeating: false, count: grid.count)
         var bandT = [Float](repeating: 1, count: grid.count)
         var outlineMM = [Float](repeating: 1e3, count: grid.count)
         var owner = [Int8](repeating: -1, count: grid.count)
@@ -388,7 +388,14 @@ extension LatticePreviewOccupancy {
                 let l = simd_length(g)
                 return l > 1e-6 ? g / l : SIMD3<Double>(repeating: 0)
             }
-            func paint(_ lo: SIMD3<Double>, _ S: Double, level: Int, cut: Bool, nearest: Double) {
+            // ★ `edge`: a finest cell the outline cuts. It is NOT painted solid any more
+            // (2026-09-15 evening: "I want a singular flat outline around the entire
+            // lattice that curves and has no pixels (cells) … a completely separate
+            // thing from the lattice"). The outline is the shader's band of one width
+            // (`solidBandMM`); the finest cells run up to it and their struts end
+            // inside it, so every texel with any of its extent inside the outline is
+            // painted as a plain cell and the band is drawn over it.
+            func paint(_ lo: SIMD3<Double>, _ S: Double, level: Int, edge: Bool, nearest: Double) {
                 let ph = tilingPhase(region: region, cellMM: S, origin: grid.origin) ?? 0
                 let t: Float = (shapeFit && shapeFitBandMM > 0)
                     ? Float(Swift.max(0, Swift.min(1, nearest / shapeFitBandMM))) : 1
@@ -418,13 +425,13 @@ extension LatticePreviewOccupancy {
                             guard owner[idx] < 0 else { continue }          // first region wins
                             let c = SIMD3<Double>(cx, cy, cz)                // the texel's middle
                             let d = dOut(c)
-                            if cut {
-                                // ★ SOLID WHEREVER ANY OF THE TEXEL IS INSIDE THE OUTLINE.
-                                // Testing the middle alone left every texel whose middle
-                                // was a bead outside unpainted — up to 1.5 mm of polygon
-                                // interior per texel, the 2 mm stair steps along his
-                                // outline ("a vectored outline with a pixel internal").
-                                // Its in-plane corners, at the middle's depth; and the
+                            if edge {
+                                // ★ PAINTED WHEREVER ANY OF THE TEXEL IS INSIDE THE OUTLINE,
+                                // so the band has a texel to be drawn in. Testing the
+                                // middle alone left every texel whose middle was a bead
+                                // outside unpainted — up to 1.5 mm of polygon interior
+                                // per texel, the 2 mm stair steps along his outline. Its
+                                // in-plane corners, at the middle's depth; and the
                                 // material test is taken a voxel and a half INSIDE the
                                 // outline, because the voxel occupancy is eroded ~0.6 mm
                                 // at the wall (measured) and would refuse the very
@@ -450,7 +457,6 @@ extension LatticePreviewOccupancy {
                             isFinest[idx] = level == ladder.sizes.count - 1
                             size[idx] = halfRepresentable(Float(S))
                             phase[idx] = ph
-                            cutFlag[idx] = cut
                             bandT[idx] = t
                             outlineMM[idx] = Float(Swift.max(0, Swift.min(1e3, d)))
                             painted += 1
@@ -460,7 +466,7 @@ extension LatticePreviewOccupancy {
                 }
                 stats.texelsPainted += painted
                 stats.paintedByRegion[ladder.region, default: 0] += painted
-                if cut { stats.slotsCut += 1 } else { stats.slotsKept[S, default: 0] += 1 }
+                if edge { stats.slotsCut += 1 } else { stats.slotsKept[S, default: 0] += 1 }
             }
             func place(_ idx: SIMD3<Int>, level: Int) {
                 let S = ladder.sizes[level]
@@ -470,12 +476,23 @@ extension LatticePreviewOccupancy {
                 let dc = dOut(centre)
                 if dc < -0.87 * S { return }                       // no corner can be inside
                 let (ok, nearest, farthest) = fits(lo, S)
+                // ★ HIS CENTRE RULE, SCALED BY SIZE (2026-09-15: "if a larger cell has
+                // 1/2 its body in the graded area it is ok, anything more than 1/2 it
+                // needs to be split up"). Taken literally that is one test for every
+                // size and lets a 12 mm cell nearer the outline than a 2 mm one; scaled,
+                // the base cell keeps its centre a full band in, the finest rung is
+                // never held back, and the rungs between get a proportional share —
+                // smallest at the outline, base cell at the band's inner edge. Band 5
+                // on a 12 mm cell changes no size (half of 12 is 6), as he accepted.
+                let finestLevel = level == ladder.sizes.count - 1
+                let centreOK = finestLevel || !(shapeFit && shapeFitBandMM > 0 && sBase > f + 1e-9)
+                    || dc >= shapeFitBandMM * (S - f) / (sBase - f) - 1e-9
                 if level == 0 {
-                    let key = "r\(ladder.region)/" + (ok ? "kept" : lastFail)
+                    let key = "r\(ladder.region)/" + (ok ? (centreOK ? "kept" : "band") : lastFail)
                     stats.why[key, default: 0] += 1
                 }
-                if ok {
-                    paint(lo, S, level: level, cut: false, nearest: nearest)
+                if ok && centreOK {
+                    paint(lo, S, level: level, edge: false, nearest: nearest)
                     return
                 }
                 if level + 1 < ladder.sizes.count {
@@ -486,15 +503,15 @@ extension LatticePreviewOccupancy {
                     }}}
                     return
                 }
-                // The finest rung and still cut by the OUTLINE: solid, wherever any of
-                // the cell lies inside the outline. A cell that failed only on the
-                // part's depth (the plate thinner than the prism) is a plain cell,
-                // painted where there is material and clipped by the part like any
-                // other — never solid.
+                // The finest rung and still cut by the OUTLINE: painted wherever any of
+                // the cell lies inside the outline, and attached to the band. A cell
+                // that failed only on the part's depth (the plate thinner than the
+                // prism) is a plain cell, painted where there is material and clipped
+                // by the part like any other.
                 if outlineFailed {
-                    if farthest > 0 { paint(lo, S, level: level, cut: true, nearest: nearest) }
-                } else if !ok {
-                    paint(lo, S, level: level, cut: false, nearest: nearest)
+                    if farthest > 0 { paint(lo, S, level: level, edge: true, nearest: nearest) }
+                } else {
+                    paint(lo, S, level: level, edge: false, nearest: nearest)
                 }
             }
             // Level-0 slots covering the region's box.
@@ -543,17 +560,18 @@ extension LatticePreviewOccupancy {
                     // cells"). A coarser cell in the band keeps its own density; the
                     // solid's bleed below still applies to every texel in the band.
                     if isFinest[i] { r = Swift.max(r, r + (q - r) * (1 - Double(bandT[i]))) }
-                    // the solid bleeds in where the law asks for more than the quilt
-                    let base = rho(activation[i] < 0 ? 0 : activation[i])
-                    let bleed = shapeFitBandMM * Swift.max(0, 1 - q) / Swift.max(1e-3, 1 - Swift.min(base, q))
-                    solidDepth[i] = Float(Swift.max(0, bleed))
+                    // ★ THE SOLID BLEEDS IN ONLY FOR A LARGE BAND (his 2026-09-14 rule:
+                    // "if this is large enough (i.e. 20-30mm) then I also expect to see
+                    // the solid bleed into that grade from the edges"; 2026-09-15: the
+                    // widening solid "couldn't be the ONLY thing changing"). Nothing
+                    // under 15 mm; half of the excess above it.
+                    solidDepth[i] = Float(Swift.max(0, (shapeFitBandMM - 15) * 0.5))
                 }
                 if lineWidthMM > 0 {
                     r = Swift.max(r, lat.printabilityDensityFloor(lineWidthMM: lineWidthMM, cellMM: s))
                 }
             }
             activation[i] = act(Swift.min(r, drawnHi))
-            if cutFlag[i] { solidDepth[i] = 1e3 }           // the whole cut cell is solid
         }
         for i in 0..<grid.count where size[i] <= 0 { activation[i] = -1 }
 

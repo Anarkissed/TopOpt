@@ -563,9 +563,9 @@ public struct LatticeCellField: Sendable {
     /// uniforms, its strut curve and the callout must all read the same span.
     public var drawnDensityHi: Double = 0
     /// ★ HOW DEEP THE SOLID OUTLINE BLEEDS IN from the face outline at each texel
-    /// (mm; stepped only). The shader draws solid wherever the voxel's in-plane
-    /// outline distance is under this OR the finest cell there is cut by the
-    /// outline, always at least one bead. Empty ⇒ no solid outline.
+    /// (mm; stepped only; large bands only). The shader draws solid wherever the
+    /// voxel's in-plane outline distance is under the larger of this and
+    /// `solidBandMM`. Empty ⇒ no solid outline.
     public var solidDepthMM: [Float] = []
     /// ★ THE SOLID OUTLINE'S WIDTH (mm, octree only): everything within it of the
     /// face outline is solid, cells stand beyond it, and the shader draws its inner

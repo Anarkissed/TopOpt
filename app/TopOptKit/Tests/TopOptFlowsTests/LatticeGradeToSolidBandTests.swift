@@ -195,18 +195,21 @@ final class LatticeGradeToSolidBandTests: XCTestCase {
             }
         }
         XCTAssertGreaterThan(six, 0); XCTAssertGreaterThan(three, 0, "vacuous")
-        // ★ THE OUTLINE: every texel with a corner inside the outline is painted, and
-        // everything past the last whole 3 mm cell is solid.
+        // ★ THE OUTLINE: every texel with a corner inside the outline is painted (so
+        // the band has a texel to be drawn in), nothing in the bake is solid (the
+        // band is the shader's, one width, carried out in `solidBandMM`), and no cell
+        // above the finest rung reaches into the band.
+        XCTAssertEqual(baked.solidBandMM, bead, accuracy: 1e-9)
+        XCTAssertFalse(baked.solidDepthMM.contains { $0 > 0 }, "band 0 bleeds no solid inward")
         for t in inWall where t.dOutline > -1.5 {
             let cornerIn = t.dOutline + 1.5 > 0
             if cornerIn {
                 XCTAssertGreaterThan(t.cellMM, 0, "a texel reaching inside the outline is left unpainted at \(t.mid) (\(t.dOutline) mm)")
             }
-            if t.dOutline < 0.5 - 1e-6, t.cellMM > 0 {
-                XCTAssertTrue(t.solid, "the cut remainder must be solid; at \(t.dOutline) mm in it drew \(t.cellMM) open")
-            }
-            if t.solid {
-                XCTAssertLessThan(t.dOutline, 3 + bead, "solid only inside the last finest cell; \(t.dOutline) mm in is solid")
+            XCTAssertFalse(t.solid, "nothing in the bake is solid any more; \(t.dOutline) mm in is")
+            if t.cellMM > 3.5 {
+                XCTAssertGreaterThanOrEqual(t.dOutline, bead - 1.5 - 1e-6,
+                    "a 6 mm cell reaches into the band; its texel sits \(t.dOutline) mm in")
             }
         }
     }
@@ -255,19 +258,20 @@ final class LatticeGradeToSolidBandTests: XCTestCase {
 
     // MARK: - The band: from the finest cell at the outline to the base cell
 
-    /// The band never caps a cell (his 2026-09-15 reading): a 5 mm band places
-    /// exactly the cells band 0 does — the largest that fits, everywhere — and only
-    /// thickens the cells whose nearest corner lies within it, toward the quilt at
-    /// the solid. Beyond it the base cell keeps its own density.
+    /// A band up to half the base cell places exactly the cells band 0 does (his
+    /// centre rule: half the body may be in the band), and a wider band only
+    /// thickens the FINEST cells, toward the quilt at the solid; a coarser cell
+    /// inside the band keeps its own density, and beyond the band so does the base
+    /// cell.
     func testTheBandOnlyThickensAndNeverCapsTheCell() throws {
         let f = slabs([(6, 0, 60)], outlineInset: 3.55)
-        let band = 5.0
         let (baked0, _) = try bake(f, band: 0)
+        let (bakedHalf, _) = try bake(f, band: 3)
+        XCTAssertEqual(bakedHalf.steppedCellMM, baked0.steppedCellMM,
+                       "a band of half the base cell moved a cell")
+        // 8 mm: the second row of 6 mm cells (edge 6.45 mm in) stands inside the band.
+        let band = 8.0
         let (baked, _) = try bake(f, band: band)
-        XCTAssertEqual(baked.steppedCellMM, baked0.steppedCellMM,
-                       "the band moved a cell: placement must not depend on the band")
-        XCTAssertEqual(baked.solidDepthMM.map { $0 >= 999 }, baked0.solidDepthMM.map { $0 >= 999 },
-                       "the band changed which texels are solid")
         let all = texels(baked, f).filter { $0.depth > 0 && $0.depth < depth && $0.cellMM > 0 && !$0.solid }
         // The 6 mm cells nearest the outline have their corner 3.5 mm in (slot at
         // 6.37 against an outline at 2.87), inside the band; their texel middles sit
@@ -295,6 +299,34 @@ final class LatticeGradeToSolidBandTests: XCTestCase {
         for t in sixInBand {
             XCTAssertEqual(t.activation, ambient, accuracy: 0.01, "a coarser cell inside the band must NOT thicken; at \(t.dOutline) mm (\(t.cellMM) mm) it is \(t.activation)")
         }
+    }
+
+    /// His centre rule, scaled by size (2026-09-15): a cell is kept only if its centre
+    /// sits at least `band · (S − f)/(base − f)` from the outline. On the 6 → 3 ladder
+    /// a 10 mm band holds 6 mm cells to a centre 10 mm in (nearest edge 7 mm), and the
+    /// 3 mm rung is never held back; a 5 mm band changes no size at all (half of 6 is
+    /// 3, and the nearest 6 mm cell's centre already sits further in than 5).
+    func testTheCentreRuleGradesTheBandAndHalfABaseCellChangesNothing() throws {
+        let f = slabs([(6, 0, 60)], outlineInset: 3.55)
+        let (b10, _) = try bake(f, band: 10)
+        let ten = texels(b10, f).filter { $0.depth > 0 && $0.depth < depth && $0.cellMM > 0 }
+        let sixes = ten.filter { abs($0.cellMM - 6) < 0.02 }
+        let threes = ten.filter { abs($0.cellMM - 3) < 0.02 }
+        XCTAssertFalse(sixes.isEmpty); XCTAssertFalse(threes.isEmpty, "vacuous")
+        // A 6 mm cell whose centre is 10 mm in has its nearest texel middle 10 − 3 + 1.5 = 8.5 mm in.
+        for t in sixes {
+            XCTAssertGreaterThanOrEqual(t.dOutline, 8.5 - 1e-6,
+                "band 10: a 6 mm cell must keep its centre 10 mm in; a texel sits \(t.dOutline) mm in")
+        }
+        XCTAssertTrue(threes.contains { $0.dOutline < 3 }, "the finest rung still reaches the outline")
+        XCTAssertTrue(threes.contains { $0.dOutline > 4 }, "the finest rung fills what the 6 mm cells left")
+        let (b5, _) = try bake(f, band: 3)
+        let (b0, _) = try bake(f, band: 0)
+        XCTAssertEqual(b5.steppedCellMM, b0.steppedCellMM, "band 3 (half of 6) on a 6 mm cell moves no cell")
+        XCTAssertFalse(b10.solidDepthMM.contains { $0 > 0 }, "no bleed under 15 mm")
+        let (b20, _) = try bake(f, band: 20)
+        XCTAssertEqual(b20.solidDepthMM.filter { $0 > 0 }.max() ?? 0, 2.5, accuracy: 1e-4,
+                       "a 20 mm band bleeds half of the excess over 15: 2.5 mm")
     }
 
     /// His Fine project hands the bake a POINT span — manual thickness, lo == hi ==

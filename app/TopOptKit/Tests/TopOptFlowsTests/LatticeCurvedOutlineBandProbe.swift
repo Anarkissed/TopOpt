@@ -1304,7 +1304,7 @@ extension LatticeCurvedOutlineBandProbe {
         let inc = i.scene.regions.filter { $0.role == .include }
         guard let rg = i.scene.regionSDF else { return r }
         let occ = i.scene.occupancy
-        func cell(_ p: SIMD3<Double>) -> (painted: Bool, solid: Bool) {
+        func cell(_ p: SIMD3<Double>, dOut: Double = 0.1) -> (painted: Bool, solid: Bool) {
             let f = cf.field
             // Stepped/octree texels span [i, i+1)·pitch; the old ring probes rounded.
             let vx = Int((((p.x - Double(f.origin.x)) / Double(f.spacing.x))).rounded(.down))
@@ -1314,7 +1314,7 @@ extension LatticeCurvedOutlineBandProbe {
             let k = vx + f.nx * (vy + f.ny * vz)
             guard k < cf.steppedCellMM.count else { return (false, false) }
             let pa = cf.steppedCellMM[k] > 0
-            return (pa, pa && (LatticeQuiltBakeProbe.isSolid(cf, k) || (k < cf.level.count && cf.solidDepthMM.isEmpty && cf.level[k] == 0)))
+            return (pa, pa && (LatticeQuiltBakeProbe.isSolid(cf, k, dOut: dOut) || (k < cf.level.count && cf.solidDepthMM.isEmpty && cf.level[k] == 0)))
         }
         func occAt(_ p: SIMD3<Double>) -> Float {
             let vx = Int((((p.x - Double(occ.origin.x)) / Double(occ.spacing.x))).rounded())
@@ -1344,7 +1344,8 @@ extension LatticeCurvedOutlineBandProbe {
                 if !inc.contains(where: { LatticeRegionMask.contains(p, region: $0) }) {
                     tally["notOwned", default: 0] += 1; continue
                 }
-                let c = cell(p)
+                let dOutHere = -(LatticeFaceOutline.signedDistance(SIMD2(uu, vv), loops: reg.outlineLoops) - reg.inPlaneOffsetMM)
+                let c = cell(p, dOut: dOutHere)
                 // ★★★ SOLID IS TESTED BEFORE CLIPPED, and getting that order wrong is
                 // what made this metric report a 2.7% "hole" at single-cell ON that
                 // does not exist. The solid ring is material the run DELIVERS; its
@@ -1380,7 +1381,7 @@ extension LatticeCurvedOutlineBandProbe {
         r.ring = ringTot > 0 ? 100.0 * Double(ringYes) / Double(ringTot) : 0
         r.painted = cf.steppedCellMM.filter { $0 > 0 }.count
         r.solidCells = (0..<cf.steppedCellMM.count).filter {
-            cf.steppedCellMM[$0] > 0 && LatticeQuiltBakeProbe.isSolid(cf, $0)
+            cf.steppedCellMM[$0] > 0 && $0 < cf.solidDepthMM.count && cf.solidDepthMM[$0] > 0
         }.count
         var h: [String: Int] = [:]
         for v2 in cf.steppedCellMM where v2 > 0 { h[String(format: "%.2f", v2), default: 0] += 1 }

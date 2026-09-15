@@ -2373,7 +2373,7 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
                     let kept = st.slotsKept.keys.sorted(by: >)
                         .map { String(format: "%.2f=%d", $0, st.slotsKept[$0]!) }.joined(separator: " ")
                     let why = st.why.keys.sorted().map { "\($0)=\(st.why[$0]!)" }.joined(separator: " ")
-                    NSLog("DIAG octree pitch=\(String(format: "%.2f", st.pitchMM)) kept=[\(kept)] cut=\(st.slotsCut) "
+                    NSLog("DIAG octree pitch=\(String(format: "%.2f", st.pitchMM)) kept=[\(kept)] edge=\(st.slotsCut) "
                           + "texels=\(st.texelsPainted) band=\(params.shapeFitBandMM) floor=\(Self.printableFloorBeads * lineWidthMM) "
                           + "solidBand=\(String(format: "%.2f", solidBandMM)) anchor=\(String(format: "(%.1f,%.1f,%.1f) in %.1fs", st.anchorShiftMM.x, st.anchorShiftMM.y, st.anchorShiftMM.z, st.anchorSeconds)) drawnHi=\(o.drawnDensityHi) "
                           + "why=[\(why)] t=\(String(format: "%.2f", st.seconds))s")
