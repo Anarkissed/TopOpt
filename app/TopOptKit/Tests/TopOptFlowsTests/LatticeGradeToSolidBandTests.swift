@@ -37,7 +37,13 @@ final class LatticeGradeToSolidBandTests: XCTestCase {
     /// Slab faces 30 mm square (outline half a voxel inside the occupancy) and 12 mm
     /// deep, side by side along x, each with its own cell and its face plane at its
     /// own offset from the voxel grid.
-    private func slabs(_ faces: [(cell: Double, faceOffset: Double, across: Int)]) -> Fixture {
+    /// `outlineInset` sets the outline in from the slab's edge: 2.5 leaves a 29 mm
+    /// square on a 34 slab (four 6 mm cells and a 3 mm one, whatever the anchor);
+    /// the 60 slab uses 3.55 (52.9 mm: eight 6 mm cells and a 3 mm one) because the
+    /// anchor search fits nine 6 mm cells into 55 mm exactly and leaves nothing to
+    /// grade.
+    private func slabs(_ faces: [(cell: Double, faceOffset: Double, across: Int)],
+                       outlineInset: Double = 2.5) -> Fixture {
         let gap = 6
         let nx = faces.map { $0.across }.reduce(0, +) + (faces.count - 1) * gap
         let ny = 20, nz = faces.map { $0.across }.max()!
@@ -65,7 +71,7 @@ final class LatticeGradeToSolidBandTests: XCTestCase {
             spec.halfUMM = 40
             spec.halfWMM = 40
             spec.depthMM = depth
-            let halfMM = centre - 2.5   // the outline, half a voxel inside the occupancy
+            let halfMM = centre - outlineInset   // the outline, inside the occupancy
             spec.outlineLoops = [[SIMD2(-halfMM, -halfMM), SIMD2(halfMM, -halfMM),
                                   SIMD2(halfMM, halfMM), SIMD2(-halfMM, halfMM)]]
             let xr = (Double(origin.x) + Double(x0))...(Double(origin.x) + Double(x0 + across))
@@ -83,7 +89,7 @@ final class LatticeGradeToSolidBandTests: XCTestCase {
         let baked = try XCTUnwrap(LatticePreviewOccupancy.octreeCellField(
             occupancy: f.occ, demand: f.demand, regions: f.regions.map { $0.spec },
             cellMM: f.regions.map { $0.cell }, lineWidthMM: bead, realFloorMM: floor,
-            shapeFitBandMM: band, shapeFit: true,
+            shapeFitBandMM: band, shapeFit: true, solidBandMM: bead,
             densityLo: span?.lo ?? lo, densityHi: span?.hi ?? hi, densityGamma: 1,
             latticeID: "octet", stats: &st), "no bake")
         return (baked, st)
@@ -254,7 +260,7 @@ final class LatticeGradeToSolidBandTests: XCTestCase {
     /// thickens the cells whose nearest corner lies within it, toward the quilt at
     /// the solid. Beyond it the base cell keeps its own density.
     func testTheBandOnlyThickensAndNeverCapsTheCell() throws {
-        let f = slabs([(6, 0, 60)])
+        let f = slabs([(6, 0, 60)], outlineInset: 3.55)
         let band = 5.0
         let (baked0, _) = try bake(f, band: 0)
         let (baked, _) = try bake(f, band: band)
@@ -279,10 +285,15 @@ final class LatticeGradeToSolidBandTests: XCTestCase {
         let quilt = quiltActivation(cell: 3, lo: lo, hi: hi)
         for t in against {
             XCTAssertGreaterThan(t.activation, ambient + 0.2, "the cells against the solid thicken; at \(t.dOutline) mm it is \(t.activation)")
-            XCTAssertGreaterThanOrEqual(t.activation, quilt - 0.1, "…toward the quilt (\(quilt)); at \(t.dOutline) mm it is \(t.activation)")
+            // The cell against the solid has its nearest corner up to a fifth of the
+            // band in (the anchor leaves a 4 mm remainder for a 3 mm cell), so it
+            // reaches ~80 % of the way to the quilt.
+            XCTAssertGreaterThanOrEqual(t.activation, quilt - 0.15, "…toward the quilt (\(quilt)); at \(t.dOutline) mm it is \(t.activation)")
         }
+        // ★ Only the finest rung quilts (his 2026-09-15 note 3): a 6 mm cell inside
+        // the band keeps its own density.
         for t in sixInBand {
-            XCTAssertGreaterThan(t.activation, ambient + 0.02, "a cell inside the band is thickened; at \(t.dOutline) mm (\(t.cellMM) mm) it is \(t.activation)")
+            XCTAssertEqual(t.activation, ambient, accuracy: 0.01, "a coarser cell inside the band must NOT thicken; at \(t.dOutline) mm (\(t.cellMM) mm) it is \(t.activation)")
         }
     }
 
@@ -292,7 +303,7 @@ final class LatticeGradeToSolidBandTests: XCTestCase {
     /// `drawnDensityHi`, and re-encode every other cell so it still draws at the
     /// stated density.
     func testAPointSpanIsWidenedToReachTheQuilt() throws {
-        let f = slabs([(6, 0, 60)])
+        let f = slabs([(6, 0, 60)], outlineInset: 3.55)
         let stated = 0.21887
         let (baked, _) = try bake(f, band: 5, span: (stated, stated))
         let quilt = Swift.min(1, LatticeType.named("octet").quiltRowDensity(cellMM: 3))
@@ -305,7 +316,7 @@ final class LatticeGradeToSolidBandTests: XCTestCase {
         XCTAssertFalse(against.isEmpty); XCTAssertFalse(beyond.isEmpty)
         func rho(_ t: Texel) -> Double { stated + (quilt - stated) * Double(t.activation) }
         for t in against {
-            XCTAssertGreaterThan(rho(t), quilt - 0.06,
+            XCTAssertGreaterThan(rho(t), quilt - 0.1,
                                  "the cells against the solid draw at the quilt over the widened span; at \(t.dOutline) mm it draws \(rho(t))")
         }
         for t in beyond {

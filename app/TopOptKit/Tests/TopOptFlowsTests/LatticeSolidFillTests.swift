@@ -75,7 +75,8 @@ final class LatticeSolidFillTests: XCTestCase {
         // the region PRISM's exact wall, the ray box, and the RAW part surface let out by
         // a third of a voxel — never by `dClip`.
         XCTAssertTrue(
-            march.contains("Fsolid = min(Fsolid, max(max(dBox, regionTex.sample(samp, stc).b), dPartRaw));"),
+            march.contains("Fsolid = min(Fsolid, max(max(dOutV - depth, dBox),")
+                && march.contains("max(regionTex.sample(samp, stc).b, dPartRaw)));"),
             "★ the outline's solid must be clipped by the prism and the raw part, not dClip")
         XCTAssertFalse(
             march.contains("Fsolid = min(Fsolid, max(dClip, dOutline"),

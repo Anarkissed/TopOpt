@@ -36,6 +36,11 @@ extension LatticePreviewOccupancy {
         public var why: [String: Int] = [:]      // level-0 slot outcomes, per region
         public var paintedByRegion: [Int: Int] = [:]
         public var secondaryRegions: [Int] = []
+        /// The in-plane anchor chosen for the base slots (mm, subtracted from the
+        /// occupancy origin), so the most base-cell volume fits whole.
+        public var anchorShiftMM = SIMD3<Double>(repeating: 0)
+        public var anchorSeconds: Double = 0
+        public var rasterSeconds: Double = 0
     }
 
     /// One cell size per texel at the finest rung's pitch, chosen by the octree.
@@ -47,6 +52,9 @@ extension LatticePreviewOccupancy {
                                        realFloorMM: Double,
                                        shapeFitBandMM: Double,
                                        shapeFit: Bool,
+                                       /// ★ THE SOLID OUTLINE'S WIDTH: no cell corner
+                                       /// closer than this to the face outline. 0 ⇒ a bead.
+                                       solidBandMM: Double = 0,
                                        densityLo: Double,
                                        densityHi: Double,
                                        densityGamma: Double,
@@ -127,8 +135,157 @@ extension LatticePreviewOccupancy {
         let pitch = ladders.map { $0.sizes.last! }.min()!
         stats.pitchMM = pitch
 
-        // The texel grid at that pitch, with the demand averaged into it.
-        let grid = cellField(occupancy: occ, demand: demand, cellMM: pitch)
+        let bead = Swift.max(lineWidthMM, 0.1)
+        // ★ A UNIFORM SOLID BAND (2026-09-15: "It should not just be in the middle of
+        // the steps but on top of them too"). Cells keep clear of the outline by the
+        // band's width, so the solid's inner face is a stepped-by-cells line and its
+        // outer face the outline itself; nothing pokes through the band.
+        let band = Swift.max(solidBandMM, bead)
+        func occupied(_ p: SIMD3<Double>) -> Bool {
+            let g = (SIMD3<Float>(p) - occ.origin) / occ.spacing
+            let i = Int(g.x.rounded()), j = Int(g.y.rounded()), k = Int(g.z.rounded())
+            guard i >= 0, i < occ.nx, j >= 0, j < occ.ny, k >= 0, k < occ.nz else { return false }
+            return occ.values[(k * occ.ny + j) * occ.nx + i] > 0.5
+        }
+        // ★ THE OCCUPANCY IS VOXELS (1.67 mm on this part) and eroded by up to one at
+        // every surface, so a cell that spans the wall exactly — his single-cell 12 mm
+        // in a 12 mm wall — has corners the voxel grid calls empty. The outline test
+        // is exact; the part test pulls the corner in by a voxel so the voxelisation
+        // cannot veto a cell the CAD holds.
+        let pull = Swift.max(0.6 * voxel, 0.2)
+
+        // ★★★ THE ANCHOR IS CHOSEN, NOT INHERITED (2026-09-15: "Look how far the 12mm
+        // cells could have gone"). Base slots sit on a grid; anchored at the voxel
+        // grid's corner, the last row that fit along his base's bottom edge left an
+        // 8–11 mm strip of 6 and 2 mm cells where a 12 mm row would have fit a few
+        // millimetres lower. The in-plane anchor is searched within one base cell
+        // (eighths, along every in-plane axis of the ladders) for the offset that
+        // fits the most base-cell VOLUME whole; the texel grid is then laid from
+        // there, so the march tiles from the same origin.
+        var inPlaneAxes = Set<Int>()
+        for l in ladders { for ax in 0..<3 where ax != l.axis { inPlaneAxes.insert(ax) } }
+        let baseMax = ladders.map { $0.sizes[0] }.max()!
+        // The outline distance, rasterised once per region for the SEARCH and the cut
+        // texels' corner tests (the fit test and the texel's own distance keep the
+        // exact polygon): 64 anchors × every base slot × 8 corners against a 75-vertex
+        // polygon cost 38 s on his stand; a raster with bilinear reads makes the
+        // search a quarter of a second.
+        struct OutlineRaster {
+            let origin: SIMD2<Double>; let h: Double; let nu: Int; let nv: Int; let values: [Double]
+            func at(_ uv: SIMD2<Double>) -> Double {
+                let g = (uv - origin) / h
+                let i = Int(g.x.rounded(.down)), j = Int(g.y.rounded(.down))
+                guard i >= 0, j >= 0, i + 1 < nu, j + 1 < nv else { return -1e3 }
+                let fx = g.x - Double(i), fy = g.y - Double(j)
+                let a = values[j * nu + i] * (1 - fx) + values[j * nu + i + 1] * fx
+                let b = values[(j + 1) * nu + i] * (1 - fx) + values[(j + 1) * nu + i + 1] * fx
+                return a * (1 - fy) + b * fy
+            }
+        }
+        var rasters: [Int: OutlineRaster] = [:]
+        let tRaster = Date()
+        for ladder in ladders {
+            let region = regions[ladder.region]
+            guard !region.outlineLoops.isEmpty else { continue }
+            var lo = SIMD2<Double>(1e9, 1e9), hi = SIMD2<Double>(-1e9, -1e9)
+            for loop in region.outlineLoops { for q in loop { lo = simd_min(lo, q); hi = simd_max(hi, q) } }
+            let pad = baseMax + 2
+            lo -= SIMD2(pad, pad); hi += SIMD2(pad, pad)
+            // 1 mm: bilinear on a distance field is within ~0.1 mm of the polygon at
+            // that step, and the 0.5 mm raster cost 10 s of a 30 s bake on his stand.
+            let h = 1.0
+            let nu = Int(((hi.x - lo.x) / h).rounded(.up)) + 2, nv = Int(((hi.y - lo.y) / h).rounded(.up)) + 2
+            var vals = [Double](repeating: -1e3, count: nu * nv)
+            for j in 0..<nv { for i in 0..<nu {
+                let uv = lo + SIMD2(Double(i), Double(j)) * h
+                vals[j * nu + i] = -(LatticeFaceOutline.signedDistance(uv, loops: region.outlineLoops) - region.inPlaneOffsetMM)
+            }}
+            rasters[ladder.region] = OutlineRaster(origin: lo, h: h, nu: nu, nv: nv, values: vals)
+        }
+        stats.rasterSeconds = Date().timeIntervalSince(tRaster)
+        func keptVolume(shift: SIMD3<Double>, children: Bool) -> Double {
+            let go = SIMD3<Double>(occ.origin) - shift
+            let ext = SIMD3<Double>(Double(occ.nx - 1) * Double(occ.spacing.x),
+                                    Double(occ.ny - 1) * Double(occ.spacing.y),
+                                    Double(occ.nz - 1) * Double(occ.spacing.z)) + shift
+            var volume = 0.0
+            for ladder in ladders {
+                let region = regions[ladder.region]
+                let n = LatticeRegionMask.unit(region.normal)
+                let (bu, bv) = LatticeRegionMask.basis(n)
+                let axis = ladder.axis, S = ladder.sizes[0], plane = region.origin[axis]
+                let raster = rasters[ladder.region]
+                func dOut(_ p: SIMD3<Double>) -> Double {
+                    guard let raster else {
+                        return LatticeRegionMask.contains(p, region: region) ? 1e3 : -1e3
+                    }
+                    let rel = p - region.origin
+                    return raster.at(SIMD2<Double>(simd_dot(rel, bu), simd_dot(rel, bv)))
+                }
+                var count = SIMD3<Int>(repeating: 1)
+                for ax in 0..<3 where ax != axis { count[ax] = Int((ext[ax] / S).rounded(.up)) + 1 }
+                count[axis] = Swift.max(1, Int((region.depthMM / S).rounded(.up)))
+                func fitsBox(_ lo: SIMD3<Double>, _ S: Double) -> Bool {
+                    if dOut(lo + SIMD3<Double>(repeating: 0.5 * S)) < -0.87 * S { return false }
+                    let eps = Swift.min(0.05 * S, 0.2)
+                    for cz in 0...1 { for cy in 0...1 { for cx in 0...1 {
+                        let corner = lo + SIMD3<Double>(Double(cx), Double(cy), Double(cz)) * S
+                        let sgn = SIMD3<Double>(cx == 0 ? 1 : -1, cy == 0 ? 1 : -1, cz == 0 ? 1 : -1)
+                        if dOut(corner + sgn * eps) < band
+                            || !occupied(corner + sgn * Swift.min(pull, 0.45 * S)) { return false }
+                    }}}
+                    return true
+                }
+                for k in 0..<count.z { for j in 0..<count.y { for i in 0..<count.x {
+                    let idx = SIMD3<Int>(i, j, k)
+                    var lo = SIMD3<Double>(repeating: 0)
+                    for ax in 0..<3 {
+                        lo[ax] = ax == axis
+                            ? (n[axis] > 0 ? plane + Double(idx[ax]) * S : plane - Double(idx[ax] + 1) * S)
+                            : go[ax] + Double(idx[ax]) * S
+                    }
+                    if fitsBox(lo, S) { volume += S * S * S; continue }
+                    // A slot that fails: its next-rung children count too, so among
+                    // anchors that fit the same base cells the one leaving room for
+                    // the next rung (rather than two solid slivers) wins. Scored only
+                    // for the anchors that tie on base cells (second pass).
+                    guard children, ladder.sizes.count > 1 else { continue }
+                    let S1 = ladder.sizes[1]
+                    let kk = Int((S / S1).rounded())
+                    for cz in 0..<kk { for cy in 0..<kk { for cx in 0..<kk {
+                        let lo1 = lo + SIMD3<Double>(Double(cx), Double(cy), Double(cz)) * S1
+                        if fitsBox(lo1, S1) { volume += S1 * S1 * S1 }
+                    }}}
+                }}}
+            }
+            return volume
+        }
+        var bestShift = SIMD3<Double>(repeating: 0)
+        var bestVolume = -1.0
+        let steps = 8
+        let axesList = inPlaneAxes.sorted()
+        var combos = [SIMD3<Double>(repeating: 0)]
+        for ax in axesList {
+            var next: [SIMD3<Double>] = []
+            for c in combos { for k in 0..<steps {
+                var v = c; v[ax] = Double(k) * baseMax / Double(steps); next.append(v)
+            }}
+            combos = next
+        }
+        let tSearch = Date()
+        let baseVolumes = combos.map { keptVolume(shift: $0, children: false) }
+        let bestBase = baseVolumes.max() ?? 0
+        for (shift, v0) in zip(combos, baseVolumes) where v0 >= bestBase - baseMax * baseMax * baseMax - 1e-9 {
+            let v = keptVolume(shift: shift, children: true)
+            if v > bestVolume + 1e-9 { bestVolume = v; bestShift = shift }
+        }
+        stats.anchorShiftMM = bestShift
+        stats.anchorSeconds = Date().timeIntervalSince(tSearch)
+
+        // The texel grid at that pitch, from the chosen anchor, with the demand
+        // averaged into it.
+        let grid = cellField(occupancy: occ, demand: demand, cellMM: pitch,
+                             originShiftMM: SIMD3<Float>(bestShift))
         let gnx = grid.nx, gny = grid.ny, gnz = grid.nz
         let gorigin = SIMD3<Double>(grid.origin)
         var size = [Float](repeating: 0, count: grid.count)
@@ -137,15 +294,8 @@ extension LatticePreviewOccupancy {
         var bandT = [Float](repeating: 1, count: grid.count)
         var outlineMM = [Float](repeating: 1e3, count: grid.count)
         var owner = [Int8](repeating: -1, count: grid.count)
+        var isFinest = [Bool](repeating: false, count: grid.count)
 
-        func occupied(_ p: SIMD3<Double>) -> Bool {
-            let g = (SIMD3<Float>(p) - occ.origin) / occ.spacing
-            let i = Int(g.x.rounded()), j = Int(g.y.rounded()), k = Int(g.z.rounded())
-            guard i >= 0, i < occ.nx, j >= 0, j < occ.ny, k >= 0, k < occ.nz else { return false }
-            return occ.values[(k * occ.ny + j) * occ.nx + i] > 0.5
-        }
-
-        let bead = Swift.max(lineWidthMM, 0.1)
         // Within a voxel of material: the voxel occupancy is eroded at every surface,
         // and a cut cell's texels sit exactly there.
         let pullV = Swift.max(0.6 * voxel, 0.2)
@@ -190,14 +340,6 @@ extension LatticePreviewOccupancy {
                 }
                 return lo
             }
-            // Whole-cell test: every corner (pulled in by a hair) sits inside the
-            // outline by at least a bead and inside the part.
-            // ★ THE OCCUPANCY IS VOXELS (1.67 mm on this part) and eroded by up to
-            // one at every surface, so a cell that spans the wall exactly — his
-            // single-cell 12 mm in a 12 mm wall — has corners the voxel grid calls
-            // empty. The outline test is exact; the part test pulls the corner in by
-            // a voxel so the voxelisation cannot veto a cell the CAD holds.
-            let pull = Swift.max(0.6 * voxel, 0.2)
             var lastFail = ""
             var outlineFailed = false
             func fits(_ lo: SIMD3<Double>, _ S: Double) -> (fits: Bool, nearest: Double, farthest: Double) {
@@ -212,7 +354,7 @@ extension LatticePreviewOccupancy {
                     let d = dOut(corner + sgn * eps)
                     nearest = Swift.min(nearest, d)
                     farthest = Swift.max(farthest, d)
-                    if d < bead { ok = false; outlineFailed = true; if lastFail.isEmpty { lastFail = "outline" } }
+                    if d < band { ok = false; outlineFailed = true; if lastFail.isEmpty { lastFail = "outline" } }
                     else if !occupied(corner + sgn * Swift.min(pull, 0.45 * S)) { ok = false; if lastFail.isEmpty { lastFail = "occupancy" } }
                 }}}
                 return (ok, nearest, farthest)
@@ -225,12 +367,23 @@ extension LatticePreviewOccupancy {
             // The largest cell that fits stands anywhere; the sizes step down only
             // where the geometry forces them, and the band drives the thickening
             // toward the solid (`bandT`) and the solid's bleed.
+            // The outline distance off the region's 0.5 mm raster (built for the
+            // anchor search) — for the cut texels' corner test and inward direction,
+            // where a tenth of a millimetre does not matter and the exact polygon
+            // (75 vertices on his stand) cost 15 s per bake. The texel's own distance
+            // (`outlineMM`) stays exact.
+            let raster = rasters[ladder.region]
+            func dOutFast(_ p: SIMD3<Double>) -> Double {
+                guard let raster else { return dOut(p) }
+                let rel = p - region.origin
+                return raster.at(SIMD2<Double>(simd_dot(rel, bu), simd_dot(rel, bv)))
+            }
             // In-plane inward direction of the outline distance at `p` (unit, in the
-            // face's own basis), by central differences on the exact polygon.
+            // face's own basis), by central differences.
             func inward(_ p: SIMD3<Double>) -> SIMD3<Double> {
-                let h = 0.1
-                let gu = (dOut(p + bu * h) - dOut(p - bu * h)) / (2 * h)
-                let gv = (dOut(p + bv * h) - dOut(p - bv * h)) / (2 * h)
+                let h = 0.25
+                let gu = (dOutFast(p + bu * h) - dOutFast(p - bu * h)) / (2 * h)
+                let gv = (dOutFast(p + bv * h) - dOutFast(p - bv * h)) / (2 * h)
                 let g = bu * gu + bv * gv
                 let l = simd_length(g)
                 return l > 1e-6 ? g / l : SIMD3<Double>(repeating: 0)
@@ -283,7 +436,7 @@ extension LatticePreviewOccupancy {
                                     let a1 = (axis + 1) % 3, a2 = (axis + 2) % 3
                                     for cx2 in [-0.5, 0.5] { for cy2 in [-0.5, 0.5] {
                                         var q = c; q[a1] += cx2 * pitch; q[a2] += cy2 * pitch
-                                        if dOut(q) > 0 { anyInside = true }
+                                        if dOutFast(q) > 0 { anyInside = true }
                                     }}
                                 }
                                 guard anyInside else { continue }
@@ -294,6 +447,7 @@ extension LatticePreviewOccupancy {
                                 guard occupied(c) || occupiedNear(c) else { continue }
                             }
                             owner[idx] = Int8(ladder.region)
+                            isFinest[idx] = level == ladder.sizes.count - 1
                             size[idx] = halfRepresentable(Float(S))
                             phase[idx] = ph
                             cutFlag[idx] = cut
@@ -384,7 +538,11 @@ extension LatticePreviewOccupancy {
             if let lat {
                 if shapeFit, shapeFitBandMM > 0, bandT[i] < 1 {
                     let q = Swift.min(drawnHi, lat.quiltRowDensity(cellMM: s))
-                    r = Swift.max(r, r + (q - r) * (1 - Double(bandT[i])))
+                    // ★ ONLY THE FINEST CELLS QUILT (2026-09-15: "Quilting should only
+                    // be allowed in the smallest printable cells — never for larger
+                    // cells"). A coarser cell in the band keeps its own density; the
+                    // solid's bleed below still applies to every texel in the band.
+                    if isFinest[i] { r = Swift.max(r, r + (q - r) * (1 - Double(bandT[i]))) }
                     // the solid bleeds in where the law asks for more than the quilt
                     let base = rho(activation[i] < 0 ? 0 : activation[i])
                     let bleed = shapeFitBandMM * Swift.max(0, 1 - q) / Swift.max(1e-3, 1 - Swift.min(base, q))
@@ -413,6 +571,7 @@ extension LatticePreviewOccupancy {
                                 }(),
                                 fromCorePlan: false,
                                 drawnDensityHi: drawnHi > densityHi + 1e-9 ? drawnHi : 0,
-                                solidDepthMM: solidDepth)
+                                solidDepthMM: solidDepth,
+                                solidBandMM: band)
     }
 }

@@ -613,7 +613,6 @@ static LSDFHit lsdf_march(constant LSDFUniforms& U,
     float3 cachedBase = float3(1e9);
     float cachedM = -1.0;
     float3 cachedPhase = float3(1e9);
-    bool cachedCut = false;   // the stepped cell under p is cut by the face outline
     float3 cachedBI = float3(1e9);
     LCell LC; LC.q = float3(0.0); LC.blk = float3(0.0); LC.S = S0; LC.m = 1.0; LC.L = 0;
     LC.stepped = 0.0; LC.phase = float3(0.0); LC.home = float3(0.0); LC.act = -1.0; LC.axis = -1;
@@ -786,24 +785,11 @@ static LSDFHit lsdf_march(constant LSDFUniforms& U,
             cachedBase = baseCell;
             cachedM = LC.m;
             cachedPhase = LC.phase;
-            // ★ IS THIS CELL CUT BY THE FACE OUTLINE? A cut finest cell goes solid —
-            // the solid outline that wraps the lattice (2026-09-14). Test the cell's
-            // four in-plane corners against the outline distance, at p's own depth.
-            cachedCut = false;
-            if (LC.stepped > 0.0 && LC.axis >= 0) {
-                float3 cellC = U.latticeOrigin.xyz + ((LC.blk + 0.5) * LC.m + LC.phase) * S0;
-                int a1 = (LC.axis + 1) % 3, a2 = (LC.axis + 2) % 3;
-                float bead = 2.0 * U.overlayParams.z;
-                for (int cx = -1; cx <= 1; cx += 2) {
-                    for (int cy = -1; cy <= 1; cy += 2) {
-                        float3 c = p;
-                        c[a1] = cellC[a1] + 0.5 * LC.S * float(cx);
-                        c[a2] = cellC[a2] + 0.5 * LC.S * float(cy);
-                        float3 sc = ((c - U.sdfOrigin.xyz) / U.sdfSpacing.xyz + 0.5) / sdfDims;
-                        if (regionTex.sample(samp, sc).g < bead) { cachedCut = true; }
-                    }
-                }
-            }
+            // (The per-cell "is it cut by the outline" test that used to live here is
+            // gone: it sampled the voxel outline distance at a KEPT cell's corners and
+            // turned whole 6 and 12 mm cells solid wherever a corner sat a hair inside
+            // the outline — his "quilted" large cells of 2026-09-15. The bake decides
+            // what is solid; the shader only draws it.)
             anyActive = false;
             for (int oz = -1; oz <= 1; oz++) {
                 for (int oy = -1; oy <= 1; oy++) {
@@ -1043,15 +1029,16 @@ static LSDFHit lsdf_march(constant LSDFUniforms& U,
         // what turned every "solid" cell into a see-through strip.
         if (LC.stepped > 0.0 && U.rimParams.y > 0.0 && LC.S > 0.0) {
             float dOutV = regionTex.sample(samp, stc).g;
-            // ★ THE SKIN SITS ON TOP OF THE STEPS (2026-09-15: "not just in the middle
-            // of the steps but on top of them too … two printed top layers"). The cut
-            // texels reach up to one texel (S0) in from the outline as stair steps, and
-            // the kept cells beside them stop at the part clip's hold; the solid skin
-            // is therefore never thinner than one texel plus two beads, measured on the
-            // smooth in-plane outline distance — so its inner face is the outline's
-            // shape, offset, whatever the texels did.
-            float depth = max(S0 + 4.0 * U.overlayParams.z, lsdf_outline_mm(U, cellTex, p));
-            if (cachedCut || dOutV < depth) {
+            // ★ THE SOLID OUTLINE IS A BAND OF ONE WIDTH (2026-09-15: "not just in the
+            // middle of the steps but on top of them too"). `rimParams.w` is the width
+            // the bake kept every cell clear of; a cut finest cell (solidDepth 1e3) and
+            // the band's bleed extend it per texel. It is drawn as a FIELD, not a test:
+            // `dOutV - depth` is negative inside the band and grows inward, so the
+            // band's inner face is the outline offset by `depth` — smooth — instead of
+            // whichever texel face the march happened to enter.
+            float depth = max(max(4.0 * U.overlayParams.z, U.rimParams.w),
+                              lsdf_outline_mm(U, cellTex, p));
+            {
                 // Clip to the region PRISM (its lateral wall is the face outline), the
                 // ray box, and the RAW part surface let out by a third of a voxel —
                 // never `lsdf_part_clip`'s hold, which is what ate it. Measured on his
@@ -1061,7 +1048,8 @@ static LSDFHit lsdf_march(constant LSDFUniforms& U,
                 // so a prism deeper than the plate can no longer draw a lip there.
                 float dPartRaw = dPart - delta
                                - 0.3 * max(U.sdfSpacing.x, max(U.sdfSpacing.y, U.sdfSpacing.z));
-                Fsolid = min(Fsolid, max(max(dBox, regionTex.sample(samp, stc).b), dPartRaw));
+                Fsolid = min(Fsolid, max(max(dOutV - depth, dBox),
+                                         max(regionTex.sample(samp, stc).b, dPartRaw)));
             }
         }
         // ★★★ DOUBLED'S SOLID CELLS RENDER **SOLID** (maintainer, 2026-08-24

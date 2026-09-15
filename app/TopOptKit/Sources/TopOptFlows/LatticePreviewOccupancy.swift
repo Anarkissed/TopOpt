@@ -212,9 +212,13 @@ public enum LatticePreviewOccupancy {
         // reports — so activation and the march's tiling cannot disagree about where a
         // cell starts. It is at most one cell, and the extra cell below covers it.
         let gridOrigin = occ.origin - originShiftMM
+        // ★ The extent grows by the shift, so a shift larger than two cells (the
+        // octree's anchor search moves the grid by up to one BASE cell on a texel
+        // pitch several times finer) still covers the occupancy's far side.
         let extent = SIMD3<Float>(Float(occ.nx - 1) * occ.spacing.x,
                                   Float(occ.ny - 1) * occ.spacing.y,
                                   Float(occ.nz - 1) * occ.spacing.z)
+                   + simd_max(originShiftMM, SIMD3<Float>(repeating: 0))
         let ncx = Swift.max(1, Int(ceil(extent.x / cell)) + 2)
         let ncy = Swift.max(1, Int(ceil(extent.y / cell)) + 2)
         let ncz = Swift.max(1, Int(ceil(extent.z / cell)) + 2)
@@ -563,6 +567,10 @@ public struct LatticeCellField: Sendable {
     /// outline distance is under this OR the finest cell there is cut by the
     /// outline, always at least one bead. Empty ⇒ no solid outline.
     public var solidDepthMM: [Float] = []
+    /// ★ THE SOLID OUTLINE'S WIDTH (mm, octree only): everything within it of the
+    /// face outline is solid, cells stand beyond it, and the shader draws its inner
+    /// face as the outline offset by exactly this. 0 ⇒ none.
+    public var solidBandMM: Double = 0
 }
 
 extension LatticePreviewOccupancy {

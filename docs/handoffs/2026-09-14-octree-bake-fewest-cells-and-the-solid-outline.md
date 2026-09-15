@@ -224,3 +224,53 @@ Subset after the change: `LatticeGradeToSolidBandTests` 7/7, `UnifiedShadingTest
 11/11 (shader compiles), `LatticeCurvedOutlineBandProbe.testTheSolidTerminusIsARingNotADottedLine`
 100 % / 95 %, `LatticePerVoxelWidthTests`, `LatticeSolidFillTests`,
 `LatticeSteppedPhaseTests`, `LatticeSteppedGradeProbe` pass. Installed 18:21.
+
+## 8. 2026-09-15 evening: "all three persist", read off the DIAG, and the anchor
+
+His 6:25–6:28 PM screenshots, band 0 (the DIAG line for that bake: `kept=[12.00=32
+10.31=106 6.00=222 5.16=232 2.58=10024 2.00=3915] band=0.0`). What §7 fixed was
+reasoned from the picture; this round was measured first:
+
+**Quilted large cells (note 3) were the shader's own per-cell cut test**, not the
+dressing. `lsdf_march` sampled the voxel outline distance at a KEPT cell's four in-plane
+corners and, where a corner sat a hair inside the outline (the bake let cells touch it
+within a bead), drew the whole 6 or 12 mm cell solid in the region tint — the isolated
+tinted X cells along the curve and the column at the base's right end. Removed: the bake
+decides what is solid (`solidDepthMM`), the shader only draws it.
+
+**The steps (note 1) were the cut texels' own boxes.** The solid was drawn as a test
+(`if (dOutV < depth) Fsolid = …prism…`), so the march hit whichever texel face it entered.
+Now: a **solid band of one width** `W = max(2 beads, trim + ½ voxel)` (1.18 mm on this
+part) — the bake keeps every cell corner `W` clear of the outline (`solidBandMM`, in
+`LatticeCellField.solidBandMM`, uploaded as `rimParams.w`), and the shader draws the band
+as a field, `max(dOutV − depth, prism, raw part)`, so its inner face is the outline offset
+by `depth` (the band, a cut cell's full depth, or the grade's bleed) — smooth, and on top
+of the cut texels.
+
+**"Look how far the 12 mm cells could have gone" (his 6:28 PM drawing).** Base slots sit
+on a grid anchored at the voxel grid's corner. Along the base's bottom edge and the
+slanted edge the last row that fit left an 8–11 mm strip of 6 and 2 mm cells where a 12 mm
+row fit a few millimetres lower. **The in-plane anchor is now searched** within one base
+cell (eighths along every in-plane axis of the ladders, 64 candidates here) for the
+offset that fits the most base-cell VOLUME whole, with the next rung's children breaking
+ties (so an anchor leaving one 4 mm remainder beats one leaving two 2 mm slivers of
+solid). The outline distance is rasterised at 0.5 mm per region for the search only; the
+bake keeps the exact polygon. `cellField`'s extent grows by the shift so the far side
+stays covered. On his stand at band 0 (probe, since deleted): anchor (6.0, 0, 6.0) mm —
+**12 mm: 32 → 43 whole cells; 10.31 mm: 106 → 120; 6 mm: 222 → 104; 2 mm: 3915 → 3339;
+cut 6003 → 8065** (the band `W` cuts what used to touch the outline). Cost on the Mac,
+Debug: raster 3.1 s (1 mm step; 0.5 mm cost 10 s), search 0.24 s (two passes: base slots
+for all 64, children for the ties), whole bake 20.5 s against 18.3 s before. Base-slot failures
+are now in the DIAG: `why=[r0/kept=43 r0/occupancy=19 r0/outline=85 r1/kept=120
+r1/occupancy=163 r1/outline=169]` — the 19 and 163 are slots that fit the outline but not
+the WALL (face 2 is 8.6–12.0 mm thick; face 15's region is 11 mm on a 10.0 mm wall), which
+is the other reason 12 mm cells stop short along the arm; that is the CAD, not the bake.
+
+**Only the finest rung quilts** (note 3's rule): the band's thickening toward the quilt is
+applied to finest-rung texels only (`isFinest`); coarser cells in the band keep their own
+density, the solid's bleed still applies to every band texel.
+
+Tests: `LatticeGradeToSolidBandTests` (7, now passing `solidBandMM: bead` so the fixture's
+geometry holds; the 60 mm slab's outline moved in to 52.9 mm because the anchor fits
+nine 6 mm cells into 55 mm exactly), `LatticeSolidFillTests` source pin updated to the
+field form.

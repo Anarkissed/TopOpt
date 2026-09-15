@@ -2351,6 +2351,13 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
             // goes, solid for the rest). `octreeBake` false is the revert switch.
             if Self.octreeBake, let finest = stated.min(), finest > 0 {
                 var st = LatticePreviewOccupancy.OctreeBakeStats()
+                // ★ THE SOLID OUTLINE'S WIDTH: two beads at least, and never less than
+                // the march's own trim plus half a voxel, so the struts of the cells
+                // beyond it (clipped by the trimmed, voxel-sampled part) always end
+                // inside the solid rather than a hair short of it.
+                let voxelMM = Double(max(scene.occupancy.spacing.x, max(scene.occupancy.spacing.y, scene.occupancy.spacing.z)))
+                let trimMM = min(max(0.35 * voxelMM, 0.10), 0.35)
+                let solidBandMM = max(2 * lineWidthMM, trimMM + 0.5 * voxelMM)
                 if let o = LatticePreviewOccupancy.octreeCellField(
                     occupancy: scene.occupancy, demand: scene.drawnDemand ?? scene.demand,
                     regions: scene.regions, cellMM: steppedCellMM,
@@ -2358,15 +2365,18 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
                     realFloorMM: Self.printableFloorBeads * lineWidthMM,
                     shapeFitBandMM: params.shapeFitBandMM,
                     shapeFit: steppedShapeFit,
+                    solidBandMM: solidBandMM,
                     densityLo: params.densitySpan.lo, densityHi: params.densitySpan.hi,
                     densityGamma: params.gamma, latticeID: params.latticeID,
                     stats: &st) {
                     baked = o
                     let kept = st.slotsKept.keys.sorted(by: >)
                         .map { String(format: "%.2f=%d", $0, st.slotsKept[$0]!) }.joined(separator: " ")
+                    let why = st.why.keys.sorted().map { "\($0)=\(st.why[$0]!)" }.joined(separator: " ")
                     NSLog("DIAG octree pitch=\(String(format: "%.2f", st.pitchMM)) kept=[\(kept)] cut=\(st.slotsCut) "
                           + "texels=\(st.texelsPainted) band=\(params.shapeFitBandMM) floor=\(Self.printableFloorBeads * lineWidthMM) "
-                          + "drawnHi=\(o.drawnDensityHi) t=\(String(format: "%.2f", st.seconds))s")
+                          + "solidBand=\(String(format: "%.2f", solidBandMM)) anchor=\(String(format: "(%.1f,%.1f,%.1f) in %.1fs", st.anchorShiftMM.x, st.anchorShiftMM.y, st.anchorShiftMM.z, st.anchorSeconds)) drawnHi=\(o.drawnDensityHi) "
+                          + "why=[\(why)] t=\(String(format: "%.2f", st.seconds))s")
                 }
             }
         }
@@ -3211,8 +3221,9 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
             debugParams: SIMD4(Float(debugShadeMode), Float(debugMinStepMM), 0, 0),
             // ★ .y IS NOW A FRACTION OF THE LOCAL CELL, not millimetres — see
             // `solidOutlineFraction`. The shader multiplies it by `LC.S`.
+            // ★ .w IS THE SOLID OUTLINE'S WIDTH in mm (octree bake; 0 otherwise).
             rimParams: SIMD4(Float(dressingBandMM), Float(solidOutlineFraction),
-                             doubledSolidCellsArmed ? 1 : 0, 0),
+                             doubledSolidCellsArmed ? 1 : 0, Float(cellField?.solidBandMM ?? 0)),
             organicRadius: {
                 let reach = Float(scene?.organicBandMM ?? 0)
                 // never past 90 % of the reach: beyond it the clamp would lie
