@@ -374,6 +374,14 @@ public struct LatticeSDFScene {
     /// EMPTY (`nil`) when no include region is declared: the clip is then inert,
     /// which is the settings page's sample block.
     public let regionSDF: LatticeVoxelGrid?
+    /// In-plane distance in from the nearest face outline, per voxel (mm; < 0
+    /// outside, 1e3 where no face region holds the voxel). The `g` channel of the
+    /// region texture; the shader's solid outline reads it.
+    public let outlineSDF: LatticeVoxelGrid?
+    /// The region prism's own signed distance, WITHOUT the part or skin terms —
+    /// the solid outline is clipped by this (its lateral wall IS the face outline),
+    /// never by the voxel-eroded part clip that swallowed it.
+    public let prismSDF: LatticeVoxelGrid?
     /// The finish's own thickness (mm) — `LatticeBoundaryTreatment.faceSkinMM`. Stored
     /// because the DRESSING BAND must be a physical width, not a fraction of whatever
     /// cell happens to be local. See `rimParams`.
@@ -690,6 +698,8 @@ public struct LatticeSDFScene {
             // What remains is the region itself, and the finish's skin.
             let partSDFValues = self.partSDF.values
             var f = solid
+            var o = solid
+            var q = solid
             var i = 0
             for k in 0..<solid.nz {
                 for j in 0..<solid.ny {
@@ -706,6 +716,10 @@ public struct LatticeSDFScene {
                         // in that band. That surviving band IS the solid wall.
                         // ★ the ERODED list: the band the shell keeps and draws solid
                         let region = LatticeRegionMask.signedDistance(p, regions: wallRegions)
+                        q.values[i] = Float(Swift.max(-1e3, Swift.min(1e3, region)))
+                        o.values[i] = region < 3.0
+                            ? Float(Swift.min(1e3, LatticeRegionMask.outlineDistance(p, regions: wallRegions)))
+                            : 1e3
                         // ★ AND ONLY WHEN THERE IS A SKIN — the finish's own number, 0
                         // for every finish but `covered`.
                         //
@@ -743,8 +757,12 @@ public struct LatticeSDFScene {
                 }
             }
             self.regionSDF = f
+            self.outlineSDF = o
+            self.prismSDF = q
         } else {
             self.regionSDF = nil
+            self.outlineSDF = nil
+            self.prismSDF = nil
         }
         tRegionField = Date().timeIntervalSince(sceneT0) - tOccupancy
         // ★ A STATED PER-REGION DENSITY OUTRANKS THE STRESS FIELD. It is the
@@ -1982,7 +2000,7 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
         // local camera explicitly.)
         uploadSegments(scene.preview.segments)
         sdfTex = makeVolumeTexture(scene.partSDF)
-        regionTex = scene.regionSDF.flatMap { makeVolumeTexture($0) }
+        regionTex = scene.regionSDF.flatMap { r in makeRegionTexture(r, outline: scene.outlineSDF, prism: scene.prismSDF) }
         organicTex = scene.organicField.flatMap { d in
             scene.organicSurfaceField.map { makeCentrelineTexture(d, surface: $0) } ?? makeVolumeTexture(d)
         }
@@ -2033,6 +2051,14 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
     static var floorTestAtCeiling: Bool {
         ProcessInfo.processInfo.environment["TOPOPT_LATTICE_FLOOR_AT_HI"] == "1"
     }
+
+    /// ★ THE REAL PRINTABLE FLOOR is a few beads of cell (his 2026-09-14: "~1.8 mm,
+    /// the one that will be quilted automatically" at a 0.45 mm bead). The edge of
+    /// every shape-graded lattice goes down to it; the density-bound floor below is
+    /// what the interior ladder still respects.
+    static let printableFloorBeads: Double = 4.0
+    /// The octree bake (2026-09-14); false falls back to the per-texel stepped bake.
+    static var octreeBake: Bool = true
 
     private func steppedFinestPrintableCellMM(finest: Double) -> Double {
         guard finest > 0 else { return 0 }
@@ -2302,6 +2328,7 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
                     // The finest cell that still prints a bead-wide strut — the halving
                     // stops here rather than at the edge, so the rim is buildable.
                     finestCellMM: steppedFinestPrintableCellMM(finest: finest),
+                    realFloorMM: Self.printableFloorBeads * lineWidthMM,
                     shapeFitBandMM: params.shapeFitBandMM,
                     // ★ THE STRUT MUST STAY ONE BEAD WIDE AS THE CELL SHRINKS, so the
                     // bake needs the printability law and the band it may move inside.
@@ -2313,6 +2340,29 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
                     shapeFit: steppedShapeFit,
                     dyadicSteps: steppedDyadicSteps,
                     cellIsUserStated: steppedCellStated)
+            }
+            // ★★★ THE OCTREE BAKE replaces the per-coarse-texel decision (his 2026-09-14
+            // rules: fewest cells, largest that fit, smallest only where nothing larger
+            // goes, solid for the rest). `octreeBake` false is the revert switch.
+            if Self.octreeBake, let finest = stated.min(), finest > 0 {
+                var st = LatticePreviewOccupancy.OctreeBakeStats()
+                if let o = LatticePreviewOccupancy.octreeCellField(
+                    occupancy: scene.occupancy, demand: scene.drawnDemand ?? scene.demand,
+                    regions: scene.regions, cellMM: steppedCellMM,
+                    lineWidthMM: lineWidthMM,
+                    realFloorMM: Self.printableFloorBeads * lineWidthMM,
+                    shapeFitBandMM: params.shapeFitBandMM,
+                    shapeFit: steppedShapeFit,
+                    densityLo: params.densitySpan.lo, densityHi: params.densitySpan.hi,
+                    densityGamma: params.gamma, latticeID: params.latticeID,
+                    stats: &st) {
+                    baked = o
+                    let kept = st.slotsKept.keys.sorted(by: >)
+                        .map { String(format: "%.2f=%d", $0, st.slotsKept[$0]!) }.joined(separator: " ")
+                    NSLog("DIAG octree pitch=\(String(format: "%.2f", st.pitchMM)) kept=[\(kept)] cut=\(st.slotsCut) "
+                          + "texels=\(st.texelsPainted) band=\(params.shapeFitBandMM) floor=\(Self.printableFloorBeads * lineWidthMM) "
+                          + "drawnHi=\(o.drawnDensityHi) t=\(String(format: "%.2f", st.seconds))s")
+                }
             }
         }
         // ★ THE BAKE, SAID OUT LOUD. Every "no grading" report so far has been a
@@ -2829,7 +2879,8 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
         var halfs = [UInt16](repeating: 0, count: grid.values.count * 4)
         for n in 0..<grid.values.count {
             halfs[4 * n] = float32to16(grid.values[n])
-            halfs[4 * n + 1] = float32to16(f.level[n])
+            halfs[4 * n + 1] = float32to16(hasStepped && f.solidDepthMM.count == grid.values.count
+                                            ? f.solidDepthMM[n] : f.level[n])
             halfs[4 * n + 2] = hasStepped ? float32to16(f.steppedCellMM[n]) : 0
             // ★ a = the owning region's tiling phase, `axis + fraction` — see
             // `LatticeCellField.steppedPhase`. 0 is "no shift", the old behaviour.
@@ -2887,6 +2938,34 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
         return tex
     }
 
+    /// The region texture: r = region signed distance (the clip), g = in-plane
+    /// distance in from the face outline (the solid outline's own measure).
+    private func makeRegionTexture(_ grid: LatticeVoxelGrid, outline: LatticeVoxelGrid?, prism: LatticeVoxelGrid?) -> MTLTexture? {
+        let d = MTLTextureDescriptor()
+        d.textureType = .type3D
+        d.pixelFormat = .rgba16Float
+        d.width = grid.nx; d.height = grid.ny; d.depth = grid.nz
+        d.usage = [.shaderRead]
+        d.storageMode = .shared
+        guard let tex = device.makeTexture(descriptor: d) else { return nil }
+        let hasOutline = outline?.values.count == grid.values.count
+        let hasPrism = prism?.values.count == grid.values.count
+        var halfs = [UInt16](repeating: 0, count: grid.values.count * 4)
+        for (n, v) in grid.values.enumerated() {
+            halfs[4 * n] = float32to16(v)
+            halfs[4 * n + 1] = float32to16(hasOutline ? outline!.values[n] : 1e3)
+            halfs[4 * n + 2] = float32to16(hasPrism ? prism!.values[n] : v)
+            halfs[4 * n + 3] = 0
+        }
+        halfs.withUnsafeBytes { raw in
+            tex.replace(region: MTLRegionMake3D(0, 0, 0, grid.nx, grid.ny, grid.nz),
+                        mipmapLevel: 0, slice: 0,
+                        withBytes: raw.baseAddress!,
+                        bytesPerRow: grid.nx * 8,
+                        bytesPerImage: grid.nx * grid.ny * 8)
+        }
+        return tex
+    }
     private func makeTintTexture(_ rgba: [UInt8], like grid: LatticeVoxelGrid) -> MTLTexture? {
         guard rgba.count == grid.count * 4 else { return nil }
         let d = MTLTextureDescriptor()
@@ -3249,7 +3328,12 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
         guard g.nx > 0, g.ny > 0, g.nz > 0,
               g.spacing.x > 0, g.spacing.y > 0, g.spacing.z > 0 else { return 0 }
         let r = (p - g.origin) / g.spacing
-        let i = Int(r.x.rounded()), j = Int(r.y.rounded()), k = Int(r.z.rounded())
+        // Stepped texels span [i, i+1)·pitch (the shader reads `floor`); the dyadic
+        // ladder's are centred.
+        let stepped = f.steppedCellMM.count == g.values.count
+        let i = Int(stepped ? r.x.rounded(.down) : r.x.rounded())
+        let j = Int(stepped ? r.y.rounded(.down) : r.y.rounded())
+        let k = Int(stepped ? r.z.rounded(.down) : r.z.rounded())
         guard i >= 0, j >= 0, k >= 0, i < g.nx, j < g.ny, k < g.nz else { return 0 }
 
         /// The cell size recorded at one index — STEPPED carries it outright, the ladder
@@ -3331,7 +3415,10 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
         guard g.nx > 0, g.ny > 0, g.nz > 0,
               g.spacing.x > 0, g.spacing.y > 0, g.spacing.z > 0 else { return -1 }
         let r = (p - g.origin) / g.spacing
-        let i = Int(r.x.rounded()), j = Int(r.y.rounded()), k = Int(r.z.rounded())
+        let stepped = f.steppedCellMM.count == g.values.count
+        let i = Int(stepped ? r.x.rounded(.down) : r.x.rounded())
+        let j = Int(stepped ? r.y.rounded(.down) : r.y.rounded())
+        let k = Int(stepped ? r.z.rounded(.down) : r.z.rounded())
         guard i >= 0, j >= 0, k >= 0, i < g.nx, j < g.ny, k < g.nz else { return -1 }
         for radius in 0...1 {
             for dk in -radius...radius {
@@ -3434,13 +3521,13 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
         if let t = neutralRegionTex { return t }
         let d = MTLTextureDescriptor()
         d.textureType = .type3D
-        d.pixelFormat = .r32Float
+        d.pixelFormat = .rgba32Float
         d.width = 1; d.height = 1; d.depth = 1
         d.usage = [.shaderRead]
         guard let t = device.makeTexture(descriptor: d) else { return nil }
-        var v: Float = -1e9
+        var v: SIMD4<Float> = SIMD4(-1e9, 1e3, -1e9, 0)
         t.replace(region: MTLRegionMake3D(0, 0, 0, 1, 1, 1), mipmapLevel: 0, slice: 0,
-                  withBytes: &v, bytesPerRow: 4, bytesPerImage: 4)
+                  withBytes: &v, bytesPerRow: 16, bytesPerImage: 16)
         neutralRegionTex = t
         return t
     }

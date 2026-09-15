@@ -71,6 +71,17 @@ public struct WorkspacePlaceholder: View {
     /// state lives on the project, so closing it never discards a choice.
     @State private var showBuildOrientation = false
     @State private var showStrutPreview = false
+    // ★ LATTICE ONLY (his 2026-09-14 ask: "show *only* the lattice by holding the
+    // lattice preview button … make it very obvious that it has worked: show a large
+    // animation and make the lattice preview button a different colour when it is
+    // set"). Holding the cube toggles it; the body drops to alpha 0 so nothing but
+    // the struts and the solid outline draw; the cube turns orange while it is set,
+    // and a large badge flashes on the viewport either way.
+    @State private var latticeOnly = false
+    @State private var latticeOnlyFlash: String? = nil
+    /// When a hold last completed: the finger's release then also lands as the
+    /// button's tap, and that tap must not undo what the hold just set.
+    @State private var viewModeHoldFiredAt = Date.distantPast
     /// ★ WHICH LEVEL THE LATTICE KEY IS ON, and the reading taken by tapping a
     /// strut (maintainer, 2026-08-19). Drilling in also HIDES the primitives and
     /// handles — he asked for the part unobstructed while reading the scale, and a
@@ -1260,6 +1271,7 @@ public struct WorkspacePlaceholder: View {
                 if viewerMesh != nil, visible.wireframe, !visible.surfaceEditing {
                     viewModeToggles
                 }
+                latticeOnlyBadge
                 // ★ THE VON MISES SCALE, ON THE RIGHT EDGE (maintainer,
                 // 2026-08-18: "Please also add a legend on the right edge").
                 // Only while the plot is actually up — a key to nothing is
@@ -4545,6 +4557,7 @@ public struct WorkspacePlaceholder: View {
     /// this value is the cheap, reversible half, and it is worth seeing on the
     /// device before writing the expensive half.
     private var latticePreviewBodyAlpha: Float {
+        if latticeOnly, showStrutPreview { return 0 }   // ★ lattice only: the body goes
         // ★★★ THE BODY MAY ONLY BE HIDDEN WHERE A LATTICE IS ACTUALLY DRAWN
         // (maintainer, 2026-08-20: his new `M2 verticalStand THICK` opened to a shadow
         // on the stage floor and NOTHING drawn — "rotating doesn't help, so it isn't
@@ -4583,7 +4596,7 @@ public struct WorkspacePlaceholder: View {
         //
         // The rule itself lives in `LatticePreviewBodyAlpha` so it can be tested; this
         // property is now only the two inputs it is asked for.
-        LatticePreviewBodyAlpha.value(
+        return LatticePreviewBodyAlpha.value(
             latticeLayerDrawn: latticeLayerIsDrawn,
             hasIncludeRegion: project.latticeJobRegions().regions
                 .contains { $0.role == .include })
@@ -6985,8 +6998,22 @@ public struct WorkspacePlaceholder: View {
             // nothing to preview with lattice mode off.
             if visible.latticeControls, project.lattice.enabled {
                 viewModeButton("cube.transparent", label: "Lattice preview",
-                               on: showStrutPreview) {
-                    if showStrutPreview {
+                               on: showStrutPreview,
+                               tint: latticeOnly && showStrutPreview ? DS.Color.warning : nil,
+                               // ★ HOLD 3 s = lattice only; let go and it stays. A tap
+                               // then goes back to the plain preview (his 2026-09-14).
+                               onLongPress: {
+                                   guard !latticeOnly else { return }
+                                   latticeOnly = true
+                                   if !showStrutPreview {
+                                       showStrutPreview = true
+                                       if strutScene == nil { buildStrutScene() }
+                                   }
+                                   flashLatticeOnly("LATTICE ONLY")
+                               }) {
+                    if latticeOnly {
+                        latticeOnly = false            // back to the lattice preview
+                    } else if showStrutPreview {
                         showStrutPreview = false
                     } else {
                         // ★★ THE ACTUAL LATTICE-VIEW BUTTON (maintainer, 2026-08-19:
@@ -7041,8 +7068,14 @@ public struct WorkspacePlaceholder: View {
 
     private func viewModeButton(_ icon: String, label: String, on: Bool,
                                 enabled: Bool = true,
+                                tint: RGBA? = nil,
+                                onLongPress: (() -> Void)? = nil,
                                 action: @escaping () -> Void) -> some View {
-        Button(action: action) {
+        Button(action: {
+            // ★ The release that ends a 3 s hold is also delivered as a tap; swallow it.
+            if Date().timeIntervalSince(viewModeHoldFiredAt) < 1.5 { return }
+            action()
+        }) {
             Image(systemName: icon)
                 .font(.system(size: 15, weight: .semibold))
                 .foregroundStyle((on ? DS.Color.textPrimary
@@ -7051,17 +7084,60 @@ public struct WorkspacePlaceholder: View {
                 .frame(width: 40, height: 40)
                 .background(
                     RoundedRectangle(cornerRadius: DS.Radius.pill, style: .continuous)
-                        .fill(on ? DS.Color.accentDeep.opacity(0.55).color
-                                 : DS.Surface.bar.color)
+                        .fill(tint != nil ? tint!.opacity(0.85).color
+                              : (on ? DS.Color.accentDeep.opacity(0.55).color
+                                    : DS.Surface.bar.color))
                         .overlay(RoundedRectangle(cornerRadius: DS.Radius.pill,
                                                   style: .continuous)
-                            .strokeBorder(DS.Color.strokePanel.color, lineWidth: 1))
+                            .strokeBorder((tint ?? DS.Color.strokePanel).color,
+                                          lineWidth: tint != nil ? 2 : 1))
                 )
         }
         .buttonStyle(.plain)
         .disabled(!enabled)
+        // ★ A HOLD is a second action on the same button (lattice only). The long
+        // press runs alongside the tap so a plain tap still toggles the preview.
+        .simultaneousGesture(
+            LongPressGesture(minimumDuration: 3.0)
+                .onEnded { _ in viewModeHoldFiredAt = Date(); onLongPress?() },
+            including: onLongPress == nil ? .none : .all)
         .accessibilityLabel(label)
         .accessibilityIdentifier("view-mode-\(label.lowercased())")
+    }
+
+    /// Flash a large badge over the viewport for a moment (lattice only on/off).
+    private func flashLatticeOnly(_ text: String) {
+        withAnimation(.spring(response: 0.35, dampingFraction: 0.65)) {
+            latticeOnlyFlash = text
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.4) {
+            withAnimation(.easeOut(duration: 0.35)) {
+                if latticeOnlyFlash == text { latticeOnlyFlash = nil }
+            }
+        }
+    }
+
+    @ViewBuilder private var latticeOnlyBadge: some View {
+        if let text = latticeOnlyFlash {
+            VStack(spacing: 14) {
+                Image(systemName: latticeOnly ? "cube.transparent.fill" : "cube.fill")
+                    .font(.system(size: 72, weight: .bold))
+                Text(text)
+                    .font(.system(size: 34, weight: .heavy, design: .rounded))
+                    .tracking(2)
+            }
+            .foregroundStyle(Color.white)
+            .padding(.horizontal, 44)
+            .padding(.vertical, 36)
+            .background(
+                RoundedRectangle(cornerRadius: 28, style: .continuous)
+                    .fill((latticeOnly ? DS.Color.warning : DS.Color.accentDeep).opacity(0.92).color)
+                    .shadow(color: .black.opacity(0.5), radius: 40, y: 12))
+            .transition(.scale(scale: 0.6).combined(with: .opacity))
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+            .allowsHitTesting(false)
+            .accessibilityIdentifier("lattice-only-badge")
+        }
     }
 
     // MARK: ★ §6 — THE SURFACE STAGE'S TOOL PANEL

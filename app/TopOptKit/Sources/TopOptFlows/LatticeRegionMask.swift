@@ -116,6 +116,32 @@ public enum LatticeRegionMask {
     /// `contains` describes, as a distance so it can be baked into a field and
     /// sphere-traced. Extrusion of the in-plane shape along the depth axis:
     /// `length(max(q,0)) + min(max(q),0)` with q = (in-plane, along-depth).
+    /// ★ HOW FAR IN FROM A FACE'S OUTLINE a point sits (mm, negative outside), for
+    /// the nearest include face region whose slab holds the point; 1e3 where no such
+    /// region exists. The stepped preview's SOLID OUTLINE is drawn from this per voxel
+    /// (his 2026-09-14 rule: "a solid outline that wraps the lattice in the shape of
+    /// the face-prism's outline"), against the raw part surface — never through the
+    /// strut clip's surface hold, which is what swallowed every "solid" cell before.
+    public static func outlineDistance(_ p: SIMD3<Double>,
+                                       regions: [LatticeRegionSpec]) -> Double {
+        var best = 1e3
+        for region in regions where region.role == .include && region.kind == .face
+            && !region.outlineLoops.isEmpty {
+            let n = unit(region.normal)
+            guard simd_length(n) > 0.5, region.depthMM > 0 else { continue }
+            let d = p - region.origin
+            let s = simd_dot(d, n)
+            let along = abs(s - 0.5 * region.depthMM) - 0.5 * region.depthMM
+            guard along <= 0 else { continue }
+            let (u, v) = basis(n)
+            let uv = SIMD2<Double>(simd_dot(d, u), simd_dot(d, v))
+            let inside = -(LatticeFaceOutline.signedDistance(uv, loops: region.outlineLoops)
+                           - region.inPlaneOffsetMM)
+            best = Swift.min(best, inside)
+        }
+        return best
+    }
+
     public static func signedDistance(_ p: SIMD3<Double>,
                                       region: LatticeRegionSpec) -> Double {
         let big = 1e9

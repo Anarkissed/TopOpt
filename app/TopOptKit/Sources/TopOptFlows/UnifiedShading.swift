@@ -315,10 +315,16 @@ struct LCell {
     // cell VERBATIM, and then `S` is that size and `L`/`blk` are meaningless. See
     // `LatticeCellField.steppedCellMM` for why a dyadic level cannot carry it.
     float  stepped;
+    int    axis;   // STEPPED: the face normal's axis (0/1/2), -1 when unknown
     // ★★★ THE TILING'S OWN ORIGIN for this cell, in BASE-CELL units, so two regions on
     // one axis can each put their declared face on a cell boundary. Zero on every other
     // path, which is the global grid origin exactly.
     float3 phase;
+    // ★ STEPPED: the block index of the cell the READ TEXEL belongs to (the cell
+    // holding the texel's middle). When `blk` differs from it the point lies in a
+    // texel that straddles two cells, and the frame was re-read from the texel on
+    // the point's side — see `lsdf_cell_frame_at`.
+    float3 home;
     // ★★★ THE DEMAND AT THE TEXEL `S` WAS READ FROM, and the fix for the holes
     // (2026-08-26). See `lsdf_march`'s prefetch: the 27-neighbour cache resolves
     // EVERY entry — self included — by the covering block's CENTRE base cell, while
@@ -351,6 +357,7 @@ static LCell lsdf_cell_frame_at(constant LSDFUniforms& U, texture3d<float> cellT
     }
     LCell o;
     o.stepped = 0.0;
+    o.axis = -1;
     o.act = -1.0;
     // ★ STEPPED TAKES THE SIZE STRAIGHT OUT OF THE TEXTURE. `b` is the covering cell's
     // size in mm, 0 on every other algorithm — so the dyadic path below is untouched
@@ -359,52 +366,55 @@ static LCell lsdf_cell_frame_at(constant LSDFUniforms& U, texture3d<float> cellT
         float4 cs = cellTex.read(uint3(bi), 0);
         float sMM = cs.b;
         if (sMM > 0.0) {
-            o.stepped = sMM;
-            o.act = cs.r;
-            o.S = sMM;
-            o.m = sMM / max(S0, 1e-6);
-            o.L = 0;
-            // ★★★ THE OWNING REGION'S TILING PHASE, unpacked from `axis + fraction`
-            // (`LatticeCellField.steppedPhase`). The struts are cut flush at the region's
-            // cap planes; this is what puts those planes ON a cell boundary instead of
-            // through the middle of a cell, where every strut is sliced at its fattest and
-            // the section reads as a quilt. In BASE cells, because everything below is.
-            float packed = max(0.0, cs.a);
-            int paxis = int(floor(packed + 1e-4));
-            float pfrac = packed - float(paxis);
-            o.phase = float3(0.0);
-            if (paxis >= 0 && paxis <= 2) { o.phase[paxis] = pfrac * o.m; }
-            // ★★★ THE BLOCK INDEX, NOT ZERO. This was `float3(0.0)`, and the march
-            // caches its 3x3x3 neighbourhood on `baseCell = LC.blk`: a CONSTANT key
-            // means the cache is filled once and never refreshed, and every neighbour
-            // read `(baseCell + offset) * m` lands next to the grid ORIGIN instead of
-            // next to the ray. Stepped therefore drew whatever the corner of the volume
-            // happened to contain, everywhere.
-            //
-            // ★★★ AND IT IS `cb`, NOT `bi` — THE TWO ENCODINGS HAVE DIFFERENT PHASE
-            // (maintainer, 2026-08-22: "These are still floating boxes. There is
-            // nothing connecting them … there is empty space between them!").
-            //
-            // The dyadic path anchors a block to the base-cell GRID, so its block index
-            // is `floor(round(cb)/m)` and its centre is `blk*m + (m-1)/2`. Stepped does
-            // NOT: `lsdf_cell_q` tiles from the ORIGIN POINT by `sMM`, so its cell index
-            // is `floor(cb/m)`. Borrowing the dyadic `round(cb)` here put `blk` one cell
-            // over wherever `frac(cb) >= 0.5` — HALF of every axis, so only 0.5³ = 12.5%
-            // of the volume prefetched its OWN neighbourhood. The other 87.5% read a
-            // cell one step away: where that neighbour was inactive the march drew
-            // nothing at all, and the boundary between "right" and "wrong" is a regular
-            // half-cell lattice — which is exactly the grid of disconnected blocks with
-            // void between them that stepped has been rendering. `q` was always correct;
-            // only the block it was paired with was not.
-            o.blk = floor((cb - o.phase) / max(o.m, 1e-6));
-            o.q = float3(0.0);   // filled by the caller, from its own point
-            return o;
+            // ★★★ A TEXEL BELONGS TO THE CELL ITS MIDDLE IS IN, AND THE POINT MAY NOT
+            // BE (2026-09-14). The octree lays texels at the finest rung of ALL
+            // regions' ladders; a region whose cells are not multiples of that pitch
+            // (his back wall: 10.31 / 5.16 / 2.58 mm on a 2 mm grid) has cell
+            // boundaries inside texels. The frame is the texel's cell — the tiling's
+            // own origin and size, unpacked from `axis + fraction` — and if `cb` lies
+            // past that cell's boundary the texel on `cb`'s side is read instead: its
+            // middle is beyond the boundary, so its cell holds `cb` (every cell is at
+            // least a texel wide). One extra read, only at straddles.
+            float3 useBI = bi;
+            for (int pass = 0; pass < 2; pass++) {
+                float packed = max(0.0, cs.a);
+                int paxis = int(floor(packed + 1e-4));
+                float pfrac = packed - float(paxis);
+                float m = sMM / max(S0, 1e-6);
+                float3 phase = float3(0.0);
+                if (paxis >= 0 && paxis <= 2) { phase[paxis] = pfrac * m; }
+                float3 home = floor((useBI + 0.5 - phase) / max(m, 1e-6));
+                float3 blkP = floor((cb - phase) / max(m, 1e-6));
+                if (pass == 0 && any(blkP != home)) {
+                    float3 bi2 = useBI + sign(cb - (useBI + 0.5)) * float3(blkP != home);
+                    if (all(bi2 >= -0.5) && all(bi2 < dims - 0.5)) {
+                        float4 cs2 = cellTex.read(uint3(bi2), 0);
+                        if (cs2.b > 0.0) { cs = cs2; sMM = cs2.b; useBI = bi2; continue; }
+                    }
+                }
+                o.stepped = sMM;
+                o.act = cs.r;
+                o.S = sMM;
+                o.m = m;
+                o.L = 0;
+                o.axis = (paxis >= 0 && paxis <= 2) ? paxis : -1;
+                o.phase = phase;
+                o.home = home;
+                // ★★★ THE BLOCK INDEX IS `floor((cb - phase) / m)` — stepped tiles from
+                // the ORIGIN POINT by `sMM`, not from the base-cell grid, and it is
+                // `cb`, not `bi` (maintainer, 2026-08-22: "These are still floating
+                // boxes … there is empty space between them!").
+                o.blk = blkP;
+                o.q = float3(0.0);   // filled by the caller, from its own point
+                return o;
+            }
         }
     }
     o.L = int(lvl + 0.5);
     o.phase = float3(0.0);
     o.m = exp2(float(o.L));
     o.blk = floor(max(bi, float3(0.0)) / o.m);
+    o.home = o.blk;
     o.q = float3(0.0);          // filled by the caller, from its own point
     o.S = S0 * o.m;
     return o;
@@ -433,7 +443,7 @@ static LCell lsdf_cell_frame(constant LSDFUniforms& U, texture3d<float> cellTex,
                              float3 p) {
     float S0 = U.latticeOrigin.w;
     float3 cb = (p - U.latticeOrigin.xyz) / S0;
-    LCell o = lsdf_cell_frame_at(U, cellTex, round(cb), cb);
+    LCell o = lsdf_cell_frame_at(U, cellTex, U.rimParams.y > 0.0 ? floor(cb) : round(cb), cb);
     o.q = lsdf_cell_q(U, o, p);
     return o;
 }
@@ -547,7 +557,8 @@ inline float lsdf_part_clip(constant LSDFUniforms& U, texture3d<float> sdfTex,
 /// channel. Negative return = no answer (outside the grid).
 inline float lsdf_outline_mm(constant LSDFUniforms& U, texture3d<float> cellTex, float3 p) {
     float S0 = U.latticeOrigin.w;
-    float3 bi = round((p - U.latticeOrigin.xyz) / S0);
+    float3 cbo = (p - U.latticeOrigin.xyz) / S0;
+    float3 bi = U.rimParams.y > 0.0 ? floor(cbo) : round(cbo);   // stepped texels span [i, i+1)·S0
     float3 dims = U.gridDims.xyz;
     if (any(bi < -0.5) || any(bi >= dims - 0.5)) { return -1.0; }
     return cellTex.read(uint3(bi), 0).g;
@@ -601,8 +612,11 @@ static LSDFHit lsdf_march(constant LSDFUniforms& U,
     // the same cell reuse the cache.
     float3 cachedBase = float3(1e9);
     float cachedM = -1.0;
+    float3 cachedPhase = float3(1e9);
+    bool cachedCut = false;   // the stepped cell under p is cut by the face outline
     float3 cachedBI = float3(1e9);
     LCell LC; LC.q = float3(0.0); LC.blk = float3(0.0); LC.S = S0; LC.m = 1.0; LC.L = 0;
+    LC.stepped = 0.0; LC.phase = float3(0.0); LC.home = float3(0.0); LC.act = -1.0; LC.axis = -1;
     float rnCache[27];
     float rhoCache[27];
     bool anyActive = false;
@@ -631,9 +645,15 @@ static LSDFHit lsdf_march(constant LSDFUniforms& U,
         // and the LEVEL is re-read only when the base cell changes, because it
         // cannot change without it.
         float3 cb = (p - U.latticeOrigin.xyz) / S0;
-        float3 bi = round(cb);
+        // ★ STEPPED TEXELS SPAN [i, i+1)·S0 (the octree paints by extent, and the
+        // neighbour prefetch already reads `floor`); the dyadic ladder is centred.
+        float3 bi = U.rimParams.y > 0.0 ? floor(cb) : round(cb);
         if (any(bi != cachedBI)) {
             cachedBI = bi;
+            LC = lsdf_cell_frame_at(U, cellTex, bi, cb);
+        } else if (LC.stepped > 0.0
+                   && any(floor((cb - LC.phase) / max(LC.m, 1e-6)) != LC.home)) {
+            // Same texel, other side of a cell boundary inside it: re-read.
             LC = lsdf_cell_frame_at(U, cellTex, bi, cb);
         }
         // ★ THE TEXTURE READ CACHES ON THE BASE CELL; THE STEPPED BLOCK DOES NOT.
@@ -756,9 +776,28 @@ static LSDFHit lsdf_march(constant LSDFUniforms& U,
             }
         }
 
-        if (any(baseCell != cachedBase) || LC.m != cachedM) {
+        if (any(baseCell != cachedBase) || LC.m != cachedM || any(LC.phase != cachedPhase)) {
             cachedBase = baseCell;
             cachedM = LC.m;
+            cachedPhase = LC.phase;
+            // ★ IS THIS CELL CUT BY THE FACE OUTLINE? A cut finest cell goes solid —
+            // the solid outline that wraps the lattice (2026-09-14). Test the cell's
+            // four in-plane corners against the outline distance, at p's own depth.
+            cachedCut = false;
+            if (LC.stepped > 0.0 && LC.axis >= 0) {
+                float3 cellC = U.latticeOrigin.xyz + ((LC.blk + 0.5) * LC.m + LC.phase) * S0;
+                int a1 = (LC.axis + 1) % 3, a2 = (LC.axis + 2) % 3;
+                float bead = 2.0 * U.overlayParams.z;
+                for (int cx = -1; cx <= 1; cx += 2) {
+                    for (int cy = -1; cy <= 1; cy += 2) {
+                        float3 c = p;
+                        c[a1] = cellC[a1] + 0.5 * LC.S * float(cx);
+                        c[a2] = cellC[a2] + 0.5 * LC.S * float(cy);
+                        float3 sc = ((c - U.sdfOrigin.xyz) / U.sdfSpacing.xyz + 0.5) / sdfDims;
+                        if (regionTex.sample(samp, sc).g < bead) { cachedCut = true; }
+                    }
+                }
+            }
             anyActive = false;
             for (int oz = -1; oz <= 1; oz++) {
                 for (int oy = -1; oy <= 1; oy++) {
@@ -815,6 +854,19 @@ static LSDFHit lsdf_march(constant LSDFUniforms& U,
                                 : (int(max(0.0, rgb.g) + 0.5) == LC.L);
                             if (sameLattice) { v = rgb.r; }
                         }
+                        // ★★★ A NEIGHBOUR OF ANOTHER SIZE — OR NONE — STILL LEAVES THIS
+                        // CELL ITS OWN FACE (2026-09-14: "a BUNCH of [12 mm cells] are
+                        // split in half … NO CELLS SHOULD BE CUT INTO PARTS"). The
+                        // octet's canonical struts are those with their midpoint in
+                        // [0, S)³, so every +x/+y/+z FACE diagonal is owned by the
+                        // neighbour on that side. Skipping a neighbour that is a
+                        // different lattice skipped this cell's own face with it: a
+                        // 12 mm cell beside 6 mm cells lost three faces, and on the
+                        // wall whose normal runs −y every cell lost the face on the
+                        // plate itself. The face is drawn at THIS cell's density; the
+                        // finer cells on the other side draw theirs, and the rungs nest
+                        // so the two coincide where they share a strut.
+                        if (v < 0.0 && LC.stepped > 0.0 && LC.act >= 0.0) { v = LC.act; }
                         if (v >= 0.0) {
                             anyActive = true;
                             float rho = hasDemand
@@ -978,11 +1030,25 @@ static LSDFHit lsdf_march(constant LSDFUniforms& U,
         // Scaling by `LC.S` asks the question the band was always meant to ask — "does
         // this cell's own extent reach the outline" — in units that cannot collide with
         // the grid's resolution.
-        float outlineBand = U.rimParams.y * LC.S;
+        // ★★★ THE SOLID OUTLINE (2026-09-14). Solid wherever the voxel sits within
+        // the texel's solid depth of the face outline (one bead at least), or the
+        // stepped cell under p is cut by the outline — drawn against the RAW part
+        // and region surfaces, not through `lsdf_part_clip`'s hold: that hold is
+        // what turned every "solid" cell into a see-through strip.
         if (LC.stepped > 0.0 && U.rimParams.y > 0.0 && LC.S > 0.0) {
-            float dOutline = lsdf_outline_mm(U, cellTex, p);
-            if (dOutline >= 0.0) {
-                Fsolid = min(Fsolid, max(dClip, dOutline - outlineBand));
+            float dOutV = regionTex.sample(samp, stc).g;
+            float depth = max(2.0 * U.overlayParams.z, lsdf_outline_mm(U, cellTex, p));
+            if (cachedCut || dOutV < depth) {
+                // Clip to the region PRISM (its lateral wall is the face outline), the
+                // ray box, and the RAW part surface let out by a third of a voxel —
+                // never `lsdf_part_clip`'s hold, which is what ate it. Measured on his
+                // stand: the part SDF is at least 0.7 mm inside the outline at the
+                // outline (the plate widens below the face), so this costs the
+                // outline nothing; at the back face the SDF is 0.05–0.45 mm eroded,
+                // so a prism deeper than the plate can no longer draw a lip there.
+                float dPartRaw = dPart - delta
+                               - 0.3 * max(U.sdfSpacing.x, max(U.sdfSpacing.y, U.sdfSpacing.z));
+                Fsolid = min(Fsolid, max(max(dBox, regionTex.sample(samp, stc).b), dPartRaw));
             }
         }
         // ★★★ DOUBLED'S SOLID CELLS RENDER **SOLID** (maintainer, 2026-08-24

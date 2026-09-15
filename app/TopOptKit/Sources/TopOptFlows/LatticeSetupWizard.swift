@@ -1481,8 +1481,8 @@ public struct LatticeSetupWizard: View {
                 rebuild()
             }
             Text("How far in from the face's outline the cells step down and thicken "
-                 + "toward the solid ring, in millimetres — never less than the ring "
-                 + "plus one row of cells. 0 grades only where a cell will not fit.")
+                 + "toward the solid outline, in millimetres. 0 keeps the largest cells "
+                 + "that fit right up to the outline, and fills the rest with solid.")
                 .dsStyle(DS.TypeScale.caption2)
                 .foregroundStyle(DS.Color.textQuaternary.color)
                 .fixedSize(horizontal: false, vertical: true)
