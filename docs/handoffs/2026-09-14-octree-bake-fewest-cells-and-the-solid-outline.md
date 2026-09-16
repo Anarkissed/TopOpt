@@ -437,3 +437,14 @@ quilted cells" — it does (0–3 mm, 1.8 mm visible past the beam), and each st
 the solid should extend inwards to fill the empty area" — the beam already widens by half
 the excess over 15 (6.2 mm at 25), and the "empty area" beyond it is the quilt, now
 visible. If he wants the solid wider still, `bleed` in `octreeCellField` is one line.
+
+**19:13, "There should be some quilting here. There isn't. Stop measuring and look at
+the actual values from the app."** He was right that the CPU numbers were not the
+picture. The march reads per-cell density only when `shadeParams.y` (`hasDemand`) is
+set, and that flag came from `scene.demand != nil` — a stress/demand field. His project
+has no optimisation, so the flag was 0 and every strut drew at the one uniform density
+(`shadeParams.x`); the quilt the bake wrote never reached the screen on this project,
+at any band, in any build since the octree. Now the flag follows the FIELD: on whenever
+the cell field carries per-texel densities (`steppedCellMM` non-empty). Installed 19:15.
+Lesson for the file: a baked value that does not show is a rendering gate, and the
+gate to check first is the one that decides whether the shader reads the bake at all.

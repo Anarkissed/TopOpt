@@ -3085,7 +3085,14 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
         let cellOrigin = cellGrid?.origin ?? bmin
         let (lo, hi) = drawnDensitySpan
         let K = Float(max(1e-3, params.lattice.densityCoefficient))
-        let hasDemand: Float = scene?.demand != nil ? 1 : 0
+        // ★ THE MARCH READS PER-CELL DENSITY ONLY WHEN THIS IS SET — and it was set
+        // only by a stress/demand field. A stepped/octree field carries a density per
+        // TEXEL whatever the demand (the grade's quilt, the printability floor), and
+        // on a project with no optimisation the flag was 0, so every strut drew at
+        // the one uniform density and the quilt the bake had written never reached
+        // the screen (his 2026-09-16 19:13: "There should be some quilting here.
+        // There isn't."). The flag follows the field.
+        let hasDemand: Float = (scene?.demand != nil || cellField?.steppedCellMM.isEmpty == false) ? 1 : 0
         let sdfSp = scene?.partSDF.spacing ?? SIMD3<Float>(repeating: 1)
         let minSDFSpacing = min(sdfSp.x, min(sdfSp.y, sdfSp.z))
         // Indigo-FAMILY endpoints (same "amount of material" story as the proxy, bar P1),
