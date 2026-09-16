@@ -231,6 +231,14 @@ struct LSDFUniforms {
     // centreline channel's reach, z = the surface channel's band, w = the WETTED JOIN's
     // fillet as a multiple of the strut radius (0 = off). Same slot as Swift.
     float4 organicRadius;
+    // ★ THE SPAN THE COLOUR RAMP READS (xy = the STATED density span, z > 0.5 when
+    // set). The grade's raise toward the quilt is drawn over the WIDER drawn span
+    // (`gradeParams`), but colouring it by that span put every quilted cell at the
+    // ramp's deep end — a 60 % cell with half-millimetre windows rendered as a dark
+    // slab and read as a void (2026-09-16: "there is now no quilting happening …
+    // there is a void between the solid and the lattice"). Colour follows the
+    // stated span; the quilt shows as what it is, dense pale struts.
+    float4 colourSpan;
 };
 
 struct VOut { float4 pos [[position]]; float2 uv; };
@@ -1231,7 +1239,8 @@ static float3 lsdf_albedo(constant LSDFUniforms& U,
         }
         return solidHue;
     }
-    float rhoMin = U.gradeParams.x, rhoMax = U.gradeParams.y;
+    float rhoMin = U.colourSpan.z > 0.5 ? U.colourSpan.x : U.gradeParams.x;
+    float rhoMax = U.colourSpan.z > 0.5 ? U.colourSpan.y : U.gradeParams.y;
     float frac = clamp((hitRho - rhoMin) / max(1e-4, rhoMax - rhoMin), 0.0, 1.0);
     // ★★ HUE = WHAT THE STRUT IS; LIGHTNESS = HOW MUCH MATERIAL IS IN IT
     // (maintainer, 2026-08-19: "I thought they were tinted for different *types* of

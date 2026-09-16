@@ -144,6 +144,9 @@ struct LSDFUniforms {
     /// WETTED JOIN's fillet as a multiple of the strut radius (0 = off). The MSL twin
     /// declares the same slot.
     var organicRadius: SIMD4<Float> = .zero
+    /// xy = the STATED density span for the colour ramp, z = 1 when set. Appended
+    /// LAST on both sides — see the MSL struct's note.
+    var colourSpan: SIMD4<Float> = .zero
 }
 
 /// ★ A pre-baked organic field — the two channels a cached variant (a beam-lattice
@@ -2362,7 +2365,8 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
                 // inside the solid rather than a hair short of it.
                 let voxelMM = Double(max(scene.occupancy.spacing.x, max(scene.occupancy.spacing.y, scene.occupancy.spacing.z)))
                 let trimMM = min(max(0.35 * voxelMM, 0.10), 0.35)
-                let solidBandMM = max(2 * lineWidthMM, trimMM + 0.5 * voxelMM)
+                // Only when the shape grade is on: the outline is the grade's frame.
+                let solidBandMM = steppedShapeFit ? max(2 * lineWidthMM, trimMM + 0.5 * voxelMM) : 0
                 if let o = LatticePreviewOccupancy.octreeCellField(
                     occupancy: scene.occupancy, demand: scene.drawnDemand ?? scene.demand,
                     regions: scene.regions, cellMM: steppedCellMM,
@@ -3636,6 +3640,9 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
         u.clipFromModel = clipFromModel
         u.eyeFromModel = eyeFromModel
         u.eyeNormalBasis = eyeNormalBasis
+        // The colour ramp reads the STATED span; the grade's raise is drawn over the
+        // wider drawn span but must not colour the quilt as the ramp's deep end.
+        u.colourSpan = SIMD4(Float(params.densitySpan.lo), Float(params.densitySpan.hi), 1, 0)
         return u
     }
 

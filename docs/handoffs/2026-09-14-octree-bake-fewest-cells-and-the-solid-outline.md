@@ -409,3 +409,31 @@ polygon corner cuts a texel between its corners and its middle, all within the 1
 band — inside the beam on screen. The probe now counts an unpainted point within the
 band as the beam (it would still read as a hole outside it); the sweep then passes,
 ring 100 % on every row, unpainted 0.0 %.
+
+## 12. 2026-09-16 evening: "no quilting … a void between the solid and the lattice"
+
+The outline accepted ("now that we finally have a good solid surrounding the lattice").
+His 0/5/10/15/20/25 mm screenshots: no quilt anywhere, and at 25 mm a dark strip
+between the widened beam and the lattice.
+
+**Measured first** (probe on his mesh, deleted after): at band 5 the 3 mm cells within
+3 mm of the outline carry activation 0.91–0.98 (the quilt), every texel painted; at band
+25 every cell within 10 mm is raised (0.66–1.00), 100 % painted, 3 mm cells out to
+10 mm, 6 mm from 8 mm. The bake was doing exactly what he asked. **The dark strip IS
+the quilt**: the density colour ramp ran over the DRAWN span (widened to the quilt, 0.6),
+so a raised 60 % cell sat at the ramp's deep end — a closed 3 mm cell with half-millimetre
+windows drawn in the deepest hue reads as a slab, a void. At 5 mm the quilt is a 1.8 mm
+fringe past the 1.2 mm beam, invisible at that depth of colour.
+
+**Fix:** a new `colourSpan` uniform (appended last on both sides: xy = the STATED span,
+z = 1) — the albedo's ramp reads it instead of `gradeParams`, so the grade's raise keeps
+its neighbours' colour and shows as what it is: dense pale struts. For his point span
+everything is one hue, and the quilt is the tight mesh he saw two days ago. Also: the
+outline beam exists only when the shape grade is on (`solidBandMM` 0 otherwise).
+
+His two requests read against the numbers: (1) "5 mm should have a small line of
+quilted cells" — it does (0–3 mm, 1.8 mm visible past the beam), and each step widens it
+(10: ~5 mm, 15: ~7, 25: ~10) while the centre rule steps the sizes back; (2) "from 25 mm
+the solid should extend inwards to fill the empty area" — the beam already widens by half
+the excess over 15 (6.2 mm at 25), and the "empty area" beyond it is the quilt, now
+visible. If he wants the solid wider still, `bleed` in `octreeCellField` is one line.
