@@ -101,7 +101,9 @@ final class LatticeSolidFillTests: XCTestCase {
         //
         // Comparing the two fields is not a looser bar, it is the bar this test always
         // meant: the hit is solid IFF the solid field is the one that produced it.
-        XCTAssertTrue(march.contains("out.solid = (Fsolid <= Fstrut) ? 1.0 : 0.0;"),
+        // (2 = the outline band, shaded flat; 1 = the run's solid fill — both are the
+        // solid FIELD's hit.)
+        XCTAssertTrue(march.contains("out.solid = (Fsolid <= Fstrut) ? (bandHit ? 2.0 : 1.0) : 0.0;"),
                       "★ and it must name the FIELD that produced the hit, not a "
                       + "neighbourhood flag that merely correlates with it — or the "
                       + "picture and the field can disagree")

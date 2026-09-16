@@ -778,7 +778,11 @@ static LSDFHit lsdf_march(constant LSDFUniforms& U,
             // for larger cells"). With the band at 0 the largest cells stand right
             // against the outline, and the rim's 1.6x on a 12 mm cell's boundary
             // struts read as a quilted cell. The solid outline is the rim there.
-            if (U.rimParams.y > 0.0 && LC.stepped > 0.0 && LC.S > 1.01 * S0) { dressing = 0.0; }
+            // ★ NO DRESSING AT ALL WHERE THE OUTLINE BAND EXISTS (2026-09-15 night:
+            // "there is no smooth, single outline"). The Rim & skin finish fattened
+            // and tinted the finest cells within its reach of the edge, and beside the
+            // 1.2 mm band that read as one ragged blue strip. The band IS the rim.
+            if (U.rimParams.y > 0.0 && LC.stepped > 0.0 && U.rimParams.w > 0.0) { dressing = 0.0; }
         }
 
         if (any(baseCell != cachedBase) || LC.m != cachedM || any(LC.phase != cachedPhase)) {
@@ -994,6 +998,7 @@ static LSDFHit lsdf_march(constant LSDFUniforms& U,
         // no proxy.
         float Fstrut = anyActive ? max(dn * cellHere, dClip) : 1e9;
         float Fsolid = anyActive ? 1e9 : dClip;
+        bool bandHit = false;
         // ★★★ THE SOLID OUTLINE — the shape fit's last step, UNIONED IN.
         //
         // ★ IT CANNOT BE DONE BY DEACTIVATING A CELL, and that is why four attempts
@@ -1039,6 +1044,7 @@ static LSDFHit lsdf_march(constant LSDFUniforms& U,
             float depth = max(max(4.0 * U.overlayParams.z, U.rimParams.w),
                               lsdf_outline_mm(U, cellTex, p));
             {
+                bandHit = true;
                 // Clip to the region PRISM (its lateral wall is the face outline), the
                 // ray box, and the RAW part surface let out by a third of a voxel —
                 // never `lsdf_part_clip`'s hold, which is what ate it. Measured on his
@@ -1102,7 +1108,9 @@ static LSDFHit lsdf_march(constant LSDFUniforms& U,
             // a strut of some invented density.
             // Which FIELD produced this hit, not which neighbourhood happened to be
             // active — see the two terms above.
-            out.solid = (Fsolid <= Fstrut) ? 1.0 : 0.0;
+            // 1 = the run's solid fill (printed layers); 2 = the OUTLINE BAND, drawn
+            // flat in the rim colour — "a single, smooth, flat outline".
+            out.solid = (Fsolid <= Fstrut) ? (bandHit ? 2.0 : 1.0) : 0.0;
             out.cellMM = cellHere;
             out.rawLevel = float(LC.L);
             return out;
@@ -1233,6 +1241,9 @@ static float3 lsdf_albedo(constant LSDFUniforms& U,
     // moment the camera moves; this is a smooth ridge profile whose contrast FADES as
     // the bands approach a pixel, so it reads as texture at every zoom instead of
     // shimmering. `fwidth` gives the on-screen period directly.
+    // ★ THE OUTLINE BAND: flat, in the rim colour, no printed-layer banding — one
+    // smooth ribbon, a separate thing from the lattice (his rule, 2026-09-15 night).
+    if (hitSolid > 1.5) { return U.rimColor.xyz; }
     if (hitSolid > 0.5) {
         // ★★★ SOLID IS THE **DEEP** END, NOT THE PALE ONE (2026-08-27).
         //

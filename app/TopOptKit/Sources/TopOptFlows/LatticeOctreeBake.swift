@@ -44,6 +44,11 @@ extension LatticePreviewOccupancy {
         public var rasterSeconds: Double = 0
     }
 
+    /// The densest a bead-wide strut may make the finest rung (core's measured law):
+    /// above it the smallest cell reads as a quilt before any grading — octet, 0.45 mm
+    /// bead: 2 mm is 26.5 %, 2.58 mm 17 %, 3 mm 13 %.
+    public static let finestRungMaxDensity = 0.20
+
     /// One cell size per texel at the finest rung's pitch, chosen by the octree.
     public static func octreeCellField(occupancy occ: LatticeVoxelGrid,
                                        demand: LatticeVoxelGrid?,
@@ -113,12 +118,26 @@ extension LatticePreviewOccupancy {
         // other: halve while the half stays printable; when a half would drop under
         // the floor but a third would not, take the third (12 → 6 → 2 at a 1.8 mm
         // floor, instead of stopping at 3). His question: "why is it ALWAYS 1/2?"
+        // ★ THE FINEST RUNG IS ALSO BOUNDED BY HOW DENSE A BEAD-WIDE STRUT MAKES IT
+        // (2026-09-15 night: "I am seeing quilting all along the 2mm cells … 0 should
+        // mean ZERO quilting"). By core's measured law a 0.45 mm bead in a 2 mm octet
+        // cell is 26.5 % dense with half-millimetre windows — it reads as a quilt
+        // before any grade; 2.58 mm is 17 %, 3 mm 13 %. A rung whose bead-wide strut
+        // exceeds `finestRungMaxDensity` is not a rung, so his ladders are 12 → 6 → 3
+        // and 10.31 → 5.16 → 2.58 ("if there isn't space, the 2.58 one is ok"), and
+        // the grade's quilt band starts from an open cell.
+        let law = latticeID.isEmpty ? nil : LatticeType.named(latticeID)
+        func printsOpen(_ r: Double) -> Bool {
+            guard let law, lineWidthMM > 0 else { return true }
+            return law.printabilityDensityFloor(lineWidthMM: lineWidthMM, cellMM: r) <= finestRungMaxDensity + 1e-9
+        }
         func ladderSizes(base: Double) -> [Double] {
-            // The finest rung: the smallest base/(2^a·3^b) still at or above the floor.
+            // The finest rung: the smallest base/(2^a·3^b) still at or above the floor
+            // whose bead-wide strut prints open.
             var finest = base
             for a in 0...8 { for b in 0...5 {
                 let r = base / (pow(2.0, Double(a)) * pow(3.0, Double(b)))
-                if r >= floorMM - 1e-9, r < finest { finest = r }
+                if r >= floorMM - 1e-9, r < finest, printsOpen(r) { finest = r }
             }}
             // The chain down to it: halve while the half is still a multiple of the
             // finest rung, otherwise take a third.
@@ -405,25 +424,50 @@ extension LatticePreviewOccupancy {
                 // of every 6 mm cell on his back wall to the 2 mm layer below it —
                 // that wall's face plane sits 0.59 mm off the texel grid — which is
                 // the cell "cut off" he photographed (2026-09-14).
+                // ★ ALONG THE NORMAL THE FACE-PLANE TEXEL COUNTS TOO. The slot against
+                // the face starts exactly at the plane, and the texel that contains the
+                // plane has its middle OUTSIDE the part whenever the plane sits past
+                // the texel's half — with a 2.58 mm pitch that left the outer 1.3 mm of
+                // his back wall with no texel at all: no band, no cells (caught by the
+                // curved-outline probe, 2026-09-15 night). That texel belongs to the
+                // slot against the face; its outside half is clipped by the part anyway.
+                // Its material test is taken just inside the plane.
+                let hiS = lo + SIMD3<Double>(repeating: S)
                 let g0 = (lo - gorigin) / pitch - 0.5
-                let g1 = (lo + SIMD3<Double>(repeating: S) - gorigin) / pitch - 0.5
-                let i0 = Swift.max(0, Int(g0.x.rounded(.up))), i1 = Swift.min(gnx - 1, Int((g1.x - 1e-9).rounded(.down)))
-                let j0 = Swift.max(0, Int(g0.y.rounded(.up))), j1 = Swift.min(gny - 1, Int((g1.y - 1e-9).rounded(.down)))
-                let k0 = Swift.max(0, Int(g0.z.rounded(.up))), k1 = Swift.min(gnz - 1, Int((g1.z - 1e-9).rounded(.down)))
+                let g1 = (hiS - gorigin) / pitch - 0.5
+                var lo0 = SIMD3<Int>(Int(g0.x.rounded(.up)), Int(g0.y.rounded(.up)), Int(g0.z.rounded(.up)))
+                var hi0 = SIMD3<Int>(Int((g1.x - 1e-9).rounded(.down)), Int((g1.y - 1e-9).rounded(.down)), Int((g1.z - 1e-9).rounded(.down)))
+                let faceSide = n[axis] > 0 ? lo[axis] : hiS[axis]
+                let atFace = abs(faceSide - plane) < 1e-6
+                if atFace {
+                    if n[axis] > 0 { lo0[axis] = Int(((lo[axis] - gorigin[axis]) / pitch).rounded(.down)) }
+                    else { hi0[axis] = Int(((hiS[axis] - gorigin[axis] - 1e-9) / pitch).rounded(.down)) }
+                }
+                let i0 = Swift.max(0, lo0.x), i1 = Swift.min(gnx - 1, hi0.x)
+                let j0 = Swift.max(0, lo0.y), j1 = Swift.min(gny - 1, hi0.y)
+                let k0 = Swift.max(0, lo0.z), k1 = Swift.min(gnz - 1, hi0.z)
+                func inSlot(_ v: Double, _ ax: Int) -> Bool {
+                    if v >= lo[ax], v < hiS[ax] { return true }
+                    // the face-plane texel: its middle is on the outside of the plane
+                    return atFace && ax == axis && (n[axis] > 0 ? v < lo[ax] && v > lo[ax] - pitch
+                                                                 : v >= hiS[ax] && v < hiS[ax] + pitch)
+                }
                 var painted = 0
                 if i0 <= i1, j0 <= j1, k0 <= k1 {
                 for k in k0...k1 {
                     let cz = gorigin.z + (Double(k) + 0.5) * pitch
-                    guard cz >= lo.z, cz < lo.z + S else { continue }
+                    guard inSlot(cz, 2) else { continue }
                     for j in j0...j1 {
                         let cy = gorigin.y + (Double(j) + 0.5) * pitch
-                        guard cy >= lo.y, cy < lo.y + S else { continue }
+                        guard inSlot(cy, 1) else { continue }
                         for i in i0...i1 {
                             let cx = gorigin.x + (Double(i) + 0.5) * pitch
-                            guard cx >= lo.x, cx < lo.x + S else { continue }
+                            guard inSlot(cx, 0) else { continue }
                             let idx = (k * gny + j) * gnx + i
                             guard owner[idx] < 0 else { continue }          // first region wins
-                            let c = SIMD3<Double>(cx, cy, cz)                // the texel's middle
+                            var c = SIMD3<Double>(cx, cy, cz)                // the texel's middle
+                            // the face-plane texel's test point, just inside the plane
+                            c[axis] = Swift.min(Swift.max(c[axis], lo[axis] + 0.25 * pitch), hiS[axis] - 0.25 * pitch)
                             let d = dOut(c)
                             if edge {
                                 // ★ PAINTED WHEREVER ANY OF THE TEXEL IS INSIDE THE OUTLINE,

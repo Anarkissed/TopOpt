@@ -75,7 +75,7 @@ final class LatticePerVoxelWidthTests: XCTestCase {
         // of ITS OWN ladder, and the bulk keeps the region cell; nothing is a division
         // of some other wall's cell. (His 2026-08-26 ban on S/2 was lifted on
         // 2026-09-14 — "why is it ALWAYS 1/2?" was answered with the nesting rule and
-        // he accepted 12 → 6 → 2 — so the rungs here are 12.03 → 6.015 → 2.005.)
+        // he accepted 12 → 6 → 2 — so the rungs here are 12.03 → 6.015 → 3.0075.)
         var st = LatticePreviewOccupancy.OctreeBakeStats()
         guard let baked = LatticePreviewOccupancy.octreeCellField(
             occupancy: occ, demand: scene.demand, regions: [specs[1]],
@@ -92,7 +92,9 @@ final class LatticePerVoxelWidthTests: XCTestCase {
         XCTAssertGreaterThan(st.slotsKept[regionCell] ?? 0, 10,
                              "the 8.59 mm sliver must not pin the face: whole 12.03 mm cells "
                              + "are expected over the 12 mm bulk; kept=\(st.slotsKept)")
-        let rungs = [12.03, 6.015, 2.005]
+        // 12.03 / 4 = 3.0075 is the finest rung: 2.005 would put a bead-wide strut at
+        // 26.5 % of the cell (core's law), over `finestRungMaxDensity`.
+        let rungs = [12.03, 6.015, 3.0075]
         for (size, count) in hist {
             let mm = Double(size)
             XCTAssertLessThanOrEqual(

@@ -321,3 +321,41 @@ the 1.2 mm band counts as clipped — the shell's skin on screen, not empty spac
 to 3.5 % for Skin rows (0.5 % elsewhere, measured 0.0); the sweep then passes with the
 solid terminus a ring at **100 % on every row**, unpainted 0.0 %, drawn 97.5 %, band
 1.9 % of the face.
+
+## 10. 2026-09-15, 11:30 PM: "FOR THE LOVE OF GOD, FINISH THE OUTLINE"
+
+His three points on the 19:24 build (grades 0/5/10/15/20 side by side):
+
+**1. "There is no smooth, single outline … I don't want it to be an SDF like the rest of
+the lattice."** What he saw was not the band. The thin bright strip at the edge IS the
+1.2 mm band; the wide blue strip with holes beside it was the Rim & skin FINISH: it
+fattens 1.6× and tints every strut within its reach of the boundary, and since §9 the
+finest cells run right up to the outline, so their dressed struts read as one ragged
+blue band. Now: no dressing at all on the stepped path wherever the band exists
+(`rimParams.w > 0` — the band is the rim), and the band hit is reported as
+`out.solid = 2` and shaded FLAT in the rim colour (`lsdf_albedo`: no printed-layer
+banding). It is still the SDF band (its outer face is the prism wall, its inner face
+the offset outline); a mesh ribbon was not needed for what was wrong.
+
+**2. "Quilting all along the 2 mm cells … 0 should mean ZERO quilting."** Not the grade:
+by core's measured law a 0.45 mm bead in a 2 mm octet cell is **26.5 %** dense with
+half-millimetre windows (2.58 mm: 17 %, 3 mm: 13 %; probed with
+`printabilityDensityFloor`), so the finest rung was a quilt before any band. New bound
+`finestRungMaxDensity = 0.20`: a rung whose bead-wide strut is denser is not a rung. His
+ladders become **12 → 6 → 3 and 10.31 → 5.16 → 2.58** (his "if there isn't space, the
+2.58 one is ok"); the texel pitch 2.58; `LatticePerVoxelWidthTests` rungs
+12.03 → 6.015 → 3.0075.
+
+**3. "Use the quilting as a secondary means to extend the gradient … 0 = zero quilting,
+5 should look like what 0 does now, 15 an extra band of quilted cells inwards."** With
+(2) this is what the existing band thickening does: only the finest rung is raised, by
+`1 − nearest/band`, so at 0 nothing is raised (open 3 mm cells straight into the band),
+at 5 the finest cells within 5 mm ramp to the quilt against the outline, at 15 the ramp
+runs 15 mm in while the centre rule also holds the larger cells back. No new rule.
+
+**And a defect the probe caught on the way:** with the 2.58 mm pitch, the texel that
+contains face 15's plane has its middle ABOVE the plane, so the slot against the face
+owned no texel there and the outer 1.3 mm of that wall had no band and no cells
+(`testTheSolidTerminusIsARingNotADottedLine`: 0 of 62 outline points painted). `paint`
+now gives the face-plane texel to the slot against the face and tests its material just
+inside the plane: 62/62 and 69/69 painted and solid.
