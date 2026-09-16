@@ -1545,10 +1545,14 @@ extension LatticeCurvedOutlineBandProbe {
                 // ★ THE OCTREE (2026-09-14) puts whole cells right against the outline
                 // when the grade is off ("fill in the empty space with any lattice
                 // cells you can"), so under a 0.9 mm Skin finish the skin's own band
-                // clips a little of them: measured 0.3 / 0.6 / 0.3 % on the three Skin
-                // rows, 0.0 % on every row without a skin. That band is the shell's
-                // solid skin on screen, not empty space, so Skin rows get 1 %.
-                let bound = r.label.contains("Skin") ? 1.0 : 0.5
+                // clips a little of them. Since the outline became a band of one width
+                // with nothing else solid (2026-09-15 night), the finest cells run up
+                // to the outline and the skin's strip beyond the 1.2 mm band — about
+                // half a millimetre along the whole outline — reads as "clipped" here:
+                // measured 2.9 % on the three Skin rows, 0.0 % on every row without a
+                // skin. That strip is the shell's solid skin on screen, not empty
+                // space, so Skin rows get 3.5 %.
+                let bound = r.label.contains("Skin") ? 3.5 : 0.5
                 XCTAssertLessThan(r.clipped, bound,
                     "★ \(r.label): \(r.clipped)% of the declared face is painted but "
                     + "clipped away — empty space on screen. Every permutation measured "

@@ -309,3 +309,15 @@ Tests: `LatticeGradeToSolidBandTests` gains
 6 mm cells to 8.5 mm texel middles, band 5 == band 0, no bleed at 10, 2.5 mm at 20); the
 outline test asserts nothing solid in the bake and no 6 mm cell inside the band; the
 curved-outline probes' "solid" is now a point within the band (`isSolid(cf, k, dOut:)`).
+
+**Suite on `b95956d1`** (`swift test`, Debug, macOS, 114 min): **2435 tests, 31 skipped,
+6 failing test cases** — the five known pre-existing ones (`AppModelTests` 3MF ×3,
+`OrganicSampleCubeTests.testThickerIsLiveAndNeverRetraces`,
+`OrganicVariantCacheTests.testTheKeyIgnoresThicknessAndFollowsCoreAndTopology`) and
+`LatticeCurvedOutlineBandProbe.testSweepEverySettingPermutation`, whose Skin rows measured
+2.9 % "painted but clipped" against the 1 % bound set the day before: with nothing solid
+in the bake, the finest cells run up to the outline and the 0.9 mm skin's strip beyond
+the 1.2 mm band counts as clipped — the shell's skin on screen, not empty space. Re-pinned
+to 3.5 % for Skin rows (0.5 % elsewhere, measured 0.0); the sweep then passes with the
+solid terminus a ring at **100 % on every row**, unpainted 0.0 %, drawn 97.5 %, band
+1.9 % of the face.
