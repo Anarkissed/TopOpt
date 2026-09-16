@@ -448,3 +448,26 @@ at any band, in any build since the octree. Now the flag follows the FIELD: on w
 the cell field carries per-texel densities (`steppedCellMM` non-empty). Installed 19:15.
 Lesson for the file: a baked value that does not show is a rendering gate, and the
 gate to check first is the one that decides whether the shader reads the bake at all.
+
+**19:17–19:22, on the 19:15 build.** The 25 mm grade: "Perfect" — quilt visible, and
+the beam "overlapping itself at the bottom-left and top-right corners. That can never
+happen." Then 15 and 5 mm wearing the 25 mm beam, and his rule: *"the growing solid
+inwards is SDF — the outline stays the way it is, clean and thin."*
+
+- **Corners:** the inner ring was a clamped bisector offset per vertex; at an acute
+  corner, or where the outline has segments shorter than the offset swallows, the two
+  strips crossed. `offsetRing` is now a true parallel offset: each inner corner is the
+  intersection of its two offset edges, an edge whose offset copy runs backwards is
+  eaten and its vertices collapse to the corner its neighbours make (decided on the
+  RAW intersections — the tip of a 20° spike is 30 mm in), and a corner the region is
+  too thin to hold takes the deepest point on the way. Test: a 20° spike with a 2 mm
+  tip flat and a nicked square, at a 6 mm offset — no inner edge runs backwards and
+  every inner vertex is ≥ 6 mm inside the polygon.
+- **The stale beam:** `outlineRibbonVersion` restarted at 0 per layer, so after a
+  settings change rebuilt the layer the view's remembered version matched and it kept
+  the previous layer's buffer. A static serial now.
+- **Thin beam + SDF bleed:** `solidBandMM` (the beam) is `max(2 beads, trim + ½ voxel)`
+  always; cells keep clear of beam + bleed; for bands over 15 mm the bake writes
+  `solidDepthMM = beam + bleed` on the band's texels and the march draws solid where the
+  voxel's in-plane outline distance is under it (`bleedHit`, `out.solid = 2`, rim colour
+  flat), clipped by the prism and the raw part. Under 15 mm nothing is written.

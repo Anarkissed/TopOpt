@@ -1879,7 +1879,12 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
     /// rebuilt with every bake that hands out a band; `MetalMeshView` draws it in the
     /// depth prepass in the rim colour. `outlineRibbonVersion` bumps on every rebuild.
     private(set) var outlineRibbon: LatticeOutlineRibbon.Mesh?
+    /// ★ GLOBALLY UNIQUE — a per-layer counter restarted at 0 whenever the layer was
+    /// rebuilt on a settings change, matched the view's remembered value, and the
+    /// view kept drawing the LAST layer's beam (his 15 and 5 mm grades wearing the
+    /// 25 mm beam, 2026-09-16 19:21).
     private(set) var outlineRibbonVersion = 0
+    private static var outlineRibbonSerial = 0
     private var cellGrid: LatticeVoxelGrid?
     private var sdfTex: MTLTexture?
     /// The region field's texture, or a neutral 1×1×1 "everywhere inside" volume
@@ -2505,7 +2510,8 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
         emptyReason = diagnoseEmpty(scene: scene, field: field)
         cellField = field
         outlineRibbon = Self.buildOutlineRibbon(scene: scene, field: field)
-        outlineRibbonVersion &+= 1
+        Self.outlineRibbonSerial &+= 1
+        outlineRibbonVersion = Self.outlineRibbonSerial
         cellGrid = field.field
         cellTex = makeCellTexture(field)
         bakeGeneration &+= 1

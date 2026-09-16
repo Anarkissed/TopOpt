@@ -80,9 +80,12 @@ final class LatticeSolidFillTests: XCTestCase {
         XCTAssertTrue(
             march.contains("dRegion = max(dRegion, 0.5 * U.rimParams.w - dOutV);"),
             "★ the struts must be clipped half a band inside the outline so they end in the ribbon")
-        XCTAssertFalse(
-            march.contains("Fsolid = min(Fsolid, max(max(dOutV - depth"),
-            "★ the outline band is being drawn as a field again")
+        // The grade's BLEED (solid growing inward past 15 mm) IS a field again, over
+        // texels the bake gave a `solidDepth`, and only those: the beam stays a mesh.
+        XCTAssertTrue(
+            march.contains("float depth = lsdf_outline_mm(U, cellTex, p);")
+                && march.contains("if (depth > 0.0) {"),
+            "★ the bleed must be drawn only where the bake wrote a solid depth")
     }
 
     /// ★★ THE HIT CARRIES WHICH IT IS. Without this the albedo would have to guess from
@@ -105,7 +108,7 @@ final class LatticeSolidFillTests: XCTestCase {
         // meant: the hit is solid IFF the solid field is the one that produced it.
         // (2 = the outline band, shaded flat; 1 = the run's solid fill — both are the
         // solid FIELD's hit.)
-        XCTAssertTrue(march.contains("out.solid = (Fsolid <= Fstrut) ? 1.0 : 0.0;"),
+        XCTAssertTrue(march.contains("out.solid = (Fsolid <= Fstrut) ? (bleedHit ? 2.0 : 1.0) : 0.0;"),
                       "★ and it must name the FIELD that produced the hit, not a "
                       + "neighbourhood flag that merely correlates with it — or the "
                       + "picture and the field can disagree")

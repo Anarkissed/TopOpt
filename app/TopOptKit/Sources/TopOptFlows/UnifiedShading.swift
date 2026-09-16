@@ -1013,13 +1013,31 @@ static LSDFHit lsdf_march(constant LSDFUniforms& U,
         // no proxy.
         float Fstrut = anyActive ? max(dn * cellHere, dClip) : 1e9;
         float Fsolid = anyActive ? 1e9 : dClip;
-        // ★★★ THE SOLID OUTLINE IS NOT DRAWN HERE ANY MORE (2026-09-16). It is a MESH —
-        // `LatticeOutlineRibbon`, one beam swept round the face outline, drawn by the
-        // view in the same G-buffer pass — because a field sampled from voxels can
+        bool bleedHit = false;
+        // ★★★ THE OUTLINE ITSELF IS NOT DRAWN HERE (2026-09-16). It is a MESH —
+        // `LatticeOutlineRibbon`, one thin beam swept round the face outline, drawn by
+        // the view in the same G-buffer pass — because a field sampled from voxels can
         // only ever be as smooth as its voxels, and he asked for "a singular beam bent
         // around the entirety of the face-prism outline; something inherently smooth".
         // The struts are clipped half a band inside the outline (see `dRegion` above),
         // so they end inside the beam.
+        //
+        // ★ THE BLEED IS: for a large grade the solid grows inward from the beam, and
+        // that part IS drawn here — "the growing solid inwards is SDF — the outline
+        // stays the way it is, clean and thin" (19:22). Solid wherever the voxel's
+        // in-plane outline distance is under the texel's `solidDepth` (beam + bleed,
+        // written by the bake only when there is a bleed), in the rim colour so it
+        // reads as one solid with the beam; clipped by the prism and the raw part.
+        if (LC.stepped > 0.0 && U.rimParams.y > 0.0 && LC.S > 0.0) {
+            float depth = lsdf_outline_mm(U, cellTex, p);
+            if (depth > 0.0) {
+                float dOutV = regionTex.sample(samp, stc).g;
+                float dPartRaw = dPart - delta
+                               - 0.3 * max(U.sdfSpacing.x, max(U.sdfSpacing.y, U.sdfSpacing.z));
+                float Fb = max(max(dOutV - depth, dBox), max(regionTex.sample(samp, stc).b, dPartRaw));
+                if (Fb < Fsolid) { Fsolid = Fb; bleedHit = true; }
+            }
+        }
         // ★★★ DOUBLED'S SOLID CELLS RENDER **SOLID** (maintainer, 2026-08-24
         // evening: "I'm not seeing a solid outline meaning the entire chamfers
         // are held up in thin air"). The ladder's shape fit already DECIDES
@@ -1070,7 +1088,9 @@ static LSDFHit lsdf_march(constant LSDFUniforms& U,
             // a strut of some invented density.
             // Which FIELD produced this hit, not which neighbourhood happened to be
             // active — see the two terms above.
-            out.solid = (Fsolid <= Fstrut) ? 1.0 : 0.0;
+            // 1 = the run's solid fill (printed layers); 2 = the grade's BLEED, drawn
+            // flat in the rim colour like the outline beam it grows from.
+            out.solid = (Fsolid <= Fstrut) ? (bleedHit ? 2.0 : 1.0) : 0.0;
             out.cellMM = cellHere;
             out.rawLevel = float(LC.L);
             return out;
@@ -1201,6 +1221,8 @@ static float3 lsdf_albedo(constant LSDFUniforms& U,
     // moment the camera moves; this is a smooth ridge profile whose contrast FADES as
     // the bands approach a pixel, so it reads as texture at every zoom instead of
     // shimmering. `fwidth` gives the on-screen period directly.
+    // ★ THE GRADE'S BLEED: flat, in the rim colour — one solid with the beam.
+    if (hitSolid > 1.5) { return U.rimColor.xyz; }
     if (hitSolid > 0.5) {
         // ★★★ SOLID IS THE **DEEP** END, NOT THE PALE ONE (2026-08-27).
         //

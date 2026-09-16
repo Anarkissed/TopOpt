@@ -167,10 +167,13 @@ extension LatticePreviewOccupancy {
         // ★ THE SOLID BLEEDS IN ONLY FOR A LARGE BAND (his 2026-09-14 rule: "if this
         // is large enough (i.e. 20-30mm) then I also expect to see the solid bleed
         // into that grade from the edges"): nothing under 15 mm, half the excess
-        // above it — as extra WIDTH of the outline ribbon, since the outline is
-        // geometry now.
+        // above it. The outline BEAM stays one thin width; the bleed is drawn by the
+        // march as solid over the band's texels (`solidDepthMM`) — his 2026-09-16
+        // 19:22 rule: "the growing solid inwards is SDF — the outline stays the way
+        // it is, clean and thin". Cells keep clear of both.
+        let beam = Swift.max(solidBandMM, bead)
         let bleed = shapeFit && shapeFitBandMM > 15 ? (shapeFitBandMM - 15) * 0.5 : 0
-        let band = Swift.max(solidBandMM, bead) + bleed
+        let band = beam + bleed
         func occupied(_ p: SIMD3<Double>) -> Bool {
             let g = (SIMD3<Float>(p) - occ.origin) / occ.spacing
             let i = Int(g.x.rounded()), j = Int(g.y.rounded()), k = Int(g.z.rounded())
@@ -620,6 +623,9 @@ extension LatticePreviewOccupancy {
                     // to nothing at the band's inner edge. Only the finest rung quilts.
                     let share = isFinest[i] ? 1.0 : coarseCellBandRaise
                     r = Swift.max(r, r + (q - r) * (1 - Double(bandT[i])) * share)
+                    // the bleed: solid wherever the voxel is within beam + bleed of
+                    // the outline — the march tests the in-plane distance per voxel
+                    if bleed > 0 { solidDepth[i] = Float(band) }
                 }
                 if lineWidthMM > 0 {
                     r = Swift.max(r, lat.printabilityDensityFloor(lineWidthMM: lineWidthMM, cellMM: s))
@@ -644,6 +650,6 @@ extension LatticePreviewOccupancy {
                                 fromCorePlan: false,
                                 drawnDensityHi: drawnHi > densityHi + 1e-9 ? drawnHi : 0,
                                 solidDepthMM: solidDepth,
-                                solidBandMM: band)
+                                solidBandMM: beam)
     }
 }

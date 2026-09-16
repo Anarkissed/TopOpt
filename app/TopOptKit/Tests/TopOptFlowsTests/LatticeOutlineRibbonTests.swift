@@ -66,6 +66,33 @@ final class LatticeOutlineRibbonTests: XCTestCase {
         XCTAssertEqual(depths, [0, 200, 400], "the far cap follows the wall's thickness at each vertex")
     }
 
+    /// His 25 mm beam overlapped itself at the base's acute corner and the arm's
+    /// tip: the inner ring of a wide offset must never run backwards against the
+    /// outline, whatever the corner angle or how short the outline's segments are.
+    func testAWideBeamNeverCrossesItselfAtSharpCorners() {
+        // A long spike (20° tip, 2 mm flat at the tip) and a square with a 1 mm
+        // nick at one corner: both have segments a 6 mm offset swallows.
+        let spike: [SIMD2<Double>] = [SIMD2(0, 0), SIMD2(60, 0), SIMD2(60, 2), SIMD2(2, 22), SIMD2(0, 20)]
+        let nicked: [SIMD2<Double>] = [SIMD2(-15, -15), SIMD2(15, -15), SIMD2(15, 14), SIMD2(14, 15), SIMD2(-15, 15)]
+        for loop in [spike, nicked] {
+            let ring = LatticeOutlineRibbon.offsetRing(loop, by: 6)
+            let m = loop.count
+            for i in 0..<m {
+                let outerE = loop[(i + 1) % m] - loop[i]
+                let innerE = ring[(i + 1) % m] - ring[i]
+                XCTAssertGreaterThanOrEqual(simd_dot(innerE, outerE), -1e-9,
+                    "inner edge \(i) runs backwards against the outline: \(ring)")
+                // every inner vertex sits at least the offset inside the polygon
+                let inside = -LatticeFaceOutline.signedDistance(ring[i], loops: [loop])
+                XCTAssertGreaterThanOrEqual(inside, 6 - 1e-6, "inner vertex \(i) is only \(inside) mm inside the outline: \(ring[i])")
+            }
+        }
+        // And a plain square still offsets to the plain inner square.
+        let sq: [SIMD2<Double>] = [SIMD2(-10, -10), SIMD2(10, -10), SIMD2(10, 10), SIMD2(-10, 10)]
+        let r = LatticeOutlineRibbon.offsetRing(sq, by: 1.2)
+        for p in r { XCTAssertEqual(max(abs(p.x), abs(p.y)), 8.8, accuracy: 1e-9) }
+    }
+
     func testNothingWithoutABand() {
         let r = square(10, ccw: true)
         XCTAssertEqual(LatticeOutlineRibbon.build(regions: [r], widthMM: 0) { _, _ in 5 }.vertexCount, 0)

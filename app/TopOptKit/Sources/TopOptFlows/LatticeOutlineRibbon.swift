@@ -23,39 +23,80 @@ public enum LatticeOutlineRibbon {
         public init(interleaved: [Float] = []) { self.interleaved = interleaved }
     }
 
-    /// Per-vertex INWARD offset directions for a loop: the mitred bisector of the two
-    /// edge normals, scaled so an offset of `d` along it moves both edges by `d`
-    /// (clamped to 2× at sharp corners). Orientation-independent.
-    static func inwardMiter(_ loop: [SIMD2<Double>]) -> [SIMD2<Double>] {
+    /// The loop's INWARD edge normals (unit), orientation-independent.
+    static func edgeInwardNormals(_ loop: [SIMD2<Double>]) -> [SIMD2<Double>] {
         let m = loop.count
-        guard m >= 3 else { return [] }
         var area = 0.0
         for i in 0..<m { let a = loop[i], b = loop[(i + 1) % m]; area += a.x * b.y - b.x * a.y }
         let ccw = area > 0
-        func edgeInward(_ a: SIMD2<Double>, _ b: SIMD2<Double>) -> SIMD2<Double> {
-            let e = b - a
+        return (0..<m).map { i in
+            let e = loop[(i + 1) % m] - loop[i]
             let l = simd_length(e)
             guard l > 1e-9 else { return .zero }
             let left = SIMD2(-e.y, e.x) / l
             return ccw ? left : -left
         }
-        var out: [SIMD2<Double>] = []
-        out.reserveCapacity(m)
+    }
+
+    /// The loop offset INWARD by `d`, as a true parallel offset: each corner is the
+    /// intersection of its two offset edges, and an edge the offset has eaten (its
+    /// offset copy runs backwards) collapses to the corner its neighbours make — so
+    /// the ring never crosses itself, whatever the corner angle or the segment
+    /// lengths (his 25 mm beam overlapped itself at two acute corners, 2026-09-16).
+    static func offsetRing(_ loop: [SIMD2<Double>], by d: Double) -> [SIMD2<Double>] {
+        let m = loop.count
+        guard m >= 3 else { return loop }
+        if abs(d) < 1e-9 { return loop }
+        let n = edgeInwardNormals(loop)
+        // Offset lines: point + direction per edge.
+        var lineP: [SIMD2<Double>] = [], lineD: [SIMD2<Double>] = []
         for i in 0..<m {
-            let n0 = edgeInward(loop[(i + m - 1) % m], loop[i])
-            let n1 = edgeInward(loop[i], loop[(i + 1) % m])
-            var s = n0 + n1
-            let l = simd_length(s)
-            if l < 1e-6 {
-                s = simd_length(n1) > 0 ? n1 : n0
-            } else {
-                s /= l
-                let cosHalf = Swift.max(simd_dot(s, n1), 0.5)   // miter, clamped to 2×
-                s /= cosHalf
-            }
-            out.append(s)
+            lineP.append(loop[i] + n[i] * d)
+            lineD.append(loop[(i + 1) % m] - loop[i])
         }
-        return out
+        func meet(_ a: Int, _ b: Int) -> SIMD2<Double> {
+            // intersection of offset lines a and b; the edge-normal offset when parallel
+            let p1 = lineP[a], d1 = lineD[a], p2 = lineP[b], d2 = lineD[b]
+            let cross = d1.x * d2.y - d1.y * d2.x
+            if abs(cross) < 1e-9 * max(simd_length(d1) * simd_length(d2), 1e-9) { return p2 }
+            let t = ((p2.x - p1.x) * d2.y - (p2.y - p1.y) * d2.x) / cross
+            return p1 + d1 * t
+        }
+        // Which edges still stand: an edge whose offset copy runs backwards is eaten
+        // — decided on the RAW intersections, so a swallowed tip segment is seen
+        // for what it is even when the true corner lies far away.
+        var alive = [Bool](repeating: true, count: m)
+        var ring = [SIMD2<Double>](repeating: .zero, count: m)
+        for _ in 0..<m {
+            func prevLive(_ i: Int) -> Int? { for k in 1...m { let j = (i - k + m) % m; if alive[j] { return j } }; return nil }
+            func nextLive(_ i: Int) -> Int? { for k in 0..<m { let j = (i + k) % m; if alive[j] { return j } }; return nil }
+            var any = false
+            for i in 0..<m {
+                guard let a = prevLive(i), let b = nextLive(i) else { return loop }
+                ring[i] = a == b ? lineP[b] : meet(a, b)
+            }
+            for i in 0..<m where alive[i] {
+                let e = ring[(i + 1) % m] - ring[i]
+                if simd_dot(e, lineD[i]) <= 1e-9 { alive[i] = false; any = true }
+            }
+            if !any { break }
+        }
+        // The true corner of the eroded polygon — however far from the vertex (a
+        // 20° tip puts it 30 mm in). Where the polygon is thinner than twice the
+        // offset that corner lies outside; the ring then takes the deepest point on
+        // the way to it, so the beam fills the thin part and never leaves the outline.
+        func inside(_ q: SIMD2<Double>) -> Double { -LatticeFaceOutline.signedDistance(q, loops: [loop]) }
+        for i in 0..<m where inside(ring[i]) < abs(d) - 1e-6 {
+            let v = loop[i], x = ring[i]
+            var best = v, bestIn = inside(v)
+            for k in 1...32 {
+                let q = v + (x - v) * (Double(k) / 32)
+                let ins = inside(q)
+                if ins > bestIn { bestIn = ins; best = q }
+            }
+            ring[i] = best
+        }
+        return ring
     }
 
     /// `depthAt(regionIndex, point)` answers how deep the beam runs into the part at a
@@ -91,11 +132,22 @@ public enum LatticeOutlineRibbon {
             for loop in region.outlineLoops {
                 let m = loop.count
                 guard m >= 3 else { continue }
-                let miter = inwardMiter(loop)
-                let outer = (0..<m).map { loop[$0] + miter[$0] * region.inPlaneOffsetMM }
-                let inner = (0..<m).map { loop[$0] + miter[$0] * (region.inPlaneOffsetMM + widthMM) }
+                let outer = offsetRing(loop, by: region.inPlaneOffsetMM)
+                let inner = offsetRing(loop, by: region.inPlaneOffsetMM + widthMM)
+                // Per-vertex inward direction for the smooth wall normals: from the
+                // outer ring to the inner one, or the edge normals' bisector where the
+                // two rings meet.
+                let en = edgeInwardNormals(loop)
+                let miter: [SIMD2<Double>] = (0..<m).map { i in
+                    let v = inner[i] - outer[i]
+                    let l = simd_length(v)
+                    if l > 1e-6 { return v / l }
+                    let b = en[(i + m - 1) % m] + en[i]
+                    let lb = simd_length(b)
+                    return lb > 1e-6 ? b / lb : en[i]
+                }
                 let depth = (0..<m).map { i -> Double in
-                    let mid = at(loop[i] + miter[i] * (region.inPlaneOffsetMM + 0.5 * widthMM), 1.0)
+                    let mid = at((outer[i] + inner[i]) * 0.5, 1.0)
                     return Swift.max(0.5, Swift.min(region.depthMM, depthAt(ri, mid)))
                 }
                 for i in 0..<m {
