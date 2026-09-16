@@ -49,6 +49,10 @@ extension LatticePreviewOccupancy {
     /// bead: 2 mm is 26.5 %, 2.58 mm 17 %, 3 mm 13 %.
     public static let finestRungMaxDensity = 0.20
 
+    /// How far toward the quilt a cell ABOVE the finest rung thickens at the outline
+    /// when it lies in the band (the finest rung goes all the way).
+    public static let coarseCellBandRaise = 0.35
+
     /// One cell size per texel at the finest rung's pitch, chosen by the octree.
     public static func octreeCellField(occupancy occ: LatticeVoxelGrid,
                                        demand: LatticeVoxelGrid?,
@@ -160,7 +164,13 @@ extension LatticePreviewOccupancy {
         // the steps but on top of them too"). Cells keep clear of the outline by the
         // band's width, so the solid's inner face is a stepped-by-cells line and its
         // outer face the outline itself; nothing pokes through the band.
-        let band = Swift.max(solidBandMM, bead)
+        // ★ THE SOLID BLEEDS IN ONLY FOR A LARGE BAND (his 2026-09-14 rule: "if this
+        // is large enough (i.e. 20-30mm) then I also expect to see the solid bleed
+        // into that grade from the edges"): nothing under 15 mm, half the excess
+        // above it — as extra WIDTH of the outline ribbon, since the outline is
+        // geometry now.
+        let bleed = shapeFit && shapeFitBandMM > 15 ? (shapeFitBandMM - 15) * 0.5 : 0
+        let band = Swift.max(solidBandMM, bead) + bleed
         func occupied(_ p: SIMD3<Double>) -> Bool {
             let g = (SIMD3<Float>(p) - occ.origin) / occ.spacing
             let i = Int(g.x.rounded()), j = Int(g.y.rounded()), k = Int(g.z.rounded())
@@ -603,13 +613,13 @@ extension LatticePreviewOccupancy {
                     // be allowed in the smallest printable cells — never for larger
                     // cells"). A coarser cell in the band keeps its own density; the
                     // solid's bleed below still applies to every texel in the band.
-                    if isFinest[i] { r = Swift.max(r, r + (q - r) * (1 - Double(bandT[i]))) }
-                    // ★ THE SOLID BLEEDS IN ONLY FOR A LARGE BAND (his 2026-09-14 rule:
-                    // "if this is large enough (i.e. 20-30mm) then I also expect to see
-                    // the solid bleed into that grade from the edges"; 2026-09-15: the
-                    // widening solid "couldn't be the ONLY thing changing"). Nothing
-                    // under 15 mm; half of the excess above it.
-                    solidDepth[i] = Float(Swift.max(0, (shapeFitBandMM - 15) * 0.5))
+                    // ★ AND THE COARSER CELLS IN THE BAND THICKEN A LITTLE (2026-09-16:
+                    // "add density around the edges — not enough to quilt them, but to
+                    // extend the grade a little bit before the movement of the next
+                    // phase"): a third of the way to the quilt at the outline, fading
+                    // to nothing at the band's inner edge. Only the finest rung quilts.
+                    let share = isFinest[i] ? 1.0 : coarseCellBandRaise
+                    r = Swift.max(r, r + (q - r) * (1 - Double(bandT[i])) * share)
                 }
                 if lineWidthMM > 0 {
                     r = Swift.max(r, lat.printabilityDensityFloor(lineWidthMM: lineWidthMM, cellMM: s))

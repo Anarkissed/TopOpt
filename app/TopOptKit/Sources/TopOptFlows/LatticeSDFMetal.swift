@@ -1872,6 +1872,11 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
     /// The last bake — kept so a caller can ask whether the cells on screen came
     /// from core's plan or from the uniform fallback.
     private(set) var cellField: LatticeCellField?
+    /// ★ THE OUTLINE RIBBON — the solid outline as GEOMETRY (`LatticeOutlineRibbon`),
+    /// rebuilt with every bake that hands out a band; `MetalMeshView` draws it in the
+    /// depth prepass in the rim colour. `outlineRibbonVersion` bumps on every rebuild.
+    private(set) var outlineRibbon: LatticeOutlineRibbon.Mesh?
+    private(set) var outlineRibbonVersion = 0
     private var cellGrid: LatticeVoxelGrid?
     private var sdfTex: MTLTexture?
     /// The region field's texture, or a neutral 1×1×1 "everywhere inside" volume
@@ -2495,6 +2500,8 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
         guard let field = baked else { return }
         emptyReason = diagnoseEmpty(scene: scene, field: field)
         cellField = field
+        outlineRibbon = Self.buildOutlineRibbon(scene: scene, field: field)
+        outlineRibbonVersion &+= 1
         cellGrid = field.field
         cellTex = makeCellTexture(field)
         bakeGeneration &+= 1
@@ -3338,6 +3345,33 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
     /// samples, so the number on the card and the geometry under the finger cannot
     /// disagree — and it is right for all three algorithms without knowing which one it
     /// is holding, because the field carries the answer either way.
+    /// The outline ribbon for a baked field: one beam per include face, `solidBandMM`
+    /// wide, as deep as the wall is at each outline vertex (the measured width field;
+    /// the region's depth where that has no answer).
+    static func buildOutlineRibbon(scene: LatticeSDFScene, field: LatticeCellField) -> LatticeOutlineRibbon.Mesh? {
+        guard field.solidBandMM > 0 else { return nil }
+        let occ = scene.occupancy
+        var widths: [Int: [Double]] = [:]
+        for (i, r) in scene.regions.enumerated() where r.role == .include && r.kind == .face {
+            widths[i] = LatticeMeasuredRegionWidth.wallWidthFieldAlongNormalMM(
+                region: r, occupancy: occ, partSDF: scene.partSDF)
+        }
+        let mesh = LatticeOutlineRibbon.build(regions: scene.regions, widthMM: field.solidBandMM) { ri, p in
+            let r = scene.regions[ri]
+            guard let w = widths[ri], w.count == occ.count else { return r.depthMM }
+            let g = (SIMD3<Float>(p) - occ.origin) / occ.spacing
+            let i = Int(g.x.rounded()), j = Int(g.y.rounded()), k = Int(g.z.rounded())
+            var best = 0.0
+            for dk in -1...1 { for dj in -1...1 { for di in -1...1 {
+                let a = i + di, b = j + dj, c = k + dk
+                guard a >= 0, b >= 0, c >= 0, a < occ.nx, b < occ.ny, c < occ.nz else { continue }
+                best = max(best, w[(c * occ.ny + b) * occ.nx + a])
+            }}}
+            return best > 0 ? best : r.depthMM
+        }
+        return mesh.vertexCount > 0 ? mesh : nil
+    }
+
     func bakedCellMMAt(_ p: SIMD3<Float>) -> Double {
         guard let f = cellField else { return 0 }
         let g = f.field

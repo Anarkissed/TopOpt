@@ -681,6 +681,13 @@ static LSDFHit lsdf_march(constant LSDFUniforms& U,
         // field on the CPU and read here. The SAME field the shell's hole is cut
         // from, so the two cannot describe different volumes.
         float dRegion = regionTex.sample(samp, stc).r;
+        // ★ THE STRUTS END INSIDE THE OUTLINE RIBBON (a mesh; see the note below):
+        // clipped half a band inside the face outline, so no strut end can show
+        // outside the beam whatever the voxel-sampled region wall does.
+        if (U.rimParams.y > 0.0 && U.rimParams.w > 0.0) {
+            float dOutV = regionTex.sample(samp, stc).g;
+            dRegion = max(dRegion, 0.5 * U.rimParams.w - dOutV);
+        }
         // ★ See `lsdf_part_clip`: at the declared mouth the struts reach the surface;
         // everywhere the shell survives they stop one voxel inside it.
         float dClip = max(max(lsdf_part_clip(U, sdfTex, regionTex, samp, RC, decls,
@@ -998,66 +1005,13 @@ static LSDFHit lsdf_march(constant LSDFUniforms& U,
         // no proxy.
         float Fstrut = anyActive ? max(dn * cellHere, dClip) : 1e9;
         float Fsolid = anyActive ? 1e9 : dClip;
-        bool bandHit = false;
-        // ★★★ THE SOLID OUTLINE — the shape fit's last step, UNIONED IN.
-        //
-        // ★ IT CANNOT BE DONE BY DEACTIVATING A CELL, and that is why four attempts
-        // failed. `anyActive` above is a NEIGHBOURHOOD property — true if any of the
-        // 3x3x3 neighbours is active — so a one-cell-wide inactive ring is surrounded by
-        // active cells and still draws their struts. Only a large contiguous inactive
-        // area ever reads as solid, which is the member floor's case, not an outline's.
-        //
-        // So the bake writes the mm distance to the face's OUTLINE into `g` (free on the
-        // stepped path: there is no dyadic ladder, `L` is 0 regardless, and the
-        // same-lattice test keys on the cell SIZE). Within `rimParams.y` of it the field
-        // goes solid, clipped by `dClip` so it stays inside the part and inside what he
-        // declared. A union can only ADD material, so no neighbour can undo it.
-        // ★★★ THE BAND IS A FRACTION OF **THIS CELL**, NOT A MILLIMETRE (2026-08-26).
-        //
-        // `rimParams.y` used to be millimetres, computed as
-        // `max(finestPrintableCell, oneVoxel)` — and the in-plane field is measured ON
-        // the occupancy grid, so its smallest non-zero value inside material is one
-        // voxel too. The band and the field's floor were the same number, so the test
-        // fired wherever the field bottomed out. Worse, `lsdf_outline_mm` NEAREST-reads
-        // one value per BASE CELL, so a 1.72 mm test was being evaluated on a 10.31 mm
-        // grid: not a ring, a scatter of isolated solid cells mid-wall. That scatter is
-        // the "empty space" — solid fill is pale and flat and the shell covers it, so it
-        // reads as nothing while still reporting a cell size when tapped.
-        //
-        // Scaling by `LC.S` asks the question the band was always meant to ask — "does
-        // this cell's own extent reach the outline" — in units that cannot collide with
-        // the grid's resolution.
-        // ★★★ THE SOLID OUTLINE (2026-09-14). Solid wherever the voxel sits within
-        // the texel's solid depth of the face outline (one bead at least), or the
-        // stepped cell under p is cut by the outline — drawn against the RAW part
-        // and region surfaces, not through `lsdf_part_clip`'s hold: that hold is
-        // what turned every "solid" cell into a see-through strip.
-        if (LC.stepped > 0.0 && U.rimParams.y > 0.0 && LC.S > 0.0) {
-            float dOutV = regionTex.sample(samp, stc).g;
-            // ★ THE SOLID OUTLINE IS A BAND OF ONE WIDTH (2026-09-15: "not just in the
-            // middle of the steps but on top of them too"). `rimParams.w` is the width
-            // the bake kept every cell clear of; a cut finest cell (solidDepth 1e3) and
-            // the band's bleed extend it per texel. It is drawn as a FIELD, not a test:
-            // `dOutV - depth` is negative inside the band and grows inward, so the
-            // band's inner face is the outline offset by `depth` — smooth — instead of
-            // whichever texel face the march happened to enter.
-            float depth = max(max(4.0 * U.overlayParams.z, U.rimParams.w),
-                              lsdf_outline_mm(U, cellTex, p));
-            {
-                bandHit = true;
-                // Clip to the region PRISM (its lateral wall is the face outline), the
-                // ray box, and the RAW part surface let out by a third of a voxel —
-                // never `lsdf_part_clip`'s hold, which is what ate it. Measured on his
-                // stand: the part SDF is at least 0.7 mm inside the outline at the
-                // outline (the plate widens below the face), so this costs the
-                // outline nothing; at the back face the SDF is 0.05–0.45 mm eroded,
-                // so a prism deeper than the plate can no longer draw a lip there.
-                float dPartRaw = dPart - delta
-                               - 0.3 * max(U.sdfSpacing.x, max(U.sdfSpacing.y, U.sdfSpacing.z));
-                Fsolid = min(Fsolid, max(max(dOutV - depth, dBox),
-                                         max(regionTex.sample(samp, stc).b, dPartRaw)));
-            }
-        }
+        // ★★★ THE SOLID OUTLINE IS NOT DRAWN HERE ANY MORE (2026-09-16). It is a MESH —
+        // `LatticeOutlineRibbon`, one beam swept round the face outline, drawn by the
+        // view in the same G-buffer pass — because a field sampled from voxels can
+        // only ever be as smooth as its voxels, and he asked for "a singular beam bent
+        // around the entirety of the face-prism outline; something inherently smooth".
+        // The struts are clipped half a band inside the outline (see `dRegion` above),
+        // so they end inside the beam.
         // ★★★ DOUBLED'S SOLID CELLS RENDER **SOLID** (maintainer, 2026-08-24
         // evening: "I'm not seeing a solid outline meaning the entire chamfers
         // are held up in thin air"). The ladder's shape fit already DECIDES
@@ -1108,9 +1062,7 @@ static LSDFHit lsdf_march(constant LSDFUniforms& U,
             // a strut of some invented density.
             // Which FIELD produced this hit, not which neighbourhood happened to be
             // active — see the two terms above.
-            // 1 = the run's solid fill (printed layers); 2 = the OUTLINE BAND, drawn
-            // flat in the rim colour — "a single, smooth, flat outline".
-            out.solid = (Fsolid <= Fstrut) ? (bandHit ? 2.0 : 1.0) : 0.0;
+            out.solid = (Fsolid <= Fstrut) ? 1.0 : 0.0;
             out.cellMM = cellHere;
             out.rawLevel = float(LC.L);
             return out;
@@ -1241,9 +1193,6 @@ static float3 lsdf_albedo(constant LSDFUniforms& U,
     // moment the camera moves; this is a smooth ridge profile whose contrast FADES as
     // the bands approach a pixel, so it reads as texture at every zoom instead of
     // shimmering. `fwidth` gives the on-screen period directly.
-    // ★ THE OUTLINE BAND: flat, in the rim colour, no printed-layer banding — one
-    // smooth ribbon, a separate thing from the lattice (his rule, 2026-09-15 night).
-    if (hitSolid > 1.5) { return U.rimColor.xyz; }
     if (hitSolid > 0.5) {
         // ★★★ SOLID IS THE **DEEP** END, NOT THE PALE ONE (2026-08-27).
         //

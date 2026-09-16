@@ -173,6 +173,9 @@ private struct DepthPrepassUniforms {
     /// view·model rotation, i.e. the SAME eye-space normal the body shader has always
     /// used — so AO and the body are lit off one definition of "which way is out".
     var normalMatrix: simd_float4x4 = matrix_identity_float4x4
+    /// The flat albedo `depth_fragment_flat` writes (the outline ribbon's rim colour);
+    /// unused by `depth_fragment`.
+    var tint: SIMD4<Float> = .zero
 }
 
 // The contact-pass uniforms — must match `CUniforms` in `contactShaderSource`.
@@ -760,7 +763,7 @@ using namespace metal;
 struct DIn  { float3 position [[attribute(0)]]; float3 normal [[attribute(1)]]; };
 struct DOut { float4 position [[position]]; float eyeZ; float3 enormal; float3 mpos;
               float3 mnormal; };   // model-space rest normal — the shell's declared-face test
-struct DUniforms { float4x4 mvp; float4x4 modelView; float4 flex; float4x4 normalMatrix; };
+struct DUniforms { float4x4 mvp; float4x4 modelView; float4 flex; float4x4 normalMatrix; float4 tint; };
 struct GBuf { float  eyeZ    [[color(0)]];      // R32Float — unchanged, the contact pass reads this
               float4 enormal [[color(1)]];      // RGBA16Float — eye-space normal (xyz), w unused
               // ★ ATTACHMENT 2 (task 2026-08-18-unified-shading): the LATTICE's albedo,
@@ -811,6 +814,18 @@ fragment GBuf depth_fragment(DOut in [[stage_in]],
     if (n.z < 0.0) { n = -n; }
     o.enormal = float4(n, 0.0);
     o.albedo = float4(0.0);      // "this pixel is the shell, not the lattice"
+    return o;
+}
+// ★ THE OUTLINE RIBBON (`LatticeOutlineRibbon`): the same vertex layout, no shell
+// clip (it lies INSIDE the declared region on purpose), a flat albedo in the rim
+// colour so the shade pass lights it like lattice material.
+fragment GBuf depth_fragment_flat(DOut in [[stage_in]], constant DUniforms& u [[buffer(1)]]) {
+    GBuf o;
+    o.eyeZ = in.eyeZ;
+    float3 n = normalize(in.enormal);
+    if (n.z < 0.0) { n = -n; }
+    o.enormal = float4(n, 0.0);
+    o.albedo = float4(u.tint.xyz, 1.0);
     return o;
 }
 """
@@ -1375,6 +1390,12 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     /// into an R32Float texture the contact pass reads. Optional — a nil disables the contact
     /// treatment (the faces fall back to the plain `groundPipeline` draw, part-a depth-bias only).
     private let depthPrepassPipeline: MTLRenderPipelineState?
+    /// The outline ribbon's pipeline: `depth_vertex` + `depth_fragment_flat`.
+    private let outlineRibbonPipeline: MTLRenderPipelineState?
+    private var outlineRibbonBuffer: MTLBuffer?
+    private var outlineRibbonFlexBuffer: MTLBuffer?
+    private var outlineRibbonVertexCount = 0
+    private var outlineRibbonVersionSeen = -1
     /// The CONTACT pipeline (items 7+8, parts b+c): the one shader variant BOTH the design-box and
     /// clearance face draws use to add the contact line + interior occlusion. Optional (same fallback).
     private let contactPipeline: MTLRenderPipelineState?
@@ -1909,6 +1930,7 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         // just the position (attribute 0) from the mesh's stride-24 pos+normal buffer, plus the
         // flex displacement at buffer 3 (so the captured depth matches the visible flexed part).
         var depthPrepassPipe: MTLRenderPipelineState? = nil
+        var outlineRibbonPipe: MTLRenderPipelineState? = nil
         if let dLib = try? device.makeLibrary(source: depthPrepassShaderSource, options: nil),
            let dvf = dLib.makeFunction(name: "depth_vertex"),
            let dff = dLib.makeFunction(name: "depth_fragment") {
@@ -1956,6 +1978,17 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
             // terms, and multisampling their INPUT would cost 4× the depth/normal
             // bandwidth to change nothing a 4×4 blur does not already smooth over.
             depthPrepassPipe = try? device.makeRenderPipelineState(descriptor: dpd)
+            if let rff = dLib.makeFunction(name: "depth_fragment_flat") {
+                let rpd = MTLRenderPipelineDescriptor()
+                rpd.vertexFunction = dvf
+                rpd.fragmentFunction = rff
+                rpd.vertexDescriptor = dvd
+                rpd.colorAttachments[0].pixelFormat = Self.sceneDepthFormat
+                rpd.colorAttachments[1].pixelFormat = Self.gbufferNormalFormat
+                rpd.colorAttachments[2].pixelFormat = Self.gbufferAlbedoFormat
+                rpd.depthAttachmentPixelFormat = Self.depthFormat
+                outlineRibbonPipe = try? device.makeRenderPipelineState(descriptor: rpd)
+            }
         }
         // §3c footprint pipeline: position only, one R8 colour attachment, no depth
         // (any coverage counts — the shadow does not care which surface was nearest).
@@ -2197,6 +2230,7 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         self.groundPipeline = groundPipe
         self.stagePipeline = stagePipe
         self.depthPrepassPipeline = depthPrepassPipe
+        self.outlineRibbonPipeline = outlineRibbonPipe
         self.contactPipeline = contactPipe
         self.groundDepthState = device.makeDepthStencilState(descriptor: gdsd) ?? depth
         self.lineOverlayDepthState = device.makeDepthStencilState(descriptor: odsd) ?? depth
@@ -4248,6 +4282,35 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
             }
             penc.setFragmentTexture(shellClipTexture, index: 4)
             countedDraw(penc, .triangle, vertexDrawCount)
+        }
+        // ★ THE OUTLINE RIBBON — the solid outline as geometry (`LatticeOutlineRibbon`),
+        // drawn whenever the lattice is, shell or no shell (lattice-only view too).
+        if let lattice, let rpipe = outlineRibbonPipeline, let rib = lattice.outlineRibbon, rib.vertexCount > 0 {
+            if outlineRibbonVersionSeen != lattice.outlineRibbonVersion {
+                outlineRibbonVersionSeen = lattice.outlineRibbonVersion
+                outlineRibbonVertexCount = rib.vertexCount
+                outlineRibbonBuffer = rib.interleaved.withUnsafeBytes {
+                    device.makeBuffer(bytes: $0.baseAddress!, length: $0.count, options: .storageModeShared)
+                }
+                let zeros = [Float](repeating: 0, count: rib.vertexCount * 3)
+                outlineRibbonFlexBuffer = zeros.withUnsafeBytes {
+                    device.makeBuffer(bytes: $0.baseAddress!, length: $0.count, options: .storageModeShared)
+                }
+            }
+            if let rb = outlineRibbonBuffer, let rf = outlineRibbonFlexBuffer, outlineRibbonVertexCount > 0 {
+                var du = DepthPrepassUniforms(mvp: uniforms.mvp, modelView: modelViewMatrix(),
+                                              flex: .zero, normalMatrix: uniforms.normalMatrix)
+                let rim = LatticeStructureColour.rim
+                du.tint = SIMD4<Float>(Float(rim.r), Float(rim.g), Float(rim.b), 1)
+                penc.setRenderPipelineState(rpipe)
+                penc.setDepthStencilState(depthState)
+                penc.setCullMode(.none)
+                penc.setVertexBuffer(rb, offset: 0, index: 0)
+                penc.setVertexBuffer(rf, offset: 0, index: 3)
+                penc.setVertexBytes(&du, length: MemoryLayout<DepthPrepassUniforms>.stride, index: 1)
+                penc.setFragmentBytes(&du, length: MemoryLayout<DepthPrepassUniforms>.stride, index: 1)
+                countedDraw(penc, .triangle, outlineRibbonVertexCount)
+            }
         }
         if let lattice {
             // The lattice marches in the SAME encoder, against the SAME depth

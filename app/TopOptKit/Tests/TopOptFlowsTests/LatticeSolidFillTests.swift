@@ -74,13 +74,15 @@ final class LatticeSolidFillTests: XCTestCase {
         // "those are holes, there is NOTHING there"). The outline's solid is bounded by
         // the region PRISM's exact wall, the ray box, and the RAW part surface let out by
         // a third of a voxel — never by `dClip`.
+        // ★ THE OUTLINE IS A MESH NOW (2026-09-16, `LatticeOutlineRibbon`), not a
+        // field in this march: what the march owes it is struts that end INSIDE it —
+        // clipped half a band inside the face outline.
         XCTAssertTrue(
-            march.contains("Fsolid = min(Fsolid, max(max(dOutV - depth, dBox),")
-                && march.contains("max(regionTex.sample(samp, stc).b, dPartRaw)));"),
-            "★ the outline's solid must be clipped by the prism and the raw part, not dClip")
+            march.contains("dRegion = max(dRegion, 0.5 * U.rimParams.w - dOutV);"),
+            "★ the struts must be clipped half a band inside the outline so they end in the ribbon")
         XCTAssertFalse(
-            march.contains("Fsolid = min(Fsolid, max(dClip, dOutline"),
-            "★ the outline's solid is behind the eroded clip again")
+            march.contains("Fsolid = min(Fsolid, max(max(dOutV - depth"),
+            "★ the outline band is being drawn as a field again")
     }
 
     /// ★★ THE HIT CARRIES WHICH IT IS. Without this the albedo would have to guess from
@@ -103,7 +105,7 @@ final class LatticeSolidFillTests: XCTestCase {
         // meant: the hit is solid IFF the solid field is the one that produced it.
         // (2 = the outline band, shaded flat; 1 = the run's solid fill — both are the
         // solid FIELD's hit.)
-        XCTAssertTrue(march.contains("out.solid = (Fsolid <= Fstrut) ? (bandHit ? 2.0 : 1.0) : 0.0;"),
+        XCTAssertTrue(march.contains("out.solid = (Fsolid <= Fstrut) ? 1.0 : 0.0;"),
                       "★ and it must name the FIELD that produced the hit, not a "
                       + "neighbourhood flag that merely correlates with it — or the "
                       + "picture and the field can disagree")

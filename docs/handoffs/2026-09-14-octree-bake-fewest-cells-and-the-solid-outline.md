@@ -359,3 +359,44 @@ owned no texel there and the outer 1.3 mm of that wall had no band and no cells
 (`testTheSolidTerminusIsARingNotADottedLine`: 0 of 62 outline points painted). `paint`
 now gives the face-plane texel to the slot against the face and tests its material just
 inside the plane: 62/62 and 69/69 painted and solid.
+
+## 11. 2026-09-16, 00:19: "DO SOMETHING DIFFERENT" — the outline is a mesh
+
+His words: *"I'd prefer the outline be a singular beam bent around the entirety of the
+face-prism outline; something inherently smooth — not something with definitive pixel
+sizes! DO SOMETHING DIFFERENT!!!"* He was right that a field sampled from 1.67 mm voxels
+can only ever be as smooth as its voxels: the band's outer face was the trilinear prism
+wall, its inner face the trilinear outline distance, the struts ended ±0.3 mm around it
+(the voxel-sampled region wall) and studded its face, and it existed only in painted
+texels.
+
+**`LatticeOutlineRibbon`** (new, pure): one beam of rectangular section — `solidBandMM`
+wide in-plane, as deep as the wall at each outline vertex (the measured width field,
+the region depth as fallback) — swept round each include face's outline polygon
+(offset in by `inPlaneOffsetMM`, mitred corners clamped to 2×), as triangles with
+position + normal in the depth-prepass layout; smooth per-vertex normals along the
+sweep. Built by `LatticeSDFRenderer.buildOutlineRibbon` after every bake that hands out
+a band (`outlineRibbon`, `outlineRibbonVersion`).
+
+**Drawn by `MetalMeshView.encodeDepthPrepass`** with a second prepass pipeline
+(`depth_vertex` + new `depth_fragment_flat`: no shell clip — the beam lies inside the
+declared region on purpose — and a flat albedo, `DUniforms.tint`, in the rim colour so
+the shade pass lights it like lattice material). Drawn whenever the lattice is, shell or
+no shell, so the lattice-only view keeps it. Depth-tested against the lattice's G-buffer
+like everything else.
+
+**The march no longer draws any band.** The struts are clipped half a band inside the
+outline (`dRegion = max(dRegion, 0.5·rimParams.w − dOutV)`) so every strut ends inside
+the beam. The bleed for large bands (half the excess over 15 mm) is now extra WIDTH of
+the beam (`band = max(solidBandMM, bead) + bleed` in the bake; `solidBandMM` carries
+it); `solidDepthMM` is no longer written.
+
+**His point 2 — 0/5/10/15 indistinguishable:** coarser cells inside the band now
+thicken a third of the way to the quilt at the outline, fading to nothing at the band's
+inner edge (`coarseCellBandRaise = 0.35`), on top of the finest rung's full ramp and the
+centre rule. So 5 mm shows as a thickened edge; 10 mm steps the 12 mm cells back 4 mm
+with the thickening 10 mm deep; 15 mm 9 mm back; 20 mm widens the beam by 2.5 mm.
+
+Tests: `LatticeOutlineRibbonTests` (4: the section, the in-plane offset, the depth
+following the wall, nothing without a band); `LatticeSolidFillTests` pins the strut
+clip; the band tests pin the bleed as width and the coarse cells' mild thickening.

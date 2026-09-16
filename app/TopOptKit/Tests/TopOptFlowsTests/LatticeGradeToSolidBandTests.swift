@@ -294,10 +294,13 @@ final class LatticeGradeToSolidBandTests: XCTestCase {
             // reaches ~80 % of the way to the quilt.
             XCTAssertGreaterThanOrEqual(t.activation, quilt - 0.15, "…toward the quilt (\(quilt)); at \(t.dOutline) mm it is \(t.activation)")
         }
-        // ★ Only the finest rung quilts (his 2026-09-15 note 3): a 6 mm cell inside
-        // the band keeps its own density.
+        // ★ Only the finest rung quilts; a coarser cell inside the band thickens a
+        // LITTLE (his 2026-09-16 "add density around the edges — not enough to quilt
+        // them"): above its own density, well under the quilt.
         for t in sixInBand {
-            XCTAssertEqual(t.activation, ambient, accuracy: 0.01, "a coarser cell inside the band must NOT thicken; at \(t.dOutline) mm (\(t.cellMM) mm) it is \(t.activation)")
+            // (the fixture's 6 mm cell sits 6.45 mm into the 8 mm band: a fifth of a third of the way)
+            XCTAssertGreaterThan(t.activation, ambient + 0.01, "a coarser cell inside the band thickens a little; at \(t.dOutline) mm (\(t.cellMM) mm) it is \(t.activation)")
+            XCTAssertLessThan(t.activation, quilt - 0.2, "…but never to the quilt; at \(t.dOutline) mm it is \(t.activation)")
         }
     }
 
@@ -323,10 +326,10 @@ final class LatticeGradeToSolidBandTests: XCTestCase {
         let (b5, _) = try bake(f, band: 3)
         let (b0, _) = try bake(f, band: 0)
         XCTAssertEqual(b5.steppedCellMM, b0.steppedCellMM, "band 3 (half of 6) on a 6 mm cell moves no cell")
-        XCTAssertFalse(b10.solidDepthMM.contains { $0 > 0 }, "no bleed under 15 mm")
+        XCTAssertEqual(b10.solidBandMM, bead, accuracy: 1e-9, "no bleed under 15 mm")
         let (b20, _) = try bake(f, band: 20)
-        XCTAssertEqual(b20.solidDepthMM.filter { $0 > 0 }.max() ?? 0, 2.5, accuracy: 1e-4,
-                       "a 20 mm band bleeds half of the excess over 15: 2.5 mm")
+        XCTAssertEqual(b20.solidBandMM, bead + 2.5, accuracy: 1e-6,
+                       "a 20 mm band bleeds half of the excess over 15 into the outline's width: 2.5 mm")
     }
 
     /// His Fine project hands the bake a POINT span — manual thickness, lo == hi ==
