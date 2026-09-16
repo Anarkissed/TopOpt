@@ -327,15 +327,14 @@ final class LatticeGradeToSolidBandTests: XCTestCase {
         let (b0, _) = try bake(f, band: 0)
         XCTAssertEqual(b5.steppedCellMM, b0.steppedCellMM, "band 3 (half of 6) on a 6 mm cell moves no cell")
         XCTAssertEqual(b10.solidBandMM, bead, accuracy: 1e-9, "the beam is one width")
-        XCTAssertFalse(b10.solidDepthMM.contains { $0 > 0 }, "no bleed under 15 mm")
+        XCTAssertFalse(b10.solidDepthMM.contains { $0 > 0 }, "no bleed under 25 mm")
         let (b20, _) = try bake(f, band: 20)
         XCTAssertEqual(b20.solidBandMM, bead, accuracy: 1e-9, "the beam stays thin whatever the band")
-        XCTAssertEqual(b20.solidDepthMM.filter { $0 > 0 }.max() ?? 0, Float(bead + 2.5), accuracy: 1e-4,
-                       "a 20 mm band bleeds half of the excess over 15 as SDF solid: beam + 2.5 mm")
-        // and no open cell sits inside the bleed
-        let deep20 = texels(b20, f).filter { $0.depth > 0 && $0.depth < depth && $0.cellMM > 0 }
-        XCTAssertFalse(deep20.contains { $0.dOutline > bead + 2.5 + 1e-6 && $0.dOutline < bead + 2.5 + 0.1 && $0.solid },
-                       "vacuous guard")
+        XCTAssertFalse(b20.solidDepthMM.contains { $0 > 0 }, "no bleed at 20 mm either (his rule: 25 and up)")
+        let (b25, _) = try bake(f, band: 25)
+        XCTAssertEqual(b25.solidBandMM, bead, accuracy: 1e-9, "the beam stays thin at 25 mm")
+        XCTAssertEqual(b25.solidDepthMM.filter { $0 > 0 }.max() ?? 0, Float(bead + 5), accuracy: 1e-4,
+                       "a 25 mm band bleeds 5 mm as SDF solid: beam + 5 mm")
     }
 
     /// His Fine project hands the bake a POINT span — manual thickness, lo == hi ==

@@ -471,3 +471,8 @@ inwards is SDF — the outline stays the way it is, clean and thin."*
   `solidDepthMM = beam + bleed` on the band's texels and the march draws solid where the
   voxel's in-plane outline distance is under it (`bleedHit`, `out.solid = 2`, rim colour
   flat), clipped by the prism and the raw part. Under 15 mm nothing is written.
+
+**19:30: "No, the rule was 25mm and up is when solid gets thicker."** The bleed
+starts at a 25 mm band (`bleedStartsAtBandMM`), none below; the amount stays half of the
+band over 15 (5 mm at 25 — what he called perfect — 7.5 at 30). 15 and 20 mm keep the
+thin beam and no SDF solid. Test pins 10/20 = none, 25 = beam + 5 mm.

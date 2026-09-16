@@ -53,6 +53,9 @@ extension LatticePreviewOccupancy {
     /// when it lies in the band (the finest rung goes all the way).
     public static let coarseCellBandRaise = 0.35
 
+    /// The band from which the solid bleeds inward from the outline beam (mm).
+    public static let bleedStartsAtBandMM = 25.0
+
     /// One cell size per texel at the finest rung's pitch, chosen by the octree.
     public static func octreeCellField(occupancy occ: LatticeVoxelGrid,
                                        demand: LatticeVoxelGrid?,
@@ -164,15 +167,15 @@ extension LatticePreviewOccupancy {
         // the steps but on top of them too"). Cells keep clear of the outline by the
         // band's width, so the solid's inner face is a stepped-by-cells line and its
         // outer face the outline itself; nothing pokes through the band.
-        // ★ THE SOLID BLEEDS IN ONLY FOR A LARGE BAND (his 2026-09-14 rule: "if this
-        // is large enough (i.e. 20-30mm) then I also expect to see the solid bleed
-        // into that grade from the edges"): nothing under 15 mm, half the excess
-        // above it. The outline BEAM stays one thin width; the bleed is drawn by the
-        // march as solid over the band's texels (`solidDepthMM`) — his 2026-09-16
-        // 19:22 rule: "the growing solid inwards is SDF — the outline stays the way
-        // it is, clean and thin". Cells keep clear of both.
+        // ★ THE SOLID BLEEDS IN ONLY FROM A 25 mm BAND UP (his 2026-09-16 19:30 rule:
+        // "25mm and up is when solid gets thicker"; at 25 he saw 5 mm of bleed and
+        // called it perfect, so the amount stays half of the band over 15 — 5 mm at
+        // 25, 7.5 at 30 — and there is none at all below 25). The outline BEAM stays
+        // one thin width; the bleed is drawn by the march as solid over the band's
+        // texels (`solidDepthMM`) — "the growing solid inwards is SDF — the outline
+        // stays the way it is, clean and thin". Cells keep clear of both.
         let beam = Swift.max(solidBandMM, bead)
-        let bleed = shapeFit && shapeFitBandMM > 15 ? (shapeFitBandMM - 15) * 0.5 : 0
+        let bleed = shapeFit && shapeFitBandMM >= bleedStartsAtBandMM ? (shapeFitBandMM - 15) * 0.5 : 0
         let band = beam + bleed
         func occupied(_ p: SIMD3<Double>) -> Bool {
             let g = (SIMD3<Float>(p) - occ.origin) / occ.spacing
