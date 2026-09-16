@@ -400,3 +400,12 @@ with the thickening 10 mm deep; 15 mm 9 mm back; 20 mm widens the beam by 2.5 mm
 Tests: `LatticeOutlineRibbonTests` (4: the section, the in-plane offset, the depth
 following the wall, nothing without a band); `LatticeSolidFillTests` pins the strut
 clip; the band tests pin the bleed as width and the coarse cells' mild thickening.
+
+**Suite on `4c4e275a`** (`swift test`, Debug, macOS, 104 min): **2439 tests, 31 skipped,
+6 failing test cases** — the five known pre-existing ones and
+`LatticeCurvedOutlineBandProbe.testSweepEverySettingPermutation`, whose Skin rows
+measured 0.059 % of the face "unpainted" against a 0.05 % bound: points where a sharp
+polygon corner cuts a texel between its corners and its middle, all within the 1.2 mm
+band — inside the beam on screen. The probe now counts an unpainted point within the
+band as the beam (it would still read as a hole outside it); the sweep then passes,
+ring 100 % on every row, unpainted 0.0 %.

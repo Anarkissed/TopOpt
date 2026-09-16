@@ -1345,7 +1345,13 @@ extension LatticeCurvedOutlineBandProbe {
                     tally["notOwned", default: 0] += 1; continue
                 }
                 let dOutHere = -(LatticeFaceOutline.signedDistance(SIMD2(uu, vv), loops: reg.outlineLoops) - reg.inPlaneOffsetMM)
-                let c = cell(p, dOut: dOutHere)
+                var c = cell(p, dOut: dOutHere)
+                // ★ THE OUTLINE IS A MESH (2026-09-16): every point within the band of
+                // the outline is inside the beam whether or not its texel is painted —
+                // a sharp polygon corner can cut a texel between its corners and its
+                // middle (0.06 % of the face on the Skin rows), and that is solid on
+                // screen, not a hole.
+                if !c.painted && cf.solidBandMM > 0 && dOutHere < cf.solidBandMM { c = (true, true) }
                 // ★★★ SOLID IS TESTED BEFORE CLIPPED, and getting that order wrong is
                 // what made this metric report a 2.7% "hole" at single-cell ON that
                 // does not exist. The solid ring is material the run DELIVERS; its
