@@ -1968,7 +1968,26 @@ OrganicLattice trace_organic_lattice(const VoxelGrid& grid,
     for (const OrganicConnector& cn : out.connectors)
       spans.push_back(OrganicSpan{cn.a, cn.b, cn.radius_mm});
 
-    if (traced_len > 0.0 && target_vol > 0.0 && !spans.empty()) {
+    rep.bead_calibration_spans = spans.size();
+    {
+      double len = 0.0;
+      std::vector<double> dia;
+      dia.reserve(spans.size());
+      for (const OrganicSpan& sp : spans) {
+        len += vlen(vsub(sp.b, sp.a));
+        dia.push_back(2.0 * sp.r);
+      }
+      rep.bead_calibration_length_mm = len;
+      if (!dia.empty()) {
+        std::sort(dia.begin(), dia.end());
+        rep.bead_calibration_median_dia_mm = dia[dia.size() / 2];
+      }
+    }
+    if (params.defer_bead_calibration) {
+      // The caller solves this against the emitter's output; the target and the basis
+      // above are reported so it has something to solve for, and nothing is scaled here.
+      rep.bead_calibration_deferred = true;
+    } else if (traced_len > 0.0 && target_vol > 0.0 && !spans.empty()) {
       auto union_at = [&](double k) {
         std::vector<OrganicSpan> q = spans;
         for (OrganicSpan& sp : q) sp.r *= k;

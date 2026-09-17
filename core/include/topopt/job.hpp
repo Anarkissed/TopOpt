@@ -497,6 +497,20 @@ struct JobGrading {
   // taken on the spans that SHIP rather than the ones the tracer drew). 0 is kept so a
   // run can be reproduced against the old figure, never because it is defensible.
   int organic_density_union_subdiv = kOrganicDensityUnionSubdivDefault;
+  // ★ SOLVE THE BEAD FACTOR AGAINST THE SPANS THAT SHIP, by re-running the emission at a
+  // trial radius, rather than against the curves the tracer drew. Those are different
+  // networks -- on the M2 stand 63,324 mm3 of curves against 41,955 mm3 of shipped spans
+  // -- so a factor fitted to the first is a guess about the second.
+  //
+  // ★★ DEFAULT FALSE, AND THE REASON IS NOT CAUTION. Built, measured, and it revealed
+  // that the target is UNREACHABLE by thickening on this pipeline: the shipped volume
+  // FALLS as the bead grows, because the node merge welds any polyline finer than its own
+  // bead and a fatter strut therefore collapses the curve it belongs to. Measured trials
+  // on the M2 stand -- x1.00 -> 41,185 mm3 over 13,128 spans; x1.24 -> 37,150 over 8,039;
+  // x2.00 -> 1,615 over 27, with the node merge taking 25,515 mm of centreline down to
+  // 493. Until that merge rule is radius-independent, calibrating mass by bead scaling
+  // cannot work, and this switch exists to demonstrate that rather than to be used.
+  bool organic_calibrate_on_shipped = false;
   double organic_scale = 1.0;
   bool organic_shape_fit = false;
   // ★★ SHAPE-FIT *ONLY* — the cell is a function of the SHAPE and nothing else; the

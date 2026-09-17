@@ -1,5 +1,6 @@
 #include "topopt/job.hpp"
 #include "topopt/lattice_dc.hpp"
+#include "topopt/lattice_union_volume.hpp"
 
 #include <algorithm>
 #include <array>
@@ -1817,7 +1818,10 @@ LatticeExportOutcome export_latticed_variant(
     // ★ Mesh the lattice by dual contouring its own SDF, into <prefix>_DC.stl beside the
     // welded pair. Grading keys, so they arrive separately from JobLattice.
     bool organic_dual_contour = false, double organic_dc_cell_mm = 0.0,
-    double organic_dc_tolerance_mm = 0.0) {
+    double organic_dc_tolerance_mm = 0.0,
+    // ★ Solve the bead factor against the spans this function EMITS, rather than against
+    // the curves the tracer drew. See the calibration loop below.
+    bool organic_calibrate_on_shipped = true) {
   // ── M4: A SKIN MODE THAT PRODUCES NO GEOMETRY MUST SAY SO, NOT RETURN ZERO.
   //
   // ★ THE PREDICATE IS THE MEASURED COUNT, NOT A PREDICTION — and the first version
@@ -2186,6 +2190,148 @@ LatticeExportOutcome export_latticed_variant(
   // the weld rasteriser needs, and observing never changes the emitted bytes
   // (lattice_gen.hpp). Without this, doubled and stepped still ship a soup of
   // thousands of closed shells and still trigger the floating-body misread.
+  // ── ★★ THE BEAD IS CALIBRATED ON THE SPANS THAT SHIP ────────────────────────
+  // (maintainer, 2026-09-17: "go ahead with the calibration rewrite".) It used to be
+  // solved inside the tracer, against the CURVES. That is not the geometry that ships and
+  // not even a shrunken version of it: measured on the M2 stand, the tracer's basis was
+  // 23,173 spans over 35,068.9 mm holding 63,324 mm3, while the file holds 11,638 spans
+  // over 30,457.5 mm and 41,955 mm3 -- the median strut diameter agrees to 4 %, the
+  // length differs by 13 %, and the VOLUME by 34 %. The emitter is not a filter: the node
+  // merge welds endpoints and the run collapse replaces each chain with fewer, straighter
+  // spans carrying that run's LARGEST radius, so the shipped set has its own overlap
+  // structure (51.5 % against the basis's 61.6 %). Scaling a radius derived from the
+  // first network can only be a guess about the second.
+  //
+  // So the factor is solved against the emitter's own output. Each trial runs the FULL
+  // emission -- clip to the part, node merge, support, prune, stranded drop, finish -- at
+  // a trial radius and measures the union of what comes out. That also removes the reason
+  // this could not simply be done afterwards: scaling radii on already-clipped spans
+  // would fatten every strut through the part's surface, whereas re-emitting clips at the
+  // radius it will ship with. Triangles are discarded during the trials, so a trial costs
+  // the emission and not the mesh.
+  OrganicLattice calibrated_lat;
+  if (organic && organic_calibrate_on_shipped &&
+      organic->report.bead_calibration_target_mm3 > 0.0 && !organic->curves.empty()) {
+    struct DiscardSink : TriangleSink {
+      void add_triangle(const Vec3&, const Vec3&, const Vec3&) override {}
+    };
+    const double target = organic->report.bead_calibration_target_mm3;
+    calibrated_lat = *organic;
+    std::vector<double> base_r(calibrated_lat.curves.size());
+    for (std::size_t q = 0; q < calibrated_lat.curves.size(); ++q)
+      base_r[q] = calibrated_lat.curves[q].radius_mm;
+    std::vector<double> base_c(calibrated_lat.connectors.size());
+    for (std::size_t q = 0; q < calibrated_lat.connectors.size(); ++q)
+      base_c[q] = calibrated_lat.connectors[q].radius_mm;
+    auto set_k = [&](double k) {
+      for (std::size_t q = 0; q < base_r.size(); ++q)
+        calibrated_lat.curves[q].radius_mm = base_r[q] * k;
+      for (std::size_t q = 0; q < base_c.size(); ++q)
+        calibrated_lat.connectors[q].radius_mm = base_c[q] * k;
+    };
+    std::size_t trial_spans = 0;
+    double trial_emitted_mm = 0.0, trial_merged_mm = 0.0, trial_written_mm = 0.0;
+    auto shipped_union = [&](double k) {
+      set_k(k);
+      DiscardSink ds;
+      std::vector<OrganicSpan> sp;
+      const OrganicGenStats gs =
+          generate_organic_lattice(calibrated_lat, ds, &boundary, 8, nullptr, &sp);
+      trial_spans = sp.size();
+      trial_emitted_mm = gs.census_len_mm[OrganicGenStats::CensusEmitted];
+      trial_merged_mm = gs.census_len_mm[OrganicGenStats::CensusNodeMerge];
+      trial_written_mm = gs.census_len_mm[OrganicGenStats::CensusWritten];
+      return sp.empty()
+                 ? 0.0
+                 : lattice_union_volume(sp, kOrganicBeadCalibrationSamples).volume_mm3;
+    };
+    const double t0cal = wall_seconds();
+    const double lt = std::log(target);
+    // ★ EVERY TRIAL IS PRINTED, because the first version of this ran the factor to
+    // 5.7e9 and emitted nothing, and the trial log is what showed why: the shipped union
+    // barely responds to the bead. A secant on a flat function extrapolates to infinity,
+    // so the search is BRACKETED and each step reported.
+    double lk0 = 0.0, lv0 = std::log(std::max(shipped_union(1.0), 1e-12));
+    const double v_at_one = std::exp(lv0);
+    std::fprintf(stderr,
+                 "[bead]   trial x1.0000 -> %.1f mm3 (%zu spans) | length emitted %.0f "
+                 "-> node_merge %.0f -> written %.0f mm\n",
+                 v_at_one, trial_spans, trial_emitted_mm, trial_merged_mm,
+                 trial_written_mm);
+    // The shipped union grows a little slower than the square of the radius, because a
+    // fatter strut is also a more overlapped one; 2.0 is the opening guess and the secant
+    // measures the real exponent from the next point.
+    // The bracket is a hard limit on what a calibration may do to a part, not a numerical
+    // convenience: a factor outside it is not a bead that needs adjusting, it is a
+    // grading target the emitter cannot deliver, and the run must SAY so rather than
+    // quietly shipping a part four times the intended thickness.
+    const double lk_lo = std::log(kOrganicCalibrationFactorMin);
+    const double lk_hi = std::log(kOrganicCalibrationFactorMax);
+    double lk1 = lk0 + (lt - lv0) / 2.0;
+    lk1 = std::min(std::max(lk1, lk_lo), lk_hi);
+    int steps = 0;
+    bool converged = false;
+    double v_final = v_at_one;
+    for (; steps < kOrganicCalibrationShippedSteps; ++steps) {
+      v_final = shipped_union(std::exp(lk1));
+      std::fprintf(stderr,
+                   "[bead]   trial x%.4f -> %.1f mm3 (%zu spans) | length emitted %.0f "
+                   "-> node_merge %.0f -> written %.0f mm\n",
+                   std::exp(lk1), v_final, trial_spans, trial_emitted_mm,
+                   trial_merged_mm, trial_written_mm);
+      const double lv1 = std::log(std::max(v_final, 1e-12));
+      if (std::fabs(lv1 - lt) < kOrganicBeadCalibrationTol) { converged = true; break; }
+      double slope = (lk1 != lk0) ? (lv1 - lv0) / (lk1 - lk0) : 2.0;
+      if (!std::isfinite(slope) || slope < 0.25) slope = 0.25;
+      if (slope > 4.0) slope = 4.0;
+      double lk2 = lk1 + (lt - lv1) / slope;
+      lk2 = std::min(std::max(lk2, lk_lo), lk_hi);
+      if (std::fabs(lk2 - lk1) < 1e-6) break;        // pinned at a bracket: no more to do
+      lk0 = lk1; lv0 = lv1; lk1 = lk2;
+      if (!std::isfinite(lk1)) { lk1 = lk0; break; }
+    }
+    double k = std::exp(lk1);
+    if (!(k > 0.0) || !std::isfinite(k)) k = 1.0;
+    const bool bracketed = k <= kOrganicCalibrationFactorMin * 1.001 ||
+                           k >= kOrganicCalibrationFactorMax * 0.999;
+    // Never below the machine: the printable floor is user input and outranks this, the
+    // same rule the tracer's own calibration was held to.
+    double kmin = 0.0;
+    for (std::size_t q = 0; q < base_r.size(); ++q)
+      if (base_r[q] > 0.0)
+        kmin = std::max(kmin, 0.5 * organic->report.min_extrudable_width_mm / base_r[q]);
+    const bool floored = k < kmin;
+    if (floored) k = kmin;
+    // ★★ AND IF THE TARGET IS OUT OF REACH, SHIP THE UNCALIBRATED PART, NOT A RUINED
+    // ONE. Measured on the M2 stand, the emitter does not merely resist a thicker bead,
+    // it DESTROYS the network under one: at x2.0 the node merge collapsed 25,515 mm of
+    // emitted centreline to 493 mm, 27 spans survived of 13,128, and the run still
+    // reported ACCEPTED. A calibration that cannot reach its target must hand back the
+    // part it started with and say why -- never the one it wrecked reaching for it.
+    if (!converged) {
+      std::fprintf(stderr,
+                   "[bead] TARGET OUT OF REACH: the grading law asks for %.1f mm3 and the "
+                   "emitter delivers %.1f at x1. Thickening does not close it -- the node "
+                   "merge welds a polyline finer than its own bead, so a fatter strut "
+                   "COLLAPSES the curve it belongs to. Shipping the uncalibrated bead.\n",
+                   target, v_at_one);
+      k = 1.0;
+    }
+    set_k(k);
+    std::fprintf(stderr,
+                 "[bead] calibrated ON WHAT SHIPS: x%.4f in %d trial(s)%s%s | target "
+                 "%.1f mm3, shipped union %.1f at x1 -> %.1f at the factor (%+.2f %%), "
+                 "%zu span(s) | %.1f s\n",
+                 k, steps + 1,
+                 converged ? "" : (bracketed ? " (PINNED at the factor bracket -- the "
+                                               "emitter cannot reach this target)"
+                                             : " (NOT converged)"),
+                 floored ? " (FLOORED at the extrudable width)" : "", target, v_at_one,
+                 v_final, target > 0.0 ? 100.0 * (v_final - target) / target : 0.0,
+                 trial_spans, wall_seconds() - t0cal);
+    organic = &calibrated_lat;
+  }
+
   LatticeGenObserver weld_obs;
   weld_obs.on_element = [&organic_spans](LatticeGenElement, const Vec3& a,
                                          const Vec3& b, double r) {
@@ -4628,6 +4774,7 @@ OrganicOutcome run_organic_step(bool shell_is_written,
   // modelling limit, so the floor is the larger of the two.
   op.rho_min = std::max(band_rho_min, kOrganicVdiDensityFloor);
   op.rho_max = band_rho_max;
+  op.defer_bead_calibration = jg.organic_calibrate_on_shipped && !bead_is_stated;
   oo.rho_min_used = op.rho_min;
   oo.rho_max_used = op.rho_max;
   const double t0 = wall_seconds();
@@ -4703,7 +4850,9 @@ void fill_organic_run_info(RunInfo& gi, const OrganicOutcome& oo) {
   } else if (r.bead_calibration_iterations > 0) {
     std::fprintf(stderr,
                  "[bead] calibration x%.4f in %d step(s)%s: target %.1f mm3, union "
-                 "%.1f mm3 (%+.2f %%), naive sum %.1f mm3 (%.1f %% of it overlap)\n",
+                 "%.1f mm3 (%+.2f %%), naive sum %.1f mm3 (%.1f %% of it overlap); "
+                 "measured on %zu span(s), %.1f mm of centreline, median dia %.4f mm "
+                 "BEFORE the factor\n",
                  r.bead_calibration, r.bead_calibration_iterations,
                  r.bead_calibration_floored ? " (FLOORED at the extrudable width)" : "",
                  r.bead_calibration_target_mm3, r.bead_calibration_union_mm3,
@@ -4712,7 +4861,9 @@ void fill_organic_run_info(RunInfo& gi, const OrganicOutcome& oo) {
                            r.bead_calibration_target_mm3
                      : 0.0,
                  r.bead_calibration_naive_mm3,
-                 100.0 * r.bead_calibration_overlap_fraction);
+                 100.0 * r.bead_calibration_overlap_fraction,
+                 r.bead_calibration_spans, r.bead_calibration_length_mm,
+                 r.bead_calibration_median_dia_mm);
   }
   gi.organic_trace_seconds = oo.trace_seconds;
   copy_growth_stats(gi, oo.growth, oo.growth_ran);
@@ -6431,7 +6582,8 @@ LatticeVariantOutcome lattice_one_variant(
       organic.ran ? &organic.lat : nullptr,
       stepped_passes.empty() ? nullptr : &stepped_passes,
       job.grading.organic_strut_embed_mm, job.grading.organic_dual_contour,
-      job.grading.organic_dc_cell_mm, job.grading.organic_dc_tolerance_mm);
+      job.grading.organic_dc_cell_mm, job.grading.organic_dc_tolerance_mm,
+      job.grading.organic_calibrate_on_shipped);
   // ★ THE EXPORT'S RETURN REPLACES THE WHOLE OUTCOME, and the growth stats copied
   // onto it above went with it -- the receipt read growth_ran: false and zero ties on
   // every grown run until 2026-09-05. Copy them again, after the replacement.

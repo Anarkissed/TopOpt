@@ -64,16 +64,18 @@ int main(int argc, char** argv) {
     std::printf("union volume %.1f +/- %.1f mm3 (the target this must reproduce)\n",
                 u.volume_mm3, u.std_error_mm3);
     bool adaptive = true; double tol = 0.0; bool write = true;
-    double mult = 8.0;
+    double mult = 8.0; unsigned long long budget = 0;
     for (int ai = 3; ai < argc; ++ai) {
       if (std::strcmp(argv[ai], "--uniform") == 0) { adaptive = false; continue; }
       if (std::strcmp(argv[ai], "--no-write") == 0) { write = false; continue; }
       if (std::strcmp(argv[ai], "--no-merge") == 0) { mult = 1.0; continue; }
       if (std::strcmp(argv[ai], "--mult") == 0 && ai + 1 < argc) { mult = std::atof(argv[++ai]); continue; }
+      if (std::strcmp(argv[ai], "--budget") == 0 && ai + 1 < argc) { budget = std::strtoull(argv[++ai], nullptr, 10); continue; }
       if (std::strcmp(argv[ai], "--tol") == 0 && ai + 1 < argc) { tol = std::atof(argv[++ai]); continue; }
       LatticeDcOptions o;
       o.cell_mm = std::atof(argv[ai]); o.adaptive = adaptive; o.simplify_tolerance_mm = tol;
       o.max_leaf_multiple = mult;
+      if (budget) o.max_active_cells = static_cast<std::size_t>(budget);
       LatticeDcStats st;
       TriangleMesh m = lattice_dual_contour(sp, o, st);
       std::printf("  %-7s h=%.3f tol=%.4f x%.0f  leaf %.3f-%.3f  visited %9zu act %8zu "

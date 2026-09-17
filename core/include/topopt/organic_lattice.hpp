@@ -751,6 +751,10 @@ struct OrganicParams {
   // bead came from that same law, and wrong when the bead is a number the user stated.
   // With this set, radii leave the tracer exactly as the diameter field specified them.
   bool bead_is_stated = false;
+  // ★ Compute and REPORT the target, but do not scale: the caller will solve the factor
+  // against the spans the emitter actually produces, which is a different network from
+  // the curves measured here (see run_job's calibration loop).
+  bool defer_bead_calibration = false;
 
   // The Jobard-Lefer ratios and the integrator step. See the constants above.
   double test_ratio = kOrganicTestRatio;
@@ -988,6 +992,8 @@ struct OrganicReport {
   bool bead_calibration_floored = false;  // the minimum extrudable width won
   // The job stated organic_strut_width_mm, so no factor was derived and none applied.
   bool bead_calibration_skipped_stated = false;
+  // The tracer computed the target and left the scaling to the caller.
+  bool bead_calibration_deferred = false;
   // ── what the calibration actually solved against ───────────────────────────
   // The target is the volume the grading law asked for; `union` is the volume the
   // calibrated lattice really occupies, measured without a mesh; `naive` is the sum of
@@ -999,6 +1005,11 @@ struct OrganicReport {
   double bead_calibration_naive_mm3 = 0.0;
   double bead_calibration_overlap_fraction = 0.0;
   int bead_calibration_iterations = 0;
+  // What the calibration was LOOKING AT: the centreline length and the median span
+  // diameter of the network it measured, so the basis can be compared with what ships.
+  double bead_calibration_length_mm = 0.0;
+  double bead_calibration_median_dia_mm = 0.0;
+  std::size_t bead_calibration_spans = 0;
   bool bead_calibration_converged = false;
   double min_extrudable_width_mm = 0.0;
   std::size_t spacing_raised_for_print_voxels = 0;       // d below the printable floor
@@ -1241,6 +1252,14 @@ inline constexpr int kOrganicDensityUnionSubdivDefault = 6;
 inline constexpr std::size_t kOrganicBeadCalibrationSamples = 300000;
 inline constexpr int kOrganicBeadCalibrationSteps = 6;
 inline constexpr double kOrganicBeadCalibrationTol = 0.002;
+// Trials allowed when the factor is solved against the EMITTER's output. Each trial is a
+// full emission, so this is a real cost and the cap is deliberately tight; the secant
+// reaches the tolerance in two on the M2 stand.
+inline constexpr int kOrganicCalibrationShippedSteps = 4;
+// What a calibration is allowed to do to a part. Outside this the factor is not a bead
+// that needs adjusting but a target the emitter cannot deliver, and the run says so.
+inline constexpr double kOrganicCalibrationFactorMin = 0.5;
+inline constexpr double kOrganicCalibrationFactorMax = 2.0;
 
 // Modifies `stress` (6 per voxel) in place for candidate voxels whose
 // `voxel_region_id` names a configured region. A voxel is DEAD when its von Mises is

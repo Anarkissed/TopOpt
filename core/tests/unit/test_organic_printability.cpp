@@ -818,6 +818,51 @@ void test_union_voxel_volume() {
   }
 }
 
+// ── DEFERRING THE CALIBRATION MUST STILL HAND OVER A TARGET ─────────────────────
+// The factor is now solved against the spans the EMITTER produces, which the tracer
+// cannot see. So the tracer's job becomes: measure what the grading law asked for, report
+// it, and scale NOTHING. Both halves of that matter -- a deferral that also dropped the
+// target would leave the caller solving for zero, and a deferral that still scaled would
+// apply the factor twice.
+void test_deferred_calibration_reports_but_does_not_scale() {
+  using namespace topopt;
+  auto trace_with = [&](bool defer) {
+    GrowFixture f = grow_fixture();
+    static std::vector<double> bead;
+    bead.assign(f.grid.voxel_count(), 0.8);
+    f.params.strut_diameter_field = &bead;
+    f.params.bead_is_stated = false;          // the calibration is in play
+    f.params.defer_bead_calibration = defer;
+    return trace_organic_lattice(f.grid, f.cand, f.stress, f.spacing, nullptr, f.params);
+  };
+  const OrganicLattice applied = trace_with(false);
+  const OrganicLattice deferred = trace_with(true);
+  CHECK(!deferred.curves.empty(), "deferred calibration: it traced something");
+
+  CHECK(deferred.report.bead_calibration_deferred,
+        "deferred calibration: the report says the caller owns the factor");
+  CHECK(deferred.report.bead_calibration_target_mm3 > 0.0,
+        "deferred calibration: the TARGET is still handed over -- without it the caller "
+        "would be solving for nothing");
+  CHECK(std::fabs(deferred.report.bead_calibration_target_mm3 -
+                  applied.report.bead_calibration_target_mm3) < 1e-9,
+        "deferred calibration: and it is the same target either way");
+  CHECK(deferred.report.bead_calibration == 1.0,
+        "deferred calibration: nothing was scaled here");
+  // ★ THE CONTROL: the non-deferred path really does move the radius, so the check above
+  // is not passing on a fixture where the factor happened to be 1.
+  CHECK(std::fabs(applied.report.bead_calibration - 1.0) > 1e-6,
+        "deferred calibration CONTROL: the in-tracer calibration does scale when asked, "
+        "so 'nothing was scaled' is a real observation");
+  bool radius_differs = false;
+  for (std::size_t i = 0; i < deferred.curves.size() && i < applied.curves.size(); ++i)
+    if (std::fabs(deferred.curves[i].radius_mm - applied.curves[i].radius_mm) > 1e-9)
+      radius_differs = true;
+  CHECK(radius_differs,
+        "deferred calibration: the emitted radii differ between the two paths, which is "
+        "the whole point of deferring");
+}
+
 // ── G2: NO SILENT FALLBACK TO THE TRACED CURVES ─────────────────────────────────
 void test_growth_does_not_fall_back() {
   GrowFixture f = grow_fixture();
@@ -1675,6 +1720,7 @@ int main() {
   test_stated_strut_width_is_exact();
   test_bead_calibration_hits_the_union_volume();
   test_certified_density_follows_the_shipped_spans();
+  test_deferred_calibration_reports_but_does_not_scale();
   test_union_voxel_volume();
   test_growth_does_not_fall_back();
   test_growth_is_supported();
