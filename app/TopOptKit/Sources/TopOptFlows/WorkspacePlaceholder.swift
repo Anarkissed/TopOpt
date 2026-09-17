@@ -4378,7 +4378,7 @@ public struct WorkspacePlaceholder: View {
             if c == .grade, !hasGrade { return nil }
             return LatticeLegendGroup(id: c.id, name: c.title, colour: c.colour,
                                       detail: c.detail, latticed: true,
-                                      gradientFrom: c.gradientFrom)
+                                      gradientFrom: c.gradientFrom, brief: c.brief)
         }
     }
 

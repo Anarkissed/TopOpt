@@ -528,3 +528,7 @@ green "bled too far" at 5 mm.
   compile (the pipeline is built with `try?`, so nothing said so on screen).
   `UnifiedShadingTests.testTheShaderSourcesActuallyCompile` caught it; fixed and
   re-installed. The note at that call site says exactly this would happen.
+- **01:10:** legend rows are name on ONE line, a one-line `brief` under it with the (i)
+  at its end (`LatticeStructureClass.brief`: "The outline and any finish" / "Ordinary
+  fill" / "Thickens toward the outline"), the full sentence under that while the (i)
+  is on.

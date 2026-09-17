@@ -37,11 +37,14 @@ public struct LatticeLegendGroup: Identifiable, Equatable, Sendable {
     /// When set, the swatch is a ramp from this colour to `colour` — the grade row,
     /// whose tint IS a gradient on screen.
     public let gradientFrom: RGBAColor?
+    /// One short line under the name; the (i) at its end opens `detail`.
+    public let brief: String
 
     public init(id: UUID, name: String, colour: RGBAColor, detail: String, latticed: Bool,
-                gradientFrom: RGBAColor? = nil) {
+                gradientFrom: RGBAColor? = nil, brief: String = "") {
         self.id = id; self.name = name; self.colour = colour
         self.detail = detail; self.latticed = latticed; self.gradientFrom = gradientFrom
+        self.brief = brief
     }
 }
 
@@ -511,16 +514,25 @@ public struct LatticeLegendPanel: View {
                     // ★ THE SENTENCE LIVES BEHIND AN (i) (2026-09-17: "remove all the
                     // text below each legend name, placing them into a (i) next to
                     // their titles"); tapping it shows the sentence under the name.
-                    VStack(alignment: .leading, spacing: 1) {
-                        HStack(spacing: 6) {
-                            Text(g.name)
-                                .font(.system(size: T.name, weight: .semibold))
-                                .foregroundStyle(DS.Color.textPrimary.color)
+                    // Name on ONE line, a one-line brief under it with the (i) at its
+                    // end (2026-09-17: "the names are broken out into two lines").
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(g.name)
+                            .font(.system(size: T.name, weight: .semibold))
+                            .foregroundStyle(DS.Color.textPrimary.color)
+                            .lineLimit(1)
+                            .fixedSize(horizontal: true, vertical: false)
+                        HStack(spacing: 5) {
+                            Text(g.brief.isEmpty ? g.detail : g.brief)
+                                .font(.system(size: T.detail))
+                                .foregroundStyle(DS.Color.textTertiary.color)
+                                .lineLimit(1)
+                                .fixedSize(horizontal: true, vertical: false)
                             Button {
                                 if infoOpen.contains(g.id) { infoOpen.remove(g.id) } else { infoOpen.insert(g.id) }
                             } label: {
                                 Image(systemName: infoOpen.contains(g.id) ? "info.circle.fill" : "info.circle")
-                                    .font(.system(size: T.name))
+                                    .font(.system(size: T.detail + 1))
                                     .foregroundStyle(DS.Color.accent.color)
                             }
                             .buttonStyle(.plain)

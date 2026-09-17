@@ -75,6 +75,15 @@ public enum LatticeStructureClass: String, CaseIterable, Sendable {
         }
     }
 
+    /// One short line under the name (the (i) at its end opens `detail`).
+    public var brief: String {
+        switch self {
+        case .rim:      return "The outline and any finish"
+        case .interior: return "Ordinary fill"
+        case .grade:    return "Thickens toward the outline"
+        }
+    }
+
     /// The colour a ramp to this class starts from (nil ⇒ a flat swatch).
     public var gradientFrom: RGBAColor? {
         self == .grade ? LatticeStructureColour.interior : nil
