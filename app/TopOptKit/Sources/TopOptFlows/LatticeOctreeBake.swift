@@ -57,6 +57,39 @@ extension LatticePreviewOccupancy {
     public static let bleedStartsAtBandMM = 25.0
 
     /// One cell size per texel at the finest rung's pitch, chosen by the octree.
+    /// ★★★ STEPPED'S MENU IS ANY STEP (his 2026-09-17: "To me that's what stepped
+    /// means: taking ANY step. If they all add up to the same outline number, who
+    /// cares" — and "Go - exclude 10 and 11, no solid strips"). Every k·(base/n) for
+    /// n up to 6: halves, thirds, quarters, sixths and their multiples — on a 12 mm
+    /// base at a 3 mm floor that is 12, 9, 8, 6, 4, 3. A 1/n tile has to be at or
+    /// above the floor AND print open (the same bead-density bound as the dyadic
+    /// finest rung), which is what drops 10 and 11 from a 12: they would need a 2 mm
+    /// tile behind them, and 2 mm at a 0.45 bead is a quilt. DEPTH-CLEAN BY
+    /// CONSTRUCTION: a k/n cell at the face leaves (n−k)/n of the wall behind it,
+    /// which the 1/n tiles fill exactly — no solid strip ever. Descending; the base
+    /// first, the finest last.
+    public static func steppedSizeMenu(base: Double, floorMM: Double,
+                                       lineWidthMM: Double, latticeID: String) -> [Double] {
+        let law = latticeID.isEmpty ? nil : LatticeType.named(latticeID)
+        func printsOpen(_ r: Double) -> Bool {
+            guard let law, lineWidthMM > 0 else { return true }
+            return law.printabilityDensityFloor(lineWidthMM: lineWidthMM, cellMM: r) <= finestRungMaxDensity + 1e-9
+        }
+        var menu: [Double] = [base]
+        for n in 2...steppedMenuMaxDivisor {
+            let t = base / Double(n)
+            guard t >= floorMM - 1e-9, printsOpen(t) else { continue }
+            for k in 1..<n {
+                let s = t * Double(k)
+                if !menu.contains(where: { abs($0 - s) < 1e-6 * base }) { menu.append(s) }
+            }
+        }
+        return menu.sorted(by: >)
+    }
+    /// The largest divisor of the base a Stepped tile may be: sixths. The start grid
+    /// inside a base slot is base/12, which every family up to sixths lands on.
+    public static let steppedMenuMaxDivisor = 6
+
     public static func octreeCellField(occupancy occ: LatticeVoxelGrid,
                                        demand: LatticeVoxelGrid?,
                                        regions: [LatticeRegionSpec],
@@ -164,7 +197,13 @@ extension LatticePreviewOccupancy {
             }
             return sizes
         }
-        ladders = ladders.map { Ladder(region: $0.region, sizes: ladderSizes(base: cellMM[$0.region]), axis: $0.axis) }
+        ladders = ladders.map {
+            let base = cellMM[$0.region]
+            let sizes = dyadicSteps
+                ? ladderSizes(base: base)
+                : steppedSizeMenu(base: base, floorMM: floorMM, lineWidthMM: lineWidthMM, latticeID: latticeID)
+            return Ladder(region: $0.region, sizes: sizes, axis: $0.axis)
+        }
         let pitch = ladders.map { $0.sizes.last! }.min()!
         stats.pitchMM = pitch
 
@@ -332,6 +371,12 @@ extension LatticePreviewOccupancy {
         let gorigin = SIMD3<Double>(grid.origin)
         var size = [Float](repeating: 0, count: grid.count)
         var phase = [Float](repeating: 0, count: grid.count)
+        // ★ EACH CELL'S OWN ORIGIN, per texel, in texel units modulo the cell's size in
+        // texel units — what the shader subtracts before it floors. Stepped cells sit
+        // anywhere on their family's grid, so the origin can no longer be derived from
+        // the size; the dyadic path writes it too (in-plane 0, the face-plane shift
+        // along the normal), so one shader path serves both.
+        var origin = [SIMD3<Float>](repeating: SIMD3<Float>(repeating: 0), count: grid.count)
         var bandT = [Float](repeating: 1, count: grid.count)
         var outlineMM = [Float](repeating: 1e3, count: grid.count)
         var owner = [Int8](repeating: -1, count: grid.count)
@@ -383,7 +428,7 @@ extension LatticePreviewOccupancy {
             }
             var lastFail = ""
             var outlineFailed = false
-            func fits(_ lo: SIMD3<Double>, _ S: Double) -> (fits: Bool, nearest: Double, farthest: Double) {
+            func fits(_ lo: SIMD3<Double>, _ S: Double, fast: Bool = false) -> (fits: Bool, nearest: Double, farthest: Double) {
                 var nearest = 1e3, farthest = -1e3
                 var ok = true
                 lastFail = ""
@@ -392,7 +437,7 @@ extension LatticePreviewOccupancy {
                 for cz in 0...1 { for cy in 0...1 { for cx in 0...1 {
                     let corner = lo + SIMD3<Double>(Double(cx), Double(cy), Double(cz)) * S
                     let sgn = SIMD3<Double>(cx == 0 ? 1 : -1, cy == 0 ? 1 : -1, cz == 0 ? 1 : -1)
-                    let d = dOut(corner + sgn * eps)
+                    let d = fast ? dOutFast(corner + sgn * eps) : dOut(corner + sgn * eps)
                     nearest = Swift.min(nearest, d)
                     farthest = Swift.max(farthest, d)
                     if d < band { ok = false; outlineFailed = true; if lastFail.isEmpty { lastFail = "outline" } }
@@ -436,8 +481,17 @@ extension LatticePreviewOccupancy {
             // (`solidBandMM`); the finest cells run up to it and their struts end
             // inside it, so every texel with any of its extent inside the outline is
             // painted as a plain cell and the band is drawn over it.
-            func paint(_ lo: SIMD3<Double>, _ S: Double, level: Int, edge: Bool, nearest: Double) {
+            func paint(_ lo: SIMD3<Double>, _ S: Double, finest: Bool, edge: Bool, nearest: Double) {
                 let ph = tilingPhase(region: region, cellMM: S, origin: grid.origin) ?? 0
+                // The cell's origin in texel units, modulo its size in texel units.
+                let m = S / pitch
+                var orig = SIMD3<Float>(repeating: 0)
+                for ax in 0..<3 {
+                    let q = (lo[ax] - gorigin[ax]) / pitch
+                    var r = q - (q / m).rounded(.down) * m
+                    if r < 1e-6 * m || r > m - 1e-6 * m { r = 0 }
+                    orig[ax] = Float(r)
+                }
                 let t: Float = (shapeFit && shapeFitBandMM > 0)
                     ? Float(Swift.max(0, Swift.min(1, nearest / shapeFitBandMM))) : 1
                 // ★ A TEXEL BELONGS TO THE CELL ITS MIDDLE IS IN. Texel i spans
@@ -520,9 +574,10 @@ extension LatticePreviewOccupancy {
                                 guard occupied(c) || occupiedNear(c) else { continue }
                             }
                             owner[idx] = Int8(ladder.region)
-                            isFinest[idx] = level == ladder.sizes.count - 1
+                            isFinest[idx] = finest
                             size[idx] = halfRepresentable(Float(S))
                             phase[idx] = ph
+                            origin[idx] = orig
                             bandT[idx] = t
                             outlineMM[idx] = Float(Swift.max(0, Swift.min(1e3, d)))
                             painted += 1
@@ -558,7 +613,14 @@ extension LatticePreviewOccupancy {
                     stats.why[key, default: 0] += 1
                 }
                 if ok && centreOK {
-                    paint(lo, S, level: level, edge: false, nearest: nearest)
+                    paint(lo, S, finest: finestLevel, edge: false, nearest: nearest)
+                    return
+                }
+                // ★★★ STEPPED: ANY STEP. A base slot that fails is PACKED, not halved:
+                // every menu size in turn, largest first, at any position on its
+                // family's grid inside the slot; then the finest fills whatever is left.
+                if !dyadicSteps, level == 0, ladder.sizes.count > 1 {
+                    packSlot(lo, sBase)
                     return
                 }
                 if level + 1 < ladder.sizes.count {
@@ -575,9 +637,115 @@ extension LatticePreviewOccupancy {
                 // prism) is a plain cell, painted where there is material and clipped
                 // by the part like any other.
                 if outlineFailed {
-                    if farthest > 0 { paint(lo, S, level: level, edge: true, nearest: nearest) }
+                    if farthest > 0 { paint(lo, S, finest: true, edge: true, nearest: nearest) }
                 } else {
-                    paint(lo, S, level: level, edge: false, nearest: nearest)
+                    paint(lo, S, finest: true, edge: false, nearest: nearest)
+                }
+            }
+            /// ★★★ THE STEPPED PACKER (his 2026-09-17 rule). The slot is a base-cell
+            /// cube; its start grid is base/12, which halves, thirds, quarters and
+            /// sixths all land on. Sizes are tried largest first; a size k·(base/n)
+            /// may start at any multiple of its own tile base/n, so a 9 mm cell sits
+            /// at 0 or 3 in a 12 mm slot — whichever the outline allows first — and
+            /// the 3 mm tiles behind and beside it land on the same grid. Depth is
+            /// scanned from the FACE inward so the face layer fills first. Cells never
+            /// overlap (the `taken` mask) and never straddle the slot. Neighbouring
+            /// cells of different families share no nodes — that is Stepped, and core
+            /// counts those ends; Default Grade never comes here.
+            ///
+            /// ★ NOTHING IS LEFT UNOWNED: after the packing a fill pass walks the finest
+            /// tile's nested grid and paints only the texels no cell claimed (paint
+            /// skips owned texels), cut by the outline where it is, so a sliver the
+            /// outline leaves between two families is drawn rather than left as a
+            /// hole — the same edge treatment the finest rung always had.
+            func packSlot(_ lo0: SIMD3<Double>, _ S0: Double) {
+                let menu = Array(ladder.sizes.dropFirst())
+                let nG = 2 * steppedMenuMaxDivisor
+                let g = S0 / Double(nG)
+                var taken = [Bool](repeating: false, count: nG * nG * nG)
+                func cellIndex(_ i: SIMD3<Int>) -> Int { (i.z * nG + i.y) * nG + i.x }
+                func isFree(_ i0: SIMD3<Int>, _ span: Int) -> Bool {
+                    for z in i0.z..<(i0.z + span) { for y in i0.y..<(i0.y + span) { for x in i0.x..<(i0.x + span) {
+                        if taken[cellIndex(SIMD3<Int>(x, y, z))] { return false }
+                    }}}
+                    return true
+                }
+                func take(_ i0: SIMD3<Int>, _ span: Int) {
+                    for z in i0.z..<(i0.z + span) { for y in i0.y..<(i0.y + span) { for x in i0.x..<(i0.x + span) {
+                        taken[cellIndex(SIMD3<Int>(x, y, z))] = true
+                    }}}
+                }
+                let ax1 = (axis + 1) % 3, ax2 = (axis + 2) % 3
+                /// Candidate starts for a cell of `span` grid steps whose family tile is
+                /// `step` grid steps: multiples of `step`, depth from the face first.
+                func candidates(span: Int, step: Int) -> [SIMD3<Int>] {
+                    var out: [SIMD3<Int>] = []
+                    let maxI = nG - span
+                    var a = 0
+                    while a <= maxI {
+                        var b = 0
+                        while b <= maxI {
+                            var c = 0
+                            while c <= maxI {
+                                var i = SIMD3<Int>(repeating: 0)
+                                i[axis] = n[axis] > 0 ? a : maxI - a
+                                i[ax1] = b; i[ax2] = c
+                                out.append(i)
+                                c += step
+                            }
+                            b += step
+                        }
+                        a += step
+                    }
+                    return out
+                }
+                func familyStep(_ S: Double) -> Int {
+                    // the tile this size is a multiple of: base/n for the smallest n
+                    // whose tile divides S
+                    for nn in 2...steppedMenuMaxDivisor {
+                        let t = S0 / Double(nn)
+                        let k = S / t
+                        if abs(k - k.rounded()) < 1e-6 { return Swift.max(1, Int((t / g).rounded())) }
+                    }
+                    return 1
+                }
+                for S in menu {
+                    let span = Int((S / g).rounded())
+                    guard span >= 1, span <= nG else { continue }
+                    let isF = abs(S - f) < 1e-9
+                    for i in candidates(span: span, step: familyStep(S)) {
+                        guard isFree(i, span) else { continue }
+                        let lo = lo0 + SIMD3<Double>(Double(i.x), Double(i.y), Double(i.z)) * g
+                        let dc = dOutFast(lo + SIMD3<Double>(repeating: 0.5 * S))
+                        if dc < -0.87 * S { continue }
+                        let (ok, nearest, _) = fits(lo, S, fast: true)
+                        let centreOK = isF || !(shapeFit && shapeFitBandMM > 0 && sBase > f + 1e-9)
+                            || dc >= shapeFitBandMM * (S - f) / (sBase - f) - 1e-9
+                        guard ok && centreOK else { continue }
+                        paint(lo, S, finest: isF, edge: false, nearest: nearest)
+                        take(i, span)
+                    }
+                }
+                // The fill pass: the finest tile on its nested grid, into unowned texels.
+                let span = Int((f / g).rounded())
+                for i in candidates(span: span, step: span) {
+                    if isFree(i, span) == false {
+                        // wholly taken? then nothing to fill here
+                        var anyFree = false
+                        for z in i.z..<(i.z + span) where !anyFree { for y in i.y..<(i.y + span) where !anyFree { for x in i.x..<(i.x + span) {
+                            if !taken[cellIndex(SIMD3<Int>(x, y, z))] { anyFree = true; break }
+                        }}}
+                        if !anyFree { continue }
+                    }
+                    let lo = lo0 + SIMD3<Double>(Double(i.x), Double(i.y), Double(i.z)) * g
+                    let dc = dOutFast(lo + SIMD3<Double>(repeating: 0.5 * f))
+                    if dc < -0.87 * f { continue }
+                    let (ok, nearest, farthest) = fits(lo, f)
+                    if ok || !outlineFailed {
+                        paint(lo, f, finest: true, edge: false, nearest: nearest)
+                    } else if farthest > 0 {
+                        paint(lo, f, finest: true, edge: true, nearest: nearest)
+                    }
                 }
             }
             // Level-0 slots covering the region's box.
@@ -649,6 +817,7 @@ extension LatticePreviewOccupancy {
         stats.seconds = Date().timeIntervalSince(t0)
         return LatticeCellField(field: out, level: outlineMM,
                                 steppedCellMM: size, steppedPhase: phase,
+                                steppedOrigin: origin,
                                 baseCellMM: pitch,
                                 maxLevel: {
                                     let maxMM = Double(size.max() ?? 0)

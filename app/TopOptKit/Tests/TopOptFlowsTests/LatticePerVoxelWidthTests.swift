@@ -92,9 +92,21 @@ final class LatticePerVoxelWidthTests: XCTestCase {
         XCTAssertGreaterThan(st.slotsKept[regionCell] ?? 0, 10,
                              "the 8.59 mm sliver must not pin the face: whole 12.03 mm cells "
                              + "are expected over the 12 mm bulk; kept=\(st.slotsKept)")
-        // 12.03 / 4 = 3.0075 is the finest rung: 2.005 would put a bead-wide strut at
-        // 26.5 % of the cell (core's law), over `finestRungMaxDensity`.
-        let rungs = [12.03, 6.015, 3.0075]
+        // 12.03 / 4 = 3.0075 is the finest tile: 2.005 would put a bead-wide strut at
+        // 26.5 % of the cell (core's law), over `finestRungMaxDensity`. Stepped's menu
+        // (2026-09-17, any step) is every multiple of the halves, thirds and quarters:
+        // and fifths (2.41 mm prints open at a 0.45 bead, just under the ceiling):
+        // 12.03, 9.62, 9.02, 8.02, 7.22, 6.015, 4.81, 4.01, 3.0075, 2.41 — the same
+        // list the bake builds. Never 10.03 or 11.03: they would need a 2.0 or 1.0 mm
+        // tile behind them, and neither prints open ("exclude 10 and 11").
+        let rungs = LatticePreviewOccupancy.steppedSizeMenu(base: 12.03, floorMM: 1.625,
+                                                            lineWidthMM: 0.45, latticeID: "octet")
+        for want in [12.03, 9.0225, 8.02, 6.015, 4.01, 3.0075] {
+            XCTAssertTrue(rungs.contains { abs($0 - want) < 1e-6 }, "\(want) missing from \(rungs)")
+        }
+        for never in [12.03 * 10 / 12, 12.03 * 11 / 12, 12.03 / 6] {
+            XCTAssertFalse(rungs.contains { abs($0 - never) < 1e-6 }, "\(never) must not be on the menu: \(rungs)")
+        }
         for (size, count) in hist {
             let mm = Double(size)
             XCTAssertLessThanOrEqual(

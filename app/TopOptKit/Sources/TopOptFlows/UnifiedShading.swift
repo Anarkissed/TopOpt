@@ -396,12 +396,15 @@ static LCell lsdf_cell_frame_at(constant LSDFUniforms& U, texture3d<float> cellT
             // least a texel wide). One extra read, only at straddles.
             float3 useBI = bi;
             for (int pass = 0; pass < 2; pass++) {
-                float packed = max(0.0, cs.a);
-                int paxis = int(floor(packed + 1e-4));
-                float pfrac = packed - float(paxis);
+                // ★ THE CELL'S ORIGIN, all three axes (2026-09-17, Stepped's any-step
+                // packing): `axis + 4·(qx + 128·(qy + 128·qz))`, q in 1/128ths of the
+                // cell — see `LatticeSDFRenderer.packCellOrigin`, the one encoder.
+                int packed = int(max(0.0, cs.a) + 0.5);
+                int paxis = packed & 3;
+                int pq = packed >> 2;
                 float m = sMM / max(S0, 1e-6);
-                float3 phase = float3(0.0);
-                if (paxis >= 0 && paxis <= 2) { phase[paxis] = pfrac * m; }
+                float3 phase = float3(float(pq & 127), float((pq >> 7) & 127), float((pq >> 14) & 127))
+                             * (m / 128.0);
                 float3 home = floor((useBI + 0.5 - phase) / max(m, 1e-6));
                 float3 blkP = floor((cb - phase) / max(m, 1e-6));
                 if (pass == 0 && any(blkP != home)) {

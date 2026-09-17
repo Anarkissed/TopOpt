@@ -2903,34 +2903,67 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
         guard f.level.count == grid.values.count else { return nil }
         let d = MTLTextureDescriptor()
         d.textureType = .type3D
-        // ★ FOUR CHANNELS SINCE STEPPED: r = demand, g = dyadic level, b = the stepped
-        // cell's size in mm (0 = not stepped), a unused. The shader reads `.b` only
-        // when it is positive, so the doubled path is byte-identical.
-        d.pixelFormat = .rgba16Float
+        // ★ FOUR CHANNELS SINCE STEPPED: r = demand, g = dyadic level (the solid
+        // depth on the octree path), b = the stepped cell's size in mm (0 = not
+        // stepped), a = the cell's ORIGIN, packed. The shader reads `.b` only when it
+        // is positive, so the doubled path is byte-identical.
+        // ★★ 32-BIT SINCE 2026-09-17 (Stepped's any-step packing): a Stepped cell sits
+        // anywhere on its family's grid, so `a` has to carry its origin on ALL THREE
+        // axes — three 7-bit fractions of the cell plus the face axis, 23 bits, which
+        // a half's 11 cannot hold and a float's 24 can, exactly. Quantised to 1/128 of
+        // the cell: 0.05 mm at 12 mm, 0.012 at 3 — the same order as the half the old
+        // single fraction lived in. `lsdf_cell_frame_at` unpacks the same way.
+        d.pixelFormat = .rgba32Float
         d.width = grid.nx; d.height = grid.ny; d.depth = grid.nz
         d.usage = [.shaderRead]
         d.storageMode = .shared
         guard let tex = device.makeTexture(descriptor: d) else { return nil }
         let hasStepped = f.steppedCellMM.count == grid.values.count
-        var halfs = [UInt16](repeating: 0, count: grid.values.count * 4)
+        let hasPhase = f.steppedPhase.count == grid.values.count
+        let hasOrigin = f.steppedOrigin.count == grid.values.count
+        let pitch = Float(f.baseCellMM)
+        var vals = [Float](repeating: 0, count: grid.values.count * 4)
         for n in 0..<grid.values.count {
-            halfs[4 * n] = float32to16(grid.values[n])
-            halfs[4 * n + 1] = float32to16(hasStepped && f.solidDepthMM.count == grid.values.count
-                                            ? f.solidDepthMM[n] : f.level[n])
-            halfs[4 * n + 2] = hasStepped ? float32to16(f.steppedCellMM[n]) : 0
-            // ★ a = the owning region's tiling phase, `axis + fraction` — see
-            // `LatticeCellField.steppedPhase`. 0 is "no shift", the old behaviour.
-            halfs[4 * n + 3] = f.steppedPhase.count == grid.values.count
-                             ? float32to16(f.steppedPhase[n]) : 0
+            vals[4 * n] = grid.values[n]
+            vals[4 * n + 1] = hasStepped && f.solidDepthMM.count == grid.values.count
+                            ? f.solidDepthMM[n] : f.level[n]
+            let sMM = hasStepped ? f.steppedCellMM[n] : 0
+            vals[4 * n + 2] = sMM
+            vals[4 * n + 3] = Self.packCellOrigin(
+                sizeMM: sMM, pitchMM: pitch,
+                phase: hasPhase ? f.steppedPhase[n] : 0,
+                origin: hasOrigin ? f.steppedOrigin[n] : nil)
         }
-        halfs.withUnsafeBytes { raw in
+        vals.withUnsafeBytes { raw in
             tex.replace(region: MTLRegionMake3D(0, 0, 0, grid.nx, grid.ny, grid.nz),
                         mipmapLevel: 0, slice: 0,
                         withBytes: raw.baseAddress!,
-                        bytesPerRow: grid.nx * 8,
-                        bytesPerImage: grid.nx * grid.ny * 8)
+                        bytesPerRow: grid.nx * 16,
+                        bytesPerImage: grid.nx * grid.ny * 16)
         }
         return tex
+    }
+
+    /// The `a` channel: `axis + 4·(qx + 128·(qy + 128·qz))`, each q the cell's origin
+    /// on that axis as a fraction of the cell in 1/128ths (0–127); axis 3 = none. With
+    /// no per-cell origin the old `axis + fraction` (one fraction, along the axis) is
+    /// re-expressed the same way, so the shader has ONE decoder.
+    static func packCellOrigin(sizeMM: Float, pitchMM: Float, phase: Float, origin: SIMD3<Float>?) -> Float {
+        guard sizeMM > 0, pitchMM > 0 else { return 0 }
+        let m = sizeMM / pitchMM
+        let axisF = phase.rounded(.down)
+        let axis = (axisF >= 0 && axisF <= 2) ? Int(axisF) : 3
+        var q = SIMD3<Int>(repeating: 0)
+        if let origin {
+            for ax in 0..<3 {
+                let frac = Swift.max(0, origin[ax] / m)
+                q[ax] = Int((frac * 128).rounded()) % 128
+            }
+        } else if axis <= 2 {
+            let frac = Swift.max(0, phase - axisF)
+            q[axis] = Int((frac * 128).rounded()) % 128
+        }
+        return Float(axis + 4 * (q.x + 128 * (q.y + 128 * q.z)))
     }
 
     /// ★ The organic field as TWO channels (rg16Float): centreline distance, surface
@@ -3580,16 +3613,14 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
         if let t = neutralCellTex { return t }
         let d = MTLTextureDescriptor()
         d.textureType = .type3D
-        d.pixelFormat = .rgba16Float
+        d.pixelFormat = .rgba32Float          // the same format as `makeCellTexture`
         d.width = 1; d.height = 1; d.depth = 1
         d.usage = [.shaderRead]
         d.storageMode = .shared
         guard let t = device.makeTexture(descriptor: d) else { return nil }
-        var halfs: [UInt16] = [float32to16(0), float32to16(-1), 0, 0]
-        halfs.withUnsafeBytes { raw in
-            t.replace(region: MTLRegionMake3D(0, 0, 0, 1, 1, 1), mipmapLevel: 0, slice: 0,
-                      withBytes: raw.baseAddress!, bytesPerRow: 8, bytesPerImage: 8)
-        }
+        var v: SIMD4<Float> = SIMD4(0, -1, 0, 0)
+        t.replace(region: MTLRegionMake3D(0, 0, 0, 1, 1, 1), mipmapLevel: 0, slice: 0,
+                  withBytes: &v, bytesPerRow: 16, bytesPerImage: 16)
         neutralCellTex = t
         return t
     }

@@ -579,3 +579,36 @@ per-region base cell, no band and no outline beam. All three symptoms, one gate.
   Default Grade); it stays the Organic lattice switch under the cell types, and the
   grade-style row is already replaced by the organic row while that is on.
 - Installed 17:48:59. Not yet seen by him.
+
+## 16. 18:52 — Stepped is ANY STEP; Default Grade stays halves; the cell origin is stored
+
+His 17:58: Stepped and Default Grade drew the same picture (both of his ladders happen
+to be halves, so "thirds allowed" changed nothing). His ruling after the research:
+"To me that's what stepped means: taking ANY step" and "Go - exclude 10 and 11, no solid
+strips."
+
+- **The menu** (`LatticePreviewOccupancy.steppedSizeMenu`): every k·(base/n) for n ≤ 6
+  whose 1/n tile is at or above the floor AND prints open (the dyadic finest rung's
+  bead-density bound). On a 12 mm base at a 0.45 bead: 12, 9.6, 9, 8, 7.2, 6, 4.8, 4,
+  3, 2.4 (fifths print open at 2.4 mm, just under the 20 % ceiling; sixths at 2.0 do
+  not, which is exactly what drops 10 and 11). Depth-clean by construction: a k/n cell
+  at the face leaves (n−k)/n behind it, which the 1/n tiles fill — no solid strip.
+- **The packer** (`packSlot` in `LatticeOctreeBake`): a failed base slot is packed, not
+  halved — sizes largest first, each at any multiple of its own tile inside the slot
+  (a 9 sits at 0 or 3 in a 12), depth from the face inward, a `taken` mask so nothing
+  overlaps; then a fill pass paints the finest tile on its nested grid into any texel
+  no cell claimed. Default Grade (`dyadicSteps`) never enters it: nested halves.
+- **The cell origin is STORED, per texel, all three axes** (`LatticeCellField.
+  steppedOrigin`): the old `axis + fraction` carried one shift along the face normal
+  and derived the in-plane origin from the size — a 9 on a 3 grid would have drawn in
+  the wrong place. The cell texture is now `rgba32Float`; `.a` packs axis + three 7-bit
+  fractions (`LatticeSDFRenderer.packCellOrigin`, one encoder; `lsdf_cell_frame_at`
+  the one decoder; ≤ 1/256 cell error, 47 µm at 12 mm). The old scalar phase stays
+  written for the non-octree path and its tests.
+- Tests: `LatticeGradeToSolidBandTests` 10/10 (the 9-base case is now 9, 6, 4.5, 3 vs
+  9, 4.5), `LatticePerVoxelWidthTests` 3/3 (menu pins: 9.02 and 8.02 present, 10.03 /
+  11.03 / 2.0 absent), `LatticePhaseChannelReadbackProbe` rewritten 3/3, stepped phase
+  / solid fill / shader-compile suites green. Installed 18:52:18. Not yet seen by him.
+- **What to look for**: Stepped should now show 9.6 / 9 / 8 / 7.2 / 6 … cells between
+  the 12 mm cells and the outline, a staircase, with seams where families meet;
+  Default Grade 12 / 6 / 3 nested. The 10.31 wall: 10.31, 7.73, 6.87, 5.16, 3.44, 2.58.

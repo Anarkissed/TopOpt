@@ -405,21 +405,23 @@ final class LatticeGradeToSolidBandTests: XCTestCase {
     /// app's log said why: `GUARD algo='doubled' — preview draws the ladder` — Default
     /// Grade had been routed round the per-region bake to the old periodic ladder,
     /// which knows no per-region cell, no band and no outline. Now "doubled" feeds the
-    /// octree bake with `dyadicSteps`, and the only difference from Stepped is the
-    /// ladder: a 9 mm cell at a 2.6 mm floor grades 9 → 3 by thirds, and 9 → 4.5 by
-    /// halves. Both must still grade — the point of the report was that nothing did.
+    /// octree bake with `dyadicSteps`, and the difference from Stepped is the menu:
+    /// a 9 mm cell at a 2.6 mm floor is 9, 6, 4.5, 3 under Stepped (any step —
+    /// halves and thirds and their multiples) and 9, 4.5 under Default Grade. Both
+    /// must still grade — the point of the report was that nothing did.
     func testDefaultGradeTakesTheSameBakeWithAHalvesOnlyLadder() throws {
         let f = slabs([(9, 0, 40)])                       // 35 mm across: 3 × 9 leaves 8
-        let (_, thirds) = try bake(f, band: 0, floor: 2.6)
+        let (_, stepped) = try bake(f, band: 0, floor: 2.6)
         let (_, halves) = try bake(f, band: 0, floor: 2.6, dyadic: true)
-        let keptThirds = Set(thirds.slotsKept.keys.map { ($0 * 100).rounded() / 100 })
+        let keptStepped = Set(stepped.slotsKept.keys.map { ($0 * 100).rounded() / 100 })
         let keptHalves = Set(halves.slotsKept.keys.map { ($0 * 100).rounded() / 100 })
-        XCTAssertTrue(keptThirds.contains(3), "Stepped's ladder takes the third: 9 → 3; kept \(keptThirds)")
-        XCTAssertFalse(keptThirds.contains(4.5), "…and never 4.5 (its half is under the floor): \(keptThirds)")
+        XCTAssertTrue(keptStepped.isSubset(of: [9, 6, 4.5, 3]), "Stepped's menu on a 9: \(keptStepped)")
+        XCTAssertTrue(keptStepped.contains(6) || keptStepped.contains(3),
+                      "Stepped takes a third or a multiple of one where a half does not fit: \(keptStepped)")
         XCTAssertTrue(keptHalves.contains(4.5), "Default Grade halves: 9 → 4.5; kept \(keptHalves)")
         XCTAssertTrue(keptHalves.isSubset(of: [9, 4.5]), "…and takes no third: \(keptHalves)")
         XCTAssertEqual(halves.pitchMM, 4.5, accuracy: 1e-9, "the dyadic ladder's finest rung is the pitch")
-        XCTAssertEqual(thirds.pitchMM, 3, accuracy: 1e-9)
+        XCTAssertEqual(stepped.pitchMM, 3, accuracy: 1e-9)
     }
 
     /// The gates that route a job to that bake accept BOTH names — the workspace's

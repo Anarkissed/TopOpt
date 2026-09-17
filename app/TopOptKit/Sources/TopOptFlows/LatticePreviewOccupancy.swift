@@ -551,6 +551,14 @@ public struct LatticeCellField: Sendable {
     /// spare `.a` channel: a half holds ~0.002 near 3, which is 0.014 mm of a 6.9 mm cell.
     /// EMPTY on every other algorithm, and 0 means no shift, which is the old behaviour.
     public let steppedPhase: [Float]
+    /// ★★ EACH CELL'S OWN ORIGIN, per texel (2026-09-17, Stepped's any-step packing):
+    /// in texel units, modulo the cell's size in texel units, per axis — exactly what
+    /// the shader subtracts from the point before it floors to the block. `steppedPhase`
+    /// above carried one fraction along the face normal because every cell used to sit
+    /// on the base grid in-plane; a Stepped cell sits anywhere on its family's grid, so
+    /// the origin is stored, never derived from the size. EMPTY on the paths that do
+    /// not write it (the renderer then derives it from `steppedPhase`, the old rule).
+    public var steppedOrigin: [SIMD3<Float>] = []
     public let baseCellMM: Double
     public let maxLevel: Int
     /// True when this came from core's plan rather than the uniform fallback — the
