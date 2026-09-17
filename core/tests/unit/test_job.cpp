@@ -724,6 +724,28 @@ static void test_organic_scale_and_gates() {
       CHECK(d.grading.organic_dc_tolerance_mm == 0.02,
             "organic_dc_tolerance_mm: the stated size dial arrives");
     }
+    // ── the certified density's measure ────────────────────────────────────────
+    // ★ THE DEFAULT IS THE UNION, and it is pinned here because a silent revert to the
+    // deposit would put every certified margin back about 20 % optimistic with nothing
+    // in the output to say so.
+    {
+      const auto d = parse_job(organic_swept(""));
+      CHECK(d.grading.organic_density_union_subdiv == topopt::kOrganicDensityUnionSubdivDefault &&
+                d.grading.organic_density_union_subdiv > 0,
+            "organic_density_union_subdiv: absent means the UNION measure, not the deposit");
+      const auto z = parse_job(organic_swept(", \"organic_density_union_subdiv\": 0"));
+      CHECK(z.grading.organic_density_union_subdiv == 0,
+            "organic_density_union_subdiv: 0 restores the old deposit, for reproducing a "
+            "run against the figure it was certified on");
+    }
+    for (const char* bad : {", \"organic_density_union_subdiv\": -1",
+                            ", \"organic_density_union_subdiv\": 2.5",
+                            ", \"organic_density_union_subdiv\": 99"}) {
+      bool refused = false;
+      try { (void)parse_job(organic_swept(bad)); } catch (const JobError&) { refused = true; }
+      CHECK(refused, "organic_density_union_subdiv: refuses a negative, a fraction and an "
+                     "absurd subdivision");
+    }
     for (const char* bad : {", \"organic_dc_cell_mm\": -1",
                             ", \"organic_dc_tolerance_mm\": -0.5"}) {
       bool refused = false;

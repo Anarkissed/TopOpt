@@ -174,4 +174,105 @@ LatticeUnionVolume lattice_union_volume(const std::vector<OrganicSpan>& spans,
   return out;
 }
 
+// ── ★ THE UNION, PER VOXEL (see the header for why it is not sampled) ─────────
+std::vector<double> lattice_union_voxel_volume(const std::vector<OrganicSpan>& spans,
+                                               const VoxelGrid& grid, int subdiv) {
+  const std::size_t n = grid.voxel_count();
+  std::vector<double> out(n, 0.0);
+  const int k = subdiv < 1 ? 1 : (subdiv > 32 ? 32 : subdiv);
+  const double h = grid.spacing;
+  if (!(h > 0.0) || spans.empty()) return out;
+
+  std::vector<Cap> caps;
+  caps.reserve(spans.size());
+  for (const OrganicSpan& sp : spans) {
+    if (!(sp.r > 0.0)) continue;
+    Cap c;
+    c.a = sp.a; c.ab = sub(sp.b, sp.a);
+    c.ab2 = dot(c.ab, c.ab);
+    c.r = sp.r; c.r2 = sp.r * sp.r;
+    c.lo = Vec3{std::min(sp.a.x, sp.b.x) - c.r, std::min(sp.a.y, sp.b.y) - c.r,
+                std::min(sp.a.z, sp.b.z) - c.r};
+    c.hi = Vec3{std::max(sp.a.x, sp.b.x) + c.r, std::max(sp.a.y, sp.b.y) + c.r,
+                std::max(sp.a.z, sp.b.z) + c.r};
+    caps.push_back(c);
+  }
+  if (caps.empty()) return out;
+
+  // A spatial hash over the capsules, so a point tests only its neighbours. The cell is
+  // the largest capsule's diameter, which bounds how far a capsule can reach out of the
+  // cells its box overlaps.
+  double rmax = 0.0;
+  for (const Cap& c : caps) rmax = std::max(rmax, c.r);
+  const double cell = std::max(2.0 * rmax, h);
+  std::unordered_map<long long, std::vector<int>> hash;
+  auto key = [](long long i, long long j, long long m) {
+    constexpr long long b = 1LL << 20;
+    return (((i + b) & 0x1FFFFF) << 42) | (((j + b) & 0x1FFFFF) << 21) | ((m + b) & 0x1FFFFF);
+  };
+  for (std::size_t t = 0; t < caps.size(); ++t) {
+    const Cap& c = caps[t];
+    for (long long i = static_cast<long long>(std::floor(c.lo.x / cell));
+         i <= static_cast<long long>(std::floor(c.hi.x / cell)); ++i)
+      for (long long j = static_cast<long long>(std::floor(c.lo.y / cell));
+           j <= static_cast<long long>(std::floor(c.hi.y / cell)); ++j)
+        for (long long m = static_cast<long long>(std::floor(c.lo.z / cell));
+             m <= static_cast<long long>(std::floor(c.hi.z / cell)); ++m)
+          hash[key(i, j, m)].push_back(static_cast<int>(t));
+  }
+  auto inside = [&](const Vec3& p) {
+    const long long ci = static_cast<long long>(std::floor(p.x / cell));
+    const long long cj = static_cast<long long>(std::floor(p.y / cell));
+    const long long ck = static_cast<long long>(std::floor(p.z / cell));
+    for (long long i = ci - 1; i <= ci + 1; ++i)
+      for (long long j = cj - 1; j <= cj + 1; ++j)
+        for (long long m = ck - 1; m <= ck + 1; ++m) {
+          auto it = hash.find(key(i, j, m));
+          if (it == hash.end()) continue;
+          for (int t : it->second) {
+            const Cap& c = caps[static_cast<std::size_t>(t)];
+            if (seg_dist2(p, c.a, c.ab, c.ab2) <= c.r2) return true;
+          }
+        }
+    return false;
+  };
+
+  // Only the voxels a capsule's box reaches are worth testing; the rest are air, and a
+  // voxel visited twice would be counted twice, so they are marked first and swept once.
+  std::vector<char> touched(n, 0);
+  for (const Cap& c : caps) {
+    const long long i0 = static_cast<long long>(std::floor((c.lo.x - grid.origin.x) / h));
+    const long long i1 = static_cast<long long>(std::floor((c.hi.x - grid.origin.x) / h));
+    const long long j0 = static_cast<long long>(std::floor((c.lo.y - grid.origin.y) / h));
+    const long long j1 = static_cast<long long>(std::floor((c.hi.y - grid.origin.y) / h));
+    const long long k0 = static_cast<long long>(std::floor((c.lo.z - grid.origin.z) / h));
+    const long long k1 = static_cast<long long>(std::floor((c.hi.z - grid.origin.z) / h));
+    for (long long i = std::max(0LL, i0); i <= std::min<long long>(grid.nx - 1, i1); ++i)
+      for (long long j = std::max(0LL, j0); j <= std::min<long long>(grid.ny - 1, j1); ++j)
+        for (long long m = std::max(0LL, k0); m <= std::min<long long>(grid.nz - 1, k1); ++m)
+          touched[grid.index(static_cast<int>(i), static_cast<int>(j),
+                             static_cast<int>(m))] = 1;
+  }
+
+  const double sub_vol = (h / k) * (h / k) * (h / k);
+  for (int kk = 0; kk < grid.nz; ++kk)
+    for (int jj = 0; jj < grid.ny; ++jj)
+      for (int ii = 0; ii < grid.nx; ++ii) {
+        const std::size_t e = grid.index(ii, jj, kk);
+        if (!touched[e]) continue;
+        const Vec3 lo{grid.origin.x + ii * h, grid.origin.y + jj * h,
+                      grid.origin.z + kk * h};
+        int hit = 0;
+        for (int a = 0; a < k; ++a)
+          for (int b = 0; b < k; ++b)
+            for (int c = 0; c < k; ++c) {
+              const Vec3 p{lo.x + (a + 0.5) * h / k, lo.y + (b + 0.5) * h / k,
+                           lo.z + (c + 0.5) * h / k};
+              if (inside(p)) ++hit;
+            }
+        out[e] = hit * sub_vol;
+      }
+  return out;
+}
+
 }  // namespace topopt

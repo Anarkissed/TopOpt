@@ -1599,6 +1599,7 @@ JobDescription parse_job(const std::string& json_text) {
              "organic_base_mat", "organic_fill_mat", "organic_trim_below_base",
              "organic_strut_embed_mm",
              "organic_dual_contour", "organic_dc_cell_mm", "organic_dc_tolerance_mm",
+             "organic_density_union_subdiv",
              "organic_structural_certification"},
         "grading");
     job.grading.present = true;
@@ -1820,6 +1821,16 @@ JobDescription parse_job(const std::string& json_text) {
                     "\" is only allowed with algorithm \"organic\"");
       if (std::string(k) == "organic_dc_cell_mm") job.grading.organic_dc_cell_mm = v->num;
       else job.grading.organic_dc_tolerance_mm = v->num;
+    }
+    if (const JsonValue* uv = find_key(gr, "organic_density_union_subdiv")) {
+      if (uv->type != JsonValue::Type::Number || !std::isfinite(uv->num) ||
+          uv->num < 0.0 || uv->num > 32.0 || uv->num != std::floor(uv->num))
+        schema_fail("grading \"organic_density_union_subdiv\" must be an integer 0..32 "
+                    "(0 = the deposit)");
+      if (!organic_alg)
+        schema_fail("grading \"organic_density_union_subdiv\" is only allowed with "
+                    "algorithm \"organic\"");
+      job.grading.organic_density_union_subdiv = static_cast<int>(uv->num);
     }
     if (const JsonValue* pv = find_key(gr, "organic_base_mat")) {
       if (pv->type != JsonValue::Type::Bool)

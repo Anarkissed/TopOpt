@@ -746,7 +746,8 @@ void test_certified_density_follows_the_shipped_spans() {
   const double vox = f.grid.spacing * f.grid.spacing * f.grid.spacing;
   auto material = [&](const std::vector<OrganicSpan>& sp) {
     const OrganicDensityField d = organic_relative_density(
-        f.grid, f.cand, lat.spacing_used_mm, sp, 0.0, 0.0);
+        f.grid, f.cand, lat.spacing_used_mm, sp, 0.0, 0.0,
+        kOrganicDensityUnionSubdivDefault);
     double v = 0.0;
     for (std::size_t e = 0; e < d.relative_density.size(); ++e)
       if (d.mask[e]) v += d.relative_density[e];
@@ -765,6 +766,56 @@ void test_certified_density_follows_the_shipped_spans() {
   CHECK(material(all) == full,
         "certified density: and the measurement is deterministic, so a re-measure after "
         "the trim passes cannot itself move the verdict");
+}
+
+// ── THE PER-VOXEL UNION MUST INTEGRATE TO THE UNION ─────────────────────────────
+// The certified density is built from a DEPOSIT that counts a strut crossing once per
+// strut. lattice_union_voxel_volume measures each voxel's share of the UNION instead, by
+// a deterministic subgrid. The acceptance test is that its sum over the grid reproduces
+// the mesh-free union volume -- which shares NO code path with it, so neither can hide
+// the other's error -- and that the agreement improves as the subgrid is refined.
+void test_union_voxel_volume() {
+  using namespace topopt;
+  VoxelGrid g;
+  g.nx = 40; g.ny = 40; g.nz = 40;
+  g.spacing = 0.5;
+  g.origin = Vec3{-10, -10, -10};
+  g.tags.assign(static_cast<std::size_t>(g.nx) * g.ny * g.nz, VoxelTag::Interior);
+
+  // a cross, so a real joint overlap is inside the grid: the naive deposit counts the
+  // crossing twice and this must not
+  const std::vector<OrganicSpan> cross = {{{-5,0,0},{5,0,0},1.0}, {{0,-5,0},{0,5,0},1.0}};
+  const LatticeUnionVolume truth = lattice_union_volume(cross, 2000000);
+  double naive = 0.0;
+  for (const OrganicSpan& sp : cross) {
+    const double L = std::sqrt((sp.b.x-sp.a.x)*(sp.b.x-sp.a.x) + (sp.b.y-sp.a.y)*(sp.b.y-sp.a.y) +
+                               (sp.b.z-sp.a.z)*(sp.b.z-sp.a.z));
+    naive += M_PI*sp.r*sp.r*L + (4.0/3.0)*M_PI*sp.r*sp.r*sp.r;
+  }
+  double prev = 1e9;
+  for (int sd : {4, 8}) {
+    const std::vector<double> v = lattice_union_voxel_volume(cross, g, sd);
+    double sum = 0.0;
+    for (double x : v) sum += x;
+    const double err = std::fabs(sum - truth.volume_mm3) / truth.volume_mm3;
+    std::printf("  union/voxel subdiv %d: %.4f vs union %.4f (%+.2f %%), naive %.4f\n",
+                sd, sum, truth.volume_mm3, 100.0*(sum-truth.volume_mm3)/truth.volume_mm3,
+                naive);
+    CHECK(err < 0.05, "union/voxel: the per-voxel field integrates to the union volume");
+    CHECK(err < prev, "union/voxel: and closes on it as the subgrid refines");
+    prev = err;
+    // ★ THE CONTROL. If this cross had no overlap the deposit would already be right and
+    // the whole exercise would be pointless. Assert the naive sum really is bigger.
+    CHECK(naive > truth.volume_mm3 * 1.02,
+          "union/voxel CONTROL: the naive sum genuinely over-counts this joint");
+  }
+  {   // determinism: no seed, no variance, the same field every time
+    const std::vector<double> a = lattice_union_voxel_volume(cross, g, 4);
+    const std::vector<double> b = lattice_union_voxel_volume(cross, g, 4);
+    CHECK(a == b,
+          "union/voxel: DETERMINISTIC -- this feeds a certificate, and a margin that "
+          "moved with a seed would be indefensible");
+  }
 }
 
 // ── G2: NO SILENT FALLBACK TO THE TRACED CURVES ─────────────────────────────────
@@ -1624,6 +1675,7 @@ int main() {
   test_stated_strut_width_is_exact();
   test_bead_calibration_hits_the_union_volume();
   test_certified_density_follows_the_shipped_spans();
+  test_union_voxel_volume();
   test_growth_does_not_fall_back();
   test_growth_is_supported();
   test_growth_respects_the_cone();

@@ -743,7 +743,8 @@ OrganicDensityField organic_relative_density(const VoxelGrid& grid,
                                              const std::vector<char>& candidate,
                                              const std::vector<double>& separation_mm,
                                              const std::vector<OrganicSpan>& spans,
-                                             double rho_min, double rho_max) {
+                                             double rho_min, double rho_max,
+                                             int union_subdiv) {
   OrganicDensityField out;
   const std::size_t n = grid.voxel_count();
   const double h = grid.spacing;
@@ -751,7 +752,16 @@ OrganicDensityField organic_relative_density(const VoxelGrid& grid,
   out.relative_density.assign(n, 0.0);
   if (candidate.size() != n || separation_mm.size() != n) return out;
 
-  std::vector<double> vol(n, 0.0);
+  // ★ THE MATERIAL IN EACH VOXEL, measured one of two ways -- see the header. The
+  // deposit is kept because it is what every organic run to date was certified on, so the
+  // two can be compared on one job rather than argued about.
+  std::vector<double> vol;
+  if (union_subdiv > 0) {
+    vol = lattice_union_voxel_volume(spans, grid, union_subdiv);
+    for (const OrganicSpan& sp : spans)
+      out.deposited_mm3 += M_PI * sp.r * sp.r * vlen(vsub(sp.b, sp.a));
+  } else {
+  vol.assign(n, 0.0);
   auto voxel_of = [&](const Vec3& p, int& i, int& j, int& k) {
     i = static_cast<int>(std::floor((p.x - grid.origin.x) / h));
     j = static_cast<int>(std::floor((p.y - grid.origin.y) / h));
@@ -772,6 +782,7 @@ OrganicDensityField organic_relative_density(const VoxelGrid& grid,
       vol[grid.index(i, j, k)] += area * dl;
     }
     out.deposited_mm3 += area * L;
+  }
   }
 
   const std::size_t sx = static_cast<std::size_t>(grid.nx) + 1;

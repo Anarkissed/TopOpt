@@ -46,6 +46,28 @@ struct LatticeUnionVolume {
 
 // `samples` is the TOTAL budget, split across capsules in proportion to their volume.
 // `seed` fixes the draw, so the measurement is reproducible.
+// ── ★ THE SAME UNION, BUT PER VOXEL ─────────────────────────────────────────────
+// The certified density is built from a DEPOSIT -- pi*r^2*dl walked along every span and
+// added to the voxel it lands in -- which counts a strut crossing once per strut, exactly
+// the double-count the bead calibration carried until the union volume replaced its
+// model. Measured on the M2 stand: the certificate saw 57,661 mm3 where the shipped file
+// holds 41,955, a 37 % excess, and it is concentrated at the joints rather than spread,
+// so no global factor corrects it.
+//
+// This measures each voxel's share of the UNION instead, and it is DELIBERATELY NOT
+// SAMPLED. A k^3 subgrid is laid inside each voxel and every point is tested against the
+// union, so the same spans always give the same field -- which matters because this feeds
+// a structural certificate, and a margin that moved with a random seed would be
+// indefensible. The error is a quantisation that falls with k, not a variance, and it is
+// bounded above by the half-cell surface area: a voxel wholly inside or wholly outside is
+// EXACT at any k.
+//
+// Returns a grid-indexed vector of mm3 of material per voxel. Its sum over the grid is
+// the union volume, which is how the accuracy is checked -- against
+// lattice_union_volume(), which shares no code path with it.
+std::vector<double> lattice_union_voxel_volume(const std::vector<OrganicSpan>& spans,
+                                               const VoxelGrid& grid, int subdiv = 6);
+
 LatticeUnionVolume lattice_union_volume(const std::vector<OrganicSpan>& spans,
                                         std::size_t samples = 4000000,
                                         std::uint64_t seed = 0x9E3779B97F4A7C15ull);

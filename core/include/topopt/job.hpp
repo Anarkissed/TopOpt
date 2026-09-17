@@ -10,6 +10,7 @@
 #include "topopt/loadcase.hpp"   // ProductionLoadCase
 #include "topopt/materials.hpp"  // MaterialLibrary
 #include "topopt/mesh.hpp"       // Vec3
+#include "topopt/organic_lattice.hpp"  // kOrganicDensityUnionSubdivDefault
 #include "topopt/pipeline.hpp"   // MinimizePlasticResult
 #include "topopt/settings.hpp"   // SettingsRules
 #include "topopt/smooth.hpp"     // SmoothStats
@@ -480,6 +481,22 @@ struct JobGrading {
   // SIZE dial: 0 => a tenth of the base cell, which on the M2 lattice was 40 % smaller
   // than an unmerged mesh with no visible change.
   double organic_dc_tolerance_mm = 0.0;
+  // ★ HOW THE CERTIFIED DENSITY MEASURES THE MATERIAL IN A VOXEL, and the default is now
+  // the one that measures something real. A positive k takes each voxel's share of the
+  // UNION by a deterministic k^3 subgrid: a point inside a strut crossing counts ONCE,
+  // however many struts meet there. 0 restores the old DEPOSIT, which walked pi*r^2*dl
+  // along every span and added it to the voxel it landed in, counting each crossing once
+  // PER STRUT -- and struts cross constantly, so it ran far high. Measured on the M2
+  // stand: the deposit said 57,661 mm3 where the shipped file holds 41,955; the union
+  // says 43,200, and the 3 % that remains is the certifiable band's own floor raising
+  // 3,840 voxels, not an error. k=6 is converged -- k=10 moves the answer by 0.08 % -- and
+  // costs about 17 s on that part.
+  //
+  // IT CHANGES THE CERTIFIED MARGIN, and the whole of that change is a correction: on the
+  // M2 stand 1,142 -> 956 effective 102.2 -> 85.6 (and 1,671 before the density was also
+  // taken on the spans that SHIP rather than the ones the tracer drew). 0 is kept so a
+  // run can be reproduced against the old figure, never because it is defensible.
+  int organic_density_union_subdiv = kOrganicDensityUnionSubdivDefault;
   double organic_scale = 1.0;
   bool organic_shape_fit = false;
   // ★★ SHAPE-FIT *ONLY* — the cell is a function of the SHAPE and nothing else; the

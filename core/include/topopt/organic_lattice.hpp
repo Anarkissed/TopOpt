@@ -1234,6 +1234,10 @@ struct SyntheticStressReport {
 // naive sum carried, so the measurement is no longer the limiting term. The seed inside
 // lattice_union_volume is fixed, so the same lattice always calibrates to the same
 // factor. `Tol` is on log volume, i.e. a relative tolerance on the volume itself.
+// The subgrid the certified density measures each voxel's union share on. Converged:
+// k=10 moves the answer 0.08 % against k=6. See JobGrading::organic_density_union_subdiv.
+inline constexpr int kOrganicDensityUnionSubdivDefault = 6;
+
 inline constexpr std::size_t kOrganicBeadCalibrationSamples = 300000;
 inline constexpr int kOrganicBeadCalibrationSteps = 6;
 inline constexpr double kOrganicBeadCalibrationTol = 0.002;
@@ -1723,11 +1727,19 @@ struct OrganicDensityField {
   std::size_t clamped_lo_voxels = 0, clamped_hi_voxels = 0;
   double deposited_mm3 = 0.0;     // sum of pi*r^2*L, overlaps counted twice
 };
+// `union_subdiv` chooses how the material in each voxel is measured, and it is the
+// difference between a number that exists and one that does not:
+//   0 -- the DEPOSIT: pi*r^2*dl walked along every span and added to the voxel it lands
+//        in. A strut crossing is counted once per strut, so the joints are over-stated.
+//        Measured on the M2 stand: 57,661 mm3 where the shipped file holds 41,955.
+//   k -- each voxel's share of the UNION, by a deterministic k^3 subgrid
+//        (lattice_union_voxel_volume). No double count, no seed.
 OrganicDensityField organic_relative_density(const VoxelGrid& grid,
                                              const std::vector<char>& candidate,
                                              const std::vector<double>& separation_mm,
                                              const std::vector<OrganicSpan>& spans,
-                                             double rho_min, double rho_max);
+                                             double rho_min, double rho_max,
+                                             int union_subdiv = 0);
 
 
 class LatticeBoundary;  // topopt/lattice_boundary.hpp

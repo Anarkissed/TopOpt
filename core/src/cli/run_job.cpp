@@ -6649,7 +6649,8 @@ LatticeVariantOutcome lattice_one_variant(
       cand[e] = organic.lat.spacing_used_mm[e] > 0.0 ? 1 : 0;
     OrganicDensityField df = organic_relative_density(
         solved_grid, cand, organic.lat.spacing_used_mm, R.oc.organic_spans_out,
-        organic.rho_min_used, organic.rho_max_used);
+        organic.rho_min_used, organic.rho_max_used,
+        job.grading.organic_density_union_subdiv);
     const double vox =
         solved_grid.spacing * solved_grid.spacing * solved_grid.spacing;
     double shipped = 0.0;
@@ -6672,16 +6673,19 @@ LatticeVariantOutcome lattice_one_variant(
         ++emptied;
       }
     std::fprintf(stderr,
-                 "[posture] certified on the SHIPPED spans: %.1f mm3 of lattice "
+                 "[posture] certified on the SHIPPED spans (%s): %.1f mm3 of lattice "
                  "material over %zu voxel(s); the traced network it used to be taken "
                  "from held %.1f mm3 (%+.1f %%). %zu voxel(s) the trim emptied "
-                 "entirely, held at the band floor %.4f\n",
+                 "entirely, held at the band floor %.4f; %zu raised to it and %zu "
+                 "capped at the ceiling by the band\n",
+                 job.grading.organic_density_union_subdiv > 0 ? "UNION" : "deposit",
                  shipped, df.latticed_voxels, organic_traced_material_mm3,
                  organic_traced_material_mm3 > 0.0
                      ? 100.0 * (shipped - organic_traced_material_mm3) /
                            organic_traced_material_mm3
                      : 0.0,
-                 emptied, organic.rho_min_used);
+                 emptied, organic.rho_min_used, df.clamped_lo_voxels,
+                 df.clamped_hi_voxels);
     gf.posture.mask = df.mask;
     gf.posture.relative_density = df.relative_density;
   }
