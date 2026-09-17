@@ -386,7 +386,21 @@ final class LatticeLegendColourTests: XCTestCase {
     func testEveryPanelWidthHoldsItsOwnContent() {
         let pad = DS.Space.m, gap = DS.Space.xs
         let lead: CGFloat = 44, bar: CGFloat = 26, trail: CGFloat = 58
-        let unit: CGFloat = 52, reading: CGFloat = 110, rows: CGFloat = 140
+        let unit: CGFloat = 52, reading: CGFloat = 110
+        // The rows' column is MEASURED from the words in it (2026-09-17: "The legend
+        // box didn't get large enough to fit the text"): swatch, gap, the widest
+        // name or brief-plus-(i) of the three classes, gap. Re-do that measurement.
+        var widest: CGFloat = 0
+        for c in LatticeStructureClass.allCases {
+            widest = max(widest, LatticeLegendPanel.textWidth(c.title, size: 15, bold: true))
+            widest = max(widest, LatticeLegendPanel.textWidth(c.brief, size: 12, bold: false)
+                                 + LatticeLegendPanel.infoGlyph)
+        }
+        let rows = LatticeLegendPanel.rowsCol
+        XCTAssertGreaterThanOrEqual(rows, 34 + DS.Space.s + widest.rounded(.up) + DS.Space.s,
+            "★ the rows' column (\(rows)) is narrower than its widest line (\(widest))")
+        XCTAssertGreaterThan(widest, 140 - 34 - DS.Space.s,
+            "★ the widest line no longer beats the old guess of 140 — this test would pass on the guess")
 
         // Explore, a strut tapped: ticks | bar | ticks | reading.
         let exploreContent = lead + gap + bar + trail + gap + reading + 2 * pad

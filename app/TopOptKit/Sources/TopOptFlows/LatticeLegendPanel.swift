@@ -21,6 +21,7 @@
 // A double tap anywhere returns. Every row is a full-height touch target.
 
 import SwiftUI
+import CoreText
 import simd
 import TopOptDesign
 
@@ -303,7 +304,39 @@ public struct LatticeLegendPanel: View {
     private static let trailCol: CGFloat = 58    // "2.19 mm"
     private static let unitCol: CGFloat = 52     // "MPa / von Mises"
     private static let readingCol: CGFloat = 110 // the squircle
-    private static let rowsCol: CGFloat = 140    // the colour rows' text column
+    private static let swatch: CGFloat = 34       // the colour rows' swatch
+    /// ★ THE ROWS' COLUMN IS MEASURED FROM THE WORDS IN IT (maintainer, 2026-09-17:
+    /// "The legend box didn't get large enough to fit the text. Can you widen the
+    /// modal up to fit everything comfortably?"). The name and the brief are laid out
+    /// `fixedSize`, so they never wrap; a column narrower than the widest of them
+    /// overflows the panel exactly as the 2026-08-20 cut-off did. The old 140 was a
+    /// guess, and "Thickens toward the outline ⓘ" beat it. This sets every class's
+    /// name and brief in the faces the rows use and takes the widest, plus the (i)
+    /// and a breath either side, so the column cannot be narrower than its words.
+    static var rowsCol: CGFloat { swatch + DS.Space.s + widestRowText + DS.Space.s }
+    static var widestRowText: CGFloat {
+        var w: CGFloat = 0
+        for c in LatticeStructureClass.allCases {
+            w = max(w, textWidth(c.title, size: T.name, bold: true))
+            w = max(w, textWidth(c.brief, size: T.detail, bold: false) + infoGlyph)
+        }
+        return w.rounded(.up)
+    }
+    /// The (i) after the brief: its 5 pt gap plus the glyph, with a point to spare.
+    static var infoGlyph: CGFloat { 5 + (T.detail + 1) + 4 }
+    /// One line of `s` in the system face at `size` (bold stands in for semibold —
+    /// a touch wider, never narrower), measured with CoreText on every platform.
+    static func textWidth(_ s: String, size: CGFloat, bold: Bool) -> CGFloat {
+        var font = CTFontCreateUIFontForLanguage(.system, size, nil)
+            ?? CTFontCreateWithName("Helvetica" as CFString, size, nil)
+        if bold, let b = CTFontCreateCopyWithSymbolicTraits(font, size, nil, .boldTrait, .boldTrait) {
+            font = b
+        }
+        let attr = NSAttributedString(string: s,
+                                      attributes: [NSAttributedString.Key(kCTFontAttributeName as String): font])
+        let line = CTLineCreateWithAttributedString(attr)
+        return CGFloat(CTLineGetTypographicBounds(line, nil, nil, nil))
+    }
     private static let gap: CGFloat = DS.Space.xs   // tick column → bar
     private static let pad: CGFloat = DS.Space.m    // the chrome's own inset
 
@@ -505,11 +538,11 @@ public struct LatticeLegendPanel: View {
                         RoundedRectangle(cornerRadius: 6, style: .continuous)
                             .fill(LinearGradient(colors: [Color(.sRGB, red: f.r, green: f.g, blue: f.b, opacity: 1), to],
                                                  startPoint: .leading, endPoint: .trailing))
-                            .frame(width: 34, height: 34)
+                            .frame(width: Self.swatch, height: Self.swatch)
                     } else {
                         RoundedRectangle(cornerRadius: 6, style: .continuous)
                             .fill(to)
-                            .frame(width: 34, height: 34)
+                            .frame(width: Self.swatch, height: Self.swatch)
                     }
                     // ★ THE SENTENCE LIVES BEHIND AN (i) (2026-09-17: "remove all the
                     // text below each legend name, placing them into a (i) next to

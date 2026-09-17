@@ -532,3 +532,11 @@ green "bled too far" at 5 mm.
   at its end (`LatticeStructureClass.brief`: "The outline and any finish" / "Ordinary
   fill" / "Thickens toward the outline"), the full sentence under that while the (i)
   is on.
+- **01:24 — the panel did not widen for the briefs.** The rows' column was a guessed
+  140 pt, so "Thickens toward the outline ⓘ" (178 pt at 12 pt) and the 34 pt swatch
+  overflowed it — the same failure as the 2026-08-20 cut-off, from the other side. Now
+  `LatticeLegendPanel.rowsCol` is MEASURED: every class's name (15 pt, bold standing in
+  for semibold) and brief + (i) (12 pt) set with CoreText, the widest taken, plus the
+  swatch and a gap either side. Rows column 229 pt; overview 253 pt; overview with the
+  stress block 414 pt (limit 620). `LatticeLegendColourTests` re-does the measurement
+  and refuses to pass on the old guess.
