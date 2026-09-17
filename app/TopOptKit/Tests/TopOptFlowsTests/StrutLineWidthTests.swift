@@ -338,9 +338,15 @@ final class StrutLineWidthTests: XCTestCase {
         // sizes — so the wizard's second organic site (candidates from the strut bead)
         // no longer exists. The "Thicker" default site remains and still reads the
         // STRUT bead. A removed site is the simplest audit there is.
-        XCTAssertEqual(strutSites, 13,
-                       "the thirteen audited lattice sites (AppModel 2, LatticePage 2, "
-                       + "WorkspacePlaceholder 5, ProjectModel 2, LatticeSetupWizard 2). "
+        // ★ RE-PINNED 13 -> 14 (2026-09-17): the legend's TAP ATTRIBUTION in
+        // `WorkspacePlaceholder` asks `LatticeSDFRenderer.outlineBeamMM(lineWidthMM:)`
+        // how wide the solid outline beam is (two beads, never less than the trim plus
+        // half a voxel) to decide "on the beam ⇒ Rim & skin". Audited: it is
+        // `strutLineWidthMM`, and it MUST be — the bake sizes that beam from the same
+        // strut bead, and the tap must agree with what was drawn. Never a wall bead.
+        XCTAssertEqual(strutSites, 14,
+                       "the fourteen audited lattice sites (AppModel 2, LatticePage 2, "
+                       + "WorkspacePlaceholder 6, ProjectModel 2, LatticeSetupWizard 2). "
                        + "If this number moved, audit the new site and update the count.")
         XCTAssertTrue(offenders.isEmpty,
                       "lattice lineWidthMM site(s) reading a WALL bead:\n"

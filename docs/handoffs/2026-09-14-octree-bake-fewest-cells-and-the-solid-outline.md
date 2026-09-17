@@ -540,3 +540,14 @@ green "bled too far" at 5 mm.
   swatch and a gap either side. Rows column 229 pt; overview 253 pt; overview with the
   stress block 414 pt (limit 620). `LatticeLegendColourTests` re-does the measurement
   and refuses to pass on the old guess.
+- **03:08 — full package suite on `4d818f27`** (the legend widening): 2440 tests, 31
+  skipped, 6 failing cases (11 assertions) in 1 h 43 min. Five are the known
+  pre-existing ones (AppModelTests 3MF ×3, `OrganicSampleCubeTests.testThickerIsLive…`,
+  `OrganicVariantCacheTests.testTheKeyIgnoresThickness…`). The SIXTH was new:
+  `StrutLineWidthTests.testNoLatticeLineWidthSiteReadsAWallBead` counted 14 lattice
+  line-width sites against a pinned 13 — the tap attribution's `outlineBeamMM(lineWidthMM:)`
+  call in `WorkspacePlaceholder` (added with the legend/tap work at 00:47). Audited: it
+  reads the STRUT bead, and must, because the bake sizes the outline beam from that same
+  bead. Re-pinned 13 → 14 with the note; the 12 `StrutLineWidthTests` pass on the fix.
+  (That rerun was the subset only; the full suite ran on `4d818f27`, before this
+  test-only change.)
