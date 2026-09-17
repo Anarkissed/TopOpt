@@ -289,15 +289,12 @@ public struct LatticeWizardModel: Equatable, Sendable {
         }
         return out
     }
-    /// ★ "Allow single-cell members" — see `LatticeSettings.singleCellMembers`. Setting
-    /// it TRUE also writes the finish, because core's one-cell floor requires one.
-    public var singleCellMembers: Bool = false {
-        didSet {
-            if singleCellMembers, boundary == .none || boundary == .rim {
-                boundary = .fullSkin
-            }
-        }
-    }
+    /// ★ "Allow single-cell members" — see `LatticeSettings.singleCellMembers`. It
+    /// no longer rewrites the finish (2026-09-16: he chose None, saved, came back to
+    /// Skin — "Can you fix it so that whatever is selected, stays selected"). The
+    /// skin core needs to re-tie a one-cell member travels with the JOB
+    /// (`LatticeSettings.jobSkinResolved`); the setting keeps his choice.
+    public var singleCellMembers: Bool = false
 
     /// ★ THE PERMISSION'S SETTER, AND IT DELEGATES. The migration rule (density
     /// `.sim ⇒ .uniform`, cell `.swept ⇒ .fixed`) lives in `LatticeSettings`
@@ -425,10 +422,8 @@ public struct LatticeWizardModel: Equatable, Sendable {
         // otherwise ride along as `defaultGrade`'s behaviour under another name.
         out.cellTransition = cellTransition.unavailableReason == nil
             ? cellTransition : .defaultGrade
-        // ★ AND THE FINISH IT REQUIRES TRAVELS WITH IT. `singleCellMembers` already
-        // wrote `boundary` when it was switched on; carrying both keeps the pair
-        // consistent on the wire, so a job can never ask for a one-cell floor without
-        // the finish core needs to grant it.
+        // ★ THE FINISH IT REQUIRES IS RESOLVED FOR THE JOB (`jobSkinResolved`), not
+        // written into the setting — his choice stays his.
         out.singleCellMembers = singleCellMembers
         // ★ ORGANIC picks travel whatever the algorithm; `gradingDictionary()` writes
         // none of them unless organic was chosen and the linked core accepts the key.
@@ -449,9 +444,6 @@ public struct LatticeWizardModel: Equatable, Sendable {
         out.organicSolidRimMM = organicSolidRimMM
         out.organicLookCellsAcross = Swift.min(16, Swift.max(2, organicLookCellsAcross))
         out.organicScale = organicScale
-        if out.singleCellMembers, out.boundary == .none || out.boundary == .rim {
-            out.boundary = .fullSkin
-        }
         // ★★★ AND THE CHOICE NOW REACHES THE JOB (maintainer, 2026-08-21: "Please
         // connect the Stepped and Organic algos"). `cellTransition` was a control that
         // set a stored value nothing downstream read — the decorative-control defect

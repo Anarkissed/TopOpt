@@ -34,10 +34,14 @@ public struct LatticeLegendGroup: Identifiable, Equatable, Sendable {
     /// Whether this group actually carries lattice (a tint-only group has no scale
     /// to drill into, and must not pretend it does).
     public let latticed: Bool
+    /// When set, the swatch is a ramp from this colour to `colour` — the grade row,
+    /// whose tint IS a gradient on screen.
+    public let gradientFrom: RGBAColor?
 
-    public init(id: UUID, name: String, colour: RGBAColor, detail: String, latticed: Bool) {
+    public init(id: UUID, name: String, colour: RGBAColor, detail: String, latticed: Bool,
+                gradientFrom: RGBAColor? = nil) {
         self.id = id; self.name = name; self.colour = colour
-        self.detail = detail; self.latticed = latticed
+        self.detail = detail; self.latticed = latticed; self.gradientFrom = gradientFrom
     }
 }
 
@@ -491,10 +495,17 @@ public struct LatticeLegendPanel: View {
         } else {
             ForEach(groups) { g in
                 HStack(alignment: .top, spacing: DS.Space.s) {
-                    RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .fill(Color(.sRGB, red: g.colour.r, green: g.colour.g,
-                                    blue: g.colour.b, opacity: 1))
-                        .frame(width: 34, height: 34)
+                    let to = Color(.sRGB, red: g.colour.r, green: g.colour.g, blue: g.colour.b, opacity: 1)
+                    if let f = g.gradientFrom {
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .fill(LinearGradient(colors: [Color(.sRGB, red: f.r, green: f.g, blue: f.b, opacity: 1), to],
+                                                 startPoint: .leading, endPoint: .trailing))
+                            .frame(width: 34, height: 34)
+                    } else {
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .fill(to)
+                            .frame(width: 34, height: 34)
+                    }
                     VStack(alignment: .leading, spacing: 1) {
                         Text(g.name)
                             .font(.system(size: T.name, weight: .semibold))

@@ -63,16 +63,21 @@ final class LatticeLegendColourTests: XCTestCase {
     /// differences are"). Now that hue means STRUCTURE, this is a plain unit test on
     /// the table rather than a scan of a view body.
     func testEachStructureColourHasItsOwnExplanation() {
-        // ★ TWO, not three. The density-thresholded "load-carrying" hue was removed
+        // ★ THREE. The density-thresholded "load-carrying" hue was removed
         // (2026-08-19) — lightness already shows density continuously and the stress
-        // map answers the load question properly, so a third hue was two encodings of
-        // one thing. What remains is a structural fact that density cannot express.
+        // map answers the load question properly. The GRADE (2026-09-16) is not a
+        // density threshold but a structural fact — a cell the shape-grade band
+        // thickened toward the solid outline — drawn as a ramp from the interior hue,
+        // and listed only when the grade is on above 0 mm (`latticeLegendGroups`).
         let all = LatticeStructureClass.allCases
-        XCTAssertEqual(all.count, 2, "rim and interior")
-        XCTAssertEqual(Set(all.map(\.title)).count, 2, "distinct titles")
-        XCTAssertEqual(Set(all.map(\.detail)).count, 2,
+        XCTAssertEqual(all.count, 3, "rim, interior and grade")
+        XCTAssertEqual(Set(all.map(\.title)).count, 3, "distinct titles")
+        XCTAssertEqual(Set(all.map(\.detail)).count, 3,
                        "★ each colour needs its OWN sentence, not one caption reused")
-        XCTAssertEqual(Set(all.map(\.id)).count, 2, "distinct ids, so drilling in works")
+        XCTAssertEqual(Set(all.map(\.id)).count, 3, "distinct ids, so drilling in works")
+        XCTAssertEqual(LatticeStructureClass.grade.gradientFrom, LatticeStructureColour.interior,
+                       "the grade's swatch is a ramp from the interior hue")
+        XCTAssertNil(LatticeStructureClass.interior.gradientFrom)
         for c in all {
             XCTAssertGreaterThan(c.detail.count, 40,
                                  "★ \(c.title)'s sentence must EXPLAIN the difference, "

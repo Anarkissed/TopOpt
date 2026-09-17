@@ -205,9 +205,11 @@ public enum LatticeAutoPosture {
                                     cellsPerMemberFloor: (s.stageMode ?? .structural)
                                         .cellsPerMemberFloor(
                                             topology: s.topologyID, utilisation: .nan,
+                                            // the job resolves the skin a one-cell
+                                            // member needs (`jobSkinResolved`); the
+                                            // finish setting keeps his choice
                                             boundaryFinishWritten:
-                                                s.singleCellMembers
-                                                && s.boundary != .none)) {
+                                                s.singleCellMembers)) {
                 out.cellMinMM = w.min
                 out.cellMaxMM = w.max
             }

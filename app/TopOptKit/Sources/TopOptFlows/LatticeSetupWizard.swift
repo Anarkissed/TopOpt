@@ -1533,10 +1533,10 @@ public struct LatticeSetupWizard: View {
             .toggleStyle(SwitchToggleStyle(tint: DS.Color.accent.color))
             .accessibilityIdentifier("wizard-single-cell-members")
             Text(model.singleCellMembers
-                 ? "One cell across a member. Needs the Skin finish to re-tie the struts "
-                   + "a single cell severs — it has been set."
-                 : "Two cells across a member. Turn this on for one, which needs the "
-                   + "Skin finish and will set it.")
+                 ? "One cell across a member. The run adds a Skin finish to re-tie the "
+                   + "struts a single cell severs; your finish choice above is kept."
+                 : "Two cells across a member. Turn this on for one; the run adds the "
+                   + "Skin finish it needs.")
                 .dsStyle(DS.TypeScale.caption2)
                 .foregroundStyle(DS.Color.textTertiary.color)
                 .fixedSize(horizontal: false, vertical: true)
@@ -2366,8 +2366,7 @@ public struct LatticeSetupWizard: View {
         // the switch as it moves, before Save & Exit writes anything.
         let floor = (project.lattice.stageMode ?? .structural).cellsPerMemberFloor(
             topology: model.topologyID, utilisation: .nan,
-            boundaryFinishWritten: model.singleCellMembers
-                && model.boundary != .none)
+            boundaryFinishWritten: model.singleCellMembers)
         let d = TopOptKit.latticeRegionDerivation(
             topology: model.topologyID, memberWidthMM: member,
             minExtrudableWidthMM: bead, cellsPerMemberFloor: floor)

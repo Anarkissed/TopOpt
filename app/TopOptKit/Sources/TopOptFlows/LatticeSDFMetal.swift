@@ -147,6 +147,9 @@ struct LSDFUniforms {
     /// xy = the STATED density span for the colour ramp, z = 1 when set. Appended
     /// LAST on both sides — see the MSL struct's note.
     var colourSpan: SIMD4<Float> = .zero
+    /// xyz = the grade's tint, w = 1 when the shape grade is on above 0 mm. Appended
+    /// LAST on both sides.
+    var gradeColor: SIMD4<Float> = .zero
 }
 
 /// ★ A pre-baked organic field — the two channels a cached variant (a beam-lattice
@@ -3656,6 +3659,9 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
         // The colour ramp reads the STATED span; the grade's raise is drawn over the
         // wider drawn span but must not colour the quilt as the ramp's deep end.
         u.colourSpan = SIMD4(Float(params.densitySpan.lo), Float(params.densitySpan.hi), 1, 0)
+        let gc = LatticeStructureColour.grade
+        u.gradeColor = SIMD4(Float(gc.r), Float(gc.g), Float(gc.b),
+                             steppedShapeFit && params.shapeFitBandMM > 0 ? 1 : 0)
         return u
     }
 

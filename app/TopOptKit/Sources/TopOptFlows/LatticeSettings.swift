@@ -1255,7 +1255,14 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
     public var jobOuterFinishResolved: String? {
         isOrganic ? (boundary == .covered ? "shell" : "skin") : boundary.jobOuterFinish
     }
-    public var jobSkinResolved: String { isOrganic ? "diagrid" : boundary.jobSkinValue }
+    /// ★ A ONE-CELL MEMBER NEEDS A SKIN TO RE-TIE THE STRUTS IT SEVERS — core's rule,
+    /// applied HERE for the job, so the finish setting itself keeps what he chose
+    /// (2026-09-16: None came back as Skin after Save & Exit).
+    public var jobSkinResolved: String {
+        if isOrganic { return "diagrid" }
+        if singleCellMembers, boundary == .none || boundary == .rim { return LatticeBoundaryTreatment.fullSkin.jobSkinValue }
+        return boundary.jobSkinValue
+    }
     public var boundary: LatticeBoundaryTreatment
     /// Density mode (uniform run fill vs field-graded preview, bar B6).
     public var densityMode: LatticeDensityMode

@@ -4353,10 +4353,14 @@ public struct WorkspacePlaceholder: View {
     /// screen is the same lie as a colour on screen with no key.
     private func latticeLegendGroups() -> [LatticeLegendGroup] {
         let hasDressing = project.lattice.boundary.previewDressingLevel > 0
+        // The grade row only when the shape grade is on above 0 mm (his 2026-09-16 ask).
+        let hasGrade = project.lattice.gradingMode.fitsShape && project.lattice.shapeFitBandMM > 0
         return LatticeStructureClass.allCases.compactMap { c in
             if c == .rim, !hasDressing { return nil }
+            if c == .grade, !hasGrade { return nil }
             return LatticeLegendGroup(id: c.id, name: c.title, colour: c.colour,
-                                      detail: c.detail, latticed: true)
+                                      detail: c.detail, latticed: true,
+                                      gradientFrom: c.gradientFrom)
         }
     }
 

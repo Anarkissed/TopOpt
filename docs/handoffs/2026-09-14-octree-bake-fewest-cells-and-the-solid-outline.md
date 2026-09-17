@@ -476,3 +476,27 @@ inwards is SDF — the outline stays the way it is, clean and thin."*
 starts at a 25 mm band (`bleedStartsAtBandMM`), none below; the amount stays half of the
 band over 15 (5 mm at 25 — what he called perfect — 7.5 at 30). 15 and 20 mm keep the
 thin beam and no SDF solid. Test pins 10/20 = none, 25 = beam + 5 mm.
+
+## 13. 2026-09-16, 19:42: the finish that came back, and the grade's own colour
+
+**"I've selected 'no' finish … go back to the settings, the setting goes back to
+'skin'. Can you confirm whether the setting is actually being set/saved?"** It was
+saved as None and then OVERWRITTEN: `LatticeWizardModel.singleCellMembers`'s `didSet`
+and the save path both rewrote `boundary` to `.fullSkin` whenever single-cell members
+was on, because core only allows one cell across a member when a skin re-ties the
+struts it severs (the caption even said "it has been set"). Now the setting keeps his
+choice; the skin core needs is resolved for the JOB alone (`jobSkinResolved` answers
+"diagrid" when single-cell is on and the finish is None or Rim), the wizard's sample
+and `LatticeAutoPosture` gate the one-cell floor on the toggle alone, and the caption
+says the run adds the skin and his choice is kept.
+
+**"The purple colour is already part of the legend as interior fill … we require a new
+colour specifically for the gradient — and it should be a gradient, itself … only when
+the gradient is set and above 0mm."** Two things: (a) with his POINT span (lo == hi) the
+colour ramp divided by `max(1e-4, 0)`, so any raised cell was the deep end — a point
+span is now one lightness; (b) `LatticeStructureColour.grade` (teal) is a third
+structure class: the shader ramps the interior hue toward it by the cell's raise above
+the stated span (`gradeColor` uniform, appended last; `t = (rho − statedHi)/(drawnHi −
+statedHi)`), so the tint IS the gradient — no raise, interior; the quilt against the
+outline, full teal. The legend shows a "Grade to shape" row with a gradient swatch
+(`LatticeLegendGroup.gradientFrom`) only when the shape grade is on and the band > 0.

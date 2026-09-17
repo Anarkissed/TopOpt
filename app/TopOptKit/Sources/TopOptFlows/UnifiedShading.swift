@@ -239,6 +239,12 @@ struct LSDFUniforms {
     // there is a void between the solid and the lattice"). Colour follows the
     // stated span; the quilt shows as what it is, dense pale struts.
     float4 colourSpan;
+    // ★ THE GRADE'S TINT (xyz), w > 0.5 when the shape grade is on above 0 mm. The
+    // raise above the stated span ramps the interior hue toward it, so the tint IS
+    // the gradient — and it is a colour of its own in the key, not the fill's deep
+    // end (his 2026-09-16 ask: "we require a new colour specifically for the
+    // gradient — and it should be a gradient, itself").
+    float4 gradeColor;
 };
 
 struct VOut { float4 pos [[position]]; float2 uv; };
@@ -1263,7 +1269,10 @@ static float3 lsdf_albedo(constant LSDFUniforms& U,
     }
     float rhoMin = U.colourSpan.z > 0.5 ? U.colourSpan.x : U.gradeParams.x;
     float rhoMax = U.colourSpan.z > 0.5 ? U.colourSpan.y : U.gradeParams.y;
-    float frac = clamp((hitRho - rhoMin) / max(1e-4, rhoMax - rhoMin), 0.0, 1.0);
+    // A POINT span (manual thickness, lo == hi) is one density: one lightness, not
+    // "anything above lo is the deep end".
+    float span = rhoMax - rhoMin;
+    float frac = span > 1e-4 ? clamp((hitRho - rhoMin) / span, 0.0, 1.0) : 0.0;
     // ★★ HUE = WHAT THE STRUT IS; LIGHTNESS = HOW MUCH MATERIAL IS IN IT
     // (maintainer, 2026-08-19: "I thought they were tinted for different *types* of
     // lattice structures. Something like the Rim was blue, the regular cells were
@@ -1287,6 +1296,15 @@ static float3 lsdf_albedo(constant LSDFUniforms& U,
     float3 hue = U.denseColor.xyz;                       // interior fill
     if (hitDressing > 0.05) { hue = U.rimColor.xyz; }    // boundary work
     float3 baseC = mix(U.sparseColor.xyz, hue, clamp(0.25 + 0.75 * frac, 0.0, 1.0));
+    // The grade's raise above the stated span, tinted toward the grade colour — the
+    // amount of raise IS the ramp position.
+    if (U.gradeColor.w > 0.5 && hitDressing <= 0.05) {
+        float reach = U.gradeParams.y - rhoMax;
+        if (reach > 1e-4) {
+            float t = clamp((hitRho - rhoMax) / reach, 0.0, 1.0);
+            baseC = mix(baseC, U.gradeColor.xyz, t);
+        }
+    }
     // Face-role tint (A4): where the body would have been tinted (anchor / load /
     // keep-clear / protect), the marked face's surface voxels carry that colour in
     // the tint volume — baked from the mesh view's own tint dictionary. The

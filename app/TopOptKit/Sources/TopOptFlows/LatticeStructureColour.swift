@@ -27,6 +27,11 @@ public enum LatticeStructureColour {
     /// ORDINARY interior fill.
     public static let interior = RGBAColor(r: 0.49, g: 0.42, b: 0.86)
 
+    /// The GRADE TO SHAPE: cells the band thickens toward the solid outline. Drawn
+    /// as a ramp from the interior hue (no raise) to this (the quilt against the
+    /// outline), so the tint itself is the gradient (his 2026-09-16 ask).
+    public static let grade = RGBAColor(r: 0.18, g: 0.80, b: 0.66)
+
     // ★★ THERE WAS A THIRD CLASS, AND IT WAS REMOVED (maintainer, 2026-08-19: "Yes,
     // I agree. Remove the green load carrying lattice type").
     //
@@ -43,13 +48,14 @@ public enum LatticeStructureColour {
 
 /// The three things a strut can be. Stable ids so the key can drill into one.
 public enum LatticeStructureClass: String, CaseIterable, Sendable {
-    case rim, interior
+    case rim, interior, grade
 
     public var id: UUID {
         switch self {
         case .rim:      return UUID(uuidString: "5747ICE0-0000-0000-0000-000000000001")
                             ?? UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
         case .interior: return UUID(uuidString: "00000000-0000-0000-0000-000000000002")!
+        case .grade:    return UUID(uuidString: "00000000-0000-0000-0000-000000000003")!
         }
     }
 
@@ -57,6 +63,7 @@ public enum LatticeStructureClass: String, CaseIterable, Sendable {
         switch self {
         case .rim:      return "Rim & skin"
         case .interior: return "Interior fill"
+        case .grade:    return "Grade to shape"
         }
     }
 
@@ -64,7 +71,13 @@ public enum LatticeStructureClass: String, CaseIterable, Sendable {
         switch self {
         case .rim:      return LatticeStructureColour.rim
         case .interior: return LatticeStructureColour.interior
+        case .grade:    return LatticeStructureColour.grade
         }
+    }
+
+    /// The colour a ramp to this class starts from (nil ⇒ a flat swatch).
+    public var gradientFrom: RGBAColor? {
+        self == .grade ? LatticeStructureColour.interior : nil
     }
 
     /// ★ ONE SENTENCE PER COLOUR, and each says what makes it DIFFERENT from the
@@ -77,6 +90,9 @@ public enum LatticeStructureClass: String, CaseIterable, Sendable {
         case .interior:
             return "Ordinary fill. Thickness follows the density — pale is thin, "
                  + "deep is thick. Turn the stress view on to see where the load goes."
+        case .grade:
+            return "Cells the grade band thickens toward the solid outline. The tint "
+                 + "deepens from the band's inner edge to the quilt against the outline."
         }
     }
 }
