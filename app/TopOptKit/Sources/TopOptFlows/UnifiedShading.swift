@@ -244,7 +244,7 @@ struct LSDFUniforms {
     // the gradient — and it is a colour of its own in the key, not the fill's deep
     // end (his 2026-09-16 ask: "we require a new colour specifically for the
     // gradient — and it should be a gradient, itself").
-    float4 gradeColor;
+    float4 gradeColor;   // w = the grade band (mm), 0 when the grade is off
 };
 
 struct VOut { float4 pos [[position]]; float2 uv; };
@@ -277,6 +277,11 @@ static inline float3 lsdf_ray(constant LSDFUniforms& U, float2 uv) {
 }
 
 struct LSDFHit { bool hit; float3 pos; float rho; float dressing; float solid;
+                 // ★ HOW FAR INTO THE GRADE BAND this hit sits (1 at the outline, 0 at
+                 // the band's inner edge and beyond) — the grade colour's ramp. A
+                 // spatial measure, so the tint can never bleed past the band
+                 // (2026-09-17: "I am seeing the green bleeding too far into the model").
+                 float grade;
                  // ★ THE CELL THIS HIT STANDS IN (mm), for the level debug shade.
                  float cellMM;
                  // ★ THE RAW LEVEL the frame read out of the cell texture, so the
@@ -591,6 +596,7 @@ static LSDFHit lsdf_march(constant LSDFUniforms& U,
     LSDFHit out; out.hit = false; out.pos = ro; out.rho = U.shadeParams.x;
     out.dressing = 0.0;
     out.solid = 0.0;
+    out.grade = 0.0;
     out.cellMM = 0.0;
     out.rawLevel = 0.0;
 
@@ -1090,6 +1096,12 @@ static LSDFHit lsdf_march(constant LSDFUniforms& U,
             // already known here (it is what fattened the radius), and the albedo
             // needs it to tell BOUNDARY work from interior fill.
             out.dressing = clamp(dressing, 0.0, 1.0);
+            // The grade band's ramp at the hit, from the voxel's in-plane outline
+            // distance: 1 at the outline, 0 at the band's inner edge, never beyond.
+            if (U.gradeColor.w > 0.0) {
+                float dOutH = regionTex.sample(samp, stc).g;
+                out.grade = clamp(1.0 - dOutH / U.gradeColor.w, 0.0, 1.0);
+            }
             // Carried out so the albedo can draw it as printed layers rather than as
             // a strut of some invented density.
             // Which FIELD produced this hit, not which neighbourhood happened to be
@@ -1197,7 +1209,7 @@ static float3 lsdf_albedo(constant LSDFUniforms& U,
                           // printed-layer branch below. Defaulted at every call site
                           // rather than inferred, because "no strut here" and "solid
                           // plastic here" are opposite claims about the same voxel.
-                          float hitSolid) {
+                          float hitSolid, float hitGrade) {
     // ★★ THE STRESS PLOT, PAINTED ONTO THE STRUTS (maintainer, 2026-08-18:
     // "Allow the stress map to *overlay* on the lattice if it is turned on
     // simultaneously. I want to be able to see the stress map and compare the
@@ -1296,14 +1308,12 @@ static float3 lsdf_albedo(constant LSDFUniforms& U,
     float3 hue = U.denseColor.xyz;                       // interior fill
     if (hitDressing > 0.05) { hue = U.rimColor.xyz; }    // boundary work
     float3 baseC = mix(U.sparseColor.xyz, hue, clamp(0.25 + 0.75 * frac, 0.0, 1.0));
-    // The grade's raise above the stated span, tinted toward the grade colour — the
-    // amount of raise IS the ramp position.
-    if (U.gradeColor.w > 0.5 && hitDressing <= 0.05) {
-        float reach = U.gradeParams.y - rhoMax;
-        if (reach > 1e-4) {
-            float t = clamp((hitRho - rhoMax) / reach, 0.0, 1.0);
-            baseC = mix(baseC, U.gradeColor.xyz, t);
-        }
+    // The grade band, tinted toward the grade colour by WHERE the hit sits in the
+    // band (`hitGrade`: 1 at the outline, 0 at the band's inner edge) — a spatial
+    // ramp, so the colour stops exactly where the band does and the tap reads the
+    // same thing the eye does.
+    if (U.gradeColor.w > 0.0 && hitGrade > 0.0 && hitDressing <= 0.05) {
+        baseC = mix(baseC, U.gradeColor.xyz, hitGrade);
     }
     // Face-role tint (A4): where the body would have been tinted (anchor / load /
     // keep-clear / protect), the marked face's surface voxels carry that colour in
@@ -1424,7 +1434,7 @@ fragment LSDFGBuf lsdf_gbuffer(VOut in [[stage_in]],
     o.eyeZ = -eyeP.z;                     // eye looks down −Z → positive into the screen
     o.enormal = float4(eyeN, 0.0);
     o.albedo = float4(lsdf_albedo(U, tintTex, stressTex, samp, h.pos, h.rho, h.dressing,
-                                  h.solid), 1.0);
+                                  h.solid, h.grade), 1.0);
     // ★★★ THE LEVEL DEBUG SHADE (diagnosis only; `debugParams.x` is 0 on every shipping
     // frame). Each hit is painted by the CELL it stands in, cycling through six
     // saturated hues per doubling from the base cell, and material the run leaves SOLID
@@ -1947,7 +1957,7 @@ fragment CapGBuf capsule_gbuffer(CapVOut in [[stage_in]],
     CapGBuf o;
     o.eyeZ = -eyeP.z;
     o.enormal = float4(eyeN, 0.0);
-    o.albedo = float4(lsdf_albedo(U, tintTex, stressTex, samp, p, U.shadeParams.x, 0.0, 0.0), 1.0);
+    o.albedo = float4(lsdf_albedo(U, tintTex, stressTex, samp, p, U.shadeParams.x, 0.0, 0.0, 0.0), 1.0);
     o.depth = clamp(clip.z / max(clip.w, 1e-6), 0.0, 1.0);
     return o;
 }

@@ -261,6 +261,8 @@ struct Line: Shape {
 }
 
 public struct LatticeLegendPanel: View {
+    /// Rows whose (i) has been tapped — their sentence is shown under the name.
+    @State private var infoOpen: Set<UUID> = []
     private let groups: [LatticeLegendGroup]
     private let span: (lo: Double, hi: Double)
     private let mmAt: (Double) -> Double
@@ -506,14 +508,30 @@ public struct LatticeLegendPanel: View {
                             .fill(to)
                             .frame(width: 34, height: 34)
                     }
+                    // ★ THE SENTENCE LIVES BEHIND AN (i) (2026-09-17: "remove all the
+                    // text below each legend name, placing them into a (i) next to
+                    // their titles"); tapping it shows the sentence under the name.
                     VStack(alignment: .leading, spacing: 1) {
-                        Text(g.name)
-                            .font(.system(size: T.name, weight: .semibold))
-                            .foregroundStyle(DS.Color.textPrimary.color)
-                        Text(g.detail)
-                            .font(.system(size: T.detail))
-                            .foregroundStyle(DS.Color.textTertiary.color)
-                            .fixedSize(horizontal: false, vertical: true)
+                        HStack(spacing: 6) {
+                            Text(g.name)
+                                .font(.system(size: T.name, weight: .semibold))
+                                .foregroundStyle(DS.Color.textPrimary.color)
+                            Button {
+                                if infoOpen.contains(g.id) { infoOpen.remove(g.id) } else { infoOpen.insert(g.id) }
+                            } label: {
+                                Image(systemName: infoOpen.contains(g.id) ? "info.circle.fill" : "info.circle")
+                                    .font(.system(size: T.name))
+                                    .foregroundStyle(DS.Color.accent.color)
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityIdentifier("lattice-legend-info-\(g.id.uuidString)")
+                        }
+                        if infoOpen.contains(g.id) {
+                            Text(g.detail)
+                                .font(.system(size: T.detail))
+                                .foregroundStyle(DS.Color.textTertiary.color)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
                     }
                     Spacer(minLength: 0)
                 }

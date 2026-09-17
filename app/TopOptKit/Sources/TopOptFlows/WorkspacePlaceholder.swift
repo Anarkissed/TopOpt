@@ -4247,6 +4247,20 @@ public struct WorkspacePlaceholder: View {
             }
             if dressing > 0.05 { klass = .rim }
         }
+        // ★ THE OUTLINE BEAM AND THE GRADE BAND, by the in-plane outline distance the
+        // shader colours by (2026-09-17: "when I tapped a section of green, the legend
+        // shows purple … I need to ensure that what is tapped is correctly attributed").
+        // On the beam ⇒ rim; inside the band ⇒ grade; else as above.
+        if project.lattice.gradingMode.fitsShape, !scene.regions.isEmpty {
+            let dOut = LatticeRegionMask.outlineDistance(SIMD3<Double>(point), regions: scene.regions,
+                                                         slabMarginMM: 2)
+            let occ = scene.occupancy
+            let voxel = Double(Swift.max(occ.spacing.x, Swift.max(occ.spacing.y, occ.spacing.z)))
+            let beam = LatticeSDFRenderer.outlineBeamMM(
+                lineWidthMM: project.printParams.strutLineWidthMM, voxelMM: voxel)
+            if dOut < beam { klass = .rim }
+            else if project.lattice.shapeFitBandMM > 0, dOut < project.lattice.shapeFitBandMM { klass = .grade }
+        }
         // ★★ THE SECOND READING, AT THE SAME POINT (maintainer: "I want to be able to
         // click on any place and find both the lattice type and stress level.
         // Simultaneously"). Sampled from the FEA field the plot is drawn from, in the
@@ -4353,10 +4367,14 @@ public struct WorkspacePlaceholder: View {
     /// screen is the same lie as a colour on screen with no key.
     private func latticeLegendGroups() -> [LatticeLegendGroup] {
         let hasDressing = project.lattice.boundary.previewDressingLevel > 0
+        // The rim row whenever there is boundary work on screen: a finish, or the
+        // solid outline beam the shape grade draws (2026-09-17: "Where is the rim and
+        // skin? You removed an entire piece of the legend").
+        let hasOutline = project.lattice.gradingMode.fitsShape
         // The grade row only when the shape grade is on above 0 mm (his 2026-09-16 ask).
-        let hasGrade = project.lattice.gradingMode.fitsShape && project.lattice.shapeFitBandMM > 0
+        let hasGrade = hasOutline && project.lattice.shapeFitBandMM > 0
         return LatticeStructureClass.allCases.compactMap { c in
-            if c == .rim, !hasDressing { return nil }
+            if c == .rim, !hasDressing, !hasOutline { return nil }
             if c == .grade, !hasGrade { return nil }
             return LatticeLegendGroup(id: c.id, name: c.title, colour: c.colour,
                                       detail: c.detail, latticed: true,

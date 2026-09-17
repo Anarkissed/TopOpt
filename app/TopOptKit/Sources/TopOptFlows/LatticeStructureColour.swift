@@ -85,8 +85,8 @@ public enum LatticeStructureClass: String, CaseIterable, Sendable {
     public var detail: String {
         switch self {
         case .rim:
-            return "Struts on the lattice's own edge, run heavier so the boundary "
-                 + "holds. This is the rim, diagrid or skin you picked as the finish."
+            return "The solid outline around each latticed face, and any rim, "
+                 + "diagrid or skin finish: the heavier work where the lattice meets its edge."
         case .interior:
             return "Ordinary fill. Thickness follows the density — pale is thin, "
                  + "deep is thick. Turn the stress view on to see where the load goes."

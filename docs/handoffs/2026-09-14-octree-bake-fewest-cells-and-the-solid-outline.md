@@ -500,3 +500,31 @@ the stated span (`gradeColor` uniform, appended last; `t = (rho − statedHi)/(d
 statedHi)`), so the tint IS the gradient — no raise, interior; the quilt against the
 outline, full teal. The legend shows a "Grade to shape" row with a gradient swatch
 (`LatticeLegendGroup.gradientFrom`) only when the shape grade is on and the band > 0.
+
+## 14. 2026-09-17, 00:22: the legend and the tap
+
+His three: the Rim & skin row vanished (it was omitted whenever the FINISH was None,
+and his choice now persists as None — but the outline beam is on screen); the row
+sentences should live behind an (i); a tapped green strut read "Interior fill"; and the
+green "bled too far" at 5 mm.
+
+- **Rim row** shows whenever there is boundary work on screen: a finish OR the shape
+  grade's outline beam; its sentence now names the outline first.
+- **(i)**: each row is name + an info button; the sentence appears under the name only
+  while the (i) is on (`LatticeLegendPanel.infoOpen`).
+- **The tint is SPATIAL now**, not the raise: the hit carries `grade = 1 − dOut/band`
+  from the voxel's in-plane outline distance (`LSDFHit.grade`, `gradeColor.w` = the band
+  in mm), and the albedo mixes the interior hue toward the grade colour by that. The
+  colour stops exactly at the band's inner edge — a coarse cell that only pokes into the
+  band is tinted only where it does — and it cannot bleed, because it no longer follows
+  the raised density (which reached the whole of a 12 mm cell whose corner touched the
+  band).
+- **The tap** classifies by the same distances: on the beam (`outlineBeamMM`, one
+  formula shared with the bake) ⇒ Rim & skin; inside the band ⇒ Grade to shape; else the
+  dressing/interior test as before.
+- **And a build that shipped with a dead shader for 18 minutes:** `lsdf_albedo` gained
+  a parameter and a THIRD call site — in `LatticeSDFMetal.swift`'s own MSL, not in
+  `UnifiedShading.swift` — was missed; the 00:47 install's lattice shader did not
+  compile (the pipeline is built with `try?`, so nothing said so on screen).
+  `UnifiedShadingTests.testTheShaderSourcesActuallyCompile` caught it; fixed and
+  re-installed. The note at that call site says exactly this would happen.

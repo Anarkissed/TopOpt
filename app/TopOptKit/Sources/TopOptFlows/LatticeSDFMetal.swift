@@ -2372,9 +2372,8 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
                 // beyond it (clipped by the trimmed, voxel-sampled part) always end
                 // inside the solid rather than a hair short of it.
                 let voxelMM = Double(max(scene.occupancy.spacing.x, max(scene.occupancy.spacing.y, scene.occupancy.spacing.z)))
-                let trimMM = min(max(0.35 * voxelMM, 0.10), 0.35)
                 // Only when the shape grade is on: the outline is the grade's frame.
-                let solidBandMM = steppedShapeFit ? max(2 * lineWidthMM, trimMM + 0.5 * voxelMM) : 0
+                let solidBandMM = steppedShapeFit ? Self.outlineBeamMM(lineWidthMM: lineWidthMM, voxelMM: voxelMM) : 0
                 if let o = LatticePreviewOccupancy.octreeCellField(
                     occupancy: scene.occupancy, demand: scene.drawnDemand ?? scene.demand,
                     regions: scene.regions, cellMM: steppedCellMM,
@@ -3365,6 +3364,14 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
     /// samples, so the number on the card and the geometry under the finger cannot
     /// disagree — and it is right for all three algorithms without knowing which one it
     /// is holding, because the field carries the answer either way.
+    /// The solid outline beam's width: two beads at least, never less than the
+    /// march's trim plus half a voxel (so the struts it clips always end inside it).
+    /// One formula, used by the bake and by the tap's attribution.
+    static func outlineBeamMM(lineWidthMM: Double, voxelMM: Double) -> Double {
+        let trimMM = min(max(0.35 * voxelMM, 0.10), 0.35)
+        return max(2 * lineWidthMM, trimMM + 0.5 * voxelMM)
+    }
+
     /// The outline ribbon for a baked field: one beam per include face, `solidBandMM`
     /// wide, as deep as the wall is at each outline vertex (the measured width field;
     /// the region's depth where that has no answer).
@@ -3660,8 +3667,9 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
         // wider drawn span but must not colour the quilt as the ramp's deep end.
         u.colourSpan = SIMD4(Float(params.densitySpan.lo), Float(params.densitySpan.hi), 1, 0)
         let gc = LatticeStructureColour.grade
+        // w = the band in mm (the tint's spatial reach), 0 when the grade is off
         u.gradeColor = SIMD4(Float(gc.r), Float(gc.g), Float(gc.b),
-                             steppedShapeFit && params.shapeFitBandMM > 0 ? 1 : 0)
+                             steppedShapeFit && params.shapeFitBandMM > 0 ? Float(params.shapeFitBandMM) : 0)
         return u
     }
 
@@ -3775,7 +3783,7 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
         // so a call short of an argument does not merely lose the rim hue, it fails
         // to COMPILE, and a shader built with `try?` then fails silently.
         float3 baseC = lsdf_albedo(U, tintTex, stressTex, samp, hitPos, hitRho, h.dressing,
-                                   h.solid);
+                                   h.solid, h.grade);
         float3 lit = baseC * (amb + 0.85 * ndlK + 0.30 * ndlF);
         float rim = pow(1.0 - clamp(dot(n, vdir), 0.0, 1.0), 2.5);
         lit += rim * 0.55 * mix(float3(0.72, 0.78, 0.98), float3(1.0), 0.35);
