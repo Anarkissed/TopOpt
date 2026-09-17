@@ -28,14 +28,14 @@ final class LatticeQuiltMatrixProbe: XCTestCase {
         var singleCell: Bool
         var finish: LatticeBoundaryTreatment
         var grade: String              // "shape" | "no-grade"
-        /// ★★★ NOT the UI's "Default Grade". `LatticeCellTransition.defaultGrade`
-        /// maps to `algorithm: "doubled"` (`coreAlgorithm`), which the preview bakes
-        /// through `gradedCellField` — the dyadic LADDER, a different function
-        /// entirely — and `steppedCellField` is not called at all
-        /// (`DIAG steppedCells GUARD algo='doubled'`). This flag is the stepped
-        /// bake's own `dyadicSteps` option, which rounds each fit division up to a
-        /// power of two. The doubled path is untouched by anything in this file and
-        /// needs its own coverage.
+        /// ★★★ SINCE 2026-09-17 THIS IS the UI's "Default Grade" too:
+        /// `LatticeCellTransition.defaultGrade` maps to `algorithm: "doubled"`, and the
+        /// preview now routes "doubled" through the SAME per-region octree bake as
+        /// Stepped with `dyadicSteps` true (halves only). Before that date "doubled"
+        /// went round the bake to the old periodic ladder (`DIAG steppedCells GUARD
+        /// algo='doubled'`) — which is why his Default Grade had no gradient, no
+        /// per-region cell and no outline. See
+        /// `LatticeGradeToSolidBandTests.testDefaultGradeTakesTheSameBakeWithAHalvesOnlyLadder`.
         var dyadic: Bool               // stepped bake, dyadic step style
         var density: Double            // uniform relative density
         var name: String {

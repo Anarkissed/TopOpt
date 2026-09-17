@@ -84,14 +84,15 @@ final class LatticeGradeToSolidBandTests: XCTestCase {
     }
 
     private func bake(_ f: Fixture, band: Double, floor: Double = 2.6,
-                      span: (lo: Double, hi: Double)? = nil) throws -> (LatticeCellField, LatticePreviewOccupancy.OctreeBakeStats) {
+                      span: (lo: Double, hi: Double)? = nil,
+                      dyadic: Bool = false) throws -> (LatticeCellField, LatticePreviewOccupancy.OctreeBakeStats) {
         var st = LatticePreviewOccupancy.OctreeBakeStats()
         let baked = try XCTUnwrap(LatticePreviewOccupancy.octreeCellField(
             occupancy: f.occ, demand: f.demand, regions: f.regions.map { $0.spec },
             cellMM: f.regions.map { $0.cell }, lineWidthMM: bead, realFloorMM: floor,
             shapeFitBandMM: band, shapeFit: true, solidBandMM: bead,
             densityLo: span?.lo ?? lo, densityHi: span?.hi ?? hi, densityGamma: 1,
-            latticeID: "octet", stats: &st), "no bake")
+            latticeID: "octet", dyadicSteps: dyadic, stats: &st), "no bake")
         return (baked, st)
     }
 
@@ -396,5 +397,47 @@ final class LatticeGradeToSolidBandTests: XCTestCase {
         for t in inner {
             XCTAssertEqual(t.cellMM, 5, accuracy: 0.02, "one cell through the wall; at depth \(t.depth) it drew \(t.cellMM)")
         }
+    }
+
+    /// ★★ DEFAULT GRADE IS THE SAME BAKE, HALVES ONLY (his 2026-09-17, a Default Grade
+    /// at a 5 mm band: "No gradient whatsoever … Both walls are using 10.31mm cells -
+    /// but the front wall should have a 12mm cell … There is no solid outline"). The
+    /// app's log said why: `GUARD algo='doubled' — preview draws the ladder` — Default
+    /// Grade had been routed round the per-region bake to the old periodic ladder,
+    /// which knows no per-region cell, no band and no outline. Now "doubled" feeds the
+    /// octree bake with `dyadicSteps`, and the only difference from Stepped is the
+    /// ladder: a 9 mm cell at a 2.6 mm floor grades 9 → 3 by thirds, and 9 → 4.5 by
+    /// halves. Both must still grade — the point of the report was that nothing did.
+    func testDefaultGradeTakesTheSameBakeWithAHalvesOnlyLadder() throws {
+        let f = slabs([(9, 0, 40)])                       // 35 mm across: 3 × 9 leaves 8
+        let (_, thirds) = try bake(f, band: 0, floor: 2.6)
+        let (_, halves) = try bake(f, band: 0, floor: 2.6, dyadic: true)
+        let keptThirds = Set(thirds.slotsKept.keys.map { ($0 * 100).rounded() / 100 })
+        let keptHalves = Set(halves.slotsKept.keys.map { ($0 * 100).rounded() / 100 })
+        XCTAssertTrue(keptThirds.contains(3), "Stepped's ladder takes the third: 9 → 3; kept \(keptThirds)")
+        XCTAssertFalse(keptThirds.contains(4.5), "…and never 4.5 (its half is under the floor): \(keptThirds)")
+        XCTAssertTrue(keptHalves.contains(4.5), "Default Grade halves: 9 → 4.5; kept \(keptHalves)")
+        XCTAssertTrue(keptHalves.isSubset(of: [9, 4.5]), "…and takes no third: \(keptHalves)")
+        XCTAssertEqual(halves.pitchMM, 4.5, accuracy: 1e-9, "the dyadic ladder's finest rung is the pitch")
+        XCTAssertEqual(thirds.pitchMM, 3, accuracy: 1e-9)
+    }
+
+    /// The gates that route a job to that bake accept BOTH names — the workspace's
+    /// per-region cells and the renderer's deferred-bake guard — and the wizard's
+    /// grade-style picker no longer offers Organic (his 2026-09-17: "It should only be
+    /// accessible from the 'cell' section").
+    func testDoubledIsRoutedToThePerRegionBakeAndOrganicLeftThePicker() throws {
+        XCTAssertEqual(WorkspacePlaceholder.perRegionCellAlgorithms, ["stepped", "doubled"])
+        let src = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("Sources/TopOptFlows")
+        let renderer = try String(contentsOf: src.appendingPathComponent("LatticeSDFMetal.swift"), encoding: .utf8)
+        XCTAssertTrue(renderer.contains("if scene.algorithm == \"stepped\" || scene.algorithm == \"doubled\","),
+                      "★ the deferred-bake guard must hold for doubled too, or a doubled scene bakes the ladder before its cells land")
+        XCTAssertTrue(renderer.contains("dyadicSteps: steppedDyadicSteps,\n                    stats: &st)"),
+                      "★ the octree call must pass the step style, or Default Grade takes thirds")
+        let wizard = try String(contentsOf: src.appendingPathComponent("LatticeSetupWizard.swift"), encoding: .utf8)
+        XCTAssertTrue(wizard.contains("private static let cellTransitions: [LatticeCellTransition] =\n        [.stepped, .defaultGrade]\n"),
+                      "★ the grade-style picker is Stepped and Default Grade only")
     }
 }

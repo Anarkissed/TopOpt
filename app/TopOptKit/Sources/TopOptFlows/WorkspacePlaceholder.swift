@@ -1480,10 +1480,7 @@ public struct WorkspacePlaceholder: View {
             // Returning to the saved variants from the original view. L5: NOT while
             // a page is up — this chip is pinned top-centre, which is exactly where
             // both pages put their own status banner, and the two overlapped.
-            if viewOriginal, !fullScreenPageUp, let outcome = run.outcome,
-               outcome.variants.contains(where: { $0.accepted }) {
-                seeResultsChip
-            }
+            if seeResultsShown { seeResultsChip }
         }
     }
 
@@ -1505,6 +1502,30 @@ public struct WorkspacePlaceholder: View {
     /// of the centre line.
     private static let secondRowSplit: CGFloat = 300
 
+    /// ★★ WHO SHARES THE SECOND ROW (his 2026-09-17: "'rebuilding the lattice' should
+    /// be in the centre, below 'aesthetic' or 'structural'. The only time it should be
+    /// to the right … should be when there is another chip meant to be in the middle
+    /// … When the rebuilding lattice chip comes up, [See Results] should move to the
+    /// left and the rebuilding should be on the right. Otherwise, it should be in the
+    /// centre - and same with [See Results]").
+    ///
+    /// Before this the banners were ALWAYS pushed right whenever the mode chip was up,
+    /// See Results or not — so a bake on a project with no accepted variants showed
+    /// its capsule hanging off to the right of nothing. Now each of the two steps
+    /// aside only when the other is actually on screen: See Results goes left by the
+    /// split when a banner is up, a banner goes right by it when See Results is up.
+    /// One condition each, read from the same two facts.
+    private var seeResultsShown: Bool {
+        guard viewOriginal, !fullScreenPageUp, let outcome = run.outcome else { return false }
+        return outcome.variants.contains(where: { $0.accepted })
+    }
+    /// Either top-centre banner is up (the FEA's, or the rebake's when the FEA's is
+    /// not) — the same tests that mount them.
+    private var topBannerShown: Bool {
+        if latticeSimIsRunning, !simBannerDismissed { return true }
+        return (strutBakeInFlight || strutRefining) && showStrutPreview
+    }
+
     private var seeResultsChip: some View {
         VStack {
             Button { viewOriginal = false } label: {
@@ -1524,7 +1545,11 @@ public struct WorkspacePlaceholder: View {
                                            : 0))
             Spacer()
         }
-        .frame(maxWidth: .infinity, alignment: .top)   // exact horizontal centre
+        .frame(maxWidth: .infinity, alignment: .top)   // exact horizontal centre …
+        // ★ … UNLESS A BANNER SHARES THE ROW: then left by the split, the banner right
+        // by it (his 2026-09-17 rule, see `seeResultsShown`).
+        .padding(.trailing, topBannerShown ? Self.secondRowSplit : 0)
+        .animation(DS.Motion.emphasized, value: topBannerShown)
         // ★ DIRECTLY BENEATH IT, DEAD CENTRE (his 2026-08-25: "Can you put 'See
         // Results' directly beneath 'Aesthetic' right in the center of the
         // screen?"). Only the transient banners step aside now.
@@ -2012,11 +2037,20 @@ public struct WorkspacePlaceholder: View {
         // one night to a silently failing precondition here. ONCE PER CHANGE, not
         // per SwiftUI evaluation: the first cut logged every frame and buried the
         // real diagnostics under its own spam.
-        if project.lattice.algorithm != "stepped" {
+        // ★★ DEFAULT GRADE TAKES THE SAME ROAD (his 2026-09-17, Default Grade at a
+        // 5 mm shape band: "No gradient whatsoever … Both walls are using 10.31mm
+        // cells - but the front wall should have a 12mm cell … There is no solid
+        // outline"). The app's own log said why: `GUARD algo='doubled' — preview
+        // draws the ladder`. Everything he was missing — the per-region base cell,
+        // the octree's band, the outline beam — lives in the bake these cells feed,
+        // and "doubled" was routed round it to the old periodic ladder. Core's
+        // "doubled" IS the octree with halves only; the bake gets that as
+        // `dyadicSteps`. Only organic (and an unknown name) still draws the ladder.
+        if !Self.perRegionCellAlgorithms.contains(project.lattice.algorithm) {
             if SteppedGuardLog.last != project.lattice.algorithm {
                 SteppedGuardLog.last = project.lattice.algorithm
                 NSLog("DIAG steppedCells GUARD algo='\(project.lattice.algorithm)' "
-                      + "(not \"stepped\") — preview draws the ladder")
+                      + "(not stepped/doubled) — preview draws the ladder")
             }
             return []
         }
@@ -2053,8 +2087,12 @@ public struct WorkspacePlaceholder: View {
 
     /// Per region, TRUE where the stepped cell is the user's own number — the
     /// bake honours those as stated (cap-only, no floor division).
+    /// The algorithms whose preview is the per-region octree bake: Stepped (halves
+    /// and thirds) and Default Grade (core's "doubled" — halves only).
+    static let perRegionCellAlgorithms: Set<String> = ["stepped", "doubled"]
+
     private var latticePreviewSteppedStated: [Bool] {
-        guard project.lattice.algorithm == "stepped" else { return [] }
+        guard Self.perRegionCellAlgorithms.contains(project.lattice.algorithm) else { return [] }
         let stated = latticeStatedCellByFace
         guard !stated.isEmpty else { return [] }
         return project.latticeJobRegions().regions.map {
@@ -3877,10 +3915,14 @@ public struct WorkspacePlaceholder: View {
         .padding(.top, PageChrome.edge + (latticeStageModeShown
                                           ? LatticeStageModeChip.rowHeight + PageChrome.gap
                                           : 0))
-        // ★ AND RIGHT OF CENTRE, so it clears See Results on the same row.
-        .padding(.leading, latticeStageModeShown ? Self.secondRowSplit : 0)
+        // ★ RIGHT OF CENTRE ONLY WHEN SEE RESULTS SHARES THE ROW (his 2026-09-17:
+        // "'rebuilding the lattice' should be in the centre, below 'aesthetic' … The
+        // only time it should be to the right … should be when there is another chip
+        // meant to be in the middle"). See `seeResultsShown`.
+        .padding(.leading, seeResultsShown ? Self.secondRowSplit : 0)
         .transition(.move(edge: .top).combined(with: .opacity))
         .animation(DS.Motion.emphasized, value: strutBakeInFlight)
+        .animation(DS.Motion.emphasized, value: seeResultsShown)
         .accessibilityIdentifier("strut-baking-banner")
     }
 
@@ -4087,10 +4129,12 @@ public struct WorkspacePlaceholder: View {
         .padding(.top, PageChrome.edge + (latticeStageModeShown
                                           ? LatticeStageModeChip.rowHeight + PageChrome.gap
                                           : 0))
-        // ★ AND RIGHT OF CENTRE, so it clears See Results on the same row.
-        .padding(.leading, latticeStageModeShown ? Self.secondRowSplit : 0)
+        // ★ RIGHT OF CENTRE ONLY WHEN SEE RESULTS SHARES THE ROW (his 2026-09-17) —
+        // the same rule as the strut-baking banner, see `seeResultsShown`.
+        .padding(.leading, seeResultsShown ? Self.secondRowSplit : 0)
         .transition(.move(edge: .top).combined(with: .opacity))
         .animation(DS.Motion.emphasized, value: latticeSimIsRunning)
+        .animation(DS.Motion.emphasized, value: seeResultsShown)
         .accessibilityIdentifier("sim-running-banner")
     }
 

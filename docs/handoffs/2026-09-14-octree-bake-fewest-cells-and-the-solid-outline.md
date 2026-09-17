@@ -551,3 +551,31 @@ green "bled too far" at 5 mm.
   bead. Re-pinned 13 → 14 with the note; the 12 `StrutLineWidthTests` pass on the fix.
   (That rerun was the subset only; the full suite ran on `4d818f27`, before this
   test-only change.)
+
+## 15. 17:49 — Default Grade goes through the octree bake; banners centre; Organic leaves the picker
+
+His 17:31 report (Default Grade, Auto·Sim, Sim density, Rim, band 5): no gradient at
+all, both walls on 10.31 mm (the front should be 12), no solid outline. The app's own
+log at 17:30:43: `DIAG steppedCells GUARD algo='doubled' — preview draws the ladder`.
+`latticePreviewSteppedCells` (and `…Stated`, and the renderer's deferred-bake guard)
+were gated on `algorithm == "stepped"` ALONE, so Default Grade — core's "doubled" —
+went round the whole per-region bake to the old periodic ladder, which has no
+per-region base cell, no band and no outline beam. All three symptoms, one gate.
+
+- **"doubled" now takes the same road as "stepped"** (`WorkspacePlaceholder.
+  perRegionCellAlgorithms`); the renderer's deferred guard holds for both; the octree
+  bake gained `dyadicSteps` — under Default Grade the ladder is halves only (a third is
+  never taken; 9 → 4.5 at a 2.6 floor where Stepped goes 9 → 3). On his part both
+  ladders are already halves (12 → 6 → 3, 10.31 → 5.16 → 2.58), so his picture should
+  match Stepped's exactly. Tests: `LatticeGradeToSolidBandTests` +2 (the dyadic ladder
+  bake; the routing pins), 10/10.
+- **Banner placement** (his: "'rebuilding the lattice' should be in the centre … The
+  only time it should be to the right should be when there is another chip meant to be
+  in the middle"): the banners were pushed right by `secondRowSplit` whenever the mode
+  chip was up, See Results or not. Now `seeResultsShown` / `topBannerShown` each step
+  aside only when the other is on screen — See Results left, the banner right —
+  otherwise both sit dead centre under the mode.
+- **Organic Grade** removed from the Grade style picker (`cellTransitions` = Stepped,
+  Default Grade); it stays the Organic lattice switch under the cell types, and the
+  grade-style row is already replaced by the organic row while that is on.
+- Installed 17:48:59. Not yet seen by him.

@@ -2264,7 +2264,7 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
         // first bake, so this gate should never fire; it stands anyway, because a
         // deferred bake (the layer simply stays hidden — `latticeFieldIsCurrent`
         // false) is strictly better than a wrong picture.
-        if scene.algorithm == "stepped",
+        if scene.algorithm == "stepped" || scene.algorithm == "doubled",
            steppedCellMM.isEmpty || steppedCellMM.count != scene.regions.count,
            scene.regions.contains(where: { $0.role == .include }) {
             NSLog("DIAG stepped bake DEFERRED — algorithm is stepped but "
@@ -2384,6 +2384,8 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
                     solidBandMM: solidBandMM,
                     densityLo: params.densitySpan.lo, densityHi: params.densitySpan.hi,
                     densityGamma: params.gamma, latticeID: params.latticeID,
+                    // ★ Default Grade is core's "doubled": the same bake, halves only.
+                    dyadicSteps: steppedDyadicSteps,
                     stats: &st) {
                     baked = o
                     let kept = st.slotsKept.keys.sorted(by: >)

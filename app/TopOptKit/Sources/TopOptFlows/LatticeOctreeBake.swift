@@ -72,6 +72,10 @@ extension LatticePreviewOccupancy {
                                        densityHi: Double,
                                        densityGamma: Double,
                                        latticeID: String,
+                                       /// ★ DEFAULT GRADE (core's "doubled"): the rungs
+                                       /// are halves only — a third is never taken, so
+                                       /// every cell's nodes land on its parent's.
+                                       dyadicSteps: Bool = false,
                                        stats: inout OctreeBakeStats) -> LatticeCellField? {
         let t0 = Date()
         let voxel = Double(Swift.max(occ.spacing.x, Swift.max(occ.spacing.y, occ.spacing.z)))
@@ -140,9 +144,11 @@ extension LatticePreviewOccupancy {
         }
         func ladderSizes(base: Double) -> [Double] {
             // The finest rung: the smallest base/(2^a·3^b) still at or above the floor
-            // whose bead-wide strut prints open.
+            // whose bead-wide strut prints open. Under Default Grade b is 0: the ladder
+            // is core's doubled one, halves only (his 2026-09-17: Default Grade must
+            // draw the same per-region cells, band and outline as Stepped).
             var finest = base
-            for a in 0...8 { for b in 0...5 {
+            for a in 0...8 { for b in 0...(dyadicSteps ? 0 : 5) {
                 let r = base / (pow(2.0, Double(a)) * pow(3.0, Double(b)))
                 if r >= floorMM - 1e-9, r < finest, printsOpen(r) { finest = r }
             }}
@@ -153,7 +159,7 @@ extension LatticePreviewOccupancy {
                 let last = sizes.last!
                 func multiple(_ v: Double) -> Bool { let q = v / finest; return abs(q - q.rounded()) < 1e-6 }
                 if multiple(last / 2) { sizes.append(last / 2) }
-                else if multiple(last / 3) { sizes.append(last / 3) }
+                else if !dyadicSteps, multiple(last / 3) { sizes.append(last / 3) }
                 else { break }
             }
             return sizes

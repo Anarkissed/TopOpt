@@ -601,8 +601,12 @@ public struct LatticeSetupWizard: View {
     /// and because a user told "advanced" learns nothing about their part. Selecting
     /// one leaves the setting where it was; nothing silently runs `defaultGrade`
     /// under another name.
+    /// ★ TWO CHIPS, NOT THREE (his 2026-09-17: "please remove 'organic gradient'
+    /// from the gradient style area of the menu. It should only be accessible from
+    /// the 'cell' section"). Organic is the `organicTypeRow` switch under the lattice
+    /// types; while it is on this row is not shown at all (`organicRow` replaces it).
     private static let cellTransitions: [LatticeCellTransition] =
-        [.stepped, .defaultGrade, .organicGrade]
+        [.stepped, .defaultGrade]
 
     /// How many distinct cell sizes the shape fit can use here. The walk lives in
     /// `LatticeShapeFitLadder` — inline in this property it TRAPPED on an `Int`
