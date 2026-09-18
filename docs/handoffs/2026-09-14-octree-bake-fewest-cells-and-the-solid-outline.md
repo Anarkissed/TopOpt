@@ -626,3 +626,10 @@ strips."
   stepped's alone again) and `SmoothingPageRound2Tests.testWhileAPageIsUp…` (the
   page-chrome audit reads `!fullScreenPageUp` on the chip's own line; spelled out).
   The three classes rerun green (34 tests). A full suite runs again on the fix.
+- **22:45 — full suite on `c468d87a`: 2443 tests, 31 skipped, 5 failing cases**
+  (1 h 51 min) — exactly the five known pre-existing ones (AppModelTests 3MF ×3,
+  `OrganicSampleCubeTests.testThickerIsLiveAndNeverRetraces`,
+  `OrganicVariantCacheTests.testTheKeyIgnoresThicknessAndFollowsCoreAndTopology`).
+  Nothing of this branch's work fails. Installed build = this commit (20:54:04).
+  Core brief for the run + structural certification:
+  `docs/handoffs/2026-09-17-core-brief-any-step-stepped-and-beam-certification.md`.
