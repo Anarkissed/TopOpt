@@ -681,3 +681,10 @@ schema so nothing is sent to an older core.
   also carries the organic bead calibration (+44 % organic mass), certified-density
   fixes (margins ~43 % lower on the M2 stand) and the dual contourer — the maintainer's
   merge call, and worth a look before the xcframework rebuild flips the probes.
+- **Core correction (2026-09-18):** the "un-subdivided control still solving, worse
+  conditioned" report is RETRACTED — the control never started (a `pgrep -f` wait loop
+  matched its own command line; see memory `pgrep-waiter-self-matches`). What stands,
+  measured independently: the weld defect (4,270 welded junctions as emitted vs 14,202
+  subdivided, longest member 28.94 mm against an 0.817 mm reach, from `lslt_probe
+  --seams` on a real spans file) and the subdivided arm (CERTIFIED, margin 210.1, p99
+  0.1145 MPa, 61,401 members, reproduced twice). The control's margin is still owed.
