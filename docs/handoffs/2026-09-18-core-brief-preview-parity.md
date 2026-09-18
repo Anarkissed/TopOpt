@@ -196,33 +196,37 @@ Reference part: his M2 verticalStand, bead 0.45 mm, two face regions (12 mm and
   job — Hausdorff distance under one bead.
 
 ──────────────────────────────────────────────────────────────────────────────────
-## 4. DECISIONS FOR THE MAINTAINER (parity cannot be exact until these are ruled)
+## 4. THE MAINTAINER'S RULINGS (2026-09-18) — what core does for each
 ──────────────────────────────────────────────────────────────────────────────────
-- A. Default Grade cells: send the app's placed list under "doubled" too (one code path in
-  core, the octree stays app-side), or have core's dyadic planner mirror §1.1–1.4 exactly?
-  Recommend: SEND THE LIST for both.
-- B. The solid outline beam (§1.5): core builds it from the same formula (beam width, mesh
-  ribbon offset, bleed rule) — confirm core's `organic_solid_rim`-style solid can be reused
-  for the octet outline, or a new "face outline beam" pass is needed.
-- C. Quilt band and coarse-cell raise (§1.6): core's grading law has no band term; add
-  `shape_band_mm` + the raise rule, or send per-cell ρ with the cell list (recommend: SEND ρ
-  PER CELL — the preview already has it per texel).
-- D. RULED (maintainer, 2026-09-18): THE CAP STAYS, UNDER BOTH MODES, AND IT IS THE
-  USER'S SWITCH. The job already carries it: with Allow quilt OFF the app caps the density
-  band's top (`max relative density`) at the aesthetic ceiling (≈ 0.219), so the run and
-  the preview agree today. What core must add: when a STRUCTURAL certification fails
-  because the density it needs is above the band's top AND that top is the aesthetic
-  ceiling, the failure message must say so and name the fix — "turn on Allow quilt" —
-  rather than a bare margin number. The app surfaces core's reason verbatim. It stays the
-  user's choice until certification needs it.
-- E. RULED (maintainer, 2026-09-18): the skin IS a structural need — core's own rule is that
-  a member one cell wide has its struts severed at the face caps with no node to end on,
-  and the skin re-ties them (that is why core lets the floor reach one cell only with a
-  finish written). So core KEEPS adding the diagrid skin for single-cell members with
-  finish None/Rim, and the APP now says so in the preview's settings ("One cell across a
-  member — the run adds a skin.", warning tint, detail behind the (i)). No core change.
-- F. `organic_scale`: drop the key from part jobs (recommend), or apply it in the part preview.
-- G. Rim band deletion (§2.2a): core keeps the band as candidate and welds. Recommend yes.
+- A. DEFAULT GRADE CELLS — RULED: the app sends its placed cell list for "doubled" too.
+  Core accepts `lattice.stepped_cells` alongside `algorithm: "doubled"` (halves-only
+  menu: S, S/2, S/4 … validated the same way) and lays it down; the dyadic planner is
+  not consulted when the list is present. One code path for both.
+- B. THE SOLID OUTLINE BEAM (§1.5) — core's call: reuse the solid-rim machinery or a
+  new "face outline beam" pass. Either way the geometry is §1.5: width
+  max(2 × bead, trim + 0.5 × voxel), a true parallel offset of the outline, as deep as the
+  wall, plus the ≥ 25 mm bleed rule. Only when the shape grade is on.
+- C. QUILT BAND AND COARSE-CELL RAISE (§1.6) — RULED: the app sends ρ PER CELL with the
+  cell list. Add `"rho"` to each `stepped_cells` entry (the density the strut is sized
+  at, after the band raise, the printability floor and the ceiling); core sizes the
+  strut from it with its own law (§1.7) and adds no band term of its own.
+- D. THE DENSITY CAP — RULED: THE CAP STAYS, UNDER BOTH MODES, AND IT IS THE USER'S
+  SWITCH. The job already carries it: with Allow quilt OFF the app caps the density
+  band's top (`max relative density`) at the aesthetic ceiling (≈ 0.219), so run and
+  preview agree today. What core must add: when a STRUCTURAL certification fails because
+  the density it needs is above the band's top AND that top is the aesthetic ceiling, the
+  failure message says so and names the fix — "turn on Allow quilt" — not a bare margin
+  number. The app surfaces core's reason verbatim. The user's choice until certification
+  needs it.
+- E. THE DIAGRID SKIN UNDER SINGLE-CELL MEMBERS — RULED: it is a structural need (a
+  one-cell-wide member's struts are severed at the face caps with no node to end on; the
+  skin re-ties them — the reason core lets the floor reach one cell only with a finish
+  written). Core KEEPS adding the diagrid skin when the finish is None/Rim. The app now
+  says so in the preview's settings. No core change.
+- F. `organic_scale` — RULED: the app stops writing it for part jobs (the wizard's sample
+  cube keeps it for its own window). Core may keep parsing the key; it will not arrive.
+- G. THE ORGANIC RIM BAND (§2.2a) — RULED: core keeps the band as CANDIDATE and welds the
+  struts into the solid, instead of deleting it. This is the one geometric fix.
 
 ## 5. Pointers (app)
 `LatticeOctreeBake.swift` (§1.2–1.6), `LatticeOutlineRibbon.swift` (§1.5),
