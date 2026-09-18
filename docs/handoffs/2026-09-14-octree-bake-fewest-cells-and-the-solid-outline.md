@@ -688,3 +688,13 @@ schema so nothing is sent to an older core.
   subdivided, longest member 28.94 mm against an 0.817 mm reach, from `lslt_probe
   --seams` on a real spans file) and the subdivided arm (CERTIFIED, margin 210.1, p99
   0.1145 MPa, 61,401 members, reproduced twice). The control's margin is still owed.
+- **Core reply 3 (2026-09-18) — the paired margin landed.** Same job, same binary but
+  the subdivision, both CERTIFIED: un-subdivided 4,270 welded nodes / 784 ends on
+  nothing / 15,650 members / p99 0.1691 MPa / margin 146.3; subdivided 14,202 / 442 /
+  61,401 / 0.1145 / 210.1. The old behaviour was PESSIMISTIC: fusing the seams raises
+  the margin +43.6 % and drops p99 32 %. No part was certified that should not have
+  been; margins were understated by about a third, so re-runs after this lands report
+  HIGHER margins than their earlier records (the receipt's [seams] line says why).
+  Solve times comparable (45.5 s vs 41.5 s). Core at `32ecc22a` on
+  claude/raster-receipt-fields, 130/130 Release, parses exactly what `d932ec71` emits.
+  Nothing further needed from the app.
