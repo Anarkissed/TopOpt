@@ -395,6 +395,9 @@ public struct LatticeSDFScene {
     /// The organic solid rim's width (mm) when the algorithm is organic and a rim is
     /// on — the outline ribbon's width on that path. 0 otherwise.
     public let organicSolidRimMM: Double
+    /// Organic's own "Fit to shape" (the spacing tightens toward the boundary) — the
+    /// grade-to-shape tint's switch on the organic path.
+    public let organicShapeFit: Bool
 
     /// ★★★ ORGANIC: the traced struts as a distance field (mm, negative inside), on the
     /// DECLARED REGION's own bbox rather than the part's — which is what makes it
@@ -668,6 +671,7 @@ public struct LatticeSDFScene {
         self.skippedFaces = skippedFaces
         self.skinMM = skinMM
         self.organicSolidRimMM = (algorithm == "organic" && (organic?.solidRimMM ?? 0) > 0) ? organic!.solidRimMM : 0
+        self.organicShapeFit = algorithm == "organic" && (organic?.shapeFit ?? false)
         self.regions = regions
         self.occupancy = LatticeRegionMask.clipped(
             solid, to: regions, whenEmpty: whenEmpty)
@@ -3736,8 +3740,12 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
         u.colourSpan = SIMD4(Float(params.densitySpan.lo), Float(params.densitySpan.hi), 1, 0)
         let gc = LatticeStructureColour.grade
         // w = the band in mm (the tint's spatial reach), 0 when the grade is off
+        // ★ ORGANIC TOO (his 2026-09-18: "I am not seeing any of the 'grade to shape'
+        // green … ensure it is implemented on the actual lattice"): its own Fit to
+        // shape is the switch; the reach is the same band the octet uses.
+        let gradeOn = (scene?.organicShapeFit ?? false) || steppedShapeFit
         u.gradeColor = SIMD4(Float(gc.r), Float(gc.g), Float(gc.b),
-                             steppedShapeFit && params.shapeFitBandMM > 0 ? Float(params.shapeFitBandMM) : 0)
+                             gradeOn && params.shapeFitBandMM > 0 ? Float(params.shapeFitBandMM) : 0)
         return u
     }
 

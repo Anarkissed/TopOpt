@@ -1960,7 +1960,17 @@ fragment CapGBuf capsule_gbuffer(CapVOut in [[stage_in]],
     CapGBuf o;
     o.eyeZ = -eyeP.z;
     o.enormal = float4(eyeN, 0.0);
-    o.albedo = float4(lsdf_albedo(U, tintTex, stressTex, samp, p, U.shadeParams.x, 0.0, 0.0, 0.0), 1.0);
+    // ★ THE GRADE-TO-SHAPE TINT ON A CAPSULE (2026-09-18): by the in-plane outline
+    // distance — the region texture's `g` channel — exactly as the march tints a
+    // strut: full at the outline, gone at the band's inner edge (`gradeColor.w`).
+    float capGrade = 0.0;
+    if (U.gradeColor.w > 0.0) {
+        float3 sdfDims = max(U.sdfDims.xyz, float3(1.0));
+        float3 stc = ((p - U.sdfOrigin.xyz) / U.sdfSpacing.xyz + 0.5) / sdfDims;
+        float dOut = regionTex.sample(samp, stc).g;
+        if (dOut < 500.0) { capGrade = clamp(1.0 - dOut / U.gradeColor.w, 0.0, 1.0); }
+    }
+    o.albedo = float4(lsdf_albedo(U, tintTex, stressTex, samp, p, U.shadeParams.x, 0.0, 0.0, capGrade), 1.0);
     o.depth = clamp(clip.z / max(clip.w, 1e-6), 0.0, 1.0);
     return o;
 }

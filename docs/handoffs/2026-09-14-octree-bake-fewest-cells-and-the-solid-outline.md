@@ -775,3 +775,14 @@ Installed 16:48:46. Not yet seen by him.
    the body. Both algorithms. `LatticeRegionCapTests` 3/3; the harness probe shows the
    layer now lighting 11 214 px without the body under organic (was 7 602).
    Installed 17:20. Not yet seen by him.
+- **17:45 — his three on the 17:14 build:** (1) the cap wall was INVISIBLE: it wrote
+  albedo 0 ("body") and nothing paints a prepass-only surface with alpha 0 — it
+  occluded the struts behind it and showed the background ("still seeing through the
+  floor"). It now writes a body grey with alpha 1 (`LatticeRegionCap.wallTint`) and the
+  lattice shade paints it like the ribbon. DIAG gained `capVerts`/`capPipeline`.
+  (2) The Lattice-only badge is a themed capsule (panel surface, accent stroke, 13 pt),
+  not the orange card. (3) The grade-to-shape green reaches the ORGANIC lattice: the
+  capsule fragment tints by the in-plane outline distance (region texture `.g`) over
+  the same band; `gradeColor.w` is armed by organic's own Fit to shape
+  (`LatticeSDFScene.organicShapeFit`); the legend's grade/rim rows key on the organic
+  switches under organic. Installed 17:45. Not yet seen by him.

@@ -12,6 +12,8 @@ import simd
 /// cap (`region_cap_fragment` samples the part SDF a voxel and a half beyond), so a
 /// prism that spans a whole wall draws no cap and the wall stays see-through.
 public enum LatticeRegionCap {
+    /// The wall's colour: the body's own grey, so the cap reads as the part it is.
+    public static let wallTint = SIMD4<Float>(0.58, 0.60, 0.64, 1)
     /// Ear-clipping triangulation of one simple loop (any orientation). Returns index
     /// triples into `loop`. Degenerate or self-crossing loops fall back to a fan.
     static func triangulate(_ loop: [SIMD2<Double>]) -> [(Int, Int, Int)] {

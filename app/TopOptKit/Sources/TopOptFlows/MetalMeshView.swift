@@ -856,8 +856,10 @@ fragment GBuf depth_fragment_flat(DOut in [[stage_in]], constant DUniforms& u [[
 // along the region's inward direction (the cap's normal points back out, so inward is
 // its negative) is still inside. A prism that spans a whole wall has no material
 // beyond its cap and draws nothing, so the wall stays see-through; the base under a
-// 12 mm prism does, and gets its wall. Albedo ZERO: the deferred shade treats it as
-// the body, which is what it is.
+// 12 mm prism does, and gets its wall. Albedo = the tint (a body grey), alpha 1: the deferred shade
+// paints whatever the prepass writes with alpha — an albedo of ZERO was "not the
+// lattice" and NOTHING painted it, so the first cut occluded the struts behind it and
+// showed the background (his 2026-09-18 "still seeing through the floor").
 struct CapUniforms { float4 origin; float4 spacing; float4 dims; float4 margin; };
 fragment GBuf region_cap_fragment(DOut in [[stage_in]], constant DUniforms& u [[buffer(1)]],
                                   constant CapUniforms& c [[buffer(2)]],
@@ -874,7 +876,7 @@ fragment GBuf region_cap_fragment(DOut in [[stage_in]], constant DUniforms& u [[
     float3 n = normalize(in.enormal);
     if (n.z < 0.0) { n = -n; }
     o.enormal = float4(n, 0.0);
-    o.albedo = float4(0.0);
+    o.albedo = float4(u.tint.xyz, 1.0);
     return o;
 }
 """
@@ -4228,7 +4230,7 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
             }
             census = area.keys.sorted().map { String(format: "%@=%.0f%%", $0, 100 * (openA[$0] ?? 0) / area[$0]!) }.joined(separator: " ")
         }
-        NSLog("DIAG shellClip mode=\(mode) inFrame=\(latticeInFrame) algo=\(scene?.algorithm ?? "-") capsules=\(scene?.organicCapsules.count ?? -1) capsulePipeline=\(organicCapsulePipelineDidBuild) capsulesReplaceField=\(layer?.capsulesReplaceField ?? false) bodyAlpha=\(bodyAlpha) initError=\(Self.lastInitError ?? "nil") regionTex=\(layer?.regionTexture != nil) skinMM=\(scene?.skinMM ?? -1) dims=\(u.dims) regions=[\(regs)] open=[\(census)]")
+        NSLog("DIAG shellClip mode=\(mode) inFrame=\(latticeInFrame) algo=\(scene?.algorithm ?? "-") capsules=\(scene?.organicCapsules.count ?? -1) capVerts=\(layer?.regionCap?.vertexCount ?? 0) capPipeline=\(regionCapPipeline != nil) capsulePipeline=\(organicCapsulePipelineDidBuild) capsulesReplaceField=\(layer?.capsulesReplaceField ?? false) bodyAlpha=\(bodyAlpha) initError=\(Self.lastInitError ?? "nil") regionTex=\(layer?.regionTexture != nil) skinMM=\(scene?.skinMM ?? -1) dims=\(u.dims) regions=[\(regs)] open=[\(census)]")
     }
 
     var shellClipForTests: (grid: SIMD4<Float>, spacing: SIMD4<Float>,
@@ -4462,6 +4464,7 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
                 var du = DepthPrepassUniforms(mvp: uniforms.mvp, modelView: modelViewMatrix(),
                                               flex: .zero, normalMatrix: uniforms.normalMatrix)
                 let voxel = max(g.spacing.x, max(g.spacing.y, g.spacing.z))
+                du.tint = LatticeRegionCap.wallTint
                 var cu = RegionCapUniforms(origin: SIMD4(g.origin, 0), spacing: SIMD4(g.spacing, 0),
                                            dims: SIMD4(Float(g.nx), Float(g.ny), Float(g.nz), 0),
                                            margin: SIMD4(1.5 * voxel, 0, 0, 0))

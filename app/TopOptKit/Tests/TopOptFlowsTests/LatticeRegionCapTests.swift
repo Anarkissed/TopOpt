@@ -45,7 +45,8 @@ final class LatticeRegionCapTests: XCTestCase {
         let s = try String(contentsOf: src, encoding: .utf8)
         XCTAssertTrue(s.contains("float3 p = in.mpos + inward * c.margin.x;"), "★ the sample is taken PAST the cap")
         XCTAssertTrue(s.contains("if (sdfTex.sample(s, uvw).r >= 0.0) { discard_fragment(); }"), "★ no material beyond ⇒ no cap")
-        XCTAssertTrue(s.contains("o.albedo = float4(0.0);"), "★ the cap is the BODY to the deferred shade")
+        XCTAssertTrue(s.contains("o.albedo = float4(u.tint.xyz, 1.0);\n    return o;\n}\n\"\"\""), "★ the cap writes a PAINTED albedo — zero was invisible")
+        XCTAssertTrue(s.contains("du.tint = LatticeRegionCap.wallTint"), "★ …in the body's grey")
         XCTAssertTrue(s.contains("margin: SIMD4(1.5 * voxel, 0, 0, 0)"), "★ a voxel and a half beyond the cap")
     }
 }

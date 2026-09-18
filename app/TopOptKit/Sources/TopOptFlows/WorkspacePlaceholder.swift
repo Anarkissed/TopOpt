@@ -4423,9 +4423,14 @@ public struct WorkspacePlaceholder: View {
         // The rim row whenever there is boundary work on screen: a finish, or the
         // solid outline beam the shape grade draws (2026-09-17: "Where is the rim and
         // skin? You removed an entire piece of the legend").
-        let hasOutline = project.lattice.gradingMode.fitsShape
+        // ★ Organic's Fit to shape is its shape grade (2026-09-18).
+        let hasOutline = project.lattice.algorithm == "organic"
+            ? (project.lattice.organicShapeFit || project.lattice.organicSolidRimMM != 0)
+            : project.lattice.gradingMode.fitsShape
         // The grade row only when the shape grade is on above 0 mm (his 2026-09-16 ask).
-        let hasGrade = hasOutline && project.lattice.shapeFitBandMM > 0
+        let hasGrade = (project.lattice.algorithm == "organic" ? project.lattice.organicShapeFit
+                                                                : project.lattice.gradingMode.fitsShape)
+            && project.lattice.shapeFitBandMM > 0
         return LatticeStructureClass.allCases.compactMap { c in
             if c == .rim, !hasDressing, !hasOutline { return nil }
             if c == .grade, !hasGrade { return nil }
@@ -7194,20 +7199,22 @@ public struct WorkspacePlaceholder: View {
 
     @ViewBuilder private var latticeOnlyBadge: some View {
         if let text = latticeOnlyFlash {
-            VStack(spacing: 14) {
+            // ★ IN THE APP'S OWN LANGUAGE (his 2026-09-18: "The 'Lattice Only' notification
+            // looks completely different from the rest of the app"): the same panel
+            // surface, accent stroke and type the top banners use — not an orange card.
+            HStack(spacing: DS.Space.s) {
                 Image(systemName: latticeOnly ? "cube.transparent.fill" : "cube.fill")
-                    .font(.system(size: 72, weight: .bold))
-                Text(text)
-                    .font(.system(size: 34, weight: .heavy, design: .rounded))
-                    .tracking(2)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(DS.Color.accent.color)
+                Text(text.capitalized)
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundStyle(DS.Color.textPrimary.color)
             }
-            .foregroundStyle(Color.white)
-            .padding(.horizontal, 44)
-            .padding(.vertical, 36)
-            .background(
-                RoundedRectangle(cornerRadius: 28, style: .continuous)
-                    .fill((latticeOnly ? DS.Color.warning : DS.Color.accentDeep).opacity(0.92).color)
-                    .shadow(color: .black.opacity(0.5), radius: 40, y: 12))
+            .padding(.vertical, DS.Space.sm)
+            .padding(.horizontal, DS.Space.l)
+            .background(Capsule().fill(DS.Surface.panel.color)
+                .overlay(Capsule().strokeBorder(DS.Color.accent.opacity(0.45).color, lineWidth: 1)))
+            .dsShadow(DS.Shadow.panel)
             .transition(.scale(scale: 0.6).combined(with: .opacity))
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
             .allowsHitTesting(false)
