@@ -673,3 +673,11 @@ schema so nothing is sent to an older core.
   (1 h 48 min) — exactly the five known pre-existing ones (AppModelTests 3MF ×3,
   OrganicSampleCubeTests thicker-is-live, OrganicVariantCacheTests key). Nothing of
   this branch's work fails. Installed build = this commit (02:47:50).
+- **Core reply 2 (2026-09-18):** the structural floor's key is `stepped_min_tile_mm`
+  (new; `min_cell_mm` never existed as a key — it was a C++ parameter name; `cell_min_mm`
+  is the swept window). Switched, pinned on the source in `LatticeSteppedCellListTests`.
+  Core keeps multi-family acceptance loose (a superset of packSlot's coarsest-family
+  placement); B and C agreed; their un-subdivided margin control still solving. PR #358
+  also carries the organic bead calibration (+44 % organic mass), certified-density
+  fixes (margins ~43 % lower on the M2 stand) and the dual contourer — the maintainer's
+  merge call, and worth a look before the xcframework rebuild flips the probes.

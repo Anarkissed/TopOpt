@@ -800,10 +800,12 @@ public struct LatticeSpec: Equatable, Sendable {
         // an any-step Stepped job under any non-aesthetic intent — an UNSTATED intent
         // included — unless it asks for the beam-network certificate, so the stage's
         // word travels with every Stepped job, and the certificate key with every
-        // structural one. `min_cell_mm` is the structural floor for the finest tile:
-        // the printability floor ALONE (core: "the 20 % rule has no structural
-        // content"), the same number the preview's bake uses under Structural. Each
-        // key only once core's schema accepts it — never a key that would kill the job.
+        // structural one. `stepped_min_tile_mm` (core reply 2, 2026-09-18 — NOT
+        // `cell_min_mm`, the swept window's lower end, and `min_cell_mm` never existed
+        // as a key) is the structural floor for the finest TILE: the printability floor
+        // ALONE (core: "the 20 % rule has no structural content"), the same number the
+        // preview's bake uses under Structural. Each key only once core's schema
+        // accepts it — never a key that would kill the job.
         if algorithm == "stepped" {
             if let m = stageMode, TopOptKit.gradingSchemaAccepts(key: "intent") {
                 grading["intent"] = m == .structural ? "structural" : "aesthetic"
@@ -813,8 +815,8 @@ public struct LatticeSpec: Equatable, Sendable {
                     grading["structural_certification"] = "beam_network"
                 }
                 if let w = minExtrudableWidthMM, w > 0,
-                   TopOptKit.gradingSchemaAccepts(key: "min_cell_mm") {
-                    grading["min_cell_mm"] = LatticeSDFRenderer.printableFloorBeads * w
+                   TopOptKit.gradingSchemaAccepts(key: "stepped_min_tile_mm") {
+                    grading["stepped_min_tile_mm"] = LatticeSDFRenderer.printableFloorBeads * w
                 }
             }
         }

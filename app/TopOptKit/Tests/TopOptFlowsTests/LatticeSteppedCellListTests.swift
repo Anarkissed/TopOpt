@@ -56,6 +56,14 @@ final class LatticeSteppedCellListTests: XCTestCase {
         let cells = try XCTUnwrap(lat["stepped_cells"] as? [[String: Any]])
         XCTAssertEqual(cells.count, 1)
         XCTAssertEqual(cells[0]["region_id"] as? Int, 1)
+        // ★ THE FLOOR'S KEY IS `stepped_min_tile_mm` (core reply 2, 2026-09-18): never
+        // `cell_min_mm` (the swept window) nor `min_cell_mm` (never a key). Pinned on
+        // the source, since the schema probe cannot tell a wrong name from an old core.
+        let src = try String(contentsOf: URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("Sources/TopOptFlows/LatticeSettings.swift"), encoding: .utf8)
+        XCTAssertTrue(src.contains("grading[\"stepped_min_tile_mm\"] = LatticeSDFRenderer.printableFloorBeads * w"))
+        XCTAssertFalse(src.contains("grading[\"min_cell_mm\"]"), "★ min_cell_mm was never a key")
         // Documented, not asserted: true only on a core carrying the any-step schema.
         print("steppedCellsWired = \(TopOptKit.steppedCellsWired); "
               + "steppedStructuralCertificationWired = \(TopOptKit.steppedStructuralCertificationWired)")
