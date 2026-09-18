@@ -861,16 +861,20 @@ fragment GBuf depth_fragment_flat(DOut in [[stage_in]], constant DUniforms& u [[
 // lattice" and NOTHING painted it, so the first cut occluded the struts behind it and
 // showed the background (his 2026-09-18 "still seeing through the floor").
 struct CapUniforms { float4 origin; float4 spacing; float4 dims; float4 margin; };
+// ★ IT ASKS THE WHOLE PART, NOT THE LATTICED VOLUME (2026-09-18 evening): the part
+// SDF is the solid CLIPPED TO THE REGIONS, so past a cap it reads "outside" even in
+// solid material and every fragment discarded — the floor stayed see-through through
+// two builds. `solidTex` is the unclipped occupancy (1 inside), sampled nearest.
 fragment GBuf region_cap_fragment(DOut in [[stage_in]], constant DUniforms& u [[buffer(1)]],
                                   constant CapUniforms& c [[buffer(2)]],
-                                  texture3d<float, access::sample> sdfTex [[texture(0)]]) {
+                                  texture3d<float, access::sample> solidTex [[texture(0)]]) {
     float3 inward = -normalize(in.mnormal);
     float3 p = in.mpos + inward * c.margin.x;
     float3 g = (p - c.origin.xyz) / max(c.spacing.xyz, float3(1e-6));
     if (any(g < float3(-0.5)) || any(g > c.dims.xyz - float3(0.5))) { discard_fragment(); }
-    constexpr sampler s(coord::normalized, filter::linear, address::clamp_to_edge);
+    constexpr sampler s(coord::normalized, filter::nearest, address::clamp_to_edge);
     float3 uvw = (g + 0.5) / max(c.dims.xyz, float3(1.0));
-    if (sdfTex.sample(s, uvw).r >= 0.0) { discard_fragment(); }
+    if (solidTex.sample(s, uvw).r < 0.5) { discard_fragment(); }
     GBuf o;
     o.eyeZ = in.eyeZ;
     float3 n = normalize(in.enormal);
@@ -4448,7 +4452,7 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         // ★ THE SOLID BEYOND EACH FACE PRISM'S CAP (2026-09-18) — body-coloured, only
         // where the part continues past the cap (the fragment samples the part SDF).
         if let lattice, let cpipe = regionCapPipeline, let cap = lattice.regionCap, cap.vertexCount > 0,
-           let sdf = lattice.partSDFTexture, let g = lattice.partSDFGrid {
+           let sdf = lattice.solidOccupancyTexture, let g = lattice.solidOccupancyGrid {
             if regionCapVersionSeen != lattice.regionCapVersion {
                 regionCapVersionSeen = lattice.regionCapVersion
                 regionCapVertexCount = cap.vertexCount

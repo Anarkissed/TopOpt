@@ -5059,6 +5059,9 @@ public struct WorkspacePlaceholder: View {
                 // band he photographed. `organicRunSolidRimMM(beadMM:)` answers for
                 // every mode now, and the job carries the same number.
                 o.solidRimMM = Swift.max(0, organicRimSetting)
+                // ★ the grade-to-shape band reaches organic (2026-09-18): its own Fit to
+                // shape switch arms it, the same millimetres the octet uses
+                o.shapeBandMM = project.lattice.organicShapeFit ? project.lattice.shapeFitBandMM : 0
                 // ★ THE DEPTH-STAGGER EXPERIMENT (2026-09-08), scaled to the window the
                 // lattice is graded to. Preview only; never written to the job.
                 o.depthStaggerCellMM = organicDepthStagger
@@ -7202,17 +7205,21 @@ public struct WorkspacePlaceholder: View {
             // ★ IN THE APP'S OWN LANGUAGE (his 2026-09-18: "The 'Lattice Only' notification
             // looks completely different from the rest of the app"): the same panel
             // surface, accent stroke and type the top banners use — not an orange card.
-            HStack(spacing: DS.Space.s) {
+            // ★ THE MODE CHIP'S OWN SIZE (his 2026-09-18: "needs to be MUCH bigger … closer
+            // to the look of the 'Aesthetic' mode title"): 22 pt semibold in a capsule of
+            // the accent at the chip's tint, the icon beside it.
+            HStack(spacing: DS.Space.sm) {
                 Image(systemName: latticeOnly ? "cube.transparent.fill" : "cube.fill")
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(.system(size: 22, weight: .semibold))
                     .foregroundStyle(DS.Color.accent.color)
                 Text(text.capitalized)
-                    .font(.system(size: 13, weight: .bold))
+                    .font(.system(size: 22, weight: .semibold))
                     .foregroundStyle(DS.Color.textPrimary.color)
             }
-            .padding(.vertical, DS.Space.sm)
-            .padding(.horizontal, DS.Space.l)
-            .background(Capsule().fill(DS.Surface.panel.color)
+            .padding(.vertical, DS.Space.s)
+            .padding(.horizontal, DS.Space.xl2)
+            .frame(height: LatticeStageModeChip.rowHeight)
+            .background(Capsule().fill(DS.Color.accent.opacity(0.14).color)
                 .overlay(Capsule().strokeBorder(DS.Color.accent.opacity(0.45).color, lineWidth: 1)))
             .dsShadow(DS.Shadow.panel)
             .transition(.scale(scale: 0.6).combined(with: .opacity))

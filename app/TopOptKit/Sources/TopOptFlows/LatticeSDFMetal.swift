@@ -271,6 +271,13 @@ public struct LatticeOrganicInput: Sendable {
     /// erodes each include face region IN-PLANE by it, so the shell keeps that band and
     /// no strut is traced there. 0 ⇒ no rim.
     public var solidRimMM: Double = 0
+    /// ★ THE GRADE-TO-SHAPE BAND ON THE ORGANIC PATH (his 2026-09-18: "There should be
+    /// some kind of gradient - like the thickness of the struts getting thicker and the
+    /// cells getting smaller … include the gradient amount in Organic"). Within this
+    /// many mm of a face outline the spacing shrinks linearly to the printable floor,
+    /// and the per-voxel bead follows the spacing (core's law), so the struts thicken
+    /// as the cells close up. 0 ⇒ no grade.
+    public var shapeBandMM: Double = 0
 
     public init(tensor: [Double], dims: (Int, Int, Int), originMM: SIMD3<Double>,
                 spacingMM: Double, minExtrudableWidthMM: Double,
@@ -392,6 +399,11 @@ public struct LatticeSDFScene {
     /// because the DRESSING BAND must be a physical width, not a fraction of whatever
     /// cell happens to be local. See `rimParams`.
     public let skinMM: Double
+    /// ★ THE WHOLE PART'S OCCUPANCY, UNCLIPPED (2026-09-18): `occupancy` and `partSDF`
+    /// are the LATTICED volume — the solid clipped to the regions — so beyond a
+    /// region's cap they read "outside" even inside solid material. The cap wall has to
+    /// ask the part itself whether material continues, and this is the part itself.
+    public let solidOccupancy: LatticeVoxelGrid
     /// The organic solid rim's width (mm) when the algorithm is organic and a rim is
     /// on — the outline ribbon's width on that path. 0 otherwise.
     public let organicSolidRimMM: Double
@@ -662,6 +674,7 @@ public struct LatticeSDFScene {
         // signed distance, the region field, the organic trace, and everything else.
         let sceneT0 = Date()
         var tOccupancy = 0.0, tRegionField = 0.0, tOrganic = 0.0
+        var outlineForOrganic: LatticeVoxelGrid? = nil     // the in-plane outline distance, for the band grade
         let solid = LatticePreviewOccupancy.occupancy(
             positions: mesh.positions, indices: mesh.indices,
             bounds: mesh.bounds, maxDim: maxDim)
@@ -670,6 +683,7 @@ public struct LatticeSDFScene {
         self.partInteriorVoxelCount = solidInside
         self.skippedFaces = skippedFaces
         self.skinMM = skinMM
+        self.solidOccupancy = solid
         self.organicSolidRimMM = (algorithm == "organic" && (organic?.solidRimMM ?? 0) > 0) ? organic!.solidRimMM : 0
         self.organicShapeFit = algorithm == "organic" && (organic?.shapeFit ?? false)
         self.regions = regions
@@ -777,6 +791,7 @@ public struct LatticeSDFScene {
             }
             self.regionSDF = f
             self.outlineSDF = o
+            outlineForOrganic = o
             self.prismSDF = q
         } else {
             self.regionSDF = nil
@@ -1231,6 +1246,32 @@ public struct LatticeSDFScene {
                 fitNote = String(format: " · shape-fit: %d voxels shrunk (min ratio %.2f, depth %d, member %@)",
                                  fit.shrunk, fit.minRatio, fit.depthVoxels,
                                  member.count == cand.count ? "yes" : "UNAVAILABLE")
+            }
+            // ★★ THE BAND GRADE (2026-09-18): within `shapeBandMM` of a face outline the
+            // spacing runs linearly from what it is down to the printable floor at the
+            // outline — smaller cells — and the bead field below follows the spacing, so
+            // the struts thicken too. The outline distance is the scene's own in-plane
+            // field, sampled at the voxel's centre.
+            if o.shapeBandMM > 0, let og = outlineForOrganic {
+                let floorMM = OrganicSizeCheck.floor(beadMM: o.minExtrudableWidthMM, voxelMM: o.spacingMM).mm
+                var graded = 0
+                for e in 0..<cand.count where cand[e] {
+                    let i = e % tnx, j = (e / tnx) % tny, k = e / (tnx * tny)
+                    let p = SIMD3<Float>(Float(o.originMM.x + (Double(i) + 0.5) * o.spacingMM),
+                                         Float(o.originMM.y + (Double(j) + 0.5) * o.spacingMM),
+                                         Float(o.originMM.z + (Double(k) + 0.5) * o.spacingMM))
+                    let gi = (p - og.origin) / og.spacing
+                    let a = Int(gi.x.rounded()), b = Int(gi.y.rounded()), c = Int(gi.z.rounded())
+                    guard a >= 0, b >= 0, c >= 0, a < og.nx, b < og.ny, c < og.nz else { continue }
+                    let d = Double(og.values[(c * og.ny + b) * og.nx + a])
+                    guard d < 999 else { continue }
+                    let t = Swift.min(Swift.max(d / o.shapeBandMM, 0), 1)
+                    let target = Swift.min(sep[e], floorMM)
+                    let s2 = sep[e] * t + target * (1 - t)
+                    if s2 < sep[e] - 1e-9 { sep[e] = s2; graded += 1 }
+                }
+                fitNote += String(format: " · shape band %.1f mm: %d voxels graded toward the %.2f mm floor",
+                                  o.shapeBandMM, graded, floorMM)
             }
             // ── ★★★ THE PER-VOXEL BEAD, THE WAY THE RUN BUILDS IT ────────────────
             //
@@ -1905,8 +1946,9 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
     private(set) var regionCap: LatticeOutlineRibbon.Mesh?
     private(set) var regionCapVersion = 0
     private static var regionCapSerial = 0
-    var partSDFTexture: MTLTexture? { sdfTex }
-    var partSDFGrid: LatticeVoxelGrid? { scene?.partSDF }
+    var solidOccupancyTexture: MTLTexture? { solidTex }
+    var solidOccupancyGrid: LatticeVoxelGrid? { scene?.solidOccupancy }
+    private var solidTex: MTLTexture?
     private static var outlineRibbonSerial = 0
     private var cellGrid: LatticeVoxelGrid?
     private var sdfTex: MTLTexture?
@@ -2041,6 +2083,7 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
         // local camera explicitly.)
         uploadSegments(scene.preview.segments)
         sdfTex = makeVolumeTexture(scene.partSDF)
+        solidTex = makeVolumeTexture(scene.solidOccupancy)     // the cap wall's "is the part here"
         regionTex = scene.regionSDF.flatMap { r in makeRegionTexture(r, outline: scene.outlineSDF, prism: scene.prismSDF) }
         let cap = LatticeRegionCap.build(regions: scene.regions)
         regionCap = cap.vertexCount > 0 ? cap : nil

@@ -23,6 +23,28 @@ final class LatticeRegionCapTests: XCTestCase {
         }
     }
 
+    /// ★ HIS OUTLINE: every cap triangle's centroid lies INSIDE the loop, and the
+    /// triangles cover the loop's area (a fan fallback fails both on a concave U).
+    func testHisOutlineTriangulatesInsideItself() throws {
+        let mesh = try LatticePreviewConfettiTests.hisMesh()
+        guard let plane = LatticeRegionEmission.planeFor(face: FaceID(15), in: mesh),
+              let r = LatticeRegionEmission.spec(for: plane, role: .include, depthMM: 12, faceID: 15),
+              let loop = r.outlineLoops.first else { throw XCTSkip("no outline") }
+        let tris = LatticeRegionCap.triangulate(loop)
+        XCTAssertEqual(tris.count, loop.count - 2, "n − 2 triangles for a simple loop of \(loop.count)")
+        var area = 0.0, polyArea = 0.0, outside = 0
+        for i in 0..<loop.count { let a = loop[i], b = loop[(i + 1) % loop.count]; polyArea += a.x * b.y - b.x * a.y }
+        polyArea = abs(polyArea) * 0.5
+        for (a, b, c) in tris {
+            let p = loop[a], q = loop[b], w = loop[c]
+            area += abs((q.x - p.x) * (w.y - p.y) - (q.y - p.y) * (w.x - p.x)) * 0.5
+            let cen = (p + q + w) / 3
+            if LatticeFaceOutline.signedDistance(cen, loops: [loop]) > 1e-6 { outside += 1 }
+        }
+        XCTAssertEqual(area, polyArea, accuracy: 1e-6 * polyArea, "the triangles cover the loop exactly")
+        XCTAssertEqual(outside, 0, "★ \(outside) of \(tris.count) cap triangles lie outside his outline")
+    }
+
     func testTheCapSitsAtTheDepthAndFacesBackOut() {
         var r = LatticeRegionSpec(role: .include, kind: .face)
         r.origin = SIMD3(1, 2, 3); r.normal = SIMD3(0, 1, 0); r.depthMM = 12
@@ -44,7 +66,8 @@ final class LatticeRegionCapTests: XCTestCase {
             .deletingLastPathComponent().appendingPathComponent("Sources/TopOptFlows/MetalMeshView.swift")
         let s = try String(contentsOf: src, encoding: .utf8)
         XCTAssertTrue(s.contains("float3 p = in.mpos + inward * c.margin.x;"), "★ the sample is taken PAST the cap")
-        XCTAssertTrue(s.contains("if (sdfTex.sample(s, uvw).r >= 0.0) { discard_fragment(); }"), "★ no material beyond ⇒ no cap")
+        XCTAssertTrue(s.contains("if (solidTex.sample(s, uvw).r < 0.5) { discard_fragment(); }"), "★ no material beyond ⇒ no cap — asked of the WHOLE part's occupancy")
+        XCTAssertTrue(s.contains("let sdf = lattice.solidOccupancyTexture, let g = lattice.solidOccupancyGrid"), "★ …bound from the unclipped occupancy, never the region-clipped SDF")
         XCTAssertTrue(s.contains("o.albedo = float4(u.tint.xyz, 1.0);\n    return o;\n}\n\"\"\""), "★ the cap writes a PAINTED albedo — zero was invisible")
         XCTAssertTrue(s.contains("du.tint = LatticeRegionCap.wallTint"), "★ …in the body's grey")
         XCTAssertTrue(s.contains("margin: SIMD4(1.5 * voxel, 0, 0, 0)"), "★ a voxel and a half beyond the cap")

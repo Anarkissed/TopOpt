@@ -15,47 +15,71 @@ public enum LatticeRegionCap {
     /// The wall's colour: the body's own grey, so the cap reads as the part it is.
     public static let wallTint = SIMD4<Float>(0.58, 0.60, 0.64, 1)
     /// Ear-clipping triangulation of one simple loop (any orientation). Returns index
-    /// triples into `loop`. Degenerate or self-crossing loops fall back to a fan.
+    /// triples into `loop`. ★ ROBUST TO A CAD OUTLINE: near-collinear vertices are
+    /// dropped as degenerate ears, the inside test is strict with a tolerance scaled to
+    /// the loop, and only REFLEX vertices can block an ear (a convex vertex never lies
+    /// inside another ear). A first cut used an inclusive test and fell back to a fan on
+    /// his 75-vertex outline — every cap triangle landed outside the part (2026-09-18).
     static func triangulate(_ loop: [SIMD2<Double>]) -> [(Int, Int, Int)] {
         let m = loop.count
         guard m >= 3 else { return [] }
+        var lo = loop[0], hi = loop[0]
+        for q in loop { lo = simd_min(lo, q); hi = simd_max(hi, q) }
+        let scale = Swift.max(hi.x - lo.x, hi.y - lo.y, 1e-9)
+        let eps = 1e-9 * scale * scale
         var area = 0.0
         for i in 0..<m { let a = loop[i], b = loop[(i + 1) % m]; area += a.x * b.y - b.x * a.y }
-        let ccw = area >= 0
         var idx = Array(0..<m)
-        var out: [(Int, Int, Int)] = []
+        if area < 0 { idx.reverse() }                         // work counter-clockwise
         func cross(_ a: SIMD2<Double>, _ b: SIMD2<Double>, _ c: SIMD2<Double>) -> Double {
             (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x)
         }
-        func inside(_ p: SIMD2<Double>, _ a: SIMD2<Double>, _ b: SIMD2<Double>, _ c: SIMD2<Double>) -> Bool {
-            let s = ccw ? 1.0 : -1.0
-            return cross(a, b, p) * s >= -1e-12 && cross(b, c, p) * s >= -1e-12 && cross(c, a, p) * s >= -1e-12
+        // INCLUSIVE: a vertex ON the ear's diagonal blocks it too (the L's notch corner
+        // sits exactly on the diagonal (0,20)–(20,0); a strict test let that ear through
+        // and the triangle covered the notch). Collinear boundary vertices are removed
+        // before this can see them, so "on an edge" here means the diagonal.
+        func blocks(_ p: SIMD2<Double>, _ a: SIMD2<Double>, _ b: SIMD2<Double>, _ c: SIMD2<Double>) -> Bool {
+            cross(a, b, p) >= -eps && cross(b, c, p) >= -eps && cross(c, a, p) >= -eps
         }
-        var guardCount = 0
-        while idx.count > 3 && guardCount < 4 * m {
-            guardCount += 1
+        var out: [(Int, Int, Int)] = []
+        var stall = 0
+        while idx.count > 3 && stall <= idx.count {
             var clipped = false
-            for k in 0..<idx.count {
-                let i0 = idx[(k + idx.count - 1) % idx.count], i1 = idx[k], i2 = idx[(k + 1) % idx.count]
+            var k = 0
+            while k < idx.count {
+                let n = idx.count
+                let i0 = idx[(k + n - 1) % n], i1 = idx[k], i2 = idx[(k + 1) % n]
                 let a = loop[i0], b = loop[i1], c = loop[i2]
-                let convex = ccw ? cross(a, b, c) > 1e-12 : cross(a, b, c) < -1e-12
-                guard convex else { continue }
-                var empty = true
-                for j in idx where j != i0 && j != i1 && j != i2 {
-                    if inside(loop[j], a, b, c) { empty = false; break }
+                let cr = cross(a, b, c)
+                if abs(cr) <= eps {                           // collinear: a degenerate ear
+                    idx.remove(at: k); clipped = true; break
                 }
-                guard empty else { continue }
+                if cr < 0 { k += 1; continue }                // reflex: not an ear
+                var empty = true
+                for (jj, j) in idx.enumerated() where j != i0 && j != i1 && j != i2 {
+                    let q = loop[j]
+                    // only a reflex vertex can lie inside a convex ear
+                    let jp = loop[idx[(jj + idx.count - 1) % idx.count]], jn = loop[idx[(jj + 1) % idx.count]]
+                    if cross(jp, q, jn) > eps { continue }
+                    if simd_length(q - a) < 1e-9 || simd_length(q - b) < 1e-9 || simd_length(q - c) < 1e-9 { continue }
+                    if blocks(q, a, b, c) { empty = false; break }
+                }
+                guard empty else { k += 1; continue }
                 out.append((i0, i1, i2))
-                idx.remove(at: k)
-                clipped = true
-                break
+                idx.remove(at: k); clipped = true; break
             }
-            if !clipped { break }
+            if clipped { stall = 0; continue }
+            // no ear found: shed the flattest vertex and carry on
+            stall += 1
+            var flattest = 0; var best = Double.greatestFiniteMagnitude
+            for k in 0..<idx.count {
+                let n = idx.count
+                let cr = abs(cross(loop[idx[(k + n - 1) % n]], loop[idx[k]], loop[idx[(k + 1) % n]]))
+                if cr < best { best = cr; flattest = k }
+            }
+            idx.remove(at: flattest)
         }
         if idx.count == 3 { out.append((idx[0], idx[1], idx[2])) }
-        else if idx.count > 3 {           // could not clip: a fan, better than nothing
-            for k in 1..<(idx.count - 1) { out.append((idx[0], idx[k], idx[k + 1])) }
-        }
         return out
     }
 

@@ -786,3 +786,28 @@ Installed 16:48:46. Not yet seen by him.
   the same band; `gradeColor.w` is armed by organic's own Fit to shape
   (`LatticeSDFScene.organicShapeFit`); the legend's grade/rim rows key on the organic
   switches under organic. Installed 17:45. Not yet seen by him.
+
+## 21. 2026-09-18 20:10 — the floor's wall (found), the organic band grade, the badge
+
+- **THE FLOOR, ROOT CAUSE (two builds late):** the cap fragment tested `partSDF`, which
+  is the signed distance of the LATTICED volume — the solid clipped to the regions — so
+  past a region's cap it reads "outside" even inside solid material, and every cap
+  fragment discarded. Proven by a CPU replica (0 of 134 kept) and an empty-region scene
+  (the field positive everywhere). The cap now samples the UNCLIPPED part occupancy
+  (`LatticeSDFScene.solidOccupancy`, uploaded as `solidTex`, nearest; kept where ≥ 0.5
+  a voxel and a half past the cap). Replica after: 16 of 134 centroids kept = the base
+  strip (the U-profile's triangles are large; the GPU decides per pixel). Also the ear
+  clipper was wrong on his outline (fell back to a fan): rewritten with collinear
+  removal, inclusive blocking (a vertex ON the diagonal blocks) and reflex-only
+  blockers; pinned on his real outline (n−2 triangles, every centroid inside, area
+  exact). Geometry learned: his part is ONE U-profile 52.6 mm deep (y −48.9…3.7), the
+  front 12.03 and back 10.31 mm latticed, the base solid across; "the floor" is that base.
+- **ORGANIC BAND GRADE** (`LatticeOrganicInput.shapeBandMM`, from `shapeFitBandMM`
+  when organic's Fit to shape is on): within the band the spacing runs linearly to the
+  printable floor at the outline; the bead field follows the spacing (core's law) so the
+  struts thicken. The organic pane has the band control; the scene banner reports
+  "shape band N mm: K voxels graded". `OrganicShapeBandTests`.
+  ★ PARITY: this is app-side spacing; core's tracer must take the same band (add to the
+  parity brief when he approves the look).
+- **BADGE** at the mode chip's size (22 pt, capsule at the accent tint, rowHeight 44).
+- Installed 20:10. Not yet seen by him.

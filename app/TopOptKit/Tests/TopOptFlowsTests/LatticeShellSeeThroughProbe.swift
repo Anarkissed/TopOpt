@@ -143,3 +143,37 @@ extension LatticeShellSeeThroughProbe {
         }
     }
 }
+
+/// ★ THE ORGANIC BAND GRADE (2026-09-18): with a band, the spacing near the outline
+/// is graded toward the floor and the scene says how many voxels it touched.
+final class OrganicShapeBandTests: XCTestCase {
+    func testTheBandGradesSpacingTowardTheFloorNearTheOutline() throws {
+        let mesh = try LatticePreviewConfettiTests.hisMesh()
+        let regs = [(15, 12.0), (2, 11.0)].compactMap { f, d in
+            LatticeRegionEmission.planeFor(face: FaceID(f), in: mesh).flatMap {
+                LatticeRegionEmission.spec(for: $0, role: .include, depthMM: d, faceID: f) }
+        }
+        try XCTSkipIf(regs.isEmpty)
+        let n = 40
+        let e = mesh.bounds.max - mesh.bounds.min
+        let sp = Double(max(e.x, max(e.y, e.z))) / Double(n)
+        var tensor = [Double](repeating: 0, count: 6 * n * n * n)
+        for i in 0..<(n * n * n) { tensor[6 * i] = 10; tensor[6 * i + 1] = 3; tensor[6 * i + 2] = 1 }
+        func scene(band: Double) -> LatticeSDFScene {
+            var input = LatticeOrganicInput(tensor: tensor, dims: (n, n, n), originMM: SIMD3<Double>(mesh.bounds.min),
+                                            spacingMM: sp, minExtrudableWidthMM: 0.45, buildDirection: SIMD3(0, 0, 1),
+                                            separationMinMM: 4, separationMaxMM: 6, rhoMin: 0.073, rhoMax: 0.9)
+            input.shapeBandMM = band
+            return LatticeSDFScene(mesh: mesh, field: nil, latticeID: "octet", stageMode: .aesthetic,
+                                   algorithm: "organic", organic: input, maxDim: 64, regions: regs, whenEmpty: .latticeNothing)
+        }
+        let off = scene(band: 0), on = scene(band: 8)
+        print("BAND off: \(off.organicSummary)")
+        print("BAND on:  \(on.organicSummary)")
+        XCTAssertFalse(off.organicSummary.contains("shape band"), "no band ⇒ no grade")
+        XCTAssertTrue(on.organicSummary.contains("shape band 8.0 mm"), "the band is reported")
+        let graded = on.organicSummary.split(separator: " ").enumerated().first { $0.element == "voxels" && $0.offset > 0 }
+            .flatMap { Int(on.organicSummary.split(separator: " ")[$0.offset - 1]) } ?? 0
+        XCTAssertGreaterThan(graded, 100, "★ the band graded nothing: \(on.organicSummary)")
+    }
+}

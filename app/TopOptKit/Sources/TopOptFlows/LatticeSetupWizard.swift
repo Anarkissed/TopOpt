@@ -1048,6 +1048,25 @@ public struct LatticeSetupWizard: View {
                 .accessibilityLabel("Solid rim at edges")
                 .accessibilityIdentifier("wizard-organic-solid-rim")
             }
+            // ★ THE GRADE-TO-SHAPE BAND, HERE TOO (his 2026-09-18: "include the gradient
+            // amount in Organic"). The same millimetres the octet grades over.
+            VStack(alignment: .leading, spacing: 5) {
+                Text("Grade to shape band")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(DS.Color.textTertiary.color)
+                    .padding(.top, DS.Space.xs)
+                scrubRow("organicShapeBand", value: model.shapeFitBandMM, unit: " mm",
+                         step: 1, range: 0...60) {
+                    model.shapeFitBandMM = $0
+                    rebuild()
+                }
+                captionLine("How far in the cells shrink toward the outline.", info: "organic-band",
+                            "Within this many millimetres of a face outline the strut spacing runs "
+                            + "down to the printable floor at the outline, and the struts thicken with "
+                            + "it. 0 turns the grade off. The tint on the lattice shows the same band.",
+                            tint: DS.Color.textQuaternary.color)
+            }
+            .accessibilityIdentifier("wizard-organic-shape-band")
             // ★ THE LOOK (Aesthetic): cells the eye reads across the shortest face —
             // the recommendation's target when sizes are checked.
             if organicAesthetic {
