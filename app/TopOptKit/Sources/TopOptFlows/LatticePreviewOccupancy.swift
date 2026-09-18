@@ -515,8 +515,13 @@ public struct LatticeSteppedCell: Equatable, Sendable {
     public let region: Int
     public let originMM: SIMD3<Double>
     public let sizeMM: Double
-    public init(region: Int, originMM: SIMD3<Double>, sizeMM: Double) {
-        self.region = region; self.originMM = originMM; self.sizeMM = sizeMM
+    /// ★ THE DENSITY THE STRUT IS SIZED AT (ruling C, 2026-09-18): the drawn relative
+    /// density after the band raise, the printability floor and the ceiling — the
+    /// densest texel of the cell, so the run's strut is never thinner than the
+    /// preview's anywhere in the cell. 0 ⇒ not graded (the bake had no demand).
+    public var rho: Double = 0
+    public init(region: Int, originMM: SIMD3<Double>, sizeMM: Double, rho: Double = 0) {
+        self.region = region; self.originMM = originMM; self.sizeMM = sizeMM; self.rho = rho
     }
 }
 

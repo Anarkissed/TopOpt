@@ -394,6 +394,7 @@ extension LatticePreviewOccupancy {
         var owner = [Int8](repeating: -1, count: grid.count)
         var isFinest = [Bool](repeating: false, count: grid.count)
         var cells: [LatticeSteppedCell] = []
+        var cellOf = [Int32](repeating: -1, count: grid.count)   // texel → cell index
 
         // Within a voxel of material: the voxel occupancy is eroded at every surface,
         // and a cut cell's texels sit exactly there.
@@ -587,6 +588,7 @@ extension LatticePreviewOccupancy {
                                 guard occupied(c) || occupiedNear(c) else { continue }
                             }
                             owner[idx] = Int8(ladder.region)
+                            cellOf[idx] = Int32(cells.count)
                             isFinest[idx] = finest
                             size[idx] = halfRepresentable(Float(S))
                             phase[idx] = ph
@@ -824,6 +826,9 @@ extension LatticePreviewOccupancy {
                 }
             }
             activation[i] = act(Swift.min(r, drawnHi))
+            // ruling C: the cell carries its densest texel's ρ
+            let ci = Int(cellOf[i])
+            if ci >= 0, ci < cells.count { cells[ci].rho = Swift.max(cells[ci].rho, Swift.min(r, drawnHi)) }
         }
         for i in 0..<grid.count where size[i] <= 0 { activation[i] = -1 }
 

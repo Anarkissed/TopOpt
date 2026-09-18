@@ -57,9 +57,11 @@ Reference part: his M2 verticalStand, bead 0.45 mm, two face regions (12 mm and
   no overlaps) then fills what is left with the finest tile.
 - Nothing is ever CUT: a finest tile the outline crosses is painted only where it is inside
   the outline (`edge`), and the solid outline is drawn over it. No cell is cut by a neighbour.
-- The app SENDS the result as `lattice.stepped_cells` (core parses it since PR #358) — for a
-  Stepped run the placement question is closed: lay down the list. For Default Grade the same
-  list could be sent under `"doubled"` if core wants it; say so.
+- The app SENDS the result as `lattice.stepped_cells` for BOTH Stepped and Default Grade
+  (ruling A): `[{region_id, origin_mm[3], size_mm, rho}]`, `rho` = the drawn relative density
+  of the cell (§1.6; its densest texel). Placement and density are closed: lay down the list
+  and size each strut from its `rho` with core's law (§1.7). Core must accept the key with
+  `algorithm: "doubled"` (halves-only menu) as it already does with "stepped".
 
 ### 1.5 The solid outline (only when the shape grade is on)
 - ONE thin beam swept round the face outline, width `beam = max(2 × bead, trim + 0.5 × voxel)`,
@@ -87,6 +89,8 @@ Reference part: his M2 verticalStand, bead 0.45 mm, two face regions (12 mm and
 - PRINTABILITY FLOOR per cell: `ρ ≥ printabilityDensityFloor(bead, S)` = the density at which
   core's law gives a bead-wide strut (17 % at 2.58 mm, 13 % at 3, < 7 % at 12).
 - `drawnHi = max(hi, quiltTop)`; ρ is clamped to it.
+- THE NUMBER THAT LEAVES THE APP: each cell's `rho` in `stepped_cells` is this ρ, after the
+  ceiling, the band raise and the floor — the densest texel of the cell.
 
 ### 1.7 Strut radius
 - `r = octet_strut_diameter_mm(ρ, S) / 2` — CORE'S MEASURED LAW, sampled at 32 points per
@@ -167,8 +171,9 @@ Reference part: his M2 verticalStand, bead 0.45 mm, two face regions (12 mm and
   strut back at the rim's inner face. THIS IS THE ONE GEOMETRIC DIVERGENCE IN-SOURCE. Fix in
   core: keep the band as candidate; the rim is a solid the struts enter, and the emission
   welds/flare-fillets them there exactly as the fillet pass does at any other solid.
-- (b) `organic_scale` is a JOB key but the PART preview never applies it (only the wizard's
-  20 mm sample cube scales its 3–6 mm window). Decision §4-F.
+- (b) `organic_scale`: the PART preview never applied it (only the wizard's 20 mm sample cube
+  scales its 3–6 mm window), so the app NO LONGER WRITES IT for part jobs (ruling F). Core
+  may keep parsing it; it will not arrive from a part job.
 - (c) "Preview: show print repairs" OFF shows the TRACED curves (pre node-merge / free-end
   tie / support prune / stranded drop); the file always has the repairs. Not a parity item —
   the ON picture is the file. Nothing to do.
@@ -183,10 +188,10 @@ Reference part: his M2 verticalStand, bead 0.45 mm, two face regions (12 mm and
 ──────────────────────────────────────────────────────────────────────────────────
 ## 3. How to PROVE parity (what core should emit)
 ──────────────────────────────────────────────────────────────────────────────────
-- Octet: the receipt already has the any-step histogram; add per cell (or per size) the ρ
-  used and the strut radius, and the outline beam width/depth and bleed. The app's DIAG line
-  (`octree pitch=… kept=[…] band=… solidBand=…`) and `densityCeiling … demandCap=…` are the
-  numbers to match: same sizes, same counts, same beam, same cap.
+- Octet: the receipt already has the any-step histogram; add per cell the ρ and strut radius
+  USED (they must equal the list's `rho` and core's law at it), and the outline beam
+  width/depth and bleed. The app's DIAG lines (`octree pitch=… kept=[…] band=… solidBand=…`,
+  `densityCeiling … demandCap=…`) are the numbers to match.
 - Organic: same inputs ⇒ same functions ⇒ same spans. Have the receipt print the inputs it
   used (window lo/hi, bead, anchor_at_boundary, ties, swirl, fillet, rim, grow/layer,
   synthetic regions) and the span census (count, total length, radius min/p50/max) so the

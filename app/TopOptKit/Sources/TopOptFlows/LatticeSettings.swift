@@ -496,13 +496,17 @@ public struct LatticeSteppedCellWire: Equatable, Sendable {
     public let regionID: Int
     public let originMM: SIMD3<Double>
     public let sizeMM: Double
-    public init(regionID: Int, originMM: SIMD3<Double>, sizeMM: Double) {
-        self.regionID = regionID; self.originMM = originMM; self.sizeMM = sizeMM
+    /// The drawn relative density (ruling C); written as `rho` when > 0.
+    public let rho: Double
+    public init(regionID: Int, originMM: SIMD3<Double>, sizeMM: Double, rho: Double = 0) {
+        self.regionID = regionID; self.originMM = originMM; self.sizeMM = sizeMM; self.rho = rho
     }
     public var wireDictionary: [String: Any] {
-        ["region_id": regionID,
-         "origin_mm": [originMM.x, originMM.y, originMM.z],
-         "size_mm": sizeMM]
+        var d: [String: Any] = ["region_id": regionID,
+                                "origin_mm": [originMM.x, originMM.y, originMM.z],
+                                "size_mm": sizeMM]
+        if rho > 0 { d["rho"] = rho }
+        return d
     }
     /// ★ REGION INDEX → REGION ID. The bake indexes the scene's regions (every role,
     /// in emission order); core numbers the INCLUDE regions 1-based in the job's own
@@ -515,7 +519,7 @@ public struct LatticeSteppedCellWire: Equatable, Sendable {
         for (i, r) in regions.enumerated() where r.role == .include { idOf[i] = next; next += 1 }
         return cells.compactMap { c in
             guard let id = idOf[c.region] else { return nil }
-            return LatticeSteppedCellWire(regionID: id, originMM: c.originMM, sizeMM: c.sizeMM)
+            return LatticeSteppedCellWire(regionID: id, originMM: c.originMM, sizeMM: c.sizeMM, rho: c.rho)
         }
     }
     /// The block value for a job, or nil when nothing is to be written: only a Stepped
@@ -523,7 +527,9 @@ public struct LatticeSteppedCellWire: Equatable, Sendable {
     /// non-empty plan, and only a core whose schema accepts it (`wired`) — an unknown
     /// key kills the whole job at parse.
     public static func blockValue(for lat: LatticeSpec, wired: Bool) -> [[String: Any]]? {
-        guard wired, lat.algorithm == "stepped", !lat.steppedCells.isEmpty else { return nil }
+        // ruling A (2026-09-18): the placed list goes for Default Grade ("doubled") too.
+        guard wired, lat.algorithm == "stepped" || lat.algorithm == "doubled",
+              !lat.steppedCells.isEmpty else { return nil }
         return lat.steppedCells.map { $0.wireDictionary }
     }
 }
@@ -896,7 +902,9 @@ public struct LatticeSpec: Equatable, Sendable {
             // this key the organic run died at core's validation ("this job says
             // nothing").
             if let m = stageMode { put("intent", m == .structural ? "structural" : "aesthetic") }
-            if organicScale != 1 { put("organic_scale", organicScale) }
+            // ★ `organic_scale` is NOT written for a part job (ruling F, 2026-09-18): the
+            // part preview never applied it, only the wizard's sample cube does, so a
+            // scaled run would not match the picture. The key stays parsed by core.
             // ★ The user's pick among certification's separations (maintainer,
             // 2026-09-03). `put` refuses it until core's schema accepts the key, so a
             // pick is stored and shown but never sent to a core that would refuse.

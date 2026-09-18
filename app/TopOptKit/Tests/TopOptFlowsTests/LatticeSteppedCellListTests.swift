@@ -42,7 +42,14 @@ final class LatticeSteppedCellListTests: XCTestCase {
         XCTAssertEqual(LatticeSteppedCellWire.blockValue(for: spec, wired: true)?.count, 1)
         XCTAssertNil(LatticeSteppedCellWire.blockValue(for: spec, wired: false), "an older core: no key")
         var doubled = spec; doubled.algorithm = "doubled"
-        XCTAssertNil(LatticeSteppedCellWire.blockValue(for: doubled, wired: true), "core refuses the key under doubled")
+        XCTAssertEqual(LatticeSteppedCellWire.blockValue(for: doubled, wired: true)?.count, 1,
+                       "ruling A: the list goes for Default Grade too")
+        var organic = spec; organic.algorithm = "organic"
+        XCTAssertNil(LatticeSteppedCellWire.blockValue(for: organic, wired: true), "never under organic")
+        // ruling C: the density rides with the cell, only when the bake graded it
+        let dense = LatticeSteppedCellWire(regionID: 1, originMM: SIMD3(0, 0, 0), sizeMM: 9, rho: 0.31)
+        XCTAssertEqual(dense.wireDictionary["rho"] as? Double, 0.31)
+        XCTAssertNil(spec.steppedCells[0].wireDictionary["rho"], "no rho ⇒ no key")
         var empty = spec; empty.steppedCells = []
         XCTAssertNil(LatticeSteppedCellWire.blockValue(for: empty, wired: true), "no plan ⇒ legacy stepped, no key")
 

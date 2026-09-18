@@ -432,6 +432,10 @@ final class LatticeGradeToSolidBandTests: XCTestCase {
         let cells = baked.steppedCells
         XCTAssertEqual(cells.count, st.cellsPlaced)
         XCTAssertGreaterThan(cells.count, 10, "vacuous")
+        // ruling C: every cell carries a density inside the drawn band, and in-band cells
+        // (this fixture grades to 3 mm) carry more than the ambient floor
+        for c in cells { XCTAssertTrue(c.rho >= lo - 1e-9 && c.rho <= 1, "cell ρ out of band: \(c.rho)") }
+        XCTAssertTrue(cells.contains { $0.rho > lo + 0.01 }, "no cell was raised — the band did nothing")
         for (i, a) in cells.enumerated() {
             for b in cells[(i + 1)...] where a.region == b.region {
                 let sep = (0..<3).contains { ax in

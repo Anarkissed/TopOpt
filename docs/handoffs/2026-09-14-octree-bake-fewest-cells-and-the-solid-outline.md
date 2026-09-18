@@ -713,3 +713,8 @@ His three final items, the first two here (the third is the core parity brief,
 - **Types**: `offeredTypeIDs = ["octet"]`; the other six chips stay visible, greyed and
   inert (the preview's density law, quilt ceiling and octree bake are octet-measured).
 - Installed 14:20. Not yet seen by him.
+- **Parity rulings applied app-side (2026-09-18 14:50):** each `stepped_cells` entry carries
+  `rho` (the cell's densest texel's drawn ρ; ruling C); the list is sent for "doubled" too
+  (ruling A); `organic_scale` is no longer written for part jobs (ruling F); the single-cell
+  caption says the run adds a skin (ruling E). Brief rewritten in full:
+  `docs/handoffs/2026-09-18-core-brief-preview-parity.md`.
