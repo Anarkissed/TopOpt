@@ -748,3 +748,9 @@ comment says so. Harness (`LatticeShellSeeThroughProbe`): lit-with-body 13116 â†
 The floor is not a cap of any declared region and stays closed by rule; if he still
 sees through it, that is a different thing and needs a screenshot.
 Installed 16:48:46. Not yet seen by him.
+- **16:55 â€” "The fix needs to ONLY be for organic!"** The both-caps rule is gated on
+  the scene's algorithm (`ShellClip.gate.z`, set by the host; the shader skips the eye
+  test only when it is set). The octet keeps the 08-25 eye-only rule unchanged.
+  `LatticeShellBothCapsOrganicOnlyTests` pins the flag per algorithm and the shader's
+  read of it. The shell clip is a PICTURE rule: nothing about it reaches the job or
+  core's STL. Installed 16:55.

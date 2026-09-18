@@ -66,8 +66,9 @@ final class LatticeCurvedOutlineBandProbe: XCTestCase {
         let sn = simd_normalize(n)
         var worst = "no-decl"
         for inward in decls {
-            // (the eye test is gone from the shader, 2026-09-18: both caps open)
-            _ = eye
+            // the octet's rule (organic alone opens both caps, 2026-09-18)
+            let toEye = eye - p
+            if simd_dot(sn, toEye) <= 0 { worst = "faces-away"; continue }
             var capSign = 0.0
             if simd_dot(sn, -inward) >= gateCos { capSign = 1 }
             else if simd_dot(sn, inward) >= gateCos { capSign = -1 }

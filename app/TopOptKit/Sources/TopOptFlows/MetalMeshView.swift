@@ -348,18 +348,21 @@ inline bool shell_is_latticed(float3 mpos, float3 mnormal, constant ShellClip& c
         // instead of daylight. Viewed from behind the roles swap, so the 08-23
         // complaint ("inverted on the back wall") stays fixed: whichever side you
         // are on is the side that opens.
-        // ★★★ BOTH CAPS, WHICHEVER WAY THE CAMERA LOOKS (his 2026-09-18: "the lattice
-        // - because it goes all the way through the wall - should be completely
-        // see-through … which is a requirement"). The 2026-08-25 rule above opened
-        // ONLY the cap facing the eye, so the far face of a declared wall — seen from
-        // inside, through the open near face, since the mesh draws with cullMode
-        // .none — stayed as a grey wall behind the struts (his organic screenshots of
-        // 2026-09-18; the census on his device said both faces open, the eye test was
-        // the one term the census did not replicate). That 08-25 rule was HIS call at
-        // the time ("massive hole"); today's ruling supersedes it: a region that spans
-        // the wall opens both of its surfaces, and a region that stops short of the far
-        // surface still does not (the containment sample below). The floor is not a
-        // cap of any declared region and stays.
+        // ★★★ ORGANIC ONLY: BOTH CAPS, WHICHEVER WAY THE CAMERA LOOKS (his 2026-09-18:
+        // "the lattice - because it goes all the way through the wall - should be
+        // completely see-through … which is a requirement" — then "The fix needs to
+        // ONLY be for organic!"). The 2026-08-25 rule opens ONLY the cap facing the
+        // eye, so the far face of a declared wall — seen from inside, through the open
+        // near face, since the mesh draws with cullMode .none — stays as a grey wall
+        // behind the struts. For the OCTET that is still his ruling ("massive hole"):
+        // the eye test stands. For ORGANIC (`gate.z` > 0.5, set by the host from the
+        // scene's algorithm) the far cap opens too; a region that stops short of the
+        // far surface still does not open it (the containment sample below). The floor
+        // is not a cap of any declared region and stays either way.
+        if (c.gate.z < 0.5) {
+            float3 toEye = c.eye.xyz - mpos;
+            if (dot(sn, toEye) <= 0.0) { continue; }
+        }
         float3 inward = normalize(d.xyz);
         float capSign = 0.0;
         if (dot(sn, -inward) >= c.gate.x) { capSign = 1.0; }
@@ -4109,6 +4112,9 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         u.grid = SIMD4(g.origin, 1)                                    // w = 1 ⇒ enabled
         u.spacing = SIMD4(g.spacing, voxel)
         u.dims = SIMD4(Float(g.nx), Float(g.ny), Float(g.nz), Float(decls.count / 3))
+        // ★ ORGANIC opens both caps of a declared wall (his 2026-09-18 ruling, organic
+        // ONLY); the octet keeps the eye-only rule of 2026-08-25. See `shellClipMSL`.
+        u.gate.z = layer.scene?.algorithm == "organic" ? 1 : 0
         return (u, decls)
     }
 
@@ -4124,7 +4130,7 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         let (u, d) = shellClipAndDecls
         let layer = latticeLayer
         let scene = layer?.scene
-        let mode = u.grid.w < 0.5 ? "OFF" : (u.gate.y > 1.5 ? "CELL" : "DECL(\(d.count / 3))")
+        let mode = u.grid.w < 0.5 ? "OFF" : (u.gate.y > 1.5 ? "CELL" : "DECL(\(d.count / 3))\(u.gate.z > 0.5 ? "+bothCaps" : "")")
         let regs = (scene?.regions ?? []).enumerated().map { i, r in
             String(format: "r%d:%@/%@ n=(%.2f,%.2f,%.2f) depth=%.2f inPlane=%.2f", i,
                    r.role == .include ? "inc" : "exc", r.kind == .face ? "face" : "bolt",
