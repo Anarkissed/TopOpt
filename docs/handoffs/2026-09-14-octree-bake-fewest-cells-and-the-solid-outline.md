@@ -698,3 +698,18 @@ schema so nothing is sent to an older core.
   Solve times comparable (45.5 s vs 41.5 s). Core at `32ecc22a` on
   claude/raster-receipt-fields, 130/130 Release, parses exactly what `d932ec71` emits.
   Nothing further needed from the app.
+
+## 18. 2026-09-18 14:20 — one-line captions with an (i); only the Octet truss offered
+
+His three final items, the first two here (the third is the core parity brief,
+`docs/handoffs/2026-09-18-core-brief-preview-parity.md`).
+
+- **Captions** (`LatticeSetupWizard.captionLine`): every lattice-stage caption is ONE
+  line that never wraps (lineLimit 1, min scale 0.85) with the (i) at its end opening
+  the former paragraph — Simulate Stresses, Grade the lattice, Grade type, Grade
+  style, band + steps note, single-cell members, density sim note, per-region gap,
+  Allow quilt, Covered/Skin facts, Auto cell note, subfloor retention. A caption with
+  nothing more to say has no (i). Pinned by `LatticeWizardOneLineCaptionTests`.
+- **Types**: `offeredTypeIDs = ["octet"]`; the other six chips stay visible, greyed and
+  inert (the preview's density law, quilt ceiling and octree bake are octet-measured).
+- Installed 14:20. Not yet seen by him.

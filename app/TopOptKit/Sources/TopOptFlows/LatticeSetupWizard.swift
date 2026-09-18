@@ -460,12 +460,10 @@ public struct LatticeSetupWizard: View {
             }
             .toggleStyle(SwitchToggleStyle(tint: DS.Color.accent.color))
             .accessibilityIdentifier("wizard-grade-toggle")
-            Text(model.gradingMode == LatticeGradingMode.none
-                 ? "One cell, one density, everywhere."
-                 : "The lattice varies across the part — how, below.")
-                .dsStyle(DS.TypeScale.caption2)
-                .foregroundStyle(DS.Color.textTertiary.color)
-                .fixedSize(horizontal: false, vertical: true)
+            captionLine(model.gradingMode == LatticeGradingMode.none
+                        ? "One cell, one density, everywhere."
+                        : "The lattice varies across the part.",
+                        info: "grade-toggle")
         }
     }
 
@@ -498,14 +496,13 @@ public struct LatticeSetupWizard: View {
                     .accessibilityIdentifier("wizard-grade-type-\(m.rawValue)")
                 }
             }
-            Text(model.gradingMode == .full
-                 ? "The density follows the solve and the cells fit the outline."
-                 : model.gradingMode == .fitShape
-                 ? "The cells fit the outline; one density everywhere."
-                 : "The density follows the solve; one cell size everywhere.")
-                .dsStyle(DS.TypeScale.caption2)
-                .foregroundStyle(DS.Color.textTertiary.color)
-                .fixedSize(horizontal: false, vertical: true)
+            captionLine(model.gradingMode == .full ? "Density by stress, cells fit the outline."
+                        : model.gradingMode == .fitShape ? "Cells fit the outline, one density."
+                        : "Density by stress, one cell size.",
+                        info: "grade-type",
+                        "Stress + shape: the density follows the solve and the cells fit the "
+                        + "outline. Shape: the cells fit the outline; one density everywhere. "
+                        + "Stress: the density follows the solve; one cell size everywhere.")
         }
     }
 
@@ -567,11 +564,9 @@ public struct LatticeSetupWizard: View {
                     Text("Simulate Stresses")
                         .font(.system(size: 12, weight: .bold))
                         .foregroundStyle(DS.Color.textPrimary.color)
-                    Text(model.simulateStresses
-                         ? "An FEA decides every setting left on Sim."
-                         : "Every setting is yours to enter.")
-                        .dsStyle(DS.TypeScale.caption2)
-                        .foregroundStyle(DS.Color.textTertiary.color)
+                    captionLine(model.simulateStresses ? "An FEA decides the Sim settings."
+                                                       : "Every setting is yours.",
+                                info: "sim")
                 }
             Spacer(minLength: DS.Space.s)
             GlassToggle(isOn: model.simulateStresses) {
@@ -651,10 +646,10 @@ public struct LatticeSetupWizard: View {
                     .accessibilityIdentifier("wizard-cell-transition-\(t.rawValue)")
                 }
             }
-            Text(model.cellTransition.unavailableReason ?? model.cellTransition.body)
-                .dsStyle(DS.TypeScale.caption2)
-                .foregroundStyle(DS.Color.textTertiary.color)
-                .fixedSize(horizontal: false, vertical: true)
+            captionLine(model.cellTransition.unavailableReason
+                        ?? (model.cellTransition == .stepped ? "Any printable step, packed to the outline."
+                                                              : "Cells halve on core's ladder."),
+                        info: "grade-style", model.cellTransition.body)
 
             // ★★★ GRADE TO SHAPE BAND — directly under the transition it belongs to
             // (his placement, 2026-08-23). It is a property of HOW the cells change
@@ -771,6 +766,22 @@ public struct LatticeSetupWizard: View {
             infoButton(id, text)
         }
         .padding(.top, DS.Space.xs)
+    }
+
+    /// ★★ ONE LINE, AND THE REST BEHIND THE (i) (his 2026-09-18: "get rid of most
+    /// of the text in the settings. Have a single line of text with an (i) in it for
+    /// more details if absolutely necessary"). `brief` is the line — never wrapped —
+    /// and `detail`, when given, is the popover the (i) opens. No detail ⇒ no (i).
+    private func captionLine(_ brief: String, info id: String, _ detail: String? = nil,
+                             tint: Color? = nil) -> some View {
+        HStack(spacing: DS.Space.xs) {
+            Text(brief)
+                .dsStyle(DS.TypeScale.caption2)
+                .foregroundStyle(tint ?? DS.Color.textTertiary.color)
+                .lineLimit(1)
+                .minimumScaleFactor(0.85)
+            if let detail { infoButton(id, detail) }
+        }
     }
 
     /// The (i): a popover with the explanation, one open at a time.
@@ -1484,12 +1495,13 @@ public struct LatticeSetupWizard: View {
                 model.shapeFitBandMM = $0
                 rebuild()
             }
-            Text("How far in from the face's outline the cells grade down toward the "
-                 + "solid outline, in millimetres. A cell stands where its centre is far "
-                 + "enough in for its size; the smallest cells always reach the outline.")
-                .dsStyle(DS.TypeScale.caption2)
-                .foregroundStyle(DS.Color.textQuaternary.color)
-                .fixedSize(horizontal: false, vertical: true)
+            captionLine("How far in the cells grade down to the outline.",
+                        info: "band",
+                        "How far in from the face's outline the cells grade down toward the "
+                        + "solid outline, in millimetres. A cell stands where its centre is far "
+                        + "enough in for its size; the smallest cells always reach the outline. "
+                        + "From 25 mm the solid outline also thickens inward.",
+                        tint: DS.Color.textQuaternary.color)
             // ★★★ HOW MANY STEPS THIS PART CAN ACTUALLY GRADE (maintainer, 2026-08-23:
             // the band offered 0–60 mm while his settings allowed exactly ONE step, and
             // nothing said so).
@@ -1500,18 +1512,15 @@ public struct LatticeSetupWizard: View {
             // that implies a gradient the printer cannot lay is the decorative-control
             // defect this page has paid for before.
             if let steps = shapeFitSteps, steps <= 1 {
-                Text("At this cell and bead there is no room to step down — a finer cell "
-                     + "would need struts under one extrusion. Use a coarser cell, or a "
-                     + "finer nozzle, to grade.")
-                    .dsStyle(DS.TypeScale.caption2)
-                    .foregroundStyle(DS.Color.warning.color)
-                    .fixedSize(horizontal: false, vertical: true)
+                captionLine("No room to step down at this cell and bead.",
+                            info: "band-no-room",
+                            "A finer cell would need struts under one extrusion. Use a coarser "
+                            + "cell, or a finer nozzle, to grade.",
+                            tint: DS.Color.warning.color)
                     .accessibilityIdentifier("wizard-shape-fit-no-room")
             } else if let steps = shapeFitSteps {
-                Text("\(steps) cell sizes available at this cell and bead.")
-                    .dsStyle(DS.TypeScale.caption2)
-                    .foregroundStyle(DS.Color.textQuaternary.color)
-                    .fixedSize(horizontal: false, vertical: true)
+                captionLine("\(steps) cell sizes available.", info: "band-steps",
+                            tint: DS.Color.textQuaternary.color)
                     .accessibilityIdentifier("wizard-shape-fit-band-note")
             }
         }
@@ -1536,14 +1545,12 @@ public struct LatticeSetupWizard: View {
             }
             .toggleStyle(SwitchToggleStyle(tint: DS.Color.accent.color))
             .accessibilityIdentifier("wizard-single-cell-members")
-            Text(model.singleCellMembers
-                 ? "One cell across a member. The run adds a Skin finish to re-tie the "
-                   + "struts a single cell severs; your finish choice above is kept."
-                 : "Two cells across a member. Turn this on for one; the run adds the "
-                   + "Skin finish it needs.")
-                .dsStyle(DS.TypeScale.caption2)
-                .foregroundStyle(DS.Color.textTertiary.color)
-                .fixedSize(horizontal: false, vertical: true)
+            captionLine(model.singleCellMembers ? "One cell across a member."
+                                                : "Two cells across a member.",
+                        info: "single-cell",
+                        "One cell across a member: the run adds a Skin finish to re-tie the "
+                        + "struts a single cell severs; your finish choice above is kept. "
+                        + "Off, two cells across a member.")
         }
     }
 
@@ -1592,12 +1599,10 @@ public struct LatticeSetupWizard: View {
             }
             // ★ WHY IT CANNOT BE OPERATED, said as the fact it is. Greying a row in
             // silence is the defect this page has already paid for.
-            Text(c.disabledReason ?? c.body)
-                .dsStyle(DS.TypeScale.caption2)
-                .foregroundStyle((c.disabledReason == nil
-                                  ? DS.Color.textTertiary
-                                  : DS.Color.warning).color)
-                .fixedSize(horizontal: false, vertical: true)
+            captionLine(c.disabledReason == nil ? "Lattice kept where the part is too thin to certify."
+                                                : "Not available on this job.",
+                        info: "subfloor", c.disabledReason ?? c.body,
+                        tint: (c.disabledReason == nil ? DS.Color.textTertiary : DS.Color.warning).color)
                 .accessibilityIdentifier("wizard-subfloor-retention-note")
         }
         .padding(.vertical, DS.Space.s)
@@ -1723,9 +1728,8 @@ public struct LatticeSetupWizard: View {
                     model.setCellSizeMode(modes[i])
                 }
                 if model.simulateStresses, model.cellSizeMode == .auto {
-                    Text(autoCellNote)
-                        .dsStyle(DS.TypeScale.caption2)
-                        .foregroundStyle(DS.Color.textQuaternary.color)
+                    captionLine("The solve picks the cell everywhere.", info: "auto-cell",
+                                autoCellNote, tint: DS.Color.textQuaternary.color)
                         .accessibilityIdentifier("wizard-auto-cell-note")
                 }
                 // ★ THE CELL DIMENSION LIVES HERE AND NOWHERE ELSE (maintainer,
@@ -1767,8 +1771,7 @@ public struct LatticeSetupWizard: View {
                     model.setDensityMode(modes[i])
                 }
                 if model.densityMode.needsSimulation {
-                    simDerivedNote("A finite-element solve grades every region "
-                                   + "from its own stress.")
+                    simDerivedNote("Each region graded from its own stress.")
                         .accessibilityIdentifier("wizard-density-sim-note")
                 }
                 if model.densityMode == .perRegion {
@@ -1778,11 +1781,10 @@ public struct LatticeSetupWizard: View {
                     // Saying so beats a control that silently does nothing — the
                     // Diagrid-readout defect, which this project has already paid
                     // for once.
-                    Text("Set each region's density in its drawer. Core still "
-                         + "derives density from the cell — these are saved, not "
-                         + "yet run.")
-                        .dsStyle(DS.TypeScale.caption2)
-                        .foregroundStyle(DS.Color.warning.color)
+                    captionLine("Saved per region, not yet run.", info: "per-region",
+                                "Set each region's density in its drawer. Core still derives "
+                                + "density from the cell — these are saved, not yet run.",
+                                tint: DS.Color.warning.color)
                         .accessibilityIdentifier("wizard-per-region-gap")
                 }
                 // ★★★ ALLOW QUILT (his ruling, 2026-09-12) — octet only. Off, every
@@ -1799,13 +1801,12 @@ public struct LatticeSetupWizard: View {
                         .accessibilityLabel("Allow quilt")
                         .accessibilityIdentifier("wizard-allow-quilt")
                     }
-                    Text(project.lattice.allowQuilt
-                         ? "Manual densities may pass the point where octet struts fuse."
-                         : "Every density stays under the point where octet struts fuse "
-                           + "(strut a fifth of the cell).")
-                        .dsStyle(DS.TypeScale.caption2)
-                        .foregroundStyle(DS.Color.textTertiary.color)
-                        .fixedSize(horizontal: false, vertical: true)
+                    captionLine(project.lattice.allowQuilt ? "Manual densities may fuse the struts."
+                                                           : "Densities stay under the fusing point.",
+                                info: "quilt",
+                                "Octet struts fuse into a quilt once a strut is about a fifth of "
+                                + "the cell. Off, every density stays under that point. On, the "
+                                + "manual density methods may pass it; simulated ones never do.")
                 }
             case .finish:
                 // ★ FOUR NOW — "Covered" is the solid outer shell.
@@ -1814,11 +1815,10 @@ public struct LatticeSetupWizard: View {
                     model.setBoundary([.none, .rim, .fullSkin, .covered][i])
                 }
                 if model.boundary == .covered {
-                    Text("A solid outer wall over the lattice, at the printer's "
-                         + "own wall thickness. The lattice is still there — "
-                         + "just not on show.")
-                        .dsStyle(DS.TypeScale.caption2)
-                        .foregroundStyle(DS.Color.textQuaternary.color)
+                    captionLine("A solid outer wall over the lattice.", info: "covered",
+                                "At the printer's own wall thickness. The lattice is still "
+                                + "there — just not on show.",
+                                tint: DS.Color.textQuaternary.color)
                         .accessibilityIdentifier("wizard-covered-fact")
                 }
                 // ★ §10(b) — A STATED FACT, NOT A PICKER. Core implements exactly
@@ -1826,9 +1826,9 @@ public struct LatticeSetupWizard: View {
                 // like an unselected control. It is presented as what it is until
                 // a second pattern exists.
                 if model.boundary == .fullSkin {
-                    Text("Skin pattern: Diagrid — the only one core builds.")
-                        .dsStyle(DS.TypeScale.caption2)
-                        .foregroundStyle(DS.Color.textQuaternary.color)
+                    captionLine("Skin pattern: Diagrid.", info: "skin",
+                                "The only skin pattern core builds.",
+                                tint: DS.Color.textQuaternary.color)
                         .accessibilityIdentifier("wizard-skin-pattern-fact")
                 }
             }
@@ -1936,12 +1936,16 @@ public struct LatticeSetupWizard: View {
         // 2026-09-02 21:11). Tapping any type chip still leaves organic.
         let organicOn = model.cellTransition == .organicGrade
         let on: Bool = (model.topologyID == t.id) && !organicOn
+        // ★ ONLY THE OCTET TRUSS FOR NOW (his 2026-09-18: "Grey out every other
+        // lattice type but Octet Truss"): the preview's density law, quilt ceiling
+        // and the octree bake are measured for the octet alone.
+        let offered = Self.offeredTypeIDs.contains(t.id)
         // ★ GREYED while Organic is on (item 5): the switch below is the way back.
-        let ink: Color = (organicOn ? DS.Color.textQuaternary
+        let ink: Color = ((organicOn || !offered) ? DS.Color.textQuaternary
                           : on ? DS.Color.textPrimary : DS.Color.textTertiary).color
         let fill: Color = on ? DS.Color.fillSelected.color : Color.clear
         return Button {
-            guard !organicOn else { return }
+            guard !organicOn, offered else { return }
             model.setTopology(t.id)
         } label: {
             Text(t.displayName)
@@ -1955,9 +1959,11 @@ public struct LatticeSetupWizard: View {
                 .overlay(Capsule().strokeBorder(DS.Color.strokeSubtle.color, lineWidth: 1))
         }
         .buttonStyle(.plain)
-        .disabled(organicOn)
+        .disabled(organicOn || !offered)
         .accessibilityIdentifier("wizard-type-\(t.id)")
     }
+    /// The lattice types a user may pick today. The rest stay visible and greyed.
+    static let offeredTypeIDs: Set<String> = ["octet"]
 
     /// ★ §9(a) — THE SWEEP WINDOW: two ends, both typed, plus what the sweep
     /// actually keys on and what a too-narrow window will do.
