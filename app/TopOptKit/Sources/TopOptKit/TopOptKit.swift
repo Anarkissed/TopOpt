@@ -1917,6 +1917,28 @@ public enum TopOptKit {
             with: #""grading": {"topology": "octet", "min_extrudable_width_mm": 0.4, "cell_mm": 3.0, "algorithm": "organic", "intent": "structural", "organic_structural_certification": "beam_network"}, "output":"#)
         return jobSchemaError(Data(text.utf8)) == nil
     }()
+    /// ★ ANY-STEP STEPPED (core reply, 2026-09-18): `lattice.stepped_cells` is accepted
+    /// only by a core that carries the packer's schema, and only alongside
+    /// `algorithm: "stepped"` — so the probe is a whole job with both. FALSE ⇒ the app
+    /// sends no plan and the run is the legacy one-cell-per-region Stepped (which
+    /// still works on every core). Probed once per launch.
+    public static let steppedCellsWired: Bool = {
+        var text = latticeProbeBaseJob.replacingOccurrences(
+            of: #""output":"#,
+            with: #""grading": {"topology": "octet", "min_extrudable_width_mm": 0.4, "cell_mm": 3.0, "algorithm": "stepped"}, "output":"#)
+        text.removeLast()
+        text += #", "lattice": {"topology": "octet", "cell_mm": 3.0, "strut_radius_mm": 0.4, "stepped_cells": [{"region_id": 1, "origin_mm": [0, 0, 0], "size_mm": 3.0}]}}"#
+        return jobSchemaError(Data(text.utf8)) == nil
+    }()
+    /// ★ The beam-network certificate under Stepped: the GENERIC key
+    /// `structural_certification` (core reply, 2026-09-18; the organic key stays an
+    /// alias). Probed as a whole job the way the organic gate is.
+    public static let steppedStructuralCertificationWired: Bool = {
+        let text = latticeProbeBaseJob.replacingOccurrences(
+            of: #""output":"#,
+            with: #""grading": {"topology": "octet", "min_extrudable_width_mm": 0.4, "cell_mm": 3.0, "algorithm": "stepped", "intent": "structural", "structural_certification": "beam_network"}, "output":"#)
+        return jobSchemaError(Data(text.utf8)) == nil
+    }()
     /// The gate's own words, surfaced wherever an organic + Structural run would start.
     public static let organicStructuralGateMessage =
         "organic structural certification is not yet wired — core refuses an organic "

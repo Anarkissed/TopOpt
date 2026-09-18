@@ -509,6 +509,17 @@ public enum LatticePreviewOccupancy {
 // octree by integer division — no second grid, and no way for the two to disagree
 // about where a cell starts, which is what would put a strut end in the middle of a
 // neighbour's face.
+/// One placed cell of the octree bake: its region (index into the scene's regions),
+/// its minimum corner in model space, and its edge. Cubic.
+public struct LatticeSteppedCell: Equatable, Sendable {
+    public let region: Int
+    public let originMM: SIMD3<Double>
+    public let sizeMM: Double
+    public init(region: Int, originMM: SIMD3<Double>, sizeMM: Double) {
+        self.region = region; self.originMM = originMM; self.sizeMM = sizeMM
+    }
+}
+
 public struct LatticeCellField: Sendable {
     /// Per BASE cell: the demand (≥ 0) of the octree cell covering it, −1 where the
     /// run leaves the material SOLID.
@@ -559,6 +570,11 @@ public struct LatticeCellField: Sendable {
     /// the origin is stored, never derived from the size. EMPTY on the paths that do
     /// not write it (the renderer then derives it from `steppedPhase`, the old rule).
     public var steppedOrigin: [SIMD3<Float>] = []
+    /// ★★ THE CELLS THEMSELVES, one entry per placed cell (2026-09-18: "Send the cell
+    /// list to core"). The texel arrays above are the picture; this is the PLAN — what
+    /// the job's `lattice.stepped_cells` carries so the run lays down exactly what the
+    /// preview drew. Empty on every path but the octree bake.
+    public var steppedCells: [LatticeSteppedCell] = []
     public let baseCellMM: Double
     public let maxLevel: Int
     /// True when this came from core's plan rather than the uniform fallback — the

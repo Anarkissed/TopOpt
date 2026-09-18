@@ -3691,6 +3691,8 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         var steppedCellStated: [Bool] = []
     }
     private var latticeDesired = LatticeDesired()
+    /// Forwarded from the view's inputs; the lattice layer calls it after each bake.
+    var onLatticeCellsBaked: (([LatticeSteppedCell], [LatticeRegionSpec]) -> Void)?
 
     func setLatticeScene(_ scene: LatticeSDFScene?, token: Int) {
         guard let scene else {
@@ -3719,6 +3721,9 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
                 fresh.steppedCellStated = latticeDesired.steppedCellStated
                 // ★ organic draws as capsules whenever this device built the pipeline
                 fresh.drawOrganicCapsules = organicCapsulePipeline != nil
+                fresh.onSteppedCellsBaked = { [weak self] cells, regions in
+                    self?.onLatticeCellsBaked?(cells, regions)
+                }
             }
             latticeLayer = fresh
             latticeSceneToken = -1
@@ -5184,6 +5189,9 @@ struct MeshViewInputs {
     var onLatticeProbe: ((SIMD3<Float>, SIMD3<Float>, Double, Float) -> Void)?
     /// Non-nil while the lattice key is drilled in: a double tap ANYWHERE leaves it.
     var onLatticeProbeExit: (() -> Void)?
+    /// ★ The octree bake's placed cells, with the scene's regions, after every rebake
+    /// (2026-09-18) — the job's `lattice.stepped_cells` is built from these.
+    var onLatticeCellsBaked: (([LatticeSteppedCell], [LatticeRegionSpec]) -> Void)?
     /// ★ §1(b) — THE SECOND TAP. A DOUBLE tap with the same one contact, carrying
     /// the same face and point the single tap does.
     ///
@@ -5454,6 +5462,7 @@ public struct MetalMeshView: UIViewRepresentable {
                 onPickPoint: ((FaceID, SIMD3<Float>?) -> Bool)? = nil,
                 onLatticeProbe: ((SIMD3<Float>, SIMD3<Float>, Double, Float) -> Void)? = nil,
                 onLatticeProbeExit: (() -> Void)? = nil,
+                onLatticeCellsBaked: (([LatticeSteppedCell], [LatticeRegionSpec]) -> Void)? = nil,
                 onPickDouble: ((FaceID, SIMD3<Float>?) -> Void)? = nil,
                 onMiss: (() -> Void)? = nil,
                 onProjection: ((CameraProjection) -> Void)? = nil,
@@ -5482,6 +5491,7 @@ public struct MetalMeshView: UIViewRepresentable {
             faceToolActive: faceToolActive, onPickFace: onPickFace,
             onPickPoint: onPickPoint, onLatticeProbe: onLatticeProbe,
             onLatticeProbeExit: onLatticeProbeExit,
+            onLatticeCellsBaked: onLatticeCellsBaked,
             onPickDouble: onPickDouble, onMiss: onMiss,
             onProjection: onProjection, onUndo: onUndo, onRedo: onRedo,
             stressTints: stressTints, stressMultiplier: stressMultiplier,
@@ -5615,6 +5625,7 @@ public struct MetalMeshView: NSViewRepresentable {
                 onPickPoint: ((FaceID, SIMD3<Float>?) -> Bool)? = nil,
                 onLatticeProbe: ((SIMD3<Float>, SIMD3<Float>, Double, Float) -> Void)? = nil,
                 onLatticeProbeExit: (() -> Void)? = nil,
+                onLatticeCellsBaked: (([LatticeSteppedCell], [LatticeRegionSpec]) -> Void)? = nil,
                 onPickDouble: ((FaceID, SIMD3<Float>?) -> Void)? = nil,
                 onMiss: (() -> Void)? = nil,
                 onProjection: ((CameraProjection) -> Void)? = nil,
@@ -5643,6 +5654,7 @@ public struct MetalMeshView: NSViewRepresentable {
             faceToolActive: faceToolActive, onPickFace: onPickFace,
             onPickPoint: onPickPoint, onLatticeProbe: onLatticeProbe,
             onLatticeProbeExit: onLatticeProbeExit,
+            onLatticeCellsBaked: onLatticeCellsBaked,
             onPickDouble: onPickDouble, onMiss: onMiss,
             onProjection: onProjection, onUndo: onUndo, onRedo: onRedo,
             stressTints: stressTints, stressMultiplier: stressMultiplier,
@@ -5836,6 +5848,7 @@ extension MetalMeshView {
             onPickPoint = inputs.onPickPoint
             onLatticeProbe = inputs.onLatticeProbe
             onLatticeProbeExit = inputs.onLatticeProbeExit
+            renderer.onLatticeCellsBaked = inputs.onLatticeCellsBaked
             onMiss = inputs.onMiss
             onProjection = inputs.onProjection
             onUndo = inputs.onUndo

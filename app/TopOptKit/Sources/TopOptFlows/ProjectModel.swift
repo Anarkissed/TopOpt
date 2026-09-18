@@ -24,6 +24,12 @@ import TopOptKit
 
 @MainActor
 public final class ProjectModel: ObservableObject {
+    /// ★★ THE PREVIEW'S PLACED CELLS, in the job's wire form (2026-09-18: "Send the
+    /// cell list to core"). Written by the workspace after every octree bake, read by
+    /// both run paths into `LatticeSpec.steppedCells`. TRANSIENT — never persisted:
+    /// it is derived from the bake, and a stale list on disk would send a run a plan
+    /// the preview no longer shows. Empty ⇒ the legacy one-cell-per-region Stepped.
+    public var latticePreviewSteppedCells: [LatticeSteppedCellWire] = []
     /// Stable identity, shared with the project's `RecentProject.id` so
     /// `AppModel.open(_:)` can restore this exact instance from the recents grid.
     public let id: UUID

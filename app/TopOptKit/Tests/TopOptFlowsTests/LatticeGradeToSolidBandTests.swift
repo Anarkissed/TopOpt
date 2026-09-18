@@ -424,6 +424,36 @@ final class LatticeGradeToSolidBandTests: XCTestCase {
         XCTAssertEqual(stepped.pitchMM, 3, accuracy: 1e-9)
     }
 
+    /// ★ THE PLAN IS THE PICTURE (2026-09-18): every placed cell is recorded, no two
+    /// overlap, and every texel drawn at a size lies inside a recorded cell of that size.
+    func testTheRecordedCellsAreThePictureAndNeverOverlap() throws {
+        let f = slabs([(9, 0, 40), (6, 0.7, 34)])
+        let (baked, st) = try bake(f, band: 3, floor: 2.6)
+        let cells = baked.steppedCells
+        XCTAssertEqual(cells.count, st.cellsPlaced)
+        XCTAssertGreaterThan(cells.count, 10, "vacuous")
+        for (i, a) in cells.enumerated() {
+            for b in cells[(i + 1)...] where a.region == b.region {
+                let sep = (0..<3).contains { ax in
+                    a.originMM[ax] + a.sizeMM <= b.originMM[ax] + 1e-6 || b.originMM[ax] + b.sizeMM <= a.originMM[ax] + 1e-6
+                }
+                XCTAssertTrue(sep, "cells overlap: \(a) vs \(b)")
+            }
+        }
+        var unhoused = 0
+        for t in texels(baked, f) where t.cellMM > 0 && t.depth > 0 {
+            let housed = cells.contains { c in
+                abs(c.sizeMM - t.cellMM) < 0.02 && (0..<3).allSatisfy { ax in
+                    t.mid[ax] >= c.originMM[ax] - 1e-6 && t.mid[ax] < c.originMM[ax] + c.sizeMM + 1e-6 }
+            }
+            if !housed { unhoused += 1 }
+        }
+        // The face-plane texel's middle sits just outside its cell along the normal —
+        // a known, bounded exception — so the count is small, not zero.
+        XCTAssertLessThan(Double(unhoused), 0.12 * Double(texels(baked, f).filter { $0.cellMM > 0 }.count) + 1,
+                          "\(unhoused) drawn texels lie in no recorded cell")
+    }
+
     /// The gates that route a job to that bake accept BOTH names — the workspace's
     /// per-region cells and the renderer's deferred-bake guard — and the wizard's
     /// grade-style picker no longer offers Organic (his 2026-09-17: "It should only be
@@ -436,8 +466,10 @@ final class LatticeGradeToSolidBandTests: XCTestCase {
         let renderer = try String(contentsOf: src.appendingPathComponent("LatticeSDFMetal.swift"), encoding: .utf8)
         XCTAssertTrue(renderer.contains("if scene.algorithm == \"stepped\",\n           steppedCellMM.isEmpty"),
                       "★ the deferred-bake guard is stepped's alone: doubled with no cells draws the dyadic ladder, which is still doubled")
-        XCTAssertTrue(renderer.contains("dyadicSteps: steppedDyadicSteps,\n                    stats: &st)"),
-                      "★ the octree call must pass the step style, or Default Grade takes thirds")
+        XCTAssertTrue(renderer.contains("dyadicSteps: steppedDyadicSteps,")
+                      && renderer.contains("finestPrintsOpen: scene.stageMode != .structural,\n                    stats: &st)"),
+                      "★ the octree call must pass the step style and the structural floor, or Default Grade takes thirds "
+                      + "and Structural keeps the aesthetic quilt bound")
         let wizard = try String(contentsOf: src.appendingPathComponent("LatticeSetupWizard.swift"), encoding: .utf8)
         XCTAssertTrue(wizard.contains("private static let cellTransitions: [LatticeCellTransition] =\n        [.stepped, .defaultGrade]\n"),
                       "★ the grade-style picker is Stepped and Default Grade only")

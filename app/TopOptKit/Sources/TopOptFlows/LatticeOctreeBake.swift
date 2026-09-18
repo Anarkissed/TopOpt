@@ -42,6 +42,7 @@ extension LatticePreviewOccupancy {
         public var anchorShiftMM = SIMD3<Double>(repeating: 0)
         public var anchorSeconds: Double = 0
         public var rasterSeconds: Double = 0
+        public var cellsPlaced = 0
     }
 
     /// The densest a bead-wide strut may make the finest rung (core's measured law):
@@ -68,11 +69,17 @@ extension LatticePreviewOccupancy {
     /// CONSTRUCTION: a k/n cell at the face leaves (n−k)/n of the wall behind it,
     /// which the 1/n tiles fill exactly — no solid strip ever. Descending; the base
     /// first, the finest last.
+    /// ★ `printsOpenBound` is the AESTHETIC quilt rule. Under a structural intent core's
+    /// ruling (2026-09-18) is the printability floor ALONE: "the 20 % rule has no
+    /// structural content … what actually binds is whether a strut can be printed; the
+    /// frame solve answers the rest." So structural passes false and the menu reaches
+    /// down to the floor (sixths of a 12 at 2.0 mm, and with them 10 mm).
     public static func steppedSizeMenu(base: Double, floorMM: Double,
-                                       lineWidthMM: Double, latticeID: String) -> [Double] {
+                                       lineWidthMM: Double, latticeID: String,
+                                       printsOpenBound: Bool = true) -> [Double] {
         let law = latticeID.isEmpty ? nil : LatticeType.named(latticeID)
         func printsOpen(_ r: Double) -> Bool {
-            guard let law, lineWidthMM > 0 else { return true }
+            guard printsOpenBound, let law, lineWidthMM > 0 else { return true }
             return law.printabilityDensityFloor(lineWidthMM: lineWidthMM, cellMM: r) <= finestRungMaxDensity + 1e-9
         }
         var menu: [Double] = [base]
@@ -109,6 +116,10 @@ extension LatticePreviewOccupancy {
                                        /// are halves only — a third is never taken, so
                                        /// every cell's nodes land on its parent's.
                                        dyadicSteps: Bool = false,
+                                       /// False under a structural intent: Stepped's
+                                       /// menu is bounded by the printability floor
+                                       /// alone (core's ruling, 2026-09-18).
+                                       finestPrintsOpen: Bool = true,
                                        stats: inout OctreeBakeStats) -> LatticeCellField? {
         let t0 = Date()
         let voxel = Double(Swift.max(occ.spacing.x, Swift.max(occ.spacing.y, occ.spacing.z)))
@@ -201,7 +212,8 @@ extension LatticePreviewOccupancy {
             let base = cellMM[$0.region]
             let sizes = dyadicSteps
                 ? ladderSizes(base: base)
-                : steppedSizeMenu(base: base, floorMM: floorMM, lineWidthMM: lineWidthMM, latticeID: latticeID)
+                : steppedSizeMenu(base: base, floorMM: floorMM, lineWidthMM: lineWidthMM, latticeID: latticeID,
+                                  printsOpenBound: finestPrintsOpen)
             return Ladder(region: $0.region, sizes: sizes, axis: $0.axis)
         }
         let pitch = ladders.map { $0.sizes.last! }.min()!
@@ -381,6 +393,7 @@ extension LatticePreviewOccupancy {
         var outlineMM = [Float](repeating: 1e3, count: grid.count)
         var owner = [Int8](repeating: -1, count: grid.count)
         var isFinest = [Bool](repeating: false, count: grid.count)
+        var cells: [LatticeSteppedCell] = []
 
         // Within a voxel of material: the voxel occupancy is eroded at every surface,
         // and a cut cell's texels sit exactly there.
@@ -588,6 +601,8 @@ extension LatticePreviewOccupancy {
                 stats.texelsPainted += painted
                 stats.paintedByRegion[ladder.region, default: 0] += painted
                 if edge { stats.slotsCut += 1 } else { stats.slotsKept[S, default: 0] += 1 }
+                // The plan: every cell that owns at least one texel, cut or whole.
+                if painted > 0 { cells.append(LatticeSteppedCell(region: ladder.region, originMM: lo, sizeMM: S)) }
             }
             func place(_ idx: SIMD3<Int>, level: Int) {
                 let S = ladder.sizes[level]
@@ -815,7 +830,8 @@ extension LatticePreviewOccupancy {
         var out = grid
         out.values = activation
         stats.seconds = Date().timeIntervalSince(t0)
-        return LatticeCellField(field: out, level: outlineMM,
+        stats.cellsPlaced = cells.count
+        var field = LatticeCellField(field: out, level: outlineMM,
                                 steppedCellMM: size, steppedPhase: phase,
                                 steppedOrigin: origin,
                                 baseCellMM: pitch,
@@ -829,5 +845,7 @@ extension LatticePreviewOccupancy {
                                 drawnDensityHi: drawnHi > densityHi + 1e-9 ? drawnHi : 0,
                                 solidDepthMM: solidDepth,
                                 solidBandMM: beam)
+        field.steppedCells = cells
+        return field
     }
 }

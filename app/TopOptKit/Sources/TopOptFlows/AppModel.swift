@@ -299,7 +299,7 @@ public final class AppModel: ObservableObject {
             regionWidthsMM: emitted.regions.filter { $0.role == .include }
                 .map { $0.depthMM },
             lineWidthMM: project.printParams.strutLineWidthMM)
-        let latticeSpec = resolvedLattice.runSpec(
+        var latticeSpec = resolvedLattice.runSpec(
             topology: project.lattice.topologyID,
             memberMM: project.lattice.regionMemberMM ?? 0,
             lineWidthMM: project.printParams.strutLineWidthMM,
@@ -312,6 +312,8 @@ public final class AppModel: ObservableObject {
             minimizePlastic: project.minimizePlastic,
             // ★ growth's precondition (§2A): organic_growth is written only with a layer height
             layerHeightMM: project.printParams.layerHeightMM)
+        // ★ The preview's placed cells ride with a Stepped run (2026-09-18).
+        latticeSpec?.steppedCells = project.latticePreviewSteppedCells
         return RunRequest(modelPath: file.path, material: project.material,
                           materialsPath: materialsPath, rulesPath: rulesPath,
                           resolution: project.quality.resolution,

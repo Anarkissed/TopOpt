@@ -489,6 +489,45 @@ public enum LatticeCellSizeMode: String, Codable, Equatable, Sendable {
 /// ONLY when lattice mode is on AND the settings are runnable-as-certified; absent ⇒
 /// the job is byte-identical to a non-lattice run (BAR U1). The worker generates a
 /// UNIFORM lattice at `strutRadiusMM` (the shipped generator has no grading law yet).
+/// One cell of `lattice.stepped_cells`, exactly as core reads it (core reply,
+/// 2026-09-18): `region_id` 1-based in the job's INCLUDE-region order, `origin_mm` the
+/// minimum corner in model space, `size_mm` the cube edge.
+public struct LatticeSteppedCellWire: Equatable, Sendable {
+    public let regionID: Int
+    public let originMM: SIMD3<Double>
+    public let sizeMM: Double
+    public init(regionID: Int, originMM: SIMD3<Double>, sizeMM: Double) {
+        self.regionID = regionID; self.originMM = originMM; self.sizeMM = sizeMM
+    }
+    public var wireDictionary: [String: Any] {
+        ["region_id": regionID,
+         "origin_mm": [originMM.x, originMM.y, originMM.z],
+         "size_mm": sizeMM]
+    }
+    /// ★ REGION INDEX → REGION ID. The bake indexes the scene's regions (every role,
+    /// in emission order); core numbers the INCLUDE regions 1-based in the job's own
+    /// order, which is the same emission order filtered to `.include`. A cell of a
+    /// non-include region has no id and is dropped.
+    public static func wire(_ cells: [LatticeSteppedCell],
+                            regions: [LatticeRegionSpec]) -> [LatticeSteppedCellWire] {
+        var idOf: [Int: Int] = [:]
+        var next = 1
+        for (i, r) in regions.enumerated() where r.role == .include { idOf[i] = next; next += 1 }
+        return cells.compactMap { c in
+            guard let id = idOf[c.region] else { return nil }
+            return LatticeSteppedCellWire(regionID: id, originMM: c.originMM, sizeMM: c.sizeMM)
+        }
+    }
+    /// The block value for a job, or nil when nothing is to be written: only a Stepped
+    /// job carries the key (core refuses it under any other algorithm), only a
+    /// non-empty plan, and only a core whose schema accepts it (`wired`) — an unknown
+    /// key kills the whole job at parse.
+    public static func blockValue(for lat: LatticeSpec, wired: Bool) -> [[String: Any]]? {
+        guard wired, lat.algorithm == "stepped", !lat.steppedCells.isEmpty else { return nil }
+        return lat.steppedCells.map { $0.wireDictionary }
+    }
+}
+
 public struct LatticeSpec: Equatable, Sendable {
     /// A core-certifiable topology name (`"octet"`), matching the job schema.
     public let topologyID: String
@@ -587,6 +626,8 @@ public struct LatticeSpec: Equatable, Sendable {
     /// is written and core resolves it to doubled. A `var` with an empty default so
     /// every existing `LatticeSpec(...)` call is unchanged and produces the same job.
     public var algorithm: String = ""
+    /// The preview's placed cells for a Stepped run — see `LatticeSteppedCellWire`.
+    public var steppedCells: [LatticeSteppedCellWire] = []
 
     // ★ ORGANIC's seven keys, carried the same way `algorithm` is: plain `var`s with
     // core's own defaults, so every existing `LatticeSpec(...)` call site is unchanged
@@ -753,6 +794,29 @@ public struct LatticeSpec: Equatable, Sendable {
         // job that dies after the solve is the worst place to learn about a typo.
         if TopOptKit.latticeAlgorithmIsKnown(algorithm) {
             grading["algorithm"] = algorithm
+        }
+        // ══════════════════════════════════════════════════════════════════════
+        // ★★ STEPPED UNDER A STRUCTURAL INTENT (core reply, 2026-09-18). Core refuses
+        // an any-step Stepped job under any non-aesthetic intent — an UNSTATED intent
+        // included — unless it asks for the beam-network certificate, so the stage's
+        // word travels with every Stepped job, and the certificate key with every
+        // structural one. `min_cell_mm` is the structural floor for the finest tile:
+        // the printability floor ALONE (core: "the 20 % rule has no structural
+        // content"), the same number the preview's bake uses under Structural. Each
+        // key only once core's schema accepts it — never a key that would kill the job.
+        if algorithm == "stepped" {
+            if let m = stageMode, TopOptKit.gradingSchemaAccepts(key: "intent") {
+                grading["intent"] = m == .structural ? "structural" : "aesthetic"
+            }
+            if stageMode == .structural {
+                if TopOptKit.steppedStructuralCertificationWired {
+                    grading["structural_certification"] = "beam_network"
+                }
+                if let w = minExtrudableWidthMM, w > 0,
+                   TopOptKit.gradingSchemaAccepts(key: "min_cell_mm") {
+                    grading["min_cell_mm"] = LatticeSDFRenderer.printableFloorBeads * w
+                }
+            }
         }
         // ══════════════════════════════════════════════════════════════════════
         // ORGANIC — the seven keys, each written only when ALL of these hold.

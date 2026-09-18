@@ -633,3 +633,39 @@ strips."
   Nothing of this branch's work fails. Installed build = this commit (20:54:04).
   Core brief for the run + structural certification:
   `docs/handoffs/2026-09-17-core-brief-any-step-stepped-and-beam-certification.md`.
+
+## 17. 2026-09-18 02:48 — the cell list goes to core; Stepped under Structural
+
+Core's reply (PR #358, branch claude/raster-receipt-fields) accepted the brief and
+handed the app four items. All four are done here; the keys are gated on core's
+schema so nothing is sent to an older core.
+
+- **The plan travels.** The octree bake records every placed cell
+  (`LatticeCellField.steppedCells`, `OctreeBakeStats.cellsPlaced`); the renderer
+  publishes them after each rebake (`onSteppedCellsBaked`, with the scene's regions);
+  the view forwards (`onLatticeCellsBaked`); the workspace stores the WIRE form on the
+  project (`ProjectModel.latticePreviewSteppedCells`, transient, never persisted);
+  both run paths attach it to `LatticeSpec.steppedCells`; both runners write
+  `lattice.stepped_cells` through ONE encoder (`LatticeSteppedCellWire.blockValue`)
+  — only for `algorithm: "stepped"`, only a non-empty plan, only when
+  `TopOptKit.steppedCellsWired` (a whole-job probe with one cell). Region index →
+  `region_id` = 1-based position among the INCLUDE regions in emission order
+  (`LatticeSteppedCellWire.wire`). Origins are the bake's model-space minimum corners.
+- **Structural keys** in `gradingDictionary` for stepped: `intent` always (core keys
+  the refusal on intent != aesthetic, unstated included); `structural_certification:
+  "beam_network"` under Structural when `steppedStructuralCertificationWired`;
+  `min_cell_mm` = the printability floor (4 beads) under Structural when the grading
+  schema accepts the key.
+- **The menu under Structural** is bounded by the printability floor ALONE
+  (`steppedSizeMenu(printsOpenBound: false)`, `octreeCellField(finestPrintsOpen:)`,
+  `scene.stageMode != .structural`): sixths of a 12 at 2.0 mm, and with them 10.
+- **Bridge gate** untouched: the app now sends the certificate key whenever core
+  can take it, so core never sees stepped + structural without it.
+- Tests: `LatticeSteppedCellListTests` (wire numbering, block gating through the real
+  builder, the structural menu) 3/3; `LatticeGradeToSolidBandTests` +1 (recorded cells
+  = the picture, no overlaps) 11/11. Both probes print FALSE on this worktree's core,
+  as expected until PR #358 is merged and the xcframework rebuilt.
+- Open with core (in the reply): packSlot places a multi-family size on its COARSEST
+  family's grid only, so their looser acceptance is a superset; the exact `min_cell_mm`
+  key name; the "inside material" check is not needed (the bake tests occupancy at
+  placement); their reading of "required" is the intended one.

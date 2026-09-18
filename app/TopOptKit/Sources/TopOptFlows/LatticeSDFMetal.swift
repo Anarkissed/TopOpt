@@ -1830,6 +1830,11 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
     /// was asked for but no region derived a cell — the ladder is drawn then, and the
     /// banner must keep saying so rather than claiming a picture it is not showing.
     private(set) var steppedDrawn = false
+    /// ★ THE PLAN THE BAKE PLACED, published after every rebake (2026-09-18: "Send
+    /// the cell list to core"): the octree's cells with the scene's regions, so the
+    /// host can map region index → the job's include order and carry the list into
+    /// `lattice.stepped_cells`. Empty when the bake was not the octree.
+    var onSteppedCellsBaked: (([LatticeSteppedCell], [LatticeRegionSpec]) -> Void)?
     /// ★ SUB-FLOOR RETENTION, as the job carries it. Armed ⇒ the cells-per-member
     /// floor stands down where the declared set MEASURES as unloaded, exactly as
     /// `retain_subfloor_in_unloaded_regions` does in the run.
@@ -2283,6 +2288,8 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
         let retains = subfloorQualifiesNow(scene)
         subfloorRetained = retains
         var baked: LatticeCellField?
+        var octreeCells: [LatticeSteppedCell] = []
+        defer { onSteppedCellsBaked?(octreeCells, scene.regions) }
         // ★ ONE CANDIDATE MAP AND ONE IN-PLANE FIELD PER BAKE. The candidate array
         // was built THREE times per bake (fit field, rim field, diagnostics) and
         // the in-plane distance BFS ran twice — the diagnostics block re-ran the
@@ -2390,8 +2397,11 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
                     densityGamma: params.gamma, latticeID: params.latticeID,
                     // ★ Default Grade is core's "doubled": the same bake, halves only.
                     dyadicSteps: steppedDyadicSteps,
+                    // ★ Structural: the printability floor alone bounds the menu.
+                    finestPrintsOpen: scene.stageMode != .structural,
                     stats: &st) {
                     baked = o
+                    octreeCells = o.steppedCells
                     let kept = st.slotsKept.keys.sorted(by: >)
                         .map { String(format: "%.2f=%d", $0, st.slotsKept[$0]!) }.joined(separator: " ")
                     let why = st.why.keys.sorted().map { "\($0)=\(st.why[$0]!)" }.joined(separator: " ")

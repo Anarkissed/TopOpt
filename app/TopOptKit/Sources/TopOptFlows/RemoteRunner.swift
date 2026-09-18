@@ -816,6 +816,11 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
             if lat.algorithm == "organic", TopOptKit.latticeSchemaAccepts(key: "emit_organic_spans") {
                 block["emit_organic_spans"] = true
             }
+            // ★ THE PLAN (2026-09-18): the preview's placed cells, verbatim — the ONE
+            // encoder, shared with RelatticeRunner.
+            if let cells = LatticeSteppedCellWire.blockValue(for: lat, wired: TopOptKit.steppedCellsWired) {
+                block["stepped_cells"] = cells
+            }
             job["lattice"] = block
         }
         // The declared load case is emitted for EVERY model source — STEP B-rep

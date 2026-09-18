@@ -815,6 +815,11 @@ public struct WorkspacePlaceholder: View {
                                   latticeLegendMode = .groups
                                   latticeLegendProbe = nil
                               } : nil,
+                          // ★ The bake's plan → the project, for the run (2026-09-18).
+                          onLatticeCellsBaked: { cells, regions in
+                              project.latticePreviewSteppedCells =
+                                  LatticeSteppedCellWire.wire(cells, regions: regions)
+                          },
                           // ★ §1(b) — DOUBLE TAP = THE ONES LIKE IT.
                           //
                           // ★ §1(e) — AND ONLY WITH THE SELECT TOOL. Handing this
@@ -3526,7 +3531,7 @@ public struct WorkspacePlaceholder: View {
         // 2026-08-06-strut-line-width-field): a re-lattice must use the same
         // printability reference the optimize run did, or the two jobs derive
         // different cells from the same project.
-        let spec = project.lattice.runSpec(
+        var spec = project.lattice.runSpec(
             topology: project.lattice.topologyID,
             memberMM: project.lattice.regionMemberMM ?? 0,
             lineWidthMM: project.printParams.strutLineWidthMM,
@@ -3542,6 +3547,8 @@ public struct WorkspacePlaceholder: View {
         // validates as a fraction in (0, 1]. On the maintainer's growth run the
         // rung is 1.1 and every attempt died at schema validation. Both values
         // now come from the variant itself.
+        // ★ The preview's placed cells ride with a Stepped run (2026-09-18).
+        spec?.steppedCells = project.latticePreviewSteppedCells
         return try? RelatticeJobBuilder.build(
             original: art.jobJSON, variant: ctx, lattice: spec)
     }

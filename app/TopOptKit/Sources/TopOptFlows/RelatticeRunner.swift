@@ -71,7 +71,10 @@ public enum RelatticeJobBuilder {
                              achievedVolumeFraction: Double,
                              designFileName: String,
                              lattice: LatticeSpec?,
-                             forecastOnly: Bool = false) throws -> Data {
+                             forecastOnly: Bool = false,
+                             /// Whether this core's schema takes `lattice.stepped_cells`
+                             /// — the launch-time probe by default; a test may force it.
+                             steppedCellsWired: Bool = TopOptKit.steppedCellsWired) throws -> Data {
         guard var job = (try? JSONSerialization.jsonObject(with: original))
                 as? [String: Any] else {
             throw BuildError("the retained job document is not readable JSON")
@@ -156,6 +159,10 @@ public enum RelatticeJobBuilder {
         // the key — `reject_unknown_keys` kills the whole job over one it does not.
         if lat.algorithm == "organic", TopOptKit.latticeSchemaAccepts(key: "emit_organic_spans") {
             block["emit_organic_spans"] = true
+        }
+        // ★ THE PLAN (2026-09-18): the preview's placed cells, verbatim.
+        if let cells = LatticeSteppedCellWire.blockValue(for: lat, wired: steppedCellsWired) {
+            block["stepped_cells"] = cells
         }
         job["lattice"] = block
         return try JSONSerialization.data(withJSONObject: job,
