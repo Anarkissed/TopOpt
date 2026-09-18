@@ -12,14 +12,15 @@
 namespace topopt {
 
 std::vector<int> stepped_admitted_divisors(double base_cell_mm, double bead_mm,
-                                           double min_cell_mm) {
+                                           double min_tile_mm, bool apply_prints_open) {
   std::vector<int> out;
   if (!(base_cell_mm > 0.0) || !std::isfinite(base_cell_mm)) return out;
   if (!(bead_mm > 0.0) || !std::isfinite(bead_mm)) return out;
   for (int n = 2; n <= kSteppedMaxDivisor; ++n) {
     const double tile = base_cell_mm / n;
-    if (min_cell_mm > 0.0 && tile < min_cell_mm) continue;
+    if (min_tile_mm > 0.0 && tile < min_tile_mm) continue;
     if (tile <= bead_mm) continue;      // the bead does not fit in the tile at all
+    if (!apply_prints_open) { out.push_back(n); continue; }   // structural: floor alone
     // ★ PRINTS OPEN, by the octet law and not by a rule of thumb: a bead-wide strut in a
     // tile this size must leave the cell mostly air. octet_relative_density depends only
     // on radius/cell, so this is a statement about the RATIO and nothing else.
@@ -36,11 +37,12 @@ std::vector<int> stepped_admitted_divisors(double base_cell_mm, double bead_mm,
 }
 
 std::vector<double> stepped_size_menu(double base_cell_mm, double bead_mm,
-                                      double min_cell_mm) {
+                                      double min_tile_mm, bool apply_prints_open) {
   std::vector<double> menu;
   if (!(base_cell_mm > 0.0) || !std::isfinite(base_cell_mm)) return menu;
   menu.push_back(base_cell_mm);          // the base is always on its own menu
-  for (int n : stepped_admitted_divisors(base_cell_mm, bead_mm, min_cell_mm)) {
+  for (int n : stepped_admitted_divisors(base_cell_mm, bead_mm, min_tile_mm,
+                                        apply_prints_open)) {
     const double tile = base_cell_mm / n;
     for (int k = 1; k < n; ++k) menu.push_back(k * tile);
   }
@@ -77,7 +79,8 @@ bool aligned_on_some_family(double offset, double size, double base, const std::
 
 SteppedPlanCheck stepped_validate_plan(const std::vector<SteppedCell>& cells,
                                        const std::vector<SteppedPlanRegion>& regions,
-                                       double bead_mm, double min_cell_mm) {
+                                       double bead_mm, double min_tile_mm,
+                                       bool apply_prints_open) {
   SteppedPlanCheck out;
   out.cells = cells.size();
   out.regions = regions.size();
@@ -88,8 +91,10 @@ SteppedPlanCheck stepped_validate_plan(const std::vector<SteppedCell>& cells,
   std::unordered_map<int, std::vector<int>> div_of;
   for (const SteppedPlanRegion& r : regions) {
     by_id[r.region_id] = &r;
-    menu_of[r.region_id] = stepped_size_menu(r.base_cell_mm, bead_mm, min_cell_mm);
-    div_of[r.region_id] = stepped_admitted_divisors(r.base_cell_mm, bead_mm, min_cell_mm);
+    menu_of[r.region_id] =
+        stepped_size_menu(r.base_cell_mm, bead_mm, min_tile_mm, apply_prints_open);
+    div_of[r.region_id] =
+        stepped_admitted_divisors(r.base_cell_mm, bead_mm, min_tile_mm, apply_prints_open);
   }
 
   double finest = 0.0;

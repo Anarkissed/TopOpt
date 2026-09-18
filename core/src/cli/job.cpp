@@ -1636,6 +1636,7 @@ JobDescription parse_job(const std::string& json_text) {
              "organic_strut_embed_mm",
              "organic_dual_contour", "organic_dc_cell_mm", "organic_dc_tolerance_mm",
              "organic_density_union_subdiv", "organic_calibrate_on_shipped",
+             "stepped_min_tile_mm",
              "organic_structural_certification", "structural_certification"},
         "grading");
     job.grading.present = true;
@@ -1889,6 +1890,17 @@ JobDescription parse_job(const std::string& json_text) {
                     "\" is only allowed with algorithm \"organic\"");
       if (std::string(k) == "organic_dc_cell_mm") job.grading.organic_dc_cell_mm = v->num;
       else job.grading.organic_dc_tolerance_mm = v->num;
+    }
+    if (const JsonValue* mt = find_key(gr, "stepped_min_tile_mm")) {
+      if (mt->type != JsonValue::Type::Number || !std::isfinite(mt->num) || mt->num < 0.0)
+        schema_fail("grading \"stepped_min_tile_mm\" must be a finite number >= 0");
+      if (job.grading.algorithm != "stepped")
+        schema_fail(
+            "grading \"stepped_min_tile_mm\" is only allowed with \"algorithm\": "
+            "\"stepped\" (this job says \"" + job.grading.algorithm +
+            "\"). It bounds an any-step TILE; note it is NOT \"cell_min_mm\", which is "
+            "the swept window's lower end and a different quantity.");
+      job.grading.stepped_min_tile_mm = mt->num;
     }
     if (const JsonValue* cs = find_key(gr, "organic_calibrate_on_shipped")) {
       if (cs->type != JsonValue::Type::Bool)

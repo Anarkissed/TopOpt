@@ -523,6 +523,17 @@ struct JobGrading {
   // 493. Until that merge rule is radius-independent, calibrating mass by bead scaling
   // cannot work, and this switch exists to demonstrate that rather than to be used.
   bool organic_calibrate_on_shipped = false;
+  // ★ THE FLOOR ON AN ANY-STEP TILE, and DELIBERATELY NOT NAMED `min_cell_mm`. This
+  // grading block already carries `cell_min_mm` -- the swept WINDOW's lower end, an
+  // entirely different quantity -- and a second key differing from it only in word order
+  // is a misconfiguration waiting to happen that no compiler or schema could ever catch.
+  // `stepped_min_tile_mm` says what it bounds: the tile S/n of an admitted family.
+  //
+  // Under a STRUCTURAL intent this is the ONLY lower bound: the 20 % "prints open" rule
+  // is aesthetic, and the beam-network certificate solves every strut rather than
+  // averaging them, so nothing structural depends on a cell being mostly air (see
+  // stepped_plan.hpp). Under an aesthetic intent both apply. 0 = no floor of its own.
+  double stepped_min_tile_mm = 0.0;
   double organic_scale = 1.0;
   bool organic_shape_fit = false;
   // ★★ SHAPE-FIT *ONLY* — the cell is a function of the SHAPE and nothing else; the

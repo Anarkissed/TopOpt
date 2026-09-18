@@ -772,8 +772,9 @@ static void test_organic_scale_and_gates() {
                       "\"cell_mode\": \"swept\", "
                       "\"cell_min_mm\": 3.0, \"cell_max_mm\": 12.0" + grade_extra + " }");
       };
-      auto stepped = [&](const std::string& lat_extra) {
-        return stepped_i(lat_extra, "aesthetic", "");
+      auto stepped = [&](const std::string& lat_extra,
+                         const std::string& grade_extra = "") {
+        return stepped_i(lat_extra, "aesthetic", grade_extra);
       };
       {
         const JobDescription j = parse_job(stepped(
@@ -804,6 +805,32 @@ static void test_organic_scale_and_gates() {
         CHECK(refused, "stepped_cells is refused on a non-stepped algorithm");
         CHECK(why.find("organic") != std::string::npos,
               "stepped_cells: and the refusal names the algorithm that was asked for");
+      }
+      {   // ★ THE STRUCTURAL TILE FLOOR, and its name. NOT "min_cell_mm": this grading
+          // block already carries "cell_min_mm" (the swept window's lower end), and two
+          // keys differing only in word order is a misconfiguration nothing could catch.
+        const JobDescription j = parse_job(stepped(
+            "\"emit_stl\": true", ", \"stepped_min_tile_mm\": 1.8"));
+        CHECK(j.grading.stepped_min_tile_mm == 1.8,
+              "stepped_min_tile_mm: the structural tile floor arrives");
+        bool wrong_alg = false;
+        std::string why;
+        try {
+          (void)parse_job(mutate(
+              "\"mesh_prefix\": \"variant\" }",
+              "\"mesh_prefix\": \"variant\" },\n  \"grading\": { \"topology\": \"octet\", "
+              "\"min_extrudable_width_mm\": 0.45, \"algorithm\": \"organic\", "
+              "\"intent\": \"aesthetic\", \"cell_mode\": \"swept\", \"cell_min_mm\": 3.0, "
+              "\"cell_max_mm\": 12.0, \"stepped_min_tile_mm\": 1.8 }"));
+        } catch (const JobError& e) { wrong_alg = true; why = e.what(); }
+        CHECK(wrong_alg, "stepped_min_tile_mm: refused on a non-stepped algorithm");
+        CHECK(why.find("cell_min_mm") != std::string::npos,
+              "stepped_min_tile_mm: and the refusal WARNS about the confusable key, "
+              "because that is the mistake worth catching");
+        bool neg = false;
+        try { (void)parse_job(stepped("\"emit_stl\": true", ", \"stepped_min_tile_mm\": -1")); }
+        catch (const JobError&) { neg = true; }
+        CHECK(neg, "stepped_min_tile_mm: a negative floor is refused");
       }
       {   // region_id is 1-BASED: 0 is not an include region
         bool refused = false;

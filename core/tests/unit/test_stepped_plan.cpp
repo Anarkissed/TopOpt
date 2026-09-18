@@ -113,6 +113,41 @@ static void test_menus_match_the_previews_live_histogram() {
         "DIAG: the two codebases agree on the size set exactly, in both directions");
 }
 
+// ── THE STRUCTURAL MENU: THE FLOOR ALONE ────────────────────────────────────────
+// Core's answer to §3.5. The 20 % "prints open" bound is a rule about how a quilt LOOKS;
+// the beam network solves every strut rather than averaging them, so nothing structural
+// depends on a cell being mostly air. Under a structural intent the ONLY lower bound is
+// the printability floor -- which admits families the aesthetic rule refuses, and the
+// difference is the whole point of asking.
+static void test_structural_menu_is_the_floor_alone() {
+  const double bead = 0.45;
+  const double floor_mm = 4.0 * bead;      // the app's stated structural floor: 4 beads
+  const std::vector<double> aesthetic = stepped_size_menu(12.0, bead, 0.0, true);
+  const std::vector<double> structural = stepped_size_menu(12.0, bead, floor_mm, false);
+  std::printf("  menu aesthetic  [%s]\n", join(aesthetic).c_str());
+  std::printf("  menu structural [%s]  (floor %.2f mm)\n", join(structural).c_str(),
+              floor_mm);
+  CHECK(structural.size() > aesthetic.size(),
+        "structural menu: dropping the aesthetic bound admits MORE sizes -- if it did "
+        "not, the decision in §3.5 would have been a distinction without a difference");
+  // the sixths of a 12 are 2.0 mm: above a 1.8 mm floor, below the 20 % rule
+  bool has_two = false, has_ten = false;
+  for (double x : structural) {
+    if (std::fabs(x - 2.0) < 1e-9) has_two = true;
+    if (std::fabs(x - 10.0) < 1e-9) has_ten = true;
+  }
+  CHECK(has_two, "structural menu: the sixths (2.0 mm) clear a 1.8 mm floor and are in");
+  CHECK(has_ten, "structural menu: and 10 mm returns with them -- it is 5*(12/6)");
+  for (double x : aesthetic) {
+    CHECK(x > 2.2, "aesthetic menu: nothing that fine survives the 20 % rule");
+  }
+  // ★ AND THE FLOOR STILL BITES. Raise it and the fine families go, bound or no bound.
+  const std::vector<double> tight = stepped_size_menu(12.0, bead, 2.5, false);
+  CHECK(tight.size() < structural.size(),
+        "structural menu CONTROL: the floor is doing the work -- raise it and families "
+        "fall away, so 'no 20 % rule' does not mean 'no bound'");
+}
+
 // ── DEPTH-CLEAN BY CONSTRUCTION ─────────────────────────────────────────────────
 // A cell of size s placed at the face leaves S - floor(S/s)*s of the wall behind it, and
 // the claim is that the remainder is always fillable by menu tiles that divide s -- no
@@ -475,6 +510,7 @@ static void test_packed_slot_covers_exactly_once() {
 int main() {
   test_menu_matches_the_brief();
   test_menus_match_the_previews_live_histogram();
+  test_structural_menu_is_the_floor_alone();
   test_depth_is_clean();
   test_menu_shape();
   test_plan_validation();

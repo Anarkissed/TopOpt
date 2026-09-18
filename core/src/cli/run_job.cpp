@@ -6578,9 +6578,17 @@ LatticeVariantOutcome lattice_one_variant(
       }
       plan_regions.push_back(pr);
     }
+    // ★ THE BOUND THE JOB'S INTENT ASKS FOR. Aesthetic keeps the 20 % "prints open" rule
+    // beside the floor; structural drops it, because the certificate solves every strut
+    // rather than averaging them and nothing structural depends on a cell looking open.
+    const bool prints_open = job.grading.intent == "aesthetic";
+    const double tile_floor = job.grading.stepped_min_tile_mm > 0.0
+                                  ? job.grading.stepped_min_tile_mm
+                                  : job.grading.min_extrudable_width_mm;
     const SteppedPlanCheck chk =
         stepped_validate_plan(job.lattice.stepped_cells, plan_regions,
-                              job.grading.min_extrudable_width_mm);
+                              job.grading.min_extrudable_width_mm, tile_floor,
+                              prints_open);
     if (!chk.ok)
       throw JobError("lattice \"stepped_cells\": " + chk.error +
                      ". Core validates the plan and does not repack it -- the run lays "

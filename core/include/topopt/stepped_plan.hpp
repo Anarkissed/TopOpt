@@ -50,13 +50,20 @@ inline constexpr double kSteppedMenuSameRel = 1e-9;
 // the region's base cell S, `bead_mm` the printable strut width, `min_cell_mm` a hard
 // floor on the tile (0 = no floor beyond the density bound). Returns {S} alone when no
 // family prints open, which is the honest answer for a base too fine to subdivide.
+// `apply_prints_open` is the AESTHETIC half of the bound and is off under a structural
+// intent. The 20 % rule is a rule about how a quilt LOOKS; the beam-network certificate
+// solves every strut rather than averaging them, so nothing structural depends on a cell
+// being mostly air. Under structural the floor is `min_tile_mm` alone -- see §3.5 of the
+// brief of 2026-09-17 and core's reply.
 std::vector<double> stepped_size_menu(double base_cell_mm, double bead_mm,
-                                      double min_cell_mm = 0.0);
+                                      double min_tile_mm = 0.0,
+                                      bool apply_prints_open = true);
 
 // The divisors whose tile was admitted, ascending. Exposed because the packer places on a
 // family's own tile grid and the receipt reports per family.
 std::vector<int> stepped_admitted_divisors(double base_cell_mm, double bead_mm,
-                                           double min_cell_mm = 0.0);
+                                           double min_tile_mm = 0.0,
+                                           bool apply_prints_open = true);
 
 
 // ── THE PLAN THE JOB STATES, AND WHY CORE VALIDATES RATHER THAN REPACKS ─────────
@@ -106,7 +113,8 @@ struct SteppedPlanCheck {
 // with the caller.
 SteppedPlanCheck stepped_validate_plan(const std::vector<SteppedCell>& cells,
                                        const std::vector<SteppedPlanRegion>& regions,
-                                       double bead_mm, double min_cell_mm = 0.0);
+                                       double bead_mm, double min_tile_mm = 0.0,
+                                       bool apply_prints_open = true);
 
 // ── ONE PASS PER (REGION, FAMILY), NOT PER DISTINCT SIZE ────────────────────────
 // The dyadic path builds a pass per distinct size on a grid anchored at the SOLVED
