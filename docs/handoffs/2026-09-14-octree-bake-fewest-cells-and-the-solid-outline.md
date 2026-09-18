@@ -669,3 +669,7 @@ schema so nothing is sent to an older core.
   family's grid only, so their looser acceptance is a superset; the exact `min_cell_mm`
   key name; the "inside material" check is not needed (the bake tests occupancy at
   placement); their reading of "required" is the intended one.
+- **04:37 — full suite on `2ffa46a6`: 2447 tests, 31 skipped, 5 failing cases**
+  (1 h 48 min) — exactly the five known pre-existing ones (AppModelTests 3MF ×3,
+  OrganicSampleCubeTests thicker-is-live, OrganicVariantCacheTests key). Nothing of
+  this branch's work fails. Installed build = this commit (02:47:50).
