@@ -109,8 +109,8 @@ Reference part: his M2 verticalStand, bead 0.45 mm, two face regions (12 mm and
 - None: nothing.
 - ★ WITH THE SHAPE GRADE ON, NO DRESSING AT ALL on the Stepped/Default path: the outline beam
   IS the rim (`dressing = 0` where the band exists).
-- Single-cell members: the JOB resolves the skin to "diagrid" when the finish is None/Rim
-  (`jobSkinResolved`); the preview does NOT draw that diagrid (§4-E).
+- Single-cell members: the finish is LOCKED to Skin in the app (§4-E), so the job always
+  carries `skin: "diagrid"` with it and the preview draws the Skin dressing.
 
 ### 1.9 Clipping to the part
 - Every strut is clipped by: the part SDF eroded by `trim` (§1.5) ∧ the part's exact bounding
@@ -223,11 +223,14 @@ Reference part: his M2 verticalStand, bead 0.45 mm, two face regions (12 mm and
   failure message says so and names the fix — "turn on Allow quilt" — not a bare margin
   number. The app surfaces core's reason verbatim. The user's choice until certification
   needs it.
-- E. THE DIAGRID SKIN UNDER SINGLE-CELL MEMBERS — RULED: it is a structural need (a
-  one-cell-wide member's struts are severed at the face caps with no node to end on; the
-  skin re-ties them — the reason core lets the floor reach one cell only with a finish
-  written). Core KEEPS adding the diagrid skin when the finish is None/Rim. The app now
-  says so in the preview's settings. No core change.
+- E. THE SKIN UNDER SINGLE-CELL MEMBERS — RULED (revised 2026-09-18): it is a structural
+  need (a one-cell-wide member's struts are severed at the face caps with no node to end
+  on; the skin re-ties them), so the APP now makes it a REQUIREMENT in the preview: turning
+  single-cell members on SETS the finish to Skin (pop-up says so), the finish is LOCKED to
+  Skin while the switch is on (a tap on another finish shows "To change the finish, turn
+  off single-cell members"), and a saved single-cell project opens with Skin. The job
+  therefore always carries `skin: "diagrid"` with single-cell members; core's own fallback
+  (adding the skin when the finish is None/Rim) can stay as belt-and-braces. No core change.
 - F. `organic_scale` — RULED: the app stops writing it for part jobs (the wizard's sample
   cube keeps it for its own window). Core may keep parsing the key; it will not arrive.
 - G. THE ORGANIC RIM BAND (§2.2a) — RULED: core keeps the band as CANDIDATE and welds the

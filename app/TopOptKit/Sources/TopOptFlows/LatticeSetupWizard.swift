@@ -164,6 +164,10 @@ public struct LatticeSetupWizard: View {
     @State private var organicSampleStatus: String?
     /// Which (i) popover is open, by id — one at a time.
     @State private var infoShown: String?
+    /// ★ The small pop-up for the single-cell ⇄ finish rule (2026-09-18): which one is
+    /// showing — "skin-required" when the switch turns on, "finish-locked" when a locked
+    /// finish is tapped.
+    @State private var finishRuleNotice: String?
     /// The grown path's print fine-tuning, folded away until asked for (item 2.2).
     @State private var showPrintTuning = false
     /// "Grading needs a stress simulation" — shown when shape-fit-only is turned off
@@ -1538,28 +1542,38 @@ public struct LatticeSetupWizard: View {
     @ViewBuilder private var singleCellSwitch: some View {
         VStack(alignment: .leading, spacing: 4) {
             Toggle(isOn: Binding(get: { model.singleCellMembers },
-                                 set: { model.singleCellMembers = $0; rebuild() })) {
+                                 set: { on in
+                                     let hadSkin = model.boundary == .fullSkin
+                                     model.setSingleCellMembers(on)
+                                     // ★ SKIN IS SET AND SAID (his 2026-09-18): the pop-up
+                                     // names the change the switch just made.
+                                     if on, !hadSkin { finishRuleNotice = "skin-required" }
+                                     rebuild()
+                                 })) {
                 Text("Allow single-cell members")
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(DS.Color.textPrimary.color)
             }
             .toggleStyle(SwitchToggleStyle(tint: DS.Color.accent.color))
             .accessibilityIdentifier("wizard-single-cell-members")
+            .popover(isPresented: Binding(get: { finishRuleNotice == "skin-required" },
+                                          set: { if !$0 { finishRuleNotice = nil } })) {
+                Text("The finish is now Skin: it must be on while single-cell members is on.")
+                    .dsStyle(DS.TypeScale.footnote)
+                    .foregroundStyle(DS.Color.textPrimary.color)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(16)
+                    .frame(maxWidth: 300)
+            }
             // ★ SAID, NOT HIDDEN (his 2026-09-18): a one-cell member's struts are
             // severed at the face caps and a skin re-ties them — core's rule — so when
             // the finish chosen above would not, the line says the run adds one.
-            captionLine(model.singleCellMembers
-                        ? (model.boundary == .none || model.boundary == .rim
-                           ? "One cell across a member — the run adds a skin."
-                           : "One cell across a member.")
-                        : "Two cells across a member.",
+            captionLine(model.singleCellMembers ? "One cell across a member; finish locked to Skin."
+                                                : "Two cells across a member.",
                         info: "single-cell",
                         "A member one cell wide has its struts cut at the face caps with no "
-                        + "node to end on; a skin re-ties them, so the run adds a Skin finish "
-                        + "when the finish above is None or Rim. Your finish choice is kept. "
-                        + "Off, two cells across a member.",
-                        tint: model.singleCellMembers && (model.boundary == .none || model.boundary == .rim)
-                              ? DS.Color.warning.color : nil)
+                        + "node to end on; the Skin finish re-ties them, so it is required "
+                        + "and locked while this is on. Off, two cells across a member.")
         }
     }
 
@@ -1821,7 +1835,31 @@ public struct LatticeSetupWizard: View {
                 // ★ FOUR NOW — "Covered" is the solid outer shell.
                 segmentRow(["None", "Rim", "Skin", "Covered"],
                            selected: boundaryIndex) { i in
-                    model.setBoundary([.none, .rim, .fullSkin, .covered][i])
+                    // ★ LOCKED TO SKIN while single-cell members is on: the tap is
+                    // refused and the pop-up says how to unlock it (his 2026-09-18).
+                    if !model.setBoundary([.none, .rim, .fullSkin, .covered][i]) {
+                        finishRuleNotice = "finish-locked"
+                    }
+                }
+                .opacity(model.finishLockedBySingleCell ? 0.55 : 1)
+                .popover(isPresented: Binding(get: { finishRuleNotice == "finish-locked" },
+                                              set: { if !$0 { finishRuleNotice = nil } })) {
+                    Text("To change the finish, turn off single-cell members.")
+                        .dsStyle(DS.TypeScale.footnote)
+                        .foregroundStyle(DS.Color.textPrimary.color)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(16)
+                        .frame(maxWidth: 300)
+                }
+                .accessibilityIdentifier("wizard-finish-row")
+                if model.finishLockedBySingleCell {
+                    captionLine("Skin is required while single-cell members is on.",
+                                info: "finish-locked",
+                                "A member one cell wide has its struts cut at the face caps "
+                                + "with no node to end on; the skin re-ties them. Turn off "
+                                + "single-cell members to change the finish.",
+                                tint: DS.Color.textQuaternary.color)
+                        .accessibilityIdentifier("wizard-finish-locked-note")
                 }
                 if model.boundary == .covered {
                     captionLine("A solid outer wall over the lattice.", info: "covered",

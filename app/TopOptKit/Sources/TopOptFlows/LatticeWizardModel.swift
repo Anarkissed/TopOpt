@@ -372,6 +372,8 @@ public struct LatticeWizardModel: Equatable, Sendable {
                   retainSubfloor: s.retainSubfloorInUnloadedRegions)
         self.cellTransition = s.cellTransition
         self.singleCellMembers = s.singleCellMembers
+        // ★ the rule holds on load too: a saved single-cell project opens with Skin
+        if s.singleCellMembers, self.boundary != .fullSkin { self.boundary = .fullSkin }
         self.gradingMode = s.gradingMode
         self.gradeStepStyle = s.gradeStepStyle
         self.organicGrowth = s.organicGrowth
@@ -606,11 +608,24 @@ public struct LatticeWizardModel: Equatable, Sendable {
     }
 
     /// The boundary finishes are SHOWN on the part, switchable (§2 C).
-    public mutating func setBoundary(_ b: LatticeBoundaryTreatment) {
-        guard b != boundary else { return }
+    /// ★★ SINGLE-CELL MEMBERS REQUIRE THE SKIN (his 2026-09-18: "If Single-cell member
+    /// is turned on, set the finish to skin … Make Finish=skin un-changeable"). A member
+    /// one cell wide has its struts severed at the face caps; the skin re-ties them.
+    /// While the switch is on, the finish is Skin and `setBoundary` refuses anything else
+    /// (returns false so the wizard can say why). Turning the switch on SETS Skin.
+    public var finishLockedBySingleCell: Bool { singleCellMembers }
+    public mutating func setSingleCellMembers(_ on: Bool) {
+        singleCellMembers = on
+        if on, boundary != .fullSkin { boundary = .fullSkin; play(.boundarySwap) }
+    }
+    @discardableResult
+    public mutating func setBoundary(_ b: LatticeBoundaryTreatment) -> Bool {
+        guard b != boundary else { return true }
+        if finishLockedBySingleCell, b != .fullSkin { return false }
         boundary = b
         stage = LatticeWizardSetting.finish.stage
         play(.boundarySwap)
+        return true
     }
 
     // MARK: what the centre stage should render

@@ -99,6 +99,28 @@ final class LatticeWizardTests: XCTestCase {
         XCTAssertEqual(m.playing, .jumpToSample, "§2C")
     }
 
+    /// ★★ SINGLE-CELL MEMBERS REQUIRE THE SKIN (his 2026-09-18): the switch sets Skin,
+    /// the finish is then locked (a refused change returns false so the wizard can say
+    /// why), and turning the switch off unlocks it.
+    func testSingleCellMembersLockTheFinishToSkin() {
+        var m = LatticeWizardModel(boundary: .rim)
+        m.setSingleCellMembers(true)
+        XCTAssertEqual(m.boundary, .fullSkin, "turning the switch on SETS Skin")
+        XCTAssertTrue(m.finishLockedBySingleCell)
+        XCTAssertFalse(m.setBoundary(.rim), "locked: refused, and says so")
+        XCTAssertFalse(m.setBoundary(.none))
+        XCTAssertFalse(m.setBoundary(.covered))
+        XCTAssertEqual(m.boundary, .fullSkin)
+        XCTAssertTrue(m.setBoundary(.fullSkin), "Skin itself is always accepted")
+        m.setSingleCellMembers(false)
+        XCTAssertTrue(m.setBoundary(.rim), "unlocked")
+        XCTAssertEqual(m.boundary, .rim)
+        // and a saved single-cell project opens with Skin whatever it stored
+        var saved = LatticeSettings()
+        saved.singleCellMembers = true; saved.boundary = .none
+        XCTAssertEqual(LatticeWizardModel(settings: saved).boundary, .fullSkin)
+    }
+
     func testTheFourFinishesAreShownOnThePart() {
         var m = LatticeWizardModel(boundary: .none)
         for b in [LatticeBoundaryTreatment.rim, .fullSkin, .none] {

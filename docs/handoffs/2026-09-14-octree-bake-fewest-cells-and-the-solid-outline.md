@@ -718,3 +718,9 @@ His three final items, the first two here (the third is the core parity brief,
   (ruling A); `organic_scale` is no longer written for part jobs (ruling F); the single-cell
   caption says the run adds a skin (ruling E). Brief rewritten in full:
   `docs/handoffs/2026-09-18-core-brief-preview-parity.md`.
+- **14:44 — single-cell members REQUIRE the Skin (his ruling, revised):**
+  `LatticeWizardModel.setSingleCellMembers(true)` sets `.fullSkin` (pop-up: "The finish is
+  now Skin…"); `setBoundary` returns false for anything but Skin while the switch is on
+  (pop-up: "To change the finish, turn off single-cell members."; the row dimmed; a
+  one-line note under it); `init(settings:)` coerces a saved single-cell project to Skin.
+  `LatticeWizardTests.testSingleCellMembersLockTheFinishToSkin`. Installed 14:43:43.
