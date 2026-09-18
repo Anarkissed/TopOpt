@@ -759,9 +759,9 @@ static void test_organic_scale_and_gates() {
       CHECK(refused, "organic_dual_contour: a number is refused -- it is a boolean");
     }
     // ── ★ ANY-STEP STEPPED: the plan the app states ──────────────────────────
-    // The cells and the frame they are stated in. A plan without its frame is refused,
-    // because a cell origin is an OFFSET from the region's slot grid and without it no
-    // cell can be checked against the menu or placed at all.
+    // The cells the app placed. There is no companion frame array: region_id is 1-based
+    // in the job's own include-region order and origin_mm is MODEL space, so the frame is
+    // DERIVED from the region a cell names and there is nothing to keep in step.
     {
       auto stepped_i = [&](const std::string& lat_extra, const std::string& intent,
                            const std::string& grade_extra) {
@@ -775,39 +775,60 @@ static void test_organic_scale_and_gates() {
       auto stepped = [&](const std::string& lat_extra) {
         return stepped_i(lat_extra, "aesthetic", "");
       };
-      const std::string frame =
-          "\"stepped_regions\": [{\"region_id\": 1, \"base_cell_mm\": 12.0, "
-          "\"slot_origin_mm\": [100.0, -5.0, 0.0]}]";
       {
         const JobDescription j = parse_job(stepped(
-            frame + ", \"stepped_cells\": ["
+            "\"stepped_cells\": ["
             "{\"region_id\": 1, \"origin_mm\": [100.0, -5.0, 0.0], \"size_mm\": 9.0},"
             "{\"region_id\": 1, \"origin_mm\": [109.0, -5.0, 0.0], \"size_mm\": 3.0}]"));
         CHECK(j.lattice.stepped_cells.size() == 2,
               "stepped_cells: every placed cell arrives");
-        CHECK(j.lattice.stepped_regions.size() == 1 &&
-                  j.lattice.stepped_regions[0].base_cell_mm == 12.0,
-              "stepped_regions: the frame arrives with it");
         CHECK(j.lattice.stepped_cells[1].size_mm == 3.0 &&
                   j.lattice.stepped_cells[1].origin.x == 109.0,
-              "stepped_cells: sizes and origins are carried verbatim, not rounded");
+              "stepped_cells: sizes and MODEL-space origins are carried verbatim");
+        CHECK(j.lattice.stepped_cells[0].region_id == 1,
+              "stepped_cells: region_id is the job's own 1-based include-region order");
       }
-      {   // ★ cells without their frame: refused, and the message says why
+      {   // ★ THE ALGORITHM GATE. The cell list IS the any-step plan; no other
+          // algorithm lays it down, so naming it elsewhere is refused rather than ignored.
         bool refused = false;
         std::string why;
         try {
-          (void)parse_job(stepped("\"stepped_cells\": [{\"region_id\": 1, "
-                                  "\"origin_mm\": [0,0,0], \"size_mm\": 3.0}]"));
+          (void)parse_job(mutate(
+              "\"mesh_prefix\": \"variant\" }",
+              "\"mesh_prefix\": \"variant\" },\n  \"lattice\": { \"stepped_cells\": "
+              "[{\"region_id\": 1, \"origin_mm\": [0,0,0], \"size_mm\": 3.0}] },\n"
+              "  \"grading\": { \"topology\": \"octet\", \"min_extrudable_width_mm\": 0.45, "
+              "\"algorithm\": \"organic\", \"intent\": \"aesthetic\", \"cell_mode\": \"swept\", "
+              "\"cell_min_mm\": 3.0, \"cell_max_mm\": 12.0 }"));
         } catch (const JobError& e) { refused = true; why = e.what(); }
-        CHECK(refused, "stepped_cells without stepped_regions is refused");
-        CHECK(why.find("stepped_regions") != std::string::npos,
-              "stepped_cells: and the refusal names the frame it needs");
+        CHECK(refused, "stepped_cells is refused on a non-stepped algorithm");
+        CHECK(why.find("organic") != std::string::npos,
+              "stepped_cells: and the refusal names the algorithm that was asked for");
+      }
+      {   // region_id is 1-BASED: 0 is not an include region
+        bool refused = false;
+        try {
+          (void)parse_job(stepped("\"stepped_cells\": [{\"region_id\": 0, "
+                                  "\"origin_mm\": [0,0,0], \"size_mm\": 3.0}]"));
+        } catch (const JobError&) { refused = true; }
+        CHECK(refused, "stepped_cells: region_id 0 is refused -- the order is 1-based");
+      }
+      {   // absent entirely: the legacy one-cell-per-region Stepped, unchanged
+        const JobDescription j = parse_job(stepped("\"emit_stl\": true"));
+        CHECK(j.lattice.stepped_cells.empty(),
+              "stepped_cells: absent means the legacy Stepped, not an empty plan");
+      }
+      for (const char* bad : {
+               "\"stepped_cells\": [{\"region_id\": 1, \"origin_mm\": [0,0,0], \"size_mm\": 0}]",
+               "\"stepped_cells\": [{\"region_id\": 1, \"origin_mm\": [0,0], \"size_mm\": 3}]",
+               "\"stepped_cells\": [{\"region_id\": 1, \"origin_mm\": [0,0,0], \"size_mm\": 3, \"colour\": 2}]"}) {
+        bool refused = false;
+        try { (void)parse_job(stepped(bad)); } catch (const JobError&) { refused = true; }
+        CHECK(refused,
+              "stepped_cells: a zero size, a short origin and an unknown key are each "
+              "refused");
       }
       {   // ★ the generic key, and the organic spelling kept as an alias
-        const JobDescription j = parse_job(stepped(
-            frame + ", \"stepped_cells\": [{\"region_id\": 1, \"origin_mm\": "
-            "[100.0, -5.0, 0.0], \"size_mm\": 3.0}]"));
-        (void)j;
         const JobDescription g = parse_job(stepped_i(
             "\"emit_stl\": true", "structural",
             ", \"structural_certification\": \"beam_network\""));
@@ -823,22 +844,6 @@ static void test_organic_scale_and_gates() {
         CHECK(both,
               "structural_certification: naming it AND its alias is refused, not resolved "
               "-- a job that says it twice has an opinion worth surfacing");
-      }
-      {   // absent entirely: the legacy one-cell-per-region Stepped, unchanged
-        const JobDescription j = parse_job(stepped("\"emit_stl\": true"));
-        CHECK(j.lattice.stepped_cells.empty() && j.lattice.stepped_regions.empty(),
-              "stepped_cells: absent means the legacy Stepped, not an empty plan");
-      }
-      for (const char* bad : {
-               ", \"stepped_cells\": [{\"region_id\": 1, \"origin_mm\": [0,0,0], \"size_mm\": 0}]",
-               ", \"stepped_cells\": [{\"region_id\": -1, \"origin_mm\": [0,0,0], \"size_mm\": 3}]",
-               ", \"stepped_cells\": [{\"region_id\": 1, \"origin_mm\": [0,0], \"size_mm\": 3}]",
-               ", \"stepped_cells\": [{\"region_id\": 1, \"origin_mm\": [0,0,0], \"size_mm\": 3, \"colour\": 2}]"}) {
-        bool refused = false;
-        try { (void)parse_job(stepped(frame + bad)); } catch (const JobError&) { refused = true; }
-        CHECK(refused,
-              "stepped_cells: a zero size, a negative region, a short origin and an "
-              "unknown key are each refused");
       }
     }
     {

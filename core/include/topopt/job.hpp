@@ -227,10 +227,11 @@ struct JobLattice {
   // cell that does not satisfy the menu rule is REFUSED BY NAME rather than quietly
   // replaced by something core preferred. Thousands of entries is normal.
   // Empty => the legacy one-cell-per-region Stepped.
+  // `origin_mm` is the cell's minimum corner in MODEL space -- the same frame as
+  // lattice.regions[].geometry -- and `region_id` is 1-based in the job's own
+  // include-region order, so the frame each cell is stated in is DERIVED from the region
+  // it names rather than sent alongside it. Nothing to keep in step.
   std::vector<SteppedCell> stepped_cells;
-  // The frame each region's cells are stated in: the base cell its menu derives from and
-  // the origin of its slot grid. Required when stepped_cells is non-empty.
-  std::vector<SteppedPlanRegion> stepped_regions;
   // MULTISCALE LATTICE TO (task multiscale-lattice-to). false (the DEFAULT) is the
   // TWO-STEP pipeline every existing job runs: optimize assuming solid, then try to
   // lattice what survived. true asks the OPTIMIZER to place the lattice while it

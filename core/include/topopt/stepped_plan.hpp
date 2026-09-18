@@ -76,9 +76,16 @@ struct SteppedCell {
 // Cell origins are checked as offsets from THIS, never from the solved grid's origin --
 // any-step cells sit on their family's tile grid within the region.
 struct SteppedPlanRegion {
-  int region_id = 0;
+  int region_id = 0;          // 1-based, the job's own include-region order
   double base_cell_mm = 0.0;
+  // The region's own frame, DERIVED from lattice.regions[] rather than sent: cells state
+  // their origin in model space, so this is the face-plane point their offsets are
+  // measured from. `normal` and `depth_mm` describe the prism along the face normal; a
+  // cell must lie within it, which is the one containment test that needs no in-plane
+  // axis convention. 0 depth => the depth test is skipped.
   Vec3 slot_origin{0, 0, 0};
+  Vec3 normal{0, 0, 0};
+  double depth_mm = 0.0;
 };
 
 struct SteppedPlanCheck {

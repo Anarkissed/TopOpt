@@ -155,6 +155,31 @@ SteppedPlanCheck stepped_validate_plan(const std::vector<SteppedCell>& cells,
       return out;
     }
 
+    // ★ INSIDE THE REGION'S PRISM, along the face normal. The in-plane bound needs a u/w
+    // axis convention this file does not own, and material is a voxel question, so those
+    // are the caller's; the DEPTH is exact here and is the axis the pack is built on --
+    // depth scanned from the face inward, a cell leaving a whole number of tiles behind
+    // it. A cell that starts before the face or ends past the wall breaks that directly.
+    if (reg.depth_mm > 0.0) {
+      const double nl = std::sqrt(reg.normal.x * reg.normal.x + reg.normal.y * reg.normal.y +
+                                  reg.normal.z * reg.normal.z);
+      if (nl > 0.0) {
+        const double nx = reg.normal.x / nl, ny = reg.normal.y / nl, nz = reg.normal.z / nl;
+        const double s0 = ox * nx + oy * ny + oz * nz;
+        const double s1 = s0 + cell.size_mm;
+        if (s0 < -1e-6 || s1 > reg.depth_mm + 1e-6) {
+          std::snprintf(msg, sizeof msg,
+                        "stepped cell %zu in region %d (%.4g mm at %.4g, %.4g, %.4g) lies "
+                        "from %.4g to %.4g mm along the region normal, outside its %.4g mm "
+                        "prism",
+                        c, cell.region_id, cell.size_mm, cell.origin.x, cell.origin.y,
+                        cell.origin.z, s0, s1, reg.depth_mm);
+          out.error = msg;
+          return out;
+        }
+      }
+    }
+
     if (finest > 0.0) {
       const long long i0 = static_cast<long long>(std::llround(ox / finest));
       const long long j0 = static_cast<long long>(std::llround(oy / finest));

@@ -72,6 +72,47 @@ static void test_menu_matches_the_brief() {
         "CONTROL: a fatter bead admits FEWER families -- the density bound is live");
 }
 
+// ── AGAINST THE PREVIEW'S OWN LIVE HISTOGRAM ────────────────────────────────────
+// The two menus above are the brief's stated examples. THIS is the app's actual output on
+// a real part -- the DIAG line from §5 of the brief of 2026-09-17 -- and it is the better
+// check, because it was produced by the packer on a part with TWO different base cells
+// rather than written down as an expectation. Core's menus for those two bases, unioned,
+// must be exactly the set of sizes the preview kept: nothing missing (a size the run
+// would refuse that the screen showed) and nothing extra (a size the run would allow that
+// the packer never offers).
+static void test_menus_match_the_previews_live_histogram() {
+  // kept=[12.00 10.31 9.60 9.00 8.00 7.73 7.20 6.87 6.00 5.16 4.80 4.00 3.44 3.00 2.58 2.40]
+  const std::vector<double> diag = {12.00, 10.31, 9.60, 9.00, 8.00, 7.73, 7.20, 6.87,
+                                    6.00,  5.16,  4.80, 4.00, 3.44, 3.00, 2.58, 2.40};
+  std::vector<double> mine;
+  for (double base : {12.0, 10.31})
+    for (double s : stepped_size_menu(base, 0.45)) mine.push_back(s);
+  std::sort(mine.begin(), mine.end(), std::greater<double>());
+  mine.erase(std::unique(mine.begin(), mine.end(),
+                         [](double a, double b) { return std::fabs(a - b) < 1e-9; }),
+             mine.end());
+  std::printf("  DIAG cross-check: core offers %zu size(s), the preview kept %zu\n",
+              mine.size(), diag.size());
+  for (double d : diag) {
+    bool found = false;
+    for (double m : mine) if (std::fabs(m - d) < 0.006) found = true;
+    char what[128];
+    std::snprintf(what, sizeof what,
+                  "DIAG: the preview kept %.2f mm and core's menu offers it", d);
+    CHECK(found, what);
+  }
+  for (double m : mine) {
+    bool found = false;
+    for (double d : diag) if (std::fabs(m - d) < 0.006) found = true;
+    char what[128];
+    std::snprintf(what, sizeof what,
+                  "DIAG: core offers %.4f mm and the preview's packer can reach it", m);
+    CHECK(found, what);
+  }
+  CHECK(mine.size() == diag.size(),
+        "DIAG: the two codebases agree on the size set exactly, in both directions");
+}
+
 // ── DEPTH-CLEAN BY CONSTRUCTION ─────────────────────────────────────────────────
 // A cell of size s placed at the face leaves S - floor(S/s)*s of the wall behind it, and
 // the claim is that the remainder is always fillable by menu tiles that divide s -- no
@@ -433,6 +474,7 @@ static void test_packed_slot_covers_exactly_once() {
 
 int main() {
   test_menu_matches_the_brief();
+  test_menus_match_the_previews_live_histogram();
   test_depth_is_clean();
   test_menu_shape();
   test_plan_validation();

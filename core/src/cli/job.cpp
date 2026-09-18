@@ -1216,7 +1216,7 @@ JobDescription parse_job(const std::string& json_text) {
                          "emit_3mf", "skin", "min_extrudable_width_mm",
                          "outer_finish", "emit_welded_stl", "welded_pitch_mm", "emit_organic_spans",
                          "regions", "multiscale",
-                         "stepped_cells", "stepped_regions",
+                         "stepped_cells",
                          "forecast_only", "organic_probe_cells_mm", "organic_probe_grades_mm",
                          "organic_recommend", "organic_look_cells_across",
                          "organic_recommend_margin", "organic_recommend_steps",
@@ -1259,43 +1259,17 @@ JobDescription parse_job(const std::string& json_text) {
     // lattice, byte-identical. Each entry is {role, kind, geometry} with the
     // SAME manual-primitive geometry a manual clearance carries; a malformed
     // role/kind is REFUSED, never defaulted (H1e).
-    // ── ★ ANY-STEP STEPPED: the placed cells, and the frame they are stated in ──
-    // Parsed here and VALIDATED against the menu rule (stepped_plan.hpp) once the bead is
-    // known, which is at run time. What this stage refuses is malformed JSON; what the
-    // run refuses is a cell that breaks the rule, named.
-    if (const JsonValue* sr = find_key(lat, "stepped_regions")) {
-      if (sr->type != JsonValue::Type::Array)
-        schema_fail("lattice \"stepped_regions\" must be an array");
-      for (const JsonValue& rv : sr->arr) {
-        require_object(rv, "a lattice.stepped_regions entry");
-        reject_unknown_keys(rv, {"region_id", "base_cell_mm", "slot_origin_mm"},
-                            "a lattice.stepped_regions entry");
-        SteppedPlanRegion r;
-        const double id = require_number(require_key(rv, "region_id",
-                                                     "a lattice.stepped_regions entry"),
-                                         "lattice.stepped_regions region_id");
-        if (id < 0.0 || id != std::floor(id))
-          schema_fail("lattice.stepped_regions \"region_id\" must be a non-negative integer");
-        r.region_id = static_cast<int>(id);
-        r.base_cell_mm = require_number(
-            require_key(rv, "base_cell_mm", "a lattice.stepped_regions entry"),
-            "lattice.stepped_regions base_cell_mm");
-        if (!(r.base_cell_mm > 0.0) || !std::isfinite(r.base_cell_mm))
-          schema_fail("lattice.stepped_regions \"base_cell_mm\" must be finite and > 0");
-        r.slot_origin = parse_vec3(
-            require_key(rv, "slot_origin_mm", "a lattice.stepped_regions entry"),
-            "lattice.stepped_regions slot_origin_mm");
-        job.lattice.stepped_regions.push_back(r);
-      }
-    }
+    // ── ★ ANY-STEP STEPPED: the cells the app placed ───────────────────────────
+    // (maintainer, 2026-09-18: "Send the cell list to core".) The app sends the exact
+    // arrangement approved on screen and core lays down those cells; it runs no packer of
+    // its own. `region_id` is 1-based in the job's own include-region order and
+    // `origin_mm` is the cell's minimum corner in MODEL space, so the frame is derived
+    // from the region named -- there is no second array to keep in step with this one.
+    // What this stage refuses is malformed JSON and the wrong algorithm; what the RUN
+    // refuses is a cell that breaks the menu rule, named.
     if (const JsonValue* sc = find_key(lat, "stepped_cells")) {
       if (sc->type != JsonValue::Type::Array)
         schema_fail("lattice \"stepped_cells\" must be an array");
-      if (job.lattice.stepped_regions.empty())
-        schema_fail(
-            "lattice \"stepped_cells\" needs \"stepped_regions\": a cell's origin is an "
-            "offset from its region's slot grid, and without that frame no cell can be "
-            "checked against the menu or placed");
       job.lattice.stepped_cells.reserve(sc->arr.size());
       for (const JsonValue& cv : sc->arr) {
         require_object(cv, "a lattice.stepped_cells entry");
@@ -1305,8 +1279,10 @@ JobDescription parse_job(const std::string& json_text) {
         const double id = require_number(
             require_key(cv, "region_id", "a lattice.stepped_cells entry"),
             "lattice.stepped_cells region_id");
-        if (id < 0.0 || id != std::floor(id))
-          schema_fail("lattice.stepped_cells \"region_id\" must be a non-negative integer");
+        if (id < 1.0 || id != std::floor(id))
+          schema_fail(
+              "lattice.stepped_cells \"region_id\" must be a positive integer -- it is "
+              "1-based in the job's own include-region order");
         c.region_id = static_cast<int>(id);
         c.origin = parse_vec3(require_key(cv, "origin_mm", "a lattice.stepped_cells entry"),
                               "lattice.stepped_cells origin_mm");
@@ -1837,6 +1813,14 @@ JobDescription parse_job(const std::string& json_text) {
       // nodes, and the tensor assumes they do -- so the beam network is its structural
       // instrument exactly as it is organic's. The key is therefore meaningful for BOTH
       // algorithms; it stays refused everywhere else, where nothing would consume it.
+      // ★ stepped_cells is meaningful for ONE algorithm. Refused elsewhere rather than
+      // ignored, so a job that packs a plan and then asks for doubled or organic fails
+      // loudly instead of silently shipping a lattice that is not the one on screen.
+      if (!job.lattice.stepped_cells.empty() && job.grading.algorithm != "stepped")
+        schema_fail(
+            "lattice \"stepped_cells\" is only allowed with \"algorithm\": \"stepped\" "
+            "(this job says \"" + job.grading.algorithm + "\"). The cell list IS the "
+            "any-step plan; no other algorithm lays it down.");
       const bool stepped_may_name =
           job.grading.algorithm == "stepped" && job.grading.intent != "aesthetic";
       if (!organic_structural && !stepped_may_name &&

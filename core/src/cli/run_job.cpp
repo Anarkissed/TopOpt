@@ -6560,15 +6560,33 @@ LatticeVariantOutcome lattice_one_variant(
   // down, or the job stops and names the cell that broke the rule.
   std::vector<std::vector<char>> anystep_active;
   if (!job.lattice.stepped_cells.empty()) {
+    // ★ THE FRAME IS DERIVED, NOT SENT. A cell names a region by its 1-based
+    // include-region order and states its origin in MODEL space, so the base cell comes
+    // from the stepped step's own answer for that region and the prism from the region's
+    // geometry. Nothing for the app to keep in step, and nothing that can disagree.
+    std::vector<SteppedPlanRegion> plan_regions;
+    for (const SteppedRegionCell& rc : R.stepped.cells) {
+      SteppedPlanRegion pr;
+      pr.region_id = rc.region_id;
+      pr.base_cell_mm = rc.cell_mm;
+      const std::size_t idx = static_cast<std::size_t>(rc.region_id - 1);
+      if (idx < job.lattice.regions.size()) {
+        const JobLatticeRegion& jr = job.lattice.regions[idx];
+        pr.slot_origin = jr.origin;
+        pr.normal = jr.normal;
+        pr.depth_mm = jr.depth_mm;
+      }
+      plan_regions.push_back(pr);
+    }
     const SteppedPlanCheck chk =
-        stepped_validate_plan(job.lattice.stepped_cells, job.lattice.stepped_regions,
+        stepped_validate_plan(job.lattice.stepped_cells, plan_regions,
                               job.grading.min_extrudable_width_mm);
     if (!chk.ok)
       throw JobError("lattice \"stepped_cells\": " + chk.error +
                      ". Core validates the plan and does not repack it -- the run lays "
                      "down the arrangement the preview showed, or it stops here.");
     const std::vector<SteppedCellGroup> groups =
-        stepped_group_cells(job.lattice.stepped_cells, job.lattice.stepped_regions);
+        stepped_group_cells(job.lattice.stepped_cells, plan_regions);
     std::fprintf(stderr, "[stepped] any-step plan: %zu cell(s) over %zu region(s) in %zu "
                          "pass(es) | %s\n",
                  chk.cells, chk.regions, groups.size(), chk.histogram_line.c_str());
