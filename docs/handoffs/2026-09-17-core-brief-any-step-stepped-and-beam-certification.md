@@ -49,16 +49,31 @@ region as an independent pass (run_job.cpp `run_stepped_step`, lattice_gen.hpp
    per (region, tile), and its `latticed` predicate marks the cells of that family
    that were placed. `LatticeRegion` already has `origin`, `cell_mm` and the
    per-cell `latticed` predicate; nothing structural is missing.
-2. **The plan comes from the job.** Recommended: the app sends the placed cells
-   explicitly — a `lattice.stepped_cells` array of `{region_id, origin_mm[3], size_mm}`
-   (thousands of entries; it is the exact picture the user approved on screen). Core
-   VALIDATES every cell against §1 (size on that region's menu, origin on the
-   family grid, no overlap, inside the region) and refuses with the offending cell
-   named — it does not silently repack. Alternative if you prefer core to own the
-   packer: port §1 verbatim and have the app send only `{region base cell, anchor
-   shift, max divisor}`; then the preview's DIAG `octree kept=[…]` histogram is the
-   agreement check (same sizes, same counts). Either way the RUN and the PREVIEW
-   must lay down the same cells — that is the whole point of approving it on screen.
+2. **The plan comes from the job — DECIDED (maintainer, 2026-09-18: "Send the cell
+   list to core").** The app sends the placed cells explicitly; core lays down exactly
+   those and does not run a packer of its own. New job key, under `lattice`:
+
+       "stepped_cells": [
+         { "region_id": 1, "origin_mm": [x, y, z], "size_mm": 9.0 },
+         …
+       ]
+
+   - `region_id`: 1-based, the job's own include-region order (as `SteppedRegionCell`).
+   - `origin_mm`: the cell's minimum corner in MODEL space (the same frame as
+     `lattice.regions[].geometry`), the face-plane side along the region normal.
+   - `size_mm`: the cell edge; cubic.
+   - Thousands of entries on a real part (his stand: ~14 000 texels ⇒ ~2 000 cells);
+     the array is the exact picture he approved on screen.
+   - Required when `algorithm: "stepped"`; refused (schema) on any other algorithm.
+   - Core VALIDATES, never repairs: each cell's size on that region's menu (§1),
+     origin on the family's grid relative to the region's base grid, cube inside the
+     region's prism and inside material, no two cells overlapping. A failure names
+     the first offending cell (index, origin, size, reason). No silent repack.
+   - Byte-identity: a job without the key and without `algorithm: "stepped"` is
+     unchanged.
+   - The app will emit the key as soon as core's schema accepts it (job.cpp
+     `reject_unknown_keys` refuses it today), from the same bake that draws the
+     preview, so the RUN and the PREVIEW are one list.
 3. **Strut radius** per cell as today (`radius.field` from the posture's relative
    density); a cell's own density at its own size.
 4. **Receipt.** Keep `stepped_adjacent_region_pairs / pairs_joined`; ADD per-family
@@ -108,9 +123,13 @@ Recommended steps:
   10 and 11 absent; 10.31 base → {10.31, 7.73, 6.87, 5.16, 3.44, 2.58}.
 - Depth-clean: for every menu size `s` and base `S`, `S − floor(S/s)·s` is 0 or a
   multiple of a menu tile that divides `s`.
-- Generator: a 12 mm slab cut by an outline at 2.5 mm from the slot edge gets a 9 at
-  offset 3 and 3 mm tiles behind and beside it; no two cells overlap; every voxel
-  inside the outline belongs to exactly one cell or the outline solid.
+- Schema: `stepped_cells` accepted only with `algorithm: "stepped"`; a cell off the
+  menu, off its family grid, outside its region, or overlapping another is refused
+  with that cell named.
+- Generator: a hand-written `stepped_cells` list for a 12 mm slab (a 9 at offset 3
+  with 3 mm tiles behind and beside it) is laid down verbatim — every voxel inside the
+  outline belongs to exactly one listed cell or the outline solid, and the receipt's
+  per-size counts equal the list's.
 - Certificate: a two-family seam (9 next to 8) welds on contact with 0 unwelded
   ends; the same seam UN-subdivided must FAIL the assertion (positive control).
 - Byte-identity: `doubled` and `organic` jobs unchanged.
