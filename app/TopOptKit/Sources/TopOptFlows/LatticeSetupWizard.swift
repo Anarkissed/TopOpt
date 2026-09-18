@@ -1545,12 +1545,21 @@ public struct LatticeSetupWizard: View {
             }
             .toggleStyle(SwitchToggleStyle(tint: DS.Color.accent.color))
             .accessibilityIdentifier("wizard-single-cell-members")
-            captionLine(model.singleCellMembers ? "One cell across a member."
-                                                : "Two cells across a member.",
+            // ★ SAID, NOT HIDDEN (his 2026-09-18): a one-cell member's struts are
+            // severed at the face caps and a skin re-ties them — core's rule — so when
+            // the finish chosen above would not, the line says the run adds one.
+            captionLine(model.singleCellMembers
+                        ? (model.boundary == .none || model.boundary == .rim
+                           ? "One cell across a member — the run adds a skin."
+                           : "One cell across a member.")
+                        : "Two cells across a member.",
                         info: "single-cell",
-                        "One cell across a member: the run adds a Skin finish to re-tie the "
-                        + "struts a single cell severs; your finish choice above is kept. "
-                        + "Off, two cells across a member.")
+                        "A member one cell wide has its struts cut at the face caps with no "
+                        + "node to end on; a skin re-ties them, so the run adds a Skin finish "
+                        + "when the finish above is None or Rim. Your finish choice is kept. "
+                        + "Off, two cells across a member.",
+                        tint: model.singleCellMembers && (model.boundary == .none || model.boundary == .rim)
+                              ? DS.Color.warning.color : nil)
         }
     }
 

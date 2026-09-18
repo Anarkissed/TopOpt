@@ -207,13 +207,20 @@ Reference part: his M2 verticalStand, bead 0.45 mm, two face regions (12 mm and
 - C. Quilt band and coarse-cell raise (§1.6): core's grading law has no band term; add
   `shape_band_mm` + the raise rule, or send per-cell ρ with the cell list (recommend: SEND ρ
   PER CELL — the preview already has it per texel).
-- D. ★ The aesthetic ceiling (0.219) caps the DRAWN density under BOTH stage modes in the
-  preview. Under Structural the run may need ρ above it to certify. Either the preview stops
-  capping under Structural, or core caps too and certification reports the shortfall.
-  Recommend: no cap under Structural, preview and run alike.
-- E. Single-cell members: the job adds a DIAGRID skin the preview does not draw. Either the
-  preview draws it (app work) or core stops adding it when the finish is None/Rim
-  (recommend: core stops — the preview is the approved picture; "your finish choice is kept").
+- D. RULED (maintainer, 2026-09-18): THE CAP STAYS, UNDER BOTH MODES, AND IT IS THE
+  USER'S SWITCH. The job already carries it: with Allow quilt OFF the app caps the density
+  band's top (`max relative density`) at the aesthetic ceiling (≈ 0.219), so the run and
+  the preview agree today. What core must add: when a STRUCTURAL certification fails
+  because the density it needs is above the band's top AND that top is the aesthetic
+  ceiling, the failure message must say so and name the fix — "turn on Allow quilt" —
+  rather than a bare margin number. The app surfaces core's reason verbatim. It stays the
+  user's choice until certification needs it.
+- E. RULED (maintainer, 2026-09-18): the skin IS a structural need — core's own rule is that
+  a member one cell wide has its struts severed at the face caps with no node to end on,
+  and the skin re-ties them (that is why core lets the floor reach one cell only with a
+  finish written). So core KEEPS adding the diagrid skin for single-cell members with
+  finish None/Rim, and the APP now says so in the preview's settings ("One cell across a
+  member — the run adds a skin.", warning tint, detail behind the (i)). No core change.
 - F. `organic_scale`: drop the key from part jobs (recommend), or apply it in the part preview.
 - G. Rim band deletion (§2.2a): core keeps the band as candidate and welds. Recommend yes.
 
