@@ -11,6 +11,7 @@
 #include "topopt/materials.hpp"  // MaterialLibrary
 #include "topopt/mesh.hpp"       // Vec3
 #include "topopt/organic_lattice.hpp"  // kOrganicDensityUnionSubdivDefault
+#include "topopt/stepped_plan.hpp"     // SteppedCell, SteppedPlanRegion
 #include "topopt/pipeline.hpp"   // MinimizePlasticResult
 #include "topopt/settings.hpp"   // SettingsRules
 #include "topopt/smooth.hpp"     // SmoothStats
@@ -220,6 +221,16 @@ struct JobLattice {
   // Lattice role regions (see JobLatticeRegion). Empty => whole-part lattice,
   // byte-identical to the pre-regions schema.
   std::vector<JobLatticeRegion> regions;
+  // ★ ANY-STEP STEPPED: the cells the app placed, which core VALIDATES and does not
+  // repack. Sending the plan rather than the packer's inputs is what makes the preview a
+  // contract: the run lays down the arrangement the maintainer approved on screen, and a
+  // cell that does not satisfy the menu rule is REFUSED BY NAME rather than quietly
+  // replaced by something core preferred. Thousands of entries is normal.
+  // Empty => the legacy one-cell-per-region Stepped.
+  std::vector<SteppedCell> stepped_cells;
+  // The frame each region's cells are stated in: the base cell its menu derives from and
+  // the origin of its slot grid. Required when stepped_cells is non-empty.
+  std::vector<SteppedPlanRegion> stepped_regions;
   // MULTISCALE LATTICE TO (task multiscale-lattice-to). false (the DEFAULT) is the
   // TWO-STEP pipeline every existing job runs: optimize assuming solid, then try to
   // lattice what survived. true asks the OPTIMIZER to place the lattice while it
