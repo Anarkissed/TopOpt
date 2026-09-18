@@ -3019,4 +3019,42 @@ OrganicCertificate certify_organic_structural(
   return finish();
 }
 
+
+// ── SUBDIVISION, and the seam census (see the header for why both exist) ──────
+std::vector<BeamSegment> subdivide_beam_segments(const std::vector<BeamSegment>& in,
+                                                 double max_len_mm) {
+  std::vector<BeamSegment> out;
+  if (!(max_len_mm > 0.0)) return in;
+  out.reserve(in.size());
+  for (const BeamSegment& s : in) {
+    const double dx = s.b.x - s.a.x, dy = s.b.y - s.a.y, dz = s.b.z - s.a.z;
+    const double len = std::sqrt(dx * dx + dy * dy + dz * dz);
+    if (!(len > max_len_mm)) { out.push_back(s); continue; }
+    // equal pieces, so no piece is a sliver: a short remainder would weld unreliably
+    const int n = static_cast<int>(std::ceil(len / max_len_mm));
+    for (int t = 0; t < n; ++t) {
+      BeamSegment p = s;
+      const double u0 = static_cast<double>(t) / n, u1 = static_cast<double>(t + 1) / n;
+      p.a = Vec3{s.a.x + dx * u0, s.a.y + dy * u0, s.a.z + dz * u0};
+      p.b = Vec3{s.a.x + dx * u1, s.a.y + dy * u1, s.a.z + dz * u1};
+      out.push_back(p);
+    }
+  }
+  return out;
+}
+
+BeamNetworkSeams beam_network_seams(const BeamNetwork& net) {
+  BeamNetworkSeams out;
+  std::vector<int> degree(net.nodes.size(), 0);
+  for (const BeamNetwork::Member& m : net.members) {
+    if (m.node_a >= 0 && static_cast<std::size_t>(m.node_a) < degree.size()) ++degree[m.node_a];
+    if (m.node_b >= 0 && static_cast<std::size_t>(m.node_b) < degree.size()) ++degree[m.node_b];
+  }
+  for (int d : degree) {
+    if (d == 1) ++out.floating_ends;        // a member end on nothing
+    else if (d > 2) { ++out.welded_nodes; out.t_junction_ends += static_cast<std::size_t>(d - 2); }
+  }
+  return out;
+}
+
 }  // namespace topopt

@@ -2,6 +2,7 @@
 // The expected menus are the maintainer's, from the brief of 2026-09-17, and they are
 // asserted to the entry rather than to a count: a menu with the right number of wrong
 // sizes would pack a part that does not match the preview the maintainer approved.
+#include "topopt/beam_network.hpp"
 #include "topopt/stepped_plan.hpp"
 #include "topopt/lattice.hpp"
 
@@ -264,12 +265,88 @@ static void test_grouping_preserves_every_cell() {
         "CONTROL: the families are on DIFFERENT grids -- that is what any-step means");
 }
 
+// ── A TWO-FAMILY SEAM MUST WELD, AND UN-SUBDIVIDED IT MUST NOT ──────────────────
+// The brief's §4 control, and the reason it is a control rather than a nicety: the weld
+// is ENDPOINT-based, so an octet strut -- one straight member up to a whole base cell
+// long -- meeting another at mid-span has no vertex near the contact and is NOT fused.
+// That failure is silent. It does not throw or warn; it reports a lattice in pieces, and
+// a lattice in pieces certifies CLEAN because nothing in it is carrying load to complain
+// about. So the test asserts both directions: subdivided welds, un-subdivided does not.
+static void test_seam_welds_only_when_subdivided() {
+  // A 9 mm cell's strut running in x, and a 8 mm cell's strut arriving at its MIDDLE
+  // from below -- the seam the brief describes, where a face centre of one family lands
+  // mid-strut on another's face.
+  const double r = 0.3;
+  std::vector<BeamSegment> raw;
+  BeamSegment along;  along.a = Vec3{0, 0, 0};   along.b = Vec3{9, 0, 0};  along.radius_mm = r;
+  BeamSegment into;   into.a  = Vec3{4.5, -4, 0}; into.b  = Vec3{4.5, 0, 0}; into.radius_mm = r;
+  raw.push_back(along);
+  raw.push_back(into);
+
+  {   // ★ THE POSITIVE CONTROL: as drawn, the crossing is invisible to an endpoint weld
+    const BeamNetwork net = build_beam_network(raw);
+    const BeamNetworkSeams seams = beam_network_seams(net);
+    std::printf("  seam UN-subdivided: %zu nodes, %zu floating end(s), %zu welded\n",
+                net.node_count(), seams.floating_ends, seams.welded_nodes);
+    CHECK(seams.floating_ends > 0,
+          "CONTROL: un-subdivided, the seam does NOT weld and leaves ends on nothing -- "
+          "if this ever passes, the assertion below is proving nothing");
+  }
+  {
+    const std::vector<BeamSegment> fine = subdivide_beam_segments(raw, 0.6);
+    CHECK(fine.size() > raw.size(), "subdivision: it actually split the members");
+    const BeamNetwork net = build_beam_network(fine);
+    const BeamNetworkSeams seams = beam_network_seams(net);
+    std::printf("  seam subdivided:    %zu nodes, %zu floating end(s), %zu welded, "
+                "%zu T-junction end(s)\n",
+                net.node_count(), seams.floating_ends, seams.welded_nodes,
+                seams.t_junction_ends);
+    CHECK(seams.welded_nodes > 0,
+          "seam: subdivided, the two families FUSE at the contact -- exactly as the print "
+          "fuses them");
+    // The fixture has exactly THREE genuinely free tips -- both ends of the long member
+    // and the far end of the arriving one. What must not happen is the seam itself
+    // contributing two more, which is what the un-subdivided case above shows (4).
+    CHECK(seams.floating_ends == 3,
+          "seam: subdivided, the only ends on nothing are the fixture's own three tips -- "
+          "the seam is not one of them");
+  }
+}
+
+// ── SUBDIVISION ITSELF: length preserved, radius and tag carried ────────────────
+static void test_subdivision_preserves_the_member() {
+  BeamSegment s;
+  s.a = Vec3{0, 0, 0};
+  s.b = Vec3{10, 0, 0};
+  s.radius_mm = 0.4;
+  s.tag = 7;
+  const std::vector<BeamSegment> out = subdivide_beam_segments({s}, 0.85);
+  CHECK(out.size() == 12, "subdivision: 10 mm at 0.85 mm is 12 equal pieces");
+  double total = 0.0;
+  for (const BeamSegment& p : out) {
+    const double dx = p.b.x - p.a.x, dy = p.b.y - p.a.y, dz = p.b.z - p.a.z;
+    const double l = std::sqrt(dx * dx + dy * dy + dz * dz);
+    total += l;
+    CHECK(l <= 0.85 + 1e-9, "subdivision: no piece exceeds the limit");
+    CHECK(p.radius_mm == s.radius_mm, "subdivision: the radius is carried");
+    CHECK(p.tag == s.tag, "subdivision: and so is the tag the certificate reads");
+  }
+  CHECK(std::fabs(total - 10.0) < 1e-9,
+        "subdivision: the pieces sum to the member -- no length invented or lost");
+  // already short enough: returned untouched, so a tracer that already satisfies the
+  // precondition pays nothing
+  const std::vector<BeamSegment> same = subdivide_beam_segments({s}, 20.0);
+  CHECK(same.size() == 1, "subdivision: a member already within the limit is left alone");
+}
+
 int main() {
   test_menu_matches_the_brief();
   test_depth_is_clean();
   test_menu_shape();
   test_plan_validation();
   test_grouping_preserves_every_cell();
+  test_subdivision_preserves_the_member();
+  test_seam_welds_only_when_subdivided();
   std::printf("%s: %d checks, %d failures\n", g_failures == 0 ? "PASS" : "FAIL", g_checks,
               g_failures);
   return g_failures == 0 ? 0 : 1;

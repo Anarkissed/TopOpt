@@ -1,6 +1,7 @@
 #include "topopt/job.hpp"
 #include "topopt/lattice_dc.hpp"
 #include "topopt/lattice_union_volume.hpp"
+#include "topopt/stepped_plan.hpp"
 
 #include <algorithm>
 #include <array>
@@ -6541,7 +6542,74 @@ LatticeVariantOutcome lattice_one_variant(
   // the printed diameter is d(rho, cell), so a region at a coarser cell prints a
   // proportionally fatter strut at the same relative density.
   std::vector<std::vector<char>> stepped_cell_active;  // backing store, per pass
-  if (R.stepped_ran) {
+  // ── ★★ ANY-STEP: THE PASSES COME FROM THE PLAN THE JOB STATED ──────────────
+  // (brief of 2026-09-17 §2.1.) The legacy path below derives one cell per region and
+  // anchors every pass at the SOLVED GRID's origin. Any-step cells are not on that grid:
+  // each family sits on its own tile grid inside the region, so each (region, family)
+  // needs its own LatticeRegion.origin. That is the whole of the change -- LatticeRegion
+  // already carries an origin, a cell size and a per-cell predicate.
+  //
+  // ★ AND THE PLAN IS VALIDATED FIRST, WITH THE RUN REFUSED ON A BAD CELL. Core does not
+  // repack: the arrangement the maintainer approved on screen is the arrangement laid
+  // down, or the job stops and names the cell that broke the rule.
+  std::vector<std::vector<char>> anystep_active;
+  if (!job.lattice.stepped_cells.empty()) {
+    const SteppedPlanCheck chk =
+        stepped_validate_plan(job.lattice.stepped_cells, job.lattice.stepped_regions,
+                              job.grading.min_extrudable_width_mm);
+    if (!chk.ok)
+      throw JobError("lattice \"stepped_cells\": " + chk.error +
+                     ". Core validates the plan and does not repack it -- the run lays "
+                     "down the arrangement the preview showed, or it stops here.");
+    const std::vector<SteppedCellGroup> groups =
+        stepped_group_cells(job.lattice.stepped_cells, job.lattice.stepped_regions);
+    std::fprintf(stderr, "[stepped] any-step plan: %zu cell(s) over %zu region(s) in %zu "
+                         "pass(es) | %s\n",
+                 chk.cells, chk.regions, groups.size(), chk.histogram_line.c_str());
+    anystep_active.resize(groups.size());
+    for (std::size_t gi = 0; gi < groups.size(); ++gi) {
+      const SteppedCellGroup& g = groups[gi];
+      LatticeRegion PR;
+      PR.origin = g.origin;                  // ★ the FAMILY's grid, not the solved grid's
+      PR.nx = g.nx; PR.ny = g.ny; PR.nz = g.nz;
+      PR.cell_mm = g.size_mm;
+      PR.boundary = &boundary;
+      std::vector<char>& act = anystep_active[gi];
+      act.assign(static_cast<std::size_t>(g.nx) * g.ny * g.nz, 0);
+      for (const std::array<int, 3>& c : g.cells)
+        act[(static_cast<std::size_t>(c[2]) * g.ny + c[1]) * g.nx + c[0]] = 1;
+      const std::vector<char>* ap = &act;
+      const int anx = g.nx, any = g.ny, anz = g.nz;
+      PR.latticed = [ap, anx, any, anz](int ci, int cj, int ck) {
+        if (ci < 0 || cj < 0 || ck < 0 || ci >= anx || cj >= any || ck >= anz) return false;
+        return (*ap)[(static_cast<std::size_t>(ck) * any + cj) * anx + ci] != 0;
+      };
+      LatticeSteppedPass sp;
+      sp.region = PR;
+      sp.radius.nseg = 8;
+      // A cell's own density at its OWN size: the printed diameter is d(rho, cell), so a
+      // 9 and a 3 at the same relative density print proportionally different struts.
+      sp.radius.uniform_mm = 0.5 * octet_strut_diameter_mm(gf.band_rho_min, g.size_mm);
+      const VoxelGrid& sgr = solved_grid;
+      const std::vector<char>& mref = mask;
+      const std::vector<double>& rref = gf.posture.relative_density;
+      const double rlo = gf.band_rho_min;
+      const double gcell = g.size_mm;
+      sp.radius.field = [&sgr, &mref, &rref, gcell, rlo](Vec3 pt) {
+        auto cl = [](int val, int hi) { return val < 0 ? 0 : (val > hi ? hi : val); };
+        const int i = cl(static_cast<int>(std::floor((pt.x - sgr.origin.x) / sgr.spacing)),
+                         sgr.nx - 1);
+        const int j = cl(static_cast<int>(std::floor((pt.y - sgr.origin.y) / sgr.spacing)),
+                         sgr.ny - 1);
+        const int k = cl(static_cast<int>(std::floor((pt.z - sgr.origin.z) / sgr.spacing)),
+                         sgr.nz - 1);
+        const std::size_t e = sgr.index(i, j, k);
+        return 0.5 * octet_strut_diameter_mm(mref[e] ? rref[e] : rlo, gcell);
+      };
+      stepped_passes.push_back(std::move(sp));
+    }
+  }
+  if (R.stepped_ran && job.lattice.stepped_cells.empty()) {
     // Distinct cells in ASCENDING order — a fixed emission order (§5a).
     std::vector<double> distinct;
     for (const SteppedRegionCell& rc : R.stepped.cells) distinct.push_back(rc.cell_mm);
@@ -6922,6 +6990,53 @@ LatticeVariantOutcome lattice_one_variant(
     for (const OrganicSpan& sp : R.oc.organic_spans_out)
       segs.push_back({sp.a, sp.b, sp.r});
 
+    // ── ★★ THE WELD'S PRECONDITION, ENFORCED HERE RATHER THAN ASSUMED ──────────
+    // (brief of 2026-09-17 §3.2.) build_beam_network welds ENDPOINTS. The organic tracer
+    // emits ~0.85 mm segments and satisfies that by accident of how it draws; an OCTET
+    // strut is one straight member up to a whole base cell long, so a strut ending on the
+    // middle of another has no vertex near the contact and is NOT fused. The failure is
+    // silent -- it reports a lattice in pieces, and a lattice in pieces certifies CLEAN,
+    // because nothing in it is carrying load to find fault with. So every input is cut to
+    // the scale the weld can actually see: the weld joins ends within r_a + r_b, so a
+    // piece no longer than the thinnest strut's DIAMETER puts an endpoint within reach of
+    // any contact along a member. Already-fine input is returned untouched and pays
+    // nothing.
+    {
+      double rmin = 0.0;
+      double longest = 0.0;
+      for (const BeamSegment& sg : segs) {
+        if (sg.radius_mm > 0.0 && (rmin <= 0.0 || sg.radius_mm < rmin)) rmin = sg.radius_mm;
+        const double dx = sg.b.x - sg.a.x, dy = sg.b.y - sg.a.y, dz = sg.b.z - sg.a.z;
+        longest = std::max(longest, std::sqrt(dx * dx + dy * dy + dz * dz));
+      }
+      const double piece = rmin > 0.0 ? 2.0 * rmin : 0.0;
+      const std::size_t before = segs.size();
+      if (piece > 0.0 && longest > piece) segs = subdivide_beam_segments(segs, piece);
+      const BeamNetwork seam_net = build_beam_network(segs);
+      const BeamNetworkSeams seams = beam_network_seams(seam_net);
+      std::fprintf(stderr,
+                   "[seams] %zu span(s) -> %zu after subdivision at %.3f mm (longest was "
+                   "%.2f mm) | %zu welded node(s), %zu T-junction end(s), %zu end(s) on "
+                   "NOTHING\n",
+                   before, segs.size(), piece, longest, seams.welded_nodes,
+                   seams.t_junction_ends, seams.floating_ends);
+      // ★ AND FOR AN ANY-STEP PLAN IT IS A GATE, NOT A REPORT. Organic legitimately has
+      // free tips -- a traced curve ends where the field ran out. An any-step octet plan
+      // does not: every strut belongs to a cell whose neighbours are packed against it,
+      // so an end on nothing is either a seam the weld failed to find or geometry that
+      // never joined, and both mean the network being solved is not the part that prints.
+      if (!job.lattice.stepped_cells.empty() && seams.floating_ends > 0) {
+        R.organic_cert.verdict = OrganicCertificate::Verdict::Refused;
+        R.organic_cert.refusal =
+            "the any-step stepped network has " + std::to_string(seams.floating_ends) +
+            " strut end(s) terminating on NOTHING after the contact weld. Every strut in "
+            "a packed plan belongs to a cell its neighbours are packed against, so an end "
+            "on nothing is a seam the weld did not find or geometry that never joined -- "
+            "and either way the network solved here is not the part that would print. A "
+            "certificate over it would be a claim about a different object.";
+      }
+    }
+
     std::vector<OrganicLoadCase> ocs;
     ocs.push_back({"job", bcs, cx.loads});
 
@@ -6946,7 +7061,7 @@ LatticeVariantOutcome lattice_one_variant(
           "cap: support_grid_too_large), so nothing has checked this lattice for "
           "unsupported material; a structural certificate cannot stand on it. "
           "Coarsen the strut floor or raise the raster cap and re-run.";
-    } else
+    } else if (R.organic_cert.verdict != OrganicCertificate::Verdict::Refused)
     R.organic_cert = certify_organic_structural(
         solved_grid, hexm, segs, ocs, material.youngs_modulus_mpa,
         material.poisson, material.yield_strength_mpa,
