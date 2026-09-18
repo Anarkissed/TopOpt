@@ -339,12 +339,105 @@ static void test_subdivision_preserves_the_member() {
   CHECK(same.size() == 1, "subdivision: a member already within the limit is left alone");
 }
 
+// ── THE PACKED SLOT: EXACTLY ONE CELL OVER EVERY POINT, OR NONE ─────────────────
+// The brief's §4 generator case. Core does not own the packer -- the app sends the cells
+// -- so what core owns, and what this asserts, is that a stated pack is laid down whole:
+// a 12 mm slot with a 9 at offset 3 and 3 mm tiles filling the rest covers every point of
+// the slot EXACTLY ONCE. Sampled on a grid finer than the finest tile rather than
+// reasoned about, because "no two cells overlap" and "nothing is left uncovered" are the
+// two halves of one claim and a counting argument proves only the first.
+static void test_packed_slot_covers_exactly_once() {
+  SteppedPlanRegion reg;
+  reg.region_id = 1;
+  reg.base_cell_mm = 12.0;
+  reg.slot_origin = Vec3{0, 0, 0};
+
+  std::vector<SteppedCell> cells;
+  auto put = [&](double x, double y, double z, double size) {
+    SteppedCell c;
+    c.region_id = 1;
+    c.origin = Vec3{x, y, z};
+    c.size_mm = size;
+    cells.push_back(c);
+  };
+  // the 9, at offset 3 on its family's tile (9 = 3*(12/4), so multiples of 3)
+  put(3, 3, 0, 9.0);
+  // 3 mm tiles everywhere the 9 is not
+  for (int i = 0; i < 4; ++i)
+    for (int j = 0; j < 4; ++j)
+      for (int k = 0; k < 4; ++k) {
+        const double x = i * 3.0, y = j * 3.0, z = k * 3.0;
+        const bool in_nine = x >= 3.0 && y >= 3.0 && z < 9.0;
+        if (!in_nine) put(x, y, z, 3.0);
+      }
+
+  const SteppedPlanCheck v = stepped_validate_plan(cells, {reg}, 0.45);
+  std::printf("  packed slot: %zu cells -> %s [%s]\n", cells.size(),
+              v.ok ? "valid" : v.error.c_str(), v.histogram_line.c_str());
+  CHECK(v.ok, "packed slot: the arrangement validates -- sizes on the menu, on their "
+              "grids, and no overlap");
+  CHECK(cells.size() == 1 + 37,
+        "packed slot: one 9 and thirty-seven 3s fill a 12 mm slot (64 tiles less the 27 "
+        "the 9 covers)");
+
+  // ★ COVERAGE, SAMPLED. A point of the slot must be in exactly one cell.
+  const double h = 0.5;                       // finer than the finest tile
+  std::size_t once = 0, twice = 0, none = 0;
+  for (double x = h / 2; x < 12.0; x += h)
+    for (double y = h / 2; y < 12.0; y += h)
+      for (double z = h / 2; z < 12.0; z += h) {
+        int hits = 0;
+        for (const SteppedCell& c : cells)
+          if (x >= c.origin.x && x < c.origin.x + c.size_mm && y >= c.origin.y &&
+              y < c.origin.y + c.size_mm && z >= c.origin.z && z < c.origin.z + c.size_mm)
+            ++hits;
+        if (hits == 1) ++once; else if (hits == 0) ++none; else ++twice;
+      }
+  std::printf("  packed slot coverage: %zu once, %zu uncovered, %zu doubled\n", once,
+              none, twice);
+  CHECK(twice == 0, "packed slot: NO point is covered twice");
+  CHECK(none == 0, "packed slot: and no point of the slot is left uncovered");
+
+  // ── cut by the outline: the cells the outline removes are simply absent ───────
+  // Depth-cleanliness means what is left behind a cell is a whole number of tiles, so an
+  // outline that removes a 3 mm slab leaves an arrangement that is still exactly-once
+  // over what remains -- no strip has to be laid solid to make the depth up.
+  std::vector<SteppedCell> cut;
+  for (const SteppedCell& c : cells)
+    if (!(c.origin.x < 3.0)) cut.push_back(c);
+  const SteppedPlanCheck vc = stepped_validate_plan(cut, {reg}, 0.45);
+  CHECK(vc.ok, "outline-cut slot: still a valid arrangement");
+  std::size_t cut_once = 0, cut_bad = 0;
+  for (double x = 3.0 + h / 2; x < 12.0; x += h)
+    for (double y = h / 2; y < 12.0; y += h)
+      for (double z = h / 2; z < 12.0; z += h) {
+        int hits = 0;
+        for (const SteppedCell& c : cut)
+          if (x >= c.origin.x && x < c.origin.x + c.size_mm && y >= c.origin.y &&
+              y < c.origin.y + c.size_mm && z >= c.origin.z && z < c.origin.z + c.size_mm)
+            ++hits;
+        if (hits == 1) ++cut_once; else ++cut_bad;
+      }
+  CHECK(cut_bad == 0,
+        "outline-cut slot: what the outline leaves is STILL covered exactly once -- no "
+        "solid strip is needed to make up a depth");
+
+  // ★ THE CONTROL: the coverage test must be able to FAIL. Move one tile onto the 9 and
+  // the doubled count has to rise, or the sampling above is proving nothing.
+  std::vector<SteppedCell> broken = cells;
+  broken.back().origin = Vec3{3, 3, 0};
+  const SteppedPlanCheck vb = stepped_validate_plan(broken, {reg}, 0.45);
+  CHECK(!vb.ok && vb.error.find("OVERLAPS") != std::string::npos,
+        "CONTROL: a tile moved onto the 9 IS caught as an overlap -- the check has teeth");
+}
+
 int main() {
   test_menu_matches_the_brief();
   test_depth_is_clean();
   test_menu_shape();
   test_plan_validation();
   test_grouping_preserves_every_cell();
+  test_packed_slot_covers_exactly_once();
   test_subdivision_preserves_the_member();
   test_seam_welds_only_when_subdivided();
   std::printf("%s: %d checks, %d failures\n", g_failures == 0 ? "PASS" : "FAIL", g_checks,

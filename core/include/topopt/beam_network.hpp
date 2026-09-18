@@ -18,9 +18,16 @@
 //      must share a node here. Weld on CONTACT, not on coordinates.
 //      PRECONDITION: the weld is ENDPOINT-based, so struts must arrive SUBDIVIDED.
 //      Two long members crossing at mid-span have no vertex near the crossing and
-//      are NOT fused (asserted in test_beam_network). The tracer emits ~0.85 mm
-//      segments, which satisfies this; coarse input would silently report a
-//      disconnected lattice.
+//      are NOT fused (asserted in test_beam_network).
+//      ★ AND DO NOT TRUST THE CALLER TO SATISFY IT. This said "the tracer emits ~0.85 mm
+//      segments, which satisfies this" -- true when written, and false by the time the
+//      centreline RUN-COLLAPSE pass shipped, which merges collinear spans into straight
+//      members up to a whole chain long. MEASURED on the M2 stand: the certificate was
+//      handed members up to 28.94 mm against a weld reach of 0.817 mm, and the weld found
+//      4,270 junctions where cutting the input to its reach finds 14,202 -- two thirds of
+//      the joints were missing and nothing reported it, because a lattice in pieces
+//      certifies CLEAN. run_job now enforces the precondition on every input rather than
+//      believing this comment.
 //
 //   2. RESTRAINT. A pinned tie into solid transmits force but not moment, so a
 //      member held at one point spins about it (3 modes) and a member held at two

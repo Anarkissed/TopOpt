@@ -1307,6 +1307,30 @@ std::string run_info_json(const RunInfo& info) {
             fmt(info.grading_lattice_solid_volume_mm3);
     }
     // ── ★ STEPPED's report. Absent entirely unless the stepped algorithm ran.
+    // ── ★ THE SEAM CENSUS, FOR EVERY ALGORITHM THAT SOLVES A BEAM NETWORK ──────
+    // Written outside the stepped block on purpose. It went in for any-step Stepped,
+    // whose seams are the point; instrumenting it MEASURED the same defect on ORGANIC.
+    // The weld is endpoint-based and this branch's run-collapse pass merges collinear
+    // spans into long straight members, so the certificate was receiving members up to
+    // 28.94 mm long against a weld reach of 0.817 mm. With the input cut to that reach
+    // the weld finds 14,202 junctions where it had found 4,270 -- the network being
+    // solved was missing two thirds of its joints, and nothing said so, because a
+    // lattice in pieces certifies clean.
+    if (info.stepped_seam_spans_before > 0) {
+      gr += ", \"seam_spans_before_subdivision\": " + fmt_ll(info.stepped_seam_spans_before);
+      gr += ", \"seam_spans_after_subdivision\": " + fmt_ll(info.stepped_seam_spans_after);
+      gr += ", \"seam_subdivision_piece_mm\": " + fmt(info.stepped_seam_piece_mm);
+      gr += ", \"seam_longest_member_before_mm\": " +
+            fmt(info.stepped_seam_longest_before_mm);
+      gr += ", \"seam_welded_nodes\": " + fmt_ll(info.stepped_seam_welded_nodes);
+      gr += ", \"seam_t_junction_ends\": " + fmt_ll(info.stepped_seam_t_junction_ends);
+      gr += ", \"seam_floating_ends\": " + fmt_ll(info.stepped_seam_floating_ends);
+      gr += ", \"seam_weld_note\": \"the weld joins ENDPOINTS, so a member crossing "
+            "another at mid-span is fused only if the input arrives cut to the weld's "
+            "reach. Uncut, the lattice reads as disconnected -- and a disconnected "
+            "lattice certifies CLEAN. floating_ends must be 0 for a certified any-step "
+            "job; organic legitimately has free tips.\"";
+    }
     if (info.stepped_present) {
       gr += ", \"stepped\": {";
       gr += "\"regions\": " + fmt_ll(info.stepped_regions);
@@ -1334,6 +1358,13 @@ std::string run_info_json(const RunInfo& info) {
             fmt_ll(info.stepped_adjacent_region_pairs);
       gr += ", \"adjacent_pairs_joined\": " +
             fmt_ll(info.stepped_adjacent_pairs_joined);
+      // ★ the any-step plan and its seams -- 0/absent on a legacy Stepped run
+      if (info.stepped_anystep_cells > 0) {
+        gr += ", \"anystep_cells\": " + fmt_ll(info.stepped_anystep_cells);
+        gr += ", \"anystep_regions\": " + fmt_ll(info.stepped_anystep_regions);
+        gr += ", \"anystep_passes\": " + fmt_ll(info.stepped_anystep_passes);
+        gr += ", \"anystep_size_histogram\": \"" + info.stepped_anystep_histogram + "\"";
+      }
       gr += ", \"seam_note\": \"regions carry unrelated cell edges, so their nodes "
             "do not line up; an adjacent pair that is not joined is a mechanical "
             "disconnection at that seam. DOUBLED's dyadic ladder exists to prevent "

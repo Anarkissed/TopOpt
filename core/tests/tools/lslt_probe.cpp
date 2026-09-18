@@ -1,6 +1,7 @@
 #include "topopt/lattice_lslt.hpp"
 #include "topopt/lattice_union_volume.hpp"
 #include "topopt/lattice_dc.hpp"
+#include "topopt/beam_network.hpp"
 #include <cstdio>
 #include <cmath>
 #include <cstdlib>
@@ -29,6 +30,42 @@ static void vol_case(const char* name, const std::vector<OrganicSpan>& sp, doubl
 }
 
 int main(int argc, char** argv) {
+  if (argc > 2 && std::strcmp(argv[1], "--seams") == 0) {
+    // Build the beam network from a SPANS file with and without subdivision, and report
+    // what the weld finds either way. The weld is endpoint-based, so this is the whole
+    // question: does the network the certificate solves actually hold together.
+    std::vector<OrganicSpan> sp;
+    std::ifstream f(argv[2]); std::string line;
+    while (std::getline(f, line)) {
+      if (line.rfind("SEG", 0) != 0) continue;
+      std::istringstream is(line.substr(3));
+      OrganicSpan s2;
+      is >> s2.a.x >> s2.a.y >> s2.a.z >> s2.b.x >> s2.b.y >> s2.b.z >> s2.r;
+      sp.push_back(s2);
+    }
+    std::vector<BeamSegment> segs;
+    double rmin = 0.0, longest = 0.0;
+    for (const OrganicSpan& x : sp) {
+      segs.push_back({x.a, x.b, x.r});
+      if (x.r > 0.0 && (rmin <= 0.0 || x.r < rmin)) rmin = x.r;
+      const double dx = x.b.x - x.a.x, dy = x.b.y - x.a.y, dz = x.b.z - x.a.z;
+      longest = std::max(longest, std::sqrt(dx*dx + dy*dy + dz*dz));
+    }
+    const double piece = 2.0 * rmin;
+    std::printf("%zu span(s), thinnest radius %.4f mm, longest member %.2f mm, weld "
+                "reach about %.3f mm\n", sp.size(), rmin, longest, piece);
+    for (int pass = 0; pass < 2; ++pass) {
+      const std::vector<BeamSegment> in =
+          pass == 0 ? segs : subdivide_beam_segments(segs, piece);
+      const BeamNetwork net = build_beam_network(in);
+      const BeamNetworkSeams sm = beam_network_seams(net);
+      std::printf("  %-14s %8zu member(s) %8zu node(s) | %7zu welded  %8zu T-junction "
+                  "end(s)  %7zu end(s) on NOTHING\n",
+                  pass == 0 ? "AS EMITTED" : "SUBDIVIDED", net.member_count(),
+                  net.node_count(), sm.welded_nodes, sm.t_junction_ends, sm.floating_ends);
+    }
+    return 0;
+  }
   if (argc > 2 && std::strcmp(argv[1], "--overlap-vs-k") == 0) {
     std::vector<OrganicSpan> sp;
     std::ifstream f(argv[2]); std::string line;

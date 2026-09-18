@@ -4149,6 +4149,12 @@ struct LatticeVariantOutcome {
   bool organic_ran = false;
   OrganicReport organic;  // meaningful iff `organic_ran`
   bool stepped_ran = false;
+  // ★ the any-step plan as laid down, and the seam census the certificate stands on
+  long long anystep_cells = 0, anystep_regions = 0, anystep_passes = 0;
+  std::string anystep_histogram;
+  long long seam_spans_before = 0, seam_spans_after = 0;
+  double seam_piece_mm = 0.0, seam_longest_before_mm = 0.0;
+  long long seam_welded_nodes = 0, seam_t_junction_ends = 0, seam_floating_ends = 0;
   SteppedOutcome stepped;  // meaningful iff `stepped_ran`
   double organic_trace_seconds = 0.0;
   LatticeAddedMaterialReceipt added_rcpt;  // design-box runs only
@@ -6566,6 +6572,10 @@ LatticeVariantOutcome lattice_one_variant(
     std::fprintf(stderr, "[stepped] any-step plan: %zu cell(s) over %zu region(s) in %zu "
                          "pass(es) | %s\n",
                  chk.cells, chk.regions, groups.size(), chk.histogram_line.c_str());
+    R.anystep_cells = static_cast<long long>(chk.cells);
+    R.anystep_regions = static_cast<long long>(chk.regions);
+    R.anystep_passes = static_cast<long long>(groups.size());
+    R.anystep_histogram = chk.histogram_line;
     anystep_active.resize(groups.size());
     for (std::size_t gi = 0; gi < groups.size(); ++gi) {
       const SteppedCellGroup& g = groups[gi];
@@ -7020,6 +7030,13 @@ LatticeVariantOutcome lattice_one_variant(
                    "NOTHING\n",
                    before, segs.size(), piece, longest, seams.welded_nodes,
                    seams.t_junction_ends, seams.floating_ends);
+      R.seam_spans_before = static_cast<long long>(before);
+      R.seam_spans_after = static_cast<long long>(segs.size());
+      R.seam_piece_mm = piece;
+      R.seam_longest_before_mm = longest;
+      R.seam_welded_nodes = static_cast<long long>(seams.welded_nodes);
+      R.seam_t_junction_ends = static_cast<long long>(seams.t_junction_ends);
+      R.seam_floating_ends = static_cast<long long>(seams.floating_ends);
       // ★ AND FOR AN ANY-STEP PLAN IT IS A GATE, NOT A REPORT. Organic legitimately has
       // free tips -- a traced curve ends where the field ran out. An any-step octet plan
       // does not: every strut belongs to a cell whose neighbours are packed against it,
@@ -9670,6 +9687,17 @@ LatticeVariantJobResult lattice_variant_job(const JobDescription& job,
       gi.grading_band_rho_min = R.gf.band_rho_min;
       gi.grading_band_rho_max = R.gf.band_rho_max;
       gi.grading_cells_per_member_floor = R.gf.cells_per_member_floor;
+      gi.stepped_anystep_cells = R.anystep_cells;
+      gi.stepped_anystep_regions = R.anystep_regions;
+      gi.stepped_anystep_passes = R.anystep_passes;
+      gi.stepped_anystep_histogram = R.anystep_histogram;
+      gi.stepped_seam_spans_before = R.seam_spans_before;
+      gi.stepped_seam_spans_after = R.seam_spans_after;
+      gi.stepped_seam_piece_mm = R.seam_piece_mm;
+      gi.stepped_seam_longest_before_mm = R.seam_longest_before_mm;
+      gi.stepped_seam_welded_nodes = R.seam_welded_nodes;
+      gi.stepped_seam_t_junction_ends = R.seam_t_junction_ends;
+      gi.stepped_seam_floating_ends = R.seam_floating_ends;
       gi.grading_cell_size_mm = R.gf.cell_size_mm;
       gi.grading_printability_floor_mm = R.gf.printability_floor_mm;
       gi.grading_cell_size_floored = R.gf.cell_size_floored;
