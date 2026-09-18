@@ -724,3 +724,27 @@ His three final items, the first two here (the third is the core parity brief,
   (pop-up: "To change the finish, turn off single-cell members."; the row dimmed; a
   one-line note under it); `init(settings:)` coerces a saved single-cell project to Skin.
   `LatticeWizardTests.testSingleCellMembersLockTheFinishToSkin`. Installed 14:43:43.
+
+## 19. 2026-09-18 16:49 — the organic "wall between the lattices": the far cap opens again
+
+His report: under organic a grey wall sat behind the struts (both walls); "the floor is
+see-through" (image 2). Lattice-only view: no grey wall ⇒ it was the BODY.
+
+What the device said (new `DIAG shellClip` line, once per change; kept): decl mode, two
+face regions (depth 12.00 / 11.00), region texture bound, capsule pipeline built and
+drawing, body opaque, and a CPU census of the shell rule over his mesh: ±y faces open
+88 % / 90 %, floor 0 %. The census replicated every term of `shell_is_latticed` but
+ONE: the 2026-08-25 eye test (`dot(sn, toEye) <= 0 → keep`), "only the cap you are
+looking at", added after his "massive hole" report. The mesh draws with cullMode
+.none, so the far face of a declared wall, seen from inside through the open near
+face, is a back-facing fragment — never opened — hence the grey wall. Octet had it too;
+the denser truss hid it.
+
+Fix: the eye test is gone — both caps of a declared region open whichever way the
+camera looks; a region that stops short of the far surface still does not open it
+(the containment sample). His 09-18 ruling supersedes his 08-25 one, and the shader
+comment says so. Harness (`LatticeShellSeeThroughProbe`): lit-with-body 13116 →
+12958 (octet) / 12837 (organic) — the background now shows through the walls.
+The floor is not a cap of any declared region and stays closed by rule; if he still
+sees through it, that is a different thing and needs a screenshot.
+Installed 16:48:46. Not yet seen by him.

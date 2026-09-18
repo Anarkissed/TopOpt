@@ -348,8 +348,18 @@ inline bool shell_is_latticed(float3 mpos, float3 mnormal, constant ShellClip& c
         // instead of daylight. Viewed from behind the roles swap, so the 08-23
         // complaint ("inverted on the back wall") stays fixed: whichever side you
         // are on is the side that opens.
-        float3 toEye = c.eye.xyz - mpos;
-        if (dot(sn, toEye) <= 0.0) { continue; }
+        // ★★★ BOTH CAPS, WHICHEVER WAY THE CAMERA LOOKS (his 2026-09-18: "the lattice
+        // - because it goes all the way through the wall - should be completely
+        // see-through … which is a requirement"). The 2026-08-25 rule above opened
+        // ONLY the cap facing the eye, so the far face of a declared wall — seen from
+        // inside, through the open near face, since the mesh draws with cullMode
+        // .none — stayed as a grey wall behind the struts (his organic screenshots of
+        // 2026-09-18; the census on his device said both faces open, the eye test was
+        // the one term the census did not replicate). That 08-25 rule was HIS call at
+        // the time ("massive hole"); today's ruling supersedes it: a region that spans
+        // the wall opens both of its surfaces, and a region that stops short of the far
+        // surface still does not (the containment sample below). The floor is not a
+        // cap of any declared region and stays.
         float3 inward = normalize(d.xyz);
         float capSign = 0.0;
         if (dot(sn, -inward) >= c.gate.x) { capSign = 1.0; }
@@ -3322,6 +3332,7 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         // bound on EVERY path — Metal drops the draw on a missing binding, the same
         // trap the AO texture above documents. Disabled + a 1×1×1 neutral volume is
         // an exact identity when there is no lattice in the frame.
+        logShellClipIfChanged()
         var (shellClip, shellDecls) = shellClipAndDecls
         enc.setFragmentBytes(&shellClip,
                              length: MemoryLayout<ShellClipUniform>.stride, index: 4)
@@ -4105,6 +4116,60 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     /// (disabled, cell-activation, declared-face) and which one is armed is not
     /// observable from a rendered frame — a black picture is consistent with all three.
     /// Exposing the uniform turns "why is the shell closed" into a measurement.
+    /// ★ DIAG (his 2026-09-18 organic see-through report): the shell clip's inputs and
+    /// a CPU census of `shell_is_latticed` over the mesh, logged ONCE per change so the
+    /// device's own numbers can be read back instead of guessed at.
+    private static var lastShellDiag = ""
+    func logShellClipIfChanged() {
+        let (u, d) = shellClipAndDecls
+        let layer = latticeLayer
+        let scene = layer?.scene
+        let mode = u.grid.w < 0.5 ? "OFF" : (u.gate.y > 1.5 ? "CELL" : "DECL(\(d.count / 3))")
+        let regs = (scene?.regions ?? []).enumerated().map { i, r in
+            String(format: "r%d:%@/%@ n=(%.2f,%.2f,%.2f) depth=%.2f inPlane=%.2f", i,
+                   r.role == .include ? "inc" : "exc", r.kind == .face ? "face" : "bolt",
+                   r.normal.x, r.normal.y, r.normal.z, r.depthMM, r.inPlaneOffsetMM)
+        }.joined(separator: " ")
+        let key = "\(mode)|\(latticeInFrame)|\(scene?.algorithm ?? "-")|\(scene?.organicCapsules.count ?? -1)|\(regs)|\(layer?.regionTexture != nil)|\(u.dims)"
+        guard key != Self.lastShellDiag else { return }
+        Self.lastShellDiag = key
+        var census = "no census"
+        if let scene, let mesh, let rsdf = scene.regionSDF, u.grid.w >= 0.5, u.gate.y < 1.5 {
+            let voxel = max(rsdf.spacing.x, max(rsdf.spacing.y, rsdf.spacing.z))
+            let gate = Float(cos(Self.shellFaceAgreementDegrees * Double.pi / 180))
+            var decls: [SIMD3<Float>] = []
+            var i = 0
+            while i + 2 < d.count { if d[i].w < 0.5 { decls.append(SIMD3(d[i].x, d[i].y, d[i].z)) }; i += 3 }
+            var openA: [String: Double] = [:], area: [String: Double] = [:]
+            let P = mesh.positions, I = mesh.indices
+            var t = 0
+            while t + 2 < I.count {
+                let i0 = Int(I[t]), i1 = Int(I[t+1]), i2 = Int(I[t+2]); t += 3
+                let a = SIMD3<Float>(P[3*i0], P[3*i0+1], P[3*i0+2]), b = SIMD3<Float>(P[3*i1], P[3*i1+1], P[3*i1+2]), c = SIMD3<Float>(P[3*i2], P[3*i2+1], P[3*i2+2])
+                let n = simd_cross(b - a, c - a); let A = Double(simd_length(n)) * 0.5
+                guard A > 1e-9 else { continue }
+                let sn = simd_normalize(n)
+                let ax = abs(sn.x) >= abs(sn.y) && abs(sn.x) >= abs(sn.z) ? 0 : (abs(sn.y) >= abs(sn.z) ? 1 : 2)
+                let k = (sn[ax] >= 0 ? "+" : "-") + ["x", "y", "z"][ax]
+                area[k, default: 0] += A
+                let p = (a + b + c) / 3
+                var open = false
+                for inward in decls where !open {
+                    var capSign: Float = 0
+                    if simd_dot(sn, -inward) >= gate { capSign = 1 } else if simd_dot(sn, inward) >= gate { capSign = -1 } else { continue }
+                    let q = p + inward * (voxel * capSign)
+                    let g = (q - rsdf.origin) / rsdf.spacing
+                    if g.x < -0.5 || g.y < -0.5 || g.z < -0.5 || g.x > Float(rsdf.nx) - 0.5 || g.y > Float(rsdf.ny) - 0.5 || g.z > Float(rsdf.nz) - 0.5 { continue }
+                    let gi = min(max(Int(g.x.rounded()), 0), rsdf.nx - 1), gj = min(max(Int(g.y.rounded()), 0), rsdf.ny - 1), gk = min(max(Int(g.z.rounded()), 0), rsdf.nz - 1)
+                    if rsdf.values[(gk * rsdf.ny + gj) * rsdf.nx + gi] <= 0 { open = true }
+                }
+                if open { openA[k, default: 0] += A }
+            }
+            census = area.keys.sorted().map { String(format: "%@=%.0f%%", $0, 100 * (openA[$0] ?? 0) / area[$0]!) }.joined(separator: " ")
+        }
+        NSLog("DIAG shellClip mode=\(mode) inFrame=\(latticeInFrame) algo=\(scene?.algorithm ?? "-") capsules=\(scene?.organicCapsules.count ?? -1) capsulePipeline=\(organicCapsulePipelineDidBuild) capsulesReplaceField=\(layer?.capsulesReplaceField ?? false) bodyAlpha=\(bodyAlpha) initError=\(Self.lastInitError ?? "nil") regionTex=\(layer?.regionTexture != nil) skinMM=\(scene?.skinMM ?? -1) dims=\(u.dims) regions=[\(regs)] open=[\(census)]")
+    }
+
     var shellClipForTests: (grid: SIMD4<Float>, spacing: SIMD4<Float>,
                             dims: SIMD4<Float>, gate: SIMD4<Float>, declCount: Int) {
         let (u, d) = shellClipAndDecls
