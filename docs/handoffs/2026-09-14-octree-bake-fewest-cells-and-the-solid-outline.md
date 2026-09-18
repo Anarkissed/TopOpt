@@ -612,3 +612,17 @@ strips."
 - **What to look for**: Stepped should now show 9.6 / 9 / 8 / 7.2 / 6 … cells between
   the 12 mm cells and the outline, a staircase, with seams where families meet;
   Default Grade 12 / 6 / 3 nested. The 10.31 wall: 10.31, 7.73, 6.87, 5.16, 3.44, 2.58.
+- **Full suite on `ebc7aa19` (in progress) found one of mine:**
+  `LatticeThreeAlgorithmsDrawTests.testAllThreeAlgorithmsDraw` — "doubled draws
+  nothing". §15 had widened the renderer's deferred-bake guard to doubled, so a doubled
+  scene with NO per-region cells (that test renders one) hid its layer instead of
+  falling through to the dyadic ladder. The ladder IS doubled at a coarser plan, so the
+  guard is stepped's alone again; the routing pin in `LatticeGradeToSolidBandTests`
+  says so.
+- **Full suite on `ebc7aa19`: 2443 tests, 31 skipped, 8 failing cases** (1 h 56 min).
+  Five known (AppModelTests 3MF ×3, OrganicSampleCubeTests thicker-is-live,
+  OrganicVariantCacheTests key). Three mine, fixed in the commit after it:
+  `LatticeThreeAlgorithmsDrawTests` ×2 (doubled with no cells hid itself — the guard is
+  stepped's alone again) and `SmoothingPageRound2Tests.testWhileAPageIsUp…` (the
+  page-chrome audit reads `!fullScreenPageUp` on the chip's own line; spelled out).
+  The three classes rerun green (34 tests). A full suite runs again on the fix.

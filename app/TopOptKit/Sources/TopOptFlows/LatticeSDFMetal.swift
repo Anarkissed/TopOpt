@@ -2264,7 +2264,11 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
         // first bake, so this gate should never fire; it stands anyway, because a
         // deferred bake (the layer simply stays hidden — `latticeFieldIsCurrent`
         // false) is strictly better than a wrong picture.
-        if scene.algorithm == "stepped" || scene.algorithm == "doubled",
+        // ★ STEPPED ONLY. Doubled with no per-region cells falls through to the
+        // dyadic ladder below, which IS doubled at a coarser plan — the same
+        // algorithm, not a wrong one — so a doubled scene never hides itself
+        // (`LatticeThreeAlgorithmsDrawTests` renders one with no cells at all).
+        if scene.algorithm == "stepped",
            steppedCellMM.isEmpty || steppedCellMM.count != scene.regions.count,
            scene.regions.contains(where: { $0.role == .include }) {
             NSLog("DIAG stepped bake DEFERRED — algorithm is stepped but "

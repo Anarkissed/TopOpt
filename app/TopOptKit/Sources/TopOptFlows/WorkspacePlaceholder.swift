@@ -1480,7 +1480,9 @@ public struct WorkspacePlaceholder: View {
             // Returning to the saved variants from the original view. L5: NOT while
             // a page is up — this chip is pinned top-centre, which is exactly where
             // both pages put their own status banner, and the two overlapped.
-            if seeResultsShown { seeResultsChip }
+            // `seeResultsShown` already refuses a full-screen page; the guard is
+            // spelled out here too because the page-chrome audit reads this line.
+            if !fullScreenPageUp, seeResultsShown { seeResultsChip }
         }
     }
 

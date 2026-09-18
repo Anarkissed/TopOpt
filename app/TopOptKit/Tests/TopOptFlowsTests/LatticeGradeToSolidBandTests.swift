@@ -434,8 +434,8 @@ final class LatticeGradeToSolidBandTests: XCTestCase {
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
             .appendingPathComponent("Sources/TopOptFlows")
         let renderer = try String(contentsOf: src.appendingPathComponent("LatticeSDFMetal.swift"), encoding: .utf8)
-        XCTAssertTrue(renderer.contains("if scene.algorithm == \"stepped\" || scene.algorithm == \"doubled\","),
-                      "★ the deferred-bake guard must hold for doubled too, or a doubled scene bakes the ladder before its cells land")
+        XCTAssertTrue(renderer.contains("if scene.algorithm == \"stepped\",\n           steppedCellMM.isEmpty"),
+                      "★ the deferred-bake guard is stepped's alone: doubled with no cells draws the dyadic ladder, which is still doubled")
         XCTAssertTrue(renderer.contains("dyadicSteps: steppedDyadicSteps,\n                    stats: &st)"),
                       "★ the octree call must pass the step style, or Default Grade takes thirds")
         let wizard = try String(contentsOf: src.appendingPathComponent("LatticeSetupWizard.swift"), encoding: .utf8)
