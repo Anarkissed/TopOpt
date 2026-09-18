@@ -754,3 +754,24 @@ Installed 16:48:46. Not yet seen by him.
   `LatticeShellBothCapsOrganicOnlyTests` pins the flag per algorithm and the shader's
   read of it. The shell clip is a PICTURE rule: nothing about it reaches the job or
   core's STL. Installed 16:55.
+
+## 20. 2026-09-18 17:20 — his four: depth-variation gone, (i) pop-ups fit, organic rim drawn, the cap wall
+
+1. **Depth variation (test)** is off the organic pane (the model keeps the flag, off,
+   for old snapshots); the placement test is retired for an "it is gone" pin.
+2. **(i) pop-ups** are sized to their text (no ScrollView, no max height, width 380).
+3. **Organic solid rim** is DRAWN: `buildOutlineRibbon` takes the rim's width
+   (`LatticeSDFScene.organicSolidRimMM`) when there is no octree band, so the organic
+   rim is the same beam around the outline as the octet's; the (i) says what it is
+   (the width typed or the printability floor; the struts run into it). Organic has no
+   other grade-to-solid (its floors raise, never solidify) — the text no longer claims one.
+4. **THE CAP WALL** (his rule: a face prism that stops inside the part leaves solid
+   beyond it — "the model should always be assumed to be 100% solid"): `LatticeRegionCap`
+   triangulates each include face outline (ear clipping, at the region's depth, facing
+   back out); the depth prepass draws it with `region_cap_fragment`, which keeps a
+   fragment only where the part SDF a voxel and a half PAST the cap is still inside —
+   so a prism through a whole wall draws no cap (see-through kept) and the base under a
+   12 mm prism gets its wall, in the middle where the prism ends. Albedo 0 ⇒ shaded as
+   the body. Both algorithms. `LatticeRegionCapTests` 3/3; the harness probe shows the
+   layer now lighting 11 214 px without the body under organic (was 7 602).
+   Installed 17:20. Not yet seen by him.

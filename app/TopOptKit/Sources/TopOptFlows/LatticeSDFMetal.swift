@@ -392,6 +392,9 @@ public struct LatticeSDFScene {
     /// because the DRESSING BAND must be a physical width, not a fraction of whatever
     /// cell happens to be local. See `rimParams`.
     public let skinMM: Double
+    /// The organic solid rim's width (mm) when the algorithm is organic and a rim is
+    /// on — the outline ribbon's width on that path. 0 otherwise.
+    public let organicSolidRimMM: Double
 
     /// ★★★ ORGANIC: the traced struts as a distance field (mm, negative inside), on the
     /// DECLARED REGION's own bbox rather than the part's — which is what makes it
@@ -664,6 +667,7 @@ public struct LatticeSDFScene {
         self.partInteriorVoxelCount = solidInside
         self.skippedFaces = skippedFaces
         self.skinMM = skinMM
+        self.organicSolidRimMM = (algorithm == "organic" && (organic?.solidRimMM ?? 0) > 0) ? organic!.solidRimMM : 0
         self.regions = regions
         self.occupancy = LatticeRegionMask.clipped(
             solid, to: regions, whenEmpty: whenEmpty)
@@ -1892,6 +1896,13 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
     /// view kept drawing the LAST layer's beam (his 15 and 5 mm grades wearing the
     /// 25 mm beam, 2026-09-16 19:21).
     private(set) var outlineRibbonVersion = 0
+    /// ★ THE SOLID BEYOND EACH FACE PRISM'S FAR CAP (2026-09-18), built once per scene;
+    /// drawn body-coloured by the depth prepass where the part continues past the cap.
+    private(set) var regionCap: LatticeOutlineRibbon.Mesh?
+    private(set) var regionCapVersion = 0
+    private static var regionCapSerial = 0
+    var partSDFTexture: MTLTexture? { sdfTex }
+    var partSDFGrid: LatticeVoxelGrid? { scene?.partSDF }
     private static var outlineRibbonSerial = 0
     private var cellGrid: LatticeVoxelGrid?
     private var sdfTex: MTLTexture?
@@ -2027,6 +2038,10 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
         uploadSegments(scene.preview.segments)
         sdfTex = makeVolumeTexture(scene.partSDF)
         regionTex = scene.regionSDF.flatMap { r in makeRegionTexture(r, outline: scene.outlineSDF, prism: scene.prismSDF) }
+        let cap = LatticeRegionCap.build(regions: scene.regions)
+        regionCap = cap.vertexCount > 0 ? cap : nil
+        Self.regionCapSerial &+= 1
+        regionCapVersion = Self.regionCapSerial
         organicTex = scene.organicField.flatMap { d in
             scene.organicSurfaceField.map { makeCentrelineTexture(d, surface: $0) } ?? makeVolumeTexture(d)
         }
@@ -3425,14 +3440,20 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
     /// wide, as deep as the wall is at each outline vertex (the measured width field;
     /// the region's depth where that has no answer).
     static func buildOutlineRibbon(scene: LatticeSDFScene, field: LatticeCellField) -> LatticeOutlineRibbon.Mesh? {
-        guard field.solidBandMM > 0 else { return nil }
+        // ★ ORGANIC'S RIM IS THE SAME BEAM (his 2026-09-18: "there is no solid rim
+        // around the lattice"): the rim used to be only an in-plane erosion of the
+        // region, so the body's own shell was the ring — invisible with the body hidden
+        // and nothing the lattice layer drew. Now it is a ribbon of the rim's width,
+        // exactly as the octet's outline beam is.
+        let width = field.solidBandMM > 0 ? field.solidBandMM : scene.organicSolidRimMM
+        guard width > 0 else { return nil }
         let occ = scene.occupancy
         var widths: [Int: [Double]] = [:]
         for (i, r) in scene.regions.enumerated() where r.role == .include && r.kind == .face {
             widths[i] = LatticeMeasuredRegionWidth.wallWidthFieldAlongNormalMM(
                 region: r, occupancy: occ, partSDF: scene.partSDF)
         }
-        let mesh = LatticeOutlineRibbon.build(regions: scene.regions, widthMM: field.solidBandMM) { ri, p in
+        let mesh = LatticeOutlineRibbon.build(regions: scene.regions, widthMM: width) { ri, p in
             let r = scene.regions[ri]
             guard let w = widths[ri], w.count == occ.count else { return r.depthMM }
             let g = (SIMD3<Float>(p) - occ.origin) / occ.spacing

@@ -165,7 +165,15 @@ private struct ShadowUniforms {
     var flex: SIMD4<Float>
 }
 
-private struct DepthPrepassUniforms {
+private /// MSL twin: `CapUniforms` in the depth-prepass library (`region_cap_fragment`).
+struct RegionCapUniforms {
+    var origin: SIMD4<Float>
+    var spacing: SIMD4<Float>
+    var dims: SIMD4<Float>
+    var margin: SIMD4<Float>
+}
+
+struct DepthPrepassUniforms {
     var mvp: simd_float4x4
     var modelView: simd_float4x4
     var flex: SIMD4<Float> = .zero
@@ -841,6 +849,34 @@ fragment GBuf depth_fragment_flat(DOut in [[stage_in]], constant DUniforms& u [[
     o.albedo = float4(u.tint.xyz, 1.0);
     return o;
 }
+
+// ★★ THE SOLID BEYOND A FACE PRISM'S FAR CAP (2026-09-18). The cap mesh covers the
+// whole face outline at the region's depth; this keeps only the fragments where the
+// PART continues past the cap — the part SDF sampled `margin` millimetres further
+// along the region's inward direction (the cap's normal points back out, so inward is
+// its negative) is still inside. A prism that spans a whole wall has no material
+// beyond its cap and draws nothing, so the wall stays see-through; the base under a
+// 12 mm prism does, and gets its wall. Albedo ZERO: the deferred shade treats it as
+// the body, which is what it is.
+struct CapUniforms { float4 origin; float4 spacing; float4 dims; float4 margin; };
+fragment GBuf region_cap_fragment(DOut in [[stage_in]], constant DUniforms& u [[buffer(1)]],
+                                  constant CapUniforms& c [[buffer(2)]],
+                                  texture3d<float, access::sample> sdfTex [[texture(0)]]) {
+    float3 inward = -normalize(in.mnormal);
+    float3 p = in.mpos + inward * c.margin.x;
+    float3 g = (p - c.origin.xyz) / max(c.spacing.xyz, float3(1e-6));
+    if (any(g < float3(-0.5)) || any(g > c.dims.xyz - float3(0.5))) { discard_fragment(); }
+    constexpr sampler s(coord::normalized, filter::linear, address::clamp_to_edge);
+    float3 uvw = (g + 0.5) / max(c.dims.xyz, float3(1.0));
+    if (sdfTex.sample(s, uvw).r >= 0.0) { discard_fragment(); }
+    GBuf o;
+    o.eyeZ = in.eyeZ;
+    float3 n = normalize(in.enormal);
+    if (n.z < 0.0) { n = -n; }
+    o.enormal = float4(n, 0.0);
+    o.albedo = float4(0.0);
+    return o;
+}
 """
 
 // ★ §3c CONTACT SHADOW — the part's own FOOTPRINT, not an ellipse.
@@ -1406,6 +1442,12 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     /// The outline ribbon's pipeline: `depth_vertex` + `depth_fragment_flat`.
     private let outlineRibbonPipeline: MTLRenderPipelineState?
     private var outlineRibbonBuffer: MTLBuffer?
+    /// The region caps' pipeline: `depth_vertex` + `region_cap_fragment` (2026-09-18).
+    private let regionCapPipeline: MTLRenderPipelineState?
+    private var regionCapBuffer: MTLBuffer?
+    private var regionCapFlexBuffer: MTLBuffer?
+    private var regionCapVertexCount = 0
+    private var regionCapVersionSeen = -1
     private var outlineRibbonFlexBuffer: MTLBuffer?
     private var outlineRibbonVertexCount = 0
     private var outlineRibbonVersionSeen = -1
@@ -1944,6 +1986,7 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         // flex displacement at buffer 3 (so the captured depth matches the visible flexed part).
         var depthPrepassPipe: MTLRenderPipelineState? = nil
         var outlineRibbonPipe: MTLRenderPipelineState? = nil
+        var regionCapPipe: MTLRenderPipelineState? = nil
         if let dLib = try? device.makeLibrary(source: depthPrepassShaderSource, options: nil),
            let dvf = dLib.makeFunction(name: "depth_vertex"),
            let dff = dLib.makeFunction(name: "depth_fragment") {
@@ -2001,6 +2044,17 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
                 rpd.colorAttachments[2].pixelFormat = Self.gbufferAlbedoFormat
                 rpd.depthAttachmentPixelFormat = Self.depthFormat
                 outlineRibbonPipe = try? device.makeRenderPipelineState(descriptor: rpd)
+            }
+            if let cff = dLib.makeFunction(name: "region_cap_fragment") {
+                let cpd = MTLRenderPipelineDescriptor()
+                cpd.vertexFunction = dvf
+                cpd.fragmentFunction = cff
+                cpd.vertexDescriptor = dvd
+                cpd.colorAttachments[0].pixelFormat = Self.sceneDepthFormat
+                cpd.colorAttachments[1].pixelFormat = Self.gbufferNormalFormat
+                cpd.colorAttachments[2].pixelFormat = Self.gbufferAlbedoFormat
+                cpd.depthAttachmentPixelFormat = Self.depthFormat
+                regionCapPipe = try? device.makeRenderPipelineState(descriptor: cpd)
             }
         }
         // §3c footprint pipeline: position only, one R8 colour attachment, no depth
@@ -2244,6 +2298,7 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         self.stagePipeline = stagePipe
         self.depthPrepassPipeline = depthPrepassPipe
         self.outlineRibbonPipeline = outlineRibbonPipe
+        self.regionCapPipeline = regionCapPipe
         self.contactPipeline = contactPipe
         self.groundDepthState = device.makeDepthStencilState(descriptor: gdsd) ?? depth
         self.lineOverlayDepthState = device.makeDepthStencilState(descriptor: odsd) ?? depth
@@ -4386,6 +4441,40 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
                 penc.setVertexBytes(&du, length: MemoryLayout<DepthPrepassUniforms>.stride, index: 1)
                 penc.setFragmentBytes(&du, length: MemoryLayout<DepthPrepassUniforms>.stride, index: 1)
                 countedDraw(penc, .triangle, outlineRibbonVertexCount)
+            }
+        }
+        // ★ THE SOLID BEYOND EACH FACE PRISM'S CAP (2026-09-18) — body-coloured, only
+        // where the part continues past the cap (the fragment samples the part SDF).
+        if let lattice, let cpipe = regionCapPipeline, let cap = lattice.regionCap, cap.vertexCount > 0,
+           let sdf = lattice.partSDFTexture, let g = lattice.partSDFGrid {
+            if regionCapVersionSeen != lattice.regionCapVersion {
+                regionCapVersionSeen = lattice.regionCapVersion
+                regionCapVertexCount = cap.vertexCount
+                regionCapBuffer = cap.interleaved.withUnsafeBytes {
+                    device.makeBuffer(bytes: $0.baseAddress!, length: $0.count, options: .storageModeShared)
+                }
+                let zeros = [Float](repeating: 0, count: cap.vertexCount * 3)
+                regionCapFlexBuffer = zeros.withUnsafeBytes {
+                    device.makeBuffer(bytes: $0.baseAddress!, length: $0.count, options: .storageModeShared)
+                }
+            }
+            if let cb = regionCapBuffer, let cf = regionCapFlexBuffer, regionCapVertexCount > 0 {
+                var du = DepthPrepassUniforms(mvp: uniforms.mvp, modelView: modelViewMatrix(),
+                                              flex: .zero, normalMatrix: uniforms.normalMatrix)
+                let voxel = max(g.spacing.x, max(g.spacing.y, g.spacing.z))
+                var cu = RegionCapUniforms(origin: SIMD4(g.origin, 0), spacing: SIMD4(g.spacing, 0),
+                                           dims: SIMD4(Float(g.nx), Float(g.ny), Float(g.nz), 0),
+                                           margin: SIMD4(1.5 * voxel, 0, 0, 0))
+                penc.setRenderPipelineState(cpipe)
+                penc.setDepthStencilState(depthState)
+                penc.setCullMode(.none)
+                penc.setVertexBuffer(cb, offset: 0, index: 0)
+                penc.setVertexBuffer(cf, offset: 0, index: 3)
+                penc.setVertexBytes(&du, length: MemoryLayout<DepthPrepassUniforms>.stride, index: 1)
+                penc.setFragmentBytes(&du, length: MemoryLayout<DepthPrepassUniforms>.stride, index: 1)
+                penc.setFragmentBytes(&cu, length: MemoryLayout<RegionCapUniforms>.stride, index: 2)
+                penc.setFragmentTexture(sdf, index: 0)
+                countedDraw(penc, .triangle, regionCapVertexCount)
             }
         }
         if let lattice {

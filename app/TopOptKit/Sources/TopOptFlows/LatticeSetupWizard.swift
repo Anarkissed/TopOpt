@@ -750,8 +750,9 @@ public struct LatticeSetupWizard: View {
     static let infoTransferTies = "On the grown lattice, ties run across the pillars along the second "
         + "stress family, welded at each pillar. They carried the structural certificate on the "
         + "test stand (p99 23.4 → 2.78 MPa). Off leaves the pillars alone."
-    static let infoSolidRim = "A ring of solid one base cell wide inside each face outline, so the "
-        + "lattice grades into the part's edge instead of ending on it. Off removes the ring."
+    static let infoSolidRim = "A solid ring inside each face outline — the width you type, or the "
+        + "printability floor (about one and a half beads, never less than a solve voxel) — drawn as a "
+        + "beam around the lattice; the struts run into it and weld there. Off removes the ring."
     static let infoLook = "How many cells the eye should read across the shortest face. The size "
         + "check uses it to pick the look under Aesthetic; larger means finer."
     static let infoManualSizes = "Sizes certification approved: at each, the lattice ties to the part "
@@ -798,16 +799,16 @@ public struct LatticeSetupWizard: View {
         .buttonStyle(.plain)
         .popover(isPresented: Binding(get: { infoShown == id },
                                       set: { if !$0 { infoShown = nil } })) {
-            // ★ the census can run to a screenful — scroll it, never overflow the page
-            ScrollView {
-                Text(text)
-                    .dsStyle(DS.TypeScale.footnote)
-                    .foregroundStyle(DS.Color.textPrimary.color)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .textSelection(.enabled)
-                    .padding(16)
-            }
-            .frame(maxWidth: 360, maxHeight: 420)
+            // ★ SIZED TO ITS TEXT, NEVER SCROLLED (his 2026-09-18: "ensure that in any of
+            // the (i) the pop-ups are the required size to fit the text. There should be
+            // no need to scroll. Just make it bigger").
+            Text(text)
+                .dsStyle(DS.TypeScale.footnote)
+                .foregroundStyle(DS.Color.textPrimary.color)
+                .fixedSize(horizontal: false, vertical: true)
+                .textSelection(.enabled)
+                .padding(16)
+                .frame(width: 380)
         }
         .accessibilityIdentifier("wizard-info-\(id)")
     }
@@ -962,23 +963,9 @@ public struct LatticeSetupWizard: View {
             // looking at, could not reach it at all. The deformation has nothing to do
             // with growth: it bins whatever the tracer returned by depth and offsets the
             // layers, which is the same operation on either path.
-            HStack(spacing: DS.Space.s) {
-                HStack(spacing: DS.Space.xs) {
-                    Text("Depth variation (test)").dsStyle(DS.TypeScale.caption)
-                        .foregroundStyle(DS.Color.textPrimary.color)
-                    infoButton("depth-stagger", Self.infoDepthStagger)
-                }
-                Spacer(minLength: DS.Space.s)
-                GlassToggle(isOn: model.organicDepthStagger) {
-                    model.organicDepthStagger.toggle(); rebuild()
-                }
-                .accessibilityLabel("Depth variation test")
-                .accessibilityIdentifier("wizard-organic-depth-stagger")
-            }
-            if model.organicDepthStagger {
-                shortNote("Preview only — the run builds the un-staggered weave",
-                          warning: true)
-            }
+            // ★ THE DEPTH-VARIATION EXPERIMENT IS OFF THE PAGE (his 2026-09-18: "remove
+            // the 'depth variation test' selection"). The model keeps the flag (off) so an
+            // old snapshot decodes; nothing here can turn it on.
 
             // ── Flare overhangs (job switch, probe-gated) ──
             let filletKeyAccepted = TopOptKit.gradingSchemaAccepts(key: "organic_overhang_fillet")

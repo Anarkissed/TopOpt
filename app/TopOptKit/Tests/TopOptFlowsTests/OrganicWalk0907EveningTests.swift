@@ -86,26 +86,12 @@ final class OrganicWalk0907EveningTests: XCTestCase {
     /// It had been put beside the transfer ties, which live inside `if
     /// model.organicGrowth` and behind the fine-tuning disclosure — invisible on the
     /// traced path he was actually using. The deformation has nothing to do with growth.
-    func testTheDepthVariationToggleIsNotInsideTheGrownOnlySection() throws {
+    /// ★ RETIRED 2026-09-18: the toggle is OFF THE PAGE ("remove the 'depth variation
+    /// test' selection"). The flag stays in the model, off, for old snapshots.
+    func testTheDepthVariationToggleIsGoneFromThePage() throws {
         let wz = try source("TopOptFlows/LatticeSetupWizard.swift")
-        let toggle = try XCTUnwrap(wz.range(of: "wizard-organic-depth-stagger"),
-                                   "the depth-variation toggle").lowerBound
-        let grownOnly = try XCTUnwrap(wz.range(of: "if model.organicGrowth, TopOptKit.gradingSchemaAccepts(key: \"organic_scale\")"),
-                                      "the grown-only fine-tuning section").lowerBound
-        let density = try XCTUnwrap(wz.range(of: "sectionTitle(\"Density\""),
-                                    "the density section").lowerBound
-        XCTAssertLessThan(grownOnly, density,
-                          "sanity: the grown-only section comes before Density in the file")
-        XCTAssertGreaterThan(toggle, density,
-                             "★ the toggle must sit AFTER the density selection, which is "
-                             + "outside the grown-only fine-tuning block")
-        // ★ And it stays an experiment: off by default, never a job key.
-        var l = LatticeSettings(enabled: true)
-        l.algorithm = "organic"
-        XCTAssertFalse(l.organicDepthStagger, "★ an experiment is off by default")
-        let settings = try source("TopOptFlows/LatticeSettings.swift")
-        XCTAssertFalse(settings.contains("organic_depth_stagger"),
-                       "★ the experiment must have no job key at all")
+        XCTAssertNil(wz.range(of: "wizard-organic-depth-stagger"), "★ the depth-variation toggle must not be on the page")
+        XCTAssertNil(wz.range(of: "Depth variation (test)"))
     }
 
     /// ★★★ THE DEPTH-VARIATION TEST REACHES EVERY PATH (his walk, 2026-09-08: "the depth
