@@ -5093,6 +5093,16 @@ public struct WorkspacePlaceholder: View {
                 // synthesize_focal_stress with the plan built above — the same function
                 // and the same per-region config the run gets. The app injects nothing.
                 organicIn?.syntheticRegions = synthPlan.regions
+                // ★ A DEAD WALL IS DEAD AS A WHOLE (2026-09-18): its real tensor is zeroed
+                // so core's per-voxel blend gives the whole wall the focal field.
+                let verdicts = OrganicSyntheticStress.deadenWholeWalls(
+                    tensor: &organicIn!.tensor, regionIDs: synthPlan.regionIDs)
+                if !verdicts.isEmpty {
+                    NSLog("DIAG synthetic whole-wall: %@",
+                          verdicts.map { String(format: "%@ p99 %.4g < thr %.4g → %d voxels zeroed",
+                                                synthPlan.keyByID[$0.regionID] ?? "r\($0.regionID)", $0.p99, $0.thr, $0.zeroed) }
+                              .joined(separator: " | "))
+                }
             }
             // ★★★ TWO STAGES (his timings, 2026-09-06: trace 0.2 s, core's emission
             // 186–191 s). The traced picture first — the bridge skips the emission when
