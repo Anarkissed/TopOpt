@@ -235,6 +235,15 @@ Reference part: his M2 verticalStand, bead 0.45 mm, two face regions (12 mm and
   cube keeps it for its own window). Core may keep parsing the key; it will not arrive.
 - G. THE ORGANIC RIM BAND (§2.2a) — RULED: core keeps the band as CANDIDATE and welds the
   struts into the solid, instead of deleting it. This is the one geometric fix.
+- H. A DEAD WALL IS DEAD AS A WHOLE (2026-09-18 night). `synthesize_focal_stress` blends
+  per voxel by the real magnitude between ¼·thr and thr, so a wall hovering just under
+  thr (his front wall: p99 0.0041, max 0.0056 against thr 0.005) came out half synthetic
+  and half rounding-noise directions — struts filling half the depth, horizontals with no
+  verticals. The app now ZEROES the real tensor over every voxel of a region whose p99 is
+  under thr before the trace (`OrganicSyntheticStress.deadenWholeWalls`), so the whole
+  wall takes the focal field; a wall with p99 ≥ thr is untouched. Core must do the same in
+  the run: a region flagged `synthetic_stress: true` (or whose p99 < thr) is synthesised
+  WHOLE (blend weight 1 over the region), not voxel by voxel.
 
 ## 5. Pointers (app)
 `LatticeOctreeBake.swift` (§1.2–1.6), `LatticeOutlineRibbon.swift` (§1.5),

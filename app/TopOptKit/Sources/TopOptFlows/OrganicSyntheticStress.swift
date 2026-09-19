@@ -201,6 +201,44 @@ public enum OrganicSyntheticStress {
     /// ★ PER-WALL VON MISES from the tensor the tracer is handed (2026-09-07), keyed
     /// by the plan's 1-based region id: the p99 and the max over that wall's voxels.
     /// The same Voigt convention core uses (true shear).
+    /// ★★ A DEAD WALL IS DEAD AS A WHOLE (his 2026-09-18 night: the front wall's struts
+    /// filled half its depth, with horizontals waiting for verticals that never came).
+    /// Core synthesises PER VOXEL, blending the focal field with the real one by the real
+    /// magnitude between ¼·thr and thr — so a wall whose stress hovers just under the
+    /// threshold (his front wall: p99 0.0041 against thr 0.005, max 0.0056) is HALF
+    /// synthetic and half rounding-noise directions, and the tracer follows the noise.
+    /// Here a wall whose p99 is under core's own threshold has its real tensor ZEROED
+    /// over every voxel, so core's blend sees nothing to mix in and the whole wall takes
+    /// the focal field. A wall above the threshold is untouched (his back wall: p99
+    /// 0.020, real and coherent). Returns what it did, per region, for the log.
+    /// ★ PARITY: the run must apply the same whole-wall rule (parity brief).
+    public struct WholeWallVerdict: Equatable {
+        public let regionID: Int
+        public let p99: Double
+        public let thr: Double
+        public let zeroed: Int
+    }
+    public static func deadenWholeWalls(tensor: inout [Double], regionIDs: [Int32],
+                                        deadFraction: Double = deadFraction,
+                                        deadMPaFloor: Double = deadMPaFloor) -> [WholeWallVerdict] {
+        let n = regionIDs.count
+        guard n > 0, tensor.count == 6 * n else { return [] }
+        var peak = 0.0
+        for i in 0..<n where regionIDs[i] >= 1 { peak = Swift.max(peak, vonMises(tensor, at: i)) }
+        let thr = Swift.max(deadFraction * peak, deadMPaFloor)
+        var out: [WholeWallVerdict] = []
+        for (id, s) in wallStress(tensor: tensor, regionIDs: regionIDs).sorted(by: { $0.key < $1.key }) {
+            guard s.p99 < thr else { continue }
+            var zeroed = 0
+            for i in 0..<n where Int(regionIDs[i]) == id {
+                for c in 0..<6 { tensor[6 * i + c] = 0 }
+                zeroed += 1
+            }
+            out.append(WholeWallVerdict(regionID: id, p99: s.p99, thr: thr, zeroed: zeroed))
+        }
+        return out
+    }
+
     public static func wallStress(tensor: [Double], regionIDs: [Int32])
         -> [Int: (p99: Double, max: Double)] {
         let n = regionIDs.count

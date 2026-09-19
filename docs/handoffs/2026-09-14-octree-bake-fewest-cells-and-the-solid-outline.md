@@ -835,3 +835,17 @@ Installed 16:48:46. Not yet seen by him.
   the organic shrink is `sep − (sep − floor)(1 − t)·amount`, never below the floor. The
   tint is linear again. Measured on a 6 mm slab, band 6: mean in-band activation 0.24 at
   ×½, 0.41 at ×1, 0.67 at ×2 (`LatticeGradeStrengthTests`). Installed 22:45.
+
+## 23. 2026-09-18 23:55 — a dead wall is dead as a whole
+
+His observation with the walls gone: the front wall's organic struts fill half its depth,
+the back wall all of it; horizontals waiting for verticals. The device log: face 15 p99
+0.0041 / max 0.0056 MPa → 72 % synthetic; face 2 p99 0.020 → 5 %. Core's rule
+(`organic_lattice.hpp`) blends per voxel between ¼·thr and thr = max(2 % peak, 0.005),
+so the front wall was half focal field, half noise directions. "Wouldn't sim-stress have
+resolved it?" — the sim ran; the wall is inert (the whole part peaks at 0.03 MPa), and
+the blend is what half-filled it. Now `OrganicSyntheticStress.deadenWholeWalls` zeroes
+the real tensor of any region whose p99 < thr before the trace (DIAG
+`synthetic whole-wall: … zeroed`); the back wall is untouched. Parity brief §4-H asks
+core for the same whole-wall rule in the run. `OrganicWholeWallTests`. Installed 23:55.
+Not yet seen by him.
