@@ -1303,15 +1303,17 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
     /// MILLIMETRES in from the outline. 0 ⇒ fit only, no extra band (the strict
     /// geometric answer).
     public var shapeFitBandMM: Double
-    /// ★ HOW STRONG THE GRADE IS ACROSS THE BAND (his 2026-09-18: "a multiplier for the
-    /// gradient … a slider with 0 at the middle"). −1 … +1, 0 = linear. Applied as an
-    /// exponent on the band fraction, `gradeGamma(strength:)`: +1 pulls the grade deep
-    /// into the band, −1 keeps it to the outline's edge. Octet (quilt raise, tint) and
-    /// organic (spacing, tint) alike.
+    /// ★ HOW MUCH THE GRADE DOES ACROSS THE BAND (his 2026-09-18: "a way to make the
+    /// struts thicker or thinner; to make the cells smaller or bigger; to modify the
+    /// AMOUNT of gradient seen in the band. NOT the band length"). −1 … +1, 0 = today's
+    /// amount. A MULTIPLIER on the grade's amount, `gradeAmount(strength:)`: +1 doubles
+    /// how far the struts thicken and the cells shrink at every point of the band, −1
+    /// halves it; the band's length is untouched. Octet (quilt raise) and organic
+    /// (spacing, and the bead that follows it) alike.
     public var shapeFitGradeStrength: Double = 0
-    /// The band fraction's exponent for a strength: 2^(−2·s) — 0.25 at +1, 4 at −1.
-    public static func gradeGamma(strength s: Double) -> Double {
-        pow(2.0, -2.0 * Swift.min(1, Swift.max(-1, s)))
+    /// The grade's amount multiplier for a strength: 2^s — 2 at +1, ½ at −1, 1 at 0.
+    public static func gradeAmount(strength s: Double) -> Double {
+        pow(2.0, Swift.min(1, Swift.max(-1, s)))
     }
     /// The density RANGE the lattice grades between (relative density, dimensionless).
     /// Stored as the user's raw pick; CLAMPED to the core band [rhoMin, rhoMax] at use

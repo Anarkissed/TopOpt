@@ -817,11 +817,11 @@ public struct LatticeSetupWizard: View {
                 .dsStyle(DS.TypeScale.caption).foregroundStyle(DS.Color.textPrimary.color)
                 .frame(width: 52, alignment: .trailing)
         }
-        captionLine("0 is linear; + pulls the grade deeper in, − keeps it to the edge.",
+        captionLine("0 is today's amount; + thicker struts and smaller cells, − less.",
                     info: "\(idPrefix)-strength",
-                    "The strength is an exponent on how far into the band a point is: at +1 the "
-                    + "grade reaches deep into the band, at −1 it stays close to the outline. "
-                    + "It shapes the quilt, the strut thickening and the tint alike.",
+                    "A multiplier on how much the grade does at every point of the band: at +1 "
+                    + "the struts thicken and the cells shrink twice as far, at −1 half as far. "
+                    + "The band's length is set above and is not changed by this.",
                     tint: DS.Color.textQuaternary.color)
     }
 

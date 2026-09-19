@@ -827,3 +827,11 @@ Installed 16:48:46. Not yet seen by him.
   applied to the octet's quilt raise (`octreeCellField(bandGamma:)`), the organic
   spacing grade, and the tint in both shaders (`colourSpan.w`).
   `LatticeGradeStrengthTests`. Installed 22:19:06. Not yet seen by him.
+- **22:45 — STRENGTH IS AN AMOUNT, NOT A SHAPE** (his correction: "a way to make the
+  struts thicker or thinner; to make the cells smaller or bigger; to modify the AMOUNT
+  of gradient seen in the band. NOT the band length"). `gradeGamma` (an exponent on the
+  band fraction) is replaced by `LatticeSettings.gradeAmount(strength) = 2^s` (½ … 2):
+  the octet's quilt raise is `(q − r)(1 − t)·share·amount` (clamped at the drawn top);
+  the organic shrink is `sep − (sep − floor)(1 − t)·amount`, never below the floor. The
+  tint is linear again. Measured on a 6 mm slab, band 6: mean in-band activation 0.24 at
+  ×½, 0.41 at ×1, 0.67 at ×2 (`LatticeGradeStrengthTests`). Installed 22:45.

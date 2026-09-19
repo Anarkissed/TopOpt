@@ -1267,10 +1267,12 @@ public struct LatticeSDFScene {
                     guard a >= 0, b >= 0, c >= 0, a < og.nx, b < og.ny, c < og.nz else { continue }
                     let d = Double(og.values[(c * og.ny + b) * og.nx + a])
                     guard d < 999 else { continue }
-                    let t = pow(Swift.min(Swift.max(d / o.shapeBandMM, 0), 1),
-                                LatticeSettings.gradeGamma(strength: o.shapeBandStrength))
+                    let t = Swift.min(Swift.max(d / o.shapeBandMM, 0), 1)
                     let target = Swift.min(sep[e], floorMM)
-                    let s2 = sep[e] * t + target * (1 - t)
+                    // ★ the AMOUNT of shrink, scaled by the strength (2026-09-18); never
+                    // below the floor, so +1 reaches the floor sooner and holds it
+                    let amount = LatticeSettings.gradeAmount(strength: o.shapeBandStrength)
+                    let s2 = Swift.max(target, sep[e] - (sep[e] - target) * (1 - t) * amount)
                     if s2 < sep[e] - 1e-9 { sep[e] = s2; graded += 1 }
                 }
                 fitNote += String(format: " · shape band %.1f mm: %d voxels graded toward the %.2f mm floor",
@@ -2464,7 +2466,7 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
                     dyadicSteps: steppedDyadicSteps,
                     // ★ Structural: the printability floor alone bounds the menu.
                     finestPrintsOpen: scene.stageMode != .structural,
-                    bandGamma: LatticeSettings.gradeGamma(strength: params.shapeFitGradeStrength),
+                    bandAmount: LatticeSettings.gradeAmount(strength: params.shapeFitGradeStrength),
                     stats: &st) {
                     baked = o
                     octreeCells = o.steppedCells
@@ -3784,9 +3786,7 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
         u.eyeNormalBasis = eyeNormalBasis
         // The colour ramp reads the STATED span; the grade's raise is drawn over the
         // wider drawn span but must not colour the quilt as the ramp's deep end.
-        // .w = the grade's gamma (the band fraction's exponent) for the tint
-        u.colourSpan = SIMD4(Float(params.densitySpan.lo), Float(params.densitySpan.hi), 1,
-                             Float(LatticeSettings.gradeGamma(strength: params.shapeFitGradeStrength)))
+        u.colourSpan = SIMD4(Float(params.densitySpan.lo), Float(params.densitySpan.hi), 1, 1)
         let gc = LatticeStructureColour.grade
         // w = the band in mm (the tint's spatial reach), 0 when the grade is off
         // ★ ORGANIC TOO (his 2026-09-18: "I am not seeing any of the 'grade to shape'

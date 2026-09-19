@@ -1103,7 +1103,7 @@ static LSDFHit lsdf_march(constant LSDFUniforms& U,
             // distance: 1 at the outline, 0 at the band's inner edge, never beyond.
             if (U.gradeColor.w > 0.0) {
                 float dOutH = regionTex.sample(samp, stc).g;
-                out.grade = 1.0 - pow(clamp(dOutH / U.gradeColor.w, 0.0, 1.0), U.colourSpan.w > 0.0 ? U.colourSpan.w : 1.0);
+                out.grade = clamp(1.0 - dOutH / U.gradeColor.w, 0.0, 1.0);
             }
             // Carried out so the albedo can draw it as printed layers rather than as
             // a strut of some invented density.
@@ -1968,7 +1968,7 @@ fragment CapGBuf capsule_gbuffer(CapVOut in [[stage_in]],
         float3 sdfDims = max(U.sdfDims.xyz, float3(1.0));
         float3 stc = ((p - U.sdfOrigin.xyz) / U.sdfSpacing.xyz + 0.5) / sdfDims;
         float dOut = regionTex.sample(samp, stc).g;
-        if (dOut < 500.0) { capGrade = 1.0 - pow(clamp(dOut / U.gradeColor.w, 0.0, 1.0), U.colourSpan.w > 0.0 ? U.colourSpan.w : 1.0); }
+        if (dOut < 500.0) { capGrade = clamp(1.0 - dOut / U.gradeColor.w, 0.0, 1.0); }
     }
     o.albedo = float4(lsdf_albedo(U, tintTex, stressTex, samp, p, U.shadeParams.x, 0.0, 0.0, capGrade), 1.0);
     o.depth = clamp(clip.z / max(clip.w, 1e-6), 0.0, 1.0);
