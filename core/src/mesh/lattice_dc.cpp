@@ -54,6 +54,33 @@ struct Cap {
   double r = 0.0, ab2 = 0.0;
 };
 
+// ★ HOW FAR THE SURFACE CAN SIT FROM A CAPSULE'S AXIS. Both walks below visit cells
+// near each capsule and nothing else, so this bound decides which cells get a vertex.
+// Get it too small and the surface passes through a cell nobody visited: that cell has
+// no vertex, every quad touching it is dropped, and the mesh OPENS.
+//
+// Without wetting the surface is the capsule's own offset, so r plus a few cells is
+// right. WITH wetting the field is LOWERED by up to `fillet = wet.scale * r`
+// (organic_wet_flare returns at most 1), which for a unit-gradient field pushes the
+// isosurface out by that much again.
+//
+// ★ WHAT GOES WRONG WHEN IT IS TOO SMALL, measured rather than reasoned. Cells outside
+// the walk are never visited, so they hold no vertex, every quad touching one is dropped,
+// and the surface is simply CLIPPED where it leaves the walked region. On the M2 lattice
+// at h = 0.2603, r = 0.4, the old r + 3h pad gave 494 boundary edges, 425 dropped quads,
+// an OPEN mesh and 565 mm3 of missing material; with the swell added, boundary 0,
+// dropped 0, closed. In the unit fixture at an exaggerated scale the same revert clips
+// the surface from 1.611 mm off the axis to 1.091 and the volume from 39.6 to 7.6 mm3.
+//
+// Note the walk visits a BOX around each capsule, so its corners reach pad * sqrt(2) and
+// a modest overshoot along a diagonal can still close: at wet.scale 1.0 the fixture's
+// surface sits 0.8121 mm out against an old pad of 0.7000 and the mesh stayed closed.
+// That is why this went unnoticed at first, and why test_wet_join_carves_closed also
+// carves at an exaggerated scale -- a test pinned only at 1.0 was green against this bug.
+static inline double cap_walk_pad(const Cap& c, double h, double wet_scale) {
+  return c.r * (1.0 + (wet_scale > 0.0 ? wet_scale : 0.0)) + 3.0 * h;
+}
+
 // ── the field, and its exact gradient ────────────────────────────────────────
 // A capsule's signed distance is |p - closest point on the segment| - r, so the union's
 // is the min over capsules. The gradient is the unit vector away from that closest
@@ -76,9 +103,9 @@ struct Field {
   // depends on which capsule is nearest.
   void wet_fields(const Vec3& p, double& d_part, double& s) const {
     d_part = voxel_field_sample(*wet.grid, *wet.part_sdf_mm, p);
-    // LatticeBoundary is POSITIVE inside the allowed region; the shader's field is
-    // positive inside the SOLID. One negation, stated here rather than buried.
-    s = -wet.boundary->signed_distance(p);
+    // Negative inside the LATTICED set, positive in the solid -- the shader's convention
+    // and, after ruling G, the only field whose zero is where a strut meets solid.
+    s = voxel_field_sample(*wet.grid, *wet.lattice_sdf_mm, p);
   }
   std::unordered_map<long long, std::vector<int>> grid;
   mutable std::size_t evals = 0;
@@ -89,6 +116,13 @@ struct Field {
     ++evals;
     double best = 1e30;
     int bi = -1;
+    // ★ THE WET FIELDS ARE SAMPLED ONCE, and the flare is applied INSIDE the single
+    // neighbourhood walk. The first version walked it twice -- once plain, once again to
+    // re-minimise with the flare -- which doubled the cost of every sample and, with the
+    // gradient taking six more, was most of why the fillet ran 7x slow.
+    const bool wetting = wet.on();
+    double d_part = 0.0, sfield = 0.0;
+    if (wetting) wet_fields(p, d_part, sfield);
     const long long ci = static_cast<long long>(std::floor(p.x / cell));
     const long long cj = static_cast<long long>(std::floor(p.y / cell));
     const long long ck = static_cast<long long>(std::floor(p.z / cell));
@@ -102,50 +136,29 @@ struct Field {
             const Vec3 ap = sub(p, c.a);
             double t = c.ab2 > 0.0 ? dot(ap, c.ab) / c.ab2 : 0.0;
             t = t < 0.0 ? 0.0 : (t > 1.0 ? 1.0 : t);
-            const double d = len(sub(ap, mul(c.ab, t))) - c.r;
+            double d = len(sub(ap, mul(c.ab, t))) - c.r;
+            if (wetting) {
+              // each capsule wets with ITS OWN fillet, as the preview draws one impostor
+              // per capsule: a thin strut gets a small bead, a fat one a big one
+              const double fillet = wet.scale * c.r;
+              if (fillet > 0.0)
+                d -= fillet * organic_wet_flare(d_part, sfield,
+                                                kOrganicWetReachPerFillet * fillet);
+            }
             if (d < best) { best = d; bi = m; }
           }
         }
     if (which) *which = bi;
     if (bi < 0) return 1e30;          // nothing near: far outside, which is all we need
-    if (wet.on()) {
-      // ★ EACH CAPSULE WETS WITH ITS OWN FILLET, exactly as the preview draws one
-      // impostor per capsule: fillet = scale x that strut's radius, so a thin strut gets
-      // a small bead and a fat one a big one. Recomputed over the neighbourhood rather
-      // than applied to the winner, because a thinner neighbour can win once swollen.
-      double d_part = 0.0, sfield = 0.0;
-      wet_fields(p, d_part, sfield);
-      best = 1e30;
-      const long long ci2 = static_cast<long long>(std::floor(p.x / cell));
-      const long long cj2 = static_cast<long long>(std::floor(p.y / cell));
-      const long long ck2 = static_cast<long long>(std::floor(p.z / cell));
-      for (long long i = ci2 - 1; i <= ci2 + 1; ++i)
-        for (long long j = cj2 - 1; j <= cj2 + 1; ++j)
-          for (long long k = ck2 - 1; k <= ck2 + 1; ++k) {
-            auto it = grid.find(key_of(i, j, k));
-            if (it == grid.end()) continue;
-            for (int m : it->second) {
-              const Cap& c = caps[static_cast<std::size_t>(m)];
-              const Vec3 ap = sub(p, c.a);
-              double t = c.ab2 > 0.0 ? dot(ap, c.ab) / c.ab2 : 0.0;
-              t = t < 0.0 ? 0.0 : (t > 1.0 ? 1.0 : t);
-              double d = len(sub(ap, mul(c.ab, t))) - c.r;
-              const double fillet = wet.scale * c.r;
-              if (fillet > 0.0)
-                d -= fillet * organic_wet_flare(d_part, sfield,
-                                                kOrganicWetReachPerFillet * fillet);
-              if (d < best) best = d;
-            }
-          }
-      // ★ AND INTERSECTED WITH WHERE MATERIAL MAY BE. Not optional once the join
-      // swells: fattening a strut against a wall pushes material THROUGH the wall
-      // unless the union is cut by the part, which is what the shader's
-      // max(d, clip_field) does and what the prism path never needed.
-      if (sfield > best) best = sfield;
-    }
+    // ★ CUT BY THE PART -- by the PART, not by the latticed set. Not optional once the
+    // join swells: fattening a strut against a wall pushes material through it unless the
+    // union is cut. Cutting by the latticed set instead would sever every strut at the
+    // rim band it is meant to run into, undoing ruling G.
+    if (wetting && d_part > best) best = d_part;
     const double below = clip_z - p.z;      // the half-space, intersected with the union
     return below > best ? below : best;
   }
+
   Vec3 gradient(const Vec3& p) const {
     if (wet.on()) {
       // ★ THE BLENDED SURFACE IS NOT ANY CAPSULE'S, so the exact analytic normal stops
@@ -457,7 +470,7 @@ TriangleMesh contour_uniform(const Field& F, double h, const LatticeDcOptions& o
       // ★ THE WALK MUST COVER A CELL'S NEIGHBOURS, NOT JUST THE CELL. A quad is emitted
       // for a sign-changing grid edge and joins the FOUR cells sharing it, so every one
       // of those must have been visited or the quad is dropped and the mesh opens.
-      const double pad = c.r + 3.0 * h;
+      const double pad = cap_walk_pad(c, h, F.wet.on() ? F.wet.scale : 0.0);
       const long long i0 = static_cast<long long>(std::floor((std::min(c.a.x, b.x) - pad) / h));
       const long long i1 = static_cast<long long>(std::ceil((std::max(c.a.x, b.x) + pad) / h));
       const long long j0 = static_cast<long long>(std::floor((std::min(c.a.y, b.y) - pad) / h));
@@ -859,7 +872,7 @@ TriangleMesh contour_octree(const Field& F, double h, const LatticeDcOptions& op
   T.occupied.assign(static_cast<std::size_t>(T.up) + 1, {});
   for (const Cap& c : F.caps) {
     const Vec3 b = add(c.a, c.ab);
-    const double pad = c.r + 3.0 * h;
+    const double pad = cap_walk_pad(c, h, F.wet.on() ? F.wet.scale : 0.0);
     const long long i0 = static_cast<long long>(std::floor((std::min(c.a.x, b.x) - pad) / h));
     const long long i1 = static_cast<long long>(std::ceil((std::max(c.a.x, b.x) + pad) / h));
     const long long j0 = static_cast<long long>(std::floor((std::min(c.a.y, b.y) - pad) / h));

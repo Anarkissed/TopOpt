@@ -55,22 +55,38 @@ namespace topopt {
 // "flat-rimmed foot" the preview tried and rejected, and is what core's own header has
 // been describing (and not implementing) since 2026-09-08.
 //
-// `part_sdf_mm` is the distance to MATERIAL, negative inside (voxel_sdf.hpp), and gates
-// the bead: a strut breaking out into air gets a clean cut, not a blob. `boundary` gives
-// the lattice/solid boundary, whose sign this inverts to match the shader's convention.
-// `scale` is 0 to leave the join alone; kOrganicWetScale is what the preview uses.
+// TWO FIELDS, AND THEY ARE NOT THE SAME ONE -- which the first wiring of this got wrong.
 //
-// NOTE, and it is one fewer thing to keep in step: core needs NO embed relaxation. The
-// preview relaxes its region by the embed because its region texture stops at the solid;
-// after ruling G core's declared region already CONTAINS the rim band the struts run
-// into, so they are inside the allowed region already.
+// `part_sdf_mm`    distance to MATERIAL, negative inside. It does two jobs: it gates the
+//                  bead (a strut breaking out into AIR gets a clean cut, not a blob) and
+//                  it is what the swollen union is CUT BY, so a fattened strut cannot
+//                  push material through the part's own surface.
+// `lattice_sdf_mm` distance to the LATTICED SET, negative inside it, positive in the
+//                  solid. This is where the joint IS, and it is what the flare is
+//                  positioned against.
+//
+// ★ THE FIRST VERSION USED LatticeBoundary FOR THE SECOND AND MEASURED ALMOST NOTHING:
+// +0.43 % of volume where a fillet of a full radius at every joint must add far more.
+// LatticeBoundary is the ALLOWED REGION -- part AND declared region -- and after ruling G
+// the declared region CONTAINS the rim band the struts run into, so a strut entering the
+// band is still inside it, s stays negative, and the flare never fires. It only fired at
+// the region's outer edge, which is not where a strut meets solid. The latticed set is
+// the surface the joint actually lies on.
+//
+// Both are sampled fields, so the inner loop does two trilinear reads and no analytic
+// boundary evaluation -- which is also why this is not slow.
+//
+// Core needs NO embed relaxation, one fewer number to keep in step: the preview relaxes
+// its region by the embed because its region texture stops at the solid, and core cuts by
+// the PART, which the band is inside of.
 struct LatticeDcWetJoin {
   const VoxelGrid* grid = nullptr;
   const std::vector<double>* part_sdf_mm = nullptr;
-  const LatticeBoundary* boundary = nullptr;
+  const std::vector<double>* lattice_sdf_mm = nullptr;
   double scale = 0.0;
   bool on() const {
-    return scale > 0.0 && grid != nullptr && part_sdf_mm != nullptr && boundary != nullptr;
+    return scale > 0.0 && grid != nullptr && part_sdf_mm != nullptr &&
+           lattice_sdf_mm != nullptr;
   }
 };
 

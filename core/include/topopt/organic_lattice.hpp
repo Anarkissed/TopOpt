@@ -505,14 +505,23 @@ inline constexpr int kOrganicFilletSegments = 12;
 // "I want all the struts to continue THROUGH to the solid and act as though they are
 // being wetted by a liquid layer... fillets on either side of the connection points,
 // regardless of what angle they come in at... as though they are melting into each
-// other." So the junction is not a cylinder stopping on a face: the strut is carried a
-// little way INTO the solid, and the corner is filled by a concave fillet -- the
-// meniscus profile, tangent to the solid at one end and to the strut at the other:
-//     rho(z) = r + R - sqrt(R^2 - (R - z)^2),  z the PERPENDICULAR distance to the face
-// rho(R) = r (meets the strut) and rho(0) = r + R (widest where it wets the face). z is
-// measured along the face normal rather than along the strut, so an oblique strut gets a
-// fillet that reaches the right height on both sides instead of a lopsided one -- which
-// is what "regardless of what angle" requires. The radius scales with the strut
+// other."
+//
+// ★ THE DERIVATION THAT USED TO SIT HERE IS GONE, and deliberately. It was a meniscus
+// of revolution about the strut axis, rho(z) = r + R - sqrt(R^2 - (R-z)^2), applied by
+// FATTENING the end capsules. That is not what the preview draws, and the maintainer's
+// verdict on it was "the way it was being implemented prior was just... bad". Two
+// reasons it could never match: the profile is a surface of revolution about ONE strut,
+// so where several struts land together it draws several overlapping collars instead of
+// one pool; and it is a change to the capsule list, so the mesher sees a fatter cylinder
+// with a hard shoulder rather than a blended field.
+//
+// The shipped wetting fillet is in organic_wet_join.hpp: the preview's own shader
+// arithmetic, transcribed constant for constant. It is a FIELD subtraction applied
+// inside the surface evaluator (lattice_dc.cpp Field::eval) keyed on two distances --
+// how far the point is into the solid, and how far it is from the latticed set -- so
+// every strut arriving at a junction, at any angle, wets the same single pool. Change
+// it there, not here.
 
 // ★ TRANSFER TIES (2026-09-05). A grown lattice follows the MAJOR principal
 // direction only, so where the load has to turn it has no member to turn along and

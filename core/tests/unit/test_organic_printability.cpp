@@ -1791,6 +1791,125 @@ void test_dual_contour() {
                                {{0,0,0},{3,3,3},0.8}});
 }
 
+// ── ★ THE WETTED CARVE MUST STAY CLOSED (the pad bug, 2026-09-19) ─────────────
+// test_wet_join_matches_the_preview above checks organic_wet_flare's ARITHMETIC, and it
+// passed throughout the defect this test exists for. The defect was at the CALL SITE:
+// lattice_dc's two capsule walks visited cells within `r + 3h` of each axis, and the
+// wetting swells the surface outward by up to `wet.scale * r`, eating the 3h ring that
+// the quad emission needs (a quad joins the four cells around a grid edge, so a cell
+// carrying surface is useless unless its neighbours were visited). On the M2 lattice
+// that left 1.46 cells of ring where 3 are needed: 425 quads dropped, 494 boundary
+// edges, an OPEN mesh, 565 mm3 of material missing -- while every value-level assertion
+// on the flare stayed green. So this test carves.
+//
+// The fixture is sized so the OLD pad is UNAMBIGUOUSLY too small, not marginally so:
+// r = 0.4 at h = 0.1 gives an old pad of r + 3h = 0.7 mm from the axis, while the wetted
+// surface sits at r + wet.scale * r = 0.8 mm -- outside it. (At h = 0.2 the old pad
+// reaches 1.0 mm and this fixture passes either way, which is why the first version of
+// this test was worthless: it was green against the very bug it was written for.)
+void test_wet_join_carves_closed() {
+  using namespace topopt;
+  // ★ THE FIXTURE IS THE REAL GEOMETRY, and the first draft of it was not. A strut
+  // placed mostly OUTSIDE the part measures the part intersection (which trimmed 77 % of
+  // it away) and not the fillet at all. What the join actually is: the part is SOLID
+  // around the latticed pocket, and a strut swells where it LEAVES the pocket into that
+  // solid -- which is where organic_wet_flare peaks, at s = 0.5 * reach outside the
+  // latticed set.
+  //
+  // So: a 20 x 10 x 10 mm block of 0.5 mm voxels, ALL of it solid part; the latticed set
+  // is a tube about the strut that STOPS at x = 10; the strut runs on to x = 14. The bead
+  // forms just past x = 10, in solid, exactly as it does at a real rim.
+  VoxelGrid g;
+  g.nx = 40; g.ny = 20; g.nz = 20; g.spacing = 0.5;
+  g.origin = Vec3{0, 0, 0};
+  g.tags.assign(static_cast<std::size_t>(g.nx * g.ny * g.nz), VoxelTag::Interior);
+  const std::size_t n = g.voxel_count();
+
+  const double r = 0.4;
+  std::vector<OrganicSpan> spans;
+  spans.push_back(OrganicSpan{Vec3{4.0, 5.0, 5.0}, Vec3{14.0, 5.0, 5.0}, r});
+
+  std::vector<char> part(n, 1), latticed(n, 0);
+  for (int k = 0; k < g.nz; ++k)
+    for (int j = 0; j < g.ny; ++j)
+      for (int i = 0; i < g.nx; ++i) {
+        const std::size_t e = static_cast<std::size_t>((k * g.ny + j) * g.nx + i);
+        const double x = (i + 0.5) * g.spacing, y = (j + 0.5) * g.spacing,
+                     z = (k + 0.5) * g.spacing;
+        const double dy = y - 5.0, dz = z - 5.0;
+        if (x >= 4.0 && x <= 10.0 && dy * dy + dz * dz <= 1.0) latticed[e] = 1;
+      }
+  const std::vector<double> psdf = voxel_signed_distance_mm(g, part);
+  const std::vector<double> lsdf = voxel_signed_distance_mm(g, latticed);
+  CHECK(psdf.size() == n && lsdf.size() == n, "wet carve: both fields built");
+
+  auto carve = [&](double scale, LatticeDcStats& st) {
+    LatticeDcOptions o;
+    o.cell_mm = 0.1; o.adaptive = true; o.simplify_tolerance_mm = 0.01;
+    if (scale > 0.0) {
+      o.wet.grid = &g; o.wet.part_sdf_mm = &psdf;
+      o.wet.lattice_sdf_mm = &lsdf; o.wet.scale = scale;
+    }
+    return lattice_dual_contour(spans, o, st); };
+
+  LatticeDcStats dry, wet;
+  carve(0.0, dry);
+  const TriangleMesh mw = carve(kOrganicWetScale, wet);
+  std::printf("  wet carve: dry V %.3f bnd %zu drop %zu | wet V %.3f bnd %zu drop %zu "
+              "nonmf %zu\n", dry.volume_mm3, dry.boundary_edges, dry.quads_dropped,
+              wet.volume_mm3, wet.boundary_edges, wet.quads_dropped,
+              wet.nonmanifold_edges);
+
+  // MEASURE the swell rather than assuming it: how far from the strut axis does the
+  // wetted surface actually get? This is the number the walk's pad has to cover.
+  {
+    double worst = 0.0, worst_x = 0.0;
+    for (const Vec3& v : mw.vertices) {
+      const double dy = v.y - 5.0, dz = v.z - 5.0;
+      const double rad = std::sqrt(dy * dy + dz * dz);
+      if (rad > worst) { worst = rad; worst_x = v.x; }
+    }
+    std::printf("  wet carve: surface reaches %.4f mm from the axis (at x = %.3f); "
+                "r = %.2f, old pad = %.4f\n", worst, worst_x, r, r + 3.0 * 0.1);
+  }
+  CHECK(!mw.triangles.empty(), "wet carve: it produced a surface");
+  CHECK(wet.boundary_edges == 0,
+        "wet carve: CLOSED -- the walk covered the swollen surface AND its ring");
+  CHECK(wet.quads_dropped == 0,
+        "wet carve: no quad dropped -- every wetted cell's neighbours were visited");
+  CHECK(wet.watertight, "wet carve: and the mesher agrees it is watertight");
+  // ★ AND IT MUST MEASURE SOMETHING. A wet run that quietly did nothing would satisfy
+  // every assertion above, which is the failure mode this whole task keeps producing.
+  CHECK(wet.volume_mm3 > dry.volume_mm3 * 1.02,
+        "wet carve: the fillet actually added material -- at least 2 % over the dry carve");
+  CHECK(dry.boundary_edges == 0 && dry.quads_dropped == 0,
+        "wet carve: the DRY carve is closed too, so a failure above is the wetting");
+
+  // ★ AND THE PAD MUST TRACK THE SCALE, not merely happen to be big enough at 1.0. The
+  // walk visits a BOX around each capsule, so its corners reach pad * sqrt(2) and a
+  // modest overshoot hides there: at kOrganicWetScale the surface already sits 0.8121 mm
+  // out against an old pad of 0.7000 and the mesh still closed. Exaggerating the scale
+  // removes that cover and tests the formula rather than the slack in it.
+  {
+    LatticeDcStats big;
+    const TriangleMesh mb = carve(3.0, big);
+    double worst = 0.0;
+    for (const Vec3& v : mb.vertices) {
+      const double dy = v.y - 5.0, dz = v.z - 5.0;
+      worst = std::max(worst, std::sqrt(dy * dy + dz * dz));
+    }
+    std::printf("  wet carve: at scale 3.0 the surface reaches %.4f mm; bnd %zu drop %zu "
+                "V %.3f\n", worst, big.boundary_edges, big.quads_dropped, big.volume_mm3);
+    CHECK(worst > r + 3.0 * 0.1,
+          "wet carve: the exaggerated scale really does push the surface past the old pad");
+    CHECK(big.boundary_edges == 0,
+          "wet carve: CLOSED at an exaggerated fillet -- the pad tracks wet.scale");
+    CHECK(big.quads_dropped == 0, "wet carve: and no quad dropped there either");
+    CHECK(big.volume_mm3 > wet.volume_mm3,
+          "wet carve: a bigger fillet really is more material");
+  }
+}
+
 // ── the octree: it must SHRINK the mesh without opening or tearing it ─────────
 // The merge is the size dial, so what is asserted here is the dial itself: raising the
 // tolerance must cost triangles and nothing else. Every run is also checked to have
@@ -1877,6 +1996,7 @@ int main() {
   test_union_volume();
   test_dual_contour();
   test_dual_contour_octree();
+  test_wet_join_carves_closed();
   test_bundle_is_not_support();
   test_chain_and_tee_survive();
   test_node_merge_joins_near_misses();
