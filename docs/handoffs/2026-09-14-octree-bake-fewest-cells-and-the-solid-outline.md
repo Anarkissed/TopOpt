@@ -862,3 +862,11 @@ Not yet seen by him.
   erodes the part by the march's trim (`stepParams.y`, clamp(0.35·voxel, 0.10, 0.35) mm)
   again; the 09-07 removal guarded a gap at the rim that cannot recur now the rim is a
   beam drawn over the band. `OrganicLookAndVisibilityTests` pin reversed. Installed 00:50.
+- **2026-09-19 — full suite at 5c6b9a47: 2468 tests, 31 skipped, 10 assertion failures in the
+  SAME five pre-existing tests** (AppModelTests 3MF ×3 — no lib3mf in the slice — ,
+  OrganicSampleCubeTests.testThickerIsLiveAndNeverRetraces,
+  OrganicVariantCacheTests.testTheKeyIgnoresThicknessAndFollowsCoreAndTopology). Nothing new.
+  The run before it (a15e0024) had ABORTED at `LatticeOrganicSettingsTests`: the test still
+  expected `organic_scale` on a part job (dropped under ruling F) and force-unwrapped the
+  missing key, which killed the xctest process — fixed in 5c6b9a47 (asserted absent, `XCTUnwrap`).
+  ~1 h 53 min wall.
