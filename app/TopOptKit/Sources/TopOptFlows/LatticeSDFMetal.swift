@@ -1209,9 +1209,6 @@ public struct LatticeSDFScene {
                     let p05 = sorted.isEmpty ? 0 : sorted[Int(0.05 * Double(sorted.count - 1))]
                     let p95 = sorted.isEmpty ? 0 : sorted[Int(0.95 * Double(sorted.count - 1))]
                     let span = Swift.max(p95 - p05, 1e-12)
-                    if deadVoxels > 0 {
-                        gradedNote += String(format: " · %d dead-wall voxels at the window's middle %.2f mm", deadVoxels, 0.5 * (lo + hi))
-                    }
                     for e in 0..<cand.count where cand[e] {
                         if isDead(e) { sep[e] = 0.5 * (lo + hi); continue }
                         let t = Swift.min(Swift.max((vm[e] - p05) / span, 0), 1)
@@ -1219,6 +1216,9 @@ public struct LatticeSDFScene {
                     }
                     gradedNote = String(format: " · graded %.2f–%.2f mm by stress (p05 %.4g, p95 %.4g MPa)",
                                         lo, hi, p05, p95)
+                    if deadVoxels > 0 {
+                        gradedNote += String(format: " · %d dead-wall voxels at the window's middle %.2f mm", deadVoxels, 0.5 * (lo + hi))
+                    }
                 }
             }
             // ★ SHAPE FIT (maintainer, 2026-09-03): the separation shrinks toward the

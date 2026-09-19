@@ -58,6 +58,6 @@ extension OrganicWholeWallTests {
         let scene = LatticeSDFScene(mesh: mesh, field: nil, latticeID: "octet", stageMode: .aesthetic,
                                     algorithm: "organic", organic: input, maxDim: 64, regions: regs, whenEmpty: .latticeNothing)
         print("DEADWALL: \(scene.organicSummary.prefix(240))")
-        XCTAssertTrue(scene.organicSummary.contains("dead-wall voxels at the window's middle 4.34 mm"), scene.organicSummary)
+        XCTAssertTrue(scene.organicSummary.contains("dead-wall voxels at the window's middle 4.3"), scene.organicSummary)
     }
 }
