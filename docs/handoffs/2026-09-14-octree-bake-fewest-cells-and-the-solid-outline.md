@@ -811,3 +811,19 @@ Installed 16:48:46. Not yet seen by him.
   parity brief when he approves the look).
 - **BADGE** at the mode chip's size (22 pt, capsule at the accent tint, rowHeight 44).
 - Installed 20:10. Not yet seen by him.
+
+## 22. 2026-09-18 22:19 — the cap goes with the body; badge + edge light; band and strength sliders
+
+- **Cap wall hidden in Lattice-only** (`bodyAlpha > 0.5` gates the cap draw): it is the
+  body, so it goes with the body.
+- **Badge**: always full opacity; each flash carries a token so a repeat cannot be
+  cleared by the previous flash's timer (the "super small opacity" was that); shown
+  1.6 s. **Edge light**: a blurred accent stroke round the whole screen, blinked twice
+  (0 → 1 → 0 → 1 → 0 over ~1.3 s) on every flash.
+- **Sliders** (`gradeBandSliders`, in the octet's band row and the organic pane): the
+  band 0–60 mm, and the grade's STRENGTH −1…+1 with 0 at the middle
+  (`LatticeSettings.shapeFitGradeStrength`, persisted, default 0). The strength is an
+  exponent on the band fraction, `gradeGamma(strength) = 2^(−2s)` (0.25 at +1, 4 at −1),
+  applied to the octet's quilt raise (`octreeCellField(bandGamma:)`), the organic
+  spacing grade, and the tint in both shaders (`colourSpan.w`).
+  `LatticeGradeStrengthTests`. Installed 22:19:06. Not yet seen by him.

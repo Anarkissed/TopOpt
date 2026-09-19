@@ -4451,7 +4451,9 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         }
         // ★ THE SOLID BEYOND EACH FACE PRISM'S CAP (2026-09-18) — body-coloured, only
         // where the part continues past the cap (the fragment samples the part SDF).
-        if let lattice, let cpipe = regionCapPipeline, let cap = lattice.regionCap, cap.vertexCount > 0,
+        // ★ THE CAP IS THE BODY: hidden with it (his 2026-09-18: "The walls for the floor
+        // are visible in the 'Lattice only' view.... That shouldn't happen").
+        if let lattice, bodyAlpha > 0.5, let cpipe = regionCapPipeline, let cap = lattice.regionCap, cap.vertexCount > 0,
            let sdf = lattice.solidOccupancyTexture, let g = lattice.solidOccupancyGrid {
             if regionCapVersionSeen != lattice.regionCapVersion {
                 regionCapVersionSeen = lattice.regionCapVersion

@@ -79,6 +79,12 @@ public struct WorkspacePlaceholder: View {
     // and a large badge flashes on the viewport either way.
     @State private var latticeOnly = false
     @State private var latticeOnlyFlash: String? = nil
+    /// Each flash gets its own token, so a repeat cannot be cleared by the previous
+    /// flash's timer (his 2026-09-18: "after that first time the opacity was super small").
+    @State private var latticeOnlyFlashToken = 0
+    /// ★ THE EDGE LIGHT (his 2026-09-18): a blue glow round the whole screen, twice, when
+    /// Lattice only turns on. 0…1, animated.
+    @State private var latticeEdgePulse: Double = 0
     /// When a hold last completed: the finger's release then also lands as the
     /// button's tap, and that tap must not undo what the hold just set.
     @State private var viewModeHoldFiredAt = Date.distantPast
@@ -1277,6 +1283,7 @@ public struct WorkspacePlaceholder: View {
                     viewModeToggles
                 }
                 latticeOnlyBadge
+                latticeEdgeLight
                 // ★ THE VON MISES SCALE, ON THE RIGHT EDGE (maintainer,
                 // 2026-08-18: "Please also add a legend on the right edge").
                 // Only while the plot is actually up — a key to nothing is
@@ -5062,6 +5069,7 @@ public struct WorkspacePlaceholder: View {
                 // ★ the grade-to-shape band reaches organic (2026-09-18): its own Fit to
                 // shape switch arms it, the same millimetres the octet uses
                 o.shapeBandMM = project.lattice.organicShapeFit ? project.lattice.shapeFitBandMM : 0
+                o.shapeBandStrength = project.lattice.shapeFitGradeStrength
                 // ★ THE DEPTH-STAGGER EXPERIMENT (2026-09-08), scaled to the window the
                 // lattice is graded to. Preview only; never written to the job.
                 o.depthStaggerCellMM = organicDepthStagger
@@ -7190,14 +7198,32 @@ public struct WorkspacePlaceholder: View {
 
     /// Flash a large badge over the viewport for a moment (lattice only on/off).
     private func flashLatticeOnly(_ text: String) {
+        latticeOnlyFlashToken += 1
+        let token = latticeOnlyFlashToken
         withAnimation(.spring(response: 0.35, dampingFraction: 0.65)) {
             latticeOnlyFlash = text
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.4) {
-            withAnimation(.easeOut(duration: 0.35)) {
-                if latticeOnlyFlash == text { latticeOnlyFlash = nil }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) {
+            guard latticeOnlyFlashToken == token else { return }   // a newer flash owns it
+            withAnimation(.easeOut(duration: 0.3)) { latticeOnlyFlash = nil }
+        }
+        // the edge light: twice
+        for (delay, value) in [(0.0, 1.0), (0.35, 0.0), (0.7, 1.0), (1.05, 0.0)] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+                withAnimation(.easeInOut(duration: 0.3)) { latticeEdgePulse = value }
             }
         }
+    }
+
+    /// The blue glow round the screen's edge — see `latticeEdgePulse`.
+    private var latticeEdgeLight: some View {
+        RoundedRectangle(cornerRadius: 36, style: .continuous)
+            .strokeBorder(DS.Color.accent.color, lineWidth: 22)
+            .blur(radius: 14)
+            .opacity(latticeEdgePulse)
+            .ignoresSafeArea()
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
     }
 
     @ViewBuilder private var latticeOnlyBadge: some View {
@@ -7222,7 +7248,8 @@ public struct WorkspacePlaceholder: View {
             .background(Capsule().fill(DS.Color.accent.opacity(0.14).color)
                 .overlay(Capsule().strokeBorder(DS.Color.accent.opacity(0.45).color, lineWidth: 1)))
             .dsShadow(DS.Shadow.panel)
-            .transition(.scale(scale: 0.6).combined(with: .opacity))
+            .opacity(1)                                   // ★ always fully opaque
+            .transition(.scale(scale: 0.85))
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
             .allowsHitTesting(false)
             .accessibilityIdentifier("lattice-only-badge")

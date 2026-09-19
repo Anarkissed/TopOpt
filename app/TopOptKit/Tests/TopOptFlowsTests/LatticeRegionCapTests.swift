@@ -71,5 +71,6 @@ final class LatticeRegionCapTests: XCTestCase {
         XCTAssertTrue(s.contains("o.albedo = float4(u.tint.xyz, 1.0);\n    return o;\n}\n\"\"\""), "★ the cap writes a PAINTED albedo — zero was invisible")
         XCTAssertTrue(s.contains("du.tint = LatticeRegionCap.wallTint"), "★ …in the body's grey")
         XCTAssertTrue(s.contains("margin: SIMD4(1.5 * voxel, 0, 0, 0)"), "★ a voxel and a half beyond the cap")
+        XCTAssertTrue(s.contains("if let lattice, bodyAlpha > 0.5, let cpipe = regionCapPipeline"), "★ the cap is the body: hidden with it")
     }
 }

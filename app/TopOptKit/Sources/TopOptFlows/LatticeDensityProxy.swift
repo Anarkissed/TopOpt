@@ -49,6 +49,8 @@ public struct LatticeProxyParams: Equatable, Sendable, Codable {
     /// cells (`LatticeSettings.shapeFitBandMM`). 0 ⇒ the strict geometric answer:
     /// subdivide only where a cell will not fit.
     public var shapeFitBandMM: Double = LatticeSettings.defaultShapeFitBandCells
+    /// The grade's strength across the band (−1…+1, 0 linear) — `LatticeSettings.shapeFitGradeStrength`.
+    public var shapeFitGradeStrength: Double = 0
     /// Relative density where demand is lowest (the sparsest the lattice grades to).
     public var minRelativeDensity: Double
     /// Relative density where demand is highest (the densest it grades to).

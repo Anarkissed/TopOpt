@@ -120,6 +120,9 @@ extension LatticePreviewOccupancy {
                                        /// menu is bounded by the printability floor
                                        /// alone (core's ruling, 2026-09-18).
                                        finestPrintsOpen: Bool = true,
+                                       /// The band fraction's exponent (1 = linear) —
+                                       /// `LatticeSettings.gradeGamma(strength:)`.
+                                       bandGamma: Double = 1,
                                        stats: inout OctreeBakeStats) -> LatticeCellField? {
         let t0 = Date()
         let voxel = Double(Swift.max(occ.spacing.x, Swift.max(occ.spacing.y, occ.spacing.z)))
@@ -816,7 +819,8 @@ extension LatticePreviewOccupancy {
                     // phase"): a third of the way to the quilt at the outline, fading
                     // to nothing at the band's inner edge. Only the finest rung quilts.
                     let share = isFinest[i] ? 1.0 : coarseCellBandRaise
-                    r = Swift.max(r, r + (q - r) * (1 - Double(bandT[i])) * share)
+                    let tb = pow(Double(bandT[i]), bandGamma > 0 ? bandGamma : 1)
+                    r = Swift.max(r, r + (q - r) * (1 - tb) * share)
                     // the bleed: solid wherever the voxel is within beam + bleed of
                     // the outline — the march tests the in-plane distance per voxel
                     if bleed > 0 { solidDepth[i] = Float(band) }

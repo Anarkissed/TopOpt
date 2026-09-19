@@ -1303,6 +1303,16 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
     /// MILLIMETRES in from the outline. 0 ⇒ fit only, no extra band (the strict
     /// geometric answer).
     public var shapeFitBandMM: Double
+    /// ★ HOW STRONG THE GRADE IS ACROSS THE BAND (his 2026-09-18: "a multiplier for the
+    /// gradient … a slider with 0 at the middle"). −1 … +1, 0 = linear. Applied as an
+    /// exponent on the band fraction, `gradeGamma(strength:)`: +1 pulls the grade deep
+    /// into the band, −1 keeps it to the outline's edge. Octet (quilt raise, tint) and
+    /// organic (spacing, tint) alike.
+    public var shapeFitGradeStrength: Double = 0
+    /// The band fraction's exponent for a strength: 2^(−2·s) — 0.25 at +1, 4 at −1.
+    public static func gradeGamma(strength s: Double) -> Double {
+        pow(2.0, -2.0 * Swift.min(1, Swift.max(-1, s)))
+    }
     /// The density RANGE the lattice grades between (relative density, dimensionless).
     /// Stored as the user's raw pick; CLAMPED to the core band [rhoMin, rhoMax] at use
     /// (`LatticeBounds`). The neutral open defaults (0…1) carry no band number.
@@ -1787,6 +1797,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         // ★ Absent from every older snapshot ⇒ decodes to its default, so an existing
         // project keeps the grade it has always had.
         case shapeFitBandMM
+        case shapeFitGradeStrength
         // ★ The Sim permission (2026-08-17). Absent from every older
         // snapshot ⇒ decodes to its TRUE default ⇒ an existing project
         // keeps asking for the solve it has always asked for.
@@ -1876,6 +1887,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         cellMinMM = try c.decodeIfPresent(Double.self, forKey: .cellMinMM) ?? LatticeSettings.defaultCellMinMM
         shapeFitBandMM = try c.decodeIfPresent(Double.self, forKey: .shapeFitBandMM)
             ?? LatticeSettings.defaultShapeFitBandCells
+        shapeFitGradeStrength = try c.decodeIfPresent(Double.self, forKey: .shapeFitGradeStrength) ?? 0
         cellMaxMM = try c.decodeIfPresent(Double.self, forKey: .cellMaxMM) ?? LatticeSettings.defaultCellMaxMM
         minRelativeDensity = try c.decodeIfPresent(Double.self, forKey: .minRelativeDensity) ?? 0
         maxRelativeDensity = try c.decodeIfPresent(Double.self, forKey: .maxRelativeDensity) ?? 1
@@ -2016,6 +2028,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         try c.encode(cellSizeMode, forKey: .cellSizeMode)
         try c.encode(cellMinMM, forKey: .cellMinMM)
         try c.encode(shapeFitBandMM, forKey: .shapeFitBandMM)
+        if shapeFitGradeStrength != 0 { try c.encode(shapeFitGradeStrength, forKey: .shapeFitGradeStrength) }
         try c.encode(cellMaxMM, forKey: .cellMaxMM)
         try c.encode(minRelativeDensity, forKey: .minRelativeDensity)
         try c.encode(maxRelativeDensity, forKey: .maxRelativeDensity)
@@ -2492,13 +2505,15 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         // ONE lattice the user asked for. Converted through the same law the
         // renderer uses, then clamped to what the machine can actually print.
         if let t = manualThicknessDensity(limits: limits) {
-            return LatticeProxyParams(latticeID: topologyID, cellMM: cellMM,
-                                      shapeFitBandMM: shapeFitBandMM,
-                                      minRelativeDensity: t, maxRelativeDensity: t,
-                                      gamma: demandExponent,
-                                      uniformRelativeDensity: t)
+            var p = LatticeProxyParams(latticeID: topologyID, cellMM: cellMM,
+                                       shapeFitBandMM: shapeFitBandMM,
+                                       minRelativeDensity: t, maxRelativeDensity: t,
+                                       gamma: demandExponent,
+                                       uniformRelativeDensity: t)
+            p.shapeFitGradeStrength = shapeFitGradeStrength
+            return p
         }
-        return LatticeProxyParams(latticeID: topologyID, cellMM: cellMM,
+        var p = LatticeProxyParams(latticeID: topologyID, cellMM: cellMM,
                                   shapeFitBandMM: shapeFitBandMM,
                                   minRelativeDensity: b.densityLo,
                                   maxRelativeDensity: b.densityHi,
@@ -2520,6 +2535,8 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
                                   uniformRelativeDensity: Swift.max(b.densityLo, Swift.min(
                                       0.5 * (b.densityLo + b.densityHi),
                                       allowQuilt ? 1.0 : lattice.aestheticDensityCeiling(cellMM: cellMM))))
+        p.shapeFitGradeStrength = shapeFitGradeStrength
+        return p
     }
 }
 

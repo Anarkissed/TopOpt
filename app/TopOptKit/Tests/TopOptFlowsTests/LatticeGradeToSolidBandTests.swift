@@ -471,7 +471,7 @@ final class LatticeGradeToSolidBandTests: XCTestCase {
         XCTAssertTrue(renderer.contains("if scene.algorithm == \"stepped\",\n           steppedCellMM.isEmpty"),
                       "★ the deferred-bake guard is stepped's alone: doubled with no cells draws the dyadic ladder, which is still doubled")
         XCTAssertTrue(renderer.contains("dyadicSteps: steppedDyadicSteps,")
-                      && renderer.contains("finestPrintsOpen: scene.stageMode != .structural,\n                    stats: &st)"),
+                      && renderer.contains("finestPrintsOpen: scene.stageMode != .structural,\n                    bandGamma: LatticeSettings.gradeGamma(strength: params.shapeFitGradeStrength),\n                    stats: &st)"),
                       "★ the octree call must pass the step style and the structural floor, or Default Grade takes thirds "
                       + "and Structural keeps the aesthetic quilt bound")
         let wizard = try String(contentsOf: src.appendingPathComponent("LatticeSetupWizard.swift"), encoding: .utf8)

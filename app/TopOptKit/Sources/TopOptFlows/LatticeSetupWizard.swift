@@ -789,6 +789,42 @@ public struct LatticeSetupWizard: View {
         }
     }
 
+    /// ★ THE BAND AND ITS STRENGTH AS SLIDERS (his 2026-09-18: "add the grade band
+    /// slider in the settings … the default is really not visible … a multiplier for the
+    /// gradient too … a slider with 0 at the middle"). One view for both panes.
+    @ViewBuilder private func gradeBandSliders(idPrefix: String) -> some View {
+        HStack(spacing: DS.Space.s) {
+            Text("Band").dsStyle(DS.TypeScale.caption2).foregroundStyle(DS.Color.textTertiary.color)
+                .frame(width: 52, alignment: .leading)
+            Slider(value: Binding(get: { model.shapeFitBandMM },
+                                  set: { model.shapeFitBandMM = ($0).rounded(); rebuild() }),
+                   in: 0...60, step: 1)
+                .tint(DS.Color.accent.color)
+                .accessibilityIdentifier("\(idPrefix)-band-slider")
+            Text(String(format: "%.0f mm", model.shapeFitBandMM))
+                .dsStyle(DS.TypeScale.caption).foregroundStyle(DS.Color.textPrimary.color)
+                .frame(width: 52, alignment: .trailing)
+        }
+        HStack(spacing: DS.Space.s) {
+            Text("Strength").dsStyle(DS.TypeScale.caption2).foregroundStyle(DS.Color.textTertiary.color)
+                .frame(width: 52, alignment: .leading)
+            Slider(value: Binding(get: { model.shapeFitGradeStrength },
+                                  set: { model.shapeFitGradeStrength = ($0 * 10).rounded() / 10; rebuild() }),
+                   in: -1...1, step: 0.1)
+                .tint(DS.Color.accent.color)
+                .accessibilityIdentifier("\(idPrefix)-strength-slider")
+            Text(model.shapeFitGradeStrength == 0 ? "0" : String(format: "%+.1f", model.shapeFitGradeStrength))
+                .dsStyle(DS.TypeScale.caption).foregroundStyle(DS.Color.textPrimary.color)
+                .frame(width: 52, alignment: .trailing)
+        }
+        captionLine("0 is linear; + pulls the grade deeper in, − keeps it to the edge.",
+                    info: "\(idPrefix)-strength",
+                    "The strength is an exponent on how far into the band a point is: at +1 the "
+                    + "grade reaches deep into the band, at −1 it stays close to the outline. "
+                    + "It shapes the quilt, the strut thickening and the tint alike.",
+                    tint: DS.Color.textQuaternary.color)
+    }
+
     /// The (i): a popover with the explanation, one open at a time.
     private func infoButton(_ id: String, _ text: String) -> some View {
         Button { infoShown = id } label: {
@@ -1055,11 +1091,7 @@ public struct LatticeSetupWizard: View {
                     .font(.system(size: 10, weight: .bold))
                     .foregroundStyle(DS.Color.textTertiary.color)
                     .padding(.top, DS.Space.xs)
-                scrubRow("organicShapeBand", value: model.shapeFitBandMM, unit: " mm",
-                         step: 1, range: 0...60) {
-                    model.shapeFitBandMM = $0
-                    rebuild()
-                }
+                gradeBandSliders(idPrefix: "wizard-organic-band")
                 captionLine("How far in the cells shrink toward the outline.", info: "organic-band",
                             "Within this many millimetres of a face outline the strut spacing runs "
                             + "down to the printable floor at the outline, and the struts thicken with "
@@ -1500,11 +1532,7 @@ public struct LatticeSetupWizard: View {
                 .font(.system(size: 10, weight: .bold))
                 .foregroundStyle(DS.Color.textTertiary.color)
                 .padding(.top, DS.Space.s)
-            scrubRow("shapeFitBand", value: model.shapeFitBandMM, unit: " mm",
-                     step: 1, range: 0...60) {
-                model.shapeFitBandMM = $0
-                rebuild()
-            }
+            gradeBandSliders(idPrefix: "wizard-shape-band")
             captionLine("How far in the cells grade down to the outline.",
                         info: "band",
                         "How far in from the face's outline the cells grade down toward the "
