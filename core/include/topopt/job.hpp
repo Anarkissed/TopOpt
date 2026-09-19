@@ -10,6 +10,8 @@
 #include "topopt/loadcase.hpp"   // ProductionLoadCase
 #include "topopt/materials.hpp"  // MaterialLibrary
 #include "topopt/mesh.hpp"       // Vec3
+#include "topopt/organic_lattice.hpp"  // kOrganicDensityUnionSubdivDefault
+#include "topopt/stepped_plan.hpp"     // SteppedCell, SteppedPlanRegion
 #include "topopt/pipeline.hpp"   // MinimizePlasticResult
 #include "topopt/settings.hpp"   // SettingsRules
 #include "topopt/smooth.hpp"     // SmoothStats
@@ -219,6 +221,17 @@ struct JobLattice {
   // Lattice role regions (see JobLatticeRegion). Empty => whole-part lattice,
   // byte-identical to the pre-regions schema.
   std::vector<JobLatticeRegion> regions;
+  // ★ ANY-STEP STEPPED: the cells the app placed, which core VALIDATES and does not
+  // repack. Sending the plan rather than the packer's inputs is what makes the preview a
+  // contract: the run lays down the arrangement the maintainer approved on screen, and a
+  // cell that does not satisfy the menu rule is REFUSED BY NAME rather than quietly
+  // replaced by something core preferred. Thousands of entries is normal.
+  // Empty => the legacy one-cell-per-region Stepped.
+  // `origin_mm` is the cell's minimum corner in MODEL space -- the same frame as
+  // lattice.regions[].geometry -- and `region_id` is 1-based in the job's own
+  // include-region order, so the frame each cell is stated in is DERIVED from the region
+  // it names rather than sent alongside it. Nothing to keep in step.
+  std::vector<SteppedCell> stepped_cells;
   // MULTISCALE LATTICE TO (task multiscale-lattice-to). false (the DEFAULT) is the
   // TWO-STEP pipeline every existing job runs: optimize assuming solid, then try to
   // lattice what survived. true asks the OPTIMIZER to place the lattice while it
@@ -443,10 +456,6 @@ struct JobGrading {
   // tracing and then repairing. Requires organic; default off so every existing job is
   // byte-identical.
   bool organic_growth = false;
-  // ★ The overhang FILLET is a printability repair (a span over open air is re-emitted
-  // as a 12-segment flare up to 2.5x the bead). Printability is user input, so the
-  // repair is a choice: absent means on (nothing existing changes), false skips it.
-  bool organic_overhang_fillet = true;
   // ★ grown only: transfer ties along the second principal direction, so the load
   // has a member to turn along (Michell's orthogonal family). The maintainer judged
   // the look on the M2 stand (2026-09-05, isostatic lines with the swirl at the
@@ -458,7 +467,73 @@ struct JobGrading {
   // distance of a solid-backed IN-PLANE boundary (the pocket's side walls, not its
   // floor or its open face) stays solid: the lattice grades into a solid frame it
   // can tie to. Absent (-1) = one base cell (cell_min_mm); 0 = off.
+  // ★ PRINTABILITY REPAIRS, ORGANIC. Each alters the geometry to help it print and each
+  // is OFF unless stated: `base_mat`/`fill_mat` add material to root the lattice,
+  // `trim_below_base` cuts what falls under the plate. They used to be hardcoded ON with
+  // no key at all.
+  bool organic_base_mat = false;
+  bool organic_fill_mat = false;
+  bool organic_trim_below_base = false;
   double organic_solid_rim_mm = -1.0;
+  // ★ Drive free organic strut ends this far INTO the solid they meet, then intersect
+  // the welded field with the part so nothing escapes a far face (organic_weld).
+  // 0 = off. Organic only.
+  double organic_strut_embed_mm = 0.0;
+  // ★ MESH THE LATTICE BY DUAL CONTOURING ITS OWN SDF instead of (as well as) welding a
+  // marching-cubes field, writing <prefix>_DC.stl beside the welded pair. OFF by default
+  // and additive: nothing already emitted changes. The weld under-reports the true union
+  // volume by 67 % and the analytic LSLT mesh by 28 %; this one reproduces it to within
+  // 1 %, and is watertight, at the cost of minutes rather than seconds. See
+  // topopt/lattice_dc.hpp.
+  bool organic_dual_contour = false;
+  // The base cell. 0 => derived from the thinnest strut, then raised if that would
+  // exceed the cell budget (the run reports which it used).
+  double organic_dc_cell_mm = 0.0;
+  // How far the fine surface may sit off a merged cell's vertex, in mm. This is the FILE
+  // SIZE dial: 0 => a tenth of the base cell, which on the M2 lattice was 40 % smaller
+  // than an unmerged mesh with no visible change.
+  double organic_dc_tolerance_mm = 0.0;
+  // ★ HOW THE CERTIFIED DENSITY MEASURES THE MATERIAL IN A VOXEL, and the default is now
+  // the one that measures something real. A positive k takes each voxel's share of the
+  // UNION by a deterministic k^3 subgrid: a point inside a strut crossing counts ONCE,
+  // however many struts meet there. 0 restores the old DEPOSIT, which walked pi*r^2*dl
+  // along every span and added it to the voxel it landed in, counting each crossing once
+  // PER STRUT -- and struts cross constantly, so it ran far high. Measured on the M2
+  // stand: the deposit said 57,661 mm3 where the shipped file holds 41,955; the union
+  // says 43,200, and the 3 % that remains is the certifiable band's own floor raising
+  // 3,840 voxels, not an error. k=6 is converged -- k=10 moves the answer by 0.08 % -- and
+  // costs about 17 s on that part.
+  //
+  // IT CHANGES THE CERTIFIED MARGIN, and the whole of that change is a correction: on the
+  // M2 stand 1,142 -> 956 effective 102.2 -> 85.6 (and 1,671 before the density was also
+  // taken on the spans that SHIP rather than the ones the tracer drew). 0 is kept so a
+  // run can be reproduced against the old figure, never because it is defensible.
+  int organic_density_union_subdiv = kOrganicDensityUnionSubdivDefault;
+  // ★ SOLVE THE BEAD FACTOR AGAINST THE SPANS THAT SHIP, by re-running the emission at a
+  // trial radius, rather than against the curves the tracer drew. Those are different
+  // networks -- on the M2 stand 63,324 mm3 of curves against 41,955 mm3 of shipped spans
+  // -- so a factor fitted to the first is a guess about the second.
+  //
+  // ★★ DEFAULT FALSE, AND THE REASON IS NOT CAUTION. Built, measured, and it revealed
+  // that the target is UNREACHABLE by thickening on this pipeline: the shipped volume
+  // FALLS as the bead grows, because the node merge welds any polyline finer than its own
+  // bead and a fatter strut therefore collapses the curve it belongs to. Measured trials
+  // on the M2 stand -- x1.00 -> 41,185 mm3 over 13,128 spans; x1.24 -> 37,150 over 8,039;
+  // x2.00 -> 1,615 over 27, with the node merge taking 25,515 mm of centreline down to
+  // 493. Until that merge rule is radius-independent, calibrating mass by bead scaling
+  // cannot work, and this switch exists to demonstrate that rather than to be used.
+  bool organic_calibrate_on_shipped = false;
+  // ★ THE FLOOR ON AN ANY-STEP TILE, and DELIBERATELY NOT NAMED `min_cell_mm`. This
+  // grading block already carries `cell_min_mm` -- the swept WINDOW's lower end, an
+  // entirely different quantity -- and a second key differing from it only in word order
+  // is a misconfiguration waiting to happen that no compiler or schema could ever catch.
+  // `stepped_min_tile_mm` says what it bounds: the tile S/n of an admitted family.
+  //
+  // Under a STRUCTURAL intent this is the ONLY lower bound: the 20 % "prints open" rule
+  // is aesthetic, and the beam-network certificate solves every strut rather than
+  // averaging them, so nothing structural depends on a cell being mostly air (see
+  // stepped_plan.hpp). Under an aesthetic intent both apply. 0 = no floor of its own.
+  double stepped_min_tile_mm = 0.0;
   double organic_scale = 1.0;
   bool organic_shape_fit = false;
   // ★★ SHAPE-FIT *ONLY* — the cell is a function of the SHAPE and nothing else; the

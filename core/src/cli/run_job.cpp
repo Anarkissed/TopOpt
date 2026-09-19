@@ -1,4 +1,9 @@
 #include "topopt/job.hpp"
+#include "topopt/lattice_dc.hpp"
+#include "topopt/lattice_union_volume.hpp"
+#include "topopt/organic_wet_join.hpp"
+#include "topopt/voxel_sdf.hpp"
+#include "topopt/stepped_plan.hpp"
 
 #include <algorithm>
 #include <array>
@@ -656,7 +661,10 @@ struct LatticeExportOutcome {
   long long organic_base_mat_stitches = 0;
   long long organic_base_mat_clusters = 0;
   long long organic_fill_mat_cells_outside_region = 0;
-  long long organic_fillet_skipped_spans = 0;   // spans the fillet would have flared, declined by the job
+  // ★ spans that run over open air. The overhang fillet that used to flare them was
+  // removed (it deposited blobs up to nine times the strut); the count remains so the
+  // receipt still says how much of the lattice is unsupported.
+  long long organic_unsupported_spans = 0;
   bool organic_shape_fit_on = false;
   long long organic_shape_fit_candidates = 0;
   long long organic_shape_fit_voxels_shrunk = 0;
@@ -742,7 +750,6 @@ struct LatticeExportOutcome {
   long long organic_arched_spans = 0;
   double organic_arch_rise = 0.0;
   long long organic_filleted = 0;
-  long long organic_fillet_unresolved = 0;
   double organic_fillet_radius = 0.0;
   double organic_base_mat_len = 0.0;
   double organic_base_mat_z = 0.0;
@@ -1806,7 +1813,18 @@ LatticeExportOutcome export_latticed_variant(
     // ★ STEPPED (§4). Null on every other run. Non-null => one ORDINARY generator
     // pass per declared region at that region's OWN cell, no ladder and no stitching
     // (lattice_gen.hpp's generate_lattice_stepped states what that gives up).
-    const std::vector<LatticeSteppedPass>* stepped = nullptr) {
+    const std::vector<LatticeSteppedPass>* stepped = nullptr,
+    // ★ Drive free organic strut ends this far into the solid, then intersect the
+    // welded field with the part (organic_weld). 0 = neither. A grading key, so it
+    // arrives separately from JobLattice.
+    double organic_strut_embed_mm = 0.0,
+    // ★ Mesh the lattice by dual contouring its own SDF, into <prefix>_DC.stl beside the
+    // welded pair. Grading keys, so they arrive separately from JobLattice.
+    bool organic_dual_contour = false, double organic_dc_cell_mm = 0.0,
+    double organic_dc_tolerance_mm = 0.0,
+    // ★ Solve the bead factor against the spans this function EMITS, rather than against
+    // the curves the tracer drew. See the calibration loop below.
+    bool organic_calibrate_on_shipped = true) {
   // ── M4: A SKIN MODE THAT PRODUCES NO GEOMETRY MUST SAY SO, NOT RETURN ZERO.
   //
   // ★ THE PREDICATE IS THE MEASURED COUNT, NOT A PREDICTION — and the first version
@@ -2086,7 +2104,6 @@ LatticeExportOutcome export_latticed_variant(
     oc.organic_support_fragment_length_mm = g.support_fragment_length_mm;
     oc.organic_base_mat_stitches = static_cast<long long>(g.base_mat_stitches);
     oc.organic_base_mat_clusters = static_cast<long long>(g.base_mat_clusters);
-    oc.organic_fillet_skipped_spans = static_cast<long long>(g.fillet_skipped_spans);
     oc.organic_fill_mat_cells_outside_region =
         static_cast<long long>(g.fill_mat_cells_outside_region);
 
@@ -2151,9 +2168,6 @@ LatticeExportOutcome export_latticed_variant(
     oc.organic_cantilever_islands = static_cast<long long>(g.cantilever_islands);
     oc.organic_arched_spans = static_cast<long long>(g.arched_spans);
     oc.organic_arch_rise = g.arch_max_rise_mm;
-    oc.organic_filleted = static_cast<long long>(g.filleted_spans);
-    oc.organic_fillet_unresolved = static_cast<long long>(g.fillet_unresolved);
-    oc.organic_fillet_radius = g.fillet_max_radius_mm;
     oc.organic_base_mat_len = g.base_mat_length_mm;
     oc.organic_base_mat_z = g.base_mat_z_mm;
     oc.organic_fill_cells = static_cast<long long>(g.fill_mat_cells);
@@ -2179,6 +2193,148 @@ LatticeExportOutcome export_latticed_variant(
   // the weld rasteriser needs, and observing never changes the emitted bytes
   // (lattice_gen.hpp). Without this, doubled and stepped still ship a soup of
   // thousands of closed shells and still trigger the floating-body misread.
+  // ── ★★ THE BEAD IS CALIBRATED ON THE SPANS THAT SHIP ────────────────────────
+  // (maintainer, 2026-09-17: "go ahead with the calibration rewrite".) It used to be
+  // solved inside the tracer, against the CURVES. That is not the geometry that ships and
+  // not even a shrunken version of it: measured on the M2 stand, the tracer's basis was
+  // 23,173 spans over 35,068.9 mm holding 63,324 mm3, while the file holds 11,638 spans
+  // over 30,457.5 mm and 41,955 mm3 -- the median strut diameter agrees to 4 %, the
+  // length differs by 13 %, and the VOLUME by 34 %. The emitter is not a filter: the node
+  // merge welds endpoints and the run collapse replaces each chain with fewer, straighter
+  // spans carrying that run's LARGEST radius, so the shipped set has its own overlap
+  // structure (51.5 % against the basis's 61.6 %). Scaling a radius derived from the
+  // first network can only be a guess about the second.
+  //
+  // So the factor is solved against the emitter's own output. Each trial runs the FULL
+  // emission -- clip to the part, node merge, support, prune, stranded drop, finish -- at
+  // a trial radius and measures the union of what comes out. That also removes the reason
+  // this could not simply be done afterwards: scaling radii on already-clipped spans
+  // would fatten every strut through the part's surface, whereas re-emitting clips at the
+  // radius it will ship with. Triangles are discarded during the trials, so a trial costs
+  // the emission and not the mesh.
+  OrganicLattice calibrated_lat;
+  if (organic && organic_calibrate_on_shipped &&
+      organic->report.bead_calibration_target_mm3 > 0.0 && !organic->curves.empty()) {
+    struct DiscardSink : TriangleSink {
+      void add_triangle(const Vec3&, const Vec3&, const Vec3&) override {}
+    };
+    const double target = organic->report.bead_calibration_target_mm3;
+    calibrated_lat = *organic;
+    std::vector<double> base_r(calibrated_lat.curves.size());
+    for (std::size_t q = 0; q < calibrated_lat.curves.size(); ++q)
+      base_r[q] = calibrated_lat.curves[q].radius_mm;
+    std::vector<double> base_c(calibrated_lat.connectors.size());
+    for (std::size_t q = 0; q < calibrated_lat.connectors.size(); ++q)
+      base_c[q] = calibrated_lat.connectors[q].radius_mm;
+    auto set_k = [&](double k) {
+      for (std::size_t q = 0; q < base_r.size(); ++q)
+        calibrated_lat.curves[q].radius_mm = base_r[q] * k;
+      for (std::size_t q = 0; q < base_c.size(); ++q)
+        calibrated_lat.connectors[q].radius_mm = base_c[q] * k;
+    };
+    std::size_t trial_spans = 0;
+    double trial_emitted_mm = 0.0, trial_merged_mm = 0.0, trial_written_mm = 0.0;
+    auto shipped_union = [&](double k) {
+      set_k(k);
+      DiscardSink ds;
+      std::vector<OrganicSpan> sp;
+      const OrganicGenStats gs =
+          generate_organic_lattice(calibrated_lat, ds, &boundary, 8, nullptr, &sp);
+      trial_spans = sp.size();
+      trial_emitted_mm = gs.census_len_mm[OrganicGenStats::CensusEmitted];
+      trial_merged_mm = gs.census_len_mm[OrganicGenStats::CensusNodeMerge];
+      trial_written_mm = gs.census_len_mm[OrganicGenStats::CensusWritten];
+      return sp.empty()
+                 ? 0.0
+                 : lattice_union_volume(sp, kOrganicBeadCalibrationSamples).volume_mm3;
+    };
+    const double t0cal = wall_seconds();
+    const double lt = std::log(target);
+    // ★ EVERY TRIAL IS PRINTED, because the first version of this ran the factor to
+    // 5.7e9 and emitted nothing, and the trial log is what showed why: the shipped union
+    // barely responds to the bead. A secant on a flat function extrapolates to infinity,
+    // so the search is BRACKETED and each step reported.
+    double lk0 = 0.0, lv0 = std::log(std::max(shipped_union(1.0), 1e-12));
+    const double v_at_one = std::exp(lv0);
+    std::fprintf(stderr,
+                 "[bead]   trial x1.0000 -> %.1f mm3 (%zu spans) | length emitted %.0f "
+                 "-> node_merge %.0f -> written %.0f mm\n",
+                 v_at_one, trial_spans, trial_emitted_mm, trial_merged_mm,
+                 trial_written_mm);
+    // The shipped union grows a little slower than the square of the radius, because a
+    // fatter strut is also a more overlapped one; 2.0 is the opening guess and the secant
+    // measures the real exponent from the next point.
+    // The bracket is a hard limit on what a calibration may do to a part, not a numerical
+    // convenience: a factor outside it is not a bead that needs adjusting, it is a
+    // grading target the emitter cannot deliver, and the run must SAY so rather than
+    // quietly shipping a part four times the intended thickness.
+    const double lk_lo = std::log(kOrganicCalibrationFactorMin);
+    const double lk_hi = std::log(kOrganicCalibrationFactorMax);
+    double lk1 = lk0 + (lt - lv0) / 2.0;
+    lk1 = std::min(std::max(lk1, lk_lo), lk_hi);
+    int steps = 0;
+    bool converged = false;
+    double v_final = v_at_one;
+    for (; steps < kOrganicCalibrationShippedSteps; ++steps) {
+      v_final = shipped_union(std::exp(lk1));
+      std::fprintf(stderr,
+                   "[bead]   trial x%.4f -> %.1f mm3 (%zu spans) | length emitted %.0f "
+                   "-> node_merge %.0f -> written %.0f mm\n",
+                   std::exp(lk1), v_final, trial_spans, trial_emitted_mm,
+                   trial_merged_mm, trial_written_mm);
+      const double lv1 = std::log(std::max(v_final, 1e-12));
+      if (std::fabs(lv1 - lt) < kOrganicBeadCalibrationTol) { converged = true; break; }
+      double slope = (lk1 != lk0) ? (lv1 - lv0) / (lk1 - lk0) : 2.0;
+      if (!std::isfinite(slope) || slope < 0.25) slope = 0.25;
+      if (slope > 4.0) slope = 4.0;
+      double lk2 = lk1 + (lt - lv1) / slope;
+      lk2 = std::min(std::max(lk2, lk_lo), lk_hi);
+      if (std::fabs(lk2 - lk1) < 1e-6) break;        // pinned at a bracket: no more to do
+      lk0 = lk1; lv0 = lv1; lk1 = lk2;
+      if (!std::isfinite(lk1)) { lk1 = lk0; break; }
+    }
+    double k = std::exp(lk1);
+    if (!(k > 0.0) || !std::isfinite(k)) k = 1.0;
+    const bool bracketed = k <= kOrganicCalibrationFactorMin * 1.001 ||
+                           k >= kOrganicCalibrationFactorMax * 0.999;
+    // Never below the machine: the printable floor is user input and outranks this, the
+    // same rule the tracer's own calibration was held to.
+    double kmin = 0.0;
+    for (std::size_t q = 0; q < base_r.size(); ++q)
+      if (base_r[q] > 0.0)
+        kmin = std::max(kmin, 0.5 * organic->report.min_extrudable_width_mm / base_r[q]);
+    const bool floored = k < kmin;
+    if (floored) k = kmin;
+    // ★★ AND IF THE TARGET IS OUT OF REACH, SHIP THE UNCALIBRATED PART, NOT A RUINED
+    // ONE. Measured on the M2 stand, the emitter does not merely resist a thicker bead,
+    // it DESTROYS the network under one: at x2.0 the node merge collapsed 25,515 mm of
+    // emitted centreline to 493 mm, 27 spans survived of 13,128, and the run still
+    // reported ACCEPTED. A calibration that cannot reach its target must hand back the
+    // part it started with and say why -- never the one it wrecked reaching for it.
+    if (!converged) {
+      std::fprintf(stderr,
+                   "[bead] TARGET OUT OF REACH: the grading law asks for %.1f mm3 and the "
+                   "emitter delivers %.1f at x1. Thickening does not close it -- the node "
+                   "merge welds a polyline finer than its own bead, so a fatter strut "
+                   "COLLAPSES the curve it belongs to. Shipping the uncalibrated bead.\n",
+                   target, v_at_one);
+      k = 1.0;
+    }
+    set_k(k);
+    std::fprintf(stderr,
+                 "[bead] calibrated ON WHAT SHIPS: x%.4f in %d trial(s)%s%s | target "
+                 "%.1f mm3, shipped union %.1f at x1 -> %.1f at the factor (%+.2f %%), "
+                 "%zu span(s) | %.1f s\n",
+                 k, steps + 1,
+                 converged ? "" : (bracketed ? " (PINNED at the factor bracket -- the "
+                                               "emitter cannot reach this target)"
+                                             : " (NOT converged)"),
+                 floored ? " (FLOORED at the extrudable width)" : "", target, v_at_one,
+                 v_final, target > 0.0 ? 100.0 * (v_final - target) / target : 0.0,
+                 trial_spans, wall_seconds() - t0cal);
+    organic = &calibrated_lat;
+  }
+
   LatticeGenObserver weld_obs;
   weld_obs.on_element = [&organic_spans](LatticeGenElement, const Vec3& a,
                                          const Vec3& b, double r) {
@@ -2394,9 +2550,24 @@ LatticeExportOutcome export_latticed_variant(
     // scatter below the base, but each clipped capsule still carries a hemispherical
     // cap a radius under the plane — 0.5 mm of it on the cube — and those caps ARE
     // the dots. Only the marched field can be cut flat.
+    // ★ THE PART, HANDED TO THE WELD so it can drive free ends into the solid and then
+    // cut back everything that leaves. The density field is the same one the solid's own
+    // surface is built from, which is why the trim lands on that surface rather than a
+    // voxel boundary; see OrganicWeldPart.
+    OrganicWeldPart wpart;
+    wpart.origin = sg.origin; wpart.h = sg.spacing;
+    wpart.nx = sg.nx; wpart.ny = sg.ny; wpart.nz = sg.nz;
+    wpart.density = &dens; wpart.iso = printed_iso;
+    wpart.embed_mm = organic_strut_embed_mm;
     TriangleMesh welded =
         organic_weld(organic_spans, lat.welded_pitch_mm, 40000000LL, ws,
-                     organic_base_trim_z > 0.0 ? organic_base_trim_z : -1e30);
+                     organic_base_trim_z > 0.0 ? organic_base_trim_z : -1e30, wpart);
+    if (std::getenv("TOPOPT_ORGANIC_TRACE"))
+      std::fprintf(stderr,
+                   "[weld] embed %.2f mm: %lld free ends driven into the solid; "
+                   "part clip %s, %lld raster voxels removed for leaving the part\n",
+                   ws.embed_mm, ws.ends_embedded, ws.part_clip_ran ? "RAN" : "did not run",
+                   ws.trimmed_voxels);
     // The SAME rigid motion the streamed soup is rotated by, from the same helper —
     // vertex order and winding preserved (det +1), so the two files describe one
     // placement of one object.
@@ -2406,6 +2577,69 @@ LatticeExportOutcome export_latticed_variant(
     oc.paths.push_back(path);
     oc.weld = ws;
     oc.welded = true;
+    // ★ THE SOLID COMPANION, BESIDE THE WELDED LATTICE (maintainer, 2026-09-08).
+    // The welded file is the lattice ALONE and the interpenetrating soup is the solid
+    // and the lattice fused into one unusable-for-inspection body, so neither file on
+    // its own shows a strut meeting material. This writes the SAME companion body the
+    // soup already contains, unmodified and separately, so the two can be opened
+    // together and the junction judged without anyone reconstructing anything. It is
+    // the same `comp_mesh` and the same rigid motion, so the pair is one placement of
+    // one object.
+    if (!comp_mesh.vertices.empty()) {
+      TriangleMesh solid_out = bake ? rotate_mesh(comp_mesh, *bake) : comp_mesh;
+      const std::string spath = base + "_SOLID.stl";
+      write_stl_file(spath, solid_out);
+      oc.paths.push_back(spath);
+    }
+  }
+
+  // ── ★ THE LATTICE, DUAL CONTOURED FROM ITS OWN SDF ─────────────────────────
+  // Additive and off unless asked for: the welded pair above is untouched. The weld
+  // marches a sampled field and its enclosed volume came out 67 % under the true union;
+  // this contours the exact capsule union instead, and reproduces that volume to within
+  // 1 % while staying watertight. It costs minutes rather than seconds, which is why it
+  // is a key and not the default. See topopt/lattice_dc.hpp.
+  if (organic_dual_contour && !organic_spans.empty()) {
+    LatticeDcOptions dopt;
+    dopt.cell_mm = organic_dc_cell_mm;
+    dopt.simplify_tolerance_mm = organic_dc_tolerance_mm;
+    // The SAME base plane the weld cuts on, so the two files describe one object rather
+    // than differing by a hemispherical cap under the plate on every clipped strut.
+    if (organic_base_trim_z > 0.0) dopt.clip_below_z = organic_base_trim_z;
+    // ── ★★ THE WETTED JOIN, ON, because this file exists to be the preview's ────
+    // The carver is the only mesher that can express it (organic_wet_join.hpp), and the
+    // whole reason a job asks for this file is that it should look like the picture. The
+    // scale is hard-coded at the maintainer's instruction (2026-09-18), so there is no
+    // number here for the two codebases to drift on.
+    //
+    // The part field is built ONCE for the whole grid: an exact Euclidean transform is
+    // three linear sweeps, which is nothing beside the contouring it feeds.
+    std::vector<char> part_solid(sg.voxel_count(), 0);
+    for (std::size_t e = 0; e < sg.voxel_count(); ++e)
+      part_solid[e] = dens[e] >= printed_iso ? 1 : 0;
+    const std::vector<double> part_sdf = voxel_signed_distance_mm(sg, part_solid);
+    // ★ AND THE LATTICED SET, which is where the joints are. The certified mask is the
+    // lattice; everything else inside the part is the solid the struts weld into.
+    const std::vector<double> lat_sdf = voxel_signed_distance_mm(sg, cert_mask);
+    dopt.wet.grid = &sg;
+    dopt.wet.part_sdf_mm = &part_sdf;
+    dopt.wet.lattice_sdf_mm = &lat_sdf;
+    dopt.wet.scale = kOrganicWetScale;
+    LatticeDcStats dst;
+    TriangleMesh dc = lattice_dual_contour(organic_spans, dopt, dst);
+    std::printf(
+        "[dc] cell %.4f mm (asked %.4f) tol %.4f | leaves %zu (%zu merged, %zu split) | "
+        "%zu tris | boundary %zu nonmanifold %zu dropped %zu | %s | volume %.1f mm3 | "
+        "%.1f s\n",
+        dst.cell_mm, dst.cell_mm_requested, dst.simplify_tolerance_mm, dst.cells_active,
+        dst.cells_merged, dst.cells_split, dst.triangles, dst.boundary_edges,
+        dst.nonmanifold_edges, dst.quads_dropped,
+        dst.manifold ? "MANIFOLD" : (dst.watertight ? "closed" : "OPEN"),
+        dst.volume_mm3, dst.seconds);
+    if (bake && !dc.vertices.empty()) dc = rotate_mesh(dc, *bake);
+    const std::string dpath = base + "_DC.stl";
+    write_stl_file(dpath, dc);
+    oc.paths.push_back(dpath);
   }
 
   // The latticed region's SOLID voxel count (the region actually filled): every
@@ -3936,6 +4170,12 @@ struct LatticeVariantOutcome {
   bool organic_ran = false;
   OrganicReport organic;  // meaningful iff `organic_ran`
   bool stepped_ran = false;
+  // ★ the any-step plan as laid down, and the seam census the certificate stands on
+  long long anystep_cells = 0, anystep_regions = 0, anystep_passes = 0;
+  std::string anystep_histogram;
+  long long seam_spans_before = 0, seam_spans_after = 0;
+  double seam_piece_mm = 0.0, seam_longest_before_mm = 0.0;
+  long long seam_welded_nodes = 0, seam_t_junction_ends = 0, seam_floating_ends = 0;
   SteppedOutcome stepped;  // meaningful iff `stepped_ran`
   double organic_trace_seconds = 0.0;
   LatticeAddedMaterialReceipt added_rcpt;  // design-box runs only
@@ -4065,6 +4305,12 @@ struct OrganicOutcome {
   // that grew and produced nothing is a different fact from a traced run, and the
   // counters above are meaningless in the second case.
   bool growth_ran = false;
+  // ★ The job stated organic_strut_width_mm, so the bead is that number everywhere and
+  // neither the mass coupling nor the calibration touched it.
+  bool bead_is_stated = false;
+  // ★ the rho band the tracer clamped to, carried out so the density can be REBUILT
+  // from the shipped spans on exactly the same terms.
+  double rho_min_used = 0.0, rho_max_used = 0.0;
   // ★★ SHAPE-FIT REPORTING. Reported whether or not the feature is on, so "it did
   // nothing" and "it was never asked to run" are distinguishable in the receipt — a
   // zero that was never measured is not a passing zero.
@@ -4231,12 +4477,21 @@ OrganicOutcome run_organic_step(bool shell_is_written,
   // The constant-bead law still stands when there is NO window (fixed/auto/fit cell
   // modes): see organic_default_strut_diameter_mm for why its default is not the
   // nozzle width.
+  // ★ A STATED STRUT WIDTH IS THE WIDTH, EVERYWHERE (maintainer, 2026-09-10). It used
+  // to be honoured only when there was NO cell window: under a swept window the bead was
+  // re-derived per voxel from the mass coupling and the stated number was never read at
+  // all. Measured on the M2 stand asking for 0.8 mm: the quiet wall came out at a 0.760
+  // mm median and the loaded one at 1.209 -- a 59 % spread around a number the job had
+  // stated exactly. The preview has always taken a stated width as a constant and turned
+  // the bead grading off; core now does the same, so the two describe one object. The
+  // CELL is still graded by the window -- only the strut thickness is pinned.
+  const bool bead_is_stated = jg.organic_strut_width_mm > 0.0;
   const double t_fixed =
-      jg.organic_strut_width_mm > 0.0
-          ? jg.organic_strut_width_mm
-          : organic_default_strut_diameter_mm(grid.spacing, 1.0, band_rho_max,
-                                              jg.min_extrudable_width_mm);
+      bead_is_stated ? jg.organic_strut_width_mm
+                     : organic_default_strut_diameter_mm(grid.spacing, 1.0, band_rho_max,
+                                                         jg.min_extrudable_width_mm);
   oo.strut_diameter_mm = t_fixed;
+  oo.bead_is_stated = bead_is_stated;
   oo.window_governed = have_window;
   std::vector<char> cand(n, 0);
   std::vector<double> spacing(n, 0.0);
@@ -4251,12 +4506,17 @@ OrganicOutcome run_organic_step(bool shell_is_written,
       double f = rho_span > 0.0 ? (rho - rho_lo) / rho_span : 0.0;
       f = std::pow(std::min(1.0, std::max(0.0, f)), f_exponent);
       d = cell_max_mm - (cell_max_mm - cell_min_mm) * f;
-      // The bead the mass coupling asks for at this (rho, d) — floored, always, at the
-      // stated minimum extrudable width. Printability is user input and outranks the
-      // coupling; voxels the floor raised are counted by the tracer.
-      bead[e] = organic_strut_diameter_for(d, rho);
-      if (!(bead[e] > jg.min_extrudable_width_mm))
-        bead[e] = jg.min_extrudable_width_mm;
+      if (bead_is_stated) {
+        // Asked for by name: no coupling, no floor, no grading. The number is the number.
+        bead[e] = t_fixed;
+      } else {
+        // The bead the mass coupling asks for at this (rho, d) — floored, always, at the
+        // stated minimum extrudable width. Printability is user input and outranks the
+        // coupling; voxels the floor raised are counted by the tracer.
+        bead[e] = organic_strut_diameter_for(d, rho);
+        if (!(bead[e] > jg.min_extrudable_width_mm))
+          bead[e] = jg.min_extrudable_width_mm;
+      }
     } else {
       d = organic_spacing_for(rho, t_fixed);
       bead[e] = t_fixed;
@@ -4400,8 +4660,9 @@ OrganicOutcome run_organic_step(bool shell_is_written,
           // ends in solid must RAISE the relative density as the cell closes, so the
           // strut keeps the thickness the stress gave it while the cell shrinks
           // around it; the rim is then where that ramp reaches density one. The bead
-          // stays as computed from the stress-driven cell; only the cell shrinks.
-          if (!(bead[e] > jg.min_extrudable_width_mm))
+          // stays as computed from the stress-driven cell; only the cell shrinks. A
+          // STATED bead is not touched here at all -- not even by the printable floor.
+          if (!bead_is_stated && !(bead[e] > jg.min_extrudable_width_mm))
             bead[e] = jg.min_extrudable_width_mm;
         }
         oo.shape_fit_voxels_shrunk = shrunk;
@@ -4452,8 +4713,9 @@ OrganicOutcome run_organic_step(bool shell_is_written,
           // ends in solid must RAISE the relative density as the cell closes, so the
           // strut keeps the thickness the stress gave it while the cell shrinks
           // around it; the rim is then where that ramp reaches density one. The bead
-          // stays as computed from the stress-driven cell; only the cell shrinks.
-          if (!(bead[e] > jg.min_extrudable_width_mm))
+          // stays as computed from the stress-driven cell; only the cell shrinks. A
+          // STATED bead is not touched here at all -- not even by the printable floor.
+          if (!bead_is_stated && !(bead[e] > jg.min_extrudable_width_mm))
             bead[e] = jg.min_extrudable_width_mm;
         }
       }
@@ -4532,6 +4794,7 @@ OrganicOutcome run_organic_step(bool shell_is_written,
   op.min_extrudable_width_mm = jg.min_extrudable_width_mm;
   op.strut_diameter_mm = t_fixed;
   op.strut_diameter_field = &bead;
+  op.bead_is_stated = bead_is_stated;
   // ★★ THE VDI FLOOR OUTRANKS THE LIBRARY BAND. The library's 0.05047 is a
   // CERTIFIABILITY limit — the lightest lattice the tensor library can describe. It
   // says nothing about whether the bar can be BUILT, and at that density the slenderness
@@ -4539,6 +4802,9 @@ OrganicOutcome run_organic_step(bool shell_is_written,
   // modelling limit, so the floor is the larger of the two.
   op.rho_min = std::max(band_rho_min, kOrganicVdiDensityFloor);
   op.rho_max = band_rho_max;
+  op.defer_bead_calibration = jg.organic_calibrate_on_shipped && !bead_is_stated;
+  oo.rho_min_used = op.rho_min;
+  oo.rho_max_used = op.rho_max;
   const double t0 = wall_seconds();
   op.layer_hint_mm = jg.organic_growth ? layer_height_mm : 0.0;
   // ★★ GROW OR TRACE. The growth path is a different ARCHITECTURE, not a different
@@ -4599,6 +4865,34 @@ void fill_organic_run_info(RunInfo& gi, const OrganicOutcome& oo) {
   const OrganicReport& r = oo.lat.report;
   gi.organic_present = true;
   gi.organic_strut_diameter_mm = r.strut_diameter_mm;
+  // ★ THE CALIBRATION IS NOW VISIBLE. It reached no receipt and no log at all, so for
+  // every organic run to date there was no way to see what factor had been applied to
+  // every strut in the part, nor what volume it was aiming at. Printed on the same terms
+  // as [synthetic] and [dc]: the target the grading law asked for, the volume the lattice
+  // really occupies, and how much of the naive sum of its parts was double-counted
+  // overlap -- which is the error the old model was solving against.
+  if (r.bead_calibration_skipped_stated) {
+    std::fprintf(stderr,
+                 "[bead] %.4f mm stated by the job: no calibration, no coupling, "
+                 "no floor -- every strut is that diameter\n", r.strut_diameter_mm);
+  } else if (r.bead_calibration_iterations > 0) {
+    std::fprintf(stderr,
+                 "[bead] calibration x%.4f in %d step(s)%s: target %.1f mm3, union "
+                 "%.1f mm3 (%+.2f %%), naive sum %.1f mm3 (%.1f %% of it overlap); "
+                 "measured on %zu span(s), %.1f mm of centreline, median dia %.4f mm "
+                 "BEFORE the factor\n",
+                 r.bead_calibration, r.bead_calibration_iterations,
+                 r.bead_calibration_floored ? " (FLOORED at the extrudable width)" : "",
+                 r.bead_calibration_target_mm3, r.bead_calibration_union_mm3,
+                 r.bead_calibration_target_mm3 > 0.0
+                     ? 100.0 * (r.bead_calibration_union_mm3 - r.bead_calibration_target_mm3) /
+                           r.bead_calibration_target_mm3
+                     : 0.0,
+                 r.bead_calibration_naive_mm3,
+                 100.0 * r.bead_calibration_overlap_fraction,
+                 r.bead_calibration_spans, r.bead_calibration_length_mm,
+                 r.bead_calibration_median_dia_mm);
+  }
   gi.organic_trace_seconds = oo.trace_seconds;
   copy_growth_stats(gi, oo.growth, oo.growth_ran);
   gi.organic_candidate_voxels = static_cast<long long>(r.candidate_voxels);
@@ -4748,6 +5042,43 @@ void refuse_organic_structural(LatticeAlgorithm alg, const JobGrading& jg) {
       "carries a structural density certified against nothing.");
 }
 
+// ── ★ AND ANY-STEP STEPPED IS REFUSED ON THE SAME TERMS, FOR A DIFFERENT REASON ──
+// (brief of 2026-09-17 §3.) Organic is refused the cubic tensor because its struts follow
+// the principal directions. Stepped's struts are octet and axis-aligned, so that argument
+// does not apply -- but the tensor assumes SHARED NODES, and any-step seams break exactly
+// that: a 9's face centre lands mid-strut on an 8's face, so neighbouring families share
+// no nodes at all. A tensor certificate would over-claim at every seam, and there are
+// thousands of them. The beam network has no such assumption: it welds ON CONTACT, so a
+// strut ending on the middle of another is fused precisely as the print fuses it and the
+// seam is just geometry being solved.
+//
+// So the tensor certificate is not offered for any-step Stepped AT ALL -- not defaulted,
+// not warned about. A stepped job that packs a plan and asks for a structural density
+// must name the instrument.
+void refuse_stepped_structural(LatticeAlgorithm alg, const JobGrading& jg,
+                               const JobLattice& jl) {
+  if (alg != LatticeAlgorithm::Stepped) return;
+  // The same test organic's gate uses, and deliberately not `intent == "structural"`: an
+  // UNSTATED intent must not be the one reading that reaches a tensor certificate.
+  if (jg.intent == "aesthetic") return;
+  if (jl.stepped_cells.empty()) return;      // legacy one-cell-per-region: unchanged
+  if (jg.organic_structural_certification == "beam_network") return;
+  throw JobError(
+      "any-step \"stepped\" under \"intent\": \"structural\" requires "
+      "\"structural_certification\": \"beam_network\" (this job says " +
+      (jg.organic_structural_certification.empty()
+           ? std::string("nothing")
+           : ("\"" + jg.organic_structural_certification + "\"")) +
+      "). This plan places " + std::to_string(jl.stepped_cells.size()) +
+      " cells of several families, and cells of DIFFERENT families share no nodes -- a "
+      "9's face centre lands mid-strut on an 8's face. The homogenised cubic tensor "
+      "assumes shared nodes, so it would over-claim at every seam, and a plan like this "
+      "is nothing but seams. The beam-network certificate makes no such assumption: it "
+      "solves the struts as frame elements and welds on contact, exactly as the print "
+      "fuses them. The tensor certificate is therefore not offered for any-step Stepped "
+      "at all.");
+}
+
 // Resolve the job's algorithm; an ABSENT key is "doubled", which is what keeps every
 // existing job byte-identical (§4d). An unknown one is refused, never defaulted.
 LatticeAlgorithm resolve_lattice_algorithm(const JobGrading& jg) {
@@ -4770,12 +5101,25 @@ LatticeAlgorithm resolve_lattice_algorithm(const JobGrading& jg) {
 // seeds a 6-connected flood walks inward through lattice voxels up to `rim_mm`
 // (voxel steps x spacing); everything it reaches leaves the mask and prints solid.
 // Returns the voxels turned solid.
-static std::size_t apply_organic_solid_rim(const VoxelGrid& grid, std::vector<char>& mask,
-                                           const std::vector<double>& density, double printed_iso,
-                                           const std::vector<int>& region_ids,
-                                           const std::vector<Vec3>& region_normals, double rim_mm) {
+// ★ `density` and `printed_iso` USED TO BE ARGUMENTS. They were only ever read by the
+// seed's "the neighbour must be solid" test, which is the bug fixed below; with the seed
+// keyed on the lattice mask alone the rim no longer consults the density field at all.
+// ★★ IT RETURNS THE BAND; IT NO LONGER DELETES IT (maintainer, 2026-09-18, ruling G).
+// Clearing the band from the mask before the tracer ran did two things at once: it made
+// the band print solid, which is the point, AND it took the band out of the tracer's
+// candidates, which was not. The preview keeps the band as candidate, so its curves run
+// THROUGH the band and weld into the solid; the run cut every strut back at the band's
+// inner face. That was the one geometric divergence between the two in source. The caller
+// now traces with the band IN and turns it solid afterwards, so the struts end up embedded
+// in the solid exactly as the picture shows.
+static std::vector<char> organic_solid_rim_band(const VoxelGrid& grid,
+                                                const std::vector<char>& mask,
+                                                const std::vector<int>& region_ids,
+                                                const std::vector<Vec3>& region_normals,
+                                                double rim_mm) {
   const std::size_t n = grid.voxel_count();
-  if (!(rim_mm > 0.0) || mask.size() != n || region_ids.size() != n) return 0;
+  std::vector<char> band(n, 0);
+  if (!(rim_mm > 0.0) || mask.size() != n || region_ids.size() != n) return band;
   const int di[6] = {1, -1, 0, 0, 0, 0}, dj[6] = {0, 0, 1, -1, 0, 0}, dk[6] = {0, 0, 0, 0, 1, -1};
   std::vector<int> dist(n, -1);
   std::vector<std::size_t> q;
@@ -4789,12 +5133,22 @@ static std::size_t apply_organic_solid_rim(const VoxelGrid& grid, std::vector<ch
         const Vec3& nrm = region_normals[static_cast<std::size_t>(rid - 1)];
         const double nl = std::sqrt(nrm.x * nrm.x + nrm.y * nrm.y + nrm.z * nrm.z);
         for (int d = 0; d < 6; ++d) {
-          const int i2 = i + di[d], j2 = j + dj[d], k2 = k + dk[d];
-          if (i2 < 0 || j2 < 0 || k2 < 0 || i2 >= grid.nx || j2 >= grid.ny || k2 >= grid.nz) continue;
-          const std::size_t e2 = grid.index(i2, j2, k2);
-          if (mask[e2] || !(density[e2] > printed_iso)) continue;
           const double dot = nl > 0.0 ? (di[d] * nrm.x + dj[d] * nrm.y + dk[d] * nrm.z) / nl : 0.0;
-          if (std::fabs(dot) >= 0.5) continue;   // along the normal: floor or open face
+          if (std::fabs(dot) >= 0.5) continue;   // along the normal: the open faces
+          const int i2 = i + di[d], j2 = j + dj[d], k2 = k + dk[d];
+          const bool outside_grid =
+              i2 < 0 || j2 < 0 || k2 < 0 || i2 >= grid.nx || j2 >= grid.ny || k2 >= grid.nz;
+          // ★ THE OUTLINE ENDS WHEREVER THE LATTICE ENDS -- NOT ONLY AGAINST MATERIAL.
+          // (maintainer, 2026-09-08.) This used to require the neighbour to be SOLID
+          // (`density[e2] > printed_iso`), which works for a pocket cut into a wall and
+          // silently refuses every edge where the region runs out at the PART'S OWN
+          // SURFACE, because the neighbour there is air. On a face prism asked for with
+          // only its front and back open, that is precisely the top and bottom edges:
+          // they got no band at all, so the "outline" was three-sided at best. The seed
+          // now asks only whether the neighbour is outside the lattice, with the face
+          // normal as the single exemption so the open faces stay open. Air off the end
+          // of the grid counts too -- it is the same situation.
+          if (!outside_grid && mask[grid.index(i2, j2, k2)]) continue;   // still lattice
           dist[e] = 0; q.push_back(e); break;
         }
       }
@@ -4813,8 +5167,17 @@ static std::size_t apply_organic_solid_rim(const VoxelGrid& grid, std::vector<ch
       dist[e2] = dist[e] + 1; q.push_back(e2);
     }
   }
+  for (std::size_t e : q) band[e] = 1;
+  return band;
+}
+
+// Clear a band out of a mask, and say how many voxels it took. Separated from the walk so
+// the caller chooses WHEN the band stops being lattice -- which for organic is after the
+// tracer has run through it, not before.
+static std::size_t clear_band_from_mask(std::vector<char>& mask, const std::vector<char>& band) {
   std::size_t turned = 0;
-  for (std::size_t e : q) { mask[e] = 0; ++turned; }
+  for (std::size_t e = 0; e < mask.size() && e < band.size(); ++e)
+    if (band[e] && mask[e]) { mask[e] = 0; ++turned; }
   return turned;
 }
 
@@ -4853,6 +5216,7 @@ LatticeVariantOutcome lattice_one_variant(
   // not allowed to certify. An absent key is "doubled" — §4(d)'s byte-identity.
   R.algorithm = resolve_lattice_algorithm(job.grading);
   refuse_organic_structural(R.algorithm, job.grading);
+  refuse_stepped_structural(R.algorithm, job.grading, job.lattice);
   const bool roles_present = !job.lattice.regions.empty();
 
   // ── Stage 4: the grading law runs FIRST, on THIS variant's own final
@@ -4864,6 +5228,10 @@ LatticeVariantOutcome lattice_one_variant(
   // only the membership primitives (the cell size, which the law itself
   // chooses, plays no part in membership).
   GradedField& gf = R.gf;
+  // ★ what the certificate WOULD have been handed on an organic run: the traced
+  // network's material. Kept so the re-measure after the export can print BOTH, and the
+  // change of basis is auditable rather than silent.
+  double organic_traced_material_mm3 = 0.0;
   double cell = job.lattice.cell_mm;
   // Which DECLARED include region owns each candidate voxel — built inside the graded
   // block below and kept here because STEPPED derives one cell PER REGION and so needs
@@ -5169,7 +5537,10 @@ LatticeVariantOutcome lattice_one_variant(
           const double rim = job.grading.organic_solid_rim_mm < 0.0 ? cc.lo : job.grading.organic_solid_rim_mm;
           std::vector<Vec3> nrms;
           for (const JobLatticeRegion& r : job.lattice.regions) if (r.role == "include") nrms.push_back(r.normal);
-          apply_organic_solid_rim(solved_grid, pmask, dens, printed_iso, region_ids, nrms, rim);
+          // The probe forecasts a cell size; it ships no geometry, so the band comes out
+          // of its candidate set as before -- ruling G is about what the RUN draws.
+          clear_band_from_mask(
+              pmask, organic_solid_rim_band(solved_grid, pmask, region_ids, nrms, rim));
         }
         OrganicOutcome po = run_organic_step(job.lattice.outer_finish != "skin", solved_grid, dens,
                                              probe_stress, pmask, agf.posture.relative_density,
@@ -5636,7 +6007,13 @@ LatticeVariantOutcome lattice_one_variant(
       }
     }
   }
-  // ── ★ GRADE TO SOLID AT THE OUTLINE, for organic (see apply_organic_solid_rim) ──
+  // ── ★ GRADE TO SOLID AT THE OUTLINE, for organic (see organic_solid_rim_band) ──
+  // ★★ THE BAND IS COMPUTED HERE AND APPLIED AFTER THE TRACER (ruling G). It used to be
+  // cleared from the mask on this line, which took it out of the tracer's candidates and
+  // cut every strut back at the band's inner face. The preview keeps it as candidate, so
+  // its curves run THROUGH the band and weld into the solid. Tracing with the band IN and
+  // turning it solid afterwards makes the run draw what the picture shows.
+  std::vector<char> organic_rim_band;
   if (graded && R.algorithm == LatticeAlgorithm::Organic) {
     const double rim = job.grading.organic_solid_rim_mm < 0.0
                            ? job.grading.cell_min_mm : job.grading.organic_solid_rim_mm;
@@ -5644,10 +6021,15 @@ LatticeVariantOutcome lattice_one_variant(
     for (const JobLatticeRegion& r : job.lattice.regions)
       if (r.role == "include") nrms.push_back(r.normal);
     R.organic_solid_rim_mm = rim;
-    R.organic_solid_rim_voxels = static_cast<long long>(apply_organic_solid_rim(
-        solved_grid, mask, dens, printed_iso, region_ids_for_stepped, nrms, rim));
+    organic_rim_band =
+        organic_solid_rim_band(solved_grid, mask, region_ids_for_stepped, nrms, rim);
+    std::size_t band_voxels = 0;
+    for (char c : organic_rim_band) band_voxels += c ? 1 : 0;
+    R.organic_solid_rim_voxels = static_cast<long long>(band_voxels);
     if (std::getenv("TOPOPT_ORGANIC_TRACE"))
-      std::fprintf(stderr, "[rim] SOLID_RIM %.3g mm: %lld lattice voxels turned solid at the outline\n",
+      std::fprintf(stderr,
+                   "[rim] SOLID_RIM %.3g mm: %lld voxel(s) in the band, KEPT as tracer "
+                   "candidates and turned solid after the trace\n",
                    rim, R.organic_solid_rim_voxels);
   }
 
@@ -5683,13 +6065,33 @@ LatticeVariantOutcome lattice_one_variant(
     // reason: both are machine facts the generator cannot infer, and without this one
     // a mat under a voxel tall is erased silently — which is how a deliberately
     // thinned mat vanished from the slice entirely while every stat still read green.
+    // ★★ AND NOW THE BAND BECOMES SOLID (ruling G). The tracer has run with it IN, so the
+    // curves cross it and end inside what is about to be solid material -- welded, as the
+    // preview draws them. It leaves the lattice set here so the band PRINTS solid and the
+    // posture and certificate see solid, which is what the band is for. Both of the
+    // band's jobs are done; they simply happen in the right order now.
+    if (!organic_rim_band.empty()) {
+      const std::size_t cleared = clear_band_from_mask(mask, organic_rim_band);
+      clear_band_from_mask(organic.lat.mask, organic_rim_band);
+      for (std::size_t e = 0; e < organic_rim_band.size() &&
+                              e < organic.lat.relative_density.size(); ++e)
+        if (organic_rim_band[e]) organic.lat.relative_density[e] = 0.0;
+      if (std::getenv("TOPOPT_ORGANIC_TRACE"))
+        std::fprintf(stderr,
+                     "[rim] band applied AFTER the trace: %zu voxel(s) left the lattice "
+                     "set and print solid; the curves that crossed them are embedded\n",
+                     cleared);
+    }
     organic.lat.weld_pitch_hint_mm = job.lattice.welded_pitch_mm;
-    organic.lat.overhang_fillet = job.grading.organic_overhang_fillet;
     // ★ THE LAYER HEIGHT THE MACHINE WILL ACTUALLY USE. The mid-air-start check
     // rasters Z at this pitch; without it the check is COARSER THAN THE PRINTER
     // and passes parts that float for two real layers. 0 = not stated, and the
     // check says so on the receipt rather than inferring one.
     organic.lat.layer_height_mm = job.loads.layer_height_mm;
+    // printability repairs: stated, or they do not run (see OrganicLattice)
+    organic.lat.base_mat = job.grading.organic_base_mat;
+    organic.lat.fill_mat = job.grading.organic_fill_mat;
+    organic.lat.trim_below_base = job.grading.organic_trim_below_base;
     if (!organic.ran || organic.lat.report.latticed_voxels == 0) {
       // Same posture as the law's own L4 refusal: no object was produced, nothing
       // was written, and the caller decides whether that kills the run or skips a
@@ -5725,6 +6127,22 @@ LatticeVariantOutcome lattice_one_variant(
     // The posture the certification consumes is now the TRACED one.
     gf.posture.mask = organic.lat.mask;
     gf.posture.relative_density = organic.lat.relative_density;
+    // ★ AND "TRACED" MEANS BEFORE THE TRIM PASSES, WHICH IS NOT A FREE CHOICE. This
+    // density is the tracer's own snapshot; the clip to the part, the node merge, the
+    // support pass, the prune, the stranded drop, the finish and the base trim all run
+    // AFTERWARDS and on a SEPARATE span list (`organic_spans`, "the POST-CLIP spans...
+    // rather than the traced intent"), so nothing refreshes it. Whatever those passes
+    // remove, the certificate still believes is there. The volume it implies is printed
+    // here so it can be compared with the shipped file's own -- measured on the M2 stand,
+    // and the gap is a third of the material.
+    {
+      double cert_vol = 0.0;
+      const double vox = solved_grid.spacing * solved_grid.spacing * solved_grid.spacing;
+      for (std::size_t e = 0; e < gf.posture.relative_density.size(); ++e)
+        if (e < gf.posture.mask.size() && gf.posture.mask[e])
+          cert_vol += gf.posture.relative_density[e];
+      organic_traced_material_mm3 = cert_vol * vox;
+    }
     // ★ `cell_size_field` IS LEFT EMPTY ON PURPOSE (§3a). An organic lattice has no
     // cells, and filling this with the SEPARATION would silently re-point the
     // certification's cells-per-member guard at the curve-crossing count — the exact
@@ -6202,7 +6620,104 @@ LatticeVariantOutcome lattice_one_variant(
   // the printed diameter is d(rho, cell), so a region at a coarser cell prints a
   // proportionally fatter strut at the same relative density.
   std::vector<std::vector<char>> stepped_cell_active;  // backing store, per pass
-  if (R.stepped_ran) {
+  // ── ★★ ANY-STEP: THE PASSES COME FROM THE PLAN THE JOB STATED ──────────────
+  // (brief of 2026-09-17 §2.1.) The legacy path below derives one cell per region and
+  // anchors every pass at the SOLVED GRID's origin. Any-step cells are not on that grid:
+  // each family sits on its own tile grid inside the region, so each (region, family)
+  // needs its own LatticeRegion.origin. That is the whole of the change -- LatticeRegion
+  // already carries an origin, a cell size and a per-cell predicate.
+  //
+  // ★ AND THE PLAN IS VALIDATED FIRST, WITH THE RUN REFUSED ON A BAD CELL. Core does not
+  // repack: the arrangement the maintainer approved on screen is the arrangement laid
+  // down, or the job stops and names the cell that broke the rule.
+  std::vector<std::vector<char>> anystep_active;
+  if (!job.lattice.stepped_cells.empty()) {
+    // ★ THE FRAME IS DERIVED, NOT SENT. A cell names a region by its 1-based
+    // include-region order and states its origin in MODEL space, so the base cell comes
+    // from the stepped step's own answer for that region and the prism from the region's
+    // geometry. Nothing for the app to keep in step, and nothing that can disagree.
+    std::vector<SteppedPlanRegion> plan_regions;
+    for (const SteppedRegionCell& rc : R.stepped.cells) {
+      SteppedPlanRegion pr;
+      pr.region_id = rc.region_id;
+      pr.base_cell_mm = rc.cell_mm;
+      const std::size_t idx = static_cast<std::size_t>(rc.region_id - 1);
+      if (idx < job.lattice.regions.size()) {
+        const JobLatticeRegion& jr = job.lattice.regions[idx];
+        pr.slot_origin = jr.origin;
+        pr.normal = jr.normal;
+        pr.depth_mm = jr.depth_mm;
+      }
+      plan_regions.push_back(pr);
+    }
+    // ★ THE BOUND THE JOB'S INTENT ASKS FOR. Aesthetic keeps the 20 % "prints open" rule
+    // beside the floor; structural drops it, because the certificate solves every strut
+    // rather than averaging them and nothing structural depends on a cell looking open.
+    const bool prints_open = job.grading.intent == "aesthetic";
+    const double tile_floor = job.grading.stepped_min_tile_mm > 0.0
+                                  ? job.grading.stepped_min_tile_mm
+                                  : job.grading.min_extrudable_width_mm;
+    const SteppedPlanCheck chk =
+        stepped_validate_plan(job.lattice.stepped_cells, plan_regions,
+                              job.grading.min_extrudable_width_mm, tile_floor,
+                              prints_open);
+    if (!chk.ok)
+      throw JobError("lattice \"stepped_cells\": " + chk.error +
+                     ". Core validates the plan and does not repack it -- the run lays "
+                     "down the arrangement the preview showed, or it stops here.");
+    const std::vector<SteppedCellGroup> groups =
+        stepped_group_cells(job.lattice.stepped_cells, plan_regions);
+    std::fprintf(stderr, "[stepped] any-step plan: %zu cell(s) over %zu region(s) in %zu "
+                         "pass(es) | %s\n",
+                 chk.cells, chk.regions, groups.size(), chk.histogram_line.c_str());
+    R.anystep_cells = static_cast<long long>(chk.cells);
+    R.anystep_regions = static_cast<long long>(chk.regions);
+    R.anystep_passes = static_cast<long long>(groups.size());
+    R.anystep_histogram = chk.histogram_line;
+    anystep_active.resize(groups.size());
+    for (std::size_t gi = 0; gi < groups.size(); ++gi) {
+      const SteppedCellGroup& g = groups[gi];
+      LatticeRegion PR;
+      PR.origin = g.origin;                  // ★ the FAMILY's grid, not the solved grid's
+      PR.nx = g.nx; PR.ny = g.ny; PR.nz = g.nz;
+      PR.cell_mm = g.size_mm;
+      PR.boundary = &boundary;
+      std::vector<char>& act = anystep_active[gi];
+      act.assign(static_cast<std::size_t>(g.nx) * g.ny * g.nz, 0);
+      for (const std::array<int, 3>& c : g.cells)
+        act[(static_cast<std::size_t>(c[2]) * g.ny + c[1]) * g.nx + c[0]] = 1;
+      const std::vector<char>* ap = &act;
+      const int anx = g.nx, any = g.ny, anz = g.nz;
+      PR.latticed = [ap, anx, any, anz](int ci, int cj, int ck) {
+        if (ci < 0 || cj < 0 || ck < 0 || ci >= anx || cj >= any || ck >= anz) return false;
+        return (*ap)[(static_cast<std::size_t>(ck) * any + cj) * anx + ci] != 0;
+      };
+      LatticeSteppedPass sp;
+      sp.region = PR;
+      sp.radius.nseg = 8;
+      // A cell's own density at its OWN size: the printed diameter is d(rho, cell), so a
+      // 9 and a 3 at the same relative density print proportionally different struts.
+      sp.radius.uniform_mm = 0.5 * octet_strut_diameter_mm(gf.band_rho_min, g.size_mm);
+      const VoxelGrid& sgr = solved_grid;
+      const std::vector<char>& mref = mask;
+      const std::vector<double>& rref = gf.posture.relative_density;
+      const double rlo = gf.band_rho_min;
+      const double gcell = g.size_mm;
+      sp.radius.field = [&sgr, &mref, &rref, gcell, rlo](Vec3 pt) {
+        auto cl = [](int val, int hi) { return val < 0 ? 0 : (val > hi ? hi : val); };
+        const int i = cl(static_cast<int>(std::floor((pt.x - sgr.origin.x) / sgr.spacing)),
+                         sgr.nx - 1);
+        const int j = cl(static_cast<int>(std::floor((pt.y - sgr.origin.y) / sgr.spacing)),
+                         sgr.ny - 1);
+        const int k = cl(static_cast<int>(std::floor((pt.z - sgr.origin.z) / sgr.spacing)),
+                         sgr.nz - 1);
+        const std::size_t e = sgr.index(i, j, k);
+        return 0.5 * octet_strut_diameter_mm(mref[e] ? rref[e] : rlo, gcell);
+      };
+      stepped_passes.push_back(std::move(sp));
+    }
+  }
+  if (R.stepped_ran && job.lattice.stepped_cells.empty()) {
     // Distinct cells in ASCENDING order — a fixed emission order (§5a).
     std::vector<double> distinct;
     for (const SteppedRegionCell& rc : R.stepped.cells) distinct.push_back(rc.cell_mm);
@@ -6279,7 +6794,10 @@ LatticeVariantOutcome lattice_one_variant(
       levels.empty() ? nullptr : &levels,
       levels.empty() ? 0.0 : gf.cell_plan.base_cell_mm, printed_iso,
       organic.ran ? &organic.lat : nullptr,
-      stepped_passes.empty() ? nullptr : &stepped_passes);
+      stepped_passes.empty() ? nullptr : &stepped_passes,
+      job.grading.organic_strut_embed_mm, job.grading.organic_dual_contour,
+      job.grading.organic_dc_cell_mm, job.grading.organic_dc_tolerance_mm,
+      job.grading.organic_calibrate_on_shipped);
   // ★ THE EXPORT'S RETURN REPLACES THE WHOLE OUTCOME, and the growth stats copied
   // onto it above went with it -- the receipt read growth_ran: false and zero ties on
   // every grown run until 2026-09-05. Copy them again, after the replacement.
@@ -6475,6 +6993,69 @@ LatticeVariantOutcome lattice_one_variant(
           if (!cell_emitted({ci, cj, ck})) ++frozen_rcpt.frozen_cells_not_emitted;
         }
   }
+  // ── ★★ THE DENSITY THE CERTIFICATE JUDGES IS REBUILT FROM WHAT SHIPPED ───────
+  // (maintainer, 2026-09-11: "fix the timing first".) It used to be the tracer's own
+  // snapshot, taken BEFORE the clip to the part, the node merge, the support pass, the
+  // prune, the stranded drop, the finish and the base trim -- all of which run afterwards
+  // and on a SEPARATE span list, so nothing refreshed it. Whatever they removed, the
+  // certificate still believed was there, and the error is in the UNSAFE direction:
+  // more material reads as stiffer and stronger. MEASURED on the M2 stand: the
+  // certificate was handed 77,336 mm3 where the shipped file holds 41,955 -- it was
+  // judging 1.84x the lattice that exists.
+  //
+  // `organic_spans_out` is the post-clip set, the same one the STL and the welded body
+  // are built from, so the certificate and the file now describe one object. The
+  // candidate set and the local separation come from the tracer's own `spacing_used_mm`
+  // (0 marks a voxel off the candidate set), and the clamp band is the one the tracer
+  // used, so nothing about the MEASUREMENT changes -- only which geometry it is taken on.
+  if (organic.ran && graded && !R.oc.organic_spans_out.empty() &&
+      organic.lat.spacing_used_mm.size() == solved_grid.voxel_count()) {
+    std::vector<char> cand(solved_grid.voxel_count(), 0);
+    for (std::size_t e = 0; e < cand.size(); ++e)
+      cand[e] = organic.lat.spacing_used_mm[e] > 0.0 ? 1 : 0;
+    OrganicDensityField df = organic_relative_density(
+        solved_grid, cand, organic.lat.spacing_used_mm, R.oc.organic_spans_out,
+        organic.rho_min_used, organic.rho_max_used,
+        job.grading.organic_density_union_subdiv);
+    const double vox =
+        solved_grid.spacing * solved_grid.spacing * solved_grid.spacing;
+    double shipped = 0.0;
+    for (std::size_t e = 0; e < df.relative_density.size(); ++e)
+      if (df.mask[e]) shipped += df.relative_density[e];
+    shipped *= vox;
+    // ★ AND SOME VOXELS THE TRIM EMPTIED COMPLETELY. The certification mask is the
+    // geometry's, and a voxel in it that the shipped spans never reach now measures
+    // ZERO -- which the octet certifier refuses outright ("relative density 0.000000 is
+    // outside the certifiable band", bar E5), and rightly: there is no lattice there to
+    // homogenise. They are held at the band's FLOOR rather than dropped, because
+    // dropping them would make the certified mask differ from the geometry's, which is
+    // the exact conflation bar E1 exists to prevent. Counted and printed, because the
+    // floor is still GENEROUS for a voxel holding nothing at all.
+    std::size_t emptied = 0;
+    for (std::size_t e = 0; e < df.mask.size() && e < mask.size(); ++e)
+      if (mask[e] && !df.mask[e]) {
+        df.mask[e] = 1;
+        df.relative_density[e] = organic.rho_min_used;
+        ++emptied;
+      }
+    std::fprintf(stderr,
+                 "[posture] certified on the SHIPPED spans (%s): %.1f mm3 of lattice "
+                 "material over %zu voxel(s); the traced network it used to be taken "
+                 "from held %.1f mm3 (%+.1f %%). %zu voxel(s) the trim emptied "
+                 "entirely, held at the band floor %.4f; %zu raised to it and %zu "
+                 "capped at the ceiling by the band\n",
+                 job.grading.organic_density_union_subdiv > 0 ? "UNION" : "deposit",
+                 shipped, df.latticed_voxels, organic_traced_material_mm3,
+                 organic_traced_material_mm3 > 0.0
+                     ? 100.0 * (shipped - organic_traced_material_mm3) /
+                           organic_traced_material_mm3
+                     : 0.0,
+                 emptied, organic.rho_min_used, df.clamped_lo_voxels,
+                 df.clamped_hi_voxels);
+    gf.posture.mask = df.mask;
+    gf.posture.relative_density = df.relative_density;
+  }
+
   // (b) certification of the composite — the octet tensor on the SAME mask the
   // geometry used. The band is enforced PER VOXEL inside the solve (E5/H4b).
   const LatticeCertContext cx =
@@ -6517,6 +7098,60 @@ LatticeVariantOutcome lattice_one_variant(
     for (const OrganicSpan& sp : R.oc.organic_spans_out)
       segs.push_back({sp.a, sp.b, sp.r});
 
+    // ── ★★ THE WELD'S PRECONDITION, ENFORCED HERE RATHER THAN ASSUMED ──────────
+    // (brief of 2026-09-17 §3.2.) build_beam_network welds ENDPOINTS. The organic tracer
+    // emits ~0.85 mm segments and satisfies that by accident of how it draws; an OCTET
+    // strut is one straight member up to a whole base cell long, so a strut ending on the
+    // middle of another has no vertex near the contact and is NOT fused. The failure is
+    // silent -- it reports a lattice in pieces, and a lattice in pieces certifies CLEAN,
+    // because nothing in it is carrying load to find fault with. So every input is cut to
+    // the scale the weld can actually see: the weld joins ends within r_a + r_b, so a
+    // piece no longer than the thinnest strut's DIAMETER puts an endpoint within reach of
+    // any contact along a member. Already-fine input is returned untouched and pays
+    // nothing.
+    {
+      double rmin = 0.0;
+      double longest = 0.0;
+      for (const BeamSegment& sg : segs) {
+        if (sg.radius_mm > 0.0 && (rmin <= 0.0 || sg.radius_mm < rmin)) rmin = sg.radius_mm;
+        const double dx = sg.b.x - sg.a.x, dy = sg.b.y - sg.a.y, dz = sg.b.z - sg.a.z;
+        longest = std::max(longest, std::sqrt(dx * dx + dy * dy + dz * dz));
+      }
+      const double piece = rmin > 0.0 ? 2.0 * rmin : 0.0;
+      const std::size_t before = segs.size();
+      if (piece > 0.0 && longest > piece) segs = subdivide_beam_segments(segs, piece);
+      const BeamNetwork seam_net = build_beam_network(segs);
+      const BeamNetworkSeams seams = beam_network_seams(seam_net);
+      std::fprintf(stderr,
+                   "[seams] %zu span(s) -> %zu after subdivision at %.3f mm (longest was "
+                   "%.2f mm) | %zu welded node(s), %zu T-junction end(s), %zu end(s) on "
+                   "NOTHING\n",
+                   before, segs.size(), piece, longest, seams.welded_nodes,
+                   seams.t_junction_ends, seams.floating_ends);
+      R.seam_spans_before = static_cast<long long>(before);
+      R.seam_spans_after = static_cast<long long>(segs.size());
+      R.seam_piece_mm = piece;
+      R.seam_longest_before_mm = longest;
+      R.seam_welded_nodes = static_cast<long long>(seams.welded_nodes);
+      R.seam_t_junction_ends = static_cast<long long>(seams.t_junction_ends);
+      R.seam_floating_ends = static_cast<long long>(seams.floating_ends);
+      // ★ AND FOR AN ANY-STEP PLAN IT IS A GATE, NOT A REPORT. Organic legitimately has
+      // free tips -- a traced curve ends where the field ran out. An any-step octet plan
+      // does not: every strut belongs to a cell whose neighbours are packed against it,
+      // so an end on nothing is either a seam the weld failed to find or geometry that
+      // never joined, and both mean the network being solved is not the part that prints.
+      if (!job.lattice.stepped_cells.empty() && seams.floating_ends > 0) {
+        R.organic_cert.verdict = OrganicCertificate::Verdict::Refused;
+        R.organic_cert.refusal =
+            "the any-step stepped network has " + std::to_string(seams.floating_ends) +
+            " strut end(s) terminating on NOTHING after the contact weld. Every strut in "
+            "a packed plan belongs to a cell its neighbours are packed against, so an end "
+            "on nothing is a seam the weld did not find or geometry that never joined -- "
+            "and either way the network solved here is not the part that would print. A "
+            "certificate over it would be a claim about a different object.";
+      }
+    }
+
     std::vector<OrganicLoadCase> ocs;
     ocs.push_back({"job", bcs, cx.loads});
 
@@ -6541,7 +7176,7 @@ LatticeVariantOutcome lattice_one_variant(
           "cap: support_grid_too_large), so nothing has checked this lattice for "
           "unsupported material; a structural certificate cannot stand on it. "
           "Coarsen the strut floor or raise the raster cap and re-run.";
-    } else
+    } else if (R.organic_cert.verdict != OrganicCertificate::Verdict::Refused)
     R.organic_cert = certify_organic_structural(
         solved_grid, hexm, segs, ocs, material.youngs_modulus_mpa,
         material.poisson, material.yield_strength_mpa,
@@ -8213,12 +8848,14 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
     // a mat under a voxel tall is erased silently — which is how a deliberately
     // thinned mat vanished from the slice entirely while every stat still read green.
     an_org.lat.weld_pitch_hint_mm = job.lattice.welded_pitch_mm;
-    an_org.lat.overhang_fillet = job.grading.organic_overhang_fillet;
     // ★ THE LAYER HEIGHT THE MACHINE WILL ACTUALLY USE. The mid-air-start check
     // rasters Z at this pitch; without it the check is COARSER THAN THE PRINTER
     // and passes parts that float for two real layers. 0 = not stated, and the
     // check says so on the receipt rather than inferring one.
     an_org.lat.layer_height_mm = job.loads.layer_height_mm;
+    an_org.lat.base_mat = job.grading.organic_base_mat;
+    an_org.lat.fill_mat = job.grading.organic_fill_mat;
+    an_org.lat.trim_below_base = job.grading.organic_trim_below_base;
 
     RunInfo gi = build_run_info(job, options, RunObservability{});
     gi.grading_present = true;
@@ -9148,6 +9785,17 @@ LatticeVariantJobResult lattice_variant_job(const JobDescription& job,
       gi.grading_band_rho_min = R.gf.band_rho_min;
       gi.grading_band_rho_max = R.gf.band_rho_max;
       gi.grading_cells_per_member_floor = R.gf.cells_per_member_floor;
+      gi.stepped_anystep_cells = R.anystep_cells;
+      gi.stepped_anystep_regions = R.anystep_regions;
+      gi.stepped_anystep_passes = R.anystep_passes;
+      gi.stepped_anystep_histogram = R.anystep_histogram;
+      gi.stepped_seam_spans_before = R.seam_spans_before;
+      gi.stepped_seam_spans_after = R.seam_spans_after;
+      gi.stepped_seam_piece_mm = R.seam_piece_mm;
+      gi.stepped_seam_longest_before_mm = R.seam_longest_before_mm;
+      gi.stepped_seam_welded_nodes = R.seam_welded_nodes;
+      gi.stepped_seam_t_junction_ends = R.seam_t_junction_ends;
+      gi.stepped_seam_floating_ends = R.seam_floating_ends;
       gi.grading_cell_size_mm = R.gf.cell_size_mm;
       gi.grading_printability_floor_mm = R.gf.printability_floor_mm;
       gi.grading_cell_size_floored = R.gf.cell_size_floored;
@@ -9219,8 +9867,7 @@ LatticeVariantJobResult lattice_variant_job(const JobDescription& job,
         gi.organic_synthetic_dead_floor_bound = R.organic_synthetic.dead_floor_bound;
         gi.organic_solid_rim_mm = R.organic_solid_rim_mm;
         gi.organic_solid_rim_voxels = R.organic_solid_rim_voxels;
-        gi.organic_overhang_fillet_on = job.grading.organic_overhang_fillet;
-        gi.organic_fillet_skipped_spans = R.oc.organic_fillet_skipped_spans;
+        gi.organic_unsupported_spans = R.oc.organic_unsupported_spans;
         gi.organic_transfer_ties_on = job.grading.organic_transfer_ties;
         gi.organic_ties_seeded = static_cast<long long>(R.oc.growth.growth_ties_seeded);
         gi.organic_ties_landed = static_cast<long long>(R.oc.growth.growth_ties_landed);
@@ -9354,7 +10001,6 @@ LatticeVariantJobResult lattice_variant_job(const JobDescription& job,
         gi.organic_arched_spans = R.oc.organic_arched_spans;
         gi.organic_arch_rise = R.oc.organic_arch_rise;
         gi.organic_filleted = R.oc.organic_filleted;
-        gi.organic_fillet_unresolved = R.oc.organic_fillet_unresolved;
         gi.organic_fillet_radius = R.oc.organic_fillet_radius;
         gi.organic_base_mat_length_mm = R.oc.organic_base_mat_len;
         gi.organic_base_mat_z_mm = R.oc.organic_base_mat_z;

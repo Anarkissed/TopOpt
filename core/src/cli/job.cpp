@@ -1216,6 +1216,7 @@ JobDescription parse_job(const std::string& json_text) {
                          "emit_3mf", "skin", "min_extrudable_width_mm",
                          "outer_finish", "emit_welded_stl", "welded_pitch_mm", "emit_organic_spans",
                          "regions", "multiscale",
+                         "stepped_cells",
                          "forecast_only", "organic_probe_cells_mm", "organic_probe_grades_mm",
                          "organic_recommend", "organic_look_cells_across",
                          "organic_recommend_margin", "organic_recommend_steps",
@@ -1258,6 +1259,41 @@ JobDescription parse_job(const std::string& json_text) {
     // lattice, byte-identical. Each entry is {role, kind, geometry} with the
     // SAME manual-primitive geometry a manual clearance carries; a malformed
     // role/kind is REFUSED, never defaulted (H1e).
+    // ── ★ ANY-STEP STEPPED: the cells the app placed ───────────────────────────
+    // (maintainer, 2026-09-18: "Send the cell list to core".) The app sends the exact
+    // arrangement approved on screen and core lays down those cells; it runs no packer of
+    // its own. `region_id` is 1-based in the job's own include-region order and
+    // `origin_mm` is the cell's minimum corner in MODEL space, so the frame is derived
+    // from the region named -- there is no second array to keep in step with this one.
+    // What this stage refuses is malformed JSON and the wrong algorithm; what the RUN
+    // refuses is a cell that breaks the menu rule, named.
+    if (const JsonValue* sc = find_key(lat, "stepped_cells")) {
+      if (sc->type != JsonValue::Type::Array)
+        schema_fail("lattice \"stepped_cells\" must be an array");
+      job.lattice.stepped_cells.reserve(sc->arr.size());
+      for (const JsonValue& cv : sc->arr) {
+        require_object(cv, "a lattice.stepped_cells entry");
+        reject_unknown_keys(cv, {"region_id", "origin_mm", "size_mm"},
+                            "a lattice.stepped_cells entry");
+        SteppedCell c;
+        const double id = require_number(
+            require_key(cv, "region_id", "a lattice.stepped_cells entry"),
+            "lattice.stepped_cells region_id");
+        if (id < 1.0 || id != std::floor(id))
+          schema_fail(
+              "lattice.stepped_cells \"region_id\" must be a positive integer -- it is "
+              "1-based in the job's own include-region order");
+        c.region_id = static_cast<int>(id);
+        c.origin = parse_vec3(require_key(cv, "origin_mm", "a lattice.stepped_cells entry"),
+                              "lattice.stepped_cells origin_mm");
+        c.size_mm = require_number(
+            require_key(cv, "size_mm", "a lattice.stepped_cells entry"),
+            "lattice.stepped_cells size_mm");
+        if (!(c.size_mm > 0.0) || !std::isfinite(c.size_mm))
+          schema_fail("lattice.stepped_cells \"size_mm\" must be finite and > 0");
+        job.lattice.stepped_cells.push_back(c);
+      }
+    }
     if (const JsonValue* regs = find_key(lat, "regions")) {
       if (regs->type != JsonValue::Type::Array)
         schema_fail("\"lattice.regions\" must be an array");
@@ -1594,9 +1630,14 @@ JobDescription parse_job(const std::string& json_text) {
              "algorithm", "organic_strut_width_mm",
              "organic_overhang_angle_deg", "organic_boundary_finish",
              "organic_shape_fit", "organic_shape_fit_only",
-             "organic_scale", "organic_growth", "organic_overhang_fillet",
+             "organic_scale", "organic_growth",
              "organic_transfer_ties", "organic_tie_swirl", "organic_solid_rim_mm",
-             "organic_structural_certification"},
+             "organic_base_mat", "organic_fill_mat", "organic_trim_below_base",
+             "organic_strut_embed_mm",
+             "organic_dual_contour", "organic_dc_cell_mm", "organic_dc_tolerance_mm",
+             "organic_density_union_subdiv", "organic_calibrate_on_shipped",
+             "stepped_min_tile_mm",
+             "organic_structural_certification", "structural_certification"},
         "grading");
     job.grading.present = true;
     if (const JsonValue* t = find_key(gr, "topology")) {
@@ -1708,6 +1749,23 @@ JobDescription parse_job(const std::string& json_text) {
     // network tied into the solid, which is the one instrument that does not read a
     // density against the octet tensor. A structural organic run certified against
     // that tensor would report a margin for a material this lattice is not.
+    // ★ "structural_certification" is the name now that Stepped needs it too; the
+    // organic spelling stays as an ALIAS so every job already in flight keeps working.
+    // Naming both is refused rather than resolved -- a job that says the instrument twice
+    // has an opinion about it, and silently picking one would hide a disagreement.
+    if (find_key(gr, "structural_certification") &&
+        find_key(gr, "organic_structural_certification"))
+      schema_fail(
+          "grading names both \"structural_certification\" and its alias "
+          "\"organic_structural_certification\"; state one");
+    if (const JsonValue* v = find_key(gr, "structural_certification")) {
+      job.grading.organic_structural_certification =
+          require_nonempty_string(*v, "grading.structural_certification");
+      if (job.grading.organic_structural_certification != "beam_network")
+        schema_fail(
+            "grading \"structural_certification\" must be \"beam_network\" (got \"" +
+            job.grading.organic_structural_certification + "\")");
+    }
     if (const JsonValue* v = find_key(gr, "organic_structural_certification")) {
       job.grading.organic_structural_certification =
           require_nonempty_string(*v, "grading.organic_structural_certification");
@@ -1751,11 +1809,26 @@ JobDescription parse_job(const std::string& json_text) {
             "REQUIRED for an organic lattice under structural intent. The certificate "
             "for organic is the beam network solved over the emitted spans; the "
             "density-against-octet-tensor path does not describe traced geometry.");
-      if (!organic_structural &&
+      // ★ AND STEPPED MAY NAME IT TOO (brief of 2026-09-17 §3.1). Any-step Stepped is
+      // not offered the tensor certificate at all -- cells of different families share no
+      // nodes, and the tensor assumes they do -- so the beam network is its structural
+      // instrument exactly as it is organic's. The key is therefore meaningful for BOTH
+      // algorithms; it stays refused everywhere else, where nothing would consume it.
+      // ★ stepped_cells is meaningful for ONE algorithm. Refused elsewhere rather than
+      // ignored, so a job that packs a plan and then asks for doubled or organic fails
+      // loudly instead of silently shipping a lattice that is not the one on screen.
+      if (!job.lattice.stepped_cells.empty() && job.grading.algorithm != "stepped")
+        schema_fail(
+            "lattice \"stepped_cells\" is only allowed with \"algorithm\": \"stepped\" "
+            "(this job says \"" + job.grading.algorithm + "\"). The cell list IS the "
+            "any-step plan; no other algorithm lays it down.");
+      const bool stepped_may_name =
+          job.grading.algorithm == "stepped" && job.grading.intent != "aesthetic";
+      if (!organic_structural && !stepped_may_name &&
           !job.grading.organic_structural_certification.empty())
         schema_fail(
-            "grading \"organic_structural_certification\" is only meaningful for an "
-            "organic lattice under structural intent (algorithm is \"" +
+            "grading \"structural_certification\" is only meaningful for an organic or "
+            "a stepped lattice under structural intent (algorithm is \"" +
             job.grading.algorithm + "\", intent is \"" + job.grading.intent + "\")");
     }
     // ★★ SHAPE-FIT GRADING REQUIRES THE AESTHETIC INTENT, and is REFUSED under any
@@ -1787,6 +1860,87 @@ JobDescription parse_job(const std::string& json_text) {
             "algorithm \"organic\"");
       job.grading.organic_transfer_ties = (tv->num != 0.0);
     }
+    if (const JsonValue* em = find_key(gr, "organic_strut_embed_mm")) {
+      if (em->type != JsonValue::Type::Number || !std::isfinite(em->num) || em->num < 0.0)
+        schema_fail(
+            "grading \"organic_strut_embed_mm\" must be a finite number >= 0 (0 = off)");
+      if (!organic_alg)
+        schema_fail(
+            "grading \"organic_strut_embed_mm\" is only allowed with "
+            "algorithm \"organic\"");
+      job.grading.organic_strut_embed_mm = em->num;
+    }
+    if (const JsonValue* dcv = find_key(gr, "organic_dual_contour")) {
+      if (dcv->type != JsonValue::Type::Bool)
+        schema_fail("grading \"organic_dual_contour\" must be a boolean");
+      if (!organic_alg)
+        schema_fail(
+            "grading \"organic_dual_contour\" is only allowed with "
+            "algorithm \"organic\"");
+      job.grading.organic_dual_contour = (dcv->num != 0.0);
+    }
+    for (const char* k : {"organic_dc_cell_mm", "organic_dc_tolerance_mm"}) {
+      const JsonValue* v = find_key(gr, k);
+      if (!v) continue;
+      if (v->type != JsonValue::Type::Number || !std::isfinite(v->num) || v->num < 0.0)
+        schema_fail(std::string("grading \"") + k +
+                    "\" must be a finite number >= 0 (0 = derived)");
+      if (!organic_alg)
+        schema_fail(std::string("grading \"") + k +
+                    "\" is only allowed with algorithm \"organic\"");
+      if (std::string(k) == "organic_dc_cell_mm") job.grading.organic_dc_cell_mm = v->num;
+      else job.grading.organic_dc_tolerance_mm = v->num;
+    }
+    if (const JsonValue* mt = find_key(gr, "stepped_min_tile_mm")) {
+      if (mt->type != JsonValue::Type::Number || !std::isfinite(mt->num) || mt->num < 0.0)
+        schema_fail("grading \"stepped_min_tile_mm\" must be a finite number >= 0");
+      if (job.grading.algorithm != "stepped")
+        schema_fail(
+            "grading \"stepped_min_tile_mm\" is only allowed with \"algorithm\": "
+            "\"stepped\" (this job says \"" + job.grading.algorithm +
+            "\"). It bounds an any-step TILE; note it is NOT \"cell_min_mm\", which is "
+            "the swept window's lower end and a different quantity.");
+      job.grading.stepped_min_tile_mm = mt->num;
+    }
+    if (const JsonValue* cs = find_key(gr, "organic_calibrate_on_shipped")) {
+      if (cs->type != JsonValue::Type::Bool)
+        schema_fail("grading \"organic_calibrate_on_shipped\" must be a boolean");
+      if (!organic_alg)
+        schema_fail("grading \"organic_calibrate_on_shipped\" is only allowed with "
+                    "algorithm \"organic\"");
+      job.grading.organic_calibrate_on_shipped = (cs->num != 0.0);
+    }
+    if (const JsonValue* uv = find_key(gr, "organic_density_union_subdiv")) {
+      if (uv->type != JsonValue::Type::Number || !std::isfinite(uv->num) ||
+          uv->num < 0.0 || uv->num > 32.0 || uv->num != std::floor(uv->num))
+        schema_fail("grading \"organic_density_union_subdiv\" must be an integer 0..32 "
+                    "(0 = the deposit)");
+      if (!organic_alg)
+        schema_fail("grading \"organic_density_union_subdiv\" is only allowed with "
+                    "algorithm \"organic\"");
+      job.grading.organic_density_union_subdiv = static_cast<int>(uv->num);
+    }
+    if (const JsonValue* pv = find_key(gr, "organic_base_mat")) {
+      if (pv->type != JsonValue::Type::Bool)
+        schema_fail("grading \"organic_base_mat\" must be a boolean");
+      if (!organic_alg)
+        schema_fail("grading \"organic_base_mat\" is only allowed with algorithm \"organic\"");
+      job.grading.organic_base_mat = (pv->num != 0.0);
+    }
+    if (const JsonValue* pv = find_key(gr, "organic_fill_mat")) {
+      if (pv->type != JsonValue::Type::Bool)
+        schema_fail("grading \"organic_fill_mat\" must be a boolean");
+      if (!organic_alg)
+        schema_fail("grading \"organic_fill_mat\" is only allowed with algorithm \"organic\"");
+      job.grading.organic_fill_mat = (pv->num != 0.0);
+    }
+    if (const JsonValue* pv = find_key(gr, "organic_trim_below_base")) {
+      if (pv->type != JsonValue::Type::Bool)
+        schema_fail("grading \"organic_trim_below_base\" must be a boolean");
+      if (!organic_alg)
+        schema_fail("grading \"organic_trim_below_base\" is only allowed with algorithm \"organic\"");
+      job.grading.organic_trim_below_base = (pv->num != 0.0);
+    }
     if (const JsonValue* rm = find_key(gr, "organic_solid_rim_mm")) {
       if (rm->type != JsonValue::Type::Number || !(rm->num >= 0.0) || !std::isfinite(rm->num))
         schema_fail("grading \"organic_solid_rim_mm\" must be a finite number >= 0 (0 = off)");
@@ -1800,15 +1954,6 @@ JobDescription parse_job(const std::string& json_text) {
       if (!organic_alg)
         schema_fail("grading \"organic_tie_swirl\" is only allowed with algorithm \"organic\"");
       job.grading.organic_tie_swirl = sw->num;
-    }
-    if (const JsonValue* fv = find_key(gr, "organic_overhang_fillet")) {
-      if (fv->type != JsonValue::Type::Bool)
-        schema_fail("grading \"organic_overhang_fillet\" must be a boolean");
-      if (!organic_alg)
-        schema_fail(
-            "grading \"organic_overhang_fillet\" is only allowed with "
-            "algorithm \"organic\"");
-      job.grading.organic_overhang_fillet = (fv->num != 0.0);
     }
     if (const JsonValue* sv = find_key(gr, "organic_shape_fit")) {
       if (sv->type != JsonValue::Type::Bool)
