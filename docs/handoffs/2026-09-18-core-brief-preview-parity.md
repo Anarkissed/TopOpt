@@ -254,3 +254,33 @@ Reference part: his M2 verticalStand, bead 0.45 mm, two face regions (12 mm and
 `UnifiedShading.swift` `lsdf_march`, `cap_*` (§1.8–1.9, §2.1), `LatticeType.swift` (§1.7),
 `OrganicShapeFit.swift`, `OrganicSolidRim.swift`, `OrganicSampleCube.swift` (§2),
 `docs/handoffs/2026-09-17-core-brief-any-step-stepped-and-beam-certification.md` (Stepped).
+
+## Core reply 4 (9ce3824d, the wetted join) — checked against the app, 2026-09-19
+
+Core transcribed `cap_wet_flare` / `cap_wet_field` into `organic_wet_join.hpp` and asked
+two things of the preview. Both were read in the shader, not assumed:
+
+1. **The flare's `s` is the LATTICED SET here too.** `cap_wet_flare` takes `s` from
+   `cap_clip_field(…, embed 0)` = max(part clip, box, `regionTex.r`), and `regionTex.r`
+   is baked from `wallRegions` — the include regions with `inPlaneOffsetMM -= solidRimMM`
+   (LatticeSDFMetal `wallRegions`, 2026-09-07). So `s` goes positive inside the rim band
+   and at the body behind the prism; the bead fires at the rim's inner face exactly where
+   core's does. Core's first wiring (the allowed region, +0.43 %) has no twin in the app.
+2. **`d_part`.** The preview's part field is the exact point-to-triangle distance to the
+   MESH within the bake band (`LatticePreviewOccupancy.signedDistance`), not a chamfer;
+   core's is the exact EDT to the printed VOXEL solid. They differ by at most the
+   voxelisation. The clip (not the flare) now adds the march's trim `stepParams.y`
+   (≤ 0.35 mm) — see a15e0024; the flare's own `solid` term reads the un-eroded distance.
+3. **Constants match.** peak 0.5·reach, above-reach 0.35·reach, reach = 2·fillet,
+   fillet = wet·R with wet = `organicRadius.w` = 1 under capsules — core's
+   `kOrganicWetScale` 1.0.
+4. **Core's trap 4 (the narrow band) has its twin already handled.** The impostor box is
+   built at R·(1 + wet) (`capsule_vertex`, 2026-09-08) and the cheap gate intersects at
+   R + fillet; the flare's bulge is ≤ fillet at any scale, so the bound is not pinned at
+   1.0. The part SDF is a full-grid bake, not a per-capsule band.
+
+Not in the app: the +15.8 % volume the join costs on the STAND (64,857 → 75,098 mm³) and
+the 3.2× DC time; the preview estimates neither. Open on core's side, in their order:
+B outline beam, A stepped_cells under "doubled", C struts from the sent rho, D the
+Allow-quilt message, §3 receipts + Hausdorff. §4-H (whole-wall synthetic + middle
+spacing) still to be acknowledged by core.
