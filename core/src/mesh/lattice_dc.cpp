@@ -1,6 +1,9 @@
 // See topopt/lattice_dc.hpp for why the lattice is contoured from its own SDF.
 #include "topopt/lattice_dc.hpp"
 
+#include "topopt/organic_wet_join.hpp"
+#include "topopt/voxel_sdf.hpp"
+
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -65,6 +68,18 @@ struct Field {
   std::vector<Cap> caps;
   double cell = 0.0;            // spatial-hash cell, sized on the largest capsule
   double clip_z = -1e30;        // the base plane: everything below it is outside
+  // ── ★ THE WETTED JOIN (lattice_dc.hpp). Off unless the caller supplies the fields.
+  LatticeDcWetJoin wet;
+  double rmin = 0.0;            // thinnest strut, for the gradient's step
+
+  // The two signed fields the flare reads, sampled ONCE per point because neither
+  // depends on which capsule is nearest.
+  void wet_fields(const Vec3& p, double& d_part, double& s) const {
+    d_part = voxel_field_sample(*wet.grid, *wet.part_sdf_mm, p);
+    // LatticeBoundary is POSITIVE inside the allowed region; the shader's field is
+    // positive inside the SOLID. One negation, stated here rather than buried.
+    s = -wet.boundary->signed_distance(p);
+  }
   std::unordered_map<long long, std::vector<int>> grid;
   mutable std::size_t evals = 0;
 
@@ -93,10 +108,58 @@ struct Field {
         }
     if (which) *which = bi;
     if (bi < 0) return 1e30;          // nothing near: far outside, which is all we need
+    if (wet.on()) {
+      // ★ EACH CAPSULE WETS WITH ITS OWN FILLET, exactly as the preview draws one
+      // impostor per capsule: fillet = scale x that strut's radius, so a thin strut gets
+      // a small bead and a fat one a big one. Recomputed over the neighbourhood rather
+      // than applied to the winner, because a thinner neighbour can win once swollen.
+      double d_part = 0.0, sfield = 0.0;
+      wet_fields(p, d_part, sfield);
+      best = 1e30;
+      const long long ci2 = static_cast<long long>(std::floor(p.x / cell));
+      const long long cj2 = static_cast<long long>(std::floor(p.y / cell));
+      const long long ck2 = static_cast<long long>(std::floor(p.z / cell));
+      for (long long i = ci2 - 1; i <= ci2 + 1; ++i)
+        for (long long j = cj2 - 1; j <= cj2 + 1; ++j)
+          for (long long k = ck2 - 1; k <= ck2 + 1; ++k) {
+            auto it = grid.find(key_of(i, j, k));
+            if (it == grid.end()) continue;
+            for (int m : it->second) {
+              const Cap& c = caps[static_cast<std::size_t>(m)];
+              const Vec3 ap = sub(p, c.a);
+              double t = c.ab2 > 0.0 ? dot(ap, c.ab) / c.ab2 : 0.0;
+              t = t < 0.0 ? 0.0 : (t > 1.0 ? 1.0 : t);
+              double d = len(sub(ap, mul(c.ab, t))) - c.r;
+              const double fillet = wet.scale * c.r;
+              if (fillet > 0.0)
+                d -= fillet * organic_wet_flare(d_part, sfield,
+                                                kOrganicWetReachPerFillet * fillet);
+              if (d < best) best = d;
+            }
+          }
+      // ★ AND INTERSECTED WITH WHERE MATERIAL MAY BE. Not optional once the join
+      // swells: fattening a strut against a wall pushes material THROUGH the wall
+      // unless the union is cut by the part, which is what the shader's
+      // max(d, clip_field) does and what the prism path never needed.
+      if (sfield > best) best = sfield;
+    }
     const double below = clip_z - p.z;      // the half-space, intersected with the union
     return below > best ? below : best;
   }
   Vec3 gradient(const Vec3& p) const {
+    if (wet.on()) {
+      // ★ THE BLENDED SURFACE IS NOT ANY CAPSULE'S, so the exact analytic normal stops
+      // being the right answer the moment a flare or the part cut is in play -- it would
+      // shade the fillet with the tube's normal and the cut with the tube it went
+      // through. Central differences at the preview's own step (0.15 r), which is how the
+      // shader takes this same gradient.
+      const double h = std::max(0.15 * (rmin > 0.0 ? rmin : 1.0), 1e-4);
+      const double gx = eval(Vec3{p.x + h, p.y, p.z}) - eval(Vec3{p.x - h, p.y, p.z});
+      const double gy = eval(Vec3{p.x, p.y + h, p.z}) - eval(Vec3{p.x, p.y - h, p.z});
+      const double gz = eval(Vec3{p.x, p.y, p.z + h}) - eval(Vec3{p.x, p.y, p.z - h});
+      const double l = std::sqrt(gx * gx + gy * gy + gz * gz);
+      return l > 1e-12 ? Vec3{gx / l, gy / l, gz / l} : Vec3{0, 0, 1};
+    }
     int m = -1;
     const double here = eval(p, &m);
     if (m < 0) return Vec3{0, 0, 1};
@@ -854,6 +917,8 @@ TriangleMesh lattice_dual_contour(const std::vector<OrganicSpan>& spans,
   if (F.caps.empty()) return TriangleMesh{};
 
   F.clip_z = opt.clip_below_z;
+  F.wet = opt.wet;
+  F.rmin = rmin;
   double h = opt.cell_mm > 0.0
                  ? opt.cell_mm
                  : (2.0 * rmin) / std::max(1, opt.cells_across_thinnest);

@@ -104,6 +104,7 @@ add_library(topopt
   src/mesh/lattice_dc.cpp
   src/mesh/lattice_boundary.cpp
   src/mesh/stepped_plan.cpp
+  src/voxel/voxel_sdf.cpp
   src/mesh/lattice_void.cpp
   src/voxel/voxelize.cpp
   src/voxel/clearance.cpp

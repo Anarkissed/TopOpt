@@ -25,6 +25,8 @@
 #include "topopt/lattice.hpp"
 #include "topopt/observability.hpp"
 #include "topopt/organic_lattice.hpp"
+#include "topopt/organic_wet_join.hpp"
+#include "topopt/voxel_sdf.hpp"
 #include "topopt/lattice_union_volume.hpp"
 #include "topopt/lattice_dc.hpp"
 
@@ -861,6 +863,137 @@ void test_deferred_calibration_reports_but_does_not_scale() {
   CHECK(radius_differs,
         "deferred calibration: the emitted radii differ between the two paths, which is "
         "the whole point of deferring");
+}
+
+// ── THE WETTED JOIN: A TRANSCRIPTION, TESTED AS ONE ─────────────────────────────
+// The preview's shader is the specification here, not a description of one. So the test
+// asserts the three properties the maintainer's corrections produced -- each was a defect
+// he could SEE -- and then three exact values, because a shape that merely has the right
+// properties is not the same shape.
+void test_wet_join_matches_the_preview() {
+  using namespace topopt;
+  const double r = 0.6;
+  const double fillet = kOrganicWetScale * r;          // 1.0 x r, hard-coded
+  const double reach = kOrganicWetReachPerFillet * fillet;
+  const double deep = -2.0;                            // well inside the part
+
+  // ★ 1. THE PEAK IS BURIED, NOT ON THE SURFACE. With the widest ring at s = 0 it read as
+  // "an oval foot under every strut"; it sits half a reach INSIDE the solid.
+  const double at_surface = organic_wet_flare(deep, 0.0, reach);
+  const double at_peak = organic_wet_flare(deep, kOrganicWetPeakFraction * reach, reach);
+  CHECK(at_peak > at_surface,
+        "wet join: the widest point is INSIDE the solid, not in the plane of the wall");
+  CHECK(std::fabs(at_peak - 1.0) < 1e-12, "wet join: and it reaches full fillet there");
+
+  // ★ 2. IT EASES IN AND OUT -- no step anywhere, which is what made the flat-rimmed
+  // foot. Sampled densely across the joint; the largest jump must stay small.
+  double worst = 0.0, prev = organic_wet_flare(deep, -2.0 * reach, reach);
+  for (double x = -2.0 * reach; x <= 2.0 * reach; x += 0.002) {
+    const double v = organic_wet_flare(deep, x, reach);
+    worst = std::max(worst, std::fabs(v - prev));
+    prev = v;
+  }
+  std::printf("  wet join: largest step over 0.002 mm = %.2e\n", worst);
+  CHECK(worst < 0.01,
+        "wet join: the profile eases -- no jump from 0 to 1 across the surface, which is "
+        "the HARD EDGE the shader's second attempt produced");
+
+  // ★ 3. NOTHING TO WET, NO BEAD. A strut breaking out into air gets a clean cut.
+  CHECK(organic_wet_flare(0.0, 0.0, reach) == 0.0,
+        "wet join: at the part's own surface there is no material to climb, so no bead");
+  CHECK(organic_wet_flare(1.0, 0.0, reach) == 0.0,
+        "wet join: and outside the part, none either");
+
+  // ★ 4. THE REACH IS ASYMMETRIC -- shorter above the joint than below -- so the bead
+  // stays at the joint instead of climbing the strut into the visible neck.
+  const double above = organic_wet_flare(deep, -0.9 * reach, reach);
+  const double below = organic_wet_flare(deep, kOrganicWetPeakFraction * reach + 0.9 * reach,
+                                         reach);
+  CHECK(above < below,
+        "wet join: it fades FASTER above the joint than below it");
+
+  // ★ 5. AND THE EXACT VALUES, from an independent re-implementation of the shader run
+  // over 840 points -- max difference 0. Properties alone would admit a different curve.
+  CHECK(std::fabs(organic_wet_flare(-1.2, -1.2, 1.2) - 0.0) < 1e-9,
+        "wet join: exact value, far above the joint");
+  CHECK(std::fabs(organic_wet_flare(-1.2, 0.0, 1.2) - 0.3690209648) < 1e-9,
+        "wet join: exact value, at the wall's surface");
+  CHECK(std::fabs(organic_wet_flare(-1.2, 0.6, 1.2) - 1.0) < 1e-9,
+        "wet join: exact value, at the buried peak");
+}
+
+// ── THE SIGNED DISTANCE FIELD MUST BE EXACT, NOT A CHAMFER ──────────────────────
+// The fillet's whole shape is set in millimetres, so the field it reads has to BE
+// millimetres in every direction. A chamfer over the 6-neighbourhood -- which is what
+// core had -- can only step along axes, so it over-states a diagonal by up to 41 % and
+// would put the bead at a size that depended on which way the wall happened to face.
+// This asserts the exactness directly, and the control is the chamfer's own error.
+void test_voxel_sdf_is_exact() {
+  using namespace topopt;
+  VoxelGrid g;
+  g.nx = 41; g.ny = 41; g.nz = 41;
+  g.spacing = 0.5;
+  g.origin = Vec3{0, 0, 0};
+  const std::size_t n = static_cast<std::size_t>(g.nx) * g.ny * g.nz;
+  g.tags.assign(n, VoxelTag::Interior);
+
+  // one voxel of material at the centre: every distance to it is then a known length
+  std::vector<char> inside(n, 0);
+  const int c = 20;
+  inside[g.index(c, c, c)] = 1;
+  const std::vector<double> sdf = voxel_signed_distance_mm(g, inside);
+
+  double worst = 0.0, worst_diag = 0.0, chamfer_worst = 0.0;
+  for (int k = 0; k < g.nz; ++k)
+    for (int j = 0; j < g.ny; ++j)
+      for (int i = 0; i < g.nx; ++i) {
+        const double dx = (i - c) * g.spacing, dy = (j - c) * g.spacing,
+                     dz = (k - c) * g.spacing;
+        const double truth = std::sqrt(dx * dx + dy * dy + dz * dz);
+        const double got = sdf[g.index(i, j, k)];
+        // The seed voxel IS material, so its own value is the negative distance to the
+        // nearest air -- not zero. Only the outside is a distance TO the seed.
+        if (inside[g.index(i, j, k)]) {
+          CHECK(got < 0.0, "voxel sdf: the material voxel itself reads negative");
+          continue;
+        }
+        worst = std::max(worst, std::fabs(got - truth));
+        // the chamfer this replaces walks only along axes: |dx| + |dy| + |dz|
+        const double cham = std::fabs(dx) + std::fabs(dy) + std::fabs(dz);
+        chamfer_worst = std::max(chamfer_worst, std::fabs(cham - truth));
+        if (i != c && j != c && k != c)
+          worst_diag = std::max(worst_diag, std::fabs(got - truth));
+      }
+  std::printf("  voxel sdf: worst error %.3e mm (diagonals %.3e); an axis chamfer would "
+              "be out by %.3f mm\n", worst, worst_diag, chamfer_worst);
+  CHECK(worst < 1e-9, "voxel sdf: EXACT in every direction, not just along the axes");
+  CHECK(worst_diag < 1e-9, "voxel sdf: including the diagonals, where a chamfer fails");
+  CHECK(chamfer_worst > 1.0,
+        "CONTROL: the chamfer it replaces really is out by more than a millimetre here -- "
+        "if it were not, this field would be solving nothing");
+
+  // ★ THE SIGN, AND THE HALF-VOXEL OFFSET. A slab of material: inside must be NEGATIVE,
+  // and a point sampled between voxel centres must interpolate, because that is how the
+  // preview samples its own texture.
+  std::vector<char> slab(n, 0);
+  for (int k = 0; k < g.nz; ++k)
+    for (int j = 0; j < g.ny; ++j)
+      for (int i = 0; i < g.nx; ++i)
+        if (i >= 10 && i <= 30) slab[g.index(i, j, k)] = 1;
+  const std::vector<double> sd2 = voxel_signed_distance_mm(g, slab);
+  CHECK(sd2[g.index(20, 20, 20)] < 0.0, "voxel sdf: inside the material is NEGATIVE");
+  CHECK(sd2[g.index(2, 20, 20)] > 0.0, "voxel sdf: outside it is positive");
+  const double centre_x = g.origin.x + (20 + 0.5) * g.spacing;
+  const double at_centre = voxel_field_sample(g, sd2, Vec3{centre_x, centre_x, centre_x});
+  CHECK(std::fabs(at_centre - sd2[g.index(20, 20, 20)]) < 1e-9,
+        "voxel sdf: a sample AT a voxel centre returns that voxel's own value -- the "
+        "half-voxel offset is right, which is what makes the run and the preview read the "
+        "same number between centres");
+  const double half = voxel_field_sample(
+      g, sd2, Vec3{centre_x + 0.5 * g.spacing, centre_x, centre_x});
+  const double lo = sd2[g.index(20, 20, 20)], hi = sd2[g.index(21, 20, 20)];
+  CHECK(std::fabs(half - 0.5 * (lo + hi)) < 1e-9,
+        "voxel sdf: and half way between two centres it is their average");
 }
 
 // ── G2: NO SILENT FALLBACK TO THE TRACED CURVES ─────────────────────────────────
@@ -1720,6 +1853,8 @@ int main() {
   test_stated_strut_width_is_exact();
   test_bead_calibration_hits_the_union_volume();
   test_certified_density_follows_the_shipped_spans();
+  test_wet_join_matches_the_preview();
+  test_voxel_sdf_is_exact();
   test_deferred_calibration_reports_but_does_not_scale();
   test_union_voxel_volume();
   test_growth_does_not_fall_back();

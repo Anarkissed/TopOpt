@@ -40,10 +40,39 @@
 #include <cstddef>
 #include <vector>
 
+#include "topopt/lattice_boundary.hpp"
 #include "topopt/mesh.hpp"
 #include "topopt/organic_lattice.hpp"
+#include "topopt/voxel.hpp"
 
 namespace topopt {
+
+// ── ★ THE WETTED JOIN, DRAWN THE WAY THE PREVIEW DRAWS IT ──────────────────────
+// (maintainer, 2026-09-18: "do it the *exact* way that App does it".) The fillet is a
+// FIELD operation -- swell the strut near material, then intersect with where material
+// may be -- which is why it belongs here and not in the prism emitter. A prism emitter
+// has no field to subtract from; fattening the end of a tube instead is precisely the
+// "flat-rimmed foot" the preview tried and rejected, and is what core's own header has
+// been describing (and not implementing) since 2026-09-08.
+//
+// `part_sdf_mm` is the distance to MATERIAL, negative inside (voxel_sdf.hpp), and gates
+// the bead: a strut breaking out into air gets a clean cut, not a blob. `boundary` gives
+// the lattice/solid boundary, whose sign this inverts to match the shader's convention.
+// `scale` is 0 to leave the join alone; kOrganicWetScale is what the preview uses.
+//
+// NOTE, and it is one fewer thing to keep in step: core needs NO embed relaxation. The
+// preview relaxes its region by the embed because its region texture stops at the solid;
+// after ruling G core's declared region already CONTAINS the rim band the struts run
+// into, so they are inside the allowed region already.
+struct LatticeDcWetJoin {
+  const VoxelGrid* grid = nullptr;
+  const std::vector<double>* part_sdf_mm = nullptr;
+  const LatticeBoundary* boundary = nullptr;
+  double scale = 0.0;
+  bool on() const {
+    return scale > 0.0 && grid != nullptr && part_sdf_mm != nullptr && boundary != nullptr;
+  }
+};
 
 struct LatticeDcOptions {
   // The BASE cell: the FINEST a leaf can be, and the grid the octree merges upward from.
@@ -93,6 +122,9 @@ struct LatticeDcOptions {
   // used, rounded down). Keeps a flat slab from collapsing into one enormous cell whose
   // vertex then drags long slivers to its finer neighbours.
   double max_leaf_multiple = 8.0;
+
+  // The wetted join and the part intersection that comes with it (see above).
+  LatticeDcWetJoin wet;
 };
 
 struct LatticeDcStats {
