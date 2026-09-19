@@ -5083,11 +5083,22 @@ LatticeAlgorithm resolve_lattice_algorithm(const JobGrading& jg) {
 // ★ `density` and `printed_iso` USED TO BE ARGUMENTS. They were only ever read by the
 // seed's "the neighbour must be solid" test, which is the bug fixed below; with the seed
 // keyed on the lattice mask alone the rim no longer consults the density field at all.
-static std::size_t apply_organic_solid_rim(const VoxelGrid& grid, std::vector<char>& mask,
-                                           const std::vector<int>& region_ids,
-                                           const std::vector<Vec3>& region_normals, double rim_mm) {
+// ★★ IT RETURNS THE BAND; IT NO LONGER DELETES IT (maintainer, 2026-09-18, ruling G).
+// Clearing the band from the mask before the tracer ran did two things at once: it made
+// the band print solid, which is the point, AND it took the band out of the tracer's
+// candidates, which was not. The preview keeps the band as candidate, so its curves run
+// THROUGH the band and weld into the solid; the run cut every strut back at the band's
+// inner face. That was the one geometric divergence between the two in source. The caller
+// now traces with the band IN and turns it solid afterwards, so the struts end up embedded
+// in the solid exactly as the picture shows.
+static std::vector<char> organic_solid_rim_band(const VoxelGrid& grid,
+                                                const std::vector<char>& mask,
+                                                const std::vector<int>& region_ids,
+                                                const std::vector<Vec3>& region_normals,
+                                                double rim_mm) {
   const std::size_t n = grid.voxel_count();
-  if (!(rim_mm > 0.0) || mask.size() != n || region_ids.size() != n) return 0;
+  std::vector<char> band(n, 0);
+  if (!(rim_mm > 0.0) || mask.size() != n || region_ids.size() != n) return band;
   const int di[6] = {1, -1, 0, 0, 0, 0}, dj[6] = {0, 0, 1, -1, 0, 0}, dk[6] = {0, 0, 0, 0, 1, -1};
   std::vector<int> dist(n, -1);
   std::vector<std::size_t> q;
@@ -5135,8 +5146,17 @@ static std::size_t apply_organic_solid_rim(const VoxelGrid& grid, std::vector<ch
       dist[e2] = dist[e] + 1; q.push_back(e2);
     }
   }
+  for (std::size_t e : q) band[e] = 1;
+  return band;
+}
+
+// Clear a band out of a mask, and say how many voxels it took. Separated from the walk so
+// the caller chooses WHEN the band stops being lattice -- which for organic is after the
+// tracer has run through it, not before.
+static std::size_t clear_band_from_mask(std::vector<char>& mask, const std::vector<char>& band) {
   std::size_t turned = 0;
-  for (std::size_t e : q) { mask[e] = 0; ++turned; }
+  for (std::size_t e = 0; e < mask.size() && e < band.size(); ++e)
+    if (band[e] && mask[e]) { mask[e] = 0; ++turned; }
   return turned;
 }
 
@@ -5496,7 +5516,10 @@ LatticeVariantOutcome lattice_one_variant(
           const double rim = job.grading.organic_solid_rim_mm < 0.0 ? cc.lo : job.grading.organic_solid_rim_mm;
           std::vector<Vec3> nrms;
           for (const JobLatticeRegion& r : job.lattice.regions) if (r.role == "include") nrms.push_back(r.normal);
-          apply_organic_solid_rim(solved_grid, pmask, region_ids, nrms, rim);
+          // The probe forecasts a cell size; it ships no geometry, so the band comes out
+          // of its candidate set as before -- ruling G is about what the RUN draws.
+          clear_band_from_mask(
+              pmask, organic_solid_rim_band(solved_grid, pmask, region_ids, nrms, rim));
         }
         OrganicOutcome po = run_organic_step(job.lattice.outer_finish != "skin", solved_grid, dens,
                                              probe_stress, pmask, agf.posture.relative_density,
@@ -5963,7 +5986,13 @@ LatticeVariantOutcome lattice_one_variant(
       }
     }
   }
-  // ── ★ GRADE TO SOLID AT THE OUTLINE, for organic (see apply_organic_solid_rim) ──
+  // ── ★ GRADE TO SOLID AT THE OUTLINE, for organic (see organic_solid_rim_band) ──
+  // ★★ THE BAND IS COMPUTED HERE AND APPLIED AFTER THE TRACER (ruling G). It used to be
+  // cleared from the mask on this line, which took it out of the tracer's candidates and
+  // cut every strut back at the band's inner face. The preview keeps it as candidate, so
+  // its curves run THROUGH the band and weld into the solid. Tracing with the band IN and
+  // turning it solid afterwards makes the run draw what the picture shows.
+  std::vector<char> organic_rim_band;
   if (graded && R.algorithm == LatticeAlgorithm::Organic) {
     const double rim = job.grading.organic_solid_rim_mm < 0.0
                            ? job.grading.cell_min_mm : job.grading.organic_solid_rim_mm;
@@ -5971,10 +6000,15 @@ LatticeVariantOutcome lattice_one_variant(
     for (const JobLatticeRegion& r : job.lattice.regions)
       if (r.role == "include") nrms.push_back(r.normal);
     R.organic_solid_rim_mm = rim;
-    R.organic_solid_rim_voxels = static_cast<long long>(apply_organic_solid_rim(
-        solved_grid, mask, region_ids_for_stepped, nrms, rim));
+    organic_rim_band =
+        organic_solid_rim_band(solved_grid, mask, region_ids_for_stepped, nrms, rim);
+    std::size_t band_voxels = 0;
+    for (char c : organic_rim_band) band_voxels += c ? 1 : 0;
+    R.organic_solid_rim_voxels = static_cast<long long>(band_voxels);
     if (std::getenv("TOPOPT_ORGANIC_TRACE"))
-      std::fprintf(stderr, "[rim] SOLID_RIM %.3g mm: %lld lattice voxels turned solid at the outline\n",
+      std::fprintf(stderr,
+                   "[rim] SOLID_RIM %.3g mm: %lld voxel(s) in the band, KEPT as tracer "
+                   "candidates and turned solid after the trace\n",
                    rim, R.organic_solid_rim_voxels);
   }
 
@@ -6010,6 +6044,23 @@ LatticeVariantOutcome lattice_one_variant(
     // reason: both are machine facts the generator cannot infer, and without this one
     // a mat under a voxel tall is erased silently — which is how a deliberately
     // thinned mat vanished from the slice entirely while every stat still read green.
+    // ★★ AND NOW THE BAND BECOMES SOLID (ruling G). The tracer has run with it IN, so the
+    // curves cross it and end inside what is about to be solid material -- welded, as the
+    // preview draws them. It leaves the lattice set here so the band PRINTS solid and the
+    // posture and certificate see solid, which is what the band is for. Both of the
+    // band's jobs are done; they simply happen in the right order now.
+    if (!organic_rim_band.empty()) {
+      const std::size_t cleared = clear_band_from_mask(mask, organic_rim_band);
+      clear_band_from_mask(organic.lat.mask, organic_rim_band);
+      for (std::size_t e = 0; e < organic_rim_band.size() &&
+                              e < organic.lat.relative_density.size(); ++e)
+        if (organic_rim_band[e]) organic.lat.relative_density[e] = 0.0;
+      if (std::getenv("TOPOPT_ORGANIC_TRACE"))
+        std::fprintf(stderr,
+                     "[rim] band applied AFTER the trace: %zu voxel(s) left the lattice "
+                     "set and print solid; the curves that crossed them are embedded\n",
+                     cleared);
+    }
     organic.lat.weld_pitch_hint_mm = job.lattice.welded_pitch_mm;
     // ★ THE LAYER HEIGHT THE MACHINE WILL ACTUALLY USE. The mid-air-start check
     // rasters Z at this pitch; without it the check is COARSER THAN THE PRINTER
