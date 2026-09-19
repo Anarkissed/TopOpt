@@ -856,3 +856,9 @@ Not yet seen by him.
   Now dead-wall voxels (`LatticeOrganicInput.deadRegionIDs`) are excluded from the
   statistics and take the window's MIDDLE spacing (4.34 mm here); the banner says so.
   Parity: the run needs the same (brief §4-H extended). Installed 00:10.
+- **2026-09-19 00:50 — the speckle on the faces.** His six screenshots: grey specks on
+  the rim ribbon's faces, the walls' side faces and the base's top — capsule ends cut
+  exactly at the sampled surface z-fighting the face they end on. The capsule clip now
+  erodes the part by the march's trim (`stepParams.y`, clamp(0.35·voxel, 0.10, 0.35) mm)
+  again; the 09-07 removal guarded a gap at the rim that cannot recur now the rim is a
+  beam drawn over the band. `OrganicLookAndVisibilityTests` pin reversed. Installed 00:50.

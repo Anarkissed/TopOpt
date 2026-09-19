@@ -1702,7 +1702,14 @@ static float cap_clip_field(constant LSDFUniforms& U, texture3d<float> sdfTex,
     // so the MARCH bulges slivers through the surface. A capsule is analytic geometry —
     // it has no sliver to trim — so applying the march's erosion here simply shaved
     // 0.35 mm off every boundary of every declared face, on top of everything else.
-    float dPart = sdfTex.sample(samp, stc).r;
+    // ★★ ERODED AGAIN (his 2026-09-19: "all of these artifacts … due to layers of
+    // models interacting"). A capsule end cut exactly at the sampled surface z-fights
+    // the face it ends on — the wall's own face, the rim ribbon's face at the band, the
+    // base's top — as grey speckle. The 09-07 removal above was right while the rim
+    // was the BODY's shell band and a shortfall read as a gap; the rim is now a beam
+    // the lattice layer draws over that band, so the shortfall is inside it and nothing
+    // shows. `stepParams.y` = clamp(0.35·voxel, 0.10, 0.35) mm, the march's own number.
+    float dPart = sdfTex.sample(samp, stc).r + U.stepParams.y;
     float3 bc = 0.5 * (U.bboxMin.xyz + U.bboxMax.xyz);
     float3 be = 0.5 * (U.bboxMax.xyz - U.bboxMin.xyz);
     float3 qb = abs(p - bc) - be;

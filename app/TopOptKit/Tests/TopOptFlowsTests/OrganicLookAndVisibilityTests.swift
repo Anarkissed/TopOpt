@@ -180,20 +180,18 @@ final class OrganicLookAndVisibilityTests: XCTestCase {
 
     // MARK: two more edge losses
 
-    /// The capsules are analytic geometry; the march's crease-sliver trim is not theirs.
-    func testTheCapsuleClipDoesNotErodeThePart() throws {
-        // ★ THE CLIP MOVED INTO `cap_clip_field` (2026-09-08) so the wetted join can
-        // take its GRADIENT as well as its sign; `cap_inside_clip` is now a thin test
-        // over it. The rule this guards is unchanged: no march erosion on an analytic
-        // capsule.
+    /// ★ REVERSED 2026-09-19 (his: "all of these artifacts … due to layers of models
+    /// interacting"): the capsule clip erodes the part by the march's trim again, so a
+    /// strut end never sits exactly on the face it ends on. The 09-07 gap this once
+    /// guarded against cannot recur: the rim is a beam drawn over the band now.
+    func testTheCapsuleClipErodesThePartByTheMarchsTrim() throws {
         let src = MeshRenderer.organicCapsuleShaderSourceForTesting
         guard let r = src.range(of: "static float cap_clip_field(") else {
             return XCTFail("the capsule clip moved")
         }
-        let body = String(src[r.lowerBound...].prefix(1600))
-        XCTAssertTrue(body.contains("float dPart = sdfTex.sample(samp, stc).r;"),
-                      "★ no trim erosion — it shaved 0.35 mm off every boundary")
-        XCTAssertFalse(body.contains("+ delta"), "★ the march's erosion is gone from here")
+        let body = String(src[r.lowerBound...].prefix(2400))
+        XCTAssertTrue(body.contains("float dPart = sdfTex.sample(samp, stc).r + U.stepParams.y;"),
+                      "★ the trim erosion is back on the capsule clip — without it the ends z-fight the faces")
     }
 
     /// Region membership is read on the tracer's own grid, not rounded onto another.
