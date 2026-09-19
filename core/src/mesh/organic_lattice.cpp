@@ -269,6 +269,38 @@ SyntheticStressReport synthesize_focal_stress(
     SyntheticStressRegionReport rr;
     rr.region_id = cfg.region_id; rr.face_id = cfg.face_id; rr.foci = cfg.foci;
     rr.voxels = cnt;
+    // ── ★ RULING H: THE WALL IS THE UNIT OF THE DECISION ────────────────────────
+    // p99 of the REAL field over this region, taken before a single voxel is written.
+    // A flagged region is synthesised WHOLE regardless -- a stated focus is an
+    // instruction, not a hint -- but p99 against the threshold is recorded so a wall
+    // that is actually carrying load cannot be flattened without it showing up.
+    {
+      std::vector<double> vms;
+      vms.reserve(cnt);
+      for (std::size_t e = 0; e < n; ++e)
+        if (candidate[e] && voxel_region_id[e] == cfg.region_id)
+          vms.push_back(organic_von_mises6(&stress[6 * e]));
+      std::sort(vms.begin(), vms.end());
+      const std::size_t q =
+          vms.empty() ? 0
+                      : std::min(vms.size() - 1,
+                                 static_cast<std::size_t>(0.99 * (vms.size() - 1) + 0.5));
+      rr.p99_von_mises = vms.empty() ? 0.0 : vms[q];
+      // AT the threshold is dead, not alive: "at 0.005 MPa and lower, it is not [a
+      // stressed wall]" (maintainer, 2026-09-08). `<` here left a wall sitting exactly
+      // on the floor untouched.
+      rr.p99_under_threshold = rr.p99_von_mises <= thr;
+      // ★ AND THE DECISION IS THE WALL'S p99, NOT THE USER'S FLAG. The flag says WHICH
+      // walls to consider and where the foci go; whether a wall is dead is measured.
+      // A flagged wall that is carrying load is left ALONE -- the same rule the
+      // per-voxel ramp used to reach one voxel at a time, now reached once for the
+      // wall. (Asserted by "a region that carries load is not touched at all".)
+      rr.whole_region = rr.p99_under_threshold;
+    }
+    if (!rr.whole_region) {
+      rep.per_region.push_back(rr);
+      continue;
+    }
     const double ex = hi.x - lo.x, ey = hi.y - lo.y, ez = hi.z - lo.z;
     const Vec3 c{0.5 * (lo.x + hi.x), 0.5 * (lo.y + hi.y), 0.5 * (lo.z + hi.z)};
     // foci on the 80 % ellipse of the two LARGEST extents, alternating pull/push
@@ -309,15 +341,13 @@ SyntheticStressReport synthesize_focal_stress(
       if (!candidate[e] || voxel_region_id[e] != cfg.region_id) continue;
       double* m = &stress[6 * e];
       const double vm = organic_von_mises6(m);
-      double w = 1.0;   // weight of the REAL field
-      if (thr > 0.0) {
-        const double lo_t = 0.25 * thr;
-        w = (vm - lo_t) / std::max(1e-300, thr - lo_t);
-        w = std::max(0.0, std::min(1.0, w));
-        w = w * w * (3.0 - 2.0 * w);
-      } else {
-        w = vm > 0.0 ? 1.0 : 0.0;
-      }
+      // ★ RULING H: NO PER-VOXEL RAMP. The blend weight over a flagged region is 0 --
+      // the whole wall takes the focal field. What used to be here was a smoothstep on
+      // this voxel's own magnitude between 0.25*thr and thr, which is what split his
+      // front wall down the middle. `vm` is still read, for the receipt below and for
+      // the absolute-floor classification, but it no longer decides anything per voxel.
+      (void)vm;
+      const double w = 0.0;   // weight of the REAL field, over the whole region
       // ★ THE ABSOLUTE FLOOR IS A HARD CLASSIFICATION, not another ramp (maintainer,
       // 2026-09-08): "at 0.005 MPa and lower, it is not [a stressed wall]". So at or
       // below it the wall is dead outright and takes the synthetic field in full --
@@ -325,8 +355,9 @@ SyntheticStressReport synthesize_focal_stress(
       // it as stressed. Above the floor the 2 %-of-peak ramp governs exactly as before,
       // and where the relative rule binds the two coincide (its band already starts at
       // 0.25 x thr, which is the floor when thr = 4 x floor).
-      if (dead_floor > 0.0 && vm <= dead_floor) w = 0.0;
-      if (w >= 1.0) continue;   // live: untouched
+      // (The absolute floor and the "live: untouched" early-out that stood here are
+      // subsumed by ruling H: a flagged region is synthesised whole, so there is no
+      // per-voxel classification left for them to make.)
       const Vec3 q = centre(e);
       double T[6] = {0, 0, 0, 0, 0, 0};
       for (std::size_t f = 0; f < foci.size(); ++f) {

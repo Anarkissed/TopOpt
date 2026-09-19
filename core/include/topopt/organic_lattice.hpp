@@ -1230,6 +1230,21 @@ struct SyntheticStressRegionReport {
   std::size_t voxels = 0;
   std::size_t fully_synthetic = 0;
   std::size_t blended = 0;
+  // ── ★ RULING H (maintainer, 2026-09-18 night): A DEAD WALL IS DEAD AS A WHOLE ──
+  // The per-voxel ramp between 0.25*thr and thr split a wall that hovered just under
+  // the threshold into half synthetic and half rounding-noise directions -- his front
+  // wall measured p99 0.0041 and max 0.0056 against a threshold of 0.005, and traced
+  // as struts filling half the depth with horizontals and no verticals. A wall is
+  // dead or it is not, and the unit of that decision is the WALL.
+  //
+  // p99 of the REAL von Mises over this region's candidate voxels, measured before
+  // anything was written, and whether it came in under the dead threshold. A flagged
+  // region is synthesised whole either way (a stated focus is the user's instruction,
+  // not a hint) -- but if `p99_under_threshold` is false the user has flagged a wall
+  // that is carrying load, and this is where that shows.
+  double p99_von_mises = 0.0;
+  bool p99_under_threshold = false;
+  bool whole_region = false;      // every candidate voxel took the focal field
 };
 struct SyntheticStressReport {
   std::vector<SyntheticStressRegionReport> per_region;

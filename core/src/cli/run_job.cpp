@@ -4369,7 +4369,35 @@ static std::vector<double> stress_tensor_for_organic(
                rep.regions, rep.voxels_in_regions, rep.voxels_fully_synthetic,
                rep.voxels_blended, rep.dead_threshold, rep.peak_von_mises,
                rep.dead_floor_bound ? "ABSOLUTE 0.005 MPa" : "2% of peak");
+  // ★ RULING H: one line per region saying whether the WALL was judged dead, and on
+  // what measurement. A flagged wall that is carrying load is left alone, and this is
+  // where the user finds out that their flag did nothing.
+  for (const SyntheticStressRegionReport& rr : rep.per_region)
+    std::fprintf(stderr,
+                 "[synthetic] region %d (face %d): p99 %.4g vs threshold %.4g -> %s"
+                 "%s\n", rr.region_id, rr.face_id, rr.p99_von_mises, rep.dead_threshold,
+                 rr.whole_region ? "DEAD, synthesised WHOLE" : "carrying load, UNTOUCHED",
+                 rr.whole_region ? "" : " (the synthetic_stress flag did nothing here)");
   return out;
+}
+
+// ── ★ RULING H: WHICH VOXELS TOOK A MANUFACTURED FIELD ───────────────────────
+// One flag per voxel, from the synthesis report's own region list, so the spacing
+// window can exclude them. Regions the report did not mark whole contribute nothing,
+// and an empty report gives an all-zero mask -- which is byte-identical to the
+// behaviour before this ruling.
+static std::vector<char> organic_synthesised_whole_voxels(
+    const SyntheticStressReport& rep, const std::vector<int>& voxel_region_id,
+    std::size_t n) {
+  std::vector<char> whole(n, 0);
+  if (voxel_region_id.size() != n) return whole;
+  std::set<int> ids;
+  for (const SyntheticStressRegionReport& r : rep.per_region)
+    if (r.whole_region) ids.insert(r.region_id);
+  if (ids.empty()) return whole;
+  for (std::size_t e = 0; e < n; ++e)
+    if (ids.count(voxel_region_id[e])) whole[e] = 1;
+  return whole;
 }
 
 OrganicOutcome run_organic_step(bool shell_is_written,
@@ -4398,7 +4426,13 @@ OrganicOutcome run_organic_step(bool shell_is_written,
                                 // its support question in that discretisation. 0 = not
                                 // stated, and growth falls back to half a voxel.
                                 double layer_height_mm = 0.0,
-                                bool probe_only = false) {
+                                bool probe_only = false,
+                                // ★ RULING H (2026-09-18): the voxels of every region
+                                // that was synthesised WHOLE. Such a wall has no real
+                                // stress left to grade by, so it is excluded from the
+                                // window statistics and takes the window's MIDDLE
+                                // spacing. null / empty = nothing was synthesised.
+                                const std::vector<char>* synthesised_whole = nullptr) {
   OrganicOutcome oo;
   const std::size_t n = grid.voxel_count();
   // NO STRESS TENSOR, NO ORGANIC LATTICE. The whole method is the eigen-decomposition
@@ -4452,16 +4486,44 @@ OrganicOutcome run_organic_step(bool shell_is_written,
   // from one law. f = 1 at the busiest material (tightest spacing, cell_min), f = 0 at
   // the quietest (widest, cell_max). A UNIFORM field gives f = 0 everywhere, i.e. the
   // LARGEST cells, which is the right degenerate answer for "nothing is working hard".
+  // ★ RULING H, SECOND HALF: A WHOLE-SYNTHESISED WALL IS NOT EVIDENCE ABOUT THE PART.
+  // Its field was manufactured and then scaled so its PEAK lands on the dead threshold,
+  // so every voxel in it reads near-zero against a real wall. Left in these statistics
+  // it drags rho_lo down and takes the coarsest spacing in the window -- which is what
+  // put his dead wall at the wide end. It is excluded here and given the window's
+  // MIDDLE below. (`whole` empty = nothing was synthesised, and this is the old code.)
+  const bool have_synth =
+      synthesised_whole && synthesised_whole->size() == n;
+  auto is_synth = [&](std::size_t e) {
+    return have_synth && (*synthesised_whole)[e] != 0; };
   double rho_lo = 0.0, rho_hi = 0.0;
   bool any_rho = false;
+  std::size_t synth_voxels = 0;
   for (std::size_t e = 0; e < n; ++e) {
     if (!lattice_mask[e]) continue;
+    if (is_synth(e)) { ++synth_voxels; continue; }
     const double r = relative_density[e];
     if (!any_rho) { rho_lo = rho_hi = r; any_rho = true; }
     rho_lo = std::min(rho_lo, r);
     rho_hi = std::max(rho_hi, r);
   }
+  // Every latticed voxel synthesised: there is no real wall to normalise against, so
+  // the window statistics are empty and EVERYTHING takes the middle. Better than
+  // normalising a manufactured field against itself.
+  if (!any_rho)
+    for (std::size_t e = 0; e < n; ++e)
+      if (lattice_mask[e]) {
+        const double r = relative_density[e];
+        if (!any_rho) { rho_lo = rho_hi = r; any_rho = true; }
+        rho_lo = std::min(rho_lo, r);
+        rho_hi = std::max(rho_hi, r);
+      }
   const double rho_span = rho_hi - rho_lo;
+  if (synth_voxels && std::getenv("TOPOPT_ORGANIC_TRACE"))
+    std::fprintf(stderr,
+                 "[spacing] %zu voxel(s) in whole-synthesised wall(s) excluded from the "
+                 "window statistics; they take the middle, %.3f mm\n",
+                 synth_voxels, 0.5 * (cell_min_mm + cell_max_mm));
 
   // ★ `minimize_plastic`, AND IT MEANS WHAT HE ASKED IT TO MEAN: ON = THE LARGEST
   // CELLS POSSIBLE. Applied as an exponent on f, so BOTH ENDS OF THE WINDOW ARE
@@ -4503,9 +4565,12 @@ OrganicOutcome run_organic_step(bool shell_is_written,
     if (!(rho > 0.0)) continue;  // a zero density has no spacing; it is not lattice
     double d;
     if (have_window) {
+      // ★ RULING H: the middle of the window, stated as a spacing and not as an f, so
+      // the minimize_plastic exponent cannot pull a manufactured wall to one end.
       double f = rho_span > 0.0 ? (rho - rho_lo) / rho_span : 0.0;
       f = std::pow(std::min(1.0, std::max(0.0, f)), f_exponent);
-      d = cell_max_mm - (cell_max_mm - cell_min_mm) * f;
+      d = is_synth(e) ? 0.5 * (cell_min_mm + cell_max_mm)
+                      : cell_max_mm - (cell_max_mm - cell_min_mm) * f;
       if (bead_is_stated) {
         // Asked for by name: no coupling, no floor, no grading. The number is the number.
         bead[e] = t_fixed;
@@ -6053,13 +6118,17 @@ LatticeVariantOutcome lattice_one_variant(
     const std::vector<double> organic_stress = stress_tensor_for_organic(
         job, solved_grid, mask, region_ids_for_stepped, v.stress_tensor_field,
         &R.organic_synthetic);
+    // ★ RULING H: mark the voxels of every region that was synthesised WHOLE, so the
+    // spacing window can leave them out of its statistics and hand them the middle.
+    const std::vector<char> synth_whole = organic_synthesised_whole_voxels(
+        R.organic_synthetic, region_ids_for_stepped, solved_grid.voxel_count());
     organic = run_organic_step(job.lattice.outer_finish != "skin",
                                solved_grid, dens, organic_stress, mask,
                                gf.posture.relative_density, gf.band_rho_min,
                                gf.band_rho_max, job.grading,
                                job.loads.present && job.loads.minimize_plastic,
                                v.applied_build_dir, printed_iso, 32,
-                               job.loads.layer_height_mm);
+                               job.loads.layer_height_mm, false, &synth_whole);
     // ★ THE WELD'S RASTER PITCH, so the generator can refuse to emit a base mat too
     // thin for that raster to KEEP. Set beside the layer height below for the same
     // reason: both are machine facts the generator cannot infer, and without this one

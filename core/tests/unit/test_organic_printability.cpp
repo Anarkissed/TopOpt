@@ -1643,6 +1643,65 @@ void test_synthetic_dead_floor() {
       }
     }
   }
+  // ── ★ RULING H: THE MAINTAINER'S FRONT WALL (2026-09-18 night) ──────────────
+  // His measured case, and the one the per-voxel ramp got wrong: p99 0.0041 and max
+  // 0.0056 against a threshold of 0.005. The old smoothstep between 0.25*thr and thr
+  // judged each voxel on its own magnitude, so the voxels above 0.005 stayed REAL --
+  // and what stayed was rounding-noise direction, not load. The wall traced as struts
+  // filling half the depth, horizontals with no verticals. A wall is dead or it is
+  // not, and p99 decides it for the whole wall.
+  {
+    std::vector<double> st = build(0.1);            // peak 0.1 -> threshold 0.005 (floor)
+    // a wall whose p99 is 0.0041 but whose top few voxels reach 0.0056: above thr
+    std::size_t wall_voxels = 0;
+    for (std::size_t e = 0; e < n; ++e)
+      if (static_cast<int>(e % 20) < 10) ++wall_voxels;
+    std::size_t seen = 0;
+    for (std::size_t e = 0; e < n; ++e) {
+      if (static_cast<int>(e % 20) >= 10) continue;
+      // UNDER 1 % of the wall over the threshold, the rest at 0.0041, so p99 lands on
+      // the body at 0.0041 and the max on the tip at 0.0056 -- his measured shape. (A
+      // 2 % tail puts p99 INSIDE the tip, which is a different wall entirely.)
+      st[6 * e + 2] = (seen < wall_voxels / 200) ? 0.0056 : 0.0041;
+      ++seen;
+    }
+    const std::vector<double> before = st;
+    const SyntheticStressReport r =
+        synthesize_focal_stress(grid, cand, rid, cfg, 0.02, st, kOrganicSyntheticDeadFloorMPa);
+    std::size_t touched = 0;
+    for (std::size_t e = 0; e < n; ++e) {
+      if (static_cast<int>(e % 20) >= 10) continue;
+      for (int c2 = 0; c2 < 6; ++c2)
+        if (std::fabs(st[6 * e + c2] - before[6 * e + c2]) > 1e-15) { ++touched; break; } }
+    CHECK(!r.per_region.empty(), "H: the region was reported");
+    const SyntheticStressRegionReport& rr = r.per_region.front();
+    std::printf("  H front wall: p99 %.4g vs thr %.4g -> whole=%d, %zu of %zu voxels "
+                "synthetic (%zu fully, %zu blended)\n", rr.p99_von_mises,
+                r.dead_threshold, rr.whole_region ? 1 : 0, touched, wall_voxels,
+                r.voxels_fully_synthetic, r.voxels_blended);
+    CHECK(rr.p99_von_mises > 0.004 && rr.p99_von_mises < 0.005,
+          "H: p99 really is the 0.0041 body of the wall, not its 0.0056 tip");
+    CHECK(rr.whole_region, "H: so the wall is dead AS A WHOLE");
+    CHECK(touched == wall_voxels,
+          "H: and EVERY voxel took the focal field -- including the ones above thr, "
+          "which is exactly what the per-voxel ramp used to leave behind");
+    CHECK(r.voxels_blended == 0, "H: nothing is blended -- there is no ramp any more");
+    // ★ THE POSITIVE CONTROL. Raise the whole wall above the threshold and the SAME
+    // code must leave it entirely alone, or this test is only asserting "synthesise
+    // everything" and would pass against a core that ignored the measurement.
+    std::vector<double> live = build(0.1);
+    for (std::size_t e = 0; e < n; ++e)
+      if (static_cast<int>(e % 20) < 10) live[6 * e + 2] = 0.02;
+    const std::vector<double> live_before = live;
+    const SyntheticStressReport lr =
+        synthesize_focal_stress(grid, cand, rid, cfg, 0.02, live, kOrganicSyntheticDeadFloorMPa);
+    std::size_t live_touched = 0;
+    for (std::size_t e = 0; e < 6 * n; ++e)
+      if (std::fabs(live[e] - live_before[e]) > 1e-15) { ++live_touched; }
+    CHECK(live_touched == 0, "H: a wall carrying load is untouched, whole or not");
+    CHECK(!lr.per_region.empty() && !lr.per_region.front().whole_region,
+          "H: and it is REPORTED as not-whole, so a mis-flagged live wall is visible");
+  }
   // a wall between the two rules is dead under the floor and would NOT be under 2 % alone
   {
     std::vector<double> st = build(0.1);
