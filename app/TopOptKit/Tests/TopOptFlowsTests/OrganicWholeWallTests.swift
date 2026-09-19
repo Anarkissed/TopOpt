@@ -26,3 +26,38 @@ final class OrganicWholeWallTests: XCTestCase {
         XCTAssertTrue(OrganicSyntheticStress.deadenWholeWalls(tensor: &t2, regionIDs: ids2).isEmpty)
     }
 }
+
+extension OrganicWholeWallTests {
+    /// A dead wall is graded at the window's MIDDLE, not the coarsest end its zero
+    /// stress would put it at; the loaded wall's grading is unchanged.
+    func testADeadWallTakesTheWindowsMiddleSpacing() throws {
+        let mesh = try LatticePreviewConfettiTests.hisMesh()
+        let regs = [(15, 12.0), (2, 11.0)].compactMap { f, d in
+            LatticeRegionEmission.planeFor(face: FaceID(f), in: mesh).flatMap {
+                LatticeRegionEmission.spec(for: $0, role: .include, depthMM: d, faceID: f) }
+        }
+        try XCTSkipIf(regs.isEmpty)
+        let n = 40
+        let e = mesh.bounds.max - mesh.bounds.min
+        let sp = Double(max(e.x, max(e.y, e.z))) / Double(n)
+        let origin = SIMD3<Double>(mesh.bounds.min)
+        let plan = OrganicSyntheticStress.plan(regions: regs, dims: (n, n, n), originMM: origin, spacingMM: sp,
+                                               defaultFoci: 2, statedFoci: [:])
+        // wall 1 (face 15) at noise, wall 2 (face 2) loaded and varied
+        var tensor = [Double](repeating: 0, count: 6 * n * n * n)
+        for i in 0..<(n * n * n) where plan.regionIDs[i] == 2 { tensor[6 * i] = 0.01 + 0.02 * Double(i % 7) / 6; tensor[6 * i + 1] = 0.003 }
+        for i in 0..<(n * n * n) where plan.regionIDs[i] == 1 { tensor[6 * i] = 0.004 }
+        var input = LatticeOrganicInput(tensor: tensor, dims: (n, n, n), originMM: origin, spacingMM: sp,
+                                        minExtrudableWidthMM: 0.45, buildDirection: SIMD3(0, 0, 1),
+                                        separationMinMM: 3.47, separationMaxMM: 5.2, rhoMin: 0.073, rhoMax: 0.9)
+        input.regionIDs = plan.regionIDs
+        input.syntheticRegions = plan.regions
+        let v = OrganicSyntheticStress.deadenWholeWalls(tensor: &input.tensor, regionIDs: plan.regionIDs)
+        XCTAssertEqual(v.map { $0.regionID }, [1], "the noise wall is dead as a whole; the loaded one is not")
+        input.deadRegionIDs = Set(v.map { $0.regionID })
+        let scene = LatticeSDFScene(mesh: mesh, field: nil, latticeID: "octet", stageMode: .aesthetic,
+                                    algorithm: "organic", organic: input, maxDim: 64, regions: regs, whenEmpty: .latticeNothing)
+        print("DEADWALL: \(scene.organicSummary.prefix(240))")
+        XCTAssertTrue(scene.organicSummary.contains("dead-wall voxels at the window's middle 4.34 mm"), scene.organicSummary)
+    }
+}

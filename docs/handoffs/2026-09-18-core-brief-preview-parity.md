@@ -243,7 +243,10 @@ Reference part: his M2 verticalStand, bead 0.45 mm, two face regions (12 mm and
   under thr before the trace (`OrganicSyntheticStress.deadenWholeWalls`), so the whole
   wall takes the focal field; a wall with p99 ≥ thr is untouched. Core must do the same in
   the run: a region flagged `synthetic_stress: true` (or whose p99 < thr) is synthesised
-  WHOLE (blend weight 1 over the region), not voxel by voxel.
+  WHOLE (blend weight 1 over the region), not voxel by voxel. AND its spacing: a wall
+  synthesised whole has no stress to grade by, so it is excluded from the p05→p95
+  statistics and takes the window's MIDDLE spacing (the app does this now; zero stress
+  had put it at the coarsest end).
 
 ## 5. Pointers (app)
 `LatticeOctreeBake.swift` (§1.2–1.6), `LatticeOutlineRibbon.swift` (§1.5),

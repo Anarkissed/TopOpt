@@ -849,3 +849,10 @@ the real tensor of any region whose p99 < thr before the trace (DIAG
 `synthetic whole-wall: … zeroed`); the back wall is untouched. Parity brief §4-H asks
 core for the same whole-wall rule in the run. `OrganicWholeWallTests`. Installed 23:55.
 Not yet seen by him.
+- **2026-09-19 00:10 — the dead wall's SPACING.** His device: the whole front wall went
+  synthetic (4332/4332) but "some horizontal lines … not enough": with its tensor zeroed
+  its von Mises is 0, and the spacing is graded by the p05→p95 of the stress over ALL
+  candidates — zero is the coarsest end, 5.2 mm, while the loaded wall grades to 3.47.
+  Now dead-wall voxels (`LatticeOrganicInput.deadRegionIDs`) are excluded from the
+  statistics and take the window's MIDDLE spacing (4.34 mm here); the banner says so.
+  Parity: the run needs the same (brief §4-H extended). Installed 00:10.

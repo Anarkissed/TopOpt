@@ -5097,6 +5097,7 @@ public struct WorkspacePlaceholder: View {
                 // so core's per-voxel blend gives the whole wall the focal field.
                 let verdicts = OrganicSyntheticStress.deadenWholeWalls(
                     tensor: &organicIn!.tensor, regionIDs: synthPlan.regionIDs)
+                organicIn?.deadRegionIDs = Set(verdicts.map { $0.regionID })
                 if !verdicts.isEmpty {
                     NSLog("DIAG synthetic whole-wall: %@",
                           verdicts.map { String(format: "%@ p99 %.4g < thr %.4g → %d voxels zeroed",

@@ -278,6 +278,12 @@ public struct LatticeOrganicInput: Sendable {
     /// and the per-voxel bead follows the spacing (core's law), so the struts thicken
     /// as the cells close up. 0 ⇒ no grade.
     public var shapeBandMM: Double = 0
+    /// ★ THE WALLS THAT ARE DEAD AS A WHOLE (2026-09-18 night): their tensor is zeroed
+    /// (`OrganicSyntheticStress.deadenWholeWalls`), so they must not enter the stress
+    /// statistics the spacing is graded by — zero would put them at the coarsest end of
+    /// the window ("some horizontal lines being added - but it's not enough"). They take
+    /// the window's MIDDLE spacing instead; the focal field only sets their directions.
+    public var deadRegionIDs: Set<Int> = []
     /// The grade's strength across the band (−1…+1) — `LatticeSettings.shapeFitGradeStrength`.
     public var shapeBandStrength: Double = 0
 
@@ -1189,16 +1195,25 @@ public struct LatticeSDFScene {
                     var vm = [Double](repeating: 0, count: cand.count)
                     var sorted: [Double] = []
                     sorted.reserveCapacity(n)
+                    let exactIDs = o.regionIDs.count == cand.count
+                    func isDead(_ e: Int) -> Bool {
+                        exactIDs && !o.deadRegionIDs.isEmpty && o.deadRegionIDs.contains(Int(o.regionIDs[e]))
+                    }
+                    var deadVoxels = 0
                     for e in 0..<cand.count where cand[e] {
                         let v = OrganicSyntheticStress.vonMises(o.tensor, at: e)
                         vm[e] = v
-                        sorted.append(v)
+                        if isDead(e) { deadVoxels += 1 } else { sorted.append(v) }
                     }
                     sorted.sort()
-                    let p05 = sorted[Int(0.05 * Double(sorted.count - 1))]
-                    let p95 = sorted[Int(0.95 * Double(sorted.count - 1))]
+                    let p05 = sorted.isEmpty ? 0 : sorted[Int(0.05 * Double(sorted.count - 1))]
+                    let p95 = sorted.isEmpty ? 0 : sorted[Int(0.95 * Double(sorted.count - 1))]
                     let span = Swift.max(p95 - p05, 1e-12)
+                    if deadVoxels > 0 {
+                        gradedNote += String(format: " · %d dead-wall voxels at the window's middle %.2f mm", deadVoxels, 0.5 * (lo + hi))
+                    }
                     for e in 0..<cand.count where cand[e] {
+                        if isDead(e) { sep[e] = 0.5 * (lo + hi); continue }
                         let t = Swift.min(Swift.max((vm[e] - p05) / span, 0), 1)
                         sep[e] = hi - (hi - lo) * t
                     }
