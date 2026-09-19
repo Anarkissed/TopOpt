@@ -60,8 +60,10 @@ final class LatticeOrganicSettingsTests: XCTestCase {
         s.organicGrowth = false; s.layerHeightMM = 0.2
         let g = try XCTUnwrap(s.gradingDictionary())
         let expect: [String: Any] = ["organic_strut_width_mm": 1.2, "organic_overhang_angle_deg": 40.0,
-            "organic_boundary_finish": "rim", "organic_shape_fit": true,
-            "organic_scale": 1.5]
+            "organic_boundary_finish": "rim", "organic_shape_fit": true]
+        // ★ `organic_scale` is NEVER written for a part job (ruling F, 2026-09-18): the
+        // preview grades the spacing itself; core's scale would double-apply.
+        XCTAssertNil(g["organic_scale"], "★ organic_scale written for a part job (ruling F)")
         // ★ `organic_shape_fit_only` is NEVER written for organic (2026-09-04): core
         // accepts it only with a cell window, and windows only on the swept path
         // (job.cpp), which D2 forbids for organic — the job would be refused.
@@ -76,8 +78,8 @@ final class LatticeOrganicSettingsTests: XCTestCase {
                        "written exactly when core accepts the key (\(accepted) on this core)")
         for (k, v) in expect {
             if TopOptKit.gradingSchemaAccepts(key: k) {
-                XCTAssertNotNil(g[k], "★ core accepts \(k) and the user moved it, but it was not written")
-                XCTAssertEqual(String(describing: g[k]!), String(describing: v), k)
+                let got = try XCTUnwrap(g[k], "★ core accepts \(k) and the user moved it, but it was not written")
+                XCTAssertEqual(String(describing: got), String(describing: v), k)
             } else {
                 XCTAssertNil(g[k], "★ \(k) written although this core does not accept it")
             }
