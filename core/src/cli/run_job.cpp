@@ -7346,6 +7346,47 @@ LatticeVariantOutcome lattice_one_variant(
         // infill knockdown (f^1.5) that stood here before describes a sparse-infill
         // solid, which a strut is not.
         material.z_knockdown, v.applied_build_dir, cell, census_ok);
+    // ── ★ RULING D: A REFUSAL THAT NAMES THE FIX, NOT A BARE MARGIN ────────────
+    // When a structural certificate fails and the grade was already pressed against
+    // the top of its density band -- and that top is the AESTHETIC CEILING rather than
+    // the certifiable one -- the lattice did not fail because it cannot be built strong
+    // enough. It failed because it was not allowed to get denser. That is a setting,
+    // and the user owns it, so the refusal says which setting and what it is called in
+    // the app instead of reporting a number the user cannot act on.
+    //
+    // The three conditions are all MEASURED, never assumed: the verdict, the count of
+    // voxels sitting exactly on the ceiling (a grade that never reached its top was not
+    // capped by it), and the top itself against core's own octet law.
+    if (R.organic_cert.verdict != OrganicCertificate::Verdict::Certified &&
+        R.gf.density_at_ceiling_voxels > 0) {
+      const double ceiling = octet_aesthetic_density_ceiling();
+      const double top = R.gf.rho_max_used > 0.0 ? R.gf.rho_max_used : R.gf.band_rho_max;
+      // within 10 %: the app's own ceiling constant is 0.219 against core's 0.211733,
+      // and a tolerance narrower than that gap would silently never fire.
+      if (top > 0.0 && top <= 1.10 * ceiling) {
+        char note[640];
+        std::snprintf(
+            note, sizeof note,
+            " THE DENSITY BAND, NOT THE GEOMETRY, IS WHAT STOPPED THIS: %zu latticed "
+            "voxel(s) are sitting exactly on the band's top of %.4f, which is the "
+            "AESTHETIC CEILING (%.4f by core's octet law -- the density at which a "
+            "strut is a fifth of its cell across, the point a quilt stops looking "
+            "open). The lattice was not permitted to get any denser, so the certificate "
+            "never saw the material this load needs. In the app this cap is the \"Allow "
+            "quilt\" switch: turn it ON to lift the ceiling and re-run. If it is "
+            "already on, raise \"max relative density\" -- the certifiable band goes to "
+            "%.4f.",
+            R.gf.density_at_ceiling_voxels, top, ceiling, R.gf.band_rho_max);
+        if (R.organic_cert.refusal.empty())
+          R.organic_cert.refusal =
+              "the structural certificate did not pass." + std::string(note);
+        else
+          R.organic_cert.refusal += std::string(note);
+        std::fprintf(stderr, "[cert] refused at the aesthetic ceiling: band top %.4f, "
+                             "%zu voxel(s) on it -- the fix is \"Allow quilt\"\n",
+                     top, R.gf.density_at_ceiling_voxels);
+      }
+    }
     std::printf(
         "organic structural certification: %s  margin %.4g  p99 %.4g MPa  max %.4g "
         "MPa  (%zu case(s), %zu members, %.1f s)  knockdown %.3f (%s, cos^2 %.2f)  "

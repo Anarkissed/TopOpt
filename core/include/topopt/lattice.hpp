@@ -569,6 +569,20 @@ double lattice_library_youngs_modulus();
 // resolution caveat (C6) and does not move the library row a query interpolates.
 double octet_relative_density(double cell_mm, double strut_radius_mm);
 
+// ── ★ THE AESTHETIC DENSITY CEILING (ruling D, maintainer 2026-09-18) ───────────
+// The density at which an octet cell's strut is a fifth of the cell across --
+// "prints open", the bound the preview caps an aesthetic quilt at and the one the
+// "Allow quilt" switch lifts. MEASURED from core's own law rather than written down:
+// 0.211733, and it is the SAME number at every cell size, because
+// octet_relative_density depends only on strut_radius/cell. (The app's note derives
+// "= 0.219, core's law inverted at a 4 mm cell"; the cell does not enter, and the two
+// numbers differ by 3.5 % -- the app inverts a measured table where this samples it
+// forward. Reported to the app 2026-09-19.)
+inline constexpr double kOctetAestheticStrutPerCell = 0.20;
+inline double octet_aesthetic_density_ceiling() {
+  return octet_relative_density(1.0, 0.5 * kOctetAestheticStrutPerCell);
+}
+
 // The resolution (voxels per cell edge) the octet tensor library was measured at,
 // and the basis octet_relative_density voxelizes on so a printed radius maps onto
 // the same rho scale the library rows carry (PR 198, vpc48).
