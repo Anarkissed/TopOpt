@@ -264,6 +264,46 @@ static void test_group_keeps_each_cells_own_rho() {
     CHECK(r == 0.0, "rho: and it is all zeros, so the caller falls back");
 }
 
+// ── ★ RULING B: THE OUTLINE BEAM'S WIDTH IS DERIVED, NOT SENT ─────────────────
+// §1.5's formula, pinned on the maintainer's own part so the two sides cannot drift:
+// a 1.72 mm voxel at a 0.45 mm bead gives 1.21 mm, the number the brief quotes. Both
+// terms are floors, and the test shows each one GOVERNING somewhere -- a formula whose
+// second term never binds is a formula with a dead branch.
+static void test_outline_beam_width() {
+  // the brief's part
+  const double his = lattice_outline_beam_mm(0.45, 1.72);
+  std::printf("  beam: bead 0.45, voxel 1.72 -> %.4f mm (brief says 1.21)\n", his);
+  CHECK(std::fabs(his - 1.21) < 0.005,
+        "beam: the maintainer's part gives the brief's 1.21 mm");
+
+  // a fat bead on a fine grid: 2*bead governs
+  const double fat = lattice_outline_beam_mm(1.20, 0.30);
+  CHECK(std::fabs(fat - 2.40) < 1e-12, "beam: a fat bead governs -- two beads wide");
+  // a fine bead on a coarse grid: trim + half a voxel governs, trim CLAMPED at 0.35
+  const double coarse = lattice_outline_beam_mm(0.20, 4.00);
+  CHECK(std::fabs(coarse - (0.35 + 2.00)) < 1e-12,
+        "beam: on a coarse grid the trim clamps at 0.35 and the grid term governs");
+  // and clamped at the LOW end too: 0.35*0.1 = 0.035 -> 0.10
+  const double fine = lattice_outline_beam_mm(0.01, 0.10);
+  CHECK(std::fabs(fine - (0.10 + 0.05)) < 1e-12,
+        "beam: and at the low end the trim clamps up to 0.10");
+  CHECK(lattice_outline_beam_mm(0.45, 0.0) == 0.0,
+        "beam: no voxel, no beam -- it is a grid-resolved wall");
+
+  // THE BLEED is a threshold, not a ramp
+  CHECK(lattice_outline_bleed_mm(24.99) == 0.0, "bleed: nothing below 25 mm");
+  CHECK(std::fabs(lattice_outline_bleed_mm(25.0) - 5.0) < 1e-12, "bleed: 5 mm at 25");
+  CHECK(std::fabs(lattice_outline_bleed_mm(30.0) - 7.5) < 1e-12, "bleed: 7.5 mm at 30");
+  CHECK(lattice_outline_bleed_mm(0.0) == 0.0, "bleed: and none at all with no band");
+  // it is monotone above the threshold, so a wider band never bleeds LESS
+  double prev = 0.0;
+  for (double b = 25.0; b <= 60.0; b += 0.5) {
+    const double v = lattice_outline_bleed_mm(b);
+    CHECK(v >= prev, "bleed: monotone in the band width");
+    prev = v;
+  }
+}
+
 static void test_doubled_menu_is_halves_only() {
   const double base = 12.0, bead = 0.45;
   const std::vector<double> halves =
@@ -640,6 +680,7 @@ int main() {
   test_plan_validation();
   test_doubled_menu_is_halves_only();
   test_group_keeps_each_cells_own_rho();
+  test_outline_beam_width();
   test_grouping_preserves_every_cell();
   test_packed_slot_covers_exactly_once();
   test_subdivision_preserves_the_member();

@@ -1641,6 +1641,7 @@ JobDescription parse_job(const std::string& json_text) {
              "organic_shape_fit", "organic_shape_fit_only",
              "organic_scale", "organic_growth",
              "organic_transfer_ties", "organic_tie_swirl", "organic_solid_rim_mm",
+             "shape_grade", "shape_grade_band_mm",
              "organic_base_mat", "organic_fill_mat", "organic_trim_below_base",
              "organic_strut_embed_mm",
              "organic_dual_contour", "organic_dc_cell_mm", "organic_dc_tolerance_mm",
@@ -1962,6 +1963,32 @@ JobDescription parse_job(const std::string& json_text) {
       if (!organic_alg)
         schema_fail("grading \"organic_solid_rim_mm\" is only allowed with algorithm \"organic\"");
       job.grading.organic_solid_rim_mm = rm->num;
+    }
+    // ★ RULING B: the shape grade, and the band the bleed rule reads. Octet only --
+    // organic's counterpart is organic_solid_rim_mm, and a job naming both would be
+    // asking two different mechanisms for one outline.
+    if (const JsonValue* sg = find_key(gr, "shape_grade")) {
+      if (sg->type != JsonValue::Type::Bool)
+        schema_fail("grading \"shape_grade\" must be a boolean");
+      if (organic_alg)
+        schema_fail(
+            "grading \"shape_grade\" is the OCTET outline beam (brief §1.5) and is not "
+            "allowed with algorithm \"organic\" -- organic grades to solid at the "
+            "outline through \"organic_solid_rim_mm\", which is the same requirement "
+            "answered by the mechanism that path already has");
+      job.grading.shape_grade = (sg->num != 0.0);
+    }
+    if (const JsonValue* sb = find_key(gr, "shape_grade_band_mm")) {
+      if (sb->type != JsonValue::Type::Number || !(sb->num >= 0.0) ||
+          !std::isfinite(sb->num))
+        schema_fail(
+            "grading \"shape_grade_band_mm\" must be a finite number >= 0 (0 = no bleed)");
+      if (!job.grading.shape_grade)
+        schema_fail(
+            "grading \"shape_grade_band_mm\" is the band the outline beam's BLEED rule "
+            "reads, so it needs \"shape_grade\": true -- without the shape grade there "
+            "is no outline beam to bleed");
+      job.grading.shape_grade_band_mm = sb->num;
     }
     if (const JsonValue* sw = find_key(gr, "organic_tie_swirl")) {
       if (sw->type != JsonValue::Type::Number || !(sw->num >= 0.0 && sw->num <= 1.0))

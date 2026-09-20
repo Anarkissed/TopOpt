@@ -4157,6 +4157,10 @@ struct LatticeVariantOutcome {
   SyntheticStressReport organic_synthetic;   // synthetic stress laid into dead walls
   double organic_solid_rim_mm = 0.0;
   long long organic_solid_rim_voxels = 0;
+  // ★ RULING B: the octet's solid outline beam, as DERIVED and as applied.
+  double outline_beam_mm = 0.0;
+  double outline_bleed_mm = 0.0;
+  long long outline_beam_voxels = 0;
   std::string receipt_path;
   std::string receipt_json;
   double cell_mm = 0.0;
@@ -6229,6 +6233,48 @@ LatticeVariantOutcome lattice_one_variant(
     gf.latticed_voxels = organic.lat.report.latticed_voxels;
     gf.rho_min_used = organic.lat.report.rho_min_emitted;
     gf.rho_max_used = organic.lat.report.rho_max_emitted;
+  }
+
+  // ── ★ RULING B: THE SOLID OUTLINE BEAM (brief §1.5) ────────────────────────
+  // Organic grades to solid at the outline through organic_solid_rim_mm; with the
+  // shape grade on, the octet does the same thing with a beam whose width is DERIVED
+  // (lattice_outline_beam_mm) rather than stated, so the preview and the run cannot
+  // hold different numbers for it. The beam is centred on the outline, so it reaches
+  // beam/2 inward, plus the bleed at a wide band.
+  //
+  // The band walk is the one organic already uses: a 6-connected flood inward from
+  // every lattice voxel that has a non-lattice neighbour IN THE FACE PLANE. On a voxel
+  // grid that IS a true parallel offset of the outline, and unlike a polygon offset it
+  // cannot self-overlap at a corner -- which is the property §1.5 asks for.
+  if (graded && R.algorithm != LatticeAlgorithm::Organic && job.grading.shape_grade) {
+    const double beam =
+        lattice_outline_beam_mm(job.grading.min_extrudable_width_mm, solved_grid.spacing);
+    const double bleed = lattice_outline_bleed_mm(job.grading.shape_grade_band_mm);
+    const double inward = 0.5 * beam + bleed;
+    std::vector<Vec3> nrms;
+    for (const JobLatticeRegion& r : job.lattice.regions)
+      if (r.role == "include") nrms.push_back(r.normal);
+    const std::vector<char> beam_band = organic_solid_rim_band(
+        solved_grid, mask, region_ids_for_stepped, nrms, inward);
+    const std::size_t cleared = clear_band_from_mask(mask, beam_band);
+    clear_band_from_mask(gf.posture.mask, beam_band);
+    for (std::size_t e = 0; e < beam_band.size() &&
+                            e < gf.posture.relative_density.size(); ++e)
+      if (beam_band[e]) gf.posture.relative_density[e] = 0.0;
+    R.outline_beam_mm = beam;
+    R.outline_bleed_mm = bleed;
+    R.outline_beam_voxels = static_cast<long long>(cleared);
+    std::fprintf(stderr,
+                 "[outline] solid beam %.4f mm (bead %.3f, voxel %.3f) + bleed %.4f mm "
+                 "(band %.3f) = %.4f mm inward | %zu voxel(s) turned solid\n",
+                 beam, job.grading.min_extrudable_width_mm, solved_grid.spacing, bleed,
+                 job.grading.shape_grade_band_mm, inward, cleared);
+    // ★ NOT DONE HERE, AND SAID OUT LOUD: §1.5's strut clip
+    // (dRegion = max(dRegion, 0.5*beam - dOutline)), which lets a strut from the cell
+    // BESIDE the beam run on and end INSIDE the solid instead of stopping at its own
+    // cell's edge. That is a change to the region the emitter clips against, not to
+    // this mask, and doing it blind would be guessing at the shader's frame. The beam
+    // prints; the struts beside it end at its inner face. Reported to the app.
   }
 
   // ── ★ STEPPED (task 2026-08-21-organic-lattice, §4) ────────────────────────

@@ -475,6 +475,23 @@ struct JobGrading {
   bool organic_fill_mat = false;
   bool organic_trim_below_base = false;
   double organic_solid_rim_mm = -1.0;
+  // ── ★ THE SOLID OUTLINE BEAM (ruling B, maintainer 2026-09-18; brief §1.5) ─────
+  // The octet's counterpart to organic's solid rim: with the SHAPE GRADE on, the
+  // preview sweeps one thin solid beam round each face outline and the cells keep
+  // clear of it. Its width is not sent -- it is derived from the bead and the voxel by
+  // the formula in §1.5, so the two sides cannot drift on it:
+  //
+  //     trim = clamp(0.35 * voxel, 0.10, 0.35)
+  //     beam = max(2 * bead, trim + 0.5 * voxel)
+  //
+  // `shape_grade` false (the default) means NO outline beam at all -- the finish
+  // dressing is the edge -- and every job written before this is byte-identical.
+  bool shape_grade = false;
+  // B, the shape-grade band, in mm. Only the BLEED rule reads it: at B >= 25 mm the
+  // solid grows inward by a further (B - 15)/2 mm (5 mm at 25, 7.5 at 30); below 25,
+  // nothing. 0 = no bleed. The band's own density raise is the app's arithmetic and
+  // arrives per cell as stepped_cells[].rho (ruling C) -- core adds no band term.
+  double shape_grade_band_mm = 0.0;
   // ★ Drive free organic strut ends this far INTO the solid they meet, then intersect
   // the welded field with the part so nothing escapes a far face (organic_weld).
   // 0 = off. Organic only.

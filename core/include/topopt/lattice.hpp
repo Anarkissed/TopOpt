@@ -578,6 +578,35 @@ double octet_relative_density(double cell_mm, double strut_radius_mm);
 // "= 0.219, core's law inverted at a 4 mm cell"; the cell does not enter, and the two
 // numbers differ by 3.5 % -- the app inverts a measured table where this samples it
 // forward. Reported to the app 2026-09-19.)
+// ── ★ THE SOLID OUTLINE BEAM'S GEOMETRY (ruling B; brief §1.5) ─────────────────
+// One thin solid beam swept round a face outline, CENTRED on the outline, with the
+// cells keeping clear of it. The width is derived and never sent, so the preview and
+// the run cannot hold different numbers for it:
+//
+//     trim = clamp(0.35 * voxel, 0.10, 0.35)      -- the march's own trim
+//     beam = max(2 * bead, trim + 0.5 * voxel)
+//
+// On the maintainer's part (a 1.72 mm voxel at a 0.45 mm bead) that is 1.21 mm, which
+// is the number the brief quotes. The two terms are a floor each: a beam thinner than
+// two beads cannot be printed as a wall, and one thinner than the march's trim plus
+// half a voxel cannot be RESOLVED on the grid that carves it.
+inline double lattice_outline_beam_mm(double bead_mm, double voxel_mm) {
+  if (!(voxel_mm > 0.0)) return 0.0;
+  double trim = 0.35 * voxel_mm;
+  if (trim < 0.10) trim = 0.10;
+  if (trim > 0.35) trim = 0.35;
+  const double by_bead = 2.0 * (bead_mm > 0.0 ? bead_mm : 0.0);
+  const double by_grid = trim + 0.5 * voxel_mm;
+  return by_bead > by_grid ? by_bead : by_grid;
+}
+
+// THE BLEED. A wide shape-grade band would otherwise meet the beam as a hard step; at
+// B >= 25 mm the solid grows inward by a further (B - 15)/2 mm -- 5 mm at 25, 7.5 at
+// 30 -- and below 25 mm, nothing. A threshold, not a ramp, which is the app's rule.
+inline double lattice_outline_bleed_mm(double band_mm) {
+  return band_mm >= 25.0 ? 0.5 * (band_mm - 15.0) : 0.0;
+}
+
 inline constexpr double kOctetAestheticStrutPerCell = 0.20;
 inline double octet_aesthetic_density_ceiling() {
   return octet_relative_density(1.0, 0.5 * kOctetAestheticStrutPerCell);
