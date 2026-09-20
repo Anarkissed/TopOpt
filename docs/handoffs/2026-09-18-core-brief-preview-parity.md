@@ -370,3 +370,9 @@ written for stepped/doubled when the grade is on and the linked schema accepts t
   dry. Their (dens−iso)/|∇dens| refinement measured WORSE — not to be tried here.
 - **§4-H**: matched both sides (flag proposes, inclusive p99 disposes).
 - Open on core: §3 receipt fields + the two Hausdorff tests only.
+- **Core reply 7 (2026-09-20)**: `grading.cell_mm` STAYS — it feeds the grading law's target
+  cell (three call sites) and is the fallback base for an include region with no cell in
+  the list; only its role as the doubled ladder's base went away. App unchanged. Core's
+  batch answering reply 5 (d_part half-voxel anchor, B depth beam + bleed, per-region
+  doubled bases, ceiling on the preimage, `max_relative_density`) is on a full Release
+  ctest; SHA to follow. Core starting §3 receipts + Hausdorff; nothing needed from the app.
