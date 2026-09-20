@@ -6,6 +6,7 @@
 #include "topopt/stepped_plan.hpp"
 
 #include <algorithm>
+#include <deque>
 #include <array>
 #include <cassert>
 #include <chrono>
@@ -6642,7 +6643,12 @@ LatticeVariantOutcome lattice_one_variant(
   //    the whole printability payoff. Empty (fewer than two levels) on every
   //    non-swept run, so the export takes the single-cell path unchanged.
   std::vector<LatticeLevelSpec> levels;
-  if (graded && gf.cell_plan.max_level > 0 &&
+  // ★ RULING A: THE DYADIC PLANNER IS NOT CONSULTED WHEN THE LIST IS PRESENT. The app
+  // packed the cells and core lays THOSE down; running the ladder as well would emit a
+  // second, differently-anchored set of passes over the same voxels -- two lattices in
+  // one file. One code path for both algorithms means exactly this: whoever sent cells
+  // owns the arrangement.
+  if (graded && gf.cell_plan.max_level > 0 && job.lattice.stepped_cells.empty() &&
       !gf.posture.cell_size_field.empty()) {
     const CellSizePlan* pl = &gf.cell_plan;
     for (const CellLevelReport& lr : gf.cell_plan.levels) {
@@ -6700,6 +6706,10 @@ LatticeVariantOutcome lattice_one_variant(
   // repack: the arrangement the maintainer approved on screen is the arrangement laid
   // down, or the job stops and names the cell that broke the rule.
   std::vector<std::vector<char>> anystep_active;
+  // ★ RULING C: per-pass backing store for the sent densities. A deque, not a vector:
+  // the radius lambda holds a pointer into it and a vector would rehome its elements on
+  // the next push_back, leaving every earlier pass reading freed memory.
+  std::deque<std::vector<double>> anystep_rho;
   if (!job.lattice.stepped_cells.empty()) {
     // ★ THE FRAME IS DERIVED, NOT SENT. A cell names a region by its 1-based
     // include-region order and states its origin in MODEL space, so the base cell comes
@@ -6719,6 +6729,34 @@ LatticeVariantOutcome lattice_one_variant(
       }
       plan_regions.push_back(pr);
     }
+    // ★ RULING A: DOUBLED SENDS ITS CELLS TOO, and its base is not a per-region answer.
+    // The stepped step derives one cell per region from that region's own FEA density
+    // and member width; the dyadic grade has no such step -- its base is the job's
+    // stated target cell, the top of the halving ladder. So when the stepped step did
+    // not run (which is exactly the doubled case), the frame comes from the declared
+    // regions directly. Include regions only, in the job's own order, which is the
+    // 1-based region_id the cells name.
+    const bool doubled_plan = plan_regions.empty();
+    if (doubled_plan) {
+      int include_index = 0;
+      for (const JobLatticeRegion& jr : job.lattice.regions) {
+        if (jr.role != "include") continue;
+        ++include_index;
+        SteppedPlanRegion pr;
+        pr.region_id = include_index;
+        pr.base_cell_mm = job.grading.cell_mm;
+        pr.slot_origin = jr.origin;
+        pr.normal = jr.normal;
+        pr.depth_mm = jr.depth_mm;
+        plan_regions.push_back(pr);
+      }
+      if (!(job.grading.cell_mm > 0.0))
+        throw JobError(
+            "lattice \"stepped_cells\" with \"algorithm\": \"doubled\" needs the job's "
+            "target cell size: the halving ladder S, S/2, S/4 ... is derived from it, "
+            "and every cell in the list is validated against that ladder. State "
+            "\"grading\": { \"cell_mm\": ... }.");
+    }
     // ★ THE BOUND THE JOB'S INTENT ASKS FOR. Aesthetic keeps the 20 % "prints open" rule
     // beside the floor; structural drops it, because the certificate solves every strut
     // rather than averaging them and nothing structural depends on a cell looking open.
@@ -6726,18 +6764,26 @@ LatticeVariantOutcome lattice_one_variant(
     const double tile_floor = job.grading.stepped_min_tile_mm > 0.0
                                   ? job.grading.stepped_min_tile_mm
                                   : job.grading.min_extrudable_width_mm;
+    // ★ RULING A: which MENU the plan is validated against. Doubled admits only the
+    // halving ladder; any-step admits every k*(S/n). Same validator, same grid, prism
+    // and overlap checks -- the menu is the only difference, and it is the difference
+    // that stops a doubled job quietly accepting an any-step plan.
+    const SteppedMenu plan_menu =
+        R.algorithm == LatticeAlgorithm::Doubled ? SteppedMenu::Halves
+                                                 : SteppedMenu::AnyStep;
     const SteppedPlanCheck chk =
         stepped_validate_plan(job.lattice.stepped_cells, plan_regions,
                               job.grading.min_extrudable_width_mm, tile_floor,
-                              prints_open);
+                              prints_open, plan_menu);
     if (!chk.ok)
       throw JobError("lattice \"stepped_cells\": " + chk.error +
                      ". Core validates the plan and does not repack it -- the run lays "
                      "down the arrangement the preview showed, or it stops here.");
     const std::vector<SteppedCellGroup> groups =
         stepped_group_cells(job.lattice.stepped_cells, plan_regions);
-    std::fprintf(stderr, "[stepped] any-step plan: %zu cell(s) over %zu region(s) in %zu "
+    std::fprintf(stderr, "[stepped] %s plan: %zu cell(s) over %zu region(s) in %zu "
                          "pass(es) | %s\n",
+                 plan_menu == SteppedMenu::Halves ? "doubled (halves)" : "any-step",
                  chk.cells, chk.regions, groups.size(), chk.histogram_line.c_str());
     R.anystep_cells = static_cast<long long>(chk.cells);
     R.anystep_regions = static_cast<long long>(chk.regions);
@@ -6772,6 +6818,51 @@ LatticeVariantOutcome lattice_one_variant(
       const std::vector<double>& rref = gf.posture.relative_density;
       const double rlo = gf.band_rho_min;
       const double gcell = g.size_mm;
+      // ── ★ RULING C: THE DENSITY CAME WITH THE CELL ─────────────────────────────
+      // When the job sent a rho per cell, the strut is sized from THAT and core adds no
+      // band term of its own. The quilt raise, the coarse-cell share and the aesthetic
+      // ceiling are the app's arithmetic over its own demand map; core re-deriving them
+      // from a field it grades differently is precisely how the two pictures drift. The
+      // LAW is still core's (octet_strut_diameter_mm) -- only the density is the app's.
+      // A cell that sent no rho (every job before this ruling) falls back to the voxel
+      // field exactly as before.
+      bool any_rho_sent = false;
+      for (double r : g.rho) if (r > 0.0) { any_rho_sent = true; break; }
+      if (any_rho_sent) {
+        std::vector<double> cell_rho(
+            static_cast<std::size_t>(g.nx) * g.ny * g.nz, 0.0);
+        for (std::size_t ci = 0; ci < g.cells.size() && ci < g.rho.size(); ++ci) {
+          const std::array<int, 3>& c = g.cells[ci];
+          cell_rho[(static_cast<std::size_t>(c[2]) * g.ny + c[1]) * g.nx + c[0]] =
+              g.rho[ci];
+        }
+        anystep_rho.push_back(std::move(cell_rho));
+        const std::vector<double>* rp = &anystep_rho.back();
+        const Vec3 gorg = g.origin;
+        const int gnx = g.nx, gny = g.ny, gnz = g.nz;
+        sp.radius.field = [rp, gorg, gnx, gny, gnz, gcell, &sgr, &mref, &rref,
+                           rlo](Vec3 pt) {
+          const int ci = static_cast<int>(std::floor((pt.x - gorg.x) / gcell));
+          const int cj = static_cast<int>(std::floor((pt.y - gorg.y) / gcell));
+          const int ck = static_cast<int>(std::floor((pt.z - gorg.z) / gcell));
+          if (ci >= 0 && cj >= 0 && ck >= 0 && ci < gnx && cj < gny && ck < gnz) {
+            const double r =
+                (*rp)[(static_cast<std::size_t>(ck) * gny + cj) * gnx + ci];
+            if (r > 0.0) return 0.5 * octet_strut_diameter_mm(r, gcell);
+          }
+          // Off the plan's own cells (a strut reaching past its cell's box): the voxel
+          // field, as before. Nothing in the plan is sized from here.
+          auto cl = [](int val, int hi) { return val < 0 ? 0 : (val > hi ? hi : val); };
+          const int i = cl(static_cast<int>(std::floor((pt.x - sgr.origin.x) / sgr.spacing)),
+                           sgr.nx - 1);
+          const int j = cl(static_cast<int>(std::floor((pt.y - sgr.origin.y) / sgr.spacing)),
+                           sgr.ny - 1);
+          const int k = cl(static_cast<int>(std::floor((pt.z - sgr.origin.z) / sgr.spacing)),
+                           sgr.nz - 1);
+          const std::size_t e = sgr.index(i, j, k);
+          return 0.5 * octet_strut_diameter_mm(mref[e] ? rref[e] : rlo, gcell);
+        };
+      } else
       sp.radius.field = [&sgr, &mref, &rref, gcell, rlo](Vec3 pt) {
         auto cl = [](int val, int hi) { return val < 0 ? 0 : (val > hi ? hi : val); };
         const int i = cl(static_cast<int>(std::floor((pt.x - sgr.origin.x) / sgr.spacing)),

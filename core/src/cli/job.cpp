@@ -1273,7 +1273,7 @@ JobDescription parse_job(const std::string& json_text) {
       job.lattice.stepped_cells.reserve(sc->arr.size());
       for (const JsonValue& cv : sc->arr) {
         require_object(cv, "a lattice.stepped_cells entry");
-        reject_unknown_keys(cv, {"region_id", "origin_mm", "size_mm"},
+        reject_unknown_keys(cv, {"region_id", "origin_mm", "size_mm", "rho"},
                             "a lattice.stepped_cells entry");
         SteppedCell c;
         const double id = require_number(
@@ -1291,6 +1291,15 @@ JobDescription parse_job(const std::string& json_text) {
             "lattice.stepped_cells size_mm");
         if (!(c.size_mm > 0.0) || !std::isfinite(c.size_mm))
           schema_fail("lattice.stepped_cells \"size_mm\" must be finite and > 0");
+        // ★ RULING C: the cell's own density, optional. Absent = core derives it.
+        if (const JsonValue* rv2 = find_key(cv, "rho")) {
+          c.rho = require_number(*rv2, "lattice.stepped_cells rho");
+          if (!(c.rho > 0.0) || !(c.rho <= 1.0) || !std::isfinite(c.rho))
+            schema_fail(
+                "lattice.stepped_cells \"rho\" must be finite and in (0, 1] -- it is a "
+                "RELATIVE density, the fraction of the cell that is material, not a "
+                "strut width");
+        }
         job.lattice.stepped_cells.push_back(c);
       }
     }
@@ -1817,11 +1826,17 @@ JobDescription parse_job(const std::string& json_text) {
       // ★ stepped_cells is meaningful for ONE algorithm. Refused elsewhere rather than
       // ignored, so a job that packs a plan and then asks for doubled or organic fails
       // loudly instead of silently shipping a lattice that is not the one on screen.
-      if (!job.lattice.stepped_cells.empty() && job.grading.algorithm != "stepped")
+      // ★ RULING A (maintainer, 2026-09-18): DEFAULT GRADE SENDS ITS CELLS TOO. The
+      // app packs the doubled ladder in the same bake that packs any-step, so the list
+      // is the picture for both and there is ONE code path that lays cells down. The
+      // dyadic planner is not consulted when the list is present. Organic has no cells
+      // at all, so it is still refused there.
+      if (!job.lattice.stepped_cells.empty() && job.grading.algorithm != "stepped" &&
+          job.grading.algorithm != "doubled")
         schema_fail(
             "lattice \"stepped_cells\" is only allowed with \"algorithm\": \"stepped\" "
-            "(this job says \"" + job.grading.algorithm + "\"). The cell list IS the "
-            "any-step plan; no other algorithm lays it down.");
+            "or \"doubled\" (this job says \"" + job.grading.algorithm + "\"). The cell "
+            "list IS the plan the preview drew; organic has no cells to send.");
       const bool stepped_may_name =
           job.grading.algorithm == "stepped" && job.grading.intent != "aesthetic";
       if (!organic_structural && !stepped_may_name &&

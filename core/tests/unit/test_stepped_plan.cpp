@@ -201,6 +201,130 @@ static void test_menu_shape() {
 // A refusal must NAME the offending cell. A validator that returned a bare false would
 // leave the app guessing which of thousands of cells it got wrong, and the whole reason
 // core validates rather than repacking is that the preview is a contract.
+// ── ★ RULING A: THE DOUBLED MENU IS THE HALVING LADDER ────────────────────────
+// The app sends its placed cells for "doubled" too, and the only thing that differs
+// from any-step is which sizes are legal. The property that matters is not that the
+// halves are accepted -- a menu that accepted EVERYTHING would do that -- but that an
+// any-step plan is REFUSED under Halves. A 9 mm cell on a 12 mm base is the exact
+// size the dyadic ladder cannot reach, so it is the control.
+// ── ★ RULING C: THE DENSITY MUST STAY WITH ITS OWN CELL ───────────────────────
+// stepped_group_cells SORTS the cells into a fixed emission order. The densities
+// arrive in the job's order, so pairing them by position after that sort hands the
+// wrong strut width to every cell -- silently, with a plausible-looking lattice. The
+// cells here are deliberately sent in an order that the sort must change, and each
+// one's rho is a function of its own position so a mispairing cannot look right.
+static void test_group_keeps_each_cells_own_rho() {
+  SteppedPlanRegion reg;
+  reg.region_id = 1;
+  reg.base_cell_mm = 12.0;
+  reg.slot_origin = Vec3{100.0, -5.0, 0.0};
+
+  auto at = [&](double dx, double dy, double dz, double rho) {
+    SteppedCell c;
+    c.region_id = 1;
+    c.origin = Vec3{reg.slot_origin.x + dx, reg.slot_origin.y + dy, reg.slot_origin.z + dz};
+    c.size_mm = 3.0;
+    c.rho = rho;
+    return c; };
+  // sent in DESCENDING corner order, which is the reverse of the emission order
+  auto rho_for = [](double dx, double dy, double dz) {
+    return 0.10 + 0.01 * (dx / 3.0) + 0.001 * (dy / 3.0) + 0.0001 * (dz / 3.0); };
+  std::vector<SteppedCell> cells;
+  for (int i = 1; i >= 0; --i)
+    for (int j = 1; j >= 0; --j)
+      for (int k = 1; k >= 0; --k) {
+        const double dx = 3.0 * i, dy = 3.0 * j, dz = 3.0 * k;
+        cells.push_back(at(dx, dy, dz, rho_for(dx, dy, dz)));
+      }
+  const SteppedPlanCheck v = stepped_validate_plan(cells, {reg}, 0.45);
+  CHECK(v.ok, "rho: the fixture plan is valid");
+  const std::vector<SteppedCellGroup> gs = stepped_group_cells(cells, {reg});
+  CHECK(gs.size() == 1, "rho: one family, one group");
+  const SteppedCellGroup& g = gs.front();
+  CHECK(g.rho.size() == g.cells.size(),
+        "rho: one density per cell, in the same order");
+  std::size_t wrong = 0;
+  for (std::size_t c = 0; c < g.cells.size(); ++c) {
+    // recover the cell's offset from the group origin and ask what its rho SHOULD be
+    const double dx = g.origin.x + g.cells[c][0] * g.size_mm - reg.slot_origin.x;
+    const double dy = g.origin.y + g.cells[c][1] * g.size_mm - reg.slot_origin.y;
+    const double dz = g.origin.z + g.cells[c][2] * g.size_mm - reg.slot_origin.z;
+    if (std::fabs(g.rho[c] - rho_for(dx, dy, dz)) > 1e-12) ++wrong;
+  }
+  std::printf("  rho: %zu cell(s), %zu mispaired after the sort\n", g.cells.size(), wrong);
+  CHECK(g.cells.size() == 8, "rho: every cell survived grouping");
+  CHECK(wrong == 0, "rho: each cell kept ITS OWN density through the emission sort");
+  // a plan that sent no rho leaves zeros, which is the caller's "derive it as before"
+  std::vector<SteppedCell> bare = cells;
+  for (SteppedCell& c : bare) c.rho = 0.0;
+  const std::vector<SteppedCellGroup> gb = stepped_group_cells(bare, {reg});
+  CHECK(!gb.empty() && gb.front().rho.size() == gb.front().cells.size(),
+        "rho: the array is still sized when nothing was sent");
+  for (double r : gb.front().rho)
+    CHECK(r == 0.0, "rho: and it is all zeros, so the caller falls back");
+}
+
+static void test_doubled_menu_is_halves_only() {
+  const double base = 12.0, bead = 0.45;
+  const std::vector<double> halves =
+      stepped_size_menu(base, bead, 0.0, true, SteppedMenu::Halves);
+  const std::vector<double> anystep =
+      stepped_size_menu(base, bead, 0.0, true, SteppedMenu::AnyStep);
+  std::printf("  doubled menu:");
+  for (double s : halves) std::printf(" %.4g", s);
+  std::printf("  (any-step has %zu sizes)\n", anystep.size());
+
+  CHECK(!halves.empty() && halves.front() == base,
+        "doubled: the base is on the menu and is the largest");
+  for (std::size_t i = 1; i < halves.size(); ++i)
+    CHECK(std::fabs(halves[i - 1] / halves[i] - 2.0) < 1e-9,
+          "doubled: every step is exactly a halving");
+  CHECK(halves.size() < anystep.size(),
+        "doubled: and it is a STRICT subset of any-step's menu, not the same list");
+  // the sizes any-step reaches that halving cannot
+  // (3.0 is 12/4 and IS dyadic -- it belongs on both menus. The sizes below are the
+  // ones only k*(S/n) can reach.)
+  for (double s : {9.6, 9.0, 8.0, 7.2, 4.8, 2.4}) {
+    bool in_halves = false;
+    for (double h : halves) if (std::fabs(h - s) < 1e-9) in_halves = true;
+    CHECK(!in_halves, "doubled: a k*(S/n) size is NOT on the halving ladder");
+  }
+
+  SteppedPlanRegion reg;
+  reg.region_id = 1;
+  reg.base_cell_mm = base;
+  reg.slot_origin = Vec3{100.0, -5.0, 0.0};
+  auto at = [&](double dx, double dy, double dz, double size) {
+    SteppedCell c;
+    c.region_id = 1;
+    c.origin = Vec3{reg.slot_origin.x + dx, reg.slot_origin.y + dy, reg.slot_origin.z + dz};
+    c.size_mm = size;
+    return c; };
+
+  {   // a dyadic pack: a 6 at the face with 3 mm cells beside it
+    std::vector<SteppedCell> cells = {at(0, 0, 0, 6.0), at(6, 0, 0, 3.0),
+                                      at(6, 3, 0, 3.0), at(0, 6, 0, 6.0)};
+    const SteppedPlanCheck v =
+        stepped_validate_plan(cells, {reg}, bead, 0.0, true, SteppedMenu::Halves);
+    std::printf("  doubled plan: %s\n", v.ok ? "ok" : v.error.c_str());
+    CHECK(v.ok, "doubled: a halving pack is accepted");
+    CHECK(v.cells == 4, "doubled: every cell counted");
+  }
+  {   // ★ THE CONTROL: the same validator must REFUSE a 9
+    std::vector<SteppedCell> cells = {at(0, 0, 0, 9.0)};
+    const SteppedPlanCheck v =
+        stepped_validate_plan(cells, {reg}, bead, 0.0, true, SteppedMenu::Halves);
+    CHECK(!v.ok, "doubled: a 9 mm any-step cell is REFUSED on the halving ladder");
+    CHECK(v.error.find("menu") != std::string::npos,
+          "doubled: and the refusal names the menu, with the cell");
+    // the same plan under any-step is fine, so the refusal is the MENU and not the cell
+    const SteppedPlanCheck a =
+        stepped_validate_plan(cells, {reg}, bead, 0.0, true, SteppedMenu::AnyStep);
+    CHECK(a.ok, "doubled: and that very cell is accepted under any-step -- the menu is "
+                "what refused it, not the geometry");
+  }
+}
+
 static void test_plan_validation() {
   SteppedPlanRegion reg;
   reg.region_id = 1;
@@ -514,6 +638,8 @@ int main() {
   test_depth_is_clean();
   test_menu_shape();
   test_plan_validation();
+  test_doubled_menu_is_halves_only();
+  test_group_keeps_each_cells_own_rho();
   test_grouping_preserves_every_cell();
   test_packed_slot_covers_exactly_once();
   test_subdivision_preserves_the_member();

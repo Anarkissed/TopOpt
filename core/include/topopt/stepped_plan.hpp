@@ -39,6 +39,10 @@ namespace topopt {
 // bound at any bead this pipeline prints, and each extra family multiplies the packer's
 // search without adding a size the coarser families cannot already express.
 inline constexpr int kSteppedMaxDivisor = 6;
+// ★ RULING A: how far the DOUBLED ladder may halve. 8 halvings takes a 12 mm base to
+// 0.047 mm, far below any printable tile, so in practice the bead and the stated floor
+// stop it first -- this is only a bound on the loop, not a design choice about depth.
+inline constexpr int kSteppedMaxHalvings = 8;
 // "Prints open": a bead-wide strut in a tile of this size must not exceed this relative
 // density. The octet law supplies the density; see the note above on the structural case.
 inline constexpr double kSteppedPrintsOpenMaxRho = 0.20;
@@ -55,15 +59,30 @@ inline constexpr double kSteppedMenuSameRel = 1e-9;
 // solves every strut rather than averaging them, so nothing structural depends on a cell
 // being mostly air. Under structural the floor is `min_tile_mm` alone -- see §3.5 of the
 // brief of 2026-09-17 and core's reply.
+// ── ★ RULING A: TWO MENUS, ONE VALIDATOR ────────────────────────────────────────
+// Any-step admits every k*(S/n) for n = 2..6. DOUBLED admits only the halving ladder
+// S, S/2, S/4, ... -- the dyadic sizes the default grade has always drawn. The app now
+// sends its placed cells for BOTH (the same bake packs them), so the only thing that
+// differs downstream is which sizes are legal, and that is this flag. Everything else
+// -- the family grid check, the prism check, the overlap hash -- is shared, because a
+// doubled cell sits on its own size's grid exactly as an any-step cell sits on its
+// family's tile.
+enum class SteppedMenu {
+  AnyStep,   // k*(S/n), n = 2..6 -- "stepped"
+  Halves,    // S, S/2, S/4, ... -- "doubled"
+};
+
 std::vector<double> stepped_size_menu(double base_cell_mm, double bead_mm,
                                       double min_tile_mm = 0.0,
-                                      bool apply_prints_open = true);
+                                      bool apply_prints_open = true,
+                                      SteppedMenu menu = SteppedMenu::AnyStep);
 
 // The divisors whose tile was admitted, ascending. Exposed because the packer places on a
 // family's own tile grid and the receipt reports per family.
 std::vector<int> stepped_admitted_divisors(double base_cell_mm, double bead_mm,
                                            double min_tile_mm = 0.0,
-                                           bool apply_prints_open = true);
+                                           bool apply_prints_open = true,
+                                           SteppedMenu menu = SteppedMenu::AnyStep);
 
 
 // ── THE PLAN THE JOB STATES, AND WHY CORE VALIDATES RATHER THAN REPACKS ─────────
@@ -76,6 +95,15 @@ struct SteppedCell {
   int region_id = 0;
   Vec3 origin{0, 0, 0};    // the cell's minimum corner, mm, in part coordinates
   double size_mm = 0.0;
+  // ── ★ RULING C (maintainer, 2026-09-18): THE DENSITY COMES WITH THE CELL ──────
+  // The preview's per-cell density, AFTER its aesthetic ceiling, its band raise and
+  // its printability floor -- the densest texel of the cell. Core sizes the strut
+  // from it with its own law (octet_strut_diameter_mm) and adds NO band term of its
+  // own: the quilt raise and the coarse-cell share are the app's arithmetic, and
+  // core re-deriving them from a demand field it grades differently is how the two
+  // pictures drift. 0 = not sent, and core derives the density as it always has,
+  // which is what every existing job does.
+  double rho = 0.0;
 };
 
 // One declared region's frame: the base cell the menu is derived from, and the origin of
@@ -114,7 +142,8 @@ struct SteppedPlanCheck {
 SteppedPlanCheck stepped_validate_plan(const std::vector<SteppedCell>& cells,
                                        const std::vector<SteppedPlanRegion>& regions,
                                        double bead_mm, double min_tile_mm = 0.0,
-                                       bool apply_prints_open = true);
+                                       bool apply_prints_open = true,
+                                       SteppedMenu menu = SteppedMenu::AnyStep);
 
 // ── ONE PASS PER (REGION, FAMILY), NOT PER DISTINCT SIZE ────────────────────────
 // The dyadic path builds a pass per distinct size on a grid anchored at the SOLVED
@@ -134,6 +163,11 @@ struct SteppedCellGroup {
   Vec3 origin{0, 0, 0};              // the group's grid origin, in part coordinates
   int nx = 0, ny = 0, nz = 0;
   std::vector<std::array<int, 3>> cells;   // indices into that grid, ascending
+  // ★ RULING C: each cell's sent density, in the SAME order as `cells`. 0 where the
+  // job did not send one, which is every job written before the ruling -- the caller
+  // then derives the density as it always has. Parallel rather than folded into the
+  // triple so `cells` stays the plain index list every existing caller reads.
+  std::vector<double> rho;
 };
 
 // Groups validated cells into passes. `cells` must already have passed

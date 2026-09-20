@@ -12,10 +12,34 @@
 namespace topopt {
 
 std::vector<int> stepped_admitted_divisors(double base_cell_mm, double bead_mm,
-                                           double min_tile_mm, bool apply_prints_open) {
+                                           double min_tile_mm, bool apply_prints_open,
+                                           SteppedMenu menu) {
   std::vector<int> out;
   if (!(base_cell_mm > 0.0) || !std::isfinite(base_cell_mm)) return out;
   if (!(bead_mm > 0.0) || !std::isfinite(bead_mm)) return out;
+  // ★ RULING A: the halving ladder. Same three admissions as any-step -- the stated
+  // floor, the bead fitting in the tile, and printing open -- applied to 2, 4, 8, ...
+  // instead of 2..6. It stops at the FIRST rung that fails rather than skipping it: a
+  // ladder with a gap is not a halving ladder, and the sizes below a gap are reached by
+  // halving a size that was refused.
+  if (menu == SteppedMenu::Halves) {
+    for (int n = 2; n <= (1 << kSteppedMaxHalvings); n *= 2) {
+      const double tile = base_cell_mm / n;
+      if (min_tile_mm > 0.0 && tile < min_tile_mm) break;
+      if (tile <= bead_mm) break;
+      if (apply_prints_open) {
+        double rho = 1.0;
+        try {
+          rho = octet_relative_density(tile, 0.5 * bead_mm);
+        } catch (const std::exception&) {
+          break;
+        }
+        if (rho > kSteppedPrintsOpenMaxRho) break;
+      }
+      out.push_back(n);
+    }
+    return out;
+  }
   for (int n = 2; n <= kSteppedMaxDivisor; ++n) {
     const double tile = base_cell_mm / n;
     if (min_tile_mm > 0.0 && tile < min_tile_mm) continue;
@@ -37,10 +61,19 @@ std::vector<int> stepped_admitted_divisors(double base_cell_mm, double bead_mm,
 }
 
 std::vector<double> stepped_size_menu(double base_cell_mm, double bead_mm,
-                                      double min_tile_mm, bool apply_prints_open) {
+                                      double min_tile_mm, bool apply_prints_open,
+                                      SteppedMenu which) {
   std::vector<double> menu;
   if (!(base_cell_mm > 0.0) || !std::isfinite(base_cell_mm)) return menu;
   menu.push_back(base_cell_mm);          // the base is always on its own menu
+  // ★ RULING A: under Halves a rung contributes ONLY its own size. Any-step's k*(S/n)
+  // is what lets a 9 sit beside an 8; the dyadic ladder has no such sizes, and adding
+  // them here would quietly make "doubled" accept an any-step plan.
+  if (which == SteppedMenu::Halves) {
+    for (int n : stepped_admitted_divisors(base_cell_mm, bead_mm, min_tile_mm,
+                                           apply_prints_open, which))
+      menu.push_back(base_cell_mm / n);
+  } else
   for (int n : stepped_admitted_divisors(base_cell_mm, bead_mm, min_tile_mm,
                                         apply_prints_open)) {
     const double tile = base_cell_mm / n;
@@ -80,7 +113,7 @@ bool aligned_on_some_family(double offset, double size, double base, const std::
 SteppedPlanCheck stepped_validate_plan(const std::vector<SteppedCell>& cells,
                                        const std::vector<SteppedPlanRegion>& regions,
                                        double bead_mm, double min_tile_mm,
-                                       bool apply_prints_open) {
+                                       bool apply_prints_open, SteppedMenu menu) {
   SteppedPlanCheck out;
   out.cells = cells.size();
   out.regions = regions.size();
@@ -92,9 +125,9 @@ SteppedPlanCheck stepped_validate_plan(const std::vector<SteppedCell>& cells,
   for (const SteppedPlanRegion& r : regions) {
     by_id[r.region_id] = &r;
     menu_of[r.region_id] =
-        stepped_size_menu(r.base_cell_mm, bead_mm, min_tile_mm, apply_prints_open);
-    div_of[r.region_id] =
-        stepped_admitted_divisors(r.base_cell_mm, bead_mm, min_tile_mm, apply_prints_open);
+        stepped_size_menu(r.base_cell_mm, bead_mm, min_tile_mm, apply_prints_open, menu);
+    div_of[r.region_id] = stepped_admitted_divisors(r.base_cell_mm, bead_mm, min_tile_mm,
+                                                    apply_prints_open, menu);
   }
 
   double finest = 0.0;
@@ -261,12 +294,22 @@ std::vector<SteppedCellGroup> stepped_group_cells(
     g.nx = std::max(1, static_cast<int>(std::llround((hi[0] - org[0]) / size)));
     g.ny = std::max(1, static_cast<int>(std::llround((hi[1] - org[1]) / size)));
     g.nz = std::max(1, static_cast<int>(std::llround((hi[2] - org[2]) / size)));
-    g.cells.reserve(kv.second.size());
+    // ★ RULING C: the density rides WITH the cell through the sort. Sorting a parallel
+    // array afterwards would silently pair the wrong density with the wrong cell, so
+    // the two are sorted together and split after.
+    std::vector<std::pair<std::array<int, 3>, double>> idx;
+    idx.reserve(kv.second.size());
     for (const SteppedCell* c : kv.second)
-      g.cells.push_back({static_cast<int>(std::llround((c->origin.x - org[0]) / size)),
-                         static_cast<int>(std::llround((c->origin.y - org[1]) / size)),
-                         static_cast<int>(std::llround((c->origin.z - org[2]) / size))});
-    std::sort(g.cells.begin(), g.cells.end());
+      idx.push_back({{static_cast<int>(std::llround((c->origin.x - org[0]) / size)),
+                      static_cast<int>(std::llround((c->origin.y - org[1]) / size)),
+                      static_cast<int>(std::llround((c->origin.z - org[2]) / size))},
+                     c->rho});
+    std::sort(idx.begin(), idx.end(),
+              [](const std::pair<std::array<int, 3>, double>& a,
+                 const std::pair<std::array<int, 3>, double>& b) { return a.first < b.first; });
+    g.cells.reserve(idx.size());
+    g.rho.reserve(idx.size());
+    for (const auto& e : idx) { g.cells.push_back(e.first); g.rho.push_back(e.second); }
     out.push_back(std::move(g));
   }
   // region ascending, then size DESCENDING: the coarse families are laid first, which is
