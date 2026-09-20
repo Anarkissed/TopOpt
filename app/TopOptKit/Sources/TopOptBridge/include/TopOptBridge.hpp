@@ -1146,6 +1146,10 @@ double lattice_subfloor_retention_fraction();
 
 double lattice_strut_diameter_mm(const std::string& topology, double rho,
                                  double cell_size_mm);
+/// The forward law: the relative density a strut RADIUS produces at a cell (octet
+/// only; 0 = no core law, 1 = the radius fills the cell). Core reply 5, 2026-09-20.
+double lattice_relative_density(const std::string& topology, double strut_radius_mm,
+                                double cell_size_mm);
 
 // ★★ CORE'S LOCAL MEMBER THICKNESS, for the preview (task 2026-08-20).
 //

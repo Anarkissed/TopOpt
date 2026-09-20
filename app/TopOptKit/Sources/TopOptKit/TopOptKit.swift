@@ -1064,6 +1064,14 @@ public enum TopOptKit {
         topoptbridge.lattice_strut_diameter_mm(std.string(topology), rho, cellMM)
     }
 
+    /// ★ THE FORWARD LAW (core reply 5, 2026-09-20): the relative density a strut
+    /// radius produces at a cell, sampled the way core samples it. 0 ⇒ no core law
+    /// for this topology; 1 ⇒ the radius fills the cell.
+    public static func latticeRelativeDensity(topology: String, strutRadiusMM: Double,
+                                              cellMM: Double) -> Double {
+        topoptbridge.lattice_relative_density(std.string(topology), strutRadiusMM, cellMM)
+    }
+
     /// ★★ CORE'S LOCAL MEMBER THICKNESS (mm per voxel), for the preview.
     ///
     /// Core leaves a member too thin to hold `minCellsPerMember` cells SOLID rather

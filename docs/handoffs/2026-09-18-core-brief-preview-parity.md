@@ -284,3 +284,65 @@ the 3.2× DC time; the preview estimates neither. Open on core's side, in their 
 B outline beam, A stepped_cells under "doubled", C struts from the sent rho, D the
 Allow-quilt message, §3 receipts + Hausdorff. §4-H (whole-wall synthetic + middle
 spacing) still to be acknowledged by core.
+
+## Core reply 5 (9ce3824d…6e0feb63) — answered from the code, 2026-09-20
+
+**Q1 (§1.5, blocking B).** No: `dRegion = max(dRegion, 0.5·beam − dOutline)` is a SHRINK of
+the latticed set, not an extension of the prism. `dOutline` is the in-plane distance in
+from the face outline, so the term is positive within beam/2 of the outline and the max
+removes lattice there. Struts end at the beam's MID-PLANE (inside the ribbon, which spans
+0…beam from the outline). The bleed is a solid FILL the march lays over the band
+(`solidDepth`, 0…beam+bleed) on top of whatever the lattice does; the strut clip does not
+move with it. Union geometry = solid(0…beam+bleed) ∪ lattice(≥ beam/2 from the outline) =
+solid(0…beam+bleed) ∪ lattice(≥ beam+bleed). So core's exact twin: clip the octet emitter
+at outline − beam/2 (not the beam's inner face) — struts end welded inside the beam — and
+lay the bleed as solid over the region; widening the boundary by the bleed changes the
+printed union by nothing and only decides whether strut ends butt against solid or sit in
+it. Either answer certifies the same union; ours is beam/2.
+
+**Q2 (density cap under structural).** The latter — PREVIEW-ONLY, and my ruling-D text
+("the job already carries it") was WRONG: the job carries NO band. `LatticeSpec` holds
+`min/maxRelativeDensity` but `gradingDictionary()` writes neither them nor any rho key;
+only a per-face stated `relative_density` travels. The preview rescales every automatic
+density so demand 1 lands on the aesthetic ceiling under BOTH intents unless Allow quilt
+is on (`aestheticDemandCap`, not gated on intent). So: yes, add a non-aesthetic cap key;
+the app will send the ceiling whenever Allow quilt is off, under either intent, and the
+structural failure message names "turn on Allow quilt" when the needed density is above it.
+
+**§3 (0.2117 vs 0.219) — pushed back, with the app's own numbers.** The bridge now exposes
+the forward law (`lattice_relative_density` → `octet_relative_density`), and the app reads
+0.211733 for strut/cell 0.20 too (pinned in `LatticeAestheticDensityCeilingTests`). But
+the ceiling stays the DIAMETER table's preimage (≈ 0.219), because `rho` on the wire is
+turned back into a strut by `octet_strut_diameter_mm` — the run then builds strut/cell
+0.20 exactly, which is the geometry he ruled on. Sent forward (0.2117), the run's capped
+strut lands UNDER 0.20 of the cell (pinned). Question back to core: which table sizes
+the strut from `stepped_cells[].rho`? If the diameter table, the preview is right as is
+and the two numbers are two scales, not a 3.5 % error; if core inverts the forward law,
+say so and the app switches.
+
+**§4 (two surfaces).** Yes, the preview has two evaluators of ONE mesh: the body is
+rasterised from the triangles; the capsule clip samples the exact point-to-triangle
+distance on the 128 grid (trilinear) and now erodes by the march's trim (≤ 0.35 mm) INTO
+the strut, deliberately, so the end hides behind the face. Not core's bug (no
+binarisation; both come from the mesh), and the error is the grid's interpolation near
+creases, not half a voxel on a flat wall. The region cap wall is a mesh at region depth
+and the capsule's region clip is the analytic prism distance − embed; struts pass through
+it, so nothing to fight.
+
+**§5 (doubled).** Ladders agree: the app's ladder picks the finest rung still ≥ floor and
+printing open; both conditions are monotone in the cell (the floor RISES as the cell
+shrinks), so "skip a failed rung" and "stop at it" are the same set — 12/0.45 → {12, 6, 3}.
+BUT the app's doubled cells carry PER-REGION bases (his 2026-09-17: Default Grade draws
+the same per-region cells as Stepped — 12 on the front wall, 10.31 on the back, from
+`latticeRegionCellsMM(widthPercentile: 0.5)`), and `grading.cell_mm` is one number. A
+doubled list validated against one halving ladder from `cell_mm` refuses the 10.31 wall.
+Ask: run the per-region derivation for doubled too, or validate each region's ladder
+from its own largest sent cell. New keys `shape_grade` / `shape_grade_band_mm` are now
+written for stepped/doubled when the grade is on and the linked schema accepts them
+(the current xcframework does not yet — `shape_grade accepted=false` in the test log).
+
+**§6 (H).** The app never forces: the flag only proposes (`syntheticRegions` = the plan),
+`deadenWholeWalls` zeroes a wall only by its measured p99, now INCLUSIVE (`<=`) to match.
+
+**§8.** Beam 1.21 mm agreed; the bleed here is (band − 15)/2 from 25 mm: 5.0 at 25, 7.5 at
+30 — the same threshold, not a ramp.

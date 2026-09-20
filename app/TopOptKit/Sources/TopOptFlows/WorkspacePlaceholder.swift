@@ -5100,7 +5100,7 @@ public struct WorkspacePlaceholder: View {
                 organicIn?.deadRegionIDs = Set(verdicts.map { $0.regionID })
                 if !verdicts.isEmpty {
                     NSLog("DIAG synthetic whole-wall: %@",
-                          verdicts.map { String(format: "%@ p99 %.4g < thr %.4g → %d voxels zeroed",
+                          verdicts.map { String(format: "%@ p99 %.4g ≤ thr %.4g → %d voxels zeroed",
                                                 synthPlan.keyByID[$0.regionID] ?? "r\($0.regionID)", $0.p99, $0.thr, $0.zeroed) }
                               .joined(separator: " | "))
                 }

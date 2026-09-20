@@ -634,6 +634,14 @@ public struct LatticeSpec: Equatable, Sendable {
     public var algorithm: String = ""
     /// The preview's placed cells for a Stepped run — see `LatticeSteppedCellWire`.
     public var steppedCells: [LatticeSteppedCellWire] = []
+    /// ★ THE SHAPE GRADE, ON THE WIRE (core reply 5, 2026-09-20: `grading.shape_grade`,
+    /// default false = NO outline beam at all; `shape_grade_band_mm` is read by the
+    /// bleed rule only and is refused without `shape_grade: true`). Set from the
+    /// grading mode's `fitsShape` and the band the wizard holds; written only for
+    /// stepped/doubled, only when on, and only when the linked core's schema accepts
+    /// the keys.
+    public var shapeGrade: Bool = false
+    public var shapeGradeBandMM: Double = 0
 
     // ★ ORGANIC's seven keys, carried the same way `algorithm` is: plain `var`s with
     // core's own defaults, so every existing `LatticeSpec(...)` call site is unchanged
@@ -824,6 +832,18 @@ public struct LatticeSpec: Equatable, Sendable {
                    TopOptKit.gradingSchemaAccepts(key: "stepped_min_tile_mm") {
                     grading["stepped_min_tile_mm"] = LatticeSDFRenderer.printableFloorBeads * w
                 }
+            }
+        }
+        // ══════════════════════════════════════════════════════════════════════
+        // ★ THE SHAPE GRADE (core reply 5, 2026-09-20). Core draws no outline beam
+        // unless the job says `shape_grade: true`; the band travels with it for the
+        // bleed rule (0 below 25 mm, (band − 15)/2 from there) and is refused on its
+        // own. Off is core's default and is not restated (bar U1).
+        if algorithm == "stepped" || algorithm == "doubled", shapeGrade,
+           TopOptKit.gradingSchemaAccepts(key: "shape_grade") {
+            grading["shape_grade"] = true
+            if shapeGradeBandMM > 0, TopOptKit.gradingSchemaAccepts(key: "shape_grade_band_mm") {
+                grading["shape_grade_band_mm"] = shapeGradeBandMM
             }
         }
         // ══════════════════════════════════════════════════════════════════════
@@ -2363,6 +2383,8 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
             // including "" — `gradingDictionary` is the single place that decides
             // whether a key is written, so "not stated" cannot become "doubled" here.
             spec.algorithm = algorithm
+            spec.shapeGrade = gradingMode.fitsShape
+            spec.shapeGradeBandMM = shapeFitBandMM
 
             // ★ ORGANIC — copied verbatim; `gradingDictionary()` owns every emission gate.
             spec.organicGrowth = organicGrowth
@@ -2426,6 +2448,8 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         // generatable-topology path — and organic can only be emitted through it.
         // "" is still not written, so an untouched project is unchanged.
         spec2.algorithm = algorithm
+        spec2.shapeGrade = gradingMode.fitsShape
+        spec2.shapeGradeBandMM = shapeFitBandMM
 
         // ★ ORGANIC — copied verbatim; `gradingDictionary()` owns every emission gate.
         spec2.organicGrowth = organicGrowth

@@ -207,7 +207,7 @@ public enum OrganicSyntheticStress {
     /// magnitude between ¼·thr and thr — so a wall whose stress hovers just under the
     /// threshold (his front wall: p99 0.0041 against thr 0.005, max 0.0056) is HALF
     /// synthetic and half rounding-noise directions, and the tracer follows the noise.
-    /// Here a wall whose p99 is under core's own threshold has its real tensor ZEROED
+    /// Here a wall whose p99 is at or under core's own threshold has its real tensor ZEROED
     /// over every voxel, so core's blend sees nothing to mix in and the whole wall takes
     /// the focal field. A wall above the threshold is untouched (his back wall: p99
     /// 0.020, real and coherent). Returns what it did, per region, for the log.
@@ -228,7 +228,9 @@ public enum OrganicSyntheticStress {
         let thr = Swift.max(deadFraction * peak, deadMPaFloor)
         var out: [WholeWallVerdict] = []
         for (id, s) in wallStress(tensor: tensor, regionIDs: regionIDs).sorted(by: { $0.key < $1.key }) {
-            guard s.p99 < thr else { continue }
+            // ★ INCLUSIVE, as core built it (reply 5, 2026-09-20): "at 0.005 MPa and lower,
+            // it is not a stressed wall" — a wall sitting exactly on the floor is dead.
+            guard s.p99 <= thr else { continue }
             var zeroed = 0
             for i in 0..<n where Int(regionIDs[i]) == id {
                 for c in 0..<6 { tensor[6 * i + c] = 0 }

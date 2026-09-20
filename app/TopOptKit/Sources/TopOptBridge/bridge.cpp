@@ -2992,6 +2992,26 @@ double lattice_strut_diameter_mm(const std::string& topology, double rho,
   return topopt::octet_strut_diameter_mm(rho, cell_size_mm);
 }
 
+// ★★ THE FORWARD LAW (core reply 5, 2026-09-20: "the aesthetic ceiling is 0.211733,
+// not 0.219 … you invert it, core samples it forward"). `octet_relative_density`
+// depends only on radius/cell, so every cell gives the same number for the same
+// ratio; bisecting the DIAMETER table for it landed 3.5 % high because core's two
+// tables are not exact inverses of each other (core's own round trip at 4 mm:
+// 0.80 → 0.7846). Returns 0 for a topology core has no law for or a bad argument,
+// and 1 when the radius fills the cell solid (core throws for that case).
+double lattice_relative_density(const std::string& topology, double strut_radius_mm,
+                                double cell_size_mm) {
+  topopt::LatticeTopology topo;
+  if (!lattice_topology_from_name(topology, topo)) return 0.0;
+  if (topo != topopt::LatticeTopology::Octet) return 0.0;
+  if (!(cell_size_mm > 0.0) || !std::isfinite(strut_radius_mm) || !(strut_radius_mm > 0.0)) return 0.0;
+  try {
+    return topopt::octet_relative_density(cell_size_mm, strut_radius_mm);
+  } catch (const std::invalid_argument&) {
+    return 1.0;
+  }
+}
+
 LatticeLimits lattice_limits(const std::string& topology) {
   LatticeLimits lim;
   topopt::LatticeTopology topo;

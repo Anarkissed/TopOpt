@@ -20,6 +20,19 @@ final class LatticeAestheticDensityCeilingTests: XCTestCase {
         }
         // core's law is linear in the cell, so the ceiling density is the same everywhere
         XCTAssertLessThan(rhos.max()! - rhos.min()!, 0.01, "ceiling drifts with cell size: \(rhos)")
+        // ★ THE TWO SCALES (core reply 5, 2026-09-20): core's forward density law reads
+        // the SAME geometry — strut/cell 0.20 — at 0.211733, while the diameter table's
+        // preimage (what the run sizes from) is ≈ 0.219. The ceiling is the preimage,
+        // because `rho` on the wire goes back through the diameter table; this pins
+        // that the forward law is exposed and that the two do differ, so nobody
+        // "corrects" one to the other again without reading this.
+        if TopOptKit.latticeRelativeDensity(topology: "octet", strutRadiusMM: 0.4, cellMM: 4) > 0 {
+            let forward = TopOptKit.latticeRelativeDensity(topology: "octet", strutRadiusMM: 0.4, cellMM: 4)
+            XCTAssertEqual(forward, 0.211733, accuracy: 0.002, "core's forward law at strut/cell 0.20")
+            XCTAssertGreaterThan(rhos[1], forward + 0.003, "the preimage sits above the forward number — two scales")
+            let back = 2 * octet.strutRadiusMM(relativeDensity: forward, cellMM: 4) / 4
+            XCTAssertLessThan(back, LatticeType.aestheticStrutRatioCeiling, "sent forward, the run's strut lands UNDER 0.20 of the cell")
+        }
         // and it is a LATTICE density, well under the 0.53 where octet struts touch
         XCTAssertGreaterThan(rhos[1], 0.12); XCTAssertLessThan(rhos[1], 0.32)
     }

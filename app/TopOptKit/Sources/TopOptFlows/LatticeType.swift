@@ -290,6 +290,17 @@ public struct LatticeType: Equatable, Sendable, Identifiable, Hashable {
     /// own answer rather than by writing a second law down.
     public func relativeDensity(strutRadiusMM radius: Double, cellMM: Double) -> Double {
         guard cellMM > 0, radius > 0 else { return 0 }
+        // ★★ NOT THE FORWARD LAW — ON PURPOSE (core reply 5, 2026-09-20, answered). Core
+        // carries TWO rho scales that are not inverses of each other: the DIAMETER
+        // table (`octet_strut_diameter_mm`, rho → d — what the run SIZES a strut by)
+        // and the density library (`octet_relative_density`, d → rho — what the
+        // certificate's tensor rows are keyed by). At strut/cell 0.20 they read 0.219
+        // and 0.2117. The number this returns is sent as `rho` and turned back into a
+        // strut by the diameter table, so it must be that table's PREIMAGE, which is
+        // this bisection: strut/cell 0.20 in the preview is strut/cell 0.20 in the
+        // run. Sampling forward instead would land the run's capped struts under the
+        // 0.20 he ruled on. `TopOptKit.latticeRelativeDensity` exposes the forward
+        // law for the certificate's scale; it is not this.
         let want = 2 * radius
         // Does core carry a law for this topology at all? The top of the band is the
         // cheapest question that says so — 0 means "no core law", not "no strut".
