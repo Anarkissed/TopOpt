@@ -34,6 +34,29 @@ final class LatticeShapeGradeKeysTests: XCTestCase {
         print("shape_grade accepted=\(accepts) band accepted=\(acceptsBand)")
     }
 
+    /// ★ THE DENSITY CAP (core reply 6, 2026-09-20): `max_relative_density` = the aesthetic
+    /// ceiling whenever Allow quilt is off, under either intent; never for organic, never
+    /// when the topology has no ceiling, never on a core without the key.
+    func testTheDensityCapTravelsUnlessAllowQuiltLiftsIt() throws {
+        let accepts = TopOptKit.gradingSchemaAccepts(key: "max_relative_density")
+        var s = LatticeSettings(enabled: true); s.topologyID = "octet"; s.cellMM = 6
+        s.allowQuilt = false
+        let capped = try XCTUnwrap(s.runSpec(lineWidthMM: 0.45))
+        let ceiling = LatticeType.named("octet").aestheticDensityCeiling(cellMM: 6)
+        XCTAssertEqual(capped.densityCapRho, ceiling, accuracy: 1e-12)
+        XCTAssertGreaterThan(ceiling, 0.2); XCTAssertLessThan(ceiling, 0.23, "the diameter table's preimage of 0.20")
+        let g = try XCTUnwrap(capped.gradingDictionary())
+        XCTAssertEqual(g["max_relative_density"] as? Double, accepts ? ceiling : nil,
+                       "written iff core accepts the key (\(accepts) on this core)")
+        s.allowQuilt = true
+        let lifted = try XCTUnwrap(s.runSpec(lineWidthMM: 0.45))
+        XCTAssertEqual(lifted.densityCapRho, 0)
+        XCTAssertNil(try XCTUnwrap(lifted.gradingDictionary())["max_relative_density"], "Allow quilt lifts the cap")
+        var o = spec("organic", on: false, band: 0); o.densityCapRho = ceiling
+        XCTAssertNil(o.gradingDictionary()?["max_relative_density"], "never beside organic")
+        print("max_relative_density accepted=\(accepts)")
+    }
+
     /// The settings feed the spec: the grade mode's `fitsShape` and the wizard's band.
     func testTheSettingsFeedTheSpec() throws {
         var s = LatticeSettings(enabled: true)

@@ -642,6 +642,12 @@ public struct LatticeSpec: Equatable, Sendable {
     /// the keys.
     public var shapeGrade: Bool = false
     public var shapeGradeBandMM: Double = 0
+    /// ★ THE DENSITY CAP ON THE WIRE (core reply 6, 2026-09-20: `grading.max_relative_density`,
+    /// (0, 1], not intent-gated — it lowers the top of the certifiable band, and ruling
+    /// D's refusal names "turn on Allow quilt" when certification needs more). The
+    /// aesthetic ceiling whenever Allow quilt is off; 0 = off (Allow quilt on, or a
+    /// topology with no ceiling).
+    public var densityCapRho: Double = 0
 
     // ★ ORGANIC's seven keys, carried the same way `algorithm` is: plain `var`s with
     // core's own defaults, so every existing `LatticeSpec(...)` call site is unchanged
@@ -833,6 +839,18 @@ public struct LatticeSpec: Equatable, Sendable {
                     grading["stepped_min_tile_mm"] = LatticeSDFRenderer.printableFloorBeads * w
                 }
             }
+        }
+        // ══════════════════════════════════════════════════════════════════════
+        // ★ THE DENSITY CAP (core reply 6, 2026-09-20). The preview has always capped
+        // every automatic density at the aesthetic ceiling unless Allow quilt is on,
+        // under BOTH intents; the run had no such key, so a structural run could
+        // certify at a density the preview never drew. Now it travels: the diameter
+        // table's preimage of strut/cell 0.20 (≈ 0.219), the same number the preview
+        // rescales onto. Absent when Allow quilt lifts it, when the topology has no
+        // ceiling (1), for organic (no octet band to cap), or on a core without the key.
+        if algorithm != "organic", densityCapRho > 0, densityCapRho < 1,
+           TopOptKit.gradingSchemaAccepts(key: "max_relative_density") {
+            grading["max_relative_density"] = densityCapRho
         }
         // ══════════════════════════════════════════════════════════════════════
         // ★ THE SHAPE GRADE (core reply 5, 2026-09-20). Core draws no outline beam
@@ -2385,6 +2403,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
             spec.algorithm = algorithm
             spec.shapeGrade = gradingMode.fitsShape
             spec.shapeGradeBandMM = shapeFitBandMM
+            spec.densityCapRho = allowQuilt ? 0 : lattice.aestheticDensityCeiling(cellMM: cellMM)
 
             // ★ ORGANIC — copied verbatim; `gradingDictionary()` owns every emission gate.
             spec.organicGrowth = organicGrowth
@@ -2450,6 +2469,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         spec2.algorithm = algorithm
         spec2.shapeGrade = gradingMode.fitsShape
         spec2.shapeGradeBandMM = shapeFitBandMM
+        spec2.densityCapRho = allowQuilt ? 0 : lattice.aestheticDensityCeiling(cellMM: cellMM)
 
         // ★ ORGANIC — copied verbatim; `gradingDictionary()` owns every emission gate.
         spec2.organicGrowth = organicGrowth

@@ -346,3 +346,27 @@ written for stepped/doubled when the grade is on and the linked schema accepts t
 
 **§8.** Beam 1.21 mm agreed; the bleed here is (band − 15)/2 from 25 mm: 5.0 at 25, 7.5 at
 30 — the same threshold, not a ramp.
+
+## Core reply 6 — closed, 2026-09-20
+
+- **B is complete** on core's side with NO strut clip: the identity above settled it; core's
+  band depth was 0.5·beam + bleed and is now beam + bleed. Recorded divergence that does
+  not print: the preview keeps lattice in beam/2…beam+bleed under the solid, core does not
+  generate it; only an embedment-depth certificate would ever see it (octet ties on contact).
+- **§3 withdrawn by core**: the DIAMETER table sizes the strut, so the app stays at the
+  preimage (0.218871); core measured 0.211733 / 0.218871 / 0.196142 exactly as the app's
+  pin says, and moved its own ceiling constant onto the preimage (bisected, not typed).
+- **§5 fixed without a key**: each region's doubled ladder is validated from ITS OWN
+  LARGEST SENT CELL; `grading.cell_mm` is no longer required for a doubled job with cells
+  (the app still writes it; harmless).
+- **Q2 key added**: `grading.max_relative_density` (0, 1], not intent-gated. NOW SENT: the
+  aesthetic ceiling whenever Allow quilt is off, under either intent, never for organic,
+  never when the topology has no ceiling, only on a core whose schema accepts it
+  (`LatticeSpec.densityCapRho`; `LatticeShapeGradeKeysTests`). Core verified under
+  structural: capped 0.218871 vs uncapped 0.899880 over 21,472 voxels.
+- **§4**: core's d_part anchor fixed (half-voxel seed; the binarised field had crossed the
+  wall with slope 2, compressing the flare's 0.8 mm profile into 0.4 mm). Fillet re-measured
+  on the corrected anchor: +22.8 % over dry (79,636 vs 64,857 mm³), non-manifold 199 vs 180
+  dry. Their (dens−iso)/|∇dens| refinement measured WORSE — not to be tried here.
+- **§4-H**: matched both sides (flag proposes, inclusive p99 disposes).
+- Open on core: §3 receipt fields + the two Hausdorff tests only.
