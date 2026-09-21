@@ -47,9 +47,9 @@ final class LatticeStructuralRegionFloorTests: XCTestCase {
                              encoding: .utf8)
         XCTAssertTrue(src.contains("if (project.lattice.stageMode ?? .structural) == .aesthetic {\n                    singleCellSwitch\n                }"),
                       "★ the switch lowers the AESTHETIC floor; under Structural it is decorative and must not show")
-        // and the sample cube never runs core's emission
-        XCTAssertTrue(src.contains("layerHeightMM: project.printParams.layerHeightMM,\n                                       showRepairs: false)"),
-                      "★ the sample is the trace: the emission's derived bead collapses it to fat sticks (7462 → 1440)")
+        // and the sample cube KEEPS core's emission stage (core reply 8, 2026-09-20)
+        XCTAssertTrue(src.contains("layerHeightMM: project.printParams.layerHeightMM,\n                                       showRepairs: organicShowRepairs)"),
+                      "★ core: do NOT stop sending the emission for the sample — the collapse was two core bugs, fixed in 6d6177c4")
     }
 
 }

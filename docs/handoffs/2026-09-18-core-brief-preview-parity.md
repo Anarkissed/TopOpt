@@ -382,3 +382,15 @@ written for stepped/doubled when the grade is on and the linked schema accepts t
   diameter preimage, `grading.max_relative_density`. Nothing for the app. NOTE: none of PR
   #358 is in the app's linked core (see memory `core-pr-358-is-not-in-the-linked-xcframework`);
   merging it and running `build_core.sh` is what flips the on-device probes.
+- **Core reply 8 (6d6177c4, 2026-09-20)**: the sample's collapse was TWO core bugs — the
+  transitive `node_merge` chaining consecutive samples of one member (0.203 mm apart at
+  r 0.489, 4.8× inside the merge radius; `EmittedSeg` had no curve identity) and the
+  "delete any span shorter than half its radius" pass, which alone emitted NOTHING
+  (0.203 ≤ 0.2445). Fixed: spans carry chain/node ids, short runs coalesce along the
+  chain; receipt counters `merge_same_member_refused` / `merge_runs_coalesced`. Core:
+  do NOT stop the sample's emission stage — the app's `showRepairs: false` for the
+  sample (4fdcdc59) is REVERTED; the sample still collapses on the linked core until
+  PR #358 is merged and `build_core.sh` rebuilt. Core asks for the 20 mm sample's emitted
+  LENGTH against traced length on their branch — needs the app built against that
+  branch; his call. The preview has no short-span filter of its own (checked: capsules
+  are drawn as emitted, bridge passes spans through).

@@ -2379,17 +2379,17 @@ public struct LatticeSetupWizard: View {
     /// the sample must follow every permutation of the user's settings).
     private var organicSamplePicks: OrganicSampleCube.Picks? {
         guard organicSampleShown else { return nil }
-        // ★★ THE SAMPLE IS THE TRACE, NEVER THE EMISSION (his 2026-09-20, image 1:
-        // "Refreshing the cube … brings a cube for a few seconds, then brings up this
-        // mess"). DIAG 20:31–20:32: capsules=7462 (the trace) then capsules=1440 ten
-        // seconds later — core's emission replacing it. With no stated width core
-        // derives the bead from the cube's synthetic field (r ≈ 0.78 mm on a 20 mm cube)
-        // and `node_merge` collapses the weave to fat sticks (2606 → 120 traced at
-        // 19:41; the 2026-09-10 finding, fixed in core for GROWN only). The repairs
-        // are still previewed where they mean something — in the part.
+        // ★ THE SAMPLE KEEPS ITS EMISSION STAGE (core reply 8, 2026-09-20: "Do NOT stop
+        // sending the emission stage for the sample"). His image 1 — the trace's 7462
+        // capsules replaced by 1440 fat sticks — was TWO core bugs: `node_merge`'s
+        // transitive union chained consecutive samples of one member (0.203 mm apart at
+        // r 0.489, 4.8× inside the merge radius) onto one centroid, and every span shorter
+        // than half its radius was then deleted. Both fixed in core 6d6177c4 (spans carry
+        // chain/node ids; short runs coalesce along the chain). Until that core is linked
+        // the sample still collapses — "Preview: show print repairs" OFF keeps the trace.
         return OrganicSampleCube.Picks(settings: model.applied(to: project.lattice),
                                        layerHeightMM: project.printParams.layerHeightMM,
-                                       showRepairs: false)
+                                       showRepairs: organicShowRepairs)
     }
 
     /// Re-traces the PR 353 cube's 20 mm corner with the current picks, off the main
