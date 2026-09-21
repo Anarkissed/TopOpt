@@ -870,3 +870,27 @@ Not yet seen by him.
   expected `organic_scale` on a part job (dropped under ruling F) and force-unwrapped the
   missing key, which killed the xctest process — fixed in 5c6b9a47 (asserted absent, `XCTUnwrap`).
   ~1 h 53 min wall.
+- **2026-09-20 20:03 — his three screenshots (Structural, M2 verticalStand, organic).**
+  (1) The Lattice-preview cube button was gated on `project.lattice.enabled`, which only
+  turns on when a lattice role is declared or the wizard is saved — so a fresh Structural
+  stage had no button. Now offered from the stage's first frame; a tap with lattice mode
+  off opens the wizard (Save & Exit turns it on), nothing bakes before that.
+  (2) The "weird" sample after Sample → In the part is core's EMISSION stage replacing
+  the trace: DIAG 19:41 `capsules=2606` (the trace) then `capsules=120` ten seconds later
+  (the repaired set). Structural + Cell size Auto states no strut width, core derives the
+  bead, and `node_merge` collapses the 2606-span sample to 120 fat struts — the 2026-09-10
+  finding (`node-merge-collapses-a-polyline-finer-than-one-bead`, 2606 → 61 then), core
+  fixed it for GROWN only. App unchanged; "Preview: show print repairs" OFF keeps the trace.
+  (3) The bare stage under "Nothing to lattice — the faces you marked do not reach any
+  material": his project has NO lattice include region (Groups A anchor, B load, C
+  protect; `latticeThisSummary` = "nothing set to lattice"). The 08-20 body-alpha rule
+  hides the body when there is no include region so a part-filling lattice can show;
+  organic traces regions only, drew nothing (DIAG 19:45 `capsules=0`, interior 0), and the
+  hidden body left an empty screen. `LatticePreviewBodyAlpha.value` takes
+  `nothingToLattice` (no scene, no part interior, or no region interior — the banner's own
+  `.empty` findings) ⇒ opaque. Installed 20:03; tests pending the running full suite.
+  (4) Organic certification: core's `certify_organic_structural` (beam-network Timoshenko
+  frame) accepts organic under Structural when the job asks for it (the app writes
+  `organic_structural_certification: "beam_network"`); on the STAND core certified TRACED
+  3–5 mm (margin 7.46) and GROWN with transfer ties (margin 1.19, 2026-09-05). No
+  on-device run receipt with `structural_certified` exists in the simulator container.
