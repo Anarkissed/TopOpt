@@ -974,3 +974,17 @@ Not yet seen by him.
   been recorded from a transient layout; it is now captured at the MOMENT the switch is
   turned off and cleared when it goes on; floor 160 pt. The stage-covered preference
   moved to the wizard's root so the gizmo always returns.
+- **2026-09-21 03:5x — his three at 03:25.** (1) THE WALL: the region cap at the declared
+  depth was drawn on his 12.03 mm wall with a 12.0 mm prism — the fragment's "solid 1.5
+  voxels past the cap" test read the surface voxel as solid. The cap is now built ONLY
+  where the measured wall width exceeds the declared depth by more than a voxel (the CPU
+  width field the ribbon already uses); a prism through the whole wall gets no plate;
+  `DIAG regionCap: N verts`. (2) The lattice-only view's contact shadow was the BODY's
+  footprint: it now casts the latticed slabs of the include regions (`LatticeWallSlabMesh
+  .build(attached:)` merged, in the body's vertex layout) and casts nothing while no
+  lattice layer is drawn. (3) The empty band at the rim at 100 % depth is IN-PLANE, not
+  depth: DIAG 03:28 face15 outline-distance p25 5.8 mm, 25 % within 6 mm (face2 2.8 mm,
+  44 %) — the trace's last streamline sits up to one spacing (3.4–5.5 mm) from the rim
+  and the emission trims dangling ends. `DIAG organic anchors:` now prints whether the
+  trace anchors at the rim. Lever in the app: the organic shape band (spacing → the floor
+  within the band); zero gap needs core to seed along the outline.

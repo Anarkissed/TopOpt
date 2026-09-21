@@ -26,6 +26,15 @@ public enum LatticeWallSlabMesh {
         r.thickness = spec
         r.thicknessMap = LatticeWallThicknessBuilder.build(region: r, spec: spec, field: nil,
                                                            referenceMPa: 0, floorMM: 0)
+        return build(attached: r)
+    }
+
+    /// The slab of a region whose thickness map is ALREADY attached (or nil: the whole
+    /// prism) — what the preview draws, as a solid; the lattice-only shadow casts it.
+    public static func build(attached r: LatticeRegionSpec) -> ViewerMesh {
+        guard r.kind == .face, r.depthMM > 0, !r.outlineLoops.isEmpty else {
+            return ViewerMesh(vertices: [], indices: [], faceIDs: [])
+        }
         let n = LatticeRegionMask.unit(r.normal)
         guard simd_length(n) > 0.5 else { return ViewerMesh(vertices: [], indices: [], faceIDs: []) }
         let (bu, bv) = LatticeRegionMask.basis(n)

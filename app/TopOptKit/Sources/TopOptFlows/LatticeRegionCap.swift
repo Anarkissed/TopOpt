@@ -85,13 +85,23 @@ public enum LatticeRegionCap {
 
     /// The caps of every include face region, as a flat mesh (6 floats per vertex:
     /// position, normal = −inward, the same layout as the outline ribbon).
-    public static func build(regions: [LatticeRegionSpec]) -> LatticeOutlineRibbon.Mesh {
+    /// `endsInsideMaterial(regionIndex, worldPoint)` says whether the prism's declared end
+    /// at that point sits INSIDE the part with material beyond it. Nil ⇒ assume it does.
+    /// ★ THE PRISM THAT GOES THROUGH THE WHOLE WALL GETS NO CAP (his 2026-09-21 03:25,
+    /// image 1: "The face-prism go through entire wall; therefore there should be NO
+    /// WALL"). His 12.03 mm wall with a 12.0 mm prism drew a plate at 12.0 — the wall's
+    /// own inner face — because the fragment's "is the part 1.5 voxels past the cap"
+    /// test read the surface voxel as solid. The CPU knows the wall's measured width at
+    /// every vertex; a triangle whose three corners all lie within a voxel of the far
+    /// surface is simply not built.
+    public static func build(regions: [LatticeRegionSpec],
+                             endsInsideMaterial: ((Int, SIMD3<Double>) -> Bool)? = nil) -> LatticeOutlineRibbon.Mesh {
         var v: [Float] = []
         func emit(_ p: SIMD3<Double>, _ n: SIMD3<Double>) {
             v.append(Float(p.x)); v.append(Float(p.y)); v.append(Float(p.z))
             v.append(Float(n.x)); v.append(Float(n.y)); v.append(Float(n.z))
         }
-        for region in regions where region.role == .include && region.kind == .face && !region.outlineLoops.isEmpty {
+        for (ri, region) in regions.enumerated() where region.role == .include && region.kind == .face && !region.outlineLoops.isEmpty {
             let n = LatticeRegionMask.unit(region.normal)
             guard simd_length(n) > 0.5, region.depthMM > 0 else { continue }
             let (bu, bv) = LatticeRegionMask.basis(n)
@@ -105,9 +115,9 @@ public enum LatticeRegionCap {
                 let ring = LatticeOutlineRibbon.offsetRing(loop, by: region.inPlaneOffsetMM)
                 guard ring.count >= 3 else { continue }
                 for (a, b, c) in triangulate(ring) {
-                    for uv in [ring[a], ring[b], ring[c]] {
-                        emit(region.origin + bu * uv.x + bv * uv.y + n * cap, -n)
-                    }
+                    let corners = [ring[a], ring[b], ring[c]].map { region.origin + bu * $0.x + bv * $0.y + n * cap }
+                    if let test = endsInsideMaterial, !corners.contains(where: { test(ri, $0) }) { continue }
+                    for p in corners { emit(p, -n) }
                 }
             }
         }

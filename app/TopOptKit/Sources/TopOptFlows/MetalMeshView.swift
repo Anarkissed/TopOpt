@@ -1669,7 +1669,16 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         let rotation: SIMD4<Float>
         let rect: SIMD4<Float>
         let flex: Float
+        /// ★ the lattice-only view casts the LATTICE's silhouette (his 2026-09-21 03:26)
+        var latticeOnly: Bool = false
+        var latticeVersion: Int = -1
     }
+    /// The lattice-only shadow caster: the latticed slabs of every include region, as
+    /// one solid, in the body's vertex layout.
+    private var latticeShadowBuffer: MTLBuffer?
+    private var latticeShadowFlex: MTLBuffer?
+    private var latticeShadowCount = 0
+    private var latticeShadowVersion = -1
     /// The world-XZ rectangle the footprint covers, and its strength. Nil until a
     /// footprint has been rendered this frame.
     private var shadowRect: SIMD4<Float> = .zero
@@ -3995,12 +4004,46 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     /// camera a thousand times and this pass runs zero times, because a shadow cast
     /// straight down does not depend on where the camera is.
     private func contactShadowTexture(floorRect: SIMD4<Float>, into cmd: MTLCommandBuffer) -> MTLTexture? {
-        guard let spipe = shadowPipeline, vertexDrawCount > 0,
-              let vbuf = vertexBuffer, let fbuf = flexBuffer,
-              floorRect.z > 0, floorRect.w > 0 else { return nil }
-        let key = ShadowKey(mesh: mesh.map(meshSignature),
+        guard let spipe = shadowPipeline, floorRect.z > 0, floorRect.w > 0 else { return nil }
+        // ★ LATTICE ONLY ⇒ THE LATTICE'S OWN SHADOW, AND NONE WHILE NOTHING IS DRAWN (his
+        // 2026-09-21 03:26: "It should only show the shadow of the lattice — and only when
+        // it shows up on screen"). The body is hidden; its footprint must not stay behind.
+        let latticeOnly = bodyAlpha <= 0.5
+        var vbuf: MTLBuffer, fbuf: MTLBuffer, drawCount: Int
+        var key = ShadowKey(mesh: mesh.map(meshSignature),
                             rotation: SIMD4<Float>(modelRotation.vector),
                             rect: floorRect, flex: flexScale)
+        if latticeOnly {
+            guard latticeInFrame, let lat = latticeLayer, let scene = lat.scene else { shadowKey = nil; return nil }
+            if latticeShadowVersion != lat.regionCapVersion {
+                latticeShadowVersion = lat.regionCapVersion
+                var v: [Float] = [], idx: [Int32] = []
+                for r in scene.regions where r.role == .include && r.kind == .face {
+                    let m = LatticeWallSlabMesh.build(attached: r)
+                    let base = Int32(v.count / 3)
+                    v += m.positions
+                    idx += m.indices.map { Int32($0) + base }
+                }
+                let merged = ViewerMesh(vertices: v, indices: idx, faceIDs: [Int32](repeating: 1, count: idx.count / 3))
+                latticeShadowCount = merged.isEmpty ? 0 : merged.flat.vertexCount
+                if latticeShadowCount > 0 {
+                    let inter = merged.flat.interleaved()
+                    latticeShadowBuffer = inter.withUnsafeBytes {
+                        device.makeBuffer(bytes: $0.baseAddress!, length: $0.count, options: .storageModeShared)
+                    }
+                    let zeros = [Float](repeating: 0, count: latticeShadowCount * 3)
+                    latticeShadowFlex = zeros.withUnsafeBytes {
+                        device.makeBuffer(bytes: $0.baseAddress!, length: $0.count, options: .storageModeShared)
+                    }
+                } else { latticeShadowBuffer = nil; latticeShadowFlex = nil }
+            }
+            guard latticeShadowCount > 0, let lb = latticeShadowBuffer, let lf = latticeShadowFlex else { shadowKey = nil; return nil }
+            vbuf = lb; fbuf = lf; drawCount = latticeShadowCount
+            key.latticeOnly = true; key.latticeVersion = latticeShadowVersion
+        } else {
+            guard vertexDrawCount > 0, let vb = vertexBuffer, let fb = flexBuffer else { return nil }
+            vbuf = vb; fbuf = fb; drawCount = vertexDrawCount
+        }
         shadowRect = floorRect
         if key == shadowKey, let t = shadowTex { return t }
         if shadowTex == nil {
@@ -4025,7 +4068,7 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         e.setVertexBuffer(vbuf, offset: 0, index: 0)
         e.setVertexBuffer(fbuf, offset: 0, index: 3)
         e.setVertexBytes(&u, length: MemoryLayout<ShadowUniforms>.stride, index: 1)
-        countedDraw(e, .triangle, vertexDrawCount)
+        countedDraw(e, .triangle, drawCount)
         e.endEncoding()
         shadowKey = key
         return tex

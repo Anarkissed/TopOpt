@@ -1183,6 +1183,8 @@ public struct LatticeSDFScene {
                 } } }
                 let frac = onBoundary > 0 ? Double(backed) / Double(onBoundary) : 0
                 if frac > 0.5 { anchorAtBoundary = true }
+                NSLog("DIAG organic anchors: boundary voxels %d backed %d frac %.2f → anchorAtBoundary=%@",
+                      onBoundary, backed, frac, anchorAtBoundary ? "yes" : "no")
             }
             // ★★★ THE SEPARATION IS GRADED FROM THE TRACER'S OWN STRESS (his walk,
             // 2026-09-07: "This was what Auto cell-grading looks like. It's awful").
@@ -2124,8 +2126,32 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
         sdfTex = makeVolumeTexture(scene.partSDF)
         solidTex = makeVolumeTexture(scene.solidOccupancy)     // the cap wall's "is the part here"
         regionTex = scene.regionSDF.flatMap { r in makeRegionTexture(r, outline: scene.outlineSDF, prism: scene.prismSDF) }
-        let cap = LatticeRegionCap.build(regions: scene.regions)
+        // ★ the cap only where the prism ends INSIDE material — measured wall width past
+        // the declared depth by more than a voxel; a prism through the whole wall gets none
+        let occ = scene.occupancy
+        let voxel = Double(max(occ.spacing.x, max(occ.spacing.y, occ.spacing.z)))
+        var widthFields: [Int: [Double]] = [:]
+        for (i, r) in scene.regions.enumerated() where r.role == .include && r.kind == .face {
+            widthFields[i] = LatticeMeasuredRegionWidth.wallWidthFieldAlongNormalMM(
+                region: r, occupancy: occ, partSDF: scene.partSDF)
+        }
+        let cap = LatticeRegionCap.build(regions: scene.regions) { ri, p in
+            guard let w = widthFields[ri], w.count == occ.count else { return true }
+            let g = (SIMD3<Float>(p) - occ.origin) / occ.spacing
+            let i = Int(g.x.rounded()), j = Int(g.y.rounded()), k = Int(g.z.rounded())
+            var best = 0.0
+            for dk in -1...1 { for dj in -1...1 { for di in -1...1 {
+                let a = i + di, b = j + dj, c = k + dk
+                guard a >= 0, b >= 0, c >= 0, a < occ.nx, b < occ.ny, c < occ.nz else { continue }
+                best = max(best, w[(c * occ.ny + b) * occ.nx + a])
+            } } }
+            // no measurement ⇒ no cap (never a wall on a guess)
+            guard best > 0 else { return false }
+            return best - scene.regions[ri].depthMM > max(1.0, voxel)
+        }
         regionCap = cap.vertexCount > 0 ? cap : nil
+        NSLog("DIAG regionCap: %d verts (regions whose prism ends inside material only; voxel %.2f mm)",
+              cap.vertexCount, voxel)
         Self.regionCapSerial &+= 1
         regionCapVersion = Self.regionCapSerial
         organicTex = scene.organicField.flatMap { d in
