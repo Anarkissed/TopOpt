@@ -5231,6 +5231,12 @@ public struct WorkspacePlaceholder: View {
                 if let o = organicIn, let out = scene.outlineSDF, !o.regionIDs.isEmpty,
                    !scene.organicCapsules.isEmpty {
                     var byRegion: [Int32: [Float]] = [:]
+                    // ★ AND THE DEPTH (his 2026-09-20, image 6: "how little lattice there
+                    // actually is … the USER sets the depth expected of the lattice"):
+                    // each span's midpoint along the face normal, INTO the part, as a share
+                    // of the declared depth — p05 / p50 / p95 per wall.
+                    let includes = scene.regions.filter { $0.role == .include }
+                    var depthByRegion: [Int32: [Float]] = [:]
                     for c in scene.organicCapsules {
                         let m = 0.5 * (c.a + c.b)
                         let gx = Int(((Double(m.x) - o.originMM.x) / o.spacingMM).rounded(.down))
@@ -5246,14 +5252,22 @@ public struct WorkspacePlaceholder: View {
                         let d = out.values[(k * out.ny + j) * out.nx + i]
                         guard d.isFinite, abs(d) < 500 else { continue }
                         byRegion[id, default: []].append(d)
+                        let ri = Int(id) - 1
+                        if ri >= 0, ri < includes.count, includes[ri].depthMM > 0 {
+                            let r = includes[ri]
+                            let into = -simd_dot(SIMD3<Double>(m) - r.origin, r.normal)
+                            depthByRegion[id, default: []].append(Float(into / r.depthMM))
+                        }
                     }
                     let lines = byRegion.sorted { $0.key < $1.key }.map { id, ds -> String in
                         let s = ds.sorted()
                         func q(_ f: Double) -> Float { s[min(s.count - 1, Int(Double(s.count - 1) * f))] }
                         let near = s.filter { $0 <= 6 }.count
-                        return String(format: "%@: spans %d · outline-distance p05 %.2f p25 %.2f p50 %.2f mm · within 6 mm %.0f%%",
+                        let dz = (depthByRegion[id] ?? []).sorted()
+                        func dq(_ f: Double) -> Float { dz.isEmpty ? .nan : dz[min(dz.count - 1, Int(Double(dz.count - 1) * f))] }
+                        return String(format: "%@: spans %d · outline-distance p05 %.2f p25 %.2f p50 %.2f mm · within 6 mm %.0f%% · depth share p05 %.2f p50 %.2f p95 %.2f",
                                       synthPlan.keyByID[Int(id)] ?? "r\(id)", s.count, q(0.05), q(0.25), q(0.5),
-                                      100 * Double(near) / Double(max(1, s.count)))
+                                      100 * Double(near) / Double(max(1, s.count)), dq(0.05), dq(0.5), dq(0.95))
                     }
                     NSLog("DIAG organic rim coverage: %@", lines.joined(separator: " | "))
                 }
