@@ -451,8 +451,22 @@ inline constexpr std::size_t kOrganicGrowthMaxTips = 20000;
 // endpoints within kOrganicNodeMergeRatio BEADS (= 2 x that many radii), so recording
 // every 3 radii was still inside it: each grown curve collapsed to ONE straight span
 // from base to tip, 20 mm long, and the cube came out as fifteen sticks. 6 radii is
-// safely clear and lands near d_sep, which is the polyline resolution the traced path
-// uses anyway.
+// safely clear.
+//
+// ★ AND THE CLAIM THAT USED TO CLOSE THIS PARAGRAPH WAS FALSE, which is what let a
+// second bug sit for ten days. It read: "lands near d_sep, which is the polyline
+// resolution the traced path uses anyway" -- and from that it followed that the traced
+// path was already safe and needed no equivalent. It is not: the TRACER samples about
+// every 0.203 mm at a median radius of 0.489 mm, roughly 0.4 radii, which is four to
+// five times INSIDE the merge radius rather than clear of it. The traced path was
+// therefore exposed to the same collapse the whole time, and the app measured it on
+// 2026-09-20: 2606 traced spans emerged as 120 on a 20 mm sample cube.
+//
+// It is fixed at the merge instead of here (see node_merge: a member now carries its
+// chain identity, and short spans along a chain are coalesced rather than deleted),
+// because coarsening a traced streamline to 6 radii would destroy the shape the traced
+// path exists to follow. This constant remains a GROWTH recording rule and nothing
+// else; do not reason from it about the tracer.
 inline constexpr double kOrganicGrowthRecordRadii = 6.0;
 
 // ★★ HOW MANY TIMES ONE TIP MAY JOIN AND CARRY ON. A tip that joins a neighbour used to
@@ -1472,11 +1486,6 @@ struct OrganicGenStats {
   // the app's sample cube. A run where this is 0 while the tracer's pitch is under
   // one radius means the tagging is not reaching the merge.
   std::size_t merge_same_member_refused = 0;
-  // ★ RUNS OF SHORT SPANS COALESCED ALONG A MEMBER instead of deleted. A traced
-  // member is sampled finer than its own bead, so this is its NORMAL state; 0 on a
-  // traced run means the coalesce is not firing and the member is being deleted
-  // span by span, which is what it exists to stop.
-  std::size_t merge_runs_coalesced = 0;
   // ── ★★ NOTHING STARTS IN MID-AIR ────────────────────────────────────────────
   // A LAYER-LOCAL bar, and it is not the same as `floating_voxels_*` above. That one
   // asks whether every piece is reachable from the plate in the FINISHED solid; this

@@ -3584,35 +3584,26 @@ OrganicGenStats generate_organic_lattice(const OrganicLattice& lat,
     // dropped, which is the original rule surviving where it was right.
     std::vector<EmittedSeg> mkeep;
     mkeep.reserve(emitted.size());
-    {
-      bool have = false;
-      EmittedSeg run{};
-      auto flush = [&]() {
-        if (!have) return;
-        run.len = vlen(vsub(run.b, run.a));
-        if (run.len <= 0.5 * run.r) ++st.merge_degenerate_spans;
-        else mkeep.push_back(run);
-        have = false; };
-      for (EmittedSeg& e : emitted) {
-        e.len = vlen(vsub(e.b, e.a));
-        if (e.chain < 0) {                       // a connector, tie or leg: as before
-          flush();
-          if (e.len <= 0.5 * e.r) { ++st.merge_degenerate_spans; continue; }
-          mkeep.push_back(e);
-          continue;
-        }
-        if (have && (run.chain != e.chain || run.node1 != e.node0)) flush();
-        if (!have) { run = e; have = true; }
-        else {
-          run.b = e.b;                           // extend the run to this span's end
-          run.node1 = e.node1;
-          run.r = std::min(run.r, e.r);
-          run.anchor1 = e.anchor1;
-          run.len = vlen(vsub(run.b, run.a));
-        }
-        if (run.len > 0.5 * run.r) { ++st.merge_runs_coalesced; flush(); }
-      }
-      flush();
+    for (EmittedSeg& e : emitted) {
+      e.len = vlen(vsub(e.b, e.a));
+      // ★ A CONNECTOR SHORTER THAN ITS OWN RADIUS IS DEGENERATE. A SPAN OF A MEMBER
+      // IS NOT. A traced member is sampled far finer than its bead -- 0.203 mm at a
+      // 0.489 mm radius -- so this rule deleted EVERY span of EVERY traced member,
+      // which is the rest of the app's 2606 -> 120 and, on the M2 stand, 1556 spans
+      // of real material lost quietly on a run nobody thought was broken.
+      //
+      // ★ AND THE MEMBER IS KEPT WHOLE, NOT RESAMPLED HERE. The first fix coalesced
+      // runs of short spans into one span from the run's first point to its last.
+      // That retains the member but CHORDS ACROSS THE BEND: measured on the stand it
+      // shortened the shipped centreline from 45172.6 to 43656.3 mm, losing 3.4 % of
+      // the traced length to straightening, because a length threshold alone has no
+      // idea how far the curve moved in between. Resampling a centreline is a job
+      // with a deviation bound and core already has that instrument -- the
+      // run-collapse pass, Douglas-Peucker at kOrganicRunCollapseTol -- which runs
+      // later over exactly these chains. So this pass stops DELETING and leaves the
+      // resampling to the pass that knows how to do it.
+      if (e.chain < 0 && e.len <= 0.5 * e.r) { ++st.merge_degenerate_spans; continue; }
+      mkeep.push_back(e);
     }
     emitted.swap(mkeep);
     census_at(OrganicGenStats::CensusNodeMerge);

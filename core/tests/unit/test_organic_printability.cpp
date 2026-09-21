@@ -1910,7 +1910,6 @@ void test_traced_member_survives_node_merge() {
               "(%.1f %%); merge refused %zu same-member pair(s), collapsed %zu span(s)\n",
               pts.size(), out.size(), len, want, 100.0 * len / want,
               st.merge_same_member_refused, st.merge_degenerate_spans);
-  std::printf("  traced merge: runs coalesced %zu\n", st.merge_runs_coalesced);
 
   CHECK(2.0 * r > pitch,
         "traced merge: the fixture really is sampled inside the merge radius -- "
