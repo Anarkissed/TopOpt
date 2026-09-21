@@ -1465,6 +1465,18 @@ struct OrganicGenStats {
   std::size_t nodes_merged = 0;          // endpoints snapped onto a shared node
   std::size_t merge_clusters = 0;        // shared nodes created
   std::size_t merge_degenerate_spans = 0;   // spans the merge collapsed to nothing
+  // ★ PAIRS THE MERGE REFUSED BECAUSE THEY ARE TWO DISTINCT NODES OF ONE MEMBER.
+  // Nonzero means the span list reached the merge sampled finer than 2 x radius --
+  // which is the normal state of a traced polyline -- and that the merge declined to
+  // chain along it. It was this chaining that took 2606 traced spans down to 120 on
+  // the app's sample cube. A run where this is 0 while the tracer's pitch is under
+  // one radius means the tagging is not reaching the merge.
+  std::size_t merge_same_member_refused = 0;
+  // ★ RUNS OF SHORT SPANS COALESCED ALONG A MEMBER instead of deleted. A traced
+  // member is sampled finer than its own bead, so this is its NORMAL state; 0 on a
+  // traced run means the coalesce is not firing and the member is being deleted
+  // span by span, which is what it exists to stop.
+  std::size_t merge_runs_coalesced = 0;
   // ── ★★ NOTHING STARTS IN MID-AIR ────────────────────────────────────────────
   // A LAYER-LOCAL bar, and it is not the same as `floating_voxels_*` above. That one
   // asks whether every piece is reachable from the plate in the FINISHED solid; this

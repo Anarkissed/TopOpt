@@ -1869,6 +1869,70 @@ void test_dual_contour() {
                                {{0,0,0},{3,3,3},0.8}});
 }
 
+// ── ★ A TRACED MEMBER MUST SURVIVE ITS OWN NODE MERGE (app, 2026-09-20) ───────
+// The app measured 2606 traced spans emerge as 120 on a 20 mm sample cube under
+// Structural + Cell size Auto -- no stated width, so the bead is DERIVED and fat.
+// The merge unions endpoints within 2 x radius and its union-find is TRANSITIVE, so
+// a polyline sampled finer than that chains: vertex 1 joins 2, 2 joins 3, and the
+// whole member lands on one centroid, every span degenerate and dropped. Length is
+// no protection; a long curve dies as completely as a short one.
+//
+// The fixture is the app's regime, not a caricature: a gently curving streamline
+// sampled at 0.203 mm with a 0.489 mm radius, the pitch and bead MEASURED on the M2
+// stand. Consecutive vertices therefore sit 4.8x inside the merge radius.
+void test_traced_member_survives_node_merge() {
+  using namespace topopt;
+  // ★ THE ARC IS STRONGLY CURVED ON PURPOSE. A gently bending fixture cannot tell a
+  // surviving member from one straightened into a single chord -- the first version of
+  // this test scored a straight chord at 99 % of the arc and passed while the bend was
+  // gone. On a 5 mm-radius arc a chord carries 45 % of the length, so the bar below
+  // fails both ways it can fail: deleted, or flattened.
+  const double pitch = 0.203, r = 0.489, R = 5.0;
+  std::vector<Vec3> pts;
+  for (int i = 0; i < 100; ++i) {           // ~20 mm of centreline, the sample cube
+    const double th = (i * pitch) / R;      // arc length / radius
+    pts.push_back(Vec3{R * std::sin(th), R * (1.0 - std::cos(th)), 5.0});
+  }
+  OrganicLattice lat = one_curve(pts, r);
+  OrganicGenStats st;
+  const std::vector<OrganicSpan> out = run(lat, st);
+
+  double len = 0.0;
+  for (const OrganicSpan& sp : out) len += seg_len(sp);
+  double want = 0.0;
+  for (std::size_t i = 1; i < pts.size(); ++i)
+    want += std::sqrt((pts[i].x - pts[i-1].x) * (pts[i].x - pts[i-1].x) +
+                      (pts[i].y - pts[i-1].y) * (pts[i].y - pts[i-1].y));
+  const double chord = std::sqrt(
+      (pts.back().x - pts.front().x) * (pts.back().x - pts.front().x) +
+      (pts.back().y - pts.front().y) * (pts.back().y - pts.front().y));
+  std::printf("  traced merge: %zu point(s) in -> %zu span(s) out, %.3f of %.3f mm "
+              "(%.1f %%); merge refused %zu same-member pair(s), collapsed %zu span(s)\n",
+              pts.size(), out.size(), len, want, 100.0 * len / want,
+              st.merge_same_member_refused, st.merge_degenerate_spans);
+  std::printf("  traced merge: runs coalesced %zu\n", st.merge_runs_coalesced);
+
+  CHECK(2.0 * r > pitch,
+        "traced merge: the fixture really is sampled inside the merge radius -- "
+        "otherwise this test proves nothing");
+  CHECK(st.merge_same_member_refused > 0,
+        "traced merge: the merge SAW same-member pairs and declined them; zero here "
+        "means the chain tagging never reached it");
+  // ★ THE BAR IS LENGTH, NOT SPAN COUNT. The run-collapse pass legitimately reduces
+  // the count -- that is its job, and asserting on it would fight a feature. What the
+  // defect destroyed was MATERIAL, and on a curve this bent, length cannot be held
+  // without following the arc.
+  std::printf("  traced merge: arc %.3f mm, straight chord %.3f mm (%.0f %%)\n",
+              want, chord, 100.0 * chord / want);
+  CHECK(chord < 0.6 * want,
+        "traced merge: the fixture really is bent enough that a flattened member "
+        "would FAIL the bar below -- otherwise it tests only deletion");
+  CHECK(!out.empty(), "traced merge: the member survived at all");
+  CHECK(len > 0.90 * want,
+        "traced merge: and carries over 90 % of the centreline's length -- neither "
+        "eaten by the merge nor flattened into a chord");
+}
+
 // ── ★ THE WETTED CARVE MUST STAY CLOSED (the pad bug, 2026-09-19) ─────────────
 // test_wet_join_matches_the_preview above checks organic_wet_flare's ARITHMETIC, and it
 // passed throughout the defect this test exists for. The defect was at the CALL SITE:
@@ -2074,6 +2138,7 @@ int main() {
   test_union_volume();
   test_dual_contour();
   test_dual_contour_octree();
+  test_traced_member_survives_node_merge();
   test_wet_join_carves_closed();
   test_bundle_is_not_support();
   test_chain_and_tee_survive();

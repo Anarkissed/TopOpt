@@ -3138,8 +3138,17 @@ OrganicGenStats generate_organic_lattice(const OrganicLattice& lat,
   // millimetre bug — the observer named the pass and one candidate was left.
   enum class Src { Curve, Connector, Tie, Net, Leg, Fill };
   struct EmittedSeg { Vec3 a, b; double r, len; bool anchor0 = false, anchor1 = false;
-                      Src src = Src::Curve; };
+                      Src src = Src::Curve;
+                      // ★ WHICH MEMBER THIS SPAN IS PART OF, AND WHERE ALONG IT.
+                      // The node merge needs to tell "two consecutive vertices of ONE
+                      // polyline" from "two different members meeting", and without
+                      // this it cannot: see the merge below for what that cost.
+                      // chain < 0 marks a span that belongs to no polyline (a
+                      // connector, a tie, a leg), which can merge freely.
+                      int chain = -1; int node0 = 0, node1 = 0; };
   Src cur_src = Src::Curve;
+  int cur_chain = -1;        // the polyline being walked, -1 = not one
+  int cur_node = 0;          // index of `a` along that polyline
   std::vector<EmittedSeg> emitted;
   // ★ THE LENGTH CENSUS. One number per stage: live span length at that point. It is
   // the only instrument that separates "the lattice fragmented" from "the lattice was
@@ -3353,7 +3362,8 @@ OrganicGenStats generate_organic_lattice(const OrganicLattice& lat,
   // that survived the tie, the prune and the ground tie.
   auto record_span = [&](const Vec3& p0, const Vec3& p1, double r) -> EmittedSeg* {
     if (!(vlen(vsub(p1, p0)) > 0.0)) return nullptr;
-    emitted.push_back({p0, p1, r, vlen(vsub(p1, p0)), false, false, cur_src});
+    emitted.push_back({p0, p1, r, vlen(vsub(p1, p0)), false, false, cur_src,
+                       cur_chain, cur_node, cur_node + 1});
     return &emitted.back();
   };
   auto span = [&](const Vec3& a, const Vec3& b, double r) {
@@ -3426,9 +3436,16 @@ OrganicGenStats generate_organic_lattice(const OrganicLattice& lat,
     }
   };
   cur_src = Src::Curve;
-  for (const OrganicCurve& cv : lat.curves) {
-    for (std::size_t t = 1; t < cv.points.size(); ++t)
-      span(cv.points[t - 1], cv.points[t], cv.radius_mm);
+  {
+    int chain = 0;
+    for (const OrganicCurve& cv : lat.curves) {
+      cur_chain = chain++;
+      for (std::size_t t = 1; t < cv.points.size(); ++t) {
+        cur_node = static_cast<int>(t) - 1;
+        span(cv.points[t - 1], cv.points[t], cv.radius_mm);
+      }
+    }
+    cur_chain = -1; cur_node = 0;
   }
   cur_src = Src::Connector;
   for (const OrganicConnector& cn : lat.connectors) {
@@ -3456,6 +3473,34 @@ OrganicGenStats generate_organic_lattice(const OrganicLattice& lat,
   census_at(OrganicGenStats::CensusEmitted);   // ★ before any pass touches it
   if (!emitted.empty()) {
     struct Ep { std::size_t span; int end; };
+    // ★★ THE MERGE MUST NOT EAT A MEMBER FROM THE INSIDE (2026-09-20).
+    // It unions every pair of endpoints within 2 x radius and the union-find is
+    // TRANSITIVE, so on a polyline sampled finer than that the clusters chain:
+    // vertex 1 joins 2, 2 joins 3, and the whole streamline lands on one centroid,
+    // after which every span is degenerate and dropped. Length is no protection --
+    // a 20 mm curve goes exactly as completely as a 2 mm one.
+    //
+    // MEASURED, the traced path on the app's 20 mm sample cube under Structural +
+    // Cell size Auto (no stated width, so the bead is derived and fat): 2606 spans
+    // traced, 120 emitted. The tracer samples about every 0.203 mm at a median
+    // radius of 0.489 mm, so consecutive vertices sit 4.8x INSIDE the merge radius.
+    // The 2026-09-10 fix for the GROWN path -- record only every 6 radii -- worked by
+    // keeping vertices outside the merge, which is a workaround for this and cannot
+    // be applied here: coarsening a traced streamline to ~2.9 mm spans would destroy
+    // the shape the traced path exists to follow.
+    //
+    // So the merge is told what a member IS. Two endpoints may join when they are
+    // the SAME node (consecutive spans sharing a vertex, which is what the merge is
+    // for) or when they belong to DIFFERENT members. Two distinct nodes of one
+    // polyline are never one node, however close the bead makes them look.
+    auto same_member_distinct_nodes = [&](const Ep& x, const Ep& y) {
+      const EmittedSeg& ex = emitted[x.span];
+      const EmittedSeg& ey = emitted[y.span];
+      if (ex.chain < 0 || ex.chain != ey.chain) return false;   // different members
+      const int nx = x.end ? ex.node1 : ex.node0;
+      const int ny = y.end ? ey.node1 : ey.node0;
+      return nx != ny;
+    };
     std::vector<Ep> eps;
     eps.reserve(emitted.size() * 2);
     double rmin_all = emitted.front().r;
@@ -3493,6 +3538,10 @@ OrganicGenStats generate_organic_lattice(const OrganicLattice& lat,
                 const double rr = kOrganicNodeMergeRatio *
                                   std::min(emitted[eps[i].span].r, emitted[eps[j].span].r);
                 if (vlen(vsub(pi, pj)) > rr) continue;
+                if (same_member_distinct_nodes(eps[i], eps[j])) {
+                  ++st.merge_same_member_refused;
+                  continue;
+                }
                 const int ra = mfind(i), rb = mfind(j);
                 if (ra != rb) mpar[std::max(ra, rb)] = std::min(ra, rb);
               }
@@ -3517,12 +3566,53 @@ OrganicGenStats generate_organic_lattice(const OrganicLattice& lat,
         ++st.nodes_merged;
       }
     }
+    // ── ★★ A SHORT SPAN ON A MEMBER IS NOT A DEGENERATE SPAN ──────────────────
+    // This dropped every span shorter than half its own radius. For a CONNECTOR that
+    // is right: it is a stub the merge collapsed, and nothing else describes it. For
+    // a span of a POLYLINE it is catastrophic, because a traced member is sampled far
+    // finer than its own bead -- 0.203 mm at a 0.489 mm radius on the M2 stand, so
+    // 0.203 <= 0.2445 and EVERY span of EVERY traced member was deleted, whether or
+    // not the merge had already chained them. That is the rest of the app's 2606 ->
+    // 120, and stopping the chaining alone still left the fixture emitting NOTHING.
+    //
+    // A member's spans are consecutive samples of ONE curve, so short ones are
+    // COALESCED along the chain instead: the run's first point to its last, at the
+    // run's thinnest radius, which is the same resample the run-collapse pass applies
+    // later for mesh quality -- just early enough to matter. The chain's own
+    // endpoints are preserved by construction, so junctions and forks are untouched.
+    // A chain whose WHOLE length is under half a radius really is degenerate and is
+    // dropped, which is the original rule surviving where it was right.
     std::vector<EmittedSeg> mkeep;
     mkeep.reserve(emitted.size());
-    for (EmittedSeg& e : emitted) {
-      e.len = vlen(vsub(e.b, e.a));
-      if (e.len <= 0.5 * e.r) { ++st.merge_degenerate_spans; continue; }
-      mkeep.push_back(e);
+    {
+      bool have = false;
+      EmittedSeg run{};
+      auto flush = [&]() {
+        if (!have) return;
+        run.len = vlen(vsub(run.b, run.a));
+        if (run.len <= 0.5 * run.r) ++st.merge_degenerate_spans;
+        else mkeep.push_back(run);
+        have = false; };
+      for (EmittedSeg& e : emitted) {
+        e.len = vlen(vsub(e.b, e.a));
+        if (e.chain < 0) {                       // a connector, tie or leg: as before
+          flush();
+          if (e.len <= 0.5 * e.r) { ++st.merge_degenerate_spans; continue; }
+          mkeep.push_back(e);
+          continue;
+        }
+        if (have && (run.chain != e.chain || run.node1 != e.node0)) flush();
+        if (!have) { run = e; have = true; }
+        else {
+          run.b = e.b;                           // extend the run to this span's end
+          run.node1 = e.node1;
+          run.r = std::min(run.r, e.r);
+          run.anchor1 = e.anchor1;
+          run.len = vlen(vsub(run.b, run.a));
+        }
+        if (run.len > 0.5 * run.r) { ++st.merge_runs_coalesced; flush(); }
+      }
+      flush();
     }
     emitted.swap(mkeep);
     census_at(OrganicGenStats::CensusNodeMerge);
