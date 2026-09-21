@@ -932,3 +932,20 @@ Not yet seen by him.
   byte-identical, pinned). Wizard: "Thickness through the wall" row on both lattice pages,
   solve-reading modes disabled without Simulate Stresses; Start slider always. Pen-tool
   profile deferred to his visual spec. `LatticeWallThicknessTests` 5/5. Installed 23:18.
+- **2026-09-21 — the thickness variable REBUILT to his design** (`docs/design/lattice-page/
+  Lattice Wall Thickness.dc.html`, pulled via his authorized terminal session; DesignSync in
+  this desktop session never saw the authorization). Model (`LatticeWallThickness`):
+  `depthBySim` (ON ⇒ the sim rule over the whole prism), else per-wall allowed range
+  `faces[key].startMM–endMM` (mm from the outer surface) and `density` ∈ {sim, autoSingle,
+  manualSingle (pct), manualGrade (a drawn `LatticeWallProfile`: start curve in the outer
+  half, end curve in the inner half, across the wall's width — the design's Bézier /
+  Catmull-Rom maths ported verbatim)}. Default = whole prism, byte-identical. The map is
+  now START and END rasters (`range(at:)`); the front plate follows a varying start.
+  Wizard: "Lattice wall thickness" (the toggle, per-wall mm rows — tap a name for the
+  thickness editor), "Density through the wall" (radio list; % field; "Open grading
+  tool"). `LatticeWallProfileEditor` = the viewer editor over the stage: box per wall,
+  drag bars (thickness) or pen/move points, tangent handles with 45° detents, rail
+  (Curved/Straight hold = all, Mirror hold = half, Shift, Flatten, Delete, Reset), Cancel /
+  Save. The five earlier `wallThickness*` fields are gone (never shipped past tonight).
+  Still preview-only. Tests rewritten (`LatticeWallThicknessTests`, 6). His 00:13 open:
+  both sliders at 50 % ⇒ slab 6–9 mm; the front plate now covers the 6 mm of solid.
