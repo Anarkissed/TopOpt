@@ -376,3 +376,9 @@ written for stepped/doubled when the grade is on and the linked schema accepts t
   batch answering reply 5 (d_part half-voxel anchor, B depth beam + bleed, per-region
   doubled bases, ceiling on the preimage, `max_relative_density`) is on a full Release
   ctest; SHA to follow. Core starting §3 receipts + Hausdorff; nothing needed from the app.
+- **Core reply 7, restated with the SHA (2026-09-20)**: the reply-5 batch is **d7f142a2** on
+  `claude/raster-receipt-fields` (PR #358), full Release ctest 130/130 in 3985 s — d_part
+  half-voxel anchor, B's depth beam + bleed, per-region doubled bases, the ceiling on the
+  diameter preimage, `grading.max_relative_density`. Nothing for the app. NOTE: none of PR
+  #358 is in the app's linked core (see memory `core-pr-358-is-not-in-the-linked-xcframework`);
+  merging it and running `build_core.sh` is what flips the on-device probes.
