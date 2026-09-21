@@ -963,3 +963,14 @@ Not yet seen by him.
   nothing drawn (his image 6). The transition: `StageDepartureMotion` — the sample cube
   and the workspace's orientation gizmo lean back, slide down and fade TOGETHER (one
   modifier, one value) as the editor's cover rises; reversed on Cancel/Save.
+- **2026-09-21 03:03 — his four at 02:55.** (1) The wall number fields open the app's own
+  `NumberPad` on tap (the text field had waited on the simulator's hidden software
+  keyboard); arrows kept. (2) With the sim switch off the density defaults to "Graded by
+  sim" (`LatticeWallThickness.standard.density = .sim`; falls back to manual single when
+  Simulate Stresses is off). (3) NO WALLS FROM THE SLAB: `LatticeRegionCap` is back to the
+  one plate at the prism's DECLARED end (his 09-19 ask); the slab's start and end draw
+  nothing — "It is meant only for where and how much lattice there is along the depth".
+  (4) The panel came back cut to one row after the editor: the sim-on base height had
+  been recorded from a transient layout; it is now captured at the MOMENT the switch is
+  turned off and cleared when it goes on; floor 160 pt. The stage-covered preference
+  moved to the wizard's root so the gizmo always returns.

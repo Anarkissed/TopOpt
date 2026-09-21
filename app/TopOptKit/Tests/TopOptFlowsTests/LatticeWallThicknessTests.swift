@@ -40,6 +40,7 @@ final class LatticeWallThicknessTests: XCTestCase {
     func testTheDefaultIsSimOnAndTheSettingsStayByteIdentical() throws {
         // ★ his image 2: every project starts with the solve deciding the depth
         XCTAssertTrue(LatticeWallThickness.standard.depthBySim)
+        XCTAssertEqual(LatticeWallThickness.standard.density, .sim, "★ Graded by sim first, once the switch is off")
         XCTAssertEqual(LatticeWallThickness(), .standard)
         XCTAssertTrue(LatticeWallThickness.through.isThrough)
         XCTAssertFalse(LatticeWallThickness.standard.isThrough)
@@ -121,15 +122,14 @@ final class LatticeWallThicknessTests: XCTestCase {
         let lo = a.slabRange(uv: uvL), hi = a.slabRange(uv: uvR)
         XCTAssertEqual(lo.start, 1, accuracy: 0.3); XCTAssertEqual(lo.end, 9, accuracy: 0.3)
         XCTAssertEqual(hi.start, 4, accuracy: 0.3); XCTAssertEqual(hi.end, 6, accuracy: 0.3)
+        // ★ NO WALLS FROM THE SLAB (his 02:55): the cap stays at the prism's declared end
         let cap = LatticeRegionCap.build(regions: [a])
-        var onStart = 0, onEnd = 0
+        var plates = 0
         for i in Swift.stride(from: 0, to: cap.interleaved.count, by: 6) {
-            let p = SIMD3<Double>(Double(cap.interleaved[i]), Double(cap.interleaved[i + 1]), Double(cap.interleaved[i + 2]))
-            let r = a.slabRange(uv: uv(p.x, p.y))
-            if abs(p.z - r.start) < 1e-4 { onStart += 1 } else if abs(p.z - r.end) < 1e-4 { onEnd += 1 }
-            else { XCTFail("cap vertex at z \(p.z) is on neither the start \(r.start) nor the end \(r.end)") }
+            XCTAssertEqual(Double(cap.interleaved[i + 2]), 10, accuracy: 1e-5, "every cap vertex at the declared 10 mm")
+            plates += 1
         }
-        XCTAssertGreaterThan(onStart, 12, "a subdivided front plate"); XCTAssertGreaterThan(onEnd, 12, "a subdivided back cap")
+        XCTAssertGreaterThan(plates, 0)
     }
 
     /// The profile maths, as in the design: straight lines, a smooth curve through a

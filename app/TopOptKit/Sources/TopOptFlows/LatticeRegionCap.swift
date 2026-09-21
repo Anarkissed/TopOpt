@@ -95,48 +95,20 @@ public enum LatticeRegionCap {
             let n = LatticeRegionMask.unit(region.normal)
             guard simd_length(n) > 0.5, region.depthMM > 0 else { continue }
             let (bu, bv) = LatticeRegionMask.basis(n)
-            // ★ THE CAP SITS WHERE THE SLAB ENDS (2026-09-21): a flat plate at the
-            // declared depth when the lattice fills the prism, else a HEIGHT FIELD at
-            // the slab's end — each outline triangle subdivided evenly (one count per
-            // region, so shared edges match and nothing cracks) and every vertex
-            // pushed to the slab's end at its own (u, v). See `LatticeWallThickness`.
-            let varying = region.thicknessMap.map { $0.nu > 1 || $0.nv > 1 } ?? false
-            var k = 1
-            if varying, let m = region.thicknessMap {
-                var longest = 0.0
-                for loop in region.outlineLoops { for i in loop.indices {
-                    longest = Swift.max(longest, simd_length(loop[(i + 1) % loop.count] - loop[i]))
-                } }
-                k = Swift.min(24, Swift.max(1, Int((longest / (2 * m.h)).rounded(.up))))
-            }
-            func depthAt(_ uv: SIMD2<Double>) -> Double { region.slabRange(uv: uv).end }
-            // ★ AND A FRONT PLATE WHERE THE SLAB STARTS IN FROM THE FACE (his 2026-09-21
-            // open, Manual 50 % + Start 50 %: the declared face opens by declaration, so
-            // with the slab at 6–9 mm he looked through 6 mm of undrawn solid at the back
-            // cap and its strut ends — "It looks bad"). The material before the slab is
-            // solid; it is drawn as the same wall, at the start, facing the viewer.
-            let hasStart = (region.thicknessMap?.starts.max() ?? 0) > 0
-            let plates: [(Double, Bool)] = hasStart ? [(0, true), (0, false)] : [(0, false)]
-            for (plate, isFront) in plates {
+            // ★ THE CAP IS THE PRISM'S DECLARED END, NEVER THE SLAB'S (his 2026-09-21
+            // 02:55: "No walls should EVER get created. It is meant only for where and how
+            // much lattice there is along the depth of the face-prism"). The slab's start
+            // and end draw nothing; the one plate stays where the prism ends inside
+            // material, as he asked on 09-19.
+            let cap = region.depthMM
             for loop in region.outlineLoops where loop.count >= 3 {
                 let ring = LatticeOutlineRibbon.offsetRing(loop, by: region.inPlaneOffsetMM)
                 guard ring.count >= 3 else { continue }
                 for (a, b, c) in triangulate(ring) {
-                    let A = ring[a], B = ring[b], C = ring[c]
-                    func P(_ i: Int, _ j: Int) -> SIMD2<Double> {
-                        A + (B - A) * (Double(i) / Double(k)) + (C - A) * (Double(j) / Double(k))
+                    for uv in [ring[a], ring[b], ring[c]] {
+                        emit(region.origin + bu * uv.x + bv * uv.y + n * cap, -n)
                     }
-                    for i in 0..<k { for j in 0..<(k - i) {
-                        var tris: [[SIMD2<Double>]] = [[P(i, j), P(i + 1, j), P(i, j + 1)]]
-                        if i + j + 1 < k { tris.append([P(i + 1, j), P(i + 1, j + 1), P(i, j + 1)]) }
-                        for t in tris { for uv in t {
-                            _ = plate
-                            emit(region.origin + bu * uv.x + bv * uv.y
-                                 + n * (isFront ? region.slabRange(uv: uv).start : depthAt(uv)), -n)
-                        } }
-                    } }
                 }
-            }
             }
         }
         return LatticeOutlineRibbon.Mesh(interleaved: v)

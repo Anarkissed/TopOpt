@@ -130,6 +130,8 @@ public struct LatticeSetupWizard: View {
         // ★ §7b — FRAME THE SAMPLE ON ENTRY, at a sensible size, whatever the
         // camera was doing before.
         .onAppear { rebuild(force: true); frameSample() }
+        // ★ at the root, so the workspace's gizmo always hears the cover come and go
+        .preference(key: WizardStageCoveredKey.self, value: wallEditorStage != nil)
         .background(GeometryReader { g in
             Color.clear.onAppear { canvasHeight = g.size.height }
                 .onChange(of: g.size.height) { canvasHeight = $0 }
@@ -476,10 +478,7 @@ public struct LatticeSetupWizard: View {
             })
             }
             .frame(height: panelRowsFrameHeight)
-            .onPreferenceChange(WizardPanelRowsHeightKey.self) { h in
-                panelRowsHeight = h
-                if model.wallThickness.depthBySim || !(model.stage == .lattice) { panelRowsBaseHeight = h }
-            }
+            .onPreferenceChange(WizardPanelRowsHeightKey.self) { h in panelRowsHeight = h }
             latencyReadout
             // ★ THE CARD, MOVED HERE: "place the one on the right at the very
             // bottom of the one on the left."
@@ -709,7 +708,13 @@ public struct LatticeSetupWizard: View {
                 Spacer(minLength: 0)
                 Toggle("", isOn: Binding(get: { ask.depthBySim },
                                          set: { on in
+                                             // ★ the panel's height at THIS moment is the size
+                                             // it keeps while the switch is off (his image 2)
+                                             panelRowsBaseHeight = on ? nil : (panelRowsHeight > 0 ? panelRowsHeight : nil)
                                              model.wallThickness.depthBySim = on
+                                             if !on, !model.simulateStresses, model.wallThickness.density.readsTheSolve {
+                                                 model.wallThickness.density = .manualSingle
+                                             }
                                              if on { wallEditorStage = nil; wallEditorDraft = nil }
                                              rebuild()
                                          }))
@@ -792,7 +797,7 @@ public struct LatticeSetupWizard: View {
                             if on, o == .manualSingle {
                                 HStack(spacing: 10) {
                                     WallNumberField(text: String(format: "%.0f", ask.pct), tint: DS.Color.textPrimary.color, wide: true,
-                                                    step: 5, range: 5...100) { v in
+                                                    step: 5, range: 5...100, unit: "%") { v in
                                         model.wallThickness.pct = Swift.min(100, Swift.max(5, v.rounded())); rebuild()
                                     }
                                     .accessibilityIdentifier("wizard-wall-pct")
@@ -848,8 +853,8 @@ public struct LatticeSetupWizard: View {
     /// STUCK at the max-length"). A greedy ScrollView took the whole band; this pins it.
     private var panelRowsFrameHeight: CGFloat? {
         guard panelRowsHeight > 0 else { return nil }
-        var cap = canvasHeight > 0 ? max(120, canvasHeight - 330) : .greatestFiniteMagnitude
-        if model.stage == .lattice, !model.wallThickness.depthBySim, let base = panelRowsBaseHeight { cap = min(cap, base) }
+        var cap = canvasHeight > 0 ? max(160, canvasHeight - 330) : .greatestFiniteMagnitude
+        if model.stage == .lattice, !model.wallThickness.depthBySim, let base = panelRowsBaseHeight { cap = min(cap, max(160, base)) }
         return min(panelRowsHeight, cap)
     }
 
@@ -883,7 +888,6 @@ public struct LatticeSetupWizard: View {
             }
         }
         .animation(.spring(response: 0.42, dampingFraction: 0.86), value: wallEditorStage)
-        .preference(key: WizardStageCoveredKey.self, value: wallEditorStage != nil)
     }
 
     /// ★ THE SETTINGS, MINIMISED under the editor (his 02:12: "Minimize the entirety of
@@ -2960,37 +2964,19 @@ struct WallNumberField: View {
     let text: String
     let tint: Color
     var wide: Bool = false
-    /// ★ arrows AND a keypad (his 2026-09-21, image 4: "It should have an up/down arrow
-    /// to tap AND have a numerical input keyboard when the numbers are tapped").
+    /// ★ arrows AND the app's own number pad on tap (his 2026-09-21: "If I click on the
+    /// number, it should automatically pop-up — this should be true across ALL numeric
+    /// inputs"). The pad is `NumberPad`, the one every other mm field opens; a text
+    /// field waited on the simulator's hidden software keyboard.
     var step: Double = 0.1
     var range: ClosedRange<Double> = 0...1e6
+    var unit: String = "mm"
     let commit: (Double) -> Void
-    @State private var draft: String = ""
-    @FocusState private var focused: Bool
+    @State private var padShown = false
 
-    private var value: Double { Double(draft.replacingOccurrences(of: ",", with: ".")) ?? Double(text) ?? 0 }
-    private func commitDraft() {
-        let cleaned = draft.replacingOccurrences(of: ",", with: ".")
-        if let v = Double(cleaned) { commit(min(range.upperBound, max(range.lowerBound, v))) }
-    }
-    private func nudge(_ dir: Double) {
-        let v = min(range.upperBound, max(range.lowerBound, value + dir * step))
-        draft = step >= 1 ? String(format: "%.0f", v) : String(format: "%.1f", v)
-        commit(v)
-    }
-
-    private var field: some View {
-        let base = TextField("", text: $draft)
-            .focused($focused)
-            .multilineTextAlignment(.trailing)
-            .font(.system(size: wide ? 18 : 13, weight: .semibold))
-            .foregroundStyle(tint)
-        #if canImport(UIKit)
-        return base.keyboardType(.decimalPad)
-        #else
-        return base
-        #endif
-    }
+    private var value: Double { Double(text) ?? 0 }
+    private func clamp(_ v: Double) -> Double { min(range.upperBound, max(range.lowerBound, v)) }
+    private func nudge(_ dir: Double) { commit(clamp(value + dir * step)) }
 
     private var shape: RoundedRectangle { RoundedRectangle(cornerRadius: wide ? 12 : 9) }
 
@@ -3010,16 +2996,24 @@ struct WallNumberField: View {
         let w: CGFloat = wide ? 132 : 80
         let h: CGFloat = wide ? 46 : 36
         HStack(spacing: 2) {
-            field.padding(.leading, wide ? 12 : 6)
+            Text(text)
+                .font(.system(size: wide ? 18 : 13, weight: .semibold)).monospacedDigit()
+                .foregroundStyle(tint)
+                .frame(maxWidth: .infinity, alignment: .trailing)
+                .padding(.leading, wide ? 12 : 6)
+                .contentShape(Rectangle())
+                .onTapGesture { padShown = true }
+                .numberPad($padShown,
+                           config: .init(title: "", unit: unit, allowsDecimal: step < 1),
+                           seed: value) { v in
+                    guard let v else { return }
+                    commit(clamp(v))
+                }
             arrows
         }
         .frame(width: w, height: h)
         .background(shape.fill(Color.white.opacity(0.08)))
         .overlay(shape.strokeBorder(Color.white.opacity(0.12)))
-        .onAppear { draft = text }
-        .onChange(of: text) { newValue in if !focused { draft = newValue } }
-        .onChange(of: focused) { isFocused in if !isFocused { commitDraft() } }
-        .onSubmit { commitDraft() }
     }
 }
 
