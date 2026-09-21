@@ -422,7 +422,13 @@ public struct LatticeSetupWizard: View {
                 if model.gradingMode != LatticeGradingMode.none { gradeTypeRow }
                 gradeStyleRow
                 if model.gradingMode.fitsShape { shapeBandRow }
-                singleCellSwitch
+                // ★ NOT IN STRUCTURAL (his 2026-09-20: "this is 'structural' and that
+                // should NOT be an option that is visible"). The switch lowers the
+                // AESTHETIC cells-per-member floor to one; the structural floor is
+                // core's own and never reads it, so the control would be decorative.
+                if (project.lattice.stageMode ?? .structural) == .aesthetic {
+                    singleCellSwitch
+                }
             }
             // ★ NOT IN AESTHETIC (his ruling, 2026-08-24 late: "we should REMOVE
             // the 'too thin to certify' button from the aesthetic mode"). The
@@ -2373,9 +2379,17 @@ public struct LatticeSetupWizard: View {
     /// the sample must follow every permutation of the user's settings).
     private var organicSamplePicks: OrganicSampleCube.Picks? {
         guard organicSampleShown else { return nil }
+        // ★★ THE SAMPLE IS THE TRACE, NEVER THE EMISSION (his 2026-09-20, image 1:
+        // "Refreshing the cube … brings a cube for a few seconds, then brings up this
+        // mess"). DIAG 20:31–20:32: capsules=7462 (the trace) then capsules=1440 ten
+        // seconds later — core's emission replacing it. With no stated width core
+        // derives the bead from the cube's synthetic field (r ≈ 0.78 mm on a 20 mm cube)
+        // and `node_merge` collapses the weave to fat sticks (2606 → 120 traced at
+        // 19:41; the 2026-09-10 finding, fixed in core for GROWN only). The repairs
+        // are still previewed where they mean something — in the part.
         return OrganicSampleCube.Picks(settings: model.applied(to: project.lattice),
                                        layerHeightMM: project.printParams.layerHeightMM,
-                                       showRepairs: organicShowRepairs)
+                                       showRepairs: false)
     }
 
     /// Re-traces the PR 353 cube's 20 mm corner with the current picks, off the main

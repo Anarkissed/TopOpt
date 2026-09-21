@@ -139,4 +139,27 @@ public enum LatticeStageMode: String, Codable, Hashable, Sendable, CaseIterable 
                 topology: topology, boundaryFinishWritten: boundaryFinishWritten)
         }
     }
+
+    /// ★★ THE PER-REGION CELL'S FLOOR UNDER A BEAM-NETWORK CERTIFICATE (his 2026-09-20:
+    /// "all that came out was a consistent 2.4mm cell across the entirety of the front
+    /// face … There should be a grade happening"). DIAG 20:45: `regionCell measuredW=12.03
+    /// floor=5.0 coreCell=2.406 final=2.4` and `10.31 → 2.06`; the ladder from 2.4 has
+    /// no rung above the 1.8 mm printable floor, so nothing could grade. The 5 is core's
+    /// ACCURACY floor for the HOMOGENISED certificate — a member must hold five cells
+    /// for a cubic tensor to stand in for it. The beam-network certificate (core reply,
+    /// 2026-09-18) solves the strut network itself and has no such need, so a Stepped or
+    /// Default-Grade region under Structural takes the aesthetic floor (2, or 1 with a
+    /// finish) once that certificate is what the job asks for. On a core without it the
+    /// homogenised floor stays, and so does the 2.4 mm wall.
+    public func regionCellsPerMemberFloor(topology: String, boundaryFinishWritten: Bool,
+                                          algorithm: String, beamNetworkCertified: Bool) -> Double {
+        if self == .structural, beamNetworkCertified,
+           algorithm == "stepped" || algorithm == "doubled" {
+            return LatticeStageMode.aesthetic.cellsPerMemberFloor(
+                topology: topology, utilisation: .nan,
+                boundaryFinishWritten: boundaryFinishWritten)
+        }
+        return cellsPerMemberFloor(topology: topology, utilisation: .nan,
+                                   boundaryFinishWritten: boundaryFinishWritten)
+    }
 }

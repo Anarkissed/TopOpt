@@ -41,8 +41,17 @@ public enum LatticePreviewBodyAlpha {
     ///     the body stays opaque; with none, the lattice fills the interior and the
     ///     shell would hide it.
     /// - Returns: 1 (opaque) or 0 (not drawn at all).
-    public static func value(latticeLayerDrawn: Bool, hasIncludeRegion: Bool) -> Float {
+    /// ★★ `nothingToLattice` (his 2026-09-20: "The lattice preview doesn't show anything
+    /// anymore … everything hides away when the lattice is ready"). The no-region case
+    /// hides the body so a lattice that FILLS the part can show — but when the scene
+    /// has nothing to draw (no region reached material, or no lattice region at all
+    /// under organic, which traces regions only) hiding the body leaves an empty
+    /// screen under a banner that says "Nothing to lattice". Nothing drawn ⇒ nothing
+    /// to concede to ⇒ the part is opaque.
+    public static func value(latticeLayerDrawn: Bool, hasIncludeRegion: Bool,
+                             nothingToLattice: Bool = false) -> Float {
         guard latticeLayerDrawn else { return 1 }
+        if nothingToLattice { return 1 }
         return hasIncludeRegion ? 1 : 0
     }
 }

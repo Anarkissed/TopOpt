@@ -1973,11 +1973,13 @@ public struct WorkspacePlaceholder: View {
             // 2 cells across a member is enough. The aesthetic floor reached the
             // per-VOXEL planner and never reached this, the per-REGION cell that both
             // Fit and Stepped are built from.
+            // ★ and under Structural with the beam-network certificate, the aesthetic
+            // floor — see `regionCellsPerMemberFloor` (his 2026-09-20, the 2.4 mm wall).
             let floor = (project.lattice.stageMode ?? .structural)
-                .cellsPerMemberFloor(topology: project.lattice.topologyID,
-                                     utilisation: .nan,
-                                     boundaryFinishWritten:
-                                        project.lattice.singleCellMembers)
+                .regionCellsPerMemberFloor(topology: project.lattice.topologyID,
+                                           boundaryFinishWritten: project.lattice.singleCellMembers,
+                                           algorithm: project.lattice.resolvedAlgorithm,
+                                           beamNetworkCertified: TopOptKit.steppedStructuralCertificationWired)
             let d = TopOptKit.latticeRegionDerivation(topology: project.lattice.topologyID,
                                                       memberWidthMM: w,
                                                       minExtrudableWidthMM: bead,
@@ -4686,7 +4688,17 @@ public struct WorkspacePlaceholder: View {
         return LatticePreviewBodyAlpha.value(
             latticeLayerDrawn: latticeLayerIsDrawn,
             hasIncludeRegion: project.latticeJobRegions().regions
-                .contains { $0.role == .include })
+                .contains { $0.role == .include },
+            nothingToLattice: latticePreviewHasNothingToDraw)
+    }
+
+    /// ★ THE SAME FINDING THE BANNER REPORTS AS `.empty` (his 2026-09-20, image 3: a
+    /// bare stage under "Nothing to lattice — the faces you marked do not reach any
+    /// material"). No scene yet, a part with no inside, or regions that reached no
+    /// material: the lattice layer will paint nothing, so the body stays opaque.
+    private var latticePreviewHasNothingToDraw: Bool {
+        guard let s = strutScene else { return true }
+        return s.partInteriorVoxelCount == 0 || s.interiorVoxelCount == 0
     }
 
     /// ★ THE ONE EXPRESSION that decides whether the raymarched lattice layer is drawn.
@@ -5209,6 +5221,41 @@ public struct WorkspacePlaceholder: View {
                 if let ph = scene.organicPhaseSeconds {
                     NSLog("DIAG organic phases: trace %.1f s · repairs (core emission) %.1f s · bake %.1f s · %d spans emitted",
                           ph.trace, ph.emit, ph.bake, scene.organicEmittedSpans?.count ?? -1)
+                }
+                // ★ PER-WALL RIM COVERAGE (his 2026-09-20, images 2–3: face2's wall latticed
+                // to the edge, face15's with "a lot of space at the edge of the rim").
+                // Each span's midpoint is attributed to its region and measured in-plane
+                // from the face outline; the log prints, per wall, the spans, the nearest
+                // 5 % / quartile / median distance and the share within one window
+                // (6 mm) of the outline — a number, before anyone says why.
+                if let o = organicIn, let out = scene.outlineSDF, !o.regionIDs.isEmpty,
+                   !scene.organicCapsules.isEmpty {
+                    var byRegion: [Int32: [Float]] = [:]
+                    for c in scene.organicCapsules {
+                        let m = 0.5 * (c.a + c.b)
+                        let gx = Int(((Double(m.x) - o.originMM.x) / o.spacingMM).rounded(.down))
+                        let gy = Int(((Double(m.y) - o.originMM.y) / o.spacingMM).rounded(.down))
+                        let gz = Int(((Double(m.z) - o.originMM.z) / o.spacingMM).rounded(.down))
+                        guard gx >= 0, gy >= 0, gz >= 0, gx < o.dims.0, gy < o.dims.1, gz < o.dims.2 else { continue }
+                        let id = o.regionIDs[(gz * o.dims.1 + gy) * o.dims.0 + gx]
+                        guard id >= 1 else { continue }
+                        let g = (m - out.origin) / out.spacing
+                        let i = min(max(Int(g.x.rounded()), 0), out.nx - 1)
+                        let j = min(max(Int(g.y.rounded()), 0), out.ny - 1)
+                        let k = min(max(Int(g.z.rounded()), 0), out.nz - 1)
+                        let d = out.values[(k * out.ny + j) * out.nx + i]
+                        guard d.isFinite, abs(d) < 500 else { continue }
+                        byRegion[id, default: []].append(d)
+                    }
+                    let lines = byRegion.sorted { $0.key < $1.key }.map { id, ds -> String in
+                        let s = ds.sorted()
+                        func q(_ f: Double) -> Float { s[min(s.count - 1, Int(Double(s.count - 1) * f))] }
+                        let near = s.filter { $0 <= 6 }.count
+                        return String(format: "%@: spans %d · outline-distance p05 %.2f p25 %.2f p50 %.2f mm · within 6 mm %.0f%%",
+                                      synthPlan.keyByID[Int(id)] ?? "r\(id)", s.count, q(0.05), q(0.25), q(0.5),
+                                      100 * Double(near) / Double(max(1, s.count)))
+                    }
+                    NSLog("DIAG organic rim coverage: %@", lines.joined(separator: " | "))
                 }
                 if synthOn, let rep = scene.organicSyntheticReport {
                     NSLog("DIAG synthetic(core): regions=%d voxels=%d fully=%d blended=%d thr=%.4g partPeak=%.4g · %@",
@@ -7098,7 +7145,12 @@ public struct WorkspacePlaceholder: View {
             // ★ LATTICE STAGE ONLY, and only once a lattice is configured —
             // `visible.latticeControls` is the stage column, and there is
             // nothing to preview with lattice mode off.
-            if visible.latticeControls, project.lattice.enabled {
+            // ★★ AND FROM THE FIRST FRAME OF THE STAGE (his 2026-09-20, image 1: "when
+            // starting Structural mode the lattice preview button is not visible at
+            // the start"). Lattice mode turns on when a lattice role is declared or
+            // the wizard is saved; the button must not wait for either — a tap with
+            // the lattice off opens the settings, which is where it turns on.
+            if visible.latticeControls {
                 viewModeButton("cube.transparent", label: "Lattice preview",
                                on: showStrutPreview,
                                tint: latticeOnly && showStrutPreview ? DS.Color.warning : nil,
@@ -7131,6 +7183,12 @@ public struct WorkspacePlaceholder: View {
                         // armed but NOT built here; the wizard's Save & Exit is what
                         // bakes it, so nothing expensive starts behind the sheet.
                         showStrutPreview = true
+                        // ★ lattice mode off ⇒ the settings, every time: Save & Exit
+                        // is what turns it on, and nothing bakes until it is on.
+                        if !project.lattice.enabled {
+                            showLatticeWizard = true
+                            return
+                        }
                         if !latticeSettingsSavedThisSession {
                             openLatticeSettingsIfUnconfigured()
                             return

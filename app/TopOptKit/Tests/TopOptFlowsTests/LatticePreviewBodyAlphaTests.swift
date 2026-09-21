@@ -93,6 +93,19 @@ final class LatticePreviewBodyAlphaTests: XCTestCase {
     /// ★ AND THE VIEW ASKS THE SHARED EXPRESSION, not a second copy of it. The frame
     /// where "hide the shell" and "draw the lattice" disagreed is the frame that drew
     /// neither, so the call site must read one property for both.
+    /// ★ his 2026-09-20 (image 3): organic with no lattice region traced nothing, the
+    /// no-region rule hid the body, and the stage was bare under "Nothing to lattice".
+    func testNothingToLatticeKeepsTheBodyOpaqueEvenWithNoRegion() {
+        XCTAssertEqual(LatticePreviewBodyAlpha.value(latticeLayerDrawn: true, hasIncludeRegion: false,
+                                                     nothingToLattice: true), 1,
+                       "★ a layer that paints nothing has nothing to reveal — the part must be drawn")
+        XCTAssertEqual(LatticePreviewBodyAlpha.value(latticeLayerDrawn: true, hasIncludeRegion: true,
+                                                     nothingToLattice: true), 1)
+        // the sample's rule is untouched when there IS something to draw
+        XCTAssertEqual(LatticePreviewBodyAlpha.value(latticeLayerDrawn: true, hasIncludeRegion: false,
+                                                     nothingToLattice: false), 0)
+    }
+
     func testTheViewGatesBothOnOneExpression() throws {
         var url = URL(fileURLWithPath: #filePath)
         url.deleteLastPathComponent(); url.deleteLastPathComponent()
@@ -104,5 +117,9 @@ final class LatticePreviewBodyAlphaTests: XCTestCase {
                       "the lattice layer must be gated by the shared expression")
         XCTAssertTrue(src.contains("latticeLayerDrawn: latticeLayerIsDrawn"),
                       "★ …and the body alpha must be gated by the SAME one")
+        XCTAssertTrue(src.contains("nothingToLattice: latticePreviewHasNothingToDraw"),
+                      "★ …and an empty scene keeps the body (his 2026-09-20)")
+        XCTAssertTrue(src.contains("if visible.latticeControls {\n                viewModeButton(\"cube.transparent\""),
+                      "★ the preview button is offered from the stage's first frame, lattice mode on or off")
     }
 }
