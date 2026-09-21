@@ -1444,10 +1444,81 @@ public struct LatticeSDFScene {
                     organicSyntheticOut = t.synthetic
                     organicPhaseOut = (t.traceSeconds, t.emitSeconds, t.bakeSeconds)
                     // ★ the tracer's own census, for his "not enough seeds" question (2026-09-21)
-                    NSLog("DIAG organic trace census: curves %d connectors %d spans %d · %@%@",
+                    NSLog("DIAG organic trace census: curves %d connectors %d spans %d · %@%@ · %@ · band:%@",
                           t.curveCount, t.connectorCount, t.spanCount, t.stops.summary,
                           t.growth.map { g in String(format: " · grown: seeds %d curves %d steps %d blocked %d branches %d joins %d",
-                                                     g.seeds, g.curves, g.steps, g.blocked, g.branches, g.joins) } ?? "")
+                                                     g.seeds, g.curves, g.steps, g.blocked, g.branches, g.joins) } ?? "",
+                          t.census.summary, fitNote)
+                    // ★★ THE FILL, MEASURED WHERE HE LOOKS (his 2026-09-21 19:08, "100% density of
+                    // the full depth … still not working"). Every emitted span is rasterised into
+                    // the trace grid; then, per include region, the share of CANDIDATE voxels that
+                    // hold a strut — by in-plane distance from the face outline (with the spacing
+                    // the tracer was asked there, after the band grade) and by depth decile into
+                    // the wall. A number per band and per decile, before anyone says why.
+                    do {
+                        let caps = organicCapsOut
+                        if !caps.isEmpty, o.regionIDs.count == cand.count {
+                            var occ = [Bool](repeating: false, count: cand.count)
+                            let h = o.spacingMM
+                            func mark(_ p: SIMD3<Float>) {
+                                let i = Int(((Double(p.x) - o.originMM.x) / h).rounded(.down))
+                                let j = Int(((Double(p.y) - o.originMM.y) / h).rounded(.down))
+                                let k = Int(((Double(p.z) - o.originMM.z) / h).rounded(.down))
+                                guard i >= 0, j >= 0, k >= 0, i < tnx, j < tny, k < tnz else { return }
+                                occ[(k * tny + j) * tnx + i] = true
+                            }
+                            for c in caps {
+                                let d = c.b - c.a
+                                let n = Swift.max(1, Int((Double(simd_length(d)) / (0.5 * h)).rounded(.up)))
+                                for st in 0...n { mark(c.a + d * (Float(st) / Float(n))) }
+                            }
+                            let includes = regions.filter { $0.role == .include }
+                            let edges: [Double] = [1, 2, 3, 4, 6, 1e9]
+                            let labels = ["0–1", "1–2", "2–3", "3–4", "4–6", "6+"]
+                            var lines: [String] = []
+                            for (ri, r) in includes.enumerated() {
+                                let id = Int32(ri + 1)
+                                var binCand = [Int](repeating: 0, count: edges.count), binOcc = binCand
+                                var binSep = [[Double]](repeating: [], count: edges.count)
+                                var decCand = [Int](repeating: 0, count: 10), decOcc = decCand
+                                let nrm = LatticeRegionMask.unit(r.normal)
+                                var total = 0, totalOcc = 0
+                                for e in 0..<cand.count where cand[e] && o.regionIDs[e] == id {
+                                    total += 1; if occ[e] { totalOcc += 1 }
+                                    let i = e % tnx, j = (e / tnx) % tny, k = e / (tnx * tny)
+                                    let p = SIMD3<Double>(o.originMM.x + (Double(i) + 0.5) * h,
+                                                          o.originMM.y + (Double(j) + 0.5) * h,
+                                                          o.originMM.z + (Double(k) + 0.5) * h)
+                                    if let og = outlineForOrganic {
+                                        let gi = (SIMD3<Float>(p) - og.origin) / og.spacing
+                                        let a = Int(gi.x.rounded()), b = Int(gi.y.rounded()), c = Int(gi.z.rounded())
+                                        if a >= 0, b >= 0, c >= 0, a < og.nx, b < og.ny, c < og.nz {
+                                            let d = Double(og.values[(c * og.ny + b) * og.nx + a])
+                                            if d < 999 {
+                                                let bi = edges.firstIndex { d < $0 } ?? edges.count - 1
+                                                binCand[bi] += 1; if occ[e] { binOcc[bi] += 1 }
+                                                binSep[bi].append(sep[e])
+                                            }
+                                        }
+                                    }
+                                    if r.depthMM > 0 {
+                                        let into = simd_dot(p - r.origin, nrm) / r.depthMM
+                                        let di = Swift.min(9, Swift.max(0, Int(into * 10)))
+                                        decCand[di] += 1; if occ[e] { decOcc[di] += 1 }
+                                    }
+                                }
+                                func pct(_ a: Int, _ b: Int) -> String { b == 0 ? "–" : String(format: "%.0f%%", 100 * Double(a) / Double(b)) }
+                                func p50(_ v: [Double]) -> String { v.isEmpty ? "–" : String(format: "%.2f", v.sorted()[v.count / 2]) }
+                                let bins = labels.indices.map {
+                                    "\(labels[$0]) \(pct(binOcc[$0], binCand[$0])) of \(binCand[$0]) sep \(p50(binSep[$0]))"
+                                }.joined(separator: ", ")
+                                let decs = (0..<10).map { pct(decOcc[$0], decCand[$0]) }.joined(separator: " ")
+                                lines.append(String(format: "r%d %@ depth %.2f mm · candidates %d occupied %@ · by outline mm: %@ · by depth decile: %@",
+                                                    ri, r.selectableKey ?? "", r.depthMM, total, pct(totalOcc, total), bins, decs))
+                            }
+                            NSLog("DIAG organic fill (strut-occupied share of candidate voxels, voxel %.2f mm): %@", h, lines.joined(separator: " | "))
+                        }
+                    }
                     if t.syntheticVonMises.count == tnx * tny * tnz {
                         organicSynthFieldOut = StressField(
                             nx: tnx, ny: tny, nz: tnz,

@@ -4978,11 +4978,28 @@ public struct WorkspacePlaceholder: View {
             // The same band the preview grades between — read from the proxy so the
             // tracer clamps into exactly what the legend shows.
             let band = latticeProxy.params.densitySpan
+            // ★★★ THE TRACER'S GRID IS THE PREVIEW'S, NOT THE COARSE SOLVE'S (2026-09-21,
+            // see `OrganicTraceGrid`). The stage solve is the fast tier (3.41 mm on his
+            // stand); core floors every spacing at one voxel, so on that grid nothing
+            // could be laid closer than 3.41 mm — to another curve or to the rim — and
+            // the 12 mm wall was 3.5 voxels deep. The run traces at the Fine chip's grid
+            // (128 across, 1.71 mm), so the trace is resampled there before it runs.
+            let previewVoxelMM = Double((mesh.bounds.max - mesh.bounds.min).max()) / 128
+            let fine = OrganicTraceGrid.resample(tensor: f.stressTensor, dims: (f.nx, f.ny, f.nz),
+                                                 originMM: SIMD3<Double>(f.origin), spacingMM: f.spacingMM,
+                                                 toVoxelMM: previewVoxelMM)
+            if let fine {
+                NSLog("DIAG organic trace grid: solve %.2f mm (%d×%d×%d) → trace %.2f mm (%d×%d×%d), ×%d per axis",
+                      f.spacingMM, f.nx, f.ny, f.nz, fine.spacingMM, fine.dims.0, fine.dims.1, fine.dims.2, fine.factor)
+            } else {
+                NSLog("DIAG organic trace grid: the solve's own %.2f mm (%d×%d×%d); preview voxel %.2f mm",
+                      f.spacingMM, f.nx, f.ny, f.nz, previewVoxelMM)
+            }
             return LatticeOrganicInput(
-                tensor: f.stressTensor,
-                dims: (f.nx, f.ny, f.nz),
-                originMM: SIMD3<Double>(f.origin),
-                spacingMM: f.spacingMM,
+                tensor: fine?.tensor ?? f.stressTensor,
+                dims: fine?.dims ?? (f.nx, f.ny, f.nz),
+                originMM: fine?.originMM ?? SIMD3<Double>(f.origin),
+                spacingMM: fine?.spacingMM ?? f.spacingMM,
                 minExtrudableWidthMM: project.printParams.strutLineWidthMM,
                 buildDirection: SIMD3<Double>(
                     project.buildOrientation.resolved(gravity: force.gravity)),

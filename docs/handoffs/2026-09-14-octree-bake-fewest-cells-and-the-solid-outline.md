@@ -1007,3 +1007,25 @@ Not yet seen by him.
   `seeds too close` count should FALL and curves/spans rise; the rim coverage
   (`organic rim coverage` p25 / within 6 mm %) is the number to read before/after.
   Preview only, no core change; if it works the core brief adds the ratios to the job.
+- **2026-09-21 19:47 — THE TRACER WAS ON THE COARSE SOLVE'S GRID.** His 19:08/19:38 opens
+  ("100% density of the full depth … still not working", ×1 and ×2 seeding). The new
+  `DIAG organic fill` (per wall, strut-occupied share of candidate voxels by outline bin
+  and depth decile, with the spacing asked in each bin) printed the cause in its header:
+  **voxel 3.41 mm**. `organicForBake` handed the tracer `latticeStressField` verbatim —
+  the stage solve's FAST tier (64 across, 3.41 mm) — and core floors every spacing at one
+  voxel, so the window's floor was 3.41, the band grade graded "toward the 3.41 mm floor",
+  the rim gap was one voxel (p25 3.41, exactly), the 12 mm wall was 3.5 voxels deep, and
+  every candidate voxel was occupied (100 %) while the picture stayed sparse — the voxels
+  were the size of the gap. The run traces at the Fine chip's 128 grid (1.71 mm), so the
+  preview was not the run's picture either. Fix (app only): `OrganicTraceGrid.resample`
+  — trilinear resample of the six tensor components onto the preview's grid (factor =
+  round(solve/preview voxel), ×8 voxels, 4 M voxel budget lowers the factor first) before
+  the trace; `DIAG organic trace grid: solve 3.41 mm (…) → trace 1.71 mm (…), ×2`.
+  Expect: window floor 1.71, rim gap ≈ 1.7 mm, ~7 voxels through the wall, trace ~8×
+  longer (1.1 s → ~9 s), more spans so a longer emission. Tests:
+  `OrganicTraceGridTests` (a linear field resampled exactly; at-or-finer left alone; the
+  budget lowers the factor). ALSO FOUND: the ×2 picture equalled ×1 because no second
+  trace ran — `buildStrutScene` defers every rebake while `strutRefining` (the "Adding the
+  print repairs" banner, core's emission, minutes on his part) and fires it when the
+  refine ends; seedBoost 2 was saved at 19:39:58. The seeding boost is untested until a
+  bake actually runs with it, and on a 1.71 mm grid it may not be needed.
