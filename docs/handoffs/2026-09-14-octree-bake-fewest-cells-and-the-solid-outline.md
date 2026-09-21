@@ -894,3 +894,25 @@ Not yet seen by him.
   `organic_structural_certification: "beam_network"`); on the STAND core certified TRACED
   3–5 mm (margin 7.46) and GROWN with transfer ties (margin 1.19, 2026-09-05). No
   on-device run receipt with `structural_certified` exists in the simulator container.
+- **2026-09-20 21:00 — his four items (grown sample, organic walls, single-cell, the 2.4 mm grade).**
+  FIRST FINDING, above all four: the linked `libtopopt.a` carries NONE of core's PR #358
+  keys (`stepped_cells`, `stepped_min_tile_mm`, `structural_certification`, `shape_grade`,
+  `max_relative_density`); the worktree's `core/` is at 2a70a38b (2026-09-09). Every probe
+  for them is false on device.
+  (1) Grown sample "mess": DIAG 20:31:57 `capsules=7462` then 20:32:08 `capsules=1440` — the
+  emission replacing the trace, drawn at core's derived bead. The sample now traces only
+  (`showRepairs: false` in `organicSamplePicks`); repairs still preview in the part.
+  (2) face2 full to the edge, face15 with space at the rim: no synthetic (project has
+  `organicSyntheticStresses: false`; it is aesthetic-only in core anyway), so the dead
+  front wall is traced from p05-normalised noise and fills evenly while the live back wall
+  follows real stress — coarse at its unloaded top. NOT proven: a new DIAG
+  `organic rim coverage` prints per wall spans / outline-distance p05·p25·p50 / share
+  within 6 mm. Read it on his next open before deciding (shape band is the lever if it is
+  spacing; a rim rule if it is the trace ending short).
+  (3) "Allow single-cell members" hidden under Structural (aesthetic-only floor).
+  (4) The 2.4 mm wall: `regionCell measuredW=12.03 floor=5.0 coreCell=2.406 final=2.4`,
+  `10.31 → 2.06`; ladder sizes=[2.06, 2.40] — the homogenised certificate's 5-cells floor
+  leaves no rung above the 1.8 mm printable floor. `regionCellsPerMemberFloor`: under
+  Structural with the beam-network certificate WIRED, stepped/doubled take the aesthetic
+  floor; on this core it is not wired, so the wall stays 2.4 mm until PR #358 is merged and
+  `build_core.sh` rebuilt. Installed 21:00; tests pending the running full suite.
