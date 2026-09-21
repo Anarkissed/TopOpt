@@ -207,6 +207,17 @@ public struct LatticeRegionSpec: Equatable, Sendable {
     public var syntheticStress: Bool = false
     public var syntheticFoci: Int? = nil
     public var selectableKey: String? = nil
+    // ★ THE SLAB (2026-09-21, preview only — see `LatticeWallThickness`): what was asked
+    // for, and the answer the scene built. Neither reaches `wireDictionary`.
+    public var thickness: LatticeWallThickness? = nil
+    public var thicknessMap: LatticeWallThicknessMap? = nil
+
+    /// Where the lattice lives along the normal at `uv`: the whole prism unless a slab
+    /// was built for this face.
+    public func slabRange(uv: SIMD2<Double>) -> (start: Double, end: Double) {
+        guard let m = thicknessMap else { return (0, depthMM) }
+        return (m.startMM, m.endMM(at: uv, depthMM: depthMM))
+    }
 
     public init(role: LatticeGroupRole, kind: Kind) {
         self.role = role
@@ -1349,6 +1360,18 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
     /// halves it; the band's length is untouched. Octet (quilt raise) and organic
     /// (spacing, and the bead that follows it) alike.
     public var shapeFitGradeStrength: Double = 0
+    /// ★ THE LATTICE'S THICKNESS THROUGH THE WALL (his 2026-09-20/21) — see
+    /// `LatticeWallThickness`. `.through` with start 0 is every existing project.
+    public var wallThicknessMode: LatticeWallThicknessMode = .through
+    public var wallThicknessStartShare: Double = 0
+    public var wallThicknessShare: Double = 1
+    public var wallThicknessLoShare: Double = 0.5
+    public var wallThicknessHiShare: Double = 1
+    public var wallThickness: LatticeWallThickness {
+        LatticeWallThickness(mode: wallThicknessMode, startShare: wallThicknessStartShare,
+                             share: wallThicknessShare, loShare: wallThicknessLoShare,
+                             hiShare: wallThicknessHiShare)
+    }
     /// The grade's amount multiplier for a strength: 2^s — 2 at +1, ½ at −1, 1 at 0.
     public static func gradeAmount(strength s: Double) -> Double {
         pow(2.0, Swift.min(1, Swift.max(-1, s)))
@@ -1838,6 +1861,8 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         // project keeps the grade it has always had.
         case shapeFitBandMM
         case shapeFitGradeStrength
+        case wallThicknessMode, wallThicknessStartShare, wallThicknessShare
+        case wallThicknessLoShare, wallThicknessHiShare
         // ★ The Sim permission (2026-08-17). Absent from every older
         // snapshot ⇒ decodes to its TRUE default ⇒ an existing project
         // keeps asking for the solve it has always asked for.
@@ -1928,6 +1953,11 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         shapeFitBandMM = try c.decodeIfPresent(Double.self, forKey: .shapeFitBandMM)
             ?? LatticeSettings.defaultShapeFitBandCells
         shapeFitGradeStrength = try c.decodeIfPresent(Double.self, forKey: .shapeFitGradeStrength) ?? 0
+        wallThicknessMode = try c.decodeIfPresent(LatticeWallThicknessMode.self, forKey: .wallThicknessMode) ?? .through
+        wallThicknessStartShare = try c.decodeIfPresent(Double.self, forKey: .wallThicknessStartShare) ?? 0
+        wallThicknessShare = try c.decodeIfPresent(Double.self, forKey: .wallThicknessShare) ?? 1
+        wallThicknessLoShare = try c.decodeIfPresent(Double.self, forKey: .wallThicknessLoShare) ?? 0.5
+        wallThicknessHiShare = try c.decodeIfPresent(Double.self, forKey: .wallThicknessHiShare) ?? 1
         cellMaxMM = try c.decodeIfPresent(Double.self, forKey: .cellMaxMM) ?? LatticeSettings.defaultCellMaxMM
         minRelativeDensity = try c.decodeIfPresent(Double.self, forKey: .minRelativeDensity) ?? 0
         maxRelativeDensity = try c.decodeIfPresent(Double.self, forKey: .maxRelativeDensity) ?? 1
@@ -2069,6 +2099,11 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         try c.encode(cellMinMM, forKey: .cellMinMM)
         try c.encode(shapeFitBandMM, forKey: .shapeFitBandMM)
         if shapeFitGradeStrength != 0 { try c.encode(shapeFitGradeStrength, forKey: .shapeFitGradeStrength) }
+        if wallThicknessMode != .through { try c.encode(wallThicknessMode, forKey: .wallThicknessMode) }
+        if wallThicknessStartShare != 0 { try c.encode(wallThicknessStartShare, forKey: .wallThicknessStartShare) }
+        if wallThicknessShare != 1 { try c.encode(wallThicknessShare, forKey: .wallThicknessShare) }
+        if wallThicknessLoShare != 0.5 { try c.encode(wallThicknessLoShare, forKey: .wallThicknessLoShare) }
+        if wallThicknessHiShare != 1 { try c.encode(wallThicknessHiShare, forKey: .wallThicknessHiShare) }
         try c.encode(cellMaxMM, forKey: .cellMaxMM)
         try c.encode(minRelativeDensity, forKey: .minRelativeDensity)
         try c.encode(maxRelativeDensity, forKey: .maxRelativeDensity)

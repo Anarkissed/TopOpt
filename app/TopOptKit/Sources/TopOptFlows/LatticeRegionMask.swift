@@ -42,6 +42,14 @@ public enum LatticeRegionMask {
         contains(p, region: region, inPlaneReachMM: 0)
     }
 
+    /// `contains` over the WHOLE declared prism, ignoring any slab — what the slab's own
+    /// builder scans, and the reference the sim rule normalises against.
+    public static func containsWholePrism(_ p: SIMD3<Double>, region: LatticeRegionSpec) -> Bool {
+        var whole = region
+        whole.thicknessMap = nil
+        return contains(p, region: whole, inPlaneReachMM: 0)
+    }
+
     /// ★★★ `contains`, WITH THE IN-PLANE TEST RELAXED BY `inPlaneReachMM` — for
     /// deciding which base cells a face OWNS, as distinct from where its material is
     /// (2026-08-27).
@@ -79,9 +87,10 @@ public enum LatticeRegionMask {
             guard simd_length(n) > 0.5, region.depthMM > 0 else { return false }
             let d = p - region.origin
             let s = simd_dot(d, n)
-            guard s >= 0, s <= region.depthMM else { return false }
             let (u, v) = basis(n)
             let uv = SIMD2<Double>(simd_dot(d, u), simd_dot(d, v))
+            let (s0, s1) = region.slabRange(uv: uv)     // the slab, or the whole prism
+            guard s >= s0, s <= s1 else { return false }
             // ★★ THE OUTLINE WINS WHEN THERE IS ONE. The rectangle was the face's
             // BOUNDING BOX — 41.2% and 29.8% of the emitted region was actually
             // the face on his two lattice walls, and the rest was solid material
@@ -156,7 +165,15 @@ public enum LatticeRegionMask {
             guard simd_length(n) > 0.5, region.depthMM > 0 else { return big }
             let d = p - region.origin
             let s = simd_dot(d, n)
-            let along = abs(s - 0.5 * region.depthMM) - 0.5 * region.depthMM
+            let (u, v) = basis(n)
+            let uv = SIMD2<Double>(simd_dot(d, u), simd_dot(d, v))
+            // ★ THE SLAB (2026-09-21): the whole prism unless a thickness map says
+            // otherwise — then [start, end(uv)] along the normal, so every reader of
+            // this distance (the shell clip, the march, the candidates, the octree)
+            // sees the one slab. See `LatticeWallThickness`.
+            let (s0, s1) = region.slabRange(uv: uv)
+            let half = 0.5 * Swift.max(0, s1 - s0)
+            let along = abs(s - (s0 + half)) - half
             // ★ THE OUTLINE DISTANCE IS THE EXPENSIVE TERM — O(outline vertices)
             // per voxel, and the field is baked over the whole part bbox. Measured
             // on his face 15 (63 vertices) it took the scene bake from 3.70 s to
@@ -173,8 +190,6 @@ public enum LatticeRegionMask {
             // from an 11 mm slab, so this skips the polygon for the large majority
             // of voxels.
             if along > 0 { return along }
-            let (u, v) = basis(n)
-            let uv = SIMD2<Double>(simd_dot(d, u), simd_dot(d, v))
             let inPlane: Double
             if !region.outlineLoops.isEmpty {
                 inPlane = LatticeFaceOutline.signedDistance(uv, loops: region.outlineLoops)

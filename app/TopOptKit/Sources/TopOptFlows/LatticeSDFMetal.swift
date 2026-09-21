@@ -613,8 +613,27 @@ public struct LatticeSDFScene {
                 //
                 // 0 ⇒ no skin, which is `none`/`rim` and every pre-existing call.
                 skinMM: Double = 0,
-                skippedFaces: Int = 0) {
+                skippedFaces: Int = 0,
+                // ★ one cell, in mm — the slab's floor (see `LatticeWallThickness`)
+                wallThicknessFloorMM: Double = 0) {
         self.preview = LatticeSDFPreview(latticeID: latticeID)
+        // ★★ THE SLAB, BUILT FIRST (2026-09-21): every reader below — the region field,
+        // the organic candidates, the octree, the cap wall — reads `regions`, so the
+        // thickness maps are attached before any of them run. `field` is the solve's
+        // von Mises, the sim rule's input.
+        let regions = LatticeWallThicknessBuilder.attach(
+            regions, field: field,
+            floorMM: wallThicknessFloorMM > 0 ? wallThicknessFloorMM
+                : Double((mesh.bounds.max - mesh.bounds.min).max()) / Double(max(1, maxDim)))
+        if regions.contains(where: { $0.thicknessMap != nil }) {
+            NSLog("DIAG wall thickness: %@", regions.enumerated().compactMap { i, r -> String? in
+                guard let m = r.thicknessMap, let spec = r.thickness else { return nil }
+                let q = m.summary
+                return String(format: "r%d %@ start %.2f mm · share p05 %.2f p50 %.2f p95 %.2f of %.2f mm (floor %.2f)",
+                              i, spec.mode.rawValue, m.startMM, q.p05, q.p50, q.p95, r.depthMM,
+                              wallThicknessFloorMM)
+            }.joined(separator: " | "))
+        }
         // ★★ THE PART'S INTERIOR AND THE LATTICED INTERIOR ARE TWO DIFFERENT
         // NUMBERS, and the banner needs both to tell the truth.
         //

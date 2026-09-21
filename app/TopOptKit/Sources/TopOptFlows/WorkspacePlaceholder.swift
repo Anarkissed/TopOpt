@@ -4910,7 +4910,16 @@ public struct WorkspacePlaceholder: View {
         // walks the selection and the settings. Empty on the settings page's
         // sample block, which is exactly when clipping must NOT happen.
         let emission = project.latticeJobRegions()
-        let regions = emission.regions
+        // ★ THE SLAB IS A PREVIEW REQUEST (2026-09-21): attached to the preview's copy of
+        // the regions only; `emission.regions` — the job's — stays as declared until the
+        // slab is agreed to work (his rule: preview first, core only then).
+        var regions = emission.regions
+        let wallThicknessAsk = project.lattice.wallThickness
+        if !wallThicknessAsk.isThrough {
+            for i in regions.indices where regions[i].role == .include && regions[i].kind == .face {
+                regions[i].thickness = wallThicknessAsk
+            }
+        }
         // ★ AND HOW MANY MARKED FACES PRODUCED NO REGION. Carried into the bake so
         // the banner can say the preview is drawing LESS than was marked, rather
         // than under-drawing in silence.
@@ -5193,7 +5202,13 @@ public struct WorkspacePlaceholder: View {
                                         // that is a solid part.
                                         whenEmpty: .latticeNothing,
                                         skinMM: skinMM,
-                                        skippedFaces: skippedFaces)
+                                        skippedFaces: skippedFaces,
+                                        // ★ one cell: the smallest per-region base for
+                                        // the octet, the window's low end for organic
+                                        wallThicknessFloorMM: algorithmForBake == "organic"
+                                            ? (organicIn?.separationMinMM ?? 0)
+                                            : (latticePreviewSteppedCells.filter { $0 > 0 }.min()
+                                               ?? project.lattice.cellMM))
             DispatchQueue.main.async {
                 // ★ a newer bake has started: this picture is stale, drop it
                 guard bakeGeneration == strutBakeGeneration else {
@@ -5255,7 +5270,8 @@ public struct WorkspacePlaceholder: View {
                         let ri = Int(id) - 1
                         if ri >= 0, ri < includes.count, includes[ri].depthMM > 0 {
                             let r = includes[ri]
-                            let into = -simd_dot(SIMD3<Double>(m) - r.origin, r.normal)
+                            // the prism runs from the face ALONG its normal (LatticeRegionMask: s ∈ [0, depth])
+                            let into = simd_dot(SIMD3<Double>(m) - r.origin, LatticeRegionMask.unit(r.normal))
                             depthByRegion[id, default: []].append(Float(into / r.depthMM))
                         }
                     }

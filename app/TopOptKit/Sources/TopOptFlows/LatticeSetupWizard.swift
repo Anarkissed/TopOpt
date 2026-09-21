@@ -417,6 +417,7 @@ public struct LatticeSetupWizard: View {
             // grown lattice does not have. Nothing here is shared by accident.
             if model.stage == .lattice, model.cellTransition == .organicGrade {
                 organicRow
+                wallThicknessRow
             } else if model.stage == .lattice {
                 gradeToggleRow
                 if model.gradingMode != LatticeGradingMode.none { gradeTypeRow }
@@ -429,6 +430,7 @@ public struct LatticeSetupWizard: View {
                 if (project.lattice.stageMode ?? .structural) == .aesthetic {
                     singleCellSwitch
                 }
+                wallThicknessRow
             }
             // ★ NOT IN AESTHETIC (his ruling, 2026-08-24 late: "we should REMOVE
             // the 'too thin to certify' button from the aesthetic mode"). The
@@ -626,6 +628,80 @@ public struct LatticeSetupWizard: View {
 
     /// ★ 3 — HOW the cells change: the algorithm. Always asked, whatever the
     /// grade, because it is what is laid down rather than how it varies.
+    // ★★★ THE LATTICE'S THICKNESS THROUGH THE WALL (his 2026-09-20/21). Both lattice
+    // pages, both stages; a preview request until it is agreed to work. See
+    // `LatticeWallThickness` for the five modes and the sim rule.
+    @ViewBuilder private var wallThicknessRow: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text("Thickness through the wall")
+                .font(.system(size: 10, weight: .bold))
+                .foregroundStyle(DS.Color.textTertiary.color)
+            HStack(spacing: DS.Space.xs) {
+                ForEach(LatticeWallThicknessMode.allCases, id: \.rawValue) { m in
+                    let off = m.readsTheSolve && !model.simulateStresses
+                    Button {
+                        guard !off else { return }
+                        model.wallThicknessMode = m
+                        rebuild()
+                    } label: {
+                        Text(m.title)
+                            .font(.system(size: 11, weight: .semibold))
+                            .lineLimit(1).minimumScaleFactor(0.8)
+                            .padding(.vertical, 6).padding(.horizontal, DS.Space.s)
+                            .frame(maxWidth: .infinity)
+                            .background(RoundedRectangle(cornerRadius: DS.Radius.pill)
+                                .fill((model.wallThicknessMode == m
+                                       ? DS.Color.accent.opacity(0.85)
+                                       : DS.Color.background.opacity(0.35)).color))
+                            .foregroundStyle((off ? DS.Color.textTertiary
+                                             : DS.Color.textPrimary).color)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(off)
+                    .accessibilityIdentifier("wizard-wall-thickness-\(m.rawValue)")
+                }
+            }
+            captionLine(model.wallThicknessMode.readsTheSolve && !model.simulateStresses
+                        ? "Needs Simulate Stresses."
+                        : model.wallThicknessMode.brief,
+                        info: "wall-thickness", model.wallThicknessMode.body)
+            if model.wallThicknessMode == .manualSingle {
+                shareSlider("Share", id: "wizard-wall-thickness-share", range: 0.05...1,
+                            get: { model.wallThicknessShare }, set: { model.wallThicknessShare = $0 })
+            }
+            if model.wallThicknessMode == .manualGrade {
+                shareSlider("Low", id: "wizard-wall-thickness-lo", range: 0.05...1,
+                            get: { model.wallThicknessLoShare }, set: { model.wallThicknessLoShare = $0 })
+                shareSlider("High", id: "wizard-wall-thickness-hi", range: 0.05...1,
+                            get: { model.wallThicknessHiShare }, set: { model.wallThicknessHiShare = $0 })
+            }
+            shareSlider("Start", id: "wizard-wall-thickness-start", range: 0...0.9,
+                        get: { model.wallThicknessStartShare }, set: { model.wallThicknessStartShare = $0 })
+            captionLine("Start is where the slab begins, in from the face.",
+                        info: "wall-thickness-start",
+                        "0 % starts the lattice at the face. Anything more leaves that share of the "
+                        + "depth solid before the lattice begins; the shares above are of what is left.",
+                        tint: DS.Color.textQuaternary.color)
+        }
+    }
+
+    /// A 0–100 % slider with its label, for the thickness shares.
+    @ViewBuilder private func shareSlider(_ label: String, id: String, range: ClosedRange<Double>,
+                                          get: @escaping () -> Double,
+                                          set: @escaping (Double) -> Void) -> some View {
+        HStack(spacing: DS.Space.s) {
+            Text(label).dsStyle(DS.TypeScale.caption2).foregroundStyle(DS.Color.textTertiary.color)
+                .frame(width: 52, alignment: .leading)
+            Slider(value: Binding(get: get, set: { set(($0 * 100).rounded() / 100); rebuild() }),
+                   in: range, step: 0.01)
+                .tint(DS.Color.accent.color)
+                .accessibilityIdentifier(id)
+            Text(String(format: "%.0f %%", get() * 100))
+                .dsStyle(DS.TypeScale.caption).foregroundStyle(DS.Color.textPrimary.color)
+                .frame(width: 52, alignment: .trailing)
+        }
+    }
+
     @ViewBuilder private var gradeStyleRow: some View {
         VStack(alignment: .leading, spacing: 5) {
             Text("Grade style")

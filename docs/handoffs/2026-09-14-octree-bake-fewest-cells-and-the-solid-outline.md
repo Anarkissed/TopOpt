@@ -916,3 +916,19 @@ Not yet seen by him.
   Structural with the beam-network certificate WIRED, stepped/doubled take the aesthetic
   floor; on this core it is not wired, so the wall stays 2.4 mm until PR #358 is merged and
   `build_core.sh` rebuilt. Installed 21:00; tests pending the running full suite.
+- **2026-09-20 23:18 — THE LATTICE'S THICKNESS THROUGH THE WALL (his "go", the sim rule
+  agreed).** New `LatticeWallThickness.swift`: five modes (`through` = today, `sim` = depth ×
+  the face point's column-peak von Mises over the part's p95, floored at one cell;
+  `autoSingle` = the wall's p95; `manualSingle` = a share; `manualGrade` = lo + (hi − lo) ×
+  stress) plus a start share. The answer is a (u, v) raster per include face
+  (`LatticeRegionSpec.thicknessMap`) and ONE reader applies it: `LatticeRegionMask.
+  signedDistance` / `contains` clip along the normal to [start, end(uv)], so the region
+  field, the shell clip, the march, the octree, the organic candidates and plan all see the
+  slab; `LatticeRegionCap.build` is a subdivided height field at the slab's end. Attached in
+  `LatticeSDFScene.init` before any reader (`wallThicknessFloorMM` = smallest per-region
+  base cell / organic window low end); `DIAG wall thickness:` per region. PREVIEW ONLY: the
+  request rides on the preview's regions in `buildStrutScene`; `wireDictionary` unchanged
+  (pinned). Settings `wallThickness*` encode only when moved (untouched project
+  byte-identical, pinned). Wizard: "Thickness through the wall" row on both lattice pages,
+  solve-reading modes disabled without Simulate Stresses; Start slider always. Pen-tool
+  profile deferred to his visual spec. `LatticeWallThicknessTests` 5/5. Installed 23:18.

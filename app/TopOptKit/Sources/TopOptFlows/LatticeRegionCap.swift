@@ -95,14 +95,36 @@ public enum LatticeRegionCap {
             let n = LatticeRegionMask.unit(region.normal)
             guard simd_length(n) > 0.5, region.depthMM > 0 else { continue }
             let (bu, bv) = LatticeRegionMask.basis(n)
-            let cap = region.depthMM
+            // ★ THE CAP SITS WHERE THE SLAB ENDS (2026-09-21): a flat plate at the
+            // declared depth when the lattice fills the prism, else a HEIGHT FIELD at
+            // the slab's end — each outline triangle subdivided evenly (one count per
+            // region, so shared edges match and nothing cracks) and every vertex
+            // pushed to the slab's end at its own (u, v). See `LatticeWallThickness`.
+            let varying = region.thicknessMap.map { $0.nu > 1 || $0.nv > 1 } ?? false
+            var k = 1
+            if varying, let m = region.thicknessMap {
+                var longest = 0.0
+                for loop in region.outlineLoops { for i in loop.indices {
+                    longest = Swift.max(longest, simd_length(loop[(i + 1) % loop.count] - loop[i]))
+                } }
+                k = Swift.min(24, Swift.max(1, Int((longest / (2 * m.h)).rounded(.up))))
+            }
+            func depthAt(_ uv: SIMD2<Double>) -> Double { region.slabRange(uv: uv).end }
             for loop in region.outlineLoops where loop.count >= 3 {
                 let ring = LatticeOutlineRibbon.offsetRing(loop, by: region.inPlaneOffsetMM)
                 guard ring.count >= 3 else { continue }
                 for (a, b, c) in triangulate(ring) {
-                    for uv in [ring[a], ring[b], ring[c]] {
-                        emit(region.origin + bu * uv.x + bv * uv.y + n * cap, -n)
+                    let A = ring[a], B = ring[b], C = ring[c]
+                    func P(_ i: Int, _ j: Int) -> SIMD2<Double> {
+                        A + (B - A) * (Double(i) / Double(k)) + (C - A) * (Double(j) / Double(k))
                     }
+                    for i in 0..<k { for j in 0..<(k - i) {
+                        var tris: [[SIMD2<Double>]] = [[P(i, j), P(i + 1, j), P(i, j + 1)]]
+                        if i + j + 1 < k { tris.append([P(i + 1, j), P(i + 1, j + 1), P(i, j + 1)]) }
+                        for t in tris { for uv in t {
+                            emit(region.origin + bu * uv.x + bv * uv.y + n * depthAt(uv), -n)
+                        } }
+                    } }
                 }
             }
         }
