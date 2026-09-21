@@ -3,136 +3,219 @@ import simd
 
 // ★★★ THE LATTICE'S THICKNESS THROUGH THE WALL (his 2026-09-20/21: "I want the sim to
 // decide the thickness of the lattice wall itself. Currently it should be ALL THE WAY
-// THROUGH. It would mean adding a new variable to the existing infrastructure").
+// THROUGH. It would mean adding a new variable to the existing infrastructure"), built
+// to his design `docs/design/lattice-page/Lattice Wall Thickness.dc.html` (2026-09-21).
 //
 // A face region is a prism: the face outline extruded `depthMM` into the part. Until
-// now the lattice filled the whole prism. This is a SLAB inside that prism — where it
-// starts (a share of the depth in from the face) and how thick it is at every point of
-// the face (a share of what is left). Five ways to pick the thickness:
+// now the lattice filled the whole prism. This is a SLAB inside that prism, and the
+// design says it in two questions:
 //
-//   through       the whole prism, as it always was (the default; an untouched project
-//                 emits byte-identically)
-//   sim           HIS RULE, agreed 2026-09-21: thickness at a face point = the depth ×
-//                 that point's normalised stress (the column's peak von Mises over the
-//                 part's 95th percentile), never thinner than one cell
-//   autoSingle    one thickness for the whole face from the same rule, at the face's own
-//                 95th percentile
-//   manualSingle  one share, typed
-//   manualGrade   two shares that BOUND the sim's rule: lo + (hi − lo) × stress
+//   1. "Depth defined by sim?"  ON  ⇒ the solve decides how deep the lattice goes
+//                               OFF ⇒ the user sets, per wall, the ALLOWED range in mm
+//                                     (start – end, from the outer surface in), "how
+//                                     much of the wall's thickness COULD be used"
+//   2. "Density through the wall" (only when the range is the user's): what WILL be used
+//        sim           HIS RULE, agreed 2026-09-21: at each face point the slab is the
+//                      allowed range × that point's normalised stress (the column's peak
+//                      von Mises over the part's 95th percentile), never under one cell
+//        autoSingle    one thickness for the wall, the same rule at the wall's own p95
+//        manualSingle  one share of the allowed range, typed (%)
+//        manualGrade   the profile he DRAWS per wall: a start curve and an end curve
+//                      across the wall's width, in the viewer's grading tool
 //
 // PREVIEW FIRST (his rule, 2026-09-20): the slab is applied where the app builds the
-// preview — the region distance every reader clips against, the organic candidates, the
-// octree's cells, the cap wall drawn where the prism ends — and NOTHING reaches core's
-// job until it is agreed to work. The job's region still carries the declared depth.
+// preview — the one region distance every reader clips against, the organic candidates,
+// the octree's cells, the cap walls drawn where the slab starts and ends — and NOTHING
+// reaches core's job until it is agreed to work. The job's region still carries the
+// declared depth. Untouched projects encode byte-identically.
 
-public enum LatticeWallThicknessMode: String, Codable, CaseIterable, Sendable {
-    case through, sim, autoSingle, manualSingle, manualGrade
+public enum LatticeWallDensityMode: String, Codable, CaseIterable, Sendable {
+    case sim, autoSingle, manualSingle, manualGrade
 
     public var title: String {
         switch self {
-        case .through: return "Through"
-        case .sim: return "Sim"
-        case .autoSingle: return "Auto"
-        case .manualSingle: return "Manual"
-        case .manualGrade: return "Grade"
+        case .sim: return "Graded by sim"
+        case .autoSingle: return "Auto single density"
+        case .manualSingle: return "Manual single density"
+        case .manualGrade: return "Manual grade"
         }
     }
-    /// One line, under the picker.
     public var brief: String {
         switch self {
-        case .through: return "The lattice fills the whole depth."
-        case .sim: return "The solve sets the thickness at every point."
-        case .autoSingle: return "One thickness for the wall, from the solve."
-        case .manualSingle: return "One thickness, as a share of the depth."
-        case .manualGrade: return "The solve grades between two shares."
+        case .sim: return "FEA stress field drives density"
+        case .autoSingle: return "One value chosen for the part"
+        case .manualSingle: return "One value you set"
+        case .manualGrade: return "Draw the density profile per wall"
         }
     }
-    /// The sentence behind (i).
-    public var body: String {
-        switch self {
-        case .through:
-            return "Every point of the face is latticed from the face to the declared depth, as before."
-        case .sim:
-            return "At each point of the face the slab is the declared depth times that point's "
-                + "stress, relative to the part's 95th-percentile stress; thick where the load is, "
-                + "thin where it is not, never thinner than one cell."
-        case .autoSingle:
-            return "The same rule, at the wall's own 95th-percentile stress, giving one thickness "
-                + "for the whole wall."
-        case .manualSingle:
-            return "The slab is this share of the declared depth everywhere on the face."
-        case .manualGrade:
-            return "The solve grades the thickness between the two shares: the low share where "
-                + "the stress is lowest, the high share where it peaks."
-        }
-    }
-    public var readsTheSolve: Bool { self == .sim || self == .autoSingle || self == .manualGrade }
+    public var readsTheSolve: Bool { self == .sim || self == .autoSingle }
 }
 
-/// What the user asked for — the request, not the answer. Shares are of the declared
-/// depth; `start` is where the slab begins, in from the face.
+/// One point of a drawn profile, in the wall's normalised box: x across the wall's width
+/// (0…1), y through its thickness (0 = outer surface, 1 = inner). `smooth` false is a
+/// corner; `tx/ty` an explicit tangent (Catmull-Rom otherwise), as in the design.
+public struct LatticeWallProfilePoint: Codable, Equatable, Sendable {
+    public var x: Double
+    public var y: Double
+    public var smooth: Bool = true
+    public var tx: Double? = nil
+    public var ty: Double? = nil
+    public init(x: Double, y: Double, smooth: Bool = true, tx: Double? = nil, ty: Double? = nil) {
+        self.x = x; self.y = y; self.smooth = smooth; self.tx = tx; self.ty = ty
+    }
+}
+
+/// The drawn profile of one wall: the START curve (kept in the outer half, y ≤ 0.5) and
+/// the END curve (the inner half, y ≥ 0.5) — the lattice lives between them.
+public struct LatticeWallProfile: Codable, Equatable, Sendable {
+    public var start: [LatticeWallProfilePoint]
+    public var end: [LatticeWallProfilePoint]
+    public var curveStart: Bool = true
+    public var curveEnd: Bool = true
+
+    public init(start: [LatticeWallProfilePoint], end: [LatticeWallProfilePoint],
+                curveStart: Bool = true, curveEnd: Bool = true) {
+        self.start = start; self.end = end; self.curveStart = curveStart; self.curveEnd = curveEnd
+    }
+    /// Two straight lines at the allowed range's shares.
+    public static func flat(start a: Double, end b: Double) -> LatticeWallProfile {
+        LatticeWallProfile(start: [.init(x: 0, y: min(a, 0.5)), .init(x: 1, y: min(a, 0.5))],
+                           end: [.init(x: 0, y: max(b, 0.5)), .init(x: 1, y: max(b, 0.5))])
+    }
+
+    // ── the design's geometry, ported verbatim (`tangent`, `pathD`) ──────────────
+    static func tangent(_ pts: [LatticeWallProfilePoint], _ i: Int) -> SIMD2<Double> {
+        let p = pts[i]
+        if let tx = p.tx, let ty = p.ty { return SIMD2(tx, ty) }
+        let a = i > 0 ? pts[i - 1] : p, b = i + 1 < pts.count ? pts[i + 1] : p
+        return SIMD2((b.x - a.x) / 6, (b.y - a.y) / 6)
+    }
+
+    /// The curve as a polyline in the normalised box, 24 samples per smooth segment,
+    /// flattened along the mid-plane where it would cross (`side` start ⇒ y ≤ 0.5).
+    public static func polyline(_ pts: [LatticeWallProfilePoint], curved: Bool,
+                                side: Side?) -> [SIMD2<Double>] {
+        guard pts.count >= 2 else { return pts.map { SIMD2($0.x, $0.y) } }
+        func clampY(_ y: Double) -> Double {
+            switch side { case .none: return y; case .start: return min(y, 0.5); case .end: return max(y, 0.5) }
+        }
+        var out = [SIMD2(pts[0].x, clampY(pts[0].y))]
+        for i in 0..<(pts.count - 1) {
+            let p0 = SIMD2(pts[i].x, pts[i].y), p1 = SIMD2(pts[i + 1].x, pts[i + 1].y)
+            if !curved || !pts[i].smooth || !pts[i + 1].smooth {
+                out.append(SIMD2(p1.x, clampY(p1.y))); continue
+            }
+            let t1 = tangent(pts, i), t2 = tangent(pts, i + 1)
+            let c1 = p0 + t1, c2 = p1 - t2
+            let n = 24
+            for k in 1...n {
+                let u = Double(k) / Double(n), v = 1 - u
+                let q = v*v*v*p0 + 3*v*v*u*c1 + 3*v*u*u*c2 + u*u*u*p1
+                out.append(SIMD2(q.x, clampY(q.y)))
+            }
+        }
+        return out
+    }
+
+    public enum Side: String, Codable, Sendable { case start, end }
+
+    /// y of a side's curve at x (0…1): the polyline's first crossing of x, its ends
+    /// held beyond the range.
+    public func y(at x: Double, side: Side) -> Double {
+        let pts = side == .start ? start : end
+        let curved = side == .start ? curveStart : curveEnd
+        let poly = LatticeWallProfile.polyline(pts, curved: curved, side: side)
+        guard let first = poly.first, let last = poly.last else { return side == .start ? 0 : 1 }
+        if x <= first.x { return first.y }
+        if x >= last.x { return last.y }
+        for i in 0..<(poly.count - 1) {
+            let a = poly[i], b = poly[i + 1]
+            if (a.x <= x && x <= b.x) || (b.x <= x && x <= a.x) {
+                let d = b.x - a.x
+                let t = abs(d) < 1e-12 ? 0 : (x - a.x) / d
+                return a.y + (b.y - a.y) * t
+            }
+        }
+        return last.y
+    }
+}
+
+/// One wall's own ask: the allowed range in mm from the outer surface (end nil = the
+/// declared depth) and, for `manualGrade`, the profile drawn for it.
+public struct LatticeFaceWallThickness: Codable, Equatable, Sendable {
+    public var startMM: Double = 0
+    public var endMM: Double? = nil
+    public var profile: LatticeWallProfile? = nil
+    public init(startMM: Double = 0, endMM: Double? = nil, profile: LatticeWallProfile? = nil) {
+        self.startMM = startMM; self.endMM = endMM; self.profile = profile
+    }
+    public var isFull: Bool { startMM <= 0 && endMM == nil && profile == nil }
+}
+
+/// What the user asked for — the request, not the answer. The default is the whole
+/// prism, exactly as before the variable existed.
 public struct LatticeWallThickness: Equatable, Sendable, Codable {
-    public var mode: LatticeWallThicknessMode = .through
-    public var startShare: Double = 0
-    public var share: Double = 1          // manualSingle
-    public var loShare: Double = 0.5      // manualGrade
-    public var hiShare: Double = 1        // manualGrade
+    public var depthBySim: Bool = false
+    public var density: LatticeWallDensityMode = .manualSingle
+    /// manualSingle: the share of the allowed range that is latticed, in percent.
+    public var pct: Double = 100
+    /// per wall, by the region's selectable key ("f:<group>:<face>")
+    public var faces: [String: LatticeFaceWallThickness] = [:]
 
-    public static let through = LatticeWallThickness()
     public init() {}
-    public init(mode: LatticeWallThicknessMode, startShare: Double = 0, share: Double = 1,
-                loShare: Double = 0.5, hiShare: Double = 1) {
-        self.mode = mode; self.startShare = startShare; self.share = share
-        self.loShare = loShare; self.hiShare = hiShare
+    public init(depthBySim: Bool, density: LatticeWallDensityMode = .manualSingle, pct: Double = 100,
+                faces: [String: LatticeFaceWallThickness] = [:]) {
+        self.depthBySim = depthBySim; self.density = density; self.pct = pct; self.faces = faces
     }
+    public static let through = LatticeWallThickness()
+
     /// The default asks for nothing the prism does not already do.
-    public var isThrough: Bool { mode == .through && startShare <= 0 }
+    public var isThrough: Bool {
+        !depthBySim && density == .manualSingle && pct >= 100 && faces.values.allSatisfy { $0.isFull }
+    }
+    public func face(_ key: String?) -> LatticeFaceWallThickness { faces[key ?? ""] ?? LatticeFaceWallThickness() }
 }
 
-/// The answer for one face: a raster over the face's (u, v) plane holding the slab's
-/// thickness as a SHARE of the depth left past `startMM` (0…1), and the start itself.
+/// The answer for one face: rasters over the face's (u, v) plane holding where the slab
+/// STARTS and ENDS, in mm from the outer surface along the normal.
 public struct LatticeWallThicknessMap: Equatable, Sendable {
-    public let startMM: Double
     public let origin: SIMD2<Double>
     public let h: Double
     public let nu: Int, nv: Int
-    public var shares: [Float]           // nu × nv, u fastest; NaN = never filled
+    public var starts: [Float]
+    public var ends: [Float]
 
-    public init(startMM: Double, origin: SIMD2<Double>, h: Double, nu: Int, nv: Int, shares: [Float]) {
-        self.startMM = startMM; self.origin = origin; self.h = h; self.nu = nu; self.nv = nv
-        self.shares = shares
+    public init(origin: SIMD2<Double>, h: Double, nu: Int, nv: Int, starts: [Float], ends: [Float]) {
+        self.origin = origin; self.h = h; self.nu = nu; self.nv = nv; self.starts = starts; self.ends = ends
     }
-
-    /// A map that is the same share everywhere.
-    public static func constant(_ share: Double, startMM: Double) -> LatticeWallThicknessMap {
-        LatticeWallThicknessMap(startMM: startMM, origin: .zero, h: 1, nu: 1, nv: 1,
-                                shares: [Float(min(1, max(0, share)))])
+    public static func constant(startMM: Double, endMM: Double) -> LatticeWallThicknessMap {
+        LatticeWallThicknessMap(origin: .zero, h: 1, nu: 1, nv: 1, starts: [Float(startMM)], ends: [Float(endMM)])
     }
+    public var isConstant: Bool { nu == 1 && nv == 1 }
+    public var startMM: Double { Double(starts.min() ?? 0) }
 
-    /// The share at `uv`, bilinear, clamped to the raster's edge.
-    public func share(at uv: SIMD2<Double>) -> Double {
-        if nu == 1 && nv == 1 { return Double(shares[0]) }
+    private func sample(_ a: [Float], at uv: SIMD2<Double>, fallback: Double) -> Double {
+        if nu == 1 && nv == 1 { return Double(a[0]) }
         let fx = min(max((uv.x - origin.x) / h, 0), Double(nu - 1))
         let fy = min(max((uv.y - origin.y) / h, 0), Double(nv - 1))
         let i0 = Int(fx), j0 = Int(fy)
         let i1 = min(i0 + 1, nu - 1), j1 = min(j0 + 1, nv - 1)
         let tx = fx - Double(i0), ty = fy - Double(j0)
-        func v(_ i: Int, _ j: Int) -> Double { Double(shares[j * nu + i]) }
-        let a = v(i0, j0) * (1 - tx) + v(i1, j0) * tx
-        let b = v(i0, j1) * (1 - tx) + v(i1, j1) * tx
-        let s = a * (1 - ty) + b * ty
-        return s.isFinite ? s : 1
+        func v(_ i: Int, _ j: Int) -> Double { Double(a[j * nu + i]) }
+        let r0 = v(i0, j0) * (1 - tx) + v(i1, j0) * tx
+        let r1 = v(i0, j1) * (1 - tx) + v(i1, j1) * tx
+        let s = r0 * (1 - ty) + r1 * ty
+        return s.isFinite ? s : fallback
     }
-
-    /// Where the slab ends (mm in from the face) at `uv`, for a prism `depthMM` deep.
-    public func endMM(at uv: SIMD2<Double>, depthMM: Double) -> Double {
-        startMM + share(at: uv) * max(0, depthMM - startMM)
+    /// The slab at `uv`: [start, end] in mm from the outer surface.
+    public func range(at uv: SIMD2<Double>, depthMM: Double) -> (start: Double, end: Double) {
+        let s = sample(starts, at: uv, fallback: 0), e = sample(ends, at: uv, fallback: depthMM)
+        return (min(max(0, s), depthMM), min(max(s, e), depthMM))
     }
-
     public var summary: (p05: Double, p50: Double, p95: Double) {
-        let s = shares.filter { $0.isFinite }.sorted()
-        guard !s.isEmpty else { return (1, 1, 1) }
-        func q(_ f: Double) -> Double { Double(s[min(s.count - 1, Int(Double(s.count - 1) * f))]) }
+        let t = zip(starts, ends).map { Double($1 - $0) }.filter { $0.isFinite }.sorted()
+        guard !t.isEmpty else { return (0, 0, 0) }
+        func q(_ f: Double) -> Double { t[min(t.count - 1, Int(Double(t.count - 1) * f))] }
         return (q(0.05), q(0.5), q(0.95))
     }
 }
@@ -159,36 +242,76 @@ public enum LatticeWallThicknessBuilder {
         return Double(vals[min(vals.count - 1, Int(Double(vals.count - 1) * 0.95))])
     }
 
-    /// The map for one face. `floorMM` is one cell — the slab is never thinner. Returns
-    /// nil when the request is the whole prism (nothing to apply).
+    /// The face's own frame: (u, v) basis, the outline's bounds, and which in-plane axis
+    /// is the wall's WIDTH (the longer one) — the x of a drawn profile.
+    public struct FaceFrame {
+        public let bu: SIMD3<Double>, bv: SIMD3<Double>
+        public let lo: SIMD2<Double>, hi: SIMD2<Double>
+        public let widthAlongU: Bool
+        public var widthMM: Double { widthAlongU ? hi.x - lo.x : hi.y - lo.y }
+        /// 0…1 across the wall's width at `uv`.
+        public func x(at uv: SIMD2<Double>) -> Double {
+            let w = widthMM
+            guard w > 1e-9 else { return 0 }
+            return min(1, max(0, (widthAlongU ? uv.x - lo.x : uv.y - lo.y) / w))
+        }
+    }
+    public static func frame(_ r: LatticeRegionSpec) -> FaceFrame? {
+        let n = LatticeRegionMask.unit(r.normal)
+        guard simd_length(n) > 0.5 else { return nil }
+        let (bu, bv) = LatticeRegionMask.basis(n)
+        var lo = SIMD2<Double>(1e9, 1e9), hi = SIMD2<Double>(-1e9, -1e9)
+        for loop in r.outlineLoops { for q in loop { lo = simd_min(lo, q); hi = simd_max(hi, q) } }
+        if r.outlineLoops.isEmpty { lo = SIMD2(-r.halfUMM, -r.halfWMM); hi = SIMD2(r.halfUMM, r.halfWMM) }
+        guard lo.x < hi.x, lo.y < hi.y else { return nil }
+        return FaceFrame(bu: bu, bv: bv, lo: lo, hi: hi, widthAlongU: (hi.x - lo.x) >= (hi.y - lo.y))
+    }
+
+    /// The map for one face, or nil when the request is the whole prism. `floorMM` is
+    /// one cell — the slab is never thinner where there is room.
     public static func build(region r: LatticeRegionSpec, spec: LatticeWallThickness,
                              field: StressField?, referenceMPa: Double,
                              floorMM: Double) -> LatticeWallThicknessMap? {
         guard r.role == .include, r.kind == .face, r.depthMM > 0, !spec.isThrough else { return nil }
-        let startMM = min(max(0, spec.startShare), 0.95) * r.depthMM
-        let left = max(0, r.depthMM - startMM)
-        let floorShare = left > 0 ? min(1, max(0, floorMM) / left) : 1
-        func clampShare(_ s: Double) -> Double { min(1, max(floorShare, s)) }
-        switch spec.mode {
-        case .through:
-            return .constant(1, startMM: startMM)
+        let depth = r.depthMM
+        let ask = spec.face(r.selectableKey)
+        // the allowed range, from the outer surface in
+        let a0 = spec.depthBySim ? 0 : min(max(0, ask.startMM), depth * 0.95)
+        let a1 = spec.depthBySim ? depth : min(max(a0, ask.endMM ?? depth), depth)
+        let room = max(0, a1 - a0)
+        let floorT = min(room, max(0, floorMM))
+        func endFor(share: Double) -> Double { a0 + max(floorT, min(1, max(0, share)) * room) }
+
+        let mode: LatticeWallDensityMode = spec.depthBySim ? .sim : spec.density
+        switch mode {
         case .manualSingle:
-            return .constant(clampShare(spec.share), startMM: startMM)
-        case .sim, .autoSingle, .manualGrade:
-            // ★ the stress at the face: the column's peak, per (u, v) cell of the raster
-            let n = LatticeRegionMask.unit(r.normal)
-            guard simd_length(n) > 0.5 else { return .constant(1, startMM: startMM) }
-            let (bu, bv) = LatticeRegionMask.basis(n)
-            var lo = SIMD2<Double>(1e9, 1e9), hi = SIMD2<Double>(-1e9, -1e9)
-            for loop in r.outlineLoops { for q in loop { lo = simd_min(lo, q); hi = simd_max(hi, q) } }
-            guard lo.x < hi.x, lo.y < hi.y, let field, referenceMPa > 0,
+            return .constant(startMM: a0, endMM: endFor(share: spec.pct / 100))
+        case .manualGrade:
+            guard let fr = frame(r), let prof = ask.profile else {
+                return .constant(startMM: a0, endMM: a1)
+            }
+            let h = max(0.5, fr.widthMM / 96)
+            let nu = Int(((fr.hi.x - fr.lo.x) / h).rounded(.up)) + 1
+            let nv = Int(((fr.hi.y - fr.lo.y) / h).rounded(.up)) + 1
+            var starts = [Float](repeating: 0, count: nu * nv), ends = [Float](repeating: 0, count: nu * nv)
+            for j in 0..<nv { for i in 0..<nu {
+                let uv = fr.lo + SIMD2(Double(i), Double(j)) * h
+                let x = fr.x(at: uv)
+                // the profile is drawn over the WHOLE wall thickness, then held inside the range
+                var s = min(max(prof.y(at: x, side: .start) * depth, a0), a1)
+                var e = min(max(prof.y(at: x, side: .end) * depth, a0), a1)
+                if e < s { swap(&s, &e) }
+                if e - s < floorT { e = min(a1, s + floorT); s = max(a0, e - floorT) }
+                starts[j * nu + i] = Float(s); ends[j * nu + i] = Float(e)
+            } }
+            return LatticeWallThicknessMap(origin: fr.lo, h: h, nu: nu, nv: nv, starts: starts, ends: ends)
+        case .sim, .autoSingle:
+            guard let fr = frame(r), let field, referenceMPa > 0,
                   field.values.count == field.nx * field.ny * field.nz else {
-                // no solve to read: the whole prism, and the wizard says why
-                return .constant(1, startMM: startMM)
+                return .constant(startMM: a0, endMM: a1)      // no solve to read: the range
             }
             let h = max(0.5, Double(field.spacing) * 0.5)
-            let pad = h
-            lo -= SIMD2(pad, pad); hi += SIMD2(pad, pad)
+            let lo = fr.lo - SIMD2(h, h), hi = fr.hi + SIMD2(h, h)
             let nu = Int(((hi.x - lo.x) / h).rounded(.up)) + 1
             let nv = Int(((hi.y - lo.y) / h).rounded(.up)) + 1
             var peak = [Float](repeating: .nan, count: nu * nv)
@@ -204,7 +327,7 @@ public enum LatticeWallThicknessBuilder {
                     let v = field.values[(k * field.ny + j) * field.nx + i]
                     guard v.isFinite else { continue }
                     let d = p - r.origin
-                    let uv = SIMD2<Double>(simd_dot(d, bu), simd_dot(d, bv))
+                    let uv = SIMD2<Double>(simd_dot(d, fr.bu), simd_dot(d, fr.bv))
                     let ci = min(nu - 1, max(0, Int((uv.x - lo.x) / h)))
                     let cj = min(nv - 1, max(0, Int((uv.y - lo.y) / h)))
                     let e = cj * nu + ci
@@ -212,8 +335,7 @@ public enum LatticeWallThicknessBuilder {
                     if peak[e].isNaN || s > peak[e] { peak[e] = s }
                 } } }
             }
-            // cells no voxel centre landed in take their neighbours' peak, a few passes
-            for _ in 0..<3 {
+            for _ in 0..<3 {                       // cells no voxel landed in take a neighbour's
                 var next = peak
                 for j in 0..<nv { for i in 0..<nu where peak[j * nu + i].isNaN {
                     var best: Float = .nan
@@ -227,21 +349,16 @@ public enum LatticeWallThicknessBuilder {
                 } }
                 peak = next
             }
-            var shares = [Float](repeating: .nan, count: nu * nv)
-            switch spec.mode {
-            case .sim:
-                for e in 0..<peak.count where peak[e].isFinite { shares[e] = Float(clampShare(Double(peak[e]))) }
-            case .manualGrade:
-                let a = min(spec.loShare, spec.hiShare), b = max(spec.loShare, spec.hiShare)
-                for e in 0..<peak.count where peak[e].isFinite { shares[e] = Float(clampShare(a + (b - a) * Double(peak[e]))) }
-            case .autoSingle:
+            guard peak.contains(where: { $0.isFinite }) else { return .constant(startMM: a0, endMM: a1) }
+            if mode == .autoSingle {
                 let s = peak.filter { $0.isFinite }.sorted()
-                let p95 = s.isEmpty ? 1 : Double(s[min(s.count - 1, Int(Double(s.count - 1) * 0.95))])
-                return .constant(clampShare(p95), startMM: startMM)
-            default: break
+                let p95 = Double(s[min(s.count - 1, Int(Double(s.count - 1) * 0.95))])
+                return .constant(startMM: a0, endMM: endFor(share: p95))
             }
-            if !shares.contains(where: { $0.isFinite }) { return .constant(1, startMM: startMM) }
-            return LatticeWallThicknessMap(startMM: startMM, origin: lo, h: h, nu: nu, nv: nv, shares: shares)
+            var starts = [Float](repeating: Float(a0), count: nu * nv), ends = [Float](repeating: .nan, count: nu * nv)
+            for e in 0..<peak.count where peak[e].isFinite { ends[e] = Float(endFor(share: Double(peak[e]))) }
+            for e in 0..<ends.count where ends[e].isNaN { ends[e] = Float(a1); starts[e] = Float(a0) }
+            return LatticeWallThicknessMap(origin: lo, h: h, nu: nu, nv: nv, starts: starts, ends: ends)
         }
     }
 
@@ -250,12 +367,10 @@ public enum LatticeWallThicknessBuilder {
         let n = LatticeRegionMask.unit(r.normal)
         let (bu, bv) = LatticeRegionMask.basis(n)
         var lo = SIMD3<Double>(repeating: 1e9), hi = SIMD3<Double>(repeating: -1e9)
-        for loop in r.outlineLoops { for q in loop {
-            for s in [0.0, r.depthMM] {
-                let p = r.origin + bu * q.x + bv * q.y + n * s
-                lo = simd_min(lo, p); hi = simd_max(hi, p)
-            }
-        } }
+        for loop in r.outlineLoops { for q in loop { for s in [0.0, r.depthMM] {
+            let p = r.origin + bu * q.x + bv * q.y + n * s
+            lo = simd_min(lo, p); hi = simd_max(hi, p)
+        } } }
         if r.outlineLoops.isEmpty {
             for su in [-r.halfUMM, r.halfUMM] { for sv in [-r.halfWMM, r.halfWMM] { for s in [0.0, r.depthMM] {
                 let p = r.origin + bu * su + bv * sv + n * s
@@ -269,8 +384,11 @@ public enum LatticeWallThicknessBuilder {
     /// carry the answer; the job's copy never sees it.
     public static func attach(_ regions: [LatticeRegionSpec], field: StressField?,
                               floorMM: Double) -> [LatticeRegionSpec] {
-        guard regions.contains(where: { $0.thickness != nil && !($0.thickness!.isThrough) }) else { return regions }
-        let needsField = regions.contains { ($0.thickness?.mode.readsTheSolve ?? false) }
+        guard regions.contains(where: { $0.thickness.map { !$0.isThrough } ?? false }) else { return regions }
+        let needsField = regions.contains { r in
+            guard let t = r.thickness else { return false }
+            return t.depthBySim || t.density.readsTheSolve
+        }
         let ref = (needsField && field != nil) ? referenceMPa(field: field!, regions: regions) : 0
         var out = regions
         for i in out.indices {

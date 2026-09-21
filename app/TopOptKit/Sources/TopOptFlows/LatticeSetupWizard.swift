@@ -110,6 +110,7 @@ public struct LatticeSetupWizard: View {
             ZStack {
                 DS.Color.background.color.ignoresSafeArea()
                 stageView
+                wallEditorOverlay
                 // ★ ONE MODAL (maintainer, 2026-08-14): *"Combine the two modals
                 // together. Place the one on the right at the very bottom of the
                 // one on the left."* The floating wizard card is gone; its view
@@ -118,7 +119,7 @@ public struct LatticeSetupWizard: View {
                     .modifier(WizardModalPlacement(canvasHeight: geo.size.height))
                 disclaimer
                 saveAndExit
-                refreshSample
+                if wallEditorStage == nil { refreshSample }
             }
         }
         // ★ §7b — FRAME THE SAMPLE ON ENTRY, at a sensible size, whatever the
@@ -164,6 +165,10 @@ public struct LatticeSetupWizard: View {
     @State private var organicSampleStatus: String?
     /// Which (i) popover is open, by id — one at a time.
     @State private var infoShown: String?
+    /// ★ the wall editor over the viewer (his design, 2026-09-21): which stage, and the
+    /// draft it edits until Save
+    @State private var wallEditorStage: LatticeWallEditorStage? = nil
+    @State private var wallEditorDraft: LatticeWallThickness? = nil
     /// ★ The small pop-up for the single-cell ⇄ finish rule (2026-09-18): which one is
     /// showing — "skin-required" when the switch turns on, "finish-locked" when a locked
     /// finish is tapped.
@@ -628,77 +633,200 @@ public struct LatticeSetupWizard: View {
 
     /// ★ 3 — HOW the cells change: the algorithm. Always asked, whatever the
     /// grade, because it is what is laid down rather than how it varies.
-    // ★★★ THE LATTICE'S THICKNESS THROUGH THE WALL (his 2026-09-20/21). Both lattice
-    // pages, both stages; a preview request until it is agreed to work. See
-    // `LatticeWallThickness` for the five modes and the sim rule.
+    // ★★★ THE LATTICE'S THICKNESS THROUGH THE WALL — his design `Lattice Wall
+    // Thickness.dc.html` (2026-09-21): "Depth defined by sim?", else the allowed range
+    // per wall in mm and "Density through the wall". Both lattice pages, both stages;
+    // a preview request until it is agreed to work. See `LatticeWallThickness`.
+    private var wallEditorFaces: [LatticeWallEditorFace] {
+        project.latticeJobRegions().regions
+            .filter { $0.role == .include && $0.kind == .face && $0.depthMM > 0 }
+            .map { r in
+                let key = r.selectableKey ?? ""
+                let tint: Color = {
+                    if let gid = key.split(separator: ":").dropFirst().first, let uuid = UUID(uuidString: String(gid)),
+                       let g = project.selection.groups.first(where: { $0.id == uuid }) { return g.color.color }
+                    return DS.Color.accent.color
+                }()
+                let width = LatticeWallThicknessBuilder.frame(r)?.widthMM ?? 2 * max(r.halfUMM, r.halfWMM)
+                return LatticeWallEditorFace(id: key, name: r.faceID.map { "Face \($0)" } ?? "Wall",
+                                             tint: tint, widthMM: width, thickMM: r.depthMM)
+            }
+    }
+
+    private static let wallGreen = Color(red: 0x30 / 255, green: 0xD1 / 255, blue: 0x58 / 255)
+
     @ViewBuilder private var wallThicknessRow: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            Text("Thickness through the wall")
-                .font(.system(size: 10, weight: .bold))
+        let ask = model.wallThickness
+        let noSolve = !model.simulateStresses
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Lattice wall thickness")
+                .font(.system(size: 12, weight: .bold))
                 .foregroundStyle(DS.Color.textTertiary.color)
-            HStack(spacing: DS.Space.xs) {
-                ForEach(LatticeWallThicknessMode.allCases, id: \.rawValue) { m in
-                    let off = m.readsTheSolve && !model.simulateStresses
-                    Button {
-                        guard !off else { return }
-                        model.wallThicknessMode = m
-                        rebuild()
-                    } label: {
-                        Text(m.title)
-                            .font(.system(size: 11, weight: .semibold))
-                            .lineLimit(1).minimumScaleFactor(0.8)
-                            .padding(.vertical, 6).padding(.horizontal, DS.Space.s)
-                            .frame(maxWidth: .infinity)
-                            .background(RoundedRectangle(cornerRadius: DS.Radius.pill)
-                                .fill((model.wallThicknessMode == m
-                                       ? DS.Color.accent.opacity(0.85)
-                                       : DS.Color.background.opacity(0.35)).color))
-                            .foregroundStyle((off ? DS.Color.textTertiary
-                                             : DS.Color.textPrimary).color)
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(off)
-                    .accessibilityIdentifier("wizard-wall-thickness-\(m.rawValue)")
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Depth defined by sim?").font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(DS.Color.textPrimary.color)
+                    Text(noSolve && !ask.depthBySim ? "Needs Simulate Stresses"
+                         : ask.depthBySim ? "FEA decides how deep the lattice goes" : "You set the allowed range per wall")
+                        .font(.system(size: 12)).foregroundStyle(DS.Color.textTertiary.color)
                 }
+                Spacer(minLength: 0)
+                Toggle("", isOn: Binding(get: { ask.depthBySim },
+                                         set: { on in
+                                             model.wallThickness.depthBySim = on
+                                             if on { wallEditorStage = nil; wallEditorDraft = nil }
+                                             rebuild()
+                                         }))
+                    .labelsHidden().toggleStyle(SwitchToggleStyle(tint: DS.Color.accent.color))
+                    .disabled(noSolve && !ask.depthBySim)
+                    .accessibilityIdentifier("wizard-wall-depth-by-sim")
             }
-            captionLine(model.wallThicknessMode.readsTheSolve && !model.simulateStresses
-                        ? "Needs Simulate Stresses."
-                        : model.wallThicknessMode.brief,
-                        info: "wall-thickness", model.wallThicknessMode.body)
-            if model.wallThicknessMode == .manualSingle {
-                shareSlider("Share", id: "wizard-wall-thickness-share", range: 0.05...1,
-                            get: { model.wallThicknessShare }, set: { model.wallThicknessShare = $0 })
+            .padding(.horizontal, 14).frame(minHeight: 56)
+            .background(RoundedRectangle(cornerRadius: 16).fill(Color.white.opacity(0.05))
+                .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(Color.white.opacity(0.09))))
+            if !ask.depthBySim {
+                (Text("How much of the wall's thickness ") + Text("could").italic() + Text(" be used for the lattice — what ")
+                 + Text("will").italic() + Text(" be used follows below."))
+                    .font(.system(size: 13)).foregroundStyle(DS.Color.textPrimary.opacity(0.72).color)
+                    .fixedSize(horizontal: false, vertical: true)
+                ForEach(wallEditorFaces) { f in
+                    let fa = ask.face(f.id)
+                    HStack(spacing: 10) {
+                        RoundedRectangle(cornerRadius: 3).fill(f.tint).frame(width: 10, height: 10)
+                        Text(f.name).font(.system(size: 14, weight: .semibold)).lineLimit(1)
+                            .foregroundStyle(DS.Color.textPrimary.color)
+                            .onTapGesture { wallEditorDraft = model.wallThickness; wallEditorStage = .thickness }
+                        Spacer(minLength: 0)
+                        WallNumberField(text: String(format: "%.1f", fa.startMM), tint: Self.wallGreen) { v in
+                            model.wallThickness.faces[f.id, default: LatticeFaceWallThickness()].startMM =
+                                Swift.min(Swift.max(0, v), (fa.endMM ?? f.thickMM) - 0.1)
+                            rebuild()
+                        }
+                        .accessibilityIdentifier("wizard-wall-start-\(f.id)")
+                        Text("–").font(.system(size: 12)).foregroundStyle(DS.Color.textQuaternary.color)
+                        WallNumberField(text: String(format: "%.1f", fa.endMM ?? f.thickMM), tint: DS.Color.danger.color) { v in
+                            let e = Swift.min(Swift.max(fa.startMM + 0.1, v), f.thickMM)
+                            model.wallThickness.faces[f.id, default: LatticeFaceWallThickness()].endMM = e >= f.thickMM - 1e-9 ? nil : e
+                            rebuild()
+                        }
+                        .accessibilityIdentifier("wizard-wall-end-\(f.id)")
+                        Text("mm").font(.system(size: 12)).foregroundStyle(DS.Color.textQuaternary.color)
+                    }
+                    .padding(.horizontal, 14).frame(minHeight: 50)
+                    .background(RoundedRectangle(cornerRadius: 14).fill(Color.white.opacity(0.04))
+                        .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(Color.white.opacity(0.08))))
+                }
+                Text("Density through the wall")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(DS.Color.textTertiary.color)
+                    .padding(.top, 12)
+                VStack(spacing: 0) {
+                    ForEach(Array(LatticeWallDensityMode.allCases.enumerated()), id: \.element.rawValue) { i, o in
+                        let on = ask.density == o
+                        let off = o.readsTheSolve && noSolve
+                        VStack(spacing: 0) {
+                            Button {
+                                guard !off else { return }
+                                model.wallThickness.density = o
+                                if o == .manualGrade { wallEditorDraft = model.wallThickness; wallEditorStage = .grade }
+                                else if wallEditorStage == .grade { wallEditorStage = nil; wallEditorDraft = nil }
+                                rebuild()
+                            } label: {
+                                HStack(spacing: 12) {
+                                    Circle().strokeBorder(on ? DS.Color.accent.color : Color.white.opacity(0.3), lineWidth: 2)
+                                        .frame(width: 22, height: 22)
+                                        .overlay(Circle().fill(on ? DS.Color.accent.color : .clear).frame(width: 11, height: 11))
+                                    VStack(alignment: .leading, spacing: 1) {
+                                        Text(o.title).font(.system(size: 14.5, weight: .semibold))
+                                            .foregroundStyle((off ? DS.Color.textTertiary : DS.Color.textPrimary).color)
+                                        Text(off ? "Needs Simulate Stresses" : o.brief).font(.system(size: 11.5))
+                                            .foregroundStyle(DS.Color.textTertiary.color)
+                                    }
+                                    Spacer(minLength: 0)
+                                }
+                                .padding(.horizontal, 14).frame(minHeight: 52)
+                                .background(on ? DS.Color.accent.opacity(0.10).color : .clear)
+                                .overlay(alignment: .top) { if i > 0 { Color.white.opacity(0.06).frame(height: 1) } }
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(off)
+                            .accessibilityIdentifier("wizard-wall-density-\(o.rawValue)")
+                            if on, o == .manualSingle {
+                                HStack(spacing: 10) {
+                                    WallNumberField(text: String(format: "%.0f", ask.pct), tint: DS.Color.textPrimary.color, wide: true) { v in
+                                        model.wallThickness.pct = Swift.min(100, Swift.max(5, v.rounded())); rebuild()
+                                    }
+                                    .accessibilityIdentifier("wizard-wall-pct")
+                                    Text("% density").font(.system(size: 15)).foregroundStyle(DS.Color.textSecondary.color)
+                                }
+                                .padding(.leading, 48).padding(.trailing, 14).padding(.bottom, 12)
+                            }
+                            if on, o == .manualGrade {
+                                VStack(alignment: .leading, spacing: 6) {
+                                    ForEach(wallEditorFaces) { f in
+                                        let p = ask.face(f.id).profile
+                                        HStack(spacing: 8) {
+                                            RoundedRectangle(cornerRadius: 2).fill(f.tint).frame(width: 8, height: 8)
+                                            Text(f.name).font(.system(size: 12.5))
+                                            Spacer(minLength: 0)
+                                            Text(p.map { "\($0.start.count + $0.end.count) pts · \($0.curveStart || $0.curveEnd ? "curved" : "straight")" } ?? "not drawn yet")
+                                                .font(.system(size: 12.5))
+                                        }
+                                        .foregroundStyle(DS.Color.textSecondary.color)
+                                    }
+                                    let editing = wallEditorStage == .grade
+                                    Button {
+                                        if editing { wallEditorStage = nil; wallEditorDraft = nil }
+                                        else { wallEditorDraft = model.wallThickness; wallEditorStage = .grade }
+                                    } label: {
+                                        Text(editing ? "Editing in viewer…" : "Open grading tool")
+                                            .font(.system(size: 13.5, weight: .semibold))
+                                            .frame(maxWidth: .infinity, minHeight: 44)
+                                            .background(RoundedRectangle(cornerRadius: 12)
+                                                .fill(editing ? DS.Color.accent.opacity(0.22).color : Color.white.opacity(0.07))
+                                                .overlay(RoundedRectangle(cornerRadius: 12)
+                                                    .strokeBorder(editing ? DS.Color.accent.opacity(0.55).color : Color.white.opacity(0.12))))
+                                            .foregroundStyle(editing ? Color(red: 0.5, green: 0.75, blue: 1) : DS.Color.textPrimary.color)
+                                    }
+                                    .buttonStyle(.plain)
+                                    .accessibilityIdentifier("wizard-wall-open-grading")
+                                }
+                                .padding(.leading, 48).padding(.trailing, 14).padding(.bottom, 12)
+                            }
+                        }
+                    }
+                }
+                .background(RoundedRectangle(cornerRadius: 16).fill(Color.white.opacity(0.04))
+                    .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(Color.white.opacity(0.09))))
+                .clipShape(RoundedRectangle(cornerRadius: 16))
             }
-            if model.wallThicknessMode == .manualGrade {
-                shareSlider("Low", id: "wizard-wall-thickness-lo", range: 0.05...1,
-                            get: { model.wallThicknessLoShare }, set: { model.wallThicknessLoShare = $0 })
-                shareSlider("High", id: "wizard-wall-thickness-hi", range: 0.05...1,
-                            get: { model.wallThicknessHiShare }, set: { model.wallThicknessHiShare = $0 })
-            }
-            shareSlider("Start", id: "wizard-wall-thickness-start", range: 0...0.9,
-                        get: { model.wallThicknessStartShare }, set: { model.wallThicknessStartShare = $0 })
-            captionLine("Start is where the slab begins, in from the face.",
-                        info: "wall-thickness-start",
-                        "0 % starts the lattice at the face. Anything more leaves that share of the "
-                        + "depth solid before the lattice begins; the shares above are of what is left.",
-                        tint: DS.Color.textQuaternary.color)
         }
     }
 
-    /// A 0–100 % slider with its label, for the thickness shares.
-    @ViewBuilder private func shareSlider(_ label: String, id: String, range: ClosedRange<Double>,
-                                          get: @escaping () -> Double,
-                                          set: @escaping (Double) -> Void) -> some View {
-        HStack(spacing: DS.Space.s) {
-            Text(label).dsStyle(DS.TypeScale.caption2).foregroundStyle(DS.Color.textTertiary.color)
-                .frame(width: 52, alignment: .leading)
-            Slider(value: Binding(get: get, set: { set(($0 * 100).rounded() / 100); rebuild() }),
-                   in: range, step: 0.01)
-                .tint(DS.Color.accent.color)
-                .accessibilityIdentifier(id)
-            Text(String(format: "%.0f %%", get() * 100))
-                .dsStyle(DS.TypeScale.caption).foregroundStyle(DS.Color.textPrimary.color)
-                .frame(width: 52, alignment: .trailing)
+    /// The viewer editor over the stage while a wall is being drawn (his design: the
+    /// card to the right of the panel, the sample hidden behind it).
+    @ViewBuilder private var wallEditorOverlay: some View {
+        if let stage = wallEditorStage {
+            HStack(spacing: 0) {
+                Color.clear.frame(width: 380 + PageChrome.edge * 2)
+                LatticeWallProfileEditor(
+                    faces: wallEditorFaces, stage: stage,
+                    ask: Binding(get: { wallEditorDraft ?? model.wallThickness },
+                                 set: { wallEditorDraft = $0 }),
+                    onCancel: { wallEditorDraft = nil; wallEditorStage = nil },
+                    onSave: {
+                        if let d = wallEditorDraft { model.wallThickness = d }
+                        wallEditorDraft = nil; wallEditorStage = nil
+                        rebuild()
+                    })
+                    .padding(.vertical, 40)
+                    .background(RoundedRectangle(cornerRadius: 30).fill(Color(red: 14 / 255, green: 16 / 255, blue: 24 / 255).opacity(0.62))
+                        .overlay(RoundedRectangle(cornerRadius: 30).strokeBorder(Color.white.opacity(0.08))))
+                    .padding(.trailing, PageChrome.edge)
+                    .padding(.top, 130).padding(.bottom, 60)
+            }
+            .transition(.opacity)
+            .accessibilityIdentifier("wizard-wall-editor")
         }
     }
 
@@ -2278,7 +2406,9 @@ public struct LatticeSetupWizard: View {
                     // against the receipt, the same check a run gets).
                     // ★ ONE SHORT LINE (item 1): the label, or what the sample is doing
                     // right now; the census sits behind the (i).
-                    Text(organicSampleShown
+                    Text(wallEditorStage == .grade ? "Tap above the dotted line to shape the start, below for the end"
+                         : wallEditorStage == .thickness ? "Drag the lines: how much of each wall may become lattice"
+                         : organicSampleShown
                          ? (organicSampleStatus ?? OrganicSampleCube.label)
                          : LatticeWizardSample.provenanceNote)
                         .dsStyle(DS.TypeScale.footnote).fontWeight(.semibold)
@@ -2738,5 +2868,51 @@ private struct OrganicProbeTintModifier: ViewModifier {
         case .amber: return DS.Color.warning.color
         case .grey: return DS.Color.textQuaternary.color
         }
+    }
+}
+
+
+/// A compact numeric field for the wall rows (mm or %): commits the typed number when
+/// the field loses focus or return is pressed.
+struct WallNumberField: View {
+    let text: String
+    let tint: Color
+    var wide: Bool = false
+    let commit: (Double) -> Void
+    @State private var draft: String = ""
+    @FocusState private var focused: Bool
+
+    private func commitDraft() {
+        let cleaned = draft.replacingOccurrences(of: ",", with: ".")
+        if let v = Double(cleaned) { commit(v) }
+    }
+
+    private var field: some View {
+        let base = TextField("", text: $draft)
+            .focused($focused)
+            .multilineTextAlignment(.trailing)
+            .font(.system(size: wide ? 18 : 13, weight: .semibold))
+            .foregroundStyle(tint)
+        #if canImport(UIKit)
+        return base.keyboardType(.decimalPad)
+        #else
+        return base
+        #endif
+    }
+
+    private var shape: RoundedRectangle { RoundedRectangle(cornerRadius: wide ? 12 : 9) }
+
+    var body: some View {
+        let w: CGFloat = wide ? 110 : 58
+        let h: CGFloat = wide ? 46 : 36
+        field
+            .padding(.horizontal, wide ? 14 : 6)
+            .frame(width: w, height: h)
+            .background(shape.fill(Color.white.opacity(0.08)))
+            .overlay(shape.strokeBorder(Color.white.opacity(0.12)))
+            .onAppear { draft = text }
+            .onChange(of: text) { newValue in draft = newValue }
+            .onChange(of: focused) { isFocused in if !isFocused { commitDraft() } }
+            .onSubmit { commitDraft() }
     }
 }

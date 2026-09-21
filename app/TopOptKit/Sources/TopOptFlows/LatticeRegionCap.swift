@@ -110,6 +110,14 @@ public enum LatticeRegionCap {
                 k = Swift.min(24, Swift.max(1, Int((longest / (2 * m.h)).rounded(.up))))
             }
             func depthAt(_ uv: SIMD2<Double>) -> Double { region.slabRange(uv: uv).end }
+            // ★ AND A FRONT PLATE WHERE THE SLAB STARTS IN FROM THE FACE (his 2026-09-21
+            // open, Manual 50 % + Start 50 %: the declared face opens by declaration, so
+            // with the slab at 6–9 mm he looked through 6 mm of undrawn solid at the back
+            // cap and its strut ends — "It looks bad"). The material before the slab is
+            // solid; it is drawn as the same wall, at the start, facing the viewer.
+            let hasStart = (region.thicknessMap?.starts.max() ?? 0) > 0
+            let plates: [(Double, Bool)] = hasStart ? [(0, true), (0, false)] : [(0, false)]
+            for (plate, isFront) in plates {
             for loop in region.outlineLoops where loop.count >= 3 {
                 let ring = LatticeOutlineRibbon.offsetRing(loop, by: region.inPlaneOffsetMM)
                 guard ring.count >= 3 else { continue }
@@ -122,10 +130,13 @@ public enum LatticeRegionCap {
                         var tris: [[SIMD2<Double>]] = [[P(i, j), P(i + 1, j), P(i, j + 1)]]
                         if i + j + 1 < k { tris.append([P(i + 1, j), P(i + 1, j + 1), P(i, j + 1)]) }
                         for t in tris { for uv in t {
-                            emit(region.origin + bu * uv.x + bv * uv.y + n * depthAt(uv), -n)
+                            _ = plate
+                            emit(region.origin + bu * uv.x + bv * uv.y
+                                 + n * (isFront ? region.slabRange(uv: uv).start : depthAt(uv)), -n)
                         } }
                     } }
                 }
+            }
             }
         }
         return LatticeOutlineRibbon.Mesh(interleaved: v)

@@ -629,9 +629,9 @@ public struct LatticeSDFScene {
             NSLog("DIAG wall thickness: %@", regions.enumerated().compactMap { i, r -> String? in
                 guard let m = r.thicknessMap, let spec = r.thickness else { return nil }
                 let q = m.summary
-                return String(format: "r%d %@ start %.2f mm · share p05 %.2f p50 %.2f p95 %.2f of %.2f mm (floor %.2f)",
-                              i, spec.mode.rawValue, m.startMM, q.p05, q.p50, q.p95, r.depthMM,
-                              wallThicknessFloorMM)
+                let mode = spec.depthBySim ? "depthBySim" : spec.density.rawValue
+                return String(format: "r%d %@ start %.2f mm · thickness p05 %.2f p50 %.2f p95 %.2f of %.2f mm (floor %.2f)",
+                              i, mode, m.startMM, q.p05, q.p50, q.p95, r.depthMM, wallThicknessFloorMM)
             }.joined(separator: " | "))
         }
         // ★★ THE PART'S INTERIOR AND THE LATTICED INTERIOR ARE TWO DIFFERENT
