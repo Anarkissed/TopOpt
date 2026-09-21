@@ -1364,6 +1364,18 @@ std::string run_info_json(const RunInfo& info) {
         gr += ", \"anystep_regions\": " + fmt_ll(info.stepped_anystep_regions);
         gr += ", \"anystep_passes\": " + fmt_ll(info.stepped_anystep_passes);
         gr += ", \"anystep_size_histogram\": \"" + info.stepped_anystep_histogram + "\"";
+        // ★ §3: the density and radius actually used, per size, so the app can diff a
+        // size at a time against its own DIAG rather than comparing pictures.
+        if (!info.stepped_anystep_rho_by_size.empty())
+          gr += ", \"anystep_rho_radius_by_size\": \"" +
+                info.stepped_anystep_rho_by_size + "\"";
+      }
+      // ★ §3: the outline beam as APPLIED. Absent when the shape grade is off.
+      if (info.lattice_outline_beam_mm > 0.0) {
+        gr += ", \"outline_beam_mm\": " + fmt(info.lattice_outline_beam_mm);
+        gr += ", \"outline_bleed_mm\": " + fmt(info.lattice_outline_bleed_mm);
+        gr += ", \"outline_inward_mm\": " + fmt(info.lattice_outline_inward_mm);
+        gr += ", \"outline_voxels\": " + fmt_ll(info.lattice_outline_voxels);
       }
       gr += ", \"seam_note\": \"regions carry unrelated cell edges, so their nodes "
             "do not line up; an adjacent pair that is not joined is a mechanical "
@@ -1495,6 +1507,13 @@ std::string run_info_json(const RunInfo& info) {
         gr += ", \"solid_rim_mm\": " + fmt(info.organic_solid_rim_mm);
         gr += ", \"solid_rim_voxels\": " + std::to_string(info.organic_solid_rim_voxels);
         gr += ", \"unsupported_spans\": " + std::to_string(info.organic_unsupported_spans);
+        // ★ §3: the SHIPPED span census, for the app's trace banner to be diffed
+        // against. These are the spans the file is carved from, not the ones traced.
+        gr += ", \"span_count\": " + fmt_ll(info.organic_span_count);
+        gr += ", \"span_length_mm\": " + fmt(info.organic_span_length_mm);
+        gr += ", \"span_radius_min_mm\": " + fmt(info.organic_span_radius_min_mm);
+        gr += ", \"span_radius_p50_mm\": " + fmt(info.organic_span_radius_p50_mm);
+        gr += ", \"span_radius_max_mm\": " + fmt(info.organic_span_radius_max_mm);
         gr += ", \"transfer_ties_on\": " + std::string(info.organic_transfer_ties_on ? "true" : "false");
         gr += ", \"ties_seeded\": " + std::to_string(info.organic_ties_seeded);
         gr += ", \"ties_landed\": " + std::to_string(info.organic_ties_landed);

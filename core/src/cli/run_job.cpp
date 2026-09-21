@@ -666,10 +666,8 @@ struct LatticeExportOutcome {
   // removed (it deposited blobs up to nine times the strut); the count remains so the
   // receipt still says how much of the lattice is unsupported.
   long long organic_unsupported_spans = 0;
-  bool organic_shape_fit_on = false;
-  long long organic_shape_fit_candidates = 0;
-  long long organic_shape_fit_voxels_shrunk = 0;
-  double organic_shape_fit_min_ratio = 1.0;
+  // (The shape-fit counters live on the variant result, not here: this struct had a
+  // second set that nothing ever wrote and nothing ever read, shadowing the real ones.)
   // ★ synthetic stress for dead walls: what was laid in, so the receipt says it RAN
   SyntheticStressReport organic_synthetic;
   // ★ THE EMITTED SPANS, carried out so the STRUCTURAL CERTIFICATE can read the
@@ -750,8 +748,9 @@ struct LatticeExportOutcome {
   bool growth_ran = false;
   long long organic_arched_spans = 0;
   double organic_arch_rise = 0.0;
-  long long organic_filleted = 0;
-  double organic_fillet_radius = 0.0;
+  // (organic_filleted / organic_fillet_radius are gone with the overhang fillet they
+  // counted. Nothing wrote them and nothing serialised them; the live measurement for
+  // spans over air is `unsupported_spans`.)
   double organic_base_mat_len = 0.0;
   double organic_base_mat_z = 0.0;
   long long organic_fill_cells = 0;
@@ -2139,6 +2138,14 @@ LatticeExportOutcome export_latticed_variant(
     oc.organic_net_deg1 = static_cast<long long>(g.net_skin_degree_one);
     oc.organic_unsupported_found = static_cast<long long>(g.unsupported_islands_found);
     oc.organic_unsupported_left = static_cast<long long>(g.unsupported_islands_remaining);
+    // ★ SPANS OVER OPEN AIR. This copy was missing, so run_info.json reported 0 on
+    // every organic run no matter how many the pass had actually seen -- and this is
+    // the metric that REPLACED the overhang fillet when that repair was removed for
+    // depositing blobs up to nine times the strut. The repair went; the measurement
+    // was supposed to remain, and instead the receipt read a clean zero on a part
+    // where the old repair had fired on 3,720 spans. A printability condition
+    // reported as absent is worse than one reported loudly.
+    oc.organic_unsupported_spans = static_cast<long long>(g.unsupported_spans_seen);
     oc.organic_support_legs = static_cast<long long>(g.support_legs_added);
     oc.organic_support_leg_len = g.support_leg_length_mm;
     oc.organic_support_rounds = g.support_rounds;
@@ -4178,6 +4185,9 @@ struct LatticeVariantOutcome {
   // ★ the any-step plan as laid down, and the seam census the certificate stands on
   long long anystep_cells = 0, anystep_regions = 0, anystep_passes = 0;
   std::string anystep_histogram;
+  // ★ §3: "size=rho/radius_mm", descending by size, beside the histogram.
+  std::string anystep_rho_by_size;
+  double outline_inward_mm = 0.0;
   long long seam_spans_before = 0, seam_spans_after = 0;
   double seam_piece_mm = 0.0, seam_longest_before_mm = 0.0;
   long long seam_welded_nodes = 0, seam_t_junction_ends = 0, seam_floating_ends = 0;
@@ -6280,6 +6290,7 @@ LatticeVariantOutcome lattice_one_variant(
     R.outline_beam_mm = beam;
     R.outline_bleed_mm = bleed;
     R.outline_beam_voxels = static_cast<long long>(cleared);
+    R.outline_inward_mm = inward;
     std::fprintf(stderr,
                  "[outline] solid beam %.4f mm (bead %.3f, voxel %.3f) + bleed %.4f mm "
                  "(band %.3f) = %.4f mm inward | %zu voxel(s) turned solid\n",
@@ -6952,6 +6963,21 @@ LatticeVariantOutcome lattice_one_variant(
         return 0.5 * octet_strut_diameter_mm(mref[e] ? rref[e] : rlo, gcell);
       };
       stepped_passes.push_back(std::move(sp));
+      // ★ §3 PARITY: the density and radius this pass ACTUALLY used, recorded as the
+      // pass is built rather than re-derived for the receipt afterwards -- a number
+      // re-derived can agree with the law while disagreeing with the geometry, which
+      // is the failure this whole section exists to make impossible. When the job sent
+      // a rho this IS that rho; when it did not, it is what core derived.
+      {
+        double rho_used = 0.0;
+        for (double rv : g.rho) if (rv > 0.0) { rho_used = rv; break; }
+        if (!(rho_used > 0.0)) rho_used = gf.band_rho_min;
+        char rbuf[96];
+        std::snprintf(rbuf, sizeof rbuf, "%s%.3f=%.4f/%.4f",
+                      R.anystep_rho_by_size.empty() ? "" : ", ", g.size_mm, rho_used,
+                      0.5 * octet_strut_diameter_mm(rho_used, g.size_mm));
+        R.anystep_rho_by_size += rbuf;
+      }
     }
   }
   if (R.stepped_ran && job.lattice.stepped_cells.empty()) {
@@ -10064,6 +10090,11 @@ LatticeVariantJobResult lattice_variant_job(const JobDescription& job,
       gi.grading_band_rho_min = R.gf.band_rho_min;
       gi.grading_band_rho_max = R.gf.band_rho_max;
       gi.grading_cells_per_member_floor = R.gf.cells_per_member_floor;
+      gi.lattice_outline_beam_mm = R.outline_beam_mm;
+      gi.lattice_outline_bleed_mm = R.outline_bleed_mm;
+      gi.lattice_outline_inward_mm = R.outline_inward_mm;
+      gi.lattice_outline_voxels = R.outline_beam_voxels;
+      gi.stepped_anystep_rho_by_size = R.anystep_rho_by_size;
       gi.stepped_anystep_cells = R.anystep_cells;
       gi.stepped_anystep_regions = R.anystep_regions;
       gi.stepped_anystep_passes = R.anystep_passes;
@@ -10147,6 +10178,30 @@ LatticeVariantJobResult lattice_variant_job(const JobDescription& job,
         gi.organic_solid_rim_mm = R.organic_solid_rim_mm;
         gi.organic_solid_rim_voxels = R.organic_solid_rim_voxels;
         gi.organic_unsupported_spans = R.oc.organic_unsupported_spans;
+        // ★ §3 PARITY: the SHIPPED span census, measured here over the very vector the
+        // STL is carved from (organic_spans_out, the post-clip set) rather than taken
+        // from any pass's own tally. A census computed from a counter can survive the
+        // geometry it counted being deleted -- which is exactly what the node merge did
+        // to a fifth of this part's material while every counter still read fine.
+        {
+          const std::vector<OrganicSpan>& sp = R.oc.organic_spans_out;
+          gi.organic_span_count = static_cast<long long>(sp.size());
+          double total = 0.0;
+          std::vector<double> radii;
+          radii.reserve(sp.size());
+          for (const OrganicSpan& q : sp) {
+            const double dx = q.b.x - q.a.x, dy = q.b.y - q.a.y, dz = q.b.z - q.a.z;
+            total += std::sqrt(dx * dx + dy * dy + dz * dz);
+            radii.push_back(q.r);
+          }
+          gi.organic_span_length_mm = total;
+          if (!radii.empty()) {
+            std::sort(radii.begin(), radii.end());
+            gi.organic_span_radius_min_mm = radii.front();
+            gi.organic_span_radius_p50_mm = radii[radii.size() / 2];
+            gi.organic_span_radius_max_mm = radii.back();
+          }
+        }
         gi.organic_transfer_ties_on = job.grading.organic_transfer_ties;
         gi.organic_ties_seeded = static_cast<long long>(R.oc.growth.growth_ties_seeded);
         gi.organic_ties_landed = static_cast<long long>(R.oc.growth.growth_ties_landed);
@@ -10279,8 +10334,6 @@ LatticeVariantJobResult lattice_variant_job(const JobDescription& job,
         gi.organic_cantilever_islands = R.oc.organic_cantilever_islands;
         gi.organic_arched_spans = R.oc.organic_arched_spans;
         gi.organic_arch_rise = R.oc.organic_arch_rise;
-        gi.organic_filleted = R.oc.organic_filleted;
-        gi.organic_fillet_radius = R.oc.organic_fillet_radius;
         gi.organic_base_mat_length_mm = R.oc.organic_base_mat_len;
         gi.organic_base_mat_z_mm = R.oc.organic_base_mat_z;
         gi.organic_fill_mat_cells = R.oc.organic_fill_cells;

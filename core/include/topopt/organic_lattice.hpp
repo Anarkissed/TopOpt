@@ -377,12 +377,16 @@ inline constexpr double kOrganicArchLegSteepness = 1.0;
 // not remove it, because the bowed strut is still a cylinder with the same underside.
 // A one-legged span of this kind is not a hard bridge, it is an impossible one.
 //
-// ★ THE FILLET. Flare the radius at the ends and taper to nominal at the middle. The
-// UNDERSIDE then rises from each support at kOrganicFilletAngleDeg and the two flares
-// meet at the centre, so every layer of the strut lands on the layer below it — the
-// arch is the strut's own surface, not its path.
-//
-// The angle the underside climbs away from each support.
+// ★ THE FILLET WAS THE ANSWER TO THIS, AND IT IS GONE. The idea: flare the radius at
+// the ends and taper to nominal at the middle, so the underside rises from each
+// support and every layer lands on the one below -- the arch being the strut's own
+// surface rather than its path. In practice it deposited lumps, not fillets (3,720
+// spans on the M2 stand, a 2.56 mm end radius against a 0.615 mm median strut, 2,789
+// still unresolved at the cap), and those lumps were the "tumors" seen through two
+// different meshers. The repair was removed; spans over air are now left exactly as
+// drawn and COUNTED -- `unsupported_spans_seen`, reaching the receipt as
+// "unsupported_spans". A printability condition that is measured and reported is worth
+// more than one that is disguised by geometry nobody asked for.
 // ══ ★★★ GROWTH — PRINTABILITY AS A CONSTRUCTION RULE, NOT A REPAIR ★★★ ═══════════
 //
 // ★ WHY THE TRACE-THEN-REPAIR ARCHITECTURE CANNOT BE PATCHED. `trace_organic_lattice`
@@ -497,23 +501,16 @@ inline constexpr int kOrganicGrowthMaxJoins = 6;
 // gain height as they go.
 inline constexpr double kOrganicGrowthUpwardBias = 0.25;
 
-inline constexpr double kOrganicFilletAngleDeg = 45.0;
-
-// ★ AND A CAP, because the honest arithmetic is expensive: fully filleting a span of
-// length L needs an end radius of r + (L/2)*tan(theta), which at L = 8 mm and r =
-// 0.5 mm is 4.5 mm — a blob nine times the strut. Capped, the fillet does not reach
-// the middle and the span is IMPROVED rather than solved; the receipt reports the
-// residual so a partial fix is never read as a complete one.
-// ★ AND THE CAP IS WHAT KEEPS IT A FILLET RATHER THAN A BALL. At 6.0 the widest end
-// radius on the maintainer's cube came to 4.87 mm on a ~1.3 mm strut — a 10 mm sphere
-// big enough that the slicer put INFILL inside it, which he spotted immediately. The
-// flare is meant to be a gusset at a junction, not a node the size of a cell. 2.5 keeps
-// the widest end near 1.6 mm; spans needing more than that are counted unresolved.
-inline constexpr double kOrganicFilletMaxRadiusRatio = 2.5;
-
-// How many segments a filleted span is emitted as. The taper is piecewise-constant in
-// radius, so this is the resolution of the underside's slope.
-inline constexpr int kOrganicFilletSegments = 12;
+// ★ THE OVERHANG FILLET'S CONSTANTS ARE GONE, and so is the repair. It flared the
+// underside of a span over air at 45 degrees, capped at 2.5x the strut radius. It was
+// REMOVED because it deposited lumps rather than fillets: measured on the M2 stand it
+// fired on 3,720 spans, reached a 2.56 mm end radius against a 0.615 mm median strut,
+// and still left 2,789 of them unresolved at the cap -- the "tumors" the maintainer
+// spotted through two different meshers were this, emitted geometry and never a
+// meshing artefact. Spans over air are now left exactly as drawn and COUNTED, which is
+// `unsupported_spans_seen` and reaches the receipt as "unsupported_spans" (1728 on the
+// stand). The constants sat here unused afterwards, along with two receipt fields that
+// were copied but never serialised, which is how a removed feature keeps looking alive.
 
 // ── ★ THE WETTING FILLET AT THE GRADED RIM (maintainer, 2026-09-08) ──────────────
 // "I want all the struts to continue THROUGH to the solid and act as though they are

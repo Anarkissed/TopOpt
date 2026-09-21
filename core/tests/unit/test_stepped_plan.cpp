@@ -276,6 +276,93 @@ static void test_group_keeps_each_cells_own_rho() {
 // sent through the table that actually sizes the strut, builds a THINNER strut than
 // the geometry the maintainer ruled on. Core published the wrong one of the two and
 // told the app its number was 3.5 % out; the app pushed back and was right.
+// ── ★ §3: THE RUN'S GEOMETRY AGAINST THE LIST THAT SPECIFIED IT ──────────────
+// The brief asks for a Hausdorff bound of ONE BEAD between what the preview describes
+// and what the run lays down. The app's half is its capsule list; core's half is this
+// -- given a cell list with densities, every strut core sizes must match the strut the
+// list's own rho implies, under core's law, to within a bead.
+//
+// ★ THIS IS NOT THAT HAUSDORFF TEST, and saying so is the point. Core cannot measure a
+// distance to a preview it does not have; the app's capsule dump is the other half and
+// has not arrived. What core can prove alone is the half that is core's: that nothing
+// between "the app said rho for this cell" and "core sized a strut" moves the number.
+// The mesh-to-mesh bound stays OUTSTANDING rather than being simulated here -- a test
+// that compares core against core and calls the answer a parity bound would be worse
+// than no test, because it would report agreement no matter how far the two drifted.
+static void test_strut_radius_matches_the_sent_rho() {
+  const double bead = 0.45;
+  SteppedPlanRegion reg;
+  reg.region_id = 1;
+  reg.base_cell_mm = 12.0;
+  reg.slot_origin = Vec3{100.0, -5.0, 0.0};
+
+  // a mixed pack: three sizes, each with its own density, as the app would send
+  struct Want { double dx, dy, dz, size, rho; };
+  const std::vector<Want> want = {
+      {0, 0, 0, 6.0, 0.2189}, {6, 0, 0, 3.0, 0.1740},
+      {6, 3, 0, 3.0, 0.4500}, {0, 6, 0, 6.0, 0.0950}};
+  std::vector<SteppedCell> cells;
+  for (const Want& w : want) {
+    SteppedCell c;
+    c.region_id = 1;
+    c.origin = Vec3{reg.slot_origin.x + w.dx, reg.slot_origin.y + w.dy,
+                    reg.slot_origin.z + w.dz};
+    c.size_mm = w.size;
+    c.rho = w.rho;
+    cells.push_back(c);
+  }
+  const SteppedPlanCheck v =
+      stepped_validate_plan(cells, {reg}, bead, 0.0, true, SteppedMenu::Halves);
+  CHECK(v.ok, "parity: the fixture plan validates under the doubled menu");
+
+  const std::vector<SteppedCellGroup> gs = stepped_group_cells(cells, {reg});
+  // ★ WHAT IS ACTUALLY CHECKED, stated because the obvious version of this test is a
+  // TAUTOLOGY: computing "what the run sizes" and "what the list implies" with the same
+  // call and diffing them reports 0.000e+00 forever and proves nothing. The wire-to-
+  // geometry step core owns is the SURVIVAL of the sent rho -- from the job, through
+  // validation and grouping, to the value the radius is taken from -- and then that the
+  // radius is a strut a printer can make inside that cell.
+  std::size_t checked = 0;
+  double worst_rho = 0.0;
+  for (const SteppedCellGroup& g : gs)
+    for (std::size_t i = 0; i < g.cells.size(); ++i) {
+      // the rho this cell was SENT with, recovered from the fixture by position
+      const double dx = g.origin.x + g.cells[i][0] * g.size_mm - reg.slot_origin.x;
+      const double dy = g.origin.y + g.cells[i][1] * g.size_mm - reg.slot_origin.y;
+      const double dz = g.origin.z + g.cells[i][2] * g.size_mm - reg.slot_origin.z;
+      double sent = -1.0;
+      for (const Want& w : want)
+        if (std::fabs(w.dx - dx) < 1e-9 && std::fabs(w.dy - dy) < 1e-9 &&
+            std::fabs(w.dz - dz) < 1e-9 && std::fabs(w.size - g.size_mm) < 1e-9)
+          sent = w.rho;
+      CHECK(sent >= 0.0, "parity: the cell is the one the fixture sent");
+      worst_rho = std::max(worst_rho, std::fabs(g.rho[i] - sent));
+      const double r = 0.5 * octet_strut_diameter_mm(g.rho[i], g.size_mm);
+      ++checked;
+      CHECK(2.0 * r >= bead * 0.999,
+            "parity: every sized strut is at least a bead across");
+      CHECK(2.0 * r < g.size_mm, "parity: and fits inside its own cell");
+    }
+  std::printf("  parity: %zu cell(s) checked, worst rho drift %.3e (bead %.3f)\n",
+              checked, worst_rho, bead);
+  CHECK(checked == want.size(), "parity: every sent cell was checked");
+  CHECK(worst_rho == 0.0,
+        "parity: the density the job sent is the density the radius is taken from, "
+        "EXACTLY -- not within a tolerance, because nothing on this path is allowed "
+        "to adjust it");
+
+  // ★ THE CONTROL. Size one cell from the WRONG density -- the forward density law's
+  // 0.2117 instead of the diameter table's 0.2189 -- and the disagreement must be
+  // visible, or this test would pass against a core that used either table.
+  const double r_right = 0.5 * octet_strut_diameter_mm(0.218871, 4.0);
+  const double r_wrong = 0.5 * octet_strut_diameter_mm(0.211733, 4.0);
+  std::printf("  parity control: right %.4f vs wrong-table %.4f mm (delta %.4f)\n",
+              r_right, r_wrong, std::fabs(r_right - r_wrong));
+  CHECK(std::fabs(r_right - r_wrong) > 1e-3,
+        "parity CONTROL: the two tables really do give different struts, so the bound "
+        "above is measuring something");
+}
+
 static void test_aesthetic_ceiling_is_the_diameter_preimage() {
   const double ceil = octet_aesthetic_density_ceiling();
   const double fwd = octet_relative_density(1.0, 0.5 * kOctetAestheticStrutPerCell);
@@ -711,6 +798,7 @@ int main() {
   test_group_keeps_each_cells_own_rho();
   test_outline_beam_width();
   test_aesthetic_ceiling_is_the_diameter_preimage();
+  test_strut_radius_matches_the_sent_rho();
   test_grouping_preserves_every_cell();
   test_packed_slot_covers_exactly_once();
   test_subdivision_preserves_the_member();
