@@ -259,6 +259,8 @@ public struct LatticeOrganicInput: Sendable {
     /// (0 = none, else the 1-based include region) and the per-region config the job
     /// carries; the bridge calls `synthesize_focal_stress` — the run's own function.
     public var regionIDs: [Int32] = []
+    /// ★ THE SEEDING BOOST (2026-09-21), ×1 = core's own tracer. See `LatticeWallThickness`.
+    public var seedBoost: Double = 1
     public var syntheticRegions: [TopOptKit.OrganicSyntheticRegionSpec] = []
     public var syntheticDeadFraction: Double = OrganicSyntheticStress.deadFraction
     /// ★ The absolute floor under that test, in MPa — see `deadMPaFloor`.
@@ -1157,6 +1159,26 @@ public struct LatticeSDFScene {
             // the only way the picture and the run can agree; the quirk is core's to
             // decide about, and it is named in the handoff rather than silently
             // "corrected" here.
+            // ★★ THE SEEDING BOOST (his 2026-09-21: "modify the algorithm being used by the
+            // beams to create the preview"). Core's tracer offers the next seed one
+            // separation off an accepted curve (seed_ratio 1.0), refuses a curve within
+            // half a separation of another (test_ratio 0.5) and culls curves shorter than
+            // one separation (min_length_ratio 1.0). At boost b the seed and length ratios
+            // fall by b — seeds offered closer, short curves near the rim kept — and the
+            // test ratio falls by b but never below the printable floor over the smallest
+            // separation, so two curves can never be laid closer than the printer can.
+            let seedRatios: (seed: Double, test: Double, minLength: Double) = {
+                let b = Swift.max(1, o.seedBoost)
+                guard b > 1 + 1e-9 else { return (0, 0, 0) }
+                let floorMM = OrganicSizeCheck.floor(beadMM: o.minExtrudableWidthMM, voxelMM: o.spacingMM).mm
+                let sepMin = Swift.max(1e-6, Swift.min(o.separationMinMM, o.separationMaxMM))
+                let test = Swift.max(0.5 / b, floorMM / sepMin)
+                return (1.0 / b, Swift.min(0.5, test), 1.0 / b)
+            }()
+            if seedRatios.seed > 0 {
+                NSLog("DIAG organic seeding boost ×%.2f: seed_ratio %.2f test_ratio %.2f min_length_ratio %.2f",
+                      o.seedBoost, seedRatios.seed, seedRatios.test, seedRatios.minLength)
+            }
             var anchorAtBoundary = o.anchorAtBoundary
             if n > 0, !anchorAtBoundary {
                 let sdf = self.partSDF
@@ -1414,7 +1436,8 @@ public struct LatticeSDFScene {
                     showRepairs: o.showRepairs, overhangFillet: o.overhangFillet,
                     regionIDs: o.regionIDs, syntheticRegions: o.syntheticRegions,
                     syntheticDeadFraction: o.syntheticDeadFraction,
-                    syntheticDeadMPa: o.syntheticDeadMPa),
+                    syntheticDeadMPa: o.syntheticDeadMPa,
+                    seedRatio: seedRatios.seed, testRatio: seedRatios.test, minLengthRatio: seedRatios.minLength),
                    t.field.count == fnx * fny * fnz {
                     organicEmittedOut = t.spans
                     organicCapsOut = t.spans.map { OrganicCapsule($0) }
@@ -1440,17 +1463,17 @@ public struct LatticeSDFScene {
                         spacing: SIMD3<Float>(repeating: Float(fs)), values: t.field)
                     organicBand = Double(t.bandMM)
                     // ★ the counters ride the census (reviewer, 2026-09-04)
-                    let counters = (t.growth.map { " · " + $0.summary } ?? "") + " · " + t.stops.summary + " · " + t.census.summary
-                        + " · " + t.phaseSummary
-                        + (o.showRepairs ? "" : " · ★ REPAIRS HIDDEN: the traced curves are shown; the file has the arches, legs and merges above")
-                    organicSaid = "\(t.curveCount) curves, \(t.connectorCount) connectors, "
-                        + String(format: "%.2f–%.2f mm spacing",
-                                 t.spacingUsedMinMM, t.spacingUsedMaxMM)
-                        + gradedNote + fitNote
-                        + (solidRimVoxels > 0
-                           ? String(format: " · solid rim %.2f mm (%d voxels)", o.solidRimMM, solidRimVoxels)
-                           : "")
-                        + counters
+                    var counters: String = t.growth.map { " · " + $0.summary } ?? ""
+                    counters += " · " + t.stops.summary
+                    counters += " · " + t.census.summary
+                    counters += " · " + t.phaseSummary
+                    if !o.showRepairs { counters += " · ★ REPAIRS HIDDEN: the traced curves are shown; the file has the arches, legs and merges above" }
+                    if seedRatios.seed > 0 { counters += String(format: " · seeding ×%.1f", o.seedBoost) }
+                    var said = "\(t.curveCount) curves, \(t.connectorCount) connectors, "
+                    said += String(format: "%.2f–%.2f mm spacing", t.spacingUsedMinMM, t.spacingUsedMaxMM)
+                    said += gradedNote + fitNote
+                    if solidRimVoxels > 0 { said += String(format: " · solid rim %.2f mm (%d voxels)", o.solidRimMM, solidRimVoxels) }
+                    organicSaid = said + counters
                 }
             }
         }

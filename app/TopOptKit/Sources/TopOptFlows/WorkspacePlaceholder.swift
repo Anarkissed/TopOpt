@@ -5042,6 +5042,7 @@ public struct WorkspacePlaceholder: View {
         let bakeGeneration = strutBakeGeneration
         DispatchQueue.global(qos: .userInitiated).async {
             var organicIn = organicForBake
+            organicIn?.seedBoost = project.lattice.wallThickness.seedBoost
             // Set on main when a newer bake takes over, read by the stage loop.
             let cancelledStages = LatticeBakeFlag()
             // ★★ THE WINDOW UNDER AUTO (2026-09-06): the probe's Auto answer when it has

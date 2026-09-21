@@ -2433,6 +2433,7 @@ std::vector<double> organic_preview_field(
     // millimetre-of-mercury into core's own units here (`max(fraction, mpa / peak)`)
     // uses `synthesize_focal_stress` exactly as written. 0 ⇒ the relative test alone.
     double synth_dead_mpa,
+    double seed_ratio, double test_ratio, double min_length_ratio,
     // The field to bake the traced capsules into: its own grid, which is the REGION's
     // bbox rather than the part's, so the voxel can be a fraction of the design grid's.
     int fnx, int fny, int fnz, double fspacing,
@@ -2535,6 +2536,10 @@ std::vector<double> organic_preview_field(
   p.layer_hint_mm = (grow != 0 && layer_height_mm > 0.0) ? layer_height_mm : 0.0;
   p.anchor_at_region_boundary = anchor_at_boundary != 0;
   p.transfer_ties = transfer_ties != 0;
+  // ★ the seeding boost — only what the caller states; core's defaults otherwise
+  if (seed_ratio > 0.0) p.seed_ratio = seed_ratio;
+  if (test_ratio > 0.0) p.test_ratio = test_ratio;
+  if (min_length_ratio > 0.0) p.min_length_ratio = min_length_ratio;
   p.tie_swirl = tie_swirl;
   // ★ AND THE RUN'S OWN DENSITY FLOOR: `op.rho_min = max(band_rho_min,
   // kOrganicVdiDensityFloor)` (run_job.cpp). Passing the band raw let the preview grade

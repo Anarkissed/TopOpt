@@ -164,8 +164,30 @@ public struct LatticeWallThickness: Equatable, Sendable, Codable {
     public var pct: Double = 100
     /// per wall, by the region's selectable key ("f:<group>:<face>")
     public var faces: [String: LatticeFaceWallThickness] = [:]
+    /// ★ THE SEEDING BOOST (his 2026-09-21), ×1 = core's tracer as it is, up to ×3:
+    /// seeds offered closer, short curves kept, curves allowed closer down to the
+    /// printable floor. Preview only, like everything here.
+    public var seedBoost: Double = 1
 
     public init() {}
+
+    private enum CodingKeys: String, CodingKey { case depthBySim, density, pct, faces, seedBoost }
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        depthBySim = try c.decodeIfPresent(Bool.self, forKey: .depthBySim) ?? true
+        density = try c.decodeIfPresent(LatticeWallDensityMode.self, forKey: .density) ?? .sim
+        pct = try c.decodeIfPresent(Double.self, forKey: .pct) ?? 100
+        faces = try c.decodeIfPresent([String: LatticeFaceWallThickness].self, forKey: .faces) ?? [:]
+        seedBoost = try c.decodeIfPresent(Double.self, forKey: .seedBoost) ?? 1
+    }
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(depthBySim, forKey: .depthBySim)
+        try c.encode(density, forKey: .density)
+        try c.encode(pct, forKey: .pct)
+        if !faces.isEmpty { try c.encode(faces, forKey: .faces) }
+        if seedBoost != 1 { try c.encode(seedBoost, forKey: .seedBoost) }
+    }
     public init(depthBySim: Bool, density: LatticeWallDensityMode = .sim, pct: Double = 100,
                 faces: [String: LatticeFaceWallThickness] = [:]) {
         self.depthBySim = depthBySim; self.density = density; self.pct = pct; self.faces = faces

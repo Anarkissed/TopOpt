@@ -1398,7 +1398,10 @@ public enum TopOptKit {
                                     syntheticDeadFraction: Double = 0.02,
                                     /// ★ An absolute floor under the dead test (MPa):
                                     /// the threshold is `max(fraction · peak, this)`.
-                                    syntheticDeadMPa: Double = 0)
+                                    syntheticDeadMPa: Double = 0,
+                                    /// ★ the seeding boost's ratios (0 ⇒ core's defaults)
+                                    seedRatio: Double = 0, testRatio: Double = 0,
+                                    minLengthRatio: Double = 0)
         -> OrganicTrace? {
         let n = nx * ny * nz
         let (fnx, fny, fnz) = fieldDims
@@ -1437,6 +1440,7 @@ public enum TopOptKit {
                         overhangFillet ? Int32(1) : Int32(0),
                         rb.baseAddress, rb.count,
                         yb.baseAddress, yb.count, syntheticDeadFraction, syntheticDeadMPa,
+                        seedRatio, testRatio, minLengthRatio,
                         Int32(fnx), Int32(fny), Int32(fnz), fieldSpacingMM,
                         fieldOrigin.x, fieldOrigin.y, fieldOrigin.z,
                         bandMM).map { Double($0) }

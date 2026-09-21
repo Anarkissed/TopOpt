@@ -988,3 +988,22 @@ Not yet seen by him.
   and the emission trims dangling ends. `DIAG organic anchors:` now prints whether the
   trace anchors at the rim. Lever in the app: the organic shape band (spacing → the floor
   within the band); zero gap needs core to seed along the outline.
+- **2026-09-21 03:50 — THE SEEDING BOOST (his 03:40: "modify the algorithm being used by
+  the beams to create the preview. Add the required seeding boost/adjustment with the
+  depth settings").** Core's tracer takes no seed list, but its Jobard–Lefer ratios were
+  never set by the app (core's defaults: `seed_ratio` 1.0 — the next seed is offered ONE
+  separation off an accepted curve; `test_ratio` 0.5 — a curve within half a separation
+  of another is refused; `min_length_ratio` 1.0 — curves shorter than one separation are
+  culled). The bridge now carries the three (`organic_preview_field(... seed_ratio,
+  test_ratio, min_length_ratio ...)`, 0 ⇒ core's default). A "Seeding ×" slider (1–3,
+  step 0.1) in the Lattice wall thickness section (`LatticeWallThickness.seedBoost`,
+  encoded only when moved, absent ⇒ 1, `.standard` byte-identical) sets, at boost b:
+  seed 1/b, min length 1/b, test max(0.5/b, printable floor / smallest separation) capped
+  at 0.5 — so seeds come closer and short rim curves survive, but two curves are never
+  laid closer than the printer can. `DIAG organic seeding boost ×b: seed_ratio …` prints
+  the ratios; the preview's banner ends "· seeding ×b". The boost sits inside
+  `wallThickness`, so `previewBakeInputs` re-arms the bake on every move. The sample
+  cube's variant cache is untouched (part preview only). Expect: with ×2 the census
+  `seeds too close` count should FALL and curves/spans rise; the rim coverage
+  (`organic rim coverage` p25 / within 6 mm %) is the number to read before/after.
+  Preview only, no core change; if it works the core brief adds the ratios to the job.

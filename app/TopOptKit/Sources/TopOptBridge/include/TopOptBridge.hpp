@@ -1303,6 +1303,12 @@ std::vector<double> organic_preview_field(
     const double* synth, std::size_t synth_count, double synth_dead_fraction,
     // ★ an absolute floor under the dead test, in MPa: `thr = max(fraction·peak, mpa)`
     double synth_dead_mpa,
+    // ★ THE SEEDING BOOST (his 2026-09-21: "modify the algorithm being used by the beams
+    // to create the preview. Add the required seeding boost"). Core's Jobard–Lefer
+    // ratios, as multiples of the local separation: where the next seed is offered
+    // off an accepted curve, how close two curves may pass, how short a curve may be
+    // before it is culled. 0 ⇒ core's own default for that ratio. Preview only.
+    double seed_ratio, double test_ratio, double min_length_ratio,
     int fnx, int fny, int fnz, double fspacing,
     double fox, double foy, double foz, double band_mm);
 

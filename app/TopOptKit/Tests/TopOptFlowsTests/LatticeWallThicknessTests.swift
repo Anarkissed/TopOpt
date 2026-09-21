@@ -184,6 +184,19 @@ final class LatticeWallThicknessTests: XCTestCase {
         XCTAssertEqual(LatticeWallSlabMesh.prismLines(region: face()).count, 3 * 4 * 6, "three segments per outline edge")
     }
 
+    /// The seeding boost: encoded only when moved; a document written before it existed decodes.
+    func testTheSeedingBoostRoundTripsAndOldDocumentsStillDecode() throws {
+        var s = LatticeSettings(enabled: true)
+        XCTAssertEqual(s.wallThickness.seedBoost, 1)
+        s.wallThickness.seedBoost = 2.5
+        let back = try JSONDecoder().decode(LatticeSettings.self, from: try JSONEncoder().encode(s))
+        XCTAssertEqual(back.wallThickness.seedBoost, 2.5)
+        let old = #"{"depthBySim": false, "density": "manualSingle", "pct": 60}"#
+        let t = try JSONDecoder().decode(LatticeWallThickness.self, from: Data(old.utf8))
+        XCTAssertEqual(t.pct, 60); XCTAssertEqual(t.seedBoost, 1, "absent ⇒ core's tracer")
+        XCTAssertFalse(String(data: try JSONEncoder().encode(LatticeWallThickness.standard), encoding: .utf8)!.contains("seedBoost"))
+    }
+
     /// The request never reaches the job: the wire dictionary is the declared depth.
     func testTheSlabNeverReachesTheJob() {
         let a = attach(face(), LatticeWallThickness(depthBySim: false, density: .manualSingle, pct: 30))

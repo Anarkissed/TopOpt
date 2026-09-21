@@ -725,6 +725,26 @@ public struct LatticeSetupWizard: View {
             .padding(.horizontal, 14).frame(minHeight: 56)
             .background(RoundedRectangle(cornerRadius: 16).fill(Color.white.opacity(0.05))
                 .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(Color.white.opacity(0.09))))
+            // ★ THE SEEDING BOOST (his 2026-09-21): the tracer's own ratios, from the depth settings
+            HStack(spacing: DS.Space.s) {
+                Text("Seeding").dsStyle(DS.TypeScale.caption2).foregroundStyle(DS.Color.textTertiary.color)
+                    .frame(width: 52, alignment: .leading)
+                Slider(value: Binding(get: { model.wallThickness.seedBoost },
+                                      set: { model.wallThickness.seedBoost = ($0 * 10).rounded() / 10; rebuild() }),
+                       in: 1...3, step: 0.1)
+                    .tint(DS.Color.accent.color)
+                    .accessibilityIdentifier("wizard-wall-seed-boost")
+                Text(String(format: "×%.1f", model.wallThickness.seedBoost))
+                    .dsStyle(DS.TypeScale.caption).foregroundStyle(DS.Color.textPrimary.color)
+                    .frame(width: 52, alignment: .trailing)
+            }
+            captionLine("×1 is core's tracer; more offers seeds closer and keeps short curves.",
+                        info: "wall-seeding",
+                        "The tracer offers each new seed one separation off an accepted curve, refuses a "
+                        + "curve within half a separation of another and culls curves shorter than one. "
+                        + "The boost divides the seed and length ratios and lets curves pass closer, never "
+                        + "closer than the printer can lay. Preview only.",
+                        tint: DS.Color.textQuaternary.color)
             if !ask.depthBySim {
                 (Text("How much of the wall's thickness ") + Text("could").italic() + Text(" be used for the lattice — what ")
                  + Text("will").italic() + Text(" be used follows below."))
