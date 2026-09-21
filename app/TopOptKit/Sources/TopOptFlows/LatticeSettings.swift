@@ -1362,7 +1362,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
     public var shapeFitGradeStrength: Double = 0
     /// ★ THE LATTICE'S THICKNESS THROUGH THE WALL (his 2026-09-20/21) — see
     /// `LatticeWallThickness`. `.through` with start 0 is every existing project.
-    public var wallThickness: LatticeWallThickness = .through
+    public var wallThickness: LatticeWallThickness = .standard
     /// The grade's amount multiplier for a strength: 2^s — 2 at +1, ½ at −1, 1 at 0.
     public static func gradeAmount(strength s: Double) -> Double {
         pow(2.0, Swift.min(1, Swift.max(-1, s)))
@@ -1943,7 +1943,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         shapeFitBandMM = try c.decodeIfPresent(Double.self, forKey: .shapeFitBandMM)
             ?? LatticeSettings.defaultShapeFitBandCells
         shapeFitGradeStrength = try c.decodeIfPresent(Double.self, forKey: .shapeFitGradeStrength) ?? 0
-        wallThickness = try c.decodeIfPresent(LatticeWallThickness.self, forKey: .wallThickness) ?? .through
+        wallThickness = try c.decodeIfPresent(LatticeWallThickness.self, forKey: .wallThickness) ?? .standard
         cellMaxMM = try c.decodeIfPresent(Double.self, forKey: .cellMaxMM) ?? LatticeSettings.defaultCellMaxMM
         minRelativeDensity = try c.decodeIfPresent(Double.self, forKey: .minRelativeDensity) ?? 0
         maxRelativeDensity = try c.decodeIfPresent(Double.self, forKey: .maxRelativeDensity) ?? 1
@@ -2085,7 +2085,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         try c.encode(cellMinMM, forKey: .cellMinMM)
         try c.encode(shapeFitBandMM, forKey: .shapeFitBandMM)
         if shapeFitGradeStrength != 0 { try c.encode(shapeFitGradeStrength, forKey: .shapeFitGradeStrength) }
-        if wallThickness != .through { try c.encode(wallThickness, forKey: .wallThickness) }
+        if wallThickness != .standard { try c.encode(wallThickness, forKey: .wallThickness) }
         try c.encode(cellMaxMM, forKey: .cellMaxMM)
         try c.encode(minRelativeDensity, forKey: .minRelativeDensity)
         try c.encode(maxRelativeDensity, forKey: .maxRelativeDensity)

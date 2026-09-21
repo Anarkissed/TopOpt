@@ -949,3 +949,17 @@ Not yet seen by him.
   Save. The five earlier `wallThickness*` fields are gone (never shipped past tonight).
   Still preview-only. Tests rewritten (`LatticeWallThicknessTests`, 6). His 00:13 open:
   both sliders at 50 % ⇒ slab 6–9 mm; the front plate now covers the 6 mm of solid.
+- **2026-09-21 02:42 — his notes on the editor's first two cuts, all in.** Settings panel:
+  the rows scroll inside a ScrollView sized to their CONTENT (a greedy ScrollView had pinned
+  the panel at the band on both pages), capped at the sim-on height once "Depth defined by
+  sim" is off and at the page's band always; `depthBySim` is ON by default (`.standard`).
+  Number fields (mm, %) have up/down arrows + the decimal keypad. The editor spans the
+  stage from the far left ABOVE the settings, which minimise to one strip while it is up;
+  the rail floats to the right with air around it, undo/redo at its top, a Magnet tool
+  (points tick into the 5 mm grid's crossings), Curved/Straight tap = the point / hold =
+  the line; a dotted 5 mm grid both ways (stronger every 25); handle detents every 45°.
+  "Show in 3D" renders the wall's OWN prism (outline, position, angle) from the drawn
+  lines, updating on every edit, with an (i) saying so; the lines meeting ⇒ no slab ⇒
+  nothing drawn (his image 6). The transition: `StageDepartureMotion` — the sample cube
+  and the workspace's orientation gizmo lean back, slide down and fade TOGETHER (one
+  modifier, one value) as the editor's cover rises; reversed on Cancel/Save.

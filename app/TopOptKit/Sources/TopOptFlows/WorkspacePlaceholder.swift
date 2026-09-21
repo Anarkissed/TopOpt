@@ -377,6 +377,8 @@ public struct WorkspacePlaceholder: View {
     /// and carries the ladder, the sim and the receipt, which the wizard
     /// deliberately does not.
     @State private var showLatticeWizard = false
+    /// ★ the wizard's wall editor is covering the stage — no gizmo over it (2026-09-21)
+    @State private var wizardCoversStage = false
 
     /// ★ WHICH STAGE THE WORKSPACE IS SHOWING (task 2026-08-14-lattice-separation
     /// §1/§2/§3). The TO page and the lattice page are the SAME page — same
@@ -1378,6 +1380,8 @@ public struct WorkspacePlaceholder: View {
                 .organicProbeDriver(makeOrganicProbeDriver())
                 // ★ the stage draws with the workspace-owned camera the one gizmo follows
                 .stageCamera(wizardCamera)
+                // ★ the wall editor's cover hides the gizmo (2026-09-21)
+                .onPreferenceChange(WizardStageCoveredKey.self) { wizardCoversStage = $0 }
                 .transition(.opacity)
             }
             // Round-2 L18: the ONE Selections library, mounted OVER the lattice page
@@ -1581,6 +1585,8 @@ public struct WorkspacePlaceholder: View {
                 Spacer()
                 OrientationGizmoView(camera: showLatticeWizard ? wizardCamera : cameraModel,
                                      size: gizmoSize)
+                    // ★ leaves with the cube when the wizard's wall editor covers the stage
+                    .modifier(StageDepartureMotion(covered: wizardCoversStage))
             }
             Spacer()
         }

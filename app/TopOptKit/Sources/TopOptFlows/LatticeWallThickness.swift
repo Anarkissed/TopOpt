@@ -155,7 +155,8 @@ public struct LatticeFaceWallThickness: Codable, Equatable, Sendable {
 /// What the user asked for — the request, not the answer. The default is the whole
 /// prism, exactly as before the variable existed.
 public struct LatticeWallThickness: Equatable, Sendable, Codable {
-    public var depthBySim: Bool = false
+    /// ★ ON by default (his 2026-09-21, image 2: "the default it should be set at").
+    public var depthBySim: Bool = true
     public var density: LatticeWallDensityMode = .manualSingle
     /// manualSingle: the share of the allowed range that is latticed, in percent.
     public var pct: Double = 100
@@ -167,9 +168,12 @@ public struct LatticeWallThickness: Equatable, Sendable, Codable {
                 faces: [String: LatticeFaceWallThickness] = [:]) {
         self.depthBySim = depthBySim; self.density = density; self.pct = pct; self.faces = faces
     }
-    public static let through = LatticeWallThickness()
+    /// The default every project starts from: the solve decides the depth.
+    public static let standard = LatticeWallThickness()
+    /// The whole prism, as before the variable existed.
+    public static let through = LatticeWallThickness(depthBySim: false)
 
-    /// The default asks for nothing the prism does not already do.
+    /// Nothing to apply: the prism is the slab.
     public var isThrough: Bool {
         !depthBySim && density == .manualSingle && pct >= 100 && faces.values.allSatisfy { $0.isFull }
     }

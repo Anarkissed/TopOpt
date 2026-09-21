@@ -185,7 +185,7 @@ public struct LatticeWizardModel: Equatable, Sendable {
     /// The grade's strength across the band (−1…+1) — see `LatticeSettings.shapeFitGradeStrength`.
     public var shapeFitGradeStrength: Double = 0
     /// ★ the lattice's thickness through the wall (2026-09-21) — see `LatticeWallThickness`.
-    public var wallThickness: LatticeWallThickness = .through
+    public var wallThickness: LatticeWallThickness = .standard
     /// The hand-set strut thickness (mm), or nil for derived — see
     /// `LatticeSettings.manualStrutThicknessMM`.
     public var manualStrutThicknessMM: Double?

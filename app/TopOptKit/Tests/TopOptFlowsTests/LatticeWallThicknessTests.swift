@@ -37,21 +37,26 @@ final class LatticeWallThicknessTests: XCTestCase {
         return LatticeWallThicknessBuilder.attach([r], field: field, floorMM: floor)[0]
     }
 
-    func testTheDefaultIsTheWholePrismAndTheSettingsStayByteIdentical() throws {
+    func testTheDefaultIsSimOnAndTheSettingsStayByteIdentical() throws {
+        // ★ his image 2: every project starts with the solve deciding the depth
+        XCTAssertTrue(LatticeWallThickness.standard.depthBySim)
+        XCTAssertEqual(LatticeWallThickness(), .standard)
         XCTAssertTrue(LatticeWallThickness.through.isThrough)
+        XCTAssertFalse(LatticeWallThickness.standard.isThrough)
         XCTAssertNil(LatticeWallThicknessBuilder.build(region: face(), spec: .through, field: nil,
                                                        referenceMPa: 0, floorMM: 1))
         let s = LatticeSettings(enabled: true)
         let json = String(data: try JSONEncoder().encode(s), encoding: .utf8) ?? ""
         XCTAssertFalse(json.contains("wallThickness"), "★ an untouched project writes no thickness key")
         var moved = s
+        moved.wallThickness.depthBySim = false
         moved.wallThickness.faces["f:g:2"] = LatticeFaceWallThickness(startMM: 2, endMM: 6)
         moved.wallThickness.density = .manualGrade
         moved.wallThickness.faces["f:g:2"]?.profile = .flat(start: 0.2, end: 0.8)
         let back = try JSONDecoder().decode(LatticeSettings.self, from: try JSONEncoder().encode(moved))
         XCTAssertEqual(back.wallThickness, moved.wallThickness, "round trip, profile included")
         XCTAssertFalse(moved.wallThickness.isThrough)
-        var full = s; full.wallThickness.faces["f:g:2"] = LatticeFaceWallThickness()
+        var full = s; full.wallThickness = .through; full.wallThickness.faces["f:g:2"] = LatticeFaceWallThickness()
         XCTAssertTrue(full.wallThickness.isThrough, "a full range at manual 100 % is still the whole prism")
     }
 
@@ -141,6 +146,42 @@ final class LatticeWallThicknessTests: XCTestCase {
         XCTAssertEqual(over.y(at: 0.5, side: .start), 0.5, accuracy: 1e-9, "★ the start line never crosses the mid-plane")
         XCTAssertEqual(LatticeWallProfile.polyline(bump.start, curved: true, side: .start).count, 1 + 2 * 24)
         XCTAssertEqual(LatticeWallProfile.polyline(bump.start, curved: false, side: .start).count, 3)
+    }
+
+    /// The wall in 3D for a face card: the slab between the curves, extruded along the height.
+    func testTheSlabMeshFollowsTheProfileAndFitsTheWall() {
+        let prof = LatticeWallProfile(start: [.init(x: 0, y: 0.1), .init(x: 1, y: 0.4)],
+                                      end: [.init(x: 0, y: 0.9), .init(x: 1, y: 0.6)], curveStart: false, curveEnd: false)
+        let m = LatticeWallSlabMesh.build(widthMM: 100, heightMM: 40, thickMM: 10,
+                                          ask: LatticeFaceWallThickness(profile: prof), stations: 16)
+        XCTAssertEqual(m.vertexCount, 16 * 4)
+        XCTAssertGreaterThan(m.triangleCount, 60)
+        XCTAssertEqual(m.bounds.min.x, 0, accuracy: 1e-5); XCTAssertEqual(m.bounds.max.x, 100, accuracy: 1e-5)
+        XCTAssertEqual(m.bounds.min.y, 1, accuracy: 1e-4, "the start line's outer point");
+        XCTAssertEqual(m.bounds.max.y, 9, accuracy: 1e-4, "the end line's inner point")
+        XCTAssertEqual(m.bounds.max.z, 40, accuracy: 1e-5)
+        let box = LatticeWallSlabMesh.boxLines(widthMM: 100, heightMM: 40, thickMM: 10)
+        XCTAssertEqual(box.count, 12 * 6, "twelve edges")
+        // a plain range at 50 %: a flat slab from 2 to 6 mm
+        let r = LatticeWallSlabMesh.build(widthMM: 100, heightMM: 40, thickMM: 10,
+                                          ask: LatticeFaceWallThickness(startMM: 2, endMM: 10), pct: 50, stations: 4)
+        XCTAssertEqual(r.bounds.min.y, 2, accuracy: 1e-4); XCTAssertEqual(r.bounds.max.y, 6, accuracy: 1e-4)
+    }
+
+    /// His image 6: start and end on the mid-plane ⇒ no slab ⇒ nothing drawn.
+    func testNoSlabWhereTheLinesMeet() {
+        let met = LatticeWallProfile.flat(start: 0.5, end: 0.5)
+        let box = LatticeWallSlabMesh.build(widthMM: 100, heightMM: 40, thickMM: 10,
+                                            ask: LatticeFaceWallThickness(profile: met), stations: 8)
+        XCTAssertTrue(box.isEmpty, "★ a flat plane was drawn where there is no thickness")
+        let shaped = LatticeWallSlabMesh.build(region: face(), ask: LatticeFaceWallThickness(profile: met))
+        XCTAssertTrue(shaped.isEmpty)
+        // and the true-shape build follows the face's prism: a 2–6 mm range on the 10 mm face
+        let r = LatticeWallSlabMesh.build(region: face(), ask: LatticeFaceWallThickness(startMM: 2, endMM: 6))
+        XCTAssertFalse(r.isEmpty)
+        XCTAssertEqual(r.bounds.min.z, 2, accuracy: 1e-4); XCTAssertEqual(r.bounds.max.z, 6, accuracy: 1e-4)
+        XCTAssertEqual(r.bounds.min.x, -10, accuracy: 1e-4); XCTAssertEqual(r.bounds.max.y, 10, accuracy: 1e-4)
+        XCTAssertEqual(LatticeWallSlabMesh.prismLines(region: face()).count, 3 * 4 * 6, "three segments per outline edge")
     }
 
     /// The request never reaches the job: the wire dictionary is the declared depth.
