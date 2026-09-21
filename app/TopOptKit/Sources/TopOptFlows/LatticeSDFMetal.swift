@@ -1420,6 +1420,11 @@ public struct LatticeSDFScene {
                     organicCapsOut = t.spans.map { OrganicCapsule($0) }
                     organicSyntheticOut = t.synthetic
                     organicPhaseOut = (t.traceSeconds, t.emitSeconds, t.bakeSeconds)
+                    // ★ the tracer's own census, for his "not enough seeds" question (2026-09-21)
+                    NSLog("DIAG organic trace census: curves %d connectors %d spans %d · %@%@",
+                          t.curveCount, t.connectorCount, t.spanCount, t.stops.summary,
+                          t.growth.map { g in String(format: " · grown: seeds %d curves %d steps %d blocked %d branches %d joins %d",
+                                                     g.seeds, g.curves, g.steps, g.blocked, g.branches, g.joins) } ?? "")
                     if t.syntheticVonMises.count == tnx * tny * tnz {
                         organicSynthFieldOut = StressField(
                             nx: tnx, ny: tny, nz: tnz,
