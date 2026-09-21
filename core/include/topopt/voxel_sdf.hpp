@@ -18,10 +18,20 @@
 // SIGN: NEGATIVE INSIDE the set, positive outside, which is the convention the preview's
 // shader samples and therefore the one the fillet's arithmetic is written against.
 //
-// It measures to the VOXEL CENTRES of the boundary layer, so it is a voxel-accurate field
-// and not a surface-accurate one -- the same thing the preview samples, built the same
-// way, which is the point. Where an exact surface distance is needed instead, that is
-// what LatticeBoundary::signed_distance is for.
+// It measures to the SURFACE, taken at the voxel FACE between the boundary layer and its
+// neighbour -- which is where marching cubes puts it on a near-binary density field, so
+// this field's zero and the solid companion's mesh describe one wall. It measured to the
+// voxel CENTRES until 2026-09-20, and that was wrong twice over: the nearest value it
+// could report was a whole voxel (0.85 mm of disagreement with the companion mesh on the
+// maintainer's grid, under a 0.80 mm bead), and the field crossed the wall with a
+// GRADIENT OF 2, so a consumer whose profile is written in millimetres -- the wetted
+// join -- had that profile compressed into half its intended width. See voxel_sdf.cpp
+// for the measurements, including the refinement that was tried and rejected.
+//
+// It remains voxel-accurate, not surface-accurate: the face is exactly right for a
+// locally planar wall and approximate where the surface curves inside one voxel. Where
+// an exact surface distance is needed instead, that is what
+// LatticeBoundary::signed_distance is for.
 
 #include <cstddef>
 #include <vector>

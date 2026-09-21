@@ -5414,6 +5414,7 @@ LatticeVariantOutcome lattice_one_variant(
     gp.aesthetic_percentile = job.grading.aesthetic_percentile;
     gp.aesthetic_rho_min = job.grading.aesthetic_rho_min;
     gp.aesthetic_rho_max = job.grading.aesthetic_rho_max;
+    gp.max_relative_density = job.grading.max_relative_density;
     gp.aesthetic_adaptive_cells_per_member =
         job.grading.aesthetic_adaptive_cells_per_member;
     gp.aesthetic_error_budget = job.grading.aesthetic_error_budget;
@@ -6250,7 +6251,22 @@ LatticeVariantOutcome lattice_one_variant(
     const double beam =
         lattice_outline_beam_mm(job.grading.min_extrudable_width_mm, solved_grid.spacing);
     const double bleed = lattice_outline_bleed_mm(job.grading.shape_grade_band_mm);
-    const double inward = 0.5 * beam + bleed;
+    // ★ THE DEPTH, SETTLED BY THE APP'S OWN ALGEBRA (2026-09-20). The beam is a
+    // ribbon lying 0..beam INWARD from the outline -- not centred on it, which is what
+    // this assumed first -- and the bleed is solid fill laid over 0..beam+bleed on top
+    // of the lattice. §1.5's dRegion line SHRINKS the latticed set to >= beam/2; it
+    // does not extend it. So the printed union is
+    //
+    //     solid(0 .. beam+bleed)  U  lattice(>= beam/2)
+    //   = solid(0 .. beam+bleed)  U  lattice(>= beam+bleed)
+    //
+    // because the solid covers everything between. The lattice the preview draws
+    // inside the ribbon is BURIED, and burying it changes nothing that prints. Which
+    // means core needs no separate strut clip at all: clipping the lattice at
+    // beam+bleed -- which is what taking these voxels out of the mask does -- yields
+    // the same union the preview yields, and certifies the same object. The app's
+    // words: "Either certifies the same union."
+    const double inward = beam + bleed;
     std::vector<Vec3> nrms;
     for (const JobLatticeRegion& r : job.lattice.regions)
       if (r.role == "include") nrms.push_back(r.normal);
@@ -6269,12 +6285,13 @@ LatticeVariantOutcome lattice_one_variant(
                  "(band %.3f) = %.4f mm inward | %zu voxel(s) turned solid\n",
                  beam, job.grading.min_extrudable_width_mm, solved_grid.spacing, bleed,
                  job.grading.shape_grade_band_mm, inward, cleared);
-    // ★ NOT DONE HERE, AND SAID OUT LOUD: §1.5's strut clip
-    // (dRegion = max(dRegion, 0.5*beam - dOutline)), which lets a strut from the cell
-    // BESIDE the beam run on and end INSIDE the solid instead of stopping at its own
-    // cell's edge. That is a change to the region the emitter clips against, not to
-    // this mask, and doing it blind would be guessing at the shader's frame. The beam
-    // prints; the struts beside it end at its inner face. Reported to the app.
+    // ★ THE ONE PLACE THIS IS NOT LITERALLY THE PREVIEW: the preview keeps lattice in
+    // beam/2 .. beam+bleed and covers it with solid; core does not generate it there at
+    // all. The printed union is identical by the algebra above. The difference that
+    // could still matter is the CERTIFICATE: a strut buried in solid is tied to it over
+    // its buried length, while a strut clipped at the solid's face touches it only at
+    // the face. Core's octet certificate ties on contact, so both tie -- but if a
+    // future certificate asks for embedment depth, this is the line to revisit.
   }
 
   // ── ★ STEPPED (task 2026-08-21-organic-lattice, §4) ────────────────────────
@@ -6784,24 +6801,38 @@ LatticeVariantOutcome lattice_one_variant(
     // 1-based region_id the cells name.
     const bool doubled_plan = plan_regions.empty();
     if (doubled_plan) {
+      // ★ THE BASE IS PER REGION, AND IT COMES OUT OF THE LIST (app, 2026-09-20).
+      // This first took grading.cell_mm, which is ONE number -- and the app's doubled
+      // cells carry a base per region (his stand: 12 mm on one wall, 10.31 on the
+      // other, by the 09-17 rule). A single ladder from one target therefore refused
+      // the 10.31 wall outright.
+      //
+      // The base is the region's own LARGEST SENT CELL. Not re-derived from the FEA:
+      // the stepped derivation answers a different question and could disagree with
+      // the base the app actually packed against, which would refuse a plan for
+      // differing from a number the app never used. The largest cell the app placed
+      // IS the top of the ladder it halved, so the ladder is checked against the
+      // list's own evidence and core still validates rather than re-plans. A region
+      // that placed only fine cells simply has a lower top, and its cells still have
+      // to be halvings of it.
+      std::map<int, double> base_of;
+      for (const SteppedCell& c : job.lattice.stepped_cells) {
+        double& b = base_of[c.region_id];
+        if (c.size_mm > b) b = c.size_mm;
+      }
       int include_index = 0;
       for (const JobLatticeRegion& jr : job.lattice.regions) {
         if (jr.role != "include") continue;
         ++include_index;
         SteppedPlanRegion pr;
         pr.region_id = include_index;
-        pr.base_cell_mm = job.grading.cell_mm;
+        auto bi = base_of.find(include_index);
+        pr.base_cell_mm = bi != base_of.end() ? bi->second : job.grading.cell_mm;
         pr.slot_origin = jr.origin;
         pr.normal = jr.normal;
         pr.depth_mm = jr.depth_mm;
         plan_regions.push_back(pr);
       }
-      if (!(job.grading.cell_mm > 0.0))
-        throw JobError(
-            "lattice \"stepped_cells\" with \"algorithm\": \"doubled\" needs the job's "
-            "target cell size: the halving ladder S, S/2, S/4 ... is derived from it, "
-            "and every cell in the list is validated against that ladder. State "
-            "\"grading\": { \"cell_mm\": ... }.");
     }
     // ★ THE BOUND THE JOB'S INTENT ASKS FOR. Aesthetic keeps the 20 % "prints open" rule
     // beside the floor; structural drops it, because the certificate solves every strut
@@ -8990,6 +9021,7 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
     gp.aesthetic_percentile = job.grading.aesthetic_percentile;
     gp.aesthetic_rho_min = job.grading.aesthetic_rho_min;
     gp.aesthetic_rho_max = job.grading.aesthetic_rho_max;
+    gp.max_relative_density = job.grading.max_relative_density;
     gp.aesthetic_adaptive_cells_per_member =
         job.grading.aesthetic_adaptive_cells_per_member;
     gp.aesthetic_error_budget = job.grading.aesthetic_error_budget;

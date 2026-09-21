@@ -957,17 +957,36 @@ void test_voxel_sdf_is_exact() {
           CHECK(got < 0.0, "voxel sdf: the material voxel itself reads negative");
           continue;
         }
-        worst = std::max(worst, std::fabs(got - truth));
+        // ★ THE FIELD MEASURES TO THE SURFACE, NOT TO THE CENTRE, so half a voxel is
+        // added back before comparing with a centre-to-centre truth. That offset is
+        // the whole point of the field (see voxel_sdf.cpp), and what is being checked
+        // here is undisturbed by it: that the transform is EXACT EUCLIDEAN and not a
+        // chamfer. An exact transform plus a constant offset is still exact in every
+        // direction; a chamfer is not, and the control below still proves the
+        // difference matters.
+        worst = std::max(worst, std::fabs(got + 0.5 * g.spacing - truth));
         // the chamfer this replaces walks only along axes: |dx| + |dy| + |dz|
         const double cham = std::fabs(dx) + std::fabs(dy) + std::fabs(dz);
         chamfer_worst = std::max(chamfer_worst, std::fabs(cham - truth));
         if (i != c && j != c && k != c)
-          worst_diag = std::max(worst_diag, std::fabs(got - truth));
+          worst_diag = std::max(worst_diag, std::fabs(got + 0.5 * g.spacing - truth));
       }
   std::printf("  voxel sdf: worst error %.3e mm (diagonals %.3e); an axis chamfer would "
               "be out by %.3f mm\n", worst, worst_diag, chamfer_worst);
   CHECK(worst < 1e-9, "voxel sdf: EXACT in every direction, not just along the axes");
   CHECK(worst_diag < 1e-9, "voxel sdf: including the diagonals, where a chamfer fails");
+  // ★ AND THE OFFSET IS REALLY THERE. Without this the assertions above would pass on
+  // a field that had quietly gone back to measuring centres, which is the regression
+  // this offset exists to prevent: the wetted join's profile is written in millimetres
+  // and reads a field whose gradient must be 1 near the wall, not 2.
+  {
+    const double adjacent = sdf[g.index(c + 1, c, c)];
+    std::printf("  voxel sdf: the voxel touching the material reads %.4f mm "
+                "(centre-to-centre would be %.4f)\n", adjacent, g.spacing);
+    CHECK(std::fabs(adjacent - 0.5 * g.spacing) < 1e-9,
+          "voxel sdf: a voxel touching the material is HALF a voxel from its surface, "
+          "not a whole one -- so the field crosses the wall with slope 1, not 2");
+  }
   CHECK(chamfer_worst > 1.0,
         "CONTROL: the chamfer it replaces really is out by more than a millimetre here -- "
         "if it were not, this field would be solving nothing");

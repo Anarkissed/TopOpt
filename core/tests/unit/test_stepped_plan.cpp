@@ -269,6 +269,35 @@ static void test_group_keeps_each_cells_own_rho() {
 // a 1.72 mm voxel at a 0.45 mm bead gives 1.21 mm, the number the brief quotes. Both
 // terms are floors, and the test shows each one GOVERNING somewhere -- a formula whose
 // second term never binds is a formula with a dead branch.
+// ── ★ THE AESTHETIC CEILING IS THE DIAMETER TABLE'S PREIMAGE ──────────────────
+// Core holds two measured tables that are not exact inverses. A rho arriving as
+// stepped_cells[].rho is consumed by the DIAMETER table, so the ceiling has to be
+// stated in the units that table reads -- otherwise core caps at a density which,
+// sent through the table that actually sizes the strut, builds a THINNER strut than
+// the geometry the maintainer ruled on. Core published the wrong one of the two and
+// told the app its number was 3.5 % out; the app pushed back and was right.
+static void test_aesthetic_ceiling_is_the_diameter_preimage() {
+  const double ceil = octet_aesthetic_density_ceiling();
+  const double fwd = octet_relative_density(1.0, 0.5 * kOctetAestheticStrutPerCell);
+  std::printf("  ceiling: diameter preimage %.6f | forward law %.6f | that forward "
+              "value builds strut/cell %.6f\n", ceil, fwd,
+              octet_strut_diameter_mm(fwd, 4.0) / 4.0);
+  // it must BUILD the ruled geometry, at any cell
+  for (double cell : {2.58, 3.0, 4.0, 12.0}) {
+    const double got = octet_strut_diameter_mm(ceil, cell) / cell;
+    CHECK(std::fabs(got - kOctetAestheticStrutPerCell) < 1e-6,
+          "ceiling: sent through the diameter table it builds strut/cell 0.20 exactly");
+  }
+  CHECK(std::fabs(ceil - 0.218871) < 1e-5,
+        "ceiling: and that is the app's 0.219, not the forward law's 0.2117");
+  // ★ THE CONTROL: the forward law's value does NOT build it, which is the whole
+  // reason the two cannot be used interchangeably.
+  CHECK(std::fabs(octet_strut_diameter_mm(fwd, 4.0) / 4.0 - kOctetAestheticStrutPerCell)
+            > 0.003,
+        "ceiling: the forward law's value builds a measurably THINNER strut -- the two "
+        "tables are not inverses, and which one you use is not a rounding choice");
+}
+
 static void test_outline_beam_width() {
   // the brief's part
   const double his = lattice_outline_beam_mm(0.45, 1.72);
@@ -681,6 +710,7 @@ int main() {
   test_doubled_menu_is_halves_only();
   test_group_keeps_each_cells_own_rho();
   test_outline_beam_width();
+  test_aesthetic_ceiling_is_the_diameter_preimage();
   test_grouping_preserves_every_cell();
   test_packed_slot_covers_exactly_once();
   test_subdivision_preserves_the_member();

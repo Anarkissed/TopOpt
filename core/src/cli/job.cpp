@@ -1630,6 +1630,7 @@ JobDescription parse_job(const std::string& json_text) {
     reject_unknown_keys(
         gr, {"topology", "cell_mm", "min_extrudable_width_mm", "demand_exponent",
              "intent", "aesthetic_percentile", "aesthetic_rho_min",
+             "max_relative_density",
              "aesthetic_rho_max", "aesthetic_adaptive_cells_per_member",
              "aesthetic_error_budget",
              "cell_mode", "cell_min_mm", "cell_max_mm",
@@ -2126,6 +2127,15 @@ JobDescription parse_job(const std::string& json_text) {
           require_number(*v, "grading.aesthetic_error_budget");
       if (!(job.grading.aesthetic_error_budget > 0.0))
         schema_fail("grading \"aesthetic_error_budget\" must be > 0");
+    }
+    if (const JsonValue* v = find_key(gr, "max_relative_density")) {
+      job.grading.max_relative_density = require_number(*v, "grading.max_relative_density");
+      if (!(job.grading.max_relative_density > 0.0) ||
+          !(job.grading.max_relative_density <= 1.0) ||
+          !std::isfinite(job.grading.max_relative_density))
+        schema_fail(
+            "grading \"max_relative_density\" must be finite and in (0, 1] -- it caps "
+            "the top of the certifiable density band, under EITHER intent");
     }
     if (const JsonValue* v = find_key(gr, "aesthetic_rho_max"))
       job.grading.aesthetic_rho_max =

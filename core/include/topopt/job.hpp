@@ -583,6 +583,14 @@ struct JobGrading {
   // where within the band to grade, never to leave it.
   double aesthetic_rho_min = 0.0;
   double aesthetic_rho_max = 0.0;
+  // ★ THE CAP THE PREVIEW APPLIES UNDER BOTH INTENTS (app, 2026-09-20). The app
+  // rescales every automatic density onto the aesthetic ceiling whenever "Allow quilt"
+  // is off -- aesthetic AND structural -- and had no key to tell core. Without it the
+  // run grades to the full certifiable band while the preview is capped, and the two
+  // are different objects. Unlike aesthetic_rho_min/max this is NOT intent-gated.
+  // 0 = off. When a structural certificate then fails against this cap, the refusal
+  // names "Allow quilt" rather than reporting a bare margin (ruling D).
+  double max_relative_density = 0.0;
   // AESTHETIC only: let the cells-per-member floor be COMPUTED from what the material
   // actually carries, instead of the fixed accuracy floor of 5. Off by default.
   bool aesthetic_adaptive_cells_per_member = false;

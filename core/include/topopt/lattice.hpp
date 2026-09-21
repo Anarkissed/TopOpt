@@ -608,8 +608,31 @@ inline double lattice_outline_bleed_mm(double band_mm) {
 }
 
 inline constexpr double kOctetAestheticStrutPerCell = 0.20;
+// ★ AND IT IS THE PREIMAGE UNDER THE DIAMETER TABLE, NOT THE FORWARD DENSITY LAW.
+// Core holds TWO measured tables and they are not exact inverses of one another:
+//
+//     octet_relative_density(cell, radius)  at strut/cell 0.20 -> rho 0.211733
+//     octet_strut_diameter_mm(rho, cell)    preimage of 0.20   -> rho 0.218871
+//
+// A density arriving as stepped_cells[].rho is consumed by the DIAMETER table -- that
+// is what sizes the strut (ruling C) -- so the ceiling must be stated in the units that
+// table reads: 0.218871, which is the app's 0.219. Taking the forward law's 0.211733
+// and sending it through the diameter table builds strut/cell 0.196, UNDER the geometry
+// the maintainer ruled on. Both numbers are cell-independent; the gap is the tables'
+// round trip and not a cell effect. (Core first published 0.2117 here and told the app
+// its 0.219 was 3.5 % wrong; the app pushed back and was right.)
+//
+// Bisected rather than written down, so that if either table is re-measured this
+// follows it instead of silently becoming a different piece of geometry.
 inline double octet_aesthetic_density_ceiling() {
-  return octet_relative_density(1.0, 0.5 * kOctetAestheticStrutPerCell);
+  const double cell = 4.0;                    // any cell: the RATIO is what matters
+  const double want = kOctetAestheticStrutPerCell * cell;
+  double lo = 0.01, hi = 0.90;
+  for (int it = 0; it < 200; ++it) {
+    const double mid = 0.5 * (lo + hi);
+    (octet_strut_diameter_mm(mid, cell) < want ? lo : hi) = mid;
+  }
+  return 0.5 * (lo + hi);
 }
 
 // The resolution (voxels per cell edge) the octet tensor library was measured at,
