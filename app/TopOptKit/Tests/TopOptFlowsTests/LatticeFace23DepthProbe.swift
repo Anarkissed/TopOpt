@@ -36,6 +36,35 @@ final class LatticeFace23DepthProbe: XCTestCase {
             try data.write(to: url)
             print("PROBE wrote \(dicts.count) region dicts to \(url.path)")
         } catch { print("PROBE write failed: \(error)") }
+        // ★ his 15:45 question: is face 23's selection redundant with the flat walls on this part?
+        do {
+            let flats = regions.filter { $0.faceID != 23 }
+            var inPart = 0, alsoFlat = 0
+            for r in regions where r.faceID == 23 {
+                let n = LatticeRegionMask.unit(r.normal); let (bu, bv) = LatticeRegionMask.basis(n)
+                var lo = SIMD2<Double>(1e9, 1e9), hi = SIMD2<Double>(-1e9, -1e9)
+                for loop in r.outlineLoops { for q in loop { lo = simd_min(lo, q); hi = simd_max(hi, q) } }
+                var whole = r; whole.outlineSeamTilt = []; whole.outlineSeams = []
+                var u = lo.x - 2
+                while u <= hi.x + 2 {
+                    var v = lo.y - 2
+                    while v <= hi.y + 2 {
+                        var s = 0.5 * h
+                        while s < r.depthMM {
+                            let p = r.origin + bu * u + bv * v + n * s
+                            if LatticeRegionMask.containsWholePrism(p, region: whole), partAt(p) {
+                                inPart += 1
+                                if flats.contains(where: { LatticeRegionMask.containsWholePrism(p, region: $0) }) { alsoFlat += 1 }
+                            }
+                            s += h
+                        }
+                        v += h
+                    }
+                    u += h
+                }
+            }
+            print("PROBE face 23 selection ∩ part: \(inPart) voxels, of which \(alsoFlat) (\(inPart > 0 ? 100 * alsoFlat / inPart : 0) %) are also inside face 15's or face 2's prism")
+        }
         // who is across each outline edge, per the mesh (nil = no shared edge / free)
         for f: FaceID in [15, 2, 23] {
             guard let pl = LatticeRegionEmission.planeFor(face: f, in: mesh), case let .plane(c, n, _, _, _, _) = pl else { continue }
