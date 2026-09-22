@@ -276,4 +276,27 @@ final class LatticeSeamFlareTests: XCTestCase {
         XCTAssertTrue(LatticeFaceOutline.insideWithFlare(SIMD2(3, 0), loops: [square], seams: seams, tilts: tilts, caps: [[0, 6, 0, 0]], depth: 15), "7 mm in is kept with the cap")
         XCTAssertFalse(LatticeFaceOutline.insideWithFlare(SIMD2(3, 0), loops: [square], seams: seams, tilts: tilts, depth: 15), "uncapped, depth 15 cuts 15")
     }
+
+    /// ★ THE WIRE CARRIES THE SELECTION (his 2026-09-22 15:50): a diverging seam edge is
+    /// pushed out by depth × tilt (capped at the neighbour's depth) so core's flat slabs
+    /// union to the bisector pocket; converging seams and true edges do not move.
+    func testTheWireOutlineIsGrownAcrossDivergingSeamsOnly() {
+        var r = LatticeRegionSpec(role: .include, kind: .face)
+        r.origin = .zero; r.normal = SIMD3(0, 0, -1); r.depthMM = 5; r.halfUMM = 10; r.halfWMM = 10
+        r.outlineLoops = [[SIMD2(-10, -10), SIMD2(10, -10), SIMD2(10, 10), SIMD2(-10, 10)]]
+        r.outlineSeams = [[false, true, false, true]]
+        r.outlineSeamTilt = [[0, 1.0, 0, -1.0]]          // +x edge diverging (45°), −x edge converging
+        r.outlineSeamDepthMM = [[0, 20, 0, 20]]
+        let w = r.wireOutlineLoops[0]
+        XCTAssertEqual(w.map { $0.x }.max()!, 15, accuracy: 1e-9, "+x edge out by 5 × tan 45°")
+        XCTAssertEqual(w.map { $0.x }.min()!, -10, accuracy: 1e-9, "the converging edge stays")
+        XCTAssertEqual(w.map { $0.y }.max()!, 10, accuracy: 1e-9); XCTAssertEqual(w.map { $0.y }.min()!, -10, accuracy: 1e-9)
+        let d = r.wireDictionary(frameAxes: false)["geometry"] as! [String: Any]
+        XCTAssertEqual(d["half_u_mm"] as! Double, 15, accuracy: 1e-9, "the bounding box holds the grown outline")
+        // capped at the neighbour's depth: a 2 mm neighbour caps the growth at 2
+        r.outlineSeamDepthMM = [[0, 2, 0, 20]]
+        XCTAssertEqual(r.wireOutlineLoops[0].map { $0.x }.max()!, 12, accuracy: 1e-9)
+        // the preview's own loops are untouched
+        XCTAssertEqual(r.outlineLoops[0].map { $0.x }.max()!, 10, accuracy: 1e-9)
+    }
 }

@@ -255,6 +255,35 @@ public struct LatticeRegionSpec: Equatable, Sendable {
     /// and stays absent. Its bytes do not move.
     /// The job's region, with the face frame axes only when the linked core takes them.
     public var wireDictionary: [String: Any] { wireDictionary(frameAxes: TopOptKit.regionFrameAxesWired) }
+
+    /// ★★★ THE SELECTION CORE CAN READ (his 2026-09-22 15:50: "if all it's doing is
+    /// SELECTING the area to lattice, you literally just counted the voxels to select").
+    /// Core lattices a curved face as flat slabs, one per facet, each straight along its
+    /// own normal; on a diverging seam a wedge of the model between two slabs falls in
+    /// neither and is never selected (core note 7). The preview's facet prisms meet at
+    /// the bisector. So the outline that goes ON THE WIRE is the facet's outline pushed
+    /// OUTWARD across every diverging seam by `min(depth, neighbour depth) × tan(half
+    /// the dihedral)` — the wedge's full width at the bottom — so the flat slabs' union
+    /// covers the bisector pocket. Converging seams overlap already and are left alone.
+    /// The over-selection this causes is a sliver ~d·θ²/2 deep at the seam's far end
+    /// (0.26 mm at 12 mm and 12°), inside the neighbour's slab. Preview-only readers keep
+    /// `outlineLoops` and the flare; this is the job's copy.
+    public var wireOutlineLoops: [[SIMD2<Double>]] {
+        guard kind == .face, depthMM > 0, !outlineSeams.isEmpty, !outlineSeamTilt.isEmpty else { return outlineLoops }
+        return outlineLoops.enumerated().map { (l, loop) in
+            let sm = l < outlineSeams.count ? outlineSeams[l] : []
+            let tl = l < outlineSeamTilt.count ? outlineSeamTilt[l] : []
+            let cl = l < outlineSeamDepthMM.count ? outlineSeamDepthMM[l] : []
+            let grow: [Double] = loop.indices.map { i in
+                guard i < sm.count, sm[i], i < tl.count, tl[i] > 1e-9 else { return 0 }
+                let cap = i < cl.count && cl[i] > 0 ? Swift.min(depthMM, cl[i]) : depthMM
+                return -(cap * tl[i])              // negative = outward in `offsetRing`
+            }
+            guard grow.contains(where: { $0 < 0 }) else { return loop }
+            return LatticeOutlineRibbon.offsetRing(loop, by: 0, seams: [], edgeOffset: grow)
+        }
+    }
+
     public func wireDictionary(frameAxes: Bool) -> [String: Any] {
         // ★★ THE OUTLINE GOES ON THE WIRE, and core now reads it. The first
         // attempt was withdrawn because `topopt-cli` rejected the key outright
@@ -270,15 +299,20 @@ public struct LatticeRegionSpec: Equatable, Sendable {
         // app moved onto core's `plane_basis` order rather than negating here,
         // because a conversion at the boundary is a second place for the sign to
         // be wrong.
+        // ★ the grown outline (see `wireOutlineLoops`) and a bounding box that holds it —
+        // core uses the half-extents as the cheap reject before the polygon test
+        let loops = wireOutlineLoops
+        var hu = halfUMM, hw = halfWMM
+        for loop in loops { for q in loop { hu = Swift.max(hu, abs(q.x)); hw = Swift.max(hw, abs(q.y)) } }
         var faceGeometry: [String: Any] = [
             "origin": [origin.x, origin.y, origin.z],
             "normal": [normal.x, normal.y, normal.z],
-            "half_u_mm": halfUMM,
-            "half_w_mm": halfWMM,
+            "half_u_mm": hu,
+            "half_w_mm": hw,
             "depth_mm": depthMM,
         ]
-        if !outlineLoops.isEmpty {
-            faceGeometry["outline_uv"] = outlineLoops.map { loop in
+        if !loops.isEmpty {
+            faceGeometry["outline_uv"] = loops.map { loop in
                 loop.map { [$0.x, $0.y] }
             }
         }

@@ -1308,3 +1308,14 @@ Not yet seen by him.
   accepted by core; the measurement job with face 23 as facets is in ~/Downloads
   (`m2_verticalStand_face23_facets_job.json`, five regions, frame axes on, no expand on
   the wire); his interim decision (deeper facet slabs vs leave) still open.
+- **2026-09-22 15:50 — THE SELECTION GOES ON THE WIRE (his: "you literally just counted
+  the voxels to select").** No interim decision: `LatticeRegionSpec.wireOutlineLoops`
+  pushes each facet's outline OUTWARD across every diverging seam by `min(depth,
+  neighbour depth) × tan(half dihedral)` (the wedge's width at the bottom), and the
+  half-extents grow with it, so core's flat slabs union to the preview's bisector pocket;
+  converging seams and true edges do not move; the preview keeps `outlineLoops` and the
+  flare. Over-selection: a sliver ~d·θ²/2 at the seam's far end, inside the neighbour's
+  slab. On the stand: the three facets move 2/4/2 outline vertices by up to 2.96 mm. The
+  job for core regenerated with the grown outlines (~/Downloads/m2_verticalStand_face23_
+  facets_job.json). Test: `LatticeSeamFlareTests.testTheWireOutlineIsGrownAcross
+  DivergingSeamsOnly`. Installed 15:57.

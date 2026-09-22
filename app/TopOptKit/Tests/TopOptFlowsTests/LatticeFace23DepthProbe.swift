@@ -31,6 +31,12 @@ final class LatticeFace23DepthProbe: XCTestCase {
         // ★ THE JOB FOR CORE NOTE 7: face 23 as it stands (facets, frame axes on the wire)
         do {
             let dicts = regions.map { $0.wireDictionary(frameAxes: true) }
+            for (ri, r) in regions.enumerated() where r.faceID == 23 {
+                let grown = zip(r.outlineLoops, r.wireOutlineLoops).map { a, b in zip(a, b).filter { simd_length($0 - $1) > 1e-6 }.count }
+                let moved = zip(r.outlineLoops, r.wireOutlineLoops).flatMap { a, b in zip(a, b).map { simd_length($0 - $1) } }.max() ?? 0
+                print(String(format: "PROBE r%d f23 wire outline: %d vertices moved, max %.2f mm (diverging seams: %d)", ri, grown.reduce(0, +), moved,
+                             zip(r.outlineSeams.flatMap { $0 }, r.outlineSeamTilt.flatMap { $0 }).filter { $0 && $1 > 1e-9 }.count))
+            }
             let data = try JSONSerialization.data(withJSONObject: dicts, options: [.prettyPrinted, .sortedKeys])
             let url = URL(fileURLWithPath: ProcessInfo.processInfo.environment["FACE23_REGIONS_OUT"] ?? "/tmp/face23_regions.json")
             try data.write(to: url)
