@@ -1509,15 +1509,72 @@ CoupledLatticeSolve solve_coupled_lattice(
     }
     out.dropped_length_fraction = total_len > 0.0 ? dropped_len / total_len : 0.0;
     if (out.dropped_length_fraction > kIslandRefuseFraction) {
-      out.refusal =
+      // ── ★ WHY IT FAILED, AND HOW TO FIX IT (maintainer, 2026-09-22) ──────────
+      // "I'd like for an error to call out the hole in the lattice should the
+      // lattice not certify for that reason." The WHY was already here; a user
+      // reading it learnt that their lattice is disconnected and nothing about
+      // what to do. The two halves are separated below and the HOW names the job
+      // keys, because a refusal that cannot be acted on is a dead end with a
+      // paragraph attached.
+      //
+      // The two shapes are distinguished because they need OPPOSITE fixes, and
+      // core can already tell them apart from the restraint report it has just
+      // built. A FEW BIG components adrift is a hole -- the lattice is in
+      // healthy pieces and one or more of them has been cut off from the solid.
+      // MANY SMALL ones is a fabric that never knitted: the cell is too coarse
+      // for the region, or the members never reached each other at all.
+      const std::size_t adrift = out.restraint.components_unrestrained +
+                                 out.restraint.components_underconstrained;
+      const double members_per_adrift =
+          adrift > 0 ? static_cast<double>(out.members_dropped) /
+                           static_cast<double>(adrift)
+                     : 0.0;
+      const bool a_hole = adrift > 0 && members_per_adrift >= 8.0;
+
+      std::string why =
           std::to_string(out.members_dropped) + " of " +
           std::to_string(net.member_count()) + " lattice member(s), " +
           std::to_string(100.0 * out.dropped_length_fraction) +
           "% of the lattice by length, reach no tie or are held too loosely to "
           "resist a rigid rotation. They carry no load and make the system "
           "singular. Dropping that much is not a repair -- the lattice is mostly "
-          "disconnected from the part, and certifying what is left would describe a "
-          "structure that is largely missing.";
+          "disconnected from the part, and certifying what is left would describe "
+          "a structure that is largely missing.";
+
+      std::string shape =
+          "  WHAT IT LOOKS LIKE: " + std::to_string(adrift) +
+          " piece(s) of lattice reach no tie, averaging " +
+          std::to_string(members_per_adrift) + " member(s) each -- ";
+      shape += a_hole
+                   ? "a few LARGE pieces, which is a HOLE: the lattice is sound "
+                     "but something has cut one or more whole pieces off from the "
+                     "solid it must hold on to."
+                   : "many SMALL pieces, which is a fabric that never knitted: "
+                     "the members did not reach each other or the solid in the "
+                     "first place.";
+
+      std::string how =
+          a_hole
+              ? "  HOW TO FIX A HOLE: the lattice must touch solid somewhere. "
+                "Give the cut-off piece something to land on -- extend the region "
+                "so it reaches material, or keep a solid rim at the outline for "
+                "struts to weld into (ORGANIC: raise \"organic_solid_rim_mm\"; "
+                "OCTET: turn the shape grade on, whose outline beam is the same "
+                "thing) -- or close the hole that severed it. If the region's "
+                "depth was drawn or graded per column, a column with no lattice "
+                "in it is exactly such a hole, and the piece beyond it has "
+                "nothing left to hold on to. Widening the cell will NOT help "
+                "here: the pieces are already healthy."
+              : "  HOW TO FIX A FABRIC THAT NEVER KNITTED: the members are too "
+                "sparse to find each other. Use a SMALLER cell (lower "
+                "\"cell_min_mm\" / \"cell_max_mm\") so more members meet, or "
+                "raise the density so each is thicker and reaches further -- both "
+                "apply to ORGANIC and the OCTET alike. ORGANIC only: turn on "
+                "\"organic_transfer_ties\" so the second family gives the first "
+                "something to cross. Closing a hole will NOT help here: there is "
+                "no single hole to close.";
+
+      out.refusal = why + "\n" + shape + "\n" + how;
       return out;
     }
   }
