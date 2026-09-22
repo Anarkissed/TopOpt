@@ -617,7 +617,9 @@ public struct LatticeSDFScene {
                 skinMM: Double = 0,
                 skippedFaces: Int = 0,
                 // ★ one cell, in mm — the slab's floor (see `LatticeWallThickness`)
-                wallThicknessFloorMM: Double = 0) {
+                wallThicknessFloorMM: Double = 0,
+                // ★ per wall (selectable key), the depths its cells can be packed to (D1)
+                wallDepthSteps: [String: [Double]] = [:]) {
         self.preview = LatticeSDFPreview(latticeID: latticeID)
         // ★★ THE SLAB, BUILT FIRST (2026-09-21): every reader below — the region field,
         // the organic candidates, the octree, the cap wall — reads `regions`, so the
@@ -626,7 +628,8 @@ public struct LatticeSDFScene {
         let regions = LatticeWallThicknessBuilder.attach(
             regions, field: field,
             floorMM: wallThicknessFloorMM > 0 ? wallThicknessFloorMM
-                : Double((mesh.bounds.max - mesh.bounds.min).max()) / Double(max(1, maxDim)))
+                : Double((mesh.bounds.max - mesh.bounds.min).max()) / Double(max(1, maxDim)),
+            depthStepsFor: { r in r.selectableKey.flatMap { wallDepthSteps[$0] } })
         if regions.contains(where: { $0.thicknessMap != nil }) {
             NSLog("DIAG wall thickness: %@", regions.enumerated().compactMap { i, r -> String? in
                 guard let m = r.thicknessMap, let spec = r.thickness else { return nil }

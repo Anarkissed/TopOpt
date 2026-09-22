@@ -2,26 +2,26 @@ import SwiftUI
 import simd
 import TopOptDesign
 
-// ★★★ THE WALL EDITOR IN THE VIEWER — his design `Lattice Wall Thickness.dc.html`
-// (2026-09-21) and his notes on the first two cuts (01:36, 02:12): the editor spans the
-// stage from the far left, ABOVE the minimised settings; each wall is its own squircle
-// card with a BIG box — OUTER SURFACE on top, INNER SURFACE below, the mid-plane dashed,
-// a dotted 5 mm grid both ways, the START line green in the outer half and the END line
-// red in the inner half, the lattice between them; the cards scroll with an obvious bar
-// and up/down arrows past two walls; the tool rail floats to the RIGHT with air around
-// it; Cancel / Save at the very bottom; "Show in 3D" on a card renders THAT wall — its
-// own outline, position and angle — and follows every edit.
+// ★★★ THE WALL EDITOR IN THE VIEWER — his design `Lattice Wall Thickness.dc.html` and his
+// notes (2026-09-21, 01:36, 02:12), rebuilt on his three decisions of the evening:
 //
-//   thickness stage  two full-width bars to drag — "how much of each wall may become
-//                    lattice" (the allowed range, in mm)
-//   grade stage      the profile: PEN taps add points on the half tapped, MOVE drags them,
-//                    MAGNET snaps points to the grid's crossings, a selected point shows
-//                    its tangent handles (drag, detents at 45°), the rail flips
-//                    Curved/Straight (tap: the point, hold ½ s: the whole line), mirrors
-//                    start ↔ end (hold: the selected point's half onto the other), shifts,
-//                    flattens, deletes, resets — and undoes / redoes, at its top.
+//   D1  the drawing is CELL-BASED, not curve-based: the box is divided into columns one
+//       cell wide along the wall and rows at the depths the wall's cells can be packed to;
+//       the user PAINTS the depth per column and the preview draws exactly those steps,
+//       in 2D here and in 3D on the card.
+//   D2  the lattice always starts AT the surface — one line to draw, the END; nothing can
+//       be drawn that leaves a covered wall over empty space.
+//   D3  it is called depth, not density.
 //
-// The maths is the design's, ported to `LatticeWallProfile`; this file is the touch.
+// The editor still spans the stage from the far left above the minimised settings, one
+// squircle card per wall with a BIG box (OUTER SURFACE above, INNER SURFACE below), the
+// cards scroll with a bar and arrows past two walls, the rail floats to the right with
+// air around it, Cancel / Save at the very bottom, "Show in 3D" renders THAT wall.
+//
+//   thickness stage  one bar to drag — how deep the lattice may go on each wall
+//   grade stage      paint: drag across the box and every column under the finger takes
+//                    the depth under it (snapped to the wall's steps); the rail undoes /
+//                    redoes, fills, flattens, mirrors, shifts and resets.
 
 public struct LatticeWallEditorFace: Identifiable, Equatable {
     public let id: String
@@ -32,10 +32,23 @@ public struct LatticeWallEditorFace: Identifiable, Equatable {
     public let thickMM: Double
     /// The face prism itself, for the true-shape render.
     public let region: LatticeRegionSpec?
+    /// The depths this wall can be packed to (ascending, 0 first); empty ⇒ continuous (organic).
+    public let depthStepsMM: [Double]
+    /// The width of one drawn column along the wall (the wall's base cell; 5 mm for organic).
+    public let columnMM: Double
     public init(id: String, name: String, tint: Color, widthMM: Double, heightMM: Double, thickMM: Double,
-                region: LatticeRegionSpec? = nil) {
+                region: LatticeRegionSpec? = nil, depthStepsMM: [Double] = [], columnMM: Double = 5) {
         self.id = id; self.name = name; self.tint = tint
         self.widthMM = widthMM; self.heightMM = heightMM; self.thickMM = thickMM; self.region = region
+        self.depthStepsMM = depthStepsMM; self.columnMM = max(0.5, columnMM)
+    }
+    /// How many columns the box is divided into.
+    public var columns: Int { max(1, min(96, Int((widthMM / columnMM).rounded()))) }
+    /// A depth in mm snapped to this wall's steps (or to 0.5 mm when continuous), never above the wall.
+    public func snap(_ mm: Double) -> Double {
+        let v = min(thickMM, max(0, mm))
+        if depthStepsMM.isEmpty { return (v * 2).rounded() / 2 }
+        return min(thickMM, LatticeWallDepthSteps.snap(v, steps: depthStepsMM))
     }
 }
 
@@ -53,21 +66,11 @@ public struct LatticeWallProfileEditor: View {
         self.faces = faces; self.stage = stage; self._ask = ask; self.onCancel = onCancel; self.onSave = onSave
     }
 
-    private enum Tool { case pen, move }
-    private struct SelPt: Equatable { var face: String; var side: LatticeWallProfile.Side; var idx: Int }
-    private enum DragKind: Equatable { case thick(LatticeWallProfile.Side), point(LatticeWallProfile.Side, Int), wing(LatticeWallProfile.Side, Int, Double), none }
-    private struct Drag: Equatable { var face: String; var kind: DragKind; var moved: Bool }
+    private struct Drag: Equatable { var face: String; var moved: Bool; var lastColumn: Int? }
 
     @State private var activeFace: String? = nil
-    @State private var tool: Tool = .pen
-    @State private var magnet = false
-    @State private var side: LatticeWallProfile.Side = .start
-    @State private var selPt: SelPt? = nil
-    @State private var showWings = true
     @State private var drag: Drag? = nil
-    @State private var holdAll = false
-    @State private var holdMirror = false
-    @State private var pressBegan: Date? = nil
+    @State private var hover: (face: String, column: Int, mm: Double)? = nil
     @State private var render3D: Set<String> = []
     @State private var info3D: String? = nil
     @State private var scrollOffset: CGFloat = 0
@@ -81,8 +84,6 @@ public struct LatticeWallProfileEditor: View {
     private static let bx: CGFloat = 60, by: CGFloat = 30, padR: CGFloat = 78, padB: CGFloat = 30
     /// ★ the box is TALL whatever the wall's mm say (his 01:36)
     private static let boxHeight: CGFloat = 300
-    /// the grid, in mm, both ways (his image 7)
-    private static let gridMM: Double = 5
     private static let railWidth: CGFloat = 116
 
     public var body: some View {
@@ -122,7 +123,7 @@ public struct LatticeWallProfileEditor: View {
                             .foregroundStyle(DS.Color.textPrimary.color)
                     }.buttonStyle(.plain).accessibilityIdentifier("wall-editor-cancel")
                     Button(action: onSave) {
-                        Text(grade ? "Save profile" : "Save thickness").font(.system(size: 16, weight: .bold))
+                        Text(grade ? "Save depth" : "Save depth").font(.system(size: 16, weight: .bold))
                             .padding(.horizontal, 30).frame(minHeight: 50)
                             .background(Capsule().fill(DS.Color.accent.color))
                             .foregroundStyle(.white)
@@ -186,10 +187,9 @@ public struct LatticeWallProfileEditor: View {
 
     // MARK: history
 
-    /// Snapshot before a change that can be undone (a drag's first move, a tap, a rail op).
     private func remember() { undoStack.append(ask); if undoStack.count > 60 { undoStack.removeFirst() }; redoStack.removeAll() }
-    private func undo() { guard let p = undoStack.popLast() else { return }; redoStack.append(ask); ask = p; selPt = nil }
-    private func redo() { guard let n = redoStack.popLast() else { return }; undoStack.append(ask); ask = n; selPt = nil }
+    private func undo() { guard let p = undoStack.popLast() else { return }; redoStack.append(ask); ask = p }
+    private func redo() { guard let n = redoStack.popLast() else { return }; undoStack.append(ask); ask = n }
 
     // MARK: per-face state
 
@@ -197,24 +197,20 @@ public struct LatticeWallProfileEditor: View {
     private func setFace(_ id: String, _ mutate: (inout LatticeFaceWallThickness) -> Void) {
         var f = faceAsk(id); mutate(&f); ask.faces[id] = f
     }
+    /// How deep the lattice may go on this wall, in mm.
+    private func allowedMM(_ f: LatticeWallEditorFace) -> Double { min(f.thickMM, faceAsk(f.id).endMM ?? f.thickMM) }
+    /// The drawn steps on this wall, on its column count (a flat drawing at the allowed depth when none).
     private func profile(_ f: LatticeWallEditorFace) -> LatticeWallProfile {
         let a = faceAsk(f.id)
-        if let p = a.profile { return p }
-        let t = max(f.thickMM, 1e-9)
-        return .flat(start: a.startMM / t, end: (a.endMM ?? f.thickMM) / t)
+        if let p = a.profile { return p.resampled(columns: f.columns) }
+        return .flat(end: allowedMM(f) / max(f.thickMM, 1e-9), columns: f.columns)
     }
     private func setProfile(_ f: LatticeWallEditorFace, _ mutate: (inout LatticeWallProfile) -> Void) {
         var p = profile(f); mutate(&p); setFace(f.id) { $0.profile = p }
     }
-    private func shares(_ f: LatticeWallEditorFace) -> (start: Double, end: Double) {
-        let a = faceAsk(f.id), t = max(f.thickMM, 1e-9)
-        return (min(max(0, a.startMM / t), 1), min(max(0, (a.endMM ?? f.thickMM) / t), 1))
-    }
-    /// The magnet: the nearest grid crossing, in the box's normalised units.
-    private func snap(_ f: LatticeWallEditorFace, x: Double, y: Double) -> (Double, Double) {
-        guard magnet else { return (x, y) }
-        let gx = Self.gridMM / max(f.widthMM, 1e-9), gy = Self.gridMM / max(f.thickMM, 1e-9)
-        return (min(1, max(0, (x / gx).rounded() * gx)), min(1, max(0, (y / gy).rounded() * gy)))
+    /// The depth (mm) a touch at normalised y means on this wall: snapped, never past what is allowed.
+    private func depthAt(_ f: LatticeWallEditorFace, y: Double) -> Double {
+        f.snap(min(allowedMM(f), max(0, y) * f.thickMM))
     }
 
     // MARK: one wall's card
@@ -227,6 +223,10 @@ public struct LatticeWallProfileEditor: View {
                 Text(f.name).font(.system(size: 16, weight: .bold))
                 Text(String(format: "%.0f × %.1f mm wall", f.widthMM, f.thickMM))
                     .font(.system(size: 13)).foregroundStyle(DS.Color.textPrimary.opacity(0.5).color)
+                if grade {
+                    Text(f.depthStepsMM.isEmpty ? "continuous" : String(format: "%.1f mm cells", f.columnMM))
+                        .font(.system(size: 12, weight: .semibold)).foregroundStyle(DS.Color.textPrimary.opacity(0.45).color)
+                }
                 if grade && isActive {
                     Text("● editing").font(.system(size: 12, weight: .bold)).foregroundStyle(Color(red: 0.5, green: 0.75, blue: 1))
                 }
@@ -237,7 +237,7 @@ public struct LatticeWallProfileEditor: View {
                 }
                 .buttonStyle(.plain)
                 .popover(isPresented: Binding(get: { info3D == f.id }, set: { if !$0 { info3D = nil } })) {
-                    Text("The 3D wall is the face's own prism — its outline, position and angle — and it updates automatically as you edit the lines.")
+                    Text("The 3D wall is the face's own prism — its outline, position and angle — and it updates automatically as you paint the depth. It shows the steps exactly as they will be laid.")
                         .dsStyle(DS.TypeScale.footnote).foregroundStyle(DS.Color.textPrimary.color)
                         .fixedSize(horizontal: false, vertical: true).padding(16).frame(maxWidth: 320)
                 }
@@ -262,7 +262,7 @@ public struct LatticeWallProfileEditor: View {
                     .contentShape(Rectangle())
                     .gesture(DragGesture(minimumDistance: 0, coordinateSpace: .local)
                         .onChanged { v in dragChanged(f, v, bw: bw, bh: bh, grade: grade) }
-                        .onEnded { v in dragEnded(f, v, bw: bw, bh: bh, grade: grade) })
+                        .onEnded { _ in drag = nil; hover = nil })
             }
             .frame(height: Self.by + Self.boxHeight + Self.padB)
             .accessibilityIdentifier("wall-editor-canvas-\(f.id)")
@@ -285,64 +285,60 @@ public struct LatticeWallProfileEditor: View {
         .accessibilityIdentifier("wall-editor-card-\(f.id)")
     }
 
-    private func pxPath(_ pts: [SIMD2<Double>], bw: CGFloat, bh: CGFloat) -> Path {
-        var p = Path()
-        for (i, q) in pts.enumerated() {
-            let pt = CGPoint(x: Self.bx + CGFloat(q.x) * bw, y: Self.by + CGFloat(q.y) * bh)
-            if i == 0 { p.move(to: pt) } else { p.addLine(to: pt) }
-        }
-        return p
-    }
-
     private func draw(_ f: LatticeWallEditorFace, in ctx: inout GraphicsContext, bw: CGFloat, bh: CGFloat,
                       grade: Bool, isActive: Bool) {
         let box = CGRect(x: Self.bx, y: Self.by, width: bw, height: bh)
+        let t = max(f.thickMM, 1e-9)
         ctx.fill(Path(roundedRect: box, cornerRadius: 8), with: .color(.white.opacity(0.05)))
-        // ★ the 5 mm grid, dotted, both ways; every 25 mm a little stronger (his image 7)
+        // ★ the grid IS the cells (D1): columns one cell wide, rows at the packable depths
         do {
             var g = ctx
             g.clip(to: Path(roundedRect: box, cornerRadius: 8))
-            let stepX = CGFloat(Self.gridMM / max(f.widthMM, 1e-9)) * bw
-            let stepY = CGFloat(Self.gridMM / max(f.thickMM, 1e-9)) * bh
-            if stepX >= 4 {
-                var i = 1; var x = box.minX + stepX
-                while x < box.maxX - 0.5 {
+            let cols = f.columns
+            let stepX = bw / CGFloat(cols)
+            if stepX >= 3 {
+                for i in 1..<max(1, cols) {
+                    let x = box.minX + CGFloat(i) * stepX
                     var p = Path(); p.move(to: CGPoint(x: x, y: box.minY)); p.addLine(to: CGPoint(x: x, y: box.maxY))
-                    g.stroke(p, with: .color(.white.opacity(i % 5 == 0 ? 0.22 : 0.10)), style: StrokeStyle(lineWidth: 1, dash: [2, 4]))
-                    i += 1; x += stepX
+                    g.stroke(p, with: .color(.white.opacity(0.10)), style: StrokeStyle(lineWidth: 1, dash: [2, 4]))
                 }
             }
-            if stepY >= 4 {
-                var j = 1; var y = box.minY + stepY
-                while y < box.maxY - 0.5 {
-                    var p = Path(); p.move(to: CGPoint(x: box.minX, y: y)); p.addLine(to: CGPoint(x: box.maxX, y: y))
-                    g.stroke(p, with: .color(.white.opacity(j % 5 == 0 ? 0.22 : 0.10)), style: StrokeStyle(lineWidth: 1, dash: [2, 4]))
-                    j += 1; y += stepY
+            let rows: [Double] = f.depthStepsMM.isEmpty
+                ? Swift.stride(from: 5.0, to: f.thickMM, by: 5.0).map { $0 }
+                : f.depthStepsMM.filter { $0 > 0 && $0 < f.thickMM - 1e-6 }
+            for mm in rows {
+                let y = box.minY + CGFloat(mm / t) * bh
+                var p = Path(); p.move(to: CGPoint(x: box.minX, y: y)); p.addLine(to: CGPoint(x: box.maxX, y: y))
+                g.stroke(p, with: .color(.white.opacity(f.depthStepsMM.isEmpty ? 0.10 : 0.18)), style: StrokeStyle(lineWidth: 1, dash: [2, 4]))
+                if !f.depthStepsMM.isEmpty {
+                    g.draw(Text(String(format: "%.1f", mm)).font(.system(size: 9)).foregroundColor(.white.opacity(0.3)),
+                           at: CGPoint(x: box.minX - 6, y: y), anchor: .trailing)
                 }
             }
         }
         ctx.stroke(Path(roundedRect: box, cornerRadius: 8),
                    with: .color(grade && isActive ? Color(red: 0.5, green: 0.75, blue: 1).opacity(0.8) : .white.opacity(0.22)),
                    lineWidth: 1.5)
-        var mid = Path(); mid.move(to: CGPoint(x: box.minX, y: box.midY)); mid.addLine(to: CGPoint(x: box.maxX, y: box.midY))
-        ctx.stroke(mid, with: .color(.white.opacity(0.45)), style: StrokeStyle(lineWidth: 1.2, dash: [5, 5]))
         let labelFont = Font.system(size: 11, weight: .semibold)
         ctx.draw(Text("OUTER SURFACE").font(labelFont).foregroundColor(.white.opacity(0.45)),
                  at: CGPoint(x: box.minX, y: box.minY - 10), anchor: .leading)
         ctx.draw(Text("INNER SURFACE").font(labelFont).foregroundColor(.white.opacity(0.45)),
                  at: CGPoint(x: box.minX, y: box.maxY + 16), anchor: .leading)
 
-        let prof = profile(f)
-        let sh = shares(f)
-        let startPts: [SIMD2<Double>] = grade
-            ? LatticeWallProfile.polyline(prof.start, curved: prof.curveStart, side: .start)
-            : [SIMD2(0, sh.start), SIMD2(1, sh.start)]
-        let endPts: [SIMD2<Double>] = grade
-            ? LatticeWallProfile.polyline(prof.end, curved: prof.curveEnd, side: .end)
-            : [SIMD2(0, sh.end), SIMD2(1, sh.end)]
-        var region = pxPath(startPts, bw: bw, bh: bh)
-        for q in endPts.reversed() { region.addLine(to: CGPoint(x: Self.bx + CGFloat(q.x) * bw, y: Self.by + CGFloat(q.y) * bh)) }
-        region.closeSubpath()
+        // the steps: from the surface down to each column's depth
+        let allowed = allowedMM(f)
+        let ends: [Double] = grade ? profile(f).ends.map { min(allowed, $0 * t) } : [allowed]
+        let cols = ends.count
+        var region = Path(); var line = Path()
+        region.move(to: CGPoint(x: box.minX, y: box.minY))
+        for (i, mm) in ends.enumerated() {
+            let x0 = box.minX + bw * CGFloat(i) / CGFloat(cols), x1 = box.minX + bw * CGFloat(i + 1) / CGFloat(cols)
+            let y = box.minY + CGFloat(mm / t) * bh
+            region.addLine(to: CGPoint(x: x0, y: y)); region.addLine(to: CGPoint(x: x1, y: y))
+            if i == 0 { line.move(to: CGPoint(x: x0, y: y)) } else { line.addLine(to: CGPoint(x: x0, y: y)) }
+            line.addLine(to: CGPoint(x: x1, y: y))
+        }
+        region.addLine(to: CGPoint(x: box.maxX, y: box.minY)); region.closeSubpath()
         if grade {
             ctx.fill(region, with: .linearGradient(Gradient(colors: [Self.green.opacity(0.45), Self.red.opacity(0.45)]),
                                                    startPoint: CGPoint(x: box.midX, y: box.minY),
@@ -350,54 +346,31 @@ public struct LatticeWallProfileEditor: View {
         } else {
             ctx.fill(region, with: .color(Color(red: 79 / 255, green: 168 / 255, blue: 1).opacity(0.16)))
         }
-        ctx.stroke(pxPath(startPts, bw: bw, bh: bh), with: .color(Self.green), style: StrokeStyle(lineWidth: grade ? 3 : 2.5, lineCap: .round, lineJoin: .round))
-        ctx.stroke(pxPath(endPts, bw: bw, bh: bh), with: .color(Self.red), style: StrokeStyle(lineWidth: grade ? 3 : 2.5, lineCap: .round, lineJoin: .round))
+        // the surface line (fixed, D2) and the depth steps
+        var surf = Path(); surf.move(to: CGPoint(x: box.minX, y: box.minY)); surf.addLine(to: CGPoint(x: box.maxX, y: box.minY))
+        ctx.stroke(surf, with: .color(Self.green), style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
+        ctx.stroke(line, with: .color(Self.red), style: StrokeStyle(lineWidth: grade ? 3 : 2.5, lineCap: .round, lineJoin: .round))
 
         let readX = box.maxX + 14
         let readFont = Font.system(size: 12.5, weight: .bold)
         if !grade {
-            for (y, col) in [(sh.start, Self.green), (sh.end, Self.red)] {
-                let c = CGPoint(x: box.midX, y: Self.by + CGFloat(y) * bh)
-                let circle = Path(ellipseIn: CGRect(x: c.x - 13, y: c.y - 13, width: 26, height: 26))
-                ctx.fill(circle, with: .color(col))
-                ctx.stroke(circle, with: .color(Color(white: 0.02)), lineWidth: 3)
-                ctx.draw(Text(String(format: "%.1f mm", y * f.thickMM)).font(readFont).foregroundColor(col),
-                         at: CGPoint(x: readX, y: c.y), anchor: .leading)
-            }
+            let c = CGPoint(x: box.midX, y: Self.by + CGFloat(allowed / t) * bh)
+            let circle = Path(ellipseIn: CGRect(x: c.x - 13, y: c.y - 13, width: 26, height: 26))
+            ctx.fill(circle, with: .color(Self.red))
+            ctx.stroke(circle, with: .color(Color(white: 0.02)), lineWidth: 3)
+            ctx.draw(Text(String(format: "%.1f mm", allowed)).font(readFont).foregroundColor(Self.red),
+                     at: CGPoint(x: readX, y: c.y), anchor: .leading)
         } else {
-            // the readouts, kept apart when the two lines meet
-            let ys = Self.by + CGFloat(prof.start.first?.y ?? 0) * bh
-            var ye = Self.by + CGFloat(prof.end.first?.y ?? 1) * bh
-            if abs(ye - ys) < 16 { ye = ys + 16 }
-            ctx.draw(Text("start").font(readFont).foregroundColor(Self.green), at: CGPoint(x: readX, y: ys), anchor: .leading)
-            ctx.draw(Text("end").font(readFont).foregroundColor(Self.red), at: CGPoint(x: readX, y: ye), anchor: .leading)
-            if showWings, let sp = selPt, sp.face == f.id {
-                let pts = sp.side == .start ? prof.start : prof.end
-                if sp.idx < pts.count, pts[sp.idx].smooth, (sp.side == .start ? prof.curveStart : prof.curveEnd) {
-                    let p = pts[sp.idx], t = LatticeWallProfile.tangent(pts, sp.idx)
-                    let c = CGPoint(x: Self.bx + CGFloat(p.x) * bw, y: Self.by + CGFloat(p.y) * bh)
-                    let col = sp.side == .start ? Self.green : Self.red
-                    for dir: CGFloat in [1, -1] where (dir == 1 && sp.idx < pts.count - 1) || (dir == -1 && sp.idx > 0) {
-                        let e = CGPoint(x: c.x + CGFloat(t.x) * bw * dir, y: c.y + CGFloat(t.y) * bh * dir)
-                        var l = Path(); l.move(to: c); l.addLine(to: e)
-                        ctx.stroke(l, with: .color(col.opacity(0.55)), lineWidth: 1.2)
-                        var d = Path(); d.move(to: CGPoint(x: e.x, y: e.y - 7)); d.addLine(to: CGPoint(x: e.x + 7, y: e.y))
-                        d.addLine(to: CGPoint(x: e.x, y: e.y + 7)); d.addLine(to: CGPoint(x: e.x - 7, y: e.y)); d.closeSubpath()
-                        ctx.fill(d, with: .color(Color(white: 0.02))); ctx.stroke(d, with: .color(col), lineWidth: 1.6)
-                    }
-                }
-            }
-            for s in [LatticeWallProfile.Side.start, .end] {
-                let pts = s == .start ? prof.start : prof.end
-                let col = s == .start ? Self.green : Self.red
-                for (i, p) in pts.enumerated() {
-                    let sel = selPt == SelPt(face: f.id, side: s, idx: i)
-                    let c = CGPoint(x: Self.bx + CGFloat(p.x) * bw, y: Self.by + CGFloat(p.y) * bh)
-                    let r: CGFloat = sel ? 11 : 8
-                    let circle = Path(ellipseIn: CGRect(x: c.x - r, y: c.y - r, width: 2 * r, height: 2 * r))
-                    ctx.fill(circle, with: .color(sel ? .white : (p.smooth ? col : Color(white: 0.02))))
-                    if sel || !p.smooth { ctx.stroke(circle, with: .color(col), lineWidth: sel ? 3 : 2.2) }
-                }
+            ctx.draw(Text("surface").font(readFont).foregroundColor(Self.green), at: CGPoint(x: readX, y: box.minY), anchor: .leading)
+            ctx.draw(Text(String(format: "may go to %.1f", allowed)).font(.system(size: 11)).foregroundColor(.white.opacity(0.4)),
+                     at: CGPoint(x: readX, y: Self.by + CGFloat(allowed / t) * bh), anchor: .leading)
+            if let h = hover, h.face == f.id, h.column < cols {
+                let x = box.minX + bw * (CGFloat(h.column) + 0.5) / CGFloat(cols)
+                let y = box.minY + CGFloat(h.mm / t) * bh
+                let c = Path(ellipseIn: CGRect(x: x - 7, y: y - 7, width: 14, height: 14))
+                ctx.fill(c, with: .color(.white)); ctx.stroke(c, with: .color(Self.red), lineWidth: 2.5)
+                ctx.draw(Text(String(format: "%.1f mm", h.mm)).font(readFont).foregroundColor(.white),
+                         at: CGPoint(x: x, y: max(box.minY + 10, y - 18)), anchor: .center)
             }
         }
         ctx.draw(Text("0 mm").font(.system(size: 11)).foregroundColor(.white.opacity(0.35)),
@@ -411,247 +384,78 @@ public struct LatticeWallProfileEditor: View {
     private func norm(_ p: CGPoint, bw: CGFloat, bh: CGFloat) -> SIMD2<Double> {
         SIMD2(Double((p.x - Self.bx) / bw), Double((p.y - Self.by) / bh))
     }
-    private func clamp(_ v: Double, _ a: Double, _ b: Double) -> Double { max(a, min(b, v)) }
-
-    private func hit(_ f: LatticeWallEditorFace, at p: CGPoint, bw: CGFloat, bh: CGFloat, grade: Bool) -> DragKind {
-        if !grade {
-            let sh = shares(f)
-            let ys = Self.by + CGFloat(sh.start) * bh, ye = Self.by + CGFloat(sh.end) * bh
-            let inX = p.x >= Self.bx - 22 && p.x <= Self.bx + bw + 22
-            if inX, abs(p.y - ys) <= 24, abs(p.y - ys) <= abs(p.y - ye) { return .thick(.start) }
-            if inX, abs(p.y - ye) <= 24 { return .thick(.end) }
-            return .none
-        }
-        let prof = profile(f)
-        if showWings, let sp = selPt, sp.face == f.id {
-            let pts = sp.side == .start ? prof.start : prof.end
-            if sp.idx < pts.count, pts[sp.idx].smooth {
-                let q = pts[sp.idx], t = LatticeWallProfile.tangent(pts, sp.idx)
-                let c = CGPoint(x: Self.bx + CGFloat(q.x) * bw, y: Self.by + CGFloat(q.y) * bh)
-                for dir: CGFloat in [1, -1] where (dir == 1 && sp.idx < pts.count - 1) || (dir == -1 && sp.idx > 0) {
-                    let e = CGPoint(x: c.x + CGFloat(t.x) * bw * dir, y: c.y + CGFloat(t.y) * bh * dir)
-                    if hypot(p.x - e.x, p.y - e.y) <= 18 { return .wing(sp.side, sp.idx, Double(dir)) }
-                }
-            }
-        }
-        var best: (DragKind, CGFloat)? = nil
-        for s in [LatticeWallProfile.Side.start, .end] {
-            let pts = s == .start ? prof.start : prof.end
-            for (i, q) in pts.enumerated() {
-                let c = CGPoint(x: Self.bx + CGFloat(q.x) * bw, y: Self.by + CGFloat(q.y) * bh)
-                let d = hypot(p.x - c.x, p.y - c.y)
-                if d <= 24, best == nil || d < best!.1 { best = (.point(s, i), d) }
-            }
-        }
-        return best?.0 ?? .none
-    }
 
     private func dragChanged(_ f: LatticeWallEditorFace, _ g: DragGesture.Value, bw: CGFloat, bh: CGFloat, grade: Bool) {
         if drag == nil || drag?.face != f.id {
-            let kind = hit(f, at: g.startLocation, bw: bw, bh: bh, grade: grade)
-            drag = Drag(face: f.id, kind: kind, moved: false)
+            drag = Drag(face: f.id, moved: false, lastColumn: nil)
             activeFace = f.id
-            if case let .point(s, i) = kind { side = s; selPt = SelPt(face: f.id, side: s, idx: i) }
-            if case let .wing(s, _, _) = kind { side = s }
+            remember()
         }
         guard var d = drag else { return }
-        if !d.moved, hypot(g.translation.width, g.translation.height) > 3 {
-            d.moved = true; drag = d
-            if d.kind != .none { remember() }
-        }
+        d.moved = true
         let n = norm(g.location, bw: bw, bh: bh)
-        let nx = clamp(n.x, 0, 1), ny = clamp(n.y, 0, 1)
-        switch d.kind {
-        case let .thick(s):
-            guard d.moved else { return }
-            setFace(f.id) { a in
-                let t = f.thickMM
-                let cur = (a.startMM / t, (a.endMM ?? t) / t)
-                let (_, sy) = snap(f, x: 0, y: ny)
-                if s == .start { a.startMM = min(sy, cur.1 - 0.02) * t }
-                else {
-                    let e = max(sy, cur.0 + 0.02) * t
-                    a.endMM = e >= t - 1e-9 ? nil : e
-                }
-            }
-        case let .point(s, i):
-            guard tool == .move || d.moved else { return }
-            setProfile(f) { p in
-                var arr = s == .start ? p.start : p.end
-                guard i < arr.count else { return }
-                var q = arr[i]
-                let (sx, sy) = snap(f, x: nx, y: ny)
-                q.y = s == .start ? min(sy, 0.5) : max(sy, 0.5)
-                if i != 0, i != arr.count - 1 { q.x = clamp(sx, arr[i - 1].x + 0.02, arr[i + 1].x - 0.02) }
-                arr[i] = q
-                if s == .start { p.start = arr } else { p.end = arr }
-            }
-        case let .wing(s, i, dir):
-            setProfile(f) { p in
-                var arr = s == .start ? p.start : p.end
-                guard i < arr.count else { return }
-                var q = arr[i]
-                // in px so angles are true on screen; detents at every 45° (his image 7)
-                var dx = (Double(g.location.x) - (Double(Self.bx) + q.x * Double(bw))) * dir
-                var dy = (Double(g.location.y) - (Double(Self.by) + q.y * Double(bh))) * dir
-                let len = hypot(dx, dy), ang = atan2(dy, dx), step = Double.pi / 4
-                let snapped = (ang / step).rounded() * step
-                if abs(ang - snapped) < 0.2 { dx = cos(snapped) * len; dy = sin(snapped) * len }
-                q.tx = dx / Double(bw); q.ty = dy / Double(bh)
-                arr[i] = q
-                if s == .start { p.start = arr } else { p.end = arr }
-            }
-        case .none: break
+        let ny = min(1, max(0, n.y))
+        if !grade {
+            // one bar: how deep the lattice may go on this wall (snapped to its steps)
+            let e = f.snap(ny * f.thickMM)
+            setFace(f.id) { a in a.endMM = e >= f.thickMM - 1e-9 ? nil : max(0.1, e) }
+            drag = d
+            return
         }
-    }
-
-    private func dragEnded(_ f: LatticeWallEditorFace, _ g: DragGesture.Value, bw: CGFloat, bh: CGFloat, grade: Bool) {
-        defer { drag = nil }
-        guard let d = drag, d.face == f.id else { return }
-        if grade, tool == .pen, d.kind == .none, !d.moved {
-            let n = norm(g.location, bw: bw, bh: bh)
-            guard n.x > 0.02, n.x < 0.98, n.y > -0.1, n.y < 1.1 else { return }
-            let tapSide: LatticeWallProfile.Side = n.y < 0.5 ? .start : .end
-            side = tapSide
-            remember()
-            setProfile(f) { p in
-                var arr = tapSide == .start ? p.start : p.end
-                let (sx, sy) = snap(f, x: n.x, y: n.y)
-                var i = arr.firstIndex { $0.x > sx } ?? (arr.count - 1)
-                if i < 0 { i = 0 }
-                arr.insert(.init(x: sx, y: tapSide == .start ? clamp(sy, 0, 0.5) : clamp(sy, 0.5, 1)), at: i)
-                if tapSide == .start { p.start = arr } else { p.end = arr }
-                selPt = SelPt(face: f.id, side: tapSide, idx: i)
-            }
+        // paint: the column under the finger takes the depth under it — and every column
+        // between the last one and this, so a fast stroke leaves no gap
+        let cols = f.columns
+        let col = min(cols - 1, max(0, Int((n.x * Double(cols)).rounded(.down))))
+        let mm = depthAt(f, y: ny)
+        let from = d.lastColumn ?? col
+        setProfile(f) { p in
+            for c in min(from, col)...max(from, col) where c < p.ends.count { p.ends[c] = mm / max(f.thickMM, 1e-9) }
         }
+        hover = (f.id, col, mm)
+        d.lastColumn = col
+        drag = d
     }
 
     // MARK: the rail (grade stage)
 
     private var activeFaceModel: LatticeWallEditorFace? { faces.first { $0.id == activeFace } ?? faces.first }
-    private var sideTint: Color { side == .start ? Self.green : Self.red }
-    private var selectedPoint: LatticeWallProfilePoint? {
-        guard let sp = selPt, let f = faces.first(where: { $0.id == sp.face }) else { return nil }
-        let pts = sp.side == .start ? profile(f).start : profile(f).end
-        return sp.idx < pts.count ? pts[sp.idx] : nil
-    }
-    private func sideOp(_ fn: ([LatticeWallProfilePoint]) -> [LatticeWallProfilePoint]) {
+    private func op(_ fn: (LatticeWallEditorFace, inout LatticeWallProfile) -> Void) {
         guard let f = activeFaceModel else { return }
         remember()
-        setProfile(f) { p in if side == .start { p.start = fn(p.start) } else { p.end = fn(p.end) } }
+        setProfile(f) { fn(f, &$0) }
     }
 
     @ViewBuilder private var rail: some View {
-        let selSmooth = selectedPoint?.smooth ?? true
-        let selLeft = (selectedPoint?.x ?? 0) <= 0.5
         VStack(spacing: 6) {
             // ★ undo / redo at the top (his image 8)
             HStack(spacing: 6) {
-                railButton("↶", "Undo", on: false, enabled: !undoStack.isEmpty) { undo() }
-                railButton("↷", "Redo", on: false, enabled: !redoStack.isEmpty) { redo() }
+                railButton("↶", "Undo", enabled: !undoStack.isEmpty) { undo() }
+                railButton("↷", "Redo", enabled: !redoStack.isEmpty) { redo() }
             }
             Divider().overlay(Color.white.opacity(0.08))
             HStack(spacing: 6) {
-                railButton("✎", "Pen", on: tool == .pen) { tool = .pen }
-                railButton("✥", "Move", on: tool == .move) { tool = .move }
+                Circle().fill(Self.red).frame(width: 8, height: 8)
+                Text("Depth steps").font(.system(size: 10.5, weight: .bold)).tracking(0.6).foregroundStyle(Self.red)
             }
+            Text("Drag across the box: each column takes the depth under your finger.")
+                .font(.system(size: 10.5)).foregroundStyle(DS.Color.textPrimary.opacity(0.5).color)
+                .multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true)
+            railButton("▮", "Fill") { op { f, p in p.ends = p.ends.map { _ in allowedMM(f) / max(f.thickMM, 1e-9) } } }
+            railButton("—", "Flatten") { op { f, p in
+                let sorted = p.ends.sorted(); let mid = sorted.isEmpty ? 0 : sorted[sorted.count / 2]
+                let mm = f.snap(mid * f.thickMM)
+                p.ends = p.ends.map { _ in mm / max(f.thickMM, 1e-9) }
+            } }
+            railButton("⇋", "Mirror") { op { _, p in p.ends.reverse() } }
             HStack(spacing: 6) {
-                railButton("⌖", "Handles", on: showWings) { showWings.toggle() }
-                // ★ the magnet: points tick into the grid's crossings (his image 8)
-                railButton("🧲", "Magnet", on: magnet) { magnet.toggle() }
+                railButton("←", "Shift") { op { _, p in guard p.ends.count > 1 else { return }; p.ends.append(p.ends.removeFirst()) } }
+                railButton("→", "Shift ") { op { _, p in guard p.ends.count > 1 else { return }; p.ends.insert(p.ends.removeLast(), at: 0) } }
             }
             Divider().overlay(Color.white.opacity(0.08))
-            HStack(spacing: 6) {
-                Circle().fill(sideTint).frame(width: 8, height: 8)
-                Text((side == .start ? "Start" : "End") + " line").font(.system(size: 10.5, weight: .bold)).tracking(0.6)
-                    .foregroundStyle(sideTint)
-            }
-            holdButton(glyph: selSmooth ? "∿" : "⟋", label: selSmooth ? "Curved" : "Straight",
-                       hint: holdAll ? "all points" : (selPt == nil ? "hold: whole line" : "tap: this point"),
-                       lit: holdAll, id: "wall-editor-curve",
-                       onHold: { holdAll = true },
-                       onRelease: { held in
-                           if held {
-                               let target = !selSmooth
-                               sideOp { $0.map { var q = $0; q.smooth = target; return q } }
-                               holdAll = false
-                           } else if let sp = selPt, let f = faces.first(where: { $0.id == sp.face }) {
-                               remember()
-                               setProfile(f) { p in
-                                   var arr = sp.side == .start ? p.start : p.end
-                                   guard sp.idx < arr.count else { return }
-                                   arr[sp.idx].smooth.toggle()
-                                   if sp.side == .start { p.start = arr } else { p.end = arr }
-                               }
-                           }
-                       })
-            holdButton(glyph: holdMirror ? "⇋" : "⇅",
-                       label: holdMirror ? (selLeft ? "Mirror →" : "← Mirror") : (side == .start ? "Mirror → End" : "Mirror → Start"),
-                       hint: holdMirror ? (selLeft ? "left half → right" : "right half → left") : (side == .start ? "start → end" : "end → start"),
-                       lit: holdMirror, id: "wall-editor-mirror",
-                       onHold: { holdMirror = true },
-                       onRelease: { held in
-                           if held {
-                               sideOp { arr in
-                                   let src = arr.filter { selLeft ? $0.x <= 0.5 : $0.x >= 0.5 }
-                                   let refl = src.filter { abs($0.x - 0.5) > 0.001 }.map { q -> LatticeWallProfilePoint in
-                                       var r = q; r.x = 1 - q.x; if let ty = q.ty { r.ty = -ty }; return r
-                                   }
-                                   return (src + refl).sorted { $0.x < $1.x }
-                               }
-                               holdMirror = false
-                           } else if let f = activeFaceModel {
-                               remember()
-                               setProfile(f) { p in
-                                   let from = side == .start ? p.start : p.end
-                                   let other: LatticeWallProfile.Side = side == .start ? .end : .start
-                                   let mapped = from.map { q -> LatticeWallProfilePoint in
-                                       var r = q
-                                       r.y = other == .start ? clamp(1 - q.y, 0, 0.5) : clamp(1 - q.y, 0.5, 1)
-                                       if let ty = q.ty { r.ty = -ty }
-                                       return r
-                                   }
-                                   if other == .start { p.start = mapped; p.curveStart = p.curveEnd }
-                                   else { p.end = mapped; p.curveEnd = p.curveStart }
-                               }
-                           }
-                       })
-            railButton("←", "Shift ◁") { shift(-1) }
-            railButton("→", "Shift ▷") { shift(1) }
-            railButton("—", "Flatten") {
-                sideOp { arr in
-                    var y = arr.map(\.y).reduce(0, +) / Double(max(1, arr.count))
-                    y = side == .start ? min(y, 0.5) : max(y, 0.5)
-                    return [.init(x: 0, y: y), .init(x: 1, y: y)]
-                }
-            }
-            Divider().overlay(Color.white.opacity(0.08))
-            let canDelete: Bool = {
-                guard let sp = selPt, let f = faces.first(where: { $0.id == sp.face }) else { return false }
-                let n = (sp.side == .start ? profile(f).start : profile(f).end).count
-                return sp.idx != 0 && sp.idx != n - 1
-            }()
-            Button {
-                guard let sp = selPt, let f = faces.first(where: { $0.id == sp.face }) else { return }
-                remember()
-                setProfile(f) { p in
-                    var arr = sp.side == .start ? p.start : p.end
-                    guard sp.idx != 0, sp.idx != arr.count - 1, sp.idx < arr.count else { return }
-                    arr.remove(at: sp.idx)
-                    if sp.side == .start { p.start = arr } else { p.end = arr }
-                }
-                selPt = nil
-            } label: {
-                Text("Delete pt").font(.system(size: 12, weight: .semibold)).frame(maxWidth: .infinity, minHeight: 42)
-                    .background(RoundedRectangle(cornerRadius: 14).fill(Self.red.opacity(0.1))
-                        .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(Self.red.opacity(0.3))))
-                    .foregroundStyle(Color(red: 1, green: 0.41, blue: 0.38))
-            }.buttonStyle(.plain).opacity(canDelete ? 1 : 0.35).accessibilityIdentifier("wall-editor-delete")
             Button {
                 guard let f = activeFaceModel else { return }
                 remember()
-                let sh = shares(f)
-                setFace(f.id) { $0.profile = .flat(start: sh.start, end: sh.end) }
+                setFace(f.id) { $0.profile = nil }
             } label: {
                 Text("Reset face").font(.system(size: 12, weight: .semibold)).frame(maxWidth: .infinity, minHeight: 42)
                     .background(RoundedRectangle(cornerRadius: 14).strokeBorder(Color.white.opacity(0.09)))
@@ -665,23 +469,12 @@ public struct LatticeWallProfileEditor: View {
         .accessibilityIdentifier("wall-editor-rail")
     }
 
-    private func shift(_ dir: Double) {
-        sideOp { arr in
-            arr.enumerated().map { i, p in
-                guard i != 0, i != arr.count - 1 else { return p }
-                var q = p
-                q.x = clamp(p.x + dir * 0.06, arr[0].x + 0.02, arr[arr.count - 1].x - 0.02)
-                return q
-            }
-        }
-    }
-
     @ViewBuilder private func railButton(_ glyph: String, _ name: String, on: Bool = false, enabled: Bool = true,
                                          action: @escaping () -> Void) -> some View {
         Button(action: action) {
             VStack(spacing: 3) {
                 Text(glyph).font(.system(size: 17))
-                Text(name).font(.system(size: 11.5, weight: .bold))
+                Text(name.trimmingCharacters(in: .whitespaces)).font(.system(size: 11.5, weight: .bold))
             }
             .frame(maxWidth: .infinity, minHeight: 48)
             .background(RoundedRectangle(cornerRadius: 14).fill(on ? DS.Color.accent.opacity(0.24).color : Color.white.opacity(0.05))
@@ -691,45 +484,13 @@ public struct LatticeWallProfileEditor: View {
         .buttonStyle(.plain)
         .disabled(!enabled)
         .opacity(enabled ? 1 : 0.35)
-        .accessibilityIdentifier("wall-editor-\(name.lowercased().filter { $0.isLetter })")
-    }
-
-    /// A button that TAPS or HOLDS (½ s): the design's Curved/Straight and Mirror.
-    @ViewBuilder private func holdButton(glyph: String, label: String, hint: String, lit: Bool, id: String,
-                                         onHold: @escaping () -> Void,
-                                         onRelease: @escaping (_ held: Bool) -> Void) -> some View {
-        VStack(spacing: 1) {
-            HStack(spacing: 7) {
-                Text(glyph).font(.system(size: 15)).foregroundStyle(sideTint)
-                Text(label).font(.system(size: 12, weight: .semibold))
-            }
-            Text(hint).font(.system(size: 9.5, weight: .semibold)).tracking(0.3)
-                .foregroundStyle(DS.Color.textPrimary.opacity(0.42).color)
-        }
-        .frame(maxWidth: .infinity, minHeight: 52)
-        .background(RoundedRectangle(cornerRadius: 14).fill(Color.white.opacity(0.05))
-            .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(lit ? Color(red: 0.5, green: 0.75, blue: 1) : Color.white.opacity(0.09))))
-        .shadow(color: lit ? DS.Color.accent.opacity(0.55).color : .clear, radius: lit ? 9 : 0)
-        .contentShape(Rectangle())
-        .gesture(DragGesture(minimumDistance: 0)
-            .onChanged { _ in
-                if pressBegan == nil {
-                    pressBegan = Date()
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { if pressBegan != nil { onHold() } }
-                }
-            }
-            .onEnded { _ in
-                let held = pressBegan.map { Date().timeIntervalSince($0) >= 0.5 } ?? false
-                pressBegan = nil
-                onRelease(held)
-            })
-        .accessibilityIdentifier(id)
+        .accessibilityIdentifier("wall-editor-\(name.lowercased().filter { $0.isLetter })\(name.hasSuffix(" ") ? "-right" : "")")
     }
 }
 
-/// ★ The wall in 3D inside its card — the slab the current lines make, in the face's
-/// own prism (outline, position, angle), framed like a freshly opened viewer; rebuilt on
-/// every edit. Nothing where the slab has no thickness.
+/// ★ The wall in 3D inside its card — the steps the drawing makes, in the face's own
+/// prism (outline, position, angle), framed like a freshly opened viewer; rebuilt on
+/// every edit. Nothing where no depth is drawn.
 struct LatticeWallSlabRender: View {
     let face: LatticeWallEditorFace
     let ask: LatticeFaceWallThickness
@@ -739,7 +500,8 @@ struct LatticeWallSlabRender: View {
 
     private var mesh: ViewerMesh {
         if let r = face.region {
-            return LatticeWallSlabMesh.build(region: r, ask: ask, pct: pct)
+            return LatticeWallSlabMesh.build(region: r, ask: ask, pct: pct,
+                                             depthSteps: face.depthStepsMM.isEmpty ? nil : face.depthStepsMM)
         }
         return LatticeWallSlabMesh.build(widthMM: face.widthMM, heightMM: face.heightMM, thickMM: face.thickMM,
                                          ask: ask, pct: pct)
@@ -754,7 +516,7 @@ struct LatticeWallSlabRender: View {
         ZStack {
             MetalMeshView(mesh: m.isEmpty ? nil : m, camera: camera, extraLines: lines)
             if m.isEmpty {
-                Text("No slab — the start and end lines meet.")
+                Text("No lattice — no depth is drawn on this wall.")
                     .dsStyle(DS.TypeScale.footnote).foregroundStyle(DS.Color.textTertiary.color)
             }
         }
@@ -762,7 +524,6 @@ struct LatticeWallSlabRender: View {
             guard !framed else { return }
             framed = true
             if let r = face.region {
-                // frame the whole prism, not only the slab, so the wall sits still as it changes
                 let l = LatticeWallSlabMesh.prismLines(region: r)
                 var lo = SIMD3<Float>(repeating: .greatestFiniteMagnitude), hi = SIMD3<Float>(repeating: -.greatestFiniteMagnitude)
                 var i = 0

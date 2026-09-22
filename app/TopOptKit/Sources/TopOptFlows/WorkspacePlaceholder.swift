@@ -5060,6 +5060,10 @@ public struct WorkspacePlaceholder: View {
         DispatchQueue.global(qos: .userInitiated).async {
             var organicIn = organicForBake
             organicIn?.seedBoost = project.lattice.wallThickness.seedBoost
+            // ★ THE DEPTHS EACH WALL CAN BE PACKED TO (his D1, 2026-09-21) — the same rule
+            // the wizard's editor draws on: `LatticeWallDepthSteps.forWalls`.
+            let wallDepthSteps = LatticeWallDepthSteps.forWalls(project.lattice, regions: regions,
+                                                                 beadMM: project.printParams.strutLineWidthMM)
             // Set on main when a newer bake takes over, read by the stage loop.
             let cancelledStages = LatticeBakeFlag()
             // ★★ THE WINDOW UNDER AUTO (2026-09-06): the probe's Auto answer when it has
@@ -5232,7 +5236,8 @@ public struct WorkspacePlaceholder: View {
                                         wallThicknessFloorMM: algorithmForBake == "organic"
                                             ? (organicIn?.separationMinMM ?? 0)
                                             : (latticePreviewSteppedCells.filter { $0 > 0 }.min()
-                                               ?? project.lattice.cellMM))
+                                               ?? project.lattice.cellMM),
+                                        wallDepthSteps: wallDepthSteps)
             DispatchQueue.main.async {
                 // ★ a newer bake has started: this picture is stale, drop it
                 guard bakeGeneration == strutBakeGeneration else {

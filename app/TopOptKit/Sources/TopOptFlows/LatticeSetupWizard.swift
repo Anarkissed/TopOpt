@@ -682,9 +682,13 @@ public struct LatticeSetupWizard: View {
                 let fr = LatticeWallThicknessBuilder.frame(r)
                 let width = fr?.widthMM ?? 2 * max(r.halfUMM, r.halfWMM)
                 let height = fr.map { $0.widthAlongU ? $0.hi.y - $0.lo.y : $0.hi.x - $0.lo.x } ?? 2 * min(r.halfUMM, r.halfWMM)
+                let lat = model.applied(to: project.lattice)
                 return LatticeWallEditorFace(id: key, name: r.faceID.map { "Face \($0)" } ?? "Wall",
                                              tint: tint, widthMM: width, heightMM: max(1, height), thickMM: r.depthMM,
-                                             region: r)
+                                             region: r,
+                                             depthStepsMM: LatticeWallDepthSteps.forWalls(
+                                                lat, regions: [r], beadMM: project.printParams.strutLineWidthMM)[key] ?? [],
+                                             columnMM: LatticeWallDepthSteps.columnMM(lat, region: r))
             }
     }
 
@@ -694,7 +698,7 @@ public struct LatticeSetupWizard: View {
         let ask = model.wallThickness
         let noSolve = !model.simulateStresses
         VStack(alignment: .leading, spacing: 8) {
-            Text("Lattice wall thickness")
+            Text("Lattice depth")
                 .font(.system(size: 12, weight: .bold))
                 .foregroundStyle(DS.Color.textTertiary.color)
             HStack(spacing: 12) {
@@ -702,7 +706,7 @@ public struct LatticeSetupWizard: View {
                     Text("Depth defined by sim?").font(.system(size: 15, weight: .semibold))
                         .foregroundStyle(DS.Color.textPrimary.color)
                     Text(noSolve && !ask.depthBySim ? "Needs Simulate Stresses"
-                         : ask.depthBySim ? "FEA decides how deep the lattice goes" : "You set the allowed range per wall")
+                         : ask.depthBySim ? "FEA decides how deep the lattice goes" : "You set how deep, per wall")
                         .font(.system(size: 12)).foregroundStyle(DS.Color.textTertiary.color)
                 }
                 Spacer(minLength: 0)
@@ -746,8 +750,8 @@ public struct LatticeSetupWizard: View {
                         + "closer than the printer can lay. Preview only.",
                         tint: DS.Color.textQuaternary.color)
             if !ask.depthBySim {
-                (Text("How much of the wall's thickness ") + Text("could").italic() + Text(" be used for the lattice — what ")
-                 + Text("will").italic() + Text(" be used follows below."))
+                (Text("How deep the lattice ") + Text("may").italic() + Text(" go from each wall's surface — how deep it ")
+                 + Text("will").italic() + Text(" go follows below."))
                     .font(.system(size: 13)).foregroundStyle(DS.Color.textPrimary.opacity(0.72).color)
                     .fixedSize(horizontal: false, vertical: true)
                 ForEach(wallEditorFaces) { f in
@@ -758,17 +762,19 @@ public struct LatticeSetupWizard: View {
                             .foregroundStyle(DS.Color.textPrimary.color)
                             .onTapGesture { withAnimation(.spring(response: 0.42, dampingFraction: 0.86)) { wallEditorDraft = model.wallThickness; wallEditorStage = .thickness } }
                         Spacer(minLength: 0)
-                        WallNumberField(text: String(format: "%.1f", fa.startMM), tint: Self.wallGreen,
-                                        step: 0.5, range: 0...max(0, (fa.endMM ?? f.thickMM) - 0.1)) { v in
-                            model.wallThickness.faces[f.id, default: LatticeFaceWallThickness()].startMM =
-                                Swift.min(Swift.max(0, v), (fa.endMM ?? f.thickMM) - 0.1)
-                            rebuild()
-                        }
-                        .accessibilityIdentifier("wizard-wall-start-\(f.id)")
-                        Text("–").font(.system(size: 12)).foregroundStyle(DS.Color.textQuaternary.color)
+                        // ★ ONE number: how deep from the surface (D2: the band starts AT the
+                        // surface). On an octet wall the arrows walk the wall's own packable
+                        // depths and a typed number lands on one (D1).
                         WallNumberField(text: String(format: "%.1f", fa.endMM ?? f.thickMM), tint: DS.Color.danger.color,
-                                        step: 0.5, range: (fa.startMM + 0.1)...f.thickMM) { v in
-                            let e = Swift.min(Swift.max(fa.startMM + 0.1, v), f.thickMM)
+                                        step: 0.5, range: 0.1...f.thickMM) { v in
+                            let cur = fa.endMM ?? f.thickMM
+                            var e = Swift.min(Swift.max(0.1, v), f.thickMM)
+                            if !f.depthStepsMM.isEmpty {
+                                let steps = f.depthStepsMM.filter { $0 > 0 }
+                                if v > cur + 1e-9 { e = steps.first { $0 > cur + 1e-6 } ?? cur }
+                                else if v < cur - 1e-9 { e = steps.last { $0 < cur - 1e-6 } ?? cur }
+                                else { e = LatticeWallDepthSteps.snap(e, steps: steps) }
+                            }
                             model.wallThickness.faces[f.id, default: LatticeFaceWallThickness()].endMM = e >= f.thickMM - 1e-9 ? nil : e
                             rebuild()
                         }
@@ -779,7 +785,7 @@ public struct LatticeSetupWizard: View {
                     .background(RoundedRectangle(cornerRadius: 14).fill(Color.white.opacity(0.04))
                         .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(Color.white.opacity(0.08))))
                 }
-                Text("Density through the wall")
+                Text("Depth mode")
                     .font(.system(size: 12, weight: .bold))
                     .foregroundStyle(DS.Color.textTertiary.color)
                     .padding(.top, 12)
@@ -821,7 +827,7 @@ public struct LatticeSetupWizard: View {
                                         model.wallThickness.pct = Swift.min(100, Swift.max(5, v.rounded())); rebuild()
                                     }
                                     .accessibilityIdentifier("wizard-wall-pct")
-                                    Text("% density").font(.system(size: 15)).foregroundStyle(DS.Color.textSecondary.color)
+                                    Text("% of the allowed depth").font(.system(size: 15)).foregroundStyle(DS.Color.textSecondary.color)
                                 }
                                 .padding(.leading, 48).padding(.trailing, 14).padding(.bottom, 12)
                             }
@@ -833,7 +839,7 @@ public struct LatticeSetupWizard: View {
                                             RoundedRectangle(cornerRadius: 2).fill(f.tint).frame(width: 8, height: 8)
                                             Text(f.name).font(.system(size: 12.5))
                                             Spacer(minLength: 0)
-                                            Text(p.map { "\($0.start.count + $0.end.count) pts · \($0.curveStart || $0.curveEnd ? "curved" : "straight")" } ?? "not drawn yet")
+                                            Text(p.map { "\($0.columns) columns · \($0.ends.filter { $0 > 0 }.count) latticed" } ?? "not drawn yet")
                                                 .font(.system(size: 12.5))
                                         }
                                         .foregroundStyle(DS.Color.textSecondary.color)

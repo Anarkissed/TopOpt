@@ -1029,3 +1029,32 @@ Not yet seen by him.
   print repairs" banner, core's emission, minutes on his part) and fires it when the
   refine ends; seedBoost 2 was saved at 19:39:58. The seeding boost is untested until a
   bake actually runs with it, and on a 1.71 mm grid it may not be needed.
+- **2026-09-21 20:5x — HIS THREE DECISIONS ON THE DEPTH FEATURE, BUILT (D1/D2/D3) + core
+  notes 2 and 3.** D1 the drawing is CELL-BASED: `LatticeWallProfile` is now
+  `ends: [Double]` — one depth share per column of equal width along the wall; the editor
+  (`LatticeWallProfileEditor`, rewritten) divides the box into columns one base cell wide
+  (`LatticeWallDepthSteps.columnMM`: the face's stated cell, else the wall; 5 mm for
+  organic) and rows at the depths the wall can be PACKED to (`LatticeWallDepthSteps
+  .forWalls`: largest-first packing of `steppedSizeMenu(base: stated ?? wall)` — the
+  reachable depths; organic none). The user PAINTS: drag across, every column under the
+  finger takes the depth under it, snapped; rail = undo/redo, Fill, Flatten, Mirror,
+  Shift, Reset. 2D and 3D draw the steps; the slab mesh is one box per raster cell with
+  risers (`LatticeWallSlabMesh`, Sutherland–Hodgman clip of the outline per cell). D2 the
+  band starts AT the surface: `LatticeFaceWallThickness.startMM` is gone (old documents
+  decode without it), the builder's a0 = 0 in every mode, one depth field per wall whose
+  arrows walk the wall's packable depths. D3 renamed: "Lattice depth", "Depth mode",
+  mode titles say depth, "% of the allowed depth". The preview's bake gets the same steps
+  (`LatticeSDFRenderer(wallDepthSteps:)` → `attach(depthStepsFor:)`), so what is drawn is
+  what is laid. Core note 3 (nearest, never interpolated): the map's `sample` WAS bilinear
+  — now nearest; and the manual-grade raster samples sit at CELL CENTRES with a pitch that
+  divides a column exactly, so every step edge is a raster edge (measured before the fix:
+  the edge landed half a cell early, x = 0.4875 for a 0.5 column edge). R1 (mirror): an
+  L-shaped fixture asymmetric in u AND v, depths read at NAMED corners in the face's own
+  (u, v), the mesh read back through the same basis — note the +z basis maps u to −world
+  y, which is exactly the assumption that would have passed silently on a symmetric wall.
+  Tests: `LatticeWallThicknessTests` 11 (steps from the surface, named corners, reachable
+  depths/greedy packing/snap, steps model + old-document decode, stepped slab mesh, no
+  slab where no depth). NOT DONE: the job never carries the raster yet (preview first);
+  when it does, origin_uv and both axes go in explicitly (R1) and end_mm[] with cell_mm
+  beside (core note 3). The seeding boost slider stays; untested on a real bake (the ×2
+  open never traced — deferred behind the repairs refine).
