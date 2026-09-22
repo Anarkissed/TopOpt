@@ -1444,6 +1444,37 @@ public struct LatticeSDFScene {
                    t.field.count == fnx * fny * fnz {
                     organicEmittedOut = t.spans
                     organicCapsOut = t.spans.map { OrganicCapsule($0) }
+                    // ★★ WHAT FLOATS (his 2026-09-21 22:40: "SO MANY random small beams
+                    // floating around the top, connecting with literally nothing"). Without
+                    // repairs the bridge emits the curves' segments first, then the
+                    // connectors (bridge.cpp, emit_repairs == 0). Every span end is hashed;
+                    // an end with no other end within a quarter-millimetre is FREE. Spans
+                    // with both ends free connect to nothing — counted by kind and length.
+                    if !o.showRepairs, !t.spans.isEmpty {
+                        let cell = 0.25
+                        var ends: [SIMD3<Int>: Int] = [:]
+                        func key(_ p: SIMD3<Double>) -> SIMD3<Int> { SIMD3<Int>(Int((p.x / cell).rounded(.down)), Int((p.y / cell).rounded(.down)), Int((p.z / cell).rounded(.down))) }
+                        for sp in t.spans { ends[key(sp.a), default: 0] += 1; ends[key(sp.b), default: 0] += 1 }
+                        func free(_ p: SIMD3<Double>) -> Bool {
+                            let k = key(p)
+                            var n = 0
+                            for dz in -1...1 { for dy in -1...1 { for dx in -1...1 { n += ends[k &+ SIMD3(dx, dy, dz)] ?? 0 } } }
+                            return n <= 1   // only itself
+                        }
+                        let connectorsFrom = max(0, t.spans.count - t.connectorCount)
+                        var floating = [0, 0], oneFree = [0, 0], lens: [[Double]] = [[], []], floatLens: [[Double]] = [[], []]
+                        for (i, sp) in t.spans.enumerated() {
+                            let kind = i >= connectorsFrom ? 1 : 0
+                            let L = simd_length(sp.b - sp.a)
+                            lens[kind].append(L)
+                            let fa = free(sp.a), fb = free(sp.b)
+                            if fa && fb { floating[kind] += 1; floatLens[kind].append(L) } else if fa || fb { oneFree[kind] += 1 }
+                        }
+                        func q(_ v: [Double], _ f: Double) -> Double { v.isEmpty ? .nan : v.sorted()[min(v.count - 1, Int(Double(v.count - 1) * f))] }
+                        NSLog("DIAG organic span census: curve segments %d (len p50 %.2f p95 %.2f mm, both ends free %d [len p50 %.2f], one end free %d) · connectors %d (len p50 %.2f p95 %.2f mm, both ends free %d [len p50 %.2f], one end free %d) · end hash cell %.2f mm",
+                              lens[0].count, q(lens[0], 0.5), q(lens[0], 0.95), floating[0], q(floatLens[0], 0.5), oneFree[0],
+                              lens[1].count, q(lens[1], 0.5), q(lens[1], 0.95), floating[1], q(floatLens[1], 0.5), oneFree[1], cell)
+                    }
                     organicSyntheticOut = t.synthetic
                     organicPhaseOut = (t.traceSeconds, t.emitSeconds, t.bakeSeconds)
                     // ★ the tracer's own census, for his "not enough seeds" question (2026-09-21)

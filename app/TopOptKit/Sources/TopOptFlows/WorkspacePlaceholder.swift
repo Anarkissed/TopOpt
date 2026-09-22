@@ -1367,6 +1367,16 @@ public struct WorkspacePlaceholder: View {
                 LatticeSetupWizard(project: project) {
                     showLatticeWizard = false
                     latticeSettingsSavedThisSession = true
+                    // ★ the gizmo hid with the wall editor and stayed hidden when the wizard
+                    // left with the editor still up (his 2026-09-21 22:44); the preference
+                    // dies with the wizard, so it is cleared here
+                    wizardCoversStage = false
+                    // ★ SAVE BAKES (his 2026-09-21): a changed setting starts its bake now,
+                    // superseding whatever is running; an unchanged one starts nothing.
+                    if project.lattice.previewBakeInputs != latticeInputsLastBaked {
+                        latticeInputsLastBaked = project.lattice.previewBakeInputs
+                        buildStrutScene(forceRebuild: true)
+                    }
                     // ★ "SAVE" SAVES (2026-09-02: a kill before the next navigation
                     // ran the next job from stale on-disk settings). Kept SHORT: the
                     // call-site guard reads 700 chars from the wizard call.
@@ -4843,9 +4853,19 @@ public struct WorkspacePlaceholder: View {
     }
 
     private func buildStrutScene(forceRebuild: Bool = false) {
-        // ★ ONE AT A TIME. Sixteen call sites lead here and a settings sheet moves
-        // several at once; without this they all bake at once and fight for the CPU.
-        guard !strutBakeInFlight, !strutRefining else { strutRebakePending = true; return }
+        // ★★★ A NEW SETTING NEVER WAITS (his 2026-09-21 22:40: "if I save and exit from
+        // the settings with an updated value, the previous action is cancelled and the
+        // new bake starts IMMEDIATELY"). The one-at-a-time guard that stood here queued
+        // every rebake behind a running one — and behind the repairs refine, which is
+        // core's emission and can run for an hour on a fine trace, so his ×2 seeding and
+        // his drawn depth never baked at all. Now the generation moves and the new bake
+        // starts; the running one cannot be interrupted inside core, but its picture is
+        // dropped when it lands (`bakeGeneration == strutBakeGeneration`).
+        if strutBakeInFlight || strutRefining {
+            NSLog("DIAG organic bake: superseding the running bake (in flight %d, refining %d) — generation %d",
+                  strutBakeInFlight ? 1 : 0, strutRefining ? 1 : 0, strutBakeGeneration + 1)
+        }
+        strutRebakePending = false
         guard let mesh = viewerMesh else { return }
         // ★★★ NOTHING MOVED ⇒ NOTHING IS REBUILT (see `organicBakeFingerprint`). The
         // comparison is the WHOLE of what a bake reads — `previewBakeInputs`, which is
@@ -5169,6 +5189,9 @@ public struct WorkspacePlaceholder: View {
             var stageIn = organicIn
             stageIn?.showRepairs = stageRepairs
             let isLastStage = stageIndex == stages.count - 1
+            if stageIndex > 0 {
+                NSLog("DIAG organic repairs stage: core emission starting (generation %d)", bakeGeneration)
+            }
             let scene = LatticeSDFScene(mesh: mesh, field: field,
                                         latticeID: latticeID,
                                         organicSpans: spansForBake,

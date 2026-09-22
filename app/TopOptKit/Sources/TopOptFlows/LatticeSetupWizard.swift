@@ -123,7 +123,10 @@ public struct LatticeSetupWizard: View {
                         .modifier(WizardModalPlacement(canvasHeight: geo.size.height))
                 }
                 disclaimer
-                saveAndExit
+                // ★ NOT while a wall is being drawn (his image 4, 2026-09-21: "I have already
+                // drawn and saved face 2 … it never says it's saved"): Save & Exit above the
+                // editor left with the draft unsaved. The editor's own Save/Cancel decide.
+                if wallEditorStage == nil { saveAndExit }
                 if wallEditorStage == nil { refreshSample }
             }
         }
@@ -157,6 +160,7 @@ public struct LatticeSetupWizard: View {
         // for a tiled block (or back), which is a different object at a different
         // scale, and the previous stage may have left the camera mid-dive.
         .onChange(of: model.stage) { _ in rebuild(force: true); frameSample() }
+        .onAppear { if openedLattice == nil { openedLattice = project.lattice } }
     }
 
     // MARK: the centre — the object
@@ -179,6 +183,8 @@ public struct LatticeSetupWizard: View {
     /// ★ the wall editor over the viewer (his design, 2026-09-21): which stage, and the
     /// draft it edits until Save
     @State private var wallEditorStage: LatticeWallEditorStage? = nil
+    /// the settings as they were when the page opened — "Exit" until they differ
+    @State private var openedLattice: LatticeSettings? = nil
     @State private var wallEditorDraft: LatticeWallThickness? = nil
     /// ★ THE PANEL NEVER GROWS PAST ITS SIM-ON HEIGHT (his 2026-09-21, image 1: "It
     /// should NEVER get that high … keep the exact size of image 2 and make it so the
@@ -693,6 +699,24 @@ public struct LatticeSetupWizard: View {
     }
 
     private static let wallGreen = Color(red: 0x30 / 255, green: 0xD1 / 255, blue: 0x58 / 255)
+    /// What the mode list says about a wall's drawing.
+    static func profileSummary(_ p: LatticeWallProfile?) -> String {
+        guard let p else { return "not drawn yet" }
+        if let c = p.curves {
+            let pts = c.start.count + c.end.count
+            return "\(pts) pts · " + ((c.curveStart || c.curveEnd) ? "curved" : "straight")
+        }
+        return "\(p.columns) columns · drawn"
+    }
+    /// A field's arrows walk the wall's packable depths; a typed number lands on one.
+    /// No steps (organic) ⇒ the number as typed.
+    static func walkSteps(from cur: Double, to v: Double, steps: [Double]) -> Double {
+        let st = steps.filter { $0 >= 0 }.sorted()
+        guard !st.isEmpty else { return v }
+        if v > cur + 1e-9 { return st.first { $0 > cur + 1e-6 } ?? cur }
+        if v < cur - 1e-9 { return st.last { $0 < cur - 1e-6 } ?? cur }
+        return LatticeWallDepthSteps.snap(v, steps: st)
+    }
 
     @ViewBuilder private var wallThicknessRow: some View {
         let ask = model.wallThickness
@@ -762,19 +786,22 @@ public struct LatticeSetupWizard: View {
                             .foregroundStyle(DS.Color.textPrimary.color)
                             .onTapGesture { withAnimation(.spring(response: 0.42, dampingFraction: 0.86)) { wallEditorDraft = model.wallThickness; wallEditorStage = .thickness } }
                         Spacer(minLength: 0)
-                        // ★ ONE number: how deep from the surface (D2: the band starts AT the
-                        // surface). On an octet wall the arrows walk the wall's own packable
-                        // depths and a typed number lands on one (D1).
+                        // ★ where the lattice may START and how deep it may go (his 22:40: the
+                        // start is back). On an octet wall the arrows walk the wall's own
+                        // packable depths and a typed number lands on one (D1).
+                        WallNumberField(text: String(format: "%.1f", fa.startMM), tint: Self.wallGreen,
+                                        step: 0.5, range: 0...max(0, (fa.endMM ?? f.thickMM) - 0.1)) { v in
+                            let e = fa.endMM ?? f.thickMM
+                            let sv = Self.walkSteps(from: fa.startMM, to: Swift.min(Swift.max(0, v), e - 0.1), steps: [0] + f.depthStepsMM)
+                            model.wallThickness.faces[f.id, default: LatticeFaceWallThickness()].startMM = Swift.min(Swift.max(0, sv), e - 0.1)
+                            rebuild()
+                        }
+                        .accessibilityIdentifier("wizard-wall-start-\(f.id)")
+                        Text("–").font(.system(size: 12)).foregroundStyle(DS.Color.textQuaternary.color)
                         WallNumberField(text: String(format: "%.1f", fa.endMM ?? f.thickMM), tint: DS.Color.danger.color,
-                                        step: 0.5, range: 0.1...f.thickMM) { v in
+                                        step: 0.5, range: (fa.startMM + 0.1)...f.thickMM) { v in
                             let cur = fa.endMM ?? f.thickMM
-                            var e = Swift.min(Swift.max(0.1, v), f.thickMM)
-                            if !f.depthStepsMM.isEmpty {
-                                let steps = f.depthStepsMM.filter { $0 > 0 }
-                                if v > cur + 1e-9 { e = steps.first { $0 > cur + 1e-6 } ?? cur }
-                                else if v < cur - 1e-9 { e = steps.last { $0 < cur - 1e-6 } ?? cur }
-                                else { e = LatticeWallDepthSteps.snap(e, steps: steps) }
-                            }
+                            let e = Swift.min(Swift.max(fa.startMM + 0.1, Self.walkSteps(from: cur, to: v, steps: f.depthStepsMM)), f.thickMM)
                             model.wallThickness.faces[f.id, default: LatticeFaceWallThickness()].endMM = e >= f.thickMM - 1e-9 ? nil : e
                             rebuild()
                         }
@@ -839,7 +866,7 @@ public struct LatticeSetupWizard: View {
                                             RoundedRectangle(cornerRadius: 2).fill(f.tint).frame(width: 8, height: 8)
                                             Text(f.name).font(.system(size: 12.5))
                                             Spacer(minLength: 0)
-                                            Text(p.map { "\($0.columns) columns · \($0.ends.filter { $0 > 0 }.count) latticed" } ?? "not drawn yet")
+                                            Text(Self.profileSummary(p))
                                                 .font(.system(size: 12.5))
                                         }
                                         .foregroundStyle(DS.Color.textSecondary.color)
@@ -894,16 +921,21 @@ public struct LatticeSetupWizard: View {
             if let stage = wallEditorStage {
                 // ★ far left to far right, ABOVE the minimised settings (his 02:12):
                 // the card fills the width, the rail floats beside it with air around it
-                LatticeWallProfileEditor(
-                    faces: wallEditorFaces, stage: stage,
-                    ask: Binding(get: { wallEditorDraft ?? model.wallThickness },
-                                 set: { wallEditorDraft = $0 }),
-                    onCancel: { withAnimation(.spring(response: 0.42, dampingFraction: 0.86)) { wallEditorDraft = nil; wallEditorStage = nil } },
-                    onSave: {
-                        if let d = wallEditorDraft { model.wallThickness = d }
-                        withAnimation(.spring(response: 0.42, dampingFraction: 0.86)) { wallEditorDraft = nil; wallEditorStage = nil }
-                        rebuild()
-                    })
+                // ★ curves for ORGANIC, steps for cell-based lattices (his 2026-09-21 22:40)
+                let draft = Binding(get: { wallEditorDraft ?? model.wallThickness }, set: { wallEditorDraft = $0 })
+                let cancel = { withAnimation(.spring(response: 0.42, dampingFraction: 0.86)) { wallEditorDraft = nil; wallEditorStage = nil } }
+                let save = {
+                    if let d = wallEditorDraft { model.wallThickness = d }
+                    withAnimation(.spring(response: 0.42, dampingFraction: 0.86)) { wallEditorDraft = nil; wallEditorStage = nil }
+                    rebuild()
+                }
+                Group {
+                    if project.lattice.algorithm == "organic" {
+                        LatticeWallCurveEditor(faces: wallEditorFaces, stage: stage, ask: draft, onCancel: cancel, onSave: save)
+                    } else {
+                        LatticeWallProfileEditor(faces: wallEditorFaces, stage: stage, ask: draft, onCancel: cancel, onSave: save)
+                    }
+                }
                     .padding(.horizontal, PageChrome.edge)
                     .padding(.top, 118)
                     .padding(.bottom, PageChrome.edge + 92)
@@ -2518,8 +2550,10 @@ public struct LatticeSetupWizard: View {
                     // against the receipt, the same check a run gets).
                     // ★ ONE SHORT LINE (item 1): the label, or what the sample is doing
                     // right now; the census sits behind the (i).
-                    Text(wallEditorStage == .grade ? "Tap above the dotted line to shape the start, below for the end"
-                         : wallEditorStage == .thickness ? "Drag the lines: how much of each wall may become lattice"
+                    Text(wallEditorStage == .grade
+                         ? (project.lattice.algorithm == "organic" ? "Tap above the dotted line to shape the start, below for the end"
+                            : "Drag across a wall: above the dotted line shapes the start, below it the end")
+                         : wallEditorStage == .thickness ? "Drag the lines: where the lattice may start and how deep it may go"
                          : organicSampleShown
                          ? (organicSampleStatus ?? OrganicSampleCube.label)
                          : LatticeWizardSample.provenanceNote)
@@ -2546,11 +2580,17 @@ public struct LatticeSetupWizard: View {
 
     /// ★ SAVE & EXIT MOVED TO THE TOP LEFT (his instruction, 2026-09-07) so the
     /// bottom-right corner carries the button he reaches for while working: Refresh.
+    /// ★ "Exit" when nothing changed since the page opened, "Save & Exit" when something
+    /// did — and that save starts the bake (his 2026-09-21 22:40).
+    private var settingsChangedSinceOpen: Bool {
+        guard let opened = openedLattice else { return true }
+        return model.applied(to: project.lattice).previewBakeInputs != opened.previewBakeInputs
+    }
     private var saveAndExit: some View {
         VStack {
             HStack {
                 Button { saveAndClose() } label: {
-                    Text("Save & Exit")
+                    Text(settingsChangedSinceOpen ? "Save & Exit" : "Exit")
                         .dsStyle(DS.TypeScale.bodyStrong).fontWeight(.semibold)
                         .foregroundStyle(DS.Color.textPrimary.color)
                         .padding(.vertical, 12).padding(.horizontal, DS.Space.xl5)
@@ -2647,7 +2687,7 @@ public struct LatticeSetupWizard: View {
     }
 
     private func saveAndClose() {
-        project.lattice = model.applied(to: project.lattice)
+        if settingsChangedSinceOpen { project.lattice = model.applied(to: project.lattice) }
         onExit()
     }
 

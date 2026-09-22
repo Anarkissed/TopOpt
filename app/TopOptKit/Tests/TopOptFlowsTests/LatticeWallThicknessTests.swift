@@ -51,9 +51,9 @@ final class LatticeWallThicknessTests: XCTestCase {
         XCTAssertFalse(json.contains("wallThickness"), "★ an untouched project writes no thickness key")
         var moved = s
         moved.wallThickness.depthBySim = false
-        moved.wallThickness.faces["f:g:2"] = LatticeFaceWallThickness(endMM: 6)
+        moved.wallThickness.faces["f:g:2"] = LatticeFaceWallThickness(startMM: 2, endMM: 6)
         moved.wallThickness.density = .manualGrade
-        moved.wallThickness.faces["f:g:2"]?.profile = .flat(end: 0.8, columns: 4)
+        moved.wallThickness.faces["f:g:2"]?.profile = .flat(start: 0.2, end: 0.8, columns: 4)
         let back = try JSONDecoder().decode(LatticeSettings.self, from: try JSONEncoder().encode(moved))
         XCTAssertEqual(back.wallThickness, moved.wallThickness, "round trip, profile included")
         XCTAssertFalse(moved.wallThickness.isThrough)
@@ -64,20 +64,20 @@ final class LatticeWallThicknessTests: XCTestCase {
     /// The allowed range alone (manual single at 100 %): the slab is exactly the range.
     func testTheAllowedRangeCutsTheRegionDistanceAndTheContainment() {
         let a = attach(face(), LatticeWallThickness(depthBySim: false, density: .manualSingle, pct: 100,
-                                                    faces: ["f:g:2": .init(endMM: 6)]))
-        XCTAssertEqual(a.slabRange(uv: .zero).start, 0, accuracy: 1e-9, "★ from the surface (D2)")
+                                                    faces: ["f:g:2": .init(startMM: 2, endMM: 6)]))
+        XCTAssertEqual(a.slabRange(uv: .zero).start, 2, accuracy: 1e-9, "★ where he said it may start")
         XCTAssertEqual(a.slabRange(uv: .zero).end, 6, accuracy: 1e-9)
-        XCTAssertTrue(LatticeRegionMask.contains(SIMD3(0, 0, 1), region: a), "just under the surface: latticed")
+        XCTAssertFalse(LatticeRegionMask.contains(SIMD3(0, 0, 1), region: a), "before the slab")
         XCTAssertTrue(LatticeRegionMask.contains(SIMD3(0, 0, 4), region: a), "inside the slab")
         XCTAssertFalse(LatticeRegionMask.contains(SIMD3(0, 0, 8), region: a), "past the slab")
         XCTAssertLessThan(LatticeRegionMask.signedDistance(SIMD3(0, 0, 4), region: a), 0)
         XCTAssertGreaterThan(LatticeRegionMask.signedDistance(SIMD3(0, 0, 8), region: a), 0)
-        XCTAssertLessThan(LatticeRegionMask.signedDistance(SIMD3(0, 0, 1), region: a), 0)
+        XCTAssertGreaterThan(LatticeRegionMask.signedDistance(SIMD3(0, 0, 1), region: a), 0)
         XCTAssertTrue(LatticeRegionMask.containsWholePrism(SIMD3(0, 0, 8), region: a), "the whole prism, for the builder")
         XCTAssertTrue(LatticeRegionMask.contains(SIMD3(0, 0, 8), region: face()), "an untouched face is unchanged")
         let half = attach(face(), LatticeWallThickness(depthBySim: false, density: .manualSingle, pct: 50,
-                                                       faces: ["f:g:2": .init(endMM: 6)]))
-        XCTAssertEqual(half.slabRange(uv: .zero).end, 3, accuracy: 1e-9, "50 % of the 6 mm allowed")
+                                                       faces: ["f:g:2": .init(startMM: 2, endMM: 6)]))
+        XCTAssertEqual(half.slabRange(uv: .zero).end, 4, accuracy: 1e-9, "2 + 50 % of 4")
     }
 
     /// His rule: thickness = the allowed range × the column's peak stress over the part's
@@ -92,12 +92,12 @@ final class LatticeWallThicknessTests: XCTestCase {
         XCTAssertGreaterThan(a.slabRange(uv: uv(0, 0)).end, thin)
         XCTAssertLessThan(a.slabRange(uv: uv(0, 0)).end, thick)
         let g = attach(face(), LatticeWallThickness(depthBySim: false, density: .sim,
-                                                    faces: ["f:g:2": .init(endMM: 6)]), field: field(), floor: 1)
-        XCTAssertEqual(g.slabRange(uv: uv(-9, 0)).start, 0, accuracy: 1e-9, "★ the band starts AT the surface (D2)")
+                                                    faces: ["f:g:2": .init(startMM: 2, endMM: 6)]), field: field(), floor: 1)
+        XCTAssertEqual(g.slabRange(uv: uv(-9, 0)).start, 2, accuracy: 1e-9)
         XCTAssertLessThan(g.slabRange(uv: uv(-9, 0)).end, 3.5, "thin where unloaded")
         XCTAssertGreaterThan(g.slabRange(uv: uv(9, 0)).end, 5.5, "up to the range's end where loaded")
         let auto = attach(face(), LatticeWallThickness(depthBySim: false, density: .autoSingle,
-                                                       faces: ["f:g:2": .init(endMM: 6)]), field: field(), floor: 1)
+                                                       faces: ["f:g:2": .init(startMM: 2, endMM: 6)]), field: field(), floor: 1)
         XCTAssertTrue(try XCTUnwrap(auto.thicknessMap).isConstant)
         XCTAssertGreaterThan(auto.slabRange(uv: .zero).end, 5.5)
     }
@@ -107,7 +107,7 @@ final class LatticeWallThicknessTests: XCTestCase {
     /// between (core note 3: nearest, never interpolated), and the cap stays at the
     /// prism's declared end (his 02:55: no walls from the slab).
     func testADrawnProfileIsStepsFromTheSurface() throws {
-        let prof = LatticeWallProfile(ends: [0.2, 0.9])
+        let prof = LatticeWallProfile(ends: [0.6, 0.9])
         let a = attach(face(), LatticeWallThickness(depthBySim: false, density: .manualGrade,
                                                     faces: ["f:g:2": .init(profile: prof)]), floor: 0.5)
         let m = try XCTUnwrap(a.thicknessMap)
@@ -120,11 +120,11 @@ final class LatticeWallThicknessTests: XCTestCase {
         }
         for x in [0.05, 0.3, 0.45] {
             XCTAssertEqual(a.slabRange(uv: at(x)).start, 0, accuracy: 1e-9)
-            XCTAssertEqual(a.slabRange(uv: at(x)).end, 2, accuracy: 1e-6, "left column, everywhere in it")
+            XCTAssertEqual(a.slabRange(uv: at(x)).end, 6, accuracy: 1e-6, "left column, everywhere in it")
         }
         for x in [0.55, 0.7, 0.95] { XCTAssertEqual(a.slabRange(uv: at(x)).end, 9, accuracy: 1e-6, "right column") }
         let e1 = a.slabRange(uv: at(0.49)).end, e2 = a.slabRange(uv: at(0.51)).end
-        XCTAssertTrue((abs(e1 - 2) < 1e-6 || abs(e1 - 9) < 1e-6) && (abs(e2 - 2) < 1e-6 || abs(e2 - 9) < 1e-6), "★ no ramp")
+        XCTAssertTrue((abs(e1 - 6) < 1e-6 || abs(e1 - 9) < 1e-6) && (abs(e2 - 6) < 1e-6 || abs(e2 - 9) < 1e-6), "★ no ramp")
         XCTAssertNotEqual(e1, e2, accuracy: 1)
         let cap = LatticeRegionCap.build(regions: [a])
         var plates = 0
@@ -144,7 +144,7 @@ final class LatticeWallThicknessTests: XCTestCase {
         r.origin = .zero; r.normal = SIMD3(0, 0, 1); r.depthMM = 10
         r.outlineLoops = [[SIMD2(-15, -10), SIMD2(15, -10), SIMD2(15, 0), SIMD2(0, 0), SIMD2(0, 10), SIMD2(-15, 10)]]
         r.selectableKey = "f:g:7"
-        let prof = LatticeWallProfile(ends: [0.1, 0.3, 0.6, 0.9])
+        let prof = LatticeWallProfile(ends: [0.55, 0.65, 0.8, 0.9])
         let a = attach(r, LatticeWallThickness(depthBySim: false, density: .manualGrade,
                                                faces: ["f:g:7": .init(profile: prof)]), floor: 0.5)
         let frame = try XCTUnwrap(LatticeWallThicknessBuilder.frame(a))
@@ -153,9 +153,9 @@ final class LatticeWallThicknessTests: XCTestCase {
         // mesh (world) is read back through the same basis — never through an assumed axis
         let cornerLowLeft = SIMD2<Double>(-14.5, -9.5), cornerLowRight = SIMD2<Double>(14.5, -9.5)
         let cornerHighLeft = SIMD2<Double>(-14.5, 9.5), notch = SIMD2<Double>(14.5, 9.5)
-        XCTAssertEqual(a.slabRange(uv: cornerLowLeft).end, 1, accuracy: 1e-6, "column 0 at the −u end")
-        XCTAssertEqual(a.slabRange(uv: cornerLowRight).end, 9, accuracy: 1e-6, "column 3 at the +u end — a u-mirror would read 1 here")
-        XCTAssertEqual(a.slabRange(uv: cornerHighLeft).end, 1, accuracy: 1e-6, "same column up the height")
+        XCTAssertEqual(a.slabRange(uv: cornerLowLeft).end, 5.5, accuracy: 1e-6, "column 0 at the −u end")
+        XCTAssertEqual(a.slabRange(uv: cornerLowRight).end, 9, accuracy: 1e-6, "column 3 at the +u end — a u-mirror would read 5.5 here")
+        XCTAssertEqual(a.slabRange(uv: cornerHighLeft).end, 5.5, accuracy: 1e-6, "same column up the height")
         XCTAssertFalse(LatticeRegionMask.contains(SIMD3<Double>(0, 0, 0) + LatticeRegionMask.basisForTests(r.normal).0 * notch.x
                                                   + LatticeRegionMask.basisForTests(r.normal).1 * notch.y + SIMD3(0, 0, 0.5), region: a),
                        "the notch is outside the outline")
@@ -201,21 +201,52 @@ final class LatticeWallThicknessTests: XCTestCase {
 
     /// The steps model itself, and a drawing from before the steps.
     func testTheStepsModel() throws {
-        let p = LatticeWallProfile(ends: [0.2, 0.5, 1.0])
-        XCTAssertEqual(p.end(at: 0.1), 0.2); XCTAssertEqual(p.end(at: 0.5), 0.5); XCTAssertEqual(p.end(at: 0.99), 1.0)
-        XCTAssertEqual(p.y(at: 0.5, side: .start), 0, "★ the start is the surface")
-        XCTAssertEqual(p.resampled(columns: 6).ends, [0.2, 0.2, 0.5, 0.5, 1.0, 1.0])
-        XCTAssertEqual(LatticeWallProfile(ends: [1.5, -1]).ends, [1, 0], "clamped")
+        let p = LatticeWallProfile(ends: [0.6, 0.5, 1.0])
+        XCTAssertEqual(p.end(at: 0.1), 0.6); XCTAssertEqual(p.end(at: 0.5), 0.5); XCTAssertEqual(p.end(at: 0.99), 1.0)
+        XCTAssertEqual(p.y(at: 0.5, side: .start), 0, "★ the start defaults to the surface")
+        XCTAssertEqual(p.resampled(columns: 6).ends, [0.6, 0.6, 0.5, 0.5, 1.0, 1.0])
+        XCTAssertEqual(LatticeWallProfile(ends: [1.5, -1]).ends, [1, 0.5], "clamped into the inner half")
         let old = #"{"start":[{"x":0,"y":0.1}],"end":[{"x":0,"y":0.9}],"curveStart":true,"curveEnd":true}"#
         let decoded = try JSONDecoder().decode(LatticeWallProfile.self, from: Data(old.utf8))
-        XCTAssertEqual(decoded.ends, [1], "a curve drawing from before decodes to the whole wall")
-        let face = try JSONDecoder().decode(LatticeFaceWallThickness.self, from: Data(#"{"startMM": 2, "endMM": 6}"#.utf8))
-        XCTAssertEqual(face.endMM, 6, "a startMM from before is dropped")
+        XCTAssertTrue(decoded.isCurves, "a curve drawing decodes AS curves")
+        XCTAssertEqual(decoded.start(at: 0.5), 0.1, accuracy: 1e-9); XCTAssertEqual(decoded.end(at: 0.5), 0.9, accuracy: 1e-9)
+        let two = LatticeWallProfile(starts: [0.1, 0.4], ends: [0.9, 0.6])
+        XCTAssertEqual(two.start(at: 0.2), 0.1); XCTAssertEqual(two.start(at: 0.8), 0.4)
+        XCTAssertEqual(LatticeWallProfile(starts: [0.7], ends: [0.3]).starts, [0.5], "★ the start never crosses the mid-plane")
+        XCTAssertEqual(LatticeWallProfile(starts: [0.7], ends: [0.3]).ends, [0.5], "★ nor the end")
+        let back = try JSONDecoder().decode(LatticeWallProfile.self, from: try JSONEncoder().encode(two))
+        XCTAssertEqual(back, two)
+        let flat = LatticeWallCurves.flat(start: 0.2, end: 0.8)
+        XCTAssertEqual(flat.y(at: 0.37, side: .start), 0.2, accuracy: 1e-9)
+        let bump = LatticeWallCurves(start: [.init(x: 0, y: 0.1), .init(x: 0.5, y: 0.4), .init(x: 1, y: 0.1)],
+                                     end: [.init(x: 0, y: 0.9), .init(x: 1, y: 0.9)])
+        XCTAssertEqual(bump.y(at: 0.5, side: .start), 0.4, accuracy: 0.02, "the curve passes through its point")
+        let over = LatticeWallCurves(start: [.init(x: 0, y: 0.7), .init(x: 1, y: 0.7)], end: [.init(x: 0, y: 0.9), .init(x: 1, y: 0.9)])
+        XCTAssertEqual(over.y(at: 0.5, side: .start), 0.5, accuracy: 1e-9, "★ the start line never crosses the mid-plane")
+        XCTAssertEqual(LatticeWallCurves.polyline(bump.start, curved: true, side: .start).count, 1 + 2 * 24)
+    }
+
+    /// A start AND an end staircase: the band is between them, and both snap to the steps.
+    func testAStartStaircaseLeavesSolidUnderTheSurface() throws {
+        let prof = LatticeWallProfile(starts: [0.0, 0.3], ends: [1.0, 0.6])
+        var r = face(); r.thickness = LatticeWallThickness(depthBySim: false, density: .manualGrade, faces: ["f:g:2": .init(profile: prof)])
+        let a = LatticeWallThicknessBuilder.attach([r], field: nil, floorMM: 0.5, depthStepsFor: { _ in [0, 3, 4, 6, 10] })[0]
+        let frame = try XCTUnwrap(LatticeWallThicknessBuilder.frame(a))
+        let mid = 0.5 * (frame.lo + frame.hi)
+        func at(_ x: Double) -> SIMD2<Double> {
+            frame.widthAlongU ? SIMD2(frame.lo.x + x * (frame.hi.x - frame.lo.x), mid.y) : SIMD2(mid.x, frame.lo.y + x * (frame.hi.y - frame.lo.y))
+        }
+        XCTAssertEqual(a.slabRange(uv: at(0.25)).start, 0, accuracy: 1e-6); XCTAssertEqual(a.slabRange(uv: at(0.25)).end, 10, accuracy: 1e-6)
+        XCTAssertEqual(a.slabRange(uv: at(0.75)).start, 3, accuracy: 1e-6, "3 mm drawn ⇒ 3 (a step)")
+        XCTAssertEqual(a.slabRange(uv: at(0.75)).end, 6, accuracy: 1e-6, "6 mm drawn ⇒ 6 (a step)")
+        let m = LatticeWallSlabMesh.build(attached: a)
+        XCTAssertFalse(m.isEmpty)
+        XCTAssertEqual(Double(m.bounds.min.z), 0, accuracy: 1e-4); XCTAssertEqual(Double(m.bounds.max.z), 10, accuracy: 1e-4)
     }
 
     /// The wall in 3D for a face card: one box per column, risers between, from the surface.
     func testTheSlabMeshIsSteppedAndFitsTheWall() {
-        let prof = LatticeWallProfile(ends: [0.1, 0.9])
+        let prof = LatticeWallProfile(ends: [0.6, 0.9])
         let m = LatticeWallSlabMesh.build(widthMM: 100, heightMM: 40, thickMM: 10,
                                           ask: LatticeFaceWallThickness(profile: prof))
         XCTAssertGreaterThan(m.triangleCount, 20)
@@ -224,7 +255,7 @@ final class LatticeWallThicknessTests: XCTestCase {
         XCTAssertEqual(m.bounds.max.y, 9, accuracy: 1e-4, "the deeper step")
         XCTAssertEqual(m.bounds.max.z, 40, accuracy: 1e-5)
         for i in Swift.stride(from: 0, to: m.positions.count, by: 3) where m.positions[i] < 49.9 {
-            XCTAssertLessThanOrEqual(m.positions[i + 1], 1 + 1e-4, "the left column never deeper than its step")
+            XCTAssertLessThanOrEqual(m.positions[i + 1], 6 + 1e-4, "the left column never deeper than its step")
         }
         let box = LatticeWallSlabMesh.boxLines(widthMM: 100, heightMM: 40, thickMM: 10)
         XCTAssertEqual(box.count, 12 * 6, "twelve edges")
@@ -233,9 +264,10 @@ final class LatticeWallThicknessTests: XCTestCase {
         XCTAssertEqual(r.bounds.min.y, 0, accuracy: 1e-4); XCTAssertEqual(r.bounds.max.y, 5, accuracy: 1e-4)
     }
 
-    /// No depth drawn ⇒ no slab ⇒ nothing drawn; and the true-shape build follows the prism.
+    /// His image 6: start and end meeting on the mid-plane ⇒ no slab ⇒ nothing drawn; and
+    /// the true-shape build follows the prism.
     func testNoSlabWhereNoDepthIsDrawn() {
-        let none = LatticeWallProfile.flat(end: 0)
+        let none = LatticeWallProfile.flat(start: 0.5, end: 0.5)
         XCTAssertTrue(LatticeWallSlabMesh.build(widthMM: 100, heightMM: 40, thickMM: 10,
                                                 ask: LatticeFaceWallThickness(profile: none)).isEmpty)
         XCTAssertTrue(LatticeWallSlabMesh.build(region: face(), ask: LatticeFaceWallThickness(profile: none)).isEmpty)

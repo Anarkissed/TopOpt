@@ -46,20 +46,22 @@ public enum LatticeWallSlabMesh {
 
         if let m = r.thicknessMap, !m.isConstant {
             // one box per raster cell; the cell (i, j) covers [origin + (i-½)h, origin + (i+½)h]
-            func end(_ i: Int, _ j: Int) -> Double {
-                guard i >= 0, j >= 0, i < m.nu, j < m.nv else { return 0 }
+            func band(_ i: Int, _ j: Int) -> (Double, Double) {
+                guard i >= 0, j >= 0, i < m.nu, j < m.nv else { return (0, 0) }
                 let e = Double(m.ends[j * m.nu + i]), s = Double(m.starts[j * m.nu + i])
-                return e.isFinite && s.isFinite ? max(0, min(r.depthMM, e) - max(0, s)) : 0
+                guard e.isFinite, s.isFinite else { return (0, 0) }
+                let s1 = min(r.depthMM, max(0, s)), e1 = min(r.depthMM, max(s1, e))
+                return (s1, e1)
             }
             for j in 0..<m.nv { for i in 0..<m.nu {
-                let e = end(i, j)
-                guard e > 0.01 else { continue }
+                let (s0, e0) = band(i, j)
+                guard e0 - s0 > 0.01 else { continue }
                 let lo = m.origin + SIMD2(Double(i) - 0.5, Double(j) - 0.5) * m.h
                 let hi = lo + SIMD2(m.h, m.h)
                 for ring in rings {
                     let poly = clip(ring, lo: lo, hi: hi)
                     guard poly.count >= 3 else { continue }
-                    builder.extrude(poly, end: e, world: world, riser: { a, b in
+                    builder.extrude(poly, from: s0, to: e0, world: world, neighbour: { a, b in
                         // an edge on a cell boundary faces the neighbour there; the riser is
                         // the difference; an outline edge faces nothing and gets the full wall
                         let mid = 0.5 * (a + b)
@@ -68,18 +70,19 @@ public enum LatticeWallSlabMesh {
                         else if abs(a.x - hi.x) < 1e-9, abs(b.x - hi.x) < 1e-9 { ni = i + 1 }
                         else if abs(a.y - lo.y) < 1e-9, abs(b.y - lo.y) < 1e-9 { nj = j - 1 }
                         else if abs(a.y - hi.y) < 1e-9, abs(b.y - hi.y) < 1e-9 { nj = j + 1 }
-                        else { return 0 }
+                        else { return nil }
                         // the neighbour must also hold the outline at that edge, else it is open
                         let neighbourHasOutline = rings.contains { Self.inside(mid + SIMD2(Double(ni - i), Double(nj - j)) * 1e-6, $0) }
-                        return neighbourHasOutline ? end(ni, nj) : 0
+                        guard neighbourHasOutline else { return nil }
+                        let nb = band(ni, nj)
+                        return nb.1 - nb.0 > 0.01 ? nb : nil
                     })
                 }
             } }
         } else {
             let (s0, e0) = r.slabRange(uv: rings[0][0])
-            let e = max(0, e0 - s0)
-            guard e > 0.01 else { return ViewerMesh(vertices: [], indices: [], faceIDs: []) }
-            for ring in rings { builder.extrude(ring, end: e, world: world, riser: { _, _ in 0 }) }
+            guard e0 - s0 > 0.01 else { return ViewerMesh(vertices: [], indices: [], faceIDs: []) }
+            for ring in rings { builder.extrude(ring, from: s0, to: e0, world: world, neighbour: { _, _ in nil }) }
         }
         return builder.mesh
     }
@@ -112,24 +115,32 @@ public enum LatticeWallSlabMesh {
     public static func build(widthMM: Double, heightMM: Double, thickMM: Double,
                              ask: LatticeFaceWallThickness, pct: Double = 100,
                              stations: Int = 64) -> ViewerMesh {
-        let columns = ask.profile.map { max(1, $0.columns) } ?? 1
-        let allowed = min(thickMM, ask.endMM ?? thickMM)
-        func depth(_ c: Int) -> Double {
-            if let p = ask.profile { return min(allowed, p.ends[min(c, p.ends.count - 1)] * thickMM) }
-            return max(0, allowed) * min(1, max(0, pct / 100))
+        // curves are sampled at `stations` columns; steps at their own
+        let columns = ask.profile.map { $0.isCurves ? max(2, stations) : max(1, $0.columns) } ?? 1
+        let a0 = max(0, ask.startMM), a1 = min(thickMM, ask.endMM ?? thickMM)
+        func band(_ c: Int) -> (Double, Double) {
+            if let p = ask.profile {
+                let x = (Double(c) + 0.5) / Double(columns)
+                var s = min(max(p.start(at: x) * thickMM, a0), a1), e = min(max(p.end(at: x) * thickMM, a0), a1)
+                if e < s { swap(&s, &e) }
+                return (s, e)
+            }
+            return (a0, a0 + max(0, a1 - a0) * min(1, max(0, pct / 100)))
         }
         var b = Builder()
         func world(_ uv: SIMD2<Double>, _ s: Double) -> SIMD3<Double> { SIMD3(uv.x, s, uv.y) }
         let cw = widthMM / Double(columns)
         for c in 0..<columns {
-            let e = depth(c)
-            guard e > 0.01 else { continue }
+            let (s0, e0) = band(c)
+            guard e0 - s0 > 0.01 else { continue }
             let x0 = Double(c) * cw, x1 = x0 + cw
             let poly = [SIMD2(x0, 0), SIMD2(x1, 0), SIMD2(x1, heightMM), SIMD2(x0, heightMM)]
-            b.extrude(poly, end: e, world: world, riser: { a, bb in
-                if abs(a.x - x0) < 1e-9, abs(bb.x - x0) < 1e-9 { return c > 0 ? depth(c - 1) : 0 }
-                if abs(a.x - x1) < 1e-9, abs(bb.x - x1) < 1e-9 { return c + 1 < columns ? depth(c + 1) : 0 }
-                return 0
+            b.extrude(poly, from: s0, to: e0, world: world, neighbour: { a, bb in
+                var n: (Double, Double)? = nil
+                if abs(a.x - x0) < 1e-9, abs(bb.x - x0) < 1e-9, c > 0 { n = band(c - 1) }
+                if abs(a.x - x1) < 1e-9, abs(bb.x - x1) < 1e-9, c + 1 < columns { n = band(c + 1) }
+                if let n, n.1 - n.0 > 0.01 { return n }
+                return nil
             })
         }
         return b.mesh
@@ -198,26 +209,31 @@ public enum LatticeWallSlabMesh {
         var idx: [Int32] = []
         mutating func add(_ p: SIMD3<Double>) -> Int32 { v += [Float(p.x), Float(p.y), Float(p.z)]; return Int32(v.count / 3 - 1) }
         mutating func tri(_ a: Int32, _ b: Int32, _ c: Int32) { idx += [a, b, c] }
-        /// One box: `poly` (in the face plane) from s = 0 to s = end; the side along each
-        /// edge runs from the neighbour's end (`riser`) up to this end — 0 ⇒ the whole wall.
-        mutating func extrude(_ poly: [SIMD2<Double>], end: Double,
+        /// One box: `poly` (in the face plane) from s = `from` to s = `to`; the side along
+        /// each edge covers whatever of [from, to] the neighbour's band (`neighbour`, nil ⇒
+        /// nothing there) does not — the risers between steps, the whole wall at the outline.
+        mutating func extrude(_ poly: [SIMD2<Double>], from: Double, to: Double,
                               world: (SIMD2<Double>, Double) -> SIMD3<Double>,
-                              riser: (SIMD2<Double>, SIMD2<Double>) -> Double) {
-            guard poly.count >= 3, end > 0 else { return }
-            // the plates
-            let top = poly.map { add(world($0, 0)) }, bottom = poly.map { add(world($0, end)) }
+                              neighbour: (SIMD2<Double>, SIMD2<Double>) -> (Double, Double)?) {
+            guard poly.count >= 3, to - from > 1e-9 else { return }
+            let top = poly.map { add(world($0, from)) }, bottom = poly.map { add(world($0, to)) }
             for (a, b, c) in LatticeRegionCap.triangulate(poly) {
-                tri(top[a], top[c], top[b])          // the surface, facing out of the part
-                tri(bottom[a], bottom[b], bottom[c]) // the end, facing in
+                tri(top[a], top[c], top[b])          // the start surface, facing out of the part
+                tri(bottom[a], bottom[b], bottom[c]) // the end surface, facing in
             }
-            // the sides
             for k in poly.indices {
                 let a = poly[k], b = poly[(k + 1) % poly.count]
-                let from = min(end, max(0, riser(a, b)))
-                guard end - from > 1e-9 else { continue }
-                let a0 = add(world(a, from)), a1 = add(world(a, end))
-                let b0 = add(world(b, from)), b1 = add(world(b, end))
-                tri(a0, a1, b1); tri(a0, b1, b0)
+                var pieces: [(Double, Double)] = [(from, to)]
+                if let n = neighbour(a, b) {
+                    pieces = []
+                    if n.0 > from { pieces.append((from, min(to, n.0))) }
+                    if n.1 < to { pieces.append((max(from, n.1), to)) }
+                }
+                for (s0, s1) in pieces where s1 - s0 > 1e-9 {
+                    let a0 = add(world(a, s0)), a1 = add(world(a, s1))
+                    let b0 = add(world(b, s0)), b1 = add(world(b, s1))
+                    tri(a0, a1, b1); tri(a0, b1, b0)
+                }
             }
         }
         var mesh: ViewerMesh {

@@ -51,48 +51,163 @@ public enum LatticeWallDensityMode: String, Codable, CaseIterable, Sendable {
     public var readsTheSolve: Bool { self == .sim || self == .autoSingle }
 }
 
-/// ★ THE DRAWN DEPTH OF ONE WALL, AS STEPS (his D1, 2026-09-21: "the way the user draws
-/// should be cell-based rather than curve-based"). `ends[i]` is the lattice's depth as a
-/// share (0…1) of the wall's thickness in column `i` of `ends.count` equal columns along
-/// the wall's length. The lattice ALWAYS starts at the surface (his D2: "if there is
-/// empty space, there should never be covered walls as a finish"), so there is one line
-/// to draw, and the preview draws exactly these steps in 2D and 3D.
+/// ★ THE DRAWN DEPTH OF ONE WALL. Two forms (his 2026-09-21 22:40): CELL-BASED lattices
+/// draw STEPS — `starts[i]`/`ends[i]` are the band's shares of the wall's thickness in
+/// column `i` of equal columns along the wall, the start in the outer half (≤ 0.5) and
+/// the end in the inner half (≥ 0.5) — and ORGANIC draws CURVES (`curves`, the design's
+/// Bézier lines, the same 50 % rule). The lattice lives between start and end.
 public struct LatticeWallProfile: Codable, Equatable, Sendable {
+    public var starts: [Double]
     public var ends: [Double]
-    public init(ends: [Double]) { self.ends = ends.map { Swift.min(1, Swift.max(0, $0)) } }
-    /// One depth across the whole wall.
-    public static func flat(end b: Double, columns: Int = 1) -> LatticeWallProfile {
-        LatticeWallProfile(ends: [Double](repeating: b, count: Swift.max(1, columns)))
+    /// organic only: the drawn curves; when set they are the profile
+    public var curves: LatticeWallCurves? = nil
+    public init(starts: [Double] = [], ends: [Double], curves: LatticeWallCurves? = nil) {
+        let n = Swift.max(1, ends.count)
+        self.ends = ends.isEmpty ? [1] : ends.map { Swift.min(1, Swift.max(0.5, $0)) }
+        var st = starts.map { Swift.min(0.5, Swift.max(0, $0)) }
+        if st.count != n { st = [Double](repeating: 0, count: n) }
+        self.starts = st
+        self.curves = curves
+    }
+    public init(curves: LatticeWallCurves) { self.starts = [0]; self.ends = [1]; self.curves = curves }
+    /// One start and one end across the whole wall.
+    public static func flat(start a: Double = 0, end b: Double, columns: Int = 1) -> LatticeWallProfile {
+        LatticeWallProfile(starts: [Double](repeating: a, count: Swift.max(1, columns)),
+                           ends: [Double](repeating: b, count: Swift.max(1, columns)))
     }
     public var columns: Int { ends.count }
-    /// The same drawing on `n` columns: each new column takes the old column under its centre.
+    public var isCurves: Bool { curves != nil }
+    /// The same steps on `n` columns: each new column takes the old column under its centre.
     public func resampled(columns n: Int) -> LatticeWallProfile {
         let n = Swift.max(1, n)
-        guard n != ends.count, !ends.isEmpty else { return self }
-        return LatticeWallProfile(ends: (0..<n).map { end(at: (Double($0) + 0.5) / Double(n)) })
+        guard n != ends.count else { return self }
+        return LatticeWallProfile(starts: (0..<n).map { start(at: (Double($0) + 0.5) / Double(n)) },
+                                  ends: (0..<n).map { end(at: (Double($0) + 0.5) / Double(n)) }, curves: curves)
     }
-    /// The depth share in the column under x (0…1 along the wall).
-    public func end(at x: Double) -> Double {
-        guard !ends.isEmpty else { return 1 }
-        let i = Swift.min(ends.count - 1, Swift.max(0, Int((x * Double(ends.count)).rounded(.down))))
-        return ends[i]
+    private func column(_ x: Double) -> Int {
+        Swift.min(ends.count - 1, Swift.max(0, Int((x * Double(ends.count)).rounded(.down))))
     }
-    private enum CodingKeys: String, CodingKey { case ends }
+    public func start(at x: Double) -> Double { curves?.y(at: x, side: .start) ?? starts[column(x)] }
+    public func end(at x: Double) -> Double { curves?.y(at: x, side: .end) ?? ends[column(x)] }
+    public typealias Side = LatticeWallCurves.Side
+    public func y(at x: Double, side: Side) -> Double { side == .start ? start(at: x) : end(at: x) }
+
+    private enum CodingKeys: String, CodingKey { case starts, ends, curves, start, end, curveStart, curveEnd }
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        // a drawing from before the steps (curves) decodes to the whole wall, never fails
-        ends = (try? c.decodeIfPresent([Double].self, forKey: .ends)) ?? [1]
-        if ends.isEmpty { ends = [1] }
+        let ends = (try? c.decodeIfPresent([Double].self, forKey: .ends)) ?? []
+        let starts = (try? c.decodeIfPresent([Double].self, forKey: .starts)) ?? []
+        var curves = try? c.decodeIfPresent(LatticeWallCurves.self, forKey: .curves)
+        // a drawing written as curves before this form existed decodes AS curves
+        if curves == nil, c.contains(.start) || c.contains(.end) {
+            curves = try? LatticeWallCurves(from: decoder)
+        }
+        self.init(starts: starts, ends: ends.isEmpty ? [1] : ends, curves: curves)
     }
     public func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(ends, forKey: .ends)
+        if starts.contains(where: { $0 > 0 }) { try c.encode(starts, forKey: .starts) }
+        if let curves { try c.encode(curves, forKey: .curves) }
+    }
+}
+
+/// One point of a drawn profile, in the wall's normalised box: x across the wall's width
+/// (0…1), y through its thickness (0 = outer surface, 1 = inner). `smooth` false is a
+/// corner; `tx/ty` an explicit tangent (Catmull-Rom otherwise), as in the design.
+public struct LatticeWallCurvesPoint: Codable, Equatable, Sendable {
+    public var x: Double
+    public var y: Double
+    public var smooth: Bool = true
+    public var tx: Double? = nil
+    public var ty: Double? = nil
+    public init(x: Double, y: Double, smooth: Bool = true, tx: Double? = nil, ty: Double? = nil) {
+        self.x = x; self.y = y; self.smooth = smooth; self.tx = tx; self.ty = ty
+    }
+    private enum CodingKeys: String, CodingKey { case x, y, smooth, tx, ty }
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        x = try c.decode(Double.self, forKey: .x); y = try c.decode(Double.self, forKey: .y)
+        smooth = try c.decodeIfPresent(Bool.self, forKey: .smooth) ?? true
+        tx = try c.decodeIfPresent(Double.self, forKey: .tx); ty = try c.decodeIfPresent(Double.self, forKey: .ty)
+    }
+}
+
+/// The drawn profile of one wall: the START curve (kept in the outer half, y ≤ 0.5) and
+/// the END curve (the inner half, y ≥ 0.5) — the lattice lives between them.
+public struct LatticeWallCurves: Codable, Equatable, Sendable {
+    public var start: [LatticeWallCurvesPoint]
+    public var end: [LatticeWallCurvesPoint]
+    public var curveStart: Bool = true
+    public var curveEnd: Bool = true
+
+    public init(start: [LatticeWallCurvesPoint], end: [LatticeWallCurvesPoint],
+                curveStart: Bool = true, curveEnd: Bool = true) {
+        self.start = start; self.end = end; self.curveStart = curveStart; self.curveEnd = curveEnd
+    }
+    /// Two straight lines at the allowed range's shares.
+    public static func flat(start a: Double, end b: Double) -> LatticeWallCurves {
+        LatticeWallCurves(start: [.init(x: 0, y: min(a, 0.5)), .init(x: 1, y: min(a, 0.5))],
+                           end: [.init(x: 0, y: max(b, 0.5)), .init(x: 1, y: max(b, 0.5))])
     }
 
-    /// Kept for the slab meshes: the start side is the surface, the end side the steps.
+    // ── the design's geometry, ported verbatim (`tangent`, `pathD`) ──────────────
+    static func tangent(_ pts: [LatticeWallCurvesPoint], _ i: Int) -> SIMD2<Double> {
+        let p = pts[i]
+        if let tx = p.tx, let ty = p.ty { return SIMD2(tx, ty) }
+        let a = i > 0 ? pts[i - 1] : p, b = i + 1 < pts.count ? pts[i + 1] : p
+        return SIMD2((b.x - a.x) / 6, (b.y - a.y) / 6)
+    }
+
+    /// The curve as a polyline in the normalised box, 24 samples per smooth segment,
+    /// flattened along the mid-plane where it would cross (`side` start ⇒ y ≤ 0.5).
+    public static func polyline(_ pts: [LatticeWallCurvesPoint], curved: Bool,
+                                side: Side?) -> [SIMD2<Double>] {
+        guard pts.count >= 2 else { return pts.map { SIMD2($0.x, $0.y) } }
+        func clampY(_ y: Double) -> Double {
+            switch side { case .none: return y; case .start: return min(y, 0.5); case .end: return max(y, 0.5) }
+        }
+        var out = [SIMD2(pts[0].x, clampY(pts[0].y))]
+        for i in 0..<(pts.count - 1) {
+            let p0 = SIMD2(pts[i].x, pts[i].y), p1 = SIMD2(pts[i + 1].x, pts[i + 1].y)
+            if !curved || !pts[i].smooth || !pts[i + 1].smooth {
+                out.append(SIMD2(p1.x, clampY(p1.y))); continue
+            }
+            let t1 = tangent(pts, i), t2 = tangent(pts, i + 1)
+            let c1 = p0 + t1, c2 = p1 - t2
+            let n = 24
+            for k in 1...n {
+                let u = Double(k) / Double(n), v = 1 - u
+                let q = v*v*v*p0 + 3*v*v*u*c1 + 3*v*u*u*c2 + u*u*u*p1
+                out.append(SIMD2(q.x, clampY(q.y)))
+            }
+        }
+        return out
+    }
+
     public enum Side: String, Codable, Sendable { case start, end }
-    public func y(at x: Double, side: Side) -> Double { side == .start ? 0 : end(at: x) }
+
+    /// y of a side's curve at x (0…1): the polyline's first crossing of x, its ends
+    /// held beyond the range.
+    public func y(at x: Double, side: Side) -> Double {
+        let pts = side == .start ? start : end
+        let curved = side == .start ? curveStart : curveEnd
+        let poly = LatticeWallCurves.polyline(pts, curved: curved, side: side)
+        guard let first = poly.first, let last = poly.last else { return side == .start ? 0 : 1 }
+        if x <= first.x { return first.y }
+        if x >= last.x { return last.y }
+        for i in 0..<(poly.count - 1) {
+            let a = poly[i], b = poly[i + 1]
+            if (a.x <= x && x <= b.x) || (b.x <= x && x <= a.x) {
+                let d = b.x - a.x
+                let t = abs(d) < 1e-12 ? 0 : (x - a.x) / d
+                return a.y + (b.y - a.y) * t
+            }
+        }
+        return last.y
+    }
 }
+
 
 /// ★ THE DEPTHS A WALL CAN ACTUALLY BE LATTICED TO (his 2026-09-21: "the cell sizes would
 /// never *not* equal a divisible of the whole wall"). On an octet wall the cell is fitted
@@ -163,17 +278,18 @@ public enum LatticeWallDepthSteps {
 /// One wall's own ask: the allowed range in mm from the outer surface (end nil = the
 /// declared depth) and, for `manualGrade`, the profile drawn for it.
 public struct LatticeFaceWallThickness: Codable, Equatable, Sendable {
-    /// how deep the lattice may go from the surface (nil = the declared depth)
+    /// where the lattice may START, in mm from the surface (his 2026-09-21 22:40: "the
+    /// user may have set the face for the lattice, but wanted the lattice to start
+    /// further INSIDE") — 0 = at the surface
+    public var startMM: Double = 0
+    /// how deep the lattice may go (nil = the declared depth)
     public var endMM: Double? = nil
-    /// the drawn steps, for `manualGrade`
+    /// the drawn profile, for `manualGrade`
     public var profile: LatticeWallProfile? = nil
-    public init(endMM: Double? = nil, profile: LatticeWallProfile? = nil) {
-        self.endMM = endMM; self.profile = profile
+    public init(startMM: Double = 0, endMM: Double? = nil, profile: LatticeWallProfile? = nil) {
+        self.startMM = startMM; self.endMM = endMM; self.profile = profile
     }
-    public var isFull: Bool { endMM == nil && profile == nil }
-    // ★ the band always starts AT the surface (his D2, 2026-09-21); a document written
-    // with a `startMM` decodes without it
-    private enum CodingKeys: String, CodingKey { case endMM, profile }
+    public var isFull: Bool { startMM <= 0 && endMM == nil && profile == nil }
 }
 
 /// What the user asked for — the request, not the answer. The default is the whole
@@ -330,9 +446,9 @@ public enum LatticeWallThicknessBuilder {
         guard r.role == .include, r.kind == .face, r.depthMM > 0, !spec.isThrough else { return nil }
         let depth = r.depthMM
         let ask = spec.face(r.selectableKey)
-        // ★ the band starts AT the surface (D2); the allowed depth is the wall's or the ask's
-        let a0 = 0.0
-        let a1 = spec.depthBySim ? depth : min(max(0, ask.endMM ?? depth), depth)
+        // the allowed range, from the outer surface in
+        let a0 = spec.depthBySim ? 0 : min(max(0, ask.startMM), depth * 0.95)
+        let a1 = spec.depthBySim ? depth : min(max(a0, ask.endMM ?? depth), depth)
         let room = max(0, a1 - a0)
         let floorT = min(room, max(0, floorMM))
         // ★ every end lands on a depth the wall can be packed to (D1); the ask is never exceeded
@@ -352,7 +468,8 @@ public enum LatticeWallThicknessBuilder {
                 return .constant(startMM: a0, endMM: a1)
             }
             // ★ the pitch divides a drawn column exactly, so every step edge is a raster edge
-            let colMM = fr.widthMM / Double(max(1, prof.columns))
+            // (curves: the plain pitch — nothing to align)
+            let colMM = prof.isCurves ? fr.widthMM : fr.widthMM / Double(max(1, prof.columns))
             let per = max(1, Int((colMM / max(0.5, fr.widthMM / 96)).rounded(.up)))
             let h = max(0.05, colMM / Double(per))
             // samples at CELL CENTRES, so a nearest read's cell edges are the column edges
@@ -363,11 +480,18 @@ public enum LatticeWallThicknessBuilder {
             for j in 0..<nv { for i in 0..<nu {
                 let uv = origin + SIMD2(Double(i), Double(j)) * h
                 let x = fr.x(at: uv)
-                // the steps are drawn over the WHOLE wall thickness, then held inside the range;
-                // a column drawn at 0 is "no lattice here", not a floor
-                let drawn = prof.end(at: x) * depth
-                let e = drawn <= 1e-9 ? 0 : finish(drawn)
-                starts[j * nu + i] = Float(a0); ends[j * nu + i] = Float(e)
+                // the profile is drawn over the WHOLE wall thickness, then held inside the range;
+                // steps land on the wall's packable depths, curves stay where they were drawn
+                var sv = min(max(prof.start(at: x) * depth, a0), a1)
+                var e = min(max(prof.end(at: x) * depth, a0), a1)
+                if e < sv { swap(&sv, &e) }
+                if let steps = depthSteps, !steps.isEmpty, !prof.isCurves {
+                    sv = min(a1, LatticeWallDepthSteps.snap(sv, steps: steps.filter { $0 <= a1 + 1e-9 } + [0]))
+                    if sv > 0, sv < a0 { sv = a0 }
+                    e = e <= sv + 1e-9 ? sv : min(a1, LatticeWallDepthSteps.snap(e, steps: steps))
+                }
+                if e - sv < floorT, e > sv + 1e-9 { e = min(a1, sv + floorT); sv = max(a0, e - floorT) }
+                starts[j * nu + i] = Float(sv); ends[j * nu + i] = Float(e)
             } }
             return LatticeWallThicknessMap(origin: origin, h: h, nu: nu, nv: nv, starts: starts, ends: ends)
         case .sim, .autoSingle:

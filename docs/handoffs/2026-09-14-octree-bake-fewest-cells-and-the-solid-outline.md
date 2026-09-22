@@ -1058,3 +1058,31 @@ Not yet seen by him.
   when it does, origin_uv and both axes go in explicitly (R1) and end_mm[] with cell_mm
   beside (core note 3). The seeding boost slider stays; untested on a real bake (the ×2
   open never traced — deferred behind the repairs refine).
+- **2026-09-21 22:5x — HIS 22:40 ROUND (images 1–4 + the bake).** (1) THE BAKE NEVER WAITS:
+  `buildStrutScene` no longer queues behind a running bake or the repairs refine — the
+  generation moves and the new bake starts; the running one's picture is dropped on
+  landing (core cannot be interrupted mid-emission, so CPU is shared until it ends);
+  `DIAG organic bake: superseding …`, and `DIAG organic repairs stage: core emission
+  starting` marks stage 2. Measured why the banner never cleared: the 1.71 mm trace has
+  150 847 spans (was 68 197) and stage 2 is core's emission on them; his 22:19 open never
+  finished it. (2) "Exit" vs "Save & Exit": the wizard keeps `openedLattice`; the label
+  and the write follow `previewBakeInputs` differing; the workspace's onExit forces the
+  bake when they differ. (3) THE DRAFT TRAP: Save & Exit sat above the wall editor and
+  left with the draft unsaved ("not drawn yet") — hidden while the editor is up. (4) The
+  gizmo stayed hidden after leaving the wizard with the editor up: `wizardCoversStage`
+  cleared on exit. (5) THE START IS BACK (his image 1: "the user … wanted the lattice to
+  start further INSIDE"): `startMM` restored on the face ask, both fields in the wizard
+  (arrows walk the packable depths on octet walls), a0 = startMM in the builder. This
+  REVERSES D2 as sent to core — tell core. (6) ORGANIC DRAWS CURVES AGAIN: the design's
+  editor reinstated as `LatticeWallCurveEditor` on `LatticeWallCurves` (the old profile
+  struct, verbatim); cell-based lattices keep the steps editor, now with TWO staircases —
+  the start in the outer half (≤ 50 %), the end in the inner (≥ 50 %), painted by the half
+  touched (his rule). `LatticeWallProfile` = `starts/ends` steps + optional `curves`;
+  old curve JSON decodes AS curves (points without `smooth` tolerated). The slab mesh
+  extrudes each cell from its start to its end with risers against the neighbour's band.
+  (7) THE FLOATING BEAMS (image 3): `DIAG organic span census` — spans by kind (curve
+  segments vs connectors, the bridge emits curves first then connectors), length p50/p95,
+  and how many have BOTH ends free (no other span end within 0.25 mm) — read it on the
+  next organic open before deciding; the 1.71 mm trace has 72 483 connectors (was 11 704)
+  at R = connect_ratio × 1.71 mm. Tests: `LatticeWallThicknessTests` 12/12 (+15
+  neighbours). Full suite on 604736ae: 2483 tests, the same 5 pre-existing failures.
