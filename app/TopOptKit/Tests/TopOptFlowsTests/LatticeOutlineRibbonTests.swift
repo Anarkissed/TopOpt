@@ -102,4 +102,31 @@ final class LatticeOutlineRibbonTests: XCTestCase {
         let r = square(10, ccw: true)
         XCTAssertEqual(LatticeOutlineRibbon.build(regions: [r], widthMM: 0) { _, _ in 5 }.vertexCount, 0)
     }
+
+    /// ★ THE BEAM NEVER LEAVES THE PART (his 2026-09-22): a grown region's beam moves
+    /// outward only where material lies beyond the edge; open edges keep the true outline;
+    /// every non-seam edge still gets its beam, starting at the part's surface.
+    func testAGrownRegionsBeamMovesOutOnlyWhereMaterialLiesBeyondTheEdge() {
+        let r = square(10, ccw: true, offset: 0.5)
+        func rings(_ m: LatticeOutlineRibbon.Mesh) -> Set<Int> {
+            var out = Set<Int>()
+            for i in 0..<m.vertexCount {
+                let p = SIMD3<Double>(Double(m.interleaved[i * 6]), Double(m.interleaved[i * 6 + 1]), Double(m.interleaved[i * 6 + 2]))
+                let rel = p - r.origin
+                out.insert(Int((max(abs(rel.x), abs(rel.z)) * 100).rounded()))
+            }
+            return out
+        }
+        let all = LatticeOutlineRibbon.build(regions: [r], widthMM: 1.0) { _, _ in 3 }
+        let air = LatticeOutlineRibbon.build(regions: [r], widthMM: 1.0, attached: { _, _ in false }) { _, _ in 3 }
+        XCTAssertEqual(air.vertexCount, all.vertexCount, "every edge still has its beam")
+        XCTAssertEqual(rings(air), [1000, 900], "air beyond ⇒ the beam stays on the true outline")
+        let solid = LatticeOutlineRibbon.build(regions: [r], widthMM: 1.0, attached: { _, _ in true }) { _, _ in 3 }
+        XCTAssertEqual(rings(solid), [1050, 950], "material beyond ⇒ the beam follows the grown region")
+        // the surface 1.5 mm below the plane: every start vertex sits at y = 20 + 1.5, the far end stays at 3
+        let sunk = LatticeOutlineRibbon.build(regions: [r], widthMM: 1.0, surfaceAt: { _, _ in 1.5 }) { _, _ in 3 }
+        var ys = Set<Int>()
+        for i in 0..<sunk.vertexCount { ys.insert(Int((sunk.interleaved[i * 6 + 1] * 100).rounded())) }
+        XCTAssertEqual(ys, [2150, 2300], "the beam runs from the surface (21.5) to the depth (23)")
+    }
 }

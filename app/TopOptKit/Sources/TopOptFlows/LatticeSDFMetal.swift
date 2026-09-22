@@ -3716,7 +3716,34 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
             widths[i] = LatticeMeasuredRegionWidth.wallWidthFieldAlongNormalMM(
                 region: r, occupancy: occ, partSDF: scene.partSDF)
         }
-        let mesh = LatticeOutlineRibbon.build(regions: scene.regions, widthMM: width) { ri, p in
+        // ★ THE BEAM NEVER LEAVES THE PART (his 2026-09-22 14:55): a grown region's beam
+        // moves outward only where the part's own material (the whole solid, not the
+        // prism) lies beyond the edge; and the beam starts at the part's surface under
+        // the facet plane, never on the plane.
+        let solid = scene.solidOccupancy
+        func solidAt(_ p: SIMD3<Double>) -> Bool {
+            let g = (SIMD3<Float>(p) - solid.origin) / solid.spacing
+            let i = Int(g.x.rounded()), j = Int(g.y.rounded()), k = Int(g.z.rounded())
+            for dk in -1...1 { for dj in -1...1 { for di in -1...1 {
+                let a = i + di, b = j + dj, c = k + dk
+                guard a >= 0, b >= 0, c >= 0, a < solid.nx, b < solid.ny, c < solid.nz else { continue }
+                if solid.values[(c * solid.ny + b) * solid.nx + a] > 0.5 { return true }
+            }}}
+            return false
+        }
+        var census: [Int: (Int, Int, Int)] = [:]
+        let mesh = LatticeOutlineRibbon.build(
+            regions: scene.regions, widthMM: width,
+            attached: { _, p in solidAt(p) },
+            surfaceAt: { ri, p in
+                let n = LatticeRegionMask.unit(scene.regions[ri].normal)
+                var s = 0.0
+                while s <= 4.0 { if solidAt(p + n * s) { return s }; s += 0.25 }
+                return 0
+            },
+            census: { ri, a, o, s in
+                let c = census[ri] ?? (0, 0, 0); census[ri] = (c.0 + a, c.1 + o, c.2 + s)
+            }) { ri, p in
             let r = scene.regions[ri]
             guard let w = widths[ri], w.count == occ.count else { return r.depthMM }
             let g = (SIMD3<Float>(p) - occ.origin) / occ.spacing
@@ -3729,6 +3756,11 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
             }}}
             return best > 0 ? best : r.depthMM
         }
+        NSLog("DIAG outline beam (grown outward only where attached; none on seams): %@ · %d verts",
+              census.keys.sorted().map { ri -> String in
+                  let c = census[ri]!
+                  return "r\(ri) f\(scene.regions[ri].faceID ?? -1): attached \(c.0) open \(c.1) seam \(c.2)"
+              }.joined(separator: " | "), mesh.vertexCount)
         return mesh.vertexCount > 0 ? mesh : nil
     }
 

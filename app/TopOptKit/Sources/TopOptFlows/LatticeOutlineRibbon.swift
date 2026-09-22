@@ -43,16 +43,19 @@ public enum LatticeOutlineRibbon {
     /// offset copy runs backwards) collapses to the corner its neighbours make — so
     /// the ring never crosses itself, whatever the corner angle or the segment
     /// lengths (his 25 mm beam overlapped itself at two acute corners, 2026-09-16).
-    static func offsetRing(_ loop: [SIMD2<Double>], by d: Double, seams: [Bool] = []) -> [SIMD2<Double>] {
+    /// `edgeOffset[i]`, when given, replaces `d` on edge i (a seam still takes 0).
+    static func offsetRing(_ loop: [SIMD2<Double>], by d: Double, seams: [Bool] = [],
+                           edgeOffset: [Double]? = nil) -> [SIMD2<Double>] {
         let m = loop.count
         guard m >= 3 else { return loop }
-        if abs(d) < 1e-9 { return loop }
+        if abs(d) < 1e-9, edgeOffset == nil { return loop }
         let n = edgeInwardNormals(loop)
         // Offset lines: point + direction per edge.
         var lineP: [SIMD2<Double>] = [], lineD: [SIMD2<Double>] = []
         for i in 0..<m {
             // ★ a seam edge is not offset: it is where the neighbouring prism continues
-            lineP.append(loop[i] + n[i] * (i < seams.count && seams[i] ? 0 : d))
+            let di = (i < seams.count && seams[i]) ? 0 : (edgeOffset.flatMap { i < $0.count ? $0[i] : nil } ?? d)
+            lineP.append(loop[i] + n[i] * di)
             lineD.append(loop[(i + 1) % m] - loop[i])
         }
         func meet(_ a: Int, _ b: Int) -> SIMD2<Double> {
@@ -131,7 +134,20 @@ public enum LatticeOutlineRibbon {
     /// `depthAt(regionIndex, point)` answers how deep the beam runs into the part at a
     /// point on the outline (the wall's thickness there); it is clamped to the
     /// region's depth.
+    /// ★ THE BEAM NEVER LEAVES THE PART (his 2026-09-22 14:55, image 1: "the rim has now
+    /// come on the outside of the model"). A grown region (positive expand) reaches beyond
+    /// the outline; where the part has material there (`attached(regionIndex, p)` true at a
+    /// point just beyond the edge, half-way down) the beam follows the grown boundary, and
+    /// where there is only air the beam stays on the true outline. The beam itself runs
+    /// along every outline edge that is not a seam — his curved inner rim stays; the
+    /// corner between two latticed walls (a seam) gets none. `surfaceAt(regionIndex, p)`
+    /// is the depth from the prism's plane to the part's surface at an outline vertex — a
+    /// curved facet's plane sits up to a sagitta outside the surface, and a beam started
+    /// on the plane floated in the air.
     public static func build(regions: [LatticeRegionSpec], widthMM: Double,
+                             attached: ((Int, SIMD3<Double>) -> Bool)? = nil,
+                             surfaceAt: ((Int, SIMD3<Double>) -> Double)? = nil,
+                             census: ((Int, _ attached: Int, _ open: Int, _ seams: Int) -> Void)? = nil,
                              depthAt: (Int, SIMD3<Double>) -> Double) -> Mesh {
         var mesh = Mesh()
         guard widthMM > 0 else { return mesh }
@@ -165,12 +181,23 @@ public enum LatticeOutlineRibbon {
                 // ★ SIGN (review 2026-09-22 #19): `offsetRing` offsets INWARD by d, while
                 // membership is `signedDistance <= inPlaneOffsetMM`, i.e. a positive expand
                 // grows the region OUTWARD — so the rings take the NEGATED offset.
-                let outer = offsetRing(loop, by: -region.inPlaneOffsetMM, seams: seams)
-                let inner = offsetRing(loop, by: -region.inPlaneOffsetMM + widthMM, seams: seams)
+                let en = edgeInwardNormals(loop)
+                // ★ outward (a grown region) only where material lies beyond the edge
+                var nAttached = 0, nOpen = 0, nSeam = 0
+                let edgeOuter: [Double] = (0..<m).map { i in
+                    if i < seams.count, seams[i] { nSeam += 1; return 0 }
+                    let d = -region.inPlaneOffsetMM
+                    guard d < 0, let attached else { nAttached += 1; return d }
+                    let probe = at((loop[i] + loop[(i + 1) % m]) * 0.5 - en[i] * (Swift.max(0, -d) + 1.0), 0.5 * region.depthMM)
+                    if attached(ri, probe) { nAttached += 1; return d }
+                    nOpen += 1; return 0
+                }
+                census?(ri, nAttached, nOpen, nSeam)
+                let outer = offsetRing(loop, by: -region.inPlaneOffsetMM, seams: seams, edgeOffset: edgeOuter)
+                let inner = offsetRing(loop, by: -region.inPlaneOffsetMM + widthMM, seams: seams, edgeOffset: edgeOuter.map { $0 + widthMM })
                 // Per-vertex inward direction for the smooth wall normals: from the
                 // outer ring to the inner one, or the edge normals' bisector where the
                 // two rings meet.
-                let en = edgeInwardNormals(loop)
                 let miter: [SIMD2<Double>] = (0..<m).map { i in
                     let v = inner[i] - outer[i]
                     let l = simd_length(v)
@@ -178,6 +205,11 @@ public enum LatticeOutlineRibbon {
                     let b = en[(i + m - 1) % m] + en[i]
                     let lb = simd_length(b)
                     return lb > 1e-6 ? b / lb : en[i]
+                }
+                // the part's surface under each outline vertex: the beam starts there
+                let start = (0..<m).map { i -> Double in
+                    guard let f = surfaceAt else { return 0 }
+                    return Swift.max(0, f(ri, at(outer[i], 0)))
                 }
                 let depth = (0..<m).map { i -> Double in
                     let mid = at((outer[i] + inner[i]) * 0.5, 1.0)
@@ -232,9 +264,10 @@ public enum LatticeOutlineRibbon {
                         continue
                     }
                     let j = (i + 1) % m
-                    let oi0 = at(outer[i], 0), oj0 = at(outer[j], 0)
+                    let si = Swift.min(start[i], depth[i]), sj = Swift.min(start[j], depth[j])
+                    let oi0 = at(outer[i], si), oj0 = at(outer[j], sj)
                     let oi1 = at(outer[i], depth[i]), oj1 = at(outer[j], depth[j])
-                    let ii0 = at(inner[i], 0), ij0 = at(inner[j], 0)
+                    let ii0 = at(inner[i], si), ij0 = at(inner[j], sj)
                     let ii1 = at(inner[i], depth[i]), ij1 = at(inner[j], depth[j])
                     // Smooth per-vertex normals along the sweep: the outer wall faces out
                     // of the prism, the inner wall faces the lattice.

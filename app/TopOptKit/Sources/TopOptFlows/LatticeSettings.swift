@@ -194,6 +194,9 @@ public struct LatticeRegionSpec: Equatable, Sendable {
     /// corner), negative where they converge. The prism flares to the bisector plane by
     /// depth × tilt, so adjacent prisms meet with no wedge of material and no overlap.
     public var outlineSeamTilt: [[Double]] = []
+    /// per loop, per edge: the depth of the prism across a seam (0 = none) — the bisector
+    /// flare applies only as deep as the neighbour's prism goes
+    public var outlineSeamDepthMM: [[Double]] = []
     /// the mesh face id this region came from (the wire carries the RUN id in `faceID`)
     public var rawFaceID: FaceID? = nil
     /// ★ THE IN-PLANE REACH, kept as its own number instead of being folded into

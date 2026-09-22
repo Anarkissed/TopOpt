@@ -98,7 +98,7 @@ public enum LatticeRegionMask {
             if !region.outlineLoops.isEmpty {
                 if !region.outlineSeamTilt.isEmpty,
                    LatticeFaceOutline.insideWithFlare(uv, loops: region.outlineLoops, seams: region.outlineSeams,
-                                                      tilts: region.outlineSeamTilt, depth: s) { return true }
+                                                      tilts: region.outlineSeamTilt, caps: region.outlineSeamDepthMM, depth: s) { return true }
                 return LatticeFaceOutline.signedDistance(uv, loops: region.outlineLoops, seams: region.outlineSeams)
                     <= region.inPlaneOffsetMM + reach
             }
@@ -207,7 +207,7 @@ public enum LatticeRegionMask {
                 // ★ the flared seams (2026-09-22): the sign follows the bisector planes
                 if !region.outlineSeamTilt.isEmpty {
                     let inside = LatticeFaceOutline.insideWithFlare(uv, loops: region.outlineLoops, seams: region.outlineSeams,
-                                                                    tilts: region.outlineSeamTilt, depth: Swift.max(0, s))
+                                                                    tilts: region.outlineSeamTilt, caps: region.outlineSeamDepthMM, depth: Swift.max(0, s))
                     sd = inside ? -abs(sd) : abs(sd)
                 }
                 inPlane = sd - region.inPlaneOffsetMM

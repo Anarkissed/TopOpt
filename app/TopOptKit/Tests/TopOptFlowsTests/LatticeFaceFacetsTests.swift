@@ -208,4 +208,72 @@ final class LatticeSeamFlareTests: XCTestCase {
         XCTAssertGreaterThan(count, 0)
         XCTAssertEqual(signs.count, 1, "★ one curvature ⇒ one sign everywhere")
     }
+
+    /// ★ A SEAM BY GEOMETRY (his 2026-09-22 14:55): his STEP tessellation shares no edge
+    /// vertices between adjacent faces, so the raw neighbour is nil on both sides; two
+    /// latticed walls meeting at a corner are still seams — the corner edge of one lies
+    /// along the (differently split) corner edge of the other.
+    func testTwoLatticedWallsMeetingAtACornerAreSeamsEvenWhenTheMeshSharesNoEdge() {
+        var a = LatticeRegionSpec(role: .include, kind: .face)
+        a.rawFaceID = 1; a.faceID = 1; a.origin = SIMD3(0, 0, 10); a.normal = SIMD3(0, 0, -1); a.depthMM = 8
+        a.outlineLoops = [[SIMD2(-10, -10), SIMD2(10, -10), SIMD2(10, 10), SIMD2(-10, 10)]]
+        var b = LatticeRegionSpec(role: .include, kind: .face)
+        b.rawFaceID = 2; b.faceID = 2; b.origin = SIMD3(10, 0, 0); b.normal = SIMD3(-1, 0, 0); b.depthMM = 6
+        // b's outline splits the shared corner edge (world x = 10, z = 10) into three
+        let (bu, bv) = LatticeRegionMask.basisForTests(LatticeRegionMask.unit(b.normal))
+        func uv(_ p: SIMD3<Double>) -> SIMD2<Double> { let d = p - b.origin; return SIMD2(simd_dot(d, bu), simd_dot(d, bv)) }
+        b.outlineLoops = [[uv(SIMD3(10, -10, -10)), uv(SIMD3(10, 10, -10)), uv(SIMD3(10, 10, 10)),
+                           uv(SIMD3(10, 3, 10)), uv(SIMD3(10, -4, 10)), uv(SIMD3(10, -10, 10))]]
+        var out = [a, b]
+        LatticeRegionEmission.finishSeams(&out, runFaceID: { Int($0) })
+        let sa = out[0].outlineSeams.first ?? [], sb = out[1].outlineSeams.first ?? []
+        XCTAssertEqual(sa.filter { $0 }.count, 1, "a's one corner edge is a seam: \(sa)")
+        XCTAssertEqual(sb.filter { $0 }.count, 3, "b's three corner pieces are seams: \(sb)")
+        XCTAssertEqual(out[0].outlineSeamFaces.first?.compactMap { $0 }, [2])
+        XCTAssertEqual(Set(out[1].outlineSeamFaces.first?.compactMap { $0 } ?? []), [1])
+        for t in (out[0].outlineSeamTilt.first ?? []) where abs(t) > 1e-9 { XCTAssertEqual(abs(t), 1, accuracy: 1e-6, "90° ⇒ tan 45°") }
+        // the other edges are not seams, and a far-away wall is not one either
+        var c = b; c.rawFaceID = 3; c.faceID = 3; c.origin = SIMD3(60, 0, 0)
+        var out2 = [a, c]
+        LatticeRegionEmission.finishSeams(&out2, runFaceID: { Int($0) })
+        XCTAssertTrue(out2[0].outlineSeams.isEmpty, "no seam to a wall 50 mm away")
+    }
+
+    /// ★ A SEAM BY THE PRISM BEYOND THE EDGE (his stand, 2026-09-22 15:25): a fillet face
+    /// separates two latticed walls, so neither mesh edges nor outline geometry meet — but
+    /// the other wall's prism lies just beyond the edge. Opposite walls never pair.
+    func testTwoWallsJoinedThroughAFilletAreSeamsBecauseTheOthersPrismLiesBeyondTheEdge() {
+        // wall A: the +z face of a block, its outline stopping 2 mm short of the corner (the fillet)
+        var a = LatticeRegionSpec(role: .include, kind: .face)
+        a.rawFaceID = 1; a.faceID = 1; a.origin = SIMD3(0, 0, 10); a.normal = SIMD3(0, 0, -1); a.depthMM = 8
+        a.outlineLoops = [[SIMD2(-10, -10), SIMD2(8, -10), SIMD2(8, 10), SIMD2(-10, 10)]]
+        // wall B: the +x face (x = 10), 20 deep, its outline also 2 mm short of the corner
+        var b = LatticeRegionSpec(role: .include, kind: .face)
+        b.rawFaceID = 2; b.faceID = 2; b.origin = SIMD3(10, 0, 0); b.normal = SIMD3(-1, 0, 0); b.depthMM = 20
+        let (bu, bv) = LatticeRegionMask.basisForTests(LatticeRegionMask.unit(b.normal))
+        func uv(_ p: SIMD3<Double>) -> SIMD2<Double> { let d = p - b.origin; return SIMD2(simd_dot(d, bu), simd_dot(d, bv)) }
+        b.outlineLoops = [[uv(SIMD3(10, -10, -10)), uv(SIMD3(10, 10, -10)), uv(SIMD3(10, 10, 8)), uv(SIMD3(10, -10, 8))]]
+        var out = [a, b]
+        LatticeRegionEmission.finishSeams(&out, runFaceID: { Int($0) })
+        XCTAssertEqual(out[0].outlineSeams.first?.filter { $0 }.count, 1, "A's edge toward the corner is a seam: \(out[0].outlineSeams)")
+        XCTAssertEqual(out[1].outlineSeams.first?.filter { $0 }.count, 1, "B's edge toward the corner is a seam: \(out[1].outlineSeams)")
+        // the cap: the neighbour's depth less the probe gap at which its prism was found (0.5 mm)
+        XCTAssertEqual(out[0].outlineSeamDepthMM.first?.max(), 19.5, "A's seam is capped at B's depth less the gap")
+        XCTAssertEqual(out[1].outlineSeamDepthMM.first?.max(), 7.5, "B's seam is capped at A's depth less the gap")
+        // opposite walls in a thin leg: never a seam
+        var c = a; c.rawFaceID = 3; c.faceID = 3; c.origin = SIMD3(0, 0, 0); c.normal = SIMD3(0, 0, 1); c.depthMM = 8
+        var out2 = [a, c]
+        LatticeRegionEmission.finishSeams(&out2, runFaceID: { Int($0) })
+        XCTAssertTrue(out2[0].outlineSeams.isEmpty && out2[1].outlineSeams.isEmpty, "opposite walls never pair")
+    }
+
+    /// The cap on the flare: beyond the neighbour's depth the prism keeps its full width.
+    func testTheFlareIsCappedAtTheNeighboursDepth() {
+        let square: [SIMD2<Double>] = [SIMD2(-10, -10), SIMD2(10, -10), SIMD2(10, 10), SIMD2(-10, 10)]
+        let seams = [[false, true, false, false]], tilts = [[0.0, -1.0, 0.0, 0.0]]
+        // converging 45° seam, neighbour 6 mm deep: at depth 15 the cut is 6, not 15
+        XCTAssertFalse(LatticeFaceOutline.insideWithFlare(SIMD2(9, 0), loops: [square], seams: seams, tilts: tilts, caps: [[0, 6, 0, 0]], depth: 15))
+        XCTAssertTrue(LatticeFaceOutline.insideWithFlare(SIMD2(3, 0), loops: [square], seams: seams, tilts: tilts, caps: [[0, 6, 0, 0]], depth: 15), "7 mm in is kept with the cap")
+        XCTAssertFalse(LatticeFaceOutline.insideWithFlare(SIMD2(3, 0), loops: [square], seams: seams, tilts: tilts, depth: 15), "uncapped, depth 15 cuts 15")
+    }
 }

@@ -272,12 +272,13 @@ public enum LatticeFaceOutline {
     /// (the bisector plane with the neighbouring prism); a point inside the polygon leaves
     /// it when a converging seam's bisector has cut it off. `s` is the depth along the normal.
     public static func insideWithFlare(_ p: SIMD2<Double>, loops: [Loop], seams: [[Bool]],
-                                       tilts: [[Double]], depth s: Double) -> Bool {
+                                       tilts: [[Double]], caps: [[Double]] = [], depth s: Double) -> Bool {
         var inside = contains(p, loops: loops)
         guard s > 0, !tilts.isEmpty else { return inside }
         for (l, loop) in loops.enumerated() {
             let sm = l < seams.count ? seams[l] : []
             let tl = l < tilts.count ? tilts[l] : []
+            let cl = l < caps.count ? caps[l] : []
             let m = loop.count
             guard m >= 3 else { continue }
             // the polygon's winding decides which side of an edge is outside
@@ -293,7 +294,10 @@ public enum LatticeFaceOutline {
                 // outward normal of this edge: right of the direction for CCW, left for CW
                 let nOut = ccw ? SIMD2(d.y, -d.x) / sqrt(l2) : SIMD2(-d.y, d.x) / sqrt(l2)
                 let out = simd_dot(p - a, nOut)          // > 0 outside this edge
-                let flare = s * tl[i]
+                // ★ only as deep as the neighbour's prism (2026-09-22 15:30): a 20 mm prism
+                // cut by a 12 mm neighbour's bisector past 12 mm lost a strip nobody owned
+                let cap = i < cl.count ? cl[i] : 0
+                let flare = (cap > 0 ? Swift.min(s, cap) : s) * tl[i]
                 if flare > 0, !inside, out >= 0, out <= flare { inside = true }
                 if flare < 0, inside, out <= 0, -out <= -flare { inside = false }
             }

@@ -422,8 +422,10 @@ public enum LatticeRegionEmission {
             let (bu, bv) = LatticeRegionMask.basis(n)
             return { uv in r.origin + bu * uv.x + bv * uv.y }
         }
+        var isFace = [Bool](repeating: false, count: out.count)
         for (ri, r) in out.enumerated() where r.role == .include && r.kind == .face {
             guard let w = worldOf(r) else { continue }
+            isFace[ri] = true
             for loop in r.outlineLoops { for i in loop.indices { edges.append(Edge(a: w(loop[i]), b: w(loop[(i + 1) % loop.count]), region: ri)) } }
         }
         // ★ BY RAW FACE, THEN NEAREST (2026-09-22): the world edge is REBUILT from the
@@ -441,31 +443,111 @@ public enum LatticeRegionEmission {
             }
             return best?.0
         }
-        for ri in out.indices where !out[ri].outlineSeamFaces.isEmpty {
-            guard let w = worldOf(out[ri]), let own = out[ri].rawFaceID else { continue }
+        // ★★ BY GEOMETRY WHEN THE MESH SHARES NO EDGE (his 2026-09-22 14:55, image 3: "the
+        // side one should be removed entirely"). His STEP tessellation does not share edge
+        // vertices between adjacent faces — face 15 reported 0 seams against face 23, the
+        // facets only their facet-to-facet ones — so the corner between two latticed walls
+        // rimmed on both sides. An outline edge that lies ALONG an edge of another latticed
+        // region (parallel within 6°, its midpoint within 1.5 mm of that segment and inside
+        // its span, or the reverse) is a seam to that region.
+        func geometricNeighbour(of a: SIMD3<Double>, _ b: SIMD3<Double>, notIn ri: Int) -> Int? {
+            let dA = b - a
+            let lA = simd_length(dA)
+            guard lA > 1e-9 else { return nil }
+            let uA = dA / lA, mA = 0.5 * (a + b)
+            var best: (Int, Double)? = nil
+            for e in edges where e.region != ri && out[e.region].rawFaceID != out[ri].rawFaceID {
+                let dB = e.b - e.a
+                let lB = simd_length(dB)
+                guard lB > 1e-9 else { continue }
+                let uB = dB / lB
+                guard abs(simd_dot(uA, uB)) > 0.995 else { continue }
+                func segDist(_ p: SIMD3<Double>, _ c: SIMD3<Double>, _ d: SIMD3<Double>) -> (Double, Double) {
+                    let cd = d - c; let l2 = simd_dot(cd, cd)
+                    let t = l2 > 1e-12 ? simd_dot(p - c, cd) / l2 : 0
+                    let q = c + cd * Swift.max(0, Swift.min(1, t))
+                    return (simd_length(p - q), t)
+                }
+                let (d1, t1) = segDist(mA, e.a, e.b)
+                let (d2, t2) = segDist(0.5 * (e.a + e.b), a, b)
+                let overlap = (t1 >= -0.05 && t1 <= 1.05) || (t2 >= -0.05 && t2 <= 1.05)
+                let dist = Swift.min(d1, d2)
+                if overlap, dist <= 1.5, best == nil || dist < best!.1 { best = (e.region, dist) }
+            }
+            return best?.0
+        }
+        // ★★★ BY THE PRISM BEYOND THE EDGE (his 2026-09-22 14:55, measured on the stand at
+        // 15:25): face 23 and the flat walls are not adjacent at all — a fillet face lies
+        // between them — yet a probe 0.5 mm beyond face 23's edge, half-way down, is
+        // already inside face 15's or face 2's prism on every non-facet edge. "Both sides
+        // latticed" is a question about PRISMS, not mesh edges: an outline edge whose
+        // outward neighbourhood (0.5, 1 and 2 mm out, at half the shallower depth) lies
+        // inside another latticed region's prism is a seam to it. Opposite walls (normals
+        // more than 150° apart) never pair — their prisms can overlap in a thin leg with
+        // no corner between them.
+        func prismNeighbour(mid uv: SIMD2<Double>, outUV: SIMD2<Double>, region ri: Int) -> (Int, Double)? {
+            let r = out[ri]
+            let nA = LatticeRegionMask.unit(r.normal)
+            let (bu, bv) = LatticeRegionMask.basis(nA)
+            for off in [0.5, 1.0, 2.0] {
+                let q = uv + outUV * off
+                for rj in out.indices where rj != ri && isFace[rj] && out[rj].rawFaceID != r.rawFaceID {
+                    let o = out[rj]
+                    let nB = LatticeRegionMask.unit(o.normal)
+                    guard simd_dot(nA, nB) > cos(150 * Double.pi / 180) else { continue }
+                    let s = 0.5 * Swift.min(r.depthMM, o.depthMM)
+                    let p = r.origin + bu * q.x + bv * q.y + nA * s
+                    if LatticeRegionMask.containsWholePrism(p, region: o) { return (rj, off) }
+                }
+            }
+            return nil
+        }
+        for ri in out.indices where isFace[ri] {
+            guard let w = worldOf(out[ri]) else { continue }
+            let own = out[ri].rawFaceID
             let nA = LatticeRegionMask.unit(out[ri].normal)
-            var seams: [[Bool]] = [], faces: [[Int?]] = [], tilts: [[Double]] = []
+            let (bu, bv) = LatticeRegionMask.basis(nA)
+            var seams: [[Bool]] = [], faces: [[Int?]] = [], tilts: [[Double]] = [], capsAll: [[Double]] = []
             var any = false
             for (l, loop) in out[ri].outlineLoops.enumerated() {
                 let raw = l < out[ri].outlineSeamFaces.count ? out[ri].outlineSeamFaces[l] : []
                 var sl = [Bool](repeating: false, count: loop.count)
                 var fl = [Int?](repeating: nil, count: loop.count)
                 var tl = [Double](repeating: 0, count: loop.count)
+                var cl = [Double](repeating: 0, count: loop.count)
                 // the polygon's winding, for the outward edge direction
                 var area = 0.0
                 for i in loop.indices { let a = loop[i], b = loop[(i + 1) % loop.count]; area += a.x * b.y - b.x * a.y }
                 let ccw = area > 0
                 for i in loop.indices {
-                    guard i < raw.count, let nbRaw = raw[i], nbRaw == Int(own) || emittedRaw.contains(FaceID(nbRaw)) else { continue }
                     let a3 = w(loop[i]), b3 = w(loop[(i + 1) % loop.count])
-                    guard let nj = neighbourRegion(of: a3, b3, rawFace: nbRaw, notIn: ri) else { continue }
+                    var nj: Int? = nil
+                    var gap = 0.0            // how far beyond the edge the neighbour's prism starts (≤)
+                    if i < raw.count, let nbRaw = raw[i], let own, nbRaw == Int(own) || emittedRaw.contains(FaceID(nbRaw)) {
+                        nj = neighbourRegion(of: a3, b3, rawFace: nbRaw, notIn: ri)
+                    }
+                    if nj == nil { nj = geometricNeighbour(of: a3, b3, notIn: ri) }
+                    if nj == nil {
+                        let d2 = loop[(i + 1) % loop.count] - loop[i]
+                        let l2 = simd_length(d2)
+                        if l2 > 1e-9 {
+                            let outUV = (ccw ? SIMD2(d2.y, -d2.x) : SIMD2(-d2.y, d2.x)) / l2
+                            if let (j, off) = prismNeighbour(mid: (loop[i] + loop[(i + 1) % loop.count]) * 0.5, outUV: outUV, region: ri) {
+                                nj = j; gap = off
+                            }
+                        }
+                    }
+                    guard let nj else { continue }
                     sl[i] = true; any = true
-                    fl[i] = runFaceID(FaceID(nbRaw))
+                    // the flare yields to the neighbour only as far as its prism reaches from
+                    // THIS edge: its depth less the gap (a fillet) between the two — short of
+                    // that the two prisms overlap, never a strip nobody owns
+                    cl[i] = Swift.max(0.5, out[nj].depthMM - gap)
+                    fl[i] = out[nj].rawFaceID.map { runFaceID($0) } ?? out[nj].faceID
                     // the tilt: half the dihedral between the two inward normals, signed by
                     // whether the neighbour's normal leans away from this facet (diverging)
                     let nB = LatticeRegionMask.unit(out[nj].normal)
                     let d2 = loop[(i + 1) % loop.count] - loop[i]
-                    let (bu, bv) = LatticeRegionMask.basis(nA)
                     let eIn = bu * d2.x + bv * d2.y
                     guard simd_length(eIn) > 1e-9 else { continue }
                     let eDir = simd_normalize(eIn)
@@ -479,12 +561,14 @@ public enum LatticeRegionEmission {
                     let sign: Double = simd_dot(nB, eOut) > 0 ? 1 : -1
                     tl[i] = sign * tan(half)
                 }
-                seams.append(sl); faces.append(fl); tilts.append(tl)
+                seams.append(sl); faces.append(fl); tilts.append(tl); capsAll.append(cl)
             }
             if any {
                 out[ri].outlineSeams = seams; out[ri].outlineSeamFaces = faces; out[ri].outlineSeamTilt = tilts
+                out[ri].outlineSeamDepthMM = capsAll
             } else {
                 out[ri].outlineSeams = []; out[ri].outlineSeamFaces = []; out[ri].outlineSeamTilt = []
+                out[ri].outlineSeamDepthMM = []
             }
         }
     }

@@ -1257,3 +1257,35 @@ Not yet seen by him.
   sentinel 1e9, far value 1e3 on return). Bake fingerprint also carries the run's
   outcome (a landed run rebakes the octet). Installed on the sim 05:17:02. Not yet
   judged on device: everything above — he reopens; report only with DIAG numbers.
+- **2026-09-22 14:55–15:45 — HIS THREE IMAGES AFTER THE TEN TIERS: the rim outside the
+  model, "get rid of the rims", the thin back wall.** Measured on his stand offline
+  (`LatticeFace23DepthProbe`, his settings: faces 15/2/23 at 12/13/20 mm, face 23 expand
+  +4.15 — the DIAG regions list) before touching anything:
+  · THE THIN BACK WALL IS THE PART. Face 23's facet prisms keep their full 20 mm in the
+    app's mask (contains-with-flare is flat across all ten depth deciles), but the leg
+    behind the curved face is thin: the big middle facet has 6530 of 15720 prism voxels
+    inside the part, and beyond 8 mm depth only 36 %; the measured wall along its normal
+    is p05 3.44 / p50 18.91 mm. At 100 % depth the lattice is as thick as the material.
+    Also the first 2 mm of every facet prism is mostly air (134 of 1310 voxels) — the
+    facet origin sits at the outermost vertex, a sagitta outside the surface.
+  · THE RIM OUTSIDE THE MODEL = the outline ribbon of the face-23 facets offset OUTWARD
+    by the +4.15 expand into air, and started on the facet plane a sagitta outside the
+    surface. Now: a grown region's beam moves outward only where the PART has material
+    beyond the edge (`LatticeOutlineRibbon.build(attached:)`, per-edge `offsetRing
+    (edgeOffset:)`), and every beam starts at the part's surface (`surfaceAt:`, a 4 mm
+    march along the normal). DIAG `outline beam (grown outward only where attached; none
+    on seams)` per region.
+  · "THE SIDE ONE" = the corner between face 23 and the flat walls, which was NEVER a
+    seam: the probe shows face 23 and face 15/2 are not adjacent at all — a fillet face
+    lies between them (face 15's outline neighbours are f56 ×21, f69 ×30, …; never f23),
+    so neither the mesh-edge match nor a geometric edge match (both tried) could pair
+    them. What IS true: a probe 0.5 mm beyond face 23's edge, half-way down, lies inside
+    face 15's or face 2's prism on every non-facet edge. So a seam is now decided BY THE
+    PRISM BEYOND THE EDGE (`finishSeams` third pass, offsets 0.5/1/2 mm at half the
+    shallower depth, opposite walls >150° apart never pair). On the stand: face 15 25 of
+    63 edges seams, face 2 30 of 75, the facets 17/21/9 of 18/21/10 — the beam mesh 4392
+    → 2040 verts; the L-profile's open edges (his curved inner rim) keep theirs. The
+    flare across a seam is CAPPED at the neighbour's depth less the gap
+    (`outlineSeamDepthMM`): a 20 mm prism cut by a 12 mm neighbour's bisector past 12 mm
+    left a strip nobody owned. Tests: `LatticeSeamFlareTests` (+2), `LatticeOutlineRibbon
+    Tests` (+1). NOT verified on device — he reopens; the DIAG lines carry the census.
