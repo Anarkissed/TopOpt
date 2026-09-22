@@ -1945,6 +1945,20 @@ public enum TopOptKit {
     /// ★ The beam-network certificate under Stepped: the GENERIC key
     /// `structural_certification` (core reply, 2026-09-18; the organic key stays an
     /// alias). Probed as a whole job the way the organic gate is.
+    /// ★ THE FACE FRAME ON THE WIRE (core note 4, his yes of 2026-09-22): a face region
+    /// may carry `frame_u` / `frame_w` — the in-plane axes its `outline_uv` (and the depth
+    /// raster to come) are expressed in, as unit world vectors — so core uses them instead
+    /// of its fitted convention and refuses on disagreement. Accepted only by a core that
+    /// knows the keys; probed as a whole job. FALSE ⇒ the keys are not sent.
+    public static let regionFrameAxesWired: Bool = {
+        var text = latticeProbeBaseJob
+        text.removeLast()
+        text += #", "lattice": {"topology": "octet", "cell_mm": 3.0, "strut_radius_mm": 0.4, "regions": [{"role": "include", "kind": "face", "geometry": {"origin": [0, 0, 0], "normal": [0, 0, 1], "half_u_mm": 5, "half_w_mm": 5, "depth_mm": 4, "outline_uv": [[[-5, -5], [5, -5], [5, 5], [-5, 5]]], "frame_u": [0, -1, 0], "frame_w": [1, 0, 0]}}]}}"#
+        return jobSchemaError(Data(text.utf8)) == nil
+    }()
+    /// ★ Whether the linked core is PR 358 or later — the branch that fixed the sample
+    /// cube's collapse under repairs (6d6177c4). Probed by a key that branch added.
+    public static let coreCarriesTheSampleRepairFix: Bool = gradingSchemaAccepts(key: "stepped_min_tile_mm")
     public static let steppedStructuralCertificationWired: Bool = {
         let text = latticeProbeBaseJob.replacingOccurrences(
             of: #""output":"#,

@@ -775,7 +775,11 @@ public struct LatticeSDFScene {
                         // which discards where this field is negative — SURVIVES
                         // in that band. That surviving band IS the solid wall.
                         // ★ the ERODED list: the band the shell keeps and draws solid
-                        let region = LatticeRegionMask.signedDistance(p, regions: wallRegions)
+                        // ★★★ THE WHOLE PRISM, NOT THE SLAB (his 23:17): this field opens
+                        // the shell and carves the body — the pocket. The slab decides
+                        // only where lattice is PLACED (candidates, cells), never where
+                        // material is kept; a thin or absent slab is air, not a wall.
+                        let region = LatticeRegionMask.signedDistanceWholePrism(p, regions: wallRegions)
                         q.values[i] = Float(Swift.max(-1e3, Swift.min(1e3, region)))
                         // ★ TWO VOXELS PAST THE CAPS, or the trilinear sample in the
                         // first voxel under the face blends with 1e3 and the outline's

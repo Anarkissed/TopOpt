@@ -405,7 +405,16 @@ public enum OrganicSampleCube {
                 layerHeightMM: picks.layerHeightMM, overhangAngleDeg: picks.overhangDeg,
                 transferTies: picks.transferTies, tieSwirl: picks.tieSwirl,
                 shapeFit: picks.shapeFit, shapeFitOnly: picks.shapeFitOnly,
-                anchorAtBoundary: picks.covered, showRepairs: picks.showRepairs,
+                // ★★★ THE REPAIRS NEED THE NEWER CORE (his 2026-09-21 22:55, images 2–3:
+                // "jumbles of nothing with massive beams … This is the same thing we had
+                // ALREADY SOLVED"). Core fixed the sample's collapse — node_merge chaining
+                // and the degenerate filter — in 6d6177c4 (core reply 8), and the app's
+                // emission skip was lifted on that word. That commit lives on PR 358,
+                // which is NOT in the linked xcframework, so the linked core still
+                // collapses the cube. The emission runs only on a core that carries the
+                // fix; until then the traced cube is shown and the row says why.
+                anchorAtBoundary: picks.covered,
+                showRepairs: picks.showRepairs && TopOptKit.coreCarriesTheSampleRepairFix,
                 overhangFillet: picks.overhangFillet)
             input.solidRimMM = picks.solidRimMM
             // ★ the depth-variation TEST, scaled to the cube's own cell

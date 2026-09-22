@@ -2342,7 +2342,24 @@ public final class ProjectModel: ObservableObject {
             selectableDensity: lattice.selectableDensity,
             selectableExpandMM: lattice.selectableExpandMM,
             syntheticWalls: latticeSyntheticWalls(),
+            regionMembers: { [weak self] _, rid in self?.latticeRegionMembers(rid) },
             resolve: resolvedLatticeFace)
+    }
+
+    /// ★ A face region the lattice CAN consume: a union of WHOLE faces (no cuts, no
+    /// parts) — its member faces, each emitted as its own prism under the region's key.
+    /// nil for a cut sector, which is a voxel set the run has no predicate for (PR 331 §6).
+    public func latticeRegionMembers(_ rid: RegionID) -> [FaceID]? {
+        guard let mesh = viewerMesh, let r = faceRegions.region(rid),
+              r.cuts.isEmpty, r.parts.isEmpty else { return nil }
+        let members = FaceRegionGeometry.members(of: r, in: mesh)
+        return members.isEmpty ? nil : members
+    }
+    /// Whether this selectable's lattice choice reaches the run: faces and primitives
+    /// always; a region when it is a union of whole faces (see `latticeRegionMembers`).
+    public func latticeReachesTheRun(_ ref: LatticeSelectableRef) -> Bool {
+        if case let .region(_, rid) = ref { return latticeRegionMembers(rid) != nil }
+        return true
     }
 
     /// A face's exact B-rep geometry as the emission needs it; nil when the face

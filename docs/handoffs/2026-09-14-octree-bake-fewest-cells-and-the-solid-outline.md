@@ -1086,3 +1086,40 @@ Not yet seen by him.
   next organic open before deciding; the 1.71 mm trace has 72 483 connectors (was 11 704)
   at R = connect_ratio × 1.71 mm. Tests: `LatticeWallThicknessTests` 12/12 (+15
   neighbours). Full suite on 604736ae: 2483 tests, the same 5 pre-existing failures.
+- **2026-09-21 23:2x — HIS 23:17 ROUND (images 1–8).** (1) THE SAMPLE CUBE UNDER REPAIRS
+  (images 2–3, "jumbles of nothing with massive beams … ALREADY SOLVED"): core fixed the
+  collapse (node_merge chaining + the degenerate filter) in 6d6177c4 and the app's
+  emission skip was lifted on core reply 8 — but that commit is on PR 358, which is NOT in
+  the linked xcframework (Sep 11), so the linked core still collapses the cube. The sample
+  now runs the emission only when `TopOptKit.coreCarriesTheSampleRepairFix` (probe: the
+  `stepped_min_tile_mm` key PR 358 added) and the row says "Repairs need the newer core
+  (PR 358) — traced cube shown". Rebuilding the xcframework from PR 358 turns it on.
+  (2) The wall editor opened as the cell-based one under Organic (image 4): the pick read
+  `project.lattice.algorithm` (saved), now the wizard's live `model.cellTransition
+  .coreAlgorithm`. (3) THE POCKET (images 5–8: "Walls should never take the place of the
+  empty or too little lattice! Ever!"): the region field that opens the shell and carves
+  the body was the SLAB-aware distance, so where his profile left no band the face stayed
+  closed and the part's own material showed as a wall, and the empty part of a band read
+  as a plate. `LatticeRegionMask.signedDistanceWholePrism` now feeds that field: the
+  declared prism is always removed (air); the slab only places lattice (candidates, cells,
+  the slab mesh keep the slab-aware distance). A start further inside therefore means air
+  in front of the lattice, and less lattice means more air — never a wall. NOTE for core:
+  this supersedes D2/"sealed band" as sent — the region is a pocket, [start, end] is where
+  the lattice sits inside it.
+- **2026-09-22 00:5x — THE THIRD WALL, THE FRAME, AND HIS TWO YESES.** (1) "Face 23 & like
+  it" (a FaceRegion in Group C, role include, depth 12) reached nothing: the emission
+  walked `g.faces` only, never `g.regionIDs`; the row's "Frozen, not latticed" came from
+  `LatticeSelectableRef.latticeReachesTheRun`, false for EVERY region by PR 331 §6's
+  reasoning (a region is a voxel set). A union of WHOLE faces is not: it is N face prisms.
+  `LatticeRegionEmission.regions(regionMembers:)` now emits one prism per member face of
+  each region the group holds, under the REGION's key (role, depth, density, expand,
+  synthetic all keyed "r:<gid>:<rid>"); `ProjectModel.latticeRegionMembers` answers for
+  regions with no cuts and no parts; `latticeReachesTheRun(_:)` on the model replaces the
+  value-only one at both drawer sites. A direct face that is also a member is emitted once.
+  Tests: `LatticeRegionEmissionFaceRegionsTests` (3). (2) His yeses: the pocket stands
+  (core reply 4 sent as drafted); the face frame axes go on the wire — `frame_u`/`frame_w`
+  (unit world vectors of `LatticeRegionMask.basis`, = core's `plane_basis`) beside
+  `outline_uv`, behind the whole-job probe `TopOptKit.regionFrameAxesWired` (false on the
+  linked core ⇒ not sent); `wireDictionary(frameAxes:)` tested (+z face ⇒ u = −world y).
+  (3) The seeding slider is withdrawn from the panel (plumbing stays at ×1); the depth
+  fields are 64 pt and the swatch is gone so "Face 15"/"Face 2" read in full.

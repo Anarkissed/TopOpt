@@ -268,6 +268,15 @@ public enum LatticeRegionEmission {
                                // foci count, ONLY for walls the bake measured as
                                // unloaded with the switch on (ProjectModel resolves).
                                syntheticWalls: [String: Int] = [:],
+                               // ★★★ A GROUP'S FACE REGIONS (his 2026-09-22 00:31: "Face 23
+                               // & like it" carried an include role and a depth and reached
+                               // nothing — the emission walked `g.faces` only). A region
+                               // that is a union of WHOLE faces is N face prisms, each pure
+                               // geometry core already takes; the closure hands back its
+                               // member faces, or nil for a region the run cannot consume
+                               // (a cut sector — a voxel set, PR 331 §6). Every member
+                               // emitted carries the REGION's key, role, depth, density.
+                               regionMembers: (UUID, RegionID) -> [FaceID]? = { _, _ in nil },
                                resolve: (FaceID) -> ResolvedFace?) -> Result {
         var out: [LatticeRegionSpec] = []
         var skipped = 0
@@ -329,6 +338,30 @@ public enum LatticeRegionEmission {
                     out.append(s)
                 } else {
                     skipped += 1
+                }
+            }
+            // ★ the group's face regions: one prism per member face, under the region's own key
+            let direct = Set(g.faces)
+            for rid in g.regionIDs {
+                let ref = LatticeSelectableRef.region(group: g.id, region: rid)
+                guard let role = LatticeSelectableRoles.role(
+                    for: ref, groupRole: groupRole, overrides: selectableRoles) else { continue }
+                guard let members = regionMembers(g.id, rid) else { continue }
+                let depth = selectableDepthMM[ref.key] ?? groupDepth
+                for f in members where !direct.contains(f) {
+                    if let r = resolve(f),
+                       var s = spec(for: r, role: role, depthMM: depth,
+                                    faceID: runFaceID(f),
+                                    expandMM: selectableExpandMM[ref.key] ?? 0) {
+                        s.relativeDensity = density(
+                            for: g.id, role: role, densities: groupDensities,
+                            stated: selectableDensity[ref.key])
+                        s.selectableKey = ref.key
+                        if let n = syntheticWalls[ref.key] { s.syntheticStress = true; s.syntheticFoci = n }
+                        out.append(s)
+                    } else {
+                        skipped += 1
+                    }
                 }
             }
         }

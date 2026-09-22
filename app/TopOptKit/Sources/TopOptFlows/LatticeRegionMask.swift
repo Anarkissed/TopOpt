@@ -226,6 +226,22 @@ public enum LatticeRegionMask {
         }
         return best
     }
+    /// ★★★ THE POCKET (his 2026-09-21 23:17, images 5–8: "Walls should never take the
+    /// place of the empty or too little lattice! Ever!"). A declared region is the whole
+    /// prism of material REMOVED; the slab only says where inside it the lattice goes.
+    /// The shell opens and the body is carved over the WHOLE prism; where the slab is
+    /// thin or absent there is air, never the part's own wall. Readers that PLACE
+    /// lattice (candidates, cells, the slab mesh) keep the slab-aware distance above.
+    public static func signedDistanceWholePrism(_ p: SIMD3<Double>,
+                                                regions: [LatticeRegionSpec]) -> Double {
+        var best = 1e9
+        for r in regions where r.role == .include {
+            var whole = r
+            whole.thicknessMap = nil
+            best = Swift.min(best, signedDistance(p, region: whole))
+        }
+        return best
+    }
 
     /// True when `p` is inside ANY of the regions that will actually be latticed.
     ///

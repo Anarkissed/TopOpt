@@ -753,26 +753,9 @@ public struct LatticeSetupWizard: View {
             .padding(.horizontal, 14).frame(minHeight: 56)
             .background(RoundedRectangle(cornerRadius: 16).fill(Color.white.opacity(0.05))
                 .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(Color.white.opacity(0.09))))
-            // ★ THE SEEDING BOOST (his 2026-09-21): the tracer's own ratios, from the depth settings
-            HStack(spacing: DS.Space.s) {
-                Text("Seeding").dsStyle(DS.TypeScale.caption2).foregroundStyle(DS.Color.textTertiary.color)
-                    .frame(width: 52, alignment: .leading)
-                Slider(value: Binding(get: { model.wallThickness.seedBoost },
-                                      set: { model.wallThickness.seedBoost = ($0 * 10).rounded() / 10; rebuild() }),
-                       in: 1...3, step: 0.1)
-                    .tint(DS.Color.accent.color)
-                    .accessibilityIdentifier("wizard-wall-seed-boost")
-                Text(String(format: "×%.1f", model.wallThickness.seedBoost))
-                    .dsStyle(DS.TypeScale.caption).foregroundStyle(DS.Color.textPrimary.color)
-                    .frame(width: 52, alignment: .trailing)
-            }
-            captionLine("×1 is core's tracer; more offers seeds closer and keeps short curves.",
-                        info: "wall-seeding",
-                        "The tracer offers each new seed one separation off an accepted curve, refuses a "
-                        + "curve within half a separation of another and culls curves shorter than one. "
-                        + "The boost divides the seed and length ratios and lets curves pass closer, never "
-                        + "closer than the printer can lay. Preview only.",
-                        tint: DS.Color.textQuaternary.color)
+            // ★ the seeding slider is withdrawn from the panel (2026-09-22): the 1.71 mm trace
+            // grid closed the rim gap it was for; `seedBoost` and its bridge plumbing stay
+            // for a later expert control, the value rides at ×1
             if !ask.depthBySim {
                 (Text("How deep the lattice ") + Text("may").italic() + Text(" go from each wall's surface — how deep it ")
                  + Text("will").italic() + Text(" go follows below."))
@@ -781,9 +764,11 @@ public struct LatticeSetupWizard: View {
                 ForEach(wallEditorFaces) { f in
                     let fa = ask.face(f.id)
                     HStack(spacing: 10) {
-                        RoundedRectangle(cornerRadius: 3).fill(f.tint).frame(width: 10, height: 10)
-                        Text(f.name).font(.system(size: 14, weight: .semibold)).lineLimit(1)
+                        // ★ the NAME reads in full (his 00:31: "I just need to see the difference
+                        // between faces"): the fields are narrow, the swatch is gone
+                        Text(f.name).font(.system(size: 14, weight: .semibold)).lineLimit(1).minimumScaleFactor(0.75)
                             .foregroundStyle(DS.Color.textPrimary.color)
+                            .layoutPriority(1)
                             .onTapGesture { withAnimation(.spring(response: 0.42, dampingFraction: 0.86)) { wallEditorDraft = model.wallThickness; wallEditorStage = .thickness } }
                         Spacer(minLength: 0)
                         // ★ where the lattice may START and how deep it may go (his 22:40: the
@@ -930,7 +915,7 @@ public struct LatticeSetupWizard: View {
                     rebuild()
                 }
                 Group {
-                    if project.lattice.algorithm == "organic" {
+                    if model.cellTransition.coreAlgorithm == "organic" {
                         LatticeWallCurveEditor(faces: wallEditorFaces, stage: stage, ask: draft, onCancel: cancel, onSave: save)
                     } else {
                         LatticeWallProfileEditor(faces: wallEditorFaces, stage: stage, ask: draft, onCancel: cancel, onSave: save)
@@ -1392,6 +1377,10 @@ public struct LatticeSetupWizard: View {
                     .accessibilityIdentifier("wizard-organic-show-repairs")
             }
             if !organicShowRepairs { shortNote("Repairs hidden", warning: true) }
+            else if !TopOptKit.coreCarriesTheSampleRepairFix {
+                // ★ the linked core collapses the cube under repairs (PR 358 not linked): the traced cube is shown
+                shortNote("Repairs need the newer core (PR 358) — traced cube shown", warning: true)
+            }
 
             // ── Fit to shape (item 6): ALWAYS ON without a simulation ──
             sectionTitle("Fit to shape", info: "fit-to-shape", Self.infoFitToShape
@@ -2551,7 +2540,7 @@ public struct LatticeSetupWizard: View {
                     // ★ ONE SHORT LINE (item 1): the label, or what the sample is doing
                     // right now; the census sits behind the (i).
                     Text(wallEditorStage == .grade
-                         ? (project.lattice.algorithm == "organic" ? "Tap above the dotted line to shape the start, below for the end"
+                         ? (model.cellTransition.coreAlgorithm == "organic" ? "Tap above the dotted line to shape the start, below for the end"
                             : "Drag across a wall: above the dotted line shapes the start, below it the end")
                          : wallEditorStage == .thickness ? "Drag the lines: where the lattice may start and how deep it may go"
                          : organicSampleShown
@@ -3059,7 +3048,7 @@ struct WallNumberField: View {
     }
 
     var body: some View {
-        let w: CGFloat = wide ? 132 : 80
+        let w: CGFloat = wide ? 132 : 64
         let h: CGFloat = wide ? 46 : 36
         HStack(spacing: 2) {
             Text(text)

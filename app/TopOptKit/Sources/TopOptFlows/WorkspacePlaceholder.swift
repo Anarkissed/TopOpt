@@ -10213,7 +10213,7 @@ public struct WorkspacePlaceholder: View {
             // CAPTURED, and the row says the run will freeze this region without
             // latticing it — core's `lattice.regions` are geometry predicates and
             // a region is a voxel set (PR 331 §6). Three words, not silence.
-            if !ref.latticeReachesTheRun, role != nil {
+            if !project.latticeReachesTheRun(ref), role != nil {
                 Text(Self.latticeRegionNotConsumed)
                     .font(.system(size: 9, weight: .bold))
                     .foregroundStyle(DS.Color.warning.color)
@@ -10458,7 +10458,7 @@ public struct WorkspacePlaceholder: View {
             card: card,
             depthMM: project.latticeSlabDepthMM(ref, in: g.id),
             held: force.isProtected(g.id),
-            latticeReachesTheRun: ref.latticeReachesTheRun,
+            latticeReachesTheRun: project.latticeReachesTheRun(ref),
             perRegionDensity: perRegionDensity,
             densityFirst: aesthetic && project.lattice.singleCellMembers,
             // ★ AUTO IS SAID OUT LOUD (his fix 7): a face nobody dialled shows

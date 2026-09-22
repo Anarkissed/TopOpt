@@ -236,7 +236,9 @@ public struct LatticeRegionSpec: Equatable, Sendable {
     /// the re-lattice path's regions come from `variantRegions`, which emits only
     /// from manual primitives and never sets `faceID`, so the key was nil there
     /// and stays absent. Its bytes do not move.
-    public var wireDictionary: [String: Any] {
+    /// The job's region, with the face frame axes only when the linked core takes them.
+    public var wireDictionary: [String: Any] { wireDictionary(frameAxes: TopOptKit.regionFrameAxesWired) }
+    public func wireDictionary(frameAxes: Bool) -> [String: Any] {
         // ★★ THE OUTLINE GOES ON THE WIRE, and core now reads it. The first
         // attempt was withdrawn because `topopt-cli` rejected the key outright
         // ("unknown key \"in_plane_offset_mm\""); core's schema accepts
@@ -261,6 +263,16 @@ public struct LatticeRegionSpec: Equatable, Sendable {
         if !outlineLoops.isEmpty {
             faceGeometry["outline_uv"] = outlineLoops.map { loop in
                 loop.map { [$0.x, $0.y] }
+            }
+        }
+        // ★ THE FRAME, STATED (core note 4 / his yes, 2026-09-22): the axes `outline_uv` is
+        // in, as unit world vectors, so core need not fit them. Only when the core takes them.
+        if frameAxes, kind == .face {
+            let n = LatticeRegionMask.unit(normal)
+            if simd_length(n) > 0.5 {
+                let (u, w) = LatticeRegionMask.basis(n)
+                faceGeometry["frame_u"] = [u.x, u.y, u.z]
+                faceGeometry["frame_w"] = [w.x, w.y, w.z]
             }
         }
         let geometry: [String: Any] = kind == .face
