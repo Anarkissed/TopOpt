@@ -687,21 +687,192 @@ static void test_organic_scale_and_gates() {
   {
     // The overhang fillet is a printability repair the job may decline: absent is on,
     // false is honoured, and it is organic-only like the other organic keys.
-    CHECK(parse_job(organic_swept("")).grading.organic_overhang_fillet,
-          "organic_overhang_fillet: absent means ON");
-    CHECK(!parse_job(organic_swept(", \"organic_overhang_fillet\": false"))
-               .grading.organic_overhang_fillet,
-          "organic_overhang_fillet: false is honoured");
-    bool refused = false;
-    try {
-      (void)parse_job(organic_swept(", \"organic_overhang_fillet\": 1"));
-    } catch (const std::exception&) { refused = true; }
-    CHECK(refused, "organic_overhang_fillet: a non-boolean is refused");
+    // ★ THE OVERHANG FILLET KEY IS GONE (maintainer, 2026-09-08). The repair flared
+    // every span over open air -- 3,720 of them on the M2 stand, to an end radius of
+    // 2.56 mm against a 0.615 mm median strut, leaving 2,789 unresolved at its own cap.
+    // The key is refused rather than ignored so a job carrying it fails loudly instead
+    // of silently losing a setting it thinks is in force.
+    {
+      bool refused = false;
+      try {
+        (void)parse_job(organic_swept(", \"organic_overhang_fillet\": false"));
+      } catch (const JobError&) { refused = true; }
+      CHECK(refused, "organic_overhang_fillet: the key is refused, the repair is gone");
+    }
     CHECK(parse_job(organic_swept("")).grading.organic_transfer_ties,
           "organic_transfer_ties: absent means ON (the maintainer approved the look, 2026-09-05)");
     CHECK(!parse_job(organic_swept(", \"organic_transfer_ties\": false"))
               .grading.organic_transfer_ties,
           "organic_transfer_ties: false switches the ties off");
+    // ── the dual-contour keys ──────────────────────────────────────────────────
+    // OFF by default and additive: nothing already emitted changes when they are absent,
+    // which is the whole reason the mesher went in as a key rather than a replacement.
+    {
+      const auto d = parse_job(organic_swept(""));
+      CHECK(!d.grading.organic_dual_contour,
+            "organic_dual_contour: absent means OFF -- the welded pair is unchanged");
+      CHECK(d.grading.organic_dc_cell_mm == 0.0 && d.grading.organic_dc_tolerance_mm == 0.0,
+            "organic_dc_*: absent means 0, i.e. derived");
+    }
+    {
+      const auto d = parse_job(organic_swept(
+          ", \"organic_dual_contour\": true, \"organic_dc_cell_mm\": 0.2, "
+          "\"organic_dc_tolerance_mm\": 0.02"));
+      CHECK(d.grading.organic_dual_contour, "organic_dual_contour: true is honoured");
+      CHECK(d.grading.organic_dc_cell_mm == 0.2,
+            "organic_dc_cell_mm: the stated base cell arrives");
+      CHECK(d.grading.organic_dc_tolerance_mm == 0.02,
+            "organic_dc_tolerance_mm: the stated size dial arrives");
+    }
+    // ── the certified density's measure ────────────────────────────────────────
+    // ★ THE DEFAULT IS THE UNION, and it is pinned here because a silent revert to the
+    // deposit would put every certified margin back about 20 % optimistic with nothing
+    // in the output to say so.
+    {
+      const auto d = parse_job(organic_swept(""));
+      CHECK(d.grading.organic_density_union_subdiv == topopt::kOrganicDensityUnionSubdivDefault &&
+                d.grading.organic_density_union_subdiv > 0,
+            "organic_density_union_subdiv: absent means the UNION measure, not the deposit");
+      const auto z = parse_job(organic_swept(", \"organic_density_union_subdiv\": 0"));
+      CHECK(z.grading.organic_density_union_subdiv == 0,
+            "organic_density_union_subdiv: 0 restores the old deposit, for reproducing a "
+            "run against the figure it was certified on");
+    }
+    for (const char* bad : {", \"organic_density_union_subdiv\": -1",
+                            ", \"organic_density_union_subdiv\": 2.5",
+                            ", \"organic_density_union_subdiv\": 99"}) {
+      bool refused = false;
+      try { (void)parse_job(organic_swept(bad)); } catch (const JobError&) { refused = true; }
+      CHECK(refused, "organic_density_union_subdiv: refuses a negative, a fraction and an "
+                     "absurd subdivision");
+    }
+    for (const char* bad : {", \"organic_dc_cell_mm\": -1",
+                            ", \"organic_dc_tolerance_mm\": -0.5"}) {
+      bool refused = false;
+      try { (void)parse_job(organic_swept(bad)); } catch (const JobError&) { refused = true; }
+      CHECK(refused, "organic_dc_*: a negative is refused, not clamped");
+    }
+    {
+      bool refused = false;
+      try { (void)parse_job(organic_swept(", \"organic_dual_contour\": 1")); }
+      catch (const JobError&) { refused = true; }
+      CHECK(refused, "organic_dual_contour: a number is refused -- it is a boolean");
+    }
+    // ── ★ ANY-STEP STEPPED: the plan the app states ──────────────────────────
+    // The cells the app placed. There is no companion frame array: region_id is 1-based
+    // in the job's own include-region order and origin_mm is MODEL space, so the frame is
+    // DERIVED from the region a cell names and there is nothing to keep in step.
+    {
+      auto stepped_i = [&](const std::string& lat_extra, const std::string& intent,
+                           const std::string& grade_extra) {
+        return mutate("\"mesh_prefix\": \"variant\" }",
+                      "\"mesh_prefix\": \"variant\" },\n  \"lattice\": { " + lat_extra + " },\n"
+                      "  \"grading\": { \"topology\": \"octet\", \"min_extrudable_width_mm\": 0.45, "
+                      "\"algorithm\": \"stepped\", \"intent\": \"" + intent + "\", "
+                      "\"cell_mode\": \"swept\", "
+                      "\"cell_min_mm\": 3.0, \"cell_max_mm\": 12.0" + grade_extra + " }");
+      };
+      auto stepped = [&](const std::string& lat_extra,
+                         const std::string& grade_extra = "") {
+        return stepped_i(lat_extra, "aesthetic", grade_extra);
+      };
+      {
+        const JobDescription j = parse_job(stepped(
+            "\"stepped_cells\": ["
+            "{\"region_id\": 1, \"origin_mm\": [100.0, -5.0, 0.0], \"size_mm\": 9.0},"
+            "{\"region_id\": 1, \"origin_mm\": [109.0, -5.0, 0.0], \"size_mm\": 3.0}]"));
+        CHECK(j.lattice.stepped_cells.size() == 2,
+              "stepped_cells: every placed cell arrives");
+        CHECK(j.lattice.stepped_cells[1].size_mm == 3.0 &&
+                  j.lattice.stepped_cells[1].origin.x == 109.0,
+              "stepped_cells: sizes and MODEL-space origins are carried verbatim");
+        CHECK(j.lattice.stepped_cells[0].region_id == 1,
+              "stepped_cells: region_id is the job's own 1-based include-region order");
+      }
+      {   // ★ THE ALGORITHM GATE. The cell list IS the any-step plan; no other
+          // algorithm lays it down, so naming it elsewhere is refused rather than ignored.
+        bool refused = false;
+        std::string why;
+        try {
+          (void)parse_job(mutate(
+              "\"mesh_prefix\": \"variant\" }",
+              "\"mesh_prefix\": \"variant\" },\n  \"lattice\": { \"stepped_cells\": "
+              "[{\"region_id\": 1, \"origin_mm\": [0,0,0], \"size_mm\": 3.0}] },\n"
+              "  \"grading\": { \"topology\": \"octet\", \"min_extrudable_width_mm\": 0.45, "
+              "\"algorithm\": \"organic\", \"intent\": \"aesthetic\", \"cell_mode\": \"swept\", "
+              "\"cell_min_mm\": 3.0, \"cell_max_mm\": 12.0 }"));
+        } catch (const JobError& e) { refused = true; why = e.what(); }
+        CHECK(refused, "stepped_cells is refused on a non-stepped algorithm");
+        CHECK(why.find("organic") != std::string::npos,
+              "stepped_cells: and the refusal names the algorithm that was asked for");
+      }
+      {   // ★ THE STRUCTURAL TILE FLOOR, and its name. NOT "min_cell_mm": this grading
+          // block already carries "cell_min_mm" (the swept window's lower end), and two
+          // keys differing only in word order is a misconfiguration nothing could catch.
+        const JobDescription j = parse_job(stepped(
+            "\"emit_stl\": true", ", \"stepped_min_tile_mm\": 1.8"));
+        CHECK(j.grading.stepped_min_tile_mm == 1.8,
+              "stepped_min_tile_mm: the structural tile floor arrives");
+        bool wrong_alg = false;
+        std::string why;
+        try {
+          (void)parse_job(mutate(
+              "\"mesh_prefix\": \"variant\" }",
+              "\"mesh_prefix\": \"variant\" },\n  \"grading\": { \"topology\": \"octet\", "
+              "\"min_extrudable_width_mm\": 0.45, \"algorithm\": \"organic\", "
+              "\"intent\": \"aesthetic\", \"cell_mode\": \"swept\", \"cell_min_mm\": 3.0, "
+              "\"cell_max_mm\": 12.0, \"stepped_min_tile_mm\": 1.8 }"));
+        } catch (const JobError& e) { wrong_alg = true; why = e.what(); }
+        CHECK(wrong_alg, "stepped_min_tile_mm: refused on a non-stepped algorithm");
+        CHECK(why.find("cell_min_mm") != std::string::npos,
+              "stepped_min_tile_mm: and the refusal WARNS about the confusable key, "
+              "because that is the mistake worth catching");
+        bool neg = false;
+        try { (void)parse_job(stepped("\"emit_stl\": true", ", \"stepped_min_tile_mm\": -1")); }
+        catch (const JobError&) { neg = true; }
+        CHECK(neg, "stepped_min_tile_mm: a negative floor is refused");
+      }
+      {   // region_id is 1-BASED: 0 is not an include region
+        bool refused = false;
+        try {
+          (void)parse_job(stepped("\"stepped_cells\": [{\"region_id\": 0, "
+                                  "\"origin_mm\": [0,0,0], \"size_mm\": 3.0}]"));
+        } catch (const JobError&) { refused = true; }
+        CHECK(refused, "stepped_cells: region_id 0 is refused -- the order is 1-based");
+      }
+      {   // absent entirely: the legacy one-cell-per-region Stepped, unchanged
+        const JobDescription j = parse_job(stepped("\"emit_stl\": true"));
+        CHECK(j.lattice.stepped_cells.empty(),
+              "stepped_cells: absent means the legacy Stepped, not an empty plan");
+      }
+      for (const char* bad : {
+               "\"stepped_cells\": [{\"region_id\": 1, \"origin_mm\": [0,0,0], \"size_mm\": 0}]",
+               "\"stepped_cells\": [{\"region_id\": 1, \"origin_mm\": [0,0], \"size_mm\": 3}]",
+               "\"stepped_cells\": [{\"region_id\": 1, \"origin_mm\": [0,0,0], \"size_mm\": 3, \"colour\": 2}]"}) {
+        bool refused = false;
+        try { (void)parse_job(stepped(bad)); } catch (const JobError&) { refused = true; }
+        CHECK(refused,
+              "stepped_cells: a zero size, a short origin and an unknown key are each "
+              "refused");
+      }
+      {   // ★ the generic key, and the organic spelling kept as an alias
+        const JobDescription g = parse_job(stepped_i(
+            "\"emit_stl\": true", "structural",
+            ", \"structural_certification\": \"beam_network\""));
+        CHECK(g.grading.organic_structural_certification == "beam_network",
+              "structural_certification: the generic name reaches the same field");
+        bool both = false;
+        try {
+          (void)parse_job(stepped_i(
+              "\"emit_stl\": true", "structural",
+              ", \"structural_certification\": \"beam_network\""
+              ", \"organic_structural_certification\": \"beam_network\""));
+        } catch (const JobError&) { both = true; }
+        CHECK(both,
+              "structural_certification: naming it AND its alias is refused, not resolved "
+              "-- a job that says it twice has an opinion worth surfacing");
+      }
+    }
     {
       auto probe = [&](const std::string& lat_extra, const std::string& alg) {
         return mutate("\"mesh_prefix\": \"variant\" }",

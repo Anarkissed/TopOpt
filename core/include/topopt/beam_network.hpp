@@ -18,9 +18,16 @@
 //      must share a node here. Weld on CONTACT, not on coordinates.
 //      PRECONDITION: the weld is ENDPOINT-based, so struts must arrive SUBDIVIDED.
 //      Two long members crossing at mid-span have no vertex near the crossing and
-//      are NOT fused (asserted in test_beam_network). The tracer emits ~0.85 mm
-//      segments, which satisfies this; coarse input would silently report a
-//      disconnected lattice.
+//      are NOT fused (asserted in test_beam_network).
+//      ★ AND DO NOT TRUST THE CALLER TO SATISFY IT. This said "the tracer emits ~0.85 mm
+//      segments, which satisfies this" -- true when written, and false by the time the
+//      centreline RUN-COLLAPSE pass shipped, which merges collinear spans into straight
+//      members up to a whole chain long. MEASURED on the M2 stand: the certificate was
+//      handed members up to 28.94 mm against a weld reach of 0.817 mm, and the weld found
+//      4,270 junctions where cutting the input to its reach finds 14,202 -- two thirds of
+//      the joints were missing and nothing reported it, because a lattice in pieces
+//      certifies CLEAN. run_job now enforces the precondition on every input rather than
+//      believing this comment.
 //
 //   2. RESTRAINT. A pinned tie into solid transmits force but not moment, so a
 //      member held at one point spins about it (3 modes) and a member held at two
@@ -64,6 +71,35 @@ struct BeamNetwork {
   std::size_t node_count() const { return nodes.size(); }
   std::size_t member_count() const { return members.size(); }
 };
+
+// ── ★ SUBDIVISION, WHICH THE WELD'S PRECONDITION MAKES MANDATORY ───────────────
+// The weld above is ENDPOINT-based. The organic tracer happens to satisfy it (~0.85 mm
+// segments); an OCTET strut does not -- it is one straight member up to a whole base cell
+// long, so a strut ending on the middle of another has no vertex near the contact and is
+// not fused. That does not fail loudly: it reports a DISCONNECTED lattice, and a
+// disconnected lattice certifies clean because there is nothing holding the load that the
+// solve can find fault with. Any-step Stepped is nothing but such seams -- a 9's face
+// centre lands mid-strut on an 8's face -- so its input must be subdivided before it
+// reaches the weld at all.
+//
+// Splits every segment into equal pieces no longer than `max_len_mm`, preserving radius
+// and tag. One bead is the right scale: the weld joins endpoints within r_a + r_b, so a
+// contact anywhere along a member is then within a piece-length of some endpoint.
+std::vector<BeamSegment> subdivide_beam_segments(const std::vector<BeamSegment>& in,
+                                                 double max_len_mm);
+
+// How many member ends terminate on NOTHING -- a node touched by exactly one member end.
+// After the contact weld this must be 0 for a certified job: an end on nothing is either
+// a strut the geometry never joined or a seam the weld failed to find, and both mean the
+// network being solved is not the part that will be printed. `t_junction_ends` counts
+// ends that landed on another member's interior and were fused, which is what an any-step
+// seam looks like when it works -- reported, never gated, because it is the normal case.
+struct BeamNetworkSeams {
+  std::size_t floating_ends = 0;
+  std::size_t t_junction_ends = 0;
+  std::size_t welded_nodes = 0;
+};
+BeamNetworkSeams beam_network_seams(const BeamNetwork& net);
 
 // Build the network, welding endpoints that COINCIDE and endpoints that TOUCH
 // (centre distance <= r_a + r_b) but belong to different chains. The different-chain

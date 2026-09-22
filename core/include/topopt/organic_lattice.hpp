@@ -377,12 +377,16 @@ inline constexpr double kOrganicArchLegSteepness = 1.0;
 // not remove it, because the bowed strut is still a cylinder with the same underside.
 // A one-legged span of this kind is not a hard bridge, it is an impossible one.
 //
-// ★ THE FILLET. Flare the radius at the ends and taper to nominal at the middle. The
-// UNDERSIDE then rises from each support at kOrganicFilletAngleDeg and the two flares
-// meet at the centre, so every layer of the strut lands on the layer below it — the
-// arch is the strut's own surface, not its path.
-//
-// The angle the underside climbs away from each support.
+// ★ THE FILLET WAS THE ANSWER TO THIS, AND IT IS GONE. The idea: flare the radius at
+// the ends and taper to nominal at the middle, so the underside rises from each
+// support and every layer lands on the one below -- the arch being the strut's own
+// surface rather than its path. In practice it deposited lumps, not fillets (3,720
+// spans on the M2 stand, a 2.56 mm end radius against a 0.615 mm median strut, 2,789
+// still unresolved at the cap), and those lumps were the "tumors" seen through two
+// different meshers. The repair was removed; spans over air are now left exactly as
+// drawn and COUNTED -- `unsupported_spans_seen`, reaching the receipt as
+// "unsupported_spans". A printability condition that is measured and reported is worth
+// more than one that is disguised by geometry nobody asked for.
 // ══ ★★★ GROWTH — PRINTABILITY AS A CONSTRUCTION RULE, NOT A REPAIR ★★★ ═══════════
 //
 // ★ WHY THE TRACE-THEN-REPAIR ARCHITECTURE CANNOT BE PATCHED. `trace_organic_lattice`
@@ -451,8 +455,22 @@ inline constexpr std::size_t kOrganicGrowthMaxTips = 20000;
 // endpoints within kOrganicNodeMergeRatio BEADS (= 2 x that many radii), so recording
 // every 3 radii was still inside it: each grown curve collapsed to ONE straight span
 // from base to tip, 20 mm long, and the cube came out as fifteen sticks. 6 radii is
-// safely clear and lands near d_sep, which is the polyline resolution the traced path
-// uses anyway.
+// safely clear.
+//
+// ★ AND THE CLAIM THAT USED TO CLOSE THIS PARAGRAPH WAS FALSE, which is what let a
+// second bug sit for ten days. It read: "lands near d_sep, which is the polyline
+// resolution the traced path uses anyway" -- and from that it followed that the traced
+// path was already safe and needed no equivalent. It is not: the TRACER samples about
+// every 0.203 mm at a median radius of 0.489 mm, roughly 0.4 radii, which is four to
+// five times INSIDE the merge radius rather than clear of it. The traced path was
+// therefore exposed to the same collapse the whole time, and the app measured it on
+// 2026-09-20: 2606 traced spans emerged as 120 on a 20 mm sample cube.
+//
+// It is fixed at the merge instead of here (see node_merge: a member now carries its
+// chain identity, and short spans along a chain are coalesced rather than deleted),
+// because coarsening a traced streamline to 6 radii would destroy the shape the traced
+// path exists to follow. This constant remains a GROWTH recording rule and nothing
+// else; do not reason from it about the tracer.
 inline constexpr double kOrganicGrowthRecordRadii = 6.0;
 
 // ★★ HOW MANY TIMES ONE TIP MAY JOIN AND CARRY ON. A tip that joins a neighbour used to
@@ -483,23 +501,38 @@ inline constexpr int kOrganicGrowthMaxJoins = 6;
 // gain height as they go.
 inline constexpr double kOrganicGrowthUpwardBias = 0.25;
 
-inline constexpr double kOrganicFilletAngleDeg = 45.0;
+// ★ THE OVERHANG FILLET'S CONSTANTS ARE GONE, and so is the repair. It flared the
+// underside of a span over air at 45 degrees, capped at 2.5x the strut radius. It was
+// REMOVED because it deposited lumps rather than fillets: measured on the M2 stand it
+// fired on 3,720 spans, reached a 2.56 mm end radius against a 0.615 mm median strut,
+// and still left 2,789 of them unresolved at the cap -- the "tumors" the maintainer
+// spotted through two different meshers were this, emitted geometry and never a
+// meshing artefact. Spans over air are now left exactly as drawn and COUNTED, which is
+// `unsupported_spans_seen` and reaches the receipt as "unsupported_spans" (1728 on the
+// stand). The constants sat here unused afterwards, along with two receipt fields that
+// were copied but never serialised, which is how a removed feature keeps looking alive.
 
-// ★ AND A CAP, because the honest arithmetic is expensive: fully filleting a span of
-// length L needs an end radius of r + (L/2)*tan(theta), which at L = 8 mm and r =
-// 0.5 mm is 4.5 mm — a blob nine times the strut. Capped, the fillet does not reach
-// the middle and the span is IMPROVED rather than solved; the receipt reports the
-// residual so a partial fix is never read as a complete one.
-// ★ AND THE CAP IS WHAT KEEPS IT A FILLET RATHER THAN A BALL. At 6.0 the widest end
-// radius on the maintainer's cube came to 4.87 mm on a ~1.3 mm strut — a 10 mm sphere
-// big enough that the slicer put INFILL inside it, which he spotted immediately. The
-// flare is meant to be a gusset at a junction, not a node the size of a cell. 2.5 keeps
-// the widest end near 1.6 mm; spans needing more than that are counted unresolved.
-inline constexpr double kOrganicFilletMaxRadiusRatio = 2.5;
-
-// How many segments a filleted span is emitted as. The taper is piecewise-constant in
-// radius, so this is the resolution of the underside's slope.
-inline constexpr int kOrganicFilletSegments = 12;
+// ── ★ THE WETTING FILLET AT THE GRADED RIM (maintainer, 2026-09-08) ──────────────
+// "I want all the struts to continue THROUGH to the solid and act as though they are
+// being wetted by a liquid layer... fillets on either side of the connection points,
+// regardless of what angle they come in at... as though they are melting into each
+// other."
+//
+// ★ THE DERIVATION THAT USED TO SIT HERE IS GONE, and deliberately. It was a meniscus
+// of revolution about the strut axis, rho(z) = r + R - sqrt(R^2 - (R-z)^2), applied by
+// FATTENING the end capsules. That is not what the preview draws, and the maintainer's
+// verdict on it was "the way it was being implemented prior was just... bad". Two
+// reasons it could never match: the profile is a surface of revolution about ONE strut,
+// so where several struts land together it draws several overlapping collars instead of
+// one pool; and it is a change to the capsule list, so the mesher sees a fatter cylinder
+// with a hard shoulder rather than a blended field.
+//
+// The shipped wetting fillet is in organic_wet_join.hpp: the preview's own shader
+// arithmetic, transcribed constant for constant. It is a FIELD subtraction applied
+// inside the surface evaluator (lattice_dc.cpp Field::eval) keyed on two distances --
+// how far the point is into the solid, and how far it is from the latticed set -- so
+// every strut arriving at a junction, at any angle, wets the same single pool. Change
+// it there, not here.
 
 // ★ TRANSFER TIES (2026-09-05). A grown lattice follows the MAJOR principal
 // direction only, so where the load has to turn it has no member to turn along and
@@ -730,6 +763,18 @@ struct OrganicParams {
   // onto it) and the BEAD is what falls out of the mass coupling instead — floored,
   // always, at the stated minimum extrudable width.
   const std::vector<double>* strut_diameter_field = nullptr;
+
+  // ★ THE BEAD WAS ASKED FOR BY NAME, SO DO NOT CALIBRATE IT (maintainer, 2026-09-10:
+  // "please implement a way to actually make organic_strut_width_mm mean what it actually
+  // says it does"). The calibration below re-derives one global factor from the TRACED
+  // length so the emitted mass matches what the grading law asked for -- correct when the
+  // bead came from that same law, and wrong when the bead is a number the user stated.
+  // With this set, radii leave the tracer exactly as the diameter field specified them.
+  bool bead_is_stated = false;
+  // ★ Compute and REPORT the target, but do not scale: the caller will solve the factor
+  // against the spans the emitter actually produces, which is a different network from
+  // the curves measured here (see run_job's calibration loop).
+  bool defer_bead_calibration = false;
 
   // The Jobard-Lefer ratios and the integrator step. See the constants above.
   double test_ratio = kOrganicTestRatio;
@@ -965,6 +1010,27 @@ struct OrganicReport {
   // families model over-estimates the bead). 1.0 = the model was right.
   double bead_calibration = 1.0;
   bool bead_calibration_floored = false;  // the minimum extrudable width won
+  // The job stated organic_strut_width_mm, so no factor was derived and none applied.
+  bool bead_calibration_skipped_stated = false;
+  // The tracer computed the target and left the scaling to the caller.
+  bool bead_calibration_deferred = false;
+  // ── what the calibration actually solved against ───────────────────────────
+  // The target is the volume the grading law asked for; `union` is the volume the
+  // calibrated lattice really occupies, measured without a mesh; `naive` is the sum of
+  // the capsules with every overlap counted twice, which is what the calibration used to
+  // solve against. `overlap_fraction` is 1 - union/naive: the share of that sum that was
+  // material counted in two places at once, and therefore the size of the error.
+  double bead_calibration_target_mm3 = 0.0;
+  double bead_calibration_union_mm3 = 0.0;
+  double bead_calibration_naive_mm3 = 0.0;
+  double bead_calibration_overlap_fraction = 0.0;
+  int bead_calibration_iterations = 0;
+  // What the calibration was LOOKING AT: the centreline length and the median span
+  // diameter of the network it measured, so the basis can be compared with what ships.
+  double bead_calibration_length_mm = 0.0;
+  double bead_calibration_median_dia_mm = 0.0;
+  std::size_t bead_calibration_spans = 0;
+  bool bead_calibration_converged = false;
   double min_extrudable_width_mm = 0.0;
   std::size_t spacing_raised_for_print_voxels = 0;       // d below the printable floor
   std::size_t spacing_raised_for_resolution_voxels = 0;  // d below one voxel
@@ -1001,6 +1067,25 @@ struct OrganicReport {
   bool tensor_out_of_regime = true;
 };
 
+
+// ★ RESAMPLING AN OVER-SAMPLED CENTRELINE (maintainer, 2026-09-08: the struts "look
+// like a million 8 sided polygons in a row rather than an actual straight line").
+// MEASURED on the M2 stand: the tracer samples about every 0.203 mm while the struts
+// have a median radius of 0.489 mm, so 59,591 of 78,508 spans (76 %) are SHORTER THAN
+// THEIR OWN RADIUS. Every span is meshed as its own 8-gon prism with a 20-triangle
+// icosahedral ball at each joint, so a prism shorter than it is wide is nearly all
+// end-cap and a straight beam arrives as a knobbly rope of polyhedra.
+//
+// The fix is Douglas-Peucker on each CHAIN of degree-2 joints. It keeps the chain's
+// endpoints, so junctions, forks and tees are untouched by construction, and a closed
+// loop is kept whole -- the first attempt at this collapsed a chain into one span and
+// silently DROPPED anything that came out degenerate, which is what B2 and G8 caught.
+inline constexpr double kOrganicRunCollapseTol = 0.25;        // deviation, x radius
+inline constexpr double kOrganicRunCollapseRadiusTol = 0.10;  // radius spread in a run
+// If resampling loses more than this fraction of the centreline length, something is
+// wrong with the chain walk and the whole pass is abandoned rather than shipped.
+inline constexpr double kOrganicRunCollapseGuard = 0.02;
+
 struct OrganicLattice {
   std::vector<OrganicCurve> curves;          // KEPT curves only, in trace order
   std::vector<OrganicConnector> connectors;
@@ -1026,6 +1111,8 @@ struct OrganicLattice {
   // MEASURED: the middle of one region (x 72-150 mm, on the arch) held 7,361 mm at
   // node_merge and 0 mm after the support pass. Solid beneath a strut is support.
   std::vector<char> part_solid;
+  // ★ THE GRADED RIM (maintainer, 2026-09-08): the voxels grade-to-solid turned from
+  // lattice into solid, kept SEPARATE from the rest of `part_solid` because the wetting
   OrganicReport report;
 
   // ── ★★ THE NET-SKIN (organic's diagrid) ─────────────────────────────────────
@@ -1050,24 +1137,28 @@ struct OrganicLattice {
   // ★ CUT THE SCATTER BELOW THE BASE (kOrganicBaseDominanceFraction). Needs a layer
   // height — without one there is no layer to test, and it does nothing rather than
   // guessing a pitch.
-  bool trim_below_base = true;
-  // The overhang fillet (job key grading.organic_overhang_fillet). Off = spans over
-  // open air are left as drawn; the count of spans that WOULD have flared is kept.
-  bool overhang_fillet = true;
+  // ★★★ PRINTABILITY IS OFF UNLESS THE JOB ASKS (maintainer, 2026-09-08) ★★★
+  // These three alter the geometry to make it print: `base_mat` and `fill_mat` add
+  // material to root the lattice, `trim_below_base` cuts what falls under the plate. All
+  // three defaulted to TRUE and had NO JOB KEY, so they ran on every organic job whether
+  // or not the user wanted a repair -- exactly the silent-default pattern that the print
+  // profile rule already forbids for the extrudable width. The overhang fillet was the
+  // fourth and is gone entirely; these are now stated or they do not run.
+  bool trim_below_base = false;
   // ★ EMIT A BASE MAT at the trimmed base plane — a crossed planar grid spanning the
   // footprint, so the first layer is a foundation rather than whatever the trace
   // happened to leave there. Needs a layer height and a boundary.
   // ★★ GROW INSTEAD OF TRACE-THEN-REPAIR. See kOrganicGrowthMinAngleDeg. Off by
   // default: the existing path stays byte-identical until a job asks for this.
   bool growth = false;
-  bool base_mat = true;
+  bool base_mat = false;
   // The pitch the WELD will raster at. The generator refuses to emit a base mat too
   // thin for that raster to keep — a mat below one voxel is erased outright, which is
   // how a deliberately thinned one vanished from the slice. 0 = unknown, check skipped.
   double weld_pitch_hint_mm = 0.0;
   // ★ FILL the low-stress interior where the tracer left holes. An override of the
   // grade, reported as one.
-  bool fill_mat = true;
+  bool fill_mat = false;
   double net_skin_reach_mm = 0.0;
   int net_skin_degree = 3;         // at most this many joins per landing
 
@@ -1150,6 +1241,21 @@ struct SyntheticStressRegionReport {
   std::size_t voxels = 0;
   std::size_t fully_synthetic = 0;
   std::size_t blended = 0;
+  // ── ★ RULING H (maintainer, 2026-09-18 night): A DEAD WALL IS DEAD AS A WHOLE ──
+  // The per-voxel ramp between 0.25*thr and thr split a wall that hovered just under
+  // the threshold into half synthetic and half rounding-noise directions -- his front
+  // wall measured p99 0.0041 and max 0.0056 against a threshold of 0.005, and traced
+  // as struts filling half the depth with horizontals and no verticals. A wall is
+  // dead or it is not, and the unit of that decision is the WALL.
+  //
+  // p99 of the REAL von Mises over this region's candidate voxels, measured before
+  // anything was written, and whether it came in under the dead threshold. A flagged
+  // region is synthesised whole either way (a stated focus is the user's instruction,
+  // not a hint) -- but if `p99_under_threshold` is false the user has flagged a wall
+  // that is carrying load, and this is where that shows.
+  double p99_von_mises = 0.0;
+  bool p99_under_threshold = false;
+  bool whole_region = false;      // every candidate voxel took the focal field
 };
 struct SyntheticStressReport {
   std::vector<SyntheticStressRegionReport> per_region;
@@ -1157,7 +1263,7 @@ struct SyntheticStressReport {
   std::size_t voxels_in_regions = 0;
   std::size_t voxels_fully_synthetic = 0;   // blend weight < 0.05 real
   std::size_t voxels_blended = 0;
-  double dead_threshold = 0.0;              // thr, in the tensor's units
+  double dead_threshold = 0.0;              // thr, in the tensor's units (the LARGER rule)
   double peak_von_mises = 0.0;
   // ★ true when the ABSOLUTE floor was the binding rule rather than the fraction.
   bool dead_floor_bound = false;
@@ -1166,9 +1272,35 @@ struct SyntheticStressReport {
   // which flattened the foci); true = one factor per region, falloff preserved.
   bool per_region_normalisation = true;
 };
+
+// ── the bead calibration's root-find ────────────────────────────────────────────
+// The factor is solved so the lattice's UNION volume matches the volume the grading law
+// asked for. Samples buy precision in the volume: at this budget the standard error on
+// the M2 lattice is about 0.1 % of the volume, against the 42.6 % overlap error the
+// naive sum carried, so the measurement is no longer the limiting term. The seed inside
+// lattice_union_volume is fixed, so the same lattice always calibrates to the same
+// factor. `Tol` is on log volume, i.e. a relative tolerance on the volume itself.
+// The subgrid the certified density measures each voxel's union share on. Converged:
+// k=10 moves the answer 0.08 % against k=6. See JobGrading::organic_density_union_subdiv.
+inline constexpr int kOrganicDensityUnionSubdivDefault = 6;
+
+inline constexpr std::size_t kOrganicBeadCalibrationSamples = 300000;
+inline constexpr int kOrganicBeadCalibrationSteps = 6;
+inline constexpr double kOrganicBeadCalibrationTol = 0.002;
+// Trials allowed when the factor is solved against the EMITTER's output. Each trial is a
+// full emission, so this is a real cost and the cap is deliberately tight; the secant
+// reaches the tolerance in two on the M2 stand.
+inline constexpr int kOrganicCalibrationShippedSteps = 4;
+// What a calibration is allowed to do to a part. Outside this the factor is not a bead
+// that needs adjusting but a target the emitter cannot deliver, and the run says so.
+inline constexpr double kOrganicCalibrationFactorMin = 0.5;
+inline constexpr double kOrganicCalibrationFactorMax = 2.0;
+
 // Modifies `stress` (6 per voxel) in place for candidate voxels whose
-// `voxel_region_id` names a configured region. `dead_fraction` is the fraction of
-// the peak below which a voxel counts as dead (0.02 is the measured noise floor).
+// `voxel_region_id` names a configured region. A voxel is DEAD when its von Mises is
+// below max(`dead_fraction` * peak, `dead_floor`): the fraction is the measured noise
+// floor (0.02) and `dead_floor` is the absolute one in MPa (see above). The report's
+// `dead_threshold` is the value actually applied, so the receipt says which rule bound.
 SyntheticStressReport synthesize_focal_stress(
     const VoxelGrid& grid, const std::vector<char>& candidate,
     const std::vector<int>& voxel_region_id,
@@ -1344,6 +1476,13 @@ struct OrganicGenStats {
   std::size_t nodes_merged = 0;          // endpoints snapped onto a shared node
   std::size_t merge_clusters = 0;        // shared nodes created
   std::size_t merge_degenerate_spans = 0;   // spans the merge collapsed to nothing
+  // ★ PAIRS THE MERGE REFUSED BECAUSE THEY ARE TWO DISTINCT NODES OF ONE MEMBER.
+  // Nonzero means the span list reached the merge sampled finer than 2 x radius --
+  // which is the normal state of a traced polyline -- and that the merge declined to
+  // chain along it. It was this chaining that took 2606 traced spans down to 120 on
+  // the app's sample cube. A run where this is 0 while the tracer's pitch is under
+  // one radius means the tagging is not reaching the merge.
+  std::size_t merge_same_member_refused = 0;
   // ── ★★ NOTHING STARTS IN MID-AIR ────────────────────────────────────────────
   // A LAYER-LOCAL bar, and it is not the same as `floating_voxels_*` above. That one
   // asks whether every piece is reachable from the plate in the FINISHED solid; this
@@ -1401,7 +1540,10 @@ struct OrganicGenStats {
   std::size_t mutations = 0;
   int fixed_point_rounds = 0;
   bool fixed_point_converged = false;   // ★ false = ran out of rounds, NOT settled
-  std::size_t support_spans_cut = 0;        // could not be held up, so not printed
+  std::size_t support_spans_cut = 0;
+  // ★ spans that run over open air. COUNTED, never repaired -- the overhang fillet that
+  // used to flare them was removed for depositing blobs up to nine times the strut.
+  std::size_t unsupported_spans_seen = 0;        // could not be held up, so not printed
   // Tips left dangling BY those cuts, eroded afterwards. The mid-air repair must not
   // reintroduce the free ends the prune exists to remove.
   std::size_t support_cleanup_pruned = 0;
@@ -1456,7 +1598,6 @@ struct OrganicGenStats {
   // the islands are not at the base -- look higher.
   std::size_t islands_held_by_solid = 0;
   // spans the fillet would have flared, left as drawn because the job switched it off
-  std::size_t fillet_skipped_spans = 0;
   // raster voxels the repair-leg flood seeded from PART SOLID (not the plate)
   std::size_t flood_seeds_on_solid = 0;
   // components spared by the stranded drop because they stand on the plate or solid
@@ -1485,7 +1626,6 @@ struct OrganicGenStats {
   std::size_t arched_spans = 0;
   double arch_max_rise_mm = 0.0;
   // ★★ FILLETING. `filleted` counts spans re-emitted with a flared profile;
-  // `fillet_unresolved` those whose flare hit the radius cap before the two sides met,
   // so the span is better but not fixed — reported separately, never folded into the
   // success count.
   // ★★ GROWTH REPORTING. `growth_steps` is how many tip advances were taken.
@@ -1595,9 +1735,14 @@ struct OrganicGenStats {
   // -1 means the stage did not run.
   int census_components[kCensusStages] = {-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1};
   double census_grown_len_mm = 0.0;
-  std::size_t filleted_spans = 0;
-  std::size_t fillet_unresolved = 0;
-  double fillet_max_radius_mm = 0.0;
+  // centreline resampling: spans before and after, and the length that survived (which
+  // must be within kOrganicRunCollapseGuard of the original or the pass is abandoned).
+  std::size_t runs_spans_before = 0;
+  std::size_t runs_spans_after = 0;
+  std::size_t runs_chains = 0;
+  double runs_len_before_mm = 0.0;
+  double runs_len_after_mm = 0.0;
+  bool runs_abandoned = false;
   bool base_mat_radius_raised_for_raster = false;
   double base_mat_z_mm = 0.0;
   // ── ★★ THE FILL MAT ─────────────────────────────────────────────────────────
@@ -1627,6 +1772,36 @@ struct OrganicSpan {
   Vec3 a{0, 0, 0}, b{0, 0, 0};
   double r = 0.0;
 };
+// ── §4(a)'s per-voxel density, callable on ANY span set ─────────────────────────
+// Extracted so the field can be recomputed from the spans that actually SHIP, not only
+// from the ones the tracer drew. It is a HOMOGENISED density, not an occupancy: the
+// deposited volume is box-filtered over a window one local separation across and
+// normalised by the CANDIDATE volume in that window, so a voxel at a region's edge is not
+// reported thinner merely for sitting there. `separation_mm` is the tracer's own
+// `spacing_used_mm` -- 0 marks a voxel off the candidate set, which is how the candidate
+// set is recovered. rho_min/rho_max are the grading band, 0 = unclamped.
+struct OrganicDensityField {
+  std::vector<char> mask;
+  std::vector<double> relative_density;
+  std::size_t latticed_voxels = 0;
+  double rho_min_emitted = 0.0, rho_max_emitted = 0.0, rho_median_emitted = 0.0;
+  std::size_t clamped_lo_voxels = 0, clamped_hi_voxels = 0;
+  double deposited_mm3 = 0.0;     // sum of pi*r^2*L, overlaps counted twice
+};
+// `union_subdiv` chooses how the material in each voxel is measured, and it is the
+// difference between a number that exists and one that does not:
+//   0 -- the DEPOSIT: pi*r^2*dl walked along every span and added to the voxel it lands
+//        in. A strut crossing is counted once per strut, so the joints are over-stated.
+//        Measured on the M2 stand: 57,661 mm3 where the shipped file holds 41,955.
+//   k -- each voxel's share of the UNION, by a deterministic k^3 subgrid
+//        (lattice_union_voxel_volume). No double count, no seed.
+OrganicDensityField organic_relative_density(const VoxelGrid& grid,
+                                             const std::vector<char>& candidate,
+                                             const std::vector<double>& separation_mm,
+                                             const std::vector<OrganicSpan>& spans,
+                                             double rho_min, double rho_max,
+                                             int union_subdiv = 0);
+
 
 class LatticeBoundary;  // topopt/lattice_boundary.hpp
 class MeshDistance;     // topopt/mesh_distance.hpp — the EXPORTED shell's distance
@@ -1709,6 +1884,34 @@ struct OrganicWeldStats {
   bool watertight = false;
   double volume_mm3 = 0.0;        // ★ the TRUE UNION volume — overlaps deducted
   std::size_t triangles = 0;
+  // ★ THE EMBED-AND-TRIM PASS (maintainer, 2026-09-08: "boolean them together and then
+  // just remove anything that goes beyond the solid"). Free strut ends are driven a
+  // generous distance along their own axis so they run INTO the part's solid rather
+  // than stopping a few millimetres short of it, and the rasterised field is then
+  // INTERSECTED with the part. The overshoot needs no accuracy -- material inside solid
+  // is absorbed by the union -- and the intersection is what guarantees nothing escapes
+  // a far face. Both happen here, on the FIELD, because the design grid's solid mask is
+  // binary at its own pitch: geometry placed against it lands about a voxel off (1.7 mm
+  // measured, against struts 0.42-1.02 mm thick), which is why doing this on the span
+  // list could not be made to work.
+  long long ends_embedded = 0;        // free ends extended into the solid
+  double embed_mm = 0.0;              // how far each was driven
+  long long trimmed_voxels = 0;       // raster voxels removed for lying outside the part
+  bool part_clip_ran = false;         // false => no part field was supplied, nothing trimmed
+};
+
+// The part the weld is trimmed to: the design's own density field, sampled TRILINEARLY
+// so the cut follows the same iso-surface the solid's mesh is built from rather than a
+// voxel staircase. Empty `density` disables both the embedding and the trim.
+struct OrganicWeldPart {
+  Vec3 origin{0, 0, 0};
+  double h = 0.0;
+  int nx = 0, ny = 0, nz = 0;
+  const std::vector<double>* density = nullptr;
+  double iso = 0.5;
+  // How far a free strut end is driven along its axis. Only ends that actually find
+  // solid ahead are moved; the trim then cuts back whatever overshoots.
+  double embed_mm = 0.0;
 };
 
 // `pitch_mm` 0 => derived from the thinnest emitted strut (a quarter of its diameter),
@@ -1721,7 +1924,10 @@ TriangleMesh organic_weld(const std::vector<OrganicSpan>& spans, double pitch_mm
                           // each clipped capsule a hemispherical cap a radius below the
                           // plane — the very dots the base trim removes. Only a cut on
                           // the SOLID gives a flat face. -inf = no cut.
-                          double floor_z = -1e30);
+                          double floor_z = -1e30,
+                          // embed free ends into the solid, then intersect with the
+                          // part. Default-constructed (no density) = neither.
+                          const OrganicWeldPart& part = OrganicWeldPart{});
 
 
 // ── THE CELL-SIZE RECOMMENDATION (maintainer, 2026-09-06) ───────────────────

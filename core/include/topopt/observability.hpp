@@ -1017,12 +1017,20 @@ struct RunInfo {
   // ★ which rule set that threshold: the absolute floor, or 2 % of the part's peak.
   bool organic_synthetic_dead_floor_bound = false;
   std::vector<OrganicSyntheticRegionInfo> organic_synthetic_by_region;   // keyed by face_id
-  // ★ the overhang fillet (grading.organic_overhang_fillet) and the transfer ties
-  // (grading.organic_transfer_ties), so the receipt says what each did or declined
   double organic_solid_rim_mm = 0.0;        // grade-to-solid band at the outline
   long long organic_solid_rim_voxels = 0;
-  bool organic_overhang_fillet_on = true;
-  long long organic_fillet_skipped_spans = 0;
+  // spans over open air, counted and NOT repaired (the fillet was removed)
+  long long organic_unsupported_spans = 0;
+  // ── ★ §3 PARITY: THE SPAN CENSUS, to be diffed against the app's own trace banner.
+  // Measured on the spans that SHIP, after every pass -- which is the set the file is
+  // carved from and the set the certificate reads, not the set the tracer drew. The
+  // two differ, and reporting the tracer's numbers here is how a run comes to describe
+  // geometry it did not emit.
+  long long organic_span_count = 0;
+  double organic_span_length_mm = 0.0;
+  double organic_span_radius_min_mm = 0.0;
+  double organic_span_radius_p50_mm = 0.0;
+  double organic_span_radius_max_mm = 0.0;
   bool organic_transfer_ties_on = false;
   long long organic_ties_seeded = 0;
   long long organic_ties_landed = 0;
@@ -1148,9 +1156,6 @@ struct RunInfo {
   long long organic_cantilever_islands = 0;
   long long organic_arched_spans = 0;
   double organic_arch_rise = 0.0;
-  long long organic_filleted = 0;
-  long long organic_fillet_unresolved = 0;
-  double organic_fillet_radius = 0.0;
   // ── ★★ GROWTH TELEMETRY (task PR-353 amendment §1) ──────────────────────────
   // `growth_ran` distinguishes "growth measured zero" from "growth never ran": a
   // traced run reports false and every counter below is meaningless, which is the
@@ -1248,6 +1253,43 @@ struct RunInfo {
   // an adjacent-but-not-joined pair is a mechanical disconnection at that seam.
   long long stepped_adjacent_region_pairs = 0;
   long long stepped_adjacent_pairs_joined = 0;
+  // ── ★ ANY-STEP STEPPED (brief of 2026-09-17 §2.4) ──────────────────────────
+  // The plan the job stated and core laid down, and its size histogram in the same
+  // shape as the preview's DIAG so the run and the screen can be compared entry for
+  // entry rather than by eye.
+  long long stepped_anystep_cells = 0;
+  long long stepped_anystep_regions = 0;
+  long long stepped_anystep_passes = 0;
+  std::string stepped_anystep_histogram;
+  // ── ★ §3 PARITY: THE NUMBERS THE PREVIEW'S DIAG PRINTS, SO THE TWO CAN BE DIFFED ──
+  // Per emitted size: the relative density USED and the strut radius core's law gave
+  // at it, in the same descending-size order as the histogram. When the job sent
+  // stepped_cells[].rho these must equal what was sent; when it did not, they are what
+  // core derived. Either way the app can check a size at a time rather than by eye.
+  // Shape: "9.000=0.2189/0.9852, 3.000=0.1740/0.2611" (size=rho/radius_mm).
+  std::string stepped_anystep_rho_by_size;
+  // The outline beam as APPLIED (ruling B): the width core derived from bead and
+  // voxel, the bleed the band asked for, and how far in the solid actually reaches.
+  // 0 when the shape grade is off, which is when there is no beam.
+  double lattice_outline_beam_mm = 0.0;
+  double lattice_outline_bleed_mm = 0.0;
+  double lattice_outline_inward_mm = 0.0;
+  long long lattice_outline_voxels = 0;
+  // ── THE SEAM CENSUS, which is the whole reason any-step certifies as a network ──
+  // `t_junction_ends` is an end that landed on another member's interior and was
+  // FUSED -- the normal case for an any-step seam, reported and never gated.
+  // `floating_ends` is an end on NOTHING; after the contact weld it must be 0 for a
+  // certified job, because a packed plan has no free tips by construction.
+  // The subdivision counts sit beside them: the weld is endpoint-based, so an
+  // unsubdivided octet member crossing at mid-span is not fused at all, and the
+  // before/after is the evidence that the precondition was actually met.
+  long long stepped_seam_spans_before = 0;
+  long long stepped_seam_spans_after = 0;
+  double stepped_seam_piece_mm = 0.0;
+  double stepped_seam_longest_before_mm = 0.0;
+  long long stepped_seam_welded_nodes = 0;
+  long long stepped_seam_t_junction_ends = 0;
+  long long stepped_seam_floating_ends = 0;
   long long grading_solid_fallback_voxels = 0;  // L4: too thin -> stayed solid
   double grading_min_member_width_mm = 0.0; // thinnest latticed member (mm)
   double grading_min_cells_per_member = 0.0;    // at that member (>= floor, EXCEPT
