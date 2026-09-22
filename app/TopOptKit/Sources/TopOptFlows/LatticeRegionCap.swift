@@ -112,12 +112,23 @@ public enum LatticeRegionCap {
             // material, as he asked on 09-19.
             let cap = region.depthMM
             for (li, loop) in region.outlineLoops.enumerated() where loop.count >= 3 {
-                let ring = LatticeOutlineRibbon.offsetRing(loop, by: region.inPlaneOffsetMM,
+                let ring = LatticeOutlineRibbon.offsetRing(loop, by: -region.inPlaneOffsetMM,
                                                            seams: li < region.outlineSeams.count ? region.outlineSeams[li] : [])
                 guard ring.count >= 3 else { continue }
                 for (a, b, c) in triangulate(ring) {
                     let corners = [ring[a], ring[b], ring[c]].map { region.origin + bu * $0.x + bv * $0.y + n * cap }
-                    if let test = endsInsideMaterial, !corners.contains(where: { test(ri, $0) }) { continue }
+                    // ★ ALL THREE CORNERS (review 2026-09-22 #22): "any corner" drew a
+                    // whole triangle for one measured corner, and on a fanned outline
+                    // that one corner reached across the open face — a plate over air.
+                    if let test = endsInsideMaterial, !corners.allSatisfy({ test(ri, $0) }) { continue }
+                    // ★ AND NEVER INSIDE ANOTHER LATTICED PRISM (the pocket rule + the seam
+                    // rule): where a second prism continues past this one's end, the end
+                    // is lattice, not a wall.
+                    let other = regions.enumerated().contains { (oi, o) in
+                        oi != ri && o.role == .include && corners.contains { q in
+                            LatticeRegionMask.containsWholePrism(q - n * 0.01, region: o) }
+                    }
+                    if other { continue }
                     for p in corners { emit(p, -n) }
                 }
             }

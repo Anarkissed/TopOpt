@@ -200,9 +200,9 @@ public struct LatticeOrganicInput: Sendable {
     /// `var` (2026-09-05) so the synthetic-stress pass can hand the tracer a
     /// tensor with the unloaded walls filled in; everything else is the solve's.
     public var tensor: [Double]
-    public let dims: (Int, Int, Int)
-    public let originMM: SIMD3<Double>
-    public let spacingMM: Double
+    public var dims: (Int, Int, Int)
+    public var originMM: SIMD3<Double>
+    public var spacingMM: Double
     /// The printer's bead. 0 is core's UNSET refusal — printability is user input.
     public let minExtrudableWidthMM: Double
     /// Model-space build direction, for the overhang cone (disarmed by default).
@@ -414,6 +414,10 @@ public struct LatticeSDFScene {
     /// region's cap they read "outside" even inside solid material. The cap wall has to
     /// ask the part itself whether material continues, and this is the part itself.
     public let solidOccupancy: LatticeVoxelGrid
+    /// ★ The part's material inside every declared prism, IGNORING the slabs — the grid
+    /// the measurers read (`LatticeRegionMask.clippedWholePrism`). `occupancy` is the
+    /// slab-clipped set where lattice may go.
+    public let prismOccupancy: LatticeVoxelGrid
     /// The organic solid rim's width (mm) when the algorithm is organic and a rim is
     /// on — the outline ribbon's width on that path. 0 otherwise.
     public let organicSolidRimMM: Double
@@ -619,14 +623,18 @@ public struct LatticeSDFScene {
                 // ★ one cell, in mm — the slab's floor (see `LatticeWallThickness`)
                 wallThicknessFloorMM: Double = 0,
                 // ★ per wall (selectable key), the depths its cells can be packed to (D1)
-                wallDepthSteps: [String: [Double]] = [:]) {
+                wallDepthSteps: [String: [Double]] = [:],
+                // ★ the wall-depth sim rule's OWN field (review #31): the grading's `field`
+                // is nil under "No grade"/"Grade to fit", which silently turned "By sim"
+                // into the whole range. nil ⇒ `field`.
+                wallStressField: StressField? = nil) {
         self.preview = LatticeSDFPreview(latticeID: latticeID)
         // ★★ THE SLAB, BUILT FIRST (2026-09-21): every reader below — the region field,
         // the organic candidates, the octree, the cap wall — reads `regions`, so the
         // thickness maps are attached before any of them run. `field` is the solve's
         // von Mises, the sim rule's input.
         let regions = LatticeWallThicknessBuilder.attach(
-            regions, field: field,
+            regions, field: wallStressField ?? field,
             floorMM: wallThicknessFloorMM > 0 ? wallThicknessFloorMM
                 : Double((mesh.bounds.max - mesh.bounds.min).max()) / Double(max(1, maxDim)),
             depthStepsFor: { r in r.selectableKey.flatMap { wallDepthSteps[$0] } })
@@ -721,6 +729,9 @@ public struct LatticeSDFScene {
         self.regions = regions
         self.occupancy = LatticeRegionMask.clipped(
             solid, to: regions, whenEmpty: whenEmpty)
+        self.prismOccupancy = regions.contains(where: { $0.thicknessMap != nil })
+            ? LatticeRegionMask.clippedWholePrism(solid, to: regions, whenEmpty: whenEmpty)
+            : occupancy
         self.partSDF = LatticePreviewOccupancy.signedDistance(
             positions: mesh.positions, indices: mesh.indices, like: occupancy)
         tOccupancy = Date().timeIntervalSince(sceneT0)
@@ -2265,7 +2276,7 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
         regionTex = scene.regionSDF.flatMap { r in makeRegionTexture(r, outline: scene.outlineSDF, prism: scene.prismSDF) }
         // ★ the cap only where the prism ends INSIDE material — measured wall width past
         // the declared depth by more than a voxel; a prism through the whole wall gets none
-        let occ = scene.occupancy
+        let occ = scene.prismOccupancy          // ★ the whole prism: the cap is measured, not the slab
         let voxel = Double(max(occ.spacing.x, max(occ.spacing.y, occ.spacing.z)))
         var widthFields: [Int: [Double]] = [:]
         for (i, r) in scene.regions.enumerated() where r.role == .include && r.kind == .face {
@@ -2510,7 +2521,7 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
     /// nil when the scene carries no thickness field: the caller then seeds the
     /// full outline, which is the pre-rule behaviour, not a guess.
     static func attachedSeed(scene: LatticeSDFScene) -> [Bool]? {
-        let occ = scene.occupancy
+        let occ = scene.prismOccupancy          // ★ material OUTSIDE THE PRISM seeds the rim, never a slab edge
         let mm = scene.memberThicknessMM
         guard mm.count == occ.values.count else { return nil }
         var seed = [Bool](repeating: false, count: occ.values.count)
@@ -2559,7 +2570,9 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
         // the in-plane distance BFS ran twice — the diagnostics block re-ran the
         // whole multi-source sweep just to print two numbers. On his 128-grid
         // part that is real seconds of "quite some time to load" for nothing.
-        let candidate = scene.occupancy.values.map { $0 > 0.5 }
+        // ★ the boundary distance and the widths read the WHOLE prism (review #21): the
+        // slab's edges are not boundaries, and a rim at them was the wall he kept seeing
+        let candidate = scene.prismOccupancy.values.map { $0 > 0.5 }
         var steppedBoundary: [[Double]?] = []
         // ★★★ STEPPED IS TRIED FIRST, AND THAT ORDER IS THE WHOLE POINT (maintainer,
         // 2026-08-22: "I attempted a Stepped lattice preview and it didn't work").
@@ -2605,7 +2618,7 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
                     widthPerRegion: scene.regions.map { r in
                         r.kind == .face && r.role == .include
                             ? LatticeMeasuredRegionWidth.wallWidthFieldAlongNormalMM(
-                                region: r, occupancy: scene.occupancy,
+                                region: r, occupancy: scene.prismOccupancy,
                                 partSDF: scene.partSDF)
                             : nil
                     },
@@ -2650,7 +2663,7 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
                 // Only when the shape grade is on: the outline is the grade's frame.
                 let solidBandMM = steppedShapeFit ? Self.outlineBeamMM(lineWidthMM: lineWidthMM, voxelMM: voxelMM) : 0
                 if let o = LatticePreviewOccupancy.octreeCellField(
-                    occupancy: scene.occupancy, demand: scene.drawnDemand ?? scene.demand,
+                    occupancy: scene.prismOccupancy, demand: scene.drawnDemand ?? scene.demand,
                     regions: scene.regions, cellMM: steppedCellMM,
                     lineWidthMM: lineWidthMM,
                     realFloorMM: Self.printableFloorBeads * lineWidthMM,
@@ -3697,7 +3710,7 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
         // exactly as the octet's outline beam is.
         let width = field.solidBandMM > 0 ? field.solidBandMM : scene.organicSolidRimMM
         guard width > 0 else { return nil }
-        let occ = scene.occupancy
+        let occ = scene.prismOccupancy          // ★ the beam's depth is the wall's, whole prism
         var widths: [Int: [Double]] = [:]
         for (i, r) in scene.regions.enumerated() where r.role == .include && r.kind == .face {
             widths[i] = LatticeMeasuredRegionWidth.wallWidthFieldAlongNormalMM(

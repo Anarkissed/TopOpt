@@ -267,6 +267,62 @@ public enum LatticeFaceOutline {
     /// The loops' own bounding half-extents — so a caller can keep emitting the
     /// slab's `halfU`/`halfW` (core still reads them) from the SAME outline the
     /// mask is built from, rather than from a second fit.
+    /// ★ INSIDE, WITH THE SEAMS FLARED (2026-09-22): a point outside the polygon still
+    /// belongs to the prism when it lies beyond a seam edge by no more than depth × tilt
+    /// (the bisector plane with the neighbouring prism); a point inside the polygon leaves
+    /// it when a converging seam's bisector has cut it off. `s` is the depth along the normal.
+    public static func insideWithFlare(_ p: SIMD2<Double>, loops: [Loop], seams: [[Bool]],
+                                       tilts: [[Double]], depth s: Double) -> Bool {
+        var inside = contains(p, loops: loops)
+        guard s > 0, !tilts.isEmpty else { return inside }
+        for (l, loop) in loops.enumerated() {
+            let sm = l < seams.count ? seams[l] : []
+            let tl = l < tilts.count ? tilts[l] : []
+            let m = loop.count
+            guard m >= 3 else { continue }
+            // the polygon's winding decides which side of an edge is outside
+            var area = 0.0
+            for i in 0..<m { let a = loop[i], b = loop[(i + 1) % m]; area += a.x * b.y - b.x * a.y }
+            let ccw = area > 0
+            for i in 0..<m where i < sm.count && sm[i] && i < tl.count && abs(tl[i]) > 1e-9 {
+                let a = loop[i], b = loop[(i + 1) % m]
+                let d = b - a, l2 = simd_dot(d, d)
+                guard l2 > 1e-12 else { continue }
+                let t = simd_dot(p - a, d) / l2
+                guard t >= -1e-6, t <= 1 + 1e-6 else { continue }
+                // outward normal of this edge: right of the direction for CCW, left for CW
+                let nOut = ccw ? SIMD2(d.y, -d.x) / sqrt(l2) : SIMD2(-d.y, d.x) / sqrt(l2)
+                let out = simd_dot(p - a, nOut)          // > 0 outside this edge
+                let flare = s * tl[i]
+                if flare > 0, !inside, out >= 0, out <= flare { inside = true }
+                if flare < 0, inside, out <= 0, -out <= -flare { inside = false }
+            }
+        }
+        return inside
+    }
+
+    /// ★ THE SIGN ACROSS A SEAM, for in-plane readers with no depth (the octree's outline
+    /// raster): a point outside the polygon whose NEAREST edge is a seam is not outside the
+    /// lattice — the next prism continues there — so it reads as inside, at the distance to
+    /// the nearest true outline edge.
+    public static func signedDistanceAcrossSeams(_ p: SIMD2<Double>, loops: [Loop], seams: [[Bool]]) -> Double {
+        let sd = signedDistance(p, loops: loops, seams: seams)
+        guard sd > 0, !seams.isEmpty else { return sd }
+        var nearest = Double.greatestFiniteMagnitude, nearestIsSeam = false
+        for (l, loop) in loops.enumerated() {
+            let sm = l < seams.count ? seams[l] : []
+            let m = loop.count
+            for i in 0..<m {
+                let a = loop[i], b = loop[(i + 1) % m]
+                let d = b - a, l2 = simd_dot(d, d)
+                let t = l2 > 1e-12 ? max(0, min(1, simd_dot(p - a, d) / l2)) : 0
+                let dist = simd_length(p - (a + d * t))
+                if dist < nearest { nearest = dist; nearestIsSeam = i < sm.count && sm[i] }
+            }
+        }
+        return nearestIsSeam ? -sd : sd
+    }
+
     public static func halfExtents(_ loops: [Loop]) -> (halfU: Double, halfW: Double)? {
         var lo = SIMD2<Double>(.greatestFiniteMagnitude, .greatestFiniteMagnitude)
         var hi = SIMD2<Double>(-.greatestFiniteMagnitude, -.greatestFiniteMagnitude)

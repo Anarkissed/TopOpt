@@ -161,3 +161,51 @@ final class LatticeCornerPlateTests: XCTestCase {
         XCTAssertEqual(mb.interleaved.count, m.interleaved.count, "order does not change the mesh size")
     }
 }
+
+/// ★ THE FLARE (2026-09-22): adjacent prisms meet at the bisector plane, so a concave wall's
+/// facets leave no wedge of material between them.
+final class LatticeSeamFlareTests: XCTestCase {
+    func testAPointBeyondADivergingSeamIsInsideUpToDepthTimesTilt() {
+        let square: [SIMD2<Double>] = [SIMD2(-10, -10), SIMD2(10, -10), SIMD2(10, 10), SIMD2(-10, 10)]
+        let seams = [[false, true, false, false]]      // the +x edge is a seam
+        let tilts = [[0.0, 1.0, 0.0, 0.0]]              // 45°: flare = depth
+        XCTAssertTrue(LatticeFaceOutline.insideWithFlare(SIMD2(11.5, 0), loops: [square], seams: seams, tilts: tilts, depth: 2), "1.5 beyond, depth 2")
+        XCTAssertFalse(LatticeFaceOutline.insideWithFlare(SIMD2(12.5, 0), loops: [square], seams: seams, tilts: tilts, depth: 2), "2.5 beyond")
+        XCTAssertFalse(LatticeFaceOutline.insideWithFlare(SIMD2(11.5, 0), loops: [square], seams: seams, tilts: tilts, depth: 0), "no flare at the surface")
+        XCTAssertFalse(LatticeFaceOutline.insideWithFlare(SIMD2(0, 11.5), loops: [square], seams: seams, tilts: tilts, depth: 2), "a true outline edge does not flare")
+        // converging: the bisector cuts the prism short of the seam
+        let conv = [[0.0, -1.0, 0.0, 0.0]]
+        XCTAssertFalse(LatticeFaceOutline.insideWithFlare(SIMD2(9, 0), loops: [square], seams: seams, tilts: conv, depth: 2), "1 mm inside a converging seam at depth 2 is cut off")
+        XCTAssertTrue(LatticeFaceOutline.insideWithFlare(SIMD2(7, 0), loops: [square], seams: seams, tilts: conv, depth: 2))
+        // the in-plane reader: beyond a seam reads inside, at the distance to the true outline
+        XCTAssertLessThan(LatticeFaceOutline.signedDistanceAcrossSeams(SIMD2(11, 0), loops: [square], seams: seams), 0)
+        XCTAssertGreaterThan(LatticeFaceOutline.signedDistanceAcrossSeams(SIMD2(0, 11), loops: [square], seams: seams), 0)
+    }
+
+    func testTheEmissionGivesFacetSeamsATiltOfOneSignAndTheSizeOfTheirDihedral() {
+        var v: [Float] = [], idx: [Int32] = [], fid: [Int32] = []
+        let r: Float = 50, steps = 18
+        for i in 0...steps { let a = Float(i) / Float(steps) * .pi / 2; v += [r * cos(a), r * sin(a), 0, r * cos(a), r * sin(a), 20] }
+        for i in 0..<steps { let a = Int32(2 * i); idx += [a, a + 2, a + 1, a + 1, a + 2, a + 3]; fid += [7, 7] }
+        let mesh = ViewerMesh(vertices: v, indices: idx, faceIDs: fid)
+        let gid = UUID()
+        let group = SelectionGroup(id: gid, name: "C", colorIndex: 0, faces: [7], regionIDs: [])
+        let res = LatticeRegionEmission.regions(groups: [group], roles: [gid: .include], primitives: { _ in [] },
+                                                includePrimitives: [], faceDepthMM: 5,
+                                                facets: { LatticeFaceFacets.facets(face: $0, in: mesh) },
+                                                resolve: { _ in nil })
+        XCTAssertGreaterThan(res.regions.count, 1)
+        var signs = Set<Int>(), count = 0
+        for reg in res.regions {
+            XCTAssertEqual(reg.outlineSeams.count, reg.outlineSeamTilt.count)
+            for (l, sl) in reg.outlineSeams.enumerated() { for (i, isSeam) in sl.enumerated() where isSeam {
+                let t = reg.outlineSeamTilt[l][i]
+                XCTAssertGreaterThan(abs(t), 1e-6, "a seam carries a tilt")
+                XCTAssertLessThan(abs(t), tan(20 * Double.pi / 180), "no facet pair is more than 40° apart")
+                signs.insert(t > 0 ? 1 : -1); count += 1
+            } }
+        }
+        XCTAssertGreaterThan(count, 0)
+        XCTAssertEqual(signs.count, 1, "★ one curvature ⇒ one sign everywhere")
+    }
+}

@@ -43,7 +43,9 @@ public struct LatticeWallEditorFace: Identifiable, Equatable {
         self.depthStepsMM = depthStepsMM; self.columnMM = max(0.5, columnMM)
     }
     /// How many columns the box is divided into.
-    public var columns: Int { max(1, min(96, Int((widthMM / columnMM).rounded()))) }
+    /// ★ one column per base cell; the cap only guards a degenerate pitch (review #44: 96
+    /// made a 2 mm cell on a 300 mm wall a 3-cell column)
+    public var columns: Int { max(1, min(400, Int((widthMM / columnMM).rounded()))) }
     /// A depth in mm snapped to this wall's steps (or to 0.5 mm when continuous), never above
     /// the wall. The END rounds DOWN and never to nothing (a positive ask is never left solid);
     /// the START rounds to the NEAREST step, zero included, so the line can sit at the surface
@@ -224,8 +226,16 @@ public struct LatticeWallProfileEditor: View {
     /// to the wall's steps and held inside the allowed range.
     private func depthAt(_ f: LatticeWallEditorFace, y: Double, side: LatticeWallProfile.Side) -> Double {
         let r = allowedMM(f), t = f.thickMM
-        let raw = side == .start ? min(0.5, max(0, y)) * t : max(0.5, min(1, y)) * t
-        return f.snap(min(r.end, max(r.start, raw)), nearest: side == .start)
+        // ★ the halves are halves of the ALLOWED RANGE (review #45): with a range of
+        // 8–12 on a 12 mm wall the start's "≤ 50 %" (6 mm) clamped to 8 and never moved
+        let mid = 0.5 * (r.start + r.end)
+        let raw = min(1, max(0, y)) * t
+        let v = side == .start ? min(mid, max(r.start, raw)) : max(mid, min(r.end, raw))
+        return f.snap(v, nearest: side == .start)
+    }
+    /// The mid-plane of the allowed range, as a share of the wall (the editor's y).
+    private func midShare(_ f: LatticeWallEditorFace) -> Double {
+        let r = allowedMM(f); return 0.5 * (r.start + r.end) / max(f.thickMM, 1e-9)
     }
 
     // MARK: one wall's card
@@ -341,7 +351,8 @@ public struct LatticeWallProfileEditor: View {
                  at: CGPoint(x: box.minX, y: box.maxY + 16), anchor: .leading)
 
         // the mid-plane: the start line lives above it, the end line below (his 50 % rule)
-        var midp = Path(); midp.move(to: CGPoint(x: box.minX, y: box.midY)); midp.addLine(to: CGPoint(x: box.maxX, y: box.midY))
+        let midY = box.minY + box.height * CGFloat(midShare(f))
+        var midp = Path(); midp.move(to: CGPoint(x: box.minX, y: midY)); midp.addLine(to: CGPoint(x: box.maxX, y: midY))
         ctx.stroke(midp, with: .color(.white.opacity(0.45)), style: StrokeStyle(lineWidth: 1.2, dash: [5, 5]))
         // the steps: the band between each column's start and end
         let allowed = allowedMM(f)
@@ -397,7 +408,7 @@ public struct LatticeWallProfileEditor: View {
                 let x = box.minX + bw * (CGFloat(h.column) + 0.5) / CGFloat(cols)
                 let y = box.minY + CGFloat(h.mm / t) * bh
                 let c = Path(ellipseIn: CGRect(x: x - 7, y: y - 7, width: 14, height: 14))
-                ctx.fill(c, with: .color(.white)); ctx.stroke(c, with: .color(h.mm / t <= 0.5 ? Self.green : Self.red), lineWidth: 2.5)
+                ctx.fill(c, with: .color(.white)); ctx.stroke(c, with: .color(h.mm / t <= midShare(f) ? Self.green : Self.red), lineWidth: 2.5)
                 ctx.draw(Text(String(format: "%.1f mm", h.mm)).font(readFont).foregroundColor(.white),
                          at: CGPoint(x: x, y: max(box.minY + 10, y - 18)), anchor: .center)
             }
@@ -442,7 +453,7 @@ public struct LatticeWallProfileEditor: View {
         // the last one and this, so a fast stroke leaves no gap
         let cols = f.columns
         let col = min(cols - 1, max(0, Int((n.x * Double(cols)).rounded(.down))))
-        let side: LatticeWallProfile.Side = ny < 0.5 ? .start : .end
+        let side: LatticeWallProfile.Side = ny < midShare(f) ? .start : .end
         let mm = depthAt(f, y: ny, side: side)
         let from = d.lastColumn ?? col
         setProfile(f) { p in

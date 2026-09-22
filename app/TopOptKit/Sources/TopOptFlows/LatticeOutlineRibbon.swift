@@ -86,8 +86,12 @@ public enum LatticeOutlineRibbon {
         // 20° tip puts it 30 mm in). Where the polygon is thinner than twice the
         // offset that corner lies outside; the ring then takes the deepest point on
         // the way to it, so the beam fills the thin part and never leaves the outline.
-        func inside(_ q: SIMD2<Double>) -> Double { -LatticeFaceOutline.signedDistance(q, loops: [loop]) }
-        for i in 0..<m where inside(ring[i]) < abs(d) - 1e-6 {
+        func inside(_ q: SIMD2<Double>) -> Double { -LatticeFaceOutline.signedDistance(q, loops: [loop], seams: seams.isEmpty ? [] : [seams]) }
+        // ★ INWARD ONLY (2026-09-22): an OUTWARD offset (a grown region, `d < 0`) puts
+        // the ring outside the loop by design; walking it back to the deepest point
+        // collapsed every grown ring onto the loop itself (the ribbon test read 1000
+        // for a ring meant to sit at 1050).
+        for i in 0..<m where d > 0 && inside(ring[i]) < d - 1e-6 {
             let v = loop[i], x = ring[i]
             var best = v, bestIn = inside(v)
             for k in 1...32 {
@@ -98,6 +102,30 @@ public enum LatticeOutlineRibbon {
             ring[i] = best
         }
         return ring
+    }
+
+    /// The include face region under `faceID` whose outline holds the edge (a, b) — the
+    /// nearest of that face's facets, by the world distance of its outline edges.
+    static func nearestRegion(to a: SIMD3<Double>, _ b: SIMD3<Double>, faceID: Int,
+                              in regions: [LatticeRegionSpec]) -> LatticeRegionSpec? {
+        var best: (LatticeRegionSpec, Double)? = nil
+        for r in regions where r.role == .include && r.kind == .face && r.faceID == faceID {
+            let n = LatticeRegionMask.unit(r.normal)
+            guard simd_length(n) > 0.5 else { continue }
+            let (bu, bv) = LatticeRegionMask.basis(n)
+            for loop in r.outlineLoops {
+                for i in loop.indices {
+                    let p = r.origin + bu * loop[i].x + bv * loop[i].y
+                    let q = r.origin + bu * loop[(i + 1) % loop.count].x + bv * loop[(i + 1) % loop.count].y
+                    let d = 0.5 * Swift.min(simd_length(p - a) + simd_length(q - b), simd_length(p - b) + simd_length(q - a))
+                    if best == nil || d < best!.1 { best = (r, d) }
+                }
+            }
+        }
+        // within a tenth of the edge or a millimetre — the projection of a shared edge
+        // onto two different facet planes can differ by the sagitta
+        guard let (r, d) = best, d < Swift.max(1.0, 0.1 * simd_length(b - a)) else { return nil }
+        return r
     }
 
     /// `depthAt(regionIndex, point)` answers how deep the beam runs into the part at a
@@ -134,8 +162,11 @@ public enum LatticeOutlineRibbon {
                 let m = loop.count
                 guard m >= 3 else { continue }
                 let seams = li < region.outlineSeams.count ? region.outlineSeams[li] : []
-                let outer = offsetRing(loop, by: region.inPlaneOffsetMM, seams: seams)
-                let inner = offsetRing(loop, by: region.inPlaneOffsetMM + widthMM, seams: seams)
+                // ★ SIGN (review 2026-09-22 #19): `offsetRing` offsets INWARD by d, while
+                // membership is `signedDistance <= inPlaneOffsetMM`, i.e. a positive expand
+                // grows the region OUTWARD — so the rings take the NEGATED offset.
+                let outer = offsetRing(loop, by: -region.inPlaneOffsetMM, seams: seams)
+                let inner = offsetRing(loop, by: -region.inPlaneOffsetMM + widthMM, seams: seams)
                 // Per-vertex inward direction for the smooth wall normals: from the
                 // outer ring to the inner one, or the edge normals' bisector where the
                 // two rings meet.
@@ -163,20 +194,31 @@ public enum LatticeOutlineRibbon {
                     // with the smaller id.
                     if i < seams.count, seams[i] {
                         guard i < seamFaces.count, let other = seamFaces[i], let own = region.faceID,
-                              other != own, own < other,
-                              let nb = regions.first(where: { $0.role == .include && $0.kind == .face && $0.faceID == other })
-                        else { continue }
-                        let nB = LatticeRegionMask.unit(nb.normal)
-                        let bis = n + nB
-                        guard simd_length(bis) > 1e-6 else { continue }
-                        let dir = simd_normalize(bis)
+                              other != own, own < other else { continue }
                         let j = (i + 1) % m
                         let p0 = at(loop[i], 0), p1 = at(loop[j], 0)
                         let along = p1 - p0
                         guard simd_length(along) > 1e-6 else { continue }
-                        let side = simd_normalize(simd_cross(simd_normalize(along), dir))
+                        // ★ THE NEIGHBOUR AT THIS EDGE (review 2026-09-22 #26): a curved
+                        // neighbour is several facet regions under one face id; the one
+                        // whose outline holds this edge is the one across it, not the first.
+                        guard let nb = nearestRegion(to: p0, p1, faceID: other, in: regions) else { continue }
+                        let nB = LatticeRegionMask.unit(nb.normal)
+                        // ★ THE GUARDS (review #26): no plate where the walls are nearly
+                        // coplanar (a tangent neighbour is one wall — nothing to brace) or
+                        // nearly folded back (the bisector degenerates and the plate's
+                        // length runs away); no plate whose side vector is undefined.
+                        let cosA = simd_dot(n, nB)
+                        guard cosA < cos(25 * Double.pi / 180), cosA > cos(155 * Double.pi / 180) else { continue }
+                        let bis = n + nB
+                        guard simd_length(bis) > 1e-6 else { continue }
+                        let dir = simd_normalize(bis)
+                        let sideRaw = simd_cross(simd_normalize(along), dir)
+                        guard simd_length(sideRaw) > 1e-6 else { continue }
+                        let side = simd_normalize(sideRaw)
                         let cosHalf = Swift.max(0.2, simd_dot(dir, n))
                         let length = Swift.min(region.depthMM, nb.depthMM) / cosHalf
+                        guard length.isFinite, length > 0 else { continue }
                         let h = 0.5 * widthMM
                         let a0 = p0 - side * h, a1 = p1 - side * h, b0 = p0 + side * h, b1 = p1 + side * h
                         let a0d = a0 + dir * length, a1d = a1 + dir * length, b0d = b0 + dir * length, b1d = b1 + dir * length

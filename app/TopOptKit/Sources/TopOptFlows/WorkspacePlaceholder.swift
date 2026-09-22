@@ -128,7 +128,9 @@ public struct WorkspacePlaceholder: View {
     /// tracing 38,099 spans and then running core's emission on them, on every core the
     /// device has. A change while one runs no longer starts a second — it sets this,
     /// and the running bake starts one more when it lands.
-    @State private var strutRebakePending = false
+    /// ★ the running bake's stop sign: set when a newer bake supersedes it, read by its
+    /// stage loop before core's emission starts (review 2026-09-22 #34)
+    @State private var strutBakeCancel = LatticeBakeFlag()
     /// The (i) beside the preview caption: the whole banner sentence, on demand.
     @State private var latticeNoticeInfoShown = false
     /// ★ The lattice settings the strut preview was last baked FROM, with the
@@ -1384,8 +1386,10 @@ public struct WorkspacePlaceholder: View {
                     refreshLatticeFaceCards()
                     // ★ SAVE & EXIT KICKS OFF THE FEA (maintainer, 2026-08-17).
                     startStressSolveIfNeeded()
-                    // ★ AND REBAKES THE PREVIEW — see `latticeWizardRebakeNote`.
-                    if showStrutPreview, project.lattice.enabled { buildStrutScene() }
+                    // ★ NO SECOND BAKE (review 2026-09-22 #33): the changed-inputs bake
+                    // above is the one; "Exit" with nothing changed starts nothing (his
+                    // 2026-09-21 rule). The plain rebake that stood here started a second
+                    // octet bake behind the forced one on every Save & Exit.
                 }
                 .organicProbeDriver(makeOrganicProbeDriver())
                 // ★ the stage draws with the workspace-owned camera the one gizmo follows
@@ -4788,10 +4792,15 @@ public struct WorkspacePlaceholder: View {
         for g in selection.groups {
             h.combine(g.id)
             for f in g.faces { h.combine(f) }
+            for r in g.regionIDs { h.combine(r) }      // ★ a group has TWO memberships
         }
         for r in project.faceRegions.regions { h.combine(r.id) }
         let l = project.lattice
         h.combine(l.enabled)
+        // ★ the slab and the per-wall cells are inputs the bake reads (review #37)
+        h.combine(l.wallThickness)
+        for (k, v) in l.selectableCellMM.sorted(by: { $0.key < $1.key }) { h.combine(k); h.combine(v) }
+        for (k, v) in l.selectableSyntheticFoci.sorted(by: { $0.key < $1.key }) { h.combine(k); h.combine(v) }
         // ★★★ THE STAGE MODE. It changes the cells-per-member FLOOR the bake applies,
         // so a scene baked before the modal was answered describes the wrong law. It is
         // answered once, on entering the stage — which is exactly when a stale scene
@@ -4865,7 +4874,6 @@ public struct WorkspacePlaceholder: View {
             NSLog("DIAG organic bake: superseding the running bake (in flight %d, refining %d) — generation %d",
                   strutBakeInFlight ? 1 : 0, strutRefining ? 1 : 0, strutBakeGeneration + 1)
         }
-        strutRebakePending = false
         guard let mesh = viewerMesh else { return }
         // ★★★ NOTHING MOVED ⇒ NOTHING IS REBUILT (see `organicBakeFingerprint`). The
         // comparison is the WHOLE of what a bake reads — `previewBakeInputs`, which is
@@ -4884,20 +4892,28 @@ public struct WorkspacePlaceholder: View {
         // have drawn the organic lattice was skipped. He was left on the octet stand-in
         // until he tapped Refresh. The field's own key and whether the tracer had its
         // inputs at all are part of what a bake reads, so both belong here.
-        if project.lattice.resolvedAlgorithm == "organic" {
-            let now = OrganicBakeKey(region: latticeRegionInputsKey,
+        // ★ EVERY ALGORITHM (review 2026-09-22 #33): the octet path had no fingerprint,
+        // so the wizard's forced bake plus the region-key change it caused started TWO
+        // bakes on every Save & Exit. The mesh and the stepped cells are in the key —
+        // they are inputs a bake reads that no setting carries.
+        do {
+            var extra = Hasher()
+            extra.combine(mesh.signature.contentHash); extra.combine(mesh.signature.topologyHash)
+            for c in latticePreviewSteppedCells { extra.combine(c) }
+            // the run's field is an input too (a landed run must rebake the octet)
+            extra.combine(run.outcome?.variants.count ?? -1)
+            extra.combine(run.outcome?.variants.last(where: { $0.accepted })?.vonMisesField.count ?? -1)
+            let now = OrganicBakeKey(region: latticeRegionInputsKey ^ extra.finalize(),
                                      stress: latticeStressFieldKey,
                                      tensor: latticeStressField?.stressTensor.count ?? -1,
                                      inputs: project.lattice.previewBakeInputs)
             if !forceRebuild, strutScene != nil, organicBakeFingerprint == now {
-                NSLog("DIAG organic bake: skipped — no lattice setting changed since the last one")
+                NSLog("DIAG lattice bake: skipped — no input changed since the last one")
                 return
             }
-            // Recorded on EVERY organic bake, forced or not: a forced rebuild that did
-            // not record one would let the very next event through as "changed".
+            // Recorded on EVERY bake, forced or not: a forced rebuild that did not
+            // record one would let the very next event through as "changed".
             organicBakeFingerprint = now
-        } else {
-            organicBakeFingerprint = nil
         }
         let latticeID = latticeProxy.params.latticeID
         // Auto density on the lattice page grades the preview from the page's OWN
@@ -4931,6 +4947,16 @@ public struct WorkspacePlaceholder: View {
         } else {
             field = LatticeSDFScene.demandField(from: run.outcome)
         }
+        // ★ the wall-depth rule's field (review #31): the measured lattice sim if there is
+        // one, else the run's — independent of the density grading mode
+        let wallStressField: StressField? = {
+            if let f = latticeStressField {
+                return StressField(nx: f.nx, ny: f.ny, nz: f.nz,
+                                   origin: SIMD3<Float>(f.origin), spacing: Float(f.spacingMM),
+                                   values: f.vonMises)
+            }
+            return LatticeSDFScene.demandField(from: run.outcome)
+        }()
         // ★ THE REGIONS THE RUN WILL ACTUALLY LATTICE (maintainer, 2026-08-17).
         // Read on the main actor and captured, because `latticeJobRegions()`
         // walks the selection and the settings. Empty on the settings page's
@@ -5004,22 +5030,12 @@ public struct WorkspacePlaceholder: View {
             // could be laid closer than 3.41 mm — to another curve or to the rim — and
             // the 12 mm wall was 3.5 voxels deep. The run traces at the Fine chip's grid
             // (128 across, 1.71 mm), so the trace is resampled there before it runs.
-            let previewVoxelMM = Double((mesh.bounds.max - mesh.bounds.min).max()) / 128
-            let fine = OrganicTraceGrid.resample(tensor: f.stressTensor, dims: (f.nx, f.ny, f.nz),
-                                                 originMM: SIMD3<Double>(f.origin), spacingMM: f.spacingMM,
-                                                 toVoxelMM: previewVoxelMM)
-            if let fine {
-                NSLog("DIAG organic trace grid: solve %.2f mm (%d×%d×%d) → trace %.2f mm (%d×%d×%d), ×%d per axis",
-                      f.spacingMM, f.nx, f.ny, f.nz, fine.spacingMM, fine.dims.0, fine.dims.1, fine.dims.2, fine.factor)
-            } else {
-                NSLog("DIAG organic trace grid: the solve's own %.2f mm (%d×%d×%d); preview voxel %.2f mm",
-                      f.spacingMM, f.nx, f.ny, f.nz, previewVoxelMM)
-            }
+            // (the resample to the preview's grid happens on the bake thread)
             return LatticeOrganicInput(
-                tensor: fine?.tensor ?? f.stressTensor,
-                dims: fine?.dims ?? (f.nx, f.ny, f.nz),
-                originMM: fine?.originMM ?? SIMD3<Double>(f.origin),
-                spacingMM: fine?.spacingMM ?? f.spacingMM,
+                tensor: f.stressTensor,
+                dims: (f.nx, f.ny, f.nz),
+                originMM: SIMD3<Double>(f.origin),
+                spacingMM: f.spacingMM,
                 minExtrudableWidthMM: project.printParams.strutLineWidthMM,
                 buildDirection: SIMD3<Double>(
                     project.buildOrientation.resolved(gravity: force.gravity)),
@@ -5074,16 +5090,45 @@ public struct WorkspacePlaceholder: View {
             && stageMode == .aesthetic && organicForBake != nil
         let synthDefaultFoci = project.lattice.organicSyntheticFoci
         let synthStatedFoci = project.lattice.selectableSyntheticFoci
+        // ★ THE SUPERSEDED BAKE'S FLAGS DIE WITH IT (review #34): `strutRefining` stayed
+        // true from the old bake's stage one until its stage two landed and was dropped —
+        // "Adding the print repairs" never went away. The new bake owns both flags now,
+        // and the old stage loop is told to stop before it starts core's emission.
+        strutRefining = false
+        strutBakeCancel.value = true
+        let cancel = LatticeBakeFlag()
+        strutBakeCancel = cancel
         strutBakeInFlight = true
         strutBakeGeneration += 1
         let bakeGeneration = strutBakeGeneration
+        // ★ READ ON MAIN, USED OFF IT (review #35): the bake thread read `project.lattice`,
+        // `project.printParams` and the stepped cells while main kept editing them.
+        let lat = project.lattice
+        let printParams = project.printParams
+        let steppedCells = latticePreviewSteppedCells
+        let previewVoxelMM = Double((mesh.bounds.max - mesh.bounds.min).max()) / 128
         DispatchQueue.global(qos: .userInitiated).async {
             var organicIn = organicForBake
-            organicIn?.seedBoost = project.lattice.wallThickness.seedBoost
+            // ★★★ THE TRACER'S GRID IS THE PREVIEW'S, NOT THE COARSE SOLVE'S (2026-09-21,
+            // see `OrganicTraceGrid`) — resampled HERE, off the main thread (review #36:
+            // the 128³ × 6 resample froze the UI for seconds on every bake).
+            if var o = organicIn,
+               let fine = OrganicTraceGrid.resample(tensor: o.tensor, dims: o.dims,
+                                                    originMM: o.originMM, spacingMM: o.spacingMM,
+                                                    toVoxelMM: previewVoxelMM) {
+                NSLog("DIAG organic trace grid: solve %.2f mm (%d×%d×%d) → trace %.2f mm (%d×%d×%d), ×%d per axis",
+                      o.spacingMM, o.dims.0, o.dims.1, o.dims.2, fine.spacingMM, fine.dims.0, fine.dims.1, fine.dims.2, fine.factor)
+                o.tensor = fine.tensor; o.dims = fine.dims; o.originMM = fine.originMM; o.spacingMM = fine.spacingMM
+                organicIn = o
+            } else if let o = organicIn {
+                NSLog("DIAG organic trace grid: the solve's own %.2f mm (%d×%d×%d); preview voxel %.2f mm",
+                      o.spacingMM, o.dims.0, o.dims.1, o.dims.2, previewVoxelMM)
+            }
+            organicIn?.seedBoost = lat.wallThickness.seedBoost
             // ★ THE DEPTHS EACH WALL CAN BE PACKED TO (his D1, 2026-09-21) — the same rule
             // the wizard's editor draws on: `LatticeWallDepthSteps.forWalls`.
-            let wallDepthSteps = LatticeWallDepthSteps.forWalls(project.lattice, regions: regions,
-                                                                 beadMM: project.printParams.strutLineWidthMM)
+            let wallDepthSteps = LatticeWallDepthSteps.forWalls(lat, regions: regions,
+                                                                 beadMM: printParams.strutLineWidthMM)
             // Set on main when a newer bake takes over, read by the stage loop.
             let cancelledStages = LatticeBakeFlag()
             // ★★ THE WINDOW UNDER AUTO (2026-09-06): the probe's Auto answer when it has
@@ -5137,8 +5182,8 @@ public struct WorkspacePlaceholder: View {
                 o.solidRimMM = Swift.max(0, organicRimSetting)
                 // ★ the grade-to-shape band reaches organic (2026-09-18): its own Fit to
                 // shape switch arms it, the same millimetres the octet uses
-                o.shapeBandMM = project.lattice.organicShapeFit ? project.lattice.shapeFitBandMM : 0
-                o.shapeBandStrength = project.lattice.shapeFitGradeStrength
+                o.shapeBandMM = lat.organicShapeFit ? lat.shapeFitBandMM : 0
+                o.shapeBandStrength = lat.shapeFitGradeStrength
                 // ★ THE DEPTH-STAGGER EXPERIMENT (2026-09-08), scaled to the window the
                 // lattice is graded to. Preview only; never written to the job.
                 o.depthStaggerCellMM = organicDepthStagger
@@ -5185,7 +5230,7 @@ public struct WorkspacePlaceholder: View {
             // on anything this thread holds is a deadlock, and reading @State off the
             // main actor is undefined besides. The generation is checked on main, in
             // the completion, where it is safe to read.
-            if stageIndex > 0, cancelledStages.value { break }
+            if stageIndex > 0, cancelledStages.value || cancel.value { break }
             var stageIn = organicIn
             stageIn?.showRepairs = stageRepairs
             let isLastStage = stageIndex == stages.count - 1
@@ -5213,7 +5258,7 @@ public struct WorkspacePlaceholder: View {
                                         // derives into it any more.
                                         statedDensityGoverns: !gradesFromSim
                                             || stageMode == .aesthetic,
-                                        allowQuilt: project.lattice.allowQuilt,
+                                        allowQuilt: lat.allowQuilt,
                                         // ★ Structural or aesthetic — it decides the
                                         // cells-per-member floor the preview draws to,
                                         // so the picture and the run agree about which
@@ -5242,7 +5287,7 @@ public struct WorkspacePlaceholder: View {
                                         // the request for it — see
                                         // `LatticeSettings.singleCellMembers`.
                                         boundaryFinishWritten:
-                                            project.lattice.singleCellMembers,
+                                            lat.singleCellMembers,
                                         organic: stageIn,
                                         regions: regions,
                                         rhoMin: span.lo, rhoMax: span.hi,
@@ -5258,9 +5303,10 @@ public struct WorkspacePlaceholder: View {
                                         // the octet, the window's low end for organic
                                         wallThicknessFloorMM: algorithmForBake == "organic"
                                             ? (organicIn?.separationMinMM ?? 0)
-                                            : (latticePreviewSteppedCells.filter { $0 > 0 }.min()
-                                               ?? project.lattice.cellMM),
-                                        wallDepthSteps: wallDepthSteps)
+                                            : (steppedCells.filter { $0 > 0 }.min()
+                                               ?? lat.cellMM),
+                                        wallDepthSteps: wallDepthSteps,
+                                        wallStressField: wallStressField)
             DispatchQueue.main.async {
                 // ★ a newer bake has started: this picture is stale, drop it
                 guard bakeGeneration == strutBakeGeneration else {
@@ -5371,10 +5417,7 @@ public struct WorkspacePlaceholder: View {
                     project.recordLatticeWallStress(fractions)
                 }
                 // ★ the change that arrived while this bake ran
-                if isLastStage {
-                    strutRefining = false
-                    if strutRebakePending { strutRebakePending = false; buildStrutScene() }
-                }
+                if isLastStage { strutRefining = false }
             }
             }   // stages
         }

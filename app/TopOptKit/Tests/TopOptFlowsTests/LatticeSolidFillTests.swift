@@ -35,10 +35,14 @@ final class LatticeSolidFillTests: XCTestCase {
             march.contains("float Fstrut = anyActive ? max(dn * cellHere, dClip) : 1e9;"),
             "★ the strut field must be infinite where no cell is active, so the solid "
             + "term below can own that ray")
+        // ★ RE-PINNED 2026-09-22 (the maintainer's pocket rule): OUTSIDE every declared prism a
+        // refused cell still takes the clip as its field; INSIDE a declared prism nothing is
+        // solid but the rim the dressing paints — the pocket is air, never a wall.
         XCTAssertTrue(
-            march.contains("float Fsolid = anyActive ? 1e9 : dClip;"),
-            "★ the march must give a refused cell the part/region clip as its field — "
-            + "with 1e9 the ray passes through and the wall reads as holed")
+            march.contains("float Fsolid = anyActive ? 1e9 : (dRegion < 0.0 ? 1e9 : dClip);"),
+            "★ the march must give a refused cell the part clip as its field outside a prism, "
+            + "and nothing inside one — with dClip inside the prism every texel without a cell "
+            + "read as a wall across the pocket")
         XCTAssertTrue(
             march.contains("float F = min(Fstrut, Fsolid);"),
             "★ and the field the ray actually traces must be the min of the two")
@@ -54,7 +58,7 @@ final class LatticeSolidFillTests: XCTestCase {
         // declared mouth — so the literal moved. What this bar is for is unchanged: the
         // fill must read the SAME `dClip` the struts did, computed before it.
         guard let clip = march.range(of: "float dClip = max(max(lsdf_part_clip("),
-              let use = march.range(of: ": dClip;")
+              let use = march.range(of: ": dClip);")
         else { return XCTFail("★ the clip term or its solid-fill use is gone") }
         XCTAssertLessThan(clip.lowerBound, use.lowerBound,
                           "★ the fill must read the clip the struts computed")
@@ -62,7 +66,9 @@ final class LatticeSolidFillTests: XCTestCase {
         // (`dPart + solidInset`) so it could not z-fight the shell; `dClip` now carries
         // exactly that, and only where the shell actually survives — so through the
         // declared mouth the fill reads flush instead of recessed behind a ledge.
-        XCTAssertTrue(march.contains("float Fsolid = anyActive ? 1e9 : dClip;"),
+        // ★ RE-PINNED 2026-09-22 (the pocket rule): outside a declared prism the fill
+        // still takes `dClip` verbatim; inside one there is no fill at all.
+        XCTAssertTrue(march.contains("float Fsolid = anyActive ? 1e9 : (dRegion < 0.0 ? 1e9 : dClip);"),
                       "★ the fill must take the struts' own clip term unmodified — a "
                       + "second inset here is a second answer to where the part ends")
         // ★ AND SO MUST THE OUTLINE'S SOLID BAND, which is the OTHER way a hit can be

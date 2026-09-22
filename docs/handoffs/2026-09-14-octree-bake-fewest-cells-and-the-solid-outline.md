@@ -1177,3 +1177,83 @@ Not yet seen by him.
   6 mm walls meeting at 90° ⇒ 8.5 mm diagonal reaching the inner corner. Emitted once (the
   smaller face id). Facet seams within one face get no plate. Preview only, not on the
   wire. Test: `LatticeCornerPlateTests`.
+- **2026-09-22 03:xx — THE WHOLE-CODEBASE REVIEW, FIXED IN ORDER (his 02:33: "go through
+  the entire codebase … note every bug … then resolve them one at a time").** Images 1–5
+  of that round still showed walls, rims and three boxed pieces after the seams. The
+  review (86 findings, consolidated into ten tiers) and what changed, each built and
+  tested before the next:
+  (1) `UnifiedShading` `Fsolid`: inside a declared prism a refused cell is AIR, never the
+  clip — `anyActive ? 1e9 : (dRegion < 0.0 ? 1e9 : dClip)`. Every texel without a cell
+  inside the pocket had read as a wall. Two `LatticeSolidFillTests` pins re-pinned.
+  (2) `LatticeRegionMask.outlineDistance`: regions UNION (`max`), not `min` — two
+  overlapping prisms had rimmed each other's outline.
+  (3) The offset sign: a positive `inPlaneOffsetMM` GROWS the region (membership is
+  `signedDistance ≤ offset`), so the ribbon, the cap and the slab mesh offset their rings
+  by `−offset`; the ribbon's "deepest point" walk-back applies to INWARD offsets only (an
+  outward ring had collapsed onto the loop — the ribbon test read 1000 for 1050);
+  `inside()` sees seams; the slab mesh raises no riser wall on a seam. `LatticeOutline
+  RibbonTests.testTheInPlaneOffsetMovesTheWholeBeamWithTheRegion` re-pinned [1050, 950].
+  (4) THE FLARE: adjacent facets of a curved face meet at the BISECTOR plane, so a
+  facet's prism is not a chord-wide box with a wedge of material between it and the next.
+  `LatticeRegionSpec.outlineSeamTilt` (±tan(half dihedral) per seam edge, sign by whether
+  the neighbour's normal leans away), `LatticeFaceOutline.insideWithFlare(…, depth:)` —
+  beyond a seam a point is inside up to `depth × tilt`, a converging seam cuts the prism
+  short — used by `contains` and the sign of `signedDistance`; `signedDistanceAcrossSeams`
+  for the octree raster and `dOut`. The facet origin moves out to the outermost VERTEX
+  (centroids had left the mouth a sagitta inside the surface). Seams are decided in a
+  POST-PASS (`LatticeRegionEmission.finishSeams`) from the EMITTED set, faces mapped
+  through `runFaceID`, and the neighbour across a seam is found BY RAW FACE then nearest
+  edge — a 1e-3 world match had found nothing, because a shared edge rebuilt from two
+  facet planes differs by the sagitta (0.25 mm on the 50 mm test cylinder). Tests:
+  `LatticeSeamFlareTests` (2).
+  (5) The cap: a triangle is built only when ALL THREE corners end inside material (one
+  measured corner had drawn the whole fan over the open face), and never where another
+  include prism continues past this one's end. `LatticeRegionCapTests` (+2).
+  (6) `LatticeSDFScene.prismOccupancy` = the part's material inside every prism IGNORING
+  the slabs (`LatticeRegionMask.clippedWholePrism`); it feeds the measured wall width,
+  the rim's attachment seed, the in-plane boundary distance, the octree's "is there
+  material here" and the organic ribbon depths. `occupancy` (slab-clipped) still places
+  lattice and the organic candidates. Every slab edge had read as a boundary: a rim, a
+  cap, or a solid wall across the pocket — the walls of images 3–5.
+  (7) The corner plate: the neighbour at the edge is the facet whose outline holds it
+  (not the first region under that face id); no plate under 25° or over 155° between the
+  walls; no plate with a degenerate side or a non-finite length.
+  (8) The thickness builder on facets: one drawn profile spans the WHOLE wall — every
+  facet reads x along the wall's shared chord axis (`FaceFrame.shared`, `sharedAxis`);
+  Auto single takes ONE p95 per wall (merged across facets); the sim raster's map origin
+  is the first cell's centre (a half-cell shift); the floor is `a0 + floor`, from the
+  slab's start; the start never snaps below `a0`, the end never below the start. The
+  "By sim" rule reads its OWN field (`wallStressField`: the measured lattice sim, else
+  the run's) — the grading's `field` is nil under "No grade"/"Grade to fit", which had
+  silently turned "By sim" into the whole range.
+  (9) Bake orchestration: ONE fingerprint for every algorithm (mesh + stepped cells in
+  the key) — the octet path had none and Save & Exit started TWO bakes; the wizard's
+  plain rebake on exit is gone; `strutRefining` resets when a bake is superseded
+  ("Adding the print repairs" had stayed up until the old bake's stage two was dropped);
+  `strutBakeCancel` tells the superseded stage loop to stop before core's emission; the
+  128³ tensor resample runs on the bake thread (it froze the UI on every bake); the bake
+  thread reads captured copies of the settings, never `project.*`; `strutRebakePending`
+  removed (dead); the region key now carries the groups' region memberships, the wall
+  thickness, the per-wall cells and the foci (`LatticeWallThickness` & co. Hashable).
+  (10) The wizard and editors: the number field's ARROWS walk the steps, a typed number
+  lands on the nearest step (typing 10 into 2 had walked to 4); organic's start field
+  moves freely (`[0] + []` had pinned it at 0); an end snapped under the start takes the
+  first step past it; the drawn halves are halves of the ALLOWED RANGE in both editors
+  (with a range of 8–12 the start's "≤ 50 %" had clamped to 8 and never moved); the
+  column cap 96 → 400; keyless walls keep their own cards; a card's width is the whole
+  wall's shared axis; `wallEditorFaces` is computed once per change (it facets every
+  curved face and was called four times per keystroke). NOT CHANGED, noted: the profile
+  card's true-shape render ignores the density mode and the floor (cosmetic).
+  FULL SUITE (05:16, after tiers 1–10): 2504 tests, 32 skipped, 12 failure assertions in
+  6 tests — the 5 pre-existing (`AppModelTests` 3MF ×3, `OrganicSampleCubeTests
+  .testThickerIsLiveAndNeverRetraces`, `OrganicVariantCacheTests.testTheKeyIgnores
+  Thickness…`) plus two the run caught: `LatticeSeparationRegionTests.testNoRegionIsEver
+  EmittedAsALatticeRegion` — a PR 331 pin of the rule he reversed on 09-21 (region members
+  ARE emitted), never re-pinned in 3bc36740, now `testARegionsMembersAreEmittedAsFace
+  PrismsUnderTheRegionsKey` (3 prisms: the face + the union's two members under the
+  region's key); and `OrganicShapeBandTests.testTheBandGradesSpacingTowardTheFloorNearThe
+  Outline` — MY tier-2 union: `outlineDistance` started `best` at 1e3 against a 1e9
+  sentinel, so the max never left 1e3 and the organic band graded 0 voxels (fixed:
+  sentinel 1e9, far value 1e3 on return). Bake fingerprint also carries the run's
+  outcome (a landed run rebakes the octet). Installed on the sim 05:17:02. Not yet
+  judged on device: everything above — he reopens; report only with DIAG numbers.

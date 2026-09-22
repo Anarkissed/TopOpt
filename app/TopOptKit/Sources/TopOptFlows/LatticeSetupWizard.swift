@@ -675,15 +675,22 @@ public struct LatticeSetupWizard: View {
     // Thickness.dc.html` (2026-09-21): "Depth defined by sim?", else the allowed range
     // per wall in mm and "Density through the wall". Both lattice pages, both stages;
     // a preview request until it is agreed to work. See `LatticeWallThickness`.
+    /// ★ COMPUTED ONCE PER CHANGE (review #41): `latticeJobRegions()` facets every curved
+    /// face; four readers per body pass called it four times per keystroke.
     private var wallEditorFaces: [LatticeWallEditorFace] {
+        wallFacesCache.isEmpty ? computeWallEditorFaces() : wallFacesCache
+    }
+    private func computeWallEditorFaces() -> [LatticeWallEditorFace] {
         let all = project.latticeJobRegions().regions
             .filter { $0.role == .include && $0.kind == .face && $0.depthMM > 0 }
+        // ★ a keyless wall keeps its own card (review #42: every keyless region merged into "")
+        func keyOf(_ r: LatticeRegionSpec) -> String { r.selectableKey ?? "face:\(r.faceID ?? -1)" }
         // ★ ONE card per selectable (a curved wall is many facet prisms under one key):
         // the widest facet stands for the wall
         var seen: [String: LatticeRegionSpec] = [:]
         var order: [String] = []
         for r in all {
-            let key = r.selectableKey ?? ""
+            let key = keyOf(r)
             let w = LatticeWallThicknessBuilder.frame(r)?.widthMM ?? 0
             if let prev = seen[key], (LatticeWallThicknessBuilder.frame(prev)?.widthMM ?? 0) >= w { continue }
             if seen[key] == nil { order.append(key) }
@@ -691,14 +698,18 @@ public struct LatticeSetupWizard: View {
         }
         return order.compactMap { seen[$0] }
             .map { r in
-                let key = r.selectableKey ?? ""
+                let key = keyOf(r)
                 let tint: Color = {
                     if let gid = key.split(separator: ":").dropFirst().first, let uuid = UUID(uuidString: String(gid)),
                        let g = project.selection.groups.first(where: { $0.id == uuid }) { return g.color.color }
                     return DS.Color.accent.color
                 }()
                 let fr = LatticeWallThicknessBuilder.frame(r)
-                let width = fr?.widthMM ?? 2 * max(r.halfUMM, r.halfWMM)
+                // ★ the WHOLE wall's width across its facets (review #43), the axis the
+                // builder reads the drawing along — not the widest facet's chord
+                let group = all.filter { keyOf($0) == key }
+                let width = LatticeWallThicknessBuilder.sharedAxis(group)?.extent
+                    ?? fr?.widthMM ?? 2 * max(r.halfUMM, r.halfWMM)
                 let height = fr.map { $0.widthAlongU ? $0.hi.y - $0.lo.y : $0.hi.x - $0.lo.x } ?? 2 * min(r.halfUMM, r.halfWMM)
                 let lat = model.applied(to: project.lattice)
                 return LatticeWallEditorFace(id: key, name: r.faceID.map { "Face \($0)" } ?? "Wall",
@@ -710,6 +721,7 @@ public struct LatticeSetupWizard: View {
             }
     }
 
+    @State private var wallFacesCache: [LatticeWallEditorFace] = []
     private static let wallGreen = Color(red: 0x30 / 255, green: 0xD1 / 255, blue: 0x58 / 255)
     /// What the mode list says about a wall's drawing.
     static func profileSummary(_ p: LatticeWallProfile?) -> String {
@@ -786,19 +798,28 @@ public struct LatticeSetupWizard: View {
                         // ★ where the lattice may START and how deep it may go (his 22:40: the
                         // start is back). On an octet wall the arrows walk the wall's own
                         // packable depths and a typed number lands on one (D1).
+                        // ★ organic has NO steps and the field moves freely (review #39: `[0] +
+                        // []` gave organic a single step at 0 and the start could never leave it)
                         WallNumberField(text: String(format: "%.1f", fa.startMM), tint: Self.wallGreen,
-                                        step: 0.5, range: 0...max(0, (fa.endMM ?? f.thickMM) - 0.1)) { v in
+                                        step: 0.5, range: 0...max(0, (fa.endMM ?? f.thickMM) - 0.1),
+                                        steps: f.depthStepsMM.isEmpty ? [] : [0] + f.depthStepsMM) { v in
                             let e = fa.endMM ?? f.thickMM
-                            let sv = Self.walkSteps(from: fa.startMM, to: Swift.min(Swift.max(0, v), e - 0.1), steps: [0] + f.depthStepsMM)
+                            let sv = f.depthStepsMM.isEmpty ? v : LatticeWallDepthSteps.snap(v, steps: [0] + f.depthStepsMM)
                             model.wallThickness.faces[f.id, default: LatticeFaceWallThickness()].startMM = Swift.min(Swift.max(0, sv), e - 0.1)
                             rebuild()
                         }
                         .accessibilityIdentifier("wizard-wall-start-\(f.id)")
                         Text("–").font(.system(size: 12)).foregroundStyle(DS.Color.textQuaternary.color)
                         WallNumberField(text: String(format: "%.1f", fa.endMM ?? f.thickMM), tint: DS.Color.danger.color,
-                                        step: 0.5, range: (fa.startMM + 0.1)...f.thickMM) { v in
-                            let cur = fa.endMM ?? f.thickMM
-                            let e = Swift.min(Swift.max(fa.startMM + 0.1, Self.walkSteps(from: cur, to: v, steps: f.depthStepsMM)), f.thickMM)
+                                        step: 0.5, range: (fa.startMM + 0.1)...f.thickMM,
+                                        steps: f.depthStepsMM) { v in
+                            var e = f.depthStepsMM.isEmpty ? v : LatticeWallDepthSteps.snap(v, steps: f.depthStepsMM)
+                            // ★ an end that snapped under the start takes the first step past it
+                            // (review #40) — never a non-packable `start + 0.1`
+                            if e < fa.startMM + 0.1 {
+                                e = f.depthStepsMM.first { $0 >= fa.startMM + 0.1 } ?? (f.depthStepsMM.isEmpty ? fa.startMM + 0.1 : f.thickMM)
+                            }
+                            e = Swift.min(e, f.thickMM)
                             model.wallThickness.faces[f.id, default: LatticeFaceWallThickness()].endMM = e >= f.thickMM - 1e-9 ? nil : e
                             rebuild()
                         }
@@ -2700,6 +2721,7 @@ public struct LatticeSetupWizard: View {
     /// opening the page, and switching sheet). Everything else marks the sample stale
     /// and waits — his rule, and it is what stops the pile-up.
     private func rebuild(force: Bool = false) {
+        wallFacesCache = computeWallEditorFaces()
         guard force else {
             sampleIsStale = true
             return
@@ -3038,12 +3060,19 @@ struct WallNumberField: View {
     var step: Double = 0.1
     var range: ClosedRange<Double> = 0...1e6
     var unit: String = "mm"
+    /// ★ THE PACKABLE DEPTHS (review 2026-09-22 #38): the ARROWS walk these; a typed
+    /// number reaches `commit` as typed and the caller lands it on one. Before this the
+    /// caller walked both, so typing 10 into a field at 2 moved it to the NEXT step (4).
+    var steps: [Double] = []
     let commit: (Double) -> Void
     @State private var padShown = false
 
     private var value: Double { Double(text) ?? 0 }
     private func clamp(_ v: Double) -> Double { min(range.upperBound, max(range.lowerBound, v)) }
-    private func nudge(_ dir: Double) { commit(clamp(value + dir * step)) }
+    private func nudge(_ dir: Double) {
+        if steps.isEmpty { commit(clamp(value + dir * step)) }
+        else { commit(clamp(LatticeSetupWizard.walkSteps(from: value, to: value + dir * step, steps: steps))) }
+    }
 
     private var shape: RoundedRectangle { RoundedRectangle(cornerRadius: wide ? 12 : 9) }
 

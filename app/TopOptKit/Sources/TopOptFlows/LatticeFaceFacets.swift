@@ -16,7 +16,7 @@ public enum LatticeFaceFacets {
     public static func facets(face: FaceID, in mesh: ViewerMesh,
                               toleranceDeg: Double = 12) -> [LatticeRegionEmission.ResolvedFace] {
         let want = Int32(face)
-        var tris: [(index: Int, n: SIMD3<Double>, area: Double, c: SIMD3<Double>)] = []
+        var tris: [(index: Int, n: SIMD3<Double>, area: Double, c: SIMD3<Double>, p: [SIMD3<Double>])] = []
         var t = 0
         while t + 2 < mesh.indices.count {
             let tri = t / 3
@@ -29,7 +29,7 @@ public enum LatticeFaceFacets {
                 if p.count == 3 {
                     let cr = simd_cross(p[1] - p[0], p[2] - p[0])
                     let a = 0.5 * simd_length(cr)
-                    if a > 1e-12 { tris.append((tri, cr / (2 * a), a, (p[0] + p[1] + p[2]) / 3)) }
+                    if a > 1e-12 { tris.append((tri, cr / (2 * a), a, (p[0] + p[1] + p[2]) / 3, p)) }
                 }
             }
             t += 3
@@ -52,7 +52,15 @@ public enum LatticeFaceFacets {
             var nSum = SIMD3<Double>.zero, cSum = SIMD3<Double>.zero, aSum = 0.0
             for i in group { if let tr = byIndex[i] { nSum += tr.n * tr.area; cSum += tr.c * tr.area; aSum += tr.area } }
             guard aSum > 1e-9, simd_length(nSum) > 1e-12 else { continue }
-            let normal = simd_normalize(nSum), centre = cSum / aSum
+            let normal = simd_normalize(nSum)
+            // ★ ON THE SURFACE (review 2026-09-22 #8): the chord centroid of a curved patch
+            // sits off the surface by the sagitta; the prism's mouth is moved out along the
+            // outward normal to the patch's outermost vertex, so the whole surface lies at
+            // s ≥ 0 and the shell's coincidence nudge finds it.
+            var centre = cSum / aSum
+            var maxOut = 0.0
+            for i in group { if let tr = byIndex[i] { for q in tr.p { maxOut = Swift.max(maxOut, simd_dot(q - centre, normal)) } } }
+            centre += normal * maxOut
             let set = Set(group)
             let lw = LatticeFaceOutline.loopsWithNeighbours(triangles: { set.contains($0) }, in: mesh, normal: normal, origin: centre)
             guard !lw.isEmpty else { continue }

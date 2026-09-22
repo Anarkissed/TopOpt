@@ -294,7 +294,7 @@ extension LatticePreviewOccupancy {
             var vals = [Double](repeating: -1e3, count: nu * nv)
             for j in 0..<nv { for i in 0..<nu {
                 let uv = lo + SIMD2(Double(i), Double(j)) * h
-                vals[j * nu + i] = -(LatticeFaceOutline.signedDistance(uv, loops: region.outlineLoops, seams: region.outlineSeams) - region.inPlaneOffsetMM)
+                vals[j * nu + i] = -(LatticeFaceOutline.signedDistanceAcrossSeams(uv, loops: region.outlineLoops, seams: region.outlineSeams) - region.inPlaneOffsetMM)
             }}
             rasters[ladder.region] = OutlineRaster(origin: lo, h: h, nu: nu, nv: nv, values: vals)
         }
@@ -425,7 +425,7 @@ extension LatticePreviewOccupancy {
                     return LatticeRegionMask.contains(p, region: region) ? 1e3 : -1e3
                 }
                 let rel = p - region.origin
-                return -(LatticeFaceOutline.signedDistance(
+                return -(LatticeFaceOutline.signedDistanceAcrossSeams(
                     SIMD2<Double>(simd_dot(rel, bu), simd_dot(rel, bv)),
                     loops: region.outlineLoops, seams: region.outlineSeams) - region.inPlaneOffsetMM)
             }

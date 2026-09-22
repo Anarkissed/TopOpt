@@ -39,11 +39,36 @@ public enum LatticeWallSlabMesh {
         let (bu, bv) = LatticeRegionMask.basis(n)
         func world(_ uv: SIMD2<Double>, _ s: Double) -> SIMD3<Double> { r.origin + bu * uv.x + bv * uv.y + n * s }
         var builder = Builder()
-        let rings = r.outlineLoops.enumerated().filter { $0.element.count >= 3 }
-            .map { LatticeOutlineRibbon.offsetRing($0.element, by: r.inPlaneOffsetMM,
-                                                   seams: $0.offset < r.outlineSeams.count ? r.outlineSeams[$0.offset] : []) }
-            .filter { $0.count >= 3 }
+        // the rings, with their seam edges (an offset ring keeps the loop's edge indices)
+        let ringsWithSeams: [(ring: [SIMD2<Double>], seams: [Bool])] = r.outlineLoops.enumerated()
+            .filter { $0.element.count >= 3 }
+            .map { e in
+                let sm = e.offset < r.outlineSeams.count ? r.outlineSeams[e.offset] : []
+                return (LatticeOutlineRibbon.offsetRing(e.element, by: -r.inPlaneOffsetMM, seams: sm), sm)
+            }
+            .filter { $0.ring.count >= 3 }
+        let rings = ringsWithSeams.map { $0.ring }
         guard !rings.isEmpty else { return ViewerMesh(vertices: [], indices: [], faceIDs: []) }
+        // ★ NO WALL ALONG A SEAM (review 2026-09-22 #22): an edge of a clipped cell polygon
+        // that lies on a seam segment of its ring is where the neighbouring prism continues
+        let seamSegments: [(SIMD2<Double>, SIMD2<Double>)] = ringsWithSeams.flatMap { rs in
+            rs.ring.indices.compactMap { i in
+                i < rs.seams.count && rs.seams[i] ? (rs.ring[i], rs.ring[(i + 1) % rs.ring.count]) : nil
+            }
+        }
+        func onSeam(_ a: SIMD2<Double>, _ b: SIMD2<Double>) -> Bool {
+            for (p, q) in seamSegments {
+                let d = q - p, l2 = simd_dot(d, d)
+                guard l2 > 1e-12 else { continue }
+                func on(_ x: SIMD2<Double>) -> Bool {
+                    let t = simd_dot(x - p, d) / l2
+                    guard t >= -1e-6, t <= 1 + 1e-6 else { return false }
+                    return simd_length(x - (p + d * t)) <= 1e-4
+                }
+                if on(a), on(b) { return true }
+            }
+            return false
+        }
 
         if let m = r.thicknessMap, !m.isConstant {
             // one box per raster cell; the cell (i, j) covers [origin + (i-½)h, origin + (i+½)h]
@@ -63,6 +88,7 @@ public enum LatticeWallSlabMesh {
                     let poly = clip(ring, lo: lo, hi: hi)
                     guard poly.count >= 3 else { continue }
                     builder.extrude(poly, from: s0, to: e0, world: world, neighbour: { a, b in
+                        if onSeam(a, b) { return (s0, e0) }      // the next prism continues here
                         // an edge on a cell boundary faces the neighbour there; the riser is
                         // the difference; an outline edge faces nothing and gets the full wall
                         let mid = 0.5 * (a + b)
@@ -83,7 +109,7 @@ public enum LatticeWallSlabMesh {
         } else {
             let (s0, e0) = r.slabRange(uv: rings[0][0])
             guard e0 - s0 > 0.01 else { return ViewerMesh(vertices: [], indices: [], faceIDs: []) }
-            for ring in rings { builder.extrude(ring, from: s0, to: e0, world: world, neighbour: { _, _ in nil }) }
+            for ring in rings { builder.extrude(ring, from: s0, to: e0, world: world, neighbour: { a, b in onSeam(a, b) ? (s0, e0) : nil }) }
         }
         return builder.mesh
     }

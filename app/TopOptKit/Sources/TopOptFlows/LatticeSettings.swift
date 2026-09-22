@@ -189,6 +189,13 @@ public struct LatticeRegionSpec: Equatable, Sendable {
     /// per loop, per edge: the run face id across a seam (nil where the edge is a true
     /// outline) — a corner between two latticed faces gets the stability plate
     public var outlineSeamFaces: [[Int?]] = []
+    /// per loop, per edge: tan(half the dihedral angle) to the prism across a seam, signed —
+    /// positive where the two prisms DIVERGE with depth (a concave wall's facets, an inside
+    /// corner), negative where they converge. The prism flares to the bisector plane by
+    /// depth × tilt, so adjacent prisms meet with no wedge of material and no overlap.
+    public var outlineSeamTilt: [[Double]] = []
+    /// the mesh face id this region came from (the wire carries the RUN id in `faceID`)
+    public var rawFaceID: FaceID? = nil
     /// ★ THE IN-PLANE REACH, kept as its own number instead of being folded into
     /// the half-extents. Against an OUTLINE the expand is Minkowski dilation by a
     /// ball — `signedDistance <= inPlaneOffsetMM` — which is precisely what

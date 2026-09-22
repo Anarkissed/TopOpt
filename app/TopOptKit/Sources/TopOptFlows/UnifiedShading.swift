@@ -1027,7 +1027,13 @@ static LSDFHit lsdf_march(constant LSDFUniforms& U,
         // printed layers in it looks like. Comparing the two fields is exact and needs
         // no proxy.
         float Fstrut = anyActive ? max(dn * cellHere, dClip) : 1e9;
-        float Fsolid = anyActive ? 1e9 : dClip;
+        // ★★★ THE POCKET IS AIR (his 2026-09-22: "Walls should never take the place of
+        // the empty or too little lattice. Ever."). `dClip` intersects the whole declared
+        // prism, so inside it the "run leaves this solid" branch filled every texel with
+        // no cell as opaque material — the wall across the pocket. Inside a declared
+        // prism nothing is solid but the rim band the dressing paints; the fill applies
+        // only to material OUTSIDE every prism.
+        float Fsolid = anyActive ? 1e9 : (dRegion < 0.0 ? 1e9 : dClip);
         bool bleedHit = false;
         // ★★★ THE OUTLINE ITSELF IS NOT DRAWN HERE (2026-09-16). It is a MESH —
         // `LatticeOutlineRibbon`, one thin beam swept round the face outline, drawn by

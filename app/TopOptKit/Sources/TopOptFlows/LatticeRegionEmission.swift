@@ -224,14 +224,11 @@ public enum LatticeRegionEmission {
             }
             s.inPlaneOffsetMM = loops.isEmpty ? 0 : LatticeSlabExpand.clamp(expandMM)
             // the point order is kept by the re-expression above, so edge i is still edge i
+            // the raw neighbour across every edge (nil = free); the post-pass in `regions`
+            // turns the ones that were actually emitted into seams and adds the tilt
+            s.outlineSeamFaces = neighbours.map { $0.map { f in f.map { Int($0) } } }
             s.outlineSeams = neighbours.map { $0.map { f in f.map(seamWith) ?? false } }
-            if !s.outlineSeams.contains(where: { $0.contains(true) }) { s.outlineSeams = [] }
-            else {
-                s.outlineSeamFaces = neighbours.map { $0.map { f in
-                    if let f, seamWith(f) { return Int(f) }
-                    return nil
-                } }
-            }
+            if !s.outlineSeams.contains(where: { $0.contains(true) }) { s.outlineSeams = []; s.outlineSeamFaces = [] }
             s.depthMM = depthMM
             return s.isValid ? s : nil
         }
@@ -372,6 +369,7 @@ public enum LatticeRegionEmission {
                         for: g.id, role: role, densities: groupDensities,
                         stated: selectableDensity[ref.key])
                     s.selectableKey = ref.key
+                    s.rawFaceID = f
                     if let n = syntheticWalls[ref.key] { s.syntheticStress = true; s.syntheticFoci = n }
                     out.append(s); emitted += 1
                 }
@@ -396,6 +394,7 @@ public enum LatticeRegionEmission {
                             for: g.id, role: role, densities: groupDensities,
                             stated: selectableDensity[ref.key])
                         s.selectableKey = ref.key
+                        s.rawFaceID = f
                         if let n = syntheticWalls[ref.key] { s.syntheticStress = true; s.syntheticFoci = n }
                         out.append(s); emitted += 1
                     }
@@ -403,7 +402,91 @@ public enum LatticeRegionEmission {
                 }
             }
         }
+        // ★★ THE POST-PASS (review 2026-09-22 #10/#15/#18 + the flare): a seam is an edge whose
+        // neighbour face was EMITTED (not merely declared), its face id on the wire is the
+        // run id, and it carries the tilt to the prism across it — tan(half the dihedral),
+        // positive where the two prisms diverge with depth — so `LatticeRegionMask` can
+        // flare each prism to the bisector plane and adjacent prisms meet without a wedge.
+        finishSeams(&out, runFaceID: runFaceID)
         return Result(regions: out, skippedFaces: skipped)
+    }
+
+    static func finishSeams(_ out: inout [LatticeRegionSpec], runFaceID: (FaceID) -> Int) {
+        let emittedRaw = Set(out.compactMap { $0.rawFaceID })
+        // world-space edges of every include face region, for the neighbour lookup
+        struct Edge { let a: SIMD3<Double>, b: SIMD3<Double>, region: Int }
+        var edges: [Edge] = []
+        func worldOf(_ r: LatticeRegionSpec) -> ((SIMD2<Double>) -> SIMD3<Double>)? {
+            let n = LatticeRegionMask.unit(r.normal)
+            guard simd_length(n) > 0.5 else { return nil }
+            let (bu, bv) = LatticeRegionMask.basis(n)
+            return { uv in r.origin + bu * uv.x + bv * uv.y }
+        }
+        for (ri, r) in out.enumerated() where r.role == .include && r.kind == .face {
+            guard let w = worldOf(r) else { continue }
+            for loop in r.outlineLoops { for i in loop.indices { edges.append(Edge(a: w(loop[i]), b: w(loop[(i + 1) % loop.count]), region: ri)) } }
+        }
+        // ★ BY RAW FACE, THEN NEAREST (2026-09-22): the world edge is REBUILT from the
+        // facet's (u,v) outline, which drops the vertex's out-of-plane component — the
+        // two facets of a curved face rebuild their shared edge ~0.25 mm apart on his
+        // 50 mm cylinder, so a 1e-3 match found nothing and no facet ever got a seam.
+        // The raw neighbour face is known; among that face's regions the nearest edge
+        // (within a tenth of the edge, or a millimetre) is the one across the seam.
+        func neighbourRegion(of a: SIMD3<Double>, _ b: SIMD3<Double>, rawFace: Int, notIn ri: Int) -> Int? {
+            var best: (Int, Double)? = nil
+            let tol = Swift.max(1.0, 0.1 * simd_length(b - a))
+            for e in edges where e.region != ri && out[e.region].rawFaceID == FaceID(rawFace) {
+                let d = 0.5 * Swift.min(simd_length(e.a - a) + simd_length(e.b - b), simd_length(e.a - b) + simd_length(e.b - a))
+                if d < tol, best == nil || d < best!.1 { best = (e.region, d) }
+            }
+            return best?.0
+        }
+        for ri in out.indices where !out[ri].outlineSeamFaces.isEmpty {
+            guard let w = worldOf(out[ri]), let own = out[ri].rawFaceID else { continue }
+            let nA = LatticeRegionMask.unit(out[ri].normal)
+            var seams: [[Bool]] = [], faces: [[Int?]] = [], tilts: [[Double]] = []
+            var any = false
+            for (l, loop) in out[ri].outlineLoops.enumerated() {
+                let raw = l < out[ri].outlineSeamFaces.count ? out[ri].outlineSeamFaces[l] : []
+                var sl = [Bool](repeating: false, count: loop.count)
+                var fl = [Int?](repeating: nil, count: loop.count)
+                var tl = [Double](repeating: 0, count: loop.count)
+                // the polygon's winding, for the outward edge direction
+                var area = 0.0
+                for i in loop.indices { let a = loop[i], b = loop[(i + 1) % loop.count]; area += a.x * b.y - b.x * a.y }
+                let ccw = area > 0
+                for i in loop.indices {
+                    guard i < raw.count, let nbRaw = raw[i], nbRaw == Int(own) || emittedRaw.contains(FaceID(nbRaw)) else { continue }
+                    let a3 = w(loop[i]), b3 = w(loop[(i + 1) % loop.count])
+                    guard let nj = neighbourRegion(of: a3, b3, rawFace: nbRaw, notIn: ri) else { continue }
+                    sl[i] = true; any = true
+                    fl[i] = runFaceID(FaceID(nbRaw))
+                    // the tilt: half the dihedral between the two inward normals, signed by
+                    // whether the neighbour's normal leans away from this facet (diverging)
+                    let nB = LatticeRegionMask.unit(out[nj].normal)
+                    let d2 = loop[(i + 1) % loop.count] - loop[i]
+                    let (bu, bv) = LatticeRegionMask.basis(nA)
+                    let eIn = bu * d2.x + bv * d2.y
+                    guard simd_length(eIn) > 1e-9 else { continue }
+                    let eDir = simd_normalize(eIn)
+                    var eOut = simd_cross(nA, eDir)           // in-plane, perpendicular to the edge
+                    // orient outward: CCW ⇒ outward is to the RIGHT of the edge in (u,v)
+                    let outUV = ccw ? SIMD2(d2.y, -d2.x) : SIMD2(-d2.y, d2.x)
+                    let outWorld = bu * outUV.x + bv * outUV.y
+                    if simd_dot(eOut, outWorld) < 0 { eOut = -eOut }
+                    let cosA = Swift.max(-1, Swift.min(1, simd_dot(nA, nB)))
+                    let half = 0.5 * acos(cosA)
+                    let sign: Double = simd_dot(nB, eOut) > 0 ? 1 : -1
+                    tl[i] = sign * tan(half)
+                }
+                seams.append(sl); faces.append(fl); tilts.append(tl)
+            }
+            if any {
+                out[ri].outlineSeams = seams; out[ri].outlineSeamFaces = faces; out[ri].outlineSeamTilt = tilts
+            } else {
+                out[ri].outlineSeams = []; out[ri].outlineSeamFaces = []; out[ri].outlineSeamTilt = []
+            }
+        }
     }
 
     /// ★ THE ONE GATE ON A DIALLED DENSITY. A density belongs to an INCLUDE

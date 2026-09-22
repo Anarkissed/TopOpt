@@ -61,6 +61,35 @@ final class LatticeRegionCapTests: XCTestCase {
         XCTAssertEqual(LatticeRegionCap.build(regions: [e]).vertexCount, 0, "exclude regions have no cap")
     }
 
+    /// ★ ALL THREE CORNERS (2026-09-22): one measured corner used to draw the whole
+    /// triangle, so a fanned outline put a plate across the open face.
+    func testATriangleWithOneCornerOverAirIsNotBuilt() {
+        var r = LatticeRegionSpec(role: .include, kind: .face)
+        r.origin = SIMD3(0, 0, 0); r.normal = SIMD3(0, 1, 0); r.depthMM = 4
+        r.halfUMM = 20; r.halfWMM = 20
+        r.outlineLoops = [[SIMD2(-5, -5), SIMD2(5, -5), SIMD2(5, 5), SIMD2(-5, 5)]]
+        // material only where x < 0 (in world): every triangle of the square has a corner at x > 0
+        let none = LatticeRegionCap.build(regions: [r]) { _, p in p.x < 0 }
+        XCTAssertEqual(none.triangleCount, 0, "a triangle with a corner over air is not a wall")
+        let all = LatticeRegionCap.build(regions: [r]) { _, _ in true }
+        XCTAssertEqual(all.triangleCount, 2)
+    }
+
+    /// ★ NO CAP INSIDE ANOTHER LATTICED PRISM: where a second prism continues past this
+    /// one's end, the end is lattice (the pocket rule), never a plate.
+    func testTheCapIsSkippedWhereAnotherIncludePrismContinues() {
+        var r = LatticeRegionSpec(role: .include, kind: .face)
+        r.origin = SIMD3(0, 0, 0); r.normal = SIMD3(0, 1, 0); r.depthMM = 4
+        r.halfUMM = 20; r.halfWMM = 20
+        r.outlineLoops = [[SIMD2(-5, -5), SIMD2(5, -5), SIMD2(5, 5), SIMD2(-5, 5)]]
+        var o = r; o.depthMM = 12          // the same mouth, deeper: it continues past r's end
+        XCTAssertEqual(LatticeRegionCap.build(regions: [r, o]) { _, _ in true }.triangleCount, 2,
+                       "only the DEEPER prism's end (at 12) is capped; r's end at 4 sits inside o")
+        var far = r; far.origin = SIMD3(100, 0, 0)
+        XCTAssertEqual(LatticeRegionCap.build(regions: [r, far]) { _, _ in true }.triangleCount, 4,
+                       "two prisms apart each keep their cap")
+    }
+
     func testTheShaderDrawsTheCapOnlyWhereThePartContinues() throws {
         let src = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
             .deletingLastPathComponent().appendingPathComponent("Sources/TopOptFlows/MetalMeshView.swift")

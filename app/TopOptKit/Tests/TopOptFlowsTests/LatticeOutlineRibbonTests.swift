@@ -43,7 +43,12 @@ final class LatticeOutlineRibbonTests: XCTestCase {
         }
     }
 
-    func testTheInPlaneOffsetMovesTheWholeBeamIn() {
+    /// ★ RE-PINNED 2026-09-22 (review #19): a POSITIVE in-plane offset GROWS the region —
+    /// membership is `signedDistance <= inPlaneOffsetMM` (`LatticeRegionMask.contains`), the
+    /// maintainer's negative expand SHRINKS it — so the beam follows the region outward.
+    /// The old pin had the beam moving in for a positive offset, 2·offset off the region's
+    /// true boundary.
+    func testTheInPlaneOffsetMovesTheWholeBeamWithTheRegion() {
         let r = square(10, ccw: true, offset: 0.5)
         let mesh = LatticeOutlineRibbon.build(regions: [r], widthMM: 1.0) { _, _ in 3 }
         var rings = Set<Int>()
@@ -52,7 +57,7 @@ final class LatticeOutlineRibbonTests: XCTestCase {
             let rel = p - r.origin
             rings.insert(Int((max(abs(rel.x), abs(rel.z)) * 100).rounded()))
         }
-        XCTAssertEqual(rings, [950, 850], "outer ring at 10 − 0.5, inner at 10 − 0.5 − 1.0")
+        XCTAssertEqual(rings, [1050, 950], "outer ring at 10 + 0.5 (the grown region's edge), inner 1.0 in from it")
     }
 
     func testTheDepthFollowsTheWall() {

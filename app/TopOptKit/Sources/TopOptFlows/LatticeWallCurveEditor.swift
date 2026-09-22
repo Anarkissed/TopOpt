@@ -180,6 +180,9 @@ public struct LatticeWallCurveEditor: View {
         let a = faceAsk(f.id), t = max(f.thickMM, 1e-9)
         return (min(max(0, a.startMM / t), 1), min(max(0, (a.endMM ?? f.thickMM) / t), 1))
     }
+    /// ★ the mid-plane of the ALLOWED RANGE (review #45): the start line lives above it,
+    /// the end line below — halves of the range, not of the wall
+    private func midShare(_ f: LatticeWallEditorFace) -> Double { let s = shares(f); return 0.5 * (s.start + s.end) }
     /// The magnet: the nearest grid crossing, in the box's normalised units.
     private func snap(_ f: LatticeWallEditorFace, x: Double, y: Double) -> (Double, Double) {
         guard magnet else { return (x, y) }
@@ -294,7 +297,8 @@ public struct LatticeWallCurveEditor: View {
         ctx.stroke(Path(roundedRect: box, cornerRadius: 8),
                    with: .color(grade && isActive ? Color(red: 0.5, green: 0.75, blue: 1).opacity(0.8) : .white.opacity(0.22)),
                    lineWidth: 1.5)
-        var mid = Path(); mid.move(to: CGPoint(x: box.minX, y: box.midY)); mid.addLine(to: CGPoint(x: box.maxX, y: box.midY))
+        let midY = box.minY + box.height * CGFloat(midShare(f))
+        var mid = Path(); mid.move(to: CGPoint(x: box.minX, y: midY)); mid.addLine(to: CGPoint(x: box.maxX, y: midY))
         ctx.stroke(mid, with: .color(.white.opacity(0.45)), style: StrokeStyle(lineWidth: 1.2, dash: [5, 5]))
         let labelFont = Font.system(size: 11, weight: .semibold)
         ctx.draw(Text("OUTER SURFACE").font(labelFont).foregroundColor(.white.opacity(0.45)),
@@ -451,7 +455,8 @@ public struct LatticeWallCurveEditor: View {
                 guard i < arr.count else { return }
                 var q = arr[i]
                 let (sx, sy) = snap(f, x: nx, y: ny)
-                q.y = s == .start ? min(sy, 0.5) : max(sy, 0.5)
+                let m = midShare(f)
+                q.y = s == .start ? min(sy, m) : max(sy, m)
                 if i != 0, i != arr.count - 1 { q.x = clamp(sx, arr[i - 1].x + 0.02, arr[i + 1].x - 0.02) }
                 arr[i] = q
                 if s == .start { p.start = arr } else { p.end = arr }
@@ -481,7 +486,8 @@ public struct LatticeWallCurveEditor: View {
         if grade, tool == .pen, d.kind == .none, !d.moved {
             let n = norm(g.location, bw: bw, bh: bh)
             guard n.x > 0.02, n.x < 0.98, n.y > -0.1, n.y < 1.1 else { return }
-            let tapSide: LatticeWallCurves.Side = n.y < 0.5 ? .start : .end
+            let m = midShare(f)
+            let tapSide: LatticeWallCurves.Side = n.y < m ? .start : .end
             side = tapSide
             remember()
             setProfile(f) { p in
@@ -489,7 +495,7 @@ public struct LatticeWallCurveEditor: View {
                 let (sx, sy) = snap(f, x: n.x, y: n.y)
                 var i = arr.firstIndex { $0.x > sx } ?? (arr.count - 1)
                 if i < 0 { i = 0 }
-                arr.insert(.init(x: sx, y: tapSide == .start ? clamp(sy, 0, 0.5) : clamp(sy, 0.5, 1)), at: i)
+                arr.insert(.init(x: sx, y: tapSide == .start ? clamp(sy, 0, m) : clamp(sy, m, 1)), at: i)
                 if tapSide == .start { p.start = arr } else { p.end = arr }
                 selPt = SelPt(face: f.id, side: tapSide, idx: i)
             }
@@ -575,9 +581,10 @@ public struct LatticeWallCurveEditor: View {
                                setProfile(f) { p in
                                    let from = side == .start ? p.start : p.end
                                    let other: LatticeWallCurves.Side = side == .start ? .end : .start
+                                   let m = midShare(f)
                                    let mapped = from.map { q -> LatticeWallCurvesPoint in
                                        var r = q
-                                       r.y = other == .start ? clamp(1 - q.y, 0, 0.5) : clamp(1 - q.y, 0.5, 1)
+                                       r.y = other == .start ? clamp(2 * m - q.y, 0, m) : clamp(2 * m - q.y, m, 1)
                                        if let ty = q.ty { r.ty = -ty }
                                        return r
                                    }
@@ -591,7 +598,8 @@ public struct LatticeWallCurveEditor: View {
             railButton("—", "Flatten") {
                 sideOp { arr in
                     var y = arr.map(\.y).reduce(0, +) / Double(max(1, arr.count))
-                    y = side == .start ? min(y, 0.5) : max(y, 0.5)
+                    let m = activeFaceModel.map(midShare) ?? 0.5
+                    y = side == .start ? min(y, m) : max(y, m)
                     return [.init(x: 0, y: y), .init(x: 1, y: y)]
                 }
             }

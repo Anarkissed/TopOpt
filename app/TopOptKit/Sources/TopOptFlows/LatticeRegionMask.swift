@@ -96,6 +96,9 @@ public enum LatticeRegionMask {
             // the face on his two lattice walls, and the rest was solid material
             // the struts were drawn into. See `LatticeFaceOutline`.
             if !region.outlineLoops.isEmpty {
+                if !region.outlineSeamTilt.isEmpty,
+                   LatticeFaceOutline.insideWithFlare(uv, loops: region.outlineLoops, seams: region.outlineSeams,
+                                                      tilts: region.outlineSeamTilt, depth: s) { return true }
                 return LatticeFaceOutline.signedDistance(uv, loops: region.outlineLoops, seams: region.outlineSeams)
                     <= region.inPlaneOffsetMM + reach
             }
@@ -138,7 +141,11 @@ public enum LatticeRegionMask {
     public static func outlineDistance(_ p: SIMD3<Double>,
                                        regions: [LatticeRegionSpec],
                                        slabMarginMM: Double = 0) -> Double {
-        var best = 1e3
+        // ★ 1e9 is the "no region answered" sentinel; the far value handed back is the
+        // old 1e3 (the full suite of 2026-09-22 caught `best` starting at 1e3 against a
+        // 1e9 sentinel test — the union's max then never left 1e3 and the organic band
+        // graded 0 voxels).
+        var best = 1e9
         for region in regions where region.role == .include && region.kind == .face
             && !region.outlineLoops.isEmpty {
             let n = unit(region.normal)
@@ -151,9 +158,13 @@ public enum LatticeRegionMask {
             let uv = SIMD2<Double>(simd_dot(d, u), simd_dot(d, v))
             let inside = -(LatticeFaceOutline.signedDistance(uv, loops: region.outlineLoops, seams: region.outlineSeams)
                            - region.inPlaneOffsetMM)
-            best = Swift.min(best, inside)
+            // ★ THE UNION (2026-09-22): the regions overlap at every seam (facets, corners),
+            // and `min` made a point deep inside one prism read as OUTSIDE its neighbour's
+            // outline — the band, the bleed and the strut clip then walled every seam. A
+            // union's inside distance is the MAX over its members.
+            best = best == 1e9 ? inside : Swift.max(best, inside)
         }
-        return best
+        return best == 1e9 ? 1e3 : best
     }
 
     public static func signedDistance(_ p: SIMD3<Double>,
@@ -192,8 +203,14 @@ public enum LatticeRegionMask {
             if along > 0 { return along }
             let inPlane: Double
             if !region.outlineLoops.isEmpty {
-                inPlane = LatticeFaceOutline.signedDistance(uv, loops: region.outlineLoops, seams: region.outlineSeams)
-                    - region.inPlaneOffsetMM
+                var sd = LatticeFaceOutline.signedDistance(uv, loops: region.outlineLoops, seams: region.outlineSeams)
+                // ★ the flared seams (2026-09-22): the sign follows the bisector planes
+                if !region.outlineSeamTilt.isEmpty {
+                    let inside = LatticeFaceOutline.insideWithFlare(uv, loops: region.outlineLoops, seams: region.outlineSeams,
+                                                                    tilts: region.outlineSeamTilt, depth: Swift.max(0, s))
+                    sd = inside ? -abs(sd) : abs(sd)
+                }
+                inPlane = sd - region.inPlaneOffsetMM
             } else if region.faceID == nil {
                 // A manual primitive's own box — see `contains` for why a FACE never
                 // gets this fallback.
@@ -279,6 +296,20 @@ public enum LatticeRegionMask {
         /// No regions ⇒ nothing latticed. The STAGE: the user has declared no
         /// lattice, so none is drawn.
         case latticeNothing
+    }
+
+    /// ★ THE SAME CLIP OVER THE WHOLE PRISM (review 2026-09-22 #21): the slab-clipped
+    /// grid is where LATTICE goes; the measurers — the wall width along the normal, the
+    /// rim's attachment seed, the in-plane boundary distance, the octree's "is there
+    /// material here" — must read the whole declared prism, or every slab edge reads
+    /// as a boundary and grows a rim, a cap, or a solid wall across the pocket.
+    public static func clippedWholePrism(_ grid: LatticeVoxelGrid,
+                                         to regions: [LatticeRegionSpec],
+                                         whenEmpty: EmptyRegionPolicy = .latticeEverything)
+        -> LatticeVoxelGrid {
+        var whole = regions
+        for i in whole.indices { whole[i].thicknessMap = nil }
+        return clipped(grid, to: whole, whenEmpty: whenEmpty)
     }
 
     public static func clipped(_ grid: LatticeVoxelGrid,
