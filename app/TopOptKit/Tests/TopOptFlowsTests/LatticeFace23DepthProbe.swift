@@ -28,6 +28,14 @@ final class LatticeFace23DepthProbe: XCTestCase {
             guard i >= 0, j >= 0, k >= 0, i < occ.nx, j < occ.ny, k < occ.nz else { return false }
             return occ.values[(k * occ.ny + j) * occ.nx + i] > 0.5
         }
+        // ★ THE JOB FOR CORE NOTE 7: face 23 as it stands (facets, frame axes on the wire)
+        do {
+            let dicts = regions.map { $0.wireDictionary(frameAxes: true) }
+            let data = try JSONSerialization.data(withJSONObject: dicts, options: [.prettyPrinted, .sortedKeys])
+            let url = URL(fileURLWithPath: ProcessInfo.processInfo.environment["FACE23_REGIONS_OUT"] ?? "/tmp/face23_regions.json")
+            try data.write(to: url)
+            print("PROBE wrote \(dicts.count) region dicts to \(url.path)")
+        } catch { print("PROBE write failed: \(error)") }
         // who is across each outline edge, per the mesh (nil = no shared edge / free)
         for f: FaceID in [15, 2, 23] {
             guard let pl = LatticeRegionEmission.planeFor(face: f, in: mesh), case let .plane(c, n, _, _, _, _) = pl else { continue }
