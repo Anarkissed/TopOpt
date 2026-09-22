@@ -1157,11 +1157,24 @@ extension LatticePreviewOccupancy {
                         // march's `dClip` cuts whatever it draws flush at the true
                         // outline — so this can only ADD material inside what he
                         // declared, never place any outside it.
+                        // ★★ THE RIM SPANS THE WHOLE PRISM (his 2026-09-22 01:09, image 8:
+                        // the drawn band's indent "is absolutely happening to the entire rim,
+                        // when it should just be the lattice"). The pocket's solid outline is
+                        // the wall's, not the band's: a texel within the rim's width of the
+                        // outline is owned through the whole declared depth; lattice texels
+                        // stay inside the drawn band.
                         for (r, region) in regions.enumerated()
                         where region.role == .include && sizes[r] > 0
-                              && LatticeRegionMask.contains(
+                              && (LatticeRegionMask.contains(
                                     p, region: region,
-                                    inPlaneReachMM: Self.overshootCells * sizes[r]) {
+                                    inPlaneReachMM: Self.overshootCells * sizes[r])
+                                  || (region.thicknessMap != nil
+                                      && LatticeRegionMask.containsWholePrism(p, region: region)
+                                      && {
+                                          let d = boundaryAtCentre(p, r)
+                                          let rim = Swift.max(finestCellMM, Double(Swift.max(occ.spacing.x, Swift.max(occ.spacing.y, occ.spacing.z))))
+                                          return d > 1e-6 && d <= rim
+                                      }())) {
                             // ★★★ THE REGION'S CELL, DIVIDED A WHOLE NUMBER OF TIMES
                             // TOWARD ITS OWN EDGE — S/2, S/3, S/4, …
                             //
@@ -1466,7 +1479,7 @@ extension LatticePreviewOccupancy {
                                     // get "how far in from the outline this centre sits".
                                     dOutlineExact = -(LatticeFaceOutline.signedDistance(
                                         SIMD2<Double>(simd_dot(rel, bu), simd_dot(rel, bv)),
-                                        loops: region.outlineLoops) - region.inPlaneOffsetMM)
+                                        loops: region.outlineLoops, seams: region.outlineSeams) - region.inPlaneOffsetMM)
                                 }
                                 let dCentreOut = dOutlineExact.isNaN ? d : dOutlineExact   // mm in from the outline (< 0 outside)
                                 let dNear = Swift.max(0, dCentreOut - 0.5 * s)              // the texel's nearest edge
@@ -2210,5 +2223,36 @@ extension LatticePreviewOccupancy {
             steppedCellMM: field.steppedCellMM, steppedPhase: field.steppedPhase,
             baseCellMM: field.baseCellMM,
             maxLevel: Swift.max(field.maxLevel, ceilingLevel), fromCorePlan: true)
+    }
+}
+
+extension LatticePreviewOccupancy {
+    /// ★ Whether an axis-aligned box [lo, lo + S) lies wholly inside the region's DRAWN
+    /// depth band (the slab), read at its four in-plane corners and its centre — true
+    /// when the region has no map (the whole prism). The region's normal is along `axis`.
+    public static func boxInsideSlab(_ lo: SIMD3<Double>, _ S: Double,
+                                     region: LatticeRegionSpec, axis: Int) -> Bool {
+        guard region.thicknessMap != nil else { return true }
+        let n = LatticeRegionMask.unit(region.normal)
+        guard simd_length(n) > 0.5 else { return true }
+        let (bu, bv) = LatticeRegionMask.basis(n)
+        let hi = lo + SIMD3<Double>(repeating: S)
+        let sA = simd_dot(lo - region.origin, n), sB = simd_dot(hi - region.origin, n)
+        let sLo = Swift.min(sA, sB), sHi = Swift.max(sA, sB)
+        let eps = Swift.min(0.05 * S, 0.2)
+        var probes: [SIMD3<Double>] = [0.5 * (lo + hi)]
+        let others = (0..<3).filter { $0 != axis }
+        for a in [0.0, 1.0] { for b in [0.0, 1.0] {
+            var c = 0.5 * (lo + hi)
+            c[others[0]] = lo[others[0]] + a * S
+            c[others[1]] = lo[others[1]] + b * S
+            probes.append(c)
+        } }
+        for p in probes {
+            let d = p - region.origin
+            let (s0, s1) = region.slabRange(uv: SIMD2<Double>(simd_dot(d, bu), simd_dot(d, bv)))
+            if sLo < s0 - eps || sHi > s1 + eps { return false }
+        }
+        return true
     }
 }

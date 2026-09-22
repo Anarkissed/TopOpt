@@ -135,10 +135,14 @@ final class OrganicPreviewSpeedAndRimTests: XCTestCase {
                       "★ the traced picture first, the repaired one after")
         XCTAssertTrue(ws.contains("guard bakeGeneration == strutBakeGeneration else {"),
                       "★ a newer bake retires an older stage")
-        // ★ ONE BAKE AT A TIME, and the traced picture is DRAWN while core repairs it
-        // (his walk, 2026-09-07: everything frozen; a 2–4 mm preview that never came).
-        XCTAssertTrue(ws.contains("guard !strutBakeInFlight, !strutRefining else { strutRebakePending = true; return }"),
-                      "★ a change during a bake queues one rebake, it does not start a second")
+        // ★ A NEW SETTING NEVER WAITS (his 2026-09-21 22:40 — this REPLACES the one-at-a-time
+        // rule of 2026-09-07): the generation moves and the new bake starts now; the running
+        // one's picture is dropped when it lands. The traced picture is still DRAWN while
+        // core repairs it.
+        XCTAssertTrue(ws.contains("if strutBakeInFlight || strutRefining {") && ws.contains("superseding the running bake"),
+                      "★ a change during a bake supersedes it — it starts now, it does not queue")
+        XCTAssertFalse(ws.contains("guard !strutBakeInFlight, !strutRefining else { strutRebakePending = true; return }"),
+                       "★ the queue-behind-the-refine guard is gone (it hid his ×2 seeding and his drawn depth for an hour)")
         XCTAssertTrue(ws.contains("strutBakeInFlight = false\n                strutRefining = !isLastStage"),
                       "★ stage one is a picture: in flight means nothing to show, refining means a better one is coming")
         XCTAssertFalse(ws.contains("DispatchQueue.main.sync { bakeGeneration == strutBakeGeneration }"),

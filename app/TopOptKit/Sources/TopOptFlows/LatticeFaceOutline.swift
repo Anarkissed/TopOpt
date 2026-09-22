@@ -71,9 +71,55 @@ public enum LatticeFaceOutline {
     /// rather than latticing an empty region.
     public static func loops(face: FaceID, in mesh: ViewerMesh,
                              normal: SIMD3<Double>, origin: SIMD3<Double>) -> [Loop] {
+        loopsWithNeighbours(face: face, in: mesh, normal: normal, origin: origin).map { $0.loop }
+    }
+    public static func loopsWithNeighbours(face: FaceID, in mesh: ViewerMesh,
+                                           normal: SIMD3<Double>, origin: SIMD3<Double>) -> [(loop: Loop, neighbours: [FaceID?])] {
+        let want = Int32(face)
+        return loopsWithNeighbours(triangles: { tri in tri < mesh.faceIDs.count && mesh.faceIDs[tri] == want },
+                                   in: mesh, normal: normal, origin: origin)
+    }
+    /// The same, over any subset of the mesh's triangles (`triangles(tri)` says which) — a
+    /// curved face's facets (`LatticeFaceFacets`) are outlined this way.
+    public static func loops(triangles belongs: (Int) -> Bool, in mesh: ViewerMesh,
+                             normal: SIMD3<Double>, origin: SIMD3<Double>) -> [Loop] {
+        loopsWithNeighbours(triangles: belongs, in: mesh, normal: normal, origin: origin).map { $0.loop }
+    }
+
+    /// ★ The mesh's edge → faces map, built once per mesh (the emission runs often).
+    private static var adjacencyLock = NSLock()
+    private static var adjacencyKey: (Int, UInt64, UInt64)? = nil
+    private static var adjacency: [EdgeK: [Int32]] = [:]
+    private static func edgeFaces(in mesh: ViewerMesh) -> [EdgeK: [Int32]] {
+        adjacencyLock.lock(); defer { adjacencyLock.unlock() }
+        let key = (mesh.indices.count, mesh.signature.contentHash, mesh.signature.topologyHash)
+        if let k = adjacencyKey, k == key { return adjacency }
+        var map: [EdgeK: [Int32]] = [:]
+        var t = 0
+        func vertex(_ i: UInt32) -> SIMD3<Double>? {
+            let b = Int(i) * 3
+            guard b + 2 < mesh.positions.count else { return nil }
+            return SIMD3<Double>(Double(mesh.positions[b]), Double(mesh.positions[b + 1]), Double(mesh.positions[b + 2]))
+        }
+        while t + 2 < mesh.indices.count {
+            let tri = t / 3
+            let f: Int32 = tri < mesh.faceIDs.count ? mesh.faceIDs[tri] : -1
+            if let p0 = vertex(mesh.indices[t]), let p1 = vertex(mesh.indices[t + 1]), let p2 = vertex(mesh.indices[t + 2]) {
+                let p = [p0, p1, p2]
+                for e in 0..<3 { map[EdgeK(p[e], p[(e + 1) % 3]), default: []].append(f) }
+            }
+            t += 3
+        }
+        adjacencyKey = key; adjacency = map
+        return map
+    }
+
+    /// The loops AND, per edge (loop[i] → loop[i+1]), the face across it — nil at a free
+    /// edge or where the neighbour is one of this very subset.
+    public static func loopsWithNeighbours(triangles belongs: (Int) -> Bool, in mesh: ViewerMesh,
+                                           normal: SIMD3<Double>, origin: SIMD3<Double>) -> [(loop: Loop, neighbours: [FaceID?])] {
         let n = simd_length(normal) > 1e-9 ? simd_normalize(normal) : SIMD3<Double>(0, 0, 1)
         let (u, v) = LatticeRegionMask.basis(n)
-        let want = Int32(face)
 
         func vertex(_ i: UInt32) -> SIMD3<Double>? {
             let b = Int(i) * 3
@@ -87,10 +133,11 @@ public enum LatticeFaceOutline {
         // rule `SurfaceCutLines.alignmentDegrees` uses to find a face's own rim.
         var count: [EdgeK: Int] = [:]
         var ends: [EdgeK: (SIMD3<Double>, SIMD3<Double>)] = [:]
+        var ownFace: [EdgeK: Int32] = [:]
         var t = 0
         while t + 2 < mesh.indices.count {
             let tri = t / 3
-            if tri < mesh.faceIDs.count, mesh.faceIDs[tri] == want,
+            if belongs(tri),
                let p0 = vertex(mesh.indices[t]),
                let p1 = vertex(mesh.indices[t + 1]),
                let p2 = vertex(mesh.indices[t + 2]) {
@@ -100,12 +147,22 @@ public enum LatticeFaceOutline {
                     let k = EdgeK(a, b)
                     count[k, default: 0] += 1
                     ends[k] = (a, b)
+                    ownFace[k] = tri < mesh.faceIDs.count ? mesh.faceIDs[tri] : -1
                 }
             }
             t += 3
         }
         let border = count.filter { $0.value == 1 }.keys
         guard !border.isEmpty else { return [] }
+        // the face across each boundary edge: the mesh's other triangle on that edge
+        let all = edgeFaces(in: mesh)
+        func across(_ k: EdgeK) -> FaceID? {
+            guard let fs = all[k], fs.count >= 2 else { return nil }
+            let own = ownFace[k] ?? -1
+            // the other triangle's face; a seam inside one face reads the face itself
+            if let other = fs.first(where: { $0 != own }) { return other }
+            return fs.count >= 2 ? own : nil
+        }
 
         // Chain them: each boundary vertex has exactly two boundary edges on a
         // manifold patch, so walking from any unused edge closes a loop.
@@ -116,11 +173,12 @@ public enum LatticeFaceOutline {
             adjacency[Key(e.1), default: []].append(k)
         }
         var unused = Set(border)
-        var out: [Loop] = []
+        var out: [(loop: Loop, neighbours: [FaceID?])] = []
         while let seed = unused.first {
             guard let e0 = ends[seed] else { unused.remove(seed); continue }
             unused.remove(seed)
             var loop3: [SIMD3<Double>] = [e0.0, e0.1]
+            var edgeKeys: [EdgeK] = [seed]
             var here = Key(e0.1)
             let start = Key(e0.0)
             var guardCount = 0
@@ -132,6 +190,7 @@ public enum LatticeFaceOutline {
                 let ka = Key(ne.0)
                 let step = (ka == here) ? ne.1 : ne.0
                 loop3.append(step)
+                edgeKeys.append(next)
                 here = Key(step)
             }
             guard loop3.count >= 3 else { continue }
@@ -141,7 +200,10 @@ public enum LatticeFaceOutline {
                 let d = p - origin
                 return SIMD2<Double>(simd_dot(d, u), simd_dot(d, v))
             }
-            if flat.count >= 3 { out.append(flat) }
+            // edge i is loop[i] → loop[i+1]; the walk appended one key per step in order
+            var nb: [FaceID?] = (0..<flat.count).map { i in i < edgeKeys.count ? across(edgeKeys[i]) : nil }
+            if nb.count < flat.count { nb += [FaceID?](repeating: nil, count: flat.count - nb.count) }
+            if flat.count >= 3 { out.append((flat, nb)) }
         }
         return out
     }
@@ -173,11 +235,20 @@ public enum LatticeFaceOutline {
     /// Signed distance (mm) to the loops in plane — negative inside. Used to bake
     /// the region field the preview and the shell clip both read, so the cut is a
     /// true distance and a sphere-trace step stays safe.
-    public static func signedDistance(_ p: SIMD2<Double>, loops: [Loop]) -> Double {
+    /// ★ SEAMS (his 2026-09-22 01:58, images 2–5: rims and walls where two lattice
+    /// prisms meet). `seams[l][i]` marks the edge loop[l][i] → loop[l][i+1] as a SEAM —
+    /// an edge shared with another latticed prism (the next facet of a curved wall, or a
+    /// neighbouring latticed face). A seam is not an outline: no rim, no band, no offset
+    /// there. The SIGN still comes from the whole loop (inside is inside); the DISTANCE
+    /// is measured to the true outline edges only. All edges seams ⇒ far from any rim.
+    public static func signedDistance(_ p: SIMD2<Double>, loops: [Loop], seams: [[Bool]] = []) -> Double {
         var best = Double.greatestFiniteMagnitude
-        for loop in loops {
+        for (l, loop) in loops.enumerated() {
+            let sm = l < seams.count ? seams[l] : []
             var j = loop.count - 1
             for i in 0..<loop.count {
+                // the edge from j to i is edge index j
+                if j < sm.count, sm[j] { j = i; continue }
                 let a = loop[i], b = loop[j]
                 let ab = b - a
                 let l2 = simd_dot(ab, ab)
@@ -186,7 +257,10 @@ public enum LatticeFaceOutline {
                 j = i
             }
         }
-        if best == .greatestFiniteMagnitude { return .greatestFiniteMagnitude }
+        if best == .greatestFiniteMagnitude {
+            guard !loops.isEmpty, !seams.isEmpty else { return .greatestFiniteMagnitude }
+            return contains(p, loops: loops) ? -1e6 : 1e6
+        }
         return contains(p, loops: loops) ? -best : best
     }
 

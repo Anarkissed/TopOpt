@@ -96,7 +96,7 @@ public enum LatticeRegionMask {
             // the face on his two lattice walls, and the rest was solid material
             // the struts were drawn into. See `LatticeFaceOutline`.
             if !region.outlineLoops.isEmpty {
-                return LatticeFaceOutline.signedDistance(uv, loops: region.outlineLoops)
+                return LatticeFaceOutline.signedDistance(uv, loops: region.outlineLoops, seams: region.outlineSeams)
                     <= region.inPlaneOffsetMM + reach
             }
             // ★★★ THE RECTANGLE IS A MANUAL PRIMITIVE'S OWN SHAPE, AND NOTHING ELSE'S.
@@ -149,7 +149,7 @@ public enum LatticeRegionMask {
             guard along <= slabMarginMM else { continue }
             let (u, v) = basis(n)
             let uv = SIMD2<Double>(simd_dot(d, u), simd_dot(d, v))
-            let inside = -(LatticeFaceOutline.signedDistance(uv, loops: region.outlineLoops)
+            let inside = -(LatticeFaceOutline.signedDistance(uv, loops: region.outlineLoops, seams: region.outlineSeams)
                            - region.inPlaneOffsetMM)
             best = Swift.min(best, inside)
         }
@@ -192,7 +192,7 @@ public enum LatticeRegionMask {
             if along > 0 { return along }
             let inPlane: Double
             if !region.outlineLoops.isEmpty {
-                inPlane = LatticeFaceOutline.signedDistance(uv, loops: region.outlineLoops)
+                inPlane = LatticeFaceOutline.signedDistance(uv, loops: region.outlineLoops, seams: region.outlineSeams)
                     - region.inPlaneOffsetMM
             } else if region.faceID == nil {
                 // A manual primitive's own box — see `contains` for why a FACE never

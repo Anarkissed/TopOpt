@@ -294,7 +294,7 @@ extension LatticePreviewOccupancy {
             var vals = [Double](repeating: -1e3, count: nu * nv)
             for j in 0..<nv { for i in 0..<nu {
                 let uv = lo + SIMD2(Double(i), Double(j)) * h
-                vals[j * nu + i] = -(LatticeFaceOutline.signedDistance(uv, loops: region.outlineLoops) - region.inPlaneOffsetMM)
+                vals[j * nu + i] = -(LatticeFaceOutline.signedDistance(uv, loops: region.outlineLoops, seams: region.outlineSeams) - region.inPlaneOffsetMM)
             }}
             rasters[ladder.region] = OutlineRaster(origin: lo, h: h, nu: nu, nv: nv, values: vals)
         }
@@ -323,6 +323,7 @@ extension LatticePreviewOccupancy {
                 count[axis] = Swift.max(1, Int((region.depthMM / S).rounded(.up)))
                 func fitsBox(_ lo: SIMD3<Double>, _ S: Double) -> Bool {
                     if dOut(lo + SIMD3<Double>(repeating: 0.5 * S)) < -0.87 * S { return false }
+                    if !LatticePreviewOccupancy.boxInsideSlab(lo, S, region: region, axis: axis) { return false }
                     let eps = Swift.min(0.05 * S, 0.2)
                     for cz in 0...1 { for cy in 0...1 { for cx in 0...1 {
                         let corner = lo + SIMD3<Double>(Double(cx), Double(cy), Double(cz)) * S
@@ -426,7 +427,7 @@ extension LatticePreviewOccupancy {
                 let rel = p - region.origin
                 return -(LatticeFaceOutline.signedDistance(
                     SIMD2<Double>(simd_dot(rel, bu), simd_dot(rel, bv)),
-                    loops: region.outlineLoops) - region.inPlaneOffsetMM)
+                    loops: region.outlineLoops, seams: region.outlineSeams) - region.inPlaneOffsetMM)
             }
             // The slot's box [lo, lo + S) per axis, for slot index (i, j, k) at size S.
             // In-plane slots are anchored at the lattice origin; along the normal at
@@ -451,6 +452,15 @@ extension LatticePreviewOccupancy {
                 lastFail = ""
                 outlineFailed = false
                 let eps = Swift.min(0.05 * S, 0.2)
+                // ★ THE SLAB IN DEPTH (his 2026-09-22 01:07: "the lattice is jutting out of
+                // the rim … something is making the lattice move rather than thin"): a
+                // cell is laid only where its whole depth lies inside the drawn band, so
+                // a thinner band takes the next rung down instead of a whole cell
+                // poking out of it.
+                if !LatticePreviewOccupancy.boxInsideSlab(lo, S, region: region, axis: axis) {
+                    lastFail = "slab"
+                    return (false, nearest, farthest)
+                }
                 for cz in 0...1 { for cy in 0...1 { for cx in 0...1 {
                     let corner = lo + SIMD3<Double>(Double(cx), Double(cy), Double(cz)) * S
                     let sgn = SIMD3<Double>(cx == 0 ? 1 : -1, cy == 0 ? 1 : -1, cz == 0 ? 1 : -1)

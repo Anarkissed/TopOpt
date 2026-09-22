@@ -27,7 +27,7 @@ final class LatticeRegionEmissionFaceRegionsTests: XCTestCase {
         XCTAssertEqual(r.regions.count, 3, "the direct face and the region's two members")
         let members = r.regions.filter { $0.selectableKey == key }
         XCTAssertEqual(members.count, 2)
-        XCTAssertEqual(Set(members.map { $0.faceID }), [23, 24])
+        XCTAssertEqual(Set(members.compactMap { $0.faceID }), [23, 24])
         for m in members {
             XCTAssertEqual(m.depthMM, 12, "the REGION's depth")
             XCTAssertEqual(m.role, .include)
@@ -57,7 +57,7 @@ final class LatticeRegionEmissionFaceRegionsTests: XCTestCase {
             faceDepthMM: 4,
             regionMembers: { _, _ in [23, 24] },
             resolve: { self.plane($0) })
-        XCTAssertEqual(r.regions.map { $0.faceID }.sorted(), [23, 24])
+        XCTAssertEqual(r.regions.compactMap { $0.faceID }.sorted(), [23, 24])
     }
 
     /// ★ THE FRAME ON THE WIRE (core note 4): the axes `outline_uv` is in, as core's own

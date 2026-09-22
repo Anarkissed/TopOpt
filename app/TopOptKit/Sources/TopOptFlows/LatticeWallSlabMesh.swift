@@ -39,8 +39,9 @@ public enum LatticeWallSlabMesh {
         let (bu, bv) = LatticeRegionMask.basis(n)
         func world(_ uv: SIMD2<Double>, _ s: Double) -> SIMD3<Double> { r.origin + bu * uv.x + bv * uv.y + n * s }
         var builder = Builder()
-        let rings = r.outlineLoops.filter { $0.count >= 3 }
-            .map { LatticeOutlineRibbon.offsetRing($0, by: r.inPlaneOffsetMM) }
+        let rings = r.outlineLoops.enumerated().filter { $0.element.count >= 3 }
+            .map { LatticeOutlineRibbon.offsetRing($0.element, by: r.inPlaneOffsetMM,
+                                                   seams: $0.offset < r.outlineSeams.count ? r.outlineSeams[$0.offset] : []) }
             .filter { $0.count >= 3 }
         guard !rings.isEmpty else { return ViewerMesh(vertices: [], indices: [], faceIDs: []) }
 

@@ -44,10 +44,16 @@ public struct LatticeWallEditorFace: Identifiable, Equatable {
     }
     /// How many columns the box is divided into.
     public var columns: Int { max(1, min(96, Int((widthMM / columnMM).rounded()))) }
-    /// A depth in mm snapped to this wall's steps (or to 0.5 mm when continuous), never above the wall.
-    public func snap(_ mm: Double) -> Double {
+    /// A depth in mm snapped to this wall's steps (or to 0.5 mm when continuous), never above
+    /// the wall. The END rounds DOWN and never to nothing (a positive ask is never left solid);
+    /// the START rounds to the NEAREST step, zero included, so the line can sit at the surface
+    /// (his 2026-09-22: "won't let me go down to 0 in the green section").
+    public func snap(_ mm: Double, nearest: Bool = false) -> Double {
         let v = min(thickMM, max(0, mm))
         if depthStepsMM.isEmpty { return (v * 2).rounded() / 2 }
+        if nearest {
+            return depthStepsMM.min { abs($0 - v) < abs($1 - v) } ?? v
+        }
         return min(thickMM, LatticeWallDepthSteps.snap(v, steps: depthStepsMM))
     }
 }
@@ -219,7 +225,7 @@ public struct LatticeWallProfileEditor: View {
     private func depthAt(_ f: LatticeWallEditorFace, y: Double, side: LatticeWallProfile.Side) -> Double {
         let r = allowedMM(f), t = f.thickMM
         let raw = side == .start ? min(0.5, max(0, y)) * t : max(0.5, min(1, y)) * t
-        return f.snap(min(r.end, max(r.start, raw)))
+        return f.snap(min(r.end, max(r.start, raw)), nearest: side == .start)
     }
 
     // MARK: one wall's card
@@ -423,7 +429,7 @@ public struct LatticeWallProfileEditor: View {
             let r = allowedMM(f), t = f.thickMM
             let s0 = norm(g.startLocation, bw: bw, bh: bh).y
             let nearStart = abs(s0 - r.start / t) <= abs(s0 - r.end / t)
-            let mm = f.snap(ny * t)
+            let mm = f.snap(ny * t, nearest: nearStart)
             setFace(f.id) { a in
                 if nearStart { a.startMM = min(mm, r.end - 0.1) }
                 else { let e = max(mm, r.start + 0.1); a.endMM = e >= t - 1e-9 ? nil : e }

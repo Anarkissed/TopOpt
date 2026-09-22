@@ -41,7 +41,10 @@ public enum LatticeRegionEmission {
         /// along. Empty ⇒ the rectangle, exactly as before.
         case plane(center: SIMD3<Double>, normal: SIMD3<Double>,
                    halfUMM: Double, halfWMM: Double,
-                   outlineLoops: [[SIMD2<Double>]] = [])
+                   outlineLoops: [[SIMD2<Double>]] = [],
+                   // ★ per outline edge, the face across it (nil: a free edge) — the
+                   // emission turns edges shared with another latticed prism into seams
+                   neighbours: [[FaceID?]] = [])
     }
 
     /// The planar `ResolvedFace` the app builds, in ONE place, so a test cannot
@@ -52,6 +55,8 @@ public enum LatticeRegionEmission {
                                             planeNormal: SIMD3<Float>(geo.planeNormal),
                                             planeOrigin: SIMD3<Float>(geo.planeOrigin))
         else { return nil }
+        let lw = LatticeFaceOutline.loopsWithNeighbours(
+            face: face, in: mesh, normal: ManualPrimitive.unit(geo.planeNormal), origin: SIMD3<Double>(o.center))
         return .plane(center: SIMD3<Double>(o.center), normal: geo.planeNormal,
                       halfUMM: Double(o.halfU), halfWMM: Double(o.halfV),
                       // ★★★ IN THE **FACE'S** FRAME, WHICH IS WHAT `spec` ASSUMES — and
@@ -70,10 +75,7 @@ public enum LatticeRegionEmission {
                       // ★ THE CONVERSION IN `spec` IS THE RIGHT PLACE FOR IT — it is
                       // written down, argued and tested there. This side simply has to
                       // hand it what it says it takes: the face's own outward frame.
-                      outlineLoops: LatticeFaceOutline.loops(
-                          face: face, in: mesh,
-                          normal: ManualPrimitive.unit(geo.planeNormal),
-                          origin: SIMD3<Double>(o.center)))
+                      outlineLoops: lw.map { $0.loop }, neighbours: lw.map { $0.neighbours })
     }
 
     public struct Result: Equatable, Sendable {
@@ -121,7 +123,9 @@ public enum LatticeRegionEmission {
     /// shape — so it ignores the value rather than pretending to widen.
     public static func spec(for face: ResolvedFace, role: LatticeGroupRole,
                             depthMM: Double, faceID: Int? = nil,
-                            expandMM: Double = 0)
+                            expandMM: Double = 0,
+                            // ★ which neighbouring face makes an outline edge a SEAM
+                            seamWith: (FaceID) -> Bool = { _ in false })
         -> LatticeRegionSpec? {
         switch face {
         case .cylinder(let axisPoint, let axisDir, let radius, let lo, let hi):
@@ -134,7 +138,7 @@ public enum LatticeRegionEmission {
             s.radiusMM = radius
             s.halfLengthMM = 0.5 * (hi - lo)
             return s.isValid ? s : nil
-        case .plane(let center, let normal, let halfU, let halfW, let loops):
+        case .plane(let center, let normal, let halfU, let halfW, let loops, let neighbours):
             // ★★★ NO OUTLINE, NO REGION — for a B-REP FACE. The half-extents are a
             // BOUNDING BOX (41.2% / 29.8% face on his two lattice walls), so emitting
             // one in place of an outline declares material he never marked, which the
@@ -219,6 +223,15 @@ public enum LatticeRegionEmission {
                 }
             }
             s.inPlaneOffsetMM = loops.isEmpty ? 0 : LatticeSlabExpand.clamp(expandMM)
+            // the point order is kept by the re-expression above, so edge i is still edge i
+            s.outlineSeams = neighbours.map { $0.map { f in f.map(seamWith) ?? false } }
+            if !s.outlineSeams.contains(where: { $0.contains(true) }) { s.outlineSeams = [] }
+            else {
+                s.outlineSeamFaces = neighbours.map { $0.map { f in
+                    if let f, seamWith(f) { return Int(f) }
+                    return nil
+                } }
+            }
             s.depthMM = depthMM
             return s.isValid ? s : nil
         }
@@ -277,9 +290,32 @@ public enum LatticeRegionEmission {
                                // (a cut sector — a voxel set, PR 331 §6). Every member
                                // emitted carries the REGION's key, role, depth, density.
                                regionMembers: (UUID, RegionID) -> [FaceID]? = { _, _ in nil },
+                               // ★ a face that does not resolve to ONE plane or cylinder may
+                               // resolve to several planar FACETS (a curved wall) — see
+                               // `LatticeFaceFacets`; empty ⇒ the face is skipped as before
+                               facets: (FaceID) -> [ResolvedFace] = { _ in [] },
                                resolve: (FaceID) -> ResolvedFace?) -> Result {
         var out: [LatticeRegionSpec] = []
         var skipped = 0
+        /// every resolved shape of a face: the one plane/cylinder, else its facets
+        func shapes(_ f: FaceID) -> [ResolvedFace] {
+            if let r = resolve(f) { return [r] }
+            return facets(f)
+        }
+        // ★ every face that will be LATTICED, known up front: an outline edge shared with
+        // one of them (or with the face's own other facets) is a seam, not a rim
+        var latticed = Set<FaceID>()
+        for g in groups {
+            guard let groupRole = roles[g.id] else { continue }
+            for f in g.faces where LatticeSelectableRoles.role(
+                for: .face(group: g.id, face: f), groupRole: groupRole, overrides: selectableRoles) == .include {
+                latticed.insert(f)
+            }
+            for rid in g.regionIDs where LatticeSelectableRoles.role(
+                for: .region(group: g.id, region: rid), groupRole: groupRole, overrides: selectableRoles) == .include {
+                for f in regionMembers(g.id, rid) ?? [] { latticed.insert(f) }
+            }
+        }
         for (p, d) in includePrimitives {
             if let s = spec(for: p, role: .include, depthMM: d) { out.append(s) }
         }
@@ -324,10 +360,12 @@ public enum LatticeRegionEmission {
                 guard let role = LatticeSelectableRoles.role(
                     for: ref, groupRole: groupRole, overrides: selectableRoles) else { continue }
                 let depth = selectableDepthMM[ref.key] ?? groupDepth
-                if let r = resolve(f),
-                   var s = spec(for: r, role: role, depthMM: depth,
-                                faceID: runFaceID(f),
-                                expandMM: selectableExpandMM[ref.key] ?? 0) {
+                var emitted = 0
+                for r in shapes(f) {
+                    guard var s = spec(for: r, role: role, depthMM: depth,
+                                       faceID: runFaceID(f),
+                                       expandMM: selectableExpandMM[ref.key] ?? 0,
+                                       seamWith: { $0 == f || (role == .include && latticed.contains($0)) }) else { continue }
                     // The face's own resolved role, same gate as the primitives
                     // above — see the note there on group- vs selectable-keying.
                     s.relativeDensity = density(
@@ -335,10 +373,9 @@ public enum LatticeRegionEmission {
                         stated: selectableDensity[ref.key])
                     s.selectableKey = ref.key
                     if let n = syntheticWalls[ref.key] { s.syntheticStress = true; s.syntheticFoci = n }
-                    out.append(s)
-                } else {
-                    skipped += 1
+                    out.append(s); emitted += 1
                 }
+                if emitted == 0 { skipped += 1 }
             }
             // ★ the group's face regions: one prism per member face, under the region's own key
             let direct = Set(g.faces)
@@ -349,19 +386,20 @@ public enum LatticeRegionEmission {
                 guard let members = regionMembers(g.id, rid) else { continue }
                 let depth = selectableDepthMM[ref.key] ?? groupDepth
                 for f in members where !direct.contains(f) {
-                    if let r = resolve(f),
-                       var s = spec(for: r, role: role, depthMM: depth,
-                                    faceID: runFaceID(f),
-                                    expandMM: selectableExpandMM[ref.key] ?? 0) {
+                    var emitted = 0
+                    for r in shapes(f) {
+                        guard var s = spec(for: r, role: role, depthMM: depth,
+                                           faceID: runFaceID(f),
+                                           expandMM: selectableExpandMM[ref.key] ?? 0,
+                                           seamWith: { $0 == f || (role == .include && latticed.contains($0)) }) else { continue }
                         s.relativeDensity = density(
                             for: g.id, role: role, densities: groupDensities,
                             stated: selectableDensity[ref.key])
                         s.selectableKey = ref.key
                         if let n = syntheticWalls[ref.key] { s.syntheticStress = true; s.syntheticFoci = n }
-                        out.append(s)
-                    } else {
-                        skipped += 1
+                        out.append(s); emitted += 1
                     }
+                    if emitted == 0 { skipped += 1 }
                 }
             }
         }

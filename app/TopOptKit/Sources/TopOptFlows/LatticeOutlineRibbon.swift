@@ -43,7 +43,7 @@ public enum LatticeOutlineRibbon {
     /// offset copy runs backwards) collapses to the corner its neighbours make — so
     /// the ring never crosses itself, whatever the corner angle or the segment
     /// lengths (his 25 mm beam overlapped itself at two acute corners, 2026-09-16).
-    static func offsetRing(_ loop: [SIMD2<Double>], by d: Double) -> [SIMD2<Double>] {
+    static func offsetRing(_ loop: [SIMD2<Double>], by d: Double, seams: [Bool] = []) -> [SIMD2<Double>] {
         let m = loop.count
         guard m >= 3 else { return loop }
         if abs(d) < 1e-9 { return loop }
@@ -51,7 +51,8 @@ public enum LatticeOutlineRibbon {
         // Offset lines: point + direction per edge.
         var lineP: [SIMD2<Double>] = [], lineD: [SIMD2<Double>] = []
         for i in 0..<m {
-            lineP.append(loop[i] + n[i] * d)
+            // ★ a seam edge is not offset: it is where the neighbouring prism continues
+            lineP.append(loop[i] + n[i] * (i < seams.count && seams[i] ? 0 : d))
             lineD.append(loop[(i + 1) % m] - loop[i])
         }
         func meet(_ a: Int, _ b: Int) -> SIMD2<Double> {
@@ -129,11 +130,12 @@ public enum LatticeOutlineRibbon {
                 let l = simd_length(w)
                 return l > 1e-9 ? w / l : bu
             }
-            for loop in region.outlineLoops {
+            for (li, loop) in region.outlineLoops.enumerated() {
                 let m = loop.count
                 guard m >= 3 else { continue }
-                let outer = offsetRing(loop, by: region.inPlaneOffsetMM)
-                let inner = offsetRing(loop, by: region.inPlaneOffsetMM + widthMM)
+                let seams = li < region.outlineSeams.count ? region.outlineSeams[li] : []
+                let outer = offsetRing(loop, by: region.inPlaneOffsetMM, seams: seams)
+                let inner = offsetRing(loop, by: region.inPlaneOffsetMM + widthMM, seams: seams)
                 // Per-vertex inward direction for the smooth wall normals: from the
                 // outer ring to the inner one, or the edge normals' bisector where the
                 // two rings meet.
@@ -150,7 +152,43 @@ public enum LatticeOutlineRibbon {
                     let mid = at((outer[i] + inner[i]) * 0.5, 1.0)
                     return Swift.max(0.5, Swift.min(region.depthMM, depthAt(ri, mid)))
                 }
+                let seamFaces = li < region.outlineSeamFaces.count ? region.outlineSeamFaces[li] : []
                 for i in 0..<m {
+                    // ★ no beam along a seam (his 2026-09-22: no rims between two prisms) —
+                    // but where the seam is a CORNER between two latticed faces, a thin
+                    // STABILITY PLATE at rim width runs from the shared edge inward along the
+                    // bisector of the two walls, to the shallower wall's depth (his 2.2,
+                    // "a 45 degree wall going into the middle of the shape … not there to
+                    // break the flow"; "thin plate, rim width"). Emitted once, by the face
+                    // with the smaller id.
+                    if i < seams.count, seams[i] {
+                        guard i < seamFaces.count, let other = seamFaces[i], let own = region.faceID,
+                              other != own, own < other,
+                              let nb = regions.first(where: { $0.role == .include && $0.kind == .face && $0.faceID == other })
+                        else { continue }
+                        let nB = LatticeRegionMask.unit(nb.normal)
+                        let bis = n + nB
+                        guard simd_length(bis) > 1e-6 else { continue }
+                        let dir = simd_normalize(bis)
+                        let j = (i + 1) % m
+                        let p0 = at(loop[i], 0), p1 = at(loop[j], 0)
+                        let along = p1 - p0
+                        guard simd_length(along) > 1e-6 else { continue }
+                        let side = simd_normalize(simd_cross(simd_normalize(along), dir))
+                        let cosHalf = Swift.max(0.2, simd_dot(dir, n))
+                        let length = Swift.min(region.depthMM, nb.depthMM) / cosHalf
+                        let h = 0.5 * widthMM
+                        let a0 = p0 - side * h, a1 = p1 - side * h, b0 = p0 + side * h, b1 = p1 + side * h
+                        let a0d = a0 + dir * length, a1d = a1 + dir * length, b0d = b0 + dir * length, b1d = b1 + dir * length
+                        quad(a0, a1, a1d, a0d, -side, -side, -side, -side)
+                        quad(b0, b0d, b1d, b1, side, side, side, side)
+                        quad(a0d, a1d, b1d, b0d, dir, dir, dir, dir)
+                        quad(a0, b0, b1, a1, -dir, -dir, -dir, -dir)
+                        let e = simd_normalize(along)
+                        quad(a0, a0d, b0d, b0, -e, -e, -e, -e)
+                        quad(a1, b1, b1d, a1d, e, e, e, e)
+                        continue
+                    }
                     let j = (i + 1) % m
                     let oi0 = at(outer[i], 0), oj0 = at(outer[j], 0)
                     let oi1 = at(outer[i], depth[i]), oj1 = at(outer[j], depth[j])

@@ -1123,3 +1123,57 @@ Not yet seen by him.
   linked core ⇒ not sent); `wireDictionary(frameAxes:)` tested (+z face ⇒ u = −world y).
   (3) The seeding slider is withdrawn from the panel (plumbing stays at ×1); the depth
   fields are 64 pt and the swatch is gone so "Face 15"/"Face 2" read in full.
+- **2026-09-22 01:2x — HIS 01:09 ROUND (images 1–8).** (1) FACE 23 IS NOT A PLANE: the
+  stand's inner curve resolved to neither plane nor cylinder, `resolve` gave nil, the face
+  was SKIPPED (scene regions r0/r1 only) — so no card, no field, no lattice. New
+  `LatticeFaceFacets`: a face's triangles grouped by normal (±12°), each group a planar
+  facet (area-weighted normal, centroid, its own outline via
+  `LatticeFaceOutline.loops(triangles:)`), emitted as ordinary face prisms under the same
+  face id / selectable key (`LatticeRegionEmission.regions(facets:)`, tried when `resolve`
+  is nil). The wizard shows ONE card per key (the widest facet). Limitation stated: a
+  manual-grade drawing on a faceted wall applies per facet (each facet's own u axis).
+  (2) THE LATTICE JUTTING OUT OF THE RIM / THE RIM INDENTED WITH THE DRAWING (octet):
+  the packer never tested depth against the slab — a whole 12 mm cell was laid where the
+  band was 6 — and the rim texels were activated slab-aware. `LatticePreviewOccupancy
+  .boxInsideSlab` gates every fit (keptVolume's `fitsBox` and the placement's `fits`,
+  `lastFail = "slab"`): a thinner band takes the next rung; the activation owns a texel
+  through the whole prism when it lies within the rim's width of the outline, so the
+  pocket's solid outline is the wall's, not the band's. (3) The steps editor's START line
+  snaps to the NEAREST step, zero included (`snap(_:nearest:)`); the end still rounds
+  down and never to nothing. Tests: `LatticeFaceFacetsTests` (3: the quarter-cylinder
+  fan with outlines summing to the strip's area, a plane stays one facet, the slab fit).
+  Full suite on bc3cf67f: 2490 tests, 12 failure assertions = the 5 pre-existing tests +
+  two source pins on rules he replaced (the bake queue, the exit closure's length), both
+  re-pinned. Untested on device until he reopens: face 23's facets in the wizard and the
+  field, the thinned octet band, the rim's full depth.
+- **2026-09-22 02:2x — SEAMS (his 01:58 round, images 1–5).** The facets of face 23 and
+  the corner where face 2 meets face 23 each drew a RIM along every outline edge — so
+  every facet seam and the shared corner edge became a solid wall inside the pocket
+  (images 2–5: "walls again where there shouldn't be"). New: `LatticeRegionSpec
+  .outlineSeams` (per loop, per edge). An outline edge whose neighbouring triangle
+  belongs to the SAME face (the next facet) or to another LATTICED face is a seam:
+  `LatticeFaceOutline.loopsWithNeighbours` (a mesh-wide edge → faces map, cached per
+  mesh signature) reports the face across each boundary edge; `ResolvedFace.plane
+  .neighbours` carries it; `spec(seamWith:)` marks seams; the emission's pre-pass
+  collects every latticed face. `LatticeFaceOutline.signedDistance(seams:)` measures
+  distance to true outline edges only (sign from the whole loop; all seams ⇒ ±1e6):
+  used by the mask (contains / signedDistance / outlineDistance), the octree raster and
+  `dOut`, the occupancy's exact outline, so no rim band, no cell standoff, no expand at a
+  seam. `LatticeOutlineRibbon.offsetRing(seams:)` leaves seam edges in place and `build`
+  sweeps no beam along them; the cap and the slab mesh use the same rings. Tests:
+  `LatticeOutlineSeamTests` (2). NOT SENT TO CORE: seams are preview-only — the run's
+  `organic_solid_rim` will still rim every facet seam until core takes either a seam-edge
+  list beside outline_uv or a curved-face region (say so in the next core note). Expand
+  (image 1): the offset now applies only to a face's TRUE outline edges — a facet's
+  seams do not move — which is the likely cause of "the prism moved" (a narrow facet
+  offset from both seam sides collapsed to a sliver); re-check on the stand. NOT BUILT:
+  his 2.2 (a 45° stability wall at the corner where two latticed faces meet) — a design
+  to agree first (thickness, whether it is a rim-width plate or a cell-wide chamfer).
+- **2026-09-22 02:24 — THE CORNER PLATE (his 2.2, "thin plate, rim width").** Where a seam
+  is between two DIFFERENT latticed faces (`LatticeRegionSpec.outlineSeamFaces`, the run
+  face id across each seam edge), the outline beam mesh (`LatticeOutlineRibbon.build`)
+  emits one box per shared edge: rim width thick, from the shared edge inward along the
+  bisector of the two inward normals, length = min(depth A, depth B) / cos(half-angle) —
+  6 mm walls meeting at 90° ⇒ 8.5 mm diagonal reaching the inner corner. Emitted once (the
+  smaller face id). Facet seams within one face get no plate. Preview only, not on the
+  wire. Test: `LatticeCornerPlateTests`.

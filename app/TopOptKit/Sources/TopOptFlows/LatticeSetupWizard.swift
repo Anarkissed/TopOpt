@@ -676,8 +676,20 @@ public struct LatticeSetupWizard: View {
     // per wall in mm and "Density through the wall". Both lattice pages, both stages;
     // a preview request until it is agreed to work. See `LatticeWallThickness`.
     private var wallEditorFaces: [LatticeWallEditorFace] {
-        project.latticeJobRegions().regions
+        let all = project.latticeJobRegions().regions
             .filter { $0.role == .include && $0.kind == .face && $0.depthMM > 0 }
+        // ★ ONE card per selectable (a curved wall is many facet prisms under one key):
+        // the widest facet stands for the wall
+        var seen: [String: LatticeRegionSpec] = [:]
+        var order: [String] = []
+        for r in all {
+            let key = r.selectableKey ?? ""
+            let w = LatticeWallThicknessBuilder.frame(r)?.widthMM ?? 0
+            if let prev = seen[key], (LatticeWallThicknessBuilder.frame(prev)?.widthMM ?? 0) >= w { continue }
+            if seen[key] == nil { order.append(key) }
+            seen[key] = r
+        }
+        return order.compactMap { seen[$0] }
             .map { r in
                 let key = r.selectableKey ?? ""
                 let tint: Color = {

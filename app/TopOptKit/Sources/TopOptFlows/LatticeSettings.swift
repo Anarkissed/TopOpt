@@ -182,6 +182,13 @@ public struct LatticeRegionSpec: Equatable, Sendable {
     /// rectangle `halfUMM`×`halfWMM` exactly as it always was, which is what a
     /// bolt, a hand-placed primitive and every pre-outline project get.
     public var outlineLoops: [[SIMD2<Double>]] = []
+    /// ★ per loop, per edge (loop[i] → loop[i+1]): a SEAM — shared with another latticed
+    /// prism (the next facet of a curved wall, a neighbouring latticed face). No rim, no
+    /// band, no expand there. Empty ⇒ every edge is a true outline. Preview only.
+    public var outlineSeams: [[Bool]] = []
+    /// per loop, per edge: the run face id across a seam (nil where the edge is a true
+    /// outline) — a corner between two latticed faces gets the stability plate
+    public var outlineSeamFaces: [[Int?]] = []
     /// ★ THE IN-PLANE REACH, kept as its own number instead of being folded into
     /// the half-extents. Against an OUTLINE the expand is Minkowski dilation by a
     /// ball — `signedDistance <= inPlaneOffsetMM` — which is precisely what

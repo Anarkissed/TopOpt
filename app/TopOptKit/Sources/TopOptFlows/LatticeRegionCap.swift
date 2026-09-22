@@ -111,8 +111,9 @@ public enum LatticeRegionCap {
             // and end draw nothing; the one plate stays where the prism ends inside
             // material, as he asked on 09-19.
             let cap = region.depthMM
-            for loop in region.outlineLoops where loop.count >= 3 {
-                let ring = LatticeOutlineRibbon.offsetRing(loop, by: region.inPlaneOffsetMM)
+            for (li, loop) in region.outlineLoops.enumerated() where loop.count >= 3 {
+                let ring = LatticeOutlineRibbon.offsetRing(loop, by: region.inPlaneOffsetMM,
+                                                           seams: li < region.outlineSeams.count ? region.outlineSeams[li] : [])
                 guard ring.count >= 3 else { continue }
                 for (a, b, c) in triangulate(ring) {
                     let corners = [ring[a], ring[b], ring[c]].map { region.origin + bu * $0.x + bv * $0.y + n * cap }

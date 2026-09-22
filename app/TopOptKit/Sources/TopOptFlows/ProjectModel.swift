@@ -2343,6 +2343,10 @@ public final class ProjectModel: ObservableObject {
             selectableExpandMM: lattice.selectableExpandMM,
             syntheticWalls: latticeSyntheticWalls(),
             regionMembers: { [weak self] _, rid in self?.latticeRegionMembers(rid) },
+            facets: { [weak self] f in
+                guard let mesh = self?.viewerMesh else { return [] }
+                return LatticeFaceFacets.facets(face: f, in: mesh)
+            },
             resolve: resolvedLatticeFace)
     }
 
