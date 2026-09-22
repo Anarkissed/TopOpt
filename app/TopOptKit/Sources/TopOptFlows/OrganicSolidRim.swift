@@ -119,6 +119,12 @@ public enum OrganicSolidRim {
                 // exempt is the NORMAL: the prism's front and back faces are open by
                 // design and walling them would hide the lattice.
                 if candidate[e2] { continue }
+                // ★★ AND ONLY AGAINST SOLID (his 2026-09-22 15:25: the rim is where the
+                // lattice meets the model's material, never where it meets air — "the top
+                // and bottom of the face-prism … should never happen"; core's own rim
+                // seeds only beside solid). This reverses the 09-08 exception above for
+                // air neighbours; the sides against solid keep their seed.
+                if !solid[e2] { continue }
                 // ★ ALONG THE NORMAL IS THE FLOOR OR THE OPEN FACE, NEVER A SIDE.
                 let dot = nl > 0
                     ? (Double(di[d]) * nrm.x + Double(dj[d]) * nrm.y + Double(dk[d]) * nrm.z) / nl

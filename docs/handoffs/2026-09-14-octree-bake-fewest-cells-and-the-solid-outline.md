@@ -1289,3 +1289,22 @@ Not yet seen by him.
     (`outlineSeamDepthMM`): a 20 mm prism cut by a 12 mm neighbour's bisector past 12 mm
     left a strip nobody owned. Tests: `LatticeSeamFlareTests` (+2), `LatticeOutlineRibbon
     Tests` (+1). NOT verified on device — he reopens; the DIAG lines carry the census.
+- **2026-09-22 15:25 — THE FACE-PRISM IS A SELECTION, NOT A SHAPE (his images 1–4 on the
+  15:20 build).** His rules, verbatim in spirit: the lattice is the model's material
+  inside the prism; the RIM is the outline of the model's shape where lattice meets
+  SOLID, never the prism's own top/bottom edges where it meets air (those are the
+  finish's); overlapping prisms are ONE lattice with one continuous rim, non-overlapping
+  ones stay separate. Measured before changing: core's tracer stops a curve only when it
+  leaves the CANDIDATE set (`organic_lattice.hpp:871`), which is already the union of
+  every prism, so curves cross prism boundaries today — the "separate pieces" were the
+  rims, not the trace. Changed: the outline beam is drawn only on edges with the part's
+  solid beyond them (open edges: none; seams: none) — `LatticeOutlineRibbon.build`'s
+  `attached` gate now skips open edges; the organic solid rim (`OrganicSolidRim
+  .voxels`) seeds only against SOLID neighbours, reversing his 09-08 air exception
+  (flagged to him: 09-08 said "the bottom of the lattice is an outline and should get a
+  rim"; today says the top and bottom of the prism must never be rims; today's rule =
+  core's own). Re-pinned `OrganicSolidRimTests.testTheOutlineTakesTheRimOnlyWhereIt
+  MeetsSolid`, `LatticeOutlineRibbonTests` air ⇒ no beam. Core note 7 answered: (b)
+  accepted by core; the measurement job with face 23 as facets is in ~/Downloads
+  (`m2_verticalStand_face23_facets_job.json`, five regions, frame axes on, no expand on
+  the wire); his interim decision (deeper facet slabs vs leave) still open.

@@ -184,13 +184,20 @@ public enum LatticeOutlineRibbon {
                 let en = edgeInwardNormals(loop)
                 // ★ outward (a grown region) only where material lies beyond the edge
                 var nAttached = 0, nOpen = 0, nSeam = 0
+                // ★★★ THE RIM IS WHERE LATTICE MEETS SOLID, NEVER WHERE IT MEETS AIR (his
+                // 2026-09-22 15:25, images 1–2: "the top and bottom of the face-prism is
+                // being set as the rims, but that should never happen … the rim should be
+                // the outline of the model's shape — NOT the face-prism"). An edge with
+                // air beyond it is the finish's job and gets NO beam; an edge with the
+                // part's material beyond it (and no other lattice — a seam) gets one.
+                var openEdge = [Bool](repeating: false, count: m)
                 let edgeOuter: [Double] = (0..<m).map { i in
                     if i < seams.count, seams[i] { nSeam += 1; return 0 }
                     let d = -region.inPlaneOffsetMM
-                    guard d < 0, let attached else { nAttached += 1; return d }
+                    guard let attached else { nAttached += 1; return d }
                     let probe = at((loop[i] + loop[(i + 1) % m]) * 0.5 - en[i] * (Swift.max(0, -d) + 1.0), 0.5 * region.depthMM)
                     if attached(ri, probe) { nAttached += 1; return d }
-                    nOpen += 1; return 0
+                    nOpen += 1; openEdge[i] = true; return 0
                 }
                 census?(ri, nAttached, nOpen, nSeam)
                 let outer = offsetRing(loop, by: -region.inPlaneOffsetMM, seams: seams, edgeOffset: edgeOuter)
@@ -263,6 +270,7 @@ public enum LatticeOutlineRibbon {
                         quad(a1, b1, b1d, a1d, e, e, e, e)
                         continue
                     }
+                    if openEdge[i] { continue }              // air beyond: the finish's edge, no rim
                     let j = (i + 1) % m
                     let si = Swift.min(start[i], depth[i]), sj = Swift.min(start[j], depth[j])
                     let oi0 = at(outer[i], si), oj0 = at(outer[j], sj)

@@ -80,7 +80,12 @@ final class OrganicSolidRimTests: XCTestCase {
     /// The one direction still exempt is the face NORMAL — the prism's front and back
     /// are open by design and walling them would hide the lattice — and that is what
     /// this now pins.
-    func testTheOutlineTakesTheRimEvenWhereItMeetsAir() {
+    /// ★ RE-PINNED 2026-09-22 15:25 (his images 1–2: "the top and bottom of the face-prism
+    /// is being set as the rims, but that should never happen … the rim should be the
+    /// outline of the model's shape"): an outline edge that meets AIR is the finish's and
+    /// takes no rim; only the edge that meets the part's solid does — core's own rule.
+    /// This reverses the 09-08 exception this test used to pin.
+    func testTheOutlineTakesTheRimOnlyWhereItMeetsSolid() {
         let (nx, ny, nz) = (9, 3, 9)
         var f = fixture()
         // take the material away on -X: that side is now air, and it is still outline
@@ -92,9 +97,9 @@ final class OrganicSolidRimTests: XCTestCase {
             normals: [SIMD3<Double>(0, 1, 0)], nx: nx, ny: ny, nz: nz,
             voxelMM: 1.0, rimMM: 1.0))
         func at(_ i: Int, _ j: Int, _ k: Int) -> Int { (k * ny + j) * nx + i }
-        XCTAssertTrue(set.contains(at(2, 1, 4)),
-                      "★ an outline edge takes the rim whether solid or air lies beyond")
-        XCTAssertTrue(set.contains(at(6, 1, 4)), "…and so does the +X wall")
+        XCTAssertFalse(set.contains(at(2, 1, 4)),
+                       "★ the -X edge meets air: the finish's edge, no rim")
+        XCTAssertTrue(set.contains(at(6, 1, 4)), "…the +X wall meets solid and keeps its rim")
         // ★ AND THE NORMAL IS STILL EXEMPT, asserted on its own fixture rather than
         // hoped for. One candidate voxel, entirely surrounded in-plane by more
         // candidates, whose ONLY non-candidate neighbours lie along ±Y — the region's

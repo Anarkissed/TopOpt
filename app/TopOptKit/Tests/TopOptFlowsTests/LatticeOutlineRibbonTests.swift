@@ -118,10 +118,14 @@ final class LatticeOutlineRibbonTests: XCTestCase {
             return out
         }
         let all = LatticeOutlineRibbon.build(regions: [r], widthMM: 1.0) { _, _ in 3 }
+        // ★ air beyond an edge ⇒ NO beam there (his 2026-09-22 15:25: the rim is where the
+        // lattice meets solid, the open edge is the finish's)
         let air = LatticeOutlineRibbon.build(regions: [r], widthMM: 1.0, attached: { _, _ in false }) { _, _ in 3 }
-        XCTAssertEqual(air.vertexCount, all.vertexCount, "every edge still has its beam")
-        XCTAssertEqual(rings(air), [1000, 900], "air beyond ⇒ the beam stays on the true outline")
+        XCTAssertEqual(air.vertexCount, 0, "air beyond every edge ⇒ no rim at all")
+        let one = LatticeOutlineRibbon.build(regions: [r], widthMM: 1.0, attached: { _, p in p.x < 0 }) { _, _ in 3 }
+        XCTAssertEqual(one.vertexCount, all.vertexCount / 4, "one of four edges meets solid")
         let solid = LatticeOutlineRibbon.build(regions: [r], widthMM: 1.0, attached: { _, _ in true }) { _, _ in 3 }
+        XCTAssertEqual(solid.vertexCount, all.vertexCount)
         XCTAssertEqual(rings(solid), [1050, 950], "material beyond ⇒ the beam follows the grown region")
         // the surface 1.5 mm below the plane: every start vertex sits at y = 20 + 1.5, the far end stays at 3
         let sunk = LatticeOutlineRibbon.build(regions: [r], widthMM: 1.0, surfaceAt: { _, _ in 1.5 }) { _, _ in 3 }
