@@ -1399,3 +1399,27 @@ Not yet seen by him.
   apart. DIAG `unselected-face skin: … pocket voxels turned solid`. Re-pinned `Lattice
   ShellAndMarchAgreeTests` (cells active inside the skin by design). 33 tests green;
   installed 01:19. Not judged on device.
+- **2026-09-23 02:23–02:40 — "THE RIM IS BELOW THE SOLID": skin, then rim, then grade, then
+  lattice; the rim drawn by the lattice layer.** His correction of my 01:20 reading: the
+  skin is the model's own thin wall at an unselected face; the RIM is the solid band UNDER
+  it, the transition where the lattice thickens into solid and connects to the skin. Built:
+  `unselectedSkinMM` = two beads (`outlineBeamMM`, 1.21 on his stand), `unselectedRimMM` =
+  the organic rim (3.41) or the octet band; the region field is solid through both; the
+  band grades from the rim's inner edge. THE GREEN ON EVERY FACE (his images 1, 2, 4): the
+  unselected-face distance field was clamped at 3 voxels (5.16 mm), so every voxel deeper
+  than that read "1.8 mm from the rim" and graded — the field now reaches skin + rim +
+  the shape band (`bandVoxels`), and nothing is applied beyond its clamp. WHERE ARE THE
+  RIMS (image 4, body hidden): the rim lived only in the body's region field. Now the
+  region texture's alpha carries "distance beyond the skin's inner face" (`skinInSDF`),
+  the march runs SOLID-ONLY under the capsules (a NEGATIVE step count: no strut field, no
+  part fill) and draws the band {inside a prism ∧ region solid ∧ beyond the skin} in the
+  rim colour. THE GREY PATCH (image 1): measured — the outer curve is face 23 the whole
+  height; the leg is a hollow channel above ~126 and below ~57 mm and SOLID between (an
+  internal cavity, faces 26/75, further in); the 24 mm prism exits into the channel's air
+  at the top and bottom and ends inside solid in the middle — the patch is the pocket's
+  floor, the model continuing. Not a bug; a selection/depth fact told to him. THE INSIDE
+  WALLS (images 2/3): the channel's inner faces are unselected ⇒ skin + rim by his own
+  rule; from inside the channel that is a solid surface. Told him; if he wants them
+  latticed they must be selected. Re-pinned the two `LatticeSolidFillTests` shader pins.
+  51 targeted tests green after the re-pin; installed 02:36. DIAG line:
+  `unselected faces: skin … + rim … · pocket voxels turned solid: skin N, rim M`.

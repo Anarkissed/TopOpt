@@ -32,14 +32,14 @@ final class LatticeSolidFillTests: XCTestCase {
         // produced. With it true, `Fsolid` is 1e9 and `F = max(dn * cellHere, dClip)`,
         // also exactly as before.
         XCTAssertTrue(
-            march.contains("float Fstrut = anyActive ? max(dn * cellHere, dClip) : 1e9;"),
+            march.contains("float Fstrut = (anyActive && !solidOnly) ? max(dn * cellHere, dClip) : 1e9;"),
             "★ the strut field must be infinite where no cell is active, so the solid "
             + "term below can own that ray")
         // ★ RE-PINNED 2026-09-22 (the maintainer's pocket rule): OUTSIDE every declared prism a
         // refused cell still takes the clip as its field; INSIDE a declared prism nothing is
         // solid but the rim the dressing paints — the pocket is air, never a wall.
         XCTAssertTrue(
-            march.contains("float Fsolid = anyActive ? 1e9 : (dRegion < 0.0 ? 1e9 : dClip);"),
+            march.contains("float Fsolid = (anyActive || solidOnly) ? 1e9 : (dRegion < 0.0 ? 1e9 : dClip);"),
             "★ the march must give a refused cell the part clip as its field outside a prism, "
             + "and nothing inside one — with dClip inside the prism every texel without a cell "
             + "read as a wall across the pocket")
@@ -68,7 +68,7 @@ final class LatticeSolidFillTests: XCTestCase {
         // declared mouth the fill reads flush instead of recessed behind a ledge.
         // ★ RE-PINNED 2026-09-22 (the pocket rule): outside a declared prism the fill
         // still takes `dClip` verbatim; inside one there is no fill at all.
-        XCTAssertTrue(march.contains("float Fsolid = anyActive ? 1e9 : (dRegion < 0.0 ? 1e9 : dClip);"),
+        XCTAssertTrue(march.contains("float Fsolid = (anyActive || solidOnly) ? 1e9 : (dRegion < 0.0 ? 1e9 : dClip);"),
                       "★ the fill must take the struts' own clip term unmodified — a "
                       + "second inset here is a second answer to where the part ends")
         // ★ AND SO MUST THE OUTLINE'S SOLID BAND, which is the OTHER way a hit can be
@@ -164,5 +164,15 @@ final class LatticeSolidFillTests: XCTestCase {
     func testPrintParamsCarriesALayerHeight() {
         XCTAssertGreaterThan(PrintParams.fdmDefault.layerHeightMM, 0,
                              "positive control: there IS a layer height to draw with")
+    }
+
+    /// ★ THE RIM UNDER EVERY UNSELECTED FACE IS DRAWN BY THE LATTICE LAYER (2026-09-23): a
+    /// negative step count runs the march solid-only under the capsules, and the band
+    /// inside the prism, solid in the region, beyond the skin, is the rim.
+    func testTheLatticeLayerDrawsTheRimUnderUnselectedFaces() {
+        XCTAssertTrue(march.contains("bool solidOnly = U.shadeParams.w < 0.0;"), "★ solid-only march under the capsules")
+        XCTAssertTrue(march.contains("float Fr = max(max(dPrismHere, -dRegion), -dSkinIn);"), "★ the rim band field")
+        XCTAssertTrue(march.contains("float Fstrut = (anyActive && !solidOnly) ? max(dn * cellHere, dClip) : 1e9;"), "★ no strut field when solid-only")
+        XCTAssertTrue(march.contains("float Fsolid = (anyActive || solidOnly) ? 1e9 : (dRegion < 0.0 ? 1e9 : dClip);"), "★ no part fill when solid-only")
     }
 }

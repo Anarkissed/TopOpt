@@ -414,8 +414,13 @@ public struct LatticeSDFScene {
     /// region's cap they read "outside" even inside solid material. The cap wall has to
     /// ask the part itself whether material continues, and this is the part itself.
     public let solidOccupancy: LatticeVoxelGrid
-    /// ★ the skin kept under every UNSELECTED face (2026-09-23), in mm — the rim
+    /// ★ under every UNSELECTED face (2026-09-23): the model's thin SKIN, then the RIM the
+    /// lattice thickens into ("the rim is below the solid"), both in mm
     public var unselectedSkinMM: Double = 0
+    public var unselectedRimMM: Double = 0
+    /// + beyond the skin's inner face, − inside the skin, 1e3 where no unselected face is
+    /// near — the lattice layer draws the rim where this is ≥ 0 and the region is solid
+    public var skinInSDF: LatticeVoxelGrid? = nil
     /// ★ The part's material inside every declared prism, IGNORING the slabs — the grid
     /// the measurers read (`LatticeRegionMask.clippedWholePrism`). `occupancy` is the
     /// slab-clipped set where lattice may go.
@@ -793,13 +798,28 @@ public struct LatticeSDFScene {
                 if fid >= 0, !selectedRaw.contains(fid) { unselIdx += [mesh.indices[t], mesh.indices[t + 1], mesh.indices[t + 2]] }
                 t += 3
             }
-            let unselSDF: [Float]? = unselIdx.isEmpty ? nil
-                : LatticePreviewOccupancy.signedDistance(positions: mesh.positions, indices: unselIdx, like: solid).values
+            // ★★ SKIN, THEN RIM (his 2026-09-23 02:30: "THE RIM IS BELOW THE SOLID! It's the
+            // transition from lattice to solid and connects the skin"). Under an unselected
+            // face: the model's own thin SKIN (two beads), then the RIM — the solid band the
+            // lattice thickens into (the organic rim, one base cell; the octet's outline
+            // band) — then the grade, then lattice. Both are solid in the region field; the
+            // band grades from the rim's inner edge; the lattice layer draws the RIM itself.
             let voxelHere = Double(Swift.max(solid.spacing.x, Swift.max(solid.spacing.y, solid.spacing.z)))
-            let unselSkin = self.organicSolidRimMM > 0 ? self.organicSolidRimMM
-                : LatticeSDFRenderer.outlineBeamMM(lineWidthMM: organic?.minExtrudableWidthMM ?? 0.45, voxelMM: voxelHere)
+            let unselSkin = LatticeSDFRenderer.outlineBeamMM(lineWidthMM: organic?.minExtrudableWidthMM ?? 0.45, voxelMM: voxelHere)
+            let unselRim = Swift.max(unselSkin, self.organicSolidRimMM)
+            let bandReach = Swift.max(organic?.shapeBandMM ?? 0, 10.0)
+            // ★ the distance field must reach past skin + rim + the grade band: its far value
+            // clamps everything beyond, and a 3-voxel clamp (5.2 mm) put EVERY voxel deeper
+            // than that "1.8 mm from the rim" — green on every face (his images 1, 2, 4).
+            let bandVoxels = Swift.max(3, Int(((unselSkin + unselRim + bandReach + 2.0) / voxelHere).rounded(.up)))
+            let unselSDF: [Float]? = unselIdx.isEmpty ? nil
+                : LatticePreviewOccupancy.signedDistance(positions: mesh.positions, indices: unselIdx, like: solid, bandVoxels: bandVoxels).values
+            let unselFar = Double(bandVoxels) * Double(Swift.min(solid.spacing.x, Swift.min(solid.spacing.y, solid.spacing.z)))
             self.unselectedSkinMM = unselSkin
-            var skinVoxels = 0
+            self.unselectedRimMM = unselRim
+            var skinIn = solid                          // + beyond the skin's inner face, − inside the skin, 1e3 = no unselected face near
+            for n in skinIn.values.indices { skinIn.values[n] = 1e3 }
+            var skinVoxels = 0, rimVoxels = 0
             var f = solid
             var o = solid
             var q = solid
@@ -868,14 +888,18 @@ public struct LatticeSDFScene {
                         // `skin − (−d)` would read solid, moving the selected face's zero
                         // crossing inward (`LatticeFaceOutlineTests.testTheSkinLeavesASolid
                         // WallAtTheSurface` caught it).
-                        if let u = unselSDF, u[i] < 0 {
-                            // inside the part, within `unselSkin` of an unselected face ⇒ solid
+                        if let u = unselSDF, u[i] < 0, -Double(u[i]) < unselFar - 1e-3 {
+                            // inside the part, within skin + rim of an unselected face ⇒ solid;
+                            // beyond the clamp the field says nothing and nothing is applied
                             let toUnsel = -Double(u[i])                    // + inside the part
-                            if region < 0, toUnsel < unselSkin { skinVoxels += 1 }
-                            carved = Swift.max(carved, unselSkin - toUnsel)
-                            // ★ and the band grades toward that skin as toward any outline
-                            if o.values[i] < 999 || region < 3.0 {
-                                o.values[i] = Float(Swift.min(Double(o.values[i]), toUnsel - unselSkin))
+                            if region < 0 {
+                                if toUnsel < unselSkin { skinVoxels += 1 } else if toUnsel < unselSkin + unselRim { rimVoxels += 1 }
+                            }
+                            carved = Swift.max(carved, unselSkin + unselRim - toUnsel)
+                            skinIn.values[i] = Float(toUnsel - unselSkin)
+                            // ★ and the band grades from the RIM's inner edge, as from any outline
+                            if region < 3.0 {
+                                o.values[i] = Float(Swift.min(Double(o.values[i]), toUnsel - unselSkin - unselRim))
                             }
                         }
                         f.values[i] = Float(carved)
@@ -887,8 +911,9 @@ public struct LatticeSDFScene {
             self.outlineSDF = o
             outlineForOrganic = o
             self.prismSDF = q
-            NSLog("DIAG unselected-face skin: %.2f mm under every face not selected (selected raw faces %@) · %d pocket voxels turned solid",
-                  unselSkin, selectedRaw.sorted().map(String.init).joined(separator: ","), skinVoxels)
+            self.skinInSDF = unselSDF == nil ? nil : skinIn
+            NSLog("DIAG unselected faces: skin %.2f mm + rim %.2f mm under every face not selected (selected raw faces %@; field reach %.1f mm) · pocket voxels turned solid: skin %d, rim %d",
+                  unselSkin, unselRim, selectedRaw.sorted().map(String.init).joined(separator: ","), unselFar, skinVoxels, rimVoxels)
         } else {
             self.regionSDF = nil
             self.outlineSDF = nil
@@ -2322,7 +2347,7 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
         uploadSegments(scene.preview.segments)
         sdfTex = makeVolumeTexture(scene.partSDF)
         solidTex = makeVolumeTexture(scene.solidOccupancy)     // the cap wall's "is the part here"
-        regionTex = scene.regionSDF.flatMap { r in makeRegionTexture(r, outline: scene.outlineSDF, prism: scene.prismSDF) }
+        regionTex = scene.regionSDF.flatMap { r in makeRegionTexture(r, outline: scene.outlineSDF, prism: scene.prismSDF, skinIn: scene.skinInSDF) }
         // ★ the cap only where the prism ends INSIDE material — measured wall width past
         // the declared depth by more than a voxel; a prism through the whole wall gets none
         let occ = scene.prismOccupancy          // ★ the whole prism: the cap is measured, not the slab
@@ -3350,7 +3375,8 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
 
     /// The region texture: r = region signed distance (the clip), g = in-plane
     /// distance in from the face outline (the solid outline's own measure).
-    private func makeRegionTexture(_ grid: LatticeVoxelGrid, outline: LatticeVoxelGrid?, prism: LatticeVoxelGrid?) -> MTLTexture? {
+    private func makeRegionTexture(_ grid: LatticeVoxelGrid, outline: LatticeVoxelGrid?, prism: LatticeVoxelGrid?,
+                                   skinIn: LatticeVoxelGrid? = nil) -> MTLTexture? {
         let d = MTLTextureDescriptor()
         d.textureType = .type3D
         d.pixelFormat = .rgba16Float
@@ -3360,12 +3386,14 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
         guard let tex = device.makeTexture(descriptor: d) else { return nil }
         let hasOutline = outline?.values.count == grid.values.count
         let hasPrism = prism?.values.count == grid.values.count
+        let hasSkinIn = skinIn?.values.count == grid.values.count
         var halfs = [UInt16](repeating: 0, count: grid.values.count * 4)
         for (n, v) in grid.values.enumerated() {
             halfs[4 * n] = float32to16(v)
             halfs[4 * n + 1] = float32to16(hasOutline ? outline!.values[n] : 1e3)
             halfs[4 * n + 2] = float32to16(hasPrism ? prism!.values[n] : v)
-            halfs[4 * n + 3] = 0
+            // a = distance beyond the skin's inner face (the rim starts at 0); 1e3 = none near
+            halfs[4 * n + 3] = float32to16(hasSkinIn ? skinIn!.values[n] : 1e3)
         }
         halfs.withUnsafeBytes { raw in
             tex.replace(region: MTLRegionMake3D(0, 0, 0, grid.nx, grid.ny, grid.nz),
@@ -3539,8 +3567,11 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
                                      ? params.uniformRelativeDensity
                                      : params.densitySpan.lo),
                                hasDemand, 0.03,
-                               // ★ no march at all while the capsules draw organic
-                               Float(capsulesReplaceField ? 0 : debugMaxSteps)),
+                               // ★ while the capsules draw organic the march runs SOLID-ONLY
+                               // (a negative step count): no strut field, just the rim band
+                               // under every unselected face, so the rim shows with the body
+                               // hidden (his 2026-09-23 02:23: "Where are ANY of the rims?")
+                               Float(capsulesReplaceField ? -debugMaxSteps : debugMaxSteps)),
             // stepParams.y = the trim's inward EROSION (mm). Near creases the trilinear
             // SDF underestimates true distance (min-of-planes is concave), so its zero
             // surface bulges outward in a lumpy per-voxel pattern — strut slivers

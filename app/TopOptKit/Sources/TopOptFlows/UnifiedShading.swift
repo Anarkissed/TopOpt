@@ -619,7 +619,10 @@ static LSDFHit lsdf_march(constant LSDFUniforms& U,
     float uniformRho = U.shadeParams.x;
     bool hasDemand = U.shadeParams.y > 0.5;
     float radiusFloor = U.shadeParams.z;
-    int maxSteps = int(U.shadeParams.w);
+    // ★ a NEGATIVE step count = solid only (the capsules draw the struts): the march
+    // still runs, for the rim band under every unselected face
+    bool solidOnly = U.shadeParams.w < 0.0;
+    int maxSteps = int(abs(U.shadeParams.w));
     // The field is a TRUE distance (min of exact capsule SDFs, radii constant per
     // owning cell), so near-full sphere-trace steps are safe — no Lipschitz-broken
     // squash like the gizmo's ribbons.
@@ -1026,15 +1029,28 @@ static LSDFHit lsdf_march(constant LSDFUniforms& U,
         // and at a neighbouring strut's density — which is what an edge band with no
         // printed layers in it looks like. Comparing the two fields is exact and needs
         // no proxy.
-        float Fstrut = anyActive ? max(dn * cellHere, dClip) : 1e9;
+        float Fstrut = (anyActive && !solidOnly) ? max(dn * cellHere, dClip) : 1e9;
         // ★★★ THE POCKET IS AIR (his 2026-09-22: "Walls should never take the place of
         // the empty or too little lattice. Ever."). `dClip` intersects the whole declared
         // prism, so inside it the "run leaves this solid" branch filled every texel with
         // no cell as opaque material — the wall across the pocket. Inside a declared
         // prism nothing is solid but the rim band the dressing paints; the fill applies
         // only to material OUTSIDE every prism.
-        float Fsolid = anyActive ? 1e9 : (dRegion < 0.0 ? 1e9 : dClip);
+        float Fsolid = (anyActive || solidOnly) ? 1e9 : (dRegion < 0.0 ? 1e9 : dClip);
         bool bleedHit = false;
+        // ★★★ THE RIM UNDER EVERY UNSELECTED FACE (his 2026-09-23 02:30: "the rim is below
+        // the solid — the transition from lattice to solid, connecting the skin"). Inside a
+        // declared prism, where the region field is solid, beyond the model's thin skin
+        // (regionTex.a ≥ 0): that band is the rim, drawn in the rim colour — part of the
+        // lattice, so it stays when the body is hidden.
+        {
+            float4 rt = regionTex.sample(samp, stc);
+            float dPrismHere = rt.b, dSkinIn = rt.a;
+            if (dPrismHere < 0.0 && dRegion >= 0.0 && dSkinIn >= 0.0 && dSkinIn < 900.0) {
+                float Fr = max(max(dPrismHere, -dRegion), -dSkinIn);
+                if (Fr < Fsolid) { Fsolid = Fr; bleedHit = true; }
+            }
+        }
         // ★★★ THE OUTLINE ITSELF IS NOT DRAWN HERE (2026-09-16). It is a MESH —
         // `LatticeOutlineRibbon`, one thin beam swept round the face outline, drawn by
         // the view in the same G-buffer pass — because a field sampled from voxels can
