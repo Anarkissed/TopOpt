@@ -414,6 +414,8 @@ public struct LatticeSDFScene {
     /// region's cap they read "outside" even inside solid material. The cap wall has to
     /// ask the part itself whether material continues, and this is the part itself.
     public let solidOccupancy: LatticeVoxelGrid
+    /// ★ the skin kept under every UNSELECTED face (2026-09-23), in mm — the rim
+    public var unselectedSkinMM: Double = 0
     /// ★ The part's material inside every declared prism, IGNORING the slabs — the grid
     /// the measurers read (`LatticeRegionMask.clippedWholePrism`). `occupancy` is the
     /// slab-clipped set where lattice may go.
@@ -768,6 +770,36 @@ public struct LatticeSDFScene {
             //
             // What remains is the region itself, and the finish's skin.
             let partSDFValues = self.partSDF.values
+            // ★★★ UNSELECTED FACES KEEP THEIR SKIN (his 2026-09-23 00:58, image 1: "since
+            // faces are selectable, they should be excluded from the lattices unless they
+            // have been selected … the curved face should be consistently thick"; on the
+            // rim: "the solid holding the lattice to the solid model … never visible from
+            // the outside … always in the shape of the model"). Under every CAD face that
+            // is NOT a selected face the part keeps a solid skin one rim thick, so no
+            // prism ever opens the model through a face nobody chose. That skin IS the
+            // rim, in the model's own shape — the outline beam mesh is retired.
+            let selectedRaw = Set(wallRegions.compactMap { r -> Int? in
+                guard r.role == .include, r.kind == .face else { return nil }
+                return r.rawFaceID.map { Int($0) } ?? r.faceID
+            })
+            var unselIdx: [UInt32] = []
+            unselIdx.reserveCapacity(mesh.indices.count)
+            var t = 0
+            while t + 2 < mesh.indices.count {
+                let tri = t / 3
+                let fid = tri < mesh.faceIDs.count ? Int(mesh.faceIDs[tri]) : -1
+                // a triangle with no face id (STL, a synthetic block) cannot be told from a
+                // selected face and gets no skin; only a KNOWN, unselected face does
+                if fid >= 0, !selectedRaw.contains(fid) { unselIdx += [mesh.indices[t], mesh.indices[t + 1], mesh.indices[t + 2]] }
+                t += 3
+            }
+            let unselSDF: [Float]? = unselIdx.isEmpty ? nil
+                : LatticePreviewOccupancy.signedDistance(positions: mesh.positions, indices: unselIdx, like: solid).values
+            let voxelHere = Double(Swift.max(solid.spacing.x, Swift.max(solid.spacing.y, solid.spacing.z)))
+            let unselSkin = self.organicSolidRimMM > 0 ? self.organicSolidRimMM
+                : LatticeSDFRenderer.outlineBeamMM(lineWidthMM: organic?.minExtrudableWidthMM ?? 0.45, voxelMM: voxelHere)
+            self.unselectedSkinMM = unselSkin
+            var skinVoxels = 0
             var f = solid
             var o = solid
             var q = solid
@@ -829,9 +861,24 @@ public struct LatticeSDFScene {
                         // Both readers want the skin. The asymmetry he photographed (one
                         // wall with skin, one without, same bake) is real and still
                         // unexplained — it is not this.
-                        f.values[i] = skinMM > 0
-                            ? Float(Swift.max(region, Double(partSDFValues[i]) + skinMM))
-                            : Float(region)
+                        var carved = skinMM > 0
+                            ? Swift.max(region, Double(partSDFValues[i]) + skinMM)
+                            : region
+                        // ★ INSIDE THE PART ONLY: outside it the signed distance is positive and
+                        // `skin − (−d)` would read solid, moving the selected face's zero
+                        // crossing inward (`LatticeFaceOutlineTests.testTheSkinLeavesASolid
+                        // WallAtTheSurface` caught it).
+                        if let u = unselSDF, u[i] < 0 {
+                            // inside the part, within `unselSkin` of an unselected face ⇒ solid
+                            let toUnsel = -Double(u[i])                    // + inside the part
+                            if region < 0, toUnsel < unselSkin { skinVoxels += 1 }
+                            carved = Swift.max(carved, unselSkin - toUnsel)
+                            // ★ and the band grades toward that skin as toward any outline
+                            if o.values[i] < 999 || region < 3.0 {
+                                o.values[i] = Float(Swift.min(Double(o.values[i]), toUnsel - unselSkin))
+                            }
+                        }
+                        f.values[i] = Float(carved)
                         i += 1
                     }
                 }
@@ -840,6 +887,8 @@ public struct LatticeSDFScene {
             self.outlineSDF = o
             outlineForOrganic = o
             self.prismSDF = q
+            NSLog("DIAG unselected-face skin: %.2f mm under every face not selected (selected raw faces %@) · %d pocket voxels turned solid",
+                  unselSkin, selectedRaw.sorted().map(String.init).joined(separator: ","), skinVoxels)
         } else {
             self.regionSDF = nil
             self.outlineSDF = nil
@@ -3710,6 +3759,13 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
         // exactly as the octet's outline beam is.
         let width = field.solidBandMM > 0 ? field.solidBandMM : scene.organicSolidRimMM
         guard width > 0 else { return nil }
+        // ★★★ RETIRED (his 2026-09-23 00:58: rims "should never be visible from the
+        // outside, barely visible at all, and always in the shape of the model"). The
+        // rim is now the skin under every unselected face, baked into the region field
+        // (`LatticeSDFScene.unselectedSkinMM`); a beam swept along the outline stood on
+        // the surface, poked past the top and ran through the lattice. The builder stays
+        // for its tests; nothing is drawn.
+        if scene.unselectedSkinMM > 0 { return nil }
         let occ = scene.prismOccupancy          // ★ the beam's depth is the wall's, whole prism
         var widths: [Int: [Double]] = [:]
         for (i, r) in scene.regions.enumerated() where r.role == .include && r.kind == .face {

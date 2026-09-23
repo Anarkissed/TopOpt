@@ -145,7 +145,13 @@ public enum LatticeRegionMask {
         // old 1e3 (the full suite of 2026-09-22 caught `best` starting at 1e3 against a
         // 1e9 sentinel test — the union's max then never left 1e3 and the organic band
         // graded 0 voxels).
+        // ★ THE NEAREST OUTLINE AMONG THE REGIONS THAT CONTAIN THE POINT (his 2026-09-23,
+        // image 3: the band "just stops half way up the curve" — exactly where face 23's
+        // prism overlaps face 2's: the union's MAX took face 23's large distance and the
+        // band vanished). Inside the union the band is the distance to the nearest true
+        // outline of any region the point is in; outside, the nearest region's edge.
         var best = 1e9
+        var bestInside = 1e9
         for region in regions where region.role == .include && region.kind == .face
             && !region.outlineLoops.isEmpty {
             let n = unit(region.normal)
@@ -162,8 +168,10 @@ public enum LatticeRegionMask {
             // and `min` made a point deep inside one prism read as OUTSIDE its neighbour's
             // outline — the band, the bleed and the strut clip then walled every seam. A
             // union's inside distance is the MAX over its members.
+            if inside > 0 { bestInside = Swift.min(bestInside, inside) }
             best = best == 1e9 ? inside : Swift.max(best, inside)
         }
+        if bestInside < 1e9 { return bestInside }
         return best == 1e9 ? 1e3 : best
     }
 

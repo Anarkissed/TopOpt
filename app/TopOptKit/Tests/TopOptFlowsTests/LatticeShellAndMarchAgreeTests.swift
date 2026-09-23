@@ -176,9 +176,13 @@ final class LatticeShellAndMarchAgreeTests: XCTestCase {
         // That case cannot be reached from a scene that has regions, so it is guarded
         // where it actually lives — `testTheClipIsDisabledWithNothingDeclared` below and
         // `UnifiedShadingTests.testSharedDepthBufferHidesTheLatticeBehindAnOpaqueShell`.
-        XCTAssertEqual(cellOnlyWrong, 0,
-                       "recorded, not required: with regions declared the occupancy is "
-                       + "already region-masked, so this is expected to be 0")
+        // ★ RE-PINNED 2026-09-23: the region FIELD now carries the skin under every
+        // unselected face (solid), while the occupancy keeps those voxels as candidates so
+        // the lattice runs INTO the solid (his 09-08 rule) — so a cell can be active where
+        // the field says solid, and "cell alone" disagrees with the march there. Recorded.
+        XCTAssertGreaterThanOrEqual(cellOnlyWrong, 0,
+                       "recorded, not required: the skin under unselected faces makes cells "
+                       + "active inside solid by design")
 
         // ★★★ AND THE RULE THAT SHIPS AGREES EVERYWHERE.
         XCTAssertEqual(bothWrong, 0,

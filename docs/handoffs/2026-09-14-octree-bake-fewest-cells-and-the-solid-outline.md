@@ -1377,3 +1377,25 @@ Not yet seen by him.
   an overlap is first-match, as core's); the diverging flare stays. Field map at z=185:
   the corner block reads pocket throughout; the only solid voxels are the flange tips
   and the outer fillet, which no selected face covers. 37 tests green. Installed 00:33.
+- **2026-09-23 00:58–01:20 — UNSELECTED FACES KEEP THEIR SKIN; the rim IS that skin (his six
+  images).** His new rule: a CAD face not selected must never be turned into lattice ("the
+  curved face should be consistently thick"); rims are "the solid holding the lattice to
+  the solid model … never visible from the outside … always in the shape of the model".
+  Built: `LatticeSDFScene` computes a signed distance to the triangles of every KNOWN
+  UNSELECTED face (`signedDistance(indices: unselIdx, like:)`; id-less triangles are
+  skipped — a synthetic block has none) and folds a skin one rim thick under them into
+  the REGION FIELD (`carved = max(region, skin − toUnsel)`, INSIDE the part only — applied
+  outside it moved the selected face's zero crossing inward, caught by `LatticeFaceOutline
+  Tests.testTheSkinLeavesASolidWallAtTheSurface`). `unselectedSkinMM` = the organic rim
+  (3.41 on his stand) or the octet's outline beam width. Capsules are clipped by the
+  region field, so struts inside the skin are hidden; candidates keep the skin voxels so
+  the curves run into it (his 09-08). The BAND (`outlineSDF`) now also measures toward
+  that skin (`min(outline, toUnsel − skin)`) — the corners fill green — and
+  `outlineDistance` takes the nearest outline among the regions CONTAINING the point
+  (the union's max had erased the band wherever face 23's prism overlapped face 2's:
+  his "grade-to-shape just stops half way up the curve"). The outline BEAM MESH is
+  retired (`buildOutlineRibbon` returns nil when a skin is armed): it stood on the
+  surface, poked past the leg's top, ran through the lattice and left the two bottom rims
+  apart. DIAG `unselected-face skin: … pocket voxels turned solid`. Re-pinned `Lattice
+  ShellAndMarchAgreeTests` (cells active inside the skin by design). 33 tests green;
+  installed 01:19. Not judged on device.
