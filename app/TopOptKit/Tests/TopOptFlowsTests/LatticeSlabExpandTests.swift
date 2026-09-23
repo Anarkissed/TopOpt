@@ -562,6 +562,10 @@ final class LatticeSlabExpandPrimitiveTests: XCTestCase {
     /// crease, which is the property the scale exists for. `1/cos(α/2)` is the
     /// classic miter formula (Clipper2's `DoMiter`), capped by a miter limit
     /// because it diverges as a crease closes.
+    /// ★ AND NOTHING MOVES ALONG THE NORMAL (his 2026-09-23: "the home face which the
+    /// face-prism comes from should always be in-line" — expand grows the prism sideways
+    /// and DEEPER, the mouth stays on the face). The dilation is in-plane only; a flat
+    /// patch's vertices keep their height exactly.
     func testAFlatPatchTakesNoMiterCorrection() {
         XCTAssertEqual(FaceOffsetShell.miterLimit, 4, accuracy: 1e-12,
                        "★ Clipper2's own default")
@@ -569,8 +573,8 @@ final class LatticeSlabExpandPrimitiveTests: XCTestCase {
         let out = FaceOffsetShell.dilated(base: s.base, inward: s.inward,
                                           indices: s.idx, byMM: 1.0)
         for k in 0..<4 {
-            XCTAssertEqual(Double(out[k].z - s.base[k].z), 1.0, accuracy: 1e-5,
-                           "★ no crease ⇒ no correction ⇒ exactly e")
+            XCTAssertEqual(Double(out[k].z - s.base[k].z), 0.0, accuracy: 1e-5,
+                           "★ no crease ⇒ no correction; and never a move along the normal — the mouth stays on the face")
         }
     }
 

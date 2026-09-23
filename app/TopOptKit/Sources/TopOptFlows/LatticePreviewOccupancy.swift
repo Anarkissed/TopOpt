@@ -896,10 +896,34 @@ extension LatticePreviewOccupancy {
                 // Overlap along the shared axis: r's slab reaches back through
                 // q's ([sOnQ − depth_r, sOnQ] against q's [0, depth_q]).
                 let sOnQ = simd_dot(regions[r].origin - regions[q].origin, nq)
-                if sOnQ > -1e-6, sOnQ - regions[r].depthMM < regions[q].depthMM + 1e-6 {
-                    primary[r] = q
-                    break
+                guard sOnQ > -1e-6, sOnQ - regions[r].depthMM < regions[q].depthMM + 1e-6 else { continue }
+                // ★ AND THE TWO MUST OVERLAP IN PLANE (2026-09-23): opposite-facing walls on
+                // the same axis but side by side — two legs, a wall and a far flange — share
+                // no material and are two lattices, not one. Measured: r's origin, and its
+                // outline's centre, inside q's prism (or the reverse) at the shared depth.
+                func overlapsInPlane(_ a: LatticeRegionSpec, _ b: LatticeRegionSpec) -> Bool {
+                    let nb = LatticeRegionMask.unit(b.normal)
+                    let (bu, bv) = LatticeRegionMask.basis(nb)
+                    var probes: [SIMD3<Double>] = [a.origin]
+                    if let loop = a.outlineLoops.first, !loop.isEmpty {
+                        let na = LatticeRegionMask.unit(a.normal)
+                        let (au, av) = LatticeRegionMask.basis(na)
+                        let c = loop.reduce(SIMD2<Double>(0, 0), +) / Double(loop.count)
+                        probes.append(a.origin + au * c.x + av * c.y)
+                    }
+                    for pr in probes {
+                        let rel = pr - b.origin
+                        let uv = SIMD2<Double>(simd_dot(rel, bu), simd_dot(rel, bv))
+                        let inPlane = b.outlineLoops.isEmpty
+                            ? (abs(uv.x) <= b.halfUMM && abs(uv.y) <= b.halfWMM)
+                            : LatticeFaceOutline.signedDistance(uv, loops: b.outlineLoops, seams: b.outlineSeams) <= b.inPlaneOffsetMM
+                        if inPlane { return true }
+                    }
+                    return false
                 }
+                guard overlapsInPlane(regions[r], regions[q]) || overlapsInPlane(regions[q], regions[r]) else { continue }
+                primary[r] = q
+                break
             }
         }
         var stepped = [Float](repeating: 0, count: grid.count)

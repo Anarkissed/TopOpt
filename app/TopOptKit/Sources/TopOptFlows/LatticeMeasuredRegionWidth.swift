@@ -332,7 +332,7 @@ public enum LatticeMeasuredRegionWidth {
                         Double(occupancy.origin.x) + Double(i) * Double(occupancy.spacing.x),
                         Double(occupancy.origin.y) + Double(j) * Double(occupancy.spacing.y),
                         Double(occupancy.origin.z) + Double(k) * Double(occupancy.spacing.z))
-                    if LatticeRegionMask.contains(p, region: region) { seen.append(w) }
+                    if LatticeRegionMask.containsWholePrism(p, region: region) { seen.append(w) }   // ★ the whole prism, never a slab
                 }
             }
         }
@@ -462,7 +462,7 @@ public enum LatticeMeasuredRegionWidth {
                         Double(occ.origin.x) + Double(i) * Double(occ.spacing.x),
                         Double(occ.origin.y) + Double(j) * Double(occ.spacing.y),
                         Double(occ.origin.z) + Double(k) * Double(occ.spacing.z))
-                    guard LatticeRegionMask.contains(p, region: region) else { continue }
+                    guard LatticeRegionMask.containsWholePrism(p, region: region) else { continue }   // ★ the whole prism, never a slab
                     var fwd = 0.0, back = 0.0
                     var q = p
                     while fwd < cap, solid(q + n * h) { q += n * h; fwd += h }

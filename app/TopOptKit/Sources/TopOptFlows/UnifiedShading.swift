@@ -1160,8 +1160,11 @@ static LSDFHit lsdf_march(constant LSDFUniforms& U,
         // `debugParams.y` overrides it in mm so the two can be told apart; 0 keeps the
         // shipping arithmetic exactly.
         float stepLo = U.debugParams.y > 0.0 ? U.debugParams.y : 0.05 * safeCell;
-        float step = anyActive ? clamp(F * stepScale, stepLo, 0.7 * safeCell)
-                               : 0.7 * safeCell;
+        // ★ BOUNDED BY THE RIM TOO (2026-09-23): with no cell here the march used to leap
+        // 0.7 cell regardless of F, and a rim band thinner than that (skin + rim ≈ 4.6 mm
+        // under a 6 mm cell) was crossed without a hit — his "blue rim only at one spot".
+        float step = (anyActive || Fsolid < 1e8) ? clamp(F * stepScale, stepLo, 0.7 * safeCell)
+                                                 : 0.7 * safeCell;
         step = max(step, dClip - 3.0 * eps);
         t += step;
     }

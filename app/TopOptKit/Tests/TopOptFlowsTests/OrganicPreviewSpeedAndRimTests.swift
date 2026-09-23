@@ -45,12 +45,12 @@ final class OrganicPreviewSpeedAndRimTests: XCTestCase {
 
     // MARK: the rows the run builds
 
-    private func wall(depth: Double, faceID: Int) -> LatticeRegionSpec {
+    private func wall(depth: Double, faceID: Int, half: Double = 10) -> LatticeRegionSpec {
         var s = LatticeRegionSpec(role: .include, kind: .face)
         s.origin = SIMD3<Double>(10, 0, 10)
         s.normal = SIMD3<Double>(0, 1, 0)
-        s.halfUMM = 10; s.halfWMM = 10; s.depthMM = depth
-        s.outlineLoops = [[SIMD2(-10, -10), SIMD2(10, -10), SIMD2(10, 10), SIMD2(-10, 10)]]
+        s.halfUMM = half; s.halfWMM = half; s.depthMM = depth
+        s.outlineLoops = [[SIMD2(-half, -half), SIMD2(half, -half), SIMD2(half, half), SIMD2(-half, half)]]
         s.faceID = faceID
         return s
     }
@@ -89,7 +89,12 @@ final class OrganicPreviewSpeedAndRimTests: XCTestCase {
     func testTheRimErodesTheRegionInPlaneButNotInDepth() throws {
         guard TopOptKit.latticeAlgorithmIsKnown("organic") else { throw XCTSkip("no organic on this core") }
         let mesh = LatticeWizardSample.cube(edgeMM: 20, at: .zero)
-        let w = wall(depth: 8, faceID: 2)
+        // ★ THE OUTLINE INSET 3 mm FROM THE CUBE'S EDGE (2026-09-23): the rim is the band
+        // where the lattice meets the part's SOLID — an outline with air beyond it (the
+        // cube's own edge) takes none (his rules: never a rim facing air, never one that
+        // sticks out). So the fixture's outline runs 3 mm inside the cube, with material
+        // beyond it, and the cube-edge case is asserted separately below.
+        let w = wall(depth: 8, faceID: 2, half: 7)
         let plain = LatticeSDFScene(mesh: mesh, field: nil, latticeID: "octet", stageMode: .aesthetic,
                                     algorithm: "organic", organic: input(n: 8, spacing: 2.5, sxx: 10),
                                     regions: [w], whenEmpty: .latticeNothing)
@@ -113,11 +118,19 @@ final class OrganicPreviewSpeedAndRimTests: XCTestCase {
             let i = Int(q.x.rounded()), j = Int(q.y.rounded()), k = Int(q.z.rounded())
             return g.values[(k * g.ny + j) * g.nx + i]
         }
-        let nearEdge = SIMD3<Float>(1.0, 4.0, 10.0)      // 1 mm from the x = 0 outline edge, 4 mm deep
+        // 2 mm inside the x = 3 outline edge, 4 mm deep: past the bare outline band (two
+        // beads) every scene keeps, inside the 3 mm rim
+        let nearEdge = SIMD3<Float>(5.0, 4.0, 10.0)
         let centre = SIMD3<Float>(10.0, 4.0, 10.0)
         XCTAssertLessThan(region(plain, at: nearEdge), 0, "inside without a rim")
         XCTAssertGreaterThan(region(rimmed, at: nearEdge), 0, "★ the outline band is solid with the rim")
         XCTAssertLessThan(region(rimmed, at: centre), 0, "the middle is still lattice")
+        // ★ and an outline at the cube's OWN edge, air beyond it, takes no rim at all
+        let atEdge = LatticeSDFScene(mesh: mesh, field: nil, latticeID: "octet", stageMode: .aesthetic,
+                                     algorithm: "organic", organic: input(n: 8, spacing: 2.5, sxx: 10, rim: 3),
+                                     regions: [wall(depth: 8, faceID: 2)], whenEmpty: .latticeNothing)
+        XCTAssertLessThan(region(atEdge, at: SIMD3<Float>(1.0, 4.0, 10.0)), 0,
+                          "★ no rim where air lies beyond the outline (his rule: never facing air)")
         // depth is untouched: a point 7 mm deep on the centre line is in either way
         let deep = SIMD3<Float>(10.0, 7.0, 10.0)
         XCTAssertLessThan(region(rimmed, at: deep), 0, "★ never along the normal")

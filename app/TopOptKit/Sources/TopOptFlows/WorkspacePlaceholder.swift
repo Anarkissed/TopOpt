@@ -1975,7 +1975,7 @@ public struct WorkspacePlaceholder: View {
                 // buys is the quilt (see `wallWidthAlongNormalMM`). The isotropic measure
                 // stays as the fallback — a bolt has no single direction to walk.
                 let d = LatticeMeasuredRegionWidth.wallWidthAlongNormalMM(
-                    region: r, occupancy: s.occupancy, partSDF: s.partSDF,
+                    region: r, occupancy: s.prismOccupancy, partSDF: s.partMaterialSDF,
                     percentile: widthPercentile)
                 if d > 0 {
                     w = d
@@ -4862,6 +4862,10 @@ public struct WorkspacePlaceholder: View {
     }
 
     private func buildStrutScene(forceRebuild: Bool = false) {
+        // ★ WHAT THIS BAKE READS IS RECORDED HERE, at the one place every bake passes
+        // (2026-09-23): it was recorded at 2 of the 16 call sites, so the wizard's
+        // Exit — no change — compared against a stale record and force-baked.
+        latticeInputsLastBaked = project.lattice.previewBakeInputs
         // ★★★ A NEW SETTING NEVER WAITS (his 2026-09-21 22:40: "if I save and exit from
         // the settings with an updated value, the previous action is cancelled and the
         // new bake starts IMMEDIATELY"). The one-at-a-time guard that stood here queued
@@ -4957,6 +4961,8 @@ public struct WorkspacePlaceholder: View {
             }
             return LatticeSDFScene.demandField(from: run.outcome)
         }()
+        // ★ the printer's bead, captured on the main thread for the skin under unselected faces
+        let beadForBake = project.printParams.strutLineWidthMM
         // ★ THE REGIONS THE RUN WILL ACTUALLY LATTICE (maintainer, 2026-08-17).
         // Read on the main actor and captured, because `latticeJobRegions()`
         // walks the selection and the settings. Empty on the settings page's
@@ -5306,7 +5312,8 @@ public struct WorkspacePlaceholder: View {
                                             : (steppedCells.filter { $0 > 0 }.min()
                                                ?? lat.cellMM),
                                         wallDepthSteps: wallDepthSteps,
-                                        wallStressField: wallStressField)
+                                        wallStressField: wallStressField,
+                                        beadMM: beadForBake)
             DispatchQueue.main.async {
                 // ★ a newer bake has started: this picture is stale, drop it
                 guard bakeGeneration == strutBakeGeneration else {

@@ -16,6 +16,11 @@ final class LatticeFinishRendersTests: XCTestCase {
 
     @MainActor
     private func covered(_ dressing: Float, device: MTLDevice) throws -> Int {
+        try dump(dressing, device: device).covered
+    }
+
+    @MainActor
+    private func dump(_ dressing: Float, device: MTLDevice) throws -> MeshRenderer.LatticeMaskDump {
         let mesh = try LatticePreviewConfettiTests.hisMesh()
         // ★★ 20 mm, NOT 11 (task 2026-08-21). See the params note below: at 11 mm this
         // region's widest member is 10.39 mm, which caps the cell at 2.08 mm — and at
@@ -57,7 +62,17 @@ final class LatticeFinishRendersTests: XCTestCase {
         renderer.latticeDressingLevel = dressing
         let d = try XCTUnwrap(renderer.latticeMaskDump(size: 384),
                               "the lattice must reach the G-buffer")
-        return d.covered
+        return d
+    }
+
+    /// Pixels the two dumps both cover but colour differently — the dressing's own
+    /// footprint (a dressed strut is tinted as boundary work).
+    private func recoloured(_ a: MeshRenderer.LatticeMaskDump, _ b: MeshRenderer.LatticeMaskDump) -> Int {
+        var n = 0
+        for i in 0..<Swift.min(a.mask.count, b.mask.count) where a.mask[i] && b.mask[i] {
+            if a.rgb[i * 3] != b.rgb[i * 3] || a.rgb[i * 3 + 1] != b.rgb[i * 3 + 1] || a.rgb[i * 3 + 2] != b.rgb[i * 3 + 2] { n += 1 }
+        }
+        return n
     }
 
     /// ★ RIM AND DIAGRID MUST BOTH ADD MATERIAL, AND THE DIAGRID MUST ADD MORE —
@@ -65,28 +80,34 @@ final class LatticeFinishRendersTests: XCTestCase {
     @MainActor
     func testEachFinishRendersDifferently() throws {
         guard let device = MTLCreateSystemDefaultDevice() else { throw XCTSkip("no Metal device") }
-        let none = try covered(0, device: device)
-        let rim = try covered(1, device: device)
-        let skin = try covered(2, device: device)
+        let none = try dump(0, device: device)
+        let rim = try dump(1, device: device)
+        let skin = try dump(2, device: device)
+        // ★ MEASURED AS RECOLOURED PIXELS, NOT SILHOUETTE (2026-09-23). Under his rules
+        // every face the lattice runs alongside keeps skin + rim, and the rim is drawn
+        // by the lattice layer — so the region's boundary is a solid band and a dressed
+        // strut under it adds no silhouette (measured: 7123 → 7125 → 7125 pixels). The
+        // dressing still fattens and tints the boundary struts at the open mouth and
+        // where they meet the rim: rim recoloured 114 px, diagrid 702 px.
+        let rimPx = recoloured(none, rim), skinPx = recoloured(none, skin)
 
         print("""
 
         ================================================================================
         WHAT EACH FINISH DRAWS — lattice pixels, his face 15, shell out
-          None ....... \(none)
-          Rim ........ \(rim)
-          Skin ....... \(skin)
+          None ....... \(none.covered)
+          Rim ........ \(rim.covered) (recoloured \(rimPx))
+          Skin ....... \(skin.covered) (recoloured \(skinPx))
         ================================================================================
         """)
 
-        XCTAssertGreaterThan(none, 100, "there must be a lattice to dress")
-        XCTAssertGreaterThan(rim, none,
-                             "★ a rim must ADD material at the region's edges — if this "
-                             + "is equal, Finish is once again a setting that travels "
-                             + "and does nothing")
-        XCTAssertGreaterThan(skin, rim,
+        XCTAssertGreaterThan(none.covered, 100, "there must be a lattice to dress")
+        XCTAssertGreaterThan(rimPx, 50,
+                             "★ a rim must dress the region's edges — if nothing is recoloured, "
+                             + "Finish is once again a setting that travels and does nothing")
+        XCTAssertGreaterThan(skinPx, rimPx,
                              "★ and the diagrid dresses the whole boundary, so it must "
-                             + "add more than the rim, which dresses only its edges")
+                             + "touch more than the rim, which dresses only its edges")
     }
 
     /// ★ AND THE MAP FROM THE SETTING IS THE ONE THE RENDERER READS.

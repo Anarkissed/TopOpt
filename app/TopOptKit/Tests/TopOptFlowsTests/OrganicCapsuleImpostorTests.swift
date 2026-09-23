@@ -196,7 +196,13 @@ final class OrganicCapsuleImpostorTests: XCTestCase {
         XCTAssertTrue(mm.contains("instanceCount: lattice.capsuleCount)"))
         XCTAssertTrue(mm.contains("fresh.drawOrganicCapsules = organicCapsulePipeline != nil"))
         let ls = try String(contentsOf: root.appendingPathComponent("LatticeSDFMetal.swift"), encoding: .utf8)
-        XCTAssertTrue(ls.contains("Float(capsulesReplaceField ? 0 : debugMaxSteps)"), "★ zero steps under capsules")
+        // ★ SOLID-ONLY, NOT ZERO (2026-09-23): under capsules the march still runs, with a
+        // NEGATIVE step count — no strut field, only the rim band under every unselected
+        // face and along the solid-backed outline, so the rim shows with the body hidden
+        // ("Where are ANY of the rims?"). `UnifiedShading` reads the sign as `solidOnly`.
+        XCTAssertTrue(ls.contains("Float(capsulesReplaceField ? -debugMaxSteps : debugMaxSteps)"),
+                      "★ the march runs solid-only under capsules")
+        XCTAssertFalse(ls.contains("Float(capsulesReplaceField ? 0 : debugMaxSteps)"), "★ never zero steps: the rim would vanish")
         XCTAssertTrue(ls.contains("organicTex != nil, !capsulesReplaceField else { return .zero }"),
                       "★ the organic field is off under capsules")
         let src = MeshRenderer.organicCapsuleShaderSourceForTesting

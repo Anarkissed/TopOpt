@@ -1296,6 +1296,7 @@ extension LatticeCurvedOutlineBandProbe {
         var drawn = 0.0, clipped = 0.0, unpainted = 0.0, notOwned = 0.0, noMat = 0.0
         var ring = 0.0
         var solidPct = 0.0
+        var rim = 0.0            // ★ the rim band: region field solid inside the prism, drawn solid by the lattice layer
         var solidCells = 0
     }
 
@@ -1327,6 +1328,16 @@ extension LatticeCurvedOutlineBandProbe {
         var tally: [String: Int] = [:]
         var ringYes = 0, ringTot = 0
         let size = 260
+        // ★ THE SKIN AND THE RIM (2026-09-23): inside the prism, within reach of an
+        // unselected face or a solid-backed outline, where the region field is solid —
+        // the model's own skin (the body's surface, kept by the shell) and the rim under
+        // it (drawn by the lattice layer, `Fr` in the march). Material on screen, never
+        // "clipped away" and never a hole.
+        func rimAt(_ p: SIMD3<Double>) -> Bool {
+            guard let sk = i.scene.skinInSDF, let pr = i.scene.prismSDF else { return false }
+            let dSkin = Self.sampleLinear(sk, p), dPrism = Self.sampleLinear(pr, p)
+            return dPrism < 0 && dSkin < 900 && Self.sampleLinear(rg, p) >= 0
+        }
         for reg in inc {
             guard !reg.outlineLoops.isEmpty else { continue }
             let n = LatticeRegionMask.unit(reg.normal)
@@ -1353,6 +1364,7 @@ extension LatticeCurvedOutlineBandProbe {
                 // middle (0.06 % of the face on the Skin rows), and that is solid on
                 // screen, not a hole.
                 if !c.painted && cf.solidBandMM > 0 && dOutHere < cf.solidBandMM { c = (true, true) }
+                if rimAt(p) { tally["rim", default: 0] += 1; continue }
                 // ★★★ SOLID IS TESTED BEFORE CLIPPED, and getting that order wrong is
                 // what made this metric report a 2.7% "hole" at single-cell ON that
                 // does not exist. The solid ring is material the run DELIVERS; its
@@ -1384,7 +1396,7 @@ extension LatticeCurvedOutlineBandProbe {
         let tot = Swift.max(1, tally.values.reduce(0, +))
         func pc(_ k: String) -> Double { 100.0 * Double(tally[k] ?? 0) / Double(tot) }
         r.drawn = pc("drawn"); r.clipped = pc("clipped"); r.unpainted = pc("unpainted")
-        r.notOwned = pc("notOwned"); r.noMat = pc("noMat"); r.solidPct = pc("solid")
+        r.notOwned = pc("notOwned"); r.noMat = pc("noMat"); r.solidPct = pc("solid"); r.rim = pc("rim")
         r.ring = ringTot > 0 ? 100.0 * Double(ringYes) / Double(ringTot) : 0
         r.painted = cf.steppedCellMM.filter { $0 > 0 }.count
         r.solidCells = (0..<cf.steppedCellMM.count).filter {
@@ -1518,10 +1530,10 @@ extension LatticeCurvedOutlineBandProbe {
         print("")
         print("PERMUTATION SWEEP — % of the declared faces at 1 mm depth")
         print(String(repeating: "-", count: 118))
-        print("  setting                                    drawn  SOLID  clipped unpaint notOwn  ring  painted")
+        print("  setting                                    drawn  SOLID    rim  clipped unpaint notOwn  ring  painted")
         for r in rows {
-            print(String(format: "  %-42@ %5.1f%% %5.1f%% %6.1f%% %6.1f%% %6.1f%% %5.0f%% %7d",
-                         r.label as NSString, r.drawn, r.solidPct, r.clipped, r.unpainted,
+            print(String(format: "  %-42@ %5.1f%% %5.1f%% %5.1f%% %6.1f%% %6.1f%% %6.1f%% %5.0f%% %7d",
+                         r.label as NSString, r.drawn, r.solidPct, r.rim, r.clipped, r.unpainted,
                          r.notOwned, r.ring, r.painted))
         }
         print("")

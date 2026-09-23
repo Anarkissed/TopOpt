@@ -63,9 +63,15 @@ public struct LatticeWallProfile: Codable, Hashable, Sendable {
     public var curves: LatticeWallCurves? = nil
     public init(starts: [Double] = [], ends: [Double], curves: LatticeWallCurves? = nil) {
         let n = Swift.max(1, ends.count)
-        self.ends = ends.isEmpty ? [1] : ends.map { Swift.min(1, Swift.max(0.5, $0)) }
-        var st = starts.map { Swift.min(0.5, Swift.max(0, $0)) }
+        // ★ NO 50 % CLAMP OF THE WHOLE WALL (his R9, 2026-09-23: the halves are halves
+        // of the ALLOWED range, which the editor already keeps; a start held under half
+        // the wall could never reach an allowed range that begins deeper). Shares are
+        // held to 0…1 and a start never passes its end.
+        var en = ends.isEmpty ? [1] : ends.map { Swift.min(1, Swift.max(0, $0)) }
+        var st = starts.map { Swift.min(1, Swift.max(0, $0)) }
         if st.count != n { st = [Double](repeating: 0, count: n) }
+        for i in 0..<n where i < st.count && i < en.count && st[i] > en[i] { en[i] = st[i] }
+        self.ends = en
         self.starts = st
         self.curves = curves
     }
@@ -147,8 +153,8 @@ public struct LatticeWallCurves: Codable, Hashable, Sendable {
     }
     /// Two straight lines at the allowed range's shares.
     public static func flat(start a: Double, end b: Double) -> LatticeWallCurves {
-        LatticeWallCurves(start: [.init(x: 0, y: min(a, 0.5)), .init(x: 1, y: min(a, 0.5))],
-                           end: [.init(x: 0, y: max(b, 0.5)), .init(x: 1, y: max(b, 0.5))])
+        LatticeWallCurves(start: [.init(x: 0, y: min(a, b)), .init(x: 1, y: min(a, b))],
+                           end: [.init(x: 0, y: max(a, b)), .init(x: 1, y: max(a, b))])
     }
 
     // ── the design's geometry, ported verbatim (`tangent`, `pathD`) ──────────────
@@ -164,9 +170,10 @@ public struct LatticeWallCurves: Codable, Hashable, Sendable {
     public static func polyline(_ pts: [LatticeWallCurvesPoint], curved: Bool,
                                 side: Side?) -> [SIMD2<Double>] {
         guard pts.count >= 2 else { return pts.map { SIMD2($0.x, $0.y) } }
-        func clampY(_ y: Double) -> Double {
-            switch side { case .none: return y; case .start: return min(y, 0.5); case .end: return max(y, 0.5) }
-        }
+        // ★ NO MID-PLANE CLAMP AT HALF THE WALL (his R9, 2026-09-23: the halves are the
+        // ALLOWED range's; the editor holds each curve on its side of that range's
+        // middle, and the wall builder swaps a crossing). `side` is kept for the callers.
+        func clampY(_ y: Double) -> Double { _ = side; return min(1, max(0, y)) }
         var out = [SIMD2(pts[0].x, clampY(pts[0].y))]
         for i in 0..<(pts.count - 1) {
             let p0 = SIMD2(pts[i].x, pts[i].y), p1 = SIMD2(pts[i + 1].x, pts[i + 1].y)
@@ -495,7 +502,9 @@ public enum LatticeWallThicknessBuilder {
         func finish(_ e: Double) -> Double {
             let v = min(a1, max(a0 + floorT, e))
             guard let steps = depthSteps, !steps.isEmpty else { return v }
-            return min(a1, max(a0, LatticeWallDepthSteps.snap(v, steps: steps)))
+            // ★ steps are laid from the slab's START `a0`, not from the face (2026-09-23):
+            // a wall whose allowed range begins deeper packs its cells from there
+            return min(a1, max(a0, a0 + LatticeWallDepthSteps.snap(v - a0, steps: steps)))
         }
         func endFor(share: Double) -> Double { finish(a0 + min(1, max(0, share)) * room) }
 
@@ -527,8 +536,9 @@ public enum LatticeWallThicknessBuilder {
                 if e < sv { swap(&sv, &e) }
                 if let steps = depthSteps, !steps.isEmpty, !prof.isCurves {
                     // ★ the start never snaps below the allowed start (review #30)
-                    sv = max(a0, min(a1, LatticeWallDepthSteps.snap(sv, steps: steps.filter { $0 <= a1 + 1e-9 } + [0])))
-                    e = e <= sv + 1e-9 ? sv : max(sv, min(a1, LatticeWallDepthSteps.snap(e, steps: steps)))
+                    // ★ relative to the slab's start `a0` (2026-09-23)
+                    sv = max(a0, min(a1, a0 + LatticeWallDepthSteps.snap(sv - a0, steps: steps.filter { $0 <= a1 - a0 + 1e-9 } + [0])))
+                    e = e <= sv + 1e-9 ? sv : max(sv, min(a1, a0 + LatticeWallDepthSteps.snap(e - a0, steps: steps)))
                 }
                 if e - sv < floorT, e > sv + 1e-9 { e = min(a1, sv + floorT); sv = max(a0, e - floorT) }
                 starts[j * nu + i] = Float(sv); ends[j * nu + i] = Float(e)

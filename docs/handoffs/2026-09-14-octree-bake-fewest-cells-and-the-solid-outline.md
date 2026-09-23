@@ -1440,3 +1440,209 @@ Not yet seen by him.
   flange's inner face 8.6 mm behind the flat faces (the green everywhere). Verified
   offline: the middle facet reads open at 1.5 and 3 mm in. DIAG now counts triangles
   alongside / passed through / unreached. 27 tests green; installed 03:12.
+- **2026-09-23 15:00 — THE FULL REVIEW OF THE LATTICE PREVIEW PATH AGAINST HIS RULES (six
+  whole-file reviews; RULES.md in the scratchpad restates the rules R1–R12).** His three
+  symptoms and their causes: (S1) no rim/green under the leg's top face and the base's end
+  face — unselected faces were classified ONCE PER TRIANGLE by a centroid probe 1.5 mm in;
+  a two-triangle face 53 mm wide has centroids outside the 12/13 mm side prisms ⇒ whole
+  faces "unreached", no skin/rim; (S2) the 45° chamfer carved — the passed-through cone
+  was 60° (R3 says ~30°) AND the seam post-pass declared the chamfer's edges seams because
+  another prism lies beyond them, never asking what SURFACE lies between; (S3) blue rim at
+  one spot only — green came from the prism OUTLINE distance (every edge, air or not) while
+  the rim came from the skin field, two unrelated sources; and the march's step is not
+  bounded by the rim band, so rays from the lattice side step over a band thinner than a
+  cell and only catch it where two bands overlap at a corner.
+  THE ORDERED LIST (fix one at a time, build + tests after each group):
+   A1  passed-through cone 60° → 30° (scene).                              [R3/R4, S2]
+   A2  skin/rim per VOXEL: every non-passed-through unselected triangle enters the field;
+       the "reached" test is the pocket itself (region < 0). Passed-through decided per
+       triangle from the prisms containing any of its nudged vertices/centroid.  [R4, S1]
+   A3  the band (.g) comes ONLY from the rim's inner edge (toUnsel − skin − rim); the
+       prism-outline distance no longer feeds green.                       [R5/R6, S3]
+   A4  the march's step is bounded by the rim band's field (Fr evaluated always); the
+       dClip leap does not jump the band.                                   [R5, S3]
+   A5  the organic in-plane erosion of EVERY outline by solidRimMM is removed (a ring of
+       the body's shell at every selected outline and seam, visible from outside). [R4/R2]
+   A6  the region CAP plate is no longer built or drawn.                     [R7]
+   A7  a seam needs the raw mesh neighbour across the edge to be latticed or absent; an
+       edge whose neighbour is a known UNSELECTED face is never a seam (the chamfer); the
+       geometric and prism-probe passes honour that veto.                   [R1/R4, S2]
+   A8  partSDF signed by the WHOLE part (solidOccupancy), not the slab-clipped occupancy —
+       fixes the wall-width walk (stopped at the slab), the cap test, subfloor retention.
+   A9  the doubled path's "inactive cell = solid" rendering off.             [R7]
+   A10 the half-band outline strip clip (rimParams.w) off; the Finish dressing returns.
+   A12 the skin sized from the printer's bead, not a hard-coded 0.45.        [R4]
+   A13 the skin-in channel continuous across the surface (no 1e3 blend inside the skin).
+   A15 `contains` with a negative expand agrees with the field (the flare no longer
+       bypasses the shrink).                                                [R8]
+   A16 hole loops: the seam probe's "outward" chosen by containment, not winding.
+   A17 the geometric seam pass gets a normal guard (opposite walls never pair).
+   A18 width statistics enumerate the whole prism, not the slab.            [R12]
+   A20 `latticeInputsLastBaked` recorded inside `buildStrutScene` — "Exit" with nothing
+       changed starts nothing.                                              [R10]
+   A21 the profile model's 50 % clamp of the WHOLE wall removed (the editor enforces the
+       allowed range's midpoint).                                           [R9]
+   A22 depth steps snapped relative to the start `a0`.                      [R9]
+   A23 the octree's finest fall-through/fill never paints a cell that failed the slab. [R9]
+   A24 anti-parallel prisms merge only when they overlap IN PLANE too.      [R1]
+   A25 `signedDistanceAcrossSeams` bounded by the seam's flare, not unbounded.  [R7]
+   A26 the diverging flare exists only where the neighbour prism exists (s ≤ cap).  [R1]
+   A27 seam detection independent of region order (probe against unflared copies).
+   A29 the octet rim/boundary seeds keyed on the alongside skin band, not only "material
+       beyond".                                                             [R4/R5]
+   Noted, not changed: octree 3-D EDT fallback for non-axis facets (LOW); manual face
+   primitives' on-screen box ignores expand (LOW); stale comments (LOW); lattice-only
+   shadow casts the slab (LOW); rim hit shaded with a strut's normal (LOW).
+
+## 2026-09-23 16:40 — THE LIST, WORKED (A1–A29 except A26; installed 16:36:42)
+
+Every item from the 15:00 review list is in, one by one, in the recorded order, except
+A26, which the seam-flare test refuted (below). Installed at 16:36:42; the installed
+`TopOpt.debug.dylib` carries the new DIAG marker `outline rim (solid-backed)` and no
+longer carries the old `runs ALONGSIDE`.
+
+### What changed, by rule
+
+**R3/R4 — passed through vs alongside (A1, A2).** The cone is 30°, not 60° — a 45°
+chamfer is ALONGSIDE and keeps its skin (image 3, "consistently removed"). And only
+"passed through" is decided per triangle any more: an unselected triangle is open when a
+prism whose direction is within 30° of the triangle's normal contains the triangle's
+centroid or any corner nudged 1.5 mm in; EVERY other unselected triangle enters the skin
+field, and the pocket decides per voxel. The old "unreached" class is gone — the leg's
+top and the base's end (images 1, 2) were "unreached" because their big triangles'
+centroids sat outside every prism while the pocket ran right under them, hence solid
+with no skin, rim or grade.
+
+**R4/R5/R6 — skin → rim → grade, rim ⇔ green (A3, A5, A13, A29).** Two rim sources, one
+field:
+- under every unselected face the lattice runs alongside: skin (two beads of the
+  PRINTER's bead — A12, `beadMM` passed into the scene) then rim (`max(skin,
+  organicSolidRimMM)`), carved into the region field, `skinIn` written continuously
+  across the surface (negative outside the part — the texture at the face no longer
+  blends a distance with the 1e3 sentinel);
+- along the prism outline ONLY WHERE THE PART'S SOLID BACKS IT
+  (`LatticeRegionMask.solidBackedOutlineDistance`: nearest point on the grown outline,
+  a probe one voxel beyond it at the same depth, `solid` occupancy there and not inside
+  any prism). A prism side running out into air — a grown outline past the leg's top,
+  the mouth's edge — is nothing; a prism side inside the part's material gets the rim
+  and then the grade. The band `.g` is `distance − rim` from either source, so green
+  starts at the rim's inner edge and exists only where a rim does.
+- the organic in-plane EROSION of the outline is gone (it was blind to what lay beyond
+  the edge). `OrganicSolidRimTests` re-pinned to the new mechanism.
+- the octet/organic boundary seed (`attachedSeed`) also seeds from the carved band
+  inside the prism, so the cell grade lands on the skin/rim, not only on "material
+  beyond".
+
+**R7 — nothing solid inside the pocket but the rim (A6, A9, A10, A23).** The region cap
+is no longer built (`regionCap = nil`; the draw is gated on it). `rimParams.z` (doubled's
+inactive cells drawn solid) and `.w` (the octree's outline strip + dressing suppression)
+are 0. The octree's finest fall-through and the packer no longer paint a cell that
+failed the depth slab (`slabFailed`).
+
+**Rim visible (A4).** The march step is bounded by F whenever `Fsolid` is finite, not
+only when a cell is active — with no cell in the rim band it leapt 0.7 cell and crossed
+a 4.6 mm band without a hit ("blue rim only at one spot").
+
+**Seams (A7, A16, A17, A27, A25, A15).** An edge whose raw mesh neighbour is a KNOWN
+unselected face is an outline, never a seam — the geometric and prism passes are skipped
+for it (the chamfer). Outward across an edge is decided by containment (a step to the
+right that lands inside the outline ⇒ outward is left), so hole loops probe the right
+way. The geometric pass has the same >150° opposite-walls guard as the prism pass. All
+probes read a snapshot of the regions taken BEFORE any seam flared them (no index-order
+dependence). `signedDistanceAcrossSeams` is bounded by the seam's cap × tilt when the
+octree passes tilts/caps. `contains` with seams still honours a NEGATIVE expand (the
+flare had answered "inside" for the whole polygon).
+
+**A26 — NOT DONE, refuted.** "No flare below the cap" would leave the corner block under
+the neighbour's foot — in neither prism — solid: a wall between two lattices.
+`LatticeSeamFlareTests.testTheFlareIsCappedAtTheNeighboursDepth` pins the flare holding
+its cap width to this prism's depth; kept.
+
+**Measurers (A8, A18).** `partSDF` keeps its slab-clipped sign for the march; a new
+`partMaterialSDF` (same distances, signed by the whole solid) goes to every measurer —
+wall width along the normal (scene, ribbon, wizard), subfloor peaks, the organic
+candidate/anchoring solid test, the finish-skin term. Width statistics enumerate
+`containsWholePrism`.
+
+**Wizard / walls (A20, A21, A22, A24).** `latticeInputsLastBaked` is recorded inside
+`buildStrutScene` (was 2 of 16 sites ⇒ Exit force-baked). The profile model's 50 %
+whole-wall clamps (steps init, `flat`, the curves' mid-plane flatten) are gone — the
+halves are the ALLOWED range's, which the editor keeps; a start never passes its end
+(zero-depth hole allowed). Depth steps snap relative to the slab's start `a0`.
+Anti-parallel prisms merge only when they also overlap in plane (origin or outline centre
+inside the other's prism).
+
+### Tests
+Targeted suites after the changes: 123 tests, 7 failures → all seven were pins of the
+old behaviour, re-read one by one: 4 re-pinned (steps model ×3 assertions → the new
+rule; rim-erodes → an INSET outline with material beyond it, plus a new assertion that
+an outline at the cube's own edge takes NO rim; OrganicSolidRimTests string pins → the
+new mechanism), 1 kept and the code reverted (A26). Re-run: 31 tests, 0 failures.
+Full suite: running at 16:40 (log `scratchpad/fullsuite_0923_1640.log`) — result in the
+next entry.
+
+### DIAG lines to read after his next bake
+- `DIAG unselected faces: skin … + rim … (selected raw faces …; triangles alongside N,
+  passed through M; field reach …) · pocket voxels turned solid: skin a, rim b, outline
+  rim (solid-backed) c` — expect M small (the leg's back face, the cavity wall), N large,
+  and c > 0 wherever a prism side sits inside the base.
+- `DIAG regionCap:` no longer printed.
+
+### Two questions for him (simple)
+1. "Passed through" = an unselected face whose normal is within ~30° of the prism's
+   direction and which the prism reaches. A 45° chamfer is alongside. Right?
+2. The skin under an unselected face is two beads of the printer's bead (≈ 0.9 mm at
+   0.45). Is that the number, or does the finish setting decide it?
+
+## 2026-09-23 19:30 — FULL SUITE, THE RE-PINS, INSTALLED 18:58:36
+
+**Full suite (16:40–18:48, 2 h 10 min): 2516 tests, 26 failure assertions in 11 test
+cases.** Five are the known pre-existing ones (`AppModelTests` 3MF ×3 — no lib3mf in the
+worktree —, `OrganicSampleCubeTests.testThickerIsLive…`, `OrganicVariantCacheTests
+.testTheKeyIgnoresThickness…`). The six others, each read and answered one by one —
+every one a pin of behaviour his rules replaced, none a hole:
+
+- `LatticeSlabExpandPrimitiveTests.testAFlatPatchTakesNoMiterCorrection` — pinned the
+  dilated shell moving 1 mm along the normal. His rule: the mouth stays on the face.
+  Re-pinned to 0.
+- `OrganicCapsuleImpostorTests…SilencesTheMarch` — pinned "0 steps under capsules"; the
+  march runs solid-only (negative steps) so the rim shows with the body hidden.
+  Re-pinned.
+- `OrganicRegionFillProbe.testTheRimStopsTheLatticeShort…` — "rim off ⇒ the region
+  reaches its own outline" measured a 0.8 mm band: the outline rim was taking
+  `max(skin, organicRim)`. Fixed in the scene: along the SOLID-BACKED OUTLINE the rim is
+  his organic rim setting (0 = none) on organic, the outline beam on the octet; the
+  skin + rim under an unselected face is unchanged. Passes.
+- `LatticeCurvedOutlineBandProbe.testSweepEverySettingPermutation` — "clipped" counted
+  every painted texel where the region field is solid: 8.8 % (no skin) / 12.4 % (Skin)
+  of the face at 1 mm depth. That IS the skin + rim band under the neighbouring faces
+  and along the solid-backed outline — drawn (rim by the lattice layer, skin by the
+  shell), not empty. The sweep now classifies that band (`rim` column) before
+  `clipped`. Result: rim 10.4 % / 14.0 %, clipped 0.0 %, unpainted 0.0 %, ring 100 % on
+  every row.
+- `LatticeFinishRendersTests.testEachFinishRendersDifferently` — measured the finish
+  by SILHOUETTE: None 7123 / Rim 7125 / Skin 7125 px. Measured instead by RECOLOURED
+  pixels (a dressed strut is tinted): Rim 114 px, Diagrid 702 px — the dressing is
+  there, on the open mouth and where struts meet the rim, but under a solid boundary
+  band it adds no outline. Re-pinned to the recolour counts (rim > 50, diagrid > rim).
+- `LatticeGBufferMaskTests.testTheStrutMaskIsBitExactWhileTheShellIsDrawn` — with the
+  shell drawn the oblique camera saw 100 lattice px (== its own bound): every face the
+  lattice ran alongside now keeps its skin, so the lattice shows only through the
+  slab's mouth on +x. Camera turned to +x (365 px); the bit-exact claim is unchanged.
+- And `LatticeSeamFlareTests.testTheFlareIsCappedAtTheNeighboursDepth` refuted A26
+  (see the 16:40 entry) — the code was reverted, the test kept.
+
+**Also found while measuring:** "passed through" decided from a triangle's own points
+misses a triangle LARGER than the prism (one big face triangle, a manual slab on a wide
+face). The prism's centre and outline corners are now projected onto the triangle too;
+inside it ⇒ probe there. (`LatticeSDFMetal.swift`, the classification loop.)
+
+Re-runs after the re-pins: the 12 affected suites — 86 tests, 0 failures, then the
+sweep + render pair + rim probes — 24 tests, 0 failures, then the sweep alone after its
+last classification change — 0 failures.
+
+**Installed 18:58:36** (`TopOpt.debug.dylib`, marker `outline rim (solid-backed)`
+present, old `runs ALONGSIDE` absent). Every source change above is in that build.
+
+Open questions for him stand as in the 16:40 entry (the 30° cone; the skin = two
+printer beads).

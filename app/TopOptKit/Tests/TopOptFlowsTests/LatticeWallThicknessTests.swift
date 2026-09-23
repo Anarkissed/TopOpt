@@ -205,15 +205,15 @@ final class LatticeWallThicknessTests: XCTestCase {
         XCTAssertEqual(p.end(at: 0.1), 0.6); XCTAssertEqual(p.end(at: 0.5), 0.5); XCTAssertEqual(p.end(at: 0.99), 1.0)
         XCTAssertEqual(p.y(at: 0.5, side: .start), 0, "★ the start defaults to the surface")
         XCTAssertEqual(p.resampled(columns: 6).ends, [0.6, 0.6, 0.5, 0.5, 1.0, 1.0])
-        XCTAssertEqual(LatticeWallProfile(ends: [1.5, -1]).ends, [1, 0.5], "clamped into the inner half")
+        XCTAssertEqual(LatticeWallProfile(ends: [1.5, -1]).ends, [1, 0], "★ held to 0…1 of the wall — the halves are the ALLOWED range's, kept by the editor (his R9, 2026-09-23)")
         let old = #"{"start":[{"x":0,"y":0.1}],"end":[{"x":0,"y":0.9}],"curveStart":true,"curveEnd":true}"#
         let decoded = try JSONDecoder().decode(LatticeWallProfile.self, from: Data(old.utf8))
         XCTAssertTrue(decoded.isCurves, "a curve drawing decodes AS curves")
         XCTAssertEqual(decoded.start(at: 0.5), 0.1, accuracy: 1e-9); XCTAssertEqual(decoded.end(at: 0.5), 0.9, accuracy: 1e-9)
         let two = LatticeWallProfile(starts: [0.1, 0.4], ends: [0.9, 0.6])
         XCTAssertEqual(two.start(at: 0.2), 0.1); XCTAssertEqual(two.start(at: 0.8), 0.4)
-        XCTAssertEqual(LatticeWallProfile(starts: [0.7], ends: [0.3]).starts, [0.5], "★ the start never crosses the mid-plane")
-        XCTAssertEqual(LatticeWallProfile(starts: [0.7], ends: [0.3]).ends, [0.5], "★ nor the end")
+        XCTAssertEqual(LatticeWallProfile(starts: [0.7], ends: [0.3]).starts, [0.7], "★ no 50 % clamp of the whole wall: a start may sit deep when the allowed range does")
+        XCTAssertEqual(LatticeWallProfile(starts: [0.7], ends: [0.3]).ends, [0.7], "★ the end never passes the start — a zero-depth hole is allowed, a negative one is not")
         let back = try JSONDecoder().decode(LatticeWallProfile.self, from: try JSONEncoder().encode(two))
         XCTAssertEqual(back, two)
         let flat = LatticeWallCurves.flat(start: 0.2, end: 0.8)
@@ -222,7 +222,7 @@ final class LatticeWallThicknessTests: XCTestCase {
                                      end: [.init(x: 0, y: 0.9), .init(x: 1, y: 0.9)])
         XCTAssertEqual(bump.y(at: 0.5, side: .start), 0.4, accuracy: 0.02, "the curve passes through its point")
         let over = LatticeWallCurves(start: [.init(x: 0, y: 0.7), .init(x: 1, y: 0.7)], end: [.init(x: 0, y: 0.9), .init(x: 1, y: 0.9)])
-        XCTAssertEqual(over.y(at: 0.5, side: .start), 0.5, accuracy: 1e-9, "★ the start line never crosses the mid-plane")
+        XCTAssertEqual(over.y(at: 0.5, side: .start), 0.7, accuracy: 1e-9, "★ no clamp at half the WALL (his R9, 2026-09-23): the halves are the allowed range's, which the editor keeps")
         XCTAssertEqual(LatticeWallCurves.polyline(bump.start, curved: true, side: .start).count, 1 + 2 * 24)
     }
 

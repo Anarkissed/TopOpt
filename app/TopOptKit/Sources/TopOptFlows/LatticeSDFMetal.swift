@@ -339,6 +339,10 @@ public struct LatticeSDFScene {
     /// Truncated signed distance of the part (mm, negative inside) — the flush
     /// boundary trim (round 3). Exact near the surface, so flat faces render straight.
     public var partSDF: LatticeVoxelGrid
+    /// ★ The same distances signed by the WHOLE part's occupancy (negative wherever the
+    /// part has material, slab or no slab) — what a measurer reads. `partSDF` stays the
+    /// latticed volume for the march.
+    public var partMaterialSDF: LatticeVoxelGrid
     public var demand: LatticeVoxelGrid?
     /// ★ THE MEASURED STRESS, NORMALISED — the FEA field the stage ran, kept apart
     /// from `demand` because a stated per-region density may overwrite `demand` and
@@ -634,7 +638,10 @@ public struct LatticeSDFScene {
                 // ★ the wall-depth sim rule's OWN field (review #31): the grading's `field`
                 // is nil under "No grade"/"Grade to fit", which silently turned "By sim"
                 // into the whole range. nil ⇒ `field`.
-                wallStressField: StressField? = nil) {
+                wallStressField: StressField? = nil,
+                // ★ the PRINTER'S bead (mm), for the skin under unselected faces; 0 ⇒ the
+                // organic settings' bead, else 0.45
+                beadMM: Double = 0) {
         self.preview = LatticeSDFPreview(latticeID: latticeID)
         // ★★ THE SLAB, BUILT FIRST (2026-09-21): every reader below — the region field,
         // the organic candidates, the octree, the cap wall — reads `regions`, so the
@@ -670,46 +677,13 @@ public struct LatticeSDFScene {
         // gap by another route (measured: 3149 capsules without a rim, 2353 with).
         // `regions` stays whole; `wallRegions` is the eroded copy, and only the region
         // FIELD — the thing the shell and the march clip against — reads it.
-        let wallRegions: [LatticeRegionSpec] = {
-            guard algorithm == "organic", let o = organic, o.solidRimMM > 0,
-                  o.spacingMM > 0 else { return regions }
-            // ★★★ THE SAME BAND THE VOXEL BFS BUILDS (`OrganicSolidRim`) — AND IT IS
-            // ONE LAYER WIDER THAN `floor(rim / voxel)` (his walk, 2026-09-07: "I
-            // removed the rim and nothing changed. The rim is a failure", and before
-            // that "there is still a gap between the rim and the lattice … And the solid
-            // is never created").
-            //
-            // ★ THE TWO HALVES DISAGREED BY EXACTLY THE SEED LAYER. Core's
-            // `apply_organic_solid_rim` marks every candidate that touches solid
-            // sideways at distance 0 and turns it solid WHATEVER `max_steps` is, then
-            // walks `max_steps` further — so the solid band is `floor(rim / voxel) + 1`
-            // voxel layers. This erosion used `floor(rim / voxel)` layers, which is one
-            // too few, and is ZERO whenever the rim is narrower than a voxel. On his
-            // part that is the common case: the rim comes from the window's low end
-            // (~1.8 mm) against a design voxel of the same order. The candidate BFS
-            // still removed the band, so the lattice stopped short — and the region
-            // still reached its own outline, so the shell was cut there and nothing was
-            // drawn in the gap. A hole, exactly where he asked for a wall.
-            // ★★★ THE BAND IS THE MILLIMETRES ASKED FOR, NOT A WHOLE DESIGN VOXEL
-            // (his walk, 2026-09-08: "also, the rim looks way too big?"). It was.
-            //
-            // ★ THE QUANTISATION EXISTED TO MATCH A DELETION THAT NO LONGER HAPPENS.
-            // While the candidate BFS removed the band, the drawn band had to land on
-            // the same whole voxels or the shell would have covered lattice the run
-            // keeps — so it was rounded to `floor(rim / voxel) + 1` LAYERS. On his part
-            // the design voxel is ~1.6 mm and the rim is one bead, 0.42 mm: that rounding
-            // drew a band nearly four times the width he asked for. The band is now
-            // continuous, because the erosion is a distance and the shell reads a
-            // distance field; nothing downstream needs it on a voxel any more.
-            let band = o.solidRimMM
-            guard band > 0 else { return regions }
-            return regions.map { r in
-                guard r.role == .include, r.kind == .face, !r.outlineLoops.isEmpty else { return r }
-                var e = r
-                e.inPlaneOffsetMM -= band
-                return e
-            }
-        }()
+        // ★★★ NO IN-PLANE EROSION ANY MORE (2026-09-23): the organic rim used to be an
+        // erosion of every region's outline by `solidRimMM`, blind to what lay beyond the
+        // outline — air past a grown edge, another prism at a seam, the part's solid. The
+        // rim is now one rule for every algorithm, applied per voxel in the loop below:
+        // skin then rim under every unselected face the lattice runs alongside, and rim
+        // along the outline wherever the part's solid backs it. Nothing is eroded.
+        let wallRegions: [LatticeRegionSpec] = regions
         // ★ "No inside to fill" and "your regions matched nothing" are different
         // findings with different fixes — one is a broken import, the other is a
         // depth set too shallow. Counting only the MASKED grid would report the
@@ -739,8 +713,22 @@ public struct LatticeSDFScene {
         self.prismOccupancy = regions.contains(where: { $0.thicknessMap != nil })
             ? LatticeRegionMask.clippedWholePrism(solid, to: regions, whenEmpty: whenEmpty)
             : occupancy
-        self.partSDF = LatticePreviewOccupancy.signedDistance(
+        let latticedSDF = LatticePreviewOccupancy.signedDistance(
             positions: mesh.positions, indices: mesh.indices, like: occupancy)
+        self.partSDF = latticedSDF
+        // ★★★ THE PART'S MATERIAL, SIGNED BY THE WHOLE SOLID (2026-09-23): `partSDF` takes
+        // its sign from the slab-clipped occupancy — it is the LATTICED volume, which the
+        // march wants — so every measurer that asked it "is the part here" read a slab
+        // edge as the end of the material (his 10.31 mm wall walk). Same distances, the
+        // part's own sign.
+        self.partMaterialSDF = {
+            var m = latticedSDF
+            for i in m.values.indices {
+                let d = abs(m.values[i])
+                m.values[i] = solid.values[i] > 0.5 ? -d : d
+            }
+            return m
+        }()
         tOccupancy = Date().timeIntervalSince(sceneT0)
 
 
@@ -774,7 +762,7 @@ public struct LatticeSDFScene {
             //      which way it faced. That is fixed where it lives, in the fragment.
             //
             // What remains is the region itself, and the finish's skin.
-            let partSDFValues = self.partSDF.values
+            let partMaterialValues = self.partMaterialSDF.values      // ★ the finish skin pulls back from the part's SURFACE, never a slab edge
             // ★★★ UNSELECTED FACES KEEP THEIR SKIN (his 2026-09-23 00:58, image 1: "since
             // faces are selectable, they should be excluded from the lattices unless they
             // have been selected … the curved face should be consistently thick"; on the
@@ -796,10 +784,14 @@ public struct LatticeSDFScene {
             // wall 3 mm behind face 23 that painted his "patch") is OPEN. A face no prism
             // reaches gets nothing either — the lattice never meets it.
             let includeFaceRegions = wallRegions.filter { $0.role == .include && $0.kind == .face && $0.isValid }
-            let acrossCos = cos(60.0 * Double.pi / 180)
+            // ★★★ 30°, NOT 60° (his 2026-09-23 15:00, image 3: the 45° chamfer was
+            // "CONSISTENTLY removed — it is another face", alongside the prism, and it keeps
+            // its skin). Passed THROUGH = the face's normal within ~30° of the prism's
+            // direction AND the prism reaching the face; a 45° chamfer is alongside.
+            let acrossCos = cos(30.0 * Double.pi / 180)
             var unselIdx: [UInt32] = []
             unselIdx.reserveCapacity(mesh.indices.count)
-            var acrossTris = 0, besideTris = 0, unreachedTris = 0
+            var acrossTris = 0, besideTris = 0
             var t = 0
             while t + 2 < mesh.indices.count {
                 let tri = t / 3
@@ -815,14 +807,55 @@ public struct LatticeSDFScene {
                     let area2 = simd_length(cr)
                     if area2 > 1e-12 {
                         let nOut = cr / area2                                // the mesh's outward normal
-                        let probe = (p0 + p1 + p2) / 3 - nOut * 1.5          // 1.5 mm into the part
-                        var reached = false, across = false
-                        for r in includeFaceRegions where LatticeRegionMask.containsWholePrism(probe, region: r) {
-                            reached = true
-                            if abs(simd_dot(nOut, LatticeRegionMask.unit(r.normal))) > acrossCos { across = true; break }
+                        // ★★★ ONLY "PASSED THROUGH" IS DECIDED PER TRIANGLE; every other
+                        // unselected triangle enters the field and the POCKET decides per
+                        // voxel (his images 1 and 2, 2026-09-23 15:00: the leg's top and the
+                        // base's end had solid but no skin, rim or grade — their big triangles'
+                        // centroids sat outside every prism, so they were "unreached" while the
+                        // pocket ran right under them). Probes: the centroid and the three
+                        // corners, each 1.5 mm into the part.
+                        var across = false
+                        let probes = [(p0 + p1 + p2) / 3, p0, p1, p2,
+                                      0.5 * (p0 + p1), 0.5 * (p1 + p2), 0.5 * (p2 + p0)].map { $0 - nOut * 1.5 }
+                        // a point of the prism's own plan, projected onto this triangle: for a
+                        // triangle LARGER than the prism (one big face triangle, a manual slab
+                        // on a wide face) none of its own points fall inside the prism, but the
+                        // prism's centre or an outline corner falls inside the triangle
+                        func insideTriangle(_ q: SIMD3<Double>) -> Bool {
+                            let v0 = p1 - p0, v1 = p2 - p0, v2 = q - p0
+                            let d00 = simd_dot(v0, v0), d01 = simd_dot(v0, v1), d11 = simd_dot(v1, v1)
+                            let d20 = simd_dot(v2, v0), d21 = simd_dot(v2, v1)
+                            let den = d00 * d11 - d01 * d01
+                            guard abs(den) > 1e-18 else { return false }
+                            let v = (d11 * d20 - d01 * d21) / den, w = (d00 * d21 - d01 * d20) / den
+                            return v >= -1e-6 && w >= -1e-6 && v + w <= 1 + 1e-6
                         }
-                        if !reached { unreachedTris += 1 }
-                        else if across { acrossTris += 1 }
+                        search: for r in includeFaceRegions
+                            where abs(simd_dot(nOut, LatticeRegionMask.unit(r.normal))) > acrossCos {
+                            for pr in probes where LatticeRegionMask.containsWholePrism(pr, region: r) {
+                                across = true
+                                break search
+                            }
+                            let nr = LatticeRegionMask.unit(r.normal)
+                            let (ru, rv) = LatticeRegionMask.basis(nr)
+                            var plan: [SIMD3<Double>] = [r.origin]
+                            if r.outlineLoops.isEmpty {
+                                for sx in [-1.0, 1.0] { for sy in [-1.0, 1.0] {
+                                    plan.append(r.origin + ru * (sx * r.halfUMM) + rv * (sy * r.halfWMM))
+                                } }
+                            } else {
+                                for loop in r.outlineLoops { for q in loop { plan.append(r.origin + ru * q.x + rv * q.y) } }
+                            }
+                            for pt in plan {
+                                let q = pt - nOut * simd_dot(pt - p0, nOut)      // onto the triangle's plane
+                                guard insideTriangle(q) else { continue }
+                                if LatticeRegionMask.containsWholePrism(q - nOut * 1.5, region: r) {
+                                    across = true
+                                    break search
+                                }
+                            }
+                        }
+                        if across { acrossTris += 1 }
                         else { besideTris += 1; unselIdx += [mesh.indices[t], mesh.indices[t + 1], mesh.indices[t + 2]] }
                     }
                 }
@@ -835,9 +868,23 @@ public struct LatticeSDFScene {
             // band) — then the grade, then lattice. Both are solid in the region field; the
             // band grades from the rim's inner edge; the lattice layer draws the RIM itself.
             let voxelHere = Double(Swift.max(solid.spacing.x, Swift.max(solid.spacing.y, solid.spacing.z)))
-            let unselSkin = LatticeSDFRenderer.outlineBeamMM(lineWidthMM: organic?.minExtrudableWidthMM ?? 0.45, voxelMM: voxelHere)
+            let unselSkin = LatticeSDFRenderer.outlineBeamMM(lineWidthMM: beadMM > 0 ? beadMM : (organic?.minExtrudableWidthMM ?? 0.45), voxelMM: voxelHere)
             let unselRim = Swift.max(unselSkin, self.organicSolidRimMM)
-            let bandReach = Swift.max(organic?.shapeBandMM ?? 0, 10.0)
+            // ★ the rim along the SOLID-BACKED OUTLINE is his organic rim setting when the
+            // algorithm is organic (0 = no rim: the lattice reaches its own outline —
+            // `OrganicRegionFillProbe` pins it), and the octet's outline band otherwise
+            let outlineRim = algorithm == "organic" ? self.organicSolidRimMM : unselSkin
+            let bandReach = Swift.max(organic?.shapeBandMM ?? 0, 12.0)
+            // ★ the outline's backing probe reads the part's own occupancy (nearest voxel)
+            let solidAtGrid: (SIMD3<Double>) -> Bool = { pt in
+                let g = (SIMD3<Float>(pt) - solid.origin) / solid.spacing
+                let a = Int(g.x.rounded()), b = Int(g.y.rounded()), c = Int(g.z.rounded())
+                guard a >= 0, b >= 0, c >= 0, a < solid.nx, b < solid.ny, c < solid.nz else { return false }
+                return solid.values[(c * solid.ny + b) * solid.nx + a] > 0.5
+            }
+            let slabMargin = 2.0 * voxelHere
+            let outlineReach = unselRim + bandReach + 2.0 * voxelHere
+            var outlineRimVoxels = 0
             // ★ the distance field must reach past skin + rim + the grade band: its far value
             // clamps everything beyond, and a 3-voxel clamp (5.2 mm) put EVERY voxel deeper
             // than that "1.8 mm from the rim" — green on every face (his images 1, 2, 4).
@@ -877,11 +924,22 @@ public struct LatticeSDFScene {
                         // ★ TWO VOXELS PAST THE CAPS, or the trilinear sample in the
                         // first voxel under the face blends with 1e3 and the outline's
                         // solid skin is missing in the very layer seen face-on.
-                        o.values[i] = region < 3.0
-                            ? Float(Swift.min(1e3, LatticeRegionMask.outlineDistance(
-                                p, regions: wallRegions,
-                                slabMarginMM: 2.0 * Double(Swift.max(solid.spacing.x, Swift.max(solid.spacing.y, solid.spacing.z))))))
-                            : 1e3
+                        // ★★★ THE OUTLINE COUNTS ONLY WHERE THE PART'S SOLID BACKS IT (his
+                        // rules, 2026-09-23: green only where there is skin or rim, never
+                        // facing air; the rim outlines the whole lattice except at seams). A
+                        // prism side that runs out into air — a grown outline past the leg's
+                        // top, the mouth's edge — is nothing; a prism side inside the part's
+                        // material is where the lattice meets the solid: the RIM, then the
+                        // grade. Backing is measured (a probe one voxel past the outline),
+                        // never assumed. The band grades from the rim's inner edge.
+                        var toSolidOutline = 1e3
+                        if region < 3.0 {
+                            toSolidOutline = LatticeRegionMask.solidBackedOutlineDistance(
+                                p, regions: wallRegions, slabMarginMM: slabMargin,
+                                stepMM: Swift.max(1.0, voxelHere), solidAt: solidAtGrid)
+                            if toSolidOutline > outlineReach { toSolidOutline = 1e3 }
+                        }
+                        o.values[i] = Float(Swift.min(1e3, toSolidOutline - outlineRim))
                         // ★ AND ONLY WHEN THERE IS A SKIN — the finish's own number, 0
                         // for every finish but `covered`.
                         //
@@ -912,26 +970,39 @@ public struct LatticeSDFScene {
                         // wall with skin, one without, same bake) is real and still
                         // unexplained — it is not this.
                         var carved = skinMM > 0
-                            ? Swift.max(region, Double(partSDFValues[i]) + skinMM)
+                            ? Swift.max(region, Double(partMaterialValues[i]) + skinMM)
                             : region
+                        // ★ the RIM along the solid-backed outline: lattice thickens into the
+                        // solid it meets (rim width, no skin — there is no surface here)
+                        if toSolidOutline < 1e3, outlineRim > 0 {
+                            if region < 0, toSolidOutline < outlineRim { outlineRimVoxels += 1 }
+                            carved = Swift.max(carved, outlineRim - toSolidOutline)
+                        }
+                        var skinHere = toSolidOutline          // + beyond the skin's inner face
                         // ★ INSIDE THE PART ONLY: outside it the signed distance is positive and
                         // `skin − (−d)` would read solid, moving the selected face's zero
                         // crossing inward (`LatticeFaceOutlineTests.testTheSkinLeavesASolid
                         // WallAtTheSurface` caught it).
-                        if let u = unselSDF, u[i] < 0, -Double(u[i]) < unselFar - 1e-3 {
-                            // inside the part, within skin + rim of an unselected face ⇒ solid;
-                            // beyond the clamp the field says nothing and nothing is applied
-                            let toUnsel = -Double(u[i])                    // + inside the part
-                            if region < 0 {
-                                if toUnsel < unselSkin { skinVoxels += 1 } else if toUnsel < unselSkin + unselRim { rimVoxels += 1 }
-                            }
-                            carved = Swift.max(carved, unselSkin + unselRim - toUnsel)
-                            skinIn.values[i] = Float(toUnsel - unselSkin)
-                            // ★ and the band grades from the RIM's inner edge, as from any outline
-                            if region < 3.0 {
-                                o.values[i] = Float(Swift.min(Double(o.values[i]), toUnsel - unselSkin - unselRim))
+                        if let u = unselSDF, abs(Double(u[i])) < unselFar - 1e-3 {
+                            let toUnsel = -Double(u[i])                    // + inside the part, − outside
+                            // ★ CONTINUOUS ACROSS THE SURFACE (− outside the part): the sampled
+                            // texture at the face must never blend a distance with the 1e3
+                            // sentinel, or the first voxel under every face loses its rim
+                            skinHere = Swift.min(skinHere, toUnsel - unselSkin)
+                            if u[i] < 0 {
+                                // inside the part, within skin + rim of an unselected face ⇒ solid;
+                                // beyond the clamp the field says nothing and nothing is applied
+                                if region < 0 {
+                                    if toUnsel < unselSkin { skinVoxels += 1 } else if toUnsel < unselSkin + unselRim { rimVoxels += 1 }
+                                }
+                                carved = Swift.max(carved, unselSkin + unselRim - toUnsel)
+                                // ★ and the band grades from the RIM's inner edge, as from any outline
+                                if region < 3.0 {
+                                    o.values[i] = Float(Swift.min(Double(o.values[i]), toUnsel - unselSkin - unselRim))
+                                }
                             }
                         }
+                        skinIn.values[i] = Float(Swift.min(1e3, skinHere))
                         f.values[i] = Float(carved)
                         i += 1
                     }
@@ -941,9 +1012,9 @@ public struct LatticeSDFScene {
             self.outlineSDF = o
             outlineForOrganic = o
             self.prismSDF = q
-            self.skinInSDF = unselSDF == nil ? nil : skinIn
-            NSLog("DIAG unselected faces: skin %.2f mm + rim %.2f mm under faces the lattice runs ALONGSIDE (selected raw faces %@; triangles alongside %d, passed through %d, unreached %d; field reach %.1f mm) · pocket voxels turned solid: skin %d, rim %d",
-                  unselSkin, unselRim, selectedRaw.sorted().map(String.init).joined(separator: ","), besideTris, acrossTris, unreachedTris, unselFar, skinVoxels, rimVoxels)
+            self.skinInSDF = skinIn
+            NSLog("DIAG unselected faces: skin %.2f mm + rim %.2f mm under every unselected face the lattice does not pass through (selected raw faces %@; triangles alongside %d, passed through %d; field reach %.1f mm) · pocket voxels turned solid: skin %d, rim %d, outline rim (solid-backed) %d",
+                  unselSkin, unselRim, selectedRaw.sorted().map(String.init).joined(separator: ","), besideTris, acrossTris, unselFar, skinVoxels, rimVoxels, outlineRimVoxels)
         } else {
             self.regionSDF = nil
             self.outlineSDF = nil
@@ -1138,7 +1209,7 @@ public struct LatticeSDFScene {
             // keeps "where he marked" and "where it traced" the same set.
             let (tnx, tny, tnz) = o.dims
             let exactRegions = o.regionIDs.count == tnx * tny * tnz
-            let sdfForSolid = self.partSDF
+            let sdfForSolid = self.partMaterialSDF      // ★ the part's material, not the slab
             func partSolidAt(_ q: SIMD3<Float>) -> Bool {
                 let gg = (q - sdfForSolid.origin) / sdfForSolid.spacing
                 let a2 = Int(gg.x.rounded()), b2 = Int(gg.y.rounded()), c2 = Int(gg.z.rounded())
@@ -1303,7 +1374,7 @@ public struct LatticeSDFScene {
             }
             var anchorAtBoundary = o.anchorAtBoundary
             if n > 0, !anchorAtBoundary {
-                let sdf = self.partSDF
+                let sdf = self.partMaterialSDF
                 var onBoundary = 0, backed = 0
                 let di = [1, -1, 0, 0, 0, 0], dj = [0, 0, 1, -1, 0, 0], dk = [0, 0, 0, 0, 1, -1]
                 for k in 0..<tnz { for j in 0..<tny { for i in 0..<tnx {
@@ -2378,32 +2449,10 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
         sdfTex = makeVolumeTexture(scene.partSDF)
         solidTex = makeVolumeTexture(scene.solidOccupancy)     // the cap wall's "is the part here"
         regionTex = scene.regionSDF.flatMap { r in makeRegionTexture(r, outline: scene.outlineSDF, prism: scene.prismSDF, skinIn: scene.skinInSDF) }
-        // ★ the cap only where the prism ends INSIDE material — measured wall width past
-        // the declared depth by more than a voxel; a prism through the whole wall gets none
-        let occ = scene.prismOccupancy          // ★ the whole prism: the cap is measured, not the slab
-        let voxel = Double(max(occ.spacing.x, max(occ.spacing.y, occ.spacing.z)))
-        var widthFields: [Int: [Double]] = [:]
-        for (i, r) in scene.regions.enumerated() where r.role == .include && r.kind == .face {
-            widthFields[i] = LatticeMeasuredRegionWidth.wallWidthFieldAlongNormalMM(
-                region: r, occupancy: occ, partSDF: scene.partSDF)
-        }
-        let cap = LatticeRegionCap.build(regions: scene.regions) { ri, p in
-            guard let w = widthFields[ri], w.count == occ.count else { return true }
-            let g = (SIMD3<Float>(p) - occ.origin) / occ.spacing
-            let i = Int(g.x.rounded()), j = Int(g.y.rounded()), k = Int(g.z.rounded())
-            var best = 0.0
-            for dk in -1...1 { for dj in -1...1 { for di in -1...1 {
-                let a = i + di, b = j + dj, c = k + dk
-                guard a >= 0, b >= 0, c >= 0, a < occ.nx, b < occ.ny, c < occ.nz else { continue }
-                best = max(best, w[(c * occ.ny + b) * occ.nx + a])
-            } } }
-            // no measurement ⇒ no cap (never a wall on a guess)
-            guard best > 0 else { return false }
-            return best - scene.regions[ri].depthMM > max(1.0, voxel)
-        }
-        regionCap = cap.vertexCount > 0 ? cap : nil
-        NSLog("DIAG regionCap: %d verts (regions whose prism ends inside material only; voxel %.2f mm)",
-              cap.vertexCount, voxel)
+        // ★★★ NO CAP (his rule R7, 2026-09-23: never a wall, plate, cap or beam inside
+        // the pocket). The prism's far end inside material is the part's own solid; the
+        // march draws it from the region field, and nothing is built for it.
+        regionCap = nil
         Self.regionCapSerial &+= 1
         regionCapVersion = Self.regionCapSerial
         organicTex = scene.organicField.flatMap { d in
@@ -2632,6 +2681,12 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
         for i in 0..<seed.count where occ.values[i] <= 0.5 && mm[i] > 0 {
             seed[i] = true
         }
+        // ★ AND THE SKIN + RIM INSIDE THE PRISM (2026-09-23): under an unselected face the
+        // lattice runs alongside — and along the solid-backed outline — the region field
+        // is solid inside the prism; the grade seeds from that band's inner edge too.
+        if let f = scene.regionSDF, let q = scene.prismSDF, f.count == seed.count, q.count == seed.count {
+            for i in 0..<seed.count where !seed[i] && q.values[i] < 0 && f.values[i] >= 0 { seed[i] = true }
+        }
         return seed
     }
 
@@ -2723,7 +2778,7 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
                         r.kind == .face && r.role == .include
                             ? LatticeMeasuredRegionWidth.wallWidthFieldAlongNormalMM(
                                 region: r, occupancy: scene.prismOccupancy,
-                                partSDF: scene.partSDF)
+                                partSDF: scene.partMaterialSDF)
                             : nil
                     },
                     // ★★★ THE RIM ONLY WHERE THE WALL IS ATTACHED (his rule: solid at
@@ -3009,7 +3064,7 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
             ?? TopOptKit.latticeSubfloorRetentionStressFraction()
         // ★ THE MEASURED FIELD, never `demand` — see `stressDemand`.
         let peaks = LatticePreviewOccupancy.subfloorPeaks(
-            demand: scene.stressDemand, partSDF: scene.partSDF,
+            demand: scene.stressDemand, partSDF: scene.partMaterialSDF,
             occupancy: scene.occupancy)
         return LatticePreviewOccupancy.subfloorQualifies(
             regionPeak: peaks.region, partPeak: peaks.part, ceiling: ceiling)
@@ -3685,8 +3740,12 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
             // ★ .y IS NOW A FRACTION OF THE LOCAL CELL, not millimetres — see
             // `solidOutlineFraction`. The shader multiplies it by `LC.S`.
             // ★ .w IS THE SOLID OUTLINE'S WIDTH in mm (octree bake; 0 otherwise).
-            rimParams: SIMD4(Float(dressingBandMM), Float(solidOutlineFraction),
-                             doubledSolidCellsArmed ? 1 : 0, Float(cellField?.solidBandMM ?? 0)),
+            // ★ .z AND .w ARE OFF (2026-09-23, his R7: nothing solid inside the pocket but the
+            // rim). .z turned doubled's inactive cells into solid across the pocket; .w drew
+            // the octree's outline strip and stripped the finish dressing beside it. The rim
+            // is the region field's now (skin + rim under unselected faces, rim along the
+            // solid-backed outline) and the lattice layer draws it.
+            rimParams: SIMD4(Float(dressingBandMM), Float(solidOutlineFraction), 0, 0),
             organicRadius: {
                 let reach = Float(scene?.organicBandMM ?? 0)
                 // never past 90 % of the reach: beyond it the clamp would lie
@@ -3831,7 +3890,7 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
         var widths: [Int: [Double]] = [:]
         for (i, r) in scene.regions.enumerated() where r.role == .include && r.kind == .face {
             widths[i] = LatticeMeasuredRegionWidth.wallWidthFieldAlongNormalMM(
-                region: r, occupancy: occ, partSDF: scene.partSDF)
+                region: r, occupancy: occ, partSDF: scene.partMaterialSDF)
         }
         // ★ THE BEAM NEVER LEAVES THE PART (his 2026-09-22 14:55): a grown region's beam
         // moves outward only where the part's own material (the whole solid, not the

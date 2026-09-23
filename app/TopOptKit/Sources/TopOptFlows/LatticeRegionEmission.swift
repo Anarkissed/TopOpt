@@ -467,7 +467,11 @@ public enum LatticeRegionEmission {
             guard lA > 1e-9 else { return nil }
             let uA = dA / lA, mA = 0.5 * (a + b)
             var best: (Int, Double)? = nil
+            let nRi = LatticeRegionMask.unit(out[ri].normal)
             for e in edges where e.region != ri && out[e.region].rawFaceID != out[ri].rawFaceID {
+                // ★ opposite walls never pair (as the prism pass): their edges can run parallel
+                // through a thin leg with no corner between them
+                guard simd_dot(nRi, LatticeRegionMask.unit(out[e.region].normal)) > cos(150 * Double.pi / 180) else { continue }
                 let dB = e.b - e.a
                 let lB = simd_length(dB)
                 guard lB > 1e-9 else { continue }
@@ -496,14 +500,17 @@ public enum LatticeRegionEmission {
         // inside another latticed region's prism is a seam to it. Opposite walls (normals
         // more than 150° apart) never pair — their prisms can overlap in a thin leg with
         // no corner between them.
+        // ★ every probe reads the regions as they were BEFORE any seam flared them, so the
+        // answer does not depend on which region the loop reached first
+        let unflared = out
         func prismNeighbour(mid uv: SIMD2<Double>, outUV: SIMD2<Double>, region ri: Int) -> (Int, Double)? {
-            let r = out[ri]
+            let r = unflared[ri]
             let nA = LatticeRegionMask.unit(r.normal)
             let (bu, bv) = LatticeRegionMask.basis(nA)
             for off in [0.5, 1.0, 2.0] {
                 let q = uv + outUV * off
-                for rj in out.indices where rj != ri && isFace[rj] && out[rj].rawFaceID != r.rawFaceID {
-                    let o = out[rj]
+                for rj in unflared.indices where rj != ri && isFace[rj] && unflared[rj].rawFaceID != r.rawFaceID {
+                    let o = unflared[rj]
                     let nB = LatticeRegionMask.unit(o.normal)
                     guard simd_dot(nA, nB) > cos(150 * Double.pi / 180) else { continue }
                     let s = 0.5 * Swift.min(r.depthMM, o.depthMM)
@@ -532,23 +539,41 @@ public enum LatticeRegionEmission {
                 var fl = [Int?](repeating: nil, count: loop.count)
                 var tl = [Double](repeating: 0, count: loop.count)
                 var cl = [Double](repeating: 0, count: loop.count)
-                // the polygon's winding, for the outward edge direction
-                var area = 0.0
-                for i in loop.indices { let a = loop[i], b = loop[(i + 1) % loop.count]; area += a.x * b.y - b.x * a.y }
-                let ccw = area > 0
+                // ★ THE OUTWARD SIDE OF AN EDGE, BY CONTAINMENT (2026-09-23): the winding
+                // rule read a hole loop backwards — its "outside" is the hole, which the
+                // winding puts on the other side — so every hole edge probed into the
+                // region's own material. A step to the right of the edge's midpoint that
+                // lands inside the outline means outward is left.
+                let allLoops = out[ri].outlineLoops
+                func outwardUV(_ i: Int) -> SIMD2<Double>? {
+                    let a = loop[i], b = loop[(i + 1) % loop.count]
+                    let d2 = b - a
+                    let l2 = simd_length(d2)
+                    guard l2 > 1e-9 else { return nil }
+                    let right = SIMD2(d2.y, -d2.x) / l2
+                    let mid = 0.5 * (a + b)
+                    let probe = Swift.max(1e-3, 0.01 * l2)
+                    return LatticeFaceOutline.contains(mid + right * probe, loops: allLoops) ? -right : right
+                }
                 for i in loop.indices {
                     let a3 = w(loop[i]), b3 = w(loop[(i + 1) % loop.count])
                     var nj: Int? = nil
                     var gap = 0.0            // how far beyond the edge the neighbour's prism starts (≤)
-                    if i < raw.count, let nbRaw = raw[i], let own, nbRaw == Int(own) || emittedRaw.contains(FaceID(nbRaw)) {
+                    // ★★★ A KNOWN UNSELECTED NEIGHBOUR IS AN OUTLINE, NEVER A SEAM (his image 3,
+                    // 2026-09-23 15:00: the chamfer "is another face" and keeps its skin and
+                    // rim). The geometric and prism passes exist for faces that share no mesh
+                    // edge; where the mesh SAYS what lies across the edge and it is a face he
+                    // did not select, the lattice ends there under that face's skin.
+                    let rawAcross: Int? = i < raw.count ? raw[i] : nil
+                    let acrossIsUnselected = rawAcross.map { nb in
+                        !(own.map { nb == Int($0) } ?? false) && !emittedRaw.contains(FaceID(nb)) } ?? false
+                    if let nbRaw = rawAcross, let own, nbRaw == Int(own) || emittedRaw.contains(FaceID(nbRaw)) {
                         nj = neighbourRegion(of: a3, b3, rawFace: nbRaw, notIn: ri)
                     }
+                    if acrossIsUnselected { continue }
                     if nj == nil { nj = geometricNeighbour(of: a3, b3, notIn: ri) }
                     if nj == nil {
-                        let d2 = loop[(i + 1) % loop.count] - loop[i]
-                        let l2 = simd_length(d2)
-                        if l2 > 1e-9 {
-                            let outUV = (ccw ? SIMD2(d2.y, -d2.x) : SIMD2(-d2.y, d2.x)) / l2
+                        if let outUV = outwardUV(i) {
                             if let (j, off) = prismNeighbour(mid: (loop[i] + loop[(i + 1) % loop.count]) * 0.5, outUV: outUV, region: ri) {
                                 nj = j; gap = off
                             }
@@ -569,8 +594,8 @@ public enum LatticeRegionEmission {
                     guard simd_length(eIn) > 1e-9 else { continue }
                     let eDir = simd_normalize(eIn)
                     var eOut = simd_cross(nA, eDir)           // in-plane, perpendicular to the edge
-                    // orient outward: CCW ⇒ outward is to the RIGHT of the edge in (u,v)
-                    let outUV = ccw ? SIMD2(d2.y, -d2.x) : SIMD2(-d2.y, d2.x)
+                    // orient outward, by containment (hole loops included)
+                    guard let outUV = outwardUV(i) else { continue }
                     let outWorld = bu * outUV.x + bv * outUV.y
                     if simd_dot(eOut, outWorld) < 0 { eOut = -eOut }
                     let cosA = Swift.max(-1, Swift.min(1, simd_dot(nA, nB)))

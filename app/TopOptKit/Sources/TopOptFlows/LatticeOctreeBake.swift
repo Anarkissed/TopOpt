@@ -294,7 +294,7 @@ extension LatticePreviewOccupancy {
             var vals = [Double](repeating: -1e3, count: nu * nv)
             for j in 0..<nv { for i in 0..<nu {
                 let uv = lo + SIMD2(Double(i), Double(j)) * h
-                vals[j * nu + i] = -(LatticeFaceOutline.signedDistanceAcrossSeams(uv, loops: region.outlineLoops, seams: region.outlineSeams) - region.inPlaneOffsetMM)
+                vals[j * nu + i] = -(LatticeFaceOutline.signedDistanceAcrossSeams(uv, loops: region.outlineLoops, seams: region.outlineSeams, tilts: region.outlineSeamTilt, caps: region.outlineSeamDepthMM) - region.inPlaneOffsetMM)
             }}
             rasters[ladder.region] = OutlineRaster(origin: lo, h: h, nu: nu, nv: nv, values: vals)
         }
@@ -427,7 +427,8 @@ extension LatticePreviewOccupancy {
                 let rel = p - region.origin
                 return -(LatticeFaceOutline.signedDistanceAcrossSeams(
                     SIMD2<Double>(simd_dot(rel, bu), simd_dot(rel, bv)),
-                    loops: region.outlineLoops, seams: region.outlineSeams) - region.inPlaneOffsetMM)
+                    loops: region.outlineLoops, seams: region.outlineSeams,
+                    tilts: region.outlineSeamTilt, caps: region.outlineSeamDepthMM) - region.inPlaneOffsetMM)
             }
             // The slot's box [lo, lo + S) per axis, for slot index (i, j, k) at size S.
             // In-plane slots are anchored at the lattice origin; along the normal at
@@ -446,11 +447,13 @@ extension LatticePreviewOccupancy {
             }
             var lastFail = ""
             var outlineFailed = false
+            var slabFailed = false
             func fits(_ lo: SIMD3<Double>, _ S: Double, fast: Bool = false) -> (fits: Bool, nearest: Double, farthest: Double) {
                 var nearest = 1e3, farthest = -1e3
                 var ok = true
                 lastFail = ""
                 outlineFailed = false
+                slabFailed = false
                 let eps = Swift.min(0.05 * S, 0.2)
                 // ★ THE SLAB IN DEPTH (his 2026-09-22 01:07: "the lattice is jutting out of
                 // the rim … something is making the lattice move rather than thin"): a
@@ -459,6 +462,7 @@ extension LatticePreviewOccupancy {
                 // poking out of it.
                 if !LatticePreviewOccupancy.boxInsideSlab(lo, S, region: region, axis: axis) {
                     lastFail = "slab"
+                    slabFailed = true
                     return (false, nearest, farthest)
                 }
                 for cz in 0...1 { for cy in 0...1 { for cx in 0...1 {
@@ -666,6 +670,10 @@ extension LatticePreviewOccupancy {
                 // that failed only on the part's depth (the plate thinner than the
                 // prism) is a plain cell, painted where there is material and clipped
                 // by the part like any other.
+                // ★ NEVER A CELL OUTSIDE THE SLAB (2026-09-23): a finest cell that failed
+                // the depth slab is air, not a plain cell — his "lattice jutting out of
+                // the rim" was this fall-through painting it.
+                if slabFailed { return }
                 if outlineFailed {
                     if farthest > 0 { paint(lo, S, finest: true, edge: true, nearest: nearest) }
                 } else {
@@ -771,6 +779,7 @@ extension LatticePreviewOccupancy {
                     let dc = dOutFast(lo + SIMD3<Double>(repeating: 0.5 * f))
                     if dc < -0.87 * f { continue }
                     let (ok, nearest, farthest) = fits(lo, f)
+                    if slabFailed { continue }                 // ★ outside the slab is air
                     if ok || !outlineFailed {
                         paint(lo, f, finest: true, edge: false, nearest: nearest)
                     } else if farthest > 0 {

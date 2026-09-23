@@ -98,7 +98,17 @@ public enum LatticeRegionMask {
             if !region.outlineLoops.isEmpty {
                 if !region.outlineSeamTilt.isEmpty,
                    LatticeFaceOutline.insideWithFlare(uv, loops: region.outlineLoops, seams: region.outlineSeams,
-                                                      tilts: region.outlineSeamTilt, caps: region.outlineSeamDepthMM, depth: s) { return true }
+                                                      tilts: region.outlineSeamTilt, caps: region.outlineSeamDepthMM, depth: s) {
+                    // ★ a NEGATIVE expand still shrinks the outline (2026-09-23): the flare
+                    // answered "inside" for every point of the polygon, so a shrunk region
+                    // with seams never shrank. The shrink is measured to the non-seam edges.
+                    let shrink = region.inPlaneOffsetMM + reach
+                    if shrink < 0 {
+                        let sd = LatticeFaceOutline.signedDistance(uv, loops: region.outlineLoops, seams: region.outlineSeams)
+                        return sd <= shrink || abs(sd) >= -shrink
+                    }
+                    return true
+                }
                 return LatticeFaceOutline.signedDistance(uv, loops: region.outlineLoops, seams: region.outlineSeams)
                     <= region.inPlaneOffsetMM + reach
             }
@@ -173,6 +183,44 @@ public enum LatticeRegionMask {
         }
         if bestInside < 1e9 { return bestInside }
         return best == 1e9 ? 1e3 : best
+    }
+
+    /// ★★★ THE OUTLINE ONLY WHERE THE PART'S SOLID BACKS IT (his rules, 2026-09-23: green
+    /// only where there is skin or rim, never facing air; the rim outlines the whole
+    /// lattice except at seams). For each region containing `p`, the nearest point on its
+    /// grown outline is found and a probe placed one `stepMM` beyond it, at the same
+    /// depth; the outline counts when `solidAt` says the part is there and the probe is
+    /// not inside any prism (a seam). Returns the in-plane distance to the nearest backed
+    /// outline, or 1e3 when none is.
+    public static func solidBackedOutlineDistance(_ p: SIMD3<Double>,
+                                                  regions: [LatticeRegionSpec],
+                                                  slabMarginMM: Double,
+                                                  stepMM: Double,
+                                                  solidAt: (SIMD3<Double>) -> Bool) -> Double {
+        var best = 1e3
+        for region in regions where region.role == .include && region.kind == .face
+            && !region.outlineLoops.isEmpty {
+            let n = unit(region.normal)
+            guard simd_length(n) > 0.5, region.depthMM > 0 else { continue }
+            let d = p - region.origin
+            let s = simd_dot(d, n)
+            let along = abs(s - 0.5 * region.depthMM) - 0.5 * region.depthMM
+            guard along <= slabMarginMM else { continue }
+            let (u, v) = basis(n)
+            let uv = SIMD2<Double>(simd_dot(d, u), simd_dot(d, v))
+            guard let near = LatticeFaceOutline.nearestPoint(uv, loops: region.outlineLoops,
+                                                              seams: region.outlineSeams) else { continue }
+            // distance to the GROWN outline: inside the raw polygon it is raw + offset,
+            // in the expand ring it is offset − raw; beyond the grown outline, outside
+            // (negative beyond the grown outline, so the sampled field is continuous across it)
+            let grown = near.inside ? near.dist + region.inPlaneOffsetMM : region.inPlaneOffsetMM - near.dist
+            let edgeUV = near.point + near.outward * region.inPlaneOffsetMM
+            let probeUV = edgeUV + near.outward * stepMM
+            let probe = region.origin + u * probeUV.x + v * probeUV.y + n * s
+            guard solidAt(probe), signedDistanceWholePrism(probe, regions: regions) > 0 else { continue }
+            best = Swift.min(best, grown)
+        }
+        return best
     }
 
     public static func signedDistance(_ p: SIMD3<Double>,

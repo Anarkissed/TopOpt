@@ -136,13 +136,18 @@ final class OrganicSolidRimTests: XCTestCase {
                       "★ the band is COUNTED, never deleted")
         XCTAssertFalse(sdf.contains("for e in rim where cand[e] { cand[e] = false"),
                        "★ no cell is cut out of the candidate set for the rim")
-        // ★ And the drawn band is the millimetres asked for. Rounding it up to a whole
-        // design voxel drew ~1.6 mm for a 0.42 mm bead on his part — "the rim looks way
-        // too big?" It was.
-        XCTAssertTrue(sdf.contains("let band = o.solidRimMM"),
-                      "★ the shell's band is the stated rim, not a voxel multiple")
-        XCTAssertTrue(sdf.contains("e.inPlaneOffsetMM -= band"),
-                      "★ …and the region field excludes it, so the wall draws solid there")
+        // ★ And the rim is no longer an in-plane EROSION of the outline (2026-09-23): the
+        // erosion was blind to what lay beyond the edge — air past a grown outline, another
+        // prism at a seam. The region field carries the rim per voxel instead: skin + rim
+        // under every unselected face the lattice runs alongside, rim along the outline
+        // wherever the part's solid backs it, in millimetres, never a voxel multiple.
+        XCTAssertTrue(sdf.contains("let wallRegions: [LatticeRegionSpec] = regions"),
+                      "★ nothing is eroded")
+        XCTAssertFalse(sdf.contains("e.inPlaneOffsetMM -= band"), "★ the erosion is gone")
+        XCTAssertTrue(sdf.contains("carved = Swift.max(carved, outlineRim - toSolidOutline)"),
+                      "★ the rim along the solid-backed outline is the region field's")
+        XCTAssertTrue(sdf.contains("carved = Swift.max(carved, unselSkin + unselRim - toUnsel)"),
+                      "★ …and so is the skin + rim under an unselected face")
     }
 
     // MARK: the sample cube — edges, never faces

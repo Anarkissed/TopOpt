@@ -264,6 +264,37 @@ public enum LatticeFaceOutline {
         return contains(p, loops: loops) ? -best : best
     }
 
+    /// The nearest point on the outline (seam edges excluded), with the OUTWARD direction
+    /// from the raw polygon at that point, or nil when every edge is a seam. `dist` is the
+    /// unsigned distance to the raw polygon.
+    public static func nearestPoint(_ p: SIMD2<Double>, loops: [Loop], seams: [[Bool]] = [])
+        -> (point: SIMD2<Double>, outward: SIMD2<Double>, dist: Double, inside: Bool)? {
+        var best = Double.greatestFiniteMagnitude
+        var bestPt = SIMD2<Double>(0, 0)
+        for (l, loop) in loops.enumerated() {
+            let sm = l < seams.count ? seams[l] : []
+            var j = loop.count - 1
+            for i in 0..<loop.count {
+                if j < sm.count, sm[j] { j = i; continue }
+                let a = loop[i], b = loop[j]
+                let ab = b - a
+                let l2 = simd_dot(ab, ab)
+                let t = l2 > 1e-12 ? max(0, min(1, simd_dot(p - a, ab) / l2)) : 0
+                let c = a + ab * t
+                let d = simd_length(p - c)
+                if d < best { best = d; bestPt = c }
+                j = i
+            }
+        }
+        guard best < .greatestFiniteMagnitude else { return nil }
+        let inside = contains(p, loops: loops)
+        var dir = inside ? bestPt - p : p - bestPt
+        let len = simd_length(dir)
+        guard len > 1e-9 else { return nil }
+        dir /= len
+        return (bestPt, dir, best, inside)
+    }
+
     /// The loops' own bounding half-extents — so a caller can keep emitting the
     /// slab's `halfU`/`halfW` (core still reads them) from the SAME outline the
     /// mask is built from, rather than from a second fit.
@@ -297,6 +328,10 @@ public enum LatticeFaceOutline {
                 // ★ only as deep as the neighbour's prism (2026-09-22 15:30): a 20 mm prism
                 // cut by a 12 mm neighbour's bisector past 12 mm lost a strip nobody owned
                 let cap = i < cl.count ? cl[i] : 0
+                // (2026-09-23: a review proposed NO flare below the cap; that would leave the
+                // corner block under the neighbour's foot — in neither prism — solid, a wall
+                // between two lattices. The flare holds its cap width to this prism's depth,
+                // as `LatticeSeamFlareTests.testTheFlareIsCappedAtTheNeighboursDepth` pins.)
                 let flare = (cap > 0 ? Swift.min(s, cap) : s) * tl[i]
                 if flare > 0, !inside, out >= 0, out <= flare { inside = true }
                 // ★★★ NO CONVERGING CUT (his 2026-09-23 00:27, the wall "SHAPED the same
@@ -316,22 +351,32 @@ public enum LatticeFaceOutline {
     /// raster): a point outside the polygon whose NEAREST edge is a seam is not outside the
     /// lattice — the next prism continues there — so it reads as inside, at the distance to
     /// the nearest true outline edge.
-    public static func signedDistanceAcrossSeams(_ p: SIMD2<Double>, loops: [Loop], seams: [[Bool]]) -> Double {
+    /// ★ BOUNDED (2026-09-23): the continuation past a seam reaches only as far as the
+    /// flare can — the neighbour's depth × the seam's tilt — when `tilts`/`caps` are
+    /// given; without them any distance past a seam read as inside.
+    public static func signedDistanceAcrossSeams(_ p: SIMD2<Double>, loops: [Loop], seams: [[Bool]],
+                                                 tilts: [[Double]] = [], caps: [[Double]] = []) -> Double {
         let sd = signedDistance(p, loops: loops, seams: seams)
         guard sd > 0, !seams.isEmpty else { return sd }
-        var nearest = Double.greatestFiniteMagnitude, nearestIsSeam = false
+        var nearest = Double.greatestFiniteMagnitude, nearestIsSeam = false, bound = Double.greatestFiniteMagnitude
         for (l, loop) in loops.enumerated() {
             let sm = l < seams.count ? seams[l] : []
+            let tl = l < tilts.count ? tilts[l] : []
+            let cl = l < caps.count ? caps[l] : []
             let m = loop.count
             for i in 0..<m {
                 let a = loop[i], b = loop[(i + 1) % m]
                 let d = b - a, l2 = simd_dot(d, d)
                 let t = l2 > 1e-12 ? max(0, min(1, simd_dot(p - a, d) / l2)) : 0
                 let dist = simd_length(p - (a + d * t))
-                if dist < nearest { nearest = dist; nearestIsSeam = i < sm.count && sm[i] }
+                if dist < nearest {
+                    nearest = dist; nearestIsSeam = i < sm.count && sm[i]
+                    bound = .greatestFiniteMagnitude
+                    if nearestIsSeam, i < tl.count, i < cl.count, cl[i] > 0 { bound = Swift.max(0, cl[i] * tl[i]) }
+                }
             }
         }
-        return nearestIsSeam ? -sd : sd
+        return (nearestIsSeam && nearest <= bound) ? -sd : sd
     }
 
     public static func halfExtents(_ loops: [Loop]) -> (halfU: Double, halfW: Double)? {

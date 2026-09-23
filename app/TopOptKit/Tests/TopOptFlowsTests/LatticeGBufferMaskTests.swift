@@ -46,7 +46,11 @@ final class LatticeGBufferMaskTests: XCTestCase {
         }
         try XCTSkipUnless(renderer.latticePipelinesDidBuild, "lattice MSL must compile")
         renderer.setMesh(mesh)
-        renderer.camera.setOrientation(azimuth: 0.7, elevation: 0.4)
+        // ★ LOOKING INTO THE MOUTH (2026-09-23): under his rules every face the lattice
+        // runs alongside keeps its skin, so with the shell drawn the lattice shows only
+        // through the slab's open mouth on +x — the old oblique view saw 100 pixels of
+        // it; from +x it sees 365.
+        renderer.camera.setOrientation(azimuth: 1.57, elevation: 0.3)
         renderer.setBodyAlpha(bodyAlpha)
         renderer.setLatticeScene(scene, token: 1)
         // ★★ A CELL HIS PART CAN HOLD (task 2026-08-21). This read `hisParams()`, whose
