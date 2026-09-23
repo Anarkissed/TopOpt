@@ -1343,3 +1343,20 @@ Not yet seen by him.
   cached per mesh in `ProjectModel.latticeSeamSolidAt()`, DIAG `seam occupancy`). Core's
   tracer stops a curve only when it leaves the candidate union, so overlapping prisms
   are already one lattice for the trace. 43 targeted tests green; installed 00:10:55.
+- **2026-09-23 00:40 — EXPAND GROWS THE PRISM IN EVERY DIRECTION BUT THE FACE (his: "expand
+  grows it in EVERY direction"; "the face should always be the position of the face-prism's
+  face. They should ALWAYS align").** The emission had applied expand IN PLANE ONLY since
+  2026-08-17 (his own instruction then, `LatticeSlabExpandTests…NotInDepth`) while the
+  stage's purple box grew every way — so a 4.15 expand on face 23 widened the outline
+  and left the 20 mm depth alone. Now `spec(for:…expandMM:)` grows the DEPTH by the
+  expand (20 + 4.15 = 24.15 on his face 23) with the origin never leaving the face; the
+  outline grows by it; the wire carries both as geometry (`wireOutlineLoops` offsets
+  every non-seam edge by the expand; `depth_mm` carries the grown depth) because core
+  rejects an expand key. A first cut also moved the mouth out by the expand — he caught
+  it in a minute ("not keeping the selected face attached to the expansion"); reverted.
+  Re-pinned `LatticeSlabExpandTests.testTheExpandGrowsTheEmittedRegionInPlaneAndInDepth
+  WithTheMouthOnTheFace`; new `LatticeSeamFlareTests.testExpandGrowsTheDepthAndThe
+  OutlineAndTheMouthStaysOnTheFace`. 58 tests green. On the stand the un-selected core
+  is unchanged in kind (26 %, 55 % of the base's bottom bin): the 12/13 mm side prisms
+  still leave 28 mm between them where face 23's 24 mm does not reach. Core's job
+  regenerated with the 24.15 mm facets. Installed 00:31.

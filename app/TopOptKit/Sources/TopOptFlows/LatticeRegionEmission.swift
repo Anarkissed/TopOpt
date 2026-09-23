@@ -115,12 +115,14 @@ public enum LatticeRegionEmission {
     /// bolt region over its exact axial span; a plane becomes a face slab reaching
     /// `depthMM` into the part (the depth the user dragged that face's primitive
     /// to). `faceID` rides along so core can check the depth tie (§0a).
-    /// ★ `expandMM` GROWS THE SLAB IN PLANE ONLY (maintainer, 2026-08-17) — the
-    /// two half-extents perpendicular to the depth, never the depth itself. A
-    /// face's slab is exactly that face's outline, so a chamfer just off its edge
-    /// is outside it; this reaches past the outline to take the surrounding wall
-    /// in. A BOLT region has no in-plane extents to grow — its radius is its
-    /// shape — so it ignores the value rather than pretending to widen.
+    /// ★ `expandMM` GROWS THE SLAB IN EVERY DIRECTION BUT ONE (his 2026-09-23 00:40:
+    /// "expand grows it in EVERY direction", and 00:25: "the face should always be the
+    /// position of the face-prism's face. They should ALWAYS align" — superseding
+    /// 2026-08-17's in-plane-only rule): the outline reaches past the face by it and the
+    /// far end moves deeper by it (depth + expand); the MOUTH stays on the selected face.
+    /// A negative expand shrinks the outline and the depth the same way. A BOLT region
+    /// has no in-plane extents to grow — its radius is its shape — so it ignores the
+    /// value rather than pretending to widen.
     public static func spec(for face: ResolvedFace, role: LatticeGroupRole,
                             depthMM: Double, faceID: Int? = nil,
                             expandMM: Double = 0,
@@ -229,7 +231,11 @@ public enum LatticeRegionEmission {
             s.outlineSeamFaces = neighbours.map { $0.map { f in f.map { Int($0) } } }
             s.outlineSeams = neighbours.map { $0.map { f in f.map(seamWith) ?? false } }
             if !s.outlineSeams.contains(where: { $0.contains(true) }) { s.outlineSeams = []; s.outlineSeamFaces = [] }
-            s.depthMM = depthMM
+            // ★ DEEPER BY THE EXPAND, THE MOUTH ON THE FACE (2026-09-23): the far end
+            // moves by the expand; the origin never leaves the selected face — core sees
+            // the growth through the depth on the wire (it rejects an expand key).
+            let grow = loops.isEmpty ? 0 : LatticeSlabExpand.clamp(expandMM)
+            s.depthMM = Swift.max(0.1, depthMM + grow)
             return s.isValid ? s : nil
         }
     }

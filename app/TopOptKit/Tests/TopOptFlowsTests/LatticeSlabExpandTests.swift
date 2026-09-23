@@ -215,7 +215,7 @@ final class LatticeSlabExpandTests: XCTestCase {
 
     /// ★ THE ASSERTION THAT STOPS THIS BEING DECORATIVE: the expanded slab is
     /// what core is asked to lattice, and the DEPTH is untouched by it.
-    func testTheExpandGrowsTheEmittedRegionInPlaneAndNotInDepth() {
+    func testTheExpandGrowsTheEmittedRegionInPlaneAndInDepthWithTheMouthOnTheFace() {
         let (p, gid, _) = project()
         let face = LatticeSelectableRef.face(group: gid, face: 1)
 
@@ -232,8 +232,11 @@ final class LatticeSlabExpandTests: XCTestCase {
                        "★ x grew by exactly the expand")
         XCTAssertEqual((after?.halfWMM ?? 0) - w0, 3, accuracy: 1e-9,
                        "★ …and so did y")
-        XCTAssertEqual(after?.depthMM ?? 0, d0, accuracy: 1e-12,
-                       "★★ and the DEPTH did not move — his one explicit exclusion")
+        // ★ RE-PINNED 2026-09-23 (his: "expand grows it in EVERY direction" — the far end
+        // moves by the expand; the mouth stays on the face). The 08-17 exclusion is lifted.
+        XCTAssertEqual((after?.depthMM ?? 0) - d0, 3, accuracy: 1e-9,
+                       "★★ and the DEPTH grew by exactly the expand")
+        XCTAssertEqual(after?.origin ?? .zero, before?.origin ?? .one, "★ the mouth stays on the face")
     }
 
     /// It is PER SELECTABLE, like the role, the depth and the density.

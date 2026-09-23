@@ -307,4 +307,35 @@ final class LatticeSeamFlareTests: XCTestCase {
         // the preview's own loops are untouched
         XCTAssertEqual(r.outlineLoops[0].map { $0.x }.max()!, 10, accuracy: 1e-9)
     }
+
+    /// ★ EXPAND GROWS THE OUTLINE AND THE DEPTH, NEVER THE MOUTH (his 2026-09-23: "every
+    /// direction" and "the face should always be the position of the face-prism's face"):
+    /// the far end moves deeper by the expand, the outline widens by it, the origin stays
+    /// on the face — and the wire carries the growth as geometry.
+    func testExpandGrowsTheDepthAndTheOutlineAndTheMouthStaysOnTheFace() {
+        let face = LatticeRegionEmission.ResolvedFace.plane(
+            center: SIMD3(0, 0, 10), normal: SIMD3(0, 0, 1), halfUMM: 10, halfWMM: 10,
+            outlineLoops: [[SIMD2(-10, -10), SIMD2(10, -10), SIMD2(10, 10), SIMD2(-10, 10)]],
+            neighbours: [[nil, nil, nil, nil]])
+        let plain = LatticeRegionEmission.spec(for: face, role: .include, depthMM: 8, faceID: 1)!
+        let grown = LatticeRegionEmission.spec(for: face, role: .include, depthMM: 8, faceID: 1, expandMM: 2)!
+        XCTAssertEqual(plain.depthMM, 8); XCTAssertEqual(plain.origin.z, 10, accuracy: 1e-9)
+        XCTAssertEqual(grown.depthMM, 10, accuracy: 1e-9, "8 + 2")
+        XCTAssertEqual(grown.origin.z, 10, accuracy: 1e-9, "★ the mouth stays ON the face")
+        XCTAssertEqual(grown.inPlaneOffsetMM, 2, accuracy: 1e-9)
+        // the region: a point 1 mm outside the old outline, 9.5 mm below the mouth, is inside now
+        XCTAssertTrue(LatticeRegionMask.contains(SIMD3(11, 0, 10 - 9.5), region: grown))
+        XCTAssertFalse(LatticeRegionMask.contains(SIMD3(11, 0, 10 - 9.5), region: plain))
+        XCTAssertFalse(LatticeRegionMask.contains(SIMD3(0, 0, 10.5), region: grown), "nothing ahead of the face")
+        // the wire outline is 2 mm wider all round, and the wire carries the grown depth from the same mouth
+        let w = grown.wireOutlineLoops[0]
+        XCTAssertEqual(w.map { $0.x }.max()!, 12, accuracy: 1e-9); XCTAssertEqual(w.map { $0.y }.min()!, -12, accuracy: 1e-9)
+        let d = grown.wireDictionary(frameAxes: false)["geometry"] as! [String: Any]
+        XCTAssertEqual(d["depth_mm"] as! Double, 10, accuracy: 1e-9)
+        XCTAssertEqual((d["origin"] as! [Double])[2], 10, accuracy: 1e-9)
+        // a shrink does the mirror: the mouth still on the face, depth 7, outline 1 mm narrower
+        let shrunk = LatticeRegionEmission.spec(for: face, role: .include, depthMM: 8, faceID: 1, expandMM: -1)!
+        XCTAssertEqual(shrunk.depthMM, 7, accuracy: 1e-9); XCTAssertEqual(shrunk.origin.z, 10, accuracy: 1e-9)
+        XCTAssertEqual(shrunk.wireOutlineLoops[0].map { $0.x }.max()!, 9, accuracy: 1e-9)
+    }
 }

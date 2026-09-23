@@ -269,17 +269,23 @@ public struct LatticeRegionSpec: Equatable, Sendable {
     /// (0.26 mm at 12 mm and 12°), inside the neighbour's slab. Preview-only readers keep
     /// `outlineLoops` and the flare; this is the job's copy.
     public var wireOutlineLoops: [[SIMD2<Double>]] {
-        guard kind == .face, depthMM > 0, !outlineSeams.isEmpty, !outlineSeamTilt.isEmpty else { return outlineLoops }
+        guard kind == .face, depthMM > 0 else { return outlineLoops }
+        // ★ the in-plane expand goes on the wire as GEOMETRY (2026-09-23): core rejects an
+        // expand key, so the outline itself is offset by it (outward for a grow, inward
+        // for a shrink) on every edge that is not a seam
+        let e = inPlaneOffsetMM
         return outlineLoops.enumerated().map { (l, loop) in
             let sm = l < outlineSeams.count ? outlineSeams[l] : []
             let tl = l < outlineSeamTilt.count ? outlineSeamTilt[l] : []
             let cl = l < outlineSeamDepthMM.count ? outlineSeamDepthMM[l] : []
             let grow: [Double] = loop.indices.map { i in
-                guard i < sm.count, sm[i], i < tl.count, tl[i] > 1e-9 else { return 0 }
+                let seam = i < sm.count && sm[i]
+                guard seam else { return -e }                     // negative = outward in `offsetRing`
+                guard i < tl.count, tl[i] > 1e-9 else { return 0 }
                 let cap = i < cl.count && cl[i] > 0 ? Swift.min(depthMM, cl[i]) : depthMM
-                return -(cap * tl[i])              // negative = outward in `offsetRing`
+                return -(cap * tl[i])
             }
-            guard grow.contains(where: { $0 < 0 }) else { return loop }
+            guard grow.contains(where: { abs($0) > 1e-9 }) else { return loop }
             return LatticeOutlineRibbon.offsetRing(loop, by: 0, seams: [], edgeOffset: grow)
         }
     }
