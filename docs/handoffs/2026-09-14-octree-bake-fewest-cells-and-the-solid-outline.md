@@ -1423,3 +1423,20 @@ Not yet seen by him.
   latticed they must be selected. Re-pinned the two `LatticeSolidFillTests` shader pins.
   51 targeted tests green after the re-pin; installed 02:36. DIAG line:
   `unselected faces: skin … + rim … · pocket voxels turned solid: skin N, rim M`.
+- **2026-09-23 02:44–03:15 — HIS ADDENDUM: a face the prism passes THROUGH is open; only a
+  face the lattice runs ALONGSIDE gets skin + rim.** His five points on the 02:36 build:
+  the patch on face 23, internal walls, green everywhere, rims against the internal walls,
+  no rims elsewhere. Measured the patch's CAUSE (he forbade measuring whether it should
+  exist): 3 mm inside face 23's middle facet 25/34 samples read solid, nearest unselected
+  face = 25, an internal CAVITY WALL ~3 mm behind the surface — the web is thin there and
+  the skin + rim from the cavity wall reached the outer surface. The facet planes are
+  clean (surface 0.05–3.4 mm inside every plane). His addendum ("the opposite side of the
+  face selected, if the face-prism passes through it, gets latticed through") is now the
+  rule: an unselected triangle is probed 1.5 mm into the part; if no include prism
+  contains the probe it gets nothing; if any containing prism's normal is within 60° of
+  the triangle's it is PASSED THROUGH → open; otherwise ALONGSIDE → skin + rim + band.
+  That opens the cavity wall (the patch), the flanges' inner faces and the channel floor
+  (the "internal walls" and the rims against them), and stops the band grading from the
+  flange's inner face 8.6 mm behind the flat faces (the green everywhere). Verified
+  offline: the middle facet reads open at 1.5 and 3 mm in. DIAG now counts triangles
+  alongside / passed through / unreached. 27 tests green; installed 03:12.

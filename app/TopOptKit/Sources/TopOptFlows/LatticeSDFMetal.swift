@@ -787,15 +787,45 @@ public struct LatticeSDFScene {
                 guard r.role == .include, r.kind == .face else { return nil }
                 return r.rawFaceID.map { Int($0) } ?? r.faceID
             })
+            // ★★★ HIS ADDENDUM (2026-09-23 02:44): "the opposite side of the face selected, if
+            // the face-prism passes through it, gets latticed through — one face-prism,
+            // crossing through the face, is enough". So an unselected face is skinned only
+            // where the lattice runs ALONGSIDE it (the top of the leg, the base's bottom, the
+            // inner curve looking up); a face the prism passes THROUGH (its normal within
+            // 60° of the prism's — the flange's inner face, the channel floor, the cavity
+            // wall 3 mm behind face 23 that painted his "patch") is OPEN. A face no prism
+            // reaches gets nothing either — the lattice never meets it.
+            let includeFaceRegions = wallRegions.filter { $0.role == .include && $0.kind == .face && $0.isValid }
+            let acrossCos = cos(60.0 * Double.pi / 180)
             var unselIdx: [UInt32] = []
             unselIdx.reserveCapacity(mesh.indices.count)
+            var acrossTris = 0, besideTris = 0, unreachedTris = 0
             var t = 0
             while t + 2 < mesh.indices.count {
                 let tri = t / 3
                 let fid = tri < mesh.faceIDs.count ? Int(mesh.faceIDs[tri]) : -1
                 // a triangle with no face id (STL, a synthetic block) cannot be told from a
                 // selected face and gets no skin; only a KNOWN, unselected face does
-                if fid >= 0, !selectedRaw.contains(fid) { unselIdx += [mesh.indices[t], mesh.indices[t + 1], mesh.indices[t + 2]] }
+                if fid >= 0, !selectedRaw.contains(fid) {
+                    let i0 = Int(mesh.indices[t]) * 3, i1 = Int(mesh.indices[t + 1]) * 3, i2 = Int(mesh.indices[t + 2]) * 3
+                    let p0 = SIMD3<Double>(Double(mesh.positions[i0]), Double(mesh.positions[i0 + 1]), Double(mesh.positions[i0 + 2]))
+                    let p1 = SIMD3<Double>(Double(mesh.positions[i1]), Double(mesh.positions[i1 + 1]), Double(mesh.positions[i1 + 2]))
+                    let p2 = SIMD3<Double>(Double(mesh.positions[i2]), Double(mesh.positions[i2 + 1]), Double(mesh.positions[i2 + 2]))
+                    let cr = simd_cross(p1 - p0, p2 - p0)
+                    let area2 = simd_length(cr)
+                    if area2 > 1e-12 {
+                        let nOut = cr / area2                                // the mesh's outward normal
+                        let probe = (p0 + p1 + p2) / 3 - nOut * 1.5          // 1.5 mm into the part
+                        var reached = false, across = false
+                        for r in includeFaceRegions where LatticeRegionMask.containsWholePrism(probe, region: r) {
+                            reached = true
+                            if abs(simd_dot(nOut, LatticeRegionMask.unit(r.normal))) > acrossCos { across = true; break }
+                        }
+                        if !reached { unreachedTris += 1 }
+                        else if across { acrossTris += 1 }
+                        else { besideTris += 1; unselIdx += [mesh.indices[t], mesh.indices[t + 1], mesh.indices[t + 2]] }
+                    }
+                }
                 t += 3
             }
             // ★★ SKIN, THEN RIM (his 2026-09-23 02:30: "THE RIM IS BELOW THE SOLID! It's the
@@ -912,8 +942,8 @@ public struct LatticeSDFScene {
             outlineForOrganic = o
             self.prismSDF = q
             self.skinInSDF = unselSDF == nil ? nil : skinIn
-            NSLog("DIAG unselected faces: skin %.2f mm + rim %.2f mm under every face not selected (selected raw faces %@; field reach %.1f mm) · pocket voxels turned solid: skin %d, rim %d",
-                  unselSkin, unselRim, selectedRaw.sorted().map(String.init).joined(separator: ","), unselFar, skinVoxels, rimVoxels)
+            NSLog("DIAG unselected faces: skin %.2f mm + rim %.2f mm under faces the lattice runs ALONGSIDE (selected raw faces %@; triangles alongside %d, passed through %d, unreached %d; field reach %.1f mm) · pocket voxels turned solid: skin %d, rim %d",
+                  unselSkin, unselRim, selectedRaw.sorted().map(String.init).joined(separator: ","), besideTris, acrossTris, unreachedTris, unselFar, skinVoxels, rimVoxels)
         } else {
             self.regionSDF = nil
             self.outlineSDF = nil
