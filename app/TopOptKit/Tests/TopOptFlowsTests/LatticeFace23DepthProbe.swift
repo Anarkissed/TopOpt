@@ -10,12 +10,19 @@ final class LatticeFace23DepthProbe: XCTestCase {
         let gid = UUID()
         let group = SelectionGroup(id: gid, name: "C", colorIndex: 0, faces: [15, 2, 23], regionIDs: [])
         let key23 = LatticeSelectableRef.face(group: gid, face: 23).key
+        let solidGrid = LatticePreviewOccupancy.occupancy(positions: mesh.positions, indices: mesh.indices, bounds: mesh.bounds, maxDim: 128)
         let res = LatticeRegionEmission.regions(
             groups: [group], roles: [gid: .include], primitives: { _ in [] }, includePrimitives: [],
             faceDepthMM: 12,
             selectableDepthMM: [LatticeSelectableRef.face(group: gid, face: 2).key: 13, key23: 20],
             selectableExpandMM: [key23: 4.15],
             facets: { LatticeFaceFacets.facets(face: $0, in: mesh) },
+            solidAt: { p in
+                let g = (SIMD3<Float>(p) - solidGrid.origin) / solidGrid.spacing
+                let i = Int(g.x.rounded()), j = Int(g.y.rounded()), k = Int(g.z.rounded())
+                guard i >= 0, j >= 0, k >= 0, i < solidGrid.nx, j < solidGrid.ny, k < solidGrid.nz else { return false }
+                return solidGrid.values[(k * solidGrid.ny + j) * solidGrid.nx + i] > 0.5
+            },
             resolve: { LatticeRegionEmission.planeFor(face: $0, in: mesh) })
         let regions = res.regions
         print("PROBE regions: \(regions.map { "f\($0.faceID ?? -1) d=\($0.depthMM) exp=\($0.inPlaneOffsetMM) n=\(LatticeRegionMask.unit($0.normal)) seams=\($0.outlineSeams.flatMap { $0 }.filter { $0 }.count) tilts=\($0.outlineSeamTilt.flatMap { $0 }.filter { abs($0) > 1e-9 }.map { String(format: "%.2f", $0) })" })")
@@ -150,6 +157,8 @@ final class LatticeFace23DepthProbe: XCTestCase {
                 }
                 u += h
             }
+            let field = LatticeMeasuredRegionWidth.wallWidthFieldAlongNormalMM(region: whole, occupancy: LatticeRegionMask.clipped(occ, to: [whole]), partSDF: sdf).filter { $0 > 0 }.sorted()
+            if !field.isEmpty { print(String(format: "PROBE r%d width field: n %d min %.2f p25 %.2f p50 %.2f p75 %.2f max %.2f (sdf far %.2f)", ri, field.count, field[0], field[field.count / 4], field[field.count / 2], field[3 * field.count / 4], field[field.count - 1], Double(sdf.values.map { abs($0) }.max() ?? 0))) }
             let width = LatticeMeasuredRegionWidth.wallWidthAlongNormalMM(region: whole, occupancy: LatticeRegionMask.clipped(occ, to: [whole]), partSDF: sdf, percentile: 0.5)
             let w05 = LatticeMeasuredRegionWidth.wallWidthAlongNormalMM(region: whole, occupancy: LatticeRegionMask.clipped(occ, to: [whole]), partSDF: sdf, percentile: 0.05)
             print(String(format: "PROBE r%d f%d depth %.0f expand %.2f · measured wall along n: p05 %.2f p50 %.2f mm · voxel %.2f", ri, r.faceID ?? -1, r.depthMM, r.inPlaneOffsetMM, w05, width, h))

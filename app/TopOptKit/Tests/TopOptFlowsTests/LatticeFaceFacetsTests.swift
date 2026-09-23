@@ -260,6 +260,14 @@ final class LatticeSeamFlareTests: XCTestCase {
         // the cap: the neighbour's depth less the probe gap at which its prism was found (0.5 mm)
         XCTAssertEqual(out[0].outlineSeamDepthMM.first?.max(), 19.5, "A's seam is capped at B's depth less the gap")
         XCTAssertEqual(out[1].outlineSeamDepthMM.first?.max(), 7.5, "B's seam is capped at A's depth less the gap")
+        // ★ and only where the part has MATERIAL beyond the edge (2026-09-23): the same
+        // two walls with air beyond A's corner edge are not seams
+        var out3 = [a, b]
+        LatticeRegionEmission.finishSeams(&out3, runFaceID: { Int($0) }, solidAt: { _ in false })
+        XCTAssertTrue(out3[0].outlineSeams.isEmpty, "a prism reaching across air is not a lattice beyond the edge")
+        var out4 = [a, b]
+        LatticeRegionEmission.finishSeams(&out4, runFaceID: { Int($0) }, solidAt: { _ in true })
+        XCTAssertEqual(out4[0].outlineSeams.first?.filter { $0 }.count, 1)
         // opposite walls in a thin leg: never a seam
         var c = a; c.rawFaceID = 3; c.faceID = 3; c.origin = SIMD3(0, 0, 0); c.normal = SIMD3(0, 0, 1); c.depthMM = 8
         var out2 = [a, c]

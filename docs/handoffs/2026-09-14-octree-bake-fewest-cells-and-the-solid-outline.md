@@ -1319,3 +1319,27 @@ Not yet seen by him.
   job for core regenerated with the grown outlines (~/Downloads/m2_verticalStand_face23_
   facets_job.json). Test: `LatticeSeamFlareTests.testTheWireOutlineIsGrownAcross
   DivergingSeamsOnly`. Installed 15:57.
+- **2026-09-23 00:00 — HIS SEVEN IMAGES: the "wall between the walls", the rim rule
+  made clear, the un-met corner.** Measured on his stand (`LatticeStandCoverageProbe`,
+  his project's real selection: Group C = faces 15, 2 + region 101 "Face 23 & like it"
+  = [23] only): the part is 53 mm thick in y; faces 15/2 are the L's WHOLE sides (outline
+  x −16…198, z 3…197) with 12/13 mm prisms; they overlap in 0 voxels; 27 % of the part's
+  material is in no prism (55 % of the bottom height bin = the base's core; ~3 % in the
+  leg's upper bins). Profiles through the leg at x = 13: fully selected side to side at
+  z = 40/89/180 (face 23's 20 mm prism reaches across there); at z = 139 the leg's sides
+  are faces 56/57 (a recessed panel, not selected) and the core is face 23's. So the
+  grey wall in his image 1 is the material between the two 12/13 mm side slabs where
+  face 23's 20 mm does not reach — selection, not a bug — unless he intends the side
+  prisms to go through (still open with him). The width walk is NOT broken (bimodal
+  10.31 / 53.28 mm: two plate thicknesses). RIM RULE (his, final): outline the whole
+  lattice shape, air or solid beyond; no rim only where two lattices combine (a seam).
+  Restored: the ribbon draws every non-seam edge (air beyond only pins a grown region's
+  beam to the true outline), `OrganicSolidRim` seeds against air again; re-pinned
+  `OrganicSolidRimTests.testTheOutlineTakesTheRimEvenWhereItMeetsAir`, `LatticeOutline
+  RibbonTests`. THE PATCHY RIM ON THE INNER CURVE (image 4): where the leg is narrower
+  than 20 mm, face 23's prism reached across to the inner curve and the flat walls'
+  inner-curve edges read as seams though beyond them is AIR — the prism seam test now
+  also requires part material at the probe (`regions(solidAt:)`, a 128-across occupancy
+  cached per mesh in `ProjectModel.latticeSeamSolidAt()`, DIAG `seam occupancy`). Core's
+  tracer stops a curve only when it leaves the candidate union, so overlapping prisms
+  are already one lattice for the trace. 43 targeted tests green; installed 00:10:55.

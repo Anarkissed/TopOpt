@@ -184,12 +184,10 @@ public enum LatticeOutlineRibbon {
                 let en = edgeInwardNormals(loop)
                 // ★ outward (a grown region) only where material lies beyond the edge
                 var nAttached = 0, nOpen = 0, nSeam = 0
-                // ★★★ THE RIM IS WHERE LATTICE MEETS SOLID, NEVER WHERE IT MEETS AIR (his
-                // 2026-09-22 15:25, images 1–2: "the top and bottom of the face-prism is
-                // being set as the rims, but that should never happen … the rim should be
-                // the outline of the model's shape — NOT the face-prism"). An edge with
-                // air beyond it is the finish's job and gets NO beam; an edge with the
-                // part's material beyond it (and no other lattice — a seam) gets one.
+                // ★ OUTWARD ONLY INTO MATERIAL: a grown region's beam moves out where the
+                // part continues beyond the edge; at an open edge it stays on the outline.
+                // (His 09-22 15:25 "top and bottom" complaint was the un-selected core of a
+                // 53 mm wall between two 12/13 mm prisms, not the rim — measured 09-23.)
                 var openEdge = [Bool](repeating: false, count: m)
                 let edgeOuter: [Double] = (0..<m).map { i in
                     if i < seams.count, seams[i] { nSeam += 1; return 0 }
@@ -270,7 +268,11 @@ public enum LatticeOutlineRibbon {
                         quad(a1, b1, b1d, a1d, e, e, e, e)
                         continue
                     }
-                    if openEdge[i] { continue }              // air beyond: the finish's edge, no rim
+                    // ★ THE RIM OUTLINES THE WHOLE LATTICE SHAPE (his 2026-09-23 00:00, images
+                    // 2–5: "outline the shape of the lattice; removing walls where two lattices
+                    // combine") — air or solid beyond, every non-seam edge has its beam; `openEdge`
+                    // only decides whether a grown region's beam may move outward.
+                    _ = openEdge[i]
                     let j = (i + 1) % m
                     let si = Swift.min(start[i], depth[i]), sj = Swift.min(start[j], depth[j])
                     let oi0 = at(outer[i], si), oj0 = at(outer[j], sj)

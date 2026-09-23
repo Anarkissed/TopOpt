@@ -2347,6 +2347,7 @@ public final class ProjectModel: ObservableObject {
                 guard let mesh = self?.viewerMesh else { return [] }
                 return LatticeFaceFacets.facets(face: f, in: mesh)
             },
+            solidAt: latticeSeamSolidAt(),
             resolve: resolvedLatticeFace)
     }
 
@@ -2361,6 +2362,29 @@ public final class ProjectModel: ObservableObject {
     }
     /// Whether this selectable's lattice choice reaches the run: faces and primitives
     /// always; a region when it is a union of whole faces (see `latticeRegionMembers`).
+    /// ★ THE PART'S MATERIAL FOR THE SEAM TEST (2026-09-23): a 128-across occupancy of the
+    /// viewer mesh, built once per mesh and kept, so `LatticeRegionEmission` can ask
+    /// "is there material just beyond this outline edge" without a mesh of its own.
+    private var latticeSeamOccupancy: (key: (Int, UInt64, UInt64), grid: LatticeVoxelGrid)? = nil
+    func latticeSeamSolidAt() -> ((SIMD3<Double>) -> Bool)? {
+        guard let mesh = viewerMesh, !mesh.indices.isEmpty else { return nil }
+        let key = (mesh.indices.count, mesh.signature.contentHash, mesh.signature.topologyHash)
+        let grid: LatticeVoxelGrid
+        if let c = latticeSeamOccupancy, c.key == key { grid = c.grid } else {
+            let t0 = Date()
+            grid = LatticePreviewOccupancy.occupancy(positions: mesh.positions, indices: mesh.indices,
+                                                    bounds: mesh.bounds, maxDim: 128)
+            latticeSeamOccupancy = (key, grid)
+            NSLog("DIAG seam occupancy: %dx%dx%d in %.2f s (once per mesh)", grid.nx, grid.ny, grid.nz, Date().timeIntervalSince(t0))
+        }
+        return { p in
+            let g = (SIMD3<Float>(p) - grid.origin) / grid.spacing
+            let i = Int(g.x.rounded()), j = Int(g.y.rounded()), k = Int(g.z.rounded())
+            guard i >= 0, j >= 0, k >= 0, i < grid.nx, j < grid.ny, k < grid.nz else { return false }
+            return grid.values[(k * grid.ny + j) * grid.nx + i] > 0.5
+        }
+    }
+
     public func latticeReachesTheRun(_ ref: LatticeSelectableRef) -> Bool {
         if case let .region(_, rid) = ref { return latticeRegionMembers(rid) != nil }
         return true

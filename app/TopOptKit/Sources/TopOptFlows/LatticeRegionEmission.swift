@@ -291,6 +291,10 @@ public enum LatticeRegionEmission {
                                // resolve to several planar FACETS (a curved wall) — see
                                // `LatticeFaceFacets`; empty ⇒ the face is skipped as before
                                facets: (FaceID) -> [ResolvedFace] = { _ in [] },
+                               // ★ is there PART MATERIAL at a world point — the seam test's
+                               // second question (2026-09-23): a prism reaching across air is
+                               // not a lattice beyond the edge. nil ⇒ prisms alone decide.
+                               solidAt: ((SIMD3<Double>) -> Bool)? = nil,
                                resolve: (FaceID) -> ResolvedFace?) -> Result {
         var out: [LatticeRegionSpec] = []
         var skipped = 0
@@ -407,11 +411,12 @@ public enum LatticeRegionEmission {
         // run id, and it carries the tilt to the prism across it — tan(half the dihedral),
         // positive where the two prisms diverge with depth — so `LatticeRegionMask` can
         // flare each prism to the bisector plane and adjacent prisms meet without a wedge.
-        finishSeams(&out, runFaceID: runFaceID)
+        finishSeams(&out, runFaceID: runFaceID, solidAt: solidAt)
         return Result(regions: out, skippedFaces: skipped)
     }
 
-    static func finishSeams(_ out: inout [LatticeRegionSpec], runFaceID: (FaceID) -> Int) {
+    static func finishSeams(_ out: inout [LatticeRegionSpec], runFaceID: (FaceID) -> Int,
+                            solidAt: ((SIMD3<Double>) -> Bool)? = nil) {
         let emittedRaw = Set(out.compactMap { $0.rawFaceID })
         // world-space edges of every include face region, for the neighbour lookup
         struct Edge { let a: SIMD3<Double>, b: SIMD3<Double>, region: Int }
@@ -497,6 +502,12 @@ public enum LatticeRegionEmission {
                     guard simd_dot(nA, nB) > cos(150 * Double.pi / 180) else { continue }
                     let s = 0.5 * Swift.min(r.depthMM, o.depthMM)
                     let p = r.origin + bu * q.x + bv * q.y + nA * s
+                    // ★ MATERIAL, NOT JUST A PRISM (his image 4, 2026-09-23): where the leg is
+                    // narrower than 20 mm face 23's prism reaches across to the inner curve,
+                    // and the flat walls' inner-curve edges read as seams — no rim, no band —
+                    // though beyond that edge is air. The neighbour's lattice is only there
+                    // if the part is.
+                    if let solidAt, !solidAt(p) { continue }
                     if LatticeRegionMask.containsWholePrism(p, region: o) { return (rj, off) }
                 }
             }

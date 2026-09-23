@@ -3756,7 +3756,7 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
             }}}
             return best > 0 ? best : r.depthMM
         }
-        NSLog("DIAG outline beam (only where lattice meets solid; none on open edges or seams): %@ · %d verts",
+        NSLog("DIAG outline beam (every outline edge; none on seams): %@ · %d verts",
               census.keys.sorted().map { ri -> String in
                   let c = census[ri]!
                   return "r\(ri) f\(scene.regions[ri].faceID ?? -1): attached \(c.0) open \(c.1) seam \(c.2)"
