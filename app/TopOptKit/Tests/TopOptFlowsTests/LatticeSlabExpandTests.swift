@@ -451,14 +451,17 @@ final class LatticeSlabExpandPrimitiveTests: XCTestCase {
     /// exactly `e` and carries the sign, so the expand can never become a
     /// DIFFERENT depth — the depth control still owns how thick the slab is,
     /// this only moves where it sits.
-    func testTheNormalMoveIsExactlyEAndNothingMore() {
+    /// ★ RE-PINNED 2026-09-23 (his 00:25/00:40: "the face should always be the position
+    /// of the face-prism's face … the home face … should always be in-line"): the base
+    /// never moves along the normal; the 08-18 "up when expanding" rule is gone.
+    func testTheHomeFaceNeverMovesAlongTheNormal() {
         let s = square()
         for e in [-0.4, 0.7] {
             let out = FaceOffsetShell.dilated(base: s.base, inward: s.inward,
                                               indices: s.idx, byMM: e)
             for k in 0..<4 {
-                XCTAssertEqual(Double(out[k].z - s.base[k].z), e, accuracy: 1e-5,
-                               "★ exactly e along the normal — never more")
+                XCTAssertEqual(Double(out[k].z - s.base[k].z), 0, accuracy: 1e-6,
+                               "★ zero along the normal — the home face stays put")
             }
         }
     }
@@ -483,8 +486,8 @@ final class LatticeSlabExpandPrimitiveTests: XCTestCase {
                 // ★ THE NORMAL PART IS EXACTLY `e` — that is the offset-surface
                 // property, and it holds at every vertex regardless of where it
                 // sits on the rim.
-                XCTAssertEqual(Double(out[k].z - s.base[k].z), e, accuracy: 1e-5,
-                               "★ normal: exactly e")
+                XCTAssertEqual(Double(out[k].z - s.base[k].z), 0, accuracy: 1e-6,
+                               "★ normal: nothing (2026-09-23: the home face stays)")
                 // ★ THE LATERAL PART CARRIES THE IN-SURFACE MITER. These are
                 // 90° CORNERS, so the corner must travel `e/cos(45°)` = e·√2
                 // for both of its EDGES to advance exactly `e` — his rule is
@@ -500,23 +503,28 @@ final class LatticeSlabExpandPrimitiveTests: XCTestCase {
 
     /// ★★ "MOVE UP WHEN EXPANDING, DOWN WHEN CONTRACTING" — the half that was
     /// entirely missing before, and the reason his curved face never followed.
-    func testItMovesAlongTheNormalAndTheDirectionFollowsTheSign() {
-        let s = square()          // inward = −z, so OUTWARD is +z
-        let grown = FaceOffsetShell.dilated(base: s.base, inward: s.inward,
-                                            indices: s.idx, byMM: 0.5)
-        let shrunk = FaceOffsetShell.dilated(base: s.base, inward: s.inward,
-                                             indices: s.idx, byMM: -0.5)
+    /// ★ RE-PINNED 2026-09-23: the sign shows in plane (out / in) and at the FAR END
+    /// (`build` offsets by depth + expand); the home face itself never moves.
+    func testTheSignShowsInPlaneAndAtTheFarEndNeverAtTheHomeFace() {
+        let s = square()          // inward = −z
+        let grown = FaceOffsetShell.dilated(base: s.base, inward: s.inward, indices: s.idx, byMM: 0.5)
+        let shrunk = FaceOffsetShell.dilated(base: s.base, inward: s.inward, indices: s.idx, byMM: -0.5)
         for k in 0..<4 {
-            XCTAssertEqual(Double(grown[k].z - s.base[k].z), 0.5, accuracy: 1e-5,
-                           "★ expanding moves UP, at the same rate as the growth")
-            XCTAssertEqual(Double(shrunk[k].z - s.base[k].z), -0.5, accuracy: 1e-5,
-                           "★ contracting moves DOWN, at the same rate")
+            XCTAssertEqual(Double(grown[k].z - s.base[k].z), 0, accuracy: 1e-6, "★ the home face stays")
+            XCTAssertEqual(Double(shrunk[k].z - s.base[k].z), 0, accuracy: 1e-6, "★ …for a shrink too")
+            let g = SIMD2<Float>(grown[k].x, grown[k].y), b = SIMD2<Float>(s.base[k].x, s.base[k].y), h = SIMD2<Float>(shrunk[k].x, shrunk[k].y)
+            XCTAssertGreaterThan(simd_length(g), simd_length(b), "out in plane")
+            XCTAssertLessThan(simd_length(h), simd_length(b), "in in plane")
         }
+        // the far end: a flat square patch, depth 3, expand 0.5 ⇒ the offset lies 3.5 below the base
+        let mesh = ViewerMesh(vertices: s.base.flatMap { [$0.x, $0.y, $0.z] }, indices: s.idx.map { Int32($0) },
+                              faceIDs: [Int32](repeating: 7, count: s.idx.count / 3))
+        if let shell = FaceOffsetShell.build(faces: [7], in: mesh, depthMM: 3, expandMM: 0.5) {
+            XCTAssertEqual(Double(shell.reachedDepthMM), 3.5, accuracy: 1e-6, "★ the far end goes deeper by the expand")
+            for k in 0..<shell.base.count { XCTAssertEqual(Double(shell.base[k].z), Double(s.base[0].z), accuracy: 1e-5, "the base is on the face") }
+        } else { XCTFail("no shell") }
     }
 
-    /// ★ AND IT STILL GROWS LATERALLY, at exactly `e` — the rim advances on
-    /// EVERY side by the same distance, which is his "all the edges expand
-    /// outward and inward at the same rate".
     func testTheRimAdvancesByExactlyEOnEverySide() {
         let s = square()
         let out = FaceOffsetShell.dilated(base: s.base, inward: s.inward,

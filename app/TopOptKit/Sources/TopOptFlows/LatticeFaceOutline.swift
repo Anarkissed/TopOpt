@@ -299,7 +299,14 @@ public enum LatticeFaceOutline {
                 let cap = i < cl.count ? cl[i] : 0
                 let flare = (cap > 0 ? Swift.min(s, cap) : s) * tl[i]
                 if flare > 0, !inside, out >= 0, out <= flare { inside = true }
-                if flare < 0, inside, out <= 0, -out <= -flare { inside = false }
+                // ★★★ NO CONVERGING CUT (his 2026-09-23 00:27, the wall "SHAPED the same
+                // shape as the overlap"): where two prisms OVERLAP each used to yield to
+                // its neighbour up to the bisector — but the two seam edges do not meet on
+                // the corner line (a fillet sits between the faces), so each cut started a
+                // couple of millimetres short of the true corner, BOTH prisms yielded along
+                // the diagonal, and a strip belonging to neither ran down every corner as
+                // a solid wall. Overlapping prisms never lose material: the union is the
+                // pocket. Ownership inside an overlap is first-match, as core's is.
             }
         }
         return inside

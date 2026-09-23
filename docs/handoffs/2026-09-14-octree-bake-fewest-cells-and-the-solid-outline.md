@@ -1360,3 +1360,20 @@ Not yet seen by him.
   is unchanged in kind (26 %, 55 % of the base's bottom bin): the 12/13 mm side prisms
   still leave 28 mm between them where face 23's 24 mm does not reach. Core's job
   regenerated with the 24.15 mm facets. Installed 00:31.
+- **2026-09-23 00:25–00:35 — THE CORNER WALL "SHAPED LIKE THE OVERLAP", and the mouth on
+  the face.** (1) The drawn shell (`FaceOffsetShell.dilated`) moved every vertex OUT along
+  its normal by the expand (his 08-18 "up when expanding") — the prism's mouth sat behind
+  the face ("moving the face-prism BACKWARDS"); now expand grows the patch sideways and
+  the far end deeper (`build` offsets by depth + expand), the base never leaves the face;
+  the emitted region does the same (origin fixed, depth + expand). Re-pinned three shell
+  tests. (2) THE WALL: the leg is a U-channel (cross-section probe: web + two flanges,
+  air between); where face 23's prism and a flange prism OVERLAP, the converging seam
+  flare trimmed EACH prism to the bisector — but the two seam edges do not meet on the
+  corner line (a fillet between the faces), so both cuts started short of the corner and
+  a diagonal strip belonged to neither: the wall down the corner, shaped like the
+  overlap. The candidate test had hidden it (its fallback undid the cut) while the
+  shader's region field kept it — the wall existed only in what was drawn. The
+  converging cut is REMOVED (overlapping prisms never lose material; ownership inside
+  an overlap is first-match, as core's); the diverging flare stays. Field map at z=185:
+  the corner block reads pocket throughout; the only solid voxels are the flange tips
+  and the outer fillet, which no selected face covers. 37 tests green. Installed 00:33.

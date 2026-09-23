@@ -79,6 +79,52 @@ final class LatticeStandCoverageProbe: XCTestCase {
             for loop in r.outlineLoops { for q in loop { let w = r.origin + bu * q.x + bv * q.y; lo = simd_min(lo, w); hi = simd_max(hi, w) } }
             print(String(format: "PROBE face %d outline world extents: x %.1f…%.1f  z %.1f…%.1f (part x %.1f…%.1f z %.1f…%.1f)", r.faceID ?? -1, lo.x, hi.x, lo.z, hi.z, Double(mesh.bounds.min.x), Double(mesh.bounds.max.x), Double(mesh.bounds.min.z), Double(mesh.bounds.max.z)))
         }
+        // ★ THE LEG'S CROSS-SECTION, voxel by voxel (his 00:27: "the two face-prisms overlap.
+        // There should be no wall"): rows = y, columns = x, at three heights near the top
+        for zmm in [195.0, 185.0, 170.0] {
+            let k = Int(((Float(zmm) - occ.origin.z) / h.z).rounded())
+            guard k >= 0, k < occ.nz else { continue }
+            var xs: [Int] = []
+            for j in 0..<occ.ny { for i in 0..<occ.nx where occ.values[(k * occ.ny + j) * occ.nx + i] > 0.5 && i < 40 { xs.append(i) } }
+            guard let x0 = xs.min(), let x1 = xs.max() else { continue }
+            print(String(format: "PROBE cross-section at z=%.0f mm (x %.0f…%.0f mm, rows = y from +y side; . air  # part/no prism  a f15  b f2  B both  c f23  C f23+side):", zmm, Double(occ.origin.x) + Double(x0) * Double(h.x), Double(occ.origin.x) + Double(x1) * Double(h.x)))
+            for j in stride(from: occ.ny - 1, through: 0, by: -1) {
+                var row = ""
+                for i in x0...x1 {
+                    guard occ.values[(k * occ.ny + j) * occ.nx + i] > 0.5 else { row += "."; continue }
+                    let p = SIMD3<Double>(occ.origin + SIMD3<Float>(Float(i), Float(j), Float(k)) * h)
+                    var m = 0
+                    for r in regions where LatticeRegionMask.contains(p, region: r) { if r.faceID == 15 { m |= 1 } else if r.faceID == 2 { m |= 2 } else { m |= 4 } }
+                    row += ["#", "a", "b", "B", "c", "C", "C", "C"][m]
+                }
+                if row.contains(where: { $0 != "." }) { print("PROBE   " + row) }
+            }
+        }
+        // ★ THE SHADER'S FIELD (the drawn pocket): the same section by `signedDistanceWholePrism`
+        // (< 0 = pocket, 'o'; part but ≥ 0 = drawn SOLID, 'X') — his corner wall lived here
+        do {
+            let k = Int(((Float(185) - occ.origin.z) / h.z).rounded())
+            var xs: [Int] = []
+            for j in 0..<occ.ny { for i in 0..<occ.nx where occ.values[(k * occ.ny + j) * occ.nx + i] > 0.5 && i < 40 { xs.append(i) } }
+            if let x0 = xs.min(), let x1 = xs.max() {
+                var solidInOverlap = 0, overlap = 0
+                print("PROBE region FIELD at z=185 (o pocket, X part drawn solid):")
+                for j in stride(from: occ.ny - 1, through: 0, by: -1) {
+                    var row = ""
+                    for i in x0...x1 {
+                        guard occ.values[(k * occ.ny + j) * occ.nx + i] > 0.5 else { row += "."; continue }
+                        let p = SIMD3<Double>(occ.origin + SIMD3<Float>(Float(i), Float(j), Float(k)) * h)
+                        let d = LatticeRegionMask.signedDistanceWholePrism(p, regions: regions)
+                        var m = 0
+                        for r in regions where LatticeRegionMask.contains(p, region: r) { if r.faceID == 15 { m |= 1 } else if r.faceID == 2 { m |= 2 } else { m |= 4 } }
+                        if m == 5 || m == 6 { overlap += 1; if d >= 0 { solidInOverlap += 1 } }
+                        row += d < 0 ? "o" : "X"
+                    }
+                    if row.contains(where: { $0 != "." }) { print("PROBE   " + row) }
+                }
+                print("PROBE overlap voxels (f23 ∧ a side) at z=185: \(overlap), drawn solid: \(solidInOverlap)")
+            }
+        }
         // a y-profile through the leg at three heights: the row of voxels along y at the leg's x-centre
         // (the leg is the tall part: take x at the column with the most part voxels in the top third)
         for frac in [0.9, 0.7, 0.45, 0.2] {
