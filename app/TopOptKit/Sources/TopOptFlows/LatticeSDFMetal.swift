@@ -513,60 +513,6 @@ public struct LatticeSDFScene {
     /// whole part mesh and no region reached this path at all, so the struts
     /// filled the entire interior regardless of the declarations. Empty ⇒ no
     /// clipping, which is what the settings page's sample block needs.
-    /// ★ IS THIS UNSELECTED TRIANGLE ONE A PRISM PASSES THROUGH? (his rule R3): a face on
-    /// the far side whose normal is within the cone of the prism's direction, and which the
-    /// prism actually reaches — probed at the triangle's centroid, corners and edge
-    /// midpoints nudged 1.5 mm into the part, and at the prism's own plan (centre and
-    /// outline corners) projected onto the triangle for a triangle larger than the prism.
-    static func prismPassesThrough(_ p0: SIMD3<Double>, _ p1: SIMD3<Double>, _ p2: SIMD3<Double>,
-                                   outward nOut: SIMD3<Double>, regions: [LatticeRegionSpec],
-                                   acrossCos: Double) -> Bool {
-        let probes = [(p0 + p1 + p2) / 3, p0, p1, p2,
-                      0.5 * (p0 + p1), 0.5 * (p1 + p2), 0.5 * (p2 + p0)].map { $0 - nOut * 1.5 }
-        func insideTriangle(_ q: SIMD3<Double>) -> Bool {
-            let v0 = p1 - p0, v1 = p2 - p0, v2 = q - p0
-            let d00 = simd_dot(v0, v0), d01 = simd_dot(v0, v1), d11 = simd_dot(v1, v1)
-            let d20 = simd_dot(v2, v0), d21 = simd_dot(v2, v1)
-            let den = d00 * d11 - d01 * d01
-            guard abs(den) > 1e-18 else { return false }
-            let v = (d11 * d20 - d01 * d21) / den, w = (d00 * d21 - d01 * d20) / den
-            return v >= -1e-6 && w >= -1e-6 && v + w <= 1 + 1e-6
-        }
-        // ★ THE FAR SIDE ONLY (his R3: "the opposite side"): the face's outward normal points
-        // the way the prism travels. A face on the NEAR side with the same slope — the
-        // fillet leaving the mouth's edge, the chamfer under it — is alongside, never open.
-        for r in regions {
-            let nr = LatticeRegionMask.unit(r.normal)
-            let facing = simd_dot(nOut, nr)
-            // ★ THE MOUTH OF A PRISM WITH NO HOME FACE (a manual slab laid on a face): a
-            // triangle lying ON the prism's start plane, facing back out of it, is where the
-            // prism begins — open. A selected face never reaches here; a fillet or chamfer
-            // leaving the mouth's edge curves away from the plane and stays alongside.
-            if facing < -acrossCos {
-                let onPlane = [p0, p1, p2].allSatisfy { abs(simd_dot($0 - r.origin, nr)) < 0.25 }
-                if onPlane, probes.prefix(4).contains(where: { LatticeRegionMask.containsWholePrism($0, region: r) }) { return true }
-                continue
-            }
-            guard facing > acrossCos else { continue }
-            for pr in probes where LatticeRegionMask.containsWholePrism(pr, region: r) { return true }
-            let (ru, rv) = LatticeRegionMask.basis(nr)
-            var plan: [SIMD3<Double>] = [r.origin]
-            if r.outlineLoops.isEmpty {
-                for sx in [-1.0, 1.0] { for sy in [-1.0, 1.0] {
-                    plan.append(r.origin + ru * (sx * r.halfUMM) + rv * (sy * r.halfWMM))
-                } }
-            } else {
-                for loop in r.outlineLoops { for q in loop { plan.append(r.origin + ru * q.x + rv * q.y) } }
-            }
-            for pt in plan {
-                let q = pt - nOut * simd_dot(pt - p0, nOut)      // onto the triangle's plane
-                guard insideTriangle(q) else { continue }
-                if LatticeRegionMask.containsWholePrism(q - nOut * 1.5, region: r) { return true }
-            }
-        }
-        return false
-    }
-
     public init(mesh: ViewerMesh, field: StressField?, latticeID: String,
                 // ★★★ THE RUN'S EMITTED SPANS (2026-09-02). When present and the
                 // algorithm is organic, the organic field is BAKED from them — the
@@ -845,7 +791,6 @@ public struct LatticeSDFScene {
             let acrossCos = cos(30.0 * Double.pi / 180)
             var unselIdx: [UInt32] = []
             unselIdx.reserveCapacity(mesh.indices.count)
-            var acrossIdx: [UInt32] = []                       // the faces a prism passes through: open
             var acrossTris = 0, besideTris = 0
             var t = 0
             while t + 2 < mesh.indices.count {
@@ -869,8 +814,48 @@ public struct LatticeSDFScene {
                         // centroids sat outside every prism, so they were "unreached" while the
                         // pocket ran right under them). Probes: the centroid and the three
                         // corners, each 1.5 mm into the part.
-                        let across = LatticeSDFScene.prismPassesThrough(p0, p1, p2, outward: nOut, regions: includeFaceRegions, acrossCos: acrossCos)
-                        if across { acrossTris += 1; acrossIdx += [mesh.indices[t], mesh.indices[t + 1], mesh.indices[t + 2]] }
+                        var across = false
+                        let probes = [(p0 + p1 + p2) / 3, p0, p1, p2,
+                                      0.5 * (p0 + p1), 0.5 * (p1 + p2), 0.5 * (p2 + p0)].map { $0 - nOut * 1.5 }
+                        // a point of the prism's own plan, projected onto this triangle: for a
+                        // triangle LARGER than the prism (one big face triangle, a manual slab
+                        // on a wide face) none of its own points fall inside the prism, but the
+                        // prism's centre or an outline corner falls inside the triangle
+                        func insideTriangle(_ q: SIMD3<Double>) -> Bool {
+                            let v0 = p1 - p0, v1 = p2 - p0, v2 = q - p0
+                            let d00 = simd_dot(v0, v0), d01 = simd_dot(v0, v1), d11 = simd_dot(v1, v1)
+                            let d20 = simd_dot(v2, v0), d21 = simd_dot(v2, v1)
+                            let den = d00 * d11 - d01 * d01
+                            guard abs(den) > 1e-18 else { return false }
+                            let v = (d11 * d20 - d01 * d21) / den, w = (d00 * d21 - d01 * d20) / den
+                            return v >= -1e-6 && w >= -1e-6 && v + w <= 1 + 1e-6
+                        }
+                        search: for r in includeFaceRegions
+                            where abs(simd_dot(nOut, LatticeRegionMask.unit(r.normal))) > acrossCos {
+                            for pr in probes where LatticeRegionMask.containsWholePrism(pr, region: r) {
+                                across = true
+                                break search
+                            }
+                            let nr = LatticeRegionMask.unit(r.normal)
+                            let (ru, rv) = LatticeRegionMask.basis(nr)
+                            var plan: [SIMD3<Double>] = [r.origin]
+                            if r.outlineLoops.isEmpty {
+                                for sx in [-1.0, 1.0] { for sy in [-1.0, 1.0] {
+                                    plan.append(r.origin + ru * (sx * r.halfUMM) + rv * (sy * r.halfWMM))
+                                } }
+                            } else {
+                                for loop in r.outlineLoops { for q in loop { plan.append(r.origin + ru * q.x + rv * q.y) } }
+                            }
+                            for pt in plan {
+                                let q = pt - nOut * simd_dot(pt - p0, nOut)      // onto the triangle's plane
+                                guard insideTriangle(q) else { continue }
+                                if LatticeRegionMask.containsWholePrism(q - nOut * 1.5, region: r) {
+                                    across = true
+                                    break search
+                                }
+                            }
+                        }
+                        if across { acrossTris += 1 }
                         else { besideTris += 1; unselIdx += [mesh.indices[t], mesh.indices[t + 1], mesh.indices[t + 2]] }
                     }
                 }
@@ -904,26 +889,8 @@ public struct LatticeSDFScene {
             // clamps everything beyond, and a 3-voxel clamp (5.2 mm) put EVERY voxel deeper
             // than that "1.8 mm from the rim" — green on every face (his images 1, 2, 4).
             let bandVoxels = Swift.max(3, Int(((unselSkin + unselRim + bandReach + 2.0) / voxelHere).rounded(.up)))
-            // ★★★ UNDER THE FACE, NOT ROUND ITS EDGES (his images 3/4/6, 2026-09-23 19:44): the
-            // band is measured along each face's normal, only where a voxel projects onto
-            // that face (`faceColumnDistance`) — a point-to-triangle field wrapped every
-            // skin + rim round the face's edges, so the floor's rim climbed the wall beside
-            // it and a chamfer's rim ran into the open face next to it. Voxels in the AIR
-            // get one voxel of margin past the edges, so two faces meeting at a convex edge
-            // leave no crack in the sampled surface.
             let unselSDF: [Float]? = unselIdx.isEmpty ? nil
-                : LatticePreviewOccupancy.faceColumnDistance(positions: mesh.positions, indices: unselIdx, like: solid,
-                                                             bandVoxels: bandVoxels, marginOutsideMM: Float(voxelHere)).values
-            // the OPEN faces' own distance: an air voxel nearer an open face than an unselected
-            // one is in front of the mouth, not under a skin (the margin must not close a
-            // corner of a passed-through face)
-            // ★ measured the same way — IN FRONT of the open face, within its footprint — or a
-            // chamfer beside an open face lost its skin: every air voxel over a 3 mm chamfer
-            // was also within 2 mm of the open face's EDGE, and "nearer the open face" won
-            // (his 2026-09-24 01:35, the chamfer beside the leg's inner face gone)
-            let acrossSDF: [Float]? = acrossIdx.isEmpty ? nil
-                : LatticePreviewOccupancy.faceColumnDistance(positions: mesh.positions, indices: acrossIdx, like: solid,
-                                                             bandVoxels: 2, marginOutsideMM: Float(voxelHere)).values
+                : LatticePreviewOccupancy.signedDistance(positions: mesh.positions, indices: unselIdx, like: solid, bandVoxels: bandVoxels).values
             let unselFar = Double(bandVoxels) * Double(Swift.min(solid.spacing.x, Swift.min(solid.spacing.y, solid.spacing.z)))
             self.unselectedSkinMM = unselSkin
             self.unselectedRimMM = unselRim
@@ -1022,21 +989,10 @@ public struct LatticeSDFScene {
                             // texture at the face must never blend a distance with the 1e3
                             // sentinel, or the first voxel under every face loses its rim
                             skinHere = Swift.min(skinHere, toUnsel - unselSkin)
-                            // ★★★ AND SOLID IN THE AIR JUST OUTSIDE THE FACE (his images 1–5, the rim
-                            // "broken into pieces", the chamfer's skin "cut off"): the field is
-                            // sampled trilinearly, so a solid voxel under the face blended with a
-                            // deeply negative prism voxel just outside it read NEGATIVE at the
-                            // surface — the shell was cut there and the rim began a voxel too
-                            // deep. The band is written on both sides of the surface; a voxel in
-                            // front of an OPEN face stays open.
-                            // (on either side of the surface: a voxel that is nearer, along the
-                            // normal, to an OPEN face's column than to this one belongs to the
-                            // open face — the floor's band no longer climbs the open wall beside
-                            // it, and the corner between an open face and its chamfer splits
-                            // along the bisector)
-                            let inFrontOfOpenFace = acrossSDF.map { abs(Double($0[i])) < abs(toUnsel) } == true
-                            if !inFrontOfOpenFace {
-                                if u[i] < 0, region < 0 {
+                            if u[i] < 0 {
+                                // inside the part, within skin + rim of an unselected face ⇒ solid;
+                                // beyond the clamp the field says nothing and nothing is applied
+                                if region < 0 {
                                     if toUnsel < unselSkin { skinVoxels += 1 } else if toUnsel < unselSkin + unselRim { rimVoxels += 1 }
                                 }
                                 carved = Swift.max(carved, unselSkin + unselRim - toUnsel)

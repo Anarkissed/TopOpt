@@ -196,9 +196,7 @@ public enum LatticeRegionMask {
                                                   regions: [LatticeRegionSpec],
                                                   slabMarginMM: Double,
                                                   stepMM: Double,
-                                                  prisms: [LatticeRegionSpec]? = nil,
                                                   solidAt: (SIMD3<Double>) -> Bool) -> Double {
-        let prisms = prisms ?? regions            // the prisms a probe must not be inside (a seam)
         var best = 1e3
         for region in regions where region.role == .include && region.kind == .face
             && !region.outlineLoops.isEmpty {
@@ -219,7 +217,7 @@ public enum LatticeRegionMask {
             let edgeUV = near.point + near.outward * region.inPlaneOffsetMM
             let probeUV = edgeUV + near.outward * stepMM
             let probe = region.origin + u * probeUV.x + v * probeUV.y + n * s
-            guard solidAt(probe), signedDistanceWholePrism(probe, regions: prisms) > 0 else { continue }
+            guard solidAt(probe), signedDistanceWholePrism(probe, regions: regions) > 0 else { continue }
             best = Swift.min(best, grown)
         }
         return best
