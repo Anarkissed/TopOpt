@@ -1646,3 +1646,52 @@ present, old `runs ALONGSIDE` absent). Every source change above is in that buil
 
 Open questions for him stand as in the 16:40 entry (the 30° cone; the skin = two
 printer beads).
+
+## 2026-09-23 21:10 — HIS 7:44–8:07 PM IMAGES: THREE CAUSES, MEASURED ON THE STAND
+
+New probe `LatticeStandRimSourceProbe` (real mesh, his five regions, organic rim 3.41):
+every face's classification, every solid voxel inside a prism attributed to its source
+(an unselected face, or a region's solid-backed outline), and cross-sections. The
+geometry, for the record: two L-shaped side plates (wall A y −6…4 with face 15 outside;
+wall B y −49…−40 with face 2 outside), a floor z 0…22 and the leg x −18…14, with the
+plates' tall bars reaching x 45 (A) and x 28 (B). Face 15's 12 mm and face 2's 13 mm
+prisms pass through the plates' inner faces (f16; f1/f22/f25) — open, as R3 says. Face
+23's 24.15 mm prism ends inside the leg lower down and passes through the leg's inner
+face (f24, f31) higher up.
+
+**Cause 1 — the skin/rim field wrapped round face EDGES.** It was a point-to-triangle
+distance, so every band was a quarter-cylinder round each face's edges: the floor
+top's rim (f20, y −37…−6) ran up the wall pocket beside it (voxels at y −6…−3, z 17…26 —
+his "extra corner edge" in image 6 and the band "cutting into the wall"), the leg's
+chamfer f21 ran its band into the open inner face, the chamfer f48 at the leg's back
+corner put a stripe into face 23's pocket ("rim in the middle"). Fixed with
+`LatticePreviewOccupancy.faceColumnDistance`: a voxel takes a face's PERPENDICULAR
+distance only where it projects inside that face's triangles (one voxel of margin, in
+the air only, so two faces meeting at a convex edge leave no crack). After: f20's rim
+sits at y −8 only; f21's within y −35…−8; f48's within x 23…25.
+
+**Cause 2 — the region field stayed deeply negative in the air just outside an
+unselected face**, so the trilinear sample at the surface blended a solid voxel under
+the face with a −20 mm prism voxel above it and read NEGATIVE: the shell was cut at
+the surface (the chamfer's skin "cut off", image 1) and the rim began a voxel too deep
+and broke up (images 3–5). The band is now written on both sides of the surface; an
+air voxel nearer an OPEN face than the unselected one stays open (a second distance
+field over the passed-through triangles decides).
+
+**Cause 3 — "passed through" ignored the side.** `abs(dot)` opened faces on the NEAR
+side with the same slope: the fillet leaving face 23's bottom edge (f58) was open.
+Now only a face whose outward normal points the way the prism travels (R3's "opposite
+side") can be passed through; a prism with no home face (a manual slab) still opens
+the face it starts on (triangles on its start plane, facing back). f58: 0 across.
+
+**Not changed, and why (R3):** 13 triangles of wall B's arc (f4, x 28…33, z 90…119,
+normals within 15° of +x) ARE passed through by face 23's upper facet: that plate is
+only ~24 mm thick there (face 23 at x 4.6, the arc at x 28) and the 24.15 mm prism
+exits through it. By his rule that stretch of the arc is open — no rim there. The
+matching stretch on wall A (f29 at x 45) is out of reach and keeps its rim.
+
+Tests: the probe + LatticeGBufferMask, LatticeFinishRenders (re-pinned: the RIM finish
+dresses the region's edges, which now lie under the rim band itself — 6 px; the
+diagrid still dresses the open mouth, 430 px), LatticeSolidFill, LatticeFaceOutline,
+OrganicPreviewSpeedAndRim, LatticeSeamFlare, LatticeShellAndMarchAgree — 37 tests,
+0 failures. Installed 21:0x (see the commit). Full suite not re-run for this entry.
