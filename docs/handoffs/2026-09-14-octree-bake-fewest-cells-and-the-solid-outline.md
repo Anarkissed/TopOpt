@@ -1646,3 +1646,31 @@ present, old `runs ALONGSIDE` absent). Every source change above is in that buil
 
 Open questions for him stand as in the 16:40 entry (the 30° cone; the skin = two
 printer beads).
+
+## 2026-09-24 16:10 — REVERTED TO THE 18:58 BUILD; THE ONE CHAMFER (his 15:41, image 4)
+
+His 15:41 images on the 01:58 build: rim scattered in mid-air, no rim on the curve, the
+chamfer in his red box still without skin. He asked for the 18:58 build (7dd414e5) as the
+foundation and that chamfer fixed. `git revert` of e58a297a and cd621a0a (a844b543);
+Sources identical to 7dd414e5.
+
+The chamfer is mesh face 56 (between face 15 and face 23, the leg's outer corner, full
+height), f57 its mirror on the face-2 side. New probe `LatticeStandChamferProbe` samples
+the region field AT the chamfer surface (what the shell tests, trilinear) at 180 points,
+and one voxel either side. On the base: inside voxel negative 0/180; OUTSIDE voxel
+inside a prism 157/180 and negative 156/180; surface sample negative 39/180. The
+outside voxel is in face 23's EXPANDED prism (+4.15 mm in plane reaches past the chamfer
+into the air) — the overlap he pointed at. The shell blended +4 (skin + rim under the
+chamfer) with −2 (air, inside the prism) and read open.
+
+The one change (`LatticeSDFMetal.swift`, the region loop): the skin + rim band is written
+on the AIR side of an alongside unselected face too, mirrored (solid within skin + rim
+of the face, nothing beyond). Only `carved`; `o` and `skinIn` untouched; the march and
+the capsules never reach the air. A first version used the signed distance unmirrored
+and closed face 15's mouth (83 → 14 of 107 interior points open) — caught by the probe,
+fixed before install. After: every chamfer 0/180 negative at the surface (f56, f57, f48,
+f76 included), face 15's mouth 83/107 as before.
+
+Ten affected suites: 51 tests, 0 failures (finish: rim recoloured 93 px, diagrid 498).
+Installed 15:56:14 (dylib newer than the last edit at 15:54:32; the reverted
+`faceColumnDistance` symbol absent from the installed binary).

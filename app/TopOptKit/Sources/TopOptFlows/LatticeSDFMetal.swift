@@ -989,6 +989,21 @@ public struct LatticeSDFScene {
                             // texture at the face must never blend a distance with the 1e3
                             // sentinel, or the first voxel under every face loses its rim
                             skinHere = Swift.min(skinHere, toUnsel - unselSkin)
+                            // ★★★ AND THE AIR JUST OUTSIDE THE FACE IS NOT THE POCKET (his 2026-09-24
+                            // 15:41, image 4: the chamfer between face 15 and face 23 with no skin).
+                            // Where two prisms overlap, face 23's EXPANDED prism reaches through
+                            // the chamfer into the air outside it, so the air voxel there read −2
+                            // (inside a prism) while the voxel under the chamfer read +4 (skin +
+                            // rim). The shell samples the field AT the surface — the blend of the
+                            // two — and read "open" on 39 of 180 chamfer samples. The band is
+                            // written on the air side too: a prism does not open a face the
+                            // lattice runs alongside. Only the region field; the march and the
+                            // capsules never reach the air (the part clips them first).
+                            if u[i] >= 0 {
+                                // mirrored: solid within skin + rim of the face on the air side,
+                                // nothing beyond (the mouth of an open face stays open)
+                                carved = Swift.max(carved, unselSkin + unselRim - abs(toUnsel))
+                            }
                             if u[i] < 0 {
                                 // inside the part, within skin + rim of an unselected face ⇒ solid;
                                 // beyond the clamp the field says nothing and nothing is applied
