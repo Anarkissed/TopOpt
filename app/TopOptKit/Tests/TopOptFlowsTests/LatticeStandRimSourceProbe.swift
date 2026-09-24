@@ -130,6 +130,63 @@ final class LatticeStandRimSourceProbe: XCTestCase {
             bySrc[src] = e
         } } }
         print("PROBE solid voxels inside prisms by kind: \(kinds)")
+        // ── the column at z≈20 in wall A's pocket: what carves it?
+        var colSrc: [String: Int] = [:]
+        for k in 0..<f.nz { for j in 0..<f.ny { for i in 0..<f.nx {
+            let p = pos(i, j, k)
+            guard p.z > 17, p.z < 23, p.y > -6.5, p.y < 4.5, p.x > 25, p.x < 60 else { continue }
+            guard at(pr, i, j, k) < 0, at(f, i, j, k) >= 0, solidGrid.values[(k * f.ny + j) * f.nx + i] > 0.5 else { continue }
+            let (fid, dFace) = nearestUnselected(p)
+            var bestOut = (ri: -1, d: 1e3)
+            for (ri, r) in inc.enumerated() {
+                let d = LatticeRegionMask.solidBackedOutlineDistance(p, regions: [r], slabMarginMM: 2 * h, stepMM: max(1.0, h), prisms: inc, solidAt: solidAt)
+                if d < bestOut.d { bestOut = (ri, d) }
+            }
+            let key = String(format: "x%.0f y%.0f: nearest f%d %.1f mm · outline r%d %.1f · skinIn %.1f", p.x, p.y, fid, dFace, bestOut.ri, bestOut.d, at(sk, i, j, k))
+            colSrc[key, default: 0] += 1
+        } } }
+        // which triangle's COLUMN reaches two of those voxels (perpendicular + footprint + margin)?
+        for target in [SIMD3<Double>(33, 3, 20), SIMD3<Double>(37, 1, 20), SIMD3<Double>(32, -1, 20)] {
+            // snap to the grid
+            let gi = Int(((target.x - Double(f.origin.x)) / h).rounded()), gj = Int(((target.y - Double(f.origin.y)) / h).rounded()), gk = Int(((target.z - Double(f.origin.z)) / h).rounded())
+            let p = pos(gi, gj, gk)
+            var hits: [String] = []
+            for (fid, a, b, c) in unselTris {
+                let n0 = simd_normalize(simd_cross(b - a, c - a))
+                let hh = simd_dot(p - a, n0)
+                guard abs(hh) < 5 else { continue }
+                let q = p - n0 * hh
+                func out(_ p0: SIMD3<Double>, _ p1: SIMD3<Double>, _ opp: SIMD3<Double>) -> Double {
+                    var o = simd_cross(p1 - p0, n0); if simd_dot(o, opp - p0) > 0 { o = -o }
+                    return simd_dot(q - p0, simd_normalize(o))
+                }
+                let e = [out(a, b, c), out(b, c, a), out(c, a, b)]
+                if e.allSatisfy({ $0 <= h }) {
+                    hits.append(String(format: "f%d perp %.2f edges [%.1f %.1f %.1f] n=(%.2f,%.2f,%.2f) a=(%.1f,%.1f,%.1f) b=(%.1f,%.1f,%.1f) c=(%.1f,%.1f,%.1f) q=(%.1f,%.1f,%.1f)", fid, hh, e[0], e[1], e[2], n0.x, n0.y, n0.z, a.x, a.y, a.z, b.x, b.y, b.z, c.x, c.y, c.z, q.x, q.y, q.z))
+                }
+            }
+            print(String(format: "PROBE column hit at (%.1f,%.1f,%.1f): skinIn %.2f · ", p.x, p.y, p.z, at(sk, gi, gj, gk)) + hits.joined(separator: " | "))
+        }
+        print("PROBE wall-A column near z=20:")
+        for (k, v) in colSrc.sorted(by: { $0.key < $1.key }) { print("  \(k) ×\(v)") }
+        // ── the chamfers: does the field close the AIR just outside them? (the shell samples
+        // the region field at the surface; a negative air voxel beside a solid one cuts it)
+        for fid in [48, 68, 73, 56, 57, 76, 77] {
+            let tris = unselTris.filter { $0.0 == fid }
+            guard !tris.isEmpty else { print("PROBE chamfer f\(fid): no alongside triangles"); continue }
+            var air = 0, airSolid = 0, inside = 0, insideSolid = 0
+            for k in 0..<f.nz { for j in 0..<f.ny { for i in 0..<f.nx {
+                let p = pos(i, j, k)
+                let pf = SIMD3<Float>(p)
+                var near = false
+                for (_, a, b, c) in tris where LatticePreviewOccupancy.pointTriangleDistSq(pf, SIMD3<Float>(a), SIMD3<Float>(b), SIMD3<Float>(c)) < 2.0 * 2.0 { near = true; break }
+                guard near else { continue }
+                let isSolid = solidGrid.values[(k * f.ny + j) * f.nx + i] > 0.5
+                let carved = at(f, i, j, k) >= 0
+                if isSolid { inside += 1; if carved { insideSolid += 1 } } else { air += 1; if carved { airSolid += 1 } }
+            } } }
+            print("PROBE chamfer f\(fid): within 2 mm — part voxels \(inside) (solid in field \(insideSolid)), air voxels \(air) (solid in field \(airSolid))")
+        }
         print("PROBE by source (count · bbox):")
         for (k, v) in bySrc.sorted(by: { $0.value.n > $1.value.n }) {
             print(String(format: "  %-40@ %6d  x[%.0f,%.0f] y[%.0f,%.0f] z[%.0f,%.0f]", k as NSString, v.n, v.lo.x, v.hi.x, v.lo.y, v.hi.y, v.lo.z, v.hi.z))

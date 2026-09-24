@@ -416,9 +416,10 @@ public enum LatticePreviewOccupancy {
     /// floor's rim ran 4.6 mm up the wall beside it (his "extra corner edge"), a chamfer's
     /// rim ran into the open face next to it (the "rim in the middle of the wall"). Here a
     /// voxel takes a triangle's PERPENDICULAR distance only when its projection lies inside
-    /// that triangle; voxels OUTSIDE the part (`occ` ≤ 0.5) get a margin of
-    /// `marginOutsideMM` past the triangle's edges, so the columns of two faces meeting at
-    /// a convex edge overlap in the air and the sampled surface has no crack there. Signed
+    /// that triangle, with a margin of `marginOutsideMM` past the triangle's edges (on both
+    /// sides of the surface), so the columns of two faces meeting at a convex edge overlap
+    /// and the sampled surface has no crack there, and a chamfer narrower than two voxels
+    /// still has a column. Signed
     /// like `signedDistance` (negative inside the part), clamped at `bandVoxels` voxels.
     public static func faceColumnDistance(positions: [Float], indices: [UInt32],
                                           like occ: LatticeVoxelGrid, bandVoxels: Int,
@@ -479,12 +480,21 @@ public enum LatticePreviewOccupancy {
                                 let d = abs(h)
                                 if d >= buf[rowBase + i] { continue }
                                 let q = p - n * h                           // the projection
-                                let inside = occ.values[rowBase + i] > 0.5
-                                let m: Float = inside ? 0 : marginOutsideMM
-                                // outside every edge by at most `m`
-                                if simd_dot(q - a, oAB) > m { continue }
-                                if simd_dot(q - b, oBC) > m { continue }
-                                if simd_dot(q - c, oCA) > m { continue }
+                                // ★ the margin on BOTH sides (2026-09-24 01:35): with none inside
+                                // the part, the voxels under a 3 mm chamfer projected outside its
+                                // strip and its skin came out jagged — the shell read "open"
+                                // there. A concave corner with an OPEN face is settled by the
+                                // caller (the open face's own column wins where it is nearer).
+                                // inside the triangle, or within `m` of it IN THE PLANE. (Not three
+                                // half-planes pushed out by `m`: at an acute corner of a long thin
+                                // fillet triangle those leave a wedge past the corner ~m/tan(angle)
+                                // long — 30 mm on his stand — and the fillet's band ran across the
+                                // wall pocket beside it.)
+                                let inside = simd_dot(q - a, oAB) <= 0 && simd_dot(q - b, oBC) <= 0 && simd_dot(q - c, oCA) <= 0
+                                if !inside {
+                                    guard marginOutsideMM > 0,
+                                          Self.pointTriangleDistSq(q, a, b, c) <= marginOutsideMM * marginOutsideMM else { continue }
+                                }
                                 buf[rowBase + i] = d
                             }
                         }

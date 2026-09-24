@@ -1695,3 +1695,31 @@ dresses the region's edges, which now lie under the rim band itself — 6 px; th
 diagrid still dresses the open mouth, 430 px), LatticeSolidFill, LatticeFaceOutline,
 OrganicPreviewSpeedAndRim, LatticeSeamFlare, LatticeShellAndMarchAgree — 37 tests,
 0 failures. Installed 21:0x (see the commit). Full suite not re-run for this entry.
+
+## 2026-09-24 02:00 — THE ONE CHAMFER (his 01:35): measured, two causes, installed 01:58:04
+
+The removed chamfer is f48 — the 45° face between wall B's tall-bar edge (f31, x 28) and
+face 2's side. Face 23's prism passes through f31 there (the two prisms overlap in wall
+B's bar, as he said), so f31 is open; f48 is alongside and must keep its skin. The probe
+counts, within 2 mm of the chamfer, how many part and air voxels the region field holds
+solid. Before: part 94/144, air 105/140 — against the intact chamfer on the other wall
+(f68) at 107/107 and 147/147.
+
+1. **The open-face guard used point-to-triangle distance.** Every air voxel over a 3 mm
+   chamfer is also within 2 mm of the open face's EDGE, so "nearer the open face" won
+   and the air over the chamfer stayed negative — the shell sampled "open" along it.
+   The guard now uses the open face's own perpendicular column (`faceColumnDistance`
+   over the passed-through triangles): an air voxel belongs to the open face only when
+   it is in front of it.
+2. **No footprint margin inside the part**, so the voxels under a 3 mm strip projected
+   outside it and its skin was jagged. The margin is now one voxel on both sides;
+   concave corners with an open face are settled by the same guard (the open face's
+   column wins where it is nearer).
+   Then a third: the margin was three half-planes pushed out by one voxel, which at the
+   acute corner of a long thin FILLET triangle leaves a wedge ~m/tan(angle) past the
+   corner — 30 mm on his stand: the leg/floor fillet's band ran across wall A's pocket
+   at floor level. It is now a true in-plane distance to the triangle.
+
+After: f48 part 139/144 (the five are under open f31), air 106/140 (the rest in front of
+f31); the z = 20 cross-section is clean. 50 tests in the nine affected suites, 0
+failures. Installed 01:58:04 (dylib newer than the last source edit at 01:53:40).

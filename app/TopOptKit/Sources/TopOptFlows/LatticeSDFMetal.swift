@@ -917,8 +917,13 @@ public struct LatticeSDFScene {
             // the OPEN faces' own distance: an air voxel nearer an open face than an unselected
             // one is in front of the mouth, not under a skin (the margin must not close a
             // corner of a passed-through face)
+            // ★ measured the same way — IN FRONT of the open face, within its footprint — or a
+            // chamfer beside an open face lost its skin: every air voxel over a 3 mm chamfer
+            // was also within 2 mm of the open face's EDGE, and "nearer the open face" won
+            // (his 2026-09-24 01:35, the chamfer beside the leg's inner face gone)
             let acrossSDF: [Float]? = acrossIdx.isEmpty ? nil
-                : LatticePreviewOccupancy.signedDistance(positions: mesh.positions, indices: acrossIdx, like: solid, bandVoxels: 2).values
+                : LatticePreviewOccupancy.faceColumnDistance(positions: mesh.positions, indices: acrossIdx, like: solid,
+                                                             bandVoxels: 2, marginOutsideMM: Float(voxelHere)).values
             let unselFar = Double(bandVoxels) * Double(Swift.min(solid.spacing.x, Swift.min(solid.spacing.y, solid.spacing.z)))
             self.unselectedSkinMM = unselSkin
             self.unselectedRimMM = unselRim
@@ -1024,7 +1029,12 @@ public struct LatticeSDFScene {
                             // surface — the shell was cut there and the rim began a voxel too
                             // deep. The band is written on both sides of the surface; a voxel in
                             // front of an OPEN face stays open.
-                            let inFrontOfOpenFace = u[i] >= 0 && acrossSDF.map { abs(Double($0[i])) < -toUnsel } == true
+                            // (on either side of the surface: a voxel that is nearer, along the
+                            // normal, to an OPEN face's column than to this one belongs to the
+                            // open face — the floor's band no longer climbs the open wall beside
+                            // it, and the corner between an open face and its chamfer splits
+                            // along the bisector)
+                            let inFrontOfOpenFace = acrossSDF.map { abs(Double($0[i])) < abs(toUnsel) } == true
                             if !inFrontOfOpenFace {
                                 if u[i] < 0, region < 0 {
                                     if toUnsel < unselSkin { skinVoxels += 1 } else if toUnsel < unselSkin + unselRim { rimVoxels += 1 }
