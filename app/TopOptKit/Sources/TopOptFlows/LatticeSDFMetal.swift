@@ -885,6 +885,8 @@ public struct LatticeSDFScene {
             let slabMargin = 2.0 * voxelHere
             let outlineReach = unselRim + bandReach + 2.0 * voxelHere
             var outlineRimVoxels = 0
+            // (probe switch: `LATTICE_NO_AIR_BAND=1` leaves the air side of an unselected face alone)
+            let airSideBand = ProcessInfo.processInfo.environment["LATTICE_NO_AIR_BAND"] != "1"
             // ★ the distance field must reach past skin + rim + the grade band: its far value
             // clamps everything beyond, and a 3-voxel clamp (5.2 mm) put EVERY voxel deeper
             // than that "1.8 mm from the rim" — green on every face (his images 1, 2, 4).
@@ -999,7 +1001,7 @@ public struct LatticeSDFScene {
                             // written on the air side too: a prism does not open a face the
                             // lattice runs alongside. Only the region field; the march and the
                             // capsules never reach the air (the part clips them first).
-                            if u[i] >= 0 {
+                            if u[i] >= 0, airSideBand {
                                 // mirrored: solid within skin + rim of the face on the air side,
                                 // nothing beyond (the mouth of an open face stays open)
                                 carved = Swift.max(carved, unselSkin + unselRim - abs(toUnsel))

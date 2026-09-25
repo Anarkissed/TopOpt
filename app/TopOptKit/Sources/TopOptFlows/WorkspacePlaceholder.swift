@@ -3853,14 +3853,23 @@ public struct WorkspacePlaceholder: View {
     }
 
     private func startStressSolveIfNeeded() {
-        guard project.lattice.enabled, project.lattice.needsStressSolve,
-              let ctx = model.makeLatticeSimContext()
-        else { return }
+        // ★ SAID OUT LOUD (2026-09-25): after a relaunch his organic preview sat on the
+        // octet stand-in for minutes — no solve had started and nothing said why.
+        guard project.lattice.enabled, project.lattice.needsStressSolve else {
+            NSLog("DIAG solve: not needed (enabled %d, needsStressSolve %d)", project.lattice.enabled ? 1 : 0, project.lattice.needsStressSolve ? 1 : 0)
+            return
+        }
+        guard let ctx = model.makeLatticeSimContext() else {
+            NSLog("DIAG solve: NOT STARTED — no sim context (loads/anchors not ready)")
+            return
+        }
         // A field we already have, for these exact inputs, is the answer.
         if latticeSim.field != nil, !latticeSim.isStale(against: ctx.fingerprint) {
+            NSLog("DIAG solve: field already current")
             return
         }
         simBannerDismissed = false          // a NEW solve gets a fresh banner
+        NSLog("DIAG solve: started (phase was %@)", String(describing: latticeSim.phase))
         latticeSim.run(ctx)
     }
 
@@ -4866,6 +4875,13 @@ public struct WorkspacePlaceholder: View {
         // (2026-09-23): it was recorded at 2 of the 16 call sites, so the wizard's
         // Exit — no change — compared against a stale record and force-baked.
         latticeInputsLastBaked = project.lattice.previewBakeInputs
+        // ★ AN ORGANIC BAKE WITH NO TENSOR IS A STAND-IN, AND A STAND-IN ASKS FOR THE
+        // SOLVE (2026-09-25, his 17:34 screenshot: octet drawn under "Organic" after a
+        // relaunch, until he saved the settings). Idempotent: nothing happens when the
+        // field is current or a solve is running; the field's key rebakes when it lands.
+        if project.lattice.enabled, project.lattice.isOrganic, latticeStressField == nil {
+            startStressSolveIfNeeded()
+        }
         // ★★★ A NEW SETTING NEVER WAITS (his 2026-09-21 22:40: "if I save and exit from
         // the settings with an updated value, the previous action is cancelled and the
         // new bake starts IMMEDIATELY"). The one-at-a-time guard that stood here queued

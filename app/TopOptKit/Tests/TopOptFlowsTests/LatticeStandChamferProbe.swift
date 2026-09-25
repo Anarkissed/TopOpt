@@ -85,5 +85,64 @@ final class LatticeStandChamferProbe: XCTestCase {
             mouthTot += 1; if sample(f, p) < 0 { mouthOpen += 1 }
         } }
         print("PROBE face 15 mouth (interior points): open \(mouthOpen) of \(mouthTot)")
+        // ── RIM CENSUS: every voxel the lattice layer's rim gate would draw
+        // (prism < 0, region ≥ 0, 0 ≤ skinIn < 900), part vs AIR, and where
+        guard let sk = scene.skinInSDF else { return }
+        var rimPart = 0, rimAir = 0, solidPartNoRim = 0
+        var airBox = (lo: SIMD3<Double>(repeating: 1e9), hi: SIMD3<Double>(repeating: -1e9))
+        var byX: [Int: (part: Int, air: Int)] = [:]
+        var byZ: [Int: (part: Int, air: Int)] = [:]
+        for k in 0..<f.nz { for j in 0..<f.ny { for i in 0..<f.nx {
+            let e = (k * f.ny + j) * f.nx + i
+            guard pr.values[e] < 0, f.values[e] >= 0 else { continue }
+            let skv = sk.values[e]
+            let isSolid = solidGrid.values[e] > 0.5
+            guard skv >= 0, skv < 900 else { if isSolid { solidPartNoRim += 1 }; continue }
+            let p = SIMD3<Double>(Double(f.origin.x) + Double(i) * h, Double(f.origin.y) + Double(j) * h, Double(f.origin.z) + Double(k) * h)
+            let xb = Int((p.x / 20).rounded(.down)) * 20, zb = Int((p.z / 20).rounded(.down)) * 20
+            var bx = byX[xb] ?? (0, 0), bz = byZ[zb] ?? (0, 0)
+            if isSolid { rimPart += 1; bx.part += 1; bz.part += 1 } else { rimAir += 1; bx.air += 1; bz.air += 1; airBox.lo = simd_min(airBox.lo, p); airBox.hi = simd_max(airBox.hi, p) }
+            byX[xb] = bx; byZ[zb] = bz
+        } } }
+        print("PROBE rim gate: part \(rimPart) · AIR \(rimAir) · solid-in-prism with no rim source \(solidPartNoRim)")
+        // ── the same gate as the GPU sees it: TRILINEAR samples at half-voxel offsets, in AIR only
+        var gateAir = 0
+        var gateBox = (lo: SIMD3<Double>(repeating: 1e9), hi: SIMD3<Double>(repeating: -1e9))
+        var gateByZ: [Int: Int] = [:]
+        var worstSkin = 1e9
+        for k in 0..<(f.nz - 1) { for j in 0..<(f.ny - 1) { for i in 0..<(f.nx - 1) {
+            let e = (k * f.ny + j) * f.nx + i
+            // skip cells whose 8 corners are all solid (part interior) — we want air
+            var anyAir = false
+            for dk in 0...1 { for dj in 0...1 { for di in 0...1 {
+                if solidGrid.values[((k + dk) * f.ny + (j + dj)) * f.nx + (i + di)] <= 0.5 { anyAir = true }
+            } } }
+            guard anyAir else { continue }
+            let p = SIMD3<Double>(Double(f.origin.x) + (Double(i) + 0.5) * h, Double(f.origin.y) + (Double(j) + 0.5) * h, Double(f.origin.z) + (Double(k) + 0.5) * h)
+            guard !solidAt(p) else { continue }                       // the cell centre is air
+            let dP = sample(pr, p), dR = sample(f, p), dS = sample(sk, p)
+            _ = e
+            if dP < 0, dR >= 0, dS >= 0, dS < 900 {
+                gateAir += 1
+                gateBox.lo = simd_min(gateBox.lo, p); gateBox.hi = simd_max(gateBox.hi, p)
+                gateByZ[Int((p.z / 20).rounded(.down)) * 20, default: 0] += 1
+                worstSkin = Swift.min(worstSkin, dS)
+            }
+        } } }
+        print(String(format: "PROBE GPU-style rim gate in AIR (cell centres): %d · bbox x[%.0f,%.0f] y[%.0f,%.0f] z[%.0f,%.0f] · min skinIn %.1f", gateAir, gateBox.lo.x, gateBox.hi.x, gateBox.lo.y, gateBox.hi.y, gateBox.lo.z, gateBox.hi.z, worstSkin))
+        print("PROBE GPU-style gate in air by z: " + gateByZ.keys.sorted().map { "\($0):\(gateByZ[$0]!)" }.joined(separator: " "))
+        print(String(format: "PROBE rim in air bbox x[%.0f,%.0f] y[%.0f,%.0f] z[%.0f,%.0f]", airBox.lo.x, airBox.hi.x, airBox.lo.y, airBox.hi.y, airBox.lo.z, airBox.hi.z))
+        print("PROBE rim by x (20 mm bins, part/air): " + byX.keys.sorted().map { "\($0):\(byX[$0]!.part)/\(byX[$0]!.air)" }.joined(separator: " "))
+        print("PROBE rim by z (20 mm bins, part/air): " + byZ.keys.sorted().map { "\($0):\(byZ[$0]!.part)/\(byZ[$0]!.air)" }.joined(separator: " "))
+        // the plate ends: x 170–200, all rim voxels in the part per 2 mm of x
+        var endX: [Int: Int] = [:]
+        for k in 0..<f.nz { for j in 0..<f.ny { for i in 0..<f.nx {
+            let e = (k * f.ny + j) * f.nx + i
+            guard pr.values[e] < 0, f.values[e] >= 0, sk.values[e] >= 0, sk.values[e] < 900, solidGrid.values[e] > 0.5 else { continue }
+            let x = Double(f.origin.x) + Double(i) * h
+            guard x > 160 else { continue }
+            endX[Int(x.rounded(.down))] = (endX[Int(x.rounded(.down))] ?? 0) + 1
+        } } }
+        print("PROBE plate ends, rim voxels per x: " + endX.keys.sorted().map { "\($0):\(endX[$0]!)" }.joined(separator: " "))
     }
 }
