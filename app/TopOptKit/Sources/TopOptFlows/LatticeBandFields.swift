@@ -746,7 +746,7 @@ public enum LatticeBandFields {
                     if br <= m2, matF[e] <= m2, ks >= -m2 {
                         q = Float(pocketQ(p, slab: false))
                     }
-                    tb[4 * e] = Float16(br); tb[4 * e + 1] = Float16(Swift.max(-100, Swift.min(100, ks)))
+                    tb[4 * e] = Float16(br); tb[4 * e + 1] = Float16(Swift.max(-30, Swift.min(30, ks)))
                     tb[4 * e + 2] = Float16(matF[e]); tb[4 * e + 3] = Float16(q)
                 } }
             }
