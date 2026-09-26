@@ -1720,3 +1720,26 @@ surface sample is solid on 184/184 at both 64³ and 128³, and the z=150 slice s
 then rim at that corner. Needs his eyes on the new build.
 
 Probe switch: `LATTICE_WRAPPED_BAND=1` restores the Euclidean band inside the part.
+
+## 2026-09-26 02:18 — HE SAID WORSE (01:46–01:48), AND HE WAS RIGHT (installed 02:18:29)
+
+On 5a98194d: rim over face 2's open mouth, the leg chamfer "half gone", its vertical
+rim broken, indents inside. My 01:45 entry was judged on a hand-built probe whose renders
+lay the part flat and fell back to the octet — no evidence of what he sees.
+
+**The instrument now:** `LatticeHisProjectRenderProbe` restores HIS project (copy
+`project.json` + `model.step` from the simulator container to `$HIS_PROJECT_DIR`) through
+`ProjectModel(restoring:)`, takes regions from `latticeJobRegions()` and depths from
+`LatticeWallDepthSteps.forWalls`, traces core's synthetic field (his 15 and 23 are
+synthetic; face 2 carries a real FEA load this probe does not have, so face 2's curves
+differ, not its rim), settles gravity −Z, draws body-on and lattice-only. 419–457k
+capsules vs his 423,886. Positive control: the old shader reproduces his image 8.
+PNGs are BGRA — swap channels to view.
+
+**Mouth rim:** at a selected face the prism cap, the region zero and the part surface
+coincide, so the max() rim distance was ≈ 0 over the whole mouth. Rim now needs region ≥
+half a voxel. Face-on rim px 46.4 % → 22.4 %.
+**Chamfer / vertical rim:** clipping the band at SELECTED neighbours cut the chamfer's
+band to a 1.6-voxel sliver. Clip only at PASSED-THROUGH neighbours (the floor ↔ walls'
+inner faces). The leg's corner rim is one continuous band again (probe frame az3).
+Floor ledge 0 (control 349); chamfers 0/180 open; face 15 mouth 83/107; air rim 0.00 mm.
