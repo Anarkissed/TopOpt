@@ -86,7 +86,8 @@ struct ShellClipUniform {
     /// xyz = the region field's voxel counts, w = how many declarations are in buffer 5.
     var dims = SIMD4<Float>(1, 1, 1, 0)
     /// x = cos(the largest angle a surface may differ from the declared face and
-    /// still be opened). y = mode (2 ⇒ cell-activation). z, w unused.
+    /// still be opened). y = mode (2 ⇒ cell-activation). z = organic (both caps).
+    /// w = THE BAND RULE's margin in mm (0.5 voxel) when the scene carries a band, else 0.
     var gate = SIMD4<Float>(1, 0, 0, 0)
     /// ★★★ THE EYE, IN MODEL SPACE — so the shell can open the cap you are LOOKING
     /// AT and leave the other one standing. See `shell_is_latticed`. w unused.
@@ -220,7 +221,8 @@ struct ShellClip {
     float4 gate;        // x = cos(max angle from the declared face)
                         // y: 0 = declared-face rule (the STAGE)
                         //    2 = cell-activation rule (the sample BLOCK) — see below
-                        // zw unused
+                        // z > 0.5 = organic: both caps
+                        // w > 0 = THE BAND RULE's margin (mm) — see below; 0 = off
     // ★ xyz = the EYE in model space — so the shell can open the cap being LOOKED
     // AT and leave the other one standing. See the FACE branch below. w unused.
     float4 eye;
@@ -300,6 +302,20 @@ inline bool shell_is_latticed(float3 mpos, float3 mnormal, constant ShellClip& c
     if (n <= 0) { return false; }
     float3 sn = normalize(mnormal);
     constexpr sampler s(coord::normalized, filter::linear, address::clamp_to_edge);
+    // ★★★ THE BAND RULE (organic band mode, 2026-09-26 redesign; `gate.w` > 0 is the shell's
+    // margin m_out, 0.5 voxel). The region field then carries the FACE CLASS itself — `.r`
+    // is the carved pocket (≤ 0 where lattice may be), `.a` is B_r (≥ 0 toward the lattice,
+    // < 0 inside skin ∪ rim) — so no normal gate is needed: a fragment opens iff, one nudge
+    // INWARD along its own normal, it is carved AND at least m_out past the rim's inner
+    // face. The shell therefore stays closed half a voxel beyond the rim, so the rim is
+    // never seen from outside with the body on.
+    if (c.gate.w > 0.0) {
+        float3 pb = mpos - sn * c.spacing.w;
+        float3 gb = (pb - c.origin.xyz) / max(c.spacing.xyz, float3(1e-6));
+        if (any(gb < float3(-0.5)) || any(gb > c.dims.xyz - float3(0.5))) { return false; }
+        float4 rv = regionTex.sample(s, (gb + 0.5) / max(c.dims.xyz, float3(1.0)));
+        return max(rv.r, c.gate.w - rv.a) <= 0.0;
+    }
     for (int i = 0; i < n; i++) {
         float4 d = decls[SHELL_DECL_STRIDE * i];
         if (d.w > 0.5) {
@@ -4219,8 +4235,20 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         // ★ ORGANIC opens both caps of a declared wall (his 2026-09-18 ruling, organic
         // ONLY); the octet keeps the eye-only rule of 2026-08-25. See `shellClipMSL`.
         u.gate.z = layer.scene?.algorithm == "organic" ? 1 : 0
+        // ★★★ THE BAND RULE (2026-09-26): with a band the region field carries the face class
+        // (`.r` carved, `.a` = B_r), and the shell opens from the field alone, staying closed
+        // m_out = 0.5 voxel past the rim's inner face. `LATTICE_BAND_SHELL_MARGIN=<mm>`
+        // overrides m_out (a control; 0 is kept a hair above zero so the rule stays armed).
+        if layer.scene?.bandFine != nil {
+            u.gate.w = max(Self.bandShellMarginOverrideMM ?? 0.5 * voxel, 1e-6)
+        }
         return (u, decls)
     }
+    /// `LATTICE_BAND_SHELL_MARGIN=<mm>`, read once per process; nil ⇒ 0.5 voxel.
+    static let bandShellMarginOverrideMM: Float? = {
+        guard let s = ProcessInfo.processInfo.environment["LATTICE_BAND_SHELL_MARGIN"], let v = Float(s) else { return nil }
+        return v
+    }()
 
     /// ★ THE SHELL'S CLIP, REACHABLE FROM A TEST. The rule has three modes now
     /// (disabled, cell-activation, declared-face) and which one is armed is not
@@ -4234,7 +4262,7 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         let (u, d) = shellClipAndDecls
         let layer = latticeLayer
         let scene = layer?.scene
-        let mode = u.grid.w < 0.5 ? "OFF" : (u.gate.y > 1.5 ? "CELL" : "DECL(\(d.count / 3))\(u.gate.z > 0.5 ? "+bothCaps" : "")")
+        let mode = u.grid.w < 0.5 ? "OFF" : (u.gate.y > 1.5 ? "CELL" : "DECL(\(d.count / 3))\(u.gate.z > 0.5 ? "+bothCaps" : "")\(u.gate.w > 0 ? String(format: "+band(%.2f)", u.gate.w) : "")")
         let regs = (scene?.regions ?? []).enumerated().map { i, r in
             String(format: "r%d:%@/%@ n=(%.2f,%.2f,%.2f) depth=%.2f inPlane=%.2f", i,
                    r.role == .include ? "inc" : "exc", r.kind == .face ? "face" : "bolt",
@@ -4244,7 +4272,35 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         guard key != Self.lastShellDiag else { return }
         Self.lastShellDiag = key
         var census = "no census"
-        if let scene, let mesh, let rsdf = scene.regionSDF, u.grid.w >= 0.5, u.gate.y < 1.5 {
+        if let scene, let mesh, let rsdf = scene.regionSDF, u.grid.w >= 0.5, u.gate.y < 1.5, u.gate.w > 0,
+           let br = scene.bandRimCoarse, br.values.count == rsdf.values.count {
+            // ★★★ THE BAND RULE, MIRRORED (the shader's `gate.w` branch): one nudge inward
+            // along the triangle's own normal, trilinear reads of `.r` (carved) and `.a` (B_r),
+            // open iff max(carved, m_out − B_r) ≤ 0. Per CAD face (per axis without ids).
+            let nudge = u.spacing.w, margin = u.gate.w
+            var openA: [String: Double] = [:], area: [String: Double] = [:]
+            let P = mesh.positions, I = mesh.indices, F = mesh.faceIDs
+            var t = 0
+            while t + 2 < I.count {
+                let tri = t / 3
+                let i0 = Int(I[t]), i1 = Int(I[t+1]), i2 = Int(I[t+2]); t += 3
+                let a = SIMD3<Float>(P[3*i0], P[3*i0+1], P[3*i0+2]), b = SIMD3<Float>(P[3*i1], P[3*i1+1], P[3*i1+2]), c = SIMD3<Float>(P[3*i2], P[3*i2+1], P[3*i2+2])
+                let n = simd_cross(b - a, c - a); let A = Double(simd_length(n)) * 0.5
+                guard A > 1e-9 else { continue }
+                let sn = simd_normalize(n)
+                let k: String
+                if tri < F.count { k = "f\(F[tri])" } else {
+                    let ax = abs(sn.x) >= abs(sn.y) && abs(sn.x) >= abs(sn.z) ? 0 : (abs(sn.y) >= abs(sn.z) ? 1 : 2)
+                    k = (sn[ax] >= 0 ? "+" : "-") + ["x", "y", "z"][ax]
+                }
+                area[k, default: 0] += A
+                let q = (a + b + c) / 3 - sn * nudge
+                let g = (q - rsdf.origin) / rsdf.spacing
+                if g.x < -0.5 || g.y < -0.5 || g.z < -0.5 || g.x > Float(rsdf.nx) - 0.5 || g.y > Float(rsdf.ny) - 0.5 || g.z > Float(rsdf.nz) - 0.5 { continue }
+                if max(Self.bandTrilinear(rsdf, g), margin - Self.bandTrilinear(br, g)) <= 0 { openA[k, default: 0] += A }
+            }
+            census = "band " + area.keys.sorted().map { String(format: "%@=%.0f%%", $0, 100 * (openA[$0] ?? 0) / area[$0]!) }.joined(separator: " ")
+        } else if let scene, let mesh, let rsdf = scene.regionSDF, u.grid.w >= 0.5, u.gate.y < 1.5 {
             let voxel = max(rsdf.spacing.x, max(rsdf.spacing.y, rsdf.spacing.z))
             let gate = Float(cos(Self.shellFaceAgreementDegrees * Double.pi / 180))
             var decls: [SIMD3<Float>] = []
@@ -4278,6 +4334,23 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
             census = area.keys.sorted().map { String(format: "%@=%.0f%%", $0, 100 * (openA[$0] ?? 0) / area[$0]!) }.joined(separator: " ")
         }
         NSLog("DIAG shellClip mode=\(mode) inFrame=\(latticeInFrame) algo=\(scene?.algorithm ?? "-") capsules=\(scene?.organicCapsules.count ?? -1) capVerts=\(layer?.regionCap?.vertexCount ?? 0) capPipeline=\(regionCapPipeline != nil) capsulePipeline=\(organicCapsulePipelineDidBuild) capsulesReplaceField=\(layer?.capsulesReplaceField ?? false) bodyAlpha=\(bodyAlpha) initError=\(Self.lastInitError ?? "nil") regionTex=\(layer?.regionTexture != nil) skinMM=\(scene?.skinMM ?? -1) dims=\(u.dims) regions=[\(regs)] open=[\(census)]")
+    }
+
+    /// The GPU's linear, clamp-to-edge read of a voxel grid at grid coordinate `g` (texel
+    /// centre i ↔ g = i) — the census's twin of `regionTex.sample` in the band rule.
+    static func bandTrilinear(_ grid: LatticeVoxelGrid, _ g: SIMD3<Float>) -> Float {
+        func cl(_ v: Int, _ n: Int) -> Int { max(0, min(n - 1, v)) }
+        let f = SIMD3<Float>(g.x.rounded(.down), g.y.rounded(.down), g.z.rounded(.down))
+        let t = g - f
+        let x0 = cl(Int(f.x), grid.nx), x1 = cl(Int(f.x) + 1, grid.nx)
+        let y0 = cl(Int(f.y), grid.ny), y1 = cl(Int(f.y) + 1, grid.ny)
+        let z0 = cl(Int(f.z), grid.nz), z1 = cl(Int(f.z) + 1, grid.nz)
+        func at(_ x: Int, _ y: Int, _ z: Int) -> Float { grid.values[(z * grid.ny + y) * grid.nx + x] }
+        let c00 = at(x0, y0, z0) * (1 - t.x) + at(x1, y0, z0) * t.x
+        let c10 = at(x0, y1, z0) * (1 - t.x) + at(x1, y1, z0) * t.x
+        let c01 = at(x0, y0, z1) * (1 - t.x) + at(x1, y0, z1) * t.x
+        let c11 = at(x0, y1, z1) * (1 - t.x) + at(x1, y1, z1) * t.x
+        return (c00 * (1 - t.y) + c10 * t.y) * (1 - t.z) + (c01 * (1 - t.y) + c11 * t.y) * t.z
     }
 
     var shellClipForTests: (grid: SIMD4<Float>, spacing: SIMD4<Float>,
