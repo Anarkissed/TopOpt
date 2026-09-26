@@ -1743,3 +1743,43 @@ half a voxel. Face-on rim px 46.4 % → 22.4 %.
 band to a 1.6-voxel sliver. Clip only at PASSED-THROUGH neighbours (the floor ↔ walls'
 inner faces). The leg's corner rim is one continuous band again (probe frame az3).
 Floor ledge 0 (control 349); chamfers 0/180 open; face 15 mouth 83/107; air rim 0.00 mm.
+
+## 2026-09-26 18:49 — ATTEMPT 4: THE BAND REBUILT (installed 18:49:01; his verdict pending)
+
+His rule after two failed patches: "if you have tried 2 or 3 times and it isn't resolved,
+you need to recode the entire section" — then "do two more attempts". This is attempt 4 and
+it is a rebuild of the skin/rim/grade section, not a patch. Designed by a workflow (3 readers,
+3 designers, 2 judges, 1 synthesis; plan in the scratchpad `wf_plan.md`).
+
+**Root causes found** (his images 10–14): the grid's origin sits ON face 2 (clamp-to-edge smeared
+rim texels outward = tumours, f57 side); the skin field took its SIGN from occupancy and its
+magnitude from unselected triangles only, jumping across face 15's open mouth (groove, f56
+side); rim hits were shaded with the phantom octet's `lsdf_normal` (rungs); f21 is an R30 fillet
+split open/alongside at a triangle edge, plus the clip's discontinuity (shelf); four different
+"inner edges" (shape fit, green, capsule ends, drawn rim) left a 0.4–0.6 mm gap.
+
+**What exists now** (organic with a face region; `LATTICE_BAND_OFF=1` = legacy byte for byte):
+- `LatticeBandTypes.swift` (contract, switches), `LatticeBandFields.swift` (CPU): classes per CAD
+  face; clip planes (footprint at concave/open edges, the neighbour's plane at convex open edges,
+  none at convex selected edges — the chamfers round the corner); sign vectors over the alongside
+  set's own adjacency; skin taper at footprint clips; signed continuous grade gated by the rim foot;
+  pseudo-normal dMat; q exact through caps (`LatticeRegionMask` `reachMM`); a FINE grid at h/2 padded
+  3.5 texels; side tiles (G4, 0 on his stand); `LATTICE_BAND_CAP_RIM=1` cap tiles (1,573).
+- Renderer (agent, merged 05caab31): 4 float4s appended to LSDFUniforms (K0 layout test), rimTex at
+  index 6, band rim term + `band_rim_normal`, capsules embed 0.25 voxel extra, shell rule
+  `max(carved, 0.5h − B_r) ≤ 0` one voxel in (no normal gate in band mode). Legacy frames
+  byte-identical (24 hashes).
+- Bake: 28 s Debug on the Mac for the band (the legacy region loop was ~50 s).
+
+**Checks on his stand** (`LatticeBandHisProjectChecks`): corner rims f56/f57 z 10–190 roughness
+≤ 0.024 mm (control K1 0.242; sign-from-occupancy: rim never reaches the mouth); rim outside the
+model 0/8,773; rim over a mouth 0/19,777; floor band inside the walls 0 (control 630). His
+project's renders (`LatticeHisProjectRenderProbe`, BGRA PNGs): rungs gone, corner rims smooth,
+blobs gone, the fillet one band. Affected suites 94 tests: 3 fixture failures fixed; full suite
+running at 19:36.
+
+**Open, his call:** the cap inside solid at the leg's foot — default "nothing" (lattice set back
+behind the fillet) vs `LATTICE_BAND_CAP_RIM=1` (a rim facing the solid). Renders sent.
+Also: smooth per-face rim normals (texture 7) have no producer yet; depth-bias edge case noted by
+the plumbing agent. If attempt 4 fails on his screen: attempt 5, then the full-section recode
+(pocket logic included).
