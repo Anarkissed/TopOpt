@@ -425,6 +425,13 @@ public struct LatticeSDFScene {
     /// + beyond the skin's inner face, − inside the skin, 1e3 where no unselected face is
     /// near — the lattice layer draws the rim where this is ≥ 0 and the region is solid
     public var skinInSDF: LatticeVoxelGrid? = nil
+    /// ★★★ THE BAND (2026-09-26 redesign; nil ⇒ the legacy band path). See `LatticeBandTypes`.
+    /// `bandFine` is the rim's own padded half-voxel grid; `bandRimCoarse` is B_r on the SDF
+    /// grid (the region texture's `.a` in band mode — the shell's rule reads it);
+    /// `bandOptions` are the switches the scene was built with.
+    public var bandFine: LatticeBandFine? = nil
+    public var bandRimCoarse: LatticeVoxelGrid? = nil
+    public var bandOptions = LatticeBandOptions()
     /// ★ The part's material inside every declared prism, IGNORING the slabs — the grid
     /// the measurers read (`LatticeRegionMask.clippedWholePrism`). `occupancy` is the
     /// slab-clipped set where lattice may go.

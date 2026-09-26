@@ -66,7 +66,7 @@ final class LatticeHisProjectRenderProbe: XCTestCase {
         let views: [(String, Float, Float, Float, Float)] = ProcessInfo.processInfo.environment["HIS_VIEWS"].map { v in
             v.split(separator: ";").map { t in let c = t.split(separator: ","); return (String(c[0]), Float(c[1])!, Float(c[2])!, Float(c[3])!, Float(c[4])!) }
         } ?? (0..<8).map { ("az\($0)", Float($0) * 0.785, 0.35, 0.9, 0.5) }
-        for body in [Float(1), 0] {
+        for body in (ProcessInfo.processInfo.environment["HIS_BODY"] == "0" ? [Float(0)] : [Float(1), 0]) {
             mr.setBodyAlpha(body)
             for (name, az, el, zoom, height) in views {
                 LatticeQuiltFrameProbe.aim(mr, mesh.bounds, azimuth: az, elevation: el, zoom: zoom, height: height)
