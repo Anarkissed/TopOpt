@@ -406,7 +406,7 @@ public enum LatticeBandFields {
         // ── the band scatter over a grid
         struct GridSpec { var origin: SIMD3<Double>; var h: Double; var nx: Int; var ny: Int; var nz: Int }
         struct BandOut { var br: [Float]; var delta: [Float]; var grade: [Float]; var taperE: [Float]; var nearTri: [Int32]; var nearFeat: [UInt8] }
-        func scatter(_ G: GridSpec, reach: Double, wantGrade: Bool) -> BandOut {
+        func scatter(_ G: GridSpec, reach: Double, wantGrade: Bool, pcs pieces: [Piece]) -> BandOut {
             let n = G.nx * G.ny * G.nz
             // ★ the band matters only in and next to the pocket (rim, skin, green, the shell's
             // rule all need q ≤ 0); elsewhere B_r takes the pocket distance, which is still a
@@ -567,8 +567,94 @@ public enum LatticeBandFields {
         let GC = GridSpec(origin: so, h: h, nx: nx, ny: ny, nz: nz)
         let matC = material(GC, reach: 3 * h)
         lap("materialC", &tl)
-        let bandC = scatter(GC, reach: reachC, wantGrade: true)
+        var bandC = scatter(GC, reach: reachC, wantGrade: true, pcs: pieces)
         lap("bandC", &tl)
+        // ── ★ SOLID-BACKED PRISM SIDES (his G4: "the *bottom* of the lattice … is an OUTLINE and
+        // absolutely should get a rim! It's the front and back faces that do not touch anything
+        // that shouldn't get a rim"): a prism side wall inside the part's material, not already
+        // under an alongside face's band, gets a rim of the organic rim width (no skin — there is
+        // no surface there) and green. Tiles of ≤ 2 mm × ≤ 3 mm on the grown outline wall, each
+        // kept when the material continues 1.5 voxels beyond it, outside every prism.
+        // `LATTICE_BAND_CAP_RIM=1` tiles the depth caps the same way (a rim facing the solid).
+        let deltaGridC = LatticeVoxelGrid(nx: nx, ny: ny, nz: nz, origin: solid.origin, spacing: solid.spacing, values: bandC.delta)
+        let matGridC = LatticeVoxelGrid(nx: nx, ny: ny, nz: nz, origin: solid.origin, spacing: solid.spacing, values: matC)
+        func backed(_ probe: SIMD3<Double>) -> Bool {
+            matGridC.sampleLinear(probe) < -0.25 * h && qGrid.sampleLinear(probe) > 0.25 * h && abs(deltaGridC.sampleLinear(probe)) > c
+        }
+        var tiles: [Piece] = []
+        var sideTiles = 0, capTiles = 0
+        if rO > 0 {
+            for rg in includeFaces where !rg.outlineLoops.isEmpty && rg.depthMM > 0 {
+                let n = LatticeRegionMask.unit(rg.normal)
+                let (u, v) = LatticeRegionMask.basis(n)
+                func to3(_ q: SIMD2<Double>, _ d: Double) -> SIMD3<Double> { rg.origin + u * q.x + v * q.y + n * d }
+                let nDepth = Swift.max(1, Int((rg.depthMM / 3).rounded(.up)))
+                for (li, loop) in rg.outlineLoops.enumerated() {
+                    let seams = li < rg.outlineSeams.count ? rg.outlineSeams[li] : []
+                    let grown = LatticeOutlineRibbon.offsetRing(loop, by: -rg.inPlaneOffsetMM, seams: seams)
+                    let inN = LatticeOutlineRibbon.edgeInwardNormals(grown)
+                    let m = grown.count
+                    guard m >= 3 else { continue }
+                    for i in 0..<m where !(i < seams.count && seams[i]) {
+                        let p0 = grown[i], p1 = grown[(i + 1) % m]
+                        let L = simd_distance(p0, p1)
+                        guard L > 1e-6 else { continue }
+                        let nSpan = Swift.max(1, Int((L / 2).rounded(.up)))
+                        let out = -inN[i]
+                        for db in 0..<nDepth {
+                            let d0 = rg.depthMM * Double(db) / Double(nDepth), d1 = rg.depthMM * Double(db + 1) / Double(nDepth)
+                            var ok = [Bool](repeating: false, count: nSpan)
+                            for sp in 0..<nSpan {
+                                let mid = p0 + (p1 - p0) * ((Double(sp) + 0.5) / Double(nSpan))
+                                ok[sp] = backed(to3(mid + out * (1.5 * h), 0.5 * (d0 + d1)))
+                            }
+                            let dir3 = simd_normalize(to3(p1, 0) - to3(p0, 0))
+                            for sp in 0..<nSpan where ok[sp] {
+                                let qa = p0 + (p1 - p0) * (Double(sp) / Double(nSpan)), qb = p0 + (p1 - p0) * (Double(sp + 1) / Double(nSpan))
+                                let a0 = to3(qa, d0), b0 = to3(qb, d0), a1 = to3(qa, d1), b1 = to3(qb, d1)
+                                var planes: [Plane] = []
+                                if sp == 0 || !ok[sp - 1] { planes.append(Plane(n: -dir3, d: simd_dot(dir3, a0))) }
+                                if sp == nSpan - 1 || !ok[sp + 1] { planes.append(Plane(n: dir3, d: -simd_dot(dir3, b0))) }
+                                for (x, y, z) in [(a0, b0, b1), (a0, b1, a1)] {
+                                    tiles.append(Piece(a: x, b: y, c: z, planes: planes, width: rO, isAlongside: false,
+                                                       signVec: [], lo: simd_min(x, simd_min(y, z)), hi: simd_max(x, simd_max(y, z))))
+                                }
+                                sideTiles += 1
+                            }
+                        }
+                    }
+                }
+                if opt.capRim {
+                    // the depth cap: 2 mm tiles over the grown polygon at the prism's full depth
+                    let pts = rg.outlineLoops.flatMap { $0 }
+                    var lo2 = SIMD2<Double>(repeating: 1e9), hi2 = SIMD2<Double>(repeating: -1e9)
+                    for q in pts { lo2 = simd_min(lo2, q); hi2 = simd_max(hi2, q) }
+                    lo2 -= SIMD2(repeating: Swift.max(0, rg.inPlaneOffsetMM)); hi2 += SIMD2(repeating: Swift.max(0, rg.inPlaneOffsetMM))
+                    let D = rg.depthMM
+                    var y = lo2.y
+                    while y < hi2.y { var x = lo2.x
+                        while x < hi2.x {
+                            let mid = SIMD2(x + 1, y + 1)
+                            let sd = LatticeFaceOutline.signedDistance(mid, loops: rg.outlineLoops, seams: rg.outlineSeams)
+                            if sd <= rg.inPlaneOffsetMM, backed(to3(mid, D + 1.5 * h)) {
+                                let a0 = to3(SIMD2(x, y), D), b0 = to3(SIMD2(x + 2, y), D), b1 = to3(SIMD2(x + 2, y + 2), D), a1 = to3(SIMD2(x, y + 2), D)
+                                for (p, q, w) in [(a0, b0, b1), (a0, b1, a1)] {
+                                    tiles.append(Piece(a: p, b: q, c: w, planes: [], width: rO, isAlongside: false,
+                                                       signVec: [], lo: simd_min(p, simd_min(q, w)), hi: simd_max(p, simd_max(q, w))))
+                                }
+                                capTiles += 1
+                            }
+                            x += 2 }
+                        y += 2 }
+                }
+            }
+        }
+        counts["sideTiles"] = sideTiles; counts["capTiles"] = capTiles
+        if !tiles.isEmpty {
+            let t = scatter(GC, reach: reachC, wantGrade: true, pcs: tiles)
+            for e in 0..<bandC.br.count { bandC.br[e] = Swift.min(bandC.br[e], t.br[e]); bandC.grade[e] = Swift.min(bandC.grade[e], t.grade[e]) }
+        }
+        lap("tiles", &tl)
         var carvedC = [Float](repeating: 0, count: nx * ny * nz)
         var skinC = carvedC, latticedC = carvedC
         var skinVox = 0, rimVox = 0, gradeVox = 0, signDisagree = 0
@@ -608,7 +694,11 @@ public enum LatticeBandFields {
         let reachF = c + 3 * hf
         let matF = material(GF, reach: 3 * hf)
         lap("materialF", &tl)
-        let bandF = scatter(GF, reach: reachF, wantGrade: false)
+        var bandF = scatter(GF, reach: reachF, wantGrade: false, pcs: pieces)
+        if !tiles.isEmpty {
+            let t = scatter(GF, reach: reachF, wantGrade: false, pcs: tiles)
+            for e in 0..<bandF.br.count { bandF.br[e] = Swift.min(bandF.br[e], t.br[e]) }
+        }
         lap("bandF", &tl)
         let nF = fd.0 * fd.1 * fd.2
         var tex = [Float16](repeating: 0, count: 4 * nF)
@@ -645,8 +735,8 @@ public enum LatticeBandFields {
             let v = classByFace[f]!
             return "f\(f)=\(v == .open ? "O" : v == .alongside ? "A" : v == .selected ? "S" : "N")"
         }.joined(separator: " ")
-        let diag = String(format: "DIAG band v1: skin %.2f rim %.2f side-rim %.2f band %.1f mm · h %.3f fine %.3f (%d×%d×%d) · alongside tris %d, border edges %d (footprint %d, neighbour %d), unmatched %d, overflow %d, taper segs %d · voxels skin %d rim %d grade %d · sign disagreements %d · fine rim texels %d · ms %@ · faces %@",
-                          s, r, rO, g, h, hf, fd.0, fd.1, fd.2, alongIdx.count, cBorder, cFoot, cNeigh, cUnmatched, cOverflow, tapers.count,
+        let diag = String(format: "DIAG band v1: skin %.2f rim %.2f side-rim %.2f band %.1f mm · h %.3f fine %.3f (%d×%d×%d) · alongside tris %d, border edges %d (footprint %d, neighbour %d), unmatched %d, overflow %d, taper segs %d · side tiles %d, cap tiles %d · voxels skin %d rim %d grade %d · sign disagreements %d · fine rim texels %d · ms %@ · faces %@",
+                          s, r, rO, g, h, hf, fd.0, fd.1, fd.2, alongIdx.count, cBorder, cFoot, cNeigh, cUnmatched, cOverflow, tapers.count, sideTiles, capTiles,
                           skinVox, rimVox, gradeVox, signDisagree, rimTexels,
                           timings.sorted { $0.key < $1.key }.map { "\($0.key)=\(Int($0.value))" }.joined(separator: ","), faceList)
         _ = t0
