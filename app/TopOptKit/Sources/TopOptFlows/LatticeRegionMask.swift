@@ -224,7 +224,8 @@ public enum LatticeRegionMask {
     }
 
     public static func signedDistance(_ p: SIMD3<Double>,
-                                      region: LatticeRegionSpec) -> Double {
+                                      region: LatticeRegionSpec,
+                                      reachMM: Double = 0) -> Double {
         let big = 1e9
         switch region.kind {
         case .face:
@@ -256,7 +257,11 @@ public enum LatticeRegionMask {
             // because `along > 0` already means outside. Most of the bbox is far
             // from an 11 mm slab, so this skips the polygon for the large majority
             // of voxels.
-            if along > 0 { return along }
+            // ★ `reachMM` (2026-09-26, the band redesign): within this distance past a cap the
+            // EXACT extrusion runs, so the field is continuous across the cap plane instead of
+            // reading `along` (≈ 0 on the cap plane's whole extension) — every existing caller
+            // passes 0 and is unchanged
+            if along > reachMM { return along }
             let inPlane: Double
             if !region.outlineLoops.isEmpty {
                 var sd = LatticeFaceOutline.signedDistance(uv, loops: region.outlineLoops, seams: region.outlineSeams)
@@ -292,10 +297,11 @@ public enum LatticeRegionMask {
     /// declared — the caller decides what "no regions" means (see
     /// `EmptyRegionPolicy`), this function only reports the geometry.
     public static func signedDistance(_ p: SIMD3<Double>,
-                                      regions: [LatticeRegionSpec]) -> Double {
+                                      regions: [LatticeRegionSpec],
+                                      reachMM: Double = 0) -> Double {
         var best = 1e9
         for r in regions where r.role == .include {
-            best = Swift.min(best, signedDistance(p, region: r))
+            best = Swift.min(best, signedDistance(p, region: r, reachMM: reachMM))
         }
         return best
     }
@@ -306,12 +312,13 @@ public enum LatticeRegionMask {
     /// thin or absent there is air, never the part's own wall. Readers that PLACE
     /// lattice (candidates, cells, the slab mesh) keep the slab-aware distance above.
     public static func signedDistanceWholePrism(_ p: SIMD3<Double>,
-                                                regions: [LatticeRegionSpec]) -> Double {
+                                                regions: [LatticeRegionSpec],
+                                                reachMM: Double = 0) -> Double {
         var best = 1e9
         for r in regions where r.role == .include {
             var whole = r
             whole.thicknessMap = nil
-            best = Swift.min(best, signedDistance(p, region: whole))
+            best = Swift.min(best, signedDistance(p, region: whole, reachMM: reachMM))
         }
         return best
     }

@@ -720,7 +720,27 @@ public struct LatticeSDFScene {
         self.prismOccupancy = regions.contains(where: { $0.thicknessMap != nil })
             ? LatticeRegionMask.clippedWholePrism(solid, to: regions, whenEmpty: whenEmpty)
             : occupancy
-        let latticedSDF = LatticePreviewOccupancy.signedDistance(
+        // ★★★ THE BAND, REBUILT (2026-09-26): organic with a declared face region takes the
+        // continuous, geometrically signed band (`LatticeBandFields`); every other path, and
+        // `LATTICE_BAND_OFF=1`, keeps the legacy block below byte for byte.
+        let bandOpts = LatticeBandOptions.fromEnvironment()
+        let bandActive = algorithm == "organic" && !bandOpts.off
+            && regions.contains(where: { $0.role == .include && $0.kind == .face && $0.isValid })
+        let bandRes: LatticeBandFields.Result? = bandActive ? {
+            let voxelHere = Double(Swift.max(solid.spacing.x, Swift.max(solid.spacing.y, solid.spacing.z)))
+            let skin = LatticeSDFRenderer.outlineBeamMM(lineWidthMM: beadMM > 0 ? beadMM : (organic?.minExtrudableWidthMM ?? 0.45), voxelMM: voxelHere)
+            let organicRim = (organic?.solidRimMM ?? 0) > 0 ? organic!.solidRimMM : 0
+            let rim = Swift.max(skin, organicRim)
+            let selectedRaw = Set(regions.compactMap { r -> Int? in
+                guard r.role == .include, r.kind == .face else { return nil }
+                return r.rawFaceID.map { Int($0) } ?? r.faceID
+            })
+            let band = (organic?.shapeBandMM ?? 0) > 0 ? organic!.shapeBandMM : 10
+            return LatticeBandFields.build(mesh: mesh, regions: regions, selectedRaw: selectedRaw, solid: solid,
+                                           params: .init(skinMM: skin, rimMM: rim, sideRimMM: organicRim,
+                                                         gradeBandMM: band, finishSkinMM: skinMM, options: bandOpts))
+        }() : nil
+        let latticedSDF = bandRes?.latticedC ?? LatticePreviewOccupancy.signedDistance(
             positions: mesh.positions, indices: mesh.indices, like: occupancy)
         self.partSDF = latticedSDF
         // ★★★ THE PART'S MATERIAL, SIGNED BY THE WHOLE SOLID (2026-09-23): `partSDF` takes
@@ -728,7 +748,7 @@ public struct LatticeSDFScene {
         // march wants — so every measurer that asked it "is the part here" read a slab
         // edge as the end of the material (his 10.31 mm wall walk). Same distances, the
         // part's own sign.
-        self.partMaterialSDF = {
+        self.partMaterialSDF = bandRes?.materialC ?? {
             var m = latticedSDF
             for i in m.values.indices {
                 let d = abs(m.values[i])
@@ -742,7 +762,23 @@ public struct LatticeSDFScene {
         // ★ Baked from the SAME list the occupancy was masked by, on the same
         // grid, in the same pass — so no third description of "the region" can
         // exist to drift from the other two.
-        if regions.contains(where: { $0.role == .include }) {
+        if let band = bandRes {
+            // ★★★ THE BAND'S FIELDS, published under the old names with their old meanings:
+            // regionSDF = carved (solid ≥ 0), outlineSDF = the grade distance past the rim's
+            // inner face, prismSDF = the pocket, skinInSDF = ≥ 0 beyond the skin's inner face.
+            self.regionSDF = band.carvedC
+            self.outlineSDF = band.gradeC
+            outlineForOrganic = band.gradeC
+            self.prismSDF = band.qC
+            self.skinInSDF = band.skinC
+            self.bandFine = band.fine
+            self.bandRimCoarse = band.rimC
+            self.bandOptions = bandOpts
+            let voxelHere = Double(Swift.max(solid.spacing.x, Swift.max(solid.spacing.y, solid.spacing.z)))
+            self.unselectedSkinMM = LatticeSDFRenderer.outlineBeamMM(lineWidthMM: beadMM > 0 ? beadMM : (organic?.minExtrudableWidthMM ?? 0.45), voxelMM: voxelHere)
+            self.unselectedRimMM = Swift.max(self.unselectedSkinMM, self.organicSolidRimMM)
+            NSLog("%@", band.diag)
+        } else if regions.contains(where: { $0.role == .include }) {
             // ★★★ THE REGION IS THE FACE — NOT THE FACE PLUS A MARGIN (maintainer,
             // 2026-08-21: the primitive is "ONLY AS BIG AS THE FACE … Never bigger.
             // Never smaller.").
@@ -1595,11 +1631,19 @@ public struct LatticeSDFScene {
                     let p = SIMD3<Float>(Float(o.originMM.x + (Double(i) + 0.5) * o.spacingMM),
                                          Float(o.originMM.y + (Double(j) + 0.5) * o.spacingMM),
                                          Float(o.originMM.z + (Double(k) + 0.5) * o.spacingMM))
-                    let gi = (p - og.origin) / og.spacing
-                    let a = Int(gi.x.rounded()), b = Int(gi.y.rounded()), c = Int(gi.z.rounded())
-                    guard a >= 0, b >= 0, c >= 0, a < og.nx, b < og.ny, c < og.nz else { continue }
-                    let d = Double(og.values[(c * og.ny + b) * og.nx + a])
-                    guard d < 999 else { continue }
+                    let d: Double
+                    if bandRes != nil {
+                        // ★ the band's grade is continuous and signed (negative through the rim), so
+                        // a trilinear read reaches the floor exactly at the rim's inner face — no
+                        // nearest-voxel beat between the trace grid and the preview grid
+                        d = og.sampleLinear(SIMD3<Double>(p))
+                    } else {
+                        let gi = (p - og.origin) / og.spacing
+                        let a = Int(gi.x.rounded()), b = Int(gi.y.rounded()), c = Int(gi.z.rounded())
+                        guard a >= 0, b >= 0, c >= 0, a < og.nx, b < og.ny, c < og.nz else { continue }
+                        d = Double(og.values[(c * og.ny + b) * og.nx + a])
+                        guard d < 999 else { continue }
+                    }
                     let t = Swift.min(Swift.max(d / o.shapeBandMM, 0), 1)
                     let target = Swift.min(sep[e], floorMM)
                     // ★ the AMOUNT of shrink, scaled by the strength (2026-09-18); never
