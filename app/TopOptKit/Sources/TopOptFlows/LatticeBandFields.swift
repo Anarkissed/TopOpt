@@ -385,13 +385,28 @@ public enum LatticeBandFields {
             }
             return Swift.max(-reachC, Swift.min(qCap, best))
         }
+        // ★ voxels more than 2 away from any solid voxel are far air: every reader there is
+        // dominated by the part's own distance, so the exact pocket is not evaluated
+        var near = solid.values.map { $0 > 0.5 }
+        for axis in 0..<3 { for _ in 0..<2 {
+            var nxt = near
+            for k in 0..<nz { for j in 0..<ny { for i in 0..<nx where !near[(k * ny + j) * nx + i] {
+                let (a, b) = axis == 0 ? (i > 0 ? near[(k * ny + j) * nx + i - 1] : false, i < nx - 1 ? near[(k * ny + j) * nx + i + 1] : false)
+                    : axis == 1 ? (j > 0 ? near[(k * ny + j - 1) * nx + i] : false, j < ny - 1 ? near[(k * ny + j + 1) * nx + i] : false)
+                    : (k > 0 ? near[((k - 1) * ny + j) * nx + i] : false, k < nz - 1 ? near[((k + 1) * ny + j) * nx + i] : false)
+                if a || b { nxt[(k * ny + j) * nx + i] = true }
+            } } }
+            near = nxt
+        } }
         var qC = [Float](repeating: Float(qCap), count: nx * ny * nz)
         var qSlabC = qC
         qC.withUnsafeMutableBufferPointer { qb in
             qSlabC.withUnsafeMutableBufferPointer { sb in
                 DispatchQueue.concurrentPerform(iterations: nz) { k in
                     for j in 0..<ny { for i in 0..<nx {
-                        let p = nodeC(i, j, k), e = (k * ny + j) * nx + i
+                        let e0 = (k * ny + j) * nx + i
+                        if !near[e0] { continue }
+                        let p = nodeC(i, j, k), e = e0
                         let w = pocketQ(p, slab: false)
                         qb[e] = Float(w)
                         // the slab form differs only inside the prism's footprint
@@ -411,16 +426,23 @@ public enum LatticeBandFields {
             // ★ the band matters only in and next to the pocket (rim, skin, green, the shell's
             // rule all need q ≤ 0); elsewhere B_r takes the pocket distance, which is still a
             // valid lower bound on the distance to the rim (the rim lies inside the pocket)
+            // nearest coarse voxel, by index arithmetic (a conservative mask: the margin is 2 voxels)
             var qAt = [Float](repeating: 0, count: n)
+            let r0 = (G.origin - so) / ss, rs = G.h / ss.x
             qAt.withUnsafeMutableBufferPointer { qa in
                 DispatchQueue.concurrentPerform(iterations: G.nz) { k in
-                    for j in 0..<G.ny { for i in 0..<G.nx {
-                        let p = G.origin + SIMD3(Double(i), Double(j), Double(k)) * G.h
-                        qa[(k * G.ny + j) * G.nx + i] = Float(qGrid.sampleLinear(p))
-                    } }
+                    let ck = Swift.max(0, Swift.min(nz - 1, Int((r0.z + Double(k) * rs).rounded())))
+                    for j in 0..<G.ny {
+                        let cj = Swift.max(0, Swift.min(ny - 1, Int((r0.y + Double(j) * rs).rounded())))
+                        let rowC = (ck * ny + cj) * nx, rowF = (k * G.ny + j) * G.nx
+                        for i in 0..<G.nx {
+                            let ci = Swift.max(0, Swift.min(nx - 1, Int((r0.x + Double(i) * rs).rounded())))
+                            qa[rowF + i] = qC[rowC + ci]
+                        }
+                    }
                 }
             }
-            let activeQ = Float(2 * h)
+            let activeQ = Float(2 * h + (G.h < h ? h : 0))
             var br = [Float](repeating: Float(reach - c), count: n)
             var d2 = [Float](repeating: .greatestFiniteMagnitude, count: n)
             var grade = [Float](repeating: Float(g + 2 * h), count: n)
@@ -713,8 +735,15 @@ public enum LatticeBandFields {
                     var dl = bandF.delta[e]
                     if opt.signFromSolid, bandF.nearTri[e] >= 0 { dl = (matF[e] < 0 ? 1 : -1) * abs(dl) }
                     let ks = dl - Float(s) * tau
-                    var q: Float = Float(qCap)
-                    if Double(br) <= 2.5 * hf {
+                    // ★ exact only where a rim hit is possible (every other rim term within two
+                    // texels of zero); elsewhere a guaranteed LOWER bound (nearest coarse value
+                    // minus a voxel), so the march's step bound never overstates the distance
+                    let gi = (p - so) / ss
+                    let ci = Swift.max(0, Swift.min(nx - 1, Int(gi.x.rounded()))), cj = Swift.max(0, Swift.min(ny - 1, Int(gi.y.rounded())))
+                    let ck = Swift.max(0, Swift.min(nz - 1, Int(gi.z.rounded())))
+                    var q = Swift.min(Float(qCap), qC[(ck * ny + cj) * nx + ci] - Float(h))
+                    let m2 = Float(2 * hf)
+                    if br <= m2, matF[e] <= m2, ks >= -m2 {
                         q = Float(pocketQ(p, slab: false))
                     }
                     tb[4 * e] = Float16(br); tb[4 * e + 1] = Float16(Swift.max(-100, Swift.min(100, ks)))
