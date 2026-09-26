@@ -33,10 +33,11 @@ final class LatticeStandRimRegressionTests: XCTestCase {
     func testTheFloorsBandDoesNotWrapIntoTheWall() throws {
         let (_, scene) = try LatticeStandRenderProbe.stand()
         let now = Self.solidInWallBAtTheFloor(scene)
-        // ★ POSITIVE CONTROL: the Euclidean (wrapping) band must put the ledge back, or
-        // this test cannot see the defect it pins
-        setenv("LATTICE_WRAPPED_BAND", "1", 1)
-        defer { unsetenv("LATTICE_WRAPPED_BAND") }
+        // ★ POSITIVE CONTROL: a band that rounds every edge must put the ledge back, or this
+        // test cannot see the defect it pins (the band redesign's switch; the legacy block's
+        // was LATTICE_WRAPPED_BAND)
+        setenv("LATTICE_BAND_NO_FOOTPRINT", "1", 1)
+        defer { unsetenv("LATTICE_BAND_NO_FOOTPRINT") }
         let (_, wrapped) = try LatticeStandRenderProbe.stand()
         let before = Self.solidInWallBAtTheFloor(wrapped)
         print("LEDGE solid voxels in wall B at the floor: wrapped \(before) · clipped \(now)")

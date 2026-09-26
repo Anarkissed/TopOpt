@@ -34,10 +34,14 @@ class LatticeBandTestCase: XCTestCase {
         return OrganicSpanIndex(gridOrigin: .zero, gridSpacing: 2, gridDims: SIMD3<Int32>(20, 20, 20), segments: segs)
     }
 
+    /// ★ The LEGACY organic scene: since the band redesign (1fb07bfb) an organic scene with a
+    /// face region builds the band, so the legacy fixture asks for the old block explicitly.
     static func organicScene() -> LatticeSDFScene {
-        LatticeSDFScene(mesh: boxMesh(), field: nil, latticeID: "octet", organicSpans: spans(),
-                        stageMode: .aesthetic, algorithm: "organic", maxDim: 64,
-                        regions: [topRegion()], whenEmpty: .latticeNothing)
+        setenv("LATTICE_BAND_OFF", "1", 1)
+        defer { unsetenv("LATTICE_BAND_OFF") }
+        return LatticeSDFScene(mesh: boxMesh(), field: nil, latticeID: "octet", organicSpans: spans(),
+                               stageMode: .aesthetic, algorithm: "organic", maxDim: 64,
+                               regions: [topRegion()], whenEmpty: .latticeNothing)
     }
     /// Built once per process — every test starts from the same legacy scene.
     static let cachedOrganicScene: LatticeSDFScene = organicScene()
