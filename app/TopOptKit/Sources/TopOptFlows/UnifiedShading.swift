@@ -1043,13 +1043,23 @@ static LSDFHit lsdf_march(constant LSDFUniforms& U,
         // declared prism, where the region field is solid, beyond the model's thin skin
         // (regionTex.a ≥ 0): that band is the rim, drawn in the rim colour — part of the
         // lattice, so it stays when the body is hidden.
+        // ★★★ AND IT IS A DISTANCE EVERYWHERE, NOT ONLY INSIDE THE BAND (2026-09-26, his
+        // images 3–5: the rim in scattered chunks, green where it should be solid blue,
+        // and a ledge recessed into every wall at the floor). The term used to exist only
+        // once a sample already stood in the band, so from the air the march stepped
+        // 0.7 cell (5.6 mm at his 8 mm cell) and the dClip leap below took up to
+        // skin + rim more (the region field is POSITIVE across the band) — a 3.4 mm rim
+        // was crossed without a sample in it, or first sampled millimetres deep. The
+        // intersection's max() is a lower bound of the distance to the band from
+        // anywhere, so it bounds the step (`Frim`) and ends it (`FrimHit`, which adds the
+        // "no face near" sentinel test — a gate only, never a distance).
+        float Frim = 1e9;
         {
             float4 rt = regionTex.sample(samp, stc);
             float dPrismHere = rt.b, dSkinIn = rt.a;
-            if (dPrismHere < 0.0 && dRegion >= 0.0 && dSkinIn >= 0.0 && dSkinIn < 900.0) {
-                float Fr = max(max(dPrismHere, -dRegion), -dSkinIn);
-                if (Fr < Fsolid) { Fsolid = Fr; bleedHit = true; }
-            }
+            Frim = max(max(dPrismHere, -dRegion), -dSkinIn);
+            float FrimHit = max(Frim, dSkinIn - 900.0);
+            if (FrimHit < Fsolid) { Fsolid = FrimHit; bleedHit = true; }
         }
         // ★★★ THE OUTLINE ITSELF IS NOT DRAWN HERE (2026-09-16). It is a MESH —
         // `LatticeOutlineRibbon`, one thin beam swept round the face outline, drawn by
@@ -1163,9 +1173,11 @@ static LSDFHit lsdf_march(constant LSDFUniforms& U,
         // ★ BOUNDED BY THE RIM TOO (2026-09-23): with no cell here the march used to leap
         // 0.7 cell regardless of F, and a rim band thinner than that (skin + rim ≈ 4.6 mm
         // under a 6 mm cell) was crossed without a hit — his "blue rim only at one spot".
-        float step = (anyActive || Fsolid < 1e8) ? clamp(F * stepScale, stepLo, 0.7 * safeCell)
+        float step = (anyActive || Fsolid < 1e8) ? clamp(min(F, Frim) * stepScale, stepLo, 0.7 * safeCell)
                                                  : 0.7 * safeCell;
-        step = max(step, dClip - 3.0 * eps);
+        // ★ the leap is a bound on the struts only; the rim band lies where dClip is
+        // POSITIVE, so it never leaps past the rim's own bound
+        step = max(step, min(dClip, Frim) - 3.0 * eps);
         t += step;
     }
     return out;

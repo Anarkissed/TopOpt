@@ -16,7 +16,8 @@ final class LatticeStandRenderProbe: XCTestCase {
         let gid = UUID()
         let group = SelectionGroup(id: gid, name: "C", colorIndex: 0, faces: [15, 2, 23], regionIDs: [])
         let key23 = LatticeSelectableRef.face(group: gid, face: 23).key
-        let solidGrid = LatticePreviewOccupancy.occupancy(positions: mesh.positions, indices: mesh.indices, bounds: mesh.bounds, maxDim: 128)
+        let dim = Int(ProcessInfo.processInfo.environment["STAND_DIM"] ?? "") ?? 128
+        let solidGrid = LatticePreviewOccupancy.occupancy(positions: mesh.positions, indices: mesh.indices, bounds: mesh.bounds, maxDim: dim)
         func solidAt(_ p: SIMD3<Double>) -> Bool {
             let g = (SIMD3<Float>(p) - solidGrid.origin) / solidGrid.spacing
             let i = Int(g.x.rounded()), j = Int(g.y.rounded()), k = Int(g.z.rounded())
@@ -69,7 +70,7 @@ final class LatticeStandRenderProbe: XCTestCase {
         let spans = OrganicSpanIndex(gridOrigin: mesh.bounds.min, gridSpacing: 2, gridDims: SIMD3<Int32>(4, 4, 4), segments: segs)
         let injectSpan = ProcessInfo.processInfo.environment["STAND_ONE_SPAN"] == "1"
         let scene = LatticeSDFScene(mesh: mesh, field: nil, latticeID: "octet", organicSpans: injectSpan ? spans : nil, stageMode: .aesthetic,
-                                    algorithm: "organic", organic: o, regions: regions, whenEmpty: .latticeNothing)
+                                    algorithm: "organic", organic: o, maxDim: dim, regions: regions, whenEmpty: .latticeNothing)
         print("RENDER scene capsules \(scene.organicCapsules.count)")
         return (mesh, scene)
     }
@@ -99,7 +100,7 @@ final class LatticeStandRenderProbe: XCTestCase {
         try XCTSkipUnless(renderer.latticePipelinesDidBuild)
         renderer.setMesh(mesh)
         renderer.setLatticeScene(scene, token: 1)
-        renderer.latticeParams = LatticePreviewConfettiTests.hisParamsAtACellHisPartCanHold(cellMM: 4.0)
+        renderer.latticeParams = LatticePreviewConfettiTests.hisParamsAtACellHisPartCanHold(cellMM: Double(ProcessInfo.processInfo.environment["STAND_CELL_MM"] ?? "") ?? 4.0)
         renderer.setBodyAlpha(0)
         let dir = URL(fileURLWithPath: ProcessInfo.processInfo.environment["STAND_RENDER_DIR"] ?? NSTemporaryDirectory())
         let views: [(String, Float, Float)] = ProcessInfo.processInfo.environment["STAND_VIEWS"].map { v in
@@ -116,6 +117,30 @@ final class LatticeStandRenderProbe: XCTestCase {
             let url = dir.appendingPathComponent("stand_\(name).png")
             Self.writePNG(d, to: url)
             print("RENDER \(name) az \(az) el \(el): covered \(d.covered) · blue \(blue) green \(green) other \(lilac) → \(url.path)")
+        }
+    }
+
+    /// The same stand with the BODY drawn (his image 1 is body-on): full composite frames.
+    /// Env STAND_BODY_VIEWS = "name,az,el,zoom,height;…".
+    @MainActor
+    func testRenderTheStandWithTheBody() throws {
+        guard let device = MTLCreateSystemDefaultDevice() else { throw XCTSkip("no Metal") }
+        let (mesh, scene) = try Self.stand()
+        guard let renderer = MeshRenderer(device: device, sampleCount: 1) else { throw XCTSkip("renderer") }
+        try XCTSkipUnless(renderer.latticePipelinesDidBuild)
+        renderer.setMesh(mesh)
+        renderer.setLatticeScene(scene, token: 1)
+        renderer.latticeParams = LatticePreviewConfettiTests.hisParamsAtACellHisPartCanHold(cellMM: Double(ProcessInfo.processInfo.environment["STAND_CELL_MM"] ?? "") ?? 4.0)
+        renderer.setBodyAlpha(1)
+        let dir = ProcessInfo.processInfo.environment["STAND_RENDER_DIR"] ?? NSTemporaryDirectory()
+        let views: [(String, Float, Float, Float, Float)] = ProcessInfo.processInfo.environment["STAND_BODY_VIEWS"].map { v in
+            v.split(separator: ";").map { t in let c = t.split(separator: ","); return (String(c[0]), Float(c[1])!, Float(c[2])!, Float(c[3])!, Float(c[4])!) }
+        } ?? [("top", 0.6, 0.6, 0.5, 0.85), ("side", -0.6, 0.3, 0.8, 0.5)]
+        for (name, az, el, zoom, height) in views {
+            LatticeQuiltFrameProbe.aim(renderer, mesh.bounds, azimuth: az, elevation: el, zoom: zoom, height: height)
+            guard let px = renderer.renderOffscreen(size: 900, clear: MTLClearColor(red: 0.08, green: 0.08, blue: 0.12, alpha: 1)) else { continue }
+            LatticeQuiltFrameProbe.writePNG(px, size: 900, to: dir + "/body_\(name).png")
+            print("RENDER body \(name) → \(dir)/body_\(name).png")
         }
     }
 }

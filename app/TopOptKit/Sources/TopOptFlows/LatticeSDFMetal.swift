@@ -792,6 +792,7 @@ public struct LatticeSDFScene {
             var unselIdx: [UInt32] = []
             unselIdx.reserveCapacity(mesh.indices.count)
             var acrossTris = 0, besideTris = 0
+            var besideTri = [Bool](repeating: false, count: mesh.indices.count / 3)
             var t = 0
             while t + 2 < mesh.indices.count {
                 let tri = t / 3
@@ -856,7 +857,7 @@ public struct LatticeSDFScene {
                             }
                         }
                         if across { acrossTris += 1 }
-                        else { besideTris += 1; unselIdx += [mesh.indices[t], mesh.indices[t + 1], mesh.indices[t + 2]] }
+                        else { besideTris += 1; besideTri[tri] = true; unselIdx += [mesh.indices[t], mesh.indices[t + 1], mesh.indices[t + 2]] }
                     }
                 }
                 t += 3
@@ -893,6 +894,48 @@ public struct LatticeSDFScene {
             let bandVoxels = Swift.max(3, Int(((unselSkin + unselRim + bandReach + 2.0) / voxelHere).rounded(.up)))
             let unselSDF: [Float]? = unselIdx.isEmpty ? nil
                 : LatticePreviewOccupancy.signedDistance(positions: mesh.positions, indices: unselIdx, like: solid, bandVoxels: bandVoxels).values
+            // ★★★ AND THE SAME DISTANCE, STOPPED AT EVERY EDGE WHERE THE FACE MEETS AN OPEN ONE
+            // (his 2026-09-26 image 2: the channel floor's band wrapped round its edge into both
+            // walls — a ledge "dug into" the lattice the length of the base). The mesh is edge-
+            // matched by position across faces (every edge twice, measured on his stand), so the
+            // triangle across each edge is known: an edge whose other side is NOT an alongside
+            // triangle (a selected face, a passed-through one) clips the band to the face's own
+            // footprint; an edge shared by two alongside triangles lets it round the corner.
+            // Everything INSIDE the part reads this one; the air side keeps the Euclidean
+            // distance (the mirrored band that keeps the chamfer's skin, 2026-09-24).
+            // (probe switch: `LATTICE_WRAPPED_BAND=1` restores the Euclidean band inside the part)
+            let unselClipped: [Float]? = unselIdx.isEmpty || ProcessInfo.processInfo.environment["LATTICE_WRAPPED_BAND"] == "1" ? nil : {
+                struct EdgeKey: Hashable { let a: SIMD3<Int32>; let b: SIMD3<Int32> }
+                func q(_ i: UInt32) -> SIMD3<Int32> {
+                    let b = Int(i) * 3
+                    return SIMD3(Int32((mesh.positions[b] * 1000).rounded()), Int32((mesh.positions[b + 1] * 1000).rounded()),
+                                 Int32((mesh.positions[b + 2] * 1000).rounded()))
+                }
+                func key(_ i: UInt32, _ j: UInt32) -> EdgeKey {
+                    let a = q(i), b = q(j)
+                    return (a.x, a.y, a.z) < (b.x, b.y, b.z) ? EdgeKey(a: a, b: b) : EdgeKey(a: b, b: a)
+                }
+                // how many ALONGSIDE triangles use each edge, over the whole mesh
+                var besideUses: [EdgeKey: Int] = [:]
+                var tt = 0
+                while tt + 2 < mesh.indices.count {
+                    if besideTri[tt / 3] {
+                        for k in 0..<3 { besideUses[key(mesh.indices[tt + k], mesh.indices[tt + (k + 1) % 3]), default: 0] += 1 }
+                    }
+                    tt += 3
+                }
+                // an alongside triangle's edge used by only ONE alongside triangle has an open
+                // face (or a degenerate sliver) across it
+                var clip = [Bool](repeating: false, count: unselIdx.count)
+                var u = 0
+                while u + 2 < unselIdx.count {
+                    for k in 0..<3 { clip[u + k] = (besideUses[key(unselIdx[u + k], unselIdx[u + (k + 1) % 3])] ?? 0) < 2 }
+                    u += 3
+                }
+                return LatticePreviewOccupancy.signedDistanceClippedAtEdges(
+                    positions: mesh.positions, indices: unselIdx, clipEdges: clip, like: solid,
+                    bandVoxels: bandVoxels, tolMM: Float(0.5 * voxelHere)).values
+            }()
             let unselFar = Double(bandVoxels) * Double(Swift.min(solid.spacing.x, Swift.min(solid.spacing.y, solid.spacing.z)))
             self.unselectedSkinMM = unselSkin
             self.unselectedRimMM = unselRim
@@ -985,7 +1028,10 @@ public struct LatticeSDFScene {
                         // `skin − (−d)` would read solid, moving the selected face's zero
                         // crossing inward (`LatticeFaceOutlineTests.testTheSkinLeavesASolid
                         // WallAtTheSurface` caught it).
-                        if let u = unselSDF, abs(Double(u[i])) < unselFar - 1e-3 {
+                        // ★ inside the part the band is the CLIPPED distance (no wrap round an
+                        // edge into an open face); outside it the Euclidean one (see above)
+                        let uInside = unselClipped.map { $0[i] < 0 } ?? false
+                        if let u = uInside ? unselClipped : unselSDF, abs(Double(u[i])) < unselFar - 1e-3 {
                             let toUnsel = -Double(u[i])                    // + inside the part, − outside
                             // ★ CONTINUOUS ACROSS THE SURFACE (− outside the part): the sampled
                             // texture at the face must never blend a distance with the 1e3
@@ -1018,6 +1064,14 @@ public struct LatticeSDFScene {
                                     o.values[i] = Float(Swift.min(Double(o.values[i]), toUnsel - unselSkin - unselRim))
                                 }
                             }
+                        }
+                        // ★★ NEVER A RIM IN THE AIR (R4: "never sticks out of the model"; his
+                        // 2026-09-25 16:58: rim fragments floating left of the leg). Outside the
+                        // part the skin field is negative whatever else is near — the rim gate
+                        // (prism < 0, region ≥ 0, skinIn ≥ 0) can then never pass in air, even
+                        // where no unselected face is within reach and only an outline was.
+                        if solid.values[i] <= 0.5 {
+                            skinHere = Swift.min(skinHere, -Swift.max(Double(partMaterialValues[i]), 1e-3))
                         }
                         skinIn.values[i] = Float(Swift.min(1e3, skinHere))
                         f.values[i] = Float(carved)

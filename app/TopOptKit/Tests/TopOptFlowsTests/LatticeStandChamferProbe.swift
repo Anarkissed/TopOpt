@@ -13,7 +13,8 @@ final class LatticeStandChamferProbe: XCTestCase {
         let gid = UUID()
         let group = SelectionGroup(id: gid, name: "C", colorIndex: 0, faces: [15, 2, 23], regionIDs: [])
         let key23 = LatticeSelectableRef.face(group: gid, face: 23).key
-        let solidGrid = LatticePreviewOccupancy.occupancy(positions: mesh.positions, indices: mesh.indices, bounds: mesh.bounds, maxDim: 128)
+        let dim = Int(ProcessInfo.processInfo.environment["STAND_DIM"] ?? "") ?? 128
+        let solidGrid = LatticePreviewOccupancy.occupancy(positions: mesh.positions, indices: mesh.indices, bounds: mesh.bounds, maxDim: dim)
         func solidAt(_ p: SIMD3<Double>) -> Bool {
             let g = (SIMD3<Float>(p) - solidGrid.origin) / solidGrid.spacing
             let i = Int(g.x.rounded()), j = Int(g.y.rounded()), k = Int(g.z.rounded())
@@ -36,7 +37,7 @@ final class LatticeStandChamferProbe: XCTestCase {
                                     separationMinMM: 3, separationMaxMM: 3, rhoMin: 0.05, rhoMax: 0.9, showRepairs: false)
         o.solidRimMM = 3.41
         let scene = LatticeSDFScene(mesh: mesh, field: nil, latticeID: "octet", stageMode: .aesthetic,
-                                    algorithm: "organic", organic: o, regions: regions, whenEmpty: .latticeNothing)
+                                    algorithm: "organic", organic: o, maxDim: dim, regions: regions, whenEmpty: .latticeNothing)
         guard let f = scene.regionSDF, let pr = scene.prismSDF else { XCTFail("no field"); return }
         func sample(_ g: LatticeVoxelGrid, _ p: SIMD3<Double>) -> Double { LatticeCurvedOutlineBandProbe.sampleLinear(g, p) }
         func nearest(_ g: LatticeVoxelGrid, _ p: SIMD3<Double>) -> Float {
@@ -110,6 +111,7 @@ final class LatticeStandChamferProbe: XCTestCase {
         var gateBox = (lo: SIMD3<Double>(repeating: 1e9), hi: SIMD3<Double>(repeating: -1e9))
         var gateByZ: [Int: Int] = [:]
         var worstSkin = 1e9
+        var farthest = 0.0
         for k in 0..<(f.nz - 1) { for j in 0..<(f.ny - 1) { for i in 0..<(f.nx - 1) {
             let e = (k * f.ny + j) * f.nx + i
             // skip cells whose 8 corners are all solid (part interior) — we want air
@@ -127,9 +129,11 @@ final class LatticeStandChamferProbe: XCTestCase {
                 gateBox.lo = simd_min(gateBox.lo, p); gateBox.hi = simd_max(gateBox.hi, p)
                 gateByZ[Int((p.z / 20).rounded(.down)) * 20, default: 0] += 1
                 worstSkin = Swift.min(worstSkin, dS)
+                farthest = Swift.max(farthest, sample(scene.partMaterialSDF, p))
             }
         } } }
         print(String(format: "PROBE GPU-style rim gate in AIR (cell centres): %d · bbox x[%.0f,%.0f] y[%.0f,%.0f] z[%.0f,%.0f] · min skinIn %.1f", gateAir, gateBox.lo.x, gateBox.hi.x, gateBox.lo.y, gateBox.hi.y, gateBox.lo.z, gateBox.hi.z, worstSkin))
+        print(String(format: "PROBE GPU-style gate in air: farthest from the part %.2f mm (voxel %.2f)", farthest, h))
         print("PROBE GPU-style gate in air by z: " + gateByZ.keys.sorted().map { "\($0):\(gateByZ[$0]!)" }.joined(separator: " "))
         print(String(format: "PROBE rim in air bbox x[%.0f,%.0f] y[%.0f,%.0f] z[%.0f,%.0f]", airBox.lo.x, airBox.hi.x, airBox.lo.y, airBox.hi.y, airBox.lo.z, airBox.hi.z))
         print("PROBE rim by x (20 mm bins, part/air): " + byX.keys.sorted().map { "\($0):\(byX[$0]!.part)/\(byX[$0]!.air)" }.joined(separator: " "))

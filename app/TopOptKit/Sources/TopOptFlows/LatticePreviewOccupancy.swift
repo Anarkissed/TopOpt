@@ -409,6 +409,88 @@ public enum LatticePreviewOccupancy {
                                 origin: occ.origin, spacing: occ.spacing, values: vals)
     }
 
+    /// ★★★ THE DISTANCE UNDER A FACE, NOT ROUND ITS EDGE (2026-09-26, his image 2: "the
+    /// floor is creating some kind of indent INTO the lattice walls"). `signedDistance` of
+    /// the unselected triangles is Euclidean, so past a face's edge it keeps measuring to
+    /// the edge — the channel floor's skin + rim band wrapped round the floor's edge into
+    /// the wall beside it as a quarter-round ledge, the length of the base. A band is the
+    /// face pushed in along its own normal; it may round an edge shared with another
+    /// banded face (two alongside faces meet, the band is continuous), but not an edge
+    /// where the face meets an OPEN one (selected, or passed through).
+    ///
+    /// `clipEdges[3·t + k]` says edge k (vertex k → k+1) of triangle t is such an edge:
+    /// a voxel whose projection onto the triangle's plane lies more than `tolMM` beyond it
+    /// takes nothing from that triangle. Same scatter, same band, same sign as
+    /// `signedDistance`; voxels no triangle reaches read the band's far value.
+    public static func signedDistanceClippedAtEdges(positions: [Float], indices: [UInt32], clipEdges: [Bool],
+                                                    like occ: LatticeVoxelGrid, bandVoxels: Int = 3,
+                                                    tolMM: Float) -> LatticeVoxelGrid {
+        let minSp = Swift.min(occ.spacing.x, Swift.min(occ.spacing.y, occ.spacing.z))
+        let farValue = Float(bandVoxels) * minSp
+        func pos(_ i: UInt32) -> SIMD3<Float> {
+            let b = Int(i) * 3
+            return SIMD3<Float>(positions[b], positions[b + 1], positions[b + 2])
+        }
+        var dist2 = [Float](repeating: .greatestFiniteMagnitude, count: occ.count)
+        let triCount = indices.count / 3
+        let padF = SIMD3<Float>(repeating: Float(bandVoxels)) * (SIMD3<Float>(repeating: minSp) / occ.spacing)
+        let slabCount = Swift.max(1, Swift.min(occ.nz, ProcessInfo.processInfo.activeProcessorCount))
+        dist2.withUnsafeMutableBufferPointer { buf in
+            DispatchQueue.concurrentPerform(iterations: slabCount) { slab in
+                let kStart = occ.nz * slab / slabCount
+                let kEnd = occ.nz * (slab + 1) / slabCount
+                guard kStart < kEnd else { return }
+                for t in 0..<triCount {
+                    let a = pos(indices[t * 3]), b = pos(indices[t * 3 + 1]), c = pos(indices[t * 3 + 2])
+                    // the clip half-planes: in-plane, perpendicular to the edge, pointing at
+                    // the opposite vertex
+                    var planes: [(o: SIMD3<Float>, m: SIMD3<Float>)] = []
+                    let n = simd_cross(b - a, c - a)
+                    guard simd_length_squared(n) > 1e-20 else { continue }
+                    let vs = [a, b, c]
+                    for k in 0..<3 where t * 3 + k < clipEdges.count && clipEdges[t * 3 + k] {
+                        let p0 = vs[k], p1 = vs[(k + 1) % 3], opp = vs[(k + 2) % 3]
+                        var m = simd_normalize(simd_cross(n, p1 - p0))
+                        if simd_dot(opp - p0, m) < 0 { m = -m }
+                        planes.append((p0, m))
+                    }
+                    let lo = (simd_min(a, simd_min(b, c)) - occ.origin) / occ.spacing - padF
+                    let hi = (simd_max(a, simd_max(b, c)) - occ.origin) / occ.spacing + padF
+                    let k0 = Swift.max(kStart, Int(lo.z.rounded(.down)))
+                    let k1 = Swift.min(kEnd - 1, Int(hi.z.rounded(.up)))
+                    guard k0 <= k1 else { continue }
+                    let i0 = Swift.max(0, Int(lo.x.rounded(.down))), i1 = Swift.min(occ.nx - 1, Int(hi.x.rounded(.up)))
+                    let j0 = Swift.max(0, Int(lo.y.rounded(.down))), j1 = Swift.min(occ.ny - 1, Int(hi.y.rounded(.up)))
+                    guard i0 <= i1, j0 <= j1 else { continue }
+                    for k in k0...k1 {
+                        let pz = occ.origin.z + Float(k) * occ.spacing.z
+                        for j in j0...j1 {
+                            let py = occ.origin.y + Float(j) * occ.spacing.y
+                            let rowBase = (k * occ.ny + j) * occ.nx
+                            for i in i0...i1 {
+                                let p = SIMD3<Float>(occ.origin.x + Float(i) * occ.spacing.x, py, pz)
+                                var beyond = false
+                                for pl in planes where simd_dot(p - pl.o, pl.m) < -tolMM { beyond = true; break }
+                                if beyond { continue }
+                                let d2 = Self.pointTriangleDistSq(p, a, b, c)
+                                if d2 < buf[rowBase + i] { buf[rowBase + i] = d2 }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        var vals = [Float](repeating: 0, count: occ.count)
+        for vi in 0..<occ.count {
+            let inside = occ.values[vi] > 0.5
+            let d2 = dist2[vi]
+            let d = d2 == .greatestFiniteMagnitude ? farValue : Swift.min(d2.squareRoot(), farValue)
+            vals[vi] = inside ? -d : d
+        }
+        return LatticeVoxelGrid(nx: occ.nx, ny: occ.ny, nz: occ.nz,
+                                origin: occ.origin, spacing: occ.spacing, values: vals)
+    }
+
     /// Squared distance from `p` to triangle `abc` (Ericson, Real-Time Collision
     /// Detection §5.1.5 — the standard closest-point-on-triangle case analysis).
     static func pointTriangleDistSq(_ p: SIMD3<Float>, _ a: SIMD3<Float>,
