@@ -435,6 +435,33 @@ public enum LatticePreviewOccupancy {
         let triCount = indices.count / 3
         let padF = SIMD3<Float>(repeating: Float(bandVoxels)) * (SIMD3<Float>(repeating: minSp) / occ.spacing)
         let slabCount = Swift.max(1, Swift.min(occ.nz, ProcessInfo.processInfo.activeProcessorCount))
+        // ★ THE CLIP HALF-PLANES, per flagged edge: in the owning triangle's plane,
+        // perpendicular to the edge, pointing at the opposite vertex. A triangle is clipped
+        // by its OWN flagged edges and by every flagged edge meeting one of its CORNERS — a
+        // fan triangle whose tip touches the open edge has no flagged edge of its own, and
+        // measured to that tip it wrapped the band round the edge all the same (his floor:
+        // 25 voxels in wall B at x 112–119, the fan tip at (112.3, −36.8, 21.8)).
+        struct VKey: Hashable { let x: Int32, y: Int32, z: Int32 }
+        func vkey(_ p: SIMD3<Float>) -> VKey { VKey(x: Int32((p.x * 1000).rounded()), y: Int32((p.y * 1000).rounded()), z: Int32((p.z * 1000).rounded())) }
+        var edgePlanes: [(o: SIMD3<Float>, m: SIMD3<Float>)] = []
+        var planesAtVertex: [VKey: [Int]] = [:]
+        var ownPlanes = [[Int]](repeating: [], count: triCount)
+        for t in 0..<triCount {
+            let a = pos(indices[t * 3]), b = pos(indices[t * 3 + 1]), c = pos(indices[t * 3 + 2])
+            let n = simd_cross(b - a, c - a)
+            guard simd_length_squared(n) > 1e-20 else { continue }
+            let vs = [a, b, c]
+            for k in 0..<3 where t * 3 + k < clipEdges.count && clipEdges[t * 3 + k] {
+                let p0 = vs[k], p1 = vs[(k + 1) % 3], opp = vs[(k + 2) % 3]
+                var m = simd_normalize(simd_cross(n, p1 - p0))
+                if simd_dot(opp - p0, m) < 0 { m = -m }
+                let id = edgePlanes.count
+                edgePlanes.append((p0, m))
+                ownPlanes[t].append(id)
+                planesAtVertex[vkey(p0), default: []].append(id)
+                planesAtVertex[vkey(p1), default: []].append(id)
+            }
+        }
         dist2.withUnsafeMutableBufferPointer { buf in
             DispatchQueue.concurrentPerform(iterations: slabCount) { slab in
                 let kStart = occ.nz * slab / slabCount
@@ -442,18 +469,16 @@ public enum LatticePreviewOccupancy {
                 guard kStart < kEnd else { return }
                 for t in 0..<triCount {
                     let a = pos(indices[t * 3]), b = pos(indices[t * 3 + 1]), c = pos(indices[t * 3 + 2])
-                    // the clip half-planes: in-plane, perpendicular to the edge, pointing at
-                    // the opposite vertex
-                    var planes: [(o: SIMD3<Float>, m: SIMD3<Float>)] = []
                     let n = simd_cross(b - a, c - a)
                     guard simd_length_squared(n) > 1e-20 else { continue }
-                    let vs = [a, b, c]
-                    for k in 0..<3 where t * 3 + k < clipEdges.count && clipEdges[t * 3 + k] {
-                        let p0 = vs[k], p1 = vs[(k + 1) % 3], opp = vs[(k + 2) % 3]
-                        var m = simd_normalize(simd_cross(n, p1 - p0))
-                        if simd_dot(opp - p0, m) < 0 { m = -m }
-                        planes.append((p0, m))
-                    }
+                    var ids = Set(ownPlanes[t])
+                    for v in [a, b, c] { for id in planesAtVertex[vkey(v)] ?? [] { ids.insert(id) } }
+                    let planes = ids.map { edgePlanes[$0] }
+                    // the in-plane barycentric frame, to tell "under this triangle" (never
+                    // clipped) from "beyond one of its edges or corners"
+                    let e0 = b - a, e1 = c - a
+                    let d00 = simd_dot(e0, e0), d01 = simd_dot(e0, e1), d11 = simd_dot(e1, e1)
+                    let den = d00 * d11 - d01 * d01
                     let lo = (simd_min(a, simd_min(b, c)) - occ.origin) / occ.spacing - padF
                     let hi = (simd_max(a, simd_max(b, c)) - occ.origin) / occ.spacing + padF
                     let k0 = Swift.max(kStart, Int(lo.z.rounded(.down)))
@@ -469,9 +494,17 @@ public enum LatticePreviewOccupancy {
                             let rowBase = (k * occ.ny + j) * occ.nx
                             for i in i0...i1 {
                                 let p = SIMD3<Float>(occ.origin.x + Float(i) * occ.spacing.x, py, pz)
-                                var beyond = false
-                                for pl in planes where simd_dot(p - pl.o, pl.m) < -tolMM { beyond = true; break }
-                                if beyond { continue }
+                                if !planes.isEmpty {
+                                    let e2 = p - a
+                                    let d20 = simd_dot(e2, e0), d21 = simd_dot(e2, e1)
+                                    let v = (d11 * d20 - d01 * d21) / den, w = (d00 * d21 - d01 * d20) / den
+                                    let under = v >= 0 && w >= 0 && v + w <= 1
+                                    if !under {
+                                        var beyond = false
+                                        for pl in planes where simd_dot(p - pl.o, pl.m) < -tolMM { beyond = true; break }
+                                        if beyond { continue }
+                                    }
+                                }
                                 let d2 = Self.pointTriangleDistSq(p, a, b, c)
                                 if d2 < buf[rowBase + i] { buf[rowBase + i] = d2 }
                             }

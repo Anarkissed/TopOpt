@@ -1057,7 +1057,15 @@ static LSDFHit lsdf_march(constant LSDFUniforms& U,
         {
             float4 rt = regionTex.sample(samp, stc);
             float dPrismHere = rt.b, dSkinIn = rt.a;
-            Frim = max(max(dPrismHere, -dRegion), -dSkinIn);
+            // ★ and INSIDE THE PART (R4: the rim "never sticks out of the model"): the
+            // sampled skin field blends across the surface, so without the part's own
+            // surface as a fourth bound the gate passed up to a millimetre into the air
+            // wherever the skin field's far value sat under the surface (measured on his
+            // stand after the edge clip: 392 air samples, the farthest 1.09 mm out). The
+            // part's MATERIAL (sdfTex.g), not the slab-clipped `dPart`: the rim spans the
+            // whole prism whatever depth the wall's slab places lattice at.
+            float dMaterial = sdfTex.sample(samp, stc).g;
+            Frim = max(max(max(dPrismHere, -dRegion), -dSkinIn), dMaterial);
             float FrimHit = max(Frim, dSkinIn - 900.0);
             if (FrimHit < Fsolid) { Fsolid = FrimHit; bleedHit = true; }
         }

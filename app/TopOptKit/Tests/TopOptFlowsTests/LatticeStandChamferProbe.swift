@@ -124,7 +124,8 @@ final class LatticeStandChamferProbe: XCTestCase {
             guard !solidAt(p) else { continue }                       // the cell centre is air
             let dP = sample(pr, p), dR = sample(f, p), dS = sample(sk, p)
             _ = e
-            if dP < 0, dR >= 0, dS >= 0, dS < 900 {
+            // the shader's gate, with its fourth bound: inside the part's material
+            if dP < 0, dR >= 0, dS >= 0, dS < 900, sample(scene.partMaterialSDF, p) < 0 {
                 gateAir += 1
                 gateBox.lo = simd_min(gateBox.lo, p); gateBox.hi = simd_max(gateBox.hi, p)
                 gateByZ[Int((p.z / 20).rounded(.down)) * 20, default: 0] += 1

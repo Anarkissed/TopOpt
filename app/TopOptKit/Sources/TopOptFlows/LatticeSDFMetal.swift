@@ -2517,7 +2517,9 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
         // framed camera is what both passes draw with. (Offscreen tests frame their
         // local camera explicitly.)
         uploadSegments(scene.preview.segments)
-        sdfTex = makeVolumeTexture(scene.partSDF)
+        // ★ TWO CHANNELS (2026-09-26): r = the LATTICED part (every existing reader), g = the
+        // part's own material, signed by the whole solid — the rim's "inside the model" bound
+        sdfTex = makeCentrelineTexture(scene.partSDF, surface: scene.partMaterialSDF)
         solidTex = makeVolumeTexture(scene.solidOccupancy)     // the cap wall's "is the part here"
         regionTex = scene.regionSDF.flatMap { r in makeRegionTexture(r, outline: scene.outlineSDF, prism: scene.prismSDF, skinIn: scene.skinInSDF) }
         // ★★★ NO CAP (his rule R7, 2026-09-23: never a wall, plate, cap or beam inside
