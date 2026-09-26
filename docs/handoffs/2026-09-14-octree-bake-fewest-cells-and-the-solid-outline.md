@@ -1674,3 +1674,49 @@ f76 included), face 15's mouth 83/107 as before.
 Ten affected suites: 51 tests, 0 failures (finish: rim recoloured 93 px, diagrid 498).
 Installed 15:56:14 (dylib newer than the last edit at 15:54:32; the reverted
 `faceColumnDistance` symbol absent from the installed binary).
+
+## 2026-09-26 01:45 — THE RIM IN CHUNKS, THE FLOOR'S LEDGE, THE RIM IN AIR (his images 2–5; installed 01:44:21)
+
+His settings, read from the simulator's `project.json` (not assumed): organic, cell 8 mm
+(auto 4–8), faces 15 (12 mm) and 2 (13 mm) with depth profiles, region 101 = face 23
+(20 mm + 4.15 expand), shape-fit band 10 mm. Geometry (`LatticeStandFaceMapProbe`):
+faces 2 (y −48.9) and 15 (y 3.7) are the outsides of two ~10 mm walls with a channel
+between them; f20 is the channel FLOOR (z 21.8); f1/f16 the walls' inner faces; f18 the
+bottom. Face 2's and 15's prisms pass through their walls into the channel.
+
+**1. Rim in scattered chunks, green where it should be blue (images 3–5).** The march's
+rim term (`UnifiedShading`, `Fr`) existed only once a sample already stood in the band.
+From the air the step was 0.7·cell — 5.6 mm at his 8 mm cell — and `max(step, dClip −
+3eps)` leapt further, because the region field is POSITIVE across the band. A 3.4 mm rim
+was crossed without a sample in it, or first sampled millimetres deep. The 09-25 probe
+could not reproduce it because it rendered at a 4 mm cell: at 8 mm the same scene drew
+19 % less rim (view a 60,593 → 48,926 px). Now `Frim = max(prism, −region, −skinIn,
+material)` is a distance bound at every step and caps the leap. Rim px at 4 vs 8 mm:
+35,790 vs 35,120 and 29,412 vs 29,748 (`testTheRimIsDrawnTheSameAtEveryCell`, < 3 %).
+
+**2. The ledge dug into every wall at the floor (image 2).** The unselected-face band
+used the EUCLIDEAN distance to the unselected triangles, so past the channel floor's
+edge it kept measuring to the edge: skin + rim + grade wrapped round into walls A and B
+as a quarter-round ledge the length of the base (slices `LatticeStandSliceProbe`, x=100).
+Inside the part the band now uses `signedDistanceClippedAtEdges`: an edge whose other
+triangle is not alongside (a selected or passed-through face) clips the band to the
+face's own footprint; edges shared by two alongside triangles still let it round the
+corner. The mesh is edge-matched by position (4,659 edges, each seen twice). A floor FAN
+triangle whose tip touches the open edge leaked 25 voxels — triangles are also clipped by
+open edges meeting their corners when the point is not directly under them. Wall B at
+floor level: 349 solid voxels (old band, the test's positive control) → 0.
+Air side unchanged (the Euclidean mirrored band of 09-24): chamfers f56/f57/f76 0 open at
+64 and 128; face 15's mouth 87/107 open (was 83).
+
+**3. No rim in the air (R4; his 09-25 16:58 floating fragments).** Outside the part
+`skinIn` is now ≤ −(distance to the part), and the march's rim is bounded by the part's
+MATERIAL distance — `sdfTex` is rg16Float, `.g` = `partMaterialSDF` (not the slab-
+clipped `.r`, which would delete rim wherever his depth profiles thin the slab). Trilinear
+gate samples in air: farthest from the part 1.09 mm → 0.00 mm.
+
+**Image 1 (the wall between face 23 and face 2) — NOT changed, measured.** It is dated
+09-23 19:44 (Fast 64³), before the 09-24 air band. On the current code the chamfer f57's
+surface sample is solid on 184/184 at both 64³ and 128³, and the z=150 slice shows skin
+then rim at that corner. Needs his eyes on the new build.
+
+Probe switch: `LATTICE_WRAPPED_BAND=1` restores the Euclidean band inside the part.
