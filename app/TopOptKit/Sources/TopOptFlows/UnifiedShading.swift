@@ -245,7 +245,73 @@ struct LSDFUniforms {
     // end (his 2026-09-16 ask: "we require a new colour specifically for the
     // gradient — and it should be a gradient, itself").
     float4 gradeColor;   // w = the grade band (mm), 0 when the grade is off
+    // ★★★ THE BAND (2026-09-26 redesign) — FOUR float4s APPENDED LAST, in the Swift
+    // struct's order (BYTE OFFSET, never name). All zero ⇒ the legacy band path.
+    float4 bandOrigin;   // xyz = fine rim grid texel-(0,0,0) centre, w > 0.5 ⇒ band drawn
+    float4 bandSpacing;  // x = fine spacing (mm), w = the capsules' extra embed (mm)
+    float4 bandDims;     // xyz = fine texel counts
+    float4 bandParams;   // x = veil, y = smooth rim normals, z = region .a is B_r, w reserved
 };
+
+// ★★★ THE BAND'S READERS (2026-09-26 redesign; the contract is `LatticeBandTypes`). The
+// rim is its own padded half-voxel grid (`rimTex`, rgba16Float, x fastest): r = B_r, the
+// rim zone's inner-boundary SDF; g = K_s, ≥ 0 beyond the skin's inner face; b = dMat, the
+// part's material SDF; a = q, the pocket SDF. The drawn rim is
+//     { max(B_r, dMat, q, dBox) ≤ 0 } ∩ { K_s ≥ 0 }      (the veil drops the K_s term)
+// Texel i is centred at origin + i·spacing — the mapping `LatticeBandFine.sample` uses.
+static inline float3 band_uvw(constant LSDFUniforms& U, float3 p) {
+    return ((p - U.bandOrigin.xyz) / max(U.bandSpacing.x, 1e-6) + 0.5)
+         / max(U.bandDims.xyz, float3(1.0));
+}
+static inline float band_dbox(constant LSDFUniforms& U, float3 p) {
+    float3 bc = 0.5 * (U.bboxMin.xyz + U.bboxMax.xyz), be = 0.5 * (U.bboxMax.xyz - U.bboxMin.xyz);
+    float3 qb = abs(p - bc) - be;
+    return length(max(qb, 0.0)) + min(max(qb.x, max(qb.y, qb.z)), 0.0);
+}
+/// The drawn rim's field at `p`: max(B_r, dMat, q, dBox), then with −K_s unless the veil
+/// is on (with the veil the skin is drawn too, grey — see `lsdf_gbuffer`).
+static inline float band_rim_field(constant LSDFUniforms& U, texture3d<float> rimTex,
+                                   sampler samp, float3 p) {
+    float4 v = rimTex.sample(samp, band_uvw(U, p));
+    float f = max(max(v.r, v.b), max(v.a, band_dbox(U, p)));
+    return U.bandParams.x > 0.5 ? f : max(f, -v.g);
+}
+/// The rim's own normal: central differences of the FINE field at half its spacing (the
+/// coarse `lsdf_normal` reads the voxel-stepped region field and facets the arcs).
+static float3 band_rim_gradient(constant LSDFUniforms& U, texture3d<float> rimTex,
+                                sampler samp, float3 p) {
+    float e = max(0.5 * U.bandSpacing.x, 1e-4);
+    float3 g = float3(band_rim_field(U, rimTex, samp, p + float3(e, 0, 0))
+                        - band_rim_field(U, rimTex, samp, p - float3(e, 0, 0)),
+                      band_rim_field(U, rimTex, samp, p + float3(0, e, 0))
+                        - band_rim_field(U, rimTex, samp, p - float3(0, e, 0)),
+                      band_rim_field(U, rimTex, samp, p + float3(0, 0, e))
+                        - band_rim_field(U, rimTex, samp, p - float3(0, 0, e)));
+    float L = length(g);
+    return L > 1e-9 ? g / L : float3(0.0, 0.0, 1.0);
+}
+/// …blended with the smooth per-CAD-face normal (`rimNormTex`, rgba on the SDF grid: xyz =
+/// the normal, w = its weight) where the skin term −K_s is the active one and
+/// `bandParams.y` asks for it. The texture has no producer yet: a neutral (0,0,0,0) is
+/// bound and `bandParams.y` is 0, so this returns the gradient.
+static float3 band_rim_normal(constant LSDFUniforms& U, texture3d<float> rimTex,
+                              texture3d<float> rimNormTex, sampler samp, float3 p) {
+    float3 n = band_rim_gradient(U, rimTex, samp, p);
+    if (U.bandParams.y > 0.5 && U.bandParams.x < 0.5) {
+        float4 v = rimTex.sample(samp, band_uvw(U, p));
+        float other = max(max(v.r, v.b), max(v.a, band_dbox(U, p)));
+        if (-v.g >= other) {
+            float3 stc = ((p - U.sdfOrigin.xyz) / U.sdfSpacing.xyz + 0.5) / max(U.sdfDims.xyz, float3(1.0));
+            float4 ns = rimNormTex.sample(samp, stc);
+            float3 m = ns.xyz + (1.0 - ns.w) * n;
+            if (length(m) > 1e-6) { n = normalize(m); }
+        }
+    }
+    return n;
+}
+/// The skin's grey when the veil draws it over the rim in the lattice layer — the body's
+/// own clay (`viewer_fragment`), since the skin IS the body's surface.
+constant float3 bandSkinGrey = float3(0.78, 0.77, 0.75);
 
 struct VOut { float4 pos [[position]]; float2 uv; };
 
@@ -592,6 +658,9 @@ static LSDFHit lsdf_march(constant LSDFUniforms& U,
                           texture3d<float> sdfTex,
                           texture3d<float> regionTex,
                           texture3d<float> organicTex,
+                          // ★ THE BAND's fine rim grid (texture 6) — read only when
+                          // `bandOrigin.w` > 0.5; a neutral 1×1×1 of air is bound otherwise
+                          texture3d<float> rimTex,
                           sampler samp,
                           constant ShellClip& RC,
                           constant float4* decls,
@@ -1054,7 +1123,21 @@ static LSDFHit lsdf_march(constant LSDFUniforms& U,
         // anywhere, so it bounds the step (`Frim`) and ends it (`FrimHit`, which adds the
         // "no face near" sentinel test — a gate only, never a distance).
         float Frim = 1e9;
-        {
+        if (U.bandOrigin.w > 0.5) {
+            // ★★★ THE BAND (2026-09-26 redesign): the rim is read off its OWN padded
+            // half-voxel grid — continuous, geometrically signed distances, no sentinel and
+            // no carve — so a trilinear read gives a constant-thickness rim at any grid
+            // phase. The step reads the Lipschitz lower bound WITHOUT the skin term (the skin
+            // is a gate on the hit, not a distance to the rim); the hit adds it unless the
+            // veil draws the skin too.
+            float4 v = rimTex.sample(samp, band_uvw(U, p));
+            float FrimStep = max(max(v.r, v.b), max(v.a, dBox));
+            float FrimHit = U.bandParams.x > 0.5 ? FrimStep : max(FrimStep, -v.g);
+            Frim = FrimStep;
+            if (FrimHit < Fsolid) { Fsolid = FrimHit; bleedHit = true; }
+        } else if (U.bandParams.z < 0.5) {
+            // (bandParams.z = 1: the region's `.a` is the band's B_r, not this block's skin
+            // field — a band scene whose capsules are off — so no legacy rim is drawn from it)
             float4 rt = regionTex.sample(samp, stc);
             float dPrismHere = rt.b, dSkinIn = rt.a;
             // ★ and INSIDE THE PART (R4: the rim "never sticks out of the model"): the
@@ -1443,6 +1526,11 @@ fragment LSDFGBuf lsdf_gbuffer(VOut in [[stage_in]],
                                // the algorithm is not organic, and the uniform's enable
                                // flag means it is never read then.
                                texture3d<float> organicTex [[texture(5)]],
+                               // ★★★ THE BAND's fine rim grid and its smooth normals
+                               // (2026-09-26). `bindFragment` binds both on EVERY path —
+                               // neutral 1×1×1 stand-ins when the scene has no band.
+                               texture3d<float> rimTex [[texture(6)]],
+                               texture3d<float> rimNormTex [[texture(7)]],
                                sampler samp [[sampler(0)]],
                                // ★ THE SAME BUFFER INDEX THE SHELL'S CLIP USES (4).
                                // `LatticeSDFRenderer.bindFragment` binds it on EVERY
@@ -1457,12 +1545,22 @@ fragment LSDFGBuf lsdf_gbuffer(VOut in [[stage_in]],
                                constant float4* shellDecls [[buffer(5)]]) {
     float3 ro = U.eye.xyz;
     float3 rd = lsdf_ray(U, in.uv);
-    LSDFHit h = lsdf_march(U, segs, cellTex, sdfTex, regionTex, organicTex, samp, RC,
+    LSDFHit h = lsdf_march(U, segs, cellTex, sdfTex, regionTex, organicTex, rimTex, samp, RC,
                            shellDecls, ro, rd);
     if (!h.hit) { discard_fragment(); }
 
-    float3 n = lsdf_normal(U, segs, cellTex, sdfTex, regionTex, samp, RC, shellDecls,
-                           h.pos, h.rho);
+    // ★★★ A BAND RIM HIT TAKES THE RIM'S OWN NORMAL (2026-09-26): `lsdf_normal` differences
+    // the voxel-stepped region field and facets the arcs. `debugParams.z` is the control:
+    // 1 = the legacy `lsdf_normal`, 2 = the fine gradient only (no smooth blend).
+    bool bandRimHit = U.bandOrigin.w > 0.5 && h.solid > 1.5;
+    float3 n;
+    if (bandRimHit && abs(U.debugParams.z - 1.0) > 0.5) {
+        n = U.debugParams.z > 1.5 ? band_rim_gradient(U, rimTex, samp, h.pos)
+                                  : band_rim_normal(U, rimTex, rimNormTex, samp, h.pos);
+    } else {
+        n = lsdf_normal(U, segs, cellTex, sdfTex, regionTex, samp, RC, shellDecls,
+                        h.pos, h.rho);
+    }
     // ★★★ THE DEPTH BIAS — see `lsdf_part_clip` for why this replaced a geometric
     // inset. Where the shell survives it OWNS the boundary, so the lattice must lose
     // the depth test there; pushing the position used for DEPTH back along the view
@@ -1490,6 +1588,11 @@ fragment LSDFGBuf lsdf_gbuffer(VOut in [[stage_in]],
     o.enormal = float4(eyeN, 0.0);
     o.albedo = float4(lsdf_albedo(U, tintTex, stressTex, samp, h.pos, h.rho, h.dressing,
                                   h.solid, h.grade), 1.0);
+    // ★ THE VEIL (`LATTICE_BAND_VEIL=1`): the skin is drawn too, in the body's grey, so
+    // only a blue line shows at each edge.
+    if (bandRimHit && U.bandParams.x > 0.5 && rimTex.sample(samp, band_uvw(U, h.pos)).g < 0.0) {
+        o.albedo = float4(bandSkinGrey, 1.0);
+    }
     // ★★★ THE LEVEL DEBUG SHADE (diagnosis only; `debugParams.x` is 0 on every shipping
     // frame). Each hit is painted by the CELL it stands in, cycling through six
     // saturated hues per doubling from the base cell, and material the run leaves SOLID
@@ -1771,6 +1874,10 @@ static float cap_clip_field(constant LSDFUniforms& U, texture3d<float> sdfTex,
     // run welds it. The PART and its bounding box are never relaxed — material outside
     // the part is not material.
     float dRegion = regionTex.sample(samp, stc).r - embed;
+    // ★★★ THE BAND (2026-09-26): the rim is drawn off its own FINE grid while this clip
+    // reads the coarse region field, so the capsule ends are carried a quarter voxel
+    // further (`bandSpacing.w`) — into the rim, never short of it.
+    if (U.bandOrigin.w > 0.5) { dRegion -= U.bandSpacing.w; }
     return max(max(lsdf_part_clip(U, sdfTex, regionTex, samp, RC, decls, p, dPart),
                    dBox), dRegion);
 }
@@ -2027,7 +2134,11 @@ fragment CapGBuf capsule_gbuffer(CapVOut in [[stage_in]],
         float3 sdfDims = max(U.sdfDims.xyz, float3(1.0));
         float3 stc = ((p - U.sdfOrigin.xyz) / U.sdfSpacing.xyz + 0.5) / sdfDims;
         float dOut = regionTex.sample(samp, stc).g;
-        if (dOut < 500.0) { capGrade = clamp(1.0 - dOut / U.gradeColor.w, 0.0, 1.0); }
+        // ★ the band's grade field is signed and continuous (no 1e3 sentinel), so band
+        // mode drops the sentinel guard; the legacy field keeps it
+        if (U.bandOrigin.w > 0.5 || dOut < 500.0) {
+            capGrade = clamp(1.0 - dOut / U.gradeColor.w, 0.0, 1.0);
+        }
     }
     o.albedo = float4(lsdf_albedo(U, tintTex, stressTex, samp, p, U.shadeParams.x, 0.0, 0.0, capGrade), 1.0);
     o.depth = clamp(clip.z / max(clip.w, 1e-6), 0.0, 1.0);

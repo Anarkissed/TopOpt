@@ -150,6 +150,21 @@ struct LSDFUniforms {
     /// xyz = the grade's tint, w = 1 when the shape grade is on above 0 mm. Appended
     /// LAST on both sides.
     var gradeColor: SIMD4<Float> = .zero
+    /// ★★★ THE BAND (2026-09-26 redesign; see `LatticeBandTypes`) — FOUR float4s APPENDED
+    /// LAST, in this order, on BOTH sides (the MSL twin in `latticeFieldSource`). These match
+    /// by BYTE OFFSET; `LatticeBandRenderPlumbingTests.testUniformLayoutRoundTrips` reads
+    /// them back through a kernel compiled from the shipping MSL.
+    ///   bandOrigin  xyz = the fine rim grid's texel-(0,0,0) centre, w = 1 ⇒ the band is drawn
+    ///   bandSpacing x = the fine grid's spacing (mm), w = the capsules' extra embed (mm)
+    ///   bandDims    xyz = the fine grid's texel counts
+    ///   bandParams  x = veil (1 ⇒ the skin drawn grey over the rim), y = smooth rim normals
+    ///               (0 until `rimNormTex` has a producer), z = 1 ⇒ the region texture's `.a`
+    ///               is B_r (a band scene; set even when the band is not drawn), w reserved
+    /// All zero ⇒ the legacy band path, byte for byte (a scene with no band).
+    var bandOrigin: SIMD4<Float> = .zero
+    var bandSpacing: SIMD4<Float> = .zero
+    var bandDims: SIMD4<Float> = .zero
+    var bandParams: SIMD4<Float> = .zero
 }
 
 /// ★ A pre-baked organic field — the two channels a cached variant (a beam-lattice
@@ -2446,6 +2461,16 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
     /// when nothing is declared — bound ALWAYS, because the shader declares it and
     /// Metal drops a draw whose declared texture is unbound.
     private var regionTex: MTLTexture?
+    /// ★★★ THE BAND's fine rim grid (2026-09-26 redesign): `LatticeBandFine`'s texels as an
+    /// rgba16Float volume, x fastest (r = B_r, g = K_s, b = dMat, a = q). nil ⇒ the scene has
+    /// no band, and the neutral 1×1×1 of air is bound at index 6 instead.
+    private var rimTex: MTLTexture?
+    /// True when `regionTex.a` holds the band's B_r (`bandRimCoarse`) instead of the legacy
+    /// skin field — see `fillBandUniforms`.
+    private var regionTexCarriesBandRim = false
+    private var neutralRimTex: MTLTexture?
+    /// ★ The smooth rim normals' stand-in (index 7): no producer yet, so always neutral.
+    private var neutralRimNormTex: MTLTexture?
     /// The stress-plot colours, for the overlay — see `LatticeSDFScene.stressRGB`.
     private var stressTex: MTLTexture?
     /// ★ Whether the host wants the stress plot ON the struts this frame. Off ⇒ the
@@ -2576,7 +2601,14 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
         // part's own material, signed by the whole solid — the rim's "inside the model" bound
         sdfTex = makeCentrelineTexture(scene.partSDF, surface: scene.partMaterialSDF)
         solidTex = makeVolumeTexture(scene.solidOccupancy)     // the cap wall's "is the part here"
-        regionTex = scene.regionSDF.flatMap { r in makeRegionTexture(r, outline: scene.outlineSDF, prism: scene.prismSDF, skinIn: scene.skinInSDF) }
+        regionTex = scene.regionSDF.flatMap { r in
+            makeRegionTexture(r, outline: scene.outlineSDF, prism: scene.prismSDF, skinIn: scene.skinInSDF,
+                              bandRim: scene.bandRimCoarse)
+        }
+        regionTexCarriesBandRim = regionTex != nil && scene.regionSDF.map { r in
+            scene.bandRimCoarse?.values.count == r.values.count } == true
+        // ★★★ THE BAND's own rim grid (nil ⇒ the legacy band path; the neutral is bound)
+        rimTex = scene.bandFine.flatMap { makeBandTexture($0) }
         // ★★★ NO CAP (his rule R7, 2026-09-23: never a wall, plate, cap or beam inside
         // the pocket). The prism's far end inside material is the part's own solid; the
         // march draws it from the region field, and nothing is built for it.
@@ -3589,7 +3621,8 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
     /// The region texture: r = region signed distance (the clip), g = in-plane
     /// distance in from the face outline (the solid outline's own measure).
     private func makeRegionTexture(_ grid: LatticeVoxelGrid, outline: LatticeVoxelGrid?, prism: LatticeVoxelGrid?,
-                                   skinIn: LatticeVoxelGrid? = nil) -> MTLTexture? {
+                                   skinIn: LatticeVoxelGrid? = nil,
+                                   bandRim: LatticeVoxelGrid? = nil) -> MTLTexture? {
         let d = MTLTextureDescriptor()
         d.textureType = .type3D
         d.pixelFormat = .rgba16Float
@@ -3600,13 +3633,22 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
         let hasOutline = outline?.values.count == grid.values.count
         let hasPrism = prism?.values.count == grid.values.count
         let hasSkinIn = skinIn?.values.count == grid.values.count
+        // ★★★ BAND MODE (2026-09-26): `.a` is B_r on the SDF grid — the shell's band rule
+        // reads it (`shell_is_latticed`, `gate.w`); the legacy march's skin gate is not run
+        let hasBandRim = bandRim?.values.count == grid.values.count
+        if bandRim != nil, !hasBandRim {
+            NSLog("DIAG band: bandRimCoarse has %d values, the region grid %d — .a keeps the legacy skin field",
+                  bandRim!.values.count, grid.values.count)
+        }
         var halfs = [UInt16](repeating: 0, count: grid.values.count * 4)
         for (n, v) in grid.values.enumerated() {
             halfs[4 * n] = float32to16(v)
             halfs[4 * n + 1] = float32to16(hasOutline ? outline!.values[n] : 1e3)
             halfs[4 * n + 2] = float32to16(hasPrism ? prism!.values[n] : v)
             // a = distance beyond the skin's inner face (the rim starts at 0); 1e3 = none near
-            halfs[4 * n + 3] = float32to16(hasSkinIn ? skinIn!.values[n] : 1e3)
+            // — or, in band mode, B_r (< 0 inside skin ∪ rim, 0 on the rim's inner face)
+            halfs[4 * n + 3] = float32to16(hasBandRim ? bandRim!.values[n]
+                                           : (hasSkinIn ? skinIn!.values[n] : 1e3))
         }
         halfs.withUnsafeBytes { raw in
             tex.replace(region: MTLRegionMake3D(0, 0, 0, grid.nx, grid.ny, grid.nz),
@@ -3617,6 +3659,63 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
         }
         return tex
     }
+    /// ★★★ THE BAND's fine rim grid as a texture: `LatticeBandFine.texels` (Float16, rgba,
+    /// x fastest) uploaded verbatim as rgba16Float — no re-rounding, so the GPU reads the
+    /// very halves the CPU twin (`LatticeBandFine.sample`) reads. nil (and a DIAG line) when
+    /// the texel count does not match the dims, which then draws the legacy path's air.
+    private func makeBandTexture(_ f: LatticeBandFine) -> MTLTexture? {
+        let nx = Int(f.dims.x), ny = Int(f.dims.y), nz = Int(f.dims.z)
+        guard nx > 0, ny > 0, nz > 0, f.spacing > 0, f.texels.count == 4 * nx * ny * nz else {
+            NSLog("DIAG band: fine grid refused — dims (%d, %d, %d) spacing %.4f texels %d",
+                  nx, ny, nz, f.spacing, f.texels.count)
+            return nil
+        }
+        let d = MTLTextureDescriptor()
+        d.textureType = .type3D
+        d.pixelFormat = .rgba16Float
+        d.width = nx; d.height = ny; d.depth = nz
+        d.usage = [.shaderRead]
+        d.storageMode = .shared
+        guard let tex = device.makeTexture(descriptor: d) else {
+            NSLog("DIAG band: makeTexture failed for (%d, %d, %d)", nx, ny, nz)
+            return nil
+        }
+        f.texels.withUnsafeBytes { raw in
+            tex.replace(region: MTLRegionMake3D(0, 0, 0, nx, ny, nz), mipmapLevel: 0, slice: 0,
+                        withBytes: raw.baseAddress!, bytesPerRow: nx * 8, bytesPerImage: nx * ny * 8)
+        }
+        return tex
+    }
+    /// The band's rim texture as uploaded — for the sampler check (K12), which must read the
+    /// real packer's output, never a copy of it.
+    var bandRimTexture: MTLTexture? { rimTex }
+
+    /// 1×1×1 stand-ins, bound whenever the scene has no band so the declared textures 6 and
+    /// 7 are never unbound (Metal drops such a draw): the rim grid reads AIR on every channel
+    /// (1e3), the smooth normals read zero weight.
+    private func neutralRim() -> MTLTexture? {
+        if let t = neutralRimTex { return t }
+        neutralRimTex = makeNeutral4(SIMD4<Float>(repeating: 1e3))
+        return neutralRimTex
+    }
+    private func neutralRimNorm() -> MTLTexture? {
+        if let t = neutralRimNormTex { return t }
+        neutralRimNormTex = makeNeutral4(.zero)
+        return neutralRimNormTex
+    }
+    private func makeNeutral4(_ v: SIMD4<Float>) -> MTLTexture? {
+        let d = MTLTextureDescriptor()
+        d.textureType = .type3D
+        d.pixelFormat = .rgba32Float
+        d.width = 1; d.height = 1; d.depth = 1
+        d.usage = [.shaderRead]
+        guard let t = device.makeTexture(descriptor: d) else { return nil }
+        var val = v
+        t.replace(region: MTLRegionMake3D(0, 0, 0, 1, 1, 1), mipmapLevel: 0, slice: 0,
+                  withBytes: &val, bytesPerRow: 16, bytesPerImage: 16)
+        return t
+    }
+
     private func makeTintTexture(_ rgba: [UInt8], like grid: LatticeVoxelGrid) -> MTLTexture? {
         guard rgba.count == grid.count * 4 else { return nil }
         let d = MTLTextureDescriptor()
@@ -3727,7 +3826,7 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
         let sparse = RGBA(158, 176, 236)
         let dense = RGBA(96, 52, 176)
         let curve = strutCurveUniforms
-        return LSDFUniforms(
+        var u = LSDFUniforms(
             rayX: SIMD4(rayX, 0),
             rayY: SIMD4(rayY, 0),
             rayDir: SIMD4(rayDir, 0),
@@ -3889,7 +3988,43 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
                 return SIMD4(live, reach, Float(LatticeSDFScene.organicBakeHeadroomMM),
                              capsulesReplaceField ? 1 : 0)
             }())
+        fillBandUniforms(&u)
+        return u
     }
+
+    /// ★★★ THE BAND's uniforms (2026-09-26 redesign) — filled ONLY when the scene carries a
+    /// fine rim grid AND the capsules draw organic (the march then runs solid-only and draws
+    /// nothing but the rim). Otherwise all four stay zero: `bandOrigin.w == 0` is the legacy
+    /// band path, byte for byte.
+    private func fillBandUniforms(_ u: inout LSDFUniforms) {
+        // ★ z = 1 ⇒ the region texture's `.a` is B_r, not the legacy skin field — so the
+        // legacy rim block (which reads `.a` as its skin gate) must not run on it. Only a band
+        // scene whose capsules are NOT drawn is in that state; it then draws no rim rather
+        // than a pocket-filling one.
+        if regionTexCarriesBandRim { u.bandParams.z = 1 }
+        guard let scene, let bf = scene.bandFine, rimTex != nil, capsulesReplaceField else { return }
+        let sp = scene.partSDF.spacing
+        let voxel = max(sp.x, max(sp.y, sp.z))
+        // e_x: the capsules run a quarter voxel further into the rim than the coarse
+        // region field says (`cap_clip_field`), so a clipped end never stops short of the
+        // fine rim. `LATTICE_BAND_EMBED_EXTRA=<mm>` overrides it (a control: −0.86 must open
+        // gaps).
+        let embed = Self.bandEmbedExtraOverrideMM ?? 0.25 * voxel
+        u.bandOrigin = SIMD4(bf.origin, 1)
+        u.bandSpacing = SIMD4(bf.spacing, bf.spacing, bf.spacing, embed)
+        u.bandDims = SIMD4(Float(bf.dims.x), Float(bf.dims.y), Float(bf.dims.z), 0)
+        u.bandParams.x = scene.bandOptions.veil ? 1 : 0
+        u.debugParams.z = Float(bandNormalControl)
+    }
+    /// `LATTICE_BAND_EMBED_EXTRA=<mm>` — read once per process; nil ⇒ production (0.25 voxel).
+    static let bandEmbedExtraOverrideMM: Float? = {
+        guard let s = ProcessInfo.processInfo.environment["LATTICE_BAND_EMBED_EXTRA"], let v = Float(s) else { return nil }
+        return v
+    }()
+    /// ★ The rim normal's control (`debugParams.z`, band mode only): 0 = production (the fine
+    /// field's normal), 1 = the legacy `lsdf_normal`, 2 = the fine gradient without the smooth
+    /// blend. `LATTICE_BAND_NORMAL=1|2` sets it for a whole run.
+    var bandNormalControl: Int = Int(ProcessInfo.processInfo.environment["LATTICE_BAND_NORMAL"] ?? "") ?? 0
 
     /// ★★★ DIAGNOSIS ONLY: paint each hit by the CELL it stands in. Off on every
     /// shipping frame; a probe turns it on to answer "which cells is this patch made
@@ -4315,6 +4450,12 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
         enc.setFragmentTexture(stressTex ?? dummyTintTex, index: 4)
         enc.setFragmentTexture(organicTex ?? neutralOrganic(), index: 5)
         enc.setFragmentTexture(tintTex ?? dummyTintTex, index: 2)
+        // ★★★ THE BAND (2026-09-26): 6 = the fine rim grid, 7 = its smooth normals. Both
+        // DECLARED by `lsdf_gbuffer` and `lsdf_fragment`, so both are bound on EVERY path —
+        // the neutral stand-ins when the scene has no band (the uniforms then never read
+        // them). The capsule pass declares neither; an extra binding is harmless there.
+        enc.setFragmentTexture(rimTex ?? neutralRim(), index: 6)
+        enc.setFragmentTexture(neutralRimNorm(), index: 7)
         enc.setFragmentSamplerState(sampler, index: 0)
     }
 
@@ -4424,6 +4565,9 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
                                   texture3d<float> regionTex [[texture(3)]],
                                   texture3d<float> stressTex [[texture(4)]],
                                   texture3d<float> organicTex [[texture(5)]],
+                                  // ★ the band's rim grid + smooth normals — see `lsdf_gbuffer`
+                                  texture3d<float> rimTex [[texture(6)]],
+                                  texture3d<float> rimNormTex [[texture(7)]],
                                   sampler samp [[sampler(0)]],
                                   constant ShellClip& RC [[buffer(4)]],
                                   // ★ See `lsdf_gbuffer`: the same declaration list,
@@ -4431,12 +4575,20 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
                                   constant float4* shellDecls [[buffer(5)]]) {
         float3 ro = U.eye.xyz;
         float3 rd = lsdf_ray(U, in.uv);
-        LSDFHit h = lsdf_march(U, segs, cellTex, sdfTex, regionTex, organicTex, samp, RC,
+        LSDFHit h = lsdf_march(U, segs, cellTex, sdfTex, regionTex, organicTex, rimTex, samp, RC,
                                shellDecls, ro, rd);
         if (!h.hit) return float4(0.0);
         float3 hitPos = h.pos; float hitRho = h.rho;
-        float3 n = lsdf_normal(U, segs, cellTex, sdfTex, regionTex, samp, RC, shellDecls,
-                               hitPos, hitRho);
+        // ★ the same normal rule as `lsdf_gbuffer`: a band rim hit takes the rim's own normal
+        bool bandRimHit = U.bandOrigin.w > 0.5 && h.solid > 1.5;
+        float3 n;
+        if (bandRimHit && abs(U.debugParams.z - 1.0) > 0.5) {
+            n = U.debugParams.z > 1.5 ? band_rim_gradient(U, rimTex, samp, hitPos)
+                                      : band_rim_normal(U, rimTex, rimNormTex, samp, hitPos);
+        } else {
+            n = lsdf_normal(U, segs, cellTex, sdfTex, regionTex, samp, RC, shellDecls,
+                            hitPos, hitRho);
+        }
 
         // ★ THE OLD, SEPARATE LIGHTING MODEL — and §1(d)'s whole point. A model-space
         // key at a different direction and a different strength from the body's, a
@@ -4455,6 +4607,9 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
         // to COMPILE, and a shader built with `try?` then fails silently.
         float3 baseC = lsdf_albedo(U, tintTex, stressTex, samp, hitPos, hitRho, h.dressing,
                                    h.solid, h.grade);
+        if (bandRimHit && U.bandParams.x > 0.5 && rimTex.sample(samp, band_uvw(U, hitPos)).g < 0.0) {
+            baseC = bandSkinGrey;      // the veil: the skin drawn over the rim
+        }
         float3 lit = baseC * (amb + 0.85 * ndlK + 0.30 * ndlF);
         float rim = pow(1.0 - clamp(dot(n, vdir), 0.0, 1.0), 2.5);
         lit += rim * 0.55 * mix(float3(0.72, 0.78, 0.98), float3(1.0), 0.35);
