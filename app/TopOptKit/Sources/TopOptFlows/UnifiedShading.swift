@@ -1065,7 +1065,14 @@ static LSDFHit lsdf_march(constant LSDFUniforms& U,
             // part's MATERIAL (sdfTex.g), not the slab-clipped `dPart`: the rim spans the
             // whole prism whatever depth the wall's slab places lattice at.
             float dMaterial = sdfTex.sample(samp, stc).g;
-            Frim = max(max(max(dPrismHere, -dRegion), -dSkinIn), dMaterial);
+            // ★★ CARVED BY HALF A VOXEL, NOT MERELY AT ZERO (his 2026-09-26 01:46: rim
+            // painted over face 2's open mouth "for no reason"). At a selected face the
+            // prism's front cap, the region field's zero and the part's surface COINCIDE,
+            // so a max() of the four distances is ≈ 0 across the whole mouth and the march
+            // called it a hit wherever an unselected face was within the field's reach. A
+            // real rim is carved skin + rim deep (≈ 3.4 mm); the mouth never is.
+            float rimCarve = 0.5 * max(U.sdfSpacing.x, max(U.sdfSpacing.y, U.sdfSpacing.z));
+            Frim = max(max(max(dPrismHere, rimCarve - dRegion), -dSkinIn), dMaterial);
             float FrimHit = max(Frim, dSkinIn - 900.0);
             if (FrimHit < Fsolid) { Fsolid = FrimHit; bleedHit = true; }
         }

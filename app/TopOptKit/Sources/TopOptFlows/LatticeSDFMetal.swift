@@ -793,6 +793,7 @@ public struct LatticeSDFScene {
             unselIdx.reserveCapacity(mesh.indices.count)
             var acrossTris = 0, besideTris = 0
             var besideTri = [Bool](repeating: false, count: mesh.indices.count / 3)
+            var acrossTri = [Bool](repeating: false, count: mesh.indices.count / 3)
             var t = 0
             while t + 2 < mesh.indices.count {
                 let tri = t / 3
@@ -856,7 +857,7 @@ public struct LatticeSDFScene {
                                 }
                             }
                         }
-                        if across { acrossTris += 1 }
+                        if across { acrossTris += 1; acrossTri[tri] = true }
                         else { besideTris += 1; besideTri[tri] = true; unselIdx += [mesh.indices[t], mesh.indices[t + 1], mesh.indices[t + 2]] }
                     }
                 }
@@ -915,21 +916,24 @@ public struct LatticeSDFScene {
                     let a = q(i), b = q(j)
                     return (a.x, a.y, a.z) < (b.x, b.y, b.z) ? EdgeKey(a: a, b: b) : EdgeKey(a: b, b: a)
                 }
-                // how many ALONGSIDE triangles use each edge, over the whole mesh
-                var besideUses: [EdgeKey: Int] = [:]
+                // ★★ ONLY A PASSED-THROUGH NEIGHBOUR STOPS THE BAND (his 2026-09-26 01:47:
+                // "the vertical rim … still broken apart"). Clipped at a SELECTED face too, the
+                // leg's chamfers kept a 2.8 mm diagonal sliver of band — 1.6 voxels, drawn
+                // ragged. At a selected face's mouth the rim is the mouth's outline and rounds
+                // the corner; only where the prism passes THROUGH the neighbour (the walls'
+                // inner faces beside the channel floor) is the pocket behind it lattice.
+                var acrossEdges = Set<EdgeKey>()
                 var tt = 0
                 while tt + 2 < mesh.indices.count {
-                    if besideTri[tt / 3] {
-                        for k in 0..<3 { besideUses[key(mesh.indices[tt + k], mesh.indices[tt + (k + 1) % 3]), default: 0] += 1 }
+                    if acrossTri[tt / 3] {
+                        for k in 0..<3 { acrossEdges.insert(key(mesh.indices[tt + k], mesh.indices[tt + (k + 1) % 3])) }
                     }
                     tt += 3
                 }
-                // an alongside triangle's edge used by only ONE alongside triangle has an open
-                // face (or a degenerate sliver) across it
                 var clip = [Bool](repeating: false, count: unselIdx.count)
                 var u = 0
                 while u + 2 < unselIdx.count {
-                    for k in 0..<3 { clip[u + k] = (besideUses[key(unselIdx[u + k], unselIdx[u + (k + 1) % 3])] ?? 0) < 2 }
+                    for k in 0..<3 { clip[u + k] = acrossEdges.contains(key(unselIdx[u + k], unselIdx[u + (k + 1) % 3])) }
                     u += 3
                 }
                 return LatticePreviewOccupancy.signedDistanceClippedAtEdges(
