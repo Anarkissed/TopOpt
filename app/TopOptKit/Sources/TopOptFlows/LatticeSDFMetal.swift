@@ -447,6 +447,9 @@ public struct LatticeSDFScene {
     public var bandFine: LatticeBandFine? = nil
     public var bandRimCoarse: LatticeVoxelGrid? = nil
     public var bandOptions = LatticeBandOptions()
+    /// ★ Every choice the band made that the user may override (chips in lattice-only view);
+    /// empty on the legacy path. See `LatticeBandDecision`.
+    public var bandDecisions: [LatticeBandDecision] = []
     /// ★ The part's material inside every declared prism, IGNORING the slabs — the grid
     /// the measurers read (`LatticeRegionMask.clippedWholePrism`). `occupancy` is the
     /// slab-clipped set where lattice may go.
@@ -661,6 +664,9 @@ public struct LatticeSDFScene {
                 // is nil under "No grade"/"Grade to fit", which silently turned "By sim"
                 // into the whole range. nil ⇒ `field`.
                 wallStressField: StressField? = nil,
+                // ★ the user's per-face / per-cap band choices ([key: solid]; see
+                // `LatticeBandDecision`) — empty ⇒ every choice is the rules' default
+                bandOverrides: [String: Bool] = [:],
                 // ★ the PRINTER'S bead (mm), for the skin under unselected faces; 0 ⇒ the
                 // organic settings' bead, else 0.45
                 beadMM: Double = 0) {

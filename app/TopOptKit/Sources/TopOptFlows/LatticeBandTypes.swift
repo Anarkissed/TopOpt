@@ -105,3 +105,38 @@ public struct LatticeBandOptions: Sendable, Equatable {
         return o
     }
 }
+
+/// ★★ A PLACE WHERE THE BAND MADE A CHOICE THE USER MAY OVERRIDE (his 2026-09-27: "a system
+/// where when the user is in Lattice Only view, there are little chips tracked to the faces that,
+/// when clicked, asks whether it should grade to solid or not").
+///
+/// Two kinds:
+///   face — an unselected CAD face the lattice reaches. `solid` = skin + rim + green under it
+///          ("grade to solid"); not solid = latticed through (open).
+///   cap  — a prism's depth end where it stops inside the part's material. `solid` = a rim facing
+///          the solid; not solid = nothing (the lattice is cut on the cap plane).
+/// `defaultSolid` is what the rules decide; `solid` is what this bake used (the override if the
+/// user set one). Keys: "face:<rawFaceID>" and "cap:<selectableKey>". The overrides live in
+/// `LatticeSettings.bandTreatments` ([key: solid]) and reach the scene as `bandOverrides`.
+public struct LatticeBandDecision: Sendable, Equatable, Identifiable {
+    public enum Kind: String, Sendable, Codable { case face, cap }
+    public var key: String
+    public var kind: Kind
+    /// A short name for the chip ("Face 20", "Face 23 depth end").
+    public var label: String
+    /// Model-space point on the surface (face) or the cap plane (cap) where the chip is pinned.
+    public var anchor: SIMD3<Float>
+    /// Outward unit normal there (for the chip's offset off the surface and back-facing tests).
+    public var normal: SIMD3<Float>
+    /// The area involved, mm² (to size/sort chips; tiny faces can be hidden by the UI).
+    public var areaMM2: Float
+    public var defaultSolid: Bool
+    public var solid: Bool
+    public var id: String { key }
+
+    public init(key: String, kind: Kind, label: String, anchor: SIMD3<Float>, normal: SIMD3<Float>,
+                areaMM2: Float, defaultSolid: Bool, solid: Bool) {
+        self.key = key; self.kind = kind; self.label = label; self.anchor = anchor; self.normal = normal
+        self.areaMM2 = areaMM2; self.defaultSolid = defaultSolid; self.solid = solid
+    }
+}
