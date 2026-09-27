@@ -171,7 +171,10 @@ final class LatticeSolidFillTests: XCTestCase {
     /// inside the prism, solid in the region, beyond the skin, is the rim.
     func testTheLatticeLayerDrawsTheRimUnderUnselectedFaces() {
         XCTAssertTrue(march.contains("bool solidOnly = U.shadeParams.w < 0.0;"), "★ solid-only march under the capsules")
-        XCTAssertTrue(march.contains("float Fr = max(max(dPrismHere, -dRegion), -dSkinIn);"), "★ the rim band field")
+        // ★ the rim band field — the legacy term (a distance everywhere since 2026-09-26, bounded by
+        // the part's material) and the band redesign's term (the fine padded rim texture)
+        XCTAssertTrue(march.contains("Frim = max(max(max(dPrismHere, rimCarve - dRegion), -dSkinIn), dMaterial);"), "★ the legacy rim band field")
+        XCTAssertTrue(march.contains("float FrimStep = max(max(v.r, v.b), max(v.a, dBox));"), "★ the band's rim field")
         XCTAssertTrue(march.contains("float Fstrut = (anyActive && !solidOnly) ? max(dn * cellHere, dClip) : 1e9;"), "★ no strut field when solid-only")
         XCTAssertTrue(march.contains("float Fsolid = (anyActive || solidOnly) ? 1e9 : (dRegion < 0.0 ? 1e9 : dClip);"), "★ no part fill when solid-only")
     }
