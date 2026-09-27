@@ -793,6 +793,26 @@ public enum LatticeBandFields {
                     let m2 = Float(2 * hf)
                     if br <= m2, matF[e] <= m2, ks >= -m2 {
                         q = Float(pocketQ(p, slab: false))
+                        // ★★ THE RIM IS THE MODEL'S SHAPE, NOT THE PRISM'S (his 2026-09-27 image 19:
+                        // "this notch happening on the curve … I'd prefer if it was smooth all the way
+                        // through"; S1: "the rim should be the outline of the model's shape - NOT the
+                        // face-prism"). A selected face's outline runs along the inner edge of the
+                        // chamfer round it, so the pocket stops ~2 mm short of the alongside faces
+                        // beyond, and the rim drawn only inside the pocket took the PRISM's side wall —
+                        // the outline polygon, with its jogs — as its outer face. A band point counts
+                        // when the lattice lies beneath it: the foot of its column (from the alongside
+                        // surface through the point, to the rim's inner face) is in the pocket. The gap
+                        // fills with rim, whose outer face is then the skin's smooth offset of the model;
+                        // past a cap (no lattice beneath) nothing changes.
+                        if !opt.rimInPocketOnly, bandF.nearTri[e] >= 0 {
+                            let pc = pieces[Int(bandF.nearTri[e])]
+                            let (cp, _) = closest(p, pc.a, pc.b, pc.c)
+                            let D = simd_distance(p, cp)
+                            if D > 1e-6 && D < c {
+                                let foot = cp + (p - cp) * (c / D)
+                                q = Swift.min(q, Float(qGrid.sampleLinear(foot)))
+                            }
+                        }
                     }
                     tb[4 * e] = Float16(br); tb[4 * e + 1] = Float16(Swift.max(-30, Swift.min(30, ks)))
                     tb[4 * e + 2] = Float16(matF[e]); tb[4 * e + 3] = Float16(q)

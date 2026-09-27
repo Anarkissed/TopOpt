@@ -84,6 +84,9 @@ public struct LatticeBandOptions: Sendable, Equatable {
     public var noRimFoot = false
     /// `LATTICE_BAND_INCLUDE_SELECTED=1`: selected faces banded too (control)
     public var includeSelected = false
+    /// `LATTICE_BAND_RIM_IN_POCKET=1`: the rim only inside the pocket — its outer face then follows
+    /// the prism's outline where a chamfer separates it from the alongside face (control)
+    public var rimInPocketOnly = false
 
     public init() {}
 
@@ -102,6 +105,7 @@ public struct LatticeBandOptions: Sendable, Equatable {
         o.noFootprint = on("LATTICE_BAND_NO_FOOTPRINT")
         o.noRimFoot = on("LATTICE_BAND_NO_RIMFOOT")
         o.includeSelected = on("LATTICE_BAND_INCLUDE_SELECTED")
+        o.rimInPocketOnly = on("LATTICE_BAND_RIM_IN_POCKET")
         return o
     }
 }
