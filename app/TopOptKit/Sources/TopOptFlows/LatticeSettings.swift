@@ -1756,6 +1756,19 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
     /// own wall).
     public var selectableCellMM: [String: Double] = [:]
 
+    /// ★★ THE USER'S BAND CHOICES (his 2026-09-27: "a system where when the user is in
+    /// Lattice Only view, there are little chips tracked to the faces that, when clicked,
+    /// asks whether it should grade to solid or not").
+    ///
+    /// Keyed like `LatticeBandDecision.key` — "face:<rawFaceID>" for an unselected CAD
+    /// face the lattice reaches, "cap:<selectableKey>" for a prism's depth end inside the
+    /// part's material — and valued `solid` (true = grade to solid / a rim facing the
+    /// solid; false = latticed through / nothing). ABSENT ⇒ the band's own rule decides,
+    /// which is every project saved before the chips existed. The preview reads it as the
+    /// scene's `bandOverrides`; it is part of `previewBakeInputs`, so a chip choice
+    /// rebakes like any other lattice setting.
+    public var bandTreatments: [String: Bool] = [:]
+
     /// ★ THE ENCLOSED-VOID RULE — the OFF control (task
     /// 2026-08-06-arm-projection-and-void-check, S2c). DEFAULT TRUE, matching
     /// core's own `lattice.require_lattice_void_reaches_exterior`.
@@ -1937,6 +1950,8 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         case frozenRegionDensity
         // the grading options (2026-08-25) — absent ⇒ full / stepped / none stated
         case gradingMode, gradeStepStyle, selectableCellMM
+        // ★ the band chips' choices (2026-09-27) — absent ⇒ the band's own rules
+        case bandTreatments
         // ★ ORGANIC (2026-09-02). Absent from every earlier snapshot ⇒ each decodes to
         // its own default ⇒ an existing project emits exactly the job it always has.
         case organicGrowth, organicStrutWidthMM, organicOverhangDeg
@@ -2101,6 +2116,10 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
                                                forKey: .gradeStepStyle) ?? .stepped
         selectableCellMM = try c.decodeIfPresent([String: Double].self,
                                                  forKey: .selectableCellMM) ?? [:]
+        // Absent from every snapshot before the band chips ⇒ empty ⇒ every face and
+        // cap takes the band's own rule, exactly as those projects always drew.
+        bandTreatments = try c.decodeIfPresent([String: Bool].self,
+                                               forKey: .bandTreatments) ?? [:]
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -2192,6 +2211,11 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
             try c.encode(gradeStepStyle, forKey: .gradeStepStyle)        }
         if !selectableCellMM.isEmpty {
             try c.encode(selectableCellMM, forKey: .selectableCellMM)
+        }
+        // Written only when the user has made a choice, so an untouched project's file
+        // is byte-identical to one saved before the chips existed (bar U1).
+        if !bandTreatments.isEmpty {
+            try c.encode(bandTreatments, forKey: .bandTreatments)
         }
     }
 

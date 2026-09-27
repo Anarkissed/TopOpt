@@ -78,6 +78,10 @@ public struct WorkspacePlaceholder: View {
     // the struts and the solid outline draw; the cube turns orange while it is set,
     // and a large badge flashes on the viewport either way.
     @State private var latticeOnly = false
+    /// ★ THE BAND CHIPS (his 2026-09-27) — which chip's card is open, and where the
+    /// stage's own UI is (`LatticeBandChipKeepOutKey`, `.global`), so no chip sits on it.
+    @State private var bandChipOpenKey: String? = nil
+    @State private var bandChipKeepOut: [CGRect] = []
     @State private var latticeOnlyFlash: String? = nil
     /// Each flash gets its own token, so a repeat cannot be cleared by the previous
     /// flash's timer (his 2026-09-18: "after that first time the opacity was super small").
@@ -1232,6 +1236,14 @@ public struct WorkspacePlaceholder: View {
             if !showSmoothingPage, !latticeLegendMode.drilledIn {
                 latticeRegionGizmoOverlay.ignoresSafeArea()
             }
+            // ★★ THE BAND CHIPS — lattice-only view only (his 2026-09-27). BELOW the
+            // chrome in z, so a panel always wins a touch; the layout also keeps every chip
+            // off the chrome's measured frames. Not while the key is drilled in: a tap
+            // there reads a strut.
+            if !fullScreenPageUp, viewerMesh != nil, visible.latticeControls,
+               !latticeLegendMode.drilledIn {
+                latticeBandChipsOverlay.ignoresSafeArea()
+            }
 
             if !fullScreenPageUp { chrome }
             if force.phase == .setup, !fullScreenPageUp {
@@ -1514,6 +1526,10 @@ public struct WorkspacePlaceholder: View {
             // spelled out here too because the page-chrome audit reads this line.
             if !fullScreenPageUp, seeResultsShown { seeResultsChip }
         }
+        // ★ the stage UI the band chips stay out of — every reporter is a descendant
+        .onPreferenceChange(LatticeBandChipKeepOutKey.self) { rects in
+            if rects != bandChipKeepOut { bandChipKeepOut = rects }
+        }
     }
 
     /// Start the M7.7 optimize run for the current load case. Gated on the same
@@ -1599,6 +1615,7 @@ public struct WorkspacePlaceholder: View {
                 Spacer()
                 OrientationGizmoView(camera: showLatticeWizard ? wizardCamera : cameraModel,
                                      size: gizmoSize)
+                    .latticeBandChipKeepOut()
                     // ★ leaves with the cube when the wizard's wall editor covers the stage
                     .modifier(StageDepartureMotion(covered: wizardCoversStage))
             }
@@ -2840,6 +2857,7 @@ public struct WorkspacePlaceholder: View {
                                                 right: .greatestFiniteMagnitude,
                                                 width: 0))
         })
+        .latticeBandChipKeepOut()          // ★ the identity row: no band chip under it
         .alert("Rename project", isPresented: $renaming) {
             TextField("Name", text: $nameDraft)
             Button("Save") { model.renameCurrentProject(to: nameDraft) }
@@ -3927,6 +3945,8 @@ public struct WorkspacePlaceholder: View {
             .overlay(Capsule().strokeBorder(
                 DS.Color.accent.opacity(0.45).color, lineWidth: 1)))
         .dsShadow(DS.Shadow.panel)
+        // ★ a chip's rebake puts this banner up — no band chip under it
+        .latticeBandChipKeepOut()
         // ★ CLEAR OF THE TOP CHROME (maintainer, 2026-08-19: "Currently it is
         // covering the redo button and cutting slightly into the 'Settings'
         // button … Please make it less wide and as tall as it needs to be.
@@ -4140,6 +4160,7 @@ public struct WorkspacePlaceholder: View {
             .overlay(Capsule().strokeBorder(
                 DS.Color.accent.opacity(0.45).color, lineWidth: 1)))
         .dsShadow(DS.Shadow.panel)
+        .latticeBandChipKeepOut()          // ★ no band chip under the banner
         // ★ CLEAR OF THE TOP CHROME (maintainer, 2026-08-19: "Currently it is
         // covering the redo button and cutting slightly into the 'Settings'
         // button … Please make it less wide and as tall as it needs to be.
@@ -4229,6 +4250,7 @@ public struct WorkspacePlaceholder: View {
             // the struts (`stressOverlay:` on the lattice layer). A scale for colours
             // the renderer is not painting would be worse than no scale.
             stress: latticeLegendStress())
+            .latticeBandChipKeepOut()      // ★ the legend: no band chip under it
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
             // ★ MINIMISED, IT SITS ON THE EDGE (maintainer: "attach the legend modal
             // to the very far right side of the screen") — the point of collapsing it
@@ -5329,6 +5351,10 @@ public struct WorkspacePlaceholder: View {
                                                ?? lat.cellMM),
                                         wallDepthSteps: wallDepthSteps,
                                         wallStressField: wallStressField,
+                                        // ★ the band chips' choices (his 2026-09-27) — read
+                                        // with the rest of `lat` on main; a change is a
+                                        // `previewBakeInputs` change, so it rebakes
+                                        bandOverrides: lat.bandTreatments,
                                         beadMM: beadForBake)
             DispatchQueue.main.async {
                 // ★ a newer bake has started: this picture is stale, drop it
@@ -5490,6 +5516,7 @@ public struct WorkspacePlaceholder: View {
         // and carries none.
         if let back = stage.back {
             stageNavButton(to: back, icon: "chevron.left")
+                .latticeBandChipKeepOut()
                 .modifier(StageNavPlacement(stage: stage))
         }
         // ★ THE WAY FORWARD — the top-right column, LEFT of the gizmo.
@@ -5501,6 +5528,7 @@ public struct WorkspacePlaceholder: View {
         VStack(alignment: .trailing, spacing: PageChrome.gap) {
             ForEach(stage.forward, id: \.rawValue) { dest in
                 stageNavButton(to: dest, icon: Self.stageIcon(dest))
+                    .latticeBandChipKeepOut()
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
@@ -5825,6 +5853,7 @@ public struct WorkspacePlaceholder: View {
                                                     right: g.frame(in: .global).minX,
                                                     width: 0))
             })
+            .latticeBandChipKeepOut()
             // ★ THE TOP-RIGHT SLOT, exactly where the TO page's "Lattice" button
             // sits: LEFT of the gizmo by `gizmoClearance`, top edge on the gizmo's
             // own inset. It moved UP into the space "Topology" vacated.
@@ -5865,6 +5894,7 @@ public struct WorkspacePlaceholder: View {
             Spacer()
             ForEach(BottomChipOrder.sorted(visibleSettingsChips, widths: settingsChipWidths), id: \.self) { id in
                 settingsChipRow(id)
+                    .latticeBandChipKeepOut()   // ★ no band chip under a settings chip
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
@@ -7364,6 +7394,7 @@ public struct WorkspacePlaceholder: View {
                 }
             }
         }
+        .latticeBandChipKeepOut()          // ★ the tool column: no band chip under it
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
         // ★ BELOW THE GIZMO, in the slot `gizmoClearance` defines — the same one
         // the Surface tray uses, so the two stages put the control in one place.
@@ -7430,6 +7461,74 @@ public struct WorkspacePlaceholder: View {
                 withAnimation(.easeInOut(duration: 0.3)) { latticeEdgePulse = value }
             }
         }
+    }
+
+    // MARK: ★★ THE BAND CHIPS (his 2026-09-27: "a system where when the user is in
+    // Lattice Only view, there are little chips tracked to the faces that, when clicked,
+    // asks whether it should grade to solid or not")
+
+    /// ★ LATTICE ONLY IS ON — the orange cube, the body at alpha 0. The same pair
+    /// `latticePreviewBodyAlpha` drops the body for, so the chips can never show over a
+    /// part that is still drawn.
+    private var latticeOnlyViewOn: Bool { latticeOnly && showStrutPreview }
+
+    /// ★ THE TRANSFORM THE PART IS DRAWN WITH, for the chips: the camera the viewer
+    /// published (`projection`, world → clip) composed with the settle
+    /// (`ViewerModelFrame.matrix` — the renderer's own `modelMatrix()`), about the DRAWN
+    /// mesh's centre (`stageMesh`: what the renderer's `setMesh` rotates about) and
+    /// through the settle handed to the view (`settleQuat`). A decision's anchor is in
+    /// MODEL space, so `projection` alone would pin every chip to the un-settled part.
+    private var latticeBandChipFrame: LatticeBandChipFrame? {
+        guard let proj = projection, let mesh = stageMesh else { return nil }
+        return LatticeBandChipFrame(projection: proj, modelCentre: mesh.bounds.center,
+                                    modelRotation: settleQuat)
+    }
+
+    /// The chips themselves. Re-laid out on every render — `projection` is republished on
+    /// every orbit, so each chip rides its face; placement is `LatticeBandChipLayout`.
+    @ViewBuilder private var latticeBandChipsOverlay: some View {
+        if latticeOnlyViewOn, let scene = strutScene, !scene.bandDecisions.isEmpty {
+            GeometryReader { geo in
+                // the keep-out frames are `.global`; this layer ignores the safe area like
+                // the MTKView, so the difference is the layer's own origin (0 full-screen)
+                let origin = geo.frame(in: .global).origin
+                let chips = LatticeBandChipLayout.layout(
+                    scene: scene, treatments: project.lattice.bandTreatments,
+                    frame: latticeBandChipFrame, latticeOnly: latticeOnlyViewOn,
+                    keepOut: bandChipKeepOut.map { $0.offsetBy(dx: -origin.x, dy: -origin.y) })
+                ZStack(alignment: .topLeading) {
+                    ForEach(chips) { c in
+                        LatticeBandChipView(
+                            placement: c,
+                            isOpen: Binding(
+                                get: { bandChipOpenKey == c.decision.key },
+                                set: { open in
+                                    if open { bandChipOpenKey = c.decision.key }
+                                    else if bandChipOpenKey == c.decision.key { bandChipOpenKey = nil }
+                                }),
+                            onChoose: { chooseBandTreatment(c.decision, solid: $0) },
+                            onDefault: { chooseBandTreatment(c.decision, solid: nil) })
+                        .position(c.point)
+                    }
+                }
+            }
+            .onDisappear { bandChipOpenKey = nil }
+            .transition(.opacity)
+        }
+    }
+
+    /// ★ A CHIP'S CHOICE → `project.lattice.bandTreatments` → the rebake. One undo step
+    /// (sealed either side, like every discrete stage action), saved at once like the
+    /// wizard's Save. The write moves `previewBakeInputs`, so `.onChange(of:
+    /// project.lattice)` supersedes any running bake and starts this one (his R10).
+    /// `solid` nil = "Use default".
+    private func chooseBandTreatment(_ d: LatticeBandDecision, solid: Bool?) {
+        let value = solid.flatMap { LatticeBandChipLayout.treatment(choosing: $0, for: d) }
+        guard project.lattice.bandTreatments[d.key] != value else { return }
+        project.sealUndoStep()
+        project.writeLatticeBandTreatment(d.key, solid: value)
+        project.sealUndoStep()
+        model.persistCurrentProject()
     }
 
     /// The blue glow round the screen's edge — see `latticeEdgePulse`.
@@ -9272,6 +9371,7 @@ public struct WorkspacePlaceholder: View {
             selectionsLibraryCard
             if !selectionsCollapsed { latticePreviewNotice }
         }
+        .latticeBandChipKeepOut()          // ★ the Selections panel, for the band chips
         .modifier(WorkspacePanelPlacement(minimized: selectionsCollapsed))
     }
 
@@ -11417,6 +11517,7 @@ public struct WorkspacePlaceholder: View {
             Color.clear.preference(key: BottomBarHeightKey.self,
                                    value: g.size.height)
         })
+        .latticeBandChipKeepOut()          // ★ the bar's own frame, for the band chips
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
         .padding(.horizontal, DS.Space.xl4)
         .padding(.bottom, DS.Space.xl4)

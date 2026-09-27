@@ -964,6 +964,15 @@ public final class ProjectModel: ObservableObject {
         else { lattice.selectableExpandMM[ref.key] = v }
     }
 
+    /// ★ ONE BAND CHIP'S CHOICE (his 2026-09-27 lattice-only chips). `key` is a
+    /// `LatticeBandDecision.key`; nil CLEARS it, so the band's own rule decides again.
+    /// Which value to write for a tapped segment is `LatticeBandChipLayout.treatment`
+    /// — a choice equal to the rule's default is stored as no choice at all.
+    public func writeLatticeBandTreatment(_ key: String, solid: Bool?) {
+        if let solid { lattice.bandTreatments[key] = solid }
+        else { lattice.bandTreatments.removeValue(forKey: key) }
+    }
+
     /// ★ WHAT THE FACE CARDS MUST BE DERIVED FROM (task
     /// 2026-08-17-lattice-stage-repair §2). One entry per thing the lattice panel
     /// shows a drawer for: the group itself, and every selectable inside it that
