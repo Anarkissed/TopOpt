@@ -195,12 +195,60 @@ public enum LatticeBandFields {
                 }
             }
         }
+        // ★★★ ONLY THE DIRECT OPPOSITE IS LATTICED THROUGH (his 2026-09-27: "While it is a face
+        // behind the other face prism, and being covered by it, it is not the *direct* opposite
+        // face … the start of the curve face is a selectable face and not the DIRECT opposite
+        // side of the face selected; therefore it should not be latticed through"). A face the
+        // prism reaches is its DIRECT opposite when the material between them is that selected
+        // face's own wall: walking back from the face toward the selected face, most of the path
+        // lies nearer that selected face than any other (the wall it belongs to). Wall B's end
+        // face (f31) is reached by face 23's prism only through wall B — face 2's wall — so it
+        // keeps its skin and rim; the leg's inner face (f24) is behind the leg — face 23's own.
+        var selTris: [(t: Int, raw: Int)] = []
+        for t in 0..<triCount where area[t] > 1e-12 && fid[t] >= 0 && selectedRaw.contains(fid[t]) { selTris.append((t, fid[t])) }
+        func ownerAt(_ p: SIMD3<Double>) -> Int {
+            var best = Double.greatestFiniteMagnitude, owner = -1
+            for st in selTris {
+                let (cp, _) = closest(p, A[st.t], B[st.t], C[st.t])
+                let d = simd_distance_squared(p, cp)
+                if d < best { best = d; owner = st.raw }
+            }
+            return owner
+        }
+        var directArea: [Int: [Double]] = [:]
+        if !opt.perTriangle {
+            for t in 0..<triCount where area[t] > 1e-12 {
+                let f = fid[t]
+                guard f >= 0, alignedArea[f] != nil else { continue }
+                for (ri, rg) in includeFaces.enumerated() where abs(simd_dot(N[t], LatticeRegionMask.unit(rg.normal))) > acrossCos && faceReached[f]![ri] {
+                    let raw = rg.rawFaceID.map { Int($0) } ?? rg.faceID ?? -1
+                    let n = LatticeRegionMask.unit(rg.normal)
+                    var p = (A[t] + B[t] + C[t]) / 3 - N[t] * 1.5
+                    var mine = 0, total = 0
+                    while simd_dot(p - rg.origin, n) > 0 && total < 200 {
+                        total += 1
+                        if ownerAt(p) == raw { mine += 1 }
+                        p -= n * 1.0
+                    }
+                    if total > 0 && 2 * mine >= total {
+                        if directArea[f] == nil { directArea[f] = [Double](repeating: 0, count: includeFaces.count) }
+                        directArea[f]![ri] += area[t]
+                    }
+                }
+            }
+        }
         var classByFace: [Int: FaceClass] = [:]
+        var behindAnother: [Int] = []
         for (f, fa) in faceArea {
-            var open = false
-            for ri in 0..<includeFaces.count where alignedArea[f]![ri] >= 0.5 * fa && faceReached[f]![ri] { open = true }
+            var open = false, wouldBe = false
+            for ri in 0..<includeFaces.count where alignedArea[f]![ri] >= 0.5 * fa && faceReached[f]![ri] {
+                wouldBe = true
+                if opt.perTriangle || (directArea[f]?[ri] ?? 0) >= 0.5 * alignedArea[f]![ri] { open = true }
+            }
+            if wouldBe && !open { behindAnother.append(f) }
             classByFace[f] = open ? .open : .alongside
         }
+        counts["behindAnotherPrism"] = behindAnother.count
         var cls = [FaceClass](repeating: .none, count: triCount)
         for t in 0..<triCount {
             let f = fid[t]
@@ -764,9 +812,10 @@ public enum LatticeBandFields {
             let v = classByFace[f]!
             return "f\(f)=\(v == .open ? "O" : v == .alongside ? "A" : v == .selected ? "S" : "N")"
         }.joined(separator: " ")
-        let diag = String(format: "DIAG band v1: skin %.2f rim %.2f side-rim %.2f band %.1f mm · h %.3f fine %.3f (%d×%d×%d) · alongside tris %d, border edges %d (footprint %d, neighbour %d), unmatched %d, overflow %d, taper segs %d · side tiles %d, cap tiles %d · voxels skin %d rim %d grade %d · sign disagreements %d · fine rim texels %d · ms %@ · faces %@",
+        let diag = String(format: "DIAG band v1: skin %.2f rim %.2f side-rim %.2f band %.1f mm · h %.3f fine %.3f (%d×%d×%d) · alongside tris %d, border edges %d (footprint %d, neighbour %d), unmatched %d, overflow %d, taper segs %d · side tiles %d, cap tiles %d · voxels skin %d rim %d grade %d · sign disagreements %d · fine rim texels %d · behind another prism %@ · ms %@ · faces %@",
                           s, r, rO, g, h, hf, fd.0, fd.1, fd.2, alongIdx.count, cBorder, cFoot, cNeigh, cUnmatched, cOverflow, tapers.count, sideTiles, capTiles,
                           skinVox, rimVox, gradeVox, signDisagree, rimTexels,
+                          behindAnother.sorted().map { "f\($0)" }.joined(separator: ",") as NSString,
                           timings.sorted { $0.key < $1.key }.map { "\($0.key)=\(Int($0.value))" }.joined(separator: ","), faceList)
         _ = t0
         return Result(qC: qGrid, carvedC: grid(carvedC), gradeC: grid(bandC.grade), skinC: grid(skinC), rimC: grid(bandC.br),
