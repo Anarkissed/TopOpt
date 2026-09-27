@@ -1846,7 +1846,7 @@ static float3 cap_normal(float3 p, float3 pa, float3 pb, float r) {
 // clipping surface's own distance and gradient — so the composition lives here and
 // `cap_inside_clip` is a thin test over it.
 static float cap_clip_field(constant LSDFUniforms& U, texture3d<float> sdfTex,
-                            texture3d<float> regionTex, sampler samp,
+                            texture3d<float> regionTex, texture3d<float> rimTex, sampler samp,
                             constant ShellClip& RC, constant float4* decls, float3 p,
                             float embed) {
     float3 sdfDims = max(U.sdfDims.xyz, float3(1.0));
@@ -1874,35 +1874,44 @@ static float cap_clip_field(constant LSDFUniforms& U, texture3d<float> sdfTex,
     // run welds it. The PART and its bounding box are never relaxed — material outside
     // the part is not material.
     float dRegion = regionTex.sample(samp, stc).r - embed;
-    // ★★★ THE BAND (2026-09-26): the rim is drawn off its own FINE grid while this clip
-    // reads the coarse region field, so the capsule ends are carried a quarter voxel
-    // further (`bandSpacing.w`) — into the rim, never short of it.
-    if (U.bandOrigin.w > 0.5) { dRegion -= U.bandSpacing.w; }
+    // ★★★ THE BAND (2026-09-26/27): the struts meet the rim WHERE THE RIM IS DRAWN — its own
+    // fine field (B_r), not the coarse region field — and the weld into it FADES toward the
+    // part's surface (his 2026-09-27: "artifacts on the blue rim … the green and blue are
+    // too close together … as I move the camera around, it changes"). A strut end welded
+    // into the rim was cut flush at an open surface right beside the rim's own cut face —
+    // two coplanar surfaces, z-fighting. Deep inside the weld is full (the joint hidden in
+    // the rim); at the surface the strut stops 0.15 mm short of the rim instead.
+    if (U.bandOrigin.w > 0.5) {
+        float4 bv = rimTex.sample(samp, band_uvw(U, p));
+        float weld = embed + U.bandSpacing.w;
+        float fade = clamp(-bv.b / max(1.5 * weld, 0.2), 0.0, 1.0);
+        dRegion = max(regionTex.sample(samp, stc).b, -bv.r + 0.15 * (1.0 - fade)) - weld * fade;
+    }
     return max(max(lsdf_part_clip(U, sdfTex, regionTex, samp, RC, decls, p, dPart),
                    dBox), dRegion);
 }
 
 static bool cap_inside_clip(constant LSDFUniforms& U, texture3d<float> sdfTex,
-                            texture3d<float> regionTex, sampler samp,
+                            texture3d<float> regionTex, texture3d<float> rimTex, sampler samp,
                             constant ShellClip& RC, constant float4* decls, float3 p) {
-    return cap_clip_field(U, sdfTex, regionTex, samp, RC, decls, p, 0.0) < 0.02;
+    return cap_clip_field(U, sdfTex, regionTex, rimTex, samp, RC, decls, p, 0.0) < 0.02;
 }
 
 // The outward normal of the clipping surface — the gradient of the field above. This is
 // what a CUT through solid material looks like: it is shaded by the plane that cut it,
 // never by the tube it went through.
 static float3 cap_clip_normal(constant LSDFUniforms& U, texture3d<float> sdfTex,
-                              texture3d<float> regionTex, sampler samp,
+                              texture3d<float> regionTex, texture3d<float> rimTex, sampler samp,
                               constant ShellClip& RC, constant float4* decls, float3 p) {
     float h = 0.5 * max(max(U.sdfSpacing.x, U.sdfSpacing.y), U.sdfSpacing.z);
     h = max(h, 1e-4);
     float3 g;
-    g.x = cap_clip_field(U, sdfTex, regionTex, samp, RC, decls, p + float3(h, 0, 0), 0.0)
-        - cap_clip_field(U, sdfTex, regionTex, samp, RC, decls, p - float3(h, 0, 0), 0.0);
-    g.y = cap_clip_field(U, sdfTex, regionTex, samp, RC, decls, p + float3(0, h, 0), 0.0)
-        - cap_clip_field(U, sdfTex, regionTex, samp, RC, decls, p - float3(0, h, 0), 0.0);
-    g.z = cap_clip_field(U, sdfTex, regionTex, samp, RC, decls, p + float3(0, 0, h), 0.0)
-        - cap_clip_field(U, sdfTex, regionTex, samp, RC, decls, p - float3(0, 0, h), 0.0);
+    g.x = cap_clip_field(U, sdfTex, regionTex, rimTex, samp, RC, decls, p + float3(h, 0, 0), 0.0)
+        - cap_clip_field(U, sdfTex, regionTex, rimTex, samp, RC, decls, p - float3(h, 0, 0), 0.0);
+    g.y = cap_clip_field(U, sdfTex, regionTex, rimTex, samp, RC, decls, p + float3(0, h, 0), 0.0)
+        - cap_clip_field(U, sdfTex, regionTex, rimTex, samp, RC, decls, p - float3(0, h, 0), 0.0);
+    g.z = cap_clip_field(U, sdfTex, regionTex, rimTex, samp, RC, decls, p + float3(0, 0, h), 0.0)
+        - cap_clip_field(U, sdfTex, regionTex, rimTex, samp, RC, decls, p - float3(0, 0, h), 0.0);
     float L = length(g);
     return L > 1e-9 ? g / L : float3(0.0, 0.0, 1.0);
 }
@@ -1938,7 +1947,7 @@ static float cap_sd(float3 p, float3 pa, float3 pb, float r) {
 // How much to fatten the strut at `p`: full at the solid's surface, gone `reach` away
 // from it, and nothing at all where there is no material to wet (outside the part).
 static float cap_wet_flare(constant LSDFUniforms& U, texture3d<float> sdfTex,
-                           texture3d<float> regionTex, sampler samp,
+                           texture3d<float> regionTex, texture3d<float> rimTex, sampler samp,
                            constant ShellClip& RC, constant float4* decls,
                            float3 p, float reach) {
     if (reach <= 0.0) { return 0.0; }
@@ -1951,7 +1960,7 @@ static float cap_wet_flare(constant LSDFUniforms& U, texture3d<float> sdfTex,
     if (solid <= 0.0) { return 0.0; }
     // Distance to the boundary between "lattice may be here" and "solid material":
     // NEGATIVE where the lattice lives, POSITIVE inside the solid.
-    float s = cap_clip_field(U, sdfTex, regionTex, samp, RC, decls, p, 0.0);
+    float s = cap_clip_field(U, sdfTex, regionTex, rimTex, samp, RC, decls, p, 0.0);
     // ★★★ EASES IN AND OUT, AND IS TIGHT TO THE JOINT (his corrections, 2026-09-08:
     // first "the fillet is happening too far *above* the rim … we should not be able to
     // see the inwards slant", then "These fillets are going the wrong way, They should
@@ -1986,30 +1995,30 @@ static float cap_wet_flare(constant LSDFUniforms& U, texture3d<float> sdfTex,
 
 // The surface actually drawn: the fattened strut, intersected with where material may be.
 static float cap_wet_field(constant LSDFUniforms& U, texture3d<float> sdfTex,
-                           texture3d<float> regionTex, sampler samp,
+                           texture3d<float> regionTex, texture3d<float> rimTex, sampler samp,
                            constant ShellClip& RC, constant float4* decls,
                            float3 p, float3 pa, float3 pb, float r,
                            float fillet, float embed) {
     float d = cap_sd(p, pa, pb, r);
     if (fillet > 0.0) {
-        d -= fillet * cap_wet_flare(U, sdfTex, regionTex, samp, RC, decls, p, 2.0 * fillet);
+        d -= fillet * cap_wet_flare(U, sdfTex, regionTex, rimTex, samp, RC, decls, p, 2.0 * fillet);
     }
-    return max(d, cap_clip_field(U, sdfTex, regionTex, samp, RC, decls, p, embed));
+    return max(d, cap_clip_field(U, sdfTex, regionTex, rimTex, samp, RC, decls, p, embed));
 }
 
 static float3 cap_wet_normal(constant LSDFUniforms& U, texture3d<float> sdfTex,
-                             texture3d<float> regionTex, sampler samp,
+                             texture3d<float> regionTex, texture3d<float> rimTex, sampler samp,
                              constant ShellClip& RC, constant float4* decls,
                              float3 p, float3 pa, float3 pb, float r,
                              float fillet, float embed) {
     float h = max(0.15 * r, 1e-4);
     float3 g;
-    g.x = cap_wet_field(U, sdfTex, regionTex, samp, RC, decls, p + float3(h, 0, 0), pa, pb, r, fillet, embed)
-        - cap_wet_field(U, sdfTex, regionTex, samp, RC, decls, p - float3(h, 0, 0), pa, pb, r, fillet, embed);
-    g.y = cap_wet_field(U, sdfTex, regionTex, samp, RC, decls, p + float3(0, h, 0), pa, pb, r, fillet, embed)
-        - cap_wet_field(U, sdfTex, regionTex, samp, RC, decls, p - float3(0, h, 0), pa, pb, r, fillet, embed);
-    g.z = cap_wet_field(U, sdfTex, regionTex, samp, RC, decls, p + float3(0, 0, h), pa, pb, r, fillet, embed)
-        - cap_wet_field(U, sdfTex, regionTex, samp, RC, decls, p - float3(0, 0, h), pa, pb, r, fillet, embed);
+    g.x = cap_wet_field(U, sdfTex, regionTex, rimTex, samp, RC, decls, p + float3(h, 0, 0), pa, pb, r, fillet, embed)
+        - cap_wet_field(U, sdfTex, regionTex, rimTex, samp, RC, decls, p - float3(h, 0, 0), pa, pb, r, fillet, embed);
+    g.y = cap_wet_field(U, sdfTex, regionTex, rimTex, samp, RC, decls, p + float3(0, h, 0), pa, pb, r, fillet, embed)
+        - cap_wet_field(U, sdfTex, regionTex, rimTex, samp, RC, decls, p - float3(0, h, 0), pa, pb, r, fillet, embed);
+    g.z = cap_wet_field(U, sdfTex, regionTex, rimTex, samp, RC, decls, p + float3(0, 0, h), pa, pb, r, fillet, embed)
+        - cap_wet_field(U, sdfTex, regionTex, rimTex, samp, RC, decls, p - float3(0, 0, h), pa, pb, r, fillet, embed);
     float L = length(g);
     return L > 1e-9 ? g / L : float3(0.0, 0.0, 1.0);
 }
@@ -2028,6 +2037,7 @@ fragment CapGBuf capsule_gbuffer(CapVOut in [[stage_in]],
                                  texture3d<float> tintTex [[texture(2)]],
                                  texture3d<float> regionTex [[texture(3)]],
                                  texture3d<float> stressTex [[texture(4)]],
+                                 texture3d<float> rimTex [[texture(6)]],
                                  sampler samp [[sampler(0)]],
                                  constant ShellClip& RC [[buffer(4)]],
                                  constant float4* shellDecls [[buffer(5)]]) {
@@ -2059,7 +2069,7 @@ fragment CapGBuf capsule_gbuffer(CapVOut in [[stage_in]],
         if (t < 0.0) { discard_fragment(); }
         p = ro + rd * t;
         n = cap_normal(p, A.xyz, B.xyz, R);
-        if (!cap_inside_clip(U, sdfTex, regionTex, samp, RC, shellDecls, p)) {
+        if (!cap_inside_clip(U, sdfTex, regionTex, rimTex, samp, RC, shellDecls, p)) {
             float3 mid = 0.5 * (A.xyz + B.xyz);
             float T = dot(mid - ro, rd) + 0.5 * length(B.xyz - A.xyz) + R + 1.0;
             float tb = cap_intersect(ro + rd * T, -rd, A.xyz, B.xyz, R);
@@ -2070,7 +2080,7 @@ fragment CapGBuf capsule_gbuffer(CapVOut in [[stage_in]],
             float lo = t, hi = -1.0;
             for (int i = 1; i <= CAP_WALK; ++i) {
                 float ts = mix(t, tExit, float(i) / float(CAP_WALK));
-                if (cap_inside_clip(U, sdfTex, regionTex, samp, RC, shellDecls, ro + rd * ts)) {
+                if (cap_inside_clip(U, sdfTex, regionTex, rimTex, samp, RC, shellDecls, ro + rd * ts)) {
                     hi = ts;
                     break;
                 }
@@ -2079,14 +2089,14 @@ fragment CapGBuf capsule_gbuffer(CapVOut in [[stage_in]],
             if (hi < 0.0) { discard_fragment(); }
             for (int i = 0; i < 12; ++i) {
                 float m2 = 0.5 * (lo + hi);
-                if (cap_inside_clip(U, sdfTex, regionTex, samp, RC, shellDecls, ro + rd * m2)) {
+                if (cap_inside_clip(U, sdfTex, regionTex, rimTex, samp, RC, shellDecls, ro + rd * m2)) {
                     hi = m2;
                 } else {
                     lo = m2;
                 }
             }
             p = ro + rd * hi;
-            n = cap_clip_normal(U, sdfTex, regionTex, samp, RC, shellDecls, p);
+            n = cap_clip_normal(U, sdfTex, regionTex, rimTex, samp, RC, shellDecls, p);
             if (dot(n, rd) > 0.0) { n = -n; }
         }
     } else {
@@ -2101,7 +2111,7 @@ fragment CapGBuf capsule_gbuffer(CapVOut in [[stage_in]],
         bool hit = false;
         for (int i = 0; i < 48; ++i) {
             float3 q = ro + rd * t;
-            float d = cap_wet_field(U, sdfTex, regionTex, samp, RC, shellDecls,
+            float d = cap_wet_field(U, sdfTex, regionTex, rimTex, samp, RC, shellDecls,
                                     q, A.xyz, B.xyz, R, fillet, embed);
             if (d < eps) { hit = true; break; }
             t += max(d, 0.5 * eps);
@@ -2109,7 +2119,7 @@ fragment CapGBuf capsule_gbuffer(CapVOut in [[stage_in]],
         }
         if (!hit) { discard_fragment(); }
         p = ro + rd * t;
-        n = cap_wet_normal(U, sdfTex, regionTex, samp, RC, shellDecls,
+        n = cap_wet_normal(U, sdfTex, regionTex, rimTex, samp, RC, shellDecls,
                            p, A.xyz, B.xyz, R, fillet, embed);
         if (dot(n, rd) > 0.0) { n = -n; }
     }
