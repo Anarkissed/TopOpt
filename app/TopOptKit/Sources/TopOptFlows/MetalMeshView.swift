@@ -2506,11 +2506,18 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         return true
     }
 
-    /// The model matrix: rotate about the model centre (keeps the centre fixed).
+    /// The model matrix: rotate about the model centre (keeps the centre fixed). ONE
+    /// definition, shared with the overlays that pin to model points
+    /// (`ViewerModelFrame.matrix` — the lattice band chips compose it with the published
+    /// camera, so a chip and the part it sits on are drawn through the same transform).
     private func modelMatrix() -> simd_float4x4 {
-        let r = simd_float4x4(modelRotation)
-        return Self.translation(modelCenter) * r * Self.translation(-modelCenter)
+        ViewerModelFrame.matrix(centre: modelCenter, rotation: modelRotation)
     }
+
+    /// The body's own clip-from-model (`ViewerUniforms.mvp`) at `aspect` — what every
+    /// pass draws the part with. For tests that hold an overlay's projection against the
+    /// renderer's.
+    func clipFromModel(aspect: Float) -> simd_float4x4 { makeUniforms(aspect: aspect).mvp }
 
     private static func translation(_ t: SIMD3<Float>) -> simd_float4x4 {
         var m = matrix_identity_float4x4
