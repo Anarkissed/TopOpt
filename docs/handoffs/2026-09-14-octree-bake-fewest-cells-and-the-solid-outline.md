@@ -1783,3 +1783,45 @@ behind the fillet) vs `LATTICE_BAND_CAP_RIM=1` (a rim facing the solid). Renders
 Also: smooth per-face rim normals (texture 7) have no producer yet; depth-bias edge case noted by
 the plumbing agent. If attempt 4 fails on his screen: attempt 5, then the full-section recode
 (pocket logic included).
+
+## 2026-09-27 20:21 — REFINEMENTS + THE CHIPS (installed 20:21:06; his verdict pending)
+
+**Direct opposite only** (456c06bb, his R3): a face is latticed through only when, walking from it
+back toward the selected face, most of the path lies nearer that selected face (its own wall).
+f31 (start of the curve, wall B's end face) keeps skin + rim; DIAG names it "behind another prism".
+
+**Zoom-dependent green on the rim and specks on the skin** (his images 17–20): two causes.
+(1) strut ends were cut flush and coplanar with the rim's inner face — struts now stop where the
+rim is DRAWN (fine B_r) and their weld fades toward the surface (4fa8ad18); (2) the near plane was
+a fixed 0.01 mm, so the float depth buffer resolved ~1 mm at 400 mm — it now follows the orbit,
+1 % of the distance clamped 0.01–5 mm (6adc3a9a; `TOPOPT_FIXED_NEAR=1` = old, for A/B).
+A/B far 1231 → 332 px, mid 4673 → 1147 px.
+
+**The notch on the curve** (his image 19): the rim was drawn only inside the pocket, and a selected
+face's outline runs along the inner edge of the chamfer, so the rim's outer face took the prism
+outline's jogs. A band point now counts when the lattice lies beneath it (its column's foot is
+in the pocket) — the rim's outer face is the skin's smooth offset of the model (6e17a244;
+`LATTICE_BAND_RIM_IN_POCKET=1` = old).
+
+**Re-render of the review's 44 frames** (wf_3edb8a41-30b confirmed 31 findings on renders made
+before all three fixes): green-on-blue speckle 19,584 → 2,791 px (−86 %) over the 22
+lattice-only frames; zleg1's green line + crease, a0hi's two notches and a1hi's grey "+" skin
+specks are gone on sight. What remains (zleg2 470, zfoot 212, zbase 409) is green strut tips
+meeting the rim's inner edge.
+
+**THE CHIPS** (his: "a system where when the user is in Lattice Only view, there are little chips
+tracked to the faces that, when clicked, asks whether it should grade to solid or not"):
+- UI (agent, band-chips 9134184e, merged 6519339a): `LatticeBandChips.swift` (pure layout: hidden
+  unless lattice-only; < 20 mm², back-facing, off-screen, under the stage UI, overlapping-smaller
+  are withdrawn), `LatticeBandChipViews.swift` (chip + card: "Grade to solid" / "Lattice through";
+  caps "Rim" / "Nothing"; "Use default"), `LatticeSettings.bandTreatments` [key: solid] (encoded
+  only when non-empty), `ProjectModel.writeLatticeBandTreatment`, one undo step, rebakes.
+- Band (4336c101): `LatticeBandFields` lists a decision for every unselected face the pocket
+  reaches beneath (the rim's mid-depth lies in the pocket — measured on the pocket alone, so the
+  chip survives a flip; pinned at the reached sample nearest the reached centroid) and for every
+  depth end with backed cap tiles (per selectable key; face 23's three facets share one).
+  Overrides force a face open/alongside and put a rim on a depth end.
+- His stand: 73 chips (49 ≥ 20 mm²). Face 20 → lattice through: floor band samples 6,413 → 0.
+  Depth ends → solid: rim samples 13 → 507. His answers ("keep them not solid; both of them"):
+  the depth ends already default to nothing; **the floor (Face 20) still defaults to grade to
+  solid — he sets it with its chip.** Keys: "face:<raw id>", "cap:<selectable key>".
