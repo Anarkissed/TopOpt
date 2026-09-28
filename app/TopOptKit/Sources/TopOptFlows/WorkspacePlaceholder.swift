@@ -81,6 +81,9 @@ public struct WorkspacePlaceholder: View {
     /// ★ THE BAND CHIPS (his 2026-09-27) — which chip's card is open, and where the
     /// stage's own UI is (`LatticeBandChipKeepOutKey`, `.global`), so no chip sits on it.
     @State private var bandChipOpenKey: String? = nil
+    /// ★ His 2026-09-28 "hide or show all the chips": a view toggle, never saved — it writes
+    /// nothing to the project and keeps every choice already made.
+    @State private var bandChipsHidden = false
     @State private var bandChipKeepOut: [CGRect] = []
     @State private var latticeOnlyFlash: String? = nil
     /// Each flash gets its own token, so a repeat cannot be cleared by the previous
@@ -5933,6 +5936,7 @@ public struct WorkspacePlaceholder: View {
         case .minimizePlastic: minimizePlasticChip.background(chipWidthReader(id))
         case .quality: qualityChip.background(chipWidthReader(id))
         case .cadFaces: cadFacesChip.background(chipWidthReader(id))
+        case .bandChips: bandChipsToggleChip.background(chipWidthReader(id))
         case .faceProtectDepth: faceProtectDepthChip.background(chipWidthReader(id))
         case .designBox:
             VStack(alignment: .trailing, spacing: DS.Space.s) {
@@ -5977,6 +5981,8 @@ public struct WorkspacePlaceholder: View {
             // behind it, so core attributes nothing and the switch would be a
             // control over an operation that cannot run.
             case .cadFaces: return isStepPart
+            // ★ Hide/Show the band chips: only while there are band chips to hide.
+            case .bandChips: return bandChipsAvailable
             default: return true
             }
         }
@@ -6355,6 +6361,38 @@ public struct WorkspacePlaceholder: View {
             .foregroundStyle(DS.Color.textPrimary.color)
         }
         .buttonStyle(.plain)
+    }
+
+    /// ★ HIDE / SHOW THE BAND CHIPS (his 2026-09-28: "add a button at the bottom right corner
+    /// (ordered in length of the button words) to hide or show all the chips"). It sorts into
+    /// the column by its measured width like every chip there. The label names the ACTION, and
+    /// both labels are laid out (the idle one hidden) so the chip is always as wide as the
+    /// longer one — tapping it never moves it to another row under his finger.
+    private var bandChipsToggleChip: some View {
+        func word(_ s: String) -> Text {
+            Text(s).dsStyle(DS.TypeScale.caption).fontWeight(.semibold)
+        }
+        return Button {
+            withAnimation(DS.Motion.emphasized) { bandChipsHidden.toggle() }
+        } label: {
+            HStack(spacing: DS.Space.s) {
+                Image(systemName: bandChipsHidden ? "eye" : "eye.slash")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle((bandChipsHidden ? DS.Color.textTertiary : DS.Color.accent).color)
+                ZStack(alignment: .leading) {
+                    word("Show chips").hidden()
+                    word("Hide chips").hidden()
+                    word(bandChipsHidden ? "Show chips" : "Hide chips")
+                }
+            }
+            .padding(.vertical, 9).padding(.horizontal, DS.Space.l)
+            .background(Capsule().fill(DS.Surface.bar.color)
+                .overlay(Capsule().strokeBorder(DS.Color.textPrimary.opacity(0.12).color, lineWidth: 1)))
+            .foregroundStyle(DS.Color.textPrimary.color)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(bandChipsHidden ? "Show chips" : "Hide chips")
+        .accessibilityIdentifier("band-chips-toggle")
     }
 
     // MARK: design box tool (M7.dom-app) — define grow room + keep-outs
@@ -7472,6 +7510,15 @@ public struct WorkspacePlaceholder: View {
     /// part that is still drawn.
     private var latticeOnlyViewOn: Bool { latticeOnly && showStrutPreview }
 
+    /// ★ The band chips COULD be drawn now: the overlay's own gates (its placement in the body
+    /// and its `if`), except the hide switch. The Hide/Show chip exists only then — a toggle
+    /// over nothing is a dead control (§2b).
+    private var bandChipsAvailable: Bool {
+        latticeOnlyViewOn && visible.latticeControls && viewerMesh != nil
+            && !latticeLegendMode.drilledIn
+            && !(strutScene?.bandDecisions.isEmpty ?? true)
+    }
+
     /// ★ THE TRANSFORM THE PART IS DRAWN WITH, for the chips: the camera the viewer
     /// published (`projection`, world → clip) composed with the settle
     /// (`ViewerModelFrame.matrix` — the renderer's own `modelMatrix()`), about the DRAWN
@@ -7487,7 +7534,7 @@ public struct WorkspacePlaceholder: View {
     /// The chips themselves. Re-laid out on every render — `projection` is republished on
     /// every orbit, so each chip rides its face; placement is `LatticeBandChipLayout`.
     @ViewBuilder private var latticeBandChipsOverlay: some View {
-        if latticeOnlyViewOn, let scene = strutScene, !scene.bandDecisions.isEmpty {
+        if latticeOnlyViewOn, !bandChipsHidden, let scene = strutScene, !scene.bandDecisions.isEmpty {
             GeometryReader { geo in
                 // the keep-out frames are `.global`; this layer ignores the safe area like
                 // the MTKView, so the difference is the layer's own origin (0 full-screen)

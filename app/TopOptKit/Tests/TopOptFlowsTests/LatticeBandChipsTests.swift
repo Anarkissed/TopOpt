@@ -186,6 +186,30 @@ final class LatticeBandChipsTests: XCTestCase {
         XCTAssertEqual(tiny.count, 2)
     }
 
+    /// ★ HIDE / SHOW ALL THE CHIPS (his 2026-09-28: "add a button at the bottom right corner
+    /// (ordered in length of the button words) to hide or show all the chips"). Call sites, read
+    /// from the source: the overlay honours the switch, the toggle sits in the width-ordered
+    /// bottom-right column, and it exists only while there are band chips to hide.
+    func testTheHideShowChipTogglesTheOverlayFromTheBottomRightColumn() throws {
+        let src = try String(contentsOf: URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("Sources/TopOptFlows/WorkspacePlaceholder.swift"), encoding: .utf8)
+        func body(after marker: String, _ n: Int = 1400) -> String {
+            guard let r = src.range(of: marker) else { return "" }
+            return String(src[r.lowerBound...].prefix(n))
+        }
+        XCTAssertTrue(body(after: "private var latticeBandChipsOverlay").contains("if latticeOnlyViewOn, !bandChipsHidden"),
+                      "the overlay ignores the hide switch")
+        XCTAssertTrue(src.contains("case .bandChips: return bandChipsAvailable"), "the toggle is not gated on chips to hide")
+        let avail = body(after: "private var bandChipsAvailable", 400)
+        XCTAssertTrue(avail.contains("latticeOnlyViewOn") && avail.contains("bandDecisions.isEmpty"))
+        let chip = body(after: "private var bandChipsToggleChip", 1600)
+        XCTAssertTrue(chip.contains("\"Hide chips\"") && chip.contains("\"Show chips\"") && chip.contains("bandChipsHidden.toggle()"))
+        XCTAssertTrue(src.contains("case .bandChips: bandChipsToggleChip.background(chipWidthReader(id))"),
+                      "the toggle does not report its width, so it cannot take its place in the width order")
+        XCTAssertTrue(SettingsChipID.allCases.contains(.bandChips))
+    }
+
     /// Pure: the stage UI and the de-clutter.
     func testKeepOutAndDeclutter() {
         let mesh = Self.boxMesh()
