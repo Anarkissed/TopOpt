@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <stdexcept>
 #include <array>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -892,6 +893,9 @@ struct JobBox {
   Vec3 max{0.0, 0.0, 0.0};
 };
 
+// The Flexible stage's job block (topopt/flexible/job_block.hpp).
+struct JobFlexible;
+
 // A parsed, schema-valid job.json.
 struct JobDescription {
   std::string model;     // model file path; relative paths resolve against the
@@ -1083,6 +1087,11 @@ struct JobDescription {
   bool has_design_box = false;
   JobBox design_box;
   std::vector<JobBox> keep_out_boxes;
+
+  // Optional "flexible" block (task 2026-09-28-flexible-squish-maths). Null when
+  // absent — every job without one is byte-identical. Run by `topopt-cli flexible`
+  // only; every other entry point refuses a job that carries one.
+  std::shared_ptr<const JobFlexible> flexible;
 };
 
 // Parse and schema-validate a job document. Throws JobError on malformed JSON,

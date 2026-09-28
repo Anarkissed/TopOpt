@@ -1,4 +1,5 @@
 #include "topopt/job.hpp"
+#include "topopt/flexible/job_block.hpp"  // refuse_flexible_job
 #include "topopt/lattice_dc.hpp"
 #include "topopt/lattice_union_volume.hpp"
 #include "topopt/organic_wet_join.hpp"
@@ -8628,6 +8629,7 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
                              const SettingsRules& rules,
                              const std::string& analyze_mesh_path,
                              const SmoothRequest& smooth) {
+  refuse_flexible_job(job, "analyze_job");  // Flexible stage (flexible/job_block.hpp)
   const auto mat_it = materials.find(job.material);
   if (mat_it == materials.end())
     throw JobError("material \"" + job.material +
@@ -9499,6 +9501,7 @@ LatticeVariantJobResult lattice_variant_job(const JobDescription& job,
                                             const std::string& out_dir,
                                             const MaterialLibrary& materials,
                                             const SettingsRules& rules) {
+  refuse_flexible_job(job, "lattice_variant_job");  // Flexible stage (flexible/job_block.hpp)
   const double t_start = wall_seconds();
   // ★ TWO MODES, ONE PIPELINE (task 2026-08-17-lattice-stage-repair).
   // "lattice_variant" lattices a FINISHED design read from a design.bin;
@@ -10817,6 +10820,7 @@ JobSetup build_job_setup(const JobDescription& job, const StepModel& model,
 PreflightJobResult preflight_job(const JobDescription& job,
                                  const std::string& job_dir,
                                  const MaterialLibrary& materials) {
+  refuse_flexible_job(job, "preflight_job");  // Flexible stage (flexible/job_block.hpp)
   const double t0 = steady_clock_ms();
   PreflightJobResult out;
   if (job.mode != "minimize_plastic")
@@ -10856,6 +10860,7 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
                      const MaterialLibrary& materials,
                      const SettingsRules& rules, bool emit_progress,
                      const RunObservability& obs) {
+  refuse_flexible_job(job, "run_job");  // Flexible stage (flexible/job_block.hpp)
   // Fail fast on everything checkable before heavy work: the mode, the
   // material, and whether this build can write the requested mesh format.
   // MODE VALIDATION STAYS STRICT (H3a): run_job optimizes minimize_plastic jobs

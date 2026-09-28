@@ -6,6 +6,7 @@
 
 #include "topopt/cell_plan.hpp"  // cell_size_mode_from_name (the ONE mode vocabulary)
 #include "topopt/lattice_algorithm.hpp"  // the ONE algorithm vocabulary (§4)
+#include "topopt/flexible/job_block.hpp"  // the Flexible stage block
 
 #include <cctype>
 #include <cmath>
@@ -405,7 +406,7 @@ JobDescription parse_job(const std::string& json_text) {
                        "lattice", "grading", "loads", "design_box", "keep_outs",
                        "build_direction", "build_orientation_report",
                        "bake_build_orientation", "variant", "semdot",
-                       "plsm"},
+                       "plsm", "flexible"},
                       "the job");
 
   JobDescription job;
@@ -2387,6 +2388,20 @@ JobDescription parse_job(const std::string& json_text) {
             "the lattice is allowed. A protection shallower than its region "
             "leaves the rest of that region as void the optimizer removed, and a "
             "lattice cannot conjure material there.");
+    }
+  }
+
+  // ── THE FLEXIBLE STAGE (task 2026-09-28-flexible-squish-maths) ── its own module
+  // parses its own block (topopt/flexible/job_block.hpp). It is a different lattice
+  // stage, so it cannot share a job with the lattice or grading blocks.
+  if (find_key(root, "flexible") != nullptr) {
+    if (job.lattice.present || job.grading.present)
+      schema_fail("a job may carry \"flexible\" or \"lattice\"/\"grading\", not both: "
+                  "Flexible is its own lattice stage with its own recipe");
+    try {
+      job.flexible = parse_flexible_block(json_text);
+    } catch (const flexible::FlexibleError& e) {
+      schema_fail(std::string("flexible: ") + e.what());
     }
   }
 
