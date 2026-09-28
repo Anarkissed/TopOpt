@@ -1859,3 +1859,38 @@ Review (wf_cb38459c-cee, 20 agents): 8 confirmed, all addressed in 490cf4b3 (pla
 storage, cap proximity grouping, flare sign, signed expand, face-on samples, default not solid).
 First fix attempt excluded seams without the mouth term: chamfers read 30–105 mm "inside" — caught
 by the chip audit in the DIAG line before commit.
+
+## 2026-09-28 01:49 — HIDE/SHOW CHIPS + THE OCTET (installed 01:49:06; his verdict pending)
+
+His asks: a bottom-right Hide/Show chips button ordered by word length; on the octet, face 2
+"entirely quilted … make the cells smaller" unless Allow quilt; "the bottom back corner is
+completely gone"; the octet's rims "a lot wrong" with no chips.
+
+**Reproduced first** (`LatticeHisSteppedBakeProbe`, HIS_PROJECT_DIR = a copy of his project
+folder): restores through AppModel + ProjectStore, runs the STAGE solve (makeLatticeSimContext →
+analyzeSolidLoadCase; results.plist is not the field), builds the scene twice like the app,
+bakes with the app's renderer inputs. Every DIAG line matched his app log to the digit
+(unselected faces, densityCeiling, steppedGrade, octree kept, stepped stated/sizes). His app log
+was read with `xcrun simctl spawn <UD> log show --predicate 'process == "TopOpt" AND eventMessage
+CONTAINS "DIAG"'` — read-only, no launch.
+
+- **Toggle** (e15bebd4): `SettingsChipID.bandChips`, sorted by measured width like every chip,
+  shown only while band chips could be (`bandChipsAvailable`); both labels laid out so it never
+  changes row.
+- **Octet on the band** (304892e3): `octetBand` opt-in (app: every non-organic algorithm);
+  rim = skin 1.21 (legacy parity), side rim = skin; renderer arms the band without capsules;
+  struts weld into the fine rim (`dClipStrut`); shell keeps the octet eye-only cap rule in band
+  mode; the octet keeps its legacy partSDF/partMaterialSDF (the run's cells read them).
+- **Corner**: face 23's foot facet (tilted 18°) and top facet (13°) got NO octree ladder under a
+  0.99 axis gate — no cells, shell cut: a hole. Gate now 30° (`ladderAxisCos`, DIAG `noLadder=`).
+- **Quilt**: per-region p90 drawn density (`regionDrawnDensityP90`); a wall in the top fifth of
+  [floor, ceiling] takes one more cell across (`LatticeRegionCells.quiltTrips`) if the smaller cell
+  prints open. Face 2: 12.03 → 6.015 mm, callout 19 % · 1.11 mm (was 2.18 mm). The grade band's
+  raise stops at the ceiling unless Allow quilt (`bandQuiltCeiling`): 38 % → 17 % at a 3 mm cell.
+  This overrides his 2026-09-12 "quilt as part of the grade to solid" with Allow quilt off.
+- **Chip threshold**: crossT = max(c, g/2) + 2h (the octet's thin rim had made the base a
+  question); partly crossed faces join a place they touch, never counting toward its 1 cm² floor.
+  His stand and his octet project: exactly 2 chips each.
+
+Open: large cells cut at an angle on the tilted facets (cosmetic, judge in the sim); the CPU shell
+census does not mirror the octet eye test (DIAG only).
