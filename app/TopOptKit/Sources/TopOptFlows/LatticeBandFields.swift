@@ -278,7 +278,10 @@ public enum LatticeBandFields {
         // a chip's faces. Measured on the prisms alone, never on the band, so a chip survives its
         // own flip.
         let probeDepth = s + 0.5 * r
-        let crossT = c + 2 * h
+        // ★ "far from the side": beyond the rim AND half the grade band (whichever is wider),
+        // plus two voxels — a length of the BAND, not of the rim alone, so a thinner rim (the
+        // octet's 1.21 mm against organic's 3.41) does not turn alongside faces into questions
+        let crossT = Swift.max(c, 0.5 * g) + 2 * h
         struct IncRegion { var rg: LatticeRegionSpec; var n: SIMD3<Double>; var u: SIMD3<Double>; var v: SIMD3<Double>; var lo: SIMD3<Double>; var hi: SIMD3<Double> }
         let incs: [IncRegion] = includeFaces.map { r0 in
             var rg = r0; rg.thicknessMap = nil
@@ -350,7 +353,11 @@ public enum LatticeBandFields {
         }
         // crossed faces (crossed over at least half of what the pocket reaches beneath them), joined
         // across shared edges into places
-        let crossed = scan.filter { $0.value.cross > 0 && $0.value.cross >= 0.5 * $0.value.reached }
+        // crossed faces (crossed over at least half of what the pocket reaches beneath them) are
+        // the seeds of a place, joined across shared edges; a face crossed only in part joins a
+        // place it touches (one hop — the floor's end ramp joins the floor), never starts one
+        let crossed = scan.filter { $0.value.cross > 0 }
+        let seeds = Set(crossed.filter { $0.value.cross >= 0.5 * $0.value.reached }.keys)
         var parentF: [Int: Int] = [:]
         for f in crossed.keys { parentF[f] = f }
         func rootF(_ f: Int) -> Int { var x = f; while let pp = parentF[x], pp != x { x = pp }; return x }
@@ -359,15 +366,24 @@ public enum LatticeBandFields {
             let vs = [A[t], B[t], C[t]]
             for k in 0..<3 { edgeFaces[ekey(vs[k], vs[(k + 1) % 3]), default: []].insert(fid[t]) }
         }
-        for (_, fs) in edgeFaces where fs.count > 1 {
-            let arr = fs.sorted()
+        for (_, fs) in edgeFaces {
+            let arr = fs.filter { seeds.contains($0) }.sorted()
+            guard arr.count > 1 else { continue }
             for g in arr.dropFirst() { let ra = rootF(arr[0]), rb = rootF(g); if ra != rb { parentF[rb] = ra } }
         }
+        var joined = Set<Int>()
+        for f in crossed.keys where !seeds.contains(f) {
+            var nb = Set<Int>()
+            for (_, fs) in edgeFaces where fs.contains(f) { nb.formUnion(fs.filter { seeds.contains($0) }) }
+            if let lead = nb.max(by: { crossed[$0]!.cross < crossed[$1]!.cross }) { parentF[f] = rootF(lead); joined.insert(f) }
+        }
         var placeOf: [Int: [Int]] = [:]
-        for f in crossed.keys { placeOf[rootF(f), default: []].append(f) }
+        for f in seeds.union(joined) { placeOf[rootF(f), default: []].append(f) }
         let chipFloorMM2 = 100.0
+        // the floor counts the SEEDS only: a face that merely joins never makes a place big
+        // enough to ask about (the leg top's 37 mm² chamfer stays the rule's)
         let places = placeOf.values.map { $0.sorted() }
-            .filter { $0.reduce(0.0) { $0 + crossed[$1]!.cross } >= chipFloorMM2 }
+            .filter { $0.filter { seeds.contains($0) }.reduce(0.0) { $0 + crossed[$1]!.cross } >= chipFloorMM2 }
             .sorted { $0[0] < $1[0] }
         let questionDefaultSolid = opt.questionSolid
         var decisions: [LatticeBandDecision] = []
@@ -407,7 +423,7 @@ public enum LatticeBandFields {
         // every face the pocket reaches beneath that no across rule decides, with its numbers
         let chipAudit = scan.filter { $0.value.reached >= 20 }.sorted { $0.key < $1.key }.map { f, a -> String in
             let v = a.inner.sorted()
-            let what = chipFaceKeys.contains("face:\(f)") ? "CHIP" : crossed[f] != nil ? "crossed, place < 1 cm², rule" : "rule"
+            let what = chipFaceKeys.contains("face:\(f)") ? "CHIP" : seeds.contains(f) ? "crossed, place < 1 cm², rule" : "rule"
             return String(format: "f%d %@ reached %.0f cross %.0f mm² (p50 %.1f mm inside)", f, what,
                           a.reached, a.cross, v.isEmpty ? 0 : v[v.count / 2])
         }.joined(separator: "; ")

@@ -37,6 +37,8 @@ extension LatticePreviewOccupancy {
         public var why: [String: Int] = [:]      // level-0 slot outcomes, per region
         public var paintedByRegion: [Int: Int] = [:]
         public var secondaryRegions: [Int] = []
+        /// Face regions tilted further than `ladderAxisCos` from every axis — they get no cells.
+        public var noLadderRegions: [Int] = []
         /// The in-plane anchor chosen for the base slots (mm, subtracted from the
         /// occupancy origin), so the most base-cell volume fits whole.
         public var anchorShiftMM = SIMD3<Double>(repeating: 0)
@@ -49,6 +51,9 @@ extension LatticePreviewOccupancy {
     /// above it the smallest cell reads as a quilt before any grading — octet, 0.45 mm
     /// bead: 2 mm is 26.5 %, 2.58 mm 17 %, 3 mm 13 %.
     public static let finestRungMaxDensity = 0.20
+
+    /// A face region gets a ladder when its normal is within 30° of an axis (cos 30°).
+    public static let ladderAxisCos = 0.866
 
     /// How far toward the quilt a cell ABOVE the finest rung thickens at the outline
     /// when it lies in the band (the finest rung goes all the way).
@@ -123,6 +128,12 @@ extension LatticePreviewOccupancy {
                                        /// The grade's amount multiplier (1 = today's) —
                                        /// `LatticeSettings.gradeAmount(strength:)`.
                                        bandAmount: Double = 1,
+                                       /// ★ The densest the grade band may raise a cell (1 = to
+                                       /// the quilt, today's). With Allow quilt off the octet's
+                                       /// non-quilt ceiling (his 2026-09-28: the quilt "should
+                                       /// be avoided at all costs … unless 'allow quilting' is
+                                       /// selected"); the band then grades by smaller cells only.
+                                       bandQuiltCeiling: Double = 1,
                                        stats: inout OctreeBakeStats) -> LatticeCellField? {
         let t0 = Date()
         let voxel = Double(Swift.max(occ.spacing.x, Swift.max(occ.spacing.y, occ.spacing.z)))
@@ -158,7 +169,15 @@ extension LatticePreviewOccupancy {
             guard simd_length(n) > 0.5 else { continue }
             let a = abs(n)
             let axis = a.x >= a.y && a.x >= a.z ? 0 : (a.y >= a.z ? 1 : 2)
-            guard a[axis] > 0.99 else { continue }
+            // ★★ A TILTED FACE GETS ITS LADDER TOO (his 2026-09-28: "The bottom back corner is
+            // completely gone"). Face 23 is a curved wall cut into three facets; its foot facet
+            // is tilted 18° (normal 0.95, 0, −0.31) and its top 13°, and a 0.99 gate (8°) gave
+            // them NO ladder — no cells at all, while the shell was cut there: a hole through
+            // the part. The cells stay axis-aligned (the lattice is in world axes); the slab test
+            // trims the ones a tilted face cuts, and the smaller rungs fill in. 30° is the band's
+            // own "across a prism" tilt; a face tilted further from every axis keeps none, and
+            // the DIAG names it.
+            guard a[axis] > Self.ladderAxisCos else { stats.noLadderRegions.append(r); continue }
             ladders.append(Ladder(region: r, sizes: [], axis: axis))
         }
         guard !ladders.isEmpty else { return nil }
@@ -827,7 +846,7 @@ extension LatticePreviewOccupancy {
             var r = rho(activation[i] < 0 ? 0 : activation[i])
             if let lat {
                 if shapeFit, shapeFitBandMM > 0, bandT[i] < 1 {
-                    let q = Swift.min(drawnHi, lat.quiltRowDensity(cellMM: s))
+                    let q = Swift.min(Swift.min(drawnHi, lat.quiltRowDensity(cellMM: s)), bandQuiltCeiling)
                     // ★ ONLY THE FINEST CELLS QUILT (2026-09-15: "Quilting should only
                     // be allowed in the smallest printable cells — never for larger
                     // cells"). A coarser cell in the band keeps its own density; the

@@ -310,6 +310,9 @@ inline bool shell_is_latticed(float3 mpos, float3 mnormal, constant ShellClip& c
     // face. The shell therefore stays closed half a voxel beyond the rim, so the rim is
     // never seen from outside with the body on.
     if (c.gate.w > 0.0) {
+        // ★ the OCTET keeps its eye-only rule under the band too (his 2026-08-25 "massive
+        // hole"): a wall's far face, seen through the open near face, stays a grey wall
+        if (c.gate.z < 0.5 && dot(sn, c.eye.xyz - mpos) <= 0.0) { return false; }
         float3 pb = mpos - sn * c.spacing.w;
         float3 gb = (pb - c.origin.xyz) / max(c.spacing.xyz, float3(1e-6));
         if (any(gb < float3(-0.5)) || any(gb > c.dims.xyz - float3(0.5))) { return false; }

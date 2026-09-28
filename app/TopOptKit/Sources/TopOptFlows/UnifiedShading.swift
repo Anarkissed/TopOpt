@@ -787,6 +787,19 @@ static LSDFHit lsdf_march(constant LSDFUniforms& U,
         // everywhere the shell survives they stop one voxel inside it.
         float dClip = max(max(lsdf_part_clip(U, sdfTex, regionTex, samp, RC, decls,
                                              p, dPart), dBox), dRegion);
+        // ★★ THE OCTET'S STRUTS WELD INTO THE FINE RIM (band mode, 2026-09-28): the coarse
+        // carved field ends them on a 1.7 mm voxel grid, which left gaps and pokes along the
+        // rim. The capsules' rule (`cap_clip_field`): inside the pocket, beyond the rim's
+        // inner face, welded `bandSpacing.w` into it deep in the material and never at the
+        // part's surface (the weld fades there, so no strut end shows through the skin).
+        float dClipStrut = dClip;
+        if (U.bandOrigin.w > 0.5) {
+            float4 bw = rimTex.sample(samp, band_uvw(U, p));
+            float weld = U.bandSpacing.w;
+            float fade = clamp(-bw.b / max(1.5 * weld, 0.2), 0.0, 1.0);
+            float dRegionBand = max(regionTex.sample(samp, stc).b, -bw.r + 0.15 * (1.0 - fade)) - weld * fade;
+            dClipStrut = max(max(lsdf_part_clip(U, sdfTex, regionTex, samp, RC, decls, p, dPart), dBox), dRegionBand);
+        }
 
         // ★★★ ORGANIC IS A DIFFERENT LATTICE, SO IT IS A DIFFERENT FIELD — AND THAT IS
         // ALL IT IS. Doubled and stepped fill the part with a CELL, so the march walks a
@@ -1098,7 +1111,7 @@ static LSDFHit lsdf_march(constant LSDFUniforms& U,
         // and at a neighbouring strut's density — which is what an edge band with no
         // printed layers in it looks like. Comparing the two fields is exact and needs
         // no proxy.
-        float Fstrut = (anyActive && !solidOnly) ? max(dn * cellHere, dClip) : 1e9;
+        float Fstrut = (anyActive && !solidOnly) ? max(dn * cellHere, dClipStrut) : 1e9;
         // ★★★ THE POCKET IS AIR (his 2026-09-22: "Walls should never take the place of
         // the empty or too little lattice. Ever."). `dClip` intersects the whole declared
         // prism, so inside it the "run leaves this solid" branch filled every texel with

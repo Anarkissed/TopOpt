@@ -31,10 +31,14 @@ final class LatticeSolidFillTests: XCTestCase {
         // `dClip`, so `F = min(1e9, dClip) = dClip` — exactly what the old single line
         // produced. With it true, `Fsolid` is 1e9 and `F = max(dn * cellHere, dClip)`,
         // also exactly as before.
+        // ★ RE-PINNED 2026-09-28: the struts take `dClipStrut` — `dClip` itself unless the
+        // band is armed, when the octet's struts weld into the fine rim (his octet rims) —
+        // so the fallback below still reads the unchanged `dClip`.
         XCTAssertTrue(
-            march.contains("float Fstrut = (anyActive && !solidOnly) ? max(dn * cellHere, dClip) : 1e9;"),
+            march.contains("float Fstrut = (anyActive && !solidOnly) ? max(dn * cellHere, dClipStrut) : 1e9;"),
             "★ the strut field must be infinite where no cell is active, so the solid "
             + "term below can own that ray")
+        XCTAssertTrue(march.contains("float dClipStrut = dClip;"), "★ outside band mode the struts' clip IS dClip")
         // ★ RE-PINNED 2026-09-22 (the maintainer's pocket rule): OUTSIDE every declared prism a
         // refused cell still takes the clip as its field; INSIDE a declared prism nothing is
         // solid but the rim the dressing paints — the pocket is air, never a wall.
@@ -175,7 +179,7 @@ final class LatticeSolidFillTests: XCTestCase {
         // the part's material) and the band redesign's term (the fine padded rim texture)
         XCTAssertTrue(march.contains("Frim = max(max(max(dPrismHere, rimCarve - dRegion), -dSkinIn), dMaterial);"), "★ the legacy rim band field")
         XCTAssertTrue(march.contains("float FrimStep = max(max(v.r, v.b), max(v.a, dBox));"), "★ the band's rim field")
-        XCTAssertTrue(march.contains("float Fstrut = (anyActive && !solidOnly) ? max(dn * cellHere, dClip) : 1e9;"), "★ no strut field when solid-only")
+        XCTAssertTrue(march.contains("float Fstrut = (anyActive && !solidOnly) ? max(dn * cellHere, dClipStrut) : 1e9;"), "★ no strut field when solid-only")
         XCTAssertTrue(march.contains("float Fsolid = (anyActive || solidOnly) ? 1e9 : (dRegion < 0.0 ? 1e9 : dClip);"), "★ no part fill when solid-only")
     }
 }

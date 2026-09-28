@@ -339,6 +339,17 @@ public struct LatticeSDFScene {
     public let drawnDemand: LatticeVoxelGrid?
     /// The density band `drawnDemand` was capped against (the init's `rhoMin`/`rhoMax`).
     public let drawnBand: (lo: Double, hi: Double)
+    /// ★ Per region (index-aligned to `regions`; 0 for a non-include), the 90th-percentile
+    /// density its lattice is drawn at — `drawnBand.lo + (hi − lo)·drawnDemand^γ` over the
+    /// region's own voxels. The per-region cell rule reads it: where a tenth of the wall is drawn
+    /// at the octet's non-quilt ceiling (his 2026-09-28 "make the cells smaller"), the wall takes
+    /// one more cell across. (The median read 0.143 on his face 2 while every wall voxel he
+    /// tapped read 0.19–0.20 — the load sits in part of the wall, and that part is the quilt.)
+    public var regionDrawnDensityP90: [Double] = []
+    /// The octet's aesthetic density ceiling this scene drew against, and whether Allow quilt
+    /// lifted it — what the cell rule compares the medians with.
+    public var drawnCeilingRho: Double = 1
+    public let allowQuilt: Bool
     /// The demand (0…1, in the shader's `rho = lo + (hi − lo)·demand^gamma` law) at which
     /// the drawn density reaches `ceilingRho`. 1 when the ceiling is at or above the band's
     /// top (nothing to cap); 0 when the ceiling is at or below the floor.
@@ -667,6 +678,12 @@ public struct LatticeSDFScene {
                 // ★ the user's per-face / per-cap band choices ([key: solid]; see
                 // `LatticeBandDecision`) — empty ⇒ every choice is the rules' default
                 bandOverrides: [String: Bool] = [:],
+                // ★★ THE OCTET TAKES THE CONTINUOUS BAND TOO (his 2026-09-28: the octet's blue rims
+                // "a lot wrong … which also does not have the chips"). Opt-in, so fixtures that build
+                // an octet scene keep the legacy block; the app passes it for every octet algorithm.
+                // `bandGradeMM` is the octet's grade band (his shape-fit band; 0 ⇒ 10 mm).
+                octetBand: Bool = false,
+                bandGradeMM: Double = 0,
                 // ★ the PRINTER'S bead (mm), for the skin under unselected faces; 0 ⇒ the
                 // organic settings' bead, else 0.45
                 beadMM: Double = 0) {
@@ -745,24 +762,32 @@ public struct LatticeSDFScene {
         // continuous, geometrically signed band (`LatticeBandFields`); every other path, and
         // `LATTICE_BAND_OFF=1`, keeps the legacy block below byte for byte.
         let bandOpts = LatticeBandOptions.fromEnvironment()
-        let bandActive = algorithm == "organic" && !bandOpts.off
+        let isOrganicScene = algorithm == "organic"
+        let bandActive = (isOrganicScene || octetBand) && !bandOpts.off
             && regions.contains(where: { $0.role == .include && $0.kind == .face && $0.isValid })
         let bandRes: LatticeBandFields.Result? = bandActive ? {
             let voxelHere = Double(Swift.max(solid.spacing.x, Swift.max(solid.spacing.y, solid.spacing.z)))
             let skin = LatticeSDFRenderer.outlineBeamMM(lineWidthMM: beadMM > 0 ? beadMM : (organic?.minExtrudableWidthMM ?? 0.45), voxelMM: voxelHere)
             let organicRim = (organic?.solidRimMM ?? 0) > 0 ? organic!.solidRimMM : 0
-            let rim = Swift.max(skin, organicRim)
+            // ★ the octet keeps its legacy rim (skin 1.21 + rim 1.21 on his stand) and its
+            // solid-backed outline rim (`outlineRim` = the skin); organic its solid rim
+            let rim = isOrganicScene ? Swift.max(skin, organicRim) : skin
+            let sideRim = isOrganicScene ? organicRim : skin
             let selectedRaw = Set(regions.compactMap { r -> Int? in
                 guard r.role == .include, r.kind == .face else { return nil }
                 return r.rawFaceID.map { Int($0) } ?? r.faceID
             })
-            let band = (organic?.shapeBandMM ?? 0) > 0 ? organic!.shapeBandMM : 10
+            let band = isOrganicScene ? ((organic?.shapeBandMM ?? 0) > 0 ? organic!.shapeBandMM : 10)
+                : (bandGradeMM > 0 ? bandGradeMM : 10)
             return LatticeBandFields.build(mesh: mesh, regions: regions, selectedRaw: selectedRaw, solid: solid,
-                                           params: .init(skinMM: skin, rimMM: rim, sideRimMM: organicRim,
+                                           params: .init(skinMM: skin, rimMM: rim, sideRimMM: sideRim,
                                                          gradeBandMM: band, finishSkinMM: skinMM, options: bandOpts,
                                                          overrides: bandOverrides))
         }() : nil
-        let latticedSDF = bandRes?.latticedC ?? LatticePreviewOccupancy.signedDistance(
+        // ★ the octet keeps the legacy part fields: the per-region cells (and so the run's
+        // stepped cells) are measured on `partMaterialSDF`, and the band's rim reads its own
+        // material distance from the fine grid anyway
+        let latticedSDF = (isOrganicScene ? bandRes?.latticedC : nil) ?? LatticePreviewOccupancy.signedDistance(
             positions: mesh.positions, indices: mesh.indices, like: occupancy)
         self.partSDF = latticedSDF
         // ★★★ THE PART'S MATERIAL, SIGNED BY THE WHOLE SOLID (2026-09-23): `partSDF` takes
@@ -770,7 +795,7 @@ public struct LatticeSDFScene {
         // march wants — so every measurer that asked it "is the part here" read a slab
         // edge as the end of the material (his 10.31 mm wall walk). Same distances, the
         // part's own sign.
-        self.partMaterialSDF = bandRes?.materialC ?? {
+        self.partMaterialSDF = (isOrganicScene ? bandRes?.materialC : nil) ?? {
             var m = latticedSDF
             for i in m.values.indices {
                 let d = abs(m.values[i])
@@ -1268,6 +1293,27 @@ public struct LatticeSDFScene {
         self.demand = statedDemand ?? graded
         self.drawnDemand = cappedStated ?? cappedGraded
         self.drawnBand = (rhoMin, rhoMax)
+        self.allowQuilt = allowQuilt
+        self.drawnCeilingRho = ceilingRho
+        // ★ each region's median drawn density (see `regionDrawnDensityP50`)
+        if let dd = self.drawnDemand {
+            let g = Swift.max(0.05, gamma)
+            var per = [[Double]](repeating: [], count: regions.count)
+            let po = self.prismOccupancy
+            for k in 0..<po.nz { for j in 0..<po.ny { for i in 0..<po.nx where po.values[(k * po.ny + j) * po.nx + i] > 0.5 {
+                let p = SIMD3<Double>(po.origin + SIMD3<Float>(Float(i), Float(j), Float(k)) * po.spacing)
+                guard let r = regions.firstIndex(where: { $0.role == .include && LatticeRegionMask.containsWholePrism(p, region: $0) }) else { continue }
+                let d = Swift.max(0, Swift.min(1, dd.sampleLinear(p)))
+                per[r].append(rhoMin + (rhoMax - rhoMin) * pow(d, g))
+            } } }
+            self.regionDrawnDensityP90 = per.map { v in v.isEmpty ? 0 : v.sorted()[Swift.min(v.count - 1, 9 * v.count / 10)] }
+            NSLog("DIAG regionDrawnDensity ceiling %.3f allowQuilt %@ · %@", ceilingRho, allowQuilt ? "yes" : "no",
+                  per.enumerated().map { i, v in
+                      let s = v.sorted()
+                      return s.isEmpty ? "r\(i) –" : String(format: "r%d p10 %.3f p50 %.3f p90 %.3f (n %d)", i,
+                          s[s.count / 10], s[s.count / 2], s[Swift.min(s.count - 1, 9 * s.count / 10)], s.count)
+                  }.joined(separator: " | "))
+        }
 
         // ── ★★★ ORGANIC: TRACE, THEN BAKE THE CAPSULES TO A FIELD ───────────────────
         //
@@ -3004,6 +3050,9 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
                     // ★ Structural: the printability floor alone bounds the menu.
                     finestPrintsOpen: scene.stageMode != .structural,
                     bandAmount: LatticeSettings.gradeAmount(strength: params.shapeFitGradeStrength),
+                    // ★ no quilt in the grade band either unless Allow quilt (his 2026-09-28)
+                    bandQuiltCeiling: LatticeType.named(params.latticeID).hasAestheticCeiling && !scene.allowQuilt
+                        ? scene.drawnCeilingRho : 1,
                     stats: &st) {
                     baked = o
                     octreeCells = o.steppedCells
@@ -3013,7 +3062,7 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
                     NSLog("DIAG octree pitch=\(String(format: "%.2f", st.pitchMM)) kept=[\(kept)] edge=\(st.slotsCut) "
                           + "texels=\(st.texelsPainted) band=\(params.shapeFitBandMM) floor=\(Self.printableFloorBeads * lineWidthMM) "
                           + "solidBand=\(String(format: "%.2f", solidBandMM)) anchor=\(String(format: "(%.1f,%.1f,%.1f) in %.1fs", st.anchorShiftMM.x, st.anchorShiftMM.y, st.anchorShiftMM.z, st.anchorSeconds)) drawnHi=\(o.drawnDensityHi) "
-                          + "why=[\(why)] t=\(String(format: "%.2f", st.seconds))s")
+                          + "why=[\(why)] noLadder=\(st.noLadderRegions) t=\(String(format: "%.2f", st.seconds))s")
                 }
             }
         }
@@ -4010,7 +4059,9 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
         // scene whose capsules are NOT drawn is in that state; it then draws no rim rather
         // than a pocket-filling one.
         if regionTexCarriesBandRim { u.bandParams.z = 1 }
-        guard let scene, let bf = scene.bandFine, rimTex != nil, capsulesReplaceField else { return }
+        // ★ the octet draws its struts with the march itself, so its band needs no capsules
+        guard let scene, let bf = scene.bandFine, rimTex != nil,
+              capsulesReplaceField || scene.algorithm != "organic" else { return }
         let sp = scene.partSDF.spacing
         let voxel = max(sp.x, max(sp.y, sp.z))
         // e_x: the capsules run a quarter voxel further into the rim than the coarse
