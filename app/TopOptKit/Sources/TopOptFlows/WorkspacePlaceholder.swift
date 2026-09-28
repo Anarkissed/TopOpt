@@ -5279,7 +5279,8 @@ public struct WorkspacePlaceholder: View {
                                         bandOverrides: lat.bandTreatments,
                                         // ★ the octet on the continuous band (2026-09-28)
                                         octetBand: algorithmForBake != "organic",
-                                        bandGradeMM: lat.shapeFitBandMM,
+                                        // (gated like organic's: the band only when grade-to-shape is on)
+                                        bandGradeMM: lat.gradingMode.fitsShape ? lat.shapeFitBandMM : 0,
                                         beadMM: beadForBake)
             DispatchQueue.main.async {
                 // ★ a newer bake has started: this picture is stale, drop it

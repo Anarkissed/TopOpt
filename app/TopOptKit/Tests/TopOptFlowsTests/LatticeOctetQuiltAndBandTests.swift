@@ -57,14 +57,26 @@ final class LatticeOctetQuiltAndBandTests: XCTestCase {
         return (occ, demand, spec)
     }
 
-    private func bake(tiltDeg: Double, bandCeiling: Double = 1, band: Double = 8)
+    private func bake(tiltDeg: Double, bandCeiling: Double = 1, band: Double = 8, amount: Double = 1,
+                      slabFollowsTheFace: Bool = false)
         -> (LatticeCellField?, LatticePreviewOccupancy.OctreeBakeStats) {
-        let (occ, demand, spec) = slab(tiltDeg: tiltDeg)
+        var (occ, demand, spec) = slab(tiltDeg: tiltDeg)
+        if slabFollowsTheFace {
+            // the material starts AT the tilted face and runs 12 mm in along its normal (his foot
+            // facet: the surface lies in front of the facet's centre plane on one side)
+            let n = LatticeRegionMask.unit(spec.normal)
+            for k in 0..<occ.nz { for j in 0..<occ.ny { for i in 0..<occ.nx {
+                let p = SIMD3<Double>(occ.origin + SIMD3<Float>(Float(i), Float(j), Float(k)))
+                let s = simd_dot(p - spec.origin, n)
+                let inside = s >= 0 && s <= 12 && i >= 2 && i < occ.nx - 2 && k >= 2 && k < occ.nz - 2
+                occ.values[(k * occ.ny + j) * occ.nx + i] = inside ? 1 : 0
+            } } }
+        }
         var st = LatticePreviewOccupancy.OctreeBakeStats()
         let baked = LatticePreviewOccupancy.octreeCellField(
             occupancy: occ, demand: demand, regions: [spec], cellMM: [6], lineWidthMM: 0.45, realFloorMM: 2.6,
             shapeFitBandMM: band, shapeFit: true, solidBandMM: 0.45, densityLo: 0.073, densityHi: 0.9, densityGamma: 1,
-            latticeID: "octet", dyadicSteps: false, bandQuiltCeiling: bandCeiling, stats: &st)
+            latticeID: "octet", dyadicSteps: false, bandAmount: amount, bandQuiltCeiling: bandCeiling, stats: &st)
         return (baked, st)
     }
 
@@ -82,13 +94,52 @@ final class LatticeOctetQuiltAndBandTests: XCTestCase {
         print("TILT 18°: texels \(st18.texelsPainted), kept \(st18.slotsKept) · 40°: no ladder \(st40.noLadderRegions)")
     }
 
+    /// ★ A tilted face's WHOLE cells reach its surface (2026-09-28 review). The slots used to be
+    /// anchored at the facet's centre plane, so where the surface lies in front of that plane
+    /// only the finest fill reached it; the slot range now spans the prism's real extent along
+    /// the axis, so whole cells stand there too. (Coverage was never the issue: the fill pass
+    /// paints every occupied texel either way — his project: 0 of 10,928 near-surface voxels
+    /// bare with or without — so this pins the whole-cell volume, and the control is the old
+    /// centre-plane anchoring.)
+    func testATiltedFacesWholeCellsReachItsSurface() {
+        func run() -> (painted: Int, total: Int, keptVolume: Double) {
+            var st = LatticePreviewOccupancy.OctreeBakeStats()
+            let (b, st0) = bake(tiltDeg: 18, band: 0, slabFollowsTheFace: true)
+            st = st0
+            guard let baked = b else { return (0, 1, 0) }
+            let (_, _, spec) = slab(tiltDeg: 18)
+            let n = LatticeRegionMask.unit(spec.normal)
+            let g = baked.field, pitch = Double(g.spacing.x), go = SIMD3<Double>(g.origin)
+            var painted = 0, total = 0
+            for k in 0..<g.nz { for j in 0..<g.ny { for i in 0..<g.nx {
+                let mid = go + (SIMD3<Double>(Double(i), Double(j), Double(k)) + 0.5) * pitch
+                let s = simd_dot(mid - spec.origin, n)
+                guard s > 0.3, s < 3, mid.y < spec.origin.y else { continue }   // in front of the centre plane
+                total += 1
+                if baked.steppedCellMM[(k * g.ny + j) * g.nx + i] > 0 { painted += 1 }
+            } } }
+            let vol = st.slotsKept.reduce(0.0) { $0 + pow($1.key, 3) * Double($1.value) }
+            return (painted, Swift.max(total, 1), vol)
+        }
+        let now = run()
+        LatticePreviewOccupancy.tiltedSpanEnabled = false
+        let old = run()
+        LatticePreviewOccupancy.tiltedSpanEnabled = true
+        print(String(format: "TILTSURF in front of the centre plane: painted now %d/%d, old %d/%d · whole-cell volume now %.0f mm³, old %.0f mm³",
+                     now.painted, now.total, old.painted, old.total, now.keptVolume, old.keptVolume))
+        XCTAssertGreaterThan(now.total, 20, "vacuous: no texels in front of the centre plane")
+        XCTAssertGreaterThanOrEqual(now.painted, old.painted, "the span left part of the tilted face's surface layer without a cell")
+        XCTAssertGreaterThan(now.keptVolume, old.keptVolume,
+                             "control: the centre-plane anchoring must stand fewer whole cells — the span changes nothing otherwise")
+    }
+
     /// ★ With Allow quilt off the grade band stops at the ceiling — it grades by smaller cells,
     /// never by closing the windows; the control (ceiling 1, today's) raises the band's finest
     /// cells toward the quilt.
     func testTheGradeBandStopsAtTheCeilingWithoutAllowQuilt() throws {
         let ceiling = LatticeType.named("octet").aestheticDensityCeiling()
-        func maxBandDensity(_ bc: Double) throws -> Double {
-            let (b, _) = bake(tiltDeg: 0, bandCeiling: bc)
+        func maxBandDensity(_ bc: Double, amount: Double = 1) throws -> Double {
+            let (b, _) = bake(tiltDeg: 0, bandCeiling: bc, amount: amount)
             let baked = try XCTUnwrap(b)
             let top = baked.drawnDensityHi > 0 ? baked.drawnDensityHi : 0.9
             var m = 0.0
@@ -102,9 +153,12 @@ final class LatticeOctetQuiltAndBandTests: XCTestCase {
             return m
         }
         let capped = try maxBandDensity(ceiling)
+        // ★ and at the strongest grade (strength 1 ⇒ amount 2): the raise doubles but never passes q
+        let cappedStrong = try maxBandDensity(ceiling, amount: 2)
         let quilted = try maxBandDensity(1)
-        print(String(format: "BANDCAP densest drawn cell: ceiling %.3f → %.3f · control (no cap) %.3f", ceiling, capped, quilted))
+        print(String(format: "BANDCAP densest drawn cell: ceiling %.3f → %.3f (amount 2: %.3f) · control (no cap) %.3f", ceiling, capped, cappedStrong, quilted))
         XCTAssertLessThanOrEqual(capped, ceiling + 0.01, "a cell in the band was drawn over the ceiling with Allow quilt off")
+        XCTAssertLessThanOrEqual(cappedStrong, ceiling + 0.01, "a strong grade pushed a band cell over the ceiling")
         XCTAssertGreaterThan(quilted, ceiling + 0.1, "control: without the cap the band must raise a cell toward the quilt")
     }
 
@@ -123,7 +177,10 @@ final class LatticeOctetQuiltAndBandTests: XCTestCase {
         // the octet keeps its legacy part fields (the per-region cells, and so the run, read them)
         XCTAssertEqual(band.partMaterialSDF.values, legacy.partMaterialSDF.values)
         XCTAssertEqual(band.partSDF.values, legacy.partSDF.values)
-        // the octet's rim is its legacy width: skin = rim
-        XCTAssertEqual(band.unselectedRimMM, band.unselectedSkinMM, accuracy: 1e-9)
+        // the octet's rim and solid-backed side rim are its legacy width (the skin, ~1.2 mm), never
+        // organic's solid rim (3.41 on his stand) — read off the band itself
+        XCTAssertEqual(band.bandRimMM, band.unselectedSkinMM, accuracy: 1e-9)
+        XCTAssertEqual(band.bandSideRimMM, band.unselectedSkinMM, accuracy: 1e-9)
+        XCTAssertGreaterThan(band.bandRimMM, 0.4); XCTAssertLessThan(band.bandRimMM, 2.0)
     }
 }

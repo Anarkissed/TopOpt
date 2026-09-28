@@ -101,7 +101,7 @@ final class LatticeHisSteppedBakeProbe: XCTestCase {
                             wallThicknessFloorMM: floorCells.filter { $0 > 0 }.min() ?? lat.cellMM,
                             wallDepthSteps: steps, wallStressField: wallStressField,
                             bandOverrides: lat.bandTreatments,
-                            octetBand: env["HIS_OCTET_BAND"] != "0", bandGradeMM: lat.shapeFitBandMM,
+                            octetBand: env["HIS_OCTET_BAND"] != "0", bandGradeMM: lat.gradingMode.fitsShape ? lat.shapeFitBandMM : 0,
                             beadMM: bead)
         }
         let s0 = scene(LatticeRegionCells.steppedCellsMM(project: pm, scene: nil))
@@ -139,6 +139,33 @@ final class LatticeHisSteppedBakeProbe: XCTestCase {
             let rho = Double(layer.bakedDensityAt(SIMD3<Float>(p))), cell = layer.bakedCellMMAt(SIMD3<Float>(p))
             let strut = cell > 0 ? 2 * lt.strutRadiusMM(relativeDensity: rho, cellMM: cell) : -1
             print(String(format: "HIS callout %@: density %.0f%% · strut %.2f mm · cell %.2f mm", name, 100 * rho, strut, cell))
+        }
+
+        // ── ★ tilted facets: material within 3 mm of the part's surface, inside a tilted include
+        // prism, that the bake left without a cell — with the tilted span and without it
+        func uncovered(_ label: String) {
+            let po = s1.prismOccupancy
+            var total = 0, bare = 0
+            for (ri, r) in regions.enumerated() where r.role == .include && r.kind == .face {
+                let n = LatticeRegionMask.unit(r.normal)
+                guard Swift.max(abs(n.x), Swift.max(abs(n.y), abs(n.z))) < 0.99 else { continue }
+                _ = ri
+                for k in 0..<po.nz { for j in 0..<po.ny { for i in 0..<po.nx where po.values[(k * po.ny + j) * po.nx + i] > 0.5 {
+                    let p = SIMD3<Double>(po.origin + SIMD3<Float>(Float(i), Float(j), Float(k)) * po.spacing)
+                    guard LatticeRegionMask.containsWholePrism(p, region: r), s1.partMaterialSDF.sampleLinear(p) > -3 else { continue }
+                    total += 1
+                    if layer.bakedCellMMAt(SIMD3<Float>(p)) <= 0 { bare += 1 }
+                } } }
+            }
+            print("HIS tilted facets \(label): near-surface material voxels \(total), without a cell \(bare)")
+        }
+        uncovered("span on")
+        if env["HIS_TILT_CONTROL"] == "1" {
+            LatticePreviewOccupancy.tiltedSpanEnabled = false
+            mr.setLatticeScene(s1, token: 2)
+            uncovered("span OFF (centre-plane anchoring)")
+            LatticePreviewOccupancy.tiltedSpanEnabled = true
+            mr.setLatticeScene(s1, token: 3)
         }
 
         // ── frames

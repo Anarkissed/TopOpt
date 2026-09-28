@@ -946,7 +946,10 @@ extension LatticePreviewOccupancy {
                                         /// per-spot rule only CAPS it at
                                         /// min(declared depth, local wall),
                                         /// never re-derives it.
-                                        cellIsUserStated: [Bool] = [])
+                                        cellIsUserStated: [Bool] = [],
+                                        /// ★ the densest the band may raise a cell (1 = to the
+                                        /// quilt); the octet's ceiling unless Allow quilt (2026-09-28)
+                                        bandQuiltCeiling: Double = 1)
         -> LatticeCellField? {
         guard baseCellMM > 0, cellMM.count == regions.count,
               cellMM.contains(where: { $0 > 0 }) else { return nil }
@@ -1945,7 +1948,7 @@ extension LatticePreviewOccupancy {
                             // in; the raise happens here, after the cap.
                             if let t = bandT, drawnHi > densityLo, !latticeID.isEmpty {
                                 let lat = LatticeType.named(latticeID)
-                                let quilt = Swift.min(drawnHi, lat.quiltRowDensity(cellMM: s))
+                                let quilt = Swift.min(Swift.min(drawnHi, lat.quiltRowDensity(cellMM: s)), bandQuiltCeiling)
                                 let g = densityGamma > 0 ? densityGamma : 1
                                 let actNow = Double(Swift.max(0, Swift.min(1, activation[i])))
                                 let rhoNow = densityLo + (drawnHi - densityLo) * pow(actNow, g)

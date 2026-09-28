@@ -46,6 +46,9 @@ public enum LatticeBandFields {
         public var counts: [String: Int]
         /// ★ every choice the band made that the user may override (the lattice-only chips)
         public var decisions: [LatticeBandDecision] = []
+        /// The rim and the solid-backed side rim this band was built with (mm).
+        public var rimMM: Double = 0
+        public var sideRimMM: Double = 0
     }
 
     public struct Params {
@@ -278,10 +281,13 @@ public enum LatticeBandFields {
         // a chip's faces. Measured on the prisms alone, never on the band, so a chip survives its
         // own flip.
         let probeDepth = s + 0.5 * r
-        // ★ "far from the side": beyond the rim AND half the grade band (whichever is wider),
-        // plus two voxels — a length of the BAND, not of the rim alone, so a thinner rim (the
-        // octet's 1.21 mm against organic's 3.41) does not turn alongside faces into questions
-        let crossT = Swift.max(c, 0.5 * g) + 2 * h
+        // ★ "far from the side": beyond the rim, and never closer than three preview voxels,
+        // plus two — a length of the GRID the preview resolves, not of a user dial: a thinner
+        // rim (the octet's 1.21 mm against organic's 3.41) must not turn alongside faces into
+        // questions, and the grade-band slider must not move a chip (2026-09-28 review: at
+        // max(c, g/2) a 25 mm band erased the floor's chip and the default 1 mm band brought
+        // the base back)
+        let crossT = Swift.max(c, 3 * h) + 2 * h
         struct IncRegion { var rg: LatticeRegionSpec; var n: SIMD3<Double>; var u: SIMD3<Double>; var v: SIMD3<Double>; var lo: SIMD3<Double>; var hi: SIMD3<Double> }
         let incs: [IncRegion] = includeFaces.map { r0 in
             var rg = r0; rg.thicknessMap = nil
@@ -372,7 +378,10 @@ public enum LatticeBandFields {
             for g in arr.dropFirst() { let ra = rootF(arr[0]), rb = rootF(g); if ra != rb { parentF[rb] = ra } }
         }
         var joined = Set<Int>()
-        for f in crossed.keys where !seeds.contains(f) {
+        // ★ a joining face must itself be crossed over a quarter of what the pocket reaches under
+        // it — one deep sample must not hand a face the rules decide (the leg top's 15 % f30) to
+        // a question and strip its skin
+        for f in crossed.keys where !seeds.contains(f) && crossed[f]!.cross >= 0.25 * crossed[f]!.reached {
             var nb = Set<Int>()
             for (_, fs) in edgeFaces where fs.contains(f) { nb.formUnion(fs.filter { seeds.contains($0) }) }
             if let lead = nb.max(by: { crossed[$0]!.cross < crossed[$1]!.cross }) { parentF[f] = rootF(lead); joined.insert(f) }
@@ -400,7 +409,8 @@ public enum LatticeBandFields {
                 if chosen != nil && classByFace[f] != want { overriddenFaces.append(f) }
                 classByFace[f] = want
             }
-            let lead = members.max { crossed[$0]!.cross < crossed[$1]!.cross }!
+            // pinned on the SEED crossed most (a joined face never carries the chip)
+            let lead = members.filter { seeds.contains($0) }.max { crossed[$0]!.cross < crossed[$1]!.cross }!
             let a = crossed[lead]!
             let centre = a.sum / a.cross
             let pin = a.pts.min { simd_distance_squared($0.0, centre) < simd_distance_squared($1.0, centre) }!
@@ -1089,7 +1099,7 @@ public enum LatticeBandFields {
         _ = t0
         return Result(qC: qGrid, carvedC: grid(carvedC), gradeC: grid(bandC.grade), skinC: grid(skinC), rimC: grid(bandC.br),
                       materialC: grid(matC), latticedC: grid(latticedC), fine: fine, classByFace: classByFace,
-                      diag: diag, counts: counts, decisions: decisions)
+                      diag: diag, counts: counts, decisions: decisions, rimMM: r, sideRimMM: rO)
     }
 }
 

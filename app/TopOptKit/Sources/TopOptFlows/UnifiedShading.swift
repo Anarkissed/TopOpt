@@ -1120,6 +1120,7 @@ static LSDFHit lsdf_march(constant LSDFUniforms& U,
         // only to material OUTSIDE every prism.
         float Fsolid = (anyActive || solidOnly) ? 1e9 : (dRegion < 0.0 ? 1e9 : dClip);
         bool bleedHit = false;
+        bool bandRimWon = false;       // the band's rim (not the grade's bleed) owns the solid hit
         // ★★★ THE RIM UNDER EVERY UNSELECTED FACE (his 2026-09-23 02:30: "the rim is below
         // the solid — the transition from lattice to solid, connecting the skin"). Inside a
         // declared prism, where the region field is solid, beyond the model's thin skin
@@ -1147,7 +1148,7 @@ static LSDFHit lsdf_march(constant LSDFUniforms& U,
             float FrimStep = max(max(v.r, v.b), max(v.a, dBox));
             float FrimHit = U.bandParams.x > 0.5 ? FrimStep : max(FrimStep, -v.g);
             Frim = FrimStep;
-            if (FrimHit < Fsolid) { Fsolid = FrimHit; bleedHit = true; }
+            if (FrimHit < Fsolid) { Fsolid = FrimHit; bleedHit = true; bandRimWon = true; }
         } else if (U.bandParams.z < 0.5) {
             // (bandParams.z = 1: the region's `.a` is the band's B_r, not this block's skin
             // field — a band scene whose capsules are off — so no legacy rim is drawn from it)
@@ -1193,7 +1194,7 @@ static LSDFHit lsdf_march(constant LSDFUniforms& U,
                 float dPartRaw = dPart - delta
                                - 0.3 * max(U.sdfSpacing.x, max(U.sdfSpacing.y, U.sdfSpacing.z));
                 float Fb = max(max(dOutV - depth, dBox), max(regionTex.sample(samp, stc).b, dPartRaw));
-                if (Fb < Fsolid) { Fsolid = Fb; bleedHit = true; }
+                if (Fb < Fsolid) { Fsolid = Fb; bleedHit = true; bandRimWon = false; }
             }
         }
         // ★★★ DOUBLED'S SOLID CELLS RENDER **SOLID** (maintainer, 2026-08-24
@@ -1255,6 +1256,9 @@ static LSDFHit lsdf_march(constant LSDFUniforms& U,
             // 1 = the run's solid fill (printed layers); 2 = the grade's BLEED, drawn
             // flat in the rim colour like the outline beam it grows from.
             out.solid = (Fsolid <= Fstrut) ? (bleedHit ? 2.0 : 1.0) : 0.0;
+            // ★ in band mode a BLEED hit is 2.5 — still the rim colour, but not the band rim, so
+            // it keeps `lsdf_normal` instead of the rim's field normal (2026-09-28 review)
+            if (out.solid > 1.5 && U.bandOrigin.w > 0.5 && !bandRimWon) { out.solid = 2.5; }
             out.cellMM = cellHere;
             out.rawLevel = float(LC.L);
             return out;
@@ -1307,7 +1311,10 @@ static float3 lsdf_normal(constant LSDFUniforms& U,
                           sampler samp,
                           constant ShellClip& RC,
                           constant float4* decls,
-                          float3 hitPos, float hitRho) {
+                          float3 hitPos, float hitRho,
+                          // ★ band mode, a STRUT hit (2026-09-28 review): the gradient takes the
+                          // clip the struts are cut by (`dClipStrut`), not the coarse carved field
+                          texture3d<float> rimTex, bool bandStrut) {
     float3 bmin = U.bboxMin.xyz, bmax = U.bboxMax.xyz;
     float3 bc = (bmin + bmax) * 0.5, be = (bmax - bmin) * 0.5;
     float3 sdfDims = U.sdfDims.xyz;
@@ -1337,6 +1344,12 @@ static float3 lsdf_normal(constant LSDFUniforms& U,
         // part surface takes the part's. Otherwise the cut face is shaded as if
         // it were still a strut and reads as a tear.
         float dR = regionTex.sample(samp, stc).r;
+        if (bandStrut) {
+            float4 bw = rimTex.sample(samp, band_uvw(U, pts[k]));
+            float weld = U.bandSpacing.w;
+            float fade = clamp(-bw.b / max(1.5 * weld, 0.2), 0.0, 1.0);
+            dR = max(regionTex.sample(samp, stc).b, -bw.r + 0.15 * (1.0 - fade)) - weld * fade;
+        }
         d6[k] = max(dmin * LCk.S,
                     max(max(lsdf_part_clip(U, sdfTex, regionTex, samp, RC, decls,
                                            pts[k], dP), dB), dR));
@@ -1565,14 +1578,14 @@ fragment LSDFGBuf lsdf_gbuffer(VOut in [[stage_in]],
     // ★★★ A BAND RIM HIT TAKES THE RIM'S OWN NORMAL (2026-09-26): `lsdf_normal` differences
     // the voxel-stepped region field and facets the arcs. `debugParams.z` is the control:
     // 1 = the legacy `lsdf_normal`, 2 = the fine gradient only (no smooth blend).
-    bool bandRimHit = U.bandOrigin.w > 0.5 && h.solid > 1.5;
+    bool bandRimHit = U.bandOrigin.w > 0.5 && h.solid > 1.5 && h.solid < 2.25;
     float3 n;
     if (bandRimHit && abs(U.debugParams.z - 1.0) > 0.5) {
         n = U.debugParams.z > 1.5 ? band_rim_gradient(U, rimTex, samp, h.pos)
                                   : band_rim_normal(U, rimTex, rimNormTex, samp, h.pos);
     } else {
         n = lsdf_normal(U, segs, cellTex, sdfTex, regionTex, samp, RC, shellDecls,
-                        h.pos, h.rho);
+                        h.pos, h.rho, rimTex, U.bandOrigin.w > 0.5 && h.solid < 0.5);
     }
     // ★★★ THE DEPTH BIAS — see `lsdf_part_clip` for why this replaced a geometric
     // inset. Where the shell survives it OWNS the boundary, so the lattice must lose

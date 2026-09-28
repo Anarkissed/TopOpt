@@ -40,6 +40,10 @@ final class LatticeStandRenderProbe: XCTestCase {
                                     spacingMM: 30, minExtrudableWidthMM: 0.45, buildDirection: SIMD3(0, 0, 1),
                                     separationMinMM: 3, separationMaxMM: 3, rhoMin: 0.05, rhoMax: 0.9, showRepairs: false)
         o.solidRimMM = 3.41
+        // ★ STAND_SHAPE_BAND=<mm>: the grade band (0 ⇒ the scene's 10 mm); STAND_ALGO=stepped builds
+        // the stand as the octet on the band
+        if let b = ProcessInfo.processInfo.environment["STAND_SHAPE_BAND"].flatMap(Double.init) { o.shapeBandMM = b; o.shapeFit = b > 0 }
+        let octetStand = ProcessInfo.processInfo.environment["STAND_ALGO"] == "stepped"
         // one tiny span, so the renderer draws capsules and the march runs SOLID-ONLY as in
         // the app (the rim band and nothing else)
         var segs: [OrganicSpanIndex.Segment] = [.init(a: SIMD3<Float>(100, -22, 60), b: SIMD3<Float>(101, -22, 60), r: 0.3)]
@@ -76,9 +80,13 @@ final class LatticeStandRenderProbe: XCTestCase {
             let kv = item.split(separator: "=")
             if kv.count == 2 { overrides[String(kv[0])] = kv[1] == "1" }
         }
-        let scene = LatticeSDFScene(mesh: mesh, field: nil, latticeID: "octet", organicSpans: injectSpan ? spans : nil, stageMode: .aesthetic,
-                                    algorithm: "organic", organic: o, maxDim: dim, regions: regions, whenEmpty: .latticeNothing,
-                                    bandOverrides: overrides)
+        let scene = octetStand
+            ? LatticeSDFScene(mesh: mesh, field: nil, latticeID: "octet", stageMode: .aesthetic, algorithm: "stepped",
+                              maxDim: dim, regions: regions, whenEmpty: .latticeNothing, bandOverrides: overrides,
+                              octetBand: true, bandGradeMM: o.shapeBandMM)
+            : LatticeSDFScene(mesh: mesh, field: nil, latticeID: "octet", organicSpans: injectSpan ? spans : nil, stageMode: .aesthetic,
+                              algorithm: "organic", organic: o, maxDim: dim, regions: regions, whenEmpty: .latticeNothing,
+                              bandOverrides: overrides)
         print("RENDER scene capsules \(scene.organicCapsules.count)")
         return (mesh, scene)
     }

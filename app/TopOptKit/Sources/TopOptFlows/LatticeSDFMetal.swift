@@ -461,6 +461,9 @@ public struct LatticeSDFScene {
     /// ★ Every choice the band made that the user may override (chips in lattice-only view);
     /// empty on the legacy path. See `LatticeBandDecision`.
     public var bandDecisions: [LatticeBandDecision] = []
+    /// The band's rim and solid-backed side rim (mm); 0 on the legacy path.
+    public var bandRimMM: Double = 0
+    public var bandSideRimMM: Double = 0
     /// ★ The part's material inside every declared prism, IGNORING the slabs — the grid
     /// the measurers read (`LatticeRegionMask.clippedWholePrism`). `occupancy` is the
     /// slab-clipped set where lattice may go.
@@ -822,6 +825,8 @@ public struct LatticeSDFScene {
             self.bandRimCoarse = band.rimC
             self.bandOptions = bandOpts
             self.bandDecisions = band.decisions
+            self.bandRimMM = band.rimMM
+            self.bandSideRimMM = band.sideRimMM
             let voxelHere = Double(Swift.max(solid.spacing.x, Swift.max(solid.spacing.y, solid.spacing.z)))
             self.unselectedSkinMM = LatticeSDFRenderer.outlineBeamMM(lineWidthMM: beadMM > 0 ? beadMM : (organic?.minExtrudableWidthMM ?? 0.45), voxelMM: voxelHere)
             self.unselectedRimMM = Swift.max(self.unselectedSkinMM, self.organicSolidRimMM)
@@ -3021,7 +3026,9 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
                     latticeID: params.latticeID,
                     shapeFit: steppedShapeFit,
                     dyadicSteps: steppedDyadicSteps,
-                    cellIsUserStated: steppedCellStated)
+                    cellIsUserStated: steppedCellStated,
+                    bandQuiltCeiling: LatticeType.named(params.latticeID).hasAestheticCeiling && !scene.allowQuilt
+                        ? scene.drawnCeilingRho : 1)
             }
             // ★★★ THE OCTREE BAKE replaces the per-coarse-texel decision (his 2026-09-14
             // rules: fewest cells, largest that fit, smallest only where nothing larger
@@ -4639,14 +4646,14 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
         if (!h.hit) return float4(0.0);
         float3 hitPos = h.pos; float hitRho = h.rho;
         // ★ the same normal rule as `lsdf_gbuffer`: a band rim hit takes the rim's own normal
-        bool bandRimHit = U.bandOrigin.w > 0.5 && h.solid > 1.5;
+        bool bandRimHit = U.bandOrigin.w > 0.5 && h.solid > 1.5 && h.solid < 2.25;
         float3 n;
         if (bandRimHit && abs(U.debugParams.z - 1.0) > 0.5) {
             n = U.debugParams.z > 1.5 ? band_rim_gradient(U, rimTex, samp, hitPos)
                                       : band_rim_normal(U, rimTex, rimNormTex, samp, hitPos);
         } else {
             n = lsdf_normal(U, segs, cellTex, sdfTex, regionTex, samp, RC, shellDecls,
-                            hitPos, hitRho);
+                            hitPos, hitRho, rimTex, U.bandOrigin.w > 0.5 && h.solid < 0.5);
         }
 
         // ★ THE OLD, SEPARATE LIGHTING MODEL — and §1(d)'s whole point. A model-space

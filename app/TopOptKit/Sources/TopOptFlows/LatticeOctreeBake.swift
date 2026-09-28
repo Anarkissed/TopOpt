@@ -54,6 +54,9 @@ extension LatticePreviewOccupancy {
 
     /// A face region gets a ladder when its normal is within 30° of an axis (cos 30°).
     public static let ladderAxisCos = 0.866
+    /// A tilted face's slots cover the prism's real extent along the axis; false = the
+    /// centre-plane anchoring (a test's control only).
+    nonisolated(unsafe) static var tiltedSpanEnabled = true
 
     /// How far toward the quilt a cell ABOVE the finest rung thickens at the outline
     /// when it lies in the band (the finest rung goes all the way).
@@ -140,7 +143,10 @@ extension LatticePreviewOccupancy {
         let floorMM = Swift.max(realFloorMM > 0 ? realFloorMM : voxel, voxel, 0.5)
 
         // Each region's ladder: its cell halved while the half is still printable.
-        struct Ladder { let region: Int; let sizes: [Double]; let axis: Int }
+        /// `span`: where the prism lies along `axis`, in mm from the face plane going into the
+        /// part — (0, depth) for an axis-aligned face; a tilted face's prism starts IN FRONT of
+        /// its centre plane on one side (his foot facet's lower half, 2026-09-28 review)
+        struct Ladder { let region: Int; let sizes: [Double]; let axis: Int; var span: (lo: Double, hi: Double) = (0, 0) }
         var ladders: [Ladder] = []
         // ★ ONE LADDER PER PLATE. His stand's plate carries two regions — face 2 from
         // the front, face 15 from the back — and each prism overruns the plate where
@@ -178,7 +184,24 @@ extension LatticePreviewOccupancy {
             // own "across a prism" tilt; a face tilted further from every axis keeps none, and
             // the DIAG names it.
             guard a[axis] > Self.ladderAxisCos else { stats.noLadderRegions.append(r); continue }
-            ladders.append(Ladder(region: r, sizes: [], axis: axis))
+            var span = (lo: 0.0, hi: region.depthMM)
+            if a[axis] < 0.99, Self.tiltedSpanEnabled {
+                // ★ the prism's real extent along the axis: the outline's corners at the face and
+                // at full depth (grown by the in-plane offset), measured into the part
+                let (bu, bv) = LatticeRegionMask.basis(n)
+                let sgn = n[axis] > 0 ? 1.0 : -1.0
+                var pts = region.outlineLoops.flatMap { $0 }
+                if pts.isEmpty { pts = [SIMD2(-region.halfUMM, -region.halfWMM), SIMD2(region.halfUMM, -region.halfWMM),
+                                        SIMD2(region.halfUMM, region.halfWMM), SIMD2(-region.halfUMM, region.halfWMM)] }
+                let grow = abs(region.inPlaneOffsetMM) * (bu[axis] * bu[axis] + bv[axis] * bv[axis]).squareRoot()
+                var lo = Double.greatestFiniteMagnitude, hi = -Double.greatestFiniteMagnitude
+                for q in pts { for d in [0.0, region.depthMM] {
+                    let t = sgn * (bu[axis] * q.x + bv[axis] * q.y + n[axis] * d)
+                    lo = Swift.min(lo, t); hi = Swift.max(hi, t)
+                } }
+                span = (Swift.min(0, lo - grow), Swift.max(region.depthMM, hi + grow))
+            }
+            ladders.append(Ladder(region: r, sizes: [], axis: axis, span: span))
         }
         guard !ladders.isEmpty else { return nil }
         // ★ ONE LADDER PER REGION, from that region's own cell. His back wall is
@@ -236,7 +259,7 @@ extension LatticePreviewOccupancy {
                 ? ladderSizes(base: base)
                 : steppedSizeMenu(base: base, floorMM: floorMM, lineWidthMM: lineWidthMM, latticeID: latticeID,
                                   printsOpenBound: finestPrintsOpen)
-            return Ladder(region: $0.region, sizes: sizes, axis: $0.axis)
+            return Ladder(region: $0.region, sizes: sizes, axis: $0.axis, span: $0.span)
         }
         let pitch = ladders.map { $0.sizes.last! }.min()!
         stats.pitchMM = pitch
@@ -339,7 +362,8 @@ extension LatticePreviewOccupancy {
                 }
                 var count = SIMD3<Int>(repeating: 1)
                 for ax in 0..<3 where ax != axis { count[ax] = Int((ext[ax] / S).rounded(.up)) + 1 }
-                count[axis] = Swift.max(1, Int((region.depthMM / S).rounded(.up)))
+                let axisI0 = Int((ladder.span.lo / S).rounded(.down))
+                count[axis] = Swift.max(1, Int((ladder.span.hi / S).rounded(.up)) - axisI0)
                 func fitsBox(_ lo: SIMD3<Double>, _ S: Double) -> Bool {
                     if dOut(lo + SIMD3<Double>(repeating: 0.5 * S)) < -0.87 * S { return false }
                     if !LatticePreviewOccupancy.boxInsideSlab(lo, S, region: region, axis: axis) { return false }
@@ -353,7 +377,8 @@ extension LatticePreviewOccupancy {
                     return true
                 }
                 for k in 0..<count.z { for j in 0..<count.y { for i in 0..<count.x {
-                    let idx = SIMD3<Int>(i, j, k)
+                    var idx = SIMD3<Int>(i, j, k)
+                    idx[axis] += axisI0
                     var lo = SIMD3<Double>(repeating: 0)
                     for ax in 0..<3 {
                         lo[ax] = ax == axis
@@ -811,8 +836,8 @@ extension LatticePreviewOccupancy {
             var i0 = SIMD3<Int>(repeating: 0), i1 = SIMD3<Int>(repeating: 0)
             for ax in 0..<3 {
                 if ax == axis {
-                    i0[ax] = 0
-                    i1[ax] = Swift.max(0, Int((region.depthMM / sBase).rounded(.up)) - 1)
+                    i0[ax] = Int((ladder.span.lo / sBase).rounded(.down))
+                    i1[ax] = Swift.max(i0[ax], Int((ladder.span.hi / sBase).rounded(.up)) - 1)
                 } else {
                     i0[ax] = 0
                     i1[ax] = Int((ext[ax] / sBase).rounded(.up))
@@ -859,7 +884,10 @@ extension LatticePreviewOccupancy {
                     let share = isFinest[i] ? 1.0 : coarseCellBandRaise
                     // ★ the amount, scaled by the strength (2026-09-18): more than the
                     // quilt is clamped to the drawn top below; less is simply less
-                    r = Swift.max(r, r + (q - r) * (1 - Double(bandT[i])) * share * (bandAmount > 0 ? bandAmount : 1))
+                    // ★ never past q (2026-09-28 review: a grade strength above 0 doubled the raise
+                    // and overshot the ceiling with Allow quilt off; past the quilt row it drew the
+                    // same saturated strut anyway)
+                    r = Swift.max(r, Swift.min(q, r + (q - r) * (1 - Double(bandT[i])) * share * (bandAmount > 0 ? bandAmount : 1)))
                     // the bleed: solid wherever the voxel is within beam + bleed of
                     // the outline — the march tests the in-plane distance per voxel
                     if bleed > 0 { solidDepth[i] = Float(band) }

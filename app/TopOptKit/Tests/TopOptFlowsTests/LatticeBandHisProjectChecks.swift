@@ -252,5 +252,21 @@ final class LatticeBandHisProjectChecks: XCTestCase {
         XCTAssertGreaterThan(allWallB, ruleWallB + 50, "control: honouring face 16's choice drew no rim — the check measures nothing")
         XCTAssertLessThan(ruleCapHits * 10, onCapHits, "the depth ends are drawn solid by default")
         XCTAssertGreaterThan(onCapHits, 150, "the depth ends set solid drew no rim")
+        XCTAssertEqual(rule.bandRimMM, 3.41, accuracy: 0.01, "organic's rim is its solid rim")
+
+        // ★ THE CHIPS DO NOT MOVE WITH THE GRADE-BAND SLIDER, and the octet asks the same two
+        // questions (2026-09-28 review: a band-length threshold erased the floor's chip at 25 mm
+        // and brought the base back at 1 mm)
+        for (label, env) in [("organic band 1", ["STAND_SHAPE_BAND": "1"]), ("organic band 40", ["STAND_SHAPE_BAND": "40"]),
+                             ("octet band 10", ["STAND_ALGO": "stepped"]), ("octet band 1", ["STAND_ALGO": "stepped", "STAND_SHAPE_BAND": "1"])] {
+            let (_, sc) = try Self.scene(env)
+            let keys = sc.bandDecisions.map(\.key)
+            print("CHIPS \(label): \(sc.bandDecisions.map(\.label)) · rim \(sc.bandRimMM) side \(sc.bandSideRimMM)")
+            XCTAssertEqual(Set(keys), Set(ds.map(\.key)), "\(label): the chips changed")
+            if env["STAND_ALGO"] == "stepped" {
+                XCTAssertEqual(sc.bandRimMM, sc.unselectedSkinMM, accuracy: 1e-9, "\(label): the octet's rim is the skin")
+                XCTAssertEqual(sc.bandSideRimMM, sc.unselectedSkinMM, accuracy: 1e-9)
+            }
+        }
     }
 }
