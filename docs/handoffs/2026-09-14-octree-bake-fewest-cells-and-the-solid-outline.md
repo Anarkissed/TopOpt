@@ -1894,3 +1894,16 @@ CONTAINS "DIAG"'` — read-only, no launch.
 
 Open: large cells cut at an angle on the tilted facets (cosmetic, judge in the sim); the CPU shell
 census does not mirror the octet eye test (DIAG only).
+
+### 02:59 — review round (wf_3f483e40-fdc, 20 agents, 9 confirmed; installed 02:59:44) — da01c9b8
+
+- crossT = max(c, 3h) + 2h: off the grade-band slider (stand: same 2 chips at bands 1/40 organic,
+  1/10 octet). Joins need ≥ ¼ crossed; the pin is a seed. Octet bandGradeMM gated on fitsShape.
+- Band raise clamped at q (grade strength 2: 0.219); `steppedCellField` gets `bandQuiltCeiling`.
+- `lsdf_normal(…, rimTex, bandStrut)`: octet strut hits differentiate the band clip; a band-mode
+  bleed hit is solid 2.5 (keeps lsdf_normal; the pinned `out.solid` line is untouched).
+- Tilted ladders span the prism along the axis. REFUTED the "wedge has no cells" premise on his
+  project (0 of 10,928 near-surface voxels bare either way — the fill pass paints them); the span
+  stands more WHOLE cells (593,549 vs 565,692 mm³; 680 vs 651 ≥ 6 mm). Test pins the volume.
+- `scene.bandRimMM/bandSideRimMM`; octet rim asserted = skin.
+Stale full-suite run stopped at 528 (only the known 4 failures); final full run started 03:00.
