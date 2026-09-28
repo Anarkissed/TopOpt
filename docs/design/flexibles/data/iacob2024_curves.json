@@ -1,0 +1,1661 @@
+{
+ "schema_version": 1,
+ "entries": [
+  {
+   "id": "iacob2024_gyroid_10pct_190C",
+   "tier": "literature",
+   "material_id": "varioshore_tpu",
+   "nozzle_temp_c": 190,
+   "flow_pct": 110,
+   "topology": "gyroid",
+   "geometry_source": "slicer_infill",
+   "beads_per_wall": null,
+   "bead_width_mm": null,
+   "relative_density": 0.1,
+   "relative_density_basis": "nominal_infill",
+   "est_core_relative_density": 0.143,
+   "cell_mm": null,
+   "specimen": {
+    "shape": "cylinder",
+    "diameter_mm": 29.0,
+    "width_mm": null,
+    "depth_mm": null,
+    "height_mm": 12.5,
+    "skin_total_mm": 1.6,
+    "side_skin": false,
+    "cells_across": null,
+    "mass_density_g_cm3": 0.303
+   },
+   "conditioning": {
+    "cycle_reported": 4,
+    "rate_mm_per_min": 10,
+    "toe_corrected": true
+   },
+   "loading": [
+    [
+     0.1,
+     0.042
+    ],
+    [
+     0.2,
+     0.054
+    ]
+   ],
+   "unloading": null,
+   "strain_max_measured": 0.25,
+   "replicates": 3,
+   "rel_sd": 0.111,
+   "source": "iacob2024"
+  },
+  {
+   "id": "iacob2024_honeycomb_10pct_190C",
+   "tier": "literature",
+   "material_id": "varioshore_tpu",
+   "nozzle_temp_c": 190,
+   "flow_pct": 110,
+   "topology": "honeycomb",
+   "geometry_source": "slicer_infill",
+   "beads_per_wall": null,
+   "bead_width_mm": null,
+   "relative_density": 0.1,
+   "relative_density_basis": "nominal_infill",
+   "est_core_relative_density": 0.165,
+   "cell_mm": null,
+   "specimen": {
+    "shape": "cylinder",
+    "diameter_mm": 29.0,
+    "width_mm": null,
+    "depth_mm": null,
+    "height_mm": 12.5,
+    "skin_total_mm": 1.6,
+    "side_skin": false,
+    "cells_across": null,
+    "mass_density_g_cm3": 0.326
+   },
+   "conditioning": {
+    "cycle_reported": 4,
+    "rate_mm_per_min": 10,
+    "toe_corrected": true
+   },
+   "loading": [
+    [
+     0.1,
+     0.165
+    ],
+    [
+     0.2,
+     0.256
+    ]
+   ],
+   "unloading": null,
+   "strain_max_measured": 0.25,
+   "replicates": 3,
+   "rel_sd": 0.042,
+   "source": "iacob2024"
+  },
+  {
+   "id": "iacob2024_gyroid_15pct_190C",
+   "tier": "literature",
+   "material_id": "varioshore_tpu",
+   "nozzle_temp_c": 190,
+   "flow_pct": 110,
+   "topology": "gyroid",
+   "geometry_source": "slicer_infill",
+   "beads_per_wall": null,
+   "bead_width_mm": null,
+   "relative_density": 0.15,
+   "relative_density_basis": "nominal_infill",
+   "est_core_relative_density": 0.18,
+   "cell_mm": null,
+   "specimen": {
+    "shape": "cylinder",
+    "diameter_mm": 29.0,
+    "width_mm": null,
+    "depth_mm": null,
+    "height_mm": 12.5,
+    "skin_total_mm": 1.6,
+    "side_skin": false,
+    "cells_across": null,
+    "mass_density_g_cm3": 0.342
+   },
+   "conditioning": {
+    "cycle_reported": 4,
+    "rate_mm_per_min": 10,
+    "toe_corrected": true
+   },
+   "loading": [
+    [
+     0.1,
+     0.119
+    ],
+    [
+     0.2,
+     0.142
+    ]
+   ],
+   "unloading": null,
+   "strain_max_measured": 0.25,
+   "replicates": 3,
+   "rel_sd": 0.056,
+   "source": "iacob2024"
+  },
+  {
+   "id": "iacob2024_honeycomb_15pct_190C",
+   "tier": "literature",
+   "material_id": "varioshore_tpu",
+   "nozzle_temp_c": 190,
+   "flow_pct": 110,
+   "topology": "honeycomb",
+   "geometry_source": "slicer_infill",
+   "beads_per_wall": null,
+   "bead_width_mm": null,
+   "relative_density": 0.15,
+   "relative_density_basis": "nominal_infill",
+   "est_core_relative_density": 0.236,
+   "cell_mm": null,
+   "specimen": {
+    "shape": "cylinder",
+    "diameter_mm": 29.0,
+    "width_mm": null,
+    "depth_mm": null,
+    "height_mm": 12.5,
+    "skin_total_mm": 1.6,
+    "side_skin": false,
+    "cells_across": null,
+    "mass_density_g_cm3": 0.401
+   },
+   "conditioning": {
+    "cycle_reported": 4,
+    "rate_mm_per_min": 10,
+    "toe_corrected": true
+   },
+   "loading": [
+    [
+     0.1,
+     0.406
+    ],
+    [
+     0.2,
+     0.652
+    ]
+   ],
+   "unloading": null,
+   "strain_max_measured": 0.25,
+   "replicates": 3,
+   "rel_sd": 0.071,
+   "source": "iacob2024"
+  },
+  {
+   "id": "iacob2024_gyroid_20pct_190C",
+   "tier": "literature",
+   "material_id": "varioshore_tpu",
+   "nozzle_temp_c": 190,
+   "flow_pct": 110,
+   "topology": "gyroid",
+   "geometry_source": "slicer_infill",
+   "beads_per_wall": null,
+   "bead_width_mm": null,
+   "relative_density": 0.2,
+   "relative_density_basis": "nominal_infill",
+   "est_core_relative_density": 0.226,
+   "cell_mm": null,
+   "specimen": {
+    "shape": "cylinder",
+    "diameter_mm": 29.0,
+    "width_mm": null,
+    "depth_mm": null,
+    "height_mm": 12.5,
+    "skin_total_mm": 1.6,
+    "side_skin": false,
+    "cells_across": null,
+    "mass_density_g_cm3": 0.39
+   },
+   "conditioning": {
+    "cycle_reported": 4,
+    "rate_mm_per_min": 10,
+    "toe_corrected": true
+   },
+   "loading": [
+    [
+     0.1,
+     0.219
+    ],
+    [
+     0.2,
+     0.292
+    ]
+   ],
+   "unloading": null,
+   "strain_max_measured": 0.25,
+   "replicates": 3,
+   "rel_sd": 0.048,
+   "source": "iacob2024"
+  },
+  {
+   "id": "iacob2024_honeycomb_20pct_190C",
+   "tier": "literature",
+   "material_id": "varioshore_tpu",
+   "nozzle_temp_c": 190,
+   "flow_pct": 110,
+   "topology": "honeycomb",
+   "geometry_source": "slicer_infill",
+   "beads_per_wall": null,
+   "bead_width_mm": null,
+   "relative_density": 0.2,
+   "relative_density_basis": "nominal_infill",
+   "est_core_relative_density": 0.286,
+   "cell_mm": null,
+   "specimen": {
+    "shape": "cylinder",
+    "diameter_mm": 29.0,
+    "width_mm": null,
+    "depth_mm": null,
+    "height_mm": 12.5,
+    "skin_total_mm": 1.6,
+    "side_skin": false,
+    "cells_across": null,
+    "mass_density_g_cm3": 0.453
+   },
+   "conditioning": {
+    "cycle_reported": 4,
+    "rate_mm_per_min": 10,
+    "toe_corrected": true
+   },
+   "loading": [
+    [
+     0.1,
+     0.595
+    ],
+    [
+     0.2,
+     1.158
+    ]
+   ],
+   "unloading": null,
+   "strain_max_measured": 0.25,
+   "replicates": 3,
+   "rel_sd": 0.057,
+   "source": "iacob2024"
+  },
+  {
+   "id": "iacob2024_gyroid_25pct_190C",
+   "tier": "literature",
+   "material_id": "varioshore_tpu",
+   "nozzle_temp_c": 190,
+   "flow_pct": 110,
+   "topology": "gyroid",
+   "geometry_source": "slicer_infill",
+   "beads_per_wall": null,
+   "bead_width_mm": null,
+   "relative_density": 0.25,
+   "relative_density_basis": "nominal_infill",
+   "est_core_relative_density": 0.271,
+   "cell_mm": null,
+   "specimen": {
+    "shape": "cylinder",
+    "diameter_mm": 29.0,
+    "width_mm": null,
+    "depth_mm": null,
+    "height_mm": 12.5,
+    "skin_total_mm": 1.6,
+    "side_skin": false,
+    "cells_across": null,
+    "mass_density_g_cm3": 0.437
+   },
+   "conditioning": {
+    "cycle_reported": 4,
+    "rate_mm_per_min": 10,
+    "toe_corrected": true
+   },
+   "loading": [
+    [
+     0.1,
+     0.32
+    ],
+    [
+     0.2,
+     0.514
+    ]
+   ],
+   "unloading": null,
+   "strain_max_measured": 0.25,
+   "replicates": 3,
+   "rel_sd": 0.051,
+   "source": "iacob2024"
+  },
+  {
+   "id": "iacob2024_honeycomb_25pct_190C",
+   "tier": "literature",
+   "material_id": "varioshore_tpu",
+   "nozzle_temp_c": 190,
+   "flow_pct": 110,
+   "topology": "honeycomb",
+   "geometry_source": "slicer_infill",
+   "beads_per_wall": null,
+   "bead_width_mm": null,
+   "relative_density": 0.25,
+   "relative_density_basis": "nominal_infill",
+   "est_core_relative_density": 0.341,
+   "cell_mm": null,
+   "specimen": {
+    "shape": "cylinder",
+    "diameter_mm": 29.0,
+    "width_mm": null,
+    "depth_mm": null,
+    "height_mm": 12.5,
+    "skin_total_mm": 1.6,
+    "side_skin": false,
+    "cells_across": null,
+    "mass_density_g_cm3": 0.51
+   },
+   "conditioning": {
+    "cycle_reported": 4,
+    "rate_mm_per_min": 10,
+    "toe_corrected": true
+   },
+   "loading": [
+    [
+     0.1,
+     0.687
+    ],
+    [
+     0.2,
+     1.428
+    ]
+   ],
+   "unloading": null,
+   "strain_max_measured": 0.25,
+   "replicates": 3,
+   "rel_sd": 0.045,
+   "source": "iacob2024"
+  },
+  {
+   "id": "iacob2024_gyroid_30pct_190C",
+   "tier": "literature",
+   "material_id": "varioshore_tpu",
+   "nozzle_temp_c": 190,
+   "flow_pct": 110,
+   "topology": "gyroid",
+   "geometry_source": "slicer_infill",
+   "beads_per_wall": null,
+   "bead_width_mm": null,
+   "relative_density": 0.3,
+   "relative_density_basis": "nominal_infill",
+   "est_core_relative_density": 0.316,
+   "cell_mm": null,
+   "specimen": {
+    "shape": "cylinder",
+    "diameter_mm": 29.0,
+    "width_mm": null,
+    "depth_mm": null,
+    "height_mm": 12.5,
+    "skin_total_mm": 1.6,
+    "side_skin": false,
+    "cells_across": null,
+    "mass_density_g_cm3": 0.484
+   },
+   "conditioning": {
+    "cycle_reported": 4,
+    "rate_mm_per_min": 10,
+    "toe_corrected": true
+   },
+   "loading": [
+    [
+     0.1,
+     0.435
+    ],
+    [
+     0.2,
+     0.782
+    ]
+   ],
+   "unloading": null,
+   "strain_max_measured": 0.25,
+   "replicates": 3,
+   "rel_sd": 0.038,
+   "source": "iacob2024"
+  },
+  {
+   "id": "iacob2024_honeycomb_30pct_190C",
+   "tier": "literature",
+   "material_id": "varioshore_tpu",
+   "nozzle_temp_c": 190,
+   "flow_pct": 110,
+   "topology": "honeycomb",
+   "geometry_source": "slicer_infill",
+   "beads_per_wall": null,
+   "bead_width_mm": null,
+   "relative_density": 0.3,
+   "relative_density_basis": "nominal_infill",
+   "est_core_relative_density": 0.396,
+   "cell_mm": null,
+   "specimen": {
+    "shape": "cylinder",
+    "diameter_mm": 29.0,
+    "width_mm": null,
+    "depth_mm": null,
+    "height_mm": 12.5,
+    "skin_total_mm": 1.6,
+    "side_skin": false,
+    "cells_across": null,
+    "mass_density_g_cm3": 0.568
+   },
+   "conditioning": {
+    "cycle_reported": 4,
+    "rate_mm_per_min": 10,
+    "toe_corrected": true
+   },
+   "loading": [
+    [
+     0.1,
+     0.818
+    ],
+    [
+     0.2,
+     1.708
+    ]
+   ],
+   "unloading": null,
+   "strain_max_measured": 0.25,
+   "replicates": 3,
+   "rel_sd": 0.045,
+   "source": "iacob2024"
+  },
+  {
+   "id": "iacob2024_gyroid_35pct_190C",
+   "tier": "literature",
+   "material_id": "varioshore_tpu",
+   "nozzle_temp_c": 190,
+   "flow_pct": 110,
+   "topology": "gyroid",
+   "geometry_source": "slicer_infill",
+   "beads_per_wall": null,
+   "bead_width_mm": null,
+   "relative_density": 0.35,
+   "relative_density_basis": "nominal_infill",
+   "est_core_relative_density": 0.362,
+   "cell_mm": null,
+   "specimen": {
+    "shape": "cylinder",
+    "diameter_mm": 29.0,
+    "width_mm": null,
+    "depth_mm": null,
+    "height_mm": 12.5,
+    "skin_total_mm": 1.6,
+    "side_skin": false,
+    "cells_across": null,
+    "mass_density_g_cm3": 0.532
+   },
+   "conditioning": {
+    "cycle_reported": 4,
+    "rate_mm_per_min": 10,
+    "toe_corrected": true
+   },
+   "loading": [
+    [
+     0.1,
+     0.517
+    ],
+    [
+     0.2,
+     0.976
+    ]
+   ],
+   "unloading": null,
+   "strain_max_measured": 0.25,
+   "replicates": 3,
+   "rel_sd": 0.051,
+   "source": "iacob2024"
+  },
+  {
+   "id": "iacob2024_honeycomb_35pct_190C",
+   "tier": "literature",
+   "material_id": "varioshore_tpu",
+   "nozzle_temp_c": 190,
+   "flow_pct": 110,
+   "topology": "honeycomb",
+   "geometry_source": "slicer_infill",
+   "beads_per_wall": null,
+   "bead_width_mm": null,
+   "relative_density": 0.35,
+   "relative_density_basis": "nominal_infill",
+   "est_core_relative_density": 0.446,
+   "cell_mm": null,
+   "specimen": {
+    "shape": "cylinder",
+    "diameter_mm": 29.0,
+    "width_mm": null,
+    "depth_mm": null,
+    "height_mm": 12.5,
+    "skin_total_mm": 1.6,
+    "side_skin": false,
+    "cells_across": null,
+    "mass_density_g_cm3": 0.62
+   },
+   "conditioning": {
+    "cycle_reported": 4,
+    "rate_mm_per_min": 10,
+    "toe_corrected": true
+   },
+   "loading": [
+    [
+     0.1,
+     0.856
+    ],
+    [
+     0.2,
+     1.816
+    ]
+   ],
+   "unloading": null,
+   "strain_max_measured": 0.25,
+   "replicates": 3,
+   "rel_sd": 0.04,
+   "source": "iacob2024"
+  },
+  {
+   "id": "iacob2024_gyroid_10pct_220C",
+   "tier": "literature",
+   "material_id": "varioshore_tpu",
+   "nozzle_temp_c": 220,
+   "flow_pct": 72,
+   "topology": "gyroid",
+   "geometry_source": "slicer_infill",
+   "beads_per_wall": null,
+   "bead_width_mm": null,
+   "relative_density": 0.1,
+   "relative_density_basis": "nominal_infill",
+   "est_core_relative_density": null,
+   "cell_mm": null,
+   "specimen": {
+    "shape": "cylinder",
+    "diameter_mm": 29.0,
+    "width_mm": null,
+    "depth_mm": null,
+    "height_mm": 12.5,
+    "skin_total_mm": 1.6,
+    "side_skin": false,
+    "cells_across": null,
+    "mass_density_g_cm3": 0.165
+   },
+   "conditioning": {
+    "cycle_reported": 4,
+    "rate_mm_per_min": 10,
+    "toe_corrected": true
+   },
+   "loading": [
+    [
+     0.1,
+     0.02
+    ],
+    [
+     0.2,
+     0.028
+    ]
+   ],
+   "unloading": null,
+   "strain_max_measured": 0.25,
+   "replicates": 3,
+   "rel_sd": 0.1,
+   "source": "iacob2024"
+  },
+  {
+   "id": "iacob2024_honeycomb_10pct_220C",
+   "tier": "literature",
+   "material_id": "varioshore_tpu",
+   "nozzle_temp_c": 220,
+   "flow_pct": 72,
+   "topology": "honeycomb",
+   "geometry_source": "slicer_infill",
+   "beads_per_wall": null,
+   "bead_width_mm": null,
+   "relative_density": 0.1,
+   "relative_density_basis": "nominal_infill",
+   "est_core_relative_density": null,
+   "cell_mm": null,
+   "specimen": {
+    "shape": "cylinder",
+    "diameter_mm": 29.0,
+    "width_mm": null,
+    "depth_mm": null,
+    "height_mm": 12.5,
+    "skin_total_mm": 1.6,
+    "side_skin": false,
+    "cells_across": null,
+    "mass_density_g_cm3": 0.179
+   },
+   "conditioning": {
+    "cycle_reported": 4,
+    "rate_mm_per_min": 10,
+    "toe_corrected": true
+   },
+   "loading": [
+    [
+     0.1,
+     0.064
+    ],
+    [
+     0.2,
+     0.108
+    ]
+   ],
+   "unloading": null,
+   "strain_max_measured": 0.25,
+   "replicates": 3,
+   "rel_sd": 0.094,
+   "source": "iacob2024"
+  },
+  {
+   "id": "iacob2024_gyroid_15pct_220C",
+   "tier": "literature",
+   "material_id": "varioshore_tpu",
+   "nozzle_temp_c": 220,
+   "flow_pct": 72,
+   "topology": "gyroid",
+   "geometry_source": "slicer_infill",
+   "beads_per_wall": null,
+   "bead_width_mm": null,
+   "relative_density": 0.15,
+   "relative_density_basis": "nominal_infill",
+   "est_core_relative_density": null,
+   "cell_mm": null,
+   "specimen": {
+    "shape": "cylinder",
+    "diameter_mm": 29.0,
+    "width_mm": null,
+    "depth_mm": null,
+    "height_mm": 12.5,
+    "skin_total_mm": 1.6,
+    "side_skin": false,
+    "cells_across": null,
+    "mass_density_g_cm3": 0.186
+   },
+   "conditioning": {
+    "cycle_reported": 4,
+    "rate_mm_per_min": 10,
+    "toe_corrected": true
+   },
+   "loading": [
+    [
+     0.1,
+     0.043
+    ],
+    [
+     0.2,
+     0.062
+    ]
+   ],
+   "unloading": null,
+   "strain_max_measured": 0.25,
+   "replicates": 3,
+   "rel_sd": 0.07,
+   "source": "iacob2024"
+  },
+  {
+   "id": "iacob2024_honeycomb_15pct_220C",
+   "tier": "literature",
+   "material_id": "varioshore_tpu",
+   "nozzle_temp_c": 220,
+   "flow_pct": 72,
+   "topology": "honeycomb",
+   "geometry_source": "slicer_infill",
+   "beads_per_wall": null,
+   "bead_width_mm": null,
+   "relative_density": 0.15,
+   "relative_density_basis": "nominal_infill",
+   "est_core_relative_density": null,
+   "cell_mm": null,
+   "specimen": {
+    "shape": "cylinder",
+    "diameter_mm": 29.0,
+    "width_mm": null,
+    "depth_mm": null,
+    "height_mm": 12.5,
+    "skin_total_mm": 1.6,
+    "side_skin": false,
+    "cells_across": null,
+    "mass_density_g_cm3": 0.23
+   },
+   "conditioning": {
+    "cycle_reported": 4,
+    "rate_mm_per_min": 10,
+    "toe_corrected": true
+   },
+   "loading": [
+    [
+     0.1,
+     0.147
+    ],
+    [
+     0.2,
+     0.318
+    ]
+   ],
+   "unloading": null,
+   "strain_max_measured": 0.25,
+   "replicates": 3,
+   "rel_sd": 0.195,
+   "source": "iacob2024"
+  },
+  {
+   "id": "iacob2024_gyroid_20pct_220C",
+   "tier": "literature",
+   "material_id": "varioshore_tpu",
+   "nozzle_temp_c": 220,
+   "flow_pct": 72,
+   "topology": "gyroid",
+   "geometry_source": "slicer_infill",
+   "beads_per_wall": null,
+   "bead_width_mm": null,
+   "relative_density": 0.2,
+   "relative_density_basis": "nominal_infill",
+   "est_core_relative_density": null,
+   "cell_mm": null,
+   "specimen": {
+    "shape": "cylinder",
+    "diameter_mm": 29.0,
+    "width_mm": null,
+    "depth_mm": null,
+    "height_mm": 12.5,
+    "skin_total_mm": 1.6,
+    "side_skin": false,
+    "cells_across": null,
+    "mass_density_g_cm3": 0.215
+   },
+   "conditioning": {
+    "cycle_reported": 4,
+    "rate_mm_per_min": 10,
+    "toe_corrected": true
+   },
+   "loading": [
+    [
+     0.1,
+     0.077
+    ],
+    [
+     0.2,
+     0.118
+    ]
+   ],
+   "unloading": null,
+   "strain_max_measured": 0.25,
+   "replicates": 3,
+   "rel_sd": 0.052,
+   "source": "iacob2024"
+  },
+  {
+   "id": "iacob2024_honeycomb_20pct_220C",
+   "tier": "literature",
+   "material_id": "varioshore_tpu",
+   "nozzle_temp_c": 220,
+   "flow_pct": 72,
+   "topology": "honeycomb",
+   "geometry_source": "slicer_infill",
+   "beads_per_wall": null,
+   "bead_width_mm": null,
+   "relative_density": 0.2,
+   "relative_density_basis": "nominal_infill",
+   "est_core_relative_density": null,
+   "cell_mm": null,
+   "specimen": {
+    "shape": "cylinder",
+    "diameter_mm": 29.0,
+    "width_mm": null,
+    "depth_mm": null,
+    "height_mm": 12.5,
+    "skin_total_mm": 1.6,
+    "side_skin": false,
+    "cells_across": null,
+    "mass_density_g_cm3": 0.24
+   },
+   "conditioning": {
+    "cycle_reported": 4,
+    "rate_mm_per_min": 10,
+    "toe_corrected": true
+   },
+   "loading": [
+    [
+     0.1,
+     0.162
+    ],
+    [
+     0.2,
+     0.358
+    ]
+   ],
+   "unloading": null,
+   "strain_max_measured": 0.25,
+   "replicates": 3,
+   "rel_sd": 0.117,
+   "source": "iacob2024"
+  },
+  {
+   "id": "iacob2024_gyroid_25pct_220C",
+   "tier": "literature",
+   "material_id": "varioshore_tpu",
+   "nozzle_temp_c": 220,
+   "flow_pct": 72,
+   "topology": "gyroid",
+   "geometry_source": "slicer_infill",
+   "beads_per_wall": null,
+   "bead_width_mm": null,
+   "relative_density": 0.25,
+   "relative_density_basis": "nominal_infill",
+   "est_core_relative_density": null,
+   "cell_mm": null,
+   "specimen": {
+    "shape": "cylinder",
+    "diameter_mm": 29.0,
+    "width_mm": null,
+    "depth_mm": null,
+    "height_mm": 12.5,
+    "skin_total_mm": 1.6,
+    "side_skin": false,
+    "cells_across": null,
+    "mass_density_g_cm3": 0.255
+   },
+   "conditioning": {
+    "cycle_reported": 4,
+    "rate_mm_per_min": 10,
+    "toe_corrected": true
+   },
+   "loading": [
+    [
+     0.1,
+     0.113
+    ],
+    [
+     0.2,
+     0.194
+    ]
+   ],
+   "unloading": null,
+   "strain_max_measured": 0.25,
+   "replicates": 3,
+   "rel_sd": 0.08,
+   "source": "iacob2024"
+  },
+  {
+   "id": "iacob2024_honeycomb_25pct_220C",
+   "tier": "literature",
+   "material_id": "varioshore_tpu",
+   "nozzle_temp_c": 220,
+   "flow_pct": 72,
+   "topology": "honeycomb",
+   "geometry_source": "slicer_infill",
+   "beads_per_wall": null,
+   "bead_width_mm": null,
+   "relative_density": 0.25,
+   "relative_density_basis": "nominal_infill",
+   "est_core_relative_density": null,
+   "cell_mm": null,
+   "specimen": {
+    "shape": "cylinder",
+    "diameter_mm": 29.0,
+    "width_mm": null,
+    "depth_mm": null,
+    "height_mm": 12.5,
+    "skin_total_mm": 1.6,
+    "side_skin": false,
+    "cells_across": null,
+    "mass_density_g_cm3": 0.281
+   },
+   "conditioning": {
+    "cycle_reported": 4,
+    "rate_mm_per_min": 10,
+    "toe_corrected": true
+   },
+   "loading": [
+    [
+     0.1,
+     0.196
+    ],
+    [
+     0.2,
+     0.452
+    ]
+   ],
+   "unloading": null,
+   "strain_max_measured": 0.25,
+   "replicates": 3,
+   "rel_sd": 0.077,
+   "source": "iacob2024"
+  },
+  {
+   "id": "iacob2024_gyroid_30pct_220C",
+   "tier": "literature",
+   "material_id": "varioshore_tpu",
+   "nozzle_temp_c": 220,
+   "flow_pct": 72,
+   "topology": "gyroid",
+   "geometry_source": "slicer_infill",
+   "beads_per_wall": null,
+   "bead_width_mm": null,
+   "relative_density": 0.3,
+   "relative_density_basis": "nominal_infill",
+   "est_core_relative_density": null,
+   "cell_mm": null,
+   "specimen": {
+    "shape": "cylinder",
+    "diameter_mm": 29.0,
+    "width_mm": null,
+    "depth_mm": null,
+    "height_mm": 12.5,
+    "skin_total_mm": 1.6,
+    "side_skin": false,
+    "cells_across": null,
+    "mass_density_g_cm3": 0.266
+   },
+   "conditioning": {
+    "cycle_reported": 4,
+    "rate_mm_per_min": 10,
+    "toe_corrected": true
+   },
+   "loading": [
+    [
+     0.1,
+     0.145
+    ],
+    [
+     0.2,
+     0.266
+    ]
+   ],
+   "unloading": null,
+   "strain_max_measured": 0.25,
+   "replicates": 3,
+   "rel_sd": 0.113,
+   "source": "iacob2024"
+  },
+  {
+   "id": "iacob2024_honeycomb_30pct_220C",
+   "tier": "literature",
+   "material_id": "varioshore_tpu",
+   "nozzle_temp_c": 220,
+   "flow_pct": 72,
+   "topology": "honeycomb",
+   "geometry_source": "slicer_infill",
+   "beads_per_wall": null,
+   "bead_width_mm": null,
+   "relative_density": 0.3,
+   "relative_density_basis": "nominal_infill",
+   "est_core_relative_density": null,
+   "cell_mm": null,
+   "specimen": {
+    "shape": "cylinder",
+    "diameter_mm": 29.0,
+    "width_mm": null,
+    "depth_mm": null,
+    "height_mm": 12.5,
+    "skin_total_mm": 1.6,
+    "side_skin": false,
+    "cells_across": null,
+    "mass_density_g_cm3": 0.317
+   },
+   "conditioning": {
+    "cycle_reported": 4,
+    "rate_mm_per_min": 10,
+    "toe_corrected": true
+   },
+   "loading": [
+    [
+     0.1,
+     0.238
+    ],
+    [
+     0.2,
+     0.552
+    ]
+   ],
+   "unloading": null,
+   "strain_max_measured": 0.25,
+   "replicates": 3,
+   "rel_sd": 0.155,
+   "source": "iacob2024"
+  },
+  {
+   "id": "iacob2024_gyroid_35pct_220C",
+   "tier": "literature",
+   "material_id": "varioshore_tpu",
+   "nozzle_temp_c": 220,
+   "flow_pct": 72,
+   "topology": "gyroid",
+   "geometry_source": "slicer_infill",
+   "beads_per_wall": null,
+   "bead_width_mm": null,
+   "relative_density": 0.35,
+   "relative_density_basis": "nominal_infill",
+   "est_core_relative_density": null,
+   "cell_mm": null,
+   "specimen": {
+    "shape": "cylinder",
+    "diameter_mm": 29.0,
+    "width_mm": null,
+    "depth_mm": null,
+    "height_mm": 12.5,
+    "skin_total_mm": 1.6,
+    "side_skin": false,
+    "cells_across": null,
+    "mass_density_g_cm3": 0.295
+   },
+   "conditioning": {
+    "cycle_reported": 4,
+    "rate_mm_per_min": 10,
+    "toe_corrected": true
+   },
+   "loading": [
+    [
+     0.1,
+     0.168
+    ],
+    [
+     0.2,
+     0.318
+    ]
+   ],
+   "unloading": null,
+   "strain_max_measured": 0.25,
+   "replicates": 3,
+   "rel_sd": 0.036,
+   "source": "iacob2024"
+  },
+  {
+   "id": "iacob2024_honeycomb_35pct_220C",
+   "tier": "literature",
+   "material_id": "varioshore_tpu",
+   "nozzle_temp_c": 220,
+   "flow_pct": 72,
+   "topology": "honeycomb",
+   "geometry_source": "slicer_infill",
+   "beads_per_wall": null,
+   "bead_width_mm": null,
+   "relative_density": 0.35,
+   "relative_density_basis": "nominal_infill",
+   "est_core_relative_density": null,
+   "cell_mm": null,
+   "specimen": {
+    "shape": "cylinder",
+    "diameter_mm": 29.0,
+    "width_mm": null,
+    "depth_mm": null,
+    "height_mm": 12.5,
+    "skin_total_mm": 1.6,
+    "side_skin": false,
+    "cells_across": null,
+    "mass_density_g_cm3": 0.339
+   },
+   "conditioning": {
+    "cycle_reported": 4,
+    "rate_mm_per_min": 10,
+    "toe_corrected": true
+   },
+   "loading": [
+    [
+     0.1,
+     0.26
+    ],
+    [
+     0.2,
+     0.604
+    ]
+   ],
+   "unloading": null,
+   "strain_max_measured": 0.25,
+   "replicates": 3,
+   "rel_sd": 0.038,
+   "source": "iacob2024"
+  },
+  {
+   "id": "iacob2024_gyroid_10pct_240C",
+   "tier": "literature",
+   "material_id": "varioshore_tpu",
+   "nozzle_temp_c": 240,
+   "flow_pct": 60,
+   "topology": "gyroid",
+   "geometry_source": "slicer_infill",
+   "beads_per_wall": null,
+   "bead_width_mm": null,
+   "relative_density": 0.1,
+   "relative_density_basis": "nominal_infill",
+   "est_core_relative_density": null,
+   "cell_mm": null,
+   "specimen": {
+    "shape": "cylinder",
+    "diameter_mm": 29.0,
+    "width_mm": null,
+    "depth_mm": null,
+    "height_mm": 12.5,
+    "skin_total_mm": 1.6,
+    "side_skin": false,
+    "cells_across": null,
+    "mass_density_g_cm3": 0.193
+   },
+   "conditioning": {
+    "cycle_reported": 4,
+    "rate_mm_per_min": 10,
+    "toe_corrected": true
+   },
+   "loading": [
+    [
+     0.1,
+     0.018
+    ],
+    [
+     0.2,
+     0.028
+    ]
+   ],
+   "unloading": null,
+   "strain_max_measured": 0.25,
+   "replicates": 3,
+   "rel_sd": 0.071,
+   "source": "iacob2024"
+  },
+  {
+   "id": "iacob2024_honeycomb_10pct_240C",
+   "tier": "literature",
+   "material_id": "varioshore_tpu",
+   "nozzle_temp_c": 240,
+   "flow_pct": 60,
+   "topology": "honeycomb",
+   "geometry_source": "slicer_infill",
+   "beads_per_wall": null,
+   "bead_width_mm": null,
+   "relative_density": 0.1,
+   "relative_density_basis": "nominal_infill",
+   "est_core_relative_density": null,
+   "cell_mm": null,
+   "specimen": {
+    "shape": "cylinder",
+    "diameter_mm": 29.0,
+    "width_mm": null,
+    "depth_mm": null,
+    "height_mm": 12.5,
+    "skin_total_mm": 1.6,
+    "side_skin": false,
+    "cells_across": null,
+    "mass_density_g_cm3": 0.205
+   },
+   "conditioning": {
+    "cycle_reported": 4,
+    "rate_mm_per_min": 10,
+    "toe_corrected": true
+   },
+   "loading": [
+    [
+     0.1,
+     0.074
+    ],
+    [
+     0.2,
+     0.138
+    ]
+   ],
+   "unloading": null,
+   "strain_max_measured": 0.25,
+   "replicates": 3,
+   "rel_sd": 0.159,
+   "source": "iacob2024"
+  },
+  {
+   "id": "iacob2024_gyroid_15pct_240C",
+   "tier": "literature",
+   "material_id": "varioshore_tpu",
+   "nozzle_temp_c": 240,
+   "flow_pct": 60,
+   "topology": "gyroid",
+   "geometry_source": "slicer_infill",
+   "beads_per_wall": null,
+   "bead_width_mm": null,
+   "relative_density": 0.15,
+   "relative_density_basis": "nominal_infill",
+   "est_core_relative_density": null,
+   "cell_mm": null,
+   "specimen": {
+    "shape": "cylinder",
+    "diameter_mm": 29.0,
+    "width_mm": null,
+    "depth_mm": null,
+    "height_mm": 12.5,
+    "skin_total_mm": 1.6,
+    "side_skin": false,
+    "cells_across": null,
+    "mass_density_g_cm3": 0.214
+   },
+   "conditioning": {
+    "cycle_reported": 4,
+    "rate_mm_per_min": 10,
+    "toe_corrected": true
+   },
+   "loading": [
+    [
+     0.1,
+     0.051
+    ],
+    [
+     0.2,
+     0.08
+    ]
+   ],
+   "unloading": null,
+   "strain_max_measured": 0.25,
+   "replicates": 3,
+   "rel_sd": 0.05,
+   "source": "iacob2024"
+  },
+  {
+   "id": "iacob2024_honeycomb_15pct_240C",
+   "tier": "literature",
+   "material_id": "varioshore_tpu",
+   "nozzle_temp_c": 240,
+   "flow_pct": 60,
+   "topology": "honeycomb",
+   "geometry_source": "slicer_infill",
+   "beads_per_wall": null,
+   "bead_width_mm": null,
+   "relative_density": 0.15,
+   "relative_density_basis": "nominal_infill",
+   "est_core_relative_density": null,
+   "cell_mm": null,
+   "specimen": {
+    "shape": "cylinder",
+    "diameter_mm": 29.0,
+    "width_mm": null,
+    "depth_mm": null,
+    "height_mm": 12.5,
+    "skin_total_mm": 1.6,
+    "side_skin": false,
+    "cells_across": null,
+    "mass_density_g_cm3": 0.247
+   },
+   "conditioning": {
+    "cycle_reported": 4,
+    "rate_mm_per_min": 10,
+    "toe_corrected": true
+   },
+   "loading": [
+    [
+     0.1,
+     0.136
+    ],
+    [
+     0.2,
+     0.292
+    ]
+   ],
+   "unloading": null,
+   "strain_max_measured": 0.25,
+   "replicates": 3,
+   "rel_sd": 0.14,
+   "source": "iacob2024"
+  },
+  {
+   "id": "iacob2024_gyroid_20pct_240C",
+   "tier": "literature",
+   "material_id": "varioshore_tpu",
+   "nozzle_temp_c": 240,
+   "flow_pct": 60,
+   "topology": "gyroid",
+   "geometry_source": "slicer_infill",
+   "beads_per_wall": null,
+   "bead_width_mm": null,
+   "relative_density": 0.2,
+   "relative_density_basis": "nominal_infill",
+   "est_core_relative_density": null,
+   "cell_mm": null,
+   "specimen": {
+    "shape": "cylinder",
+    "diameter_mm": 29.0,
+    "width_mm": null,
+    "depth_mm": null,
+    "height_mm": 12.5,
+    "skin_total_mm": 1.6,
+    "side_skin": false,
+    "cells_across": null,
+    "mass_density_g_cm3": 0.246
+   },
+   "conditioning": {
+    "cycle_reported": 4,
+    "rate_mm_per_min": 10,
+    "toe_corrected": true
+   },
+   "loading": [
+    [
+     0.1,
+     0.084
+    ],
+    [
+     0.2,
+     0.15
+    ]
+   ],
+   "unloading": null,
+   "strain_max_measured": 0.25,
+   "replicates": 3,
+   "rel_sd": 0.04,
+   "source": "iacob2024"
+  },
+  {
+   "id": "iacob2024_honeycomb_20pct_240C",
+   "tier": "literature",
+   "material_id": "varioshore_tpu",
+   "nozzle_temp_c": 240,
+   "flow_pct": 60,
+   "topology": "honeycomb",
+   "geometry_source": "slicer_infill",
+   "beads_per_wall": null,
+   "bead_width_mm": null,
+   "relative_density": 0.2,
+   "relative_density_basis": "nominal_infill",
+   "est_core_relative_density": null,
+   "cell_mm": null,
+   "specimen": {
+    "shape": "cylinder",
+    "diameter_mm": 29.0,
+    "width_mm": null,
+    "depth_mm": null,
+    "height_mm": 12.5,
+    "skin_total_mm": 1.6,
+    "side_skin": false,
+    "cells_across": null,
+    "mass_density_g_cm3": 0.289
+   },
+   "conditioning": {
+    "cycle_reported": 4,
+    "rate_mm_per_min": 10,
+    "toe_corrected": true
+   },
+   "loading": [
+    [
+     0.1,
+     0.17
+    ],
+    [
+     0.2,
+     0.368
+    ]
+   ],
+   "unloading": null,
+   "strain_max_measured": 0.25,
+   "replicates": 3,
+   "rel_sd": 0.159,
+   "source": "iacob2024"
+  },
+  {
+   "id": "iacob2024_gyroid_25pct_240C",
+   "tier": "literature",
+   "material_id": "varioshore_tpu",
+   "nozzle_temp_c": 240,
+   "flow_pct": 60,
+   "topology": "gyroid",
+   "geometry_source": "slicer_infill",
+   "beads_per_wall": null,
+   "bead_width_mm": null,
+   "relative_density": 0.25,
+   "relative_density_basis": "nominal_infill",
+   "est_core_relative_density": null,
+   "cell_mm": null,
+   "specimen": {
+    "shape": "cylinder",
+    "diameter_mm": 29.0,
+    "width_mm": null,
+    "depth_mm": null,
+    "height_mm": 12.5,
+    "skin_total_mm": 1.6,
+    "side_skin": false,
+    "cells_across": null,
+    "mass_density_g_cm3": 0.273
+   },
+   "conditioning": {
+    "cycle_reported": 4,
+    "rate_mm_per_min": 10,
+    "toe_corrected": true
+   },
+   "loading": [
+    [
+     0.1,
+     0.119
+    ],
+    [
+     0.2,
+     0.222
+    ]
+   ],
+   "unloading": null,
+   "strain_max_measured": 0.25,
+   "replicates": 3,
+   "rel_sd": 0.042,
+   "source": "iacob2024"
+  },
+  {
+   "id": "iacob2024_honeycomb_25pct_240C",
+   "tier": "literature",
+   "material_id": "varioshore_tpu",
+   "nozzle_temp_c": 240,
+   "flow_pct": 60,
+   "topology": "honeycomb",
+   "geometry_source": "slicer_infill",
+   "beads_per_wall": null,
+   "bead_width_mm": null,
+   "relative_density": 0.25,
+   "relative_density_basis": "nominal_infill",
+   "est_core_relative_density": null,
+   "cell_mm": null,
+   "specimen": {
+    "shape": "cylinder",
+    "diameter_mm": 29.0,
+    "width_mm": null,
+    "depth_mm": null,
+    "height_mm": 12.5,
+    "skin_total_mm": 1.6,
+    "side_skin": false,
+    "cells_across": null,
+    "mass_density_g_cm3": 0.321
+   },
+   "conditioning": {
+    "cycle_reported": 4,
+    "rate_mm_per_min": 10,
+    "toe_corrected": true
+   },
+   "loading": [
+    [
+     0.1,
+     0.225
+    ],
+    [
+     0.2,
+     0.484
+    ]
+   ],
+   "unloading": null,
+   "strain_max_measured": 0.25,
+   "replicates": 3,
+   "rel_sd": 0.129,
+   "source": "iacob2024"
+  },
+  {
+   "id": "iacob2024_gyroid_30pct_240C",
+   "tier": "literature",
+   "material_id": "varioshore_tpu",
+   "nozzle_temp_c": 240,
+   "flow_pct": 60,
+   "topology": "gyroid",
+   "geometry_source": "slicer_infill",
+   "beads_per_wall": null,
+   "bead_width_mm": null,
+   "relative_density": 0.3,
+   "relative_density_basis": "nominal_infill",
+   "est_core_relative_density": null,
+   "cell_mm": null,
+   "specimen": {
+    "shape": "cylinder",
+    "diameter_mm": 29.0,
+    "width_mm": null,
+    "depth_mm": null,
+    "height_mm": 12.5,
+    "skin_total_mm": 1.6,
+    "side_skin": false,
+    "cells_across": null,
+    "mass_density_g_cm3": 0.307
+   },
+   "conditioning": {
+    "cycle_reported": 4,
+    "rate_mm_per_min": 10,
+    "toe_corrected": true
+   },
+   "loading": [
+    [
+     0.1,
+     0.147
+    ],
+    [
+     0.2,
+     0.282
+    ]
+   ],
+   "unloading": null,
+   "strain_max_measured": 0.25,
+   "replicates": 3,
+   "rel_sd": 0.061,
+   "source": "iacob2024"
+  },
+  {
+   "id": "iacob2024_honeycomb_30pct_240C",
+   "tier": "literature",
+   "material_id": "varioshore_tpu",
+   "nozzle_temp_c": 240,
+   "flow_pct": 60,
+   "topology": "honeycomb",
+   "geometry_source": "slicer_infill",
+   "beads_per_wall": null,
+   "bead_width_mm": null,
+   "relative_density": 0.3,
+   "relative_density_basis": "nominal_infill",
+   "est_core_relative_density": null,
+   "cell_mm": null,
+   "specimen": {
+    "shape": "cylinder",
+    "diameter_mm": 29.0,
+    "width_mm": null,
+    "depth_mm": null,
+    "height_mm": 12.5,
+    "skin_total_mm": 1.6,
+    "side_skin": false,
+    "cells_across": null,
+    "mass_density_g_cm3": 0.359
+   },
+   "conditioning": {
+    "cycle_reported": 4,
+    "rate_mm_per_min": 10,
+    "toe_corrected": true
+   },
+   "loading": [
+    [
+     0.1,
+     0.282
+    ],
+    [
+     0.2,
+     0.6
+    ]
+   ],
+   "unloading": null,
+   "strain_max_measured": 0.25,
+   "replicates": 3,
+   "rel_sd": 0.067,
+   "source": "iacob2024"
+  },
+  {
+   "id": "iacob2024_gyroid_35pct_240C",
+   "tier": "literature",
+   "material_id": "varioshore_tpu",
+   "nozzle_temp_c": 240,
+   "flow_pct": 60,
+   "topology": "gyroid",
+   "geometry_source": "slicer_infill",
+   "beads_per_wall": null,
+   "bead_width_mm": null,
+   "relative_density": 0.35,
+   "relative_density_basis": "nominal_infill",
+   "est_core_relative_density": null,
+   "cell_mm": null,
+   "specimen": {
+    "shape": "cylinder",
+    "diameter_mm": 29.0,
+    "width_mm": null,
+    "depth_mm": null,
+    "height_mm": 12.5,
+    "skin_total_mm": 1.6,
+    "side_skin": false,
+    "cells_across": null,
+    "mass_density_g_cm3": 0.33
+   },
+   "conditioning": {
+    "cycle_reported": 4,
+    "rate_mm_per_min": 10,
+    "toe_corrected": true
+   },
+   "loading": [
+    [
+     0.1,
+     0.182
+    ],
+    [
+     0.2,
+     0.35
+    ]
+   ],
+   "unloading": null,
+   "strain_max_measured": 0.25,
+   "replicates": 3,
+   "rel_sd": 0.017,
+   "source": "iacob2024"
+  },
+  {
+   "id": "iacob2024_honeycomb_35pct_240C",
+   "tier": "literature",
+   "material_id": "varioshore_tpu",
+   "nozzle_temp_c": 240,
+   "flow_pct": 60,
+   "topology": "honeycomb",
+   "geometry_source": "slicer_infill",
+   "beads_per_wall": null,
+   "bead_width_mm": null,
+   "relative_density": 0.35,
+   "relative_density_basis": "nominal_infill",
+   "est_core_relative_density": null,
+   "cell_mm": null,
+   "specimen": {
+    "shape": "cylinder",
+    "diameter_mm": 29.0,
+    "width_mm": null,
+    "depth_mm": null,
+    "height_mm": 12.5,
+    "skin_total_mm": 1.6,
+    "side_skin": false,
+    "cells_across": null,
+    "mass_density_g_cm3": 0.377
+   },
+   "conditioning": {
+    "cycle_reported": 4,
+    "rate_mm_per_min": 10,
+    "toe_corrected": true
+   },
+   "loading": [
+    [
+     0.1,
+     0.294
+    ],
+    [
+     0.2,
+     0.638
+    ]
+   ],
+   "unloading": null,
+   "strain_max_measured": 0.25,
+   "replicates": 3,
+   "rel_sd": 0.044,
+   "source": "iacob2024"
+  }
+ ]
+}

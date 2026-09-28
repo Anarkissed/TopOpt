@@ -1,0 +1,152 @@
+{
+  "schema_version": 1,
+  "status": "DRAFT - reviewer-drafted (Claude, 2026-09-27); maintainer commits; agents implement the exporter and must not change these numbers",
+  "purpose": "In-house calibration coupons for the Flexible stage. Each set answers one question. Geometry for sets A, B and S is chosen to match Iacob et al. 2024 (ISO 7743 cylinder, 29 mm diameter x 12.5 mm) so results are comparable with the only tabulated FDM squish dataset.",
+  "common": {
+    "layer_height_mm": 0.2,
+    "bead_width_mm": "job default wall line width (0.42 on his X1C profile) - record the actual value in the manifest",
+    "skin_top_bottom_layers": 4,
+    "skin_side": "none (Iacob used 0 perimeters)",
+    "test": {
+      "rate_mm_per_min": 10,
+      "cycles": 4,
+      "max_nominal_strain": 0.25,
+      "report": "secant modulus at 10% and 20% nominal strain from the 4th LOADING cycle, toe extrapolated (Iacob method); keep every cycle, loading and unloading",
+      "optional_extra": "after the 4 cycles, one further cycle to 50% nominal strain (plateau exploration) recorded separately, force limit permitting",
+      "force_limit_n": 1500,
+      "platens": "lubricate top and bottom surfaces (Iacob / ISO 7743)"
+    },
+    "weigh_every_piece": "yes - mass is how printed core density is known (nominal infill % understates it), and a light piece flags missing material"
+  },
+  "sets": [
+    {
+      "id": "A",
+      "question": "Does a TopOpt-GENERATED 1-bead gyroid squish like the slicer-infill gyroid the literature measured, at equal relative density?",
+      "material": "TPU 95A (record brand + lot)",
+      "nozzle_temp_c": "brand TDS recommendation (record it)",
+      "geometry": {
+        "shape": "cylinder",
+        "diameter_mm": 29.0,
+        "height_mm": 12.5
+      },
+      "densities": [
+        0.15,
+        0.25,
+        0.35
+      ],
+      "arms": [
+        {
+          "arm": "slicer_infill",
+          "export": "plain solid cylinder",
+          "slicer": "gyroid sparse infill at density x 100 %, wall loops 0, top/bottom shell layers 4, layer 0.2 mm"
+        },
+        {
+          "arm": "generated_mesh",
+          "export": "TopOpt gyroid, beads_per_wall 1, relative density as listed, top/bottom skins 4 layers, no side skin",
+          "slicer": "wall generator Arachne, wall loops 1, sparse infill 0 %, top/bottom shell layers 4, layer 0.2 mm, line width = bead width"
+        }
+      ],
+      "replicates": 3,
+      "count": 18,
+      "notes": "At 15 % the 1-bead gyroid cell is ~8.7 mm, so only ~3.4 cells span 29 mm and ~1.3 span the 10.9 mm core height - size effects are possible; record cells-across in the manifest. Proxy force at 20 % strain (varioShore-190 as stand-in): ~94 N / ~340 N / ~645 N."
+    },
+    {
+      "id": "B",
+      "question": "Does his printer reproduce Iacob's table? (replication)",
+      "material": "colorFabb varioShore TPU (record lot)",
+      "geometry": {
+        "shape": "cylinder",
+        "diameter_mm": 29.0,
+        "height_mm": 12.5
+      },
+      "densities": [
+        0.2
+      ],
+      "arms": [
+        {
+          "arm": "slicer_infill_190",
+          "nozzle_temp_c": 190,
+          "flow_pct": 110
+        },
+        {
+          "arm": "slicer_infill_220",
+          "nozzle_temp_c": 220,
+          "flow_pct": 72
+        },
+        {
+          "arm": "slicer_infill_240",
+          "nozzle_temp_c": 240,
+          "flow_pct": 60
+        }
+      ],
+      "slicer": "gyroid sparse infill 20 %, wall loops 0, top/bottom shell layers 4, layer 0.2 mm, 35 mm/s, part fan 70 % (Iacob settings); bed temperature 0 C (unheated) and part fan off for the first 4 layers, full from layer 6 (Iacob Table 1)",
+      "replicates": 3,
+      "count": 9,
+      "pass_bar": "E10 and E20 within ~15 % of Iacob's 20 % gyroid rows at each temperature (190: 2.19/1.46; 220: 0.77/0.59; 240: 0.84/0.75 MPa)"
+    },
+    {
+      "id": "S",
+      "question": "Scale invariance / bead count: does a 2-bead gyroid squish like a 1-bead gyroid at the same relative density when the whole specimen is scaled x2?",
+      "material": "same TPU 95A lot as set A",
+      "geometry": {
+        "shape": "cylinder",
+        "diameter_mm": 58.0,
+        "height_mm": 25.0
+      },
+      "skin_top_bottom_layers": 8,
+      "densities": [
+        0.15,
+        0.25
+      ],
+      "arms": [
+        {
+          "arm": "generated_mesh_2bead",
+          "export": "TopOpt gyroid, beads_per_wall 2, cell size = 2 x the set-A cell at the same density, top/bottom skins 8 layers (1.6 mm), no side skin"
+        }
+      ],
+      "compare_against": "set A generated_mesh arm at 0.15 and 0.25 (every dimension of S is exactly 2x A - geometrically similar)",
+      "replicates": 3,
+      "count": 6,
+      "notes": "Proxy force at 20 % strain: ~375 N (15 %) and ~1360 N (25 %). Use the 200 kg load cell. Do not test 35 % at this size (> 2 kN). Layer height stays 0.2 mm (0.4 mm layers are impractical for TPU on a 0.4 mm nozzle), so bead-level geometry is NOT scaled - the same confound Justino Netto 2024 had. Interpret with that caveat."
+    },
+    {
+      "id": "SW",
+      "question": "Sideways: does printed TPU gyroid squash the same when loaded ACROSS the print layers as ALONG them? (unlocks side faces from 'estimated')",
+      "material": "same TPU 95A lot as set A",
+      "geometry": {
+        "shape": "block",
+        "width_mm": 29.0,
+        "depth_mm": 29.0,
+        "height_mm": 29.0
+      },
+      "densities": [
+        0.15,
+        0.25,
+        0.35
+      ],
+      "arms": [
+        {
+          "arm": "generated_mesh_on_side",
+          "export": "TopOpt gyroid, beads_per_wall 1, relative density as listed, solid skins on the two faces that will touch the platens (the SIDES of the printed block, 4 beads thick), no skin on the other four faces",
+          "test": "compress horizontally relative to print: rotate the block 90 deg so the platens press on the two skinned side faces"
+        }
+      ],
+      "compare_against": "a vertically-loaded 29 mm cube of the same density (print 3 extra per density with skins on top/bottom instead) - same shape, only the load direction relative to the layers differs",
+      "replicates": 3,
+      "count": 18,
+      "notes": "Cubes rather than Iacob cylinders so the same geometry can be loaded in both directions. The 9 vertical cubes are the control; the 9 sideways cubes are the question. Evidence it may be close: gyroid geometry is cubic-symmetric, and Beloshenko 2021 found printed TPU gyroid much less direction-dependent than honeycomb."
+    },
+    {
+      "id": "C",
+      "status": "DEFERRED - needs designed strut lattices in TPU (Kelvin / FCC / BCC generators); not part of P1",
+      "question": "FDM TPU strut lattices vs gyroid",
+      "count": 36
+    },
+    {
+      "id": "D",
+      "status": "DEFERRED - rigid PLA TPMS knockdown for the Structural stage; needs the 14:1 gearbox and 5 kN load cell",
+      "question": "Printed PLA gyroid / Schwarz D / Schwarz P modulus and strength vs homogenized prediction",
+      "count": 27
+    }
+  ]
+}

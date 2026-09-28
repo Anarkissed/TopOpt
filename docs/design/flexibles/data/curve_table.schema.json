@@ -1,0 +1,247 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "topopt/flexible/curve_table.schema.json",
+  "title": "Flexible stage squish curve table",
+  "description": "One entry = one measured (or literature) compression response for a material + print condition + topology + relative density. Literature and in-house calibrated rows share this schema; 'tier' says which. The loader must reject unknown fields, missing required fields, and non-monotonic loading curves.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "entries"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "entries": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "tier",
+          "material_id",
+          "nozzle_temp_c",
+          "topology",
+          "geometry_source",
+          "relative_density",
+          "specimen",
+          "conditioning",
+          "loading",
+          "strain_max_measured",
+          "source",
+          "relative_density_basis"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "tier": {
+            "enum": [
+              "literature",
+              "calibrated",
+              "proxy"
+            ],
+            "description": "literature = published table; calibrated = measured on the maintainer's printer; proxy = scaled from another material (only if the maintainer rules proxies in - open question Q4)"
+          },
+          "material_id": {
+            "type": "string",
+            "description": "key into flexible_materials.json"
+          },
+          "nozzle_temp_c": {
+            "type": "number"
+          },
+          "flow_pct": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "topology": {
+            "enum": [
+              "gyroid",
+              "honeycomb"
+            ]
+          },
+          "geometry_source": {
+            "enum": [
+              "slicer_infill",
+              "generated_mesh"
+            ]
+          },
+          "beads_per_wall": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 1,
+            "maximum": 2
+          },
+          "bead_width_mm": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "relative_density": {
+            "type": "number",
+            "exclusiveMinimum": 0,
+            "maximum": 1,
+            "description": "For slicer_infill rows this is the infill fraction (e.g. 0.25 for 25 %). Treating infill % as relative density is an ASSUMPTION that coupon set A tests."
+          },
+          "cell_mm": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "specimen": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "shape",
+              "height_mm",
+              "skin_total_mm"
+            ],
+            "properties": {
+              "shape": {
+                "enum": [
+                  "cylinder",
+                  "block"
+                ]
+              },
+              "diameter_mm": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "width_mm": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "depth_mm": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "height_mm": {
+                "type": "number"
+              },
+              "skin_total_mm": {
+                "type": "number",
+                "description": "combined solid top + bottom skin thickness included in the nominal strain gauge length"
+              },
+              "side_skin": {
+                "type": "boolean"
+              },
+              "cells_across": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "mass_density_g_cm3": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              }
+            }
+          },
+          "conditioning": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "cycle_reported",
+              "rate_mm_per_min"
+            ],
+            "properties": {
+              "cycle_reported": {
+                "type": "integer",
+                "minimum": 1,
+                "description": "Iacob reports the 4th cycle (after Mullins softening) - a fresh part is stiffer"
+              },
+              "rate_mm_per_min": {
+                "type": "number"
+              },
+              "toe_corrected": {
+                "type": "boolean"
+              }
+            }
+          },
+          "loading": {
+            "type": "array",
+            "minItems": 2,
+            "description": "[nominal strain, nominal stress MPa] pairs, strictly increasing in both. For Iacob rows: (0.10, 0.10*E10) and (0.20, 0.20*E20).",
+            "items": {
+              "type": "array",
+              "prefixItems": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "minItems": 2,
+              "maxItems": 2
+            }
+          },
+          "unloading": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "array",
+              "minItems": 2,
+              "maxItems": 2
+            }
+          },
+          "strain_max_measured": {
+            "type": "number",
+            "description": "the largest strain the test actually reached (Iacob: 0.25; data points only to 0.20)"
+          },
+          "replicates": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "rel_sd": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "description": "relative standard deviation of the reported values, if known"
+          },
+          "source": {
+            "type": "string",
+            "description": "key into 06-references.md"
+          },
+          "relative_density_basis": {
+            "enum": [
+              "nominal_infill",
+              "estimated_core",
+              "measured_core",
+              "designed"
+            ],
+            "description": "What relative_density means. Iacob rows are NOMINAL slicer infill; their own specimen masses show the printed core carries MORE material than the nominal % (gyroid ~0.14 at 10 % up to ~0.36 at 35 %; honeycomb ~0.17 to ~0.45 at 190 C) - see est_core_relative_density. Generated-mesh rows should use 'designed' (and 'measured_core' once weighed)."
+          },
+          "est_core_relative_density": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "description": "Reviewer estimate of the lattice-core relative density from the specimen mass (190 C only; assumes 1.6 mm of fully dense skin at 1.2 g/cm3 and nominal dimensions). null where not computable (foamed material density unknown)."
+          }
+        }
+      }
+    }
+  }
+}
