@@ -1,0 +1,34 @@
+material_id,property,condition,value,unit,source_type,source,note
+varioshore_tpu,youngs_modulus_iso527,printed XY 0.15 mm layers 100% infill at 210 C / 100% flow,50,MPa,manufacturer TDS,colorfabb_varioshore_tds,
+varioshore_tpu,youngs_modulus_iso527,printed XY at 230 C / 70% flow,40,MPa,manufacturer TDS,colorfabb_varioshore_tds,
+varioshore_tpu,tensile_strength,210 C / 100% flow,24,MPa,manufacturer TDS,colorfabb_varioshore_tds,
+varioshore_tpu,tensile_strength,230 C / 70% flow,12,MPa,manufacturer TDS,colorfabb_varioshore_tds,
+varioshore_tpu,tensile_strength,injection-moulded base,59,MPa,manufacturer TDS,colorfabb_varioshore_tds,Printed is well below moulded.
+varioshore_tpu,elongation_at_break,210 C / 100% flow,465,%,manufacturer TDS,colorfabb_varioshore_tds,
+varioshore_tpu,elongation_at_break,230 C / 70% flow,450,%,manufacturer TDS,colorfabb_varioshore_tds,
+varioshore_tpu,elongation_at_break,injection-moulded base,490,%,manufacturer TDS,colorfabb_varioshore_tds,
+varioshore_tpu,flexural_modulus,210 C / 100% flow,50,MPa,manufacturer TDS,colorfabb_varioshore_tds,
+varioshore_tpu,flexural_modulus,230 C / 70% flow,40,MPa,manufacturer TDS,colorfabb_varioshore_tds,
+varioshore_tpu,charpy_notched,210 C / 100% flow,40,kJ/m2,manufacturer TDS,colorfabb_varioshore_tds,
+varioshore_tpu,charpy_notched,230 C / 70% flow,20,kJ/m2,manufacturer TDS,colorfabb_varioshore_tds,
+varioshore_tpu,density,unfoamed base,1.2,g/cm3,manufacturer TDS,colorfabb_varioshore_tds,
+varioshore_tpu,shore_hardness,unfoamed base,92,Shore A,manufacturer TDS,colorfabb_varioshore_tds,
+varioshore_tpu,glass_transition,DSC unfoamed base,-20,C,manufacturer TDS,colorfabb_varioshore_tds,
+varioshore_tpu,melt_temperature,DSC unfoamed base,130,C,manufacturer TDS,colorfabb_varioshore_tds,
+ninjaflex_85a,youngs_modulus,printed 1 vs 4 shell lines (uniaxial tension),10.7-12.2,MPa,independent peer-reviewed,reppel_weinberg_2018,
+ninjaflex_85a,tensile_strength,printed 1 vs 4 shell lines,19.2-27.8,MPa,independent peer-reviewed,reppel_weinberg_2018,
+ninjaflex_85a,elongation_at_break,printed 1 vs 4 shell lines,1139-1200,%,independent peer-reviewed,reppel_weinberg_2018,
+ninjaflex_85a,nominal_stress_at_800pct,1-shell specimens,11.96 +/- 0.57,MPa,independent peer-reviewed,reppel_weinberg_2018,
+ninjaflex_85a,youngs_modulus,manufacturer,12,MPa,manufacturer,reppel_weinberg_2018,Manufacturer figures as quoted by the research report: 660% elongation; 26 MPa; E = 12 MPa.
+ninjaflex_85a,youngs_modulus,infill-only (+/-45 deg) coupons at 225 C,8.14,MPa,independent peer-reviewed,gallup2025,Void ratio 0.32 at 225 C falling to 0.16 at 250 C (infill-only).
+ninjaflex_85a,youngs_modulus,infill-only at 235 C,15.84,MPa,independent peer-reviewed,gallup2025,
+ninjaflex_85a,youngs_modulus,infill-only at 250 C,17.63,MPa,independent peer-reviewed,gallup2025,
+ninjaflex_85a,youngs_modulus,wall-only (0 deg - beads side by side) at 225 C,15.36,MPa,independent peer-reviewed,gallup2025,Wall-only = parallel beads fused side by side: relevant to 2-bead lattice walls.
+ninjaflex_85a,youngs_modulus,wall-only at 235 C,18.73,MPa,independent peer-reviewed,gallup2025,
+ninjaflex_85a,youngs_modulus,wall-only at 250 C,19.48,MPa,independent peer-reviewed,gallup2025,
+bambu_tpu_for_ams,shore_hardness,manufacturer,68,Shore D,manufacturer TDS,bambu_tpu_for_ams_tds,Hard TPU; AMS-compatible. Nozzle 220-240 C; dry 70 C 8 h (oven) or 80-90 C 12 h (heatbed); store < 20% RH.
+esun_etpu_95a,density,as used by Li et al.,1.21,g/cm3,independent peer-reviewed,li2026,Tg -9 C (eTPU).
+rosh_tpu_95a,density,as used by Li et al.,1.21,g/cm3,independent peer-reviewed,li2026,
+xinbo_peba_85a,density,as used by Li et al.,~1.02,g/cm3,independent peer-reviewed,li2026,PEBA melt peak 147.5 C; most thermally stable (onset ~380 C).
+carbon_epu41,bayshore_rebound,DLS bulk (reference only - not FDM),30,%,manufacturer TDS,carbon_epu41_tds,
+carbon_epu41,compression_set,23 C 72 h (reference only),22,%,manufacturer TDS,carbon_epu41_tds,
