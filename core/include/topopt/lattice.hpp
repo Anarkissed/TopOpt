@@ -569,6 +569,72 @@ double lattice_library_youngs_modulus();
 // resolution caveat (C6) and does not move the library row a query interpolates.
 double octet_relative_density(double cell_mm, double strut_radius_mm);
 
+// ── ★ THE AESTHETIC DENSITY CEILING (ruling D, maintainer 2026-09-18) ───────────
+// The density at which an octet cell's strut is a fifth of the cell across --
+// "prints open", the bound the preview caps an aesthetic quilt at and the one the
+// "Allow quilt" switch lifts. MEASURED from core's own law rather than written down:
+// 0.211733, and it is the SAME number at every cell size, because
+// octet_relative_density depends only on strut_radius/cell. (The app's note derives
+// "= 0.219, core's law inverted at a 4 mm cell"; the cell does not enter, and the two
+// numbers differ by 3.5 % -- the app inverts a measured table where this samples it
+// forward. Reported to the app 2026-09-19.)
+// ── ★ THE SOLID OUTLINE BEAM'S GEOMETRY (ruling B; brief §1.5) ─────────────────
+// One thin solid beam swept round a face outline, CENTRED on the outline, with the
+// cells keeping clear of it. The width is derived and never sent, so the preview and
+// the run cannot hold different numbers for it:
+//
+//     trim = clamp(0.35 * voxel, 0.10, 0.35)      -- the march's own trim
+//     beam = max(2 * bead, trim + 0.5 * voxel)
+//
+// On the maintainer's part (a 1.72 mm voxel at a 0.45 mm bead) that is 1.21 mm, which
+// is the number the brief quotes. The two terms are a floor each: a beam thinner than
+// two beads cannot be printed as a wall, and one thinner than the march's trim plus
+// half a voxel cannot be RESOLVED on the grid that carves it.
+inline double lattice_outline_beam_mm(double bead_mm, double voxel_mm) {
+  if (!(voxel_mm > 0.0)) return 0.0;
+  double trim = 0.35 * voxel_mm;
+  if (trim < 0.10) trim = 0.10;
+  if (trim > 0.35) trim = 0.35;
+  const double by_bead = 2.0 * (bead_mm > 0.0 ? bead_mm : 0.0);
+  const double by_grid = trim + 0.5 * voxel_mm;
+  return by_bead > by_grid ? by_bead : by_grid;
+}
+
+// THE BLEED. A wide shape-grade band would otherwise meet the beam as a hard step; at
+// B >= 25 mm the solid grows inward by a further (B - 15)/2 mm -- 5 mm at 25, 7.5 at
+// 30 -- and below 25 mm, nothing. A threshold, not a ramp, which is the app's rule.
+inline double lattice_outline_bleed_mm(double band_mm) {
+  return band_mm >= 25.0 ? 0.5 * (band_mm - 15.0) : 0.0;
+}
+
+inline constexpr double kOctetAestheticStrutPerCell = 0.20;
+// ★ AND IT IS THE PREIMAGE UNDER THE DIAMETER TABLE, NOT THE FORWARD DENSITY LAW.
+// Core holds TWO measured tables and they are not exact inverses of one another:
+//
+//     octet_relative_density(cell, radius)  at strut/cell 0.20 -> rho 0.211733
+//     octet_strut_diameter_mm(rho, cell)    preimage of 0.20   -> rho 0.218871
+//
+// A density arriving as stepped_cells[].rho is consumed by the DIAMETER table -- that
+// is what sizes the strut (ruling C) -- so the ceiling must be stated in the units that
+// table reads: 0.218871, which is the app's 0.219. Taking the forward law's 0.211733
+// and sending it through the diameter table builds strut/cell 0.196, UNDER the geometry
+// the maintainer ruled on. Both numbers are cell-independent; the gap is the tables'
+// round trip and not a cell effect. (Core first published 0.2117 here and told the app
+// its 0.219 was 3.5 % wrong; the app pushed back and was right.)
+//
+// Bisected rather than written down, so that if either table is re-measured this
+// follows it instead of silently becoming a different piece of geometry.
+inline double octet_aesthetic_density_ceiling() {
+  const double cell = 4.0;                    // any cell: the RATIO is what matters
+  const double want = kOctetAestheticStrutPerCell * cell;
+  double lo = 0.01, hi = 0.90;
+  for (int it = 0; it < 200; ++it) {
+    const double mid = 0.5 * (lo + hi);
+    (octet_strut_diameter_mm(mid, cell) < want ? lo : hi) = mid;
+  }
+  return 0.5 * (lo + hi);
+}
+
 // The resolution (voxels per cell edge) the octet tensor library was measured at,
 // and the basis octet_relative_density voxelizes on so a printed radius maps onto
 // the same rho scale the library rows carry (PR 198, vpc48).
