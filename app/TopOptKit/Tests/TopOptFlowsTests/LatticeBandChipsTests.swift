@@ -230,6 +230,32 @@ final class LatticeBandChipsTests: XCTestCase {
         XCTAssertEqual(LatticeBandChipText.explanation(.cap, solid: false), "Nothing — the lattice is cut here")
     }
 
+    /// ★ ONE PLACE, SEVERAL MEMBERS (2026-09-27: the floor, its end ramp and the fillet are one chip;
+    /// his project stored "face:21" from the per-face chips). The chip reads the FIRST member with a
+    /// choice, exactly as the band does — so a choice stored on a non-first member shows, with the
+    /// dot, and is not "pending" once the band has drawn it.
+    func testAPlaceReadsItsMembersInTheBandsOrder() {
+        let mesh = Self.boxMesh()
+        let f = frame(camera: camera(for: mesh), centre: mesh.bounds.center, rotation: Self.settle)
+        let shown = LatticeBandChipLayout.layout(decisions: Self.faceDecisions(mesh), treatments: [:], frame: f,
+                                                 latticeOnly: true)[0].decision
+        let members = ["face:19", "face:20", "face:21"]
+        // the band drew his stored "face:21" = lattice through over a solid default
+        let d = LatticeBandDecision(key: members[0], kind: .face, label: "Faces 19, 20, 21", anchor: shown.anchor,
+                                    normal: shown.normal, areaMM2: 1000, defaultSolid: true, solid: false, memberKeys: members)
+        XCTAssertNil(d.storedChoice(in: [:]))
+        XCTAssertEqual(d.storedChoice(in: ["face:21": false]), false)
+        XCTAssertEqual(d.storedChoice(in: ["face:20": true, "face:21": false]), true, "the first member in order decides")
+        let c = LatticeBandChipLayout.layout(decisions: [d], treatments: ["face:21": false], frame: f, latticeOnly: true)
+        XCTAssertEqual(c.count, 1)
+        XCTAssertEqual(c.first?.solid, false)
+        XCTAssertEqual(c.first?.overridden, true, "★ a choice on a non-first member is the user's choice (the dot)")
+        XCTAssertEqual(c.first?.pending, false, "★ …and it is what the band drew, not a rebake due")
+        // a lone decision answers for its own key
+        XCTAssertEqual(LatticeBandDecision(key: "cap:x", kind: .cap, label: "", anchor: .zero, normal: .zero,
+                                           areaMM2: 1, defaultSolid: false, solid: false).memberKeys, ["cap:x"])
+    }
+
     /// ★★ THE CHIP IS ON ITS FACE — through the renderer's own transform, in its own pixels.
     func testChipsSitOnTheirFacesInTheRenderersOwnPixels() throws {
         guard let device = MTLCreateSystemDefaultDevice() else { throw XCTSkip("no Metal") }

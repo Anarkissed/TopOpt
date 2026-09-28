@@ -7524,9 +7524,11 @@ public struct WorkspacePlaceholder: View {
     /// `solid` nil = "Use default".
     private func chooseBandTreatment(_ d: LatticeBandDecision, solid: Bool?) {
         let value = solid.flatMap { LatticeBandChipLayout.treatment(choosing: $0, for: d) }
-        guard project.lattice.bandTreatments[d.key] != value else { return }
+        // ★ every member of the place (the floor, its ramp and the fillet; each prism's depth end)
+        // takes the choice, so the band and the chip read the same answer whichever member decides
+        guard d.memberKeys.contains(where: { project.lattice.bandTreatments[$0] != value }) else { return }
         project.sealUndoStep()
-        project.writeLatticeBandTreatment(d.key, solid: value)
+        for k in d.memberKeys { project.writeLatticeBandTreatment(k, solid: value) }
         project.sealUndoStep()
         model.persistCurrentProject()
     }

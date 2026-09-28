@@ -1760,11 +1760,12 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
     /// Lattice Only view, there are little chips tracked to the faces that, when clicked,
     /// asks whether it should grade to solid or not").
     ///
-    /// Keyed like `LatticeBandDecision.key` — "face:<rawFaceID>" for an unselected CAD
-    /// face the lattice reaches, "cap:<selectableKey>" for a prism's depth end inside the
-    /// part's material — and valued `solid` (true = grade to solid / a rim facing the
-    /// solid; false = latticed through / nothing). ABSENT ⇒ the band's own rule decides,
-    /// which is every project saved before the chips existed. The preview reads it as the
+    /// Keyed per MEMBER of a chip (`LatticeBandDecision.memberKeys`) — "face:<rawFaceID>" for
+    /// a face no rule decides, "cap:<selectableKey>" for a prism's depth end inside the part's
+    /// material — and valued `solid` (true = grade to solid / a rim facing the solid; false =
+    /// latticed through / nothing). A chip writes every member; the band reads the first member
+    /// with a value. ABSENT ⇒ the default (not solid), which is every project saved before the
+    /// chips existed. A key on a face the rules decide (no chip there) is ignored. The preview reads it as the
     /// scene's `bandOverrides`; it is part of `previewBakeInputs`, so a chip choice
     /// rebakes like any other lattice setting.
     public var bandTreatments: [String: Bool] = [:]

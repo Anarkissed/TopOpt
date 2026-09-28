@@ -90,6 +90,9 @@ public struct LatticeBandOptions: Sendable, Equatable {
     /// `LATTICE_BAND_HONOR_ALL=1`: a stored choice is honoured on ANY face, not only where a chip is
     /// shown (control for "the rules decide everywhere else")
     public var honorAllChoices = false
+    /// `LATTICE_BAND_QUESTION_SOLID=1`: a face no rule decides defaults to grade to solid (the
+    /// shipped default is lattice through — his R3 and his "not solid")
+    public var questionSolid = false
 
     public init() {}
 
@@ -110,6 +113,7 @@ public struct LatticeBandOptions: Sendable, Equatable {
         o.includeSelected = on("LATTICE_BAND_INCLUDE_SELECTED")
         o.rimInPocketOnly = on("LATTICE_BAND_RIM_IN_POCKET")
         o.honorAllChoices = on("LATTICE_BAND_HONOR_ALL")
+        o.questionSolid = on("LATTICE_BAND_QUESTION_SOLID")
         return o
     }
 }
@@ -119,16 +123,16 @@ public struct LatticeBandOptions: Sendable, Equatable {
 /// when clicked, asks whether it should grade to solid or not").
 ///
 /// ONLY WHERE NO RULE DECIDES (his 2026-09-27: "Only the faces that are *questionable* and in
-/// between all the rules, should get the chip"): a face a prism crosses far from all of its sides,
-/// and the depth ends inside material (one chip per block of solid they stop in). Everywhere else
-/// the rules decide and a stored choice is ignored. Two kinds:
+/// between all the rules, should get the chip"): faces the pocket crosses far from all of its sides
+/// (edge-connected ones are one place), and depth ends inside material (touching ones are one
+/// place). Both default NOT solid (his answer). Everywhere else the rules decide and a stored
+/// choice is ignored. Two kinds:
 ///   face — an unselected CAD face the lattice reaches. `solid` = skin + rim + green under it
 ///          ("grade to solid"); not solid = latticed through (open).
 ///   cap  — a prism's depth end where it stops inside the part's material. `solid` = a rim facing
 ///          the solid; not solid = nothing (the lattice is cut on the cap plane).
 /// `defaultSolid` is what the rules decide; `solid` is what this bake used (the override if the
-/// user set one). Keys: "face:<rawFaceID>" and "cap:<key>+<key>…" (the selectable keys of every prism
-/// whose depth end is in that block, sorted). The overrides live in
+/// user set one). Stored keys, per member: "face:<rawFaceID>" and "cap:<selectable key>". The overrides live in
 /// `LatticeSettings.bandTreatments` ([key: solid]) and reach the scene as `bandOverrides`.
 public struct LatticeBandDecision: Sendable, Equatable, Identifiable {
     public enum Kind: String, Sendable, Codable { case face, cap }
@@ -145,11 +149,23 @@ public struct LatticeBandDecision: Sendable, Equatable, Identifiable {
     public var areaMM2: Float
     public var defaultSolid: Bool
     public var solid: Bool
+    /// ★ The stored keys this chip answers for, in the ONE order the band and the chip layout both
+    /// read: the first member with a stored choice decides, and a tap writes every member. One place
+    /// can span several faces (the floor, its end ramp, the fillet up into the leg) or several
+    /// prisms' depth ends; storing per member keeps a choice when an edit regroups them. `key` is
+    /// the first member (the chip's identity).
+    public var memberKeys: [String]
     public var id: String { key }
 
     public init(key: String, kind: Kind, label: String, anchor: SIMD3<Float>, normal: SIMD3<Float>,
-                areaMM2: Float, defaultSolid: Bool, solid: Bool) {
+                areaMM2: Float, defaultSolid: Bool, solid: Bool, memberKeys: [String]? = nil) {
         self.key = key; self.kind = kind; self.label = label; self.anchor = anchor; self.normal = normal
         self.areaMM2 = areaMM2; self.defaultSolid = defaultSolid; self.solid = solid
+        self.memberKeys = memberKeys ?? [key]
+    }
+
+    /// The user's choice for this place, read the way the band reads it (nil: the default).
+    public func storedChoice(in treatments: [String: Bool]) -> Bool? {
+        memberKeys.lazy.compactMap { treatments[$0] }.first
     }
 }

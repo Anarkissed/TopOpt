@@ -31,6 +31,10 @@ final class LatticeStandRimRegressionTests: XCTestCase {
     }
 
     func testTheFloorsBandDoesNotWrapIntoTheWall() throws {
+        // ★ the floor graded to SOLID (its chip; the default is lattice through since 2026-09-27) —
+        // this pins where a floor band stops, so it needs one
+        setenv("LATTICE_BAND_QUESTION_SOLID", "1", 1)
+        defer { unsetenv("LATTICE_BAND_QUESTION_SOLID") }
         let (_, scene) = try LatticeStandRenderProbe.stand()
         let now = Self.solidInWallBAtTheFloor(scene)
         // ★ POSITIVE CONTROL: a band that rounds every edge must put the ledge back, or this

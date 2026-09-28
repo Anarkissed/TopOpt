@@ -138,7 +138,7 @@ public enum LatticeBandChipLayout {
             guard screen.contains(drawn) else { continue }
             let guarded = drawn.insetBy(dx: -margin, dy: -margin)
             if keepOut.contains(where: { $0.intersects(guarded) }) { continue }
-            let chosen = treatments[d.key]
+            let chosen = d.storedChoice(in: treatments)     // the first member with a choice, as the band reads it
             let shown = chosen ?? d.defaultSolid
             candidates.append(LatticeBandChipPlacement(
                 decision: d, point: p, solid: shown, overridden: chosen != nil,
