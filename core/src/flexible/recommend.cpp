@@ -31,8 +31,10 @@ FaceFailure failure_of(const Stack& st, const FaceDesign& d, const Candidate& c)
   bool first = true, nearest_first = true;
   for (std::size_t k = 0; k < d.columns.size(); ++k) {
     const ColumnDesign& cd = d.columns[k];
-    const bool bad = cd.status == "too_firm" || cd.status == "too_soft" || cd.status == "beyond_data";
-    if (!bad) continue;
+    const bool target_bad = cd.status == "too_firm" || cd.status == "too_soft" || cd.status == "beyond_data";
+    const bool built_bad = cd.status == "ok" && !cd.buildable_ok;
+    if (!target_bad && !built_bad) continue;
+    if (built_bad) ++f.buildable_beyond_data;
     if (cd.status == "too_firm") ++f.too_firm;
     if (cd.status == "too_soft") ++f.too_soft;
     if (cd.status == "beyond_data") ++f.beyond_data;
@@ -63,6 +65,9 @@ FaceFailure failure_of(const Stack& st, const FaceDesign& d, const Candidate& c)
   if (f.too_soft)
     what += std::string(what.empty() ? "" : "; ") + std::to_string(f.too_soft) +
             " columns cannot stay that shallow (even the firmest squishes further)";
+  if (f.buildable_beyond_data)
+    what += std::string(what.empty() ? "" : "; ") + std::to_string(f.buildable_beyond_data) +
+            " columns squish past the tested strain once smoothed to what can be built";
   if (f.beyond_data)
     what += std::string(what.empty() ? "" : "; ") + std::to_string(f.beyond_data) +
             " columns ask for more squish than the tests measured";
@@ -145,7 +150,10 @@ Recommendation recommend(const FlexibleData& data, const std::string& material_i
                                         f.stack->frame.side, beads_per_wall);
         const FaceDesign d = design_face(cs.set, *f.stack, f.map, f.weight_n, f.design_stamp,
                                          build, tier);
-        const int bad = d.too_firm + d.too_soft + d.beyond_data;
+        int built_bad = 0;  // reachable targets the smoothing pushes past the data
+        for (const ColumnDesign& cd : d.columns)
+          if (cd.status == "ok" && !cd.buildable_ok) ++built_bad;
+        const int bad = d.too_firm + d.too_soft + d.beyond_data + built_bad;
         c.unreachable_columns += bad;
         c.near_edge_columns += d.near_edge;
         c.material_volume_mm3 += d.material_volume_mm3;

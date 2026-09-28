@@ -359,6 +359,10 @@ CurveEntry parse_entry(const Value& e, const std::string& table, std::size_t ind
     if (!v->is_null()) {
       out.has_unloading = true;
       out.unloading = curve_points(*v, key("unloading"));
+      if (out.unloading.size() < 2) json::fail(key("unloading"), "needs at least two points when given");
+      for (const CurvePoint& p : out.unloading)
+        if (p.strain < 0.0 || p.stress_mpa < 0.0)
+          json::fail(key("unloading"), "strain and stress must be >= 0");
     }
   }
   out.strain_max_measured =
@@ -367,9 +371,25 @@ CurveEntry parse_entry(const Value& e, const std::string& table, std::size_t ind
     json::fail(key("strain_max_measured"),
                fmt(out.strain_max_measured) + " is below the last loading point's strain " +
                    fmt(out.loading.back().strain));
-  if (const Value* v = json::find(e, "replicates"))
+  if (const Value* v = json::find(e, "replicates")) {
     out.replicates = maybe_number(*v, key("replicates"));
-  if (const Value* v = json::find(e, "rel_sd")) out.rel_sd = maybe_number(*v, key("rel_sd"));
+    if (out.replicates.known &&
+        (out.replicates.value < 1.0 || out.replicates.value != std::floor(out.replicates.value)))
+      json::fail(key("replicates"), "must be null or an integer >= 1");
+  }
+  if (const Value* v = json::find(e, "rel_sd")) {
+    out.rel_sd = maybe_number(*v, key("rel_sd"));
+    if (out.rel_sd.known && out.rel_sd.value < 0.0) json::fail(key("rel_sd"), "must be >= 0");
+  }
+  auto positive = [&](const MaybeNumber& m, const char* k) {
+    if (m.known && !(m.value > 0.0)) json::fail(key(k), "must be null or > 0");
+  };
+  positive(out.bead_width_mm, "bead_width_mm");
+  positive(out.cell_mm, "cell_mm");
+  positive(out.flow_pct, "flow_pct");
+  if (!(out.nozzle_temp_c > 0.0)) json::fail(key("nozzle_temp_c"), "must be > 0");
+  if (!(out.conditioning.rate_mm_per_min > 0.0))
+    json::fail(key("conditioning") + ".rate_mm_per_min", "must be > 0");
   out.source = json::as_string(*json::find(e, "source"), key("source"));
   return out;
 }

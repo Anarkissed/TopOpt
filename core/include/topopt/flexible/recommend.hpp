@@ -48,6 +48,7 @@ struct FaceFailure {
   std::string topology;
   double temp_c = 0.0;
   int too_firm = 0, too_soft = 0, beyond_data = 0;
+  int buildable_beyond_data = 0;  // reachable targets that squish past the data once smoothed
   double u_min_mm = 0.0, u_max_mm = 0.0, v_min_mm = 0.0, v_max_mm = 0.0;  // failing columns
   bool nearest_known = false;
   double nearest_depth_min_mm = 0.0, nearest_depth_max_mm = 0.0;  // over failing columns

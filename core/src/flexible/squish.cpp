@@ -192,6 +192,17 @@ CurveSetResult curve_set(const FlexibleData& data, const std::string& material_i
     if (!(s.rows[i].core_density > s.rows[i - 1].core_density))
       throw FlexibleError("rows \"" + s.rows[i - 1].entry_id + "\" and \"" + s.rows[i].entry_id +
                           "\" sit at the same core density");
+  // The inverse brackets density by bisection, which needs σ(ε; ρ) to rise with ρ at
+  // every strain it may be asked about, the extrapolated zone included. Rows whose
+  // curves cross would silently return a wrong density, so a crossing is refused.
+  for (std::size_t i = 1; i < s.rows.size(); ++i)
+    for (int k = 1; k <= 100; ++k) {
+      const double e = s.strain_limit() * k / 100.0;
+      if (!(row_stress(s.rows[i], e) > row_stress(s.rows[i - 1], e)))
+        throw FlexibleError("rows \"" + s.rows[i - 1].entry_id + "\" and \"" + s.rows[i].entry_id +
+                            "\" cross at strain " + fmt(e) +
+                            ": stress must rise with density for the lookup to invert");
+    }
   s.tier = s.rows.front().tier;
   for (const CurveRow& r : s.rows)
     if (r.tier != s.tier)

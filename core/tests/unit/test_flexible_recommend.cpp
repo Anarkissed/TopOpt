@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "flexible_test_boxes.hpp"
+#include "topopt/flexible/field.hpp"
 
 using namespace topopt;
 using namespace topopt::flexible;
@@ -108,6 +109,30 @@ int main() {
   CHECK(t190, "190 °C reported unreachable with its failure");
   CHECK(has(r, "tiebreak_near_edge") || has(r, "tiebreak_material") || has(r, "tiebreak_inside_data"),
         "the temperature was settled by a named tiebreak");
+
+  // A design stamp near the strain limit: its targets are reachable, but smoothing its
+  // dense core into the soft even-pressure lattice around it squishes past the data.
+  {
+    StampGrid st;
+    st.name = "hot";
+    st.origin_u_mm = 40;
+    st.origin_v_mm = 40;
+    st.cell_mm = 2;
+    st.nu = st.nv = 10;
+    st.values_mpa.assign(100, 0.2);
+    st.force_n = 0.2 * 400;
+    FaceRequest fh{&top, flat(4.0), W, &st};  // every TARGET reachable here
+    r = recommend(data(), "varioshore_tpu", {220}, {"gyroid"}, "springy", 1, 0.42, {fh});
+    int built_bad = 0;
+    for (const Candidate& c : r.candidates)
+      for (const FaceFailure& ff : c.failures) built_bad += ff.buildable_beyond_data;
+    int target_bad = 0;
+    for (const Candidate& c : r.candidates)
+      for (const FaceFailure& ff : c.failures) target_bad += ff.too_firm + ff.too_soft + ff.beyond_data;
+    CHECK(target_bad == 0, "the scenario's targets are all reachable (only smoothing fails)");
+    CHECK(built_bad > 0 && !r.reachable,
+          "columns pushed past the data by smoothing make the candidate not reachable");
+  }
 
   // Nothing reachable: 8 mm of 20 is past the tested strain for everything.
   f.map = flat(8.0);

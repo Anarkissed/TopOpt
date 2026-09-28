@@ -149,6 +149,7 @@ StampOnColumns stamp_on_columns(const StampGrid& s, const Stack& stack) {
   StampOnColumns out;
   out.pressure_mpa.assign(stack.columns.size(), 0.0);
   out.covered.assign(stack.columns.size(), 0);
+  out.covered_area_mm2.assign(stack.columns.size(), 0.0);
   const double p = stack.pitch_mm, c = s.cell_mm;
   for (int j = 0; j < s.nv; ++j)
     for (int i = 0; i < s.nu; ++i) {
@@ -170,6 +171,7 @@ StampOnColumns stamp_on_columns(const StampGrid& s, const Stack& stack) {
           out.pressure_mpa[static_cast<std::size_t>(col)] +=
               val * a / stack.columns[static_cast<std::size_t>(col)].area_mm2;
           out.covered[static_cast<std::size_t>(col)] = 1;
+          out.covered_area_mm2[static_cast<std::size_t>(col)] += a;
           landed += a;
         }
       out.force_on_face_n += val * landed;
@@ -314,12 +316,13 @@ FaceDesign design_face(const CurveSet& set, const Stack& stack, const SquishMap&
 
   // F7: a Gaussian of σ = half the local cell, gathered over the face's columns.
   const double p = stack.pitch_mm;
-  int nt = 0, nb = 0, nd = 0, nc = 0;
+  int nt = 0, nb = 0, nd = 0, nc = 0, ns = 0;
   for (std::size_t k = 0; k < stack.columns.size(); ++k) {
     ColumnDesign& c = out.columns[k];
     if (c.status == "no_lattice") continue;
     c.sigma_mm = 0.5 * cell_size_mm(build.topology, c.clamped_density, build.beads_per_wall,
                                     build.bead_width_mm);
+    accumulate(out.sigma, c.sigma_mm, ns);
     const int r = static_cast<int>(std::ceil(3.0 * c.sigma_mm / p));
     const StackColumn& sc = stack.columns[k];
     double wsum = 0.0, rsum = 0.0;
@@ -366,6 +369,7 @@ FaceDesign design_face(const CurveSet& set, const Stack& stack, const SquishMap&
   finish(out.buildable_depth, nb);
   finish(out.buildable_density, nd);
   finish(out.cell, nc);
+  finish(out.sigma, ns);
   return out;
 }
 
@@ -417,9 +421,18 @@ StampCheck check_stamp(const CurveSet& set, const Stack& stack,
     out.ok = true;
     return out;
   }
+  // A rigid stamp resting partly on SOLID (a column with no lattice) is carried by the
+  // solid: the independent-column model cannot say how far it sinks, so it refuses.
+  if (out.rigid_unlatticed_columns > 0) {
+    out.refusal = Refusal{"rigid_over_solid",
+                          "the rigid stamp rests on " + std::to_string(out.rigid_unlatticed_columns) +
+                              " columns with no lattice; the solid carries it and v1 does not model that"};
+    return out;
+  }
+  // Each column takes the stamp only over the area the stamp covers in it.
   std::vector<double> a, h, rho;
   for (std::size_t k : under) {
-    a.push_back(stack.columns[k].area_mm2);
+    a.push_back(soc.covered_area_mm2[k]);
     h.push_back(stack.columns[k].lattice_mm);
     rho.push_back(column_density[k]);
   }

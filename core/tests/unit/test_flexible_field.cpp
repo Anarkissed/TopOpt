@@ -276,6 +276,27 @@ static void test_stamps(const Pad& p) {
   rig.rigid = true;
   c = check_stamp(s, p.top, rho, rig, kGyroid1, tier);
   CHECK(c.ok && near(c.rigid_depth_mm, expect, 1e-9), "rigid on uniform lattice = soft depth");
+  // A rigid stamp only part-covering its edge columns: each column takes the stamp
+  // over the area it covers, so the depth is the soft depth at the stamp's pressure.
+  {
+    StampGrid half = st;
+    half.origin_u_mm = 30.5;
+    half.origin_v_mm = 30.5;
+    half.rigid = true;
+    c = check_stamp(s, p.top, rho, half, kGyroid1, tier);
+    CHECK(c.ok && near(c.rigid_depth_mm, expect, 1e-9),
+          "rigid over part-covered columns: the covered area carries the stamp");
+  }
+  // A rigid stamp partly on solid (no lattice) is refused, not sunk into the lattice.
+  {
+    std::vector<double> some = rho;
+    for (std::size_t k = 0; k < some.size(); ++k)
+      if (p.top.columns[k].u_mm < 40) some[k] = 0.0;
+    StampGrid r2 = st;
+    r2.rigid = true;
+    c = check_stamp(s, p.top, some, r2, kGyroid1, tier);
+    CHECK(!c.ok && c.refusal.code == "rigid_over_solid", "a rigid stamp on solid is refused");
+  }
   // A rigid press past the data is refused, named.
   rig.values_mpa.assign(400, 2.0);
   rig.force_n = 800.0;
@@ -346,6 +367,14 @@ static void test_field_and_handover() {
         "just inside the side, far from the top: the side's density");
   CHECK(near(f.density[at(69, 51, 29)], 0.5 * (rt + rsd), 1e-9),
         "equidistant from both faces: the average");
+  {
+    // The blend's WIDTH: 4 mm nearer the top than the side, w = 0.5 + 4 / (2 L) with L
+    // one cell of the larger local cell size (R11).
+    const double L = std::max(cell_size_mm("gyroid", rt, 1, 0.42), cell_size_mm("gyroid", rsd, 1, 0.42));
+    const double w = 0.5 + 4.0 / (2.0 * L);
+    CHECK(near(f.density[at(65, 51, 29)], w * rt + (1 - w) * rsd, 1e-9),
+          "the blend runs over one cell of the larger cell size");
+  }
   // Density is between the two everywhere in the overlap.
   bool between = true;
   for (std::size_t i = 0; i < f.density.size(); ++i)

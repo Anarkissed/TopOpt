@@ -47,6 +47,7 @@ inline constexpr double kStampForceTolerance = 0.005;
 struct StampOnColumns {
   std::vector<double> pressure_mpa;  // per column
   std::vector<char> covered;         // per column: any pressed stamp cell overlaps it
+  std::vector<double> covered_area_mm2;  // per column: the pressed area inside it
   double force_on_face_n = 0.0;
   double force_off_face_n = 0.0;     // stamp force landing outside every column
 };
@@ -132,6 +133,7 @@ struct FaceDesign {
   double max_smoothing_change_mm = 0.0;
   double material_volume_mm3 = 0.0;  // Σ ρ_buildable × area × height
   Range1 target_depth, buildable_depth, buildable_density, cell;
+  Range1 sigma;  // the smoothing σ used (mm), R14 / F7
 };
 
 FaceDesign design_face(const CurveSet& set, const Stack& stack, const SquishMap& map,
@@ -149,7 +151,7 @@ struct StampCheck {
   std::vector<double> depth_mm;     // per column; < 0 where the stamp does not press
   std::vector<std::string> status;  // per column: "" | "ok" | "extrapolated" | "beyond_data"
   int pressed_columns = 0, extrapolated_columns = 0, beyond_data_columns = 0;
-  int rigid_unlatticed_columns = 0;  // under a rigid stamp but solid (not in the solve)
+  int rigid_unlatticed_columns = 0;  // under a rigid stamp but solid: the press is refused
   double max_depth_mm = 0.0;
   double rigid_depth_mm = 0.0;
   double stamp_width_mm = 0.0;

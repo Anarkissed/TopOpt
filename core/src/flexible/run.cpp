@@ -389,6 +389,33 @@ std::string safe_name(const std::string& s) {
   return o.empty() ? "stamp" : o;
 }
 
+std::string stamp_json(const StampGrid& g) {
+  return Obj()
+      .add("name", jstr(g.name))
+      .add("mode", jstr(g.rigid ? "rigid" : "soft"))
+      .add("force_n", jnum(g.force_n))
+      .add("cells_force_n", jnum(stamp_force_n(g)))
+      .add("origin_mm", "[" + jnum(g.origin_u_mm) + ", " + jnum(g.origin_v_mm) + "]")
+      .add("cell_mm", jnum(g.cell_mm))
+      .add("nu", jnum(g.nu))
+      .add("nv", jnum(g.nv))
+      .str();
+}
+
+std::string region_json(const JobLatticeRegion& r) {
+  Obj o;
+  o.add("role", jstr(r.role)).add("kind", jstr(r.kind));
+  if (r.kind == "region") o.add("region_id", jnum(r.region_id));
+  if (r.kind == "bolt")
+    o.add("axis_point", jvec(r.axis_point)).add("axis_dir", jvec(r.axis_dir))
+        .add("radius_mm", jnum(r.radius_mm)).add("half_length_mm", jnum(r.half_length_mm));
+  if (r.kind == "face")
+    o.add("origin", jvec(r.origin)).add("normal", jvec(r.normal)).add("half_u_mm", jnum(r.half_u_mm))
+        .add("half_w_mm", jnum(r.half_w_mm));
+  if (r.kind != "bolt") o.add("depth_mm", jnum(r.depth_mm));
+  return o.str();
+}
+
 std::string reasons_json(const std::vector<Reason>& rs) {
   std::vector<std::string> out;
   for (const Reason& r : rs)
@@ -571,8 +598,14 @@ FlexibleRunResult run_flexible_job(const JobDescription& job, const std::string&
                      "where it rests.";
   } else if (temps.empty()) {
     const auto it = data.catalogue.materials.find(fx.material_id);
-    refusal_code = it == data.catalogue.materials.end() ? "unknown_material" : "calibrate_first";
-    refusal_reason = curve_set(data, fx.material_id, 0.0, "gyroid").refusal.reason;
+    if (it != data.catalogue.materials.end() && it->second.tier == "literature") {
+      refusal_code = "temperature_not_tested";
+      refusal_reason = it->second.display_name + " has no tested temperature in its tables";
+    } else {
+      const Refusal gate = curve_set(data, fx.material_id, 0.0, "gyroid").refusal;
+      refusal_code = gate.code;
+      refusal_reason = gate.reason;
+    }
   } else {
     try {
       rec = recommend(data, fx.material_id, temps, topos, fx.feel, fx.beads_per_wall,
@@ -654,12 +687,7 @@ FlexibleRunResult run_flexible_job(const JobDescription& job, const std::string&
       fo.add("curve_centre_edge", jcurve(jf.curve_c_x, jf.curve_c_y));
     else
       fo.add("curve_x", jcurve(jf.curve_x_x, jf.curve_x_y)).add("curve_y", jcurve(jf.curve_y_x, jf.curve_y_y));
-    fo.add("design_stamp", jf.has_design_stamp
-                               ? Obj().add("name", jstr(jf.design_stamp.name))
-                                     .add("mode", jstr(jf.design_stamp.rigid ? "rigid" : "soft"))
-                                     .add("force_n", jnum(jf.design_stamp.force_n))
-                                     .str()
-                               : "null");
+    fo.add("design_stamp", jf.has_design_stamp ? stamp_json(jf.design_stamp) : "null");
     if (!designs.empty()) {
       const FaceDesign& d = designs[i];
       fo.add("design_pressure_even_mpa", jnum(d.design_pressure_even_mpa))
@@ -681,6 +709,7 @@ FlexibleRunResult run_flexible_job(const JobDescription& job, const std::string&
                                      : "null")
           .add("density", jrange(d.buildable_density))
           .add("cell_mm", jrange(d.cell))
+          .add("smoothing_sigma_mm", jrange(d.sigma))
           .add("max_smoothing_change_mm", jnum(d.max_smoothing_change_mm))
           .add("material_volume_mm3", jnum(d.material_volume_mm3))
           .add("tier", Obj().add("tier", jstr(d.tier.tier)).add("band", jnum(d.tier.band))
@@ -803,6 +832,7 @@ FlexibleRunResult run_flexible_job(const JobDescription& job, const std::string&
                              notes, "mm", 2, &special));
       check_json.push_back(Obj()
                                .add("name", jstr(cs.stamp.name))
+                               .add("stamp", stamp_json(cs.stamp))
                                .add("face_region_id", jnum(cs.face_region_id))
                                .add("mode", jstr(cs.stamp.rigid ? "rigid" : "soft"))
                                .add("force_n", jnum(cs.stamp.force_n))
@@ -898,7 +928,11 @@ FlexibleRunResult run_flexible_job(const JobDescription& job, const std::string&
       .add("resolution", jnum(job.resolution))
       .add("voxel_mm", jnum(grid.spacing))
       .add("column_pitch_mm", jnum(pitch))
-      .add("lattice_region", Obj().add("regions", jnum(static_cast<double>(fx.regions.size())))
+      .add("lattice_region", Obj().add("regions", jlist([&] {
+                                    std::vector<std::string> v;
+                                    for (const JobLatticeRegion& g : fx.regions) v.push_back(region_json(g));
+                                    return v;
+                                  }()))
                                   .add("voxels", jnum(static_cast<double>(lattice_voxels)))
                                   .add("volume_mm3", jnum(lattice_voxels * grid.voxel_volume())).str())
       .add("faces", jlist(face_json))

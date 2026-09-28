@@ -5,6 +5,7 @@
 // Every negative case is a small inline document: tests/fixtures/** is untouched.
 
 #include "topopt/flexible/data.hpp"
+#include "topopt/flexible/squish.hpp"
 
 #include <cmath>
 #include <cstdio>
@@ -227,6 +228,10 @@ static void test_catalogue_strictness() {
           parse_material_catalogue("{\"schema_version\":1,\"schema_version\":1}");
         }, "duplicated key"),
         "a duplicated JSON key is rejected, not last-wins");
+  CHECK(throws([] { parse_material_catalogue(std::string(100, '[') + std::string(100, ']')); }, "nesting"),
+        "a pathologically nested document is refused, not a stack overflow");
+  CHECK(throws([] { parse_material_catalogue("{\"schema_version\":1e400}"); }, "out of range"),
+        "an out-of-range number is a FlexibleError, not a stray std::out_of_range");
 }
 
 static void test_curve_strictness() {
@@ -307,6 +312,12 @@ static void test_curve_strictness() {
                                         ",\"beads_per_wall\":3")), "t.json");
         }, "beads_per_wall"),
         "beads_per_wall 3 rejected");
+  for (const char* bad : {",\"rel_sd\":-0.3", ",\"replicates\":2.5", ",\"unloading\":[]",
+                          ",\"bead_width_mm\":0", ",\"cell_mm\":-4"})
+    CHECK(throws([&] {
+            parse_curve_table(table(entry("a", 190, 0.1, "0.1", "[[0.1,0.05],[0.2,0.08]]", bad)), "t.json");
+          }),
+          "an out-of-range optional value is refused");
 }
 
 static void test_cross_checks() {
@@ -387,6 +398,15 @@ static void test_density_axis() {
           core_density_of(ax, bad.tables[0].entries[2]);
         }, "not on the"),
         "an unmapped nominal value is refused, not interpolated");
+  // rows whose curves cross: the inverse could not bracket density
+  CHECK(throws([&] {
+          FlexibleData bad = make_flexible_data(
+              c, {parse_curve_table(table(entry("a", 190, 0.1, "0.15", "[[0.1,0.05],[0.2,0.2]]") + "," +
+                                          entry("b", 190, 0.2, "0.25", "[[0.1,0.06],[0.2,0.07]]")),
+                                    "t.json")});
+          curve_set(bad, "tpu_x", 190, "gyroid");
+        }, "cross"),
+        "rows whose stress does not rise with density are refused");
   // a map that is not increasing
   CHECK(throws([&] {
           FlexibleData bad = make_flexible_data(

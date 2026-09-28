@@ -29,6 +29,7 @@ class Parser {
   const std::string& s_;
   const std::string& what_;
   std::size_t pos_ = 0;
+  int depth_ = 0;
 
   [[noreturn]] void fail_at(const std::string& msg) {
     throw FlexibleError(what_ + ": JSON parse error at offset " +
@@ -52,6 +53,11 @@ class Parser {
 
   Value parse_value() {
     skip_ws();
+    if (++depth_ > 64) fail_at("nesting deeper than 64 levels");
+    struct Leave {
+      int& d;
+      ~Leave() { --d; }
+    } leave{depth_};
     const char c = peek();
     if (c == '{') return parse_object();
     if (c == '[') return parse_array();
@@ -163,7 +169,11 @@ class Parser {
     }
     Value v;
     v.type = Value::Type::Number;
-    v.num = std::stod(s_.substr(start, pos_ - start));
+    try {
+      v.num = std::stod(s_.substr(start, pos_ - start));
+    } catch (const std::out_of_range&) {
+      fail_at("number out of range");
+    }
     return v;
   }
 

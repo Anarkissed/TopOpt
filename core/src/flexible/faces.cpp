@@ -382,7 +382,10 @@ FaceFrame face_frame(const TriangleMesh& mesh, const std::vector<int>& triangles
   // principal axis: exact second moment of the projected triangles
   Vec3 e1, e2;
   plane_basis(f.load, e1, e2);
-  double sxx = 0, sxy = 0, syy = 0;
+  // Second moments of the PROJECTED face about the PROJECTED face's own centroid
+  // (sums about the 3D centroid, then the parallel-axis shift), so a curved or mixed-
+  // slope face gets the principal axis of what the stack actually sees.
+  double sxx = 0, sxy = 0, syy = 0, pa = 0, pcx = 0, pcy = 0;
   for (int ti : triangles) {
     const auto& t = mesh.triangles[static_cast<std::size_t>(ti)];
     double px[3], py[3];
@@ -404,6 +407,16 @@ FaceFrame face_frame(const TriangleMesh& mesh, const std::vector<int>& triangles
     sxx += A / 12.0 * xx;
     sxy += A / 12.0 * xy;
     syy += A / 12.0 * yy;
+    pa += A;
+    pcx += A * sx / 3.0;
+    pcy += A * sy / 3.0;
+  }
+  if (pa > 0.0) {
+    pcx /= pa;
+    pcy /= pa;
+    sxx -= pa * pcx * pcx;
+    sxy -= pa * pcx * pcy;
+    syy -= pa * pcy * pcy;
   }
   double dx = 1, dy = 0;
   bool tied = false;
