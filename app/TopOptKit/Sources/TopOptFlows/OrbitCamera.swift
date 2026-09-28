@@ -285,7 +285,15 @@ public struct OrbitCamera: Equatable {
     }
 
     /// View → clip space (right-handed, Metal [0,1] depth).
-    public func projectionMatrix(aspect: Float, near: Float = 0.01, far: Float = 10_000) -> simd_float4x4 {
+    /// (probe switch: `TOPOPT_FIXED_NEAR=1` restores the old fixed 0.01 mm near plane for A/B)
+    static let fixedNearForTests = ProcessInfo.processInfo.environment["TOPOPT_FIXED_NEAR"] == "1"
+    public func projectionMatrix(aspect: Float, near nearArg: Float? = nil, far: Float = 10_000) -> simd_float4x4 {
+        // ★★ THE NEAR PLANE FOLLOWS THE ORBIT (2026-09-27, his images 17–20: struts showing through
+        // the blue rim and the grey skin from a distance, clean close up). A fixed 0.01 mm near plane
+        // with a float depth buffer resolves depth to ~d²·6e-8/near — about 1 mm at 400 mm, coarser
+        // than the gap between a strut welded into the rim and the rim's own face. 1 % of the orbit
+        // distance (0.01–5 mm) resolves ~0.003 mm there; nothing is ever that close to the eye.
+        let near = nearArg ?? (Self.fixedNearForTests ? 0.01 : Swift.max(0.01, Swift.min(5, distance * 0.01)))
         let a = aspect > 0 ? aspect : 1
         let ys = 1 / tan(fovY * 0.5)
         let xs = ys / a

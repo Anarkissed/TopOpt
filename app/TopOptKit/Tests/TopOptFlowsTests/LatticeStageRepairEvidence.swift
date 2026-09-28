@@ -55,6 +55,20 @@ import TopOptKit
 // `LatticeRegionDrawer.depthDivergence` makes "they cannot diverge" a checkable
 // property instead of a convention.
 
+/// ★★ THE OLD APP LAW, WRITTEN DOWN (2026-08-20). These tests reconstructed the
+/// number his card used to show by CALLING `LatticeType.strutRadiusMM` — and that
+/// call now returns CORE's measured diameter, because closing this very
+/// divergence was the point. Reconstructing history from live code meant the
+/// evidence quietly stopped reproducing the history the moment the history was
+/// fixed, and three tests went red claiming the fix had broken them.
+///
+/// So the superseded law is pinned here as the constant it always was:
+/// `ρ = K·(r/L)²` with K = 48, i.e. `d = 2·L·√(ρ/K)`. It reproduces his 0.32 mm
+/// exactly, and it can never drift again, because nothing computes it any more.
+fileprivate func oldAppStrutDiameterMM(relativeDensity rho: Double, cellMM: Double) -> Double {
+    2 * cellMM * (rho / 48).squareRoot()
+}
+
 @MainActor
 final class LatticeDepthIsOneValueTests: XCTestCase {
 
@@ -375,7 +389,7 @@ final class LatticeAutoDensityIsDerivedTests: XCTestCase {
         // exactly what turned a printable strut into the badge's 2nd problem.
         let bounds = TopOptKit.latticeCellBounds(topology: "octet",
                                                  minExtrudableWidthMM: Self.w)
-        let appDia = 2 * LatticeType.octet.strutRadiusMM(
+        let appDia = oldAppStrutDiameterMM(
             relativeDensity: TopOptKit.latticeLimits(topology: "octet").rhoMin,
             cellMM: bounds.printabilityFloorMM)
         XCTAssertEqual(appDia, 0.32, accuracy: 5e-3)
@@ -580,8 +594,8 @@ final class LatticeStageRepairEvidence: XCTestCase {
         let oldCell = bounds.printabilityFloorMM          // LIGHT-end floor
         let oldCells = Self.hisDepthMM / oldCell
         let oldDensity = limits.rhoMin                     // the band floor
-        let oldStrut = 2 * LatticeType.octet.strutRadiusMM(
-            relativeDensity: oldDensity, cellMM: oldCell)  // the APP's own law
+        let oldStrut = oldAppStrutDiameterMM(
+            relativeDensity: oldDensity, cellMM: oldCell)  // the app's law AS IT WAS
         XCTAssertEqual(oldCell, 4.93, accuracy: 5e-3, "his card's 4.93 mm cell")
         XCTAssertEqual(oldCells, 0.81, accuracy: 5e-3, "his 0.8 cells across")
         XCTAssertEqual(oldDensity, 0.05047, accuracy: 1e-4, "his 5% IS band_rho_min")
@@ -714,8 +728,8 @@ final class LatticeStageRepairEvidence: XCTestCase {
         XCTAssertGreaterThanOrEqual(atNeeded.cellsPerMember, 5.0 - 1e-6)
         XCTAssertTrue(atNeeded.prints)
 
-        // ★ AND THE CARD'S STRUT IS THE APP'S OWN LAW, 1.4x OFF CORE'S.
-        let appDia = 2 * LatticeType.octet.strutRadiusMM(
+        // ★ AND THE CARD'S STRUT WAS THE APP'S OWN LAW, 1.4x OFF CORE'S.
+        let appDia = oldAppStrutDiameterMM(
             relativeDensity: limits.rhoMin, cellMM: bounds.printabilityFloorMM)
         let coreDerivedAtThatCell = TopOptKit.latticeRegionDerivation(
             topology: "octet",
@@ -730,6 +744,16 @@ final class LatticeStageRepairEvidence: XCTestCase {
         XCTAssertEqual(w / appDia, 1.4, accuracy: 0.02,
                        "the 1.4x that memory app-octet-strut-law-differs-from-core "
                        + "recorded, reaching a verdict the user acts on")
+        // ★★ AND IT IS CLOSED. The live app law, at the same density and cell, is
+        // now core's own number — so the gap above is history and this is the guard
+        // that keeps it history.
+        let liveDia = 2 * LatticeType.octet.strutRadiusMM(
+            relativeDensity: limits.rhoMin, cellMM: bounds.printabilityFloorMM)
+        XCTAssertEqual(liveDia, w, accuracy: 1e-3,
+                       "★ the app must now answer exactly what core answers")
+        XCTAssertNotEqual(liveDia, appDia, accuracy: 0.05,
+                          "positive control: the old law and the new one differ, so "
+                          + "this is not comparing a number with itself")
 
         let report = """
         HIS CARD vs CORE — 2026-08-17-lattice-stage-repair, before any fix
