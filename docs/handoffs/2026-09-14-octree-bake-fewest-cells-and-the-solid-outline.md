@@ -1825,3 +1825,37 @@ tracked to the faces that, when clicked, asks whether it should grade to solid o
   Depth ends → solid: rim samples 13 → 507. His answers ("keep them not solid; both of them"):
   the depth ends already default to nothing; **the floor (Face 20) still defaults to grade to
   solid — he sets it with its chip.** Keys: "face:<raw id>", "cap:<selectable key>".
+
+## 2026-09-27 23:59 — CHIPS ONLY WHERE NO RULE DECIDES (installed 23:59:36; his verdict pending)
+
+His ruling on the 73-chip build: "Only the faces that are *questionable* and in between all the
+rules, should get the chip. The exact opposing face of face15 should be latticed through because I
+pushed the face-prism all the way through … The two questions you had should be the only places with
+chips … Faces that don't fit any rules = chip?" His project had stored `{"face:21": false}`.
+
+**The rule** (`LatticeBandFields`, 5cf8b72b → 490cf4b3):
+- decided, never a chip: faces across a prism (direct opposite open, behind another prism solid,
+  stopped short = skin) and faces alongside (a prism's non-seam side or its MOUTH within c + 2h of
+  the rim's mid-depth probe; depth = MAX over the prisms holding the probe, flare-signed, signed expand);
+- a chip: faces the pocket crosses deeper than that, over ≥ half their reached area; edge-connected
+  ones are ONE place; a place < 1 cm² keeps the rule. Depth ends inside material: touching ones are
+  one place;
+- defaults NOT solid (his R3 + "keep them not solid; both of them"); `LATTICE_BAND_QUESTION_SOLID=1`
+  and `LATTICE_BAND_CAP_RIM=1` flip them; `LATTICE_BAND_HONOR_ALL=1` = the ignored-choice control;
+- choices stored per member ("face:<raw>", "cap:<selectable>"), first member with a value decides
+  (`LatticeBandDecision.memberKeys` / `storedChoice`, shared by the band and the chip layout); a tap
+  writes every member.
+
+**His stand and his project: exactly 2 chips** — "Faces 19, 20, 21" (floor, end ramp, leg-foot fillet;
+pinned on the fillet) and "Depth ends · faces 2, 15, 23". His project now renders pixel-identical to
+the floor + fillet set to lattice through by hand (0 of 810,000 px differ, 8 frames).
+Checks: floor band default 0, graded to solid through face 21's key 6,413; face 16's choice ignored
+0 vs honoured control 3,535; depth ends 0 → 484 rim samples set to rim. Band suites 40/40. Floor-band
+and ledge checks now run with `LATTICE_BAND_QUESTION_SOLID=1`.
+Visible consequence of "lattice through" on the floor: face 2's prism overshoots wall A by only
+1.4 mm, so that strip opens as a thin slot in the floor's skin (face 15's 2.5 mm strip shows lattice).
+
+Review (wf_cb38459c-cee, 20 agents): 8 confirmed, all addressed in 490cf4b3 (place grouping, per-member
+storage, cap proximity grouping, flare sign, signed expand, face-on samples, default not solid).
+First fix attempt excluded seams without the mouth term: chamfers read 30–105 mm "inside" — caught
+by the chip audit in the DIAG line before commit.
