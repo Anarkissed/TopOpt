@@ -1067,7 +1067,7 @@ public enum LatticeBandFields {
                           s, r, rO, g, h, hf, fd.0, fd.1, fd.2, alongIdx.count, cBorder, cFoot, cNeigh, cUnmatched, cOverflow, tapers.count, sideTiles, capTiles,
                           skinVox, rimVox, gradeVox, signDisagree, rimTexels,
                           behindAnother.sorted().map { "f\($0)" }.joined(separator: ",") as NSString,
-                          decisions.count, decisions.filter { params.overrides[$0.key] != nil }.map { "\($0.key)=\($0.solid ? "solid" : "open")" }.joined(separator: ",") as NSString,
+                          decisions.count, decisions.filter { $0.storedChoice(in: params.overrides) != nil }.map { "\($0.key)=\($0.solid ? "solid" : "open")" }.joined(separator: ",") as NSString,
                           ignoredChoices.sorted().joined(separator: ",") as NSString, chipAudit as NSString,
                           timings.sorted { $0.key < $1.key }.map { "\($0.key)=\(Int($0.value))" }.joined(separator: ","), faceList)
         _ = t0
