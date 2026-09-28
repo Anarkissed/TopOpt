@@ -179,64 +179,75 @@ final class LatticeBandHisProjectChecks: XCTestCase {
         return between
     }
 
-    /// ★ THE CHIPS (his 2026-09-27: "little chips tracked to the faces that, when clicked, asks
-    /// whether it should grade to solid or not"; his two answers: the channel floor and the
-    /// leg-foot cap "not solid"). The band lists the floor and the depth ends; a choice flips
-    /// what is drawn and the chip stays listed either way.
-    func testChipsListTheFloorAndTheDepthEndsAndAChoiceFlipsThem() throws {
+    /// Rim samples inside wall B just behind its inner face (f16, latticed through: none by rule).
+    static func wallBInnerRim(_ fine: LatticeBandFine, _ bounds: MeshBounds) -> Int {
+        var hits = 0
+        for x in stride(from: 50.0, through: 150.0, by: 1) { for z in stride(from: 26.0, through: 30.0, by: 1) {
+            for y in stride(from: -5.6, through: -2.0, by: 0.4) where rimF(fine, bounds, SIMD3(x, y, z)) <= 0 { hits += 1 }
+        } }
+        return hits
+    }
+
+    /// ★ THE CHIPS, ONLY WHERE NO RULE DECIDES (his 2026-09-27, shown 73: "Only the faces that are
+    /// *questionable* and in between all the rules, should get the chip … The two questions you had
+    /// should be the only places with chips … Faces that don't fit any rules = chip?"). His two
+    /// questions: the channel floor, and the depth end at the leg's foot (all three prisms end in the
+    /// one block of base under the floor: one chip). A choice flips what is drawn there; a choice on
+    /// a face the rules decide (face 16, "I pushed the face-prism all the way through") is ignored.
+    func testChipsOnlyWhereNoRuleDecides() throws {
         let (mesh, rule) = try Self.scene()
         let ds = rule.bandDecisions
-        for d in ds.sorted(by: { $0.areaMM2 > $1.areaMM2 }) {
+        for d in ds {
             print(String(format: "CHIP %@ %@ · %@ · area %.0f mm² · anchor (%.1f, %.1f, %.1f) n (%.2f, %.2f, %.2f) · default %@ · now %@",
                          d.key, d.kind.rawValue, d.label, d.areaMM2, d.anchor.x, d.anchor.y, d.anchor.z, d.normal.x, d.normal.y, d.normal.z,
                          d.defaultSolid ? "solid" : "open", d.solid ? "solid" : "open"))
         }
-        let floor = try XCTUnwrap(ds.first { $0.key == "face:20" }, "no chip on the channel floor")
+        let faces = ds.filter { $0.kind == .face }, caps = ds.filter { $0.kind == .cap }
+        // the floor (its end ramp, face 19, follows it) and the fillet at the leg's foot
+        XCTAssertEqual(Set(faces.map(\.key)), ["face:20", "face:21"], "face chips other than the floor and the leg-foot fillet")
+        XCTAssertEqual(caps.count, 1, "the three depth ends in the base are one place")
+        let floor = try XCTUnwrap(faces.first { $0.key == "face:20" })
         XCTAssertTrue(floor.defaultSolid)
-        XCTAssertGreaterThan(floor.areaMM2, 20)
-        // the pin lies ON the floor (z 21.8) between the walls
-        XCTAssertEqual(Double(floor.anchor.z), 21.8, accuracy: 0.1)
-        let caps = ds.filter { $0.kind == .cap }
-        XCTAssertFalse(caps.isEmpty, "no depth-end chip")
-        XCTAssertTrue(caps.allSatisfy { !$0.defaultSolid && !$0.solid })
-        // every anchor is on the part's surface (face) or inside its material (cap)
-        for d in ds {
-            let m = rule.partMaterialSDF.sampleLinear(SIMD3<Double>(d.anchor))
-            if d.kind == .face { XCTAssertLessThan(abs(m), 1.0, "\(d.key) pinned off the surface (\(m))") }
-        }
+        XCTAssertEqual(Double(floor.anchor.z), 21.8, accuracy: 0.1, "the floor's chip is not on the floor")
+        XCTAssertLessThan(abs(rule.partMaterialSDF.sampleLinear(SIMD3<Double>(floor.anchor))), 1.0)
+        let cap = try XCTUnwrap(caps.first)
+        for k in [2, 15, 23] { XCTAssertTrue(cap.key.hasSuffix(":\(k)") || cap.key.contains(":\(k)+"), "face \(k)'s depth end is not in the cap chip") }
+        XCTAssertFalse(cap.defaultSolid); XCTAssertFalse(cap.solid)
         let ruleFloor = Self.floorBandSamples(try XCTUnwrap(rule.bandFine))
+        let ruleWallB = Self.wallBInnerRim(try XCTUnwrap(rule.bandFine), mesh.bounds)
 
-        // the rim a solid cap draws: on the lattice side of the cap plane, within the side rim
-        func capRimHits(_ sc: LatticeSDFScene, _ cs: [LatticeBandDecision]) throws -> Int {
+        // the rim a solid cap draws, in a ±5 mm box round the cap chip's pin (a cap chip has no
+        // facing: it is seen through the lattice from any side)
+        XCTAssertEqual(cap.normal, .zero)
+        func capRimHits(_ sc: LatticeSDFScene) throws -> Int {
             let f = try XCTUnwrap(sc.bandFine)
             var hits = 0
-            for d in cs { for du in stride(from: -6.0, through: 6.0, by: 1.0) { for dv in stride(from: -6.0, through: 6.0, by: 1.0) {
-                let n = SIMD3<Double>(d.normal)
-                let u = simd_normalize(simd_cross(n, abs(n.z) < 0.9 ? SIMD3(0, 0, 1) : SIMD3(1, 0, 0))), v = simd_cross(n, u)
-                let p = SIMD3<Double>(d.anchor) + n * (0.5 * sc.organicSolidRimMM) + u * du + v * dv
-                if Self.rimF(f, mesh.bounds, p) <= 0 { hits += 1 }
+            for dx in stride(from: -5.0, through: 5.0, by: 1.0) { for dy in stride(from: -5.0, through: 5.0, by: 1.0) { for dz in stride(from: -5.0, through: 5.0, by: 1.0) {
+                if Self.rimF(f, mesh.bounds, SIMD3<Double>(cap.anchor) + SIMD3(dx, dy, dz)) <= 0 { hits += 1 }
             } } }
             return hits
         }
-        let ruleCapHits = try capRimHits(rule, caps)
+        let ruleCapHits = try capRimHits(rule)
 
-        // his answer for the floor: latticed through
-        let (_, open20) = try Self.scene(["STAND_BAND_OVERRIDES": "face:20=0"])
-        let openFloor = Self.floorBandSamples(try XCTUnwrap(open20.bandFine))
-        let f20 = try XCTUnwrap(open20.bandDecisions.first { $0.key == "face:20" })
-        XCTAssertEqual(Set(open20.bandDecisions.map(\.key)), Set(ds.map(\.key)), "a choice changed which chips exist")
-        XCTAssertFalse(f20.solid); XCTAssertTrue(f20.defaultSolid)
-        // the positive control for the caps: every depth end set SOLID
-        let (_, capsOn) = try Self.scene(["STAND_BAND_OVERRIDES": caps.map { "\($0.key)=1" }.joined(separator: ",")])
-        let onCapHits = try capRimHits(capsOn, caps)
-        XCTAssertTrue(capsOn.bandDecisions.filter { $0.kind == .cap }.allSatisfy(\.solid))
-        print("CHIPS rule: \(ds.count) chips (\(ds.filter { $0.areaMM2 >= LatticeBandChipLayout.minAreaMM2 }.count) at or above the chip floor) · floor band samples rule \(ruleFloor) → lattice through \(openFloor) · cap-rim samples rule \(ruleCapHits) → caps solid \(onCapHits)")
+        // his answers: the floor latticed through — and a choice on face 16, which the rules decide
+        let (_, chosen) = try Self.scene(["STAND_BAND_OVERRIDES": "face:20=0,face:16=1"])
+        let chosenFloor = Self.floorBandSamples(try XCTUnwrap(chosen.bandFine))
+        let chosenWallB = Self.wallBInnerRim(try XCTUnwrap(chosen.bandFine), mesh.bounds)
+        XCTAssertEqual(Set(chosen.bandDecisions.map(\.key)), Set(ds.map(\.key)), "a choice changed which chips exist")
+        XCTAssertEqual(chosen.bandDecisions.first { $0.key == "face:20" }?.solid, false)
+        // the control: honour every choice — face 16 then takes a rim
+        let (_, honorAll) = try Self.scene(["STAND_BAND_OVERRIDES": "face:20=0,face:16=1", "LATTICE_BAND_HONOR_ALL": "1"])
+        let allWallB = Self.wallBInnerRim(try XCTUnwrap(honorAll.bandFine), mesh.bounds)
+        // the positive control for the cap: set SOLID
+        let (_, capOn) = try Self.scene(["STAND_BAND_OVERRIDES": "\(cap.key)=1"])
+        let onCapHits = try capRimHits(capOn)
+        XCTAssertEqual(capOn.bandDecisions.first { $0.kind == .cap }?.solid, true)
+        print("CHIPS \(ds.count) (\(ds.map(\.key).joined(separator: ", "))) · floor band samples rule \(ruleFloor) → lattice through \(chosenFloor) · wall-B rim behind face 16: rule \(ruleWallB), face:16 solid ignored \(chosenWallB), honoured (control) \(allWallB) · cap-rim samples rule \(ruleCapHits) → solid \(onCapHits)")
         XCTAssertGreaterThan(ruleFloor, 0)
-        XCTAssertEqual(openFloor, 0, "the floor still carries a band after 'lattice through'")
-        // (the ±6 mm box round a pin reaches the floor's own rim at the top of the base: a few
-        // hits there are the floor, not a cap)
-        XCTAssertLessThan(ruleCapHits * 10, onCapHits, "a depth end is drawn solid by default")
-        XCTAssertGreaterThan(onCapHits, 100, "a depth end set solid drew no rim")
-        _ = mesh
+        XCTAssertEqual(chosenFloor, 0, "the floor still carries a band after 'lattice through'")
+        XCTAssertEqual(chosenWallB, ruleWallB, "a choice on a face the rules decide changed the band")
+        XCTAssertGreaterThan(allWallB, ruleWallB + 50, "control: honouring face 16's choice drew no rim — the check measures nothing")
+        XCTAssertLessThan(ruleCapHits * 10, onCapHits, "the depth end is drawn solid by default")
+        XCTAssertGreaterThan(onCapHits, 150, "the depth end set solid drew no rim")
     }
 }

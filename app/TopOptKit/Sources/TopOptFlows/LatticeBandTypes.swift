@@ -87,6 +87,9 @@ public struct LatticeBandOptions: Sendable, Equatable {
     /// `LATTICE_BAND_RIM_IN_POCKET=1`: the rim only inside the pocket — its outer face then follows
     /// the prism's outline where a chamfer separates it from the alongside face (control)
     public var rimInPocketOnly = false
+    /// `LATTICE_BAND_HONOR_ALL=1`: a stored choice is honoured on ANY face, not only where a chip is
+    /// shown (control for "the rules decide everywhere else")
+    public var honorAllChoices = false
 
     public init() {}
 
@@ -106,6 +109,7 @@ public struct LatticeBandOptions: Sendable, Equatable {
         o.noRimFoot = on("LATTICE_BAND_NO_RIMFOOT")
         o.includeSelected = on("LATTICE_BAND_INCLUDE_SELECTED")
         o.rimInPocketOnly = on("LATTICE_BAND_RIM_IN_POCKET")
+        o.honorAllChoices = on("LATTICE_BAND_HONOR_ALL")
         return o
     }
 }
@@ -114,13 +118,17 @@ public struct LatticeBandOptions: Sendable, Equatable {
 /// where when the user is in Lattice Only view, there are little chips tracked to the faces that,
 /// when clicked, asks whether it should grade to solid or not").
 ///
-/// Two kinds:
+/// ONLY WHERE NO RULE DECIDES (his 2026-09-27: "Only the faces that are *questionable* and in
+/// between all the rules, should get the chip"): a face a prism crosses far from all of its sides,
+/// and the depth ends inside material (one chip per block of solid they stop in). Everywhere else
+/// the rules decide and a stored choice is ignored. Two kinds:
 ///   face — an unselected CAD face the lattice reaches. `solid` = skin + rim + green under it
 ///          ("grade to solid"); not solid = latticed through (open).
 ///   cap  — a prism's depth end where it stops inside the part's material. `solid` = a rim facing
 ///          the solid; not solid = nothing (the lattice is cut on the cap plane).
 /// `defaultSolid` is what the rules decide; `solid` is what this bake used (the override if the
-/// user set one). Keys: "face:<rawFaceID>" and "cap:<selectableKey>". The overrides live in
+/// user set one). Keys: "face:<rawFaceID>" and "cap:<key>+<key>…" (the selectable keys of every prism
+/// whose depth end is in that block, sorted). The overrides live in
 /// `LatticeSettings.bandTreatments` ([key: solid]) and reach the scene as `bandOverrides`.
 public struct LatticeBandDecision: Sendable, Equatable, Identifiable {
     public enum Kind: String, Sendable, Codable { case face, cap }
@@ -130,7 +138,8 @@ public struct LatticeBandDecision: Sendable, Equatable, Identifiable {
     public var label: String
     /// Model-space point on the surface (face) or the cap plane (cap) where the chip is pinned.
     public var anchor: SIMD3<Float>
-    /// Outward unit normal there (for the chip's offset off the surface and back-facing tests).
+    /// Outward unit normal there (for the chip's offset off the surface and back-facing tests);
+    /// ZERO for a cap — it lies inside the part and is seen through the lattice from any side.
     public var normal: SIMD3<Float>
     /// The area involved, mm² (to size/sort chips; tiny faces can be hidden by the UI).
     public var areaMM2: Float
