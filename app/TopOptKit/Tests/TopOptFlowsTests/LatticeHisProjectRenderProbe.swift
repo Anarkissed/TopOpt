@@ -47,10 +47,20 @@ final class LatticeHisProjectRenderProbe: XCTestCase {
         o.regionIDs = plan.regionIDs
         o.syntheticRegions = plan.regions
         o.deadRegionIDs = Set(plan.regions.map { Int($0.regionID) })
+        // ★ his chip choices, as the app hands them (`lat.bandTreatments`), plus HIS_BAND_OVERRIDES
+        // = "face:20=0,cap:<key>=1" (1 = solid) on top
+        var overrides = lat.bandTreatments
+        for item in (ProcessInfo.processInfo.environment["HIS_BAND_OVERRIDES"] ?? "").split(separator: ",") {
+            let kv = item.split(separator: "=")
+            if kv.count == 2 { overrides[String(kv[0])] = kv[1] == "1" }
+        }
         let scene = LatticeSDFScene(mesh: mesh, field: nil, latticeID: lat.topologyID, stageMode: .aesthetic,
                                     algorithm: "organic", organic: o, regions: regions, whenEmpty: .latticeNothing,
-                                    wallDepthSteps: steps, beadMM: pm.printParams.strutLineWidthMM)
-        print("HIS regions \(regions.count) · capsules \(scene.organicCapsules.count)")
+                                    wallDepthSteps: steps, bandOverrides: overrides, beadMM: pm.printParams.strutLineWidthMM)
+        print("HIS regions \(regions.count) · capsules \(scene.organicCapsules.count) · chips \(scene.bandDecisions.count) · choices \(overrides)")
+        for d in scene.bandDecisions where d.kind == .cap || d.key == "face:20" {
+            print("HIS chip \(d.key) \(d.label) default \(d.defaultSolid ? "solid" : "open") now \(d.solid ? "solid" : "open")")
+        }
 
         guard let mr = MeshRenderer(device: device, sampleCount: 4) else { throw XCTSkip("renderer") }
         try XCTSkipUnless(mr.latticePipelinesDidBuild)

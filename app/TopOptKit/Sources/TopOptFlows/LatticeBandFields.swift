@@ -44,6 +44,8 @@ public enum LatticeBandFields {
         public var classByFace: [Int: FaceClass]
         public var diag: String
         public var counts: [String: Int]
+        /// ★ every choice the band made that the user may override (the lattice-only chips)
+        public var decisions: [LatticeBandDecision] = []
     }
 
     public struct Params {
@@ -53,10 +55,13 @@ public enum LatticeBandFields {
         public var gradeBandMM: Double     // g
         public var finishSkinMM: Double    // the covered finish's skin (0 unless `covered`)
         public var options: LatticeBandOptions
+        /// ★ the user's chip choices, [`LatticeBandDecision.key`: solid] — empty ⇒ the rules
+        public var overrides: [String: Bool]
         public init(skinMM: Double, rimMM: Double, sideRimMM: Double, gradeBandMM: Double,
-                    finishSkinMM: Double, options: LatticeBandOptions) {
+                    finishSkinMM: Double, options: LatticeBandOptions, overrides: [String: Bool] = [:]) {
             self.skinMM = skinMM; self.rimMM = rimMM; self.sideRimMM = sideRimMM
             self.gradeBandMM = gradeBandMM; self.finishSkinMM = finishSkinMM; self.options = options
+            self.overrides = overrides
         }
     }
 
@@ -249,12 +254,23 @@ public enum LatticeBandFields {
             classByFace[f] = open ? .open : .alongside
         }
         counts["behindAnotherPrism"] = behindAnother.count
+        // ★★ THE USER'S CHOICE WINS (his 2026-09-27 chips: "asks whether it should grade to solid
+        // or not"). `ruleClassByFace` keeps what the rules decided — the chip's default.
+        let ruleClassByFace = classByFace
+        var overriddenFaces: [Int] = []
+        for (key, solidChoice) in params.overrides where key.hasPrefix("face:") {
+            guard let f = Int(key.dropFirst(5)), classByFace[f] != nil else { continue }
+            let want: FaceClass = solidChoice ? .alongside : .open
+            if classByFace[f] != want { overriddenFaces.append(f) }
+            classByFace[f] = want
+        }
+        counts["overriddenFaces"] = overriddenFaces.count
         var cls = [FaceClass](repeating: .none, count: triCount)
         for t in 0..<triCount {
             let f = fid[t]
             if f < 0 { cls[t] = .none; continue }
             if selectedRaw.contains(f) && !opt.includeSelected { cls[t] = .selected; continue }
-            if opt.perTriangle { cls[t] = triAcross[t] ? .open : .alongside; continue }
+            if opt.perTriangle && params.overrides["face:\(f)"] == nil { cls[t] = triAcross[t] ? .open : .alongside; continue }
             cls[t] = classByFace[f] ?? .alongside
         }
         lap("classify", &tl)
@@ -466,6 +482,50 @@ public enum LatticeBandFields {
         let qGrid = LatticeVoxelGrid(nx: nx, ny: ny, nz: nz, origin: solid.origin, spacing: solid.spacing, values: qC)
         lap("pocket", &tl)
 
+        // ── ★★ THE FACE CHIPS (his 2026-09-27: "little chips tracked to the faces that, when
+        // clicked, asks whether it should grade to solid or not"). One per unselected face the
+        // pocket reaches BENEATH — the rim's mid-depth (s + r/2 under the surface) lies in the
+        // pocket — measured on the pocket alone, so a face keeps its chip whichever way the user
+        // sets it. Sampled over each triangle (a coarse probe at one centroid misses the thin
+        // strips a big flat face is reached in); pinned at the reached sample nearest the reached
+        // area's centroid, so a chip always sits where the choice shows.
+        var decisions: [LatticeBandDecision] = []
+        do {
+            let probeDepth = s + 0.5 * r
+            struct FaceAcc { var area = 0.0; var sum = SIMD3<Double>(0, 0, 0); var pts: [(SIMD3<Double>, Int)] = [] }
+            var acc: [Int: FaceAcc] = [:]
+            for t in 0..<triCount where area[t] > 1e-12 {
+                let f = fid[t]
+                guard f >= 0, classByFace[f] != nil else { continue }
+                let lmax = Swift.max(simd_distance(A[t], B[t]), Swift.max(simd_distance(B[t], C[t]), simd_distance(C[t], A[t])))
+                let m = Swift.max(1, Swift.min(64, Int((lmax / h).rounded(.up))))
+                let w = area[t] / Double(m * m)
+                let md = Double(m)
+                func probe(_ u: Double, _ v: Double) {
+                    let x = A[t] + (B[t] - A[t]) * (u / md) + (C[t] - A[t]) * (v / md)
+                    guard qGrid.sampleLinear(x - N[t] * probeDepth) < 0 else { return }
+                    acc[f, default: FaceAcc()].area += w
+                    acc[f]!.sum += x * w
+                    acc[f]!.pts.append((x, t))
+                }
+                for i in 0..<m { for j in 0..<(m - i) {
+                    probe(Double(i) + 1.0 / 3, Double(j) + 1.0 / 3)
+                    if i + j < m - 1 { probe(Double(i) + 2.0 / 3, Double(j) + 2.0 / 3) }
+                } }
+            }
+            for f in acc.keys.sorted() {
+                let a = acc[f]!
+                guard a.area > 0, let cls0 = ruleClassByFace[f], let clsNow = classByFace[f] else { continue }
+                let centre = a.sum / a.area
+                let pin = a.pts.min { simd_distance_squared($0.0, centre) < simd_distance_squared($1.0, centre) }!
+                decisions.append(LatticeBandDecision(key: "face:\(f)", kind: .face, label: "Face \(f)",
+                                                     anchor: SIMD3<Float>(pin.0), normal: SIMD3<Float>(N[pin.1]),
+                                                     areaMM2: Float(a.area), defaultSolid: cls0 == .alongside,
+                                                     solid: clsNow == .alongside))
+            }
+        }
+        lap("faceChips", &tl)
+
         // ── the band scatter over a grid
         struct GridSpec { var origin: SIMD3<Double>; var h: Double; var nx: Int; var ny: Int; var nz: Int }
         struct BandOut { var br: [Float]; var delta: [Float]; var grade: [Float]; var taperE: [Float]; var nearTri: [Int32]; var nearFeat: [UInt8] }
@@ -653,8 +713,14 @@ public enum LatticeBandFields {
         }
         var tiles: [Piece] = []
         var sideTiles = 0, capTiles = 0
+        // ★ the depth caps, per selectable (a curved wall's facets share one key): computed
+        // whenever there is a side rim, KEPT only where the cap is solid — the user's choice on
+        // its chip, else `LATTICE_BAND_CAP_RIM` (off: nothing, the lattice is cut on the cap)
+        struct CapAcc { var tiles: [Piece] = []; var centres: [SIMD3<Double>] = []; var normal = SIMD3<Double>(0, 0, 0); var faceIDs: [Int] = [] }
+        var capAcc: [String: CapAcc] = [:]
+        var capOrder: [String] = []
         if rO > 0 {
-            for rg in includeFaces where !rg.outlineLoops.isEmpty && rg.depthMM > 0 {
+            for (ri, rg) in includeFaces.enumerated() where !rg.outlineLoops.isEmpty && rg.depthMM > 0 {
                 let n = LatticeRegionMask.unit(rg.normal)
                 let (u, v) = LatticeRegionMask.basis(n)
                 func to3(_ q: SIMD2<Double>, _ d: Double) -> SIMD3<Double> { rg.origin + u * q.x + v * q.y + n * d }
@@ -694,7 +760,11 @@ public enum LatticeBandFields {
                         }
                     }
                 }
-                if opt.capRim {
+                do {
+                    let capKey = "cap:" + (rg.selectableKey.flatMap { $0.isEmpty ? nil : $0 } ?? "r\(ri)")
+                    if capAcc[capKey] == nil { capAcc[capKey] = CapAcc(); capOrder.append(capKey) }
+                    capAcc[capKey]!.normal += -n
+                    if let fidR = rg.faceID ?? rg.rawFaceID.map({ Int($0) }) { capAcc[capKey]!.faceIDs.append(fidR) }
                     // the depth cap: 2 mm tiles over the grown polygon at the prism's full depth
                     let pts = rg.outlineLoops.flatMap { $0 }
                     var lo2 = SIMD2<Double>(repeating: 1e9), hi2 = SIMD2<Double>(repeating: -1e9)
@@ -709,17 +779,31 @@ public enum LatticeBandFields {
                             if sd <= rg.inPlaneOffsetMM, backed(to3(mid, D + 1.5 * h)) {
                                 let a0 = to3(SIMD2(x, y), D), b0 = to3(SIMD2(x + 2, y), D), b1 = to3(SIMD2(x + 2, y + 2), D), a1 = to3(SIMD2(x, y + 2), D)
                                 for (p, q, w) in [(a0, b0, b1), (a0, b1, a1)] {
-                                    tiles.append(Piece(a: p, b: q, c: w, planes: [], width: rO, isAlongside: false,
+                                    capAcc[capKey]!.tiles.append(Piece(a: p, b: q, c: w, planes: [], width: rO, isAlongside: false,
                                                        signVec: [], lo: simd_min(p, simd_min(q, w)), hi: simd_max(p, simd_max(q, w))))
                                 }
-                                capTiles += 1
+                                capAcc[capKey]!.centres.append(to3(mid, D))
                             }
                             x += 2 }
                         y += 2 }
                 }
             }
         }
+        for key in capOrder {
+            let a = capAcc[key]!
+            guard !a.centres.isEmpty else { continue }
+            let chosen = params.overrides[key] ?? opt.capRim
+            if chosen { tiles.append(contentsOf: a.tiles); capTiles += a.centres.count }
+            let centre = a.centres.reduce(SIMD3<Double>(0, 0, 0), +) / Double(a.centres.count)
+            let pin = a.centres.min { simd_distance_squared($0, centre) < simd_distance_squared($1, centre) }!
+            let nOut = unitOr(a.normal, SIMD3(0, 0, 1))
+            let name = a.faceIDs.min().map { "Face \($0) depth end" } ?? "Depth end"
+            decisions.append(LatticeBandDecision(key: key, kind: .cap, label: name, anchor: SIMD3<Float>(pin),
+                                                 normal: SIMD3<Float>(nOut), areaMM2: Float(4 * a.centres.count),
+                                                 defaultSolid: opt.capRim, solid: chosen))
+        }
         counts["sideTiles"] = sideTiles; counts["capTiles"] = capTiles
+        counts["decisions"] = decisions.count
         if !tiles.isEmpty {
             let t = scatter(GC, reach: reachC, wantGrade: true, pcs: tiles)
             for e in 0..<bandC.br.count { bandC.br[e] = Swift.min(bandC.br[e], t.br[e]); bandC.grade[e] = Swift.min(bandC.grade[e], t.grade[e]) }
@@ -832,15 +916,16 @@ public enum LatticeBandFields {
             let v = classByFace[f]!
             return "f\(f)=\(v == .open ? "O" : v == .alongside ? "A" : v == .selected ? "S" : "N")"
         }.joined(separator: " ")
-        let diag = String(format: "DIAG band v1: skin %.2f rim %.2f side-rim %.2f band %.1f mm · h %.3f fine %.3f (%d×%d×%d) · alongside tris %d, border edges %d (footprint %d, neighbour %d), unmatched %d, overflow %d, taper segs %d · side tiles %d, cap tiles %d · voxels skin %d rim %d grade %d · sign disagreements %d · fine rim texels %d · behind another prism %@ · ms %@ · faces %@",
+        let diag = String(format: "DIAG band v1: skin %.2f rim %.2f side-rim %.2f band %.1f mm · h %.3f fine %.3f (%d×%d×%d) · alongside tris %d, border edges %d (footprint %d, neighbour %d), unmatched %d, overflow %d, taper segs %d · side tiles %d, cap tiles %d · voxels skin %d rim %d grade %d · sign disagreements %d · fine rim texels %d · behind another prism %@ · chips %d (user-set %@) · ms %@ · faces %@",
                           s, r, rO, g, h, hf, fd.0, fd.1, fd.2, alongIdx.count, cBorder, cFoot, cNeigh, cUnmatched, cOverflow, tapers.count, sideTiles, capTiles,
                           skinVox, rimVox, gradeVox, signDisagree, rimTexels,
                           behindAnother.sorted().map { "f\($0)" }.joined(separator: ",") as NSString,
+                          decisions.count, decisions.filter { params.overrides[$0.key] != nil }.map { "\($0.key)=\($0.solid ? "solid" : "open")" }.joined(separator: ",") as NSString,
                           timings.sorted { $0.key < $1.key }.map { "\($0.key)=\(Int($0.value))" }.joined(separator: ","), faceList)
         _ = t0
         return Result(qC: qGrid, carvedC: grid(carvedC), gradeC: grid(bandC.grade), skinC: grid(skinC), rimC: grid(bandC.br),
                       materialC: grid(matC), latticedC: grid(latticedC), fine: fine, classByFace: classByFace,
-                      diag: diag, counts: counts)
+                      diag: diag, counts: counts, decisions: decisions)
     }
 }
 

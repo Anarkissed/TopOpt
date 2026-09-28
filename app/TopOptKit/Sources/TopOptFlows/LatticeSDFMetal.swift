@@ -759,7 +759,8 @@ public struct LatticeSDFScene {
             let band = (organic?.shapeBandMM ?? 0) > 0 ? organic!.shapeBandMM : 10
             return LatticeBandFields.build(mesh: mesh, regions: regions, selectedRaw: selectedRaw, solid: solid,
                                            params: .init(skinMM: skin, rimMM: rim, sideRimMM: organicRim,
-                                                         gradeBandMM: band, finishSkinMM: skinMM, options: bandOpts))
+                                                         gradeBandMM: band, finishSkinMM: skinMM, options: bandOpts,
+                                                         overrides: bandOverrides))
         }() : nil
         let latticedSDF = bandRes?.latticedC ?? LatticePreviewOccupancy.signedDistance(
             positions: mesh.positions, indices: mesh.indices, like: occupancy)
@@ -795,6 +796,7 @@ public struct LatticeSDFScene {
             self.bandFine = band.fine
             self.bandRimCoarse = band.rimC
             self.bandOptions = bandOpts
+            self.bandDecisions = band.decisions
             let voxelHere = Double(Swift.max(solid.spacing.x, Swift.max(solid.spacing.y, solid.spacing.z)))
             self.unselectedSkinMM = LatticeSDFRenderer.outlineBeamMM(lineWidthMM: beadMM > 0 ? beadMM : (organic?.minExtrudableWidthMM ?? 0.45), voxelMM: voxelHere)
             self.unselectedRimMM = Swift.max(self.unselectedSkinMM, self.organicSolidRimMM)

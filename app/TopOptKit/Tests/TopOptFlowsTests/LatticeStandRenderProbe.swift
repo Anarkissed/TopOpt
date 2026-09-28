@@ -13,7 +13,8 @@ import TopOptKit
 final class LatticeStandRenderProbe: XCTestCase {
     static func stand() throws -> (ViewerMesh, LatticeSDFScene) {
         let mesh = try LatticePreviewConfettiTests.hisMesh()
-        let gid = UUID()
+        // a FIXED group id: the chips' cap keys carry it, and a check builds the stand twice
+        let gid = UUID(uuidString: "15AC41DF-951D-4355-A677-FCBF7F63703F")!
         let group = SelectionGroup(id: gid, name: "C", colorIndex: 0, faces: [15, 2, 23], regionIDs: [])
         let key23 = LatticeSelectableRef.face(group: gid, face: 23).key
         let dim = Int(ProcessInfo.processInfo.environment["STAND_DIM"] ?? "") ?? 128
@@ -69,8 +70,15 @@ final class LatticeStandRenderProbe: XCTestCase {
         }
         let spans = OrganicSpanIndex(gridOrigin: mesh.bounds.min, gridSpacing: 2, gridDims: SIMD3<Int32>(4, 4, 4), segments: segs)
         let injectSpan = ProcessInfo.processInfo.environment["STAND_ONE_SPAN"] == "1"
+        // ★ the chips' choices: STAND_BAND_OVERRIDES="face:20=0,cap:<key>=1" (1 = solid)
+        var overrides: [String: Bool] = [:]
+        for item in (ProcessInfo.processInfo.environment["STAND_BAND_OVERRIDES"] ?? "").split(separator: ",") {
+            let kv = item.split(separator: "=")
+            if kv.count == 2 { overrides[String(kv[0])] = kv[1] == "1" }
+        }
         let scene = LatticeSDFScene(mesh: mesh, field: nil, latticeID: "octet", organicSpans: injectSpan ? spans : nil, stageMode: .aesthetic,
-                                    algorithm: "organic", organic: o, maxDim: dim, regions: regions, whenEmpty: .latticeNothing)
+                                    algorithm: "organic", organic: o, maxDim: dim, regions: regions, whenEmpty: .latticeNothing,
+                                    bandOverrides: overrides)
         print("RENDER scene capsules \(scene.organicCapsules.count)")
         return (mesh, scene)
     }
