@@ -5758,9 +5758,29 @@ LatticeVariantOutcome lattice_one_variant(
         // that cost 10 x 12 s on the M2 run. Run it only when structural intent or a
         // structural recommendation will read the answer.
         const bool want_cert = job.grading.intent == "structural" || recommend_mode == "structural";
-        if (!want_cert)
-          pred = "\"predicted\": {\"ran\": false, \"reason\": \"aesthetic intent: nothing reads a certificate\"}";
-        if (want_cert && !psegs.empty() && psegs.size() <= 600000) {
+        // ★ ONE DECISION, TESTED (organic_probe_certificate_skip). Each branch below
+        // states its OWN reason and no branch may overwrite another's -- see the
+        // helper for what that cost.
+        constexpr std::size_t kProbeSegmentCap = 600000;
+        const OrganicProbeSkip skip =
+            organic_probe_certificate_skip(want_cert, psegs.size(), kProbeSegmentCap);
+        switch (skip) {
+          case OrganicProbeSkip::AestheticIntent:
+            pred = "\"predicted\": {\"ran\": false, \"reason\": \"aesthetic intent: "
+                   "nothing reads a certificate\"}";
+            break;
+          case OrganicProbeSkip::NoSegments:
+            pred = "\"predicted\": {\"ran\": false, \"reason\": \"no segments\"}";
+            break;
+          case OrganicProbeSkip::SegmentCap:
+            pred = "\"predicted\": {\"ran\": false, \"reason\": \"" +
+                   std::to_string(psegs.size()) + " segments exceed the probe's " +
+                   std::to_string(kProbeSegmentCap) + " cap\"}";
+            break;
+          case OrganicProbeSkip::None:
+            break;   // the certificate runs below and writes its own
+        }
+        if (skip == OrganicProbeSkip::None) {
           const double t1 = wall_seconds();
           std::vector<char> hexm(solved_grid.voxel_count(), 0);
           for (std::size_t e = 0; e < solved_grid.voxel_count(); ++e)
@@ -5809,9 +5829,6 @@ LatticeVariantOutcome lattice_one_variant(
                        pc.margin_untagged, pc.stress_p99_untagged_mpa, pc.members_tagged, pc.tagged_p99_mpa,
                        pc.knockdown_used, pc.max_over_allowable, pc.max_over_allowable_distributed,
                        psegs.size(), wall_seconds() - t1);
-        } else if (!psegs.empty()) {
-          pred = "\"predicted\": {\"ran\": false, \"reason\": \"" + std::to_string(psegs.size()) +
-                 " segments exceed the probe's 600000 cap\"}";
         }
         bool ok_s = true, ok_a = true;
         std::string regs;
@@ -5881,20 +5898,37 @@ LatticeVariantOutcome lattice_one_variant(
         R.organic_recommend_ran = true;
         const OrganicRecommendation& RC = R.organic_recommendation;
         char rb[1200];
+        // ── ★ A MARGIN THAT WAS NEVER MEASURED IS null, NOT 0 (2026-09-29) ───────
+        // fit_margin / auto_margin default to 0.0 and were written unconditionally,
+        // so "margin": 0 meant three different things: certified at 0 (impossible),
+        // NO CERTIFICATE RAN (every aesthetic run), or no row found. #354's
+        // Recommended pills read it straight out as "· 0.00". The margin is now the
+        // JSON null where it was not measured, and `certified` states it positively
+        // beside it so no consumer has to infer from a sentinel.
+        char fmb[40] = "null", amb[40] = "null";
+        if (RC.fit_certified) std::snprintf(fmb, sizeof fmb, "%.6g", RC.fit_margin);
+        if (RC.auto_certified) std::snprintf(amb, sizeof amb, "%.6g", RC.auto_margin);
+        const char* fit_margin_json = fmb;
+        const char* auto_margin_json = amb;
         std::snprintf(rb, sizeof rb,
                       "{\"ran\": true, \"mode\": \"%s\", \"band_lo_mm\": %.6g, \"band_hi_mm\": %.6g, "
                       "\"collapsed\": %s, \"printability_floor_mm\": %.6g, \"resolution_floor_mm\": %.6g, "
                       "\"member_ceiling_mm\": %.6g, \"extent_ceiling_mm\": %.6g, \"look_cell_mm\": %.6g, "
                       "\"grade_ratio\": %.6g, \"look_cells_across\": %.6g, \"target_margin\": %.6g,\n"
-                      "    \"fit\": {\"found\": %s, \"cell_mm\": %.6g, \"margin\": %.6g, \"traced_mm\": %.6g, \"source\": \"%s\"},\n"
-                      "    \"auto\": {\"found\": %s, \"cell_min_mm\": %.6g, \"cell_max_mm\": %.6g, \"margin\": %.6g, "
+                      "    \"fit\": {\"found\": %s, \"cell_mm\": %.6g, \"certified\": %s, "
+                      "\"margin\": %s, \"traced_mm\": %.6g, \"source\": \"%s\"},\n"
+                      "    \"auto\": {\"found\": %s, \"cell_min_mm\": %.6g, \"cell_max_mm\": %.6g, "
+                      "\"certified\": %s, \"margin\": %s, "
                       "\"traced_mm\": %.6g, \"source\": \"%s\"},\n    \"rejected\": [",
                       RC.mode.c_str(), B.lo_mm, B.hi_mm, B.collapsed ? "true" : "false", B.printability_floor_mm,
                       B.resolution_floor_mm, B.member_ceiling_mm, B.extent_ceiling_mm, B.look_cell_mm, B.grade_ratio,
                       job.lattice.organic_look_cells_across, job.lattice.organic_recommend_margin,
-                      RC.fit_found ? "true" : "false", RC.fit_mm, RC.fit_margin, RC.fit_traced_mm, RC.fit_source.c_str(),
-                      RC.auto_found ? "true" : "false", RC.auto_lo_mm, RC.auto_hi_mm, RC.auto_margin, RC.auto_traced_mm,
-                      RC.auto_source.c_str());
+                      RC.fit_found ? "true" : "false", RC.fit_mm,
+                      RC.fit_certified ? "true" : "false", fit_margin_json,
+                      RC.fit_traced_mm, RC.fit_source.c_str(),
+                      RC.auto_found ? "true" : "false", RC.auto_lo_mm, RC.auto_hi_mm,
+                      RC.auto_certified ? "true" : "false", auto_margin_json,
+                      RC.auto_traced_mm, RC.auto_source.c_str());
         rj = rb;
         for (std::size_t i = 0; i < RC.rejected.size(); ++i) {
           char e[300];

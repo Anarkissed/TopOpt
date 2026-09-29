@@ -1521,6 +1521,15 @@ std::string run_info_json(const RunInfo& info) {
         gr += ", \"ties_refused_reach\": " + std::to_string(info.organic_ties_refused_reach);
         gr += ", \"transfer_tie_length_mm\": " + fmt(info.organic_xfer_tie_length_mm);
         gr += ", \"tie_swirl\": " + fmt(info.organic_tie_swirl);
+        // ── ★ SAY IT, DO NOT LEAVE IT TO BE INFERRED (2026-09-29) ─────────────
+        // The block below is emitted only when a certificate ran, so "no
+        // certificate" was signalled by the ABSENCE of every key in it. That is
+        // fine for a consumer using optionals and ambiguous for anything that
+        // defaults a missing key -- which is exactly how organic_unsupported_spans
+        // read 0 on every run while the true count was 1728. This flag is ALWAYS
+        // written, so a consumer never has to interpret silence.
+        gr += ", \"structural_certified\": " +
+              std::string(info.organic_structural_verdict == "certified" ? "true" : "false");
         if (!info.organic_structural_verdict.empty()) {
           gr += ", \"structural_verdict\": \"" + info.organic_structural_verdict + "\"";
           gr += ", \"structural_statistic\": \"" + info.organic_structural_statistic + "\"";

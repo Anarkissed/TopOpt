@@ -1869,6 +1869,51 @@ void test_dual_contour() {
                                {{0,0,0},{3,3,3},0.8}});
 }
 
+// ── ★ AN AESTHETIC RUN REPORTS "aesthetic intent", NEVER THE SEGMENT CAP ───────
+// From #354's audit, 2026-09-29. run_job set the true reason for an aesthetic run --
+// "aesthetic intent: nothing reads a certificate" -- and then a following branch
+// OVERWROTE it with "N segments exceed the probe's 600000 cap" whenever any segments
+// existed. The claim was false on its face: a stand run reports 39,849 segments
+// against a 600,000 cap. A receipt that invents a limit it did not hit sends the
+// reader to tune a number that was never the reason.
+//
+// The decision now lives in one pure function that the call site switches on, so it
+// can be tested without a job run -- which is why it went unnoticed: nothing links
+// run_job.cpp, so nothing could see this.
+void test_the_probe_reports_the_TRUE_reason() {
+  using namespace topopt;
+  constexpr std::size_t cap = 600000;
+
+  // ★ THE BUG, PINNED. Aesthetic, with a realistic segment count well UNDER the cap.
+  CHECK(organic_probe_certificate_skip(/*want_cert=*/false, 39849, cap) ==
+            OrganicProbeSkip::AestheticIntent,
+        "probe: an aesthetic run with 39,849 segments reports AESTHETIC INTENT");
+  CHECK(organic_probe_certificate_skip(false, 39849, cap) != OrganicProbeSkip::SegmentCap,
+        "probe: and NOT the segment cap -- 39,849 is nowhere near 600,000");
+
+  // aesthetic wins even when the count DOES exceed the cap: no certificate was
+  // wanted, so the cap was never the thing that stopped it
+  CHECK(organic_probe_certificate_skip(false, cap + 1, cap) ==
+            OrganicProbeSkip::AestheticIntent,
+        "probe: aesthetic still reports aesthetic even over the cap -- the cap is not "
+        "why nothing ran");
+
+  // ★ AND THE CAP MUST STILL BE REPORTED WHERE IT IS THE TRUTH, or this fix would
+  // have traded a false reason for a missing one.
+  CHECK(organic_probe_certificate_skip(/*want_cert=*/true, cap + 1, cap) ==
+            OrganicProbeSkip::SegmentCap,
+        "probe: a STRUCTURAL run over the cap does report the cap");
+  CHECK(organic_probe_certificate_skip(true, cap, cap) == OrganicProbeSkip::None,
+        "probe: exactly AT the cap is not over it -- the certificate runs");
+
+  CHECK(organic_probe_certificate_skip(true, 0, cap) == OrganicProbeSkip::NoSegments,
+        "probe: no network to certify says so, and does not blame the cap");
+  CHECK(organic_probe_certificate_skip(true, 39849, cap) == OrganicProbeSkip::None,
+        "probe: a structural run inside the cap runs the certificate");
+  std::printf("  probe reason: aesthetic/39849 -> AestheticIntent; structural/600001 -> "
+              "SegmentCap; structural/600000 -> None\n");
+}
+
 // ── ★ A TRACED MEMBER MUST SURVIVE ITS OWN NODE MERGE (app, 2026-09-20) ───────
 // The app measured 2606 traced spans emerge as 120 on a 20 mm sample cube under
 // Structural + Cell size Auto -- no stated width, so the bead is DERIVED and fat.
@@ -2137,6 +2182,7 @@ int main() {
   test_union_volume();
   test_dual_contour();
   test_dual_contour_octree();
+  test_the_probe_reports_the_TRUE_reason();
   test_traced_member_survives_node_merge();
   test_wet_join_carves_closed();
   test_bundle_is_not_support();
