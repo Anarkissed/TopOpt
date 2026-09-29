@@ -293,8 +293,13 @@ PR (draft): https://github.com/Anarkissed/TopOpt/pull/362 · CI: the PR's checks
    - go the G-code route sooner.
 2. **The lattice is a layer drawn over the part, not occluded by it.** You see every wall
    through the ghost body. That is on purpose for an x-ray look, but the part's near side
-   does not hide the far walls. Folding the march into MetalMeshView's passes is the
-   follow-up if you want the walls hidden where the body is in front.
+   does not hide the far walls.
+   - The composed frame (`page_composite_pad_gyroid_{rest,full}.png`) shows the cost: the
+     lattice also covers the dent's colour map. Only the map's rim and a few deepest
+     (yellow) spots show through the pores.
+   - The squish still reads as a sunken centre.
+   - If you want the map on top, or the walls hidden where the body is in front, the
+     follow-up is folding the march into MetalMeshView's passes. The octet did this.
 3. **I could not run it on the simulator tonight.** Launching the app on my simulator
    (147E56A1, not yours) was refused by the permission check, and I did not work around
    that. The new build is installed there, but none of the overnight screens has been
@@ -401,6 +406,11 @@ All other work this round is in new files:
     `lattice_pad_honeycomb_{rest,half,full}_x3.png`.
   - The pad split at x = 50, halves at 10 kg and 25 kg (buildable deepest 2.25 mm and
     2.90 mm): `lattice_split_pad_10kg_25kg_{rest,full}_x3.png`.
+- **The page's frame, composed offscreen from its own two renderers:**
+  `page_composite_pad_gyroid_{rest,full}.png`. MeshRenderer draws the settled overlay mesh
+  at the 18 % ghost, with the dented map opaque and dented ×3 × amplitude. The lattice layer
+  is laid over it with the page's projection. This is the closest I could get to the screen
+  without a launch.
 - **Regenerate** with
   `FLEX_EVIDENCE_DIR=<dir> swift test --filter FlexibleLatticeEvidenceProbe`.
 - **Dent through a 30 % body** (on the device, before this round's launch refusal):

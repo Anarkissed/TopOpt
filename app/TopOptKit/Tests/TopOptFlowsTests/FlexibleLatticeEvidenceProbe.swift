@@ -55,6 +55,96 @@ final class FlexibleLatticeEvidenceProbe: XCTestCase {
         print("FLEX-EVIDENCE wrote \(url.path)")
     }
 
+    /// ★ THE PAGE'S FRAME, composed offscreen from the page's own two renderers: MeshRenderer
+    /// draws the overlay mesh (the part with the face's column map) SETTLED, at the page's
+    /// 18 % ghost with the dented map opaque (FlexibleOverlay tints flags.y), dented by the
+    /// same displacements × exaggeration × amplitude; the lattice layer is drawn with the
+    /// projection the page composes (camera · settle about the mesh centre) and laid over
+    /// it premultiplied, as the transparent MTKView is. Not a device screenshot.
+    @MainActor
+    func testComposeThePagesFrame() throws {
+        guard let dir = ProcessInfo.processInfo.environment["FLEX_EVIDENCE_DIR"] else {
+            throw XCTSkip("set FLEX_EVIDENCE_DIR to compose the page's frame")
+        }
+        guard let device = MTLCreateSystemDefaultDevice() else { throw XCTSkip("no Metal device") }
+        guard let mr = MeshRenderer(device: device, sampleCount: 4) else {
+            throw XCTSkip("MeshRenderer init: \(MeshRenderer.lastInitError ?? "?")")
+        }
+        let lr = try FlexibleLatticeRenderer(device: device)
+        let size = 900
+        let m = try TopOptKit.importMesh(path: FlexibleStageTests.padSTL)
+        let part = ViewerMesh(vertices: m.vertices, indices: m.indices, faceIDs: m.faceIDs, pseudoFaces: true)
+        let scene = try FlexibleScene(jobJSON: try FlexibleLatticeFieldTests.padJob(),
+                                      jobDir: FlexibleLatticeFieldTests.padDir.path)
+        let topo = "gyroid"
+        let build = FlexBuildParams(topology: topo, beadsPerWall: 1, beadWidthMM: 0.42)
+        let d = try scene.design(materialsPath: FlexibleStageTests.materialsPath, materialID: "varioshore_tpu",
+                                 tempC: 220, face: 101, rotation: 0, map: Self.map, weightN: 30 * 9.80665,
+                                 stamp: nil, build: build)
+        let st = try scene.stack(face: 101, rotation: 0)
+        let key = FlexFaceKey(region: 101, rotation: 0)
+        let geo = try FlexFaceGeometry.compute(scene: scene, key: key, stack: st, partFlat: part.flat.positions)
+        let overlay = FlexibleOverlayMesh.build(part: part, faces: [
+            FlexibleOverlayFace(key: key, faces: [1], cuts: [], stack: st, centres: geo.centres)])
+        let depths: [Double?] = st.columns.indices.map { k in
+            let c = d.columns[k]
+            return c.status != "no_lattice" && c.buildableOK ? c.buildableDepthMM : nil
+        }
+        let maxDepth = depths.compactMap { $0 }.max() ?? 0
+        let colours = depths.map { $0.map { FlexibleColours.depth($0, max: maxDepth) } ?? FlexibleColours.noNumber }
+        let tints = overlay.tints(partTint: { _, _ in nil }, columnColours: [key: colours])
+        let dents = overlay.displacements(depths: [key: depths], stacks: [key: st], partUVT: [key: geo.partUVT])
+        let ext = max(st.uExtentMM, st.vExtentMM)
+        let exaggeration = Float(max(1, min(4, (0.10 * ext / maxDepth).rounded())))   // the page's rule
+        let field = try scene.densityField(faces: [101], rotations: [0], build: build)
+        let inputs = try FlexibleLatticeBuilder.inputs(field: field, part: part, topology: topo, beadsPerWall: 1,
+                                                       beadWidthMM: 0.42, buildDir: SIMD3(0, 0, 1), skinOffFaces: [])
+        let settle = simd_quatf(from: SIMD3<Float>(0, 0, -1), to: SIMD3<Float>(0, -1, 0))
+
+        mr.setMesh(overlay.mesh)
+        mr.beginSettle(to: settle, duration: 0)
+        mr.camera.setOrientation(azimuth: 0.65, elevation: 0.42)
+        mr.setVertexTints(tints)
+        mr.setFlexDisplacements(dents)
+        mr.setBodyAlpha(FlexibleStagePage.latticeBodyAlpha)
+        let cam = CameraProjection(camera: mr.camera, viewportSize: CGSize(width: size, height: size))
+        let model = ViewerModelFrame.matrix(centre: overlay.mesh.bounds.center, rotation: settle)
+        let proj = CameraProjection(viewProjection: cam.viewProjection * model, viewportSize: cam.viewportSize)
+        lr.setInputs(inputs)
+        lr.setSquishFaces([FlexibleSquishFace(stack: st, design: d)])
+        lr.exaggeration = exaggeration
+        print("FLEX-COMPOSE pad: exaggeration ×\(exaggeration), deepest buildable \(maxDepth) mm, "
+              + "overlay \(overlay.mesh.flat.vertexCount) flat vertices")
+        let bg = MTLClearColor(red: 0.11, green: 0.12, blue: 0.14, alpha: 1)
+        for (label, amount) in [("rest", Float(0)), ("full", Float(1))] {
+            mr.setFlexScale(exaggeration * amount)
+            let body = try XCTUnwrap(mr.renderOffscreen(size: size, clear: bg))
+            let lat = try XCTUnwrap(lr.renderOffscreen(width: size, height: size, projection: proj, squish: amount))
+            // premultiplied "over", in BGRA; then swizzled to RGBA for the PNG
+            var out = [UInt8](repeating: 255, count: body.count)
+            for i in stride(from: 0, to: body.count, by: 4) {
+                let a = Float(lat[i + 3]) / 255
+                let px = (0..<3).map { c in UInt8(min(255, Float(lat[i + c]) + Float(body[i + c]) * (1 - a))) }
+                out[i] = px[2]; out[i + 1] = px[1]; out[i + 2] = px[0]
+            }
+            try Self.writeOpaque(out, size: size,
+                                 to: URL(fileURLWithPath: dir).appendingPathComponent("page_composite_pad_\(topo)_\(label).png"))
+        }
+    }
+
+    static func writeOpaque(_ rgba: [UInt8], size: Int, to url: URL) throws {
+        let provider = try XCTUnwrap(CGDataProvider(data: Data(rgba) as CFData))
+        let img = try XCTUnwrap(CGImage(width: size, height: size, bitsPerComponent: 8, bitsPerPixel: 32,
+                                        bytesPerRow: size * 4, space: CGColorSpaceCreateDeviceRGB(),
+                                        bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.noneSkipLast.rawValue),
+                                        provider: provider, decode: nil, shouldInterpolate: false,
+                                        intent: .defaultIntent))
+        let dest = try XCTUnwrap(CGImageDestinationCreateWithURL(url as CFURL, "public.png" as CFString, 1, nil))
+        CGImageDestinationAddImage(dest, img, nil)
+        XCTAssertTrue(CGImageDestinationFinalize(dest))
+        print("FLEX-EVIDENCE wrote \(url.path)")
+    }
+
     func testDrawTheGeneratedLatticeOnRealDesigns() throws {
         guard let dir = ProcessInfo.processInfo.environment["FLEX_EVIDENCE_DIR"] else {
             throw XCTSkip("set FLEX_EVIDENCE_DIR to draw the generated lattice")
