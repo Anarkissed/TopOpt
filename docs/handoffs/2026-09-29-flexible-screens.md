@@ -86,8 +86,8 @@ number from C1's core through the bridge.
 
 | branch | last synced commit |
 |---|---|
-| #361 `claude/flexible-squish-maths` (base) | `592d9155` Restore four evidence PNGs the running app suite rewrote |
-| #354 `claude/topopt-holes-quilting-298212` | `8105522b` #358 follow-up (maintainer's answers): over-air spans are PRINTED … |
+| #361 `claude/flexible-squish-maths` (base) | `23196cfb` Handoff: FULL CHECK — core 140/140 … (morning sync) |
+| #354 `claude/topopt-holes-quilting-298212` | `e0021963` Dead walls are core's verdict everywhere … (morning sync) |
 | #358 `claude/raster-receipt-fields` | `5be7862a` unsupported_spans_seen: the comment said "not printed" and they are printed |
 | `main` | `f932266f` Merge pull request #360 (lattice types setup) |
 
@@ -95,6 +95,15 @@ number from C1's core through the bridge.
   conflicts. #361 and main were already contained.
 - **After the sync.** `build_core.sh` exited 0, `swift build` finished, and the 62 targeted
   tests passed.
+- **Morning sync.** `c2fd316c` (Sync: merge #361, handoff only) and `4f4d3b04` (Sync: merge #354,
+  `e0021963`: app-side only, no core/ change, so the core xcframework stands) merged with no
+  conflicts. After it: `swift build` clean, and 209 targeted tests (all Flexible suites,
+  #354's renderer/page suites, `OrganicDeadWallParityTests`, `LatticeStageModeTests`,
+  `LatticeSettingsPersistTests`, `SmoothingPageRound2Tests`, `ProjectStoreTests`,
+  `UndoHistoryTests`) passed:
+  ```
+  	 Executed 209 tests, with 4 tests skipped and 0 failures (0 unexpected) in 251.024 (251.043) seconds
+  ```
 
 ## Per-stage status
 
