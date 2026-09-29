@@ -213,8 +213,10 @@ the lookup (55 red), the pen-curve tangents (5), the load direction, σ and the 
 rule (3), the blend width, rigid covered area, smoothing-past-data in Auto, the feel
 preference (5), the runner guard in `analyze_job`.
 
-**App:** not built — blocked on the base (below). The FULL CHECK (app suite) and the draft
-PR / CI were therefore NOT run. CI run: none. PR: none.
+**App:** the build fails on an INHERITED error (bridge.cpp:2708 vs #358's `5846c476`; see
+Blocked). The FULL CHECK (app suite) waits for #354's fix and the next "sync".
+PR (draft): https://github.com/Anarkissed/TopOpt/pull/361 — CI: see the PR's checks. Expect
+app-macos to fail on the inherited error until #354's fix is synced in.
 
 Portability check (`std::` exception types without `<stdexcept>`) over every file I created
 or changed: prints nothing. Every `std::` facility in the new files is included directly.
