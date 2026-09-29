@@ -22,9 +22,11 @@ The heel check shows the honest answer: a pad drawn for 30 kg spread evenly is s
 past the tested strain under a 300 N heel, and the map says "no number" there instead
 of inventing one.
 
-**Status: BLOCKED before push.** Core is done (140/140). But #354 and #358 together do
-not compile the app: #358 removed a stats field that #354's bridge reads (one line; see
-Blocked). So there is no push, no PR and no app suite yet.
+**Status: core done (140/140); pushed as a DRAFT PR on the maintainer's instruction
+(2026-09-28).** The app-macos build failure is INHERITED, not mine:
+`bridge.cpp:2708` (#354) reads `OrganicGenStats::filleted_spans`, which #358's `5846c476`
+removed. The maintainer ruled that #354 fixes it (the app stops reading the field; no stub in
+core), and the #354 agent is doing it. On "sync" I run SYNC → SYNC CHECK → push → FULL CHECK.
 
 **What's next.** C2 (the lattice recipe) turns the density field into gyroid/honeycomb
 walls and bead paths; A1 (the app screens) calls the functions in the BRIDGE CONTRACT
@@ -418,8 +420,10 @@ string — never an exception, never a guessed number.
 
 ## Blocked
 
-**The synced base's app does not build, so I stopped before pushing and opening the PR
-(task rule: "Stop with ## Blocked if the base cannot build").**
+**The synced base's app does not build.** I stopped before pushing. Maintainer ruling,
+2026-09-28: the diagnosis is right; the fix belongs on #354 (the app stops reading the
+removed field; no zero stub in core), and the #354 agent is making it. Push now as a draft
+for backup and review; the app-macos failure is inherited, not mine.
 
 ```
 app/TopOptKit/Sources/TopOptBridge/bridge.cpp:2708:44: error: no member named
@@ -439,9 +443,11 @@ app/TopOptKit/Sources/TopOptBridge/bridge.cpp:2708:44: error: no member named
 - Not mine to fix under the rules: the line is #354's app code (TRACK core; never edit
   #354/#358), and the removal is #358's core change, not one of mine.
 - **Decision needed (maintainer):** either #354 drops or replaces `out[47]` in the bridge,
-  or #358 keeps a `filleted_spans` field (0, since the fillet stage is gone). Once either
-  lands, I run SYNC → SYNC CHECK → push → draft PR "[stacked on #354 + #358] Flexible
-  squish maths" → FULL CHECK (app suite).
+  or #358 keeps a `filleted_spans` field (0, since the fillet stage is gone).
+  **Ruled: #354 fixes it.** When the maintainer says "sync": SYNC → SYNC CHECK → push →
+  FULL CHECK (app suite).
+- At push time main (`f932266f`) and #358 (`95754820`) had moved past my last sync. As
+  instructed, they were NOT merged for this backup push; the next "sync" merges them.
 - Everything else is ready and committed locally on `claude/flexible-squish-maths`:
   core 140/140, evidence, handoff. The known pre-existing app failures to compare against
   after unblocking (from #354's latest handoff): `AppModelTests` 3MF ×3 (no lib3mf in a
