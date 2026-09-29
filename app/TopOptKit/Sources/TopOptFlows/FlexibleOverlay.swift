@@ -95,8 +95,13 @@ public struct FlexibleOverlayMesh {
 
     /// Part triangles tinted per triangle (`partTint(face, centroid)`, nil = clay), and one
     /// RGBA per column of each loaded region's map.
+    /// ★ X-RAY (maintainer, 2026-09-29: "more ghostly … with the bent plane showing the
+    /// dent"): with `ghost` set, every vertex that is not the opaque map is flagged
+    /// flags.z = 1 and drawn by MetalMeshView as a ghost — faint face-on, lit at the
+    /// silhouette — in its own tint, or in `ghost` where it had none.
     public func tints(partTint: (Int, SIMD3<Double>) -> SIMD4<Float>?,
-                      columnColours: [FlexFaceKey: [SIMD4<Float>]]) -> [Float] {
+                      columnColours: [FlexFaceKey: [SIMD4<Float>]],
+                      ghost: SIMD4<Float>? = nil) -> [Float] {
         let n = mesh.flat.vertexCount
         var out = [Float](repeating: 0, count: n * 8)
         for t in 0..<keptFace.count {
@@ -118,7 +123,18 @@ public struct FlexibleOverlayMesh {
                 }
             }
         }
+        if let g = ghost { Self.markGhost(&out, colour: g) }
         return out
+    }
+
+    /// flags.z = 1 on every vertex that is not flagged opaque (flags.y); clay takes `colour`.
+    public static func markGhost(_ out: inout [Float], colour g: SIMD4<Float>) {
+        for v in 0..<(out.count / 8) where out[v * 8 + 5] < 0.5 {
+            out[v * 8 + 6] = 1
+            if out[v * 8 + 3] <= 0 {
+                out[v * 8] = g.x; out[v * 8 + 1] = g.y; out[v * 8 + 2] = g.z; out[v * 8 + 3] = g.w
+            }
+        }
     }
 
     // MARK: the dent (02 §6)
@@ -203,4 +219,6 @@ public enum FlexibleColours {
     public static let linkedEnd = token(DS.Color.accentCyan, 0.45)
     public static let conflict = token(DS.Color.warning, 0.6)
     public static let restingFace = token(DS.Color.accentCyan, 0.25)
+    /// The X-ray ghost's glow (the body's clay under X-ray).
+    public static let ghost = token(DS.Color.accentCyan, 1)
 }

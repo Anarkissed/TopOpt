@@ -38,7 +38,9 @@ public struct FlexibleStagePage: View {
     @State private var padTarget: String?
     // the generated lattice: squish loop phase (0…1, 30 fps, the Results flex pattern)
     @State private var squishPhase: Double = 0
-    @State private var showLattice = true
+    /// ★ X-RAY VISION (maintainer, 2026-09-29): the body as a ghost, the dented map opaque,
+    /// the lattice seen inside. The "view" button under the gizmo (FlexibleViewControls).
+    @State private var xray = false
     @State private var showExport = false
     private let ticker = Timer.publish(every: 1.0 / 30.0, on: .main, in: .common).autoconnect()
     static let squishPeriodS = 2.4
@@ -64,6 +66,7 @@ public struct FlexibleStagePage: View {
                     .padding(.leading, PageChrome.edge)
                     .padding(.bottom, PageChrome.edge)
                 latticeControls
+                FlexibleViewColumn(camera: camera, xray: $xray)
                 if showExport, let g = model.lattice { exportSheet(g) }
                 if model.tab == .squish, model.step == .view3D || model.checkStampShown != nil {
                     FlexibleLegend(model: model)
@@ -79,7 +82,7 @@ public struct FlexibleStagePage: View {
         .onChange(of: model.geometry.count) { _ in rebuildOverlay() }
         .onReceive(ticker) { _ in
             // ★ THE SQUISH, ON REPEAT (maintainer, 2026-09-29): only while a lattice is shown
-            guard model.lattice != nil, showLattice else { return }
+            guard model.lattice != nil else { return }
             squishPhase = (squishPhase + (1.0 / 30.0) / Self.squishPeriodS).truncatingRemainder(dividingBy: 1)
             // ★ only the scale moves: the displacements and colours are rebuilt when the
             // design changes, never per frame (a whole-mesh rebuild at 30 fps on the M2 stand)
@@ -87,10 +90,11 @@ public struct FlexibleStagePage: View {
         }
         .onChange(of: model.lattice != nil) { has in
             // a fresh lattice is shown squishing what can be built — the densities it was made from
-            if has { model.step = .view3D; model.showBuildable = true; model.tab = .squish; showLattice = true }
+            if has { model.step = .view3D; model.showBuildable = true; model.tab = .squish; xray = true }
             refreshChannels()
         }
         .onChange(of: model.stacks.count) { _ in rebuildOverlay() }
+        .onChange(of: xray) { _ in refreshChannels() }
         .onReceive(model.objectWillChange.debounce(for: .milliseconds(16), scheduler: RunLoop.main)) { _ in
             refreshChannels()
         }
@@ -101,12 +105,13 @@ public struct FlexibleStagePage: View {
 
     /// The part's opacity while a dent is shown; the dented map itself stays opaque.
     static let dentBodyAlpha: Float = 0.3
-    /// With the lattice shown the body is a ghost, so the walls read through it.
-    static let latticeBodyAlpha: Float = 0.18
+    /// X-ray: the ghost's face-on opacity. The shader adds up to +0.5 toward the silhouette
+    /// (MetalMeshView, tint flags.z), so the outline reads and the inside shows.
+    static let xrayBodyAlpha: Float = 0.04
 
     /// 0 → 1 → 0 over one period (FlexAnimation's cosine ease, Results screen).
     private var squishAmplitude: Double {
-        model.lattice != nil && showLattice ? 0.5 - 0.5 * cos(2 * .pi * squishPhase) : 1
+        model.lattice != nil ? 0.5 - 0.5 * cos(2 * .pi * squishPhase) : 1
     }
 
     /// The same settle the workspace draws with (gravity → down), so the part sits as it
@@ -140,9 +145,8 @@ public struct FlexibleStagePage: View {
                 flexDisplacements: dents, flexScale: dentScale,
                 // ★ THE DENT READS THROUGH THE PART (maintainer, 2026-09-29): while a dent is
                 // shown the body drops to 30 % and the dented map stays at 100 %.
-                bodyAlpha: model.lattice != nil && showLattice ? Self.latticeBodyAlpha
-                    : (dents != nil ? Self.dentBodyAlpha : 1))
-            if let g = model.lattice, showLattice {
+                bodyAlpha: xray ? Self.xrayBodyAlpha : (dents != nil ? Self.dentBodyAlpha : 1))
+            if let g = model.lattice, xray {
                 FlexibleLatticeMount(lattice: g, proj: proj, squish: Float(squishAmplitude),
                                      exaggeration: Float(max(dentExaggeration, 1)))
                     .allowsHitTesting(false)
@@ -208,6 +212,7 @@ public struct FlexibleStagePage: View {
                     out[v * 8] = col.x; out[v * 8 + 1] = col.y; out[v * 8 + 2] = col.z; out[v * 8 + 3] = col.w
                 }
             }
+            if xray { FlexibleOverlayMesh.markGhost(&out, colour: FlexibleColours.ghost) }
             tints = n > 0 ? out : nil
             dents = nil
             dentScale = 0
@@ -225,7 +230,7 @@ public struct FlexibleStagePage: View {
                 }
             }
         }
-        tints = overlay.tints(partTint: tintOf, columnColours: colours)
+        tints = overlay.tints(partTint: tintOf, columnColours: colours, ghost: xray ? FlexibleColours.ghost : nil)
         if shown.showsDent {
             var depths: [FlexFaceKey: [Double?]] = [:]
             for (k, vals) in shown.values {
@@ -272,8 +277,6 @@ public struct FlexibleStagePage: View {
                     }
                     HStack(spacing: DS.Space.s) {
                         if model.lattice != nil {
-                            pill(showLattice ? "Hide lattice" : "Show lattice", icon: "square.stack.3d.up",
-                                 fill: DS.Color.chipSolid, id: "flexible-lattice-toggle") { showLattice.toggle(); refreshChannels() }
                             pill("Export", icon: "square.and.arrow.up", fill: DS.Color.accent, id: "flexible-export") {
                                 showExport = true
                             }

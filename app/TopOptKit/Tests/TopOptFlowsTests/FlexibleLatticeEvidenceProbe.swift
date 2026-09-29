@@ -93,6 +93,8 @@ final class FlexibleLatticeEvidenceProbe: XCTestCase {
         let maxDepth = depths.compactMap { $0 }.max() ?? 0
         let colours = depths.map { $0.map { FlexibleColours.depth($0, max: maxDepth) } ?? FlexibleColours.noNumber }
         let tints = overlay.tints(partTint: { _, _ in nil }, columnColours: [key: colours])
+        let ghostTints = overlay.tints(partTint: { _, _ in nil }, columnColours: [key: colours],
+                                       ghost: FlexibleColours.ghost)
         let dents = overlay.displacements(depths: [key: depths], stacks: [key: st], partUVT: [key: geo.partUVT])
         let ext = max(st.uExtentMM, st.vExtentMM)
         let exaggeration = Float(max(1, min(4, (0.10 * ext / maxDepth).rounded())))   // the page's rule
@@ -104,9 +106,10 @@ final class FlexibleLatticeEvidenceProbe: XCTestCase {
         mr.setMesh(overlay.mesh)
         mr.beginSettle(to: settle, duration: 0)
         mr.camera.setOrientation(azimuth: 0.65, elevation: 0.42)
-        mr.setVertexTints(tints)
+        mr.setVertexTints(ghostTints)
+        _ = tints
         mr.setFlexDisplacements(dents)
-        mr.setBodyAlpha(FlexibleStagePage.latticeBodyAlpha)
+        mr.setBodyAlpha(FlexibleStagePage.xrayBodyAlpha)
         let cam = CameraProjection(camera: mr.camera, viewportSize: CGSize(width: size, height: size))
         let model = ViewerModelFrame.matrix(centre: overlay.mesh.bounds.center, rotation: settle)
         let proj = CameraProjection(viewProjection: cam.viewProjection * model, viewportSize: cam.viewportSize)
@@ -119,6 +122,13 @@ final class FlexibleLatticeEvidenceProbe: XCTestCase {
         for (label, amount) in [("rest", Float(0)), ("full", Float(1))] {
             mr.setFlexScale(exaggeration * amount)
             let body = try XCTUnwrap(mr.renderOffscreen(size: size, clear: bg))
+            // ★ the X-RAY GHOST alone: the body faint and rim-lit, the bent heat-map plane opaque
+            var ghostOnly = [UInt8](repeating: 255, count: body.count)
+            for i in stride(from: 0, to: body.count, by: 4) {
+                ghostOnly[i] = body[i + 2]; ghostOnly[i + 1] = body[i + 1]; ghostOnly[i + 2] = body[i]
+            }
+            try Self.writeOpaque(ghostOnly, size: size,
+                                 to: URL(fileURLWithPath: dir).appendingPathComponent("xray_ghost_dent_pad_\(label).png"))
             let lat = try XCTUnwrap(lr.renderOffscreen(width: size, height: size, projection: proj, squish: amount))
             // premultiplied "over", in BGRA; then swizzled to RGBA for the PNG
             var out = [UInt8](repeating: 255, count: body.count)
