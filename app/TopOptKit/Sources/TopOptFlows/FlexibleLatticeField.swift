@@ -3,15 +3,16 @@
 //
 // ★ THE APP IS THE SOURCE OF TRUTH FOR THIS GEOMETRY (maintainer, 2026-09-29: "there is
 // no core yet for Flexibles, so your preview will be the source of truth"). C2 (core's
-// lattice recipe) does not exist; until it does, the preview AND the STL export both
-// evaluate the function written here. It has three copies, held together by tests:
-//   * this Swift reference (`FlexibleLatticeField.solid(at:)`),
-//   * the Metal raymarcher (FlexibleLatticeRenderer's MSL `flx_field`),
-//   * the C++ exporter's streaming mesher (flexible_lattice.cpp `flx_field`).
-// A change here must be made in all three; the tests sample them at the same points and
-// fail if they disagree: FlexibleLatticeExportTests (C++ — BIT-IDENTICAL on a graded,
-// tilted field) and FlexibleLatticeRendererTests (MSL — within 2e-3 mm; the GPU's own
-// sin/cos). FlexibleLatticeFieldTests pins what the field means on C1's pad.
+// lattice recipe) does not exist; until it does, the preview evaluates the function
+// written here. It has TWO copies, held together by tests:
+//   * this Swift reference (`FlexibleLatticeField.lattice(at:)`),
+//   * the Metal G-buffer march (FlexibleLatticeShader's MSL `flx_field`, drawn by
+//     FlexibleLatticePass inside MeshRenderer's passes).
+// A change here must be made in both; FlexibleLatticePassTests samples them at the same
+// points and fails if they disagree by more than 2e-3 mm (the GPU's own sin/cos).
+// FlexibleLatticeFieldTests pins what the field means on C1's pad. (Exports wait on core —
+// maintainer, 2026-09-29 — so the app's STL exporter and its C++ copy were removed; they
+// are recoverable at 85b1bdc0.)
 //
 // ── THE FIELD (all lengths mm, model space; negative = inside) ─────────────────────────
 // Grids use the VOXEL-CENTRE convention: value i sits at c0 + i·spacing, sampled with
@@ -34,15 +35,6 @@
 //               n = max(|q.x|, |0.5 q.x + 0.8660254 q.y|, |−0.5 q.x + 0.8660254 q.y|)
 //               wall = |d/2 − n| − t/2           (mod(x, y) = x − y·floor(x/y))
 //   LATTICE:    F = max(wall, dRegion, dPart, dSkin)          — the preview draws F
-//   EXPORT:     S = min(max(dPart, −max(dRegion, dSkin)), F)  — solid body ∪ lattice
-//               (the solid outside the lattice region or inside the skin, plus the walls)
-//               ★ MAX, not min (exporter round, 2026-09-29): the lattice may only be where
-//               the point is in the region AND deeper than the skin, max(dRegion, dSkin) ≤ 0.
-//               As first written (min) the body was the part outside the region AND inside
-//               the skin: every skin was air and the part outside the region was hollow —
-//               the exported 30 × 30 × 12 box was a skinless gyroid (2 022 mm³ of 10 800,
-//               the skin's 2 592 mm³ missing). `solid` is the export's alone; the preview
-//               draws `lattice`, which never read it.
 //
 // ★ GRADING. Walls stay whole beads (R1); the gyroid's cell follows ρ continuously
 // (03-generators §3: L = 3.0915 t/ρ). A continuously varying k warps cells where ρ
@@ -69,7 +61,7 @@ public struct FlexGrid: Equatable, Sendable {
 
     @inline(__always) func at(_ i: Int, _ j: Int, _ k: Int) -> Float { values[(k * ny + j) * nx + i] }
 
-    /// Trilinear at a model point (the one sampling rule all three copies use).
+    /// Trilinear at a model point (the one sampling rule both copies use).
     public func sample(_ p: SIMD3<Float>) -> Float {
         let u = (p - c0) / spacing
         let ux = Swift.min(Swift.max(u.x, 0), Float(nx - 1))
@@ -151,14 +143,6 @@ public enum FlexibleLatticeField {
     /// The lattice walls (what the preview draws). Negative inside.
     public static func lattice(at p: SIMD3<Float>, _ f: FlexibleLatticeInputs) -> Float {
         Swift.max(Swift.max(wall(p, f), dRegion(p, f)), Swift.max(f.partSDF.sample(p), dSkin(p, f)))
-    }
-
-    /// The exported solid: the part outside the lattice region (or inside the skin) plus
-    /// the walls. Negative inside.
-    public static func solid(at p: SIMD3<Float>, _ f: FlexibleLatticeInputs) -> Float {
-        let dPart = f.partSDF.sample(p)
-        let open = Swift.max(dRegion(p, f), dSkin(p, f))   // ≤ 0 where the lattice may be
-        return Swift.min(Swift.max(dPart, -open), lattice(at: p, f))
     }
 }
 

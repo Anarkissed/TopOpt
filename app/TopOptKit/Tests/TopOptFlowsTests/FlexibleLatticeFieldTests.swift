@@ -34,6 +34,15 @@ final class FlexibleLatticeFieldTests: XCTestCase {
                                                  skinOffFaces: skinOff ? [(face: 1, cuts: [])] : [])
     }
 
+    /// Material at p as the PRINTED part would have it: a lattice wall, or the part's body
+    /// where the lattice may not be (outside the region, or inside a skin). The preview draws
+    /// the walls; the body is the part itself. (Restated from the removed export's `solid`
+    /// without it — exports wait on core.)
+    static func isMaterial(_ p: SIMD3<Float>, _ f: FlexibleLatticeInputs) -> Bool {
+        FlexibleLatticeField.lattice(at: p, f) < 0
+            || (f.partSDF.sample(p) < 0 && max(FlexibleLatticeField.dRegion(p, f), FlexibleLatticeField.dSkin(p, f)) > 0)
+    }
+
     func testTheCoreFieldBecomesFilledGrids() throws {
         let f = try Self.padInputs()
         XCTAssertEqual(f.wallMM, 0.42, accuracy: 1e-6)
@@ -56,12 +65,14 @@ final class FlexibleLatticeFieldTests: XCTestCase {
         }
         XCTAssertGreaterThan(inside, 20, "walls cross the mid-plane")
         XCTAssertGreaterThan(outside, 200, "and most of it is open (ρ ≈ 0.14–0.36)")
-        // within the 0.8 mm skin under the top face: no lattice, but solid in the export
+        // within the 0.8 mm skin under the top face: no lattice wall, but the skin's material
         let skinP = SIMD3<Float>(50, 50, 19.7)
         XCTAssertGreaterThan(FlexibleLatticeField.lattice(at: skinP, f), 0)
-        XCTAssertLessThan(FlexibleLatticeField.solid(at: skinP, f), 0)
+        XCTAssertGreaterThan(FlexibleLatticeField.dSkin(skinP, f), 0, "inside the skin")
+        XCTAssertTrue(Self.isMaterial(skinP, f))
         // outside the part: nothing
-        XCTAssertGreaterThan(FlexibleLatticeField.solid(at: SIMD3(50, 50, 25), f), 0)
+        XCTAssertGreaterThan(FlexibleLatticeField.lattice(at: SIMD3(50, 50, 25), f), 0)
+        XCTAssertFalse(Self.isMaterial(SIMD3(50, 50, 25), f))
     }
 
     func testSkinOffLetsTheLatticeReachTheFace() throws {
@@ -70,8 +81,8 @@ final class FlexibleLatticeFieldTests: XCTestCase {
         var gapsOn = 0, gapsOff = 0
         for i in 0..<400 {
             let p = SIMD3<Float>(20 + Float(i % 20) * 3.1, 20 + Float(i / 20) * 3.1, 19.75)
-            if FlexibleLatticeField.solid(at: p, on) > 0 { gapsOn += 1 }
-            if FlexibleLatticeField.solid(at: p, off) > 0 { gapsOff += 1 }
+            if !Self.isMaterial(p, on) { gapsOn += 1 }
+            if !Self.isMaterial(p, off) { gapsOff += 1 }
         }
         XCTAssertEqual(gapsOn, 0, "a skinned face is solid under its surface")
         XCTAssertGreaterThan(gapsOff, 100, "with its skin off the lattice runs to the face")
