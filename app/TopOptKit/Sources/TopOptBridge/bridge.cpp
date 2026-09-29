@@ -2520,6 +2520,16 @@ std::vector<double> organic_preview_field(
   p.rho_min = rho_min;
   p.rho_max = rho_max;
   p.strut_diameter_mm = strut_diameter_mm > 0.0 ? strut_diameter_mm : 0.0;
+  // ★ A STATED WIDTH IS NOT CALIBRATED (core #358: `op.bead_is_stated =
+  // jg.organic_strut_width_mm > 0`, run_job.cpp). The caller passes the stated width
+  // here and 0 when none was stated, so this is the run's own test. Without it the run
+  // shipped radius = stated/2 while the preview still scaled every radius by the
+  // union calibration's k.
+  p.bead_is_stated = strut_diameter_mm > 0.0;
+  // ★ The run defers only under `organic_calibrate_on_shipped`, which the app never
+  // writes (core's default is false): `op.defer_bead_calibration =
+  // jg.organic_calibrate_on_shipped && !bead_is_stated`.
+  p.defer_bead_calibration = false;
   p.layer_hint_mm = (grow != 0 && layer_height_mm > 0.0) ? layer_height_mm : 0.0;
   p.anchor_at_region_boundary = anchor_at_boundary != 0;
   p.transfer_ties = transfer_ties != 0;

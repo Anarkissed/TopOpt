@@ -101,6 +101,27 @@ public struct OrganicForecast: Equatable, Sendable, Codable {
             String(format: "bead floor %.2f mm · grid %.2f mm · wall ceiling %.1f mm · face ceiling %.1f mm",
                    printabilityFloorMM, resolutionFloorMM, memberCeilingMM, extentCeilingMM)
         }
+        /// ★ A MARGIN EXISTS ONLY UNDER A STRUCTURAL RECOMMENDATION (maintainer,
+        /// 2026-09-29). Core runs the probe's certificate only for structural intent or a
+        /// structural recommendation (`want_cert`, run_job.cpp); on an aesthetic one it
+        /// writes margin 0, and "· 0.00" read as a failing margin when nothing was
+        /// certified. Show nothing, never 0.00.
+        public var showsMargin: Bool { mode == "structural" }
+        public func pillText(_ a: Auto) -> String {
+            String(format: "Auto %g–%g mm", a.cellMinMM, a.cellMaxMM)
+                + (showsMargin ? String(format: " · %.2f", a.margin) : "")
+        }
+        public func pillText(_ f: Fit) -> String {
+            String(format: "Fit %g mm", f.cellMM) + (showsMargin ? String(format: " · %.2f", f.margin) : "")
+        }
+        public func infoText(_ a: Auto) -> String {
+            String(format: "Core's graded pick across the band %.2f–%.2f mm (%@). ", bandLoMM, bandHiMM, a.source)
+                + (showsMargin ? String(format: "Predicted margin %.2f. ", a.margin) + OrganicForecast.notCertified : "")
+        }
+        public func infoText(_ f: Fit) -> String {
+            String(format: "Core's one-size pick across the band %.2f–%.2f mm (%@). ", bandLoMM, bandHiMM, f.source)
+                + (showsMargin ? String(format: "Predicted margin %.2f. ", f.margin) + OrganicForecast.notCertified : "")
+        }
     }
 
     public struct Candidate: Equatable, Sendable, Codable {

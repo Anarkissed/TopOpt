@@ -1086,9 +1086,9 @@ public struct LatticeSetupWizard: View {
         + "lattice; the run's receipt reports survival and pieces. Grown organic holds a "
         + "fixed 30° overhang, so there is no overhang limit to tune there."
     static let infoRepairs = "Core's export repairs the traced lattice for printing: it merges nodes, cuts "
-        + "the base and ties free ends; a span nothing can hold up is left out, and the run's "
-        + "receipt counts them. Those repairs are in the file. Turn this off to see the traced curves "
-        + "alone — a way to judge the topology, not what will print."
+        + "the base and ties free ends. A span that crosses open air is printed as drawn, with "
+        + "nothing underneath, and the run's receipt counts them. Those repairs are in the file. "
+        + "Turn this off to see the traced curves alone — a way to judge the topology, not what will print."
     static let infoSynthetic = "A wall the load never reaches carries no stress, so there is nothing for the "
         + "tracer to follow — its curves wander. With this on, every such wall (median stress "
         + "under 5% of the part's peak) is given a synthetic load: a few focal points, "
@@ -1116,8 +1116,7 @@ public struct LatticeSetupWizard: View {
         + "simulated stress, so it is offered only with a simulation; Fit lets core choose one "
         + "size that fits the shape; Manual is your grade (with a simulation) or your one size."
     static let infoTransferTies = "On the grown lattice, ties run across the pillars along the second "
-        + "stress family, welded at each pillar. They carried the structural certificate on the "
-        + "test stand (p99 23.4 → 2.78 MPa). Off leaves the pillars alone."
+        + "stress family, welded at each pillar. Off leaves the pillars alone."
     static let infoSolidRim = "A solid ring inside each face outline — the width you type, or the "
         + "printability floor (about one and a half beads, never less than a solve voxel) — drawn as a "
         + "beam around the lattice; the struts run into it and weld there. Off removes the ring."
@@ -1734,24 +1733,22 @@ public struct LatticeSetupWizard: View {
             } else if model.simulateStresses, let a = rec.auto, a.found {
                 HStack(spacing: DS.Space.xs) {
                     shortNote("Recommended")
-                    organicPill(String(format: "Auto %g–%g mm · %.2f", a.cellMinMM, a.cellMaxMM, a.margin),
+                    organicPill(rec.pillText(a),
                                 on: model.organicPickedGradeMM == [a.cellMinMM, a.cellMaxMM], enabled: true) {
                         commitOrganicGrade(lo: a.cellMinMM, hi: a.cellMaxMM)
                     }
                     .modifier(OrganicProbeTintModifier(tint: .green))
-                    infoButton("rec-auto", String(format: "Core's graded pick across the band %.2f–%.2f mm (%@). Predicted margin %.2f. ",
-                                                  rec.bandLoMM, rec.bandHiMM, a.source, a.margin) + OrganicForecast.notCertified)
+                    infoButton("rec-auto", rec.infoText(a))
                 }
             } else if !model.simulateStresses, let f = rec.fit, f.found {
                 HStack(spacing: DS.Space.xs) {
                     shortNote("Recommended")
-                    organicPill(String(format: "Fit %g mm · %.2f", f.cellMM, f.margin),
+                    organicPill(rec.pillText(f),
                                 on: abs(model.organicPickedSeparationMM - f.cellMM) < 1e-6, enabled: true) {
                         commitOrganicSize(f.cellMM)
                     }
                     .modifier(OrganicProbeTintModifier(tint: .green))
-                    infoButton("rec-fit", String(format: "Core's one-size pick across the band %.2f–%.2f mm (%@). Predicted margin %.2f. ",
-                                                 rec.bandLoMM, rec.bandHiMM, f.source, f.margin) + OrganicForecast.notCertified)
+                    infoButton("rec-fit", rec.infoText(f))
                 }
             }
         }

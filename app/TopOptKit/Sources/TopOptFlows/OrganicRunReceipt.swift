@@ -63,9 +63,10 @@ public struct OrganicRunReceipt: Equatable, Sendable {
     public var tiesLanded: Int? = nil
     public var tiesRefusedReach: Int? = nil
     public var tiesRefusedMinorStress: Int? = nil
-    /// ★ Spans core could not hold up and so did not print (`unsupported_spans`, core #358 —
-    /// the measurement that replaced the overhang flare, which deposited lumps up to ~9× the
-    /// strut; 1728 on the M2 stand).
+    /// ★ Spans that cross open air (`unsupported_spans`, core #358 — the measurement that
+    /// replaced the overhang flare, which deposited lumps up to ~9× the strut; 1728 on the
+    /// M2 stand). Core PRINTS them as drawn and counts them (organic_lattice.cpp, the
+    /// over-air pass never clears the span); they are not removed.
     public var unsupportedSpans: Int? = nil
     public var solidRimMM: Double? = nil
     public var shapeFitOn: Bool? = nil
@@ -135,7 +136,7 @@ public struct OrganicRunReceipt: Equatable, Sendable {
     /// The repairs the run applied, in one line.
     public var repairsLine: String? {
         var parts: [String] = []
-        if let n = unsupportedSpans, n > 0 { parts.append("\(n) spans left out: nothing to hold them up") }
+        if let n = unsupportedSpans, n > 0 { parts.append("\(n) spans cross open air — printed as drawn, with nothing underneath") }
         if let on = transferTiesOn, on, let l = tiesLanded { parts.append("\(l) ties landed") }
         if let big = supportGridTooLarge, big { parts.append("support pass skipped (grid too large)") }
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
