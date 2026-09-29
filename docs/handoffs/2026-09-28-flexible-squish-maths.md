@@ -22,6 +22,10 @@ The heel check shows the honest answer: a pad drawn for 30 kg spread evenly is s
 past the tested strain under a 300 N heel, and the map says "no number" there instead
 of inventing one.
 
+**Status: BLOCKED before push.** Core is done (140/140). But #354 and #358 together do
+not compile the app: #358 removed a stats field that #354's bridge reads (one line; see
+Blocked). So there is no push, no PR and no app suite yet.
+
 **What's next.** C2 (the lattice recipe) turns the density field into gyroid/honeycomb
 walls and bead paths; A1 (the app screens) calls the functions in the BRIDGE CONTRACT
 below. Nothing here is a certificate: every depth carries a tier and a band (R7).
