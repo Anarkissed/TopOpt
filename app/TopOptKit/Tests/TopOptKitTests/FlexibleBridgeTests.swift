@@ -304,3 +304,29 @@ final class FlexibleTimingProbe: XCTestCase {
                      open, st, st2, sq, design))
     }
 }
+
+/// Slice probe (not a gate): FLEX_SLICE=1 — prints a Z slice's per-column make-up.
+final class FlexibleSliceProbe: XCTestCase {
+    func testPrintSlice() throws {
+        guard ProcessInfo.processInfo.environment["FLEX_SLICE"] == "1" else { throw XCTSkip("FLEX_SLICE not set") }
+        var job = try FlexibleBridgeTests.padJob()
+        job = job.replacingOccurrences(of: "\"resolution\": 100", with: "\"resolution\": 64")
+        let scene = try FlexibleScene(jobJSON: job, jobDir: FlexibleBridgeTests.padDir.path)
+        let info = try scene.info()
+        let build = FlexBuildParams(topology: "gyroid", beadsPerWall: 1, beadWidthMM: 0.42)
+        let map = FlexMap(mode: "both", x: FlexCurve(x: [0, 0.5, 1], y: [0.3, 1, 0.3]),
+                          y: FlexCurve(x: [0, 0.5, 1], y: [0.3, 1, 0.3]), centreEdge: .flat, deepestMM: 3)
+        for f in [101, 103] {
+            _ = try scene.design(materialsPath: FlexibleBridgeTests.materialsPath, materialID: "varioshore_tpu",
+                                 tempC: 190, face: f, rotation: 0, map: map, weightN: 392, stamp: nil, build: build)
+        }
+        let s = try scene.densitySlice(faces: [101, 103], rotations: [0, 0], build: build, axis: 2, index: info.nz / 2)
+        print("FLEX_SLICE grid \(info.nx)x\(info.ny)x\(info.nz) slice \(s.width)x\(s.height)")
+        let row = s.height / 2
+        let line = (0..<s.width).map { i -> String in
+            let d = s.density[row * s.width + i], o = s.owner[row * s.width + i]
+            return d < 0 ? "." : (o < 0 ? "0" : String(o % 10))
+        }.joined()
+        print("FLEX_SLICE mid row: \(line)")
+    }
+}

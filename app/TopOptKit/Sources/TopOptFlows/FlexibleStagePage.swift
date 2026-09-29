@@ -189,6 +189,20 @@ public struct FlexibleStagePage: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityIdentifier("flexible-exit")
+                // the project's own snapshot history: every Flexible setting is undoable (S5)
+                ForEach([(true, "arrow.uturn.backward"), (false, "arrow.uturn.forward")], id: \.1) { undo, icon in
+                    Button {
+                        if undo { project.performUndo() } else { project.performRedo() }
+                        model.recomputeAll()
+                    } label: {
+                        Image(systemName: icon).font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(DS.Color.textPrimary.color)
+                            .frame(width: 44, height: 44)
+                            .background(Circle().fill(DS.Color.chipSolid.color))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier(undo ? "flexible-undo" : "flexible-redo")
+                }
                 Spacer()
             }
             Spacer()
@@ -314,9 +328,17 @@ struct FlexibleShownValues {
             }
         }
         for v in values.values { for x in v { if case .depth(let d) = x { maxDepth = max(maxDepth, d) } } }
+        // ★ ONE SCALE FOR BOTH SIDES OF THE TOGGLE: drawn and buildable are coloured against
+        // the same maximum, so flipping between them compares like with like.
+        if m.step == .view3D, checkID == nil {
+            for d in m.designs.values where d.refusal == nil {
+                maxDepth = max(maxDepth, d.targetDepthRange?.upperBound ?? 0,
+                               d.buildableDepthRange?.upperBound ?? 0)
+            }
+        }
         // the dent is exaggerated so a few mm reads on a 100 mm part; the legend says by how much
         let ext = m.stacks.values.map { max($0.uExtentMM, $0.vExtentMM) }.max() ?? 0
-        if maxDepth > 0, ext > 0 { exaggeration = max(1, min(6, (0.04 * ext / maxDepth).rounded())) }
+        if maxDepth > 0, ext > 0 { exaggeration = max(1, min(4, (0.10 * ext / maxDepth).rounded())) }
     }
 }
 
@@ -469,9 +491,9 @@ struct FlexibleFilamentPane: View {
     var body: some View {
         VStack(alignment: .leading, spacing: DS.Space.m) {
             if let e = model.catalogueError { FlexCaption(text: e, colour: DS.Color.danger.color) }
+            if let m = model.material { temperature(m) }
             FlexSectionTitle(text: "Filament")
             ForEach(model.catalogue) { m in row(m) }
-            if let m = model.material { temperature(m) }
             FlexSectionTitle(text: "Walls")
             FlexChips(options: [("1", "1 bead"), ("2", "2 beads")],
                       selection: String(model.settings.beadsPerWall), id: "flexible-beads") { v in
@@ -575,9 +597,12 @@ struct FlexibleSquishPane: View {
                 if f.isLoaded { curveControls(f); results(f) }
                 FlexibleSliceView(model: model)
             }
-            if model.material?.noPrediction != nil {
-                FlexCaption(text: "This filament is calibrate-first: the curves can be drawn, but no squish is predicted.",
-                            colour: DS.Color.warning.color)
+            if let np = model.material?.noPrediction {
+                // R7: empty fields with the reason — core's own sentence
+                Text("Calibrate first — geometry only").font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(DS.Color.warning.color)
+                FlexCaption(text: np.reason)
+                FlexCaption(text: "The curves can be drawn; no squish, density or depth is predicted.")
             }
         }
         .onAppear { if model.selectedRegion == nil { model.selectedRegion = faces.first?.faceRegionID } }

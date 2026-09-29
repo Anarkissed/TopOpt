@@ -182,6 +182,19 @@ public final class FlexibleStageModel: ObservableObject {
         guard s != settings else { return }
         settings = s
         if recompute { recomputeAll() }
+        scheduleSave()
+    }
+
+    /// Every edit reaches the disk shortly after it is made, not only on Exit: a kill
+    /// between edits must not lose the drawing (the lattice stage's own 2026-09-02 rule).
+    private var saveTask: Task<Void, Never>?
+    private func scheduleSave() {
+        saveTask?.cancel()
+        saveTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 800_000_000)
+            guard let self, !Task.isCancelled else { return }
+            self.save()
+        }
     }
 
     public func save() {
@@ -287,6 +300,7 @@ public final class FlexibleStageModel: ObservableObject {
 
     /// Tap on the model: a new face becomes loaded; a known face is selected.
     public func tapFace(_ face: Int) {
+        NSLog("DIAG flexible tap face %d (known %d)", face, settings.face(FlexibleJob.regionID(face: face)) != nil ? 1 : 0)
         let region = FlexibleJob.regionID(face: face)
         if settings.face(region) == nil {
             edit { $0.setFace(FlexibleFaceSettings(faceRegionID: region)) }

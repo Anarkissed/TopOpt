@@ -114,13 +114,29 @@ public struct FlexibleOverlayMesh {
         for (k, d) in depths {
             guard let st = stacks[k] else { continue }
             let l = st.load
-            // the column quads: the full depth
+            // the column quads: the full depth, each CORNER the mean of the columns that
+            // share it, so neighbouring quads stay joined and the dented surface is closed
             if let start = flatStart[k] {
-                for (c, dc) in d.enumerated() {
-                    guard let dd = dc, dd > 0 else { continue }
+                func depth(_ iu: Int, _ iv: Int) -> Double? {
+                    let c = st.column(iu, iv)
+                    guard c >= 0, c < d.count else { return nil }
+                    return d[c]
+                }
+                func corner(_ cu: Int, _ cv: Int) -> Double {
+                    var sum = 0.0, n = 0
+                    for (du, dv) in [(-1, -1), (0, -1), (-1, 0), (0, 0)] {
+                        if let x = depth(cu + du, cv + dv) { sum += x; n += 1 }
+                    }
+                    return n > 0 ? sum / Double(n) : 0
+                }
+                // the quad's corners in build order, then its six flat vertices
+                let order = [0, 2, 1, 0, 3, 2]
+                for (c, col) in st.columns.enumerated() where c < d.count {
+                    let cs = [corner(col.iu, col.iv), corner(col.iu + 1, col.iv),
+                              corner(col.iu + 1, col.iv + 1), corner(col.iu, col.iv + 1)]
                     for j in 0..<6 {
-                        let v = start + c * 6 + j
-                        guard v < n else { break }
+                        let v = start + c * 6 + j, dd = cs[order[j]]
+                        guard v < n, dd > 0 else { continue }
                         out[v * 3] += Float(l.x * dd); out[v * 3 + 1] += Float(l.y * dd); out[v * 3 + 2] += Float(l.z * dd)
                     }
                 }

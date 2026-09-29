@@ -726,6 +726,10 @@ public struct WorkspacePlaceholder: View {
     public var body: some View {
         ZStack(alignment: .topLeading) {
             DS.Color.background.color.ignoresSafeArea()
+                // Under Flexible the lattice Settings door opens the Flexible page instead (always-mounted view).
+                .onChange(of: showLatticeWizard) { open in
+                    if open, project.lattice.flexible != nil { showLatticeWizard = false; showFlexiblePage = true }
+                }
             MetalMeshView(mesh: stageMesh,
                           camera: cameraModel,
                           selection: selection,
@@ -2980,10 +2984,6 @@ public struct WorkspacePlaceholder: View {
         }
         .onChange(of: stage) { s in
             if s == .lattice { openLatticeSettingsIfUnconfigured() }
-        }
-        // Under Flexible the lattice Settings door opens the Flexible page instead.
-        .onChange(of: showLatticeWizard) { open in
-            if open, project.lattice.flexible != nil { showLatticeWizard = false; showFlexiblePage = true }
         }
         // Graded follow-up: when a run's accepted variants land (streamed or final),
         // rebake the strut scene so its radii grade by the fresh von Mises field.

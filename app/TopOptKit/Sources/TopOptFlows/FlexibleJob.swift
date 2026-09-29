@@ -16,8 +16,9 @@ import TopOptKit
 public enum FlexibleJob {
 
     /// Face region id for B-rep / pseudo face `face` (one declared region per face, so a
-    /// tapped face and the stack's linked other end are both named by core).
-    public static let regionBase = 100_000
+    /// tapped face and the stack's linked other end are both named by core). The id IS the
+    /// face id, so core's own sentences ("face 12: …") name the face the app shows.
+    public static let regionBase = 0
     public static func regionID(face: Int) -> Int { regionBase + face }
     public static func face(regionID: Int) -> Int { regionID - regionBase }
 

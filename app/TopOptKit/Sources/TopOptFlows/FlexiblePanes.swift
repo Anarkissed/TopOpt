@@ -40,7 +40,9 @@ struct FlexibleAutoPane: View {
             .foregroundStyle(r.reachable ? DS.Color.textPrimary.color : DS.Color.warning.color)
             .fixedSize(horizontal: false, vertical: true)
             .accessibilityIdentifier("flexible-auto-sentence")
-        ForEach(Array(r.reasons.enumerated()), id: \.offset) { _, x in
+        // a failure's sentence is listed once, under "Where it cannot be met"
+        let failureTexts = Set(r.failures.map(\.text))
+        ForEach(Array(r.reasons.filter { !failureTexts.contains($0.text) }.enumerated()), id: \.offset) { _, x in
             HStack(alignment: .top, spacing: 6) {
                 Text("•").foregroundStyle(DS.Color.textTertiary.color)
                 FlexCaption(text: x.text + (x.face.map { " (face \(FlexibleJob.face(regionID: $0)))" } ?? ""))
@@ -339,7 +341,7 @@ struct FlexibleSliceView: View {
         }
         .aspectRatio(CGFloat(max(1, s.width)) / CGFloat(max(1, s.height)), contentMode: .fit)
         .frame(maxHeight: 180)
-        .background(DS.Color.background.color)
+        .frame(maxWidth: .infinity)
         .accessibilityIdentifier("flexible-slice")
         Text(String(format: "Brighter = denser (to ρ %.2f). Grey = lattice with no loaded face above it.", rhoMax))
             .font(.system(size: 10)).foregroundStyle(DS.Color.textTertiary.color)
