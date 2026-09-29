@@ -177,6 +177,24 @@ struct JobLatticeRegion {
   double half_w_mm = 0.0;
   double depth_mm = 0.0;
   std::vector<std::vector<std::array<double, 2>>> outline_uv;   // the app's pocket outline
+  // ── ★ THE FRAME outline_uv IS EXPRESSED IN (app, 2026-09-22) ─────────────────
+  // Unit world vectors of the region's in-plane u and w axes. Core derives the same
+  // pair from the normal in plane_basis(), and the two have agreed so far BY
+  // COINCIDENCE OF CONSTRUCTION, not by contract: the app's basis(n) happens to be
+  // the same formula. The agreement was never derived -- it was FITTED, once, on the
+  // M2 stand in 2026-09-05 by running all eight frames (swap / negate either axis)
+  // and scoring them by include-region void fraction (11.9 % for the winner against
+  // 64-426 % for the rest). The margin is enormous, so the choice is not in doubt;
+  // but it was one part, one heuristic, and the winner's 11.9 % has never been
+  // explained. A convention fitted once is right until a face nobody tried.
+  //
+  // Sent, these END it: where present they are authoritative and the fitted
+  // convention is not consulted. They are still CHECKED against plane_basis() and a
+  // disagreement REFUSES, because running the outline on one frame and a future
+  // depth raster on another -- in silence, on some face nobody tested -- is the
+  // failure that is hardest to see. Absent (zero), today's behaviour is unchanged.
+  Vec3 frame_u{0.0, 0.0, 0.0};
+  Vec3 frame_w{0.0, 0.0, 0.0};
   // ★ WHICH B-REP FACE THIS REGION CAME FROM (task 2026-08-12 §0a). Optional,
   // -1 = "not from a face" (a hand-placed primitive). It exists so the ONE
   // number the user drags can be CHECKED: when a face region names a face that

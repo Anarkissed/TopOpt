@@ -1431,8 +1431,56 @@ JobDescription parse_job(const std::string& json_text) {
                         "zero-depth region marks nothing)");
         } else {  // face
           reject_unknown_keys(
-              gv, {"origin", "normal", "half_u_mm", "half_w_mm", "depth_mm", "outline_uv"},
+              gv, {"origin", "normal", "half_u_mm", "half_w_mm", "depth_mm", "outline_uv",
+                   "frame_u", "frame_w"},
               "a face lattice region geometry");
+          // ── ★ THE FRAME outline_uv IS IN, WHEN THE JOB STATES IT (app, 2026-09-22)
+          // Both axes or neither: one alone cannot define a frame, and guessing the
+          // other from the normal would silently reinstate the fitted convention this
+          // key exists to retire. Unit length and mutual perpendicularity are checked
+          // here because a frame that is neither is not a frame, and the failure
+          // downstream would be a quietly skewed outline rather than an error.
+          {
+            const JsonValue* fu = find_key(gv, "frame_u");
+            const JsonValue* fw = find_key(gv, "frame_w");
+            if ((fu != nullptr) != (fw != nullptr))
+              schema_fail(
+                  "a face lattice region geometry states one of \"frame_u\" / "
+                  "\"frame_w\" without the other -- a frame needs both axes, and "
+                  "deriving the missing one would put the outline back on the "
+                  "convention these keys exist to replace");
+            if (fu && fw) {
+              reg.frame_u = parse_vec3(*fu, "a face lattice region \"frame_u\"");
+              reg.frame_w = parse_vec3(*fw, "a face lattice region \"frame_w\"");
+              auto len = [](const Vec3& v) {
+                return std::sqrt(v.x * v.x + v.y * v.y + v.z * v.z); };
+              const double lu = len(reg.frame_u), lw = len(reg.frame_w);
+              if (!(std::fabs(lu - 1.0) < 1e-6) || !(std::fabs(lw - 1.0) < 1e-6))
+                schema_fail(
+                    "a face lattice region's \"frame_u\" / \"frame_w\" must be UNIT "
+                    "vectors (got lengths " + std::to_string(lu) + " and " +
+                    std::to_string(lw) + ")");
+              const double uw = reg.frame_u.x * reg.frame_w.x +
+                                reg.frame_u.y * reg.frame_w.y +
+                                reg.frame_u.z * reg.frame_w.z;
+              if (!(std::fabs(uw) < 1e-6))
+                schema_fail(
+                    "a face lattice region's \"frame_u\" and \"frame_w\" must be "
+                    "PERPENDICULAR (u . w = " + std::to_string(uw) + ")");
+              const double nu = reg.frame_u.x * reg.normal.x +
+                                reg.frame_u.y * reg.normal.y +
+                                reg.frame_u.z * reg.normal.z;
+              const double nw = reg.frame_w.x * reg.normal.x +
+                                reg.frame_w.y * reg.normal.y +
+                                reg.frame_w.z * reg.normal.z;
+              if (!(std::fabs(nu) < 1e-6) || !(std::fabs(nw) < 1e-6))
+                schema_fail(
+                    "a face lattice region's frame axes must lie IN the face plane "
+                    "(u . n = " + std::to_string(nu) + ", w . n = " +
+                    std::to_string(nw) + ") -- an axis out of plane means the frame "
+                    "and the normal describe different faces");
+            }
+          }
           if (const JsonValue* ov = find_key(gv, "outline_uv")) {
             if (ov->type != JsonValue::Type::Array)
               schema_fail("a face lattice region \"outline_uv\" must be an array of loops");
