@@ -8,8 +8,10 @@
 //   * this Swift reference (`FlexibleLatticeField.solid(at:)`),
 //   * the Metal raymarcher (FlexibleLatticeRenderer's MSL `flx_field`),
 //   * the C++ exporter's streaming mesher (flexible_lattice.cpp `flx_field`).
-// A change here must be made in all three; `FlexibleLatticeFieldAgreementTests` samples
-// them at the same points and fails if they disagree.
+// A change here must be made in all three; the tests sample them at the same points and
+// fail if they disagree: FlexibleLatticeExportTests (C++ — BIT-IDENTICAL on a graded,
+// tilted field) and FlexibleLatticeRendererTests (MSL — within 2e-3 mm; the GPU's own
+// sin/cos). FlexibleLatticeFieldTests pins what the field means on C1's pad.
 //
 // ── THE FIELD (all lengths mm, model space; negative = inside) ─────────────────────────
 // Grids use the VOXEL-CENTRE convention: value i sits at c0 + i·spacing, sampled with
