@@ -156,6 +156,29 @@ public final class FlexibleStageModel: ObservableObject {
     @Published public private(set) var latticeError: String?
 
     private var pendingStacks: Set<FlexFaceKey> = []
+    /// Every bridge call in flight (scene, stacks, drawn maps, the lattice) — awaited by
+    /// `waitForIdle` so nothing is still inside core when its owner goes away.
+    private var inFlight: [UUID: Task<Void, Never>] = [:]
+
+    private func track(_ t: Task<Void, Never>) {
+        let id = UUID()
+        inFlight[id] = t
+        Task { @MainActor [weak self] in
+            _ = await t.value
+            self?.inFlight[id] = nil
+        }
+    }
+
+    /// Wait until no bridge call is in flight and no design / Auto run is pending (tests; a
+    /// page that must not tear down a scene mid-call).
+    func waitForIdle() async {
+        for _ in 0..<2000 {
+            let tasks = Array(inFlight.values) + [designTask, autoTask].compactMap { $0 }
+            for t in tasks { _ = await t.value }
+            if inFlight.isEmpty { return }
+            try? await Task.sleep(nanoseconds: 5_000_000)
+        }
+    }
     private var designGeneration = 0
     private var designTask: Task<Void, Never>?
     private var autoTask: Task<Void, Never>?
@@ -256,6 +279,7 @@ public final class FlexibleStageModel: ObservableObject {
             beadWidthMM: project.printParams.strutLineWidthMM, faceCount: faceCount,
             settings: settings, regions: project.latticeJobRegions().regions.map(\.wireDictionary))
         inputs.sectorRegions = regions.wire
+        (inputs.buildDir, inputs.plateDir) = buildDirections
         let json = try FlexibleJob.sceneJobJSON(inputs, fallbackMaterial: catalogue.first?.id ?? "flexible")
         return SceneJob(json: json, dir: (file.path as NSString).deletingLastPathComponent)
     }
@@ -267,7 +291,15 @@ public final class FlexibleStageModel: ObservableObject {
         let regions = project.latticeJobRegions().regions.map(\.wireDictionary)
         let r = (try? JSONSerialization.data(withJSONObject: regions, options: [.sortedKeys]))
             .map { String(decoding: $0, as: UTF8.self) } ?? ""
-        return "\(file.path)|\(project.quality.resolution)|\(r)|\(self.regions.key)"
+        let (b, p) = buildDirections
+        return "\(file.path)|\(project.quality.resolution)|\(r)|\(self.regions.key)|\(b)|\(p.map { "\($0)" } ?? "-")"
+    }
+
+    /// ★ ROUND 3 (item 1.2): the main run's build directions — `loads.build_dir` = −gravity
+    /// (+Z when gravity is unset) and the plate normal only when he declared one.
+    var buildDirections: (SIMD3<Double>, SIMD3<Double>?) {
+        let lc = project.loadCase()
+        return (lc.buildDirection, lc.plateDirection == SIMD3<Double>(0, 0, 0) ? nil : lc.plateDirection)
     }
 
     // MARK: regions (split sectors, FlexibleRegions.swift)
@@ -287,7 +319,7 @@ public final class FlexibleStageModel: ObservableObject {
         }
         sceneState = .opening
         let worker = self.worker
-        Task.detached(priority: .userInitiated) {
+        track(Task.detached(priority: .userInitiated) {
             do {
                 let info = try await worker.open(jobJSON: job.json, jobDir: job.dir, key: key)
                 await MainActor.run {
@@ -296,12 +328,14 @@ public final class FlexibleStageModel: ObservableObject {
                     self.geometry = [:]
                     self.pendingStacks = []
                     self.sceneState = .ready
+                    // ★ ROUND 3 (item 1.2): the main page's loads arrive as pressed / resting faces
+                    self.adoptMainPageLoads(recompute: false)
                     self.recomputeAll()
                 }
             } catch {
                 await MainActor.run { self.sceneState = .failed("\(error)") }
             }
-        }
+        })
     }
 
     // MARK: faces (S2)
@@ -310,18 +344,103 @@ public final class FlexibleStageModel: ObservableObject {
         settings.loadedFaces.map { FlexFaceKey(region: $0.faceRegionID, rotation: $0.rotationDeg) }
     }
 
-    /// Tap on the model: a new face becomes loaded; a known face is selected.
+    /// Tap on the model: ★ ROUND 3 — it only SELECTS (img 8: tapping around pressed seven
+    /// faces at 10 kg each, which made the conflicts and the '7 faces' refusal). Pressing is
+    /// explicit: [Press it] / [It rests here] in the panel, or the main page's groups.
     public func tapFace(_ face: Int, point: SIMD3<Double>? = nil) {
         // a split face resolves to the sector holding the point (the Surface stage's rule)
         let region = regions.region(at: point, face: face, mesh: project.viewerMesh)
         NSLog("DIAG flexible tap face %d → region %d (known %d)", face, region, settings.face(region) != nil ? 1 : 0)
         curvePoint = nil
-        if settings.face(region) == nil {
-            edit { $0.setFace(FlexibleFaceSettings(faceRegionID: region)) }
-        }
         selectedRegion = region
         if tab == .filament { tab = .squish }
         ensureStack(region)
+    }
+
+    // MARK: the main page's loads (round 3, item 1.2 — FlexibleMainPageLoads)
+
+    /// The main page's groups read as Flexible faces (cached per scene open and write-back).
+    @Published public private(set) var mainPageLoads = FlexibleMainPageLoads()
+
+    /// Read the main page's groups, then MATERIALISE them: a face in a Load group becomes
+    /// pressed with its share (weightFrom = the group), an Anchor group's faces rest. An
+    /// inherited face re-syncs; a weight of his own (weightFrom nil) is never overwritten; a
+    /// face whose group no longer presses it keeps its weight as his own. Sealed as one undo
+    /// step. Called when the scene opens and after every write-back.
+    public func adoptMainPageLoads(recompute: Bool = true) {
+        guard let mesh = project.viewerMesh else { return }
+        let loads = FlexibleMainPageLoads.derive(
+            groups: project.selection.groups, force: project.force, faceRegions: project.faceRegions,
+            mesh: mesh, regions: regions, load: { [stacks] r in stacks[FlexFaceKey(region: r, rotation: 0)]?.load })
+        mainPageLoads = loads
+        let before = settings
+        edit({ s in
+            for e in loads.entries.values.sorted(by: { $0.region < $1.region }) {
+                switch e.role {
+                case .pressed:
+                    if var f = s.face(e.region) {
+                        guard f.weightFrom != nil else { continue }        // his own weight
+                        f.role = "loaded"; f.weightKg = e.weightKg; f.weightFrom = e.groupID
+                        s.setFace(f)
+                    } else {
+                        s.setFace(FlexibleFaceSettings(faceRegionID: e.region, weightKg: e.weightKg, weightFrom: e.groupID))
+                    }
+                case .rests:
+                    if s.face(e.region) == nil { s.setFace(FlexibleFaceSettings(faceRegionID: e.region, role: "resting")) }
+                case .ask:
+                    break
+                }
+            }
+            for f in s.faces where f.weightFrom != nil && loads.entry(f.faceRegionID)?.role != .pressed {
+                var g = f; g.weightFrom = nil; s.setFace(g)
+            }
+        }, recompute: recompute)
+        if settings != before { project.sealUndoStep() }
+        if selectedRegion == nil { selectedRegion = settings.loadedFaces.first?.faceRegionID }
+    }
+
+    /// [Press it]: the main page's weight when the face is in a Load group; else `kg` (the
+    /// number pad's answer). false ⇒ a weight must be asked first ("How much weight presses
+    /// here?").
+    @discardableResult
+    public func press(_ region: Int, kg: Double? = nil) -> Bool {
+        let inherited = mainPageLoads.entry(region).flatMap { $0.role == .pressed ? $0 : nil }
+        guard inherited != nil || (kg ?? 0) > 0 else { return false }
+        edit { s in
+            var f = s.face(region) ?? FlexibleFaceSettings(faceRegionID: region)
+            f.role = "loaded"
+            if let e = inherited, kg == nil { f.weightKg = e.weightKg; f.weightFrom = e.groupID }
+            else if let kg { f.weightKg = kg; f.weightFrom = nil }
+            s.setFace(f)
+        }
+        selectedRegion = region
+        ensureStack(region)
+        return true
+    }
+
+    /// [It rests here].
+    public func rest(_ region: Int) {
+        edit { s in
+            var f = s.face(region) ?? FlexibleFaceSettings(faceRegionID: region, role: "resting")
+            f.role = "resting"
+            s.setFace(f)
+        }
+        selectedRegion = region
+    }
+
+    /// A weight typed on the Flexible page. ★ ONE SOURCE OF TRUTH (maintainer): for a face
+    /// whose weight comes from a main-page group, it WRITES BACK to the group — the group
+    /// takes the weight that gives this face `kg` — and every face of the group re-syncs, so
+    /// the area split stays consistent. A face in no group keeps it as its own.
+    public func setWeight(_ region: Int, kg: Double) {
+        guard kg > 0 else { return }
+        if let f = settings.face(region), let g = f.weightFrom,
+           let total = mainPageLoads.groupKg(forRegion: region, kg: kg) {
+            project.force.setWeight(g, kg: total)
+            adoptMainPageLoads()
+            return
+        }
+        edit { s in guard var f = s.face(region) else { return }; f.weightKg = kg; f.weightFrom = nil; s.setFace(f) }
     }
 
     public func removeFace(_ region: Int) {
@@ -341,7 +460,7 @@ public final class FlexibleStageModel: ObservableObject {
         pendingStacks.insert(k)
         let partFlat = project.viewerMesh?.flat.positions ?? []
         let worker = self.worker
-        Task.detached(priority: .userInitiated) {
+        track(Task.detached(priority: .userInitiated) {
             do {
                 let st = try await worker.withScene { try $0.stack(face: k.region, rotation: k.rotation) }
                 let g = try await worker.withScene { try FlexFaceGeometry.compute(scene: $0, key: k, stack: st, partFlat: partFlat) }
@@ -349,7 +468,7 @@ public final class FlexibleStageModel: ObservableObject {
             } catch {
                 await MainActor.run { self.lastError = "\(error)"; self.pendingStacks.remove(k) }
             }
-        }
+        })
     }
 
     // MARK: the pipeline
@@ -374,11 +493,11 @@ public final class FlexibleStageModel: ObservableObject {
         guard let k = key(region), let f = settings.face(region), stacks[k] != nil else { return }
         let map = f.map
         let worker = self.worker
-        Task.detached(priority: .userInitiated) {
+        track(Task.detached(priority: .userInitiated) {
             if let s = try? await worker.withScene({ try $0.squishFraction(face: k.region, rotation: k.rotation, map: map) }) {
                 await MainActor.run { self.liveS[k] = s }
             }
-        }
+        })
         scheduleDesigns(delayNS: 120_000_000)
     }
 
@@ -401,7 +520,7 @@ public final class FlexibleStageModel: ObservableObject {
         }
         guard !jobs.isEmpty else { return }
         let worker = self.worker
-        Task.detached(priority: .userInitiated) {
+        track(Task.detached(priority: .userInitiated) {
             var out: [FlexFaceKey: [Double]] = [:]
             for (k, map) in jobs {
                 if let s = try? await worker.withScene({ try $0.squishFraction(face: k.region, rotation: k.rotation, map: map) }) {
@@ -410,7 +529,7 @@ public final class FlexibleStageModel: ObservableObject {
             }
             let o = out
             await MainActor.run { for (k, v) in o { self.liveS[k] = v } }
-        }
+        })
     }
 
     private func scheduleDesigns(delayNS: UInt64) {
@@ -607,7 +726,7 @@ public final class FlexibleStageModel: ObservableObject {
         latticeBuilding = true
         latticeError = nil
         let worker = self.worker
-        Task.detached(priority: .userInitiated) {
+        track(Task.detached(priority: .userInitiated) {
             do {
                 let field = try await worker.withScene {
                     try $0.densityField(faces: keys.map(\.region), rotations: keys.map(\.rotation), build: build)
@@ -622,7 +741,7 @@ public final class FlexibleStageModel: ObservableObject {
             } catch {
                 await MainActor.run { self.latticeError = "\(error)"; self.latticeBuilding = false }
             }
-        }
+        })
     }
 
     public func discardLattice() { lattice = nil }
@@ -638,6 +757,7 @@ public final class FlexibleStageModel: ObservableObject {
             settings: settings, regions: project.latticeJobRegions().regions.map(\.wireDictionary),
             stampGrids: stampGrids)
         inputs.sectorRegions = regions.wire
+        (inputs.buildDir, inputs.plateDir) = buildDirections
         return try FlexibleJob.runJobJSON(inputs)
     }
 }

@@ -67,8 +67,11 @@ enum FlexibleHisProject {
 
     /// A Flexible stage model over `project`, its scene open and every loaded face's stack
     /// and geometry built (the page's own pipeline). Waits up to `timeout` seconds.
-    static func openedModel(_ project: ProjectModel, timeout: Double = 60) async throws -> FlexibleStageModel {
+    /// `test` gets a teardown that waits until nothing is still inside core (a bridge call
+    /// running past the test's end crashed the process at exit).
+    static func openedModel(_ project: ProjectModel, test: XCTestCase, timeout: Double = 60) async throws -> FlexibleStageModel {
         let m = FlexibleStageModel(project: project, materialsPath: materialsPath, stampsPath: stampsPath, persist: {})
+        test.addTeardownBlock { @MainActor in await m.waitForIdle() }
         m.openScene()
         try await waitFor(timeout, "the scene and every loaded stack") {
             m.sceneState == .ready && m.loadedKeys.allSatisfy { m.stacks[$0] != nil && m.geometry[$0] != nil }

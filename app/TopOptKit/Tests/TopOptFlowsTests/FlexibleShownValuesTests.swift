@@ -39,7 +39,7 @@ final class FlexibleShownValuesTests: XCTestCase {
         let top = FlexibleHisProject.topFace(try XCTUnwrap(probe.viewerMesh))
         s.setFace(FlexibleFaceSettings(faceRegionID: top))
         let pm = try FlexibleHisProject.padProject(s)
-        let m = try await FlexibleHisProject.openedModel(pm)
+        let m = try await FlexibleHisProject.openedModel(pm, test: self)
         let k = FlexFaceKey(region: top, rotation: 0)
         try await FlexibleHisProject.waitFor(30, "the drawn map") { m.liveS[k] != nil }
         XCTAssertNotNil(m.material?.noPrediction, "premise: TPU 95A is calibrate-first")
@@ -76,7 +76,7 @@ final class FlexibleShownValuesTests: XCTestCase {
         s.faces = s.faces.filter { $0.faceRegionID == FlexibleHisProject.topA }
         s.checkStamps = []
         r.project.lattice.flexible = s
-        let m = try await FlexibleHisProject.openedModel(r.project)
+        let m = try await FlexibleHisProject.openedModel(r.project, test: self)
         let k = FlexFaceKey(region: FlexibleHisProject.topA, rotation: 0)
         try await FlexibleHisProject.waitFor(30, "the drawn map") { m.liveS[k] != nil }
         let o = try XCTUnwrap(FlexiblePageChannels.overlay(model: m))

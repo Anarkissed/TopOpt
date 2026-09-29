@@ -11,6 +11,7 @@
 //     declared face as loaded with a unit map. It is never saved or run.
 
 import Foundation
+import simd
 import TopOptKit
 
 public enum FlexibleJob {
@@ -36,6 +37,11 @@ public enum FlexibleJob {
         public var stampGrids: [UUID: FlexStamp]
         /// The split sectors' `loads.face_regions` entries (FlexibleRegions.wire).
         public var sectorRegions: [[String: Any]] = []
+        /// ★ ROUND 3 (item 1.2): the main run's `loads.build_dir` (−gravity, "up in service")
+        /// and root `build_direction` (the plate normal, only when declared) — without them
+        /// core assumed +Z, so a part whose gravity is not −Z got the wrong side faces.
+        public var buildDir: SIMD3<Double>?
+        public var plateDir: SIMD3<Double>?
 
         public init(modelPath: String, resolution: Int, beadWidthMM: Double, faceCount: Int,
                     settings: FlexibleStageSettings, regions: [[String: Any]] = [],
@@ -138,7 +144,9 @@ public enum FlexibleJob {
         let regions: [[String: Any]] = (0..<max(0, i.faceCount)).map { f in
             ["id": regionID(face: f), "name": "face \(f)", "add": [f]]
         } + i.sectorRegions
-        let job: [String: Any] = [
+        var loads: [String: Any] = ["face_regions": regions]
+        if let b = i.buildDir { loads["build_dir"] = [b.x, b.y, b.z] }
+        var job: [String: Any] = [
             "model": i.modelPath,
             "material": material,
             // core's schema still requires these; the Flexible runner does not read them
@@ -146,9 +154,11 @@ public enum FlexibleJob {
             "mode": "analyze",
             "resolution": i.resolution,
             "output": ["report": "report.json", "mesh_format": "stl", "mesh_prefix": "unused"],
-            "loads": ["face_regions": regions],
+            "loads": loads,
             "flexible": block,
         ]
+        // the plate normal at the ROOT, only when declared (RemoteRunner's rule)
+        if let p = i.plateDir, p != SIMD3<Double>(0, 0, 0) { job["build_direction"] = [p.x, p.y, p.z] }
         let data = try JSONSerialization.data(withJSONObject: job, options: [.sortedKeys, .prettyPrinted])
         return String(decoding: data, as: UTF8.self)
     }

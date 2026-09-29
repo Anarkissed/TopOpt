@@ -258,7 +258,7 @@ final class FlexibleOverlayClipTests: XCTestCase {
         s.checkStamps = []
         XCTAssertEqual(s.loadedFaces.map(\.faceRegionID), [FlexibleHisProject.topA], "premise: only top A pressed")
         pm.lattice.flexible = s
-        let m = try await FlexibleHisProject.openedModel(pm)
+        let m = try await FlexibleHisProject.openedModel(pm, test: self)
         let o = try XCTUnwrap(FlexiblePageChannels.overlay(model: m))
         let key = FlexFaceKey(region: FlexibleHisProject.topA, rotation: 0)
         let st = try XCTUnwrap(m.stacks[key])
