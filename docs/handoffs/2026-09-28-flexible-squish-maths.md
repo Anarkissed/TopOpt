@@ -531,4 +531,60 @@ What the re-run changed in the evidence (honest, not tuned):
 - (c) Still gyroid at 220 °C, by the near-edge tiebreak (3,008 vs 3,648); it is also the
   lightest in grams.
 
-ROUND1_TESTS
+### FULL CHECK (2026-09-29, on the pushed head `2405ddec`: sync + review round 1)
+
+**Core, full suite, cli_demo included** (140 registered, macOS arm64 Release, OCCT +
+Eigen + lib3mf, the same dependencies as CI):
+```
+140/140 Test #116: cli_demo .........................   Passed  4124.96 sec
+
+100% tests passed out of 140
+
+Total Test time (real) = 4124.98 sec
+CTEST_EXIT=0
+```
+```
+ 81/140 Test #137: flexible_field ...................   Passed    0.92 sec
+ 84/140 Test #140: flexible_run .....................   Passed    0.35 sec
+118/140 Test #138: flexible_recommend ...............   Passed    0.42 sec
+120/140 Test #139: flexible_job .....................   Passed    0.16 sec
+122/140 Test #133: flexible_data ....................   Passed    0.10 sec
+129/140 Test #134: flexible_squish ..................   Passed    0.20 sec
+138/140 Test #136: flexible_faces ...................   Passed    0.09 sec
+139/140 Test #135: flexible_curve ...................   Passed    0.07 sec
+140/140 Test #116: cli_demo .........................   Passed  4124.96 sec
+```
+
+**App, full package suite** (`swift test --package-path app/TopOptKit`, Debug, macOS,
+lib3mf-free worktree slice, 3 h 38 min):
+```
+Executed 2551 tests, with 34 tests skipped and 14 failures (0 unexpected) in 13079.964 (13080.282) seconds
+```
+The 14 failure assertions fall in 9 test cases. **All 9 are INHERITED; none come from
+this branch:**
+
+| test case | assertions | verdict |
+|---|---|---|
+| `AppModelTests.testReopenedThreeMFProjectReimportsTheStlWorkingCopy` | 3 | inherited: known pre-existing (no lib3mf in a worktree slice) |
+| `AppModelTests.testThreeMFImportNormalisesToStlWorkingCopyAndKeepsProvenance` | 5 | inherited: known pre-existing (no lib3mf) |
+| `AppModelTests.testThreeMFImportOptimisesOnDeviceEndToEnd` | 3 | inherited: known pre-existing (no lib3mf) |
+| `OrganicSampleCubeTests.testThickerIsLiveAndNeverRetraces` | 2 | inherited: known pre-existing (#354's handoff) |
+| `OrganicVariantCacheTests.testTheKeyIgnoresThicknessAndFollowsCoreAndTopology` | 2 | inherited: known pre-existing (#354's handoff) |
+| `LatticeCellGradingTests.testGradingChangesTheRenderedLattice` ("298 is not greater than 500") | 2 | **inherited, NEW with this sync**: identical failure on the synced base without my commits |
+| `LatticePageRound2Tests.testIncludeAndExcludeRegionsReachTheEmittedJobJSON` (region geometry keys now carry `frame_u`, `frame_w`) | 2 | **inherited, NEW with this sync**: identical on the base |
+| `LatticeSimSolveTriggerTests.testTheTriggerRefusesOnAllThreeGrounds` ("…and otherwise it actually runs") | 2 | **inherited, NEW with this sync**: identical on the base |
+| `OrganicPreviewParameterParityTests.testThePreviewCarriesEveryOrganicParameterTheRunSets` (`bead_is_stated`, `defer_bead_calibration`) | 2 | **inherited, NEW with this sync**: identical on the base |
+
+**How the four new ones were decided:** a scratch worktree at main `f932266f` + #358
+`8414af47` + #354 `026904dd`, merged in my sync order. It differs from `2405ddec` only by
+this branch's own files (nothing under `app/`). There, `build_core.sh` and then
+`swift test --filter` on the four tests gave:
+```
+	 Executed 4 tests, with 4 failures (0 unexpected) in 39.508 (39.512) seconds
+```
+Same four messages as on my branch. They come in with #354/#358/main at this sync, not
+from Flexible; they belong to #354's/#358's owners.
+
+**Side effect, handled:** the app suite rewrites other tasks' evidence files
+(`docs/handoffs/assets/*.png`, `evidence/**`). They were restored to their committed
+contents; four that a docs commit had swept in (`91e1f0d1`) were restored in `592d9155`.
