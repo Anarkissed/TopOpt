@@ -101,10 +101,10 @@ struct ColumnDesign {
   std::string status;
   bool target_extrapolated = false;
   double target_density = 0.0;    // meaningful when status == "ok"
-  double nearest_depth_mm = 0.0;  // the unreachable column's nearest achievable depth
+  double nearest_depth_mm = 0.0;  // the unreachable column's nearest achievable depth; NaN = unknown
   bool nearest_known = false;
   double clamped_density = 0.0;
-  double clamped_depth_mm = 0.0;
+  double clamped_depth_mm = 0.0;  // NaN when the nearest achievable depth is past the data (H1)
   double buildable_density = 0.0;
   double buildable_depth_mm = 0.0;
   bool buildable_ok = false;      // false: the forward solve left the data
@@ -127,7 +127,9 @@ struct FaceDesign {
   bool design_stamp_rigid_averaged = false;  // a rigid design stamp is read as its
                                              // average pressure over its footprint
   double design_stamp_off_face_n = 0.0;
+  bool design_stamp_off_face = false;  // some of the design stamp's force misses the face
   int ok = 0, too_firm = 0, too_soft = 0, beyond_data = 0, no_lattice = 0;
+  int solid_under_map = 0;  // no_lattice columns with squish drawn over them (B2)
   int target_extrapolated = 0, buildable_extrapolated = 0, buildable_beyond_data = 0;
   int near_edge = 0;  // buildable density within 10 % of the table's span of an end
   double max_smoothing_change_mm = 0.0;
@@ -158,6 +160,7 @@ struct StampCheck {
   double local_cell_mm = 0.0;        // the largest cell under the stamp
   bool narrow = false;               // narrower than 3 local cells (R9)
   double force_off_face_n = 0.0;
+  bool off_face = false;             // some of the stamp's force lands off the face (B1)
   TierBand tier;
 };
 

@@ -75,6 +75,12 @@ struct FaceFrame {
 FaceFrame face_frame(const TriangleMesh& mesh, const std::vector<int>& triangles,
                      int rotation_deg, const Vec3& build_dir);
 
+// The frame of the given triangles CLIPPED to the region's cuts (half-spaces), so a
+// sector of a face is framed from its own geometry (B6). Empty cuts = face_frame.
+FaceFrame face_frame_cut(const TriangleMesh& mesh, const std::vector<int>& triangles,
+                         const std::vector<RegionCut>& cuts, int rotation_deg,
+                         const Vec3& build_dir);
+
 // One column of the stack: a ray along the load through the (u, v) cell centre.
 struct StackColumn {
   int iu = 0, iv = 0;        // cell in the column grid
@@ -98,6 +104,7 @@ struct StackLink {
 // leaves through are the LINKED OTHER END.
 struct Stack {
   int face_region_id = -1;
+  std::vector<RegionCut> cuts;  // the region's cuts (a sector); empty for a whole face
   FaceFrame frame;
   double pitch_mm = 0.0;
   int nu = 0, nv = 0;             // the column grid over [0, u_extent] × [0, v_extent]
@@ -132,6 +139,9 @@ Stack build_stack(const StepModel& model, const ResolvedFaceRegion& face,
                   const std::vector<ResolvedFaceRegion>& regions, const VoxelGrid& grid,
                   const std::vector<char>& lattice_mask, int rotation_deg,
                   const Vec3& build_dir, double pitch_mm);
+
+// Does `p` satisfy every half-space (the voxel-centre rule of face_region.hpp)?
+bool passes_cuts(const std::vector<RegionCut>& cuts, const Vec3& p);
 
 // Angle between two load LINES (0..90°): the sign of a direction does not matter.
 double axis_angle_deg(const Vec3& a, const Vec3& b);

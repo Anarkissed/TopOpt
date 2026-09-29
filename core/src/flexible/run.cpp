@@ -94,6 +94,25 @@ std::string jrange(const Range1& r) {
   return Obj().add("min", jnum(r.min)).add("mean", jnum(r.mean)).add("max", jnum(r.max)).str();
 }
 
+// A CSV line with every non-finite field left EMPTY (H1: an unknown value is blank with
+// its status beside it, never a number).
+std::string blank_nans(std::string line) {
+  for (const char* t : {"-nan", "nan", "-inf", "inf"}) {
+    std::size_t at = 0;
+    const std::string tok(t);
+    while ((at = line.find(tok, at)) != std::string::npos) {
+      const bool left = at == 0 || line[at - 1] == ',';
+      const std::size_t end = at + tok.size();
+      const bool right = end == line.size() || line[end] == ',' || line[end] == '\n';
+      if (left && right)
+        line.erase(at, tok.size());
+      else
+        at = end;
+    }
+  }
+  return line;
+}
+
 std::string fmtd(double v, int dec) {
   char b[40];
   std::snprintf(b, sizeof(b), "%.*f", dec, v);
@@ -461,6 +480,7 @@ std::string recommendation_json(const Recommendation& r, const std::string& req_
                         .add("unreachable_columns", jnum(c.unreachable_columns))
                         .add("near_edge_columns", jnum(c.near_edge_columns))
                         .add("material_volume_mm3", jnum(c.material_volume_mm3))
+                        .add("mass_g", c.mass_known ? jnum(c.mass_g) : "null")
                         .add("insideness", jnum(c.insideness))
                         .add("failures", jlist(fl))
                         .str());
@@ -693,6 +713,8 @@ FlexibleRunResult run_flexible_job(const JobDescription& job, const std::string&
       fo.add("design_pressure_even_mpa", jnum(d.design_pressure_even_mpa))
           .add("design_stamp_rigid_averaged", jbool(d.design_stamp_rigid_averaged))
           .add("design_stamp_off_face_n", jnum(d.design_stamp_off_face_n))
+          .add("design_stamp_off_face", jbool(d.design_stamp_off_face))
+          .add("solid_under_map_columns", jnum(d.solid_under_map))
           .add("columns_by_status", Obj().add("ok", jnum(d.ok)).add("too_firm", jnum(d.too_firm))
                                         .add("too_soft", jnum(d.too_soft)).add("beyond_data", jnum(d.beyond_data))
                                         .add("no_lattice", jnum(d.no_lattice)).str())
@@ -750,7 +772,7 @@ FlexibleRunResult run_flexible_job(const JobDescription& job, const std::string&
                       c.buildable_extrapolated ? 1 : 0, has ? c.cell_mm : kNaN, d.tier.tier.c_str(),
                       d.tier.band, c.buildable_ok ? c.buildable_depth_mm * (1 - d.tier.band) : kNaN,
                       c.buildable_ok ? c.buildable_depth_mm * (1 + d.tier.band) : kNaN);
-        csv << line;
+        csv << blank_nans(line);
       }
       write_text(out_path("face" + id + "_columns.csv"), csv.str());
       const std::string what = rec.topology + ", " + fx.material_id + " at " + temp_label + ", " +
@@ -814,7 +836,7 @@ FlexibleRunResult run_flexible_job(const JobDescription& job, const std::string&
         std::snprintf(line, sizeof(line), "%d,%d,%.4f,%.4f,%.5f,%s\n", st.columns[k].iu, st.columns[k].iv,
                       st.columns[k].u_mm, st.columns[k].v_mm, c.depth_mm[k] >= 0 ? c.depth_mm[k] : kNaN,
                       c.status[k].c_str());
-        csv << line;
+        csv << blank_nans(line);
       }
       write_text(out_path(name + ".csv"), csv.str());
       std::vector<std::string> notes = {
@@ -851,6 +873,7 @@ FlexibleRunResult run_flexible_job(const JobDescription& job, const std::string&
                                .add("max_depth_mm", jnum(c.max_depth_mm))
                                .add("rigid_depth_mm", cs.stamp.rigid && c.ok ? jnum(c.rigid_depth_mm) : "null")
                                .add("force_off_face_n", jnum(c.force_off_face_n))
+                               .add("off_face", jbool(c.off_face))
                                .add("tier", Obj().add("tier", jstr(c.tier.tier)).add("band", jnum(c.tier.band)).str())
                                .str());
     }
@@ -897,6 +920,14 @@ FlexibleRunResult run_flexible_job(const JobDescription& job, const std::string&
                             .add("tier", mat != data.catalogue.materials.end() ? jstr(mat->second.tier) : "null")
                             .str())
       .add("tested_temperatures_c", jarr(tested_temperatures(data, fx.material_id)))
+      .add("temperature_notes", [&] {
+        Obj o;
+        for (double t : tested_temperatures(data, fx.material_id)) {
+          const std::string n = temperature_note(data, fx.material_id, t);
+          if (!n.empty()) o.add(fmtd(t, 0), jstr(n));
+        }
+        return o.str();
+      }())
       .add("recommendation", recommendation_json(rec, fx.topology,
                                                  fx.nozzle_temp_auto ? jstr("auto") : jnum(fx.nozzle_temp_c)))
       .add("topology", rec.chosen ? jstr(rec.topology) : "null")

@@ -391,6 +391,14 @@ CurveEntry parse_entry(const Value& e, const std::string& table, std::size_t ind
   if (!(out.conditioning.rate_mm_per_min > 0.0))
     json::fail(key("conditioning") + ".rate_mm_per_min", "must be > 0");
   out.source = json::as_string(*json::find(e, "source"), key("source"));
+  // ★ CORE STRAIN, ONCE, HERE (02 §2; review round 1). The table's strain is nominal over
+  // the whole specimen, skins included. The skins (near-solid TPU, ~40-50 MPa against a
+  // 0.1-9 MPa core) are treated as rigid and taken out of the gauge length, so
+  // ε_core = ε_nominal × height / (height − skin_total); stress is unchanged. At the
+  // stiffest Iacob row, skin compliance moves this by under 3 %.
+  const double k = out.specimen.height_mm / (out.specimen.height_mm - out.specimen.skin_total_mm);
+  for (const CurvePoint& p : out.loading) out.core_loading.push_back({p.strain * k, p.stress_mpa});
+  out.core_strain_max_measured = out.strain_max_measured * k;
   return out;
 }
 
@@ -559,6 +567,25 @@ double core_density_of(const DensityAxis& axis, const CurveEntry& entry) {
   throw FlexibleError("entry \"" + entry.id + "\": nominal " + fmt(entry.relative_density) +
                       " is not on the " + axis.material_id + "/" + axis.topology +
                       " nominal->core map; the map is never interpolated");
+}
+
+std::string temperature_note(const FlexibleData& data, const std::string& material_id,
+                             double temp_c) {
+  const auto it = data.catalogue.materials.find(material_id);
+  if (it == data.catalogue.materials.end()) return "";
+  const Material& m = it->second;
+  if (!m.nozzle_temp_range_c.known) return "";
+  const bool below = temp_c < m.nozzle_temp_range_c.lo, above = temp_c > m.nozzle_temp_range_c.hi;
+  if (!below && !above) return "";
+  std::set<std::string> sources;
+  for (const CurveTable& t : data.tables)
+    for (const CurveEntry& e : t.entries)
+      if (e.material_id == material_id && e.nozzle_temp_c == temp_c) sources.insert(e.source);
+  std::string src;
+  for (const std::string& s : sources) src += (src.empty() ? "" : ", ") + s;
+  return std::string(below ? "below" : "above") + " the manufacturer's range " +
+         fmt(m.nozzle_temp_range_c.lo) + "-" + fmt(m.nozzle_temp_range_c.hi) + " \xC2\xB0""C" +
+         (src.empty() ? std::string("; not tested") : "; tested by " + src);
 }
 
 }  // namespace flexible

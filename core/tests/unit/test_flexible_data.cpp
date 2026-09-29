@@ -10,6 +10,7 @@
 #include <cmath>
 #include <cstdio>
 #include <functional>
+#include <stdexcept>
 #include <string>
 
 using namespace topopt::flexible;
@@ -342,6 +343,30 @@ static void test_cross_checks() {
         "duplicate entry ids rejected");
 }
 
+// H5: an offered temperature outside the maker's printing range is FLAGGED, never
+// dropped or changed (data untouched).
+static void test_temperature_flags() {
+  FlexibleData d = load_flexible_data(FLEXIBLE_MATERIALS_JSON_PATH);
+  const std::string n190 = temperature_note(d, "varioshore_tpu", 190);
+  CHECK(n190.find("below the manufacturer") != std::string::npos &&
+            n190.find("195") != std::string::npos && n190.find("iacob2024") != std::string::npos,
+        "190 C: below the manufacturer's 195-260 C range, tested by iacob2024");
+  CHECK(temperature_note(d, "varioshore_tpu", 220).empty(), "220 C is inside the range: no note");
+}
+
+// The loader converts every curve to CORE strain once (02 §2): the specimen's skins are
+// treated as rigid and removed from the gauge length.
+static void test_core_strain() {
+  FlexibleData d = load_flexible_data(FLEXIBLE_MATERIALS_JSON_PATH);
+  const CurveEntry& g = d.tables[0].entries[0];
+  const double k = 12.5 / (12.5 - 1.6);
+  CHECK(g.loading[0].strain == 0.1 && g.core_loading.size() == 2 &&
+            std::fabs(g.core_loading[0].strain - 0.1 * k) < 1e-15 &&
+            g.core_loading[0].stress_mpa == g.loading[0].stress_mpa &&
+            std::fabs(g.core_strain_max_measured - 0.25 * k) < 1e-15,
+        "file values kept as written; core curve = nominal strain x 12.5 / 10.9, stress unchanged");
+}
+
 static void test_density_axis() {
   FlexibleData d = load_flexible_data(FLEXIBLE_MATERIALS_JSON_PATH);
   for (const char* topo : {"gyroid", "honeycomb"}) {
@@ -407,6 +432,17 @@ static void test_density_axis() {
           curve_set(bad, "tpu_x", 190, "gyroid");
         }, "cross"),
         "rows whose stress does not rise with density are refused");
+  // Rows that cross ONLY at one row's own curve point, strictly between the sampled
+  // strains (review round 1): a's steep step to 0.070 at 0.10125 pokes above b there.
+  CHECK(throws([&] {
+          FlexibleData bad = make_flexible_data(
+              c, {parse_curve_table(
+                     table(entry("a", 190, 0.1, "0.15", "[[0.1,0.065],[0.10125,0.070],[0.2,0.075]]") + "," +
+                           entry("b", 190, 0.2, "0.25", "[[0.1,0.066],[0.1025,0.0705],[0.2,0.3]]")),
+                     "t.json")});
+          curve_set(bad, "tpu_x", 190, "gyroid");
+        }, "cross"),
+        "a crossing at a row's own point (between samples) is refused");
   // a map that is not increasing
   CHECK(throws([&] {
           FlexibleData bad = make_flexible_data(
@@ -424,6 +460,8 @@ int main() {
   test_curve_strictness();
   test_cross_checks();
   test_density_axis();
+  test_temperature_flags();
+  test_core_strain();
   std::printf("test_flexible_data: %d checks, %d failures\n", g_checks, g_failures);
   return g_failures == 0 ? 0 : 1;
 }

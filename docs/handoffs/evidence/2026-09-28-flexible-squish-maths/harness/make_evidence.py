@@ -211,7 +211,12 @@ def main():
     check(t["stack"]["linked_faces"][0]["face_id"] == 0 and t["stack"]["linked_regions"][0]["face_region_id"] == 100,
           "(a) its stack's other end is the bottom (face 0 / region 100)")
     check(rc["nozzle_temp_c"] == 220 and rc["topology"] == "gyroid", "(a) gyroid at 220 C")
-    check(rc["recommendation"]["reachable"], "(a) every column reachable")
+    # Core strain (review round 1): the firmest gyroid squishes 0.40 mm under 30 kg, deeper
+    # than the 0.38 mm drawn at the four corners, so those few columns are too soft.
+    st = t["columns_by_status"]
+    check(0 < st["too_soft"] <= 20 and st["too_firm"] == 0 and st["beyond_data"] == 0 and
+          not rc["recommendation"]["reachable"],
+          "(a) only the corner columns are out of reach (too soft), and Auto says so")
     check(t["tier"]["tier"] == "literature" and t["tier"]["band"] == 0.4, "(a) literature tier, +/-40 %")
 
     rc = run(a.cli, *scenario_b(), a.out)

@@ -15,7 +15,7 @@ force spread evenly over the shape, cells summed to the stated force), writes th
 runs the CLI, and checks the receipt.
 
 `iacob_spot_checks.md` is `flexible_spot_table` (core's lookup against Iacob 2024
-Table 2, typed from the paper): 72 of 72 values, worst relative difference 2.7e-16.
+Table 2, typed from the paper): 72 of 72 values at the converted core strains (0.1147 / 0.2294), worst relative difference 2.0e-16.
 
 ## Files per scenario (`<scenario>/out/`)
 
@@ -33,41 +33,44 @@ Table 2, typed from the paper): 72 of 72 values, worst relative difference 2.7e-
 
 ## The three scenarios
 
+All numbers are after review round 1: **core strain** (the loader removes the
+specimen's 1.6 mm skins from Iacob's 12.5 mm gauge length, so ε_core = ε_nominal ×
+12.5 / 10.9 and the zones are ≤ 0.229 measured, ≤ 0.287 extrapolated), the blend is
+one cell measured across the boundary, and the mass tiebreak weighs grams.
+
 **(a) `a_pad_centre_soft`** — 100 × 100 × 20 mm pad, top loaded with 30 kg spread
 evenly (0.0294 MPa), centre-soft on both axes (curves 0.3 → 1 → 0.3, deepest 4 mm),
 varioShore at 220 °C, topology auto, springy.
-Gyroid at 220 °C. Honeycomb weighed and dropped: its softest row squishes only 0.92 mm
-under this pressure, so 8,916 of 10,000 columns cannot go deep enough. All 10,000
-columns reachable. Buildable 0.42–3.92 mm (target 0.38–4.00), density 0.145–0.310,
-cells 4.2–9.0 mm, literature ±40 %. The top's other end is the bottom (face 0 /
-region 100, 100 % of the area).
+Gyroid at 220 °C is the closest candidate but **not everything fits**: the 12 corner
+columns (3 per corner) are drawn at 0.377 mm and even the firmest gyroid squishes
+0.402 mm there (too soft). The other 9,988 columns are reachable. Honeycomb misses on
+8,444 columns (its softest row squishes about 1 mm, not 4). Buildable 0.42–3.92 mm,
+density 0.148–0.345, literature ±40 %. The top's other end is the bottom (face 0 /
+region 100, 100 %).
 
 **(b) `b_pad_thumb_design_palm_heel_check`** — the same pad with the thumb stamp
 (20 × 26 mm ellipse, 50 N ≈ 0.12 MPa) as the design load; palm (100 N) and heel (300 N)
 in check mode.
-Under the thumb the core is denser (it carries 4× the pressure at the same target depth).
-Palm: 6,056 columns pressed, max dent 1.40 mm, all inside the data. Heel: 3,600
-columns pressed, **3,120 squish past the tested strain** (no number: dark red on the
-map), 92 extrapolated. A pad drawn for 30 kg spread evenly does not survive a heel;
-the map says so instead of inventing a depth.
-Smoothing finding, and the recommender's verdict: every TARGET column is reachable, but
-around the thumb's edge one cell of smoothing cannot follow a 4× pressure step — the
-buildable depth overshoots the target by up to 2.4 mm, 168 columns land in 0.20–0.25
-strain and **180 squish past the tested strain**. Auto therefore reports *nothing fits
-every face* (closest: gyroid at 220 °C) and names the face and the 180 columns. (Before
-the review fix it wrongly said "reachable" here.) This is the R14 heuristic as
-specified; C2's realised lattice replaces it.
+Under the thumb the core is denser (4× the pressure at the same target depth). Around
+the thumb's edge one cell of smoothing cannot follow the pressure step: 128 columns
+squish past the tested strain once smoothed and 108 land in the extrapolated zone
+(largest smoothing change 2.3 mm), so Auto reports *nothing fits every face* and names
+them. Palm: 6,056 columns pressed, max 1.50 mm, all inside the data. Heel: 3,600
+pressed, **3,080 squish past the tested strain** (dark red, no number), 88
+extrapolated. A pad drawn for 30 kg spread evenly does not survive a heel; the map says
+so instead of inventing a depth.
 
-**(c) `c_block_top_and_side_handover`** — 100 × 100 × 60 mm block, top loaded
-(30 kg, edges soft, "either" mode, deepest 10 mm) and the +X side loaded (25 kg,
-centre → edge curve 0.4 → 1, deepest 10 mm); nozzle temperature auto, damped.
+**(c) `c_block_top_and_side_handover`** — 100 × 100 × 60 mm block, top loaded (30 kg,
+edges soft, "either" mode, deepest 10 mm) and the +X side loaded (25 kg, centre → edge
+curve 0.4 → 1, deepest 10 mm); nozzle temperature auto, damped.
 Honeycomb is not eligible (face 103 is pushed from the side, R6), so gyroid; 190 °C
-fails (4,992 columns too firm), 220 and 240 both reach, and 220 wins the first
-tiebreak (3,648 vs 4,256 columns near a table edge). The side stack is 'estimated'
-(±50 %); its other end is the −X face (region 105). The two stacks overlap on the whole
+fails (4,224 columns), 220 and 240 both reach, and 220 wins the first tiebreak (3,008
+vs 3,648 columns near a table edge; it is also the lightest: 245 g vs 273 g at 240 °C and
+378 g at 190 °C, from the measured specimen densities). The side stack is 'estimated'
+(±50 %); its other end is the −X face (region 105). The stacks overlap on the whole
 block (600,000 mm³); each voxel follows the nearer loaded face, blended over one cell
-(85,264 mm³ in the blend band) — see `field_xz_owner.svg`: the split runs along
-x = 40 + z, equal depth from both faces.
+measured across the boundary (57,588 mm³ in the band). 190 °C carries the note
+"below the manufacturer's range 195-260 °C; tested by iacob2024".
 
 ## Byte-identity (F11/F13)
 

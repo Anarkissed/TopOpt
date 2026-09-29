@@ -107,6 +107,23 @@ int main() {
   CHECK(svg.rfind("<svg", 0) == 0 && svg.find("</svg>") != std::string::npos && svg.find("min ") != std::string::npos,
         "an SVG with numbers");
 
+  // H5: the receipt flags an offered temperature outside the maker's range.
+  CHECK(ri.find("\"190\": \"below the manufacturer's range 195-260") != std::string::npos,
+        "H5: 190 C flagged below the manufacturer's range in the receipt");
+  CHECK(ri.find("core strain") != std::string::npos, "the receipt names the core-strain convention");
+  // H1: a column whose nearest depth is past the data has BLANK depth fields in the CSV.
+  {
+    std::string heavy = kTop;
+    heavy.replace(heavy.find("294.3"), 5, "50000");
+    const std::string d4 = "\"deepest_squish_mm\":4";
+    heavy.replace(heavy.find(d4), d4.size(), "\"deepest_squish_mm\":0.1");
+    const FlexibleRunResult rh = run("heavy", job("varioshore_tpu", "220", "gyroid", "[" + heavy + "]"));
+    const std::string hc = read(kDir + "/heavy/out/face101_columns.csv");
+    CHECK(rh.receipt_json.size() > 0 && hc.find(",too_soft,,,0.362000,,") != std::string::npos &&
+              hc.find("nan") == std::string::npos,
+          "H1: unknown values are empty CSV fields, never 'nan' or a stand-in number");
+  }
+
   // Refusals: named, receipt still written, the drawn map still written.
   r = run("stack", job("varioshore_tpu", "220", "auto",
                        "[" + kTop + ",{\"face_region_id\":100,\"role\":\"loaded\",\"weight_n\":100,"

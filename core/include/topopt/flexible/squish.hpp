@@ -36,6 +36,7 @@ struct CurveRow {
   double strain_max_measured = 0.0;
   std::string tier;                  // literature | calibrated | proxy
   MaybeNumber rel_sd;
+  MaybeNumber specimen_density_g_cm3;  // the tested specimen's mass density (skins included)
 };
 
 // Every row for ONE (material, tested temperature, topology), ascending in core
@@ -46,6 +47,7 @@ struct CurveSet {
   std::string topology;
   std::string density_basis;  // e.g. "estimated_core (190 °C mapping)"
   std::string tier;           // the rows' tier (they must agree)
+  std::string strain_convention;  // how the rows' strain axis is defined (receipt)
   std::vector<CurveRow> rows;
   double density_min() const { return rows.front().core_density; }
   double density_max() const { return rows.back().core_density; }
@@ -114,6 +116,11 @@ struct InverseResult {
 };
 InverseResult density_for(const CurveSet& set, double target_strain,
                           double pressure_mpa);
+
+// The measured specimen mass density at core density ρ, linear in ρ between the rows
+// (H2: the mass tiebreak weighs grams). Unknown when a bracketing row lacks it or ρ is
+// outside the table.
+MaybeNumber specimen_density_g_cm3(const CurveSet& set, double core_density);
 
 // FORWARD, SOFT (02 §5): the strain a column of density ρ takes under pressure p
 // (closed form per column; solved by bisection on ε). Refusals as stress_at, plus

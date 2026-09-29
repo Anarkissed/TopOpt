@@ -107,7 +107,7 @@ int main() {
   for (const Candidate& c : r.candidates)
     if (c.temp_c == 190) t190 = !c.reachable && !c.failures.empty();
   CHECK(t190, "190 °C reported unreachable with its failure");
-  CHECK(has(r, "tiebreak_near_edge") || has(r, "tiebreak_material") || has(r, "tiebreak_inside_data"),
+  CHECK(has(r, "tiebreak_near_edge") || has(r, "tiebreak_mass") || has(r, "tiebreak_inside_data"),
         "the temperature was settled by a named tiebreak");
 
   // A design stamp near the strain limit: its targets are reachable, but smoothing its
@@ -141,6 +141,47 @@ int main() {
   CHECK(!r.failures.empty() && r.failures[0].face_region_id == 101 &&
             r.failures[0].beyond_data > 0,
         "the failure names the face and says it is beyond the data");
+
+  // B2: a map drawn over SOLID (no lattice in any column) cannot squish: not reachable,
+  // with its own reason.
+  {
+    const std::vector<char> none(g.voxel_count(), 0);
+    const Stack solid = build_stack(m, region(rs, 101), rs, g, none, 0, {0, 0, 1}, 2.0);
+    FaceRequest fsol{&solid, flat(0.6), W, nullptr};
+    r = recommend(data(), "varioshore_tpu", {220}, {"gyroid"}, "springy", 1, 0.42, {fsol});
+    CHECK(!r.reachable && has(r, "solid_under_map"), "B2: squish drawn over solid is not reachable");
+  }
+
+  // H2: the mass tiebreak weighs GRAMS from the measured specimen densities, interpolated
+  // in density per temperature — foamed 220/240 C is lighter than 190 C at the same map.
+  {
+    FaceRequest fm{&top, flat(0.6), W, nullptr};
+    r = recommend(data(), "varioshore_tpu", {190, 220, 240}, {"gyroid"}, "springy", 1, 0.42, {fm});
+    double g190 = -1, g220 = -1, g240 = -1;
+    bool known = true;
+    for (const Candidate& c : r.candidates) {
+      known = known && c.mass_known;
+      if (c.temp_c == 190) g190 = c.mass_g;
+      if (c.temp_c == 220) g220 = c.mass_g;
+      if (c.temp_c == 240) g240 = c.mass_g;
+    }
+    CHECK(known && g190 > g220 && g190 > g240 && g220 > 0, "H2: 190 C is the heaviest, in grams");
+    const CurveSet s190 = curve_set(data(), "varioshore_tpu", 190, "gyroid").set;
+    const MaybeNumber d20 = specimen_density_g_cm3(s190, 0.226);
+    CHECK(d20.known && std::fabs(d20.value - 0.390) < 1e-12, "at a row: its own specimen density");
+  }
+
+  // H4: the reason names the comparison that decided the winner over its closest rival,
+  // not the last comparison made.
+  {
+    Candidate A, B, C;
+    A.near_edge_columns = 5; A.mass_known = true; A.mass_g = 10;
+    B.near_edge_columns = 5; B.mass_known = true; B.mass_g = 8;
+    C.near_edge_columns = 9; C.mass_known = true; C.mass_g = 1;
+    std::string code;
+    const std::size_t w = pick_by_tiebreaks({&A, &B, &C}, code);
+    CHECK(w == 1 && code == "tiebreak_mass", "H4: B beats A on mass; C lost earlier, on edges");
+  }
 
   // A material with no data predicts nothing.
   r = recommend(data(), "tpu95a_generic", {220}, both, "springy", 1, 0.42, {f});

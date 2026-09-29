@@ -158,7 +158,12 @@ struct CurveEntry {
   MaybeNumber cell_mm;
   Specimen specimen;
   Conditioning conditioning;
-  std::vector<CurvePoint> loading;     // strictly increasing in both
+  std::vector<CurvePoint> loading;     // strictly increasing in both, AS WRITTEN (nominal)
+  // ★ THE SAME CURVE IN CORE STRAIN (02 §2, review round 1), computed once by the loader:
+  // strain × height / (height − skin_total) — the specimen's skins treated as rigid and
+  // removed from the gauge length; stress unchanged. Every lookup uses these.
+  std::vector<CurvePoint> core_loading;
+  double core_strain_max_measured = 0.0;
   bool has_unloading = false;          // unloading: null or absent => false
   std::vector<CurvePoint> unloading;
   double strain_max_measured = 0.0;    // >= the last loading strain
@@ -230,6 +235,12 @@ struct DensityAxis {
 DensityAxis build_density_axis(const FlexibleData& data,
                                const std::string& material_id,
                                const std::string& topology);
+
+// A note when `temp_c` is offered for `material_id` but lies outside the maker's
+// nozzle_temp_range_c (e.g. "below the manufacturer's range 195-260 °C; tested by
+// iacob2024"); "" when inside, unknown or not offered. The data is never changed (H5).
+std::string temperature_note(const FlexibleData& data, const std::string& material_id,
+                             double temp_c);
 
 // The printed-core density of one entry on `axis`. Throws FlexibleError if the
 // entry's nominal value is not on the map.

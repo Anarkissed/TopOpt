@@ -49,6 +49,12 @@ static const Table2Row kTable2[] = {
 static const double kGyroidCore[] = {0.143, 0.180, 0.226, 0.271, 0.316, 0.362};
 static const double kHoneyCore[] = {0.165, 0.236, 0.286, 0.341, 0.396, 0.446};
 
+// ★ CORE STRAIN (review round 1, 02 §2). Iacob's strain is nominal over the whole
+// 12.5 mm specimen, 1.6 mm of near-rigid skins included; the loader converts it once to
+// strain of the lattice core alone: ε_core = ε_nominal × 12.5 / (12.5 − 1.6), σ unchanged.
+// So Table 2's points sit at K × 0.10 and K × 0.20, and R8's zones move with them.
+static const double K = 12.5 / (12.5 - 1.6);
+
 static const FlexibleData& data() {
   static FlexibleData d = load_flexible_data(FLEXIBLE_MATERIALS_JSON_PATH);
   return d;
@@ -69,19 +75,21 @@ static void test_spot_values() {
       const double rho = topo == 0 ? kGyroidCore[idx] : kHoneyCore[idx];
       const double e10 = topo == 0 ? t.g10 : t.h10;
       const double e20 = topo == 0 ? t.g20 : t.h20;
-      const StressResult a = stress_at(s, 0.10, rho);
-      const StressResult b = stress_at(s, 0.20, rho);
-      CHECK(a.ok && near(a.stress_mpa, 0.10 * e10, 1e-9), "σ(0.10) = 0.10 × E10 (Table 2)");
-      CHECK(b.ok && near(b.stress_mpa, 0.20 * e20, 1e-9), "σ(0.20) = 0.20 × E20 (Table 2)");
+      const StressResult a = stress_at(s, 0.10 * K, rho);
+      const StressResult b = stress_at(s, 0.20 * K, rho);
+      CHECK(a.ok && near(a.stress_mpa, 0.10 * e10, 1e-9), "σ(core K·0.10) = 0.10 × E10 (Table 2)");
+      CHECK(b.ok && near(b.stress_mpa, 0.20 * e20, 1e-9), "σ(core K·0.20) = 0.20 × E20 (Table 2)");
       CHECK(!a.extrapolated && !b.extrapolated, "tabulated strains are measured");
       checked += 2;
     }
   }
   CHECK(checked == 72, "all 36 rows x 2 strains checked");
-  // The task's own example: nominal 20 % gyroid at 190 °C, ε = 0.20 → 0.292 MPa.
+  // The task's own example: nominal 20 % gyroid at 190 °C, nominal ε = 0.20 → 0.292 MPa,
+  // which is core ε = 0.2294.
   const CurveSet g190 = set_of(190, "gyroid");
-  const StressResult ex = stress_at(g190, 0.20, 0.226);
-  CHECK(ex.ok && near(ex.stress_mpa, 0.292, 1e-12), "20 % gyroid 190 °C at 0.20 = 0.292 MPa");
+  const StressResult ex = stress_at(g190, 0.20 * K, 0.226);
+  CHECK(ex.ok && near(ex.stress_mpa, 0.292, 1e-12), "20 % gyroid 190 °C at nominal 0.20 = 0.292 MPa");
+  CHECK(g190.strain_convention.find("core") != std::string::npos, "the set says its strain is core strain");
   CHECK(g190.density_basis == "estimated_core (190 \xC2\xB0""C mapping)",
         "every set records its density basis");
   CHECK(set_of(220, "gyroid").density_basis == g190.density_basis,
@@ -91,31 +99,32 @@ static void test_spot_values() {
 static void test_interpolation() {
   const CurveSet s = set_of(190, "gyroid");
   // Piecewise linear through the origin below the first point.
-  const StressResult half = stress_at(s, 0.05, 0.226);
+  const StressResult half = stress_at(s, 0.05 * K, 0.226);
   CHECK(half.ok && near(half.stress_mpa, 0.5 * 0.219, 1e-12), "linear from (0,0) to (0.1,σ10)");
-  const StressResult mid = stress_at(s, 0.15, 0.226);
+  const StressResult mid = stress_at(s, 0.15 * K, 0.226);
   CHECK(mid.ok && near(mid.stress_mpa, 0.5 * (0.219 + 0.292), 1e-12), "linear between points");
   // Linear in ρ between rows (the 15 % and 20 % rows at 0.10).
   const double r = 0.180 + 0.25 * (0.226 - 0.180);
-  const StressResult q = stress_at(s, 0.10, r);
+  const StressResult q = stress_at(s, 0.10 * K, r);
   CHECK(q.ok && near(q.stress_mpa, 0.119 + 0.25 * (0.219 - 0.119), 1e-12),
         "linear in ρ between bracketing rows");
   CHECK(stress_at(s, 0.0, 0.2).ok && stress_at(s, 0.0, 0.2).stress_mpa == 0.0,
         "zero strain is zero stress");
-  // Extrapolation zone (R8): 0.20 < ε <= 0.25.
-  const StressResult x = stress_at(s, 0.25, 0.226);
-  CHECK(x.ok && x.extrapolated, "ε = 0.25 is 'extrapolated'");
+  // Extrapolation zone (R8, in core strain): 0.2294 < ε <= 0.2867.
+  const StressResult x = stress_at(s, 0.25 * K, 0.226);
+  CHECK(x.ok && x.extrapolated, "core ε = K·0.25 is 'extrapolated'");
   CHECK(near(x.stress_mpa, 0.292 + 0.5 * (0.292 - 0.219), 1e-12),
         "extrapolation extends the last segment linearly");
-  CHECK(stress_at(s, 0.2000001, 0.226).extrapolated, "just past 0.20 is extrapolated");
-  CHECK(!stress_at(s, 0.2, 0.226).extrapolated, "0.20 exactly is measured");
-  CHECK(s.strain_measured_max() == 0.20 && s.strain_limit() == 0.25, "zone limits");
+  CHECK(stress_at(s, 0.2 * K + 1e-7, 0.226).extrapolated, "just past K·0.20 is extrapolated");
+  CHECK(!stress_at(s, 0.2 * K, 0.226).extrapolated, "K·0.20 exactly is measured");
+  CHECK(near(s.strain_measured_max(), 0.2 * K, 1e-15) && near(s.strain_limit(), 0.25 * K, 1e-15),
+        "zone limits moved with the conversion: 0.2294 / 0.2867");
 }
 
 static void test_refusals() {
   const CurveSet s = set_of(190, "gyroid");
-  StressResult r = stress_at(s, 0.2500001, 0.226);
-  CHECK(!r.ok && r.refusal.code == "strain_beyond_data", "ε > 0.25 refused (R8)");
+  StressResult r = stress_at(s, 0.25 * K + 1e-7, 0.226);
+  CHECK(!r.ok && r.refusal.code == "strain_beyond_data", "core ε > K·0.25 refused (R8)");
   r = stress_at(s, 0.1, 0.1429);
   CHECK(!r.ok && r.refusal.code == "density_below_range", "ρ below the table refused");
   r = stress_at(s, 0.1, 0.3621);
@@ -185,7 +194,7 @@ static void test_round_trip() {
           const StrainResult fw = strain_under(s, sig, inv.core_density);
           CHECK(fw.ok, "forward solves");
           worst_eps = std::max(worst_eps, std::fabs(fw.strain - eps) / eps);
-          CHECK(inv.extrapolated == (eps > 0.2 + 1e-12), "inverse flags the extrapolated zone");
+          CHECK(inv.extrapolated == (eps > 0.2 * K + 1e-12), "inverse flags the extrapolated zone");
         }
     }
   std::printf("  round trip worst relative error: rho %.3g, strain %.3g\n", worst_rho, worst_eps);

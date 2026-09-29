@@ -16,6 +16,8 @@ namespace topopt {
 namespace flexible {
 namespace {
 
+const double kNaN = std::numeric_limits<double>::quiet_NaN();
+
 std::string fmt(double v) {
   char b[40];
   std::snprintf(b, sizeof(b), "%.4g", v);
@@ -109,6 +111,12 @@ bool in_stack(const Stack& s, const Vec3& p, int& col, double& depth) {
   const double t = dot(sub(p, s.frame.centroid), s.frame.load);
   if (t < c.entry_t - 1e-9 || t > c.exit_t + 1e-9) return false;
   depth = t - c.entry_t;
+  // A SECTOR owns only what projects onto its side of its cuts (B5): the column cell a
+  // voxel falls in may straddle the cut.
+  if (!s.cuts.empty()) {
+    const Vec3 q = {p.x - s.frame.load.x * depth, p.y - s.frame.load.y * depth, p.z - s.frame.load.z * depth};
+    if (!passes_cuts(s.cuts, q)) return false;
+  }
   return true;
 }
 
@@ -253,19 +261,26 @@ FaceDesign design_face(const CurveSet& set, const Stack& stack, const SquishMap&
     const StampOnColumns soc = stamp_on_columns(*design_stamp, stack);
     out.design_stamp_used = true;
     out.design_stamp_off_face_n = soc.force_off_face_n;
-    stamp_p = soc.pressure_mpa;
+    out.design_stamp_off_face = soc.force_off_face_n > 1e-9 * design_stamp->force_n;
     stamp_cov = soc.covered;
-    if (design_stamp->rigid) {
-      // A rigid stamp's pressure depends on the lattice under it; for DESIGN it is
-      // read as its average over the footprint (what it presses on a map that sinks
-      // evenly), and the receipt says so.
-      double area = 0.0;
-      for (std::size_t k = 0; k < stamp_cov.size(); ++k)
-        if (stamp_cov[k]) area += stack.columns[k].area_mm2;
-      for (std::size_t k = 0; k < stamp_cov.size(); ++k)
-        if (stamp_cov[k]) stamp_p[k] = soc.force_on_face_n / area;
-      out.design_stamp_rigid_averaged = true;
+    // B3: a column the stamp only partly covers keeps the even-spread share of the rest.
+    std::vector<double> frac(stack.columns.size(), 0.0);
+    for (std::size_t k = 0; k < frac.size(); ++k)
+      frac[k] = std::min(1.0, soc.covered_area_mm2[k] / stack.columns[k].area_mm2);
+    double area = 0.0;
+    for (std::size_t k = 0; k < frac.size(); ++k) area += soc.covered_area_mm2[k];
+    for (std::size_t k = 0; k < frac.size(); ++k) {
+      // A rigid stamp's pressure depends on the lattice under it; for DESIGN it is read as
+      // its STATED force over the area that lands on the face (never a quietly lighter
+      // load: B1), and the receipt says so.
+      const double stamp_part = design_stamp->rigid
+                                    ? (area > 0.0 ? design_stamp->force_n / area * soc.covered_area_mm2[k] /
+                                                        stack.columns[k].area_mm2
+                                                  : 0.0)
+                                    : soc.pressure_mpa[k];
+      stamp_p[k] = stamp_part + out.design_pressure_even_mpa * (1.0 - frac[k]);
     }
+    out.design_stamp_rigid_averaged = design_stamp->rigid;
   }
   const double lim = set.strain_limit();
   out.columns.resize(stack.columns.size());
@@ -274,11 +289,12 @@ FaceDesign design_face(const CurveSet& set, const Stack& stack, const SquishMap&
     ColumnDesign& c = out.columns[k];
     c.s = S[k];
     c.height_mm = sc.lattice_mm;
-    c.pressure_mpa = (stamp_cov[k] && stamp_p[k] > 0.0) ? stamp_p[k] : out.design_pressure_even_mpa;
+    c.pressure_mpa = stamp_cov[k] ? stamp_p[k] : out.design_pressure_even_mpa;
     c.target_depth_mm = S[k] * map.deepest_squish_mm;
     if (!(c.height_mm > 0.0)) {
       c.status = "no_lattice";
       ++out.no_lattice;
+      if (c.target_depth_mm > 0.0) ++out.solid_under_map;  // squish drawn over solid (B2)
       continue;
     }
     c.target_strain = c.target_depth_mm / c.height_mm;
@@ -297,8 +313,9 @@ FaceDesign design_face(const CurveSet& set, const Stack& stack, const SquishMap&
       (inv.status == "too_firm" ? out.too_firm : out.too_soft)++;
       c.clamped_density = inv.nearest_density;
       c.nearest_known = inv.nearest_known;
-      c.nearest_depth_mm = inv.nearest_known ? inv.nearest_strain * c.height_mm : 0.0;
-      c.clamped_depth_mm = inv.nearest_known ? c.nearest_depth_mm : lim * c.height_mm;
+      // H1: no known depth is NaN with the status saying why — never a stand-in number.
+      c.nearest_depth_mm = inv.nearest_known ? inv.nearest_strain * c.height_mm : kNaN;
+      c.clamped_depth_mm = c.nearest_depth_mm;
       continue;
     }
     // beyond_data: pull the target back to the strain limit, then re-invert.
@@ -310,8 +327,8 @@ FaceDesign design_face(const CurveSet& set, const Stack& stack, const SquishMap&
       c.clamped_density = at_lim.status == "too_firm" ? set.density_min() : set.density_max();
     const StrainResult f = strain_under(set, c.pressure_mpa, c.clamped_density);
     c.nearest_known = f.ok;
-    c.nearest_depth_mm = f.ok ? f.strain * c.height_mm : 0.0;
-    c.clamped_depth_mm = f.ok ? c.nearest_depth_mm : lim * c.height_mm;
+    c.nearest_depth_mm = f.ok ? f.strain * c.height_mm : kNaN;
+    c.clamped_depth_mm = c.nearest_depth_mm;
   }
 
   // F7: a Gaussian of σ = half the local cell, gathered over the face's columns.
@@ -351,8 +368,9 @@ FaceDesign design_face(const CurveSet& set, const Stack& stack, const SquishMap&
       c.buildable_depth_mm = f.strain * c.height_mm;
       c.buildable_extrapolated = f.extrapolated;
       if (f.extrapolated) ++out.buildable_extrapolated;
-      out.max_smoothing_change_mm =
-          std::max(out.max_smoothing_change_mm, std::fabs(c.buildable_depth_mm - c.clamped_depth_mm));
+      if (std::isfinite(c.clamped_depth_mm))
+        out.max_smoothing_change_mm =
+            std::max(out.max_smoothing_change_mm, std::fabs(c.buildable_depth_mm - c.clamped_depth_mm));
       accumulate(out.buildable_depth, c.buildable_depth_mm, nb);
     } else {
       ++out.buildable_beyond_data;
@@ -384,6 +402,7 @@ StampCheck check_stamp(const CurveSet& set, const Stack& stack,
   out.tier = tier;
   const StampOnColumns soc = stamp_on_columns(stamp, stack);
   out.force_off_face_n = soc.force_off_face_n;
+  out.off_face = soc.force_off_face_n > 1e-9 * stamp.force_n;
   out.stamp_width_mm = stamp_width_mm(stamp);
   out.depth_mm.assign(stack.columns.size(), -1.0);
   out.status.assign(stack.columns.size(), "");
@@ -432,11 +451,12 @@ StampCheck check_stamp(const CurveSet& set, const Stack& stack,
   // Each column takes the stamp only over the area the stamp covers in it.
   std::vector<double> a, h, rho;
   for (std::size_t k : under) {
-    a.push_back(soc.covered_area_mm2[k]);
+    a.push_back(soc.covered_area_mm2[k]);  // the area the stamp covers in this column
     h.push_back(stack.columns[k].lattice_mm);
     rho.push_back(column_density[k]);
   }
-  const RigidResult r = rigid_press(set, a, h, rho, soc.force_on_face_n);
+  // B1: the STATED force, all of it, on the area that lands — never a quietly lighter load.
+  const RigidResult r = rigid_press(set, a, h, rho, stamp.force_n);
   if (!r.ok) {
     out.refusal = r.refusal;
     for (std::size_t k : under) out.status[k] = "beyond_data";
@@ -460,6 +480,13 @@ std::vector<StackConflict> find_stack_conflicts(const VoxelGrid& grid,
                                                 const std::vector<char>& lattice_mask,
                                                 const std::vector<const Stack*>& stacks) {
   std::map<std::pair<std::size_t, std::size_t>, double> vol;
+  // The overlap's extent in the first stack's (u, v): a sliver thinner than one column
+  // pitch in either direction is a rasterisation artefact at a shared edge, not two
+  // profiles on one stack (B5).
+  struct Ext {
+    double u0 = 1e300, u1 = -1e300, v0 = 1e300, v1 = -1e300;
+  };
+  std::map<std::pair<std::size_t, std::size_t>, Ext> ext;
   const double vv = grid.voxel_volume();
   std::vector<std::pair<std::size_t, std::size_t>> same;
   for (std::size_t a = 0; a < stacks.size(); ++a)
@@ -480,10 +507,22 @@ std::vector<StackConflict> find_stack_conflicts(const VoxelGrid& grid,
           in[s] = in_stack(*stacks[s], p, col, d);
         }
         for (const auto& pr : same)
-          if (in[pr.first] && in[pr.second]) vol[pr] += vv;
+          if (in[pr.first] && in[pr.second]) {
+            vol[pr] += vv;
+            double u = 0, v = 0;
+            stacks[pr.first]->frame.to_uv(p, u, v);
+            Ext& e = ext[pr];
+            e.u0 = std::min(e.u0, u);
+            e.u1 = std::max(e.u1, u);
+            e.v0 = std::min(e.v0, v);
+            e.v1 = std::max(e.v1, v);
+          }
       }
   std::vector<StackConflict> out;
   for (const auto& kv : vol) {
+    const Ext& e = ext[kv.first];
+    const double pitch = stacks[kv.first.first]->pitch_mm;
+    if (e.u1 - e.u0 < pitch || e.v1 - e.v0 < pitch) continue;
     StackConflict c;
     c.face_a = stacks[kv.first.first]->face_region_id;
     c.face_b = stacks[kv.first.second]->face_region_id;
@@ -568,7 +607,14 @@ DensityField assemble_density_field(const VoxelGrid& grid, const std::vector<cha
         const double L = std::max(
             cell_size_mm(build.topology, ca.buildable_density, build.beads_per_wall, build.bead_width_mm),
             cell_size_mm(build.topology, cb.buildable_density, build.beads_per_wall, build.bead_width_mm));
-        const double w = std::min(1.0, std::max(0.0, 0.5 + (B.depth - A.depth) / (2.0 * L)));
+        // H3 / R11: one cell L of blend measured ACROSS the boundary d_A = d_B. The
+        // distance across it is (d_B − d_A) / |l_A − l_B| (the gradient of d_B − d_A).
+        const Vec3& la = stacks[A.s].stack->frame.load;
+        const Vec3& lb = stacks[B.s].stack->frame.load;
+        const double g = std::sqrt((la.x - lb.x) * (la.x - lb.x) + (la.y - lb.y) * (la.y - lb.y) +
+                                   (la.z - lb.z) * (la.z - lb.z));
+        const double across = g > 1e-9 ? (B.depth - A.depth) / g : (B.depth > A.depth ? 1e300 : -1e300);
+        const double w = std::min(1.0, std::max(0.0, 0.5 + across / L));
         f.density[idx] = w * ca.buildable_density + (1.0 - w) * cb.buildable_density;
         f.owner[idx] = w >= 0.5 ? fa : fb;
         for (std::size_t x = 0; x < hits.size(); ++x)

@@ -12,9 +12,12 @@ namespace topopt {
 namespace flexible {
 
 const char* const kStrainConvention =
-    "nominal: strain = squish depth / the column's latticed height, stress = force / "
-    "loaded area, exactly as the table states them (Iacob: nominal over the whole "
-    "12.5 mm specimen, 1.6 mm of skins included). No skin-ratio correction is applied.";
+    "core strain: squish depth / the column's latticed height. The tables' nominal strain "
+    "(over the whole specimen, skins included) is converted once by the loader: "
+    "strain x height / (height - skin_total), the specimen skins treated as rigid and "
+    "removed; stress = force / loaded area, unchanged. Skins in the PART are not yet "
+    "subtracted from the column height (C2 subtracts them), so a skinned face currently "
+    "reads high by about skin / height.";
 
 namespace {
 
@@ -175,13 +178,15 @@ CurveSetResult curve_set(const FlexibleData& data, const std::string& material_i
   s.nozzle_temp_c = nozzle_temp_c;
   s.topology = topology;
   s.density_basis = axis.density_basis;
+  s.strain_convention = kStrainConvention;
   for (const CurveEntry* e : hits) {
     CurveRow r;
     r.entry_id = e->id;
     r.core_density = core_density_of(axis, *e);
     r.nominal = e->relative_density;
-    r.loading = e->loading;
-    r.strain_max_measured = e->strain_max_measured;
+    r.loading = e->core_loading;
+    r.strain_max_measured = e->core_strain_max_measured;
+    r.specimen_density_g_cm3 = e->specimen.mass_density_g_cm3;
     r.tier = e->tier;
     r.rel_sd = e->rel_sd;
     s.rows.push_back(r);
@@ -195,9 +200,13 @@ CurveSetResult curve_set(const FlexibleData& data, const std::string& material_i
   // The inverse brackets density by bisection, which needs σ(ε; ρ) to rise with ρ at
   // every strain it may be asked about, the extrapolated zone included. Rows whose
   // curves cross would silently return a wrong density, so a crossing is refused.
+  std::vector<double> probe;
+  for (int k = 1; k <= 100; ++k) probe.push_back(s.strain_limit() * k / 100.0);
+  for (const CurveRow& r : s.rows)  // the rows' own points, where a crossing can hide
+    for (const CurvePoint& p : r.loading)
+      if (p.strain <= s.strain_limit()) probe.push_back(p.strain);
   for (std::size_t i = 1; i < s.rows.size(); ++i)
-    for (int k = 1; k <= 100; ++k) {
-      const double e = s.strain_limit() * k / 100.0;
+    for (double e : probe) {
       if (!(row_stress(s.rows[i], e) > row_stress(s.rows[i - 1], e)))
         throw FlexibleError("rows \"" + s.rows[i - 1].entry_id + "\" and \"" + s.rows[i].entry_id +
                             "\" cross at strain " + fmt(e) +
@@ -422,6 +431,21 @@ double cell_size_mm(const std::string& topology, double rho, int beads, double b
   if (topology == "gyroid") return 3.0915 * t / rho;
   if (topology == "honeycomb") return 2.0 * t / rho;
   throw FlexibleError("cell_size_mm: unknown topology \"" + topology + "\"");
+}
+
+MaybeNumber specimen_density_g_cm3(const CurveSet& s, double rho) {
+  MaybeNumber out;
+  if (s.rows.empty() || density_gate(s, rho).refused()) return out;
+  const double r = clamp_rho(s, rho);
+  std::size_t i = 1;
+  while (i + 1 < s.rows.size() && s.rows[i].core_density < r) ++i;
+  const CurveRow& a = s.rows[i - 1];
+  const CurveRow& b = s.rows[i];
+  if (!a.specimen_density_g_cm3.known || !b.specimen_density_g_cm3.known) return out;
+  const double w = std::min(1.0, std::max(0.0, (r - a.core_density) / (b.core_density - a.core_density)));
+  out.known = true;
+  out.value = (1 - w) * a.specimen_density_g_cm3.value + w * b.specimen_density_g_cm3.value;
+  return out;
 }
 
 }  // namespace flexible

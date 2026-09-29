@@ -76,7 +76,7 @@ void principal_2d(double a, double b, double c, double& dx, double& dy, bool& ti
   const double mean = 0.5 * (a + c);
   const double r = std::sqrt(0.25 * (a - c) * (a - c) + b * b);
   const double l1 = mean + r, l2 = mean - r;
-  tied = !(l1 > 0.0) || (l1 - l2) <= 1e-6 * std::fabs(l1);
+  tied = !(l1 > 0.0) || (l1 - l2) <= 1e-4 * std::fabs(l1);
   if (std::fabs(b) > 1e-300) {
     dx = l1 - c;
     dy = b;
@@ -444,51 +444,12 @@ Stack build_stack(const StepModel& model, const ResolvedFaceRegion& face,
   Stack s;
   s.face_region_id = face.id;
   s.pitch_mm = pitch_mm;
-  s.frame = face_frame(model.mesh, face.member_triangles, rotation_deg, build_dir);
+  s.cuts = face.cuts;
+  // A sector (a region with cuts) is framed from its own clipped geometry (B6).
+  s.frame = face_frame_cut(model.mesh, face.member_triangles, face.cuts, rotation_deg, build_dir);
   if (!s.frame.valid)
     throw FlexibleError("face region " + std::to_string(face.id) + ": " + s.frame.reason);
-  TraceOut t = trace(model, face, s.frame, grid, lattice_mask, pitch_mm);
-  if (!face.cuts.empty() && !t.columns.empty()) {
-    // A SECTOR: its own principal axis and extents, from the columns that survived
-    // the cuts, then traced again in that frame.
-    FaceFrame f = s.frame;
-    double mu = 0, mv = 0;
-    for (const StackColumn& c : t.columns) {
-      mu += c.u_mm + f.u_min;
-      mv += c.v_mm + f.v_min;
-    }
-    mu /= static_cast<double>(t.columns.size());
-    mv /= static_cast<double>(t.columns.size());
-    double a = 0, b = 0, c2 = 0;
-    for (const StackColumn& c : t.columns) {
-      const double du = c.u_mm + f.u_min - mu, dv = c.v_mm + f.v_min - mv;
-      a += du * du;
-      b += du * dv;
-      c2 += dv * dv;
-    }
-    double dx = 1, dy = 0;
-    bool tied = false;
-    principal_2d(a, b, c2, dx, dy, tied);
-    // back to the un-rotated axes of the first pass, then re-apply the rotation
-    f.x_axis = orient_axis(unit(add(mul(s.frame.x_axis, dx), mul(s.frame.y_axis, dy))), tied,
-                           f.load);
-    f.y_axis = cross(f.load, f.x_axis);
-    f.principal_axis_tied = tied;
-    rotate_frame(f, rotation_deg);
-    std::vector<Vec3> pts;
-    for (const StackColumn& c : t.columns) pts.push_back(s.frame.from_uv(c.u_mm, c.v_mm));
-    set_extents_from_points(f, pts);
-    f.u_min -= 0.5 * pitch_mm;
-    f.v_min -= 0.5 * pitch_mm;
-    f.u_extent_mm += pitch_mm;
-    f.v_extent_mm += pitch_mm;
-    double fp = 0.0;
-    for (const StackColumn& c : t.columns) fp += c.area_mm2;
-    f.projected_area_mm2 = fp;
-    f.area_mm2 = fp;
-    s.frame = f;
-    t = trace(model, face, s.frame, grid, lattice_mask, pitch_mm);
-  }
+  const TraceOut t = trace(model, face, s.frame, grid, lattice_mask, pitch_mm);
   if (t.columns.empty())
     throw FlexibleError("face region " + std::to_string(face.id) + " has no column at a " +
                         std::to_string(pitch_mm) + " mm pitch");
@@ -518,11 +479,17 @@ Stack build_stack(const StepModel& model, const ResolvedFaceRegion& face,
   s.exit_unresolved_fraction = static_cast<double>(t.unresolved) /
                                static_cast<double>(s.columns.size());
   for (const auto& kv : by_face) s.exit_faces.push_back({kv.first, kv.second / s.footprint_area_mm2});
+  // A region is credited only where the column's EXIT POINT satisfies its cuts, so the
+  // halves of a split face share their face's area instead of each taking all of it (B4).
   std::map<int, double> by_region;
   for (const ResolvedFaceRegion& r : regions)
-    for (const auto& kv : by_face)
-      if (std::binary_search(r.member_faces.begin(), r.member_faces.end(), kv.first))
-        by_region[r.id] += kv.second;
+    for (const StackColumn& c : s.columns) {
+      if (c.exit_face < 0 ||
+          !std::binary_search(r.member_faces.begin(), r.member_faces.end(), c.exit_face))
+        continue;
+      const Vec3 exit = add(s.frame.from_uv(c.u_mm, c.v_mm), mul(s.frame.load, c.exit_t));
+      if (passes_cuts(r.cuts, exit)) by_region[r.id] += c.area_mm2;
+    }
   for (const auto& kv : by_region)
     s.exit_regions.push_back({kv.first, kv.second / s.footprint_area_mm2});
   auto by_share = [](const StackLink& a, const StackLink& b) {
@@ -531,6 +498,57 @@ Stack build_stack(const StepModel& model, const ResolvedFaceRegion& face,
   std::sort(s.exit_faces.begin(), s.exit_faces.end(), by_share);
   std::sort(s.exit_regions.begin(), s.exit_regions.end(), by_share);
   return s;
+}
+
+bool passes_cuts(const std::vector<RegionCut>& cuts, const Vec3& p) {
+  for (const RegionCut& c : cuts) {
+    const double d = dot(sub(p, c.point), c.normal);
+    if (c.strict ? !(d > 0.0) : !(d >= 0.0)) return false;
+  }
+  return true;
+}
+
+FaceFrame face_frame_cut(const TriangleMesh& mesh, const std::vector<int>& triangles,
+                         const std::vector<RegionCut>& cuts, int rotation_deg,
+                         const Vec3& build_dir) {
+  if (cuts.empty()) return face_frame(mesh, triangles, rotation_deg, build_dir);
+  // Clip every triangle by every half-space (Sutherland–Hodgman on a convex polygon),
+  // then fan the pieces into a mesh of their own. The winding is kept, so the load
+  // direction is the clipped face's own.
+  TriangleMesh clipped;
+  std::vector<int> ids;
+  for (int ti : triangles) {
+    if (ti < 0 || static_cast<std::size_t>(ti) >= mesh.triangles.size()) continue;
+    const auto& t = mesh.triangles[static_cast<std::size_t>(ti)];
+    std::vector<Vec3> poly = {mesh.vertices[static_cast<std::size_t>(t[0])],
+                              mesh.vertices[static_cast<std::size_t>(t[1])],
+                              mesh.vertices[static_cast<std::size_t>(t[2])]};
+    for (const RegionCut& c : cuts) {
+      std::vector<Vec3> out;
+      const std::size_t n = poly.size();
+      for (std::size_t i = 0; i < n; ++i) {
+        const Vec3& a = poly[i];
+        const Vec3& b = poly[(i + 1) % n];
+        const double da = dot(sub(a, c.point), c.normal), db = dot(sub(b, c.point), c.normal);
+        if (da >= 0.0) out.push_back(a);
+        if ((da >= 0.0) != (db >= 0.0)) out.push_back(add(a, mul(sub(b, a), da / (da - db))));
+      }
+      poly = out;
+      if (poly.size() < 3) break;
+    }
+    if (poly.size() < 3) continue;
+    const int base = static_cast<int>(clipped.vertices.size());
+    for (const Vec3& p : poly) clipped.vertices.push_back(p);
+    for (std::size_t i = 1; i + 1 < poly.size(); ++i) {
+      const Vec3 e1 = sub(poly[i], poly[0]), e2 = sub(poly[i + 1], poly[0]);
+      if (norm(cross(e1, e2)) <= 1e-12) continue;  // a sliver the cut left behind
+      ids.push_back(static_cast<int>(clipped.triangles.size()));
+      clipped.triangles.push_back({base, base + static_cast<int>(i), base + static_cast<int>(i) + 1});
+    }
+  }
+  FaceFrame f = face_frame(clipped, ids, rotation_deg, build_dir);
+  if (!f.valid && ids.empty()) f.reason = "the region's cuts leave nothing of its faces";
+  return f;
 }
 
 }  // namespace flexible

@@ -119,6 +119,21 @@ static void test_side_and_spread() {
     else
       CHECK(!ff.normal_spread_flag && ff.normal_spread_deg < 30.0, "10° fold not flagged");
   }
+  // B6: a cut sector of a folded face is framed from its OWN (clipped) triangles: the
+  // flat half alone pushes straight down and is not flagged.
+  {
+    TriangleMesh t;
+    const double ang = 40.0 * 3.14159265358979323846 / 180.0;
+    t.vertices = {{0, 0, 0}, {10, 0, 0}, {10, 10, 0}, {0, 10, 0},
+                  {-10 * std::cos(ang), 10, 10 * std::sin(ang)}, {-10 * std::cos(ang), 0, 10 * std::sin(ang)}};
+    t.triangles = {{0, 1, 2}, {0, 2, 3}, {0, 3, 4}, {0, 4, 5}};
+    const FaceFrame whole = face_frame(t, {0, 1, 2, 3}, 0, kBuildZ);
+    const FaceFrame half = face_frame_cut(t, {0, 1, 2, 3}, {RegionCut{{0, 0, 0}, {1, 0, 0}, false}}, 0, kBuildZ);
+    CHECK(whole.normal_spread_flag && !veq(whole.load, {0, 0, -1}, 1e-3), "the whole fold is tilted and flagged");
+    CHECK(half.valid && veq(half.load, {0, 0, -1}) && !half.normal_spread_flag &&
+              half.normal_spread_deg < 1e-9 && std::fabs(half.area_mm2 - 100) < 1e-9,
+          "B6: the flat sector gets its own load (-Z), no spread, 100 mm2");
+  }
   FaceFrame none = face_frame(m.mesh, {}, 0, kBuildZ);
   CHECK(!none.valid && !none.reason.empty(), "an empty face is invalid, with a reason");
 }
@@ -190,6 +205,36 @@ static void test_stack() {
     if (p.x < 50) right = false;
   }
   CHECK(right, "every sector column lies at x >= 50");
+
+  CHECK(std::fabs(hs.frame.u_extent_mm - 60) < 1e-9 && std::fabs(hs.frame.v_extent_mm - 50) < 1e-9 &&
+            std::fabs(hs.frame.area_mm2 - 3000) < 1e-9,
+        "B6: the sector's frame is its own clipped face, exactly 60 x 50, 3000 mm2");
+
+  // B4: a split exit face is credited by the cuts, not by face membership. The bottom
+  // as a whole (100) and split at x = 50 into 200 (x < 50) and 201 (x >= 50).
+  {
+    std::vector<FaceRegionSpec> sp = one_region_per_face();
+    FaceRegionSpec a, b;
+    a.id = 200;
+    a.add = {0};
+    a.cuts = {RegionCut{{50, 0, 0}, {-1, 0, 0}, true}};
+    b.id = 201;
+    b.add = {0};
+    b.cuts = {RegionCut{{50, 0, 0}, {1, 0, 0}, false}};
+    sp.push_back(a);
+    sp.push_back(b);
+    const std::vector<ResolvedFaceRegion> r3 = resolve_face_regions(m, sp);
+    const Stack t3 = build_stack(m, region(r3, 101), r3, g, lat, 0, kBuildZ, 1.0);
+    double s100 = -1, s200 = -1, s201 = -1;
+    for (const StackLink& l : t3.exit_regions) {
+      if (l.id == 100) s100 = l.area_fraction;
+      if (l.id == 200) s200 = l.area_fraction;
+      if (l.id == 201) s201 = l.area_fraction;
+    }
+    CHECK(std::fabs(s100 - 1.0) < 1e-12 && std::fabs(s200 - 0.5) < 1e-12 &&
+              std::fabs(s201 - 0.5) < 1e-12,
+          "B4: the whole bottom takes 100 %, each half 50 % (the halves sum to 1)");
+  }
 
   bool threw = false;
   try {

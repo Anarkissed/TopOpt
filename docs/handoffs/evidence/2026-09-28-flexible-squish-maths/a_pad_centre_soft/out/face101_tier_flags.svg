@@ -4,8 +4,12 @@
 <text x="20.0" y="50.0" fill="#333333">gyroid, varioshore_tpu at 220 °C, 1 bead(s) of 0.42 mm</text>
 <text x="20.0" y="66.0" fill="#333333">tier literature, +/-40 % on depth. Not a certificate.</text>
 <text x="20.0" y="82.0" fill="#333333">colour = the drawn target's status (clamped where it is not ok) or the buildable column's zone</text>
-<rect x="80.00" y="662.40" width="560.05" height="5.65" fill="#2a9d8f"/>
-<rect x="80.00" y="656.80" width="560.05" height="5.65" fill="#2a9d8f"/>
+<rect x="80.00" y="662.40" width="11.25" height="5.65" fill="#e76f51"/>
+<rect x="91.20" y="662.40" width="537.65" height="5.65" fill="#2a9d8f"/>
+<rect x="628.80" y="662.40" width="11.25" height="5.65" fill="#e76f51"/>
+<rect x="80.00" y="656.80" width="5.65" height="5.65" fill="#e76f51"/>
+<rect x="85.60" y="656.80" width="548.85" height="5.65" fill="#2a9d8f"/>
+<rect x="634.40" y="656.80" width="5.65" height="5.65" fill="#e76f51"/>
 <rect x="80.00" y="651.20" width="560.05" height="5.65" fill="#2a9d8f"/>
 <rect x="80.00" y="645.60" width="560.05" height="5.65" fill="#2a9d8f"/>
 <rect x="80.00" y="640.00" width="560.05" height="5.65" fill="#2a9d8f"/>
@@ -102,8 +106,12 @@
 <rect x="80.00" y="130.40" width="560.05" height="5.65" fill="#2a9d8f"/>
 <rect x="80.00" y="124.80" width="560.05" height="5.65" fill="#2a9d8f"/>
 <rect x="80.00" y="119.20" width="560.05" height="5.65" fill="#2a9d8f"/>
-<rect x="80.00" y="113.60" width="560.05" height="5.65" fill="#2a9d8f"/>
-<rect x="80.00" y="108.00" width="560.05" height="5.65" fill="#2a9d8f"/>
+<rect x="80.00" y="113.60" width="5.65" height="5.65" fill="#e76f51"/>
+<rect x="85.60" y="113.60" width="548.85" height="5.65" fill="#2a9d8f"/>
+<rect x="634.40" y="113.60" width="5.65" height="5.65" fill="#e76f51"/>
+<rect x="80.00" y="108.00" width="11.25" height="5.65" fill="#e76f51"/>
+<rect x="91.20" y="108.00" width="537.65" height="5.65" fill="#2a9d8f"/>
+<rect x="628.80" y="108.00" width="11.25" height="5.65" fill="#e76f51"/>
 <rect x="80.0" y="108.0" width="560.0" height="560.0" fill="none" stroke="#555555"/>
 <line x1="80.0" y1="668.0" x2="80.0" y2="673.0" stroke="#555555"/>
 <text x="80.0" y="686.0" text-anchor="middle">0.0</text>
@@ -120,13 +128,13 @@
 <text x="360.0" y="702.0" text-anchor="middle" fill="#333333">u (mm), along the frame's X</text>
 <text x="32.0" y="388.0" text-anchor="middle" fill="#333333" transform="rotate(-90 32.0 388.0)">v (mm), along the frame's Y</text>
 <rect x="670.0" y="102.0" width="14" height="14" fill="#2a9d8f" stroke="#555555"/>
-<text x="690.0" y="114.0" >ok (measured, &lt;= 0.20 strain): 10000</text>
+<text x="690.0" y="114.0" >ok (measured, &lt;= 0.20 strain): 9988</text>
 <rect x="670.0" y="124.0" width="14" height="14" fill="#e9c46a" stroke="#555555"/>
 <text x="690.0" y="136.0" >extrapolated (0.20 - 0.25 strain): 0</text>
 <rect x="670.0" y="146.0" width="14" height="14" fill="#457b9d" stroke="#555555"/>
 <text x="690.0" y="158.0" >too firm: cannot squish that deep: 0</text>
 <rect x="670.0" y="168.0" width="14" height="14" fill="#e76f51" stroke="#555555"/>
-<text x="690.0" y="180.0" >too soft: cannot stay that shallow: 0</text>
+<text x="690.0" y="180.0" >too soft: cannot stay that shallow: 12</text>
 <rect x="670.0" y="190.0" width="14" height="14" fill="#9b2226" stroke="#555555"/>
 <text x="690.0" y="202.0" >beyond the data (&gt; 0.25 strain): 0</text>
 <rect x="670.0" y="212.0" width="14" height="14" fill="#bbbbbb" stroke="#555555"/>

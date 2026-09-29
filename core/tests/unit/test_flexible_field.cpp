@@ -223,6 +223,43 @@ static void test_design(const Pad& p) {
   }
   CHECK(near(under, 20.0, 1e-9), "the stamp's 20 N lands under it");
   CHECK(outside_even == outside, "outside the stamp: the weight spread evenly");
+
+  // B3: a stamp covering a quarter of a column adds to that column's even-spread share of
+  // the rest; it does not replace the whole column's load with a sliver.
+  {
+    StampGrid q;
+    q.name = "corner";
+    q.origin_u_mm = 40;
+    q.origin_v_mm = 40;
+    q.cell_mm = 0.5;
+    q.nu = q.nv = 1;
+    q.values_mpa = {1e-4};
+    q.force_n = 1e-4 * 0.25;
+    const FaceDesign dq = design_face(s, p.top, map_both(1, {0, 1}, {1, 1}), W, &q, kGyroid1, tier);
+    const int kk = p.top.column_at(40, 40);  // the column over u 40..41, v 40..41
+    CHECK(near(dq.columns[static_cast<std::size_t>(kk)].pressure_mpa, 1e-4 * 0.25 + (W / 10000.0) * 0.75, 1e-12),
+          "B3: p = stamp average + even x (1 - covered / area)");
+  }
+  // B1 (design): a rigid design stamp half off the face reads the STATED force over the
+  // area that lands, and says some of it missed.
+  {
+    StampGrid rd = st;
+    rd.origin_u_mm = 90;
+    rd.rigid = true;
+    const FaceDesign dr = design_face(s, p.top, map_both(4, {0, 1}, {1, 1}), W, &rd, kGyroid1, tier);
+    const int k = p.top.column_at(95, 50);
+    CHECK(near(dr.columns[static_cast<std::size_t>(k)].pressure_mpa, 20.0 / 200.0, 1e-12) &&
+              dr.design_stamp_off_face,
+          "B1: rigid design stamp half off: 20 N over the 200 mm2 on the face, flagged");
+  }
+  // H1: a column whose nearest achievable depth is itself past the data carries NO depth
+  // (NaN), never a placeholder.
+  {
+    const FaceDesign dh = design_face(s, p.top, map_both(0.1, {0, 1}, {1, 1}), 5.0e4, nullptr, kGyroid1, tier);
+    const ColumnDesign& c0 = dh.columns[0];
+    CHECK(c0.status == "too_soft" && !c0.nearest_known && std::isnan(c0.clamped_depth_mm),
+          "H1: unknown nearest depth is NaN, not 0.25 x h");
+  }
 }
 
 static void test_stamps(const Pad& p) {
@@ -312,7 +349,42 @@ static void test_stamps(const Pad& p) {
   StampGrid off = st;
   off.origin_u_mm = 90;
   c = check_stamp(s, p.top, rho, off, kGyroid1, tier);
-  CHECK(near(c.force_off_face_n, 4.0, 1e-9), "half the stamp off the face: 4 N missed");
+  CHECK(near(c.force_off_face_n, 4.0, 1e-9) && c.off_face, "half the stamp off the face: 4 N missed, flagged");
+  // B1: a RIGID plate half off the face still carries its whole 8 N, on the 200 mm2
+  // that lands: never a quietly lighter load.
+  {
+    StampGrid roff = off;
+    roff.rigid = true;
+    c = check_stamp(s, p.top, rho, roff, kGyroid1, tier);
+    const double full = strain_under(s, 8.0 / 200.0, 0.2).strain * h;
+    CHECK(c.ok && near(c.rigid_depth_mm, full, 1e-9) && c.off_face && near(c.force_off_face_n, 4.0, 1e-9),
+          "B1: rigid half off the face: the stated 8 N on the covered 200 mm2, flagged off-face");
+  }
+}
+
+// B5: two sectors of ONE face, side by side (same axis, footprints not overlapping), are
+// not a one-profile-per-stack conflict, whatever the pitch or the cut position.
+static void test_side_by_side_sectors() {
+  StepModel m = box(100, 60, 20);
+  const VoxelGrid g = voxelize(m.mesh, 73);
+  std::vector<FaceRegionSpec> sp = one_region_per_face();
+  FaceRegionSpec a, b;
+  a.id = 200;
+  a.add = {1};
+  a.cuts = {RegionCut{{41, 0, 0}, {-1, 0, 0}, true}};
+  b.id = 201;
+  b.add = {1};
+  b.cuts = {RegionCut{{41, 0, 0}, {1, 0, 0}, false}};
+  sp.push_back(a);
+  sp.push_back(b);
+  const std::vector<ResolvedFaceRegion> rs = resolve_face_regions(m, sp);
+  const std::vector<char> lat = all_solid(g);
+  const Stack sa = build_stack(m, region(rs, 200), rs, g, lat, 0, kZ, g.spacing);
+  const Stack sb = build_stack(m, region(rs, 201), rs, g, lat, 0, kZ, g.spacing);
+  const std::vector<StackConflict> cf = find_stack_conflicts(g, lat, {&sa, &sb});
+  CHECK(cf.empty(), "B5: side-by-side sectors (cut at x = 41, resolution 73) are not a conflict");
+  const Stack bottom = build_stack(m, region(rs, 100), rs, g, lat, 0, kZ, g.spacing);
+  CHECK(find_stack_conflicts(g, lat, {&sa, &bottom}).size() == 1, "... a sector over a loaded bottom still is");
 }
 
 static void test_field_and_handover() {
@@ -371,9 +443,11 @@ static void test_field_and_handover() {
     // The blend's WIDTH: 4 mm nearer the top than the side, w = 0.5 + 4 / (2 L) with L
     // one cell of the larger local cell size (R11).
     const double L = std::max(cell_size_mm("gyroid", rt, 1, 0.42), cell_size_mm("gyroid", rsd, 1, 0.42));
-    const double w = 0.5 + 4.0 / (2.0 * L);
+    // Across the boundary (the plane d_top = d_side) the distance is (d_B - d_A) / |l_A - l_B|
+    // = 4 / sqrt(2) mm here; one cell L of blend measured ACROSS it (review H3).
+    const double w = 0.5 + 4.0 / (L * std::sqrt(2.0));
     CHECK(near(f.density[at(65, 51, 29)], w * rt + (1 - w) * rsd, 1e-9),
-          "the blend runs over one cell of the larger cell size");
+          "H3: the blend is one cell wide measured across the boundary");
   }
   // Density is between the two everywhere in the overlap.
   bool between = true;
@@ -398,6 +472,7 @@ int main() {
   test_design(p);
   test_stamps(p);
   test_field_and_handover();
+  test_side_by_side_sectors();
   std::printf("test_flexible_field: %d checks, %d failures\n", g_checks, g_failures);
   return g_failures == 0 ? 0 : 1;
 }

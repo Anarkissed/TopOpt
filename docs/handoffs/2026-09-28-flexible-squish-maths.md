@@ -14,8 +14,8 @@ picks gyroid or honeycomb and the temperature, with reasons. A `flexible` job bl
 `topopt-cli flexible` write SVG heat maps, a CSV of columns and a receipt.
 
 **What I measured.** Every one of Iacob's 72 published numbers (36 rows × 10 % and 20 %
-strain) comes back from the lookup to 3e-16. Inverse → forward round trips agree to
-6e-16. Three scenario runs on generated boxes (a pad with a soft centre; the same pad
+strain, read on the core-strain axis after review round 1) comes back from the lookup to
+2e-16. Inverse → forward round trips agree to 5e-15. Three scenario runs on generated boxes (a pad with a soft centre; the same pad
 designed under a thumb and checked under a palm and a heel; a block loaded on top and
 on a side) produce the pictures in `docs/handoffs/evidence/2026-09-28-flexible-squish-maths/`.
 The heel check shows the honest answer: a pad drawn for 30 kg spread evenly is squished
@@ -110,11 +110,15 @@ ambiguous: `wall_line_width_mm`/`_outer_mm` are the perimeter-wall widths of the
 knockdown gate, not the strut floor. A Flexible job cannot carry `lattice`/`grading`,
 so the block states the same key with the same meaning; required, > 0.
 
-**The strain convention.** Nominal: strain = depth ÷ the column's latticed height,
-stress = force ÷ loaded area, as the table states them (Iacob: nominal over the whole
-12.5 mm specimen, skins included). No skin-ratio correction. R8's limits then read
-literally (≤ 0.20 measured, ≤ 0.25 extrapolated, beyond refused). Recorded in every
-receipt (`strain_convention`).
+**The strain convention (changed in review round 1).** CORE strain. The loader converts
+every table curve once, with each entry's own `specimen.height_mm` and `skin_total_mm`:
+ε_core = ε_nominal × height / (height − skin) (12.5 / 10.9 for Iacob), stress
+unchanged; the skins are treated as rigid (under 3 % effect at the stiffest row). The
+zones move with it: measured ≤ 0.2294, extrapolated ≤ 0.2867, refused beyond. The
+column height is the latticed length; skins IN THE PART are not yet subtracted (C2 does),
+so a skinned face currently reads high by about skin / height. Recorded in every receipt
+(`strain_convention`). The first version applied no correction and under-predicted
+squish by 5–13 %.
 
 ## F-items
 
@@ -122,7 +126,7 @@ receipt (`strain_convention`).
 |---|---|---|
 | F1 strict loaders | **PASS** | `test_flexible_data` (111 checks): the live files load (10 filaments, 36 entries, bands 0.40/0.20/0.50, varioShore offers exactly 190/220/240); unknown keys refused at top, material, drying, modulus, band, entry, specimen levels; missing required keys (including required-but-nullable ones) refused; non-monotone / flat / single-point / origin-point loading refused; relative_density 0 and 1.2 refused, 1.0 accepted; nulls stay `known = false` (TPU95A modulus, varioShore drying/retraction); duplicate JSON keys and out-of-range numbers refused; cross-file checks (unknown material, unlisted table, duplicate ids). |
 | F2 density axis | **PASS** | `test_flexible_data`: the map reproduces every 190 °C `est_core_relative_density` EXACTLY; every 220/240 °C row takes the 190 °C value of its nominal %; gyroid axis 0.143–0.362, honeycomb 0.165–0.446 (02 §2); `density_basis = "estimated_core (190 °C mapping)"` on every set and every receipt; ambiguous maps (two temperatures, a nominal off the map, a decreasing map) refused. |
-| F3 lookup | **PASS** | `test_flexible_squish` (9,676 checks): all 72 Table 2 values (typed from the paper) within 1e-9 (tool: 2.7e-16, `iacob_spot_checks.md`); the example 20 % gyroid 190 °C ε 0.20 → 0.292 MPa; piecewise-linear through the origin; linear in ρ; extrapolated zone 0.20–0.25 flagged, > 0.25 refused; σ strictly increasing in ρ and in ε on dense grids for all six sets; round trip inverse → forward worst 5.5e-16 (ρ) / 4.4e-15 (ε); every refusal path (negative strain, beyond data, below/above ρ range, untested temperature 205 °C, octet, calibrate_first, proxy_candidate, unknown material, too_firm/too_soft/beyond_data/no_pressure with the nearest achievable depth); rigid press equilibrium Σaσ = F to 1e-9. |
+| F3 lookup | **PASS** | `test_flexible_squish` (9,676 checks): all 72 Table 2 values (typed from the paper) within 1e-9 (tool: 2.7e-16, `iacob_spot_checks.md`); the example 20 % gyroid 190 °C ε 0.20 → 0.292 MPa; piecewise-linear through the origin; linear in ρ; extrapolated zone flagged, beyond refused (core strain after review round 1: 0.2294 / 0.2867); σ strictly increasing in ρ and in ε on dense grids for all six sets; round trip inverse → forward worst 5.5e-16 (ρ) / 4.4e-15 (ε); every refusal path (negative strain, beyond data, below/above ρ range, untested temperature 205 °C, octet, calibrate_first, proxy_candidate, unknown material, too_firm/too_soft/beyond_data/no_pressure with the nearest achievable depth); rigid press equilibrium Σaσ = F to 1e-9. |
 | F4 pen curve | **PASS** | `test_flexible_curve` (61): passes through every point; never leaves its two neighbours' [min, max] (11 shapes incl. interior extremes); S-curve monotone; flat, 2-point, plateau; refusals. Positive control: naive tangents → 5 checks red. |
 | F5 frames and stacks | **PASS** | `test_flexible_faces` (46): top face → load −Z, X +X (long side), Y = load × X, 100 × 60 extents, stack 20 mm, linked bottom (face 0 / region 100, 100 %); side face → side flag (and not with build X); 40° fold flagged, 10° not; rotation 90/180/270 exact, 45 refused; square face → tie rule; a cut sector gets its own frame. `test_flexible_field`: top + bottom → conflict naming 101 and 100 over the whole block; top + side → one handover pair, blended band inside the overlap, nearest-face density at both ends, the average at equal depth. STL faces reachable: `StepModel` pseudo-faces (evidence (a)–(c)). |
 | F6 maps → field | **PASS** | `test_flexible_field` (59): both / either / centre→edge exactly as defined; target = S·D; design stamp pressure under it (20 N conserved), even spread elsewhere; target density carries the design pressure at the target strain; clamped too_firm / too_soft / beyond_data each tested; 3D field assembled with handover; receipts count clamped columns per face. |
@@ -277,6 +281,12 @@ string — never an exception, never a guessed number.
   Show depth × (1 ± band).
 - `double cell_size_mm(topology, density, beads_per_wall, bead_width_mm)` — gyroid
   3.0915·t/ρ, honeycomb 2·t/ρ.
+- `MaybeNumber specimen_density_g_cm3(set, density)` — measured specimen mass density,
+  linear in ρ (the mass tiebreak).
+- `std::string temperature_note(data, material_id, temp_c)` — "" or e.g. "below the
+  manufacturer's range 195-260 °C; tested by iacob2024" (show it; never hide the temp).
+- Strain everywhere is CORE strain (`set.strain_convention`); `entry.loading` is the
+  file as written, `entry.core_loading` what the lookup uses.
 
 **Faces and stacks (F5):**
 - `topopt::resolve_face_regions(model, job.loads.face_regions)` (existing) → regions.
@@ -287,6 +297,8 @@ string — never an exception, never a guessed number.
   area_mm2, projected_area_mm2, normal_spread_deg, normal_spread_flag, build_angle_deg,
   side, principal_axis_tied}`; `to_uv(p,u,v)`, `from_uv(u,v)`. Throws for a rotation not a
   multiple of 90.
+- `FaceFrame face_frame_cut(mesh, triangles, region.cuts, rotation_deg, build_dir)` — the
+  frame of a sector (triangles clipped to the cuts); `bool passes_cuts(cuts, p)`.
 - `Stack build_stack(model, region, all_regions, grid, lattice_mask, rotation_deg,
   build_dir, pitch_mm)` — columns on a `pitch_mm` grid (the run uses `grid.spacing`):
   `{frame, pitch_mm, nu, nv, cell[], columns[] {iu, iv, u_mm, v_mm, area_mm2, entry_t,
@@ -305,7 +317,8 @@ string — never an exception, never a guessed number.
 - `FaceDesign design_face(set, stack, map, weight_n, design_stamp*, BuildParams{topology,
   beads_per_wall, bead_width_mm}, tier)` → per column `{s, pressure_mpa, height_mm,
   target_depth_mm, target_strain, status, target_extrapolated, target_density,
-  nearest_depth_mm, nearest_known, clamped_density, clamped_depth_mm, buildable_density,
+  nearest_depth_mm (NaN = unknown), nearest_known, clamped_density, clamped_depth_mm (NaN
+  when the nearest is past the data), buildable_density,
   buildable_depth_mm, buildable_ok, buildable_extrapolated, cell_mm, sigma_mm}` plus
   counts (`ok, too_firm, too_soft, beyond_data, no_lattice, target_extrapolated,
   buildable_extrapolated, buildable_beyond_data, near_edge`), ranges and `tier`.
@@ -313,7 +326,9 @@ string — never an exception, never a guessed number.
 - `StampCheck check_stamp(set, stack, column_density[], stamp, build, tier)` →
   `{ok, refusal, depth_mm[] (<0 = not pressed), status[] ("" | ok | extrapolated |
   beyond_data), counts, max_depth_mm, rigid_depth_mm, stamp_width_mm, local_cell_mm,
-  narrow, force_off_face_n, tier}`. Refusal codes `beyond_data` (rigid), `no_lattice_under_stamp`.
+  narrow, force_off_face_n, off_face, tier}`. A rigid stamp carries its STATED force on the
+  area that lands. Refusal codes `beyond_data` (rigid), `rigid_over_solid`,
+  `no_lattice_under_stamp`.
 - `std::vector<StackConflict> find_stack_conflicts(grid, mask, stacks*)` — non-empty ⇒
   refuse and name `face_a`, `face_b` (M13).
 - `DensityField assemble_density_field(grid, mask, {stack*, design*}[], build)` —
@@ -324,10 +339,11 @@ string — never an exception, never a guessed number.
 - `Recommendation recommend(data, material_id, temps[], topologies[], feel, beads,
   bead_width_mm, FaceRequest[] {stack*, map, weight_n, design_stamp*})` →
   `{chosen, reachable, topology, temp_c, feel, reasons[] {code, text, face_region_id},
-  candidates[], failures[], sentence}`. Reason codes: `feel_springy_prefers_gyroid`,
+  candidates[] {…, mass_known, mass_g}, failures[] {…, buildable_beyond_data,
+  solid_under_map}, sentence}`. `pick_by_tiebreaks(pool, code)` is the rule-4 step alone. Reason codes: `feel_springy_prefers_gyroid`,
   `feel_damped_prefers_honeycomb`, `other_family_unreachable`, `only_family_reachable`,
   `preferred_family_ineligible`, `honeycomb_side_stack`, `tiebreak_near_edge`,
-  `tiebreak_material`, `tiebreak_inside_data`, `nothing_reachable`, `face_unreachable`,
+  `tiebreak_mass`, `tiebreak_inside_data`, `solid_under_map`, `nothing_reachable`, `face_unreachable`,
   `only_candidate`, and any `curve_set` refusal code. Throws on a bad feel/topology name.
 
 **Jobs and the CLI (F11, F12):**
@@ -354,19 +370,23 @@ string — never an exception, never a guessed number.
 4. **Honeycomb's planning cell is d = 2t/ρ (C2).** The recommender, the smoothing σ
    and the receipt use it; C2's honeycomb generator should use the same relation or
    report its measured one.
-5. **Strain convention (C2).** Nominal over the latticed height, no skin correction —
-   the specimen's convention. When C2's skins make the part's skin/core ratio very
-   different from 1.6/12.5, revisit (02 §2 gives E_core ≈ 0.872 E_nominal).
+5. **Strain convention (C2).** Core strain (specimen skins removed by the loader). C2 must
+   subtract the PART's skins from each column's height; until then a skinned face reads
+   high by about skin / height.
 6. **Stamp edges (A1).** Stamps are averaged over each column's square (force
    conserved exactly), so a column the stamp only half covers carries half the pressure:
    the heel map shows a thin ring of shallow dents at the edge. Rasterise at ≤ half the
    column pitch.
 7. **Rigid design stamps (A1).** A rigid stamp used as the DESIGN load is read as its
-   average pressure over its footprint (`design_stamp_rigid_averaged`), because its
-   real pressure depends on the lattice being designed.
+   STATED force over the area that lands on the face (`design_stamp_rigid_averaged`,
+   `design_stamp_off_face`), because its real pressure depends on the lattice being
+   designed. A partly covered column adds the even-spread share of its uncovered part.
 8. **Frames (A1).** A square or round face has no longest direction: X = model +X
-   projected (else +Y), flagged `principal_axis_tied`. A cut sector's frame comes from
-   its own columns, so it depends on the pitch. Draw frames from core, never re-derive.
+   projected (else +Y), flagged `principal_axis_tied` (principal moments within 1e-4). A
+   cut sector is framed from its own triangles clipped to its cuts. Draw frames from core,
+   never re-derive. **Orientation:** Y = load × X is a view from INSIDE the part, so a top
+   face's SVG is mirrored relative to looking at it from outside, and +90° turns
+   clockwise as seen from outside — A1 must label or flip v.
 9. **Job schema (A1).** A Flexible job still needs `mode` (any of the four; unused),
    `output` (unused) and `material` (= `flexible.material_id`); `resolution` sets the
    voxel grid AND the column pitch. `skin_on` is required per face and recorded only —
@@ -376,12 +396,25 @@ string — never an exception, never a guessed number.
     `multiscale_region_mask` with the same primitives, because run_job.cpp is not in the
     OCCT-free slices. A refactor that moves those two into the base library and has both
     call one function would remove the duplicate; I did not refactor a shared file.
-11. **Recommendation reachability is judged on the TARGET map**, not the buildable one:
-    a map can be "reachable" while its buildable version has extrapolated columns
-    (scenario b). Both counts are in the receipt.
-12. **Data observation (not blocking, no value changed).** varioShore's
-    `nozzle_temp_range_c` is [195, 260] while its offered (Iacob-tested) temperatures
-    include 190 °C. The loader does not require offered ⊂ range. Maintainer to decide.
+11. **Reachability counts the buildable map too.** A column whose target is reachable but
+    whose smoothed density squishes past the data, or squish drawn over SOLID
+    (`solid_under_map`), makes the candidate not reachable. Buildable columns in the
+    extrapolated zone are allowed and counted (scenario b: 108).
+12. **Temperature outside the maker's range (H5).** varioShore offers 190 °C (Iacob tested
+    it) while `nozzle_temp_range_c` is [195, 260]. Data unchanged; `temperature_note()`
+    and the receipt's `temperature_notes` flag it: "below the manufacturer's range
+    195-260 °C; tested by iacob2024". A1 should show it next to the temperature.
+13. **Depth ignores the handover (C2).** Each face's depth assumes one density through the
+    whole column, but the handover gives part of a column to another face (in (c) the top
+    column at x = 99.5 is 59.5 of its 60 mm at face 103's density). C2 must solve columns
+    in series through the assembled field, d = Σ hⱼ·ε(p; ρⱼ) (02 §4's "realised field").
+14. **Smoothing at face edges (C2).** The Gaussian pulls edge columns toward the interior
+    (in (c) face 101's edge 9.82 → 8.30 mm, −15 %). Use local-linear or mirrored weights.
+15. **Adjacent sectors on one axis (C2)** meet with a hard density step (each is designed
+    alone; there is no handover between same-axis sectors).
+16. **Stamp rasterisation (A1).** Partly covered columns now keep their even-spread share
+    (B3), so faded image-stamp edges no longer make near-unloaded rings; still rasterise
+    at ≤ half the column pitch.
 
 
 ## What I did NOT do
@@ -394,8 +427,11 @@ string — never an exception, never a guessed number.
 - Skins are not modelled: `skin_on` is parsed and recorded, nothing more.
 - The `calibrated` / `proxy` tiers are implemented but no data carries them yet; `proxy`
   stays refused (as calibrate_first) until Q4 is ruled.
-- The mass tiebreak compares material VOLUME (Σ ρ·A·h), not grams: the foamed density at
-  220/240 °C is unknown (null), so grams would be a guess.
+- (Corrected in review round 1: the first version compared volume and said "grams would
+  be a guess" — wrong, the measured specimen masses are in the table for every row.) The
+  mass tiebreak now weighs grams: specimen density interpolated in ρ per temperature ×
+  column volume. Specimen density includes the specimen's skins, so it is a relative
+  (between-temperature) measure, not a predicted part mass.
 - No per-temperature "furthest inside the data" beyond the insideness score; no
   unloading curves are used (the tables have none).
 - The app is untouched (TRACK core). A1 is not started.
@@ -457,3 +493,42 @@ app/TopOptKit/Sources/TopOptBridge/bridge.cpp:2708:44: error: no member named
   `OrganicVariantCacheTests.testTheKeyIgnoresThickness…`.
 - Disk: the volume had 4.7 GB free near the end, mostly used by other worktrees; an app
   suite run needs about 1–2 GB.
+
+## Review round 1 (reviewer: ACCEPT-WITH-NOTES; one fix round, tests first)
+
+Every item got a test FIRST, and each test was run against today's code before the fix.
+Stubs reproduced today's behaviour for the new APIs, so the failures were behavioural,
+not compile errors. The red run: data 3, squish 369, faces 2, field 7, recommend 4
+failures. After the fixes: all green.
+
+| item | verdict | the test that proves it |
+|---|---|---|
+| B1 rigid stamp partly off the face (check + design) | **PASS** | `test_flexible_field`: "B1: rigid half off the face: the stated 8 N on the covered 200 mm2, flagged off-face"; "B1: rigid design stamp half off: 20 N over the 200 mm2 on the face, flagged". `StampCheck::off_face`, `FaceDesign::design_stamp_off_face`. |
+| B2 map drawn over solid | **PASS** | `test_flexible_recommend` "B2: squish drawn over solid is not reachable" (reason `solid_under_map`; `FaceDesign::solid_under_map`). |
+| B3 partly covered column | **PASS** | `test_flexible_field` "B3: p = stamp average + even x (1 - covered / area)". |
+| B4 split exit faces | **PASS** | `test_flexible_faces` "B4: the whole bottom takes 100 %, each half 50 % (the halves sum to 1)" (exit point tested against each region's cuts). |
+| B5 side-by-side sectors | **PASS** | `test_flexible_field` "B5: side-by-side sectors (cut at x = 41, resolution 73) are not a conflict" (reproduced red first); "… a sector over a loaded bottom still is". `in_stack` tests the voxel's projection against the sector's cuts; overlaps thinner than one pitch are ignored. |
+| B6 sectors framed from the whole face | **PASS** | `test_flexible_faces` "B6: the flat sector gets its own load (-Z), no spread, 100 mm2" (`face_frame_cut` clips triangles, Sutherland–Hodgman); "B6: the sector's frame is its own clipped face, exactly 60 x 50, 3000 mm2". The column-based re-frame is gone. |
+| H1 placeholder depth | **PASS** | `test_flexible_field` "H1: unknown nearest depth is NaN, not 0.25 x h"; `test_flexible_run` "H1: unknown values are empty CSV fields, never 'nan' or a stand-in number". |
+| H2 "least material" | **PASS** | `test_flexible_recommend` "H2: 190 C is the heaviest, in grams" and "at a row: its own specimen density" (`specimen_density_g_cm3`, `Candidate::mass_g`; tiebreak code `tiebreak_mass`). Scenario (c): 220 °C 245 g, 240 °C 273 g, 190 °C 378 g. The handoff line "grams would be a guess" is corrected. |
+| H3 blend width | **PASS** | `test_flexible_field` "H3: the blend is one cell wide measured across the boundary" (w = ½ + (d_B − d_A) / (L·\|l_A − l_B\|)). Scenario (c) band: 57,588 mm³ (was 85,264; the reviewer's one-cell estimate of about 60,220 used the pre-conversion densities). |
+| H4 tiebreak reason | **PASS** | `test_flexible_recommend` "H4: B beats A on mass; C lost earlier, on edges" (`pick_by_tiebreaks`). |
+| H5 temperature outside the maker's range | **PASS** | `test_flexible_data` "190 C: below the manufacturer's 195-260 C range, tested by iacob2024"; `test_flexible_run` "H5: 190 C flagged … in the receipt". No data value changed. |
+| Strain convention (02 §2) | **PASS** | `test_flexible_data` "file values kept as written; core curve = nominal strain x 12.5 / 10.9, stress unchanged"; `test_flexible_squish`: all 72 Table 2 values at the core strains 0.1147 / 0.2294 (`iacob_spot_checks.md`: 2.0e-16), zones 0.2294 / 0.2867, round trip ≤ 5e-15; the three scenarios re-run. |
+| Minor: tie tolerance 1e-4 | **PASS** | the square-face tie test still passes at the new tolerance (`faces.cpp` principal_2d). |
+| Minor: curve dead code | **PASS** | removed (a, b ≥ 0 always); `test_flexible_curve` 61/61, including the control that goes red with naive tangents. |
+| Minor: row-crossing at the rows' own points | **PASS** | `test_flexible_data` "a crossing at a row's own point (between samples) is refused" (red before). |
+| Minor: problem #11 stale | **PASS** | rewritten (reachability counts smoothing-past-data and solid-under-map). |
+| Rulings recorded | — | the width key `flexible.min_extrudable_width_mm` accepted; Q4 open, proxy_candidate stays refused. |
+| For C2 / A1 | recorded | Problems 13–16 and 8 (frame orientation): depth ignores the handover (solve in series), edge smoothing bias, hard steps between same-axis sectors, the frame seen from inside. |
+
+What the re-run changed in the evidence (honest, not tuned):
+- (a) The 12 corner columns are now "too soft": drawn at 0.377 mm, while the firmest
+  gyroid squishes 0.402 mm under 30 kg. So Auto says nothing fits every face; the
+  closest is gyroid at 220 °C. I kept the scenario's inputs as specified; the harness
+  asserts the new outcome.
+- (b) 128 columns go past the data once smoothed (was 180); heel 3,080 beyond the data.
+- (c) Still gyroid at 220 °C, by the near-edge tiebreak (3,008 vs 3,648); it is also the
+  lightest in grams.
+
+ROUND1_TESTS

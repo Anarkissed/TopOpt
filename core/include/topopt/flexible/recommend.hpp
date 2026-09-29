@@ -49,6 +49,7 @@ struct FaceFailure {
   double temp_c = 0.0;
   int too_firm = 0, too_soft = 0, beyond_data = 0;
   int buildable_beyond_data = 0;  // reachable targets that squish past the data once smoothed
+  int solid_under_map = 0;        // squish drawn where the column has no lattice (B2)
   double u_min_mm = 0.0, u_max_mm = 0.0, v_min_mm = 0.0, v_max_mm = 0.0;  // failing columns
   bool nearest_known = false;
   double nearest_depth_min_mm = 0.0, nearest_depth_max_mm = 0.0;  // over failing columns
@@ -65,6 +66,8 @@ struct Candidate {
   int unreachable_columns = 0;
   int near_edge_columns = 0;
   double material_volume_mm3 = 0.0;
+  bool mass_known = false;  // every column's specimen density was known
+  double mass_g = 0.0;      // Σ specimen density(ρ) × A × h — measured masses, not a guess
   double insideness = 0.0;  // mean distance of the densities from the table's ends, ÷ span
   std::vector<FaceFailure> failures;
 };
@@ -80,6 +83,12 @@ struct Recommendation {
   std::vector<FaceFailure> failures;  // the choice's, when !reachable
   std::string sentence;               // the one line the UI shows
 };
+
+// The tiebreaks (rule 4) over candidates that already passed eligibility, reachability
+// and feel: fewer near-edge columns, then fewer grams (when every candidate's mass is
+// known), then furthest inside the table. Returns the winner's index and, in `code`, the
+// tiebreak that separated it from its CLOSEST rival ("" when they tie throughout) (H4).
+std::size_t pick_by_tiebreaks(const std::vector<const Candidate*>& pool, std::string& code);
 
 // `temps` and `topologies` are the candidates to weigh: one value each when the
 // user fixed them, every tested temperature / both families under "auto". Throws

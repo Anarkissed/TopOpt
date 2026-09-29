@@ -54,11 +54,10 @@ PenCurve::PenCurve(const std::vector<double>& x, const std::vector<double>& y) {
       m_[k + 1] = 0.0;
       continue;
     }
+    // a, b >= 0 always: the end tangents ARE the end secants, and an interior tangent is
+    // either 0 or the mean of two secants of the same sign as d[k].
     const double a = m_[k] / d[k];
     const double b = m_[k + 1] / d[k];
-    // Tangents of the wrong sign (possible only at the two ends) are zeroed.
-    if (a < 0.0) m_[k] = 0.0;
-    if (b < 0.0) m_[k + 1] = 0.0;
     const double s = a * a + b * b;
     if (s > 9.0) {  // step 3: pull the pair back inside the monotone region
       const double tau = 3.0 / std::sqrt(s);

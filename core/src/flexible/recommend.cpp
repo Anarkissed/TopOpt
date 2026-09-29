@@ -33,8 +33,10 @@ FaceFailure failure_of(const Stack& st, const FaceDesign& d, const Candidate& c)
     const ColumnDesign& cd = d.columns[k];
     const bool target_bad = cd.status == "too_firm" || cd.status == "too_soft" || cd.status == "beyond_data";
     const bool built_bad = cd.status == "ok" && !cd.buildable_ok;
-    if (!target_bad && !built_bad) continue;
+    const bool solid = cd.status == "no_lattice" && cd.target_depth_mm > 0.0;
+    if (!target_bad && !built_bad && !solid) continue;
     if (built_bad) ++f.buildable_beyond_data;
+    if (solid) ++f.solid_under_map;
     if (cd.status == "too_firm") ++f.too_firm;
     if (cd.status == "too_soft") ++f.too_soft;
     if (cd.status == "beyond_data") ++f.beyond_data;
@@ -65,6 +67,9 @@ FaceFailure failure_of(const Stack& st, const FaceDesign& d, const Candidate& c)
   if (f.too_soft)
     what += std::string(what.empty() ? "" : "; ") + std::to_string(f.too_soft) +
             " columns cannot stay that shallow (even the firmest squishes further)";
+  if (f.solid_under_map)
+    what += std::string(what.empty() ? "" : "; ") + std::to_string(f.solid_under_map) +
+            " columns have squish drawn over SOLID (no lattice there to squish)";
   if (f.buildable_beyond_data)
     what += std::string(what.empty() ? "" : "; ") + std::to_string(f.buildable_beyond_data) +
             " columns squish past the tested strain once smoothed to what can be built";
@@ -89,10 +94,12 @@ std::string tiebreak(const Candidate& a, const Candidate& b, bool& a_wins) {
     a_wins = a.near_edge_columns < b.near_edge_columns;
     return "tiebreak_near_edge";
   }
-  if (std::fabs(a.material_volume_mm3 - b.material_volume_mm3) >
-      1e-9 * std::max(a.material_volume_mm3, b.material_volume_mm3)) {
-    a_wins = a.material_volume_mm3 < b.material_volume_mm3;
-    return "tiebreak_material";
+  // H2: GRAMS, from the measured specimen densities (foamed 220/240 C rows are lighter
+  // than 190 C at the same core density); skipped when either mass is unknown.
+  if (a.mass_known && b.mass_known &&
+      std::fabs(a.mass_g - b.mass_g) > 1e-9 * std::max(a.mass_g, b.mass_g)) {
+    a_wins = a.mass_g < b.mass_g;
+    return "tiebreak_mass";
   }
   if (a.insideness != b.insideness) {
     a_wins = a.insideness > b.insideness;
@@ -146,7 +153,8 @@ Recommendation recommend(const FlexibleData& data, const std::string& material_i
       c.has_data = true;
       const BuildParams build{topo, beads_per_wall, bead_width_mm};
       const double span = cs.set.density_max() - cs.set.density_min();
-      double inside = 0.0;
+      double inside = 0.0, mass_g = 0.0;
+      bool mass_known = true;
       int n = 0;
       for (const FaceRequest& f : faces) {
         const TierBand tier = tier_band(data.catalogue.error_bands, cs.set.tier,
@@ -156,12 +164,17 @@ Recommendation recommend(const FlexibleData& data, const std::string& material_i
         int built_bad = 0;  // reachable targets the smoothing pushes past the data
         for (const ColumnDesign& cd : d.columns)
           if (cd.status == "ok" && !cd.buildable_ok) ++built_bad;
-        const int bad = d.too_firm + d.too_soft + d.beyond_data + built_bad;
+        const int bad = d.too_firm + d.too_soft + d.beyond_data + built_bad + d.solid_under_map;
         c.unreachable_columns += bad;
         c.near_edge_columns += d.near_edge;
         c.material_volume_mm3 += d.material_volume_mm3;
-        for (const ColumnDesign& cd : d.columns) {
+        for (std::size_t k = 0; k < d.columns.size(); ++k) {
+          const ColumnDesign& cd = d.columns[k];
           if (cd.status == "no_lattice") continue;
+          const MaybeNumber md = specimen_density_g_cm3(cs.set, cd.buildable_density);
+          if (!md.known) mass_known = false;
+          // g/cm3 x mm3 / 1000 = g
+          mass_g += md.value * f.stack->columns[k].area_mm2 * cd.height_mm / 1000.0;
           inside += std::min(cd.buildable_density - cs.set.density_min(),
                              cs.set.density_max() - cd.buildable_density) / span;
           ++n;
@@ -169,6 +182,8 @@ Recommendation recommend(const FlexibleData& data, const std::string& material_i
         if (bad > 0) c.failures.push_back(failure_of(*f.stack, d, c));
       }
       c.insideness = n > 0 ? inside / n : 0.0;
+      c.mass_known = mass_known;
+      c.mass_g = mass_known ? mass_g : 0.0;
       c.reachable = c.unreachable_columns == 0;
       r.candidates.push_back(c);
     }
@@ -260,19 +275,14 @@ Recommendation recommend(const FlexibleData& data, const std::string& material_i
   }
 
   // Step 4: tiebreaks.
-  const Candidate* best = pool.front();
   std::string decided;
-  for (std::size_t i = 1; i < pool.size(); ++i) {
-    bool a_wins = true;
-    const std::string code = tiebreak(*best, *pool[i], a_wins);
-    if (!code.empty()) decided = code;
-    if (!a_wins) best = pool[i];
-  }
+  const Candidate* best = pool[pick_by_tiebreaks(pool, decided)];
   if (pool.size() > 1 && !decided.empty()) {
     const char* text = decided == "tiebreak_near_edge"
                            ? "fewest columns near an edge of the table"
-                           : decided == "tiebreak_material" ? "the least material"
-                                                            : "its densities sit furthest inside the table";
+                           : decided == "tiebreak_mass"
+                                 ? "the least material, in grams from the measured specimen densities"
+                                 : "its densities sit furthest inside the table";
     r.reasons.push_back({decided, label(*best) + ": " + text, -1});
   }
   r.chosen = true;
@@ -286,8 +296,15 @@ Recommendation recommend(const FlexibleData& data, const std::string& material_i
                              " comes closest (" + std::to_string(best->unreachable_columns) +
                              " columns out of reach)",
                          -1});
-    for (const FaceFailure& f : best->failures)
+    for (const FaceFailure& f : best->failures) {
       r.reasons.push_back({"face_unreachable", f.text, f.face_region_id});
+      if (f.solid_under_map > 0)
+        r.reasons.push_back({"solid_under_map",
+                             "face " + std::to_string(f.face_region_id) + ": " +
+                                 std::to_string(f.solid_under_map) +
+                                 " columns ask for squish where the part is solid",
+                             f.face_region_id});
+    }
     r.sentence = "Nothing fits every face: " + label(*best) + " comes closest; " +
                  best->failures.front().text;
     return r;
@@ -299,6 +316,32 @@ Recommendation recommend(const FlexibleData& data, const std::string& material_i
   r.sentence = label(*best) + " - " + (why.empty() ? std::string("fits every face") : why) +
                ". Every face's squish fits inside the data.";
   return r;
+}
+
+std::size_t pick_by_tiebreaks(const std::vector<const Candidate*>& pool, std::string& code) {
+  code.clear();
+  if (pool.empty()) return 0;
+  std::size_t best = 0;
+  for (std::size_t i = 1; i < pool.size(); ++i) {
+    bool a_wins = true;
+    tiebreak(*pool[best], *pool[i], a_wins);
+    if (!a_wins) best = i;
+  }
+  // H4: the code is the criterion that separated the winner from its CLOSEST rival —
+  // the one it beat at the latest criterion — not whichever comparison ran last.
+  static const char* order[] = {"tiebreak_near_edge", "tiebreak_mass", "tiebreak_inside_data"};
+  int deepest = -1;
+  for (std::size_t i = 0; i < pool.size(); ++i) {
+    if (i == best) continue;
+    bool a_wins = true;
+    const std::string c = tiebreak(*pool[best], *pool[i], a_wins);
+    int idx = 3;  // a full tie
+    for (int k = 0; k < 3; ++k)
+      if (c == order[k]) idx = k;
+    deepest = std::max(deepest, idx);
+  }
+  if (deepest >= 0 && deepest < 3) code = order[deepest];
+  return best;
 }
 
 }  // namespace flexible

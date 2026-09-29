@@ -34,8 +34,9 @@ int main(int argc, char** argv) {
     return 2;
   }
   const FlexibleData d = load_flexible_data(argv[1]);
-  std::printf("| T (°C) | pattern | nominal | core ρ (%s) | Iacob E10 | σ(0.10) paper | σ(0.10) core | "
-              "Iacob E20 | σ(0.20) paper | σ(0.20) core | max rel. diff |\n",
+  std::printf("Core looked up at core strain = nominal x 12.5 / (12.5 - 1.6): 0.1147 and 0.2294.\n\n");
+  std::printf("| T (°C) | pattern | nominal | core ρ (%s) | Iacob E10 | σ(0.10) paper | σ(0.1147 core) core | "
+              "Iacob E20 | σ(0.20) paper | σ(0.2294 core) core | max rel. diff |\n",
               "190 °C map");
   std::printf("|---|---|---|---|---|---|---|---|---|---|---|\n");
   double worst = 0.0;
@@ -47,8 +48,10 @@ int main(int argc, char** argv) {
       for (const CurveRow& x : s.rows)
         if (std::fabs(x.nominal - r.infill / 100.0) < 1e-12) row = &x;
       const double e10 = t == 0 ? r.g10 : r.h10, e20 = t == 0 ? r.g20 : r.h20;
-      const double a = stress_at(s, 0.10, row->core_density).stress_mpa;
-      const double b = stress_at(s, 0.20, row->core_density).stress_mpa;
+      // The loader works in CORE strain: nominal ε × 12.5 / (12.5 − 1.6).
+      const double k = 12.5 / (12.5 - 1.6);
+      const double a = stress_at(s, 0.10 * k, row->core_density).stress_mpa;
+      const double b = stress_at(s, 0.20 * k, row->core_density).stress_mpa;
       const double diff = std::max(std::fabs(a - 0.1 * e10) / (0.1 * e10), std::fabs(b - 0.2 * e20) / (0.2 * e20));
       worst = std::max(worst, diff);
       std::printf("| %d | %s | %d %% | %.3f | %.2f | %.4f | %.4f | %.2f | %.4f | %.4f | %.1e |\n", r.temp, topo,
