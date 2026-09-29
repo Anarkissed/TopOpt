@@ -27,20 +27,24 @@ import MetalKit
 
 extension MeshRenderer {
 
-    /// The Flexible pass draws this frame: present, uploaded, not hidden.
-    var flexibleLatticeInFrame: Bool { flexibleLattice?.isDrawable == true }
+    /// The Flexible pass draws this frame: present, uploaded, not hidden — AND #354's two
+    /// lattice pipelines built. Its walls are lit by #354's `lsdf_shade` (built with `try?`):
+    /// without it they would be written into the G-buffer, where AO and creases read them,
+    /// but never shaded, and the ghost would still leave the G-buffer — lattice-shaped AO on
+    /// the ghost and the map. Every gate below keys on this, so they all fall back together.
+    var flexibleLatticeInFrame: Bool { flexibleLattice?.isDrawable == true && latticePipelinesDidBuild }
 
     /// A see-through body stays OUT of the G-buffer while the Flexible pass draws, so the
     /// ghost cannot occlude the walls it is meant to show (rule 1 above).
     var flexibleGhostOutOfGBuffer: Bool {
-        guard let fx = flexibleLattice, fx.isDrawable, !fx.controlKeepGhostInGBuffer else { return false }
+        guard flexibleLatticeInFrame, let fx = flexibleLattice, !fx.controlKeepGhostInGBuffer else { return false }
         return bodyAlpha < 0.999
     }
 
     /// The see-through body is drawn AFTER the opaque lattice shade, not before it (rule 2).
     /// `latticeShaded`: the shade block runs this frame (the G-buffer exists).
     func flexibleGhostAfterLattice(translucent: Bool, latticeShaded: Bool) -> Bool {
-        guard let fx = flexibleLattice, fx.isDrawable, !fx.controlDrawGhostFirst else { return false }
+        guard flexibleLatticeInFrame, let fx = flexibleLattice, !fx.controlDrawGhostFirst else { return false }
         return translucent && latticeShaded
     }
 

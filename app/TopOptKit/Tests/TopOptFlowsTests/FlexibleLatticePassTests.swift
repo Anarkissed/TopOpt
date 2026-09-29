@@ -28,6 +28,9 @@ final class FlexibleLatticePassTests: XCTestCase {
     /// hardware-filtered HALVES, so the stated parity is 5 µm — it was 2 µm with every
     /// fetch an exact trilinear of 32-bit reads. The reference holds the half-rounded grids.
     static let parityMM: Float = 5e-3
+    /// T11's depth half: the share of pixels (covered by both marches) allowed to land on a
+    /// different wall than the fine march — measured, see testMarchDepthMatchesAFineReference.
+    static let depthBar: Double = 0.01
 
     // MARK: T1 — pipeline and compile guard
 
@@ -41,6 +44,11 @@ final class FlexibleLatticePassTests: XCTestCase {
         }
         let pass = try FlexibleLatticePass(device: device)
         XCTAssertTrue(pass.gbufferPipelineDidBuild)
+        // the test kernels are built on first use, THROWING too
+        for name in ["flx_field_probe", "flx_squish_probe", "flx_uniform_echo", "flx_frame_echo"] {
+            XCTAssertEqual(try pass.computePipeline(name).label, name)
+        }
+        XCTAssertThrowsError(try pass.computePipeline("flx_no_such_kernel"), "control: a missing kernel must throw")
         let d = pass.gbufferDescriptor
         XCTAssertEqual(FlexibleLatticePass.descriptorProblems(d), [])
         XCTAssertEqual(d.colorAttachments[0].pixelFormat, MeshRenderer.sceneDepthFormat)
@@ -167,6 +175,25 @@ final class FlexibleLatticePassTests: XCTestCase {
             XCTAssertGreaterThan(inside, 5); XCTAssertGreaterThan(outside, 5)
             XCTAssertGreaterThan(missTopo, 0.1, "control: the probe must tell the topologies apart")
             XCTAssertGreaterThan(missSwap, 0.1, "control: the (ρ, mask) volume in the (SDF, skin) slot must show")
+            if topo == .gyroid {
+                // ★ THE LADDER IS EXERCISED: points inside a rung-to-rung blend AND on a pure rung
+                var blend = 0, pure = 0
+                for p in pts {
+                    let rho = min(max(f.rho.sample(p), 0.05), 0.9)
+                    let w = FlexibleLatticeField.rungs(L: min(max(3.0915 * f.wallMM / rho, f.lMinMM), f.lMaxMM), lMin: f.lMinMM).w
+                    if w > 0 && w < 1 { blend += 1 } else { pure += 1 }
+                }
+                // ★ RED CONTROL: the retired chirped gyroid (q = k(p)·p) is NOT what the GPU draws
+                let missChirp = pts.indices.map { i -> Float in
+                    let p = pts[i]
+                    let chirp = max(max(FlexibleLatticeGradingTests.chirpedWall(p, f), FlexibleLatticeField.dRegion(p, f)),
+                                    max(f.partSDF.sample(p), FlexibleLatticeField.dSkin(p, f)))
+                    return abs(gpu[i] - chirp)
+                }.max() ?? 0
+                print("FLEX-PROBE gyroid ladder: \(blend) points in a blend, \(pure) on a pure rung; control (chirped q = k·p) misses by \(missChirp) mm")
+                XCTAssertGreaterThan(blend, 20); XCTAssertGreaterThan(pure, 20)
+                XCTAssertGreaterThan(missChirp, 0.1, "control: the probe must tell the ladder from the chirp")
+            }
         }
     }
 
@@ -196,6 +223,22 @@ final class FlexibleLatticePassTests: XCTestCase {
         XCTAssertGreaterThan(moved, 20, "the squish moved nothing the probe could see")
         XCTAssertGreaterThan(air, 0, "no probe point landed in the gap the face left")
         XCTAssertGreaterThan(missHalf, 0.1, "control: the probe must see the squish amount")
+
+        // ★ PAST THE CLAMP: s = 8 on a 3 mm / 20 mm column asks a = 1.2, so both copies clamp
+        // at FlexibleSquishField.maxRatio (the MSL interpolates the same constant). His pad
+        // runs at a ≈ 0.44 and the cases above at 0.12 — neither reached the clamp before.
+        let sClamp: Float = 8
+        XCTAssertGreaterThan(sClamp * 3 / 20, FlexibleSquishField.maxRatio, "the case must reach the clamp")
+        let gpuC = try XCTUnwrap(pass.probeSquished(pts, squish: sClamp))
+        var worstC: Float = 0, missBelow: Float = 0
+        for (i, p) in pts.enumerated() {
+            worstC = max(worstC, abs(gpuC[i] - FlexibleSquishField.lattice(at: p, f, faces: [face], squish: sClamp)))
+            // ★ RED CONTROL: below the clamp (a = 0.6) the reference is a different field
+            missBelow = max(missBelow, abs(gpuC[i] - FlexibleSquishField.lattice(at: p, f, faces: [face], squish: 4)))
+        }
+        print("FLEX-SQUISH-PROBE past the clamp (s = \(sClamp), a asked 1.2, clamped \(FlexibleSquishField.maxRatio)): max |gpu − swift| = \(worstC) mm; control (s = 4, a = 0.6) misses by \(missBelow)")
+        XCTAssertLessThanOrEqual(worstC, Self.parityMM, "the shader's clamp drifted from FlexibleSquishField.maxRatio")
+        XCTAssertGreaterThan(missBelow, 0.1, "control: the probe must tell a clamped column from an unclamped one")
     }
 
     func testRegionAndSkinTermsDecideTheGPUField() throws {
@@ -262,21 +305,44 @@ final class FlexibleLatticePassTests: XCTestCase {
         #endif
     }
 
-    // MARK: T10 (eye depth) — the G-buffer's eye-Z is the hit's
+    // MARK: T10 (eye depth + normal) — the G-buffer holds the hit's eye-Z and eye normal
 
     /// Renders the pass alone into a G-buffer of the renderer's formats, with the matrices
     /// MeshRenderer.makeUniforms composes (P·V·M, V·M, the rotation of V·M), and reads back
-    /// eye-Z and the albedo mask.
-    struct GBufferRead { var eyeZ: [Float]; var alpha: [UInt8]; var size: Int }
+    /// eye-Z, the eye-space normal and the albedo mask.
+    struct GBufferRead { var eyeZ: [Float]; var normal: [SIMD3<Float>]; var alpha: [UInt8]; var size: Int }
 
-    func renderGBuffer(_ pass: FlexibleLatticePass, device: MTLDevice, camera cam: OrbitCamera,
-                       settle: simd_quatf, centre: SIMD3<Float>, size: Int) throws -> GBufferRead {
-        let model = ViewerModelFrame.matrix(centre: centre, rotation: settle)
-        let mv = cam.viewMatrix() * model
-        let mvp = cam.projectionMatrix(aspect: 1) * mv
-        let nb = simd_float4x4(columns: (SIMD4(mv.columns.0.x, mv.columns.0.y, mv.columns.0.z, 0),
-                                         SIMD4(mv.columns.1.x, mv.columns.1.y, mv.columns.1.z, 0),
-                                         SIMD4(mv.columns.2.x, mv.columns.2.y, mv.columns.2.z, 0), SIMD4(0, 0, 0, 1)))
+    struct Frame {
+        let cam: OrbitCamera; let settle: simd_quatf; let centre: SIMD3<Float>
+        var model: simd_float4x4 { ViewerModelFrame.matrix(centre: centre, rotation: settle) }
+        var mv: simd_float4x4 { cam.viewMatrix() * model }
+        var mvp: simd_float4x4 { cam.projectionMatrix(aspect: 1) * mv }
+        var normalBasis: simd_float4x4 {
+            let m = mv
+            return simd_float4x4(columns: (SIMD4(m.columns.0.x, m.columns.0.y, m.columns.0.z, 0),
+                                           SIMD4(m.columns.1.x, m.columns.1.y, m.columns.1.z, 0),
+                                           SIMD4(m.columns.2.x, m.columns.2.y, m.columns.2.z, 0), SIMD4(0, 0, 0, 1)))
+        }
+        /// The page's framing (settle gravity → down), and a GENERIC one: a tilted settle and
+        /// an off-origin centre, so a frame that only works for the page's view fails here.
+        static func page(azimuth: Float = 0.65, elevation: Float = 0.5) -> Frame {
+            var cam = OrbitCamera()
+            cam.frame(MeshBounds(min: SIMD3(0, 0, 0), max: SIMD3(40, 40, 20), isEmpty: false))
+            cam.setOrientation(azimuth: azimuth, elevation: elevation)
+            return Frame(cam: cam, settle: simd_quatf(from: SIMD3<Float>(0, 0, -1), to: SIMD3<Float>(0, -1, 0)),
+                         centre: SIMD3(20, 20, 10))
+        }
+        static func generic() -> Frame {
+            var cam = OrbitCamera()
+            cam.frame(MeshBounds(min: SIMD3(0, 0, 0), max: SIMD3(40, 40, 20), isEmpty: false))
+            cam.setOrientation(azimuth: 1.1, elevation: 0.3)
+            return Frame(cam: cam, settle: simd_quatf(from: SIMD3<Float>(0, 0, -1), to: simd_normalize(SIMD3<Float>(0.3, -1, 0.2))),
+                         centre: SIMD3(23.3, 18.3, 12.1))
+        }
+    }
+
+    func renderGBuffer(_ pass: FlexibleLatticePass, device: MTLDevice, frame fr: Frame, size: Int,
+                       squish: Float = 0) throws -> GBufferRead {
         func tex(_ f: MTLPixelFormat) -> MTLTexture? {
             let d = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: f, width: size, height: size, mipmapped: false)
             d.usage = [.renderTarget, .shaderRead]
@@ -302,67 +368,178 @@ final class FlexibleLatticePassTests: XCTestCase {
         let ds = try XCTUnwrap(device.makeDepthStencilState(descriptor: dsd))
         let q = try XCTUnwrap(device.makeCommandQueue()), cmd = try XCTUnwrap(q.makeCommandBuffer())
         let enc = try XCTUnwrap(cmd.makeRenderCommandEncoder(descriptor: rpd))
-        XCTAssertTrue(pass.encodeGBuffer(enc, depthState: ds, camera: cam, modelRotation: settle, modelCenter: centre,
-                                         aspect: 1, clipFromModel: mvp, eyeFromModel: mv, eyeNormalBasis: nb, squish: 0))
+        XCTAssertTrue(pass.encodeGBuffer(enc, depthState: ds, camera: fr.cam, modelRotation: fr.settle, modelCenter: fr.centre,
+                                         aspect: 1, clipFromModel: fr.mvp, eyeFromModel: fr.mv, eyeNormalBasis: fr.normalBasis,
+                                         squish: squish))
         enc.endEncoding()
         cmd.commit(); cmd.waitUntilCompleted()
         var eyeZ = [Float](repeating: 0, count: size * size)
         z.getBytes(&eyeZ, bytesPerRow: size * 4, from: MTLRegionMake2D(0, 0, size, size), mipmapLevel: 0)
+        var nh = [UInt16](repeating: 0, count: size * size * 4)
+        n.getBytes(&nh, bytesPerRow: size * 8, from: MTLRegionMake2D(0, 0, size, size), mipmapLevel: 0)
+        let normal = (0..<(size * size)).map { i in
+            SIMD3<Float>(FlexibleLatticePass.halfValue(nh[i * 4]), FlexibleLatticePass.halfValue(nh[i * 4 + 1]),
+                         FlexibleLatticePass.halfValue(nh[i * 4 + 2]))
+        }
         var rgba = [UInt8](repeating: 0, count: size * size * 4)
         a.getBytes(&rgba, bytesPerRow: size * 4, from: MTLRegionMake2D(0, 0, size, size), mipmapLevel: 0)
-        return GBufferRead(eyeZ: eyeZ, alpha: stride(from: 3, to: rgba.count, by: 4).map { rgba[$0] }, size: size)
+        return GBufferRead(eyeZ: eyeZ, normal: normal, alpha: stride(from: 3, to: rgba.count, by: 4).map { rgba[$0] }, size: size)
     }
 
-    func testGBufferEyeZIsTheHitsEyeDepth() throws {
+    /// The Swift field's first zero along a ray: sphere-traced, then bisected. ★ Inside the
+    /// part the step is capped at 0.05 mm: the gyroid's |g|/|∇g| over-reads between the
+    /// sheets (why the shader caps its step at 0.1 cell), so an uncapped CPU trace jumps
+    /// walls itself and the comparison would blame the GPU for the reference's miss.
+    static func cpuHit(_ f: FlexibleLatticeInputs, eye: SIMD3<Float>, rd: SIMD3<Float>) -> SIMD3<Float>? {
+        var t: Float = 0, prev: Float = 0
+        for _ in 0..<200_000 {
+            let p = eye + rd * t
+            let v = FlexibleLatticeField.lattice(at: p, f)
+            if v < 0 {
+                var lo = prev, hi = t
+                for _ in 0..<30 { let m = 0.5 * (lo + hi); if FlexibleLatticeField.lattice(at: eye + rd * m, f) < 0 { hi = m } else { lo = m } }
+                return eye + rd * hi
+            }
+            prev = t
+            // outside the part only the part's own SDF is a true distance (the max of the
+            // terms is not: an over-reading wall term would step through the part's face)
+            let dPart = f.partSDF.sample(p)
+            t += dPart > 0.5 ? 0.9 * dPart : min(max(0.4 * v, 0.004), 0.05)
+            if t > 1e4 { break }
+        }
+        return nil
+    }
+
+    static func quantile(_ v: [Float], _ q: Double) -> Float {
+        let s = v.sorted()
+        return s.isEmpty ? .nan : s[min(s.count - 1, Int(q * Double(s.count)))]
+    }
+
+    /// ★ The G-buffer's eye-Z and eye NORMAL are the hit's, in the renderer's own frame —
+    /// both topologies, at the page's framing AND a generic tilted, off-centre one.
+    /// Quantiles, not the max: a few sparse pixels where the march legitimately lands on the
+    /// next wall behind a grazing one (T11's depth half counts those) would make a max
+    /// depend on the camera. Plus a CPU-only check that the ray basis and P·V·M agree to a
+    /// sub-pixel (the hit re-projects onto its own pixel centre).
+    func testGBufferEyeZAndNormalAreTheHits() throws {
         let device = try Fx.device()
         let pass = try FlexibleLatticePass(device: device)
-        pass.upload(Fx.layer(Fx.boxInputs(.honeycomb), token: 1))
-        let f = try XCTUnwrap(pass.referenceInputs)
-        var cam = OrbitCamera()
-        cam.frame(MeshBounds(min: SIMD3(0, 0, 0), max: SIMD3(40, 40, 20), isEmpty: false))
-        cam.setOrientation(azimuth: 0.65, elevation: 0.5)
-        let settle = simd_quatf(from: SIMD3<Float>(0, 0, -1), to: SIMD3<Float>(0, -1, 0))
-        let centre = SIMD3<Float>(20, 20, 10)
-        let size = 256
-        let g = try renderGBuffer(pass, device: device, camera: cam, settle: settle, centre: centre, size: size)
-        let mv = cam.viewMatrix() * ViewerModelFrame.matrix(centre: centre, rotation: settle)
-        let basis = FlexibleLatticePass.rayBasis(camera: cam, modelRotation: settle, modelCenter: centre, aspect: 1)
-        var checked = 0, worst: Float = 0, worstNoSettle: Float = .infinity
-        var sNoSettle: [Float] = []
-        // interior pixels of walls (all four neighbours covered), a sparse lattice of them
-        for py in stride(from: 8, to: size - 8, by: 7) { for px in stride(from: 8, to: size - 8, by: 7) {
-            let i = py * size + px
-            guard g.alpha[i] >= 128, g.alpha[i - 1] >= 128, g.alpha[i + 1] >= 128,
-                  g.alpha[i - size] >= 128, g.alpha[i + size] >= 128 else { continue }
-            let uv = SIMD2<Float>((Float(px) + 0.5) / Float(size) * 2 - 1, 1 - (Float(py) + 0.5) / Float(size) * 2)
-            let rd = simd_normalize(basis.rayDir + basis.rayX * uv.x + basis.rayY * uv.y)
-            // the reference: sphere-trace the Swift field to its first zero, then bisect
-            var t: Float = 0, prev: Float = 0, hit: SIMD3<Float>?
-            for _ in 0..<20000 {
-                let v = FlexibleLatticeField.lattice(at: basis.eye + rd * t, f)
-                if v < 0 {
-                    var lo = prev, hi = t
-                    for _ in 0..<30 { let m = 0.5 * (lo + hi); if FlexibleLatticeField.lattice(at: basis.eye + rd * m, f) < 0 { hi = m } else { lo = m } }
-                    hit = basis.eye + rd * hi
-                    break
+        var token = 0
+        for topo in [FlexibleLatticeInputs.Topology.gyroid, .honeycomb] {
+            token += 1
+            pass.upload(Fx.layer(Fx.boxInputs(topo), token: token))
+            let f = try XCTUnwrap(pass.referenceInputs)
+            for (fname, fr) in [("page", Frame.page()), ("generic", Frame.generic())] {
+                let size = 256
+                let g = try renderGBuffer(pass, device: device, frame: fr, size: size)
+                let basis = FlexibleLatticePass.rayBasis(camera: fr.cam, modelRotation: fr.settle, modelCenter: fr.centre, aspect: 1)
+                let wrongBasis = FlexibleLatticePass.rayBasis(camera: fr.cam, modelRotation: fr.settle, modelCenter: fr.centre, aspect: 1.01)
+                var dz: [Float] = [], dzNoSettle: [Float] = [], ang: [Float] = [], angModel: [Float] = []
+                var reproj: [Float] = [], reprojWrong: [Float] = []
+                func eyeN(_ n: SIMD3<Float>, basis nb: simd_float4x4) -> SIMD3<Float> {
+                    var e = simd_normalize(SIMD3<Float>((nb * SIMD4(n, 0)).x, (nb * SIMD4(n, 0)).y, (nb * SIMD4(n, 0)).z))
+                    if e.z < 0 { e = -e }
+                    return e
                 }
-                prev = t
-                t += max(0.4 * v, 0.004)
-                if t > 1e4 { break }
+                func angle(_ a: SIMD3<Float>, _ b: SIMD3<Float>) -> Float { acos(Swift.min(1, Swift.max(-1, simd_dot(simd_normalize(a), simd_normalize(b))))) }
+                func pixel(_ p: SIMD3<Float>) -> SIMD2<Float> {
+                    let c = fr.mvp * SIMD4(p, 1)
+                    let ndc = SIMD2(c.x / c.w, c.y / c.w)
+                    return SIMD2((ndc.x + 1) * 0.5 * Float(size), (1 - ndc.y) * 0.5 * Float(size))
+                }
+                for py in stride(from: 8, to: size - 8, by: 5) { for px in stride(from: 8, to: size - 8, by: 5) {
+                    let i = py * size + px
+                    guard g.alpha[i] >= 128, g.alpha[i - 1] >= 128, g.alpha[i + 1] >= 128,
+                          g.alpha[i - size] >= 128, g.alpha[i + size] >= 128 else { continue }
+                    let uv = SIMD2<Float>((Float(px) + 0.5) / Float(size) * 2 - 1, 1 - (Float(py) + 0.5) / Float(size) * 2)
+                    let rd = simd_normalize(basis.rayDir + basis.rayX * uv.x + basis.rayY * uv.y)
+                    guard let h = Self.cpuHit(f, eye: basis.eye, rd: rd) else { continue }
+                    dz.append(abs(g.eyeZ[i] - (-(fr.mv * SIMD4(h, 1)).z)))
+                    // ★ RED CONTROL (depth): the view alone, without the settled model frame
+                    dzNoSettle.append(abs(g.eyeZ[i] - (-(fr.cam.viewMatrix() * SIMD4(h, 1)).z)))
+                    // the normal: central differences of the Swift field at the hit (0.05 mm, the shader's)
+                    let e: Float = 0.05
+                    func F(_ p: SIMD3<Float>) -> Float { FlexibleLatticeField.lattice(at: p, f) }
+                    let grad = SIMD3<Float>(F(h + SIMD3(e, 0, 0)) - F(h - SIMD3(e, 0, 0)),
+                                            F(h + SIMD3(0, e, 0)) - F(h - SIMD3(0, e, 0)),
+                                            F(h + SIMD3(0, 0, e)) - F(h - SIMD3(0, 0, e)))
+                    // the normal is compared where the two hit the SAME wall (eye-Z within 0.02 mm)
+                    guard simd_length(grad) > 1e-6, dz.last! <= 0.02 else { continue }
+                    ang.append(angle(g.normal[i], eyeN(simd_normalize(grad), basis: fr.normalBasis)))
+                    // ★ RED CONTROL (normal): the MODEL-space normal, as if the basis were skipped
+                    var nm = simd_normalize(grad); if nm.z < 0 { nm = -nm }
+                    angModel.append(angle(g.normal[i], nm))
+                    // the ray basis and P·V·M agree: the hit lands on its own pixel centre
+                    reproj.append(simd_distance(pixel(h), SIMD2(Float(px) + 0.5, Float(py) + 0.5)))
+                    let rdW = simd_normalize(wrongBasis.rayDir + wrongBasis.rayX * uv.x + wrongBasis.rayY * uv.y)
+                    if let hw = Self.cpuHit(f, eye: wrongBasis.eye, rd: rdW) {
+                        reprojWrong.append(simd_distance(pixel(hw), SIMD2(Float(px) + 0.5, Float(py) + 0.5)))
+                    }
+                } }
+                let over = dz.filter { $0 > 0.02 }.count
+                print(String(format: "FLEX-GBUF %@ %@: %d wall px; eyeZ |Δ| p50 %.5f p99 %.4f max %.3f mm, %d over 0.02 mm; control (no settle) median %.2f mm; normal angle p50 %.4f p95 %.4f p99 %.3f rad; control (model-space normal) median %.3f rad; hit re-projects p99 %.2e px (control aspect×1.01 median %.2f px)",
+                             "\(topo)", fname, dz.count, Self.quantile(dz, 0.5), Self.quantile(dz, 0.99), dz.max() ?? .nan, over,
+                             Self.quantile(dzNoSettle, 0.5), Self.quantile(ang, 0.5), Self.quantile(ang, 0.95), Self.quantile(ang, 0.99),
+                             Self.quantile(angModel, 0.5), Self.quantile(reproj, 0.99), Self.quantile(reprojWrong, 0.5)))
+                XCTAssertGreaterThan(dz.count, 100, "\(topo) \(fname): too few wall pixels to judge")
+                XCTAssertLessThanOrEqual(Self.quantile(dz, 0.99), 0.02, "\(topo) \(fname): the G-buffer eye-Z is not the hit's")
+                XCTAssertLessThanOrEqual(Double(over), 0.02 * Double(dz.count), "\(topo) \(fname)")
+                XCTAssertGreaterThan(Self.quantile(dzNoSettle, 0.5), 0.5, "control: the model frame must matter")
+                XCTAssertLessThanOrEqual(Self.quantile(ang, 0.95), 0.05, "\(topo) \(fname): the G-buffer normal is not the field's")
+                XCTAssertGreaterThan(Self.quantile(angModel, 0.5), 0.3, "control: a model-space normal must miss")
+                XCTAssertLessThanOrEqual(Self.quantile(reproj, 0.99), 0.01, "the ray basis and P·V·M disagree")
+                XCTAssertGreaterThan(Self.quantile(reprojWrong, 0.5), 0.1, "control: a wrong aspect must miss the pixel")
             }
-            guard let h = hit else { continue }
-            let want = -(mv * SIMD4(h, 1)).z
-            worst = max(worst, abs(g.eyeZ[i] - want))
-            // ★ RED CONTROL: the view alone, without the settled model frame, is the wrong depth
-            let noSettle = -(cam.viewMatrix() * SIMD4(h, 1)).z
-            sNoSettle.append(abs(g.eyeZ[i] - noSettle))
-            checked += 1
-        } }
-        worstNoSettle = sNoSettle.sorted()[sNoSettle.count / 2]   // the TYPICAL miss (median)
-        print("FLEX-EYEZ \(checked) wall pixels: max |gbuffer eyeZ − (−(V·M·hit).z)| = \(worst) mm; control without the settle: median miss \(worstNoSettle) mm")
-        XCTAssertGreaterThan(checked, 30)
-        XCTAssertLessThanOrEqual(worst, 0.02)
-        XCTAssertGreaterThan(worstNoSettle, 0.5, "control: the model frame must matter")
+        }
+    }
+
+    /// T11's DEPTH half (the in-pass T11 compares coverage only, which cannot see a march that
+    /// jumps a wall and lands on the next one behind it). The shipped march against a fine,
+    /// independent one (`flx_field`, early-outs off) on eye-Z: pixels covered by both whose
+    /// depth differs by more than 0.05 mm. Rest and a checkerboard press, both topologies.
+    /// ★ The rate is a KNOWN LIMIT of the step cap at grazing angles (sparse, a wall behind);
+    /// the bar pins it where it is measured. RED CONTROL: a half-cell cap must exceed it.
+    func testMarchDepthMatchesAFineReference() throws {
+        let device = try Fx.device()
+        let pass = try FlexibleLatticePass(device: device)
+        var token = 0
+        let size = 384
+        for (topo, faces) in [(FlexibleLatticeInputs.Topology.gyroid, [FlexibleSquishFace]()), (.gyroid, [Fx.checkerFace()]),
+                              (.honeycomb, []), (.honeycomb, [Fx.checkerFace()])] {
+            token += 1
+            pass.upload(Fx.layer(Fx.boxInputs(topo), faces: faces, token: token))
+            let s: Float = faces.isEmpty ? 0 : 1
+            for (fname, fr) in [("page", Frame.page()), ("generic", Frame.generic())] {
+                let own = (factor: pass.stepFactor, minStep: pass.minStepMM)   // the pass's own values
+                pass.stepFactor = 0.2; pass.stepCapOverride = 0.02; pass.minStepMM = 0.005; pass.stepBudget = 30000
+                pass.earlyOut = false
+                let ref = try renderGBuffer(pass, device: device, frame: fr, size: size, squish: s)
+                pass.stepFactor = own.factor; pass.stepCapOverride = nil; pass.minStepMM = own.minStep; pass.stepBudget = FlexibleLatticePass.maxSteps
+                pass.earlyOut = true
+                func deeper(_ g: GBufferRead) -> (bad: Int, both: Int) {
+                    var bad = 0, both = 0
+                    for i in 0..<(size * size) where g.alpha[i] >= 128 && ref.alpha[i] >= 128 {
+                        both += 1
+                        if abs(g.eyeZ[i] - ref.eyeZ[i]) > 0.05 { bad += 1 }
+                    }
+                    return (bad, both)
+                }
+                let shipped = deeper(try renderGBuffer(pass, device: device, frame: fr, size: size, squish: s))
+                pass.stepCapOverride = 0.5
+                let half = deeper(try renderGBuffer(pass, device: device, frame: fr, size: size, squish: s))
+                pass.stepCapOverride = nil
+                let label = "\(topo) \(faces.isEmpty ? "rest" : "checkerboard press") \(fname)"
+                print(String(format: "FLEX-MARCH-DEPTH %@: %d of %d px covered by both differ by > 0.05 mm (%.3f %%); control (half-cell cap) %d (%.3f %%)",
+                             label, shipped.bad, shipped.both, 100 * Double(shipped.bad) / Double(max(1, shipped.both)),
+                             half.bad, 100 * Double(half.bad) / Double(max(1, half.both))))
+                XCTAssertGreaterThan(shipped.both, 1000)
+                XCTAssertLessThanOrEqual(Double(shipped.bad), Self.depthBar * Double(shipped.both), "\(label): the march lands on the wrong wall")
+                // (the control where the gyroid's cap is what bounds the step: at rest)
+                if topo == .gyroid && faces.isEmpty {
+                    XCTAssertGreaterThan(Double(half.bad), Self.depthBar * Double(half.both), "control: \(label): a half-cell cap must exceed the bar")
+                }
+            }
+        }
     }
 
     // MARK: T13 — one upload per token

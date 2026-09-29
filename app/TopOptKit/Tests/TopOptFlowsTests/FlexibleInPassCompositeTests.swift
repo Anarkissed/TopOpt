@@ -16,6 +16,7 @@
 #if canImport(Metal) && canImport(MetalKit)
 import XCTest
 import Metal
+import MetalKit
 import simd
 import TopOptDesign
 @testable import TopOptFlows
@@ -167,6 +168,47 @@ final class FlexibleInPassCompositeTests: XCTestCase {
         XCTAssertLessThanOrEqual(Double(first.differ), 0.005 * Double(first.of), "control: an opaque shade over the ghost leaves no veil")
     }
 
+    /// T7b — the re-issued ghost keeps its DEPTH TEST: the box's far side, behind every wall,
+    /// fails `.less` against the depth lsdf_shade wrote, so a wall is veiled by ONE layer of
+    /// ghost (the near side), never two. Frames: the full box vs the same box with its far
+    /// faces removed — on lattice pixels they must agree. POSITIVE CONTROL: where no wall
+    /// hides it, the far side does show through the ghost (the two frames differ there).
+    /// RED (proved by giving the re-issued body `.always`): the far side paints over the walls.
+    func testTheGhostsFarSideIsHiddenBehindTheWalls() throws {
+        let device = try Fx.device()
+        let full = Fx.boxMesh()
+        let r = try Fx.renderer(device: device, box: full)
+        r.quality = []
+        // the far faces: outward normal pointing away from the eye (the model is not settled)
+        let eye = r.camera.eye
+        let faces: [(id: Int32, n: SIMD3<Float>, c: SIMD3<Float>)] = [
+            (0, SIMD3(0, 0, -1), SIMD3(20, 20, 0)), (2, SIMD3(-1, 0, 0), SIMD3(0, 20, 10)),
+            (3, SIMD3(1, 0, 0), SIMD3(40, 20, 10)), (4, SIMD3(0, -1, 0), SIMD3(20, 0, 10)),
+            (5, SIMD3(0, 1, 0), SIMD3(20, 40, 10))]
+        let far = Set(faces.filter { simd_dot($0.n, eye - $0.c) < 0 }.map(\.id))
+        XCTAssertGreaterThanOrEqual(far.count, 2, "the camera must see some faces from behind")
+        let open = Fx.boxMesh(omit: far)
+        func frame(_ box: Fx.BoxMesh) throws -> [UInt8] {
+            r.setMesh(box.mesh)
+            r.setVertexTints(Fx.xrayTints(box, ghost: ghost, dent: nil))
+            r.setBodyAlpha(FlexibleStagePage.xrayBodyAlpha)
+            return try self.frame(r)
+        }
+        r.applyFlexibleLattice(Fx.layer(Fx.boxInputs(.gyroid), token: 1), device: device)
+        r.setMesh(full.mesh)
+        r.setVertexTints(Fx.xrayTints(full, ghost: ghost, dent: nil))
+        r.setBodyAlpha(FlexibleStagePage.xrayBodyAlpha)
+        let mask = try XCTUnwrap(r.latticeMaskDump(size: size)).mask
+        let a = try frame(full)
+        let b = try frame(open)
+        let walls = Fx.differing(a, b, where: { mask[$0] })
+        let bare = Fx.differing(a, b, where: { !mask[$0] })
+        print("FLEX-T7b far faces \(far.sorted()): lattice px full ≠ open \(walls.differ)/\(walls.of); positive control, px with no wall \(bare.differ)/\(bare.of)")
+        XCTAssertGreaterThan(walls.of, 5000)
+        XCTAssertLessThanOrEqual(Double(walls.differ), 0.005 * Double(walls.of), "the ghost's far side must fail the depth test behind a wall")
+        XCTAssertGreaterThan(bare.differ, 1000, "positive control: the far side must show where no wall hides it")
+    }
+
     func testNoLatticeAOOrCreasesOnTheMap() throws {
         let device = try Fx.device()
         let box = Fx.boxMesh()
@@ -306,9 +348,16 @@ final class FlexibleInPassCompositeTests: XCTestCase {
             r.applyFlexibleLattice(Fx.layer(Fx.boxInputs(topo), faces: faces, token: token), device: device)
             let pass = try XCTUnwrap(r.flexibleLattice)
             r.setFlexScale(faces.isEmpty ? 0 : 1)
+            // ★ THE REFERENCE IS INDEPENDENT OF THE MARCH'S OWN VIEW OF F: `earlyOut` off, so
+            // it steps through `flx_field` (no lower-bound shortcuts). With it on, the
+            // reference shared `flx_field_march` — a wrong march-view field moved both and
+            // the comparison could not see it (a 5 % phase bias there: 4168 px, bar 526).
+            let own = (factor: pass.stepFactor, minStep: pass.minStepMM)   // the pass's own values
             pass.stepFactor = 0.2; pass.stepCapOverride = 0.02; pass.minStepMM = 0.005; pass.stepBudget = 30000
+            pass.earlyOut = false
             let ref = try XCTUnwrap(r.latticeMaskDump(size: n))
-            pass.stepFactor = 0.6; pass.stepCapOverride = nil; pass.minStepMM = 0.02; pass.stepBudget = FlexibleLatticePass.maxSteps
+            pass.stepFactor = own.factor; pass.stepCapOverride = nil; pass.minStepMM = own.minStep; pass.stepBudget = FlexibleLatticePass.maxSteps
+            pass.earlyOut = true
             let shipped = try XCTUnwrap(r.latticeMaskDump(size: n))
             let bad = Fx.mismatch(shipped.mask, ref.mask)
             let label = "\(topo) \(faces.isEmpty ? "rest" : "checkerboard press")"
@@ -318,9 +367,14 @@ final class FlexibleInPassCompositeTests: XCTestCase {
             if topo == .gyroid && faces.isEmpty {
                 pass.stepCapOverride = 0.25
                 let quarter = Fx.mismatch(try XCTUnwrap(r.latticeMaskDump(size: n)).mask, ref.mask)
+                pass.stepCapOverride = 0.5
+                let half = Fx.mismatch(try XCTUnwrap(r.latticeMaskDump(size: n)).mask, ref.mask)
                 pass.stepCapOverride = nil
-                print("FLEX-MARCH in-pass control, gyroid at a quarter-cell cap: \(quarter) px")
-                XCTAssertGreaterThan(Double(quarter), 0.01 * Double(ref.covered), "control: the comparison cannot see a jumped wall")
+                print("FLEX-MARCH in-pass controls, gyroid at a quarter-cell cap: \(quarter) px; at a half-cell cap: \(half) px")
+                // the quarter cell FAILS the shipped bar (why the gyroid's cap is 0.1), and a
+                // half cell jumps walls by the percent
+                XCTAssertGreaterThan(Double(quarter), 0.003 * Double(ref.covered), "control: a quarter-cell cap must fail the bar")
+                XCTAssertGreaterThan(Double(half), 0.01 * Double(ref.covered), "control: the comparison cannot see a jumped wall")
             }
             if !faces.isEmpty {
                 pass.ignoresColumnWalls = true
@@ -330,6 +384,52 @@ final class FlexibleInPassCompositeTests: XCTestCase {
                 XCTAssertGreaterThan(Double(torn), 0.01 * Double(ref.covered), "control: the comparison cannot see a torn column wall")
             }
         }
+    }
+
+    // MARK: the two hooks no frame test sees — the 1152 px cap and the view's apply
+
+    /// ★ The march inherits #354's G-buffer cap (`gbufferSize`), and the SwiftUI update
+    /// (`Coordinator.apply`) is what hands the pass its inputs. Frames at 384 px cannot see
+    /// either: under the cap the size is the drawable's, and the tests above call
+    /// `applyFlexibleLattice` directly. RED (proved by reverting each hook): the gbufferSize
+    /// hook reverted gives a 2048² G-buffer; the apply line removed leaves the pass out.
+    @MainActor
+    func testTheMarchIsCappedAndTheViewHandsThePassItsInputs() throws {
+        let device = try Fx.device()
+        let box = Fx.boxMesh()
+        let r = try Fx.renderer(device: device, box: box)
+        r.setVertexTints(Fx.xrayTints(box, ghost: nil, dent: nil))
+        r.setBodyAlpha(0)
+        r.applyFlexibleLattice(Fx.layer(Fx.boxInputs(.gyroid), token: 1), device: device)
+        let big = try XCTUnwrap(r.latticeMaskDump(size: 2048))
+        // positive control: under the cap the G-buffer is the drawable's own size
+        let small = try XCTUnwrap(r.latticeMaskDump(size: 512))
+        print("FLEX-CAP drawable 2048 → G-buffer \(big.width)×\(big.height); drawable 512 → \(small.width)×\(small.height)")
+        XCTAssertEqual(big.width, MeshRenderer.latticeGBufferMaxPixels, "the Flexible march must inherit the 1152 px cap")
+        XCTAssertEqual(big.height, MeshRenderer.latticeGBufferMaxPixels)
+        XCTAssertEqual(small.width, 512, "control: under the cap the size is the drawable's")
+
+        // the view's own apply, as the SwiftUI update calls it (LatticePreviewConfettiTests' precedent)
+        guard let r2 = MeshRenderer(device: device, sampleCount: 1) else {
+            throw XCTSkip("MeshRenderer init: \(MeshRenderer.lastInitError ?? "?")")
+        }
+        let coord = MetalMeshView.Coordinator()
+        coord.renderer = r2
+        let view = MTKView(frame: CGRect(x: 0, y: 0, width: 256, height: 256), device: device)
+        var inputs = LatticePreviewConfettiTests.baseInputs()
+        inputs.mesh = box.mesh
+        inputs.bodyAlpha = FlexibleStagePage.xrayBodyAlpha
+        inputs.flexibleLattice = Fx.layer(Fx.boxInputs(.gyroid), token: 3)
+        coord.apply(inputs, to: view)
+        XCTAssertTrue(r2.flexibleLatticeInFrame, "Coordinator.apply must hand the pass its inputs")
+        XCTAssertEqual(r2.flexibleLattice?.uploadCount, 1)
+        coord.apply(inputs, to: view)
+        XCTAssertEqual(r2.flexibleLattice?.uploadCount, 1, "a redraw with the same token must not re-upload")
+        // control: the same update without the lattice tears it down
+        inputs.flexibleLattice = nil
+        coord.apply(inputs, to: view)
+        XCTAssertNil(r2.flexibleLattice)
+        XCTAssertFalse(r2.flexibleLatticeInFrame)
     }
 
     // MARK: T12 — #354's frames are inert

@@ -130,12 +130,14 @@ enum FlexibleLatticeFixtures {
     /// The 40 × 40 × 20 box, inflated by `pad` mm on every side (so the lattice's walls,
     /// which reach the box's own faces, are strictly INSIDE the shell and a depth test
     /// between the two is never a tie), each face an n × n grid, the top face last.
-    static func boxMesh(pad: Float = 0.25, subdiv: Int = 4) -> BoxMesh {
+    /// `omit`: face ids left out (an open box — T7b removes the far side).
+    static func boxMesh(pad: Float = 0.25, subdiv: Int = 4, omit: Set<Int32> = []) -> BoxMesh {
         let lo = SIMD3<Float>(-pad, -pad, -pad), hi = SIMD3<Float>(40 + pad, 40 + pad, 20 + pad)
         let X = SIMD3<Float>(hi.x - lo.x, 0, 0), Y = SIMD3<Float>(0, hi.y - lo.y, 0), Z = SIMD3<Float>(0, 0, hi.z - lo.z)
         var pos: [Float] = [], idx: [Int32] = [], fid: [Int32] = []
         let n = max(1, subdiv)
         func face(_ o: SIMD3<Float>, _ u: SIMD3<Float>, _ v: SIMD3<Float>, id: Int32) {
+            guard !omit.contains(id) else { return }
             let base = Int32(pos.count / 3)
             for j in 0...n { for i in 0...n {
                 let p = o + u * (Float(i) / Float(n)) + v * (Float(j) / Float(n))

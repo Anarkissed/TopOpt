@@ -9,7 +9,8 @@
 //   * the Metal G-buffer march (FlexibleLatticeShader's MSL `flx_field`, drawn by
 //     FlexibleLatticePass inside MeshRenderer's passes).
 // A change here must be made in both; FlexibleLatticePassTests samples them at the same
-// points and fails if they disagree by more than 2e-3 mm (the GPU's own sin/cos).
+// points and fails if they disagree by more than 5e-3 mm (the GPU's half-float SDF and its
+// own sin/cos).
 // FlexibleLatticeFieldTests pins what the field means on C1's pad. (Exports wait on core —
 // maintainer, 2026-09-29 — so the app's STL exporter and its C++ copy were removed; they
 // are recoverable at 85b1bdc0.)
@@ -23,11 +24,15 @@
 //   dRegion   = (0.5 − m(p)) · 2 · rhoSpacing            — ≤ 0 inside the lattice region
 //   dPart     = trilinear(partSDF)                        — part surface, − inside
 //   dSkin     = skinMM − trilinear(skinDist)             — ≤ 0 deeper than the skin
-//   GYROID:     L = clamp(3.0915·t/ρ, Lmin, Lmax), k = 2π/L, q = k·p
-//               g = sin qx cos qy + sin qy cos qz + sin qz cos qx
-//               ∇ = k·(cos qx cos qy − sin qz sin qx, cos qy cos qz − sin qx sin qy,
-//                      cos qz cos qx − sin qy sin qz)
-//               wall = |g| / max(|∇|, 0.05·k) − t/2
+//   GYROID:     L = clamp(3.0915·t/ρ, Lmin, Lmax)
+//               THE LADDER: j = 4·log2(L/Lmin), j0 = floor(j), La = Lmin·2^(j0/4),
+//               Lb = Lmin·2^((j0+1)/4), w = smoothstep(¼, ¾, j − j0)
+//               per rung (k = 2π/L_rung, ONE k, q = k·p):
+//                 g = sin qx cos qy + sin qy cos qz + sin qz cos qx
+//                 ∇ = k·(cos qx cos qy − sin qz sin qx, cos qy cos qz − sin qx sin qy,
+//                        cos qz cos qx − sin qy sin qz)
+//               G = (1−w)·gA + w·gB, ∇G = (1−w)·∇A + w·∇B, k̄ = (1−w)·kA + w·kB
+//               wall = |G| / max(|∇G|, 0.05·k̄) − t/2
 //   HONEYCOMB:  e1, e2 ⟂ buildDir (e1 = normalize(buildDir × (|b.x| < 0.9 ? X : Y)),
 //               e2 = buildDir × e1), v = (p·e1, p·e2), d = honeycombCellMM (across flats)
 //               r = (d, √3·d), h = r/2, A = mod(v, r) − h, B = mod(v − h, r) − h,
@@ -36,9 +41,12 @@
 //               wall = |d/2 − n| − t/2           (mod(x, y) = x − y·floor(x/y))
 //   LATTICE:    F = max(wall, dRegion, dPart, dSkin)          — the preview draws F
 //
-// ★ GRADING. Walls stay whole beads (R1); the gyroid's cell follows ρ continuously
-// (03-generators §3: L = 3.0915 t/ρ). A continuously varying k warps cells where ρ
-// changes — continuous, so the surface stays closed, but not a perfect gyroid there.
+// ★ GRADING. Walls stay whole beads (R1); the gyroid's cell follows ρ (03-generators §3:
+// L = 3.0915 t/ρ) on a LADDER of true gyroids 19 % apart, blended between neighbouring
+// rungs over the middle half of each step (03 §3(a)). It was q = k(p)·p — §3(b)'s naive
+// form, whose cells shrink or swell with the distance from the ORIGIN (3× on his pad's far
+// end; FlexibleLatticeGradingTests). Continuous either way; in a blend it is a hybrid of
+// two gyroids, elsewhere exactly one.
 // Honeycomb uses ONE cell for the whole part (03 §4: uniform d in v1), d = 2t/ρ̄.
 // ★ SKIN. Faces with skin ON keep `skinMM` of solid under them (M15); `skinDist` is the
 // distance to the triangles of every face EXCEPT the loaded faces whose skin is off, so
@@ -105,19 +113,101 @@ public enum FlexibleLatticeField {
 
     @inline(__always) static func fmod(_ x: Float, _ y: Float) -> Float { x - y * (x / y).rounded(.down) }
 
+    /// Rungs per doubling of the gyroid's cell: Lmin·2^(j/4), 19 % apart (03 §3: ≤ 20 % per step).
+    public static let ladderStepsPerOctave: Float = 4
+    /// The share of each rung-to-rung interval (in log L) that BLENDS; the rest is a pure rung.
+    public static let blendLo: Float = 0.25, blendHi: Float = 0.75
+
+    /// The gyroid g and ∇g at ONE constant wavenumber k (a true gyroid, cell 2π/k).
+    @inline(__always) static func gyroid(_ p: SIMD3<Float>, k: Float) -> (g: Float, grad: SIMD3<Float>) {
+        let q = p * k
+        let s = SIMD3<Float>(sin(q.x), sin(q.y), sin(q.z))
+        let c = SIMD3<Float>(cos(q.x), cos(q.y), cos(q.z))
+        let g = s.x * c.y + s.y * c.z + s.z * c.x
+        let grad = k * SIMD3<Float>(c.x * c.y - s.z * s.x, c.y * c.z - s.x * s.y, c.z * c.x - s.y * s.z)
+        return (g, grad)
+    }
+
+    /// The two bracketing rungs of the ladder for the intended cell L, the blend weight of
+    /// the upper one (0 = the lower rung alone, 1 = the upper alone), and dw/dj.
+    public static func rungs(L: Float, lMin: Float) -> (La: Float, Lb: Float, w: Float, dwdj: Float, j: Float) {
+        let j = Swift.max(0, ladderStepsPerOctave * log2(L / lMin))
+        let j0 = j.rounded(.down), fr = j - j0
+        let x = Swift.min(Swift.max((fr - blendLo) / (blendHi - blendLo), 0), 1)
+        let w = x * x * (3 - 2 * x)   // MSL smoothstep
+        return (lMin * exp2(j0 / ladderStepsPerOctave), lMin * exp2((j0 + 1) / ladderStepsPerOctave), w,
+                6 * x * (1 - x) / (blendHi - blendLo), j)
+    }
+
+    /// `FlexGrid.sample` AND its gradient (mm⁻¹): the trilinear's own, from the same eight
+    /// values, 0 along an axis where p is clamped to the grid.
+    public static func sampleWithGradient(_ g: FlexGrid, _ p: SIMD3<Float>) -> (value: Float, grad: SIMD3<Float>) {
+        let u = (p - g.c0) / g.spacing
+        let nx = g.nx, ny = g.ny, nz = g.nz
+        let ux = Swift.min(Swift.max(u.x, 0), Float(nx - 1))
+        let uy = Swift.min(Swift.max(u.y, 0), Float(ny - 1))
+        let uz = Swift.min(Swift.max(u.z, 0), Float(nz - 1))
+        let i0 = Swift.min(Int(ux), Swift.max(0, nx - 2)), j0 = Swift.min(Int(uy), Swift.max(0, ny - 2))
+        let k0 = Swift.min(Int(uz), Swift.max(0, nz - 2))
+        let i1 = Swift.min(i0 + 1, nx - 1), j1 = Swift.min(j0 + 1, ny - 1), k1 = Swift.min(k0 + 1, nz - 1)
+        let fx = ux - Float(i0), fy = uy - Float(j0), fz = uz - Float(k0)
+        let c000 = g.at(i0, j0, k0), c100 = g.at(i1, j0, k0), c010 = g.at(i0, j1, k0), c110 = g.at(i1, j1, k0)
+        let c001 = g.at(i0, j0, k1), c101 = g.at(i1, j0, k1), c011 = g.at(i0, j1, k1), c111 = g.at(i1, j1, k1)
+        let c00 = c000 * (1 - fx) + c100 * fx, c10 = c010 * (1 - fx) + c110 * fx
+        let c01 = c001 * (1 - fx) + c101 * fx, c11 = c011 * (1 - fx) + c111 * fx
+        let c0v = c00 * (1 - fy) + c10 * fy, c1v = c01 * (1 - fy) + c11 * fy
+        let value = c0v * (1 - fz) + c1v * fz
+        var gx = ((c100 - c000) * (1 - fy) + (c110 - c010) * fy) * (1 - fz) + ((c101 - c001) * (1 - fy) + (c111 - c011) * fy) * fz
+        var gy = (c10 - c00) * (1 - fz) + (c11 - c01) * fz
+        var gz = c1v - c0v
+        if u.x < 0 || u.x > Float(nx - 1) { gx = 0 }
+        if u.y < 0 || u.y > Float(ny - 1) { gy = 0 }
+        if u.z < 0 || u.z > Float(nz - 1) { gz = 0 }
+        return (value, SIMD3(gx, gy, gz) / g.spacing)
+    }
+
+    /// The blended SHEET function G at p, its gradient, the blended wavenumber and the blend
+    /// weight — from the SAMPLED ρ and its gradient (the MSL `flx_wall`).
+    /// ★ A LADDER OF TRUE GYROIDS, NOT q = k(p)·p. A varying k times ABSOLUTE p has the local
+    /// wavenumber k + p·∇k (03 §3(b)): on his mirror-symmetric pad the far end drew cells 3×
+    /// finer than the near end at the same ρ (FlexibleLatticeGradingTests). Each rung has ONE
+    /// k, so its cell is its cell everywhere; between two rungs the sheet functions blend
+    /// (03 §3(a)), G = (1−w)·gA + w·gB, and ∇G is the WHOLE gradient — including
+    /// (gB − gA)·∇w, the blend weight's own gradient through ρ, without which the walls inside
+    /// a blend are drawn off t (`blendGradient: false` is only a test's red control).
+    public static func gyroidSheet(_ p: SIMD3<Float>, rhoRaw: Float, gradRho: SIMD3<Float>, _ f: FlexibleLatticeInputs,
+                                   blendGradient: Bool = true) -> (G: Float, grad: SIMD3<Float>, k: Float, w: Float) {
+        let t = f.wallMM
+        let rhoIn = rhoRaw > 0.05 && rhoRaw < 0.9
+        let rho = Swift.min(Swift.max(rhoRaw, 0.05), 0.9)
+        let Lraw = 3.0915 * t / rho
+        let L = Swift.min(Swift.max(Lraw, f.lMinMM), f.lMaxMM)
+        let r = rungs(L: L, lMin: f.lMinMM)
+        let ka = 2 * Float.pi / r.La, kb = 2 * Float.pi / r.Lb
+        var g: Float = 0, grad = SIMD3<Float>.zero
+        var gA: Float = 0, gB: Float = 0
+        if r.w < 1 { let a = gyroid(p, k: ka); gA = a.g; g += (1 - r.w) * a.g; grad += (1 - r.w) * a.grad }
+        if r.w > 0 { let b = gyroid(p, k: kb); gB = b.g; g += r.w * b.g; grad += r.w * b.grad }
+        if blendGradient, r.w > 0, r.w < 1, rhoIn, Lraw > f.lMinMM, Lraw < f.lMaxMM, r.j > 0 {
+            // ∇j = 4/ln2 · ∇L/L, ∇L = −L/ρ·∇ρ (zero wherever a clamp holds)
+            let gradJ = -(ladderStepsPerOctave / Float(M_LN2)) * gradRho / rho
+            grad += (gB - gA) * r.dwdj * gradJ
+        }
+        return (g, grad, (1 - r.w) * ka + r.w * kb, r.w)
+    }
+
+    /// The gyroid wall: the gradient-normalised sheet, t thick.
+    static func gyroidWall(_ p: SIMD3<Float>, rhoRaw: Float, gradRho: SIMD3<Float>, _ f: FlexibleLatticeInputs) -> Float {
+        let s = gyroidSheet(p, rhoRaw: rhoRaw, gradRho: gradRho, f)
+        return abs(s.G) / Swift.max(simd_length(s.grad), 0.05 * s.k) - 0.5 * f.wallMM
+    }
+
     public static func wall(_ p: SIMD3<Float>, _ f: FlexibleLatticeInputs) -> Float {
         let t = f.wallMM
         switch f.topology {
         case .gyroid:
-            let rho = Swift.min(Swift.max(f.rho.sample(p), 0.05), 0.9)
-            let L = Swift.min(Swift.max(3.0915 * t / rho, f.lMinMM), f.lMaxMM)
-            let k = 2 * Float.pi / L
-            let q = p * k
-            let s = SIMD3<Float>(sin(q.x), sin(q.y), sin(q.z))
-            let c = SIMD3<Float>(cos(q.x), cos(q.y), cos(q.z))
-            let g = s.x * c.y + s.y * c.z + s.z * c.x
-            let grad = k * SIMD3<Float>(c.x * c.y - s.z * s.x, c.y * c.z - s.x * s.y, c.z * c.x - s.y * s.z)
-            return abs(g) / Swift.max(simd_length(grad), 0.05 * k) - 0.5 * t
+            let s = sampleWithGradient(f.rho, p)
+            return gyroidWall(p, rhoRaw: s.value, gradRho: s.grad, f)
         case .honeycomb:
             let b = simd_normalize(f.buildDir)
             let ref: SIMD3<Float> = abs(b.x) < 0.9 ? SIMD3(1, 0, 0) : SIMD3(0, 1, 0)

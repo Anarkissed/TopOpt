@@ -3,13 +3,14 @@
 //
 // ★ RELEASE ONLY. A Debug build's timing is not the app's; the test skips on DEBUG and says
 // which configuration and GPU it declined to measure. Run:
-//     swift test -c release --filter FlexibleLatticePassPerfTests
+//     swift test -c release -Xswiftc -enable-testing --filter FlexibleLatticePassPerfTests
 // ★ THE WHOLE FRAME, not the march alone: `measureFrameGPUSeconds(size: 1152, stage: true)`
 // is the shipping frame (backdrop, MSAA, prepass, AO, shade, the re-issued ghost) at the
 // G-buffer cap, beside the octet cube's frame from the same process. 1 warm-up + 9 frames,
 // median/min/max printed. Bar: gyroid squished (s = 1) median ≤ 16 ms; hang guard 250 ms.
 // ★ RED CONTROL: the same frame with the pass hidden must be > 20 % cheaper — the timer
-// sees the march, or the bar measures nothing.
+// sees the march, or the bar measures nothing. A pass with NOTHING latticed must cost
+// about what the hidden one does (the empty region box exits the march at once).
 #if canImport(Metal) && canImport(MetalKit)
 import XCTest
 import Metal
@@ -43,7 +44,7 @@ final class FlexibleLatticePassPerfTests: XCTestCase {
     func testFrameBudgetAt1152() throws {
         let device = try Fx.device()
         #if DEBUG
-        throw XCTSkip("T16 is a RELEASE measurement; this is a DEBUG build on \(device.name) — run swift test -c release --filter FlexibleLatticePassPerfTests")
+        throw XCTSkip("T16 is a RELEASE measurement; this is a DEBUG build on \(device.name) — run swift test -c release -Xswiftc -enable-testing --filter FlexibleLatticePassPerfTests")
         #else
         let box = Fx.boxMesh()
         // the shipping sample count (MSAA 4×), as the screen draws
@@ -71,6 +72,16 @@ final class FlexibleLatticePassPerfTests: XCTestCase {
         r.flexibleLattice?.hidden = true
         let hidden = try measure(r)
         report.append("gyroid s=1 HIDDEN \(hidden)")
+        // ★ A DRAWABLE PASS WITH NOTHING LATTICED (T8's frame E; the evidence probe's
+        // reference): the march must exit on the empty region box at once, not read the
+        // inverted box as all of space and march every pixel (proved red by removing it)
+        var empty = Fx.boxInputs(.gyroid)
+        empty.mask.values = [Float](repeating: 0, count: empty.mask.values.count)
+        token += 1
+        r.applyFlexibleLattice(Fx.layer(empty, faces: [Fx.topFace(depth: 3)], token: token), device: device)
+        XCTAssertTrue(r.flexibleLatticeInFrame)
+        let nothing = try measure(r)
+        report.append("gyroid s=1 NOTHING LATTICED \(nothing)")
         // the octet cube's frame, same process, same size
         let scene = LatticeBandTestCase.octetScene()
         guard let o = MeshRenderer(device: device) else { throw XCTSkip("octet renderer") }
@@ -86,6 +97,8 @@ final class FlexibleLatticePassPerfTests: XCTestCase {
         let g = try XCTUnwrap(gyroidSquished)
         XCTAssertLessThanOrEqual(g.median, 16, "the gyroid squished frame must fit 16 ms at the 1152 cap")
         XCTAssertLessThan(hidden.median, 0.8 * g.median, "control: the timer must see the march")
+        XCTAssertLessThan(nothing.median, hidden.median + 0.25 * (g.median - hidden.median),
+                          "an empty lattice region must cost about what a hidden pass costs")
         #endif
     }
 }

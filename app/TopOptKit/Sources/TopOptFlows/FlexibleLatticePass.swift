@@ -81,11 +81,12 @@ final class FlexibleLatticePass {
     /// The pad (mm) the lattice region's box is clipped to around the part's AABB.
     static let boxPadMM: Float = 1
 
-    /// The longest step, in cells. ★ THE GYROID'S IS 0.1, NOT THE 0.25 FIRST WRITTEN: its
-    /// |g|/|∇| over-reads between the sheets (the gradient floor is 0.05·k), and a quarter
-    /// cell jumped whole 0.8 mm walls at grazing angles (1.2 % of the covered pixels against a
-    /// march at 0.02 cells; 0.1 gives < 0.3 %). The honeycomb's wall is 1-Lipschitz, so it
-    /// keeps the quarter cell. T11 holds both, in the pass.
+    /// The longest step, in cells (of the FINEST ladder rung in play). ★ THE GYROID'S IS 0.1,
+    /// NOT THE 0.25 FIRST WRITTEN: its |g|/|∇| over-reads between the sheets (the gradient
+    /// floor is 0.05·k), and a quarter cell jumps whole walls at grazing angles (on the
+    /// ladder: 0.5 % of the covered pixels against a march at 0.02 cells, over T11's 0.3 %
+    /// bar; 0.1 gives 0.05 %). The honeycomb's wall is 1-Lipschitz, so it keeps the quarter
+    /// cell. T11 holds both, in the pass.
     static func stepCap(for topology: FlexibleLatticeInputs.Topology) -> Float {
         topology == .gyroid ? 0.1 : 0.25
     }
@@ -93,10 +94,11 @@ final class FlexibleLatticePass {
     let device: MTLDevice
     let gbufferDescriptor: MTLRenderPipelineDescriptor
     let gbufferPipeline: MTLRenderPipelineState
-    let probePipeline: MTLComputePipelineState
-    let squishProbePipeline: MTLComputePipelineState
-    let uniformEchoPipeline: MTLComputePipelineState
-    let frameEchoPipeline: MTLComputePipelineState
+    /// The library the G-buffer pipeline came from; the TEST kernels' compute pipelines are
+    /// built from it on first use (`computePipeline`) — the app never asks for them, so
+    /// making a pass costs one compile and one render pipeline.
+    private let library: MTLLibrary
+    private var computeCache: [String: MTLComputePipelineState] = [:]
     /// True once the G-buffer pipeline built (the init THROWS otherwise, with the log).
     var gbufferPipelineDidBuild: Bool { gbufferPipeline.label == "flx_gbuffer" }
 
@@ -179,17 +181,7 @@ final class FlexibleLatticePass {
         gbufferDescriptor = pd
         do { gbufferPipeline = try device.makeRenderPipelineState(descriptor: pd) }
         catch { throw Failure.pipeline("flx_gbuffer: \(error)") }
-        func compute(_ name: String) throws -> MTLComputePipelineState {
-            let cd = MTLComputePipelineDescriptor()
-            cd.label = name
-            cd.computeFunction = try fn(name)
-            do { return try device.makeComputePipelineState(descriptor: cd, options: [], reflection: nil) }
-            catch { throw Failure.pipeline("\(name): \(error)") }
-        }
-        probePipeline = try compute("flx_field_probe")
-        squishProbePipeline = try compute("flx_squish_probe")
-        uniformEchoPipeline = try compute("flx_uniform_echo")
-        frameEchoPipeline = try compute("flx_frame_echo")
+        library = lib
         // a 1×1 "no column" table for the face slots nobody uses, bound on every draw
         let d = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .rgba32Float, width: 1, height: 1, mipmapped: false)
         d.usage = [.shaderRead]; d.storageMode = .shared
@@ -197,6 +189,20 @@ final class FlexibleLatticePass {
         var zero = SIMD4<Float>.zero
         e.replace(region: MTLRegionMake2D(0, 0, 1, 1), mipmapLevel: 0, withBytes: &zero, bytesPerRow: 16)
         emptyColumns = e
+    }
+
+    /// A test kernel's compute pipeline, built once on first use (THROWING, with the log).
+    func computePipeline(_ name: String) throws -> MTLComputePipelineState {
+        if let p = computeCache[name] { return p }
+        guard let f = library.makeFunction(name: name) else { throw Failure.function(name) }
+        let cd = MTLComputePipelineDescriptor()
+        cd.label = name
+        cd.computeFunction = f
+        let p: MTLComputePipelineState
+        do { p = try device.makeComputePipelineState(descriptor: cd, options: [], reflection: nil) }
+        catch { throw Failure.pipeline("\(name): \(error)") }
+        computeCache[name] = p
+        return p
     }
 
     /// The pipeline descriptor's contract, as a list of what is wrong with it (empty = OK).
@@ -475,12 +481,14 @@ final class FlexibleLatticePass {
     /// `flx_field` (undeformed) at each point — compare with `FlexibleLatticeField.lattice`
     /// on `referenceInputs`.
     func probe(_ points: [SIMD3<Float>]) -> [Float]? {
-        runProbe(probePipeline, points, squish: 0, columns: false)
+        guard let pipe = try? computePipeline("flx_field_probe") else { return nil }
+        return runProbe(pipe, points, squish: 0, columns: false)
     }
 
     /// `flx_deformed` at each (deformed) point — compare with `FlexibleSquishField.lattice`.
     func probeSquished(_ points: [SIMD3<Float>], squish s: Float) -> [Float]? {
-        runProbe(squishProbePipeline, points, squish: s, columns: true)
+        guard let pipe = try? computePipeline("flx_squish_probe") else { return nil }
+        return runProbe(pipe, points, squish: s, columns: true)
     }
 
     private func runProbe(_ pipe: MTLComputePipelineState, _ points: [SIMD3<Float>], squish s: Float,
@@ -519,9 +527,10 @@ final class FlexibleLatticePass {
     /// deliberately mis-ordered struct (the red control).
     func echo<T>(_ value: T, frame: Bool, count: Int) -> [SIMD4<Float>]? {
         var v = value
-        guard let queue, let out = device.makeBuffer(length: count * 16, options: .storageModeShared),
+        guard let pipe = try? computePipeline(frame ? "flx_frame_echo" : "flx_uniform_echo"),
+              let queue, let out = device.makeBuffer(length: count * 16, options: .storageModeShared),
               let cmd = queue.makeCommandBuffer(), let enc = cmd.makeComputeCommandEncoder() else { return nil }
-        enc.setComputePipelineState(frame ? frameEchoPipeline : uniformEchoPipeline)
+        enc.setComputePipelineState(pipe)
         enc.setBuffer(out, offset: 0, index: 1)
         withUnsafeBytes(of: &v) { raw in enc.setBytes(raw.baseAddress!, length: raw.count, index: 2) }
         enc.dispatchThreadgroups(MTLSize(width: 1, height: 1, depth: 1), threadsPerThreadgroup: MTLSize(width: 1, height: 1, depth: 1))
