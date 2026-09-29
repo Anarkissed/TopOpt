@@ -999,8 +999,24 @@ LatticeRoleRegions lattice_role_regions_from_job(const JobDescription& job,
       mg.half_u_mm = r.half_u_mm;
       mg.half_w_mm = r.half_w_mm;
       mg.outline_uv = r.outline_uv;
+      mg.frame_u = r.frame_u;      // zero unless the job stated them
+      mg.frame_w = r.frame_w;
     }
     const ClearanceGeometry g = resolve_clearance_manual(mg, p);
+    // ★ A STATED FRAME THAT DISAGREES WITH plane_basis() IS A REFUSAL, and it is
+    // raised HERE because this is where the face can be named. Skipping the region
+    // would drop it silently -- the outline would be gone and the wall unlatticed,
+    // which reads as a modelling choice rather than an error.
+    if (g.frame_conflict)
+      throw JobError(
+          "lattice region " + std::to_string(&r - &job.lattice.regions[0] + 1) +
+          " (face " + std::to_string(r.face_id) + ") states \"frame_u\"/\"frame_w\" "
+          "that do not match the in-plane basis core derives from its normal. The two "
+          "have agreed until now by coincidence of construction, so a disagreement "
+          "means one side has changed its convention: the outline would be read in one "
+          "frame and everything else in another, and a mirrored outline has the same "
+          "AREA as a correct one, so nothing downstream would catch it. Send axes that "
+          "match the normal, or omit them and core will derive the basis as before.");
     if (!g.valid) continue;  // degenerate → the rasterizer's safe no-op
                              // (parse_job already refused zero extents)
     (r.role == "include" ? rr.includes : rr.excludes).push_back(g);
@@ -1283,6 +1299,8 @@ std::vector<FitRegionCell> fit_region_cells(const JobDescription& job,
       mg.half_u_mm = r.half_u_mm;
       mg.half_w_mm = r.half_w_mm;
       mg.outline_uv = r.outline_uv;
+      mg.frame_u = r.frame_u;      // same geometry as the mask path sees
+      mg.frame_w = r.frame_w;
     }
     if (!resolve_clearance_manual(mg, p).valid) continue;
     ++include_index;

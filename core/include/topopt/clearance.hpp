@@ -93,6 +93,19 @@ struct ManualClearanceGeometry {
   // ★ OUTLINE (the app's `outline_uv`): closed loops in the face's in-plane (u, w)
   // basis, origin at `origin`. Empty = the rectangle. See ClearanceGeometry.
   std::vector<std::vector<std::array<double, 2>>> outline_uv;
+  // ── ★ THE FRAME THE OUTLINE IS ACTUALLY IN, when the job states it ───────────
+  // Unit world vectors of the axes `outline_uv` is expressed in. Sent by the app
+  // from 2026-09-22; ZERO means "not stated", and then the basis is derived from
+  // the normal and read through the FITTED frame convention as before.
+  //
+  // Why they exist: core and the app derive the same pair by coincidence of
+  // construction, not by contract, and the agreement between them was never
+  // derived -- it was fitted once, on one part, by scoring all eight frames by
+  // include-region void fraction. The margin was enormous (11.9 % against
+  // 64-426 %), so the choice is not in doubt; but one part, one heuristic, and
+  // the winner's 11.9 % was never explained. Stated axes end it.
+  Vec3 frame_u{0.0, 0.0, 0.0};
+  Vec3 frame_w{0.0, 0.0, 0.0};
 };
 
 // ── Suggested default distances (design 095 STEP 1/2). ────────────────────
@@ -276,6 +289,10 @@ struct ClearanceVoxelMask {
 
 struct ClearanceGeometry {
   ClearanceKind kind = ClearanceKind::Bolt;
+  // ★ Set when the job STATED frame axes that disagree with plane_basis(). The
+  // geometry is left invalid so the caller refuses rather than silently choosing
+  // one of two frames. Distinct from a merely degenerate region, which is a no-op.
+  bool frame_conflict = false;
   bool valid = false;
 
   // ★ NON-NULL => THIS GEOMETRY IS A VOXEL SET (see the note above). Every
