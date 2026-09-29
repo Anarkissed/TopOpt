@@ -160,9 +160,18 @@ final class FlexibleLatticeEvidenceProbe: XCTestCase {
                 let i = q * 4
                 if a[i] != c[i] || a[i + 1] != c[i + 1] || a[i + 2] != c[i + 2] { poke += 1 }
             } }
-            print(String(format: "FLEX-EVIDENCE %@ %@: flexScale %.2f (× %.0f · %.1f), lattice covers %d px (%.1f %%); poke-through %d of %d interior map px (%.2f %%)",
+            // ★ AND OUTSIDE THE PART: pixels that are background in the no-wall reference but
+            // not in the frame — walls standing above the dented map's edge, against the
+            // background (the interior count above cannot see those)
+            func isBG(_ f: [UInt8], _ q: Int) -> Bool {
+                let i = q * 4
+                return abs(Int(f[i]) - Int(bb)) <= 1 && abs(Int(f[i + 1]) - Int(bgG)) <= 1 && abs(Int(f[i + 2]) - Int(br)) <= 1
+            }
+            var above = 0
+            for q in 0..<(n * n) where isBG(c, q) && !isBG(a, q) { above += 1 }
+            print(String(format: "FLEX-EVIDENCE %@ %@: flexScale %.2f (× %.0f · %.1f), lattice covers %d px (%.1f %%); poke-through %d of %d interior map px (%.2f %%); %d px outside the no-wall silhouette",
                          name, label, p.shown.exaggeration * amp, p.shown.exaggeration, amp, mask.covered,
-                         100 * mask.coveredFraction, poke, interior, interior > 0 ? 100 * Double(poke) / Double(interior) : 0))
+                         100 * mask.coveredFraction, poke, interior, interior > 0 ? 100 * Double(poke) / Double(interior) : 0, above))
             XCTAssertGreaterThan(mask.covered, n * n / 100, "\(name) \(label): the lattice must draw")
             mr.applyFlexibleLattice(FlexibleLatticePreview.inputs(xray: true, lattice: p.lattice, building: false), device: device)
         }
@@ -209,7 +218,7 @@ final class FlexibleLatticeEvidenceProbe: XCTestCase {
                 let po = Self.page(part: part, faces: [Face(key: key, stack: st, design: d, geometry: geo,
                                                             overlayFace: face.overlayFace, settings: off)],
                                    inputs: offInputs, topology: topo, generation: 20)
-                try render(po, device: device, name: "pad_gyroid_skin_off", amplitudes: [("full", 1)])
+                try render(po, device: device, name: "pad_gyroid_skin_off", amplitudes: [("half", 0.5), ("full", 1)])
             }
         }
 
