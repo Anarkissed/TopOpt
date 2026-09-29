@@ -113,10 +113,6 @@ public final class FlexibleStageModel: ObservableObject {
         case filament = "Filament", squish = "Squish", auto = "Auto", physics = "Physics", stamps = "Stamps"
         public var id: String { rawValue }
     }
-    public enum Step: String, CaseIterable, Identifiable {
-        case curveX = "X curve", curveY = "Y curve", view3D = "3D view"
-        public var id: String { rawValue }
-    }
     public enum SceneState: Equatable {
         case idle, opening, ready, failed(String)
     }
@@ -135,7 +131,6 @@ public final class FlexibleStageModel: ObservableObject {
     @Published public private(set) var sceneState: SceneState = .idle
     @Published public private(set) var sceneInfo: FlexibleScene.Info?
     @Published public var tab: Tab = .filament
-    @Published public var step: Step = .curveX
     @Published public var selectedRegion: Int?
     @Published public var showBuildable = false
     @Published public private(set) var stacks: [FlexFaceKey: FlexStackInfo] = [:]
@@ -390,9 +385,32 @@ public final class FlexibleStageModel: ObservableObject {
     public func recomputeAll() {
         guard sceneState == .ready else { return }
         for k in loadedKeys where stacks[k] == nil { ensureStack(k.region) }
+        refreshLiveS(loadedKeys)
         rasteriseStamps()
         scheduleDesigns(delayNS: 0)
         scheduleAuto()
+    }
+
+    /// ★ ROUND 3, ITEM 1: every pressed face's DRAWN map, from core's squish_fraction, as
+    /// soon as its stack exists and after every recompute (undo, a new weight…). It needs no
+    /// filament data, so a calibrate-first filament's map bends too (FlexibleShownValues).
+    private func refreshLiveS(_ keys: [FlexFaceKey]) {
+        let jobs = keys.compactMap { k -> (FlexFaceKey, FlexMap)? in
+            guard stacks[k] != nil, let f = settings.face(k.region) else { return nil }
+            return (k, f.map)
+        }
+        guard !jobs.isEmpty else { return }
+        let worker = self.worker
+        Task.detached(priority: .userInitiated) {
+            var out: [FlexFaceKey: [Double]] = [:]
+            for (k, map) in jobs {
+                if let s = try? await worker.withScene({ try $0.squishFraction(face: k.region, rotation: k.rotation, map: map) }) {
+                    out[k] = s
+                }
+            }
+            let o = out
+            await MainActor.run { for (k, v) in o { self.liveS[k] = v } }
+        }
     }
 
     private func scheduleDesigns(delayNS: UInt64) {

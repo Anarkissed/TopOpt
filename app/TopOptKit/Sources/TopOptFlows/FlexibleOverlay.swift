@@ -321,13 +321,16 @@ public struct FlexibleOverlayMesh {
     }
 }
 
-/// Colours for the overlay: the app's existing heat ramp (ResultsModel.stressColor) for
-/// depth, DS tokens for the flags. No new colours.
+/// Colours for the overlay: the depth ramp, and DS tokens for the flags. No new colours.
 @MainActor
 public enum FlexibleColours {
     public static func depth(_ mm: Double, max: Double) -> SIMD4<Float> {
-        let c = ResultsModel.stressColor(fraction: max > 0 ? mm / max : 0)
+        let c = depthColour(fraction: max > 0 ? mm / max : 0)
         return SIMD4(Float(c.r), Float(c.g), Float(c.b), 0.95)
+    }
+    /// The depth ramp at 0…1 (the map AND its legend read this one function).
+    public static func depthColour(fraction f: Double) -> RGBA {
+        ResultsModel.stressColor(fraction: f)
     }
     public static func token(_ c: RGBA, _ a: Float) -> SIMD4<Float> {
         SIMD4(Float(c.r), Float(c.g), Float(c.b), a)

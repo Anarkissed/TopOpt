@@ -84,6 +84,28 @@ enum FlexibleHisProject {
         }
     }
 
+    /// C1's plain pad (100 × 100 × 20, pseudo-faces) as a project the Flexible model can
+    /// open: the same STL his project uses, with no groups and no split.
+    static func padProject(_ flexible: FlexibleStageSettings) throws -> ProjectModel {
+        let path = repoRoot.appendingPathComponent(
+            "docs/handoffs/evidence/2026-09-28-flexible-squish-maths/a_pad_centre_soft/pad_100x100x20.stl").path
+        let m = try TopOptKit.importMesh(path: path)
+        let file = ImportedFile(name: "pad_100x100x20.stl", path: path, triangleCount: m.triangleCount,
+                                faceCount: m.faceCount, watertight: m.watertight, pseudoFaces: m.pseudoFaces)
+        let pm = ProjectModel(id: UUID(), name: "pad", material: "ABS", process: .fdm, importedFile: file, importedMesh: m)
+        pm.lattice.flexible = flexible
+        return pm
+    }
+
+    /// The pad's top face id (its triangles sit at z = 20).
+    static func topFace(_ mesh: ViewerMesh) -> Int {
+        for t in 0..<mesh.triangleCount {
+            let z = (0..<3).map { mesh.positions[Int(mesh.indices[3 * t + $0]) * 3 + 2] }
+            if z.allSatisfy({ abs($0 - 20) < 1e-3 }) { return Int(mesh.faceIDs[t]) }
+        }
+        return -1
+    }
+
     /// The region id of 'top A' / 'top B' in his project (sector ids).
     nonisolated static let topA = FlexibleRegions.sectorBase + 103
     nonisolated static let topB = FlexibleRegions.sectorBase + 104

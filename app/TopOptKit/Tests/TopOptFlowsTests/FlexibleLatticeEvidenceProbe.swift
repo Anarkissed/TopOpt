@@ -87,7 +87,7 @@ final class FlexibleLatticeEvidenceProbe: XCTestCase {
         let inp = FlexibleShownValues.Inputs(
             loadedFaces: faces.map(\.settings), stacks: Dictionary(uniqueKeysWithValues: faces.map { ($0.key, $0.stack) }),
             designs: Dictionary(uniqueKeysWithValues: faces.map { ($0.key, $0.design) }), liveS: [:], checks: [:],
-            checkStamps: [], checkStampShown: nil, step: .view3D, showBuildable: true)
+            checkStamps: [], checkStampShown: nil, showBuildable: true)
         let shown = FlexibleShownValues(inp, drawnLattice: g)
         var colours: [FlexFaceKey: [SIMD4<Float>]] = [:]
         var shownDepths: [FlexFaceKey: [Double?]] = [:]

@@ -93,9 +93,9 @@ public enum FlexibleLatticePreview {
     /// recompiled its library and re-uploaded its volumes on the main thread — every View
     /// tap. A hidden pass leaves #354's frame byte-identical (T12) and re-shows by token.
     /// nil only when there is no lattice at all.
-    /// `latticeShows`: the lattice decides the map (`latticeShows(step:checkStampShown:)`);
-    /// while a stamp or a curve step owns the map, the walls hide rather than squish by
-    /// numbers the dent is not drawn with.
+    /// `latticeShows`: the lattice decides the map (`latticeShows(checkStampShown:)`);
+    /// while a stamp owns the map, the walls hide rather than squish by numbers the dent is
+    /// not drawn with.
     public static func inputs(xray: Bool, lattice: FlexibleGeneratedLattice?, building: Bool,
                               latticeShows: Bool = true) -> FlexibleLatticeLayerInputs? {
         guard let g = lattice else { return nil }
@@ -103,11 +103,12 @@ public enum FlexibleLatticePreview {
                                           hidden: building || !xray || !latticeShows)
     }
 
-    /// The generated lattice owns the map, the dent and the walls only in the 3D view with no
-    /// check stamp shown. A stamp's dent ("Dent under the stamp") and a curve being drawn
-    /// ("What you drew") keep the map they had before a lattice existed.
-    public static func latticeShows(step: FlexibleStageModel.Step, checkStampShown: UUID?) -> Bool {
-        step == .view3D && checkStampShown == nil
+    /// The generated lattice owns the map, the dent and the walls whenever no check stamp is
+    /// shown; a stamp's dent ("Dent under the stamp") keeps its own map. ★ ROUND 3: the
+    /// X / Y / 3D steps are gone (both curves are drawn at once and the map always bends),
+    /// so the rule no longer depends on a step.
+    public static func latticeShows(checkStampShown: UUID?) -> Bool {
+        checkStampShown == nil
     }
 
     /// What the page's "a fresh lattice is shown" reset is keyed on: the GENERATION, so

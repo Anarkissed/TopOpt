@@ -261,13 +261,14 @@ final class FlexibleSquishTests: XCTestCase {
         let off = FlexibleLatticePreview.inputs(xray: false, lattice: g, building: false)
         XCTAssertEqual(off?.hidden, true, "control: out of X-ray the walls never draw")
         XCTAssertEqual(off?.token, 7, "…but the pass keeps the same lattice")
-        // ★ A STAMP SHOWN, OR A CURVE BEING DRAWN: the map is not the lattice's, so neither
-        // are the walls (they would squish by other numbers than the dent)
+        // ★ A STAMP SHOWN: the map is not the lattice's, so neither are the walls (they would
+        // squish by other numbers than the dent).
+        // ★ RE-PINNED (round 3): the X / Y / 3D steps are gone — both curves are drawn at once
+        // and the map always bends — so the rule no longer reads a step. RED CONTROL: a shown
+        // stamp must still hide the walls.
         XCTAssertEqual(FlexibleLatticePreview.inputs(xray: true, lattice: g, building: false, latticeShows: false)?.hidden, true)
-        XCTAssertTrue(FlexibleLatticePreview.latticeShows(step: .view3D, checkStampShown: nil))
-        XCTAssertFalse(FlexibleLatticePreview.latticeShows(step: .view3D, checkStampShown: UUID()))
-        XCTAssertFalse(FlexibleLatticePreview.latticeShows(step: .curveX, checkStampShown: nil))
-        XCTAssertFalse(FlexibleLatticePreview.latticeShows(step: .curveY, checkStampShown: nil))
+        XCTAssertTrue(FlexibleLatticePreview.latticeShows(checkStampShown: nil))
+        XCTAssertFalse(FlexibleLatticePreview.latticeShows(checkStampShown: UUID()), "control: a stamp shown hides the walls")
         // equality is by token + hidden, so a redraw never re-uploads the same lattice
         XCTAssertEqual(FlexibleLatticePreview.inputs(xray: true, lattice: g, building: false),
                        FlexibleLatticePreview.inputs(xray: true, lattice: Self.generated(faces: []), building: false))
@@ -288,11 +289,16 @@ final class FlexibleSquishTests: XCTestCase {
         XCTAssertEqual(oldKey(first), oldKey(again), "control: the retired key cannot see Generate again")
     }
 
-    /// ★ A STAMP OR A CURVE STEP WINS OVER THE LATTICE'S MAP. With the lattice drawn, tapping
-    /// a check stamp must still show "Dent under the stamp", and a curve step the live drawn
-    /// map (no dent) — at 8046e80a they did; the lattice branch had taken both over.
+    /// ★ A STAMP WINS OVER THE LATTICE'S MAP. With the lattice drawn, tapping a check stamp
+    /// must still show "Dent under the stamp" (at 8046e80a it did; the lattice branch had
+    /// taken it over).
+    /// ★ REWRITTEN DELIBERATELY (round 3, item 1 — maintainer 2026-09-29: the heat map bends in
+    /// 3D while he draws): the pinned rule "a curve step shows the drawing, never an animated
+    /// dent" is overturned. With no lattice drawn, the drawn map DENTS — statically (it holds
+    /// still while he edits; it loops only once a lattice is drawn). RED CONTROL, run before
+    /// the change: the old rule (showsDent false in the drawing branch) failed this assertion.
     @MainActor
-    func testAStampOrACurveStepIsNotTakenOverByTheLattice() throws {
+    func testAStampWinsAndADrawnMapDentsStatically() throws {
         let p = try Self.pad()
         let face = FlexibleFaceSettings(faceRegionID: 101, weightKg: 30, deepestMM: 3)
         let depths = FlexibleSquishFace.buildableDepths(stack: p.stack, design: p.design)
@@ -307,20 +313,23 @@ final class FlexibleSquishTests: XCTestCase {
                                        maxDepthMM: 0.7, rigidDepthMM: 0, stampWidthMM: 20, localCellMM: 4,
                                        narrow: false, forceOffFaceN: 0, offFace: false,
                                        tier: FlexTier(tier: "estimate", band: 0.3, why: ""))
-        var inp = FlexibleShownValues.Inputs(loadedFaces: [face], stacks: [p.key: p.stack], designs: [p.key: p.design],
+        var inp = FlexibleShownValues.Inputs(loadedFaces: [face], stacks: [p.key: p.stack], designs: [:],
                                              liveS: [p.key: [Double](repeating: 0.5, count: n)], checks: [stamp.id: check],
-                                             checkStamps: [stamp], checkStampShown: stamp.id, step: .view3D,
+                                             checkStamps: [stamp], checkStampShown: stamp.id,
                                              showBuildable: true)
         let withStamp = FlexibleShownValues(inp, drawnLattice: g)
         XCTAssertEqual(withStamp.label, "Dent under the stamp", "a shown stamp must keep its own dent")
+        XCTAssertTrue(withStamp.showsDent)
         inp.checkStampShown = nil
-        inp.step = .curveX
-        let drawing = FlexibleShownValues(inp, drawnLattice: g)
+        let drawing = FlexibleShownValues(inp, drawnLattice: nil)
         XCTAssertEqual(drawing.label, "What you drew")
-        XCTAssertFalse(drawing.showsDent, "a curve step shows the drawing, never an animated dent")
-        // ★ RED CONTROL: in the 3D view with no stamp, the lattice's own map (the rule still holds)
-        inp.step = .view3D
-        XCTAssertEqual(FlexibleShownValues(inp, drawnLattice: g).label, "What the lattice was built from")
+        XCTAssertTrue(drawing.showsDent, "round 3: a drawn map dents")
+        XCTAssertFalse(drawing.animated, "…statically: it holds still while he edits")
+        XCTAssertEqual(drawing.legendLine, "What you drew · shown ×\(Int(drawing.exaggeration))")
+        // with no stamp and the lattice drawn: the lattice's own map, looping
+        let lat = FlexibleShownValues(inp, drawnLattice: g)
+        XCTAssertEqual(lat.label, "What the lattice was built from")
+        XCTAssertTrue(lat.animated)
     }
 
     @MainActor
@@ -329,7 +338,7 @@ final class FlexibleSquishTests: XCTestCase {
         let face = FlexibleFaceSettings(faceRegionID: 101, weightKg: 30, deepestMM: 3)
         var inp = FlexibleShownValues.Inputs(loadedFaces: [face], stacks: [p.key: p.stack], designs: [p.key: p.design],
                                              liveS: [:], checks: [:], checkStamps: [], checkStampShown: nil,
-                                             step: .view3D, showBuildable: true)
+                                             showBuildable: true)
         let depths = FlexibleSquishFace.buildableDepths(stack: p.stack, design: p.design)
         let squish = FlexibleSquishFace(stack: p.stack, depthsMM: depths)
         let noLat = p.design.columns.map { $0.status == "no_lattice" }
@@ -352,8 +361,11 @@ final class FlexibleSquishTests: XCTestCase {
         XCTAssertEqual(dent(latA), depths.enumerated().map { noLat[$0.offset] ? nil : $0.element })
         XCTAssertEqual(latA.label, "What the lattice was built from")
         XCTAssertTrue(latA.showsDent)
+        // ★ RE-PINNED (round 3): ONE k per page state — the rule, the thin-stack cap (no dent
+        // past 0.65 of a column's lattice depth) and, with a lattice, the shader's clamp
         let rule = FlexibleShownValues.exaggerationRule(maxDepthMM: latA.maxDepth, extentMM: g.extentMM)
-        XCTAssertEqual(latA.exaggeration, FlexibleShownValues.cappedExaggeration(rule: rule, maxSafeScale: g.maxSafeScale))
+        let thin = FlexibleShownValues.thinCap(values: latA.values, stacks: [p.key: p.stack]) ?? rule
+        XCTAssertEqual(latA.exaggeration, FlexibleShownValues.cappedExaggeration(rule: min(rule, thin), maxSafeScale: g.maxSafeScale))
         // no-lattice columns stay "solid" (unpainted), columns core could not build stay "no number"
         let solid = (latA.values[p.key] ?? []).filter { if case .solid = $0 { return true } else { return false } }.count
         XCTAssertEqual(solid, noLat.filter { $0 }.count)

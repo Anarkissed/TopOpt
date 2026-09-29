@@ -14,10 +14,10 @@
 import SwiftUI
 import TopOptDesign
 
-/// The top-right column: the gizmo, and directly beneath it the X-ray view button.
+/// The top-right column: the gizmo. ★ ROUND 3 (item 1.4): the X-ray button that sat under it
+/// is gone — the Settings page is always in X-ray (FlexibleStagePage.xray).
 struct FlexibleViewColumn: View {
     @ObservedObject var camera: OrbitCameraModel
-    @Binding var xray: Bool
 
     var body: some View {
         VStack {
@@ -25,10 +25,6 @@ struct FlexibleViewColumn: View {
                 Spacer()
                 VStack(alignment: .trailing, spacing: DS.Space.s) {
                     OrientationGizmoView(camera: camera, size: OrientationGizmoView.standardSize)
-                    FlexibleViewButton(icon: "square.stack.3d.up", label: "X-ray view", on: xray) {
-                        xray.toggle()
-                    }
-                    .accessibilityIdentifier("flexible-view-xray")
                 }
             }
             Spacer()
