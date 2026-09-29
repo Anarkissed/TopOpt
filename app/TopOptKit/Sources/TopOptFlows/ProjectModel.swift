@@ -765,11 +765,11 @@ public final class ProjectModel: ObservableObject {
     /// count, else the lattice default (4, which is also core's own default for a flagged
     /// wall with no count: `synthetic_foci = 4`, placed by core). No measurement is read,
     /// so an unmeasured wall is asked about too. nil ⇒ nothing flagged.
+    /// ★ AND ONLY WITH THE SIMULATION ON (ruling 2, 2026-09-29): a saved "on" with the
+    /// simulation off flags nothing (`organicSyntheticStressesActive`).
     public func latticeSyntheticFlags() -> OrganicSyntheticStress.SyntheticFlags? {
-        let lat = lattice
-        guard lat.isOrganic, lat.organicSyntheticStresses,
-              (lat.stageMode ?? .structural) == .aesthetic else { return nil }
-        return .init(defaultFoci: lat.organicSyntheticFoci, stated: lat.selectableSyntheticFoci)
+        guard lattice.organicSyntheticStressesActive else { return nil }
+        return .init(defaultFoci: lattice.organicSyntheticFoci, stated: lattice.selectableSyntheticFoci)
     }
 
     /// Core's per-wall verdicts from the bake (true = core synthesised the wall),
@@ -2286,7 +2286,10 @@ public final class ProjectModel: ObservableObject {
             primitives: resolvedLatticePrimitives,
             includePrimitives: lattice.includePrimitives.map {
                 ($0, $0.resolvedDepthMM) },
-            groupDensities: lattice.groupDensities)
+            groupDensities: lattice.groupDensities,
+            // ★ ruling 1 (2026-09-29): the re-lattice job (run, forecast, Check sizes)
+            // flags every include wall exactly as the main job does
+            synthetic: latticeSyntheticFlags())
     }
 
     /// A role group's manual primitives with their slab depths resolved through

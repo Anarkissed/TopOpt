@@ -5047,8 +5047,9 @@ public struct WorkspacePlaceholder: View {
         let receiptForBake = latticeOrganicReceipt
         // ★ SYNTHETIC STRESSES ON UNLOADED WALLS (maintainer, 2026-09-05; Aesthetic
         // only): decided on the main actor, injected off it, reported back.
-        let synthOn = project.lattice.organicSyntheticStresses
-            && stageMode == .aesthetic && organicForBake != nil
+        // ★ ruling 2 (2026-09-29): and only with the simulation on — a hidden setting
+        // must not act (`organicSyntheticStressesActive` carries organic + Aesthetic too).
+        let synthOn = project.lattice.organicSyntheticStressesActive && organicForBake != nil
         let synthDefaultFoci = project.lattice.organicSyntheticFoci
         let synthStatedFoci = project.lattice.selectableSyntheticFoci
         // ★ THE SUPERSEDED BAKE'S FLAGS DIE WITH IT (review #34): `strutRefining` stayed
@@ -10658,8 +10659,7 @@ public struct WorkspacePlaceholder: View {
     /// to carry load. The verdict's words are the row beneath it.
     private func latticeSyntheticFociRow(_ ref: LatticeSelectableRef) -> String? {
         let lat = project.lattice
-        guard lat.isOrganic, lat.organicSyntheticStresses,
-              (lat.stageMode ?? .structural) == .aesthetic else { return nil }
+        guard lat.organicSyntheticStressesActive else { return nil }   // ruling 2
         if project.latticeWallLoaded(ref) == true { return "—" }
         return project.latticeSelectableSyntheticFoci(ref).map { "\($0)" }
             ?? "Auto · \(lat.organicSyntheticFoci)"

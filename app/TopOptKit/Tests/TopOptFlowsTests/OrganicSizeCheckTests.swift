@@ -57,11 +57,102 @@ final class OrganicSizeCheckTests: XCTestCase {
         let grey = OrganicSizeCheck.evaluate(cellMinMM: 3, cellMaxMM: 5, walls: walls,
                                              printabilityFloorMM: 2.2, probe: probe)
         XCTAssertFalse(grey.allowed, "refused for aesthetic too")
-        XCTAssertEqual(grey.likely, false)
+        // ★ CHANGED (ruling 3, 2026-09-29): this candidate carries no prediction, so the
+        // stress bar was never computed — not checked, not "false".
+        XCTAssertNil(grey.likely, "★ ruling 3: no prediction ran — not checked")
+        XCTAssertEqual(grey.notChecked, "")
+        XCTAssertNil(amber.notChecked, "its prediction ran")
         // A size the probe never traced: back to the local rules only.
         let unknown = OrganicSizeCheck.evaluate(cellMinMM: 5.5, cellMaxMM: 5.5, walls: walls,
                                                 printabilityFloorMM: 2.2, probe: probe)
         XCTAssertTrue(unknown.allowed); XCTAssertNil(unknown.likely)
+    }
+
+    /// A candidate exactly as core writes one (run_job.cpp): `approved_structural` is
+    /// `ok_s && cert_ok`, and `cert_ok` is set only where the certificate ran.
+    private func coreProbe(_ predicted: [String: Any]?, rooted: Bool = true, structural: Bool = false,
+                           cell: [Double] = [4.5, 4.5]) throws -> OrganicForecast {
+        var c: [String: Any] = [
+            "cell_min_mm": cell[0], "cell_max_mm": cell[1],
+            "regions": [["approved_structural": structural, "approved_aesthetic": rooted,
+                         "refusals": rooted ? "" : "rooted 0.910000 < 0.95"]],
+            "approved_structural": structural, "approved_aesthetic": rooted]
+        if let predicted { c["predicted"] = predicted }
+        return try XCTUnwrap(OrganicForecast.parse(try JSONSerialization.data(
+            withJSONObject: ["organic_probe_version": 1, "candidates": [c]] as [String: Any])))
+    }
+
+    /// ★★ RULING 3 (2026-09-29): "When a candidate's prediction never ran,
+    /// OrganicSizeCheck says 'Not checked', never 'may not certify'." Every way core
+    /// writes a prediction that did not run, and none at all.
+    func testACandidateWhosePredictionNeverRanIsNotChecked() throws {
+        let reasons: [String?] = ["no segments", "aesthetic intent: nothing reads a certificate",
+                                  "612000 segments exceed the probe's 600000 cap", nil]
+        for reason in reasons {
+            let probe = try coreProbe(reason.map { ["ran": false, "reason": $0] })
+            let c = try XCTUnwrap(probe.candidates.first)
+            // CONTROL — what the old law said about this very candidate
+            XCTAssertFalse(c.approvedStructural, "core writes false: nothing ran")
+            let old = OrganicSizeCheck.Verdict(allowed: true, likely: c.approvedStructural, reasons: [], advice: [])
+            XCTAssertEqual(OrganicSizeCheck.structuralTitle(label: "4.5 mm", verdict: old), "4.5 mm may not certify")
+            // the ruling
+            let v = OrganicSizeCheck.evaluate(cellMinMM: 4.5, cellMaxMM: 4.5, walls: walls,
+                                              printabilityFloorMM: 2.2, probe: probe)
+            XCTAssertNil(v.likely, "\(reason ?? "no prediction")")
+            XCTAssertEqual(v.notChecked, reason ?? "", "core's reason, verbatim")
+            XCTAssertTrue(v.allowed); XCTAssertTrue(v.reasons.isEmpty)
+            XCTAssertFalse(v.advice.contains { $0.contains("margin") }, "no margin was predicted")
+            let title = OrganicSizeCheck.structuralTitle(label: "4.5 mm", verdict: v)
+            let notice = OrganicSizeCheck.structuralNotice(label: "4.5 mm", verdict: v)
+            XCTAssertEqual(title, "4.5 mm: Not checked")
+            XCTAssertTrue(notice.hasPrefix("Not checked"), notice)
+            if let reason { XCTAssertTrue(notice.contains(reason), notice) }
+            XCTAssertTrue(notice.contains("the run's certificate decides"))
+            for t in [title, notice] {
+                XCTAssertFalse(t.contains("may not certify") || t.contains("not expected to pass"), t)
+            }
+        }
+    }
+
+    /// A rooting refusal on a candidate whose prediction did not run is still "Not
+    /// checked" for the stress bar — the refusal is listed, the certificate is not claimed.
+    func testARootingRefusalWithoutAPredictionStaysNotChecked() throws {
+        let probe = try coreProbe(["ran": false, "reason": "no segments"], rooted: false, cell: [3, 5])
+        let v = OrganicSizeCheck.evaluate(cellMinMM: 3, cellMaxMM: 5, walls: walls,
+                                          printabilityFloorMM: 2.2, probe: probe)
+        XCTAssertFalse(v.allowed)
+        XCTAssertEqual(v.reasons, ["rooted 0.910000 < 0.95"], "verbatim")
+        XCTAssertNil(v.likely, "★ not coerced to false by the refusal")
+        XCTAssertEqual(OrganicSizeCheck.structuralTitle(label: "3–5 mm", verdict: v), "3–5 mm: Not checked")
+        let notice = OrganicSizeCheck.structuralNotice(label: "3–5 mm", verdict: v)
+        XCTAssertTrue(notice.contains("rooted 0.910000 < 0.95"))
+        XCTAssertFalse(notice.contains("not expected to pass"), notice)
+    }
+
+    /// Positive control: a prediction that RAN keeps its verdict and its words.
+    func testAPredictionThatRanKeepsItsVerdict() throws {
+        let refused = OrganicSizeCheck.evaluate(
+            cellMinMM: 4.5, cellMaxMM: 4.5, walls: walls, printabilityFloorMM: 2.2,
+            probe: try coreProbe(["ran": true, "verdict": "refused", "margin": 0.91]))
+        XCTAssertEqual(refused.likely, false); XCTAssertNil(refused.notChecked)
+        XCTAssertEqual(OrganicSizeCheck.structuralTitle(label: "4.5 mm", verdict: refused), "4.5 mm may not certify")
+        XCTAssertTrue(OrganicSizeCheck.structuralNotice(label: "4.5 mm", verdict: refused)
+            .hasPrefix("4.5 mm is not expected to pass certification."))
+        let certified = OrganicSizeCheck.evaluate(
+            cellMinMM: 4.5, cellMaxMM: 4.5, walls: walls, printabilityFloorMM: 2.2,
+            probe: try coreProbe(["ran": true, "verdict": "certified", "margin": 1.84], structural: true))
+        XCTAssertEqual(certified.likely, true); XCTAssertNil(certified.notChecked)
+    }
+
+    /// ★ The wizard's Structural pop-up takes its words from the size check (a value-type
+    /// test alone would miss a call site that still writes its own title).
+    func testTheWizardsStructuralNoticeReadsTheSizeCheck() throws {
+        var root = URL(fileURLWithPath: #filePath); for _ in 0..<3 { root.deleteLastPathComponent() }
+        let wz = try String(contentsOf: root.appendingPathComponent("Sources/TopOptFlows/LatticeSetupWizard.swift"),
+                            encoding: .utf8)
+        XCTAssertFalse(wz.contains("may not certify"), "the wizard writes no certification title of its own")
+        XCTAssertTrue(wz.contains("} else if v.likely == false || !v.reasons.isEmpty || v.notChecked != nil {"))
+        XCTAssertTrue(wz.contains("title: OrganicSizeCheck.structuralTitle(label: label, verdict: v),"))
     }
 
     func testTheStructuralNoticeSaysCoreSettlesItAndTheRunIsTheVerdict() {

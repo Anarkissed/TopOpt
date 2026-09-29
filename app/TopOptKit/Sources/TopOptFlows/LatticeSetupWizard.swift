@@ -1843,9 +1843,11 @@ public struct LatticeSetupWizard: View {
             organicNotice = OrganicNotice(
                 title: v.allowed ? "About \(label)" : "\(label) cannot form a lattice",
                 message: v.text + (v.allowed ? "\nYou can keep this size." : ""))
-        } else if v.likely == false || !v.reasons.isEmpty {
+        } else if v.likely == false || !v.reasons.isEmpty || v.notChecked != nil {
+            // ★ ruling 3 (2026-09-29): "Not checked" where the candidate's prediction did
+            // not run — the title is the size check's, so its words are tested there
             organicNotice = OrganicNotice(
-                title: "\(label) may not certify",
+                title: OrganicSizeCheck.structuralTitle(label: label, verdict: v),
                 message: OrganicSizeCheck.structuralNotice(label: label, verdict: v))
         }
     }

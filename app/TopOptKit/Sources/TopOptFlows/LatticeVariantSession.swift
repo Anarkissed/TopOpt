@@ -529,11 +529,18 @@ public extension LatticeRegionEmission {
         roles: [UUID: LatticeGroupRole],
         primitives: (UUID) -> [(prim: ManualPrimitive, depthMM: Double)],
         includePrimitives: [(prim: ManualPrimitive, depthMM: Double)],
-        groupDensities: [UUID: Double] = [:]) -> Result {
+        groupDensities: [UUID: Double] = [:],
+        // ★ THE SYNTHETIC-STRESS FLAGS (ruling 1, 2026-09-29): the re-lattice job flags
+        // every include wall as the main job does (`regions(synthetic:)`); nil ⇒ none.
+        // Faces are not emitted here (see above), so only placed walls can carry one.
+        synthetic: OrganicSyntheticStress.SyntheticFlags? = nil) -> Result {
         var out: [LatticeRegionSpec] = []
         var skipped = 0
         for (p, d) in includePrimitives {
-            if let s = spec(for: p, role: .include, depthMM: d) { out.append(s) }
+            if var s = spec(for: p, role: .include, depthMM: d) {
+                if let sf = synthetic { s.syntheticStress = true; s.syntheticFoci = sf.foci(for: nil) }
+                out.append(s)
+            }
         }
         for g in groups {
             guard let role = roles[g.id] else { continue }
@@ -545,6 +552,8 @@ public extension LatticeRegionEmission {
             for (p, d) in primitives(g.id) {
                 if var s = spec(for: p, role: role, depthMM: d) {
                     s.relativeDensity = rho
+                    let ref = LatticeSelectableRef.primitive(p.id)
+                    if role == .include, let sf = synthetic { s.syntheticStress = true; s.syntheticFoci = sf.foci(for: ref.key) }
                     out.append(s)
                 }
             }

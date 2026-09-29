@@ -1585,7 +1585,9 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         // core's FEA-derived window, not the app's. Forcing Fit here (2026-09-03,
         // item 3) made the sample show a one-separation lattice the run never
         // builds. What the switch still governs for organic is the DENSITY preview
-        // (`.sim` ⇒ `.uniform` above).
+        // (`.sim` ⇒ `.uniform` above) — and SYNTHETIC STRESSES (ruling 2, 2026-09-29):
+        // the toggle is left as saved but is inert until the switch comes back
+        // (`organicSyntheticStressesActive`).
     }
 
     /// ★ WHETHER A SOLVE IS ACTUALLY NEEDED — the permission AND at least one
@@ -1596,6 +1598,16 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         // trace without the stage's tensor, whatever the density mode says.
         simulateStresses
             && (densityMode.needsSimulation || cellSizeMode == .swept || isOrganic)
+    }
+    /// ★★ SYNTHETIC STRESSES IN FORCE (maintainer, 2026-09-29, ruling 2: "A hidden setting
+    /// must not act"). The toggle is offered only with the simulation on (the wizard's
+    /// Unloaded walls row), so it acts only then: organic, Aesthetic, the simulation on AND
+    /// the toggle on. A saved "on" with the simulation off is KEPT (`setSimulateStresses`
+    /// never clears it) and flags nothing — not in the job, not in the re-lattice job, not
+    /// in the preview, not in the Selections row.
+    public var organicSyntheticStressesActive: Bool {
+        isOrganic && simulateStresses && organicSyntheticStresses
+            && (stageMode ?? .structural) == .aesthetic
     }
     /// Faces painted "Material, latticed" (lattice-include). Preview-scope legacy
     /// store (the unified library's group roles are the carrier now). The EXCLUDE
