@@ -41,7 +41,6 @@ final class LatticeHisProjectRenderProbe: XCTestCase {
         o.shapeBandMM = lat.organicShapeFit ? lat.shapeFitBandMM : 0
         o.shapeBandStrength = lat.shapeFitGradeStrength
         o.transferTies = lat.organicTransferTies
-        o.overhangFillet = lat.organicOverhangFillet
         let plan = OrganicSyntheticStress.plan(regions: regions, dims: dims, originMM: origin, spacingMM: voxel,
                                                defaultFoci: lat.organicSyntheticFoci, statedFoci: lat.selectableSyntheticFoci)
         o.regionIDs = plan.regionIDs

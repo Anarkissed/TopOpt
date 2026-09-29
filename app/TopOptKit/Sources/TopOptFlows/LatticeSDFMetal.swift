@@ -267,9 +267,6 @@ public struct LatticeOrganicInput: Sendable {
     /// repaired spans (arches, legs, merges). The file always has the repairs; the
     /// banner says which one is shown (maintainer, 2026-09-05).
     public var showRepairs: Bool = true
-    /// ★ core `organic_overhang_fillet` (2026-09-05): false ⇒ spans over air are left
-    /// as drawn. Honoured by the preview's emission when this core carries the field.
-    public var overhangFillet: Bool = true
     /// ★ CORE'S SYNTHETIC STRESS ON UNLOADED WALLS (2026-09-06): per-voxel region id
     /// (0 = none, else the 1-based include region) and the per-region config the job
     /// carries; the bridge calls `synthesize_focal_stress` — the run's own function.
@@ -313,8 +310,7 @@ public struct LatticeOrganicInput: Sendable {
                 layerHeightMM: Double = 0, overhangAngleDeg: Double = 0,
                 transferTies: Bool = true, tieSwirl: Double = 1.0,
                 shapeFit: Bool = false, shapeFitOnly: Bool = false,
-                anchorAtBoundary: Bool = true, showRepairs: Bool = true,
-                overhangFillet: Bool = true) {
+                anchorAtBoundary: Bool = true, showRepairs: Bool = true) {
         self.tensor = tensor; self.dims = dims; self.originMM = originMM
         self.spacingMM = spacingMM; self.minExtrudableWidthMM = minExtrudableWidthMM
         self.buildDirection = buildDirection
@@ -326,7 +322,6 @@ public struct LatticeOrganicInput: Sendable {
         self.shapeFit = shapeFit; self.shapeFitOnly = shapeFitOnly
         self.anchorAtBoundary = anchorAtBoundary
         self.showRepairs = showRepairs
-        self.overhangFillet = overhangFillet
     }
 }
 
@@ -1826,7 +1821,7 @@ public struct LatticeSDFScene {
                     layerHeightMM: o.layerHeightMM, anchorAtBoundary: anchorAtBoundary,
                     // ★ the ties, at last — see `LatticeOrganicInput.transferTies`
                     transferTies: o.transferTies, tieSwirl: o.tieSwirl, beadMM: beadMM,
-                    showRepairs: o.showRepairs, overhangFillet: o.overhangFillet,
+                    showRepairs: o.showRepairs,
                     regionIDs: o.regionIDs, syntheticRegions: o.syntheticRegions,
                     syntheticDeadFraction: o.syntheticDeadFraction,
                     syntheticDeadMPa: o.syntheticDeadMPa,

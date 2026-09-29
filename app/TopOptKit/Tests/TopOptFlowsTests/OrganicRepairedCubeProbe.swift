@@ -23,7 +23,6 @@ final class OrganicRepairedCubeProbe: XCTestCase {
         s.organicTieSwirl = 1
         s.organicShapeFit = true
         s.organicShapeFitOnly = false
-        s.organicOverhangFillet = false
         s.organicSolidRimMM = -1
         s.organicStrutWidthMM = 0.9
         s.organicLookPercent = 54

@@ -1292,7 +1292,6 @@ std::vector<double> organic_preview_field(
     // ★ the run's per-voxel bead (`op.strut_diameter_field`); null ⇒ the scalar
     const double* bead_mm, std::size_t bead_count,
     int emit_repairs,
-    int overhang_fillet,
     // ★ SYNTHETIC STRESS ON UNLOADED WALLS — CORE'S OWN FUNCTION (brief 2026-09-05,
     // B.5: "the preview bridge ... must call synthesize_focal_stress() on its tensor
     // with the same per-region config, or preview and run disagree on a dead wall").

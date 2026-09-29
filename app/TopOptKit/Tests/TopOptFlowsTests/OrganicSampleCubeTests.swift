@@ -120,19 +120,19 @@ final class OrganicSampleCubeTests: XCTestCase {
                        "bar U1: nothing written until certification found something")
         s.organicFittingSeparationsMM = [2, 3, 5]; s.organicPickedSeparationMM = 3
         s.organicApprovedGradesMM = [[3, 6], [2, 4]]; s.organicPickedGradeMM = [3, 6]
-        s.organicOverhangFillet = false
         let back = try JSONDecoder().decode(LatticeSettings.self, from: JSONEncoder().encode(s))
         XCTAssertEqual(back.organicFittingSeparationsMM, [2, 3, 5])
         XCTAssertEqual(back.organicPickedSeparationMM, 3)
         XCTAssertEqual(back.organicApprovedGradesMM, [[3, 6], [2, 4]])
         XCTAssertEqual(back.organicPickedGradeMM, [3, 6])
-        XCTAssertFalse(back.organicOverhangFillet, "the fillet switch persists with the other organic settings")
-        XCTAssertTrue(LatticeSettings().organicOverhangFillet, "absent ⇒ on")
-        let p = OrganicSampleCube.Picks(settings: s, layerHeightMM: 0.2)
-        XCTAssertFalse(p.overhangFillet)
-        XCTAssertNotEqual(OrganicVariantCache.key(picks: p, fieldIdentity: "f"),
-                          OrganicVariantCache.key(picks: OrganicSampleCube.Picks(settings: organic(), layerHeightMM: 0.2), fieldIdentity: "f"),
-                          "the fillet switch changes the file ⇒ a different variant")
+        // ★ a project saved with the retired "Flare overhangs" switch still loads — the key is
+        // ignored (core #358 removed the stage, 2026-09-28)
+        var old = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(s)) as? [String: Any])
+        old["organicOverhangFillet"] = false
+        let reloaded = try JSONDecoder().decode(LatticeSettings.self, from: JSONSerialization.data(withJSONObject: old))
+        XCTAssertEqual(reloaded.organicPickedGradeMM, [3, 6])
+        XCTAssertFalse(String(decoding: try JSONEncoder().encode(reloaded), as: UTF8.self).contains("organicOverhangFillet"),
+                       "the retired key is not written back")
         XCTAssertEqual(LatticeSettings.organicManualSizeLadderMM.first, 2)
     }
 

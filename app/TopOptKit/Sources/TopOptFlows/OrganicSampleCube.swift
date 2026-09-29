@@ -95,8 +95,6 @@ public enum OrganicSampleCube {
         /// (2026-09-05). A topology pick: it changes what is baked, so it keys the
         /// cache; the shipped variants are with repairs.
         public var showRepairs: Bool
-        /// ★ core `organic_overhang_fillet` (a job setting, 2026-09-05).
-        public var overhangFillet: Bool
         /// ★★★ THE TRANSFER TIES (`organic_transfer_ties`) and their swirl — the
         /// cross-members between grown pillars. Core applies them on the GROWN path
         /// only, so they key the cache only when `grow` is set.
@@ -150,7 +148,6 @@ public enum OrganicSampleCube {
             shapeFitOnly = s.organicShapeFit && s.organicShapeFitOnly
             covered = s.boundary == .covered
             self.showRepairs = showRepairs
-            overhangFillet = s.organicOverhangFillet
             strutWidthMM = Swift.max(0, s.organicStrutWidthMM)
             transferTies = s.organicTransferTies
             tieSwirl = s.organicTieSwirl
@@ -414,8 +411,7 @@ public enum OrganicSampleCube {
                 // collapses the cube. The emission runs only on a core that carries the
                 // fix; until then the traced cube is shown and the row says why.
                 anchorAtBoundary: picks.covered,
-                showRepairs: picks.showRepairs && TopOptKit.coreCarriesTheSampleRepairFix,
-                overhangFillet: picks.overhangFillet)
+                showRepairs: picks.showRepairs && TopOptKit.coreCarriesTheSampleRepairFix)
             input.solidRimMM = picks.solidRimMM
             // ★ the depth-variation TEST, scaled to the cube's own cell
             input.depthStaggerCellMM = picks.depthStagger

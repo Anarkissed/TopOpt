@@ -1085,13 +1085,9 @@ public struct LatticeSetupWizard: View {
     static let infoSpacingScale = "Scales the spacing the solve derives. Coarser spacing can fragment the "
         + "lattice; the run's receipt reports survival and pieces. Grown organic holds a "
         + "fixed 30° overhang, so there is no overhang limit to tune there."
-    static let infoOverhangFillet = "A job setting. Any strut that runs over open air is re-emitted by core as a 45° "
-        + "fillet, 12 short segments flaring up to 2.5× the bead, so it prints without support. "
-        + "Off leaves every strut exactly as traced or grown and core reports the unsupported runs "
-        + "instead of repairing them. Absent from the job means on."
     static let infoRepairs = "Core's export repairs the traced lattice for printing: it merges nodes, cuts "
-        + "the base, ties free ends and flares any strut that runs over air into an arch up to "
-        + "2.5× the bead. Those repairs are in the file. Turn this off to see the traced curves "
+        + "the base and ties free ends; a span nothing can hold up is left out, and the run's "
+        + "receipt counts them. Those repairs are in the file. Turn this off to see the traced curves "
         + "alone — a way to judge the topology, not what will print."
     static let infoSynthetic = "A wall the load never reaches carries no stress, so there is nothing for the "
         + "tracer to follow — its curves wander. With this on, every such wall (median stress "
@@ -1375,25 +1371,7 @@ public struct LatticeSetupWizard: View {
             // the 'depth variation test' selection"). The model keeps the flag (off) so an
             // old snapshot decodes; nothing here can turn it on.
 
-            // ── Flare overhangs (job switch, probe-gated) ──
-            let filletKeyAccepted = TopOptKit.gradingSchemaAccepts(key: "organic_overhang_fillet")
-            HStack(spacing: DS.Space.s) {
-                HStack(spacing: DS.Space.xs) {
-                    Text("Flare overhangs for printing").dsStyle(DS.TypeScale.caption)
-                        .foregroundStyle((filletKeyAccepted ? DS.Color.textPrimary : DS.Color.textQuaternary).color)
-                    infoButton("overhang-fillet", Self.infoOverhangFillet
-                               + " \"Not available yet\" means this build cannot turn the fillet off; the run flares them.")
-                }
-                Spacer(minLength: DS.Space.s)
-                GlassToggle(isOn: model.organicOverhangFillet) {
-                    guard filletKeyAccepted else { return }
-                    model.organicOverhangFillet.toggle(); rebuild()
-                }
-                .opacity(filletKeyAccepted ? 1 : 0.4)
-                .accessibilityLabel("Flare overhangs for printing")
-                .accessibilityIdentifier("wizard-organic-overhang-fillet")
-            }
-            if !filletKeyAccepted { shortNote("Not available yet", warning: true) }
+            // (the "Flare overhangs" row is gone, 2026-09-28: core #358 removed the stage)
 
             // ── Preview repairs (preview only) ──
             HStack(spacing: DS.Space.s) {

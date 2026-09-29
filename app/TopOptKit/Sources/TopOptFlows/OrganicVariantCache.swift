@@ -37,11 +37,11 @@ public enum OrganicVariantCache {
         // and a cube traced at core's derived bead is a DIFFERENT cube from one traced
         // at the width he typed. Appended only when he has stated one, so the variants
         // this build ships keep their keys.
-        s += String(format: "|grow=%d|layer=%.4f|sep=%.4f-%.4f|overhang=%.2f|rho=%.4f-%.4f|fit=%d|only=%d|covered=%d|voxel=%.4f|repairs=%d|fillet=%d",
+        s += String(format: "|grow=%d|layer=%.4f|sep=%.4f-%.4f|overhang=%.2f|rho=%.4f-%.4f|fit=%d|only=%d|covered=%d|voxel=%.4f|repairs=%d",
                     picks.grow ? 1 : 0, picks.layerHeightMM, picks.separationMinMM, picks.separationMaxMM,
                     picks.overhangDeg, picks.rhoMin, picks.rhoMax,
                     picks.shapeFit ? 1 : 0, picks.shapeFitOnly ? 1 : 0, picks.covered ? 1 : 0, picks.bakeVoxelMM,
-                    picks.showRepairs ? 1 : 0, picks.overhangFillet ? 1 : 0)
+                    picks.showRepairs ? 1 : 0)
         // ★ APPENDED ONLY WHEN THERE IS ONE (2026-09-07): the rim changes the traced
         // geometry, so it belongs in the key — but adding it unconditionally would
         // change EVERY key and orphan the four variants this build ships.

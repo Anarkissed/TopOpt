@@ -239,7 +239,7 @@ final class OrganicFloatingPillProbe: XCTestCase {
                 showRepairs: repairs)
             else { XCTFail("no trace: \(tag)"); return }
             print("\n════ \(tag) · spans \(tr.spans.count) · curves \(tr.curveCount) · connectors "
-                  + "\(tr.connectorCount) · filleted \(tr.census.filletedSpans)")
+                  + "\(tr.connectorCount)")
             pieces(tr.spans)
         }
 
@@ -330,7 +330,7 @@ final class OrganicFloatingPillProbe: XCTestCase {
         print("\n════ THE EMISSION'S LENGTH CENSUS (grown, ties on)")
         print(String(format: "   input %.0f mm", shown.census.inputLengthMM))
         for st in shown.census.stages { print(String(format: "   %-22@ %.0f mm", st.name as NSString, st.lengthMM)) }
-        print("   written components \(shown.census.writtenComponents) · filleted spans \(shown.census.filletedSpans)")
+        print("   written components \(shown.census.writtenComponents)")
 
         // Does each hidden-picture span survive into the file?
         func key(_ p: SIMD3<Double>) -> SIMD3<Int64> {
