@@ -123,6 +123,14 @@ public struct FlexibleExportSheet: View {
                             Self.count(e.triangles), Self.bytes(e.bytes), pitch))
                     .font(.system(size: 12)).foregroundStyle(DS.Color.textTertiary.color)
                     .fixedSize(horizontal: false, vertical: true)
+                // ★ A whole-part lattice meshed at a bead's resolution is BIG (the 100 × 100 ×
+                // 20 mm pad: 1.3 GB at Standard). Say so before the export, not after.
+                if e.bytes > Self.largeBytes {
+                    Text("Large file: a slicer may be slow to open it. Draft is the smallest.")
+                        .font(.system(size: 12, weight: .medium)).foregroundStyle(DS.Color.warning.color)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("flexible-export-large")
+                }
             }
             if let p = progress {
                 ProgressView(value: p).tint(FlexibleStageStyle.accent)
@@ -183,6 +191,9 @@ public struct FlexibleExportSheet: View {
             }
         }
     }
+
+    /// Above this the sheet warns that the file is large (500 MB).
+    static let largeBytes = 500 << 20
 
     static func count(_ n: Int) -> String {
         n >= 1_000_000 ? String(format: "%.1f M", Double(n) / 1e6) : n >= 1000 ? String(format: "%.0f k", Double(n) / 1e3) : "\(n)"
