@@ -34,6 +34,8 @@ public enum FlexibleJob {
         public var regions: [[String: Any]]
         /// Rasterised stamps by placement id (FlexibleStamps), for the run job.
         public var stampGrids: [UUID: FlexStamp]
+        /// The split sectors' `loads.face_regions` entries (FlexibleRegions.wire).
+        public var sectorRegions: [[String: Any]] = []
 
         public init(modelPath: String, resolution: Int, beadWidthMM: Double, faceCount: Int,
                     settings: FlexibleStageSettings, regions: [[String: Any]] = [],
@@ -135,7 +137,7 @@ public enum FlexibleJob {
     static func document(_ i: Inputs, material: String, block: [String: Any]) throws -> String {
         let regions: [[String: Any]] = (0..<max(0, i.faceCount)).map { f in
             ["id": regionID(face: f), "name": "face \(f)", "add": [f]]
-        }
+        } + i.sectorRegions
         let job: [String: Any] = [
             "model": i.modelPath,
             "material": material,

@@ -36,7 +36,7 @@ struct FlexibleAutoPane: View {
     }
 
     @ViewBuilder private func recommendation(_ r: FlexRecommendationInfo) -> some View {
-        Text(r.sentence).font(.system(size: 14, weight: .semibold))
+        Text(model.text(r.sentence)).font(.system(size: 14, weight: .semibold))
             .foregroundStyle(r.reachable ? DS.Color.textPrimary.color : DS.Color.warning.color)
             .fixedSize(horizontal: false, vertical: true)
             .accessibilityIdentifier("flexible-auto-sentence")
@@ -45,16 +45,16 @@ struct FlexibleAutoPane: View {
         ForEach(Array(r.reasons.filter { !failureTexts.contains($0.text) }.enumerated()), id: \.offset) { _, x in
             HStack(alignment: .top, spacing: 6) {
                 Text("•").foregroundStyle(DS.Color.textTertiary.color)
-                FlexCaption(text: x.text + (x.face.map { " (face \(FlexibleJob.face(regionID: $0)))" } ?? ""))
+                FlexCaption(text: model.text(x.text) + (x.face.map { " (\(model.name($0)))" } ?? ""))
             }
         }
         if !r.reachable, !r.failures.isEmpty {
             FlexSectionTitle(text: "Where it cannot be met")
             ForEach(Array(r.failures.enumerated()), id: \.offset) { _, f in
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Face \(FlexibleJob.face(regionID: f.face))").font(.system(size: 12, weight: .semibold))
+                    Text(model.name(f.face).capitalized).font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(DS.Color.textPrimary.color)
-                    FlexCaption(text: f.text)
+                    FlexCaption(text: model.text(f.text))
                     FlexCaption(text: String(format: "Across u %.0f–%.0f mm, v %.0f–%.0f mm of the face.",
                                              f.uRangeMM.lowerBound, f.uRangeMM.upperBound,
                                              f.vRangeMM.lowerBound, f.vRangeMM.upperBound))
@@ -201,7 +201,7 @@ struct FlexibleCurveChart: View {
                     op = (e, p)
                 }
             }
-            out.append(Series(label: String(format: "face %d · ρ %.2f", FlexibleJob.face(regionID: f.faceRegionID), rho),
+            out.append(Series(label: model.name(f.faceRegionID) + String(format: " · ρ %.2f", rho),
                               points: pts, op: op, colour: palette[i % palette.count].color))
         }
         if out.isEmpty, let pts = try? FlexibleCore.curveSamples(path: path, materialID: materialID, tempC: tempC,
@@ -294,16 +294,16 @@ struct FlexibleSliceView: View {
                         ForEach(owners, id: \.self) { o in
                             HStack(spacing: 4) {
                                 Rectangle().fill(ownerColour(o, owners)).frame(width: 10, height: 10)
-                                Text("face \(FlexibleJob.face(regionID: o))").font(.system(size: 10.5))
+                                Text(model.name(o)).font(.system(size: 10.5))
                                     .foregroundStyle(DS.Color.textSecondary.color)
                             }
                         }
                     }
                 }
                 ForEach(Array(s.handovers.enumerated()), id: \.offset) { _, h in
-                    FlexCaption(text: String(format: "Faces %d and %d hand over across %.0f mm³, blended over %.0f mm³ (nearest face, one cell wide).",
-                                             FlexibleJob.face(regionID: h.faceA), FlexibleJob.face(regionID: h.faceB),
-                                             h.overlapMM3, h.blendedMM3))
+                    FlexCaption(text: "\(model.name(h.faceA).capitalized) and \(model.name(h.faceB)) "
+                                + String(format: "hand over across %.0f mm³, blended over %.0f mm³ (nearest face, one cell wide).",
+                                         h.overlapMM3, h.blendedMM3))
                 }
                 if s.unassignedVoxels > 0 {
                     FlexCaption(text: "\(s.unassignedVoxels) lattice voxels are under no loaded face — no density is chosen there yet.")
@@ -367,7 +367,7 @@ struct FlexibleStampsPane: View {
                 FlexCaption(text: asDesign
                             ? "Design mode: this face is designed under ONE stamp — \"under this, squish like my curves\"."
                             : "Check mode: press any stamps on the designed lattice and read the dent. Nothing is re-designed.")
-                FlexSectionTitle(text: "Library — face \(FlexibleJob.face(regionID: r))")
+                FlexSectionTitle(text: "Library — \(model.name(r))")
                 library(r, st)
                 Button { importing = true } label: {
                     Label("Import an SVG or image", systemImage: "square.and.arrow.down")

@@ -248,10 +248,11 @@ public final class FlexibleStageModel: ObservableObject {
     func sceneJob() throws -> SceneJob? {
         guard let file = project.importedFile else { return nil }
         let faceCount = max(file.faceCount, (project.viewerMesh?.faceIDs.max().map { Int($0) + 1 }) ?? 0)
-        let inputs = FlexibleJob.Inputs(
+        var inputs = FlexibleJob.Inputs(
             modelPath: file.path, resolution: project.quality.resolution,
             beadWidthMM: project.printParams.strutLineWidthMM, faceCount: faceCount,
             settings: settings, regions: project.latticeJobRegions().regions.map(\.wireDictionary))
+        inputs.sectorRegions = regions.wire
         let json = try FlexibleJob.sceneJobJSON(inputs, fallbackMaterial: catalogue.first?.id ?? "flexible")
         return SceneJob(json: json, dir: (file.path as NSString).deletingLastPathComponent)
     }
@@ -263,8 +264,16 @@ public final class FlexibleStageModel: ObservableObject {
         let regions = project.latticeJobRegions().regions.map(\.wireDictionary)
         let r = (try? JSONSerialization.data(withJSONObject: regions, options: [.sortedKeys]))
             .map { String(decoding: $0, as: UTF8.self) } ?? ""
-        return "\(file.path)|\(project.quality.resolution)|\(r)"
+        return "\(file.path)|\(project.quality.resolution)|\(r)|\(self.regions.key)"
     }
+
+    // MARK: regions (split sectors, FlexibleRegions.swift)
+
+    /// The declared regions: every face, plus the Surface stage's split sectors.
+    public var regions: FlexibleRegions { FlexibleRegions(model: project.faceRegions, mesh: project.viewerMesh) }
+    public func name(_ region: Int) -> String { regions.name(region, mesh: project.viewerMesh) }
+    /// Core's sentence with sector ids replaced by the app's names.
+    public func text(_ s: String) -> String { regions.renamed(s, mesh: project.viewerMesh) }
 
     public func openScene() {
         guard sceneState != .opening else { return }
@@ -299,9 +308,10 @@ public final class FlexibleStageModel: ObservableObject {
     }
 
     /// Tap on the model: a new face becomes loaded; a known face is selected.
-    public func tapFace(_ face: Int) {
-        NSLog("DIAG flexible tap face %d (known %d)", face, settings.face(FlexibleJob.regionID(face: face)) != nil ? 1 : 0)
-        let region = FlexibleJob.regionID(face: face)
+    public func tapFace(_ face: Int, point: SIMD3<Double>? = nil) {
+        // a split face resolves to the sector holding the point (the Surface stage's rule)
+        let region = regions.region(at: point, face: face, mesh: project.viewerMesh)
+        NSLog("DIAG flexible tap face %d → region %d (known %d)", face, region, settings.face(region) != nil ? 1 : 0)
         if settings.face(region) == nil {
             edit { $0.setFace(FlexibleFaceSettings(faceRegionID: region)) }
         }
@@ -536,10 +546,12 @@ public final class FlexibleStageModel: ObservableObject {
     public func runJobJSON() throws -> String {
         guard let file = project.importedFile else { throw FlexibleJob.EncodeError.noLoadedFace }
         let faceCount = max(file.faceCount, (project.viewerMesh?.faceIDs.max().map { Int($0) + 1 }) ?? 0)
-        return try FlexibleJob.runJobJSON(FlexibleJob.Inputs(
+        var inputs = FlexibleJob.Inputs(
             modelPath: file.path, resolution: project.quality.resolution,
             beadWidthMM: project.printParams.strutLineWidthMM, faceCount: faceCount,
             settings: settings, regions: project.latticeJobRegions().regions.map(\.wireDictionary),
-            stampGrids: stampGrids))
+            stampGrids: stampGrids)
+        inputs.sectorRegions = regions.wire
+        return try FlexibleJob.runJobJSON(inputs)
     }
 }

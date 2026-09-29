@@ -94,6 +94,11 @@ public struct FlexibleStagePage: View {
                 settleRotation: settle, settleAnimated: false,
                 faceToolActive: true,
                 onPickFace: { fid in model.tapFace(Int(fid)) },
+                // a split face: the tap's point picks the sector (FlexibleRegions)
+                onPickPoint: { fid, pt in
+                    model.tapFace(Int(fid), point: pt.map { SIMD3<Double>($0) })
+                    return true
+                },
                 onProjection: { p in
                     // the renderer publishes world→clip; the part is drawn settled (rotated
                     // about its centre), so the overlays project MODEL points through both
@@ -116,7 +121,9 @@ public struct FlexibleStagePage: View {
         guard let part = project.viewerMesh else { return }
         let faces: [FlexibleOverlayFace] = model.loadedKeys.compactMap { k in
             guard let st = model.stacks[k], let g = model.geometry[k] else { return nil }
-            return FlexibleOverlayFace(key: k, face: FlexibleJob.face(regionID: k.region), stack: st, centres: g.centres)
+            let regions = model.regions
+            return FlexibleOverlayFace(key: k, faces: Set(regions.faces(of: k.region, mesh: part)),
+                                       cuts: regions.cuts(of: k.region), stack: st, centres: g.centres)
         }
         overlay = faces.isEmpty ? nil : FlexibleOverlayMesh.build(part: part, faces: faces)
         refreshChannels()
@@ -124,26 +131,45 @@ public struct FlexibleStagePage: View {
 
     /// Per-column colours + the dent, from the model's current copies of core's results.
     private func refreshChannels() {
-        // part faces: loaded / selected / linked other end / conflict
-        var faceTint: [Int: SIMD4<Float>] = [:]
+        // part regions: loaded / resting / selected / linked other end / conflict — by REGION,
+        // so a split sector is tinted on its own side of its cuts (FlexibleRegions)
+        let regions = model.regions
         let conflictRegions = Set(model.conflicts.flatMap { [$0.faceA, $0.faceB] })
+        var regionTint: [(id: Int, tint: SIMD4<Float>)] = []   // later entries win
         for f in model.settings.faces {
-            let face = FlexibleJob.face(regionID: f.faceRegionID)
-            faceTint[face] = f.isLoaded ? FlexibleColours.loadedFace : FlexibleColours.restingFace
-            if conflictRegions.contains(f.faceRegionID) { faceTint[face] = FlexibleColours.conflict }
+            var c = f.isLoaded ? FlexibleColours.loadedFace : FlexibleColours.restingFace
+            if conflictRegions.contains(f.faceRegionID) { c = FlexibleColours.conflict }
+            regionTint.append((f.faceRegionID, c))
         }
         if let r = model.selectedRegion, let st = model.stack(r) {
-            for l in st.exitRegions { faceTint[FlexibleJob.face(regionID: l.id)] = FlexibleColours.linkedEnd }
-            if !conflictRegions.contains(r) { faceTint[FlexibleJob.face(regionID: r)] = FlexibleColours.selectedFace }
+            for l in st.exitRegions { regionTint.append((l.id, FlexibleColours.linkedEnd)) }
+            if !conflictRegions.contains(r) { regionTint.append((r, FlexibleColours.selectedFace)) }
+        }
+        let partMesh = project.viewerMesh
+        let tintOf: (Int, SIMD3<Double>) -> SIMD4<Float>? = { face, centroid in
+            var out: SIMD4<Float>?
+            for e in regionTint where regions.contains(e.id, face: face, centroid: centroid, mesh: partMesh) {
+                out = e.tint
+            }
+            return out
         }
         guard let overlay else {
-            // no stacks yet: a plain face tint on the part itself
-            let n = project.viewerMesh?.flat.vertexCount ?? 0
+            // no stacks yet: tint the part itself, per triangle
+            guard let mesh = project.viewerMesh else { tints = nil; dents = nil; dentScale = 0; return }
+            let n = mesh.flat.vertexCount
             var out = [Float](repeating: 0, count: n * 8)
-            if let ids = project.viewerMesh?.faceIDs {
-                for v in 0..<n {
-                    guard v / 3 < ids.count, let c = faceTint[Int(ids[v / 3])] else { continue }
-                    out[v * 8] = c.x; out[v * 8 + 1] = c.y; out[v * 8 + 2] = c.z; out[v * 8 + 3] = c.w
+            let ids = mesh.faceIDs
+            func vtx(_ i: UInt32) -> SIMD3<Double> {
+                let b = Int(i) * 3
+                return SIMD3(Double(mesh.positions[b]), Double(mesh.positions[b + 1]), Double(mesh.positions[b + 2]))
+            }
+            for t in 0..<min(mesh.triangleCount, n / 3) where !regionTint.isEmpty {
+                let fid = t < ids.count ? Int(ids[t]) : -1
+                let c = (vtx(mesh.indices[3 * t]) + vtx(mesh.indices[3 * t + 1]) + vtx(mesh.indices[3 * t + 2])) / 3
+                guard let col = tintOf(fid, c) else { continue }
+                for j in 0..<3 {
+                    let v = 3 * t + j
+                    out[v * 8] = col.x; out[v * 8 + 1] = col.y; out[v * 8 + 2] = col.z; out[v * 8 + 3] = col.w
                 }
             }
             tints = n > 0 ? out : nil
@@ -163,7 +189,7 @@ public struct FlexibleStagePage: View {
                 }
             }
         }
-        tints = overlay.tints(partFaceTints: faceTint, columnColours: colours)
+        tints = overlay.tints(partTint: tintOf, columnColours: colours)
         if shown.showsDent {
             var depths: [FlexFaceKey: [Double?]] = [:]
             for (k, vals) in shown.values {
@@ -614,7 +640,7 @@ struct FlexibleSquishPane: View {
         .onAppear { if model.selectedRegion == nil { model.selectedRegion = faces.first?.faceRegionID } }
     }
 
-    private func faceName(_ region: Int) -> String { "face \(FlexibleJob.face(regionID: region))" }
+    private func faceName(_ region: Int) -> String { model.name(region) }
 
     @ViewBuilder private func stepper(_ r: Int) -> some View {
         let i = faces.firstIndex { $0.faceRegionID == r } ?? 0

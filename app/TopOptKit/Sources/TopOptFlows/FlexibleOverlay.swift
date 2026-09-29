@@ -21,7 +21,10 @@ import TopOptKit
 
 public struct FlexibleOverlayFace {
     public let key: FlexFaceKey
-    public let face: Int            // B-rep / pseudo face id (region − regionBase)
+    /// The part faces the region covers, and its cuts (a split sector); the map replaces
+    /// exactly the triangles of those faces whose centroid passes the cuts.
+    public let faces: Set<Int>
+    public let cuts: [RegionCut]
     public let stack: FlexStackInfo
     /// Core's from_uv at every column centre (u_mm, v_mm), in column order.
     public let centres: [SIMD3<Double>]
@@ -35,21 +38,32 @@ public struct FlexibleOverlayMesh {
     public let keptTriangles: [Int]
     /// Per face: the first FLAT vertex of its quads (6 flat vertices per column).
     public let flatStart: [FlexFaceKey: Int]
+    /// Per kept part triangle: its face id and centroid (per-sector tinting).
+    public let keptFace: [Int]
+    public let keptCentroid: [SIMD3<Double>]
 
     /// The part's own mesh (minus the loaded faces) plus one quad per column of every face.
     public static func build(part: ViewerMesh, faces: [FlexibleOverlayFace]) -> FlexibleOverlayMesh {
-        let replaced = Set(faces.map { Int32($0.face) })
         var pos = part.positions
         var idx: [Int32] = []
         var fid: [Int32] = []
         var kept: [Int] = []
+        var keptFace: [Int] = [], keptCentroid: [SIMD3<Double>] = []
         let pfid = part.faceIDs
+        func vtx(_ i: UInt32) -> SIMD3<Double> {
+            let b = Int(i) * 3
+            return SIMD3(Double(part.positions[b]), Double(part.positions[b + 1]), Double(part.positions[b + 2]))
+        }
         for t in 0..<part.triangleCount {
-            let f = t < pfid.count ? pfid[t] : -1
-            if replaced.contains(f) { continue }
+            let f = t < pfid.count ? Int(pfid[t]) : -1
+            let c = (vtx(part.indices[3 * t]) + vtx(part.indices[3 * t + 1]) + vtx(part.indices[3 * t + 2])) / 3
+            // replaced by a loaded region's map: its face, on the sector's side of every cut
+            if faces.contains(where: { $0.faces.contains(f) && FaceRegionGeometry.inside(c, $0.cuts) }) { continue }
             kept.append(t)
+            keptFace.append(f)
+            keptCentroid.append(c)
             idx += [Int32(part.indices[3 * t]), Int32(part.indices[3 * t + 1]), Int32(part.indices[3 * t + 2])]
-            fid.append(f)
+            fid.append(Int32(f))
         }
         var flatStart: [FlexFaceKey: Int] = [:]
         var tri = kept.count
@@ -66,28 +80,31 @@ public struct FlexibleOverlayMesh {
                 }
                 // wound so the quad faces out of the part (along −load)
                 idx += [base, base + 2, base + 1, base, base + 3, base + 2]
-                fid += [Int32(f.face), Int32(f.face)]
+                let face = Int32(f.faces.min() ?? -1)
+                fid += [face, face]
                 tri += 2
             }
         }
         let mesh = ViewerMesh(vertices: pos, indices: idx, faceIDs: fid,
                               faceGeometry: part.faceGeometry, pseudoFaces: part.pseudoFaces)
         return FlexibleOverlayMesh(mesh: mesh, partFlatVertices: kept.count * 3, keptTriangles: kept,
-                                   flatStart: flatStart)
+                                   flatStart: flatStart, keptFace: keptFace, keptCentroid: keptCentroid)
     }
 
     // MARK: colour
 
-    /// One RGBA per column (nil ⇒ leave the quad uncoloured, i.e. hidden in clay).
-    public func tints(partFaceTints: [Int: SIMD4<Float>],
+    /// Part triangles tinted per triangle (`partTint(face, centroid)`, nil = clay), and one
+    /// RGBA per column of each loaded region's map.
+    public func tints(partTint: (Int, SIMD3<Double>) -> SIMD4<Float>?,
                       columnColours: [FlexFaceKey: [SIMD4<Float>]]) -> [Float] {
         let n = mesh.flat.vertexCount
         var out = [Float](repeating: 0, count: n * 8)
-        let ids = mesh.faceIDs
-        for v in 0..<partFlatVertices {
-            let t = v / 3
-            guard t < ids.count, let c = partFaceTints[Int(ids[t])] else { continue }
-            out[v * 8] = c.x; out[v * 8 + 1] = c.y; out[v * 8 + 2] = c.z; out[v * 8 + 3] = c.w
+        for t in 0..<keptFace.count {
+            guard let c = partTint(keptFace[t], keptCentroid[t]) else { continue }
+            for j in 0..<3 {
+                let v = t * 3 + j
+                out[v * 8] = c.x; out[v * 8 + 1] = c.y; out[v * 8 + 2] = c.z; out[v * 8 + 3] = c.w
+            }
         }
         for (k, start) in flatStart {
             guard let cols = columnColours[k] else { continue }
