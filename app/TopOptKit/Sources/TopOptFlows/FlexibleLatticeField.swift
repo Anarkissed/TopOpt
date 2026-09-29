@@ -32,9 +32,15 @@
 //               n = max(|q.x|, |0.5 q.x + 0.8660254 q.y|, |−0.5 q.x + 0.8660254 q.y|)
 //               wall = |d/2 − n| − t/2           (mod(x, y) = x − y·floor(x/y))
 //   LATTICE:    F = max(wall, dRegion, dPart, dSkin)          — the preview draws F
-//   EXPORT:     open = max(dRegion, dSkin)                     — ≤ 0 where lattice may be
-//               S = min(max(dPart, −open), F)                  — solid body ∪ lattice
+//   EXPORT:     S = min(max(dPart, −max(dRegion, dSkin)), F)  — solid body ∪ lattice
 //               (the solid outside the lattice region or inside the skin, plus the walls)
+//               ★ MAX, not min (exporter round, 2026-09-29): the lattice may only be where
+//               the point is in the region AND deeper than the skin, max(dRegion, dSkin) ≤ 0.
+//               As first written (min) the body was the part outside the region AND inside
+//               the skin: every skin was air and the part outside the region was hollow —
+//               the exported 30 × 30 × 12 box was a skinless gyroid (2 022 mm³ of 10 800,
+//               the skin's 2 592 mm³ missing). `solid` is the export's alone; the preview
+//               draws `lattice`, which never read it.
 //
 // ★ GRADING. Walls stay whole beads (R1); the gyroid's cell follows ρ continuously
 // (03-generators §3: L = 3.0915 t/ρ). A continuously varying k warps cells where ρ
@@ -149,8 +155,7 @@ public enum FlexibleLatticeField {
     /// the walls. Negative inside.
     public static func solid(at p: SIMD3<Float>, _ f: FlexibleLatticeInputs) -> Float {
         let dPart = f.partSDF.sample(p)
-        // ≤ 0 where the lattice may be: inside the region AND deeper than the skin
-        let open = Swift.max(dRegion(p, f), dSkin(p, f))
+        let open = Swift.max(dRegion(p, f), dSkin(p, f))   // ≤ 0 where the lattice may be
         return Swift.min(Swift.max(dPart, -open), lattice(at: p, f))
     }
 }
