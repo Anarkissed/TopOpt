@@ -88,15 +88,18 @@ public struct FlexibleStagePage: View {
             // design changes, never per frame (a whole-mesh rebuild at 30 fps on the M2 stand)
             if dents != nil { dentScale = Float(dentExaggeration * squishAmplitude) }
         }
-        .onChange(of: model.lattice != nil) { has in
-            // a fresh lattice is shown squishing what can be built — the densities it was made from
-            if has { model.step = .view3D; model.showBuildable = true; model.tab = .squish; xray = true }
+        // ★ A FRESH LATTICE — Generate AND Generate again (keyed on the generation, not on
+        // `lattice != nil`, which stayed true across a rebuild) — is shown squishing what can
+        // be built, the densities it was made from, in X-ray: the 3D view, no stamp.
+        .onChange(of: FlexibleLatticePreview.freshKey(model.lattice)) { gen in
+            if gen != nil {
+                model.step = .view3D; model.showBuildable = true; model.tab = .squish
+                model.checkStampShown = nil; xray = true
+            }
             refreshChannels()
         }
         .onChange(of: model.stacks.count) { _ in rebuildOverlay() }
         .onChange(of: xray) { _ in refreshChannels() }
-        // a new lattice (Generate again) or a build starting/ending changes the dent's source
-        .onChange(of: model.lattice?.generation) { _ in refreshChannels() }
         .onChange(of: model.latticeBuilding) { _ in refreshChannels() }
         .onReceive(model.objectWillChange.debounce(for: .milliseconds(16), scheduler: RunLoop.main)) { _ in
             refreshChannels()
@@ -115,7 +118,12 @@ public struct FlexibleStagePage: View {
     /// The generated lattice while it is DRAWN: X-ray on, and not being rebuilt. The map and
     /// the dent then come from its own depths (FlexibleShownValues).
     private var drawnLattice: FlexibleGeneratedLattice? {
-        xray && !model.latticeBuilding ? model.lattice : nil
+        xray && !model.latticeBuilding && latticeShows ? model.lattice : nil
+    }
+
+    /// The lattice owns the map (3D view, no stamp shown) — FlexibleLatticePreview.latticeShows.
+    private var latticeShows: Bool {
+        FlexibleLatticePreview.latticeShows(step: model.step, checkStampShown: model.checkStampShown)
     }
 
     /// 0 → 1 → 0 over one period (FlexAnimation's cosine ease, Results screen).
@@ -157,9 +165,11 @@ public struct FlexibleStagePage: View {
                 bodyAlpha: xray ? Self.xrayBodyAlpha : (dents != nil ? Self.dentBodyAlpha : 1),
                 // ★ THE LATTICE IS DRAWN IN THE MESH VIEW'S OWN PASSES (FlexibleLatticePass,
                 // a third G-buffer writer — the way Structural and Aesthetic draw theirs), only
-                // in X-ray, squished by the SAME flexScale as the dent.
+                // in X-ray, squished by the SAME flexScale as the dent (hidden, not torn down,
+                // out of X-ray or while a stamp / curve step owns the map).
                 flexibleLattice: FlexibleLatticePreview.inputs(xray: xray, lattice: model.lattice,
-                                                               building: model.latticeBuilding))
+                                                               building: model.latticeBuilding,
+                                                               latticeShows: latticeShows))
             FlexibleStageOverlays(model: model, proj: proj)
         }
         .coordinateSpace(name: FlexibleStageSpace.name)
@@ -482,7 +492,9 @@ struct FlexibleShownValues {
         // one set of numbers, and the drawn/buildable toggle cannot move one without the
         // other. The exaggeration is capped where the shader's 0.95 clamp would bind, so the
         // walls follow the dent all the way down.
-        if let g = drawnLattice {
+        // ★ ONLY WHERE THE LATTICE OWNS THE MAP (3D view, no stamp): a shown check stamp keeps
+        // "Dent under the stamp" and a curve step the live drawing, as before a lattice existed.
+        if let g = drawnLattice, FlexibleLatticePreview.latticeShows(step: m.step, checkStampShown: m.checkStampShown) {
             for k in g.keys {
                 guard let d = g.columnDepths[k] else { continue }
                 let noLattice = g.columnNoLattice[k] ?? []

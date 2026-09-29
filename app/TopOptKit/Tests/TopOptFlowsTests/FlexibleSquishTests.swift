@@ -81,7 +81,7 @@ final class FlexibleSquishTests: XCTestCase {
         let p = try Self.pad()
         let depths: [Double?] = p.stack.columns.map { _ in 1.5 }
         let face = FlexibleSquishFace(stack: p.stack, depthsMM: depths)
-        var worst = 0.0, checked = 0
+        var worst = 0.0, checked = 0, smallestMove = Double.infinity
         for s: Float in [0.5, 1, 3] {
             let disp = p.overlay.displacements(depths: [p.key: depths], stacks: [p.key: p.stack],
                                                partUVT: [p.key: p.geometry.partUVT])
@@ -89,15 +89,19 @@ final class FlexibleSquishTests: XCTestCase {
                 let entry = Self.point(face, iu: col.iu, iv: col.iv, t: Float(col.entryT) + 1e-4)
                 let moved = FlexibleSquishField.forward(entry, faces: [face], squish: s)
                 let lattice = Double(simd_dot(moved - entry, face.load))
+                // ★ BOTH MOVE: two zero displacements would agree too (the instrument must
+                // see a move) — the entry moves 1.5·s mm
+                smallestMove = min(smallestMove, lattice / Double(s))
                 for corner in Self.cornerDisplacements(disp, p, column: c) {
                     worst = max(worst, abs(corner * Double(s) - lattice))
                     checked += 1
                 }
             }
         }
-        print("FLEX-T14 uniform 1.5 mm press: max |dent corner·s − wall move| = \(worst) mm over \(checked) corners")
+        print("FLEX-T14 uniform 1.5 mm press: max |dent corner·s − wall move| = \(worst) mm over \(checked) corners; smallest wall move / s \(smallestMove) mm")
         XCTAssertGreaterThan(checked, 100)
         XCTAssertLessThanOrEqual(worst, 1e-4, "a uniform press must move the dent and the walls alike")
+        XCTAssertEqual(smallestMove, 1.5, accuracy: 1e-3, "the walls must actually move (1.5 mm at s = 1)")
     }
 
     /// Varied press (his buildable depths): each quad corner is the MEAN of the columns
@@ -243,7 +247,7 @@ final class FlexibleSquishTests: XCTestCase {
                                  generation: generation, topology: "gyroid", tempC: 220, settingsKey: 0)
     }
 
-    func testTheLatticeIsAnInputOnlyInXrayWithALattice() {
+    func testTheLatticeIsDrawnOnlyInXrayWithALattice() {
         let g = Self.generated()
         let shown = FlexibleLatticePreview.inputs(xray: true, lattice: g, building: false)
         XCTAssertEqual(shown?.token, 7)
@@ -251,14 +255,72 @@ final class FlexibleSquishTests: XCTestCase {
         XCTAssertEqual(shown?.faces, g.faces)
         XCTAssertEqual(FlexibleLatticePreview.inputs(xray: true, lattice: g, building: true)?.hidden, true,
                        "a rebuild hides the superseded lattice (like latticeHidden during a rebake)")
-        XCTAssertNil(FlexibleLatticePreview.inputs(xray: true, lattice: nil, building: false))
-        // ★ RED CONTROL: out of X-ray the lattice is never an input
-        XCTAssertNil(FlexibleLatticePreview.inputs(xray: false, lattice: g, building: false))
+        XCTAssertNil(FlexibleLatticePreview.inputs(xray: true, lattice: nil, building: false), "no lattice: torn down")
+        // ★ OUT OF X-RAY THE LATTICE IS HIDDEN, NOT TORN DOWN: the same token re-shows without
+        // re-compiling the pass or re-uploading its volumes (every View tap did both)
+        let off = FlexibleLatticePreview.inputs(xray: false, lattice: g, building: false)
+        XCTAssertEqual(off?.hidden, true, "control: out of X-ray the walls never draw")
+        XCTAssertEqual(off?.token, 7, "…but the pass keeps the same lattice")
+        // ★ A STAMP SHOWN, OR A CURVE BEING DRAWN: the map is not the lattice's, so neither
+        // are the walls (they would squish by other numbers than the dent)
+        XCTAssertEqual(FlexibleLatticePreview.inputs(xray: true, lattice: g, building: false, latticeShows: false)?.hidden, true)
+        XCTAssertTrue(FlexibleLatticePreview.latticeShows(step: .view3D, checkStampShown: nil))
+        XCTAssertFalse(FlexibleLatticePreview.latticeShows(step: .view3D, checkStampShown: UUID()))
+        XCTAssertFalse(FlexibleLatticePreview.latticeShows(step: .curveX, checkStampShown: nil))
+        XCTAssertFalse(FlexibleLatticePreview.latticeShows(step: .curveY, checkStampShown: nil))
         // equality is by token + hidden, so a redraw never re-uploads the same lattice
         XCTAssertEqual(FlexibleLatticePreview.inputs(xray: true, lattice: g, building: false),
                        FlexibleLatticePreview.inputs(xray: true, lattice: Self.generated(faces: []), building: false))
         XCTAssertNotEqual(FlexibleLatticePreview.inputs(xray: true, lattice: g, building: false),
                           FlexibleLatticePreview.inputs(xray: true, lattice: Self.generated(generation: 8), building: false))
+    }
+
+    /// ★ "GENERATE AGAIN" IS A FRESH LATTICE TOO. The page's reset (3D view, buildable,
+    /// Squish tab, no stamp, X-ray on) is keyed on `freshKey`: a new generation must change
+    /// it. RED CONTROL: the old key (`lattice != nil`) stays `true` across a rebuild, so the
+    /// reset never ran again and, with X-ray off, the new lattice was never drawn.
+    func testGenerateAgainIsAFreshLattice() {
+        let first = Self.generated(generation: 7), again = Self.generated(generation: 8)
+        XCTAssertNotEqual(FlexibleLatticePreview.freshKey(first), FlexibleLatticePreview.freshKey(again))
+        XCTAssertNil(FlexibleLatticePreview.freshKey(nil))
+        XCTAssertEqual(FlexibleLatticePreview.freshKey(first), FlexibleLatticePreview.freshKey(Self.generated(generation: 7)))
+        let oldKey: (FlexibleGeneratedLattice?) -> Bool = { $0 != nil }
+        XCTAssertEqual(oldKey(first), oldKey(again), "control: the retired key cannot see Generate again")
+    }
+
+    /// ★ A STAMP OR A CURVE STEP WINS OVER THE LATTICE'S MAP. With the lattice drawn, tapping
+    /// a check stamp must still show "Dent under the stamp", and a curve step the live drawn
+    /// map (no dent) — at 8046e80a they did; the lattice branch had taken both over.
+    @MainActor
+    func testAStampOrACurveStepIsNotTakenOverByTheLattice() throws {
+        let p = try Self.pad()
+        let face = FlexibleFaceSettings(faceRegionID: 101, weightKg: 30, deepestMM: 3)
+        let depths = FlexibleSquishFace.buildableDepths(stack: p.stack, design: p.design)
+        let g = Self.generated(faces: [FlexibleSquishFace(stack: p.stack, depthsMM: depths)], keys: [p.key],
+                               depths: [p.key: depths], extentMM: max(p.stack.uExtentMM, p.stack.vExtentMM))
+        let stamp = FlexibleCheckStamp(faceRegionID: 101, stamp: FlexibleStampPlacement(
+            source: .library("palm"), widthMM: 20, lengthMM: 20, centreU: 50, centreV: 50, weightKg: 5, rigid: false))
+        let n = p.stack.columns.count
+        let check = FlexStampCheckInfo(ok: true, refusal: nil, depthMM: (0..<n).map { $0 % 3 == 0 ? 0.7 : nil },
+                                       status: [String](repeating: "ok", count: n), pressedColumns: n / 3,
+                                       extrapolatedColumns: 0, beyondDataColumns: 0, rigidUnlatticedColumns: 0,
+                                       maxDepthMM: 0.7, rigidDepthMM: 0, stampWidthMM: 20, localCellMM: 4,
+                                       narrow: false, forceOffFaceN: 0, offFace: false,
+                                       tier: FlexTier(tier: "estimate", band: 0.3, why: ""))
+        var inp = FlexibleShownValues.Inputs(loadedFaces: [face], stacks: [p.key: p.stack], designs: [p.key: p.design],
+                                             liveS: [p.key: [Double](repeating: 0.5, count: n)], checks: [stamp.id: check],
+                                             checkStamps: [stamp], checkStampShown: stamp.id, step: .view3D,
+                                             showBuildable: true)
+        let withStamp = FlexibleShownValues(inp, drawnLattice: g)
+        XCTAssertEqual(withStamp.label, "Dent under the stamp", "a shown stamp must keep its own dent")
+        inp.checkStampShown = nil
+        inp.step = .curveX
+        let drawing = FlexibleShownValues(inp, drawnLattice: g)
+        XCTAssertEqual(drawing.label, "What you drew")
+        XCTAssertFalse(drawing.showsDent, "a curve step shows the drawing, never an animated dent")
+        // ★ RED CONTROL: in the 3D view with no stamp, the lattice's own map (the rule still holds)
+        inp.step = .view3D
+        XCTAssertEqual(FlexibleShownValues(inp, drawnLattice: g).label, "What the lattice was built from")
     }
 
     @MainActor

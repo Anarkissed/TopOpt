@@ -89,8 +89,28 @@ public enum FlexibleLatticePreview {
     /// plane with a heat map for the dent"): out of X-ray the body is opaque and the walls
     /// would be marched for nothing. Hidden while a new lattice builds, so the superseded
     /// one does not draw (the octet's `latticeHidden` rule during a rebake).
-    public static func inputs(xray: Bool, lattice: FlexibleGeneratedLattice?, building: Bool) -> FlexibleLatticeLayerInputs? {
-        guard xray, let g = lattice else { return nil }
-        return FlexibleLatticeLayerInputs(lattice: g.inputs, faces: g.faces, token: g.generation, hidden: building)
+    /// ★ HIDDEN, NOT nil, OUT OF X-RAY: nil tears the pass down, and turning X-ray back on then
+    /// recompiled its library and re-uploaded its volumes on the main thread — every View
+    /// tap. A hidden pass leaves #354's frame byte-identical (T12) and re-shows by token.
+    /// nil only when there is no lattice at all.
+    /// `latticeShows`: the lattice decides the map (`latticeShows(step:checkStampShown:)`);
+    /// while a stamp or a curve step owns the map, the walls hide rather than squish by
+    /// numbers the dent is not drawn with.
+    public static func inputs(xray: Bool, lattice: FlexibleGeneratedLattice?, building: Bool,
+                              latticeShows: Bool = true) -> FlexibleLatticeLayerInputs? {
+        guard let g = lattice else { return nil }
+        return FlexibleLatticeLayerInputs(lattice: g.inputs, faces: g.faces, token: g.generation,
+                                          hidden: building || !xray || !latticeShows)
     }
+
+    /// The generated lattice owns the map, the dent and the walls only in the 3D view with no
+    /// check stamp shown. A stamp's dent ("Dent under the stamp") and a curve being drawn
+    /// ("What you drew") keep the map they had before a lattice existed.
+    public static func latticeShows(step: FlexibleStageModel.Step, checkStampShown: UUID?) -> Bool {
+        step == .view3D && checkStampShown == nil
+    }
+
+    /// What the page's "a fresh lattice is shown" reset is keyed on: the GENERATION, so
+    /// "Generate again" is fresh too (a `lattice != nil` key stayed true across a rebuild).
+    public static func freshKey(_ lattice: FlexibleGeneratedLattice?) -> Int? { lattice?.generation }
 }
