@@ -54,16 +54,22 @@
 - **Everything is saved and undoable.** Every edit reaches `project.json` within 0.8 s. Undo
   and Redo are on the page.
 
-**Overnight round (below).** Added since the first handoff:
+**Morning round (below) — this is the current state.** Since the first handoff:
 
-- the dent reads through a 30 % body;
-- split faces are loaded faces;
-- **Generate lattice** with the squish on repeat;
-- **Export** (STL; G-code "not ready yet").
+- **X-ray view.** The Flexible page has the position gizmo top-right and a **view button**
+  under it. X-ray turns the part into a ghost (faint face-on, lit toward its outline) and
+  keeps the bent heat-map plane fully opaque, so the dent reads.
+- **The lattice is drawn inside the part's own renderer**, the way the Structural and
+  Aesthetic previews are: marched as an SDF into the same G-buffer, lit by the same shade,
+  at the same 1152 px cap. In X-ray you see it through the ghost; it never paints over the
+  heat map. It squishes on repeat with the dent, on the same number.
+- **Split faces** are loaded faces (each half its own design); the two halves' dents meet
+  along the cut.
+- **Exports wait on core.** The app's STL exporter is gone; the Export modal says STL and
+  G-code both come from core's Flexible lattice.
 
-Three things need you: the STL size (1.3 GB for the pad at Standard), whether the lattice
-should be occluded by the body, and a look on the device. The simulator launch was refused
-tonight, so none of it has been seen on a screen.
+Needs you: a look in the simulator (the launch is refused to me — nothing has been seen on a
+device), and the rulings listed under "Morning round → Your call".
 
 **What is next.**
 
@@ -174,8 +180,9 @@ converted with `Array(...)` once (`FLEX_TIMING` probe). After the fix:
 | `LatticeStageModeModal.swift` | +9 −2 | `onChooseFlexible: (() -> Void)?` (default nil) + `flexibleFocused` state + init parameter (L25–32); one `FlexibleStageCard` line in the card HStack (L75); max width 980 when three cards (L80). `LatticeStageMode` is **not** touched. |
 | `WorkspacePlaceholder.swift` | +33 −3 | `showFlexiblePage` state (L673); joins `fullScreenPageUp` (L617); `latticeStageModeNeeded` also requires `flexible == nil` (L624); the modal call gains `onChooseFlexible:` (L1373–1376); `FlexibleStageSheet` + `FlexibleStagePage` presented next to the mode sheet (L1384–1394); `FlexibleStageChip` in the title slot (L2790–2792); one `.onChange(of: showLatticeWizard)` on the always-mounted background that sends the Settings door to the Flexible page under Flexible (L729–732). |
 | `project.pbxproj` | +12 | three file refs, three build files, group entries, Resources entries (IDs `F1E0…`). |
-| `TopOptBridge/include/module.modulemap` | +2 | `header "FlexibleBridge.hpp"`; overnight: `header "FlexibleLattice.hpp"`. |
-| `MetalMeshView.swift` (overnight) | +4 −1 | the dent's opaque flag: `float solid;` in `VOut` (L426), `o.solid = in.flags.y;` (L487), fragment alpha `in.solid > 0.5 ? 1.0 : bodyAlpha` (L683–684). |
+| `TopOptBridge/include/module.modulemap` | +1 | `header "FlexibleBridge.hpp"`. (The overnight `FlexibleLattice.hpp` line was removed with the exporter.) |
+| `MetalMeshView.swift` | see Morning round | the dent's opaque flag (flags.y), the X-ray ghost (flags.z), and the Flexible lattice as a third G-buffer writer: every line is listed under "Morning round → Hook lines". |
+| `SmoothingPageRound2Tests.swift` (test) | +2 −1 | the pinned `fullScreenPageUp` text includes `showFlexiblePage` (+ one comment line). |
 
 ## Test evidence (raw, pasted, unedited)
 
@@ -251,6 +258,14 @@ After the sync, with the hook-adjacent suites
 PR (draft): https://github.com/Anarkissed/TopOpt/pull/362 · CI: the PR's checks tab.
 
 ## Overnight round (2026-09-29, while you slept)
+
+> **Partly superseded by the Morning round below.** The separate lattice layer
+> (`FlexibleLatticeRenderer.swift`) and the STL exporter (`flexible_lattice.cpp`,
+> `FlexibleLatticeExport.swift`) described here are REMOVED; the lattice is now drawn inside
+> MeshRenderer, and exports wait on core. The field's gyroid is now a ladder (see Morning).
+> The evidence PNGs this section names (`lattice_pad_*`, `lattice_split_pad_*`,
+> `page_composite_*`) were deleted with the layer. The split faces, Generate gate and dent
+> sections still hold.
 
 ### In plain words
 
@@ -503,6 +518,252 @@ under "Full suite" below.
 6. **The squish is the 02 §6 linear ramp.** It is a picture of the design, not a
    simulation.
 
+## Morning round (2026-09-29) — X-ray view, and the lattice drawn inside the part's renderer
+
+**This is the current state.** The separate lattice layer and the STL exporter from the
+overnight round are gone.
+
+### Your rulings, verbatim, and where they live
+
+| ruling | where |
+|---|---|
+| "We are building this App first, so I would first look at the way App does the lattice preview and build upon that." | The lattice is drawn inside MeshRenderer like the Structural and Aesthetic previews (`FlexibleLatticePass.swift`, `MeshRenderer+FlexibleLattice.swift`). |
+| "The exports aren't supposed to happen until core gets to it. So we don't need to worry about exports or sizes. I am simply looking for a fast preview via an SDF - like the preview in the other two sections of the lattice stage" | Exporter removed (recoverable at `85b1bdc0`). `FlexibleExportSheet` is static: two disabled cards, "Not ready yet — comes from core's Flexible lattice". |
+| "Where is the ghost version with a dent and heat map?" / "I am not able to see through the model. Imagine an "X-ray vision" with a plane with a heat map for the dent. Make it a "view" button below the position gizmo (which should be on every screen that had a 3d object)" | `FlexibleViewControls.swift`: the gizmo (shared size and inset) and, under it, the workspace's view-button (same metrics and tokens) toggling X-ray. |
+| "I'd like the x-ray to look more ghostly for this version with the bent plane showing the dent" | MetalMeshView ghost hook (tint flags.z): alpha 0.04 face-on, rising by 0.5·(1−N·V)^2.2 toward the outline, in DS accentCyan. The dented map (flags.y) stays opaque. |
+
+### What you see (X-ray on)
+
+- **The part** is a ghost, and **the loaded face** is an opaque heat-map plane that bends
+  with the dent.
+- **The lattice** shows inside through the ghost. It is lit by the octet's own deferred shade
+  (`lsdf_shade`) and coloured by density: `LatticeStructureColour.pale` → the Flexible
+  accent (DS accentGreen).
+  - ★ The octet's dense end, `LatticeStructureColour.interior` (0.49, 0.42, 0.86), reads
+    violet, so it is not used: never purple.
+- **The squish** plays on repeat after Generate (rest → full design load → rest, 2.4 s).
+  The walls and the plane move together.
+- **Toggling:**
+  - X-ray off → the lattice is hidden. It is not torn down, so turning X-ray back on
+    recompiles nothing.
+  - Generate / Generate again → X-ray on.
+- **While a check stamp or a curve step owns the map**, the walls hide, so that map is not
+  contradicted.
+- Evidence: `inpass_xray_pad_gyroid_{rest,half,full}.png` (C1's pad, 30 kg, ×3).
+
+### How it is drawn: a third G-buffer writer
+
+- **The march.** `FlexibleLatticePass` marches `FlexibleLatticeField` into MeshRenderer's
+  depth-prepass G-buffer: eye-Z, eye normal, and albedo with alpha as the mask, plus depth,
+  with the same attachments and the same `.less`+write depth state. It runs after the octet
+  and organic writers. The main pass's `lsdf_shade` then lights it, exactly as it lights
+  the octet.
+- **Two gates, active only while a Flexible pass is in frame:**
+  1. The see-through body stays out of the G-buffer. Otherwise the 0.04 ghost would
+     depth-reject every wall.
+  2. The body draw is re-issued after the shade, with neutral AO. The ghost then blends over
+     the walls, the ghost's back faces behind a wall fail depth, and the opaque map replaces
+     the walls behind it.
+- **One number.** The lattice's squish is `MeshRenderer.flexScale`, the dent's own scale,
+  driven by the page's single 30 fps clock.
+- **Speed (Stage B, applied because the first Release frame was 22–24 ms):**
+  - (part SDF, skin) are stored as half-float, hardware-filtered; ρ stays exact.
+  - The march alone uses range-reduced `fast::sincos`; hits, normals and probes stay
+    precise.
+  - GPU parity with the Swift field is about 1 µm (stated bound 5 µm).
+- **Limit.** At most 4 loaded faces; Generate refuses more with one sentence.
+
+### The gyroid changed: a ladder of true gyroids
+
+- **The fault.** The overnight field was `q = k(p)·p`, with p in absolute model
+  coordinates. That warps the cells by p·∇k, so the verifier found your symmetric pad's
+  lattice lopsided: 1017 vs 2358 wall crossings at mirrored ends.
+- **The fix.** Rungs `Lmin·2^(j/4)`, 19 % apart, each a true gyroid with one k. Neighbouring
+  rungs blend their sheet functions over the middle half of each step, and the gradient
+  includes the blend weight's own term.
+- **The result:**
+  - the mirror gap is 4.8 % / 0.7 %;
+  - cell ratios against a constant-cell gyroid are 1.05 / 0.99 and 1.10 / 1.11;
+  - the analytic gradient matches a central difference to 0.7 % at p95.
+- **For you to judge.** Inside a blend the walls are a hybrid of two gyroids. The blend
+  width and rung spacing are two constants: `ladderStepsPerOctave`, and
+  `blendLo`/`blendHi`.
+
+### Split faces: the seam
+
+- **The fault.** The two halves' dented maps stepped apart at the cut: 0.315 mm at full
+  load, with dark cracks.
+- **The fix.** A corner shared by two loaded regions now averages both regions' columns.
+  The step is 0.0 mm (control: 0.315 mm), and a whole face is unchanged bit for bit.
+- Evidence: `inpass_xray_split_pad_10kg_25kg_{rest,full}.png`.
+
+### Hook lines in #354's files (this round)
+
+**`MetalMeshView.swift`** (cumulative since `a6fa2702`, including the overnight dent and
+ghost hooks):
+
+- **Shader** (+13 −1):
+  - `float solid;` and `float ghost;` in `VOut`;
+  - `o.solid = in.flags.y;` and `o.ghost = in.flags.z;`;
+  - in the fragment tail: alpha 1 on the map, and the ghost's rim-lit alpha/colour
+    (6 lines).
+- **Renderer:**
+  - `var flexibleLattice: FlexibleLatticePass?` (+1);
+  - `wantsLattice` also true for the Flexible pass (1 edited);
+  - `let ghostAfterLattice = flexibleGhostAfterLattice(...)` (+1);
+  - the body draw becomes `if !ghostAfterLattice { countedDraw(...) }` (1 edited);
+  - the re-issued ghost after the lattice shade (+7);
+  - `gbufferSize` guard (1 edited);
+  - `shellVisible = bodyAlpha > 0.004 && !flexibleGhostOutOfGBuffer` (1 edited);
+  - the prepass guard (1 edited);
+  - the third writer before `penc.endEncoding()` (+5);
+  - the `latticeMaskDump` guard (1 edited).
+- **Inputs:**
+  - `MeshViewInputs.flexibleLattice` (+1);
+  - the iOS and macOS inits (+1, 1 edited each);
+  - `Coordinator.apply`: `if renderer.applyFlexibleLattice(inputs.flexibleLattice, device: view.device) { dirty = true }` (+1).
+- **Inertness.** Every gate reduces to #354's expression when the pass is nil, not ready or
+  hidden. A verifier compared 18 octet and organic frames recorded before and after: they
+  are byte-identical. T12 proves the same in CI.
+
+**Other files:**
+
+- **`SmoothingPageRound2Tests.swift` (#354 test file)** (+2 −1): the pinned
+  `fullScreenPageUp` text now includes `showFlexiblePage`, plus a comment line.
+- **`module.modulemap`:** the overnight `header "FlexibleLattice.hpp"` is removed again.
+  This PR's modulemap hook is back to S1's single `FlexibleBridge.hpp` line.
+- **Untouched:** `LatticeSDFMetal.swift`, `UnifiedShading.swift`, `LatticeStageMode`,
+  core/. `WorkspacePlaceholder.swift` and `LatticeSettings.swift` gained nothing this round.
+
+### Added / removed
+
+- **Added:**
+  - sources: `FlexibleLatticePass.swift`, `FlexibleSquish.swift`,
+    `MeshRenderer+FlexibleLattice.swift`, `FlexibleViewControls.swift`;
+  - tests: `FlexibleInPassCompositeTests` (10), `FlexibleLatticePassTests` (10),
+    `FlexibleSquishTests` (10), `FlexibleLatticeGradingTests` (2),
+    `FlexibleOverlaySeamTests` (2), `FlexibleLatticePassPerfTests` (1, Release only),
+    and `FlexibleLatticeFixtures`.
+- **Rewritten:** `FlexibleLatticeShader.swift` (G-buffer source).
+- **Removed:**
+  - `FlexibleLatticeRenderer.swift` and `FlexibleLatticeGlue.swift`;
+  - `FlexibleLatticeExport.swift`, `flexible_lattice.cpp`, `FlexibleLattice.hpp`, and
+    `FlexibleLatticeField.solid(at:)`;
+  - the test files `FlexibleLatticeExportTests`, `FlexibleLatticeRendererTests` and
+    `FlexibleLatticeRendererCoverageTests`.
+- **Deleted test functions (23)**, all either for removed code or ported:
+  - Exporter: the C++ agreement tests (to 1e-4, and bit-exact), the export's
+    closed/outward/volume, determinism, cancel, two layers held, refusals, and the solid's
+    skin/body.
+  - Standalone layer: shader compiles, uniform layout, GPU probe, squish probe, pullback,
+    offscreen coverage, zero squish, fine-reference march, frame time, frames only while
+    looping, lands where it projects, region/skin terms.
+    - All except "frames only while looping", which has no MTKView now, are ported as
+      T1–T11 in-pass.
+  - Evidence probes: the two old opt-in probe tests and `testWriteEvidencePNGs`, replaced
+    by `testDrawThePagesXrayFrameInPass`.
+
+### Tests (raw)
+
+All Flexible suites plus #354's renderer and page suites (UnifiedShading,
+LatticePreviewBodyAlpha, LatticeGBufferMask, LatticeThreeAlgorithmsDraw,
+OrganicCapsuleImpostor, LatticeSDFAlignment, Viewer, ViewerVisibilityRegression,
+StageBackdrop, SmoothingPageRound2, LatticeStageMode, LatticeSettingsPersist), on HEAD after
+the colour change:
+```
+	 Executed 197 tests, with 6 tests skipped and 0 failures (0 unexpected) in 254.856 (254.874) seconds
+```
+The 6 skipped are the opt-in evidence and timing probes and the Release-only frame budget.
+
+**Every comparison has a control that goes red.** A verifier also switched on 15 real code
+mutations one at a time.
+
+- **What the tests catch:**
+  - the ghost put back in the G-buffer → T5/T6/T7 red;
+  - the body drawn before the shade → T6/T7/T8;
+  - lattice AO on the heat map → T8;
+  - the squish fixed at 1 or 0 → T9;
+  - the ghost dropped → T6/T7/T8.
+- **Gaps closed in the fix round:**
+  - the march view's trig (T11 now 4168 px against a bar of 526);
+  - the G-buffer normal (a model-space normal gives 1.07–1.62 rad);
+  - the shader's 0.95 squish clamp (13 mm);
+  - the 1152 px cap hook (2048 × 2048);
+  - the `Coordinator.apply` line;
+  - the ghost's far side at depth `.always` (43859 px).
+- **Known instrument gap:** a colour ramp read at the deformed point is invisible to the
+  fixtures. It is cosmetic.
+
+### Frame budget (T16, Release)
+
+Command: `swift test -c release -Xswiftc -enable-testing --filter FlexibleLatticePassPerfTests`.
+Whole frame at 1152 px, MSAA 4×, X-ray config, on the M2 Pro.
+
+| frame | median |
+|---|---|
+| gyroid fully squished (s = 1), five runs | 16.09 / 13.19 / 14.45 / 12.94 / 16.35 ms |
+| gyroid s = 0 | 7.5–8.8 ms |
+| honeycomb | 3.3–8.0 ms |
+| hidden | ~1 ms |
+
+- Two of the five gyroid runs miss 16 ms by 0.09 and 0.35 ms. ★ All were measured with
+  about 40 % background GPU load from other apps and sessions, so re-measure on an idle GPU
+  and on the iPad.
+- The 1152 px cap is untouched.
+- The octet cube in the same process took 67–83 ms. That is only a comparison bar (a
+  different scene from the handoff's 12.5 ms), but worth a look by #354's owner.
+
+### Evidence (`docs/handoffs/evidence/2026-09-29-flexible-screens/`)
+
+These are the page's frame, rendered offscreen by MeshRenderer with the Flexible pass. They
+are NOT device screenshots. The part is settled as on the page.
+
+- **C1's pad** (top face 30 kg, the 0.3–1–0.3 curves, dent ×3; honeycomb ×4):
+  - `inpass_xray_pad_gyroid_{rest,half,full}.png`;
+  - `inpass_xray_pad_honeycomb_{rest,half,full}.png`;
+  - poke-through: 0 map px in every frame.
+- **Skin off** on the top face: `inpass_xray_pad_gyroid_skin_off_{half,full}.png`.
+  Wall tops speckle the map on 16.6 % / 16.1 % of its px, with 5 / 32 px outside the
+  silhouette (your call, below).
+- **Split pad** (halves at 10 kg and 25 kg): `inpass_xray_split_pad_10kg_25kg_{rest,full}.png`.
+  0 px poke-through, and the halves meet along the cut.
+- **The X-ray ghost before Generate** (no lattice): `xray_ghost_dent_pad_{rest,full}.png`.
+- **Regenerate** with
+  `FLEX_EVIDENCE_DIR=<dir> swift test --filter FlexibleLatticeEvidenceProbe`.
+
+### Your call
+
+1. **Wall colours.** Pale → Flexible green. The octet's dense end would be violet, which
+   breaks never-purple. Keep green, or pick another existing token?
+2. **Skin-off faces.** The walls move per column while the map's corners average their
+   neighbours, so wall tops show through the opaque map (16 % of its px at ×3, full). The
+   squish model is unchanged. Accept it, or should the walls follow the map's interpolated
+   surface?
+3. **The ladder gyroid.** Please judge it on your restored project (blend width and rung
+   spacing are two constants).
+4. **More than 4 loaded faces?** Generate refuses them today. Raising the limit to 8 is a
+   small change in new files.
+5. **The map under X-ray.** While the lattice shows, the map has no AO or crease lines of its
+   own, and there is no floor shadow under the 0.04 ghost (pre-existing).
+6. **The map's per-column flat colours** read as a mosaic up close. And would iso-depth lines
+   or a fixed colour scale make the dent read better in a still frame?
+7. **The wall-profile editor's small 3D card** has no gizmo. The standard 210 pt gizmo would
+   cover the card. Add a small one, or is your rule for full-screen 3D views only?
+
+### Not done / warnings
+
+- **Nothing here has been seen on a device.** The simulator launch is refused to me by the
+  permission check. The build is INSTALLED on my simulator 147E56A1 (binary 09:23; strings
+  `flx_gbuffer` ×3, `flexible-view-xray` ×1). Your M2 project and the seeded "Pad split top
+  (Flexible)" project are on it.
+- **For #354's owner (pre-existing):** `Coordinator.apply` re-uploads `flexDisplacements`
+  only when `dirty || !appliedFlex`, so a new dent with unchanged tints is not uploaded. The
+  fix is a content key there, a #354 hook not taken.
+- **Commits that don't build alone.** Intermediate commits `760fc53c`, `cadaf920`,
+  `9d8ed40f` and `a3318fdc` were not built individually, and `0191aa6a` (overnight) does
+  not build alone. The tip builds for macOS and the iOS simulator. Keep this in mind if you
+  bisect.
+
 ## What I did NOT do
 
 1. **Simulator-driven SVG/image import.** The file picker is wired, and the import and
@@ -537,19 +798,24 @@ under "Full suite" below.
 
 ## Full suite
 
-`swift test` (whole package), started 02:30 on `dcae9a03`, with its own scratch path. It is
-slow tonight because other sessions' suites are running on the same machine.
+`swift test` (whole package) on `dcae9a03` (before the overnight round), own scratch path,
+03:04 → 06:34 (other sessions' suites shared the machine). Raw:
+```
+Test Suite 'All tests' failed at 2026-09-29 06:34:29.891.
+	 Executed 2588 tests, with 36 tests skipped and 13 failures (0 unexpected) in 12572.089 (12572.356) seconds
+```
+13 assertion failures in 8 tests:
 
-**Status at the time of writing: STILL RUNNING.** 690 test cases have passed. The failures so
-far are all known pre-existing ones:
-```
-TopOptFlowsTests.AppModelTests testReopenedThreeMFProjectReimportsTheStlWorkingCopy
-TopOptFlowsTests.AppModelTests testThreeMFImportNormalisesToStlWorkingCopyAndKeepsProvenance
-TopOptFlowsTests.AppModelTests testThreeMFImportOptimisesOnDeviceEndToEnd
-TopOptFlowsTests.LatticeCellGradingTests testGradingChangesTheRenderedLattice
-```
-The three `AppModelTests` 3MF tests fail because a worktree's macOS core has no lib3mf.
-`LatticeCellGradingTests` also fails on #354's own head (see above).
+| test | status |
+|---|---|
+| `AppModelTests` × 3 (3MF) | pre-existing: the worktree's macOS core has no lib3mf |
+| `LatticeCellGradingTests.testGradingChangesTheRenderedLattice` | pre-existing: identical on #354's head `8105522b` with its own core (moved 298 vs 500) |
+| `LatticeSimSolveTriggerTests.testTheTriggerRefusesOnAllThreeGrounds` | pre-existing: the test reads the first 900 characters of `startStressSolveIfNeeded`; #354's own DIAG lines put `latticeSim.run(ctx)` at offset 1073 on both `8105522b` and HEAD |
+| `OrganicSampleCubeTests.testThickerIsLiveAndNeverRetraces` | pre-existing (#354's known list) |
+| `OrganicVariantCacheTests.testTheKeyIgnoresThicknessAndFollowsCoreAndTopology` | pre-existing (#354's known list) |
+| `SmoothingPageRound2Tests.testWhileAPageIsUpTheWorkspaceDrawsNoChromeOfItsOwn` | **MINE, fixed** in `2ff7fed7`: it pins `fullScreenPageUp`'s exact text, which my S1 hook extended with `showFlexiblePage` (the one-predicate rule the test asks a new page to follow). Now green. |
+
+The suite rewrote other tasks' tracked evidence (`docs/handoffs/assets/`, `evidence/`); restored.
 
 ## Blocked
 None. No core brief was needed: every number on screen comes from the C1 bridge contract.
