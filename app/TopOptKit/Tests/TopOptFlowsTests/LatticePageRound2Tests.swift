@@ -248,9 +248,13 @@ final class LatticePageRound2Tests: XCTestCase {
                 // the difference were the artifact. Core's strict parser accepts the
                 // key (`job.cpp`), so the assertion stays exact set-equality against
                 // what core allows; it is the allowed set that grew by one.
+                // ★ And by two more (95754820, 2026-09-28): `frame_u` / `frame_w`, the
+                // world axes the outline was drawn against, so core places it by the
+                // app's frame instead of re-deriving one that agreed only by
+                // construction. Core accepts both, and only together (`job.cpp`).
                 XCTAssertEqual(Set(geom.keys),
                                ["origin", "normal", "half_u_mm", "half_w_mm", "depth_mm",
-                                "outline_uv"])
+                                "outline_uv", "frame_u", "frame_w"])
                 XCTAssertGreaterThan(try XCTUnwrap(geom["depth_mm"] as? Double), 0)
             }
         }

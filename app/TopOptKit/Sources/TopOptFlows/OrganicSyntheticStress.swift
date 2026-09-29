@@ -58,9 +58,9 @@ public enum OrganicSyntheticStress {
     /// core's own units (`max(fraction, mpa / peak)`) so `synthesize_focal_stress` runs
     /// exactly as written.
     ///
-    /// ★ THE RUN STILL PASSES 0.02 AND HAS NO KEY FOR THIS (run_job.cpp:4118). Until
-    /// core takes one, the preview synthesises on walls the run will not — named in the
-    /// handoff rather than hidden here.
+    /// ★ THE RUN APPLIES THE SAME FLOOR: it passes 0.02 AND `kOrganicSyntheticDeadFloorMPa`
+    /// (0.005, organic_lattice.hpp) to `synthesize_focal_stress`, so the preview and the
+    /// run call the same walls dead.
     public static let deadMPaFloor = 0.005
 
     /// A wall is offered foci when it is under the loaded share OR under this absolute
@@ -203,15 +203,17 @@ public enum OrganicSyntheticStress {
     /// The same Voigt convention core uses (true shear).
     /// ★★ A DEAD WALL IS DEAD AS A WHOLE (his 2026-09-18 night: the front wall's struts
     /// filled half its depth, with horizontals waiting for verticals that never came).
-    /// Core synthesises PER VOXEL, blending the focal field with the real one by the real
-    /// magnitude between ¼·thr and thr — so a wall whose stress hovers just under the
-    /// threshold (his front wall: p99 0.0041 against thr 0.005, max 0.0056) is HALF
-    /// synthetic and half rounding-noise directions, and the tracer follows the noise.
+    /// Core USED TO synthesise per voxel, blending the focal field with the real one by
+    /// the real magnitude between ¼·thr and thr — so a wall whose stress hovered just under
+    /// the threshold (his front wall: p99 0.0041 against thr 0.005, max 0.0056) came out
+    /// HALF synthetic and half rounding-noise directions, and the tracer followed the noise.
     /// Here a wall whose p99 is at or under core's own threshold has its real tensor ZEROED
-    /// over every voxel, so core's blend sees nothing to mix in and the whole wall takes
-    /// the focal field. A wall above the threshold is untouched (his back wall: p99
-    /// 0.020, real and coherent). Returns what it did, per region, for the log.
-    /// ★ PARITY: the run must apply the same whole-wall rule (parity brief).
+    /// over every voxel, and the whole wall takes the focal field. A wall above the
+    /// threshold is untouched (his back wall: p99 0.020, real and coherent). Returns what
+    /// it did, per region, for the log.
+    /// ★ PARITY: core #358 took the same whole-wall rule (the wall's p99, inclusive; the
+    /// real field's weight is 0 over a dead wall), so its report is whole-or-nothing and
+    /// `blended` is always 0.
     public struct WholeWallVerdict: Equatable {
         public let regionID: Int
         public let p99: Double

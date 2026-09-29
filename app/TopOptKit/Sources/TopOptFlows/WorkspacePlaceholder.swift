@@ -5172,8 +5172,10 @@ public struct WorkspacePlaceholder: View {
                 // synthesize_focal_stress with the plan built above — the same function
                 // and the same per-region config the run gets. The app injects nothing.
                 organicIn?.syntheticRegions = synthPlan.regions
-                // ★ A DEAD WALL IS DEAD AS A WHOLE (2026-09-18): its real tensor is zeroed
-                // so core's per-voxel blend gives the whole wall the focal field.
+                // ★ A DEAD WALL IS DEAD AS A WHOLE (2026-09-18): its real tensor is zeroed.
+                // Core now decides the same way itself (#358: the wall's p99 against the
+                // threshold, and a dead wall takes the focal field over every voxel), so
+                // this is the app's mirror of that rule, kept for the log's verdicts.
                 let verdicts = OrganicSyntheticStress.deadenWholeWalls(
                     tensor: &organicIn!.tensor, regionIDs: synthPlan.regionIDs)
                 organicIn?.deadRegionIDs = Set(verdicts.map { $0.regionID })

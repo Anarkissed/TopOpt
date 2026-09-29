@@ -1475,10 +1475,10 @@ public struct LatticeSDFScene {
             // has two surfaces to blend. The count is kept for the banner because "how
             // wide is the rim" is still a question worth answering.
             //
-            // ★ AND THE RUN HAS TO FOLLOW. Core still deletes the band
-            // (`apply_organic_solid_rim` sets `mask[e] = 0`), so until the wetted-join
-            // work lands there the preview shows struts entering the wall that the run
-            // will still cut back. Named in the handoff, not hidden here.
+            // ★ AND THE RUN FOLLOWS. Core keeps the band as tracer candidates and turns it
+            // solid AFTER the trace (ruling G, `organic_solid_rim_band`, run_job.cpp), so
+            // its struts also run into the wall; the wetted join is applied too, on the
+            // latticed set, but only in the dual-contoured file (core #358).
             var solidRimVoxels = 0
             // ★ NO DECLARED FACE ⇒ NO OUTLINE, so the block's EDGES take the band
             // instead — the sample cube's twelve bars, never its faces (his rule,
