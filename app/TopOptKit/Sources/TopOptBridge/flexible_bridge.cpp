@@ -221,6 +221,31 @@ void copy_design(const fx::FaceDesign& d, FlexFaceDesign& o) {
   o.sigma_max = d.sigma.max;
 }
 
+// The assembled field for these faces' last designs (cached on the scene). Caller holds s.mu.
+const fx::DensityField& field_of(Scene& s, const std::vector<int32_t>& face_region_ids,
+                                 const std::vector<int32_t>& rotations, const FlexBuild& build) {
+  std::vector<fx::LoadedStack> ls;
+  std::vector<std::tuple<int, int, const fx::FaceDesign*>> key;
+  for (std::size_t i = 0; i < face_region_ids.size(); ++i) {
+    const int rot = i < rotations.size() ? rotations[i] : 0;
+    const auto k = std::make_pair(static_cast<int>(face_region_ids[i]), rot);
+    auto it = s.designs.find(k);
+    if (it == s.designs.end())
+      throw std::invalid_argument("face " + std::to_string(face_region_ids[i]) + " has no design yet");
+    ls.push_back({&stack_of(s, k.first, k.second), it->second.get()});
+    key.emplace_back(k.first, k.second, it->second.get());
+  }
+  const std::string bkey = build.topology + "/" + std::to_string(build.beads_per_wall) + "/" +
+                           std::to_string(build.bead_width_mm);
+  if (!s.field || s.field_key != key || s.field_build_key != bkey) {
+    s.field = std::make_unique<fx::DensityField>(
+        fx::assemble_density_field(s.grid, s.mask, ls, to_core(build)));
+    s.field_key = key;
+    s.field_build_key = bkey;
+  }
+  return *s.field;
+}
+
 }  // namespace
 
 // ── catalogue ───────────────────────────────────────────────────────────────
@@ -785,26 +810,7 @@ FlexFieldSlice flexible_scene_density_slice(int64_t scene,
   try {
     auto s = scene_at(scene);
     std::lock_guard<std::mutex> lock(s->mu);
-    std::vector<fx::LoadedStack> ls;
-    std::vector<std::tuple<int, int, const fx::FaceDesign*>> key;
-    for (std::size_t i = 0; i < face_region_ids.size(); ++i) {
-      const int rot = i < rotations.size() ? rotations[i] : 0;
-      const auto k = std::make_pair(static_cast<int>(face_region_ids[i]), rot);
-      auto it = s->designs.find(k);
-      if (it == s->designs.end())
-        throw std::invalid_argument("face " + std::to_string(face_region_ids[i]) + " has no design yet");
-      ls.push_back({&stack_of(*s, k.first, k.second), it->second.get()});
-      key.emplace_back(k.first, k.second, it->second.get());
-    }
-    const std::string bkey = build.topology + "/" + std::to_string(build.beads_per_wall) + "/" +
-                             std::to_string(build.bead_width_mm);
-    if (!s->field || s->field_key != key || s->field_build_key != bkey) {
-      s->field = std::make_unique<fx::DensityField>(
-          fx::assemble_density_field(s->grid, s->mask, ls, to_core(build)));
-      s->field_key = key;
-      s->field_build_key = bkey;
-    }
-    const fx::DensityField& f = *s->field;
+    const fx::DensityField& f = field_of(*s, face_region_ids, rotations, build);
     const int n[3] = {f.nx, f.ny, f.nz};
     if (axis < 0 || axis > 2) throw std::invalid_argument("axis must be 0, 1 or 2");
     if (index < 0 || index >= n[axis]) throw std::invalid_argument("slice index out of range");
@@ -838,6 +844,28 @@ FlexFieldSlice flexible_scene_density_slice(int64_t scene,
   } catch (const std::exception& e) {
     fail(err, e);
     o = FlexFieldSlice{};
+  }
+  return o;
+}
+
+FlexField flexible_scene_density_field(int64_t scene, const std::vector<int32_t>& face_region_ids,
+                                       const std::vector<int32_t>& rotations, const FlexBuild& build,
+                                       BridgeError& err) {
+  FlexField o;
+  try {
+    auto s = scene_at(scene);
+    std::lock_guard<std::mutex> lock(s->mu);
+    const fx::DensityField& f = field_of(*s, face_region_ids, rotations, build);
+    o.nx = f.nx;
+    o.ny = f.ny;
+    o.nz = f.nz;
+    o.spacing = f.spacing;
+    put3(o.origin, f.origin);
+    o.density.assign(f.density.begin(), f.density.end());
+    o.owner.assign(f.owner.begin(), f.owner.end());
+  } catch (const std::exception& e) {
+    fail(err, e);
+    o = FlexField{};
   }
   return o;
 }

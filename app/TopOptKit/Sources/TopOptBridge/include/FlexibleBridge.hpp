@@ -374,6 +374,19 @@ FlexFieldSlice flexible_scene_density_slice(int64_t scene,
                                             const FlexBuild& build, int32_t axis, int32_t index,
                                             BridgeError& err);
 
+// The whole field (same cache as the slice): density per voxel, x fastest, and the
+// owner face per voxel. The lattice preview builds its walls from this.
+struct FlexField {
+  int32_t nx = 0, ny = 0, nz = 0;
+  double spacing = 0.0;
+  double origin[3] = {0, 0, 0};
+  std::vector<float> density;  // -1 not lattice, 0 unassigned, else rho
+  std::vector<int32_t> owner;
+};
+FlexField flexible_scene_density_field(int64_t scene, const std::vector<int32_t>& face_region_ids,
+                                       const std::vector<int32_t>& rotations, const FlexBuild& build,
+                                       BridgeError& err);
+
 // ---------------------------------------------------------------------------
 // Auto (F9).
 struct FlexFaceRequest {

@@ -423,6 +423,7 @@ struct VIn  { float3 position [[attribute(0)]]; float3 normal [[attribute(1)]];
 struct VOut { float4 position [[position]]; float3 vnormal; float4 tint; float mheight;
               // §6 — the cut's half-space test, per fragment.
               float3 mpos; float member;
+              float solid;   // Flexible: 1 = stays opaque under a translucent body (tint flags.y)
               // ★ THE SURFACE'S OWN NORMAL, IN MODEL SPACE — the shell's declared-face
               // test. It must be MODEL space because `mpos` and the declared normals
               // are, and it must be the REST normal (not flexed) for the same reason
@@ -483,6 +484,7 @@ vertex VOut viewer_vertex(VIn in [[stage_in]], constant Uniforms& u [[buffer(1)]
     o.mpos = in.position;        // §6: rest model position, for the cut's half-space test
     o.mnormal = in.normal;       // the shell's declared-face test (model space, rest)
     o.member = in.flags.x;       // §6: 1 on faces of the selected region
+    o.solid = in.flags.y;        // Flexible: the dented face stays opaque (FlexibleOverlay)
     // §2 / §3d: the WORLD normal + WORLD position (so the light can stay put while the
     // camera orbits) and the EYE depth (so the far side of a dense lattice can recede).
     o.wnormal = (u.worldNormalMatrix * float4(in.normal, 0.0)).xyz;
@@ -678,7 +680,8 @@ fragment float4 viewer_fragment(VOut in [[stage_in]], constant float4& reveal [[
         color = mix(color, float3(0.02, 0.32, 0.28), hatch * 0.85);
     }
     float3 rgb = clamp(color, 0.0, 1.0);
-    return float4(rgb * bodyAlpha, bodyAlpha);   // premultiplied (a==1 → unchanged)
+    float a = in.solid > 0.5 ? 1.0 : bodyAlpha;   // Flexible: flagged fragments stay opaque
+    return float4(rgb * a, a);   // premultiplied (a==1 → unchanged)
 }
 """
 

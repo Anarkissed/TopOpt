@@ -76,6 +76,9 @@ public struct FlexibleStagePage: View {
 
     // MARK: the stage
 
+    /// The part's opacity while a dent is shown; the dented map itself stays opaque.
+    static let dentBodyAlpha: Float = 0.3
+
     /// The same settle the workspace draws with (gravity → down), so the part sits as it
     /// does on every other stage.
     private var settle: simd_quatf {
@@ -99,7 +102,10 @@ public struct FlexibleStagePage: View {
                     let q = CameraProjection(viewProjection: p.viewProjection * m, viewportSize: p.viewportSize)
                     if proj.projection != q { proj.projection = q }
                 },
-                flexDisplacements: dents, flexScale: dentScale)
+                flexDisplacements: dents, flexScale: dentScale,
+                // ★ THE DENT READS THROUGH THE PART (maintainer, 2026-09-29): while a dent is
+                // shown the body drops to 30 % and the dented map stays at 100 %.
+                bodyAlpha: dents != nil ? Self.dentBodyAlpha : 1)
             FlexibleStageOverlays(model: model, proj: proj)
         }
         .coordinateSpace(name: FlexibleStageSpace.name)

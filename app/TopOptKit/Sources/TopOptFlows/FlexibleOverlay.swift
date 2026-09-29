@@ -96,6 +96,8 @@ public struct FlexibleOverlayMesh {
                     let v = start + c * 6 + j
                     guard v < n else { break }
                     out[v * 8] = col.x; out[v * 8 + 1] = col.y; out[v * 8 + 2] = col.z; out[v * 8 + 3] = col.w
+                    // flags.y: the map stays fully opaque when the body is drawn see-through
+                    if col.w > 0 { out[v * 8 + 5] = 1 }
                 }
             }
         }

@@ -290,6 +290,20 @@ public struct FlexFieldSliceInfo: Equatable, Sendable {
     public let handovers: [FlexHandover]
 }
 
+/// Core's assembled 3D density field: −1 not lattice, 0 lattice under no loaded face, else ρ.
+public struct FlexDensityField: Equatable, Sendable {
+    public let nx: Int, ny: Int, nz: Int
+    public let spacing: Double
+    public let origin: SIMD3<Double>
+    public let density: [Float]
+    public let owner: [Int]
+    public init(nx: Int, ny: Int, nz: Int, spacing: Double, origin: SIMD3<Double>, density: [Float], owner: [Int]) {
+        self.nx = nx; self.ny = ny; self.nz = nz; self.spacing = spacing; self.origin = origin
+        self.density = density; self.owner = owner
+    }
+    public func index(_ i: Int, _ j: Int, _ k: Int) -> Int { (k * ny + j) * nx + i }
+}
+
 public struct FlexFaceRequest: Equatable, Sendable {
     public var face: Int
     public var rotation: Int
@@ -814,6 +828,17 @@ public final class FlexibleScene: @unchecked Sendable {
                                   density: Array(r.density), owner: Array(r.owner).map { Int($0) },
                                   latticeVoxels: Int(r.lattice_voxels), assignedVoxels: Int(r.assigned_voxels),
                                   unassignedVoxels: Int(r.unassigned_voxels), handovers: h)
+    }
+
+    /// The whole assembled density field for the designs last run for `faces` (x fastest).
+    public func densityField(faces: [Int], rotations: [Int], build: FlexBuildParams) throws -> FlexDensityField {
+        var err = topoptbridge.BridgeError()
+        let r = topoptbridge.flexible_scene_density_field(handle, FlexConv.i(faces), FlexConv.i(rotations),
+                                                          FlexConv.build(build), &err)
+        try FlexConv.check(err)
+        return FlexDensityField(nx: Int(r.nx), ny: Int(r.ny), nz: Int(r.nz), spacing: r.spacing,
+                                origin: FlexConv.v3(r.origin), density: Array(r.density),
+                                owner: Array(r.owner).map { Int($0) })
     }
 
     public func recommend(materialsPath: String, materialID: String, temps: [Double],
