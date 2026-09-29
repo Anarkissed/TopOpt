@@ -74,7 +74,7 @@ enum FlexibleLatticeShader {
         float4x4 clipFromModel;           // MeshRenderer's P·V·M (uniforms.mvp)
         float4x4 eyeFromModel;            // V·M (uniforms.modelView)
         float4x4 eyeNormalBasis;          // rotation of V·M (uniforms.normalMatrix)
-        float4 sparse, dense;             // LatticeStructureColour.pale / .interior
+        float4 sparse, dense;             // LatticeStructureColour.pale / FlexibleLatticePass.denseWall
         float4 rhoSpan;                   // x = lo, y = hi (the in-mask ρ span)
         float4 tail;
     };

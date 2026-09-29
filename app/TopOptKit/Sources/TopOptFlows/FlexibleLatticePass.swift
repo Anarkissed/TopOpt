@@ -27,8 +27,12 @@
 #if canImport(MetalKit)
 import MetalKit
 import simd
+import TopOptDesign
 
 final class FlexibleLatticePass {
+    /// The dense end of the wall ramp: the Flexible accent (DS accentGreen), never purple.
+    static let denseWall = DS.Color.accentGreen
+
 
     enum Failure: Error, CustomStringConvertible {
         case library(String), function(String), pipeline(String)
@@ -451,8 +455,11 @@ final class FlexibleLatticePass {
         f.clipFromModel = clipFromModel
         f.eyeFromModel = eyeFromModel
         f.eyeNormalBasis = eyeNormalBasis
-        // the octet's lightness-by-density ramp, from the legend's own constants
-        let pale = LatticeStructureColour.pale, dense = LatticeStructureColour.interior
+        // Lightness by density, like the octet's ramp — but NOT its dense end:
+        // LatticeStructureColour.interior (0.49, 0.42, 0.86) reads violet, and this track's
+        // rule is "never purple". Sparse = the legend's pale; dense = the Flexible section's
+        // own accent (FlexibleStageStyle, DS accentGreen), apart from the cyan ghost.
+        let pale = LatticeStructureColour.pale, dense = FlexibleLatticePass.denseWall
         f.sparse = SIMD4(Float(pale.r), Float(pale.g), Float(pale.b), 1)
         f.dense = SIMD4(Float(dense.r), Float(dense.g), Float(dense.b), 1)
         f.rhoSpan = SIMD4(rhoSpan.x, rhoSpan.y, 0, 0)
