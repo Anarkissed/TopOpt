@@ -1560,6 +1560,7 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     /// and the segment soup. Nil = no lattice in the frame, and then every pass below is
     /// byte-for-byte what it was before this task.
     private var latticeLayer: LatticeSDFRenderer?
+    var flexibleLattice: FlexibleLatticePass?   // Flexible (PR #362): a third G-buffer writer (FlexibleLatticePass.swift); nil = #354's frame
     /// The scene token last uploaded, so a bake happens once per scene change and never
     /// per frame (the preview's bar P2, carried over unchanged).
     private var latticeSceneToken: Int = -1
@@ -3361,7 +3362,7 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         // ★ AND WHENEVER A LATTICE IS IN THE FRAME (unified shading). The lattice's
         // pixels are PRODUCED by the prepass now — it is not an optional quality
         // treatment for them, it is where they come from.
-        let wantsLattice = latticeInFrame && latticeGBufferPipeline != nil
+        let wantsLattice = (latticeInFrame || flexibleLatticeInFrame) && latticeGBufferPipeline != nil
             && latticeShadePipeline != nil
         let wantsAO = !quality.isDisjoint(with: [.ambientOcclusion, .edges]) && aoPipeline != nil
         // The G-buffer is single-sampled, so it is sized from the RESOLVE target when
@@ -3427,6 +3428,7 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         // the translucent pipeline (premultiplied "over", no depth write) so the comet
         // arrows show through the walls; alpha 1 is the unchanged opaque draw.
         let translucent = bodyAlpha < 0.999
+        let ghostAfterLattice = flexibleGhostAfterLattice(translucent: translucent, latticeShaded: wantsLattice && gbuffer != nil)
         var bodyAlphaVal = bodyAlpha
         enc.setRenderPipelineState(translucent ? (translucentBodyPipeline ?? pipeline) : pipeline)
         enc.setDepthStencilState(translucent ? translucentBodyDepthState : depthState)
@@ -3461,7 +3463,7 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         // it, so it is bound on every path.
         var cu = cutUniforms
         enc.setFragmentBytes(&cu, length: MemoryLayout<CutUniformsSwift>.stride, index: 3)
-        countedDraw(enc, .triangle, vertexDrawCount)
+        if !ghostAfterLattice { countedDraw(enc, .triangle, vertexDrawCount) }
 
         // ★ THE LATTICE, IN THIS PASS, IMMEDIATELY AFTER THE SHELL (task
         // 2026-08-18-unified-shading). A DEFERRED shade of what the prepass marched:
@@ -3507,6 +3509,13 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
             enc.setFragmentTexture(gb.albedo, index: 3)
             countedDraw(enc, .triangle, 3)
         }
+        // Flexible X-ray (#362): the see-through body AFTER the opaque lattice shade; lsdf_shade rebound only fragment 0/2 + textures 0-3 (UnifiedShading.swift:1705-1711)
+        if ghostAfterLattice {
+            enc.setRenderPipelineState(translucentBodyPipeline ?? pipeline); enc.setDepthStencilState(translucentBodyDepthState)
+            enc.setFragmentBytes(&revealParams, length: MemoryLayout<SIMD4<Float>>.stride, index: 0)
+            enc.setFragmentBytes(&shade, length: MemoryLayout<ShadeParams>.stride, index: 2)
+            enc.setFragmentTexture(flexibleGhostKeepsAO ? (aoTex ?? neutralAOTexture()) : neutralAOTexture(), index: 0)
+            countedDraw(enc, .triangle, vertexDrawCount) }
 
         // Ground grid + contact shadow (M7.6 D2), drawn after the opaque mesh so it
         // blends, depth-tested so the part occludes it, depth-write off.
@@ -3999,7 +4008,7 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     /// colour target unless a lattice is in the frame, in which case the long side is
     /// capped — see `latticeGBufferMaxPixels` for why (the march is fill-bound).
     private func gbufferSize(width: Int, height: Int) -> (w: Int, h: Int) {
-        guard latticeInFrame else { return (width, height) }
+        guard latticeInFrame || flexibleLatticeInFrame else { return (width, height) }   // the Flexible march inherits latticeGBufferMaxPixels = 1152
         let long = Swift.max(width, height)
         guard long > Self.latticeGBufferMaxPixels else { return (width, height) }
         let s = Double(Self.latticeGBufferMaxPixels) / Double(long)
@@ -4506,11 +4515,11 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     private func encodeDepthPrepass(width: Int, height: Int, uniforms: ViewerUniforms,
                                     aspect: Float, into cmd: MTLCommandBuffer)
         -> (depth: MTLTexture, normal: MTLTexture, albedo: MTLTexture)? {
-        let shellVisible = bodyAlpha > 0.004
+        let shellVisible = bodyAlpha > 0.004 && !flexibleGhostOutOfGBuffer
         let lattice = latticeInFrame ? latticeLayer : nil
         guard let dpipe = depthPrepassPipeline, vertexDrawCount > 0,
               let vbuf = vertexBuffer, let fbuf = flexBuffer,
-              shellVisible || lattice != nil,
+              shellVisible || lattice != nil || flexibleLatticeInFrame,
               let tex = sceneDepthTextures(width: width, height: height) else { return nil }
         let pd = MTLRenderPassDescriptor()
         pd.colorAttachments[0].texture = tex.color
@@ -4665,6 +4674,11 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
                                     instanceCount: lattice.capsuleCount)
             }
         }
+        // Flexible (#362): the third writer — same encoder, attachments and .less+write depth state as lsdf_gbuffer / capsule_gbuffer
+        if flexibleLatticeInFrame, let fx = flexibleLattice,
+           fx.encodeGBuffer(penc, depthState: depthState, camera: camera, modelRotation: modelRotation, modelCenter: modelCenter, aspect: aspect,
+                            clipFromModel: uniforms.mvp, eyeFromModel: uniforms.modelView, eyeNormalBasis: uniforms.normalMatrix, squish: flexScale) {
+            frameDrawCalls += 1; frameVertices += 3 }
         penc.endEncoding()
         return (tex.color, tex.normal, tex.albedo)
     }
@@ -5045,7 +5059,7 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     /// this instrument. They have to be re-established on a sound one before any
     /// of them is used to justify a fix.
     func latticeMaskDump(size: Int) -> LatticeMaskDump? {
-        guard vertexDrawCount > 0, latticeInFrame else { return nil }
+        guard vertexDrawCount > 0, latticeInFrame || flexibleLatticeInFrame else { return nil }   // the coverage instrument for T5/T9/T11
         sceneDepthColorTex = nil; sceneDepthZTex = nil
         sceneNormalTex = nil; gbufferAlbedoTex = nil
         let cdesc = MTLTextureDescriptor.texture2DDescriptor(
@@ -5601,6 +5615,7 @@ struct MeshViewInputs {
     /// view (task 2026-08-18-unified-shading). nil = no lattice, and then this view is
     /// byte-for-byte what it was.
     var latticeLayer: LatticeLayerInputs? = nil
+    var flexibleLattice: FlexibleLatticeLayerInputs? = nil
 }
 
 /// ★ THE LATTICE AS A LAYER OF THE MESH VIEW, NOT A VIEW BESIDE IT.
@@ -5787,7 +5802,8 @@ public struct MetalMeshView: UIViewRepresentable {
                 onBrushRefused: ((BrushInput) -> Void)? = nil,
                 inputDiscipline: SurfaceInputDiscipline = .off,
                 onPencilSeen: (() -> Void)? = nil,
-                latticeLayer: LatticeLayerInputs? = nil) {
+                latticeLayer: LatticeLayerInputs? = nil,
+                flexibleLattice: FlexibleLatticeLayerInputs? = nil) {
         inputs = MeshViewInputs(mesh: mesh, camera: camera, selection: selection, faceTints: faceTints,
                                 vertexTints: vertexTints, extraLines: extraLines,
                                 cutRibbon: cutRibbon,
@@ -5811,7 +5827,7 @@ public struct MetalMeshView: UIViewRepresentable {
             brushRequiresPencil: brushRequiresPencil,
             onBrushRefused: onBrushRefused,
             inputDiscipline: inputDiscipline, onPencilSeen: onPencilSeen,
-            latticeLayer: latticeLayer)
+            latticeLayer: latticeLayer, flexibleLattice: flexibleLattice)
     }
 
     public func makeCoordinator() -> Coordinator { Coordinator() }
@@ -5950,7 +5966,8 @@ public struct MetalMeshView: NSViewRepresentable {
                 onBrushRefused: ((BrushInput) -> Void)? = nil,
                 inputDiscipline: SurfaceInputDiscipline = .off,
                 onPencilSeen: (() -> Void)? = nil,
-                latticeLayer: LatticeLayerInputs? = nil) {
+                latticeLayer: LatticeLayerInputs? = nil,
+                flexibleLattice: FlexibleLatticeLayerInputs? = nil) {
         inputs = MeshViewInputs(mesh: mesh, camera: camera, selection: selection, faceTints: faceTints,
                                 vertexTints: vertexTints, extraLines: extraLines,
                                 cutRibbon: cutRibbon,
@@ -5974,7 +5991,7 @@ public struct MetalMeshView: NSViewRepresentable {
             brushRequiresPencil: brushRequiresPencil,
             onBrushRefused: onBrushRefused,
             inputDiscipline: inputDiscipline, onPencilSeen: onPencilSeen,
-            latticeLayer: latticeLayer)
+            latticeLayer: latticeLayer, flexibleLattice: flexibleLattice)
     }
 
     public func makeCoordinator() -> Coordinator { Coordinator() }
@@ -6627,6 +6644,7 @@ extension MetalMeshView {
                 dirty = true
             }
 
+            if renderer.applyFlexibleLattice(inputs.flexibleLattice, device: view.device) { dirty = true }   // token-keyed upload in FlexibleLatticePass.swift; squish frames already dirty via flexScale
             if dirty { redraw(view) }
             // Publish the camera projection (deduped) on the NEXT runloop, never inline:
             // `onProjection` writes the host view's `@State projection`, and `apply` runs

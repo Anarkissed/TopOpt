@@ -69,7 +69,7 @@ public struct FlexibleStagePage: View {
                 FlexibleViewColumn(camera: camera, xray: $xray)
                 if showExport, let g = model.lattice { exportSheet(g) }
                 if model.tab == .squish, model.step == .view3D || model.checkStampShown != nil {
-                    FlexibleLegend(model: model)
+                    FlexibleLegend(model: model, drawnLattice: drawnLattice)
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
                         .padding(PageChrome.edge)
                 }
@@ -95,6 +95,9 @@ public struct FlexibleStagePage: View {
         }
         .onChange(of: model.stacks.count) { _ in rebuildOverlay() }
         .onChange(of: xray) { _ in refreshChannels() }
+        // a new lattice (Generate again) or a build starting/ending changes the dent's source
+        .onChange(of: model.lattice?.generation) { _ in refreshChannels() }
+        .onChange(of: model.latticeBuilding) { _ in refreshChannels() }
         .onReceive(model.objectWillChange.debounce(for: .milliseconds(16), scheduler: RunLoop.main)) { _ in
             refreshChannels()
         }
@@ -108,6 +111,12 @@ public struct FlexibleStagePage: View {
     /// X-ray: the ghost's face-on opacity. The shader adds up to +0.5 toward the silhouette
     /// (MetalMeshView, tint flags.z), so the outline reads and the inside shows.
     static let xrayBodyAlpha: Float = 0.04
+
+    /// The generated lattice while it is DRAWN: X-ray on, and not being rebuilt. The map and
+    /// the dent then come from its own depths (FlexibleShownValues).
+    private var drawnLattice: FlexibleGeneratedLattice? {
+        xray && !model.latticeBuilding ? model.lattice : nil
+    }
 
     /// 0 → 1 → 0 over one period (FlexAnimation's cosine ease, Results screen).
     private var squishAmplitude: Double {
@@ -145,12 +154,12 @@ public struct FlexibleStagePage: View {
                 flexDisplacements: dents, flexScale: dentScale,
                 // ★ THE DENT READS THROUGH THE PART (maintainer, 2026-09-29): while a dent is
                 // shown the body drops to 30 % and the dented map stays at 100 %.
-                bodyAlpha: xray ? Self.xrayBodyAlpha : (dents != nil ? Self.dentBodyAlpha : 1))
-            if let g = model.lattice, xray {
-                FlexibleLatticeMount(lattice: g, proj: proj, squish: Float(squishAmplitude),
-                                     exaggeration: Float(max(dentExaggeration, 1)))
-                    .allowsHitTesting(false)
-            }
+                bodyAlpha: xray ? Self.xrayBodyAlpha : (dents != nil ? Self.dentBodyAlpha : 1),
+                // ★ THE LATTICE IS DRAWN IN THE MESH VIEW'S OWN PASSES (FlexibleLatticePass,
+                // a third G-buffer writer — the way Structural and Aesthetic draw theirs), only
+                // in X-ray, squished by the SAME flexScale as the dent.
+                flexibleLattice: FlexibleLatticePreview.inputs(xray: xray, lattice: model.lattice,
+                                                               building: model.latticeBuilding))
             FlexibleStageOverlays(model: model, proj: proj)
         }
         .coordinateSpace(name: FlexibleStageSpace.name)
@@ -218,7 +227,7 @@ public struct FlexibleStagePage: View {
             dentScale = 0
             return
         }
-        let shown = FlexibleShownValues(model: model)
+        let shown = FlexibleShownValues(model: model, drawnLattice: drawnLattice)
         var colours: [FlexFaceKey: [SIMD4<Float>]] = [:]
         for k in model.loadedKeys {
             guard let vals = shown.values[k] else { continue }
@@ -247,7 +256,7 @@ public struct FlexibleStagePage: View {
         }
     }
 
-    // MARK: generate + export (FlexibleLatticeGeneration.swift, FlexibleExportSheet.swift)
+    // MARK: generate + export (FlexibleLatticeGeneration.swift, FlexibleExportSheet.swift — disabled until core)
 
     /// Bottom right, where the Settings wizard keeps "Refresh sample": Generate lattice,
     /// then Export and a show/hide for the lattice once it exists.
@@ -310,16 +319,11 @@ public struct FlexibleStagePage: View {
     }
 
     @ViewBuilder private func exportSheet(_ g: FlexibleGeneratedLattice) -> some View {
-        let name = (project.name.isEmpty ? "part" : project.name)
-            .replacingOccurrences(of: "/", with: "-") + "-flexible-\(g.topology).stl"
-        FlexibleExportSheet(
-            wallMM: Double(g.inputs.wallMM), fileName: name,
-            summary: "\(g.topology.capitalized) · \(Int(g.tempC)) °C · \(model.material?.displayName ?? "")",
-            estimate: { h in FlexibleLatticeExporting.estimate(g, hMM: h) },
-            export: { h, url, progress in try await FlexibleLatticeExporting.export(g.inputs, hMM: h, to: url, progress: progress) },
-            onClose: { showExport = false })
-        .transition(.opacity)
-        .zIndex(20)
+        // ★ EXPORTS WAIT ON CORE (maintainer, 2026-09-29): the modal says so, both cards disabled
+        FlexibleExportSheet(summary: "\(g.topology.capitalized) · \(Int(g.tempC)) °C · \(model.material?.displayName ?? "")",
+                            onClose: { showExport = false })
+            .transition(.opacity)
+            .zIndex(20)
     }
 
     // MARK: chrome
@@ -438,7 +442,8 @@ public struct FlexibleStagePage: View {
 enum FlexShownValue { case depth(Double), noNumber, solid }
 
 /// Which numbers the overlay shows right now — the drawn map while a curve is being
-/// drawn, the drawn or buildable depth in the 3D view, a stamp's dent in check mode.
+/// drawn, the drawn or buildable depth in the 3D view, a stamp's dent in check mode, and
+/// — while the generated lattice is drawn (X-ray) — the depths it was BUILT from.
 @MainActor
 struct FlexibleShownValues {
     var values: [FlexFaceKey: [FlexShownValue]] = [:]
@@ -447,13 +452,58 @@ struct FlexibleShownValues {
     var exaggeration = 1.0
     var label = ""
 
-    init(model m: FlexibleStageModel) {
+    /// Everything the numbers are read from: the model's copies of core's results. A plain
+    /// value, so the rule below is testable without a model (FlexibleSquishTests, T15).
+    struct Inputs {
+        var loadedFaces: [FlexibleFaceSettings]
+        var stacks: [FlexFaceKey: FlexStackInfo]
+        var designs: [FlexFaceKey: FlexFaceDesignInfo]
+        var liveS: [FlexFaceKey: [Double]]
+        var checks: [UUID: FlexStampCheckInfo]
+        var checkStamps: [FlexibleCheckStamp]
+        var checkStampShown: UUID?
+        var step: FlexibleStageModel.Step
+        var showBuildable: Bool
+    }
+
+    static func inputs(_ m: FlexibleStageModel) -> Inputs {
+        Inputs(loadedFaces: m.settings.loadedFaces, stacks: m.stacks, designs: m.designs, liveS: m.liveS,
+               checks: m.checks, checkStamps: m.settings.checkStamps, checkStampShown: m.checkStampShown,
+               step: m.step, showBuildable: m.showBuildable)
+    }
+
+    init(model m: FlexibleStageModel, drawnLattice: FlexibleGeneratedLattice? = nil) {
+        self.init(Self.inputs(m), drawnLattice: drawnLattice)
+    }
+
+    init(_ m: Inputs, drawnLattice: FlexibleGeneratedLattice?) {
+        // ★ WHILE THE LATTICE IS DRAWN, THE MAP AND THE DENT ARE THE LATTICE'S: the exact
+        // depth arrays its squish faces were built from, so the dent and the walls squish by
+        // one set of numbers, and the drawn/buildable toggle cannot move one without the
+        // other. The exaggeration is capped where the shader's 0.95 clamp would bind, so the
+        // walls follow the dent all the way down.
+        if let g = drawnLattice {
+            for k in g.keys {
+                guard let d = g.columnDepths[k] else { continue }
+                let noLattice = g.columnNoLattice[k] ?? []
+                values[k] = d.enumerated().map { i, x in
+                    if i < noLattice.count, noLattice[i] { return .solid }
+                    return x.map { .depth($0) } ?? .noNumber
+                }
+            }
+            for v in values.values { for x in v { if case .depth(let d) = x { maxDepth = max(maxDepth, d) } } }
+            label = "What the lattice was built from"
+            showsDent = true
+            exaggeration = Self.cappedExaggeration(rule: Self.exaggerationRule(maxDepthMM: maxDepth, extentMM: g.extentMM),
+                                                   maxSafeScale: g.maxSafeScale)
+            return
+        }
         let checkID = m.checkStampShown
-        for f in m.settings.loadedFaces {
+        for f in m.loadedFaces {
             let k = FlexFaceKey(region: f.faceRegionID, rotation: f.rotationDeg)
             guard let st = m.stacks[k] else { continue }
             if let id = checkID, let c = m.checks[id],
-               m.settings.checkStamps.contains(where: { $0.stamp.id == id && $0.faceRegionID == f.faceRegionID }) {
+               m.checkStamps.contains(where: { $0.stamp.id == id && $0.faceRegionID == f.faceRegionID }) {
                 values[k] = st.columns.indices.map { i in
                     if let d = c.depthMM[i] { return .depth(d) }
                     return c.status[i] == "beyond_data" ? .noNumber : .depth(0)
@@ -488,7 +538,21 @@ struct FlexibleShownValues {
         }
         // the dent is exaggerated so a few mm reads on a 100 mm part; the legend says by how much
         let ext = m.stacks.values.map { max($0.uExtentMM, $0.vExtentMM) }.max() ?? 0
-        if maxDepth > 0, ext > 0 { exaggeration = max(1, min(4, (0.10 * ext / maxDepth).rounded())) }
+        exaggeration = Self.exaggerationRule(maxDepthMM: maxDepth, extentMM: ext)
+    }
+
+    /// × 1…4, so the deepest squish reads as about a tenth of the face (an integer: the
+    /// legend says "× N").
+    nonisolated static func exaggerationRule(maxDepthMM: Double, extentMM: Double) -> Double {
+        guard maxDepthMM > 0, extentMM > 0 else { return 1 }
+        return max(1, min(4, (0.10 * extentMM / maxDepthMM).rounded()))
+    }
+
+    /// The rule, capped at the largest integer scale at which no column's face passes the
+    /// shader's clamp (`[FlexibleSquishFace].maxSafeScale`) — never below × 1.
+    nonisolated static func cappedExaggeration(rule: Double, maxSafeScale: Double) -> Double {
+        guard maxSafeScale.isFinite else { return rule }
+        return max(1, min(rule, maxSafeScale.rounded(.down)))
     }
 }
 
@@ -959,9 +1023,11 @@ struct FlexibleFaceResult: View {
 /// The 3D view's legend: numbers, the tier and band, the exaggeration.
 struct FlexibleLegend: View {
     @ObservedObject var model: FlexibleStageModel
+    /// The generated lattice while it is drawn (X-ray): the map is then the one it was built from.
+    var drawnLattice: FlexibleGeneratedLattice? = nil
 
     var body: some View {
-        let shown = FlexibleShownValues(model: model)
+        let shown = FlexibleShownValues(model: model, drawnLattice: drawnLattice)
         let tier = model.checkStampShown.flatMap { model.checks[$0]?.tier }
             ?? model.selectedRegion.flatMap { model.design($0)?.tier }
         VStack(alignment: .leading, spacing: 6) {

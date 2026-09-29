@@ -1,0 +1,471 @@
+// FlexibleLatticePass — the Flexible lattice as a THIRD G-BUFFER WRITER inside
+// MeshRenderer (task 2026-09-29-flexible-screens, in-pass round).
+//
+// ★ BUILT ON THE APP'S LATTICE PREVIEW, NOT BESIDE IT (maintainer, 2026-09-29: "look at
+// the way App does the lattice preview and build upon that"; "a fast preview via an SDF —
+// like the preview in the other two sections of the lattice stage"). Structural and
+// Aesthetic march the octet into MeshRenderer's G-buffer in the depth prepass and #354's
+// `lsdf_shade` lights it inside the main pass. This pass does the same with the Flexible
+// field: `flx_gbuffer` writes eye-Z, the eye normal and an albedo + mask into the SAME
+// attachments, against the SAME depth buffer, at the SAME 1152 px cap — so the walls take
+// the shell's material, occlusion, creases and depth fade, and every overlay drawn after
+// them is occluded by them. There is no second MTKView and no compositing.
+//
+// ★ BAKE-ONLY, LIKE THE OCTET'S LAYER. It never draws itself: MeshRenderer owns it
+// (`flexibleLattice`) and calls `encodeGBuffer` from its prepass. Uploads happen once per
+// TOKEN (`MeshRenderer.applyFlexibleLattice`, in the view's apply), never in encode.
+//
+// ★ ONE NUMBER FOR THE SQUISH. `squish` is MeshRenderer's `flexScale` — the float the
+// dent's vertices are scaled by — passed by value from the prepass. The dent and the
+// walls cannot drift out of phase.
+//
+// ★ THE RAY IS THE OCTET'S CAMERA BASIS (LatticeSDFMetal.makeUniforms): model-space eye,
+// right/up/forward folded with the frustum half-tangents, no matrix inversion anywhere.
+// The hits are written with MeshRenderer's own P·V·M, V·M and normal basis, so lsdf_shade's
+// depth curve agrees with them.
+
+#if canImport(MetalKit)
+import MetalKit
+import simd
+
+final class FlexibleLatticePass {
+
+    enum Failure: Error, CustomStringConvertible {
+        case library(String), function(String), pipeline(String)
+        var description: String {
+            switch self {
+            case .library(let s): return "FlexibleLatticeShader failed to compile: \(s)"
+            case .function(let s): return "FlexibleLatticeShader has no function \(s)"
+            case .pipeline(let s): return "Flexible lattice pipeline failed: \(s)"
+            }
+        }
+    }
+
+    /// Matched to MSL `FlxFace` BY BYTE OFFSET (all float4, same order).
+    struct FaceUniforms: Equatable {
+        var centroid: SIMD4<Float>   // w = the largest depth (0 = the face does not move)
+        var xAxis: SIMD4<Float>      // w = uMin
+        var yAxis: SIMD4<Float>      // w = vMin
+        var load: SIMD4<Float>       // w = pitch
+        var extent: SIMD4<Float>     // nu, nv, tMin, tMax
+        static let zero = FaceUniforms(centroid: .zero, xAxis: .zero, yAxis: .zero, load: .zero, extent: .zero)
+    }
+
+    /// Matched to MSL `FlxUniforms` BY BYTE OFFSET — `flx_uniform_echo` and
+    /// `testUniformAndFrameLayoutsMatchTheMSL` hold the two together.
+    struct Uniforms {
+        var boxMin = SIMD4<Float>.zero, boxMax = SIMD4<Float>.zero
+        var shape = SIMD4<Float>.zero, shape2 = SIMD4<Float>.zero, buildDir = SIMD4<Float>.zero
+        var rmO = SIMD4<Float>.zero, rmN = SIMD4<Float>.zero
+        var dsO = SIMD4<Float>.zero, dsN = SIMD4<Float>.zero
+        var squish = SIMD4<Float>.zero
+        var march = SIMD4<Float>.zero
+        var faces: (FaceUniforms, FaceUniforms, FaceUniforms, FaceUniforms) = (.zero, .zero, .zero, .zero)
+        var tail = SIMD4<Float>(1, 2, 3, 4)
+    }
+
+    /// Matched to MSL `FlxFrame` BY BYTE OFFSET — `flx_frame_echo` holds it.
+    struct Frame {
+        var eye = SIMD4<Float>.zero, rayX = SIMD4<Float>.zero, rayY = SIMD4<Float>.zero, rayDir = SIMD4<Float>.zero
+        var clipFromModel = matrix_identity_float4x4
+        var eyeFromModel = matrix_identity_float4x4
+        var eyeNormalBasis = matrix_identity_float4x4
+        var sparse = SIMD4<Float>.zero, dense = SIMD4<Float>.zero, rhoSpan = SIMD4<Float>.zero
+        var tail = SIMD4<Float>(5, 6, 7, 8)
+    }
+
+    /// The last init failure (MeshRenderer does not retry a library that failed to compile).
+    static var lastInitError: String?
+    /// The march's step budget.
+    static let maxSteps: Float = 400
+    /// The pad (mm) the lattice region's box is clipped to around the part's AABB.
+    static let boxPadMM: Float = 1
+
+    /// The longest step, in cells. ★ THE GYROID'S IS 0.1, NOT THE 0.25 FIRST WRITTEN: its
+    /// |g|/|∇| over-reads between the sheets (the gradient floor is 0.05·k), and a quarter
+    /// cell jumped whole 0.8 mm walls at grazing angles (1.2 % of the covered pixels against a
+    /// march at 0.02 cells; 0.1 gives < 0.3 %). The honeycomb's wall is 1-Lipschitz, so it
+    /// keeps the quarter cell. T11 holds both, in the pass.
+    static func stepCap(for topology: FlexibleLatticeInputs.Topology) -> Float {
+        topology == .gyroid ? 0.1 : 0.25
+    }
+
+    let device: MTLDevice
+    let gbufferDescriptor: MTLRenderPipelineDescriptor
+    let gbufferPipeline: MTLRenderPipelineState
+    let probePipeline: MTLComputePipelineState
+    let squishProbePipeline: MTLComputePipelineState
+    let uniformEchoPipeline: MTLComputePipelineState
+    let frameEchoPipeline: MTLComputePipelineState
+    /// True once the G-buffer pipeline built (the init THROWS otherwise, with the log).
+    var gbufferPipelineDidBuild: Bool { gbufferPipeline.label == "flx_gbuffer" }
+
+    // ── what was uploaded (once per token) ──
+    private(set) var token = -1
+    /// Hidden while a new lattice builds: the volumes stay, only the march is skipped.
+    var hidden = false
+    private(set) var uploadCount = 0
+    /// The grids AS THE GPU SEES THEM (a mismatched pair resampled onto one grid) — what
+    /// every parity test compares against.
+    private(set) var referenceInputs: FlexibleLatticeInputs?
+    private(set) var faces: [FlexibleSquishFace] = []
+    /// The lattice region's AABB (voxel centres with mask ≥ ½, ± one mask voxel, within the
+    /// part's AABB + 1 mm). Empty (min > max) when nothing is latticed.
+    private(set) var regionMin = SIMD3<Float>(repeating: 1e30)
+    private(set) var regionMax = SIMD3<Float>(repeating: -1e30)
+    /// The in-mask ρ span the colour ramp runs over.
+    private(set) var rhoSpan = SIMD2<Float>(0, 1)
+    private var base: Uniforms?
+    private var maxDepthMM: Float = 0
+    private var rmTex: MTLTexture?, dsTex: MTLTexture?
+    private var columnTex: [MTLTexture] = []
+    private let emptyColumns: MTLTexture
+    private lazy var queue: MTLCommandQueue? = device.makeCommandQueue()
+
+    /// Drawn this frame: uploaded and not hidden.
+    var isDrawable: Bool { !hidden && rmTex != nil && dsTex != nil && base != nil }
+
+    // ── the march's constants: the shipping values, and knobs for DIAGNOSIS ONLY (the tests'
+    // fine reference march and their red controls turn them; nothing in the app does) ──
+    var stepFactor: Float = 0.6, minStepMM: Float = 0.02
+    var stepBudget: Float = FlexibleLatticePass.maxSteps
+    /// nil = the topology's own cap (`stepCap(for:)`).
+    var stepCapOverride: Float?
+    var stepCapCells: Float { stepCapOverride ?? Self.stepCap(for: referenceInputs?.topology ?? .gyroid) }
+    /// The march's lower-bound early-out (`flx_field_march`).
+    var earlyOut = true
+    /// Control only: march as if neighbouring columns never jumped (tears a varied press).
+    var ignoresColumnWalls = false
+
+    // ── TEST CONTROLS: each restores one wrong behaviour so a test can prove it sees it.
+    // All off in the app. ──
+    /// Put the see-through body back into the G-buffer (#354's `bodyAlpha > 0.004` rule).
+    var controlKeepGhostInGBuffer = false
+    /// Draw the body in #354's place (before the opaque shade) instead of after it.
+    var controlDrawGhostFirst = false
+    /// Bind the lattice-only AO texture to the re-issued body instead of the neutral one.
+    var controlKeepAOForGhost = false
+    /// Replace the squish MeshRenderer passes (its flexScale) with this value.
+    var controlSquishOverride: Float?
+    /// Offset the model centre on the PASS side only (the ray's frame).
+    var controlModelCenterOffset = SIMD3<Float>.zero
+    /// Probe only: bind the (ρ, mask) volume into the (SDF, skin) slot.
+    var controlSwapVolumes = false
+
+    /// The frame uniform the last `encodeGBuffer` bound (tests read it back).
+    private(set) var lastFrame: Frame?
+
+    init(device: MTLDevice) throws {
+        self.device = device
+        let lib: MTLLibrary
+        do { lib = try device.makeLibrary(source: FlexibleLatticeShader.gbufferSource, options: nil) }
+        catch { throw Failure.library("\(error)") }
+        func fn(_ name: String) throws -> MTLFunction {
+            guard let f = lib.makeFunction(name: name) else { throw Failure.function(name) }
+            return f
+        }
+        let pd = MTLRenderPipelineDescriptor()
+        pd.label = "flx_gbuffer"
+        pd.vertexFunction = try fn("flx_vertex")
+        pd.fragmentFunction = try fn("flx_gbuffer")
+        // ★ ALL THREE of MeshRenderer's G-buffer colour formats: a pipeline writes ONLY the
+        // attachments it declares, and an undeclared one is left undefined, then stored —
+        // the "struts behind the wall" artifact (LatticeGBufferMaskTests).
+        pd.colorAttachments[0].pixelFormat = MeshRenderer.sceneDepthFormat
+        pd.colorAttachments[1].pixelFormat = MeshRenderer.gbufferNormalFormat
+        pd.colorAttachments[2].pixelFormat = MeshRenderer.gbufferAlbedoFormat
+        pd.depthAttachmentPixelFormat = MeshRenderer.depthFormat
+        pd.rasterSampleCount = 1
+        gbufferDescriptor = pd
+        do { gbufferPipeline = try device.makeRenderPipelineState(descriptor: pd) }
+        catch { throw Failure.pipeline("flx_gbuffer: \(error)") }
+        func compute(_ name: String) throws -> MTLComputePipelineState {
+            let cd = MTLComputePipelineDescriptor()
+            cd.label = name
+            cd.computeFunction = try fn(name)
+            do { return try device.makeComputePipelineState(descriptor: cd, options: [], reflection: nil) }
+            catch { throw Failure.pipeline("\(name): \(error)") }
+        }
+        probePipeline = try compute("flx_field_probe")
+        squishProbePipeline = try compute("flx_squish_probe")
+        uniformEchoPipeline = try compute("flx_uniform_echo")
+        frameEchoPipeline = try compute("flx_frame_echo")
+        // a 1×1 "no column" table for the face slots nobody uses, bound on every draw
+        let d = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .rgba32Float, width: 1, height: 1, mipmapped: false)
+        d.usage = [.shaderRead]; d.storageMode = .shared
+        guard let e = device.makeTexture(descriptor: d) else { throw Failure.pipeline("column placeholder") }
+        var zero = SIMD4<Float>.zero
+        e.replace(region: MTLRegionMake2D(0, 0, 1, 1), mipmapLevel: 0, withBytes: &zero, bytesPerRow: 16)
+        emptyColumns = e
+    }
+
+    /// The pipeline descriptor's contract, as a list of what is wrong with it (empty = OK).
+    /// T1 runs it on the shipped descriptor AND on a broken copy (its red control).
+    static func descriptorProblems(_ d: MTLRenderPipelineDescriptor) -> [String] {
+        var out: [String] = []
+        let want = [MeshRenderer.sceneDepthFormat, MeshRenderer.gbufferNormalFormat, MeshRenderer.gbufferAlbedoFormat]
+        for (i, f) in want.enumerated() where d.colorAttachments[i].pixelFormat != f {
+            out.append("colour \(i) is \(d.colorAttachments[i].pixelFormat.rawValue), not \(f.rawValue)")
+        }
+        if d.colorAttachments[3].pixelFormat != .invalid { out.append("colour 3 is declared") }
+        if d.depthAttachmentPixelFormat != MeshRenderer.depthFormat { out.append("depth format") }
+        if d.rasterSampleCount != 1 { out.append("sample count \(d.rasterSampleCount)") }
+        if d.vertexFunction == nil || d.fragmentFunction == nil { out.append("functions") }
+        return out
+    }
+
+    // MARK: upload (once per token)
+
+    func upload(_ l: FlexibleLatticeLayerInputs) {
+        token = l.token
+        hidden = l.hidden
+        uploadCount += 1
+        let f = l.lattice
+        // (ρ, mask) on ρ's grid and (part SDF, skin) on the SDF's: the builder puts each pair
+        // on one grid; a test fixture that does not is resampled here, and the REFERENCE
+        // keeps the resampled grid, so parity is exact either way.
+        let mask = Self.sameGrid(f.mask, f.rho) ? f.mask : Self.resample(f.mask, like: f.rho)
+        let skin = Self.sameGrid(f.skinDist, f.partSDF) ? f.skinDist : Self.resample(f.skinDist, like: f.partSDF)
+        var ref = f
+        ref.mask = mask
+        ref.skinDist = skin
+        referenceInputs = ref
+        rmTex = makeVolume(f.rho, mask)
+        dsTex = makeVolume(f.partSDF, skin)
+        faces = Array(l.faces.prefix(FlexibleSquishField.maxFaces))
+        columnTex = faces.map { makeColumns($0) ?? emptyColumns }
+        maxDepthMM = faces.map(\.maxDepthMM).max() ?? 0
+        // the lattice region's box and the in-mask ρ span
+        var lo = SIMD3<Float>(repeating: .infinity), hi = SIMD3<Float>(repeating: -.infinity)
+        var rLo = Float.infinity, rHi = -Float.infinity
+        for k in 0..<mask.nz { for j in 0..<mask.ny { for i in 0..<mask.nx {
+            let n = (k * mask.ny + j) * mask.nx + i
+            guard mask.values[n] >= 0.5 else { continue }
+            let c = mask.c0 + SIMD3<Float>(Float(i), Float(j), Float(k)) * mask.spacing
+            lo = simd_min(lo, c); hi = simd_max(hi, c)
+            let r = f.rho.values[n]
+            rLo = Swift.min(rLo, r); rHi = Swift.max(rHi, r)
+        } } }
+        if lo.x.isFinite {
+            let pad = SIMD3<Float>(repeating: Self.boxPadMM)
+            regionMin = simd_max(lo - mask.spacing, f.boundsMin - pad)
+            regionMax = simd_min(hi + mask.spacing, f.boundsMax + pad)
+        } else {
+            regionMin = SIMD3(repeating: 1e30); regionMax = SIMD3(repeating: -1e30)
+        }
+        rhoSpan = rLo.isFinite ? SIMD2(rLo, rHi) : SIMD2(0, 1)
+        base = makeBase(ref)
+    }
+
+    static func sameGrid(_ a: FlexGrid, _ b: FlexGrid) -> Bool {
+        a.nx == b.nx && a.ny == b.ny && a.nz == b.nz && a.c0 == b.c0 && a.spacing == b.spacing
+    }
+
+    /// `g` sampled (FlexGrid.sample) at every voxel centre of `like`.
+    static func resample(_ g: FlexGrid, like t: FlexGrid) -> FlexGrid {
+        var v = [Float](repeating: 0, count: t.nx * t.ny * t.nz)
+        for k in 0..<t.nz { for j in 0..<t.ny { for i in 0..<t.nx {
+            v[(k * t.ny + j) * t.nx + i] = g.sample(t.c0 + SIMD3<Float>(Float(i), Float(j), Float(k)) * t.spacing)
+        } } }
+        return FlexGrid(nx: t.nx, ny: t.ny, nz: t.nz, c0: t.c0, spacing: t.spacing, values: v)
+    }
+
+    /// Two same-grid scalar fields as one rg32Float volume (read by integer `read()`).
+    /// ★ 32-bit, not 16: a half has 11 bits, and a half-float cell once HALVED the octet
+    /// preview's cell (2026-08-26). The field is compared with Swift to 2 µm.
+    private func makeVolume(_ a: FlexGrid, _ b: FlexGrid) -> MTLTexture? {
+        let n = a.nx * a.ny * a.nz
+        guard a.nx > 0, a.ny > 0, a.nz > 0, a.values.count == n, b.values.count == n, a.spacing > 0 else { return nil }
+        var packed = [Float](repeating: 0, count: 2 * n)
+        for i in 0..<n { packed[2 * i] = a.values[i]; packed[2 * i + 1] = b.values[i] }
+        let d = MTLTextureDescriptor()
+        d.textureType = .type3D
+        d.pixelFormat = .rg32Float
+        d.width = a.nx; d.height = a.ny; d.depth = a.nz
+        d.usage = [.shaderRead]
+        d.storageMode = .shared
+        guard let tex = device.makeTexture(descriptor: d) else { return nil }
+        packed.withUnsafeBytes { raw in
+            tex.replace(region: MTLRegionMake3D(0, 0, 0, a.nx, a.ny, a.nz), mipmapLevel: 0, slice: 0,
+                        withBytes: raw.baseAddress!, bytesPerRow: a.nx * 8, bytesPerImage: a.nx * a.ny * 8)
+        }
+        return tex
+    }
+
+    private func makeColumns(_ f: FlexibleSquishFace) -> MTLTexture? {
+        guard f.nu > 0, f.nv > 0, f.cells.count == f.nu * f.nv else { return nil }
+        let d = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .rgba32Float, width: f.nu, height: f.nv,
+                                                         mipmapped: false)
+        d.usage = [.shaderRead]; d.storageMode = .shared
+        guard let tex = device.makeTexture(descriptor: d) else { return nil }
+        // alpha carries the wall jump next to "exists": 1 + jump where a column is, −jump
+        // where none is (flx_pullback decodes it)
+        let jumps = f.columnJumps()
+        var payload = f.cells
+        for k in payload.indices {
+            payload[k].w = payload[k].w >= 0.5 ? 1 + jumps[k] : -jumps[k]
+        }
+        payload.withUnsafeBytes { raw in
+            tex.replace(region: MTLRegionMake2D(0, 0, f.nu, f.nv), mipmapLevel: 0,
+                        withBytes: raw.baseAddress!, bytesPerRow: f.nu * 16)
+        }
+        return tex
+    }
+
+    // MARK: uniforms
+
+    private func makeBase(_ f: FlexibleLatticeInputs) -> Uniforms {
+        var u = Uniforms()
+        u.shape = SIMD4(f.topology == .gyroid ? 0 : 1, f.wallMM, f.lMinMM, f.lMaxMM)
+        u.shape2 = SIMD4(f.honeycombCellMM, f.skinMM, Self.maxSteps, 0)
+        u.buildDir = SIMD4(f.buildDir, 0)
+        (u.rmO, u.rmN) = (SIMD4(f.rho.c0, f.rho.spacing), SIMD4(Float(f.rho.nx), Float(f.rho.ny), Float(f.rho.nz), 0))
+        (u.dsO, u.dsN) = (SIMD4(f.partSDF.c0, f.partSDF.spacing),
+                          SIMD4(Float(f.partSDF.nx), Float(f.partSDF.ny), Float(f.partSDF.nz), 0))
+        var fu = [FaceUniforms](repeating: .zero, count: FlexibleSquishField.maxFaces)
+        for (i, face) in faces.enumerated() {
+            fu[i] = FaceUniforms(centroid: SIMD4(face.centroid, face.maxDepthMM),
+                                 xAxis: SIMD4(face.xAxis, face.uMin), yAxis: SIMD4(face.yAxis, face.vMin),
+                                 load: SIMD4(face.load, face.pitchMM),
+                                 extent: SIMD4(Float(face.nu), Float(face.nv), face.tMin, face.tMax))
+        }
+        u.faces = (fu[0], fu[1], fu[2], fu[3])
+        return u
+    }
+
+    /// The uniforms for one frame: the base, the squish MeshRenderer passes, the march's
+    /// knobs, and the region box dilated by how far the squish can move material.
+    func frameUniforms(squish s: Float) -> Uniforms? {
+        guard var u = base else { return nil }
+        let raw = controlSquishOverride ?? s
+        let sq = raw.isFinite ? Swift.max(0, raw) : 0
+        u.squish = SIMD4(sq, Float(faces.count), ignoresColumnWalls ? 1 : 0, 0)
+        u.march = SIMD4(stepFactor, stepCapCells, minStepMM, earlyOut ? 1 : 0)
+        u.shape2.z = stepBudget
+        let dil = SIMD3<Float>(repeating: sq * maxDepthMM)
+        u.boxMin = SIMD4(regionMin - dil, 0)
+        u.boxMax = SIMD4(regionMax + dil, 0)
+        return u
+    }
+
+    /// The octet's camera basis (LatticeSDFMetal.makeUniforms, verbatim): the eye and the
+    /// per-pixel ray, in MODEL space, as the exact inverse of P·V·M with M = T(c)·R·T(−c).
+    static func rayBasis(camera: OrbitCamera, modelRotation: simd_quatf, modelCenter: SIMD3<Float>, aspect: Float)
+        -> (eye: SIMD3<Float>, rayX: SIMD3<Float>, rayY: SIMD3<Float>, rayDir: SIMD3<Float>) {
+        let invR = modelRotation.inverse
+        let eyeModel = modelCenter + invR.act(camera.eye - modelCenter)
+        let zW = simd_normalize(camera.eye - camera.target)
+        let xW = simd_normalize(simd_cross(camera.up, zW))
+        let yW = simd_cross(zW, xW)
+        let tanHalf = tan(camera.fovY * 0.5)
+        return (eyeModel, invR.act(xW) * tanHalf * aspect, invR.act(yW) * tanHalf, invR.act(-zW))
+    }
+
+    // MARK: encoding (MeshRenderer's depth prepass)
+
+    /// Draw the lattice into the prepass's G-buffer: one full-screen triangle, the pass's
+    /// own pipeline, the caller's depth state (.less, write on — the shell's and the
+    /// octet's), culling off. Returns false (and draws nothing) when not drawable.
+    @discardableResult
+    func encodeGBuffer(_ enc: MTLRenderCommandEncoder, depthState: MTLDepthStencilState,
+                       camera: OrbitCamera, modelRotation: simd_quatf, modelCenter: SIMD3<Float>, aspect: Float,
+                       clipFromModel: simd_float4x4, eyeFromModel: simd_float4x4, eyeNormalBasis: simd_float4x4,
+                       squish: Float) -> Bool {
+        guard isDrawable, let rm = rmTex, let ds = dsTex, var u = frameUniforms(squish: squish) else { return false }
+        // the volumes live on this pass's device; an encoder from another cannot read them
+        guard enc.device === device else { return false }
+        let b = Self.rayBasis(camera: camera, modelRotation: modelRotation,
+                              modelCenter: modelCenter + controlModelCenterOffset, aspect: aspect)
+        var f = Frame()
+        f.eye = SIMD4(b.eye, 1); f.rayX = SIMD4(b.rayX, 0); f.rayY = SIMD4(b.rayY, 0); f.rayDir = SIMD4(b.rayDir, 0)
+        f.clipFromModel = clipFromModel
+        f.eyeFromModel = eyeFromModel
+        f.eyeNormalBasis = eyeNormalBasis
+        // the octet's lightness-by-density ramp, from the legend's own constants
+        let pale = LatticeStructureColour.pale, dense = LatticeStructureColour.interior
+        f.sparse = SIMD4(Float(pale.r), Float(pale.g), Float(pale.b), 1)
+        f.dense = SIMD4(Float(dense.r), Float(dense.g), Float(dense.b), 1)
+        f.rhoSpan = SIMD4(rhoSpan.x, rhoSpan.y, 0, 0)
+        enc.setRenderPipelineState(gbufferPipeline)
+        enc.setDepthStencilState(depthState)
+        enc.setCullMode(.none)
+        enc.setFragmentBytes(&u, length: MemoryLayout<Uniforms>.stride, index: 0)
+        enc.setFragmentBytes(&f, length: MemoryLayout<Frame>.stride, index: 1)
+        enc.setFragmentTexture(rm, index: 0)
+        enc.setFragmentTexture(ds, index: 1)
+        enc.setFragmentTextures(boundColumns(), range: FlexibleLatticeShader.columnSlot..<(FlexibleLatticeShader.columnSlot + FlexibleLatticeShader.maxFaces))
+        enc.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
+        lastFrame = f
+        return true
+    }
+
+    /// Every declared column slot bound: the faces' tables, the 1×1 placeholder elsewhere.
+    private func boundColumns() -> [MTLTexture?] {
+        var cols: [MTLTexture?] = columnTex
+        while cols.count < FlexibleLatticeShader.maxFaces { cols.append(emptyColumns) }
+        return cols
+    }
+
+    // MARK: probes and echoes (tests)
+
+    /// `flx_field` (undeformed) at each point — compare with `FlexibleLatticeField.lattice`
+    /// on `referenceInputs`.
+    func probe(_ points: [SIMD3<Float>]) -> [Float]? {
+        runProbe(probePipeline, points, squish: 0, columns: false)
+    }
+
+    /// `flx_deformed` at each (deformed) point — compare with `FlexibleSquishField.lattice`.
+    func probeSquished(_ points: [SIMD3<Float>], squish s: Float) -> [Float]? {
+        runProbe(squishProbePipeline, points, squish: s, columns: true)
+    }
+
+    private func runProbe(_ pipe: MTLComputePipelineState, _ points: [SIMD3<Float>], squish s: Float,
+                          columns: Bool) -> [Float]? {
+        guard let rm = rmTex, let ds = dsTex, !points.isEmpty, var u = frameUniforms(squish: s),
+              let queue else { return nil }
+        var second = ds
+        if controlSwapVolumes { second = rm; (u.dsO, u.dsN) = (u.rmO, u.rmN) }
+        let pts = points.map { SIMD4<Float>($0, 0) }
+        var n = UInt32(points.count)
+        guard let inBuf = device.makeBuffer(bytes: pts, length: pts.count * 16, options: .storageModeShared),
+              let outBuf = device.makeBuffer(length: points.count * 4, options: .storageModeShared),
+              let cmd = queue.makeCommandBuffer(), let enc = cmd.makeComputeCommandEncoder() else { return nil }
+        enc.setComputePipelineState(pipe)
+        enc.setBuffer(inBuf, offset: 0, index: 0)
+        enc.setBuffer(outBuf, offset: 0, index: 1)
+        enc.setBytes(&u, length: MemoryLayout<Uniforms>.stride, index: 2)
+        enc.setBytes(&n, length: 4, index: 3)
+        enc.setTexture(rm, index: 0)
+        enc.setTexture(second, index: 1)
+        if columns {
+            enc.setTextures(boundColumns(), range: FlexibleLatticeShader.columnSlot..<(FlexibleLatticeShader.columnSlot + FlexibleLatticeShader.maxFaces))
+        }
+        let w = Swift.max(1, Swift.min(64, pipe.maxTotalThreadsPerThreadgroup))
+        enc.dispatchThreadgroups(MTLSize(width: (points.count + w - 1) / w, height: 1, depth: 1),
+                                 threadsPerThreadgroup: MTLSize(width: w, height: 1, depth: 1))
+        enc.endEncoding()
+        cmd.commit(); cmd.waitUntilCompleted()
+        guard cmd.status == .completed else { return nil }
+        let p = outBuf.contents().bindMemory(to: Float.self, capacity: points.count)
+        return Array(UnsafeBufferPointer(start: p, count: points.count))
+    }
+
+    /// Every field of `value` as the GPU reads it, BY NAME (`flx_uniform_echo` when
+    /// `frame` is false, `flx_frame_echo` when true). Generic so a test can hand it a
+    /// deliberately mis-ordered struct (the red control).
+    func echo<T>(_ value: T, frame: Bool, count: Int) -> [SIMD4<Float>]? {
+        var v = value
+        guard let queue, let out = device.makeBuffer(length: count * 16, options: .storageModeShared),
+              let cmd = queue.makeCommandBuffer(), let enc = cmd.makeComputeCommandEncoder() else { return nil }
+        enc.setComputePipelineState(frame ? frameEchoPipeline : uniformEchoPipeline)
+        enc.setBuffer(out, offset: 0, index: 1)
+        withUnsafeBytes(of: &v) { raw in enc.setBytes(raw.baseAddress!, length: raw.count, index: 2) }
+        enc.dispatchThreadgroups(MTLSize(width: 1, height: 1, depth: 1), threadsPerThreadgroup: MTLSize(width: 1, height: 1, depth: 1))
+        enc.endEncoding()
+        cmd.commit(); cmd.waitUntilCompleted()
+        guard cmd.status == .completed else { return nil }
+        let p = out.contents().bindMemory(to: SIMD4<Float>.self, capacity: count)
+        return Array(UnsafeBufferPointer(start: p, count: count))
+    }
+}
+#endif

@@ -551,14 +551,30 @@ public final class FlexibleStageModel: ObservableObject {
     /// The generated lattice no longer matches the settings (a face or the filament changed).
     public var latticeIsStale: Bool { lattice.map { $0.settingsKey != settings.hashValue } ?? false }
 
+    /// Bumped per Generate — the token the preview uploads once per.
+    private var latticeGeneration = 0
+
     public func generateLattice() {
         guard latticeRefusal == nil, !latticeBuilding, let part = project.viewerMesh else { return }
         let faces = settings.loadedFaces
         let keys = faces.map { FlexFaceKey(region: $0.faceRegionID, rotation: $0.rotationDeg) }
-        let squish = keys.compactMap { k -> FlexibleSquishFace? in
-            guard let st = stacks[k], let d = designs[k] else { return nil }
-            return FlexibleSquishFace(stack: st, design: d)
+        // ★ ONE ARRAY PER FACE for the walls AND the dent: core's buildable depths, kept on
+        // the lattice so the map drawn beside it is the one it squishes by
+        var squish: [FlexibleSquishFace] = [], built: [FlexFaceKey] = []
+        var depths: [FlexFaceKey: [Double?]] = [:], noLattice: [FlexFaceKey: [Bool]] = [:]
+        var extent = 0.0
+        for k in keys {
+            guard let st = stacks[k], let d = designs[k] else { continue }
+            let dk = FlexibleSquishFace.buildableDepths(stack: st, design: d)
+            squish.append(FlexibleSquishFace(stack: st, depthsMM: dk))
+            built.append(k)
+            depths[k] = dk
+            noLattice[k] = st.columns.indices.map { $0 < d.columns.count && d.columns[$0].status == "no_lattice" }
+            extent = max(extent, st.uExtentMM, st.vExtentMM)
         }
+        latticeGeneration += 1
+        let generation = latticeGeneration
+        let (squishFaces, builtKeys, faceDepths, faceNoLattice, extentMM) = (squish, built, depths, noLattice, extent)
         let build = self.build, key = settings.hashValue, temp = designTempC ?? 0
         let regions = self.regions
         let skinOff: [(face: Int, cuts: [RegionCut])] = faces.filter { !$0.skinOn }.flatMap { f in
@@ -576,8 +592,9 @@ public final class FlexibleStageModel: ObservableObject {
                 let inputs = try FlexibleLatticeBuilder.inputs(
                     field: field, part: part, topology: build.topology, beadsPerWall: build.beadsPerWall,
                     beadWidthMM: build.beadWidthMM, buildDir: buildDir, skinOffFaces: skinOff)
-                let g = FlexibleGeneratedLattice(inputs: inputs, faces: squish, topology: build.topology,
-                                                 tempC: temp, settingsKey: key)
+                let g = FlexibleGeneratedLattice(inputs: inputs, faces: squishFaces, keys: builtKeys, columnDepths: faceDepths,
+                                                 columnNoLattice: faceNoLattice, extentMM: extentMM, generation: generation,
+                                                 topology: build.topology, tempC: temp, settingsKey: key)
                 await MainActor.run { self.lattice = g; self.latticeBuilding = false }
             } catch {
                 await MainActor.run { self.latticeError = "\(error)"; self.latticeBuilding = false }

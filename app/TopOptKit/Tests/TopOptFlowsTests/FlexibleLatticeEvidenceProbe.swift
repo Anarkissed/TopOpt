@@ -1,15 +1,22 @@
-// FlexibleLatticeEvidenceProbe — the generated lattice on REAL designs, drawn by the
-// preview's own shader (task 2026-09-29-flexible-screens, overnight round). Opt-in:
-// FLEX_EVIDENCE_DIR=<dir> swift test --filter FlexibleLatticeEvidenceProbe
+// FlexibleLatticeEvidenceProbe — the page's X-RAY frame on REAL designs, drawn by
+// MeshRenderer with the Flexible pass in its passes (task 2026-09-29-flexible-screens,
+// in-pass round). Opt-in:
+//     FLEX_EVIDENCE_DIR=<dir> swift test --filter FlexibleLatticeEvidenceProbe
 //
-// What it draws, each through the same path the page takes (core's design → core's
-// assembled field → FlexibleLatticeBuilder.inputs → FlexibleLatticeRenderer):
-//   * C1's pad, top face designed at 30 kg, gyroid and honeycomb, at rest / half / full
-//     load (the loop's three moments), dent ×3;
-//   * the pad with its top SPLIT at x = 50 (FlexibleRegions sectors), the halves loaded at
-//     10 kg and 25 kg — two designs, one lattice, two squishes.
-// The frames are the LATTICE LAYER ONLY (the page draws the part under it at 18 %), over
-// the stage's dark backdrop. They are not device screenshots.
+// ★ ONE RENDERER, THE PAGE'S CONFIGURATION. Each frame is `MeshRenderer.renderOffscreen`
+// of what FlexibleStagePage hands MetalMeshView after Generate with X-ray on:
+//   * the overlay mesh (the part, the loaded face replaced by its column map) SETTLED
+//     (gravity → down) like the page, the orbit camera above it, MSAA 4× as the screen;
+//   * X-ray: the body a 0.04 ghost (FlexibleStagePage.xrayBodyAlpha) with the ghost tints,
+//     the bent heat-map plane opaque (flags.y), coloured and dented from the lattice's OWN
+//     depths (FlexibleShownValues with the drawn lattice, capped exaggeration);
+//   * the lattice as the pass's input (FlexibleLatticePreview.inputs), squished by the same
+//     flexScale as the dent at rest / half / full.
+// Cases: C1's pad (top face designed at 30 kg) gyroid and honeycomb, rest / half / full;
+// the pad with its top SPLIT at x = 50, halves at 10 kg and 25 kg, rest / full.
+// Also MEASURED (printed, for his ruling): walls poking through the opaque map — interior
+// map pixels where the frame differs from the same frame with the pass hidden.
+// They are offscreen frames of the shipping renderer, not device screenshots.
 #if canImport(MetalKit)
 import XCTest
 import MetalKit
@@ -18,131 +25,18 @@ import simd
 @testable import TopOptFlows
 @testable import TopOptKit
 
+@MainActor
 final class FlexibleLatticeEvidenceProbe: XCTestCase {
 
     static let map = FlexMap(mode: "both", x: FlexCurve(x: [0, 0.5, 1], y: [0.3, 1, 0.3]),
                              y: FlexCurve(x: [0, 0.5, 1], y: [0.3, 1, 0.3]), centreEdge: .flat, deepestMM: 3)
+    static let settle = simd_quatf(from: SIMD3<Float>(0, 0, -1), to: SIMD3<Float>(0, -1, 0))
+    static let bg = MTLClearColor(red: 0.11, green: 0.12, blue: 0.14, alpha: 1)
+    static let size = 900
 
-    /// The page's own view: the part SETTLED (gravity → down, the default settle the page
-    /// uses when the project has none) about its centre, the orbit camera above it.
-    static func projection(size: Int) -> CameraProjection {
-        let c = SIMD3<Float>(50, 50, 10)
-        var cam = OrbitCamera()
-        cam.frame(MeshBounds(min: c - SIMD3(52, 12, 52), max: c + SIMD3(52, 12, 52), isEmpty: false))
-        cam.setOrientation(azimuth: 0.65, elevation: 0.42)
-        let p = CameraProjection(camera: cam, viewportSize: CGSize(width: size, height: size))
-        let settle = simd_quatf(from: SIMD3<Float>(0, 0, -1), to: SIMD3<Float>(0, -1, 0))
-        let m = ViewerModelFrame.matrix(centre: c, rotation: settle)
-        return CameraProjection(viewProjection: p.viewProjection * m, viewportSize: p.viewportSize)
-    }
-
-    static func write(_ px: [UInt8], size: Int, to url: URL) throws {
-        var out = [UInt8](repeating: 255, count: px.count)
-        let bg: [Float] = [0.11, 0.12, 0.14]
-        for i in stride(from: 0, to: px.count, by: 4) {
-            let a = Float(px[i + 3]) / 255
-            for c in 0..<3 { out[i + c] = UInt8(Swift.min(255, Float(px[i + c]) + bg[c] * 255 * (1 - a))) }
-        }
-        let provider = try XCTUnwrap(CGDataProvider(data: Data(out) as CFData))
-        let img = try XCTUnwrap(CGImage(width: size, height: size, bitsPerComponent: 8, bitsPerPixel: 32,
-                                        bytesPerRow: size * 4, space: CGColorSpaceCreateDeviceRGB(),
-                                        bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.noneSkipLast.rawValue),
-                                        provider: provider, decode: nil, shouldInterpolate: false,
-                                        intent: .defaultIntent))
-        let dest = try XCTUnwrap(CGImageDestinationCreateWithURL(url as CFURL, "public.png" as CFString, 1, nil))
-        CGImageDestinationAddImage(dest, img, nil)
-        XCTAssertTrue(CGImageDestinationFinalize(dest))
-        print("FLEX-EVIDENCE wrote \(url.path)")
-    }
-
-    /// ★ THE PAGE'S FRAME, composed offscreen from the page's own two renderers: MeshRenderer
-    /// draws the overlay mesh (the part with the face's column map) SETTLED, at the page's
-    /// 18 % ghost with the dented map opaque (FlexibleOverlay tints flags.y), dented by the
-    /// same displacements × exaggeration × amplitude; the lattice layer is drawn with the
-    /// projection the page composes (camera · settle about the mesh centre) and laid over
-    /// it premultiplied, as the transparent MTKView is. Not a device screenshot.
-    @MainActor
-    func testComposeThePagesFrame() throws {
-        guard let dir = ProcessInfo.processInfo.environment["FLEX_EVIDENCE_DIR"] else {
-            throw XCTSkip("set FLEX_EVIDENCE_DIR to compose the page's frame")
-        }
-        guard let device = MTLCreateSystemDefaultDevice() else { throw XCTSkip("no Metal device") }
-        guard let mr = MeshRenderer(device: device, sampleCount: 4) else {
-            throw XCTSkip("MeshRenderer init: \(MeshRenderer.lastInitError ?? "?")")
-        }
-        let lr = try FlexibleLatticeRenderer(device: device)
-        let size = 900
-        let m = try TopOptKit.importMesh(path: FlexibleStageTests.padSTL)
-        let part = ViewerMesh(vertices: m.vertices, indices: m.indices, faceIDs: m.faceIDs, pseudoFaces: true)
-        let scene = try FlexibleScene(jobJSON: try FlexibleLatticeFieldTests.padJob(),
-                                      jobDir: FlexibleLatticeFieldTests.padDir.path)
-        let topo = "gyroid"
-        let build = FlexBuildParams(topology: topo, beadsPerWall: 1, beadWidthMM: 0.42)
-        let d = try scene.design(materialsPath: FlexibleStageTests.materialsPath, materialID: "varioshore_tpu",
-                                 tempC: 220, face: 101, rotation: 0, map: Self.map, weightN: 30 * 9.80665,
-                                 stamp: nil, build: build)
-        let st = try scene.stack(face: 101, rotation: 0)
-        let key = FlexFaceKey(region: 101, rotation: 0)
-        let geo = try FlexFaceGeometry.compute(scene: scene, key: key, stack: st, partFlat: part.flat.positions)
-        let overlay = FlexibleOverlayMesh.build(part: part, faces: [
-            FlexibleOverlayFace(key: key, faces: [1], cuts: [], stack: st, centres: geo.centres)])
-        let depths: [Double?] = st.columns.indices.map { k in
-            let c = d.columns[k]
-            return c.status != "no_lattice" && c.buildableOK ? c.buildableDepthMM : nil
-        }
-        let maxDepth = depths.compactMap { $0 }.max() ?? 0
-        let colours = depths.map { $0.map { FlexibleColours.depth($0, max: maxDepth) } ?? FlexibleColours.noNumber }
-        let tints = overlay.tints(partTint: { _, _ in nil }, columnColours: [key: colours])
-        let ghostTints = overlay.tints(partTint: { _, _ in nil }, columnColours: [key: colours],
-                                       ghost: FlexibleColours.ghost)
-        let dents = overlay.displacements(depths: [key: depths], stacks: [key: st], partUVT: [key: geo.partUVT])
-        let ext = max(st.uExtentMM, st.vExtentMM)
-        let exaggeration = Float(max(1, min(4, (0.10 * ext / maxDepth).rounded())))   // the page's rule
-        let field = try scene.densityField(faces: [101], rotations: [0], build: build)
-        let inputs = try FlexibleLatticeBuilder.inputs(field: field, part: part, topology: topo, beadsPerWall: 1,
-                                                       beadWidthMM: 0.42, buildDir: SIMD3(0, 0, 1), skinOffFaces: [])
-        let settle = simd_quatf(from: SIMD3<Float>(0, 0, -1), to: SIMD3<Float>(0, -1, 0))
-
-        mr.setMesh(overlay.mesh)
-        mr.beginSettle(to: settle, duration: 0)
-        mr.camera.setOrientation(azimuth: 0.65, elevation: 0.42)
-        mr.setVertexTints(ghostTints)
-        _ = tints
-        mr.setFlexDisplacements(dents)
-        mr.setBodyAlpha(FlexibleStagePage.xrayBodyAlpha)
-        let cam = CameraProjection(camera: mr.camera, viewportSize: CGSize(width: size, height: size))
-        let model = ViewerModelFrame.matrix(centre: overlay.mesh.bounds.center, rotation: settle)
-        let proj = CameraProjection(viewProjection: cam.viewProjection * model, viewportSize: cam.viewportSize)
-        lr.setInputs(inputs)
-        lr.setSquishFaces([FlexibleSquishFace(stack: st, design: d)])
-        lr.exaggeration = exaggeration
-        print("FLEX-COMPOSE pad: exaggeration ×\(exaggeration), deepest buildable \(maxDepth) mm, "
-              + "overlay \(overlay.mesh.flat.vertexCount) flat vertices")
-        let bg = MTLClearColor(red: 0.11, green: 0.12, blue: 0.14, alpha: 1)
-        for (label, amount) in [("rest", Float(0)), ("full", Float(1))] {
-            mr.setFlexScale(exaggeration * amount)
-            let body = try XCTUnwrap(mr.renderOffscreen(size: size, clear: bg))
-            // ★ the X-RAY GHOST alone: the body faint and rim-lit, the bent heat-map plane opaque
-            var ghostOnly = [UInt8](repeating: 255, count: body.count)
-            for i in stride(from: 0, to: body.count, by: 4) {
-                ghostOnly[i] = body[i + 2]; ghostOnly[i + 1] = body[i + 1]; ghostOnly[i + 2] = body[i]
-            }
-            try Self.writeOpaque(ghostOnly, size: size,
-                                 to: URL(fileURLWithPath: dir).appendingPathComponent("xray_ghost_dent_pad_\(label).png"))
-            let lat = try XCTUnwrap(lr.renderOffscreen(width: size, height: size, projection: proj, squish: amount))
-            // premultiplied "over", in BGRA; then swizzled to RGBA for the PNG
-            var out = [UInt8](repeating: 255, count: body.count)
-            for i in stride(from: 0, to: body.count, by: 4) {
-                let a = Float(lat[i + 3]) / 255
-                let px = (0..<3).map { c in UInt8(min(255, Float(lat[i + c]) + Float(body[i + c]) * (1 - a))) }
-                out[i] = px[2]; out[i + 1] = px[1]; out[i + 2] = px[0]
-            }
-            try Self.writeOpaque(out, size: size,
-                                 to: URL(fileURLWithPath: dir).appendingPathComponent("page_composite_pad_\(topo)_\(label).png"))
-        }
-    }
-
-    static func writeOpaque(_ rgba: [UInt8], size: Int, to url: URL) throws {
+    static func writeBGRA(_ bgra: [UInt8], size: Int, to url: URL) throws {
+        var rgba = bgra
+        for i in stride(from: 0, to: rgba.count, by: 4) { rgba.swapAt(i, i + 2); rgba[i + 3] = 255 }
         let provider = try XCTUnwrap(CGDataProvider(data: Data(rgba) as CFData))
         let img = try XCTUnwrap(CGImage(width: size, height: size, bitsPerComponent: 8, bitsPerPixel: 32,
                                         bytesPerRow: size * 4, space: CGColorSpaceCreateDeviceRGB(),
@@ -155,20 +49,135 @@ final class FlexibleLatticeEvidenceProbe: XCTestCase {
         print("FLEX-EVIDENCE wrote \(url.path)")
     }
 
-    func testDrawTheGeneratedLatticeOnRealDesigns() throws {
-        guard let dir = ProcessInfo.processInfo.environment["FLEX_EVIDENCE_DIR"] else {
-            throw XCTSkip("set FLEX_EVIDENCE_DIR to draw the generated lattice")
+    /// One loaded face as the page builds it: core's stack + design, the overlay geometry.
+    struct Face {
+        let key: FlexFaceKey
+        let stack: FlexStackInfo
+        let design: FlexFaceDesignInfo
+        let geometry: FlexFaceGeometry
+        let overlayFace: FlexibleOverlayFace
+        let settings: FlexibleFaceSettings
+    }
+
+    /// What the page draws after Generate with X-ray on, from the faces and the lattice.
+    struct Page {
+        let overlay: FlexibleOverlayMesh
+        let lattice: FlexibleGeneratedLattice
+        let shown: FlexibleShownValues
+        let ghostTints: [Float]
+        let dentOnlyTints: [Float]
+        let dents: [Float]
+    }
+
+    static func page(part: ViewerMesh, faces: [Face], inputs: FlexibleLatticeInputs, topology: String,
+                     generation: Int) -> Page {
+        let overlay = FlexibleOverlayMesh.build(part: part, faces: faces.map(\.overlayFace))
+        var depths: [FlexFaceKey: [Double?]] = [:], noLat: [FlexFaceKey: [Bool]] = [:]
+        var squish: [FlexibleSquishFace] = [], ext = 0.0
+        for f in faces {
+            let d = FlexibleSquishFace.buildableDepths(stack: f.stack, design: f.design)
+            depths[f.key] = d
+            noLat[f.key] = f.stack.columns.indices.map { $0 < f.design.columns.count && f.design.columns[$0].status == "no_lattice" }
+            squish.append(FlexibleSquishFace(stack: f.stack, depthsMM: d))
+            ext = max(ext, f.stack.uExtentMM, f.stack.vExtentMM)
+        }
+        let g = FlexibleGeneratedLattice(inputs: inputs, faces: squish, keys: faces.map(\.key), columnDepths: depths,
+                                         columnNoLattice: noLat, extentMM: ext, generation: generation,
+                                         topology: topology, tempC: 220, settingsKey: 0)
+        let inp = FlexibleShownValues.Inputs(
+            loadedFaces: faces.map(\.settings), stacks: Dictionary(uniqueKeysWithValues: faces.map { ($0.key, $0.stack) }),
+            designs: Dictionary(uniqueKeysWithValues: faces.map { ($0.key, $0.design) }), liveS: [:], checks: [:],
+            checkStamps: [], checkStampShown: nil, step: .view3D, showBuildable: true)
+        let shown = FlexibleShownValues(inp, drawnLattice: g)
+        var colours: [FlexFaceKey: [SIMD4<Float>]] = [:]
+        var shownDepths: [FlexFaceKey: [Double?]] = [:]
+        for (k, vals) in shown.values {
+            colours[k] = vals.map { v in
+                switch v {
+                case .depth(let mm): return FlexibleColours.depth(mm, max: shown.maxDepth)
+                case .noNumber: return FlexibleColours.noNumber
+                case .solid: return SIMD4(0, 0, 0, 0)
+                }
+            }
+            shownDepths[k] = vals.map { if case .depth(let d) = $0 { return d } else { return nil } }
+        }
+        // the page tints loaded regions green; their triangles are replaced by the map here
+        let ghostTints = overlay.tints(partTint: { _, _ in nil }, columnColours: colours, ghost: FlexibleColours.ghost)
+        let dentOnly = overlay.tints(partTint: { _, _ in nil }, columnColours: colours, ghost: nil)
+        let geo = Dictionary(uniqueKeysWithValues: faces.map { ($0.key, $0.geometry.partUVT) })
+        let stacks = Dictionary(uniqueKeysWithValues: faces.map { ($0.key, $0.stack) })
+        let dents = overlay.displacements(depths: shownDepths, stacks: stacks, partUVT: geo)
+        return Page(overlay: overlay, lattice: g, shown: shown, ghostTints: ghostTints, dentOnlyTints: dentOnly, dents: dents)
+    }
+
+    /// Renders the page's X-ray frame at each amplitude, writes it, and measures poke-through.
+    func render(_ p: Page, device: MTLDevice, name: String, amplitudes: [(String, Double)]) throws {
+        guard let mr = MeshRenderer(device: device, sampleCount: 4) else {
+            throw XCTSkip("MeshRenderer init: \(MeshRenderer.lastInitError ?? "?")")
+        }
+        XCTAssertTrue(mr.latticePipelinesDidBuild)
+        mr.setMesh(p.overlay.mesh)
+        mr.beginSettle(to: Self.settle, duration: 0)
+        mr.camera.setOrientation(azimuth: 0.65, elevation: 0.42)
+        mr.setFlexDisplacements(p.dents)
+        mr.applyFlexibleLattice(FlexibleLatticePreview.inputs(xray: true, lattice: p.lattice, building: false), device: device)
+        XCTAssertTrue(mr.flexibleLatticeInFrame)
+        let dir = URL(fileURLWithPath: ProcessInfo.processInfo.environment["FLEX_EVIDENCE_DIR"]!)
+        let n = Self.size
+        let (bb, bgG, br) = (UInt8((Self.bg.blue * 255).rounded()), UInt8((Self.bg.green * 255).rounded()),
+                             UInt8((Self.bg.red * 255).rounded()))
+        for (label, amp) in amplitudes {
+            mr.setFlexScale(Float(p.shown.exaggeration * amp))
+            mr.flexibleLattice?.hidden = false
+            mr.setVertexTints(p.ghostTints)
+            mr.setBodyAlpha(FlexibleStagePage.xrayBodyAlpha)
+            let a = try XCTUnwrap(mr.renderOffscreen(size: n, clear: Self.bg))
+            try Self.writeBGRA(a, size: n, to: dir.appendingPathComponent("inpass_xray_\(name)_\(label).png"))
+            let mask = try XCTUnwrap(mr.latticeMaskDump(size: n))
+            // ★ POKE-THROUGH: the same frame with a drawable pass that has NO walls (mask all
+            // zero — T8's reference), so the map is shaded identically (neutral AO) and only
+            // walls nearer than the map can differ. (The pass HIDDEN would put the ghost back
+            // in the G-buffer and shade the map with the shell's AO — not a poke-through.)
+            var empty = p.lattice.inputs
+            empty.mask.values = [Float](repeating: 0, count: empty.mask.values.count)
+            mr.applyFlexibleLattice(FlexibleLatticeLayerInputs(lattice: empty, faces: p.lattice.faces,
+                                                               token: -1000 - p.lattice.generation), device: device)
+            let c = try XCTUnwrap(mr.renderOffscreen(size: n, clear: Self.bg))
+            mr.flexibleLattice?.hidden = true
+            mr.setVertexTints(p.dentOnlyTints)
+            mr.setBodyAlpha(0)
+            let d = try XCTUnwrap(mr.renderOffscreen(size: n, clear: Self.bg))
+            var foot = [Bool](repeating: false, count: n * n)
+            for q in 0..<(n * n) {
+                let i = q * 4
+                foot[q] = abs(Int(d[i]) - Int(bb)) > 1 || abs(Int(d[i + 1]) - Int(bgG)) > 1 || abs(Int(d[i + 2]) - Int(br)) > 1
+            }
+            var interior = 0, poke = 0
+            for y in 1..<(n - 1) { for x in 1..<(n - 1) {
+                let q = y * n + x
+                guard foot[q], foot[q - 1], foot[q + 1], foot[q - n], foot[q + n] else { continue }
+                interior += 1
+                let i = q * 4
+                if a[i] != c[i] || a[i + 1] != c[i + 1] || a[i + 2] != c[i + 2] { poke += 1 }
+            } }
+            print(String(format: "FLEX-EVIDENCE %@ %@: flexScale %.2f (× %.0f · %.1f), lattice covers %d px (%.1f %%); poke-through %d of %d interior map px (%.2f %%)",
+                         name, label, p.shown.exaggeration * amp, p.shown.exaggeration, amp, mask.covered,
+                         100 * mask.coveredFraction, poke, interior, interior > 0 ? 100 * Double(poke) / Double(interior) : 0))
+            XCTAssertGreaterThan(mask.covered, n * n / 100, "\(name) \(label): the lattice must draw")
+            mr.applyFlexibleLattice(FlexibleLatticePreview.inputs(xray: true, lattice: p.lattice, building: false), device: device)
+        }
+    }
+
+    func testDrawThePagesXrayFrameInPass() throws {
+        guard ProcessInfo.processInfo.environment["FLEX_EVIDENCE_DIR"] != nil else {
+            throw XCTSkip("set FLEX_EVIDENCE_DIR to draw the in-pass X-ray evidence")
         }
         guard let device = MTLCreateSystemDefaultDevice() else { throw XCTSkip("no Metal device") }
-        let r = try FlexibleLatticeRenderer(device: device)
-        let size = 900
-        let proj = Self.projection(size: size)
-        let out = URL(fileURLWithPath: dir)
         let m = try TopOptKit.importMesh(path: FlexibleStageTests.padSTL)
         let part = ViewerMesh(vertices: m.vertices, indices: m.indices, faceIDs: m.faceIDs, pseudoFaces: true)
 
         // ── C1's pad, top face (region 101), 30 kg ──────────────────────────────────────
-        for topo in ["gyroid", "honeycomb"] {
+        for (n, topo) in ["gyroid", "honeycomb"].enumerated() {
             let scene = try FlexibleScene(jobJSON: try FlexibleLatticeFieldTests.padJob(),
                                           jobDir: FlexibleLatticeFieldTests.padDir.path)
             let build = FlexBuildParams(topology: topo, beadsPerWall: 1, beadWidthMM: 0.42)
@@ -177,28 +186,30 @@ final class FlexibleLatticeEvidenceProbe: XCTestCase {
                                      stamp: nil, build: build)
             XCTAssertNil(d.refusal)
             let st = try scene.stack(face: 101, rotation: 0)
+            let key = FlexFaceKey(region: 101, rotation: 0)
+            let geo = try FlexFaceGeometry.compute(scene: scene, key: key, stack: st, partFlat: part.flat.positions)
+            let face = Face(key: key, stack: st, design: d, geometry: geo,
+                            overlayFace: FlexibleOverlayFace(key: key, faces: [1], cuts: [], stack: st, centres: geo.centres),
+                            settings: FlexibleFaceSettings(faceRegionID: 101, weightKg: 30, deepestMM: 3))
             let field = try scene.densityField(faces: [101], rotations: [0], build: build)
             let inputs = try FlexibleLatticeBuilder.inputs(field: field, part: part, topology: topo, beadsPerWall: 1,
                                                            beadWidthMM: 0.42, buildDir: SIMD3(0, 0, 1), skinOffFaces: [])
-            let face = FlexibleSquishFace(stack: st, design: d)
-            let g = FlexibleGeneratedLattice(inputs: inputs, faces: [face], topology: topo, tempC: 220, settingsKey: 0)
-            print("FLEX-EVIDENCE pad \(topo): wall \(inputs.wallMM) mm, deepest buildable \(g.maxDepthMM) mm, "
-                  + "columns \(st.columns.count), moves \(face.moves)")
-            XCTAssertTrue(face.moves, "the designed face must squish")
-            for q in FlexibleExportSheet.qualities {
-                let h = Double(inputs.wallMM) * q.pitchOverWall
-                if let e = try? FlexibleLatticeExport.estimate(inputs, hMM: h) {
-                    print(String(format: "FLEX-EXPORT-ESTIMATE pad %@ %@ h %.3f mm: grid %d×%d×%d, ~%d triangles, %.0f MB",
-                                 topo, q.label, h, e.nx, e.ny, e.nz, e.triangles, Double(e.bytes) / 1_048_576))
-                }
-            }
-            r.setInputs(inputs)
-            r.setSquishFaces([face])
-            r.exaggeration = 3
-            for (label, s) in [("rest", Float(0)), ("half", Float(0.5)), ("full", Float(1))] {
-                let px = try XCTUnwrap(r.renderOffscreen(width: size, height: size, projection: proj, squish: s))
-                XCTAssertGreaterThan(FlexibleLatticeRenderer.coveredPixelCount(rgba: px), size * size / 50)
-                try Self.write(px, size: size, to: out.appendingPathComponent("lattice_pad_\(topo)_\(label)_x3.png"))
+            let p = Self.page(part: part, faces: [face], inputs: inputs, topology: topo, generation: n + 1)
+            print("FLEX-EVIDENCE pad \(topo): wall \(inputs.wallMM) mm, deepest buildable \(p.lattice.maxDepthMM) mm, "
+                  + "maxSafeScale \(p.lattice.maxSafeScale), exaggeration × \(p.shown.exaggeration), label '\(p.shown.label)'")
+            try render(p, device: device, name: "pad_\(topo)", amplitudes: [("rest", 0), ("half", 0.5), ("full", 1)])
+            // ★ SKIN OFF (the walls run to the face): where the mean-corner dent can let walls
+            // poke through the opaque map — measured for his ruling, gyroid at full squish
+            if topo == "gyroid" {
+                var off = face.settings
+                off.skinOn = false
+                let offInputs = try FlexibleLatticeBuilder.inputs(field: field, part: part, topology: topo, beadsPerWall: 1,
+                                                                  beadWidthMM: 0.42, buildDir: SIMD3(0, 0, 1),
+                                                                  skinOffFaces: [(face: 1, cuts: [])])
+                let po = Self.page(part: part, faces: [Face(key: key, stack: st, design: d, geometry: geo,
+                                                            overlayFace: face.overlayFace, settings: off)],
+                                   inputs: offInputs, topology: topo, generation: 20)
+                try render(po, device: device, name: "pad_gyroid_skin_off", amplitudes: [("full", 1)])
             }
         }
 
@@ -211,33 +222,32 @@ final class FlexibleLatticeEvidenceProbe: XCTestCase {
         var s = FlexibleStageSettings(materialID: "varioshore_tpu", nozzleTempC: 220)
         s.setFace(FlexibleFaceSettings(faceRegionID: left, weightKg: 10, deepestMM: 3))
         s.setFace(FlexibleFaceSettings(faceRegionID: right, weightKg: 25, deepestMM: 3))
-        var inputs = FlexibleJob.Inputs(modelPath: FlexibleStageTests.padSTL, resolution: 50, beadWidthMM: 0.42,
-                                        faceCount: 6, settings: s)
-        inputs.sectorRegions = regions.wire
-        let scene = try FlexibleScene(jobJSON: try FlexibleJob.sceneJobJSON(inputs, fallbackMaterial: "varioshore_tpu"),
-                                      jobDir: "/")
+        var ji = FlexibleJob.Inputs(modelPath: FlexibleStageTests.padSTL, resolution: 50, beadWidthMM: 0.42,
+                                    faceCount: 6, settings: s)
+        ji.sectorRegions = regions.wire
+        let scene = try FlexibleScene(jobJSON: try FlexibleJob.sceneJobJSON(ji, fallbackMaterial: "varioshore_tpu"), jobDir: "/")
         let build = FlexBuildParams(topology: "gyroid", beadsPerWall: 1, beadWidthMM: 0.42)
-        var faces: [FlexibleSquishFace] = []
+        var faces: [Face] = []
         for (id, kg) in [(left, 10.0), (right, 25.0)] {
             let d = try scene.design(materialsPath: FlexibleStageTests.materialsPath, materialID: "varioshore_tpu",
                                      tempC: 220, face: id, rotation: 0, map: Self.map, weightN: kg * 9.80665,
                                      stamp: nil, build: build)
             XCTAssertNil(d.refusal, "\(regions.name(id, mesh: part))")
-            faces.append(FlexibleSquishFace(stack: try scene.stack(face: id, rotation: 0), design: d))
+            let st = try scene.stack(face: id, rotation: 0)
+            let key = FlexFaceKey(region: id, rotation: 0)
+            let geo = try FlexFaceGeometry.compute(scene: scene, key: key, stack: st, partFlat: part.flat.positions)
+            faces.append(Face(key: key, stack: st, design: d, geometry: geo,
+                              overlayFace: FlexibleOverlayFace(key: key, faces: Set(regions.faces(of: id, mesh: part)),
+                                                               cuts: regions.cuts(of: id), stack: st, centres: geo.centres),
+                              settings: FlexibleFaceSettings(faceRegionID: id, weightKg: kg, deepestMM: 3)))
         }
         let field = try scene.densityField(faces: [left, right], rotations: [0, 0], build: build)
         let li = try FlexibleLatticeBuilder.inputs(field: field, part: part, topology: "gyroid", beadsPerWall: 1,
                                                    beadWidthMM: 0.42, buildDir: SIMD3(0, 0, 1), skinOffFaces: [])
-        func deepest(_ f: FlexibleSquishFace) -> Float { f.cells.reduce(0) { max($0, $1.w > 0.5 ? $1.x : 0) } }
-        print("FLEX-EVIDENCE split pad: \(regions.name(left, mesh: part)) 10 kg deepest \(deepest(faces[0])) mm; "
-              + "\(regions.name(right, mesh: part)) 25 kg deepest \(deepest(faces[1])) mm")
-        r.setInputs(li)
-        r.setSquishFaces(faces)
-        r.exaggeration = 3
-        for (label, sq) in [("rest", Float(0)), ("full", Float(1))] {
-            let px = try XCTUnwrap(r.renderOffscreen(width: size, height: size, projection: proj, squish: sq))
-            try Self.write(px, size: size, to: out.appendingPathComponent("lattice_split_pad_10kg_25kg_\(label)_x3.png"))
-        }
+        let p = Self.page(part: part, faces: faces, inputs: li, topology: "gyroid", generation: 9)
+        print("FLEX-EVIDENCE split pad: \(regions.name(left, mesh: part)) 10 kg deepest \(p.lattice.faces[0].maxDepthMM) mm; "
+              + "\(regions.name(right, mesh: part)) 25 kg deepest \(p.lattice.faces[1].maxDepthMM) mm; exaggeration × \(p.shown.exaggeration)")
+        try render(p, device: device, name: "split_pad_10kg_25kg", amplitudes: [("rest", 0), ("full", 1)])
     }
 }
 #endif
