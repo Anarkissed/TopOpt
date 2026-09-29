@@ -177,7 +177,18 @@ GradedField grade_lattice(const VoxelGrid& grid,
   GradedField out;
   // ── the limits, READ from core (never hardcoded here) ──────────────────────────
   const double rho_lo = lattice_rho_min(topo);
-  const double rho_hi = lattice_rho_max(topo);
+  // ★ THE STATED CAP, UNDER EITHER INTENT (see GradingLawParams). Lowering the band's
+  // TOP, not the density of any one voxel: everything downstream -- the aesthetic
+  // range, the percentile, the histogram's ceiling count that ruling D's refusal reads
+  // -- then answers to the capped band without a second notion of "the top" existing.
+  const double rho_hi_band = lattice_rho_max(topo);
+  const double rho_hi = params.max_relative_density > 0.0
+                            ? std::min(rho_hi_band, params.max_relative_density)
+                            : rho_hi_band;
+  if (params.max_relative_density > 0.0 && !(rho_hi > rho_lo))
+    throw std::invalid_argument(
+        "grade_lattice: max_relative_density is at or below the certifiable band's "
+        "floor, so no density is admissible");
   const double n_star = lattice_cells_per_member_min(topo);
   out.band_rho_min = rho_lo;
   out.band_rho_max = rho_hi;

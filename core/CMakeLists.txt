@@ -99,7 +99,12 @@ add_library(topopt
   src/mesh/surface_operator.cpp
   src/mesh/lattice_gen.cpp
   src/mesh/organic_lattice.cpp
+  src/mesh/lattice_lslt.cpp
+  src/mesh/lattice_union_volume.cpp
+  src/mesh/lattice_dc.cpp
   src/mesh/lattice_boundary.cpp
+  src/mesh/stepped_plan.cpp
+  src/voxel/voxel_sdf.cpp
   src/mesh/lattice_void.cpp
   src/voxel/voxelize.cpp
   src/voxel/clearance.cpp
@@ -323,6 +328,10 @@ target_link_libraries(test_lattice_gen PRIVATE topopt)
 target_compile_definitions(test_lattice_gen PRIVATE
   LATTICE_TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
 add_test(NAME lattice_gen COMMAND test_lattice_gen)
+
+add_executable(test_stepped_plan tests/unit/test_stepped_plan.cpp)
+target_link_libraries(test_stepped_plan PRIVATE topopt)
+add_test(NAME stepped_plan COMMAND test_stepped_plan)
 
 # The lattice boundary finish (handoff 2026-07-29-lattice-boundary-finish): the
 # shared boundary predicate, solid-safe clipping (B3 is adversarial against a
@@ -2326,3 +2335,6 @@ if(OpenCASCADE_FOUND AND Eigen3_FOUND)
     add_test(NAME threemf_import COMMAND test_3mf_import)
   endif()
 endif()
+
+add_executable(lslt_probe EXCLUDE_FROM_ALL tests/tools/lslt_probe.cpp)
+target_link_libraries(lslt_probe PRIVATE topopt)

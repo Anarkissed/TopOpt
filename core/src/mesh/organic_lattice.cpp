@@ -4,6 +4,8 @@
 
 #include "topopt/organic_lattice.hpp"
 
+#include "topopt/lattice_union_volume.hpp"
+
 #include "topopt/mesh_distance.hpp"
 
 #include <algorithm>
@@ -267,6 +269,38 @@ SyntheticStressReport synthesize_focal_stress(
     SyntheticStressRegionReport rr;
     rr.region_id = cfg.region_id; rr.face_id = cfg.face_id; rr.foci = cfg.foci;
     rr.voxels = cnt;
+    // ── ★ RULING H: THE WALL IS THE UNIT OF THE DECISION ────────────────────────
+    // p99 of the REAL field over this region, taken before a single voxel is written.
+    // A flagged region is synthesised WHOLE regardless -- a stated focus is an
+    // instruction, not a hint -- but p99 against the threshold is recorded so a wall
+    // that is actually carrying load cannot be flattened without it showing up.
+    {
+      std::vector<double> vms;
+      vms.reserve(cnt);
+      for (std::size_t e = 0; e < n; ++e)
+        if (candidate[e] && voxel_region_id[e] == cfg.region_id)
+          vms.push_back(organic_von_mises6(&stress[6 * e]));
+      std::sort(vms.begin(), vms.end());
+      const std::size_t q =
+          vms.empty() ? 0
+                      : std::min(vms.size() - 1,
+                                 static_cast<std::size_t>(0.99 * (vms.size() - 1) + 0.5));
+      rr.p99_von_mises = vms.empty() ? 0.0 : vms[q];
+      // AT the threshold is dead, not alive: "at 0.005 MPa and lower, it is not [a
+      // stressed wall]" (maintainer, 2026-09-08). `<` here left a wall sitting exactly
+      // on the floor untouched.
+      rr.p99_under_threshold = rr.p99_von_mises <= thr;
+      // ★ AND THE DECISION IS THE WALL'S p99, NOT THE USER'S FLAG. The flag says WHICH
+      // walls to consider and where the foci go; whether a wall is dead is measured.
+      // A flagged wall that is carrying load is left ALONE -- the same rule the
+      // per-voxel ramp used to reach one voxel at a time, now reached once for the
+      // wall. (Asserted by "a region that carries load is not touched at all".)
+      rr.whole_region = rr.p99_under_threshold;
+    }
+    if (!rr.whole_region) {
+      rep.per_region.push_back(rr);
+      continue;
+    }
     const double ex = hi.x - lo.x, ey = hi.y - lo.y, ez = hi.z - lo.z;
     const Vec3 c{0.5 * (lo.x + hi.x), 0.5 * (lo.y + hi.y), 0.5 * (lo.z + hi.z)};
     // foci on the 80 % ellipse of the two LARGEST extents, alternating pull/push
@@ -307,15 +341,13 @@ SyntheticStressReport synthesize_focal_stress(
       if (!candidate[e] || voxel_region_id[e] != cfg.region_id) continue;
       double* m = &stress[6 * e];
       const double vm = organic_von_mises6(m);
-      double w = 1.0;   // weight of the REAL field
-      if (thr > 0.0) {
-        const double lo_t = 0.25 * thr;
-        w = (vm - lo_t) / std::max(1e-300, thr - lo_t);
-        w = std::max(0.0, std::min(1.0, w));
-        w = w * w * (3.0 - 2.0 * w);
-      } else {
-        w = vm > 0.0 ? 1.0 : 0.0;
-      }
+      // ★ RULING H: NO PER-VOXEL RAMP. The blend weight over a flagged region is 0 --
+      // the whole wall takes the focal field. What used to be here was a smoothstep on
+      // this voxel's own magnitude between 0.25*thr and thr, which is what split his
+      // front wall down the middle. `vm` is still read, for the receipt below and for
+      // the absolute-floor classification, but it no longer decides anything per voxel.
+      (void)vm;
+      const double w = 0.0;   // weight of the REAL field, over the whole region
       // ★ THE ABSOLUTE FLOOR IS A HARD CLASSIFICATION, not another ramp (maintainer,
       // 2026-09-08): "at 0.005 MPa and lower, it is not [a stressed wall]". So at or
       // below it the wall is dead outright and takes the synthetic field in full --
@@ -323,8 +355,9 @@ SyntheticStressReport synthesize_focal_stress(
       // it as stressed. Above the floor the 2 %-of-peak ramp governs exactly as before,
       // and where the relative rule binds the two coincide (its band already starts at
       // 0.25 x thr, which is the floor when thr = 4 x floor).
-      if (dead_floor > 0.0 && vm <= dead_floor) w = 0.0;
-      if (w >= 1.0) continue;   // live: untouched
+      // (The absolute floor and the "live: untouched" early-out that stood here are
+      // subsumed by ruling H: a flagged region is synthesised whole, so there is no
+      // per-voxel classification left for them to make.)
       const Vec3 q = centre(e);
       double T[6] = {0, 0, 0, 0, 0, 0};
       for (std::size_t f = 0; f < foci.size(); ++f) {
@@ -727,6 +760,117 @@ OrganicProbeResult probe_organic_rooting(const OrganicLattice& lat,
     }
     kv.second.components = rc.size();
     out.regions.push_back(kv.second);
+  }
+  return out;
+}
+
+// ── §4(a)'s per-voxel density, on any span set (see the header) ───────────────
+// Byte for byte the computation that used to sit inline in the tracer: the deposit walks
+// each span in quarter-voxel steps and adds pi*r^2*dl to the voxel holding the midpoint,
+// then two summed-area tables give the box sums exactly and in O(1) per voxel at any
+// window size. Nothing here was changed in the extraction -- it is lifted so the field
+// can also be built from the spans that SHIP.
+OrganicDensityField organic_relative_density(const VoxelGrid& grid,
+                                             const std::vector<char>& candidate,
+                                             const std::vector<double>& separation_mm,
+                                             const std::vector<OrganicSpan>& spans,
+                                             double rho_min, double rho_max,
+                                             int union_subdiv) {
+  OrganicDensityField out;
+  const std::size_t n = grid.voxel_count();
+  const double h = grid.spacing;
+  out.mask.assign(n, 0);
+  out.relative_density.assign(n, 0.0);
+  if (candidate.size() != n || separation_mm.size() != n) return out;
+
+  // ★ THE MATERIAL IN EACH VOXEL, measured one of two ways -- see the header. The
+  // deposit is kept because it is what every organic run to date was certified on, so the
+  // two can be compared on one job rather than argued about.
+  std::vector<double> vol;
+  if (union_subdiv > 0) {
+    vol = lattice_union_voxel_volume(spans, grid, union_subdiv);
+    for (const OrganicSpan& sp : spans)
+      out.deposited_mm3 += M_PI * sp.r * sp.r * vlen(vsub(sp.b, sp.a));
+  } else {
+  vol.assign(n, 0.0);
+  auto voxel_of = [&](const Vec3& p, int& i, int& j, int& k) {
+    i = static_cast<int>(std::floor((p.x - grid.origin.x) / h));
+    j = static_cast<int>(std::floor((p.y - grid.origin.y) / h));
+    k = static_cast<int>(std::floor((p.z - grid.origin.z) / h));
+  };
+  for (const OrganicSpan& sp : spans) {
+    const double area = M_PI * sp.r * sp.r;
+    const double L = vlen(vsub(sp.b, sp.a));
+    if (!(L > 0.0)) continue;
+    const int m = std::max(1, static_cast<int>(std::ceil(L / (0.25 * h))));
+    const double dl = L / m;
+    for (int t = 0; t < m; ++t) {
+      const double u = (t + 0.5) / m;
+      const Vec3 p = vadd(sp.a, vmul(vsub(sp.b, sp.a), u));
+      int i, j, k;
+      voxel_of(p, i, j, k);
+      if (i < 0 || j < 0 || k < 0 || i >= grid.nx || j >= grid.ny || k >= grid.nz) continue;
+      vol[grid.index(i, j, k)] += area * dl;
+    }
+    out.deposited_mm3 += area * L;
+  }
+  }
+
+  const std::size_t sx = static_cast<std::size_t>(grid.nx) + 1;
+  const std::size_t sy = static_cast<std::size_t>(grid.ny) + 1;
+  const std::size_t sz = static_cast<std::size_t>(grid.nz) + 1;
+  std::vector<double> sat_v(sx * sy * sz, 0.0), sat_c(sx * sy * sz, 0.0);
+  auto S = [sx, sy](int i, int j, int k) {
+    return (static_cast<std::size_t>(k) * sy + j) * sx + i;
+  };
+  for (int k = 1; k < static_cast<int>(sz); ++k)
+    for (int j = 1; j < static_cast<int>(sy); ++j)
+      for (int i = 1; i < static_cast<int>(sx); ++i) {
+        const std::size_t e = grid.index(i - 1, j - 1, k - 1);
+        const double add_v = vol[e];
+        const double add_c = candidate[e] ? 1.0 : 0.0;
+        sat_v[S(i, j, k)] = add_v + sat_v[S(i - 1, j, k)] + sat_v[S(i, j - 1, k)] +
+                            sat_v[S(i, j, k - 1)] - sat_v[S(i - 1, j - 1, k)] -
+                            sat_v[S(i - 1, j, k - 1)] - sat_v[S(i, j - 1, k - 1)] +
+                            sat_v[S(i - 1, j - 1, k - 1)];
+        sat_c[S(i, j, k)] = add_c + sat_c[S(i - 1, j, k)] + sat_c[S(i, j - 1, k)] +
+                            sat_c[S(i, j, k - 1)] - sat_c[S(i - 1, j - 1, k)] -
+                            sat_c[S(i - 1, j, k - 1)] - sat_c[S(i, j - 1, k - 1)] +
+                            sat_c[S(i - 1, j - 1, k - 1)];
+      }
+  auto box = [&](const std::vector<double>& T, int i0, int j0, int k0, int i1, int j1,
+                 int k1) {
+    return T[S(i1, j1, k1)] - T[S(i0, j1, k1)] - T[S(i1, j0, k1)] - T[S(i1, j1, k0)] +
+           T[S(i0, j0, k1)] + T[S(i0, j1, k0)] + T[S(i1, j0, k0)] - T[S(i0, j0, k0)];
+  };
+
+  const double vox = h * h * h;
+  std::vector<double> rhos;
+  for (int k = 0; k < grid.nz; ++k)
+    for (int j = 0; j < grid.ny; ++j)
+      for (int i = 0; i < grid.nx; ++i) {
+        const std::size_t e = grid.index(i, j, k);
+        if (!candidate[e]) continue;
+        const int rad = std::max(1, static_cast<int>(std::llround(0.5 * separation_mm[e] / h)));
+        const int i0 = std::max(0, i - rad), i1 = std::min(grid.nx, i + rad + 1);
+        const int j0 = std::max(0, j - rad), j1 = std::min(grid.ny, j + rad + 1);
+        const int k0 = std::max(0, k - rad), k1 = std::min(grid.nz, k + rad + 1);
+        const double v = box(sat_v, i0, j0, k0, i1, j1, k1);
+        const double c = box(sat_c, i0, j0, k0, i1, j1, k1);
+        if (!(v > 0.0) || !(c > 0.0)) continue;
+        double rho = v / (c * vox);
+        if (rho_max > 0.0 && rho > rho_max) { rho = rho_max; ++out.clamped_hi_voxels; }
+        if (rho_min > 0.0 && rho < rho_min) { rho = rho_min; ++out.clamped_lo_voxels; }
+        out.mask[e] = 1;
+        out.relative_density[e] = rho;
+        rhos.push_back(rho);
+      }
+  out.latticed_voxels = rhos.size();
+  if (!rhos.empty()) {
+    std::sort(rhos.begin(), rhos.end());   // full sort, never a sample
+    out.rho_min_emitted = rhos.front();
+    out.rho_max_emitted = rhos.back();
+    out.rho_median_emitted = rhos[rhos.size() / 2];
   }
   return out;
 }
@@ -1810,48 +1954,110 @@ OrganicLattice trace_organic_lattice(const VoxelGrid& grid,
   // factor, applied to every radius, so the GRADE is untouched (all radii scale
   // together and their ratios are preserved) and only the mass moves. Reported, never
   // silent, and floored at the stated minimum extrudable width like everything else.
-  {
+  if (params.bead_is_stated) {
+    // Stated by the job: the calibration is skipped entirely and the report says so, so
+    // a receipt can never show a factor that was not applied.
+    rep.bead_calibration = 1.0;
+    rep.bead_calibration_skipped_stated = true;
+  } else {
+    // ★ SOLVED AGAINST THE UNION VOLUME, NOT A SUM OF THE PARTS (maintainer, 2026-09-10).
+    // The previous model added up pi*r^2*L over every segment plus a ball at every
+    // polyline vertex, and that sum counts every overlap TWICE. It is not a small
+    // correction: measured on the M2 lattice, 42.6 % of the naive sum is material
+    // occupying the same space as other material -- and the share is not even constant,
+    // running 31.4 % at k=0.6 to 51.8 % at k=1.4, so no fixed fudge factor could stand in
+    // for it. Solving k^2*P + k^3*N = target therefore aimed at a number that does not
+    // exist, and every organic run's mass was set against it.
+    //
+    // The lattice's real volume is now measured directly -- lattice_union_volume, which
+    // decomposes the union by ownership and importance-samples each capsule, so it builds
+    // no mesh and cannot inherit a mesh's defects. V(k) is monotone in k and close to a
+    // power law between k^2 (a prism) and k^3 (a ball), so the root is found by secant in
+    // log-log, which needs a handful of evaluations. The SEED IS FIXED, so the same
+    // lattice calibrates to the same factor every time and the same noise appears in
+    // every evaluation -- common random numbers, which is what makes the ratio the
+    // iteration is chasing far steadier than either volume alone.
     double traced_len = 0.0;
     for (const OrganicCurve& cv : out.curves) traced_len += cv.length_mm;
     for (const OrganicConnector& cn : out.connectors) traced_len += cn.length_mm;
     double target_vol = 0.0;   // the volume the grading law asked for
-    double model_vol = 0.0;    // the volume the un-calibrated beads would emit
     const double vox = h * h * h;
     for (std::size_t e = 0; e < n; ++e)
       if (candidate[e]) target_vol += spacing_mm_target_rho(e) * vox;
-    for (const OrganicCurve& cv : out.curves)
-      model_vol += M_PI * cv.radius_mm * cv.radius_mm * cv.length_mm;
-    for (const OrganicConnector& cn : out.connectors)
-      model_vol += M_PI * cn.radius_mm * cn.radius_mm * cn.length_mm;
-    // ★ THE NODE BALLS ARE A QUARTER OF THE EMITTED SOLID AND THE FIRST VERSION OF
-    // THIS LEFT THEM OUT. One icosahedron per polyline vertex and two per connector,
-    // measured at 1,816 mm^3 against 5,500 mm^3 of prism on the cube. They scale as
-    // k^3 where the prisms scale as k^2, so the calibration is not a square root but
-    // the root of k^2*P + k^3*N = target — solved by a few fixed-point steps, which
-    // is deterministic and converges in three for any k near 1.
-    double node_vol = 0.0;
-    for (const OrganicCurve& cv : out.curves)
-      node_vol += static_cast<double>(cv.points.size()) *
-                  lattice_node_volume_mm3(cv.radius_mm);
-    for (const OrganicConnector& cn : out.connectors)
-      node_vol += 2.0 * lattice_node_volume_mm3(cn.radius_mm);
     rep.bead_calibration = 1.0;
-    if (traced_len > 0.0 && model_vol > 0.0 && target_vol > 0.0) {
-      double k = std::sqrt(target_vol / model_vol);
-      for (int it = 0; it < 8; ++it) {
-        const double f = k * k * model_vol + k * k * k * node_vol - target_vol;
-        const double df = 2.0 * k * model_vol + 3.0 * k * k * node_vol;
-        if (!(std::fabs(df) > 0.0)) break;
-        const double kn = k - f / df;
-        if (!(kn > 0.0) || !std::isfinite(kn)) break;
-        k = kn;
+    rep.bead_calibration_target_mm3 = target_vol;
+
+    // the emitted solid, as the capsules it actually is: one per polyline segment, one
+    // per connector. The union already carries the joints -- a capsule's end cap IS the
+    // node ball -- so nothing is added for them, which is the other half of the
+    // double-count the old model carried.
+    std::vector<OrganicSpan> spans;
+    spans.reserve(out.connectors.size() + 4 * out.curves.size());
+    for (const OrganicCurve& cv : out.curves)
+      for (std::size_t i = 1; i < cv.points.size(); ++i)
+        spans.push_back(OrganicSpan{cv.points[i - 1], cv.points[i], cv.radius_mm});
+    for (const OrganicConnector& cn : out.connectors)
+      spans.push_back(OrganicSpan{cn.a, cn.b, cn.radius_mm});
+
+    rep.bead_calibration_spans = spans.size();
+    {
+      double len = 0.0;
+      std::vector<double> dia;
+      dia.reserve(spans.size());
+      for (const OrganicSpan& sp : spans) {
+        len += vlen(vsub(sp.b, sp.a));
+        dia.push_back(2.0 * sp.r);
       }
+      rep.bead_calibration_length_mm = len;
+      if (!dia.empty()) {
+        std::sort(dia.begin(), dia.end());
+        rep.bead_calibration_median_dia_mm = dia[dia.size() / 2];
+      }
+    }
+    if (params.defer_bead_calibration) {
+      // The caller solves this against the emitter's output; the target and the basis
+      // above are reported so it has something to solve for, and nothing is scaled here.
+      rep.bead_calibration_deferred = true;
+    } else if (traced_len > 0.0 && target_vol > 0.0 && !spans.empty()) {
+      auto union_at = [&](double k) {
+        std::vector<OrganicSpan> q = spans;
+        for (OrganicSpan& sp : q) sp.r *= k;
+        return lattice_union_volume(q, kOrganicBeadCalibrationSamples);
+      };
+      const double lt = std::log(target_vol);
+      double lk0 = 0.0, lv0 = std::log(std::max(union_at(1.0).volume_mm3, 1e-12));
+      // the first step assumes V ~ k^2.3, between a prism's square and a ball's cube
+      double lk1 = lk0 + (lt - lv0) / 2.3;
+      double k = std::exp(lk1);
+      LatticeUnionVolume uv{};
+      for (int it = 0; it < kOrganicBeadCalibrationSteps; ++it) {
+        uv = union_at(std::exp(lk1));
+        ++rep.bead_calibration_iterations;
+        const double lv1 = std::log(std::max(uv.volume_mm3, 1e-12));
+        if (std::fabs(lv1 - lt) < kOrganicBeadCalibrationTol) {
+          rep.bead_calibration_converged = true;
+          break;
+        }
+        double slope = (lk1 - lk0) != 0.0 ? (lv1 - lv0) / (lk1 - lk0) : 2.3;
+        if (!std::isfinite(slope) || slope < 1.0 || slope > 4.0) slope = 2.3;
+        const double lk2 = lk1 + (lt - lv1) / slope;
+        lk0 = lk1; lv0 = lv1; lk1 = lk2;
+        if (!std::isfinite(lk1)) { lk1 = lk0; break; }
+      }
+      k = std::exp(lk1);
+      if (!(k > 0.0) || !std::isfinite(k)) k = 1.0;
       // Never below the machine: the floor is user input and outranks the calibration.
       double kmin = 0.0;
       for (const OrganicCurve& cv : out.curves)
         kmin = std::max(kmin, params.min_extrudable_width_mm / (2.0 * cv.radius_mm));
       if (k < kmin) { k = kmin; rep.bead_calibration_floored = true; }
       rep.bead_calibration = k;
+      // Report the volume of what is actually being SHIPPED, so a receipt can never
+      // quote a figure for a factor that was then floored away.
+      uv = union_at(k);
+      rep.bead_calibration_union_mm3 = uv.volume_mm3;
+      rep.bead_calibration_naive_mm3 = uv.naive_sum_mm3;
+      rep.bead_calibration_overlap_fraction = uv.overlap_fraction;
       for (OrganicCurve& cv : out.curves) cv.radius_mm *= k;
       for (OrganicConnector& cn : out.connectors) cn.radius_mm *= k;
     }
@@ -1875,98 +2081,24 @@ OrganicLattice trace_organic_lattice(const VoxelGrid& grid,
   // Both sums come off SUMMED-AREA TABLES (3D prefix sums) in one fixed traversal —
   // exact, O(1) per query at any window size, no sampling anywhere (§5b).
   {
-    std::vector<double> vol(n, 0.0);
-    auto deposit = [&](const Vec3& a, const Vec3& b, double r) {
-      const double area = M_PI * r * r;
-      const double L = vlen(vsub(b, a));
-      if (!(L > 0.0)) return;
-      const int m = std::max(1, static_cast<int>(std::ceil(L / (0.25 * h))));
-      const double dl = L / m;
-      for (int s = 0; s < m; ++s) {
-        const double u = (s + 0.5) / m;
-        const Vec3 p = vadd(a, vmul(vsub(b, a), u));
-        int i, j, k;
-        voxel_of(p, i, j, k);
-        if (i < 0 || j < 0 || k < 0 || i >= grid.nx || j >= grid.ny ||
-            k >= grid.nz)
-          continue;
-        vol[grid.index(i, j, k)] += area * dl;
-      }
-      rep.emitted_volume_mm3 += area * L;
-    };
+    std::vector<OrganicSpan> emitted;
+    emitted.reserve(out.connectors.size() + 4 * out.curves.size());
     for (const OrganicCurve& cv : out.curves)
       for (std::size_t t = 1; t < cv.points.size(); ++t)
-        deposit(cv.points[t - 1], cv.points[t], cv.radius_mm);
+        emitted.push_back(OrganicSpan{cv.points[t - 1], cv.points[t], cv.radius_mm});
     for (const OrganicConnector& cn : out.connectors)
-      deposit(cn.a, cn.b, cn.radius_mm);
-
-    // Summed-area tables over (nx+1)(ny+1)(nz+1), inclusive prefix sums.
-    const std::size_t sx = static_cast<std::size_t>(grid.nx) + 1;
-    const std::size_t sy = static_cast<std::size_t>(grid.ny) + 1;
-    const std::size_t sz = static_cast<std::size_t>(grid.nz) + 1;
-    std::vector<double> sat_v(sx * sy * sz, 0.0), sat_c(sx * sy * sz, 0.0);
-    auto S = [sx, sy](int i, int j, int k) {
-      return (static_cast<std::size_t>(k) * sy + j) * sx + i;
-    };
-    for (int k = 1; k < static_cast<int>(sz); ++k)
-      for (int j = 1; j < static_cast<int>(sy); ++j)
-        for (int i = 1; i < static_cast<int>(sx); ++i) {
-          const std::size_t e = grid.index(i - 1, j - 1, k - 1);
-          const double add_v = vol[e];
-          const double add_c = candidate[e] ? 1.0 : 0.0;
-          sat_v[S(i, j, k)] = add_v + sat_v[S(i - 1, j, k)] + sat_v[S(i, j - 1, k)] +
-                              sat_v[S(i, j, k - 1)] - sat_v[S(i - 1, j - 1, k)] -
-                              sat_v[S(i - 1, j, k - 1)] - sat_v[S(i, j - 1, k - 1)] +
-                              sat_v[S(i - 1, j - 1, k - 1)];
-          sat_c[S(i, j, k)] = add_c + sat_c[S(i - 1, j, k)] + sat_c[S(i, j - 1, k)] +
-                              sat_c[S(i, j, k - 1)] - sat_c[S(i - 1, j - 1, k)] -
-                              sat_c[S(i - 1, j, k - 1)] - sat_c[S(i, j - 1, k - 1)] +
-                              sat_c[S(i - 1, j - 1, k - 1)];
-        }
-    auto box = [&](const std::vector<double>& T, int i0, int j0, int k0, int i1,
-                   int j1, int k1) {
-      return T[S(i1, j1, k1)] - T[S(i0, j1, k1)] - T[S(i1, j0, k1)] -
-             T[S(i1, j1, k0)] + T[S(i0, j0, k1)] + T[S(i0, j1, k0)] +
-             T[S(i1, j0, k0)] - T[S(i0, j0, k0)];
-    };
-
-    const double vox = h * h * h;
-    std::vector<double> rhos;
-    for (int k = 0; k < grid.nz; ++k)
-      for (int j = 0; j < grid.ny; ++j)
-        for (int i = 0; i < grid.nx; ++i) {
-          const std::size_t e = grid.index(i, j, k);
-          if (!candidate[e]) continue;
-          // HALF-WINDOW = half the local separation, so the window is one repeat of
-          // the lattice across. At least one voxel either side, or the "homogenised"
-          // figure degenerates back into the occupancy this block exists to avoid.
-          const int rad = std::max(1, static_cast<int>(std::llround(0.5 * dsep[e] / h)));
-          const int i0 = std::max(0, i - rad), i1 = std::min(grid.nx, i + rad + 1);
-          const int j0 = std::max(0, j - rad), j1 = std::min(grid.ny, j + rad + 1);
-          const int k0 = std::max(0, k - rad), k1 = std::min(grid.nz, k + rad + 1);
-          const double v = box(sat_v, i0, j0, k0, i1, j1, k1);
-          const double c = box(sat_c, i0, j0, k0, i1, j1, k1);
-          if (!(v > 0.0) || !(c > 0.0)) continue;
-          double rho = v / (c * vox);
-          if (params.rho_max > 0.0 && rho > params.rho_max) {
-            rho = params.rho_max;
-            ++rep.rho_clamped_hi_voxels;
-          }
-          if (params.rho_min > 0.0 && rho < params.rho_min) {
-            rho = params.rho_min;
-            ++rep.rho_clamped_lo_voxels;
-          }
-          out.mask[e] = 1;
-          out.relative_density[e] = rho;
-          rhos.push_back(rho);
-        }
-    rep.latticed_voxels = rhos.size();
-    if (!rhos.empty()) {
-      std::sort(rhos.begin(), rhos.end());  // full sort, never a sample
-      rep.rho_min_emitted = rhos.front();
-      rep.rho_max_emitted = rhos.back();
-      rep.rho_median_emitted = rhos[rhos.size() / 2];
-    }
+      emitted.push_back(OrganicSpan{cn.a, cn.b, cn.radius_mm});
+    const OrganicDensityField df = organic_relative_density(
+        grid, candidate, dsep, emitted, params.rho_min, params.rho_max);
+    out.mask = df.mask;
+    out.relative_density = df.relative_density;
+    rep.emitted_volume_mm3 += df.deposited_mm3;
+    rep.rho_clamped_hi_voxels += df.clamped_hi_voxels;
+    rep.rho_clamped_lo_voxels += df.clamped_lo_voxels;
+    rep.latticed_voxels = df.latticed_voxels;
+    rep.rho_min_emitted = df.rho_min_emitted;
+    rep.rho_max_emitted = df.rho_max_emitted;
+    rep.rho_median_emitted = df.rho_median_emitted;
   }
 
   // ── §3(a) / R7: THE CURVE-CROSSING COUNT ───────────────────────────────────
@@ -3006,8 +3138,17 @@ OrganicGenStats generate_organic_lattice(const OrganicLattice& lat,
   // millimetre bug — the observer named the pass and one candidate was left.
   enum class Src { Curve, Connector, Tie, Net, Leg, Fill };
   struct EmittedSeg { Vec3 a, b; double r, len; bool anchor0 = false, anchor1 = false;
-                      Src src = Src::Curve; };
+                      Src src = Src::Curve;
+                      // ★ WHICH MEMBER THIS SPAN IS PART OF, AND WHERE ALONG IT.
+                      // The node merge needs to tell "two consecutive vertices of ONE
+                      // polyline" from "two different members meeting", and without
+                      // this it cannot: see the merge below for what that cost.
+                      // chain < 0 marks a span that belongs to no polyline (a
+                      // connector, a tie, a leg), which can merge freely.
+                      int chain = -1; int node0 = 0, node1 = 0; };
   Src cur_src = Src::Curve;
+  int cur_chain = -1;        // the polyline being walked, -1 = not one
+  int cur_node = 0;          // index of `a` along that polyline
   std::vector<EmittedSeg> emitted;
   // ★ THE LENGTH CENSUS. One number per stage: live span length at that point. It is
   // the only instrument that separates "the lattice fragmented" from "the lattice was
@@ -3221,7 +3362,8 @@ OrganicGenStats generate_organic_lattice(const OrganicLattice& lat,
   // that survived the tie, the prune and the ground tie.
   auto record_span = [&](const Vec3& p0, const Vec3& p1, double r) -> EmittedSeg* {
     if (!(vlen(vsub(p1, p0)) > 0.0)) return nullptr;
-    emitted.push_back({p0, p1, r, vlen(vsub(p1, p0)), false, false, cur_src});
+    emitted.push_back({p0, p1, r, vlen(vsub(p1, p0)), false, false, cur_src,
+                       cur_chain, cur_node, cur_node + 1});
     return &emitted.back();
   };
   auto span = [&](const Vec3& a, const Vec3& b, double r) {
@@ -3294,9 +3436,16 @@ OrganicGenStats generate_organic_lattice(const OrganicLattice& lat,
     }
   };
   cur_src = Src::Curve;
-  for (const OrganicCurve& cv : lat.curves) {
-    for (std::size_t t = 1; t < cv.points.size(); ++t)
-      span(cv.points[t - 1], cv.points[t], cv.radius_mm);
+  {
+    int chain = 0;
+    for (const OrganicCurve& cv : lat.curves) {
+      cur_chain = chain++;
+      for (std::size_t t = 1; t < cv.points.size(); ++t) {
+        cur_node = static_cast<int>(t) - 1;
+        span(cv.points[t - 1], cv.points[t], cv.radius_mm);
+      }
+    }
+    cur_chain = -1; cur_node = 0;
   }
   cur_src = Src::Connector;
   for (const OrganicConnector& cn : lat.connectors) {
@@ -3324,6 +3473,34 @@ OrganicGenStats generate_organic_lattice(const OrganicLattice& lat,
   census_at(OrganicGenStats::CensusEmitted);   // ★ before any pass touches it
   if (!emitted.empty()) {
     struct Ep { std::size_t span; int end; };
+    // ★★ THE MERGE MUST NOT EAT A MEMBER FROM THE INSIDE (2026-09-20).
+    // It unions every pair of endpoints within 2 x radius and the union-find is
+    // TRANSITIVE, so on a polyline sampled finer than that the clusters chain:
+    // vertex 1 joins 2, 2 joins 3, and the whole streamline lands on one centroid,
+    // after which every span is degenerate and dropped. Length is no protection --
+    // a 20 mm curve goes exactly as completely as a 2 mm one.
+    //
+    // MEASURED, the traced path on the app's 20 mm sample cube under Structural +
+    // Cell size Auto (no stated width, so the bead is derived and fat): 2606 spans
+    // traced, 120 emitted. The tracer samples about every 0.203 mm at a median
+    // radius of 0.489 mm, so consecutive vertices sit 4.8x INSIDE the merge radius.
+    // The 2026-09-10 fix for the GROWN path -- record only every 6 radii -- worked by
+    // keeping vertices outside the merge, which is a workaround for this and cannot
+    // be applied here: coarsening a traced streamline to ~2.9 mm spans would destroy
+    // the shape the traced path exists to follow.
+    //
+    // So the merge is told what a member IS. Two endpoints may join when they are
+    // the SAME node (consecutive spans sharing a vertex, which is what the merge is
+    // for) or when they belong to DIFFERENT members. Two distinct nodes of one
+    // polyline are never one node, however close the bead makes them look.
+    auto same_member_distinct_nodes = [&](const Ep& x, const Ep& y) {
+      const EmittedSeg& ex = emitted[x.span];
+      const EmittedSeg& ey = emitted[y.span];
+      if (ex.chain < 0 || ex.chain != ey.chain) return false;   // different members
+      const int nx = x.end ? ex.node1 : ex.node0;
+      const int ny = y.end ? ey.node1 : ey.node0;
+      return nx != ny;
+    };
     std::vector<Ep> eps;
     eps.reserve(emitted.size() * 2);
     double rmin_all = emitted.front().r;
@@ -3361,6 +3538,10 @@ OrganicGenStats generate_organic_lattice(const OrganicLattice& lat,
                 const double rr = kOrganicNodeMergeRatio *
                                   std::min(emitted[eps[i].span].r, emitted[eps[j].span].r);
                 if (vlen(vsub(pi, pj)) > rr) continue;
+                if (same_member_distinct_nodes(eps[i], eps[j])) {
+                  ++st.merge_same_member_refused;
+                  continue;
+                }
                 const int ra = mfind(i), rb = mfind(j);
                 if (ra != rb) mpar[std::max(ra, rb)] = std::min(ra, rb);
               }
@@ -3385,11 +3566,43 @@ OrganicGenStats generate_organic_lattice(const OrganicLattice& lat,
         ++st.nodes_merged;
       }
     }
+    // ── ★★ A SHORT SPAN ON A MEMBER IS NOT A DEGENERATE SPAN ──────────────────
+    // This dropped every span shorter than half its own radius. For a CONNECTOR that
+    // is right: it is a stub the merge collapsed, and nothing else describes it. For
+    // a span of a POLYLINE it is catastrophic, because a traced member is sampled far
+    // finer than its own bead -- 0.203 mm at a 0.489 mm radius on the M2 stand, so
+    // 0.203 <= 0.2445 and EVERY span of EVERY traced member was deleted, whether or
+    // not the merge had already chained them. That is the rest of the app's 2606 ->
+    // 120, and stopping the chaining alone still left the fixture emitting NOTHING.
+    //
+    // A member's spans are consecutive samples of ONE curve, so short ones are
+    // COALESCED along the chain instead: the run's first point to its last, at the
+    // run's thinnest radius, which is the same resample the run-collapse pass applies
+    // later for mesh quality -- just early enough to matter. The chain's own
+    // endpoints are preserved by construction, so junctions and forks are untouched.
+    // A chain whose WHOLE length is under half a radius really is degenerate and is
+    // dropped, which is the original rule surviving where it was right.
     std::vector<EmittedSeg> mkeep;
     mkeep.reserve(emitted.size());
     for (EmittedSeg& e : emitted) {
       e.len = vlen(vsub(e.b, e.a));
-      if (e.len <= 0.5 * e.r) { ++st.merge_degenerate_spans; continue; }
+      // ★ A CONNECTOR SHORTER THAN ITS OWN RADIUS IS DEGENERATE. A SPAN OF A MEMBER
+      // IS NOT. A traced member is sampled far finer than its bead -- 0.203 mm at a
+      // 0.489 mm radius -- so this rule deleted EVERY span of EVERY traced member,
+      // which is the rest of the app's 2606 -> 120 and, on the M2 stand, 1556 spans
+      // of real material lost quietly on a run nobody thought was broken.
+      //
+      // ★ AND THE MEMBER IS KEPT WHOLE, NOT RESAMPLED HERE. The first fix coalesced
+      // runs of short spans into one span from the run's first point to its last.
+      // That retains the member but CHORDS ACROSS THE BEND: measured on the stand it
+      // shortened the shipped centreline from 45172.6 to 43656.3 mm, losing 3.4 % of
+      // the traced length to straightening, because a length threshold alone has no
+      // idea how far the curve moved in between. Resampling a centreline is a job
+      // with a deviation bound and core already has that instrument -- the
+      // run-collapse pass, Douglas-Peucker at kOrganicRunCollapseTol -- which runs
+      // later over exactly these chains. So this pass stops DELETING and leaves the
+      // resampling to the pass that knows how to do it.
+      if (e.chain < 0 && e.len <= 0.5 * e.r) { ++st.merge_degenerate_spans; continue; }
       mkeep.push_back(e);
     }
     emitted.swap(mkeep);
@@ -5072,69 +5285,27 @@ OrganicGenStats generate_organic_lattice(const OrganicLattice& lat,
               if (worst_run > kOrganicArchMinUnsupportedMm || flagged_any)
                 to_arch.push_back(si);
             }
-            // ★ THE FILLET IS A CHOICE (maintainer, 2026-09-05): any span over open air
-            // by more than kOrganicArchMinUnsupportedMm (0.01 mm, i.e. every one) was
-            // flared into kOrganicFilletSegments pieces up to the radius cap, in the
-            // preview as well as the run. Printability is user input, so the job can
-            // decline the repair; the spans that would have flared are counted.
-            if (!lat.overhang_fillet && !to_arch.empty()) {
-              st.fillet_skipped_spans += to_arch.size();
+            // ★★ THE OVERHANG FILLET IS GONE (maintainer, 2026-09-08: "remove that
+            // from the printability settings"). It flared any span over open air into a
+            // profile of radius R at the ends falling to r in the middle, and its own
+            // comment stated the cost: "at L = 8 mm, r = 0.5 mm that is 4.5 mm, a blob
+            // nine times the strut". MEASURED on the M2 stand it fired on 3,720 spans,
+            // reached an end radius of 2.56 mm against a median strut radius of 0.615,
+            // and left 2,789 of them UNRESOLVED at the cap -- so it did not even achieve
+            // the support angle it existed for, it just deposited lumps. Its gate was
+            // kOrganicArchMinUnsupportedMm = 0.01 mm, which is every span over air.
+            // Those lumps are what the maintainer has been calling tumors through two
+            // different meshers; they were never a meshing artefact, they were emitted
+            // geometry. Spans over air are now left exactly as drawn and counted, so the
+            // measurement survives while the repair does not.
+            if (!to_arch.empty()) {
+              st.unsupported_spans_seen += to_arch.size();
               if (std::getenv("TOPOPT_ORGANIC_TRACE"))
-                std::fprintf(stderr, "[fillet] FILLET_SKIPPED %zu span(s) over air left as drawn\n",
-                             to_arch.size());
+                std::fprintf(stderr,
+                             "[overhang] %zu span(s) over air, left as drawn (the fillet "
+                             "repair was removed)\n", to_arch.size());
               to_arch.clear();
             }
-            // ★★ FILLET, DO NOT BOW. The maintainer's correction, and it is the
-            // difference between improving the defect and reproducing it: a bowed
-            // centreline is still a CYLINDER, and its lowest layer is still a
-            // zero-width sliver along the whole span with nothing under it. Re-emit the
-            // span with a FLARED PROFILE instead — radius R at the ends falling to the
-            // nominal r at the middle, so the underside climbs away from each support
-            // at kOrganicFilletAngleDeg and the two flares meet in the centre. The arch
-            // is then the strut's own surface.
-            const double fil_tan = std::tan(kOrganicFilletAngleDeg * M_PI / 180.0);
-            for (std::size_t si : to_arch) {
-              const EmittedSeg e = emitted[si];      // by value: `emitted` grows below
-              if (!(e.len > 0.0) || !(e.r > 0.0)) continue;
-              // The end radius that would let the two fillets MEET, and the capped one
-              // actually used. Wanted = r + (L/2)*tan(theta); at L = 8 mm, r = 0.5 mm
-              // that is 4.5 mm, a blob nine times the strut, which is why there is a
-              // cap and why a capped span is counted as UNRESOLVED rather than fixed.
-              const double want_end = e.r + 0.5 * e.len * fil_tan;
-              const double r_end =
-                  std::min(want_end, kOrganicFilletMaxRadiusRatio * e.r);
-              if (!(r_end > e.r)) continue;          // nothing to flare
-              live[si] = 0;
-              ++st.support_spans_cut;                // so the compaction below runs
-              const Src saved = cur_src;
-              cur_src = e.src;
-              const std::size_t before = emitted.size();
-              const int NSEG = std::max(2, kOrganicFilletSegments);
-              for (int q = 0; q < NSEG; ++q) {
-                const double t0 = static_cast<double>(q) / NSEG;
-                const double t1 = static_cast<double>(q + 1) / NSEG;
-                const double tm = 0.5 * (t0 + t1);
-                // distance from whichever END is nearer — the flare is symmetric
-                const double d = std::min(tm, 1.0 - tm) * e.len;
-                const double R = std::max(e.r, r_end - d * fil_tan);
-                span(vadd(e.a, vmul(vsub(e.b, e.a), t0)),
-                     vadd(e.a, vmul(vsub(e.b, e.a), t1)), R);
-              }
-              cur_src = saved;
-              live.resize(emitted.size(), 1);
-              if (emitted.size() > before) {
-                ++st.filleted_spans;
-                ++st.mutations;
-                st.fillet_max_radius_mm = std::max(st.fillet_max_radius_mm, r_end);
-                if (r_end < want_end - 1e-9) ++st.fillet_unresolved;
-              }
-            }
-            if (st.filleted_spans > 0 && std::getenv("TOPOPT_ORGANIC_TRACE"))
-              std::fprintf(stderr,
-                           "[fillet] %zu spans flared, %zu still unresolved at the cap, "
-                           "widest end radius %.2f mm\n",
-                           st.filleted_spans, st.fillet_unresolved,
-                           st.fillet_max_radius_mm);
 
             if (st.mutations != mutations_at_round_start) continue;  // repair the arches
           }
@@ -5570,6 +5741,7 @@ OrganicGenStats generate_organic_lattice(const OrganicLattice& lat,
 
 
   // ══════════════════════════════════════════════════════════════════════════════
+
   // ★★★ THE FINISH, AFTER THE FIXED POINT — A LOOK, NEVER A REPAIR ★★★
   // The maintainer's ruling. It is OUTSIDE the loop above on purpose: inside it, the
   // finish would iterate with the structural passes and its joins would change what
@@ -6313,6 +6485,167 @@ OrganicGenStats generate_organic_lattice(const OrganicLattice& lat,
   // known. Here, only the count is recorded.
   if (!emitted.empty()) st.support_components_after = solver_components();
 
+  // ══════════════════════════════════════════════════════════════════════════════
+  // ★★★ RESAMPLE OVER-SAMPLED CENTRELINES INTO REAL BEAMS ★★★
+  // See kOrganicRunCollapseTol. Douglas-Peucker per CHAIN of degree-2 joints: chain
+  // endpoints are always kept, so every junction, fork and tee survives untouched, and
+  // a chain is always re-emitted with at least one segment, so nothing can vanish.
+  if (emitted.size() > 1) {
+    const std::size_t n_before = emitted.size();
+    double len_before = 0.0;
+    for (const EmittedSeg& e : emitted) len_before += e.len;
+    auto key_of = [](const Vec3& p) {
+      const double q = 1e-4;
+      const long long a = std::llround(p.x / q), b = std::llround(p.y / q),
+                      c = std::llround(p.z / q);
+      return (a * 73856093LL) ^ (b * 19349663LL) ^ (c * 83492791LL); };
+    // vertices and adjacency
+    std::unordered_map<long long, int> vid;
+    std::vector<Vec3> vpos;
+    auto vertex_of = [&](const Vec3& p) {
+      const long long k = key_of(p);
+      auto it = vid.find(k);
+      if (it != vid.end()) return it->second;
+      const int id = static_cast<int>(vpos.size());
+      vid.emplace(k, id); vpos.push_back(p);
+      return id; };
+    std::vector<int> ea(n_before), eb(n_before);
+    for (std::size_t i = 0; i < n_before; ++i) {
+      ea[i] = vertex_of(emitted[i].a);
+      eb[i] = vertex_of(emitted[i].b);
+    }
+    std::vector<std::vector<std::pair<int, int>>> adj(vpos.size());  // (span, other vertex)
+    for (std::size_t i = 0; i < n_before; ++i) {
+      if (ea[i] == eb[i]) continue;                      // degenerate: no chain role
+      adj[ea[i]].push_back({static_cast<int>(i), eb[i]});
+      adj[eb[i]].push_back({static_cast<int>(i), ea[i]});
+    }
+    std::vector<char> done(n_before, 0);
+    std::vector<EmittedSeg> out;
+    out.reserve(n_before);
+    // Douglas-Peucker over a polyline, keeping both ends
+    std::function<void(const std::vector<Vec3>&, std::size_t, std::size_t, double,
+                       std::vector<char>&)> dp =
+        [&](const std::vector<Vec3>& P, std::size_t i0, std::size_t i1, double tol,
+            std::vector<char>& keep) {
+          if (i1 <= i0 + 1) return;
+          const Vec3 s = P[i0], e = P[i1];
+          const Vec3 se = vsub(e, s);
+          const double L2 = vdot(se, se);
+          double worst = -1.0; std::size_t wi = i0;
+          for (std::size_t k = i0 + 1; k < i1; ++k) {
+            double d;
+            if (L2 > 0.0) {
+              double t = vdot(vsub(P[k], s), se) / L2;
+              t = std::min(1.0, std::max(0.0, t));
+              const Vec3 dv = vsub(vsub(P[k], s), vmul(se, t));
+              d = std::sqrt(vdot(dv, dv));
+            } else {
+              const Vec3 dv = vsub(P[k], s);
+              d = std::sqrt(vdot(dv, dv));
+            }
+            if (d > worst) { worst = d; wi = k; }
+          }
+          if (worst <= tol) return;
+          keep[wi] = 1;
+          dp(P, i0, wi, tol, keep); dp(P, wi, i1, tol, keep); };
+    // emit one chain, given its ordered vertices and the span that made each step
+    auto emit_chain = [&](const std::vector<Vec3>& P, const std::vector<std::size_t>& S) {
+      if (S.empty()) return;
+      ++st.runs_chains;
+      // split into radius-homogeneous runs so a taper is never flattened
+      std::size_t a = 0;
+      while (a < S.size()) {
+        double rmin = emitted[S[a]].r, rmax = rmin;
+        std::size_t b = a;
+        while (b + 1 < S.size()) {
+          const double r = emitted[S[b + 1]].r;
+          const double lo = std::min(rmin, r), hi = std::max(rmax, r);
+          if (hi > 0.0 && (hi - lo) / hi > kOrganicRunCollapseRadiusTol) break;
+          rmin = lo; rmax = hi; ++b;
+        }
+        std::vector<Vec3> sub(P.begin() + a, P.begin() + b + 2);
+        std::vector<char> keep(sub.size(), 0);
+        keep.front() = 1; keep.back() = 1;
+        dp(sub, 0, sub.size() - 1, kOrganicRunCollapseTol * rmax, keep);
+        std::size_t prev = 0;
+        for (std::size_t k = 1; k < sub.size(); ++k) {
+          if (!keep[k]) continue;
+          EmittedSeg m = emitted[S[a]];
+          m.a = sub[prev]; m.b = sub[k]; m.r = rmax;
+          const Vec3 ab = vsub(m.b, m.a);
+          m.len = std::sqrt(vdot(ab, ab));
+          if (m.len > 0.0) out.push_back(m);
+          prev = k;
+        }
+        a = b + 1;
+      }
+    };
+    // chains that START at a non-degree-2 vertex
+    for (int v = 0; v < static_cast<int>(vpos.size()); ++v) {
+      if (adj[v].size() == 2) continue;                  // interior of a chain
+      for (const auto& e0 : adj[v]) {
+        if (done[e0.first]) continue;
+        std::vector<Vec3> P{vpos[v]};
+        std::vector<std::size_t> S;
+        int cur_v = v, cur_e = e0.first;
+        while (true) {
+          done[cur_e] = 1;
+          const int nxt = (ea[cur_e] == cur_v) ? eb[cur_e] : ea[cur_e];
+          P.push_back(vpos[nxt]); S.push_back(static_cast<std::size_t>(cur_e));
+          if (adj[nxt].size() != 2) break;               // a junction ends the chain
+          const int e1 = adj[nxt][0].first == cur_e ? adj[nxt][1].first : adj[nxt][0].first;
+          if (done[e1]) break;
+          cur_v = nxt; cur_e = e1;
+        }
+        emit_chain(P, S);
+      }
+    }
+    // whatever is left is a closed loop of degree-2 vertices: walk it whole
+    for (std::size_t i = 0; i < n_before; ++i) {
+      if (done[i] || ea[i] == eb[i]) continue;
+      std::vector<Vec3> P{vpos[ea[i]]};
+      std::vector<std::size_t> S;
+      int cur_v = ea[i], cur_e = static_cast<int>(i);
+      while (true) {
+        done[cur_e] = 1;
+        const int nxt = (ea[cur_e] == cur_v) ? eb[cur_e] : ea[cur_e];
+        P.push_back(vpos[nxt]); S.push_back(static_cast<std::size_t>(cur_e));
+        if (adj[nxt].size() != 2) break;
+        const int e1 = adj[nxt][0].first == cur_e ? adj[nxt][1].first : adj[nxt][0].first;
+        if (done[e1]) break;
+        cur_v = nxt; cur_e = e1;
+      }
+      emit_chain(P, S);
+    }
+    // degenerate spans were never in the graph: carry them through untouched
+    for (std::size_t i = 0; i < n_before; ++i)
+      if (!done[i]) { out.push_back(emitted[i]); done[i] = 1; }
+    double len_after = 0.0;
+    for (const EmittedSeg& e : out) len_after += e.len;
+    st.runs_spans_before = n_before;
+    st.runs_spans_after = out.size();
+    st.runs_len_before_mm = len_before;
+    st.runs_len_after_mm = len_after;
+    // ★ THE GUARD. Resampling a chord out of a curve legitimately shortens it a little;
+    // losing real material does not look different in a span count, so check the LENGTH
+    // and abandon the whole pass rather than ship a lattice with pieces missing.
+    if (len_before > 0.0 &&
+        (len_before - len_after) / len_before > kOrganicRunCollapseGuard) {
+      st.runs_abandoned = true;
+    } else {
+      emitted.swap(out);
+    }
+    if (std::getenv("TOPOPT_ORGANIC_TRACE"))
+      std::fprintf(stderr,
+                   "[runs] %zu chains: %zu -> %zu spans, length %.1f -> %.1f mm (%+.2f %%)%s\n",
+                   st.runs_chains, st.runs_spans_before, st.runs_spans_after,
+                   st.runs_len_before_mm, st.runs_len_after_mm,
+                   len_before > 0.0 ? 100.0 * (len_after - len_before) / len_before : 0.0,
+                   st.runs_abandoned ? "  -- ABANDONED, guard tripped" : "");
+  }
+
+
   {
     Vec3 last_b{0, 0, 0};
     bool have_last = false;
@@ -6371,12 +6704,86 @@ OrganicGenStats generate_organic_lattice(const OrganicLattice& lat,
 // ────────────────────────────────────────────────────────────────────────────────
 TriangleMesh organic_weld(const std::vector<OrganicSpan>& spans, double pitch_mm,
                           long long max_voxels, OrganicWeldStats& stats,
-                          double floor_z) {
+                          double floor_z, const OrganicWeldPart& part) {
   stats = OrganicWeldStats{};
   if (spans.empty()) return TriangleMesh{};
-  Vec3 lo = spans.front().a, hi = spans.front().a;
+  // ── ★★ THE PART, SAMPLED TRILINEARLY ────────────────────────────────────────────
+  // The design's density field is what the solid's own surface is built from, so
+  // sampling it between voxel centres puts the cut on that same iso-surface instead of
+  // on a voxel staircase. This is the whole reason the pass lives here and not on the
+  // span list: at the design grid's pitch a BINARY "is this voxel solid" answer is
+  // about a voxel wide, and a strut is a fifth of that.
+  const bool have_part = part.density && !part.density->empty() && part.h > 0.0 &&
+                         part.nx > 0 && part.ny > 0 && part.nz > 0 &&
+                         part.density->size() >= static_cast<std::size_t>(part.nx) *
+                                                 part.ny * part.nz;
+  auto part_at = [&](const Vec3& p) -> double {
+    if (!have_part) return 1.0;
+    const double fx = (p.x - part.origin.x) / part.h - 0.5;
+    const double fy = (p.y - part.origin.y) / part.h - 0.5;
+    const double fz = (p.z - part.origin.z) / part.h - 0.5;
+    const int i0 = static_cast<int>(std::floor(fx));
+    const int j0 = static_cast<int>(std::floor(fy));
+    const int k0 = static_cast<int>(std::floor(fz));
+    const double tx = fx - i0, ty = fy - j0, tz = fz - k0;
+    double acc = 0.0;
+    for (int dk = 0; dk < 2; ++dk)
+      for (int dj = 0; dj < 2; ++dj)
+        for (int di = 0; di < 2; ++di) {
+          const double w = (di ? tx : 1.0 - tx) * (dj ? ty : 1.0 - ty) *
+                           (dk ? tz : 1.0 - tz);
+          if (!(w > 0.0)) continue;
+          const int i = i0 + di, j = j0 + dj, k = k0 + dk;
+          if (i < 0 || j < 0 || k < 0 || i >= part.nx || j >= part.ny || k >= part.nz)
+            continue;   // outside the grid reads as air
+          acc += w * (*part.density)[(static_cast<std::size_t>(k) * part.ny + j) *
+                                     part.nx + i];
+        }
+    return acc; };
+  auto in_part = [&](const Vec3& p) { return part_at(p) >= part.iso; };
+
+  // ── ★★ DRIVE FREE ENDS INTO THE SOLID ───────────────────────────────────────────
+  // An end shared with another span is a join; an end on its own is where a strut
+  // stops. MEASURED on the STAND: 54 % of those stopped in open air a median 3.94 mm
+  // from the solid they pointed at, which is why the lattice read as floating rather
+  // than rooted. Extend along the strut's own axis -- no surface hunting, because the
+  // intersection below removes whatever overshoots.
+  std::vector<OrganicSpan> work = spans;
+  if (have_part && part.embed_mm > 0.0) {
+    std::unordered_map<long long, int> tally;
+    auto key_of = [&](const Vec3& p) {
+      const double q = 1e-3;
+      const long long a = std::llround(p.x / q), b = std::llround(p.y / q),
+                      c = std::llround(p.z / q);
+      return (a * 73856093LL) ^ (b * 19349663LL) ^ (c * 83492791LL); };
+    for (const OrganicSpan& sp : work) { ++tally[key_of(sp.a)]; ++tally[key_of(sp.b)]; }
+    const double step = 0.25 * part.h;
+    const int NS = std::max(1, static_cast<int>(std::ceil(part.embed_mm / step)));
+    for (OrganicSpan& sp : work) {
+      const Vec3 ab = vsub(sp.b, sp.a);
+      const double L = std::sqrt(vdot(ab, ab));
+      if (!(L > 0.0)) continue;
+      const Vec3 dir = vmul(ab, 1.0 / L);
+      for (int endi = 0; endi < 2; ++endi) {
+        Vec3& tip = endi ? sp.b : sp.a;
+        if (tally[key_of(tip)] > 1) continue;          // a join, not a free end
+        const Vec3 into = endi ? dir : vmul(dir, -1.0);
+        // only move an end that has solid ahead of it; otherwise leave it alone
+        bool sees_solid = false;
+        for (int q = 1; q <= NS && !sees_solid; ++q)
+          sees_solid = in_part(vadd(tip, vmul(into, step * q))) &&
+                       part_at(vadd(tip, vmul(into, step * q))) > 0.9;
+        if (!sees_solid) continue;
+        tip = vadd(tip, vmul(into, part.embed_mm));
+        ++stats.ends_embedded;
+      }
+    }
+    stats.embed_mm = part.embed_mm;
+  }
+
+  Vec3 lo = work.front().a, hi = work.front().a;
   double rmin = spans.front().r, rmax = spans.front().r;
-  for (const OrganicSpan& sp : spans) {
+  for (const OrganicSpan& sp : work) {
     for (const Vec3& p : {sp.a, sp.b}) {
       lo.x = std::min(lo.x, p.x - sp.r); lo.y = std::min(lo.y, p.y - sp.r);
       lo.z = std::min(lo.z, p.z - sp.r);
@@ -6410,7 +6817,7 @@ TriangleMesh organic_weld(const std::vector<OrganicSpan>& spans, double pitch_mm
   };
   // Rasterise each capsule exactly: over its bounding box, mark every voxel whose
   // CENTRE is within r of the segment. Exact test, fixed traversal, no sampling.
-  for (const OrganicSpan& sp : spans) {
+  for (const OrganicSpan& sp : work) {
     const int i0 = std::max(0, static_cast<int>(std::floor(
         (std::min(sp.a.x, sp.b.x) - sp.r - origin.x) / pitch)));
     const int i1 = std::min(nx - 1, static_cast<int>(std::ceil(
@@ -6436,6 +6843,23 @@ TriangleMesh organic_weld(const std::vector<OrganicSpan>& spans, double pitch_mm
           t = std::min(1.0, std::max(0.0, t));
           const Vec3 d = vsub(ac, vmul(ab, t));
           if (vdot(d, d) <= r2) field[idx(i, j, k)] = 1.0;
+        }
+  }
+  // ── ★★ REMOVE ANYTHING THAT GOES BEYOND THE SOLID ───────────────────────────
+  // The other half of the maintainer's rule. Everything above may overshoot freely;
+  // this is where it is taken back. Cutting on the FIELD is the same argument the base
+  // trim below makes: a span-level cut leaves each capsule's hemispherical cap hanging
+  // past the plane, and only the solid can be cut flat.
+  if (have_part) {
+    stats.part_clip_ran = true;
+    for (int k = 0; k < nz; ++k)
+      for (int j = 0; j < ny; ++j)
+        for (int i = 0; i < nx; ++i) {
+          const std::size_t e = idx(i, j, k);
+          if (field[e] <= 0.5) continue;
+          const Vec3 c{origin.x + (i + 0.5) * pitch, origin.y + (j + 0.5) * pitch,
+                       origin.z + (k + 0.5) * pitch};
+          if (!in_part(c)) { field[e] = 0.0; ++stats.trimmed_voxels; }
         }
   }
   // ── ★★ A FLAT BASE, CUT ON THE SOLID ────────────────────────────────────────

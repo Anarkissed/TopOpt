@@ -25,6 +25,10 @@
 #include "topopt/lattice.hpp"
 #include "topopt/observability.hpp"
 #include "topopt/organic_lattice.hpp"
+#include "topopt/organic_wet_join.hpp"
+#include "topopt/voxel_sdf.hpp"
+#include "topopt/lattice_union_volume.hpp"
+#include "topopt/lattice_dc.hpp"
 
 #include <cmath>
 #include <functional>
@@ -621,6 +625,396 @@ void test_growth_produces_curves() {
         "the run still reported ACCEPTED");
 }
 
+// ── A STATED STRUT WIDTH IS THE WIDTH, EXACTLY, EVERYWHERE ──────────────────────
+// `organic_strut_width_mm` used to be read only when there was NO cell window. Under a
+// swept window the bead was re-derived per voxel from the mass coupling and then scaled
+// AGAIN by the global calibration, so the stated number reached the geometry nowhere.
+// Measured on the M2 stand asking for 0.8 mm: 0.760 mm median on one wall, 1.209 on the
+// other, 1.646 at the top -- a 2x spread around a number the job had stated exactly. The
+// preview has always taken a stated width as a constant; this is core agreeing with it.
+void test_stated_strut_width_is_exact() {
+  GrowFixture f = grow_fixture();
+  const std::size_t n = f.grid.voxel_count();
+  const double stated = 0.8;
+  std::vector<double> bead(n, stated);
+  f.params.strut_diameter_field = &bead;
+
+  // The control FIRST, and it matters: if the calibration happened to leave the radii
+  // alone on this fixture, the assertion below would pass while measuring nothing.
+  f.params.bead_is_stated = false;
+  const OrganicLattice calibrated =
+      trace_organic_lattice(f.grid, f.cand, f.stress, f.spacing, nullptr, f.params);
+  bool calibration_moved_it = false;
+  for (const OrganicCurve& cv : calibrated.curves)
+    if (std::fabs(2.0 * cv.radius_mm - stated) > 1e-9) { calibration_moved_it = true; break; }
+  CHECK(!calibrated.curves.empty(), "stated width: the control traced something");
+  CHECK(calibration_moved_it,
+        "stated width CONTROL: the calibration does move the radius off the bead field -- "
+        "without this the test below could pass on a fixture where nothing was scaled");
+
+  f.params.bead_is_stated = true;
+  const OrganicLattice pinned =
+      trace_organic_lattice(f.grid, f.cand, f.stress, f.spacing, nullptr, f.params);
+  CHECK(!pinned.curves.empty(), "stated width: it traced something");
+  double lo = 1e30, hi = 0.0;
+  for (const OrganicCurve& cv : pinned.curves) {
+    lo = std::min(lo, 2.0 * cv.radius_mm); hi = std::max(hi, 2.0 * cv.radius_mm);
+  }
+  for (const OrganicConnector& cn : pinned.connectors) {
+    lo = std::min(lo, 2.0 * cn.radius_mm); hi = std::max(hi, 2.0 * cn.radius_mm);
+  }
+  std::printf("  stated width: asked %.4f, emitted %.4f..%.4f over %zu curve(s)\n",
+              stated, lo, hi, pinned.curves.size());
+  CHECK(std::fabs(lo - stated) < 1e-9 && std::fabs(hi - stated) < 1e-9,
+        "stated width: EVERY emitted strut is the stated diameter, to the last decimal");
+}
+
+// ── THE MASS CALIBRATION MUST AIM AT A VOLUME THAT EXISTS ───────────────────────
+// It used to solve k^2*P + k^3*N = target with P the sum of pi*r^2*L over every segment
+// and N a ball at every polyline vertex -- a sum that counts every overlap TWICE, and on
+// the M2 lattice 42.6 % of it was material occupying the same space as other material.
+// So the factor was chosen to hit a number that does not exist, and every organic run's
+// mass was set against it. It now solves against the UNION volume, measured with no mesh.
+void test_bead_calibration_hits_the_union_volume() {
+  using namespace topopt;
+  GrowFixture f = grow_fixture();
+  std::vector<double> bead(f.grid.voxel_count(), 0.8);
+  f.params.strut_diameter_field = &bead;
+  f.params.bead_is_stated = false;          // the calibration must actually run
+  const OrganicLattice lat =
+      trace_organic_lattice(f.grid, f.cand, f.stress, f.spacing, nullptr, f.params);
+  CHECK(!lat.curves.empty(), "bead calibration: it traced something");
+  CHECK(lat.report.bead_calibration_iterations > 0,
+        "bead calibration: the root-find ran -- a zero here means it was never asked");
+  const double target = lat.report.bead_calibration_target_mm3;
+  CHECK(target > 0.0, "bead calibration: the grading law asked for a volume");
+
+  // Measure the SHIPPED geometry independently, and at a different sample budget from
+  // the one the calibration used, so this is not the calibration marking its own work.
+  std::vector<OrganicSpan> spans;
+  for (const OrganicCurve& cv : lat.curves)
+    for (std::size_t i = 1; i < cv.points.size(); ++i)
+      spans.push_back(OrganicSpan{cv.points[i - 1], cv.points[i], cv.radius_mm});
+  for (const OrganicConnector& cn : lat.connectors)
+    spans.push_back(OrganicSpan{cn.a, cn.b, cn.radius_mm});
+  const LatticeUnionVolume u = lattice_union_volume(spans, 2000000, 0xD1B54A32D192ED03ull);
+  const double err = std::fabs(u.volume_mm3 - target) / target;
+  std::printf("  bead calibration: k %.4f in %d step(s); target %.2f, union %.2f "
+              "(%+.2f %%), naive %.2f, overlap %.1f %%\n",
+              lat.report.bead_calibration, lat.report.bead_calibration_iterations,
+              target, u.volume_mm3, 100.0 * (u.volume_mm3 - target) / target,
+              u.naive_sum_mm3, 100.0 * u.overlap_fraction);
+  CHECK(err < 0.03,
+        "bead calibration: the SHIPPED lattice occupies the volume the grading law asked "
+        "for, measured without a mesh");
+  // ★ THE CONTROL. On a lattice with no self-overlap the old sum would have been right,
+  // and this test would pass while proving nothing. Assert the overlap is real and large.
+  CHECK(u.overlap_fraction > 0.05,
+        "bead calibration CONTROL: the lattice really does overlap itself, so a sum of "
+        "the parts genuinely over-counts -- without this the check above is vacuous");
+  const double naive_err = std::fabs(u.naive_sum_mm3 - target) / target;
+  CHECK(naive_err > err,
+        "bead calibration: the naive sum of the parts is FURTHER from the target than "
+        "the union is -- which is the whole reason the model changed");
+}
+
+// ── THE CERTIFIED DENSITY MUST FOLLOW THE GEOMETRY THAT SHIPS ───────────────────
+// It used to be the tracer's own snapshot, taken before the clip to the part, the node
+// merge, the support pass, the prune, the stranded drop and the finish -- all of which
+// run afterwards, on a separate span list, and remove material. Nothing refreshed it, so
+// whatever they removed the certificate still believed was there, in the UNSAFE
+// direction: more material reads as stiffer. Measured on the M2 stand, the certificate
+// was handed 77,336 mm3 where the shipped file holds 41,955, and the certified margin
+// fell from 1,671 to 1,142 once it was taken on what ships. The property that has to hold
+// is simply this: REMOVE GEOMETRY, AND THE MEASURED DENSITY MUST FALL.
+void test_certified_density_follows_the_shipped_spans() {
+  using namespace topopt;
+  GrowFixture f = grow_fixture();
+  std::vector<double> bead(f.grid.voxel_count(), 0.8);
+  f.params.strut_diameter_field = &bead;
+  f.params.bead_is_stated = true;
+  const OrganicLattice lat =
+      trace_organic_lattice(f.grid, f.cand, f.stress, f.spacing, nullptr, f.params);
+  CHECK(!lat.curves.empty(), "certified density: it traced something");
+
+  std::vector<OrganicSpan> all;
+  for (const OrganicCurve& cv : lat.curves)
+    for (std::size_t i = 1; i < cv.points.size(); ++i)
+      all.push_back(OrganicSpan{cv.points[i - 1], cv.points[i], cv.radius_mm});
+  for (const OrganicConnector& cn : lat.connectors)
+    all.push_back(OrganicSpan{cn.a, cn.b, cn.radius_mm});
+  CHECK(all.size() > 8, "certified density: there are spans to remove");
+
+  const double vox = f.grid.spacing * f.grid.spacing * f.grid.spacing;
+  auto material = [&](const std::vector<OrganicSpan>& sp) {
+    const OrganicDensityField d = organic_relative_density(
+        f.grid, f.cand, lat.spacing_used_mm, sp, 0.0, 0.0,
+        kOrganicDensityUnionSubdivDefault);
+    double v = 0.0;
+    for (std::size_t e = 0; e < d.relative_density.size(); ++e)
+      if (d.mask[e]) v += d.relative_density[e];
+    return v * vox;
+  };
+  // a THIRD of the network removed, which is about what the trim passes take off the
+  // M2 stand
+  std::vector<OrganicSpan> trimmed(all.begin(), all.begin() + (all.size() * 2) / 3);
+  const double full = material(all), cut = material(trimmed);
+  std::printf("  certified density: %zu spans -> %.2f mm3, %zu spans -> %.2f mm3\n",
+              all.size(), full, trimmed.size(), cut);
+  CHECK(full > 0.0, "certified density: the full network measures something");
+  CHECK(cut < full,
+        "certified density: removing a third of the spans LOWERS the measured material -- "
+        "the snapshot it used to certify could not do this");
+  CHECK(material(all) == full,
+        "certified density: and the measurement is deterministic, so a re-measure after "
+        "the trim passes cannot itself move the verdict");
+}
+
+// ── THE PER-VOXEL UNION MUST INTEGRATE TO THE UNION ─────────────────────────────
+// The certified density is built from a DEPOSIT that counts a strut crossing once per
+// strut. lattice_union_voxel_volume measures each voxel's share of the UNION instead, by
+// a deterministic subgrid. The acceptance test is that its sum over the grid reproduces
+// the mesh-free union volume -- which shares NO code path with it, so neither can hide
+// the other's error -- and that the agreement improves as the subgrid is refined.
+void test_union_voxel_volume() {
+  using namespace topopt;
+  VoxelGrid g;
+  g.nx = 40; g.ny = 40; g.nz = 40;
+  g.spacing = 0.5;
+  g.origin = Vec3{-10, -10, -10};
+  g.tags.assign(static_cast<std::size_t>(g.nx) * g.ny * g.nz, VoxelTag::Interior);
+
+  // a cross, so a real joint overlap is inside the grid: the naive deposit counts the
+  // crossing twice and this must not
+  const std::vector<OrganicSpan> cross = {{{-5,0,0},{5,0,0},1.0}, {{0,-5,0},{0,5,0},1.0}};
+  const LatticeUnionVolume truth = lattice_union_volume(cross, 2000000);
+  double naive = 0.0;
+  for (const OrganicSpan& sp : cross) {
+    const double L = std::sqrt((sp.b.x-sp.a.x)*(sp.b.x-sp.a.x) + (sp.b.y-sp.a.y)*(sp.b.y-sp.a.y) +
+                               (sp.b.z-sp.a.z)*(sp.b.z-sp.a.z));
+    naive += M_PI*sp.r*sp.r*L + (4.0/3.0)*M_PI*sp.r*sp.r*sp.r;
+  }
+  double prev = 1e9;
+  for (int sd : {4, 8}) {
+    const std::vector<double> v = lattice_union_voxel_volume(cross, g, sd);
+    double sum = 0.0;
+    for (double x : v) sum += x;
+    const double err = std::fabs(sum - truth.volume_mm3) / truth.volume_mm3;
+    std::printf("  union/voxel subdiv %d: %.4f vs union %.4f (%+.2f %%), naive %.4f\n",
+                sd, sum, truth.volume_mm3, 100.0*(sum-truth.volume_mm3)/truth.volume_mm3,
+                naive);
+    CHECK(err < 0.05, "union/voxel: the per-voxel field integrates to the union volume");
+    CHECK(err < prev, "union/voxel: and closes on it as the subgrid refines");
+    prev = err;
+    // ★ THE CONTROL. If this cross had no overlap the deposit would already be right and
+    // the whole exercise would be pointless. Assert the naive sum really is bigger.
+    CHECK(naive > truth.volume_mm3 * 1.02,
+          "union/voxel CONTROL: the naive sum genuinely over-counts this joint");
+  }
+  {   // determinism: no seed, no variance, the same field every time
+    const std::vector<double> a = lattice_union_voxel_volume(cross, g, 4);
+    const std::vector<double> b = lattice_union_voxel_volume(cross, g, 4);
+    CHECK(a == b,
+          "union/voxel: DETERMINISTIC -- this feeds a certificate, and a margin that "
+          "moved with a seed would be indefensible");
+  }
+}
+
+// ── DEFERRING THE CALIBRATION MUST STILL HAND OVER A TARGET ─────────────────────
+// The factor is now solved against the spans the EMITTER produces, which the tracer
+// cannot see. So the tracer's job becomes: measure what the grading law asked for, report
+// it, and scale NOTHING. Both halves of that matter -- a deferral that also dropped the
+// target would leave the caller solving for zero, and a deferral that still scaled would
+// apply the factor twice.
+void test_deferred_calibration_reports_but_does_not_scale() {
+  using namespace topopt;
+  auto trace_with = [&](bool defer) {
+    GrowFixture f = grow_fixture();
+    static std::vector<double> bead;
+    bead.assign(f.grid.voxel_count(), 0.8);
+    f.params.strut_diameter_field = &bead;
+    f.params.bead_is_stated = false;          // the calibration is in play
+    f.params.defer_bead_calibration = defer;
+    return trace_organic_lattice(f.grid, f.cand, f.stress, f.spacing, nullptr, f.params);
+  };
+  const OrganicLattice applied = trace_with(false);
+  const OrganicLattice deferred = trace_with(true);
+  CHECK(!deferred.curves.empty(), "deferred calibration: it traced something");
+
+  CHECK(deferred.report.bead_calibration_deferred,
+        "deferred calibration: the report says the caller owns the factor");
+  CHECK(deferred.report.bead_calibration_target_mm3 > 0.0,
+        "deferred calibration: the TARGET is still handed over -- without it the caller "
+        "would be solving for nothing");
+  CHECK(std::fabs(deferred.report.bead_calibration_target_mm3 -
+                  applied.report.bead_calibration_target_mm3) < 1e-9,
+        "deferred calibration: and it is the same target either way");
+  CHECK(deferred.report.bead_calibration == 1.0,
+        "deferred calibration: nothing was scaled here");
+  // ★ THE CONTROL: the non-deferred path really does move the radius, so the check above
+  // is not passing on a fixture where the factor happened to be 1.
+  CHECK(std::fabs(applied.report.bead_calibration - 1.0) > 1e-6,
+        "deferred calibration CONTROL: the in-tracer calibration does scale when asked, "
+        "so 'nothing was scaled' is a real observation");
+  bool radius_differs = false;
+  for (std::size_t i = 0; i < deferred.curves.size() && i < applied.curves.size(); ++i)
+    if (std::fabs(deferred.curves[i].radius_mm - applied.curves[i].radius_mm) > 1e-9)
+      radius_differs = true;
+  CHECK(radius_differs,
+        "deferred calibration: the emitted radii differ between the two paths, which is "
+        "the whole point of deferring");
+}
+
+// ── THE WETTED JOIN: A TRANSCRIPTION, TESTED AS ONE ─────────────────────────────
+// The preview's shader is the specification here, not a description of one. So the test
+// asserts the three properties the maintainer's corrections produced -- each was a defect
+// he could SEE -- and then three exact values, because a shape that merely has the right
+// properties is not the same shape.
+void test_wet_join_matches_the_preview() {
+  using namespace topopt;
+  const double r = 0.6;
+  const double fillet = kOrganicWetScale * r;          // 1.0 x r, hard-coded
+  const double reach = kOrganicWetReachPerFillet * fillet;
+  const double deep = -2.0;                            // well inside the part
+
+  // ★ 1. THE PEAK IS BURIED, NOT ON THE SURFACE. With the widest ring at s = 0 it read as
+  // "an oval foot under every strut"; it sits half a reach INSIDE the solid.
+  const double at_surface = organic_wet_flare(deep, 0.0, reach);
+  const double at_peak = organic_wet_flare(deep, kOrganicWetPeakFraction * reach, reach);
+  CHECK(at_peak > at_surface,
+        "wet join: the widest point is INSIDE the solid, not in the plane of the wall");
+  CHECK(std::fabs(at_peak - 1.0) < 1e-12, "wet join: and it reaches full fillet there");
+
+  // ★ 2. IT EASES IN AND OUT -- no step anywhere, which is what made the flat-rimmed
+  // foot. Sampled densely across the joint; the largest jump must stay small.
+  double worst = 0.0, prev = organic_wet_flare(deep, -2.0 * reach, reach);
+  for (double x = -2.0 * reach; x <= 2.0 * reach; x += 0.002) {
+    const double v = organic_wet_flare(deep, x, reach);
+    worst = std::max(worst, std::fabs(v - prev));
+    prev = v;
+  }
+  std::printf("  wet join: largest step over 0.002 mm = %.2e\n", worst);
+  CHECK(worst < 0.01,
+        "wet join: the profile eases -- no jump from 0 to 1 across the surface, which is "
+        "the HARD EDGE the shader's second attempt produced");
+
+  // ★ 3. NOTHING TO WET, NO BEAD. A strut breaking out into air gets a clean cut.
+  CHECK(organic_wet_flare(0.0, 0.0, reach) == 0.0,
+        "wet join: at the part's own surface there is no material to climb, so no bead");
+  CHECK(organic_wet_flare(1.0, 0.0, reach) == 0.0,
+        "wet join: and outside the part, none either");
+
+  // ★ 4. THE REACH IS ASYMMETRIC -- shorter above the joint than below -- so the bead
+  // stays at the joint instead of climbing the strut into the visible neck.
+  const double above = organic_wet_flare(deep, -0.9 * reach, reach);
+  const double below = organic_wet_flare(deep, kOrganicWetPeakFraction * reach + 0.9 * reach,
+                                         reach);
+  CHECK(above < below,
+        "wet join: it fades FASTER above the joint than below it");
+
+  // ★ 5. AND THE EXACT VALUES, from an independent re-implementation of the shader run
+  // over 840 points -- max difference 0. Properties alone would admit a different curve.
+  CHECK(std::fabs(organic_wet_flare(-1.2, -1.2, 1.2) - 0.0) < 1e-9,
+        "wet join: exact value, far above the joint");
+  CHECK(std::fabs(organic_wet_flare(-1.2, 0.0, 1.2) - 0.3690209648) < 1e-9,
+        "wet join: exact value, at the wall's surface");
+  CHECK(std::fabs(organic_wet_flare(-1.2, 0.6, 1.2) - 1.0) < 1e-9,
+        "wet join: exact value, at the buried peak");
+}
+
+// ── THE SIGNED DISTANCE FIELD MUST BE EXACT, NOT A CHAMFER ──────────────────────
+// The fillet's whole shape is set in millimetres, so the field it reads has to BE
+// millimetres in every direction. A chamfer over the 6-neighbourhood -- which is what
+// core had -- can only step along axes, so it over-states a diagonal by up to 41 % and
+// would put the bead at a size that depended on which way the wall happened to face.
+// This asserts the exactness directly, and the control is the chamfer's own error.
+void test_voxel_sdf_is_exact() {
+  using namespace topopt;
+  VoxelGrid g;
+  g.nx = 41; g.ny = 41; g.nz = 41;
+  g.spacing = 0.5;
+  g.origin = Vec3{0, 0, 0};
+  const std::size_t n = static_cast<std::size_t>(g.nx) * g.ny * g.nz;
+  g.tags.assign(n, VoxelTag::Interior);
+
+  // one voxel of material at the centre: every distance to it is then a known length
+  std::vector<char> inside(n, 0);
+  const int c = 20;
+  inside[g.index(c, c, c)] = 1;
+  const std::vector<double> sdf = voxel_signed_distance_mm(g, inside);
+
+  double worst = 0.0, worst_diag = 0.0, chamfer_worst = 0.0;
+  for (int k = 0; k < g.nz; ++k)
+    for (int j = 0; j < g.ny; ++j)
+      for (int i = 0; i < g.nx; ++i) {
+        const double dx = (i - c) * g.spacing, dy = (j - c) * g.spacing,
+                     dz = (k - c) * g.spacing;
+        const double truth = std::sqrt(dx * dx + dy * dy + dz * dz);
+        const double got = sdf[g.index(i, j, k)];
+        // The seed voxel IS material, so its own value is the negative distance to the
+        // nearest air -- not zero. Only the outside is a distance TO the seed.
+        if (inside[g.index(i, j, k)]) {
+          CHECK(got < 0.0, "voxel sdf: the material voxel itself reads negative");
+          continue;
+        }
+        // ★ THE FIELD MEASURES TO THE SURFACE, NOT TO THE CENTRE, so half a voxel is
+        // added back before comparing with a centre-to-centre truth. That offset is
+        // the whole point of the field (see voxel_sdf.cpp), and what is being checked
+        // here is undisturbed by it: that the transform is EXACT EUCLIDEAN and not a
+        // chamfer. An exact transform plus a constant offset is still exact in every
+        // direction; a chamfer is not, and the control below still proves the
+        // difference matters.
+        worst = std::max(worst, std::fabs(got + 0.5 * g.spacing - truth));
+        // the chamfer this replaces walks only along axes: |dx| + |dy| + |dz|
+        const double cham = std::fabs(dx) + std::fabs(dy) + std::fabs(dz);
+        chamfer_worst = std::max(chamfer_worst, std::fabs(cham - truth));
+        if (i != c && j != c && k != c)
+          worst_diag = std::max(worst_diag, std::fabs(got + 0.5 * g.spacing - truth));
+      }
+  std::printf("  voxel sdf: worst error %.3e mm (diagonals %.3e); an axis chamfer would "
+              "be out by %.3f mm\n", worst, worst_diag, chamfer_worst);
+  CHECK(worst < 1e-9, "voxel sdf: EXACT in every direction, not just along the axes");
+  CHECK(worst_diag < 1e-9, "voxel sdf: including the diagonals, where a chamfer fails");
+  // ★ AND THE OFFSET IS REALLY THERE. Without this the assertions above would pass on
+  // a field that had quietly gone back to measuring centres, which is the regression
+  // this offset exists to prevent: the wetted join's profile is written in millimetres
+  // and reads a field whose gradient must be 1 near the wall, not 2.
+  {
+    const double adjacent = sdf[g.index(c + 1, c, c)];
+    std::printf("  voxel sdf: the voxel touching the material reads %.4f mm "
+                "(centre-to-centre would be %.4f)\n", adjacent, g.spacing);
+    CHECK(std::fabs(adjacent - 0.5 * g.spacing) < 1e-9,
+          "voxel sdf: a voxel touching the material is HALF a voxel from its surface, "
+          "not a whole one -- so the field crosses the wall with slope 1, not 2");
+  }
+  CHECK(chamfer_worst > 1.0,
+        "CONTROL: the chamfer it replaces really is out by more than a millimetre here -- "
+        "if it were not, this field would be solving nothing");
+
+  // ★ THE SIGN, AND THE HALF-VOXEL OFFSET. A slab of material: inside must be NEGATIVE,
+  // and a point sampled between voxel centres must interpolate, because that is how the
+  // preview samples its own texture.
+  std::vector<char> slab(n, 0);
+  for (int k = 0; k < g.nz; ++k)
+    for (int j = 0; j < g.ny; ++j)
+      for (int i = 0; i < g.nx; ++i)
+        if (i >= 10 && i <= 30) slab[g.index(i, j, k)] = 1;
+  const std::vector<double> sd2 = voxel_signed_distance_mm(g, slab);
+  CHECK(sd2[g.index(20, 20, 20)] < 0.0, "voxel sdf: inside the material is NEGATIVE");
+  CHECK(sd2[g.index(2, 20, 20)] > 0.0, "voxel sdf: outside it is positive");
+  const double centre_x = g.origin.x + (20 + 0.5) * g.spacing;
+  const double at_centre = voxel_field_sample(g, sd2, Vec3{centre_x, centre_x, centre_x});
+  CHECK(std::fabs(at_centre - sd2[g.index(20, 20, 20)]) < 1e-9,
+        "voxel sdf: a sample AT a voxel centre returns that voxel's own value -- the "
+        "half-voxel offset is right, which is what makes the run and the preview read the "
+        "same number between centres");
+  const double half = voxel_field_sample(
+      g, sd2, Vec3{centre_x + 0.5 * g.spacing, centre_x, centre_x});
+  const double lo = sd2[g.index(20, 20, 20)], hi = sd2[g.index(21, 20, 20)];
+  CHECK(std::fabs(half - 0.5 * (lo + hi)) < 1e-9,
+        "voxel sdf: and half way between two centres it is their average");
+}
+
 // ── G2: NO SILENT FALLBACK TO THE TRACED CURVES ─────────────────────────────────
 void test_growth_does_not_fall_back() {
   GrowFixture f = grow_fixture();
@@ -1195,6 +1589,7 @@ void test_recommend_select_aesthetic() {
   CHECK(r2.rejected.size() == 2, "R3: the unrooted look and pair are rejected with a reason");
 }
 
+
 // ── S2: THE ABSOLUTE DEAD FLOOR (maintainer, 2026-09-08) ──────────────────────────
 // "2 % of peak OR below 0.005 MPa, whichever comes first." As a wall's stress falls it
 // meets the LARGER of the two thresholds first, so that is the one that binds. On a
@@ -1267,6 +1662,65 @@ void test_synthetic_dead_floor() {
       }
     }
   }
+  // ── ★ RULING H: THE MAINTAINER'S FRONT WALL (2026-09-18 night) ──────────────
+  // His measured case, and the one the per-voxel ramp got wrong: p99 0.0041 and max
+  // 0.0056 against a threshold of 0.005. The old smoothstep between 0.25*thr and thr
+  // judged each voxel on its own magnitude, so the voxels above 0.005 stayed REAL --
+  // and what stayed was rounding-noise direction, not load. The wall traced as struts
+  // filling half the depth, horizontals with no verticals. A wall is dead or it is
+  // not, and p99 decides it for the whole wall.
+  {
+    std::vector<double> st = build(0.1);            // peak 0.1 -> threshold 0.005 (floor)
+    // a wall whose p99 is 0.0041 but whose top few voxels reach 0.0056: above thr
+    std::size_t wall_voxels = 0;
+    for (std::size_t e = 0; e < n; ++e)
+      if (static_cast<int>(e % 20) < 10) ++wall_voxels;
+    std::size_t seen = 0;
+    for (std::size_t e = 0; e < n; ++e) {
+      if (static_cast<int>(e % 20) >= 10) continue;
+      // UNDER 1 % of the wall over the threshold, the rest at 0.0041, so p99 lands on
+      // the body at 0.0041 and the max on the tip at 0.0056 -- his measured shape. (A
+      // 2 % tail puts p99 INSIDE the tip, which is a different wall entirely.)
+      st[6 * e + 2] = (seen < wall_voxels / 200) ? 0.0056 : 0.0041;
+      ++seen;
+    }
+    const std::vector<double> before = st;
+    const SyntheticStressReport r =
+        synthesize_focal_stress(grid, cand, rid, cfg, 0.02, st, kOrganicSyntheticDeadFloorMPa);
+    std::size_t touched = 0;
+    for (std::size_t e = 0; e < n; ++e) {
+      if (static_cast<int>(e % 20) >= 10) continue;
+      for (int c2 = 0; c2 < 6; ++c2)
+        if (std::fabs(st[6 * e + c2] - before[6 * e + c2]) > 1e-15) { ++touched; break; } }
+    CHECK(!r.per_region.empty(), "H: the region was reported");
+    const SyntheticStressRegionReport& rr = r.per_region.front();
+    std::printf("  H front wall: p99 %.4g vs thr %.4g -> whole=%d, %zu of %zu voxels "
+                "synthetic (%zu fully, %zu blended)\n", rr.p99_von_mises,
+                r.dead_threshold, rr.whole_region ? 1 : 0, touched, wall_voxels,
+                r.voxels_fully_synthetic, r.voxels_blended);
+    CHECK(rr.p99_von_mises > 0.004 && rr.p99_von_mises < 0.005,
+          "H: p99 really is the 0.0041 body of the wall, not its 0.0056 tip");
+    CHECK(rr.whole_region, "H: so the wall is dead AS A WHOLE");
+    CHECK(touched == wall_voxels,
+          "H: and EVERY voxel took the focal field -- including the ones above thr, "
+          "which is exactly what the per-voxel ramp used to leave behind");
+    CHECK(r.voxels_blended == 0, "H: nothing is blended -- there is no ramp any more");
+    // ★ THE POSITIVE CONTROL. Raise the whole wall above the threshold and the SAME
+    // code must leave it entirely alone, or this test is only asserting "synthesise
+    // everything" and would pass against a core that ignored the measurement.
+    std::vector<double> live = build(0.1);
+    for (std::size_t e = 0; e < n; ++e)
+      if (static_cast<int>(e % 20) < 10) live[6 * e + 2] = 0.02;
+    const std::vector<double> live_before = live;
+    const SyntheticStressReport lr =
+        synthesize_focal_stress(grid, cand, rid, cfg, 0.02, live, kOrganicSyntheticDeadFloorMPa);
+    std::size_t live_touched = 0;
+    for (std::size_t e = 0; e < 6 * n; ++e)
+      if (std::fabs(live[e] - live_before[e]) > 1e-15) { ++live_touched; }
+    CHECK(live_touched == 0, "H: a wall carrying load is untouched, whole or not");
+    CHECK(!lr.per_region.empty() && !lr.per_region.front().whole_region,
+          "H: and it is REPORTED as not-whole, so a mis-flagged live wall is visible");
+  }
   // a wall between the two rules is dead under the floor and would NOT be under 2 % alone
   {
     std::vector<double> st = build(0.1);
@@ -1309,8 +1763,360 @@ void test_synthetic_dead_floor() {
   }
 }
 
+
+// ★★ THE UNION VOLUME, AGAINST CASES WITH EXACT ANSWERS ★★
+// The lattice's true volume is the measure of the UNION of its capsules, and every route
+// through a mesh was compromised: the naive sum counts each joint overlap twice, the
+// marching-cubes weld drops struts thinner than its voxel, and the analytic mesh carries
+// non-manifold edges that make the divergence theorem over-count where it self-overlaps.
+// This estimator measures the SET instead, by assigning each point of the union to the
+// lowest-indexed capsule containing it and sampling inside each capsule. The controls
+// below are the ones with closed forms, including two where the answer must come out
+// EXACT (no variance) because every sample is owned or none is.
+void test_union_volume() {
+  using namespace topopt;
+  const double r = 1.0, L = 10.0;
+  const double ball = (4.0 / 3.0) * M_PI * r * r * r;
+  const double one = M_PI * r * r * L + ball;          // one capsule, closed form
+
+  {
+    LatticeUnionVolume v = lattice_union_volume({{{0,0,0},{L,0,0},r}}, 200000);
+    CHECK(std::fabs(v.volume_mm3 - one) < 1e-9,
+          "union volume: a single capsule is exact -- every sample is owned");
+    CHECK(v.std_error_mm3 == 0.0, "union volume: and carries no sampling error");
+  }
+  {   // the same capsule twice: the union is one capsule, and half the sum is overlap
+    LatticeUnionVolume v =
+        lattice_union_volume({{{0,0,0},{L,0,0},r},{{0,0,0},{L,0,0},r}}, 200000);
+    CHECK(std::fabs(v.volume_mm3 - one) < 1e-9,
+          "union volume: a capsule counted twice is still one capsule");
+    CHECK(std::fabs(v.overlap_fraction - 0.5) < 1e-9,
+          "union volume: and the naive sum is reported as 50 % overlap");
+  }
+  {   // two halves meeting end to end are exactly one capsule of the full length
+    LatticeUnionVolume v =
+        lattice_union_volume({{{0,0,0},{5,0,0},r},{{5,0,0},{L,0,0},r}}, 400000);
+    std::printf("  UV two collinear halves: %.4f +/- %.4f vs exact %.4f\n",
+                v.volume_mm3, v.std_error_mm3, one);
+    CHECK(std::fabs(v.volume_mm3 - one) < 5.0 * v.std_error_mm3 + 1e-9,
+          "union volume: two collinear halves make one capsule, within sampling error");
+  }
+  {   // far apart: no overlap, so the union IS the sum, exactly
+    LatticeUnionVolume v =
+        lattice_union_volume({{{0,0,0},{L,0,0},r},{{0,50,0},{L,50,0},r}}, 200000);
+    CHECK(std::fabs(v.volume_mm3 - 2.0 * one) < 1e-9,
+          "union volume: disjoint capsules sum exactly");
+    CHECK(v.overlap_fraction < 1e-12, "union volume: and report no overlap");
+  }
+  {
+    // ★ THE OVERLAP FRACTION IS NOT A CONSTANT, which is why the bead calibration cannot
+    // simply be corrected by a factor measured once. Fatten every strut and the joints
+    // swallow proportionally more: measured on the M2 lattice, 31.4 % at k = 0.6 rising
+    // to 51.8 % at k = 1.4. Here the same monotonicity is asserted on a small cross.
+    std::vector<OrganicSpan> cross = {{{-5,0,0},{5,0,0},1.0}, {{0,-5,0},{0,5,0},1.0}};
+    double prev = -1.0;
+    for (double k : {0.5, 1.0, 1.5}) {
+      std::vector<OrganicSpan> q = cross;
+      for (OrganicSpan& x : q) x.r *= k;
+      const LatticeUnionVolume v = lattice_union_volume(q, 200000);
+      CHECK(v.overlap_fraction > prev,
+            "union volume: the overlap fraction RISES with the bead scale");
+      prev = v.overlap_fraction;
+    }
+  }
+}
+
+
+// ★★ THE LATTICE AS AN ISOSURFACE OF ITS OWN SDF ★★
+// A union has no joints: d(p) = min_i (dist to segment_i - r_i) handles every junction,
+// at any valence and any mix of radii, with no stitching. What has to be proved is that
+// contouring it gives a CLOSED, MANIFOLD surface whose volume is the right one -- and
+// the right one is known independently, from lattice_union_volume, which never builds a
+// mesh and so cannot share a mesh's defects.
+void test_dual_contour() {
+  using namespace topopt;
+  auto check = [&](const char* name, const std::vector<OrganicSpan>& sp) {
+    const LatticeUnionVolume u = lattice_union_volume(sp, 1000000);
+    double prev_err = 1e9;
+    for (double h : {0.5, 0.25}) {
+      LatticeDcOptions o; o.cell_mm = h;
+      // the UNIFORM grid: this is the convergence reference, and the octree is measured
+      // against it rather than replacing it
+      o.adaptive = false;
+      LatticeDcStats st;
+      const TriangleMesh m = lattice_dual_contour(sp, o, st);
+      const double err = std::fabs(st.volume_mm3 - u.volume_mm3) / u.volume_mm3;
+      std::printf("  DC %-20s h=%.3f tris %6zu bnd %3zu nonmf %3zu split %4zu  "
+                  "V %8.3f vs %8.3f (%+.2f %%)\n",
+                  name, h, st.triangles, st.boundary_edges, st.nonmanifold_edges,
+                  st.cells_split, st.volume_mm3, u.volume_mm3, 100.0 * err);
+      CHECK(!m.triangles.empty(), "dual contour: it produced a surface");
+      CHECK(st.boundary_edges == 0, "dual contour: CLOSED -- no edge used only once");
+      // ★ the manifold criterion: a cell carrying two sheets is split rather than
+      // pinched through one vertex, which is what leaves an edge on three triangles.
+      CHECK(st.nonmanifold_edges == 0,
+            "dual contour: MANIFOLD -- no edge used more than twice");
+      CHECK(err < 0.08, "dual contour: the volume matches the mesh-free union volume");
+      CHECK(err < prev_err, "dual contour: and converges as the cell shrinks");
+      prev_err = err;
+    }
+  };
+  check("one capsule", {{{0,0,0},{10,0,0},1.0}});
+  check("perpendicular cross", {{{-5,0,0},{5,0,0},1.0},{{0,-5,0},{0,5,0},1.0}});
+  // five arms of four different radii: the case that needed the cell splitting
+  check("5-way, mixed radii", {{{0,0,0},{5,0,0},1.0},{{0,0,0},{-5,0,0},0.7},
+                               {{0,0,0},{0,5,0},1.0},{{0,0,0},{0,0,5},0.5},
+                               {{0,0,0},{3,3,3},0.8}});
+}
+
+// ── ★ A TRACED MEMBER MUST SURVIVE ITS OWN NODE MERGE (app, 2026-09-20) ───────
+// The app measured 2606 traced spans emerge as 120 on a 20 mm sample cube under
+// Structural + Cell size Auto -- no stated width, so the bead is DERIVED and fat.
+// The merge unions endpoints within 2 x radius and its union-find is TRANSITIVE, so
+// a polyline sampled finer than that chains: vertex 1 joins 2, 2 joins 3, and the
+// whole member lands on one centroid, every span degenerate and dropped. Length is
+// no protection; a long curve dies as completely as a short one.
+//
+// The fixture is the app's regime, not a caricature: a gently curving streamline
+// sampled at 0.203 mm with a 0.489 mm radius, the pitch and bead MEASURED on the M2
+// stand. Consecutive vertices therefore sit 4.8x inside the merge radius.
+void test_traced_member_survives_node_merge() {
+  using namespace topopt;
+  // ★ THE ARC IS STRONGLY CURVED ON PURPOSE. A gently bending fixture cannot tell a
+  // surviving member from one straightened into a single chord -- the first version of
+  // this test scored a straight chord at 99 % of the arc and passed while the bend was
+  // gone. On a 5 mm-radius arc a chord carries 45 % of the length, so the bar below
+  // fails both ways it can fail: deleted, or flattened.
+  const double pitch = 0.203, r = 0.489, R = 5.0;
+  std::vector<Vec3> pts;
+  for (int i = 0; i < 100; ++i) {           // ~20 mm of centreline, the sample cube
+    const double th = (i * pitch) / R;      // arc length / radius
+    pts.push_back(Vec3{R * std::sin(th), R * (1.0 - std::cos(th)), 5.0});
+  }
+  OrganicLattice lat = one_curve(pts, r);
+  OrganicGenStats st;
+  const std::vector<OrganicSpan> out = run(lat, st);
+
+  double len = 0.0;
+  for (const OrganicSpan& sp : out) len += seg_len(sp);
+  double want = 0.0;
+  for (std::size_t i = 1; i < pts.size(); ++i)
+    want += std::sqrt((pts[i].x - pts[i-1].x) * (pts[i].x - pts[i-1].x) +
+                      (pts[i].y - pts[i-1].y) * (pts[i].y - pts[i-1].y));
+  const double chord = std::sqrt(
+      (pts.back().x - pts.front().x) * (pts.back().x - pts.front().x) +
+      (pts.back().y - pts.front().y) * (pts.back().y - pts.front().y));
+  std::printf("  traced merge: %zu point(s) in -> %zu span(s) out, %.3f of %.3f mm "
+              "(%.1f %%); merge refused %zu same-member pair(s), collapsed %zu span(s)\n",
+              pts.size(), out.size(), len, want, 100.0 * len / want,
+              st.merge_same_member_refused, st.merge_degenerate_spans);
+
+  CHECK(2.0 * r > pitch,
+        "traced merge: the fixture really is sampled inside the merge radius -- "
+        "otherwise this test proves nothing");
+  CHECK(st.merge_same_member_refused > 0,
+        "traced merge: the merge SAW same-member pairs and declined them; zero here "
+        "means the chain tagging never reached it");
+  // ★ THE BAR IS LENGTH, NOT SPAN COUNT. The run-collapse pass legitimately reduces
+  // the count -- that is its job, and asserting on it would fight a feature. What the
+  // defect destroyed was MATERIAL, and on a curve this bent, length cannot be held
+  // without following the arc.
+  std::printf("  traced merge: arc %.3f mm, straight chord %.3f mm (%.0f %%)\n",
+              want, chord, 100.0 * chord / want);
+  CHECK(chord < 0.6 * want,
+        "traced merge: the fixture really is bent enough that a flattened member "
+        "would FAIL the bar below -- otherwise it tests only deletion");
+  CHECK(!out.empty(), "traced merge: the member survived at all");
+  CHECK(len > 0.90 * want,
+        "traced merge: and carries over 90 % of the centreline's length -- neither "
+        "eaten by the merge nor flattened into a chord");
+}
+
+// ── ★ THE WETTED CARVE MUST STAY CLOSED (the pad bug, 2026-09-19) ─────────────
+// test_wet_join_matches_the_preview above checks organic_wet_flare's ARITHMETIC, and it
+// passed throughout the defect this test exists for. The defect was at the CALL SITE:
+// lattice_dc's two capsule walks visited cells within `r + 3h` of each axis, and the
+// wetting swells the surface outward by up to `wet.scale * r`, eating the 3h ring that
+// the quad emission needs (a quad joins the four cells around a grid edge, so a cell
+// carrying surface is useless unless its neighbours were visited). On the M2 lattice
+// that left 1.46 cells of ring where 3 are needed: 425 quads dropped, 494 boundary
+// edges, an OPEN mesh, 565 mm3 of material missing -- while every value-level assertion
+// on the flare stayed green. So this test carves.
+//
+// The fixture is sized so the OLD pad is UNAMBIGUOUSLY too small, not marginally so:
+// r = 0.4 at h = 0.1 gives an old pad of r + 3h = 0.7 mm from the axis, while the wetted
+// surface sits at r + wet.scale * r = 0.8 mm -- outside it. (At h = 0.2 the old pad
+// reaches 1.0 mm and this fixture passes either way, which is why the first version of
+// this test was worthless: it was green against the very bug it was written for.)
+void test_wet_join_carves_closed() {
+  using namespace topopt;
+  // ★ THE FIXTURE IS THE REAL GEOMETRY, and the first draft of it was not. A strut
+  // placed mostly OUTSIDE the part measures the part intersection (which trimmed 77 % of
+  // it away) and not the fillet at all. What the join actually is: the part is SOLID
+  // around the latticed pocket, and a strut swells where it LEAVES the pocket into that
+  // solid -- which is where organic_wet_flare peaks, at s = 0.5 * reach outside the
+  // latticed set.
+  //
+  // So: a 20 x 10 x 10 mm block of 0.5 mm voxels, ALL of it solid part; the latticed set
+  // is a tube about the strut that STOPS at x = 10; the strut runs on to x = 14. The bead
+  // forms just past x = 10, in solid, exactly as it does at a real rim.
+  VoxelGrid g;
+  g.nx = 40; g.ny = 20; g.nz = 20; g.spacing = 0.5;
+  g.origin = Vec3{0, 0, 0};
+  g.tags.assign(static_cast<std::size_t>(g.nx * g.ny * g.nz), VoxelTag::Interior);
+  const std::size_t n = g.voxel_count();
+
+  const double r = 0.4;
+  std::vector<OrganicSpan> spans;
+  spans.push_back(OrganicSpan{Vec3{4.0, 5.0, 5.0}, Vec3{14.0, 5.0, 5.0}, r});
+
+  std::vector<char> part(n, 1), latticed(n, 0);
+  for (int k = 0; k < g.nz; ++k)
+    for (int j = 0; j < g.ny; ++j)
+      for (int i = 0; i < g.nx; ++i) {
+        const std::size_t e = static_cast<std::size_t>((k * g.ny + j) * g.nx + i);
+        const double x = (i + 0.5) * g.spacing, y = (j + 0.5) * g.spacing,
+                     z = (k + 0.5) * g.spacing;
+        const double dy = y - 5.0, dz = z - 5.0;
+        if (x >= 4.0 && x <= 10.0 && dy * dy + dz * dz <= 1.0) latticed[e] = 1;
+      }
+  const std::vector<double> psdf = voxel_signed_distance_mm(g, part);
+  const std::vector<double> lsdf = voxel_signed_distance_mm(g, latticed);
+  CHECK(psdf.size() == n && lsdf.size() == n, "wet carve: both fields built");
+
+  auto carve = [&](double scale, LatticeDcStats& st) {
+    LatticeDcOptions o;
+    o.cell_mm = 0.1; o.adaptive = true; o.simplify_tolerance_mm = 0.01;
+    if (scale > 0.0) {
+      o.wet.grid = &g; o.wet.part_sdf_mm = &psdf;
+      o.wet.lattice_sdf_mm = &lsdf; o.wet.scale = scale;
+    }
+    return lattice_dual_contour(spans, o, st); };
+
+  LatticeDcStats dry, wet;
+  carve(0.0, dry);
+  const TriangleMesh mw = carve(kOrganicWetScale, wet);
+  std::printf("  wet carve: dry V %.3f bnd %zu drop %zu | wet V %.3f bnd %zu drop %zu "
+              "nonmf %zu\n", dry.volume_mm3, dry.boundary_edges, dry.quads_dropped,
+              wet.volume_mm3, wet.boundary_edges, wet.quads_dropped,
+              wet.nonmanifold_edges);
+
+  // MEASURE the swell rather than assuming it: how far from the strut axis does the
+  // wetted surface actually get? This is the number the walk's pad has to cover.
+  {
+    double worst = 0.0, worst_x = 0.0;
+    for (const Vec3& v : mw.vertices) {
+      const double dy = v.y - 5.0, dz = v.z - 5.0;
+      const double rad = std::sqrt(dy * dy + dz * dz);
+      if (rad > worst) { worst = rad; worst_x = v.x; }
+    }
+    std::printf("  wet carve: surface reaches %.4f mm from the axis (at x = %.3f); "
+                "r = %.2f, old pad = %.4f\n", worst, worst_x, r, r + 3.0 * 0.1);
+  }
+  CHECK(!mw.triangles.empty(), "wet carve: it produced a surface");
+  CHECK(wet.boundary_edges == 0,
+        "wet carve: CLOSED -- the walk covered the swollen surface AND its ring");
+  CHECK(wet.quads_dropped == 0,
+        "wet carve: no quad dropped -- every wetted cell's neighbours were visited");
+  CHECK(wet.watertight, "wet carve: and the mesher agrees it is watertight");
+  // ★ AND IT MUST MEASURE SOMETHING. A wet run that quietly did nothing would satisfy
+  // every assertion above, which is the failure mode this whole task keeps producing.
+  CHECK(wet.volume_mm3 > dry.volume_mm3 * 1.02,
+        "wet carve: the fillet actually added material -- at least 2 % over the dry carve");
+  CHECK(dry.boundary_edges == 0 && dry.quads_dropped == 0,
+        "wet carve: the DRY carve is closed too, so a failure above is the wetting");
+
+  // ★ AND THE PAD MUST TRACK THE SCALE, not merely happen to be big enough at 1.0. The
+  // walk visits a BOX around each capsule, so its corners reach pad * sqrt(2) and a
+  // modest overshoot hides there: at kOrganicWetScale the surface already sits 0.8121 mm
+  // out against an old pad of 0.7000 and the mesh still closed. Exaggerating the scale
+  // removes that cover and tests the formula rather than the slack in it.
+  {
+    LatticeDcStats big;
+    const TriangleMesh mb = carve(3.0, big);
+    double worst = 0.0;
+    for (const Vec3& v : mb.vertices) {
+      const double dy = v.y - 5.0, dz = v.z - 5.0;
+      worst = std::max(worst, std::sqrt(dy * dy + dz * dz));
+    }
+    std::printf("  wet carve: at scale 3.0 the surface reaches %.4f mm; bnd %zu drop %zu "
+                "V %.3f\n", worst, big.boundary_edges, big.quads_dropped, big.volume_mm3);
+    CHECK(worst > r + 3.0 * 0.1,
+          "wet carve: the exaggerated scale really does push the surface past the old pad");
+    CHECK(big.boundary_edges == 0,
+          "wet carve: CLOSED at an exaggerated fillet -- the pad tracks wet.scale");
+    CHECK(big.quads_dropped == 0, "wet carve: and no quad dropped there either");
+    CHECK(big.volume_mm3 > wet.volume_mm3,
+          "wet carve: a bigger fillet really is more material");
+  }
+}
+
+// ── the octree: it must SHRINK the mesh without opening or tearing it ─────────
+// The merge is the size dial, so what is asserted here is the dial itself: raising the
+// tolerance must cost triangles and nothing else. Every run is also checked to have
+// actually merged something -- a tolerance so tight that the tree stays uniform would
+// pass every other assertion below while measuring nothing at all.
+void test_dual_contour_octree() {
+  using namespace topopt;
+  auto check = [&](const char* name, const std::vector<OrganicSpan>& sp) {
+    const LatticeUnionVolume u = lattice_union_volume(sp, 1000000);
+    const double h = 0.25;
+    LatticeDcOptions ref; ref.cell_mm = h; ref.adaptive = false;
+    LatticeDcStats rst;
+    lattice_dual_contour(sp, ref, rst);
+
+    std::size_t prev_tris = rst.triangles;
+    for (double tol : {0.01, 0.04, 0.10}) {
+      LatticeDcOptions o;
+      o.cell_mm = h; o.adaptive = true; o.simplify_tolerance_mm = tol;
+      LatticeDcStats st;
+      const TriangleMesh m = lattice_dual_contour(sp, o, st);
+      const double err = std::fabs(st.volume_mm3 - u.volume_mm3) / u.volume_mm3;
+      std::printf("  DC/oct %-20s tol=%.3f leaf %.3f-%.3f merged %5zu tris %6zu "
+                  "(uniform %6zu) bnd %3zu nonmf %3zu drop %3zu  V %8.3f (%+.2f %%)\n",
+                  name, tol, st.finest_leaf_mm, st.coarsest_leaf_mm, st.cells_merged,
+                  st.triangles, rst.triangles, st.boundary_edges, st.nonmanifold_edges,
+                  st.quads_dropped, st.volume_mm3, 100.0 * err);
+      CHECK(!m.triangles.empty(), "dc octree: it produced a surface");
+      CHECK(st.cells_merged > 0, "dc octree: the merge actually fired");
+      CHECK(st.coarsest_leaf_mm > st.cell_mm,
+            "dc octree: and left leaves coarser than the base cell");
+      CHECK(st.finest_leaf_mm >= st.cell_mm - 1e-12,
+            "dc octree: no leaf is FINER than the base cell -- the tree only goes up");
+      CHECK(st.boundary_edges == 0, "dc octree: CLOSED across every level change");
+      CHECK(st.nonmanifold_edges == 0, "dc octree: MANIFOLD across every level change");
+      CHECK(st.quads_dropped == 0,
+            "dc octree: no quad dropped -- every merged leaf answered for its neighbours");
+      CHECK(st.triangles <= rst.triangles,
+            "dc octree: never more triangles than the uniform grid it was built from");
+      CHECK(st.triangles <= prev_tris,
+            "dc octree: and a looser tolerance never costs MORE triangles");
+      // A merge at a cell the surface only clips can move a vertex without removing a
+      // quad, so a tight tolerance may cost nothing. The DIAL is what has to work: by the
+      // loosest setting the mesh must be substantially smaller, or this measures nothing.
+      if (tol > 0.09)
+        CHECK(st.triangles < rst.triangles * 4 / 5,
+              "dc octree: the loosest tolerance sheds at least a fifth of the triangles");
+      CHECK(err < 0.08, "dc octree: the volume still matches the mesh-free union volume");
+      prev_tris = st.triangles;
+    }
+  };
+  check("one capsule", {{{0,0,0},{10,0,0},1.0}});
+  check("perpendicular cross", {{{-5,0,0},{5,0,0},1.0},{{0,-5,0},{0,5,0},1.0}});
+  check("5-way, mixed radii", {{{0,0,0},{5,0,0},1.0},{{0,0,0},{-5,0,0},0.7},
+                               {{0,0,0},{0,5,0},1.0},{{0,0,0},{0,0,5},0.5},
+                               {{0,0,0},{3,3,3},0.8}});
+}
+
 int main() {
   test_growth_produces_curves();
+  test_stated_strut_width_is_exact();
+  test_bead_calibration_hits_the_union_volume();
+  test_certified_density_follows_the_shipped_spans();
+  test_wet_join_matches_the_preview();
+  test_voxel_sdf_is_exact();
+  test_deferred_calibration_reports_but_does_not_scale();
+  test_union_voxel_volume();
   test_growth_does_not_fall_back();
   test_growth_is_supported();
   test_growth_respects_the_cone();
@@ -1327,6 +2133,12 @@ int main() {
   test_recommend_select_structural();
   test_recommend_select_aesthetic();
   test_synthetic_focal_stress();
+  test_synthetic_dead_floor();
+  test_union_volume();
+  test_dual_contour();
+  test_dual_contour_octree();
+  test_traced_member_survives_node_merge();
+  test_wet_join_carves_closed();
   test_bundle_is_not_support();
   test_chain_and_tee_survive();
   test_node_merge_joins_near_misses();
@@ -1335,7 +2147,6 @@ int main() {
   test_one_cell_needs_a_finish();
   test_every_census_stage_is_recorded();
   test_census_counts_components_not_only_length();
-  test_synthetic_dead_floor();
   std::printf("%s: %d checks, %d failures\n",
               g_failures == 0 ? "PASS" : "FAIL", g_checks, g_failures);
   return g_failures == 0 ? 0 : 1;
