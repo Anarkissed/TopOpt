@@ -54,6 +54,17 @@
 - **Everything is saved and undoable.** Every edit reaches `project.json` within 0.8 s. Undo
   and Redo are on the page.
 
+**Overnight round (below).** Added since the first handoff:
+
+- the dent reads through a 30 % body;
+- split faces are loaded faces;
+- **Generate lattice** with the squish on repeat;
+- **Export** (STL; G-code "not ready yet").
+
+Three things need you: the STL size (1.3 GB for the pad at Standard), whether the lattice
+should be occluded by the body, and a look on the device. The simulator launch was refused
+tonight, so none of it has been seen on a screen.
+
 **What is next.**
 
 - **Maintainer look.** Please check the curve editor's feel, the 3D dent (see "Not done" §2),
@@ -163,7 +174,8 @@ converted with `Array(...)` once (`FLEX_TIMING` probe). After the fix:
 | `LatticeStageModeModal.swift` | +9 −2 | `onChooseFlexible: (() -> Void)?` (default nil) + `flexibleFocused` state + init parameter (L25–32); one `FlexibleStageCard` line in the card HStack (L75); max width 980 when three cards (L80). `LatticeStageMode` is **not** touched. |
 | `WorkspacePlaceholder.swift` | +33 −3 | `showFlexiblePage` state (L673); joins `fullScreenPageUp` (L617); `latticeStageModeNeeded` also requires `flexible == nil` (L624); the modal call gains `onChooseFlexible:` (L1373–1376); `FlexibleStageSheet` + `FlexibleStagePage` presented next to the mode sheet (L1384–1394); `FlexibleStageChip` in the title slot (L2790–2792); one `.onChange(of: showLatticeWizard)` on the always-mounted background that sends the Settings door to the Flexible page under Flexible (L729–732). |
 | `project.pbxproj` | +12 | three file refs, three build files, group entries, Resources entries (IDs `F1E0…`). |
-| `TopOptBridge/include/module.modulemap` | +1 | `header "FlexibleBridge.hpp"`. |
+| `TopOptBridge/include/module.modulemap` | +2 | `header "FlexibleBridge.hpp"`; overnight: `header "FlexibleLattice.hpp"`. |
+| `MetalMeshView.swift` (overnight) | +4 −1 | the dent's opaque flag: `float solid;` in `VOut` (L426), `o.solid = in.flags.y;` (L487), fragment alpha `in.solid > 0.5 ? 1.0 : bodyAlpha` (L683–684). |
 
 ## Test evidence (raw, pasted, unedited)
 
@@ -232,9 +244,254 @@ After the sync, with the hook-adjacent suites
 - `AppModelTests`: the three 3MF tests (no lib3mf in a worktree macOS slice; this worktree's
   core was built with `LIB3MF_PREFIX=/nonexistent`, as the memory recommends);
 - `OrganicSampleCubeTests.testThickerIsLive…`;
-- `OrganicVariantCacheTests.testTheKeyIgnoresThickness…`.
+- `OrganicVariantCacheTests.testTheKeyIgnoresThickness…`;
+- `LatticeCellGradingTests.testGradingChangesTheRenderedLattice`: reproduced on #354's
+  head `8105522b` with its own core (see the overnight round).
 
 PR (draft): https://github.com/Anarkissed/TopOpt/pull/362 · CI: the PR's checks tab.
+
+## Overnight round (2026-09-29, while you slept)
+
+### In plain words
+
+- **The dent reads through the part.** While a dent is shown, the part drops to 30 %
+  opacity and the dented face map stays at 100 %.
+- **Split faces work as loaded faces.** A face you split on the Surface stage offers each
+  half as its own loaded face. A tap picks the half you touched, using the Surface stage's
+  own rule. Core frames each half from its own triangles, so a half of the pad's top is
+  50 × 100, not 100 × 100. The names read "face 1 · top A".
+- **Generate lattice.** When every loaded face has a design core accepted, a **Generate
+  lattice** button appears at the bottom right. If it can't run yet, the button says why
+  in one sentence (no filament, calibrate-first, a shared stack, or a face core refused).
+  - Generating builds the lattice from core's assembled density field. The part becomes a
+    ghost (18 %), the lattice is drawn inside it, and **the squish plays on repeat**:
+    rest → full design load → rest, every 2.4 s. The dent and the lattice move together.
+  - **Hide / Show lattice** and **Generate again** sit beside it. "Out of date" shows
+    when you change a face after generating.
+- **Export.** The Export button opens a modal with two cards:
+  - **STL:** the part with its lattice as one closed solid. Draft / Standard / Fine set the
+    sampling. The card shows the size before you export, a progress bar, Cancel (which
+    deletes the partial file), and then the share sheet. Above 500 MB it warns that a
+    slicer may be slow to open the file.
+  - **G-code:** greyed out, with the reason: "TopOpt does not slice (ARCHITECTURE §2)".
+    What comes next (DECISIONS 2026-09-27 item 6) is post-processing your sliced G-code
+    for foaming filaments.
+
+**Please look at these three things:**
+
+1. **The STL is big.** The 100 × 100 × 20 mm pad, gyroid, with one 0.42 mm bead per wall:
+   | quality | pitch | triangles | size |
+   |---|---|---|---|
+   | Draft | 0.210 mm | ~17 M | 824 MB |
+   | Standard | 0.168 mm | ~27 M | 1.3 GB |
+   | Fine | 0.140 mm | ~40 M | 1.9 GB |
+
+   A whole-part lattice meshed finely enough to keep a 0.42 mm wall closed is simply that
+   large. The honeycomb is about 60 % of these sizes. Options are yours:
+   - decimate flat regions;
+   - export only the lattice region and let the slicer fill the rest;
+   - go the G-code route sooner.
+2. **The lattice is a layer drawn over the part, not occluded by it.** You see every wall
+   through the ghost body. That is on purpose for an x-ray look, but the part's near side
+   does not hide the far walls. Folding the march into MetalMeshView's passes is the
+   follow-up if you want the walls hidden where the body is in front.
+3. **I could not run it on the simulator tonight.** Launching the app on my simulator
+   (147E56A1, not yours) was refused by the permission check, and I did not work around
+   that. The new build is installed there, but none of the overnight screens has been
+   seen on a device. The evidence below is the preview's own shader rendering offscreen,
+   not screenshots.
+
+### Your rulings this round, and where they live
+
+| ruling | where |
+|---|---|
+| "the dent to show via an opacity drop in the model (but the dent is full 100% opacity)" | `FlexibleStagePage.dentBodyAlpha = 0.3`. The dented quads carry tint `flags.y = 1` (`FlexibleOverlayMesh.tints`), and `MetalMeshView` keeps those fragments at alpha 1 (hook below). |
+| "work on the split faces" | `FlexibleRegions.swift` |
+| "the lattice generated when everything is done and then an animation showing the squishing of the model playing on repeat with an 'export' button that will pull up a modal to either export gcode or an stl" | the Generate / Export pills, `FlexibleLatticeGeneration.swift`, `FlexibleExportSheet.swift` |
+| "there is no core yet for Flexibles, so your preview will be the source of truth" | `FlexibleLatticeField.swift` defines the geometry once. The renderer (MSL) and the exporter (C++) are held to it by tests. |
+| G-code: "STL now, G-code next" | the G-code card says "Not ready yet" and why |
+| Generate: "Button + design load" | the loop plays each face's own design load |
+
+### The lattice, defined once (`FlexibleLatticeField.swift`)
+
+- **Input.** Core's assembled density field for the faces' current designs
+  (`FlexibleScene.densityField` → `assemble_density_field`).
+- **Gyroid.** Walls are whole beads (R1), t = beads × bead width. The cell follows ρ
+  continuously, with L = 3.0915 t/ρ (03-generators §3), clamped to ρ ∈ [0.05, 0.9].
+- **Honeycomb.** One cell for the whole part, d = 2t/ρ̄ (03 §4, uniform d in v1), as prisms
+  along the build direction.
+- **Skin.** Default 0.8 mm of solid under every face. A loaded face with skin off lets the
+  lattice run to its surface.
+- **What the preview draws:** the walls only,
+  `F = max(wall, dRegion, dPart, dSkin)`. The body and skin are the ghosted mesh.
+- **What the STL writes:** the body plus the walls,
+  `S = min(max(dPart, −max(dRegion, dSkin)), F)`.
+  - ★ The spec first said `min(dRegion, dSkin)`, which made every skin air and the part
+    outside the region hollow. Both my tests and the exporter's builder caught it
+    independently; it is fixed, and the change is recorded in the file's header.
+- **Three copies of the field, held together:**
+  - **Swift reference.**
+  - **C++ exporter (`flexible_lattice.cpp`):** bit-identical at 4,000 points on each of five
+    fields (graded ρ from 0.01 to 1.0, a region edge, four build directions).
+    - Controls: the old π rounding gives 1,220 differing values, and a wall one ulp
+      thicker moves ~1,000.
+    - To get there, the C++ now uses Swift's `Float.pi` (rounded toward zero) and
+      `simd_normalize`, both found by the verifier.
+  - **Metal shader:** within 1.2e-4 mm (gyroid) and 2.4e-6 mm (honeycomb) at 256 points.
+    The GPU's own sin/cos is the gap.
+
+### The preview renderer (`FlexibleLatticeRenderer.swift`, `FlexibleLatticeShader.swift`)
+
+- **Technique.** Built on the octet preview's approach: a per-pixel sphere-tracer of the
+  field on a transparent layer above MetalMeshView. It takes no touches, so orbiting still
+  reaches the part.
+- **Rays.** Unprojected in double on the CPU. Inverting in single precision is what cost
+  the octet preview 1–4 px of swim.
+- **Squish.** The shader inverts 02-squish-model §6's ramp per sample: a point at t in a
+  column moves s·d·(exit − t)/(exit − entry) along the load. The depths are core's
+  buildable depths (`FlexibleSquishFace(stack:design:)`). One page clock drives both the
+  dent and the lattice, so they stay in phase.
+- **Frame time at 1024² on the M2 Pro** (median):
+  | | rest | squished |
+  |---|---|---|
+  | gyroid | 15–18 ms | 25–26 ms |
+  | honeycomb | 4–5 ms | 8–9 ms |
+
+  The drawable is capped at 1152 px, as for the octet.
+- **March cap.** The gyroid step cap is 0.1 cell. At 0.25, 2,203 px disagreed with a fine
+  reference march at 768²; at 0.1, 95 px did.
+
+### The STL exporter (`flexible_lattice.cpp`, `FlexibleLatticeExport.swift`)
+
+- **Streaming.** Marching cubes over `solid`, streamed: two sample layers in memory and a
+  1 MiB write buffer. The triangle count is patched in at the end.
+- **Test box (30 × 30 × 12 mm).**
+  - The mesh is closed: every directed edge is matched once each way, and a flipped facet
+    shows as a failure.
+  - It winds outward.
+  - Its volume is within 0.9 % (gyroid) and 1.4 % (honeycomb) of a Monte-Carlo integral of
+    the Swift field.
+  - It is deterministic.
+- **Cancel** deletes the partial file.
+- **Off the main thread.** The page runs the export off the main actor and caches the size
+  estimate per lattice and pitch.
+
+### Hook lines added this round (in #354's files)
+
+| file | lines | what |
+|---|---|---|
+| `MetalMeshView.swift` | +4 −1 | `float solid;` in `VOut` (L426), `o.solid = in.flags.y;` (L487), and in the fragment `float a = in.solid > 0.5 ? 1.0 : bodyAlpha; return float4(rgb * a, a);` (L683–684). No other tint writer uses slot 5 (checked: SurfaceTint writes slot 4 only), so every other screen is unchanged. |
+| `TopOptBridge/include/module.modulemap` | +1 | `header "FlexibleLattice.hpp"`, the exporter's POD API. |
+
+All other work this round is in new files:
+
+- `FlexibleRegions`
+- `FlexibleLatticeField`, `FlexibleLatticeGeneration`, `FlexibleLatticeGlue`
+- `FlexibleExportSheet`
+- `FlexibleLatticeRenderer`, `FlexibleLatticeShader`
+- `FlexibleLatticeExport`
+- `flexible_lattice.cpp` and `FlexibleLattice.hpp`
+- five test files
+
+### Evidence (`docs/handoffs/evidence/2026-09-29-flexible-screens/`)
+
+- **Lattice layer, drawn offscreen by the preview's own shader.** These are not device
+  screenshots. The part is settled as the page draws it, and the dent is ×3.
+  - C1's pad designed at 30 kg: `lattice_pad_gyroid_{rest,half,full}_x3.png` and
+    `lattice_pad_honeycomb_{rest,half,full}_x3.png`.
+  - The pad split at x = 50, halves at 10 kg and 25 kg (buildable deepest 2.25 mm and
+    2.90 mm): `lattice_split_pad_10kg_25kg_{rest,full}_x3.png`.
+- **Regenerate** with
+  `FLEX_EVIDENCE_DIR=<dir> swift test --filter FlexibleLatticeEvidenceProbe`.
+- **Dent through a 30 % body** (on the device, before this round's launch refusal):
+  `s5_pad_dent_body_30pct_map_opaque.png`.
+
+### Tests
+
+`swift test --filter Flexible`, after the last commit:
+```
+Test Suite 'FlexibleLatticeFieldTests' passed at 2026-09-29 04:42:37.324.
+	 Executed 4 tests, with 0 failures (0 unexpected) in 3.668 (3.669) seconds
+Test Suite 'FlexibleLatticeRendererCoverageTests' passed at 2026-09-29 04:42:38.358.
+	 Executed 2 tests, with 0 failures (0 unexpected) in 1.033 (1.033) seconds
+Test Suite 'FlexibleLatticeRendererTests' passed at 2026-09-29 04:42:44.725.
+	 Executed 11 tests, with 1 test skipped and 0 failures (0 unexpected) in 6.366 (6.367) seconds
+Test Suite 'FlexibleRegionsTests' passed at 2026-09-29 04:42:44.775.
+	 Executed 3 tests, with 0 failures (0 unexpected) in 0.050 (0.050) seconds
+Test Suite 'FlexibleSliceProbe' passed at 2026-09-29 04:42:44.775.
+Test Suite 'FlexibleStageTests' passed at 2026-09-29 04:42:46.536.
+	 Executed 15 tests, with 0 failures (0 unexpected) in 1.760 (1.762) seconds
+Test Suite 'FlexibleTimingProbe' passed at 2026-09-29 04:42:46.537.
+	 Executed 63 tests, with 4 tests skipped and 0 failures (0 unexpected) in 18.180 (18.186) seconds
+	 Executed 63 tests, with 4 tests skipped and 0 failures (0 unexpected) in 18.180 (18.187) seconds
+```
+
+New this round:
+
+- **`FlexibleRegionsTests` (3):**
+  - sectors are declared, named and picked by the side of the tap;
+  - core frames a sector from its own half;
+  - the overlay replaces only the sector's triangles.
+- **`FlexibleLatticeFieldTests` (4):**
+  - core's field becomes filled grids;
+  - walls exist inside and the skin is solid;
+  - skin off reaches the face;
+  - the honeycomb is a prism along the build axis.
+- **`FlexibleLatticeExportTests` (8):**
+  - C++ = Swift, both to 1e-4 and bit-exact;
+  - skin and body are solid;
+  - closed, wound, and the right volume;
+  - deterministic;
+  - cancel;
+  - two layers held (self-reported);
+  - refusals.
+- **`FlexibleLatticeRendererTests` (11):**
+  - the shader compiles;
+  - the uniform layout matches the MSL, field by field;
+  - the GPU matches Swift, and the squish probe matches the Swift pullback;
+  - the pullback inverts the ramp;
+  - coverage, and the two topologies differ;
+  - s = 0 draws exactly the rest lattice;
+  - the march matches a fine reference march, with controls that go red;
+  - frame time;
+  - frames run only while the squish loops.
+
+Each comparison has a control that goes red.
+
+**Full app suite.** It was started on `dcae9a03`, before this round. The raw result is
+under "Full suite" below.
+
+- **Tonight's MetalMeshView hook.** I ran the 111 tests that draw through MetalMeshView's
+  fragment shader on HEAD `fe9dc359`, and all passed:
+  - `LatticePreviewBodyAlphaTests`, `UnifiedShadingTests`, `ViewerVisibilityRegressionTests`
+  - `StageBackdropTests`, `SurfaceStageTests`, `SurfaceRound7Tests`
+  - `FaceSelectionTests`, `ContactShadingTests`, `ViewerTests`
+  - `FaceProtectionTests`, `LatticeGBufferMaskTests`
+  ```
+  	 Executed 111 tests, with 0 failures (0 unexpected) in 81.290 (81.299) seconds
+  ```
+  They rewrite `docs/handoffs/assets/120_*.png`; I restored those with git.
+- **`LatticeCellGradingTests.testGradingChangesTheRenderedLattice` is PRE-EXISTING.** It
+  fails identically on #354's head `8105522b` built with its own core
+  (`GRADING lit uniform=3720 graded=3719 moved=298 noiseFloor=0 levels=[0.0, 1.0, 2.0]`,
+  so 298 against a threshold of 500). It sits in #354's octet renderer, which this branch
+  does not touch.
+- **`0191aa6a` (the renderer, as cherry-picked) does not build on its own.** It declares two
+  names the branch already had; the next commit, `e5247c45`, reconciles them. The tip builds.
+  Keep this in mind if you bisect.
+
+### What I did NOT do (this round)
+
+1. **No on-device check of the overnight screens.** The simulator launch was refused
+   (above).
+2. **The lattice is not occluded by the body** (above).
+3. **No decimation**, so the STL sizes are as in the table above.
+4. **The G-code card is informational only**, as ruled.
+5. **Draw-order limitation with the translucent body.** The body is drawn without depth
+   writes while it is translucent. So an opaque dented quad drawn after a nearer
+   translucent wall can overwrite it. From normal angles it reads correctly.
+6. **The squish is the 02 §6 linear ramp.** It is a picture of the design, not a
+   simulation.
 
 ## What I did NOT do
 
@@ -250,9 +507,10 @@ PR (draft): https://github.com/Anarkissed/TopOpt/pull/362 · CI: the PR's checks
    column core's `edge_fraction` calls most-inside, along the frame's X. The curve's values are
    core's.
 4. **No skin geometry.** `skin_on` is saved and sent, and core records it only (C1 #9).
-5. **No bead-path preview, export or print settings.** Those are A2, C3 and C5.
-6. **Face picking uses the importer's faces (one region per face).** Split sectors from the
-   Surface stage (`FaceRegionModel` cuts) are not yet offered as loaded faces.
+5. **No bead-path preview or print settings.** Those are A2 and C5. (An STL export of the
+   app's own lattice now exists: see the overnight round.)
+6. ~~**Face picking uses the importer's faces (one region per face).**~~ Done in the
+   overnight round: split sectors are loaded faces (`FlexibleRegions`).
 7. **Undo is the project's snapshot history.** A curve drag is one step once it rests.
 
 ## Warnings for the next run
@@ -266,6 +524,22 @@ PR (draft): https://github.com/Anarkissed/TopOpt/pull/362 · CI: the PR's checks
 - **Seeded test projects.** My simulator is a separate device, "iPad Pro 13 Flexible-A1"
   (`147E56A1-…`). The three test projects on it were seeded by copying your M2 project and
   C1's pad STL. Your device was not touched.
+
+## Full suite
+
+`swift test` (whole package), started 02:30 on `dcae9a03`, with its own scratch path. It is
+slow tonight because other sessions' suites are running on the same machine.
+
+**Status at the time of writing: STILL RUNNING.** 690 test cases have passed. The failures so
+far are all known pre-existing ones:
+```
+TopOptFlowsTests.AppModelTests testReopenedThreeMFProjectReimportsTheStlWorkingCopy
+TopOptFlowsTests.AppModelTests testThreeMFImportNormalisesToStlWorkingCopyAndKeepsProvenance
+TopOptFlowsTests.AppModelTests testThreeMFImportOptimisesOnDeviceEndToEnd
+TopOptFlowsTests.LatticeCellGradingTests testGradingChangesTheRenderedLattice
+```
+The three `AppModelTests` 3MF tests fail because a worktree's macOS core has no lib3mf.
+`LatticeCellGradingTests` also fails on #354's own head (see above).
 
 ## Blocked
 None. No core brief was needed: every number on screen comes from the C1 bridge contract.
