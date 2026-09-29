@@ -8,7 +8,9 @@
 //       offset, so a swap on one side would draw nonsense silently);
 //   T3  the ray is the octet's camera basis (no matrix inversion);
 //   T4  the GPU field and squish equal the Swift reference (ported from the retired
-//       FlexibleLatticeRendererTests / CoverageTests), on the grids AS THE GPU SEES THEM;
+//       FlexibleLatticeRendererTests / CoverageTests), on the grids AS THE GPU SEES THEM —
+//       within 5 µm (`parityMM`): Stage B samples the (SDF, skin) volume as hardware-
+//       filtered halves (8-bit filter weights); ρ stays exact;
 //   T10 (the eye-depth half) the G-buffer's eye-Z is the hit's −(modelView·hit).z;
 //   T13 MeshRenderer uploads once per token.
 // GPU-gated: skips only when no Metal device exists; a shader that fails to compile on a
@@ -22,6 +24,10 @@ import simd
 final class FlexibleLatticePassTests: XCTestCase {
 
     typealias Fx = FlexibleLatticeFixtures
+    /// ★ STAGE B (the Release frame missed 16 ms): the (SDF, skin) volume is sampled as
+    /// hardware-filtered HALVES, so the stated parity is 5 µm — it was 2 µm with every
+    /// fetch an exact trilinear of 32-bit reads. The reference holds the half-rounded grids.
+    static let parityMM: Float = 5e-3
 
     // MARK: T1 — pipeline and compile guard
 
@@ -157,7 +163,7 @@ final class FlexibleLatticePassTests: XCTestCase {
             pass.controlSwapVolumes = false
             let missSwap = pts.indices.map { abs(swapped[$0] - FlexibleLatticeField.lattice(at: pts[$0], f)) }.max() ?? 0
             print("FLEX-PROBE \(topo): max |gpu − swift| = \(worst) mm over \(pts.count) points (\(inside) in a wall, \(outside) not); controls: other topology \(missTopo), swapped volumes \(missSwap)")
-            XCTAssertLessThanOrEqual(worst, 2e-3, "\(topo): the GPU field drifted from FlexibleLatticeField.lattice")
+            XCTAssertLessThanOrEqual(worst, Self.parityMM, "\(topo): the GPU field drifted from FlexibleLatticeField.lattice")
             XCTAssertGreaterThan(inside, 5); XCTAssertGreaterThan(outside, 5)
             XCTAssertGreaterThan(missTopo, 0.1, "control: the probe must tell the topologies apart")
             XCTAssertGreaterThan(missSwap, 0.1, "control: the (ρ, mask) volume in the (SDF, skin) slot must show")
@@ -186,7 +192,7 @@ final class FlexibleLatticePassTests: XCTestCase {
             missHalf = max(missHalf, abs(gpu[i] - FlexibleSquishField.lattice(at: p, f, faces: [face], squish: s / 2)))
         }
         print("FLEX-SQUISH-PROBE max |gpu − swift| = \(worst) mm over \(pts.count) points (\(moved) moved, \(air) in the gap); control at s/2: \(missHalf)")
-        XCTAssertLessThanOrEqual(worst, 2e-3)
+        XCTAssertLessThanOrEqual(worst, Self.parityMM)
         XCTAssertGreaterThan(moved, 20, "the squish moved nothing the probe could see")
         XCTAssertGreaterThan(air, 0, "no probe point landed in the gap the face left")
         XCTAssertGreaterThan(missHalf, 0.1, "control: the probe must see the squish amount")
@@ -219,11 +225,41 @@ final class FlexibleLatticePassTests: XCTestCase {
             let missRegion = pts.indices.map { abs(gpuNoRegion[$0] - FlexibleLatticeField.lattice(at: pts[$0], f)) }.max() ?? 0
             let missSkin = pts.indices.map { abs(gpuNoSkin[$0] - FlexibleLatticeField.lattice(at: pts[$0], f)) }.max() ?? 0
             print("FLEX-TERMS \(topo): max |gpu − swift| \(worst) mm over \(pts.count) points; region decides at \(byRegion), skin at \(bySkin); controls: region dropped \(missRegion) mm, skin dropped \(missSkin) mm")
-            XCTAssertLessThanOrEqual(worst, 2e-3)
+            XCTAssertLessThanOrEqual(worst, Self.parityMM)
             XCTAssertGreaterThanOrEqual(byRegion, 5); XCTAssertGreaterThanOrEqual(bySkin, 5)
             XCTAssertGreaterThan(missRegion, 0.1, "control: a dropped region term must show")
             XCTAssertGreaterThan(missSkin, 0.1, "control: a dropped skin term must show")
         }
+    }
+
+    /// Stage B's half converter against the hardware's own (Float16 exists on arm64): every
+    /// value the SDF can hold rounds to the same half, including ties and subnormals.
+    func testHalfRoundingMatchesTheHardwareHalf() throws {
+        #if arch(arm64)
+        var vals: [Float] = [0, -0, 1, -1, 0.1, 0.2, 1e-5, 6.1e-5, 5.96e-8, 3e-8, 2049, 2050, 2051, 65504, 65520, 1e6, -1e6,
+                             .infinity, -.infinity, 0.33333334, 12.345678, -7.0078125, 1.0009766, 1.0014648]
+        var s: UInt64 = 7
+        for _ in 0..<20000 {
+            s = s &* 6364136223846793005 &+ 1442695040888963407
+            vals.append(Float(bitPattern: UInt32(truncatingIfNeeded: s >> 32)))
+        }
+        var bad = 0
+        for v in vals where !v.isNaN {
+            let mine = FlexibleLatticePass.halfBits(v)
+            if mine != Float16(v).bitPattern { bad += 1 }
+            if FlexibleLatticePass.halfValue(mine) != Float(Float16(v)) { bad += 1 }
+        }
+        XCTAssertEqual(bad, 0)
+        XCTAssertTrue(FlexibleLatticePass.halfValue(FlexibleLatticePass.halfBits(.nan)).isNaN)
+        // control: a converter that TRUNCATES must disagree somewhere
+        let truncated = vals.filter { !$0.isNaN && abs($0) < 60000 && abs($0) > 1e-4 }.filter { v in
+            let t = UInt16((v.bitPattern >> 16) & 0x8000) | UInt16(truncatingIfNeeded: ((Int(v.bitPattern >> 23 & 0xFF) - 112) << 10)) | UInt16(truncatingIfNeeded: (v.bitPattern & 0x7FFFFF) >> 13)
+            return t != Float16(v).bitPattern
+        }.count
+        XCTAssertGreaterThan(truncated, 100, "control: truncation must be distinguishable from rounding")
+        #else
+        throw XCTSkip("Float16 is not available on this architecture")
+        #endif
     }
 
     // MARK: T10 (eye depth) — the G-buffer's eye-Z is the hit's

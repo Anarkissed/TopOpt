@@ -226,12 +226,15 @@ final class FlexibleLatticePass {
         // keeps the resampled grid, so parity is exact either way.
         let mask = Self.sameGrid(f.mask, f.rho) ? f.mask : Self.resample(f.mask, like: f.rho)
         let skin = Self.sameGrid(f.skinDist, f.partSDF) ? f.skinDist : Self.resample(f.skinDist, like: f.partSDF)
+        // ★ STAGE B: the (SDF, skin) pair is uploaded as HALF floats and hardware-filtered
+        // (FlexibleLatticeShader.flx_sample_ds); the reference holds those rounded values
         var ref = f
         ref.mask = mask
-        ref.skinDist = skin
+        ref.partSDF = Self.halfRounded(f.partSDF)
+        ref.skinDist = Self.halfRounded(skin)
         referenceInputs = ref
         rmTex = makeVolume(f.rho, mask)
-        dsTex = makeVolume(f.partSDF, skin)
+        dsTex = makeHalfVolume(f.partSDF, skin)
         faces = Array(l.faces.prefix(FlexibleSquishField.maxFaces))
         columnTex = faces.map { makeColumns($0) ?? emptyColumns }
         maxDepthMM = faces.map(\.maxDepthMM).max() ?? 0
@@ -290,6 +293,67 @@ final class FlexibleLatticePass {
                         withBytes: raw.baseAddress!, bytesPerRow: a.nx * 8, bytesPerImage: a.nx * a.ny * 8)
         }
         return tex
+    }
+
+    /// The (SDF, skin) pair as one rg16Float volume, sampled with the hardware filter.
+    private func makeHalfVolume(_ a: FlexGrid, _ b: FlexGrid) -> MTLTexture? {
+        let n = a.nx * a.ny * a.nz
+        guard a.nx > 0, a.ny > 0, a.nz > 0, a.values.count == n, b.values.count == n, a.spacing > 0 else { return nil }
+        var packed = [UInt16](repeating: 0, count: 2 * n)
+        for i in 0..<n { packed[2 * i] = Self.halfBits(a.values[i]); packed[2 * i + 1] = Self.halfBits(b.values[i]) }
+        let d = MTLTextureDescriptor()
+        d.textureType = .type3D
+        d.pixelFormat = .rg16Float
+        d.width = a.nx; d.height = a.ny; d.depth = a.nz
+        d.usage = [.shaderRead]
+        d.storageMode = .shared
+        guard let tex = device.makeTexture(descriptor: d) else { return nil }
+        packed.withUnsafeBytes { raw in
+            tex.replace(region: MTLRegionMake3D(0, 0, 0, a.nx, a.ny, a.nz), mipmapLevel: 0, slice: 0,
+                        withBytes: raw.baseAddress!, bytesPerRow: a.nx * 4, bytesPerImage: a.nx * a.ny * 4)
+        }
+        return tex
+    }
+
+    /// IEEE half bits of `f`, rounded to nearest even (no `Float16`: it does not exist on
+    /// x86_64 macOS). Overflow → ±inf, NaN → quiet NaN.
+    static func halfBits(_ f: Float) -> UInt16 {
+        let x = f.bitPattern
+        let sign = UInt16((x >> 16) & 0x8000)
+        let absx = x & 0x7FFF_FFFF
+        if absx > 0x7F80_0000 { return sign | 0x7E00 }                 // NaN
+        let exp = Int((absx >> 23) & 0xFF) - 127 + 15
+        var mant = absx & 0x7F_FFFF
+        if exp >= 31 { return sign | 0x7C00 }                           // too big → inf
+        if exp <= 0 {                                                   // subnormal half
+            if exp < -10 { return sign }
+            mant |= 0x80_0000
+            let shift = UInt32(14 - exp)
+            var h = mant >> shift
+            let rem = mant & ((UInt32(1) << shift) - 1), halfway = UInt32(1) << (shift - 1)
+            if rem > halfway || (rem == halfway && h & 1 == 1) { h += 1 }
+            return sign | UInt16(h)
+        }
+        var h = (UInt32(exp) << 10) | (mant >> 13)
+        let rem = mant & 0x1FFF
+        if rem > 0x1000 || (rem == 0x1000 && h & 1 == 1) { h += 1 }       // a carry into the exponent is correct
+        return sign | UInt16(truncatingIfNeeded: h)
+    }
+
+    /// The float an IEEE half's bits hold.
+    static func halfValue(_ h: UInt16) -> Float {
+        let sign: Float = h & 0x8000 != 0 ? -1 : 1
+        let exp = Int((h >> 10) & 0x1F), mant = Float(h & 0x3FF)
+        if exp == 0 { return sign * mant * pow(2, -24) }
+        if exp == 31 { return mant == 0 ? sign * .infinity : .nan }
+        return sign * (1 + mant / 1024) * pow(2, Float(exp - 15))
+    }
+
+    /// A grid with every value rounded through a half, as the GPU reads it.
+    static func halfRounded(_ g: FlexGrid) -> FlexGrid {
+        var r = g
+        r.values = g.values.map { halfValue(halfBits($0)) }
+        return r
     }
 
     private func makeColumns(_ f: FlexibleSquishFace) -> MTLTexture? {

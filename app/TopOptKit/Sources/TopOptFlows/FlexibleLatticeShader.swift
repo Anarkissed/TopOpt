@@ -19,10 +19,17 @@
 //     `.FaceUniforms` / `.Frame` BY BYTE OFFSET (all float4 / float4x4, same order).
 //     `flx_uniform_echo` / `flx_frame_echo` read every field back BY NAME, so a field
 //     added or reordered on one side fails a test instead of drawing nonsense.
-//   * flx_sample2 — FlexGrid.sample on a PACKED two-channel volume: one integer `read()`
-//     per corner returns both channels (ρ + mask, or part SDF + skin distance). The same
-//     clamp of u to [0, n−1] and i0 ≤ n−2 clamp. NOT the hardware filter: its weights are
-//     8-bit fixed point (1/256 of a voxel), ~2 µm on a 0.5 mm grid.
+//   * flx_sample2 — FlexGrid.sample on the PACKED (ρ, mask) volume: one integer `read()`
+//     per corner returns both channels. The same clamp of u to [0, n−1] and i0 ≤ n−2
+//     clamp — EXACT, because ρ sets the gyroid's cell and a rounded cell once halved the
+//     octet's (2026-08-26).
+//   * flx_sample_ds — the (part SDF, skin distance) volume. ★ STAGE B (task in-pass round:
+//     the Release frame missed 16 ms): rg16Float, HARDWARE-filtered (linear, clamp to
+//     edge — the same clamp to [0, n−1]), the octet's own SDF format. One sample for the
+//     eight reads, on the fetch every march step makes first. Its cost: half rounding
+//     plus the filter's 8-bit weights (1/256 of a voxel) — parity with Swift loosens from
+//     2 µm to ≤ 5 µm, and the reference (`FlexibleLatticePass.referenceInputs`) holds the
+//     half-rounded grids the GPU reads.
 //   * flx_wall / flx_field — gyroid and honeycomb walls, dRegion, dPart, dSkin.
 //   * flx_pullback / flx_deformed — the SQUISH (02 §6), inverted.
 //   * flx_march, flx_vertex, flx_gbuffer — the full-screen sphere trace into the G-buffer.
@@ -92,11 +99,17 @@ enum FlexibleLatticeShader {
         return c0v * (1 - fz) + c1v * fz;
     }
 
+    static inline float2 flx_sample_ds(texture3d<float> T, float4 O, float4 N, float3 p) {
+        constexpr sampler smp(coord::normalized, filter::linear, address::clamp_to_edge);
+        float3 uvw = ((p - O.xyz) / O.w + 0.5f) / N.xyz;
+        return T.sample(smp, uvw).rg;
+    }
+
     // mod(x, y) = x − y·floor(x/y) (the spec's, NOT C's fmod: it never goes negative)
     static inline float flx_fmod(float x, float y) { return x - y * floor(x / y); }
 
     // ── FlexibleLatticeField.wall; `rhoRaw` is the sampled ρ, `Lcur` the local cell ─────
-    static float flx_wall(constant FlxUniforms& U, float rhoRaw, float3 p, thread float& Lcur) {
+    static float flx_wall(constant FlxUniforms& U, float rhoRaw, float3 p, thread float& Lcur, bool fastTrig = false) {
         float t = U.shape.y;
         if (U.shape.x < 0.5f) {
             float rho = min(max(rhoRaw, 0.05f), 0.9f);
@@ -107,8 +120,16 @@ enum FlexibleLatticeShader {
             // ★ PRECISE trig: the fast variants are only 2^-13 absolute inside [−π, π] and
             // worse beyond it, and q runs to ~100 rad across a part — |g|/|∇| near the
             // gradient floor turns that into tens of µm.
-            float3 c;
-            float3 s = precise::sincos(q, c);
+            // ★ STAGE B (the march's lower-bound view ONLY, `fastTrig`): q range-reduced to
+            // [−π, π] first, where fast::sincos holds its 2^-13; the hit, its bisection, the
+            // normal and the probes stay on precise:: (flx_field). Gated by T11.
+            float3 c, s;
+            if (fastTrig) {
+                float3 qr = q - (2 * M_PI_F) * rint(q * (0.5f / M_PI_F));
+                s = fast::sincos(qr, c);
+            } else {
+                s = precise::sincos(q, c);
+            }
             float g = s.x * c.y + s.y * c.z + s.z * c.x;
             float3 grad = k * float3(c.x * c.y - s.z * s.x, c.y * c.z - s.x * s.y, c.z * c.x - s.y * s.z);
             return abs(g) / max(length(grad), 0.05f * k) - 0.5f * t;
@@ -131,7 +152,7 @@ enum FlexibleLatticeShader {
     static float flx_field(constant FlxUniforms& U, texture3d<float> rmT, texture3d<float> dsT,
                            float3 p, thread float& Lcur) {
         float2 rm = flx_sample2(rmT, U.rmO, U.rmN, p);
-        float2 ds = flx_sample2(dsT, U.dsO, U.dsN, p);
+        float2 ds = flx_sample_ds(dsT, U.dsO, U.dsN, p);
         float wall = flx_wall(U, rm.x, p, Lcur);
         float dRegion = (0.5f - rm.y) * 2 * U.rmO.w;
         float dPart = ds.x;
@@ -148,7 +169,7 @@ enum FlexibleLatticeShader {
     static float flx_field_march(constant FlxUniforms& U, texture3d<float> rmT, texture3d<float> dsT,
                                  float3 p, thread float& Lcur) {
         const float far = 0.25f;
-        float2 ds = flx_sample2(dsT, U.dsO, U.dsN, p);
+        float2 ds = flx_sample_ds(dsT, U.dsO, U.dsN, p);
         float dPart = ds.x;
         if (dPart > far) { Lcur = 1e30f; return dPart; }
         float dSkin = U.shape2.y - ds.y;
@@ -156,7 +177,7 @@ enum FlexibleLatticeShader {
         float2 rm = flx_sample2(rmT, U.rmO, U.rmN, p);
         float dRegion = (0.5f - rm.y) * 2 * U.rmO.w;
         if (dRegion > far) { Lcur = 1e30f; return max(dRegion, max(dPart, dSkin)); }
-        float wall = flx_wall(U, rm.x, p, Lcur);
+        float wall = flx_wall(U, rm.x, p, Lcur, true);
         return max(max(wall, dRegion), max(dPart, dSkin));
     }
 
