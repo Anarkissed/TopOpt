@@ -305,7 +305,7 @@ public struct FlexibleStagePage: View {
         FlexibleExportSheet(
             wallMM: Double(g.inputs.wallMM), fileName: name,
             summary: "\(g.topology.capitalized) · \(Int(g.tempC)) °C · \(model.material?.displayName ?? "")",
-            estimate: { h in FlexibleLatticeExporting.estimate(g.inputs, hMM: h) },
+            estimate: { h in FlexibleLatticeExporting.estimate(g, hMM: h) },
             export: { h, url, progress in try await FlexibleLatticeExporting.export(g.inputs, hMM: h, to: url, progress: progress) },
             onClose: { showExport = false })
         .transition(.opacity)
