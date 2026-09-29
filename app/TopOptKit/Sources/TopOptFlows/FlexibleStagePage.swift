@@ -143,7 +143,8 @@ public struct FlexibleStagePage: View {
                 bodyAlpha: model.lattice != nil && showLattice ? Self.latticeBodyAlpha
                     : (dents != nil ? Self.dentBodyAlpha : 1))
             if let g = model.lattice, showLattice {
-                FlexibleLatticeLayer(lattice: g, proj: proj, squish: Float(squishAmplitude))
+                FlexibleLatticeMount(lattice: g, proj: proj, squish: Float(squishAmplitude),
+                                     exaggeration: Float(max(dentExaggeration, 1)))
                     .allowsHitTesting(false)
             }
             FlexibleStageOverlays(model: model, proj: proj)

@@ -9,47 +9,21 @@
 //
 // ★ WHAT IT BUILDS. Core's assembled density field for the faces' current designs
 // (FlexibleScene.densityField) → FlexibleLatticeBuilder.inputs (the grids the renderer and
-// the exporter both read) + one `FlexibleSquishFace` per loaded face for the animation.
+// the exporter both read) + one `FlexibleSquishFace` (FlexibleLatticeRenderer.swift) per
+// loaded face for the animation, at core's BUILDABLE depths — the densities the lattice
+// was made from.
 
 import Foundation
 import simd
 import TopOptKit
 
-/// One loaded face's columns for the squish animation: the frame, and per column the
-/// depth at full load (core's buildable depth; nil when core has no number) plus where
-/// the column enters and leaves the part along the load (02-squish-model §6 ramp).
-public struct FlexibleSquishFace: Equatable, Sendable {
-    public let region: Int
-    public let centroid: SIMD3<Double>
-    public let xAxis: SIMD3<Double>
-    public let yAxis: SIMD3<Double>
-    public let load: SIMD3<Double>
-    public let uMin: Double, vMin: Double
-    public let pitchMM: Double
-    public let nu: Int, nv: Int
-    /// nu*nv, row-major in v: (depth mm, entryT, exitT, exists 0/1)
-    public let columns: [SIMD4<Float>]
-    public var maxDepthMM: Double {
-        columns.reduce(0) { Swift.max($0, $1.w > 0 ? Double($1.x) : 0) }
-    }
-
-    public init(region: Int, stack st: FlexStackInfo, design: FlexFaceDesignInfo) {
-        self.region = region
-        centroid = st.centroid; xAxis = st.xAxis; yAxis = st.yAxis; load = st.load
-        uMin = st.uMin; vMin = st.vMin; pitchMM = st.pitchMM; nu = st.nu; nv = st.nv
-        var cols = [SIMD4<Float>](repeating: .zero, count: st.nu * st.nv)
-        for (k, c) in st.columns.enumerated() where k < design.columns.count {
-            let d = design.columns[k]
-            let depth = d.status != "no_lattice" && d.buildableOK ? d.buildableDepthMM : 0
-            cols[c.iv * st.nu + c.iu] = SIMD4(Float(depth), Float(c.entryT), Float(c.exitT), 1)
-        }
-        columns = cols
-    }
-}
-
 public struct FlexibleGeneratedLattice: Sendable {
     public let inputs: FlexibleLatticeInputs
     public let faces: [FlexibleSquishFace]
+    /// The deepest buildable squish over all faces (mm, full load), for the exaggeration.
+    public var maxDepthMM: Double {
+        faces.flatMap(\.cells).reduce(0) { Swift.max($0, $1.w > 0.5 ? Double($1.x) : 0) }
+    }
     public let topology: String
     public let tempC: Double
     /// When it was built, for the "out of date" hint (settings changed since).
@@ -72,5 +46,18 @@ public enum FlexibleLatticeGate {
             if let r = d.refusal { return "\(m.name(f.faceRegionID).capitalized): \(m.text(r.reason))" }
         }
         return nil
+    }
+}
+
+extension FlexibleSquishFace {
+    /// A loaded face at core's buildable depths: a column core left without lattice, or
+    /// whose buildable depth it could not reach, does not move.
+    public init(stack st: FlexStackInfo, design: FlexFaceDesignInfo) {
+        let depths: [Double?] = st.columns.indices.map { k in
+            guard k < design.columns.count else { return nil }
+            let d = design.columns[k]
+            return d.status != "no_lattice" && d.buildableOK ? d.buildableDepthMM : nil
+        }
+        self.init(stack: st, depthsMM: depths)
     }
 }

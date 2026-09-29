@@ -1,19 +1,28 @@
-// FlexibleLatticeGlue — the page's two seams onto the lattice renderer and the STL
-// exporter (built in parallel tonight; see FlexibleLatticeRenderer.swift and
-// FlexibleLatticeExport.swift). Kept here so the page never depends on their internals.
+// FlexibleLatticeGlue — the page's two seams onto the lattice renderer
+// (FlexibleLatticeRenderer.swift) and the STL exporter (FlexibleLatticeExport.swift), so
+// the page never depends on their internals.
 
 import SwiftUI
 import simd
 
-/// The lattice drawn over the part, squishing with the page's loop.
-struct FlexibleLatticeLayer: View {
+/// The lattice drawn over the part, squishing in step with the page's dent.
+///
+/// ★ ONE CLOCK. The page's 30 fps ticker drives both the dent (MetalMeshView's flexScale)
+/// and this layer, as `.still(amount)` each tick — the renderer's own `.loop` would run
+/// on a different clock and drift out of phase with the dent.
+/// ★ It observes the projection box itself, so a camera move redraws only this layer.
+struct FlexibleLatticeMount: View {
     let lattice: FlexibleGeneratedLattice
     @ObservedObject var proj: FlexibleProjectionBox
     /// 0 … 1 of the full design load (the loop's amplitude).
     let squish: Float
+    /// The dent's exaggeration, so the walls move exactly as far as the face does.
+    let exaggeration: Float
 
     var body: some View {
-        Color.clear   // replaced by FlexibleLatticeView when the renderer lands
+        FlexibleLatticeView(inputs: lattice.inputs, projection: proj.projection,
+                            squishFaces: lattice.faces, motion: .still(squish),
+                            exaggeration: exaggeration)
     }
 }
 

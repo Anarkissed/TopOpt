@@ -557,7 +557,7 @@ public final class FlexibleStageModel: ObservableObject {
         let keys = faces.map { FlexFaceKey(region: $0.faceRegionID, rotation: $0.rotationDeg) }
         let squish = keys.compactMap { k -> FlexibleSquishFace? in
             guard let st = stacks[k], let d = designs[k] else { return nil }
-            return FlexibleSquishFace(region: k.region, stack: st, design: d)
+            return FlexibleSquishFace(stack: st, design: d)
         }
         let build = self.build, key = settings.hashValue, temp = designTempC ?? 0
         let regions = self.regions
