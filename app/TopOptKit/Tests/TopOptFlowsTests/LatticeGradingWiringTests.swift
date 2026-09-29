@@ -139,8 +139,11 @@ final class LatticeGradingWiringTests: XCTestCase {
     /// fingerprint. A value the bake READS and the fingerprint IGNORES is a stale
     /// picture by construction — the box is ticked and nothing redraws.
     func testTheRebakeFingerprintCoversBothGradingInputs() throws {
-        let src = try String(contentsOfFile:
-            "Sources/TopOptFlows/WorkspacePlaceholder.swift", encoding: .utf8)
+        // ★ from this file's own location, not the working directory (xcodebuild runs the
+        // tests from /private/tmp, so a relative path found nothing there)
+        let src = try String(contentsOf: URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("Sources/TopOptFlows/WorkspacePlaceholder.swift"), encoding: .utf8)
         guard let r = src.range(of: "private var latticeRegionInputsKey: Int {"),
               let end = src.range(of: "return h.finalize()",
                                   range: r.upperBound..<src.endIndex)

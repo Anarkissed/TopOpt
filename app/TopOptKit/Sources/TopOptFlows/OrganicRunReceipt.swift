@@ -63,9 +63,10 @@ public struct OrganicRunReceipt: Equatable, Sendable {
     public var tiesLanded: Int? = nil
     public var tiesRefusedReach: Int? = nil
     public var tiesRefusedMinorStress: Int? = nil
-    public var overhangFilletOn: Bool? = nil
-    public var filletedSpans: Int? = nil
-    public var filletSkippedSpans: Int? = nil
+    /// ★ Spans core could not hold up and so did not print (`unsupported_spans`, core #358 —
+    /// the measurement that replaced the overhang flare, which deposited lumps up to ~9× the
+    /// strut; 1728 on the M2 stand).
+    public var unsupportedSpans: Int? = nil
     public var solidRimMM: Double? = nil
     public var shapeFitOn: Bool? = nil
     public var shapeFitVoxelsShrunk: Int? = nil
@@ -134,10 +135,7 @@ public struct OrganicRunReceipt: Equatable, Sendable {
     /// The repairs the run applied, in one line.
     public var repairsLine: String? {
         var parts: [String] = []
-        if let on = overhangFilletOn {
-            if on, let n = filletedSpans { parts.append("\(n) spans flared") }
-            if !on, let n = filletSkippedSpans { parts.append("\(n) spans left over air") }
-        }
+        if let n = unsupportedSpans, n > 0 { parts.append("\(n) spans left out: nothing to hold them up") }
         if let on = transferTiesOn, on, let l = tiesLanded { parts.append("\(l) ties landed") }
         if let big = supportGridTooLarge, big { parts.append("support pass skipped (grid too large)") }
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
@@ -270,8 +268,7 @@ public struct OrganicRunReceipt: Equatable, Sendable {
         transferTiesOn = b("transfer_ties_on"); tieSwirl = d("tie_swirl")
         tiesSeeded = i("ties_seeded"); tiesLanded = i("ties_landed")
         tiesRefusedReach = i("ties_refused_reach"); tiesRefusedMinorStress = i("ties_refused_minor_stress")
-        overhangFilletOn = b("overhang_fillet_on"); filletedSpans = i("filleted_spans")
-        filletSkippedSpans = i("fillet_skipped_spans")
+        unsupportedSpans = i("unsupported_spans")
         solidRimMM = d("solid_rim_mm"); shapeFitOn = b("shape_fit_on")
         shapeFitVoxelsShrunk = i("shape_fit_voxels_shrunk")
         spacingPrintFloorMM = d("spacing_print_floor_mm")

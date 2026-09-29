@@ -154,8 +154,11 @@ final class LatticeSolidFillTests: XCTestCase {
     /// the last field appended to one side alone had the shader reading `lightDir` as
     /// the overlay flags.
     func testTheLayerHeightIsWrittenIntoTheSlotTheShaderReads() throws {
-        let src = try String(contentsOfFile: "Sources/TopOptFlows/LatticeSDFMetal.swift",
-                            encoding: .utf8)
+        // ★ from this file's own location, not the working directory (xcodebuild runs the
+        // tests from /private/tmp, so a relative path found nothing there)
+        let src = try String(contentsOf: URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("Sources/TopOptFlows/LatticeSDFMetal.swift"), encoding: .utf8)
         XCTAssertTrue(src.contains("Float(max(0, layerHeightMM))"),
                       "★ the renderer must write its layer height into overlayParams")
         XCTAssertTrue(src.contains("var layerHeightMM: Double = 0"),

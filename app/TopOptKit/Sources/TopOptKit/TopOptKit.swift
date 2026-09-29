@@ -1214,13 +1214,11 @@ public enum TopOptKit {
             public let stages: [(name: String, lengthMM: Double)]
             public let writtenComponents: Int
             public let emissionRan: Bool
-            /// The support pass's ARCHES — spans flared into fillets (12 short fat
-            /// segments each) because they ran over air. 0 in core's own run on the
-            /// cube; the fat blobs in the preview when it is not.
-            public let filletedSpans: Int
+            // (the overhang fillet's arched-span count is gone: core #358 removed the
+            // stage, so the bridge's slot 47 is NaN and never read)
             public static func == (a: LengthCensus, b: LengthCensus) -> Bool {
                 a.inputLengthMM == b.inputLengthMM && a.writtenComponents == b.writtenComponents
-                    && a.emissionRan == b.emissionRan && a.filletedSpans == b.filletedSpans
+                    && a.emissionRan == b.emissionRan
                     && a.stages.map { $0.lengthMM } == b.stages.map { $0.lengthMM }
             }
             public var writtenMM: Double { stages.last?.lengthMM ?? -1 }
@@ -1229,7 +1227,6 @@ public enum TopOptKit {
                 let ran = stages.filter { $0.lengthMM >= 0 }.map { String(format: "%@ %.0f", $0.name, $0.lengthMM) }
                 let survival = inputLengthMM > 0 && writtenMM >= 0 ? String(format: " (%.0f%% of %.0f mm)", 100 * writtenMM / inputLengthMM, inputLengthMM) : ""
                 return "census mm: " + ran.joined(separator: " → ") + survival + " · \(writtenComponents) written component\(writtenComponents == 1 ? "" : "s")"
-                    + " · arched (filleted) spans \(filletedSpans)"
             }
         }
         public let census: LengthCensus
@@ -1389,8 +1386,6 @@ public enum TopOptKit {
                                     // ★ false ⇒ bake the traced curves, not the
                                     // file's repaired spans (2026-09-05)
                                     showRepairs: Bool = true,
-                                    // ★ core `organic_overhang_fillet` (2026-09-05)
-                                    overhangFillet: Bool = true,
                                     // ★ core's synthetic stress on unloaded walls (2026-09-06):
                                     // per-voxel region id (0 = none) and per-region config
                                     regionIDs: [Int32] = [],
@@ -1437,7 +1432,6 @@ public enum TopOptKit {
                         transferTies ? Int32(1) : Int32(0), tieSwirl,
                         bb.baseAddress, bb.count,
                         showRepairs ? Int32(1) : Int32(0),
-                        overhangFillet ? Int32(1) : Int32(0),
                         rb.baseAddress, rb.count,
                         yb.baseAddress, yb.count, syntheticDeadFraction, syntheticDeadMPa,
                         seedRatio, testRatio, minLengthRatio,
@@ -1521,8 +1515,7 @@ public enum TopOptKit {
                                 inputLengthMM: raw[32],
                                 stages: zip(OrganicTrace.LengthCensus.stageNames, (0..<12).map { raw[33 + $0] })
                                     .map { (name: $0, lengthMM: $1) },
-                                writtenComponents: Int(raw[45]), emissionRan: raw[46] > 0.5,
-                                filletedSpans: Int(raw[47])),
+                                writtenComponents: Int(raw[45]), emissionRan: raw[46] > 0.5),
                             synthetic: synthetic, syntheticVonMises: synthVM,
                             traceSeconds: raw[56], emitSeconds: raw[57], bakeSeconds: raw[58])
     }

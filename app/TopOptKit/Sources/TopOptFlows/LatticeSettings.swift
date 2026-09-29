@@ -739,7 +739,6 @@ public struct LatticeSpec: Equatable, Sendable {
     public var organicBoundaryFinish: String = LatticeOrganicFinish.skin.jobValue
     public var organicShapeFit: Bool = false
     public var organicShapeFitOnly: Bool = false
-    public var organicOverhangFillet: Bool = true
     /// ★ The printability floor the rim is sized to, when the builder knew it —
     /// `max(1.535 × bead, one design voxel)`. 0 ⇒ derive the bead term here.
     public var organicRimFloorMM: Double = 0
@@ -976,8 +975,8 @@ public struct LatticeSpec: Equatable, Sendable {
                 put("organic_boundary_finish", organicBoundaryFinish)
             }
             if organicShapeFit { put("organic_shape_fit", true) }
-            // ★ absent ⇒ true in core; write only the OFF state (maintainer, 2026-09-05)
-            if !organicOverhangFillet { put("organic_overhang_fillet", false) }
+            // (`organic_overhang_fillet` is never written: core #358 removed the overhang flare
+            // — it deposited lumps up to ~9× the strut — and refuses the key)
             // ★ PR 355 (2026-09-06): ties and their swirl ride the GROWN path only; the
             // solid rim's default (−1 = one base cell) is core's own, written only when
             // changed; the structural certificate is REQUIRED with a structural intent.
@@ -1291,12 +1290,9 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
     public var organicShapeFitOnly: Bool = false
     /// Uniform scale on the derived spacing.
     public var organicScale: Double = 1.0
-    /// ★ FLARE OVERHANGS FOR PRINTING (core `organic_overhang_fillet`, maintainer
-    /// wire-up 2026-09-05): ON (core's default, absent in the job) re-emits every span
-    /// over open air as a 45° fillet up to 2.5× the bead so it prints; OFF leaves the
-    /// struts exactly as traced/grown and core reports the unsupported runs. Written
-    /// only when false, only for organic, only when core's schema accepts the key.
-    public var organicOverhangFillet: Bool = true
+    // ★ (the "Flare overhangs" setting is GONE, 2026-09-28: core #358 removed the overhang
+    // flare stage and refuses `organic_overhang_fillet`. A saved project's
+    // `organicOverhangFillet` still decodes — the key is simply not read.)
     /// ★ SYNTHETIC STRESSES ON UNLOADED WALLS (maintainer, 2026-09-05; Aesthetic
     /// mode only). A wall that carries no stress whatsoever has no field to trace;
     /// with this on, every such wall gets a synthetic focal load — `organicSyntheticFoci`
@@ -1958,7 +1954,6 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         case organicGrowth, organicStrutWidthMM, organicOverhangDeg
         case organicBoundaryFinish, organicShapeFit, organicShapeFitOnly, organicScale
         case organicFittingSeparationsMM, organicPickedSeparationMM
-        case organicOverhangFillet
         case organicApprovedGradesMM, organicPickedGradeMM
         case organicSyntheticStresses, organicSyntheticFoci, selectableSyntheticFoci
         // ★★★ THE STORED NUMBER CHANGED MEANING, SO THE KEY CHANGED WITH IT
@@ -2003,7 +1998,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         organicScale = try c.decodeIfPresent(Double.self, forKey: .organicScale) ?? 1.0
         organicFittingSeparationsMM = try c.decodeIfPresent([Double].self, forKey: .organicFittingSeparationsMM) ?? []
         organicPickedSeparationMM = try c.decodeIfPresent(Double.self, forKey: .organicPickedSeparationMM) ?? 0
-        organicOverhangFillet = try c.decodeIfPresent(Bool.self, forKey: .organicOverhangFillet) ?? true
+        // (an old snapshot's `organicOverhangFillet` is ignored: the flare stage is gone, #358)
         // Absent from every earlier snapshot ⇒ off ⇒ the job it always emitted.
         organicSyntheticStresses = try c.decodeIfPresent(Bool.self, forKey: .organicSyntheticStresses) ?? false
         organicSyntheticFoci = OrganicSyntheticStress.clampFoci(
@@ -2136,7 +2131,6 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         try c.encode(organicOverhangDeg, forKey: .organicOverhangDeg)
         try c.encode(organicBoundaryFinish, forKey: .organicBoundaryFinish)
         try c.encode(organicShapeFit, forKey: .organicShapeFit)
-        try c.encode(organicOverhangFillet, forKey: .organicOverhangFillet)
         try c.encode(organicSyntheticStresses, forKey: .organicSyntheticStresses)
         try c.encode(organicSyntheticFoci, forKey: .organicSyntheticFoci)
         try c.encode(selectableSyntheticFoci, forKey: .selectableSyntheticFoci)
@@ -2523,7 +2517,6 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
             spec.organicBoundaryFinish = organicBoundaryFinish.jobValue
             spec.organicShapeFit = organicShapeFit
             spec.organicShapeFitOnly = organicShapeFitOnly
-            spec.organicOverhangFillet = organicOverhangFillet
             spec.organicSyntheticStresses = organicSyntheticStresses
             spec.organicSyntheticFoci = organicSyntheticFoci
             spec.organicTransferTies = organicTransferTies
@@ -2589,7 +2582,6 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         spec2.organicBoundaryFinish = organicBoundaryFinish.jobValue
         spec2.organicShapeFit = organicShapeFit
         spec2.organicShapeFitOnly = organicShapeFitOnly
-        spec2.organicOverhangFillet = organicOverhangFillet
         spec2.organicSyntheticStresses = organicSyntheticStresses
         spec2.organicSyntheticFoci = organicSyntheticFoci
         spec2.organicTransferTies = organicTransferTies

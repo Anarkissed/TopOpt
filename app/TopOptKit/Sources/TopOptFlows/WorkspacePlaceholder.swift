@@ -5026,8 +5026,7 @@ public struct WorkspacePlaceholder: View {
                 // default of true, so the part ALWAYS ran core's emission — the long
                 // pass — and always showed the second-stage banner, whatever the switch
                 // said. Only the wizard's sample honoured it.
-                showRepairs: lat.organicShowRepairs,
-                overhangFillet: lat.organicOverhangFillet)
+                showRepairs: lat.organicShowRepairs)
         }()
         // ★ NOTHING PICKED ⇒ the window above is the octet window standing in; the
         // bake replaces it below with core's own band (or the probe's Auto answer).

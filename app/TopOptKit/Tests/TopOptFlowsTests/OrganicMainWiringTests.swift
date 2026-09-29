@@ -120,7 +120,10 @@ final class OrganicMainWiringTests: XCTestCase {
             "structural_max_over_allowable_distributed": 1.31, "structural_max_exceeds_allowable": true,
             "structural_knockdown_used": 0.42, "structural_knockdown_source": "z_knockdown by orientation",
             "transfer_ties_on": true, "ties_landed": 118, "tie_swirl": 1.0,
-            "overhang_fillet_on": false, "fillet_skipped_spans": 239,
+            // ★ core #358: the flare is gone; `unsupported_spans` counts what could not be held
+            // up (1728 on his stand). An OLD receipt's fillet keys ride along and must be ignored.
+            "unsupported_spans": 1728,
+            "overhang_fillet_on": false, "fillet_skipped_spans": 239, "filleted_spans": 12,
             "solid_rim_mm": 3.0, "shape_fit_on": true,
             "spacing_print_floor_mm": 0.691, "spacing_resolution_floor_mm": 1.71,
             "support_grid_too_large": false, "tensor_note": "",
@@ -134,7 +137,9 @@ final class OrganicMainWiringTests: XCTestCase {
         let r = OrganicRunReceipt(info: info)
         XCTAssertEqual(r.floorMM, 1.71)
         XCTAssertEqual(r.certificateLine, "Refused · margin 1.19 (p99) · the worst strut exceeds its allowable under distributed load · worst strut 1.31× allowable")
-        XCTAssertEqual(r.repairsLine, "239 spans left over air · 118 ties landed")
+        XCTAssertEqual(r.unsupportedSpans, 1728)
+        XCTAssertEqual(r.repairsLine, "1728 spans left out: nothing to hold them up · 118 ties landed",
+                       "the fillet stage is gone (#358): its keys are not shown")
         XCTAssertEqual(r.fittingSeparationsMM, [4.5], "the FIT pick is the approved separation")
         XCTAssertEqual(r.recommendAutoLoMM, 3.0); XCTAssertEqual(r.recommendAutoHiMM, 5.0)
         XCTAssertEqual(r.syntheticStressByFace[2]?.text, "synthetic field: 4 foci, 12480 of 12480 voxels")
@@ -169,7 +174,9 @@ final class OrganicMainWiringTests: XCTestCase {
         guard TopOptKit.gradingSchemaAccepts(key: "organic_structural_certification") else {
             throw XCTSkip("this core predates PR 355")
         }
-        XCTAssertTrue(TopOptKit.gradingSchemaAccepts(key: "organic_overhang_fillet"))
+        // ★ core #358 removed the overhang fillet: the key is REFUSED, so the job never writes
+        // it (`put` is schema-gated) and the wizard hides its toggle
+        XCTAssertFalse(TopOptKit.gradingSchemaAccepts(key: "organic_overhang_fillet"))
         XCTAssertTrue(TopOptKit.gradingSchemaAccepts(key: "organic_transfer_ties"))
         XCTAssertTrue(TopOptKit.organicSyntheticStressWired, "per-region synthetic_stress/foci")
         XCTAssertTrue(TopOptKit.organicProbeWired, "organic_probe_cells_mm / grades")

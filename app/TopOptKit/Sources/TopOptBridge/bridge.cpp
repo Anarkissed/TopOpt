@@ -12,6 +12,7 @@
 #include <cctype>
 #include <chrono>
 #include <cmath>
+#include <limits>
 #include <cstdio>
 #include <exception>
 #include <functional>
@@ -2278,17 +2279,6 @@ static void stamp_centreline_span(std::vector<double>& field, std::vector<double
   }
 }
 
-// ★ `OrganicLattice::overhang_fillet` exists on cores from branch
-// claude/traced-organic-refusals onward; this bridge compiles against either.
-template <typename T, typename = void>
-struct has_overhang_fillet : std::false_type {};
-template <typename T>
-struct has_overhang_fillet<T, std::void_t<decltype(std::declval<T&>().overhang_fillet)>> : std::true_type {};
-template <typename T>
-static void set_overhang_fillet_if_present(T& lat, bool on) {
-  if constexpr (has_overhang_fillet<T>::value) lat.overhang_fillet = on;
-  else (void)on;
-}
 
 // ★ BAKE A SPAN LIST ALONE — for a cached variant (a beam-lattice 3MF) or a run's
 // emitted spans: no trace, no emission, the same two channels. Layout: [0] 1 = ok,
@@ -2359,7 +2349,9 @@ std::vector<double> organic_spans_field(const double* spans7, std::size_t span_c
 //   [33..44] census_len_mm[emitted, node_merge, base_cut, support_prune,
 //   stranded_drop, ground_tie, branch_support, dangling, stranded_drop_2, fill_mat,
 //   finish, written] (−1 = the pass did not run), [45] written components,
-//   [46] 1 = emission ran, [47] filleted (arched) spans
+//   [46] 1 = emission ran, [47] RETIRED — NaN, never read (it carried the overhang
+//   fillet's arched-span count; core #358 removed the fillet stage, so the number is
+//   ABSENT, not zero)
 //   ★ [59] 1 = the SYNTHESISED von Mises (n doubles) follows the surface field, before
 //   the spans — what the tracer actually saw, so the stress map can paint it.
 //   ★ THE PHASE CLOCK (2026-09-06: his part sat 12 min 26 s at "Rebuilding the
@@ -2412,11 +2404,6 @@ std::vector<double> organic_preview_field(
     // before any repair — the "show without repairs" preview (maintainer,
     // 2026-09-05). The census still names how many spans the repairs would arch.
     int emit_repairs,
-    // ★ core `organic_overhang_fillet` (maintainer wire-up, 2026-09-05): 1 ⇒ core's
-    // default (flare spans over air), 0 ⇒ leave them as drawn. Set on the lattice
-    // when this core's `OrganicLattice` carries `overhang_fillet`; ignored (with the
-    // Swift side told so through the schema probe) when it does not.
-    int overhang_fillet,
     // ★ SYNTHETIC STRESS ON UNLOADED WALLS — core's own function (2026-09-06). See the
     // header. region_id per voxel (0 = none), synth rows of 4, the run's dead fraction.
     const int* region_id, std::size_t region_id_count,
@@ -2616,7 +2603,6 @@ std::vector<double> organic_preview_field(
     // base trim (`trim_below_base && layer_height_mm > 0`) and the mid-air-start raster
     // are SKIPPED, and the preview keeps material the file cuts (measured 2026-09-04).
     lat.layer_height_mm = layer_height_mm > 0.0 ? layer_height_mm : 0.0;
-    set_overhang_fillet_if_present(lat, overhang_fillet != 0);
     // ★ THE BOUNDARY THE PASSES READ (run_job.cpp `lattice_boundary_for`: a voxel base
     // at iso 0.5 with a 2·cell window, plus the shell where one is written). Without
     // it the emission's breach checks (`boundary->signed_distance(c) < rmin`) and the
@@ -2705,7 +2691,7 @@ std::vector<double> organic_preview_field(
     out[33 + c] = emit_stats.census_len_mm[c];
   out[45] = static_cast<double>(emit_stats.census_components[topopt::OrganicGenStats::CensusWritten]);
   out[46] = emit_ran ? 1.0 : 0.0;
-  out[47] = static_cast<double>(emit_stats.filleted_spans);   // the support pass's arches
+  out[47] = std::numeric_limits<double>::quiet_NaN();   // retired: the fillet stage is gone (#358)
   out[11] = static_cast<double>(gstats.growth_seeds);
   out[12] = static_cast<double>(gstats.growth_curves);
   out[13] = static_cast<double>(gstats.growth_steps);
