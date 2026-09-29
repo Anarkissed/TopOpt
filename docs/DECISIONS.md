@@ -199,3 +199,28 @@ undo with one tap, is not the disorientation 074 guarded against.
      foaming filaments. TopOpt still does not slice.
   7. Reference pack: docs/design/flexibles/ (maintainer-committed). Its 00-decisions.md
      §2 lists reviewer defaults; agents keep them unless a later entry overrides.
+
+- 2026-09-28: LATTICE TYPES ROUND 1 (maintainer).
+  1. Structural and Aesthetic gain eight lattice types: strut SC, BCC, FCC, Diamond,
+     Kelvin, Rhombic dodecahedron; sheet (TPMS) Gyroid and Schwarz-D. BCCZ, FCCZ and
+     Re-entrant stay generate-but-not-certify and are not offered.
+  2. A type is offered in a mode only when core reports it both generatable and
+     certifiable (the 2026-07-10 certification rule is unchanged; Aesthetic still
+     certifies). A type goes live only when every number it uses is its own
+     measurement - no octet placeholder (docs/design/lattice-types/00-decisions.md R1).
+  3. Print status is maintainer data: core/src/materials/lattice_print_tests.json.
+     Types not marked tested are offered with a "Not print-tested" tag. Agents never
+     edit the file.
+  4. One definition: every type's geometry, density law, floors and ceilings live in
+     /core/; the app draws from core through the bridge. The run's STL must match the
+     preview for every type (2026-09-18 ruling).
+  5. One TPMS field in core (topopt/tpms.hpp), shared with the Flexible stage. This
+     amends 2026-09-27 item 5 for the gyroid field only: Gyroid enters Structural and
+     Aesthetic as a certified sheet lattice. Honeycomb stays Flexible-only.
+  6. Gyroid and Schwarz-D grade by wall thickness at one cell size per region; Doubled
+     and Stepped are not offered for them until a transition method is measured.
+  7. PR 354 (app) merges PR 358 (core) one-way - merge only, never edit core - so the
+     app links the core it ships with. Updates flow 358 -> 354 -> Flexible.
+  8. Octet is unchanged (outputs, receipts, tensor). Whether octet moves from the
+     legs-only rows to its own full-octet rows is an open maintainer question.
+  9. Reference pack: docs/design/lattice-types/ (maintainer-committed).

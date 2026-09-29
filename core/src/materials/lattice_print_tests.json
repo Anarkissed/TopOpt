@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "_comment": "MAINTAINER DATA. Which lattice types the maintainer has physically printed. Agents read this file and never edit it. To clear a type's 'Not print-tested' tag, print its sample block (topopt-cli lattice-sample) and set print_tested true with the date and a short note. Ids are core's topology ids.",
+  "types": {
+    "octet":     { "print_tested": true,  "date": "2026-07-27", "note": "Graded 8 mm octet block; reprinted with supports on the plate only. 45 deg struts and 90 deg bridges self-supporting." },
+    "bccz":      { "print_tested": true,  "date": "2026-07-29", "note": "BCCZ block. Clean struts; bed adhesion harder (sharp cell corners on the plate). Not offered in round 1." },
+    "sc":        { "print_tested": false, "date": null, "note": null },
+    "bcc":       { "print_tested": false, "date": null, "note": null },
+    "fcc":       { "print_tested": false, "date": null, "note": null },
+    "diamond":   { "print_tested": false, "date": null, "note": null },
+    "kelvin":    { "print_tested": false, "date": null, "note": null },
+    "rhombic":   { "print_tested": false, "date": null, "note": null },
+    "gyroid":    { "print_tested": false, "date": null, "note": null },
+    "schwarz_d": { "print_tested": false, "date": null, "note": null }
+  }
+}
