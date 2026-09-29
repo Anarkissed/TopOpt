@@ -570,16 +570,17 @@ struct FlexibleStageOverlays: View {
 
     var body: some View {
         ZStack {
+            // ★ ROUND 3: BOTH curves on the selected pressed face, on its own two edges, at once
+            // ("X and Y always combined"); the frame arrows went with the frame rotation.
             if model.tab == .squish, let r = model.selectedRegion, let k = model.key(r),
-               let g = model.geometry[k], let st = model.stacks[k], let f = model.settings.face(r), f.isLoaded {
-                FlexibleFrameArrows(projection: proj.projection, origin: g.corner, xAxis: st.xAxis,
-                                    yAxis: st.yAxis, load: st.load,
-                                    lengthMM: max(4, 0.15 * max(st.uExtentMM, st.vExtentMM)))
-                if model.step != .view3D {
-                    let (base, curve, label) = editorInputs(f, g)
-                    FlexibleCurveEditor(projection: proj.projection, baseline: base, curve: curve,
-                                        label: label, tint: FlexibleStageStyle.accent,
-                                        onChange: { c in setCurve(r, c) },
+               let g = model.geometry[k], let f = model.settings.face(r), f.isLoaded {
+                ForEach(["x", "y"], id: \.self) { axis in
+                    FlexibleCurveEditor(projection: proj.projection,
+                                        baseline: axis == "x" ? g.baselineX : g.baselineY,
+                                        curve: axis == "x" ? f.curveX : f.curveY,
+                                        label: axis.uppercased(), tint: FlexibleStageStyle.accent,
+                                        selected: selection(r, axis),
+                                        onChange: { c in setCurve(r, axis, c) },
                                         onCommit: { model.save() })
                 }
             }
@@ -589,16 +590,16 @@ struct FlexibleStageOverlays: View {
         }
     }
 
-    private func editorInputs(_ f: FlexibleFaceSettings, _ g: FlexFaceGeometry) -> (FlexibleCurveBaseline, FlexCurve, String) {
-        if f.mode == "centre_edge" { return (g.baselineC, f.curveCentreEdge, "edge → centre") }
-        return model.step == .curveY ? (g.baselineY, f.curveY, "Y") : (g.baselineX, f.curveX, "X")
+    /// The × of one curve, held by the model (a tap on the part clears it).
+    private func selection(_ r: Int, _ axis: String) -> Binding<Int?> {
+        Binding(get: { model.curvePoint.flatMap { $0.region == r && $0.axis == axis ? $0.index : nil } },
+                set: { model.curvePoint = $0.map { FlexCurvePoint(region: r, axis: axis, index: $0) } })
     }
 
-    private func setCurve(_ r: Int, _ c: FlexCurve) {
+    private func setCurve(_ r: Int, _ axis: String, _ c: FlexCurve) {
         model.edit({ s in
             guard var f = s.face(r) else { return }
-            if f.mode == "centre_edge" { f.curveCentreEdge = c }
-            else if model.step == .curveY { f.curveY = c } else { f.curveX = c }
+            if axis == "y" { f.curveY = c } else { f.curveX = c }
             s.setFace(f)
         }, recompute: false)
         model.curveChanged(region: r)
@@ -929,26 +930,7 @@ struct FlexibleSquishPane: View {
         FlexChips(options: steps, selection: model.step.rawValue, id: "flexible-step") { v in
             model.step = FlexibleStageModel.Step(rawValue: v) ?? .curveX
         }
-        if model.step != .view3D {
-            HStack {
-                FlexCaption(text: "Drag the points on the part. Up = softer (0 → 1 × deepest squish). Double-tap a point to delete it.")
-                Button {
-                    model.edit({ s in
-                        var g = f
-                        if g.mode == "centre_edge" { g.curveCentreEdge = FlexibleCurveEditor.addingPoint(to: g.curveCentreEdge) }
-                        else if model.step == .curveY { g.curveY = FlexibleCurveEditor.addingPoint(to: g.curveY) }
-                        else { g.curveX = FlexibleCurveEditor.addingPoint(to: g.curveX) }
-                        s.setFace(g)
-                    }, recompute: false)
-                    model.curveChanged(region: f.faceRegionID)
-                } label: {
-                    Text("+ point").font(.system(size: 12, weight: .semibold))
-                        .padding(.horizontal, 10).padding(.vertical, 6)
-                        .background(Capsule().fill(DS.Color.fillSelected.color))
-                        .foregroundStyle(DS.Color.textPrimary.color)
-                }.buttonStyle(.plain).accessibilityIdentifier("flexible-add-point")
-            }
-        } else {
+        if model.step == .view3D {
             FlexChips(options: [("drew", "What you drew"), ("built", "What can be built")],
                       selection: model.showBuildable ? "built" : "drew", id: "flexible-drew-built") { v in
                 model.showBuildable = v == "built"

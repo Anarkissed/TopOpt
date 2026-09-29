@@ -3,7 +3,7 @@
 //
 // ★ WHERE IT SITS. The curve's baseline is a line of points on the face — core's
 // from_uv(u, v) + load × entry_t along the X edge (v = 0) or the Y edge (u = 0) — and
-// the curve rises OUT of the part along −load, `amplitudeMM` at y = 1. Every frame the
+// the dashed guide sits `amplitudeMM` OUT of the part along −load. Every frame the
 // world points are projected through the live camera, so the curve turns with the part
 // and its orientation is true (C1 problem #8: the frame's Y = load × X is a view from
 // inside, so we draw on the model instead of mirroring a flat chart).
@@ -12,9 +12,14 @@
 // (Fritsch–Carlson); a move core's `pen_curve_error` refuses is not applied, and its
 // sentence is shown. The editor only moves control points.
 //
-// Gestures: drag a handle; "+ point" adds one in the widest gap; double-tap an inner
-// handle to delete it.
-// The two end points stay at x = 0 and x = 1 (core's rule) and move only up and down.
+// ★ ROUND 3 (items 1.3 and 8, maintainer 2026-09-29): "a curve point nearer the object =
+// squishier" — the editor draws a stored y at height 1 − y above the face (the face line is
+// the squishiest, the dashed guide the firmest); storage, the job and core's S keep their
+// meaning. "Tap the line adds a point, tap a point shows an x that deletes it": a tap on the
+// curve adds a point THERE, on the curve; a tap on a point selects it and shows an ×; the
+// double-tap and the panel's "+ point" are gone. A drag moves a point.
+// The two end points stay at x = 0 and x = 1 (core's rule), move only up and down, and have
+// no ×.
 
 import SwiftUI
 import simd
@@ -46,6 +51,8 @@ struct FlexibleCurveEditor: View {
     let curve: FlexCurve
     let label: String
     let tint: Color
+    /// The point showing its × (held by the model, so a tap elsewhere on the part clears it).
+    @Binding var selected: Int?
     let onChange: (FlexCurve) -> Void
     let onCommit: () -> Void
     @State private var dragIndex: Int?
@@ -55,7 +62,12 @@ struct FlexibleCurveEditor: View {
         projection?.project(SIMD3<Float>(Float(w.x), Float(w.y), Float(w.z)))
     }
 
-    /// (t, y) under a screen point, in the projected frame at the nearest baseline point.
+    /// Where stored value y at t is drawn: height 1 − y above the face (round 3).
+    private func drawn(_ t: Double, _ y: Double) -> SIMD3<Double> {
+        baseline.world(t, Self.displayHeight(y))
+    }
+
+    /// (t, height) under a screen point, in the projected frame at the nearest baseline point.
     private func param(at p: CGPoint, near t0: Double) -> (Double, Double)? {
         guard let s0 = screen(baseline.at(0)), let s1 = screen(baseline.at(1)),
               let a = screen(baseline.at(t0)), let b = screen(baseline.world(t0, 1)) else { return nil }
@@ -65,20 +77,22 @@ struct FlexibleCurveEditor: View {
         guard abs(det) > 1e-6 else { return nil }
         let t = (d.dx * n.dy - d.dy * n.dx) / det
         let dn = CGVector(dx: p.x - a.x - e.dx * (t - t0), dy: p.y - a.y - e.dy * (t - t0))
-        let y = (e.dx * dn.dy - e.dy * dn.dx) / det
-        return (Double(t), Double(y))
+        let h = (e.dx * dn.dy - e.dy * dn.dx) / det
+        return (Double(t), Double(h))
     }
 
+    static let sampleCount = 60
     private var samples: [Double] {
-        let t = stride(from: 0.0, through: 1.0, by: 1.0 / 60).map { $0 }
+        let t = (0...Self.sampleCount).map { Double($0) / Double(Self.sampleCount) }
         return (try? FlexibleCore.penCurveValues(x: curve.x, y: curve.y, t: t)) ?? []
     }
 
     var body: some View {
         let ys = samples
+        let line: [CGPoint] = ys.enumerated().compactMap { i, y in screen(drawn(Double(i) / Double(Self.sampleCount), y)) }
         ZStack {
             Canvas { ctx, _ in
-                // baseline (the face edge) and the y = 1 guide
+                // the face line (squishiest) and the dashed guide (firmest)
                 var base = Path(), top = Path()
                 for (i, t) in stride(from: 0.0, through: 1.0, by: 1.0 / 30).enumerated() {
                     if let a = screen(baseline.world(t, 0)) { i == 0 ? base.move(to: a) : base.addLine(to: a) }
@@ -89,22 +103,19 @@ struct FlexibleCurveEditor: View {
                            style: StrokeStyle(lineWidth: 1, dash: [4, 4]))
                 // core's curve
                 var c = Path()
-                for (i, y) in ys.enumerated() {
-                    guard let p = screen(baseline.world(Double(i) / 60, y)) else { continue }
-                    i == 0 ? c.move(to: p) : c.addLine(to: p)
-                }
+                for (i, p) in line.enumerated() { i == 0 ? c.move(to: p) : c.addLine(to: p) }
                 ctx.stroke(c, with: .color(tint), lineWidth: 3)
-                // verticals from the edge up to the curve: the drawing reads as "this much squish here"
+                // verticals from the firm guide down to the curve: "this much squish here"
                 for i in stride(from: 0, to: ys.count, by: 6) {
-                    guard let a = screen(baseline.world(Double(i) / 60, 0)),
-                          let b = screen(baseline.world(Double(i) / 60, ys[i])) else { continue }
+                    let t = Double(i) / Double(Self.sampleCount)
+                    guard let a = screen(baseline.world(t, 1)), let b = screen(drawn(t, ys[i])) else { continue }
                     var v = Path(); v.move(to: a); v.addLine(to: b)
                     ctx.stroke(v, with: .color(tint.opacity(0.35)), lineWidth: 1)
                 }
                 // control points
                 for k in curve.x.indices {
-                    guard let p = screen(baseline.world(curve.x[k], curve.y[k])) else { continue }
-                    let r: CGFloat = dragIndex == k ? 11 : 8
+                    guard let p = screen(drawn(curve.x[k], curve.y[k])) else { continue }
+                    let r: CGFloat = dragIndex == k || selected == k ? 11 : 8
                     ctx.fill(Path(ellipseIn: CGRect(x: p.x - r, y: p.y - r, width: 2 * r, height: 2 * r)),
                              with: .color(tint))
                     ctx.stroke(Path(ellipseIn: CGRect(x: p.x - r, y: p.y - r, width: 2 * r, height: 2 * r)),
@@ -114,20 +125,50 @@ struct FlexibleCurveEditor: View {
                     ctx.draw(Text(label).font(.system(size: 13, weight: .bold)).foregroundColor(tint),
                              at: CGPoint(x: s.x + 18, y: s.y))
                 }
+                // which way reads which (two tiny words at the curve's end)
+                if let s = screen(baseline.world(0, 0)) {
+                    ctx.draw(Text("soft").font(.system(size: 10, weight: .semibold))
+                                .foregroundColor(DS.Color.textTertiary.color), at: CGPoint(x: s.x - 20, y: s.y))
+                }
+                if let s = screen(baseline.world(0, 1)) {
+                    ctx.draw(Text("firm").font(.system(size: 10, weight: .semibold))
+                                .foregroundColor(DS.Color.textTertiary.color), at: CGPoint(x: s.x - 20, y: s.y))
+                }
             }
             .allowsHitTesting(false)
-            // ★ ONLY THE HANDLES TAKE TOUCHES, so a drag anywhere else still orbits the part.
-            // Drag a handle to move it; double-tap an inner handle to delete it.
+            // ★ A THIN BAND ALONG THE CURVE takes a tap (a point lands there); everywhere else
+            // a drag still orbits. SpatialTapGesture: iOS 16 has no onTapGesture(coordinateSpace:).
+            Color.white.opacity(0.001)
+                .contentShape(FlexibleCurveBand(points: line, width: Self.bandWidth))
+                .gesture(SpatialTapGesture(coordinateSpace: .named(FlexibleStageSpace.name))
+                    .onEnded { v in tapLine(v.location, line: line) })
+                .accessibilityIdentifier("flexible-curve-line")
+            // ★ THE HANDLES: drag to move, tap to select (the × appears beside it)
             ForEach(Array(curve.x.indices), id: \.self) { k in
-                if let p = screen(baseline.world(curve.x[k], curve.y[k])) {
+                if let p = screen(drawn(curve.x[k], curve.y[k])) {
                     Circle()
                         .fill(Color.white.opacity(0.001))
                         .frame(width: 44, height: 44)
                         .position(p)
                         .gesture(pointDrag(k))
-                        .simultaneousGesture(TapGesture(count: 2).onEnded { deletePoint(k) })
+                        .simultaneousGesture(TapGesture().onEnded { selected = selected == k ? nil : k })
                         .accessibilityIdentifier("flexible-curve-point-\(k)")
                 }
+            }
+            if let k = selected, Self.deletable(k, in: curve), k < curve.x.count,
+               let p = screen(drawn(curve.x[k], curve.y[k])) {
+                Button { delete(k) } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundStyle(DS.Color.textPrimary.color)
+                        .frame(width: 28, height: 28)
+                        .background(Circle().fill(DS.Color.danger.color))
+                        .frame(width: 44, height: 44)
+                        .contentShape(Circle())
+                }
+                .buttonStyle(.plain)
+                .position(x: p.x + 30, y: p.y - 30)
+                .accessibilityIdentifier("flexible-curve-point-delete-\(k)")
             }
             if let r = refusal {
                 VStack {
@@ -144,18 +185,34 @@ struct FlexibleCurveEditor: View {
         }
     }
 
+    /// The tap band's width (pt): thin, so a drag that starts off the line still orbits.
+    static let bandWidth: CGFloat = 24
+
+    private func tapLine(_ p: CGPoint, line: [CGPoint]) {
+        guard !line.isEmpty else { return }
+        let i = line.indices.min { hypot(line[$0].x - p.x, line[$0].y - p.y) < hypot(line[$1].x - p.x, line[$1].y - p.y) } ?? 0
+        let t0 = Double(i) / Double(max(1, line.count - 1))
+        let t = param(at: p, near: t0).map { max(0, min(1, $0.0)) } ?? t0
+        if let k = Self.pointNear(t: t, in: curve) { selected = k; return }
+        selected = nil
+        guard let (c, _) = Self.inserting(at: t, into: curve) else { return }
+        apply(c)
+        onCommit()
+    }
+
     private func pointDrag(_ k: Int) -> some Gesture {
         DragGesture(minimumDistance: 1, coordinateSpace: .named(FlexibleStageSpace.name))
             .onChanged { g in
                 dragIndex = k
-                guard k < curve.x.count, let (t, y) = param(at: g.location, near: curve.x[k]) else { return }
+                if selected != nil { selected = nil }
+                guard k < curve.x.count, let (t, h) = param(at: g.location, near: curve.x[k]) else { return }
                 var c = curve
                 let last = c.x.count - 1
                 if k > 0 && k < last {
                     // stay strictly between the neighbours (core's rule: x strictly increasing)
-                    c.x[k] = max(c.x[k - 1] + 0.01, min(c.x[k + 1] - 0.01, t))
+                    c.x[k] = max(c.x[k - 1] + Self.minGap, min(c.x[k + 1] - Self.minGap, t))
                 }
-                c.y[k] = max(0, min(1, y))
+                c.y[k] = Self.storedY(height: h)
                 apply(c)
             }
             .onEnded { _ in
@@ -164,32 +221,9 @@ struct FlexibleCurveEditor: View {
             }
     }
 
-    /// ★ ROUND 3, ITEM 1.3 — "CLOSER TO THE FACE = SQUISHIER". The height (× amplitude)
-    /// above the face at which a stored y (core's fraction of the deepest squish) is drawn:
-    /// y = 1 on the face line, y = 0 on the dashed guide. Storage, the job and core's S keep
-    /// their meaning; only the editor reads it upside down from before.
-    static func displayHeight(_ y: Double) -> Double { 1 - y }
-    /// The stored y for a height (× amplitude) the finger dragged to — the inverse.
-    static func storedY(height h: Double) -> Double { 1 - max(0, min(1, h)) }
-
-    /// A new point in the widest gap, on the curve (the "+ point" button).
-    static func addingPoint(to c: FlexCurve) -> FlexCurve {
-        guard c.x.count >= 2 else { return c }
-        var best = 0
-        for i in 0..<(c.x.count - 1) where c.x[i + 1] - c.x[i] > c.x[best + 1] - c.x[best] { best = i }
-        let t = (c.x[best] + c.x[best + 1]) / 2
-        let y = (try? FlexibleCore.penCurveValues(x: c.x, y: c.y, t: [t]).first) ?? nil
-        var out = c
-        out.x.insert(t, at: best + 1)
-        out.y.insert(y ?? (c.y[best] + c.y[best + 1]) / 2, at: best + 1)
-        return out
-    }
-
-    private func deletePoint(_ k: Int) {
-        guard k > 0, k < curve.x.count - 1 else { return }
-        var c = curve
-        c.x.remove(at: k)
-        c.y.remove(at: k)
+    private func delete(_ k: Int) {
+        guard let c = Self.removing(k, from: curve) else { return }
+        selected = nil
         apply(c)
         onCommit()
     }
@@ -203,41 +237,62 @@ struct FlexibleCurveEditor: View {
             refusal = err
         }
     }
+
+    // MARK: the pure rules (FlexibleCurveEditTests)
+
+    /// Core's gap between neighbouring x (x strictly increasing).
+    static let minGap = 0.01
+
+    /// ★ ROUND 3, ITEM 1.3 — "CLOSER TO THE FACE = SQUISHIER". The height (× amplitude)
+    /// above the face at which a stored y (core's fraction of the deepest squish) is drawn:
+    /// y = 1 on the face line, y = 0 on the dashed guide. Storage, the job and core's S keep
+    /// their meaning; only the editor reads it upside down from before.
+    static func displayHeight(_ y: Double) -> Double { 1 - y }
+    /// The stored y for a height (× amplitude) the finger dragged to — the inverse.
+    static func storedY(height h: Double) -> Double { 1 - max(0, min(1, h)) }
+
+    /// The point a tap at t is on (within core's gap), or nil.
+    static func pointNear(t: Double, in c: FlexCurve) -> Int? {
+        c.x.indices.filter { abs(c.x[$0] - t) < minGap }.min { abs(c.x[$0] - t) < abs(c.x[$1] - t) }
+    }
+
+    /// ★ ITEM 8: a tap on the curve line at t adds a point AT t, ON the curve (its y is core's
+    /// curve value there, so the shape stays), strictly between its neighbours. nil when the
+    /// tap is on an existing point (the tap selects that point instead).
+    static func inserting(at t: Double, into c: FlexCurve) -> (curve: FlexCurve, index: Int)? {
+        guard c.x.count >= 2, pointNear(t: t, in: c) == nil else { return nil }
+        guard let i = c.x.indices.dropLast().last(where: { c.x[$0] < t }) else { return nil }
+        let lo = c.x[i] + minGap, hi = c.x[i + 1] - minGap
+        guard lo <= hi else { return nil }
+        let tt = min(max(t, lo), hi)
+        let y = (try? FlexibleCore.penCurveValues(x: c.x, y: c.y, t: [tt]).first) ?? nil
+        var out = c
+        out.x.insert(tt, at: i + 1)
+        out.y.insert(max(0, min(1, y ?? (c.y[i] + c.y[i + 1]) / 2)), at: i + 1)
+        return (out, i + 1)
+    }
+
+    /// The end points stay (core: x[0] = 0, x[n−1] = 1).
+    static func deletable(_ k: Int, in c: FlexCurve) -> Bool { k > 0 && k < c.x.count - 1 }
+
+    /// The curve without point k, or nil for an end point.
+    static func removing(_ k: Int, from c: FlexCurve) -> FlexCurve? {
+        guard deletable(k, in: c) else { return nil }
+        var out = c
+        out.x.remove(at: k); out.y.remove(at: k)
+        return out
+    }
 }
 
-/// The face frame's X / Y and the load, as arrows ON THE MODEL (C1 problem #8).
-struct FlexibleFrameArrows: View {
-    let projection: CameraProjection?
-    let origin: SIMD3<Double>
-    let xAxis: SIMD3<Double>
-    let yAxis: SIMD3<Double>
-    let load: SIMD3<Double>
-    let lengthMM: Double
-
-    var body: some View {
-        Canvas { ctx, _ in
-            func s(_ w: SIMD3<Double>) -> CGPoint? {
-                projection?.project(SIMD3<Float>(Float(w.x), Float(w.y), Float(w.z)))
-            }
-            func arrow(_ dir: SIMD3<Double>, _ label: String, _ colour: Color, from o: SIMD3<Double>) {
-                guard let a = s(o), let b = s(o + dir * lengthMM) else { return }
-                var p = Path(); p.move(to: a); p.addLine(to: b)
-                ctx.stroke(p, with: .color(colour), lineWidth: 2.5)
-                let ang = atan2(b.y - a.y, b.x - a.x)
-                var h = Path()
-                h.move(to: b)
-                h.addLine(to: CGPoint(x: b.x - 10 * cos(ang - 0.45), y: b.y - 10 * sin(ang - 0.45)))
-                h.move(to: b)
-                h.addLine(to: CGPoint(x: b.x - 10 * cos(ang + 0.45), y: b.y - 10 * sin(ang + 0.45)))
-                ctx.stroke(h, with: .color(colour), lineWidth: 2.5)
-                ctx.draw(Text(label).font(.system(size: 12, weight: .bold)).foregroundColor(colour),
-                         at: CGPoint(x: b.x + 10 * cos(ang), y: b.y + 10 * sin(ang)))
-            }
-            arrow(xAxis, "X", DS.Color.textPrimary.color, from: origin)
-            arrow(yAxis, "Y", DS.Color.textSecondary.color, from: origin)
-            // the load pushes INTO the part: drawn arriving at the face
-            arrow(load, "load", DS.Color.accentGreen.color, from: origin - load * lengthMM * 1.1)
-        }
-        .allowsHitTesting(false)
+/// The tap band along the projected curve.
+struct FlexibleCurveBand: Shape {
+    let points: [CGPoint]
+    let width: CGFloat
+    func path(in rect: CGRect) -> Path {
+        var p = Path()
+        guard let f = points.first else { return p }
+        p.move(to: f)
+        for q in points.dropFirst() { p.addLine(to: q) }
+        return p.strokedPath(StrokeStyle(lineWidth: width, lineCap: .round, lineJoin: .round))
     }
 }

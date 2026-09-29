@@ -36,6 +36,13 @@ actor FlexibleWorker {
     }
 }
 
+/// One control point of one face's X or Y curve (the × on the model, round 3 item 8).
+public struct FlexCurvePoint: Equatable, Sendable {
+    public let region: Int
+    public let axis: String      // "x" | "y"
+    public let index: Int
+}
+
 public struct FlexFaceKey: Hashable, Sendable {
     public let region: Int
     public let rotation: Int
@@ -45,10 +52,10 @@ public struct FlexFaceKey: Hashable, Sendable {
 public struct FlexFaceGeometry {
     /// from_uv at every column centre, column order.
     public let centres: [SIMD3<Double>]
-    /// The X edge (v = 0), the Y edge (u = 0) and the centre→edge line, on the face.
+    /// The X edge (v = 0) and the Y edge (u = 0), on the face — both curves are drawn at
+    /// once (round 3: "X and Y always combined"; the centre→edge line went with its mode).
     public let baselineX: FlexibleCurveBaseline
     public let baselineY: FlexibleCurveBaseline
-    public let baselineC: FlexibleCurveBaseline
     /// The frame's corner (u = 0, v = 0) on the face: where the X / Y arrows start.
     public let corner: SIMD3<Double>
     /// to_uv + t of every flat vertex of the part (the dent's ramp).
@@ -82,19 +89,11 @@ public struct FlexFaceGeometry {
         let up = -st.load
         let bx = FlexibleCurveBaseline(points: try line { (st.uExtentMM * $0, 0) }, up: up, amplitudeMM: amp)
         let by = FlexibleCurveBaseline(points: try line { (0, st.vExtentMM * $0) }, up: up, amplitudeMM: amp)
-        // centre→edge: from the face boundary (t = 0) to the most-inside column (t = 1)
-        let ef = try scene.edgeFraction(face: k.region, rotation: k.rotation)
-        let ci = ef.indices.max { ef[$0] < ef[$1] } ?? 0
-        let (cu, cv, civ) = st.columns.isEmpty ? (0.0, 0.0, 0) : (st.columns[ci].uMM, st.columns[ci].vMM, st.columns[ci].iv)
-        var u0 = cu
-        while st.pitchMM > 0, st.column(Int(u0 / st.pitchMM) - 1, civ) >= 0 { u0 -= st.pitchMM }
-        u0 -= st.pitchMM / 2
-        let bc = FlexibleCurveBaseline(points: try line { (u0 + (cu - u0) * $0, cv) }, up: up, amplitudeMM: amp)
         let corner = try line { _ in (0, 0) }.first ?? .zero
         var xyz = [Double](); xyz.reserveCapacity(partFlat.count)
         for f in partFlat { xyz.append(Double(f)) }
         let uvt = try scene.toUVT(face: k.region, rotation: k.rotation, xyz)
-        return FlexFaceGeometry(centres: centres, baselineX: bx, baselineY: by, baselineC: bc,
+        return FlexFaceGeometry(centres: centres, baselineX: bx, baselineY: by,
                                 corner: corner, partUVT: uvt)
     }
 }
@@ -153,6 +152,8 @@ public final class FlexibleStageModel: ObservableObject {
     @Published public var sliceFraction = 0.5
     /// Check mode shows the stamp's dent instead of the design's (M14).
     @Published public var checkStampShown: UUID?
+    /// The curve point showing its × (round 3, item 8); a tap anywhere on the part clears it.
+    @Published public var curvePoint: FlexCurvePoint?
     @Published public private(set) var lastError: String?
     /// The generated lattice (Generate button) and its build state.
     @Published public private(set) var lattice: FlexibleGeneratedLattice?
@@ -319,6 +320,7 @@ public final class FlexibleStageModel: ObservableObject {
         // a split face resolves to the sector holding the point (the Surface stage's rule)
         let region = regions.region(at: point, face: face, mesh: project.viewerMesh)
         NSLog("DIAG flexible tap face %d → region %d (known %d)", face, region, settings.face(region) != nil ? 1 : 0)
+        curvePoint = nil
         if settings.face(region) == nil {
             edit { $0.setFace(FlexibleFaceSettings(faceRegionID: region)) }
         }
