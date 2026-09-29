@@ -142,10 +142,14 @@ public struct FlexibleOverlayMesh {
     /// Per-flat-vertex displacement (mm, before the renderer's exaggeration).
     /// `depth[k]` per column (nil / ≤ 0 ⇒ that column does not move); `partUVT` is
     /// core's to_uv + t for every part flat vertex, per face.
+    /// `joinRegions` (default on; off only as a test's red control): a quad corner that two
+    /// loaded regions share — the two sectors of a split face — takes the mean over BOTH
+    /// regions' columns, so their maps meet along the cut instead of stepping apart.
     public func displacements(depths: [FlexFaceKey: [Double?]], stacks: [FlexFaceKey: FlexStackInfo],
-                              partUVT: [FlexFaceKey: [Double]]) -> [Float] {
+                              partUVT: [FlexFaceKey: [Double]], joinRegions: Bool = true) -> [Float] {
         let n = mesh.flat.vertexCount
         var out = [Float](repeating: 0, count: n * 3)
+        let shared = joinRegions ? SharedCorners(self, depths: depths, stacks: stacks) : nil
         for (k, d) in depths {
             guard let st = stacks[k] else { continue }
             let l = st.load
@@ -157,18 +161,27 @@ public struct FlexibleOverlayMesh {
                     guard c >= 0, c < d.count else { return nil }
                     return d[c]
                 }
-                func corner(_ cu: Int, _ cv: Int) -> Double {
+                // `flat`: one flat vertex AT this corner (its place, for the other regions)
+                func corner(_ cu: Int, _ cv: Int, flat v: Int) -> Double {
                     var sum = 0.0, n = 0
                     for (du, dv) in [(-1, -1), (0, -1), (-1, 0), (0, 0)] {
                         if let x = depth(cu + du, cv + dv) { sum += x; n += 1 }
+                    }
+                    // ★ ACROSS THE CUT: the other loaded regions' columns at this very corner
+                    // (same place, same load) — the sectors of a split face stay joined
+                    if let shared {
+                        for x in shared.depths(at: v, load: l, except: k) { sum += x; n += 1 }
                     }
                     return n > 0 ? sum / Double(n) : 0
                 }
                 // the quad's corners in build order, then its six flat vertices
                 let order = [0, 2, 1, 0, 3, 2]
                 for (c, col) in st.columns.enumerated() where c < d.count {
-                    let cs = [corner(col.iu, col.iv), corner(col.iu + 1, col.iv),
-                              corner(col.iu + 1, col.iv + 1), corner(col.iu, col.iv + 1)]
+                    let q = start + c * 6
+                    let cs = [corner(col.iu, col.iv, flat: q + Self.flatOfCorner[0]),
+                              corner(col.iu + 1, col.iv, flat: q + Self.flatOfCorner[1]),
+                              corner(col.iu + 1, col.iv + 1, flat: q + Self.flatOfCorner[2]),
+                              corner(col.iu, col.iv + 1, flat: q + Self.flatOfCorner[3])]
                     for j in 0..<6 {
                         let v = start + c * 6 + j, dd = cs[order[j]]
                         guard v < n, dd > 0 else { continue }
@@ -197,6 +210,63 @@ public struct FlexibleOverlayMesh {
             }
         }
         return out
+    }
+
+    /// Corner i (build order: (iu, iv), (iu+1, iv), (iu+1, iv+1), (iu, iv+1)) of a column
+    /// quad is its flat vertex `flatOfCorner[i]` (the quad's flat order is [0, 2, 1, 0, 3, 2]).
+    static let flatOfCorner = [0, 2, 1, 4]
+
+    /// Every loaded region's column-quad corners, by PLACE: what a corner of one region
+    /// finds of the others at the same point. Places are hashed on a 0.01 mm grid (and its
+    /// neighbours, so a point on a cell's boundary is not lost), matched within 0.005 mm;
+    /// only regions pressing along the SAME load join (a corner shared by two faces of an
+    /// edge moves along two directions, and averaging them would close nothing).
+    struct SharedCorners {
+        struct Entry { let key: FlexFaceKey; let load: SIMD3<Double>; let depth: Double; let p: SIMD3<Float> }
+        private var byCell: [SIMD3<Int32>: [Entry]] = [:]
+        private let positions: [Float]
+        static let cellMM: Float = 0.01
+
+        init(_ o: FlexibleOverlayMesh, depths: [FlexFaceKey: [Double?]], stacks: [FlexFaceKey: FlexStackInfo]) {
+            positions = o.mesh.flat.positions
+            guard depths.count > 1 else { return }   // one region: nothing to join
+            for (k, d) in depths {
+                guard let st = stacks[k], let start = o.flatStart[k] else { continue }
+                for c in st.columns.indices where c < d.count {
+                    guard let x = d[c] else { continue }
+                    for j in FlexibleOverlayMesh.flatOfCorner {
+                        let p = Self.place(positions, start + c * 6 + j)
+                        byCell[Self.cell(p), default: []].append(Entry(key: k, load: st.load, depth: x, p: p))
+                    }
+                }
+            }
+        }
+
+        static func place(_ pos: [Float], _ v: Int) -> SIMD3<Float> {
+            guard 3 * v + 2 < pos.count else { return SIMD3(repeating: .nan) }
+            return SIMD3(pos[3 * v], pos[3 * v + 1], pos[3 * v + 2])
+        }
+        static func cell(_ p: SIMD3<Float>) -> SIMD3<Int32> {
+            guard p.x.isFinite, p.y.isFinite, p.z.isFinite else { return SIMD3(repeating: Int32.min) }
+            return SIMD3<Int32>(p / cellMM, rounding: .toNearestOrEven)
+        }
+
+        /// The depths of the OTHER regions' columns whose quads have a corner at flat vertex
+        /// `v`'s place, pressing along `load`.
+        func depths(at v: Int, load: SIMD3<Double>, except k: FlexFaceKey) -> [Double] {
+            guard !byCell.isEmpty else { return [] }
+            let p = Self.place(positions, v)
+            let c = Self.cell(p)
+            guard c.x != Int32.min else { return [] }
+            var out: [Double] = []
+            for dz in -1...1 { for dy in -1...1 { for dx in -1...1 {
+                for e in byCell[c &+ SIMD3(Int32(dx), Int32(dy), Int32(dz))] ?? []
+                where e.key != k && simd_distance(e.p, p) <= 0.5 * Self.cellMM && simd_dot(e.load, load) > 0.999 {
+                    out.append(e.depth)
+                }
+            } } }
+            return out
+        }
     }
 }
 
