@@ -1019,7 +1019,11 @@ struct RunInfo {
   std::vector<OrganicSyntheticRegionInfo> organic_synthetic_by_region;   // keyed by face_id
   double organic_solid_rim_mm = 0.0;        // grade-to-solid band at the outline
   long long organic_solid_rim_voxels = 0;
-  // spans over open air, counted and NOT repaired (the fillet was removed)
+  // Spans over open air: PRINTED AS DRAWN and counted. Not repaired, not deleted --
+  // the overhang fillet that used to flare them was removed for depositing blobs up
+  // to nine times the strut, and this count is the measurement that replaced it. Said
+  // explicitly because the generator's own field carried the opposite claim until
+  // 2026-09-29, and silence here would leave the same inference available.
   long long organic_unsupported_spans = 0;
   // ── ★ §3 PARITY: THE SPAN CENSUS, to be diffed against the app's own trace banner.
   // Measured on the spans that SHIP, after every pass -- which is the set the file is

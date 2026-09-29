@@ -1543,7 +1543,13 @@ struct OrganicGenStats {
   std::size_t support_spans_cut = 0;
   // ★ spans that run over open air. COUNTED, never repaired -- the overhang fillet that
   // used to flare them was removed for depositing blobs up to nine times the strut.
-  std::size_t unsupported_spans_seen = 0;        // could not be held up, so not printed
+  // ★ THE TRAILING NOTE HERE USED TO READ "could not be held up, so not printed",
+  // which is FALSE and contradicted both the two lines above it and the code that
+  // fills it (see the overhang pass: "left exactly as drawn and counted"). Nothing
+  // deletes these spans -- they are emitted like any other. Found by #354's audit
+  // on 2026-09-29, and it is where the wrong receipt wording came from: a reader
+  // reaching for the field's own comment was told the opposite of what ships.
+  std::size_t unsupported_spans_seen = 0;   // over open air; printed as drawn and counted
   // Tips left dangling BY those cuts, eroded afterwards. The mid-air repair must not
   // reintroduce the free ends the prune exists to remove.
   std::size_t support_cleanup_pruned = 0;
