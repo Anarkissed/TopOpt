@@ -164,6 +164,14 @@ struct FlexibleCurveEditor: View {
             }
     }
 
+    /// ★ ROUND 3, ITEM 1.3 — "CLOSER TO THE FACE = SQUISHIER". The height (× amplitude)
+    /// above the face at which a stored y (core's fraction of the deepest squish) is drawn:
+    /// y = 1 on the face line, y = 0 on the dashed guide. Storage, the job and core's S keep
+    /// their meaning; only the editor reads it upside down from before.
+    static func displayHeight(_ y: Double) -> Double { 1 - y }
+    /// The stored y for a height (× amplitude) the finger dragged to — the inverse.
+    static func storedY(height h: Double) -> Double { 1 - max(0, min(1, h)) }
+
     /// A new point in the widest gap, on the curve (the "+ point" button).
     static func addingPoint(to c: FlexCurve) -> FlexCurve {
         guard c.x.count >= 2 else { return c }

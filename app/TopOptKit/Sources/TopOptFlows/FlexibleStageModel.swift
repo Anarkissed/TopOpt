@@ -175,8 +175,11 @@ public final class FlexibleStageModel: ObservableObject {
 
     // MARK: settings (in the project)
 
+    /// ★ READ THROUGH THE ROUND-3 MIGRATION (FlexibleSettingsMigration): an old project
+    /// shows and runs the new way (1 bead, both axes, no frame rotation, curves read "closer
+    /// to the face = squishier") and its file changes only with the next edit.
     public var settings: FlexibleStageSettings {
-        get { project.lattice.flexible ?? FlexibleStageSettings() }
+        get { FlexibleSettingsMigration.migrated(project.lattice.flexible ?? FlexibleStageSettings()) }
         set { project.lattice.flexible = newValue }
     }
 

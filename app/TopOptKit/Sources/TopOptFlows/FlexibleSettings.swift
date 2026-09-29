@@ -60,11 +60,12 @@ public struct FlexibleFaceSettings: Codable, Equatable, Hashable, Sendable, Iden
     public var faceRegionID: Int
     /// "loaded" | "resting"
     public var role: String
-    /// 0 / 90 / 180 / 270 — the frame turned about the load (R13).
+    /// ★ ROUND 3 (item 5): always 0 — the frame rotation is removed (a saved 90 reads as 0).
     public var rotationDeg: Int
     public var weightKg: Double
     public var deepestMM: Double
-    /// both | either | centre_edge
+    /// ★ ROUND 3 (item 5, his answer "X and Y always combined"): always "both" — a saved
+    /// "either" / "centre_edge" reads as "both", its curveX / curveY kept.
     public var mode: String
     public var curveX: FlexCurve
     public var curveY: FlexCurve
@@ -73,17 +74,26 @@ public struct FlexibleFaceSettings: Codable, Equatable, Hashable, Sendable, Iden
     public var skinOn: Bool
     /// Design mode: the one stamp the face is designed under (nil ⇒ weight spread evenly).
     public var designStamp: FlexibleStampPlacement?
+    /// ★ ROUND 3 (item 1.2): the main-page Load group this face's weight comes from. nil ⇒
+    /// the weight is the user's own (typed here), never overwritten by a re-sync. OPTIONAL
+    /// so every project saved before it still decodes (synthesized Codable).
+    public var weightFrom: UUID?
+    /// ★ ROUND 3 (item 6b): the squish shape — nil (or "curves") ⇒ the X and Y curves,
+    /// always combined; "stamp" ⇒ squish by stamp (batch D). OPTIONAL for old projects.
+    public var shape: String?
 
     public init(faceRegionID: Int, role: String = "loaded", rotationDeg: Int = 0,
                 weightKg: Double = 10, deepestMM: Double = 3, mode: String = "both",
                 curveX: FlexCurve = FlexibleFaceSettings.defaultCurve,
                 curveY: FlexCurve = FlexibleFaceSettings.defaultCurve,
                 curveCentreEdge: FlexCurve = FlexCurve(x: [0, 1], y: [0.3, 1]),
-                skinOn: Bool = true, designStamp: FlexibleStampPlacement? = nil) {
+                skinOn: Bool = true, designStamp: FlexibleStampPlacement? = nil,
+                weightFrom: UUID? = nil, shape: String? = nil) {
         self.faceRegionID = faceRegionID; self.role = role; self.rotationDeg = rotationDeg
         self.weightKg = weightKg; self.deepestMM = deepestMM; self.mode = mode
         self.curveX = curveX; self.curveY = curveY; self.curveCentreEdge = curveCentreEdge
         self.skinOn = skinOn; self.designStamp = designStamp
+        self.weightFrom = weightFrom; self.shape = shape
     }
 
     /// A gentle dome: soft in the middle, firmer at both ends. A starting drawing, not a
@@ -119,17 +129,24 @@ public struct FlexibleStageSettings: Codable, Equatable, Hashable, Sendable {
     public var topology: String
     /// springy | damped (R5)
     public var feel: String
-    /// Walls in whole beads (R1: 1 default, 2 allowed).
+    /// Walls in whole beads. ★ ROUND 3 (item 2.1): always 1 — a saved 2 reads as 1
+    /// (FlexibleSettingsMigration); 2-bead walls come after coupon tests (Core brief).
     public var beadsPerWall: Int
     public var faces: [FlexibleFaceSettings]
     public var checkStamps: [FlexibleCheckStamp]
+    /// ★ ROUND 3 (item 1.3): which way the curve editor read the stored y when these curves
+    /// were drawn. nil ⇒ saved before round 3 ("up = softer"): FlexibleSettingsMigration
+    /// flips every DRAWN curve once so its picture survives the new reading ("closer to the
+    /// face = squishier"). OPTIONAL so old projects decode.
+    public var curveConvention: Int?
 
     public init(materialID: String? = nil, nozzleTempC: Double? = nil, topology: String = "auto",
                 feel: String = "springy", beadsPerWall: Int = 1,
-                faces: [FlexibleFaceSettings] = [], checkStamps: [FlexibleCheckStamp] = []) {
+                faces: [FlexibleFaceSettings] = [], checkStamps: [FlexibleCheckStamp] = [],
+                curveConvention: Int? = FlexibleSettingsMigration.currentCurveConvention) {
         self.materialID = materialID; self.nozzleTempC = nozzleTempC; self.topology = topology
         self.feel = feel; self.beadsPerWall = beadsPerWall; self.faces = faces
-        self.checkStamps = checkStamps
+        self.checkStamps = checkStamps; self.curveConvention = curveConvention
     }
 
     public var loadedFaces: [FlexibleFaceSettings] { faces.filter(\.isLoaded) }
