@@ -154,6 +154,10 @@ public final class FlexibleStageModel: ObservableObject {
     /// Check mode shows the stamp's dent instead of the design's (M14).
     @Published public var checkStampShown: UUID?
     @Published public private(set) var lastError: String?
+    /// The generated lattice (Generate button) and its build state.
+    @Published public private(set) var lattice: FlexibleGeneratedLattice?
+    @Published public private(set) var latticeBuilding = false
+    @Published public private(set) var latticeError: String?
 
     private var pendingStacks: Set<FlexFaceKey> = []
     private var designGeneration = 0
@@ -540,6 +544,48 @@ public final class FlexibleStageModel: ObservableObject {
         guard let g = stampGrids[id] else { return "" }
         return FlexibleCore.stampError(g)
     }
+
+    // MARK: Generate lattice (FlexibleLatticeGeneration.swift)
+
+    public var latticeRefusal: String? { FlexibleLatticeGate.refusal(self) }
+    /// The generated lattice no longer matches the settings (a face or the filament changed).
+    public var latticeIsStale: Bool { lattice.map { $0.settingsKey != settings.hashValue } ?? false }
+
+    public func generateLattice() {
+        guard latticeRefusal == nil, !latticeBuilding, let part = project.viewerMesh else { return }
+        let faces = settings.loadedFaces
+        let keys = faces.map { FlexFaceKey(region: $0.faceRegionID, rotation: $0.rotationDeg) }
+        let squish = keys.compactMap { k -> FlexibleSquishFace? in
+            guard let st = stacks[k], let d = designs[k] else { return nil }
+            return FlexibleSquishFace(region: k.region, stack: st, design: d)
+        }
+        let build = self.build, key = settings.hashValue, temp = designTempC ?? 0
+        let regions = self.regions
+        let skinOff: [(face: Int, cuts: [RegionCut])] = faces.filter { !$0.skinOn }.flatMap { f in
+            regions.faces(of: f.faceRegionID, mesh: part).map { (face: $0, cuts: regions.cuts(of: f.faceRegionID)) }
+        }
+        let buildDir = sceneInfo?.buildDir ?? SIMD3(0, 0, 1)
+        latticeBuilding = true
+        latticeError = nil
+        let worker = self.worker
+        Task.detached(priority: .userInitiated) {
+            do {
+                let field = try await worker.withScene {
+                    try $0.densityField(faces: keys.map(\.region), rotations: keys.map(\.rotation), build: build)
+                }
+                let inputs = try FlexibleLatticeBuilder.inputs(
+                    field: field, part: part, topology: build.topology, beadsPerWall: build.beadsPerWall,
+                    beadWidthMM: build.beadWidthMM, buildDir: buildDir, skinOffFaces: skinOff)
+                let g = FlexibleGeneratedLattice(inputs: inputs, faces: squish, topology: build.topology,
+                                                 tempC: temp, settingsKey: key)
+                await MainActor.run { self.lattice = g; self.latticeBuilding = false }
+            } catch {
+                await MainActor.run { self.latticeError = "\(error)"; self.latticeBuilding = false }
+            }
+        }
+    }
+
+    public func discardLattice() { lattice = nil }
 
     // MARK: the run job (S5)
 
