@@ -1089,13 +1089,15 @@ public struct LatticeSetupWizard: View {
         + "the base and ties free ends. A span that crosses open air is printed as drawn, with "
         + "nothing underneath, and the run's receipt counts them. Those repairs are in the file. "
         + "Turn this off to see the traced curves alone — a way to judge the topology, not what will print."
-    static let infoSynthetic = "A wall the load never reaches carries no stress, so there is nothing for the "
-        + "tracer to follow — its curves wander. With this on, every such wall (median stress "
-        + "under 5% of the part's peak) is given a synthetic load: a few focal points, "
-        + "alternating pull and push, so the struts sweep between them. Each unloaded wall "
-        + "chooses its own number of foci (1–5) in its row under Selections; a wall that "
-        + "carries load never takes foci. Shown in the preview; the run carries it only on a "
-        + "core whose schema accepts it. "
+    // ★ HIS WORDS, 2026-09-29 (ruling B): say what is applied — core's own rule, the
+    // wall's p99 at or under max(2 % of the peak, 0.005 MPa). The old "median under 5 %"
+    // matched neither core nor the app.
+    static let infoSynthetic = "A wall the load barely reaches can be given a made-up load so it still gets a "
+        + "pattern. It's only applied where the wall's real stress is tiny — at or under 2 % of the "
+        + "part's peak, or 0.005 MPa. A wall that carries load is left alone. The made-up load is a "
+        + "few focal points, alternating pull and push, so the struts sweep between them. Each "
+        + "wall chooses its own number of foci (1–5) in its row under Selections; a wall that "
+        + "carries load takes none. "
         // ★ HIS INSTRUCTION, 2026-09-08: say what the stress map does with this on.
         + "The stress map reads each declared face on its OWN range, apart from the rest "
         + "of the body — so a wall carrying a thousandth of the part's peak still shows "
@@ -1550,7 +1552,7 @@ public struct LatticeSetupWizard: View {
                 ManualSize(size: c.cellMinMM,
                            approved: structural ? c.approvedStructural : c.approvedAesthetic,
                            selectable: OrganicForecast.selectable(c, structural: structural),
-                           refusals: c.refusals, tint: OrganicForecast.tint(c),
+                           refusals: c.refusals, tint: OrganicForecast.tint(c, structural: structural),
                            margin: c.marginText, hover: c.hoverText)
             }.sorted { $0.size < $1.size }
         }
@@ -1572,7 +1574,7 @@ public struct LatticeSetupWizard: View {
                 ManualGrade(grade: c.gradeMM,
                             approved: structural ? c.approvedStructural : c.approvedAesthetic,
                             selectable: OrganicForecast.selectable(c, structural: structural),
-                            refusals: c.refusals, tint: OrganicForecast.tint(c),
+                            refusals: c.refusals, tint: OrganicForecast.tint(c, structural: structural),
                             margin: c.marginText, hover: c.hoverText)
             }
         }
@@ -1646,8 +1648,7 @@ public struct LatticeSetupWizard: View {
                     .dsStyle(DS.TypeScale.caption2)
                     .foregroundStyle(DS.Color.textTertiary.color)
                 infoButton("manual-grades", (organicProbePresent
-                    ? (structural ? OrganicForecast.structuralMeaning : OrganicForecast.aestheticMeaning)
-                      + " " + OrganicForecast.notCertified
+                    ? OrganicForecast.meaning(structural: structural)
                     : Self.infoManualGrades) + Self.infoSizeCheck)
             }
             let lo = organicGradeLo, hi = organicGradeHi
@@ -1689,8 +1690,7 @@ public struct LatticeSetupWizard: View {
                     .dsStyle(DS.TypeScale.caption2)
                     .foregroundStyle(DS.Color.textTertiary.color)
                 infoButton("manual-sizes", (organicProbePresent
-                    ? (structural ? OrganicForecast.structuralMeaning : OrganicForecast.aestheticMeaning)
-                      + " " + OrganicForecast.notCertified
+                    ? OrganicForecast.meaning(structural: structural)
                     : Self.infoManualSizes) + Self.infoSizeCheck)
             }
             HStack(spacing: DS.Space.xs) {
@@ -1737,7 +1737,7 @@ public struct LatticeSetupWizard: View {
                                 on: model.organicPickedGradeMM == [a.cellMinMM, a.cellMaxMM], enabled: true) {
                         commitOrganicGrade(lo: a.cellMinMM, hi: a.cellMaxMM)
                     }
-                    .modifier(OrganicProbeTintModifier(tint: .green))
+                    .modifier(OrganicProbeTintModifier(tint: rec.tint))
                     infoButton("rec-auto", rec.infoText(a))
                 }
             } else if !model.simulateStresses, let f = rec.fit, f.found {
@@ -1747,7 +1747,7 @@ public struct LatticeSetupWizard: View {
                                 on: abs(model.organicPickedSeparationMM - f.cellMM) < 1e-6, enabled: true) {
                         commitOrganicSize(f.cellMM)
                     }
-                    .modifier(OrganicProbeTintModifier(tint: .green))
+                    .modifier(OrganicProbeTintModifier(tint: rec.tint))
                     infoButton("rec-fit", rec.infoText(f))
                 }
             }
@@ -2996,7 +2996,9 @@ private struct OrganicRefusalsModifier: ViewModifier {
 
 
 /// ★ green = likely to certify · amber = ties only · grey = refused (UI 1): a dot on
-/// the pill's corner, so the pill's own on/off state stays legible.
+/// the pill's corner, so the pill's own on/off state stays legible. STRUCTURAL ONLY, and
+/// only where the prediction ran: otherwise the tint is nil and no dot is drawn
+/// (maintainer, 2026-09-29, rulings A and 3).
 private struct OrganicProbeTintModifier: ViewModifier {
     let tint: OrganicForecast.Tint?
     func body(content: Content) -> some View {

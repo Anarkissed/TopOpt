@@ -10,11 +10,13 @@ import simd
 /// cells-per-member and percolation floors are OCTET invariants; organic keeps its own
 /// … and audits them in run_organic_step"), and organic's own spacing floors RAISE the
 /// separation rather than turning anything solid. So for a traced lattice there is
-/// exactly one grade-to-solid in the whole run, and it is `apply_organic_solid_rim`:
-/// a band, `rim` millimetres wide, of candidate voxels that touch solid material
-/// SIDEWAYS, turned back into solid.
+/// exactly one grade-to-solid in the whole run, and it is `organic_solid_rim_band`
+/// (run_job.cpp): a band, `rim` millimetres wide, of lattice voxels seeded where a
+/// 6-neighbour IN the face plane is not lattice (material or air — the outline ends
+/// wherever the lattice ends), kept as tracer candidates and turned solid only AFTER
+/// the trace (ruling G), so the struts run through it into the wall.
 ///
-/// This is that function, mirrored on the preview's own grid — the BFS, the step count
+/// This is that band, mirrored on the preview's own grid — the BFS, the step count
 /// and the normal test, arithmetic for arithmetic. Inventing a smoother rule here would
 /// draw a part the run does not build, which is the whole failure this file exists to
 /// avoid.
@@ -109,9 +111,10 @@ public enum OrganicSolidRim {
                 // front and back faces that do not touch anything that shouldn't get a
                 // rim").
                 //
-                // ★ THIS REFUSED A SEED WHOSE NEIGHBOUR WAS AIR, mirroring core's
-                // `apply_organic_solid_rim`, which only turns a cell solid where there
-                // is already solid beside it. On a face prism cut into a wall that is
+                // ★ THIS REFUSED A SEED WHOSE NEIGHBOUR WAS AIR, mirroring core's old
+                // rim pass, which only turned a cell solid where there was already solid
+                // beside it (core's `organic_solid_rim_band` has since dropped that test
+                // too: the seed asks only whether the neighbour is outside the lattice). On a face prism cut into a wall that is
                 // right for the sides — and WRONG for the bottom, where the region runs
                 // out at the part's own surface and the neighbour is air. That edge is
                 // as much the outline as the sides are, the lattice ends there, and it

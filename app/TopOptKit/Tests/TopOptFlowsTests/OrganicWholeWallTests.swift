@@ -1,35 +1,41 @@
 import XCTest
+import TopOptKit
 @testable import TopOptFlows
 
-/// ★ A DEAD WALL IS DEAD AS A WHOLE (2026-09-18): under core's threshold the wall's real
-/// tensor is zeroed everywhere; a wall above it is untouched.
+/// ★ A DEAD WALL IS DEAD AS A WHOLE (2026-09-18) — and since ruling C (2026-09-29) it is
+/// CORE that says so: the app hands core the real tensor and reads the dead walls from
+/// its report (`fully_synthetic > 0`). The app's own zeroing is gone.
 final class OrganicWholeWallTests: XCTestCase {
-    func testTheWallUnderTheThresholdIsZeroedAndTheLoadedOneKept() {
-        // two regions of 100 voxels: region 1 hovers at 0.004 MPa (his front wall),
-        // region 2 at 0.02 (his back wall); the part peak 0.03 sets thr = max(0.0006, 0.005)
-        var ids = [Int32](repeating: 0, count: 200)
-        var t = [Double](repeating: 0, count: 6 * 200)
+    /// His two walls on the verdict core returns: region 1 hovers at 0.004 MPa (his front
+    /// wall), region 2 carries 0.02 (his back wall); the part peak 0.03 sets
+    /// thr = max(0.0006, 0.005). Core calls the first dead and leaves the second alone.
+    func testCoreCallsTheQuietWallDeadAndLeavesTheLoadedOneAlone() throws {
+        guard TopOptKit.latticeAlgorithmIsKnown("organic") else { throw XCTSkip("no organic on this core") }
+        let n = 200
+        var ids = [Int32](repeating: 0, count: n)
+        var t = [Double](repeating: 0, count: 6 * n)
         for i in 0..<100 { ids[i] = 1; t[6 * i] = 0.004; t[6 * i + 1] = 0.001 }
         for i in 100..<200 { ids[i] = 2; t[6 * i] = 0.02; t[6 * i + 1] = 0.005 }
         t[6 * 150] = 0.03                                             // the part's peak, in wall 2
-        let v = OrganicSyntheticStress.deadenWholeWalls(tensor: &t, regionIDs: ids)
-        XCTAssertEqual(v.count, 1)
-        XCTAssertEqual(v[0].regionID, 1)
-        XCTAssertEqual(v[0].zeroed, 100)
-        XCTAssertEqual(v[0].thr, 0.005, accuracy: 1e-12, "the absolute floor binds on a lightly loaded part")
-        XCTAssertTrue((0..<100).allSatisfy { t[6 * $0] == 0 && t[6 * $0 + 1] == 0 }, "wall 1 zeroed")
-        XCTAssertEqual(t[6 * 120], 0.02, "wall 2 untouched")
-        // a wall right at the threshold is a live wall
-        var t2 = [Double](repeating: 0, count: 6 * 100)
-        let ids2 = [Int32](repeating: 1, count: 100)
-        for i in 0..<100 { t2[6 * i] = 0.0051 }
-        XCTAssertTrue(OrganicSyntheticStress.deadenWholeWalls(tensor: &t2, regionIDs: ids2).isEmpty)
+        let rep = try XCTUnwrap(TopOptKit.organicSyntheticReport(
+            nx: n, ny: 1, nz: 1, spacingMM: 1, origin: .zero,
+            candidate: [Bool](repeating: true, count: n), stressTensor: t, regionIDs: ids,
+            syntheticRegions: [.init(regionID: 1, faceID: 11, foci: 2), .init(regionID: 2, faceID: 12, foci: 2)]))
+        XCTAssertEqual(rep.deadRegionIDs, [1], "the quiet wall is dead as a whole; the loaded one is not")
+        XCTAssertEqual(rep.deadThreshold, 0.005, accuracy: 1e-12, "the absolute floor binds on a lightly loaded part")
+        XCTAssertTrue(rep.deadFloorBound)
+        let r1 = try XCTUnwrap(rep.regions.first { $0.regionID == 1 })
+        XCTAssertEqual(r1.fullySynthetic, 100, "the WHOLE wall takes the focal field")
+        XCTAssertEqual(r1.blended, 0, "no per-voxel blend since #358")
+        let r2 = try XCTUnwrap(rep.regions.first { $0.regionID == 2 })
+        XCTAssertEqual(r2.fullySynthetic, 0); XCTAssertFalse(r2.wholeRegion)
     }
 }
 
 extension OrganicWholeWallTests {
-    /// A dead wall is graded at the window's MIDDLE, not the coarsest end its zero
-    /// stress would put it at; the loaded wall's grading is unchanged.
+    /// A dead wall is graded at the window's MIDDLE, not the coarsest end its low stress
+    /// would put it at; the loaded wall's grading is unchanged. The scene takes the dead
+    /// wall from core's verdict on the untouched tensor.
     func testADeadWallTakesTheWindowsMiddleSpacing() throws {
         let mesh = try LatticePreviewConfettiTests.hisMesh()
         let regs = [(15, 12.0), (2, 11.0)].compactMap { f, d in
@@ -52,12 +58,11 @@ extension OrganicWholeWallTests {
                                         separationMinMM: 3.47, separationMaxMM: 5.2, rhoMin: 0.073, rhoMax: 0.9)
         input.regionIDs = plan.regionIDs
         input.syntheticRegions = plan.regions
-        let v = OrganicSyntheticStress.deadenWholeWalls(tensor: &input.tensor, regionIDs: plan.regionIDs)
-        XCTAssertEqual(v.map { $0.regionID }, [1], "the noise wall is dead as a whole; the loaded one is not")
-        input.deadRegionIDs = Set(v.map { $0.regionID })
         let scene = LatticeSDFScene(mesh: mesh, field: nil, latticeID: "octet", stageMode: .aesthetic,
                                     algorithm: "organic", organic: input, maxDim: 64, regions: regs, whenEmpty: .latticeNothing)
         print("DEADWALL: \(scene.organicSummary.prefix(240))")
+        XCTAssertEqual(scene.organicSyntheticReport?.deadRegionIDs, [1],
+                       "★ core's verdict, on the tensor as the solve gave it")
         XCTAssertTrue(scene.organicSummary.contains("dead-wall voxels at the window's middle 4.3"), scene.organicSummary)
     }
 }

@@ -107,6 +107,10 @@ public struct OrganicForecast: Equatable, Sendable, Codable {
         /// writes margin 0, and "· 0.00" read as a failing margin when nothing was
         /// certified. Show nothing, never 0.00.
         public var showsMargin: Bool { mode == "structural" }
+        /// ★ AND A COLOUR ONLY THERE TOO (maintainer, 2026-09-29, ruling A). A structural
+        /// pick is rooted, certified and at or over the target margin, so green is true;
+        /// an aesthetic pick is only rooted — no strength check ran — so it gets no colour.
+        public var tint: OrganicForecast.Tint? { showsMargin ? .green : nil }
         public func pillText(_ a: Auto) -> String {
             String(format: "Auto %g–%g mm", a.cellMinMM, a.cellMaxMM)
                 + (showsMargin ? String(format: " · %.2f", a.margin) : "")
@@ -174,7 +178,11 @@ public struct OrganicForecast: Equatable, Sendable, Codable {
         }
     }
 
-    /// green = likely to certify · amber = ties (aesthetic) only · grey = refused
+    /// Structural only: green = likely to certify · amber = ties to the part, the
+    /// prediction did not pass · grey = refused. Aesthetic shows no colour at all — its
+    /// probe runs no certificate (`want_cert`, run_job.cpp), so no verdict exists to colour
+    /// — and neither does a candidate whose prediction did not run (nil `predicted` or
+    /// `ran == false`; ruling 3, 2026-09-29).
     public enum Tint: String, Equatable, Sendable {
         case green, amber, grey
     }
@@ -291,8 +299,22 @@ public struct OrganicForecast: Equatable, Sendable, Codable {
 
     // MARK: - the menu's law (pure, tested)
 
+    /// The colour a verdict maps to — not the display law (pills read
+    /// `tint(_:structural:)`); kept as the tests' control.
     public static func tint(_ c: Candidate) -> Tint {
         c.approvedStructural ? .green : (c.approvedAesthetic ? .amber : .grey)
+    }
+    /// ★ NO COLOUR VERDICT UNDER AESTHETIC (maintainer, 2026-09-29, ruling A: "no green,
+    /// no amber"), AND NONE WHERE THE PREDICTION DID NOT RUN (ruling 3: "No computed
+    /// verdict means no colour: not amber, not grey"). Core writes `ran: false` for no
+    /// segments, for aesthetic intent and at the 600000-segment cap (run_job.cpp), and
+    /// `approved_structural` is then false because nothing ran (`cert_ok` is set only
+    /// where the certificate ran) — amber or grey there read that false as a failure.
+    /// Green cannot lose its dot: it needs `cert_ok`. The refusal a grey dot showed is
+    /// still on the pill (its "*" and the hover text), in core's own words.
+    public static func tint(_ c: Candidate, structural: Bool) -> Tint? {
+        guard structural, c.predicted?.ran == true else { return nil }
+        return tint(c)
     }
 
     /// Structural offers only green; Aesthetic offers every candidate.
@@ -308,11 +330,16 @@ public struct OrganicForecast: Equatable, Sendable, Codable {
         + "certify; an unapproved one may still. It will not be refused for disconnection. "
         + "The margin shown is predicted; the run's certificate is the verdict."
     public static let aestheticMeaning =
-        "Green: likely to certify. Amber: predicted to tie to the part but not to pass the "
-        + "stress bar. Grey: refused. Every size may be chosen under Aesthetic."
+        "Sizes chosen for the look. Aesthetic runs no strength check."
     public static let notCertified =
         "This is a prediction made during the run, not the certificate. Only the run's "
         + "certificate says a size certified."
+    /// The (i) beside the probe's sizes: the structural legend with its "not the
+    /// certificate" caveat; under Aesthetic only the plain statement — no certificate
+    /// claim of any kind, since none was computed.
+    public static func meaning(structural: Bool) -> String {
+        structural ? structuralMeaning + " " + notCertified : aestheticMeaning
+    }
     public static let checkSizesTitle = "Check sizes"
     public static let checkSizesHelp =
         "Starts the run with the candidate sizes, reads the size check as soon as it is "

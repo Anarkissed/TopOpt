@@ -61,9 +61,9 @@ final class OrganicPreviewBakeInputsTests: XCTestCase {
     func testAMeasurementTheBakeWroteDoesNotChangeItsInputs() throws {
         let a = organic()
         var b = a
-        b.selectableWallStressFraction = ["f:x:2": 0.9, "f:x:15": 0.83]
+        b.selectableWallCoreDead = ["f:x:2": false, "f:x:15": true]
         XCTAssertNotEqual(a, b)
-        XCTAssertEqual(a.previewBakeInputs, b.previewBakeInputs, "the wall shares are its own write")
+        XCTAssertEqual(a.previewBakeInputs, b.previewBakeInputs, "core's wall verdicts are its own write")
         var c = a
         c.organicForecast = OrganicForecast.parse(try JSONSerialization.data(withJSONObject: [
             "organic_probe_version": 1,

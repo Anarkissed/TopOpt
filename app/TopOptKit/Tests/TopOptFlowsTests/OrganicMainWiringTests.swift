@@ -114,6 +114,7 @@ final class OrganicMainWiringTests: XCTestCase {
         // ★ an aesthetic recommendation shows NO margin — nothing, never "0.00"
         let fit = try XCTUnwrap(r.fit), auto = try XCTUnwrap(r.auto)
         XCTAssertFalse(r.showsMargin)
+        XCTAssertNil(r.tint, "★ no colour verdict under Aesthetic (ruling A)")
         XCTAssertEqual(r.pillText(fit), "Fit 3 mm"); XCTAssertEqual(r.pillText(auto), "Auto 3–4.8 mm")
         for t in [r.pillText(fit), r.pillText(auto), r.infoText(fit), r.infoText(auto)] {
             XCTAssertFalse(t.contains("0.00") || t.contains("margin") || t.contains("·"), t)
@@ -136,6 +137,7 @@ final class OrganicMainWiringTests: XCTestCase {
         ]
         let r = try XCTUnwrap(OrganicForecast.parse(try JSONSerialization.data(withJSONObject: doc))?.recommendation)
         XCTAssertTrue(r.showsMargin)
+        XCTAssertEqual(r.tint, .green, "a structural pick is rooted, certified and at the target margin")
         XCTAssertEqual(r.pillText(try XCTUnwrap(r.fit)), "Fit 3 mm · 1.84")
         XCTAssertEqual(r.pillText(try XCTUnwrap(r.auto)), "Auto 3–4.8 mm · 1.60")
         XCTAssertTrue(r.infoText(try XCTUnwrap(r.auto)).contains("Predicted margin 1.60."))
@@ -150,6 +152,15 @@ final class OrganicMainWiringTests: XCTestCase {
         XCTAssertTrue(src.contains("organicPill(rec.pillText(a)"))
         XCTAssertTrue(src.contains("organicPill(rec.pillText(f)"))
         XCTAssertFalse(src.contains("Predicted margin %.2f"), "the wizard formats no margin of its own")
+        // ★ ruling A: the Recommended pills take the recommendation's own tint (nil under
+        // Aesthetic), the candidate pills are coloured only under Structural, and the (i)
+        // is the mode's own meaning — no certificate caveat appended under Aesthetic
+        XCTAssertFalse(src.contains("OrganicProbeTintModifier(tint: .green)"))
+        XCTAssertEqual(src.components(separatedBy: "OrganicProbeTintModifier(tint: rec.tint)").count - 1, 2)
+        XCTAssertFalse(src.contains("OrganicForecast.tint(c),"))
+        XCTAssertEqual(src.components(separatedBy: "OrganicForecast.tint(c, structural: structural)").count - 1, 2)
+        XCTAssertEqual(src.components(separatedBy: "OrganicForecast.meaning(structural: structural)").count - 1, 2)
+        XCTAssertFalse(src.contains("+ \" \" + OrganicForecast.notCertified"))
     }
 
     /// §2: the receipt's certificate, ties, fillet, floors, recommendation and

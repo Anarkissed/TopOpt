@@ -1120,10 +1120,17 @@ public enum TopOptKit {
             public let voxels: Int
             public let fullySynthetic: Int
             public let blended: Int
+            /// ★ core's own p99 of the wall's real von Mises and its verdict on it
+            /// (`p99 ≤ threshold` ⇒ the whole wall takes the focal field). Only the
+            /// report-only call carries them; the trace's rows leave the defaults.
+            public var p99VonMises: Double = 0
+            public var wholeRegion: Bool = false
             public init(regionID: Int, faceID: Int, foci: Int, softMM: Double,
-                        voxels: Int, fullySynthetic: Int, blended: Int) {
+                        voxels: Int, fullySynthetic: Int, blended: Int,
+                        p99VonMises: Double = 0, wholeRegion: Bool = false) {
                 self.regionID = regionID; self.faceID = faceID; self.foci = foci; self.softMM = softMM
                 self.voxels = voxels; self.fullySynthetic = fullySynthetic; self.blended = blended
+                self.p99VonMises = p99VonMises; self.wholeRegion = wholeRegion
             }
         }
         public let regions: [Region]
@@ -1132,12 +1139,68 @@ public enum TopOptKit {
         public let blended: Int
         public let deadThreshold: Double
         public let peakVonMises: Double
+        /// true when core's absolute floor, not the fraction of the peak, set the threshold
+        public var deadFloorBound: Bool = false
         public init(regions: [Region], voxelsInRegions: Int, fullySynthetic: Int, blended: Int,
-                    deadThreshold: Double, peakVonMises: Double) {
+                    deadThreshold: Double, peakVonMises: Double, deadFloorBound: Bool = false) {
             self.regions = regions; self.voxelsInRegions = voxelsInRegions
             self.fullySynthetic = fullySynthetic; self.blended = blended
             self.deadThreshold = deadThreshold; self.peakVonMises = peakVonMises
+            self.deadFloorBound = deadFloorBound
         }
+        /// ★★ THE DEAD WALLS ARE CORE'S (maintainer, 2026-09-29, ruling C): the regions
+        /// core gave the focal field (`fully_synthetic > 0`) — the same count the run's
+        /// receipt carries per region. The app keeps no rule of its own for this.
+        public var deadRegionIDs: Set<Int> {
+            Set(regions.filter { $0.fullySynthetic > 0 }.map(\.regionID))
+        }
+    }
+
+    /// Core's own absolute floor under the dead test (`kOrganicSyntheticDeadFloorMPa`).
+    public static var organicSyntheticDeadFloorMPa: Double { topoptbridge.organic_synthetic_dead_floor_mpa() }
+
+    /// ★ CORE'S DEAD-WALL VERDICT WITHOUT A TRACE (ruling C, 2026-09-29) — the run's own
+    /// call (`synthesize_focal_stress(…, 0.02, …, kOrganicSyntheticDeadFloorMPa)`) on
+    /// the given candidates, per-voxel region ids and tensor. The preview needs it
+    /// BEFORE it traces, because a dead wall is graded at the window's middle.
+    /// nil when core refused or the inputs do not fit the grid.
+    public static func organicSyntheticReport(nx: Int, ny: Int, nz: Int, spacingMM: Double,
+                                              origin: SIMD3<Double>,
+                                              candidate: [Bool], stressTensor: [Double],
+                                              regionIDs: [Int32],
+                                              syntheticRegions: [OrganicSyntheticRegionSpec])
+        -> OrganicSyntheticReport? {
+        let n = nx * ny * nz
+        guard n > 0, spacingMM > 0, candidate.count == n, stressTensor.count == 6 * n,
+              regionIDs.count == n, !syntheticRegions.isEmpty else { return nil }
+        let flags = candidate.map { $0 ? UInt8(1) : UInt8(0) }
+        let rows = syntheticRegions.flatMap { [Double($0.regionID), Double($0.faceID), Double($0.foci), $0.softMM] }
+        let raw: [Double] = flags.withUnsafeBufferPointer { cb in
+            stressTensor.withUnsafeBufferPointer { tb in
+                regionIDs.withUnsafeBufferPointer { rb in
+                    rows.withUnsafeBufferPointer { yb in
+                        topoptbridge.organic_synthetic_report(
+                            Int32(nx), Int32(ny), Int32(nz), spacingMM, origin.x, origin.y, origin.z,
+                            cb.baseAddress, cb.count, tb.baseAddress, tb.count,
+                            rb.baseAddress, rb.count, yb.baseAddress, yb.count).map { Double($0) }
+                    }
+                }
+            }
+        }
+        guard raw.count >= 9, raw[0] > 0.5 else { return nil }
+        let r = Int(raw[8])
+        guard raw.count >= 9 + 9 * r else { return nil }
+        let regions = (0..<r).map { k -> OrganicSyntheticReport.Region in
+            let o = 9 + 9 * k
+            return .init(regionID: Int(raw[o]), faceID: Int(raw[o + 1]), foci: Int(raw[o + 2]),
+                         softMM: raw[o + 3], voxels: Int(raw[o + 4]),
+                         fullySynthetic: Int(raw[o + 5]), blended: Int(raw[o + 6]),
+                         p99VonMises: raw[o + 7], wholeRegion: raw[o + 8] > 0.5)
+        }
+        return OrganicSyntheticReport(regions: regions, voxelsInRegions: Int(raw[2]),
+                                      fullySynthetic: Int(raw[3]), blended: Int(raw[4]),
+                                      deadThreshold: raw[5], peakVonMises: raw[6],
+                                      deadFloorBound: raw[7] > 0.5)
     }
 
     public struct OrganicTrace: Sendable {
@@ -1389,11 +1452,9 @@ public enum TopOptKit {
                                     // ★ core's synthetic stress on unloaded walls (2026-09-06):
                                     // per-voxel region id (0 = none) and per-region config
                                     regionIDs: [Int32] = [],
+                                    // the dead test is the RUN's call, in the bridge —
+                                    // no threshold is taken from the caller (ruling C)
                                     syntheticRegions: [OrganicSyntheticRegionSpec] = [],
-                                    syntheticDeadFraction: Double = 0.02,
-                                    /// ★ An absolute floor under the dead test (MPa):
-                                    /// the threshold is `max(fraction · peak, this)`.
-                                    syntheticDeadMPa: Double = 0,
                                     /// ★ the seeding boost's ratios (0 ⇒ core's defaults)
                                     seedRatio: Double = 0, testRatio: Double = 0,
                                     minLengthRatio: Double = 0)
@@ -1433,7 +1494,7 @@ public enum TopOptKit {
                         bb.baseAddress, bb.count,
                         showRepairs ? Int32(1) : Int32(0),
                         rb.baseAddress, rb.count,
-                        yb.baseAddress, yb.count, syntheticDeadFraction, syntheticDeadMPa,
+                        yb.baseAddress, yb.count,
                         seedRatio, testRatio, minLengthRatio,
                         Int32(fnx), Int32(fny), Int32(fnz), fieldSpacingMM,
                         fieldOrigin.x, fieldOrigin.y, fieldOrigin.z,

@@ -2309,6 +2309,98 @@ std::vector<double> organic_spans_field(const double* spans7, std::size_t span_c
   return out;
 }
 
+// ★★ THE RUN'S CALL, VERBATIM (maintainer, 2026-09-29: "pass core the same tensor the
+// run uses, and take the dead regions from core's report … Preview = run by
+// construction"). run_job.cpp `stress_tensor_for_organic`:
+//     synthesize_focal_stress(grid, candidate, voxel_region_id, cfg, 0.02, out,
+//                             kOrganicSyntheticDeadFloorMPa);
+// The fraction is the run's literal and the absolute floor is CORE'S OWN constant,
+// passed as `dead_floor`. The bridge used to fold an app-side floor into the fraction
+// (`max(fraction, mpa / peak)`), and `(0.005 / peak) · peak` lands one ulp UNDER 0.005
+// for about 3 % of peaks — so a wall at exactly the floor was dead in the run and alive
+// in the preview. Every synthesis in this file goes through here.
+// (OrganicDeadWallParityTests pins this line against run_job.cpp.)
+static topopt::SyntheticStressReport synthesize_as_the_run(
+    const topopt::VoxelGrid& grid, const std::vector<char>& cand, const std::vector<int>& vr,
+    const std::vector<topopt::SyntheticStressRegion>& cfg, std::vector<double>& stress) {
+  return topopt::synthesize_focal_stress(grid, cand, vr, cfg, 0.02, stress, topopt::kOrganicSyntheticDeadFloorMPa);
+}
+
+// Rows of 4 doubles [region_id, face_id, foci, soft_mm] → core's per-region config.
+static std::vector<topopt::SyntheticStressRegion> synthetic_regions_from_rows(
+    const double* synth, std::size_t synth_count) {
+  std::vector<topopt::SyntheticStressRegion> cfg;
+  for (std::size_t k = 0; k + 3 < synth_count; k += 4) {
+    topopt::SyntheticStressRegion r;
+    r.region_id = static_cast<int>(synth[k]);
+    r.face_id = static_cast<int>(synth[k + 1]);
+    r.foci = static_cast<int>(synth[k + 2]);
+    r.soft_mm = synth[k + 3];
+    cfg.push_back(r);
+  }
+  return cfg;
+}
+
+double organic_synthetic_dead_floor_mpa() { return topopt::kOrganicSyntheticDeadFloorMPa; }
+
+// ★ CORE'S DEAD-WALL VERDICT, BEFORE THE TRACE (ruling C, 2026-09-29). The preview
+// grades a dead wall at the window's middle BEFORE it traces, so it needs core's
+// verdict first; this is the same call the trace makes (`synthesize_as_the_run`) on
+// the same candidates, ids and tensor, returning only the report. Layout:
+//   [0] ran (1/0)  [1] regions  [2] voxels in regions  [3] fully synthetic
+//   [4] blended  [5] dead threshold (MPa)  [6] peak von Mises  [7] dead floor bound
+//   [8] R = row count, then R rows of 9:
+//       region_id, face_id, foci, soft_mm, voxels, fully_synthetic, blended,
+//       p99_von_mises, whole_region
+std::vector<double> organic_synthetic_report(
+    int nx, int ny, int nz, double spacing, double ox, double oy, double oz,
+    const std::uint8_t* candidate, std::size_t candidate_count,
+    const double* tensor, std::size_t tensor_count,
+    const int* region_id, std::size_t region_id_count,
+    const double* synth, std::size_t synth_count) {
+  const std::size_t n = static_cast<std::size_t>(nx) * static_cast<std::size_t>(ny) *
+                        static_cast<std::size_t>(nz);
+  std::vector<double> out(9, 0.0);
+  if (nx <= 0 || ny <= 0 || nz <= 0 || !(spacing > 0.0)) return out;
+  if (candidate == nullptr || candidate_count != n) return out;
+  if (tensor == nullptr || tensor_count != 6 * n) return out;
+  if (region_id == nullptr || region_id_count != n || synth == nullptr || synth_count < 4) return out;
+  topopt::VoxelGrid grid;
+  grid.nx = nx; grid.ny = ny; grid.nz = nz;
+  grid.spacing = spacing;
+  grid.origin = topopt::Vec3{ox, oy, oz};
+  grid.tags.assign(n, topopt::VoxelTag::Empty);   // voxel_count() is tags.size()
+  std::vector<char> cand(n, 0);
+  for (std::size_t i = 0; i < n; ++i) {
+    cand[i] = candidate[i] != 0 ? 1 : 0;
+    if (cand[i]) grid.tags[i] = topopt::VoxelTag::Interior;
+  }
+  std::vector<int> vr(region_id, region_id + n);
+  std::vector<double> stress(tensor, tensor + 6 * n);
+  topopt::SyntheticStressReport rep;
+  try {
+    rep = synthesize_as_the_run(grid, cand, vr, synthetic_regions_from_rows(synth, synth_count), stress);
+  } catch (...) {
+    return out;
+  }
+  out[0] = 1.0;
+  out[1] = static_cast<double>(rep.regions);
+  out[2] = static_cast<double>(rep.voxels_in_regions);
+  out[3] = static_cast<double>(rep.voxels_fully_synthetic);
+  out[4] = static_cast<double>(rep.voxels_blended);
+  out[5] = rep.dead_threshold;
+  out[6] = rep.peak_von_mises;
+  out[7] = rep.dead_floor_bound ? 1.0 : 0.0;
+  out[8] = static_cast<double>(rep.per_region.size());
+  for (const topopt::SyntheticStressRegionReport& r : rep.per_region)
+    out.insert(out.end(),
+               {static_cast<double>(r.region_id), static_cast<double>(r.face_id),
+                static_cast<double>(r.foci), r.soft_mm, static_cast<double>(r.voxels),
+                static_cast<double>(r.fully_synthetic), static_cast<double>(r.blended),
+                r.p99_von_mises, r.whole_region ? 1.0 : 0.0});
+  return out;
+}
+
 // ★★★ THE ORGANIC LATTICE, AS THE PREVIEW NEEDS IT (task 2026-08-22).
 //
 // ★ WHY THE PREVIEW CAN HAVE THIS AT ALL. The standing note said the strut preview
@@ -2405,21 +2497,10 @@ std::vector<double> organic_preview_field(
     // 2026-09-05). The census still names how many spans the repairs would arch.
     int emit_repairs,
     // ★ SYNTHETIC STRESS ON UNLOADED WALLS — core's own function (2026-09-06). See the
-    // header. region_id per voxel (0 = none), synth rows of 4, the run's dead fraction.
+    // header. region_id per voxel (0 = none), synth rows of 4. The dead test takes NO
+    // numbers from the caller: `synthesize_as_the_run` passes the run's own (below).
     const int* region_id, std::size_t region_id_count,
-    const double* synth, std::size_t synth_count, double synth_dead_fraction,
-    // ★★★ AN ABSOLUTE FLOOR UNDER THE DEAD TEST (his ruling, 2026-09-07: "I want you to
-    // change the dead test to 2% OR 0.005MPa - whichever comes first").
-    //
-    // ★ CORE'S TEST IS PURELY RELATIVE: `thr = dead_fraction × peak`, the peak taken
-    // over every candidate. On a part that carries almost nothing — his stand peaks at
-    // 0.03 MPa against a 31 MPa allowable — 2 % of that peak is 0.0006 MPa, and a wall
-    // holding 0.004 MPa clears it comfortably. Core replaces nothing, the foci he set do
-    // nothing, and no message anywhere says why. The fix is a threshold that is also an
-    // ABSOLUTE stress, and `dead_fraction` is a parameter core exposes: converting the
-    // millimetre-of-mercury into core's own units here (`max(fraction, mpa / peak)`)
-    // uses `synthesize_focal_stress` exactly as written. 0 ⇒ the relative test alone.
-    double synth_dead_mpa,
+    const double* synth, std::size_t synth_count,
     double seed_ratio, double test_ratio, double min_length_ratio,
     // The field to bake the traced capsules into: its own grid, which is the REGION's
     // bbox rather than the part's, so the voxel can be a fraction of the design grid's.
@@ -2459,45 +2540,16 @@ std::vector<double> organic_preview_field(
 
   std::vector<double> stress(tensor, tensor + 6 * n);
 
-  // ★ SYNTHETIC STRESS ON UNLOADED WALLS — CORE'S OWN FUNCTION, the same one
-  // run_job calls (`synthesize_focal_stress(grid, candidate, voxel_region_id, cfg,
-  // 0.02, out)`), on the same per-region config the job carries. The app used to
-  // inject its own field here; two recipes cannot agree, so the app's is gone.
+  // ★ SYNTHETIC STRESS ON UNLOADED WALLS — CORE'S OWN FUNCTION, called exactly as the
+  // run calls it (`synthesize_as_the_run`), on the same per-region config the job
+  // carries and on the tensor as given. The app injects nothing and zeroes nothing.
   topopt::SyntheticStressReport srep;
   bool synth_ran = false;
-  if (region_id != nullptr && region_id_count == n && synth != nullptr &&
-      synth_count >= 4 && synth_dead_fraction > 0.0) {
+  if (region_id != nullptr && region_id_count == n && synth != nullptr && synth_count >= 4) {
     std::vector<int> vr(region_id, region_id + n);
-    std::vector<topopt::SyntheticStressRegion> cfg;
-    for (std::size_t k = 0; k + 3 < synth_count; k += 4) {
-      topopt::SyntheticStressRegion r;
-      r.region_id = static_cast<int>(synth[k]);
-      r.face_id = static_cast<int>(synth[k + 1]);
-      r.foci = static_cast<int>(synth[k + 2]);
-      r.soft_mm = synth[k + 3];
-      cfg.push_back(r);
-    }
-    // ★ HIS RULE, IN CORE'S OWN UNITS: whichever threshold fires FIRST. The peak is
-    // core's — the maximum von Mises over every candidate, the same loop
-    // `synthesize_focal_stress` runs — so `mpa / peak` is exactly the fraction that
-    // makes core's `dead_fraction × peak` equal to the stated millipascals.
-    // `organic_von_mises6` is file-static in core, so the formula is written out here —
-    // core's exactly, Voigt [xx, yy, zz, xy, yz, zx] with TRUE shear.
-    auto vm6 = [](const double* m) {
-      const double sxx = m[0], syy = m[1], szz = m[2], sxy = m[3], syz = m[4], szx = m[5];
-      const double d = 0.5 * ((sxx - syy) * (sxx - syy) + (syy - szz) * (syy - szz) +
-                              (szz - sxx) * (szz - sxx)) +
-                       3.0 * (sxy * sxy + syz * syz + szx * szx);
-      return std::sqrt(std::max(0.0, d));
-    };
-    double synth_peak = 0.0;
-    for (std::size_t e = 0; e < n; ++e)
-      if (cand[e]) synth_peak = std::max(synth_peak, vm6(&stress[6 * e]));
-    double dead_fraction = synth_dead_fraction;
-    if (synth_dead_mpa > 0.0 && synth_peak > 0.0)
-      dead_fraction = std::max(dead_fraction, synth_dead_mpa / synth_peak);
+    const std::vector<topopt::SyntheticStressRegion> cfg = synthetic_regions_from_rows(synth, synth_count);
     try {
-      srep = topopt::synthesize_focal_stress(grid, cand, vr, cfg, dead_fraction, stress);
+      srep = synthesize_as_the_run(grid, cand, vr, cfg, stress);
       synth_ran = true;
     } catch (...) {
       synth_ran = false;
