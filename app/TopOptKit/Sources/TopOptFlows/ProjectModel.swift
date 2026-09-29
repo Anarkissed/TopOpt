@@ -739,8 +739,8 @@ public final class ProjectModel: ObservableObject {
 
     /// Write one wall's synthetic-foci count. nil, 0, or a value outside 1…5
     /// CLEARS it back to the default — "no number stated" must be spellable. A wall
-    /// the last bake measured as LOADED refuses the write (his rule, 2026-09-05:
-    /// "it should never be able to add foci to loaded walls").
+    /// core found to CARRY LOAD refuses the write (his rule, 2026-09-05: "it should
+    /// never be able to add foci to loaded walls"; core's verdict since 2026-09-29).
     public func writeLatticeSyntheticFoci(_ ref: LatticeSelectableRef, foci: Int?) {
         guard let n = foci, OrganicSyntheticStress.fociRange.contains(n) else {
             lattice.selectableSyntheticFoci.removeValue(forKey: ref.key)
@@ -750,34 +750,35 @@ public final class ProjectModel: ObservableObject {
         lattice.selectableSyntheticFoci[ref.key] = n
     }
 
-    /// Whether the last bake found real stress on this wall: true = loaded (no foci
-    /// allowed), false = unloaded, nil = not measured yet.
+    /// ★★ CORE'S VERDICT ON THIS WALL (maintainer, 2026-09-29, ruling 1): true = core
+    /// left it alone — it carries load, no foci; false = core synthesised it — barely
+    /// loaded, foci offered; nil = not measured yet. The Selections row's word and the
+    /// foci offer both read this one value, so they cannot disagree.
     public func latticeWallLoaded(_ ref: LatticeSelectableRef) -> Bool? {
-        // ★ THE STORED NUMBER IS THE WALL'S STRESS SHARE (2026-09-07) — what share of
-        // the part's peak von Mises this wall carries. It was core's synthesis share,
-        // which answers a different question and called a spill-loaded wall "loaded".
-        lattice.selectableWallStressFraction[ref.key].map { $0 >= OrganicSyntheticStress.loadedStressShare }
+        lattice.selectableWallCoreDead[ref.key].map { !$0 }
     }
 
-    /// ★ THE WALLS THE JOB MAY SYNTHESISE ON: only under an organic Aesthetic lattice
-    /// with the switch on, only walls the bake measured as UNLOADED — each with its
-    /// own count, else the lattice default. Loaded and unmeasured walls are absent.
-    public func latticeSyntheticWalls() -> [String: Int] {
+    /// ★★ THE JOB'S SYNTHETIC-STRESS FLAGS (maintainer, 2026-09-29, ruling 2): only under
+    /// an organic Aesthetic lattice with the switch on (core refuses the keys otherwise),
+    /// and then EVERY include wall — core decides on the run's own tensor which are dead
+    /// and leaves a flagged wall that carries load untouched. Each wall carries its stated
+    /// count, else the lattice default (4, which is also core's own default for a flagged
+    /// wall with no count: `synthetic_foci = 4`, placed by core). No measurement is read,
+    /// so an unmeasured wall is asked about too. nil ⇒ nothing flagged.
+    public func latticeSyntheticFlags() -> OrganicSyntheticStress.SyntheticFlags? {
         let lat = lattice
         guard lat.isOrganic, lat.organicSyntheticStresses,
-              (lat.stageMode ?? .structural) == .aesthetic else { return [:] }
-        var out: [String: Int] = [:]
-        for (key, frac) in lat.selectableWallStressFraction where frac < OrganicSyntheticStress.loadedStressShare {
-            out[key] = OrganicSyntheticStress.clampFoci(lat.selectableSyntheticFoci[key] ?? lat.organicSyntheticFoci)
-        }
-        return out
+              (lat.stageMode ?? .structural) == .aesthetic else { return nil }
+        return .init(defaultFoci: lat.organicSyntheticFoci, stated: lat.selectableSyntheticFoci)
     }
 
-    /// The bake's per-wall measurement, stored so the drawer and the job agree on
-    /// which walls are unloaded. Only writes when something changed.
-    public func recordLatticeWallStress(_ fractions: [String: Double]) {
-        guard fractions != lattice.selectableWallStressFraction else { return }
-        lattice.selectableWallStressFraction = fractions
+    /// Core's per-wall verdicts from the bake (true = core synthesised the wall),
+    /// stored so the row and the offer survive a relaunch. Replaces the whole map — a
+    /// wall this bake did not report reads unmeasured, never a stale verdict. Only
+    /// writes when something changed.
+    public func recordLatticeWallVerdicts(_ coreDead: [String: Bool]) {
+        guard coreDead != lattice.selectableWallCoreDead else { return }
+        lattice.selectableWallCoreDead = coreDead
     }
 
     public func latticeSelectableDensity(_ ref: LatticeSelectableRef,
@@ -2350,7 +2351,7 @@ public final class ProjectModel: ObservableObject {
             // and `LatticeSlabExpandTests` caught this one missing.
             selectableDensity: lattice.selectableDensity,
             selectableExpandMM: lattice.selectableExpandMM,
-            syntheticWalls: latticeSyntheticWalls(),
+            synthetic: latticeSyntheticFlags(),
             regionMembers: { [weak self] _, rid in self?.latticeRegionMembers(rid) },
             facets: { [weak self] f in
                 guard let mesh = self?.viewerMesh else { return [] }
@@ -2459,7 +2460,7 @@ public final class ProjectModel: ObservableObject {
                     groupDensities: self.lattice.groupDensities,
                     selectableDensity: self.lattice.selectableDensity,
                     selectableExpandMM: self.lattice.selectableExpandMM,
-                    syntheticWalls: self.latticeSyntheticWalls(),
+                    synthetic: self.latticeSyntheticFlags(),
                     resolve: { [weak self] f in self?.resolvedLatticeFace(f) }).regions
             },
             topology: lattice.topologyID,

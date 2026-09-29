@@ -159,40 +159,46 @@ final class OrganicAutoGradeAndFreezeTests: XCTestCase {
                        "★ the shell-only rule must not still be wired through")
     }
 
-    /// The row answers one question: is this wall carrying load, and how much.
-    func testTheWallRowIsTwoFacts() {
-        var w = OrganicSyntheticStress.WallReport(key: "f:b", faceID: 15, voxels: 100,
-                                                  fullySynthetic: 0, blended: 0, foci: 4)
-        w.partPeakMPa = 0.024; w.wallP99MPa = 0.0203; w.allowableMPa = 37
-        XCTAssertEqual(w.statusText, "unloaded · 0.0203 MPa")
-        XCTAssertFalse(w.statusText.contains("%"), "no percentages")
-        XCTAssertFalse(w.statusText.contains("allowable"), "no allowable")
-        XCTAssertLessThanOrEqual(w.statusText.count, 28, w.statusText)
+    /// The row answers one question: does core call this wall loaded — in plain words
+    /// (ruling 1, 2026-09-29). This retires the "two facts" row (verdict + the wall's MPa,
+    /// 2026-09-07) and its 28-character cap: the MPa it showed was the app's own p99,
+    /// not the one core judged. His stand's back wall (0.0203 MPa, core leaves it alone)
+    /// is the test case.
+    func testTheWallRowIsCoresVerdictInPlainWords() {
+        let back = OrganicSyntheticStress.WallReport(key: "f:b", faceID: 15, voxels: 100,
+                                                     fullySynthetic: 0, blended: 0, foci: 4)
+        XCTAssertEqual(back.statusText, "Carries load")
+        let front = OrganicSyntheticStress.WallReport(key: "f:a", faceID: 2, voxels: 100,
+                                                      fullySynthetic: 100, blended: 0, foci: 4)
+        XCTAssertEqual(front.statusText, "Barely loaded — a made-up load can be added")
+        for t in [back.statusText, front.statusText] {
+            XCTAssertFalse(t.contains("%"), "no percentages"); XCTAssertFalse(t.contains("MPa"), "no number")
+        }
     }
 
-    /// ★ THE GATE AND THE ROW MUST NOT DISAGREE. The row read the live report (which
-    /// knows the part is idle) and said "unloaded"; the gate read the stored share and
-    /// re-applied the 15 % test alone, so 84 % said "loaded" and the pills stayed grey.
-    @MainActor func testTheStoredNumberCarriesTheVerdictNotTheRawShare() throws {
+    /// ★ THE GATE AND THE ROW MUST NOT DISAGREE — they read ONE stored value, core's
+    /// verdict (ruling 1). The stand's back wall: core left it alone, so the row says
+    /// "Carries load" and the foci are refused.
+    @MainActor func testTheStoredValueIsCoresVerdict() throws {
         let ws = try source("WorkspacePlaceholder.swift")
-        XCTAssertTrue(ws.contains("fractions[k] = w.carriesLoad ? w.stressShare : 0"),
-                      "★ the verdict is stored, so the gate needs no context it lacks")
-        // …and the gate then agrees with the row on his own numbers.
-        var w = OrganicSyntheticStress.WallReport(key: "f:a", faceID: 2, voxels: 100,
-                                                  fullySynthetic: 0, blended: 0, foci: 4)
-        w.partPeakMPa = 0.024; w.wallP99MPa = 0.0203; w.allowableMPa = 37
-        XCTAssertTrue(w.dead, "the row says unloaded")
+        XCTAssertTrue(ws.contains(".filter { $0.value.voxels > 0 }.mapValues(\\.dead))"),
+                      "★ core's verdict is stored, per wall, from the bake's own report")
+        XCTAssertFalse(ws.contains("stressShare"), "no app-side share decides anything")
+        let back = OrganicSyntheticStress.WallReport(key: "f:a", faceID: 2, voxels: 100,
+                                                     fullySynthetic: 0, blended: 0, foci: 4)
+        XCTAssertFalse(back.dead, "core left the back wall alone")
         let p = ProjectModel(id: UUID(), name: "P", material: "PLA", process: .fdm,
                              importedFile: nil, importedMesh: nil)
         let ref = LatticeSelectableRef.face(group: UUID(), face: 15)
-        p.recordLatticeWallStress([ref.key: w.carriesLoad ? w.stressShare : 0])
-        XCTAssertEqual(p.latticeWallLoaded(ref), false, "★ and so does the gate")
+        p.recordLatticeWallVerdicts([ref.key: back.dead])
+        XCTAssertEqual(p.latticeWallLoaded(ref), true, "★ and so does the gate")
         p.lattice.algorithm = "organic"
         p.lattice.stageMode = .aesthetic
         p.lattice.organicSyntheticStresses = true
         p.writeLatticeSyntheticFoci(ref, foci: 3)
-        XCTAssertEqual(p.latticeSelectableSyntheticFoci(ref), 3, "★ the foci are accepted")
-        XCTAssertEqual(p.latticeSyntheticWalls(), [ref.key: 3], "★ and the job marks the wall")
+        XCTAssertNil(p.latticeSelectableSyntheticFoci(ref), "★ no foci on a wall core says carries load")
+        XCTAssertEqual(p.latticeSyntheticFlags()?.foci(for: ref.key), 4,
+                       "★ but the job still asks core about it (ruling 2) — core leaves it alone")
     }
 
     // MARK: the cached cube does not wait on a solve

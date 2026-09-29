@@ -167,7 +167,7 @@ Reference part: his M2 verticalStand, bead 0.45 mm, two face regions (12 mm and
 ### 2.2 Where the run and the preview DIFFER today
 - (a) ★ THE RIM BAND: the preview COUNTS the rim voxels and keeps them as candidates, so the
   curves run THROUGH the band INTO the solid and are welded there (the wetted join). Core's
-  `apply_organic_solid_rim` still DELETES the band (`mask[e] = 0`), so the run cuts every
+  `apply_organic_solid_rim` *(superseded 2026-09-29: core replaced this with `organic_solid_rim_band`, which keeps the band as tracer candidates and turns it solid after the trace — ruling G)* still DELETES the band (`mask[e] = 0`), so the run cuts every
   strut back at the rim's inner face. THIS IS THE ONE GEOMETRIC DIVERGENCE IN-SOURCE. Fix in
   core: keep the band as candidate; the rim is a solid the struts enter, and the emission
   welds/flare-fillets them there exactly as the fillet pass does at any other solid.

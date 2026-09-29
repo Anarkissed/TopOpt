@@ -152,10 +152,6 @@ public struct WorkspacePlaceholder: View {
     /// skipped. Organic only — a periodic bake is about a second and its call sites are
     /// long settled, and nothing about the regular lattice's timing is being changed.
     @State private var organicBakeFingerprint: OrganicBakeKey? = nil
-    /// ★ THE DEAD-WALL REPORT of the last organic bake (2026-09-05): per selectable
-    /// key, whether the wall carried real stress and what was injected. Read by the
-    /// Selections drawer's Foci row.
-    @State private var latticeDeadWalls: [String: OrganicSyntheticStress.WallReport] = [:]
     /// ★ THE LAST ORGANIC RUN'S EMITTED SPANS + RECEIPT (2026-09-02) — the preview's
     /// source when the algorithm is organic. Same lifetime as the bake's other inputs:
     /// replaced on a run, never touched per frame.
@@ -5197,19 +5193,13 @@ public struct WorkspacePlaceholder: View {
                 // synthesize_focal_stress with the plan built above — the same function
                 // and the same per-region config the run gets. The app injects nothing.
                 organicIn?.syntheticRegions = synthPlan.regions
-                // ★ A DEAD WALL IS DEAD AS A WHOLE (2026-09-18): its real tensor is zeroed.
-                // Core now decides the same way itself (#358: the wall's p99 against the
-                // threshold, and a dead wall takes the focal field over every voxel), so
-                // this is the app's mirror of that rule, kept for the log's verdicts.
-                let verdicts = OrganicSyntheticStress.deadenWholeWalls(
-                    tensor: &organicIn!.tensor, regionIDs: synthPlan.regionIDs)
-                organicIn?.deadRegionIDs = Set(verdicts.map { $0.regionID })
-                if !verdicts.isEmpty {
-                    NSLog("DIAG synthetic whole-wall: %@",
-                          verdicts.map { String(format: "%@ p99 %.4g ≤ thr %.4g → %d voxels zeroed",
-                                                synthPlan.keyByID[$0.regionID] ?? "r\($0.regionID)", $0.p99, $0.thr, $0.zeroed) }
-                              .joined(separator: " | "))
-                }
+                // ★★ THE TENSOR GOES TO CORE UNTOUCHED (maintainer, 2026-09-29, ruling C).
+                // A dead wall is dead as a whole (his 2026-09-18 night), and since #358 core
+                // decides that itself: the wall's p99 against the threshold, the focal field
+                // over every voxel of a dead wall. The app used to zero the walls it judged
+                // dead first, by its own p99, so at the threshold the preview and the run
+                // could disagree. The scene now asks core for the verdict before it traces
+                // (`TopOptKit.organicSyntheticReport`) and grades core's dead walls.
             }
             // ★★★ TWO STAGES (his timings, 2026-09-06: trace 0.2 s, core's emission
             // 186–191 s). The traced picture first — the bridge skips the emission when
@@ -5324,13 +5314,6 @@ public struct WorkspacePlaceholder: View {
                 // means "this is current, a better one is coming".
                 strutBakeInFlight = false
                 strutRefining = !isLastStage
-                // ★ THE WALL'S OWN STRESS, from the tensor the tracer was handed.
-                let wallStress = OrganicSyntheticStress.wallStress(
-                    tensor: organicIn?.tensor ?? [], regionIDs: synthPlan.regionIDs)
-                let wallReports = OrganicSyntheticStress.wallReports(
-                    from: scene.organicSyntheticReport, plan: synthPlan,
-                    stressByRegion: wallStress, allowableMPa: allowableMPa)
-                latticeDeadWalls = wallReports
                 // ★ THE PHASE CLOCK, IN THE LOG (2026-09-06): where a long bake went.
                 if let ph = scene.organicPhaseSeconds {
                     NSLog("DIAG organic phases: trace %.1f s · repairs (core emission) %.1f s · bake %.1f s · %d spans emitted",
@@ -5387,35 +5370,31 @@ public struct WorkspacePlaceholder: View {
                     NSLog("DIAG organic rim coverage: %@", lines.joined(separator: " | "))
                 }
                 if synthOn, let rep = scene.organicSyntheticReport {
-                    NSLog("DIAG synthetic(core): regions=%d voxels=%d fully=%d blended=%d thr=%.4g partPeak=%.4g · %@",
-                          rep.regions.count, rep.voxelsInRegions, rep.fullySynthetic, rep.blended,
-                          rep.deadThreshold, rep.peakVonMises,
-                          wallReports.values.map {
-                              String(format: "%@: p99 %.4g max %.4g = %.1f%% of peak → %@ (core synth %d/%d)",
-                                     $0.key ?? "?", $0.wallP99MPa, $0.wallMaxMPa, 100 * $0.stressShare,
-                                     $0.dead ? "UNLOADED" : "loaded", $0.fullySynthetic, $0.voxels)
+                    // ★ CORE'S VERDICT PER WALL (ruling C): its own p99 against its own
+                    // threshold — the decision the run makes on the same call.
+                    NSLog("DIAG synthetic(core verdict): thr=%.4g%@ · %@",
+                          rep.deadThreshold, rep.deadFloorBound ? " (the 0.005 MPa floor)" : " (2 % of the peak)",
+                          rep.regions.map {
+                              String(format: "%@ core p99 %.4g → %@",
+                                     synthPlan.keyByID[$0.regionID] ?? "r\($0.regionID)", $0.p99VonMises,
+                                     $0.fullySynthetic > 0 ? "DEAD, synthesised whole" : "left alone")
                           }.joined(separator: " | "))
+                    NSLog("DIAG synthetic(core): regions=%d voxels=%d fully=%d blended=%d thr=%.4g partPeak=%.4g",
+                          rep.regions.count, rep.voxelsInRegions, rep.fullySynthetic, rep.blended,
+                          rep.deadThreshold, rep.peakVonMises)
                 }
-                // ★ The measurement outlives the bake: the drawer greys loaded walls
-                // and the job marks only unloaded ones (both read the project). Stored
-                // as the wall's REAL share (1 − synthetic).
-                if synthOn {
-                    var fractions = project.lattice.selectableWallStressFraction
-                    // ★★★ THE VERDICT, NOT THE RAW SHARE (his walk, 2026-09-07: the row
-                    // said "unloaded" and the pills stayed grey). Two paths were judging
-                    // the same wall: the ROW read the live report, which knows the part's
-                    // peak and the material's allowable and therefore knows the part is
-                    // idle; the GATE read this stored number and re-applied the share
-                    // test alone, with no idea the part carries nothing. 0.84 ≥ 0.15, so
-                    // it said "loaded" under a row that said "unloaded".
-                    //
-                    // One number, already judged: the share when the wall really carries
-                    // load, 0 when it does not. `latticeWallLoaded` then needs no context
-                    // it does not have.
-                    for (k, w) in wallReports where w.voxels > 0 {
-                        fractions[k] = w.carriesLoad ? w.stressShare : 0
-                    }
-                    project.recordLatticeWallStress(fractions)
+                // ★★ CORE'S VERDICT OUTLIVES THE BAKE (maintainer, 2026-09-29, ruling 1): the
+                // Selections row's word and the foci offer both read it from the project, so
+                // they agree and survive a relaunch. It is core's answer from the same call
+                // the preview graded by — a wall core synthesised (any of its regions) is
+                // barely loaded; one core left alone carries load. No Swift threshold: the
+                // app's 15 % rule is retired. The whole map is replaced, so a wall this bake
+                // did not report reads unmeasured; a bake without a report records nothing.
+                // (The job no longer reads this: every include wall is flagged, ruling 2.)
+                if synthOn, let rep = scene.organicSyntheticReport {
+                    project.recordLatticeWallVerdicts(
+                        OrganicSyntheticStress.wallReports(from: rep, plan: synthPlan)
+                            .filter { $0.value.voxels > 0 }.mapValues(\.dead))
                 }
                 // ★ the change that arrived while this bake ran
                 if isLastStage { strutRefining = false }
@@ -10123,7 +10102,7 @@ public struct WorkspacePlaceholder: View {
                                 .accessibilityIdentifier("\(identifier)-foci-\(n)")
                             }
                         }
-                        .accessibilityLabel(row.disabled ? "Foci — loaded wall, not available" : "Foci")
+                        .accessibilityLabel(row.disabled ? "Foci — carries load, not offered" : "Foci")
                     } else if row.modifiable {
                         let slug = row.label.lowercased()
                         let padKey = "\(identifier)-\(slug)"
@@ -10643,11 +10622,13 @@ public struct WorkspacePlaceholder: View {
             expandMM: project.latticeExpandMM(ref),
             syntheticFoci: latticeSyntheticFociRow(ref),
             fociDisabled: project.latticeWallLoaded(ref) == true,
-            // ★ Receipt C (brief 2026-09-06): after a run the wall's own entry, keyed
-            // by face, outranks the preview's measurement — "never assume the toggle
-            // did something; read the entry".
+            // ★★ THE WORD AND THE OFFER READ ONE VALUE — core's verdict (ruling 1,
+            // 2026-09-29): "Carries load" (no foci) or "Barely loaded — a made-up load
+            // can be added". Unmeasured ⇒ no word. This retires Receipt C's precedence
+            // in this row (the run's "carried load, untouched" line): the ruling names
+            // the preview's core call, and the offer beside it reads that same verdict.
             wallStress: latticeSyntheticFociRow(ref) == nil ? nil
-                : (latticeReceiptWallText(ref) ?? latticeDeadWalls[ref.key]?.statusText))
+                : project.latticeWallLoaded(ref).map(OrganicSyntheticStress.wallWord(loaded:)))
         latticeDrawerBody(drawer, depthDrag: latticePrimitiveDepthDrag(g, ref),
                           identifier: "lattice-drawer-\(ref.key)",
                           writeDepth: { mm in
@@ -10696,18 +10677,10 @@ public struct WorkspacePlaceholder: View {
             .padding(.leading, DS.Space.m)
     }
 
-    /// The run receipt's per-face synthetic entry for this wall, when the run had one.
-    private func latticeReceiptWallText(_ ref: LatticeSelectableRef) -> String? {
-        guard let receipt = latticeOrganicReceipt, !receipt.syntheticStressByFace.isEmpty,
-              let fid = project.latticeJobRegions().regions.first(where: { $0.selectableKey == ref.key })?.faceID,
-              let row = receipt.syntheticStressByFace[fid] else { return nil }
-        return "run: " + row.text
-    }
-
     /// ★ THE FOCI ROW'S TEXT, or nil when the row must not exist: only an organic
     /// lattice, under an Aesthetic stage, with synthetic stresses on. "Auto · 2"
-    /// when the wall states nothing, its own count otherwise, then the last
-    /// bake's verdict on the wall ("unloaded · 0.4% of peak" / "loaded · 20% of peak").
+    /// when the wall states nothing, its own count otherwise; "—" on a wall core found
+    /// to carry load. The verdict's words are the row beneath it.
     private func latticeSyntheticFociRow(_ ref: LatticeSelectableRef) -> String? {
         let lat = project.lattice
         guard lat.isOrganic, lat.organicSyntheticStresses,

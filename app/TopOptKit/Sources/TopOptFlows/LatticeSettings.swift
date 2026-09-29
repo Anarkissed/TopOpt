@@ -216,9 +216,10 @@ public struct LatticeRegionSpec: Equatable, Sendable {
     /// byte-identical to a pre-task one. Never set on an exclude region.
     public var relativeDensity: Double? = nil
     /// ★ SYNTHETIC STRESS FOR AN UNLOADED WALL (maintainer, 2026-09-05; Aesthetic
-    /// only). `syntheticStress` is set by the emission ONLY for a wall the last bake
-    /// measured as unloaded (never a loaded one — his rule); `syntheticFoci` is then
-    /// the count to use (the wall's own, else the lattice default). Core's contract:
+    /// only). `syntheticStress` is set by the emission on EVERY include wall when the
+    /// switch is on (ruling 2, 2026-09-29) — core decides on the run's own tensor which
+    /// are dead and leaves a loaded one untouched; `syntheticFoci` is the count to use
+    /// (the wall's own, else the lattice default). Core's contract:
     /// per-region `synthetic_stress` + `synthetic_foci` (1…5). The selectable key
     /// rides along so the bake's report can name the row; it never reaches the job.
     public var syntheticStress: Bool = false
@@ -1002,8 +1003,8 @@ public struct LatticeSpec: Equatable, Sendable {
             if stageMode == .structural { put("organic_structural_certification", "beam_network") }
             // ★ SYNTHETIC STRESSES ON UNLOADED WALLS (maintainer, 2026-09-05) carry NO
             // grading key: core's contract is per REGION (`synthetic_stress`,
-            // `synthetic_foci`), written by `LatticeRegionSpec.wireDictionary` for the
-            // walls the bake measured as unloaded.
+            // `synthetic_foci`), written by `LatticeRegionSpec.wireDictionary` for every
+            // include wall when the switch is on — core decides which are dead.
             // ★ NEVER `organic_shape_fit_only` ON AN ORGANIC JOB: core accepts it only
             // with a cell window, and windows only on the SWEPT path (job.cpp), which
             // D2 forbids for organic — a job carrying it is refused at validation
@@ -1094,7 +1095,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
     /// are still empty spaces at the bottom and the top").
     ///
     /// run_job: `rim = organic_solid_rim_mm < 0 ? job.grading.cell_min_mm
-    /// : organic_solid_rim_mm`, and `apply_organic_solid_rim` returns immediately
+    /// : organic_solid_rim_mm`, and `organic_solid_rim_band` returns an empty band
     /// unless `rim > 0`. `cell_min_mm` defaults to 0 and this app writes it ONLY when a
     /// GRADE was picked — under Auto, and under a single Manual size, the job carries no
     /// `cell_min_mm` at all. So the run applies NO RIM in those cases.
@@ -1149,8 +1150,8 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
     }
 
     /// ★ WHAT A BAKE READS — with what a bake WRITES stripped out. The strut bake's
-    /// completion records the wall-stress shares it measured
-    /// (`recordLatticeWallStress`), and the probe records its answer; neither changes
+    /// completion records core's per-wall verdicts
+    /// (`recordLatticeWallVerdicts`), and the probe records its answer; neither changes
     /// the picture, but both are fields of this value, and the preview rebakes on
     /// `.onChange(of: project.lattice)`. Measured 2026-09-06 on his part: one change,
     /// two 12-minute bakes — the second armed by the first's own write. The trigger
@@ -1158,7 +1159,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
     /// from.
     public var previewBakeInputs: LatticeSettings {
         var s = self
-        s.selectableWallStressFraction = [:]
+        s.selectableWallCoreDead = [:]
         s.organicForecast = nil
         return s
     }
@@ -1297,11 +1298,13 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
     // `organicOverhangFillet` still decodes — the key is simply not read.)
     /// ★ SYNTHETIC STRESSES ON UNLOADED WALLS (maintainer, 2026-09-05; Aesthetic
     /// mode only). A wall that carries no stress whatsoever has no field to trace;
-    /// with this on, every such wall gets a synthetic focal load — `organicSyntheticFoci`
-    /// foci unless the wall states its own count in Selections
-    /// (`selectableSyntheticFoci`, keyed like the role and the depth, 1…5).
+    /// with this on, every include wall is offered to core, and each wall core finds
+    /// dead gets a synthetic focal load — `organicSyntheticFoci` foci unless the wall
+    /// states its own count in Selections (`selectableSyntheticFoci`, keyed like the role
+    /// and the depth, 1…5).
     public var organicSyntheticStresses: Bool = false
-    /// The count an unloaded wall gets when it states none — 4, core's measured recipe.
+    /// The count an unloaded wall gets when it states none — 4, core's measured recipe and
+    /// core's own default for a flagged wall with no count (`synthetic_foci = 4`, job.hpp).
     public var organicSyntheticFoci: Int = 4
     public var selectableSyntheticFoci: [String: Int] = [:]
     /// ★ PR 355 keys (2026-09-06): grown-path transfer ties and their swirl, the solid
@@ -1315,11 +1318,14 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
     public var organicLookCellsAcross: Int = 8
     public static let organicRecommendSteps = 5
     public static let organicRecommendMargin = 1.5
-    /// ★ THE LAST BAKE'S MEASUREMENT per wall: median von Mises as a fraction of the
-    /// field's peak. A cache of a measurement, not a choice — it decides which walls
-    /// may take foci (below `OrganicSyntheticStress.deadFraction`) and which regions
-    /// the job marks `synthetic_stress`. Absent ⇒ unmeasured.
-    public var selectableWallStressFraction: [String: Double] = [:]
+    /// ★★ CORE'S VERDICT PER WALL, from the last bake (maintainer, 2026-09-29, ruling 1:
+    /// "The Selections row's word and the foci offer follow core's verdict … not the
+    /// app's 15 % rule"). true = core synthesised the wall (any of its regions:
+    /// `fully_synthetic > 0`), so it is barely loaded and may take foci; false = core
+    /// measured it and left it alone — it carries load, no foci; absent = unmeasured. A
+    /// cache of core's answer, not a choice, and the job does not read it (every include
+    /// wall is flagged, ruling 2).
+    public var selectableWallCoreDead: [String: Bool] = [:]
     /// ★★★ PREVIEW: SHOW PRINT REPAIRS (his walk, 2026-09-07: "always set to 'on' each
     /// time I go back into the settings, no matter how many times I turn it off"). It
     /// was `@State` on the wizard view — born `true` every time the page was built, so
@@ -1959,18 +1965,15 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         case organicFittingSeparationsMM, organicPickedSeparationMM
         case organicApprovedGradesMM, organicPickedGradeMM
         case organicSyntheticStresses, organicSyntheticFoci, selectableSyntheticFoci
-        // ★★★ THE STORED NUMBER CHANGED MEANING, SO THE KEY CHANGED WITH IT
-        // (2026-09-07). It used to hold core's SYNTHESIS share — how much of the wall
-        // core replaced — which is typically 0.8–0.9; it now holds the wall's STRESS
-        // share, tested against `OrganicSyntheticStress.loadedStressShare` — a far
-        // smaller number. (Named, not spelled: `testNoHardcodedCertifiableBandLiterals‌-
-        // InControlSources` scans this file for band literals and a source-text guard
-        // counts comments too.) Read under the old key, every wall in
-        // every project saved by an earlier build would come back loaded and refuse
-        // foci for a reason that no longer exists. A new key means those old values are
-        // simply not read: the wall reads "unmeasured" until the next bake measures it,
-        // which is the truth.
-        case selectableWallStressFraction = "selectableWallStressShare"
+        // ★★★ THE STORED VALUE CHANGED MEANING, SO THE KEY CHANGED WITH IT — TWICE.
+        // 2026-09-07: core's SYNTHESIS share ("selectableWallStressFraction") gave way to
+        // the wall's STRESS share ("selectableWallStressShare"), judged by the app's own
+        // rule. 2026-09-29 (ruling 1): that rule is retired and the value is CORE'S
+        // verdict. Neither old key is read: an old 0 meant "the app called it unloaded"
+        // and that included his stand's 0.0203 MPa back wall, which core leaves alone,
+        // so carrying them forward would carry the very verdict the ruling overturns.
+        // An old project's walls read "unmeasured" until the next bake asks core.
+        case selectableWallCoreDead = "selectableWallCoreDead"
         case organicShowRepairs, organicLookPercent
         case organicTransferTies, organicTieSwirl, organicSolidRimMM, organicLookCellsAcross
         case organicDepthStagger
@@ -2009,7 +2012,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
             try c.decodeIfPresent(Int.self, forKey: .organicSyntheticFoci) ?? 4)
         selectableSyntheticFoci = (try c.decodeIfPresent([String: Int].self, forKey: .selectableSyntheticFoci) ?? [:])
             .filter { OrganicSyntheticStress.fociRange.contains($0.value) }
-        selectableWallStressFraction = try c.decodeIfPresent([String: Double].self, forKey: .selectableWallStressFraction) ?? [:]
+        selectableWallCoreDead = try c.decodeIfPresent([String: Bool].self, forKey: .selectableWallCoreDead) ?? [:]
         organicShowRepairs = try c.decodeIfPresent(Bool.self, forKey: .organicShowRepairs) ?? true
         organicLookPercent = try c.decodeIfPresent(Double.self, forKey: .organicLookPercent) ?? 50
         organicTransferTies = try c.decodeIfPresent(Bool.self, forKey: .organicTransferTies) ?? true
@@ -2145,8 +2148,8 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         try c.encode(organicLookCellsAcross, forKey: .organicLookCellsAcross)
         if !organicShowRepairs { try c.encode(organicShowRepairs, forKey: .organicShowRepairs) }
         if organicLookPercent != 50 { try c.encode(organicLookPercent, forKey: .organicLookPercent) }
-        if !selectableWallStressFraction.isEmpty {
-            try c.encode(selectableWallStressFraction, forKey: .selectableWallStressFraction)
+        if !selectableWallCoreDead.isEmpty {
+            try c.encode(selectableWallCoreDead, forKey: .selectableWallCoreDead)
         }
         try c.encodeIfPresent(organicForecast, forKey: .organicForecast)
         try c.encode(organicShapeFitOnly, forKey: .organicShapeFitOnly)

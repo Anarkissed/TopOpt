@@ -70,8 +70,8 @@ public struct LatticeDrawerRow: Equatable, Sendable {
     public let value: String
     /// ★ §4b — anything but `.fact` is a control. Everything else is a FACT.
     public let kind: Kind
-    /// ★ A control that must not act (2026-09-05): the Foci row on a wall the bake
-    /// found LOADED — shown greyed, taps ignored.
+    /// ★ A control that must not act (2026-09-05): the Foci row on a wall core found to
+    /// CARRY LOAD (its verdict, since 2026-09-29) — shown greyed, taps ignored.
     public var disabled: Bool = false
 
     /// The unit the keypad shows for this row — and the unit is part of the
@@ -183,11 +183,12 @@ public struct LatticeRegionDrawer: Equatable, Sendable {
                             // lattice is organic, the stage Aesthetic and synthetic
                             // stresses are on — every other drawer is unchanged.
                             syntheticFoci: String? = nil,
-                            // ★ Greyed on a LOADED wall — foci are never allowed there.
+                            // ★ Greyed on a wall core found to carry load — foci are
+                            // never allowed there.
                             fociDisabled: Bool = false,
-                            // ★ The last bake's verdict on the wall ("unloaded ·
-                            // 3.5% of peak"), a FACT row under Foci; nil until a
-                            // bake has measured it.
+                            // ★ Core's verdict on the wall in plain words ("Carries
+                            // load" / "Barely loaded — a made-up load can be added"),
+                            // a FACT row under Foci; nil until a bake has asked core.
                             wallStress: String? = nil) -> LatticeRegionDrawer {
         guard latticeReachesTheRun else {
             return LatticeRegionDrawer(

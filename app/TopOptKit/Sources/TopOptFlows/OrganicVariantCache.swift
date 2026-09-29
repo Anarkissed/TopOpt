@@ -24,7 +24,13 @@ public enum OrganicVariantCache {
     /// three change the geometry core emits, so every variant baked before them
     /// describes a lattice this build no longer draws. The key cannot detect that on its
     /// own (they are not picks), so the version retires them.
-    public static let layoutVersion = 5
+    /// ★ 6 (2026-09-29, core #358 follow-up): the bridge now sets `bead_is_stated`, so
+    /// a STATED strut width reaches the trace uncalibrated (r = stated/2, not k·stated/2)
+    /// — and node_merge, clipping and the legs all key on the radius, so every stated-
+    /// width variant changed geometry. The key already carries `strut=`, but a cube cached
+    /// by the previous build on this same core fingerprint would still be served. The
+    /// preview's synthesis also moved to the run's own call (ruling C).
+    public static let layoutVersion = 6
 
     /// The cache key for a sample's topology picks on a named field.
     public static func key(picks: OrganicSampleCube.Picks, fieldIdentity: String) -> String {

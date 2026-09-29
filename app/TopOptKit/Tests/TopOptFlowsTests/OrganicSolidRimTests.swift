@@ -8,8 +8,9 @@ import TopOptKit
 /// Core's grade-to-solid for a TRACED lattice is exactly one thing: the rim.
 /// `grade_lattice`'s cells-per-member refusal — the rule that turns an octet voxel
 /// solid — is explicitly skipped for organic, and organic's own spacing floors RAISE
-/// the separation rather than solidifying anything. So `apply_organic_solid_rim` is the
-/// whole of it, and this pins the mirror against core's arithmetic.
+/// the separation rather than solidifying anything. So the rim band
+/// (`organic_solid_rim_band`, run_job.cpp) is the whole of it, and this pins the mirror
+/// against core's arithmetic.
 final class OrganicSolidRimTests: XCTestCase {
 
     /// A slab of candidates inside a solid block, one region, normal +Y.
@@ -71,8 +72,8 @@ final class OrganicSolidRimTests: XCTestCase {
     /// A voxel whose only non-lattice neighbour is AIR is on the open face, not a wall.
     /// ★★★ REVERSED ON HIS INSTRUCTION, 2026-09-08: "Get the rim on ALL outlined
     /// faces." This used to assert the opposite — that an edge whose neighbour is AIR
-    /// takes no rim, which is core's own rule in `apply_organic_solid_rim` and which I
-    /// had mirrored. It is right for a side cut into a wall and wrong for every edge
+    /// takes no rim, which was core's own rule in its old rim pass and which I had
+    /// mirrored (core's `organic_solid_rim_band` now seeds on air too). It is right for a side cut into a wall and wrong for every edge
     /// where the region runs out at the part's own surface: that edge is as much the
     /// outline as the sides are, the lattice ends there, and it is exactly where he
     /// expects a wall. His bottom edge was getting nothing.

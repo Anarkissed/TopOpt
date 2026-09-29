@@ -280,10 +280,11 @@ public enum LatticeRegionEmission {
                                // (maintainer, 2026-08-17). Empty ⇒ 0 ⇒ the slab
                                // is exactly the face, byte-identical to before.
                                selectableExpandMM: [String: Double] = [:],
-                               // ★ THE UNLOADED WALLS (2026-09-05): selectable key →
-                               // foci count, ONLY for walls the bake measured as
-                               // unloaded with the switch on (ProjectModel resolves).
-                               syntheticWalls: [String: Int] = [:],
+                               // ★ THE SYNTHETIC-STRESS FLAGS (ruling 2, 2026-09-29): with the
+                               // switch on, EVERY include wall is flagged with its foci count
+                               // and core decides on the run's own tensor which are dead;
+                               // nil ⇒ none flagged (ProjectModel resolves the gates).
+                               synthetic: OrganicSyntheticStress.SyntheticFlags? = nil,
                                // ★★★ A GROUP'S FACE REGIONS (his 2026-09-22 00:31: "Face 23
                                // & like it" carried an include role and a depth and reached
                                // nothing — the emission walked `g.faces` only). A region
@@ -324,7 +325,10 @@ public enum LatticeRegionEmission {
             }
         }
         for (p, d) in includePrimitives {
-            if let s = spec(for: p, role: .include, depthMM: d) { out.append(s) }
+            if var s = spec(for: p, role: .include, depthMM: d) {
+                if let sf = synthetic { s.syntheticStress = true; s.syntheticFoci = sf.foci(for: nil) }
+                out.append(s)
+            }
         }
         for g in groups {
             guard let groupRole = roles[g.id] else { continue }
@@ -358,7 +362,7 @@ public enum LatticeRegionEmission {
                         for: g.id, role: role, densities: groupDensities,
                         stated: selectableDensity[LatticeSelectableRef.primitive(p.id).key])
                     s.selectableKey = ref.key
-                    if let n = syntheticWalls[ref.key] { s.syntheticStress = true; s.syntheticFoci = n }
+                    if role == .include, let sf = synthetic { s.syntheticStress = true; s.syntheticFoci = sf.foci(for: ref.key) }
                     out.append(s)
                 }
             }
@@ -380,7 +384,7 @@ public enum LatticeRegionEmission {
                         stated: selectableDensity[ref.key])
                     s.selectableKey = ref.key
                     s.rawFaceID = f
-                    if let n = syntheticWalls[ref.key] { s.syntheticStress = true; s.syntheticFoci = n }
+                    if role == .include, let sf = synthetic { s.syntheticStress = true; s.syntheticFoci = sf.foci(for: ref.key) }
                     out.append(s); emitted += 1
                 }
                 if emitted == 0 { skipped += 1 }
@@ -405,7 +409,7 @@ public enum LatticeRegionEmission {
                             stated: selectableDensity[ref.key])
                         s.selectableKey = ref.key
                         s.rawFaceID = f
-                        if let n = syntheticWalls[ref.key] { s.syntheticStress = true; s.syntheticFoci = n }
+                        if role == .include, let sf = synthetic { s.syntheticStress = true; s.syntheticFoci = sf.foci(for: ref.key) }
                         out.append(s); emitted += 1
                     }
                     if emitted == 0 { skipped += 1 }
