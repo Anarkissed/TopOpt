@@ -22,8 +22,8 @@ The heel check shows the honest answer: a pad drawn for 30 kg spread evenly is s
 past the tested strain under a 300 N heel, and the map says "no number" there instead
 of inventing one.
 
-**Status: core done (140/140); pushed as a DRAFT PR on the maintainer's instruction
-(2026-09-28).** The app-macos build failure is INHERITED, not mine:
+**Status (2026-09-29): synced onto #354's app fix; the app builds.** Core done, review
+round 1 done. History: the app-macos build failure was INHERITED, not mine:
 `bridge.cpp:2708` (#354) reads `OrganicGenStats::filleted_spans`, which #358's `5846c476`
 removed. The maintainer ruled that #354 fixes it (the app stops reading the field; no stub in
 core), and the #354 agent is doing it. On "sync" I run SYNC → SYNC CHECK → push → FULL CHECK.
@@ -38,24 +38,21 @@ loaders, lookup (inverse and forward), pen curves, face frames and stacks, squis
 → density field, stamps, the Auto recommender, a `flexible` job block and a CLI.
 
 ## Synced commits
+
+**Latest sync (2026-09-29, pushed head `2405ddec`):**
+
 | branch | last synced commit |
 |---|---|
-| #354 `claude/topopt-holes-quilting-298212` | `ec2af861` Remove committed Xcode build output; ignore app/.build-app |
-| #358 `claude/raster-receipt-fields` | `daa764c4` The outline beam reads the RUN's voxel, not the test's: the three holds finished |
-| `main` | `ce28b6fa` Merge pull request #359 (flexible setup) |
+| #354 `claude/topopt-holes-quilting-298212` | `026904dd` Core #358, the app side: the overhang flare is gone — slot 47 retired … |
+| #358 `claude/raster-receipt-fields` | `8414af47` Every symbol and key #358 removed, grepped against the app … |
+| `main` | `f932266f` Merge pull request #360 (lattice types setup) |
 
-Setup checks: `ec2af861` is an ancestor of #354 (CURRENT); #354 carries no build output;
-both merges clean (`b378ce52` Sync: merge #358, `d615a55c` Sync: merge #354). Re-fetched
-before the handoff: nothing moved. `git log --oneline -5` after setup:
-```
-d615a55c Sync: merge #354
-b378ce52 Sync: merge #358
-ec2af861 Remove committed Xcode build output; ignore app/.build-app
-08cb757c Handoff: the octet review round
-da01c9b8 Octet review fixes (wf_3f483e40-fdc, 9 confirmed): ...
-```
-This branch: `05ee339e` (C1), `8759d85d` (review fixes), `62df7435` (wording), plus the
-handoff commit. **Not pushed; no PR opened** — see Blocked.
+All three merges were clean, no conflicts (`6171a6af` #358, `3d0c1e92` #354, `2405ddec` main).
+#354 carries no build output. SYNC CHECK on `2405ddec`: core `ctest -E cli_demo` **139/139**,
+`build_core.sh` exit 0, `swift build --package-path app/TopOptKit` **Build complete!**
+
+First sync (2026-09-28): #354 `ec2af861`, #358 `daa764c4`, main `ce28b6fa`; `git log --oneline -5`
+after setup: `d615a55c` Sync: merge #354 · `b378ce52` Sync: merge #358 · `ec2af861` · `08cb757c` · `da01c9b8`.
 
 ## What I did
 
@@ -456,9 +453,12 @@ string — never an exception, never a guessed number.
 
 - There is no Flexible box in docs/ROADMAP.md, so none was checked.
 
-## Blocked
+## Blocked — RESOLVED 2026-09-29
 
-**The synced base's app does not build.** I stopped before pushing. Maintainer ruling,
+#354's `026904dd` retired bridge slot 47 (merged #358); synced at `2405ddec`, the app package
+builds. Kept below as the record.
+
+**The synced base's app did not build.** I stopped before pushing. Maintainer ruling,
 2026-09-28: the diagnosis is right; the fix belongs on #354 (the app stops reading the
 removed field; no zero stub in core), and the #354 agent is making it. Push now as a draft
 for backup and review; the app-macos failure is inherited, not mine.
