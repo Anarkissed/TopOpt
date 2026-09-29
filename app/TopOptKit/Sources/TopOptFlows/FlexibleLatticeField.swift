@@ -32,7 +32,8 @@
 //               n = max(|q.x|, |0.5 q.x + 0.8660254 q.y|, |−0.5 q.x + 0.8660254 q.y|)
 //               wall = |d/2 − n| − t/2           (mod(x, y) = x − y·floor(x/y))
 //   LATTICE:    F = max(wall, dRegion, dPart, dSkin)          — the preview draws F
-//   EXPORT:     S = min(max(dPart, −min(dRegion, dSkin)), F)  — solid body ∪ lattice
+//   EXPORT:     open = max(dRegion, dSkin)                     — ≤ 0 where lattice may be
+//               S = min(max(dPart, −open), F)                  — solid body ∪ lattice
 //               (the solid outside the lattice region or inside the skin, plus the walls)
 //
 // ★ GRADING. Walls stay whole beads (R1); the gyroid's cell follows ρ continuously
@@ -148,7 +149,8 @@ public enum FlexibleLatticeField {
     /// the walls. Negative inside.
     public static func solid(at p: SIMD3<Float>, _ f: FlexibleLatticeInputs) -> Float {
         let dPart = f.partSDF.sample(p)
-        let open = Swift.min(dRegion(p, f), dSkin(p, f))   // ≤ 0 where the lattice may be
+        // ≤ 0 where the lattice may be: inside the region AND deeper than the skin
+        let open = Swift.max(dRegion(p, f), dSkin(p, f))
         return Swift.min(Swift.max(dPart, -open), lattice(at: p, f))
     }
 }

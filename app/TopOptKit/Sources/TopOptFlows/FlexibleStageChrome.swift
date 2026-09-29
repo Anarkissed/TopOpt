@@ -24,6 +24,7 @@ public enum FlexibleStageStyle {
         + "far off it might be."
 
     public static var accent: Color { DS.Color.accentGreen.color }
+    public static var accentToken: RGBA { DS.Color.accentGreen }
     /// The modal's luminance rule (LatticeStageModeStyle.onAccent), on the green token.
     public static var onAccent: Color {
         let (r, g, b) = (48.0 / 255, 209.0 / 255, 88.0 / 255)   // #30D158

@@ -34,6 +34,12 @@ public struct FlexibleStagePage: View {
     @State private var dents: [Float]?
     @State private var dentScale: Float = 0
     @State private var padTarget: String?
+    // the generated lattice: squish loop phase (0…1, 30 fps, the Results flex pattern)
+    @State private var squishPhase: Double = 0
+    @State private var showLattice = true
+    @State private var showExport = false
+    private let ticker = Timer.publish(every: 1.0 / 30.0, on: .main, in: .common).autoconnect()
+    static let squishPeriodS = 2.4
 
     public init(project: ProjectModel, materialsPath: String?, stampsPath: String?,
                 persist: @escaping () -> Void, onExit: @escaping () -> Void) {
@@ -55,6 +61,8 @@ public struct FlexibleStagePage: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
                     .padding(.leading, PageChrome.edge)
                     .padding(.bottom, PageChrome.edge)
+                latticeControls
+                if showExport, let g = model.lattice { exportSheet(g) }
                 if model.tab == .squish, model.step == .view3D || model.checkStampShown != nil {
                     FlexibleLegend(model: model)
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
@@ -67,6 +75,17 @@ public struct FlexibleStagePage: View {
             model.openScene()
         }
         .onChange(of: model.geometry.count) { _ in rebuildOverlay() }
+        .onReceive(ticker) { _ in
+            // ★ THE SQUISH, ON REPEAT (maintainer, 2026-09-29): only while a lattice is shown
+            guard model.lattice != nil, showLattice else { return }
+            squishPhase = (squishPhase + (1.0 / 30.0) / Self.squishPeriodS).truncatingRemainder(dividingBy: 1)
+            refreshChannels()
+        }
+        .onChange(of: model.lattice != nil) { has in
+            // a fresh lattice is shown squishing what can be built — the densities it was made from
+            if has { model.step = .view3D; model.showBuildable = true; model.tab = .squish; showLattice = true }
+            refreshChannels()
+        }
         .onChange(of: model.stacks.count) { _ in rebuildOverlay() }
         .onReceive(model.objectWillChange.debounce(for: .milliseconds(16), scheduler: RunLoop.main)) { _ in
             refreshChannels()
@@ -78,6 +97,13 @@ public struct FlexibleStagePage: View {
 
     /// The part's opacity while a dent is shown; the dented map itself stays opaque.
     static let dentBodyAlpha: Float = 0.3
+    /// With the lattice shown the body is a ghost, so the walls read through it.
+    static let latticeBodyAlpha: Float = 0.18
+
+    /// 0 → 1 → 0 over one period (FlexAnimation's cosine ease, Results screen).
+    private var squishAmplitude: Double {
+        model.lattice != nil && showLattice ? 0.5 - 0.5 * cos(2 * .pi * squishPhase) : 1
+    }
 
     /// The same settle the workspace draws with (gravity → down), so the part sits as it
     /// does on every other stage.
@@ -110,7 +136,12 @@ public struct FlexibleStagePage: View {
                 flexDisplacements: dents, flexScale: dentScale,
                 // ★ THE DENT READS THROUGH THE PART (maintainer, 2026-09-29): while a dent is
                 // shown the body drops to 30 % and the dented map stays at 100 %.
-                bodyAlpha: dents != nil ? Self.dentBodyAlpha : 1)
+                bodyAlpha: model.lattice != nil && showLattice ? Self.latticeBodyAlpha
+                    : (dents != nil ? Self.dentBodyAlpha : 1))
+            if let g = model.lattice, showLattice {
+                FlexibleLatticeLayer(lattice: g, proj: proj, squish: Float(squishAmplitude))
+                    .allowsHitTesting(false)
+            }
             FlexibleStageOverlays(model: model, proj: proj)
         }
         .coordinateSpace(name: FlexibleStageSpace.name)
@@ -197,11 +228,88 @@ public struct FlexibleStagePage: View {
             }
             dents = overlay.displacements(depths: depths, stacks: model.stacks,
                                           partUVT: model.geometry.mapValues(\.partUVT))
-            dentScale = Float(shown.exaggeration)
+            dentScale = Float(shown.exaggeration * squishAmplitude)
         } else {
             dents = nil
             dentScale = 0
         }
+    }
+
+    // MARK: generate + export (FlexibleLatticeGeneration.swift, FlexibleExportSheet.swift)
+
+    /// Bottom right, where the Settings wizard keeps "Refresh sample": Generate lattice,
+    /// then Export and a show/hide for the lattice once it exists.
+    private var latticeControls: some View {
+        VStack {
+            Spacer()
+            HStack(alignment: .bottom) {
+                Spacer()
+                VStack(alignment: .trailing, spacing: DS.Space.s) {
+                    if let why = model.latticeRefusal, model.lattice == nil {
+                        Text(why).font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(DS.Color.textSecondary.color)
+                            .multilineTextAlignment(.trailing)
+                            .frame(maxWidth: 300, alignment: .trailing)
+                            .padding(.horizontal, DS.Space.m).padding(.vertical, DS.Space.s)
+                            .background(Capsule().fill(DS.Color.chipSolid.color))
+                    }
+                    if model.latticeIsStale {
+                        Text("Settings changed since this lattice was made — generate again.")
+                            .font(.system(size: 12, weight: .medium)).foregroundStyle(DS.Color.warning.color)
+                            .padding(.horizontal, DS.Space.m).padding(.vertical, DS.Space.s)
+                            .background(Capsule().fill(DS.Color.chipSolid.color))
+                    }
+                    if let e = model.latticeError {
+                        Text(e).font(.system(size: 12, weight: .medium)).foregroundStyle(DS.Color.danger.color)
+                            .frame(maxWidth: 320, alignment: .trailing)
+                    }
+                    HStack(spacing: DS.Space.s) {
+                        if model.lattice != nil {
+                            pill(showLattice ? "Hide lattice" : "Show lattice", icon: "square.stack.3d.up",
+                                 fill: DS.Color.chipSolid, id: "flexible-lattice-toggle") { showLattice.toggle(); refreshChannels() }
+                            pill("Export", icon: "square.and.arrow.up", fill: DS.Color.accent, id: "flexible-export") {
+                                showExport = true
+                            }
+                        }
+                        pill(model.latticeBuilding ? "Generating…" : (model.lattice == nil ? "Generate lattice" : "Generate again"),
+                             icon: "cube.transparent",
+                             fill: model.latticeRefusal == nil && !model.latticeBuilding ? FlexibleStageStyle.accentToken : DS.Color.textTertiary,
+                             id: "flexible-generate") {
+                            model.generateLattice()
+                        }
+                        .disabled(model.latticeRefusal != nil || model.latticeBuilding)
+                    }
+                }
+            }
+            .padding(PageChrome.edge)
+        }
+    }
+
+    private func pill(_ title: String, icon: String, fill: RGBA, id: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: DS.Space.s) {
+                Image(systemName: icon).font(.system(size: 15, weight: .bold))
+                Text(title).dsStyle(DS.TypeScale.bodyStrong).fontWeight(.semibold)
+            }
+            .foregroundStyle(DS.Color.textPrimary.color)
+            .padding(.vertical, 12).padding(.horizontal, DS.Space.xl2)
+            .background(Capsule().fill(fill.color))
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier(id)
+    }
+
+    @ViewBuilder private func exportSheet(_ g: FlexibleGeneratedLattice) -> some View {
+        let name = (project.name.isEmpty ? "part" : project.name)
+            .replacingOccurrences(of: "/", with: "-") + "-flexible-\(g.topology).stl"
+        FlexibleExportSheet(
+            wallMM: Double(g.inputs.wallMM), fileName: name,
+            summary: "\(g.topology.capitalized) · \(Int(g.tempC)) °C · \(model.material?.displayName ?? "")",
+            estimate: { h in FlexibleLatticeExporting.estimate(g.inputs, hMM: h) },
+            export: { h, url, progress in try await FlexibleLatticeExporting.export(g.inputs, hMM: h, to: url, progress: progress) },
+            onClose: { showExport = false })
+        .transition(.opacity)
+        .zIndex(20)
     }
 
     // MARK: chrome
