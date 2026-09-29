@@ -33,6 +33,8 @@ public struct FlexibleStagePage: View {
     @State private var tints: [Float]?
     @State private var dents: [Float]?
     @State private var dentScale: Float = 0
+    /// The shown dent's exaggeration, kept so the loop only rescales (FlexibleShownValues).
+    @State private var dentExaggeration: Double = 0
     @State private var padTarget: String?
     // the generated lattice: squish loop phase (0…1, 30 fps, the Results flex pattern)
     @State private var squishPhase: Double = 0
@@ -79,7 +81,9 @@ public struct FlexibleStagePage: View {
             // ★ THE SQUISH, ON REPEAT (maintainer, 2026-09-29): only while a lattice is shown
             guard model.lattice != nil, showLattice else { return }
             squishPhase = (squishPhase + (1.0 / 30.0) / Self.squishPeriodS).truncatingRemainder(dividingBy: 1)
-            refreshChannels()
+            // ★ only the scale moves: the displacements and colours are rebuilt when the
+            // design changes, never per frame (a whole-mesh rebuild at 30 fps on the M2 stand)
+            if dents != nil { dentScale = Float(dentExaggeration * squishAmplitude) }
         }
         .onChange(of: model.lattice != nil) { has in
             // a fresh lattice is shown squishing what can be built — the densities it was made from
@@ -228,10 +232,12 @@ public struct FlexibleStagePage: View {
             }
             dents = overlay.displacements(depths: depths, stacks: model.stacks,
                                           partUVT: model.geometry.mapValues(\.partUVT))
+            dentExaggeration = shown.exaggeration
             dentScale = Float(shown.exaggeration * squishAmplitude)
         } else {
             dents = nil
             dentScale = 0
+            dentExaggeration = 0
         }
     }
 

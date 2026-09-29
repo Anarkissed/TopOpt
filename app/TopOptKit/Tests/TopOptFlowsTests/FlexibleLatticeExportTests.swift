@@ -9,7 +9,7 @@
 //       welds CLOSED (every edge on exactly two facets), winds OUTWARD, and holds the
 //       volume the field defines (Monte-Carlo over `FlexibleLatticeField.solid`);
 //   (c) a cancelled export leaves no file behind;
-//   (d) the exporter never holds more than two sample layers.
+//   (d) the exporter REPORTS holding no more than two sample layers (self-reported).
 // Plus the solid's own semantics (skin and body are SOLID — the `min` the spec first
 // shipped made both air) and determinism (same inputs ⇒ byte-identical file).
 import XCTest
@@ -36,7 +36,9 @@ final class FlexibleLatticeExportTests: XCTestCase {
     /// the SDF reaches past the export's 2h pad. `latticeBelowX` limits the lattice
     /// region (mask 1) to x < that value.
     static func box(_ topology: FlexibleLatticeInputs.Topology,
-                    latticeBelowX: Float = .infinity) -> FlexibleLatticeInputs {
+                    latticeBelowX: Float = .infinity,
+                    rhoAt: (SIMD3<Float>) -> Float = { _ in 0.25 },
+                    buildDir: SIMD3<Float> = SIMD3(0, 0, 1)) -> FlexibleLatticeInputs {
         let c0 = SIMD3<Float>(-3, -3, -3)
         let nx = 37, ny = 37, nz = 19
         var sdf = [Float](), dist = [Float](), mask = [Float](), rho = [Float]()
@@ -48,7 +50,7 @@ final class FlexibleLatticeExportTests: XCTestCase {
                     sdf.append(d)
                     dist.append(abs(d))          // skinDist: distance to the box surface
                     mask.append(p.x < latticeBelowX ? 1 : 0)
-                    rho.append(0.25)
+                    rho.append(rhoAt(p))
                 }
             }
         }
@@ -56,7 +58,7 @@ final class FlexibleLatticeExportTests: XCTestCase {
         let t = wallMM
         return FlexibleLatticeInputs(
             topology: topology, wallMM: t, lMinMM: 3.0915 * t / 0.9, lMaxMM: 3.0915 * t / 0.05,
-            honeycombCellMM: 2 * t / 0.25, buildDir: SIMD3(0, 0, 1),
+            honeycombCellMM: 2 * t / 0.25, buildDir: simd_normalize(buildDir),
             skinMM: FlexibleLatticeField.defaultSkinMM,
             rho: grid(rho), mask: grid(mask), partSDF: grid(sdf), skinDist: grid(dist),
             boundsMin: .zero, boundsMax: boxMax)
@@ -117,6 +119,45 @@ final class FlexibleLatticeExportTests: XCTestCase {
             XCTAssertGreaterThan(inside, 40, "\(topo): the points must reach the solid")
             XCTAssertGreaterThan(outside, 40)
             XCTAssertGreaterThan(dDrifted, 1e-3, "\(topo): the control must go RED")
+        }
+    }
+
+    /// ★ BIT-EXACT on a field that exercises every branch (exporter verifier, 2026-09-29):
+    /// the test above used ONE ρ (so one k, where both roundings of π happened to agree),
+    /// an axis build direction (where 1/sqrt and simd_normalize agree) and a full mask.
+    /// Here ρ is graded from 0.01 to 1.0 (past both clamps), the region has an edge, and
+    /// the build direction is tilted both ways about the |b.x| < 0.9 switch.
+    func testCppFieldIsBitIdenticalOnAGradedTiltedField() {
+        let dirs: [SIMD3<Float>] = [SIMD3(0, 0, 1), SIMD3(0.95, 0.1, 0.2), SIMD3(0.3, -0.5, 0.8), SIMD3(-0.2, 0.9, 0.4)]
+        for topo in [FlexibleLatticeInputs.Topology.gyroid, .honeycomb] {
+            for dir in (topo == .gyroid ? [dirs[0]] : dirs) {
+                let f = Self.box(topo, latticeBelowX: 17.5, rhoAt: { p in 0.01 + 0.99 * Swift.min(Swift.max(p.x / 30, 0), 1) },
+                                 buildDir: dir)
+                var rng = SplitMix(state: 0xB17E + UInt64(topo.rawValue) * 31 + UInt64(abs(dir.x * 100)))
+                let pts = (0..<4000).map { _ in
+                    SIMD3<Float>(Float.random(in: -4...34, using: &rng), Float.random(in: -4...34, using: &rng),
+                                 Float.random(in: -4...16, using: &rng))
+                }
+                let cppL = FlexibleLatticeExport.values(f, at: pts, field: .lattice)
+                let cppS = FlexibleLatticeExport.values(f, at: pts, field: .solid)
+                guard cppL.count == pts.count, cppS.count == pts.count else { XCTFail("no C++ values"); continue }
+                var diffL = 0, diffS = 0
+                for (n, p) in pts.enumerated() {
+                    if FlexibleLatticeField.lattice(at: p, f).bitPattern != cppL[n].bitPattern { diffL += 1 }
+                    if FlexibleLatticeField.solid(at: p, f).bitPattern != cppS[n].bitPattern { diffS += 1 }
+                }
+                // ★ CONTROL: a wall ONE ULP thicker changes values at these points — the
+                // bitwise comparison can see a one-ulp change in the field's inputs.
+                var ulp = f
+                ulp.wallMM = f.wallMM.nextUp
+                let cppU = FlexibleLatticeExport.values(ulp, at: pts, field: .lattice)
+                let moved = zip(cppU, cppL).filter { $0.bitPattern != $1.bitPattern }.count
+                print("[FlexExport] bit-exact \(topo) dir \(dir): \(pts.count) points, lattice differs at \(diffL), "
+                      + "solid at \(diffS); control (wall +1 ulp) moved \(moved)")
+                XCTAssertEqual(diffL, 0, "\(topo) \(dir): the C++ lattice must be the Swift definition, bit for bit")
+                XCTAssertEqual(diffS, 0, "\(topo) \(dir): the C++ solid must be the Swift definition, bit for bit")
+                XCTAssertGreaterThan(moved, 100, "control: a one-ulp wall must show")
+            }
         }
     }
 
@@ -189,6 +230,13 @@ final class FlexibleLatticeExportTests: XCTestCase {
             XCTAssertTrue(watertight, "\(topo): the export must weld closed")
             // ★ CONTROL: one facet fewer is NOT closed — the check can see a hole.
             XCTAssertFalse(MeshExport.isWatertight(vertices: wv, indices: Array(wi.dropLast(3))))
+            // Consistently wound: every directed edge (a→b) is matched by exactly one (b→a).
+            // (isWatertight counts undirected edges; one flipped facet passes it — verifier.)
+            XCTAssertEqual(Self.unpairedDirectedEdges(wi), 0, "\(topo): every edge must be wound once each way")
+            var flipped = wi
+            flipped.swapAt(1, 2)
+            XCTAssertTrue(MeshExport.isWatertight(vertices: wv, indices: flipped), "control: undirected check is blind to it")
+            XCTAssertGreaterThan(Self.unpairedDirectedEdges(flipped), 0, "control: one flipped facet must show")
 
             // Outward: the signed volume is positive, and the stored normals are the winding's.
             let signed = Self.signedVolume(verts, idx)
@@ -283,6 +331,10 @@ final class FlexibleLatticeExportTests: XCTestCase {
     }
 
     // MARK: - (d) memory
+    // ★ SELF-REPORTED (verifier, 2026-09-29): this reads the exporter's own count of its two
+    // sample layers (now re-noted after every slab). It cannot see a copy of the grid held
+    // anywhere else; a 370 k-sample grid (1.5 MB) is below what a process-footprint read
+    // resolves in a test, so no such check is claimed.
 
     func testExporterHoldsTwoSampleLayersNeverTheGrid() throws {
         let f = Self.box(.honeycomb)
@@ -349,6 +401,28 @@ final class FlexibleLatticeExportTests: XCTestCase {
             }
         }
         return (out, oi)
+    }
+
+    /// Directed edges with no exactly-one opposite partner (0 on a consistently wound
+    /// closed mesh).
+    static func unpairedDirectedEdges(_ idx: [Int32]) -> Int {
+        var count: [UInt64: Int] = [:]
+        count.reserveCapacity(idx.count)
+        func key(_ a: Int32, _ b: Int32) -> UInt64 {
+            (UInt64(UInt32(bitPattern: a)) << 32) | UInt64(UInt32(bitPattern: b))
+        }
+        for t in stride(from: 0, to: idx.count, by: 3) {
+            let a = idx[t], b = idx[t + 1], c = idx[t + 2]
+            count[key(a, b), default: 0] += 1
+            count[key(b, c), default: 0] += 1
+            count[key(c, a), default: 0] += 1
+        }
+        var bad = 0
+        for (k, n) in count {
+            let a = Int32(bitPattern: UInt32(k >> 32)), b = Int32(bitPattern: UInt32(k & 0xFFFF_FFFF))
+            if n != 1 || count[key(b, a)] != 1 { bad += 1 }
+        }
+        return bad
     }
 
     static func signedVolume(_ v: [Float], _ idx: [Int32]) -> Double {

@@ -28,6 +28,9 @@
 #include <string>
 #include <utility>
 #include <vector>
+#if defined(__APPLE__)
+#include <simd/simd.h>
+#endif
 
 #if defined(__APPLE__)
 #include <dispatch/dispatch.h>
@@ -98,7 +101,10 @@ float wall(const FlexLatticeGrids& f, float px, float py, float pz) {
   if (f.topology == 0) {  // gyroid
     const float rho = smin(smax(sample(f.rho, px, py, pz), 0.05f), 0.9f);
     const float L = smin(smax(3.0915f * t / rho, f.l_min_mm), f.l_max_mm);
-    const float k = 2 * static_cast<float>(M_PI) / L;  // Float.pi == (float)M_PI
+    // ★ Swift's Float.pi is π rounded TOWARD ZERO (0x40490FDA); (float)M_PI rounds to
+    // nearest (…FDB). One ulp in k moved 8 968 of 20 000 graded samples by up to 2.3 µm
+    // (exporter verifier, 2026-09-29), so the constant is Swift's, spelled out.
+    const float k = 2 * 0x1.921fb4p1f / L;
     const float qx = px * k, qy = py * k, qz = pz * k;
     const float sx = std::sin(qx), sy = std::sin(qy), sz = std::sin(qz);
     const float cx = std::cos(qx), cy = std::cos(qy), cz = std::cos(qz);
@@ -109,18 +115,35 @@ float wall(const FlexLatticeGrids& f, float px, float py, float pz) {
     return std::fabs(g) / smax(glen, 0.05f * k) - 0.5f * t;
   }
   // honeycomb
+  // ★ Swift normalises with simd_normalize (simd_precise_rsqrt), which can round
+  // differently from 1/sqrt on a tilted build direction; on Apple the port uses the same
+  // call so the two are bit-identical (exporter verifier, 2026-09-29).
+#if defined(__APPLE__)
+  const simd_float3 bn = simd_normalize(simd_make_float3(f.build_dir[0], f.build_dir[1], f.build_dir[2]));
+  const float bx = bn.x, by = bn.y, bz = bn.z;
+#else
   const float bl = std::sqrt(f.build_dir[0] * f.build_dir[0] + f.build_dir[1] * f.build_dir[1] +
                              f.build_dir[2] * f.build_dir[2]);
   const float bs = 1.0f / bl;
   const float bx = f.build_dir[0] * bs, by = f.build_dir[1] * bs, bz = f.build_dir[2] * bs;
+#endif
   const bool use_x = std::fabs(bx) < 0.9f;
   const float rx = use_x ? 1.0f : 0.0f, ry = use_x ? 0.0f : 1.0f, rz = 0.0f;
   // e1 = normalize(b × ref), e2 = b × e1
   float e1x = by * rz - bz * ry, e1y = bz * rx - bx * rz, e1z = bx * ry - by * rx;
+#if defined(__APPLE__)
+  {
+    const simd_float3 e1 = simd_normalize(simd_make_float3(e1x, e1y, e1z));
+    e1x = e1.x;
+    e1y = e1.y;
+    e1z = e1.z;
+  }
+#else
   const float e1s = 1.0f / std::sqrt(e1x * e1x + e1y * e1y + e1z * e1z);
   e1x *= e1s;
   e1y *= e1s;
   e1z *= e1s;
+#endif
   const float e2x = by * e1z - bz * e1y, e2y = bz * e1x - bx * e1z, e2z = bx * e1y - by * e1x;
   const float vx = px * e1x + py * e1y + pz * e1z;
   const float vy = px * e2x + py * e2y + pz * e2z;
@@ -628,6 +651,7 @@ class LatticeExporter {
     if (!file_) throw std::runtime_error("the export is closed");
     for (int32_t s = 0; s < slabs && done_ < slabs_total(); ++s) {
       fill(hi_, done_ + 1);
+      note_peak();
       march(done_);
       std::swap(lo_, hi_);
       ++done_;
