@@ -50,9 +50,13 @@ Palm: 6,056 columns pressed, max dent 1.40 mm, all inside the data. Heel: 3,600
 columns pressed, **3,120 squish past the tested strain** (no number: dark red on the
 map), 92 extrapolated. A pad drawn for 30 kg spread evenly does not survive a heel;
 the map says so instead of inventing a depth.
-Smoothing finding: around the thumb's edge the buildable depth overshoots the target by
-up to 2.4 mm (168 columns into 0.20–0.25 strain). One cell of smoothing cannot follow a
-4× pressure step. This is the R14 heuristic as specified; C2's lattice replaces it.
+Smoothing finding, and the recommender's verdict: every TARGET column is reachable, but
+around the thumb's edge one cell of smoothing cannot follow a 4× pressure step — the
+buildable depth overshoots the target by up to 2.4 mm, 168 columns land in 0.20–0.25
+strain and **180 squish past the tested strain**. Auto therefore reports *nothing fits
+every face* (closest: gyroid at 220 °C) and names the face and the 180 columns. (Before
+the review fix it wrongly said "reachable" here.) This is the R14 heuristic as
+specified; C2's realised lattice replaces it.
 
 **(c) `c_block_top_and_side_handover`** — 100 × 100 × 60 mm block, top loaded
 (30 kg, edges soft, "either" mode, deepest 10 mm) and the +X side loaded (25 kg,

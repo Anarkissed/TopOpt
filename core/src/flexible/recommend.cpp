@@ -76,7 +76,10 @@ FaceFailure failure_of(const Stack& st, const FaceDesign& d, const Candidate& c)
            fmt(f.v_max_mm) + " mm" +
            (f.nearest_known ? "; nearest achievable there " + fmt(f.nearest_depth_min_mm) + "-" +
                                   fmt(f.nearest_depth_max_mm) + " mm"
-                            : "; the nearest achievable squish is itself past the data");
+            : (f.too_firm + f.too_soft + f.beyond_data) > 0
+                ? "; the nearest achievable squish is itself past the data"
+                : "; the drawn map is reachable column by column, but not once smoothed "
+                  "to what can be built");
   return f;
 }
 
