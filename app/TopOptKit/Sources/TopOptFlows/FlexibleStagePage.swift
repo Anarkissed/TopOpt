@@ -78,6 +78,7 @@ public struct FlexibleStagePage: View {
         .onAppear {
             if let b = project.viewerMesh?.bounds { camera.reframe(b) }
             model.openScene()
+            rebuildOverlay()
         }
         .onChange(of: model.geometry.count) { _ in rebuildOverlay() }
         .onReceive(ticker) { _ in
@@ -177,14 +178,7 @@ public struct FlexibleStagePage: View {
     }
 
     private func rebuildOverlay() {
-        guard let part = project.viewerMesh else { return }
-        let faces: [FlexibleOverlayFace] = model.loadedKeys.compactMap { k in
-            guard let st = model.stacks[k], let g = model.geometry[k] else { return nil }
-            let regions = model.regions
-            return FlexibleOverlayFace(key: k, faces: Set(regions.faces(of: k.region, mesh: part)),
-                                       cuts: regions.cuts(of: k.region), stack: st, centres: g.centres)
-        }
-        overlay = faces.isEmpty ? nil : FlexibleOverlayMesh.build(part: part, faces: faces)
+        overlay = FlexiblePageChannels.overlay(model: model)
         refreshChannels()
     }
 
@@ -213,7 +207,7 @@ public struct FlexibleStagePage: View {
             return out
         }
         guard let overlay else {
-            // no stacks yet: tint the part itself, per triangle
+            // no map and no sector yet: tint the part itself, per triangle (no cut crosses one)
             guard let mesh = project.viewerMesh else { tints = nil; dents = nil; dentScale = 0; return }
             let n = mesh.flat.vertexCount
             var out = [Float](repeating: 0, count: n * 8)

@@ -244,10 +244,51 @@ public enum FlexibleLatticeBuilder {
         public let description: String
     }
 
+    /// The part's SKINNED surface — every part of a face that keeps its skin (M15) — as
+    /// positions + indices for the skin's distance field. `allSkinned` when nothing is
+    /// skin-off (the part's own distance is reused then).
+    /// ★ ROUND 3, ITEM 2: a triangle a skin-off sector's cut crosses is CUT along it
+    /// (FlexibleFacePieces) and only its pieces outside the sector stay skinned — by
+    /// centroid, skin-off on 'top A' took the skin off half of 'top B' as well.
+    public static func skinnedTriangles(part: ViewerMesh, skinOffFaces: [(face: Int, cuts: [RegionCut])])
+        -> (positions: [Float], indices: [UInt32], allSkinned: Bool) {
+        let indices = part.indices
+        guard !skinOffFaces.isEmpty else { return (part.positions, indices, true) }
+        var positions = part.positions
+        var skinnedIdx: [UInt32] = []
+        skinnedIdx.reserveCapacity(indices.count)
+        var planes: [Int: [RegionCut]] = [:]
+        for s in skinOffFaces { for c in s.cuts { FlexibleFacePieces.add(c, to: &planes[s.face, default: []]) } }
+        let fids = part.faceIDs
+        func v(_ i: UInt32) -> SIMD3<Double> {
+            let b = Int(i) * 3
+            return SIMD3(Double(part.positions[b]), Double(part.positions[b + 1]), Double(part.positions[b + 2]))
+        }
+        var allSkinned = true
+        for t in 0..<(indices.count / 3) {
+            let fid = t < fids.count ? Int(fids[t]) : -1
+            let off = skinOffFaces.filter { $0.face == fid }
+            let i0 = indices[3 * t], i1 = indices[3 * t + 1], i2 = indices[3 * t + 2]
+            guard !off.isEmpty else { skinnedIdx += [i0, i1, i2]; continue }
+            allSkinned = false
+            if off.contains(where: { $0.cuts.isEmpty }) { continue }       // the whole face
+            for piece in FlexibleFacePieces.pieces(v(i0), v(i1), v(i2), planes: planes[fid] ?? []) {
+                if off.contains(where: { FaceRegionGeometry.inside(piece.centroid, $0.cuts) }) { continue }
+                if piece.whole { skinnedIdx += [i0, i1, i2]; continue }
+                let base = UInt32(positions.count / 3)
+                for p in piece.points { positions += [Float(p.x), Float(p.y), Float(p.z)] }
+                for (a, b, c) in FlexibleFacePieces.fan(piece.points.count) {
+                    skinnedIdx += [base + UInt32(a), base + UInt32(b), base + UInt32(c)]
+                }
+            }
+        }
+        return (positions, skinnedIdx, allSkinned)
+    }
+
     /// Prepare the grids from core's density field and the part (off the main thread).
     /// `skinOffFaces` are the B-rep/pseudo face ids whose skin is off (M15);
-    /// `skinOffCuts` narrows a split sector to its own half-spaces (a triangle counts when
-    /// its centroid passes every cut).
+    /// each entry's `cuts` narrow a split sector to its own half-spaces (the face is cut
+    /// along them, `skinnedTriangles`).
     public static func inputs(field: FlexDensityField, part: ViewerMesh, topology: String,
                               beadsPerWall: Int, beadWidthMM: Double, buildDir: SIMD3<Double>,
                               skinOffFaces: [(face: Int, cuts: [RegionCut])],
@@ -297,28 +338,13 @@ public enum FlexibleLatticeBuilder {
         let band = 6
         let sdf = LatticePreviewOccupancy.signedDistance(positions: part.positions, indices: indices,
                                                          like: occ, bandVoxels: band)
-        var skinnedIdx: [UInt32] = []
-        skinnedIdx.reserveCapacity(indices.count)
-        let fids = part.faceIDs
-        for t in 0..<(indices.count / 3) {
-            let fid = t < fids.count ? Int(fids[t]) : -1
-            var skinOff = false
-            for s in skinOffFaces where s.face == fid {
-                if s.cuts.isEmpty { skinOff = true; break }
-                let a = Int(indices[3 * t]), b = Int(indices[3 * t + 1]), c = Int(indices[3 * t + 2])
-                func v(_ i: Int) -> SIMD3<Double> {
-                    SIMD3(Double(part.positions[3 * i]), Double(part.positions[3 * i + 1]), Double(part.positions[3 * i + 2]))
-                }
-                if FaceRegionGeometry.inside((v(a) + v(b) + v(c)) / 3, s.cuts) { skinOff = true; break }
-            }
-            if !skinOff { skinnedIdx += [indices[3 * t], indices[3 * t + 1], indices[3 * t + 2]] }
-        }
+        let skinned = skinnedTriangles(part: part, skinOffFaces: skinOffFaces)
         let skinGrid: FlexGrid
-        if skinnedIdx.count == indices.count {
+        if skinned.allSkinned {
             skinGrid = FlexGrid(nx: sdf.nx, ny: sdf.ny, nz: sdf.nz, c0: sdf.origin, spacing: sdf.spacing.x,
                                 values: sdf.values.map { abs($0) })
         } else {
-            let sd = LatticePreviewOccupancy.signedDistance(positions: part.positions, indices: skinnedIdx,
+            let sd = LatticePreviewOccupancy.signedDistance(positions: skinned.positions, indices: skinned.indices,
                                                             like: occ, bandVoxels: band)
             skinGrid = FlexGrid(nx: sd.nx, ny: sd.ny, nz: sd.nz, c0: sd.origin, spacing: sd.spacing.x,
                                 values: sd.values.map { abs($0) })

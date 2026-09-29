@@ -22,7 +22,7 @@ import TopOptKit
 public struct FlexibleOverlayFace {
     public let key: FlexFaceKey
     /// The part faces the region covers, and its cuts (a split sector); the map replaces
-    /// exactly the triangles of those faces whose centroid passes the cuts.
+    /// exactly the part of those faces on the sector's side of every cut (FlexibleFacePieces).
     public let faces: Set<Int>
     public let cuts: [RegionCut]
     public let stack: FlexStackInfo
@@ -33,37 +33,81 @@ public struct FlexibleOverlayFace {
 public struct FlexibleOverlayMesh {
     public let mesh: ViewerMesh
     public let partFlatVertices: Int
-    /// The part triangles kept, in order (a loaded face's own triangles are replaced by
-    /// its column quads, so the dent is not hidden under the undented face).
+    /// Per kept part triangle: its SOURCE triangle in the part (a triangle a sector cut
+    /// crosses is kept as its pieces outside the pressed sectors, so a source can repeat).
+    /// A loaded region's own part is replaced by its column quads, so the dent is not
+    /// hidden under the undented face.
     public let keptTriangles: [Int]
     /// Per face: the first FLAT vertex of its quads (6 flat vertices per column).
     public let flatStart: [FlexFaceKey: Int]
-    /// Per kept part triangle: its face id and centroid (per-sector tinting).
+    /// Per kept part triangle: its face id and centroid (per-sector tinting — exact, since
+    /// every piece lies on one side of every sector cut).
     public let keptFace: [Int]
     public let keptCentroid: [SIMD3<Double>]
+    /// Per kept FLAT vertex: its barycentric weights in its source triangle
+    /// (`keptTriangles[v / 3]`). The dent's uvt is interpolated from them; core's to_uv + t
+    /// is affine, so the interpolation is exact (FlexibleOverlayClipTests).
+    public let keptWeights: [SIMD3<Double>]
 
-    /// The part's own mesh (minus the loaded faces) plus one quad per column of every face.
-    public static func build(part: ViewerMesh, faces: [FlexibleOverlayFace]) -> FlexibleOverlayMesh {
+    /// The part's own mesh (minus the pressed regions) plus one quad per column of every face.
+    ///
+    /// ★ ROUND 3, ITEM 2 — THE HOLE. A triangle of a face with sectors is CUT along the
+    /// sectors' planes (`splitPlanes`, plus every pressed region's own cuts) before anything
+    /// is dropped; only the pieces inside a pressed region go. So the part's own surface runs
+    /// right up to the map along the cut, and never under it.
+    public static func build(part: ViewerMesh, faces: [FlexibleOverlayFace],
+                             splitPlanes: [Int: [RegionCut]] = [:]) -> FlexibleOverlayMesh {
         var pos = part.positions
         var idx: [Int32] = []
         var fid: [Int32] = []
         var kept: [Int] = []
-        var keptFace: [Int] = [], keptCentroid: [SIMD3<Double>] = []
+        var keptFace: [Int] = [], keptCentroid: [SIMD3<Double>] = [], weights: [SIMD3<Double>] = []
+        var planes = splitPlanes
+        for f in faces where !f.cuts.isEmpty {
+            for face in f.faces { for c in f.cuts { FlexibleFacePieces.add(c, to: &planes[face, default: []]) } }
+        }
         let pfid = part.faceIDs
         func vtx(_ i: UInt32) -> SIMD3<Double> {
             let b = Int(i) * 3
             return SIMD3(Double(part.positions[b]), Double(part.positions[b + 1]), Double(part.positions[b + 2]))
         }
+        let identity = [SIMD3<Double>(1, 0, 0), SIMD3(0, 1, 0), SIMD3(0, 0, 1)]
         for t in 0..<part.triangleCount {
             let f = t < pfid.count ? Int(pfid[t]) : -1
-            let c = (vtx(part.indices[3 * t]) + vtx(part.indices[3 * t + 1]) + vtx(part.indices[3 * t + 2])) / 3
-            // replaced by a loaded region's map: its face, on the sector's side of every cut
-            if faces.contains(where: { $0.faces.contains(f) && FaceRegionGeometry.inside(c, $0.cuts) }) { continue }
-            kept.append(t)
-            keptFace.append(f)
-            keptCentroid.append(c)
-            idx += [Int32(part.indices[3 * t]), Int32(part.indices[3 * t + 1]), Int32(part.indices[3 * t + 2])]
-            fid.append(Int32(f))
+            let pressed = faces.filter { $0.faces.contains(f) }
+            // a whole face pressed: its map replaces all of it
+            if pressed.contains(where: { $0.cuts.isEmpty }) { continue }
+            let i0 = part.indices[3 * t], i1 = part.indices[3 * t + 1], i2 = part.indices[3 * t + 2]
+            let a = vtx(i0), b = vtx(i1), c = vtx(i2)
+            let facePlanes = planes[f] ?? []
+            guard !facePlanes.isEmpty else {
+                // no sector on this face: the triangle as it is
+                kept.append(t); keptFace.append(f); keptCentroid.append((a + b + c) / 3)
+                weights += identity
+                idx += [Int32(i0), Int32(i1), Int32(i2)]
+                fid.append(Int32(f))
+                continue
+            }
+            for piece in FlexibleFacePieces.pieces(a, b, c, planes: facePlanes) {
+                // replaced by a pressed sector's map: this piece is on its side of every cut
+                if pressed.contains(where: { FaceRegionGeometry.inside(piece.centroid, $0.cuts) }) { continue }
+                if piece.whole {
+                    kept.append(t); keptFace.append(f); keptCentroid.append(piece.centroid)
+                    weights += identity
+                    idx += [Int32(i0), Int32(i1), Int32(i2)]
+                    fid.append(Int32(f))
+                    continue
+                }
+                let base = Int32(pos.count / 3)
+                for p in piece.points { pos += [Float(p.x), Float(p.y), Float(p.z)] }
+                for (x, y, z) in FlexibleFacePieces.fan(piece.points.count) {
+                    kept.append(t); keptFace.append(f)
+                    keptCentroid.append((piece.points[x] + piece.points[y] + piece.points[z]) / 3)
+                    weights += [piece.weights[x], piece.weights[y], piece.weights[z]]
+                    idx += [base + Int32(x), base + Int32(y), base + Int32(z)]
+                    fid.append(Int32(f))
+                }
+            }
         }
         var flatStart: [FlexFaceKey: Int] = [:]
         var tri = kept.count
@@ -88,7 +132,8 @@ public struct FlexibleOverlayMesh {
         let mesh = ViewerMesh(vertices: pos, indices: idx, faceIDs: fid,
                               faceGeometry: part.faceGeometry, pseudoFaces: part.pseudoFaces)
         return FlexibleOverlayMesh(mesh: mesh, partFlatVertices: kept.count * 3, keptTriangles: kept,
-                                   flatStart: flatStart, keptFace: keptFace, keptCentroid: keptCentroid)
+                                   flatStart: flatStart, keptFace: keptFace, keptCentroid: keptCentroid,
+                                   keptWeights: weights)
     }
 
     // MARK: colour
@@ -192,10 +237,16 @@ public struct FlexibleOverlayMesh {
             // the part: the linear ramp from the face (full) to the far end (none)
             guard let uvt = partUVT[k], st.pitchMM > 0 else { continue }
             for v in 0..<partFlatVertices {
-                // this flat vertex's place in the ORIGINAL part's flat buffer (the uvt order)
-                let o = keptTriangles[v / 3] * 3 + v % 3
-                guard 3 * o + 2 < uvt.count else { continue }
-                let u = uvt[3 * o], w = uvt[3 * o + 1], t = uvt[3 * o + 2]
+                // ★ its source triangle's corners in the ORIGINAL part's flat buffer (the uvt
+                // order), weighted by where this vertex sits in it (a clipped piece's corner
+                // lies inside its source; an uncut triangle's weights are the identity)
+                let src = keptTriangles[v / 3] * 3
+                guard 3 * (src + 2) + 2 < uvt.count, v < keptWeights.count else { continue }
+                let wv = keptWeights[v]
+                var u = 0.0, w = 0.0, t = 0.0
+                for j in 0..<3 where wv[j] != 0 {
+                    u += wv[j] * uvt[3 * (src + j)]; w += wv[j] * uvt[3 * (src + j) + 1]; t += wv[j] * uvt[3 * (src + j) + 2]
+                }
                 let iu = Int((u / st.pitchMM).rounded(.down)), iv = Int((w / st.pitchMM).rounded(.down))
                 let iuC = min(max(iu, 0), st.nu - 1), ivC = min(max(iv, 0), st.nv - 1)
                 // a vertex on the face's own edge sits half a pitch outside the last column

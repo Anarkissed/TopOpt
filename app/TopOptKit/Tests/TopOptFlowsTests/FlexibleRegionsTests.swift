@@ -98,10 +98,21 @@ final class FlexibleRegionsTests: XCTestCase {
                                         faces: Set(regions.faces(of: right, mesh: mesh)),
                                         cuts: regions.cuts(of: right), stack: st, centres: centres)
         let o = FlexibleOverlayMesh.build(part: mesh, faces: [empty])
-        let topTris = (0..<mesh.triangleCount).filter { Int(mesh.faceIDs[$0]) == topFace }.count
-        let removed = mesh.triangleCount - o.keptTriangles.count
-        XCTAssertGreaterThan(removed, 0, "the sector's triangles are replaced by its map")
-        XCTAssertLessThan(removed, topTris, "the other sector keeps its own triangles")
+        // ★ RE-PINNED (round 3, item 2 — the hole): the sector's PART of the face is replaced,
+        // not the triangles whose centroid is in it. The face is cut along x = 50 first, so a
+        // triangle that crosses the cut keeps its x < 50 piece — which adds triangles, so the
+        // old "fewer kept triangles than the part had" count no longer describes it. What
+        // stays: exactly the other sector's 5000 mm² of the top, and nothing past the cut.
+        var topArea = 0.0
+        for i in 0..<o.keptTriangles.count where o.keptFace[i] == topFace {
+            let p = (0..<3).map { j -> SIMD3<Double> in
+                let v = 3 * i + j
+                return SIMD3(Double(o.mesh.flat.positions[3 * v]), Double(o.mesh.flat.positions[3 * v + 1]),
+                             Double(o.mesh.flat.positions[3 * v + 2]))
+            }
+            topArea += simd_length(simd_cross(p[1] - p[0], p[2] - p[0])) / 2
+        }
+        XCTAssertEqual(topArea, 5000, accuracy: 1e-3, "the other sector keeps its half of the top, and only that")
         XCTAssertTrue(o.keptFace.enumerated().allSatisfy { i, f in
             f != topFace || o.keptCentroid[i].x < 50 + 1e-6 })
     }
