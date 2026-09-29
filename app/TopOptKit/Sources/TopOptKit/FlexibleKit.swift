@@ -693,6 +693,14 @@ public final class FlexibleScene: @unchecked Sendable {
         return (0..<(r.count / 3)).map { SIMD3(r[3 * $0], r[3 * $0 + 1], r[3 * $0 + 2]) }
     }
 
+    /// Core's `FaceFrame::to_uv` for each model point, plus t along the load.
+    public func toUVT(face: Int, rotation: Int, _ xyz: [Double]) throws -> [Double] {
+        var err = topoptbridge.BridgeError()
+        let r = topoptbridge.flexible_scene_to_uvt(handle, Int32(face), Int32(rotation), FlexConv.d(xyz), &err)
+        try FlexConv.check(err)
+        return Array(r)
+    }
+
     public func squishFraction(face: Int, rotation: Int, map: FlexMap) throws -> [Double] {
         var err = topoptbridge.BridgeError()
         let r = topoptbridge.flexible_scene_squish_fraction(handle, Int32(face), Int32(rotation),

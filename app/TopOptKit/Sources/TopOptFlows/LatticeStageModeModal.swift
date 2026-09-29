@@ -22,10 +22,14 @@ import TopOptDesign
 public struct LatticeStageModeModal: View {
     /// Called with the chosen mode. The caller records it and never asks again.
     public let onChoose: (LatticeStageMode) -> Void
+    /// The Flexible stage's card (FlexibleStageChrome.swift): its own choice BESIDE the two modes. nil ⇒ two cards.
+    public var onChooseFlexible: (() -> Void)? = nil
     @State private var focused: LatticeStageMode?
+    @State private var flexibleFocused = false
 
-    public init(onChoose: @escaping (LatticeStageMode) -> Void) {
+    public init(onChoose: @escaping (LatticeStageMode) -> Void, onChooseFlexible: (() -> Void)? = nil) {
         self.onChoose = onChoose
+        self.onChooseFlexible = onChooseFlexible
     }
 
     public var body: some View {
@@ -68,11 +72,12 @@ public struct LatticeStageModeModal: View {
                 HStack(alignment: .top, spacing: DS.Space.m) {
                     card(.structural)
                     card(.aesthetic)
+                    if let onChooseFlexible { FlexibleStageCard(focused: flexibleFocused) { flexibleFocused = true; onChooseFlexible() } }
                 }
                 .fixedSize(horizontal: false, vertical: true)
             }
             .padding(DS.Space.xl4)
-            .frame(maxWidth: 800)
+            .frame(maxWidth: onChooseFlexible == nil ? 800 : 980)
             .fixedSize(horizontal: false, vertical: true)
             .background(
                 RoundedRectangle(cornerRadius: DS.Radius.sheet, style: .continuous)

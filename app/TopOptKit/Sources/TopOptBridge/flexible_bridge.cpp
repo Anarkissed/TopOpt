@@ -611,6 +611,32 @@ std::vector<double> flexible_scene_from_uv(int64_t scene, int32_t face_region_id
   return out;
 }
 
+std::vector<double> flexible_scene_to_uvt(int64_t scene, int32_t face_region_id,
+                                          int32_t rotation_deg, const std::vector<double>& xyz,
+                                          BridgeError& err) {
+  std::vector<double> out;
+  try {
+    auto s = scene_at(scene);
+    std::lock_guard<std::mutex> lock(s->mu);
+    const fx::FaceFrame& f = stack_of(*s, face_region_id, rotation_deg).frame;
+    out.reserve(xyz.size());
+    for (std::size_t i = 0; i + 2 < xyz.size(); i += 3) {
+      const topopt::Vec3 p{xyz[i], xyz[i + 1], xyz[i + 2]};
+      double u = 0.0, v = 0.0;
+      f.to_uv(p, u, v);
+      const double t = (p.x - f.centroid.x) * f.load.x + (p.y - f.centroid.y) * f.load.y +
+                       (p.z - f.centroid.z) * f.load.z;
+      out.push_back(u);
+      out.push_back(v);
+      out.push_back(t);
+    }
+  } catch (const std::exception& e) {
+    fail(err, e);
+    out.clear();
+  }
+  return out;
+}
+
 std::vector<double> flexible_scene_squish_fraction(int64_t scene, int32_t face_region_id,
                                                    int32_t rotation_deg, const FlexSquishMap& map,
                                                    BridgeError& err) {

@@ -265,6 +265,12 @@ std::vector<double> flexible_scene_from_uv(int64_t scene, int32_t face_region_id
                                            int32_t rotation_deg, const std::vector<double>& uv,
                                            BridgeError& err);
 
+// Core's FaceFrame::to_uv for every xyz point (flattened) → (u, v, t) flattened, t
+// the distance along the load from the frame plane (the column's entry_t / exit_t axis).
+std::vector<double> flexible_scene_to_uvt(int64_t scene, int32_t face_region_id,
+                                          int32_t rotation_deg, const std::vector<double>& xyz,
+                                          BridgeError& err);
+
 // S per column (the fast path while a curve point is dragged) and the
 // centre→edge t per column.
 std::vector<double> flexible_scene_squish_fraction(int64_t scene, int32_t face_region_id,

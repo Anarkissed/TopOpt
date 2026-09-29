@@ -1175,6 +1175,8 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
     /// is what makes the modal appear; it is deliberately NOT defaulted, because a
     /// default would silently pick which claim the receipt makes.
     public var stageMode: LatticeStageMode?
+    /// The Flexible stage (a third choice BESIDE stageMode, never a case of it; nil ⇒ not chosen). FlexibleSettings.swift.
+    public var flexible: FlexibleStageSettings? = nil
 
     /// ★★★ WHICH KIND OF LATTICE IS LAID DOWN — core's `LatticeAlgorithm`, as its own
     /// name string. ORTHOGONAL to `cellSizeMode`: that says how the cell is CHOSEN,
@@ -1912,6 +1914,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
     private enum CodingKeys: String, CodingKey {
         case enabled, topologyID, cellMM, minRelativeDensity, maxRelativeDensity
         case stageMode                  // Structural / Aesthetic — chosen once (nil ⇒ unasked)
+        case flexible                   // the Flexible stage (nil ⇒ not chosen)
         case algorithm                  // core's LatticeAlgorithm name ("" ⇒ not stated)
         case manualStrutThicknessMM      // the hand-set thickness (nil ⇒ derived)
         case region                     // legacy single-region snapshots
@@ -1982,6 +1985,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         // ★ ABSENT ⇒ NOT YET ASKED. A pre-mode snapshot must reopen the modal rather
         // than inherit a mode nobody chose — the choice decides what the receipt claims.
         stageMode = try c.decodeIfPresent(LatticeStageMode.self, forKey: .stageMode)
+        flexible = try c.decodeIfPresent(FlexibleStageSettings.self, forKey: .flexible)
         // Absent in every project saved before the selector existed, and "" is exactly
         // what those projects mean: not stated, so core takes doubled.
         algorithm = try c.decodeIfPresent(String.self, forKey: .algorithm) ?? ""
@@ -2161,6 +2165,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
             try c.encode(organicPickedSeparationMM, forKey: .organicPickedSeparationMM)
         }
         try c.encodeIfPresent(stageMode, forKey: .stageMode)
+        try c.encodeIfPresent(flexible, forKey: .flexible)
         // Written only when stated, so an untouched project's file is byte-identical
         // to one saved before the selector existed (bar U1).
         if !algorithm.isEmpty { try c.encode(algorithm, forKey: .algorithm) }

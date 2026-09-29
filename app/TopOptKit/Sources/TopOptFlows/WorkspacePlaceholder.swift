@@ -614,13 +614,14 @@ public struct WorkspacePlaceholder: View {
     /// `!showLatticePage` at each site, so the third page had to remember to add
     /// itself to eight separate conditions, and it did not. ONE predicate,
     /// gating every site, is what makes a fourth page correct by default.
-    private var fullScreenPageUp: Bool { showLatticePage || showSmoothingPage || showLatticeWizard }
+    private var fullScreenPageUp: Bool { showLatticePage || showSmoothingPage || showLatticeWizard || showFlexiblePage }
 
     /// ★ THE STAGE IS ON AND THE QUESTION IS UNANSWERED. `nil` is "not yet asked" —
     /// deliberately not a default, so a project made before the modes existed reopens
     /// the choice rather than inheriting one nobody made.
     private var latticeStageModeNeeded: Bool {
         (stage == .lattice || showLatticePage) && project.lattice.stageMode == nil
+            && project.lattice.flexible == nil   // Flexible is answered too (FlexibleSettings.swift)
     }
 
     /// ★★★ THROW AWAY EVERYTHING DONE UNDER THIS MODE AND ASK AGAIN (maintainer,
@@ -669,6 +670,7 @@ public struct WorkspacePlaceholder: View {
 
     /// Whether the mode's limitations sheet is up. Opened by tapping the mode title.
     @State private var showLatticeModeSheet = false
+    @State private var showFlexiblePage = false      // the Flexible stage's page (FlexibleStagePage.swift)
 
     /// ★ IS A LATTICE HANDLE UNDER THE FINGER RIGHT NOW? Depth, expand and the
     /// clearance/design-box knobs all move a region, so all three defer the bake. One
@@ -1359,18 +1361,34 @@ public struct WorkspacePlaceholder: View {
             // way out — because the two modes make DIFFERENT CLAIMS about the same
             // object and a default would pick one silently. See `LatticeStageMode`.
             if latticeStageModeNeeded {
-                LatticeStageModeModal { mode in
+                LatticeStageModeModal(onChoose: { mode in
                     project.lattice.stageMode = mode
                     // Written straight away: the choice is permanent, so it must not
                     // depend on some later save to survive a relaunch.
                     model.persistCurrentProject()
-                }
+                }, onChooseFlexible: {
+                    project.lattice.flexible = FlexibleStageSettings()
+                    showLatticeWizard = false; showFlexiblePage = true
+                    model.persistCurrentProject()
+                })
                 .transition(.opacity)
                 .zIndex(50)
             }
             // ★★ THE LIMITATIONS, ON DEMAND — and the only way to unmake the choice
             // (maintainer, 2026-08-21). Above everything except the modal itself: it
             // can END with the modal being asked again, so the two must not race.
+            if showLatticeModeSheet, project.lattice.stageMode == nil, project.lattice.flexible != nil {
+                FlexibleStageSheet(onDelete: { showFlexiblePage = false; deleteLatticeForMode() },
+                                   onClose: { showLatticeModeSheet = false })
+                    .transition(.opacity).zIndex(49)
+            }
+            if showFlexiblePage, project.lattice.flexible != nil {
+                FlexibleStagePage(project: project, materialsPath: FlexibleResources.materialsPath,
+                                  stampsPath: FlexibleResources.stampsPath,
+                                  persist: { model.persistCurrentProject() },
+                                  onExit: { showFlexiblePage = false })
+                    .transition(.opacity).zIndex(48)
+            }
             if showLatticeModeSheet, let mode = project.lattice.stageMode {
                 LatticeStageModeSheet(
                     mode: mode,
@@ -2765,6 +2783,9 @@ public struct WorkspacePlaceholder: View {
             if stage == .lattice, let mode = project.lattice.stageMode {
                 LatticeStageModeChip(mode: mode) { showLatticeModeSheet = true }
                     .padding(.trailing, PageChrome.gizmoClearance + Self.settingsClearance)
+            } else if stage == .lattice, project.lattice.flexible != nil {
+                FlexibleStageChip { showLatticeModeSheet = true }
+                    .padding(.trailing, PageChrome.gizmoClearance + Self.settingsClearance)
             }
         }
         // ★ THE IDENTITY ROW IS THE FIRST ROW ON EVERY STAGE — restored 2026-08-21.
@@ -2959,6 +2980,10 @@ public struct WorkspacePlaceholder: View {
         }
         .onChange(of: stage) { s in
             if s == .lattice { openLatticeSettingsIfUnconfigured() }
+        }
+        // Under Flexible the lattice Settings door opens the Flexible page instead.
+        .onChange(of: showLatticeWizard) { open in
+            if open, project.lattice.flexible != nil { showLatticeWizard = false; showFlexiblePage = true }
         }
         // Graded follow-up: when a run's accepted variants land (streamed or final),
         // rebake the strut scene so its radii grade by the fresh von Mises field.
