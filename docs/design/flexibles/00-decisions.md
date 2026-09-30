@@ -27,6 +27,20 @@ Updated 2026-09-27 evening, after the design conversation settled the screen flo
 | M15 | **Skin on/off per face** (off lets edges and side walls squish down). |
 | M16 | **Soft-over-firm layering** (squish that firms up as you press, and different feel from each side under small loads) comes **after v1**. |
 
+## 1b. Round 3 — his answers and the rows they change (2026-09-29, batch A: the Settings page)
+
+These OVERRIDE the rows they name below. Agents: do not "fix" them back.
+
+| # | Decision | Overrides |
+|---|---|---|
+| D-R3-1 | **Frame rotation is removed; every face is sent at 0°.** Both X and Y curves are drawn on the face's own two edges at once, so turning the frame has nothing left to do (and the stack cache keys halve). A saved 90° reads as 0 (read-through migration, `FlexibleSettingsMigration`). | R13's "user can rotate the frame in 90° steps" |
+| D-R3-2 | **Walls are always 1 bead; the 1/2-bead chips are gone.** Core marks every 2-bead number "estimated" and nothing chooses 2 automatically yet. A saved 2 reads as 1. Core brief: *recommend should weigh 1 vs 2 beads once 2-bead coupons exist.* | R1's "2 allowed" (as a user choice) |
+| D-R3-3 | **Curve convention: closer to the face = squishier.** The editor draws a stored y (core's fraction of the deepest squish) at height 1 − y above the face: the face line is the squishiest, the dashed guide the firmest ('soft' / 'firm' labels). Core's S, the job and storage keep their meaning. A curve DRAWN before round 3 flips its stored y once so its picture survives (marker `curveConvention`); the untouched default dome is kept and now reads as a valley touching the face — the dent's own shape. | M11's editor reading ("up = softer") |
+| D-R3-4 | **Mode is always "both" (X and Y always combined); the X / Y / 3D steps are gone; the map always bends.** The drawn map dents statically while he edits ("What you drew · shown ×k") and loops only once a lattice is drawn; every filament bends, calibrate-first included (its map is core's squish_fraction). Saved "either" / "centre_edge" faces read as "both" with their curves kept. | M11's combine modes and steps; the pinned "a curve step never dents" rule |
+| D-R3-5 | **One integer exaggeration k per page state**: clamp(round(0.20 · extent / deepest), 1, 10), capped so no column's shown dent passes 0.65 of its own lattice depth (and, with a lattice, by the shader's clamp). The dent, the depth prism and the chip share it; it freezes while the chip is dragged. | the × 1–4 rule |
+| D-R3-6 | **A tap on the model only selects.** Faces come from the main page: a Load group's faces arrive pressed with their area share (c = force · into-the-face ≥ cos 15° full, oblique × c, ≤ 0 asked), an Anchor group's faces rest. **The group is the one source of truth**: a weight typed on the Flexible page writes back to the group and the group's faces re-sync. The Flexible job writes `loads.build_dir` = −gravity (core had assumed +Z). | M13's "picking a face" as the way to load it |
+| D-R3-7 | **The density cross-section and its slider are removed** (they did nothing on a calibrate-first filament; the X-ray lattice shows the same field in 3D). | S2's slice evidence |
+
 ## 2. Reviewer defaults — NOT yet ruled (agents: keep them, do not change silently)
 
 | # | Default | Why |

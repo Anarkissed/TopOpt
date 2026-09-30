@@ -1,5 +1,130 @@
 # Handoff — 2026-09-29-flexible-screens (TRACK app, A1): the Flexible screens
 
+## Round 3 · batch A — the Settings page: simple, visual, and it bends (current state)
+
+**What you will see on the Flexible Settings page** (judged headlessly on YOUR project 0004,
+restored through `AppModel.open` from a copy of the simulator's folder — the app was not
+launched, per the standing rule; nothing here has been seen on a screen yet):
+
+- **The hole is closed** (img 2). With only 'top A' pressed, every point of the top face is
+  covered exactly once: the part's own surface runs up to the heat map along the cut. The
+  sector tint and "skin off" stop at the cut too.
+- **The heat map bends in 3D, always** (img 1). While you draw it holds still; it loops
+  0 → full → 0 only once a lattice is drawn. TPU 95A (calibrate-first) bends as well — its
+  map is core's squish_fraction of your curves. The page is **always in X-ray** (the button
+  under the gizmo is gone). The legend sits on the **right edge, vertically centred**, with
+  one line: "What you drew · shown ×4". Its colours are the dent's own green ramp (never
+  purple; Stress keeps its rainbow).
+- **The curve reads the right way round.** Nearer the face = squishier ("soft" at the face
+  line, "firm" at the dashed guide). Your drawn V keeps its picture (its stored values flip
+  once); the untouched default is now a valley touching the face in the middle.
+- **Both X and Y curves are on the part at once.** Tap the line: a point lands there, on
+  the curve. Tap a point: a red × appears beside it; tap the × to delete (never on an end
+  point). A tap on the part clears the ×. The double-tap and "+ point" are gone.
+- **Deepest squish = a green prism you drag out.** A green glass chip ("3.0 mm") sits on
+  the selected pressed face; drag it and a green prism grows into the part (the dent
+  bottoms out on its floor). It snaps every 0.5 mm and at the lattice depth, with a haptic
+  tick, and stops there. Looking straight down the load it becomes a scrub. It hides under
+  the panel or the legend (where it could not be reached).
+- **A tap on the part only selects.** Faces come from the main page: your 'Top' group
+  (10 kg, gravity) presses top A with "10 kg from Top"; the bottom anchor rests. Editing
+  the weight here **writes back to the group** (your answer); a group over several faces is
+  split by area and re-syncs. A face in no group shows [Press it] [It rests here]; pressing
+  it asks "How much weight presses here?" on the number pad.
+- **The panel: Face | Stamps | More, one line per setting, details behind (i).** Face:
+  filament (a menu, until New TopOpt supplies it), Feel, then the selected face's name
+  [Pressed | Rests], Weight, Shape [Curves] [Stamp — disabled, batch D], Deepest squish,
+  Solid skin. More: nozzle temperature, lattice family, Auto's pick, "Walls · 1 bead",
+  Physics. **Removed:** Both/Either/Centre (always both), the X/Y/3D steps, the frame
+  rotation, 1/2 beads (always 1), the density cross-section and its slider, every long
+  caption.
+
+**Not done in batch A (honestly):**
+- **No simulator check.** The plan's step 5 (install on your project, compare with img 1/2,
+  screenshots) needs the app launched, which is refused to me. `xcodebuild` for the
+  simulator succeeds; everything else was measured on your restored project in tests.
+- **Stamp shape** is shown disabled (batch D). The Stamps tab itself is unchanged (its
+  captions stay until batch D reworks it).
+- **The Generate pill is still on this page** (batch B moves the build to Save & Exit); the
+  legend no longer covers it. Readiness pop-ups, the shape-only lattice for calibrate-first
+  filaments and the >4-face limit are batch B.
+- **Your saved project keeps its seven tapped faces** (they are yours: the adoption never
+  overwrites or prunes them). Only new taps stop pressing faces.
+- A face you saved at 90° now reads at 0°; its curves are not re-mapped to the turned frame.
+  A curve redrawn to exactly the default is not flipped (treated as the default).
+- The oblique-press line reads "… at an angle" in the weight row; there is no separate
+  confirm button.
+
+### Hooks in #354 / main files
+
+**None.** Every change is in `Flexible*` track files (plus this handoff and
+`docs/design/flexibles/00-decisions.md` §1b). MetalMeshView, WorkspacePlaceholder,
+LatticeSettings and ProjectModel are untouched; the prism uses MetalMeshView's existing
+`clearanceVolumes:` argument; the weight write-back uses `ForceModel.setWeight` (public).
+
+### Decisions rows (00-decisions.md §1b)
+
+D-R3-1 frame rotation removed (overrides R13's 90° steps) · D-R3-2 walls always 1 bead
+(R1; Core brief: recommend weighs 1 vs 2 once 2-bead coupons exist) · D-R3-3 the curve
+convention (face line = squishiest; drawn curves flip once, marker `curveConvention`) ·
+D-R3-4 mode always both, no steps, the map always bends · D-R3-5 one integer k (0.20 ·
+extent / deepest, 1…10, ≤ 0.65 of each column's lattice) · D-R3-6 a tap only selects; the
+main-page group is the one source of truth for weight; `loads.build_dir` = −gravity ·
+D-R3-7 the density cross-section removed.
+
+### Commits (on claude/flexible-screens, not pushed)
+
+f580008d the hole · 4c04024e Optional fields + read-through migration · bea8e56e the curve
+(inversion, tap-add, ×) · 5394b0f9 the map bends · 1dd4221f main-page weights, select-only
+tap, build_dir · 014f48a8 the depth prism + chip · 06521d22 the panel (Face | Stamps | More)
+· 3dc4b91d the dent's own ramp.
+
+### Tests (raw, targeted suite: every Flexible* suite + the round's list)
+
+```
+Executed 252 tests, with 4 tests skipped and 1 failure (0 unexpected) in 265.234 seconds
+  the one failure: LatticeSimSolveTriggerTests.testTheTriggerRefusesOnAllThreeGrounds (known, pre-existing)
+FLEX-HOLE pad, only top A pressed (pitch 2.00 mm): interior 38416 points — uncovered 0 (0 mm²), twice 0; band 1584, off 0 | OLD centroid rule: uncovered 4851 (1213 mm²), twice 4560
+FLEX-HOLE HIS project 0004, only top A pressed: interior 38416 — uncovered 0 (0 mm²), twice 0; band 1584, off 0
+  (run before the fix, same instrument: uncovered 4753 (1188 mm²), twice 6298)
+FLEX-HOLE uvt on 5 clipped flat vertices: worst |interp − core to_uvt| 0.0 mm; old corner lookup 70.71 mm (control)
+FLEX-HOLE skin off on top A: top B points without skin 0, top A points still skinned 0 | OLD centroid rule: 4950, 5050
+FLEX-HOLE his top face before any stack: 6 pieces, 0 straddle x = 50 | the part's own: 2 straddle (control)
+FLEX-BEND TPU 95A pad, default curves: deepest quad dent 3.00 mm (× 4 shown), legend "What you drew · shown ×4", animated no
+FLEX-BEND his top A: shown depths 0.00–2.07 mm × 6; the quads' shown dent spans 0.00–12.41 mm along the load
+FLEX-CURVE insert at t 0.2 on the default dome: |Δ curve| over 20 t's max 0.0174 mean 0.0055 (exact at the tap)
+FLEX-PRISM top A: 1250 columns, footprint 5000.0 mm² (columns × pitch² 5000.0), 1326 corners, 2500 triangles, built in 7.2 ms (Debug)
+FLEX-PRISM handle round trip: worst |read − set| 0.00030 mm (model projection), 4.15 mm (world, control)
+FLEX-LOADS 60/40 split, 10 kg: [4.0, 6.0] kg, shares [0.4, 0.6]
+FLEX-ROWS 42 lines, longest 44: "Siraya Tech Roamr TPU Air HR 8… · shape only"
+FLEX-RAMP dent ramp hue span 3° (Stress rainbow 221°), luminance 0.22 → 0.86
+```
+
+Every new comparison has a control that goes red (the old centroid rule, the old corner
+lookup, the old curve mapping, the old widest-gap insert, the old tap, a sector-blind
+mapping, an equal split, a weightFrom-blind re-sync, no build_dir, −load, a world
+projection, the uncapped k, the old caption, the DS purple). Tests were run red for their
+stated reasons before each change (the hole: 1188 mm² on your project; the dent: the old
+drawing branch failed "a drawn map dents"; the tap: face 3 pressed at 10 kg).
+
+**Deleted-test sweep (my diff):** one test renamed and rewritten deliberately —
+`FlexibleSquishTests.testAStampOrACurveStepIsNotTakenOverByTheLattice` →
+`testAStampWinsAndADrawnMapDentsStatically` (your round-3 ruling overturns "a curve step …
+never an animated dent"; the stamp half is kept). Re-pinned assertions, each commented in
+place: `testTheLatticeIsDrawnOnlyInXrayWithALattice` (latticeShows without steps; a shown
+stamp still hides the walls), `testTheMapAndDentComeFromTheLatticeWhileItIsDrawn` (k with the
+thin-stack cap), `FlexibleRegionsTests.testOverlayReplacesOnlyTheSectorsTriangles` (kept area
+5000 mm², not a triangle count). No test deleted.
+
+**iOS build:** `xcodebuild … -destination id=147E56A1… build` — BUILD SUCCEEDED (no new
+warning in the new files).
+
+**Your restored project** is committed as a test fixture under
+`docs/handoffs/evidence/2026-09-29-flexible-screens/his_project_0004/` (project.json + the
+pad STL, byte-identical to the simulator's); `HIS_PROJECT_DIR` points the same tests at any
+other copy.
+
+
 ## In plain words
 
 **What you can do on screen now** (simulator, on the 100 × 100 × 20 pad and on the M2 stand):
