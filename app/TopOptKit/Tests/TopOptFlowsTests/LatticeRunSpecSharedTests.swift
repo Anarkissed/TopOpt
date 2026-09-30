@@ -115,8 +115,7 @@ final class LatticeRunSpecSharedTests: XCTestCase {
         }
         XCTAssertEqual(try text(variant.gradingDictionary()), try text(stage.gradingDictionary()),
                        "★ the stage's Auto-resolved grading")
-        XCTAssertEqual(VariantFacePrismFixture.canonical(variant.regions), VariantFacePrismFixture.canonical(stage.regions),
-                       "and the stage's walls")
+        XCTAssertEqual(variant.regions, stage.regions, "and the stage's walls")
         XCTAssertEqual(variant.cellSizeMode, stage.cellSizeMode)
         XCTAssertEqual(variant.reportRegionCells, stage.reportRegionCells)
         XCTAssertEqual(stage.cellSizeMode, "swept", "control: Auto resolved to a swept window")

@@ -77,8 +77,7 @@ final class LatticeVariantFaceWallsTests: XCTestCase {
         p.selection.pickFaces([42])
         XCTAssertEqual(p.latticeJobRegions().skippedFaces, 1, "control: the stage leaves it out too")
         XCTAssertEqual(p.variantLatticeJobRegions().skippedFaces, 1)
-        XCTAssertEqual(VariantFacePrismFixture.canonical(p.variantLatticeJobRegions().regions),
-                       VariantFacePrismFixture.canonical(p.latticeJobRegions().regions),
+        XCTAssertEqual(p.variantLatticeJobRegions().regions, p.latticeJobRegions().regions,
                        "the rest of the walls still travel")
         XCTAssertEqual(LatticeVariantFaceWalls.line(withoutShape: 1),
                        "1 marked face has no shape to lattice and is left out.")

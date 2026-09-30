@@ -153,10 +153,8 @@ final class LatticeVariantTests: XCTestCase {
         XCTAssertTrue(faces.allSatisfy { $0.faceID != nil && !$0.outlineLoops.isEmpty })
         XCTAssertEqual(stage.regions.filter { $0.kind == .bolt }.count, 1)
         XCTAssertEqual(stage.skippedFaces, 0)
-        // ★ the variant carries every one of them, unchanged (outline loops compared in one order:
-        // the emission's own order is hash order — see `testTheVariantDocumentIsStableAcrossCalls`)
-        XCTAssertEqual(VariantFacePrismFixture.canonical(variant.regions), VariantFacePrismFixture.canonical(stage.regions),
-                       "★ the variant's walls are the stage's")
+        // ★ the variant carries every one of them, unchanged
+        XCTAssertEqual(variant.regions, stage.regions, "★ the variant's walls are the stage's")
         XCTAssertEqual(variant.skippedFaces, 0, "★ no face wall is left out")
     }
 
@@ -181,8 +179,8 @@ final class LatticeVariantTests: XCTestCase {
                 let wire = try XCTUnwrap((obj["lattice"] as? [String: Any])?["regions"] as? [[String: Any]], label)
                 XCTAssertEqual(wire.count, stage.count, label)
                 for (w, s) in zip(wire, stage) {
-                    XCTAssertEqual(try VariantFacePrismFixture.canonicalWire(w),
-                                   try VariantFacePrismFixture.canonicalWire(s.wireDictionary),
+                    XCTAssertEqual(try VariantFacePrismFixture.wireText(w),
+                                   try VariantFacePrismFixture.wireText(s.wireDictionary),
                                    "★ \(label): the stage's entry, face_id included")
                 }
                 XCTAssertEqual(wire.filter { $0["kind"] as? String == "face" && $0["face_id"] == nil }.count, 0,
@@ -207,38 +205,25 @@ final class LatticeVariantTests: XCTestCase {
         }
     }
 
-    /// ★★ ONE ORDER FOR ONE OUTLINE (2026-09-30). The emission's outline loops come out in hash
-    /// order — the same polygon rotated or reordered from call to call — and a variant's forecast
-    /// is keyed on the document's bytes and re-requested whenever they change, so the document
-    /// fixes the order: each loop from its smallest (u, w) vertex, the loops by that vertex.
-    func testTheVariantDocumentIsStableAcrossCalls() throws {
+    /// ★★ ONE ORDER FOR ONE OUTLINE (maintainer, 2026-09-30, ruling 1). The emission's outline
+    /// loops came out in hash order — the same polygon rotated or reordered from call to call,
+    /// so the stage's job bytes differed between launches. The emission now fixes the order at
+    /// its source (`LatticeFaceOutline`), so the stage, its job document and the variant's
+    /// documents are each ONE byte string, however many times they are built.
+    func testOneOutlineOrderForTheStageAndTheVariant() throws {
         let (p, _, _) = VariantFacePrismFixture.project()
-        // control: the EMISSION really varies (else this measures nothing) — across 200 calls
-        var emissions = Set<String>()
-        for _ in 0..<200 { emissions.insert(p.latticeJobRegions().regions.map { "\($0.outlineLoops)" }.joined(separator: "|")) }
-        // the variant's document does not
-        var docs = Set<Data>()
-        for _ in 0..<200 { docs.insert(try XCTUnwrap(VariantFacePrismFixture.variantDocuments(p).first?.1)) }
-        XCTAssertEqual(docs.count, 1, "★ one document for one project (the emission gave \(emissions.count) orders)")
-        print("STABILITY emission orders \(emissions.count) of 200, variant documents \(docs.count) of 200")
-        // deterministically: a rotated, reordered outline comes out in the one order
-        var rotated = LatticeRegionSpec(role: .include, kind: .face)
-        rotated.normal = SIMD3(0, 0, -1)
-        rotated.halfUMM = 5; rotated.halfWMM = 5; rotated.depthMM = 2
-        rotated.outlineLoops = [[SIMD2(2, 1), SIMD2(1, 2), SIMD2(1, 1)],
-                                [SIMD2(5, 5), SIMD2(5, -5), SIMD2(-5, -5), SIMD2(-5, 5)]]
-        let spec = LatticeSpec(topologyID: "octet", cellMM: 4, strutRadiusMM: 0.6,
-                               generateRelativeDensity: 0.3, minRelativeDensity: 0.05,
-                               maxRelativeDensity: 0.9, emitSTL: true, emit3MF: false,
-                               regionScoped: true, skin: "diagrid", minExtrudableWidthMM: 0.42,
-                               graded: false, regions: [rotated])
-        let doc = try RelatticeJobBuilder.build(original: try VariantFacePrismFixture.original(), designFingerprint: 1,
-                                                achievedVolumeFraction: 0.5, designFileName: "design.bin", lattice: spec)
-        let obj = try XCTUnwrap(JSONSerialization.jsonObject(with: doc) as? [String: Any])
-        let region = try XCTUnwrap(((obj["lattice"] as? [String: Any])?["regions"] as? [[String: Any]])?.first)
-        XCTAssertEqual((region["geometry"] as? [String: Any])?["outline_uv"] as? [[[Double]]],
-                       [[[-5, -5], [-5, 5], [5, 5], [5, -5]], [[1, 1], [2, 1], [1, 2]]],
-                       "★ each loop from its smallest vertex, the loops by that vertex — same shapes")
+        var emissions = Set<String>(), stages = Set<Data>(), variants = Set<Data>()
+        for _ in 0..<200 {
+            let e = p.latticeJobRegions()
+            emissions.insert(e.regions.map { "\($0.outlineLoops)" }.joined(separator: "|"))
+            stages.insert(try VariantFacePrismFixture.sorted(e.regions.map { $0.wireDictionary }))
+            variants.insert(try XCTUnwrap(VariantFacePrismFixture.variantDocuments(p).first?.1))
+        }
+        let env = ProcessInfo.processInfo.environment["SWIFT_DETERMINISTIC_HASHING"] ?? "unset"
+        print("ONE ORDER emissions \(emissions.count), stage wires \(stages.count), variant documents \(variants.count) of 200; SWIFT_DETERMINISTIC_HASHING=\(env)")
+        XCTAssertEqual(emissions.count, 1, "★ one outline order")
+        XCTAssertEqual(stages.count, 1, "★ one stage wire")
+        XCTAssertEqual(variants.count, 1, "★ one variant document")
     }
 
     /// ★★ RULING (a) (maintainer, 2026-09-30): core's depth tie (job.cpp, inside `parse_job`) is
@@ -643,39 +628,10 @@ enum VariantFacePrismFixture {
         try JSONSerialization.data(withJSONObject: o, options: [.sortedKeys])
     }
 
-    /// A wire region as text, in the ONE outline order (`RelatticeJobBuilder.canonicalOutline`),
-    /// after a JSON round trip so a stage dictionary and a parsed document compare like for like
-    /// (a Swift -0.0 is written "-0" and parses back as 0).
-    static func canonicalWire(_ region: [String: Any]) throws -> String {
+    /// A wire region as text, after a JSON round trip so a stage dictionary and a parsed document
+    /// compare like for like (a Swift -0.0 is written "-0" and parses back as 0).
+    static func wireText(_ region: [String: Any]) throws -> String {
         let parsed = try XCTUnwrap(JSONSerialization.jsonObject(with: try sorted(region)) as? [String: Any])
-        return String(decoding: try sorted(RelatticeJobBuilder.canonicalOutline(parsed)), as: UTF8.self)
-    }
-
-    /// Regions with each outline loop in the ONE order (its per-edge seam facts rotated with it):
-    /// the emission's own loop order is hash order, the same polygon from call to call.
-    static func canonical(_ regions: [LatticeRegionSpec]) -> [LatticeRegionSpec] {
-        func less(_ a: SIMD2<Double>, _ b: SIMD2<Double>) -> Bool { a.x < b.x || (a.x == b.x && a.y < b.y) }
-        func rot<T>(_ a: [T], _ k: Int) -> [T] { Array(a[k...] + a[..<k]) }
-        return regions.map { r in
-            var s = r
-            guard !s.outlineLoops.isEmpty else { return s }
-            for l in s.outlineLoops.indices {
-                let loop = s.outlineLoops[l]
-                guard let k = loop.indices.min(by: { less(loop[$0], loop[$1]) }) else { continue }
-                s.outlineLoops[l] = rot(loop, k)
-                if l < s.outlineSeams.count, s.outlineSeams[l].count == loop.count { s.outlineSeams[l] = rot(s.outlineSeams[l], k) }
-                if l < s.outlineSeamFaces.count, s.outlineSeamFaces[l].count == loop.count { s.outlineSeamFaces[l] = rot(s.outlineSeamFaces[l], k) }
-                if l < s.outlineSeamTilt.count, s.outlineSeamTilt[l].count == loop.count { s.outlineSeamTilt[l] = rot(s.outlineSeamTilt[l], k) }
-                if l < s.outlineSeamDepthMM.count, s.outlineSeamDepthMM[l].count == loop.count { s.outlineSeamDepthMM[l] = rot(s.outlineSeamDepthMM[l], k) }
-            }
-            let n = s.outlineLoops.count
-            let order = s.outlineLoops.indices.sorted { less(s.outlineLoops[$0].first ?? .zero, s.outlineLoops[$1].first ?? .zero) }
-            s.outlineLoops = order.map { s.outlineLoops[$0] }
-            if s.outlineSeams.count == n { s.outlineSeams = order.map { s.outlineSeams[$0] } }
-            if s.outlineSeamFaces.count == n { s.outlineSeamFaces = order.map { s.outlineSeamFaces[$0] } }
-            if s.outlineSeamTilt.count == n { s.outlineSeamTilt = order.map { s.outlineSeamTilt[$0] } }
-            if s.outlineSeamDepthMM.count == n { s.outlineSeamDepthMM = order.map { s.outlineSeamDepthMM[$0] } }
-            return s
-        }
+        return String(decoding: try sorted(parsed), as: UTF8.self)
     }
 }
