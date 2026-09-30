@@ -233,7 +233,11 @@ struct FlexibleMorePanel: View {
         VStack(alignment: .leading, spacing: DS.Space.xs) {
             let calibrateFirst = model.material?.noPrediction != nil
             if let m = model.material, m.noPrediction == nil {
-                FlexRow(FlexibleRowCopy.temperature, info: FlexibleRowCopy.Info.temperature, id: "flexible-row-temp") {
+                // a temperature core has a note on (not in order, estimated…) is said by the
+                // row's colour; the (i) carries the note itself
+                let note = model.settings.nozzleTempC.map { model.temperatureNote($0) } ?? ""
+                FlexRow(FlexibleRowCopy.temperature, info: FlexibleRowCopy.Info.temperature, id: "flexible-row-temp",
+                        warning: !note.isEmpty) {
                     FlexChips(options: FlexibleRowCopy.temperatureOptions(m.testedTempsC),
                               selection: model.settings.nozzleTempC.map { String(Int($0)) } ?? "auto", id: "flexible-temp",
                               equalWidths: false) { v in
@@ -241,8 +245,8 @@ struct FlexibleMorePanel: View {
                     }
                     .fixedSize()
                 } extra: {
-                    if let t = model.settings.nozzleTempC, !model.temperatureNote(t).isEmpty {
-                        FlexInfoText("\(Int(t)) °C: \(model.temperatureNote(t))", warning: true)
+                    if let t = model.settings.nozzleTempC, !note.isEmpty {
+                        FlexInfoText("\(Int(t)) °C: \(note)", warning: true)
                     }
                 }
             } else {

@@ -108,6 +108,7 @@ final class FlexibleRowCopyTests: XCTestCase {
         XCTAssertTrue(panel.contains("FlexibleRowCopy.autoLine("))
         XCTAssertTrue(panel.contains("warning: auto.warning"))
         XCTAssertFalse(panel.contains(".frame(width: 2"), "no chip row squeezed into a fixed frame")
+        XCTAssertTrue(panel.contains("warning: !note.isEmpty"), "a temperature core has a note on is coloured")
     }
 
     #if canImport(AppKit)
