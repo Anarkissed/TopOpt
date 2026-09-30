@@ -33,6 +33,9 @@ struct FlexibleFaceList: View {
         let line: String
         let pressed: Bool
         let selected: Bool
+        /// ★ D2: the face's squeeze group's number, only while there are two or more (its dot
+        /// takes the group's colour).
+        var group: Int? = nil
         var id: Int { region }
     }
 
@@ -42,10 +45,12 @@ struct FlexibleFaceList: View {
     static func rows(model: FlexibleStageModel) -> [Row] {
         let faces = model.settings.faces
         let ordered = faces.filter(\.isLoaded) + faces.filter { !$0.isLoaded }
+        let groups = model.squeezeGroups
         return ordered.map { f in
             Row(region: f.faceRegionID,
                 line: FlexibleRowCopy.faceRow(name: model.faceName(f.faceRegionID), pressed: f.isLoaded, kg: f.weightKg),
-                pressed: f.isLoaded, selected: f.faceRegionID == model.selectedRegion)
+                pressed: f.isLoaded, selected: f.faceRegionID == model.selectedRegion,
+                group: groups.count > 1 ? groups.first { $0.regions.contains(f.faceRegionID) }?.number : nil)
         }
     }
 
@@ -94,7 +99,8 @@ struct FlexibleFaceList: View {
     private func label(_ row: Row) -> some View {
         HStack(spacing: DS.Space.s) {
             Circle()
-                .fill((row.pressed ? DS.Color.accentGreen : DS.Color.accentCyan).color)
+                .fill((row.pressed ? (row.group.map { FlexibleSqueezeGroups.colour(number: $0) } ?? DS.Color.accentGreen)
+                       : DS.Color.accentCyan).color)
                 .frame(width: 10, height: 10)
             Text(row.line)
                 .font(.system(size: 14, weight: row.selected ? .semibold : .medium))
@@ -114,14 +120,12 @@ struct FlexibleFaceList: View {
         .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 
-    // MARK: ★ SQUEEZE GROUPS (batch D2) — the group rows go HERE.
+    // MARK: ★ SQUEEZE GROUPS (round 4 batch D2) — right under the faces.
     // His img 4: "there needs to be a setting that says Groups faces together — preferably the
     // face area in the settings. The user should group all of them together, or group two sides
-    // together with another two sides as a different group". D2 adds the group rows (a group's
-    // faces, its ONE squeeze force — his answer 1: "Squeeze 10 kg" applies to every face in the
-    // group, like two hands pressing equally; each face keeps its own curve) right under the
-    // faces above. Nothing is drawn here until then.
+    // together with another two sides as a different group". One line per group — its faces and
+    // its ONE squeeze force (his answer 1) — FlexibleSqueezeGroupRows; a face moves from its card.
     @ViewBuilder private var squeezeGroupRows: some View {
-        EmptyView()
+        FlexibleSqueezeGroupRows(model: model, padTarget: $padTarget)
     }
 }

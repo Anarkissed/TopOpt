@@ -172,13 +172,19 @@ public struct FlexibleMainPlayerSlot: View {
 
     public var body: some View {
         GeometryReader { g in
+            // ★ ROUND 4 (D2): the group picker widens it, a group's miss line heightens it — the
+            // placement keeps the whole of it clear of every button and legend
+            let sims = main.sims, note = main.simNote
+            let size = FlexibleSquishPlayer.size(picker: sims.count > 1, note: note != nil)
             if main.playerShown,
                let r = FlexibleLegendPlacement.player(viewport: g.size, bottomClearance: bottomClearance,
                                                       keepOut: Self.keepOut(viewport: g.size, bottomClearance: bottomClearance,
                                                                             chipColumnWidth: chipColumnWidth,
                                                                             legends: main.legendFrames(viewport: g.size, bottomClearance: bottomClearance,
-                                                                                                       chipColumnWidth: chipColumnWidth).values.map(\.frame))) {
-                FlexibleSquishPlayer(loop: main.loop, fullLabel: main.fullLabel, width: r.width)
+                                                                                                       chipColumnWidth: chipColumnWidth).values.map(\.frame)),
+                                                      size: size) {
+                FlexibleSquishPlayer(loop: main.loop, fullLabel: main.fullLabel, width: r.width,
+                                     sims: sims, shown: main.shownSimInfo, onPick: { main.pick($0) }, note: note)
                     .latticeBandChipKeepOut()
                     .position(x: r.midX, y: r.midY)
             }

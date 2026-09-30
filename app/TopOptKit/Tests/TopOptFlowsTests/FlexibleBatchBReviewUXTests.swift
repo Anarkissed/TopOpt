@@ -28,9 +28,9 @@ final class FlexibleBatchBReviewUXTests: XCTestCase {
     private func inputs(_ faces: [FlexibleReadiness.Face], material: String? = "varioshore_tpu",
                         withData: (id: String, name: String)? = (id: "varioshore_tpu", name: "colorFabb varioShore TPU"),
                         anyFilament: (id: String, name: String)? = (id: "tpu95a_generic", name: "TPU 95A"),
-                        conflicts: [(a: Int, b: Int)] = [], selected: Int? = nil, suggested: Int? = nil) -> FlexibleReadiness.Inputs {
+                        selected: Int? = nil, suggested: Int? = nil) -> FlexibleReadiness.Inputs {
         FlexibleReadiness.Inputs(materialID: material, materialName: "colorFabb varioShore TPU (foaming)",
-                                 calibrateFirst: false, withData: withData, pressed: faces, conflicts: conflicts,
+                                 calibrateFirst: false, withData: withData, pressed: faces,
                                  nozzleIsAuto: true, topologyIsGyroid: true, selected: selected,
                                  anyFilament: anyFilament, suggested: suggested)
     }
@@ -43,7 +43,7 @@ final class FlexibleBatchBReviewUXTests: XCTestCase {
             ("no filament, none with data", inputs([face(1)], material: nil, withData: nil)),
             ("no pressed face, nothing selected", inputs([], suggested: 7)),
             ("no pressed face, one selected", inputs([], selected: 4, suggested: 7)),
-            ("shared stack", inputs([face(3), face(5)], conflicts: [(a: 3, b: 5)])),
+            // ★ RE-PINNED (round 4 D2): "shared stack" is no blocker any more (a pinch builds) — gone from this list
             ("no stack", inputs([face(2, stacked: false, stackError: "no lattice under it")])),
             ("no weight", inputs([face(2, kg: 0)])),
             ("refused", inputs([face(2, design: .refused(code: "no_pressure", reason: "x"))])),
@@ -121,15 +121,17 @@ final class FlexibleBatchBReviewUXTests: XCTestCase {
     }
 
     func testABlockerStandingWhenThePageOpensPopsOnce() {
-        let block = FlexibleReadiness.evaluate(inputs([face(3), face(5)], conflicts: [(a: 3, b: 5)]))
+        // ★ RE-PINNED (round 4 batch D2): the blocker was 3/5's shared stack, which no longer
+        // blocks (a pinch builds); the rule under test is the prompt's, on any blocker — a weight
+        let block = FlexibleReadiness.evaluate(inputs([face(3), face(5, kg: 0)]))
         var p = FlexibleFixPrompt(actionSerial: 4, popExisting: true)
         XCTAssertNil(p.next(block, actionSerial: 4, settled: false), "not while the scene / designs are in flight")
-        XCTAssertEqual(p.next(block, actionSerial: 4, settled: true)?.kind, .sharedStack, "at once, when settled")
+        XCTAssertEqual(p.next(block, actionSerial: 4, settled: true)?.kind, .noWeight, "at once, when settled")
         XCTAssertNil(p.next(block, actionSerial: 4, settled: true), "once — recompute noise never re-pops it")
         // a clear page opens with nothing to pop, and then only his actions pop
         var q = FlexibleFixPrompt(actionSerial: 4, popExisting: true)
         XCTAssertNil(q.next(FlexibleReadiness.evaluate(inputs([face(3)])), actionSerial: 4, settled: true))
-        XCTAssertEqual(q.next(block, actionSerial: 5, settled: false)?.kind, .sharedStack)
+        XCTAssertEqual(q.next(block, actionSerial: 5, settled: false)?.kind, .noWeight)
         // ★ RED CONTROL: the old prompt (no pop on open) stays silent on the same readiness
         var old = FlexibleFixPrompt(actionSerial: 4)
         XCTAssertNil(old.next(block, actionSerial: 4, settled: true))
@@ -151,9 +153,9 @@ final class FlexibleBatchBReviewUXTests: XCTestCase {
         // ★ RED CONTROL: the one-face rule turns face-on to Face 5 (LEFT)
         let old = try XCTUnwrap(FlexibleFixPopup.cameraRegion(load: SIMD3(1, 0, 0), settle: settle))
         XCTAssertEqual(old.kind, .face)
-        // the issue names both ends (the pop-up pulses both)
-        let issue = try XCTUnwrap(FlexibleReadiness.evaluate(inputs([face(3), face(5)], conflicts: [(a: 3, b: 5)])).blocking.first)
-        XCTAssertEqual(issue.named, [5, 3])
+        // ★ RE-PINNED (round 4 batch D2): no issue names both ends of a stack any more — two
+        // pressed faces on one stack are a pinch (or separate squeezes) and nothing blocks
+        XCTAssertTrue(FlexibleReadiness.evaluate(inputs([face(3), face(5)])).blocking.isEmpty)
     }
 
     // MARK: placement — the top line and the pop-up never cover a button
@@ -199,11 +201,13 @@ final class FlexibleBatchBReviewUXTests: XCTestCase {
     }
 
     func testThePillReadsWholeAndSaysLatticeOnce() throws {
-        let r = FlexibleReadiness.evaluate(inputs([face(3), face(5)], conflicts: [(a: 3, b: 5)]))
+        // ★ RE-PINNED (round 4 batch D2): the shared stack no longer blocks — the pill's short
+        // form, on the weight blocker instead
+        let r = FlexibleReadiness.evaluate(inputs([face(3), face(5, kg: 0)]))
         let s = FlexibleMainStatus.of(readiness: r, sceneReady: true, isBuilding: false, lattice: nil, stale: false)
-        XCTAssertEqual(s.line, "Fix: Face 3 & Face 5 share a stack")
+        XCTAssertEqual(s.line, "Fix: the weight on Face 5")
         XCTAssertEqual(s.tone, .fix)
-        XCTAssertEqual(s.fix?.kind, .sharedStack, "a tap opens that fix")
+        XCTAssertEqual(s.fix?.kind, .noWeight, "a tap opens that fix")
         XCTAssertLessThan(s.line.count, r.oneLine.count, "control: the Settings line is the longer sentence")
         for line in [FlexibleMainStatus.ready, FlexibleMainStatus.building, FlexibleMainStatus.notOpened] {
             XCTAssertFalse(line.localizedCaseInsensitiveContains("lattice"), "the pill's title already says Lattice: \(line)")

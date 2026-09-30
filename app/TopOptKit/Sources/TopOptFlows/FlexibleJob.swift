@@ -56,11 +56,18 @@ public enum FlexibleJob {
         case noFilament
         case noLoadedFace
         case missingStampGrid(UUID)
+        /// ★ ROUND 4 (D2): two or more squeeze groups — core designs one squeeze (core brief).
+        case squeezeGroups
+        /// ★ ROUND 4 (D2): a pinch (two faces of one group on one stack) — core designs one
+        /// profile per stack (core brief).
+        case pinch
         public var description: String {
             switch self {
             case .noFilament: return "Pick a filament first."
             case .noLoadedFace: return "Mark at least one face as carrying weight."
             case .missingStampGrid: return "A stamp has not been laid on its face yet."
+            case .squeezeGroups: return "Squeeze groups are the app's preview for now: core designs one squeeze at a time."
+            case .pinch: return "A pinch is the app's preview for now: core designs one squish profile per stack."
             }
         }
     }
@@ -70,6 +77,8 @@ public enum FlexibleJob {
     public static func runJobJSON(_ i: Inputs) throws -> String {
         guard let material = i.settings.materialID else { throw EncodeError.noFilament }
         guard !i.settings.loadedFaces.isEmpty else { throw EncodeError.noLoadedFace }
+        // ★ ROUND 4 (D2): core designs ONE squeeze (core brief: load cases)
+        guard FlexibleSqueezeGroups.groups(i.settings).count <= 1 else { throw EncodeError.squeezeGroups }
         var faces: [[String: Any]] = []
         let finish = i.settings.finishMode
         for f in i.settings.faces { faces.append(try faceEntry(f, finish: finish, stamps: i.stampGrids)) }

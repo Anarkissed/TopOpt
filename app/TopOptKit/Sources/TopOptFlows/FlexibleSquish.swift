@@ -240,11 +240,18 @@ public struct FlexibleLatticeLayerInputs: Equatable {
     /// (MeshRenderer+FlexibleLattice.stepFlexibleLoop), so the squish never publishes into
     /// WorkspacePlaceholder's body. nil ⇒ the view's own flexScale (the Settings page).
     public var loop: FlexibleSquishLoop?
+    /// ★ ROUND 4 (D2): the token the squish FACES are uploaded by — the player's group pick
+    /// changes which faces squish without a new lattice (FlexibleLatticePass.uploadFaces), so
+    /// the volumes are not re-uploaded. Defaults to `token`.
+    public var facesToken: Int
 
     public init(lattice: FlexibleLatticeInputs, faces: [FlexibleSquishFace], token: Int, hidden: Bool = false,
-                loop: FlexibleSquishLoop? = nil) {
+                loop: FlexibleSquishLoop? = nil, facesToken: Int? = nil) {
         self.lattice = lattice; self.faces = faces; self.token = token; self.hidden = hidden; self.loop = loop
+        self.facesToken = facesToken ?? token
     }
 
-    public static func == (a: Self, b: Self) -> Bool { a.token == b.token && a.hidden == b.hidden && a.loop === b.loop }
+    public static func == (a: Self, b: Self) -> Bool {
+        a.token == b.token && a.hidden == b.hidden && a.loop === b.loop && a.facesToken == b.facesToken
+    }
 }

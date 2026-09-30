@@ -483,7 +483,6 @@ public enum FlexibleColours {
     /// ★ Not the map's green (verification of round 3): the on-part colour, like the curves.
     public static let selectedFace = token(DS.Color.textPrimary, 0.45)
     public static let linkedEnd = token(DS.Color.accentCyan, 0.45)
-    public static let conflict = token(DS.Color.warning, 0.6)
     public static let restingFace = token(DS.Color.accentCyan, 0.25)
     /// The X-ray ghost's glow (the body's clay under X-ray).
     /// ★ Neutral white, not cyan: the dent ramp runs blue → cyan → white (2026-09-30), and a

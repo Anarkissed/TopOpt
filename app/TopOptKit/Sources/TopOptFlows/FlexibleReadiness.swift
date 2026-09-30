@@ -10,15 +10,18 @@
 // ★ WHAT BLOCKS (decisions): only what truly stops a lattice —
 //   * no filament (a legacy project only),
 //   * no pressed face,
-//   * two pressed faces that share a stack (core refuses to assemble them: "push the same
-//     material along the same axis"),
 //   * a pressed face core cannot stack,
 //   * a pressed face with no weight (core: "weight must be > 0"),
 //   * a core refusal with no automatic fix.
 // ★ WHAT NEVER BLOCKS: a calibrate-first filament (9 of 10 — Exit builds a SHAPE-ONLY
 // lattice, "<filament>: shape only — no squish predicted", his answer), more than four
 // pressed faces (the walls use every face; the squish is shown on the 4 largest), and
-// "still being designed" (Exit proceeds; the main page's pill says "Building…").
+// "still being designed" (Exit proceeds; the main page's pill says "Building…"), and — ★ ROUND 4
+// (D2, his img 3: "you would absolutely squeeze the two sides together. One side wouldn't
+// rest.") — TWO PRESSED FACES ON ONE STACK: inside one squeeze group they are a PINCH, built as
+// two segments (FlexiblePinch); in two groups they are separate squeezes and the firmer wins
+// (FlexibleGroupField). Round 3's "share a stack" blocker and its [Face 5 rests] [Face 3 rests]
+// fixes (the "Rest the other end" machinery) are gone.
 // ★ SILENT AUTO-FIXES (with a toast): temperature_not_tested → Auto; topology_no_data /
 // honeycomb_side_stack → Gyroid.
 //
@@ -57,7 +60,7 @@ public enum FlexibleFix: Hashable, Sendable {
 /// One thing the readiness line / the pop-up says.
 public struct FlexibleIssue: Equatable, Identifiable, Sendable {
     public enum Kind: String, Sendable {
-        case noFilament, noPressedFace, sharedStack, noStack, noWeight, refused, designFailed
+        case noFilament, noPressedFace, noStack, noWeight, refused, designFailed
         // never blocking
         case stillDesigning, shapeOnly, squishOnFour
         /// The last build failed on these settings and this scene (core's words; batch B review).
@@ -73,12 +76,12 @@ public struct FlexibleIssue: Equatable, Identifiable, Sendable {
     public let blocking: Bool
     public let fixes: [FlexibleFix]
     /// ★ BATCH B REVIEW: the main page's pill form — short enough to read whole in the bottom
-    /// bar at 11" portrait ("Fix: Face 3 & Face 5 share a stack"); the full sentence is on the
-    /// pop-up the pill opens.
+    /// bar at 11" portrait ("Fix: the weight on Face 3"); the full sentence is on the pop-up the
+    /// pill opens.
     public let pill: String
 
-    /// Every face the issue names — its own, then the other its fixes rest (a shared stack:
-    /// both ends; the pop-up pulses them all and turns the camera to see both).
+    /// Every face the issue names — its own, then any other its fixes rest (the pop-up pulses
+    /// them all and turns the camera to see them).
     public var named: [Int] {
         var out: [Int] = region.map { [$0] } ?? []
         for f in fixes { if case .rest(let r) = f, !out.contains(r) { out.append(r) } }
@@ -184,8 +187,6 @@ public struct FlexibleReadiness: Equatable, Sendable {
         /// suggestedFace) — "no pressed face" with nothing selected had NO button.
         public var suggested: Int?
         public var pressed: [Face]
-        /// core's stack conflicts among the pressed faces (a, b in core's order).
-        public var conflicts: [(a: Int, b: Int)]
         public var nozzleIsAuto: Bool
         public var topologyIsGyroid: Bool
         public var selected: Int?
@@ -199,14 +200,14 @@ public struct FlexibleReadiness: Equatable, Sendable {
         public var buildFailure: String?
 
         public init(materialID: String?, materialName: String?, calibrateFirst: Bool,
-                    withData: (id: String, name: String)?, pressed: [Face], conflicts: [(a: Int, b: Int)],
+                    withData: (id: String, name: String)?, pressed: [Face],
                     nozzleIsAuto: Bool = true, topologyIsGyroid: Bool = false, selected: Int? = nil,
                     name: @escaping (Int) -> String = { "Face \($0)" },
                     removable: @escaping (Int) -> Bool = { _ in true },
                     inherited: @escaping (Int) -> Bool = { _ in false }, buildFailure: String? = nil,
                     anyFilament: (id: String, name: String)? = nil, suggested: Int? = nil) {
             self.materialID = materialID; self.materialName = materialName; self.calibrateFirst = calibrateFirst
-            self.withData = withData; self.pressed = pressed; self.conflicts = conflicts
+            self.withData = withData; self.pressed = pressed
             self.nozzleIsAuto = nozzleIsAuto; self.topologyIsGyroid = topologyIsGyroid; self.selected = selected
             self.name = name; self.removable = removable; self.inherited = inherited
             self.buildFailure = buildFailure
@@ -248,20 +249,9 @@ public struct FlexibleReadiness: Equatable, Sendable {
                                      fixes: target.map { [.press($0)] } ?? [],
                                      pill: "Fix: press the face that carries weight"))
         }
-        // 3. two pressed faces sharing a stack — ★ FIRST among the per-face issues: on his
-        // project it is THE one thing (the old gate said "calibrate-first" before it)
-        var seenPairs = Set<String>()
-        for c in i.conflicts {
-            let (a, b) = (min(c.a, c.b), max(c.a, c.b))
-            let key = "\(a)|\(b)"
-            guard seenPairs.insert(key).inserted else { continue }
-            out.append(FlexibleIssue(id: "sharedStack|\(key)", kind: .sharedStack, region: c.b,
-                                     oneLine: "\(name(c.a)) and \(name(c.b)) press the same material",
-                                     blocking: true,
-                                     fixes: [.rest(c.b), .rest(c.a)],
-                                     pill: "Fix: \(name(c.a)) & \(name(c.b)) share a stack"))
-        }
-        // 4–7. per pressed face
+        // ★ ROUND 4 (D2): two pressed faces on one stack no longer block — a pinch inside a
+        // squeeze group is two segments, two groups are separate squeezes (firmer wins)
+        // 3–6. per pressed face
         for f in i.pressed {
             let r = f.region
             if let e = f.stackError {
@@ -457,10 +447,12 @@ extension FlexibleStageModel {
             let k = FlexFaceKey(region: f.faceRegionID, rotation: f.rotationDeg)
             let st = stacks[k]
             var design: FlexibleReadiness.DesignState = .pending
+            // ★ ROUND 4 (D2): core's words about the face as it WAS wait for the run in flight
+            let fresh = !designsInFlight || designedInputs[k] == Self.designInputKey(f)
             if let d = designs[k] {
-                design = d.refusal.map { .refused(code: $0.code, reason: text($0.reason)) } ?? .ok
+                design = d.refusal.map { fresh ? .refused(code: $0.code, reason: text($0.reason)) : .pending } ?? .ok
             } else if let e = designErrors[k] {
-                design = .failed(text(e))
+                design = fresh ? .failed(text(e)) : .pending
             }
             return FlexibleReadiness.Face(region: f.faceRegionID, weightKg: f.weightKg, stacked: st != nil,
                                           stackError: stackErrors[k].map { text($0) }, design: design,
@@ -468,15 +460,9 @@ extension FlexibleStageModel {
         }
         let withData = catalogue.first { $0.noPrediction == nil }.map { (id: $0.id, name: $0.displayName) }
         let anyFilament = catalogue.first.map { (id: $0.id, name: $0.displayName) }
-        let pressedIDs = Set(s.loadedFaces.map(\.faceRegionID))
         return FlexibleReadiness.Inputs(
             materialID: s.materialID, materialName: material?.displayName ?? s.materialID,
             calibrateFirst: calibrateFirst, withData: withData, pressed: pressed,
-            // ★ a pair core found BEFORE his last action may name a face that no longer presses
-            // (he just rested it): the line and the pop-up clear at once, not when the
-            // pipeline next lands
-            conflicts: conflicts.filter { pressedIDs.contains($0.faceA) && pressedIDs.contains($0.faceB) }
-                .map { (a: $0.faceA, b: $0.faceB) },
             nozzleIsAuto: s.nozzleTempC == nil, topologyIsGyroid: s.topology == "gyroid",
             selected: selectedRegion,
             name: { [weak self] r in self?.displayName(r) ?? "Face \(r)" },

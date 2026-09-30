@@ -86,6 +86,11 @@ public struct FlexibleFaceSettings: Codable, Equatable, Hashable, Sendable, Iden
     /// sends the drawn curves and never a stamp (a stamp kept from before is stored, not
     /// used); Stamp sends flat curves and its ONE stamp (`designStamp`) at the face's weight.
     public var shape: String?
+    /// ★ ROUND 4 (D2, his img 3 / img 4 and answer 1): the SQUEEZE GROUP this pressed face is in
+    /// (FlexibleSqueezeGroups) — nil ⇒ group 1, so every pressed face starts in one group. Faces
+    /// of one group are squeezed AT THE SAME TIME with one force (a pinch across a stack is two
+    /// segments); separate groups are separate squeezes. OPTIONAL so old projects decode.
+    public var squeezeGroup: Int?
 
     public init(faceRegionID: Int, role: String = "loaded", rotationDeg: Int = 0,
                 weightKg: Double = 10, deepestMM: Double = 3, mode: String = "both",
@@ -93,12 +98,12 @@ public struct FlexibleFaceSettings: Codable, Equatable, Hashable, Sendable, Iden
                 curveY: FlexCurve = FlexibleFaceSettings.defaultCurve,
                 curveCentreEdge: FlexCurve = FlexCurve(x: [0, 1], y: [0.3, 1]),
                 skinOn: Bool = true, designStamp: FlexibleStampPlacement? = nil,
-                weightFrom: UUID? = nil, shape: String? = nil) {
+                weightFrom: UUID? = nil, shape: String? = nil, squeezeGroup: Int? = nil) {
         self.faceRegionID = faceRegionID; self.role = role; self.rotationDeg = rotationDeg
         self.weightKg = weightKg; self.deepestMM = deepestMM; self.mode = mode
         self.curveX = curveX; self.curveY = curveY; self.curveCentreEdge = curveCentreEdge
         self.skinOn = skinOn; self.designStamp = designStamp
-        self.weightFrom = weightFrom; self.shape = shape
+        self.weightFrom = weightFrom; self.shape = shape; self.squeezeGroup = squeezeGroup
     }
 
     /// A gentle dome: soft in the middle, firmer at both ends. A starting drawing, not a

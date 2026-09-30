@@ -80,6 +80,10 @@ extension MeshRenderer {
         if pass.token != inputs.token {
             pass.upload(inputs)
             changed = true
+        } else if pass.facesToken != inputs.facesToken {
+            // ★ ROUND 4 (D2): the player's pick — the same lattice, other faces squishing
+            pass.uploadFaces(inputs)
+            changed = true
         }
         if pass.hidden != inputs.hidden {
             pass.hidden = inputs.hidden

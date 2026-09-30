@@ -175,9 +175,13 @@ struct FlexibleFaceRows: View {
                 .lineLimit(1)
                 .accessibilityIdentifier("flexible-row-pressed-on-main")
         }
-        if let c = model.conflicts.first(where: { $0.faceA == r || $0.faceB == r }) {
-            FlexWarningLine(text: FlexibleRowCopy.sharesStack(with: name(c.faceA == r ? c.faceB : c.faceA)),
-                            id: "flexible-row-conflict")
+        // ★ ROUND 4 (D2): two faces of one group on one stack are a PINCH — never a warning
+        // (round 3 said "Shares a stack with …" and blocked Exit): each half is its own face's
+        if f.isLoaded, let other = model.pinchPartners(r).first {
+            Text(FlexibleRowCopy.pinched(with: name(other)))
+                .font(.system(size: 12, weight: .medium)).foregroundStyle(DS.Color.textSecondary.color)
+                .lineLimit(1)
+                .accessibilityIdentifier("flexible-row-pinch")
         }
         if f.isLoaded, let w = warning(r) { FlexWarningLine(text: w) }
         if f.isLoaded {
@@ -193,6 +197,8 @@ struct FlexibleFaceRows: View {
                     .lineLimit(1)
                     .accessibilityIdentifier("flexible-row-relinked")
             }
+            // ★ ROUND 4 (D2): which squeeze group — [1] [2] [+ New] (its weight IS the group's force)
+            FlexibleFaceGroupRow(model: model, region: r)
             FlexRow(FlexibleRowCopy.shape, info: FlexibleRowCopy.Info.shape, id: "flexible-row-shape") {
                 // ★ ROUND 4 (D1): an either/or — Stamp shows the face's ONE stamp below (flat
                 // curves + design_stamp, the face's weight, the prism on its footprint) and the

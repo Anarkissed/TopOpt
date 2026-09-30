@@ -50,19 +50,25 @@ public enum FlexiblePageChannels {
     /// still moves them, so the ghost itself squishes.
     public static func channels(model: FlexibleStageModel, overlay: FlexibleOverlayMesh?, xray: Bool,
                                 drawnLattice: FlexibleGeneratedLattice?, heat: Bool = true) -> Channels {
-        // part regions: loaded / resting / selected / linked other end / conflict — by REGION,
-        // so a split sector is tinted on its own side of its cuts (FlexibleRegions)
+        // part regions: loaded / resting / selected / linked other end — by REGION, so a split
+        // sector is tinted on its own side of its cuts (FlexibleRegions).
+        // ★ ROUND 4 (D2): no "conflict" tint — two faces on one stack are a pinch (one group) or
+        // separate squeezes (two groups), never an error; with two or more squeeze groups a
+        // pressed face's own part takes its GROUP's colour (FlexibleSqueezeGroups.palette, never
+        // purple) — seen until its map quads cover it (the face list's dots carry it after)
         let regions = model.regions
-        let conflictRegions = Set(model.conflicts.flatMap { [$0.faceA, $0.faceB] })
+        let groups = model.squeezeGroups
         var regionTint: [(id: Int, tint: SIMD4<Float>)] = []   // later entries win
         for f in model.settings.faces {
             var c = f.isLoaded ? FlexibleColours.loadedFace : FlexibleColours.restingFace
-            if conflictRegions.contains(f.faceRegionID) { c = FlexibleColours.conflict }
+            if f.isLoaded, groups.count > 1, let g = groups.first(where: { $0.regions.contains(f.faceRegionID) }) {
+                c = FlexibleColours.token(FlexibleSqueezeGroups.colour(number: g.number), FlexibleColours.loadedFace.w)
+            }
             regionTint.append((f.faceRegionID, c))
         }
         if let r = model.selectedRegion {
             if let st = model.stack(r) { for l in st.exitRegions { regionTint.append((l.id, FlexibleColours.linkedEnd)) } }
-            if !conflictRegions.contains(r) { regionTint.append((r, FlexibleColours.selectedFace)) }
+            regionTint.append((r, FlexibleColours.selectedFace))
         }
         let partMesh = model.project.viewerMesh
         let tintOf: (Int, SIMD3<Double>) -> SIMD4<Float>? = { face, centroid in

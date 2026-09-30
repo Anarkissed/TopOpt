@@ -166,15 +166,74 @@ public final class FlexibleSquishLoop: ObservableObject {
 }
 
 /// The control: [▶︎] Rest ——●—— 10 kg, in the Results player's capsule.
+/// ★ ROUND 4 (D2): with two or more squeeze groups, a GROUP PICKER leads the capsule —
+/// "[Group 1 ▾]": each group's squeeze (only its faces squish), or "All at once" — and a group
+/// that squishes less than it was designed for says so in one line above the capsule.
 struct FlexibleSquishPlayer: View {
     @ObservedObject var loop: FlexibleSquishLoop
     let fullLabel: String
     /// The capsule's width (FlexibleLegendPlacement.player); the slider takes what is left.
     var width: CGFloat = FlexibleLegendPlacement.playerSize.width
+    /// The squeezes to pick from (none, or one: no picker), the one shown, and the pick.
+    var sims: [FlexibleSim] = []
+    var shown: FlexibleSim?
+    var onPick: (String) -> Void = { _ in }
+    /// "Group 2 squishes 1.2 of 3.0 mm · firmer wins" — above the capsule.
+    var note: String?
+
+    /// The player's size: wider with the picker, taller with the note.
+    static func size(picker: Bool, note: Bool) -> CGSize {
+        let s = FlexibleLegendPlacement.playerSize
+        return CGSize(width: s.width + (picker ? pickerWidth : 0), height: s.height + (note ? noteHeight : 0))
+    }
+    static let pickerWidth: CGFloat = 104
+    static let noteHeight: CGFloat = 22
 
     var body: some View {
+        VStack(spacing: 4) {
+            if let note {
+                Text(note)
+                    .dsStyle(DS.TypeScale.footnote)
+                    .foregroundStyle(DS.Color.textSecondary.color)
+                    .lineLimit(1).minimumScaleFactor(0.8)
+                    .padding(.horizontal, DS.Space.m).padding(.vertical, 2)
+                    .background(Capsule().fill(DS.Surface.bar.color))
+                    .frame(height: Self.noteHeight - 4)
+                    .accessibilityIdentifier("flexible-squish-note")
+            }
+            capsule
+        }
+        .accessibilityIdentifier("flexible-squish-player")
+    }
+
+    private var picker: some View {
+        Menu {
+            ForEach(sims) { sim in
+                Button { onPick(sim.id) } label: {
+                    if sim.id == shown?.id { Label(sim.title, systemImage: "checkmark") } else { Text(sim.title) }
+                }
+                .accessibilityIdentifier("flexible-squish-sim-\(sim.id)")
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Text(shown?.short ?? FlexibleRowCopy.simAllShort)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(DS.Color.textPrimary.color)
+                    .lineLimit(1).fixedSize()
+                Image(systemName: "chevron.up.chevron.down").font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(DS.Color.textSecondary.color)
+            }
+            .padding(.horizontal, 10).frame(height: 30)
+            .background(Capsule().fill(DS.Color.fillSelected.color))
+        }
+        .accessibilityLabel("Which squeeze plays")
+        .accessibilityIdentifier("flexible-squish-picker")
+    }
+
+    private var capsule: some View {
         TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: !loop.playing)) { _ in
             HStack(spacing: DS.Space.sm) {
+                if sims.count > 1 { picker }
                 Button { loop.toggle() } label: {
                     Image(systemName: loop.playing ? "pause.fill" : "play.fill")
                         .font(.system(size: 12, weight: .bold))
@@ -206,6 +265,5 @@ struct FlexibleSquishPlayer: View {
                 .overlay(Capsule().strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
             .dsShadow(.panel)
         }
-        .accessibilityIdentifier("flexible-squish-player")
     }
 }

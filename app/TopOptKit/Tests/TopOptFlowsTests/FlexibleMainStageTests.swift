@@ -89,15 +89,22 @@ final class FlexibleMainStageTests: XCTestCase {
             m.sceneState == .ready && m.loadedKeys.allSatisfy { m.stacks[$0] != nil } && !m.readiness.designing
         }
         await m.waitForIdle()
+        // ★ RE-PINNED (round 4 batch D2): his project as saved no longer blocks — faces 3 and 5
+        // are a pinch, which builds. The pill's rule is shown on a blocker he can still make: a
+        // face with no weight
+        XCTAssertTrue(m.readiness.isReady, "his pinch never blocks")
+        m.edit { s in var f = s.face(5)!; f.weightKg = 0; s.setFace(f) }
+        await m.waitForIdle()
+        try await FlexibleHisProject.waitFor(60, "the designs") { !m.readiness.designing }
         let s = stage.status
         XCTAssertEqual(s.tone, .fix)
         // ★ batch B review: the pill's SHORT form (the whole sentence truncated at 11" portrait)
         XCTAssertEqual(s.line, m.readiness.blocking.first?.pill, "the pill says the one thing to fix")
-        XCTAssertEqual(s.line, "Fix: Face 3 & Face 5 share a stack")
-        XCTAssertEqual(s.fix?.kind, .sharedStack)
+        XCTAssertEqual(s.line, "Fix: the weight on Face 5")
+        XCTAssertEqual(s.fix?.kind, .noWeight)
         stage.openFix()
-        XCTAssertEqual(m.pendingFix?.kind, .sharedStack, "a tap opens Settings on that fix")
-        m.rest(5)
+        XCTAssertEqual(m.pendingFix?.kind, .noWeight, "a tap opens Settings on that fix")
+        m.setWeight(5, kg: 10)
         stage.didExitSettings()
         XCTAssertEqual(stage.status.line, FlexibleMainStatus.building)
         try await FlexibleHisProject.waitFor(120, "the lattice") { m.lattice != nil || m.latticeError != nil }
@@ -181,8 +188,7 @@ final class FlexibleMainStageTests: XCTestCase {
         // the readiness never blocks on the count
         let r = FlexibleReadiness.evaluate(FlexibleReadiness.Inputs(
             materialID: "varioshore_tpu", materialName: "varioShore", calibrateFirst: false, withData: nil,
-            pressed: faces.map { FlexibleReadiness.Face(region: $0.key, weightKg: 10, stacked: true, design: .ok, areaMM2: $0.areaMM2) },
-            conflicts: []))
+            pressed: faces.map { FlexibleReadiness.Face(region: $0.key, weightKg: 10, stacked: true, design: .ok, areaMM2: $0.areaMM2) }))
         XCTAssertTrue(r.isReady)
     }
 

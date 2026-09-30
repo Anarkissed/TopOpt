@@ -108,6 +108,9 @@ final class FlexibleLatticePass {
 
     // ── what was uploaded (once per token) ──
     private(set) var token = -1
+    /// ★ ROUND 4 (D2): the squish faces' token (the player's pick re-uploads them alone).
+    private(set) var facesToken = -1
+    private(set) var faceUploadCount = 0
     /// Hidden while a new lattice builds: the volumes stay, only the march is skipped.
     var hidden = false
     /// ★ BATCH B: the MAIN page's squish loop (FlexibleSquishLoop), stepped by the renderer
@@ -231,6 +234,7 @@ final class FlexibleLatticePass {
 
     func upload(_ l: FlexibleLatticeLayerInputs) {
         token = l.token
+        facesToken = l.facesToken
         hidden = l.hidden
         uploadCount += 1
         let f = l.lattice
@@ -271,6 +275,18 @@ final class FlexibleLatticePass {
         }
         rhoSpan = rLo.isFinite ? SIMD2(rLo, rHi) : SIMD2(0, 1)
         base = makeBase(ref)
+    }
+
+    /// ★ ROUND 4 (D2): the player picked another squeeze — the SAME lattice (its volumes stay
+    /// on the GPU), other faces squishing: only their column tables and the face uniforms are
+    /// made again.
+    func uploadFaces(_ l: FlexibleLatticeLayerInputs) {
+        facesToken = l.facesToken
+        faceUploadCount += 1
+        faces = Array(l.faces.prefix(FlexibleSquishField.maxFaces))
+        columnTex = faces.map { makeColumns($0) ?? emptyColumns }
+        maxDepthMM = faces.map(\.maxDepthMM).max() ?? 0
+        if let ref = referenceInputs { base = makeBase(ref) }
     }
 
     static func sameGrid(_ a: FlexGrid, _ b: FlexGrid) -> Bool {

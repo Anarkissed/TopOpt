@@ -7,8 +7,9 @@
 //   * turns the camera to look at it (the gizmo view nearest the face's outward normal —
 //     never while he is mid-orbit: it turns once, when it opens),
 //   * says ONE sentence (FlexibleIssue.oneLine),
-//   * offers 1–3 big buttons (FlexibleFix): "[Face 5 rests] [Face 3 rests]", "[Type the
-//     weight]" (the shared number pad), "[varioShore TPU]".
+//   * offers 1–3 big buttons (FlexibleFix): "[Face 2 rests] [Remove Face 2]", "[Type the
+//     weight]" (the shared number pad), "[varioShore TPU]". (Round 3's "[Face 5 rests] [Face 3
+//     rests]" for a shared stack went in round 4 D2: a pinch builds.)
 // It opens on a NEW blocking issue HIS last action caused (FlexibleFixPrompt), when Exit is
 // tapped while something blocks, or from the readiness line's [Fix] / the main page's pill.
 
@@ -78,8 +79,8 @@ struct FlexibleFixPopup: View {
                     if model.settings.face(r)?.isLoaded == true { model.setWeight(r, kg: v) } else { model.press(r, kg: v) }
                     onDone()
                 })
-        case .press(let r) where !(model.mainPageLoads.entry(r)?.role == .pressed):
-            // no main-page weight: pressing asks it (the pad), then presses
+        case .press(let r) where model.pressNeedsWeight(r):
+            // no main-page weight and no squeeze force yet: pressing asks it (the pad), then presses
             Button { padTarget = "fix-\(r)" } label: { label }
                 .buttonStyle(.plain)
                 .accessibilityIdentifier("flexible-fix-press")

@@ -227,16 +227,20 @@ final class FlexibleBatchBReviewTests: XCTestCase {
         XCTAssertFalse(m.latticeIsStale)
         XCTAssertEqual(stage.status.line, FlexibleMainStatus.ready)
         // ★ ONE MORE UNDO takes back [Face 5 rests]: faces 3 and 5 press the same material
-        // again — the pill must SAY so (the conflict recomputed), never "Building…" for a
-        // build that cannot start
+        // again. ★ RE-PINNED (round 4 batch D2, his img 3): that is a PINCH now, which builds —
+        // the undo must be noticed and REBUILT (round 3 said "share a stack" on the pill), never
+        // "Building…" for ever
+        let g3 = try XCTUnwrap(m.lattice?.generation)
         try await spin(1)
         r.project.performUndo()
         XCTAssertEqual(m.settings.face(5)?.isLoaded, true, "premise: Face 5 presses again")
-        try await FlexibleHisProject.waitFor(60, "the conflict said on the pill") { stage.status.tone == .fix }
+        try await FlexibleHisProject.waitFor(120, "the pinch rebuilt") {
+            (m.lattice?.generation ?? g3) > g3 && !m.latticeIsStale && !m.latticeBuilding
+        }
         await m.waitForIdle()
-        print("FLEX-REVIEW undo of [Face 5 rests]: pill '\(stage.status.line)' \(stage.status.tone)")
-        XCTAssertEqual(stage.status.tone, .fix)
-        XCTAssertTrue(stage.status.line.contains("Face 3") && stage.status.line.contains("Face 5"), stage.status.line)
+        print("FLEX-REVIEW undo of [Face 5 rests]: pill '\(stage.status.line)' \(stage.status.tone) · pinches \(m.pinches.count)")
+        XCTAssertEqual(stage.status.line, FlexibleMainStatus.ready)
+        XCTAssertEqual(m.pinches.map { "\($0.a)|\($0.b)" }, ["3|5"], "control: the conflict round 3 blocked on is still core's")
     }
 
     // MARK: C4 — the renderer gives the view back

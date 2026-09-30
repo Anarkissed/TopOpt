@@ -89,6 +89,28 @@ public final class FlexibleMainStage: ObservableObject {
 
     /// The squish, one number, stepped by the renderer (FlexibleSquishLoop).
     public let loop = FlexibleSquishLoop()
+    /// ★ ROUND 4 (D2): the squeeze the player shows (a group, or all at once) — nil ⇒ the
+    /// lattice's default (its first group). One publish per pick.
+    @Published public private(set) var shownSim: String?
+    /// What the player can pick: the lattice's sims (each group, then all at once).
+    public var sims: [FlexibleSim] { model?.lattice?.sims ?? [] }
+    /// The player's picker: that squeeze's faces squish (the dent and the walls); the walls'
+    /// field is the same lattice (a faces-only upload — FlexibleLatticeLayerInputs.facesToken).
+    public func pick(_ id: String) {
+        guard shownSim != id else { return }
+        shownSim = id
+        refresh()
+    }
+    /// The lattice as the player shows it: only the picked squeeze's faces squish.
+    public var shownLattice: FlexibleGeneratedLattice? { model?.lattice?.showing(shownSim) }
+    /// The sim on screen (nil: one group — nothing to pick).
+    public var shownSimInfo: FlexibleSim? { sims.count > 1 ? shownLattice?.shownSim : nil }
+    /// ★ ONE LINE when the shown group squishes less than it was designed for (another group's
+    /// firmer material wins where they share): "Group 2 squishes 1.2 of 3.0 mm · firmer wins".
+    public var simNote: String? {
+        guard let g = shownLattice, let id = g.shownSimID else { return nil }
+        return g.simNotes[id]
+    }
     public private(set) var model: FlexibleStageModel?
     private var projectID: UUID?
     private var observation: AnyCancellable?
@@ -147,6 +169,8 @@ public final class FlexibleMainStage: ObservableObject {
         overlay = nil; overlayKey = nil; channels = nil; channelsKey = nil; playedGeneration = nil
         // (called from a view's init: publish nothing unless a previous project left it playing)
         if loop.playing || loop.held != 1 { DispatchQueue.main.async { [loop] in loop.hold(1) } }
+        // ★ D2: another project's squeeze pick does not carry over (async: never inside an update)
+        if shownSim != nil { DispatchQueue.main.async { [weak self] in self?.shownSim = nil } }
         observation = m.objectWillChange
             .debounce(for: .milliseconds(120), scheduler: RunLoop.main)
             .sink { [weak self] _ in self?.modelChanged() }
@@ -201,7 +225,8 @@ public final class FlexibleMainStage: ObservableObject {
         note(project, owned: owns(project, stage), pageUp: pageUp)
         guard let m = current(project, stage) else { return nil }
         let fresh = m.lattice != nil && !m.latticeIsStale
-        return FlexibleLatticePreview.inputs(xray: xray, lattice: m.lattice, building: m.latticeBuilding,
+        // ★ ROUND 4 (D2): the picked squeeze's faces squish
+        return FlexibleLatticePreview.inputs(xray: xray, lattice: m.lattice?.showing(shownSim), building: m.latticeBuilding,
                                              latticeShows: latticeOn && fresh && !pageUp,
                                              loop: fresh && !pageUp ? loop : nil)
     }
@@ -231,7 +256,7 @@ public final class FlexibleMainStage: ObservableObject {
     /// The player's full end ("10 kg").
     public var fullLabel: String {
         guard let m = model else { return "Full load" }
-        let shown = Set(m.lattice?.squishedKeys.map(\.region) ?? [])
+        let shown = Set(shownLattice?.squishedKeys.map(\.region) ?? [])
         return FlexibleSquishLoop.fullLabel(weightsKg: m.settings.loadedFaces.filter { shown.contains($0.faceRegionID) }.map(\.weightKg),
                                             shapeOnly: m.lattice?.shapeOnly == true)
     }
@@ -332,7 +357,7 @@ public final class FlexibleMainStage: ObservableObject {
             overlayKey = oKey
         }
         // the map is the lattice's while one is shown (X-ray only gates the walls here)
-        let drawn = FlexibleLatticePreview.drawn(m.lattice, xray: true, building: m.latticeBuilding,
+        let drawn = FlexibleLatticePreview.drawn(m.lattice?.showing(shownSim), xray: true, building: m.latticeBuilding,
                                                  checkStampShown: nil, stale: m.latticeIsStale)
         self.drawn = drawn
         // ★ BATCH C: the channels WITHOUT the ghost — Stress and the group colours are composed
@@ -350,7 +375,7 @@ public final class FlexibleMainStage: ObservableObject {
         }
         let key = [String(describing: c.tints.map { VertexTintKey($0).hash }),
                    String(describing: c.dents.map { VertexTintKey($0).hash }),
-                   "\(c.exaggeration)", "\(drawn?.generation ?? -1)", "\(m.latticeBuilding)",
+                   "\(c.exaggeration)", "\(drawn?.generation ?? -1)", "\(drawn?.facesToken ?? -1)", "\(m.latticeBuilding)",
                    "\(m.lattice?.generation ?? -1)", "\(m.latticeIsStale)", oKey].joined(separator: "|")
         channels = c
         if channelsKey != key {

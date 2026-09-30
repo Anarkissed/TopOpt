@@ -47,11 +47,23 @@ public struct FlexibleGeneratedLattice: Sendable {
     /// ★ BATCH B REVIEW: the scene it was built on (FlexibleStageModel's opened key) — a new
     /// grid or lattice region leaves it stale, not "Lattice ready". nil: not keyed (tests).
     public let sceneKey: String?
+    /// ★ ROUND 4 (D2): the squeezes it was built for — each group, then all at once (one sim
+    /// with a single group). The player picks one (`showing`).
+    public let sims: [FlexibleSim]
+    /// A group that squishes less than it was designed for (the firmer group wins where they
+    /// share material): its one line, by sim id.
+    public let simNotes: [String: String]
+    /// Lattice voxels two or more groups assign a density to (the firmer won there).
+    public let sharedVoxels: Int
+    /// The sim this view of the lattice squishes (`showing`); nil = every face.
+    public let shownSimID: String?
 
     public init(inputs: FlexibleLatticeInputs, faces: [FlexibleSquishFace], keys: [FlexFaceKey] = [],
                 columnDepths: [FlexFaceKey: [Double?]] = [:], columnNoLattice: [FlexFaceKey: [Bool]] = [:],
                 extentMM: Double = 0, generation: Int = 0, topology: String, tempC: Double, settingsKey: Int,
-                squishedKeys: [FlexFaceKey]? = nil, shapeOnlyLabel: String? = nil, sceneKey: String? = nil) {
+                squishedKeys: [FlexFaceKey]? = nil, shapeOnlyLabel: String? = nil, sceneKey: String? = nil,
+                sims: [FlexibleSim] = [], simNotes: [String: String] = [:], sharedVoxels: Int = 0,
+                shownSimID: String? = nil) {
         self.inputs = inputs; self.faces = faces; self.keys = keys
         self.columnDepths = columnDepths; self.columnNoLattice = columnNoLattice
         self.extentMM = extentMM; self.generation = generation
@@ -59,6 +71,41 @@ public struct FlexibleGeneratedLattice: Sendable {
         self.squishedKeys = squishedKeys ?? Array(keys.prefix(FlexibleSquishField.maxFaces))
         self.shapeOnlyLabel = shapeOnlyLabel
         self.sceneKey = sceneKey
+        self.sims = sims; self.simNotes = simNotes; self.sharedVoxels = sharedVoxels; self.shownSimID = shownSimID
+    }
+
+    /// The picker's default: the first group (a real squeeze), or nil (every face) with one sim.
+    public var defaultSimID: String? { sims.count > 1 ? sims.first?.id : nil }
+
+    /// ★ THE PLAYER'S PICK (D2): this lattice with only `id`'s faces squishing — its walls (the
+    /// combined field) unchanged, the dent and the walls moved by that sim's faces alone. nil or
+    /// an unknown id: the default sim. "All at once": every face.
+    public func showing(_ id: String?) -> FlexibleGeneratedLattice {
+        guard let sim = sims.first(where: { $0.id == (id ?? defaultSimID) }) ?? sims.first(where: { $0.id == defaultSimID }),
+              sim.kind != .allAtOnce else { return self }
+        let wanted = Set(sim.keys)
+        var byKey: [FlexFaceKey: FlexibleSquishFace] = [:]
+        for (k, f) in zip(keys, faces) { byKey[k] = f }
+        let simKeys = keys.filter { wanted.contains($0) }
+        return FlexibleGeneratedLattice(
+            inputs: inputs, faces: simKeys.compactMap { byKey[$0] }, keys: simKeys,
+            columnDepths: columnDepths.filter { wanted.contains($0.key) },
+            columnNoLattice: columnNoLattice.filter { wanted.contains($0.key) },
+            extentMM: extentMM, generation: generation, topology: topology, tempC: tempC, settingsKey: settingsKey,
+            squishedKeys: Array(simKeys.prefix(FlexibleSquishField.maxFaces)), shapeOnlyLabel: shapeOnlyLabel,
+            sceneKey: sceneKey, sims: sims, simNotes: simNotes, sharedVoxels: sharedVoxels, shownSimID: sim.id)
+    }
+
+    /// The sim this view shows ("All at once" when nothing narrower is shown).
+    public var shownSim: FlexibleSim? {
+        sims.first { $0.id == shownSimID } ?? sims.first { $0.kind == .allAtOnce }
+    }
+
+    /// The token the pass re-uploads its squish faces by (the volumes keep `generation`): the
+    /// generation and the sim shown.
+    public var facesToken: Int {
+        let i = shownSimID.flatMap { id in sims.firstIndex { $0.id == id } } ?? sims.count
+        return generation &* 64 &+ i
     }
 
     /// The deepest buildable squish over all faces (mm, full load), for the exaggeration.
@@ -89,7 +136,8 @@ public enum FlexibleLatticePreview {
                               latticeShows: Bool = true, loop: FlexibleSquishLoop? = nil) -> FlexibleLatticeLayerInputs? {
         guard let g = lattice else { return nil }
         return FlexibleLatticeLayerInputs(lattice: g.inputs, faces: g.faces, token: g.generation,
-                                          hidden: building || !xray || !latticeShows, loop: loop)
+                                          hidden: building || !xray || !latticeShows, loop: loop,
+                                          facesToken: g.facesToken)
     }
 
     /// The generated lattice owns the map, the dent and the walls whenever no check stamp is

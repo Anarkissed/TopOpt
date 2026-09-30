@@ -143,6 +143,9 @@ public final class FlexibleStageModel: ObservableObject {
     @Published public private(set) var liveS: [FlexFaceKey: [Double]] = [:]
     @Published public private(set) var designs: [FlexFaceKey: FlexFaceDesignInfo] = [:]
     @Published public private(set) var conflicts: [FlexConflictInfo] = []
+    /// ★ ROUND 4 (D2): the TWO-SEGMENT designs of the faces a pinch presses (FlexiblePinch) —
+    /// run with the designs; a face that is not pinched has none (core's own design stands).
+    @Published public private(set) var segments: [FlexFaceKey: FlexiblePinch.Segments] = [:]
     @Published public private(set) var recommendation: FlexRecommendationInfo?
     @Published public private(set) var recommendationError: String?
     @Published public private(set) var checks: [UUID: FlexStampCheckInfo] = [:]
@@ -162,14 +165,25 @@ public final class FlexibleStageModel: ObservableObject {
     @Published public private(set) var lattice: FlexibleGeneratedLattice?
     @Published public private(set) var latticeBuilding = false
     @Published public private(set) var latticeError: String?
+    /// ★ ROUND 4 (D2): the density field the last lattice was built from (groups combined
+    /// firmer-wins, pinches as two segments) — kept for the tests and the as-built reading.
+    private(set) var lastCombinedField: FlexDensityField?
     /// ★ ROUND 3 BATCH B (item 9): core's words per face, kept PER KEY — a face core could
     /// not stack (no blind retry: the next scene open clears it) or could not design (one
     /// face's throw no longer leaves every later face "still being designed").
     @Published public private(set) var stackErrors: [FlexFaceKey: String] = [:]
     @Published public private(set) var designErrors: [FlexFaceKey: String] = [:]
+    /// ★ ROUND 4 (D2): what each face was designed FROM (its weight, map and stamp) — a refusal or
+    /// a throw core gave for the face as it WAS is not said about the face as it IS while the
+    /// run for the new one is in flight (typing a weight into the fix pop-up popped "weight must
+    /// be > 0" until the new design landed).
+    private(set) var designedInputs: [FlexFaceKey: String] = [:]
+    nonisolated static func designInputKey(_ f: FlexibleFaceSettings) -> String {
+        "\(f.weightKg)|\(f.map.hashValue)|\(f.activeStamp?.hashValue ?? 0)"
+    }
     /// Bumped by every action of HIS that can create a problem (press, rest, a weight, the
     /// trash, a filament): the fix pop-up opens only on a NEW blocking issue an action caused.
-    @Published public private(set) var actionSerial = 0
+    @Published public internal(set) var actionSerial = 0
     /// A one-line note for an automatic fix ("Nozzle temperature set to Auto — …"). ★ BATCH B
     /// REVIEW: it clears ITSELF after `toastSeconds` — an auto-fix can land while the main page
     /// shows (no Settings page up to clear it), and the page's own clear only heard a change,
@@ -451,7 +465,7 @@ public final class FlexibleStageModel: ObservableObject {
     @Published public private(set) var mainPageLoads = FlexibleMainPageLoads()
     /// Faces whose OWN weight a group's replaced this session (region → the old kg): the
     /// panel says so in one line ("Was 7 kg · now Top's weight").
-    @Published public private(set) var relinkedWeights: [Int: Double] = [:]
+    @Published public internal(set) var relinkedWeights: [Int: Double] = [:]
 
     /// Read the main page's groups, then MATERIALISE them (`FlexibleMainPageLoads.adopt`): a
     /// face a Load group presses is pressed with its share and LINKED (weightFrom = the
@@ -474,19 +488,22 @@ public final class FlexibleStageModel: ObservableObject {
     }
 
     /// [Press it]: the main page's weight when the face is in a Load group; else `kg` (the
-    /// number pad's answer). false ⇒ a weight must be asked first ("How much weight presses
-    /// here?").
+    /// number pad's answer); else — ★ ROUND 4 (D2) — group 1's ONE squeeze force (the face joins
+    /// group 1, no pad). false ⇒ a weight must be asked first ("How much weight presses here?").
     @discardableResult
     public func press(_ region: Int, kg: Double? = nil) -> Bool {
         let inherited = mainPageLoads.entry(region).flatMap { $0.role == .pressed ? $0 : nil }
-        guard inherited != nil || (kg ?? 0) > 0 else { return false }
+        let joinKg = inherited == nil && kg == nil ? firstGroupForce : nil
+        guard inherited != nil || (kg ?? joinKg ?? 0) > 0 else { return false }
         actionSerial += 1
         edit { s in
             var f = s.face(region) ?? FlexibleFaceSettings(faceRegionID: region)
             f.role = "loaded"
+            f.squeezeGroup = nil   // a newly pressed face joins group 1
             if let e = inherited, kg == nil { f.weightKg = e.weightKg; f.weightFrom = e.groupID }
-            else if let kg { f.weightKg = kg; f.weightFrom = nil }
+            else if let w = kg ?? joinKg { f.weightKg = w; f.weightFrom = nil }
             s.setFace(f)
+            FlexibleSqueezeGroups.normalise(&s)
         }
         relinkedWeights[region] = nil
         selectedRegion = region
@@ -503,6 +520,7 @@ public final class FlexibleStageModel: ObservableObject {
             f.role = "resting"
             f.weightFrom = nil
             s.setFace(f)
+            FlexibleSqueezeGroups.normalise(&s)   // ★ D2: a resting face is in no squeeze group
         }
         relinkedWeights[region] = nil
         selectedRegion = region
@@ -512,8 +530,17 @@ public final class FlexibleStageModel: ObservableObject {
     /// whose weight comes from a main-page group, it WRITES BACK to the group — the group
     /// takes the weight that gives this face `kg` — and every face of the group re-syncs, so
     /// the area split stays consistent. A face in no group keeps it as its own.
+    /// ★ ROUND 4 (D2, his answer 1: ONE force per squeeze group): a pressed face's weight IS its
+    /// squeeze group's force — the hand that gives this face `kg` (its main-page group's weight,
+    /// or `kg`) becomes the force of every hand in the group (`setGroupForce`).
     public func setWeight(_ region: Int, kg: Double) {
         guard kg > 0 else { return }
+        if let g = squeezeGroup(of: region) {
+            let f = settings.face(region)
+            let hand = f?.weightFrom != nil ? mainPageLoads.groupKg(forRegion: region, kg: kg) : nil
+            setGroupForce(g.id, kg: hand ?? kg)
+            return
+        }
         actionSerial += 1
         if let f = settings.face(region), let g = f.weightFrom,
            let total = mainPageLoads.groupKg(forRegion: region, kg: kg) {
@@ -656,6 +683,7 @@ public final class FlexibleStageModel: ObservableObject {
         guard let path = materialsPath, let mat = settings.materialID else {
             designs = [:]
             designErrors = [:]
+            segments = [:]
             if designsInFlight { designsInFlight = false }
             return
         }
@@ -664,6 +692,12 @@ public final class FlexibleStageModel: ObservableObject {
         let temp = designTempC, build = self.build, grids = stampGrids
         let checkStamps = settings.checkStamps
         let worker = self.worker
+        // ★ ROUND 4 (D2): what the pinches' two-segment designs read (FlexiblePinch)
+        let snapshot = settings, stackSnap = stacks
+        let inputKeys = Dictionary(faces.map { (FlexFaceKey(region: $0.faceRegionID, rotation: $0.rotationDeg), Self.designInputKey($0)) },
+                                   uniquingKeysWith: { a, _ in a })
+        let regions = self.regions
+        let cuts = Dictionary(faces.map { ($0.faceRegionID, regions.cuts(of: $0.faceRegionID)) }, uniquingKeysWith: { a, _ in a })
         designTask = Task.detached(priority: .userInitiated) {
             if delayNS > 0 { try? await Task.sleep(nanoseconds: delayNS) }
             if Task.isCancelled { return }
@@ -672,6 +706,7 @@ public final class FlexibleStageModel: ObservableObject {
             var s: [FlexFaceKey: [Double]] = [:]
             var checks: [UUID: FlexStampCheckInfo] = [:]
             var conflicts: [FlexConflictInfo] = []
+            var segs: [FlexFaceKey: FlexiblePinch.Segments] = [:]
             var err: String?
             let keys = faces.map { FlexFaceKey(region: $0.faceRegionID, rotation: $0.rotationDeg) }
             do {
@@ -709,9 +744,18 @@ public final class FlexibleStageModel: ObservableObject {
                         if err == nil { err = "\(error)" }
                     }
                 }
+                // ★ ROUND 4 (D2): a PINCH (two faces of one group on one stack) — each face's
+                // pinched columns designed over their half, through core's own table
+                do {
+                    let law = try FlexiblePinch.Law.core(materialsPath: path, materialID: mat, tempC: temp, build: build)
+                    segs = try Self.pinchSegments(settings: snapshot, conflicts: conflicts, designs: out,
+                                                  stacks: stackSnap, cuts: cuts, law: law)
+                } catch {
+                    if err == nil { err = "\(error)" }
+                }
             }
             if Task.isCancelled { return }
-            let (o, fe, ss, ch, co, er) = (out, faceErrors, s, checks, conflicts, err)
+            let (o, fe, ss, ch, co, er, sg) = (out, faceErrors, s, checks, conflicts, err, segs)
             await MainActor.run {
                 guard gen == self.designGeneration else { return }
                 self.designsInFlight = false
@@ -720,6 +764,8 @@ public final class FlexibleStageModel: ObservableObject {
                 for (k, v) in ss { self.liveS[k] = v }
                 self.checks = ch
                 self.conflicts = co
+                self.segments = sg
+                self.designedInputs = inputKeys
                 self.lastError = er
                 self.applyAutoFixes()
             }
@@ -871,6 +917,11 @@ public final class FlexibleStageModel: ObservableObject {
     /// Build the lattice: core's density field from the designs, or — for a calibrate-first
     /// filament — the SHAPE-ONLY field (FlexibleGeometryOnlyLattice) from core's mask and the
     /// drawn map. Refused only by a blocking readiness issue.
+    /// ★ ROUND 4 (D2): one field PER SQUEEZE GROUP — core's own for a group core can assemble, the
+    /// app's (FlexibleGroupField.assemble: core's rule without its refusal) for a group with a
+    /// PINCH, whose pinched faces bring their two-segment designs — and, with two or more groups,
+    /// the FIRMER density per voxel; each face then squishes by what its column holds in that
+    /// combined field (≈ as built), and a group that misses its design says so.
     public func generateLattice() {
         let ready = readiness
         // blocked, or still designing (a face without its design would be left out silently)
@@ -878,12 +929,13 @@ public final class FlexibleStageModel: ObservableObject {
         let faces = settings.loadedFaces
         let shapeOnly = material?.noPrediction != nil
         let allKeys = faces.map { FlexFaceKey(region: $0.faceRegionID, rotation: $0.rotationDeg) }
-        // ★ ONE ARRAY PER FACE for the walls AND the dent: core's buildable depths — or, shape
-        // only, the drawing itself (S × deepest) — kept on the lattice so the map drawn beside
-        // it is the one it squishes by
+        // ★ ONE ARRAY PER FACE for the walls AND the dent: core's buildable depths (a pinched
+        // face: its halves') — or, shape only, the drawing itself (S × deepest) — kept on the
+        // lattice so the map drawn beside it is the one it squishes by
         var squish: [FlexFaceKey: FlexibleSquishFace] = [:], built: [FlexFaceKey] = []
         var depths: [FlexFaceKey: [Double?]] = [:], noLattice: [FlexFaceKey: [Bool]] = [:]
         var drawn: [FlexibleGeometryOnlyLattice.Face] = []
+        var designed: [FlexFaceKey: FlexiblePinch.Segments] = [:], pressure: [FlexFaceKey: [Double]] = [:]
         var extent = 0.0, shallowest = Double.infinity
         for (f, k) in zip(faces, allKeys) {
             guard let st = stacks[k] else { continue }
@@ -899,7 +951,10 @@ public final class FlexibleStageModel: ObservableObject {
                 if !lat.isEmpty { shallowest = min(shallowest, lat.reduce(0, +) / Double(lat.count)) }
             } else {
                 guard let d = designs[k] else { continue }
-                dk = FlexibleSquishFace.buildableDepths(stack: st, design: d)
+                let sg = segments[k] ?? FlexiblePinch.core(d, stack: st)
+                designed[k] = sg
+                pressure[k] = d.columns.map(\.pressureMPa)
+                dk = sg.buildableDepthMM
                 noLattice[k] = st.columns.indices.map { $0 < d.columns.count && d.columns[$0].status == "no_lattice" }
             }
             squish[k] = FlexibleSquishFace(stack: st, depthsMM: dk)
@@ -908,13 +963,29 @@ public final class FlexibleStageModel: ObservableObject {
             extent = max(extent, st.uExtentMM, st.vExtentMM)
         }
         let order = Self.squishOrder(built.map { (key: $0, areaMM2: stacks[$0]?.areaMM2 ?? 0) })
-        let squishFaces = order.compactMap { squish[$0] }
-        let squished = Array(order.prefix(FlexibleSquishField.maxFaces))
+        // ★ ROUND 4 (D2): the squeeze groups over the faces built, and whether each has a pinch
+        let builtSet = Set(order)
+        let partners = FlexibleSqueezeGroups.partners(pinches)
+        let plans: [(number: Int, keys: [FlexFaceKey], pinched: Bool)] = squeezeGroups.compactMap { g in
+            let keys = order.filter { g.regions.contains($0.region) }
+            return keys.isEmpty ? nil : (g.number, keys, g.regions.contains { partners[$0] != nil })
+        }
+        let sims = self.sims.compactMap { sim -> FlexibleSim? in
+            let keys = sim.keys.filter { builtSet.contains($0) }
+            return keys.isEmpty ? nil : FlexibleSim(id: sim.id, kind: sim.kind, title: sim.title, short: sim.short, keys: keys)
+        }
+        let stackOf = stacks, regions = self.regions
+        let cutsOf = Dictionary(order.map { ($0.region, regions.cuts(of: $0.region)) }, uniquingKeysWith: { a, _ in a })
         latticeGeneration += 1
         let generation = latticeGeneration
-        let (builtKeys, faceDepths, faceNoLattice, extentMM, drawnFaces) = (order, depths, noLattice, extent, drawn)
+        let (builtKeys, faceNoLattice, extentMM, drawnFaces) = (order, noLattice, extent, drawn)
+        let (designedSnap, pressureSnap, squishSnap, depthsSnap) = (designed, pressure, squish, depths)
         let depthForBand = shallowest.isFinite ? shallowest : 0
         let build = self.build, key = settings.hashValue, temp = designTempC ?? 0
+        let lawInputs: (path: String, material: String, temp: Double)? = {
+            guard let p = materialsPath, let m = settings.materialID, let t = designTempC else { return nil }
+            return (p, m, t)
+        }()
         let builtOn = openedKey, buildKey = latticeBuildKey
         let label = shapeOnly ? FlexibleReadiness.shapeOnlyLabel(material?.displayName ?? "This filament") : nil
         // ★ ROUND 4 (D1): the WHOLE model's finish (None / Rim / Skin / Covered) — the per-face
@@ -925,29 +996,82 @@ public final class FlexibleStageModel: ObservableObject {
         latticeError = nil
         let worker = self.worker
         let failWith = controlFailBuild
+        let combine = controlCombine
         track(Task.detached(priority: .userInitiated) {
             do {
                 if let failWith { throw TopOptError(message: failWith) }
-                let field: FlexDensityField
+                var field: FlexDensityField
+                var shared = 0
+                var faceDepths = depthsSnap, squishFaces = squishSnap
+                var notes: [String: String] = [:]
                 if shapeOnly {
-                    // ★ core's mask, the drawn map's density inside the printable band
+                    // ★ core's mask, the drawn map's density inside the printable band (a voxel
+                    // under two faces — a pinch, two groups — takes the firmer)
                     let mask = try await worker.withScene { try $0.latticeMask(build: build) }
                     let band = try FlexibleGeometryOnlyLattice.band(topology: build.topology, beadsPerWall: build.beadsPerWall,
                                                                     beadWidthMM: build.beadWidthMM, latticeDepthMM: depthForBand)
                     field = FlexibleGeometryOnlyLattice.field(mask: mask, faces: drawnFaces, band: band)
                 } else {
-                    field = try await worker.withScene {
-                        try $0.densityField(faces: builtKeys.map(\.region), rotations: builtKeys.map(\.rotation), build: build)
+                    var fields: [FlexDensityField] = []
+                    var mask: FlexDensityField?
+                    for plan in plans {
+                        if plan.pinched {
+                            // ★ a PINCH: core refuses one stack pressed from both ends — the app
+                            // assembles it by core's rule, over each face's halves
+                            if mask == nil { mask = try await worker.withScene { try $0.latticeMask(build: build) } }
+                            let fs = plan.keys.compactMap { k -> FlexibleGroupField.Face? in
+                                guard let st = stackOf[k], let sg = designedSnap[k] else { return nil }
+                                return FlexibleGroupField.Face(region: k.region, stack: st, cuts: cutsOf[k.region] ?? [],
+                                                               density: sg.buildableDensity, cellMM: sg.cellMM)
+                            }
+                            fields.append(FlexibleGroupField.assemble(mask: mask!, faces: fs))
+                        } else {
+                            fields.append(try await worker.withScene {
+                                try $0.densityField(faces: plan.keys.map(\.region), rotations: plan.keys.map(\.rotation), build: build)
+                            })
+                        }
+                    }
+                    guard !fields.isEmpty else { throw TopOptError(message: "No pressed face has a design yet.") }
+                    if fields.count == 1 {
+                        field = fields[0]
+                    } else {
+                        let c = combine(fields)
+                        field = c.field
+                        shared = c.shared
+                        // ★ SEPARATE SQUEEZES: each face squishes by what its column holds in the
+                        // COMBINED field (≈), and a group that misses its design says so
+                        if let li = lawInputs {
+                            let law = try FlexiblePinch.Law.core(materialsPath: li.path, materialID: li.material, tempC: li.temp, build: build)
+                            for k in builtKeys {
+                                guard let st = stackOf[k], let sg = designedSnap[k], let p = pressureSnap[k] else { continue }
+                                let d = try FlexibleGroupField.asBuilt(field, stack: st, segments: sg, pressureMPa: p,
+                                                                        strainUnder: law.strainUnder)
+                                faceDepths[k] = d
+                                squishFaces[k] = FlexibleSquishFace(stack: st, depthsMM: d)
+                            }
+                            for plan in plans {
+                                let want = plan.keys.compactMap { designedSnap[$0]?.buildableDepthMM.compactMap { $0 }.max() }.max() ?? 0
+                                let got = plan.keys.compactMap { faceDepths[$0]?.compactMap { $0 }.max() }.max() ?? 0
+                                if want > 0, got < 0.9 * want {
+                                    notes[FlexibleSim.groupID(plan.number)] =
+                                        FlexibleRowCopy.groupMisses(number: plan.number, asBuiltMM: got, designedMM: want)
+                                }
+                            }
+                        }
                     }
                 }
                 let inputs = try FlexibleLatticeBuilder.inputs(
                     field: field, part: part, topology: build.topology, beadsPerWall: build.beadsPerWall,
                     beadWidthMM: build.beadWidthMM, buildDir: buildDir, skinOffFaces: [], finish: finish)
-                let g = FlexibleGeneratedLattice(inputs: inputs, faces: squishFaces, keys: builtKeys, columnDepths: faceDepths,
+                let faceList = builtKeys.compactMap { squishFaces[$0] }
+                let g = FlexibleGeneratedLattice(inputs: inputs, faces: faceList, keys: builtKeys, columnDepths: faceDepths,
                                                  columnNoLattice: faceNoLattice, extentMM: extentMM, generation: generation,
                                                  topology: build.topology, tempC: temp, settingsKey: key,
-                                                 squishedKeys: squished, shapeOnlyLabel: label, sceneKey: builtOn)
-                await MainActor.run { self.lattice = g; self.latticeBuilding = false }
+                                                 squishedKeys: Array(builtKeys.prefix(FlexibleSquishField.maxFaces)),
+                                                 shapeOnlyLabel: label, sceneKey: builtOn,
+                                                 sims: sims, simNotes: notes, sharedVoxels: shared)
+                let combined = field
+                await MainActor.run { self.lattice = g; self.lastCombinedField = combined; self.latticeBuilding = false }
             } catch {
                 await MainActor.run {
                     self.latticeFailedKey = buildKey
@@ -958,6 +1082,9 @@ public final class FlexibleStageModel: ObservableObject {
         })
     }
 
+    /// Test control only: how separate squeezes are combined (the rule: the firmer wins).
+    var controlCombine: @Sendable ([FlexDensityField]) -> (field: FlexDensityField, shared: Int) = { FlexibleGroupField.firmer($0) }
+
     public func discardLattice() { lattice = nil }
 
     /// Test control only: the next builds throw this (a builder or core refusal on the build).
@@ -967,6 +1094,9 @@ public final class FlexibleStageModel: ObservableObject {
 
     public func runJobJSON() throws -> String {
         guard let file = project.importedFile else { throw FlexibleJob.EncodeError.noLoadedFace }
+        // ★ ROUND 4 (D2): what core cannot run yet (core brief) is said, never sent to be refused
+        if squeezeGroups.count > 1 { throw FlexibleJob.EncodeError.squeezeGroups }
+        if !pinches.isEmpty { throw FlexibleJob.EncodeError.pinch }
         let faceCount = max(file.faceCount, (project.viewerMesh?.faceIDs.max().map { Int($0) + 1 }) ?? 0)
         var inputs = FlexibleJob.Inputs(
             modelPath: file.path, resolution: project.quality.resolution,

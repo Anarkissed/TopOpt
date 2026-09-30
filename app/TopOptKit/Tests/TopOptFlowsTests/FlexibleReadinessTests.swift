@@ -1,10 +1,11 @@
 // FlexibleReadinessTests — "requirements are shown at once, fixed in one tap, and exit is
 // blocked only when truly needed" (task 2026-09-29-flexible-screens, round 3 batch B, item 9;
 // maintainer: "I can't make Lattice run").
-//   * HIS project as saved (faces 3 and 5 pressed at 10 kg by the old taps): exactly ONE
-//     blocking issue — 3/5 share a stack — with its fixes [Face 5 rests] [Face 3 rests].
-//     RED CONTROL: with TPU 95A the OLD gate (copied verbatim below) says "calibrate-first"
-//     first — the sentence that no longer blocks hid the one that did;
+//   * HIS project as saved (faces 3 and 5 pressed at 10 kg by the old taps): ★ RE-PINNED IN
+//     ROUND 4 (batch D2, his img 3: "you would absolutely squeeze the two sides together. One
+//     side wouldn't rest."): NOTHING blocks — 3 and 5 are a pinch in one squeeze group, built as
+//     two segments. RED CONTROL: round 3's rule (copied below) blocked on the shared stack, and
+//     the OLD gate said "calibrate-first" first;
 //   * after [Face 5 rests]: nothing blocks; Exit ⇒ a lattice (varioShore) or a SHAPE-ONLY
 //     lattice labelled "TPU 95A: shape only — no squish predicted" (TPU 95A);
 //   * the rule on values: calibrate-first, more than four faces and "still designing" never
@@ -58,32 +59,35 @@ final class FlexibleReadinessTests: XCTestCase {
         return nil
     }
 
+    /// ROUND 3 BATCH B's RULE for a stack conflict, copied — the red control of the re-pin.
     @MainActor
-    func testHisProjectAsSavedHasOneThingToFix() async throws {
+    private func round3Blockers(_ m: FlexibleStageModel) -> [String] {
+        m.conflicts.map { "\(m.displayName($0.faceA)) and \(m.displayName($0.faceB)) press the same material" }
+    }
+
+    @MainActor
+    func testHisProjectAsSavedHasNothingToFix() async throws {
         let (_, m) = try await his()
         XCTAssertEqual(m.settings.materialID, "varioshore_tpu", "premise: his project as saved")
         XCTAssertEqual(Set(m.settings.loadedFaces.map(\.faceRegionID)),
                        Set([FlexibleHisProject.topA, FlexibleHisProject.topB, 3, 5]), "premise: the old taps pressed 3 and 5")
         let r = m.readiness
-        print("FLEX-READY his project as saved: \(r.blocking.count) blocking — \(r.oneLine) | fixes \(r.blocking.first?.fixes ?? [])")
-        XCTAssertEqual(r.blocking.count, 1, "exactly one thing blocks: \(r.blocking.map(\.oneLine))")
-        let i = try XCTUnwrap(r.blocking.first)
-        XCTAssertEqual(i.kind, .sharedStack)
-        XCTAssertEqual(Set([3, 5]), Set([i.region].compactMap { $0 } + i.fixes.compactMap { if case .rest(let x) = $0 { return x } else { return nil } }))
-        XCTAssertEqual(i.fixes, [.rest(5), .rest(3)], "[Face 5 rests] [Face 3 rests]")
-        XCTAssertEqual(i.fixes.map { $0.title { m.displayName($0) } }, ["Face 5 rests", "Face 3 rests"])
-        XCTAssertEqual(r.oneLine, "1 thing to fix: Face 3 and Face 5 press the same material")
-        XCTAssertEqual(FlexibleExitDecision.decide(r), .fix(i))
-        XCTAssertEqual(FlexibleExitDecision.title(r), "Fix 1 thing")
-        XCTAssertLessThanOrEqual(r.oneLine.count, 60, "one line")
+        print("FLEX-READY his project as saved: \(r.blocking.count) blocking — \(r.oneLine) | pinches \(m.pinches.map { "\($0.a)|\($0.b)" })")
+        XCTAssertTrue(r.isReady, "his pinch builds: \(r.blocking.map(\.oneLine))")
+        XCTAssertEqual(r.oneLine, FlexibleReadiness.ready)
+        XCTAssertEqual(FlexibleExitDecision.decide(r), .exit)
+        XCTAssertEqual(FlexibleExitDecision.title(r), "Exit")
+        XCTAssertEqual(m.pinches.map { "\($0.a)|\($0.b)" }, ["3|5"], "3 and 5: a pinch in group 1")
+        // ★ RED CONTROL: round 3's rule said exactly this one thing
+        XCTAssertEqual(round3Blockers(m), ["Face 3 and Face 5 press the same material"], "control: the old blocker")
     }
 
     @MainActor
-    func testWithTPU95AStillOnlyTheSharedStackBlocks() async throws {
+    func testWithTPU95ANothingBlocks() async throws {
         let (_, m) = try await his(material: "tpu95a_generic")
         let r = m.readiness
         print("FLEX-READY his project, TPU 95A: \(r.blocking.map(\.oneLine)) | info \(r.issues.filter { !$0.blocking }.map(\.oneLine))")
-        XCTAssertEqual(r.blocking.map(\.kind), [.sharedStack], "calibrate-first never blocks")
+        XCTAssertTrue(r.blocking.isEmpty, "calibrate-first never blocks, nor his pinch")
         XCTAssertTrue(r.shapeOnly)
         XCTAssertEqual(r.issues.first { $0.kind == .shapeOnly }?.oneLine, "TPU 95A: shape only — no squish predicted")
         // ★ RED CONTROL: the old gate's ORDER — it said calibrate-first first
@@ -92,11 +96,12 @@ final class FlexibleReadinessTests: XCTestCase {
         XCTAssertNotEqual(old, r.refusal)
     }
 
+    /// ★ RE-PINNED (round 4 D2): [Face 5 rests] is no longer a fix the pop-up offers (the pinch
+    /// builds); resting face 5 is still his choice, and Exit still builds.
     @MainActor
     func testAfterFace5RestsExitBuildsTheLattice() async throws {
         let (_, m) = try await his()
-        let fix = try XCTUnwrap(m.readiness.blocking.first?.fixes.first)
-        FlexibleFixPopup.apply(fix, to: m)
+        FlexibleFixPopup.apply(.rest(5), to: m)
         try await settle(m)
         let r = m.readiness
         XCTAssertTrue(r.isReady, "nothing blocks after [Face 5 rests]: \(r.blocking.map(\.oneLine))")
@@ -141,11 +146,11 @@ final class FlexibleReadinessTests: XCTestCase {
     }
 
     private func inputs(_ faces: [FlexibleReadiness.Face], calibrateFirst: Bool = false,
-                        conflicts: [(a: Int, b: Int)] = [], material: String? = "varioshore_tpu",
+                        material: String? = "varioshore_tpu",
                         nozzleAuto: Bool = false, gyroid: Bool = false) -> FlexibleReadiness.Inputs {
         FlexibleReadiness.Inputs(materialID: material, materialName: calibrateFirst ? "TPU 95A (Bambu 95A HF)" : "colorFabb varioShore TPU (foaming)",
                                  calibrateFirst: calibrateFirst, withData: (id: "varioshore_tpu", name: "colorFabb varioShore TPU"),
-                                 pressed: faces, conflicts: conflicts, nozzleIsAuto: nozzleAuto, topologyIsGyroid: gyroid)
+                                 pressed: faces, nozzleIsAuto: nozzleAuto, topologyIsGyroid: gyroid)
     }
 
     func testOnlyWhatTrulyStopsALatticeBlocks() {
@@ -170,9 +175,10 @@ final class FlexibleReadinessTests: XCTestCase {
         XCTAssertEqual(none.blocking.map(\.kind), [.noPressedFace])
         let noFilament = FlexibleReadiness.evaluate(inputs([face(1)], material: nil))
         XCTAssertEqual(noFilament.blocking.first?.fixes, [.pickFilament(id: "varioshore_tpu", name: "colorFabb varioShore TPU")])
-        // the shared stack comes before a per-face issue; a pair is said once
-        let pair = FlexibleReadiness.evaluate(inputs([face(3), face(5, kg: 0)], conflicts: [(a: 3, b: 5), (a: 5, b: 3)]))
-        XCTAssertEqual(pair.blocking.map(\.kind), [.sharedStack, .noWeight])
+        // ★ RE-PINNED (round 4 D2): two faces on one stack are never an issue (a pinch builds) —
+        // only the face with no weight is; two per-face issues are counted
+        let pair = FlexibleReadiness.evaluate(inputs([face(3, kg: 0), face(5, kg: 0)]))
+        XCTAssertEqual(pair.blocking.map(\.kind), [.noWeight, .noWeight])
         XCTAssertEqual(FlexibleExitDecision.title(pair), "Fix 2 things")
     }
 
@@ -191,7 +197,8 @@ final class FlexibleReadinessTests: XCTestCase {
     }
 
     func testThePopUpOpensOnlyOnANewIssueHisActionCaused() {
-        let block = FlexibleReadiness.evaluate(inputs([face(3), face(5)], conflicts: [(a: 3, b: 5)]))
+        // ★ RE-PINNED (round 4 D2): the blocker was the shared stack; now a face with no weight
+        let block = FlexibleReadiness.evaluate(inputs([face(3), face(5, kg: 0)]))
         let clear = FlexibleReadiness.evaluate(inputs([face(3)]))
         // an action-only prompt (no popExisting — the page's pop-once-on-open is pinned in
         // FlexibleBatchBReviewUXTests): an issue that stood before any action does not pop
@@ -201,7 +208,7 @@ final class FlexibleReadinessTests: XCTestCase {
         XCTAssertNil(p.next(block, actionSerial: 4, settled: true))
         // he rests 5 (action 5) — cleared; he presses 5 again (action 6) — the pop-up opens
         XCTAssertNil(p.next(clear, actionSerial: 5, settled: true))
-        XCTAssertEqual(p.next(block, actionSerial: 6, settled: false)?.kind, .sharedStack)
+        XCTAssertEqual(p.next(block, actionSerial: 6, settled: false)?.kind, .noWeight)
         XCTAssertNil(p.next(block, actionSerial: 6, settled: true), "once")
         // ★ RED CONTROL: a prompt that pops on every evaluation would have popped at open
         var naive = 0

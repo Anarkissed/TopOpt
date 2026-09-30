@@ -363,7 +363,9 @@ final class FlexibleSquishTests: XCTestCase {
         // ★ RE-PINNED (round 4, batch D1): the lattice is drawn only on the MAIN page (his img 6),
         // so the main stage is the page that asks; the Settings page never draws one
         let main = try FlexibleSource.code("FlexibleMainStage.swift")
-        XCTAssertTrue(main.contains("FlexibleLatticePreview.drawn(m.lattice, xray: true, building: m.latticeBuilding,"))
+        // ★ RE-PINNED (round 4 batch D2): the lattice as the squish player shows it (the picked
+        // squeeze's faces) — the same staleness rule
+        XCTAssertTrue(main.contains("FlexibleLatticePreview.drawn(m.lattice?.showing(shownSim), xray: true, building: m.latticeBuilding,"))
         XCTAssertTrue(main.contains("stale: m.latticeIsStale)"))
         XCTAssertFalse(try FlexibleSource.code("FlexibleStagePage.swift").contains("FlexibleLatticePreview.drawn("))
     }
@@ -418,8 +420,7 @@ final class FlexibleSquishTests: XCTestCase {
         func r(_ n: Int) -> FlexibleReadiness {
             FlexibleReadiness.evaluate(FlexibleReadiness.Inputs(
                 materialID: "varioshore_tpu", materialName: "varioShore", calibrateFirst: false, withData: nil,
-                pressed: (0..<n).map { FlexibleReadiness.Face(region: $0, weightKg: 10, stacked: true, design: .ok) },
-                conflicts: []))
+                pressed: (0..<n).map { FlexibleReadiness.Face(region: $0, weightKg: 10, stacked: true, design: .ok) }))
         }
         for n in 1...4 { XCTAssertEqual(r(n).oneLine, FlexibleReadiness.ready, "\(n) faces") }
         let five = r(5)

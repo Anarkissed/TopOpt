@@ -48,7 +48,13 @@ final class FlexibleRowCopyTests: XCTestCase {
         lines += [FlexibleRowCopy.faceName(sector: "top A", face: 1), FlexibleRowCopy.faceName(sector: longGroup, face: 1),
                   FlexibleRowCopy.faceName(sector: nil, face: 12), FlexibleRowCopy.noFace,
                   FlexibleRowCopy.deepest(3), FlexibleRowCopy.deepest(18.44), FlexibleRowCopy.finish, FlexibleRowCopy.shape,
-                  FlexibleRowCopy.feel, FlexibleRowCopy.sharesStack(with: longGroup), FlexibleRowCopy.askWeight,
+                  // ★ RE-PINNED (round 4 batch D2): "Shares a stack with …" is gone — two faces on one
+                  // stack are a pinch (or separate squeezes), never a warning; its lines instead
+                  FlexibleRowCopy.feel, FlexibleRowCopy.pinched(with: longGroup), FlexibleRowCopy.askWeight,
+                  FlexibleRowCopy.groupLine(number: 12, names: [longGroup, longGroup, longGroup], force: 123.4...500),
+                  FlexibleRowCopy.groupsTitle, FlexibleRowCopy.groupRow, FlexibleRowCopy.groupsShare,
+                  FlexibleRowCopy.groupMisses(number: 12, asBuiltMM: 12.34, designedMM: 30.45), FlexibleRowCopy.simAll,
+                  FlexibleRowCopy.simTitle(number: 12, names: [longGroup, longGroup]),
                   FlexibleRowCopy.temperature, FlexibleRowCopy.temperatureNoData, FlexibleRowCopy.topology,
                   FlexibleRowCopy.auto(topology: "honeycomb", tempC: 240), FlexibleRowCopy.autoWaiting,
                   FlexibleRowCopy.autoNoData, FlexibleRowCopy.physics, FlexibleRowCopy.catalogueMissing,

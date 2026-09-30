@@ -140,7 +140,58 @@ public enum FlexibleRowCopy {
     public static let shape = "Shape"
     public static func deepest(_ mm: Double) -> String { String(format: "Deepest squish %.1f mm", mm) }
     public static let deepestTitle = "Deepest squish"
-    public static func sharesStack(with other: String) -> String { fit("Shares a stack with \(other)") }
+
+    // MARK: ★ squeeze groups (round 4 batch D2)
+
+    public static let groupsTitle = "Squeeze groups"
+    public static func groupName(_ number: Int) -> String { "Group \(number)" }
+    /// "Squeeze 10 kg" · "Squeeze 7–10 kg" (a project from before groups, faces of their own weights).
+    public static func squeeze(_ force: ClosedRange<Double>?) -> String {
+        guard let f = force else { return "Squeeze —" }
+        if f.upperBound - f.lowerBound < 0.05 { return "Squeeze \(kgText(f.upperBound))" }
+        return "Squeeze \(kgNumber(f.lowerBound))–\(kgText(f.upperBound))"
+    }
+    static func kgNumber(_ kg: Double) -> String {
+        abs(kg - kg.rounded()) < 0.05 ? "\(Int(kg.rounded()))" : String(format: "%.1f", kg)
+    }
+    /// The faces, joined " + ", cut to "Top A + 3 more" when the line would not fit.
+    static func faceList(_ names: [String], room: Int) -> String {
+        let all = names.joined(separator: " + ")
+        if all.count <= room { return all }
+        guard names.count > 1 else { return fit(all, max(4, room)) }
+        for keep in stride(from: names.count - 1, through: 1, by: -1) {
+            let s = names.prefix(keep).joined(separator: " + ") + " + \(names.count - keep) more"
+            if s.count <= room { return s }
+        }
+        // the first name cut to what is left beside "+ N more"; with no room at all, a count
+        let more = " + \(names.count - 1) more"
+        if room - more.count >= 5 { return fit(names[0], room - more.count) + more }
+        return "\(names.count) faces"
+    }
+    /// ONE line per group, its faces and its ONE force: "Group 1 · Face 3 + Face 5 · Squeeze 10 kg".
+    public static func groupLine(number: Int, names: [String], force: ClosedRange<Double>?) -> String {
+        let head = "\(groupName(number)) · ", tail = " · \(squeeze(force))"
+        return fit(head + faceList(names, room: maxChars - head.count - tail.count) + tail)
+    }
+    /// The squish player's picker: "Group 2 · Face 3 + Face 5" / "All at once".
+    public static func simTitle(number: Int, names: [String]) -> String {
+        let head = "\(groupName(number)) · "
+        return fit(head + faceList(names, room: 34 - head.count), 34)
+    }
+    public static let simAll = "All at once"
+    public static let simAllShort = "All"
+    /// The face card's group row and its chip that makes a new group.
+    public static let groupRow = "Squeeze group"
+    public static let newGroupChip = "+ New"
+    /// ★ SEPARATE GROUPS SHARE MATERIAL: said in one line (the page's, under the groups).
+    public static let groupsShare = "Groups share material: the firmer one wins"
+    /// A group that squishes less than it was designed for, because another group's material is
+    /// firmer there (the player's line): "Group 2 squishes 1.2 of 3.0 mm · firmer wins".
+    public static func groupMisses(number: Int, asBuiltMM: Double, designedMM: Double) -> String {
+        fit(String(format: "%@ squishes %.1f of %.1f mm · firmer wins", groupName(number), asBuiltMM, designedMM))
+    }
+    /// A pressed face pinched with another of its group (two segments).
+    public static func pinched(with other: String) -> String { fit("Pinched with \(fit(other, 16)) · two halves") }
 
     /// ★ WHAT HE MUST KNOW ABOUT THE SELECTED FACE, ON THE PANEL (verification of round 3: a
     /// refusal, the columns his curve cannot reach and the side-face limit lived only behind
@@ -204,5 +255,8 @@ public enum FlexibleRowCopy {
         public static let temperature = "Foaming filaments change softness with nozzle temperature — and not in order. Only the temperatures the filament was tested at are offered; Auto picks one."
         public static let topology = "Auto picks gyroid or honeycomb for the feel you chose. Honeycomb has test data only when pressed along its prism axis, so a side face is gyroid only."
         public static let noFace = "Tap a face on the part to select it, then press it or let it rest. Faces from the main page's Load and Anchor groups are already set."
+        /// ★ ROUND 4 (D2).
+        public static let groups = "Faces in one group are squeezed at the same time with the same force — like two hands pressing equally; each face keeps its own curve. Two opposite faces in one group are a pinch: each half of the part between them is designed for its own face. Separate groups are separate squeezes: the lattice is built for all of them, and where two groups need the same material the firmer one wins. A face from a main-page Load group shares that group's weight with its other faces by area."
+        public static let groupRow = "Move this face to another squeeze group, or make a new group from it."
     }
 }
