@@ -1,5 +1,101 @@
 # Handoff — 2026-09-29-flexible-screens (TRACK app, A1): the Flexible screens
 
+## Round 3 · batch A — verification pass (read this first)
+
+A verifier read batch A against your rules and rendered it on YOUR project 0004. I confirmed
+every finding myself (code + your restored project; renders are headless, the app was not
+launched) and fixed each blocker-level and major one that belongs to batch A, plus the cheap
+minors. **Still true: on your project, Exit builds nothing today** — the Generate pill,
+Save & Exit, the readiness pop-up and the shape-only lattice are batch B; do not judge batch A
+alone as "done".
+
+**What changed for you (all in `Flexible*` track files; no #354 / main hook added):**
+
+- **Your top A now reads "10 kg from Top" and writes back to the Top group.** It had been
+  pressed by the old tap at its 10 kg default (unlinked), so the batch-A build showed "10 kg"
+  and kept a second truth. Every face a main-page Load group presses is now linked
+  (`FlexibleMainPageLoads.adopt`); if the group's weight replaces one of yours, one line says
+  "Was 7 kg · now Top's weight". Faces no group holds (top B, faces 3 and 5) keep your 10 kg.
+- **[Rests] stays.** Choosing Rests on a face the Top group presses used to be undone by the
+  next re-sync (every open, every weight you typed). It is now your choice; one line says
+  "Top presses it on the main page". **The trash is gone for a face a group holds** (it came
+  straight back at the next open) — Rests is the way out.
+- **The number pad commits once, when it closes.** Typing "12" had written 1 kg and then
+  12 kg to the Top group (two undo steps), and pressing a new face on the first digit tore
+  the pad down ("25" became 2 kg).
+- **The prism is drawn only while you drag the chip**, and a flat prism has four clean walls
+  (the old one stood a line every 2 mm — a barcode that hid the bend from img 1's angle).
+  **It never leaves the part:** k now also keeps k × deepest within 0.65 of the lattice (your
+  top A: × 6 → × 4), and one drag stops where the drawn prism meets the lattice (let go and
+  drag again to go deeper). While you drag, the dent follows the chip on varioShore too.
+  Looking straight down the load, dragging DOWN is deeper (it had been the other way on top A).
+  If the chip slides under the panel mid-drag it stays and the drag still finishes (before, k
+  stayed frozen and nothing was recomputed or saved).
+- **After Generate, a curve you edit shows at once.** The old lattice had kept owning the map
+  (looping its old depths); a stale lattice now gives way to your live drawing and hides.
+- **Only the dent map is green.** Curves, their points, the chip, the prism and the selected
+  face are the neutral light colour; the green is the map's ramp and the page accent.
+- **What you must know is on the panel:** one orange line when the selected face is refused
+  or your curve cannot be reached ("Can't reach your curve on 794 columns" on your top A at
+  10 kg), "Auto: can't meet your curve" / "Auto: no pick" in orange, a missing filament list.
+  TPU 95A reads "· no squish data" (it had promised "shape only", which nothing builds yet).
+- **Rows fit in points, not only in characters:** "Nozzle °C", chips at their own widths
+  ("Honeycomb" had read "Honeyco…"); the filament line is ≤ 38 characters. The (i) is a
+  44 pt target. Gone: the second filament name in the header, the permanent "no strength
+  certificate" notice (it is in the Physics (i)), the Walls row (folded into "Physics ·
+  1-bead walls"); Feel and Lattice are hidden for a calibrate-first filament.
+- **A tap on a curve point no longer moves it** (drags start at 6 pt, relative to the grab).
+- **Top B's curve is not flipped** by the round-3 read-through: its extra knot came from the
+  old "+ point" on the default dome (its shape is within 0.022 of the default; your top A's
+  moved peak is 0.072 away and is flipped, as is face 3's V).
+
+**Findings I did not fix here, and why:**
+- *Exit yields no lattice / Generate pill / blockers not pop-ups* (the verifier's blocker):
+  confirmed; it is batch B by the plan (it needs the hoisted model and the shape-only
+  lattice). This handoff now says so plainly above and in the batch-A section.
+- *Prism floor vs legend vs "Deepest squish"* (3.0 mm × k vs the map's 2.1 mm): kept by
+  design — the prism is the deepest squish (S = 1); your curve never touches the face line,
+  so the dent stops short of it. Recorded in D-R3-5; the batch-A sentence "the dent bottoms
+  out on its floor" is corrected.
+- *Curve handles have no keep-out; X's corner point can sit under Y's*: not fixed (minor,
+  and hiding an unreachable handle does not make it reachable) — batch C's camera work.
+
+**Your call:** faces the OLD taps pressed that no main-page group holds (top B, faces 3 and 5,
+10 kg each) are kept. Faces 3 and 5 share a stack, which is what refuses Generate on your
+project. Should the first open after round 3 drop old-tap faces that no group holds, or keep
+them (today)?
+
+**Decisions rows:** D-R3-5 and D-R3-6 extended; D-R3-8 (only the map is green; the prism
+only while dragging) and D-R3-9 (a stale lattice never owns the map) added —
+`docs/design/flexibles/00-decisions.md` §1b.
+
+**Commits (not pushed):** ce1f0471 the group is the one truth · ee9377c4 the prism, the stale
+lattice, the chip's drag · b465e461 only the map is green · 9169fde1 the panel says it, rows
+fit in points · 9b56539d top B's knot is not a drawing · 80b42512 the temperature note's
+colour · (this handoff).
+
+**Tests:** every fix has a test with an inline RED control, and each fix was also reverted in
+source and the new tests run RED before restoring (mutation runs: 12 failures in 4 tests;
+15 in 8; 2 in 1; 8 in 4; 1 in 1). Final targeted run (every Flexible* suite + UnifiedShading,
+LatticePreviewBodyAlpha, LatticeGBufferMask, LatticeThreeAlgorithmsDraw, OrganicCapsuleImpostor,
+Viewer, SmoothingViewer, StageBackdrop, SmoothingPageRound2, LatticeStageMode,
+LatticeSettingsPersist, ProjectStore, UndoHistory, SurfaceStage, LatticeSimSolveTrigger), raw:
+
+```
+Executed 269 tests, with 4 tests skipped and 1 failure (0 unexpected) in 259.738 (259.760) seconds
+  the one failure: LatticeSimSolveTriggerTests.testTheTriggerRefusesOnAllThreeGrounds (known, pre-existing)
+FLEX-LOADS his top A row: '10 kg from Top'
+FLEX-PRISM top A skirt: 4 vertical edges (grid mesh: 150), 5 vertices
+FLEX-PRISM diagonal sector: 1225 columns in 69 rectangles, boundary 416.0 mm (perimeter 416.0 mm), skirt 208 vertical edges
+FLEX-PRISM flat 0.3 drawing: shown max 0.27 mm, k 4, prism 12.0 mm, floor z 7.95 (lattice 20.0–20.0 mm)
+FLEX-BEND his top A: shown depths 0.00–2.07 mm × 4; the quads' shown dent spans 0.00–8.27 mm along the load
+FLEX-MIGRATE shape gap from the default dome: top B 0.022, top A 0.072 (tolerance 0.04)
+FLEX-ROWS in points (panel content 372 pt): Feel 244 · Top A 239 · Shape 243 · Nozzle °C 347 · Lattice 329 · 10 kg from T 212 · Deepest squi 266 · Auto: can't  293 · Physics · 1- 257
+```
+
+**iOS build:** `xcodebuild … -destination id=147E56A1… build` at 80b42512 — BUILD SUCCEEDED,
+no warning in a Flexible file. **Hooks in #354 / main files: still none.**
+
 ## Round 3 · batch A — the Settings page: simple, visual, and it bends (current state)
 
 **What you will see on the Flexible Settings page** (judged headlessly on YOUR project 0004,
@@ -21,23 +117,31 @@ launched, per the standing rule; nothing here has been seen on a screen yet):
 - **Both X and Y curves are on the part at once.** Tap the line: a point lands there, on
   the curve. Tap a point: a red × appears beside it; tap the × to delete (never on an end
   point). A tap on the part clears the ×. The double-tap and "+ point" are gone.
-- **Deepest squish = a green prism you drag out.** A green glass chip ("3.0 mm") sits on
-  the selected pressed face; drag it and a green prism grows into the part (the dent
-  bottoms out on its floor). It snaps every 0.5 mm and at the lattice depth, with a haptic
-  tick, and stops there. Looking straight down the load it becomes a scrub. It hides under
-  the panel or the legend (where it could not be reached).
+- **Deepest squish = a prism you drag out.** A glass chip ("3.0 mm") sits at the deepest
+  squish under the selected pressed face; drag it and a prism grows into the part — drawn
+  ONLY while you drag (verification fix: at rest it buried the bend). It snaps every 0.5 mm
+  and at the lattice depth, with a haptic tick; one drag stops where the drawn prism meets
+  the lattice (let go, drag again to go deeper). The dent reaches the prism floor only where
+  your curve touches the face line. Looking straight down the load it becomes a scrub
+  (down = deeper). At rest it hides under the panel or the legend; mid-drag it never does.
 - **A tap on the part only selects.** Faces come from the main page: your 'Top' group
-  (10 kg, gravity) presses top A with "10 kg from Top"; the bottom anchor rests. Editing
-  the weight here **writes back to the group** (your answer); a group over several faces is
-  split by area and re-syncs. A face in no group shows [Press it] [It rests here]; pressing
-  it asks "How much weight presses here?" on the number pad.
+  (10 kg, gravity) presses top A with "10 kg from Top" — on YOUR saved project too since the
+  verification fix (the batch-A build left top A unlinked, reading "10 kg"); the bottom
+  anchor rests. Editing the weight here **writes back to the group** (your answer), once,
+  when the number pad closes; a group over several faces is split by area and re-syncs.
+  [Rests] on a face the group presses is your choice and stays ("Top presses it on the main
+  page"); the trash is not offered for a face a group holds. A face in no group shows
+  [Press it] [It rests here]; pressing it asks "How much weight presses here?".
 - **The panel: Face | Stamps | More, one line per setting, details behind (i).** Face:
-  filament (a menu, until New TopOpt supplies it), Feel, then the selected face's name
-  [Pressed | Rests], Weight, Shape [Curves] [Stamp — disabled, batch D], Deepest squish,
-  Solid skin. More: nozzle temperature, lattice family, Auto's pick, "Walls · 1 bead",
-  Physics. **Removed:** Both/Either/Centre (always both), the X/Y/3D steps, the frame
+  filament (a menu, until New TopOpt supplies it; "· squish data" / "· no squish data"),
+  Feel, then the selected face's name [Pressed | Rests], Weight, Shape [Curves] [Stamp —
+  disabled, batch D], Deepest squish, Solid skin — and ONE warning line when the face's
+  design is refused or your curve cannot be reached on some columns. More: "Nozzle °C",
+  lattice family, Auto's pick (in warning colour when Auto cannot meet your curve or picked
+  nothing), "Physics · 1-bead walls". Feel and Lattice are hidden for a calibrate-first
+  filament. **Removed:** Both/Either/Centre (always both), the X/Y/3D steps, the frame
   rotation, 1/2 beads (always 1), the density cross-section and its slider, every long
-  caption.
+  caption, the header's second filament name and the permanent notice.
 
 **Not done in batch A (honestly):**
 - **No simulator check.** The plan's step 5 (install on your project, compare with img 1/2,
@@ -45,13 +149,20 @@ launched, per the standing rule; nothing here has been seen on a screen yet):
   simulator succeeds; everything else was measured on your restored project in tests.
 - **Stamp shape** is shown disabled (batch D). The Stamps tab itself is unchanged (its
   captions stay until batch D reworks it).
-- **The Generate pill is still on this page** (batch B moves the build to Save & Exit); the
-  legend no longer covers it. Readiness pop-ups, the shape-only lattice for calibrate-first
-  filaments and the >4-face limit are batch B.
-- **Your saved project keeps its seven tapped faces** (they are yours: the adoption never
-  overwrites or prunes them). Only new taps stop pressing faces.
+- **ON YOUR PROJECT, EXIT BUILDS NOTHING TODAY — do not judge batch A alone as done.** The
+  Generate pill is still on this page (batch B moves the build to Save & Exit), and on your
+  project as saved it is refused: "Face 3 and face 5 share a stack — mark one of them as
+  where it rests" (a grey line bottom-right, not yet the pop-up that selects the face with
+  fix buttons). With TPU 95A it is refused as calibrate-first. Readiness pop-ups, the
+  shape-only lattice for calibrate-first filaments, the >4-face limit and removing the pill
+  are batch B.
+- **Your saved project keeps the faces the old taps pressed** that no main-page group holds
+  (top B, faces 3 and 5 at 10 kg each; 0, 2, 4 resting). Top A — in your Top group — now
+  follows Top. Whether the others should be pruned is your call (see "Your call" below).
 - A face you saved at 90° now reads at 0°; its curves are not re-mapped to the turned frame.
-  A curve redrawn to exactly the default is not flipped (treated as the default).
+  A curve whose SHAPE is the default dome (within 0.04 of core's curve — e.g. top B's extra
+  knot from the old "+ point") is not flipped; a curve you redrew to look like the default
+  is treated the same way.
 - The oblique-press line reads "… at an angle" in the weight row; there is no separate
   confirm button.
 
@@ -92,11 +203,12 @@ FLEX-HOLE skin off on top A: top B points without skin 0, top A points still ski
 FLEX-HOLE his top face before any stack: 6 pieces, 0 straddle x = 50 | the part's own: 2 straddle (control)
 FLEX-BEND TPU 95A pad, default curves: deepest quad dent 3.00 mm (× 4 shown), legend "What you drew · shown ×4", animated no
 FLEX-BEND his top A: shown depths 0.00–2.07 mm × 6; the quads' shown dent spans 0.00–12.41 mm along the load
+  (after the verification fix k is also capped by k × deepest: × 4, 0.00–8.27 mm — see the verification section)
 FLEX-CURVE insert at t 0.2 on the default dome: |Δ curve| over 20 t's max 0.0174 mean 0.0055 (exact at the tap)
 FLEX-PRISM top A: 1250 columns, footprint 5000.0 mm² (columns × pitch² 5000.0), 1326 corners, 2500 triangles, built in 7.2 ms (Debug)
 FLEX-PRISM handle round trip: worst |read − set| 0.00030 mm (model projection), 4.15 mm (world, control)
 FLEX-LOADS 60/40 split, 10 kg: [4.0, 6.0] kg, shares [0.4, 0.6]
-FLEX-ROWS 42 lines, longest 44: "Siraya Tech Roamr TPU Air HR 8… · shape only"
+FLEX-ROWS 42 lines, longest 44: "Siraya Tech Roamr TPU Air HR 8… · shape only"   (batch-A copy; now "· no squish data")
 FLEX-RAMP dent ramp hue span 3° (Stress rainbow 221°), luminance 0.22 → 0.86
 ```
 
