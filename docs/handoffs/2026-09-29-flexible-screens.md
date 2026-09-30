@@ -1,6 +1,229 @@
 # Handoff — 2026-09-29-flexible-screens (TRACK app, A1): the Flexible screens
 
-## Round 4 · batch D2 — verification pass (read this first)
+## Round 4 · batch C2 — the main Flexible page (read this first)
+
+Your notes on the main page after testing batches A + B (img 5, img 6) and your answer 2, built on
+the main Flexible page. Judged headlessly on the pad and on YOUR project 0004 restored through
+`AppModel.open`; the view row was hosted offscreen at 11" and 13" in both orientations and
+clicked. The app was NOT launched, so none of this has been seen on a screen yet.
+
+**What you will see on the main Flexible page:**
+- **No X-ray button** (img 5). The view row under the gizmo is **[Dent heat] [Stress] [Lattice]**.
+  X-ray is now simply how the Lattice view draws:
+  - Lattice shown: the part is the X-ray ghost with the walls inside (as before).
+  - Lattice hidden: the solid part, with the dent heat or the stress on it.
+  - The two can no longer disagree (before: X-ray off hid the walls while the Lattice button
+    stayed on; X-ray on with Lattice off was an empty ghost).
+  - Dent heat, Stress and Lattice keep their legends and tap-to-read, unchanged.
+- **The Lattice button shows or hides the lattice** (your answer 2).
+  - It is lit only when there is a lattice to show: one drawn, or one on its way without
+    Settings (building, or its designs in flight).
+  - **With nothing that can come** (no pressed face, no filament, a failed build), a tap opens
+    Settings, with the one thing to fix popping up as it does today. **Save & Exit then turns the
+    view on**: the lattice builds and shows.
+  - An Exit that did not come from the Lattice button keeps your choice (a lattice you hid stays
+    hidden).
+- **"Lattice ready"** (your answer 2: "a notification should show up when it is ready"). When a
+  build lands, a one-line note appears under the view row for 4 seconds: "✓ Lattice ready". If
+  you had hidden the lattice it adds **[Show]**. It shows once per build (after Save & Exit, after a
+  main-page edit that rebuilds), never when you merely come back to a lattice that was already
+  there. Its place under the row is reserved, so a note coming and going never moves a legend.
+- **The big bottom Lattice button** (img 6, your answer 2):
+  - **"Lattice · Ready" → Send to core and the Export step.** It no longer opens Settings (img 6:
+    "When I clicked Lattice after already having a lattice preview, it brought me to the
+    settings page"). While core runs, the pill reads "Sending to core…"; the Export step is
+    already open.
+  - **"Lattice · Fix: …"** still opens Settings on that fix's pop-up.
+  - **"Lattice · Building…"**: nothing opens; the note under the view row says "Still building —
+    it shows here when ready".
+  - From another stage (Topology, Surface) the same rules hold; "Tap to open" (the stage not yet
+    opened this session) goes to the Lattice stage and Settings, as before.
+- **The Export step** (the modal you asked for in round 1: "export gcode or an stl"):
+  - Its top line is core's answer, ONE line, core's whole sentence behind the (i):
+    - on your pad (top pressed, varioShore): **"Core designed it · Gyroid · 240 °C · 1 face"**,
+      in 0.21 s;
+    - on your project with Face 5 resting: **"Core designed it · Gyroid · 240 °C · 3 faces"**;
+    - on your project as saved (faces 3 and 5 pinch the pad): **"Not sent: core can't press both
+      ends yet"** — core designs one squish profile per stack; the pinch is the app's preview
+      (D2). Several squeeze groups: "Not sent: core runs one squeeze group at a time";
+    - a calibrate-first filament (TPU 95A on your pad): **"Core refused it: no squish data for this
+      filament yet"**. Core's own sentence names five brands, so it goes behind the (i); the known
+      refusal codes each have a short line, anything else shows core's first sentence.
+  - The (i) says where core wrote its receipt, heat maps and CSVs (21 files on your project).
+  - **STL** and **G-code** stay disabled, each with ONE line: **"Waits on core's Flexible
+    exporter"**. Core's Flexible runner designs the density; it writes no printable file yet.
+  - The same job is not sent twice: tapping Ready again reopens the step with core's answer.
+
+**How it is routed (what I found):**
+- **The other sections' Lattice button:** `requestLatticeRun` → `model.makeLatticeRunRequest()`
+  → `RunModel.start` → `latticeBridgeRunner` writes `lattice_job.json` beside the part and calls
+  `TopOptKit.runLatticeJob` → the bridge's `run_lattice_job` → core's `lattice_variant_job`,
+  output in a temp folder → the results screen and its exports. On a Mac worker, the job document
+  goes to the worker's `run`.
+- **Core C1 does NOT run a Flexible job on that path.** The bridge's `run_lattice_job` takes only
+  `lattice_part` / `lattice_variant` (the Flexible document says `analyze`), and core's
+  `run_job`, `analyze_job`, `lattice_variant_job` and `preflight_job` each call
+  `refuse_flexible_job`: "… this job carries a "flexible" block, which runs with `topopt-cli
+  flexible`". The test sends your pad's Flexible job down the other sections' path as its
+  control: `run_lattice_job: mode must be "lattice_part" or "lattice_variant" (got "analyze")`.
+- **Core's one entry point is `run_flexible_job`** (`core/src/flexible/run.cpp`, the
+  `topopt-cli flexible` subcommand). It is in the always-built library the iPad already links (the
+  symbol is in all three xcframework slices). The app's bridge now calls it
+  (`flexible_run_job` in `flexible_bridge.cpp`, app side; core untouched).
+- So Ready sends the SAME document the Settings page encodes (`FlexibleStageModel.runJobJSON`,
+  round-trip tested against core's `parse_job`), with the part's folder as the job dir and the
+  output in a temp folder (the lattice path's rules), off the main thread. `RunModel`,
+  `RunRequest`, `requestLatticeRun` and the results screen are untouched, so Structural and
+  Aesthetic run exactly as before.
+
+**Not done (and why):**
+- **Nothing has been seen on a device or simulator.** I must not launch the app. The iOS build
+  succeeds (below); the view row was hosted and clicked offscreen.
+- **No STL or G-code.** Core's Flexible runner writes receipts, heat maps and CSVs, not a mesh
+  (core's C2/C3 exporter; core brief #9, #16). The cards say so in one line.
+- **Not on a Mac worker.** The worker runs `run` jobs, which refuse the Flexible block. The
+  Flexible run is on this device only (0.2 s on your pad).
+- **Core cannot run a pinch or several squeeze groups** (core brief #1, #2, #6). Those projects
+  say "Not sent: …" instead of sending a job core would refuse.
+- **Core's receipt is not shown in the app** beyond the one line (the heat maps are files in a
+  temp folder). Showing core's heat maps next to the preview's is a later step.
+- **The render defects from B's renders** (the seam speckle, the flap past a pressed side wall,
+  the torn side face) are untouched: C2 does not draw the dent or the walls. Batch G's
+  displacement field replaces the per-column squish.
+- **The note is not shown on other stages.** It sits under the view row, which only the Lattice
+  stage has; the pill's own line says "Building…" / "Ready" there.
+- Carried over: #354's latent Surface / Settings overlap (4b11beb3).
+
+**Your call:**
+- **"Tap to open" from Topology still lands in Settings** (the stage has not opened your part yet
+  this session, so it cannot know whether it is set up). Should it go to the Lattice stage only,
+  and open Settings only if something is missing? (One more line in #354's bottom-bar hook.)
+- **Save & Exit turns the view on only after the Lattice button sent you there.** Should every
+  Exit that rebuilds the lattice show it?
+- **Where the "Lattice ready" note sits:** under the view row, beside the Lattice button that
+  shows the lattice, for 4 seconds. The app's usual toast is bottom-centre, where the squish
+  player is. Say if you want it there instead, or longer.
+
+### Hook lines in #354 files
+
+| hook | file · anchor | ± | why |
+|---|---|---|---|
+| H5'' | WorkspacePlaceholder · `if flexibleMain.owns(project, stage) { FlexibleMainViewToggles(main: flexibleMain, solver: FlexibleStressSolver(app: model, sim: latticeSim)` | ~1 | `, openSettings: { showFlexiblePage = true })`: the Lattice button, with nothing to show, opens Settings |
+| X1 | WorkspacePlaceholder · after the `FlexibleStagePage(…)` mount's `.transition(.opacity).zIndex(48)` block | +1 | `if project.lattice.flexible != nil { FlexibleExportMount(run: flexibleMain.coreRun).zIndex(48) }`: the Export step, on any stage |
+
+WorkspacePlaceholder in C2: `git diff --numstat` 2 1 (one line edited, one added). H10 (the pill's
+mount) is NOT edited: the pill's own body decides what a tap does. `requestLatticeRun`,
+`startStressSolveIfNeeded` (its first 900 characters, pinned) and every other pinned string are
+untouched. MetalMeshView, LatticeSettings, ProjectModel and LatticeStageMode are untouched; no
+case was added.
+
+App-side bridge (#362's own files, not core): `FlexibleBridge.hpp` +19 (`FlexRunResult`,
+`flexible_run_job`), `flexible_bridge.cpp` +26 (the call into core's `run_flexible_job`),
+`FlexibleKit.swift` +30 (`FlexRunInfo`, `FlexibleCore.runJob`).
+
+New files: `FlexibleCoreRun.swift` (the run, its report, the pill's tap rule),
+`FlexibleMainLatticeView.swift` (the view rule, the note, the Lattice button, the pill's tap).
+Edited track files: `FlexibleMainStage.swift` (X-ray derived, availability, the note's trigger,
+Exit shows the view), `FlexibleMainStatusPill.swift` (three buttons, the note under them, the
+reserved band, the pill body), `FlexibleExportSheet.swift` (core's line, one line per card, the
+mount).
+
+### Decisions (00-decisions.md)
+
+- New rows D-R4-20 … D-R4-23: no X-ray button; the Lattice button (and Exit shows the view); the
+  "Lattice ready" note; Ready sends to core's Flexible runner and opens the Export step.
+- D-R3-11 is amended: the pill no longer opens Settings when Ready.
+- D-R3-15 is amended: "[X-ray]" struck from the view row.
+
+### Tests
+
+Written FIRST and run RED against stubs of the new API (`c2/red1.log`, before any hook): **11 of 11
+failed** — the X-ray button still there, the Lattice button a bare toggle, no note within 5 s of
+the build, the pill opening Settings when Ready, nothing sent to core, no "Not sent" line, no
+reserved band, the hooks absent.
+
+NEW:
+- `FlexibleMainPageRound4Tests` (12): the row has no X-ray; X-ray == the Lattice view (the body's
+  alpha follows it); on the pad with nothing pressed the Lattice button opens Settings and Exit
+  shows the lattice (built, walls drawn), then it hides / shows and never opens Settings; the
+  "Lattice ready" note once per build, [Show] when hidden; the pill's tap rule; Ready sends the
+  pad's job to core's runner (0.21 s, 9 files, run_info.json, `face1_density.svg`) and the same job
+  is not sent twice; your project as saved says "Not sent" and nothing reaches core, with Face 5
+  resting it is sent (core designs 3 faces); TPU 95A is core's refusal in one short line; every
+  "Not sent" line ≤ 56 characters; the export step's source; the reserved note band at 11" / 13";
+  the two hook lines.
+- `FlexibleMainPageRound4HostedTests` (2, hosted and CLICKED, added after the first green run): the
+  three buttons fill their slot (136 pt wide, no X-ray) and the note — both its forms, [Show]
+  included — lies inside its reserved band at 11" and 13", both orientations; clicking Lattice
+  hides / shows it, and with nothing to show opens Settings; Exit shows the view; the note's
+  [Show] shows it.
+
+Inline RED controls:
+- a bare toggle (batch C's button) shows nothing when there is no lattice;
+- the other sections' runner refuses your pad's Flexible job: `run_lattice_job: mode must be
+  "lattice_part" or "lattice_variant" (got "analyze")`;
+- a stage that did not see the build posts no note (the note is keyed on the build);
+- batch B's pill body (Settings on every tap) is gone from the source;
+- the row-only frame (batch C's keep-out) does not hold the note, source and hosted;
+- core's calibrate-first sentence is over 80 characters (why it goes behind the (i));
+- with the pinch undone the same tap reaches core (the "nothing sent" counter can move).
+
+Re-pinned, each with its reason in the test:
+- FlexibleBatchBReviewUXTests.testTheLatticeViewTurnsXRayOn: no X-ray button; the button shows
+  what is drawn (control: `latticeAvailable` false leaves it unlit while `latticeOn` is true).
+- FlexibleMainViewsTests: "X-ray off" is now the lattice hidden (`latticeOn = false`).
+- FlexibleMainPageHookTests (H5), FlexibleBatchCHookTests (H5'): the `openSettings` closure.
+
+Deleted-test sweep of my diff (`git diff c0a7ff42..HEAD -- app/TopOptKit/Tests`): none deleted; 14
+test functions added.
+
+Mutation runs. Each breaks one rule, rebuilds, runs the test that pins it, then restores the file
+from git (`git status` clean afterwards). All 10 are RED:
+```
+M1  X-ray independent of the Lattice view      ⇒ ("true") is not equal to ("false") "X-ray is the Lattice view's rendering" (2)
+M2  the Lattice button a bare toggle           ⇒ ("0") is not equal to ("1") "nothing set up: the tap opens Settings" (3)
+M3  availability ignored                       ⇒ "no lattice can come without Settings" (8)
+M4  Exit does not turn the view on             ⇒ "Exit turned the view on" (9)
+M5  no note when a build lands                 ⇒ "timed out waiting for the note" (6)
+M6  a note on every refresh with a lattice     ⇒ ("3") is not equal to ("1") "once per build, not per refresh" (3)
+M7  the pill opens Settings when Ready         ⇒ "a ready lattice never opens Settings" (8)
+M8  the same job sent to core twice            ⇒ ("2") is not equal to ("1") "the same job is not sent twice" (1)
+M9  the note band not reserved                 ⇒ "the note band is inside the reserved frame at 13l" (5)
+M10 a pinch sent to core                       ⇒ "not sent: sending" (1)
+```
+
+Raw lines:
+```
+FLEX-CORE pad: 'Core designed it · Gyroid · 240 °C · 1 face' in 0.21 s · files 9: ["face1_target_depth.svg", "face1_columns.csv", "face1_buildable_depth.svg", "face1_density.svg", "face1_cell_size.svg", "face1_tier_flags.svg", "field_xz_density.svg", "field_xz_owner.svg"] …
+FLEX-CORE control: the other sections' runner says 'run_lattice_job: mode must be "lattice_part" or "lattice_variant" (got "analyze")'
+FLEX-CORE his project as saved: 'Not sent: core can’t press both ends yet' · (i) 'A pinch is the app's preview for now: core designs one squish profile per stack.'
+FLEX-CORE his project, face 5 resting: 'Core designed it · Gyroid · 240 °C · 3 faces' · (i) 'Core’s receipt, heat maps and CSVs (21 files) are in …/T/flexible-7CA37B9B-…. It designs the density, not the printable file yet.'
+FLEX-CORE TPU 95A: 'Core refused it: no squish data for this filament yet' · code calibrate_first · (i) 'TPU 95A (Bambu 95A HF, Polymaker PolyFlex TPU95, eSUN, Elegoo ...) has no lattice squish data. It can be built, but no squish is predicted unti…'
+FLEX-NOTE 11l: row+note (870.0, 235.0, 300.0, 83.0) · note (870.0, 283.0, 300.0, 35.0) · legends ["dent (922.0, 331.0, 248.0, 124.0) open", "lattice (922.0, 603.0, 248.0, 124.0) open", "stress (922.0, 467.0, 248.0, 124.0) open"]
+FLEX-HOSTED 11l ready: drawn [(1034.0, 235.0, 136.0, 41.0), (996.0, 283.0, 174.0, 35.0)] · row slot (1034.0, 235.0, 136.0, 41.0) · note band (870.0, 283.0, 300.0, 35.0)
+FLEX-HOSTED 11l building: drawn [(1034.0, 235.0, 136.0, 41.0), (870.0, 283.0, 300.0, 35.0)] · row slot (1034.0, 235.0, 136.0, 41.0) · note band (870.0, 283.0, 300.0, 35.0)
+```
+(at 11" landscape the three legends still open in one column: 331–727, above the bar at 740.)
+
+The targeted suite: every Flexible* suite (both new ones included), the brief's list, and every
+suite that scans WorkspacePlaceholder (D2's filter, `c2/filter.txt`). It ran on the committed tree
+after the last source change and after the mutation runs. Raw:
+```
+Executed 777 tests, with 10 tests skipped and 1 failure (0 unexpected) in 827.484 (827.552) seconds
+  the one failure: LatticeSimSolveTriggerTests.testTheTriggerRefusesOnAllThreeGrounds (known, pre-existing)
+```
+
+**iOS build (the committed tree):** `xcodebuild -project app/TopOpt.xcodeproj -scheme TopOpt
+-configuration Debug -destination id=147E56A1… -derivedDataPath …/flexA1 build` → `** BUILD
+SUCCEEDED **` (exit 0), no warning in a file C2 touched. The app was not launched.
+
+### Commits (on claude/flexible-screens, not pushed)
+
+15d915aa the app's bridge reaches core's own Flexible runner · 140c8d45 the main Flexible page (no
+X-ray button, the Lattice view button, "Lattice ready", Ready → core and the Export step) · (this
+handoff + DECISIONS D-R4-20 … 23, D-R3-11 / D-R3-15 amended).
+
+## Round 4 · batch D2 — verification pass
 
 The D2 verifier reported 20 findings: 1 blocker, 10 majors and 9 minors. Two of them are the same
 pinched-face warning, seen from the code side and from the screen side. I checked each one on YOUR
