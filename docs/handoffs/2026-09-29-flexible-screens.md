@@ -1,6 +1,228 @@
 # Handoff — 2026-09-29-flexible-screens (TRACK app, A1): the Flexible screens
 
-## Round 3 · batch C — verification pass (read this first)
+## Round 4 · batch D1 — the Settings page (read this first)
+
+Your notes after testing batches A + B (your images 1, 2, 4, 5, 6, 7) and your answers 3
+(stamps) and 4 (the finish), built on the Settings page. Judged headlessly on YOUR project 0004
+restored through `AppModel.open`, and on the pad. The app was NOT launched, so none of this has
+been seen on a screen yet.
+
+**What you will see on the Settings page:**
+- **Your faces are listed** (img 1). Under the filament, feel and finish rows there is a
+  **Faces** list: every face set on the main page (and here), one big row each:
+  - "Top A · Pressed · 10 kg", "Top B · Pressed · 10 kg", "Face 3 · Pressed · 10 kg",
+    "Face 5 · Pressed · 10 kg", "Face 0 · Rests", "Face 2 · Rests", "Face 4 · Rests" on your
+    project;
+  - pressed faces come first. Each row is 48 pt tall with a chevron. The selected row is filled,
+    outlined in blue and ticked.
+  - **Tap a row:** the rows below it (Pressed / Rests, weight, Shape, depth) show and edit THAT
+    face, and the part shows it selected. A split sector is selected as itself: tapping "Top B"
+    selects top B, not the whole top face.
+  - A marked place under the list waits for the squeeze-group rows (batch D2).
+- **The panel is only as tall as its rows** (img 1). The pad's panel with one face is 577 pt,
+  where round 3 took 62 % of the screen. Long content still scrolls.
+- **Minimize** (img 1):
+  - A chevron in the panel's header folds it to its header line ("Flexible · Top A", 64 pt).
+    The same chevron opens it again.
+  - The legend has a chevron too. It folds to the lattice legend's own bar (the scale alone,
+    with the reading's arrow). A tap on the bar brings the legend back.
+- **Shape [Curves | Stamp] is a real either/or** (img 1, img 4, your answer 3):
+  - **Stamp can be pressed.** The face's ONE stamp appears at once on the part, at the face
+    centre. It is the palm, a thumb pad or a fingertip: the first of these that fits the face
+    (a thumb pad on your top A).
+  - **The curves leave the part at once**, and the stamp's rows appear in their place, one line
+    each: "Stamp · Thumb pad" [pick from the list, or import an SVG / image] · "Size 20 × 26 mm"
+    [pencil] · "Turned 0°" [quarter turn] · Press [Soft | Rigid].
+  - The stamp's weight IS the face's weight: the weight row above it, which a main-page group may
+    own.
+  - Drag the stamp's handle on the part to move it.
+  - The map shows the stamp SINKING where it sits: the deepest squish under it, nothing beside
+    it. On the pad, 174 of 4,096 columns dent, where the curves dent all 4,096. The depth prism
+    stands on the stamp's footprint.
+  - **Curves** hides the stamp and brings the curves back. The stamp is kept for a switch back
+    and never sent.
+  - **The Stamps tab and the check stamps are gone.** The tabs are Face | More; the tap-to-read
+    legend gives dent values.
+  - Your project's two check stamps (thumb on face 3, four fingers on face 5) are simply not
+    read any more. A face designed under one stamp before round 4 keeps it as its Stamp shape.
+- **The black circles are gone** (img 6). They were round 3's check-stamp handles, seen through
+  the panel. Only the selected Stamp face's handle is drawn now, and never under the panel or the
+  legend. Its outline is clipped out of them too.
+- **The depth prism and its chip are the lattice stage's face-prism purple** (img 2, your
+  request):
+  - the prism is `latticeRegionTint(.include)`, the same (124, 111, 214) as the Lattice groups'
+    prisms. A test reads #354's line, so the two cannot drift apart;
+  - the chip wears the lattice depth knob's glass, brighter while dragged.
+  - Batch C's "never violet" main-page hook is reverted, so there is ONE purple for every face
+    prism, the main page's included.
+- **Finish [None | Rim | Skin | Covered], for the whole part** (img 5, your answer 4). It is a
+  row on the Face tab and replaces the per-face "Solid skin" row:
+  - **None:** the lattice runs to the surface everywhere;
+  - **Rim:** a solid band 2 mm round every face edge, with the faces open;
+  - **Skin:** a 0.8 mm skin with round 1.5 mm holes on a 5 mm hex grid, laid in each face's own
+    plane;
+  - **Covered:** a solid skin everywhere. This is the default, and what a project saved before
+    reads.
+  - Measured under the pad's top face (400 points 0.25 mm in), the points that are NOT solid:
+    Covered 0 · None 317 · Rim 317 · Skin 97. Along the top edge, 60 of 60 points are solid
+    under Rim (None: 18).
+  - It shows on the main page's lattice after Save & Exit.
+- **No lattice on the Settings page** (img 6). The part is X-ray and the map is your drawing
+  ("What you drew", played by the page's own player). The lattice is drawn on the main page only.
+- **More: Auto and Physics open below their titles** (img 7). The whole row is the button. A
+  round caret points down and turns up when open (36 pt closed → 244 pt with Physics' 200 pt of
+  details). The (i) popover that floated beside the panel is gone.
+
+**Not done (and why):**
+- **No simulator check, no screenshots.** I must not launch the app. `xcodebuild` for the
+  simulator succeeds (below); everything else was measured headlessly.
+- **Not in this batch** (the plan puts them elsewhere):
+  - the squeeze groups: img 3, squeezing two sides at once; img 4, grouping faces; your answer 1,
+    one force per group. This is batch D2; its place in the face list is marked;
+  - img 5's X-ray / Lattice view selector on the main page;
+  - img 6 / your answer 2, the big bottom Lattice button (send to core and export; the view
+    button, the "ready" note);
+  - the render defects in B's renders (the sector-seam speckle, the flap, the torn side face).
+    The Settings page no longer draws the lattice. The map's own seam is left to batch G's
+    displacement field.
+- **A Stamp face's lattice on the main page squishes evenly.** Core designs a stamp face so the
+  stamp "sinks that far" where it sits and spreads weight ÷ footprint elsewhere (core brief #10).
+  The walls then squish by core's buildable depths (flat curves ⇒ the deepest everywhere). The
+  Settings page's map shows the stamp sinking where it sits; that is your drawing, not a
+  prediction.
+- **Rim and Skin exist in the app's preview only.** Core's Flexible block has one `skin_on` per
+  face. The job says true only under Covered (core brief #16 below).
+- **The stamp turns in quarter turns only** (a one-tap button). The number pad cannot take 0°.
+- The panel's and the legend's folded state is not remembered: they open unfolded each time the
+  Settings page opens.
+
+**Your call:**
+- **A project saved before the finish existed reads Covered.** Your face 3 had its per-face
+  "Solid skin" off; it is now covered like the rest. Pick None to open every face. Covered
+  changes the one face; None would have changed every other face.
+- **The finish's sizes are my choice until core owns them:** Rim 2 mm; Skin 0.8 mm thick with
+  1.5 mm holes, 5 mm apart.
+- **The Finish row sits on the Face tab**, under Feel. Say if you want it in More.
+- **The default stamp** is the palm, a thumb pad or a fingertip, whichever fits first.
+
+### Core brief (additions from D1; items 1–15 are the plan's, carried by batch D)
+
+- **16. A MODEL-WIDE FINISH in the Flexible block**: `flexible.finish: none | rim | skin |
+  covered`, with rim width and perforation (hole size, pitch, skin thickness) as core's numbers.
+  - Today `job_block.cpp:180` reads one `skin_on` per face, and `run.cpp` only echoes it.
+  - The app sends `skin_on = (finish == covered)` on every face.
+  - C2 / C3 (the export) must build Rim's band and Skin's holes the way the preview draws them
+    (`FlexibleFinish`: the distance to the face edges; a hex hole grid in each face's plane).
+- **#10 is now in use:** the Stamp shape sends flat curves, `deepest` = the chip, and
+  `design_stamp` = the face's one stamp at the face's weight.
+
+### Hook lines in #354 files
+
+| hook | file · anchor | ± | why |
+|---|---|---|---|
+| H13 reverted | WorkspacePlaceholder · `latticeRegionTint(_ role:` | −1 | the `FlexibleMainTints.depthPlane` line is gone: #354's violet include tint again |
+| H13 reverted | · `latticeDepthKnob(active:` | ~1 | `LatticeDensityProxy.densityColor(fraction: 0.6),` (#354's own line again) |
+| H13 reverted | · `latticeExpandKnob(active:` | ~1 | `LatticeDensityProxy.densityColor(fraction: 0.25),` (#354's own line again) |
+
+WorkspacePlaceholder in D1: `git diff --numstat` 2 3 (the revert commit 8de48a83 alone). No other
+#354 file is touched. MetalMeshView, LatticeSettings and ProjectModel are untouched. New code
+lives in new files: FlexibleFinish, FlexibleFaceList, FlexibleFaceStamp, FlexibleSettingsPanel
+and FlexibleDisclosure.
+
+### Decisions (00-decisions.md)
+
+- §1c adds D-R4-1 … D-R4-7.
+- D-R3-8 is amended: the prism and the chip are purple.
+- D-R3-19 is struck (reverted).
+
+### Tests
+
+NEW `FlexibleSettingsRound4Tests` (14 tests). Each carries an inline positive control on the
+rule it replaces:
+
+- **Face list:** a tap through the part's face selects the whole split face, not top B.
+- **Panel height:** round 3's ScrollView in a max-height frame takes all 900 pt offered for
+  300 pt of rows.
+- **Stamp handles:** your project's two check stamps were two handles.
+- **Job:**
+  - Curves sends the drawing and never the stored stamp;
+  - the per-face skin said off, and Covered covers it.
+- **Finish:**
+  - with no finish, the edge is latticed;
+  - Covered has skin in a hole.
+- **Stamp map:** under Curves, every column dents.
+- **Settings page:** a drawn lattice owned the map.
+- **Colour:** the on-part white is not the purple.
+- **Migration:** a required `finish` would not decode your project.
+- **Carets:** the (i) row never grows.
+
+Mutation runs. Each restores the rule D1 replaces in the source, rebuilds, runs
+FlexibleSettingsRound4Tests, FlexibleShownValuesTests and FlexibleStageTests, then restores the
+file. Afterwards `grep MUTATION` finds no marker of mine. Every one is RED:
+```
+M1  the panel scroll takes every point offered  ⇒ testThePanelIsOnlyAsTallAsItsContent: ("900.0") is not equal to ("300.0"); testThePanelAndTheLegendMinimize: ("900.0") is not less than ("800.0")
+M2  a list tap resolved through the part's face ⇒ testTheFaceListListsHisFacesAndATapSelectsThatFace: ("Optional(1)") is not equal to ("Optional(1000104)"); ("[]") is not equal to ("[1000104]")
+M3  the job's skin_on from the per-face switch  ⇒ testTheFinishReachesTheJob: 5 failures (covered / none / rim / skin, "…and Covered covers it"); FlexibleStageTests.testRunJobRoundTrips…: "Covered, the default finish"
+M4  the builder ignores the finish (Covered)    ⇒ testTheFinishShapesTheLatticeField: None 0 > 100, Rim 0 > 100, the edge control 60 < 60, Skin 0 > 0, "no skin in a hole" 0.482 < 0
+M5  a stored stamp is used under Curves too     ⇒ testShapeIsATrueEitherOr: "Curves never sends a stamp"; testTheStampShapeWritesFlatCurvesAndItsStamp: the Palm grid sent under Curves
+M6  a Stamp face's map dents the whole face     ⇒ testTheStampSinks…: ("4096") is not less than ("2048"); max 2.998 ≠ 3.0
+M7  the prism back in the on-part white         ⇒ testTheDepthPrismAndChip…: (0.949, 0.949, 0.961) ≠ (0.486, 0.435, 0.839); FlexibleShownValuesTests: "the prism"
+M8  the migration keeps the check stamps        ⇒ testNoStampHandleIsDrawnUnderThePanel: ("2") is not equal to ("0"); testTheMigrationDrops…: the list kept
+M9  the caret never opens inline                ⇒ testAutoAndPhysicsAreDisclosureCarets: ("36.0") is not greater than ("186.0")
+M10 round 3's handles (every stamp of every face) ⇒ testNoStampHandleIsDrawnUnderThePanel: ("1") is not equal to ("0") "another face selected: none"
+```
+(M2 then crashed the run on a force-unwrap in the test; that line is now an XCTUnwrap. The only
+`MUTATION` left in Sources is a word in a comment in GroupViewState.swift, which is not mine.)
+
+Re-pinned on purpose (each carries its reason in the test):
+- FlexibleBatchBReviewUXTests: the Settings page's renderer loop (there is no lattice on that
+  page now);
+- FlexibleSquishTests: the drawn-lattice call site moves to the main stage;
+- FlexibleShownValuesTests: the prism and chip colour (purple);
+- FlexibleStageTests:
+  - the job's `skin_on` follows the finish;
+  - the stamp round trip is under Shape = Stamp;
+- FlexibleRowCopyTests:
+  - the tabs are Face | More;
+  - the one-line table gains the round-4 lines.
+
+**Deleted-test sweep (my diff):** `FlexibleNeverVioletTests.swift` is deleted by the revert of
+f968ee40. It pinned the Flexible accent on the main page's depth prism and knobs, which your
+explicit request overrides. Its replacement pin is
+`testTheDepthPrismAndChipAreTheLatticeStagesFacePrismPurple`: the hook is gone, #354's knob line
+is its own again, and FlexibleDepthAccent.swift does not exist. No other test is deleted.
+
+The targeted suite ran after the last source change. It covers every Flexible* suite, the
+brief's list, and every suite that scans a touched file (WorkspacePlaceholder's readers: batch C's
+`filter.txt`, unchanged). Raw:
+```
+Executed 709 tests, with 9 tests skipped and 1 failure (0 unexpected) in 623.831 (623.891) seconds
+  the one failure: LatticeSimSolveTriggerTests.testTheTriggerRefusesOnAllThreeGrounds (known, pre-existing)
+FLEX-LIST his faces: Top A · Pressed · 10 kg ✓ | Top B · Pressed · 10 kg | Face 3 · Pressed · 10 kg | Face 5 · Pressed · 10 kg | Face 0 · Rests | Face 2 · Rests | Face 4 · Rests
+FLEX-PANEL hug: 300 pt content → 300.0 · 2000 pt content → 900.0 (offered 900.0)
+FLEX-PANEL pad: open 577.0 pt · minimized 64.0 pt (offered 900.0)
+FLEX-STAMP pad top: 4096 columns · curves dent 4096 · the stamp dents 174 (167 under it) · deepest shown 3.0 mm
+FLEX-FINISH gaps under the top (of 400): covered 0 · none 317 · rim 317 · skin 97 | solid along the top edge (of 60): covered 60 · none 18 · rim 60 · skin 60
+FLEX-FINISH row 338 pt of 372
+FLEX-CARET closed 36.0 pt · open 244.0 pt
+```
+Before the re-pins, the whole Flexible filter (230 tests) had 9 failures in 6 tests. Each was a
+rule D1 changes on purpose: the renderer-loop pin, the tabs, the prism / chip colour, the
+drawn-lattice call site, the job's skin_on, and the stamp round trip under Curves. All 6 are
+re-pinned above.
+
+**iOS build (final tree):** `xcodebuild -project app/TopOpt.xcodeproj -scheme TopOpt -configuration
+Debug -destination id=147E56A1… -derivedDataPath …/flexA1 build` → `** BUILD SUCCEEDED **` (exit
+0), no warning in a Flexible file. The app was not launched.
+
+### Commits (on claude/flexible-screens, not pushed)
+
+8de48a83 revert f968ee40 (one purple for every face prism) · 90c3f758 the Settings page (face
+list, hug, minimize, Shape either/or, purple prism, Finish, no lattice, carets) · (this handoff
+and the DECISIONS rows).
+
+
+## Round 3 · batch C — verification pass
 
 A verifier read batch C against your rules on YOUR project 0004 (headless renders and his real
 solid-part FEA; the app was not launched). I confirmed each finding myself, on the code and on
@@ -1909,4 +2131,4 @@ Test Suite 'All tests' failed at 2026-09-29 06:34:29.891.
 The suite rewrote other tasks' tracked evidence (`docs/handoffs/assets/`, `evidence/`); restored.
 
 ## Blocked
-None. No core brief was needed: every number on screen comes from the C1 bridge contract.
+~~None. No core brief was needed: every number on screen comes from the C1 bridge contract.~~ **Superseded (round 4):** the plan's Core brief (items 1–15), plus #16 in round 4 batch D1 at the top.

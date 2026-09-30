@@ -53,8 +53,8 @@ final class FlexibleSettingsRound4Tests: XCTestCase {
         XCTAssertEqual(m.selectedRegion, FlexibleHisProject.topB)
         XCTAssertEqual(FlexibleFaceList.rows(model: m).filter(\.selected).map(\.region), [FlexibleHisProject.topB])
         let b = try XCTUnwrap(m.settings.face(FlexibleHisProject.topB))
-        XCTAssertTrue(FlexibleFaceList.rows(model: m).first { $0.selected }!.line
-            .hasSuffix(FlexibleRowCopy.kgText(b.weightKg)), "the row says the value the rows below edit")
+        let selectedRow = try XCTUnwrap(FlexibleFaceList.rows(model: m).first { $0.selected })
+        XCTAssertTrue(selectedRow.line.hasSuffix(FlexibleRowCopy.kgText(b.weightKg)), "the row says the value the rows below edit")
         // ★ RED CONTROL: a tap through the PART's face (no point) selects the whole split face
         m.tapFace(1)
         XCTAssertNotEqual(m.selectedRegion, FlexibleHisProject.topB, "control: the part's face is not the sector")
