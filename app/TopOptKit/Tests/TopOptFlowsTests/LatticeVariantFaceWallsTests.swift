@@ -335,4 +335,26 @@ final class LatticeVariantFaceWallsTests: XCTestCase {
         XCTAssertTrue(try src("ProjectModel.swift").contains(
             "public func variantLatticeJobRegions() -> LatticeRegionEmission.Result {\n        latticeJobRegions()\n    }"))
     }
+    /// ★ THE #358 SYNC'S CANARY (2026-09-30): core's in-plane frame check now fires at PARSE time
+    /// (12ff5880). Before the sync the app's linked core let an out-of-plane frame through its
+    /// parser (Q1's J8, a dead check) and the job died only at run time, after the load case —
+    /// so this test goes red on a stale core. The app's own frames are built from the unit normal
+    /// and pass (the control).
+    func testTheLinkedCoreRefusesAnOutOfPlaneFrameAtParseTime() throws {
+        let (p, _, _) = VariantFacePrismFixture.project()
+        let docs = try VariantFacePrismFixture.variantDocuments(p)
+        for (label, doc) in docs {
+            XCTAssertNil(TopOptKit.jobSchemaError(doc), "control: the app's own \(label) document parses")
+            var obj = try XCTUnwrap(JSONSerialization.jsonObject(with: doc) as? [String: Any])
+            var lat = try XCTUnwrap(obj["lattice"] as? [String: Any])
+            var regions = try XCTUnwrap(lat["regions"] as? [[String: Any]])
+            let i = try XCTUnwrap(regions.firstIndex { ($0["geometry"] as? [String: Any])?["frame_u"] != nil })
+            var g = try XCTUnwrap(regions[i]["geometry"] as? [String: Any])
+            g["frame_u"] = g["normal"]          // the u axis along the normal: out of the face plane
+            regions[i]["geometry"] = g; lat["regions"] = regions; obj["lattice"] = lat
+            let why = try XCTUnwrap(TopOptKit.jobSchemaError(try JSONSerialization.data(withJSONObject: obj)),
+                                    "★ \(label): refused at parse time by the synced core")
+            XCTAssertTrue(why.contains("frame axes must lie IN the face plane"), why)
+        }
+    }
 }
