@@ -85,6 +85,14 @@ extension MeshRenderer {
             pass.uploadFaces(inputs)
             changed = true
         }
+        // ★ BATCH G: the squeeze groups' FE fields (once per feToken) and the loop's sequence
+        if pass.feToken != inputs.feToken {
+            pass.uploadFE(inputs)
+            changed = true
+        } else if pass.feSequence != inputs.feSequence {
+            pass.setFESequence(inputs.feSequence)
+            changed = true
+        }
         if pass.hidden != inputs.hidden {
             pass.hidden = inputs.hidden
             changed = true
@@ -141,6 +149,7 @@ extension MeshRenderer {
         guard let s = flexibleLoopScale(now: now), let loop = flexibleLattice?.loop else { return false }
         loop.attach(view)
         setFlexScale(s)
+        stepFlexibleFE(loop, now: now)
         if loop.playing {
             if view.isPaused { view.isPaused = false }
             if view.enableSetNeedsDisplay { view.enableSetNeedsDisplay = false }
@@ -155,6 +164,32 @@ extension MeshRenderer {
             }
         }
         return false
+    }
+
+    /// ★ BATCH G: the loop's squeeze on screen. Each group is its own sim; "Play all" plays them one
+    /// after another: the loop's CYCLE picks the sequence entry, and the field AND the mesh
+    /// displacements are swapped TOGETHER, in the same step, only as a cycle begins (amount =
+    /// ease(0) = 0 — nothing pops) — or at once when nothing is bound or the loop is paused (a
+    /// pick). The loop learns what is shown (`shownIndex`) so the page's H4 hands the same mesh.
+    func stepFlexibleFE(_ loop: FlexibleSquishLoop, now: CFTimeInterval) {
+        guard let pass = flexibleLattice, !pass.feSequence.isEmpty else { return }
+        if let lag = pass.controlPendingMesh, lag < pass.feMesh.count {   // (the red control's late mesh)
+            setFlexDisplacements(pass.feMesh[lag]); pass.feMeshShown = lag; pass.controlPendingMesh = nil
+        }
+        let cycle = loop.cycle(at: now)
+        let n = pass.feSequence.count
+        let want = pass.feSequence[((cycle % n) + n) % n]
+        defer { pass.feCycle = cycle }
+        guard want != pass.feShown else { return }
+        guard pass.feShown < 0 || !loop.playing || pass.feCycle != cycle || pass.controlSwapAnywhere else { return }
+        pass.bindFE(want)
+        if pass.controlSwapMeshNextFrame {
+            pass.controlPendingMesh = want   // RED CONTROL: the mesh lags the field one frame
+        } else if want < pass.feMesh.count {
+            setFlexDisplacements(pass.feMesh[want])
+            pass.feMeshShown = want
+        }
+        loop.shownIndex = want
     }
 }
 #endif

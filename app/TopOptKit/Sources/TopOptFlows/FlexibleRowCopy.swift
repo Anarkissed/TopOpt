@@ -192,12 +192,13 @@ public enum FlexibleRowCopy {
     }
     /// A pinched face whose two-segment design failed: it keeps core's one profile for now.
     public static func pinchedOneProfile(with other: String) -> String { fit("Pinched with \(fit(other, 16)) · one profile for now") }
-    /// The squish player's picker: "Group 2 · Face 3 + Face 5" / "All at once".
+    /// The squish player's picker: "Group 2 · Face 3 + Face 5" / "Play all" (★ batch G: the groups in
+    /// turn — D2's "All at once" is dropped).
     public static func simTitle(number: Int, names: [String]) -> String {
         let head = "\(groupName(number)) · "
         return fit(head + faceList(names, room: 34 - head.count), 34)
     }
-    public static let simAll = "All at once"
+    public static let simAll = "Play all"
     public static let simAllShort = "All"
     /// The face card's group row and its chip that makes a new group.
     public static let groupRow = "Squeeze group"

@@ -82,10 +82,13 @@ final class FlexibleLatticePassTests: XCTestCase {
         u.boxMin = v(); u.boxMax = v(); u.shape = v(); u.shape2 = v(); u.buildDir = v()
         u.rmO = v(); u.rmN = v(); u.dsO = v(); u.dsN = v(); u.squish = v(); u.march = v()
         u.faces = (face(), face(), face(), face())
+        // ★ RE-PINNED (round 5 batch G): the FE field's block (feO / feN / feK) before the tail
+        u.feO = v(); u.feN = v(); u.feK = v()
         u.tail = v()
         var expected = [u.boxMin, u.boxMax, u.shape, u.shape2, u.buildDir, u.rmO, u.rmN, u.dsO, u.dsN,
                         u.squish, u.march]
         for f in [u.faces.0, u.faces.1, u.faces.2, u.faces.3] { expected += [f.centroid, f.xAxis, f.yAxis, f.load, f.extent] }
+        expected += [u.feO, u.feN, u.feK]
         expected.append(u.tail)
         XCTAssertEqual(MemoryLayout<FlexibleLatticePass.Uniforms>.stride, expected.count * 16)
         XCTAssertEqual(try XCTUnwrap(pass.echo(u, frame: false, count: expected.count)), expected)
@@ -110,12 +113,13 @@ final class FlexibleLatticePassTests: XCTestCase {
             var squish = SIMD4<Float>.zero, march = SIMD4<Float>.zero
             var faces: (FlexibleLatticePass.FaceUniforms, FlexibleLatticePass.FaceUniforms,
                         FlexibleLatticePass.FaceUniforms, FlexibleLatticePass.FaceUniforms) = (.zero, .zero, .zero, .zero)
+            var feO = SIMD4<Float>.zero, feN = SIMD4<Float>.zero, feK = SIMD4<Float>.zero
             var tail = SIMD4<Float>.zero
         }
         var s = Swapped()
         s.boxMin = u.boxMin; s.boxMax = u.boxMax; s.shape = u.shape; s.shape2 = u.shape2; s.buildDir = u.buildDir
         s.rmO = u.rmO; s.rmN = u.rmN; s.dsO = u.dsO; s.dsN = u.dsN; s.squish = u.squish; s.march = u.march
-        s.faces = u.faces; s.tail = u.tail
+        s.faces = u.faces; s.feO = u.feO; s.feN = u.feN; s.feK = u.feK; s.tail = u.tail
         XCTAssertEqual(MemoryLayout<Swapped>.stride, MemoryLayout<FlexibleLatticePass.Uniforms>.stride)
         let swappedEcho = try XCTUnwrap(pass.echo(s, frame: false, count: expected.count))
         XCTAssertNotEqual(swappedEcho, expected, "control: a swapped field must fail the by-name echo")

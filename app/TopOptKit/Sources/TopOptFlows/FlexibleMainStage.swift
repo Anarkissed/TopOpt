@@ -123,7 +123,10 @@ public final class FlexibleMainStage: ObservableObject {
     public func pick(_ id: String) {
         guard shownSim != id else { return }
         shownSim = id
+        model?.squishSolver.promote(id)   // ★ BATCH G: a pick of a sim still solving runs next
         refresh()
+        // ★ BATCH G: a pick while playing starts that squeeze from rest (the swap never pops)
+        if fe.active, loop.playing { loop.restartFromRest(reduceMotion: reduceMotion()) }
     }
     /// The lattice as the player shows it: only the picked squeeze's faces squish.
     public var shownLattice: FlexibleGeneratedLattice? { model?.lattice?.showing(shownSim) }
@@ -132,6 +135,8 @@ public final class FlexibleMainStage: ObservableObject {
     /// ★ ONE LINE when the shown group squishes less than it was designed for (another group's
     /// firmer material wins where they share): "Group 2 squishes 1.2 of 3.0 mm · firmer wins".
     public var simNote: String? {
+        // ★ BATCH G: the sims' own line wins while it lasts ("Simulating the squish…")
+        if let n = feNote { return n }
         guard let g = shownLattice, let id = g.shownSimID else { return nil }
         return g.simNote(for: id)
     }
@@ -159,6 +164,21 @@ public final class FlexibleMainStage: ObservableObject {
     private var channelsKey: String?
     /// The lattice generation the loop last auto-played for.
     private var playedGeneration: Int?
+    // ★ BATCH G: the squish sims (FlexibleMainStage+Squish)
+    /// The FE view of the lattice on screen (refreshed with the picture, never per frame).
+    var fe = FlexibleFEView()
+    /// Each field's mesh displacements on the overlay, keyed by (overlay, field).
+    var feMeshCache: [String: (key: String, mesh: [Float])] = [:]
+    /// Bumped per overlay rebuild (the mesh cache and the pass's FE token follow it).
+    var overlaySerial = 0
+    /// The lattice generation the loop started its FE sequence for (from rest).
+    var fePlayedGeneration: Int?
+    /// ★ the gate: another core solve runs (the Stress view's sim, a topology run) — FlexibleStressSolver.busy
+    var squishBusy: (() -> Bool)?
+    /// The Stress solve waited for a sim (it starts when the sims go idle).
+    var stressWaiting = false
+    /// Test control only: draw today's COLUMN squish even with the sims landed (the BEFORE renders).
+    var controlColumnSquish = false
     /// Reduced motion (tests pin it).
     var reduceMotion: () -> Bool = {
         #if canImport(UIKit)
@@ -202,6 +222,10 @@ public final class FlexibleMainStage: ObservableObject {
         observation = m.objectWillChange
             .debounce(for: .milliseconds(120), scheduler: RunLoop.main)
             .sink { [weak self] _ in self?.modelChanged() }
+        // ★ BATCH G: no sim starts beside another core solve; a Stress solve it held back starts after
+        m.squishSolver.busy = { [weak self] in self?.squishBusy?() ?? false }
+        m.squishSolver.onIdle = { [weak self] in self?.squishIdle() }
+        fe = FlexibleFEView(); feMeshCache = [:]; fePlayedGeneration = nil
         seenLoads = nil
         projectObservation = project.objectWillChange
             .debounce(for: .milliseconds(250), scheduler: RunLoop.main)
@@ -256,9 +280,14 @@ public final class FlexibleMainStage: ObservableObject {
         guard let m = current(project, stage) else { return nil }
         let fresh = m.lattice != nil && !m.latticeIsStale
         // ★ ROUND 4 (D2): the picked squeeze's faces squish
-        return FlexibleLatticePreview.inputs(xray: xray, lattice: m.lattice?.showing(shownSim), building: m.latticeBuilding,
-                                             latticeShows: latticeOn && fresh && !pageUp,
-                                             loop: fresh && !pageUp ? loop : nil)
+        var inputs = FlexibleLatticePreview.inputs(xray: xray, lattice: m.lattice?.showing(shownSim), building: m.latticeBuilding,
+                                                   latticeShows: latticeOn && fresh && !pageUp,
+                                                   loop: fresh && !pageUp ? loop : nil)
+        // ★ BATCH G: the squeeze groups' fields, their meshes and the sequence the loop plays
+        if fe.active, fresh, !pageUp {
+            inputs?.fe = fe.fields; inputs?.feMesh = fe.mesh; inputs?.feSequence = fe.sequence; inputs?.feToken = fe.token
+        }
+        return inputs
     }
 
     /// H4: the overlay mesh (the part with every pressed face's map quads), nil ⇒ the stage's.
@@ -266,7 +295,8 @@ public final class FlexibleMainStage: ObservableObject {
         current(project, stage) != nil ? overlay?.mesh : nil
     }
     public func dents(_ project: ProjectModel, on stage: WorkspaceStage) -> [Float]? {
-        current(project, stage) != nil && overlay != nil ? channels?.dents : nil
+        // ★ BATCH G: in FE mode the mesh of the sim the RENDERER shows (a rebuild re-uploads it)
+        current(project, stage) != nil && overlay != nil ? shownDents : nil
     }
     /// The static scale (k × the held amount); the renderer's loop overrides it while it drives.
     public func dentScale(_ project: ProjectModel, on stage: WorkspaceStage) -> Float {
@@ -377,6 +407,13 @@ public final class FlexibleMainStage: ObservableObject {
         buildIfReady()
     }
 
+    /// ★ BATCH G: the sims went idle — a Stress solve that waited for them starts now.
+    func squishIdle() {
+        guard stressWaiting else { return }
+        stressWaiting = false
+        stressSolver?()
+    }
+
     private func modelChanged() {
         guard !frozen, visible else { return }
         refresh()
@@ -437,8 +474,14 @@ public final class FlexibleMainStage: ObservableObject {
         if overlayKey != oKey {
             // ★ BATCH C VERIFICATION: the part's triangles cut fine enough for the Stress colours
             // (his pad is 12 triangles); the dent's geometry is unchanged
-            overlay = FlexiblePageChannels.overlay(model: m, maxEdgeMM: m.project.viewerMesh.map(FlexibleOverlayMesh.stressEdgeMM))
+            // ★ BATCH G: … and no coarser than the squish sim's grid, so a big flat triangle bends
+            // with the lattice skin inside it (known from the scene before the first overlay)
+            let stressEdge = m.project.viewerMesh.map(FlexibleOverlayMesh.stressEdgeMM)
+            let feEdge = m.sceneInfo.map { FlexibleFE.spacing(sceneNX: $0.nx, ny: $0.ny, nz: $0.nz, spacing: $0.spacing) }
+            overlay = FlexiblePageChannels.overlay(model: m, maxEdgeMM: [stressEdge, feEdge].compactMap { $0 }.min())
             overlayKey = oKey
+            overlaySerial &+= 1
+            feMeshCache = [:]
         }
         // the map is the lattice's while one is shown (X-ray only gates the walls here)
         let drawn = FlexibleLatticePreview.drawn(m.lattice?.showing(shownSim), xray: true, building: m.latticeBuilding,
@@ -446,11 +489,32 @@ public final class FlexibleMainStage: ObservableObject {
         self.drawn = drawn
         // ★ BATCH C: the channels WITHOUT the ghost — Stress and the group colours are composed
         // in first (FlexibleMainTints), then X-ray ghosts what is not opaque
-        let c = FlexiblePageChannels.channels(model: m, overlay: overlay, xray: false, drawnLattice: drawn, heat: heat)
-        dentMaxMM = FlexibleShownValues(model: m, drawnLattice: drawn).maxDepth
+        var c = FlexiblePageChannels.channels(model: m, overlay: overlay, xray: false, drawnLattice: drawn, heat: heat)
+        let shown = FlexibleShownValues(model: m, drawnLattice: drawn)
+        dentMaxMM = shown.maxDepth
+        // ★ BATCH G: the squeeze groups' 3D sims — the field moves the ghost, the heat plane and the
+        // walls; ×k capped so the map stays injective (the planes never cross)
+        fe = feView(m, drawn: drawn)
+        if fe.active {
+            c.exaggeration = FlexibleShownValues.cappedExaggeration(rule: shown.uncappedExaggeration, maxSafeScale: fe.safeScale)
+            c.dents = feShownMesh
+        }
         loop.exaggeration = c.exaggeration
         if let g = drawn {
-            if playedGeneration != g.generation {
+            if fe.active {
+                loop.sequenceCount = fe.sequence.count
+                if fePlayedGeneration != g.generation {
+                    // the first field landed: the sequence starts from REST (sim 0)
+                    fePlayedGeneration = g.generation
+                    playedGeneration = g.generation
+                    loop.restartFromRest(reduceMotion: reduceMotion())
+                }
+            } else if fe.pending {
+                // the sims run: the lattice is shown, held at rest ("Simulating the squish…")
+                loop.sequenceCount = 1
+                if loop.playing || loop.held != 0 { loop.hold(0) }
+            } else if playedGeneration != g.generation {
+                loop.sequenceCount = 1
                 playedGeneration = g.generation
                 loop.autoPlay(reduceMotion: reduceMotion())   // (held still while a legend reads)
             }
@@ -458,9 +522,10 @@ public final class FlexibleMainStage: ObservableObject {
             loop.hold(1)   // his live drawing (no lattice) holds at the full squish
         }
         let key = [String(describing: c.tints.map { VertexTintKey($0).hash }),
-                   String(describing: c.dents.map { VertexTintKey($0).hash }),
+                   String(describing: (fe.active ? nil : c.dents).map { VertexTintKey($0).hash }),   // (FE: the token below)
                    "\(c.exaggeration)", "\(drawn?.generation ?? -1)", "\(drawn?.facesToken ?? -1)", "\(m.latticeBuilding)",
-                   "\(m.lattice?.generation ?? -1)", "\(m.latticeIsStale)", oKey, "\(latticeAvailable)"].joined(separator: "|")
+                   "\(m.lattice?.generation ?? -1)", "\(m.latticeIsStale)", oKey, "\(latticeAvailable)",
+                   "\(fe.token)", "\(fe.sequence)", "\(fe.pending)", fe.failure ?? ""].joined(separator: "|")
         channels = c
         if channelsKey != key {
             channelsKey = key

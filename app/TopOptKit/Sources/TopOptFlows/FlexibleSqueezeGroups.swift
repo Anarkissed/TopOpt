@@ -37,17 +37,21 @@ public struct FlexibleSqueezeGroup: Equatable, Identifiable, Sendable {
     public let regions: [Int]
 }
 
-/// One squeeze the player can play: a group, or every group at once (batch G's case picker
-/// plugs in here — each case a named, selectable sim).
+/// One squeeze the player can play: a group (its own 3D sim — batch G), or every group one after
+/// another ("Play all").
+/// ★ BATCH G (his words: "I'd like a way to play the different sims if there are multiple ways to
+/// squeeze/squish a model"): D2's "All at once" is DROPPED — the groups are, by his own definition,
+/// separate squeezes the firmer-wins lattice was designed for one at a time; a simultaneous press
+/// is a load case he never asked for. "Play all" plays each group's sim in turn.
 public struct FlexibleSim: Equatable, Identifiable, Sendable {
     public enum Kind: Equatable, Sendable {
         case group(Int)
-        case allAtOnce
+        case playAll
     }
     /// "group-1" … "group-N", "all".
     public let id: String
     public let kind: Kind
-    /// "Group 1 · Top A + Top B" / "All at once".
+    /// "Group 1 · Top A + Top B" / "Play all".
     public let title: String
     /// "Group 1" / "All".
     public let short: String
@@ -241,7 +245,8 @@ public enum FlexibleSqueezeGroups {
 
     // MARK: the sims (the squish player's picker)
 
-    /// One sim per group, LARGEST face first; with two or more groups, "All at once" too.
+    /// One sim per group, LARGEST face first; with two or more groups, "Play all" too (the groups in
+    /// turn — batch G).
     /// `area(region)` orders the faces (the pass squishes the first four); `name` names them.
     public static func sims(_ groups: [FlexibleSqueezeGroup], key: (Int) -> FlexFaceKey?,
                             area: (FlexFaceKey) -> Double, name: (Int) -> String) -> [FlexibleSim] {
@@ -255,7 +260,7 @@ public enum FlexibleSqueezeGroups {
                         short: FlexibleRowCopy.groupName(g.number), keys: ordered(g.regions))
         }
         if groups.count > 1 {
-            out.append(FlexibleSim(id: FlexibleSim.allID, kind: .allAtOnce, title: FlexibleRowCopy.simAll,
+            out.append(FlexibleSim(id: FlexibleSim.allID, kind: .playAll, title: FlexibleRowCopy.simAll,
                                    short: FlexibleRowCopy.simAllShort, keys: ordered(groups.flatMap(\.regions))))
         }
         return out

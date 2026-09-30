@@ -36,6 +36,9 @@ struct FlexibleShownValues {
     /// The dent loops 0 → full → 0 (only while a lattice is drawn); otherwise it holds still.
     var animated = false
     var exaggeration = 1.0
+    /// ★ BATCH G: with a lattice, the rule before the shader's COLUMN clamp (min of the rule and the
+    /// thin / prism caps) — the FE squish replaces that clamp by its own injectivity bound.
+    var uncappedExaggeration = 1.0
     var label = ""
 
     /// The legend's one line: "What you drew · shown ×7".
@@ -109,6 +112,7 @@ struct FlexibleShownValues {
             let rule = Self.exaggerationRule(maxDepthMM: maxDepth, extentMM: g.extentMM)
             let thin = min(Self.thinCap(values: values, stacks: m.stacks, pinched: m.pinched) ?? rule,
                            Self.prismCap(loadedFaces: m.loadedFaces, stacks: m.stacks, pinched: m.pinched) ?? rule)
+            uncappedExaggeration = min(rule, thin)
             exaggeration = Self.cappedExaggeration(rule: min(rule, thin), maxSafeScale: g.maxSafeScale)
             return
         }

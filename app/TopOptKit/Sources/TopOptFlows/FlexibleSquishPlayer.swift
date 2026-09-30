@@ -44,7 +44,27 @@ public final class FlexibleSquishLoop: ObservableObject {
     private var anchorTime: CFTimeInterval = 0
     private var anchorPhase: Double = 0
 
+    // ★ BATCH G: "Play all" plays the squeeze groups ONE AFTER ANOTHER — each whole period of the
+    // loop (rest → full → rest) is one group's sim; the renderer reads these (never published).
+    /// How many sims the loop plays in turn (≥ 1).
+    public var sequenceCount = 1
+    /// The cycle held while paused (so pause / scrub / play keep the group on screen).
+    public private(set) var heldCycle = 0
+    /// The sequence entry the renderer shows now (set by the renderer's swap).
+    public var shownIndex = 0
+
     public init() {}
+
+    /// Whole periods since the anchor (the cycle holds while paused).
+    public func cycle(at now: CFTimeInterval) -> Int {
+        guard playing else { return heldCycle }
+        return Int((anchorPhase + (now - anchorTime) / Self.periodS).rounded(.down))
+    }
+    /// The sequence entry this cycle plays: cycle mod sequenceCount.
+    public func simIndex(at now: CFTimeInterval) -> Int {
+        let n = Swift.max(1, sequenceCount)
+        return ((cycle(at: now) % n) + n) % n
+    }
 
     /// 0 → 1 → 0 over one period (FlexAnimation's cosine ease).
     public static func ease(_ phase: Double) -> Double { 0.5 - 0.5 * cos(2 * .pi * phase) }
@@ -70,7 +90,8 @@ public final class FlexibleSquishLoop: ObservableObject {
 
     public func play() {
         guard !playing else { return }
-        anchorPhase = Self.risingPhase(held)
+        // ★ BATCH G: resume IN the held cycle (the group paused on keeps playing)
+        anchorPhase = Double(heldCycle) + Self.risingPhase(held)
         anchorTime = clock()
         playing = true
         wake()
@@ -78,9 +99,21 @@ public final class FlexibleSquishLoop: ObservableObject {
 
     public func pause() {
         guard playing else { return }
-        held = amount(at: clock())
+        let now = clock()
+        heldCycle = cycle(at: now)
+        held = amount(at: now)
         playing = false
         wake()
+    }
+
+    /// ★ BATCH G: start the sequence over from REST (a new lattice's sims, a pick while playing):
+    /// its first sim, rising from 0 — so a swap never lands mid-squeeze.
+    public func restartFromRest(reduceMotion: Bool) {
+        heldCycle = 0
+        if playing { playing = false }
+        held = 0
+        if reading { resumeAfterReading = !reduceMotion; wake(); return }
+        if reduceMotion { hold(1) } else { play() }
     }
 
     public func toggle() { playing ? pause() : play() }
@@ -88,14 +121,14 @@ public final class FlexibleSquishLoop: ObservableObject {
     /// A drag on the timeline: pauses and sets the amount directly.
     public func scrub(to a: Double) {
         let v = min(1, max(0, a.isFinite ? a : 0))
-        if playing { playing = false }
+        if playing { heldCycle = cycle(at: clock()); playing = false }
         if held != v { held = v }
         wake()
     }
 
     /// Hold still at `a` (nothing to loop: his live drawing, held at full).
     public func hold(_ a: Double = 1) {
-        if playing { playing = false }
+        if playing { heldCycle = cycle(at: clock()); playing = false }
         if held != a { held = a }
         wake()
     }

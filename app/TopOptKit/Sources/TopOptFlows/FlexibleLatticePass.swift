@@ -65,6 +65,8 @@ final class FlexibleLatticePass {
         var squish = SIMD4<Float>.zero
         var march = SIMD4<Float>.zero
         var faces: (FaceUniforms, FaceUniforms, FaceUniforms, FaceUniforms) = (.zero, .zero, .zero, .zero)
+        /// ★ BATCH G: the FE field's block (feO / feN / feK — FlexibleLatticeShader's comments).
+        var feO = SIMD4<Float>.zero, feN = SIMD4<Float>(1, 1, 1, 1), feK = SIMD4<Float>.zero
         var tail = SIMD4<Float>(1, 2, 3, 4)
     }
 
@@ -132,6 +134,31 @@ final class FlexibleLatticePass {
     private var rmTex: MTLTexture?, dsTex: MTLTexture?
     private var columnTex: [MTLTexture] = []
     private let emptyColumns: MTLTexture
+
+    // ── ★ BATCH G: the squeeze groups' FE fields (FlexibleFEField), one 3D texture each ──
+    /// The fields AS THE GPU READS THEM (u rounded through a half) — the parity tests' reference.
+    private(set) var feFields: [FlexibleFEField] = []
+    /// Per field: the mesh displacements (the ghost and the heat plane) the renderer swaps in with it.
+    private(set) var feMesh: [[Float]] = []
+    /// The sequence the loop plays (indices into `feFields`); empty ⇒ the column squish.
+    var feSequence: [Int] = []
+    /// The field bound now (−1: none — the column squish), and the loop cycle it was bound in.
+    var feShown = -1
+    var feCycle: Int?
+    private(set) var feToken = -1
+    private(set) var feUploadCount = 0
+    private var feTex: [MTLTexture] = []
+    private let emptyFE: MTLTexture
+    /// FE mode this frame: a field is bound.
+    var feActive: Bool { feShown >= 0 && feShown < feTex.count && feShown < feFields.count }
+    /// Test control only: the fixed-point iterations (1 = the red control).
+    var controlFEIterations: Int?
+    /// The field whose mesh displacements the renderer last swapped in WITH it (tests read it).
+    var feMeshShown = -1
+    /// Test controls: swap mid-cycle; let the mesh lag the field by one frame.
+    var controlSwapAnywhere = false
+    var controlSwapMeshNextFrame = false
+    var controlPendingMesh: Int?
     private lazy var queue: MTLCommandQueue? = device.makeCommandQueue()
 
     /// Drawn this frame: uploaded and not hidden.
@@ -199,6 +226,16 @@ final class FlexibleLatticePass {
         var zero = SIMD4<Float>.zero
         e.replace(region: MTLRegionMake2D(0, 0, 1, 1), mipmapLevel: 0, withBytes: &zero, bytesPerRow: 16)
         emptyColumns = e
+        // ★ BATCH G: a 1×1×1 zero field for slot 6 when no FE field is bound
+        let fd = MTLTextureDescriptor()
+        fd.textureType = .type3D; fd.pixelFormat = .rgba16Float
+        fd.width = 1; fd.height = 1; fd.depth = 1
+        fd.usage = [.shaderRead]; fd.storageMode = .shared
+        guard let fe = device.makeTexture(descriptor: fd) else { throw Failure.pipeline("FE placeholder") }
+        var zeros = [UInt16](repeating: 0, count: 4)
+        fe.replace(region: MTLRegionMake3D(0, 0, 0, 1, 1, 1), mipmapLevel: 0, slice: 0, withBytes: &zeros,
+                   bytesPerRow: 8, bytesPerImage: 8)
+        emptyFE = fe
     }
 
     /// A test kernel's compute pipeline, built once on first use (THROWING, with the log).
@@ -287,6 +324,69 @@ final class FlexibleLatticePass {
         columnTex = faces.map { makeColumns($0) ?? emptyColumns }
         maxDepthMM = faces.map(\.maxDepthMM).max() ?? 0
         if let ref = referenceInputs { base = makeBase(ref) }
+    }
+
+    /// ★ BATCH G: the squeeze groups' FE fields — one rgba16Float 3D texture each (node dims, xyz =
+    /// u, hardware-filtered), and their mesh displacements. Once per `feToken` (the generation and
+    /// the set of landed fields); a pick only changes the SEQUENCE. The field on screen stays bound
+    /// if it is still there (a group landing in Play all never pops the one playing).
+    func uploadFE(_ l: FlexibleLatticeLayerInputs) {
+        let shownID = feActive ? feFields[feShown].simID : nil
+        feToken = l.feToken
+        feUploadCount += 1
+        feTex = []
+        feFields = []
+        for f in l.fe {
+            guard let t = makeFieldTexture(f) else { continue }
+            feTex.append(t)
+            feFields.append(Self.halfRounded(f))
+        }
+        feMesh = Array(l.feMesh.prefix(feFields.count))
+        feShown = shownID.flatMap { id in feFields.firstIndex { $0.simID == id } } ?? -1
+        setFESequence(l.feSequence)
+    }
+
+    /// The loop's sequence (indices into the fields). The field on screen is kept when it is still
+    /// in it; otherwise the next step binds the sequence's own (a pick shows at once).
+    func setFESequence(_ seq: [Int]) {
+        feSequence = seq.filter { $0 >= 0 && $0 < feFields.count }
+        if feShown >= 0, !feSequence.contains(feShown) { feShown = -1 }
+        if feSequence.isEmpty { feShown = -1 }
+    }
+
+    /// Bind field `i` (the renderer's swap, at rest).
+    func bindFE(_ i: Int) { feShown = (i >= 0 && i < feTex.count) ? i : -1 }
+
+    /// A field as one rgba16Float 3D texture: xyz = u (mm at full load), w = 0.
+    private func makeFieldTexture(_ f: FlexibleFEField) -> MTLTexture? {
+        let n = f.nx * f.ny * f.nz
+        guard f.nx > 0, f.ny > 0, f.nz > 0, f.u.count == n else { return nil }
+        var packed = [UInt16](repeating: 0, count: 4 * n)
+        for i in 0..<n {
+            packed[4 * i] = Self.halfBits(f.u[i].x); packed[4 * i + 1] = Self.halfBits(f.u[i].y)
+            packed[4 * i + 2] = Self.halfBits(f.u[i].z)
+        }
+        let d = MTLTextureDescriptor()
+        d.textureType = .type3D
+        d.pixelFormat = .rgba16Float
+        d.width = f.nx; d.height = f.ny; d.depth = f.nz
+        d.usage = [.shaderRead]
+        d.storageMode = .shared
+        guard let tex = device.makeTexture(descriptor: d) else { return nil }
+        packed.withUnsafeBytes { raw in
+            tex.replace(region: MTLRegionMake3D(0, 0, 0, f.nx, f.ny, f.nz), mipmapLevel: 0, slice: 0,
+                        withBytes: raw.baseAddress!, bytesPerRow: f.nx * 8, bytesPerImage: f.nx * f.ny * 8)
+        }
+        return tex
+    }
+
+    /// The field with every u rounded through a half, as the GPU reads it.
+    static func halfRounded(_ f: FlexibleFEField) -> FlexibleFEField {
+        let u = f.u.map { SIMD3<Float>(halfValue(halfBits($0.x)), halfValue(halfBits($0.y)), halfValue(halfBits($0.z))) }
+        var r = FlexibleFEField(simID: f.simID, generation: f.generation, nx: f.nx, ny: f.ny, nz: f.nz,
+                                origin: f.origin, spacing: f.spacing, u: u, solved: f.solved, bcMode: f.bcMode)
+        r = r.scaled(by: 1)
+        return r
     }
 
     static func sameGrid(_ a: FlexGrid, _ b: FlexGrid) -> Bool {
@@ -435,7 +535,17 @@ final class FlexibleLatticePass {
         u.squish = SIMD4(sq, Float(faces.count), ignoresColumnWalls ? 1 : 0, 0)
         u.march = SIMD4(stepFactor, stepCapCells, minStepMM, earlyOut ? 1 : 0)
         u.shape2.z = stepBudget
-        let dil = SIMD3<Float>(repeating: sq * maxDepthMM)
+        var dil = SIMD3<Float>(repeating: sq * maxDepthMM)
+        if feActive {
+            // ★ BATCH G: the FE field moves everything — no column faces; the box dilates by how
+            // far the field can move material; a rest step × (1 − s·gmax) is a safe deformed step
+            let f = feFields[feShown]
+            u.squish.y = 0
+            u.feO = SIMD4(f.origin, f.spacing)
+            u.feN = SIMD4(Float(f.nx), Float(f.ny), Float(f.nz), Swift.max(0.2, 1 - sq * Float(f.gmax)))
+            u.feK = SIMD4(1, f.maxDisplacement, Float(controlFEIterations ?? FlexibleFE.pullbackIterations), FlexibleFE.pullbackTolMM)
+            dil = SIMD3<Float>(repeating: sq * f.maxDisplacement)
+        }
         u.boxMin = SIMD4(regionMin - dil, 0)
         u.boxMax = SIMD4(regionMax + dil, 0)
         return u
@@ -490,10 +600,14 @@ final class FlexibleLatticePass {
         enc.setFragmentTexture(rm, index: 0)
         enc.setFragmentTexture(ds, index: 1)
         enc.setFragmentTextures(boundColumns(), range: FlexibleLatticeShader.columnSlot..<(FlexibleLatticeShader.columnSlot + FlexibleLatticeShader.maxFaces))
+        enc.setFragmentTexture(boundFE, index: FlexibleLatticeShader.feSlot)
         enc.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
         lastFrame = f
         return true
     }
+
+    /// ★ BATCH G: the FE field bound at slot 6 (the 1×1×1 zero field when none).
+    private var boundFE: MTLTexture { feActive ? feTex[feShown] : emptyFE }
 
     /// Every declared column slot bound: the faces' tables, the 1×1 placeholder elsewhere.
     private func boundColumns() -> [MTLTexture?] {
@@ -537,6 +651,7 @@ final class FlexibleLatticePass {
         enc.setTexture(second, index: 1)
         if columns {
             enc.setTextures(boundColumns(), range: FlexibleLatticeShader.columnSlot..<(FlexibleLatticeShader.columnSlot + FlexibleLatticeShader.maxFaces))
+            enc.setTexture(boundFE, index: FlexibleLatticeShader.feSlot)
         }
         let w = Swift.max(1, Swift.min(64, pipe.maxTotalThreadsPerThreadgroup))
         enc.dispatchThreadgroups(MTLSize(width: (points.count + w - 1) / w, height: 1, depth: 1),
@@ -545,6 +660,32 @@ final class FlexibleLatticePass {
         cmd.commit(); cmd.waitUntilCompleted()
         guard cmd.status == .completed else { return nil }
         let p = outBuf.contents().bindMemory(to: Float.self, capacity: points.count)
+        return Array(UnsafeBufferPointer(start: p, count: points.count))
+    }
+
+    /// ★ BATCH G: `flx_pullback` at each deformed point — the rest point (xyz) and the step scale (w).
+    func probePullback(_ points: [SIMD3<Float>], squish s: Float) -> [SIMD4<Float>]? {
+        guard let pipe = try? computePipeline("flx_pullback_probe"), !points.isEmpty, var u = frameUniforms(squish: s),
+              let queue else { return nil }
+        let pts = points.map { SIMD4<Float>($0, 0) }
+        var n = UInt32(points.count)
+        guard let inBuf = device.makeBuffer(bytes: pts, length: pts.count * 16, options: .storageModeShared),
+              let outBuf = device.makeBuffer(length: points.count * 16, options: .storageModeShared),
+              let cmd = queue.makeCommandBuffer(), let enc = cmd.makeComputeCommandEncoder() else { return nil }
+        enc.setComputePipelineState(pipe)
+        enc.setBuffer(inBuf, offset: 0, index: 0)
+        enc.setBuffer(outBuf, offset: 0, index: 1)
+        enc.setBytes(&u, length: MemoryLayout<Uniforms>.stride, index: 2)
+        enc.setBytes(&n, length: 4, index: 3)
+        enc.setTextures(boundColumns(), range: FlexibleLatticeShader.columnSlot..<(FlexibleLatticeShader.columnSlot + FlexibleLatticeShader.maxFaces))
+        enc.setTexture(boundFE, index: FlexibleLatticeShader.feSlot)
+        let w = Swift.max(1, Swift.min(64, pipe.maxTotalThreadsPerThreadgroup))
+        enc.dispatchThreadgroups(MTLSize(width: (points.count + w - 1) / w, height: 1, depth: 1),
+                                 threadsPerThreadgroup: MTLSize(width: w, height: 1, depth: 1))
+        enc.endEncoding()
+        cmd.commit(); cmd.waitUntilCompleted()
+        guard cmd.status == .completed else { return nil }
+        let p = outBuf.contents().bindMemory(to: SIMD4<Float>.self, capacity: points.count)
         return Array(UnsafeBufferPointer(start: p, count: points.count))
     }
 

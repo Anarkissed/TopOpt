@@ -483,9 +483,11 @@ FlexRunResult flexible_run_job(const std::string& job_json, const std::string& j
 // (round 5, batch G; maintainer: "is there a way to ensure that the squish sim also squeezes
 // out the sides of the object? I'd like it to actually bend and move and squish like it would
 // in real life"). One squeeze group's force on its pressed faces (core's column pressures,
-// sector cuts respected), resting faces held (a pinch or a hand squeeze with no resting face:
-// inertia relief + a 3-2-1 minimal constraint, the rigid motion removed afterwards), the sides
-// free — solved by core's EXISTING heterogeneous matrix-free MG-CG (fea_solve_mgcg_matfree) on
+// sector cuts respected), resting faces held — BONDED where a pressed stack of the group exits
+// through them (an anvil grips under load), sliding (the normal only) elsewhere — and whatever
+// rigid modes that leaves free (all six for a pinch or a hand squeeze with nothing resting)
+// relieved by inertia relief and pinned by one DOF each, their rigid motion removed afterwards;
+// the sides free — solved by core's EXISTING heterogeneous matrix-free MG-CG (fea_solve_mgcg_matfree) on
 // the scene's own voxel grid (coarsened by one rule, flexible_squish_coarsen), each voxel's
 // modulus the SECANT of core's tested squish curve at its own density and operating strain
 // (flexible_squish_modulus). Linear small-strain physics, a DISPLAY field: the app scales it so
@@ -515,13 +517,15 @@ struct FlexSquishRequest {
   int32_t coarsen = 0;   // 0 = the rule (flexible_squish_coarsen)
   int32_t control = 0;   // TESTS ONLY (bits: 1 nu=0 . 2 anchor patch . 4 ignore cuts .
                          // 8 uniform pressure . 16 uniform E . 32 lattice=solid . 64 no extension
-                         // . 128 roller rest . 256 nominal-strain law . 512 other 3-2-1 nodes
-                         // . 1024 unprojected traction); the app sends 0
+                         // . 128 every rest slides . 256 nominal-strain law . 512 other pins
+                         // . 1024 unprojected traction . 2048 every rest bonded); the app sends 0
 };
 struct FlexSquishSolution {
   bool ok = false;
   std::string failure;
   std::string bc_mode;                   // rest | exit | free | patch (control 2)
+  int32_t free_modes = 0;                // rigid modes the rests leave free (6: nothing rests), each
+                                         // relieved (inertia relief) and pinned by one DOF
   int32_t coarsen = 1;
   int32_t nx = 0, ny = 0, nz = 0;        // FE NODE counts
   double spacing = 0.0;

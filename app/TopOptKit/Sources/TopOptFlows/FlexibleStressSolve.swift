@@ -95,20 +95,28 @@ public enum FlexibleStressState: Equatable, Sendable {
 public struct FlexibleStressSolver {
     public let sim: LatticeSimModel
     let context: () -> LatticeSimModel.Context?
+    /// ★ BATCH G: another core solve is running — this sim's, or a topology run (AppModel.runningIDs):
+    /// the squish sims (FlexibleSquishSolver) do not START while it is true (the matrix-free pool
+    /// is process-global).
+    public let busy: () -> Bool
 
     public init(app: AppModel, sim: LatticeSimModel) {
         self.sim = sim
         self.context = { [weak app] in app?.makeLatticeSimContext().map(FlexibleStressContext.reached) }
+        self.busy = { [weak app, weak sim] in sim?.phase == .running || !(app?.runningIDs.isEmpty ?? true) }
     }
     /// Tests: any context.
     init(sim: LatticeSimModel, context: @escaping () -> LatticeSimModel.Context?) {
         self.sim = sim
         self.context = context
+        self.busy = { [weak sim] in sim?.phase == .running }
     }
 
     public enum Outcome: Equatable, Sendable {
         case started, running, current
         case blocked(String)
+        /// ★ BATCH G: a squish sim is inside core — the solve starts when the sims go idle.
+        case waiting
     }
 
     /// Run the solve when there is no field for these inputs (or the last one failed) and none is
@@ -122,6 +130,7 @@ public struct FlexibleStressSolver {
         let failed: Bool = { if case .failed = sim.phase { return true } else { return false } }()
         guard FlexibleStressTrigger.shouldRun(hasField: sim.field != nil && !failed,
                                               stale: sim.isStale(against: ctx.fingerprint), running: false) else { return .current }
+        if FlexibleSquishSolver.solving { return .waiting }   // ★ BATCH G: never beside a squish sim
         sim.run(ctx)
         return .started
     }

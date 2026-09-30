@@ -37,12 +37,19 @@
 //   * flx_pullback / flx_deformed — the SQUISH (02 §6), inverted.
 //   * flx_march, flx_vertex, flx_gbuffer — the full-screen sphere trace into the G-buffer.
 //   * flx_field_probe / flx_squish_probe / flx_uniform_echo / flx_frame_echo — test kernels.
+//   * ★ BATCH G: flx_fe_u / flx_fe_pullback — the squish as ONE continuous 3D displacement field
+//     (FlexibleFEField): texture slot 6, rgba16Float, hardware-filtered, node-centred, clamped to
+//     the node box; deformed → rest by fixed-point iteration (a contraction: the page's ×k keeps
+//     s·gmax ≤ ½). `flx_pullback` dispatches to it when `feK.x` is set — the march, the bisection,
+//     the normal, the albedo's rest ρ and the probes all follow. flx_pullback_probe (tests).
 
 enum FlexibleLatticeShader {
     /// Textures 0, 1 are the packed volumes; the four per-face column tables occupy 2…5
     /// (an `array<texture2d<float>, 4>`).
     static let columnSlot = 2
     static let maxFaces = FlexibleSquishField.maxFaces
+    /// ★ BATCH G: the squish sim's displacement field (a 3D rgba16Float texture), after the columns.
+    static let feSlot = 6
 
     /// The field, the squish and the march — everything but the entry points.
     static let fieldSource = """
@@ -65,6 +72,9 @@ enum FlexibleLatticeShader {
         float4 squish;                // x = s (MeshRenderer.flexScale), y = face count, z = 1: column walls ignored
         float4 march;                 // x = step factor, y = step cap in cells, z = min step mm, w = 1: early-out
         FlxFace faces[4];
+        float4 feO;                   // ★ BATCH G: xyz = FE node (0,0,0), w = node spacing
+        float4 feN;                   // xyz = node counts, w = this frame's safe contraction max(0.2, 1 − s·gmax)
+        float4 feK;                   // x = 1: FE mode, y = max |u|, z = iterations, w = tolerance (mm)
         float4 tail;                  // layout sentinel (echoed)
     };
 
@@ -274,7 +284,38 @@ enum FlexibleLatticeShader {
     struct FlxStep { float L; float scale; float lateral; float jump; };
     struct FlxPull { float3 p0; float scale; float lateral; float jump; float air; };
 
-    static FlxPull flx_pullback(constant FlxUniforms& U, array<texture2d<float>, 4> cols, float3 p) {
+    // ── ★ BATCH G: THE SQUISH AS ONE 3D FIELD (FlexibleFEField) ─────────────────────────────
+    // u at p: the node-centred field, hardware-trilinear, clamped to the node box (texel i's
+    // centre is node i; clamp_to_edge holds the edge nodes' value beyond them) — the Swift twin's
+    // `sample`.
+    static inline float3 flx_fe_u(texture3d<float> T, constant FlxUniforms& U, float3 p) {
+        constexpr sampler smp(coord::normalized, filter::linear, address::clamp_to_edge);
+        return T.sample(smp, ((p - U.feO.xyz) / U.feO.w + 0.5f) / U.feN.xyz).xyz;
+    }
+    // deformed → rest: p = x − s·u(p) by fixed-point iteration (a contraction: s·gmax ≤ ½ on the
+    // page), the Swift twin's `pullback` (same count, same early exit). No column walls (the
+    // field is continuous) and no air: a pulled-back point outside the part has dPart > 0. A rest
+    // distance × (1 − s·gmax) is a safe deformed step (`scale`).
+    static FlxPull flx_fe_pullback(constant FlxUniforms& U, texture3d<float> T, float3 x) {
+        FlxPull r;
+        r.p0 = x; r.scale = 1; r.lateral = 1e30f; r.jump = 0; r.air = -1;
+        float s = U.squish.x;
+        if (!(s > 0.0f)) return r;                       // rest: bit-identical to today
+        float3 p = x - s * flx_fe_u(T, U, x);
+        int n = int(U.feK.z);
+        for (int i = 1; i < n; ++i) {
+            float3 pn = x - s * flx_fe_u(T, U, p);
+            float d = length(pn - p);
+            p = pn;
+            if (d < U.feK.w) break;
+        }
+        r.p0 = p;
+        r.scale = U.feN.w;
+        return r;
+    }
+
+    static FlxPull flx_pullback(constant FlxUniforms& U, array<texture2d<float>, 4> cols, texture3d<float> feT, float3 p) {
+        if (U.feK.x > 0.5f) return flx_fe_pullback(U, feT, p);   // ★ BATCH G: the FE field
         FlxPull r;
         r.p0 = p; r.scale = 1; r.lateral = 1e30f; r.jump = 0; r.air = -1;
         float s = U.squish.x;
@@ -319,8 +360,9 @@ enum FlexibleLatticeShader {
     }
 
     static float flx_deformed(constant FlxUniforms& U, texture3d<float> rmT, texture3d<float> dsT,
-                              array<texture2d<float>, 4> cols, float3 p, thread FlxStep& st, bool march = false) {
-        FlxPull pb = flx_pullback(U, cols, p);
+                              array<texture2d<float>, 4> cols, texture3d<float> feT, float3 p, thread FlxStep& st,
+                              bool march = false) {
+        FlxPull pb = flx_pullback(U, cols, feT, p);
         st.scale = pb.scale; st.lateral = pb.lateral; st.jump = pb.jump;
         if (pb.air > 0) { st.L = 1e30f; return pb.air; }
         return march ? flx_field_march(U, rmT, dsT, pb.p0, st.L)
@@ -332,7 +374,7 @@ enum FlexibleLatticeShader {
     struct FlxHit { int status; float3 p; };
 
     static FlxHit flx_march(constant FlxUniforms& U, texture3d<float> rmT, texture3d<float> dsT,
-                            array<texture2d<float>, 4> cols, float3 ro, float3 rd) {
+                            array<texture2d<float>, 4> cols, texture3d<float> feT, float3 ro, float3 rd) {
         FlxHit h; h.status = 0; h.p = float3(0);
         // ★ NOTHING LATTICED (FlexibleLatticePass.upload's min > max sentinel): the slab test
         // below would read an inverted box as ALL of space and march every pixel for nothing
@@ -347,7 +389,7 @@ enum FlexibleLatticeShader {
         bool early = U.march.w > 0.5f;
         float t = tn;
         FlxStep st;
-        float f = flx_deformed(U, rmT, dsT, cols, ro + rd * t, st, early);
+        float f = flx_deformed(U, rmT, dsT, cols, feT, ro + rd * t, st, early);
         if (f < 0) { h.status = 1; h.p = ro + rd * t; return h; }
         int maxSteps = int(U.shape2.z);
         for (int i = 0; i < maxSteps; ++i) {
@@ -359,13 +401,13 @@ enum FlexibleLatticeShader {
             float t2 = t + step;
             if (t2 > tf) return h;
             FlxStep st2;
-            float f2 = flx_deformed(U, rmT, dsT, cols, ro + rd * t2, st2, early);
+            float f2 = flx_deformed(U, rmT, dsT, cols, feT, ro + rd * t2, st2, early);
             if (f2 < 0) {
                 float a = t, b = t2, fa = f, fb = f2;
                 for (int k = 0; k < 4; ++k) {
                     float m = 0.5f * (a + b);
                     FlxStep sm;
-                    float fm = flx_deformed(U, rmT, dsT, cols, ro + rd * m, sm);
+                    float fm = flx_deformed(U, rmT, dsT, cols, feT, ro + rd * m, sm);
                     if (fm < 0) { b = m; fb = fm; } else { a = m; fa = fm; }
                 }
                 // ★ then ONE false-position step on the bracket the halvings left (free: both
@@ -419,27 +461,28 @@ enum FlexibleLatticeShader {
                                  constant FlxFrame& F [[buffer(1)]],
                                  texture3d<float> rmT [[texture(0)]],
                                  texture3d<float> dsT [[texture(1)]],
-                                 array<texture2d<float>, 4> cols [[texture(2)]]) {
+                                 array<texture2d<float>, 4> cols [[texture(2)]],
+                                 texture3d<float> feT [[texture(6)]]) {
         float3 ro = F.eye.xyz;
         float3 rd = normalize(F.rayDir.xyz + F.rayX.xyz * in.uv.x + F.rayY.xyz * in.uv.y);
-        FlxHit h = flx_march(U, rmT, dsT, cols, ro, rd);
+        FlxHit h = flx_march(U, rmT, dsT, cols, feT, ro, rd);
         if (h.status != 1) { discard_fragment(); }
         // the normal: central differences of the (deformed) field, 0.05 mm
         const float e = 0.05f;
         FlxStep st;
         float3 g = float3(
-            flx_deformed(U, rmT, dsT, cols, h.p + float3(e, 0, 0), st)
-          - flx_deformed(U, rmT, dsT, cols, h.p - float3(e, 0, 0), st),
-            flx_deformed(U, rmT, dsT, cols, h.p + float3(0, e, 0), st)
-          - flx_deformed(U, rmT, dsT, cols, h.p - float3(0, e, 0), st),
-            flx_deformed(U, rmT, dsT, cols, h.p + float3(0, 0, e), st)
-          - flx_deformed(U, rmT, dsT, cols, h.p - float3(0, 0, e), st));
+            flx_deformed(U, rmT, dsT, cols, feT, h.p + float3(e, 0, 0), st)
+          - flx_deformed(U, rmT, dsT, cols, feT, h.p - float3(e, 0, 0), st),
+            flx_deformed(U, rmT, dsT, cols, feT, h.p + float3(0, e, 0), st)
+          - flx_deformed(U, rmT, dsT, cols, feT, h.p - float3(0, e, 0), st),
+            flx_deformed(U, rmT, dsT, cols, feT, h.p + float3(0, 0, e), st)
+          - flx_deformed(U, rmT, dsT, cols, feT, h.p - float3(0, 0, e), st));
         float3 n = length_squared(g) > 1e-20f ? normalize(g) : -rd;
         float3 eyeN = normalize((F.eyeNormalBasis * float4(n, 0.0f)).xyz);
         // face the normal toward the eye (the AO hemisphere is built on the eye's side)
         if (eyeN.z < 0.0f) { eyeN = -eyeN; }
         // the colour: the octet's lightness-by-density ramp, at the REST point's ρ
-        float3 p0 = flx_pullback(U, cols, h.p).p0;
+        float3 p0 = flx_pullback(U, cols, feT, h.p).p0;
         float rho = flx_sample2(rmT, U.rmO, U.rmN, p0).x;
         float span = F.rhoSpan.y - F.rhoSpan.x;
         float frac = span > 1e-4f ? clamp((rho - F.rhoSpan.x) / span, 0.0f, 1.0f) : 0.0f;
@@ -472,10 +515,24 @@ enum FlexibleLatticeShader {
                                  texture3d<float> rmT [[texture(0)]],
                                  texture3d<float> dsT [[texture(1)]],
                                  array<texture2d<float>, 4> cols [[texture(2)]],
+                                 texture3d<float> feT [[texture(6)]],
                                  uint id [[thread_position_in_grid]]) {
         if (id >= count) return;
         FlxStep st;
-        out[id] = flx_deformed(U, rmT, dsT, cols, pts[id].xyz, st);
+        out[id] = flx_deformed(U, rmT, dsT, cols, feT, pts[id].xyz, st);
+    }
+
+    // ★ BATCH G: deformed → rest, the pulled-back point itself (xyz) and its step scale (w)
+    kernel void flx_pullback_probe(const device float4* pts [[buffer(0)]],
+                                   device float4* out [[buffer(1)]],
+                                   constant FlxUniforms& U [[buffer(2)]],
+                                   constant uint& count [[buffer(3)]],
+                                   array<texture2d<float>, 4> cols [[texture(2)]],
+                                   texture3d<float> feT [[texture(6)]],
+                                   uint id [[thread_position_in_grid]]) {
+        if (id >= count) return;
+        FlxPull pb = flx_pullback(U, cols, feT, pts[id].xyz);
+        out[id] = float4(pb.p0, pb.scale);
     }
 
     // every field BY NAME, in declaration order
@@ -491,6 +548,7 @@ enum FlexibleLatticeShader {
             out[k++] = U.faces[f].centroid; out[k++] = U.faces[f].xAxis; out[k++] = U.faces[f].yAxis;
             out[k++] = U.faces[f].load; out[k++] = U.faces[f].extent;
         }
+        out[k++] = U.feO; out[k++] = U.feN; out[k++] = U.feK;
         out[k++] = U.tail;
     }
 

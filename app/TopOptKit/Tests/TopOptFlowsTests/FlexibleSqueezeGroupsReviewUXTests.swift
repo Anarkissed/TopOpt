@@ -5,7 +5,8 @@
 //     action that caused it with [Join the groups] [Keep apart] — RED: D2's prompt popped only
 //     blockers, and nothing on the Settings page said it; the estimate agrees with the built
 //     lattice's own reading; with no other group's material it misses nothing (positive control);
-//   * "All at once" says the miss too — RED: D2 looked up the "all" note only;
+//   * "Play all" (D2's "All at once"; round 5 batch G) says the miss too — RED: D2 looked up the
+//     "all" note only;
 //   * the pass's four squish slots never split a pinch — RED: the four largest split 3 | 5;
 //   * a Top + Bottom pinch's two dents never cross — RED: D2's cap drew both 12 mm into 20 mm;
 //   * the card says only the face's SHARE (no second force control) and its dot is its group's —
@@ -98,7 +99,7 @@ final class FlexibleSqueezeGroupsReviewUXTests: XCTestCase {
         print("FLEX-REVIEW compete: built lattice \(builtGot) mm · estimate \(miss.asBuiltMM) mm · note '\(g.simNotes["group-1"] ?? "-")'")
         XCTAssertEqual(miss.asBuiltMM, builtGot, accuracy: 0.25, "the estimate reads what the lattice will squish")
         XCTAssertNotNil(g.simNotes["group-1"], "the lattice says the same miss")
-        // "All at once" says it too
+        // "Play all" (D2's "All at once") says it too
         XCTAssertEqual(g.simNote(for: FlexibleSim.allID), g.simNotes["group-1"])
         // ★ RED CONTROL: D2 read the "all" note alone — there is none
         XCTAssertNil(g.simNotes[FlexibleSim.allID], "control: D2's all-at-once showed no note")

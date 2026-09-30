@@ -47,8 +47,8 @@ public struct FlexibleGeneratedLattice: Sendable {
     /// ★ BATCH B REVIEW: the scene it was built on (FlexibleStageModel's opened key) — a new
     /// grid or lattice region leaves it stale, not "Lattice ready". nil: not keyed (tests).
     public let sceneKey: String?
-    /// ★ ROUND 4 (D2): the squeezes it was built for — each group, then all at once (one sim
-    /// with a single group). The player picks one (`showing`).
+    /// ★ ROUND 4 (D2): the squeezes it was built for — each group, then (★ batch G) "Play all" (the
+    /// groups in turn; one sim with a single group). The player picks one (`showing`).
     public let sims: [FlexibleSim]
     /// A group that squishes less than it was designed for (the firmer group wins where they
     /// share material): its one line, by sim id.
@@ -87,15 +87,20 @@ public struct FlexibleGeneratedLattice: Sendable {
         return zip(keys, faces).filter { shown.contains($0.0) }.map(\.1)
     }
 
-    /// The picker's default: the first group (a real squeeze), or nil (every face) with one sim.
-    public var defaultSimID: String? { sims.count > 1 ? sims.first?.id : nil }
+    /// The picker's default: ★ BATCH G — "Play all" with two or more groups (his "a way to play the
+    /// different sims"), or nil (every face) with one sim.
+    public var defaultSimID: String? {
+        guard sims.count > 1 else { return nil }
+        return sims.first { $0.kind == .playAll }?.id ?? sims.first?.id
+    }
 
     /// ★ THE PLAYER'S PICK (D2): this lattice with only `id`'s faces squishing — its walls (the
     /// combined field) unchanged, the dent and the walls moved by that sim's faces alone. nil or
-    /// an unknown id: the default sim. "All at once": every face.
+    /// an unknown id: the default sim. "Play all": every face (every group's map coloured; with the
+    /// sims landed, the renderer plays each group's field in turn — batch G).
     public func showing(_ id: String?) -> FlexibleGeneratedLattice {
         guard let sim = sims.first(where: { $0.id == (id ?? defaultSimID) }) ?? sims.first(where: { $0.id == defaultSimID }),
-              sim.kind != .allAtOnce else { return self }
+              sim.kind != .playAll else { return self }
         let wanted = Set(sim.keys)
         var byKey: [FlexFaceKey: FlexibleSquishFace] = [:]
         for (k, f) in zip(keys, faces) { byKey[k] = f }
@@ -111,9 +116,9 @@ public struct FlexibleGeneratedLattice: Sendable {
             pinchedWith: pinchedWith)
     }
 
-    /// The sim this view shows ("All at once" when nothing narrower is shown).
+    /// The sim this view shows ("Play all" when nothing narrower is shown).
     public var shownSim: FlexibleSim? {
-        sims.first { $0.id == shownSimID } ?? sims.first { $0.kind == .allAtOnce }
+        sims.first { $0.id == shownSimID } ?? sims.first { $0.kind == .playAll }
     }
 
     /// The token the pass re-uploads its squish faces by (the volumes keep `generation`): the
@@ -131,8 +136,8 @@ public struct FlexibleGeneratedLattice: Sendable {
     /// passes the shader's 0.95 clamp) — over the faces the pass squishes.
     public var maxSafeScale: Double { squishFaces.maxSafeScale }
 
-    /// ★ D2 REVIEW: the player's note for sim `id` — its own, and on "All at once" the first
-    /// group's that misses (every group squeezes there, so the miss is on screen too).
+    /// ★ D2 REVIEW: the player's note for sim `id` — its own, and on "Play all" the first group's
+    /// that misses (every group squeezes there in turn, so the miss is on screen too).
     public func simNote(for id: String?) -> String? {
         guard let id else { return nil }
         if let n = simNotes[id] { return n }

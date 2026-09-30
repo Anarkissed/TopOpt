@@ -53,6 +53,7 @@ extension FlexibleMainStage {
     /// run-loop turn — never a publish inside the view update that handed it over).
     public func attach(_ s: FlexibleStressSolver) {
         stressSolver = { [weak self] in self?.noteOutcome(s.start()) }
+        squishBusy = s.busy   // ★ BATCH G: no squish sim starts beside the Stress solve or a run
         guard stressSim !== s.sim else { return }
         stressSim = s.sim
         stressPhaseObservation = s.sim.$phase
@@ -70,6 +71,9 @@ extension FlexibleMainStage {
         switch o {
         case .blocked(let line): setStress(.blocked(line))
         case .started, .running: setStress(.running)
+        case .waiting:   // ★ BATCH G: a squish sim is inside core — it starts when the sims go idle
+            stressWaiting = true
+            setStress(.running)
         case .current: setStress(.ready)
         }
     }
@@ -194,6 +198,10 @@ extension FlexibleMainStage {
     public var dentExaggeration: Int { Int(channels?.exaggeration ?? 1) }
     /// The dent legend's (i), ONE sentence: what the map is and why it looks deeper than it is.
     public var dentInfo: String {
+        // ★ BATCH G: the 3D sim, said in ONE sentence (linear physics, scaled to core's squish) —
+        // or, after a failed sim, core's words
+        if fe.active { return FlexibleFE.info(exaggeration: dentExaggeration, stiffer: fe.coreRatio) }
+        if let why = fe.failure { return FlexibleFE.failedInfo(why, exaggeration: dentExaggeration) }
         let what = (channels?.legendLine ?? "").components(separatedBy: " · ").first ?? ""
         return (what.isEmpty ? "The map" : what) + " is drawn \(dentExaggeration)× deeper so it reads — tap here, then the part, for the true mm."
     }
@@ -254,7 +262,7 @@ extension FlexibleMainStage {
         switch kind {
         case .dent:
             guard let m = model, let dir = viewFrame?.viewDirection(at: p) else { return nil }
-            return FlexibleProbe.dentReading(model: m, overlay: overlay, dents: channels?.dents, scale: currentScale,
+            return FlexibleProbe.dentReading(model: m, overlay: overlay, dents: shownDents, scale: currentScale,
                                              drawnLattice: drawn, point: p, dir: dir, onlyIfOnMap: !xray)
         case .stress:
             guard stress, stressDrawable, let f = stressField else { return nil }
@@ -264,7 +272,7 @@ extension FlexibleMainStage {
             // surface under the ray
             var at = p, anchor = p
             if !heat, let m = model, let o = overlay, let dir = viewFrame?.viewDirection(at: p),
-               let hit = FlexibleProbe.drawnMapHit(model: m, overlay: o, dents: channels?.dents, scale: currentScale,
+               let hit = FlexibleProbe.drawnMapHit(model: m, overlay: o, dents: shownDents, scale: currentScale,
                                                    point: p, dir: dir, onlyIfOnMap: !xray) {
                 at = hit.rest; anchor = hit.point
             }
@@ -287,7 +295,7 @@ extension FlexibleMainStage {
     public func readLattice(_ project: ProjectModel, mode: LatticeLegendMode, model p: SIMD3<Float>) -> Bool {
         guard let kind = FlexibleReadKind(mode: mode) else { return false }
         guard kind == .lattice, let g = shownLattice else { return true }
-        guard let r = FlexibleProbe.lattice(g.inputs, faces: g.squishFaces, squish: currentScale, at: p) else {
+        guard let r = FlexibleProbe.lattice(g.inputs, faces: g.squishFaces, squish: currentScale, at: p, fe: feShownField) else {
             reading = FlexibleReading(kind: .lattice, value: "—", unit: FlexibleReadKind.lattice.nothingHere, fraction: nil, anchor: p)
             return true
         }

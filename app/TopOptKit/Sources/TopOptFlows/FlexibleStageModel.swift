@@ -34,6 +34,9 @@ actor FlexibleWorker {
         guard let s = scene else { throw TopOptError(message: "The part is still opening.") }
         return try body(s)
     }
+    /// ★ BATCH G: the scene itself, fetched in one quick hop — the squish sims run OFF this actor
+    /// (it serialises the design calls and must never wait seconds on a solve).
+    func sceneRef() -> FlexibleScene? { scene }
 }
 
 /// One control point of one face's X or Y curve (the × on the model, round 3 item 8).
@@ -128,6 +131,8 @@ public final class FlexibleStageModel: ObservableObject {
     private let worker = FlexibleWorker()
     /// The bridge worker, for tests that read core through the same open scene.
     var workerForTests: FlexibleWorker { worker }
+    /// ★ BATCH G: the worker the squish sims fetch the scene from (one hop; they run off it).
+    var squishWorker: FlexibleWorker { worker }
 
     // what the screens show
     @Published public private(set) var catalogue: [FlexMaterialInfo] = []
@@ -171,6 +176,23 @@ public final class FlexibleStageModel: ObservableObject {
     @Published public private(set) var lattice: FlexibleGeneratedLattice?
     @Published public private(set) var latticeBuilding = false
     @Published public private(set) var latticeError: String?
+    /// ★ BATCH G: each squeeze group's squish sim for the CURRENT lattice (by sim id): pending,
+    /// its calibrated FE field, or core's words. One publish per landed sim (FlexibleStageModel+Squish).
+    @Published public internal(set) var squish: [String: FlexibleSquishState] = [:]
+    /// The lattice generation `squish` belongs to.
+    public internal(set) var squishGeneration: Int?
+    /// What the sims need, built in the lattice's build task (released once the solver has it).
+    var feRequest: FlexibleFERequest?
+    /// The generation whose sims were handed to the solver.
+    var squishScheduled: Int?
+    /// One solve at a time, off the main thread (FlexibleSquishSolver).
+    let squishSolver = FlexibleSquishSolver()
+    /// Test only: keep the last FE request (the solver releases it after its last sim).
+    var keepFERequest = false
+    private(set) var lastFERequest: FlexibleFERequest?
+    func keepLastFERequest(_ r: FlexibleFERequest?) { lastFERequest = r }
+    /// Test control only: store a sim's result whatever its generation (the red control).
+    var controlIgnoreSquishGeneration = false
     /// ★ ROUND 4 (D2): the density field the last lattice was built from (groups combined
     /// firmer-wins, pinches as two segments). ★ D2 REVIEW: kept ONLY when a test asks
     /// (`keepCombinedField`) — at 128³ it is ~24 MB (Float ρ + Int owner) nothing else reads.
@@ -237,7 +259,7 @@ public final class FlexibleStageModel: ObservableObject {
         for _ in 0..<2000 {
             let tasks = Array(inFlight.values) + [designTask, autoTask].compactMap { $0 }
             for t in tasks { _ = await t.value }
-            if inFlight.isEmpty { return }
+            if inFlight.isEmpty { await squishSolver.waitForIdle(); return }
             try? await Task.sleep(nanoseconds: 5_000_000)
         }
     }
@@ -1042,6 +1064,13 @@ public final class FlexibleStageModel: ObservableObject {
         let worker = self.worker
         let failWith = controlFailBuild
         let combine = controlCombine
+        // ★ BATCH G: the squish sims' law, rests and (shape only) weights — every group a sim
+        let feLaw: FlexSquishLawInfo? = materialsPath.map {
+            FlexSquishLawInfo(materialsPath: $0, materialID: settings.materialID ?? "", topology: build.topology,
+                              tempC: designTempC ?? 0, shapeOnly: shapeOnly)
+        }
+        let feResting = settings.faces.filter { $0.role == "resting" }.map(\.faceRegionID)
+        let feWeights = Dictionary(zip(allKeys, faces.map(\.weightN)), uniquingKeysWith: { a, _ in a })
         track(Task.detached(priority: .userInitiated) {
             do {
                 if let failWith { throw TopOptError(message: failWith) }
@@ -1108,6 +1137,24 @@ public final class FlexibleStageModel: ObservableObject {
                 let inputs = try FlexibleLatticeBuilder.inputs(
                     field: field, part: part, topology: build.topology, beadsPerWall: build.beadsPerWall,
                     beadWidthMM: build.beadWidthMM, buildDir: buildDir, skinOffFaces: [], finish: finish)
+                // ★ BATCH G: what the squish sims need, made HERE — the combined field is not kept
+                // (D-R4-19); the solver releases it after the last sim
+                var fe: FlexibleFERequest?
+                if let law = feLaw {
+                    var fs: [FlexFaceKey: FlexibleFERequest.Face] = [:]
+                    for k in builtKeys {
+                        guard let st = stackOf[k] else { continue }
+                        let sg = designedSnap[k]
+                        let even = (feWeights[k] ?? 0) / Swift.max(st.footprintAreaMM2, 1e-9)
+                        fs[k] = FlexibleFERequest.Face(key: k, stack: st, cuts: cutsOf[k.region] ?? [], depthsMM: faceDepths[k] ?? [],
+                                                       heightsMM: sg?.heightMM ?? st.columns.map(\.latticeMM),
+                                                       pinched: sg?.pinched ?? [],
+                                                       pressureMPa: pressureSnap[k] ?? [Double](repeating: even, count: st.columns.count))
+                    }
+                    fe = FlexibleFERequest.build(field: field, inputs: inputs, sims: sims, faces: fs, resting: feResting,
+                                                 law: law, generation: generation)
+                }
+                let feBuilt = fe
                 let faceList = builtKeys.compactMap { squishFaces[$0] }
                 let g = FlexibleGeneratedLattice(inputs: inputs, faces: faceList, keys: builtKeys, columnDepths: faceDepths,
                                                  columnNoLattice: faceNoLattice, extentMM: extentMM, generation: generation,
@@ -1118,7 +1165,10 @@ public final class FlexibleStageModel: ObservableObject {
                 let combined = field
                 let keep = await MainActor.run { self.keepCombinedField }
                 let kept = keep ? combined : nil
-                await MainActor.run { self.lattice = g; self.lastCombinedField = kept; self.latticeBuilding = false }
+                await MainActor.run {
+                    self.lattice = g; self.lastCombinedField = kept; self.latticeBuilding = false
+                    self.latticeLanded(feBuilt)   // ★ BATCH G: a new lattice — its own squish sims
+                }
             } catch {
                 await MainActor.run {
                     self.latticeFailedKey = buildKey
@@ -1132,7 +1182,7 @@ public final class FlexibleStageModel: ObservableObject {
     /// Test control only: how separate squeezes are combined (the rule: the firmer wins).
     var controlCombine: @Sendable ([FlexDensityField]) -> (field: FlexDensityField, shared: Int) = { FlexibleGroupField.firmer($0) }
 
-    public func discardLattice() { lattice = nil }
+    public func discardLattice() { lattice = nil; latticeLanded(nil) }
 
     /// Test control only: the next builds throw this (a builder or core refusal on the build).
     var controlFailBuild: String?

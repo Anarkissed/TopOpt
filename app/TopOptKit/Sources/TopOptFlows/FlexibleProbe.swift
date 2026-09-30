@@ -311,7 +311,14 @@ public enum FlexibleProbe {
     /// The wall at the DRAWN point `p` (what the G-buffer probe returns), read at its rest
     /// point under squish `s` (the renderer's flexScale). nil in the air a pressed face left.
     public static func lattice(_ inputs: FlexibleLatticeInputs, faces: [FlexibleSquishFace], squish s: Float,
-                               at p: SIMD3<Float>) -> LatticeRead? {
+                               at p: SIMD3<Float>, fe: FlexibleFEField? = nil) -> LatticeRead? {
+        // ★ BATCH G: through the squish sim's field when one moves the walls
+        if let fe {
+            let p0 = fe.pullback(p, s)
+            let rho = Double(inputs.rho.sample(p0))
+            let c = drawnCell(rho: rho, inputs)
+            return LatticeRead(rho: rho, cellMM: c.mm, cellBlended: c.blended, rest: p0)
+        }
         let pb = FlexibleSquishField.pullback(p, faces: faces, squish: s)
         guard pb.air <= 0 else { return nil }
         let rho = Double(inputs.rho.sample(pb.p0))

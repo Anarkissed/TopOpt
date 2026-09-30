@@ -74,6 +74,8 @@ public struct FlexSquishSolutionInfo: Sendable {
     public let failure: String
     /// "rest" | "exit" | "free" | "patch" (a test control).
     public let bcMode: String
+    /// The rigid modes the rests left free (6: nothing rests) — each relieved and pinned by one DOF.
+    public let freeModes: Int
     public let coarsen: Int
     /// Node counts.
     public let nx: Int, ny: Int, nz: Int
@@ -155,7 +157,7 @@ extension FlexibleScene {
             }
         }
         return FlexSquishSolutionInfo(
-            ok: s.ok, failure: String(s.failure), bcMode: String(s.bc_mode), coarsen: Int(s.coarsen),
+            ok: s.ok, failure: String(s.failure), bcMode: String(s.bc_mode), freeModes: Int(s.free_modes), coarsen: Int(s.coarsen),
             nx: Int(s.nx), ny: Int(s.ny), nz: Int(s.nz), spacing: s.spacing, origin: FlexConv.v3(s.origin),
             u: u, solved: solved, elements: Int(s.elements), iterations: Int(s.iterations), mgLevels: Int(s.mg_levels),
             usedMultigrid: s.used_multigrid, residual: s.residual, setupMS: s.setup_ms, solveMS: s.solve_ms,

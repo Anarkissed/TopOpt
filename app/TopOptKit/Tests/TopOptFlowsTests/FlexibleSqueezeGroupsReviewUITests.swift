@@ -186,7 +186,8 @@ final class FlexibleSqueezeGroupsReviewUITests: XCTestCase {
     func testTheTimelineKeepsItsWidthWithTheGroupPicker() throws {
         let sims = [FlexibleSim(id: "group-1", kind: .group(1), title: "Group 1 · Top A + Top B", short: "Group 1", keys: []),
                     FlexibleSim(id: "group-2", kind: .group(2), title: "Group 2 · Face 3 + Face 5", short: "Group 2", keys: []),
-                    FlexibleSim(id: "all", kind: .allAtOnce, title: "All at once", short: "All", keys: [])]
+                    // ★ RE-PINNED (round 5 batch G): "Play all" replaces D2's "All at once"
+                    FlexibleSim(id: "all", kind: .playAll, title: "Play all", short: "All", keys: [])]
         let note = "Group 1 squishes 0.3 of 2.6 mm · firmer wins"
         func measure(_ tag: String, width: CGFloat, height: CGFloat) throws -> (timeline: CGFloat, player: CGRect) {
             let loop = FlexibleSquishLoop()

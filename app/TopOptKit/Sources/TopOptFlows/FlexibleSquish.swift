@@ -214,8 +214,11 @@ public enum FlexibleSquishField {
     }
 
     /// The lattice at a DEFORMED point (what the preview draws while squishing).
+    /// ★ BATCH G: with an FE field (`fe`), the point is pulled back through THAT field (the MSL's
+    /// flx_fe_pullback) — no columns, no air.
     public static func lattice(at p: SIMD3<Float>, _ f: FlexibleLatticeInputs,
-                               faces: [FlexibleSquishFace], squish s: Float) -> Float {
+                               faces: [FlexibleSquishFace], squish s: Float, fe: FlexibleFEField? = nil) -> Float {
+        if let fe { return FlexibleLatticeField.lattice(at: fe.pullback(p, s), f) }
         let pb = pullback(p, faces: faces, squish: s)
         return pb.air > 0 ? pb.air : FlexibleLatticeField.lattice(at: pb.p0, f)
     }
@@ -244,6 +247,15 @@ public struct FlexibleLatticeLayerInputs: Equatable {
     /// changes which faces squish without a new lattice (FlexibleLatticePass.uploadFaces), so
     /// the volumes are not re-uploaded. Defaults to `token`.
     public var facesToken: Int
+    /// ★ BATCH G: the squeeze groups' FE fields (one continuous displacement field per group), the
+    /// mesh displacement of each (the ghost and the heat plane at their REST vertices — swapped in
+    /// by the renderer WITH the field), and the sequence the loop plays (indices into `fe`: a pick
+    /// is [g], "Play all" every landed group in turn). Empty ⇒ today's column squish.
+    public var fe: [FlexibleFEField] = []
+    public var feMesh: [[Float]] = []
+    public var feSequence: [Int] = []
+    /// The token the fields are uploaded by (the generation and the set of landed fields).
+    public var feToken: Int = 0
 
     public init(lattice: FlexibleLatticeInputs, faces: [FlexibleSquishFace], token: Int, hidden: Bool = false,
                 loop: FlexibleSquishLoop? = nil, facesToken: Int? = nil) {
@@ -253,5 +265,6 @@ public struct FlexibleLatticeLayerInputs: Equatable {
 
     public static func == (a: Self, b: Self) -> Bool {
         a.token == b.token && a.hidden == b.hidden && a.loop === b.loop && a.facesToken == b.facesToken
+            && a.feToken == b.feToken && a.feSequence == b.feSequence
     }
 }

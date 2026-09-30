@@ -149,18 +149,20 @@ final class FlexibleSqueezeGroupsTests: XCTestCase {
                                        area: area, name: { [FlexibleHisProject.topA: "Top A", FlexibleHisProject.topB: "Top B"][$0] ?? "Face \($0)" })
         }
         let one = sims()
-        XCTAssertEqual(one.map(\.id), ["group-1"], "one group: one sim, no 'all at once'")
+        XCTAssertEqual(one.map(\.id), ["group-1"], "one group: one sim, no 'Play all'")
         XCTAssertEqual(one[0].keys.map(\.region).prefix(2).sorted(), [FlexibleHisProject.topA, FlexibleHisProject.topB].sorted(),
                        "largest first")
         _ = FlexibleSqueezeGroups.newGroup(with: 3, in: &s)
         FlexibleSqueezeGroups.move(5, to: FlexibleSqueezeGroups.group(of: 3, in: s)!.id, in: &s)
         let two = sims()
         XCTAssertEqual(two.map(\.id), ["group-1", "group-2", "all"])
-        XCTAssertEqual(two.map(\.title), ["Group 1 · Top A + Top B", "Group 2 · Face 3 + Face 5", "All at once"])
+        // ★ RE-PINNED (round 5 batch G, his words: "a way to play the different sims"): D2's
+        // "All at once" is dropped — "Play all" plays each group's own 3D sim in turn
+        XCTAssertEqual(two.map(\.title), ["Group 1 · Top A + Top B", "Group 2 · Face 3 + Face 5", "Play all"])
         XCTAssertEqual(two.map(\.short), ["Group 1", "Group 2", "All"])
         XCTAssertEqual(two[1].keys.map(\.region), [3, 5])
         XCTAssertEqual(two[2].keys.count, 4)
-        XCTAssertEqual(two[2].kind, .allAtOnce)
+        XCTAssertEqual(two[2].kind, .playAll)
     }
 
     func testSeparateSqueezesCombineFirmerWins() {

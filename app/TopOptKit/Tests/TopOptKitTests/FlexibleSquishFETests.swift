@@ -278,6 +278,34 @@ final class FlexibleSquishFETests: XCTestCase {
         XCTAssertGreaterThan(slide, 1e-4, "control: a roller lets the sole slide")
     }
 
+    /// ★ A REST GRIPS ONLY WHERE IT IS AN ANVIL (the deviation from the design's "every rest
+    /// bonded", stated in the handoff). His img 4 / his project: the sides squeezed while the pad
+    /// lies on its bottom. Nothing presses into the bottom, so it slides (its normal held) and the
+    /// pinch squeezes the pad as if nothing rested; the top press's bottom IS its anvil and stays
+    /// bonded (testRestingFaceIsHeld). RED CONTROL (2048): every rest bonded — the table glues the
+    /// pad and the pinch hardly moves (his project: k 7.7 then, 13.6 with [Face 5 rests]).
+    func testASideSqueezeDoesNotGlueThePadToItsRest() throws {
+        let pad = try Self.pad()
+        let pressed = [try pad.press(Self.plusX, weightN: 98.07), try pad.press(Self.minusX, weightN: 98.07)]
+        let free = try pad.scene.squishSolve(Self.request(pad, pressed: pressed, resting: []))
+        let slide = try pad.scene.squishSolve(Self.request(pad, pressed: pressed, resting: [Self.bottom]))
+        let glued = try pad.scene.squishSolve(Self.request(pad, pressed: pressed, resting: [Self.bottom], control: 2048))
+        func squeeze(_ s: FlexSquishSolutionInfo) -> Double {
+            Self.meanOnPlane(s, axis: 0, value: 0) { $0.x } - Self.meanOnPlane(s, axis: 0, value: 100) { $0.x }
+        }
+        let slideSole = slide.heldNodes.map { simd_length(SIMD2(slide.displacement($0).x, slide.displacement($0).y)) }.max() ?? 0
+        print(String(format: "FLEX-G FE rests: the pinch squeezes %.4f mm free · %.4f mm on a sliding bottom (%d free modes, the sole slides %.4f mm) · %.4f mm glued (control 2048)",
+                     squeeze(free), squeeze(slide), slide.freeModes, slideSole, squeeze(glued)))
+        XCTAssertTrue(free.ok && slide.ok && glued.ok)
+        XCTAssertEqual(slide.bcMode, "rest")
+        XCTAssertEqual(slide.freeModes, 3, "a bottom that slides leaves x, y and the turn about z to the pins")
+        XCTAssertGreaterThan(slideSole, 1e-3, "the bottom slides")
+        XCTAssertGreaterThanOrEqual(squeeze(slide), 0.8 * squeeze(free), "the table does not glue the pad")
+        XCTAssertLessThanOrEqual(slide.anchorReactionN, 1e-3 * slide.appliedForceAbsN, "the pins carry nothing")
+        // ★ RED CONTROL: bonded, the pad hardly squeezes
+        XCTAssertLessThan(squeeze(glued), 0.5 * squeeze(free), "control: a bonded bottom glues the pad")
+    }
+
     // MARK: - the loads
 
     func testLoadsSumToTheDesignForce() throws {

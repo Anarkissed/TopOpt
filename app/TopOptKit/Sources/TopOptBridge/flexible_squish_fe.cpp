@@ -61,6 +61,7 @@ enum Control : int {
   kNominalStrain = 256,
   kOtherAnchors = 512,
   kUnprojected = 1024,
+  kBondedRests = 2048,
 };
 
 std::mutex g_squish_fe_mu;
@@ -312,20 +313,51 @@ int gauss(std::vector<double> A, std::vector<double>& b, int n) {
   return rank;
 }
 
-// The rank of the 6×6 rigid-mode constraint matrix of `dofs` about `c` (a row per pinned DOF:
-// [e_comp, r × e_comp]).
-int rigid_rank(const FE& fe, const std::vector<std::pair<int, int>>& dofs, const Vec3& c) {
-  std::vector<double> A(36, 0.0);
-  for (std::size_t i = 0; i < dofs.size() && i < 6; ++i) {
-    const Vec3 r = sub(fe.pos(dofs[i].first), c);
-    Vec3 e{0, 0, 0};
-    if (dofs[i].second == 0) e.x = 1; else if (dofs[i].second == 1) e.y = 1; else e.z = 1;
-    const Vec3 m = cross(r, e);
-    const double row[6] = {e.x, e.y, e.z, m.x, m.y, m.z};
-    for (int k = 0; k < 6; ++k) A[i * 6 + k] = row[k];
+// The eigenvectors of a symmetric 6×6 matrix whose eigenvalues are (relatively) zero — the
+// rigid modes a set of constraint rows leaves free. Cyclic Jacobi rotations.
+std::vector<std::vector<double>> null_modes(std::vector<double> A) {
+  std::vector<double> V(36, 0.0);
+  for (int i = 0; i < 6; ++i) V[i * 6 + i] = 1.0;
+  for (int sweep = 0; sweep < 60; ++sweep) {
+    double off = 0.0;
+    for (int p = 0; p < 6; ++p)
+      for (int q = p + 1; q < 6; ++q) off += A[p * 6 + q] * A[p * 6 + q];
+    if (off < 1e-30) break;
+    for (int p = 0; p < 6; ++p)
+      for (int q = p + 1; q < 6; ++q) {
+        const double apq = A[p * 6 + q];
+        if (std::fabs(apq) < 1e-300) continue;
+        const double theta = (A[q * 6 + q] - A[p * 6 + p]) / (2.0 * apq);
+        const double t = (theta >= 0 ? 1.0 : -1.0) / (std::fabs(theta) + std::sqrt(theta * theta + 1.0));
+        const double c = 1.0 / std::sqrt(t * t + 1.0), sn = t * c;
+        for (int k = 0; k < 6; ++k) {
+          const double akp = A[k * 6 + p], akq = A[k * 6 + q];
+          A[k * 6 + p] = c * akp - sn * akq;
+          A[k * 6 + q] = sn * akp + c * akq;
+        }
+        for (int k = 0; k < 6; ++k) {
+          const double apk = A[p * 6 + k], aqk = A[q * 6 + k];
+          A[p * 6 + k] = c * apk - sn * aqk;
+          A[q * 6 + k] = sn * apk + c * aqk;
+        }
+        for (int k = 0; k < 6; ++k) {
+          const double vkp = V[k * 6 + p], vkq = V[k * 6 + q];
+          V[k * 6 + p] = c * vkp - sn * vkq;
+          V[k * 6 + q] = sn * vkp + c * vkq;
+        }
+      }
   }
-  std::vector<double> none;
-  return gauss(A, none, 6);
+  double top = 0.0;
+  for (int i = 0; i < 6; ++i) top = std::max(top, A[i * 6 + i]);
+  const double tol = 1e-8 * std::max(top, 1.0);
+  std::vector<std::vector<double>> out;
+  for (int i = 0; i < 6; ++i) {
+    if (A[i * 6 + i] > tol) continue;
+    std::vector<double> v(6);
+    for (int k = 0; k < 6; ++k) v[static_cast<std::size_t>(k)] = V[k * 6 + i];
+    out.push_back(v);
+  }
+  return out;
 }
 
 // ── the posture (RAII) ───────────────────────────────────────────────────────────────
@@ -584,17 +616,28 @@ FlexSquishSolution solve(const Setup& s, const FlexSquishRequest& req, const fx:
       }
     }
   };
-  auto hold = [&](const std::vector<int>& nodes, const Vec3& normal) {
+  // ★ A REST GRIPS ONLY WHERE IT IS AN ANVIL (deviation from the design's "every rest bonded",
+  // stated in the handoff): a resting face that a pressed stack of THIS group exits through
+  // carries the group's load, so its friction holds it — bonded (x, y, z). A resting face nothing
+  // of the group presses into slides — only its normal is held (frictionless; a side squeeze does
+  // not glue the pad to the table it lies on). Control 2048 bonds every rest (the design's rule),
+  // control 128 lets every rest slide.
+  std::vector<int> anvilFaces;
+  for (const Press& p : s.pressed)
+    for (const fx::StackLink& l : p.stack.exit_faces)
+      if (l.area_fraction >= 0.05 && std::find(pressedFaces.begin(), pressedFaces.end(), l.id) == pressedFaces.end())
+        anvilFaces.push_back(l.id);
+  auto hold = [&](const std::vector<int>& nodes, const Vec3& normal, bool bonded) {
     int ax = 0;
     if (std::fabs(normal.y) > std::fabs(comp(normal, ax))) ax = 1;
     if (std::fabs(normal.z) > std::fabs(comp(normal, ax))) ax = 2;
     for (int nd : nodes) {
-      if (control & kRollerRest) {
-        pin(nd, ax);
-      } else {
+      if (bonded) {
         pin(nd, 0);
         pin(nd, 1);
         pin(nd, 2);
+      } else {
+        pin(nd, ax);
       }
       out.held_nodes.push_back(nd);
     }
@@ -625,140 +668,144 @@ FlexSquishSolution solve(const Setup& s, const FlexSquishRequest& req, const fx:
       std::vector<int> nodes;
       Vec3 n;
       sole(r.member_triangles, r.cuts, nodes, n);
-      hold(nodes, n);
+      bool anvil = false;
+      for (int face : r.member_faces)
+        if (std::find(anvilFaces.begin(), anvilFaces.end(), face) != anvilFaces.end()) anvil = true;
+      const bool bonded = (control & kRollerRest) ? false : ((control & kBondedRests) != 0 || anvil);
+      hold(nodes, n, bonded);
     }
     if (!bcs.empty()) mode = "rest";
   }
   if (mode.empty() && !balanced) {
     // the linked other end of each pressed stack (core's anvil), not a face this group presses
-    for (const Press& p : s.pressed) {
-      for (const fx::StackLink& l : p.stack.exit_faces) {
-        if (l.area_fraction < 0.05) continue;
-        if (std::find(pressedFaces.begin(), pressedFaces.end(), l.id) != pressedFaces.end()) continue;
-        std::vector<int> tris;
-        for (std::size_t t = 0; t < s.model->triangle_face.size(); ++t)
-          if (s.model->triangle_face[t] == l.id) tris.push_back(static_cast<int>(t));
-        std::vector<int> nodes;
-        Vec3 n;
-        sole(tris, {}, nodes, n);
-        hold(nodes, n);
-      }
+    for (int face : anvilFaces) {
+      std::vector<int> tris;
+      for (std::size_t t = 0; t < s.model->triangle_face.size(); ++t)
+        if (s.model->triangle_face[t] == face) tris.push_back(static_cast<int>(t));
+      std::vector<int> nodes;
+      Vec3 n;
+      sole(tris, {}, nodes, n);
+      hold(nodes, n, true);
     }
     if (!bcs.empty()) mode = "exit";
   }
+  if (mode.empty()) mode = "free";
   std::sort(out.held_nodes.begin(), out.held_nodes.end());
   out.held_nodes.erase(std::unique(out.held_nodes.begin(), out.held_nodes.end()), out.held_nodes.end());
+  const std::size_t heldCount = bcs.size();
 
-  // mass centre (solid nodes)
+  // ── the rigid modes the rests leave FREE (all six for a squeeze nothing rests against) ──
+  // θ = [t; L·ω] (L the part's size, so the six coordinates weigh alike): a rigid motion moves
+  // node n by ψ(θ)(x_n) = t + (θ_ω × r_n) / L, r about the mass centre.
   double msum = 0.0;
   Vec3 cm{0, 0, 0};
+  Vec3 lo{1e300, 1e300, 1e300}, hi{-1e300, -1e300, -1e300};
   for (std::size_t n = 0; n < N; ++n) {
     if (mass[n] <= 0.0) continue;
+    const Vec3 p = fe.pos(static_cast<int>(n));
     msum += mass[n];
-    cm = add(cm, mul(fe.pos(static_cast<int>(n)), mass[n]));
+    cm = add(cm, mul(p, mass[n]));
+    lo = {std::min(lo.x, p.x), std::min(lo.y, p.y), std::min(lo.z, p.z)};
+    hi = {std::max(hi.x, p.x), std::max(hi.y, p.y), std::max(hi.z, p.z)};
   }
   cm = mul(cm, 1.0 / msum);
+  const Vec3 ext = sub(hi, lo);
+  const double Ls = std::max({ext.x, ext.y, ext.z, 1e-9});
+  auto row = [&](int node, int c, double out6[6]) {
+    const Vec3 r = sub(fe.pos(node), cm);
+    Vec3 e{0, 0, 0};
+    if (c == 0) e.x = 1; else if (c == 1) e.y = 1; else e.z = 1;
+    const Vec3 m = mul(cross(r, e), 1.0 / Ls);
+    out6[0] = e.x; out6[1] = e.y; out6[2] = e.z; out6[3] = m.x; out6[4] = m.y; out6[5] = m.z;
+  };
+  auto psi = [&](const double* phi, int node) {
+    const Vec3 r = sub(fe.pos(node), cm);
+    return add(Vec3{phi[0], phi[1], phi[2]}, mul(cross(Vec3{phi[3], phi[4], phi[5]}, r), 1.0 / Ls));
+  };
+  std::vector<double> gram(36, 0.0);
+  auto accumulate = [&](std::vector<double>& G, int node, int c) {
+    double r6[6];
+    row(node, c, r6);
+    for (int a = 0; a < 6; ++a)
+      for (int b = 0; b < 6; ++b) G[a * 6 + b] += r6[a] * r6[b];
+  };
+  for (std::size_t q = 0; q < heldCount; ++q) accumulate(gram, bcs[q].node, bcs[q].component);
+  std::vector<std::vector<double>> freeModes = null_modes(gram);
+  if (mode == "patch") freeModes.clear();
+  out.free_modes = static_cast<int32_t>(freeModes.size());
+  const int d = static_cast<int>(freeModes.size());
 
-  if (mode.empty()) {
-    mode = "free";
-    // ★ INERTIA RELIEF: the loads made EXACTLY self-equilibrated (force and moment about the
-    // mass centre), so the six 3-2-1 pins carry no reaction and bias nothing
-    Vec3 F{0, 0, 0}, M{0, 0, 0};
+  if (d > 0) {
+    // ★ INERTIA RELIEF on the free modes: the loads' share in them removed by the mass-weighted
+    // rigid acceleration it would cause, so the loads are EXACTLY self-equilibrated there and the
+    // pins below carry no reaction and bias nothing
+    std::vector<double> Mg(static_cast<std::size_t>(d * d), 0.0), g(static_cast<std::size_t>(d), 0.0);
     for (std::size_t n = 0; n < N; ++n) {
       const Vec3 fn{f[3 * n], f[3 * n + 1], f[3 * n + 2]};
-      if (fn.x == 0.0 && fn.y == 0.0 && fn.z == 0.0) continue;
-      F = add(F, fn);
-      M = add(M, cross(sub(fe.pos(static_cast<int>(n)), cm), fn));
+      if (mass[n] <= 0.0 && fn.x == 0.0 && fn.y == 0.0 && fn.z == 0.0) continue;
+      std::vector<Vec3> ps(static_cast<std::size_t>(d));
+      for (int i = 0; i < d; ++i) ps[static_cast<std::size_t>(i)] = psi(freeModes[static_cast<std::size_t>(i)].data(), static_cast<int>(n));
+      for (int i = 0; i < d; ++i) {
+        g[static_cast<std::size_t>(i)] += dot(fn, ps[static_cast<std::size_t>(i)]);
+        if (mass[n] <= 0.0) continue;
+        for (int j = 0; j < d; ++j) Mg[static_cast<std::size_t>(i * d + j)] += mass[n] * dot(ps[static_cast<std::size_t>(i)], ps[static_cast<std::size_t>(j)]);
+      }
     }
-    std::vector<double> I(9, 0.0);
+    std::vector<double> a = g;
+    gauss(Mg, a, d);
     for (std::size_t n = 0; n < N; ++n) {
       if (mass[n] <= 0.0) continue;
-      const Vec3 r = sub(fe.pos(static_cast<int>(n)), cm);
-      const double rr = dot(r, r);
-      const double rv[3] = {r.x, r.y, r.z};
-      for (int a = 0; a < 3; ++a)
-        for (int b = 0; b < 3; ++b) I[a * 3 + b] += mass[n] * ((a == b ? rr : 0.0) - rv[a] * rv[b]);
+      Vec3 acc{0, 0, 0};
+      for (int i = 0; i < d; ++i) acc = add(acc, mul(psi(freeModes[static_cast<std::size_t>(i)].data(), static_cast<int>(n)), a[static_cast<std::size_t>(i)]));
+      f[3 * n] -= mass[n] * acc.x;
+      f[3 * n + 1] -= mass[n] * acc.y;
+      f[3 * n + 2] -= mass[n] * acc.z;
     }
-    std::vector<double> alpha = {M.x, M.y, M.z};
-    gauss(I, alpha, 3);
-    const Vec3 acc = mul(F, 1.0 / msum), al{alpha[0], alpha[1], alpha[2]};
-    for (std::size_t n = 0; n < N; ++n) {
-      if (mass[n] <= 0.0) continue;
-      const Vec3 r = sub(fe.pos(static_cast<int>(n)), cm);
-      const Vec3 relief = mul(add(acc, cross(al, r)), -mass[n]);
-      f[3 * n] += relief.x;
-      f[3 * n + 1] += relief.y;
-      f[3 * n + 2] += relief.z;
-    }
-    // ★ 3-2-1: six DOFs, preferring nodes on the coarse multigrid levels (indices % 4 == 0)
-    Vec3 lo{1e300, 1e300, 1e300}, hi{-1e300, -1e300, -1e300};
-    for (std::size_t n = 0; n < N; ++n) {
-      if (mass[n] <= 0.0) continue;
-      const Vec3 p = fe.pos(static_cast<int>(n));
-      lo = {std::min(lo.x, p.x), std::min(lo.y, p.y), std::min(lo.z, p.z)};
-      hi = {std::max(hi.x, p.x), std::max(hi.y, p.y), std::max(hi.z, p.z)};
-    }
-    const Vec3 ext = sub(hi, lo);
-    int axes[3] = {0, 1, 2};
-    std::sort(axes, axes + 3, [&](int a, int b) { return comp(ext, a) > comp(ext, b); });
+    // ★ MINIMAL PINS: one DOF per free mode, each the candidate that constrains what is still free
+    // most strongly (on the coarse multigrid nodes, indices % 4 == 0, where there are enough);
+    // control 512 draws them from the other half of the part (another valid choice)
     const bool other = (control & kOtherAnchors) != 0;
-    const int L = other ? axes[1] : axes[0];
     auto preferred = [&](int n) {
-      const int a = n % fe.nnx, b = (n / fe.nnx) % fe.nny, cc = n / (fe.nnx * fe.nny);
-      return a % 4 == 0 && b % 4 == 0 && cc % 4 == 0;
+      const int a2 = n % fe.nnx, b2 = (n / fe.nnx) % fe.nny, c2 = n / (fe.nnx * fe.nny);
+      return a2 % 4 == 0 && b2 % 4 == 0 && c2 % 4 == 0;
     };
     std::vector<int> cands;
-    for (std::size_t n = 0; n < N; ++n)
-      if (mass[n] > 0.0 && preferred(static_cast<int>(n))) cands.push_back(static_cast<int>(n));
-    if (cands.size() < 3) {
+    for (int pass = 0; pass < 2 && cands.size() < 8; ++pass) {
       cands.clear();
-      for (std::size_t n = 0; n < N; ++n)
-        if (mass[n] > 0.0) cands.push_back(static_cast<int>(n));
+      for (std::size_t n = 0; n < N; ++n) {
+        if (mass[n] <= 0.0 || (pass == 0 && !preferred(static_cast<int>(n)))) continue;
+        const Vec3 p = fe.pos(static_cast<int>(n));
+        if (other && p.x > cm.x) continue;
+        cands.push_back(static_cast<int>(n));
+      }
     }
-    const Vec3 aim = other ? lo : cm;
-    int A = cands.front();
-    for (int n : cands)
-      if (norm(sub(fe.pos(n), aim)) < norm(sub(fe.pos(A), aim))) A = n;
-    const Vec3 pa = fe.pos(A);
-    int B = -1;
-    double bs = -1e300;
-    for (int n : cands) {
-      if (n == A) continue;
-      const Vec3 d = sub(fe.pos(n), pa);
-      double off = 0.0;
-      for (int a = 0; a < 3; ++a)
-        if (a != L) off += comp(d, a) * comp(d, a);
-      const double score = std::fabs(comp(d, L)) - 1e-3 * std::sqrt(off);
-      if (score > bs) { bs = score; B = n; }
+    std::vector<double> G = gram;
+    for (int k = 0; k < d; ++k) {
+      const std::vector<std::vector<double>> still = null_modes(G);
+      if (still.empty()) break;
+      int bestNode = -1, bestComp = 0;
+      double best = 0.0;
+      for (int n : cands)
+        for (int c2 = 0; c2 < 3; ++c2) {
+          if (pinned[3 * static_cast<std::size_t>(n) + static_cast<std::size_t>(c2)]) continue;
+          double r6[6];
+          row(n, c2, r6);
+          double proj = 0.0;
+          for (const auto& v : still) {
+            double x = 0.0;
+            for (int q = 0; q < 6; ++q) x += r6[q] * v[static_cast<std::size_t>(q)];
+            proj += x * x;
+          }
+          if (proj > best * (1.0 + 1e-9)) { best = proj; bestNode = n; bestComp = c2; }
+        }
+      if (bestNode < 0 || best < 1e-12) break;
+      pin(bestNode, bestComp);
+      accumulate(G, bestNode, bestComp);
     }
-    const Vec3 pb = fe.pos(B);
-    const Vec3 ab = sub(pb, pa);
-    const double abl = std::max(norm(ab), 1e-12);
-    std::vector<std::pair<double, int>> cs;
-    for (int n : cands) {
-      if (n == A || n == B) continue;
-      cs.push_back({norm(cross(ab, sub(fe.pos(n), pa))) / abl, n});
-    }
-    std::sort(cs.begin(), cs.end(), [](const auto& x, const auto& y) { return x.first > y.first; });
-    std::vector<std::pair<int, int>> dofs;
-    bool found = false;
-    for (std::size_t q = 0; q < cs.size() && q < 64 && !found; ++q) {
-      const int C = cs[q].second;
-      const Vec3 nrm = cross(ab, sub(fe.pos(C), pa));
-      int ax = 0;
-      if (std::fabs(nrm.y) > std::fabs(comp(nrm, ax))) ax = 1;
-      if (std::fabs(nrm.z) > std::fabs(comp(nrm, ax))) ax = 2;
-      dofs = {{A, 0}, {A, 1}, {A, 2}};
-      for (int a = 0; a < 3; ++a)
-        if (a != L) dofs.push_back({B, a});
-      dofs.push_back({C, ax});
-      found = rigid_rank(fe, dofs, cm) == 6;
-    }
-    if (!found) {
-      out.failure = "the squish sim found no stable 3-2-1 anchor on this part";
+    if (!null_modes(G).empty()) {
+      out.failure = "the squish sim found no stable anchoring for this squeeze";
       return out;
     }
-    for (const auto& d : dofs) pin(d.first, d.second);
   }
   out.bc_mode = mode;
   for (const auto& b : bcs) out.pinned_dofs.push_back(3 * b.node + b.component);
@@ -807,45 +854,39 @@ FlexSquishSolution solve(const Setup& s, const FlexSquishRequest& req, const fx:
   {
     const std::vector<double> Ku = topopt::fea_matfree_apply(fe.g, fe.E, nu, sol.u);
     double r2 = 0.0;
-    for (const auto& b : bcs) {
-      const std::size_t q = 3 * static_cast<std::size_t>(b.node) + static_cast<std::size_t>(b.component);
-      const double r = Ku[q] - f[q];
-      r2 += r * r;
-      if (mode == "rest" || mode == "exit") out.held_reaction_n[b.component] += r;
+    for (std::size_t q = 0; q < bcs.size(); ++q) {
+      const auto& b = bcs[q];
+      const std::size_t i = 3 * static_cast<std::size_t>(b.node) + static_cast<std::size_t>(b.component);
+      const double r = Ku[i] - f[i];
+      if (q < heldCount && mode != "patch") {
+        out.held_reaction_n[b.component] += r;   // the rests (or the linked other end)
+      } else {
+        r2 += r * r;                              // the pins (the patch control's DOFs)
+      }
     }
     out.anchor_reaction_n = std::sqrt(r2);
   }
 
   std::vector<double> u = std::move(sol.u);
-  if (mode == "free") {
-    // ★ the mass-weighted best-fit RIGID motion removed (t + ω × r, least squares)
-    std::vector<double> G(36, 0.0), rhs(6, 0.0);
+  if (d > 0) {
+    // ★ the mass-weighted best-fit motion in the FREE rigid modes removed (least squares), so the
+    // pins' choice leaves no trace
+    std::vector<double> Mg(static_cast<std::size_t>(d * d), 0.0), b(static_cast<std::size_t>(d), 0.0);
     for (std::size_t n = 0; n < N; ++n) {
       if (mass[n] <= 0.0) continue;
-      const double m = mass[n];
-      const Vec3 r = sub(fe.pos(static_cast<int>(n)), cm);
       const Vec3 un{u[3 * n], u[3 * n + 1], u[3 * n + 2]};
-      const double rv[3] = {r.x, r.y, r.z};
-      // [r]× (so r × w = X w)
-      const double X[9] = {0, -r.z, r.y, r.z, 0, -r.x, -r.y, r.x, 0};
-      const double rr = dot(r, r);
-      for (int a = 0; a < 3; ++a) {
-        G[a * 6 + a] += m;
-        for (int b = 0; b < 3; ++b) {
-          G[a * 6 + 3 + b] += -m * X[a * 3 + b];
-          G[(3 + a) * 6 + b] += m * X[a * 3 + b];
-          G[(3 + a) * 6 + 3 + b] += m * ((a == b ? rr : 0.0) - rv[a] * rv[b]);
-        }
+      std::vector<Vec3> ps(static_cast<std::size_t>(d));
+      for (int i = 0; i < d; ++i) ps[static_cast<std::size_t>(i)] = psi(freeModes[static_cast<std::size_t>(i)].data(), static_cast<int>(n));
+      for (int i = 0; i < d; ++i) {
+        b[static_cast<std::size_t>(i)] += mass[n] * dot(un, ps[static_cast<std::size_t>(i)]);
+        for (int j = 0; j < d; ++j) Mg[static_cast<std::size_t>(i * d + j)] += mass[n] * dot(ps[static_cast<std::size_t>(i)], ps[static_cast<std::size_t>(j)]);
       }
-      const Vec3 ru = cross(r, un);
-      rhs[0] += m * un.x; rhs[1] += m * un.y; rhs[2] += m * un.z;
-      rhs[3] += m * ru.x; rhs[4] += m * ru.y; rhs[5] += m * ru.z;
     }
-    gauss(G, rhs, 6);
-    const Vec3 t{rhs[0], rhs[1], rhs[2]}, w{rhs[3], rhs[4], rhs[5]};
+    gauss(Mg, b, d);
     for (std::size_t n = 0; n < N; ++n) {
       if (mass[n] <= 0.0) continue;
-      const Vec3 rg = add(t, cross(w, sub(fe.pos(static_cast<int>(n)), cm)));
+      Vec3 rg{0, 0, 0};
+      for (int i = 0; i < d; ++i) rg = add(rg, mul(psi(freeModes[static_cast<std::size_t>(i)].data(), static_cast<int>(n)), b[static_cast<std::size_t>(i)]));
       u[3 * n] -= rg.x;
       u[3 * n + 1] -= rg.y;
       u[3 * n + 2] -= rg.z;
