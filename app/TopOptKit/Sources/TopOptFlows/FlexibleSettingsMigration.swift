@@ -14,6 +14,12 @@
 //     face = squishier"). A curve he DREW before keeps its PICTURE, so its stored y flips
 //     once (y → 1 − y); the untouched default dome is NOT flipped — under the new reading it
 //     is the valley that touches the face in the middle, the dent's own shape.
+//     ★ "UNTOUCHED" IS THE SHAPE, NOT THE BYTES (verification of round 3): the old "+ point"
+//     inserted a knot ON the curve, so his top B's curveX (x 0 · 0.25 · 0.5 · 1) is the
+//     default dome with one more point — he drew nothing, yet it was flipped to firm-in-the-
+//     middle beside the identical, unflipped curveY. A curve is drawn only when core's own
+//     curve (pen_curve_values, 21 samples) leaves the default's by more than `drawnTolerance`
+//     (0.04 in S: his top B's knot moves it 0.022, his top A's dragged peak 0.072).
 
 import Foundation
 import TopOptKit
@@ -36,14 +42,40 @@ public enum FlexibleSettingsMigration {
             f.rotationDeg = 0
             if flip {
                 // a DRAWN curve keeps its picture; the untouched default is kept as it is
-                if f.curveX != FlexibleFaceSettings.defaultCurve { f.curveX = flipped(f.curveX) }
-                if f.curveY != FlexibleFaceSettings.defaultCurve { f.curveY = flipped(f.curveY) }
+                if isDrawn(f.curveX) { f.curveX = flipped(f.curveX) }
+                if isDrawn(f.curveY) { f.curveY = flipped(f.curveY) }
             }
             out.faces[i] = f
         }
         out.curveConvention = currentCurveConvention
         return out
     }
+
+    /// How far (in S) core's curve must leave the default dome's anywhere to count as drawn.
+    /// Measured on his project: top B's inserted knot moves the curve ≤ 0.022 (Fritsch–Carlson
+    /// re-slopes around it); top A's dragged peak moves it 0.072.
+    public static let drawnTolerance = 0.04
+    static let samples = (0...20).map { Double($0) / 20 }
+
+    /// Did he DRAW this curve (its shape leaves the default dome), or is it the default —
+    /// perhaps with a knot the old "+ point" inserted on it? Memoised: the migration runs on
+    /// every settings read until the first edit writes the migrated form.
+    public static func isDrawn(_ c: FlexCurve) -> Bool {
+        if c == FlexibleFaceSettings.defaultCurve { return false }
+        let key = "\(c.x)|\(c.y)" as NSString
+        if let hit = drawnCache.object(forKey: key) { return hit.boolValue }
+        let d = FlexibleFaceSettings.defaultCurve
+        let drawn: Bool
+        if let a = try? FlexibleCore.penCurveValues(x: c.x, y: c.y, t: samples),
+           let b = try? FlexibleCore.penCurveValues(x: d.x, y: d.y, t: samples), a.count == b.count {
+            drawn = zip(a, b).contains { abs($0 - $1) > drawnTolerance }
+        } else {
+            drawn = true   // core cannot read it: keep the old rule (not byte-equal ⇒ drawn)
+        }
+        drawnCache.setObject(NSNumber(value: drawn), forKey: key)
+        return drawn
+    }
+    private static let drawnCache = NSCache<NSString, NSNumber>()
 
     /// y → 1 − y at every control point (the picture under the other reading).
     public static func flipped(_ c: FlexCurve) -> FlexCurve {

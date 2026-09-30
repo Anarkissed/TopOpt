@@ -77,6 +77,41 @@ final class FlexibleSettingsMigrationTests: XCTestCase {
         XCTAssertEqual(FlexibleSettingsMigration.migrated(m), m, "flipped once, never twice")
     }
 
+    /// ★ HIS TOP B (verification of round 3): its curveX is the default dome with one knot the
+    /// old "+ point" inserted ON it (x 0 · 0.25 · 0.5 · 1) — he drew nothing, so it is NOT
+    /// flipped, exactly like the identical default curveY beside it. His top A (the peak
+    /// dragged to x 0.417) and face 3's V are drawn, and flip. RED CONTROL: the byte rule
+    /// flipped top B.
+    func testAKnotOnTheDefaultDomeIsNotADrawing() throws {
+        let s = try JSONDecoder().decode(FlexibleStageSettings.self, from: Self.hisSavedJSON())
+        let b = try XCTUnwrap(s.face(FlexibleHisProject.topB))
+        XCTAssertEqual(b.curveX.x, [0, 0.25, 0.5, 1], "premise: his top B as saved")
+        XCTAssertEqual(b.curveX.y, [0.3, 0.7375, 1, 0.3])
+        // how far each saved curve's shape (core's own curve) is from the default dome
+        let t = (0...40).map { Double($0) / 40 }
+        let d = FlexibleFaceSettings.defaultCurve
+        func gap(_ c: FlexCurve) throws -> Double {
+            let a = try FlexibleCore.penCurveValues(x: c.x, y: c.y, t: t), z = try FlexibleCore.penCurveValues(x: d.x, y: d.y, t: t)
+            return zip(a, z).map { abs($0 - $1) }.max() ?? 0
+        }
+        let gapB = try gap(b.curveX), gapA = try gap(try XCTUnwrap(s.face(FlexibleHisProject.topA)).curveX)
+        print(String(format: "FLEX-MIGRATE shape gap from the default dome: top B %.3f, top A %.3f (tolerance %.2f)",
+                     gapB, gapA, FlexibleSettingsMigration.drawnTolerance))
+        XCTAssertLessThan(gapB, FlexibleSettingsMigration.drawnTolerance)
+        XCTAssertGreaterThan(gapA, FlexibleSettingsMigration.drawnTolerance)
+        let m = FlexibleSettingsMigration.migrated(s)
+        XCTAssertEqual(m.face(FlexibleHisProject.topB)?.curveX, b.curveX, "top B's knot on the dome is not flipped")
+        XCTAssertEqual(m.face(FlexibleHisProject.topB)?.curveY, b.curveY)
+        XCTAssertFalse(FlexibleSettingsMigration.isDrawn(b.curveX))
+        let a = try XCTUnwrap(s.face(FlexibleHisProject.topA))
+        XCTAssertTrue(FlexibleSettingsMigration.isDrawn(a.curveX), "top A's moved peak is a drawing")
+        XCTAssertEqual(m.face(FlexibleHisProject.topA)?.curveX, FlexibleSettingsMigration.flipped(a.curveX))
+        XCTAssertTrue(FlexibleSettingsMigration.isDrawn(try XCTUnwrap(s.face(3)).curveX), "face 3's V is a drawing")
+        XCTAssertFalse(FlexibleSettingsMigration.isDrawn(FlexibleFaceSettings.defaultCurve))
+        // ★ RED CONTROL: the byte rule counted the extra knot as a drawing and flipped it
+        XCTAssertNotEqual(b.curveX, FlexibleFaceSettings.defaultCurve, "control: not byte-equal to the default")
+    }
+
     /// The model reads THROUGH the migration: designs, Auto and the job use 1 bead.
     @MainActor
     func testTheModelDesignsAndBuildsWithOneBead() throws {
