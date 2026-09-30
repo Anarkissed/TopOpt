@@ -22,6 +22,11 @@ struct FlexibleSettingsPanel: View {
     @Binding var minimized: Bool
 
     static let width: CGFloat = 400
+    /// The selected card's height and the scroll's own, as laid out: when either changes (the
+    /// stamp's rows, a design's warning line; the fix pop-up taking the top of the page) the card
+    /// is brought back into view — a reveal made before them left it cut off.
+    @State private var cardHeight: CGFloat = 0
+    @State private var scrollHeight: CGFloat = 0
 
     var body: some View {
         VStack(alignment: .leading, spacing: DS.Space.m) {
@@ -32,16 +37,32 @@ struct FlexibleSettingsPanel: View {
                           selection: model.tab.rawValue, id: "flexible-tab") {
                     model.tab = FlexibleStageModel.Tab(rawValue: $0) ?? .face
                 }
-                FlexibleHugHeight {
-                    ScrollView(.vertical, showsIndicators: true) {
-                        VStack(alignment: .leading, spacing: DS.Space.m) {
-                            switch model.tab {
-                            case .face: FlexibleFacePanel(model: model, padTarget: $padTarget)
-                            case .more: FlexibleMorePanel(model: model)
+                ScrollViewReader { proxy in
+                    FlexibleHugHeight {
+                        ScrollView(.vertical, showsIndicators: true) {
+                            VStack(alignment: .leading, spacing: DS.Space.m) {
+                                switch model.tab {
+                                case .face: FlexibleFacePanel(model: model, padTarget: $padTarget)
+                                case .more: FlexibleMorePanel(model: model)
+                                }
                             }
+                            .frame(maxWidth: .infinity, alignment: .leading)
                         }
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(GeometryReader { g in
+                            Color.clear
+                                .onAppear { scrollHeight = g.size.height }
+                                .onChange(of: g.size.height) { scrollHeight = $0 }
+                                // what the scroll SHOWS (the hosted test checks the card lies in it)
+                                .preference(key: FlexibleKeepOutKey.self, value: ["panelScroll": g.frame(in: .global)])
+                        }.allowsHitTesting(false))
+                        .onPreferenceChange(FlexibleKeepOutKey.self) { v in cardHeight = v["faceCard"]?.height ?? 0 }
                     }
+                    // ★ THE SELECTED FACE'S CARD SCROLLS INTO VIEW (verification of D1): on a list
+                    // tap, a tap on the part, the fix pop-up's select, a switch back to Face, the
+                    // card growing (Stamp's rows, a warning line), the panel shrinking under the
+                    // pop-up — and as the page opens
+                    .onChange(of: revealKey) { _ in reveal(proxy) }
+                    .onAppear { reveal(proxy) }
                 }
             }
         }
@@ -52,6 +73,36 @@ struct FlexibleSettingsPanel: View {
             .overlay(RoundedRectangle(cornerRadius: DS.Radius.panel)
                 .strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
         .dsShadow(DS.Shadow.panel)
+    }
+
+    /// What moves or resizes the selected face's card.
+    private var revealKey: String {
+        let r = model.selectedRegion
+        let f = r.flatMap { model.settings.face($0) }
+        return "\(r ?? -1)|\(model.tab.rawValue)|\(f?.role ?? "-")|\(f?.isStampShape ?? false)|\(minimized)"
+            + "|\(Int(cardHeight / 4))|\(Int(scrollHeight / 4))"
+    }
+
+    /// Scroll the card fully into view: `.bottom` moves the list only as far as the card's last
+    /// row needs (a card already on the panel stays put; the rows above it stay in sight).
+    /// Asked IN the change (SwiftUI applies it on the layout that follows), and again whenever the
+    /// card or the scroll changes height (`revealKey`: the stamp's rows, a design's warning, the
+    /// fix pop-up taking the top of the page). ★ Not deferred: a scroll dispatched for later ran
+    /// seconds late in the hosted test — after the next tap — and left the card below the fold.
+    private func reveal(_ proxy: ScrollViewProxy) {
+        guard !minimized, model.tab == .face, let r = model.selectedRegion else { return }
+        proxy.scrollTo(FlexibleFaceList.cardID(r), anchor: Self.revealAnchor)
+    }
+    static let revealAnchor = UnitPoint.bottom
+
+    /// ★ HOW TALL THE PANEL MAY GROW (verification of D1): up to the page's top chrome over its
+    /// column — the Exit row, the top line (and its toast), the fix pop-up while it is up — never
+    /// less than round 3's 62 % of the page. At 62 % the selected face's card (446 pt with a stamp)
+    /// did not fit the scroll on 11" landscape (517 pt for the whole panel). It still hugs its rows.
+    static func maxHeight(viewport: CGSize, topChrome: [CGRect], edge: CGFloat = PageChrome.edge) -> CGFloat {
+        let column = CGRect(x: edge, y: 0, width: width, height: viewport.height)
+        let top = topChrome.filter { $0.minX < column.maxX && $0.maxX > column.minX }.map(\.maxY).max() ?? edge
+        return max(viewport.height * 0.62, viewport.height - edge - top - DS.Space.m)
     }
 
     private var header: some View {
@@ -102,7 +153,9 @@ struct FlexibleHugHeight: Layout {
 /// arrow when there is one; a tap on it (the page's) brings the whole legend back.
 struct FlexibleLegendBar: View {
     let fraction: Double?
-    static let barHeight: CGFloat = 150
+    /// ★ VERIFICATION OF D1: 150 pt made the folded legend (≈ 180 pt with its caret) TALLER than
+    /// the open one (98–124 pt) — minimising must make it smaller.
+    static let barHeight: CGFloat = 64
 
     var body: some View {
         VStack(spacing: 6) {

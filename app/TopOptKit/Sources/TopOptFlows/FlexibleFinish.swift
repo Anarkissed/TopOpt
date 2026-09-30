@@ -6,8 +6,9 @@
 //   none ...... the lattice runs to the surface everywhere;
 //   rim ....... a SOLID band along every face edge (`rimMM` round each edge); the faces open;
 //   skin ...... a thin PERFORATED skin over the lattice: `skinMM` of solid under every
-//               surface, with round holes (`holeRadiusMM`, on a hex grid `holePitchMM`
-//               apart) through which the lattice reaches the surface;
+//               surface, with round holes 3 mm ACROSS (`holeRadiusMM` = 1.5 is a RADIUS), on a
+//               hex grid `holePitchMM` = 5 mm apart — about a third of the skin open — through
+//               which the lattice reaches the surface;
 //   covered ... a solid skin everywhere (the default, and what every project had before).
 //
 // ★ HOW THE PREVIEW DRAWS IT — ONE CHANNEL, NO SHADER CHANGE. The lattice field is
@@ -39,9 +40,14 @@ public enum FlexibleFinish: String, CaseIterable, Codable, Sendable {
 
     /// Rim: the solid band's radius round each face edge (mm). The app's choice (core brief).
     public static let rimMM: Float = 2.0
-    /// Skin: the perforation — round holes on a hex grid, in each surface's own plane.
+    /// Skin: the perforation — round holes on a hex grid, in each surface's own plane. ★ A
+    /// RADIUS (verification of D1: the handoff said "1.5 mm holes"): the holes are 3 mm across,
+    /// ~33 % of the skin open (π·1.5² / (5² · √3/2)).
     public static let holeRadiusMM: Float = 1.5
+    public static var holeDiameterMM: Float { 2 * holeRadiusMM }
     public static let holePitchMM: Float = 5.0
+    /// The share of a skin plane the holes open (the hex cell's area is pitch² · √3/2).
+    public static var openFraction: Float { .pi * holeRadiusMM * holeRadiusMM / (holePitchMM * holePitchMM * 0.8660254) }
     /// "No skin anywhere near" (None): far beyond any skin thickness; fits a half float.
     public static let farMM: Float = 1000
 
@@ -66,11 +72,11 @@ public enum FlexibleFinish: String, CaseIterable, Codable, Sendable {
     /// The hole pattern's signed distance (mm, negative inside a hole) at a surface point `p`
     /// whose outward normal is `n`: triplanar — the pattern lies in the two axes `n` is least
     /// along, so an axis-aligned face gets round holes.
-    public static func holeDistance(_ p: SIMD3<Float>, normal n: SIMD3<Float>) -> Float {
+    public static func holeDistance(_ p: SIMD3<Float>, normal n: SIMD3<Float>, radius: Float = holeRadiusMM) -> Float {
         let a = simd_abs(n)
         let q: SIMD2<Float> = a.z >= a.x && a.z >= a.y ? SIMD2(p.x, p.y)
             : (a.x >= a.y ? SIMD2(p.y, p.z) : SIMD2(p.x, p.z))
-        return simd_length(q - holeCentreNear(q)) - holeRadiusMM
+        return simd_length(q - holeCentreNear(q)) - radius
     }
 
     // MARK: the skin-distance grid

@@ -55,6 +55,12 @@ struct FlexibleCurveEditor: View {
     @Binding var selected: Int?
     let onChange: (FlexCurve) -> Void
     let onCommit: () -> Void
+    /// ★ VERIFICATION OF D1 (img 6's class, for the curves): the page's chrome — the panel, the
+    /// legend, the player — in stage points. The curve, its guide and labels are clipped out of
+    /// them (they showed through the 62 %-opaque panel), and no point, line band or × is mounted
+    /// under them (the chrome took the touch anyway): a point under the chrome is hidden, as the
+    /// depth chip is, until the part is turned.
+    var keepOut: [CGRect] = []
     @State private var dragIndex: Int?
     /// Finger − point at the drag's start: the point moves WITH the finger, never jumps to it.
     @State private var grab: CGSize = .zero
@@ -93,7 +99,10 @@ struct FlexibleCurveEditor: View {
         let ys = samples
         let line: [CGPoint] = ys.enumerated().compactMap { i, y in screen(drawn(Double(i) / Double(Self.sampleCount), y)) }
         ZStack {
-            Canvas { ctx, _ in
+            Canvas { ctx, size in
+                var clip = Path(CGRect(origin: .zero, size: size))
+                for r in keepOut { clip.addRect(r) }
+                ctx.clip(to: clip, style: FillStyle(eoFill: true))
                 // the face line (squishiest) and the dashed guide (firmest)
                 var base = Path(), top = Path()
                 for (i, t) in stride(from: 0.0, through: 1.0, by: 1.0 / 30).enumerated() {
@@ -141,13 +150,14 @@ struct FlexibleCurveEditor: View {
             // ★ A THIN BAND ALONG THE CURVE takes a tap (a point lands there); everywhere else
             // a drag still orbits. SpatialTapGesture: iOS 16 has no onTapGesture(coordinateSpace:).
             Color.white.opacity(0.001)
-                .contentShape(FlexibleCurveBand(points: line, width: Self.bandWidth))
+                .contentShape(FlexibleCurveBand(runs: Self.runsOutside(line, keepOut: keepOut, margin: Self.bandWidth / 2),
+                                                width: Self.bandWidth))
                 .gesture(SpatialTapGesture(coordinateSpace: .named(FlexibleStageSpace.name))
                     .onEnded { v in tapLine(v.location, line: line) })
                 .accessibilityIdentifier("flexible-curve-line")
             // ★ THE HANDLES: drag to move, tap to select (the × appears beside it)
             ForEach(Array(curve.x.indices), id: \.self) { k in
-                if let p = screen(drawn(curve.x[k], curve.y[k])) {
+                if let p = screen(drawn(curve.x[k], curve.y[k])), dragIndex == k || Self.reachable(p, keepOut: keepOut) {
                     Circle()
                         .fill(Color.white.opacity(0.001))
                         .frame(width: 44, height: 44)
@@ -158,7 +168,8 @@ struct FlexibleCurveEditor: View {
                 }
             }
             if let k = selected, Self.deletable(k, in: curve), k < curve.x.count,
-               let p = screen(drawn(curve.x[k], curve.y[k])) {
+               let p = screen(drawn(curve.x[k], curve.y[k])), Self.reachable(p, keepOut: keepOut),
+               Self.reachable(CGPoint(x: p.x + 30, y: p.y - 30), keepOut: keepOut) {
                 Button { delete(k) } label: {
                     Image(systemName: "xmark")
                         .font(.system(size: 13, weight: .bold))
@@ -189,6 +200,26 @@ struct FlexibleCurveEditor: View {
 
     /// The tap band's width (pt): thin, so a drag that starts off the line still orbits.
     static let bandWidth: CGFloat = 24
+
+    /// A point outside every keep-out (the chrome over the part).
+    static func reachable(_ p: CGPoint, keepOut: [CGRect]) -> Bool {
+        p.x.isFinite && p.y.isFinite && !keepOut.contains { $0.contains(p) }
+    }
+
+    /// The curve's screen points split into the runs that stay `margin` clear of every keep-out:
+    /// the tap band is laid only along them.
+    static func runsOutside(_ line: [CGPoint], keepOut: [CGRect], margin: CGFloat) -> [[CGPoint]] {
+        var runs: [[CGPoint]] = [], cur: [CGPoint] = []
+        for p in line {
+            if keepOut.contains(where: { $0.insetBy(dx: -margin, dy: -margin).contains(p) }) {
+                if !cur.isEmpty { runs.append(cur); cur = [] }
+            } else {
+                cur.append(p)
+            }
+        }
+        if !cur.isEmpty { runs.append(cur) }
+        return runs
+    }
 
     private func tapLine(_ p: CGPoint, line: [CGPoint]) {
         guard !line.isEmpty else { return }
@@ -301,15 +332,19 @@ struct FlexibleCurveEditor: View {
     }
 }
 
-/// The tap band along the projected curve.
+/// The tap band along the projected curve (each run of it clear of the page's chrome).
 struct FlexibleCurveBand: Shape {
-    let points: [CGPoint]
+    let runs: [[CGPoint]]
     let width: CGFloat
+    init(points: [CGPoint], width: CGFloat) { self.runs = [points]; self.width = width }
+    init(runs: [[CGPoint]], width: CGFloat) { self.runs = runs; self.width = width }
     func path(in rect: CGRect) -> Path {
         var p = Path()
-        guard let f = points.first else { return p }
-        p.move(to: f)
-        for q in points.dropFirst() { p.addLine(to: q) }
+        for run in runs {
+            guard let f = run.first else { continue }
+            p.move(to: f)
+            for q in run.dropFirst() { p.addLine(to: q) }
+        }
         return p.strokedPath(StrokeStyle(lineWidth: width, lineCap: .round, lineJoin: .round))
     }
 }

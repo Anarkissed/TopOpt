@@ -60,11 +60,15 @@ final class FlexibleSettingsRound4Tests: XCTestCase {
         XCTAssertNotEqual(m.selectedRegion, FlexibleHisProject.topB, "control: the part's face is not the sector")
         // source pins: the panel mounts the list; the D2 group rows have their marked place
         let panel = try FlexibleSource.code("FlexibleFacePanel.swift")
-        XCTAssertTrue(panel.contains("FlexibleFaceList(model: model)"))
+        // ★ RE-PINNED (D1 verification): the list takes the pad binding — the selected face's
+        // rows open INSIDE its row (the card), not below the whole list
+        XCTAssertTrue(panel.contains("FlexibleFaceList(model: model, padTarget: $padTarget)"))
         let list = try FlexibleSource.text("FlexibleFaceList.swift")
         XCTAssertTrue(list.contains("SQUEEZE GROUPS (batch D2)"), "the place for D2's group rows is marked")
         XCTAssertTrue(list.contains("model.select(row.region)"))
-        XCTAssertTrue(list.contains(".accessibilityAddTraits(row.selected ? [.isButton, .isSelected] : .isButton)"))
+        // ★ RE-PINNED (D1 verification): the selected row is the open card (selected), the others buttons
+        XCTAssertTrue(list.contains(".accessibilityAddTraits(.isSelected)"))
+        XCTAssertTrue(list.contains("if row.selected {\n                    card(row.region)"))
     }
 
     // MARK: - the panel only as tall as it needs to be; minimize (img 1)
@@ -200,7 +204,8 @@ final class FlexibleSettingsRound4Tests: XCTestCase {
         XCTAssertTrue(src.contains("FlexibleDepthChipLayout.shows(q, dragging: dragging != nil, keepOut: keepOut, viewport: vp)"))
         XCTAssertTrue(src.contains("FillStyle(eoFill: true)"), "the outline is clipped out of the keep-outs")
         let page = try FlexibleSource.code("FlexibleStagePage.swift")
-        XCTAssertTrue(page.contains("FlexibleFaceStampHandle(model: model, projection: proj.projection, keepOut: keepOut)"))
+        // ★ RE-PINNED (D1 verification): the handle also reads the page's k — it keeps clear of the depth chip
+        XCTAssertTrue(page.contains("FlexibleFaceStampHandle(model: model, projection: proj.projection, keepOut: keepOut, k: exaggeration)"))
     }
 
     /// The Stamp shape's job: flat curves + its one stamp, at the face's weight. Read back
@@ -311,8 +316,9 @@ final class FlexibleSettingsRound4Tests: XCTestCase {
         // ★ RED CONTROL: the per-face switch no longer decides — his face 1 had its skin off
         s.finish = FlexibleFinish.covered.rawValue
         XCTAssertEqual(s.face(FlexibleJob.regionID(face: 1))?.skinOn, false, "control: the old per-face switch said off")
-        XCTAssertTrue(try FlexibleCore.parseJobBlock(try FlexibleJob.runJobJSON(FlexibleStageTests.inputs(s)))
-            .faces.first { $0.role == "loaded" }!.skinOn, "…and Covered covers it")
+        let loaded = try XCTUnwrap(try FlexibleCore.parseJobBlock(try FlexibleJob.runJobJSON(FlexibleStageTests.inputs(s)))
+            .faces.first { $0.role == "loaded" })
+        XCTAssertTrue(loaded.skinOn, "…and Covered covers it")
         XCTAssertEqual(FlexibleStageSettings().finishMode, .covered, "a new project: Covered, today's default")
     }
 

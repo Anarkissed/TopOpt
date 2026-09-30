@@ -5,10 +5,15 @@
 // it obvious that it's selectable.").
 //
 // ★ ONE BIG ROW PER FACE — "Top A · Pressed · 10 kg" / "Face 0 · Rests" — pressed faces first,
-// each a 48 pt button with a chevron; the selected one is filled, outlined in the accent and
-// ticked. A tap SELECTS that region (a split sector as itself, `FlexibleStageModel.select`):
-// the rows below it (Pressed / Rests, weight, Shape, depth) are that face's, and the part
-// shows it selected. Every row is one line (FlexibleRowCopy.faceRow).
+// each a 48 pt button with a chevron. A tap SELECTS that region (a split sector as itself,
+// `FlexibleStageModel.select`) and the part shows it selected. Every row is one line
+// (FlexibleRowCopy.faceRow).
+// ★ THE SELECTED ROW OPENS IN PLACE (verification of D1 — his project's seven rows pushed the
+// face's own rows below the panel on every iPad, so a tap seemed to move only the tick): its
+// row becomes a CARD — filled, outlined in the accent — holding that face's rows
+// (FlexibleFaceRows: [Pressed | Rests] on the row itself, then weight, Shape, depth), and the
+// panel scrolls the card into view (FlexibleSettingsPanel.reveal). A face selected on the part
+// that is not set yet opens first, with [Press it] [It rests here].
 
 import SwiftUI
 import TopOptDesign
@@ -16,9 +21,12 @@ import TopOptKit
 
 struct FlexibleFaceList: View {
     @ObservedObject var model: FlexibleStageModel
+    @Binding var padTarget: String?
 
     /// A row's height: big, obviously a button (the HIG's 44 and then some).
     static let rowHeight: CGFloat = 48
+    /// The selected face's card (the panel scrolls to it).
+    static func cardID(_ region: Int) -> String { "flexible-face-card-\(region)" }
 
     struct Row: Equatable, Identifiable {
         let region: Int
@@ -44,18 +52,43 @@ struct FlexibleFaceList: View {
     var body: some View {
         let rows = Self.rows(model: model)
         VStack(alignment: .leading, spacing: 6) {
-            if !rows.isEmpty {
-                FlexSectionTitle(text: FlexibleRowCopy.facesTitle)
+            FlexSectionTitle(text: FlexibleRowCopy.facesTitle)
+            if let r = model.selectedRegion {
+                // a face tapped on the part that is not set yet: its card first
+                if model.settings.face(r) == nil { card(r) }
+            } else {
+                FlexRow(FlexibleRowCopy.noFace, info: FlexibleRowCopy.Info.noFace, id: "flexible-row-noface")
             }
             ForEach(rows) { row in
-                Button { model.select(row.region) } label: { label(row) }
-                    .buttonStyle(.plain)
-                    .accessibilityIdentifier("flexible-face-row-\(row.region)")
-                    .accessibilityLabel(row.line)
-                    .accessibilityAddTraits(row.selected ? [.isButton, .isSelected] : .isButton)
+                if row.selected {
+                    card(row.region)
+                } else {
+                    Button { model.select(row.region) } label: { label(row) }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("flexible-face-row-\(row.region)")
+                        .accessibilityLabel(row.line)
+                        .accessibilityAddTraits(.isButton)
+                }
             }
             squeezeGroupRows
         }
+    }
+
+    /// ★ THE SELECTED FACE, OPEN IN PLACE: its rows inside its own row (filled, outlined in the
+    /// accent). Its frame reaches the page ("faceCard") so a test can see it on the panel.
+    private func card(_ region: Int) -> some View {
+        FlexibleFaceRows(model: model, region: region, padTarget: $padTarget)
+            .padding(.leading, DS.Space.m).padding(.trailing, DS.Space.s).padding(.bottom, DS.Space.xs)
+            .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(DS.Color.fillSelected.color))
+            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(DS.Color.accent.color, lineWidth: 1.5))
+            .background(GeometryReader { g in
+                Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["faceCard": g.frame(in: .global)])
+            }.allowsHitTesting(false))
+            .id(Self.cardID(region))
+            .accessibilityElement(children: .contain)
+            .accessibilityAddTraits(.isSelected)
+            .accessibilityIdentifier("flexible-face-card")
     }
 
     private func label(_ row: Row) -> some View {

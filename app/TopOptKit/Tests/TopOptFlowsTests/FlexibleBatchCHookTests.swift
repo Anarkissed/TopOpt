@@ -9,7 +9,8 @@
 //   H7  WorkspacePlaceholder: a surface tap reads while a Flexible legend is drilled in
 //   H8  WorkspacePlaceholder: the wall probe armed only for the lattice legend; a wall read first
 //   M4  MetalMeshView: `latticeProbe` finds a Flexible wall
-// (H9, the Surface button: FlexibleSurfaceNavTests; H13, never violet: FlexibleNeverVioletTests.)
+// (H9, the Surface button: FlexibleSurfaceNavTests. H13, never violet, was REVERTED in round 4
+// D1 at his request — one purple for every face prism: FlexibleSettingsRound4Tests.)
 import XCTest
 import simd
 @testable import TopOptFlows

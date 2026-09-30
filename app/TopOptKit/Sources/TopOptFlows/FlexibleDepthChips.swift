@@ -76,10 +76,8 @@ struct FlexibleDepthChips: View {
     var body: some View {
         ZStack {
             if let r = model.selectedRegion, let f = model.settings.face(r), f.isLoaded, let key = model.key(r),
-               let st = model.stacks[key], let g = model.geometry[key], let proj = projection,
-               let v = FlexibleDepthPrism.volume(region: r, stack: st, centres: g.centres, depthMM: f.deepestMM,
-                                                 k: model.frozenExaggeration ?? k, columns: model.prismColumns(r)),
-               let h = FlexibleDepthPrism.handle(v), let p = proj.project(h.anchor),
+               let st = model.stacks[key], let proj = projection,
+               let h = Self.handle(model: model, k: k), let p = proj.project(h.anchor),
                FlexibleDepthChipLayout.shows(p, dragging: dragging || model.frozenExaggeration != nil,
                                              keepOut: keepOut, viewport: proj.viewportSize) {
                 chip(f.deepestMM, arrow: arrowAngle(proj, h, at: p))
@@ -91,6 +89,18 @@ struct FlexibleDepthChips: View {
         // a drag that ENDED without onEnded (cancelled) is finished here
         .onChange(of: dragging) { d in if !d { finish() } }
         .onDisappear { finish() }
+    }
+
+    /// The selected pressed face's prism handle (its anchor is where the chip sits): the one
+    /// rule the chip and the stamp handle (which keeps clear of it) both read.
+    @MainActor
+    static func handle(model: FlexibleStageModel, k: Double) -> ClearanceHandle? {
+        guard let r = model.selectedRegion, let f = model.settings.face(r), f.isLoaded, let key = model.key(r),
+              let st = model.stacks[key], let g = model.geometry[key],
+              let v = FlexibleDepthPrism.volume(region: r, stack: st, centres: g.centres, depthMM: f.deepestMM,
+                                                k: model.frozenExaggeration ?? k, footprint: model.prismFootprint(r))
+        else { return nil }
+        return FlexibleDepthPrism.handle(v)
     }
 
     /// Release: k thaws, the designs re-run, the file is written. Idempotent (onEnded and the

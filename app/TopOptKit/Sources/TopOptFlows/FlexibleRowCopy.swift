@@ -51,6 +51,23 @@ public enum FlexibleRowCopy {
     public static let finish = "Finish"
     public static let finishOptions: [(id: String, label: String)] =
         [("none", "None"), ("rim", "Rim"), ("skin", "Skin"), ("covered", "Covered")]
+    /// ★ VERIFICATION OF D1: Rim and Skin are the app's drawing until core has a finish (core
+    /// brief #16) — the job sends them as None. Said UNDER THE ROW, never only behind the (i).
+    /// The line beside the finish's picture for None and Covered (Rim / Skin: `finishPreviewOnly`).
+    public static func finishLine(_ f: FlexibleFinish) -> String {
+        switch f {
+        case .none: return "None: the lattice runs to the surface"
+        case .covered: return "Covered: a solid skin all over"
+        case .rim, .skin: return finishPreviewOnly(f) ?? ""
+        }
+    }
+    public static func finishPreviewOnly(_ f: FlexibleFinish) -> String? {
+        switch f {
+        case .rim: return "Rim: preview only · prints as None for now"
+        case .skin: return "Skin: preview only · prints as None for now"
+        case .none, .covered: return nil
+        }
+    }
     public static let topologyOptions: [(id: String, label: String)] = [("auto", "Auto"), ("gyroid", "Gyroid"), ("honeycomb", "Honeycomb")]
     public static func temperatureOptions(_ tested: [Double]) -> [(id: String, label: String)] {
         [("auto", "Auto")] + tested.map { (String(Int($0)), "\(Int($0))°") }
@@ -82,6 +99,11 @@ public enum FlexibleRowCopy {
     public static let stampImport = "Import an SVG or image…"
     public static let stampWidthTitle = "Stamp width"
     public static func stampOffFace(_ n: Double) -> String { fit(String(format: "%.1f N of the stamp lands off the face", n)) }
+    /// ★ VERIFICATION OF D1: the main page's lattice sinks the whole face under a stamp today
+    /// (core brief #10) — this page's map is the stamp he drew. Said on the panel.
+    public static let stampMainPage = "Main page: whole face sinks, for now"
+    /// …and on the main page's dent legend, while a Stamp face's squish is shown there.
+    public static let stampMainLegend = "Squish · stamp: whole face"
 
     /// "10 kg from Top" · "6.0 kg of Top's 10 kg" (a group over several faces) · "7.1 kg at an angle".
     public static func weight(kg: Double, group: String?, groupKg: Double, groupRegions: Int, oblique: Bool) -> String {
@@ -173,7 +195,7 @@ public enum FlexibleRowCopy {
         public static let face = "Pressed: this face carries weight and squishes. Rests: it sits on something and carries no squish of its own. A face in a main-page Load group arrives pressed; an Anchor group's faces arrive resting. Tap a face on the part to select it."
         public static let weight = "The weight pressing this face. It comes from the main page's Load group and changing it here changes the group. A group over several faces is split by area, the way the solver spreads it; a press at an angle counts its straight-in part (cos θ)."
         public static let shape = "Curves: the X and Y curves drawn on the face's two edges, always combined — soft only where both say soft. A point nearer the face is squishier. Tap the line to add a point; tap a point for an × to delete it. Stamp: the face is shaped by ONE stamp — what presses it — and sinks the deepest squish under it; drag its handle on the part to move it. One or the other, never both."
-        public static let finish = "The whole part's outside. None: the lattice runs to the surface everywhere. Rim: a solid band along every edge, the faces open. Skin: a thin skin over the lattice with round holes in it. Covered: a solid skin everywhere. Only Covered reaches the solver today; Rim and Skin are drawn by the app."
+        public static let finish = "The whole part's outside. None: the lattice runs to the surface everywhere. Rim: a solid band along every edge, the faces open. Skin: a thin skin over the lattice with round holes in it. Covered: a solid skin everywhere. Only Covered reaches the solver today; Rim and Skin are drawn by the app (the line under the row says so). Rim's band is 2 mm; Skin is 0.8 mm thick with 3 mm holes (1.5 mm radius) 5 mm apart."
         public static let stamp = "What presses this face: pick one from the list, or import an SVG outline or an image (darker presses harder). Its weight is the face's weight."
         public static let stampSize = "The stamp's real size across; its other side follows its own proportions."
         public static let stampTurn = "Turns the stamp a quarter turn on the face."

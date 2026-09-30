@@ -7,7 +7,8 @@
 // exaggeration. The dent bottoms out on the prism's floor. Drawn by MetalMeshView's
 // clearance-volume pass (`clearanceVolumes:`). ★ ROUND 4 (D1, his explicit request): in the
 // lattice stage's own face-prism purple (FlexibleStageStyle.facePrismTint) — one colour for
-// every face prism. ★ A Stamp-shaped face's prism stands on its STAMP's footprint only.
+// every face prism. ★ A Stamp-shaped face's prism stands on its STAMP's footprint only — the
+// ½ contour of the smoothed footprint (`stampShell`, verification of D1), never a staircase.
 //
 // ★ SHARED CORNERS, NOT A QUAD PER COLUMN. Each grid corner is the mean of the columns that
 // touch it, so the shell's skirt forms on the footprint's outline only (a quad per column
@@ -156,10 +157,26 @@ enum FlexibleDepthPrism {
         return verts.count
     }
 
+    /// ★ A STAMP FACE'S PRISM (verification of D1): it stands on the ½ contour of the stamp's
+    /// SMOOTHED footprint (FlexibleStampFootprint.contour) — a smooth outline following the
+    /// face — not on the ≥ ½ columns, whose stair-stepped outline wore a sawtooth crown.
+    static func stampShell(stack st: FlexStackInfo, centres: [SIMD3<Double>], footprint: [Double],
+                           depthMM: Double, k: Double) -> FaceOffsetShell? {
+        guard !st.columns.isEmpty, centres.count == st.columns.count, footprint.count == st.columns.count else { return nil }
+        let surface = st.columns.indices.map { centres[$0] + st.load * (st.columns[$0].entryT + insetMM) }
+        guard let c = FlexibleStampFootprint.contour(stack: st, surface: surface, values: footprint) else { return nil }
+        let travel = st.load * (k * depthMM)
+        return FaceOffsetShell(base: c.points.map { SIMD3<Float>($0) }, offset: c.points.map { SIMD3<Float>($0 + travel) },
+                               indices: c.triangles, reachedDepthMM: k * depthMM)
+    }
+
+    /// `footprint` (a Stamp face's smoothed footprint): the prism on its ½ contour; else on
+    /// `columns` (nil ⇒ every column).
     static func volume(region: Int, stack: FlexStackInfo, centres: [SIMD3<Double>], depthMM: Double, k: Double,
-                       columns: Set<Int>? = nil) -> ClearanceVolume? {
-        shell(stack: stack, centres: centres, depthMM: depthMM, k: k, columns: columns)
-            .map { ClearanceVolume.shell(faceID: region, shell: $0) }
+                       columns: Set<Int>? = nil, footprint: [Double]? = nil) -> ClearanceVolume? {
+        let s = footprint.map { stampShell(stack: stack, centres: centres, footprint: $0, depthMM: depthMM, k: k) }
+            ?? shell(stack: stack, centres: centres, depthMM: depthMM, k: k, columns: columns)
+        return s.map { ClearanceVolume.shell(faceID: region, shell: $0) }
     }
 
     /// The drag handle: a `.slabDepth` whose normal is the load; its anchor is the prism floor.
@@ -216,7 +233,7 @@ enum FlexibleDepthPrism {
               let r = model.selectedRegion, let f = model.settings.face(r), f.isLoaded,
               let key = model.key(r), let st = model.stacks[key], let g = model.geometry[key], k > 0,
               let v = volume(region: r, stack: st, centres: g.centres, depthMM: f.deepestMM, k: k,
-                             columns: model.prismColumns(r)) else { return [] }
+                             footprint: model.prismFootprint(r)) else { return [] }
         return [ClearanceRenderItem(volume: v, selected: true, tint: FlexibleStageStyle.facePrismTint)]
     }
 }

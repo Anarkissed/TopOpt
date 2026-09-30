@@ -52,17 +52,31 @@ struct FlexibleFacePanel: View {
                         .fixedSize()
                 }
             }
-            // ★ ROUND 4: the WHOLE model's finish (his answer 4)
+            // ★ ROUND 4: the WHOLE model's finish (his answer 4). ★ VERIFICATION OF D1: a picture
+            // of the chosen finish beside its chips (nothing else on this page shows it), and Rim /
+            // Skin say on a line of their own that they print as None until core has a finish
+            let finish = model.settings.finishMode
             FlexRow(FlexibleRowCopy.finish, info: FlexibleRowCopy.Info.finish, id: "flexible-row-finish") {
-                FlexChips(options: FlexibleRowCopy.finishOptions, selection: model.settings.finishMode.rawValue,
+                FlexChips(options: FlexibleRowCopy.finishOptions, selection: finish.rawValue,
                           id: "flexible-finish", equalWidths: false) { v in model.edit { $0.finish = v } }
                     .fixedSize()
             }
+            // its picture and ONE line under the chips (beside them "Finish" was cut to "Fin…")
+            HStack(spacing: DS.Space.s) {
+                FlexibleFinishSwatch(finish: finish)
+                if let note = FlexibleRowCopy.finishPreviewOnly(finish) {
+                    FlexWarningLine(text: note, id: "flexible-row-finish-preview-only")
+                } else {
+                    Text(FlexibleRowCopy.finishLine(finish))
+                        .font(.system(size: 12, weight: .medium)).foregroundStyle(DS.Color.textSecondary.color)
+                        .lineLimit(1).minimumScaleFactor(0.85)
+                        .accessibilityIdentifier("flexible-row-finish-line")
+                }
+            }
             Divider().overlay(DS.Color.strokeSubtle.color).padding(.vertical, DS.Space.xs)
-            // ★ ROUND 4: the faces set on the main page — tap one to edit it below
-            FlexibleFaceList(model: model)
-            Divider().overlay(DS.Color.strokeSubtle.color).padding(.vertical, DS.Space.xs)
-            faceRows
+            // ★ ROUND 4: the faces set on the main page — tap one and ITS rows open right under it
+            // (verification of D1: they sat below the whole list, off the panel on his project)
+            FlexibleFaceList(model: model, padTarget: $padTarget)
         }
         .onAppear {
             if model.selectedRegion == nil { model.selectedRegion = model.settings.loadedFaces.first?.faceRegionID }
@@ -97,24 +111,47 @@ struct FlexibleFacePanel: View {
         }
     }
 
+}
+
+// MARK: - the selected face's rows (inside its card in the face list)
+
+/// ★ VERIFICATION OF D1 (his img 1: "when you tap on one, the values show up and get modified
+/// below"): the selected face's rows are drawn INSIDE its own row of the face list (an
+/// accordion, FlexibleFaceList.card) — below the whole list they sat 400 pt down on his project,
+/// off the panel on every iPad. The card's first row is the list row itself, with the
+/// [Pressed | Rests] switch on it (the list's "· Pressed · 10 kg" is not said twice).
+struct FlexibleFaceRows: View {
+    @ObservedObject var model: FlexibleStageModel
+    let region: Int
+    @Binding var padTarget: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: DS.Space.xs) {
+            if let f = model.settings.face(region) {
+                markedRows(region, f)
+            } else {
+                unmarkedRow(region)
+            }
+        }
+    }
+
     // MARK: face rows
 
     private func name(_ r: Int) -> String { model.faceName(r) }
 
-    @ViewBuilder private var faceRows: some View {
-        if let r = model.selectedRegion {
-            if let f = model.settings.face(r) {
-                markedRows(r, f)
-            } else {
-                unmarkedRow(r)
-            }
-        } else {
-            FlexRow(FlexibleRowCopy.noFace, info: FlexibleRowCopy.Info.noFace, id: "flexible-row-noface")
+    /// The card's first row: the face's dot and name, as the list row, at its height.
+    private func header<C: View>(_ r: Int, pressed: Bool?, @ViewBuilder control: () -> C) -> some View {
+        HStack(spacing: DS.Space.s) {
+            Circle()
+                .fill((pressed == nil ? DS.Color.textTertiary : (pressed! ? DS.Color.accentGreen : DS.Color.accentCyan)).color)
+                .frame(width: 10, height: 10)
+            FlexRow(name(r), info: FlexibleRowCopy.Info.face, id: "flexible-row-face") { control() }
         }
+        .frame(minHeight: FlexibleFaceList.rowHeight)
     }
 
     @ViewBuilder private func markedRows(_ r: Int, _ f: FlexibleFaceSettings) -> some View {
-        FlexRow(name(r), info: FlexibleRowCopy.Info.face, id: "flexible-row-face") {
+        header(r, pressed: f.isLoaded) {
             FlexChips(options: FlexibleRowCopy.roleOptions, selection: f.role, id: "flexible-role", equalWidths: false) { v in
                 if v == "loaded" { pressOrAsk(r) } else { model.rest(r) }
             }
@@ -198,7 +235,7 @@ struct FlexibleFacePanel: View {
     }
 
     @ViewBuilder private func unmarkedRow(_ r: Int) -> some View {
-        FlexRow(name(r), info: FlexibleRowCopy.Info.face, id: "flexible-row-face") {
+        header(r, pressed: nil) {
             Button { pressOrAsk(r) } label: { chipLabel("Press it") }
                 .buttonStyle(.plain).accessibilityIdentifier("flexible-press")
             Button { model.rest(r) } label: { chipLabel("It rests here") }

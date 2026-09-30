@@ -5,7 +5,8 @@
 // ★ THE SAME SHAPES, FONTS AND SPACING AS LatticeStageModeModal / LatticeStageModeSheet —
 // copied from them rather than generalised, so #354's files keep their shape (the
 // territory rule: only small additive hooks in their files). Accent: DS.Color.accentGreen,
-// an existing token (no new colours; never purple).
+// an existing token (no new colours). Purple only where he asked for it (round 4 D1, img 2):
+// the depth prism and chip wear the lattice stage's face-prism purple (`facePrismToken`).
 
 import SwiftUI
 import simd

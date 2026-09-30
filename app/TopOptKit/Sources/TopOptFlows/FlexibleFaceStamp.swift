@@ -30,16 +30,22 @@ import TopOptKit
 
 extension FlexibleStageModel {
 
-    /// A face's short name, as the panel and the face list say it ("Top A", "Face 3").
-    public func faceName(_ r: Int) -> String {
-        let sector = regions.sector(r)
-        return FlexibleRowCopy.faceName(sector: sector?.name,
-                                        face: sector == nil ? r : regions.faces(of: r, mesh: project.viewerMesh).first ?? r)
-    }
+    /// A face's short name, as the panel and the face list say it ("Top A", "Face 3") — the
+    /// readiness line's own `displayName` (one rule, not a copy of it).
+    public func faceName(_ r: Int) -> String { displayName(r) }
 
     /// Shape [Curves | Stamp]: an either/or. Stamp lands ONE stamp on the face (the library's
     /// first that fits it, at its centre) unless the face kept one from before.
+    /// ★ VERIFICATION OF D1: a tap on the chip ALREADY chosen changes nothing (a face that never
+    /// chose reads Curves) — writing "curves" over nil changed the settings' hash, so the main
+    /// page's lattice went stale and the designs re-ran for a tap that changed nothing.
+    /// ★ AND A STAMP NEEDS ITS FACE: before the face's stack has landed there is no size to fit
+    /// or centre to sit on (it put an 80 × 95 mm palm on the pad's corner, mostly off the face) —
+    /// the shape is Stamp at once and the stamp is seeded when the stack arrives
+    /// (`seedStampIfNeeded`, from the stack's landing).
     public func setShape(_ r: Int, _ shape: String) {
+        guard let current = settings.face(r) else { return }
+        guard (shape == "stamp") != current.isStampShape else { curvePoint = nil; return }
         let seed = shape == "stamp" ? defaultStamp(r) : nil
         edit { s in
             guard var f = s.face(r) else { return }
@@ -58,22 +64,48 @@ extension FlexibleStageModel {
     }
 
     /// The stamp a face gets when Stamp is chosen: the palm, a thumb or a fingertip — the first
-    /// that fits the face — at the face centre.
+    /// that fits the face, square or turned a quarter — at the face centre. nil until the face's
+    /// stack has landed (its size and centre are the stack's).
     func defaultStamp(_ r: Int) -> FlexibleStampPlacement? {
-        guard let lib = library, let f = settings.face(r) else { return nil }
-        let u = stack(r)?.uExtentMM ?? 0, v = stack(r)?.vExtentMM ?? 0
-        let fits: (FlexibleStampShape) -> Bool = { s in
-            let n = s.naturalSizeMM
-            return u <= 0 || (n.width <= 0.9 * u && n.length <= 0.9 * v)
+        guard let lib = library, let f = settings.face(r), let st = stack(r) else { return nil }
+        let u = st.uExtentMM, v = st.vExtentMM
+        guard u > 0, v > 0 else { return nil }
+        let order = ["palm", "thumb", "fingertip"].compactMap { lib.shape($0) }
+            + lib.stamps.filter { $0.shape != "whole_face" }
+        for s in order {
+            guard let turn = Self.stampTurnThatFits(s.naturalSizeMM, uExtentMM: u, vExtentMM: v) else { continue }
+            var p = FlexibleStamps.place(s, uExtentMM: u, vExtentMM: v, weightKg: f.weightKg)
+            p.rotationDeg = turn
+            return p
         }
-        let pick = ["palm", "thumb", "fingertip"].compactMap { lib.shape($0) }.first(where: fits)
-            ?? lib.stamps.first { $0.shape != "whole_face" && fits($0) } ?? lib.stamps.first
-        return pick.map { FlexibleStamps.place($0, uExtentMM: u, vExtentMM: v, weightKg: f.weightKg) }
+        return lib.stamps.first.map { FlexibleStamps.place($0, uExtentMM: u, vExtentMM: v, weightKg: f.weightKg) }
+    }
+
+    /// 0 when a stamp of `size` fits the face (within 90 % of each side) as it is, 90 when it
+    /// fits only turned a quarter (a long stamp along a long face), nil when it fits neither way.
+    nonisolated static func stampTurnThatFits(_ size: (width: Double, length: Double), uExtentMM u: Double,
+                                              vExtentMM v: Double) -> Double? {
+        if size.width <= 0.9 * u && size.length <= 0.9 * v { return 0 }
+        if size.length <= 0.9 * u && size.width <= 0.9 * v { return 90 }
+        return nil
+    }
+
+    /// A Stamp face with no stamp yet (Stamp chosen before its stack landed): seeded now, at
+    /// the face centre. Called as a stack lands.
+    func seedStampIfNeeded(_ r: Int) {
+        guard let f = settings.face(r), f.isStampShape, f.designStamp == nil, let seed = defaultStamp(r) else { return }
+        edit({ s in
+            guard var g = s.face(r) else { return }
+            g.designStamp = seed
+            s.setFace(g)
+        }, recompute: false)   // the stack's landing recomputes (and lays the stamp's grid)
     }
 
     /// Replace the face's stamp (a library shape, or an imported mask), keeping where it sits.
+    /// Refused until the face's stack has landed (no size to fit, no centre to sit on).
     public func setStamp(_ r: Int, source: FlexibleStampSource, shape: FlexibleStampShape?) {
-        let u = stack(r)?.uExtentMM ?? 0, v = stack(r)?.vExtentMM ?? 0
+        guard let st = stack(r) else { return }
+        let u = st.uExtentMM, v = st.vExtentMM
         edit { s in
             guard var f = s.face(r) else { return }
             var p: FlexibleStampPlacement
@@ -107,17 +139,42 @@ extension FlexibleStageModel {
         if saving { save() }
     }
 
-    /// Where the Stamp face's stamp presses, per column 0…1 (its laid grid at each column
-    /// centre, over the grid's peak) — nil for a Curves face or before the grid is laid.
+    /// Where the Stamp face's stamp presses, per column 0…1 — nil for a Curves face or before
+    /// the grid is laid. ★ SMOOTHED (verification of D1): the stamp's sharp cover, a 0/1 step
+    /// one column wide, was drawn as a ROW OF TEETH — each dent corner is the mean of the four
+    /// columns round it, so along the staircase of the stamp's edge the corners alternated ¼ / ¾
+    /// of a 12 mm (× 4) cliff. The cover is blurred on the column grid
+    /// (`FlexibleStampFootprint.smoothed`), so the pit's wall slopes and the corners at one
+    /// distance from the stamp's edge sink alike.
     public func stampFootprint(_ r: Int) -> [Double]? {
+        guard let raw = stampCoverage(r), let st = stack(r) else { return nil }
+        return FlexibleStampFootprint.smoothed(raw, stack: st)
+    }
+
+    /// The stamp's sharp COVER of each column: its laid grid (half a pitch) averaged over the
+    /// column's own cell, over the grid's peak — what the smoothing starts from (and the red
+    /// control of the teeth).
+    func stampCoverage(_ r: Int) -> [Double]? {
         guard let f = settings.face(r), let p = f.activeStamp, let g = stampGrids[p.id], let st = stack(r),
               g.cellMM > 0, let peak = g.valuesMPa.max(), peak > 0 else { return nil }
+        let q = st.pitchMM / 4
         return st.columns.map { c in
-            let iu = Int(((c.uMM - g.originU) / g.cellMM).rounded(.down))
-            let iv = Int(((c.vMM - g.originV) / g.cellMM).rounded(.down))
-            guard iu >= 0, iv >= 0, iu < g.nu, iv < g.nv else { return 0 }
-            return g.valuesMPa[iv * g.nu + iu] / peak
+            var sum = 0.0
+            for (du, dv) in [(-q, -q), (q, -q), (-q, q), (q, q)] {
+                let iu = Int(((c.uMM + du - g.originU) / g.cellMM).rounded(.down))
+                let iv = Int(((c.vMM + dv - g.originV) / g.cellMM).rounded(.down))
+                guard iu >= 0, iv >= 0, iu < g.nu, iv < g.nv else { continue }
+                sum += g.valuesMPa[iv * g.nu + iu] / peak
+            }
+            return sum / 4
         }
+    }
+
+    /// A Stamp face's footprint for its depth prism (the smoothed one, whose ½ contour the prism
+    /// stands on); nil for a Curves face (the prism stands on every column).
+    public func prismFootprint(_ r: Int) -> [Double]? {
+        guard settings.face(r)?.isStampShape == true else { return nil }
+        return stampFootprint(r) ?? []
     }
 
     /// The columns a face's depth prism stands on: a Stamp face's footprint (at least half
@@ -152,6 +209,8 @@ struct FlexibleFaceStampRows: View {
                 let p = f.activeStamp
                 FlexRow(FlexibleRowCopy.stamp(name: p.map { model.stampName($0) } ?? "pick one"),
                         info: FlexibleRowCopy.Info.stamp, id: "flexible-row-stamp") {
+                    // a stamp needs its face's stack (its size and centre): the menu waits for it
+                    if model.stack(region) != nil {
                     Menu {
                         ForEach(model.library?.stamps ?? []) { s in
                             Button(s.name) { model.setStamp(region, source: .library(s.id), shape: s) }
@@ -166,6 +225,7 @@ struct FlexibleFaceStampRows: View {
                             .background(Circle().fill(DS.Color.fillSubtle.color))
                     }
                     .accessibilityIdentifier("flexible-stamp-menu")
+                    }
                 }
                 if let p {
                     FlexRow(FlexibleRowCopy.stampSize(widthMM: p.widthMM, lengthMM: p.lengthMM),
@@ -199,6 +259,13 @@ struct FlexibleFaceStampRows: View {
                         }
                         .fixedSize()
                     }
+                    // ★ ONE LINE, NEVER BEHIND THE (i) (verification of D1): the main page's lattice is
+                    // core's design of this face, and today core sinks the WHOLE face (flat curves ⇒
+                    // the deepest everywhere, core brief #10) — the map here is the stamp he drew
+                    Text(FlexibleRowCopy.stampMainPage)
+                        .font(.system(size: 12, weight: .medium)).foregroundStyle(DS.Color.textSecondary.color)
+                        .lineLimit(1).minimumScaleFactor(0.85)
+                        .accessibilityIdentifier("flexible-row-stamp-main-page")
                     let err = model.stampError(p.id)
                     if !err.isEmpty { FlexWarningLine(text: FlexibleRowCopy.fit(err), id: "flexible-row-stamp-error") }
                     if let d = model.design(region), d.designStampOffFace {
@@ -237,10 +304,26 @@ struct FlexibleFaceStampHandle: View {
     let projection: CameraProjection?
     /// The panel's and the legend's frames, in stage points.
     let keepOut: [CGRect]
+    /// The page's exaggeration: where the depth chip sits (the handle keeps clear of it).
+    var k: Double = 1
     /// The stamp's centre when the drag began (nil: not dragging).
     @State private var dragging: SIMD2<Double>?
 
     struct Placed { let region: Int; let stamp: FlexibleStampPlacement }
+
+    /// ★ NEVER ON THE DEPTH CHIP (verification of D1): the chip sits on the prism's floor, right
+    /// under the stamp's centre along the load, so seen from above (≳ 60°) the two 44 pt targets
+    /// met and the handle — drawn later — took the chip's drag. The handle keeps `minGap` from the
+    /// chip on screen, pushed straight away from it (up-left when they coincide), with a leader
+    /// to the stamp's centre; its drag is relative, so where it sits does not move the stamp.
+    static let minGap: CGFloat = 56
+    static func handlePoint(centre c: CGPoint, chip: CGPoint?) -> CGPoint {
+        guard let q = chip, q.x.isFinite, q.y.isFinite else { return c }
+        let dx = c.x - q.x, dy = c.y - q.y, d = hypot(dx, dy)
+        guard d < minGap else { return c }
+        let dir = d > 1 ? CGVector(dx: dx / d, dy: dy / d) : CGVector(dx: -0.7071, dy: -0.7071)
+        return CGPoint(x: q.x + dir.dx * minGap, y: q.y + dir.dy * minGap)
+    }
 
     /// What is drawn: ONLY the selected face's stamp, and only while its shape is Stamp — one
     /// handle at most (round 3 drew every design and check stamp of every face).
@@ -261,12 +344,21 @@ struct FlexibleFaceStampHandle: View {
     var body: some View {
         let placed = Self.placements(model.settings, selected: model.selectedRegion)
         let vp = projection?.viewportSize ?? .zero
+        let chip = placed.isEmpty ? nil : FlexibleDepthChips.handle(model: model, k: k).flatMap { projection?.project($0.anchor) }
         ZStack {
             Canvas { ctx, size in
                 var clip = Path(CGRect(origin: .zero, size: size))
                 for r in keepOut { clip.addRect(r) }
                 ctx.clip(to: clip, style: FillStyle(eoFill: true))
                 for s in placed {
+                    // the leader from a handle kept off the chip to the stamp's centre
+                    if let c = screen(world(s.region, s.stamp.centreU, s.stamp.centreV)) {
+                        let h = Self.handlePoint(centre: c, chip: chip)
+                        if h != c {
+                            var lead = Path(); lead.move(to: c); lead.addLine(to: h)
+                            ctx.stroke(lead, with: .color(FlexibleStageStyle.onPart.opacity(0.7)), lineWidth: 1.5)
+                        }
+                    }
                     let th = s.stamp.rotationDeg * .pi / 180
                     var path = Path()
                     for i in 0...48 {
@@ -282,7 +374,8 @@ struct FlexibleFaceStampHandle: View {
             }
             .allowsHitTesting(false)
             ForEach(placed, id: \.stamp.id) { s in
-                if let q = screen(world(s.region, s.stamp.centreU, s.stamp.centreV)),
+                if let c = screen(world(s.region, s.stamp.centreU, s.stamp.centreV)),
+                   case let q = Self.handlePoint(centre: c, chip: chip),
                    FlexibleDepthChipLayout.shows(q, dragging: dragging != nil, keepOut: keepOut, viewport: vp) {
                     Image(systemName: "hand.point.up.left.fill")
                         .font(.system(size: 12, weight: .bold))

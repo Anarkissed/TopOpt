@@ -147,7 +147,10 @@ public final class FlexibleStageModel: ObservableObject {
     @Published public private(set) var recommendationError: String?
     @Published public private(set) var checks: [UUID: FlexStampCheckInfo] = [:]
     @Published public private(set) var stampGrids: [UUID: FlexStamp] = [:]
-    /// Check mode shows the stamp's dent instead of the design's (M14).
+    /// Check mode shows the stamp's dent instead of the design's (M14). ★ SINCE ROUND 4 (D1) NO
+    /// UI SETS IT: the check stamps are gone from the page (his answer 3) and the migration
+    /// empties the list — the plumbing (this, `checks`, the check branch of FlexibleShownValues
+    /// and of the job) is KEPT for D2's load cases / G's case picker, which show a named press.
     @Published public var checkStampShown: UUID?
     /// The curve point showing its × (round 3, item 8); a tap anywhere on the part clears it.
     @Published public var curvePoint: FlexCurvePoint?
@@ -552,7 +555,11 @@ public final class FlexibleStageModel: ObservableObject {
             do {
                 let st = try await worker.withScene { try $0.stack(face: k.region, rotation: k.rotation) }
                 let g = try await worker.withScene { try FlexFaceGeometry.compute(scene: $0, key: k, stack: st, partFlat: partFlat) }
-                await MainActor.run { self.stacks[k] = st; self.geometry[k] = g; self.recomputeAll() }
+                await MainActor.run {
+                    self.stacks[k] = st; self.geometry[k] = g
+                    self.seedStampIfNeeded(k.region)   // ★ Stamp chosen before the stack landed (D1 verification)
+                    self.recomputeAll()
+                }
             } catch {
                 await MainActor.run {
                     self.lastError = "\(error)"

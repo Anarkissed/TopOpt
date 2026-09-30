@@ -175,7 +175,19 @@ extension FlexibleMainStage {
     /// the map shows his drawing (no lattice drawn, or a shape-only one — "no squish
     /// predicted"), and "Squish · mm" only for a lattice core designed.
     public func legendTitle(_ k: FlexibleReadKind) -> String {
-        k == .dent ? FlexibleReadKind.dentTitle(drawn: drawn) : k.title
+        guard k == .dent else { return k.title }
+        // ★ VERIFICATION OF D1: a Stamp face's squish here is core's — the WHOLE face sinks
+        // (core brief #10) — while Settings shows the stamp he drew; the legend says so
+        if let g = drawn, !g.shapeOnly, let m = model,
+           Self.showsStampFace(squished: Set(g.squishedKeys.map(\.region)), settings: m.settings) {
+            return FlexibleRowCopy.stampMainLegend
+        }
+        return FlexibleReadKind.dentTitle(drawn: drawn)
+    }
+
+    /// A pressed Stamp face among the faces the main page squishes.
+    nonisolated static func showsStampFace(squished: Set<Int>, settings: FlexibleStageSettings) -> Bool {
+        settings.loadedFaces.contains { $0.isStampShape && squished.contains($0.faceRegionID) }
     }
 
     /// The dent legend's "×k" (the map is drawn k times deeper).

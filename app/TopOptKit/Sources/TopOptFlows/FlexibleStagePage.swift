@@ -102,7 +102,7 @@ public struct FlexibleStagePage: View {
                     .background(GeometryReader { g in
                         Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["panel": g.frame(in: .global)])
                     }.allowsHitTesting(false))
-                    .frame(maxHeight: geo.size.height * 0.62, alignment: .bottom)
+                    .frame(maxHeight: panelMaxHeight(geo.size), alignment: .bottom)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
                     .padding(.leading, PageChrome.edge)
                     .padding(.bottom, PageChrome.edge)
@@ -122,6 +122,9 @@ public struct FlexibleStagePage: View {
                                                             below: model.toast == nil ? 0 : Self.toastRowHeight)
                     FlexibleFixPopup(model: model, issue: issue, padTarget: $padTarget) { fixShown = nil }
                         .frame(width: pop.width)
+                        .background(GeometryReader { g in
+                            Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["popup": g.frame(in: .global)])
+                        }.allowsHitTesting(false))
                         .padding(.leading, pop.minX)
                         .padding(.top, pop.minY)
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -157,13 +160,11 @@ public struct FlexibleStagePage: View {
         .onReceive(loop.$held) { a in
             if !loop.playing, dents != nil { dentScale = Float(dentExaggeration * a) }
         }
-        // ★ A FRESH LATTICE (keyed on the generation) is shown squishing what can be built, the
-        // densities it was made from, in X-ray: the 3D view, no stamp — and it plays.
+        // A fresh lattice (a Save & Exit build that lands while this page is up) refreshes the
+        // channels. ★ VERIFICATION OF D1: it no longer flips the map to "What can be built" or
+        // the tab to Face — no lattice is drawn on this page (D-R4-6), the map stays HIS drawing,
+        // and nothing ever set the flag back
         .onChange(of: FlexibleLatticePreview.freshKey(model.lattice)) { gen in
-            if gen != nil {
-                model.showBuildable = true; model.tab = .face
-                model.checkStampShown = nil
-            }
             refreshChannels()
             if gen != nil, dentAnimated { loop.autoPlay(reduceMotion: reduceMotion) }
         }
@@ -395,6 +396,18 @@ public struct FlexibleStagePage: View {
     /// The toast line's height under the top line (the pop-up goes below it).
     static let toastRowHeight: CGFloat = 30
 
+    /// ★ THE PANEL MAY GROW UP TO THE TOP CHROME (verification of D1; FlexibleSettingsPanel.maxHeight):
+    /// the Exit row, the top line and its toast, the fix pop-up while it is up.
+    private func panelMaxHeight(_ size: CGSize) -> CGFloat {
+        var band = noticeBand(size)
+        if model.toast != nil { band.size.height += Self.toastRowHeight }
+        var top = [exitRowLocal(), band]
+        if fixShown != nil, let p = frames["popup"], let page = frames["page"] {
+            top.append(p.offsetBy(dx: -page.minX, dy: -page.minY))
+        }
+        return FlexibleSettingsPanel.maxHeight(viewport: size, topChrome: top)
+    }
+
     /// The Exit row in the page's frame (measured; a nominal row before the first layout).
     private func exitRowLocal() -> CGRect {
         guard let row = frames["exitRow"] else {
@@ -420,13 +433,14 @@ public struct FlexibleStagePage: View {
         // tap on the bar brings it back; its chevron (top right) folds it
         let view = Group {
             if legendMinimized {
-                FlexibleLegendBar(fraction: legendDrilled ? reading?.fraction : nil)
-                    .contentShape(Rectangle())
-                    .onTapGesture { legendMinimized = false }
-                    .accessibilityElement()
-                    .accessibilityLabel("Show the key")
-                    .accessibilityAddTraits(.isButton)
-                    .accessibilityIdentifier("flexible-legend-expand")
+                // ★ A BUTTON (verification of D1): the tap gesture that brought it back was untested
+                Button { legendMinimized = false } label: {
+                    FlexibleLegendBar(fraction: legendDrilled ? reading?.fraction : nil)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Show the key")
+                .accessibilityIdentifier("flexible-legend-expand")
             } else {
                 FlexibleLegend(model: model, drawnLattice: nil, drilled: legendDrilled,
                                reading: legendDrilled ? reading : nil)
@@ -568,12 +582,16 @@ struct FlexibleStageOverlays: View {
                                         label: axis.uppercased(), tint: FlexibleStageStyle.onPart,
                                         selected: selection(r, axis),
                                         onChange: { c in setCurve(r, axis, c) },
-                                        onCommit: { model.save() })
+                                        onCommit: { model.save() },
+                                        // ★ VERIFICATION OF D1: never drawn or touched under the panel,
+                                        // the legend or the player (img 6's class, for the curves)
+                                        keepOut: keepOut)
                 }
                 // ★ ROUND 3 (item 1.1): the deepest squish, dragged out as a prism
                 FlexibleDepthChips(model: model, projection: proj.projection, k: exaggeration, keepOut: keepOut)
-                // ★ ROUND 4 (D1): a Stamp face's ONE stamp — never under the panel or the legend
-                FlexibleFaceStampHandle(model: model, projection: proj.projection, keepOut: keepOut)
+                // ★ ROUND 4 (D1): a Stamp face's ONE stamp — never under the panel or the legend,
+                // and never on the depth chip (it keeps clear of the chip's place: `k`)
+                FlexibleFaceStampHandle(model: model, projection: proj.projection, keepOut: keepOut, k: exaggeration)
             }
         }
     }
