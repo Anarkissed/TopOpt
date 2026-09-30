@@ -6,6 +6,13 @@
 // its tabs are Face | Stamps | More, every row one line (FlexibleFacePanel); the page is
 // always in X-ray; the legend sits on the trailing edge, centred.
 //
+// ★ ROUND 3 BATCH B: there is no Generate button — Save & Exit builds the lattice and the MAIN
+// Flexible page shows it (FlexibleMainStage owns the ONE model, so the lattice outlives this
+// page). The top line is a live readiness line (FlexibleReadiness); a blocker opens a pop-up
+// that selects the face and offers 1–3 one-tap fixes (FlexibleFixPopup); Exit is blocked
+// only by a blocking issue and then reads "Fix 1 thing". The squish player (play / drag)
+// sits bottom-centre, its frame computed against the panel, the legend and the top row.
+//
 // ★ NOTHING ON THIS PAGE COMPUTES A SQUISH NUMBER. It draws FlexibleStageModel's copies of
 // core's results (M9). Numbers carry their tier and ± band (R7); a column core could not
 // give a number for is drawn as "no number", never a guess.
@@ -24,7 +31,9 @@ final class FlexibleProjectionBox: ObservableObject {
 
 public struct FlexibleStagePage: View {
     @ObservedObject var project: ProjectModel
-    @StateObject private var model: FlexibleStageModel
+    /// ★ BATCH B: the SHARED model (FlexibleMainStage.model(for:)), observed — not owned. A
+    /// page-owned @StateObject died with the page, and the lattice with it (item 7.1).
+    @ObservedObject var model: FlexibleStageModel
     @StateObject private var camera = OrbitCameraModel()
     @StateObject private var proj = FlexibleProjectionBox()
     let onExit: () -> Void
@@ -39,27 +48,34 @@ public struct FlexibleStagePage: View {
     /// The dent loops only while a lattice is drawn; while he edits it holds still (round 3).
     @State private var dentAnimated = false
     @State private var padTarget: String?
-    // the generated lattice: squish loop phase (0…1, 30 fps, the Results flex pattern)
-    @State private var squishPhase: Double = 0
+    /// ★ THE SQUISH PLAYER (maintainer: "a play button and/or timeline to drag that moves the
+    /// squish in and out"): one amount 0…1 for the dent AND the walls (FlexibleSquishLoop).
+    @StateObject private var loop = FlexibleSquishLoop()
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// The fix pop-up (item 9): which issue, and the rule that opens it on a NEW one.
+    @State private var fixShown: FlexibleIssue?
+    @State private var prompt = FlexibleFixPrompt()
+    /// The face the pop-up pulses on the part.
+    @State private var pulse: DetentPulse?
+    @State private var pulseToken = 0
     /// ★ X-RAY VISION (maintainer, 2026-09-29): the body as a ghost, the dented map opaque,
     /// the lattice seen inside. ★ ROUND 3 (item 1.4): ALWAYS on on this page — the bend reads
     /// from any angle, even edge-on (img 1); the X-ray button under the gizmo is gone.
     private let xray = true
-    @State private var showExport = false
-    /// The panel's and the legend's frames (global), and the stage's — for the chips' keep-out.
+    /// The panel's, the legend's, the top row's and the player's frames (global), and the
+    /// stage's — for the chips' keep-out and the player's place.
     @State private var frames: [String: CGRect] = [:]
     private var keepOut: [CGRect] {
         guard let st = frames["stage"] else { return [] }
-        return ["panel", "legend"].compactMap { frames[$0]?.offsetBy(dx: -st.minX, dy: -st.minY) }
+        return ["panel", "legend", "player"].compactMap { frames[$0]?.offsetBy(dx: -st.minX, dy: -st.minY) }
     }
     private let ticker = Timer.publish(every: 1.0 / 30.0, on: .main, in: .common).autoconnect()
     static let squishPeriodS = 2.4
 
-    public init(project: ProjectModel, materialsPath: String?, stampsPath: String?,
-                persist: @escaping () -> Void, onExit: @escaping () -> Void) {
+    /// ★ BATCH B: over the main page's shared model (FlexibleMainStage.model(for:)).
+    public init(project: ProjectModel, model: FlexibleStageModel, onExit: @escaping () -> Void) {
         self.project = project
-        _model = StateObject(wrappedValue: FlexibleStageModel(
-            project: project, materialsPath: materialsPath, stampsPath: stampsPath, persist: persist))
+        self.model = model
         self.onExit = onExit
     }
 
@@ -75,9 +91,8 @@ public struct FlexibleStagePage: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
                     .padding(.leading, PageChrome.edge)
                     .padding(.bottom, PageChrome.edge)
-                latticeControls
                 FlexibleViewColumn(camera: camera)
-                if showExport, let g = model.lattice { exportSheet(g) }
+                player(in: geo.size)
                 // ★ THE LEGEND SITS ON THE TRAILING EDGE, VERTICALLY CENTRED (round 3, item 7:
                 // "legends never cover buttons" — it covered Generate in the bottom corner)
                 if dents != nil || model.checkStampShown != nil {
@@ -88,32 +103,52 @@ public struct FlexibleStagePage: View {
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
                         .padding(.trailing, PageChrome.edge)
                 }
+                if let issue = fixShown {
+                    FlexibleFixPopup(model: model, issue: issue, padTarget: $padTarget) { fixShown = nil }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                        .padding(.top, PageChrome.edge + 64)
+                        .padding(.horizontal, 180)
+                        .transition(.opacity)
+                        .zIndex(30)
+                }
             }
+            .background(GeometryReader { g in
+                Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["page": g.frame(in: .global)])
+            }.allowsHitTesting(false))
         }
         .onAppear {
             if let b = project.viewerMesh?.bounds { camera.reframe(b) }
+            // his earlier actions are not new: only what he does on this visit pops a fix
+            prompt = FlexibleFixPrompt(actionSerial: model.actionSerial)
             model.openScene()
             rebuildOverlay()
+            // the main page's pill opened Settings on a fix
+            if let f = model.pendingFix { model.pendingFix = nil; present(f) }
         }
         .onChange(of: model.geometry.count) { _ in rebuildOverlay() }
         .onReceive(ticker) { _ in
-            // ★ THE SQUISH, ON REPEAT (maintainer, 2026-09-29): only while a lattice is drawn;
-            // the drawn map holds still while he edits (round 3)
-            guard dentAnimated else { return }
-            squishPhase = (squishPhase + (1.0 / 30.0) / Self.squishPeriodS).truncatingRemainder(dividingBy: 1)
-            // ★ only the scale moves: the displacements and colours are rebuilt when the
-            // design changes, never per frame (a whole-mesh rebuild at 30 fps on the M2 stand)
-            if dents != nil { dentScale = Float(dentExaggeration * squishAmplitude) }
+            // ★ THE SQUISH (the player's loop): only the scale moves — the displacements and
+            // colours are rebuilt when the design changes, never per frame
+            guard loop.playing, dents != nil else { return }
+            dentScale = Float(dentExaggeration * loop.amount)
         }
-        // ★ A FRESH LATTICE — Generate AND Generate again (keyed on the generation, not on
-        // `lattice != nil`, which stayed true across a rebuild) — is shown squishing what can
-        // be built, the densities it was made from, in X-ray: the 3D view, no stamp.
+        // a drag on the timeline, a pause: the one scale follows at once
+        .onReceive(loop.$held) { a in
+            if !loop.playing, dents != nil { dentScale = Float(dentExaggeration * a) }
+        }
+        // ★ A FRESH LATTICE (keyed on the generation) is shown squishing what can be built, the
+        // densities it was made from, in X-ray: the 3D view, no stamp — and it plays.
         .onChange(of: FlexibleLatticePreview.freshKey(model.lattice)) { gen in
             if gen != nil {
                 model.showBuildable = true; model.tab = .face
                 model.checkStampShown = nil
             }
             refreshChannels()
+            if gen != nil, dentAnimated { loop.autoPlay(reduceMotion: reduceMotion) }
+        }
+        .onChange(of: model.toast) { t in
+            guard let t else { return }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3.5) { if model.toast == t { model.toast = nil } }
         }
         .onChange(of: model.stacks.count) { _ in rebuildOverlay() }
         .onChange(of: model.latticeBuilding) { _ in refreshChannels() }
@@ -144,11 +179,6 @@ public struct FlexibleStagePage: View {
         FlexibleLatticePreview.latticeShows(checkStampShown: model.checkStampShown, stale: model.latticeIsStale)
     }
 
-    /// 0 → 1 → 0 over one period (FlexAnimation's cosine ease, Results screen) while the
-    /// lattice is drawn; 1 (the full drawing, held still) otherwise.
-    private var squishAmplitude: Double {
-        dentAnimated ? 0.5 - 0.5 * cos(2 * .pi * squishPhase) : 1
-    }
 
     /// The same settle the workspace draws with (gravity → down), so the part sits as it
     /// does on every other stage.
@@ -184,6 +214,8 @@ public struct FlexibleStagePage: View {
                 // ★ THE DENT READS THROUGH THE PART (maintainer, 2026-09-29): while a dent is
                 // shown the body drops to 30 % and the dented map stays at 100 %.
                 bodyAlpha: xray ? Self.xrayBodyAlpha : (dents != nil ? Self.dentBodyAlpha : 1),
+                // ★ BATCH B: the face the fix pop-up names, pulsed
+                detentPulse: pulse,
                 // ★ THE LATTICE IS DRAWN IN THE MESH VIEW'S OWN PASSES (FlexibleLatticePass,
                 // a third G-buffer writer — the way Structural and Aesthetic draw theirs), only
                 // in X-ray, squished by the SAME flexScale as the dent (hidden, not torn down,
@@ -205,84 +237,74 @@ public struct FlexibleStagePage: View {
         refreshChannels()
     }
 
-    /// Per-column colours + the dent (FlexiblePageChannels — the page's one source).
+    /// Per-column colours + the dent (FlexiblePageChannels — the page's one source), then the
+    /// player's state and the fix pop-up's rule.
     private func refreshChannels() {
         let c = FlexiblePageChannels.channels(model: model, overlay: overlay, xray: xray, drawnLattice: drawnLattice)
         tints = c.tints
         dents = c.dents
         dentExaggeration = c.exaggeration
+        // ★ a lattice appears → the squish plays (not under reduced motion); his live drawing
+        // (no lattice, or a stale one) holds still at the full squish — he can still play it
+        if c.animated != dentAnimated {
+            if c.animated { loop.autoPlay(reduceMotion: reduceMotion) } else { loop.hold(1) }
+        }
         dentAnimated = c.animated
-        dentScale = c.dents == nil ? 0 : Float(c.exaggeration * squishAmplitude)
+        dentScale = c.dents == nil ? 0 : Float(c.exaggeration * loop.amount)
+        // ★ ITEM 9: a NEW blocking issue HIS last action caused opens the pop-up at once
+        let r = model.readiness
+        if let i = prompt.next(r, actionSerial: model.actionSerial, settled: !r.designing), fixShown == nil {
+            present(i)
+        }
+        if let f = fixShown, !r.blocking.contains(where: { $0.id == f.id }) { fixShown = nil }
     }
 
-    // MARK: generate + export (FlexibleLatticeGeneration.swift, FlexibleExportSheet.swift — disabled until core)
-
-    /// Bottom right, where the Settings wizard keeps "Refresh sample": Generate lattice,
-    /// then Export and a show/hide for the lattice once it exists.
-    private var latticeControls: some View {
-        VStack {
-            Spacer()
-            HStack(alignment: .bottom) {
-                Spacer()
-                VStack(alignment: .trailing, spacing: DS.Space.s) {
-                    if let why = model.latticeRefusal, model.lattice == nil {
-                        Text(why).font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(DS.Color.textSecondary.color)
-                            .multilineTextAlignment(.trailing)
-                            .frame(maxWidth: 300, alignment: .trailing)
-                            .padding(.horizontal, DS.Space.m).padding(.vertical, DS.Space.s)
-                            .background(Capsule().fill(DS.Color.chipSolid.color))
-                    }
-                    if model.latticeIsStale {
-                        Text("Settings changed since this lattice was made — generate again.")
-                            .font(.system(size: 12, weight: .medium)).foregroundStyle(DS.Color.warning.color)
-                            .padding(.horizontal, DS.Space.m).padding(.vertical, DS.Space.s)
-                            .background(Capsule().fill(DS.Color.chipSolid.color))
-                    }
-                    if let e = model.latticeError {
-                        Text(e).font(.system(size: 12, weight: .medium)).foregroundStyle(DS.Color.danger.color)
-                            .frame(maxWidth: 320, alignment: .trailing)
-                    }
-                    HStack(spacing: DS.Space.s) {
-                        if model.lattice != nil {
-                            pill("Export", icon: "square.and.arrow.up", fill: DS.Color.accent, id: "flexible-export") {
-                                showExport = true
-                            }
-                        }
-                        pill(model.latticeBuilding ? "Generating…" : (model.lattice == nil ? "Generate lattice" : "Generate again"),
-                             icon: "cube.transparent",
-                             fill: model.latticeRefusal == nil && !model.latticeBuilding ? FlexibleStageStyle.accentToken : DS.Color.textTertiary,
-                             id: "flexible-generate") {
-                            model.generateLattice()
-                        }
-                        .disabled(model.latticeRefusal != nil || model.latticeBuilding)
-                    }
-                }
-            }
-            .padding(PageChrome.edge)
+    /// Open the pop-up on `issue`: select its face, pulse it, turn the camera to it.
+    private func present(_ issue: FlexibleIssue) {
+        fixShown = issue
+        guard let r = issue.region else { return }
+        model.selectedRegion = r
+        model.tab = .face
+        if let f = regionsFaces(r).first {
+            pulseToken += 1
+            pulse = DetentPulse(faceID: FaceID(f), token: pulseToken)
+        }
+        if let st = model.stack(r) ?? model.stacks.first(where: { $0.key.region == r })?.value,
+           let g = FlexibleFixPopup.cameraRegion(load: st.load, settle: settle) {
+            camera.snap(to: g, animated: !reduceMotion)
         }
     }
 
-    private func pill(_ title: String, icon: String, fill: RGBA, id: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            HStack(spacing: DS.Space.s) {
-                Image(systemName: icon).font(.system(size: 15, weight: .bold))
-                Text(title).dsStyle(DS.TypeScale.bodyStrong).fontWeight(.semibold)
-            }
-            .foregroundStyle(DS.Color.textPrimary.color)
-            .padding(.vertical, 12).padding(.horizontal, DS.Space.xl2)
-            .background(Capsule().fill(fill.color))
+    private func regionsFaces(_ r: Int) -> [Int] { model.regions.faces(of: r, mesh: project.viewerMesh) }
+
+    // MARK: the squish player (bottom-centre, its frame computed against the page's keep-outs)
+
+    @ViewBuilder private func player(in size: CGSize) -> some View {
+        if dents != nil, let r = playerFrame(size) {
+            FlexibleSquishPlayer(loop: loop, fullLabel: fullLabel, width: r.width)
+                .background(GeometryReader { g in
+                    Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["player": g.frame(in: .global)])
+                }.allowsHitTesting(false))
+                .position(x: r.midX, y: r.midY)
         }
-        .buttonStyle(.plain)
-        .accessibilityIdentifier(id)
     }
 
-    @ViewBuilder private func exportSheet(_ g: FlexibleGeneratedLattice) -> some View {
-        // ★ EXPORTS WAIT ON CORE (maintainer, 2026-09-29): the modal says so, both cards disabled
-        FlexibleExportSheet(summary: "\(g.topology.capitalized) · \(Int(g.tempC)) °C · \(model.material?.displayName ?? "")",
-                            onClose: { showExport = false })
-            .transition(.opacity)
-            .zIndex(20)
+    /// The page's keep-outs in its own frame: the panel, the legend, the top row (Exit, undo,
+    /// redo), the readiness line — so the player never covers a button or a legend.
+    static func playerKeepOut(_ frames: [String: CGRect]) -> [CGRect] {
+        guard let page = frames["page"] else { return [] }
+        return ["panel", "legend", "exitRow", "notice"].compactMap { frames[$0]?.offsetBy(dx: -page.minX, dy: -page.minY) }
+    }
+
+    private func playerFrame(_ size: CGSize) -> CGRect? {
+        FlexibleLegendPlacement.player(viewport: size, bottomClearance: PageChrome.edge,
+                                       keepOut: Self.playerKeepOut(frames))
+    }
+
+    private var fullLabel: String {
+        let shown = model.lattice.map { Set($0.squishedKeys.map(\.region)) }
+        return FlexibleSquishLoop.fullLabel(weightsKg: model.settings.loadedFaces
+            .filter { shown?.contains($0.faceRegionID) ?? true }.map(\.weightKg))
     }
 
     // MARK: chrome
@@ -290,15 +312,23 @@ public struct FlexibleStagePage: View {
     private var exitButton: some View {
         VStack {
             HStack {
+                // ★ BATCH B (item 9.3): Exit consults the readiness — blocked ONLY by what truly
+                // stops a lattice, and then it opens the fix instead of leaving
+                let r = model.readiness
                 Button {
-                    model.save()
-                    onExit()
+                    switch FlexibleExitDecision.decide(model.readiness) {
+                    case .exit:
+                        model.save()
+                        onExit()
+                    case .fix(let issue):
+                        present(issue)
+                    }
                 } label: {
-                    Text("Exit")
+                    Text(FlexibleExitDecision.title(r))
                         .dsStyle(DS.TypeScale.bodyStrong).fontWeight(.semibold)
                         .foregroundStyle(DS.Color.textPrimary.color)
                         .padding(.vertical, 12).padding(.horizontal, DS.Space.xl5)
-                        .background(Capsule().fill(DS.Color.accent.color))
+                        .background(Capsule().fill((r.isReady ? DS.Color.accent : DS.Color.warning).color))
                 }
                 .buttonStyle(.plain)
                 .accessibilityIdentifier("flexible-exit")
@@ -316,6 +346,9 @@ public struct FlexibleStagePage: View {
                     .buttonStyle(.plain)
                     .accessibilityIdentifier(undo ? "flexible-undo" : "flexible-redo")
                 }
+                .background(GeometryReader { g in
+                    Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["exitRow": g.frame(in: .global)])
+                }.allowsHitTesting(false))
                 Spacer()
             }
             Spacer()
@@ -323,44 +356,66 @@ public struct FlexibleStagePage: View {
         .padding(PageChrome.edge)
     }
 
-    /// ★ ONLY WHEN THERE IS SOMETHING TO SAY (verification of round 3: "only what is
-    /// necessary"): opening, a failure, or "Tap a face on the part." — the permanent
-    /// "no strength certificate" line is gone (it lives in the Physics (i) and the modal).
+    /// ★ THE TOP LINE (batch B, item 9): opening / a failure, else the live READINESS line —
+    /// "Ready: Exit builds the lattice" (green) or "1 thing to fix: … [Fix]" (the pop-up) —
+    /// and, under it for a moment, what an automatic fix did.
     @ViewBuilder private var notice: some View {
-        if let text = noticeText {
-            noticePill(text)
-        }
-    }
-
-    private func noticePill(_ text: String) -> some View {
-        VStack {
-            HStack(spacing: DS.Space.s) {
-                Image(systemName: "info.circle.fill").font(.system(size: 13))
-                Text(text)
-                    .font(.system(size: 13, weight: .medium))
-                    .lineLimit(2)
+        VStack(spacing: DS.Space.xs) {
+            if let text = noticeText {
+                noticePill(text, icon: "info.circle.fill", colour: DS.Color.textSecondary.color, fix: nil)
+            } else if model.sceneState == .ready {
+                let r = model.readiness
+                noticePill(r.oneLine,
+                           icon: r.isReady ? "checkmark.circle.fill" : "exclamationmark.circle.fill",
+                           colour: (r.isReady ? FlexibleStageStyle.accentToken : DS.Color.warning).color,
+                           fix: r.blocking.first)
             }
-            .foregroundStyle(DS.Color.textSecondary.color)
-            .padding(.horizontal, DS.Space.l).padding(.vertical, DS.Space.s)
-            .background(Capsule().fill(DS.Color.chipSolid.color))
-            .overlay(Capsule().stroke(DS.Color.strokeSubtle.color, lineWidth: 1))
-            .padding(.top, PageChrome.edge + 6)
-            .padding(.horizontal, 180)
+            if let t = model.toast {
+                Text(t).font(.system(size: 12, weight: .medium)).foregroundStyle(DS.Color.textSecondary.color)
+                    .lineLimit(1)
+                    .padding(.horizontal, DS.Space.m).padding(.vertical, 6)
+                    .background(Capsule().fill(DS.Color.chipSolid.color))
+                    .accessibilityIdentifier("flexible-toast")
+            }
             Spacer()
         }
-        .allowsHitTesting(false)
+        .padding(.top, PageChrome.edge + 6)
+        .padding(.horizontal, 180)
+    }
+
+    private func noticePill(_ text: String, icon: String, colour: Color, fix: FlexibleIssue?) -> some View {
+        HStack(spacing: DS.Space.s) {
+            Image(systemName: icon).font(.system(size: 13)).foregroundStyle(colour)
+            Text(text)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(DS.Color.textSecondary.color)
+                .lineLimit(1).truncationMode(.tail)
+                .accessibilityIdentifier("flexible-readiness-line")
+            if let fix {
+                Button { present(fix) } label: {
+                    Text("Fix").font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(DS.Color.textPrimary.color)
+                        .padding(.horizontal, 12).padding(.vertical, 4)
+                        .background(Capsule().fill(DS.Color.warning.color.opacity(0.35)))
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("flexible-readiness-fix")
+            }
+        }
+        .padding(.horizontal, DS.Space.l).padding(.vertical, DS.Space.s)
+        .background(Capsule().fill(DS.Color.chipSolid.color))
+        .overlay(Capsule().stroke(DS.Color.strokeSubtle.color, lineWidth: 1))
+        .background(GeometryReader { g in
+            Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["notice": g.frame(in: .global)])
+        }.allowsHitTesting(false))
     }
 
     private var noticeText: String? {
         switch model.sceneState {
         case .opening: return "Opening the part — its faces, stacks and lattice region."
         case .failed(let why): return "The part could not be opened: \(why)"
-        default: break
+        default: return nil
         }
-        if model.settings.faces.isEmpty, model.tab == .face {
-            return "Tap a face on the part."
-        }
-        return nil
     }
 
     // MARK: the panel

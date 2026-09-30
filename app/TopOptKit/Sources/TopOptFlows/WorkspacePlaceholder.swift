@@ -108,6 +108,7 @@ public struct WorkspacePlaceholder: View {
     /// The gate for popping them open — not `lattice.enabled`, which is true for any
     /// project configured on a previous run and so never opened them again.
     @State private var latticeSettingsSavedThisSession = false
+    @StateObject private var flexibleMain = FlexibleMainStage()   // Flexible (PR #362): the ONE Flexible model per project + the main page's lattice (FlexibleMainStage.swift)
     @State private var strutScene: LatticeSDFScene? = nil
     @State private var strutSceneToken = 0
     /// ★★ WHETHER A STRUT BAKE IS IN FLIGHT (maintainer, 2026-08-19: "There is
@@ -726,7 +727,7 @@ public struct WorkspacePlaceholder: View {
                 .onChange(of: showLatticeWizard) { open in
                     if open, project.lattice.flexible != nil { showLatticeWizard = false; showFlexiblePage = true }
                 }
-            MetalMeshView(mesh: stageMesh,
+            MetalMeshView(mesh: flexibleMain.mesh(project, on: stage) ?? stageMesh,   // Flexible (PR #362) H4: the part + its dented map quads
                           camera: cameraModel,
                           selection: selection,
                           // ★ §6 — THE SURFACE STAGE DOES NOT WEAR THE TO PAGE'S
@@ -747,7 +748,7 @@ public struct WorkspacePlaceholder: View {
                           // It cannot coexist with the Surface stage's tints —
                           // they are different stages — so this is a choice, not
                           // a blend, and the Surface stage keeps priority.
-                          vertexTints: visible.surfaceEditing ? surfaceVertexTints : nil,
+                          vertexTints: visible.surfaceEditing ? surfaceVertexTints : flexibleMain.tints(project, on: stage),   // Flexible H4: X-ray ghost + dent heat
                           extraLines: surfaceCutLineBuffer,
                           previewLines: surfacePreviewLineBuffer,
                           // ★ A UNION'S INTERNAL EDGES ARE NOT EDGES ANY MORE.
@@ -778,7 +779,7 @@ public struct WorkspacePlaceholder: View {
                               : [],
                           xray: surfaceXrayOn,
                           settleRotation: settleQuat,           // D2: settle onto the floor
-                          settleAnimated: !reduceMotion,
+                          settleAnimated: !reduceMotion && !flexibleMain.owns(project, stage),   // Flexible H4: a map-mesh swap snaps, never spins
                           showGround: showGround,
                           // D1: tap always selects (routed by phase) — EXCEPT on
                           // the smoothing page, which authors no selection at all
@@ -923,7 +924,8 @@ public struct WorkspacePlaceholder: View {
                           // looking like the other, is the confusion; with the
                           // Stress view on, this channel means von Mises and
                           // nothing else.
-                          stressTints: stageSurfaceTints,
+                          stressTints: flexibleMain.owns(project, stage) ? nil : stageSurfaceTints,   // Flexible H4: the tints ride vertexTints
+                          flexDisplacements: flexibleMain.dents(project, on: stage), flexScale: flexibleMain.dentScale(project, on: stage),   // Flexible H4
                           // M7.dom-app: the translucent design box + keep-outs (model
                           // space); nil when the tool is off → nothing drawn. L1: a
                           // full-screen page draws NO design-box wireframe.
@@ -1024,7 +1026,7 @@ public struct WorkspacePlaceholder: View {
                           // each other, with the lattice's albedo alpha as its
                           // mask. Two visible surfaces is a case that pass was
                           // built for; it is no longer "the body OR the struts".
-                          bodyAlpha: latticePreviewBodyAlpha,
+                          bodyAlpha: flexibleMain.bodyAlpha(project, on: stage) ?? latticePreviewBodyAlpha,   // Flexible H4: X-ray
                           // Detent face-highlight pulse (item 2): flash the snapped part face.
                           detentPulse: detentPulse,
                           // Paint mode (handoff 2026-07-25): when on, a one-finger drag brushes
@@ -1148,7 +1150,8 @@ public struct WorkspacePlaceholder: View {
                                                      hidden: strutBakeInFlight
                                                         || latticeSimIsRunning)
                               }
-                              : nil)
+                              : nil,
+                          flexibleLattice: flexibleMain.layer(project, stage: stage, pageUp: fullScreenPageUp))   // Flexible (PR #362) H3: the main page's lattice + its squish loop (FlexibleMainStage.swift)
                 .ignoresSafeArea()
                 // ★ §6(g) — THE PENCIL HOVER, ON THE MESH VIEW ITSELF.
                 //
@@ -1300,7 +1303,8 @@ public struct WorkspacePlaceholder: View {
                 // the entire app. Please add to the TO page side-by-side just below
                 // the position gizmo (with padding between them)"). The Surface
                 // stage keeps them in its own tray, where the rest of its tools are.
-                if viewerMesh != nil, visible.wireframe, !visible.surfaceEditing {
+                if flexibleMain.owns(project, stage) { FlexibleMainViewToggles(main: flexibleMain) }   // Flexible (PR #362) H5: X-ray / Heat / Lattice
+                else if viewerMesh != nil, visible.wireframe, !visible.surfaceEditing {
                     viewModeToggles
                 }
                 latticeOnlyBadge
@@ -1351,6 +1355,7 @@ public struct WorkspacePlaceholder: View {
                             bottomBarHeight = ok
                         }
                     }
+                if flexibleMain.owns(project, stage) { FlexibleMainPlayerSlot(main: flexibleMain, bottomClearance: bottomBarClearance) }   // Flexible (PR #362): the squish player
             }
             // The full-screen lattice page (handoff 2026-07-30-lattice-page): chrome
             // over the SAME live stage — the workspace chrome above is hidden while
@@ -1383,10 +1388,9 @@ public struct WorkspacePlaceholder: View {
                     .transition(.opacity).zIndex(49)
             }
             if showFlexiblePage, project.lattice.flexible != nil {
-                FlexibleStagePage(project: project, materialsPath: FlexibleResources.materialsPath,
-                                  stampsPath: FlexibleResources.stampsPath,
-                                  persist: { model.persistCurrentProject() },
-                                  onExit: { showFlexiblePage = false })
+                FlexibleStagePage(project: project, model: flexibleMain.model(for: project, materialsPath: FlexibleResources.materialsPath,
+                                  stampsPath: FlexibleResources.stampsPath, persist: { model.persistCurrentProject() }),
+                                  onExit: { showFlexiblePage = false; latticeSettingsSavedThisSession = true; flexibleMain.didExitSettings() })
                     .transition(.opacity).zIndex(48)
             }
             if showLatticeModeSheet, let mode = project.lattice.stageMode {
@@ -11467,7 +11471,7 @@ public struct WorkspacePlaceholder: View {
             printParamsButton
             // ★ LATTICE, TO THE LEFT OF OPTIMIZE (maintainer, 2026-08-17: "Make
             // it exactly like Optimize button, but to the left of it").
-            latticeThisButton
+            if project.lattice.flexible == nil { latticeThisButton } else { FlexibleMainStatusPill(main: flexibleMain, open: { showFlexiblePage = true }) }   // Flexible (PR #362) H10
             optimizeButton
         }
         // ★ THE BAR MEASURES ITSELF. Its height is not a constant: Optimize grows

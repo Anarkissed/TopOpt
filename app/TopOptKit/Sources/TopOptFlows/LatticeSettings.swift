@@ -1161,6 +1161,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         var s = self
         s.selectableWallCoreDead = [:]
         s.organicForecast = nil
+        s.flexible = nil   // Flexible (PR #362) H12: a Flexible edit never re-keys the octet bake
         return s
     }
     /// LATTICE MODE. Off (the default) ⇒ no lattice block reaches the job and the
