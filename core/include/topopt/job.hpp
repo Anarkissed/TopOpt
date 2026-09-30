@@ -227,6 +227,43 @@ struct JobLatticeRegion {
   double synthetic_soft_mm = 0.0;   // 0 = a quarter of the region's largest extent
 };
 
+// ── ★ AN INCLUDE-REGION ID COUNTS INCLUDES, NOT REGIONS (#354, 2026-09-30) ────
+// Every 1-based region id that crosses the bridge -- the per-voxel `region_ids`
+// `lattice_role_regions_from_job` assigns, `SteppedCell::region_id`,
+// `SteppedRegionCell::region_id`, `SyntheticStressRegionReport::region_id` -- is a
+// position among the job's INCLUDE regions, in declaration order. It is NOT an index
+// into `lattice.regions`, and the two coincide only while no exclude is declared
+// before an include.
+//
+// `run_job.cpp` built the stepped plan's frame with `regions[region_id - 1]`, so one
+// exclude declared first handed the plan the EXCLUDE's slot origin, normal and prism
+// depth. Measured: the identical include and the identical one-cell plan are ACCEPTED
+// with the include alone and REFUSED with an exclude first, the refusal quoting
+// offsets measured from the exclude's origin.
+//
+// Resolving the id is a decision, so it lives here where a test can reach it rather
+// than inline at the call site. ★ AND THE REASON IT COULD NOT BE REACHED THERE IS
+// NOT "nothing links run_job.cpp" (reviewer, 2026-09-30 -- an earlier version of this
+// comment said that and it is false). run_job.cpp is compiled into libtopopt and
+// test_job_loadcase_copy calls `production_loadcase_from_job` out of it. What hides
+// these decisions is the three ANONYMOUS NAMESPACES at run_job.cpp :67-7774,
+// :7934-8739 and :10673-10933. A job-schema fact like this one belongs here; a large
+// function that is not a schema fact is cheaper to move OUT of the anonymous
+// namespace and declare in an internal header without moving its body, which is the
+// precedent `production_loadcase_from_job` already sets.
+//
+// nullptr for an id below 1 or past the last include -- never a different region.
+inline const JobLatticeRegion* job_include_region(
+    const std::vector<JobLatticeRegion>& regions, int include_id_1based) {
+  if (include_id_1based < 1) return nullptr;
+  int seen = 0;
+  for (const JobLatticeRegion& r : regions) {
+    if (r.role != "include") continue;
+    if (++seen == include_id_1based) return &r;
+  }
+  return nullptr;
+}
+
 struct JobLattice {
   bool present = false;
   std::string topology = "octet";  // only "octet" is implemented

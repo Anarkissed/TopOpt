@@ -146,3 +146,148 @@ will move.
 The last row is the reverse of a removal and worth the same care: a receipt key whose
 VALUE starts being correct will move an app-side number that has been reading a
 default, and no grep shows that either.
+
+## MEANING CHANGES, addendum (2026-09-29) — #354's audit items
+
+Same rule, later commits. Nothing here removes or renames anything, so the greps
+above all come back clean; these move numbers or fix what a receipt asserts.
+
+| what | was | is | measured effect |
+|---|---|---|---|
+| `organic_probe.json` `recommendation.fit.margin` / `auto.margin` | `0` whether or not a certificate ran | JSON `null` where none ran, with `certified` beside it | #354's Recommended pill read "· 0.00" on every aesthetic run; it must now read the absence |
+| `organic_probe.json` `predicted.reason` under aesthetic intent | "N segments exceed the probe's 600000 cap" (false — a stand run has 39,849) | "aesthetic intent: nothing reads a certificate" | the reason a reader acts on changes; nothing else moves |
+| the probe's dead-wall SPACING | graded from the synthetic field, i.e. the window's coarsest end | the window's MIDDLE, via `synthesised_whole`, as ruling H gives the run | a recommended cell can move on any part with a flagged dead wall. Invisible on a degenerate window (`cell_min == cell_max`) |
+| the probe's dead-wall DOMAIN | `cand` | that candidate's pre-rim posture mask | **no effect, measured.** For organic every candidate voxel is masked (three `params.organic_geometry` branches in grading.cpp), so the two sets are identical on every organic run. Written for the contract, not for a number |
+| `unsupported_spans_seen`'s documented meaning | "could not be held up, so not printed" | "over open air; printed as drawn and counted" | comment only; the count was always of printed spans |
+
+### New receipt keys (additive, report-only)
+
+| file | key | why |
+|---|---|---|
+| `run_info.json` | `grading.organic.synthetic_stress_by_region[].synthesised_whole`, `.stress_p99` | ruling H's verdict per wall and the measurement behind it. It existed only on a `[synthetic]` stderr line, which is why the run's dead set and the probe's could be compared only by parsing two logs |
+| `organic_probe.json` | `candidates[].regions[].synthesised_whole`, `.stress_p99` | the same two for the probe |
+| `organic_probe.json` | `candidates[].dead_threshold` | the threshold those verdicts were measured against, so a disagreement is locatable and not merely visible |
+
+No key changes shape or type, and nothing the app already reads changes meaning. The
+numbers BEHIND `organic_probe.json`'s recommendation can move (row 3 above).
+
+### The gap these did NOT close
+
+The run's synthesis domain is `lattice_certification_mask(boundary, ...) ∩
+gf.posture.mask`, not the posture mask. The probe has no certification mask — it runs
+before the variant's shell boundary is built — so it is still the broader set. Nothing
+the `cli_organic_dead_parity` fixture can be configured into separated the two (cell
+3–10 mm, uniform and swept windows, `min_extrudable_width_mm` 0.45–3 mm, three rho
+bands, a manual clearance keep-out, all three outer finishes: `cand` == posture ==
+the run's mask in every one). So this is UNMEASURED, not closed, and it is the
+remaining way a dead verdict could differ — on a part whose cell-overlap proof or
+shell clip rejects posture voxels. Closing it means building a certification mask per
+candidate, which is a real cost and its own measurement.
+
+## MEANING CHANGES, addendum 2 (2026-09-30) — #354's variant-work items
+
+Neither item removes or renames anything, and neither changes a job or receipt key's
+name, shape or type, so every grep in this handoff still comes back clean. Both change
+which jobs are ACCEPTED — but NOT in the same direction, and the first draft of this
+section blurred that (reviewer, 2026-09-30):
+
+- **Only item 1 can refuse a job that was previously accepted**, and only a
+  hand-authored one (see the app-impact note below).
+- **Item 2 makes wrongly refused jobs RUN.** It could refuse a job only if that job's
+  plan had been packed against the wrong wall to begin with, and the app packs by
+  include order (`LatticeSteppedCellWire.wire`), so there is no such job.
+
+| what | was | is | effect |
+|---|---|---|---|
+| a face lattice region's stated `frame_u` / `frame_w` | the "axes must lie IN the face plane" check ran before `normal` was parsed, so it tested against `Vec3{0,0,0}` and could never fire | parsed after `origin`/`normal`, against the UNIT normal | an out-of-plane frame is now REFUSED AT PARSE TIME instead of being accepted and then refused mid-run by `clearance.cpp`'s `frame_conflict`. A job the app could previously submit and watch fail after a solve now fails on submission, with the reason |
+| the stepped plan's prism per region | `lattice.regions[region_id - 1]` — an index over ALL regions | `job_include_region(regions, region_id)` — a position among INCLUDE regions, which is what the id means | on a job with an exclude declared BEFORE an include, the plan took the exclude's `slot_origin` / `normal` / `depth_mm`. Measured: the identical include and the identical one-cell plan are ACCEPTED with the include alone and REFUSED with an exclude first. Ordering-dependent, so a plan the app packed correctly could be refused for a reason naming the wrong wall |
+
+### The frame check: what a job that was passing may now be refused for
+
+The in-plane test is also now taken against the NORMALISED normal, and the direction
+of that effect is the opposite of what I first wrote here (reviewer, 2026-09-30).
+`u · n = |n| (u · n̂)`, so the raw test `|u · n| < 1e-6` accepts `|u · n̂| < 1e-6/|n|`:
+
+| `\|n\|` | raw admits | so the raw test was |
+|---|---|---|
+| 1000 | 1e-9 rad | 1000x STRICTER — refuses a frame that is in plane |
+| 1 | 1e-6 rad | the intended bound |
+| 1e-3 | 1e-3 rad | 1000x LOOSER — the dangerous case |
+
+A SHORT normal is the loose one, not a long one. Both directions are now pinned by a
+test that goes red with the raw dot product restored (`test_job` cases (g) and (h));
+every other frame case returns the same verdict under both rules.
+
+APP IMPACT: NONE. The app does not state an arbitrary frame — it builds `frame_u` /
+`frame_w` from the UNIT normal by cross products (`LatticeSettings.swift` ~326-333,
+`LatticeRegionMask.basis`), so its axes are in plane to ~1e-16 at any `|normal|`, under
+either rule. The refusal is reachable only by a hand-authored or third-party job.
+
+### The stepped id: the rule, stated once
+
+Every 1-based region id crossing the bridge — the per-voxel `region_ids`,
+`SteppedCell::region_id`, `SteppedRegionCell::region_id`,
+`SyntheticStressRegionReport::region_id` — is a position among the job's **include**
+regions in declaration order, never an index into `lattice.regions`. Swept the file:
+`region_id - 1` appeared at exactly one site, the one fixed here. The doubled path
+beside it (`run_job.cpp`, the `base_of` loop) already walked the regions and counted
+includes in lockstep, which is the correct pattern and is why only the stepped branch
+was wrong.
+
+Resolving that id is now `job_include_region()` in `job.hpp`, so the decision has a
+test (`test_job`'s "a stepped cell names the include, not the nth region") instead of
+sitting inline in `run_job.cpp`.
+
+★ AND A CORRECTION TO THE DIAGNOSIS I gave with the previous two commits (reviewer,
+2026-09-30). I wrote that "nothing links `run_job.cpp`". That is false: it is compiled
+into `libtopopt`, and `test_job_loadcase_copy` calls `production_loadcase_from_job`
+(run_job.cpp:7788) out of it, as do two harness probes. What hides these decisions is
+the three ANONYMOUS NAMESPACES at :67-7774, :7934-8739 and :10673-10933 -- nothing in
+them has external linkage, so no test can name them whatever it links.
+
+The remedy is unchanged: lift a decision into a testable place when you touch it. But
+the cheaper route for a large function that is NOT a job-schema fact is to move it out
+of the anonymous namespace and declare it in an internal header WITHOUT moving the
+body -- the precedent `production_loadcase_from_job` already sets. A job-schema fact
+like `job_include_region` still belongs in `job.hpp`. No inventory or refactor is
+proposed here.
+
+## The probe's certification-mask gap: SPENT, and it measures as a no-op (2026-09-30)
+
+The gap left open on 2026-09-29 is closed by construction: the run's synthesis domain
+is now one function, `lattice_synthesis_domain()` in `lattice_boundary.hpp`
+(`lattice_certification_mask(boundary, …) ∩ posture`), and the run and the organic
+size probe both call it. The probe builds its own boundary per candidate because the
+cell-overlap proof is a function of the cell.
+
+**Cost, measured on the maintainer's stand** (`.m2_organic_aes_synth3`, resolution 128,
+organic aesthetic, one candidate window 4.5–5.5 mm):
+
+| | |
+|---|---|
+| grid | **468,224 voxels** — resolution 128 on the stand's bbox, not a 128³ cube (2.1M) |
+| boundary + domain, per candidate | **0.1455 s** |
+| the probe's own per-candidate total | 3.8 s |
+| **added** | **3.8 %** — under the 10 % bar |
+
+**Effect, on the same run: NONE.** `|posture| = 62,465` and `|domain| = 62,465`. The
+domain is `posture ∩ cert` by construction, so ⊆ posture; equal counts therefore mean
+the sets are EQUAL, and the probe's inputs are unchanged voxel for voxel. Same on the
+`cli_organic_dead_parity` fixture, where a `loads.clearances` keep-out shrinks the
+CANDIDATE set too and so moves both terms together.
+
+**So no meaning-changes row, and that is the finding.** This is the SECOND time this
+gap has measured as a no-op: the `cand` → posture move was the first
+(`params.organic_geometry` masks every candidate). On both parts available, all four
+sets — `cand`, the posture, the certification mask and the run's `mask` — coincide.
+What is bought is the CONTRACT, not a number: the probe can no longer drift from the
+run by using a different set, and there is now one definition to change instead of
+five inline lines plus a call site that forgot them.
+
+What would separate the sets is the shell base rejecting posture voxels at convex
+edges (the isosurface chamfers the voxel-cube union — see `lattice_boundary_for`'s
+note, measured at h/√3 = 0.984 mm on a 1.705 mm voxel). Neither part exercises it.
+`test_lattice_clip_shell`'s "the synthesis domain is cert ∩ posture" builds a synthetic
+grid with a keep-out where the sets DO differ (printed 512, certified 408), and goes
+red on 5 checks when the intersection is dropped — that is where the guarantee lives,
+not in either part's numbers.

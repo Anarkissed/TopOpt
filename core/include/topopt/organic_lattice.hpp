@@ -1249,10 +1249,15 @@ struct SyntheticStressRegionReport {
   // dead or it is not, and the unit of that decision is the WALL.
   //
   // p99 of the REAL von Mises over this region's candidate voxels, measured before
-  // anything was written, and whether it came in under the dead threshold. A flagged
-  // region is synthesised whole either way (a stated focus is the user's instruction,
-  // not a hint) -- but if `p99_under_threshold` is false the user has flagged a wall
-  // that is carrying load, and this is where that shows.
+  // anything was written, and whether it came in under the dead threshold.
+  //
+  // ★ THE FLAG PROPOSES; THE MEASUREMENT DISPOSES. An earlier draft of this comment
+  // said a flagged region is synthesised "whole either way" -- that a stated focus is
+  // an instruction rather than a hint. It is not what core does, and two standing
+  // tests refuse it ("a region that carries load is not touched at all"). The flag
+  // says WHICH walls to consider and where the foci go; `p99_under_threshold` decides
+  // whether the wall is dead. A flagged wall that is carrying load is left ENTIRELY
+  // ALONE and says so on stderr.
   double p99_von_mises = 0.0;
   bool p99_under_threshold = false;
   bool whole_region = false;      // every candidate voxel took the focal field
@@ -1997,12 +2002,45 @@ struct OrganicRecommendRow {
   double margin = 0.0;
   double traced_mm = 0.0;
 };
+// ── ★ WHY THE PROBE DID NOT RUN A CERTIFICATE ────────────────────────────────────
+// Extracted from run_job so the DECISION can be tested without a job run, which is
+// how it was wrong for so long: the cap branch fired whenever segments existed, so an
+// AESTHETIC run -- which had already recorded the true reason -- had it overwritten
+// with "N segments exceed the probe's 600000 cap". False on its face: a stand run
+// reports 39,849 segments against a 600,000 cap. A receipt that invents a limit it
+// did not hit sends the reader to tune a number that was never the reason.
+//
+// Only the DECISION lives here. The caller still formats the message, because the cap
+// text carries the segment count and the certificate's own text carries its verdict.
+enum class OrganicProbeSkip {
+  None,          // a certificate should run
+  AestheticIntent,   // nothing reads a certificate on this run
+  NoSegments,        // there is no network to certify
+  SegmentCap,        // and ONLY this may claim the cap
+};
+inline OrganicProbeSkip organic_probe_certificate_skip(bool want_cert,
+                                                       std::size_t segments,
+                                                       std::size_t cap) {
+  if (!want_cert) return OrganicProbeSkip::AestheticIntent;
+  if (segments == 0) return OrganicProbeSkip::NoSegments;
+  if (segments > cap) return OrganicProbeSkip::SegmentCap;
+  return OrganicProbeSkip::None;
+}
+
 struct OrganicRecommendation {
   std::string mode;               // "structural" | "aesthetic"
   bool fit_found = false, auto_found = false;
   double fit_mm = 0.0;
   double auto_lo_mm = 0.0, auto_hi_mm = 0.0;
   double fit_margin = 0.0, auto_margin = 0.0;
+  // ★ WHETHER THAT MARGIN MEANS ANYTHING (2026-09-29). The margins above are 0.0
+  // both when the selected row was certified at 0 -- which cannot happen -- and
+  // when NO CERTIFICATE RAN AT ALL, which is every aesthetic run, and when no row
+  // was found. A consumer cannot tell those apart from the number, and the app's
+  // Recommended pills read the 0 straight out as "· 0.00". So the row's own
+  // `certified` flag is carried forward and the receipt states it beside the
+  // margin instead of leaving it to be inferred.
+  bool fit_certified = false, auto_certified = false;
   double fit_traced_mm = 0.0, auto_traced_mm = 0.0;
   std::string fit_source, auto_source;
   std::vector<std::pair<OrganicRecommendRow, std::string>> rejected;  // row, reason
