@@ -113,7 +113,7 @@ final class FlexibleSqueezeGroupsUITests: XCTestCase {
             // ★ RE-PINNED (D2 review): the move makes the top share the sides' firmer material — the
             // pop-up opens at once and selects top A; [Keep apart] closes it, face 3's card reopens
             // under group 2's header (FlexibleSqueezeGroupsReviewUITests pins the pop-up itself)
-            XCTAssertTrue(h.pumpUntil(60) { self.h.local(host, "fix-keep-apart") != nil }, "\(tag): the pop-up opens")
+            XCTAssertTrue(h.pumpUntil(180) { self.h.local(host, "fix-keep-apart") != nil }, "\(tag): the pop-up opens")   // (180 s: 60 s missed under a load average of 45)
             let keep = try XCTUnwrap(h.local(host, "fix-keep-apart"))
             h.click(host, CGPoint(x: keep.midX, y: keep.midY))
             XCTAssertTrue(h.pumpUntil(3) { self.h.local(host, "fix-keep-apart") == nil })

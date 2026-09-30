@@ -117,7 +117,7 @@ final class FlexibleSqueezeGroupsReviewUITests: XCTestCase {
             m.moveToGroup(5, two)
             // ★ THE MISS POPS AT ONCE (D2 review): the top now shares the sides' firmer material —
             // the pop-up selects group 1's face and offers [Join the groups] [Keep apart]
-            XCTAssertTrue(pumpUntil(60) { self.local(host, "fix-keep-apart") != nil }, "\(tag): the pop-up opens on the move")
+            XCTAssertTrue(pumpUntil(180) { self.local(host, "fix-keep-apart") != nil }, "\(tag): the pop-up opens on the move")   // (180 s: the designs run first; 60 s missed under a load average of 45)
             XCTAssertEqual(m.selectedRegion, m.squeezeGroups[0].regions.first, "\(tag): it selects the group that misses")
             XCTAssertNotNil(local(host, "fix-join-1-\(two)"), "\(tag): [Join the groups]")
             let keep = try XCTUnwrap(local(host, "fix-keep-apart"))
