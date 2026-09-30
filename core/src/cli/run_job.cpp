@@ -5663,11 +5663,24 @@ LatticeVariantOutcome lattice_one_variant(
         JobGrading jg2 = job.grading;
         jg2.cell_min_mm = cc.lo; jg2.cell_max_mm = cc.hi; jg2.cell_mm = cc.hi;
         const GradedField agf = grade_lattice(solved_grid, dens, v.von_mises_field, &cand, alt, printed_iso);
-        std::vector<char> pmask = agf.posture.mask;
-        // the run's order: synthesise over the posture mask, THEN clear the rim
+        // ★ THE RUN'S DOMAIN, NOT THE POSTURE (reviewer, 2026-09-30). The run builds
+        // its lattice on lattice_certification_mask INTERSECT the posture; the probe
+        // used the posture alone, so it forecast for a set the run does not build.
+        // Same function, same terms, this candidate's own coarsest cell. The boundary
+        // is per candidate because the cell-overlap proof is a function of the cell --
+        // measured cost is stated in the commit; v.v3.mesh is already in hand here.
+        const double pcell = agf.cell_size_mm > 0.0 ? agf.cell_size_mm : cc.hi;
+        const LatticeBoundary pbnd =
+            lattice_boundary_for(solved_grid, dens, pcell, lattice_kos, lattice_roles,
+                                 printed_iso, &v.v3.mesh);
+        const std::vector<char> pdomain = lattice_synthesis_domain(
+            pbnd, solved_grid, dens, printed_iso,
+            solved_grid.origin, pcell, agf.posture.mask);
+        std::vector<char> pmask = pdomain;
+        // the run's order: synthesise over the domain, THEN clear the rim
         SyntheticStressReport prep;
         const std::vector<double> probe_stress = stress_tensor_for_organic(
-            job, solved_grid, agf.posture.mask, region_ids, v.stress_tensor_field, &prep);
+            job, solved_grid, pdomain, region_ids, v.stress_tensor_field, &prep);
         // ★ AND THE SAME GRADING INPUT: ruling H hands a whole-synthesised wall the
         // window's MIDDLE spacing, because its manufactured field has no real stress
         // to grade by. The probe used to skip this and take the coarsest end, so it
@@ -6189,18 +6202,16 @@ LatticeVariantOutcome lattice_one_variant(
   // activation) and the posture. On a graded run it is intersected with the
   // law's own mask (voxels the law kept solid drop out; law-masked voxels the
   // shared predicate's cell-overlap proof rejects are counted, not hidden).
-  std::vector<char> mask = lattice_certification_mask(
-      boundary, solved_grid, dens, printed_iso, solved_grid.origin, cell);
+  // ★ ONE DEFINITION, SHARED WITH THE SIZE PROBE (reviewer, 2026-09-30). This was
+  // five lines here, so the probe -- which exists to forecast this run -- synthesised
+  // over the posture ALONE and worked on a strictly larger set. Both now call
+  // lattice_synthesis_domain(); an empty posture means ungraded, which is the
+  // behaviour the `if (graded)` guard used to express.
   long long dropped_by_overlap = 0;
-  if (graded) {
-    for (std::size_t e = 0; e < mask.size(); ++e) {
-      if (mask[e] && !gf.posture.mask[e]) {
-        mask[e] = 0;  // the law left it solid (too-thin fallback / not a candidate)
-      } else if (!mask[e] && gf.posture.mask[e]) {
-        ++dropped_by_overlap;
-      }
-    }
-  }
+  const std::vector<char> kNoPosture;
+  std::vector<char> mask = lattice_synthesis_domain(
+      boundary, solved_grid, dens, printed_iso, solved_grid.origin, cell,
+      graded ? gf.posture.mask : kNoPosture, &dropped_by_overlap);
   // ── ★ GRADE TO SOLID AT THE OUTLINE, for organic (see organic_solid_rim_band) ──
   // ★★ THE BAND IS COMPUTED HERE AND APPLIED AFTER THE TRACER (ruling G). It used to be
   // cleared from the mask on this line, which took it out of the tracer's candidates and
@@ -6911,12 +6922,29 @@ LatticeVariantOutcome lattice_one_variant(
       // counts INCLUDE regions; `regions[region_id - 1]` counted ALL of them, so one
       // exclude declared first handed this plan the exclude's prism. See
       // job_include_region().
-      if (const JobLatticeRegion* jr =
-              job_include_region(job.lattice.regions, rc.region_id)) {
-        pr.slot_origin = jr->origin;
-        pr.normal = jr->normal;
-        pr.depth_mm = jr->depth_mm;
+      const JobLatticeRegion* jr =
+          job_include_region(job.lattice.regions, rc.region_id);
+      // ★ A CAN'T-HAPPEN STILL REFUSES (reviewer, 2026-09-30). `rc.region_id` comes
+      // from the run's own per-voxel ids, so an id with no include region is not
+      // reachable today. Leaving the frame at zero was still the wrong failure mode:
+      // `depth_mm` 0 means "skip the depth test" in stepped_validate_plan, so a plan
+      // would be validated against a prism that does not exist and pass the one check
+      // that would have caught it. Name the id and the count instead.
+      if (jr == nullptr) {
+        int includes = 0;
+        for (const JobLatticeRegion& q : job.lattice.regions)
+          if (q.role == "include") ++includes;
+        throw JobError(
+            "the stepped step derived a cell for include region " +
+            std::to_string(rc.region_id) + ", but this job declares " +
+            std::to_string(includes) +
+            " include region(s). A region id is a 1-based position among the INCLUDE "
+            "regions (see job_include_region), so this run cannot say which wall that "
+            "cell belongs to and will not guess.");
       }
+      pr.slot_origin = jr->origin;
+      pr.normal = jr->normal;
+      pr.depth_mm = jr->depth_mm;
       plan_regions.push_back(pr);
     }
     // ★ RULING A: DOUBLED SENDS ITS CELLS TOO, and its base is not a per-region answer.

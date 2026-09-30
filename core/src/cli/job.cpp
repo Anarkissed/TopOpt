@@ -1434,6 +1434,17 @@ JobDescription parse_job(const std::string& json_text) {
               gv, {"origin", "normal", "half_u_mm", "half_w_mm", "depth_mm", "outline_uv",
                    "frame_u", "frame_w"},
               "a face lattice region geometry");
+          // ── ★ WHICH WALL (reviewer, 2026-09-30) ──────────────────────────
+          // The run-time refusal these checks replace named the region -- "lattice
+          // region N (face F)" -- and a parse-time refusal that names neither sends
+          // the user to hunt through a list. The declared position is the region's
+          // 1-based place in `lattice.regions`, which is what `regions.size() + 1` is
+          // here because the region is pushed at the end of this iteration; the face
+          // id is included when the job states one.
+          const std::string which =
+              "lattice region " +
+              std::to_string(job.lattice.regions.size() + 1) +
+              (reg.face_id >= 0 ? " (face " + std::to_string(reg.face_id) + ")" : "");
           // ── ★ origin AND normal ARE PARSED FIRST, BECAUSE THE FRAME CHECK READS
           // THE NORMAL (#354, 2026-09-30) ────────────────────────────────────
           // These two used to be parsed BELOW the frame block, so the "frame axes must
@@ -1452,7 +1463,7 @@ JobDescription parse_job(const std::string& json_text) {
           {
             const Vec3& nn = reg.normal;
             if (nn.x * nn.x + nn.y * nn.y + nn.z * nn.z <= 0.0)
-              schema_fail("a face lattice region \"normal\" must be non-zero");
+              schema_fail(which + ": a face lattice region \"normal\" must be non-zero");
           }
           // ── ★ THE FRAME outline_uv IS IN, WHEN THE JOB STATES IT (app, 2026-09-22)
           // Both axes or neither: one alone cannot define a frame, and guessing the
@@ -1465,7 +1476,7 @@ JobDescription parse_job(const std::string& json_text) {
             const JsonValue* fw = find_key(gv, "frame_w");
             if ((fu != nullptr) != (fw != nullptr))
               schema_fail(
-                  "a face lattice region geometry states one of \"frame_u\" / "
+                  which + ": a face lattice region geometry states one of \"frame_u\" / "
                   "\"frame_w\" without the other -- a frame needs both axes, and "
                   "deriving the missing one would put the outline back on the "
                   "convention these keys exist to replace");
@@ -1477,7 +1488,7 @@ JobDescription parse_job(const std::string& json_text) {
               const double lu = len(reg.frame_u), lw = len(reg.frame_w);
               if (!(std::fabs(lu - 1.0) < 1e-6) || !(std::fabs(lw - 1.0) < 1e-6))
                 schema_fail(
-                    "a face lattice region's \"frame_u\" / \"frame_w\" must be UNIT "
+                    which + ": a face lattice region's \"frame_u\" / \"frame_w\" must be UNIT "
                     "vectors (got lengths " + std::to_string(lu) + " and " +
                     std::to_string(lw) + ")");
               const double uw = reg.frame_u.x * reg.frame_w.x +
@@ -1485,13 +1496,17 @@ JobDescription parse_job(const std::string& json_text) {
                                 reg.frame_u.z * reg.frame_w.z;
               if (!(std::fabs(uw) < 1e-6))
                 schema_fail(
-                    "a face lattice region's \"frame_u\" and \"frame_w\" must be "
+                    which + ": a face lattice region's \"frame_u\" and \"frame_w\" must be "
                     "PERPENDICULAR (u . w = " + std::to_string(uw) + ")");
-              // ★ AGAINST THE UNIT normal. `normal` is only required to be non-zero,
-              // and u . n scales with |n| -- a raw dot product would apply a tolerance
-              // three times looser to a normal of [0,0,3] than to [0,0,1]. Lying in
-              // the plane is a property of the DIRECTION, so the tolerance has to be
-              // too. (|n| > 0 is already refused above.)
+              // ★ AGAINST THE UNIT normal, AND THE DIRECTION OF THE EFFECT IS THIS
+              // WAY ROUND (reviewer, 2026-09-30 -- the first version of this comment
+              // had it backwards). u . n = |n| (u . n_hat), so the raw test
+              // |u . n| < 1e-6 accepts |u . n_hat| < 1e-6 / |n|: a LONG normal makes
+              // it STRICTER (on [0,0,3], 3.3e-7 rad) and a SHORT one makes it LOOSER
+              // (on [0,0,1e-3] it admits a 1e-3 rad tilt, a thousand times the
+              // intended bound). The loose case is the dangerous one and it is a short
+              // normal, not a long one. Lying in the plane is a property of the
+              // DIRECTION, so the tolerance must be too. (|n| > 0 is refused above.)
               const double ln = len(reg.normal);
               const Vec3 un{reg.normal.x / ln, reg.normal.y / ln, reg.normal.z / ln};
               const double nu = reg.frame_u.x * un.x + reg.frame_u.y * un.y +
@@ -1500,7 +1515,7 @@ JobDescription parse_job(const std::string& json_text) {
                                 reg.frame_w.z * un.z;
               if (!(std::fabs(nu) < 1e-6) || !(std::fabs(nw) < 1e-6))
                 schema_fail(
-                    "a face lattice region's frame axes must lie IN the face plane "
+                    which + ": a face lattice region's frame axes must lie IN the face plane "
                     "(u . n = " + std::to_string(nu) + ", w . n = " +
                     std::to_string(nw) + ") -- an axis out of plane means the frame "
                     "and the normal describe different faces");

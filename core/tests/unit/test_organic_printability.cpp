@@ -1878,9 +1878,10 @@ void test_dual_contour() {
 //
 // ★ WHAT THIS TEST CAN AND CANNOT GUARD, said plainly. It pins the MECHANISM: that
 // the dead verdict moves with the domain, so the two must agree; and that the same
-// domain gives the same set. It CANNOT pin the call site, because nothing links
-// run_job.cpp -- the same structural blind spot that let the probe's false segment-
-// cap reason survive. A real probe-vs-run comparison needs a job run. That is the
+// domain gives the same set. It CANNOT pin the call site: that code sits in one of
+// run_job.cpp's anonymous namespaces (:67-7774), so nothing outside the file can name
+// it -- the same structural blind spot that let the probe's false segment-cap reason
+// survive. A real probe-vs-run comparison needs a job run. That is the
 // second defect in a row this gap has hidden, and it is the argument for making
 // run_job reachable from a test.
 void test_the_dead_set_follows_the_domain() {
@@ -1950,8 +1951,8 @@ void test_the_dead_set_follows_the_domain() {
 // reader to tune a number that was never the reason.
 //
 // The decision now lives in one pure function that the call site switches on, so it
-// can be tested without a job run -- which is why it went unnoticed: nothing links
-// run_job.cpp, so nothing could see this.
+// can be tested without a job run. Why it went unnoticed: it sat in an anonymous
+// namespace in run_job.cpp, where no test can name it.
 void test_the_probe_reports_the_TRUE_reason() {
   using namespace topopt;
   constexpr std::size_t cap = 600000;

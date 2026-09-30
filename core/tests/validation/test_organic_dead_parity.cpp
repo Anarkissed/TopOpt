@@ -30,8 +30,12 @@
 //     separated those two sets (cell 3-10 mm, uniform and swept, three rho bands, a
 //     clearance keep-out, all three outer finishes), so that gap is unmeasured here.
 //
-// WHY THIS IS AT CLI LEVEL. The domain is chosen in run_job.cpp, and nothing links
-// run_job.cpp: the unit test beside this one (test_organic_printability's "the dead
+// WHY THIS IS AT CLI LEVEL. The domain is chosen inside one of run_job.cpp's three
+// ANONYMOUS NAMESPACES (:67-7774), so no unit test can name it. (The file itself is
+// linked -- test_job_loadcase_copy calls production_loadcase_from_job out of it; it is
+// the namespaces, not the linkage, that hide this. An earlier version of this comment
+// said "nothing links run_job.cpp", which is false.) The unit test beside this one
+// (test_organic_printability's "the dead
 // set follows the domain") pins the MECHANISM -- one wall, one stress field, opposite
 // verdicts over two domains -- but it cannot see which domain the probe passes. Only
 // a run can. So this runs the real topopt-cli as a subprocess, the way test_cli and

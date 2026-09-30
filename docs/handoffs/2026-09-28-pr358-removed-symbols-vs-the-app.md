@@ -187,8 +187,15 @@ candidate, which is a real cost and its own measurement.
 ## MEANING CHANGES, addendum 2 (2026-09-30) — #354's variant-work items
 
 Neither item removes or renames anything, and neither changes a job or receipt key's
-name, shape or type, so every grep in this handoff still comes back clean. Both
-change which jobs are ACCEPTED, which is the kind of change an app notices.
+name, shape or type, so every grep in this handoff still comes back clean. Both change
+which jobs are ACCEPTED — but NOT in the same direction, and the first draft of this
+section blurred that (reviewer, 2026-09-30):
+
+- **Only item 1 can refuse a job that was previously accepted**, and only a
+  hand-authored one (see the app-impact note below).
+- **Item 2 makes wrongly refused jobs RUN.** It could refuse a job only if that job's
+  plan had been packed against the wrong wall to begin with, and the app packs by
+  include order (`LatticeSteppedCellWire.wire`), so there is no such job.
 
 | what | was | is | effect |
 |---|---|---|---|
@@ -197,12 +204,24 @@ change which jobs are ACCEPTED, which is the kind of change an app notices.
 
 ### The frame check: what a job that was passing may now be refused for
 
-The in-plane test is also now taken against the NORMALISED normal. `normal` is only
-required to be non-zero, and `u · n` scales with `|n|`, so a raw dot product applied a
-tolerance `|n|` times looser — a frame 45° out of plane on a normal of `[0,0,3]` would
-have been judged by a bound three times wider than the same frame on `[0,0,1]`. In
-plane is a property of the direction, so the tolerance is too. Anything the app sends
-with a unit normal is unaffected.
+The in-plane test is also now taken against the NORMALISED normal, and the direction
+of that effect is the opposite of what I first wrote here (reviewer, 2026-09-30).
+`u · n = |n| (u · n̂)`, so the raw test `|u · n| < 1e-6` accepts `|u · n̂| < 1e-6/|n|`:
+
+| `\|n\|` | raw admits | so the raw test was |
+|---|---|---|
+| 1000 | 1e-9 rad | 1000x STRICTER — refuses a frame that is in plane |
+| 1 | 1e-6 rad | the intended bound |
+| 1e-3 | 1e-3 rad | 1000x LOOSER — the dangerous case |
+
+A SHORT normal is the loose one, not a long one. Both directions are now pinned by a
+test that goes red with the raw dot product restored (`test_job` cases (g) and (h));
+every other frame case returns the same verdict under both rules.
+
+APP IMPACT: NONE. The app does not state an arbitrary frame — it builds `frame_u` /
+`frame_w` from the UNIT normal by cross products (`LatticeSettings.swift` ~326-333,
+`LatticeRegionMask.basis`), so its axes are in plane to ~1e-16 at any `|normal|`, under
+either rule. The refusal is reachable only by a hand-authored or third-party job.
 
 ### The stepped id: the rule, stated once
 
@@ -217,4 +236,58 @@ was wrong.
 
 Resolving that id is now `job_include_region()` in `job.hpp`, so the decision has a
 test (`test_job`'s "a stepped cell names the include, not the nth region") instead of
-sitting inline in `run_job.cpp` where nothing links.
+sitting inline in `run_job.cpp`.
+
+★ AND A CORRECTION TO THE DIAGNOSIS I gave with the previous two commits (reviewer,
+2026-09-30). I wrote that "nothing links `run_job.cpp`". That is false: it is compiled
+into `libtopopt`, and `test_job_loadcase_copy` calls `production_loadcase_from_job`
+(run_job.cpp:7788) out of it, as do two harness probes. What hides these decisions is
+the three ANONYMOUS NAMESPACES at :67-7774, :7934-8739 and :10673-10933 -- nothing in
+them has external linkage, so no test can name them whatever it links.
+
+The remedy is unchanged: lift a decision into a testable place when you touch it. But
+the cheaper route for a large function that is NOT a job-schema fact is to move it out
+of the anonymous namespace and declare it in an internal header WITHOUT moving the
+body -- the precedent `production_loadcase_from_job` already sets. A job-schema fact
+like `job_include_region` still belongs in `job.hpp`. No inventory or refactor is
+proposed here.
+
+## The probe's certification-mask gap: SPENT, and it measures as a no-op (2026-09-30)
+
+The gap left open on 2026-09-29 is closed by construction: the run's synthesis domain
+is now one function, `lattice_synthesis_domain()` in `lattice_boundary.hpp`
+(`lattice_certification_mask(boundary, …) ∩ posture`), and the run and the organic
+size probe both call it. The probe builds its own boundary per candidate because the
+cell-overlap proof is a function of the cell.
+
+**Cost, measured on the maintainer's stand** (`.m2_organic_aes_synth3`, resolution 128,
+organic aesthetic, one candidate window 4.5–5.5 mm):
+
+| | |
+|---|---|
+| grid | **468,224 voxels** — resolution 128 on the stand's bbox, not a 128³ cube (2.1M) |
+| boundary + domain, per candidate | **0.1455 s** |
+| the probe's own per-candidate total | 3.8 s |
+| **added** | **3.8 %** — under the 10 % bar |
+
+**Effect, on the same run: NONE.** `|posture| = 62,465` and `|domain| = 62,465`. The
+domain is `posture ∩ cert` by construction, so ⊆ posture; equal counts therefore mean
+the sets are EQUAL, and the probe's inputs are unchanged voxel for voxel. Same on the
+`cli_organic_dead_parity` fixture, where a `loads.clearances` keep-out shrinks the
+CANDIDATE set too and so moves both terms together.
+
+**So no meaning-changes row, and that is the finding.** This is the SECOND time this
+gap has measured as a no-op: the `cand` → posture move was the first
+(`params.organic_geometry` masks every candidate). On both parts available, all four
+sets — `cand`, the posture, the certification mask and the run's `mask` — coincide.
+What is bought is the CONTRACT, not a number: the probe can no longer drift from the
+run by using a different set, and there is now one definition to change instead of
+five inline lines plus a call site that forgot them.
+
+What would separate the sets is the shell base rejecting posture voxels at convex
+edges (the isosurface chamfers the voxel-cube union — see `lattice_boundary_for`'s
+note, measured at h/√3 = 0.984 mm on a 1.705 mm voxel). Neither part exercises it.
+`test_lattice_clip_shell`'s "the synthesis domain is cert ∩ posture" builds a synthetic
+grid with a keep-out where the sets DO differ (printed 512, certified 408), and goes
+red on 5 checks when the intersection is dropped — that is where the guarantee lives,
+not in either part's numbers.

@@ -1167,16 +1167,19 @@ static void test_a_stated_frame_must_lie_in_the_face_plane() {
                 "frame: a frame tilted out of the face plane must be refused");
 
   // (e) ★ AND THE TEST MUST MEAN THE SAME THING FOR A NON-UNIT NORMAL. `normal` is
-  // not required to be unit (only non-zero), and u . n scales with |n| -- so a raw
-  // dot product against [0,0,3] applies a tolerance three times looser than against
-  // [0,0,1]. In-plane is a property of the DIRECTION, so the normal is normalised
-  // before the test: an in-plane frame is accepted...
+  // not required to be unit, only non-zero. u . n = |n| (u . n_hat), so the RAW test
+  // |u . n| < 1e-6 accepts |u . n_hat| < 1e-6 / |n| -- the bound moves with the
+  // length of a vector whose length was never meant to mean anything. In-plane is a
+  // property of the DIRECTION, so the normal is normalised before the test.
+  //
+  // These two cases pass under both rules and so pin NOTHING about the normalisation;
+  // they are here as ordinary coverage of a non-unit normal. The two that DO
+  // discriminate are (g) and (h).
   {
     const JobDescription j = parse_job(region("[0,0,3]", "[1,0,0]", "[0,1,0]"));
     CHECK(j.lattice.regions.size() == 1,
           "frame: an in-plane frame on a non-unit normal is accepted");
   }
-  // ...and the same tilt is refused there too, not silently absorbed by |n|.
   check_rejects(region("[0,0,3]", "[1,0,0]",
                        "[0,0.70710678118654752,0.70710678118654752]"),
                 "frame: a tilted frame is refused on a non-unit normal as well");
@@ -1186,6 +1189,30 @@ static void test_a_stated_frame_must_lie_in_the_face_plane() {
   // normal rather than the frame.
   check_rejects(region("[0,0,0]", "[1,0,0]", "[0,1,0]"),
                 "frame: a zero normal is refused");
+
+  // ── ★ (g) AND (h): THE TWO CASES THE NORMALISATION IS FOR ────────────────
+  // Every case above returns the same verdict under the raw dot product and under the
+  // normalised one, so none of them would notice if the normalisation were removed.
+  // These two do, in opposite directions. Both were proved RED by temporarily
+  // restoring `u . n` in job.cpp.
+  //
+  // (g) A SHORT normal is the LOOSE case, and it is the dangerous one. |n| = 1e-3
+  // with frame_w tilted 1e-4 rad out of plane: u . n = 1e-7, under the 1e-6 bound, so
+  // the raw test ACCEPTS a tilt a hundred times the bound it means to enforce. The
+  // normalised test sees 1e-4 and refuses.
+  check_rejects(region("[0,0,0.001]", "[1,0,0]",
+                       "[0,0.99999999500000004,0.00009999999983333333]"),
+                "frame: a 1e-4 rad tilt on a SHORT normal is refused (raw accepts it)");
+
+  // (h) A LONG normal is the STRICT case: |n| = 1000 with frame_w tilted 1e-8 rad
+  // gives u . n = 1e-5, over the bound, so the raw test REFUSES a frame that is in
+  // plane to a hundredth of the tolerance. Refusing a good job is a defect too.
+  {
+    const JobDescription j =
+        parse_job(region("[0,0,1000]", "[1,0,0]", "[0,1,0.00000001]"));
+    CHECK(j.lattice.regions.size() == 1,
+          "frame: a 1e-8 rad tilt on a LONG normal is accepted (raw refuses it)");
+  }
 }
 
 // --- ★ A STEPPED CELL'S region_id COUNTS INCLUDES, NOT REGIONS
