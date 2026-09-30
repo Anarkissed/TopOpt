@@ -22,7 +22,8 @@
 //   ρ(p)      = clamp(trilinear(rho), 0.05, 0.9)        — core's density, gaps filled
 //   m(p)      = trilinear(mask)                          — 1 lattice voxel, 0 not
 //   dRegion   = (0.5 − m(p)) · 2 · rhoSpacing            — ≤ 0 inside the lattice region
-//   dPart     = trilinear(partSDF)                        — part surface, − inside
+//   dPart     = trilinear(partSDF)                        — part surface, − inside; BEYOND the
+//               grid's box, max(that, |p − box|) (the grid has no margin — batch B review)
 //   dSkin     = skinMM − trilinear(skinDist)             — ≤ 0 deeper than the skin
 //   GYROID:     L = clamp(3.0915·t/ρ, Lmin, Lmax)
 //               THE LADDER: j = 4·log2(L/Lmin), j0 = floor(j), La = Lmin·2^(j0/4),
@@ -85,6 +86,15 @@ public struct FlexGrid: Equatable, Sendable {
         let c11 = at(i0, j1, k1) * (1 - fx) + at(i1, j1, k1) * fx
         let c0v = c00 * (1 - fy) + c10 * fy, c1v = c01 * (1 - fy) + c11 * fy
         return c0v * (1 - fz) + c1v * fz
+    }
+
+    /// How far `p` lies OUTSIDE the grid's box (its first and last voxel centres), 0 inside.
+    /// ★ THE PART'S SDF IS CLAMPED AT ITS GRID'S EDGE, and the preview's grid has no margin
+    /// (its last texel lies ON a face): beyond it the part's distance is at least this far
+    /// (batch B review — the shader's flx_part_distance, the twin).
+    public func outsideDistance(_ p: SIMD3<Float>) -> Float {
+        let lo = c0, hi = c0 + SIMD3<Float>(Float(nx - 1), Float(ny - 1), Float(nz - 1)) * spacing
+        return simd_length(simd_max(simd_max(lo - p, p - hi), .zero))
     }
 }
 
@@ -232,7 +242,13 @@ public enum FlexibleLatticeField {
 
     /// The lattice walls (what the preview draws). Negative inside.
     public static func lattice(at p: SIMD3<Float>, _ f: FlexibleLatticeInputs) -> Float {
-        Swift.max(Swift.max(wall(p, f), dRegion(p, f)), Swift.max(f.partSDF.sample(p), dSkin(p, f)))
+        Swift.max(Swift.max(wall(p, f), dRegion(p, f)), Swift.max(dPart(p, f), dSkin(p, f)))
+    }
+    /// The part's distance: the SDF — and beyond its grid's box never less than the distance
+    /// to that box. Inside the box the SDF stands as it is (a max with 0 would erase every wall).
+    public static func dPart(_ p: SIMD3<Float>, _ f: FlexibleLatticeInputs) -> Float {
+        let sdf = f.partSDF.sample(p), out = f.partSDF.outsideDistance(p)
+        return out > 0 ? Swift.max(sdf, out) : sdf
     }
 }
 

@@ -6647,7 +6647,7 @@ extension MetalMeshView {
                 dirty = true
             }
 
-            if renderer.applyFlexibleLattice(inputs.flexibleLattice, device: view.device) { dirty = true }   // token-keyed upload in FlexibleLatticePass.swift; squish frames already dirty via flexScale
+            if renderer.applyFlexibleLattice(inputs.flexibleLattice, device: view.device, baseScale: appliedFlexScale) { dirty = true }   // token-keyed upload in FlexibleLatticePass.swift; squish frames already dirty via flexScale; baseScale: the view's own squish, back when a loop lets go
             if dirty { redraw(view) }
             // Publish the camera projection (deduped) on the NEXT runloop, never inline:
             // `onProjection` writes the host view's `@State projection`, and `apply` runs

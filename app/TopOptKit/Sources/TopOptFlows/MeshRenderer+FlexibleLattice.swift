@@ -55,11 +55,13 @@ extension MeshRenderer {
     /// THE ONE ENTRY POINT for the Flexible lattice (called from the view's apply). Uploads
     /// once per TOKEN; `hidden` flips without re-uploading; nil tears the pass down.
     /// Returns true when the frame must be redrawn. The pass is built on `device` — the
-    /// view's, which is this renderer's.
+    /// view's, which is this renderer's. `baseScale`: the view's OWN flexScale (the
+    /// coordinator's), restored when a loop stops driving it (batch B review).
     @discardableResult
-    func applyFlexibleLattice(_ inputs: FlexibleLatticeLayerInputs?, device: MTLDevice?) -> Bool {
+    func applyFlexibleLattice(_ inputs: FlexibleLatticeLayerInputs?, device: MTLDevice?, baseScale: Float? = nil) -> Bool {
         guard let inputs else {
-            guard flexibleLattice != nil else { return false }
+            guard let old = flexibleLattice else { return false }
+            releaseFlexibleLoop(old.loop, baseScale: baseScale)
             flexibleLattice = nil
             return true
         }
@@ -84,10 +86,33 @@ extension MeshRenderer {
             changed = true
         }
         if pass.loop !== inputs.loop {
+            releaseFlexibleLoop(pass.loop, baseScale: baseScale)
             pass.loop = inputs.loop
             changed = true
         }
         return changed
+    }
+
+    /// ★ A LOOP TAKEN AWAY MID-PLAY GIVES THE VIEW BACK (batch B review). The step re-pauses
+    /// the view only when it runs WITH a paused loop; when the loop is detached (Settings goes
+    /// up, the lattice goes stale) or the pass torn down (he leaves the stage), no step ever
+    /// runs for it again — the main view kept drawing at display rate under the full-screen
+    /// page and on every other stage, and the dent stayed frozen at the loop's last frame
+    /// (the coordinator re-sends flexScale only when ITS value changes). So, on that edge:
+    /// the view's own flexScale comes back, the view returns to on-demand drawing (unless a
+    /// settle or a pulse still animates), and the loop forgets the view (a later play must
+    /// not wake a view nothing steps it in).
+    private func releaseFlexibleLoop(_ loop: FlexibleSquishLoop?, baseScale: Float?) {
+        guard let loop else { return }
+        if let s = baseScale { setFlexScale(s) }
+        let view = loop.view
+        loop.view = nil
+        guard loop.renderingContinuously else { return }
+        loop.renderingContinuously = false
+        if let view, !isSettling, !isPulsing {
+            view.isPaused = true
+            view.enableSetNeedsDisplay = true
+        }
     }
 
     // MARK: the main page's squish loop (round 3 batch B)

@@ -138,6 +138,20 @@ enum FlexibleLatticeShader {
         return T.sample(smp, uvw).rg;
     }
 
+    // ★ OUTSIDE THE PART'S GRID IS OUTSIDE THE PART (batch B review). The (SDF, skin) volume
+    // is sampled clamp-to-edge, and the preview's occupancy grid has no margin: its last
+    // texel lies ON the part's face (his pad's x = 100), SDF ≈ 0 there. Beyond it the clamped
+    // SDF stayed 0, so with that face's skin off F = max(wall, …, 0) was 0 on every gyroid
+    // sheet, and the march — its box dilated by the squish — drew walls up to s·maxDepth
+    // OUTSIDE the part (12 mm on his face 3). The distance to the grid's box is a lower bound
+    // on the distance to the part, which lies inside it (FlexibleLatticeField.dPart, the twin).
+    // INSIDE the box the SDF stands as it is (a max with 0 there would erase every wall).
+    static inline float flx_part_distance(float sdf, float4 O, float4 N, float3 p) {
+        float3 lo = O.xyz, hi = O.xyz + (N.xyz - 1.0f) * O.w;
+        float out = length(max(max(lo - p, p - hi), 0.0f));
+        return out > 0.0f ? max(sdf, out) : sdf;
+    }
+
     // mod(x, y) = x − y·floor(x/y) (the spec's, NOT C's fmod: it never goes negative)
     static inline float flx_fmod(float x, float y) { return x - y * floor(x / y); }
 
@@ -217,7 +231,7 @@ enum FlexibleLatticeShader {
         float2 ds = flx_sample_ds(dsT, U.dsO, U.dsN, p);
         float wall = flx_wall(U, rm.x, gRho, p, Lcur);
         float dRegion = (0.5f - rm.y) * 2 * U.rmO.w;
-        float dPart = ds.x;
+        float dPart = flx_part_distance(ds.x, U.dsO, U.dsN, p);
         float dSkin = U.shape2.y - ds.y;
         return max(max(wall, dRegion), max(dPart, dSkin));
     }
@@ -232,7 +246,7 @@ enum FlexibleLatticeShader {
                                  float3 p, thread float& Lcur) {
         const float far = 0.25f;
         float2 ds = flx_sample_ds(dsT, U.dsO, U.dsN, p);
-        float dPart = ds.x;
+        float dPart = flx_part_distance(ds.x, U.dsO, U.dsN, p);
         if (dPart > far) { Lcur = 1e30f; return dPart; }
         float dSkin = U.shape2.y - ds.y;
         if (dSkin > far) { Lcur = 1e30f; return max(dPart, dSkin); }
