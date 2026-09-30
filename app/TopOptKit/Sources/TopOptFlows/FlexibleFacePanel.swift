@@ -4,15 +4,14 @@
 // ★ HIS RULES. One line of text per setting (FlexibleRowCopy), details behind an (i) he
 // won't tap (FlexibleInfo), only what is necessary, as visual as possible: the curves, the
 // depth prism and the stamps are edited ON THE PART, so the panel only names and switches.
-// No wizard. Tabs: Face | Stamps | More.
+// No wizard. Tabs: Face | More (round 4: the Stamps tab went).
 //
-// ★ FACE: two part rows — the filament ("varioShore TPU · squish data") and the feel —
-// then, for the face selected on the model:
+// ★ FACE: three part rows — the filament ("varioShore TPU · squish data"), the feel and the
+// finish (round 4) — the face LIST (round 4), then, for the face selected in it or on the model:
 //   1. its name, [Pressed | Rests]                      (a tap on the part only SELECTS)
 //   2. its weight, from the main page's group (editing it writes back to the group)
-//   3. Shape [Curves] [Stamp]                           (Stamp: batch D)
-//   4. Deepest squish (the green chip drags it on the part)
-//   5. Solid skin
+//   3. Shape [Curves] [Stamp]                           (Stamp: its one stamp's rows follow)
+//   4. Deepest squish (the purple chip drags it on the part)
 // A face not set yet shows [Press it] [It rests here]; pressing a face with no main-page
 // load asks "How much weight presses here?" on the number pad.
 // ★ REMOVED (round 3): Both / Either / Centre (always both), the X / Y / 3D steps (the map
@@ -24,6 +23,14 @@
 // or unreached columns (FlexWarningLine), Auto that cannot meet the curve or picked nothing,
 // a missing filament list; Feel and Lattice are hidden for a calibrate-first filament (they
 // change nothing there yet); chips take their own widths so no label reads "…".
+// ★ ROUND 4 (batch D1, his notes on img 1, 5, 7):
+//   * the FACE LIST (FlexibleFaceList) under the part rows: every face set on the main page,
+//     one big obviously-tappable row each; a tap selects it and the rows below are ITS values;
+//   * Finish [None | Rim | Skin | Covered] — the whole model's (FlexibleFinish), a part row;
+//     the per-face "Solid skin" row is gone;
+//   * Shape [Curves | Stamp] is live and an either/or: Stamp shows the face's ONE stamp here
+//     (FlexibleFaceStampRows) and the curves leave the part at once;
+//   * More: Auto and Physics open their details inline behind a caret (FlexDisclosureRow).
 
 import SwiftUI
 import TopOptDesign
@@ -45,6 +52,15 @@ struct FlexibleFacePanel: View {
                         .fixedSize()
                 }
             }
+            // ★ ROUND 4: the WHOLE model's finish (his answer 4)
+            FlexRow(FlexibleRowCopy.finish, info: FlexibleRowCopy.Info.finish, id: "flexible-row-finish") {
+                FlexChips(options: FlexibleRowCopy.finishOptions, selection: model.settings.finishMode.rawValue,
+                          id: "flexible-finish", equalWidths: false) { v in model.edit { $0.finish = v } }
+                    .fixedSize()
+            }
+            Divider().overlay(DS.Color.strokeSubtle.color).padding(.vertical, DS.Space.xs)
+            // ★ ROUND 4: the faces set on the main page — tap one to edit it below
+            FlexibleFaceList(model: model)
             Divider().overlay(DS.Color.strokeSubtle.color).padding(.vertical, DS.Space.xs)
             faceRows
         }
@@ -83,10 +99,7 @@ struct FlexibleFacePanel: View {
 
     // MARK: face rows
 
-    private func name(_ r: Int) -> String {
-        let sector = model.regions.sector(r)
-        return FlexibleRowCopy.faceName(sector: sector?.name, face: sector == nil ? r : model.regions.faces(of: r, mesh: model.project.viewerMesh).first ?? r)
-    }
+    private func name(_ r: Int) -> String { model.faceName(r) }
 
     @ViewBuilder private var faceRows: some View {
         if let r = model.selectedRegion {
@@ -144,16 +157,14 @@ struct FlexibleFacePanel: View {
                     .accessibilityIdentifier("flexible-row-relinked")
             }
             FlexRow(FlexibleRowCopy.shape, info: FlexibleRowCopy.Info.shape, id: "flexible-row-shape") {
-                // ★ BATCH D: the Stamp shape (squish by stamp: flat curves + design_stamp, the
-                // stamp's weight as the face's, the prism on its footprint) lands here. Until
-                // then it is shown, and disabled — the curves are this build's shape.
-                FlexChips(options: FlexibleRowCopy.shapeOptions, selection: f.shape ?? "curves",
-                          id: "flexible-shape", disabled: ["stamp"], equalWidths: false) { v in
-                    guard v == "curves" else { return }
-                    model.edit { s in guard var g = s.face(r) else { return }; g.shape = nil; s.setFace(g) }
-                }
+                // ★ ROUND 4 (D1): an either/or — Stamp shows the face's ONE stamp below (flat
+                // curves + design_stamp, the face's weight, the prism on its footprint) and the
+                // curves leave the part at once; Curves hides the stamp
+                FlexChips(options: FlexibleRowCopy.shapeOptions, selection: f.isStampShape ? "stamp" : "curves",
+                          id: "flexible-shape", equalWidths: false) { v in model.setShape(r, v) }
                 .fixedSize()
             }
+            if f.isStampShape { FlexibleFaceStampRows(model: model, region: r, padTarget: $padTarget) }
             FlexRow(FlexibleRowCopy.deepest(f.deepestMM), info: FlexibleRowCopy.Info.deepest, id: "flexible-row-deepest") {
                 FlexEditPill(key: "deepest-\(r)", title: FlexibleRowCopy.deepestTitle, unit: "mm", value: f.deepestMM,
                              padTarget: $padTarget) { v in
@@ -175,10 +186,6 @@ struct FlexibleFacePanel: View {
                     if st.side { FlexInfoText("Side face · gyroid only · estimated", warning: true) }
                 }
             }
-        }
-        FlexRow(FlexibleRowCopy.skin, info: FlexibleRowCopy.Info.skin, id: "flexible-row-skin") {
-            GlassToggle(isOn: f.skinOn) { model.edit { s in guard var g = s.face(r) else { return }; g.skinOn.toggle(); s.setFace(g) } }
-                .accessibilityIdentifier("flexible-skin")
         }
     }
 
@@ -259,15 +266,13 @@ struct FlexibleMorePanel: View {
                         .fixedSize()
                 }
             }
+            // ★ ROUND 4 (img 7): Auto's reasoning and the physics open BELOW their titles, behind
+            // a caret (the (i) popover floated them beside the panel)
             let auto = autoLine
-            FlexRow(auto.text, info: FlexibleRowCopy.Info.auto, id: "flexible-row-auto", warning: auto.warning) {
-                EmptyView()
-            } extra: {
+            FlexDisclosureRow(auto.text, id: "flexible-row-auto", warning: auto.warning) {
                 FlexibleAutoPane(model: model)
             }
-            FlexRow(FlexibleRowCopy.physics, info: FlexibleRowCopy.Info.physics, id: "flexible-row-physics") {
-                EmptyView()
-            } extra: {
+            FlexDisclosureRow(FlexibleRowCopy.physics, id: "flexible-row-physics") {
                 FlexiblePhysicsPane(model: model)
             }
         }

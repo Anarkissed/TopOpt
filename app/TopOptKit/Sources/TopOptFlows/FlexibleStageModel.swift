@@ -110,8 +110,10 @@ extension FlexStackInfo {
 public final class FlexibleStageModel: ObservableObject {
 
     /// ★ ROUND 3 (item 5): Face | Stamps | More (Filament / Squish / Auto / Physics folded in).
+    /// ★ ROUND 4 (D1, his answer 3): Face | More — a face's ONE stamp is its Shape (Stamp), on
+    /// the Face tab; the Stamps tab and its check stamps are gone.
     public enum Tab: String, CaseIterable, Identifiable {
-        case face = "Face", stamps = "Stamps", more = "More"
+        case face = "Face", more = "More"
         public var id: String { rawValue }
     }
     public enum SceneState: Equatable {
@@ -430,6 +432,16 @@ public final class FlexibleStageModel: ObservableObject {
         ensureStack(region)
     }
 
+    /// ★ ROUND 4 (D1): a row of the Settings panel's face LIST was tapped — select that REGION
+    /// (a split sector as itself: never resolved through the part's face, which would pick the
+    /// whole face), so the rows below edit it and the part shows it selected.
+    public func select(_ region: Int) {
+        curvePoint = nil
+        selectedRegion = region
+        if tab == .more { tab = .face }
+        ensureStack(region)
+    }
+
     // MARK: the main page's loads (round 3, item 1.2 — FlexibleMainPageLoads)
 
     /// The main page's groups read as Flexible faces (cached per scene open and write-back).
@@ -665,7 +677,7 @@ public final class FlexibleStageModel: ObservableObject {
             if let temp {
                 let r = await Self.designEach(faces, key: { FlexFaceKey(region: $0.faceRegionID, rotation: $0.rotationDeg) }) { f in
                     let k = FlexFaceKey(region: f.faceRegionID, rotation: f.rotationDeg)
-                    let stamp = f.designStamp.flatMap { grids[$0.id] }
+                    let stamp = f.activeStamp.flatMap { grids[$0.id] }
                     return try await worker.withScene {
                         try $0.design(materialsPath: path, materialID: mat, tempC: temp, face: k.region,
                                       rotation: k.rotation, map: f.map, weightN: f.weightN,
@@ -735,7 +747,7 @@ public final class FlexibleStageModel: ObservableObject {
             let k = FlexFaceKey(region: f.faceRegionID, rotation: f.rotationDeg)
             guard stacks[k] != nil else { return nil }
             return FlexFaceRequest(face: f.faceRegionID, rotation: f.rotationDeg, map: f.map,
-                                   weightN: f.weightN, stamp: f.designStamp.flatMap { stampGrids[$0.id] })
+                                   weightN: f.weightN, stamp: f.activeStamp.flatMap { stampGrids[$0.id] })
         }
         guard !faces.isEmpty else { recommendation = nil; return }
         // Auto weighs every tested temperature and both families; the user's overrides
@@ -790,7 +802,9 @@ public final class FlexibleStageModel: ObservableObject {
                 grids[p.id] = g
             }
         }
-        for f in settings.faces { if let p = f.designStamp { lay(p, region: f.faceRegionID) } }
+        // ★ ROUND 4 (D1): only a Stamp-shaped face's ONE stamp, at the face's weight (the
+        // migration empties the check stamps; a stamp stored under Curves is not laid)
+        for f in settings.faces { if let p = f.activeStamp { lay(p, region: f.faceRegionID) } }
         for c in settings.checkStamps { lay(c.stamp, region: c.faceRegionID) }
         stampGrids = grids
     }
@@ -896,10 +910,9 @@ public final class FlexibleStageModel: ObservableObject {
         let build = self.build, key = settings.hashValue, temp = designTempC ?? 0
         let builtOn = openedKey, buildKey = latticeBuildKey
         let label = shapeOnly ? FlexibleReadiness.shapeOnlyLabel(material?.displayName ?? "This filament") : nil
-        let regions = self.regions
-        let skinOff: [(face: Int, cuts: [RegionCut])] = faces.filter { !$0.skinOn }.flatMap { f in
-            regions.faces(of: f.faceRegionID, mesh: part).map { (face: $0, cuts: regions.cuts(of: f.faceRegionID)) }
-        }
+        // ★ ROUND 4 (D1): the WHOLE model's finish (None / Rim / Skin / Covered) — the per-face
+        // "Solid skin" is gone
+        let finish = settings.finishMode
         let buildDir = sceneInfo?.buildDir ?? SIMD3(0, 0, 1)
         latticeBuilding = true
         latticeError = nil
@@ -922,7 +935,7 @@ public final class FlexibleStageModel: ObservableObject {
                 }
                 let inputs = try FlexibleLatticeBuilder.inputs(
                     field: field, part: part, topology: build.topology, beadsPerWall: build.beadsPerWall,
-                    beadWidthMM: build.beadWidthMM, buildDir: buildDir, skinOffFaces: skinOff)
+                    beadWidthMM: build.beadWidthMM, buildDir: buildDir, skinOffFaces: [], finish: finish)
                 let g = FlexibleGeneratedLattice(inputs: inputs, faces: squishFaces, keys: builtKeys, columnDepths: faceDepths,
                                                  columnNoLattice: faceNoLattice, extentMM: extentMM, generation: generation,
                                                  topology: build.topology, tempC: temp, settingsKey: key,

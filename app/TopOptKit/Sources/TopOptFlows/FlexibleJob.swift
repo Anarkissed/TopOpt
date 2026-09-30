@@ -71,7 +71,8 @@ public enum FlexibleJob {
         guard let material = i.settings.materialID else { throw EncodeError.noFilament }
         guard !i.settings.loadedFaces.isEmpty else { throw EncodeError.noLoadedFace }
         var faces: [[String: Any]] = []
-        for f in i.settings.faces { faces.append(try faceEntry(f, stamps: i.stampGrids)) }
+        let finish = i.settings.finishMode
+        for f in i.settings.faces { faces.append(try faceEntry(f, finish: finish, stamps: i.stampGrids)) }
         var block = header(i, material: material)
         block["faces"] = faces
         let checks = try i.settings.checkStamps.map { c -> [String: Any] in
@@ -112,20 +113,24 @@ public enum FlexibleJob {
         return b
     }
 
-    static func faceEntry(_ f: FlexibleFaceSettings, stamps: [UUID: FlexStamp]) throws -> [String: Any] {
-        var e: [String: Any] = ["face_region_id": f.faceRegionID, "role": f.role, "skin_on": f.skinOn]
+    /// ★ ROUND 4 (D1): `skin_on` is the MODEL-WIDE finish's (only Covered is a skin core can
+    /// be told about — core brief), and the face's SHAPE decides the rest: Curves sends the
+    /// drawn curves and never a stored stamp; Stamp sends flat curves and its one stamp.
+    static func faceEntry(_ f: FlexibleFaceSettings, finish: FlexibleFinish, stamps: [UUID: FlexStamp]) throws -> [String: Any] {
+        var e: [String: Any] = ["face_region_id": f.faceRegionID, "role": f.role, "skin_on": finish.jobSkinOn]
         guard f.isLoaded else { return e }
         if f.rotationDeg != 0 { e["frame_rotation_deg"] = f.rotationDeg }
+        let map = f.map
         e["weight_n"] = f.weightN
-        e["deepest_squish_mm"] = f.deepestMM
-        e["mode"] = f.mode
-        if f.mode == "centre_edge" {
-            e["curve_centre_edge"] = pairs(f.curveCentreEdge)
+        e["deepest_squish_mm"] = map.deepestMM
+        e["mode"] = map.mode
+        if map.mode == "centre_edge" {
+            e["curve_centre_edge"] = pairs(map.centreEdge)
         } else {
-            e["curve_x"] = pairs(f.curveX)
-            e["curve_y"] = pairs(f.curveY)
+            e["curve_x"] = pairs(map.x)
+            e["curve_y"] = pairs(map.y)
         }
-        if let s = f.designStamp {
+        if let s = f.activeStamp {
             guard let g = stamps[s.id] else { throw EncodeError.missingStampGrid(s.id) }
             e["design_stamp"] = stampEntry(g)
         }

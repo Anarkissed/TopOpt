@@ -47,6 +47,10 @@ public enum FlexibleRowCopy {
     public static let feelOptions: [(id: String, label: String)] = [("springy", "Springy"), ("damped", "Damped")]
     public static let roleOptions: [(id: String, label: String)] = [("loaded", "Pressed"), ("resting", "Rests")]
     public static let shapeOptions: [(id: String, label: String)] = [("curves", "Curves"), ("stamp", "Stamp")]
+    /// ★ ROUND 4 (D1, his answer 4): the WHOLE model's finish.
+    public static let finish = "Finish"
+    public static let finishOptions: [(id: String, label: String)] =
+        [("none", "None"), ("rim", "Rim"), ("skin", "Skin"), ("covered", "Covered")]
     public static let topologyOptions: [(id: String, label: String)] = [("auto", "Auto"), ("gyroid", "Gyroid"), ("honeycomb", "Honeycomb")]
     public static func temperatureOptions(_ tested: [Double]) -> [(id: String, label: String)] {
         [("auto", "Auto")] + tested.map { (String(Int($0)), "\(Int($0))°") }
@@ -60,6 +64,24 @@ public enum FlexibleRowCopy {
         return "Face \(face)"
     }
     public static let noFace = "Tap a face on the part"
+
+    /// ★ ROUND 4 (D1): one row of the face LIST — "Top A · Pressed · 10 kg" / "Face 0 · Rests".
+    public static func faceRow(name: String, pressed: Bool, kg: Double) -> String {
+        fit(pressed ? "\(name) · Pressed · \(kgText(kg))" : "\(name) · Rests")
+    }
+    public static let facesTitle = "Faces"
+
+    /// ★ ROUND 4 (D1): the Stamp shape's rows (the face's ONE stamp).
+    public static func stamp(name: String) -> String { fit("Stamp · \(name)", 34) }
+    public static func stampSize(widthMM: Double, lengthMM: Double) -> String {
+        fit(String(format: "Size %.0f × %.0f mm", widthMM, lengthMM))
+    }
+    public static func stampTurn(_ deg: Double) -> String { "Turned \(Int(deg.rounded()))°" }
+    public static let stampPress = "Press"
+    public static let stampPressOptions: [(id: String, label: String)] = [("soft", "Soft"), ("rigid", "Rigid")]
+    public static let stampImport = "Import an SVG or image…"
+    public static let stampWidthTitle = "Stamp width"
+    public static func stampOffFace(_ n: Double) -> String { fit(String(format: "%.1f N of the stamp lands off the face", n)) }
 
     /// "10 kg from Top" · "6.0 kg of Top's 10 kg" (a group over several faces) · "7.1 kg at an angle".
     public static func weight(kg: Double, group: String?, groupKg: Double, groupRegions: Int, oblique: Bool) -> String {
@@ -96,7 +118,6 @@ public enum FlexibleRowCopy {
     public static let shape = "Shape"
     public static func deepest(_ mm: Double) -> String { String(format: "Deepest squish %.1f mm", mm) }
     public static let deepestTitle = "Deepest squish"
-    public static let skin = "Solid skin"
     public static func sharesStack(with other: String) -> String { fit("Shares a stack with \(other)") }
 
     /// ★ WHAT HE MUST KNOW ABOUT THE SELECTED FACE, ON THE PANEL (verification of round 3: a
@@ -151,13 +172,15 @@ public enum FlexibleRowCopy {
         public static let feel = "Springy bounces back and prefers gyroid (lowest energy loss, best recovery). Damped soaks up the push and prefers honeycomb (bigger loop, firmer). Auto weighs both."
         public static let face = "Pressed: this face carries weight and squishes. Rests: it sits on something and carries no squish of its own. A face in a main-page Load group arrives pressed; an Anchor group's faces arrive resting. Tap a face on the part to select it."
         public static let weight = "The weight pressing this face. It comes from the main page's Load group and changing it here changes the group. A group over several faces is split by area, the way the solver spreads it; a press at an angle counts its straight-in part (cos θ)."
-        public static let shape = "Curves: the X and Y curves drawn on the face's two edges, always combined — soft only where both say soft. A point nearer the face is squishier. Tap the line to add a point; tap a point for an × to delete it. Stamp: squish by the shape of what presses (next build)."
+        public static let shape = "Curves: the X and Y curves drawn on the face's two edges, always combined — soft only where both say soft. A point nearer the face is squishier. Tap the line to add a point; tap a point for an × to delete it. Stamp: the face is shaped by ONE stamp — what presses it — and sinks the deepest squish under it; drag its handle on the part to move it. One or the other, never both."
+        public static let finish = "The whole part's outside. None: the lattice runs to the surface everywhere. Rim: a solid band along every edge, the faces open. Skin: a thin skin over the lattice with round holes in it. Covered: a solid skin everywhere. Only Covered reaches the solver today; Rim and Skin are drawn by the app."
+        public static let stamp = "What presses this face: pick one from the list, or import an SVG outline or an image (darker presses harder). Its weight is the face's weight."
+        public static let stampSize = "The stamp's real size across; its other side follows its own proportions."
+        public static let stampTurn = "Turns the stamp a quarter turn on the face."
+        public static let stampPress = "Soft spreads the weight evenly under the stamp (a hand, a foot). Rigid sinks evenly, like a flat plate."
         public static let deepest = "How far the softest spot sinks under the full weight. Drag the chip on the part: while you drag, a glass prism shows how deep it goes (drawn ×k, the same exaggeration as the dent). It snaps every 0.5 mm and at the lattice depth, and never goes deeper than the lattice. One drag stops where the drawn prism meets the lattice; let go and drag again to go deeper."
-        public static let skin = "On: a solid skin covers this face and the squish is under it. Off: the lattice reaches the face, so edges and side walls squish too."
         public static let temperature = "Foaming filaments change softness with nozzle temperature — and not in order. Only the temperatures the filament was tested at are offered; Auto picks one."
         public static let topology = "Auto picks gyroid or honeycomb for the feel you chose. Honeycomb has test data only when pressed along its prism axis, so a side face is gyroid only."
-        public static let auto = "Auto weighs every tested temperature and both lattice families for your faces and feel, and says why."
-        public static let physics = "Walls are one bead thick; two-bead walls come after coupon tests. Not a simulation: measured squash curves, looked up and inverted. Numbers are after break-in (a new part is firmer for its first squeezes). Dents have sharper edges than real life, and a small press on a big pad sinks less than shown. No certificate."
         public static let noFace = "Tap a face on the part to select it, then press it or let it rest. Faces from the main page's Load and Anchor groups are already set."
     }
 }

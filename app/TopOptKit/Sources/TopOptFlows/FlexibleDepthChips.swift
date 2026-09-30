@@ -78,7 +78,7 @@ struct FlexibleDepthChips: View {
             if let r = model.selectedRegion, let f = model.settings.face(r), f.isLoaded, let key = model.key(r),
                let st = model.stacks[key], let g = model.geometry[key], let proj = projection,
                let v = FlexibleDepthPrism.volume(region: r, stack: st, centres: g.centres, depthMM: f.deepestMM,
-                                                 k: model.frozenExaggeration ?? k),
+                                                 k: model.frozenExaggeration ?? k, columns: model.prismColumns(r)),
                let h = FlexibleDepthPrism.handle(v), let p = proj.project(h.anchor),
                FlexibleDepthChipLayout.shows(p, dragging: dragging || model.frozenExaggeration != nil,
                                              keepOut: keepOut, viewport: proj.viewportSize) {
@@ -105,17 +105,20 @@ struct FlexibleDepthChips: View {
         model.save()
     }
 
+    /// ★ ROUND 4 (D1, his explicit request, img 2): the lattice stage's depth knob — its
+    /// face-prism purple glass (`latticeDepthKnob`'s frost of the density ramp's 0.6 stop) —
+    /// with the true mm on it; brighter while dragged, as the knob is.
     private func chip(_ mm: Double, arrow: Angle) -> some View {
-        HStack(spacing: 5) {
+        let active = model.frozenExaggeration != nil
+        return HStack(spacing: 5) {
             Image(systemName: "arrow.down").font(.system(size: 12, weight: .bold)).rotationEffect(arrow)
             Text(String(format: "%.1f mm", mm)).font(.system(size: 13, weight: .semibold)).monospacedDigit()
         }
-        .foregroundStyle(DS.Color.textPrimary.color)
+        .foregroundStyle(.white)
         .padding(.horizontal, 12)
         .frame(minHeight: 44)
-        .background(Capsule().fill(.ultraThinMaterial))
-        .background(Capsule().fill(DS.Color.chipSolid.color.opacity(0.55)))
-        .overlay(Capsule().strokeBorder(FlexibleStageStyle.onPart.opacity(0.85), lineWidth: 1.5))
+        .liquidGlass(LiquidGlass.Tint.frost(FlexibleStageStyle.facePrismKnob, intensity: active ? 0.85 : 0.55),
+                     in: Capsule(), specular: active ? 1.3 : 1)
         .contentShape(Capsule())
         .accessibilityIdentifier("flexible-depth-chip")
     }

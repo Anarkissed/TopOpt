@@ -47,13 +47,18 @@ final class FlexibleRowCopyTests: XCTestCase {
         }
         lines += [FlexibleRowCopy.faceName(sector: "top A", face: 1), FlexibleRowCopy.faceName(sector: longGroup, face: 1),
                   FlexibleRowCopy.faceName(sector: nil, face: 12), FlexibleRowCopy.noFace,
-                  FlexibleRowCopy.deepest(3), FlexibleRowCopy.deepest(18.44), FlexibleRowCopy.skin, FlexibleRowCopy.shape,
+                  FlexibleRowCopy.deepest(3), FlexibleRowCopy.deepest(18.44), FlexibleRowCopy.finish, FlexibleRowCopy.shape,
                   FlexibleRowCopy.feel, FlexibleRowCopy.sharesStack(with: longGroup), FlexibleRowCopy.askWeight,
                   FlexibleRowCopy.temperature, FlexibleRowCopy.temperatureNoData, FlexibleRowCopy.topology,
                   FlexibleRowCopy.auto(topology: "honeycomb", tempC: 240), FlexibleRowCopy.autoWaiting,
                   FlexibleRowCopy.autoNoData, FlexibleRowCopy.physics, FlexibleRowCopy.catalogueMissing,
                   FlexibleRowCopy.autoNoFace, FlexibleRowCopy.autoUnreachable, FlexibleRowCopy.autoNoPick,
-                  FlexibleRowCopy.pressedOnMainPage(group: longGroup), FlexibleRowCopy.relinked(oldKg: 123.4, group: longGroup)]
+                  FlexibleRowCopy.pressedOnMainPage(group: longGroup), FlexibleRowCopy.relinked(oldKg: 123.4, group: longGroup),
+                  // ★ round 4 (D1): the face list, the finish and the Stamp shape's rows
+                  FlexibleRowCopy.faceRow(name: FlexibleRowCopy.faceName(sector: longGroup, face: 1), pressed: true, kg: 123.4),
+                  FlexibleRowCopy.faceRow(name: "Face 12", pressed: false, kg: 0), FlexibleRowCopy.finish,
+                  FlexibleRowCopy.stamp(name: longGroup), FlexibleRowCopy.stampSize(widthMM: 1234.5, lengthMM: 987.6),
+                  FlexibleRowCopy.stampTurn(270), FlexibleRowCopy.stampPress, FlexibleRowCopy.stampOffFace(1234.56)]
         for code in ["temperature_not_tested", "topology_no_data", "honeycomb_side_stack", "too_few_rows", "calibrate_first", "too_soft"] {
             lines.append(FlexibleRowCopy.faceWarning(refusalCode: code, refusalReason: String(repeating: "a long reason ", count: 9),
                                                      unreachedColumns: 0, side: false) ?? "")
@@ -184,6 +189,8 @@ final class FlexibleRowCopyTests: XCTestCase {
                      "\"flexible-view-xray\"", "Up = softer"] {
             XCTAssertFalse(flexible.contains(gone), "removed: \(gone)")
         }
-        XCTAssertEqual(FlexibleStageModel.Tab.allCases.map(\.rawValue), ["Face", "Stamps", "More"])
+        // ★ RE-PINNED (round 4, batch D1 — his answer 3): the Stamps tab went; a face's ONE stamp
+        // is its Shape, on the Face tab
+        XCTAssertEqual(FlexibleStageModel.Tab.allCases.map(\.rawValue), ["Face", "More"])
     }
 }

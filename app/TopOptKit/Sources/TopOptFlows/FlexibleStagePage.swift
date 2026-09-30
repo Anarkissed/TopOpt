@@ -3,8 +3,12 @@
 // Layout follows the lattice Settings page (LatticeSetupWizard): the part fills the
 // screen, "Exit" top-left in the accent capsule, a one-line notice top-centre, and ONE
 // panel bottom-left (PageChrome.edge inset, DS.Surface.panel, DS.Radius.panel). ★ ROUND 3:
-// its tabs are Face | Stamps | More, every row one line (FlexibleFacePanel); the page is
-// always in X-ray; the legend sits on the trailing edge, centred.
+// every row one line (FlexibleFacePanel); the page is always in X-ray; the legend sits on
+// the trailing edge, centred. ★ ROUND 4 (batch D1): the panel (FlexibleSettingsPanel) is as
+// tall as its rows, Face | More, and folds to its header; the legend folds to a bar; and NO
+// LATTICE is drawn here (his img 6: "the lattice should not be visible in the settings screen
+// - only in the main Flexibles page. Simply have the model in xray view in the settings") —
+// the X-ray part and the bent map only; the lattice lives on the main page.
 //
 // ★ ROUND 3 BATCH B: there is no Generate button — Save & Exit builds the lattice and the MAIN
 // Flexible page shows it (FlexibleMainStage owns the ONE model, so the lattice outlives this
@@ -70,6 +74,9 @@ public struct FlexibleStagePage: View {
     /// The panel's, the legend's, the top row's and the player's frames (global), and the
     /// stage's — for the chips' keep-out and the player's place.
     @State private var frames: [String: CGRect] = [:]
+    /// ★ ROUND 4 (img 1): the panel and the legend fold away.
+    @State private var panelMinimized = false
+    @State private var legendMinimized = false
     private var keepOut: [CGRect] {
         guard let st = frames["stage"] else { return [] }
         return ["panel", "legend", "player"].compactMap { frames[$0]?.offsetBy(dx: -st.minX, dy: -st.minY) }
@@ -91,7 +98,10 @@ public struct FlexibleStagePage: View {
                 stage
                 exitButton
                 notice(in: geo.size)
-                panel
+                FlexibleSettingsPanel(model: model, padTarget: $padTarget, minimized: $panelMinimized)
+                    .background(GeometryReader { g in
+                        Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["panel": g.frame(in: .global)])
+                    }.allowsHitTesting(false))
                     .frame(maxHeight: geo.size.height * 0.62, alignment: .bottom)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
                     .padding(.leading, PageChrome.edge)
@@ -102,7 +112,7 @@ public struct FlexibleStagePage: View {
                 // "legends never cover buttons" — it covered Generate in the bottom corner),
                 // placed by FlexibleLegendPlacement.legend against the gizmo and the top line
                 // (batch B review: the placement the tests measure is the one the page calls)
-                if dents != nil || model.checkStampShown != nil {
+                if dents != nil {
                     legend(in: geo.size)
                 }
                 // ★ THE POP-UP SHOWS THE ISSUE AS IT IS NOW (batch B review) — placed under the
@@ -137,11 +147,10 @@ public struct FlexibleStagePage: View {
         .onChange(of: model.geometry.count) { _ in rebuildOverlay() }
         .onReceive(ticker) { _ in
             // ★ THE SQUISH (the player's loop): only the scale moves — the displacements and
-            // colours are rebuilt when the design changes, never per frame. ★ BATCH B REVIEW:
-            // while a lattice is drawn the RENDERER steps the loop (as on the main page) — this
-            // @State write re-ran the whole page (panel, overlays) 30 times a second; it now
-            // runs only for his live drawing (no lattice pass to step it)
-            guard loop.playing, dents != nil, !rendererLoops else { return }
+            // colours are rebuilt when the design changes, never per frame. ★ ROUND 4: no lattice
+            // is drawn on this page, so this ticker steps his drawing (the renderer's loop is the
+            // main page's)
+            guard loop.playing, dents != nil else { return }
             dentScale = Float(dentExaggeration * loop.amount)
         }
         // a drag on the timeline, a pause: the one scale follows at once
@@ -160,7 +169,7 @@ public struct FlexibleStagePage: View {
         }
         .onChange(of: model.stacks.count) { _ in rebuildOverlay() }
         // the legend went (no dent to show): it cannot stay drilled in
-        .onChange(of: dents == nil && model.checkStampShown == nil) { gone in if gone { legendDrilled = false; reading = nil } }
+        .onChange(of: dents == nil) { gone in if gone { legendDrilled = false; reading = nil } }
         // ★ while the legend reads, the squish holds still (the reading stays on its surface)
         .onChange(of: legendDrilled) { loop.holdWhileReading($0) }
         .onChange(of: model.latticeBuilding) { _ in refreshChannels() }
@@ -179,20 +188,9 @@ public struct FlexibleStagePage: View {
     /// (MetalMeshView, tint flags.z), so the outline reads and the inside shows.
     static let xrayBodyAlpha: Float = 0.04
 
-    /// The generated lattice while it is DRAWN: X-ray on, not being rebuilt, and still what the
-    /// settings describe. The map and the dent then come from its own depths (FlexibleShownValues).
-    private var drawnLattice: FlexibleGeneratedLattice? {
-        FlexibleLatticePreview.drawn(model.lattice, xray: xray, building: model.latticeBuilding,
-                                     checkStampShown: model.checkStampShown, stale: model.latticeIsStale)
-    }
-
-    /// The renderer steps the squish (a drawn lattice's pass is there to step it).
-    private var rendererLoops: Bool { drawnLattice != nil && dents != nil }
-
-    /// The lattice owns the map (no stamp shown, not stale) — FlexibleLatticePreview.latticeShows.
-    private var latticeShows: Bool {
-        FlexibleLatticePreview.latticeShows(checkStampShown: model.checkStampShown, stale: model.latticeIsStale)
-    }
+    // ★ ROUND 4 (D1, img 6): NO LATTICE ON THIS PAGE. The generated lattice lives on the MAIN
+    // Flexible page; here the part is X-ray and the map is his drawing (FlexibleShownValues with
+    // no drawn lattice: "What you drew"), stepped by this page's own ticker.
 
 
     /// The same settle the workspace draws with (gravity → down), so the part sits as it
@@ -234,14 +232,8 @@ public struct FlexibleStagePage: View {
                 bodyAlpha: xray ? Self.xrayBodyAlpha : (dents != nil ? Self.dentBodyAlpha : 1),
                 // ★ BATCH B: the face the fix pop-up names, pulsed
                 detentPulse: pulse,
-                // ★ THE LATTICE IS DRAWN IN THE MESH VIEW'S OWN PASSES (FlexibleLatticePass,
-                // a third G-buffer writer — the way Structural and Aesthetic draw theirs), only
-                // in X-ray, squished by the SAME flexScale as the dent (hidden, not torn down,
-                // while a stamp owns the map).
-                flexibleLattice: FlexibleLatticePreview.inputs(xray: xray, lattice: model.lattice,
-                                                               building: model.latticeBuilding,
-                                                               latticeShows: latticeShows,
-                                                               loop: rendererLoops ? loop : nil))
+                // ★ ROUND 4 (D1, img 6): no lattice here — it lives on the main Flexible page
+                flexibleLattice: nil)
             FlexibleStageOverlays(model: model, proj: proj, exaggeration: dentExaggeration, keepOut: keepOut)
             FlexibleReadingCallout(proj: proj, reading: legendDrilled ? reading : nil)
         }
@@ -261,16 +253,15 @@ public struct FlexibleStagePage: View {
     /// FlexibleProbe, the main page's one dent probe.
     private func readDent(at pt: SIMD3<Float>?) {
         guard let p = pt, let q = proj.projection, let sp = q.project(p), let ray = q.ray(throughViewPoint: sp) else { return }
-        let scale = rendererLoops ? loop.scale(at: loop.clock()) : dentScale
-        reading = FlexibleProbe.dentReading(model: model, overlay: overlay, dents: dents, scale: scale,
-                                            drawnLattice: drawnLattice, point: p, dir: ray.dir)
+        reading = FlexibleProbe.dentReading(model: model, overlay: overlay, dents: dents, scale: dentScale,
+                                            drawnLattice: nil, point: p, dir: ray.dir)
             ?? FlexibleReading(kind: .dent, value: "—", unit: FlexibleReadKind.dent.nothingHere, fraction: nil, anchor: p)
     }
 
     /// Per-column colours + the dent (FlexiblePageChannels — the page's one source), then the
     /// player's state and the fix pop-up's rule.
     private func refreshChannels() {
-        let c = FlexiblePageChannels.channels(model: model, overlay: overlay, xray: xray, drawnLattice: drawnLattice)
+        let c = FlexiblePageChannels.channels(model: model, overlay: overlay, xray: xray, drawnLattice: nil)
         tints = c.tints
         dents = c.dents
         dentExaggeration = c.exaggeration
@@ -425,18 +416,44 @@ public struct FlexibleStagePage: View {
         // ★ BATCH C VERIFICATION: the legend's BODY lets every touch through (a curve point or
         // the curve line under it stays live — "tap the line adds a point"); only its tab row
         // ("TAP TO READ") takes the tap that drills in and out
-        let view = FlexibleLegend(model: model, drawnLattice: drawnLattice, drilled: legendDrilled,
-                                  reading: legendDrilled ? reading : nil)
-            .overlay(alignment: .top) {
-                Color.clear
-                    .frame(maxWidth: .infinity).frame(height: FlexibleLegend.tabHeight)
+        // ★ ROUND 4 (img 1): the legend folds to the lattice legend's bar (the scale alone) — a
+        // tap on the bar brings it back; its chevron (top right) folds it
+        let view = Group {
+            if legendMinimized {
+                FlexibleLegendBar(fraction: legendDrilled ? reading?.fraction : nil)
                     .contentShape(Rectangle())
-                    .onTapGesture { legendDrilled.toggle(); reading = nil }
+                    .onTapGesture { legendMinimized = false }
                     .accessibilityElement()
-                    .accessibilityLabel(legendDrilled ? "Stop reading" : "Tap to read")
+                    .accessibilityLabel("Show the key")
                     .accessibilityAddTraits(.isButton)
-                    .accessibilityIdentifier("flexible-settings-legend-tab")
+                    .accessibilityIdentifier("flexible-legend-expand")
+            } else {
+                FlexibleLegend(model: model, drawnLattice: nil, drilled: legendDrilled,
+                               reading: legendDrilled ? reading : nil)
+                    .overlay(alignment: .top) {
+                        HStack(spacing: 0) {
+                            Color.clear
+                                .frame(maxWidth: .infinity).frame(height: FlexibleLegend.tabHeight)
+                                .contentShape(Rectangle())
+                                .onTapGesture { legendDrilled.toggle(); reading = nil }
+                                .accessibilityElement()
+                                .accessibilityLabel(legendDrilled ? "Stop reading" : "Tap to read")
+                                .accessibilityAddTraits(.isButton)
+                                .accessibilityIdentifier("flexible-settings-legend-tab")
+                            Button { legendMinimized = true } label: {
+                                Image(systemName: "chevron.up")
+                                    .font(.system(size: 11, weight: .bold))
+                                    .foregroundStyle(DS.Color.accent.color)
+                                    .frame(width: 44, height: 44)
+                                    .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("Minimise the key")
+                            .accessibilityIdentifier("flexible-legend-minimize")
+                        }
+                    }
             }
+        }
             .accessibilityIdentifier("flexible-settings-legend")
             .background(GeometryReader { g in
                 Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["legend": g.frame(in: .global)])
@@ -516,44 +533,7 @@ public struct FlexibleStagePage: View {
         }
     }
 
-    // MARK: the panel
-
-    private var panel: some View {
-        VStack(alignment: .leading, spacing: DS.Space.m) {
-            HStack(spacing: DS.Space.xs) {
-                Circle().fill(FlexibleStageStyle.accent).frame(width: 8, height: 8)
-                Text("Flexible").font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(DS.Color.textPrimary.color)
-                Spacer()
-                // (the filament is the Face tab's first row — not said twice)
-            }
-            // ★ ROUND 3 (item 5): Face | Stamps | More — one-line rows, details behind (i)
-            FlexChips(options: FlexibleStageModel.Tab.allCases.map { ($0.rawValue, $0.rawValue) },
-                      selection: model.tab.rawValue, id: "flexible-tab") {
-                model.tab = FlexibleStageModel.Tab(rawValue: $0) ?? .face
-            }
-            ScrollView(.vertical, showsIndicators: true) {
-                VStack(alignment: .leading, spacing: DS.Space.m) {
-                    switch model.tab {
-                    case .face: FlexibleFacePanel(model: model, padTarget: $padTarget)
-                    case .stamps: FlexibleStampsPane(model: model, padTarget: $padTarget)
-                    case .more: FlexibleMorePanel(model: model)
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-        }
-        .padding(DS.Space.ml)
-        .frame(width: 400, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: DS.Radius.panel)
-            .fill(DS.Surface.panel.color)
-            .overlay(RoundedRectangle(cornerRadius: DS.Radius.panel)
-                .strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
-        .dsShadow(DS.Shadow.panel)
-        .background(GeometryReader { g in
-            Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["panel": g.frame(in: .global)])
-        }.allowsHitTesting(false))
-    }
+    // (the panel: FlexibleSettingsPanel — round 4)
 }
 
 /// The frames the depth chips keep out of (the panel, the legend) and the stage's own.
@@ -580,8 +560,8 @@ struct FlexibleStageOverlays: View {
             // ("X and Y always combined"); the frame arrows went with the frame rotation.
             if model.tab == .face, let r = model.selectedRegion, let k = model.key(r),
                let g = model.geometry[k], let f = model.settings.face(r), f.isLoaded {
-                // the Curves shape (batch D's Stamp shape draws its stamp here instead)
-                ForEach((f.shape ?? "curves") == "curves" ? ["x", "y"] : [], id: \.self) { axis in
+                // ★ ROUND 4: Curves or Stamp — never both; the Stamp face's handle is below
+                ForEach(Self.curveAxes(f), id: \.self) { axis in
                     FlexibleCurveEditor(projection: proj.projection,
                                         baseline: axis == "x" ? g.baselineX : g.baselineY,
                                         curve: axis == "x" ? f.curveX : f.curveY,
@@ -592,12 +572,15 @@ struct FlexibleStageOverlays: View {
                 }
                 // ★ ROUND 3 (item 1.1): the deepest squish, dragged out as a prism
                 FlexibleDepthChips(model: model, projection: proj.projection, k: exaggeration, keepOut: keepOut)
-            }
-            if model.tab == .stamps {
-                FlexibleStampHandles(model: model, projection: proj.projection)
+                // ★ ROUND 4 (D1): a Stamp face's ONE stamp — never under the panel or the legend
+                FlexibleFaceStampHandle(model: model, projection: proj.projection, keepOut: keepOut)
             }
         }
     }
+
+    /// The curves drawn on a face: both (X and Y, combined) under Curves, none under Stamp —
+    /// the curves vanish the moment Stamp is chosen (his img 1).
+    static func curveAxes(_ f: FlexibleFaceSettings) -> [String] { f.isStampShape ? [] : ["x", "y"] }
 
     /// The × of one curve, held by the model (a tap on the part clears it).
     private func selection(_ r: Int, _ axis: String) -> Binding<Int?> {

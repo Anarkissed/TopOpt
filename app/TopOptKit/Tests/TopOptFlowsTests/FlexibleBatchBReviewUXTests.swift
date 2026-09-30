@@ -252,11 +252,16 @@ final class FlexibleBatchBReviewUXTests: XCTestCase {
     /// ★ The Settings page's squish is stepped by the RENDERER while a lattice is drawn (its
     /// 30 fps @State re-ran the whole page); the ticker writes the scale only for his live
     /// drawing, which has no lattice pass to step it.
+    /// ★ RE-PINNED (round 4, batch D1 — his img 6: "the lattice should not be visible in the
+    /// settings screen"): the Settings page draws NO lattice, so there is no lattice pass to
+    /// step its squish — its own ticker steps his drawing (the renderer's loop is the main
+    /// page's, the control below).
     func testTheSettingsPageLetsTheRendererStepTheSquish() throws {
         let page = try FlexibleSource.code("FlexibleStagePage.swift")
-        XCTAssertTrue(page.contains("loop: rendererLoops ? loop : nil))"), "the page hands its loop to the lattice pass")
-        XCTAssertTrue(page.contains("guard loop.playing, dents != nil, !rendererLoops else { return }"),
-                      "…and stops writing the scale itself while the renderer steps it")
+        XCTAssertTrue(page.contains("flexibleLattice: nil)"), "no lattice pass on the Settings page (round 4)")
+        XCTAssertTrue(page.contains("guard loop.playing, dents != nil else { return }"),
+                      "…so the page's ticker steps his drawing")
+        XCTAssertFalse(page.contains("rendererLoops"), "no renderer loop to hand over")
         XCTAssertTrue(page.contains("loop.exaggeration = c.exaggeration"), "the renderer's scale is k × amount")
         // ★ CONTROL: the main page does the same (the mechanism FlexibleSquishPlayerTests measures)
         let main = try FlexibleSource.code("FlexibleMainStage.swift")

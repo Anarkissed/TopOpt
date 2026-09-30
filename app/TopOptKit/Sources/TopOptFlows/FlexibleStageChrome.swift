@@ -8,6 +8,7 @@
 // an existing token (no new colours; never purple).
 
 import SwiftUI
+import simd
 import TopOptDesign
 
 public enum FlexibleStageStyle {
@@ -32,6 +33,17 @@ public enum FlexibleStageStyle {
     /// page's accent (its dot, Generate) and the map's own ramp.
     public static var onPart: Color { DS.Color.textPrimary.color }
     public static var onPartToken: RGBA { DS.Color.textPrimary }
+    /// ★ ROUND 4 (D1, HIS EXPLICIT REQUEST — img 2: "please use the same purple used in the rest
+    /// of the lattice area's face-prisms"): the depth prism is the lattice stage's own face
+    /// prism — `WorkspacePlaceholder.latticeRegionTint(.include)`, the density ramp's mid violet
+    /// (FlexibleSettingsRound4Tests reads that line, so the two cannot drift) — and the depth
+    /// chip wears the lattice stage's depth-knob glass. It overrides "never purple" for THIS
+    /// element only; everything else on the part stays `onPart`.
+    public static let facePrismToken = RGBA(124, 111, 214)
+    public static var facePrismTint: SIMD3<Float> {
+        SIMD3<Float>(Float(facePrismToken.r), Float(facePrismToken.g), Float(facePrismToken.b))
+    }
+    public static var facePrismKnob: RGBA { LatticeDensityProxy.densityColor(fraction: 0.6) }
     /// The modal's luminance rule (LatticeStageModeStyle.onAccent), on the green token.
     public static var onAccent: Color {
         let (r, g, b) = (48.0 / 255, 209.0 / 255, 88.0 / 255)   // #30D158

@@ -63,7 +63,9 @@ final class FlexibleStageTests: XCTestCase {
         XCTAssertEqual(loaded.map.mode, "both")
         XCTAssertEqual(loaded.map.x, FlexCurve(x: [0, 0.4, 1], y: [0.2, 1, 0.3]))
         XCTAssertEqual(loaded.map.y, FlexCurve(x: [0, 1], y: [1, 0.5]))
-        XCTAssertFalse(loaded.skinOn)
+        // ★ RE-PINNED (round 4, batch D1 — his answer 4): the skin is the WHOLE model's Finish; this
+        // face's old per-face "skin off" no longer decides, and no finish set reads Covered
+        XCTAssertTrue(loaded.skinOn, "Covered, the default finish")
         XCTAssertEqual(b.faces.first { $0.role == "resting" }?.faceRegionID, FlexibleJob.regionID(face: 0))
     }
 
@@ -88,6 +90,11 @@ final class FlexibleStageTests: XCTestCase {
         let palm = FlexibleStamps.place(try XCTUnwrap(lib.shape("palm")), uExtentMM: 100, vExtentMM: 100, weightKg: 20)
         var f = try XCTUnwrap(s.face(FlexibleJob.regionID(face: 1)))
         f.designStamp = thumb
+        // ★ RE-PINNED (round 4, batch D1 — Shape is an either/or): a stamp is sent only while the
+        // face's shape is Stamp (FlexibleSettingsRound4Tests: under Curves it is never sent). The
+        // encoder still writes `check_stamps` a caller hands it; the app no longer has any (the
+        // migration empties them).
+        f.shape = "stamp"
         s.setFace(f)
         s.checkStamps = [FlexibleCheckStamp(faceRegionID: f.faceRegionID, stamp: palm)]
         let pitch = 2.0

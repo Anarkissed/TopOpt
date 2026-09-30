@@ -20,6 +20,14 @@
 //     middle beside the identical, unflipped curveY. A curve is drawn only when core's own
 //     curve (pen_curve_values, 21 samples) leaves the default's by more than `drawnTolerance`
 //     (0.04 in S: his top B's knot moves it 0.022, his top A's dragged peak 0.072).
+// ★ ROUND 4 (batch D1, his answers 3 and 4):
+//   * check stamps are gone (the Stamps tab went; the tap-to-read legends give dent values):
+//     a saved list reads as empty;
+//   * a face designed under ONE stamp before round 4 ("Design (one stamp)") keeps it as its
+//     Shape = Stamp — Shape is an either/or now, and that face was drawn under its stamp;
+//   * the finish is model-wide: a project saved before it reads Covered (today's default). A
+//     face whose per-face "Solid skin" was off (his face 3) is covered like the rest — the
+//     per-face switch is gone; None opens every face.
 
 import Foundation
 import TopOptKit
@@ -30,9 +38,9 @@ public enum FlexibleSettingsMigration {
     public static let currentCurveConvention = 1
 
     public static func migrated(_ s: FlexibleStageSettings) -> FlexibleStageSettings {
-        // the fast path: already the round-3 shape (every edit writes it)
-        if s.beadsPerWall == 1, s.curveConvention == currentCurveConvention,
-           s.faces.allSatisfy({ $0.mode == "both" && $0.rotationDeg == 0 }) { return s }
+        // the fast path: already the round-4 shape (every edit writes it)
+        if s.beadsPerWall == 1, s.curveConvention == currentCurveConvention, s.checkStamps.isEmpty, s.finish != nil,
+           s.faces.allSatisfy({ $0.mode == "both" && $0.rotationDeg == 0 && !stampedBeforeShape($0) }) { return s }
         var out = s
         out.beadsPerWall = 1
         let flip = s.curveConvention == nil
@@ -45,11 +53,18 @@ public enum FlexibleSettingsMigration {
                 if isDrawn(f.curveX) { f.curveX = flipped(f.curveX) }
                 if isDrawn(f.curveY) { f.curveY = flipped(f.curveY) }
             }
+            // ★ ROUND 4: a face designed under its one stamp keeps it, as its Stamp shape
+            if stampedBeforeShape(f) { f.shape = "stamp" }
             out.faces[i] = f
         }
         out.curveConvention = currentCurveConvention
+        out.checkStamps = []
+        out.finish = s.finishMode.rawValue
         return out
     }
+
+    /// A face saved with a design stamp and no shape: round 3's "Design (one stamp)".
+    static func stampedBeforeShape(_ f: FlexibleFaceSettings) -> Bool { f.designStamp != nil && f.shape == nil }
 
     /// How far (in S) core's curve must leave the default dome's anywhere to count as drawn.
     /// Measured on his project: top B's inserted knot moves the curve ≤ 0.022 (Fritsch–Carlson

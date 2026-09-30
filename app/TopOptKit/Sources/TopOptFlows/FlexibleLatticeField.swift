@@ -51,7 +51,9 @@
 // Honeycomb uses ONE cell for the whole part (03 §4: uniform d in v1), d = 2t/ρ̄.
 // ★ SKIN. Faces with skin ON keep `skinMM` of solid under them (M15); `skinDist` is the
 // distance to the triangles of every face EXCEPT the loaded faces whose skin is off, so
-// the lattice runs to the surface only there.
+// the lattice runs to the surface only there. ★ ROUND 4 (D1): the model-wide FINISH decides
+// (FlexibleFinish): Covered is this grid; None, Rim and Skin bring their own skinDist and
+// thickness through the same dSkin — so this field and its MSL twin are unchanged.
 
 import Foundation
 import simd
@@ -305,9 +307,13 @@ public enum FlexibleLatticeBuilder {
     /// `skinOffFaces` are the B-rep/pseudo face ids whose skin is off (M15);
     /// each entry's `cuts` narrow a split sector to its own half-spaces (the face is cut
     /// along them, `skinnedTriangles`).
+    /// ★ ROUND 4 (D1): `finish` — the whole model's finish (FlexibleFinish). Covered keeps the
+    /// grid below (the distance to every skinned surface, `skinOffFaces` honoured); None, Rim
+    /// and Skin replace it with their own skin-distance grid and thickness.
     public static func inputs(field: FlexDensityField, part: ViewerMesh, topology: String,
                               beadsPerWall: Int, beadWidthMM: Double, buildDir: SIMD3<Double>,
                               skinOffFaces: [(face: Int, cuts: [RegionCut])],
+                              finish: FlexibleFinish = .covered,
                               skinMM: Float = FlexibleLatticeField.defaultSkinMM,
                               sdfMaxDim: Int = 128) throws -> FlexibleLatticeInputs {
         guard field.nx > 1, field.ny > 1, field.nz > 1, field.density.count == field.nx * field.ny * field.nz
@@ -354,16 +360,22 @@ public enum FlexibleLatticeBuilder {
         let band = 6
         let sdf = LatticePreviewOccupancy.signedDistance(positions: part.positions, indices: indices,
                                                          like: occ, bandVoxels: band)
-        let skinned = skinnedTriangles(part: part, skinOffFaces: skinOffFaces)
         let skinGrid: FlexGrid
-        if skinned.allSkinned {
-            skinGrid = FlexGrid(nx: sdf.nx, ny: sdf.ny, nz: sdf.nz, c0: sdf.origin, spacing: sdf.spacing.x,
-                                values: sdf.values.map { abs($0) })
+        var skinThickness = skinMM
+        if let f = FlexibleFinish.skin(finish, part: part, sdf: sdf, bandVoxels: band) {
+            skinGrid = f.grid
+            skinThickness = f.skinMM
         } else {
-            let sd = LatticePreviewOccupancy.signedDistance(positions: skinned.positions, indices: skinned.indices,
-                                                            like: occ, bandVoxels: band)
-            skinGrid = FlexGrid(nx: sd.nx, ny: sd.ny, nz: sd.nz, c0: sd.origin, spacing: sd.spacing.x,
-                                values: sd.values.map { abs($0) })
+            let skinned = skinnedTriangles(part: part, skinOffFaces: skinOffFaces)
+            if skinned.allSkinned {
+                skinGrid = FlexGrid(nx: sdf.nx, ny: sdf.ny, nz: sdf.nz, c0: sdf.origin, spacing: sdf.spacing.x,
+                                    values: sdf.values.map { abs($0) })
+            } else {
+                let sd = LatticePreviewOccupancy.signedDistance(positions: skinned.positions, indices: skinned.indices,
+                                                                like: occ, bandVoxels: band)
+                skinGrid = FlexGrid(nx: sd.nx, ny: sd.ny, nz: sd.nz, c0: sd.origin, spacing: sd.spacing.x,
+                                    values: sd.values.map { abs($0) })
+            }
         }
         let sdfGrid = FlexGrid(nx: sdf.nx, ny: sdf.ny, nz: sdf.nz, c0: sdf.origin, spacing: sdf.spacing.x,
                                values: sdf.values)
@@ -374,7 +386,7 @@ public enum FlexibleLatticeBuilder {
             topology: topo, wallMM: t,
             lMinMM: 3.0915 * t / 0.9, lMaxMM: 3.0915 * t / 0.05,
             honeycombCellMM: 2 * t / Swift.max(meanRho, 0.05),
-            buildDir: SIMD3<Float>(simd_normalize(buildDir)), skinMM: skinMM,
+            buildDir: SIMD3<Float>(simd_normalize(buildDir)), skinMM: skinThickness,
             rho: rhoGrid, mask: maskGrid, partSDF: sdfGrid, skinDist: skinGrid,
             boundsMin: part.bounds.min, boundsMax: part.bounds.max)
     }

@@ -360,10 +360,12 @@ final class FlexibleSquishTests: XCTestCase {
         XCTAssertEqual(fresh.label, "What the lattice was built from")
         XCTAssertTrue(fresh.animated)
         // the page asks the one rule, with the staleness
-        let root = FlexibleHisProject.repoRoot.appendingPathComponent("app/TopOptKit/Sources/TopOptFlows")
-        let page = try String(contentsOf: root.appendingPathComponent("FlexibleStagePage.swift"), encoding: .utf8)
-        XCTAssertTrue(page.contains("FlexibleLatticePreview.drawn(model.lattice, xray: xray, building: model.latticeBuilding,"))
-        XCTAssertTrue(page.contains("stale: model.latticeIsStale)"))
+        // ★ RE-PINNED (round 4, batch D1): the lattice is drawn only on the MAIN page (his img 6),
+        // so the main stage is the page that asks; the Settings page never draws one
+        let main = try FlexibleSource.code("FlexibleMainStage.swift")
+        XCTAssertTrue(main.contains("FlexibleLatticePreview.drawn(m.lattice, xray: true, building: m.latticeBuilding,"))
+        XCTAssertTrue(main.contains("stale: m.latticeIsStale)"))
+        XCTAssertFalse(try FlexibleSource.code("FlexibleStagePage.swift").contains("FlexibleLatticePreview.drawn("))
     }
 
     @MainActor

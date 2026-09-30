@@ -5,7 +5,9 @@
 // is exactly the heat map's footprint and a split sector's prism stops at the cut — pushed
 // INTO the part along the load (core's R13 frame) by the deepest squish × k, the page's one
 // exaggeration. The dent bottoms out on the prism's floor. Drawn by MetalMeshView's
-// clearance-volume pass (`clearanceVolumes:`), in the on-part colour (never violet, never the map green).
+// clearance-volume pass (`clearanceVolumes:`). ★ ROUND 4 (D1, his explicit request): in the
+// lattice stage's own face-prism purple (FlexibleStageStyle.facePrismTint) — one colour for
+// every face prism. ★ A Stamp-shaped face's prism stands on its STAMP's footprint only.
 //
 // ★ SHARED CORNERS, NOT A QUAD PER COLUMN. Each grid corner is the mean of the columns that
 // touch it, so the shell's skirt forms on the footprint's outline only (a quad per column
@@ -48,13 +50,17 @@ enum FlexibleDepthPrism {
     /// The prism under a pressed face's columns: base = surface + load·ε, offset = base +
     /// load·k·depth. nil when the stack has no column. `flatOutline` false keeps the per-corner
     /// grid on a flat face too (the tests' control).
+    /// `columns`: only these columns (a Stamp face: the stamp's footprint); nil ⇒ every column.
     static func shell(stack st: FlexStackInfo, centres: [SIMD3<Double>], depthMM: Double, k: Double,
-                      flatOutline: Bool = true) -> FaceOffsetShell? {
+                      flatOutline: Bool = true, columns only: Set<Int>? = nil) -> FaceOffsetShell? {
         guard !st.columns.isEmpty, centres.count == st.columns.count, st.pitchMM > 0 else { return nil }
+        let kept = st.columns.indices.filter { only?.contains($0) ?? true }
+        guard !kept.isEmpty else { return nil }
         struct Key: Hashable { let u: Int; let v: Int }
         var sum: [Key: SIMD3<Double>] = [:], count: [Key: Int] = [:]
         let h = st.pitchMM / 2
-        for (c, col) in st.columns.enumerated() {
+        for c in kept {
+            let col = st.columns[c]
             let p = centres[c] + st.load * col.entryT
             for (du, dv) in [(0, 0), (1, 0), (1, 1), (0, 1)] {
                 let q = p + st.xAxis * (Double(2 * du - 1) * h) + st.yAxis * (Double(2 * dv - 1) * h)
@@ -75,7 +81,7 @@ enum FlexibleDepthPrism {
         let along = corner.values.map { simd_dot($0, st.load) }
         if flatOutline, (along.max() ?? 0) - (along.min() ?? 0) <= flatToleranceMM {
             // ── FLAT: the fewest rectangles, fanned from their centres ──
-            let cells = Set(st.columns.map { Key(u: $0.iu, v: $0.iv) })
+            let cells = Set(kept.map { Key(u: st.columns[$0].iu, v: st.columns[$0].iv) })
             let rects = Self.rectangles(cells.map { ($0.u, $0.v) })
             var cornerKeys = Set<Key>()
             for r in rects { for (u, v) in [(r.u0, r.v0), (r.u1, r.v0), (r.u1, r.v1), (r.u0, r.v1)] { cornerKeys.insert(Key(u: u, v: v)) } }
@@ -103,8 +109,8 @@ enum FlexibleDepthPrism {
             // ── CURVED: every grid corner, so the base follows the surface ──
             var index: [Key: UInt32] = [:]
             for key in corner.keys.sorted(by: { ($0.v, $0.u) < ($1.v, $1.u) }) { index[key] = vertex(corner[key]!) }
-            idx.reserveCapacity(st.columns.count * 6)
-            for col in st.columns {
+            idx.reserveCapacity(kept.count * 6)
+            for col in kept.map({ st.columns[$0] }) {
                 guard let a = index[Key(u: col.iu, v: col.iv)], let b = index[Key(u: col.iu + 1, v: col.iv)],
                       let c = index[Key(u: col.iu + 1, v: col.iv + 1)], let d = index[Key(u: col.iu, v: col.iv + 1)] else { continue }
                 idx += [a, c, b, a, d, c]
@@ -150,8 +156,10 @@ enum FlexibleDepthPrism {
         return verts.count
     }
 
-    static func volume(region: Int, stack: FlexStackInfo, centres: [SIMD3<Double>], depthMM: Double, k: Double) -> ClearanceVolume? {
-        shell(stack: stack, centres: centres, depthMM: depthMM, k: k).map { ClearanceVolume.shell(faceID: region, shell: $0) }
+    static func volume(region: Int, stack: FlexStackInfo, centres: [SIMD3<Double>], depthMM: Double, k: Double,
+                       columns: Set<Int>? = nil) -> ClearanceVolume? {
+        shell(stack: stack, centres: centres, depthMM: depthMM, k: k, columns: columns)
+            .map { ClearanceVolume.shell(faceID: region, shell: $0) }
     }
 
     /// The drag handle: a `.slabDepth` whose normal is the load; its anchor is the prism floor.
@@ -199,15 +207,16 @@ enum FlexibleDepthPrism {
         return (clamp(r.mm, latticeMM: limit), r.snapped, r.didSnap)
     }
 
-    /// The prism the Settings page draws: the SELECTED pressed face's, in the on-part colour,
-    /// and ONLY while its chip is dragged (`frozenExaggeration` set) — at rest the dent reads alone.
+    /// The prism the Settings page draws: the SELECTED pressed face's (a Stamp face's on its
+    /// stamp's footprint), in the lattice stage's face-prism purple, and ONLY while its chip is
+    /// dragged (`frozenExaggeration` set) — at rest the dent reads alone.
     @MainActor
     static func renderItems(model: FlexibleStageModel, k: Double) -> [ClearanceRenderItem] {
         guard model.frozenExaggeration != nil,
               let r = model.selectedRegion, let f = model.settings.face(r), f.isLoaded,
               let key = model.key(r), let st = model.stacks[key], let g = model.geometry[key], k > 0,
-              let v = volume(region: r, stack: st, centres: g.centres, depthMM: f.deepestMM, k: k) else { return [] }
-        let t = FlexibleStageStyle.onPartToken
-        return [ClearanceRenderItem(volume: v, selected: true, tint: SIMD3<Float>(Float(t.r), Float(t.g), Float(t.b)))]
+              let v = volume(region: r, stack: st, centres: g.centres, depthMM: f.deepestMM, k: k,
+                             columns: model.prismColumns(r)) else { return [] }
+        return [ClearanceRenderItem(volume: v, selected: true, tint: FlexibleStageStyle.facePrismTint)]
     }
 }

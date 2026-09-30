@@ -71,6 +71,8 @@ public struct FlexibleFaceSettings: Codable, Equatable, Hashable, Sendable, Iden
     public var curveY: FlexCurve
     public var curveCentreEdge: FlexCurve
     /// M15: the face keeps its solid skin (off lets edges and side walls squish).
+    /// ★ ROUND 4 (D1): READ BY NOTHING — the model-wide Finish (`FlexibleStageSettings.finish`)
+    /// replaced the per-face "Solid skin" row; kept so every saved project still decodes.
     public var skinOn: Bool
     /// Design mode: the one stamp the face is designed under (nil ⇒ weight spread evenly).
     public var designStamp: FlexibleStampPlacement?
@@ -79,7 +81,10 @@ public struct FlexibleFaceSettings: Codable, Equatable, Hashable, Sendable, Iden
     /// so every project saved before it still decodes (synthesized Codable).
     public var weightFrom: UUID?
     /// ★ ROUND 3 (item 6b): the squish shape — nil (or "curves") ⇒ the X and Y curves,
-    /// always combined; "stamp" ⇒ squish by stamp (batch D). OPTIONAL for old projects.
+    /// always combined; "stamp" ⇒ squish by stamp. OPTIONAL for old projects.
+    /// ★ ROUND 4 (D1, his "either/or"): the shape decides EVERYTHING the face sends — Curves
+    /// sends the drawn curves and never a stamp (a stamp kept from before is stored, not
+    /// used); Stamp sends flat curves and its ONE stamp (`designStamp`) at the face's weight.
     public var shape: String?
 
     public init(faceRegionID: Int, role: String = "loaded", rotationDeg: Int = 0,
@@ -103,9 +108,26 @@ public struct FlexibleFaceSettings: Codable, Equatable, Hashable, Sendable, Iden
     public var weightN: Double { FlexibleUnits.newtons(kg: weightKg) }
     public var isLoaded: Bool { role == "loaded" }
 
-    /// The squish map core reads (02 §12).
+    /// ★ ROUND 4 (D1): Shape [Curves | Stamp] is an either/or.
+    public var isStampShape: Bool { shape == "stamp" }
+
+    /// The ONE stamp this face is designed under — only while its shape is Stamp, and always
+    /// at the face's own weight ("the face weight equals the stamp weight": one number, which
+    /// a main-page group may own). nil under Curves, even when a stamp is stored.
+    public var activeStamp: FlexibleStampPlacement? {
+        guard isStampShape, var p = designStamp else { return nil }
+        p.weightKg = weightKg
+        return p
+    }
+
+    /// The squish map core reads (02 §12). ★ ROUND 4 (D1): under Stamp the curves are FLAT
+    /// (the stamp sinks the deepest squish wherever it presses — core brief #10); the drawn
+    /// curves stay stored for a switch back to Curves.
     public var map: FlexMap {
-        FlexMap(mode: mode, x: curveX, y: curveY, centreEdge: curveCentreEdge, deepestMM: deepestMM)
+        if isStampShape {
+            return FlexMap(mode: "both", x: .flat, y: .flat, centreEdge: curveCentreEdge, deepestMM: deepestMM)
+        }
+        return FlexMap(mode: mode, x: curveX, y: curveY, centreEdge: curveCentreEdge, deepestMM: deepestMM)
     }
 }
 
@@ -139,15 +161,24 @@ public struct FlexibleStageSettings: Codable, Equatable, Hashable, Sendable {
     /// flips every DRAWN curve once so its picture survives the new reading ("closer to the
     /// face = squishier"). OPTIONAL so old projects decode.
     public var curveConvention: Int?
+    /// ★ ROUND 4 (D1, his answer 4): the WHOLE model's finish — "none" | "rim" | "skin" |
+    /// "covered" (FlexibleFinish). nil ⇒ Covered, today's default. It replaces the per-face
+    /// "Solid skin" row. OPTIONAL so old projects decode.
+    public var finish: String?
 
     public init(materialID: String? = nil, nozzleTempC: Double? = nil, topology: String = "auto",
                 feel: String = "springy", beadsPerWall: Int = 1,
                 faces: [FlexibleFaceSettings] = [], checkStamps: [FlexibleCheckStamp] = [],
-                curveConvention: Int? = FlexibleSettingsMigration.currentCurveConvention) {
+                curveConvention: Int? = FlexibleSettingsMigration.currentCurveConvention,
+                finish: String? = nil) {
         self.materialID = materialID; self.nozzleTempC = nozzleTempC; self.topology = topology
         self.feel = feel; self.beadsPerWall = beadsPerWall; self.faces = faces
         self.checkStamps = checkStamps; self.curveConvention = curveConvention
+        self.finish = finish
     }
+
+    /// The model-wide finish (nil or an unknown value ⇒ Covered).
+    public var finishMode: FlexibleFinish { finish.flatMap(FlexibleFinish.init(rawValue:)) ?? .covered }
 
     public var loadedFaces: [FlexibleFaceSettings] { faces.filter(\.isLoaded) }
 

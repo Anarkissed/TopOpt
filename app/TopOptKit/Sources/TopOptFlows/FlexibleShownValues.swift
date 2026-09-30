@@ -54,12 +54,21 @@ struct FlexibleShownValues {
         var showBuildable: Bool
         /// The depth chip is being dragged: the designs are for the OLD deepest squish.
         var editingDepth = false
+        /// ★ ROUND 4 (D1): a Stamp face's footprint, per column 0…1 (FlexibleStageModel.stampFootprint).
+        var stampFootprints: [FlexFaceKey: [Double]] = [:]
     }
 
     static func inputs(_ m: FlexibleStageModel) -> Inputs {
-        Inputs(loadedFaces: m.settings.loadedFaces, stacks: m.stacks, designs: m.designs, liveS: m.liveS,
-               checks: m.checks, checkStamps: m.settings.checkStamps, checkStampShown: m.checkStampShown,
-               showBuildable: m.showBuildable, editingDepth: m.frozenExaggeration != nil)
+        let settings = m.settings
+        var feet: [FlexFaceKey: [Double]] = [:]
+        for f in settings.loadedFaces where f.isStampShape {
+            if let foot = m.stampFootprint(f.faceRegionID) {
+                feet[FlexFaceKey(region: f.faceRegionID, rotation: f.rotationDeg)] = foot
+            }
+        }
+        return Inputs(loadedFaces: settings.loadedFaces, stacks: m.stacks, designs: m.designs, liveS: m.liveS,
+                      checks: m.checks, checkStamps: settings.checkStamps, checkStampShown: m.checkStampShown,
+                      showBuildable: m.showBuildable, editingDepth: m.frozenExaggeration != nil, stampFootprints: feet)
     }
 
     init(model m: FlexibleStageModel, drawnLattice: FlexibleGeneratedLattice? = nil) {
@@ -104,6 +113,15 @@ struct FlexibleShownValues {
                     return c.status[i] == "beyond_data" ? .noNumber : .depth(0)
                 }
                 label = "Dent under the stamp"
+                continue
+            }
+            if let foot = m.stampFootprints[k] {
+                // ★ ROUND 4 (D1): a Stamp face shows its stamp SINKING where it sits (the
+                // deepest squish under it, nothing beside it) — his drawing, not a prediction
+                values[k] = foot.enumerated().map { i, w in
+                    i < st.columns.count && st.columns[i].latticeMM <= 0 ? .solid : .depth(w * f.deepestMM)
+                }
+                if label.isEmpty { label = "What you drew" }
                 continue
             }
             if !m.editingDepth, let d = m.designs[k], d.refusal == nil {

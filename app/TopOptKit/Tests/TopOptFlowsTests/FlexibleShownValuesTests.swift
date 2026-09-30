@@ -148,10 +148,15 @@ final class FlexibleShownValuesTests: XCTestCase {
         let root = FlexibleHisProject.repoRoot.appendingPathComponent("app/TopOptKit/Sources/TopOptFlows")
         func src(_ f: String) throws -> String { try String(contentsOf: root.appendingPathComponent(f), encoding: .utf8) }
         XCTAssertTrue(try src("FlexibleStagePage.swift").contains("tint: FlexibleStageStyle.onPart,"), "the curves")
-        XCTAssertTrue(try src("FlexibleDepthPrism.swift").contains("let t = FlexibleStageStyle.onPartToken"), "the prism")
+        // ★ RE-PINNED (round 4, batch D1 — HIS explicit request, img 2: "please use the same purple
+        // used in the rest of the lattice area's face-prisms"): the depth prism and its chip are the
+        // lattice stage's face prism and depth knob (FlexibleSettingsRound4Tests reads #354's line);
+        // still never the map's green
+        XCTAssertTrue(try src("FlexibleDepthPrism.swift").contains("tint: FlexibleStageStyle.facePrismTint)"), "the prism")
         let chips = try src("FlexibleDepthChips.swift")
-        XCTAssertTrue(chips.contains("FlexibleStageStyle.onPart.opacity"), "the chip")
+        XCTAssertTrue(chips.contains("FlexibleStageStyle.facePrismKnob"), "the chip")
         XCTAssertFalse(chips.contains("FlexibleStageStyle.accent"), "the chip is not green")
+        XCTAssertFalse(inRamp(FlexibleStageStyle.facePrismToken), "the prism is not the map's hue")
     }
 
     // MARK: the dent's own ramp (his answer: never purple; Stress keeps its rainbow)
