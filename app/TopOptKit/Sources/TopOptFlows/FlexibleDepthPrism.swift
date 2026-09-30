@@ -5,7 +5,7 @@
 // is exactly the heat map's footprint and a split sector's prism stops at the cut — pushed
 // INTO the part along the load (core's R13 frame) by the deepest squish × k, the page's one
 // exaggeration. The dent bottoms out on the prism's floor. Drawn by MetalMeshView's
-// clearance-volume pass (`clearanceVolumes:`), in the Flexible accent (never violet).
+// clearance-volume pass (`clearanceVolumes:`), in the on-part colour (never violet, never the map green).
 //
 // ★ SHARED CORNERS, NOT A QUAD PER COLUMN. Each grid corner is the mean of the columns that
 // touch it, so the shell's skirt forms on the footprint's outline only (a quad per column
@@ -199,7 +199,7 @@ enum FlexibleDepthPrism {
         return (clamp(r.mm, latticeMM: limit), r.snapped, r.didSnap)
     }
 
-    /// The prism the Settings page draws: the SELECTED pressed face's, in the Flexible accent,
+    /// The prism the Settings page draws: the SELECTED pressed face's, in the on-part colour,
     /// and ONLY while its chip is dragged (`frozenExaggeration` set) — at rest the dent reads alone.
     @MainActor
     static func renderItems(model: FlexibleStageModel, k: Double) -> [ClearanceRenderItem] {
@@ -207,7 +207,7 @@ enum FlexibleDepthPrism {
               let r = model.selectedRegion, let f = model.settings.face(r), f.isLoaded,
               let key = model.key(r), let st = model.stacks[key], let g = model.geometry[key], k > 0,
               let v = volume(region: r, stack: st, centres: g.centres, depthMM: f.deepestMM, k: k) else { return [] }
-        let t = FlexibleStageStyle.accentToken
+        let t = FlexibleStageStyle.onPartToken
         return [ClearanceRenderItem(volume: v, selected: true, tint: SIMD3<Float>(Float(t.r), Float(t.g), Float(t.b)))]
     }
 }

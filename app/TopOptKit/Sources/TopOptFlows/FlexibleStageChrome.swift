@@ -25,6 +25,13 @@ public enum FlexibleStageStyle {
 
     public static var accent: Color { DS.Color.accentGreen.color }
     public static var accentToken: RGBA { DS.Color.accentGreen }
+    /// ★ WHAT IS DRAWN ON THE PART BESIDE THE DENT MAP — the curves and their points, the
+    /// depth chip and prism, the selected face — in DS textPrimary, never the map's green
+    /// (verification of round 3: the ramp, the tints, the prism, the curves and the chip were
+    /// all accentGreen, and the heat map read as shading in a green box). The green stays the
+    /// page's accent (its dot, Generate) and the map's own ramp.
+    public static var onPart: Color { DS.Color.textPrimary.color }
+    public static var onPartToken: RGBA { DS.Color.textPrimary }
     /// The modal's luminance rule (LatticeStageModeStyle.onAccent), on the green token.
     public static var onAccent: Color {
         let (r, g, b) = (48.0 / 255, 209.0 / 255, 88.0 / 255)   // #30D158

@@ -353,7 +353,8 @@ public enum FlexibleColours {
     public static let noNumber = token(DS.Color.textQuaternary, 0.9)
     public static let refused = token(DS.Color.danger, 0.9)
     public static let loadedFace = token(DS.Color.accentGreen, 0.35)
-    public static let selectedFace = token(DS.Color.accentGreen, 0.6)
+    /// ★ Not the map's green (verification of round 3): the on-part colour, like the curves.
+    public static let selectedFace = token(DS.Color.textPrimary, 0.45)
     public static let linkedEnd = token(DS.Color.accentCyan, 0.45)
     public static let conflict = token(DS.Color.warning, 0.6)
     public static let restingFace = token(DS.Color.accentCyan, 0.25)

@@ -124,6 +124,33 @@ final class FlexibleShownValuesTests: XCTestCase {
         XCTAssertLessThan(old.max() ?? 0, (s.max() ?? 0) * 6 - 1, "control: the design lags at the old deepest")
     }
 
+    /// ★ "EVERYTHING IS THE SAME GREEN" (verification of round 3): the curves, their points,
+    /// the depth chip and prism and the selected face are drawn in the neutral on-part colour,
+    /// so the dent's green ramp reads against them. RED CONTROL: the old accent green sits
+    /// inside the ramp's own hue family.
+    @MainActor
+    func testWhatIsDrawnOnThePartIsNotTheMapsGreen() throws {
+        let ramp = FlexibleColours.depthStops.map(Self.hueSat).filter { $0.s > 0.15 }
+        let rampHue = ramp.map(\.h).reduce(0, +) / Double(max(1, ramp.count))
+        func inRamp(_ c: RGBA) -> Bool { let (h, s) = Self.hueSat(c); return s > 0.15 && abs(h - rampHue) < 30 }
+        let sel = FlexibleColours.selectedFace
+        for (name, c) in [("on-part", FlexibleStageStyle.onPartToken),
+                          ("selected face", RGBA(Double(sel.x) * 255, Double(sel.y) * 255, Double(sel.z) * 255))] {
+            XCTAssertFalse(inRamp(c), "\(name) is not the map's green")
+            XCTAssertFalse(Self.isPurple(c), "\(name) is never purple")
+        }
+        // ★ RED CONTROL: the accent every one of them used is IN the ramp's family
+        XCTAssertTrue(inRamp(FlexibleStageStyle.accentToken), "control: the old accent is the map's green")
+        // the call sites use it
+        let root = FlexibleHisProject.repoRoot.appendingPathComponent("app/TopOptKit/Sources/TopOptFlows")
+        func src(_ f: String) throws -> String { try String(contentsOf: root.appendingPathComponent(f), encoding: .utf8) }
+        XCTAssertTrue(try src("FlexibleStagePage.swift").contains("tint: FlexibleStageStyle.onPart,"), "the curves")
+        XCTAssertTrue(try src("FlexibleDepthPrism.swift").contains("let t = FlexibleStageStyle.onPartToken"), "the prism")
+        let chips = try src("FlexibleDepthChips.swift")
+        XCTAssertTrue(chips.contains("FlexibleStageStyle.onPart.opacity"), "the chip")
+        XCTAssertFalse(chips.contains("FlexibleStageStyle.accent"), "the chip is not green")
+    }
+
     // MARK: the dent's own ramp (his answer: never purple; Stress keeps its rainbow)
 
     /// Hue (degrees) and saturation of an RGBA.

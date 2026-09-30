@@ -426,7 +426,7 @@ struct FlexibleStageOverlays: View {
                     FlexibleCurveEditor(projection: proj.projection,
                                         baseline: axis == "x" ? g.baselineX : g.baselineY,
                                         curve: axis == "x" ? f.curveX : f.curveY,
-                                        label: axis.uppercased(), tint: FlexibleStageStyle.accent,
+                                        label: axis.uppercased(), tint: FlexibleStageStyle.onPart,
                                         selected: selection(r, axis),
                                         onChange: { c in setCurve(r, axis, c) },
                                         onCommit: { model.save() })

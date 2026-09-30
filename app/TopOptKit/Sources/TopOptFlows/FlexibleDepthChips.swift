@@ -1,4 +1,4 @@
-// FlexibleDepthChips — the green glass chip on the selected pressed face that drags its
+// FlexibleDepthChips — the glass chip on the selected pressed face that drags its
 // deepest squish out as a prism (task 2026-09-29-flexible-screens, round 3, item 1.1).
 //
 // ★ THE DRAG. The finger's MODEL-space ray (the page's projection composes the settle) meets
@@ -114,8 +114,8 @@ struct FlexibleDepthChips: View {
         .padding(.horizontal, 12)
         .frame(minHeight: 44)
         .background(Capsule().fill(.ultraThinMaterial))
-        .background(Capsule().fill(FlexibleStageStyle.accent.opacity(0.28)))
-        .overlay(Capsule().strokeBorder(FlexibleStageStyle.accent.opacity(0.8), lineWidth: 1.5))
+        .background(Capsule().fill(DS.Color.chipSolid.color.opacity(0.55)))
+        .overlay(Capsule().strokeBorder(FlexibleStageStyle.onPart.opacity(0.85), lineWidth: 1.5))
         .contentShape(Capsule())
         .accessibilityIdentifier("flexible-depth-chip")
     }
