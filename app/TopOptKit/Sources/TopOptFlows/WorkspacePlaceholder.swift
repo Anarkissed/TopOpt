@@ -2200,7 +2200,6 @@ public struct WorkspacePlaceholder: View {
 
     /// The volume colour for a lattice role (nil → keep the clearance red).
     private func latticeRegionTint(_ role: LatticeGroupRole?) -> SIMD3<Float>? {
-        if let t = FlexibleMainTints.depthPlane(role, flexible: project.lattice.flexible != nil) { return t }   // Flexible (PR #362) H13: never violet under Flexible
         switch role {
         case .include: return SIMD3<Float>(124.0 / 255, 111.0 / 255, 214.0 / 255)  // ramp mid violet
         case .exclude: return SIMD3<Float>(74.0 / 255, 52.0 / 255, 158.0 / 255)    // ramp deep indigo
@@ -8341,7 +8340,7 @@ public struct WorkspacePlaceholder: View {
 
     private func latticeDepthKnob(active: Bool) -> some View {
         let tint = LiquidGlass.Tint.frost(
-            FlexibleMainTints.knob(flexible: project.lattice.flexible != nil, LatticeDensityProxy.densityColor(fraction: 0.6)),   // Flexible (PR #362) H13
+            LatticeDensityProxy.densityColor(fraction: 0.6),
             intensity: active ? 0.85 : 0.55)
         let size: CGFloat = active ? 26 : 22
         return Image(systemName: "arrow.down.to.line")
@@ -8405,7 +8404,7 @@ public struct WorkspacePlaceholder: View {
     private func latticeExpandKnob(active: Bool,
                                    sense: LatticeSlabExpand.Sense) -> some View {
         let tint = LiquidGlass.Tint.frost(
-            FlexibleMainTints.knob(flexible: project.lattice.flexible != nil, LatticeDensityProxy.densityColor(fraction: 0.25)),   // Flexible (PR #362) H13
+            LatticeDensityProxy.densityColor(fraction: 0.25),
             intensity: active ? 0.85 : 0.55)
         let size: CGFloat = active ? 26 : 22
         return Image(systemName: sense.symbolName)
