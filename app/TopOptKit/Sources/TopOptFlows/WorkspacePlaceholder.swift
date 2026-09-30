@@ -3475,21 +3475,16 @@ public struct WorkspacePlaceholder: View {
     /// `startRelatticeRun` submits what this returns, and the forecast is a
     /// forecast OF these bytes (RelatticeRun arms `lattice.forecast_only` inside
     /// the runner, on this same document, so the two differ in one key and no
-    /// other). `noteSkippedFaces` is off for the forecast — it must not post
-    /// transient notes on every settings change.
-    private func relatticeJobJSON(noteSkippedFaces: Bool) -> Data? {
+    /// other). It also returns how many face walls the variant job left out (bar Z11),
+    /// so each of the three surfaces can say so (ruling V1, 2026-09-29) — the note this
+    /// used to post was drawn on the page the run then closed, so nobody ever saw it.
+    private func relatticeJobJSON() -> (json: Data, faceWallsLeftOut: Int)? {
         guard let ctx = latticeVariantContext, let art = ctx.artifacts else { return nil }
         // The regions the page authored, as EXPLICIT GEOMETRY PREDICATES (bar
         // Z11): on a variant only placed primitives are emitted, because a face
         // id would resolve against the ORIGINAL part's surface, which this design
         // no longer has.
         let emission = project.variantLatticeJobRegions()
-        if noteSkippedFaces, emission.skippedFaces > 0 {
-            latticePageModel.post(
-                note: "\(emission.skippedFaces) face selection(s) were not carried "
-                    + "onto this variant — an optimized surface has no faces to "
-                    + "resolve them against. Place a region instead.")
-        }
         // The SAME spec builder the optimize request uses — only the regions
         // differ, and they differ for the Z11 reason above.
         // The STRUT width, matching AppModel.makeRunRequest (task
@@ -3514,8 +3509,15 @@ public struct WorkspacePlaceholder: View {
         // now come from the variant itself.
         // ★ The preview's placed cells ride with a Stepped run (2026-09-18).
         spec?.steppedCells = project.latticePreviewSteppedCells
-        return try? RelatticeJobBuilder.build(
-            original: art.jobJSON, variant: ctx, lattice: spec)
+        guard let json = try? RelatticeJobBuilder.build(
+            original: art.jobJSON, variant: ctx, lattice: spec) else { return nil }
+        return (json, emission.skippedFaces)
+    }
+
+    /// ★ ruling V1 (2026-09-29): the face walls a variant's job leaves out — 0 off a
+    /// variant. The forecast drawer states it even when no forecast can be produced.
+    private var latticeVariantFaceWallsLeftOut: Int {
+        latticeVariantContext != nil ? project.variantLatticeJobRegions().skippedFaces : 0
     }
 
     /// The forecast's input and identity: the job above, but only when a forecast
@@ -3524,7 +3526,7 @@ public struct WorkspacePlaceholder: View {
     private var latticeForecastJob: Data? {
         guard showLatticePage, compute.activeRemote != nil,
               latticeVariantContext?.artifacts != nil else { return nil }
-        return relatticeJobJSON(noteSkippedFaces: false)
+        return relatticeJobJSON()?.json
     }
 
     /// ★ THE ORGANIC CELL-SIZE PROBE (final contract 2026-09-05): the SAME inputs
@@ -3542,16 +3544,20 @@ public struct WorkspacePlaceholder: View {
         let designBin = art.designBin
         let path = file.path
         return { [self] cells, grades, recommend in
-            guard let job = relatticeJobJSON(noteSkippedFaces: false) else {
+            guard let job = relatticeJobJSON() else {
                 throw RelatticeError("There is nothing to check yet. Optimize the part first.")
             }
             let inputs = RelatticeRun.Inputs(
-                config: config, modelPath: path, jobJSON: job,
+                config: config, modelPath: path, jobJSON: job.json,
                 designBin: designBin, projectName: name,
                 requestedVolumeFraction: vf)
-            return try await Task.detached(priority: .utility) {
+            var probe = try await Task.detached(priority: .utility) {
                 try RelatticeRun.probe(inputs, cellsMM: cells, gradesMM: grades, recommend: recommend)
             }.value
+            // ★ ruling V1: what this check left out travels WITH its answer (the answer is
+            // stored and shown later, when the walls may have changed)
+            probe.faceWallsLeftOut = job.faceWallsLeftOut
+            return probe
         }
     }
 
@@ -3593,7 +3599,7 @@ public struct WorkspacePlaceholder: View {
         }
         // THE SAME DOCUMENT THE FORECAST DESCRIBED — one builder, so the prediction
         // and the job cannot drift apart.
-        guard let jobJSON = relatticeJobJSON(noteSkippedFaces: true) else {
+        guard let job = relatticeJobJSON() else {
             model.toast = "Can’t build the re-lattice job from this run’s retained "
                 + "job document."
             return
@@ -3602,7 +3608,9 @@ public struct WorkspacePlaceholder: View {
         // the one that produced this variant ONLY in the lattice question. If any
         // load-case key moved, refuse HERE — before the worker spends solves
         // certifying under a load case the variant was never optimized under.
-        let moved = RelatticeJobBuilder.loadCaseDifferences(art.jobJSON, jobJSON)
+        let moved = RelatticeJobBuilder.loadCaseDifferences(art.jobJSON, job.json)
+        // ★ ruling V1: the face walls this job leaves out, for the result's own line
+        let leftOut = job.faceWallsLeftOut
         guard moved.isEmpty else {
             model.toast = "Can’t re-lattice: the load case changed (\(moved.joined(separator: ", "))). "
                 + "This job must certify under the load case the variant was optimized under."
@@ -3610,7 +3618,7 @@ public struct WorkspacePlaceholder: View {
         }
         viewOriginal = false
         let inputs = RelatticeRun.Inputs(
-            config: config, modelPath: file.path, jobJSON: jobJSON,
+            config: config, modelPath: file.path, jobJSON: job.json,
             designBin: art.designBin, projectName: project.name,
             requestedVolumeFraction: ctx.requestedVolumeFraction)
         // THE RECEIPT WAS BEING THROWN AWAY (task
@@ -3659,7 +3667,8 @@ public struct WorkspacePlaceholder: View {
                 emittedRegions: spec.regions.count,
                 // The per-region rows only exist when the job asked for them; a
                 // receipt that carries none parses to nil and shows nothing.
-                regionCellsJSON: spec.reportRegionCells ? result.receiptJSON : nil))
+                regionCellsJSON: spec.reportRegionCells ? result.receiptJSON : nil,
+                variantFaceWallsLeftOut: leftOut))
         }
         guard let request = model.makeRunRequest() else { return }
         closeLatticePage()
@@ -3730,7 +3739,8 @@ public struct WorkspacePlaceholder: View {
                     // driver is nil exactly when no forecast is possible.
                     forecast: latticeForecast,
                     forecastJob: latticeForecastJob,
-                    driveForecast: makeForecastDriver())
+                    driveForecast: makeForecastDriver(),
+                    variantFaceWallsLeftOut: latticeVariantFaceWallsLeftOut)
             .ignoresSafeArea(.keyboard)
     }
 

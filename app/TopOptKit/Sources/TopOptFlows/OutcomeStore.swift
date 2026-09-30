@@ -157,6 +157,9 @@ enum OutcomeCodec {
         // put on screen. Stored as the raw bytes core wrote. Optional so every blob
         // written before this task decodes → nil → no breakdown, which is honest.
         let regionCellsJSON: Data?
+        // ★ ruling V1 (2026-09-29): face walls a variant's re-lattice left out. Optional and
+        // written only when non-zero, so every other outcome is stored byte-for-byte as before.
+        var variantFaceWallsLeftOut: Int? = nil
     }
 
     struct OutcomeDTO: Codable, Sendable {
@@ -297,7 +300,8 @@ enum OutcomeCodec {
                     strutSubfloorRetainedVoxels: r.strut?.subfloorRetainedVoxels,
                     strutSubfloorRegionStressFraction:
                         r.strut?.subfloorRegionStressFraction,
-                    regionCellsJSON: r.regionCellsJSON) },
+                    regionCellsJSON: r.regionCellsJSON,
+                    variantFaceWallsLeftOut: r.variantFaceWallsLeftOut > 0 ? r.variantFaceWallsLeftOut : nil) },
             solvedBy: o.solvedBy)
     }
 
@@ -395,7 +399,8 @@ enum OutcomeCodec {
                                 r.strutSubfloorRetainedVoxels ?? 0,
                             subfloorRegionStressFraction:
                                 r.strutSubfloorRegionStressFraction ?? 0) },
-                    regionCellsJSON: r.regionCellsJSON) },
+                    regionCellsJSON: r.regionCellsJSON,
+                    variantFaceWallsLeftOut: r.variantFaceWallsLeftOut ?? 0) },
             solvedBy: d.solvedBy,
             // nil on a pre-growth blob → false → reduction, which is what it is.
             growthLadder: d.growthLadder ?? false)

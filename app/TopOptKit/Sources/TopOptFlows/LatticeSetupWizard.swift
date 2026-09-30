@@ -1311,7 +1311,8 @@ public struct LatticeSetupWizard: View {
                 organicPill("Manual", on: organicManual, enabled: fitPossible) {
                     if model.simulateStresses {
                         if model.organicPickedGradeMM.count != 2 {
-                            model.organicPickedGradeMM = organicManualGrades.first?.grade
+                            // ★ ruling V3: never seed an unselectable (unchecked) grade
+                            model.organicPickedGradeMM = organicManualGrades.first(where: { $0.selectable })?.grade
                                 ?? LatticeSettings.organicProbeGradesMM[0]
                         }
                         model.organicPickedSeparationMM = 0
@@ -1540,6 +1541,9 @@ public struct LatticeSetupWizard: View {
     private struct ManualGrade: Hashable {
         let grade: [Double]; let approved: Bool; let selectable: Bool; let refusals: [String]
         var tint: OrganicForecast.Tint? = nil; var margin: String? = nil; var hover: String = ""
+        /// ★ the pill's words (ruling V3): "Not checked" under Structural where the stress
+        /// bar was never computed, else the size with "*" when unapproved and the margin
+        var label: String = ""
     }
     /// ★ THE MANUAL SIZE LIST. With the organic cell-size probe present (contract
     /// 2026-09-05): its candidates — Structural offers only `approved_structural`,
@@ -1553,7 +1557,7 @@ public struct LatticeSetupWizard: View {
                            approved: structural ? c.approvedStructural : c.approvedAesthetic,
                            selectable: OrganicForecast.selectable(c, structural: structural),
                            refusals: c.refusals, tint: OrganicForecast.tint(c, structural: structural),
-                           margin: c.marginText, hover: c.hoverText)
+                           margin: c.marginText, hover: c.hoverText(structural: structural, probedIntent: probe.probedIntent))
             }.sorted { $0.size < $1.size }
         }
         let approved = project.lattice.organicFittingSeparationsMM
@@ -1575,11 +1579,13 @@ public struct LatticeSetupWizard: View {
                             approved: structural ? c.approvedStructural : c.approvedAesthetic,
                             selectable: OrganicForecast.selectable(c, structural: structural),
                             refusals: c.refusals, tint: OrganicForecast.tint(c, structural: structural),
-                            margin: c.marginText, hover: c.hoverText)
+                            margin: c.marginText, hover: c.hoverText(structural: structural, probedIntent: probe.probedIntent),
+                            label: c.pillText(structural: structural))
             }
         }
         return project.lattice.organicApprovedGradesMM.filter { $0.count == 2 }
-            .map { ManualGrade(grade: $0, approved: true, selectable: true, refusals: []) }
+            .map { ManualGrade(grade: $0, approved: true, selectable: true, refusals: [],
+                               label: String(format: "%g–%g mm", $0[0], $0[1])) }
     }
     private var organicProbePresent: Bool { project.lattice.organicForecast != nil }
 
@@ -1644,7 +1650,7 @@ public struct LatticeSetupWizard: View {
         if model.simulateStresses {
             // ── item 2: a GRADE, "## mm to ## mm", never single values ──
             HStack(spacing: DS.Space.xs) {
-                Text(organicProbePresent && structural ? "Likely to certify" : "Grade")
+                Text(organicProbePresent && structural && organicAnyChecked ? "Likely to certify" : "Grade")
                     .dsStyle(DS.TypeScale.caption2)
                     .foregroundStyle(DS.Color.textTertiary.color)
                 infoButton("manual-grades", (organicProbePresent
@@ -1670,8 +1676,7 @@ public struct LatticeSetupWizard: View {
                     HStack(spacing: DS.Space.xs) {
                         ForEach(grades, id: \.self) { m in
                             let g = m.grade
-                            organicPill(String(format: m.approved ? "%g–%g mm" : "%g–%g mm*", g[0], g[1])
-                                            + (m.margin.map { " · \($0)" } ?? ""),
+                            organicPill(m.label,
                                         on: model.organicPickedGradeMM == g,
                                         enabled: fitPossible && m.selectable) {
                                 commitOrganicGrade(lo: g[0], hi: g[1])
@@ -1686,7 +1691,7 @@ public struct LatticeSetupWizard: View {
         } else {
             // ── item 4: ONE size, "## mm", checked after the number is complete ──
             HStack(spacing: DS.Space.xs) {
-                Text(organicProbePresent && structural ? "Likely to certify" : "Size")
+                Text(organicProbePresent && structural && organicAnyChecked ? "Likely to certify" : "Size")
                     .dsStyle(DS.TypeScale.caption2)
                     .foregroundStyle(DS.Color.textTertiary.color)
                 infoButton("manual-sizes", (organicProbePresent
@@ -1715,6 +1720,26 @@ public struct LatticeSetupWizard: View {
                 infoButton("check-failed", why)
             }
         }
+        // ★ ruling V3 (2026-09-29): not one size's stress bar was computed — say so, and
+        // what would get them checked; each size's reason behind the (i)
+        if let none = project.lattice.organicForecast?.uncheckedSummary(
+            structural: structural, grades: model.simulateStresses, checkRefusal: organicProbeRefusal) {
+            HStack(spacing: DS.Space.xs) {
+                shortNote(none.line, warning: true)
+                infoButton("none-checked", none.info)
+            }
+            .accessibilityIdentifier("wizard-organic-none-checked")
+        }
+        // ★ ruling V1 (2026-09-29): a variant's Check sizes left its face walls out — say so
+        if let line = LatticeVariantFaceWalls.line(leftOut: project.lattice.organicForecast?.faceWallsLeftOut ?? 0) {
+            shortNote(line, warning: true)
+                .accessibilityIdentifier("wizard-organic-face-walls-left-out")
+        }
+    }
+
+    /// Any size IN THE LIST SHOWN whose stress bar the probe computed (ruling V3).
+    private var organicAnyChecked: Bool {
+        project.lattice.organicForecast?.anyChecked(grades: model.simulateStresses) ?? false
     }
 
     /// ★ THE RECOMMENDATION (brief 2026-09-06, §3 menu wiring): with a simulation the
@@ -1733,8 +1758,11 @@ public struct LatticeSetupWizard: View {
             } else if model.simulateStresses, let a = rec.auto, a.found {
                 HStack(spacing: DS.Space.xs) {
                     shortNote("Recommended")
-                    organicPill(rec.pillText(a),
-                                on: model.organicPickedGradeMM == [a.cellMinMM, a.cellMaxMM], enabled: true) {
+                    // ★ ruling V3: under Structural only a CHECKED pick may be taken — one from
+                    // a probe that ran on Aesthetic was never checked (2026-09-03)
+                    organicPill(rec.pillText(a) + (structural && !rec.showsMargin ? " · " + OrganicSizeCheck.notCheckedTitle : ""),
+                                on: model.organicPickedGradeMM == [a.cellMinMM, a.cellMaxMM],
+                                enabled: !structural || rec.showsMargin) {
                         commitOrganicGrade(lo: a.cellMinMM, hi: a.cellMaxMM)
                     }
                     .modifier(OrganicProbeTintModifier(tint: rec.tint))
@@ -1743,8 +1771,9 @@ public struct LatticeSetupWizard: View {
             } else if !model.simulateStresses, let f = rec.fit, f.found {
                 HStack(spacing: DS.Space.xs) {
                     shortNote("Recommended")
-                    organicPill(rec.pillText(f),
-                                on: abs(model.organicPickedSeparationMM - f.cellMM) < 1e-6, enabled: true) {
+                    organicPill(rec.pillText(f) + (structural && !rec.showsMargin ? " · " + OrganicSizeCheck.notCheckedTitle : ""),
+                                on: abs(model.organicPickedSeparationMM - f.cellMM) < 1e-6,
+                                enabled: !structural || rec.showsMargin) {
                         commitOrganicSize(f.cellMM)
                     }
                     .modifier(OrganicProbeTintModifier(tint: rec.tint))

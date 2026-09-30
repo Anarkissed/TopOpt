@@ -161,6 +161,18 @@ final class OrganicMainWiringTests: XCTestCase {
         XCTAssertEqual(src.components(separatedBy: "OrganicForecast.tint(c, structural: structural)").count - 1, 2)
         XCTAssertEqual(src.components(separatedBy: "OrganicForecast.meaning(structural: structural)").count - 1, 2)
         XCTAssertFalse(src.contains("+ \" \" + OrganicForecast.notCertified"))
+        // ★ ruling V3 (2026-09-29): no bare "*" on a Structural pill that was never checked;
+        // the headings claim "Likely to certify" only when a size was; an unchecked
+        // Recommended pick is not offered under Structural; the Manual seed is selectable
+        XCTAssertFalse(src.contains("%g–%g mm*"))
+        XCTAssertTrue(src.contains("organicPill(m.label,"))
+        XCTAssertEqual(src.components(separatedBy: "label: c.pillText(structural: structural)").count - 1, 1)
+        XCTAssertEqual(src.components(separatedBy: "c.hoverText(structural: structural, probedIntent: probe.probedIntent)").count - 1, 2)
+        XCTAssertEqual(src.components(separatedBy: "organicProbePresent && structural && organicAnyChecked").count - 1, 2)
+        XCTAssertTrue(src.contains("uncheckedSummary(\n            structural: structural, grades: model.simulateStresses, checkRefusal: organicProbeRefusal)"))
+        XCTAssertTrue(src.contains("anyChecked(grades: model.simulateStresses)"), "the heading reads the list shown")
+        XCTAssertEqual(src.components(separatedBy: "enabled: !structural || rec.showsMargin").count - 1, 2)
+        XCTAssertTrue(src.contains("organicManualGrades.first(where: { $0.selectable })?.grade"))
     }
 
     /// §2: the receipt's certificate, ties, fillet, floors, recommendation and

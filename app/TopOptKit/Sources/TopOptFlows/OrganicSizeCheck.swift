@@ -118,7 +118,9 @@ public enum OrganicSizeCheck {
                 likely = c.approvedStructural
                 advice.append(String(format: "Predicted margin %.2f.", p.margin))
             } else {
-                notChecked = c.predicted?.reason ?? ""
+                // core's reason verbatim — except the cap line core writes for a SKIPPED
+                // certificate (N within the cap), where the true cause is said (ruling V3)
+                notChecked = c.predicted == nil ? "" : (c.notCheckedReason(probedIntent: probe?.probedIntent) ?? "")
             }
         }
         // (`likely != nil` used to stand in for "a candidate matched" here — the same

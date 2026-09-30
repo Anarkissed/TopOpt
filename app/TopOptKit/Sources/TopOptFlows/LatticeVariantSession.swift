@@ -513,6 +513,17 @@ public struct LatticeVariantAuthoring: Equatable, Sendable {
 
 // MARK: - region emission against a variant
 
+/// ★★ RULING V1 (maintainer, 2026-09-29, re-lattice): a variant's job carries placed shapes
+/// only (bar Z11), so a face wall — a face or a face region — is left out of Check sizes, the
+/// forecast and the re-lattice. Each says so in THIS one line, never a silent result.
+/// Carrying face walls as explicit face-prism geometry is the follow-up that retires it.
+public enum LatticeVariantFaceWalls {
+    public static let leftOutLine =
+        "On a variant, only placed shapes are checked; your face walls aren’t included yet."
+    /// The line when any face wall was left out; nil otherwise.
+    public static func line(leftOut: Int) -> String? { leftOut > 0 ? leftOutLine : nil }
+}
+
 public extension LatticeRegionEmission {
     /// The emission for a page working on a VARIANT.
     ///
@@ -523,13 +534,20 @@ public extension LatticeRegionEmission {
     /// geometry describes the ORIGINAL part's surface, which this design no
     /// longer has, and emitting them would place regions the user has never
     /// seen against the geometry they will actually affect. They are COUNTED so
-    /// the page can say so.
+    /// the page can say so: `skippedFaces` is every face wall left out — faces AND face
+    /// regions, include or exclude, a wall set to Off being no wall (ruling V1,
+    /// 2026-09-29) — and Check sizes, the forecast and the re-lattice say so in
+    /// `LatticeVariantFaceWalls.leftOutLine`.
     static func variantRegions(
         groups: [SelectionGroup],
         roles: [UUID: LatticeGroupRole],
         primitives: (UUID) -> [(prim: ManualPrimitive, depthMM: Double)],
         includePrimitives: [(prim: ManualPrimitive, depthMM: Double)],
         groupDensities: [UUID: Double] = [:],
+        // ★ THE PER-SELECTABLE ROLES (ruling V2, 2026-09-29, re-lattice): a primitive set to
+        // Solid or Off inside an include group is resolved exactly as the main job does
+        // (`regions()`), so it is emitted as exclude — never flagged, no density — or not at all.
+        selectableRoles: [String: LatticeSelectableRole] = [:],
         // ★ THE SYNTHETIC-STRESS FLAGS (ruling 1, 2026-09-29): the re-lattice job flags
         // every include wall as the main job does (`regions(synthetic:)`); nil ⇒ none.
         // Faces are not emitted here (see above), so only placed walls can carry one.
@@ -543,21 +561,32 @@ public extension LatticeRegionEmission {
             }
         }
         for g in groups {
-            guard let role = roles[g.id] else { continue }
-            // ★ The dialled density rides the re-lattice job too (task
-            // 2026-08-16-per-sector-density-override). Through the SAME gate as
-            // the optimize path, so the two cannot disagree about which regions
-            // may carry one.
-            let rho = density(for: g.id, role: role, densities: groupDensities)
+            guard let groupRole = roles[g.id] else { continue }
             for (p, d) in primitives(g.id) {
+                let ref = LatticeSelectableRef.primitive(p.id)
+                // ★ ruling V2: the primitive's OWN role, as `regions()` resolves it; Off ⇒ nil ⇒
+                // not a region at all.
+                guard let role = LatticeSelectableRoles.role(
+                    for: ref, groupRole: groupRole, overrides: selectableRoles) else { continue }
                 if var s = spec(for: p, role: role, depthMM: d) {
-                    s.relativeDensity = rho
-                    let ref = LatticeSelectableRef.primitive(p.id)
+                    // ★ The dialled density rides the re-lattice job too (task
+                    // 2026-08-16-per-sector-density-override), through the SAME gate as the
+                    // optimize path — per the RESOLVED role, so a Solid bolt in a dialled
+                    // include group carries none (core refuses a density on an exclude region).
+                    s.relativeDensity = density(for: g.id, role: role, densities: groupDensities)
                     if role == .include, let sf = synthetic { s.syntheticStress = true; s.syntheticFoci = sf.foci(for: ref.key) }
                     out.append(s)
                 }
             }
-            skipped += g.faces.count
+            // ★ ruling V1: every face wall left out — faces AND face regions; Off is no wall
+            for f in g.faces where LatticeSelectableRoles.role(
+                for: .face(group: g.id, face: f), groupRole: groupRole, overrides: selectableRoles) != nil {
+                skipped += 1
+            }
+            for rid in g.regionIDs where LatticeSelectableRoles.role(
+                for: .region(group: g.id, region: rid), groupRole: groupRole, overrides: selectableRoles) != nil {
+                skipped += 1
+            }
         }
         return Result(regions: out, skippedFaces: skipped)
     }

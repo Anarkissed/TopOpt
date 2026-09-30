@@ -884,6 +884,9 @@ public struct LatticeReport: Equatable, Sendable {
     /// This is the file that answers "which of my seven regions got what", which no
     /// artifact could answer after the maintainer's overnight run.
     public let regionCellsJSON: Data?
+    /// ★ ruling V1 (2026-09-29): how many face walls a VARIANT's re-lattice job left out
+    /// (it carries placed shapes only), so the result says so; 0 everywhere else.
+    public let variantFaceWallsLeftOut: Int
 
     public struct StrutStrength: Equatable, Sendable {
         public let marginInPlane: Double
@@ -944,8 +947,10 @@ public struct LatticeReport: Equatable, Sendable {
                 regionScoped: Bool, emittedRegions: Int = 0,
                 generated: Generated? = nil,
                 strut: StrutStrength? = nil,
-                regionCellsJSON: Data? = nil) {
+                regionCellsJSON: Data? = nil,
+                variantFaceWallsLeftOut: Int = 0) {
         self.regionCellsJSON = regionCellsJSON
+        self.variantFaceWallsLeftOut = variantFaceWallsLeftOut
         self.topologyID = topologyID
         self.cellMM = cellMM
         self.generateRelativeDensity = generateRelativeDensity

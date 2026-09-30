@@ -82,6 +82,8 @@ public struct LatticePage: View {
     /// Runs the forecast. Injected because it is a worker round trip; nil in the
     /// previews and offscreen captures, where the page renders without one.
     let driveForecast: (@Sendable (Data) async throws -> LatticeForecast)?
+    /// ★ ruling V1 (2026-09-29): face walls this variant's job leaves out (0 off a variant)
+    let variantFaceWallsLeftOut: Int
 
     public init(model: AppModel, project: ProjectModel, run: RunModel,
                 sim: LatticeSimModel, page: LatticePageModel,
@@ -97,6 +99,7 @@ public struct LatticePage: View {
                 forecast: LatticeForecastModel = LatticeForecastModel(),
                 forecastJob: Data? = nil,
                 driveForecast: (@Sendable (Data) async throws -> LatticeForecast)? = nil,
+                variantFaceWallsLeftOut: Int = 0,
                 staticRender: Bool = false) {
         self.model = model
         self.project = project
@@ -116,6 +119,7 @@ public struct LatticePage: View {
         self.forecast = forecast
         self.forecastJob = forecastJob
         self.driveForecast = driveForecast
+        self.variantFaceWallsLeftOut = variantFaceWallsLeftOut
         self.staticRender = staticRender
     }
 
@@ -1846,6 +1850,12 @@ public struct LatticePage: View {
             Text(p.title.uppercased()).font(.system(size: 11, weight: .semibold))
                 .tracking(0.7)
                 .foregroundStyle((p.warn ? DS.Color.warning : DS.Color.textQuaternary).color)
+            // ★ ruling V1 (2026-09-29): a variant's forecast never silently omits face walls
+            if let scope = LatticeVariantFaceWalls.line(leftOut: variantFaceWallsLeftOut) {
+                Text(scope).dsStyle(DS.TypeScale.caption)
+                    .foregroundStyle(DS.Color.warning.color)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             if let placeholder = p.placeholder {
                 Text(placeholder).dsStyle(DS.TypeScale.caption)
                     .foregroundStyle(DS.Color.textTertiary.color)
@@ -1869,7 +1879,8 @@ public struct LatticePage: View {
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel(
-            ([p.title, p.placeholder, p.headline] + p.reasons + p.advice)
+            ([p.title, LatticeVariantFaceWalls.line(leftOut: variantFaceWallsLeftOut), p.placeholder, p.headline]
+                + p.reasons + p.advice)
                 .compactMap { $0 }.joined(separator: ". "))
     }
 

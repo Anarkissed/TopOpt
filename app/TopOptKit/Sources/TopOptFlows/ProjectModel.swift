@@ -2287,6 +2287,8 @@ public final class ProjectModel: ObservableObject {
             includePrimitives: lattice.includePrimitives.map {
                 ($0, $0.resolvedDepthMM) },
             groupDensities: lattice.groupDensities,
+            // ★ ruling V2 (2026-09-29): a Solid/Off primitive inside an include group
+            selectableRoles: lattice.selectableRoles,
             // ★ ruling 1 (2026-09-29): the re-lattice job (run, forecast, Check sizes)
             // flags every include wall exactly as the main job does
             synthetic: latticeSyntheticFlags())

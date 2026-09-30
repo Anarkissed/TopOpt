@@ -872,6 +872,8 @@ public final class ResultsModel: ObservableObject {
     /// Format a run's lattice report into honest lines.
     public static func latticeNotes(_ report: LatticeReport?) -> [String] {
         guard let r = report else { return [] }
+        // ★ ruling V1 (2026-09-29): a variant's re-lattice left its face walls out — say so
+        let scopeLine = LatticeVariantFaceWalls.line(leftOut: r.variantFaceWallsLeftOut).map { [$0] } ?? []
         func pct(_ x: Double) -> String { "\(Int((x * 100).rounded()))%" }
         var lines: [String] = []
         // ★ WHICH REGION GOT WHAT (task 2026-08-05-lattice-retention-app-control,
@@ -945,7 +947,7 @@ public final class ResultsModel: ObservableObject {
                 + "(the material is too thin to hold \(String(format: "%g", r.cellMM)) mm "
                 + "cells), so this file is the solid part. The density and strut "
                 + "figures below describe nothing and are withheld.")
-            return lines + regionLines
+            return lines + scopeLine + regionLines
         }
         lines.append("Lattice: \(name), \(String(format: "%g", r.cellMM)) mm cell, "
             + "filled at \(pct(r.generateRelativeDensity)) density "
@@ -1009,7 +1011,7 @@ public final class ResultsModel: ObservableObject {
                 }
             }
         }
-        return lines + regionLines
+        return lines + scopeLine + regionLines
     }
 
     /// Format the Face-protection diagnostics from a finished outcome into honest lines.
