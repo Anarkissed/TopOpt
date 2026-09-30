@@ -396,7 +396,10 @@ public struct LatticePageActions: Equatable, Sendable {
     public static func compute(variant: LatticeVariantContext?,
                                optimizeSurface: LatticeOptimizeSurface,
                                running: Bool,
-                               forecast: LatticeForecast? = nil) -> LatticePageActions {
+                               forecast: LatticeForecast? = nil,
+                               // ★ ruling (c) (2026-09-30): why this variant's job may not be
+                               // written (`ProjectModel.variantLatticeJobRefusal()`); nil ⇒ it may.
+                               jobRefusal: String? = nil) -> LatticePageActions {
         guard let v = variant else {
             // No variant: the pre-existing single Optimize button, verbatim.
             return LatticePageActions(
@@ -420,6 +423,12 @@ public struct LatticePageActions: Equatable, Sendable {
                         primary: true)
         } else if let why = v.unavailable {
             re = Action(label: "Lattice this variant", sub: why.reason,
+                        enabled: false, primary: true)
+        } else if let why = jobRefusal {
+            // ★ RULING (c): zero include walls ⇒ no job — core would lattice the WHOLE variant.
+            // Disabled with the stage's words; after `unavailable` (setting walls cannot fix a
+            // run that kept no design), before the forecast (none is asked for).
+            re = Action(label: "Lattice this variant", sub: why,
                         enabled: false, primary: true)
         } else if let f = forecast, f.regionVoxels > 0, f.wouldLatticeVoxels == 0 {
             // NOTHING WOULD BE LATTICED (task
@@ -485,7 +494,10 @@ public struct LatticePageActions: Equatable, Sendable {
 /// So on a variant, authoring is by EXPLICIT GEOMETRY PREDICATE — the bolt
 /// cylinder / bounded slab shape `resolve_clearance_manual` already carries and
 /// core's `lattice.regions` accepts verbatim. Face TAPPING is off, and the page
-/// says why instead of accepting taps that would land nowhere.
+/// says why instead of accepting taps that would land nowhere. Face walls marked on the
+/// PART travel to the variant's job as the stage's full prisms, face_id included as
+/// provenance (the face-prism route, 2026-09-29; ruling a, 2026-09-30: core's variant path
+/// imports the ORIGINAL part, where the id is real).
 public struct LatticeVariantAuthoring: Equatable, Sendable {
     /// May the user tap the viewport to select a face?
     public let faceTapEnabled: Bool
@@ -505,89 +517,65 @@ public struct LatticeVariantAuthoring: Equatable, Sendable {
         return LatticeVariantAuthoring(
             faceTapEnabled: false,
             primitivePlacementEnabled: true,
-            note: "This is an optimized variant — it has no selectable faces. "
-                + "Place a region to say where lattice goes; it lands on this "
-                + "variant’s geometry.")
+            // ★ RULING (e) (maintainer, 2026-09-30): ONE sentence on the tap refusal, his words.
+            // (Placing a region is still offered by the page's header chip.)
+            note: Self.variantTapRefusal)
     }
+
+    /// ★ Ruling (e), verbatim.
+    public static let variantTapRefusal =
+        "You can't pick faces on an optimised result — the walls you marked on the part carry over."
 }
 
 // MARK: - region emission against a variant
+//
+// ★ RETIRED (2026-09-29, the face-prism route): a variant's job no longer has an emission of
+// its own. It carries the stage's walls as their explicit prisms (see
+// `ProjectModel.variantLatticeJobRegions`), so the primitives-only emission is gone.
 
-/// ★★ RULING V1 (maintainer, 2026-09-29, re-lattice): a variant's job carries placed shapes
-/// only (bar Z11), so a face wall — a face or a face region — is left out of Check sizes, the
-/// forecast and the re-lattice. Each says so in THIS one line, never a silent result.
-/// Carrying face walls as explicit face-prism geometry is the follow-up that retires it.
+/// ★★ THE VARIANT'S FACE-WALL LINE (ruling V1, 2026-09-29; the face-prism route, same day;
+/// wording accepted 2026-09-30, ruling f). A variant's job carries every face wall the stage's
+/// job carries, each as its prism, so a wall is left out only where the stage leaves it out
+/// too: a marked face with no shape to lattice (the emission's `skippedFaces`), or a face
+/// region the run cannot consume — a cut sector — NAMED (`skippedRegionNames`, ruling g).
+/// Check sizes, the forecast and the re-lattice each say so in THIS one line, never a silent
+/// result, and say nothing when every wall is carried. The sentence is the stage banner's
+/// (`LatticeWallsWithoutShape`), so the two cannot drift.
 public enum LatticeVariantFaceWalls {
-    public static let leftOutLine =
-        "On a variant, only placed shapes are checked; your face walls aren’t included yet."
-    /// The line when any face wall was left out; nil otherwise.
-    public static func line(leftOut: Int) -> String? { leftOut > 0 ? leftOutLine : nil }
+    /// The line when any marked face or face region was left out; nil otherwise.
+    public static func line(withoutShape n: Int, regions: [String] = []) -> String? {
+        LatticeWallsWithoutShape.text(faces: n, regions: regions, ending: .leftOut)
+    }
+    /// A re-lattice result stored by the V1 build — its job carried placed shapes only, and its
+    /// count was every face wall — keeps a line that is still TRUE of that result, instead of
+    /// losing its notice when the key changed.
+    public static func legacyLine(leftOut n: Int) -> String? {
+        guard n > 0 else { return nil }
+        return "Made before face walls reached variants: "
+            + (n == 1 ? "1 face wall was" : "\(n) face walls were") + " left out."
+    }
 }
 
-public extension LatticeRegionEmission {
-    /// The emission for a page working on a VARIANT.
-    ///
-    /// Only explicit geometry predicates are emitted (bar Z11): every entry
-    /// comes from a placed primitive, whose cylinder/slab is model-space
-    /// geometry the core resolves directly against the variant's voxels. Faces
-    /// carried over from the setup page are NOT synthesised here — their
-    /// geometry describes the ORIGINAL part's surface, which this design no
-    /// longer has, and emitting them would place regions the user has never
-    /// seen against the geometry they will actually affect. They are COUNTED so
-    /// the page can say so: `skippedFaces` is every face wall left out — faces AND face
-    /// regions, include or exclude, a wall set to Off being no wall (ruling V1,
-    /// 2026-09-29) — and Check sizes, the forecast and the re-lattice say so in
-    /// `LatticeVariantFaceWalls.leftOutLine`.
-    static func variantRegions(
-        groups: [SelectionGroup],
-        roles: [UUID: LatticeGroupRole],
-        primitives: (UUID) -> [(prim: ManualPrimitive, depthMM: Double)],
-        includePrimitives: [(prim: ManualPrimitive, depthMM: Double)],
-        groupDensities: [UUID: Double] = [:],
-        // ★ THE PER-SELECTABLE ROLES (ruling V2, 2026-09-29, re-lattice): a primitive set to
-        // Solid or Off inside an include group is resolved exactly as the main job does
-        // (`regions()`), so it is emitted as exclude — never flagged, no density — or not at all.
-        selectableRoles: [String: LatticeSelectableRole] = [:],
-        // ★ THE SYNTHETIC-STRESS FLAGS (ruling 1, 2026-09-29): the re-lattice job flags
-        // every include wall as the main job does (`regions(synthetic:)`); nil ⇒ none.
-        // Faces are not emitted here (see above), so only placed walls can carry one.
-        synthetic: OrganicSyntheticStress.SyntheticFlags? = nil) -> Result {
-        var out: [LatticeRegionSpec] = []
-        var skipped = 0
-        for (p, d) in includePrimitives {
-            if var s = spec(for: p, role: .include, depthMM: d) {
-                if let sf = synthetic { s.syntheticStress = true; s.syntheticFoci = sf.foci(for: nil) }
-                out.append(s)
-            }
-        }
-        for g in groups {
-            guard let groupRole = roles[g.id] else { continue }
-            for (p, d) in primitives(g.id) {
-                let ref = LatticeSelectableRef.primitive(p.id)
-                // ★ ruling V2: the primitive's OWN role, as `regions()` resolves it; Off ⇒ nil ⇒
-                // not a region at all.
-                guard let role = LatticeSelectableRoles.role(
-                    for: ref, groupRole: groupRole, overrides: selectableRoles) else { continue }
-                if var s = spec(for: p, role: role, depthMM: d) {
-                    // ★ The dialled density rides the re-lattice job too (task
-                    // 2026-08-16-per-sector-density-override), through the SAME gate as the
-                    // optimize path — per the RESOLVED role, so a Solid bolt in a dialled
-                    // include group carries none (core refuses a density on an exclude region).
-                    s.relativeDensity = density(for: g.id, role: role, densities: groupDensities)
-                    if role == .include, let sf = synthetic { s.syntheticStress = true; s.syntheticFoci = sf.foci(for: ref.key) }
-                    out.append(s)
-                }
-            }
-            // ★ ruling V1: every face wall left out — faces AND face regions; Off is no wall
-            for f in g.faces where LatticeSelectableRoles.role(
-                for: .face(group: g.id, face: f), groupRole: groupRole, overrides: selectableRoles) != nil {
-                skipped += 1
-            }
-            for rid in g.regionIDs where LatticeSelectableRoles.role(
-                for: .region(group: g.id, region: rid), groupRole: groupRole, overrides: selectableRoles) != nil {
-                skipped += 1
-            }
-        }
-        return Result(regions: out, skippedFaces: skipped)
+// MARK: - nothing set to lattice (ruling c)
+
+/// ★★ RULING (c) (maintainer, 2026-09-30): a variant job with zero include walls refuses, in the
+/// stage's words — never lattice the whole variant silently. Core lattices the WHOLE printed set
+/// when a job declares no include region (run_job.cpp's candidate set; J6 of the face-prism
+/// proof), and `RelatticeJobBuilder` writes an exclude-only or empty `lattice.regions` without
+/// complaint, so the refusal is the app's, read from the EMITTED regions: a legacy include
+/// primitive is an include wall; a marked face with no shape, a cut sector, a Solid/Off wall
+/// is not.
+public enum LatticeJobIncludeGate {
+    /// The stage's own words (`WorkspacePlaceholder.latticeThisSummary`) — one home.
+    public static let latticeModeOff = "lattice mode is off"
+    public static let nothingSetToLattice = "nothing set to lattice"
+    /// Why the job may not be written; nil when it may. Lattice off first, as the stage says it.
+    public static func refusal(latticeEnabled: Bool, includeCount: Int) -> String? {
+        guard latticeEnabled else { return latticeModeOff }
+        return includeCount > 0 ? nil : nothingSetToLattice
+    }
+    public static func refusal(latticeEnabled: Bool, regions: [LatticeRegionSpec]) -> String? {
+        refusal(latticeEnabled: latticeEnabled,
+                includeCount: regions.filter { $0.role == .include }.count)
     }
 }

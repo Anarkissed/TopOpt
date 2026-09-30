@@ -157,8 +157,15 @@ enum OutcomeCodec {
         // put on screen. Stored as the raw bytes core wrote. Optional so every blob
         // written before this task decodes → nil → no breakdown, which is honest.
         let regionCellsJSON: Data?
-        // ★ ruling V1 (2026-09-29): face walls a variant's re-lattice left out. Optional and
+        // ★ ruling V1 (2026-09-29): marked faces with no shape to lattice, which a variant's
+        // re-lattice left out. Optional and
         // written only when non-zero, so every other outcome is stored byte-for-byte as before.
+        var variantFacesWithoutShape: Int? = nil
+        // ★ ruling (g) (2026-09-30): the face regions (by name) it left out; written only when
+        // non-empty, for the same reason.
+        var variantRegionsWithoutShape: [String]? = nil
+        // V1's own key (2026-09-29): a result whose job carried placed shapes only. Read so the
+        // result keeps its line; written back only for such a result, so no other outcome moves.
         var variantFaceWallsLeftOut: Int? = nil
     }
 
@@ -301,7 +308,9 @@ enum OutcomeCodec {
                     strutSubfloorRegionStressFraction:
                         r.strut?.subfloorRegionStressFraction,
                     regionCellsJSON: r.regionCellsJSON,
-                    variantFaceWallsLeftOut: r.variantFaceWallsLeftOut > 0 ? r.variantFaceWallsLeftOut : nil) },
+                    variantFacesWithoutShape: r.variantFacesWithoutShape > 0 ? r.variantFacesWithoutShape : nil,
+                    variantRegionsWithoutShape: r.variantRegionsWithoutShape.isEmpty ? nil : r.variantRegionsWithoutShape,
+                    variantFaceWallsLeftOut: r.variantLegacyFaceWallsLeftOut > 0 ? r.variantLegacyFaceWallsLeftOut : nil) },
             solvedBy: o.solvedBy)
     }
 
@@ -400,7 +409,9 @@ enum OutcomeCodec {
                             subfloorRegionStressFraction:
                                 r.strutSubfloorRegionStressFraction ?? 0) },
                     regionCellsJSON: r.regionCellsJSON,
-                    variantFaceWallsLeftOut: r.variantFaceWallsLeftOut ?? 0) },
+                    variantFacesWithoutShape: r.variantFacesWithoutShape ?? 0,
+                    variantRegionsWithoutShape: r.variantRegionsWithoutShape ?? [],
+                    variantLegacyFaceWallsLeftOut: r.variantFaceWallsLeftOut ?? 0) },
             solvedBy: d.solvedBy,
             // nil on a pre-growth blob → false → reduction, which is what it is.
             growthLadder: d.growthLadder ?? false)

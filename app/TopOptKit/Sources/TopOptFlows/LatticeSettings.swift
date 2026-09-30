@@ -250,10 +250,11 @@ public struct LatticeRegionSpec: Equatable, Sendable {
     /// exactly the one-sided edit RelatticeRunner's own header says it collapsed
     /// the grading dictionary to prevent. So both now call this.
     ///
-    /// The `face_id` divergence is closed as a side effect and is provably inert:
-    /// the re-lattice path's regions come from `variantRegions`, which emits only
-    /// from manual primitives and never sets `faceID`, so the key was nil there
-    /// and stays absent. Its bytes do not move.
+    /// The re-lattice job (`RelatticeJobBuilder`) sends this dictionary UNCHANGED, `face_id`
+    /// included (maintainer, 2026-09-30, ruling a): a variant's job carries each face wall as
+    /// the stage's full prism with its face id as provenance — core's variant path imports the
+    /// ORIGINAL part, where the id is real — so core's depth tie checks it against the
+    /// protection the optimize run froze.
     /// The job's region, with the face frame axes only when the linked core takes them.
     public var wireDictionary: [String: Any] { wireDictionary(frameAxes: TopOptKit.regionFrameAxesWired) }
 
@@ -1344,6 +1345,20 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
     /// ★ THE ORGANIC CELL-SIZE PROBE'S LAST ANSWER (contract 2026-09-05), stored so
     /// the wizard's Manual list can offer it; nil until core writes the block.
     public var organicForecast: OrganicForecast? = nil
+    /// ★ RULING (d) (maintainer, 2026-09-30): THE ONLY READER of the stored Check-sizes answer.
+    /// One measured on an older job route (every answer stored before `OrganicForecast.jobRoute`)
+    /// is kept on disk but never used: no candidates, no recommendation, no floor, no preview
+    /// window, no Manual seed. Only the codec, `previewBakeInputs`, these two and the
+    /// Check-sizes write touch `organicForecast` directly (pinned by a test).
+    public var currentOrganicForecast: OrganicForecast? {
+        guard let f = organicForecast, f.isCurrent else { return nil }
+        return f
+    }
+    /// A stored answer exists but was measured on an older route — the wizard says sizes need
+    /// re-checking.
+    public var organicSizesNeedRecheck: Bool {
+        organicForecast.map { !$0.isCurrent } ?? false
+    }
     /// The window presets "Check sizes" probes (the contract's example set); the
     /// user's current pick is added to them. Sent only for organic, only when the
     /// linked core's schema accepts the keys.

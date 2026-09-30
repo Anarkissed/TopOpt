@@ -6,14 +6,15 @@ import TopOptKit
 /// SYNTHETIC-STRESS FLAGS — "so we see what moved on the dead walls".
 ///
 /// ★ WHAT THIS CAN AND CANNOT MEASURE. The app's own Check sizes runs on a VARIANT's
-/// re-lattice job, and that job emits placed primitives only (faces are never carried to a
-/// variant, `variantRegions`): his stand's walls are faces 15 and 2 and face region 101, so
-/// its re-lattice job carries NO wall and is byte-identical before and after (printed
-/// below). What CAN be measured is core's own size probe on his walls: the probe runs inside
-/// `lattice_one_variant` for the whole-part job too, so this runs the stage's `lattice_part`
-/// document with the wizard's Check-sizes keys, once with every include wall flagged (AFTER,
-/// what the job carries now) and once with the flags stripped (BEFORE) — the only
-/// difference, asserted. A proxy for the app's button, labelled as one.
+/// re-lattice job, which needs a retained design (a worker run) this probe does not have.
+/// Since the face-prism route (2026-09-29) that job carries the stage's walls — faces 15 and
+/// 2 and face region 101 — as their prisms, face ids included (ruling a, 2026-09-30;
+/// `VariantWallsStandProbe` measures the variant document itself). What this measures is core's own size probe on
+/// his walls: the probe runs inside `lattice_one_variant` for the whole-part job too, so
+/// this runs the stage's `lattice_part` document with the wizard's Check-sizes keys, once
+/// with every include wall flagged (AFTER, what the job carries now) and once with the flags
+/// stripped (BEFORE) — the only difference, asserted. A proxy for the app's button,
+/// labelled as one.
 ///
 /// Env: HIS_PROJECT_DIR (a copy of his project folder), STAND_PROBE_OUT, STAND_ARM
 /// (before | after | before2 — the repeat is the noise floor). One arm per process.
@@ -57,7 +58,9 @@ final class OrganicStandCheckSizesProbe: XCTestCase {
 
         // ── the app's own Check-sizes job: the variant's regions
         let variant = pm.variantLatticeJobRegions()
-        print("STAND re-lattice (variant) job: \(variant.regions.count) region(s), \(variant.skippedFaces) face selection(s) not carried")
+        print("STAND re-lattice (variant) job: \(variant.regions.count) region(s), "
+              + "\(variant.regions.filter { $0.kind == .face }.count) face prism(s), "
+              + "\(variant.skippedFaces) marked face(s) with no shape to lattice")
 
         // ── the stage job, AFTER (flags as the job carries them now) and BEFORE (stripped)
         for r in pm.latticeJobRegions().regions where r.role == .include {

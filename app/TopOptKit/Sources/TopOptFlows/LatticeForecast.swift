@@ -469,9 +469,17 @@ public struct LatticeForecastPanel: Equatable, Sendable {
 
     public static func compute(state: LatticeForecastModel.State,
                                describesCurrentJob: Bool,
-                               combinedPathAvailable: Bool = false)
+                               combinedPathAvailable: Bool = false,
+                               // ★ ruling (c): the job is refused, so no forecast is asked
+                               refusal: String? = nil)
         -> LatticeForecastPanel {
         let title = "What this would produce"
+        // ★ RULING (c) (2026-09-30): no document is written, so no forecast is asked — say why,
+        // in the stage's words, instead of "Checking…" for a question never sent.
+        if let why = refusal {
+            return LatticeForecastPanel(title: title, placeholder: "Can’t forecast: \(why).",
+                                        headline: nil, reasons: [], advice: [], warn: true)
+        }
         // A forecast that describes a DIFFERENT configuration is treated exactly
         // as no forecast: the user changed something, and the last answer is about
         // the thing they changed away from.

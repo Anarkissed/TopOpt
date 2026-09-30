@@ -82,8 +82,14 @@ public struct LatticePage: View {
     /// Runs the forecast. Injected because it is a worker round trip; nil in the
     /// previews and offscreen captures, where the page renders without one.
     let driveForecast: (@Sendable (Data) async throws -> LatticeForecast)?
-    /// ★ ruling V1 (2026-09-29): face walls this variant's job leaves out (0 off a variant)
-    let variantFaceWallsLeftOut: Int
+    /// ★ ruling V1 (2026-09-29): marked faces with no shape to lattice, which this variant's
+    /// job leaves out (0 off a variant; every other face wall is carried as its prism)
+    let variantFacesWithoutShape: Int
+    /// ★ ruling (g) (2026-09-30): face regions (by name) the variant's job leaves out
+    let variantRegionsWithoutShape: [String]
+    /// ★ ruling (c) (2026-09-30): why the variant's job may not be written ("nothing set to
+    /// lattice"); nil off a variant or when it may
+    let variantJobRefusal: String?
 
     public init(model: AppModel, project: ProjectModel, run: RunModel,
                 sim: LatticeSimModel, page: LatticePageModel,
@@ -99,7 +105,9 @@ public struct LatticePage: View {
                 forecast: LatticeForecastModel = LatticeForecastModel(),
                 forecastJob: Data? = nil,
                 driveForecast: (@Sendable (Data) async throws -> LatticeForecast)? = nil,
-                variantFaceWallsLeftOut: Int = 0,
+                variantFacesWithoutShape: Int = 0,
+                variantRegionsWithoutShape: [String] = [],
+                variantJobRefusal: String? = nil,
                 staticRender: Bool = false) {
         self.model = model
         self.project = project
@@ -119,7 +127,9 @@ public struct LatticePage: View {
         self.forecast = forecast
         self.forecastJob = forecastJob
         self.driveForecast = driveForecast
-        self.variantFaceWallsLeftOut = variantFaceWallsLeftOut
+        self.variantFacesWithoutShape = variantFacesWithoutShape
+        self.variantRegionsWithoutShape = variantRegionsWithoutShape
+        self.variantJobRefusal = variantJobRefusal
         self.staticRender = staticRender
     }
 
@@ -1850,8 +1860,9 @@ public struct LatticePage: View {
             Text(p.title.uppercased()).font(.system(size: 11, weight: .semibold))
                 .tracking(0.7)
                 .foregroundStyle((p.warn ? DS.Color.warning : DS.Color.textQuaternary).color)
-            // ★ ruling V1 (2026-09-29): a variant's forecast never silently omits face walls
-            if let scope = LatticeVariantFaceWalls.line(leftOut: variantFaceWallsLeftOut) {
+            // ★ ruling V1 (2026-09-29): a variant's forecast never silently omits a face wall
+            if let scope = LatticeVariantFaceWalls.line(withoutShape: variantFacesWithoutShape,
+                                                        regions: variantRegionsWithoutShape) {
                 Text(scope).dsStyle(DS.TypeScale.caption)
                     .foregroundStyle(DS.Color.warning.color)
                     .fixedSize(horizontal: false, vertical: true)
@@ -1879,7 +1890,9 @@ public struct LatticePage: View {
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel(
-            ([p.title, LatticeVariantFaceWalls.line(leftOut: variantFaceWallsLeftOut), p.placeholder, p.headline]
+            ([p.title, LatticeVariantFaceWalls.line(withoutShape: variantFacesWithoutShape,
+                                                    regions: variantRegionsWithoutShape),
+              p.placeholder, p.headline]
                 + p.reasons + p.advice)
                 .compactMap { $0 }.joined(separator: ". "))
     }
@@ -1905,7 +1918,8 @@ public struct LatticePage: View {
         LatticePageActions.compute(variant: variantContext,
                                    optimizeSurface: optimizeSurface,
                                    running: optimizing,
-                                   forecast: forecast.forecast(for: forecastJob))
+                                   forecast: forecast.forecast(for: forecastJob),
+                                   jobRefusal: variantJobRefusal)
     }
 
     /// THE FORECAST, IN THE REVIEW DRAWER (bar F3). The button carries the refusal
@@ -1915,7 +1929,8 @@ public struct LatticePage: View {
     private var forecastPanel: LatticeForecastPanel {
         LatticeForecastPanel.compute(
             state: forecast.state,
-            describesCurrentJob: forecastJob != nil && forecast.describes == forecastJob)
+            describesCurrentJob: forecastJob != nil && forecast.describes == forecastJob,
+            refusal: variantJobRefusal)
     }
 
     private var optimizeButton: some View {

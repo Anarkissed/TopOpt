@@ -3475,18 +3475,22 @@ public struct WorkspacePlaceholder: View {
     /// `startRelatticeRun` submits what this returns, and the forecast is a
     /// forecast OF these bytes (RelatticeRun arms `lattice.forecast_only` inside
     /// the runner, on this same document, so the two differ in one key and no
-    /// other). It also returns how many face walls the variant job left out (bar Z11),
-    /// so each of the three surfaces can say so (ruling V1, 2026-09-29) — the note this
-    /// used to post was drawn on the page the run then closed, so nobody ever saw it.
-    private func relatticeJobJSON() -> (json: Data, faceWallsLeftOut: Int)? {
+    /// other). It also returns how many marked faces the variant job left out because they
+    /// have no shape to lattice (the stage's job leaves them out too), so each of the three
+    /// surfaces can say so (ruling V1, 2026-09-29) — the note this used to post was drawn on
+    /// the page the run then closed, so nobody ever saw it.
+    private func relatticeJobJSON() -> (json: Data, facesWithoutShape: Int, regionsWithoutShape: [String])? {
         guard let ctx = latticeVariantContext, let art = ctx.artifacts else { return nil }
-        // The regions the page authored, as EXPLICIT GEOMETRY PREDICATES (bar
-        // Z11): on a variant only placed primitives are emitted, because a face
-        // id would resolve against the ORIGINAL part's surface, which this design
-        // no longer has.
+        // The regions as the stage sends them (bar Z11; ruling a, 2026-09-30): each face wall
+        // as its full prism on the original part, face_id included as provenance, so core's
+        // depth tie checks it against the protection this variant's run froze.
         let emission = project.variantLatticeJobRegions()
-        // The SAME spec builder the optimize request uses — only the regions
-        // differ, and they differ for the Z11 reason above.
+        // ★ RULING (c) (2026-09-30): no include wall ⇒ no document — core would lattice the
+        // WHOLE variant. The backstop for all three callers (the forecast, Check sizes, the
+        // run); each says why in the stage's words (`project.variantLatticeJobRefusal()`).
+        guard LatticeJobIncludeGate.refusal(latticeEnabled: project.lattice.enabled,
+                                            regions: emission.regions) == nil else { return nil }
+        // The SAME spec builder the optimize request uses, with the SAME regions.
         // The STRUT width, matching AppModel.makeRunRequest (task
         // 2026-08-06-strut-line-width-field): a re-lattice must use the same
         // printability reference the optimize run did, or the two jobs derive
@@ -3511,13 +3515,20 @@ public struct WorkspacePlaceholder: View {
         spec?.steppedCells = project.latticePreviewSteppedCells
         guard let json = try? RelatticeJobBuilder.build(
             original: art.jobJSON, variant: ctx, lattice: spec) else { return nil }
-        return (json, emission.skippedFaces)
+        return (json, emission.skippedFaces, emission.skippedRegionNames)
     }
 
-    /// ★ ruling V1 (2026-09-29): the face walls a variant's job leaves out — 0 off a
-    /// variant. The forecast drawer states it even when no forecast can be produced.
-    private var latticeVariantFaceWallsLeftOut: Int {
-        latticeVariantContext != nil ? project.variantLatticeJobRegions().skippedFaces : 0
+    /// ★ THE VARIANT JOB'S FACTS FOR THE PAGE, from ONE emission (read once per page pass):
+    /// what the job leaves out — marked faces that have no shape to lattice, and face regions the
+    /// run cannot consume, by name (rulings V1 and g) — and why it may not be written at all
+    /// (ruling c). Nothing off a variant. The forecast drawer states them even when no forecast
+    /// can be produced.
+    private var latticeVariantJobFacts: (faces: Int, regions: [String], refusal: String?) {
+        guard latticeVariantContext != nil else { return (0, [], nil) }
+        let e = project.variantLatticeJobRegions()
+        return (e.skippedFaces, e.skippedRegionNames,
+                LatticeJobIncludeGate.refusal(latticeEnabled: project.lattice.enabled,
+                                              regions: e.regions))
     }
 
     /// The forecast's input and identity: the job above, but only when a forecast
@@ -3544,6 +3555,10 @@ public struct WorkspacePlaceholder: View {
         let designBin = art.designBin
         let path = file.path
         return { [self] cells, grades, recommend in
+            // ★ ruling (c): never a job with no include wall — said in the stage's words
+            if let why = project.variantLatticeJobRefusal() {
+                throw RelatticeError("Can’t check sizes: \(why).")
+            }
             guard let job = relatticeJobJSON() else {
                 throw RelatticeError("There is nothing to check yet. Optimize the part first.")
             }
@@ -3556,7 +3571,11 @@ public struct WorkspacePlaceholder: View {
             }.value
             // ★ ruling V1: what this check left out travels WITH its answer (the answer is
             // stored and shown later, when the walls may have changed)
-            probe.faceWallsLeftOut = job.faceWallsLeftOut
+            probe.facesWithoutShape = job.facesWithoutShape
+            probe.regionsWithoutShape = job.regionsWithoutShape.isEmpty ? nil : job.regionsWithoutShape
+            // ★ ruling (d) (2026-09-30): and the job route it was measured on — an answer from
+            // another route is kept but never used, and the wizard asks for a re-check
+            probe.jobRoute = OrganicForecast.currentJobRoute
             return probe
         }
     }
@@ -3589,6 +3608,12 @@ public struct WorkspacePlaceholder: View {
             return
         }
         guard run.phase != .running else { return }
+        // ★ RULING (c) (2026-09-30): the button already carries it; this is the second layer, in
+        // the stage's words, before the worker is asked for anything.
+        if let why = project.variantLatticeJobRefusal() {
+            model.toast = "Can’t lattice this variant: \(why)."
+            return
+        }
         guard let config = compute.activeRemote else {
             model.toast = "Latticing a variant runs on a Mac worker — pick one in Compute."
             return
@@ -3609,8 +3634,10 @@ public struct WorkspacePlaceholder: View {
         // load-case key moved, refuse HERE — before the worker spends solves
         // certifying under a load case the variant was never optimized under.
         let moved = RelatticeJobBuilder.loadCaseDifferences(art.jobJSON, job.json)
-        // ★ ruling V1: the face walls this job leaves out, for the result's own line
-        let leftOut = job.faceWallsLeftOut
+        // ★ ruling V1 / (g): the marked faces and face regions this job leaves out, for the
+        // result's own line
+        let withoutShape = job.facesWithoutShape
+        let regionsWithoutShape = job.regionsWithoutShape
         guard moved.isEmpty else {
             model.toast = "Can’t re-lattice: the load case changed (\(moved.joined(separator: ", "))). "
                 + "This job must certify under the load case the variant was optimized under."
@@ -3668,7 +3695,8 @@ public struct WorkspacePlaceholder: View {
                 // The per-region rows only exist when the job asked for them; a
                 // receipt that carries none parses to nil and shows nothing.
                 regionCellsJSON: spec.reportRegionCells ? result.receiptJSON : nil,
-                variantFaceWallsLeftOut: leftOut))
+                variantFacesWithoutShape: withoutShape,
+                variantRegionsWithoutShape: regionsWithoutShape))
         }
         guard let request = model.makeRunRequest() else { return }
         closeLatticePage()
@@ -3676,7 +3704,8 @@ public struct WorkspacePlaceholder: View {
     }
 
     private var latticePageOverlay: some View {
-        LatticePage(model: model, project: project, run: run,
+        let facts = latticeVariantJobFacts
+        return LatticePage(model: model, project: project, run: run,
                     sim: latticeSim, page: latticePageModel,
                     variantField: latticePageVariantField,
                     variantContext: latticeVariantContext,
@@ -3740,7 +3769,9 @@ public struct WorkspacePlaceholder: View {
                     forecast: latticeForecast,
                     forecastJob: latticeForecastJob,
                     driveForecast: makeForecastDriver(),
-                    variantFaceWallsLeftOut: latticeVariantFaceWallsLeftOut)
+                    variantFacesWithoutShape: facts.faces,
+                    variantRegionsWithoutShape: facts.regions,
+                    variantJobRefusal: facts.refusal)
             .ignoresSafeArea(.keyboard)
     }
 
@@ -4948,6 +4979,8 @@ public struct WorkspacePlaceholder: View {
         // the banner can say the preview is drawing LESS than was marked, rather
         // than under-drawing in silence.
         let skippedFaces = emission.skippedFaces
+        // ★ ruling (g): and the face regions the run cannot consume, by name
+        let skippedRegionNames = emission.skippedRegionNames
         // The SAME band and gamma the raymarcher grades with, so a stated
         // per-region density can be inverted into the demand value that comes
         // back out as exactly that density.
@@ -5038,7 +5071,7 @@ public struct WorkspacePlaceholder: View {
         // bake replaces it below with core's own band (or the probe's Auto answer).
         let organicAutoWindow = project.lattice.organicPreviewWindowIsFallback
         let organicForecastAuto: (lo: Double, hi: Double)? = {
-            guard let a = project.lattice.organicForecast?.recommendation?.auto, a.found,
+            guard let a = project.lattice.currentOrganicForecast?.recommendation?.auto, a.found,
                   a.cellMinMM > 0, a.cellMaxMM >= a.cellMinMM else { return nil }
             return (a.cellMinMM, a.cellMaxMM)
         }()
@@ -5267,6 +5300,7 @@ public struct WorkspacePlaceholder: View {
                                         whenEmpty: .latticeNothing,
                                         skinMM: skinMM,
                                         skippedFaces: skippedFaces,
+                                        skippedRegionNames: skippedRegionNames,
                                         // ★ one cell: the smallest per-region base for
                                         // the octet, the window's low end for organic
                                         wallThicknessFloorMM: algorithmForBake == "organic"
@@ -10412,7 +10446,7 @@ public struct WorkspacePlaceholder: View {
         case let .face(_, f): return "Face \(project.runFaceID(f))"
         case .primitive: return "Primitive"
         case let .region(_, rid):
-            return project.faceRegions.region(rid)?.name ?? "Region \(rid)"
+            return project.latticeRegionName(rid)
         }
     }
 
@@ -11667,10 +11701,12 @@ public struct WorkspacePlaceholder: View {
     }
 
     private var latticeThisSummary: String {
-        guard project.lattice.enabled else { return "lattice mode is off" }
+        // (The words live in `LatticeJobIncludeGate`, so a variant's refusal is the stage's by
+        // construction — ruling c, 2026-09-30.)
+        guard project.lattice.enabled else { return LatticeJobIncludeGate.latticeModeOff }
         let n = project.latticeJobRegions().regions
             .filter { $0.role == .include }.count
-        if n == 0 { return "nothing set to lattice" }
+        if n == 0 { return LatticeJobIncludeGate.nothingSetToLattice }
         if !organicStructuralGateOpen { return TopOptKit.organicStructuralGateMessage }
         if organicFitWithoutRegion { return "organic Fit needs a declared lattice region — pick Auto or declare one" }
         return "\(n) region\(n > 1 ? "s" : "") · no optimization"

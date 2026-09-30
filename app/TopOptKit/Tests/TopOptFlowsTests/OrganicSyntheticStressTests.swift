@@ -238,6 +238,10 @@ final class OrganicSyntheticStressTests: XCTestCase {
         var sel = SelectionModel(); let gi = sel.addGroup(); let ge = sel.addGroup(); p.selection = sel
         let inc = p.force.addManualPrimitive(.defaultBolt(at: SIMD3(0, 0, 5), radiusMM: 3, halfLengthMM: 5), to: gi)
         let exc = p.force.addManualPrimitive(.defaultBolt(at: SIMD3(20, 0, 5), radiusMM: 3, halfLengthMM: 5), to: ge)
+        // declared groups: the variant's job is the stage's, which lattices only an eligible
+        // group (the face-prism route, 2026-09-29)
+        p.force.sync(groups: p.selection.groups)
+        p.force.setProtected(gi, true); p.force.setProtected(ge, true)
         p.lattice.includePrimitives = [.defaultBolt(at: SIMD3(40, 0, 5), radiusMM: 3, halfLengthMM: 5)]
         p.lattice.enabled = true
         p.lattice.groupRoles = [gi: .include, ge: .exclude]
@@ -281,13 +285,17 @@ final class OrganicSyntheticStressTests: XCTestCase {
         func src(_ f: String) throws -> String {
             try String(contentsOf: root.appendingPathComponent("Sources/TopOptFlows/\(f)"), encoding: .utf8)
         }
-        let pm = try src("ProjectModel.swift"), ws = try src("WorkspacePlaceholder.swift"), vs = try src("LatticeVariantSession.swift")
-        XCTAssertTrue(pm.contains("synthetic: latticeSyntheticFlags())"), "variantLatticeJobRegions passes the flags")
+        let pm = try src("ProjectModel.swift"), ws = try src("WorkspacePlaceholder.swift"), em = try src("LatticeRegionEmission.swift")
+        // the variant's job IS the stage's emission (the face-prism route, 2026-09-29)
+        XCTAssertTrue(pm.contains("public func variantLatticeJobRegions() -> LatticeRegionEmission.Result {\n        latticeJobRegions()\n    }"))
+        XCTAssertTrue(pm.contains("synthetic: latticeSyntheticFlags(),"), "which passes the flags")
+        XCTAssertEqual(p.variantLatticeJobRegions().regions, p.latticeJobRegions().regions)
         XCTAssertTrue(ws.contains("let emission = project.variantLatticeJobRegions()"), "relatticeJobJSON builds from it")
         XCTAssertGreaterThanOrEqual(ws.components(separatedBy: "relatticeJobJSON(").count - 1, 4,
                                     "the definition plus the forecast, the Check-sizes probe and the run")
-        XCTAssertTrue(vs.contains("if role == .include, let sf = synthetic { s.syntheticStress = true; s.syntheticFoci = sf.foci(for: ref.key) }"))
-        XCTAssertTrue(vs.contains("if let sf = synthetic { s.syntheticStress = true; s.syntheticFoci = sf.foci(for: nil) }"))
+        XCTAssertEqual(em.components(separatedBy: "if role == .include, let sf = synthetic { s.syntheticStress = true; s.syntheticFoci = sf.foci(for: ref.key) }").count - 1, 3,
+                       "a primitive, a face, a face region's member face")
+        XCTAssertTrue(em.contains("if let sf = synthetic { s.syntheticStress = true; s.syntheticFoci = sf.foci(for: nil) }"), "a legacy include")
     }
 
     /// ★★ RULING 2 (2026-09-29): "A hidden setting must not act." The synthesis toggle is

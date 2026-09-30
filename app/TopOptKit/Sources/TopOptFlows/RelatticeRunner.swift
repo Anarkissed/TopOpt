@@ -142,7 +142,20 @@ public enum RelatticeJobBuilder {
             // density-override). This copy had already drifted — it dropped
             // `face_id` — which is the one-sided edit this file's own grading
             // comment above warns about, in the very next block.
-            block["regions"] = lat.regions.map { $0.wireDictionary }
+            // ★ BAR Z11 (maintainer, 2026-09-30, ruling a): the regions go out as the stage sends
+            // them, `face_id` INCLUDED. Core's variant path imports the ORIGINAL part, where the
+            // id is real, and it changes no geometry; keeping it keeps core's depth tie against
+            // the retained `loads.face_protections` (job.cpp's parse), its messages and its
+            // receipt echoes. The app does not re-implement the tie.
+            //
+            // ★ ONE ORDER FOR ONE OUTLINE (2026-09-30). The emission's outline loops come out in
+            // hash order — the same polygon, rotated or reordered from one call to the next
+            // (Swift seeds each Set/Dictionary's iteration per instance; measured on the face-prism
+            // fixture: 2 orderings in 20 emissions) — and a variant's forecast is keyed on these
+            // bytes and re-requested whenever they change (`LatticeForecastModel`,
+            // `.task(id: forecastJob)`), so it would never settle. The variant's document fixes
+            // the order; the geometry is unchanged (core reads the outline even-odd).
+            block["regions"] = lat.regions.map { $0.wireDictionary }.map(canonicalOutline)
         }
         // Absent unless asked for, so a real re-lattice job is byte-identical to
         // the one this builder has always produced.
@@ -167,6 +180,29 @@ public enum RelatticeJobBuilder {
         job["lattice"] = block
         return try JSONSerialization.data(withJSONObject: job,
                                           options: [.sortedKeys])
+    }
+
+    /// Each outline loop starts at its smallest (u, w) vertex, and the loops are ordered by that
+    /// vertex: a rotation and a reordering, never a change of shape. Everything else in the
+    /// region passes through untouched.
+    static func canonicalOutline(_ region: [String: Any]) -> [String: Any] {
+        guard var g = region["geometry"] as? [String: Any],
+              let loops = g["outline_uv"] as? [[[Double]]], !loops.isEmpty else { return region }
+        func less(_ a: [Double], _ b: [Double]) -> Bool {
+            guard a.count == 2, b.count == 2 else { return a.count < b.count }
+            return a[0] < b[0] || (a[0] == b[0] && a[1] < b[1])
+        }
+        let rotated = loops.map { loop -> [[Double]] in
+            guard let k = loop.indices.min(by: { less(loop[$0], loop[$1]) }) else { return loop }
+            return Array(loop[k...] + loop[..<k])
+        }
+        g["outline_uv"] = rotated.sorted { a, b in
+            guard let x = a.first, let y = b.first else { return a.count < b.count }
+            return less(x, y)
+        }
+        var r = region
+        r["geometry"] = g
+        return r
     }
 
     /// THE SHIPPING ENTRY POINT (task 2026-08-04-variant-volume-fraction-mismatch,

@@ -229,10 +229,32 @@ public struct OrganicForecast: Equatable, Sendable, Codable {
     public var recommendation: Recommendation? = nil
 
     public var sizes: [Candidate] { candidates.filter { !$0.isGrade } }
-    /// ★ ruling V1 (2026-09-29): how many face walls the job this answer came from left out
-    /// (a variant's job carries placed shapes only). Stamped by the app, not core; nil on
-    /// an answer stored before it.
-    public var faceWallsLeftOut: Int? = nil
+    /// ★ ruling V1 (2026-09-29): how many marked faces the job this answer came from left out
+    /// because they have no shape to lattice (a variant's job carries every other face wall as
+    /// its prism). Stamped by the app, not core; nil on an answer stored before it — including
+    /// one stored under V1's key, whose count meant every face wall.
+    public var facesWithoutShape: Int? = nil
+    /// ★ ruling (g) (2026-09-30): the face regions (by name) that job left out — a region the
+    /// run cannot consume, a cut sector. nil on an older answer, or when none was.
+    public var regionsWithoutShape: [String]? = nil
+    /// ★ RULING (d) (maintainer, 2026-09-30): THE JOB ROUTE THIS ANSWER WAS MEASURED ON, stamped
+    /// by the app beside `facesWithoutShape`, never by core. A variant's Check sizes once ran on
+    /// placed shapes only; it now runs on the stage's walls (each face wall as its prism, face
+    /// id kept) — a different job, so an answer measured before is about walls that are not the
+    /// job's. nil on every answer stored before this key. Bump `currentJobRoute` whenever the
+    /// variant job's composition changes what Check sizes measures.
+    public static let currentJobRoute = 1
+    public var jobRoute: Int? = nil
+    /// This answer describes today's job: its sizes, recommendation and floor may be used.
+    public var isCurrent: Bool { jobRoute == Self.currentJobRoute }
+    /// ★ ruling (d): the one line for a stored answer from an older route. Where Check sizes
+    /// cannot act, its refusal is said instead of pointing at a button that is not there (as
+    /// `uncheckedSummary` does).
+    public static let recheckTitle = "Sizes need re-checking"
+    public static func recheckLine(checkRefusal: String? = nil) -> String {
+        if let r = checkRefusal, !r.isEmpty { return recheckTitle + ". " + r }
+        return recheckTitle + " — tap " + checkSizesTitle + "."
+    }
     /// The intent the probe ran under: the wizard asks with `organic_recommend: "auto"`,
     /// which core resolves to the job's `grading.intent` (run_job.cpp) and writes as the
     /// recommendation's mode. nil when the file has no recommendation.

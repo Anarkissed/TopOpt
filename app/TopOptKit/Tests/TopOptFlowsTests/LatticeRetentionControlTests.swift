@@ -250,6 +250,10 @@ final class LatticeRetentionControlTests: XCTestCase {
         var sel = SelectionModel(); let gi = sel.addGroup(); let ge = sel.addGroup(); p.selection = sel
         _ = p.force.addManualPrimitive(.defaultBolt(at: SIMD3(0, 0, 5), radiusMM: 3, halfLengthMM: 5), to: gi)
         _ = p.force.addManualPrimitive(.defaultBolt(at: SIMD3(20, 0, 5), radiusMM: 3, halfLengthMM: 5), to: ge)
+        // declared groups: the variant's job is the stage's, which lattices only an eligible
+        // group (the face-prism route, 2026-09-29)
+        p.force.sync(groups: p.selection.groups)
+        p.force.setProtected(gi, true); p.force.setProtected(ge, true)
         p.lattice.enabled = true
         p.lattice.groupRoles = [gi: .include, ge: .exclude]
         p.lattice.algorithm = "organic"

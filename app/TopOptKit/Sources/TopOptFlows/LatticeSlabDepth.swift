@@ -116,7 +116,11 @@ public enum LatticeSlabDepth {
     /// THE ASSERTION (bar R2), as a function rather than a comment: for every face
     /// that is both protected and latticed, the protection depth and the lattice
     /// region depth are the same number. Returns the faces where they are not —
-    /// EMPTY is the only shippable answer, and the run path checks it.
+    /// EMPTY is the only shippable answer.
+    ///
+    /// A TEST MIRROR ONLY. No run path calls it: core's parser refuses a job whose two depths
+    /// differ (job.cpp's depth tie, on the stage's job and a variant's alike), and the app must
+    /// not re-implement that check (maintainer, 2026-09-30, ruling a).
     public static func mismatches(protections: [(faceID: Int, depthMM: Double)],
                                   regions: [(faceID: Int, depthMM: Double)])
         -> [(faceID: Int, protectionMM: Double, regionMM: Double)] {
