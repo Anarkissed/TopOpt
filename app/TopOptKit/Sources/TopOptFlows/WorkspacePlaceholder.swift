@@ -5453,7 +5453,7 @@ public struct WorkspacePlaceholder: View {
         // ★ THE WAY BACK — top-left, under the project name. Topology is the root
         // and carries none.
         if let back = stage.back {
-            stageNavButton(to: back, icon: "chevron.left")
+            HStack(spacing: PageChrome.gap) { stageNavButton(to: back, icon: "chevron.left"); if let x = FlexibleStageNav.extra(stage, flexible: project.lattice.flexible != nil) { stageNavButton(to: x.dest, icon: x.icon, title: x.title) } }   // Flexible (PR #362) H9: [‹ Topology] [Surface] on the Flexible stage; [‹ Flexible] on Surface
                 .latticeBandChipKeepOut()
                 .modifier(StageNavPlacement(stage: stage))
         }
@@ -5560,7 +5560,7 @@ public struct WorkspacePlaceholder: View {
             + CGFloat(stage.forward.count) * (PageChrome.compactButton + PageChrome.gap)
     }
 
-    private func stageNavButton(to dest: WorkspaceStage, icon: String) -> some View {
+    private func stageNavButton(to dest: WorkspaceStage, icon: String, title: String? = nil) -> some View {   // Flexible (PR #362) H9: `title` ("Flexible")
         let entry = LatticeEntryButtonGate.compute(gravitySet: force.gravityIsSet,
                                                    anchors: force.anchorCount(in: selection.groups),
                                                    loads: force.loadCount(in: selection.groups))
@@ -5576,7 +5576,7 @@ public struct WorkspacePlaceholder: View {
                 HStack(spacing: DS.Space.s) {
                     Image(systemName: icon)
                         .font(.system(size: 12, weight: .bold))
-                    Text(dest.title)
+                    Text(title ?? dest.title)   // Flexible (PR #362) H9
                         .dsStyle(DS.TypeScale.bodyStrong).fontWeight(.semibold)
                 }
                 if !enabled {
