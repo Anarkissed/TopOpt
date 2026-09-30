@@ -271,6 +271,16 @@ struct OrganicSyntheticRegionInfo {
   long long voxels = 0;
   long long fully = 0;
   long long blended = 0;
+  // ── ★ RULING H'S VERDICT FOR THIS WALL, IN THE RECEIPT (2026-09-29) ─────────
+  // Report-only. The verdict existed only on a stderr line ("[synthetic] region N
+  // ... -> DEAD, synthesised WHOLE"), so the run's DEAD SET could not be compared
+  // with the size probe's except by reading and parsing two logs -- which is how the
+  // two came to disagree unnoticed (#354's audit). `p99_von_mises` is the REAL
+  // field's p99 over this region's voxels in the synthesis domain, measured before a
+  // single voxel was written; `whole_region` is that p99 against the run's dead
+  // threshold (already in the receipt as synthetic_stress_dead_threshold).
+  bool whole_region = false;
+  double p99_von_mises = 0.0;
 };
 
 struct RunInfo {

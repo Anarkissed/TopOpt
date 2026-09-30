@@ -1869,6 +1869,78 @@ void test_dual_contour() {
                                {{0,0,0},{3,3,3},0.8}});
 }
 
+// ── ★ THE DEAD SET IS A FUNCTION OF THE DOMAIN (#354's audit, 2026-09-29) ─────
+// The size probe synthesised over `cand` -- the candidate set -- while the run
+// synthesises over `mask`, the graded posture. Two different domains, so the probe
+// could call a wall dead that the run does not, and a size check that describes a
+// different run than the one it recommends for is not a check. The probe now
+// synthesises per candidate over that candidate's own pre-rim posture mask.
+//
+// ★ WHAT THIS TEST CAN AND CANNOT GUARD, said plainly. It pins the MECHANISM: that
+// the dead verdict moves with the domain, so the two must agree; and that the same
+// domain gives the same set. It CANNOT pin the call site, because nothing links
+// run_job.cpp -- the same structural blind spot that let the probe's false segment-
+// cap reason survive. A real probe-vs-run comparison needs a job run. That is the
+// second defect in a row this gap has hidden, and it is the argument for making
+// run_job reachable from a test.
+void test_the_dead_set_follows_the_domain() {
+  using namespace topopt;
+  VoxelGrid grid;
+  grid.nx = 20; grid.ny = 4; grid.nz = 12; grid.spacing = 1.0;
+  grid.origin = Vec3{0, 0, 0};
+  grid.tags.assign(static_cast<std::size_t>(20 * 4 * 12), VoxelTag::Interior);
+  const std::size_t n = grid.voxel_count();
+
+  std::vector<int> rid(n, 0);
+  std::vector<SyntheticStressRegion> cfg;
+  { SyntheticStressRegion c; c.region_id = 1; c.face_id = 7; c.foci = 3; cfg.push_back(c); }
+
+  // A wall whose DEADNESS depends on which voxels you look at: the half of it the
+  // posture would lattice is quiet, the half only the candidate set includes carries
+  // load. p99 over the two domains therefore lands on opposite sides of the floor.
+  std::vector<double> stress(6 * n, 0.0);
+  std::vector<char> cand(n, 0), posture(n, 0);
+  for (std::size_t e = 0; e < n; ++e) {
+    const int i = static_cast<int>(e % 20), k = static_cast<int>(e / (20 * 4));
+    rid[e] = i < 10 ? 1 : 2;
+    if (i >= 10) { stress[6 * e + 2] = 0.02; continue; }   // the live half: region 2
+    cand[e] = 1;                       // the candidate set takes the WHOLE wall
+    if (k < 6) { posture[e] = 1; stress[6 * e + 2] = 0.0009; }   // quiet, latticed
+    else { stress[6 * e + 2] = 0.05; }  // loaded, and NOT in the posture
+  }
+
+  auto dead_over = [&](const std::vector<char>& domain) {
+    std::vector<double> st = stress;
+    const SyntheticStressReport r =
+        synthesize_focal_stress(grid, domain, rid, cfg, 0.02, st, kOrganicSyntheticDeadFloorMPa);
+    bool whole = false; double p99 = 0.0;
+    for (const SyntheticStressRegionReport& rr : r.per_region)
+      if (rr.region_id == 1) { whole = rr.whole_region; p99 = rr.p99_von_mises; }
+    return std::make_pair(whole, p99); };
+
+  const auto over_posture = dead_over(posture);
+  const auto over_cand = dead_over(cand);
+  std::printf("  dead set: over POSTURE p99 %.4g -> whole=%d | over CANDIDATE p99 %.4g "
+              "-> whole=%d\n", over_posture.second, over_posture.first ? 1 : 0,
+              over_cand.second, over_cand.first ? 1 : 0);
+
+  // ★ THE POINT: the same wall, the same stresses, opposite verdicts -- so the probe
+  // and the run MUST synthesise over the same domain or they describe different parts.
+  CHECK(over_posture.first != over_cand.first,
+        "dead set: the verdict really does move with the domain -- which is why the "
+        "probe using `cand` while the run uses `mask` was a defect and not a detail");
+  CHECK(over_posture.first,
+        "dead set: over the POSTURE the wall reads dead (its latticed half is quiet)");
+  CHECK(!over_cand.first,
+        "dead set: over the CANDIDATE set it reads alive (the half the posture drops "
+        "carries load)");
+
+  // and the invariant the fix rests on: one domain, one answer, every time
+  const auto again = dead_over(posture);
+  CHECK(again.first == over_posture.first && again.second == over_posture.second,
+        "dead set: the same domain gives the same dead set and the same p99");
+}
+
 // ── ★ AN AESTHETIC RUN REPORTS "aesthetic intent", NEVER THE SEGMENT CAP ───────
 // From #354's audit, 2026-09-29. run_job set the true reason for an aesthetic run --
 // "aesthetic intent: nothing reads a certificate" -- and then a following branch
@@ -2182,6 +2254,7 @@ int main() {
   test_union_volume();
   test_dual_contour();
   test_dual_contour_octree();
+  test_the_dead_set_follows_the_domain();
   test_the_probe_reports_the_TRUE_reason();
   test_traced_member_survives_node_merge();
   test_wet_join_carves_closed();

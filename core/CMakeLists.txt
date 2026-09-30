@@ -2084,6 +2084,20 @@ if(OpenCASCADE_FOUND AND Eigen3_FOUND)
   endif()
   add_test(NAME cli_demo COMMAND test_cli)
 
+  # ★ THE SIZE PROBE AND THE RUN MUST AGREE ABOUT WHICH WALLS ARE DEAD
+  # (#354's audit, 2026-09-29). The domain the synthesis runs over is chosen in
+  # run_job.cpp and nothing links run_job.cpp, so the only way to see WHICH domain
+  # the probe passes is to run the binary: one `lattice-variant` on a tiny L-prism
+  # fixture (~4 s at resolution 48) writes both organic_probe.json and run_info.json,
+  # and the test compares the dead verdicts AND the numbers behind them.
+  add_executable(test_organic_dead_parity tests/validation/test_organic_dead_parity.cpp)
+  target_link_libraries(test_organic_dead_parity PRIVATE topopt)
+  target_compile_definitions(test_organic_dead_parity PRIVATE
+    ORGANIC_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/organic"
+    CLI_TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}"
+    TOPOPT_CLI_EXE="$<TARGET_FILE:topopt_cli>")
+  add_test(NAME cli_organic_dead_parity COMMAND test_organic_dead_parity)
+
   # Task 2026-08-03-variant-postprocessing-fix (defect 1): design.bin is
   # published AFTER EVERY VARIANT, not once at the end of the ladder. Runs the
   # real topopt-cli as a subprocess and reads the container back at the moment

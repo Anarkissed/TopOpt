@@ -1501,7 +1501,12 @@ std::string run_info_json(const RunInfo& info) {
                 ", \"soft_mm\": " + fmt(ri.soft_mm) +
                 ", \"voxels\": " + std::to_string(ri.voxels) +
                 ", \"fully\": " + std::to_string(ri.fully) +
-                ", \"blended\": " + std::to_string(ri.blended) + "}";
+                ", \"blended\": " + std::to_string(ri.blended) +
+                // ★ the wall's OWN verdict and the measurement behind it, so the
+                // run's dead set is readable beside the size probe's.
+                ", \"stress_p99\": " + fmt(ri.p99_von_mises) +
+                std::string(", \"synthesised_whole\": ") +
+                (ri.whole_region ? "true" : "false") + "}";
         }
         gr += "]";
         gr += ", \"solid_rim_mm\": " + fmt(info.organic_solid_rim_mm);

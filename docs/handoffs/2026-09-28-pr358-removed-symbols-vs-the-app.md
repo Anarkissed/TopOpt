@@ -146,3 +146,40 @@ will move.
 The last row is the reverse of a removal and worth the same care: a receipt key whose
 VALUE starts being correct will move an app-side number that has been reading a
 default, and no grep shows that either.
+
+## MEANING CHANGES, addendum (2026-09-29) — #354's audit items
+
+Same rule, later commits. Nothing here removes or renames anything, so the greps
+above all come back clean; these move numbers or fix what a receipt asserts.
+
+| what | was | is | measured effect |
+|---|---|---|---|
+| `organic_probe.json` `recommendation.fit.margin` / `auto.margin` | `0` whether or not a certificate ran | JSON `null` where none ran, with `certified` beside it | #354's Recommended pill read "· 0.00" on every aesthetic run; it must now read the absence |
+| `organic_probe.json` `predicted.reason` under aesthetic intent | "N segments exceed the probe's 600000 cap" (false — a stand run has 39,849) | "aesthetic intent: nothing reads a certificate" | the reason a reader acts on changes; nothing else moves |
+| the probe's dead-wall SPACING | graded from the synthetic field, i.e. the window's coarsest end | the window's MIDDLE, via `synthesised_whole`, as ruling H gives the run | a recommended cell can move on any part with a flagged dead wall. Invisible on a degenerate window (`cell_min == cell_max`) |
+| the probe's dead-wall DOMAIN | `cand` | that candidate's pre-rim posture mask | **no effect, measured.** For organic every candidate voxel is masked (three `params.organic_geometry` branches in grading.cpp), so the two sets are identical on every organic run. Written for the contract, not for a number |
+| `unsupported_spans_seen`'s documented meaning | "could not be held up, so not printed" | "over open air; printed as drawn and counted" | comment only; the count was always of printed spans |
+
+### New receipt keys (additive, report-only)
+
+| file | key | why |
+|---|---|---|
+| `run_info.json` | `grading.organic.synthetic_stress_by_region[].synthesised_whole`, `.stress_p99` | ruling H's verdict per wall and the measurement behind it. It existed only on a `[synthetic]` stderr line, which is why the run's dead set and the probe's could be compared only by parsing two logs |
+| `organic_probe.json` | `candidates[].regions[].synthesised_whole`, `.stress_p99` | the same two for the probe |
+| `organic_probe.json` | `candidates[].dead_threshold` | the threshold those verdicts were measured against, so a disagreement is locatable and not merely visible |
+
+No key changes shape or type, and nothing the app already reads changes meaning. The
+numbers BEHIND `organic_probe.json`'s recommendation can move (row 3 above).
+
+### The gap these did NOT close
+
+The run's synthesis domain is `lattice_certification_mask(boundary, ...) ∩
+gf.posture.mask`, not the posture mask. The probe has no certification mask — it runs
+before the variant's shell boundary is built — so it is still the broader set. Nothing
+the `cli_organic_dead_parity` fixture can be configured into separated the two (cell
+3–10 mm, uniform and swept windows, `min_extrudable_width_mm` 0.45–3 mm, three rho
+bands, a manual clearance keep-out, all three outer finishes: `cand` == posture ==
+the run's mask in every one). So this is UNMEASURED, not closed, and it is the
+remaining way a dead verdict could differ — on a part whose cell-overlap proof or
+shell clip rejects posture voxels. Closing it means building a certification mask per
+candidate, which is a real cost and its own measurement.
