@@ -183,3 +183,38 @@ the run's mask in every one). So this is UNMEASURED, not closed, and it is the
 remaining way a dead verdict could differ — on a part whose cell-overlap proof or
 shell clip rejects posture voxels. Closing it means building a certification mask per
 candidate, which is a real cost and its own measurement.
+
+## MEANING CHANGES, addendum 2 (2026-09-30) — #354's variant-work items
+
+Neither item removes or renames anything, and neither changes a job or receipt key's
+name, shape or type, so every grep in this handoff still comes back clean. Both
+change which jobs are ACCEPTED, which is the kind of change an app notices.
+
+| what | was | is | effect |
+|---|---|---|---|
+| a face lattice region's stated `frame_u` / `frame_w` | the "axes must lie IN the face plane" check ran before `normal` was parsed, so it tested against `Vec3{0,0,0}` and could never fire | parsed after `origin`/`normal`, against the UNIT normal | an out-of-plane frame is now REFUSED AT PARSE TIME instead of being accepted and then refused mid-run by `clearance.cpp`'s `frame_conflict`. A job the app could previously submit and watch fail after a solve now fails on submission, with the reason |
+| the stepped plan's prism per region | `lattice.regions[region_id - 1]` — an index over ALL regions | `job_include_region(regions, region_id)` — a position among INCLUDE regions, which is what the id means | on a job with an exclude declared BEFORE an include, the plan took the exclude's `slot_origin` / `normal` / `depth_mm`. Measured: the identical include and the identical one-cell plan are ACCEPTED with the include alone and REFUSED with an exclude first. Ordering-dependent, so a plan the app packed correctly could be refused for a reason naming the wrong wall |
+
+### The frame check: what a job that was passing may now be refused for
+
+The in-plane test is also now taken against the NORMALISED normal. `normal` is only
+required to be non-zero, and `u · n` scales with `|n|`, so a raw dot product applied a
+tolerance `|n|` times looser — a frame 45° out of plane on a normal of `[0,0,3]` would
+have been judged by a bound three times wider than the same frame on `[0,0,1]`. In
+plane is a property of the direction, so the tolerance is too. Anything the app sends
+with a unit normal is unaffected.
+
+### The stepped id: the rule, stated once
+
+Every 1-based region id crossing the bridge — the per-voxel `region_ids`,
+`SteppedCell::region_id`, `SteppedRegionCell::region_id`,
+`SyntheticStressRegionReport::region_id` — is a position among the job's **include**
+regions in declaration order, never an index into `lattice.regions`. Swept the file:
+`region_id - 1` appeared at exactly one site, the one fixed here. The doubled path
+beside it (`run_job.cpp`, the `base_of` loop) already walked the regions and counted
+includes in lockstep, which is the correct pattern and is why only the stepped branch
+was wrong.
+
+Resolving that id is now `job_include_region()` in `job.hpp`, so the decision has a
+test (`test_job`'s "a stepped cell names the include, not the nth region") instead of
+sitting inline in `run_job.cpp` where nothing links.

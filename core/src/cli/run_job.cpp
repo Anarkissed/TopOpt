@@ -6907,12 +6907,15 @@ LatticeVariantOutcome lattice_one_variant(
       SteppedPlanRegion pr;
       pr.region_id = rc.region_id;
       pr.base_cell_mm = rc.cell_mm;
-      const std::size_t idx = static_cast<std::size_t>(rc.region_id - 1);
-      if (idx < job.lattice.regions.size()) {
-        const JobLatticeRegion& jr = job.lattice.regions[idx];
-        pr.slot_origin = jr.origin;
-        pr.normal = jr.normal;
-        pr.depth_mm = jr.depth_mm;
+      // ★ BY INCLUDE ORDER, NOT BY POSITION (#354, 2026-09-30). `rc.region_id`
+      // counts INCLUDE regions; `regions[region_id - 1]` counted ALL of them, so one
+      // exclude declared first handed this plan the exclude's prism. See
+      // job_include_region().
+      if (const JobLatticeRegion* jr =
+              job_include_region(job.lattice.regions, rc.region_id)) {
+        pr.slot_origin = jr->origin;
+        pr.normal = jr->normal;
+        pr.depth_mm = jr->depth_mm;
       }
       plan_regions.push_back(pr);
     }

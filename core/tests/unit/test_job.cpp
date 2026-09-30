@@ -23,6 +23,8 @@
 using topopt::JobClearance;
 using topopt::JobDescription;
 using topopt::JobError;
+using topopt::job_include_region;
+using topopt::JobLatticeRegion;
 using topopt::load_job_file;
 using topopt::parse_job;
 
@@ -1111,6 +1113,151 @@ static void test_mode_analyze() {
                 "mode: case-mangled mode refused (no fuzzy match)");
 }
 
+// --- ★ A STATED FRAME MUST LIE IN THE FACE PLANE, AND BE REFUSED AT PARSE TIME
+// (#354's variant work, 2026-09-30) -----------------------------------------------
+//
+// job.cpp checks `frame_u . normal` and `frame_w . normal` inside the frame block,
+// which runs BEFORE `normal` is parsed -- so it was testing against the default
+// Vec3{0,0,0} and both dot products were 0 for every job ever written. The check
+// could not fire. An out-of-plane frame was accepted here and caught only at run
+// time by clearance.cpp's `frame_conflict`, which is a refusal a user meets after
+// a solve rather than on submission.
+//
+// The cases below are chosen so that ONLY the in-plane test can catch them: each
+// frame is unit and mutually perpendicular, so the two checks that did work say
+// nothing about it.
+static void test_a_stated_frame_must_lie_in_the_face_plane() {
+  auto lat = [](const std::string& body) {
+    return mutate("\"mesh_prefix\": \"variant\" }",
+                  "\"mesh_prefix\": \"variant\" },\n  \"lattice\": " + body);
+  };
+  auto region = [&](const std::string& normal, const std::string& fu,
+                    const std::string& fw) {
+    return lat("{ \"cell_mm\": 5, \"strut_radius_mm\": 0.7, \"regions\": [\n"
+               "  { \"role\": \"include\", \"kind\": \"face\", \"geometry\": { "
+               "\"origin\": [0,0,0], \"normal\": " + normal + ", "
+               "\"half_u_mm\": 10.0, \"half_w_mm\": 8.0, \"depth_mm\": 5.0, "
+               "\"frame_u\": " + fu + ", \"frame_w\": " + fw + " } } ] }");
+  };
+
+  // (a) THE CONTROL: a frame that IS in the plane must still be accepted, and must
+  // arrive intact. Without this the fix could pass by refusing everything.
+  {
+    const JobDescription j = parse_job(region("[1,0,0]", "[0,1,0]", "[0,0,1]"));
+    CHECK(j.lattice.regions.size() == 1 &&
+              j.lattice.regions[0].frame_u.y == 1.0 &&
+              j.lattice.regions[0].frame_w.z == 1.0,
+          "frame: an in-plane frame is accepted and parsed");
+  }
+
+  // (b) `frame_w` PARALLEL TO THE NORMAL. u . w = 0 and both are unit, so the two
+  // working checks pass; only u/w . n catches it.
+  check_rejects(region("[1,0,0]", "[0,1,0]", "[1,0,0]"),
+                "frame: frame_w parallel to the normal must be refused at parse time");
+
+  // (c) `frame_u` PARALLEL TO THE NORMAL, the other way round.
+  check_rejects(region("[0,0,1]", "[0,0,1]", "[0,1,0]"),
+                "frame: frame_u parallel to the normal must be refused at parse time");
+
+  // (d) A TILTED frame -- 45 degrees out of plane, still unit and still mutually
+  // perpendicular. This is the shape a real frame bug takes: not a swapped axis but
+  // a frame belonging to a DIFFERENT face.
+  check_rejects(region("[0,0,1]", "[1,0,0]",
+                       "[0,0.70710678118654752,0.70710678118654752]"),
+                "frame: a frame tilted out of the face plane must be refused");
+
+  // (e) ★ AND THE TEST MUST MEAN THE SAME THING FOR A NON-UNIT NORMAL. `normal` is
+  // not required to be unit (only non-zero), and u . n scales with |n| -- so a raw
+  // dot product against [0,0,3] applies a tolerance three times looser than against
+  // [0,0,1]. In-plane is a property of the DIRECTION, so the normal is normalised
+  // before the test: an in-plane frame is accepted...
+  {
+    const JobDescription j = parse_job(region("[0,0,3]", "[1,0,0]", "[0,1,0]"));
+    CHECK(j.lattice.regions.size() == 1,
+          "frame: an in-plane frame on a non-unit normal is accepted");
+  }
+  // ...and the same tilt is refused there too, not silently absorbed by |n|.
+  check_rejects(region("[0,0,3]", "[1,0,0]",
+                       "[0,0.70710678118654752,0.70710678118654752]"),
+                "frame: a tilted frame is refused on a non-unit normal as well");
+
+  // (f) A ZERO normal is still refused, and the frame block must not read it first:
+  // with no direction there is no plane to be in, and the diagnostic should name the
+  // normal rather than the frame.
+  check_rejects(region("[0,0,0]", "[1,0,0]", "[0,1,0]"),
+                "frame: a zero normal is refused");
+}
+
+// --- ★ A STEPPED CELL'S region_id COUNTS INCLUDES, NOT REGIONS
+// (#354's variant work, 2026-09-30) -----------------------------------------------
+//
+// `SteppedCell::region_id` and `SteppedRegionCell::region_id` are both documented
+// "1-based, the job's own INCLUDE-region order", and that is what they carry -- the
+// per-voxel region id is assigned by counting includes. run_job.cpp built the plan's
+// frame with `job.lattice.regions[region_id - 1]`, which is the same thing only when
+// every region before it is an include. Declare one exclude first and the plan's
+// prism (slot_origin / normal / depth_mm) comes from the EXCLUDE.
+//
+// Reproduced end to end before this test was written: same include region, same
+// one-cell plan, `topopt-cli lattice-variant` ACCEPTS it with the include alone and
+// REFUSES it with an exclude declared first -- "7.25 mm at offset (-24.75, 0, -2.75)
+// from the slot grid", offsets measured from the exclude's origin (50,0,18) instead
+// of the include's (18,0,8).
+static void test_a_stepped_cell_names_the_include_not_the_nth_region() {
+  auto lat = [](const std::string& body) {
+    return mutate("\"mesh_prefix\": \"variant\" }",
+                  "\"mesh_prefix\": \"variant\" },\n  \"lattice\": " + body);
+  };
+  // EXCLUDE FIRST, then the include -- the ordering the app is free to send and the
+  // schema does not constrain.
+  const JobDescription j = parse_job(lat(
+      "{ \"cell_mm\": 5, \"strut_radius_mm\": 0.7, \"regions\": [\n"
+      "  { \"role\": \"exclude\", \"kind\": \"face\", \"geometry\": { "
+      "\"origin\": [50,0,18], \"normal\": [1,0,0], \"half_u_mm\": 4.0, "
+      "\"half_w_mm\": 4.0, \"depth_mm\": 3.0 } },\n"
+      "  { \"role\": \"include\", \"kind\": \"face\", \"geometry\": { "
+      "\"origin\": [18,0,8], \"normal\": [0,1,0], \"half_u_mm\": 6.0, "
+      "\"half_w_mm\": 6.0, \"depth_mm\": 12.0 } } ] }"));
+  CHECK(j.lattice.regions.size() == 2 && j.lattice.regions[0].role == "exclude" &&
+            j.lattice.regions[1].role == "include",
+        "stepped region_id: the fixture declares the exclude FIRST");
+
+  // ★ THE CONTROL. The naive index and the include order disagree on this fixture,
+  // which is what makes the assertion below non-vacuous. If a future change made
+  // them agree here, this would fire and say so rather than passing silently.
+  CHECK(j.lattice.regions[0].role != "include",
+        "stepped region_id: control -- regions[region_id - 1] is NOT the include here");
+
+  // Include-region id 1 must resolve to the INCLUDE's frame: origin (18,0,8),
+  // normal +y, depth 12 -- never the exclude's (50,0,18) / +x / 3.
+  const JobLatticeRegion* r1 = job_include_region(j.lattice.regions, 1);
+  CHECK(r1 != nullptr, "stepped region_id: include id 1 resolves");
+  if (r1 != nullptr) {
+    CHECK(r1->role == "include", "stepped region_id: id 1 is an include region");
+    CHECK(r1->origin.x == 18.0 && r1->origin.z == 8.0,
+          "stepped region_id: id 1 carries the INCLUDE's slot origin, not the exclude's");
+    CHECK(r1->normal.y == 1.0 && r1->depth_mm == 12.0,
+          "stepped region_id: id 1 carries the INCLUDE's normal and prism depth");
+  }
+  // Out of range in both directions is a null, not a silently wrong region: there is
+  // no include 2 here, and 0 is not a 1-based id.
+  CHECK(job_include_region(j.lattice.regions, 2) == nullptr,
+        "stepped region_id: an id past the last include resolves to nothing");
+  CHECK(job_include_region(j.lattice.regions, 0) == nullptr,
+        "stepped region_id: 0 is not a 1-based include id");
+
+  // And with no excludes the two agree, which is why this went unnoticed.
+  {
+    const JobDescription k = parse_job(lat(
+        "{ \"cell_mm\": 5, \"strut_radius_mm\": 0.7, \"regions\": [\n"
+        "  { \"role\": \"include\", \"kind\": \"face\", \"geometry\": { "
+        "\"origin\": [18,0,8], \"normal\": [0,1,0], \"half_u_mm\": 6.0, "
+        "\"half_w_mm\": 6.0, \"depth_mm\": 12.0 } } ] }"));
+    CHECK(job_include_region(k.lattice.regions, 1) == &k.lattice.regions[0],
+          "stepped region_id: with no excludes, id 1 IS regions[0]");
+  }
+}
+
 // --- lattice.regions roles (task lattice-page-core-hookup stage 1, H1e) ------
 static void test_lattice_regions() {
   auto lat = [](const std::string& body) {
@@ -1239,6 +1386,8 @@ int main() {
   test_warm_start_block();
   test_mode_analyze();
   test_lattice_regions();
+  test_a_stated_frame_must_lie_in_the_face_plane();
+  test_a_stepped_cell_names_the_include_not_the_nth_region();
   test_lattice_grading_coupling();
 
   if (g_failures == 0) {

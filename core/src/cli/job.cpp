@@ -1434,6 +1434,26 @@ JobDescription parse_job(const std::string& json_text) {
               gv, {"origin", "normal", "half_u_mm", "half_w_mm", "depth_mm", "outline_uv",
                    "frame_u", "frame_w"},
               "a face lattice region geometry");
+          // ── ★ origin AND normal ARE PARSED FIRST, BECAUSE THE FRAME CHECK READS
+          // THE NORMAL (#354, 2026-09-30) ────────────────────────────────────
+          // These two used to be parsed BELOW the frame block, so the "frame axes must
+          // lie IN the face plane" test ran against `reg.normal`'s default Vec3{0,0,0}
+          // and both dot products were 0 for every job ever submitted. The check could
+          // not fire: an out-of-plane frame parsed clean and was caught only at run
+          // time, by clearance.cpp's `frame_conflict`, after a solve. Order is the
+          // whole fix -- and a zero normal is refused HERE, before anything divides by
+          // its length.
+          reg.origin = parse_vec3(
+              require_key(gv, "origin", "a face lattice region geometry"),
+              "lattice region origin");
+          reg.normal = parse_vec3(
+              require_key(gv, "normal", "a face lattice region geometry"),
+              "lattice region normal");
+          {
+            const Vec3& nn = reg.normal;
+            if (nn.x * nn.x + nn.y * nn.y + nn.z * nn.z <= 0.0)
+              schema_fail("a face lattice region \"normal\" must be non-zero");
+          }
           // ── ★ THE FRAME outline_uv IS IN, WHEN THE JOB STATES IT (app, 2026-09-22)
           // Both axes or neither: one alone cannot define a frame, and guessing the
           // other from the normal would silently reinstate the fitted convention this
@@ -1467,12 +1487,17 @@ JobDescription parse_job(const std::string& json_text) {
                 schema_fail(
                     "a face lattice region's \"frame_u\" and \"frame_w\" must be "
                     "PERPENDICULAR (u . w = " + std::to_string(uw) + ")");
-              const double nu = reg.frame_u.x * reg.normal.x +
-                                reg.frame_u.y * reg.normal.y +
-                                reg.frame_u.z * reg.normal.z;
-              const double nw = reg.frame_w.x * reg.normal.x +
-                                reg.frame_w.y * reg.normal.y +
-                                reg.frame_w.z * reg.normal.z;
+              // ★ AGAINST THE UNIT normal. `normal` is only required to be non-zero,
+              // and u . n scales with |n| -- a raw dot product would apply a tolerance
+              // three times looser to a normal of [0,0,3] than to [0,0,1]. Lying in
+              // the plane is a property of the DIRECTION, so the tolerance has to be
+              // too. (|n| > 0 is already refused above.)
+              const double ln = len(reg.normal);
+              const Vec3 un{reg.normal.x / ln, reg.normal.y / ln, reg.normal.z / ln};
+              const double nu = reg.frame_u.x * un.x + reg.frame_u.y * un.y +
+                                reg.frame_u.z * un.z;
+              const double nw = reg.frame_w.x * un.x + reg.frame_w.y * un.y +
+                                reg.frame_w.z * un.z;
               if (!(std::fabs(nu) < 1e-6) || !(std::fabs(nw) < 1e-6))
                 schema_fail(
                     "a face lattice region's frame axes must lie IN the face plane "
@@ -1498,12 +1523,6 @@ JobDescription parse_job(const std::string& json_text) {
               reg.outline_uv.push_back(std::move(pts));
             }
           }
-          reg.origin = parse_vec3(
-              require_key(gv, "origin", "a face lattice region geometry"),
-              "lattice region origin");
-          reg.normal = parse_vec3(
-              require_key(gv, "normal", "a face lattice region geometry"),
-              "lattice region normal");
           reg.half_u_mm = require_number(
               require_key(gv, "half_u_mm", "a face lattice region geometry"),
               "lattice region half_u_mm");
@@ -1517,9 +1536,6 @@ JobDescription parse_job(const std::string& json_text) {
               !(reg.depth_mm > 0.0))
             schema_fail("a face lattice region half_u_mm/half_w_mm/depth_mm "
                         "must be > 0 (a zero-extent region marks nothing)");
-          const Vec3& nn = reg.normal;
-          if (nn.x * nn.x + nn.y * nn.y + nn.z * nn.z <= 0.0)
-            schema_fail("a face lattice region \"normal\" must be non-zero");
         }
         job.lattice.regions.push_back(std::move(reg));
       }
