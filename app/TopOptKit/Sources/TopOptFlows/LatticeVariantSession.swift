@@ -528,9 +528,10 @@ public struct LatticeVariantAuthoring: Equatable, Sendable {
             note: Self.variantTapRefusal)
     }
 
-    /// ★ Ruling (e), verbatim.
+    /// ★ Ruling (e), in the house style (ruling 5, 2026-09-30: a curly ’ and "optimized" — "His
+    /// rule was mine to phrase; the house style wins").
     public static let variantTapRefusal =
-        "You can't pick faces on an optimised result — the walls you marked on the part carry over."
+        "You can’t pick faces on an optimized result — the walls you marked on the part carry over."
 }
 
 // MARK: - region emission against a variant

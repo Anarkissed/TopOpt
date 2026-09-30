@@ -331,9 +331,11 @@ final class LatticeVariantTests: XCTestCase {
                        "Z11: a marching-cubes variant has no selectable faces")
         XCTAssertTrue(off.primitivePlacementEnabled,
                       "Z11: placing a region is the authoring that DOES work here")
-        // ★ ruling (e) (2026-09-30): ONE sentence, his words
+        // ★ ruling (e) (2026-09-30): ONE sentence — in the house style (ruling 5): a curly ’, "optimized"
         XCTAssertEqual(off.note,
-                       "You can't pick faces on an optimised result — the walls you marked on the part carry over.")
+                       "You can\u{2019}t pick faces on an optimized result — the walls you marked on the part carry over.")
+        XCTAssertFalse(off.note.contains("'"), "no straight apostrophe")
+        XCTAssertFalse(off.note.contains("optimised"), "the house spelling")
 
         let on = LatticeVariantAuthoring.compute(variant: nil)
         XCTAssertTrue(on.faceTapEnabled, "the workspace entry is unchanged")
