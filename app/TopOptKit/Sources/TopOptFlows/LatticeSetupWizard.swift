@@ -681,7 +681,10 @@ public struct LatticeSetupWizard: View {
         wallFacesCache.isEmpty ? computeWallEditorFaces() : wallFacesCache
     }
     private func computeWallEditorFaces() -> [LatticeWallEditorFace] {
-        let all = project.latticeJobRegions().regions
+        computeWallEditorFaces(from: project.latticeJobRegions().regions)
+    }
+    private func computeWallEditorFaces(from regions: [LatticeRegionSpec]) -> [LatticeWallEditorFace] {
+        let all = regions
             .filter { $0.role == .include && $0.kind == .face && $0.depthMM > 0 }
         // ★ a keyless wall keeps its own card (review #42: every keyless region merged into "")
         func keyOf(_ r: LatticeRegionSpec) -> String { r.selectableKey ?? "face:\(r.faceID ?? -1)" }
@@ -722,6 +725,9 @@ public struct LatticeSetupWizard: View {
     }
 
     @State private var wallFacesCache: [LatticeWallEditorFace] = []
+    /// ★ ruling (c): the include walls the job carries, from the SAME emission as the cache
+    /// above (one per change, never one per read); nil until the first rebuild
+    @State private var includeWallCountCache: Int? = nil
     private static let wallGreen = Color(red: 0x30 / 255, green: 0xD1 / 255, blue: 0x58 / 255)
     /// What the mode list says about a wall's drawing.
     static func profileSummary(_ p: LatticeWallProfile?) -> String {
@@ -1311,7 +1317,8 @@ public struct LatticeSetupWizard: View {
                 organicPill("Manual", on: organicManual, enabled: fitPossible) {
                     if model.simulateStresses {
                         if model.organicPickedGradeMM.count != 2 {
-                            model.organicPickedGradeMM = organicManualGrades.first?.grade
+                            // ★ ruling V3: never seed an unselectable (unchecked) grade
+                            model.organicPickedGradeMM = organicManualGrades.first(where: { $0.selectable })?.grade
                                 ?? LatticeSettings.organicProbeGradesMM[0]
                         }
                         model.organicPickedSeparationMM = 0
@@ -1540,6 +1547,9 @@ public struct LatticeSetupWizard: View {
     private struct ManualGrade: Hashable {
         let grade: [Double]; let approved: Bool; let selectable: Bool; let refusals: [String]
         var tint: OrganicForecast.Tint? = nil; var margin: String? = nil; var hover: String = ""
+        /// ★ the pill's words (ruling V3): "Not checked" under Structural where the stress
+        /// bar was never computed, else the size with "*" when unapproved and the margin
+        var label: String = ""
     }
     /// ★ THE MANUAL SIZE LIST. With the organic cell-size probe present (contract
     /// 2026-09-05): its candidates — Structural offers only `approved_structural`,
@@ -1547,13 +1557,13 @@ public struct LatticeSetupWizard: View {
     /// certification found (item 3) and, under Aesthetic, the ladder with a "*".
     private var organicManualSizes: [ManualSize] {
         let structural = !organicAesthetic
-        if let probe = project.lattice.organicForecast, !probe.sizes.isEmpty {
+        if let probe = project.lattice.currentOrganicForecast, !probe.sizes.isEmpty {
             return probe.sizes.map { c in
                 ManualSize(size: c.cellMinMM,
                            approved: structural ? c.approvedStructural : c.approvedAesthetic,
                            selectable: OrganicForecast.selectable(c, structural: structural),
                            refusals: c.refusals, tint: OrganicForecast.tint(c, structural: structural),
-                           margin: c.marginText, hover: c.hoverText)
+                           margin: c.marginText, hover: c.hoverText(structural: structural, probedIntent: probe.probedIntent))
             }.sorted { $0.size < $1.size }
         }
         let approved = project.lattice.organicFittingSeparationsMM
@@ -1569,19 +1579,21 @@ public struct LatticeSetupWizard: View {
     /// The grades likewise: the probe's when present, else certification's.
     private var organicManualGrades: [ManualGrade] {
         let structural = !organicAesthetic
-        if let probe = project.lattice.organicForecast, !probe.grades.isEmpty {
+        if let probe = project.lattice.currentOrganicForecast, !probe.grades.isEmpty {
             return probe.grades.map { c in
                 ManualGrade(grade: c.gradeMM,
                             approved: structural ? c.approvedStructural : c.approvedAesthetic,
                             selectable: OrganicForecast.selectable(c, structural: structural),
                             refusals: c.refusals, tint: OrganicForecast.tint(c, structural: structural),
-                            margin: c.marginText, hover: c.hoverText)
+                            margin: c.marginText, hover: c.hoverText(structural: structural, probedIntent: probe.probedIntent),
+                            label: c.pillText(structural: structural))
             }
         }
         return project.lattice.organicApprovedGradesMM.filter { $0.count == 2 }
-            .map { ManualGrade(grade: $0, approved: true, selectable: true, refusals: []) }
+            .map { ManualGrade(grade: $0, approved: true, selectable: true, refusals: [],
+                               label: String(format: "%g–%g mm", $0[0], $0[1])) }
     }
-    private var organicProbePresent: Bool { project.lattice.organicForecast != nil }
+    private var organicProbePresent: Bool { project.lattice.currentOrganicForecast != nil }
 
     /// ★ "CHECK SIZES" (final contract 2026-09-05, UI 1): the window presets plus the
     /// user's current choice, submitted with the re-lattice job; the menu fills from
@@ -1590,7 +1602,19 @@ public struct LatticeSetupWizard: View {
     private var organicProbeRefusal: String? {
         if !TopOptKit.organicProbeWired { return "Size checking is not available in this build." }
         if probeDriver == nil { return "Size checking needs a worker and a finished optimization." }
+        if let why = organicIncludeRefusal { return why }
         return nil
+    }
+    /// ★ RULING (c) (2026-09-30): a variant's job with no include wall is never written — core
+    /// would lattice the whole variant — so Check sizes refuses, in the stage's words. Asked only
+    /// when there IS a variant to check (the driver exists only then).
+    private var organicIncludeRefusal: String? {
+        guard probeDriver != nil else { return nil }
+        let n = includeWallCountCache
+            ?? project.variantLatticeJobRegions().regions.filter { $0.role == .include }.count
+        guard let why = LatticeJobIncludeGate.refusal(latticeEnabled: project.lattice.enabled,
+                                                      includeCount: n) else { return nil }
+        return "Can’t check sizes: \(why)."
     }
     private var organicCheckSizesButton: some View {
         let refusal = organicProbeRefusal
@@ -1644,7 +1668,7 @@ public struct LatticeSetupWizard: View {
         if model.simulateStresses {
             // ── item 2: a GRADE, "## mm to ## mm", never single values ──
             HStack(spacing: DS.Space.xs) {
-                Text(organicProbePresent && structural ? "Likely to certify" : "Grade")
+                Text(organicProbePresent && structural && organicAnyChecked ? "Likely to certify" : "Grade")
                     .dsStyle(DS.TypeScale.caption2)
                     .foregroundStyle(DS.Color.textTertiary.color)
                 infoButton("manual-grades", (organicProbePresent
@@ -1670,8 +1694,7 @@ public struct LatticeSetupWizard: View {
                     HStack(spacing: DS.Space.xs) {
                         ForEach(grades, id: \.self) { m in
                             let g = m.grade
-                            organicPill(String(format: m.approved ? "%g–%g mm" : "%g–%g mm*", g[0], g[1])
-                                            + (m.margin.map { " · \($0)" } ?? ""),
+                            organicPill(m.label,
                                         on: model.organicPickedGradeMM == g,
                                         enabled: fitPossible && m.selectable) {
                                 commitOrganicGrade(lo: g[0], hi: g[1])
@@ -1686,7 +1709,7 @@ public struct LatticeSetupWizard: View {
         } else {
             // ── item 4: ONE size, "## mm", checked after the number is complete ──
             HStack(spacing: DS.Space.xs) {
-                Text(organicProbePresent && structural ? "Likely to certify" : "Size")
+                Text(organicProbePresent && structural && organicAnyChecked ? "Likely to certify" : "Size")
                     .dsStyle(DS.TypeScale.caption2)
                     .foregroundStyle(DS.Color.textTertiary.color)
                 infoButton("manual-sizes", (organicProbePresent
@@ -1715,6 +1738,42 @@ public struct LatticeSetupWizard: View {
                 infoButton("check-failed", why)
             }
         }
+        // ★ RULING (d) (2026-09-30): an answer measured on an older job route is kept but not
+        // used — one line says so, and what checks the sizes again (or why nothing can)
+        if project.lattice.organicSizesNeedRecheck, organicProbeState != .running {
+            shortNote(OrganicForecast.recheckLine(checkRefusal: organicProbeRefusal), warning: true)
+                .accessibilityIdentifier("wizard-organic-sizes-recheck")
+        }
+        // ★ RULING (c) (2026-09-30): Check sizes shows only when it can act, so a job with no
+        // include wall is SAID — unless the re-check line above or the none-checked line below
+        // already carries the refusal
+        if let why = organicIncludeRefusal, !project.lattice.organicSizesNeedRecheck,
+           project.lattice.currentOrganicForecast?.uncheckedSummary(
+               structural: structural, grades: model.simulateStresses, checkRefusal: why) == nil {
+            shortNote(why, warning: true)
+                .accessibilityIdentifier("wizard-organic-check-refused")
+        }
+        // ★ ruling V3 (2026-09-29): not one size's stress bar was computed — say so, and
+        // what would get them checked; each size's reason behind the (i)
+        if let none = project.lattice.currentOrganicForecast?.uncheckedSummary(
+            structural: structural, grades: model.simulateStresses, checkRefusal: organicProbeRefusal) {
+            HStack(spacing: DS.Space.xs) {
+                shortNote(none.line, warning: true)
+                infoButton("none-checked", none.info)
+            }
+            .accessibilityIdentifier("wizard-organic-none-checked")
+        }
+        // ★ ruling V1 (2026-09-29): a variant's Check sizes left a face wall out — say so
+        if let line = LatticeVariantFaceWalls.line(withoutShape: project.lattice.currentOrganicForecast?.facesWithoutShape ?? 0,
+                                                   regions: project.lattice.currentOrganicForecast?.regionsWithoutShape ?? []) {
+            shortNote(line, warning: true)
+                .accessibilityIdentifier("wizard-organic-face-walls-left-out")
+        }
+    }
+
+    /// Any size IN THE LIST SHOWN whose stress bar the probe computed (ruling V3).
+    private var organicAnyChecked: Bool {
+        project.lattice.currentOrganicForecast?.anyChecked(grades: model.simulateStresses) ?? false
     }
 
     /// ★ THE RECOMMENDATION (brief 2026-09-06, §3 menu wiring): with a simulation the
@@ -1723,7 +1782,7 @@ public struct LatticeSetupWizard: View {
     /// simulation (his item 1) and Auto never without (item 3). Collapsed ⇒ "no cell
     /// fits this wall — solid", with the bounds behind the (i).
     @ViewBuilder private func organicRecommendationRow(structural: Bool) -> some View {
-        if let rec = project.lattice.organicForecast?.recommendation, rec.ran {
+        if let rec = project.lattice.currentOrganicForecast?.recommendation, rec.ran {
             if rec.collapsed {
                 HStack(spacing: DS.Space.xs) {
                     shortNote("No cell fits: solid", warning: true)
@@ -1733,8 +1792,11 @@ public struct LatticeSetupWizard: View {
             } else if model.simulateStresses, let a = rec.auto, a.found {
                 HStack(spacing: DS.Space.xs) {
                     shortNote("Recommended")
-                    organicPill(rec.pillText(a),
-                                on: model.organicPickedGradeMM == [a.cellMinMM, a.cellMaxMM], enabled: true) {
+                    // ★ ruling V3: under Structural only a CHECKED pick may be taken — one from
+                    // a probe that ran on Aesthetic was never checked (2026-09-03)
+                    organicPill(rec.pillText(a) + (structural && !rec.showsMargin ? " · " + OrganicSizeCheck.notCheckedTitle : ""),
+                                on: model.organicPickedGradeMM == [a.cellMinMM, a.cellMaxMM],
+                                enabled: !structural || rec.showsMargin) {
                         commitOrganicGrade(lo: a.cellMinMM, hi: a.cellMaxMM)
                     }
                     .modifier(OrganicProbeTintModifier(tint: rec.tint))
@@ -1743,8 +1805,9 @@ public struct LatticeSetupWizard: View {
             } else if !model.simulateStresses, let f = rec.fit, f.found {
                 HStack(spacing: DS.Space.xs) {
                     shortNote("Recommended")
-                    organicPill(rec.pillText(f),
-                                on: abs(model.organicPickedSeparationMM - f.cellMM) < 1e-6, enabled: true) {
+                    organicPill(rec.pillText(f) + (structural && !rec.showsMargin ? " · " + OrganicSizeCheck.notCheckedTitle : ""),
+                                on: abs(model.organicPickedSeparationMM - f.cellMM) < 1e-6,
+                                enabled: !structural || rec.showsMargin) {
                         commitOrganicSize(f.cellMM)
                     }
                     .modifier(OrganicProbeTintModifier(tint: rec.tint))
@@ -1796,7 +1859,7 @@ public struct LatticeSetupWizard: View {
         // octet cell bound. From the probe once it has run.
         OrganicSizeCheck.evaluate(cellMinMM: lo, cellMaxMM: hi, walls: organicWalls,
                                   floor: project.organicFloor,
-                                  probe: project.lattice.organicForecast)
+                                  probe: project.lattice.currentOrganicForecast)
     }
 
     /// Checked AFTER the full number: Aesthetic ⇒ a red * with the reasons below;
@@ -1843,9 +1906,11 @@ public struct LatticeSetupWizard: View {
             organicNotice = OrganicNotice(
                 title: v.allowed ? "About \(label)" : "\(label) cannot form a lattice",
                 message: v.text + (v.allowed ? "\nYou can keep this size." : ""))
-        } else if v.likely == false || !v.reasons.isEmpty {
+        } else if v.likely == false || !v.reasons.isEmpty || v.notChecked != nil {
+            // ★ ruling 3 (2026-09-29): "Not checked" where the candidate's prediction did
+            // not run — the title is the size check's, so its words are tested there
             organicNotice = OrganicNotice(
-                title: "\(label) may not certify",
+                title: OrganicSizeCheck.structuralTitle(label: label, verdict: v),
                 message: OrganicSizeCheck.structuralNotice(label: label, verdict: v))
         }
     }
@@ -2696,7 +2761,9 @@ public struct LatticeSetupWizard: View {
     /// opening the page, and switching sheet). Everything else marks the sample stale
     /// and waits — his rule, and it is what stops the pile-up.
     private func rebuild(force: Bool = false) {
-        wallFacesCache = computeWallEditorFaces()
+        let regions = project.latticeJobRegions().regions
+        wallFacesCache = computeWallEditorFaces(from: regions)
+        includeWallCountCache = regions.filter { $0.role == .include }.count
         guard force else {
             sampleIsStale = true
             return

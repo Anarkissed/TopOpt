@@ -197,11 +197,13 @@ final class OrganicDeadWallParityTests: XCTestCase {
             cand[f] = true; ids[f] = 2; t[6 * f] = 0.00411
         } }
         let group = UUID()
-        let back = LatticeSelectableRef.face(group: group, face: 15)
-        let front = LatticeSelectableRef.face(group: group, face: 2)
+        // (his stand, solved 2026-09-29 through core's probe: face 2 is the back wall,
+        // p99 0.018 MPa, left alone; face 15 the front, p99 0.0049, synthesised)
+        let back = LatticeSelectableRef.face(group: group, face: 2)
+        let front = LatticeSelectableRef.face(group: group, face: 15)
         let other = LatticeSelectableRef.face(group: group, face: 9)
-        let specs: [TopOptKit.OrganicSyntheticRegionSpec] = [.init(regionID: 1, faceID: 15, foci: 4),
-                                                             .init(regionID: 2, faceID: 2, foci: 4)]
+        let specs: [TopOptKit.OrganicSyntheticRegionSpec] = [.init(regionID: 1, faceID: 2, foci: 4),
+                                                             .init(regionID: 2, faceID: 15, foci: 4)]
         let plan = OrganicSyntheticStress.Plan(regionIDs: ids, regions: specs,
                                                keyByID: [1: back.key, 2: front.key])
         var input = LatticeOrganicInput(tensor: t, dims: (nx, ny, nz), originMM: .zero, spacingMM: 1,

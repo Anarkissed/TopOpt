@@ -169,6 +169,120 @@ final class OrganicForecastTests: XCTestCase {
         XCTAssertNil(OrganicForecast.tint(green, structural: false))
     }
 
+    /// ★★ RULING V3 (2026-09-29): under Structural an unchecked candidate stays
+    /// unselectable, but reads "Not checked" and core's reason — never the bare "*".
+    func testAnUncheckedCandidateReadsNotCheckedNeverAStar() throws {
+        func cand(_ predicted: [String: Any]?, structural s: Bool = false, aesthetic a: Bool = true,
+                  mode: String? = nil) throws -> (OrganicForecast.Candidate, OrganicForecast) {
+            var c: [String: Any] = ["cell_min_mm": 3.0, "cell_max_mm": 5.0, "regions": [],
+                                    "approved_structural": s, "approved_aesthetic": a]
+            if let predicted { c["predicted"] = predicted }
+            var doc: [String: Any] = ["organic_probe_version": 1, "candidates": [c]]
+            if let mode { doc["recommendation"] = ["ran": true, "mode": mode, "band_lo_mm": 3.0, "band_hi_mm": 6.0] }
+            let f = try XCTUnwrap(OrganicForecast.parse(try data(doc)))
+            return (try XCTUnwrap(f.candidates.first), f)
+        }
+        for predicted in [["ran": false, "reason": "no segments"],
+                          ["ran": false, "reason": "aesthetic intent: nothing reads a certificate"],
+                          ["ran": false, "reason": "612000 segments exceed the probe's 600000 cap"], nil] as [[String: Any]?] {
+            let (c, f) = try cand(predicted)
+            // CONTROL: the old pill — the bare star
+            XCTAssertEqual(c.label + (c.approvedStructural ? "" : "*"), "3–5 mm*")
+            XCTAssertEqual(c.pillText(structural: true), "3–5 mm · Not checked")
+            XCTAssertFalse(c.pillText(structural: true).contains("*"))
+            XCTAssertFalse(OrganicForecast.selectable(c, structural: true), "★ still unselectable under Structural")
+            XCTAssertNil(OrganicForecast.tint(c, structural: true))
+            let hover = c.hoverText(structural: true, probedIntent: f.probedIntent)
+            XCTAssertTrue(hover.contains("Not checked: "), hover)
+            if let r = predicted?["reason"] as? String { XCTAssertTrue(hover.contains(r), "core's reason, verbatim: \(hover)") }
+            // under Aesthetic nothing changes
+            XCTAssertEqual(c.pillText(structural: false), c.label + (c.approvedAesthetic ? "" : "*"))
+        }
+        // positive controls: a prediction that RAN keeps its words exactly
+        let (refused, _) = try cand(["ran": true, "verdict": "refused", "margin": 0.91])
+        XCTAssertEqual(refused.pillText(structural: true), "3–5 mm* · 0.91")
+        let (certified, _) = try cand(["ran": true, "verdict": "certified", "margin": 1.84], structural: true)
+        XCTAssertEqual(certified.pillText(structural: true), "3–5 mm · 1.84")
+        XCTAssertTrue(OrganicForecast.selectable(certified, structural: true))
+        // an approved-but-unchecked candidate is never offered under Structural
+        let (odd, _) = try cand(["ran": false, "reason": "no segments"], structural: true)
+        XCTAssertTrue(odd.approvedStructural, "control: approved…")
+        XCTAssertFalse(OrganicForecast.selectable(odd, structural: true), "★ …but not checked, so not offered")
+    }
+
+    /// Core writes "N segments exceed the probe's 600000 cap" for a certificate it SKIPPED
+    /// (an Aesthetic probe; sent to #358). Within the cap the line contradicts itself, so
+    /// the true cause is said; above the cap, or on a Structural probe, it is verbatim.
+    func testTheSelfContradictingCapLineIsNotShownAsTheReason() throws {
+        func candidate(_ reason: String) throws -> OrganicForecast.Candidate {
+            let doc: [String: Any] = ["organic_probe_version": 1, "candidates": [[
+                "cell_min_mm": 4.5, "cell_max_mm": 4.5, "regions": [],
+                "predicted": ["ran": false, "reason": reason],
+                "approved_structural": false, "approved_aesthetic": true]]]
+            return try XCTUnwrap(OrganicForecast.parse(try data(doc))?.candidates.first)
+        }
+        let within = try candidate("51080 segments exceed the probe's 600000 cap")
+        XCTAssertTrue(within.hoverText.contains("51080 segments exceed"), "control: the old hover showed core's false line")
+        let why = try XCTUnwrap(within.notCheckedReason(probedIntent: nil))
+        XCTAssertTrue(why.contains("Aesthetic"), why); XCTAssertFalse(why.contains("exceed"), why)
+        XCTAssertEqual(within.notCheckedReason(probedIntent: "structural"), "51080 segments exceed the probe's 600000 cap",
+                       "on a Structural probe the line is core's, verbatim")
+        let over = try candidate("612000 segments exceed the probe's 600000 cap")
+        XCTAssertEqual(over.notCheckedReason(probedIntent: nil), "612000 segments exceed the probe's 600000 cap")
+    }
+
+    /// ★ NONE CHECKED: one line saying so and what would get them checked; nil when any
+    /// was checked, under Aesthetic, or with no candidates.
+    func testNoneCheckedSaysSoAndWhatWouldCheckThem() throws {
+        func probe(_ reasons: [String?], mode: String? = nil) throws -> OrganicForecast {
+            let cands: [[String: Any]] = reasons.enumerated().map { i, r in
+                var c: [String: Any] = ["cell_min_mm": 3.5 + Double(i), "cell_max_mm": 3.5 + Double(i), "regions": [],
+                                        "approved_structural": false, "approved_aesthetic": true]
+                if let r { c["predicted"] = ["ran": false, "reason": r] }
+                return c
+            }
+            var doc: [String: Any] = ["organic_probe_version": 1, "candidates": cands]
+            if let mode { doc["recommendation"] = ["ran": true, "mode": mode, "band_lo_mm": 3.0, "band_hi_mm": 6.0] }
+            return try XCTUnwrap(OrganicForecast.parse(try data(doc)))
+        }
+        let aes = try probe(["51080 segments exceed the probe's 600000 cap", "aesthetic intent: nothing reads a certificate"],
+                            mode: "aesthetic")
+        let s = try XCTUnwrap(aes.uncheckedSummary(structural: true, grades: false))
+        XCTAssertTrue(s.line.hasPrefix("No size was checked for strength."), s.line)
+        XCTAssertTrue(s.line.contains("Check sizes") && s.line.contains("Structural"), s.line)
+        XCTAssertTrue(s.info.contains("3.5 mm:") && s.info.contains("4.5 mm:"), s.info)
+        XCTAssertFalse(s.info.contains("exceed"), "the false cap line is not the reason")
+        XCTAssertTrue(try probe(["612000 segments exceed the probe's 600000 cap"], mode: "structural")
+            .uncheckedSummary(structural: true, grades: false)?.line.contains("larger size") == true)
+        XCTAssertTrue(try probe(["no segments"], mode: "structural").uncheckedSummary(structural: true, grades: false)?
+            .line.contains("mark a wall") == true)
+        XCTAssertTrue(try probe([nil]).uncheckedSummary(structural: true, grades: false)?.line.contains("update it") == true)
+        XCTAssertEqual(try probe(["no segments"]).uncheckedSummary(structural: true, grades: false, checkRefusal: "No worker is connected.")?
+            .line, "No size was checked for strength. No worker is connected.", "never points at a button that is not there")
+        // nil when there is nothing to say
+        XCTAssertNil(aes.uncheckedSummary(structural: false, grades: false), "Aesthetic runs no strength check — not a gap")
+        XCTAssertNil(try probe([]).uncheckedSummary(structural: true, grades: false))
+        var mixedDoc: [String: Any] = ["organic_probe_version": 1, "candidates": [
+            ["cell_min_mm": 4.5, "cell_max_mm": 4.5, "regions": [], "approved_structural": true, "approved_aesthetic": true,
+             "predicted": ["ran": true, "verdict": "certified", "margin": 1.8]],
+            ["cell_min_mm": 5.5, "cell_max_mm": 5.5, "regions": [], "approved_structural": false, "approved_aesthetic": true,
+             "predicted": ["ran": false, "reason": "no segments"]]]]
+        mixedDoc["x"] = 0
+        XCTAssertNil(try XCTUnwrap(OrganicForecast.parse(try data(mixedDoc))).uncheckedSummary(structural: true, grades: false),
+                     "one was checked")
+        // ★ the LIST SHOWN decides: a checked 6.5 mm SIZE does not stand for grades none of
+        // which was checked (the simulation on shows grades only)
+        let split = try XCTUnwrap(OrganicForecast.parse(try data(["organic_probe_version": 1, "candidates": [
+            ["cell_min_mm": 6.5, "cell_max_mm": 6.5, "regions": [], "approved_structural": true, "approved_aesthetic": true,
+             "predicted": ["ran": true, "verdict": "certified", "margin": 2.1]],
+            ["cell_min_mm": 3.0, "cell_max_mm": 5.0, "regions": [], "approved_structural": false, "approved_aesthetic": true,
+             "predicted": ["ran": false, "reason": "612000 segments exceed the probe's 600000 cap"]]]] as [String: Any])))
+        XCTAssertTrue(split.anyChecked, "control: across both lists, one was checked")
+        XCTAssertFalse(split.anyChecked(grades: true), "★ but not one GRADE was")
+        XCTAssertNotNil(split.uncheckedSummary(structural: true, grades: true), "★ so the grade list says so")
+        XCTAssertNil(split.uncheckedSummary(structural: true, grades: false), "the size list had one checked")
+    }
+
     /// ★ GREEN, AND THE STRUCTURAL RECOMMENDED PICK, NEED A CERTIFICATE THAT RAN — core's
     /// source, pinned: `cert_ok` is set only inside the branch that writes `ran: true`, and
     /// the structural recommender rejects an uncertified row. So the ran-guard above can

@@ -534,6 +534,8 @@ public struct LatticeSDFScene {
     /// ★ Faces the emission could not turn into a region (no usable B-rep
     /// geometry). Non-zero means the preview draws LESS than the user marked.
     public let skippedFaces: Int
+    /// ★ RULING (g): face regions (by name) the emission could not use — a cut sector.
+    public let skippedRegionNames: [String]
 
     /// ★ `regions` CLIPS THE PREVIEW TO WHAT IS ACTUALLY SET TO LATTICE
     /// (maintainer, 2026-08-17: "Can you confirm that the preview will only show
@@ -659,6 +661,7 @@ public struct LatticeSDFScene {
                 // 0 ⇒ no skin, which is `none`/`rim` and every pre-existing call.
                 skinMM: Double = 0,
                 skippedFaces: Int = 0,
+                skippedRegionNames: [String] = [],
                 // ★ one cell, in mm — the slab's floor (see `LatticeWallThickness`)
                 wallThicknessFloorMM: Double = 0,
                 // ★ per wall (selectable key), the depths its cells can be packed to (D1)
@@ -740,6 +743,7 @@ public struct LatticeSDFScene {
         for v in solid.values where v > 0.5 { solidInside += 1 }
         self.partInteriorVoxelCount = solidInside
         self.skippedFaces = skippedFaces
+        self.skippedRegionNames = skippedRegionNames
         self.skinMM = skinMM
         self.solidOccupancy = solid
         self.organicSolidRimMM = (algorithm == "organic" && (organic?.solidRimMM ?? 0) > 0) ? organic!.solidRimMM : 0
@@ -2322,6 +2326,9 @@ extension LatticeSDFScene {
 
 extension LatticeSDFScene: LatticeSDFPreviewSummary {
     public var previewLabel: String { preview.previewLabel }
+
+    /// ★ ruling (g): whether an include region was emitted — the list the clip used.
+    public var hasIncludeRegion: Bool { regions.contains { $0.role == .include } }
 
     /// ★ WHAT THE BANNER SAYS THE RUN WILL BUILD. Empty when the job states nothing,
     /// because then the job IS doubled and there is nothing to caveat.

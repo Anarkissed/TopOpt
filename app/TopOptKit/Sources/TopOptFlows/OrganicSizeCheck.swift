@@ -5,8 +5,10 @@ import Foundation
 /// complete, never per keystroke. What the app can judge locally: the printable
 /// floor at this bead, and whether one cell fits the thinnest declared wall. What
 /// only the probe can judge (rooting, families, the stress bar): read from the
-/// probe when it has that exact candidate; otherwise "likely" stays a guess and
-/// the copy says so. `cells_across` is ADVICE, never a gate (core's brief).
+/// probe when it has that exact candidate — the stress bar only where its
+/// prediction RAN; a candidate whose prediction did not run is "Not checked", never
+/// a certification verdict (ruling 3, 2026-09-29). Without a candidate "likely"
+/// stays unknown and the copy says so. `cells_across` is ADVICE, never a gate.
 public enum OrganicSizeCheck {
 
     public struct Wall: Equatable, Sendable {
@@ -18,13 +20,21 @@ public enum OrganicSizeCheck {
     public struct Verdict: Equatable, Sendable {
         /// Aesthetic: may it be used at all (the printable floor, one cell fits)?
         public let allowed: Bool
-        /// Structural: is it LIKELY to certify? nil when nothing can say (no probe).
+        /// Structural: is it LIKELY to certify? Only a prediction that RAN answers; nil
+        /// when nothing can say — no probe, a size the probe never traced, or a candidate
+        /// whose prediction did not run (`notChecked`).
         public let likely: Bool?
         /// Why, in short lines — shown under the field (Aesthetic) or in the alert
         /// (Structural). Empty when nothing is wrong.
         public let reasons: [String]
         /// Advice that never gates (cells across).
         public let advice: [String]
+        /// ★ NOT CHECKED (ruling 3, 2026-09-29): the probe has this exact candidate but its
+        /// prediction did not run (`predicted` absent or `ran == false`) — core's reason
+        /// verbatim, "" when the file gives none; nil when it ran or no candidate matched.
+        /// Core writes approved_structural false there because `cert_ok` is set only where
+        /// the certificate ran (run_job.cpp), so that false is not a verdict.
+        public var notChecked: String? = nil
         public var text: String { reasons.joined(separator: "\n") }
     }
 
@@ -95,27 +105,30 @@ public enum OrganicSizeCheck {
                                      across, w.depthMM))
             }
         }
-        // The probe's own verdict for this exact candidate, when it has one.
+        // The probe's own verdict for this exact candidate, when it has one — and the
+        // stress bar only when its prediction RAN (ruling 3).
         var likely: Bool? = nil
-        if let probe {
-            if let c = probe.candidates.first(where: {
-                abs($0.cellMinMM - lo) < 1e-6 && abs($0.cellMaxMM - hi) < 1e-6 }) {
+        var notChecked: String? = nil
+        let matched = probe?.candidates.first(where: {
+            abs($0.cellMinMM - lo) < 1e-6 && abs($0.cellMaxMM - hi) < 1e-6 })
+        if let c = matched {
+            if !c.approvedAesthetic { reasons.append(contentsOf: c.refusals) }
+            else if !c.approvedStructural { reasons.append(contentsOf: c.refusals) }
+            if let p = c.predicted, p.ran {
                 likely = c.approvedStructural
-                if !c.approvedAesthetic { reasons.append(contentsOf: c.refusals) }
-                else if !c.approvedStructural { reasons.append(contentsOf: c.refusals) }
-                if let p = c.predicted, p.ran {
-                    advice.append(String(format: "Predicted margin %.2f.", p.margin))
-                }
+                advice.append(String(format: "Predicted margin %.2f.", p.margin))
+            } else {
+                // core's reason verbatim — except the cap line core writes for a SKIPPED
+                // certificate (N within the cap), where the true cause is said (ruling V3)
+                notChecked = c.predicted == nil ? "" : (c.notCheckedReason(probedIntent: probe?.probedIntent) ?? "")
             }
         }
-        let allowed = reasons.isEmpty || (likely != nil && probeAllowsAesthetic(probe, lo, hi))
-        return Verdict(allowed: allowed && !hardRefused(reasons), likely: reasons.isEmpty ? likely : (likely ?? false),
-                       reasons: reasons, advice: advice)
-    }
-
-    private static func probeAllowsAesthetic(_ probe: OrganicForecast?, _ lo: Double, _ hi: Double) -> Bool {
-        probe?.candidates.first(where: { abs($0.cellMinMM - lo) < 1e-6 && abs($0.cellMaxMM - hi) < 1e-6 })?
-            .approvedAesthetic ?? true
+        // (`likely != nil` used to stand in for "a candidate matched" here — the same
+        // rule, stated.)
+        let allowed = reasons.isEmpty || (matched?.approvedAesthetic ?? false)
+        return Verdict(allowed: allowed && !hardRefused(reasons),
+                       likely: (reasons.isEmpty || notChecked != nil) ? likely : (likely ?? false),
+                       reasons: reasons, advice: advice, notChecked: notChecked)
     }
 
     /// The two local rules are hard refusals everywhere: below the printable cell,
@@ -124,10 +137,22 @@ public enum OrganicSizeCheck {
         reasons.contains { $0.contains("smallest cell") || $0.contains("solve grid") || $0.contains("thinnest wall") }
     }
 
+    /// ★ "Not checked" where the candidate's prediction did not run (ruling 3, 2026-09-29);
+    /// "may not certify" only on a verdict that was computed.
+    public static let notCheckedTitle = "Not checked"
+    public static func structuralTitle(label: String, verdict: Verdict) -> String {
+        verdict.notChecked != nil ? "\(label): \(notCheckedTitle)" : "\(label) may not certify"
+    }
+
     /// The Structural pop-up's words (his item 2: "it will confirm when the actual
     /// lattice is calculated but that it may not fit", said better).
     public static func structuralNotice(label: String, verdict: Verdict) -> String {
-        var text = "\(label) is not expected to pass certification."
+        var text: String
+        if let why = verdict.notChecked {
+            text = "\(notCheckedTitle): the prediction did not run for \(label)" + (why.isEmpty ? "." : " (\(why)).")
+        } else {
+            text = "\(label) is not expected to pass certification."
+        }
         if !verdict.reasons.isEmpty { text += "\n" + verdict.text }
         return text + "\nThe final check happens when the lattice is built. You can keep this size; "
             + "the run's certificate decides."

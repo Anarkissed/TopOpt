@@ -230,6 +230,114 @@ final class OrganicSyntheticStressTests: XCTestCase {
         XCTAssertFalse(em.contains("syntheticWalls"), "no measurement gates the job any more")
     }
 
+    /// A project with an include group and an exclude group, each holding one placed bolt,
+    /// plus a legacy include primitive — organic, Aesthetic, simulation on, synthesis on.
+    @MainActor private func variantProject() -> (ProjectModel, inc: UUID, exc: UUID) {
+        let p = ProjectModel(id: UUID(), name: "P", material: "PLA", process: .fdm,
+                             importedFile: nil, importedMesh: nil)
+        var sel = SelectionModel(); let gi = sel.addGroup(); let ge = sel.addGroup(); p.selection = sel
+        let inc = p.force.addManualPrimitive(.defaultBolt(at: SIMD3(0, 0, 5), radiusMM: 3, halfLengthMM: 5), to: gi)
+        let exc = p.force.addManualPrimitive(.defaultBolt(at: SIMD3(20, 0, 5), radiusMM: 3, halfLengthMM: 5), to: ge)
+        // declared groups: the variant's job is the stage's, which lattices only an eligible
+        // group (the face-prism route, 2026-09-29)
+        p.force.sync(groups: p.selection.groups)
+        p.force.setProtected(gi, true); p.force.setProtected(ge, true)
+        p.lattice.includePrimitives = [.defaultBolt(at: SIMD3(40, 0, 5), radiusMM: 3, halfLengthMM: 5)]
+        p.lattice.enabled = true
+        p.lattice.groupRoles = [gi: .include, ge: .exclude]
+        p.lattice.algorithm = "organic"
+        p.lattice.stageMode = .aesthetic
+        p.lattice.simulateStresses = true
+        p.lattice.organicSyntheticStresses = true
+        return (p, inc, exc)
+    }
+
+    /// ★★ RULING 1 (2026-09-29): the RE-LATTICE job — Check sizes, the forecast and the
+    /// re-lattice run all read `variantLatticeJobRegions()` — flags every include wall
+    /// exactly as the main job does, with the wall's own count or the default; an
+    /// exclude wall never.
+    @MainActor func testTheReLatticeJobFlagsEveryIncludeWall() throws {
+        let (p, inc, _) = variantProject()
+        p.writeLatticeSyntheticFoci(.primitive(inc), foci: 2)
+        let regions = p.variantLatticeJobRegions().regions
+        let includes = regions.filter { $0.role == .include }, excludes = regions.filter { $0.role == .exclude }
+        XCTAssertEqual(includes.count, 2, "the placed bolt and the legacy include")
+        XCTAssertEqual(excludes.count, 1)
+        XCTAssertTrue(includes.allSatisfy(\.syntheticStress), "★ every include wall is flagged")
+        XCTAssertEqual(includes.compactMap(\.syntheticFoci).sorted(), [2, 4], "its own count, else the default")
+        XCTAssertFalse(excludes[0].syntheticStress, "★ never an exclude wall")
+        XCTAssertNil(excludes[0].syntheticFoci)
+        if TopOptKit.organicSyntheticStressWired {
+            XCTAssertTrue(includes.allSatisfy { $0.wireDictionary["synthetic_stress"] as? Bool == true })
+            XCTAssertNil(excludes[0].wireDictionary["synthetic_stress"])
+        }
+        // the gates: nothing flagged under Structural, synthesis off, octet, simulation off
+        for (label, change) in [("Structural", { (l: inout LatticeSettings) in l.stageMode = .structural }),
+                                ("synthesis off", { (l: inout LatticeSettings) in l.organicSyntheticStresses = false }),
+                                ("octet", { (l: inout LatticeSettings) in l.algorithm = "octet" }),
+                                ("simulation off", { (l: inout LatticeSettings) in l.setSimulateStresses(false) })] {
+            let (q, _, _) = variantProject()
+            change(&q.lattice)
+            XCTAssertFalse(q.variantLatticeJobRegions().regions.contains(where: \.syntheticStress), label)
+        }
+        // one builder for all three documents, and the variant path carries the flags
+        var root = URL(fileURLWithPath: #filePath); for _ in 0..<3 { root.deleteLastPathComponent() }
+        func src(_ f: String) throws -> String {
+            try String(contentsOf: root.appendingPathComponent("Sources/TopOptFlows/\(f)"), encoding: .utf8)
+        }
+        let pm = try src("ProjectModel.swift"), ws = try src("WorkspacePlaceholder.swift"), em = try src("LatticeRegionEmission.swift")
+        // the variant's job IS the stage's emission (the face-prism route, 2026-09-29)
+        XCTAssertTrue(pm.contains("public func variantLatticeJobRegions() -> LatticeRegionEmission.Result {\n        latticeJobRegions()\n    }"))
+        XCTAssertTrue(pm.contains("synthetic: latticeSyntheticFlags(),"), "which passes the flags")
+        XCTAssertEqual(p.variantLatticeJobRegions().regions, p.latticeJobRegions().regions)
+        XCTAssertTrue(ws.contains("let emission = project.variantLatticeJobRegions()"), "relatticeJobJSON builds from it")
+        XCTAssertGreaterThanOrEqual(ws.components(separatedBy: "relatticeJobJSON(").count - 1, 4,
+                                    "the definition plus the forecast, the Check-sizes probe and the run")
+        XCTAssertEqual(em.components(separatedBy: "if role == .include, let sf = synthetic { s.syntheticStress = true; s.syntheticFoci = sf.foci(for: ref.key) }").count - 1, 3,
+                       "a primitive, a face, a face region's member face")
+        XCTAssertTrue(em.contains("if let sf = synthetic { s.syntheticStress = true; s.syntheticFoci = sf.foci(for: nil) }"), "a legacy include")
+    }
+
+    /// ★★ RULING 2 (2026-09-29): "A hidden setting must not act." The synthesis toggle is
+    /// offered only with the simulation on, so it acts only then. A saved "on" with the
+    /// simulation off flags nothing — main job, re-lattice job, preview, Selections row —
+    /// and stays saved for when the switch comes back.
+    @MainActor func testASavedOnWithTheSimulationOffFlagsNothing() throws {
+        let (p, _, _) = variantProject()
+        // control: switch on ⇒ it acts
+        XCTAssertTrue(p.lattice.organicSyntheticStressesActive)
+        XCTAssertNotNil(p.latticeSyntheticFlags())
+        XCTAssertTrue(p.variantLatticeJobRegions().regions.contains(where: \.syntheticStress))
+        XCTAssertTrue(p.latticeJobRegions().regions.contains(where: \.syntheticStress))
+        // the real switch, off
+        p.lattice.setSimulateStresses(false)
+        XCTAssertTrue(p.lattice.organicSyntheticStresses, "★ the saved on stays saved")
+        XCTAssertFalse(p.lattice.organicSyntheticStressesActive)
+        XCTAssertNil(p.latticeSyntheticFlags(), "★ …and flags nothing")
+        XCTAssertFalse(p.variantLatticeJobRegions().regions.contains(where: \.syntheticStress))
+        XCTAssertFalse(p.latticeJobRegions().regions.contains(where: \.syntheticStress))
+        XCTAssertFalse(p.latticeJobRegions().regions.contains { $0.wireDictionary["synthetic_stress"] != nil })
+        // …and a project saved that way reads the same
+        let back = try JSONDecoder().decode(LatticeSettings.self, from: try JSONEncoder().encode(p.lattice))
+        XCTAssertTrue(back.organicSyntheticStresses); XCTAssertFalse(back.simulateStresses)
+        XCTAssertFalse(back.organicSyntheticStressesActive)
+        // the switch back on brings it back
+        p.lattice.setSimulateStresses(true)
+        XCTAssertNotNil(p.latticeSyntheticFlags())
+        // every reader goes through the one gate
+        var root = URL(fileURLWithPath: #filePath); for _ in 0..<3 { root.deleteLastPathComponent() }
+        func src(_ f: String) throws -> String {
+            try String(contentsOf: root.appendingPathComponent("Sources/TopOptFlows/\(f)"), encoding: .utf8)
+        }
+        let ws = try src("WorkspacePlaceholder.swift"), pm = try src("ProjectModel.swift")
+        XCTAssertTrue(ws.contains("let synthOn = project.lattice.organicSyntheticStressesActive && organicForBake != nil"),
+                      "the preview's synthesis")
+        XCTAssertTrue(ws.contains("guard lat.organicSyntheticStressesActive else { return nil }"), "the Selections row")
+        XCTAssertTrue(pm.contains("guard lattice.organicSyntheticStressesActive else { return nil }"), "the job")
+        XCTAssertFalse(ws.contains("lattice.organicSyntheticStresses\n") || ws.contains("lat.organicSyntheticStresses,"),
+                       "no raw read of the toggle acts")
+    }
+
     /// Core's per-region keys travel only when the linked core's schema accepts them.
     func testJobKeysArePerRegionAndProbeGated() throws {
         var s = LatticeSpec(topologyID: "octet", cellMM: 6, strutRadiusMM: 0.6,

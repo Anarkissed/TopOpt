@@ -344,9 +344,14 @@ final class StrutLineWidthTests: XCTestCase {
         // half a voxel) to decide "on the beam ⇒ Rim & skin". Audited: it is
         // `strutLineWidthMM`, and it MUST be — the bake sizes that beam from the same
         // strut bead, and the tap must agree with what was drawn. Never a wall bead.
-        XCTAssertEqual(strutSites, 14,
-                       "the fourteen audited lattice sites (AppModel 2, LatticePage 2, "
-                       + "WorkspacePlaceholder 6, ProjectModel 2, LatticeSetupWizard 2). "
+        // ★ RE-PINNED 14 -> 12 (2026-09-30, ruling b): the stage's spec recipe moved from
+        // AppModel (2 sites) into ONE builder, `ProjectModel.latticeRunSpec` (2 sites), which
+        // the variant's re-lattice job and its receipt echo now call instead of building
+        // their own (WorkspacePlaceholder −2). Audited: both new sites read
+        // `printParams.strutLineWidthMM`, the STRUT bead. Four sites became two.
+        XCTAssertEqual(strutSites, 12,
+                       "the twelve audited lattice sites (AppModel 0, LatticePage 2, "
+                       + "WorkspacePlaceholder 4, ProjectModel 4, LatticeSetupWizard 2). "
                        + "If this number moved, audit the new site and update the count.")
         XCTAssertTrue(offenders.isEmpty,
                       "lattice lineWidthMM site(s) reading a WALL bead:\n"

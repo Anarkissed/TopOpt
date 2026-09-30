@@ -725,7 +725,7 @@ public final class ProjectModel: ObservableObject {
     /// ★ THE ORGANIC FLOOR for this part: the probe's when it has run, else
     /// max(1.535 × bead, one voxel) computed here.
     public var organicFloor: OrganicSizeCheck.Floor {
-        if let rec = lattice.organicForecast?.recommendation, rec.ran {
+        if let rec = lattice.currentOrganicForecast?.recommendation, rec.ran {
             return OrganicSizeCheck.floor(from: rec)
         }
         return OrganicSizeCheck.floor(beadMM: printParams.strutLineWidthMM, voxelMM: solveVoxelMM)
@@ -765,11 +765,11 @@ public final class ProjectModel: ObservableObject {
     /// count, else the lattice default (4, which is also core's own default for a flagged
     /// wall with no count: `synthetic_foci = 4`, placed by core). No measurement is read,
     /// so an unmeasured wall is asked about too. nil ⇒ nothing flagged.
+    /// ★ AND ONLY WITH THE SIMULATION ON (ruling 2, 2026-09-29): a saved "on" with the
+    /// simulation off flags nothing (`organicSyntheticStressesActive`).
     public func latticeSyntheticFlags() -> OrganicSyntheticStress.SyntheticFlags? {
-        let lat = lattice
-        guard lat.isOrganic, lat.organicSyntheticStresses,
-              (lat.stageMode ?? .structural) == .aesthetic else { return nil }
-        return .init(defaultFoci: lat.organicSyntheticFoci, stated: lat.selectableSyntheticFoci)
+        guard lattice.organicSyntheticStressesActive else { return nil }
+        return .init(defaultFoci: lattice.organicSyntheticFoci, stated: lattice.selectableSyntheticFoci)
     }
 
     /// Core's per-wall verdicts from the bake (true = core synthesised the wall),
@@ -2268,30 +2268,71 @@ public final class ProjectModel: ObservableObject {
     /// emission the stale page copy said was impossible — PR 256's schema). Role
     /// groups' manual primitives + faces, plus the legacy include primitives.
     /// Slab depths resolve through the SAME metric chain the chips/volumes read.
-    /// The `lattice.regions` entries for a job that lattices a FINISHED VARIANT
-    /// (task 2026-08-02-lattice-a-variant, bar Z11).
+    /// The `lattice.regions` entries for a job that lattices a FINISHED VARIANT (task
+    /// 2026-08-02-lattice-a-variant, bar Z11; the face-prism route, 2026-09-29; ruling a,
+    /// 2026-09-30).
     ///
-    /// ONLY explicit geometry predicates. A variant is a marching-cubes
-    /// iso-surface with no segmentation, so a face selection carried over from
-    /// the setup page describes the ORIGINAL part's surface — geometry this
-    /// design no longer has. Synthesising a region from it would place a keep-out
-    /// or an include the user has never seen against the geometry it will
-    /// actually affect: PR 261's resolve-against-the-wrong-geometry failure. Such
-    /// faces are COUNTED (`skippedFaces`) so the page can say so, never emitted.
+    /// ★★ THE STAGE'S WALLS, AS THE STAGE SENDS THEM. Every face wall is a prism — origin and
+    /// inward normal on the ORIGINAL face plane, extents, outline, frame, depth — which core
+    /// resolves analytically (clearance.cpp's slab test). A variant job imports the original
+    /// part too (core requires the design on its exact grid), so the variant's regions are the
+    /// stage's, wall for wall — per-selectable roles, depths, densities and synthetic flags
+    /// included — each with its `face_id` as provenance (maintainer, 2026-09-30: real on the
+    /// original part, it changes no geometry, and it keeps core's depth tie against the run's
+    /// `loads.face_protections`, its messages and receipt echoes). Tapping faces ON the
+    /// variant stays refused: its mesh has none.
     public func variantLatticeJobRegions() -> LatticeRegionEmission.Result {
-        guard lattice.enabled else { return .init(regions: [], skippedFaces: 0) }
-        return LatticeRegionEmission.variantRegions(
-            groups: selection.groups,
-            roles: lattice.groupRoles,
-            primitives: resolvedLatticePrimitives,
-            includePrimitives: lattice.includePrimitives.map {
-                ($0, $0.resolvedDepthMM) },
-            groupDensities: lattice.groupDensities)
+        latticeJobRegions()
+    }
+
+    /// ★★ THE ONE LATTICE SPEC (maintainer, 2026-09-30, ruling b): what the stage's Optimize /
+    /// Lattice request carries (`AppModel.makeRunRequest`) and what a variant's re-lattice
+    /// carries (`relatticeJobJSON` — its run, forecast and Check sizes — and the run's receipt
+    /// echo). Moved VERBATIM from `AppModel.makeRunRequest` (aecef72c), so the stage's spec —
+    /// and its job bytes — are unchanged; the variant now gets Auto resolved as the stage does.
+    ///
+    /// ★ AUTO, RESOLVED (task 2026-08-12 §4). "Auto" is not a job field: it becomes core's
+    /// per-region `fit` when regions are declared and `swept` otherwise, and it never emits a
+    /// combination core refuses. Auto's swept window is DERIVED, so the posture needs the two
+    /// things it is derived from: what each declared region has to fit into (its DECLARED
+    /// depth — never the preview's measured width, or the stage's bytes would move), and the
+    /// bead. `emission` is the caller's own, so a count the caller states describes these
+    /// regions. No policy here: a variant's zero-include refusal (ruling c) is its caller's.
+    public func latticeRunSpec(emission: LatticeRegionEmission.Result) -> LatticeSpec? {
+        let includes = emission.regions.filter { $0.role == .include }
+        let resolvedLattice = LatticeAutoPosture.applied(
+            to: lattice,
+            includeRegionCount: includes.count,
+            regionWidthsMM: includes.map { $0.depthMM },
+            lineWidthMM: printParams.strutLineWidthMM)
+        var spec = resolvedLattice.runSpec(
+            topology: lattice.topologyID,
+            memberMM: lattice.regionMemberMM ?? 0,
+            lineWidthMM: printParams.strutLineWidthMM,
+            // Round-2 (M3): the include/exclude regions — role groups' primitives + faces and
+            // the legacy include primitives — ride `lattice.regions`.
+            regions: emission.regions,
+            // ★ THE OBJECTIVE SHAPES "AUTO" (maintainer, 2026-08-19); see
+            // `LatticeSettings.resolvedCellPlan`.
+            minimizePlastic: minimizePlastic,
+            // ★ growth's precondition (§2A): organic_growth is written only with a layer height
+            layerHeightMM: printParams.layerHeightMM)
+        // ★ The preview's placed cells ride with a Stepped run (2026-09-18).
+        spec?.steppedCells = latticePreviewSteppedCells
+        return spec
+    }
+
+    /// ★ RULING (c) (maintainer, 2026-09-30): why a variant's job may not be written, in the
+    /// stage's words — nil when it may. Read from the SAME emission the job carries; with no
+    /// include wall core would lattice the WHOLE variant.
+    public func variantLatticeJobRefusal() -> String? {
+        LatticeJobIncludeGate.refusal(latticeEnabled: lattice.enabled,
+                                      regions: variantLatticeJobRegions().regions)
     }
 
     /// A role group's manual primitives with their slab depths resolved through
     /// the SAME metric chain the chips and the rendered volumes read — so run,
-    /// picture and chips agree. Shared by the whole-part and variant emissions.
+    /// picture and chips agree.
     private var resolvedLatticePrimitives: (UUID) -> [(prim: ManualPrimitive, depthMM: Double)] {
         { gid in
             self.force.manualPrimitives(for: gid).map { mp in
@@ -2353,6 +2394,9 @@ public final class ProjectModel: ObservableObject {
             selectableExpandMM: lattice.selectableExpandMM,
             synthetic: latticeSyntheticFlags(),
             regionMembers: { [weak self] _, rid in self?.latticeRegionMembers(rid) },
+            // ★ ruling (g): a region the run cannot consume is counted and NAMED
+            droppedRegionName: { [weak self] gid, rid, role, groupRole in
+                self?.latticeDroppedRegionName(group: gid, rid, role: role, groupRole: groupRole) },
             facets: { [weak self] f in
                 guard let mesh = self?.viewerMesh else { return [] }
                 return LatticeFaceFacets.facets(face: f, in: mesh)
@@ -2369,6 +2413,37 @@ public final class ProjectModel: ObservableObject {
               r.cuts.isEmpty, r.parts.isEmpty else { return nil }
         let members = FaceRegionGeometry.members(of: r, in: mesh)
         return members.isEmpty ? nil : members
+    }
+
+    /// The name a face region goes by — on the Selections row AND in the left-out notice.
+    public func latticeRegionName(_ rid: RegionID) -> String {
+        faceRegions.region(rid)?.name ?? "Region \(rid)"
+    }
+
+    /// ★ RULING (g) (maintainer, 2026-09-30): the name a face region the run cannot consume is
+    /// reported under, or nil when it is not a wall to report:
+    /// - it is gone from the model (a stale id the user cannot find), or
+    /// - its surface is emitted, WITH THE CHILD'S OWN ROLE, through an ANCESTOR that sits in the
+    ///   same group (a whole-face parent folded over its cut children — `latticeRegionRefs`).
+    ///   An Off ancestor emits nothing, and one with another role drops the child's own choice,
+    ///   so either way the child is named.
+    public func latticeDroppedRegionName(group gid: UUID, _ rid: RegionID,
+                                         role: LatticeGroupRole, groupRole: LatticeGroupRole) -> String? {
+        guard let r = faceRegions.region(rid) else { return nil }
+        if let g = selection.groups.first(where: { $0.id == gid }) {
+            var seen: Set<RegionID> = [rid]
+            var up = r.parentID
+            while let a = faceRegions.region(up), !seen.contains(a.id) {
+                seen.insert(a.id)
+                if g.regionIDs.contains(a.id), latticeRegionMembers(a.id) != nil,
+                   LatticeSelectableRoles.role(for: .region(group: gid, region: a.id), groupRole: groupRole,
+                                               overrides: lattice.selectableRoles) == role {
+                    return nil   // the ancestor emits this surface with the child's own role
+                }
+                up = a.parentID
+            }
+        }
+        return r.name
     }
     /// Whether this selectable's lattice choice reaches the run: faces and primitives
     /// always; a region when it is a union of whole faces (see `latticeRegionMembers`).

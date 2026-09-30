@@ -250,10 +250,11 @@ public struct LatticeRegionSpec: Equatable, Sendable {
     /// exactly the one-sided edit RelatticeRunner's own header says it collapsed
     /// the grading dictionary to prevent. So both now call this.
     ///
-    /// The `face_id` divergence is closed as a side effect and is provably inert:
-    /// the re-lattice path's regions come from `variantRegions`, which emits only
-    /// from manual primitives and never sets `faceID`, so the key was nil there
-    /// and stays absent. Its bytes do not move.
+    /// The re-lattice job (`RelatticeJobBuilder`) sends this dictionary UNCHANGED, `face_id`
+    /// included (maintainer, 2026-09-30, ruling a): a variant's job carries each face wall as
+    /// the stage's full prism with its face id as provenance — core's variant path imports the
+    /// ORIGINAL part, where the id is real — so core's depth tie checks it against the
+    /// protection the optimize run froze.
     /// The job's region, with the face frame axes only when the linked core takes them.
     public var wireDictionary: [String: Any] { wireDictionary(frameAxes: TopOptKit.regionFrameAxesWired) }
 
@@ -1347,6 +1348,20 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
     /// ★ THE ORGANIC CELL-SIZE PROBE'S LAST ANSWER (contract 2026-09-05), stored so
     /// the wizard's Manual list can offer it; nil until core writes the block.
     public var organicForecast: OrganicForecast? = nil
+    /// ★ RULING (d) (maintainer, 2026-09-30): THE ONLY READER of the stored Check-sizes answer.
+    /// One measured on an older job route (every answer stored before `OrganicForecast.jobRoute`)
+    /// is kept on disk but never used: no candidates, no recommendation, no floor, no preview
+    /// window, no Manual seed. Only the codec, `previewBakeInputs`, these two and the
+    /// Check-sizes write touch `organicForecast` directly (pinned by a test).
+    public var currentOrganicForecast: OrganicForecast? {
+        guard let f = organicForecast, f.isCurrent else { return nil }
+        return f
+    }
+    /// A stored answer exists but was measured on an older route — the wizard says sizes need
+    /// re-checking.
+    public var organicSizesNeedRecheck: Bool {
+        organicForecast.map { !$0.isCurrent } ?? false
+    }
     /// The window presets "Check sizes" probes (the contract's example set); the
     /// user's current pick is added to them. Sent only for organic, only when the
     /// linked core's schema accepts the keys.
@@ -1588,7 +1603,9 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         // core's FEA-derived window, not the app's. Forcing Fit here (2026-09-03,
         // item 3) made the sample show a one-separation lattice the run never
         // builds. What the switch still governs for organic is the DENSITY preview
-        // (`.sim` ⇒ `.uniform` above).
+        // (`.sim` ⇒ `.uniform` above) — and SYNTHETIC STRESSES (ruling 2, 2026-09-29):
+        // the toggle is left as saved but is inert until the switch comes back
+        // (`organicSyntheticStressesActive`).
     }
 
     /// ★ WHETHER A SOLVE IS ACTUALLY NEEDED — the permission AND at least one
@@ -1599,6 +1616,16 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         // trace without the stage's tensor, whatever the density mode says.
         simulateStresses
             && (densityMode.needsSimulation || cellSizeMode == .swept || isOrganic)
+    }
+    /// ★★ SYNTHETIC STRESSES IN FORCE (maintainer, 2026-09-29, ruling 2: "A hidden setting
+    /// must not act"). The toggle is offered only with the simulation on (the wizard's
+    /// Unloaded walls row), so it acts only then: organic, Aesthetic, the simulation on AND
+    /// the toggle on. A saved "on" with the simulation off is KEPT (`setSimulateStresses`
+    /// never clears it) and flags nothing — not in the job, not in the re-lattice job, not
+    /// in the preview, not in the Selections row.
+    public var organicSyntheticStressesActive: Bool {
+        isOrganic && simulateStresses && organicSyntheticStresses
+            && (stageMode ?? .structural) == .aesthetic
     }
     /// Faces painted "Material, latticed" (lattice-include). Preview-scope legacy
     /// store (the unified library's group roles are the carrier now). The EXCLUDE

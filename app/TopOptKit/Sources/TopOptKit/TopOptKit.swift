@@ -884,6 +884,17 @@ public struct LatticeReport: Equatable, Sendable {
     /// This is the file that answers "which of my seven regions got what", which no
     /// artifact could answer after the maintainer's overnight run.
     public let regionCellsJSON: Data?
+    /// ★ ruling V1 (2026-09-29; the face-prism route, same day): how many marked faces a
+    /// VARIANT's re-lattice job left out because they have no shape to lattice — the ones the
+    /// stage's job leaves out too — so the result says so; 0 everywhere else. (A new key: the
+    /// count V1 stored meant "every face wall", which the job now carries.)
+    public let variantFacesWithoutShape: Int
+    /// ★ ruling (g) (2026-09-30): face regions (by name) a variant's re-lattice left out — a
+    /// region the run cannot consume, a cut sector; [] everywhere else.
+    public let variantRegionsWithoutShape: [String]
+    /// A result made by the V1 build (2026-09-29, placed shapes only): how many face walls ITS
+    /// job left out. Read from V1's stored key only; never written by a new run.
+    public let variantLegacyFaceWallsLeftOut: Int
 
     public struct StrutStrength: Equatable, Sendable {
         public let marginInPlane: Double
@@ -944,8 +955,14 @@ public struct LatticeReport: Equatable, Sendable {
                 regionScoped: Bool, emittedRegions: Int = 0,
                 generated: Generated? = nil,
                 strut: StrutStrength? = nil,
-                regionCellsJSON: Data? = nil) {
+                regionCellsJSON: Data? = nil,
+                variantFacesWithoutShape: Int = 0,
+                variantRegionsWithoutShape: [String] = [],
+                variantLegacyFaceWallsLeftOut: Int = 0) {
         self.regionCellsJSON = regionCellsJSON
+        self.variantFacesWithoutShape = variantFacesWithoutShape
+        self.variantRegionsWithoutShape = variantRegionsWithoutShape
+        self.variantLegacyFaceWallsLeftOut = variantLegacyFaceWallsLeftOut
         self.topologyID = topologyID
         self.cellMM = cellMM
         self.generateRelativeDensity = generateRelativeDensity
