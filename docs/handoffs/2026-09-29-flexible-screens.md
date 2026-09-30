@@ -1,6 +1,206 @@
 # Handoff — 2026-09-29-flexible-screens (TRACK app, A1): the Flexible screens
 
-## Round 4 · batch D1 — the Settings page (read this first)
+## Round 4 · batch D1 — verification pass (read this first)
+
+A verifier read batch D1 against your rules on YOUR project 0004. It rendered the page headlessly,
+hosted it in an offscreen window and clicked it; the app was not launched. I confirmed each
+finding myself on the code and on your restored project, and none turned out wrong. Every blocker
+and major, and the cheap minors, now has a test that is RED on the code D1 left: an inline
+control on the old rule, plus the mutation runs below. The one blocker, every major and those
+minors are fixed; the rest are listed under "Not done".
+
+**What changes for you on the Settings page:**
+- **Tap a face in the list and its rows open right there** (the blocker). D1 put the face's rows
+  under the whole list. On your project the list alone is 392 pt, so on every iPad the rows sat
+  off the panel, and a tap seemed to move only the tick. On 11" landscape none of them showed.
+  - The tapped row now opens in place as a card, filled and outlined in blue. Its first line is
+    the row itself with [Pressed | Rests] on it, so the list's "· Pressed · 10 kg" is not said
+    twice. Under it, inside the card: the weight, Shape (and the stamp's rows), and the depth.
+  - The panel scrolls the card into view when you tap a row, tap the part, or use the fix
+    pop-up, and when the card grows (Stamp's rows, a warning line). It moves only as far as the
+    card's last row needs, so a card already on the panel stays put.
+  - The panel may now grow up to the top chrome (the Exit row, the top line, the fix pop-up while
+    it is up). The old cap was 62 % of the page, and your Stamp card (446 pt) could not fit on
+    11" landscape. It still hugs its rows, so a short panel stays short.
+  - Measured hosted on your project, the page's own frames, at 11" and 13" in both orientations.
+    Each step is as opened, then a tap on top A, Stamp on top A, face 5, and face 4 (the last
+    row). The card was on the panel every time (table in Tests).
+- **The curves never draw under the panel, the legend or the player**, and can't be touched
+  there (img 6's class, now for the curves as well). D1 fixed this for the stamp only; a curve
+  point still sat on the filament row's "squish data" text. A point under the chrome is hidden,
+  as the depth chip is, until you turn the part. (Rendered: 1,976 px of curve under a panel
+  before, 0 now.)
+- **A Stamp face's pit is a smooth bowl, and its prism a smooth outline.** D1 drew the thumb's pit
+  as a row of teeth and the purple prism with a sawtooth crown. The stamp's footprint was a 0/1
+  step one column wide, so along its staircase edge the dent's corners alternated between ¼ and
+  ¾ of a 12 mm (3 mm × 4) cliff.
+  - The footprint is now smoothed on the column grid (≈ 1.4 column pitches), and the deepest
+    squish is still reached under the stamp.
+  - On your top A, corners at one distance from the stamp's edge now differ by 0.13 of the
+    deepest squish, where D1's differed by 0.33.
+  - The prism stands on the smoothed footprint's half-depth outline. 7 % of its outline edges run
+    along the grid, where D1's staircase had 100 %.
+- **The stamp's handle keeps clear of the depth chip.** Seen from above they sat 3.6 pt apart,
+  and the handle took the chip's drag. The handle now stays at least 56 pt from the chip, with a
+  thin line to the stamp's centre. Its drag is relative, so where it sits doesn't move the stamp.
+- **Finish** has a picture and one line under its chips: a small square of the part's outside
+  (None: lattice to the edge · Rim: a solid band · Skin: solid with holes · Covered: solid). It
+  redraws the moment you tap. Under Rim or Skin the line says **"Rim: preview only · prints as
+  None for now"**; that used to be said only behind the (i). (Beside the chips, the picture cut
+  "Finish" to "Fin…".)
+- **Stamp says what the main page shows.** Under the stamp's rows: "Main page: whole face sinks,
+  for now". On the main page, the dent legend reads "Squish · stamp: whole face" while a Stamp
+  face's squish is shown there (core brief #10: core sinks the whole face today).
+- **Smaller fixes:**
+  - A lattice that lands while Settings is open no longer turns the map into "What can be built
+    (estimate)" or jumps your tab to Face. The map stays "What you drew" (D-R4-6), which nothing
+    reset before.
+  - Choosing Stamp before the face's stack has landed no longer drops an 80 × 95 mm palm on the
+    pad's corner. The stamp is seeded when the stack lands: centred, fitting, square or turned a
+    quarter (your pad: Thumb pad 20 × 26 mm at 50, 50).
+  - Tapping the Shape chip that is already chosen changes nothing. It used to stale the main
+    page's lattice and re-run the designs.
+  - The folded legend is smaller than the open one: 34 × 94 pt, where it was 34 × 180 against an
+    open 264 × 124. Its bar is now a button, and a click on it brings the legend back (tested).
+  - **The Skin holes are 3 mm across** (1.5 mm is the radius), about a third of the skin open. D1's
+    prose said "1.5 mm holes". The handoff, D-R4-4 and core brief #16 now say what the code draws.
+
+**Not done (and why):**
+- **Nothing has been seen on a device or simulator.** I must not launch the app. The page was
+  hosted offscreen on macOS; the iOS build succeeds (below).
+- **The finish on the MAIN page is still hard to see.** In X-ray, a solid skin shows only as
+  where the lattice stops. Drawing the skin itself (a frosted shell, the rim band, the holes)
+  needs the lattice shader or a MetalMeshView hook. That is a #354-file change, not a cheap one,
+  so it is your call. The Settings picture and line are the fix in this pass.
+- **The main page's Stamp squish** is core's (the whole face sinks), and its pit there has the
+  same teeth, because that map is core's per-column numbers. Smoothing core's numbers would draw
+  something core did not say. It is said on both pages instead (core brief #10).
+- **The camera the fix pop-up picks** can still put a curve point under the chrome. It is hidden
+  there now, not covered; turn the part to reach it.
+- **The check-stamp plumbing** (`checkStampShown`, `checks`, its branches) has no UI since D1. It
+  is marked "kept for D2's load cases / G's case picker", not deleted.
+
+**Your call:**
+- **Rim and Skin print as None today** (core brief #16). One alternative is to send Skin as
+  Covered (a skin two-thirds solid is closer to Covered than to None). Say if you want that.
+- **The panel now grows up to the top chrome**, not to 62 %. Say if you want it lower.
+
+### Hook lines in #354 files
+
+None in this pass. Every change is in a Flexible track file. The new files are
+`FlexibleStampFootprint.swift` and `FlexibleFinishSwatch.swift`. The edited files are
+FlexibleFaceList, FlexibleFacePanel, FlexibleSettingsPanel, FlexibleStagePage,
+FlexibleCurveEditor, FlexibleFaceStamp, FlexibleDepthPrism, FlexibleDepthChips, FlexibleFinish,
+FlexibleRowCopy, FlexibleStageModel, FlexibleMainStage+Views and FlexibleStageChrome (a comment).
+WorkspacePlaceholder, MetalMeshView, LatticeSettings and ProjectModel are untouched, and
+LatticeStageMode gains no case.
+
+### Decisions (00-decisions.md, in f75351ff)
+
+D-R4-4 is corrected (3 mm holes, 1.5 mm radius). New rows:
+- D-R4-8: the selected face's card, the reveal, and the panel's cap;
+- D-R4-9: the smoothed footprint and the contour prism;
+- D-R4-10: the chrome keep-out for the curves, and the handle clear of the chip;
+- D-R4-11: said on the panel, and the smaller fixes.
+
+### Tests
+
+NEW:
+- `FlexibleSettingsVerifyD1Tests` (10 tests);
+- `FlexibleSettingsPageHostedTests` (2 tests: the page hosted in an offscreen window on your
+  project, read through its own frames; clicks).
+
+Inline RED controls:
+- the page's old flag relabels the map;
+- the old seed centres a palm on the corner;
+- a 1.5 mm hole leaves 1.2 mm covered;
+- Rim's and Skin's job is None's;
+- the old write of "curves" changes the settings;
+- the old handle sat 3.6 pt from the chip;
+- D1's footprint spread 0.33, and its prism outline 100 % along the grid;
+- the old curve band ran under the panel, and 1,976 px drew there;
+- your Face tab (787 pt with face 5 open) is taller than the old cap;
+- D1's bar was taller than the open legend;
+- the picture beside the chips left the row no room.
+
+Re-pinned (my batch's own tests, each with its reason):
+- `FlexibleSettingsRound4Tests`: the list takes the pad binding; the selected row is the card;
+  the stamp handle reads k;
+- the finish row's width test measures the chips alone (the picture moved to its own line);
+- the job test's force-unwrap is now an XCTUnwrap (the verifier's nit).
+
+Mutation runs. Each run restores the rule this pass replaced, rebuilds, and runs the test that pins it; the
+file is then restored byte for byte. All 12 are RED:
+```
+M1  the selected card never scrolled to            ⇒ hosted: 11l as opened — card 691–937 below the scroll's 312–796 (4 failures)
+M2  the panel capped at 62 % again                 ⇒ hosted: 11l top A · Stamp — card 350–796 above the scroll's 400–796
+M3  the stamp's footprint not smoothed             ⇒ teeth 0.264 not < 0.2
+M4  the prism back on whole columns                ⇒ the page's prism call pinned (footprint:, not columns:)
+M5  the stamp handle at the stamp's centre         ⇒ 0 / 5 / 30 pt from the chip, not ≥ 44 (4 failures)
+M6  the curves not clipped out of the chrome       ⇒ 1,976 px under the panel, not 0
+M7  Rim / Skin say nothing on the row              ⇒ "rim": no note
+M8  a fresh lattice flips the Settings map         ⇒ showBuildable = true, and the tab switched (2 failures)
+M9  re-tapping the chosen shape writes it          ⇒ the settings (and their hash) change (2 failures)
+M10 Stamp before the stack seeds at 0 × 0          ⇒ a palm 80 × 95 at (0, 0) (5 failures)
+M11 the folded legend's bar 150 pt again           ⇒ folded 180 pt not < open 124 pt
+M12 the main dent legend silent on a stamp         ⇒ the legend line pinned
+```
+M2 was GREEN on its first run: the hosted check measured the card against the whole panel, so a
+card tucked under the panel's header and tabs passed. The check now measures what the panel's
+scroll SHOWS (a `panelScroll` frame), and M2 is RED.
+
+The targeted suite: it covers every Flexible* suite, the brief's list, and every
+suite that scans WorkspacePlaceholder (batch D1's `filter.txt`, unchanged: no #354 file is
+touched). It ran after the last source change. Raw:
+```
+Executed 721 tests, with 9 tests skipped and 1 failure (0 unexpected) in 706.793 (706.854) seconds
+  the one failure: LatticeSimSolveTriggerTests.testTheTriggerRefusesOnAllThreeGrounds (known, pre-existing)
+FLEX-HOSTED his Face tab 787 pt tall · the panel's cap at 11" landscape 517 pt
+  11l as opened: card 550–796 in the panel's scroll 312–796 (246 pt) ✓
+  11l top A: card 529–754 in the panel's scroll 312–796 (225 pt) ✓
+  11l top A · Stamp: card 350–796 in the panel's scroll 312–796 (446 pt) ✓
+  11l face 5 (last pressed): card 550–796 in the panel's scroll 312–796 (246 pt) ✓
+  11l face 4 (last row): card 742–796 in the panel's scroll 312–796 (54 pt) ✓
+  11p as opened: card 748–994 in the panel's scroll 369–1156 (246 pt) ✓
+  11p top A: card 607–832 in the panel's scroll 390–1156 (225 pt) ✓
+  11p top A · Stamp: card 583–1029 in the panel's scroll 366–1156 (446 pt) ✓
+  11p face 5 (last pressed): card 748–994 in the panel's scroll 369–1156 (246 pt) ✓
+  11p face 4 (last row): card 1102–1156 in the panel's scroll 561–1156 (54 pt) ✓
+  13p as opened: card 930–1176 in the panel's scroll 551–1338 (246 pt) ✓
+  13p top A: card 789–1014 in the panel's scroll 572–1338 (225 pt) ✓
+  13p top A · Stamp: card 568–1014 in the panel's scroll 351–1338 (446 pt) ✓
+  13p face 5 (last pressed): card 930–1176 in the panel's scroll 551–1338 (246 pt) ✓
+  13p face 4 (last row): card 1284–1338 in the panel's scroll 743–1338 (54 pt) ✓
+  13l as opened: card 691–937 in the panel's scroll 312–994 (246 pt) ✓
+  13l top A: card 529–754 in the panel's scroll 312–994 (225 pt) ✓
+  13l top A · Stamp: card 529–975 in the panel's scroll 312–994 (446 pt) ✓
+  13l face 5 (last pressed): card 691–937 in the panel's scroll 312–994 (246 pt) ✓
+  13l face 4 (last row): card 940–994 in the panel's scroll 399–994 (54 pt) ✓
+FLEX-TEETH his top A, Thumb pad: dent spread among corners at one distance from the stamp's edge — D1's footprint 0.33 of the deepest (2016 corners) · smoothed 0.13 (2016)
+FLEX-PRISM-STAMP his top A: outline edges along the grid — columns (old) 100% of 32 · contour 7% of 56
+FLEX-HANDLE pad top from above (el 1.5): stamp centre ↔ chip 3.6 pt (old handle) → handle ↔ chip 56.0 pt
+FLEX-CURVE-KEEPOUT pixels drawn under the panel: 0 (without the keep-out 1976)
+FLEX-LEGEND open 264 × 124 · folded 34 × 94 · after a click on the bar 264 × 124
+FLEX-SWATCH solid pixels: covered 6154 · skin 4186 · rim 3850 · none 0
+FLEX-SEED pad top 100.0 × 100.0 mm: Thumb pad 20.0 × 26.0 mm at (50.0, 50.0), turned 0.0°
+FLEX-PANEL pad: open 542.0 pt · minimized 64.0 pt (offered 900.0)
+```
+Before it, every Flexible* suite alone: `Executed 242 tests, with 4 tests skipped and 0 failures`.
+Before and after renders of your top A under the thumb pad (D1's footprint vs the fix, with and
+without the prism) are in the session's scratch, not committed: they are renders, not the app.
+
+**iOS build:** `xcodebuild -project app/TopOpt.xcodeproj -scheme TopOpt -configuration Debug
+-destination id=147E56A1… -derivedDataPath …/flexA1 build` → `** BUILD SUCCEEDED **` (exit 0) on
+the final source tree, with FlexibleStampFootprint and FlexibleFinishSwatch compiled and no
+warning in a Flexible file. The app was not launched.
+
+### Commits (on claude/flexible-screens, not pushed)
+
+This pass: f75351ff (the fixes, their tests and the DECISIONS rows D-R4-4 corrected, D-R4-8…11), then
+this handoff section.
+
+
+## Round 4 · batch D1 — the Settings page
 
 Your notes after testing batches A + B (your images 1, 2, 4, 5, 6, 7) and your answers 3
 (stamps) and 4 (the finish), built on the Settings page. Judged headlessly on YOUR project 0004
@@ -59,7 +259,8 @@ been seen on a screen yet.
   row on the Face tab and replaces the per-face "Solid skin" row:
   - **None:** the lattice runs to the surface everywhere;
   - **Rim:** a solid band 2 mm round every face edge, with the faces open;
-  - **Skin:** a 0.8 mm skin with round 1.5 mm holes on a 5 mm hex grid, laid in each face's own
+  - **Skin:** a 0.8 mm skin with round 3 mm holes (1.5 mm radius; this line said "1.5 mm holes"
+    until the verification pass) on a 5 mm hex grid, about a third open, laid in each face's own
     plane;
   - **Covered:** a solid skin everywhere. This is the default, and what a project saved before
     reads.
@@ -101,7 +302,7 @@ been seen on a screen yet.
   "Solid skin" off; it is now covered like the rest. Pick None to open every face. Covered
   changes the one face; None would have changed every other face.
 - **The finish's sizes are my choice until core owns them:** Rim 2 mm; Skin 0.8 mm thick with
-  1.5 mm holes, 5 mm apart.
+  3 mm holes (1.5 mm radius), 5 mm apart.
 - **The Finish row sits on the Face tab**, under Feel. Say if you want it in More.
 - **The default stamp** is the palm, a thumb pad or a fingertip, whichever fits first.
 
@@ -112,7 +313,8 @@ been seen on a screen yet.
   - Today `job_block.cpp:180` reads one `skin_on` per face, and `run.cpp` only echoes it.
   - The app sends `skin_on = (finish == covered)` on every face.
   - C2 / C3 (the export) must build Rim's band and Skin's holes the way the preview draws them
-    (`FlexibleFinish`: the distance to the face edges; a hex hole grid in each face's plane).
+    (`FlexibleFinish`: the distance to the face edges; a hex hole grid in each face's plane —
+    holes 3 mm ACROSS, `holeRadiusMM` = 1.5 is a radius, 5 mm pitch, ~33 % of the skin open).
 - **#10 is now in use:** the Stamp shape sends flat curves, `deepest` = the chip, and
   `design_stamp` = the face's one stamp at the face's weight.
 
