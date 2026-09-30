@@ -579,3 +579,49 @@ public enum LatticeJobIncludeGate {
                 includeCount: regions.filter { $0.role == .include }.count)
     }
 }
+
+// MARK: - a retained run core refuses (ruling 3)
+
+/// ★★ RULING 3 (maintainer, 2026-09-30): an old retained run froze a wall at another depth than
+/// the wall has today — core's depth tie refuses the variant's job before any solve. The app asks
+/// core's OWN parser (never re-deriving the tie) and says it in his words. This only turns core's
+/// message into that sentence: it reads core's numbers, never computes a verdict.
+public enum LatticeVariantProtectionTie {
+    public struct Mismatch: Equatable, Sendable {
+        /// The RUN face id core names.
+        public let faceID: Int
+        /// Core's two numbers, in mm.
+        public let protectionMM: Double
+        public let wallMM: Double
+    }
+    /// Core's refusal text (job.cpp's depth tie: "face N is BOTH protected and a lattice region, at
+    /// two different depths: the protection is X mm and the lattice region is Y mm. …") → its
+    /// numbers; nil for any other message.
+    public static func parse(coreError: String) -> Mismatch? {
+        let pattern = #"face (\d+) is BOTH protected and a lattice region, at two different depths: the protection is ([0-9.]+) mm and the lattice region is ([0-9.]+) mm"#
+        guard let re = try? NSRegularExpression(pattern: pattern),
+              let m = re.firstMatch(in: coreError, range: NSRange(coreError.startIndex..., in: coreError)),
+              let f = Range(m.range(at: 1), in: coreError), let x = Range(m.range(at: 2), in: coreError),
+              let y = Range(m.range(at: 3), in: coreError),
+              let face = Int(coreError[f]), let prot = Double(coreError[x]), let wall = Double(coreError[y])
+        else { return nil }
+        return Mismatch(faceID: face, protectionMM: prot, wallMM: wall)
+    }
+    /// A depth as a person writes it: 5, 12.5 — core's value rounded to 0.01 mm.
+    public static func mm(_ v: Double) -> String {
+        let r = (v * 100).rounded() / 100
+        return r == r.rounded() ? String(format: "%.0f", r) : String(format: "%g", r)
+    }
+    /// His sentence. `setToMM` is the depth to set the wall to — core's protection, less the wall's
+    /// own in-plane expand when it has one (its slab reaches depth + expand).
+    public static func sentence(_ m: Mismatch, wallName: String, setToMM: Double) -> String {
+        "This result was optimized with a \(mm(m.protectionMM)) mm protected skin under \(wallName), "
+            + "but the wall is \(mm(m.wallMM)) mm deep. Optimize again with this wall, "
+            + "or set the wall to \(mm(setToMM)) mm."
+    }
+    /// Any OTHER refusal of a variant document is said in core's own words, less its file prefix.
+    public static func coreWords(_ coreError: String) -> String {
+        coreError.hasPrefix("job.json: ") ? String(coreError.dropFirst("job.json: ".count)) : coreError
+    }
+}
+

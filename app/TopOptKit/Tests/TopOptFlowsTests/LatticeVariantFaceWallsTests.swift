@@ -115,13 +115,13 @@ final class LatticeVariantFaceWallsTests: XCTestCase {
             .facesWithoutShape, "★ a V1 answer's count meant every face wall — not read as this one")
         // every surface draws it, from the job's own count
         let ws = try src("WorkspacePlaceholder.swift")
-        XCTAssertTrue(ws.contains("return (json, spec, emission.skippedFaces, emission.skippedRegionNames)"),
-                      "the job's own count, with the job's own spec")
+        XCTAssertTrue(ws.contains("return (json, spec, emission.skippedFaces, emission.skippedRegionNames, coreRefusal)"),
+                      "the job's own count, with the job's own spec (and core's verdict, ruling 3)")
         XCTAssertTrue(ws.contains("probe.facesWithoutShape = job.facesWithoutShape"), "Check sizes stamps its answer")
         XCTAssertTrue(ws.contains("probe.regionsWithoutShape = job.regionsWithoutShape.isEmpty ? nil : job.regionsWithoutShape"))
         XCTAssertTrue(ws.contains("variantFacesWithoutShape: withoutShape,\n                variantRegionsWithoutShape: regionsWithoutShape))"),
                       "the re-lattice result carries it")
-        XCTAssertTrue(ws.contains("variantFacesWithoutShape: facts.faces,\n                    variantRegionsWithoutShape: facts.regions,"),
+        XCTAssertTrue(ws.contains("variantFacesWithoutShape: pass.facesWithoutShape,\n                    variantRegionsWithoutShape: pass.regionsWithoutShape,"),
                       "the forecast drawer gets it, from ONE emission per pass")
         XCTAssertTrue(try src("LatticePage.swift").contains(
             "if let scope = LatticeVariantFaceWalls.line(withoutShape: variantFacesWithoutShape,\n"

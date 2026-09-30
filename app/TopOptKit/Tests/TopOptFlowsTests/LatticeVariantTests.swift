@@ -290,7 +290,7 @@ final class LatticeVariantTests: XCTestCase {
                       "relatticeJobJSON — the forecast, Check sizes and the run all come from it")
         XCTAssertTrue(ws.contains("model.toast = \"Can’t lattice this variant: \\(why).\""))
         XCTAssertTrue(ws.contains("throw RelatticeError(\"Can’t check sizes: \\(why).\")"))
-        XCTAssertTrue(ws.contains("variantJobRefusal: facts.refusal)"), "the page gets it")
+        XCTAssertTrue(ws.contains("variantJobRefusal: pass.refusal,"), "the page gets it")
     }
 
     /// The re-lattice button and the forecast drawer carry the refusal — pure, no SwiftUI.
@@ -317,9 +317,9 @@ final class LatticeVariantTests: XCTestCase {
         var root = URL(fileURLWithPath: #filePath); for _ in 0..<3 { root.deleteLastPathComponent() }
         let page = try String(contentsOf: root.appendingPathComponent("Sources/TopOptFlows/LatticePage.swift"),
                               encoding: .utf8)
-        XCTAssertTrue(page.contains("forecast: forecast.forecast(for: forecastJob),\n                                   jobRefusal: variantJobRefusal)"),
-                      "the page's button reads the gate")
-        XCTAssertTrue(page.contains("describesCurrentJob: forecastJob != nil && forecast.describes == forecastJob,\n            refusal: variantJobRefusal)"),
+        XCTAssertTrue(page.contains("forecast: forecast.forecast(for: forecastJob),\n                                   jobRefusal: variantJobRefusal ?? variantJobCoreRefusal)"),
+                      "the page's button reads the gate (and core's own refusal, ruling 3)")
+        XCTAssertTrue(page.contains("describesCurrentJob: forecastJob != nil && forecast.describes == forecastJob,\n            refusal: variantJobRefusal, coreRefusal: variantJobCoreRefusal)"),
                       "the page's drawer reads the gate")
     }
 
@@ -585,6 +585,17 @@ enum VariantFacePrismFixture {
     /// (`faceProtectionSpecs()`), so core's depth tie has something to check.
     static func original(protecting p: ProjectModel? = nil) throws -> Data {
         let prot = p?.faceProtectionSpecs()
+        return try original(faceIDs: prot?.faceIDs ?? [], depthMM: prot?.depthMM ?? -1, depthsMM: prot?.depthsMM ?? [])
+    }
+
+    /// ★ Ruling 3: an OLD retained run — its protections as BARE face ids at the global depth
+    /// (no per-face depths: the shape a run made before per-face depths, or with the wall's group
+    /// protect-only, is written in). `depthMM` ≤ 0 omits the key and core uses its 5 mm default.
+    static func original(bareProtection ids: [Int], depthMM: Double) throws -> Data {
+        try original(faceIDs: ids, depthMM: depthMM, depthsMM: [])
+    }
+
+    static func original(faceIDs: [Int], depthMM: Double, depthsMM: [Double]) throws -> Data {
         let request = RunRequest(
             modelPath: "/tmp/part.step", material: "PLA", materialsPath: "",
             rulesPath: "", resolution: 64, projectName: "prism",
@@ -594,9 +605,9 @@ enum VariantFacePrismFixture {
             infillPercent: 40, wallLoops: 3,
             wallLineWidthOuterMM: 0.45, wallLineWidthInnerMM: 0.45,
             clearances: [TopOptKit.ClearanceSpec(faceID: 7, kind: .bolt, concentricMarginMM: 1.5)],
-            faceProtections: prot?.faceIDs ?? [],
-            faceProtectionDepthMM: prot?.depthMM ?? -1,
-            faceProtectionDepthsMM: prot?.depthsMM ?? [])
+            faceProtections: faceIDs,
+            faceProtectionDepthMM: depthMM,
+            faceProtectionDepthsMM: depthsMM)
         let run = RemoteRun(config: RemoteRunnerConfig(host: "127.0.0.1", port: 8757, expectedFingerprint: "test"),
                             request: request, progress: { _, _, _ in true }, onVariant: { _ in })
         let job = try JSONSerialization.jsonObject(with: try run.buildJobJSON())

@@ -290,7 +290,7 @@ final class OrganicSyntheticStressTests: XCTestCase {
         XCTAssertTrue(pm.contains("public func variantLatticeJobRegions() -> LatticeRegionEmission.Result {\n        latticeJobRegions()\n    }"))
         XCTAssertTrue(pm.contains("synthetic: latticeSyntheticFlags(),"), "which passes the flags")
         XCTAssertEqual(p.variantLatticeJobRegions().regions, p.latticeJobRegions().regions)
-        XCTAssertTrue(ws.contains("let emission = project.variantLatticeJobRegions()"), "relatticeJobJSON builds from it")
+        XCTAssertTrue(ws.contains("let emission = given ?? project.variantLatticeJobRegions()"), "relatticeJobJSON builds from it")
         XCTAssertGreaterThanOrEqual(ws.components(separatedBy: "relatticeJobJSON(").count - 1, 4,
                                     "the definition plus the forecast, the Check-sizes probe and the run")
         XCTAssertEqual(em.components(separatedBy: "if role == .include, let sf = synthetic { s.syntheticStress = true; s.syntheticFoci = sf.foci(for: ref.key) }").count - 1, 3,

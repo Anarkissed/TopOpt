@@ -2437,6 +2437,42 @@ public final class ProjectModel: ObservableObject {
         faceRegions.region(rid)?.name ?? "Region \(rid)"
     }
 
+    /// A selectable's short name — the Selections row's, and the one ruling 3's sentence uses.
+    /// Two words at most (R7).
+    public func latticeSelectableName(_ ref: LatticeSelectableRef) -> String {
+        switch ref {
+        case let .face(_, f): return "Face \(runFaceID(f))"
+        case .primitive: return "Primitive"
+        case let .region(_, rid): return latticeRegionName(rid)
+        }
+    }
+
+    /// ★ RULING 3 (maintainer, 2026-09-30): core's refusal of a variant document, in his words.
+    /// Core's depth tie → "This result was optimized with a X mm protected skin under [wall], but
+    /// the wall is Y mm deep. …", the wall named as its Selections row names it (the prism core
+    /// stopped at, in wire order); any other refusal → core's own words. Nothing is re-derived:
+    /// X and Y are core's.
+    public func variantJobCoreRefusal(coreError: String, regions: [LatticeRegionSpec]) -> String {
+        guard let m = LatticeVariantProtectionTie.parse(coreError: coreError) else {
+            return LatticeVariantProtectionTie.coreWords(coreError)
+        }
+        let prism = regions.first { $0.kind == .face && $0.faceID == m.faceID }
+        var ref: LatticeSelectableRef? = nil
+        if let key = prism?.selectableKey {
+            for g in selection.groups {
+                if let f = g.faces.first(where: { LatticeSelectableRef.face(group: g.id, face: $0).key == key }) {
+                    ref = .face(group: g.id, face: f); break
+                }
+                if let r = g.regionIDs.first(where: { LatticeSelectableRef.region(group: g.id, region: $0).key == key }) {
+                    ref = .region(group: g.id, region: r); break
+                }
+            }
+        }
+        let name = ref.map(latticeSelectableName) ?? "Face \(m.faceID)"
+        let expand = prism?.selectableKey.map { LatticeSlabExpand.clamp(lattice.selectableExpandMM[$0] ?? 0) } ?? 0
+        return LatticeVariantProtectionTie.sentence(m, wallName: name, setToMM: m.protectionMM - expand)
+    }
+
     /// ★ RULING (g) (maintainer, 2026-09-30): the name a face region the run cannot consume is
     /// reported under, or nil when it is not a wall to report:
     /// - it is gone from the model (a stale id the user cannot find), or

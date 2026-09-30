@@ -90,6 +90,9 @@ public struct LatticePage: View {
     /// ★ ruling (c) (2026-09-30): why the variant's job may not be written ("nothing set to
     /// lattice"); nil off a variant or when it may
     let variantJobRefusal: String?
+    /// ★ ruling 3 (2026-09-30): core's own refusal of the variant's job, in his words (an old run's
+    /// protection at another depth than the wall today); nil off a variant or when core accepts
+    let variantJobCoreRefusal: String?
 
     public init(model: AppModel, project: ProjectModel, run: RunModel,
                 sim: LatticeSimModel, page: LatticePageModel,
@@ -108,6 +111,7 @@ public struct LatticePage: View {
                 variantFacesWithoutShape: Int = 0,
                 variantRegionsWithoutShape: [String] = [],
                 variantJobRefusal: String? = nil,
+                variantJobCoreRefusal: String? = nil,
                 staticRender: Bool = false) {
         self.model = model
         self.project = project
@@ -130,6 +134,7 @@ public struct LatticePage: View {
         self.variantFacesWithoutShape = variantFacesWithoutShape
         self.variantRegionsWithoutShape = variantRegionsWithoutShape
         self.variantJobRefusal = variantJobRefusal
+        self.variantJobCoreRefusal = variantJobCoreRefusal
         self.staticRender = staticRender
     }
 
@@ -180,7 +185,10 @@ public struct LatticePage: View {
     }
     private var banner: LatticePageBanner? {
         LatticePageBanner.derive(simPhase: sim.phase, simStale: simStale,
-                                 optimizing: optimizing, runFailure: runFailureText)
+                                 optimizing: optimizing, runFailure: runFailureText,
+                                 // ★ ruling 3: said before any tap, with one tap to Optimize again
+                                 variantJobRefusal: variantJobCoreRefusal,
+                                 optimizeEnabled: actions.optimize.enabled)
     }
     private var simGate: LatticeSimGate {
         LatticeSimGate.compute(latticeOn: project.lattice.enabled,
@@ -528,7 +536,7 @@ public struct LatticePage: View {
         switch k {
         case .simRunning: return DS.Color.accent
         case .simComplete: return DS.Color.okGreen
-        case .simStale, .smoothingStale: return DS.Color.warning
+        case .simStale, .smoothingStale, .variantJobRefused: return DS.Color.warning
         case .optimizing: return RGBA(hex: 0x5E5CE6)
         case .failed: return DS.Color.danger
         }
@@ -537,7 +545,7 @@ public struct LatticePage: View {
         switch k {
         case .simRunning, .optimizing: return "circle.fill"
         case .simComplete: return "checkmark"
-        case .simStale, .smoothingStale: return "exclamationmark"
+        case .simStale, .smoothingStale, .variantJobRefused: return "exclamationmark"
         case .failed: return "xmark"
         }
     }
@@ -548,6 +556,9 @@ public struct LatticePage: View {
             if let ctx = model.makeLatticeSimContext() { sim.run(ctx) }
         case .optimizing: run.cancel()
         case .failed: page.go(nil)
+        // ★ ruling 3: the one tap — the SAME path as "Optimize from scratch", replace-results
+        // confirmation included; offered only while that path is open
+        case .variantJobRefused: if actions.optimize.enabled { onOptimize() }
         // The smoothing-stale banner is not a LATTICE-page state; it is derived
         // and shown by the smoothing page. Listed for exhaustiveness so a future
         // kind cannot be added without a decision here.
@@ -1919,7 +1930,7 @@ public struct LatticePage: View {
                                    optimizeSurface: optimizeSurface,
                                    running: optimizing,
                                    forecast: forecast.forecast(for: forecastJob),
-                                   jobRefusal: variantJobRefusal)
+                                   jobRefusal: variantJobRefusal ?? variantJobCoreRefusal)
     }
 
     /// THE FORECAST, IN THE REVIEW DRAWER (bar F3). The button carries the refusal
@@ -1930,7 +1941,7 @@ public struct LatticePage: View {
         LatticeForecastPanel.compute(
             state: forecast.state,
             describesCurrentJob: forecastJob != nil && forecast.describes == forecastJob,
-            refusal: variantJobRefusal)
+            refusal: variantJobRefusal, coreRefusal: variantJobCoreRefusal)
     }
 
     private var optimizeButton: some View {

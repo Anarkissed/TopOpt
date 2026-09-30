@@ -123,6 +123,9 @@ public struct LatticePageBanner: Equatable, Sendable {
         /// was computed from inputs that have since changed" is the same state
         /// `simStale` already names.
         case smoothingStale
+        /// ★ RULING 3 (2026-09-30): core refuses the variant's job (an old run's protection at
+        /// another depth than the wall today) — said before any tap, with one tap to optimize again.
+        case variantJobRefused
     }
     public let kind: Kind
     public let title: String
@@ -131,7 +134,11 @@ public struct LatticePageBanner: Equatable, Sendable {
     public let showsProgress: Bool
 
     public static func derive(simPhase: LatticeSimModel.Phase, simStale: Bool,
-                              optimizing: Bool, runFailure: String?) -> LatticePageBanner? {
+                              optimizing: Bool, runFailure: String?,
+                              // ★ ruling 3: core's refusal of the variant's job, and whether the
+                              // Optimize path is open for the one tap
+                              variantJobRefusal: String? = nil,
+                              optimizeEnabled: Bool = false) -> LatticePageBanner? {
         // Optimizing outranks sim states (the page dims and gates on it).
         if optimizing {
             return LatticePageBanner(kind: .optimizing, title: "Optimizing",
@@ -141,6 +148,12 @@ public struct LatticePageBanner: Equatable, Sendable {
         if let f = runFailure {
             return LatticePageBanner(kind: .failed, title: "Job failed", body: f,
                                      actionLabel: "Fix", showsProgress: false)
+        }
+        // ★ ruling 3: below a running sim (its Cancel is never hidden), above the sim's results
+        if let why = variantJobRefusal, simPhase != .running {
+            return LatticePageBanner(kind: .variantJobRefused, title: "Can’t lattice this variant",
+                                     body: why, actionLabel: optimizeEnabled ? "Optimize again" : nil,
+                                     showsProgress: false)
         }
         switch simPhase {
         case .running:
