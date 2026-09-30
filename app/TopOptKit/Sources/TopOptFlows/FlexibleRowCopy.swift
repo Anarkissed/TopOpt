@@ -55,6 +55,13 @@ public enum FlexibleRowCopy {
         if groupRegions > 1 { return fit("\(w) of \(g)'s \(kgText(groupKg))") }
         return fit("\(w) from \(g)")
     }
+    /// The weight row of a marked face, exactly as the panel shows it: "from <group>" only
+    /// while the face is LINKED to the group that holds it.
+    public static func weight(face f: FlexibleFaceSettings, entry e: FlexibleMainPageLoads.Entry?) -> String {
+        let fromGroup = f.weightFrom != nil && e?.groupID == f.weightFrom
+        return weight(kg: f.weightKg, group: fromGroup ? e?.groupName : nil, groupKg: e?.groupKg ?? 0,
+                      groupRegions: e?.groupRegions ?? 0, oblique: fromGroup && (e?.oblique ?? false))
+    }
     public static func kgText(_ kg: Double) -> String {
         abs(kg - kg.rounded()) < 0.05 ? "\(Int(kg.rounded())) kg" : String(format: "%.1f kg", kg)
     }
@@ -66,6 +73,12 @@ public enum FlexibleRowCopy {
     public static func sharesStack(with other: String) -> String { fit("Shares a stack with \(other)") }
     /// The number pad's title when a face with no main-page load is pressed.
     public static let askWeight = "How much weight presses here?"
+    /// [Rests] chosen here on a face a main-page Load group presses: said, never hidden.
+    public static func pressedOnMainPage(group: String) -> String { fit("\(fit(group, 16)) presses it on the main page") }
+    /// A weight of his own the group's replaced (one source of truth: the group).
+    public static func relinked(oldKg: Double, group: String) -> String {
+        fit("Was \(kgText(oldKg)) · now \(fit(group, 16))'s weight")
+    }
 
     // MARK: More
 

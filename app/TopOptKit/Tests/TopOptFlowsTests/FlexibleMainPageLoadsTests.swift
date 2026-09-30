@@ -9,7 +9,11 @@
 //   * a pull, or gravity on a side face, is ASKED, never mapped;
 //   * a tap only selects (img 8: seven faces pressed at 10 kg by tapping around);
 //   * a typed weight on an inherited face writes back to the group and the split re-syncs;
-//     a weight of his own survives a re-sync (RED: a re-sync without weightFrom overwrites it);
+//     a weight of his own on a face in NO group survives a re-sync; a face a group presses is
+//     ALWAYS linked — HIS top A (an old tap's 10 kg) reads "10 kg from Top" and writes back
+//     (RED: the rule that skipped unlinked faces kept two truths);
+//   * [Rests] chosen here survives a write-back and a re-open; the trash is refused for a
+//     face a group holds; the number pad commits once, when it closes;
 //   * the Flexible job carries loads.build_dir = −gravity (core defaulted to +Z; RED control).
 import XCTest
 import simd
@@ -141,25 +145,152 @@ final class FlexibleMainPageLoadsTests: XCTestCase {
         XCTAssertEqual(pm.force.kind(for: g).weightKg ?? 0, 8 / 0.6, accuracy: 1e-6, "the group took the weight")
         XCTAssertEqual(m.settings.face(big)?.weightKg ?? 0, 8, accuracy: 1e-6)
         XCTAssertEqual(m.settings.face(small)?.weightKg ?? 0, 8 / 0.6 * 0.4, accuracy: 1e-6, "the split re-synced")
-        // his own weight on a face in no group is never overwritten by a re-sync
+        // ★ RE-PINNED (verification of round 3): "his own weight" is a face in NO group (top B);
+        // a face a Load group presses is ALWAYS linked — one source of truth, the group
         let r = try FlexibleHisProject.restore()
         defer { r.cleanup() }
         var s = try XCTUnwrap(r.project.lattice.flexible)
-        var own = try XCTUnwrap(s.face(FlexibleHisProject.topA))
-        XCTAssertNil(own.weightFrom, "premise: he typed top A's weight before round 3")
-        own.weightKg = 7
-        s.setFace(own)
+        var a7 = try XCTUnwrap(s.face(FlexibleHisProject.topA)), b7 = try XCTUnwrap(s.face(FlexibleHisProject.topB))
+        a7.weightKg = 7; b7.weightKg = 7
+        s.setFace(a7); s.setFace(b7)
         r.project.lattice.flexible = s
         let hm = try await FlexibleHisProject.openedModel(r.project, test: self)
-        hm.adoptMainPageLoads()
-        XCTAssertEqual(hm.settings.face(FlexibleHisProject.topA)?.weightKg, 7, "his own 7 kg survives")
-        // ★ RED CONTROL: a re-sync that ignores weightFrom writes the group's 10 kg over it
-        let loads = hm.mainPageLoads
-        var naive = hm.settings
-        for e in loads.entries.values where e.role == .pressed {
-            if var f = naive.face(e.region) { f.weightKg = e.weightKg; naive.setFace(f) }
+        XCTAssertEqual(hm.settings.face(FlexibleHisProject.topB)?.weightKg, 7, "his own 7 kg on top B (no group) survives")
+        XCTAssertNil(hm.settings.face(FlexibleHisProject.topB)?.weightFrom)
+        let top = try XCTUnwrap(r.project.selection.groups.first { $0.name == "Top" })
+        XCTAssertEqual(hm.settings.face(FlexibleHisProject.topA)?.weightKg, 10, "top A takes Top's 10 kg")
+        XCTAssertEqual(hm.settings.face(FlexibleHisProject.topA)?.weightFrom, top.id)
+        XCTAssertEqual(hm.relinkedWeights[FlexibleHisProject.topA], 7, "…and the panel says it was 7 kg")
+        XCTAssertEqual(FlexibleRowCopy.relinked(oldKg: 7, group: "Top"), "Was 7 kg · now Top's weight")
+        // ★ RED CONTROL: the rule that skipped every unlinked face left top A at 7 kg, unlinked,
+        // while the main run pressed it with 10 — two sources of truth
+        var builder = s
+        for e in hm.mainPageLoads.entries.values where e.role == .pressed {
+            guard var f = builder.face(e.region), f.weightFrom != nil else { continue }
+            f.weightKg = e.weightKg; builder.setFace(f)
         }
-        XCTAssertEqual(naive.face(FlexibleHisProject.topA)?.weightKg, 10, "control: the naive re-sync overwrites it")
+        XCTAssertEqual(builder.face(FlexibleHisProject.topA)?.weightKg, 7, "control: the old rule kept two truths")
+        XCTAssertNil(builder.face(FlexibleHisProject.topA)?.weightFrom)
+    }
+
+    /// ★ HIS PROJECT AS SAVED (verification of round 3): top A — pressed by an old tap at the
+    /// 10 kg default, weightFrom nil — reads "10 kg from Top", and a weight typed on it
+    /// changes the Top group (one source of truth).
+    @MainActor
+    func testHisTopAReadsFromTopAndATypedWeightChangesTheGroup() async throws {
+        let r = try FlexibleHisProject.restore()
+        defer { r.cleanup() }
+        let raw = try XCTUnwrap(r.project.lattice.flexible?.face(FlexibleHisProject.topA))
+        XCTAssertNil(raw.weightFrom, "premise: saved before round 3, unlinked")
+        XCTAssertEqual(raw.weightKg, 10, "premise: the old tap's 10 kg default")
+        let top = try XCTUnwrap(r.project.selection.groups.first { $0.name == "Top" })
+        let m = try await FlexibleHisProject.openedModel(r.project, test: self)
+        let a = try XCTUnwrap(m.settings.face(FlexibleHisProject.topA))
+        XCTAssertEqual(a.weightFrom, top.id, "linked to Top")
+        let line = FlexibleRowCopy.weight(face: a, entry: m.mainPageLoads.entry(FlexibleHisProject.topA))
+        print("FLEX-LOADS his top A row: '\(line)'")
+        XCTAssertEqual(line, "10 kg from Top")
+        XCTAssertNil(m.relinkedWeights[FlexibleHisProject.topA], "the same 10 kg: nothing to say")
+        // the faces no group holds keep what he had (top B, faces 3 and 5)
+        for id in [FlexibleHisProject.topB, 3, 5] {
+            XCTAssertEqual(m.settings.face(id)?.isLoaded, true)
+            XCTAssertNil(m.settings.face(id)?.weightFrom)
+        }
+        m.setWeight(FlexibleHisProject.topA, kg: 4)
+        XCTAssertEqual(r.project.force.kind(for: top.id).weightKg ?? 0, 4, accuracy: 1e-9, "the Top group took 4 kg")
+        XCTAssertEqual(m.settings.face(FlexibleHisProject.topA)?.weightKg ?? 0, 4, accuracy: 1e-9)
+        XCTAssertEqual(m.settings.face(FlexibleHisProject.topA)?.weightFrom, top.id, "still linked")
+        // ★ RED CONTROL: unlinked (the round-3 build on his project), the row read "10 kg" and a
+        // typed weight stayed on the Flexible page
+        XCTAssertEqual(FlexibleRowCopy.weight(face: raw, entry: m.mainPageLoads.entry(FlexibleHisProject.topA)), "10 kg")
+    }
+
+    /// ★ [Rests] ON A FACE A GROUP PRESSES IS HIS CHOICE: it survives a write-back on another
+    /// face of the group and a re-open, and the panel says the main page still presses it.
+    @MainActor
+    func testRestsSurvivesAWriteBackAndAReopen() async throws {
+        let (pm, ids, g) = try Self.split60()
+        let m = try await FlexibleHisProject.openedModel(pm, test: self)
+        m.adoptMainPageLoads()
+        m.rest(ids[0])
+        XCTAssertEqual(m.settings.face(ids[0])?.role, "resting")
+        XCTAssertNil(m.settings.face(ids[0])?.weightFrom, "his choice: unlinked")
+        m.setWeight(ids[1], kg: 3)                      // a write-back on the OTHER face
+        XCTAssertNotEqual(pm.force.kind(for: g).weightKg ?? 0, 10, "premise: the group was written")
+        XCTAssertEqual(m.settings.face(ids[0])?.role, "resting", "Rests survives a write-back")
+        let again = try await FlexibleHisProject.openedModel(pm, test: self)
+        XCTAssertEqual(again.settings.face(ids[0])?.role, "resting", "…and a re-open")
+        XCTAssertEqual(again.mainPageLoads.entry(ids[0])?.role, .pressed, "the main page still presses it")
+        XCTAssertEqual(FlexibleRowCopy.pressedOnMainPage(group: "Top"), "Top presses it on the main page")
+        // [Pressed] links it again
+        XCTAssertTrue(again.press(ids[0]))
+        XCTAssertEqual(again.settings.face(ids[0])?.weightFrom, g)
+        // ★ RED CONTROL: Rests that kept the link (the round-3 build) was pressed again by the
+        // next re-sync
+        var kept = again.settings
+        var f = try XCTUnwrap(kept.face(ids[0])); f.role = "resting"; kept.setFace(f)
+        XCTAssertNotNil(f.weightFrom)
+        again.mainPageLoads.adopt(into: &kept)
+        XCTAssertEqual(kept.face(ids[0])?.role, "loaded", "control: a linked Rests is undone by the re-sync")
+    }
+
+    /// ★ THE TRASH IS NOT OFFERED FOR A FACE A GROUP HOLDS (it came back at the next open).
+    @MainActor
+    func testTheTrashIsRefusedForAFaceAGroupHolds() async throws {
+        let r = try FlexibleHisProject.restore()
+        defer { r.cleanup() }
+        let m = try await FlexibleHisProject.openedModel(r.project, test: self)
+        XCTAssertFalse(m.mainPageLoads.canRemove(FlexibleHisProject.topA))
+        XCTAssertFalse(m.removeFace(FlexibleHisProject.topA), "Top presses top A: refused")
+        XCTAssertNotNil(m.settings.face(FlexibleHisProject.topA))
+        XCTAssertFalse(m.mainPageLoads.canRemove(0), "the bottom anchor holds face 0")
+        XCTAssertTrue(m.removeFace(FlexibleHisProject.topB), "top B is in no group: removed")
+        XCTAssertNil(m.settings.face(FlexibleHisProject.topB))
+        // ★ RED CONTROL: removed anyway, the re-sync brings top A straight back
+        var s = m.settings
+        s.removeFace(FlexibleHisProject.topA)
+        m.mainPageLoads.adopt(into: &s)
+        XCTAssertEqual(s.face(FlexibleHisProject.topA)?.role, "loaded", "control: the group re-adds it")
+        // the panel shows the trash only where the model allows it (source pin)
+        let panel = try String(contentsOf: FlexibleHisProject.repoRoot
+            .appendingPathComponent("app/TopOptKit/Sources/TopOptFlows/FlexibleFacePanel.swift"), encoding: .utf8)
+        XCTAssertTrue(panel.contains("if model.mainPageLoads.canRemove(r) {"))
+    }
+
+    /// ★ THE NUMBER PAD COMMITS ONCE, WHEN IT CLOSES: typing "12" on an inherited face wrote 1 kg
+    /// then 12 kg to the main-page group (and a first digit that marked a face tore its pad
+    /// down). RED CONTROL: the live path writes the intermediate 1 kg to the group.
+    @MainActor
+    func testThePadCommitsOnceWhenItCloses() async throws {
+        var b = FlexPadBuffer()
+        b.typed(1); b.typed(12)
+        XCTAssertEqual(b.closed(), 12)
+        XCTAssertNil(b.closed(), "committed once")
+        b.typed(3); b.typed(nil)
+        XCTAssertNil(b.closed(), "an emptied field commits nothing")
+        b.typed(0)
+        XCTAssertNil(b.closed(), "nor does 0")
+        // the group sees only the final number
+        let (pm, ids, g) = try Self.split60()
+        let m = try await FlexibleHisProject.openedModel(pm, test: self)
+        m.adoptMainPageLoads()
+        let big = (m.settings.face(ids[0])?.weightKg ?? 0) > (m.settings.face(ids[1])?.weightKg ?? 0) ? ids[0] : ids[1]
+        var seen: [Double] = []
+        var pad = FlexPadBuffer()
+        for v in [1.0, 12.0] { pad.typed(v) }
+        if let v = pad.closed() { m.setWeight(big, kg: v); seen.append(pm.force.kind(for: g).weightKg ?? 0) }
+        XCTAssertEqual(seen.count, 1)
+        XCTAssertEqual(seen[0], 12 / 0.6, accuracy: 1e-6)
+        // ★ RED CONTROL: live, every keystroke reached the group
+        var live: [Double] = []
+        for v in [1.0, 12.0] { m.setWeight(big, kg: v); live.append(pm.force.kind(for: g).weightKg ?? 0) }
+        XCTAssertEqual(live.count, 2)
+        XCTAssertEqual(live[0], 1 / 0.6, accuracy: 1e-6, "control: the intermediate 1 kg was written")
+        // source pin: every pad on the panel goes through the commit-on-close modifier
+        let panel = try String(contentsOf: FlexibleHisProject.repoRoot
+            .appendingPathComponent("app/TopOptKit/Sources/TopOptFlows/FlexibleFacePanel.swift"), encoding: .utf8)
+        XCTAssertEqual(panel.components(separatedBy: ".numberPad(").count - 1, 1, "only FlexPadCommit opens the pad")
+        XCTAssertEqual(panel.components(separatedBy: ".modifier(FlexPadCommit(").count - 1, 2, "the ask pad and the pencil pills")
     }
 
     /// ★ loads.build_dir = −gravity reaches core's scene. RED CONTROL: without it, core's +Z.

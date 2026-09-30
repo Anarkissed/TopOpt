@@ -362,12 +362,16 @@ public final class FlexibleStageModel: ObservableObject {
 
     /// The main page's groups read as Flexible faces (cached per scene open and write-back).
     @Published public private(set) var mainPageLoads = FlexibleMainPageLoads()
+    /// Faces whose OWN weight a group's replaced this session (region → the old kg): the
+    /// panel says so in one line ("Was 7 kg · now Top's weight").
+    @Published public private(set) var relinkedWeights: [Int: Double] = [:]
 
-    /// Read the main page's groups, then MATERIALISE them: a face in a Load group becomes
-    /// pressed with its share (weightFrom = the group), an Anchor group's faces rest. An
-    /// inherited face re-syncs; a weight of his own (weightFrom nil) is never overwritten; a
-    /// face whose group no longer presses it keeps its weight as his own. Sealed as one undo
-    /// step. Called when the scene opens and after every write-back.
+    /// Read the main page's groups, then MATERIALISE them (`FlexibleMainPageLoads.adopt`): a
+    /// face a Load group presses is pressed with its share and LINKED (weightFrom = the
+    /// group) — one source of truth, also for a face pressed before round 3; an Anchor
+    /// group's faces rest; [Rests] chosen on this page survives; a face whose group no longer
+    /// holds it keeps its weight as his own. Sealed as one undo step. Called when the scene
+    /// opens and after every write-back.
     public func adoptMainPageLoads(recompute: Bool = true) {
         guard let mesh = project.viewerMesh else { return }
         let loads = FlexibleMainPageLoads.derive(
@@ -375,27 +379,9 @@ public final class FlexibleStageModel: ObservableObject {
             mesh: mesh, regions: regions, load: { [stacks] r in stacks[FlexFaceKey(region: r, rotation: 0)]?.load })
         mainPageLoads = loads
         let before = settings
-        edit({ s in
-            for e in loads.entries.values.sorted(by: { $0.region < $1.region }) {
-                switch e.role {
-                case .pressed:
-                    if var f = s.face(e.region) {
-                        guard f.weightFrom != nil else { continue }        // his own weight
-                        f.role = "loaded"; f.weightKg = e.weightKg; f.weightFrom = e.groupID
-                        s.setFace(f)
-                    } else {
-                        s.setFace(FlexibleFaceSettings(faceRegionID: e.region, weightKg: e.weightKg, weightFrom: e.groupID))
-                    }
-                case .rests:
-                    if s.face(e.region) == nil { s.setFace(FlexibleFaceSettings(faceRegionID: e.region, role: "resting")) }
-                case .ask:
-                    break
-                }
-            }
-            for f in s.faces where f.weightFrom != nil && loads.entry(f.faceRegionID)?.role != .pressed {
-                var g = f; g.weightFrom = nil; s.setFace(g)
-            }
-        }, recompute: recompute)
+        var relinked: [Int: Double] = [:]
+        edit({ s in relinked = loads.adopt(into: &s) }, recompute: recompute)
+        relinkedWeights.merge(relinked) { old, _ in old }
         if settings != before { project.sealUndoStep() }
         if selectedRegion == nil { selectedRegion = settings.loadedFaces.first?.faceRegionID }
     }
@@ -414,18 +400,22 @@ public final class FlexibleStageModel: ObservableObject {
             else if let kg { f.weightKg = kg; f.weightFrom = nil }
             s.setFace(f)
         }
+        relinkedWeights[region] = nil
         selectedRegion = region
         ensureStack(region)
         return true
     }
 
-    /// [It rests here].
+    /// [It rests here] / [Rests]: HIS choice on this page, so it is unlinked (weightFrom nil)
+    /// and no re-sync presses it again — not a write-back, not a re-open (`adopt(into:)`).
     public func rest(_ region: Int) {
         edit { s in
             var f = s.face(region) ?? FlexibleFaceSettings(faceRegionID: region, role: "resting")
             f.role = "resting"
+            f.weightFrom = nil
             s.setFace(f)
         }
+        relinkedWeights[region] = nil
         selectedRegion = region
     }
 
@@ -438,15 +428,23 @@ public final class FlexibleStageModel: ObservableObject {
         if let f = settings.face(region), let g = f.weightFrom,
            let total = mainPageLoads.groupKg(forRegion: region, kg: kg) {
             project.force.setWeight(g, kg: total)
+            relinkedWeights[region] = nil
             adoptMainPageLoads()
             return
         }
+        relinkedWeights[region] = nil
         edit { s in guard var f = s.face(region) else { return }; f.weightKg = kg; f.weightFrom = nil; s.setFace(f) }
     }
 
-    public func removeFace(_ region: Int) {
+    /// The trash. Refused (false) for a face a main-page group presses or anchors: the next
+    /// re-sync would bring it straight back, so the panel offers [Rests] instead.
+    @discardableResult
+    public func removeFace(_ region: Int) -> Bool {
+        guard mainPageLoads.canRemove(region) else { return false }
         edit { $0.removeFace(region) }
+        relinkedWeights[region] = nil
         if selectedRegion == region { selectedRegion = settings.faces.first?.faceRegionID }
+        return true
     }
 
     public func key(_ region: Int) -> FlexFaceKey? {

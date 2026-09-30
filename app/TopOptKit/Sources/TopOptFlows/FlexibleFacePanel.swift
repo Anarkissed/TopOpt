@@ -98,14 +98,25 @@ struct FlexibleFacePanel: View {
                 if v == "loaded" { pressOrAsk(r) } else { model.rest(r) }
             }
             .frame(width: 170)
-            Button { model.removeFace(r) } label: {
-                Image(systemName: "trash").font(.system(size: 13)).foregroundStyle(DS.Color.textTertiary.color)
-                    .frame(width: 32, height: 32)
+            // ★ NO TRASH FOR A FACE A MAIN-PAGE GROUP HOLDS: the next re-sync would bring it
+            // back (the group is the one truth) — [Rests] is the Flexible page's way out
+            if model.mainPageLoads.canRemove(r) {
+                Button { model.removeFace(r) } label: {
+                    Image(systemName: "trash").font(.system(size: 13)).foregroundStyle(DS.Color.textTertiary.color)
+                        .frame(width: 32, height: 32)
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("flexible-face-remove")
             }
-            .buttonStyle(.plain)
-            .accessibilityIdentifier("flexible-face-remove")
         }
         .background(askAnchor(r))
+        // [Rests] chosen here on a face the main page presses: one line, never hidden
+        if !f.isLoaded, let e = model.mainPageLoads.entry(r), e.role == .pressed {
+            Text(FlexibleRowCopy.pressedOnMainPage(group: e.groupName))
+                .font(.system(size: 12, weight: .medium)).foregroundStyle(DS.Color.textSecondary.color)
+                .lineLimit(1)
+                .accessibilityIdentifier("flexible-row-pressed-on-main")
+        }
         if let c = model.conflicts.first(where: { $0.faceA == r || $0.faceB == r }) {
             Text(FlexibleRowCopy.sharesStack(with: name(c.faceA == r ? c.faceB : c.faceA)))
                 .font(.system(size: 12, weight: .semibold)).foregroundStyle(DS.Color.warning.color)
@@ -115,11 +126,15 @@ struct FlexibleFacePanel: View {
         if f.isLoaded {
             let e = model.mainPageLoads.entry(r)
             let fromGroup = f.weightFrom != nil && e?.groupID == f.weightFrom
-            FlexRow(FlexibleRowCopy.weight(kg: f.weightKg, group: fromGroup ? e?.groupName : nil, groupKg: e?.groupKg ?? 0,
-                                           groupRegions: e?.groupRegions ?? 0, oblique: fromGroup && (e?.oblique ?? false)),
-                    info: FlexibleRowCopy.Info.weight, id: "flexible-row-weight") {
+            FlexRow(FlexibleRowCopy.weight(face: f, entry: e), info: FlexibleRowCopy.Info.weight, id: "flexible-row-weight") {
                 FlexEditPill(key: "weight-\(r)", title: FlexibleRowCopy.weightTitle, unit: "kg", value: f.weightKg,
                              padTarget: $padTarget) { model.setWeight(r, kg: $0) }
+            }
+            if fromGroup, let old = model.relinkedWeights[r], let e {
+                Text(FlexibleRowCopy.relinked(oldKg: old, group: e.groupName))
+                    .font(.system(size: 12, weight: .medium)).foregroundStyle(DS.Color.textSecondary.color)
+                    .lineLimit(1)
+                    .accessibilityIdentifier("flexible-row-relinked")
             }
             FlexRow(FlexibleRowCopy.shape, info: FlexibleRowCopy.Info.shape, id: "flexible-row-shape") {
                 // ★ BATCH D: the Stamp shape (squish by stamp: flat curves + design_stamp, the
@@ -182,13 +197,14 @@ struct FlexibleFacePanel: View {
         if !model.press(r) { padTarget = "press-\(r)" }
     }
 
-    /// The anchor the "How much weight presses here?" pad pops from.
+    /// The anchor the "How much weight presses here?" pad pops from. ★ THE FACE IS PRESSED
+    /// WHEN THE PAD CLOSES, not per keystroke: pressing on the first digit swapped this row for
+    /// the marked rows, which tore the pad's anchor down mid-number ("25" became 2 kg).
     private func askAnchor(_ r: Int) -> some View {
         Color.clear
-            .numberPad(Binding(get: { padTarget == "press-\(r)" }, set: { if !$0 { padTarget = nil } }),
-                       config: .init(title: FlexibleRowCopy.askWeight, unit: "kg", allowsDecimal: true), seed: nil) { v in
-                if let v, v > 0 { model.press(r, kg: v) }
-            }
+            .modifier(FlexPadCommit(key: "press-\(r)", padTarget: $padTarget,
+                                    config: .init(title: FlexibleRowCopy.askWeight, unit: "kg", allowsDecimal: true),
+                                    seed: nil) { v in model.press(r, kg: v) })
             .allowsHitTesting(false)
     }
 }
@@ -262,9 +278,44 @@ struct FlexEditPill: View {
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier("flexible-number-\(key)")
-        .numberPad(Binding(get: { padTarget == key }, set: { if !$0 { padTarget = nil } }),
-                   config: .init(title: title, unit: unit, allowsDecimal: true), seed: value) { v in
-            if let v, v > 0 { onValue(v) }
-        }
+        .modifier(FlexPadCommit(key: key, padTarget: $padTarget,
+                                config: .init(title: title, unit: unit, allowsDecimal: true), seed: value, commit: onValue))
+    }
+}
+
+// MARK: - the number pad, committed ONCE when it closes
+
+/// What the number pad typed, held until it CLOSES. The shared pad emits a value on every
+/// keystroke; applied live, typing "12" wrote 1 kg then 12 kg to the main-page group — two
+/// writes and two sealed undo steps — and a first digit that marked a face tore its pad down.
+/// Pure, so the rule is testable (FlexibleMainPageLoadsTests).
+struct FlexPadBuffer: Equatable {
+    private(set) var pending: Double?
+    mutating func typed(_ v: Double?) { pending = v }
+    /// The value to commit as the pad closes (a positive number, else nothing); empties the buffer.
+    mutating func closed() -> Double? {
+        defer { pending = nil }
+        guard let v = pending, v.isFinite, v > 0 else { return nil }
+        return v
+    }
+}
+
+/// The shared number pad on a Flexible control, committing `FlexPadBuffer`'s value once, as
+/// the pad closes (the popover's own dismissal, or `padTarget` moving elsewhere).
+struct FlexPadCommit: ViewModifier {
+    let key: String
+    @Binding var padTarget: String?
+    let config: NumberPad.Config
+    let seed: Double?
+    let commit: (Double) -> Void
+    @State private var buffer = FlexPadBuffer()
+
+    func body(content: Content) -> some View {
+        content
+            .numberPad(Binding(get: { padTarget == key }, set: { if !$0, padTarget == key { padTarget = nil } }),
+                       config: config, seed: seed) { buffer.typed($0) }
+            .onChange(of: padTarget == key) { open in
+                if !open, let v = buffer.closed() { commit(v) }
+            }
     }
 }

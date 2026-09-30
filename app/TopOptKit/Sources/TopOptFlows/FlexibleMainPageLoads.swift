@@ -6,7 +6,10 @@
 // resting. A weight typed on the Flexible page for such a face WRITES BACK to the group
 // (`groupKg(forRegion:kg:)`), and every face of the group re-syncs, so the area split stays
 // consistent. A weight typed for a face in no group is the user's own (weightFrom nil) and
-// is never overwritten.
+// is never overwritten. A face a Load group presses is ALWAYS linked — also one pressed
+// before it was linked (a pre-round-3 project's taps): see `adopt(into:)`. [Rests] on the
+// Flexible page is his explicit choice and survives every re-sync; the trash is not offered
+// for a face a group holds (`canRemove`).
 //
 // ★ THE MAPPING, per group (pure, headless):
 //   * a face in `faces`: its split sectors if it has any (the sectors are the Flexible
@@ -55,6 +58,59 @@ public struct FlexibleMainPageLoads: Equatable {
 
     /// The main page's verdict for a region; nil ⇒ it is in no Load or Anchor group (ask).
     public func entry(_ region: Int) -> Entry? { entries[region] }
+
+    /// Can the Flexible page forget this face? Not while a main-page group presses or anchors
+    /// it — the next re-sync would bring it straight back (the group is the one truth).
+    public func canRemove(_ region: Int) -> Bool {
+        guard let e = entries[region] else { return true }
+        return e.role == .ask
+    }
+
+    /// ★ ADOPT (the one source of truth: the group — maintainer, 2026-09-29). Materialise the
+    /// main page's groups into the Flexible faces, IN PLACE:
+    ///   * a face a Load group presses becomes pressed with its share, LINKED (weightFrom =
+    ///     the group). That holds for a face pressed before it was linked too — a project
+    ///     saved before round 3, whose old taps pressed every face at 10 kg: the group's
+    ///     weight wins, so the main run and the Flexible job can never disagree;
+    ///   * a face he marked RESTS on this page (unlinked, not pressed) keeps his choice — the
+    ///     panel says in one line that the main page still presses it;
+    ///   * an Anchor group's faces rest, linked; a face he pressed there himself is kept;
+    ///   * a linked face whose group no longer presses or anchors it keeps its role and weight
+    ///     as his own (unlinked).
+    /// Returns the old weight of every face whose OWN weight the group replaced (the panel
+    /// says so in one line).
+    @discardableResult
+    public func adopt(into s: inout FlexibleStageSettings) -> [Int: Double] {
+        var relinked: [Int: Double] = [:]
+        for e in entries.values.sorted(by: { $0.region < $1.region }) {
+            switch e.role {
+            case .pressed:
+                if var f = s.face(e.region) {
+                    if f.weightFrom == nil && !f.isLoaded { continue }          // his Rests
+                    if f.weightFrom == nil, abs(f.weightKg - e.weightKg) > 1e-9 { relinked[e.region] = f.weightKg }
+                    f.role = "loaded"; f.weightKg = e.weightKg; f.weightFrom = e.groupID
+                    s.setFace(f)
+                } else {
+                    s.setFace(FlexibleFaceSettings(faceRegionID: e.region, weightKg: e.weightKg, weightFrom: e.groupID))
+                }
+            case .rests:
+                if var f = s.face(e.region) {
+                    guard f.weightFrom != nil else { continue }                // his own choice
+                    f.role = "resting"; f.weightFrom = e.groupID
+                    s.setFace(f)
+                } else {
+                    s.setFace(FlexibleFaceSettings(faceRegionID: e.region, role: "resting", weightFrom: e.groupID))
+                }
+            case .ask:
+                break
+            }
+        }
+        for f in s.faces where f.weightFrom != nil {
+            if let e = entries[f.faceRegionID], e.role != .ask { continue }
+            var g = f; g.weightFrom = nil; s.setFace(g)
+        }
+        return relinked
+    }
 
     /// The group weight that gives `region` a share of `kg` (the write-back of a weight typed
     /// on the Flexible page), or nil when the region's weight is not the group's.
