@@ -37,17 +37,38 @@ public final class FlexibleMainStage: ObservableObject {
     @Published public private(set) var generation = 0
     /// Bumped when the shared model arrives (a new project, or the first visit).
     @Published public private(set) var attached = 0
-    /// The views (batch B's minimum — batch C adds Stress and the legends). X-ray on.
-    @Published public var xray = true { didSet { if oldValue != xray { refresh() } } }
+    /// The views (batch B's minimum — batch C adds Stress and the legends).
     @Published public var heat = true { didSet { if oldValue != heat { refresh() } } }
+    /// ★ ROUND 4 (C2 — his img 5: "the xray and lattice view … both seem to require one another
+    /// … remove the xray view selector if the lattice view is going to use the rendering
+    /// anyways"): the Lattice VIEW is his one choice. Shown, the part is the X-ray ghost with the
+    /// walls inside; hidden, it is the solid part (Dent heat / Stress read on it). On by default.
     @Published public var latticeOn = true { didSet { if oldValue != latticeOn { refresh() } } }
-    /// ★ BATCH B REVIEW: the walls are drawn only in X-ray (the body is opaque otherwise), so
-    /// X-ray off made the Lattice button look broken. The button shows what is DRAWN, and
-    /// turning it on turns X-ray on.
-    public var latticeShown: Bool { latticeOn && xray }
+    /// What the Lattice button shows as on, and what is drawn: his choice AND a lattice to show
+    /// (one drawn, or one on its way without Settings — `latticeAvailable`).
+    public var latticeShown: Bool { latticeOn && latticeAvailable }
+    /// ★ C2: X-ray is no longer a button — it is the Lattice view's rendering (the walls are only
+    /// ever seen through the ghost), so the two are on together and off together.
+    public var xray: Bool { latticeShown }
     public func toggleLattice() {
-        if latticeShown { latticeOn = false } else { xray = true; latticeOn = true }
+        latticeOn = !latticeShown
     }
+    /// ★ C2: a lattice to show — drawn, or coming without Settings (the scene opening, a build or
+    /// its designs in flight, nothing blocking, no failed build). Kept here (read on every
+    /// workspace body pass by `bodyAlpha`), recomputed in `refresh` — never per body pass.
+    public internal(set) var latticeAvailable = true
+    /// ★ C2 (his answer 2): Settings was opened by the Lattice VIEW button (nothing to show) —
+    /// its Save & Exit turns the view on.
+    var showLatticeOnExit = false
+    /// ★ C2: a build this stage started has not landed yet — when it does, the note says so once.
+    var awaitingReady = false
+    /// ★ C2 (his answer 2: "a notification should show up when it is ready"): the one-line note
+    /// under the view row. Its own object — a note coming and going never re-runs the workspace.
+    public let note = FlexibleMainNote()
+    /// ★ C2 (his answer 2: "when Lattice Ready shows, tapping it should send to Core and the
+    /// export path"): core's Flexible runner and the Export step (its own object, observed only
+    /// by the pill and the Export mount).
+    public let coreRun = FlexibleCoreRun()
 
     // MARK: batch C — Stress, the legends, tap-to-read (FlexibleMainStage+Views.swift)
 
@@ -193,6 +214,8 @@ public final class FlexibleMainStage: ObservableObject {
         model?.checkStampShown = nil
         model?.pendingFix = nil
         model?.retryFailedBuild()   // his Save & Exit asks for the build: a failed one is tried once more
+        // ★ C2: Settings opened by the Lattice view button (nothing to show) — Exit shows the view
+        if showLatticeOnExit { showLatticeOnExit = false; latticeOn = true }
         noteLoads()        // what Settings did to the groups (a weight written back) is in hand
         refresh()
         buildIfReady()
@@ -342,12 +365,16 @@ public final class FlexibleMainStage: ObservableObject {
         let r = m.readiness
         guard r.isReady, !r.designing else { return }
         m.generateLattice()
+        awaitingReady = true   // ★ C2: the note says "Lattice ready" when this build lands
     }
 
     /// The picture from the model: the overlay (rebuilt only when the pressed faces' stacks
     /// change — a new mesh reframes the camera), then its tints and dents.
     func refresh() {
         guard let m = model else { return }
+        // ★ C2: what the Lattice button and the X-ray read (once per refresh, never per body pass)
+        latticeAvailable = FlexibleLatticeView.available(model: m)
+        noteBuildLanded(m)
         let keys = m.loadedKeys.filter { m.stacks[$0] != nil && m.geometry[$0] != nil }
         let oKey = keys.map { "\($0.region)/\($0.rotation)" }.joined(separator: ",") + "|" + m.regions.key
         if overlayKey != oKey {
@@ -376,7 +403,7 @@ public final class FlexibleMainStage: ObservableObject {
         let key = [String(describing: c.tints.map { VertexTintKey($0).hash }),
                    String(describing: c.dents.map { VertexTintKey($0).hash }),
                    "\(c.exaggeration)", "\(drawn?.generation ?? -1)", "\(drawn?.facesToken ?? -1)", "\(m.latticeBuilding)",
-                   "\(m.lattice?.generation ?? -1)", "\(m.latticeIsStale)", oKey].joined(separator: "|")
+                   "\(m.lattice?.generation ?? -1)", "\(m.latticeIsStale)", oKey, "\(latticeAvailable)"].joined(separator: "|")
         channels = c
         if channelsKey != key {
             channelsKey = key

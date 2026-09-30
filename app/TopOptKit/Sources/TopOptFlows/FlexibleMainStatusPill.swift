@@ -6,10 +6,15 @@
 // the same slot and stature: "Lattice" over one line — "Ready", "Building…", the shape-only
 // label, a failed build's words, or the ONE thing to fix in its short pill form
 // (FlexibleIssue.pill — the whole sentence is on the pop-up it opens).
-// A tap opens Settings; with something to fix, the page opens on that fix's pop-up.
+// ★ ROUND 4 (C2 — his img 6 and answer 2: "the large bottom buttons are for exports and
+// starting the actual core process. So when Lattice Ready shows, tapping it should send to Core
+// and the export path"): Ready → core's Flexible runner and the Export step
+// (FlexibleMainStage.pillTapped → FlexibleCoreRun); the one thing to fix → Settings on its
+// pop-up; building → nothing opens. It used to open Settings on EVERY tap, a ready lattice
+// included — his img 6.
 //
-// Also here: the Flexible view toggles (H5 — X-ray, Dent heat, Stress, Lattice) and the main
-// page's squish player slot.
+// Also here: the Flexible view toggles (H5 — Dent heat, Stress, Lattice; C2: no X-ray button)
+// and the main page's squish player slot.
 
 import SwiftUI
 import TopOptDesign
@@ -62,20 +67,28 @@ public struct FlexibleMainStatusPill: View {
 private struct FlexibleMainStatusPillBody: View {
     @ObservedObject var model: FlexibleStageModel
     @ObservedObject var main: FlexibleMainStage
+    @ObservedObject var run: FlexibleCoreRun
     let open: () -> Void
 
+    init(model: FlexibleStageModel, main: FlexibleMainStage, open: @escaping () -> Void) {
+        self.model = model; self.main = main; self._run = ObservedObject(wrappedValue: main.coreRun); self.open = open
+    }
+
     var body: some View {
-        let s = FlexibleMainStatus.of(model: model)
+        // ★ C2: while core runs the job, the pill says so (a tap shows the run)
+        let s = FlexibleMainStatus.of(model: model).whileSending(run.isSending)
         FlexibleMainStatusPill.pill(s) {
-            if s.fix != nil { main.openFix() }
-            open()
+            main.pillTapped(s, open: open)
         }
     }
 }
 
 /// H5 / H5': the main Flexible page's views, where `viewModeToggles` sits (below the gizmo, on
-/// `edge`) — the same 40 pt buttons. X-ray, Dent heat, Stress, Lattice (batch C: Stress). X-ray,
-/// Heat and Lattice on by default. Lattice turns X-ray on (the walls are drawn in X-ray);
+/// `edge`) — the same 40 pt buttons. ★ ROUND 4 (C2, his img 5): Dent heat, Stress, Lattice — no
+/// X-ray button: the Lattice view IS the X-ray rendering (FlexibleMainStage.xray). Heat and
+/// Lattice on by default. The Lattice button shows / hides the lattice, or — with nothing to
+/// show — opens Settings, whose Exit turns the view on (`openSettings`, H5's closure). The
+/// "Lattice ready" note sits under the row (FlexibleMainNoteView);
 /// ★ BATCH C VERIFICATION: Stress and Dent heat are the two colourings of the pressed map — one
 /// at a time (FlexibleMainStage.toggleStress); Stress leaves X-ray and the lattice alone.
 /// ★ STRESS IS SOLVED DIRECTLY (item T): `solver` is the workspace's own FlexibleStressSolver
@@ -86,45 +99,58 @@ private struct FlexibleMainStatusPillBody: View {
 public struct FlexibleMainViewToggles: View {
     @ObservedObject var main: FlexibleMainStage
     let solver: FlexibleStressSolver?
+    /// ★ C2: H5 hands the workspace's "open Settings" over (the Lattice button with nothing to show).
+    let openSettings: () -> Void
 
-    public init(main: FlexibleMainStage, solver: FlexibleStressSolver? = nil) {
+    public init(main: FlexibleMainStage, solver: FlexibleStressSolver? = nil, openSettings: @escaping () -> Void = {}) {
         self.main = main
         self.solver = solver
+        self.openSettings = openSettings
     }
 
     static let heatIcon = "thermometer.medium"
     static let stressIcon = "waveform.path.ecg"
-    static let buttons = 4
+    static let buttons = 3
 
     public var body: some View {
         // the workspace's solver (no publish: its sim's phase arrives on the next run-loop turn)
         let _ = solver.map { main.attach($0) }
-        HStack(spacing: DS.Space.s) {
-            FlexibleViewButton(icon: "square.stack.3d.up", label: "X-ray", on: main.xray) { main.xray.toggle() }
-                .accessibilityIdentifier("flexible-main-view-xray")
-            // ★ a thermometer reads "heat" (the stacked-layers glyph did not — batch B review)
-            FlexibleViewButton(icon: FlexibleMainViewToggles.heatIcon, label: "Dent heat", on: main.heat) { main.toggleHeat() }
-                .accessibilityIdentifier("flexible-main-view-heat")
-            FlexibleViewButton(icon: FlexibleMainViewToggles.stressIcon, label: main.stressRunning ? "Simulating…" : "Stress",
-                               on: main.stress) { main.toggleStress() }
-                .overlay {
-                    if main.stressRunning, main.stress {
-                        ProgressView().controlSize(.small).tint(DS.Color.textPrimary.color).allowsHitTesting(false)
+        VStack(alignment: .trailing, spacing: DS.Space.s) {
+            HStack(spacing: DS.Space.s) {
+                // ★ a thermometer reads "heat" (the stacked-layers glyph did not — batch B review)
+                FlexibleViewButton(icon: FlexibleMainViewToggles.heatIcon, label: "Dent heat", on: main.heat) { main.toggleHeat() }
+                    .accessibilityIdentifier("flexible-main-view-heat")
+                FlexibleViewButton(icon: FlexibleMainViewToggles.stressIcon, label: main.stressRunning ? "Simulating…" : "Stress",
+                                   on: main.stress) { main.toggleStress() }
+                    .overlay {
+                        if main.stressRunning, main.stress {
+                            ProgressView().controlSize(.small).tint(DS.Color.textPrimary.color).allowsHitTesting(false)
+                        }
                     }
+                    .accessibilityIdentifier("flexible-main-view-stress")
+                // ★ C2: shows / hides the lattice — or, with nothing to show, opens Settings
+                FlexibleViewButton(icon: "cube.transparent", label: "Lattice", on: main.latticeShown) {
+                    main.latticeButtonTapped(openSettings: openSettings)
                 }
-                .accessibilityIdentifier("flexible-main-view-stress")
-            FlexibleViewButton(icon: "cube.transparent", label: "Lattice", on: main.latticeShown) { main.toggleLattice() }
-                .accessibilityIdentifier("flexible-main-view-lattice")
+                    .accessibilityIdentifier("flexible-main-view-lattice")
+            }
+            .latticeBandChipKeepOut()
+            // ★ C2: "Lattice ready" — in the band `frame` reserves under the row
+            FlexibleMainNoteView(note: main.note, main: main)
         }
-        .latticeBandChipKeepOut()
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
         .padding(.top, PageChrome.belowGizmo)
         .padding(.trailing, PageChrome.edge)
     }
 
-    /// Where the toggles sit, for the player's and the legends' keep-outs (four 40 pt buttons,
-    /// `s` apart).
+    /// Where the toggles sit, for the player's and the legends' keep-outs: the row (three 40 pt
+    /// buttons, `s` apart) AND the note's band under it (★ C2: reserved, so a note coming and
+    /// going never moves a legend).
     static func frame(viewport: CGSize) -> CGRect {
+        rowFrame(viewport: viewport).union(noteFrame(viewport: viewport))
+    }
+    /// The buttons alone.
+    static func rowFrame(viewport: CGSize) -> CGRect {
         let w = CGFloat(buttons) * 40 + CGFloat(buttons - 1) * DS.Space.s
         return CGRect(x: viewport.width - PageChrome.edge - w, y: PageChrome.belowGizmo, width: w, height: 40)
     }

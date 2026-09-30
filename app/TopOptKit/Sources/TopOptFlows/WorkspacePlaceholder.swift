@@ -1305,7 +1305,7 @@ public struct WorkspacePlaceholder: View {
                 // the entire app. Please add to the TO page side-by-side just below
                 // the position gizmo (with padding between them)"). The Surface
                 // stage keeps them in its own tray, where the rest of its tools are.
-                if flexibleMain.owns(project, stage) { FlexibleMainViewToggles(main: flexibleMain, solver: FlexibleStressSolver(app: model, sim: latticeSim)) }   // Flexible (PR #362) H5 (+C): X-ray / Dent heat / Stress / Lattice; Stress solved directly (never through startStressSolveIfNeeded's octet gate — FlexibleStressSolve.swift)
+                if flexibleMain.owns(project, stage) { FlexibleMainViewToggles(main: flexibleMain, solver: FlexibleStressSolver(app: model, sim: latticeSim), openSettings: { showFlexiblePage = true }) }   // Flexible (PR #362) H5 (+C, C2): Dent heat / Stress / Lattice (the Lattice view IS the X-ray); with nothing to show the Lattice button opens Settings; Stress solved directly (never through startStressSolveIfNeeded's octet gate — FlexibleStressSolve.swift)
                 else if viewerMesh != nil, visible.wireframe, !visible.surfaceEditing {
                     viewModeToggles
                 }
@@ -1396,6 +1396,7 @@ public struct WorkspacePlaceholder: View {
                                   onExit: { showFlexiblePage = false; latticeSettingsSavedThisSession = true; flexibleMain.didExitSettings(solver: FlexibleStressSolver(app: model, sim: latticeSim)) })
                     .transition(.opacity).zIndex(48)
             }
+            if project.lattice.flexible != nil { FlexibleExportMount(run: flexibleMain.coreRun).zIndex(48) }   // Flexible (PR #362) C2: the big Lattice button's Export step — core's answer + the exports (FlexibleExportSheet.swift)
             if showLatticeModeSheet, let mode = project.lattice.stageMode {
                 LatticeStageModeSheet(
                     mode: mode,

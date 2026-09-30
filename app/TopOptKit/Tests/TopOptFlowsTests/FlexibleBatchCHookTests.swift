@@ -23,7 +23,8 @@ final class FlexibleBatchCHookTests: XCTestCase {
             ("H4'", "vertexTints: visible.surfaceEditing ? surfaceVertexTints : flexibleMain.tints(project, on: stage, roles: roleTints, stress: latticeStressField),"),
             // ★ RE-PINNED (batch C verification): the toggles take the workspace's solver
             // (FlexibleStressSolve.swift — the regions the load case reaches, the sim's state said)
-            ("H5'", "if flexibleMain.owns(project, stage) { FlexibleMainViewToggles(main: flexibleMain, solver: FlexibleStressSolver(app: model, sim: latticeSim)) }"),
+            // ★ RE-PINNED (round 4, C2 — his answer 2): the Lattice button, with nothing to show, opens Settings
+            ("H5'", "if flexibleMain.owns(project, stage) { FlexibleMainViewToggles(main: flexibleMain, solver: FlexibleStressSolver(app: model, sim: latticeSim), openSettings: { showFlexiblePage = true }) }"),
             // ★ and Settings' Save & Exit hands it over too (the first Exit, before the toggles rendered)
             ("H2'", "flexibleMain.didExitSettings(solver: FlexibleStressSolver(app: model, sim: latticeSim)) })"),
             // ★ #354's "grading your lattice" banner stands down under Flexible (it grades nothing there)

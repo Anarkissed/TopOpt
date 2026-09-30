@@ -476,7 +476,7 @@ final class FlexibleMainViewsTests: XCTestCase {
         let b = try XCTUnwrap(r.project.viewerMesh).bounds
         let field = Self.field(nx: 60, ny: 60, nz: 14, origin: SIMD3<Double>(b.min) - 1, spacing: 2) { i, _, _ in Float(1 + i) }
         stage.stress = true
-        stage.xray = false
+        stage.latticeOn = false   // ★ round 4 (C2): X-ray off = the lattice view hidden (no X-ray button)
         _ = stage.tints(r.project, on: .lattice, roles: [:], stress: field)
         let low = b.min.z + 2, mid = (b.min + b.max) / 2
         var side: (hit: FacePicker.Hit, toEye: SIMD3<Float>)?

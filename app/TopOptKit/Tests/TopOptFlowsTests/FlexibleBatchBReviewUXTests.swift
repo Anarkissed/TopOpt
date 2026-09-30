@@ -236,18 +236,21 @@ final class FlexibleBatchBReviewUXTests: XCTestCase {
         XCTAssertEqual(m.toast, "second", "the first one's clear does not take the second")
     }
 
+    /// ★ RE-PINNED (round 4, C2 — his img 5: "remove the xray view selector if the lattice view
+    /// is going to use the rendering anyways"): there is no X-ray button any more — X-ray IS the
+    /// Lattice view's rendering, so the button still shows what is DRAWN, and the two can never
+    /// disagree (FlexibleMainPageRound4Tests pins the rest).
     @MainActor
     func testTheLatticeViewTurnsXRayOn() {
         let stage = FlexibleMainStage()
-        stage.xray = false
-        XCTAssertFalse(stage.latticeShown, "X-ray off: the walls are not drawn, and the button says so")
-        stage.toggleLattice()
-        XCTAssertTrue(stage.xray && stage.latticeShown, "turning the lattice on turns X-ray on")
+        XCTAssertTrue(stage.xray && stage.latticeShown, "the default: the lattice view, in X-ray")
         stage.toggleLattice()
         XCTAssertFalse(stage.latticeShown)
-        XCTAssertTrue(stage.xray, "turning it off leaves X-ray as it is")
-        // ★ RED CONTROL: the old button showed `latticeOn`, which stays true with X-ray off
-        stage.latticeOn = true; stage.xray = false
+        XCTAssertFalse(stage.xray, "the lattice hidden: the solid part (X-ray goes with it)")
+        stage.toggleLattice()
+        XCTAssertTrue(stage.xray && stage.latticeShown, "turning the lattice on turns X-ray on")
+        // ★ CONTROL: the button shows what is drawn — with nothing to show it is not lit, even on
+        stage.latticeAvailable = false
         XCTAssertTrue(stage.latticeOn)
         XCTAssertNotEqual(stage.latticeOn, stage.latticeShown)
         XCTAssertEqual(FlexibleMainViewToggles.heatIcon, "thermometer.medium")
