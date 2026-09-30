@@ -200,7 +200,10 @@ extension FlexibleMainStage {
     public var dentInfo: String {
         // ★ BATCH G: the 3D sim, said in ONE sentence (linear physics, scaled to core's squish) —
         // or, after a failed sim, core's words
-        if fe.active { return FlexibleFE.info(exaggeration: dentExaggeration, stiffer: fe.coreRatio) }
+        if fe.active {
+            return FlexibleFE.info(exaggeration: dentExaggeration, stiffer: fe.coreRatio,
+                                   largeStrain: Double(dentExaggeration) > fe.safeScale, bonded: fe.restsBonded)
+        }
         if let why = fe.failure { return FlexibleFE.failedInfo(why, exaggeration: dentExaggeration) }
         let what = (channels?.legendLine ?? "").components(separatedBy: " · ").first ?? ""
         return (what.isEmpty ? "The map" : what) + " is drawn \(dentExaggeration)× deeper so it reads — tap here, then the part, for the true mm."

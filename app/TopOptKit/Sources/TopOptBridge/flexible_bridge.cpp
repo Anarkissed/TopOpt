@@ -22,6 +22,7 @@
 
 #include "topopt/face_overrides.hpp"  // import_part_file_resolved
 #include "topopt/face_region.hpp"
+#include "topopt/fea.hpp"  // fea_set_geneo_twolevel (the squish sim's test hook)
 #include "topopt/flexible/curve.hpp"
 #include "topopt/flexible/data.hpp"
 #include "topopt/flexible/faces.hpp"
@@ -1053,6 +1054,10 @@ double flexible_squish_modulus(const FlexSquishLaw& law, double rho, double stra
 
 int32_t flexible_squish_coarsen(int32_t nx, int32_t ny, int32_t nz) {
   return squishfe::coarsen(nx, ny, nz);
+}
+
+bool flexible_squish_set_geneo_for_tests(bool enable) {
+  return topopt::fea_set_geneo_twolevel(enable);
 }
 
 }  // namespace topoptbridge

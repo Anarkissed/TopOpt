@@ -158,5 +158,22 @@ final class FlexibleSquishEvidenceProbe: XCTestCase {
         }
         try beforeAfter(stage, m, pm, case: "padPinchX", device: device, dir: dir)
     }
+
+    /// The M2 stand, its top pressed at 5 kg on its resting bottom: a slender, all-lattice part
+    /// whose multigrid stagnates (the work budget lets Jacobi-CG land it) and whose field is steep.
+    func testTheM2StandBeforeAndAfter() async throws {
+        guard let dir = Self.dir else { throw XCTSkip("FLEX_G_EVIDENCE_DIR") }
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let device = try XCTUnwrap(MTLCreateSystemDefaultDevice())
+        let pm = try FlexibleSquishFixture.stlProject("app/TopOptKit/Tests/TopOptFlowsTests/Fixtures/M2_verticalStand.step")
+        let mesh = try XCTUnwrap(pm.viewerMesh)
+        let top = try XCTUnwrap(FlexibleReadiness.suggestedFace(mesh: mesh, up: SIMD3(0, 0, 1))?.face)
+        let bottom = try XCTUnwrap(FlexibleReadiness.suggestedFace(mesh: mesh, up: SIMD3(0, 0, -1))?.face)
+        let (stage, m) = try await stage(pm, "the M2 stand") { m in
+            _ = m.press(top, kg: 5)
+            m.rest(bottom)
+        }
+        try beforeAfter(stage, m, pm, case: "m2stand", device: device, dir: dir)
+    }
 }
 #endif

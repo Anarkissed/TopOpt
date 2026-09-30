@@ -48,11 +48,21 @@ constexpr double kEpsMin = 0.02;
 // Iacob's specimen: 12.5 mm high, 1.6 mm of skins — core's loader converts nominal to core strain
 // by 12.5 / 10.9 (data.cpp). Used ONLY by the test control 256 (the law read on the nominal axis).
 constexpr double kNominalToCore = 12.5 / 10.9;
-// ★ THE SOLVE IS BOUNDED BY ITERATIONS TOO. Core polls the deadline once every 256 CG iterations,
-// so a multigrid solve that crawls (a loaded or slow device) could run far past its 20 s budget
-// (measured: ~150 s under heavy CPU load) before the poll. His pad converges in 13–150 iterations;
-// past this cap core throws its non-convergence (a value here: the column squish plays).
-constexpr int kMaxIterations = 600;
+// ★ THE SOLVE IS BOUNDED BY WORK TOO, not only by its deadline. Core polls the deadline once every
+// 256 CG iterations, so a solve that crawls (a loaded or slow device) could run far past its 20 s
+// budget (measured: ~150 s under heavy CPU load) before the poll. Core gives multigrid at most 300
+// V-cycles whatever the cap, then restarts Jacobi-CG from zero; the cap bounds THAT. A fixed 600
+// failed the M2 stand (64 × 16 × 59, 13 287 elements, all lattice, E 0.16–34 MPa): multigrid
+// stagnates there and Jacobi-CG needs 2 556 iterations for 1e-4. So the cap is a WORK budget —
+// elements × Jacobi-CG iterations, ~4 s of Jacobi on an M2 Pro — never under 600 (his pad: 939;
+// the M2 stand: 3 763). Past it core's non-convergence is a value (the column squish plays).
+constexpr int kMinIterations = 600;
+constexpr int kMaxIterationsCap = 20000;
+constexpr double kIterationWork = 5.0e7;
+int iteration_cap(long long elements) {
+  const double by_work = kIterationWork / static_cast<double>(std::max<long long>(elements, 1));
+  return static_cast<int>(std::clamp(by_work, static_cast<double>(kMinIterations), static_cast<double>(kMaxIterationsCap)));
+}
 
 enum Control : int {
   kPoissonZero = 1,
@@ -67,6 +77,9 @@ enum Control : int {
   kOtherAnchors = 512,
   kUnprojected = 1024,
   kBondedRests = 2048,
+  kLongSolve = 4096,
+  kFixedCap = 8192,
+  kKeepGlobals = 16384,
 };
 
 std::mutex g_squish_fe_mu;
@@ -130,7 +143,7 @@ Law make_law(const FlexSquishLaw& in, const fx::FlexibleData& data) {
     L.es = it->second.solid_youngs_modulus_mpa.value_mpa;
   } else {
     // unknown solid modulus on a filament with curves: 20 × the firmest lattice's initial
-    // modulus (said in the receipt; no current filament hits it)
+    // modulus (NOT flagged in the solution; no current filament hits it)
     Law probe = L;
     probe.es = 1.0;
     L.es = 20.0 * probe.lattice(L.set.density_max(), 0.0, 0);
@@ -366,16 +379,28 @@ std::vector<std::vector<double>> null_modes(std::vector<double> A) {
 }
 
 // ── the posture (RAII) ───────────────────────────────────────────────────────────────
+// ★ A TOPOLOGY RUN LEAVES CORE'S PRODUCTION TOGGLES ARMED FOR THE PROCESS (found in the suite:
+// configure_production_options arms the GenEO two-level deflation and Krylov recycling, and
+// nothing disarms them). The squish sim's Jacobi-CG fallback then built a GenEO eigenbasis
+// (LOBPCG) for its own system: 73 s on the M2 stand, which solves in 3.9 s without it. The
+// posture pins both OFF for the sim and gives them back (control 16384 leaves them as found).
 struct Posture {
   int prev_threads = 0;
   int prev_pad = 1;
   bool prev_alg = false;
+  bool prev_geneo = false;
+  bool prev_recycling = false;
+  bool keep_globals = false;
   double prev_deadline = 0.0;
-  explicit Posture(double deadline_abs_ms) {
+  explicit Posture(double deadline_abs_ms, bool keep = false) : keep_globals(keep) {
     prev_threads = topopt::fea_set_matfree_threads(1);
     prev_pad = topopt::fea_mg_parity_pad_mode();
     topopt::fea_set_mg_parity_pad_mode(1);
     prev_alg = topopt::fea_set_mg_algebraic_level1(false);
+    if (!keep_globals) {
+      prev_geneo = topopt::fea_set_geneo_twolevel(false);
+      prev_recycling = topopt::fea_set_krylov_recycling(false);
+    }
     topopt::fea_matfree_reset_mg_stagnation_latch();
     topopt::fea_reset_krylov_recycle_space();
     prev_deadline = topopt::fea_set_solve_deadline_ms(deadline_abs_ms);
@@ -384,6 +409,10 @@ struct Posture {
     topopt::fea_set_solve_deadline_ms(prev_deadline);
     topopt::fea_matfree_reset_mg_stagnation_latch();
     topopt::fea_reset_krylov_recycle_space();
+    if (!keep_globals) {
+      topopt::fea_set_krylov_recycling(prev_recycling);
+      topopt::fea_set_geneo_twolevel(prev_geneo);
+    }
     topopt::fea_set_mg_algebraic_level1(prev_alg);
     topopt::fea_set_mg_parity_pad_mode(prev_pad);
     topopt::fea_set_matfree_threads(prev_threads);
@@ -418,7 +447,6 @@ FlexSquishSolution solve(const Setup& s, const FlexSquishRequest& req, const fx:
   if (s.pressed.empty()) throw std::invalid_argument("squish sim: no pressed face");
   if (s.model == nullptr) throw std::invalid_argument("squish sim: no part");
   const int control = req.control;
-  const double deadline_abs = req.deadline_ms > 0.0 ? t0 + req.deadline_ms : 0.0;
   out.resting_missing = s.resting_missing;
 
   // ── the law, per scene voxel ──
@@ -824,30 +852,58 @@ FlexSquishSolution solve(const Setup& s, const FlexSquishRequest& req, const fx:
   const double nu = (control & kPoissonZero) ? 0.0 : req.poisson;
   topopt::FeaSolution sol;
   {
+    // control 4096: a reference solve (the budget lifted — the deadline still holds); control
+    // 8192: the old fixed 600 (the red control of the work budget)
+    out.max_iterations = (control & kLongSolve) ? kMaxIterationsCap
+                         : (control & kFixedCap) ? kMinIterations
+                                                 : iteration_cap(out.elements);
+    const double tw = topopt::steady_clock_ms();
     std::lock_guard<std::mutex> lock(g_squish_fe_mu);
+    // ★ THE DEADLINE STARTS HERE, once this sim holds the solver: it bounds the solve's OWN work.
+    // Measured from the request, a sim queued behind another (a second stage model's, in the
+    // suite) spent its whole 20 s waiting and began with none left — core then threw its deadline
+    // at the first poll, and the M2 stand played the column squish. The wait is said in `wait_ms`.
+    out.wait_ms = topopt::steady_clock_ms() - tw;
+    const double deadline_abs = req.deadline_ms > 0.0 ? topopt::steady_clock_ms() + req.deadline_ms : 0.0;
     out.threads_before = topopt::fea_matfree_thread_count();
+    out.geneo_before = topopt::fea_geneo_twolevel_enabled();
     {
-      Posture posture(deadline_abs);
+      Posture posture(deadline_abs, (control & kKeepGlobals) != 0);
       out.threads_during = topopt::fea_matfree_thread_count();
+      out.geneo_during = topopt::fea_geneo_twolevel_enabled();
+      out.recycling_during = topopt::fea_krylov_recycling_enabled();
       if (deadline_abs > 0.0 && topopt::steady_clock_ms() >= deadline_abs) {
         out.failure = "the solve deadline passed before the squish sim's solve began (" +
                       std::to_string(static_cast<long long>(req.deadline_ms)) + " ms budget)";
       } else {
         const double ts = topopt::steady_clock_ms();
+        // core fills `info` before it throws its non-convergence, so a failure says WHICH solver
+        // gave up (the hierarchy never built, or the V-cycles stagnated and Jacobi-CG ran out). Its
+        // deadline throws from INSIDE the recurrence, before `info` is filled: say the clock.
+        topopt::CgInfo info;
         try {
-          topopt::CgInfo info;
-          sol = topopt::fea_solve_mgcg_matfree(fe.g, fe.E, nu, bcs, loads, req.tolerance, kMaxIterations, &info, nullptr, nullptr);
-          out.iterations = info.iterations;
-          out.residual = info.residual;
-          out.used_multigrid = info.used_multigrid;
-          out.mg_levels = info.mg_levels;
+          sol = topopt::fea_solve_mgcg_matfree(fe.g, fe.E, nu, bcs, loads, req.tolerance, out.max_iterations, &info, nullptr, nullptr);
+        } catch (const topopt::SolverDeadlineExceeded& e) {
+          out.failure = std::string(e.what()) + " (after " +
+                        std::to_string(static_cast<long long>(topopt::steady_clock_ms() - ts)) + " ms of solving, at CG iteration " +
+                        std::to_string(e.iterations) + ", residual " + std::to_string(e.residual) + ")";
+        } catch (const topopt::SolverNonConvergence& e) {
+          out.failure = std::string(e.what()) + " (multigrid " + (info.hier_built ? "built" : "not built") +
+                        ", " + std::to_string(info.mg_cycles_attempted) + " V-cycles, then " +
+                        std::to_string(info.iterations) + " Jacobi-CG iterations, residual " +
+                        std::to_string(info.residual) + ")";
         } catch (const std::exception& e) {
           out.failure = e.what();
         }
+        out.iterations = info.iterations;
+        out.residual = info.residual;
+        out.used_multigrid = info.used_multigrid;
+        out.mg_levels = info.mg_levels;
         out.solve_ms = topopt::steady_clock_ms() - ts;
       }
     }
     out.threads_after = topopt::fea_matfree_thread_count();
+    out.geneo_after = topopt::fea_geneo_twolevel_enabled();
   }
   if (!out.failure.empty()) return out;
   if (sol.u.size() != 3 * N) {

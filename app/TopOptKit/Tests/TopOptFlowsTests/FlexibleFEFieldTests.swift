@@ -12,7 +12,9 @@
 //     corner-blend dent leaves the big side triangles flat (the torn face);
 //   * the extension outside the solid is smooth — RED: zeros outside (control 64);
 //   * five pressed faces all move (the D2 four-slot limit is gone) — RED: the column slots;
-//   * a sector's loads stay on its side of the cut — RED: the cuts ignored (control 4).
+//   * a sector's loads stay on its side of the cut — RED: the cuts ignored (control 4);
+//   * a slender all-lattice part (the M2 stand) gets its field — RED: the old fixed 600
+//     iterations (control 8192).
 import XCTest
 import simd
 @testable import TopOptFlows
@@ -98,6 +100,28 @@ final class FlexibleFEFieldTests: XCTestCase {
         let raw = FlexibleFEField(solution: s, simID: sim.id, generation: r.generation)
         let banded = raw.calibrated(to: sim.targets)
         XCTAssertGreaterThan(abs(banded.calibration(sim.targets).k - 1), 0.01, "control: the band would not reach the drawing")
+    }
+
+    /// The Squish legend's (i) in every FE state is ONE sentence (his rule: details behind an (i),
+    /// one line each) — normal, stiffer / softer than core's columns, past small strain, failed with
+    /// core's words (which may hold sentences of their own). RED CONTROL: core's words kept raw
+    /// would make two sentences.
+    func testTheSquishInfoIsOneSentence() {
+        let core = "CG did not converge. The iteration blew its time budget."
+        let lines = [FlexibleFE.info(exaggeration: 2), FlexibleFE.info(exaggeration: 2, stiffer: 3.6),
+                     FlexibleFE.info(exaggeration: 1, stiffer: 0.3), FlexibleFE.info(exaggeration: 1, largeStrain: true),
+                     FlexibleFE.failedInfo(core, exaggeration: 4), FlexibleFE.info(exaggeration: 2, stiffer: 3.6, bonded: true)]
+        for l in lines {
+            XCTAssertFalse(l.contains(". "), "one sentence: \(l)")
+            XCTAssertTrue(l.hasSuffix("."))
+            XCTAssertFalse(l.lowercased().contains("purple"))
+        }
+        print("FLEX-G INFO: " + lines.joined(separator: " | "))
+        XCTAssertTrue(lines[1].contains("4× stiffer"))
+        XCTAssertTrue(lines[4].contains("CG did not converge; The iteration"), "core's words kept, joined")
+        XCTAssertTrue(lines[5].contains("every rest held fast") && lines[5].contains("4× stiffer"), "the bonded retry is said")
+        XCTAssertFalse(lines[1].contains("held fast"), "…and only then")
+        XCTAssertTrue(core.contains(". "), "control: core's raw words are two sentences")
     }
 
     // MARK: - the dent follows the drawing
@@ -377,6 +401,55 @@ final class FlexibleFEFieldTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(Double(bad.fail) / Double(bad.tried), 0.01, "control: …and the inverse fails there")
     }
 
+    // MARK: - a slender all-lattice part
+
+    /// The M2 stand (64 × 16 × 59, every voxel lattice, E 0.16–34 MPa), its top pressed at 5 kg on
+    /// its resting bottom: multigrid stagnates there (core gives it 300 V-cycles) and Jacobi-CG then
+    /// needs ~2 600 iterations for 1e-4. The solve's cap is a WORK budget (elements × iterations),
+    /// so the stand gets its field; a fixed 600 threw and the stand played the column squish.
+    /// Run with core's GenEO deflation ARMED, as a topology run leaves the process.
+    /// ★ RED CONTROL (8192): the old fixed 600 iterations.
+    func testASlenderAllLatticePartGetsItsField() async throws {
+        // as a topology run leaves the process: core's GenEO deflation armed (its eigenbasis build
+        // made this sim 73 s in the suite before the posture pinned it off)
+        let was = FlexibleCore.squishSetGeneoForTests(true)
+        addTeardownBlock { FlexibleCore.squishSetGeneoForTests(was) }
+        let pm = try FlexibleSquishFixture.stlProject("app/TopOptKit/Tests/TopOptFlowsTests/Fixtures/M2_verticalStand.step")
+        let mesh = try XCTUnwrap(pm.viewerMesh)
+        let top = try XCTUnwrap(FlexibleReadiness.suggestedFace(mesh: mesh, up: SIMD3(0, 0, 1))?.face)
+        let bottom = try XCTUnwrap(FlexibleReadiness.suggestedFace(mesh: mesh, up: SIMD3(0, 0, -1))?.face)
+        let m = try await FlexibleSquishFixture.model(self, pm, "the M2 stand") { m in
+            _ = m.press(top, kg: 5)
+            m.rest(bottom)
+        }
+        FlexibleSquishFixture.log(m, "the M2 stand")
+        let f = try XCTUnwrap(m.squish["group-1"]?.field, "the stand's sim landed: \(m.squish["group-1"]?.failure ?? "-")")
+        let (s, r, sim) = try await FlexibleSquishFixture.resolve(m)
+        XCTAssertTrue(s.ok, s.failure)
+        XCTAssertTrue(s.geneoBefore && !s.geneoDuring, "GenEO armed in the process, off for the sim")
+        XCTAssertFalse(s.usedMultigrid, "premise: multigrid stagnates on this part")
+        XCTAssertGreaterThan(s.iterations, 600, "premise: Jacobi-CG needs more than the old fixed cap")
+        XCTAssertLessThanOrEqual(s.iterations, s.maxIterations)
+        XCTAssertGreaterThan(f.maxDisplacement, 0)
+        // it IS the solve's answer: within 0.5 % of a 1e-8 reference (the budget lifted)
+        let ref = await m.squishWorker.sceneRef()
+        let scene = try XCTUnwrap(ref)
+        var q = r.request(sim, control: 4096, deadlineMS: 180_000)
+        q.tolerance = 1e-8
+        let exact = try scene.squishSolve(q)
+        XCTAssertTrue(exact.ok, exact.failure)
+        var dev: Float = 0, big: Float = 0
+        for i in 0..<min(s.u.count, exact.u.count) { dev = max(dev, abs(s.u[i] - exact.u[i])); big = max(big, abs(exact.u[i])) }
+        print(String(format: "FLEX-G M2 STAND: %d elements · E %.3f..%.2f MPa · multigrid %@ · %d of %d iterations · %.0f ms · k %.3f · max |u − u(1e-8)| / max |u| %.5f (the reference: %d iterations)",
+                     s.elements, s.eMinMPa, s.eMaxMPa, "\(s.usedMultigrid)", s.iterations, s.maxIterations, s.solveMS, f.scale, dev / max(big, 1e-30), exact.iterations))
+        XCTAssertLessThanOrEqual(dev / max(big, 1e-30), 0.005)
+        // ★ RED CONTROL (8192): the old fixed 600 throws core's non-convergence
+        let (old, _, _) = try await FlexibleSquishFixture.resolve(m, control: 8192)
+        print("FLEX-G M2 STAND control 8192 (600 iterations): ok \(old.ok) · \(old.failure)")
+        XCTAssertFalse(old.ok, "control: 600 iterations do not reach 1e-4 on the stand")
+        XCTAssertTrue(old.failure.contains("did not reach"), old.failure)
+    }
+
     // MARK: - five faces, and the sectors' loads
 
     func testFiveFacePinchMovesEveryFace() async throws {
@@ -387,9 +460,19 @@ final class FlexibleFEFieldTests: XCTestCase {
         let f = try XCTUnwrap(m.squish["group-1"]?.field)
         XCTAssertEqual(m.squeezeGroups.count, 1)
         // nothing of this group rests on an anvil: the sliding rests' solve stalls, and the one retry
-        // with every rest bonded lands (said in the receipt)
+        // with every rest bonded lands (said behind the Squish legend's (i))
         print("FLEX-G FIVE: rests bonded by the retry \(f.restsBonded)")
         XCTAssertTrue(f.restsBonded, "the sliding solve did not converge; the bonded retry landed")
+        // …and the Squish legend's (i) says so: the view the main page draws, from this model
+        let stage = FlexibleMainStage()
+        stage.fe = stage.feView(m, drawn: g)
+        XCTAssertTrue(stage.fe.active)
+        XCTAssertTrue(stage.fe.restsBonded)
+        XCTAssertTrue(stage.dentInfo.contains("every rest held fast"), stage.dentInfo)
+        print("FLEX-G FIVE (i): \(stage.dentInfo)")
+        // ★ RED CONTROL: the same view without the flag says nothing of it
+        stage.fe.restsBonded = false
+        XCTAssertFalse(stage.dentInfo.contains("held fast"), "control: an unflagged field is silent")
         var moves: [Int: Float] = [:]
         for k in g.keys {
             let st = try XCTUnwrap(m.stacks[k])

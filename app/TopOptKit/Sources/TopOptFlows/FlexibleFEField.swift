@@ -43,7 +43,7 @@ public struct FlexibleFEField: Sendable, Equatable {
     public let iterations: Int
     public let solveMS: Double
     public let coarsen: Int
-    /// No deepest zone to calibrate against (k = 1; the receipt says so).
+    /// No deepest zone to calibrate against (k = 1; flagged here — nothing on screen says it yet).
     public private(set) var uncalibrated: Bool
     /// k as the deepest zone asked for it (before the band): > 2 ⇒ the sim found the part that many
     /// times stiffer than core's columns (FlexibleFE.calibrationBand).

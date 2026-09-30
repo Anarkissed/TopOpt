@@ -373,12 +373,61 @@ final class FlexibleSquishFETests: XCTestCase {
         XCTAssertTrue(s.ok, s.failure)
         XCTAssertEqual(s.threadsDuring, 1, "the display solve runs on ONE matrix-free thread")
         XCTAssertEqual(s.threadsAfter, s.threadsBefore, "…and gives the count back")
-        // a deadline that has already passed: a VALUE (ok = false, the deadline said), not a throw
-        let late = try pad.scene.squishSolve(Self.request(pad, pressed: [press], resting: [Self.bottom], deadlineMS: 1))
-        print("FLEX-G FE posture: threads \(s.threadsBefore)/\(s.threadsDuring)/\(s.threadsAfter) · 1 ms deadline: ok \(late.ok) '\(late.failure)' · threads after \(late.threadsAfter)")
+        // a deadline that has passed before the solve began: a VALUE (ok = false, the deadline
+        // said), not a throw (the deadline starts once the sim holds the solver, so it is 1 ns)
+        let late = try pad.scene.squishSolve(Self.request(pad, pressed: [press], resting: [Self.bottom], deadlineMS: 1e-6))
+        print("FLEX-G FE posture: threads \(s.threadsBefore)/\(s.threadsDuring)/\(s.threadsAfter) · 1 ns deadline: ok \(late.ok) '\(late.failure)' · threads after \(late.threadsAfter)")
         XCTAssertFalse(late.ok)
         XCTAssertTrue(late.failure.contains("deadline"), late.failure)
         XCTAssertEqual(late.threadsAfter, late.threadsBefore, "restored on the failure path too")
+        // a topology run leaves core's GenEO deflation armed for the process: the sim pins it off
+        // (and Krylov recycling) and gives it back
+        let was = FlexibleCore.squishSetGeneoForTests(true)
+        defer { FlexibleCore.squishSetGeneoForTests(was) }
+        let armed = try pad.scene.squishSolve(Self.request(pad, pressed: [press], resting: [Self.bottom]))
+        print("FLEX-G FE posture, GenEO armed before: during \(armed.geneoDuring) · recycling during \(armed.recyclingDuring) · after \(armed.geneoAfter)")
+        XCTAssertTrue(armed.ok, armed.failure)
+        XCTAssertTrue(armed.geneoBefore, "premise: armed, as a topology run leaves it")
+        XCTAssertFalse(armed.geneoDuring, "the sim's solve runs without GenEO")
+        XCTAssertFalse(armed.recyclingDuring, "…and without Krylov recycling")
+        XCTAssertTrue(armed.geneoAfter, "…and gives it back")
+        // ★ RED CONTROL (16384): left as found, the sim's Jacobi-CG would build a GenEO basis
+        let kept = try pad.scene.squishSolve(Self.request(pad, pressed: [press], resting: [Self.bottom], control: 16384))
+        XCTAssertTrue(kept.geneoDuring, "control: left as found, GenEO is armed during the sim")
+    }
+
+    /// A sim queued behind another keeps its WHOLE budget: the deadline starts once it holds the
+    /// solver. (In the suite a second stage model's sim held it, and the M2 stand's sim — its
+    /// deadline measured from the request — began with none of its 20 s left: core threw at its
+    /// first poll, "multigrid not built, 0 V-cycles, then 0 Jacobi-CG iterations".)
+    /// ★ RED CONTROL: measured from the request, the queued sim's wait + setup + solve is past it.
+    func testAQueuedSimKeepsItsWholeBudget() throws {
+        let a = try Self.pad(), b = try Self.pad()
+        let pressA = try a.press(Self.top, weightN: 294.3), pressB = try b.press(Self.top, weightN: 294.3)
+        // the first sim cannot converge (1e-300, below rounding; the budget lifted): it holds the
+        // solver until its iteration cap or its own 8 s deadline
+        final class Box: @unchecked Sendable { var s: FlexSquishSolutionInfo? }
+        let first = Box()
+        let started = DispatchSemaphore(value: 0), done = DispatchSemaphore(value: 0)
+        let reqA = Self.request(a, pressed: [pressA], resting: [Self.bottom], control: 4096, tolerance: 1e-300, deadlineMS: 8000)
+        DispatchQueue.global(qos: .userInitiated).async {
+            started.signal()
+            first.s = try? a.scene.squishSolve(reqA)
+            done.signal()
+        }
+        started.wait()
+        Thread.sleep(forTimeInterval: 0.5)
+        let budget = 2000.0
+        let queued = try b.scene.squishSolve(Self.request(b, pressed: [pressB], resting: [Self.bottom], deadlineMS: budget))
+        done.wait()
+        print(String(format: "FLEX-G FE queue: the first sim %.0f ms (ok %@) · the queued sim waited %.0f ms, set up %.0f, solved %.0f ms of its %.0f ms budget (ok %@)",
+                     first.s?.solveMS ?? -1, "\(first.s?.ok ?? false)", queued.waitMS, queued.setupMS, queued.solveMS, budget, "\(queued.ok)"))
+        XCTAssertTrue(queued.ok, queued.failure)
+        XCTAssertGreaterThan(queued.waitMS, 1000, "premise: it waited behind the first sim")
+        XCTAssertLessThanOrEqual(queued.solveMS, budget)
+        // ★ RED CONTROL: from the request, the wait ate the budget
+        XCTAssertGreaterThan(queued.waitMS + queued.setupMS + queued.solveMS, budget,
+                             "control: measured from the request, the queued sim would have run out")
     }
 
     func testDisplayToleranceIsEnough() throws {

@@ -69,15 +69,22 @@ public enum FlexibleFE {
     public static let failed = "Simple squish · the sim failed"
     /// The Squish legend's (i), in FE mode — one sentence. `stiffer`: the sim found the part this
     /// many times stiffer than core's columns (k past its band) — said, since it then moves less
-    /// than the map reads.
-    public static func info(exaggeration k: Int, stiffer: Double? = nil) -> String {
+    /// than the map reads. `largeStrain`: even the page's ×k is past s · gmax ≤ ½. `bonded`: the
+    /// sliding rests' solve did not settle and the one retry held every rest fast (a stiffer
+    /// picture) — said.
+    public static func info(exaggeration k: Int, stiffer: Double? = nil, largeStrain: Bool = false, bonded: Bool = false) -> String {
+        let sim = bonded ? "a linear 3D sim with every rest held fast (sliding, it did not settle)" : "a linear 3D sim"
+        if largeStrain {
+            // even ×1 is past s · gmax ≤ ½: the linear sim has left small strain here
+            return "The shape moves by \(sim) that leaves small strain here, so the picture can fold where real TPU would stiffen — tap here, then the part, for core's mm."
+        }
         if let r = stiffer, r > 1 {
-            return String(format: "The shape is drawn %d× deeper and moves by a linear 3D sim that finds this part %.0f× stiffer than core's columns (its skin and walls carry load), so it moves less than the map reads — tap here, then the part, for core's mm.", k, r)
+            return String(format: "The shape is drawn %d× deeper and moves by %@ that finds this part %.0f× stiffer than core's columns (its skin and walls carry load), so it moves less than the map reads — tap here, then the part, for core's mm.", k, sim, r)
         }
         if let r = stiffer, r > 0, r < 1 {
-            return String(format: "The shape is drawn %d× deeper and moves by a linear 3D sim that finds this part %.0f× softer than core's columns, so it moves more than the map reads — tap here, then the part, for core's mm.", k, 1 / r)
+            return String(format: "The shape is drawn %d× deeper and moves by %@ that finds this part %.0f× softer than core's columns, so it moves more than the map reads — tap here, then the part, for core's mm.", k, sim, 1 / r)
         }
-        return "The shape is drawn \(k)× deeper and moves by a linear 3D sim scaled to core's squish; real TPU stiffens and thin walls can fold — tap here, then the part, for the true mm."
+        return "The shape is drawn \(k)× deeper and moves by \(sim) scaled to core's squish; real TPU stiffens and thin walls can fold — tap here, then the part, for the true mm."
     }
     /// The Squish legend's (i) after a failed sim — one sentence, core's words kept.
     public static func failedInfo(_ why: String, exaggeration k: Int) -> String {

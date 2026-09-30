@@ -87,14 +87,21 @@ public struct FlexSquishSolutionInfo: Sendable {
     /// Per node: a solid element owns it.
     public let solved: [Bool]
     public let elements: Int, iterations: Int, mgLevels: Int
+    /// The solve's iteration cap: a work budget, elements × iterations (never under 600).
+    public let maxIterations: Int
     public let usedMultigrid: Bool
     public let residual: Double, setupMS: Double, solveMS: Double
+    /// Waiting for another sim to leave the solver (the deadline starts after it).
+    public let waitMS: Double
     public let eMinMPa: Double, eMaxMPa: Double
     public let appliedForceN: SIMD3<Double>
     public let appliedForceAbsN: Double
     public let heldReactionN: SIMD3<Double>
     public let anchorReactionN: Double
     public let threadsBefore: Int, threadsDuring: Int, threadsAfter: Int
+    /// Core's GenEO deflation before / during / after the solve (a topology run leaves it armed;
+    /// the posture pins it off for the sim), and Krylov recycling during it.
+    public let geneoBefore: Bool, geneoDuring: Bool, geneoAfter: Bool, recyclingDuring: Bool
     /// Per press: its nodal loads (node, N) — the tests' receipt — the force it was normalised
     /// to (Σ p · column area) and the raw Σ p · projected area before normalising.
     public let pressLoads: [[(node: Int, force: SIMD3<Double>)]]
@@ -159,12 +166,14 @@ extension FlexibleScene {
         return FlexSquishSolutionInfo(
             ok: s.ok, failure: String(s.failure), bcMode: String(s.bc_mode), freeModes: Int(s.free_modes), coarsen: Int(s.coarsen),
             nx: Int(s.nx), ny: Int(s.ny), nz: Int(s.nz), spacing: s.spacing, origin: FlexConv.v3(s.origin),
-            u: u, solved: solved, elements: Int(s.elements), iterations: Int(s.iterations), mgLevels: Int(s.mg_levels),
-            usedMultigrid: s.used_multigrid, residual: s.residual, setupMS: s.setup_ms, solveMS: s.solve_ms,
+            u: u, solved: solved, elements: Int(s.elements), iterations: Int(s.iterations), mgLevels: Int(s.mg_levels), maxIterations: Int(s.max_iterations),
+            usedMultigrid: s.used_multigrid, residual: s.residual, setupMS: s.setup_ms, solveMS: s.solve_ms, waitMS: s.wait_ms,
             eMinMPa: s.e_min_mpa, eMaxMPa: s.e_max_mpa, appliedForceN: FlexConv.v3(s.applied_force_n),
             appliedForceAbsN: s.applied_force_abs_n, heldReactionN: FlexConv.v3(s.held_reaction_n),
             anchorReactionN: s.anchor_reaction_n, threadsBefore: Int(s.threads_before),
             threadsDuring: Int(s.threads_during), threadsAfter: Int(s.threads_after),
+            geneoBefore: s.geneo_before, geneoDuring: s.geneo_during, geneoAfter: s.geneo_after,
+            recyclingDuring: s.recycling_during,
             pressLoads: loads, pressForceN: Array(s.press_force_n), pressRawForceN: Array(s.press_raw_force_n),
             heldNodes: Array(s.held_nodes).map { Int($0) }, pinnedDOFs: Array(s.pinned_dofs).map { Int($0) },
             restingMissing: Array(s.resting_missing).map { Int($0) })
@@ -186,6 +195,13 @@ extension FlexibleCore {
     /// The FE grid's coarsening factor for an nx × ny × nz scene grid (core-side rule).
     public static func squishCoarsen(nx: Int, ny: Int, nz: Int) -> Int {
         Int(topoptbridge.flexible_squish_coarsen(Int32(nx), Int32(ny), Int32(nz)))
+    }
+
+    /// TESTS: arm core's GenEO deflation process-wide, as a topology run leaves it. Returns the
+    /// previous setting.
+    @discardableResult
+    public static func squishSetGeneoForTests(_ enable: Bool) -> Bool {
+        topoptbridge.flexible_squish_set_geneo_for_tests(enable)
     }
 }
 

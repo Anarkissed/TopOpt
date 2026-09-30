@@ -34,6 +34,9 @@ struct FlexibleFEView: Equatable {
     /// The sequence's first clamped field: how much stiffer (> 1) or softer the sim found the part
     /// than core's columns (the (i) says it).
     var coreRatio: Double?
+    /// A field of the sequence was solved with every rest held fast (its sliding solve did not
+    /// settle — the one retry): the (i) says so.
+    var restsBonded = false
     /// The FE field moves the picture.
     var active: Bool { !sequence.isEmpty }
 
@@ -68,6 +71,7 @@ extension FlexibleMainStage {
         v.token = h.finalize()
         v.safeScale = v.sequence.map { v.fields[$0].maxSafeScale }.min() ?? .infinity
         v.coreRatio = v.sequence.map { v.fields[$0] }.first { $0.clamped }?.coreRatio
+        v.restsBonded = v.sequence.contains { v.fields[$0].restsBonded }
         return v
     }
 

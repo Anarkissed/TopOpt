@@ -519,7 +519,10 @@ struct FlexSquishRequest {
                          // 8 uniform pressure . 16 uniform E . 32 lattice=solid . 64 no extension
                          // . 128 every rest slides . 256 nominal-strain law . 512 other pins
                          // . 1024 unprojected traction . 2048 every rest bonded — the app's one
-                         // retry when a solve whose rests slide does not converge); else the app sends 0
+                         // retry when a solve whose rests slide does not converge) . 4096 the
+                         // iteration budget lifted (a reference solve) . 8192 the old fixed 600
+                         // iterations . 16384 core's GenEO + Krylov recycling left as found); else
+                         // the app sends 0
 };
 struct FlexSquishSolution {
   bool ok = false;
@@ -534,13 +537,18 @@ struct FlexSquishSolution {
   FlexFloats u;                          // 3 per node, mm, RAW (uncalibrated), extended to every node
   FlexBytes solved;                      // per node: 1 = a node the solver owned (a solid element's)
   int32_t elements = 0, iterations = 0, mg_levels = 0;
+  int32_t max_iterations = 0;            // the solve's cap: a WORK budget (elements x iterations)
   bool used_multigrid = false;
   double residual = 0, setup_ms = 0, solve_ms = 0, e_min_mpa = 0, e_max_mpa = 0;
+  double wait_ms = 0;                    // waiting for another sim to leave the solver (the
+                                         // deadline starts after it)
   double applied_force_n[3] = {0, 0, 0};  // the presses' loads, summed (before inertia relief)
   double applied_force_abs_n = 0;         // sum of the presses' force magnitudes
   double held_reaction_n[3] = {0, 0, 0};  // K u - f summed over the held (rest / exit) DOFs
   double anchor_reaction_n = 0;           // |K u - f| over the pinned DOFs (free: the six 3-2-1 pins)
   int32_t threads_before = 0, threads_during = 0, threads_after = 0;  // posture receipt
+  bool geneo_before = false, geneo_during = false, geneo_after = false;  // core's GenEO deflation
+  bool recycling_during = false;         // core's Krylov recycling while the sim solved
   // receipts the tests read: each press's nodal loads (flattened per press) and its force
   std::vector<int32_t> press_load_offsets;  // size presses + 1, into press_load_nodes
   std::vector<int32_t> press_load_nodes;
@@ -561,5 +569,8 @@ double flexible_squish_modulus(const FlexSquishLaw& law, double rho, double stra
 // The coarsening factor of the FE grid for an nx x ny x nz scene grid: 1 up to 120 000 voxels,
 // 2 up to 960 000, else 4 (FlexibleFE.coarsen is its Swift twin; a test holds them together).
 int32_t flexible_squish_coarsen(int32_t nx, int32_t ny, int32_t nz);
+// TESTS: arm (or disarm) core's GenEO two-level deflation process-wide, as a topology run's
+// configure_production_options leaves it. Returns the previous setting.
+bool flexible_squish_set_geneo_for_tests(bool enable);
 
 }  // namespace topoptbridge

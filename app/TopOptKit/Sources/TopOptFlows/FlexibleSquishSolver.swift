@@ -132,7 +132,9 @@ public final class FlexibleSquishSolver {
             running.append(id)
             solveCount += 1
             let bits = controlBits
-            let deadline = controlFailSimIDs.contains(id) ? 1 : (controlDeadlineMS ?? FlexibleFE.deadlineMS)
+            // a forced failure: a 1 ns budget (the deadline starts once the sim holds the solver, so
+            // 1 ms is enough for a solve that converges before core's first poll)
+            let deadline = controlFailSimIDs.contains(id) ? 1e-6 : (controlDeadlineMS ?? FlexibleFE.deadlineMS)
             // (the rule is the SERIAL queue; the red control's concurrency needs a concurrent one)
             let q = controlConcurrency > 1 ? DispatchQueue.global(qos: .utility) : queue
             Task { @MainActor [weak self] in

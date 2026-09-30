@@ -119,7 +119,7 @@ public struct FlexibleFERequest: Sendable {
             var s = try scene.squishSolve(r.request(sim, control: control, deadlineMS: deadlineMS))
             // ★ A squeeze whose rests SLIDE leaves near-rigid modes held by one pin each; on a
             // high-contrast part multigrid can stall there (his pad with the bottom pressed too:
-            // no convergence in 600 iterations; bonded: 221). Retry ONCE with every rest bonded
+            // multigrid stagnates and Jacobi-CG runs out of its work budget; bonded: 221). Retry ONCE with every rest bonded
             // (the design's rule) — a stiffer picture, still one continuous field.
             var retried = false
             if !s.ok, s.freeModes > 0, s.bcMode == "rest", control & FlexibleFE.bondedRests == 0 {
