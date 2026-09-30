@@ -5236,7 +5236,7 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     /// copied back. Returns the MODEL-space point of the strut surface, or nil when
     /// the pixel is not lattice — the caller then falls through to ordinary picking.
     func latticeProbe(atNormalizedPoint p: CGPoint, width: Int, height: Int) -> LatticeProbeHit? {
-        guard vertexDrawCount > 0, latticeInFrame, width > 0, height > 0 else { return nil }
+        guard vertexDrawCount > 0, latticeInFrame || flexibleLatticeInFrame, width > 0, height > 0 else { return nil }   // Flexible (PR #362) M4: a tap on a Flexible wall is found too
         sceneDepthColorTex = nil; sceneDepthZTex = nil
         sceneNormalTex = nil; gbufferAlbedoTex = nil
         let cdesc = MTLTextureDescriptor.texture2DDescriptor(

@@ -748,7 +748,7 @@ public struct WorkspacePlaceholder: View {
                           // It cannot coexist with the Surface stage's tints —
                           // they are different stages — so this is a choice, not
                           // a blend, and the Surface stage keeps priority.
-                          vertexTints: visible.surfaceEditing ? surfaceVertexTints : flexibleMain.tints(project, on: stage),   // Flexible H4: X-ray ghost + dent heat
+                          vertexTints: visible.surfaceEditing ? surfaceVertexTints : flexibleMain.tints(project, on: stage, roles: roleTints, stress: latticeStressField),   // Flexible H4 (+C): X-ray ghost + dent heat + Stress + group colours, ONE array
                           extraLines: surfaceCutLineBuffer,
                           previewLines: surfacePreviewLineBuffer,
                           // ★ A UNION'S INTERNAL EDGES ARE NOT EDGES ANY MORE.
@@ -809,6 +809,7 @@ public struct WorkspacePlaceholder: View {
                               // wall BEHIND a strut and missed entirely where the id
                               // pass said "background". This only has to make sure a
                               // tap cannot also change the selection while reading.
+                              if flexibleMain.read(project, mode: latticeLegendMode, face: fid, point: pt) { return true }   // Flexible (PR #362) H7: a surface tap reads the drilled-in Flexible legend
                               if latticeLegendMode.drilledIn { return true }
                               guard let m = viewerMesh else { return false }
                               if visible.surfaceEditing {
@@ -823,8 +824,9 @@ public struct WorkspacePlaceholder: View {
                           },
                           // ★ Only while drilled in — the PRESENCE of this closure is
                           // what makes a tap read a strut instead of selecting a face.
-                          onLatticeProbe: latticeLegendMode.drilledIn
+                          onLatticeProbe: latticeLegendMode.drilledIn && flexibleMain.wantsWallProbe(latticeLegendMode)   // Flexible (PR #362) H8: the wall probe only for the lattice legend (a dent / stress tap must reach the surface)
                               ? { model, world, cellMM, density in
+                                  if flexibleMain.readLattice(project, mode: latticeLegendMode, model: model) { return }   // Flexible (PR #362) H8: a Flexible wall, read at its rest point
                                   setLatticeProbe(at: model, world: world,
                                                   bakedCellMM: cellMM,
                                                   bakedDensity: density)
@@ -1303,7 +1305,7 @@ public struct WorkspacePlaceholder: View {
                 // the entire app. Please add to the TO page side-by-side just below
                 // the position gizmo (with padding between them)"). The Surface
                 // stage keeps them in its own tray, where the rest of its tools are.
-                if flexibleMain.owns(project, stage) { FlexibleMainViewToggles(main: flexibleMain) }   // Flexible (PR #362) H5: X-ray / Heat / Lattice
+                if flexibleMain.owns(project, stage) { FlexibleMainViewToggles(main: flexibleMain, stressReady: latticeStressField != nil, stressRunning: latticeSimIsRunning, solve: { if let ctx = model.makeLatticeSimContext(), FlexibleStressTrigger.shouldRun(hasField: latticeSim.field != nil, stale: latticeSim.isStale(against: ctx.fingerprint), running: latticeSimIsRunning) { latticeSim.run(ctx) } }) }   // Flexible (PR #362) H5 (+C): X-ray / Dent heat / Stress / Lattice; Stress solved directly (never through startStressSolveIfNeeded's octet gate)
                 else if viewerMesh != nil, visible.wireframe, !visible.surfaceEditing {
                     viewModeToggles
                 }
@@ -1326,6 +1328,7 @@ public struct WorkspacePlaceholder: View {
                     latticeDensityLegend
                     latticeProbeCallout
                 }
+                if flexibleMain.owns(project, stage) { FlexibleMainLegends(main: flexibleMain, mode: $latticeLegendMode, projection: projection, settle: settleQuat, bottomClearance: bottomBarClearance, chipColumnWidth: force.gravityIsSet ? (settingsChipWidths.values.max() ?? 0) : 0) }   // Flexible (PR #362) H6: one legend per view (Squish / Stress / Lattice), tap to read (FlexibleMainLegends.swift)
                 // ★ "Simulation running", top-centre (maintainer, 2026-08-18).
                 if latticeSimIsRunning, !simBannerDismissed { simRunningBanner }
                 // ★ AND THE GEOMETRY REBAKE. Only when the FEA banner is NOT up:

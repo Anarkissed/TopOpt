@@ -25,12 +25,14 @@ final class FlexibleMainPageHookTests: XCTestCase {
             ("H2", "onExit: { showFlexiblePage = false; latticeSettingsSavedThisSession = true; flexibleMain.didExitSettings() })"),
             ("H3", "flexibleLattice: flexibleMain.layer(project, stage: stage, pageUp: fullScreenPageUp))"),
             ("H4", "MetalMeshView(mesh: flexibleMain.mesh(project, on: stage) ?? stageMesh,"),
-            ("H4", "vertexTints: visible.surfaceEditing ? surfaceVertexTints : flexibleMain.tints(project, on: stage),"),
+            // ★ batch C (re-pinned on purpose): the ONE tint array composes Stress and the group colours too
+            ("H4", "vertexTints: visible.surfaceEditing ? surfaceVertexTints : flexibleMain.tints(project, on: stage, roles: roleTints, stress: latticeStressField),"),
             ("H4", "settleAnimated: !reduceMotion && !flexibleMain.owns(project, stage),"),
             ("H4", "stressTints: flexibleMain.owns(project, stage) ? nil : stageSurfaceTints,"),
             ("H4", "flexDisplacements: flexibleMain.dents(project, on: stage), flexScale: flexibleMain.dentScale(project, on: stage),"),
             ("H4", "bodyAlpha: flexibleMain.bodyAlpha(project, on: stage) ?? latticePreviewBodyAlpha,"),
-            ("H5", "if flexibleMain.owns(project, stage) { FlexibleMainViewToggles(main: flexibleMain) }"),
+            // ★ batch C (re-pinned on purpose): the toggles gain Stress, solved directly (FlexibleBatchCHookTests pins the whole line)
+            ("H5", "if flexibleMain.owns(project, stage) { FlexibleMainViewToggles(main: flexibleMain, stressReady: latticeStressField != nil,"),
             // ★ batch B review: from Topology the pill goes to the Lattice stage first (Exit then shows the lattice)
             ("H10", "if project.lattice.flexible == nil { latticeThisButton } else { FlexibleMainStatusPill(main: flexibleMain, open: { if stage != .lattice { goToStage(.lattice) }; showFlexiblePage = true }) }"),
             // ★ batch B review: the player clears the bottom-right chip column (Gravity …) in its row

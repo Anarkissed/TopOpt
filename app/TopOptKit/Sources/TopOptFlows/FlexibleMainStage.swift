@@ -20,6 +20,7 @@
 
 import Combine
 import Foundation
+import simd
 import SwiftUI
 #if canImport(UIKit)
 import UIKit
@@ -47,6 +48,34 @@ public final class FlexibleMainStage: ObservableObject {
     public func toggleLattice() {
         if latticeShown { latticeOn = false } else { xray = true; latticeOn = true }
     }
+
+    // MARK: batch C — Stress, the legends, tap-to-read (FlexibleMainStage+Views.swift)
+
+    /// ★ STRESS (item T): the solid part's FEA from the main page's loads, coloured over the
+    /// part. Off by default; on, it turns X-ray off so its colours read (toggleStress).
+    @Published public var stress = false
+    /// The reading a tap pinned while a legend is drilled in (one publish per tap).
+    @Published public internal(set) var reading: FlexibleReading?
+    /// Legends he minimised (the caret), and the one placed first (a pill he tapped open).
+    @Published public var minimized: Set<FlexibleReadKind> = []
+    @Published public var legendPriority: FlexibleReadKind?
+    /// The workspace's solve (H5' hands it over each render): run only when there is no field
+    /// or it is stale, and never twice (FlexibleStressTrigger).
+    var stressSolver: (() -> Void)?
+    var stressReady = false
+    var stressRunning = false
+    /// The field the page shows (stashed from H4's call), its identity and its peak.
+    var stressField: LatticeDemandField?
+    var stressKey = 0
+    var stressPeak = 0.0
+    /// The view the tap came through (H6 hands the projection and the settle each render).
+    var viewFrame: LatticeBandChipFrame?
+    /// The composed ONE tint array, and what it was composed from.
+    var composedKey: String?
+    var composed: [Float]?
+    /// The lattice whose depths the map shows (refresh), and the map's deepest value (mm).
+    private(set) var drawn: FlexibleGeneratedLattice?
+    private(set) var dentMaxMM = 0.0
 
     /// The squish, one number, stepped by the renderer (FlexibleSquishLoop).
     public let loop = FlexibleSquishLoop()
@@ -129,6 +158,7 @@ public final class FlexibleMainStage: ObservableObject {
         noteLoads()        // what Settings did to the groups (a weight written back) is in hand
         refresh()
         buildIfReady()
+        requestStressIfNeeded()   // ★ BATCH C (item T): the solid part's FEA starts on Save & Exit
     }
 
     /// The pill's tap: the page opens on the one thing to fix.
@@ -144,7 +174,7 @@ public final class FlexibleMainStage: ObservableObject {
         stage == .lattice && project.lattice.flexible != nil
     }
 
-    private func current(_ project: ProjectModel, _ stage: WorkspaceStage) -> FlexibleStageModel? {
+    func current(_ project: ProjectModel, _ stage: WorkspaceStage) -> FlexibleStageModel? {
         guard owns(project, stage), let m = model, projectID == project.id else { return nil }
         return m
     }
@@ -163,9 +193,6 @@ public final class FlexibleMainStage: ObservableObject {
     /// H4: the overlay mesh (the part with every pressed face's map quads), nil ⇒ the stage's.
     public func mesh(_ project: ProjectModel, on stage: WorkspaceStage) -> ViewerMesh? {
         current(project, stage) != nil ? overlay?.mesh : nil
-    }
-    public func tints(_ project: ProjectModel, on stage: WorkspaceStage) -> [Float]? {
-        current(project, stage) != nil && overlay != nil ? channels?.tints : nil
     }
     public func dents(_ project: ProjectModel, on stage: WorkspaceStage) -> [Float]? {
         current(project, stage) != nil && overlay != nil ? channels?.dents : nil
@@ -256,6 +283,9 @@ public final class FlexibleMainStage: ObservableObject {
             refresh()
         }
         buildIfReady()
+        // ★ BATCH C: a main-page edit (a load, an anchor) leaves the stress field stale — while
+        // Stress shows, the solver re-runs it (it checks the fingerprint; nothing runs twice)
+        if stress { requestStressIfNeeded() }
     }
 
     /// Build when nothing blocks and the designs are in: the first time the stage shows, after
@@ -286,7 +316,11 @@ public final class FlexibleMainStage: ObservableObject {
         // the map is the lattice's while one is shown (X-ray only gates the walls here)
         let drawn = FlexibleLatticePreview.drawn(m.lattice, xray: true, building: m.latticeBuilding,
                                                  checkStampShown: nil, stale: m.latticeIsStale)
-        let c = FlexiblePageChannels.channels(model: m, overlay: overlay, xray: xray, drawnLattice: drawn, heat: heat)
+        self.drawn = drawn
+        // ★ BATCH C: the channels WITHOUT the ghost — Stress and the group colours are composed
+        // in first (FlexibleMainTints), then X-ray ghosts what is not opaque
+        let c = FlexiblePageChannels.channels(model: m, overlay: overlay, xray: false, drawnLattice: drawn, heat: heat)
+        dentMaxMM = FlexibleShownValues(model: m, drawnLattice: drawn).maxDepth
         loop.exaggeration = c.exaggeration
         if let g = drawn {
             if playedGeneration != g.generation {

@@ -62,6 +62,11 @@ public struct FlexibleStagePage: View {
     /// the lattice seen inside. ★ ROUND 3 (item 1.4): ALWAYS on on this page — the bend reads
     /// from any angle, even edge-on (img 1); the X-ray button under the gizmo is gone.
     private let xray = true
+    /// ★ BATCH C (item 1.4): the legend reads too — tap it ("TAP THE PART TO READ"), then the
+    /// part: the dent's true mm at that spot, pinned as a callout; a tap never selects a face
+    /// while it reads; a double tap anywhere (or the legend again) comes back out.
+    @State private var legendDrilled = false
+    @State private var reading: FlexibleReading?
     /// The panel's, the legend's, the top row's and the player's frames (global), and the
     /// stage's — for the chips' keep-out and the player's place.
     @State private var frames: [String: CGRect] = [:]
@@ -154,6 +159,8 @@ public struct FlexibleStagePage: View {
             if gen != nil, dentAnimated { loop.autoPlay(reduceMotion: reduceMotion) }
         }
         .onChange(of: model.stacks.count) { _ in rebuildOverlay() }
+        // the legend went (no dent to show): it cannot stay drilled in
+        .onChange(of: dents == nil && model.checkStampShown == nil) { gone in if gone { legendDrilled = false; reading = nil } }
         .onChange(of: model.latticeBuilding) { _ in refreshChannels() }
         .onReceive(model.objectWillChange.debounce(for: .milliseconds(16), scheduler: RunLoop.main)) { _ in
             refreshChannels()
@@ -203,9 +210,12 @@ public struct FlexibleStagePage: View {
                 onPickFace: { fid in model.tapFace(Int(fid)) },
                 // a split face: the tap's point picks the sector (FlexibleRegions)
                 onPickPoint: { fid, pt in
+                    if legendDrilled { readDent(at: pt); return true }   // reading, never selecting
                     model.tapFace(Int(fid), point: pt.map { SIMD3<Double>($0) })
                     return true
                 },
+                // ★ a double tap anywhere leaves the reading (#354's exit, mounted only while drilled in)
+                onLatticeProbeExit: legendDrilled ? { legendDrilled = false; reading = nil } : nil,
                 onProjection: { p in
                     // the renderer publishes world→clip; the part is drawn settled (rotated
                     // about its centre), so the overlays project MODEL points through both
@@ -231,6 +241,7 @@ public struct FlexibleStagePage: View {
                                                                latticeShows: latticeShows,
                                                                loop: rendererLoops ? loop : nil))
             FlexibleStageOverlays(model: model, proj: proj, exaggeration: dentExaggeration, keepOut: keepOut)
+            FlexibleReadingCallout(proj: proj, reading: legendDrilled ? reading : nil)
         }
         .coordinateSpace(name: FlexibleStageSpace.name)
         .background(GeometryReader { g in
@@ -242,6 +253,16 @@ public struct FlexibleStagePage: View {
     private func rebuildOverlay() {
         overlay = FlexiblePageChannels.overlay(model: model)
         refreshChannels()
+    }
+
+    /// The dent he tapped (the drawn map, at the squish on screen now), read at its column —
+    /// FlexibleProbe, the main page's one dent probe.
+    private func readDent(at pt: SIMD3<Float>?) {
+        guard let p = pt, let q = proj.projection, let sp = q.project(p), let ray = q.ray(throughViewPoint: sp) else { return }
+        let scale = rendererLoops ? loop.scale(at: loop.clock()) : dentScale
+        reading = FlexibleProbe.dentReading(model: model, overlay: overlay, dents: dents, scale: scale,
+                                            drawnLattice: drawnLattice, point: p, dir: ray.dir)
+            ?? FlexibleReading(kind: .dent, value: "—", unit: FlexibleReadKind.dent.nothingHere, fraction: nil, anchor: p)
     }
 
     /// Per-column colours + the dent (FlexiblePageChannels — the page's one source), then the
@@ -399,7 +420,11 @@ public struct FlexibleStagePage: View {
     /// The legend, placed by FlexibleLegendPlacement.legend against the gizmo and the top line
     /// (its own size measured; trailing-centred until the first measurement).
     @ViewBuilder private func legend(in size: CGSize) -> some View {
-        let view = FlexibleLegend(model: model, drawnLattice: drawnLattice)
+        let view = FlexibleLegend(model: model, drawnLattice: drawnLattice, drilled: legendDrilled,
+                                  reading: legendDrilled ? reading : nil)
+            .contentShape(Rectangle())
+            .onTapGesture { legendDrilled.toggle(); reading = nil }
+            .accessibilityIdentifier("flexible-settings-legend")
             .background(GeometryReader { g in
                 Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["legend": g.frame(in: .global)])
             }.allowsHitTesting(false))
@@ -735,10 +760,14 @@ struct FlexibleFaceResult: View {
 /// The map's legend: ONE line saying what it shows and how much it is exaggerated ("What
 /// you drew · shown ×7"), the ramp, 0 … deepest, and the tier where core gave one. ★ ROUND 3:
 /// the long captions moved behind the (i) (FlexibleRowCopy); on the trailing edge, centred.
+/// ★ BATCH C: it takes a tap — "TAP TO READ" → "TAP THE PART TO READ" — and marks the reading
+/// on its ramp.
 struct FlexibleLegend: View {
     @ObservedObject var model: FlexibleStageModel
     /// The generated lattice while it is drawn (X-ray): the map is then the one it was built from.
     var drawnLattice: FlexibleGeneratedLattice? = nil
+    var drilled = false
+    var reading: FlexibleReading? = nil
 
     var body: some View {
         let shown = FlexibleShownValues(model: model, drawnLattice: drawnLattice)
@@ -746,12 +775,24 @@ struct FlexibleLegend: View {
             ?? model.selectedRegion.flatMap { model.design($0)?.tier }
         let noNumber = shown.values.values.contains { $0.contains { if case .noNumber = $0 { return true } else { return false } } }
         VStack(alignment: .leading, spacing: 6) {
+            Text(drilled ? "TAP THE PART TO READ" : "TAP TO READ")
+                .font(.system(size: 10, weight: .bold)).tracking(0.7)
+                .foregroundStyle(DS.Color.accent.color)
+                .accessibilityIdentifier("flexible-legend-tab")
             Text(shown.legendLine).font(.system(size: 12, weight: .semibold)).foregroundStyle(DS.Color.textPrimary.color)
                 .lineLimit(1).minimumScaleFactor(0.8)
                 .accessibilityIdentifier("flexible-legend-line")
             HStack(spacing: 0) {
                 ForEach(0..<24, id: \.self) { i in
                     FlexibleColours.depthColour(fraction: Double(i) / 23).color.frame(width: 9, height: 10)
+                }
+            }
+            .overlay(alignment: .topLeading) {
+                if let f = reading?.fraction {
+                    Image(systemName: "arrowtriangle.up.fill")
+                        .font(.system(size: 9))
+                        .foregroundStyle(DS.Color.accent.color)
+                        .offset(x: CGFloat(min(1, max(0, f))) * 216 - 4, y: 10)
                 }
             }
             HStack {
@@ -770,7 +811,35 @@ struct FlexibleLegend: View {
         .frame(width: 236)
         .padding(DS.Space.ml)
         .background(RoundedRectangle(cornerRadius: DS.Radius.panel).fill(DS.Surface.panel.color)
-            .overlay(RoundedRectangle(cornerRadius: DS.Radius.panel).strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
-        .allowsHitTesting(false)
+            .overlay(RoundedRectangle(cornerRadius: DS.Radius.panel)
+                .strokeBorder((drilled ? DS.Color.accent : DS.Color.strokePanel).color, lineWidth: drilled ? 1.5 : 1)))
+    }
+}
+
+/// The reading a tap pinned on the Settings page's part, re-projected on every camera move
+/// (it observes the page's projection box, so the page itself does not re-render).
+struct FlexibleReadingCallout: View {
+    @ObservedObject var proj: FlexibleProjectionBox
+    let reading: FlexibleReading?
+
+    var body: some View {
+        if let r = reading, let s = proj.projection?.project(r.anchor) {
+            HStack(spacing: 5) {
+                Image(systemName: "arrowtriangle.left.fill")
+                    .font(.system(size: 11))
+                    .foregroundStyle(DS.Color.accent.color)
+                Text(r.text)
+                    .font(.system(size: 13, weight: .semibold)).monospacedDigit()
+                    .foregroundStyle(DS.Color.textPrimary.color)
+            }
+            .padding(.horizontal, 9).padding(.vertical, 6)
+            .background(Capsule().fill(DS.Surface.panel.color.opacity(0.95))
+                .overlay(Capsule().strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
+            .fixedSize()
+            .offset(x: s.x + 8, y: s.y - 15)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .allowsHitTesting(false)
+            .accessibilityIdentifier("flexible-reading-callout")
+        }
     }
 }
