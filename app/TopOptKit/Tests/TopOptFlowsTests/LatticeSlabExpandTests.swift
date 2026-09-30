@@ -299,20 +299,16 @@ final class LatticeSlabExpandTests: XCTestCase {
 
     // MARK: ★ THE BOUNDARY, PINNED RATHER THAN DISCOVERED ON A RUN
 
-    /// ★★ THE EXPAND GROWS THE LATTICE REGION, NOT THE PROTECTION.
+    /// ★★ THE EXPAND DEEPENS THE PROTECTION WITH THE SLAB (ruling 2, 2026-09-30).
     ///
-    /// Core's `face_protections` are keyed by FACE ID and masked by
-    /// `mask_step_face`, which walks that face's OWN footprint — there is no
-    /// margin on that call, so nothing the app can send widens it. Material
-    /// outside the face's outline is therefore latticed-if-present but NOT held
-    /// against the optimizer, and TO may carve it away before the lattice pass
-    /// sees it. The remedy is the one the app already has: protect the chamfer's
-    /// own face too.
-    ///
-    /// This test exists so that boundary is a STATED property rather than
-    /// something found on a wasted run — and so that if core ever grows a
-    /// protection margin, the test fails and points here.
-    func testTheExpandDoesNotWidenTheProtection() {
+    /// His 09-23 ruling moved an expanded wall's far end deeper, and core's depth tie makes
+    /// protect + lattice on one face ONE slab — so the protection is the depth the prism
+    /// EMITS (depth + expand). It adds no face: core's `face_protections` are keyed by FACE
+    /// ID and masked by `mask_step_face`, which freezes the solid within (N − ½)·h of that
+    /// face's OWN triangles — in plane, only a rounded collar beyond the face's edge is held;
+    /// the expand band's far corner is latticed-if-present but not held (reported, not
+    /// changed). Before this ruling the depth did NOT move, and core refused the job.
+    func testTheExpandDeepensTheProtectionWithTheSlab() {
         let (p, gid, _) = project()
         let face = LatticeSelectableRef.face(group: gid, face: 1)
         let before = p.faceProtectionSpecs()
@@ -320,11 +316,10 @@ final class LatticeSlabExpandTests: XCTestCase {
         let after = p.faceProtectionSpecs()
         XCTAssertEqual(before.faceIDs, after.faceIDs,
                        "the protection is by FACE ID — the expand adds no face")
-        XCTAssertEqual(before.depthsMM, after.depthsMM,
-                       "★ and no depth moved: the expand is in plane only")
-        // The lattice region DID grow, so the two really are decoupled here.
-        let r = p.latticeJobRegions().regions.first { $0.faceID == 1 }
-        XCTAssertGreaterThan(r?.halfUMM ?? 0, 0)
+        XCTAssertEqual(before.depthsMM, [20])
+        XCTAssertEqual(after.depthsMM, [25], "★ the protection deepens with the slab")
+        let r = p.latticeJobRegions().regions.first { $0.kind == .face && $0.faceID == 1 }
+        XCTAssertEqual(after.depthsMM.first, r?.depthMM, "★ …to exactly the depth the prism emits")
     }
 
     // MARK: fixture

@@ -18,15 +18,15 @@
 // he can actually aim — "reach 3 mm further in every direction" — and it is
 // rotation-independent, so it survives the face being re-fitted.
 //
-// ★★ WHAT THIS DOES NOT DO, STATED RATHER THAN DISCOVERED LATER. The expand
-// grows the LATTICE REGION, which is a geometric slab core evaluates pointwise.
-// It does NOT grow the PROTECTION: core's `face_protections` are keyed by FACE
-// ID and masked by `mask_step_face`, which walks that face's own footprint —
-// there is no margin on that call. So material outside the face's outline is
-// latticed-if-present but NOT held against the optimizer, and TO may carve it
-// away before the lattice pass sees it. The honest remedy is the one the app
-// already has: protect the chamfer's own face too. `LatticeSlabExpandTests`
-// pins this as a known boundary rather than leaving it to be found on a run.
+// ★★ WHAT THIS DOES AND DOES NOT PROTECT. The expand grows the LATTICE REGION — its
+// outline in plane, and its far end deeper (2026-09-23) — and a protected, latticed
+// face is protected to that deeper slab too (ruling 2, 2026-09-30: `faceProtectionSpecs`
+// reads the depth the emission wrote; core's tie makes the two ONE slab). IN PLANE it
+// is held only partly: core's `mask_step_face` freezes the solid voxels within
+// (N − ½)·h of the face's OWN triangles (a 3D point-to-triangle distance), so beyond
+// the face's edge only a rounded collar of that radius is held; the band's far corner
+// is latticed-if-present but NOT held against the optimizer, and TO may carve it
+// away. The remedy for that part is still to protect the neighbouring face too.
 
 import Foundation
 import CoreGraphics

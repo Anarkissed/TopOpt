@@ -80,9 +80,7 @@ parser:
 - the same run refuses a wall at 12 mm, with core's message;
 - the same refused bytes pass once `face_id` is removed. That is why the id is kept.
 
-A related finding the app has NOT acted on, because it needs the maintainer's ruling: on the
-stage job, a protected and latticed face wall with an in-plane **expand** is refused by this same
-tie today. The region sends depth + expand; the protection sends the depth alone. Verified through
-core's parser on 2026-09-30: face 1 is protected at 20 mm and given a 1 mm expand, and core refuses
-it with "the protection is 20.000000 mm and the lattice region is 21.000000 mm"; with no expand it
-accepts. Either fix changes the stage's job bytes.
+(A related item once listed here — an expanded, protected wall refused by this tie on the stage
+job — was the APP's error, not core's: it sent the dragged depth as the protection and depth +
+expand as the lattice region, two depths for one slab. Fixed app-side, 2026-09-30, ruling 2: the
+protection now reads the depth the region emits. Core's tie is right.)

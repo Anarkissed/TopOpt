@@ -617,12 +617,23 @@ public final class ProjectModel: ObservableObject {
     /// for an STL project (no B-rep faces) or when nothing is protected → the run is
     /// byte-identical. Face ids are deduped (a face never appears twice).
     ///
-    /// ★ THE DEPTH IS THE ONE THE USER DRAGGED (task 2026-08-12 §0a). `depthsMM`
-    /// is parallel to `faceIDs`: for a group that also carries a lattice role it
-    /// is that group's `LatticeSlabDepth` — the SAME number its lattice region
-    /// carries — so the barrier is exactly as deep as the lattice it feeds. For a
-    /// protect-only group it is the project's global depth, unchanged.
+    /// ★★ A PROTECTED, LATTICED FACE IS PROTECTED TO THE DEPTH ITS SLAB EMITS (maintainer,
+    /// 2026-09-30, ruling 2; his 2026-09-23 ruling: the expand moves the far end deeper). Core's
+    /// tie makes protect + lattice on one face ONE slab, so `depthsMM` reads the very number the
+    /// emission wrote on that face's prism (`LatticeRegionEmission.Result.slabDepthMM`: depth +
+    /// expand, floored at 0.1; a negative expand shrinks both) — never a second calculation.
+    /// The app used to send the dragged depth here and depth + expand on the prism: two depths
+    /// for one slab, which core refused. A face with no face prism (a bolt, no role) keeps the
+    /// depth it had: its group's `LatticeSlabDepth` when latticed, else the global depth.
+    /// Region protections are unchanged (core does not tie them; see the region loop).
     public func faceProtectionSpecs()
+        -> (faceIDs: [Int], depthMM: Double, depthsMM: [Double],
+            regionIDs: [RegionID], regionDepthsMM: [Double]) {
+        faceProtectionSpecs(emission: latticeJobRegions())
+    }
+
+    /// The same, reading the given emission — the one the job's lattice regions come from.
+    public func faceProtectionSpecs(emission: LatticeRegionEmission.Result)
         -> (faceIDs: [Int], depthMM: Double, depthsMM: [Double],
             regionIDs: [RegionID], regionDepthsMM: [Double]) {
         guard viewerMesh != nil else {
@@ -644,14 +655,16 @@ public final class ProjectModel: ObservableObject {
                 // per face now, so the protection is resolved per face through the
                 // SAME `LatticeSlabDepth` call the region emission makes — which is
                 // what keeps R4 true when two faces of one group hold two depths.
-                let d = latticed
+                let run = Int(resolvedRunFaceID(f))
+                // ★ ruling 2: the depth its slab emits, when the run lattices a prism on it
+                let d = emission.slabDepthMM(runFaceID: run) ?? (latticed
                     ? LatticeSlabDepth.depthMM(
                         ref: .face(group: g.id, face: f), group: g.id,
                         perSelectable: lattice.selectableDepthMM,
                         perGroup: lattice.groupDepthMM,
                         fallbackMM: lattice.paintDepthMM)
-                    : force.faceProtectDepthMM
-                ids.append(Int(resolvedRunFaceID(f)))
+                    : force.faceProtectDepthMM)
+                ids.append(run)
                 depths.append(d)
             }
             // ★ EACH REGION CARRIES ITS OWN DEPTH — which is what makes a grid
@@ -668,6 +681,10 @@ public final class ProjectModel: ObservableObject {
             // children both resolve to the same surface; emitting both describes it
             // twice with two roles and two depths, and the run keeps whichever was
             // written last. `surfaceEffectiveRegions` is the one definition.
+            // ★ NOT FOLLOWING THE EXPAND (ruling 2 changes only jobs core refuses, and core does
+            // not tie region protections): a region's protection stays its dragged depth, so an
+            // expanded region's prisms reach deeper than its protection (his stand: region 101
+            // at 24.15 mm against 20). Reported, not changed.
             for r in surfaceEffectiveRegions(of: g) where !seenRegions.contains(r) {
                 seenRegions.insert(r)
                 let d = latticed

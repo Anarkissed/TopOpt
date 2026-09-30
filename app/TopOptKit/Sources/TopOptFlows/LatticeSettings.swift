@@ -1674,10 +1674,10 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
 
     /// ★ THE PER-PRIMITIVE DEPTH — the same override shape as the role, for the
     /// number the 3D depth plane drags (§3d). Absent ⇒ `groupDepthMM` ⇒
-    /// `paintDepthMM`, so nothing about an untouched project moves. It is STILL
-    /// the protection depth as well: `ProjectModel.faceProtectionSpecs()` and
-    /// `latticeJobRegions()` both resolve through `LatticeSlabDepth`, per face
-    /// (bar R4).
+    /// `paintDepthMM`, so nothing about an untouched project moves. It is the DRAGGED
+    /// depth: the emitted slab is this plus the in-plane expand, and a protected,
+    /// latticed face is protected to that emitted slab (`faceProtectionSpecs` reads the
+    /// emission's own depth — ruling 2, 2026-09-30).
     public var selectableDepthMM: [String: Double]
 
     /// ★ THE PER-SELECTABLE DENSITY — the store `LatticeRegionEmission` recorded

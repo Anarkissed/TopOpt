@@ -272,7 +272,10 @@ public final class AppModel: ObservableObject {
         guard let project, let file = project.importedFile,
               let materialsPath, let rulesPath else { return nil }
         let lc = project.loadCase()
-        let protections = project.faceProtectionSpecs()
+        // ★ ONE emission for the protections AND the lattice regions (ruling 2): a protected,
+        // latticed face is protected to the depth its prism emits, so both read the same regions
+        let emission = project.latticeJobRegions()
+        let protections = project.faceProtectionSpecs(emission: emission)
         // The lattice block, gated by the core-read certifiable limits (handoff
         // 2026-07-29-lattice-mode-ui). runSpec returns nil unless lattice mode is on and
         // the settings are runnable-as-certified, so a non-lattice project yields the
@@ -289,7 +292,7 @@ public final class AppModel: ObservableObject {
         // which a variant's re-lattice job builds from too (ruling b, 2026-09-30). Resolved
         // from the EMITTED regions, not the role map, so a role whose face has no usable
         // B-rep geometry cannot select a mode with nothing to fit into.
-        let latticeSpec = project.latticeRunSpec(emission: project.latticeJobRegions())
+        let latticeSpec = project.latticeRunSpec(emission: emission)
         return RunRequest(modelPath: file.path, material: project.material,
                           materialsPath: materialsPath, rulesPath: rulesPath,
                           resolution: project.quality.resolution,
