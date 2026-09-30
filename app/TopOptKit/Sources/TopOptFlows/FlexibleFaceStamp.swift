@@ -228,28 +228,26 @@ struct FlexibleFaceStampRows: View {
                     }
                 }
                 if let p {
+                    // ★ ROUND 5 (S3): every number in its own box — tap for the keypad, drag up / down
+                    let faceMM = model.stack(region).map { max($0.uExtentMM, $0.vExtentMM) }
                     FlexRow(FlexibleRowCopy.stampSize(widthMM: p.widthMM, lengthMM: p.lengthMM),
                             info: FlexibleRowCopy.Info.stampSize, id: "flexible-row-stamp-size") {
-                        FlexEditPill(key: "stamp-size-\(region)", title: FlexibleRowCopy.stampWidthTitle, unit: "mm",
-                                     value: p.widthMM, padTarget: $padTarget) { v in
+                        FlexNumberBox(key: "stamp-size-\(region)", title: FlexibleRowCopy.stampWidthTitle,
+                                      spec: FlexibleNumberSpecs.stampWidth(mm: p.widthMM, faceMM: faceMM),
+                                      padTarget: $padTarget) { v in
                             model.updateStamp(region) { q in
                                 let k = q.widthMM > 0 ? v / q.widthMM : 1
                                 q.widthMM = v; q.lengthMM *= k
                             }
                         }
                     }
-                    FlexRow(FlexibleRowCopy.stampTurn(p.rotationDeg), info: FlexibleRowCopy.Info.stampTurn,
+                    FlexRow(FlexibleRowCopy.stampTurnRow, info: FlexibleRowCopy.Info.stampTurn,
                             id: "flexible-row-stamp-turn") {
-                        Button {
-                            model.updateStamp(region) { $0.rotationDeg = ($0.rotationDeg + 90).truncatingRemainder(dividingBy: 360) }
-                        } label: {
-                            Image(systemName: "rotate.right")
-                                .font(.system(size: 13, weight: .semibold))
-                                .foregroundStyle(DS.Color.textPrimary.color)
-                                .frame(width: 44, height: 32)
-                                .background(Capsule().fill(DS.Surface.valuePill.color))
+                        FlexNumberBox(key: "stamp-turn-\(region)", title: FlexibleRowCopy.stampTurnRow,
+                                      spec: FlexibleNumberSpecs.stampTurn(deg: p.rotationDeg),
+                                      padTarget: $padTarget) { v in
+                            model.updateStamp(region) { $0.rotationDeg = v.truncatingRemainder(dividingBy: 360) }
                         }
-                        .buttonStyle(.plain)
                         .accessibilityIdentifier("flexible-stamp-turn")
                     }
                     FlexRow(FlexibleRowCopy.stampPress, info: FlexibleRowCopy.Info.stampPress, id: "flexible-row-stamp-press") {

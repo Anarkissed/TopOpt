@@ -140,8 +140,15 @@ public final class FlexibleStageModel: ObservableObject {
     @Published public private(set) var bands: FlexErrorBandsInfo?
     @Published public private(set) var sceneState: SceneState = .idle
     @Published public private(set) var sceneInfo: FlexibleScene.Info?
-    @Published public var tab: Tab = .face
-    @Published public var selectedRegion: Int?
+    @Published public var tab: Tab = .face { didSet { if oldValue != tab { tabChanged() } } }
+    @Published public var selectedRegion: Int? { didSet { if oldValue != selectedRegion { selectionChanged() } } }
+    /// ★ ROUND 5 (S8): the folder tab open on the Settings modal's left rail (FlexibleSettingsRail).
+    @Published public var rail: FlexibleRailTab = .group(FlexibleSqueezeGroups.first) { didSet { if oldValue != rail { railChanged() } } }
+    /// ★ ROUND 5 (S9): the page's Exit left with nothing changed — the main page does nothing.
+    var exitUnchanged = false
+    /// ★ ROUND 5 (S9): a Save & Exit with the main page's Lattice view OFF only stored — the bake
+    /// waits for the view (FlexibleMainStage).
+    @Published public internal(set) var latticeBuildDeferred = false
     @Published public var showBuildable = false
     @Published public private(set) var stacks: [FlexFaceKey: FlexStackInfo] = [:]
     @Published public private(set) var geometry: [FlexFaceKey: FlexFaceGeometry] = [:]
@@ -291,6 +298,7 @@ public final class FlexibleStageModel: ObservableObject {
         change(&s)
         guard s != settings else { return }
         settings = s
+        syncRail()   // ★ ROUND 5 (S8): the folder tab follows the selected face's group
         if recompute { recomputeAll() }
         scheduleSave()
     }
@@ -515,7 +523,7 @@ public final class FlexibleStageModel: ObservableObject {
         if selectedRegion == nil { selectedRegion = settings.loadedFaces.first?.faceRegionID }
     }
 
-    private func deriveMainPageLoads() -> FlexibleMainPageLoads? {
+    func deriveMainPageLoads() -> FlexibleMainPageLoads? {
         guard let mesh = project.viewerMesh else { return nil }
         return FlexibleMainPageLoads.derive(
             groups: project.selection.groups, force: project.force, faceRegions: project.faceRegions,
@@ -532,6 +540,10 @@ public final class FlexibleStageModel: ObservableObject {
     /// holds no group, a face it presses again joins a group that EXISTS (a stale id made a
     /// "Group 2" nobody made), and a main-page hand sits in one group.
     nonisolated static func adopt(_ loads: FlexibleMainPageLoads, into s: inout FlexibleStageSettings) -> [Int: Double] {
+        // ★ ROUND 5 (S6): a face he DELETED stays deleted — the re-sync skips it (the main page's
+        // group still holds it; that is his to change there)
+        let removed = Set(s.removedRegions ?? [])
+        let loads = removed.isEmpty ? loads : FlexibleMainPageLoads(entries: loads.entries.filter { !removed.contains($0.key) })
         let relinked = loads.adopt(into: &s)
         FlexibleSqueezeGroups.uniteHands(&s, loads: loads)
         return relinked
@@ -547,6 +559,8 @@ public final class FlexibleStageModel: ObservableObject {
         guard inherited != nil || (kg ?? joinKg ?? 0) > 0 else { return false }
         actionSerial += 1
         edit { s in
+            // ★ ROUND 5 (S6): pressing a deleted face brings it back — as a NEW face
+            if s.isRemoved(region) { s.removedRegions?.removeAll { $0 == region }; if s.removedRegions?.isEmpty == true { s.removedRegions = nil } }
             var f = s.face(region) ?? FlexibleFaceSettings(faceRegionID: region)
             f.role = "loaded"
             f.squeezeGroup = nil   // a newly pressed face joins group 1
@@ -566,6 +580,7 @@ public final class FlexibleStageModel: ObservableObject {
     public func rest(_ region: Int) {
         actionSerial += 1
         edit { s in
+            if s.isRemoved(region) { s.removedRegions?.removeAll { $0 == region }; if s.removedRegions?.isEmpty == true { s.removedRegions = nil } }
             var f = s.face(region) ?? FlexibleFaceSettings(faceRegionID: region, role: "resting")
             f.role = "resting"
             f.weightFrom = nil
@@ -603,16 +618,43 @@ public final class FlexibleStageModel: ObservableObject {
         edit { s in guard var f = s.face(region) else { return }; f.weightKg = kg; f.weightFrom = nil; s.setFace(f) }
     }
 
-    /// The trash. Refused (false) for a face a main-page group presses or anchors: the next
-    /// re-sync would bring it straight back, so the panel offers [Rests] instead.
+    /// The trash. ★ ROUND 5 (S6, his img 3: "For some reason, top A/B are not deletable. All faces
+    /// should be deletable."): EVERY face — a split sector, a face a main-page Load or Anchor group
+    /// holds — leaves the Flexible setup. The main page's group is NOT touched (it still presses the
+    /// face in the main run — his to change there); a face a group holds is remembered as deleted
+    /// (`removedRegions`) so the re-sync never brings it back.
+    /// ★ ROUND 5 (S7: "When a face has been deleted, it comes back with the previous values. It
+    /// should come back with reset values."): EVERYTHING the face held goes with it — its settings
+    /// (curves, stamp, shape, squeeze group, deepest squish, weight and its link), its check
+    /// stamps, and every per-face copy of core's answers the page keeps (the drawn map, the design,
+    /// its words, the pinch halves, the relinked weight, a curve point's ×). Added again, it is a
+    /// NEW face: defaults, and the main page's weight if a group presses it.
     @discardableResult
     public func removeFace(_ region: Int) -> Bool {
-        guard mainPageLoads.canRemove(region) else { return false }
         actionSerial += 1
-        edit { $0.removeFace(region) }
-        relinkedWeights[region] = nil
-        if selectedRegion == region { selectedRegion = settings.faces.first?.faceRegionID }
+        let held = !mainPageLoads.canRemove(region)
+        edit { s in
+            s.removeFace(region)
+            if held, !s.isRemoved(region) { s.removedRegions = (s.removedRegions ?? []) + [region] }
+            FlexibleSqueezeGroups.normalise(&s)
+        }
+        purgeFaceCaches(region)
+        if selectedRegion == region { selectedRegion = settings.loadedFaces.first?.faceRegionID ?? settings.faces.first?.faceRegionID }
         return true
+    }
+
+    /// ★ S7: every per-face copy the model keeps for `region` (any rotation) — never shown again for
+    /// a face added back later.
+    func purgeFaceCaches(_ region: Int) {
+        func drop<V>(_ d: inout [FlexFaceKey: V]) {
+            let ks = d.keys.filter { $0.region == region }
+            for k in ks { d[k] = nil }
+        }
+        drop(&liveS); drop(&designs); drop(&designErrors); drop(&segments); drop(&segmentErrors)
+        drop(&designedInputs)
+        relinkedWeights[region] = nil
+        if curvePoint?.region == region { curvePoint = nil }
+        checks = checks.filter { id, _ in settings.checkStamps.contains { $0.stamp.id == id } }
     }
 
     public func key(_ region: Int) -> FlexFaceKey? {
@@ -939,11 +981,12 @@ public final class FlexibleStageModel: ObservableObject {
     /// — ★ BATCH B REVIEW: or the SCENE it was built on (a new grid, a new lattice region, a
     /// new bead on the main page; the shared model keeps its lattice across the session).
     public var latticeIsStale: Bool {
-        lattice.map { $0.settingsKey != settings.hashValue || ($0.sceneKey != nil && $0.sceneKey != openedKey) } ?? false
+        lattice.map { $0.settingsKey != settings.designInputs.hashValue || ($0.sceneKey != nil && $0.sceneKey != openedKey) } ?? false
     }
 
-    /// What a build is keyed by: the settings and the scene.
-    private var latticeBuildKey: String { "\(settings.hashValue)|\(openedKey ?? "")" }
+    /// What a build is keyed by: the settings and the scene. ★ ROUND 5: the settings WITHOUT the
+    /// display-only choices (a group's colour, the weight unit) — neither re-builds the lattice.
+    private var latticeBuildKey: String { "\(settings.designInputs.hashValue)|\(openedKey ?? "")" }
     /// The key the last build FAILED on.
     private var latticeFailedKey: String?
     /// ★ BATCH B REVIEW: a failed build is LATCHED against what it was built from — the main
@@ -962,7 +1005,7 @@ public final class FlexibleStageModel: ObservableObject {
     private(set) var pipelineSettings: FlexibleStageSettings?
     /// ★ BATCH B REVIEW: the settings moved without the pipeline — an undo / redo on the MAIN
     /// page (its two-finger tap restores `lattice.flexible` behind the model's back).
-    var settingsOutranPipeline: Bool { sceneState == .ready && pipelineSettings != settings }
+    var settingsOutranPipeline: Bool { sceneState == .ready && pipelineSettings?.designInputs != settings.designInputs }
 
     /// Bumped per build — the token the preview uploads once per.
     private var latticeGeneration = 0
@@ -1048,7 +1091,7 @@ public final class FlexibleStageModel: ObservableObject {
         let (builtKeys, faceNoLattice, extentMM, drawnFaces) = (order, noLattice, extent, drawn)
         let (designedSnap, pressureSnap, squishSnap, depthsSnap) = (designed, pressure, squish, depths)
         let depthForBand = shallowest.isFinite ? shallowest : 0
-        let build = self.build, key = settings.hashValue, temp = designTempC ?? 0
+        let build = self.build, key = settings.designInputs.hashValue, temp = designTempC ?? 0
         let lawInputs: (path: String, material: String, temp: Double)? = {
             guard let p = materialsPath, let m = settings.materialID, let t = designTempC else { return nil }
             return (p, m, t)

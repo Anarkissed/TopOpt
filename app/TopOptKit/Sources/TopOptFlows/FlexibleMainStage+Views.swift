@@ -120,6 +120,7 @@ extension FlexibleMainStage {
         composed = FlexibleMainTints.compose(base: c.tints, overlay: overlay, part: project.viewerMesh, heat: heat,
                                              roles: roles, stress: showStress ? (stressField!, stressPeak) : nil,
                                              ghost: xray ? FlexibleColours.ghost : nil)
+        if let m = model { FlexibleGroupFrames.paint(&composed, overlay: overlay, model: m) }   // ★ S1: the group frames in every view (Stress too)
         return composed
     }
 

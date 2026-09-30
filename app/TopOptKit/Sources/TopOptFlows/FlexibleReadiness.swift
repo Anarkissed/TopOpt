@@ -507,7 +507,7 @@ extension FlexibleStageModel {
             nozzleIsAuto: s.nozzleTempC == nil, topologyIsGyroid: s.topology == "gyroid",
             selected: selectedRegion,
             name: { [weak self] r in self?.displayName(r) ?? "Face \(r)" },
-            removable: { [mainPageLoads] r in mainPageLoads.canRemove(r) },
+            removable: { _ in true },   // ★ ROUND 5 (S6): every face can be deleted from the Flexible setup
             inherited: { [mainPageLoads] r in mainPageLoads.entry(r)?.role == .pressed },
             buildFailure: latticeFailure, anyFilament: anyFilament,
             // only asked for when it is needed (nothing pressed, nothing selected)

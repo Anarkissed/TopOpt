@@ -236,7 +236,8 @@ public struct FlexibleMainPlayerSlot: View {
                                                                                                        chipColumnWidth: chipColumnWidth).values.map(\.frame)),
                                                       size: size) {
                 FlexibleSquishPlayer(loop: main.loop, fullLabel: main.fullLabel, width: r.width,
-                                     sims: sims, shown: main.shownSimInfo, onPick: { main.pick($0) }, note: note)
+                                     sims: sims, shown: main.shownSimInfo, onPick: { main.pick($0) }, note: note,
+                                     colour: { n in main.model?.groupColour(number: n) ?? FlexibleSqueezeGroups.colour(number: n) })   // ★ S1: his chosen colour
                     .latticeBandChipKeepOut()
                     .position(x: r.midX, y: r.midY)
             }

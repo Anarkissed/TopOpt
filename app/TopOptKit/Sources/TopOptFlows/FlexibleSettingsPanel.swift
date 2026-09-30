@@ -11,6 +11,11 @@
 // chevron opens it again. The legend's own minimize (the lattice legend's idiom: a narrow bar
 // that keeps the scale) is `FlexibleLegendBar`.
 // ★ TABS: Face | More (the Stamps tab went — a face's one stamp is its Shape).
+// ★ ROUND 5 (S8, his img 3: "The groups should be separate folders … The folder tabs should be on
+// the *left* side of the modal so enough groups can fit"): the Face | More chips became a RAIL of
+// folder tabs down the panel's left side (FlexibleSettingsRail) — [Model], one per squeeze group,
+// [Rests], [+] — with the open tab beside it. The panel is 480 pt wide: the rail takes 72 + 8, the
+// tab keeps round 4's 372 pt (`contentWidth`), so every row measured at 372 still fits. ★ S5: [Reset all] in the header, with a one-line confirm.
 
 import SwiftUI
 import TopOptDesign
@@ -21,7 +26,11 @@ struct FlexibleSettingsPanel: View {
     @Binding var padTarget: String?
     @Binding var minimized: Bool
 
-    static let width: CGFloat = 400
+    static let width: CGFloat = 480
+    /// The open tab's width beside the rail — round 4's 372 pt, so every one-line row still fits.
+    static let contentWidth: CGFloat = width - 2 * DS.Space.ml - FlexibleSettingsRailView.width - DS.Space.s
+    /// ★ S5: the header's Reset all asks once, in one line, before it resets.
+    @State private var confirmingReset = false
     /// The selected card's height and the scroll's own, as laid out: when either changes (the
     /// stamp's rows, a design's warning line; the fix pop-up taking the top of the page) the card
     /// is brought back into view — a reveal made before them left it cut off.
@@ -30,21 +39,16 @@ struct FlexibleSettingsPanel: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: DS.Space.m) {
-            header
+            if confirmingReset { resetConfirm } else { header }
             if !minimized {
-                // ★ Face | More — one-line rows, details behind (i) or a caret
-                FlexChips(options: FlexibleStageModel.Tab.allCases.map { ($0.rawValue, $0.rawValue) },
-                          selection: model.tab.rawValue, id: "flexible-tab") {
-                    model.tab = FlexibleStageModel.Tab(rawValue: $0) ?? .face
-                }
+                // ★ ROUND 5 (S8): the folder rail on the left, the open tab beside it
                 ScrollViewReader { proxy in
                     FlexibleHugHeight {
+                        HStack(alignment: .top, spacing: DS.Space.s) {
+                        FlexibleSettingsRailView(model: model)
                         ScrollView(.vertical, showsIndicators: true) {
                             VStack(alignment: .leading, spacing: DS.Space.m) {
-                                switch model.tab {
-                                case .face: FlexibleFacePanel(model: model, padTarget: $padTarget)
-                                case .more: FlexibleMorePanel(model: model)
-                                }
+                                FlexibleRailContent(model: model, padTarget: $padTarget)
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
                         }
@@ -56,6 +60,7 @@ struct FlexibleSettingsPanel: View {
                                 .preference(key: FlexibleKeepOutKey.self, value: ["panelScroll": g.frame(in: .global)])
                         }.allowsHitTesting(false))
                         .onPreferenceChange(FlexibleKeepOutKey.self) { v in cardHeight = v["faceCard"]?.height ?? 0 }
+                        }
                     }
                     // ★ THE SELECTED FACE'S CARD SCROLLS INTO VIEW (verification of D1): on a list
                     // tap, a tap on the part, the fix pop-up's select, a switch back to Face, the
@@ -81,7 +86,7 @@ struct FlexibleSettingsPanel: View {
         let f = r.flatMap { model.settings.face($0) }
         // ★ D2 REVIEW: a move to another squeeze group moves the card under that group's header
         let group = r.flatMap { model.squeezeGroup(of: $0)?.id } ?? 0
-        return "\(r ?? -1)|\(model.tab.rawValue)|\(f?.role ?? "-")|\(f?.isStampShape ?? false)|\(minimized)|g\(group)"
+        return "\(r ?? -1)|\(model.tab.rawValue)|\(model.rail)|\(f?.role ?? "-")|\(f?.isStampShape ?? false)|\(minimized)|g\(group)"
             + "|\(Int(cardHeight / 4))|\(Int(scrollHeight / 4))"
     }
 
@@ -119,6 +124,22 @@ struct FlexibleSettingsPanel: View {
                     .lineLimit(1)
             }
             Spacer()
+            // ★ ROUND 5 (S5): "Reset all" — every input back to a brand-new setup (asked once; undoable)
+            if !minimized {
+                Button { confirmingReset = true } label: {
+                    Text(FlexibleSettingsExit.resetButton)
+                        .font(.system(size: 12, weight: .semibold)).foregroundStyle(DS.Color.textSecondary.color)
+                        .padding(.horizontal, 10).frame(height: 30)
+                        .background(Capsule().fill(DS.Color.fillSubtle.color)
+                            .overlay(Capsule().strokeBorder(DS.Color.strokeSubtle.color, lineWidth: 1)))
+                        .contentShape(Capsule())
+                }
+                .buttonStyle(.plain)
+                .background(GeometryReader { g in
+                    Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["resetAll": g.frame(in: .global)])
+                }.allowsHitTesting(false))
+                .accessibilityIdentifier("flexible-reset-all")
+            }
             Button { withAnimation(.easeInOut(duration: 0.2)) { minimized.toggle() } } label: {
                 Image(systemName: minimized ? "chevron.up" : "chevron.down")
                     .font(.system(size: 12, weight: .bold))
@@ -132,6 +153,41 @@ struct FlexibleSettingsPanel: View {
             .accessibilityLabel(minimized ? "Show the settings" : "Minimise the settings")
             .accessibilityIdentifier("flexible-panel-minimize")
         }
+    }
+}
+
+extension FlexibleSettingsPanel {
+    /// ★ S5: the one-line confirm, in the header's place: "Reset every setting here? [Reset] [Cancel]".
+    var resetConfirm: some View {
+        HStack(spacing: DS.Space.s) {
+            Image(systemName: "arrow.counterclockwise").font(.system(size: 13, weight: .bold))
+                .foregroundStyle(DS.Color.warning.color)
+            Text(FlexibleSettingsExit.resetAsk).font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(DS.Color.textPrimary.color)
+                .lineLimit(1).minimumScaleFactor(0.85)
+                .accessibilityIdentifier("flexible-reset-ask")
+            Spacer(minLength: DS.Space.xs)
+            Button { confirmingReset = false; model.resetAll() } label: {
+                Text(FlexibleSettingsExit.resetConfirm).font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(DS.Color.textPrimary.color)
+                    .padding(.horizontal, 12).frame(height: 32)
+                    .background(Capsule().fill(DS.Color.danger.color.opacity(0.55)))
+            }
+            .buttonStyle(.plain)
+            .background(GeometryReader { g in
+                Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["resetConfirm": g.frame(in: .global)])
+            }.allowsHitTesting(false))
+            .accessibilityIdentifier("flexible-reset-confirm")
+            Button { confirmingReset = false } label: {
+                Text(FlexibleSettingsExit.resetCancel).font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(DS.Color.textPrimary.color)
+                    .padding(.horizontal, 12).frame(height: 32)
+                    .background(Capsule().fill(DS.Color.fillSubtle.color))
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("flexible-reset-cancel")
+        }
+        .frame(minHeight: 36)
     }
 }
 

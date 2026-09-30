@@ -71,7 +71,7 @@ struct FlexibleSqueezeGroupHeader: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             HStack(spacing: DS.Space.s) {
-                Circle().fill(FlexibleSqueezeGroups.colour(number: row.number).color)
+                Circle().fill(model.groupColour(number: row.number).color)
                     .frame(width: 10, height: 10)
                 Text(row.line)
                     .font(.system(size: 13, weight: .semibold))
@@ -84,9 +84,13 @@ struct FlexibleSqueezeGroupHeader: View {
                     }.allowsHitTesting(false))
                     .accessibilityIdentifier("flexible-group-\(row.number)-line")
                 Spacer(minLength: DS.Space.xs)
-                FlexValuePill(key: "group-\(row.id)", value: row.value,
-                              title: FlexibleRowCopy.groupName(row.number) + " · squeeze", unit: "kg", seed: row.kg,
-                              padTarget: $padTarget) { model.setGroupForce(row.id, kg: $0) }
+                // ★ ROUND 5 (S3 / S4): the force in a number box, in the page's unit (the pencil pill went)
+                let unit = model.weightUnit
+                FlexNumberBox(key: "group-\(row.id)", title: FlexibleRowCopy.groupName(row.number) + " · squeeze",
+                              spec: FlexibleNumberSpecs.weight(kg: row.kg, unit: unit), padTarget: $padTarget,
+                              units: FlexibleWeightUnit.allCases, onUnit: { model.setWeightUnit($0) }) { v in
+                    model.setGroupForce(row.id, kg: unit.toKg(v))
+                }
                 if row.removable {
                     Button { model.removeGroup(row.id) } label: {
                         Image(systemName: "xmark").font(.system(size: 12, weight: .semibold))
@@ -112,7 +116,7 @@ struct FlexibleSqueezeGroupHeader: View {
         }
         .padding(.horizontal, DS.Space.m)
         .background(RoundedRectangle(cornerRadius: 12, style: .continuous)
-            .fill(FlexibleSqueezeGroups.colour(number: row.number).color.opacity(0.10)))
+            .fill(model.groupColour(number: row.number).color.opacity(0.10)))
         // its frame reaches the page (the hosted test checks it is on the panel)
         .background(GeometryReader { g in
             Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["groupRow-\(row.number)": g.frame(in: .global)])
@@ -123,38 +127,8 @@ struct FlexibleSqueezeGroupHeader: View {
     }
 }
 
-/// A value pill that opens the shared number pad: "[10 kg ✎]" — the value IS the control.
-struct FlexValuePill: View {
-    let key: String
-    let value: String
-    let title: String
-    let unit: String
-    let seed: Double
-    @Binding var padTarget: String?
-    let onValue: (Double) -> Void
-
-    var body: some View {
-        Button { padTarget = key } label: {
-            HStack(spacing: 4) {
-                Text(value)
-                    .font(.system(size: 13, weight: .semibold)).monospacedDigit()
-                    .foregroundStyle(DS.Color.textPrimary.color)
-                    .lineLimit(1).fixedSize()
-                Image(systemName: "pencil")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(DS.Color.textSecondary.color)
-            }
-            .padding(.horizontal, 10)
-            .frame(height: 32)
-            .background(Capsule().fill(DS.Surface.valuePill.color))
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("\(title) \(value)")
-        .accessibilityIdentifier("flexible-number-\(key)")
-        .modifier(FlexPadCommit(key: key, padTarget: $padTarget,
-                                config: .init(title: title, unit: unit, allowsDecimal: true), seed: seed, commit: onValue))
-    }
-}
+// ★ ROUND 5 (S3, "The pencil buttons go"): D2's value pill ("[10 kg ✎]", FlexValuePill) is gone —
+// the force is a FlexNumberBox (FlexibleNumberBox.swift).
 
 /// The selected pressed face's "Squeeze group [1] [2] [+ New]" row (in its card).
 struct FlexibleFaceGroupRow: View {

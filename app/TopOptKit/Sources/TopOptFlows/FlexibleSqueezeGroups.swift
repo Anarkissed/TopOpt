@@ -21,7 +21,8 @@
 //   * SEPARATE groups are separate squeezes (sims). The preview lattice is built for all of
 //     them: where two groups need the same material the FIRMER wins (FlexibleGroupField), and
 //     the page says so in one line. The squish player picks a group (or all at once).
-// Group colours are DS tokens — green, blue, orange, red — never purple.
+// Group colours are DS tokens — green, orange, red, blue — never purple; ★ round 5 (S1): chosen
+// per group (FlexibleGroupColours).
 
 import Foundation
 import TopOptDesign
@@ -92,6 +93,8 @@ public enum FlexibleSqueezeGroups {
             let n = rank[id(s.faces[i])] ?? first
             s.faces[i].squeezeGroup = n == first ? nil : n
         }
+        // ★ ROUND 5 (S1): each group's colour goes with it to its new number
+        s.groupColours = remapColours(s.groupColours, rank: rank)
     }
 
     /// Move a pressed face into the group stored as `groupID`. ★ D2 REVIEW: `hand` — the faces
@@ -300,8 +303,10 @@ public enum FlexibleSqueezeGroups {
 
     // MARK: colours
 
-    /// A group's colour — DS tokens, NEVER purple: green (group 1, the pressed faces' own
-    /// colour), blue, orange, red, then round again. FlexibleSqueezeGroupsTests pins it.
-    public static let palette: [RGBA] = [DS.Color.accentGreen, DS.Color.accent, DS.Color.warning, DS.Color.danger]
+    /// A group's DEFAULT colour — DS tokens, NEVER purple: green (group 1, the pressed faces' own
+    /// colour), orange, red, blue, then round again. FlexibleSqueezeGroupsTests pins it.
+    /// ★ ROUND 5 (S1): he picks each group's colour in its folder tab (FlexibleGroupColours —
+    /// `FlexibleStageModel.groupColour`); blue moved LAST (the dent heat is blue → cyan → white).
+    public static let palette: [RGBA] = FlexibleGroupColour.allCases.map(\.rgba)
     public static func colour(number: Int) -> RGBA { palette[(max(1, number) - 1) % palette.count] }
 }
