@@ -5568,7 +5568,7 @@ public struct WorkspacePlaceholder: View {
         // ★ ONLY THE LATTICE DESTINATION IS GATED — it needs an anchor, a load and
         // gravity before a lattice means anything. Going BACK, and going to
         // SURFACE (which edits the CAD faces themselves), never are.
-        let enabled = dest != .lattice || entry.enabled
+        let enabled = dest != .lattice || title != nil || entry.enabled   // Flexible (PR #362) H9: [‹ Flexible] (a title) is never gated — the pill reaches it from anywhere
         return Button {
             guard enabled else { return }
             goToStage(dest)
@@ -5604,8 +5604,8 @@ public struct WorkspacePlaceholder: View {
         }
         .buttonStyle(.plain)
         .disabled(!enabled)
-        .accessibilityIdentifier("stage-nav-\(dest.rawValue)")
-        .accessibilityLabel(enabled ? dest.title
+        .accessibilityIdentifier("stage-nav-\(dest.rawValue)\(title == nil ? "" : "-flexible")")   // Flexible (PR #362) H9: its own id beside #354's forward Surface
+        .accessibilityLabel(enabled ? (title ?? dest.title)   // Flexible (PR #362) H9: VoiceOver reads what the button says
                             : "Lattice — needs \(entry.missing.joined(separator: " and "))")
     }
 

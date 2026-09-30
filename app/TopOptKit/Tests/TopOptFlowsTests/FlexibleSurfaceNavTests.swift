@@ -19,6 +19,18 @@ final class FlexibleSurfaceNavTests: XCTestCase {
         let h = try XCTUnwrap(ws.range(of: "HStack(spacing: PageChrome.gap) { stageNavButton(to: back,"))
         let after = String(ws[h.upperBound...].prefix(600))
         XCTAssertTrue(after.contains(".latticeBandChipKeepOut()\n                .modifier(StageNavPlacement(stage: stage))"))
+        // ★ BATCH C VERIFICATION: the extra buttons are what they say — [‹ Flexible] is never
+        // gated like the octet's Lattice entry (a Flexible part with no main-page anchor got a
+        // disabled "Flexible — needs …"), VoiceOver reads its title (it read "Lattice"), and the
+        // extra [Surface] has its own id beside #354's forward Surface (two "stage-nav-surface")
+        let fn = try XCTUnwrap(ws.range(of: "private func stageNavButton(to dest: WorkspaceStage, icon: String, title: String? = nil) -> some View {"))
+        let body = String(ws[fn.upperBound...].prefix(3200))
+        XCTAssertTrue(body.contains("let enabled = dest != .lattice || title != nil || entry.enabled"))
+        XCTAssertTrue(body.contains(".accessibilityIdentifier(\"stage-nav-\\(dest.rawValue)\\(title == nil ? \"\" : \"-flexible\")\")"))
+        XCTAssertTrue(body.contains(".accessibilityLabel(enabled ? (title ?? dest.title)"))
+        // ★ RED CONTROL: #354's own lines, which the edits replaced
+        XCTAssertFalse(body.contains("let enabled = dest != .lattice || entry.enabled\n"), "control: the octet gate alone is gone")
+        XCTAssertFalse(body.contains(".accessibilityLabel(enabled ? dest.title\n"), "control: the destination's title alone is gone")
     }
 
     // MARK: H9 — the Surface button on the main Flexible page, and the way back
