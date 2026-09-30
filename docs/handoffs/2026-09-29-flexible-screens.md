@@ -1,6 +1,240 @@
 # Handoff — 2026-09-29-flexible-screens (TRACK app, A1): the Flexible screens
 
-## Round 4 · batch D2 — squeeze groups and the pinch (read this first)
+## Round 4 · batch D2 — verification pass (read this first)
+
+The D2 verifier reported 20 findings: 1 blocker, 10 majors and 9 minors. Two of them are the same
+pinched-face warning, seen from the code side and from the screen side. I checked each one on YOUR
+project 0004, restored through `AppModel.open`, and fixed every blocker and major and the cheap
+minors. The Settings page was hosted offscreen at 11" and 13" in both orientations and clicked.
+The app was NOT launched, so none of this has been seen on a screen yet.
+
+**What changes for you on the Settings page:**
+- **Each squeeze group is now a header in the face list, with its force in its pill.** It reads
+  "● Group 1 · Squeeze [10 kg ✎]" (with × and (i)), and the group's faces are listed under it.
+  Resting faces come after the groups. With one pressed face the header just says "Squeeze".
+  - D2's single line ("Group 1 · Top A + Top B · Squeeze 10 kg") was cut at the force on every
+    iPad. It was drawn 125–143 pt wide where the words need 248–261 pt, so it read "…Squ…".
+  - The new header is drawn whole: 114 of 114 pt at all four sizes (measured).
+- **The group you are working on is on the panel.** After + New, the new group's header and its ×
+  sit right above the open face, at all four iPad sizes. In landscape, D2's group section started
+  at y 958 (11") and y 1091 (13"), below the panel's bottom edge at 796 and 994.
+- **The card no longer has its own "10 kg ✎".** That pencil changed the whole group's force, and
+  the main page's Load group, without saying so. The force now has ONE control: the header's pill.
+  The card shows the face's own weight only where it differs from the group's force, for example
+  "5 kg of Top's 10 kg" when the main page's Top covers both top sectors. The card's dot is now
+  its group's colour (Face 5 in Group 2 is blue, not green).
+- **Before you Exit, a group that will squish less than you drew says so.** On your pad, with the
+  sides in Group 2:
+  - the top line reads "Ready · Group 1 squishes ~0.3 of 2.6 mm · firmer wins" in orange, with
+    [Fix];
+  - the move that caused it opens the pop-up. It selects Top A and says "Group 1 would squish ~0.3
+    of 2.6 mm: Group 2 needs firmer material", with [Join the groups] and [Keep apart];
+  - Group 1's header adds one line: "Squishes ~0.3 of 2.6 mm · Group 2 firmer".
+  The estimate comes with the designs, column by column, using the same rule as the build. It
+  gives 0.331 mm; the built lattice gives 0.330 mm. The pop-up opens once per new miss, and never
+  just because you opened the page.
+- **A pinched face's warning counts its two halves.** Face 3 now says "Can't reach your curve on
+  412 columns" and Face 5 says 476. Both said 832 before, which was core's figure for the whole
+  column. The lattice is built from the halves.
+- **Top + Bottom pinched: the two heat maps no longer cross.** The drawn dent's exaggeration is
+  now ×2 (it was ×4, which drew both maps 12 mm into your 20 mm pad). The depth chip and the
+  Deepest-squish pad stop at the half its design uses: 10 of 20 mm on Top A.
+- **Removing a group gives its faces the other group's force.** D2 left "Squeeze 6–10 kg", and the
+  next face you pressed then asked for the number pad.
+- **Undo and redo on this page keep the group's force right.** D2 kept the undone weight: the line
+  read "Squeeze 10–12 kg" and the pad offered 12. The redo still works after an undo.
+- **A main-page Load group is one hand, so its faces move together.** If the main page's Top covers
+  Top A and Top B, "+ New" on Top B takes Top A with it. "+ New" is not offered when that hand is
+  the whole group. So setting one group's force no longer changes another group's through the
+  main page (D2: "Group 1 · Squeeze 4–10 kg").
+
+**What changes on the main page:**
+- **The player's group picker "[● Group 1 ▾]" and its one-line note now sit in a row above the
+  play bar.** The timeline you drag stays at least 121 pt wide at every iPad size. D2 put the
+  picker inside the bar; at 11" portrait, in the same 294 pt bar, that left the timeline 4 pt
+  (hosted measurement). The picker is now outside the bar's 30 Hz redraw.
+- **"All at once" shows the note too**, for example "Group 1 squishes 0.3 of 2.6 mm · firmer
+  wins".
+- **With five pressed faces, the animation never splits a pinch.** The animation can squish at most
+  four faces. With the bottom pressed as well, D2 squished Face 3 while Face 5 stood still. Now
+  the top and bottom squish together, and the line says "Squish shown on 3 of 5 faces · pinches
+  whole". Picking Group 2 squishes Face 3 and Face 5 together.
+
+**Also fixed (you will not see these):**
+- If one face's two-half design fails, the other faces keep theirs. That face keeps core's single
+  design for now, and its card says "Pinched with Face 5 · one profile for now".
+- A face that the main page rests, then presses again, no longer lands in a leftover "Group 2" that
+  nobody made.
+- The combined lattice field is no longer kept in memory after a build. At 128³ it is about 24 MB,
+  and only tests read it.
+- The run-job encoder itself now refuses a pinch (`FlexibleJob.Inputs.pinches`), not only the
+  model.
+
+**Not done (and why):**
+- **Nothing has been seen on a device or simulator.** I must not launch the app. The iOS build
+  succeeds, and offscreen renders of the Settings page are in the scratchpad (`e2/out/`).
+- **The part does not show which face is in which group while its heat map is drawn.** The map
+  covers the face, so the colour is on the list, the headers and the card only. Outlining each map
+  in its group colour needs an edge pass in the overlay. Not done.
+- **Group colours 3 and 4 stay orange and red. I rejected this finding.** They come from DS's own
+  face-group palette (`DS.Color.groupPalette`: red, blue, green, orange, purple), which the main
+  page's groups already use; the squeeze palette is that palette without purple. The only other
+  tokens that are not purple are cyan, which is the Rests dot, and blues too close to Group 2's.
+- **The rendering defects on a pinch (the flap past a pressed side wall, the torn side faces) stay
+  for batch G's displacement field**, as D2 said.
+- **With five faces, three are animated** ({bottom, Top A, Top B}; {3, 5} does not fit beside
+  them). Four slots is a limit in the shader. Raising it would change the pass's texture slots.
+- **The Settings page's own player has no group picker.** It plays your drawing, every face at
+  once. **"Play all" still plays the groups together**, not one after another.
+- **Where a pinch's two halves meet is still the middle of the column** (core brief #6). **The
+  "~0.3 mm" is an estimate** (core brief #4).
+- **At 11" portrait the timeline is 121 pt**, just over the 120 pt minimum the test enforces.
+
+**Your call:**
+- The "Group 1 would squish ~0.3 of 2.6 mm" pop-up opens once, on the move that caused it, with
+  [Join the groups] [Keep apart]. Is once enough, or should it come back at Exit?
+- One hand moves as one: moving Top B out of the main page's Top group's squeeze group takes Top A
+  along. Should a single face be able to leave its main-page group instead? (Its weight would then
+  become its own.)
+- With one pressed face, the header reads just "Squeeze [10 kg ✎]", with no "Group 1".
+
+### Each finding, confirmed on the code → what changed
+| # | Finding | Verdict | Fix (file) | Pinned by |
+|---|---|---|---|---|
+| C1 | remove leaves two forces | CONFIRMED (V1: "6–10 kg", pad asked) | `mergeGroup` takes the target's force (FlexibleStageModel+Groups) | Review · testRemovingAGroup… (E1 RED) |
+| C2 | Settings undo shows a stale force | CONFIRMED (V6: "10–12 kg") | `FlexibleStagePage.history` re-reads the loads (no edit); hands read the project live | Review · testTheSettingsPageUndo… (E2 RED) |
+| C3 / U4 | pinched warning = whole column | CONFIRMED (832 vs 412 / 476) | `FlexibleFaceRows.warning` counts `segments[k].status`; the showBuildable branch reads the halves | Review · testAPinchedFacesWarning… (E3 RED) |
+| C4 | a main-page hand across two groups | CONFIRMED (V2: "4–10 kg") | a hand moves whole (`FlexibleSqueezeGroups.hand`, `move(hand:)`, `uniteHands`); "+ New" only outside the hand; handoff D2 bullet corrected | Review · testAMainPageHandMoves… (E4 RED) |
+| C5 | adopt keeps a stale group id | CONFIRMED (V4: a "Group 2" nobody made) | `FlexibleStageModel.adopt` = adopt + `uniteHands` (normalises) | Review · testTheMainPageResting… (E5 RED) |
+| C6 | one throw drops every pinch | CONFIRMED (one do/catch) | per-face catch, `segmentErrors`, "one profile for now" | Review · testOneFacesThrow… (E6 RED) |
+| C7 | 24 MB field kept for tests | CONFIRMED | `keepCombinedField` (test only) | Review · testTheCombinedField… (E7 RED) |
+| C8 | static runJobJSON sends a pinch | CONFIRMED | `Inputs.pinches`, `.pinch` thrown in the encoder | Review · testTheStaticRunJob… (E8 RED) |
+| U1 | group line cut at the force (BLOCKER) | CONFIRMED (hosted: 125/261 pt) | headers in the list, force in the pill (`FlexibleSqueezeGroupHeader`, `FlexValuePill`) | ReviewUI · testTheGroupHeadersAreWhole… (E16 RED; D2's line in place: cut at all 4 sizes) |
+| U2 | firmer-wins learnt after Exit | CONFIRMED | `FlexibleGroupEstimate` with the designs; readiness `.groupsCompete`; pop-up on the action; header line; "All at once" note | ReviewUX · testSeparateGroupsSayTheMiss… (E9/E10/E11 RED) |
+| U3 | groups below the fold | CONFIRMED (11l/13l) | headers in the list; the reveal follows a group move | ReviewUI (the old place is below the fold at 11l and 13l) |
+| U5 | card's "10 kg ✎" moves the group silently | CONFIRMED | no force control on the card; `weightLine` only for a share; Info.weight | ReviewUX · testTheCardSaysOnly… (E14 RED) |
+| U6 | 5+ faces: one-sided pinch | CONFIRMED (squished [0, A, B, 3]) | `squishSlots` keeps a pinch whole; `squishFaces` to the pass; readiness line | ReviewUX · testThePassSlots…, testFivePressedFaces… (E12 RED) |
+| U7 | Top + Bottom dents cross | CONFIRMED (k 4, 468 columns cross) | `effectiveLattice` halves pinched columns: thinCap, prismCap, dragLimit, latticeMax | ReviewUX · testATopAndBottomPinch… (E13 RED) |
+| U8 | 11" portrait timeline ~32 pt | CONFIRMED (hosted: 4 pt) | picker + note in a row above the capsule; `minTimeline` 120 | ReviewUI · testTheTimelineKeeps… (E17 RED) |
+| U9 | groups not on the model; card dot green | card dot CONFIRMED and fixed; the model tint NOT done | `FlexibleFaceRows.dot` | ReviewUX (E15 RED) |
+| U10 | orange / red group colours | REJECTED | DS's own group palette minus purple (see above) | — |
+| U11 | pinch render defects | disclosed, batch G | — | — |
+| U12 | (a) how to make a group (b) Settings player (c) Menu in the TimelineView | (a) fixed in Info.groups; (b) not done; (c) fixed — the picker is outside the TimelineView | FlexibleRowCopy, FlexibleSquishPlayer | — |
+
+### Hook lines in #354 files
+
+None. `git diff HEAD --stat` touches no #354 or main file: WorkspacePlaceholder, MetalMeshView,
+LatticeSettings, ProjectModel and LatticeStageMode are untouched, and no case was added. Every
+edit is in a Flexible track file:
+- New: `FlexibleGroupEstimate.swift` (+123).
+- Edited (+/−):
+  - FlexibleSqueezeGroupRows +132 −56 (the header and the value pill);
+  - FlexibleStageModel+Groups +110 −16 (merge, hands, estimate hook, pinched columns, per-face
+    catch);
+  - FlexibleSqueezeGroups +90 −18 (hand-aware move and new, uniteHands, live force,
+    squishSlots);
+  - FlexibleFaceList +64 −17 (sections under headers, row frames);
+  - FlexibleStageModel +61 −13 (the estimate and pinch errors in the pipeline, the field flag,
+    derive/refresh/adopt, the pinch-aware order, the job's pinches);
+  - FlexibleReadiness +58 −5 (`.groupsCompete`, `popping`, `competing`, the fixes, squishShown);
+  - FlexibleSquishPlayer +53 −24 (the row above the capsule);
+  - FlexibleFacePanel +47 −11 (warning, weightLine, dot, the pinch fallback line, the pad clamp);
+  - FlexibleShownValues +33 −12 (half caps, the halves' buildable depths);
+  - FlexibleLatticeGeneration +31 −7 (pinchedWith, squishFaces, simNote);
+  - FlexibleRowCopy +31 −2;
+  - FlexibleDepthPrism +21 −3;
+  - FlexibleStagePage +16 −5 (`history`, popping, the notice);
+  - FlexibleFixPopup +8 (the join / keep-apart fixes, button frames);
+  - FlexibleJob +6;
+  - FlexibleDepthChips +4 −2;
+  - FlexibleSettingsPanel +3 −1 (the reveal follows a group move);
+  - FlexibleMainStage and FlexibleMainStage+Views, +1 −1 each (the note, the probe's faces).
+
+### Decisions (00-decisions.md)
+- D-R4-12, D-R4-14 and D-R4-15 amended: headers in the list, one force control, the hand, the
+  merge's force, the miss said before Exit with the pop-up, and the picker above the capsule.
+- New rows:
+  - D-R4-17: a pinched column is half a column for the dent, the chip, the pad and the warning;
+  - D-R4-18: the four squish slots keep a pinch whole;
+  - D-R4-19: undo re-reads the main page; no 24 MB field is kept; the encoder refuses a pinch.
+
+### Tests
+Every new test states its RED control inline: D2's behaviour, computed beside it, must differ.
+Each fix was also mutated back to D2's behaviour, rebuilt, and its pinning test run. All 17
+mutations went RED (`e2/mut_run.log`):
+- E1 remove keeps its own force;
+- E2 undo without the re-read;
+- E3 whole-column warning;
+- E4 a hand split;
+- E5 adopt without uniting;
+- E6 one catch for all;
+- E7 field always kept;
+- E8 the encoder sends a pinch;
+- E9 no estimate;
+- E10 the prompt pops blockers only;
+- E11 no "All at once" note;
+- E12 the four largest;
+- E13 whole-column caps;
+- E14 the card says the force;
+- E15 green dot;
+- E16 D2's long header line;
+- E17 the picker inside the capsule.
+
+NEW:
+- `FlexibleSqueezeGroupsReviewTests` (8, his project): remove, undo, pinched warning, hand,
+  adopt, one throw, combined field, the static encoder.
+- `FlexibleSqueezeGroupsReviewUXTests` (5): the miss before Exit and its choice (the estimate
+  against the built lattice; the positive control is that with no other group's material it
+  misses nothing), the pass's slots (pure), five faces on his pad, Top + Bottom, the card.
+- `FlexibleSqueezeGroupsReviewUITests` (2, hosted): the headers whole and on the panel, with the
+  pop-up clicked; the timeline with the picker at four sizes.
+
+RE-PINNED, each with its reason in the test:
+- `FlexibleSqueezeGroupsUITests`: the header lines; the pop-up goes through [Keep apart]; group
+  1's miss line; the player is taller, not wider.
+- `FlexibleSettingsRound4Tests`: the list's source pins.
+- `FlexibleSqueezeGroupsModelTests`: it asks for the combined field.
+- `FlexibleRowCopyTests`: the card's warning is a static the tests call.
+
+Raw results:
+```
+Targeted suite (every Flexible* suite + the brief's list + the WorkspacePlaceholder scanners; D2's filter):
+Executed 763 tests, with 10 tests skipped and 2 failures (0 unexpected) in 822.797 (822.866) seconds
+  LatticeSimSolveTriggerTests.testTheTriggerRefusesOnAllThreeGrounds — known, pre-existing
+  FlexibleRowCopyTests.testRefusalsUnreachedColumnsAndAutoSayItOnThePanel — its source pin, re-pinned; rerun: Executed 4 tests, with 0 failures
+FLEX-REVIEW remove: ["Group 1 · Top A + 3 more · Squeeze 10 kg"] · face 3 10.0 kg · first force Optional(10.0)
+FLEX-REVIEW undo: ["Group 1 · Top A + 3 more · Squeeze 10 kg"] · header Group 1 · Squeeze [10 kg] seed 10.0 · first force Optional(10.0)
+FLEX-REVIEW face 3 warning: 'Can't reach your curve on 412 columns' · halves 412 · core's whole column 832
+FLEX-REVIEW face 5 warning: 'Can't reach your curve on 476 columns' · halves 476 · core's whole column 832
+FLEX-REVIEW hand: ["Group 1 · Face 3 + Face 5 · Squeeze 10 kg", "Group 2 · Top A + Top B · Squeeze 4 kg"] · Top 4.0 kg
+FLEX-REVIEW one throw: segments [3] · errors [5: "columnsDoNotMatch"]
+FLEX-REVIEW combined field: 53248 voxels · held only on request
+FLEX-REVIEW compete: estimate 0.331 of 2.630 mm · top line 'Ready · Group 1 squishes ~0.3 of 2.6 mm · firmer wins' · pop-up 'Group 1 would squish ~0.3 of 2.6 mm: Group 2 needs firmer material' · fixes [joinGroups(from: 1, into: 2), keepApart]
+FLEX-REVIEW compete: built lattice 0.330 mm · estimate 0.331 mm · note 'Group 1 squishes 0.3 of 2.6 mm · firmer wins'
+FLEX-REVIEW top+bottom: k 2.0 (D2's cap 4.0) · worst k·d / half 0.600 · D2 crossing columns 468 · top A lattice 20.0 mm, chip stops at 10.0 mm
+FLEX-REVIEW five faces: line 'Ready · Squish shown on 3 of 5 faces · pinches whole' · group-1 [0, A, B] · group-2 [3, 5] · all [0, A, B]
+FLEX-REVIEW card share: '5 kg of Top's 10 kg'
+FLEX-REVIEW-HOSTED headers (the pop-up opened on the move, [Keep apart] clicked, face 5 reopened):
+  11l: G1 line 114/114 pt G2 line 116/116 pt · G2 header y 446–490, × y 468, card y 550–796, scroll 187–796 · D2's section would start at y 958 · D2 'Group 1 · Top A + Top B · Squeeze 10 kg' 126/248 pt · D2 'Group 2 · Face 3 + Face 5 · Squeeze 10 kg' 125/261 pt
+  11p: G1 line 114/114 pt G2 line 116/116 pt · G2 header y 644–688, × y 666, card y 748–994, scroll 252–1156 · D2's section would start at y 1156 · D2 … 143/248 pt · … 138/261 pt
+  13p: G1 line 114/114 pt G2 line 116/116 pt · G2 header y 826–870, × y 848, card y 930–1176, scroll 434–1338 · D2's section would start at y 1338 · D2 … 143/248 pt · … 138/261 pt
+  13l: G1 line 114/114 pt G2 line 116/116 pt · G2 header y 579–623, × y 601, card y 683–929, scroll 187–994 · D2's section would start at y 1091 · D2 … 126/248 pt · … 125/261 pt
+FLEX-REVIEW-HOSTED player:
+  11l capsule 340 pt → timeline 167 pt · D2: capsule 444 pt → timeline 154 pt
+  11p capsule 294 pt → timeline 121 pt · D2: capsule 294 pt → timeline 4 pt
+  13p capsule 340 pt → timeline 167 pt · D2: capsule 444 pt → timeline 154 pt
+  13l capsule 340 pt → timeline 167 pt · D2: capsule 444 pt → timeline 154 pt
+FLEX-GROUPS-HOSTED (re-pinned): 11l + New → 2 groups · × clicked → 1 group (D2: "× under the fold — removed through the model") | 13p the same
+Mutations (e2/mut_run.log): E1–E17 all RED.
+iOS: xcodebuild … -destination id=147E56A1-C8CA-4B9D-BE6C-CF230589A83A … build → ** BUILD SUCCEEDED ** (exit 0), no warning or error in a Flexible file. The app was not launched.
+```
+
+### Commits (on claude/flexible-screens, not pushed)
+- 1ee4f364 — the code, three new suites, re-pins.
+- "A1 round 4 batch D2 verification: handoff section and DECISIONS …" — this section,
+  D-R4-12/14/15 amended, D-R4-17..19 new.
+
+## Round 4 · batch D2 — squeeze groups and the pinch
 
 Your img 3 ("when squeezing something with your hands, you would absolutely squeeze the two sides
 together. One side wouldn't rest"), img 4 ("Groups faces together … group two sides together with
@@ -14,8 +248,9 @@ none of this has been seen on a screen yet.
   builds the lattice". Round 3 said "1 thing to fix: Face 3 and Face 5 press the same material"
   and offered [Face 5 rests] [Face 3 rests]. That blocker, its two buttons and the orange
   "conflict" tint on the part are gone.
-- **Squeeze groups, under the face list.** Every pressed face starts in Group 1. One line per group,
-  its faces and its ONE force:
+- **Squeeze groups, under the face list.** (★ Superseded by the verification pass above: each group
+  is now a header IN the face list, its force in its pill — this one line was cut at the force.)
+  Every pressed face starts in Group 1. One line per group, its faces and its ONE force:
   - "Group 1 · Top A + 3 more · Squeeze 10 kg" on your project as saved;
   - "Group 1 · Top A + Top B · Squeeze 10 kg" / "Group 2 · Face 3 + Face 5 · Squeeze 10 kg"
     once the sides are apart (your img 4).
@@ -24,7 +259,9 @@ none of this has been seen on a screen yet.
   group). The face list's dots take the group colour too.
 - **Moving a face.** A pressed face's card has a new row: "Squeeze group [1] [2] [+ New]". + New
   makes a new group from that face; a number moves it there.
-- **One force per group.** "Squeeze 10 kg" presses every face of the group with 10 kg. A face that
+- **One force per group.** "Squeeze 10 kg" is every HAND's force (★ corrected in the verification
+  pass: not "every face with 10 kg" — a main-page Load group over two faces splits its 10 kg by
+  area, 5 kg each; a face of your own takes the full 10 kg). A face that
   comes from a main-page Load group is that group's hand: the pencil writes the main page's group
   back (one source of truth), and its faces share it by area, as core spreads a group. A weight
   typed on one face is its group's force. A face you press here joins Group 1 at its force, with
