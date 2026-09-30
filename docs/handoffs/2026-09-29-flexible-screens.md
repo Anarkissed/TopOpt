@@ -1,6 +1,286 @@
 # Handoff — 2026-09-29-flexible-screens (TRACK app, A1): the Flexible screens
 
-## Round 4 · batch D1 — verification pass (read this first)
+## Round 4 · batch D2 — squeeze groups and the pinch (read this first)
+
+Your img 3 ("when squeezing something with your hands, you would absolutely squeeze the two sides
+together. One side wouldn't rest"), img 4 ("Groups faces together … group two sides together with
+another two sides as a different group") and your answer 1 (ONE force per group, "like two hands
+pressing equally; each face keeps its own curve"). Judged on YOUR project 0004 restored through
+`AppModel.open`; the Settings page was hosted offscreen and clicked. The app was NOT launched, so
+none of this has been seen on a screen yet.
+
+**What you will see on the Settings page:**
+- **Your faces 3 and 5 no longer stop the lattice.** Your project as saved now reads "Ready: Exit
+  builds the lattice". Round 3 said "1 thing to fix: Face 3 and Face 5 press the same material"
+  and offered [Face 5 rests] [Face 3 rests]. That blocker, its two buttons and the orange
+  "conflict" tint on the part are gone.
+- **Squeeze groups, under the face list.** Every pressed face starts in Group 1. One line per group,
+  its faces and its ONE force:
+  - "Group 1 · Top A + 3 more · Squeeze 10 kg" on your project as saved;
+  - "Group 1 · Top A + Top B · Squeeze 10 kg" / "Group 2 · Face 3 + Face 5 · Squeeze 10 kg"
+    once the sides are apart (your img 4).
+  Each line has the group's colour dot (green, blue, orange, red — never purple), a pencil for the
+  force, and with two or more groups an × that removes the group (its faces join the first other
+  group). The face list's dots take the group colour too.
+- **Moving a face.** A pressed face's card has a new row: "Squeeze group [1] [2] [+ New]". + New
+  makes a new group from that face; a number moves it there.
+- **One force per group.** "Squeeze 10 kg" presses every face of the group with 10 kg. A face that
+  comes from a main-page Load group is that group's hand: the pencil writes the main page's group
+  back (one source of truth), and its faces share it by area, as core spreads a group. A weight
+  typed on one face is its group's force. A face you press here joins Group 1 at its force, with
+  no number pad.
+- **A pinch says so, in one plain line.** Face 3's card: "Pinched with Face 5 · two halves".
+- **Two groups that share material say so:** "Groups share material: the firmer one wins".
+
+**What you will see on the main page:**
+- **The squish player has a group picker** once there are two or more groups: "[Group 1 ▾]" lists
+  "Group 1 · Top A + Top B", "Group 2 · Face 3 + Face 5" and "All at once" (your "Play all").
+  Picking a group squishes only its faces, the dent and the walls. It is the same lattice: the
+  pick re-uploads the squish faces only, never the lattice. It opens on Group 1.
+- **A group that squishes less than it was designed for says so**, one line above the player:
+  "Group 1 squishes 0.3 of 2.6 mm · firmer wins".
+
+**What it does to the lattice (your pad):**
+- **The pinch is two halves.** Every one of face 3's 832 columns runs 100 mm to face 5. Each column
+  is split in the middle. The half nearer face 3 is designed for face 3's own drawing, at face 3's
+  own pressure. It uses core's own density_for / strain_under / cell_size_mm through the bridge,
+  column by column, as core's design_face does, with the height halved. The field gives every voxel
+  to the NEARER face (core's own handover rule), so the two halves meet in the middle.
+  - With nothing pinched, this design IS core's: |Δρ| ≤ 1.7e-16 over all 5,760 columns of your
+    four faces.
+  - Your drawing is met better. Over 100 mm, face 3's one profile missed your drawing by 1.42 mm
+    on average (every column "too soft": even the firmest lattice squishes further than drawn).
+    Over its half it misses by 0.48 mm (412 columns still too soft).
+- **Core refuses this** ("faces 3 and 5 push the same material along the same axis (one profile
+  per stack)"). So a group with a pinch is assembled by the app. The app's assembler is core's rule
+  in Swift: on a set core CAN assemble (top A, top B, face 3) it equals core's field on every one of
+  the 53,248 lattice voxels (|Δρ| = 0, the same owner).
+- **Separate groups: the firmer wins.** Take your img 4, the top in Group 1 and the sides in
+  Group 2. The lattice must carry both squeezes, so each voxel takes the firmer group's density.
+  - The sides' 100 mm columns at 10 kg need a dense lattice. Group 2 is firmer on 45,831 of the
+    53,248 voxels.
+  - So the top, designed to squish 2.6 mm, squishes about 0.3 mm in that lattice. The player says
+    so. This is the honest consequence of firmer-wins: a compromise density that serves both is
+    core's job (core brief #1).
+
+**Not done (and why):**
+- **Nothing has been seen on a device or simulator.** I must not launch the app.
+- **Where the halves meet is the column's middle, not a force balance.** Two faces pressed equally
+  meet where the nearest-face rule puts them (d_A = d_B). Core should place it (core brief #6).
+- **"As built" across groups is an estimate.** It uses the mean density along each column's span
+  through core's strain_under, not a series column (core brief #4). It is used only with two or
+  more groups; one group shows its designed depths, as before.
+- **Core's run job cannot carry groups or a pinch yet.** `runJobJSON` throws
+  `.squeezeGroups` / `.pinch` with one sentence, instead of sending a job core would refuse. Nothing
+  in the app sends it yet (your answer 2's export path is another batch).
+- **Auto (More) still weighs each face over its whole column.** For a pinched face its pick may fit
+  the whole column but not the half (core brief #7).
+- **The render defects seen in B's renders** (the seam speckle, the flap past a pressed side wall,
+  the torn-looking pressed side face) are untouched. A pinch now squishes BOTH side faces at once,
+  so the side-face tearing may show more. Batch G's displacement field replaces the per-column
+  squish.
+- **The group colour on the part** shows only where a pressed face has no map yet. Once its map is
+  drawn, the heat map covers the face. The list and the group rows carry the colour.
+- **At 11" portrait the player with its picker narrows to 294 pt**, so the timeline is short there.
+- **The player's "Play all" is "All at once"** (every group squeezing together, each face at its
+  group's as-built depth). It does not play the groups one after another.
+
+**Your call:**
+- **One force per group, counted per hand.** A main-page Load group over two faces (say Top A +
+  Top B) is ONE hand: "Squeeze 10 kg" puts 10 kg on the top, split by area. It is not 10 kg on each
+  sector. Faces of your own each take the full 10 kg (face 3 and face 5: two hands pressing
+  equally). Say if you want every face at the full force instead.
+- **A face you press joins Group 1 at its force, without asking.** Say if you want the pad to ask.
+- **Firmer-wins makes the top nearly rigid when the sides are a separate group** (0.3 of 2.6 mm).
+  Keep the sides in Group 1 (a pinch together with the top) to keep each face's own squish, or wait
+  for core's compromise design.
+- **"Play all" plays everything at once.** Say if you want the groups played one after another
+  instead.
+
+### Core brief (D2 — everything core cannot do; the plan's items 1–15 and D1's #16 stand)
+
+The app does each of these itself today. Each item says what the app does and what core should
+own instead.
+- **#1 (now concrete) MULTI-SQUEEZE DESIGN.** Design ONE field that meets every squeeze group, a
+  compromise with each group's miss reported.
+  - Today the app combines the groups firmer-wins. On your pad (top | sides), Group 1 was designed
+    for 2.6 mm and squishes about 0.3 mm: Group 2 is firmer on 45,831 of 53,248 voxels.
+- **#2 (now concrete) THE JOB SCHEMA**: `flexible.squeeze_groups: [{faces: [face_region_id],
+  force_n}]`.
+  - One force per HAND: a main-page Load group is one hand, split by area; any other face is its
+    own hand.
+  - Until then `runJobJSON` throws `.squeezeGroups` for two or more groups.
+- **#4 SERIES COLUMNS.** The app's "as built" across groups is the mean ρ along a column's designed
+  span, put through strain_under (≈). Core should integrate the column in series.
+- **#6 (now concrete) THE PINCH**:
+  - `design_face` over a column SEGMENT (a per-column height);
+  - `assemble_density_field` without its one-profile refusal for two faces of one group;
+  - `find_stack_conflicts` telling a pinch (two faces pressing against each other) from two
+    faces pressing the same way on one stack (a step), which the app also treats as nearest-face;
+  - the split placed by FORCE BALANCE. The app splits where d_A = d_B: the column's middle for two
+    parallel faces, and each half at its own face's pressure.
+  - Today the app does this in `FlexiblePinch.design` (core's design_face, column by column, with
+    the height halved) and `FlexibleGroupField.assemble` (core's assembler in Swift, without the
+    refusal).
+  - Until core owns it, `runJobJSON` throws `.pinch`.
+- **#7 AUTO OVER GROUPS AND PINCHES.** `recommend` designs every face over its whole column. A
+  pinched face's half runs at twice the strain, so Auto's family or temperature may suit the whole
+  column but not the half.
+- **#9 C2/C3 EXPORT** from the combined field (the groups, and the pinches' two halves).
+- **#17 (new) A RECEIPT PER GROUP**: each group's squish in the combined field, and the lattice the
+  groups compete for. The app counts it (`FlexibleGeneratedLattice.sharedVoxels`, `simNotes`).
+
+### Hook lines in #354 files
+
+None. `git diff 956c9587..HEAD --stat` touches no #354 file: WorkspacePlaceholder, MetalMeshView,
+LatticeSettings, ProjectModel and LatticeStageMode are untouched, and no case was added.
+- The renderer's new branch lives in `MeshRenderer+FlexibleLattice.swift` (#362's own file): a
+  faces-only upload when the lattice token is the same and the faces token changed.
+- New files: FlexibleSqueezeGroups, FlexiblePinch, FlexibleGroupField, FlexibleStageModel+Groups
+  and FlexibleSqueezeGroupRows.
+- Edited track files (small, each marked ★ ROUND 4 (D2)): FlexibleSettings (+1 optional field),
+  FlexibleStageModel (segments; the group-aware build; press / rest / setWeight; the run job; the
+  stale-refusal rule), FlexibleReadiness (the blocker removed), FlexibleFaceList / FlexibleFacePanel
+  (group rows, the card's group row, the pinch line), FlexiblePageChannels / FlexibleOverlay (the
+  conflict tint gone, group tint), FlexibleFixPopup (press asks the pad only when needed),
+  FlexibleRowCopy, FlexibleLatticeGeneration (sims, `showing`), FlexibleSquish (facesToken),
+  FlexibleLatticePass (`uploadFaces`), FlexibleMainStage(+Views) (the pick), FlexibleSquishPlayer
+  and FlexibleMainStatusPill (the picker), and FlexibleJob (the throws).
+
+### Decisions (00-decisions.md)
+
+- New rows D-R4-12 … D-R4-16: the squeeze groups, the pinch, firmer-wins, the player's picker, and
+  the stale refusal.
+- D-R3-10 is amended: its shared-stack blocker, its [Face N rests] fixes and the two-face camera
+  sentence are struck.
+- R11's "refuse and name them" is amended.
+- M13 stands for core; D-R4-13 overrides it inside a group.
+
+### Tests
+
+Each new suite was written FIRST and run RED against the round-3 code. Its API surface was stubbed
+so it compiled (`d2_red1.log`): the pinch blocked ("Face 3 and Face 5 press the same material"), no
+lattice was built within 120 s, the player had no sims, a typed weight moved one face, and the run
+job did not throw.
+
+NEW:
+- `FlexibleSqueezeGroupsTests` (8): the groups as values, the one-line copy, the colours, pinch vs
+  shared material, Codable, the sims, firmer-wins.
+- `FlexiblePinchTests` (7): on your project — core refuses the pinch; nothing pinched = core's
+  design; 832 / 832 columns pinched; the assembler = core's field; your project READY and building;
+  two segments; core's in_stack with a straddling cut.
+- `FlexibleSqueezeGroupsModelTests` (7): on your project — one group at 10 kg; the force writes the
+  main page back; a moved face takes its group's force; nothing blocks in or across groups;
+  separate groups firmer-wins; the player's pick; the run job's throws.
+- `FlexibleSqueezeGroupsUITests` (4): the Settings page hosted and CLICKED (+ New and ×); the group
+  tint; a pick re-uploads the faces alone (Metal); the player with its picker kept clear of every
+  button and legend.
+- `FlexibleGroupFieldPerfTests` (1, opt-in, Release): the cost.
+
+Inline RED controls:
+- the old rule's blocker on your project;
+- core's own refusal of 3 + 5;
+- a halved column changes 727 of 832 densities;
+- no partner, nothing pinched;
+- the assembler without R11's blend is off by 0.100;
+- a point across a cut is in the column without the cut;
+- min-combine is softer on 49,564 voxels;
+- the old per-face write left face 5 at 10 kg;
+- a required `squeezeGroup` breaks old JSON;
+- `groupPalette[4]` is purple;
+- the lattice unpicked squishes 4 faces;
+- round 3's layer equality ignored a pick;
+- one profile (0.202) is neither half.
+
+Re-pinned, each with its reason in the test:
+- FlexibleReadinessTests:
+  - your project has NOTHING to fix (round 3's rule copied as the control);
+  - TPU 95A: nothing blocks;
+  - [Face 5 rests] is applied directly;
+  - the rule's pair and the prompt use a no-weight blocker.
+- FlexibleBatchBReviewUXTests: the prompt, the pill and the fix list without the shared-stack case;
+  no issue names both ends of a stack.
+- FlexibleMainStageTests: the pill's rule on a weight blocker (it caught D-R4-16).
+- FlexibleBatchBReviewTests: the undo of [Face 5 rests] REBUILDS the pinch; it no longer says
+  "share a stack".
+- FlexibleRowCopyTests: the one-line table.
+- FlexibleSettingsRound4Tests: D1's marker now holds the group rows.
+- FlexibleSquishTests: the drawn-lattice call site takes the pick.
+
+Deleted-test sweep of my diff: no test deleted. Two are renamed by their re-pin
+(`testHisProjectAsSavedHasOneThingToFix` → `…HasNothingToFix`,
+`testWithTPU95AStillOnlyTheSharedStackBlocks` → `testWithTPU95ANothingBlocks`).
+
+Mutation runs. Each run breaks one rule, rebuilds, and runs the test that pins it; the file is then
+restored from git. All 14 are RED:
+```
+M1  the pinch group handed to core            ⇒ his pinch: "faces 3 and 5 push the same material … (one profile per stack)" (2 failures)
+M2  no split (a pinched column over 100 mm)   ⇒ 100.0 ≠ 50.0 "half of his 100 mm columns" (3)
+M3  separate groups combined SOFTER-wins      ⇒ |combined − max| 0.215 (4)
+M4  the assembler without R11's blend         ⇒ 0.09998 not < 1e-5 "the app's assembler is core's rule" (1)
+M5  membership ignores a sector's cuts        ⇒ "(col: 0, depth: 3.0)" across the cut (2)
+M6  a typed weight changes its face alone     ⇒ face 5 12.0 ≠ 9.0 "the other side of the pinch follows" (2)
+M7  the player's pick ignored                 ⇒ group 1's layer squishes [−Z, −X, +X] (5)
+M8  the renderer re-uploads nothing on a pick ⇒ "a pick redraws" (3)
+M9  a pinch across groups too                 ⇒ "separate groups: no pinch" (2)
+M10 a stale refusal said during the new run   ⇒ "Fix: Face 5 can't be designed" ≠ "Building…" (1)
+M11 the group palette reaches purple          ⇒ group 1 red, not green; purple at group 5 (3)
+M12 the run job sent for groups / a pinch     ⇒ "did not throw — one group with a pinch" (1)
+M13 the player placed at its old size         ⇒ the slot's source pin (1)
+M14 a moved face keeps its own weight         ⇒ 10.0 ≠ 6.0 "face 5 joins group 2 at its 6 kg" (2)
+```
+
+The targeted suite: every Flexible* suite, the brief's list, and every suite that scans
+WorkspacePlaceholder (D1's filter, unchanged: no #354 file is touched). It ran after the last source
+change. Raw:
+```
+Executed 748 tests, with 10 tests skipped and 1 failure (0 unexpected) in 750.553 (750.617) seconds
+  the one failure: LatticeSimSolveTriggerTests.testTheTriggerRefusesOnAllThreeGrounds (known, pre-existing)
+FLEX-PINCH core on 3 + 5: faces 3 and 5 push the same material along the same axis (one profile per stack)
+FLEX-PINCH face 3 pinched by face 5: 832 of 832
+FLEX-PINCH face 3 mean miss of its drawing: one profile over 100 mm 1.4204065801731192 mm (too soft on 832) · its half 0.47520234869831113 mm (too soft on 412)
+FLEX-PINCH his project as saved: blocking [] · line 'Ready: Exit builds the lattice'
+FLEX-PINCH nothing pinched vs core's design: 5760 columns · |Δρ| ≤ 1.6653345369377348e-16 · |Δdepth| ≤ 1.5987211554602254e-14 mm
+FLEX-PINCH face 3 halved: 727 of 832 columns change density
+FLEX-ASSEMBLE app vs core on top A + top B + face 3: 53248 lattice voxels · |Δρ| ≤ 0.0 · owners differ on 0
+FLEX-ASSEMBLE his split without cuts: owners differ on 0, |Δρ| ≤ 0.0
+FLEX-ASSEMBLE control, no blend: |Δρ| ≤ 0.09997618198394775, owners differ on 0
+FLEX-PINCH two segments: near face 3 ρ 0.16584753 (its half 0.16574399775724688) · near face 5 ρ 0.26536065 (its half 0.26507709097617244)
+FLEX-PINCH control: one profile (face 3's, 100 mm) ρ 0.20215404914798032 beside face 5
+FLEX-READY his project as saved: 0 blocking — Ready: Exit builds the lattice | pinches ["3|5"]
+FLEX-GROUPS his top | sides: shared voxels 53248 · notes ["group-1": "Group 1 squishes 0.3 of 2.6 mm · firmer wins"]
+FLEX-GROUPS firmer wins: |combined − max| ≤ 0.0 · group 2 firmer on 45831 voxels · min-combine softer on 49564
+FLEX-PLAYER group 2: dented vertices top A 0 · face 3 4992 · face 5 4992
+FLEX-PLAYER pick: volume uploads 1 · face uploads 1 · faces 1
+FLEX-GROUPS-HOSTED 11l: + New at (311, 668) → 2 groups · rows 44 pt / 44 pt · × under the fold (removed through the model) | 13p: + New at (328, 918) → 2 groups · rows 44 pt / 44 pt · × clicked → 1 group
+FLEX-PLAYER with picker + note: 11l 444×68 at (489, 664) · 11p 294×68 at (384, 1024) · 13p 444×68 at (408, 1206) · 13l 444×68 at (466, 862) · old size would collide at 2 of 4
+FLEX-REVIEW undo of [Face 5 rests]: pill 'Ready' ready · pinches 1
+```
+(Face 3's half near face 3 is 0.166 and face 5's is 0.265 with both sides drawn as the same dome,
+face 3 at 4 mm and face 5 at 1 mm. Your own face 3 is drawn FIRM in the middle: its flipped curve
+is 0 there.)
+
+Cost on a Release build (Mac; `FLEX_D2_PERF=1`), paid only when a lattice is built (Exit, or a
+main-page edit) or a design lands, never per drag:
+```
+FLEX-PERF assemble 128³ (2097152 voxels), 4 faces, 2 pinches: 0.383 / 0.389 / 0.381 s (3 runs) · two groups 0.606 s + firmer 0.027 s
+FLEX-PERF two-segment design, 4096 columns through core's table: 0.065 s
+```
+Your pad's grid is 64 × 64 × 13, where the assembly takes milliseconds. An iPad is slower than this
+Mac, so on a 128³ part expect about 1 s more on Exit.
+
+**iOS build (final tree):** `xcodebuild -project app/TopOpt.xcodeproj -scheme TopOpt -configuration
+Debug -destination id=147E56A1… -derivedDataPath …/flexA1 build` → `** BUILD SUCCEEDED **` (exit
+0), with no warning in a Flexible file. The app was not launched.
+
+### Commits (on claude/flexible-screens, not pushed)
+
+75641936 the squeeze groups and the pinch (code and tests, re-pins) · e0643a7f a moved face takes its
+group's force, the two-segment test's premise, the cost probe · (this handoff and the DECISIONS rows
+D-R4-12…16).
+
+
+## Round 4 · batch D1 — verification pass
 
 A verifier read batch D1 against your rules on YOUR project 0004. It rendered the page headlessly,
 hosted it in an offscreen window and clicked it; the app was not launched. I confirmed each
