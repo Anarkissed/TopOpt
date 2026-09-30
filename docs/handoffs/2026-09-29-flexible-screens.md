@@ -1,6 +1,197 @@
 # Handoff — 2026-09-29-flexible-screens (TRACK app, A1): the Flexible screens
 
-## Round 3 · batch A — verification pass (read this first)
+## Round 3 · batch B — Exit always leaves a lattice on the main Flexible page (read this first)
+
+**What you will see** (judged headlessly on YOUR project 0004 restored through `AppModel.open`,
+and on C1's pad; the app was not launched — nothing here has been seen on a screen yet):
+
+- **The top line of Settings is a live readiness line.** On your project as saved it reads
+  **"1 thing to fix: Face 3 and Face 5 press the same material [Fix]"** — the ONE thing that
+  blocks (with TPU 95A too: calibrate-first no longer blocks; the old Generate gate said
+  "calibrate-first" first and hid it). When it is clear: **"Ready: Exit builds the lattice"**
+  (green), or "Ready: Exit builds a shape-only lattice", or "Ready · Squish shown on the 4
+  largest of 7 faces".
+- **A blocker pops up at once** when your action caused it (pressing face 5 while 3 is
+  pressed): the pop-up selects the face, pulses it on the part, turns the camera to look at it,
+  says one sentence and offers big buttons — **[Face 5 rests] [Face 3 rests]**; for a face with
+  no weight **[Type the weight]** (the number pad); for a face core cannot stack or design
+  **[Face N rests] [Remove Face N]**; with no filament **[colorFabb varioShore TPU]**. Opening a
+  project that already has one does not pop (its line says so); recompute noise never pops.
+- **Exit is blocked only when truly needed**, and then it reads **"Fix 1 thing"** (orange) and
+  opens the same pop-up. Calibrate-first, more than four faces and "still designing" never
+  block. Two obvious refusals are fixed for you with a one-line toast (an untested nozzle
+  temperature → Auto; a family with no data → Gyroid).
+- **No Generate button.** Save & Exit builds the lattice and the **MAIN Flexible page shows
+  it**: "Building the lattice…" in the bottom pill, then the lattice squishing inside the X-ray
+  part, with your dented map. The bottom bar's octet "Lattice · nothing set to lattice" is
+  gone under Flexible; its pill says **"Lattice ready"**, **"Building the lattice…"**, the
+  shape-only label, or the one thing to fix (a tap opens Settings on that fix).
+- **TPU 95A (and every calibrate-first filament) gets a SHAPE-ONLY lattice** — your answer:
+  it follows your curves (softer where you drew softer), it is labelled **"TPU 95A: shape only —
+  no squish predicted"**, and the map beside it says "What you drew".
+- **The squish player** (your request) on both pages: a white play/pause circle, "Rest" ——●——
+  "10 kg", in the Results player's capsule, bottom-centre. Play loops rest → full → rest and
+  resumes from where it is; dragging pauses and sets the squish directly — the dent and the
+  lattice move together (one number). Reduced motion: no auto-play. It shows only when there
+  is something to squish, and its place is computed against the panel, the legend, the top row
+  and (main page) the bottom bar, the view buttons and the right-edge legend slot.
+- **The main page's views under the gizmo: X-ray, Dent heat, Lattice** (all on). Stress, the
+  legends with tap-to-read and the Surface button are batch C.
+- **Legends never cover a button**: the Settings page has no bottom-right buttons at all; the
+  legend stays on the trailing edge, centred.
+
+**Not done in batch B (honestly):**
+- **No simulator check.** The plan's steps 6–7 (install on your project, press 5 and see the
+  pop-up, Exit and watch "Building…" then the squish; the Release frame budget on the main
+  page) need the app launched, which is refused to me. `xcodebuild` for the simulator
+  succeeds; everything else was measured headlessly on your restored project and the pad.
+  The loop's own per-frame cost was measured (1.5–4.7 µs per step, Debug); the lattice march
+  under it is the same pass T16 measured — not re-measured on a Release build here.
+- **Main-page mesh swap.** The main page draws the part WITH its map quads (the overlay mesh,
+  like Settings). #354's viewer reframes the camera when the mesh changes, so the first time
+  the map appears (and whenever the pressed faces change) your zoom / pan return to the
+  framed view; the settle SNAPS under Flexible (hook H4, no 0.8 s spin). Not fixed here: it
+  needs a #354 change to `applyMesh`.
+- **Main-page vertex tints are hashed per update** by #354's existing `VertexTintKey` (the
+  Surface stage pays the same): on a large part every workspace body update (an orbit tick
+  publishes `projection`) hashes ~8 floats per flat vertex. Fine on your pad; worth a look on
+  the M2 stand in batch C. The dent's own check is O(1) (the flex hook compares the array's
+  storage; a full hash was 83 ms per update over 1.2 M floats in Debug — replaced).
+- **"One at a time" (load cases)** is the third fix for a shared stack in the plan — it is
+  batch D; today the pop-up offers [Face 5 rests] [Face 3 rests].
+- **7 pressed faces** are tested on values (the readiness never blocks; the four LARGEST
+  squish; only they dent), not on a real build: no 7 pressed faces on the pad avoid shared
+  stacks.
+- **The Settings page's Export pill** left with Generate (exports still wait on core); the
+  export modal is not reachable until core's exporter lands (batch C/D can host it on the
+  main page).
+- **Your project as saved still has faces 3 and 5 pressed** by the old taps (batch A's
+  "your call"): the readiness line and the pop-up now make that one tap to fix.
+
+**Your call:**
+- **The shape-only band** is my choice, not a prediction: the finest cell 8 walls (3.4 mm at a
+  0.42 mm bead), the coarsest half the pressed face's lattice depth, capped at 12 mm (your pad:
+  3.4 … 9.2 mm). Say if you want it firmer / softer overall.
+- **Export** is unreachable until core's exporter lands (it left with Generate). Main page, or
+  wait for core?
+- **Pulse on a split face**: the pop-up pulses the whole B-rep face (top A and top B flash
+  together); the selection tint is per sector. Worth a per-sector pulse (a #354 hook)?
+
+### Hooks in #354 / main files (every line, grepped after the edit; pinned by FlexibleMainPageHookTests / FlexibleSquishPlayerTests)
+
+| hook | file · anchor | ± | why |
+|---|---|---|---|
+| H1 | WorkspacePlaceholder · after `@State private var latticeSettingsSavedThisSession = false` | +1 | `@StateObject private var flexibleMain = FlexibleMainStage()` — the ONE model per project |
+| H2 | WorkspacePlaceholder · `FlexibleStagePage(project: project, …` (the `showFlexiblePage` mount) | +3 −4 | the page over `flexibleMain.model(for:…)`; `onExit: { showFlexiblePage = false; latticeSettingsSavedThisSession = true; flexibleMain.didExitSettings() }` (also stops Settings re-popping on every Lattice entry) |
+| H3 | WorkspacePlaceholder · the main `MetalMeshView`'s `latticeLayer: … : nil)` | +2 −1 | `: nil,` + `flexibleLattice: flexibleMain.layer(project, stage: stage, pageUp: fullScreenPageUp))` (`latticeLayer: latticeLayerIsDrawn` untouched) |
+| H4 | WorkspacePlaceholder · `MetalMeshView(mesh: stageMesh,` | ~1 | `mesh: flexibleMain.mesh(project, on: stage) ?? stageMesh` |
+| H4 | · `vertexTints: visible.surfaceEditing ? surfaceVertexTints : nil,` | ~1 | `… : flexibleMain.tints(project, on: stage)` (ghost + dent heat) |
+| H4 | · `settleAnimated: !reduceMotion,` | ~1 | `!reduceMotion && !flexibleMain.owns(project, stage)` — a map-mesh swap snaps, never spins |
+| H4 | · `stressTints: stageSurfaceTints,` | ~1 +1 | `flexibleMain.owns(project, stage) ? nil : stageSurfaceTints` + `flexDisplacements: flexibleMain.dents(…), flexScale: flexibleMain.dentScale(…)` |
+| H4 | · `bodyAlpha: latticePreviewBodyAlpha,` | ~1 | `flexibleMain.bodyAlpha(project, on: stage) ?? latticePreviewBodyAlpha` (X-ray) |
+| H5 | · `if viewerMesh != nil, visible.wireframe, !visible.surfaceEditing {` | +1 ~1 | `if flexibleMain.owns(project, stage) { FlexibleMainViewToggles(main: flexibleMain) }` + `else if …` — the octet cube (and its bake) is not offered under Flexible |
+| P | · inside `if !fullScreenPageUp { bottomBar … }` | +1 | `if flexibleMain.owns(project, stage) { FlexibleMainPlayerSlot(main: flexibleMain, bottomClearance: bottomBarClearance) }` — the squish player |
+| H10 | · `latticeThisButton` in `bottomBar` | ~1 | `if project.lattice.flexible == nil { latticeThisButton } else { FlexibleMainStatusPill(main: flexibleMain, open: { showFlexiblePage = true }) }` |
+| H12 | LatticeSettings · `previewBakeInputs` (after `s.organicForecast = nil`) | +1 | `s.flexible = nil` — a Flexible edit never re-keys the octet bake (OrganicPreviewBakeInputsTests green) |
+| M1 | MetalMeshView · `func draw(in view: MTKView) {` | +1 ~1 | `let flexLooping = stepFlexibleLoop(in: view)` before encode; the settle's end `… && !flexLooping` — the main page's loop runs in the renderer |
+| M2 | MetalMeshView · Coordinator `private var appliedFlex = false` / the flex upload | +2 ~1 | `appliedFlexArray`; `if dirty \|\| !appliedFlex \|\| flex != appliedFlexArray` — a new dent on the same mesh reaches the GPU |
+
+WorkspacePlaceholder: 12 lines touched (+10 net); MetalMeshView +3 ~2; LatticeSettings +1.
+Everything else is in track files. **No bridge / core change:** the plan's
+`flexible_scene_mask_field` was not needed — `densityField(faces: [])` is core's own mask
+(FlexibleKit+Mask.swift, 4 lines of Swift).
+
+### Added / changed (track files)
+
+- NEW `FlexibleReadiness.swift` (issues, fixes, auto-fixes, `FlexibleExitDecision`,
+  `FlexibleFixPrompt`), `FlexibleFixPopup.swift`, `FlexibleGeometryOnlyLattice.swift`,
+  `TopOptKit/FlexibleKit+Mask.swift`, `FlexibleMainStage.swift` (+ `FlexibleMainStatus`),
+  `FlexibleMainStatusPill.swift` (+ `FlexibleMainViewToggles`, `FlexibleMainPlayerSlot`),
+  `FlexibleSquishPlayer.swift` (`FlexibleSquishLoop` + the control), `FlexibleLegendPlacement.swift`.
+- `FlexibleStageModel`: per-face design catch (`designEach`), `stackErrors` / `designErrors`,
+  no blind stack retry, `actionSerial`, auto-fixes + `toast`, `pendingFix`, a ready scene with
+  the same key is re-used (the shared model keeps its stacks), `generateLattice` builds the
+  shape-only field or the designed one, faces LARGEST first; `FlexibleLatticeGate` removed.
+- `FlexibleStagePage`: over the shared model; no Generate / Export pill; the readiness line,
+  the pop-up, Exit's decision, the player; the loop is the player's (one amount).
+- `FlexibleLatticePass` / `MeshRenderer+FlexibleLattice`: the loop reference and
+  `stepFlexibleLoop` / `flexibleLoopScale`. `FlexibleSquish`: the layer carries the loop.
+- `FlexiblePageChannels`: a `heat` switch; only the squished faces dent under a lattice.
+  `FlexibleShownValues`: a shape-only lattice's map says "What you drew".
+
+### Decisions rows (00-decisions.md §1b)
+
+D-R3-10 what blocks Exit (and what never does; the pop-up; the silent fixes) · D-R3-11 no
+Generate — Save & Exit builds, the main page shows it, H1–H12 · D-R3-12 the shape-only
+lattice · D-R3-13 the squish player · D-R3-14 more than four faces.
+
+### Commits (on claude/flexible-screens, not pushed)
+
+23506824 the squish player + the renderer loop + the dent upload · 9b3b95e5 readiness, the fix
+pop-up, the shape-only lattice, per-face catch, more than four faces · 5729e291 no Generate —
+Save & Exit builds, the main page shows it (the #354 hooks) · (this handoff + DECISIONS rows).
+
+### Tests (raw)
+
+Targeted suite (every Flexible* suite in both targets + UnifiedShading, LatticePreviewBodyAlpha,
+LatticeGBufferMask, LatticeThreeAlgorithmsDraw, OrganicCapsuleImpostor, Viewer, StageBackdrop,
+SmoothingPageRound2, LatticeStageMode, LatticeSettingsPersist, ProjectStore, UndoHistory,
+SurfaceStage, LatticeSimSolveTrigger, and every suite that scans or drives a file I touched:
+LatticeLegendColour, OrganicPreviewBakeInputs, LatticeBandChips, OrganicWalk0907Evening,
+LatticePreviewConfetti, SmoothingStrokeCamera, SmoothingUsablePath, BottomBarMeasurement,
+LatticePageRound2, LatticeMode, SmoothingViewer, VariantEntryGating, GroupViewState,
+LatticePreviewNoticeCaption, LatticeStressTint), after the last source change, raw:
+
+```
+Executed 437 tests, with 5 tests skipped and 1 failure (0 unexpected) in 318.415 (318.464) seconds
+  the one failure: LatticeSimSolveTriggerTests.testTheTriggerRefusesOnAllThreeGrounds (known, pre-existing)
+FLEX-LOOP cost per frame: 1.54 µs (step + read, this build) — sink 74635
+FLEX-MAIN 2 s loop: stage publishes 0, scale 0.0…3.9923894
+FLEX-MAIN dented quad vertices: all squished A 12288 B 12288 | only A: A 12288 B 0
+FLEX-MAIN designing at Exit: true; lattice built: true
+FLEX-PLACE main 11" landscape: player (427.0, 702.0, 340.0, 46.0) · legend slot (902.0, 333.0, 268.0, 168.0)
+FLEX-PLACE main 11" portrait: player (247.0, 1062.0, 340.0, 46.0) · legend slot (542.0, 513.0, 268.0, 168.0)
+FLEX-PLACE main 13" landscape: player (518.0, 900.0, 340.0, 46.0) · legend slot (1084.0, 432.0, 268.0, 168.0)
+FLEX-PLACE main 13" portrait: player (346.0, 1244.0, 340.0, 46.0) · legend slot (740.0, 604.0, 268.0, 168.0)
+FLEX-PLACE settings 11" landscape: legend (906.0, 358.0, 264.0, 118.0) · player (633.0, 752.0, 340.0, 46.0)
+FLEX-PLACE settings 11" portrait: legend (546.0, 538.0, 264.0, 118.0) · player (453.0, 1112.0, 340.0, 46.0)
+FLEX-PLACE settings 13" landscape: legend (1088.0, 457.0, 264.0, 118.0) · player (518.0, 950.0, 340.0, 46.0)
+FLEX-PLACE settings 13" portrait: legend (744.0, 629.0, 264.0, 118.0) · player (552.0, 1294.0, 340.0, 46.0)
+FLEX-READY TPU 95A shape only: 3 faces, ρ span 0.17608377…0.38643384
+FLEX-READY his project as saved: 1 blocking — 1 thing to fix: Face 3 and Face 5 press the same material | fixes [TopOptFlows.FlexibleFix.rest(5), TopOptFlows.FlexibleFix.rest(3)]
+FLEX-READY his project, TPU 95A: ["Face 3 and Face 5 press the same material"] | info ["TPU 95A: shape only — no squish predicted"]
+FLEX-READY varioShore after [Face 5 rests]: lattice of 3 faces, squished 3
+FLEX-READY weight 0 first: designs [1] errors [TopOptFlows.FlexFaceKey(region: 2, rotation: 0): "face 2: weight must be > 0"]
+FLEX-SHAPE S soft 0.49 → ρ 0.272 · S firm 0.00 → ρ 0.386 (band 0.155…0.386)
+FLEX-SHAPE band ρ 0.141…0.386 ⇒ cells 3.36…9.20 mm (t 0.42, depth 18.4)
+FLEX-SHAPE mask voxels 53248, core's latticeVoxels 53248 | app occupancy on its own grid 51597 (control)
+FLEX-UPLOAD same mesh, new dent: 2226 of 16384 pixels changed
+FLEX-UPLOAD same-array check over 1.2 M floats: 0.13 µs per apply (this build)
+```
+
+RED first (the new suites run before the #354 hooks, `b_red1`): `Executed 32 tests, with 18
+failures` — the 13 hook pins, H12 (twice), the draw(in:) pin, the dent upload ("0 of 16384
+pixels changed"), the pill after [Face 5 rests] (stale conflicts — fixed in the readiness), and
+one wrong expectation of mine in the area order (corrected: 80 mm² before 50 mm²).
+Mutation runs (each reverted in source, the tests run, then restored — grep shows no marker
+left): no shape-only branch ⇒ "No lattice voxel has a density yet" and no lattice; the old
+single catch ⇒ the next face never designed (timed out); no build when the designs land ⇒
+timed out; the flex upload check removed ⇒ 0 of 16384 px changed.
+The first targeted run also caught `FlexibleRowCopyTests`' pin (`"flexible-view-xray"` gone
+from every Flexible file): the main page's toggles now use `flexible-main-view-*`.
+
+**iOS build:** `xcodebuild -project app/TopOpt.xcodeproj -scheme TopOpt -configuration Debug
+-destination id=147E56A1… build` — `** BUILD SUCCEEDED **`, no warning in a batch-B file.
+
+**Deleted-test sweep (my diff):** one test renamed and rewritten deliberately —
+`FlexibleSquishTests.testGenerateRefusesMoreThanFourLoadedFaces` →
+`testMoreThanFourPressedFacesNeverBlockAndAreSaidInOneLine` (your "exit is blocked only when
+truly needed" overturns the refusal; what it guarded — no face dropped without a word — is
+kept: the line says "Squish shown on the 4 largest of 5 faces"). No other test deleted or
+re-pinned. `FlexibleRowCopyTests`' pin that `"flexible-view-xray"` is gone from every Flexible
+file stays: the main page's toggles use `flexible-main-view-*`.
+
+## Round 3 · batch A — verification pass
 
 A verifier read batch A against your rules and rendered it on YOUR project 0004. I confirmed
 every finding myself (code + your restored project; renders are headless, the app was not
