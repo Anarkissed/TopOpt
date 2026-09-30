@@ -420,7 +420,8 @@ struct FlexibleStageOverlays: View {
             // ("X and Y always combined"); the frame arrows went with the frame rotation.
             if model.tab == .face, let r = model.selectedRegion, let k = model.key(r),
                let g = model.geometry[k], let f = model.settings.face(r), f.isLoaded {
-                ForEach(["x", "y"], id: \.self) { axis in
+                // the Curves shape (batch D's Stamp shape draws its stamp here instead)
+                ForEach((f.shape ?? "curves") == "curves" ? ["x", "y"] : [], id: \.self) { axis in
                     FlexibleCurveEditor(projection: proj.projection,
                                         baseline: axis == "x" ? g.baselineX : g.baselineY,
                                         curve: axis == "x" ? f.curveX : f.curveY,

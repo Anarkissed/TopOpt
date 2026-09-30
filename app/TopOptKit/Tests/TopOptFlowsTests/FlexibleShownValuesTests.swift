@@ -10,6 +10,7 @@
 //     depths along the load — the bend that reads edge-on from the RIGHT view.
 import XCTest
 import simd
+import TopOptDesign
 @testable import TopOptFlows
 @testable import TopOptKit
 
@@ -97,5 +98,41 @@ final class FlexibleShownValuesTests: XCTestCase {
         XCTAssertGreaterThan(hi, 3, "the bend reads edge-on: several mm along the load")
         // corners are the mean of up to four columns, so the span is at least half of k·range
         XCTAssertGreaterThanOrEqual(hi - lo, 0.5 * want)
+    }
+
+    // MARK: the dent's own ramp (his answer: never purple; Stress keeps its rainbow)
+
+    /// Hue (degrees) and saturation of an RGBA.
+    static func hueSat(_ c: RGBA) -> (h: Double, s: Double) {
+        let mx = max(c.r, c.g, c.b), mn = min(c.r, c.g, c.b), d = mx - mn
+        guard d > 1e-9 else { return (0, 0) }
+        var h: Double
+        if mx == c.r { h = ((c.g - c.b) / d).truncatingRemainder(dividingBy: 6) }
+        else if mx == c.g { h = (c.b - c.r) / d + 2 } else { h = (c.r - c.g) / d + 4 }
+        h *= 60; if h < 0 { h += 360 }
+        return (h, mx > 0 ? d / mx : 0)
+    }
+    static func isPurple(_ c: RGBA) -> Bool { let (h, s) = hueSat(c); return s > 0.15 && h >= 250 && h <= 330 }
+
+    @MainActor
+    func testTheDentRampIsItsOwnAndNeverPurple() {
+        let samples = (0...20).map { FlexibleColours.depthColour(fraction: Double($0) / 20) }
+        XCTAssertFalse(samples.contains(where: Self.isPurple), "never purple")
+        XCTAssertFalse(FlexibleColours.depthStops.contains(where: Self.isPurple))
+        // ★ RED CONTROL: the instrument sees purple when it is there
+        XCTAssertTrue(Self.isPurple(DS.Color.accentPurple), "control: the DS purple is purple")
+        // its own ramp: one hue family (≤ 40° of hue), brighter = deeper — unlike Stress's rainbow
+        let hues = samples.filter { Self.hueSat($0).s > 0.15 }.map { Self.hueSat($0).h }
+        let span = (hues.max() ?? 0) - (hues.min() ?? 0)
+        let stress = (0...20).map { ResultsModel.stressColor(fraction: Double($0) / 20) }.map { Self.hueSat($0).h }
+        let stressSpan = (stress.max() ?? 0) - (stress.min() ?? 0)
+        func lum(_ c: RGBA) -> Double { 0.299 * c.r + 0.587 * c.g + 0.114 * c.b }
+        print(String(format: "FLEX-RAMP dent ramp hue span %.0f° (Stress rainbow %.0f°), luminance %.2f → %.2f", span, stressSpan,
+                     lum(samples.first!), lum(samples.last!)))
+        XCTAssertLessThan(span, 40)
+        XCTAssertGreaterThan(stressSpan, 150, "control: the Stress rainbow spans the hues")
+        XCTAssertTrue(zip(samples, samples.dropFirst()).allSatisfy { lum($1) >= lum($0) - 1e-9 }, "brighter = deeper")
+        XCTAssertNotEqual(FlexibleColours.depthColour(fraction: 0.5), ResultsModel.stressColor(fraction: 0.5),
+                          "no longer the Stress rainbow")
     }
 }

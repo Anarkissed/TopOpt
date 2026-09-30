@@ -321,16 +321,30 @@ public struct FlexibleOverlayMesh {
     }
 }
 
-/// Colours for the overlay: the depth ramp, and DS tokens for the flags. No new colours.
+/// Colours for the overlay: the depth ramp and the flags, all from DS tokens. Never purple.
 @MainActor
 public enum FlexibleColours {
     public static func depth(_ mm: Double, max: Double) -> SIMD4<Float> {
         let c = depthColour(fraction: max > 0 ? mm / max : 0)
         return SIMD4(Float(c.r), Float(c.g), Float(c.b), 0.95)
     }
-    /// The depth ramp at 0…1 (the map AND its legend read this one function).
+    /// ★ ROUND 3 (his answer): THE DENT'S OWN RAMP, from DS tokens — the Flexible green from
+    /// dim (no squish) to pale (the deepest), ONE hue, so it can never be read as the Stress
+    /// rainbow the main page shows beside it (ResultsModel.stressColor keeps that one) — and
+    /// never purple. FlexibleShownValuesTests pins both. The map AND its legend read it.
+    public static let depthStops: [RGBA] = [
+        mix(DS.Color.background, DS.Color.accentGreen, 0.35),
+        DS.Color.accentGreen,
+        mix(DS.Color.accentGreen, DS.Color.textPrimary, 0.75),
+    ]
     public static func depthColour(fraction f: Double) -> RGBA {
-        ResultsModel.stressColor(fraction: f)
+        let x = min(1, max(0, f.isFinite ? f : 0)) * Double(depthStops.count - 1)
+        let i = min(depthStops.count - 2, Int(x)), t = x - Double(i)
+        return mix(depthStops[i], depthStops[i + 1], t)
+    }
+    /// a + (b − a)·t, per channel (two DS tokens blended).
+    static func mix(_ a: RGBA, _ b: RGBA, _ t: Double) -> RGBA {
+        RGBA((a.r + (b.r - a.r) * t) * 255, (a.g + (b.g - a.g) * t) * 255, (a.b + (b.b - a.b) * t) * 255)
     }
     public static func token(_ c: RGBA, _ a: Float) -> SIMD4<Float> {
         SIMD4(Float(c.r), Float(c.g), Float(c.b), a)
