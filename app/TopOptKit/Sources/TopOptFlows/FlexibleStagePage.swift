@@ -85,7 +85,7 @@ public struct FlexibleStagePage: View {
                 DS.Color.background.color.ignoresSafeArea()
                 stage
                 exitButton
-                notice
+                notice(in: geo.size)
                 panel
                     .frame(maxHeight: geo.size.height * 0.62, alignment: .bottom)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
@@ -94,20 +94,22 @@ public struct FlexibleStagePage: View {
                 FlexibleViewColumn(camera: camera)
                 player(in: geo.size)
                 // ★ THE LEGEND SITS ON THE TRAILING EDGE, VERTICALLY CENTRED (round 3, item 7:
-                // "legends never cover buttons" — it covered Generate in the bottom corner)
+                // "legends never cover buttons" — it covered Generate in the bottom corner),
+                // placed by FlexibleLegendPlacement.legend against the gizmo and the top line
+                // (batch B review: the placement the tests measure is the one the page calls)
                 if dents != nil || model.checkStampShown != nil {
-                    FlexibleLegend(model: model, drawnLattice: drawnLattice)
-                        .background(GeometryReader { g in
-                            Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["legend": g.frame(in: .global)])
-                        }.allowsHitTesting(false))
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
-                        .padding(.trailing, PageChrome.edge)
+                    legend(in: geo.size)
                 }
-                if let issue = fixShown {
+                // ★ THE POP-UP SHOWS THE ISSUE AS IT IS NOW (batch B review) — placed under the
+                // top line, clear of the gizmo (it covered its left 36 pt at 11" portrait)
+                if let shown = fixShown, let issue = FlexibleFixPrompt.live(shown, in: model.readiness) {
+                    let pop = FlexibleLegendPlacement.popUp(viewport: geo.size, notice: noticeBand(geo.size),
+                                                            below: model.toast == nil ? 0 : Self.toastRowHeight)
                     FlexibleFixPopup(model: model, issue: issue, padTarget: $padTarget) { fixShown = nil }
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                        .padding(.top, PageChrome.edge + 64)
-                        .padding(.horizontal, 180)
+                        .frame(width: pop.width)
+                        .padding(.leading, pop.minX)
+                        .padding(.top, pop.minY)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                         .transition(.opacity)
                         .zIndex(30)
                 }
@@ -118,8 +120,10 @@ public struct FlexibleStagePage: View {
         }
         .onAppear {
             if let b = project.viewerMesh?.bounds { camera.reframe(b) }
-            // his earlier actions are not new: only what he does on this visit pops a fix
-            prompt = FlexibleFixPrompt(actionSerial: model.actionSerial)
+            // his earlier actions are not new — but a blocker that already stands pops ONCE,
+            // when the scene and designs settle (batch B review: "blockers surface at once");
+            // the main page's pill opens its own fix instead
+            prompt = FlexibleFixPrompt(actionSerial: model.actionSerial, popExisting: model.pendingFix == nil)
             model.openScene()
             rebuildOverlay()
             // the main page's pill opened Settings on a fix
@@ -128,8 +132,11 @@ public struct FlexibleStagePage: View {
         .onChange(of: model.geometry.count) { _ in rebuildOverlay() }
         .onReceive(ticker) { _ in
             // ★ THE SQUISH (the player's loop): only the scale moves — the displacements and
-            // colours are rebuilt when the design changes, never per frame
-            guard loop.playing, dents != nil else { return }
+            // colours are rebuilt when the design changes, never per frame. ★ BATCH B REVIEW:
+            // while a lattice is drawn the RENDERER steps the loop (as on the main page) — this
+            // @State write re-ran the whole page (panel, overlays) 30 times a second; it now
+            // runs only for his live drawing (no lattice pass to step it)
+            guard loop.playing, dents != nil, !rendererLoops else { return }
             dentScale = Float(dentExaggeration * loop.amount)
         }
         // a drag on the timeline, a pause: the one scale follows at once
@@ -145,10 +152,6 @@ public struct FlexibleStagePage: View {
             }
             refreshChannels()
             if gen != nil, dentAnimated { loop.autoPlay(reduceMotion: reduceMotion) }
-        }
-        .onChange(of: model.toast) { t in
-            guard let t else { return }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 3.5) { if model.toast == t { model.toast = nil } }
         }
         .onChange(of: model.stacks.count) { _ in rebuildOverlay() }
         .onChange(of: model.latticeBuilding) { _ in refreshChannels() }
@@ -173,6 +176,9 @@ public struct FlexibleStagePage: View {
         FlexibleLatticePreview.drawn(model.lattice, xray: xray, building: model.latticeBuilding,
                                      checkStampShown: model.checkStampShown, stale: model.latticeIsStale)
     }
+
+    /// The renderer steps the squish (a drawn lattice's pass is there to step it).
+    private var rendererLoops: Bool { drawnLattice != nil && dents != nil }
 
     /// The lattice owns the map (no stamp shown, not stale) — FlexibleLatticePreview.latticeShows.
     private var latticeShows: Bool {
@@ -222,7 +228,8 @@ public struct FlexibleStagePage: View {
                 // while a stamp owns the map).
                 flexibleLattice: FlexibleLatticePreview.inputs(xray: xray, lattice: model.lattice,
                                                                building: model.latticeBuilding,
-                                                               latticeShows: latticeShows))
+                                                               latticeShows: latticeShows,
+                                                               loop: rendererLoops ? loop : nil))
             FlexibleStageOverlays(model: model, proj: proj, exaggeration: dentExaggeration, keepOut: keepOut)
         }
         .coordinateSpace(name: FlexibleStageSpace.name)
@@ -244,6 +251,7 @@ public struct FlexibleStagePage: View {
         tints = c.tints
         dents = c.dents
         dentExaggeration = c.exaggeration
+        loop.exaggeration = c.exaggeration   // the renderer's scale is k × amount
         // ★ a lattice appears → the squish plays (not under reduced motion); his live drawing
         // (no lattice, or a stale one) holds still at the full squish — he can still play it
         if c.animated != dentAnimated {
@@ -253,26 +261,35 @@ public struct FlexibleStagePage: View {
         dentScale = c.dents == nil ? 0 : Float(c.exaggeration * loop.amount)
         // ★ ITEM 9: a NEW blocking issue HIS last action caused opens the pop-up at once
         let r = model.readiness
-        if let i = prompt.next(r, actionSerial: model.actionSerial, settled: !r.designing), fixShown == nil {
+        if let i = prompt.next(r, actionSerial: model.actionSerial,
+                               settled: !r.designing && model.sceneState == .ready && !model.designsInFlight),
+           fixShown == nil {
             present(i)
         }
         if let f = fixShown, !r.blocking.contains(where: { $0.id == f.id }) { fixShown = nil }
     }
 
-    /// Open the pop-up on `issue`: select its face, pulse it, turn the camera to it.
+    /// Open the pop-up on `issue`: select its face, pulse every face it names (a shared stack:
+    /// both ends, one after the other), turn the camera to see them (two: an oblique view).
     private func present(_ issue: FlexibleIssue) {
         fixShown = issue
         guard let r = issue.region else { return }
         model.selectedRegion = r
         model.tab = .face
-        if let f = regionsFaces(r).first {
-            pulseToken += 1
-            pulse = DetentPulse(faceID: FaceID(f), token: pulseToken)
+        let named = issue.named
+        for (i, region) in named.enumerated() {
+            guard let f = regionsFaces(region).first else { continue }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5 * Double(i)) {
+                pulseToken += 1
+                pulse = DetentPulse(faceID: FaceID(f), token: pulseToken)
+            }
         }
-        if let st = model.stack(r) ?? model.stacks.first(where: { $0.key.region == r })?.value,
-           let g = FlexibleFixPopup.cameraRegion(load: st.load, settle: settle) {
-            camera.snap(to: g, animated: !reduceMotion)
+        let loads = named.compactMap { region in
+            (model.stack(region) ?? model.stacks.first(where: { $0.key.region == region })?.value)?.load
         }
+        let g = loads.count >= 2 ? FlexibleFixPopup.cameraRegion(load: loads[0], other: loads[1], settle: settle)
+            : loads.first.flatMap { FlexibleFixPopup.cameraRegion(load: $0, settle: settle) }
+        if let g { camera.snap(to: g, animated: !reduceMotion) }
     }
 
     private func regionsFaces(_ r: Int) -> [Int] { model.regions.faces(of: r, mesh: project.viewerMesh) }
@@ -303,8 +320,10 @@ public struct FlexibleStagePage: View {
 
     private var fullLabel: String {
         let shown = model.lattice.map { Set($0.squishedKeys.map(\.region)) }
+        // a calibrate-first filament: the dent is what he drew — "As drawn", never a weight
         return FlexibleSquishLoop.fullLabel(weightsKg: model.settings.loadedFaces
-            .filter { shown?.contains($0.faceRegionID) ?? true }.map(\.weightKg))
+            .filter { shown?.contains($0.faceRegionID) ?? true }.map(\.weightKg),
+                                            shapeOnly: model.material?.noPrediction != nil || model.lattice?.shapeOnly == true)
     }
 
     // MARK: chrome
@@ -312,40 +331,43 @@ public struct FlexibleStagePage: View {
     private var exitButton: some View {
         VStack {
             HStack {
-                // ★ BATCH B (item 9.3): Exit consults the readiness — blocked ONLY by what truly
-                // stops a lattice, and then it opens the fix instead of leaving
-                let r = model.readiness
-                Button {
-                    switch FlexibleExitDecision.decide(model.readiness) {
-                    case .exit:
-                        model.save()
-                        onExit()
-                    case .fix(let issue):
-                        present(issue)
-                    }
-                } label: {
-                    Text(FlexibleExitDecision.title(r))
-                        .dsStyle(DS.TypeScale.bodyStrong).fontWeight(.semibold)
-                        .foregroundStyle(DS.Color.textPrimary.color)
-                        .padding(.vertical, 12).padding(.horizontal, DS.Space.xl5)
-                        .background(Capsule().fill((r.isReady ? DS.Color.accent : DS.Color.warning).color))
-                }
-                .buttonStyle(.plain)
-                .accessibilityIdentifier("flexible-exit")
-                // the project's own snapshot history: every Flexible setting is undoable (S5)
-                ForEach([(true, "arrow.uturn.backward"), (false, "arrow.uturn.forward")], id: \.1) { undo, icon in
+                HStack {
+                    // ★ BATCH B (item 9.3): Exit consults the readiness — blocked ONLY by what truly
+                    // stops a lattice, and then it opens the fix instead of leaving
+                    let r = model.readiness
                     Button {
-                        if undo { project.performUndo() } else { project.performRedo() }
-                        model.recomputeAll()
+                        switch FlexibleExitDecision.decide(model.readiness) {
+                        case .exit:
+                            model.save()
+                            onExit()
+                        case .fix(let issue):
+                            present(issue)
+                        }
                     } label: {
-                        Image(systemName: icon).font(.system(size: 15, weight: .semibold))
+                        Text(FlexibleExitDecision.title(r))
+                            .dsStyle(DS.TypeScale.bodyStrong).fontWeight(.semibold)
                             .foregroundStyle(DS.Color.textPrimary.color)
-                            .frame(width: 44, height: 44)
-                            .background(Circle().fill(DS.Color.chipSolid.color))
+                            .padding(.vertical, 12).padding(.horizontal, DS.Space.xl5)
+                            .background(Capsule().fill((r.isReady ? DS.Color.accent : DS.Color.warning).color))
                     }
                     .buttonStyle(.plain)
-                    .accessibilityIdentifier(undo ? "flexible-undo" : "flexible-redo")
+                    .accessibilityIdentifier("flexible-exit")
+                    // the project's own snapshot history: every Flexible setting is undoable (S5)
+                    ForEach([(true, "arrow.uturn.backward"), (false, "arrow.uturn.forward")], id: \.1) { undo, icon in
+                        Button {
+                            if undo { project.performUndo() } else { project.performRedo() }
+                            model.recomputeAll()
+                        } label: {
+                            Image(systemName: icon).font(.system(size: 15, weight: .semibold))
+                                .foregroundStyle(DS.Color.textPrimary.color)
+                                .frame(width: 44, height: 44)
+                                .background(Circle().fill(DS.Color.chipSolid.color))
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier(undo ? "flexible-undo" : "flexible-redo")
+                    }
                 }
+                // ★ the WHOLE row (Exit, undo, redo) — the top line's band starts right of it
                 .background(GeometryReader { g in
                     Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["exitRow": g.frame(in: .global)])
                 }.allowsHitTesting(false))
@@ -356,18 +378,55 @@ public struct FlexibleStagePage: View {
         .padding(PageChrome.edge)
     }
 
+    /// The toast line's height under the top line (the pop-up goes below it).
+    static let toastRowHeight: CGFloat = 30
+
+    /// The Exit row in the page's frame (measured; a nominal row before the first layout).
+    private func exitRowLocal() -> CGRect {
+        guard let row = frames["exitRow"] else {
+            return CGRect(x: PageChrome.edge, y: PageChrome.edge, width: 226, height: 44)
+        }
+        guard let page = frames["page"] else { return row }
+        return row.offsetBy(dx: -page.minX, dy: -page.minY)
+    }
+
+    /// ★ THE TOP LINE'S BAND (batch B review): right of the Exit row, left of the gizmo —
+    /// or its own row under Exit when that is too narrow (11" portrait).
+    private func noticeBand(_ size: CGSize) -> CGRect {
+        FlexibleLegendPlacement.noticeBand(viewport: size, exitRow: exitRowLocal())
+    }
+
+    /// The legend, placed by FlexibleLegendPlacement.legend against the gizmo and the top line
+    /// (its own size measured; trailing-centred until the first measurement).
+    @ViewBuilder private func legend(in size: CGSize) -> some View {
+        let view = FlexibleLegend(model: model, drawnLattice: drawnLattice)
+            .background(GeometryReader { g in
+                Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["legend": g.frame(in: .global)])
+            }.allowsHitTesting(false))
+        if let measured = frames["legend"]?.size, measured.width > 0, measured.height > 0,
+           let r = FlexibleLegendPlacement.legend(size: measured, viewport: size,
+                                                  keepOut: [FlexibleLegendPlacement.gizmoFrame(viewport: size), noticeBand(size)]) {
+            view.position(x: r.midX, y: r.midY)
+        } else {
+            view.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
+                .padding(.trailing, PageChrome.edge)
+        }
+    }
+
     /// ★ THE TOP LINE (batch B, item 9): opening / a failure, else the live READINESS line —
     /// "Ready: Exit builds the lattice" (green) or "1 thing to fix: … [Fix]" (the pop-up) —
-    /// and, under it for a moment, what an automatic fix did.
-    @ViewBuilder private var notice: some View {
+    /// and, under it for a moment, what an automatic fix did. In its band (noticeBand).
+    @ViewBuilder private func notice(in size: CGSize) -> some View {
+        let band = noticeBand(size)
         VStack(spacing: DS.Space.xs) {
             if let text = noticeText {
                 noticePill(text, icon: "info.circle.fill", colour: DS.Color.textSecondary.color, fix: nil)
             } else if model.sceneState == .ready {
                 let r = model.readiness
+                let good = r.isReady && !r.buildFailed   // a failed build is said in warning colour
                 noticePill(r.oneLine,
-                           icon: r.isReady ? "checkmark.circle.fill" : "exclamationmark.circle.fill",
-                           colour: (r.isReady ? FlexibleStageStyle.accentToken : DS.Color.warning).color,
+                           icon: good ? "checkmark.circle.fill" : "exclamationmark.circle.fill",
+                           colour: (good ? FlexibleStageStyle.accentToken : DS.Color.warning).color,
                            fix: r.blocking.first)
             }
             if let t = model.toast {
@@ -377,10 +436,11 @@ public struct FlexibleStagePage: View {
                     .background(Capsule().fill(DS.Color.chipSolid.color))
                     .accessibilityIdentifier("flexible-toast")
             }
-            Spacer()
         }
-        .padding(.top, PageChrome.edge + 6)
-        .padding(.horizontal, 180)
+        .frame(width: band.width)
+        .padding(.leading, band.minX)
+        .padding(.top, band.minY)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
     private func noticePill(_ text: String, icon: String, colour: Color, fix: FlexibleIssue?) -> some View {

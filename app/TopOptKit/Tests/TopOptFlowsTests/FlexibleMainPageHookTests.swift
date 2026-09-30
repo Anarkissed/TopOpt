@@ -31,8 +31,10 @@ final class FlexibleMainPageHookTests: XCTestCase {
             ("H4", "flexDisplacements: flexibleMain.dents(project, on: stage), flexScale: flexibleMain.dentScale(project, on: stage),"),
             ("H4", "bodyAlpha: flexibleMain.bodyAlpha(project, on: stage) ?? latticePreviewBodyAlpha,"),
             ("H5", "if flexibleMain.owns(project, stage) { FlexibleMainViewToggles(main: flexibleMain) }"),
-            ("H10", "if project.lattice.flexible == nil { latticeThisButton } else { FlexibleMainStatusPill(main: flexibleMain, open: { showFlexiblePage = true }) }"),
-            ("P", "if flexibleMain.owns(project, stage) { FlexibleMainPlayerSlot(main: flexibleMain, bottomClearance: bottomBarClearance) }"),
+            // ★ batch B review: from Topology the pill goes to the Lattice stage first (Exit then shows the lattice)
+            ("H10", "if project.lattice.flexible == nil { latticeThisButton } else { FlexibleMainStatusPill(main: flexibleMain, open: { if stage != .lattice { goToStage(.lattice) }; showFlexiblePage = true }) }"),
+            // ★ batch B review: the player clears the bottom-right chip column (Gravity …) in its row
+            ("P", "if flexibleMain.owns(project, stage) { FlexibleMainPlayerSlot(main: flexibleMain, bottomClearance: bottomBarClearance, chipColumnWidth: force.gravityIsSet ? (settingsChipWidths.values.max() ?? 0) : 0) }"),
         ]
         for (h, pin) in pins {
             XCTAssertEqual(ws.components(separatedBy: pin).count - 1, 1, "\(h) must appear exactly once: \(pin)")
@@ -57,8 +59,17 @@ final class FlexibleMainPageHookTests: XCTestCase {
         let page = try FlexibleSource.code("FlexibleStagePage.swift")
         XCTAssertTrue(page.contains("switch FlexibleExitDecision.decide(model.readiness) {"), "Exit consults the readiness")
         XCTAssertTrue(page.contains("Text(FlexibleExitDecision.title(r))"), "Exit says \"Fix 1 thing\" while blocked")
-        XCTAssertTrue(page.contains("prompt.next(r, actionSerial: model.actionSerial, settled: !r.designing)"),
-                      "a new blocking issue opens the pop-up at once")
+        XCTAssertTrue(page.contains("settled: !r.designing && model.sceneState == .ready && !model.designsInFlight),"),
+                      "a new blocking issue opens the pop-up at once (settled: the scene open, nothing in flight)")
+        // ★ batch B review: a blocker standing when the page opens pops once; the pop-up shows
+        // the issue AS IT IS NOW; the top line, the pop-up and the legend are placed by the
+        // functions FlexibleLegendPlacementTests measure (not by 180 pt of padding)
+        XCTAssertTrue(page.contains("prompt = FlexibleFixPrompt(actionSerial: model.actionSerial, popExisting: model.pendingFix == nil)"))
+        XCTAssertTrue(page.contains("if let shown = fixShown, let issue = FlexibleFixPrompt.live(shown, in: model.readiness) {"))
+        XCTAssertTrue(page.contains("FlexibleLegendPlacement.noticeBand(viewport: size, exitRow: exitRowLocal())"))
+        XCTAssertTrue(page.contains("FlexibleLegendPlacement.popUp(viewport: geo.size, notice: noticeBand(geo.size),"))
+        XCTAssertTrue(page.contains("let r = FlexibleLegendPlacement.legend(size: measured, viewport: size,"))
+        XCTAssertFalse(page.contains(".padding(.horizontal, 180)"), "no line or pop-up laid out by blind padding")
         XCTAssertFalse(page.contains("flexible-generate"), "no Generate button (item 7.1)")
         XCTAssertFalse(page.contains("model.generateLattice()"), "the page never builds — Save & Exit does, on the main page")
     }

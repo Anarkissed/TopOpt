@@ -45,6 +45,44 @@ public enum FlexibleLegendPlacement {
         return nil
     }
 
+    // MARK: the Settings page's top line and the fix pop-up (batch B review)
+
+    /// The top line's height (the readiness pill).
+    public static let noticeHeight: CGFloat = 40
+    /// Narrower than this, the top line takes its own row under the Exit row.
+    public static let noticeMinWidth: CGFloat = 460
+    /// The fix pop-up's widest.
+    public static let popUpMaxWidth: CGFloat = 460
+
+    /// The gizmo's frame (FlexibleViewColumn: top-right, `gizmoInset` from both edges).
+    public static func gizmoFrame(viewport: CGSize) -> CGRect {
+        CGRect(x: viewport.width - PageChrome.gizmoInset - PageChrome.gizmoSize, y: PageChrome.gizmoInset,
+               width: PageChrome.gizmoSize, height: PageChrome.gizmoSize)
+    }
+
+    /// ★ THE TOP LINE NEVER COVERS A BUTTON (batch B review, item 7: at 11" portrait the line,
+    /// centred with 180 pt each side, lay over Redo and part of Undo — and swallowed their taps —
+    /// and put [Fix] half under the gizmo, which orbits on its whole square). The band right of
+    /// the Exit row and left of the gizmo's clearance; narrower than `noticeMinWidth`, its own
+    /// row under the Exit row, from the edge to the gizmo's clearance.
+    public static func noticeBand(viewport: CGSize, exitRow: CGRect, edge: CGFloat = PageChrome.edge) -> CGRect {
+        let right = viewport.width - PageChrome.gizmoClearance
+        let left = exitRow.maxX + gap
+        if right - left >= noticeMinWidth {
+            return CGRect(x: left, y: exitRow.midY - noticeHeight / 2, width: right - left, height: noticeHeight)
+        }
+        return CGRect(x: edge, y: exitRow.maxY + gap, width: max(0, right - edge), height: noticeHeight)
+    }
+
+    /// The fix pop-up's frame (its height is its content's): under the top line (and the
+    /// toast line when one shows), centred in the span left of the gizmo's clearance.
+    public static func popUp(viewport: CGSize, notice: CGRect, below extra: CGFloat = 0,
+                             edge: CGFloat = PageChrome.edge) -> CGRect {
+        let right = viewport.width - PageChrome.gizmoClearance
+        let w = max(0, min(popUpMaxWidth, right - edge))
+        return CGRect(x: edge + (right - edge - w) / 2, y: notice.maxY + gap + extra, width: w, height: 0)
+    }
+
     /// The player: bottom-centre, `bottomClearance` above the bottom edge (the bottom bar and
     /// its inset), in the widest free span of its row. nil when nothing fits.
     public static func player(viewport: CGSize, bottomClearance: CGFloat, edge: CGFloat = PageChrome.edge,

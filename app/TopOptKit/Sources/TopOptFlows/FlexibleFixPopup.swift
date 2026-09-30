@@ -127,4 +127,22 @@ struct FlexibleFixPopup: View {
         let n = simd_normalize(out)
         return OrientationGizmo.regions.max { simd_dot($0.direction, n) < simd_dot($1.direction, n) }
     }
+
+    /// ★ TWO FACES (a shared stack — batch B review): the face-on view of ONE of them hid the
+    /// other directly behind it, and turned its curve editor edge-on. So: between the two
+    /// outward normals when they are apart (the region nearest their mean); for two facing
+    /// AWAY from each other (3 and 5, the two ends of one stack) an OBLIQUE corner view from
+    /// above that looks at `load`'s face, the other seen through the X-ray.
+    static func cameraRegion(load: SIMD3<Double>, other: SIMD3<Double>, settle: simd_quatf) -> GizmoRegion? {
+        let a = settle.act(SIMD3<Float>(-load)), b = settle.act(SIMD3<Float>(-other))
+        guard simd_length(a) > 1e-6, simd_length(b) > 1e-6 else { return cameraRegion(load: load, settle: settle) }
+        let na = simd_normalize(a), nb = simd_normalize(b)
+        let mean = na + nb
+        if simd_length(mean) > 0.5 {
+            let m = simd_normalize(mean)
+            return OrientationGizmo.regions.max { simd_dot($0.direction, m) < simd_dot($1.direction, m) }
+        }
+        let corners = OrientationGizmo.regions.filter { $0.kind == .corner && $0.direction.y > 0 }
+        return corners.max { simd_dot($0.direction, na) < simd_dot($1.direction, na) }
+    }
 }

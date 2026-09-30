@@ -3,8 +3,9 @@
 //
 // ★ NO OCTET "LATTICE" RUN UNDER FLEXIBLE. The bottom bar's `latticeThisButton` ("Lattice ·
 // nothing set to lattice") is replaced, only when the project is Flexible, by this pill in
-// the same slot and stature: "Lattice" over one line — "Lattice ready", "Building the
-// lattice…", the shape-only label, or the ONE thing to fix (FlexibleReadiness.oneLine).
+// the same slot and stature: "Lattice" over one line — "Ready", "Building…", the shape-only
+// label, a failed build's words, or the ONE thing to fix in its short pill form
+// (FlexibleIssue.pill — the whole sentence is on the pop-up it opens).
 // A tap opens Settings; with something to fix, the page opens on that fix's pop-up.
 //
 // Also here: the minimal Flexible view toggles (H5 — X-ray, Heat, Lattice; batch C adds
@@ -79,13 +80,16 @@ public struct FlexibleMainViewToggles: View {
 
     public init(main: FlexibleMainStage) { self.main = main }
 
+    static let heatIcon = "thermometer.medium"
+
     public var body: some View {
         HStack(spacing: DS.Space.s) {
             FlexibleViewButton(icon: "square.stack.3d.up", label: "X-ray", on: main.xray) { main.xray.toggle() }
                 .accessibilityIdentifier("flexible-main-view-xray")
-            FlexibleViewButton(icon: "square.3.layers.3d.down.right", label: "Dent heat", on: main.heat) { main.heat.toggle() }
+            // ★ a thermometer reads "heat" (the stacked-layers glyph did not — batch B review)
+            FlexibleViewButton(icon: FlexibleMainViewToggles.heatIcon, label: "Dent heat", on: main.heat) { main.heat.toggle() }
                 .accessibilityIdentifier("flexible-main-view-heat")
-            FlexibleViewButton(icon: "cube.transparent", label: "Lattice", on: main.latticeOn) { main.latticeOn.toggle() }
+            FlexibleViewButton(icon: "cube.transparent", label: "Lattice", on: main.latticeShown) { main.toggleLattice() }
                 .accessibilityIdentifier("flexible-main-view-lattice")
         }
         .latticeBandChipKeepOut()
@@ -107,18 +111,31 @@ public struct FlexibleMainViewToggles: View {
 public struct FlexibleMainPlayerSlot: View {
     @ObservedObject var main: FlexibleMainStage
     let bottomClearance: CGFloat
+    /// ★ BATCH B REVIEW: the width of the bottom-right settings-chip column (Gravity, …) — it
+    /// sits in the player's row (0 when the column is not shown). Its widest chip is the
+    /// bottom one (BottomChipOrder), the one beside the player.
+    let chipColumnWidth: CGFloat
 
-    public init(main: FlexibleMainStage, bottomClearance: CGFloat) {
+    public init(main: FlexibleMainStage, bottomClearance: CGFloat, chipColumnWidth: CGFloat = 0) {
         self.main = main
         self.bottomClearance = bottomClearance
+        self.chipColumnWidth = chipColumnWidth
     }
 
     /// The trailing legend slot the main page's legends take (batch C) — kept clear now.
     public static let legendSize = CGSize(width: 268, height: 168)
+    /// How tall the chip column is kept clear above the bar (four chip rows).
+    static let chipColumnHeight: CGFloat = 4 * (PageChrome.compactButton + DS.Space.s)
 
-    public static func keepOut(viewport: CGSize) -> [CGRect] {
+    public static func keepOut(viewport: CGSize, bottomClearance: CGFloat = 0, chipColumnWidth: CGFloat = 0) -> [CGRect] {
         var k = [FlexibleMainViewToggles.frame(viewport: viewport)]
         if let l = FlexibleLegendPlacement.legend(size: legendSize, viewport: viewport) { k.append(l) }
+        if chipColumnWidth > 0 {
+            // bottomRightControls: trailing on `edge`, its bottom `bottomClearance + m` up
+            let bottom = viewport.height - bottomClearance - DS.Space.m
+            k.append(CGRect(x: viewport.width - PageChrome.edge - chipColumnWidth, y: bottom - chipColumnHeight,
+                            width: chipColumnWidth, height: chipColumnHeight))
+        }
         return k
     }
 
@@ -126,7 +143,8 @@ public struct FlexibleMainPlayerSlot: View {
         GeometryReader { g in
             if main.playerShown,
                let r = FlexibleLegendPlacement.player(viewport: g.size, bottomClearance: bottomClearance,
-                                                      keepOut: Self.keepOut(viewport: g.size)) {
+                                                      keepOut: Self.keepOut(viewport: g.size, bottomClearance: bottomClearance,
+                                                                            chipColumnWidth: chipColumnWidth)) {
                 FlexibleSquishPlayer(loop: main.loop, fullLabel: main.fullLabel, width: r.width)
                     .latticeBandChipKeepOut()
                     .position(x: r.midX, y: r.midY)
