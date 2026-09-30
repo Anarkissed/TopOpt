@@ -1,6 +1,207 @@
 # Handoff — 2026-09-29-flexible-screens (TRACK app, A1): the Flexible screens
 
-## Round 3 · batch B — verification pass (read this first)
+## Round 3 · batch C — the main Flexible page: views, legends, tap-to-read, Surface (read this first)
+
+**What you will see** (judged headlessly on YOUR project 0004 restored through `AppModel.open`
+and on the pad; the app was NOT launched — nothing here has been seen on a screen yet):
+
+- **Four views under the gizmo: [X-ray] [Dent heat] [Stress] [Lattice].** X-ray, Dent heat and
+  Lattice are on by default; any mix works. Lattice turns X-ray on (batch B); **Stress turns
+  X-ray off** so its colours read on a solid part (a ghost shows them only at its outline —
+  turn X-ray back on and they stay, ghosted). While the FEA solves, the Stress button spins and
+  a "Simulating…" line sits under the row.
+- **Each data view has its own legend on the right edge** — #354's key squircle, (i) and
+  caret: **"Squish · mm"** (the dent's own deep blue → cyan → white ramp, 0 … deepest, "×k"),
+  **"Stress in the solid part · MPa"** (Stress's rainbow, 0 … peak; "Simulating…" while it
+  solves), **"Lattice · density"** (the walls' pale → green, each end as "18 % · 9.2 mm").
+  X-ray has none (your answer). The (i) holds the one sentence (the dent's says "What you
+  drew" / "What the lattice was built from" and that it is drawn k× deeper).
+- **Tap a legend → it reads "TAP THE PART TO READ"** (outlined in the accent). A tap on the part
+  then pins a callout **at that spot: value and unit** ("2.01 mm", "1.50 MPa", "22% density ·
+  6.1 mm cell") and a small arrow on the legend's ramp. It rides the part when you orbit.
+  **A double tap anywhere (or the legend again) comes back out.** While reading, a tap never
+  selects a face and the group primitives hide (#354's own drill-in, reused).
+  - **The dent is read where you SEE it**: the tap's ray is cast against the map AS DRAWN (×k,
+    at the squish on screen) and that column's number is read — the same number its colour
+    came from. Read off the undented surface instead, a 30° view lands on a neighbour column
+    (the test's red control: column 1017 instead of 1022 on your top A).
+  - **The stress** is the solid part's field at the tapped point; **a wall** is read at its
+    REST point (the squish pulled back), so density and cell are the wall's own, not the
+    squished point's.
+  - A tap that has nothing for the open legend reads another view that has something there,
+    and the legend follows (a side of the part with Squish open and Stress on → "1.50 MPa",
+    the Stress legend opens). Nothing at all → "— no squish here".
+- **The Settings page's legend reads too**: "TAP TO READ" → tap it, tap the map → the true mm
+  there; taps never select a face while it reads; double tap out. It is always X-ray (batch A).
+- **Legends never cover a button**: placed on the trailing edge from the middle out, clear of
+  the gizmo, the view row, the nav / Settings column, the bottom bar, the bottom-right chip
+  column and the left panel; when the edge is full (11" landscape with the chip column) a second
+  column opens to their left; a legend with no room at all becomes a small pill (tap it: it
+  opens first). The squish player is placed after them and never covers one. Measured at 13" /
+  11", portrait / landscape, with and without the chip column (raw lines below).
+- **The Surface button**: top-left, **[‹ Topology] [Surface]** in identical chrome on the
+  Flexible lattice stage; on Surface a Flexible project also has **[‹ Flexible]** straight
+  back. Coming back does not re-pop Settings once Settings was saved this session (#354's own
+  `latticeSettingsSavedThisSession`, set by Exit).
+- **Never violet under Flexible**: the main page's lattice-depth prism of a Lattice group and
+  its depth / expand knobs take the Flexible accent (a Solid group's prism: DS grey).
+- **Stress runs by itself**: on Save & Exit, when you turn Stress on, and — while Stress shows —
+  after a main-page edit that moves the loads (the solve checks its own fingerprint; nothing
+  runs twice). It is the SOLID part's FEA with the main page's loads and the project's rigid
+  material (hidden ABS) — the legend's title says "in the solid part", the (i) says it is not
+  the TPU lattice.
+
+**Not done (honestly):**
+- **No simulator check, no screenshots.** The plan's step 5 (every combination of the four
+  toggles on your project, tap each legend then the part, double tap out, the Surface round
+  trip, screenshots of X-ray + Heat + Lattice and Heat + Stress) needs the app launched, which
+  I must not do. `xcodebuild` for the simulator succeeds (below); everything else was measured
+  headlessly.
+- **#354's latent Surface / Settings overlap (4b11beb3) is NOT fixed**: on every Lattice page
+  the forward [Surface] button (top-right) is still drawn under Settings
+  (`settingsButtonTopInset` is computed and never used). Under Flexible the new top-left
+  [Surface] reaches it; Structural / Aesthetic keep the hidden one.
+- **The dent's callout is pinned where the drawn map was at the moment of the tap.** While the
+  squish plays, the map moves under the arrow (the renderer steps the loop; nothing publishes
+  per frame, so the callout cannot follow the dent). Pause the player to read at full squish.
+- **Stress uses the main page's loads, not the Flexible weights** — since batch A the group IS
+  the weight (a Flexible weight writes back), so they agree for every face a group presses; a
+  face pressed only on the Flexible page (top B, faces 3 / 5 on your project) is not in the
+  solid part's FEA.
+- **Large parts**: the composed tint array is rebuilt only when an input changes, but the
+  stress colours sample the field once per flat vertex then (fine on your pad; worth a look on
+  the M2 stand). #354's per-update `VertexTintKey` hash (batch B's note) still applies.
+- **The main page's mesh swap still reframes the camera** (batch B, #354's `applyMesh`).
+- The octet's own Stress legend / view toggle can still show if `stressViewOn` was left on in
+  an octet session of the same page before the part became Flexible (the octet toggle is not
+  reachable under Flexible). Not seen; noted.
+
+**Your call:**
+- **Stress turns X-ray off.** I chose it so the button never paints something you cannot see
+  (a ghost shows the colours only at its outline). Say if Stress should leave X-ray alone.
+- **Stress solves on every Save & Exit when there is no current field** (the plan's rule), even
+  with Stress off — about a coarse 64³ FEA of the solid part. Say if it should wait for the
+  Stress button.
+- **The second legend column** (11" landscape with the chip column): the Stress / Lattice
+  legends open left of the Squish one rather than turning into pills. Say if you prefer pills.
+
+### Hooks in #354 / main files (every line, grepped after the edit; pinned by FlexibleBatchCHookTests / FlexibleSurfaceNavTests / FlexibleNeverVioletTests / FlexibleMainPageHookTests)
+
+| hook | file · anchor | ± | why |
+|---|---|---|---|
+| H4' | WorkspacePlaceholder · `vertexTints: visible.surfaceEditing ? surfaceVertexTints : flexibleMain.tints(project, on: stage` | ~1 | `, roles: roleTints, stress: latticeStressField)` — the ONE tint array (heat, stress, group colours, ghost); `stressTints` stays nil under Flexible (batch B) |
+| H5' | · `if flexibleMain.owns(project, stage) { FlexibleMainViewToggles(main: flexibleMain` | ~1 | `, stressReady: latticeStressField != nil, stressRunning: latticeSimIsRunning, solve: { if let ctx = model.makeLatticeSimContext(), FlexibleStressTrigger.shouldRun(hasField: latticeSim.field != nil, stale: latticeSim.isStale(against: ctx.fingerprint), running: latticeSimIsRunning) { latticeSim.run(ctx) } })` — Stress, solved directly (the plan's H11 folded in: no +1 in H2's onExit — `didExitSettings()` asks the handed-over solver) |
+| H6 | · after `latticeDensityLegend` / `latticeProbeCallout` inside `} else if !fullScreenPageUp {` | +1 | `if flexibleMain.owns(project, stage) { FlexibleMainLegends(main: flexibleMain, mode: $latticeLegendMode, projection: projection, settle: settleQuat, bottomClearance: bottomBarClearance, chipColumnWidth: …) }` |
+| H7 | · onPickPoint, before `if latticeLegendMode.drilledIn { return true }` | +1 | `if flexibleMain.read(project, mode: latticeLegendMode, face: fid, point: pt) { return true }` — #354's consumption line stays, pinned |
+| H8 | · `onLatticeProbe: latticeLegendMode.drilledIn` | ~1 | `&& flexibleMain.wantsWallProbe(latticeLegendMode)` — the wall probe only for the lattice legend (it claims any tap near a wall first) |
+| H8 | · the probe closure, before `setLatticeProbe(at: model, world: world,` | +1 | `if flexibleMain.readLattice(project, mode: latticeLegendMode, model: model) { return }` |
+| H9 | · `if let back = stage.back {` in `stageNavigationButtonOverlay` | ~1 | `HStack(spacing: PageChrome.gap) { stageNavButton(to: back, icon: "chevron.left"); if let x = FlexibleStageNav.extra(stage, flexible: …) { stageNavButton(to: x.dest, icon: x.icon, title: x.title) } }` — keep-out and `StageNavPlacement` stay on it |
+| H9 | · `private func stageNavButton(to dest: WorkspaceStage, icon: String` | ~1 | `, title: String? = nil` |
+| H9 | · `Text(dest.title)` in `stageNavButton` | ~1 | `Text(title ?? dest.title)` ("Flexible") |
+| H13 | · `private func latticeRegionTint(_ role:` | +1 | `if let t = FlexibleMainTints.depthPlane(role, flexible: …) { return t }` — never violet under Flexible |
+| H13 | · `latticeDepthKnob` / `latticeExpandKnob` · `LatticeDensityProxy.densityColor(fraction: 0.6)` / `(0.25)` | ~2 | wrapped in `FlexibleMainTints.knob(flexible: …, …)` |
+| M4 | MetalMeshView · `func latticeProbe(` first guard | 1 token | `latticeInFrame || flexibleLatticeInFrame` — a tap on a Flexible wall is found (RED before: "⇒ nil") |
+
+WorkspacePlaceholder: +4 lines, 9 lines edited; MetalMeshView: 1 line edited. `startStressSolveIfNeeded`
+is not edited (LatticeSimSolveTriggerTests reads its first 900 characters; pinned again here).
+Every other pinned string holds (LatticeLegendColourTests 154 / 158 / 192 / 215 / 273,
+LatticePreviewBodyAlphaTests, SmoothingPageRound2Tests' `fullScreenPageUp`, the viewModeToggles
+cube). **Re-pinned on purpose:** FlexibleMainPageHookTests' H4 and H5 lines (their new text).
+
+### Added / changed (track files)
+
+- NEW `FlexibleProbe.swift` — `FlexibleReadKind` (three fixed ids, titles, units, ramps),
+  `FlexibleReading`, `FlexibleProbe` (the dent ray against the drawn map, stress at the rest
+  point, the wall pulled back, the lattice span / colour / cell), `FlexibleMainTints.compose`
+  (the ONE array), `FlexibleStressTrigger`.
+- NEW `FlexibleMainLegends.swift` — `FlexibleMainLegendLayout` (keep-outs, one stack on the
+  edge, then a second column, then pills) and the legends + callout view (H6).
+- NEW `FlexibleMainStage+Views.swift` — Stress (toggle, solver hand-over, field stash), the
+  composed tints (H4'), the legend kinds / frames, tap-to-read (H7, H8).
+- NEW `FlexibleStageNav.swift` (H9), `FlexibleDepthAccent.swift` (H13).
+- `FlexibleMainStage` — Stress / reading / minimised state; channels built without the ghost
+  (composed later); the drawn lattice and the map's deepest value kept; Save & Exit and a
+  main-page edit (while Stress shows) ask for the solve.
+- `FlexibleMainStatusPill` — the toggles gain Stress ("Simulating…"); the player keeps clear
+  of the legends' real frames.
+- `FlexibleStagePage` — the legend takes a tap ("TAP TO READ" → "TAP THE PART TO READ"), a tap
+  reads the dent (never `tapFace`), a double tap out, the callout.
+
+### Decisions rows (00-decisions.md §1b)
+
+D-R3-15 the views, legends and tap-to-read · D-R3-16 the ONE tint array · D-R3-17 Stress under
+Flexible (solved directly; Stress turns X-ray off) · D-R3-18 the Surface button · D-R3-19 never
+violet under Flexible.
+
+### Tests (raw)
+
+RED first (the new suites against stubs of the new API — every test failing for its stated
+reason, before any hook; `c_red1`):
+```
+Executed 16 tests, with 102 failures (4 unexpected) in 6.756 (6.762) seconds
+FLEX-PROBE wall: covered 19521 px; probe at (0.501953125, 0.501953125) ⇒ nil · |F| inf
+FLEX-TINT heat + stress: part 0/24 stress (ghosted), map 7200/7200 heat (opaque)
+(and: every legend kind unplaced, no read / readLattice consumed, the hook pins absent, the
+stress trigger never ran, the probes nil)
+```
+Mutation runs (each reverted in source, the tests run, the file restored; grep shows no marker):
+```
+M4 token removed (latticeInFrame alone) ⇒ testTheProbeFindsAFlexibleWall: "a tap on a Flexible wall is found" failed · probe ⇒ nil · |F| inf
+dent read off the UNDENTED map (scale 0) ⇒ testTheDentProbeReadsTheColumnHeSees: ("1.68") is not equal to ("2.01"); callout 16.2 mm from the tap
+                                         ⇒ testTheStageReadsHisDentAndSwitchesToStress: callout 8.56 mm from the tap (not < 1.5)
+```
+(The stage test's VALUE did not change under that mutation — its neighbour column 1081 carries the
+same 1.07 mm on the built lattice — so it also pins the callout's place; the probe test is the
+one whose value moves.)
+
+Targeted suite after the last source change (every Flexible* suite + UnifiedShading,
+LatticePreviewBodyAlpha, LatticeGBufferMask, LatticeThreeAlgorithmsDraw, OrganicCapsuleImpostor,
+Viewer, StageBackdrop, SmoothingPageRound2, LatticeStageMode, LatticeSettingsPersist,
+ProjectStore, UndoHistory, SurfaceStage, SurfaceRound7, LatticeSimSolveTrigger, and every suite
+that scans or drives a file I touched — LatticeLegendColour, LatticeStressTint, LatticeBandChips,
+OrganicPreviewBakeInputs, OrganicWalk0907Evening, LatticePreviewConfetti, SmoothingStrokeCamera,
+SmoothingUsablePath, BottomBarMeasurement, LatticePageRound2, LatticeMode, SmoothingViewer,
+VariantEntryGating, GroupViewState, LatticePreviewNoticeCaption, FrozenRegionAsMaterial,
+LatticeGradingWiring, LatticeProbeSampling, LatticeRegionCap, LatticeSDFAlignment,
+LatticeShellAndMarchAgree, OrganicAutoGradeAndFreeze, OrganicDeadWallParity,
+OrganicLookAndVisibility, OrganicPreviewParameterParity, OrganicPreviewSpeedAndRim,
+OrganicSolidRim, ProtectFreezeVsSolidity, SmoothingPage, SmoothingPreviewGate, SmoothingRound3,
+SmoothingRound4, SurfaceStageGestures, VariantRetention), raw:
+```
+Executed 673 tests, with 9 tests skipped and 1 failure (0 unexpected) in 651.129 (651.208) seconds
+  the one failure: LatticeSimSolveTriggerTests.testTheTriggerRefusesOnAllThreeGrounds (known, pre-existing)
+FLEX-PROBE wall: covered 19521 px; probe at (0.501953125, 0.501953125) ⇒ SIMD3<Float>(27.295109, 27.983433, 19.390156) · |F| 1.0609627e-05
+FLEX-TINT heat + stress: part 24/24 stress (ghosted), map 7200/7200 heat (opaque)
+FLEX-TINT control: a part-sized stress buffer on the overlay mesh changes 0 px; an overlay-sized one 4532 px
+FLEX-PROBE dent: column 1022 (2.01 mm) ⇒ drawn hit 1000103/1022 · reading '2.01 mm' · rest surface under the ray: 1000103/1017
+FLEX-PROBE stage: column 1086 1.07 mm · k 4.0 · reading '1.07 mm'
+FLEX-PROBE stage control: the rest surface under the ray is column 1081
+FLEX-PROBE stage side tap with the dent drilled in: '1.50 MPa' (stress)
+FLEX-PLACE legends 13" portrait chip 221: dent (760.0, 490.0, 248.0, 124.0) · stress (760.0, 626.0, 248.0, 124.0) · lattice (760.0, 762.0, 248.0, 124.0) · player (346.0, 1244.0, 340.0, 46.0)
+FLEX-PLACE legends 13" landscape chip 221: dent (1104.0, 314.0, 248.0, 124.0) · stress (1104.0, 450.0, 248.0, 124.0) · lattice (1104.0, 586.0, 248.0, 124.0) · player (518.0, 900.0, 340.0, 46.0)
+FLEX-PLACE legends 11" portrait chip 221: dent (562.0, 399.0, 248.0, 124.0) · stress (562.0, 535.0, 248.0, 124.0) · lattice (562.0, 671.0, 248.0, 124.0) · player (130.0, 1062.0, 341.0, 46.0)
+FLEX-PLACE legends 11" landscape chip 0: dent (922.0, 311.0, 248.0, 124.0) · stress (922.0, 447.0, 248.0, 124.0) · lattice (922.0, 583.0, 248.0, 124.0) · player (427.0, 702.0, 340.0, 46.0)
+FLEX-PLACE legends 11" landscape chip 221: dent (922.0, 355.0, 248.0, 124.0) · stress (662.0, 355.0, 248.0, 124.0) · lattice (662.0, 219.0, 248.0, 124.0) · player (427.0, 702.0, 340.0, 46.0)
+```
+(An earlier targeted run, before the legend stack / left-panel keep-out / file split: 672 tests,
+9 skipped, the same one known failure.) Every Flexible suite alone at that stage: 203 tests,
+4 skipped, 0 failures.
+
+**iOS build:** `xcodebuild -project app/TopOpt.xcodeproj -scheme TopOpt -configuration Debug
+-destination id=147E56A1… -derivedDataPath …/flexA1 build` → `** BUILD SUCCEEDED **` (exit 0), no
+warning in a batch-C file. The app was not launched.
+
+**Deleted-test sweep (my diff):** none deleted. Re-pinned on purpose: FlexibleMainPageHookTests'
+H4 and H5 lines (the tints call gained `roles:` / `stress:`, the toggles gained Stress).
+The intermediate commits were not built one by one; the final tree was (above).
+
+### Commits (on claude/flexible-screens, not pushed)
+
+06951923 the views, the legends, tap-to-read, Stress (H4' H5' H6 H7 H8, M4) · 234e0495 the Surface
+button and [‹ Flexible] (H9) · f968ee40 never violet under Flexible (H13) · (this handoff +
+DECISIONS rows D-R3-15..19).
+
+## Round 3 · batch B — verification pass
 
 A verifier read batch B against your rules on YOUR project 0004 (headless renders; the app
 was not launched). I confirmed each finding myself, on the code and on your restored project.
