@@ -459,4 +459,23 @@ struct FlexJobBlock {
 };
 FlexJobBlock flexible_parse_job_block(const std::string& job_json, BridgeError& err);
 
+// ---------------------------------------------------------------------------
+// THE RUN (round 4, batch C2 — maintainer: "when Lattice Ready shows, tapping it should send
+// to Core and the export path"). Core's own Flexible runner, `run_flexible_job` (the one
+// `topopt-cli flexible` calls; run_job / lattice_variant_job REFUSE a job with a `flexible`
+// block): the job document is parsed by core's `parse_job`, its `model` read relative to
+// `job_dir`, and every receipt, heat map and CSV written into `out_dir`. A stage refusal
+// (calibrate-first filament, two loaded faces on one stack, …) comes back in the result with
+// core's code and sentence; malformed input fills `err`.
+struct FlexRunResult {
+  bool refused = false;
+  std::string refusal_code;
+  std::string refusal_reason;
+  std::string receipt_json;        // the `flexible` block of run_info.json
+  std::vector<std::string> files;  // written, relative to out_dir
+};
+FlexRunResult flexible_run_job(const std::string& job_json, const std::string& job_dir,
+                               const std::string& out_dir, const std::string& materials_path,
+                               const std::string& fingerprint, BridgeError& err);
+
 }  // namespace topoptbridge

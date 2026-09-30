@@ -892,3 +892,33 @@ public final class FlexibleScene: @unchecked Sendable {
                                       reasons: reasons, candidates: cands, failures: fails)
     }
 }
+
+// MARK: - the run (round 4, batch C2)
+
+/// What core's own Flexible runner (`run_flexible_job`, the one `topopt-cli flexible` calls)
+/// said about a job: its stage refusal (core's code + sentence) or none, the receipt (the
+/// `flexible` block of run_info.json) and the files it wrote into the output directory.
+public struct FlexRunInfo: Equatable, Sendable {
+    public let refusal: FlexRefusal?
+    public let receiptJSON: String
+    public let files: [String]
+    public init(refusal: FlexRefusal?, receiptJSON: String, files: [String]) {
+        self.refusal = refusal; self.receiptJSON = receiptJSON; self.files = files
+    }
+}
+
+extension FlexibleCore {
+    /// Run a job document with a `flexible` block through core's Flexible runner. The other
+    /// sections' runner (`run_lattice_job` → `lattice_variant_job`) refuses such a job; this is
+    /// the entry point core gives it. Throws on malformed input (core's words).
+    public static func runJob(jobJSON: String, jobDir: String, outDir: String, materialsPath: String,
+                              fingerprint: String) throws -> FlexRunInfo {
+        var err = topoptbridge.BridgeError()
+        let r = topoptbridge.flexible_run_job(std.string(jobJSON), std.string(jobDir), std.string(outDir),
+                                              std.string(materialsPath), std.string(fingerprint), &err)
+        try FlexConv.check(err)
+        let files = Array(r.files).map { String($0) }
+        return FlexRunInfo(refusal: r.refused ? FlexRefusal(code: String(r.refusal_code), reason: String(r.refusal_reason)) : nil,
+                           receiptJSON: String(r.receipt_json), files: files)
+    }
+}

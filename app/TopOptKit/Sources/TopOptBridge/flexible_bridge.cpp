@@ -26,6 +26,7 @@
 #include "topopt/flexible/field.hpp"
 #include "topopt/flexible/job_block.hpp"
 #include "topopt/flexible/recommend.hpp"
+#include "topopt/flexible/run.hpp"
 #include "topopt/flexible/squish.hpp"
 #include "topopt/job.hpp"
 #include "topopt/mesh.hpp"
@@ -978,6 +979,31 @@ FlexJobBlock flexible_parse_job_block(const std::string& job_json, BridgeError& 
   } catch (const std::exception& e) {
     fail(err, e);
     o = FlexJobBlock{};
+  }
+  return o;
+}
+
+
+// ★ ROUND 4 (C2): core's own Flexible runner — see FlexibleBridge.hpp.
+FlexRunResult flexible_run_job(const std::string& job_json, const std::string& job_dir,
+                               const std::string& out_dir, const std::string& materials_path,
+                               const std::string& fingerprint, BridgeError& err) {
+  FlexRunResult o;
+  try {
+    const topopt::JobDescription job = topopt::parse_job(job_json);
+    topopt::FlexibleProvenance prov;
+    prov.cli_version = "app";
+    prov.fingerprint = fingerprint;
+    const topopt::FlexibleRunResult r =
+        topopt::run_flexible_job(job, job_dir, out_dir, materials_path, prov);
+    o.refused = r.refused;
+    o.refusal_code = r.refusal_code;
+    o.refusal_reason = r.refusal_reason;
+    o.receipt_json = r.receipt_json;
+    o.files = r.files;
+  } catch (const std::exception& e) {
+    fail(err, e);
+    o = FlexRunResult{};
   }
   return o;
 }
