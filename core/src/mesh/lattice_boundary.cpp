@@ -451,4 +451,26 @@ std::vector<char> lattice_certification_mask(const LatticeBoundary& boundary,
   return mask;
 }
 
+std::vector<char> lattice_synthesis_domain(const LatticeBoundary& boundary,
+                                           const VoxelGrid& grid,
+                                           const std::vector<double>& density,
+                                           double iso, const Vec3& region_origin,
+                                           double cell_mm,
+                                           const std::vector<char>& posture_mask,
+                                           long long* posture_rejected) {
+  std::vector<char> mask = lattice_certification_mask(boundary, grid, density, iso,
+                                                      region_origin, cell_mm);
+  long long rejected = 0;
+  if (!posture_mask.empty()) {
+    if (posture_mask.size() != mask.size())
+      throw std::invalid_argument("lattice_synthesis_domain: posture size mismatch");
+    for (std::size_t e = 0; e < mask.size(); ++e) {
+      if (mask[e] && !posture_mask[e]) mask[e] = 0;   // the law kept it solid
+      else if (!mask[e] && posture_mask[e]) ++rejected;
+    }
+  }
+  if (posture_rejected != nullptr) *posture_rejected = rejected;
+  return mask;
+}
+
 }  // namespace topopt

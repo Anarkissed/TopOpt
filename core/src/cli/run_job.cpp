@@ -5607,8 +5607,40 @@ LatticeVariantOutcome lattice_one_variant(
             "certifies (0.44x) and may read above the run (1.09x); require margin >= 1.09 x target "
             "for an approval to imply the run certifies\"},\n";
       pj += "  \"candidates\": [\n";
-      const std::vector<double> probe_stress = stress_tensor_for_organic(
-          job, solved_grid, cand, region_ids, v.stress_tensor_field, nullptr);
+      // ★ THE SYNTHESIS MOVED INTO THE LOOP, AND ONTO THE POSTURE MASK (#354's
+      // audit, 2026-09-29). It used to happen ONCE here over `cand` -- the candidate
+      // set -- and without `synthesised_whole`. Two things were wrong with that, and
+      // they are NOT equally serious; the honest split, measured 2026-09-29:
+      //
+      //   (1) THE DOMAIN MOVE IS A NO-OP TODAY, and saying otherwise would be wrong.
+      //       For organic, `grade_lattice` masks EVERY candidate voxel -- all three
+      //       `params.organic_geometry` branches in grading.cpp set `post.mask[e] = 1`
+      //       and `continue` before any octet refusal -- so `cand` and
+      //       `agf.posture.mask` are the SAME SET on every organic run. Measured on
+      //       the cli_organic_dead_parity fixture across cell 3-10 mm, uniform and
+      //       swept windows, min_extrudable_width 0.45-3 mm, three rho bands, a
+      //       manual clearance keep-out and all three outer finishes: cand == posture
+      //       == the run's mask, every time, and the two dead sets were identical
+      //       with `cand` in place. It is written this way for the CONTRACT (the
+      //       probe must name the domain it means), not because it moved a number.
+      //
+      //   (2) `synthesised_whole` WAS MISSING, and that half is real: ruling H hands
+      //       a whole-synthesised wall the window's MIDDLE spacing, so without it the
+      //       probe sized a dead wall against a lattice the run would not build.
+      //
+      //   ★ AND WHAT IS STILL NOT ALIGNED. The run's domain is not the posture: it
+      //   is `lattice_certification_mask(boundary, ...) ∩ gf.posture.mask` (see the
+      //   organic block below), and the probe has no certification mask -- it runs
+      //   before the variant's shell boundary is built. Nothing measurable separated
+      //   the two on the fixture above, so the gap is UNMEASURED rather than closed,
+      //   and it is the one that could still move a verdict on a part whose
+      //   cell-overlap proof or shell clip rejects posture voxels.
+      //
+      // The domain is that candidate's own PRE-RIM posture mask: the run synthesises
+      // before its rim band is cleared (ruling G applies the band after the tracer),
+      // so the probe must too -- and a post-rim domain here IS observable, which is
+      // what cli_organic_dead_parity's positive control uses to go red. Per candidate
+      // this costs one O(n) pass plus a p99 sort beside a full trace and certificate.
       // ★ THE STRESS HALF (2026-09-05). Rooting alone saturates at 100 % on a wall
       // whose every welded network touches the solid, and the certificate's margin
       // is what "approved for structural" has to mean. So each candidate's RAW trace
@@ -5631,7 +5663,30 @@ LatticeVariantOutcome lattice_one_variant(
         JobGrading jg2 = job.grading;
         jg2.cell_min_mm = cc.lo; jg2.cell_max_mm = cc.hi; jg2.cell_mm = cc.hi;
         const GradedField agf = grade_lattice(solved_grid, dens, v.von_mises_field, &cand, alt, printed_iso);
-        std::vector<char> pmask = agf.posture.mask;
+        // ★ THE RUN'S DOMAIN, NOT THE POSTURE (reviewer, 2026-09-30). The run builds
+        // its lattice on lattice_certification_mask INTERSECT the posture; the probe
+        // used the posture alone, so it forecast for a set the run does not build.
+        // Same function, same terms, this candidate's own coarsest cell. The boundary
+        // is per candidate because the cell-overlap proof is a function of the cell --
+        // measured cost is stated in the commit; v.v3.mesh is already in hand here.
+        const double pcell = agf.cell_size_mm > 0.0 ? agf.cell_size_mm : cc.hi;
+        const LatticeBoundary pbnd =
+            lattice_boundary_for(solved_grid, dens, pcell, lattice_kos, lattice_roles,
+                                 printed_iso, &v.v3.mesh);
+        const std::vector<char> pdomain = lattice_synthesis_domain(
+            pbnd, solved_grid, dens, printed_iso,
+            solved_grid.origin, pcell, agf.posture.mask);
+        std::vector<char> pmask = pdomain;
+        // the run's order: synthesise over the domain, THEN clear the rim
+        SyntheticStressReport prep;
+        const std::vector<double> probe_stress = stress_tensor_for_organic(
+            job, solved_grid, pdomain, region_ids, v.stress_tensor_field, &prep);
+        // ★ AND THE SAME GRADING INPUT: ruling H hands a whole-synthesised wall the
+        // window's MIDDLE spacing, because its manufactured field has no real stress
+        // to grade by. The probe used to skip this and take the coarsest end, so it
+        // sized a dead wall against a lattice the run would never build.
+        const std::vector<char> probe_synth_whole =
+            organic_synthesised_whole_voxels(prep, region_ids, solved_grid.voxel_count());
         {
           const double rim = job.grading.organic_solid_rim_mm < 0.0 ? cc.lo : job.grading.organic_solid_rim_mm;
           std::vector<Vec3> nrms;
@@ -5646,7 +5701,8 @@ LatticeVariantOutcome lattice_one_variant(
                                              agf.band_rho_min, agf.band_rho_max, jg2,
                                              job.loads.present && job.loads.minimize_plastic,
                                              v.applied_build_dir, printed_iso, 32,
-                                             job.loads.layer_height_mm, /*probe_only=*/true);
+                                             job.loads.layer_height_mm, /*probe_only=*/true,
+                                             &probe_synth_whole);
         // ★ ONE welded polyline set feeds BOTH measures: thin to 2 mm keeping shared
         // vertices, insert crossing junctions, then root and certify the same curves.
         OrganicLattice plat = po.lat;
@@ -5758,9 +5814,29 @@ LatticeVariantOutcome lattice_one_variant(
         // that cost 10 x 12 s on the M2 run. Run it only when structural intent or a
         // structural recommendation will read the answer.
         const bool want_cert = job.grading.intent == "structural" || recommend_mode == "structural";
-        if (!want_cert)
-          pred = "\"predicted\": {\"ran\": false, \"reason\": \"aesthetic intent: nothing reads a certificate\"}";
-        if (want_cert && !psegs.empty() && psegs.size() <= 600000) {
+        // ★ ONE DECISION, TESTED (organic_probe_certificate_skip). Each branch below
+        // states its OWN reason and no branch may overwrite another's -- see the
+        // helper for what that cost.
+        constexpr std::size_t kProbeSegmentCap = 600000;
+        const OrganicProbeSkip skip =
+            organic_probe_certificate_skip(want_cert, psegs.size(), kProbeSegmentCap);
+        switch (skip) {
+          case OrganicProbeSkip::AestheticIntent:
+            pred = "\"predicted\": {\"ran\": false, \"reason\": \"aesthetic intent: "
+                   "nothing reads a certificate\"}";
+            break;
+          case OrganicProbeSkip::NoSegments:
+            pred = "\"predicted\": {\"ran\": false, \"reason\": \"no segments\"}";
+            break;
+          case OrganicProbeSkip::SegmentCap:
+            pred = "\"predicted\": {\"ran\": false, \"reason\": \"" +
+                   std::to_string(psegs.size()) + " segments exceed the probe's " +
+                   std::to_string(kProbeSegmentCap) + " cap\"}";
+            break;
+          case OrganicProbeSkip::None:
+            break;   // the certificate runs below and writes its own
+        }
+        if (skip == OrganicProbeSkip::None) {
           const double t1 = wall_seconds();
           std::vector<char> hexm(solved_grid.voxel_count(), 0);
           for (std::size_t e = 0; e < solved_grid.voxel_count(); ++e)
@@ -5809,9 +5885,6 @@ LatticeVariantOutcome lattice_one_variant(
                        pc.margin_untagged, pc.stress_p99_untagged_mpa, pc.members_tagged, pc.tagged_p99_mpa,
                        pc.knockdown_used, pc.max_over_allowable, pc.max_over_allowable_distributed,
                        psegs.size(), wall_seconds() - t1);
-        } else if (!psegs.empty()) {
-          pred = "\"predicted\": {\"ran\": false, \"reason\": \"" + std::to_string(psegs.size()) +
-                 " segments exceed the probe's 600000 cap\"}";
         }
         bool ok_s = true, ok_a = true;
         std::string regs;
@@ -5838,26 +5911,44 @@ LatticeVariantOutcome lattice_one_variant(
           if (across < 4.0) advice = "cells_across " + std::to_string(across) + " < 4 (advisory)";
           const bool ok_str = ok_aes;
           ok_s = ok_s && ok_str; ok_a = ok_a && ok_aes;
-          char buf[640];
+          // ★ THE PROBE'S OWN DEAD VERDICT, IN ITS OWN RECEIPT (2026-09-29).
+          // Report-only, and the point of it: the domain fix above is only checkable
+          // if BOTH sides say which walls they called dead. `run_info.json`'s
+          // grading.synthetic_stress_by_region[] carries the same two keys for the
+          // run, and cli_organic_dead_parity compares them. A region with no row in
+          // `prep` was never flagged (or has no voxels in the domain): not dead.
+          const SyntheticStressRegionReport* PS = nullptr;
+          for (const SyntheticStressRegionReport& q : prep.per_region)
+            if (q.region_id == include_index) PS = &q;
+          char buf[800];
           std::snprintf(buf, sizeof buf,
                         "        {\"face_id\": %d, \"region_id\": %d, \"depth_mm\": %.6g, \"cells_across\": %.4g, "
                         "\"curves_per_family\": [%zu, %zu, %zu], \"components\": %zu, "
                         "\"traced_length_mm\": %.6g, \"rooted_length_fraction\": %.6g, "
+                        "\"synthesised_whole\": %s, \"stress_p99\": %.6g, "
                         "\"approved_structural\": %s, \"approved_aesthetic\": %s, \"refusals\": \"%s\", \"advice\": \"%s\"}",
                         jr.face_id, include_index, jr.depth_mm, across,
                         R2 ? R2->curves_per_family[0] : 0, R2 ? R2->curves_per_family[1] : 0, R2 ? R2->curves_per_family[2] : 0,
                         R2 ? R2->components : 0, R2 ? R2->traced_mm : 0.0, rooted,
+                        (PS && PS->whole_region) ? "true" : "false", PS ? PS->p99_von_mises : 0.0,
                         ok_str ? "true" : "false", ok_aes ? "true" : "false", refs.c_str(), advice.c_str());
           regs += std::string(regs.empty() ? "" : ",\n") + buf;
         }
-        char head[400];
+        char head[560];
         std::snprintf(head, sizeof head,
                       "    {\"cell_min_mm\": %.6g, \"cell_max_mm\": %.6g, \"trace_seconds\": %.3g, "
                       "\"curves\": %zu, \"components\": %zu, \"traced_length_mm\": %.6g, "
-                      "\"rooted_length_fraction\": %.6g, \"candidate_voxels\": %zu,\n      \"regions\": [\n",
+                      // \"candidate_voxels\" IS the synthesis domain: it counts the same
+                      // pre-rim posture mask the synthesis ran over, which is the whole
+                      // point of the 2026-09-29 fix. \"dead_threshold\" is the threshold
+                      // the per-region verdicts below were measured against, so a
+                      // disagreement with the run is locatable rather than merely visible.
+                      "\"rooted_length_fraction\": %.6g, \"candidate_voxels\": %zu, "
+                      "\"dead_threshold\": %.6g,\n      \"regions\": [\n",
                       cc.lo, cc.hi, secs, pr.curves, pr.components, pr.traced_mm,
                       pr.traced_mm > 0.0 ? pr.rooted_mm / pr.traced_mm : 0.0,
-                      static_cast<std::size_t>(std::count(agf.posture.mask.begin(), agf.posture.mask.end(), 1)));
+                      static_cast<std::size_t>(std::count(agf.posture.mask.begin(), agf.posture.mask.end(), 1)),
+                      prep.dead_threshold);
         const bool approved_structural = ok_s && cert_ok;
         pj += head + regs + "\n      ],\n      " + pred + ",\n      \"approved_structural\": " +
               (approved_structural ? "true" : "false") +
@@ -5881,20 +5972,37 @@ LatticeVariantOutcome lattice_one_variant(
         R.organic_recommend_ran = true;
         const OrganicRecommendation& RC = R.organic_recommendation;
         char rb[1200];
+        // ── ★ A MARGIN THAT WAS NEVER MEASURED IS null, NOT 0 (2026-09-29) ───────
+        // fit_margin / auto_margin default to 0.0 and were written unconditionally,
+        // so "margin": 0 meant three different things: certified at 0 (impossible),
+        // NO CERTIFICATE RAN (every aesthetic run), or no row found. #354's
+        // Recommended pills read it straight out as "· 0.00". The margin is now the
+        // JSON null where it was not measured, and `certified` states it positively
+        // beside it so no consumer has to infer from a sentinel.
+        char fmb[40] = "null", amb[40] = "null";
+        if (RC.fit_certified) std::snprintf(fmb, sizeof fmb, "%.6g", RC.fit_margin);
+        if (RC.auto_certified) std::snprintf(amb, sizeof amb, "%.6g", RC.auto_margin);
+        const char* fit_margin_json = fmb;
+        const char* auto_margin_json = amb;
         std::snprintf(rb, sizeof rb,
                       "{\"ran\": true, \"mode\": \"%s\", \"band_lo_mm\": %.6g, \"band_hi_mm\": %.6g, "
                       "\"collapsed\": %s, \"printability_floor_mm\": %.6g, \"resolution_floor_mm\": %.6g, "
                       "\"member_ceiling_mm\": %.6g, \"extent_ceiling_mm\": %.6g, \"look_cell_mm\": %.6g, "
                       "\"grade_ratio\": %.6g, \"look_cells_across\": %.6g, \"target_margin\": %.6g,\n"
-                      "    \"fit\": {\"found\": %s, \"cell_mm\": %.6g, \"margin\": %.6g, \"traced_mm\": %.6g, \"source\": \"%s\"},\n"
-                      "    \"auto\": {\"found\": %s, \"cell_min_mm\": %.6g, \"cell_max_mm\": %.6g, \"margin\": %.6g, "
+                      "    \"fit\": {\"found\": %s, \"cell_mm\": %.6g, \"certified\": %s, "
+                      "\"margin\": %s, \"traced_mm\": %.6g, \"source\": \"%s\"},\n"
+                      "    \"auto\": {\"found\": %s, \"cell_min_mm\": %.6g, \"cell_max_mm\": %.6g, "
+                      "\"certified\": %s, \"margin\": %s, "
                       "\"traced_mm\": %.6g, \"source\": \"%s\"},\n    \"rejected\": [",
                       RC.mode.c_str(), B.lo_mm, B.hi_mm, B.collapsed ? "true" : "false", B.printability_floor_mm,
                       B.resolution_floor_mm, B.member_ceiling_mm, B.extent_ceiling_mm, B.look_cell_mm, B.grade_ratio,
                       job.lattice.organic_look_cells_across, job.lattice.organic_recommend_margin,
-                      RC.fit_found ? "true" : "false", RC.fit_mm, RC.fit_margin, RC.fit_traced_mm, RC.fit_source.c_str(),
-                      RC.auto_found ? "true" : "false", RC.auto_lo_mm, RC.auto_hi_mm, RC.auto_margin, RC.auto_traced_mm,
-                      RC.auto_source.c_str());
+                      RC.fit_found ? "true" : "false", RC.fit_mm,
+                      RC.fit_certified ? "true" : "false", fit_margin_json,
+                      RC.fit_traced_mm, RC.fit_source.c_str(),
+                      RC.auto_found ? "true" : "false", RC.auto_lo_mm, RC.auto_hi_mm,
+                      RC.auto_certified ? "true" : "false", auto_margin_json,
+                      RC.auto_traced_mm, RC.auto_source.c_str());
         rj = rb;
         for (std::size_t i = 0; i < RC.rejected.size(); ++i) {
           char e[300];
@@ -6094,18 +6202,16 @@ LatticeVariantOutcome lattice_one_variant(
   // activation) and the posture. On a graded run it is intersected with the
   // law's own mask (voxels the law kept solid drop out; law-masked voxels the
   // shared predicate's cell-overlap proof rejects are counted, not hidden).
-  std::vector<char> mask = lattice_certification_mask(
-      boundary, solved_grid, dens, printed_iso, solved_grid.origin, cell);
+  // ★ ONE DEFINITION, SHARED WITH THE SIZE PROBE (reviewer, 2026-09-30). This was
+  // five lines here, so the probe -- which exists to forecast this run -- synthesised
+  // over the posture ALONE and worked on a strictly larger set. Both now call
+  // lattice_synthesis_domain(); an empty posture means ungraded, which is the
+  // behaviour the `if (graded)` guard used to express.
   long long dropped_by_overlap = 0;
-  if (graded) {
-    for (std::size_t e = 0; e < mask.size(); ++e) {
-      if (mask[e] && !gf.posture.mask[e]) {
-        mask[e] = 0;  // the law left it solid (too-thin fallback / not a candidate)
-      } else if (!mask[e] && gf.posture.mask[e]) {
-        ++dropped_by_overlap;
-      }
-    }
-  }
+  const std::vector<char> kNoPosture;
+  std::vector<char> mask = lattice_synthesis_domain(
+      boundary, solved_grid, dens, printed_iso, solved_grid.origin, cell,
+      graded ? gf.posture.mask : kNoPosture, &dropped_by_overlap);
   // ── ★ GRADE TO SOLID AT THE OUTLINE, for organic (see organic_solid_rim_band) ──
   // ★★ THE BAND IS COMPUTED HERE AND APPLIED AFTER THE TRACER (ruling G). It used to be
   // cleared from the mask on this line, which took it out of the tracer's candidates and
@@ -6812,13 +6918,33 @@ LatticeVariantOutcome lattice_one_variant(
       SteppedPlanRegion pr;
       pr.region_id = rc.region_id;
       pr.base_cell_mm = rc.cell_mm;
-      const std::size_t idx = static_cast<std::size_t>(rc.region_id - 1);
-      if (idx < job.lattice.regions.size()) {
-        const JobLatticeRegion& jr = job.lattice.regions[idx];
-        pr.slot_origin = jr.origin;
-        pr.normal = jr.normal;
-        pr.depth_mm = jr.depth_mm;
+      // ★ BY INCLUDE ORDER, NOT BY POSITION (#354, 2026-09-30). `rc.region_id`
+      // counts INCLUDE regions; `regions[region_id - 1]` counted ALL of them, so one
+      // exclude declared first handed this plan the exclude's prism. See
+      // job_include_region().
+      const JobLatticeRegion* jr =
+          job_include_region(job.lattice.regions, rc.region_id);
+      // ★ A CAN'T-HAPPEN STILL REFUSES (reviewer, 2026-09-30). `rc.region_id` comes
+      // from the run's own per-voxel ids, so an id with no include region is not
+      // reachable today. Leaving the frame at zero was still the wrong failure mode:
+      // `depth_mm` 0 means "skip the depth test" in stepped_validate_plan, so a plan
+      // would be validated against a prism that does not exist and pass the one check
+      // that would have caught it. Name the id and the count instead.
+      if (jr == nullptr) {
+        int includes = 0;
+        for (const JobLatticeRegion& q : job.lattice.regions)
+          if (q.role == "include") ++includes;
+        throw JobError(
+            "the stepped step derived a cell for include region " +
+            std::to_string(rc.region_id) + ", but this job declares " +
+            std::to_string(includes) +
+            " include region(s). A region id is a 1-based position among the INCLUDE "
+            "regions (see job_include_region), so this run cannot say which wall that "
+            "cell belongs to and will not guess.");
       }
+      pr.slot_origin = jr->origin;
+      pr.normal = jr->normal;
+      pr.depth_mm = jr->depth_mm;
       plan_regions.push_back(pr);
     }
     // ★ RULING A: DOUBLED SENDS ITS CELLS TOO, and its base is not a per-region answer.
@@ -10249,6 +10375,8 @@ LatticeVariantJobResult lattice_variant_job(const JobDescription& job,
           ri.voxels = static_cast<long long>(rr.voxels);
           ri.fully = static_cast<long long>(rr.fully_synthetic);
           ri.blended = static_cast<long long>(rr.blended);
+          ri.whole_region = rr.whole_region;
+          ri.p99_von_mises = rr.p99_von_mises;
           gi.organic_synthetic_by_region.push_back(ri);
         }
         // ★ the organic structural certificate. `verdict` is never absent when one

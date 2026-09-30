@@ -151,6 +151,129 @@ Protrusion run_case(const Fixture& f, const LatticeBoundary& B,
 
 }  // namespace
 
+// ── ★ THE SYNTHESIS DOMAIN IS cert ∩ posture, AND BOTH TERMS BITE
+// (reviewer follow-up, 2026-09-30) ──────────────────────────────────────────────
+//
+// `lattice_synthesis_domain` is the set an organic run actually builds a lattice on.
+// It lived as five lines inline in run_job.cpp, so the size probe synthesised over
+// the POSTURE ALONE and forecast for a strictly larger set than the run.
+//
+// This is on a synthetic grid deliberately chosen so the certification mask REMOVES
+// posture voxels — otherwise the assertion would be vacuous, which is exactly how the
+// cli_organic_dead_parity fixture failed to separate the two sets. The mechanism is
+// the cell-overlap proof: a coarse cell on a small block cannot wholly overlap the
+// allowed region near its faces, so those voxels certify SOLID while the law's
+// posture still posts a lattice on them.
+static void test_the_synthesis_domain_is_cert_intersect_posture() {
+  const Fixture f = make_block(20, 6, 13, false);
+  const double cell = 2.0 * kSpacingMm;
+
+  // ★ WHY A KEEP-OUT AND NOT THE CELL-OVERLAP PROOF. The first draft of this test
+  // used a coarse cell, expecting boundary voxels to certify solid. They do not: the
+  // proof is "the owning cell MAY overlap the allowed region", which is permissive, so
+  // it dropped nothing and the control fired — printed 512, certified 512. That is
+  // the control earning its place, and it is the same vacuity the
+  // cli_organic_dead_parity fixture has. A keep-out removes voxels unconditionally.
+  ClearanceGeometry ko;
+  ko.kind = ClearanceKind::Bolt;
+  ko.valid = true;
+  ko.axis_point = Vec3{f.grid.origin.x + 9.5 * kSpacingMm,
+                       f.grid.origin.y + 9.5 * kSpacingMm, 0.0};
+  ko.axis_dir = Vec3{0.0, 0.0, 1.0};
+  ko.radius = 2.0 * kSpacingMm;
+  ko.t_lo = -1e6;
+  ko.t_hi = 1e6;
+
+  LatticeBoundary B;
+  B.set_voxel_base(&f.grid, &f.density, 0.5, 2.0 * cell);
+  B.add_keep_out(ko, /*collar=*/false);
+
+  const std::vector<char> cert = lattice_certification_mask(
+      B, f.grid, f.density, 0.5, f.grid.origin, cell);
+
+  // A posture that posts a lattice on EVERY printed voxel — the law's most generous
+  // possible answer, so posture ⊇ cert and the difference is the cell-overlap proof.
+  std::vector<char> posture(f.density.size(), 0);
+  std::size_t printed = 0;
+  for (std::size_t e = 0; e < f.density.size(); ++e)
+    if (f.density[e] >= 0.5) { posture[e] = 1; ++printed; }
+
+  std::size_t n_cert = 0;
+  for (char c : cert) n_cert += (c != 0);
+
+  // ★ THE CONTROL: the two sets must actually differ on this fixture, or everything
+  // below passes whether or not the intersection is taken.
+  CHECK(printed > 0 && n_cert < printed,
+        "synthesis domain: control — the certification mask must drop posture voxels "
+        "on this fixture, or the test proves nothing");
+  std::printf("  [synthesis domain] printed %zu, certified %zu, cell %.3f mm\n",
+              printed, n_cert, cell);
+
+  long long rejected = -1;
+  const std::vector<char> dom = lattice_synthesis_domain(
+      B, f.grid, f.density, 0.5, f.grid.origin, cell, posture, &rejected);
+
+  std::size_t n_dom = 0;
+  for (char c : dom) n_dom += (c != 0);
+  CHECK(n_dom == n_cert,
+        "synthesis domain: with a posture over every printed voxel the domain IS the "
+        "certification mask");
+  CHECK(n_dom < printed,
+        "synthesis domain: the domain is strictly smaller than the posture — this is "
+        "the assertion that fails if the intersection is dropped");
+  CHECK(rejected == static_cast<long long>(printed - n_cert),
+        "synthesis domain: posture_rejected counts |posture minus certification|");
+  for (std::size_t e = 0; e < dom.size(); ++e)
+    if (dom[e] && !cert[e]) {
+      CHECK(false, "synthesis domain: no voxel outside the certification mask");
+      break;
+    }
+
+  // ★ AND THE POSTURE TERM BITES TOO, in the other direction: a voxel the LAW kept
+  // solid must leave the domain even though the certification mask keeps it. Drop one
+  // certified voxel from the posture and require the domain to lose exactly it.
+  {
+    std::size_t victim = dom.size();
+    for (std::size_t e = 0; e < cert.size(); ++e)
+      if (cert[e] && posture[e]) { victim = e; break; }
+    CHECK(victim < dom.size(), "synthesis domain: a certified posture voxel exists");
+    if (victim < dom.size()) {
+      std::vector<char> holed = posture;
+      holed[victim] = 0;
+      const std::vector<char> d2 = lattice_synthesis_domain(
+          B, f.grid, f.density, 0.5, f.grid.origin, cell, holed);
+      std::size_t n2 = 0;
+      for (char c : d2) n2 += (c != 0);
+      CHECK(!d2[victim] && n2 == n_dom - 1,
+            "synthesis domain: a voxel the law kept SOLID leaves the domain");
+    }
+  }
+
+  // An EMPTY posture means ungraded: the certification mask is the whole answer, which
+  // is what the run does on an ungraded variant.
+  {
+    long long rej = -1;
+    const std::vector<char> d3 = lattice_synthesis_domain(
+        B, f.grid, f.density, 0.5, f.grid.origin, cell, {}, &rej);
+    std::size_t n3 = 0;
+    for (char c : d3) n3 += (c != 0);
+    CHECK(n3 == n_cert && rej == 0,
+          "synthesis domain: an empty posture leaves the certification mask alone");
+  }
+
+  // A posture of the wrong length is a programming error, not a silent truncation.
+  {
+    bool threw = false;
+    try {
+      (void)lattice_synthesis_domain(B, f.grid, f.density, 0.5, f.grid.origin,
+                                     cell, std::vector<char>(3, 1));
+    } catch (const std::exception&) {
+      threw = true;
+    }
+    CHECK(threw, "synthesis domain: a mis-sized posture throws");
+  }
+}
+
 int main() {
   // A cell that fits several times across the block, and a radius in the middle
   // of his measured strut range (0.225-0.384 mm) — so the protrusion below is a
@@ -425,6 +548,8 @@ int main() {
     }
     CHECK(threw, "set_shell_base(nullptr) must throw");
   }
+
+  test_the_synthesis_domain_is_cert_intersect_posture();
 
   std::printf("test_lattice_clip_shell: %d checks, %d failures\n", g_checks,
               g_failures);
