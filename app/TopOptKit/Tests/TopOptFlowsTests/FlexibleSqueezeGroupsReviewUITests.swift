@@ -127,24 +127,19 @@ final class FlexibleSqueezeGroupsReviewUITests: XCTestCase {
             m.select(5)
             pump(1.2)
             let rows = FlexibleSqueezeGroupRows.rows(model: m)
-            // the list's order on the page, top to bottom
-            let order = host.frames.all.filter { $0.key.hasPrefix("groupRow-") || $0.key.hasPrefix("faceRow-") || $0.key == "faceCard" }
-                .sorted { $0.value.minY < $1.value.minY }.map { "\($0.key)@\(Int($0.value.minY))" }
-            print("FLEX-REVIEW-ORDER \(tag): \(order.joined(separator: " ")) · groups \(m.squeezeGroups.map(\.regions)) · selected \(m.selectedRegion ?? -1)")
             XCTAssertEqual(rows.map(\.line), ["Group 1 · Squeeze", "Group 2 · Squeeze"])
             XCTAssertEqual(rows.map(\.value), ["10 kg", "10 kg"])
+            // ★ RE-PINNED (round 5, S8 — his img 3: "The groups should be separate folders … on the *left*
+            // side"): each group is a FOLDER TAB on the rail. Face 5's tab (group 2) is open: ITS header —
+            // "Group 2" with × and (i), Squeeze [box], Colour — is whole, on the panel, above face 5's card;
+            // group 1's header lives on group 1's tab
+            XCTAssertEqual(m.rail, .group(two), "\(tag): face 5's tab is open")
             let scroll = try XCTUnwrap(local(host, "panelScroll"))
             var line = "\(tag):"
-            for row in rows {
-                let f = try XCTUnwrap(local(host, "groupLine-\(row.number)"), "\(tag): group \(row.number)'s line is drawn")
-                let need = Self.needed(row.line)
-                line += String(format: " G%d line %.0f/%.0f pt", row.number, f.width, need)
-                XCTAssertGreaterThanOrEqual(f.width + 0.5, need, "\(tag): group \(row.number)'s line is whole ('\(row.line)')")
-                let r = try XCTUnwrap(local(host, "groupRow-\(row.number)"))
-                // one row (and, for a group that misses, its one warning line under it)
-                XCTAssertLessThanOrEqual(r.height, row.miss == nil ? 50 : 68, "\(tag): one row")
-            }
-            // the open card's group header and its × are ON the panel
+            let name = try XCTUnwrap(local(host, "groupLine-2"), "\(tag): group 2's name is drawn")
+            let need = Self.needed(FlexibleRowCopy.groupName(2))
+            line += String(format: " G2 name %.0f/%.0f pt", name.width, need)
+            XCTAssertGreaterThanOrEqual(name.width + 0.5, need, "\(tag): group 2's name is whole")
             let g2 = try XCTUnwrap(local(host, "groupRow-2")), x2 = try XCTUnwrap(local(host, "groupRemove-2"))
             let card = try XCTUnwrap(local(host, "faceCard"))
             line += String(format: " · G2 header y %.0f–%.0f, × y %.0f, card y %.0f–%.0f, scroll %.0f–%.0f",
@@ -152,24 +147,9 @@ final class FlexibleSqueezeGroupsReviewUITests: XCTestCase {
             XCTAssertTrue(g2.minY >= scroll.minY - 0.5 && g2.maxY <= scroll.maxY + 0.5, "\(tag): group 2's header is on the panel")
             XCTAssertTrue(x2.minY >= scroll.minY - 0.5 && x2.maxY <= scroll.maxY + 0.5, "\(tag): its × is on the panel")
             XCTAssertLessThan(g2.maxY, card.minY + 1, "\(tag): the header sits above face 5's card")
-            // … and the × works where it is
-            // ★ RED CONTROL (the fold): D2's section began under the WHOLE face list
-            let list = try XCTUnwrap(local(host, "faceList"))
-            if list.maxY > scroll.maxY { foldControl += 1 }
-            line += String(format: " · D2's section would start at y %.0f", list.maxY)
-            // ★ RED CONTROL (the cut): D2's long line in the same header
-            FlexibleSqueezeGroupRows.controlLongLine = true
-            m.objectWillChange.send()
-            pump(0.8)
-            for row in FlexibleSqueezeGroupRows.rows(model: m) {
-                guard let f = local(host, "groupLine-\(row.number)") else { continue }
-                let need = Self.needed(row.line)
-                if f.width + 0.5 < need { cutControl += 1 }
-                line += String(format: " · D2 '%@' %.0f/%.0f pt", row.line, f.width, need)
-            }
-            FlexibleSqueezeGroupRows.controlLongLine = false
-            m.objectWillChange.send()
-            pump(0.5)
+            // ★ RED CONTROL: D2's one list drew BOTH groups' headers — the tab draws only its own
+            XCTAssertEqual(FlexibleFaceList.sections(model: m).compactMap(\.group).count, 2, "control: D2's list had both headers")
+            if local(host, "groupRow-1") == nil { foldControl += 1; cutControl += 1 }
             click(host, CGPoint(x: x2.midX, y: x2.midY))
             XCTAssertTrue(pumpUntil(5) { m.squeezeGroups.count == 1 }, "\(tag): a click on group 2's × removes it")
             XCTAssertEqual(m.groupForce(m.squeezeGroups[0]), 10...10)
@@ -177,8 +157,9 @@ final class FlexibleSqueezeGroupsReviewUITests: XCTestCase {
             host.window.orderOut(nil); host.window.contentView = nil
         }
         print("FLEX-REVIEW-HOSTED headers\n  " + report.joined(separator: "\n  "))
-        XCTAssertGreaterThanOrEqual(cutControl, 4, "control: D2's line is cut at every size")
-        XCTAssertGreaterThanOrEqual(foldControl, 1, "control: D2's place was below the fold somewhere")
+        // (round 5: the two counters now count the sizes where the OTHER group's header is off the open tab)
+        XCTAssertGreaterThanOrEqual(cutControl, 4, "one header per tab at every size")
+        XCTAssertGreaterThanOrEqual(foldControl, 1)
     }
 
     // MARK: the player's timeline

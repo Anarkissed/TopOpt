@@ -60,8 +60,11 @@ final class FlexibleMainPageHookTests: XCTestCase {
     /// the pop-up, and the page never builds (Save & Exit does, on the main page).
     func testTheExitButtonAndThePageConsultTheReadiness() throws {
         let page = try FlexibleSource.code("FlexibleStagePage.swift")
-        XCTAssertTrue(page.contains("switch FlexibleExitDecision.decide(model.readiness) {"), "Exit consults the readiness")
-        XCTAssertTrue(page.contains("Text(FlexibleExitDecision.title(r))"), "Exit says \"Fix 1 thing\" while blocked")
+        // ★ RE-PINNED (round 5, S9): the button reads "Exit" until something changed, "Save & Exit" after,
+        // "Fix 1 thing" only when changed AND blocked — FlexibleSettingsExit wraps the same readiness rule
+        XCTAssertTrue(page.contains("switch FlexibleSettingsExit.decide(model.readiness, modified: modified) {"), "Exit consults the readiness")
+        XCTAssertTrue(page.contains("Text(FlexibleSettingsExit.title(r, modified: modified))"), "Exit says \"Fix 1 thing\" while blocked")
+        XCTAssertTrue(page.contains("let modified = FlexibleSettingsExit.modified(model.settings, since: opened)"), "…and whether anything changed")
         XCTAssertTrue(page.contains("settled: !r.designing && model.sceneState == .ready && !model.designsInFlight),"),
                       "a new blocking issue opens the pop-up at once (settled: the scene open, nothing in flight)")
         // ★ batch B review: a blocker standing when the page opens pops once; the pop-up shows

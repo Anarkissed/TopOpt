@@ -111,7 +111,7 @@ final class FlexibleSettingsPageHostedTests: XCTestCase {
         // face's rows below the list (D1) — or anywhere, unscrolled — can sit below the fold
         m.select(5)
         let content = FlexibleSettingsRound4Tests.height(FlexibleFacePanel(model: m, padTarget: .constant(nil)),
-                                                         proposed: CGSize(width: FlexibleSettingsPanel.width - 2 * DS.Space.ml, height: 5000))
+                                                         proposed: CGSize(width: FlexibleSettingsPanel.contentWidth, height: 5000))   // ★ round 5: the tab beside the rail
         let cap11l = 834 * 0.62
         print(String(format: "FLEX-HOSTED his Face tab %.0f pt tall · the panel's cap at 11\" landscape %.0f pt", content, cap11l))
         XCTAssertGreaterThan(content, cap11l, "control: the rows cannot all show at once — the card must be brought to view")

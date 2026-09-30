@@ -236,25 +236,33 @@ final class FlexibleMainPageLoadsTests: XCTestCase {
 
     /// ★ THE TRASH IS NOT OFFERED FOR A FACE A GROUP HOLDS (it came back at the next open).
     @MainActor
-    func testTheTrashIsRefusedForAFaceAGroupHolds() async throws {
+    /// ★ RE-PINNED (round 5, S6 — his img 3: "For some reason, top A/B are not deletable. All faces
+    /// should be deletable."): round 3's rule refused the trash for a face a main-page group holds
+    /// (the re-sync brought it back). Now every face is deletable and a held one is REMEMBERED as
+    /// deleted, so the re-sync skips it; the main page's group is untouched.
+    func testTheTrashDeletesAFaceAGroupHoldsAndTheReSyncLeavesItDeleted() async throws {
         let r = try FlexibleHisProject.restore()
         defer { r.cleanup() }
         let m = try await FlexibleHisProject.openedModel(r.project, test: self)
-        XCTAssertFalse(m.mainPageLoads.canRemove(FlexibleHisProject.topA))
-        XCTAssertFalse(m.removeFace(FlexibleHisProject.topA), "Top presses top A: refused")
-        XCTAssertNotNil(m.settings.face(FlexibleHisProject.topA))
-        XCTAssertFalse(m.mainPageLoads.canRemove(0), "the bottom anchor holds face 0")
+        XCTAssertFalse(m.mainPageLoads.canRemove(FlexibleHisProject.topA), "premise: Top presses top A")
+        XCTAssertTrue(m.removeFace(FlexibleHisProject.topA), "deleted")
+        XCTAssertNil(m.settings.face(FlexibleHisProject.topA))
+        XCTAssertFalse(m.mainPageLoads.canRemove(0), "premise: the bottom anchor holds face 0")
+        XCTAssertTrue(m.removeFace(0))
         XCTAssertTrue(m.removeFace(FlexibleHisProject.topB), "top B is in no group: removed")
         XCTAssertNil(m.settings.face(FlexibleHisProject.topB))
-        // ★ RED CONTROL: removed anyway, the re-sync brings top A straight back
+        m.adoptMainPageLoads()
+        XCTAssertNil(m.settings.face(FlexibleHisProject.topA), "the re-sync leaves it deleted")
+        XCTAssertNil(m.settings.face(0))
+        // ★ RED CONTROL: without the remembered deletion, the re-sync brings top A straight back
         var s = m.settings
-        s.removeFace(FlexibleHisProject.topA)
+        s.removedRegions = nil
         m.mainPageLoads.adopt(into: &s)
         XCTAssertEqual(s.face(FlexibleHisProject.topA)?.role, "loaded", "control: the group re-adds it")
-        // the panel shows the trash only where the model allows it (source pin)
+        // the panel's trash is on every face (source pin)
         let panel = try String(contentsOf: FlexibleHisProject.repoRoot
             .appendingPathComponent("app/TopOptKit/Sources/TopOptFlows/FlexibleFacePanel.swift"), encoding: .utf8)
-        XCTAssertTrue(panel.contains("if model.mainPageLoads.canRemove(r) {"))
+        XCTAssertFalse(panel.contains("if model.mainPageLoads.canRemove(r) {"))
     }
 
     /// ★ THE NUMBER PAD COMMITS ONCE, WHEN IT CLOSES: typing "12" on an inherited face wrote 1 kg
@@ -290,7 +298,13 @@ final class FlexibleMainPageLoadsTests: XCTestCase {
         let panel = try String(contentsOf: FlexibleHisProject.repoRoot
             .appendingPathComponent("app/TopOptKit/Sources/TopOptFlows/FlexibleFacePanel.swift"), encoding: .utf8)
         XCTAssertEqual(panel.components(separatedBy: ".numberPad(").count - 1, 1, "only FlexPadCommit opens the pad")
-        XCTAssertEqual(panel.components(separatedBy: ".modifier(FlexPadCommit(").count - 1, 2, "the ask pad and the pencil pills")
+        // ★ RE-PINNED (round 5, S3): the pencil pills are gone — the ask pad is the panel's one
+        // FlexPadCommit; every number is a FlexNumberBox, which commits ONCE as its keypad closes too
+        XCTAssertEqual(panel.components(separatedBy: ".modifier(FlexPadCommit(").count - 1, 1, "the ask pad")
+        let box = try String(contentsOf: FlexibleHisProject.repoRoot
+            .appendingPathComponent("app/TopOptKit/Sources/TopOptFlows/FlexibleNumberBox.swift"), encoding: .utf8)
+        XCTAssertEqual(box.components(separatedBy: ".numberPad(").count - 1, 1)
+        XCTAssertTrue(box.contains("if !open, let v = buffer.closed(spec)"), "the box commits once, as its keypad closes")
     }
 
     /// ★ loads.build_dir = −gravity reaches core's scene. RED CONTROL: without it, core's +Z.

@@ -135,7 +135,8 @@ final class FlexibleRowCopyTests: XCTestCase {
     /// temperat…" and "Honeyco…" although both lines passed the 44-character rule.
     @MainActor
     func testEveryRowFitsThePanelInPoints() {
-        let content: CGFloat = 400 - 2 * DS.Space.ml          // FlexibleStagePage.panel
+        let content: CGFloat = FlexibleSettingsPanel.contentWidth   // ★ RE-PINNED (round 5, S8): the tab beside the rail
+        XCTAssertEqual(content, 400 - 2 * DS.Space.ml, "round 4's row width, kept beside the rail")
         let chips: [(String, [(id: String, label: String)])] = [
             (FlexibleRowCopy.feel, FlexibleRowCopy.feelOptions),
             ("Top A", FlexibleRowCopy.roleOptions),
