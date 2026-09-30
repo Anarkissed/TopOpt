@@ -125,9 +125,9 @@ final class FlexibleShownValuesTests: XCTestCase {
     }
 
     /// ★ "EVERYTHING IS THE SAME GREEN" (verification of round 3): the curves, their points,
-    /// the depth chip and prism and the selected face are drawn in the neutral on-part colour,
-    /// so the dent's green ramp reads against them. RED CONTROL: the old accent green sits
-    /// inside the ramp's own hue family.
+    /// the depth chip and prism, the selected face and the X-ray ghost are drawn in the neutral
+    /// on-part colour, so the dent's ramp (blue → cyan → white since 2026-09-30) reads against
+    /// them. RED CONTROL: the ghost's old cyan sits inside the ramp's own hue family.
     @MainActor
     func testWhatIsDrawnOnThePartIsNotTheMapsGreen() throws {
         let ramp = FlexibleColours.depthStops.map(Self.hueSat).filter { $0.s > 0.15 }
@@ -139,8 +139,11 @@ final class FlexibleShownValuesTests: XCTestCase {
             XCTAssertFalse(inRamp(c), "\(name) is not the map's green")
             XCTAssertFalse(Self.isPurple(c), "\(name) is never purple")
         }
-        // ★ RED CONTROL: the accent every one of them used is IN the ramp's family
-        XCTAssertTrue(inRamp(FlexibleStageStyle.accentToken), "control: the old accent is the map's green")
+        // the X-ray ghost is not the map's hue either (it was cyan until the ramp went blue)
+        let g = FlexibleColours.ghost
+        XCTAssertFalse(inRamp(RGBA(Double(g.x) * 255, Double(g.y) * 255, Double(g.z) * 255)), "the ghost is not the map's hue")
+        // ★ RED CONTROL: the ghost's old cyan IS in the ramp's family
+        XCTAssertTrue(inRamp(DS.Color.accentCyan), "control: the old cyan ghost is the map's hue")
         // the call sites use it
         let root = FlexibleHisProject.repoRoot.appendingPathComponent("app/TopOptKit/Sources/TopOptFlows")
         func src(_ f: String) throws -> String { try String(contentsOf: root.appendingPathComponent(f), encoding: .utf8) }

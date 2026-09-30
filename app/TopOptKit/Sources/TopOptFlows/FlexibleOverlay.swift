@@ -328,14 +328,15 @@ public enum FlexibleColours {
         let c = depthColour(fraction: max > 0 ? mm / max : 0)
         return SIMD4(Float(c.r), Float(c.g), Float(c.b), 0.95)
     }
-    /// ★ ROUND 3 (his answer): THE DENT'S OWN RAMP, from DS tokens — the Flexible green from
-    /// dim (no squish) to pale (the deepest), ONE hue, so it can never be read as the Stress
+    /// ★ ROUND 3 (his answers): THE DENT'S OWN RAMP, from DS tokens — "make it deep blue →
+    /// cyan → white" (2026-09-30): accentDeep (no squish) → accentCyan → textPrimary (the
+    /// deepest). One hue family, brighter = deeper, so it can never be read as the Stress
     /// rainbow the main page shows beside it (ResultsModel.stressColor keeps that one) — and
     /// never purple. FlexibleShownValuesTests pins both. The map AND its legend read it.
     public static let depthStops: [RGBA] = [
-        mix(DS.Color.background, DS.Color.accentGreen, 0.35),
-        DS.Color.accentGreen,
-        mix(DS.Color.accentGreen, DS.Color.textPrimary, 0.75),
+        DS.Color.accentDeep,
+        DS.Color.accentCyan,
+        DS.Color.textPrimary,
     ]
     public static func depthColour(fraction f: Double) -> RGBA {
         let x = min(1, max(0, f.isFinite ? f : 0)) * Double(depthStops.count - 1)
@@ -359,5 +360,7 @@ public enum FlexibleColours {
     public static let conflict = token(DS.Color.warning, 0.6)
     public static let restingFace = token(DS.Color.accentCyan, 0.25)
     /// The X-ray ghost's glow (the body's clay under X-ray).
-    public static let ghost = token(DS.Color.accentCyan, 1)
+    /// ★ Neutral white, not cyan: the dent ramp runs blue → cyan → white (2026-09-30), and a
+    /// cyan ghost would read as part of the map.
+    public static let ghost = token(DS.Color.textPrimary, 1)
 }
