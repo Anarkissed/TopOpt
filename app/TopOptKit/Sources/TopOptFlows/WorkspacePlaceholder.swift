@@ -3479,7 +3479,7 @@ public struct WorkspacePlaceholder: View {
     /// have no shape to lattice (the stage's job leaves them out too), so each of the three
     /// surfaces can say so (ruling V1, 2026-09-29) — the note this used to post was drawn on
     /// the page the run then closed, so nobody ever saw it.
-    private func relatticeJobJSON() -> (json: Data, facesWithoutShape: Int, regionsWithoutShape: [String])? {
+    private func relatticeJobJSON() -> (json: Data, spec: LatticeSpec, facesWithoutShape: Int, regionsWithoutShape: [String])? {
         guard let ctx = latticeVariantContext, let art = ctx.artifacts else { return nil }
         // The regions as the stage sends them (bar Z11; ruling a, 2026-09-30): each face wall
         // as its full prism on the original part, face_id included as provenance, so core's
@@ -3490,32 +3490,19 @@ public struct WorkspacePlaceholder: View {
         // run); each says why in the stage's words (`project.variantLatticeJobRefusal()`).
         guard LatticeJobIncludeGate.refusal(latticeEnabled: project.lattice.enabled,
                                             regions: emission.regions) == nil else { return nil }
-        // The SAME spec builder the optimize request uses, with the SAME regions.
-        // The STRUT width, matching AppModel.makeRunRequest (task
-        // 2026-08-06-strut-line-width-field): a re-lattice must use the same
-        // printability reference the optimize run did, or the two jobs derive
-        // different cells from the same project.
-        var spec = project.lattice.runSpec(
-            topology: project.lattice.topologyID,
-            memberMM: project.lattice.regionMemberMM ?? 0,
-            lineWidthMM: project.printParams.strutLineWidthMM,
-            regions: emission.regions,
-            // ★ THE OBJECTIVE SHAPES "AUTO" (maintainer, 2026-08-19): minimise
-            // plastic ⇒ the coarsest, sparsest cell the sim will certify; off ⇒
-            // (Minimize plastic no longer steers the lattice — 2026-09-12.)
-            // ★ growth's precondition (§2A): organic_growth is written only with a layer height
-            layerHeightMM: project.printParams.layerHeightMM)
+        // ★★ THE STAGE'S OWN SPEC (ruling b, 2026-09-30): the SAME builder the optimize request
+        // uses (`ProjectModel.latticeRunSpec`) — Auto resolved from these walls and the strut
+        // bead exactly as the stage resolves it, the strut width, the preview's placed cells.
         // THE VARIANT'S OWN IDENTITY AND ITS OWN NUMBER (task
         // 2026-08-04-variant-volume-fraction-mismatch). This passed
         // `ctx.requestedVolumeFraction` — the LADDER RUNG — into a job key core
         // validates as a fraction in (0, 1]. On the maintainer's growth run the
         // rung is 1.1 and every attempt died at schema validation. Both values
         // now come from the variant itself.
-        // ★ The preview's placed cells ride with a Stepped run (2026-09-18).
-        spec?.steppedCells = project.latticePreviewSteppedCells
-        guard let json = try? RelatticeJobBuilder.build(
-            original: art.jobJSON, variant: ctx, lattice: spec) else { return nil }
-        return (json, emission.skippedFaces, emission.skippedRegionNames)
+        guard let spec = project.latticeRunSpec(emission: emission),
+              let json = try? RelatticeJobBuilder.build(
+                original: art.jobJSON, variant: ctx, lattice: spec) else { return nil }
+        return (json, spec, emission.skippedFaces, emission.skippedRegionNames)
     }
 
     /// ★ THE VARIANT JOB'S FACTS FOR THE PAGE, from ONE emission (read once per page pass):
@@ -3655,17 +3642,10 @@ public struct WorkspacePlaceholder: View {
         // the path the Lattice page actually drives, showed no lattice record at
         // all. It now carries the receipt onto the outcome, which is what puts the
         // per-region breakdown on the results screen.
-        // The STRUT width, matching the job this receipt describes.
-        let echo = project.lattice.runSpec(
-            topology: project.lattice.topologyID,
-            memberMM: project.lattice.regionMemberMM ?? 0,
-            lineWidthMM: project.printParams.strutLineWidthMM,
-            regions: project.variantLatticeJobRegions().regions,
-            // ★ THE OBJECTIVE SHAPES "AUTO" (maintainer, 2026-08-19): minimise
-            // plastic ⇒ the coarsest, sparsest cell the sim will certify; off ⇒
-            // (Minimize plastic no longer steers the lattice — 2026-09-12.)
-            // ★ growth's precondition (§2A): organic_growth is written only with a layer height
-            layerHeightMM: project.printParams.layerHeightMM)
+        // ★ The receipt's echo IS the submitted job's spec (ruling b, 2026-09-30): one build, so
+        // the per-region rows the job asked for (`report_region_cells`, set by Auto's posture)
+        // are the rows kept — a second, unresolved build here would have dropped them.
+        let echo = job.spec
         run.runner = { _, _, _ in
             let result = try RelatticeRun.run(inputs)
             // ★ THE ORGANIC PREVIEW'S SOURCE (2026-09-02): the run's emitted spans and
@@ -3684,7 +3664,7 @@ public struct WorkspacePlaceholder: View {
                 // lifetime, so a new run is a new bake, never a per-frame one.
                 self.buildStrutScene()
             }
-            guard let spec = echo else { return result.outcome }
+            let spec = echo
             return result.outcome.withLatticeReport(LatticeReport(
                 topologyID: spec.topologyID, cellMM: spec.cellMM,
                 generateRelativeDensity: spec.generateRelativeDensity,

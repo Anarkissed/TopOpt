@@ -2285,6 +2285,43 @@ public final class ProjectModel: ObservableObject {
         latticeJobRegions()
     }
 
+    /// ★★ THE ONE LATTICE SPEC (maintainer, 2026-09-30, ruling b): what the stage's Optimize /
+    /// Lattice request carries (`AppModel.makeRunRequest`) and what a variant's re-lattice
+    /// carries (`relatticeJobJSON` — its run, forecast and Check sizes — and the run's receipt
+    /// echo). Moved VERBATIM from `AppModel.makeRunRequest` (aecef72c), so the stage's spec —
+    /// and its job bytes — are unchanged; the variant now gets Auto resolved as the stage does.
+    ///
+    /// ★ AUTO, RESOLVED (task 2026-08-12 §4). "Auto" is not a job field: it becomes core's
+    /// per-region `fit` when regions are declared and `swept` otherwise, and it never emits a
+    /// combination core refuses. Auto's swept window is DERIVED, so the posture needs the two
+    /// things it is derived from: what each declared region has to fit into (its DECLARED
+    /// depth — never the preview's measured width, or the stage's bytes would move), and the
+    /// bead. `emission` is the caller's own, so a count the caller states describes these
+    /// regions. No policy here: a variant's zero-include refusal (ruling c) is its caller's.
+    public func latticeRunSpec(emission: LatticeRegionEmission.Result) -> LatticeSpec? {
+        let includes = emission.regions.filter { $0.role == .include }
+        let resolvedLattice = LatticeAutoPosture.applied(
+            to: lattice,
+            includeRegionCount: includes.count,
+            regionWidthsMM: includes.map { $0.depthMM },
+            lineWidthMM: printParams.strutLineWidthMM)
+        var spec = resolvedLattice.runSpec(
+            topology: lattice.topologyID,
+            memberMM: lattice.regionMemberMM ?? 0,
+            lineWidthMM: printParams.strutLineWidthMM,
+            // Round-2 (M3): the include/exclude regions — role groups' primitives + faces and
+            // the legacy include primitives — ride `lattice.regions`.
+            regions: emission.regions,
+            // ★ THE OBJECTIVE SHAPES "AUTO" (maintainer, 2026-08-19); see
+            // `LatticeSettings.resolvedCellPlan`.
+            minimizePlastic: minimizePlastic,
+            // ★ growth's precondition (§2A): organic_growth is written only with a layer height
+            layerHeightMM: printParams.layerHeightMM)
+        // ★ The preview's placed cells ride with a Stepped run (2026-09-18).
+        spec?.steppedCells = latticePreviewSteppedCells
+        return spec
+    }
+
     /// ★ RULING (c) (maintainer, 2026-09-30): why a variant's job may not be written, in the
     /// stage's words — nil when it may. Read from the SAME emission the job carries; with no
     /// include wall core would lattice the WHOLE variant.

@@ -621,7 +621,8 @@ enum VariantFacePrismFixture {
     /// The variant's documents as the page builds them: the re-lattice run and its forecast
     /// (`RelatticeJobBuilder`), plus the Check-sizes probe on an organic lattice.
     static func variantDocuments(_ p: ProjectModel, retained given: Data? = nil) throws -> [(String, Data)] {
-        guard let spec = p.lattice.runSpec(lineWidthMM: 0.45, regions: p.variantLatticeJobRegions().regions) else {
+        // ★ ruling (b): the page's own builder — the stage's spec, Auto resolved
+        guard let spec = p.latticeRunSpec(emission: p.variantLatticeJobRegions()) else {
             throw NSError(domain: "fixture", code: 1, userInfo: [NSLocalizedDescriptionKey: "no run spec"])
         }
         let retained = try given ?? Self.original(protecting: p)

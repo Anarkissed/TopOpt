@@ -116,7 +116,8 @@ final class LatticeVariantFaceWallsTests: XCTestCase {
             .facesWithoutShape, "★ a V1 answer's count meant every face wall — not read as this one")
         // every surface draws it, from the job's own count
         let ws = try src("WorkspacePlaceholder.swift")
-        XCTAssertTrue(ws.contains("return (json, emission.skippedFaces, emission.skippedRegionNames)"), "the job's own count")
+        XCTAssertTrue(ws.contains("return (json, spec, emission.skippedFaces, emission.skippedRegionNames)"),
+                      "the job's own count, with the job's own spec")
         XCTAssertTrue(ws.contains("probe.facesWithoutShape = job.facesWithoutShape"), "Check sizes stamps its answer")
         XCTAssertTrue(ws.contains("probe.regionsWithoutShape = job.regionsWithoutShape.isEmpty ? nil : job.regionsWithoutShape"))
         XCTAssertTrue(ws.contains("variantFacesWithoutShape: withoutShape,\n                variantRegionsWithoutShape: regionsWithoutShape))"),

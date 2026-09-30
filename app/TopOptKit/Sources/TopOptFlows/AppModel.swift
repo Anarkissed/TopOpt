@@ -282,38 +282,14 @@ public final class AppModel: ObservableObject {
         // `wallLineWidthOuterMM` — a wall-loop bead standing in for a lone unsupported
         // extrusion, and the NARROWER of the two beads at that. Still the user's own
         // setting, never a hardcoded number; see PrintParams.strutLineWidthMM.
-        // THIS IS THE SITE THAT REACHES THE JOB AND THE BRIDGE; the other five are
-        // display, and all six must agree or the page describes a different run.
-        // ★ AUTO, RESOLVED (task 2026-08-12 §4). "Auto" is not a job field: it
-        // becomes core's per-region `fit` when regions are declared and `swept`
-        // otherwise, and it never emits a combination core refuses. Resolved from
-        // the EMITTED regions, not the role map, so a role whose face has no
-        // usable B-rep geometry cannot select a mode with nothing to fit into.
-        let emitted = project.latticeJobRegions()
-        let includeCount = emitted.regions.filter { $0.role == .include }.count
-        // ★ Auto's swept window is DERIVED, so the posture needs the two things it is
-        // derived from: what each declared region has to fit into, and the bead.
-        let resolvedLattice = LatticeAutoPosture.applied(
-            to: project.lattice,
-            includeRegionCount: includeCount,
-            regionWidthsMM: emitted.regions.filter { $0.role == .include }
-                .map { $0.depthMM },
-            lineWidthMM: project.printParams.strutLineWidthMM)
-        var latticeSpec = resolvedLattice.runSpec(
-            topology: project.lattice.topologyID,
-            memberMM: project.lattice.regionMemberMM ?? 0,
-            lineWidthMM: project.printParams.strutLineWidthMM,
-            // Round-2 (M3): the include/exclude regions — role groups' primitives +
-            // faces and the legacy include primitives — ride `lattice.regions`.
-            regions: emitted.regions,
-            // ★ THE OBJECTIVE SHAPES "AUTO" (maintainer, 2026-08-19): minimise
-            // plastic ⇒ the coarsest, sparsest cell the sim will certify; off ⇒
-            // the finest printable cell. See `LatticeSettings.resolvedCellPlan`.
-            minimizePlastic: project.minimizePlastic,
-            // ★ growth's precondition (§2A): organic_growth is written only with a layer height
-            layerHeightMM: project.printParams.layerHeightMM)
-        // ★ The preview's placed cells ride with a Stepped run (2026-09-18).
-        latticeSpec?.steppedCells = project.latticePreviewSteppedCells
+        // `ProjectModel.latticeRunSpec` is now THE SITE THAT REACHES THE JOB AND THE BRIDGE
+        // (for the stage and a variant's re-lattice alike); the others are display, and all
+        // must agree or the page describes a different run.
+        // ★ AUTO, RESOLVED (task 2026-08-12 §4) — in ONE place, `ProjectModel.latticeRunSpec`,
+        // which a variant's re-lattice job builds from too (ruling b, 2026-09-30). Resolved
+        // from the EMITTED regions, not the role map, so a role whose face has no usable
+        // B-rep geometry cannot select a mode with nothing to fit into.
+        let latticeSpec = project.latticeRunSpec(emission: project.latticeJobRegions())
         return RunRequest(modelPath: file.path, material: project.material,
                           materialsPath: materialsPath, rulesPath: rulesPath,
                           resolution: project.quality.resolution,

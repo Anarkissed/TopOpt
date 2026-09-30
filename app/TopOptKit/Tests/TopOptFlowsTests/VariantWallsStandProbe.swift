@@ -11,9 +11,11 @@ import TopOptKit
 /// region census (walls carried, face ids, outlines, frames, flags) and asks core's parser.
 /// Running them on the design file is left to `topopt-cli lattice-variant`, outside the test.
 ///
-/// It uses only APIs present both before the route (aecef72c) and after it, so one file
-/// measures both arms. Two settings: his project as saved, and with the one stated
-/// substitution algorithm = organic (the flags act only on organic).
+/// From ruling (b) on it builds the spec with the page's own builder
+/// (`ProjectModel.latticeRunSpec`), which does not exist at aecef72c: the route's before arms
+/// (VARIANT_ARM=before/before2, at aecef72c) were measured with the commit-1 copy of this file,
+/// which rebuilt the pre-(b) recipe inline. Two settings: his project as saved, and with the
+/// one stated substitution algorithm = organic (the flags act only on organic).
 ///
 /// Env: HIS_PROJECT_DIR (a copy of his project folder), VARIANT_ORIGINAL (the optimize
 /// document), VARIANT_FINGERPRINT / VARIANT_FRACTION (the design file's variant),
@@ -99,20 +101,13 @@ final class VariantWallsStandProbe: XCTestCase {
             }
             ms.sort()
             print(String(format: "%@ variant emission time (debug) min %.2f median %.2f max %.2f ms", tag, ms[0], ms[3], ms[6]))
-            // (read by reflection: the names exist only after ruling g, and this file must build
-            // at both commits)
-            let names = Mirror(reflecting: variant).children.first { $0.label == "skippedRegionNames" }?.value
+            let names: [String]? = variant.skippedRegionNames
             print("\(tag) variant emission: \(variant.regions.count) region(s), "
                   + "\(variant.regions.filter { $0.kind == .face }.count) face prism(s), "
                   + "include \(variant.regions.filter { $0.role == .include }.count), "
                   + "skippedFaces \(variant.skippedFaces), skippedRegionNames \(names.map { "\($0)" } ?? "n/a")")
-            var spec = pm.lattice.runSpec(
-                topology: pm.lattice.topologyID,
-                memberMM: pm.lattice.regionMemberMM ?? 0,
-                lineWidthMM: pm.printParams.strutLineWidthMM,
-                regions: variant.regions,
-                layerHeightMM: pm.printParams.layerHeightMM)
-            spec?.steppedCells = pm.latticePreviewSteppedCells
+            // ★ ruling (b): the page's own builder (`relatticeJobJSON` calls it)
+            let spec = pm.latticeRunSpec(emission: variant)
             let run = try RelatticeJobBuilder.build(original: original, designFingerprint: fp, achievedVolumeFraction: vf,
                                                     designFileName: "design.bin", lattice: spec)
             let forecast = try RelatticeJobBuilder.build(original: original, designFingerprint: fp, achievedVolumeFraction: vf,
