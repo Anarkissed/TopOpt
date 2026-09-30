@@ -102,7 +102,25 @@ public final class FlexibleSquishLoop: ObservableObject {
 
     /// A fresh lattice: it plays — unless reduced motion, which holds the full squish.
     public func autoPlay(reduceMotion: Bool) {
+        if reading { resumeAfterReading = !reduceMotion; hold(1); return }   // it plays when the reading ends
         if reduceMotion { hold(1) } else { play() }
+    }
+
+    /// ★ BATCH C VERIFICATION: a legend is READING (drilled in). A reading is pinned where the
+    /// map is drawn at the moment of the tap; a playing loop then moved the map out from under
+    /// the arrow half the time. While a legend reads, a playing loop holds still at the full
+    /// squish; when it stops reading, the loop plays again. A loop he had paused stays put.
+    public private(set) var reading = false
+    private var resumeAfterReading = false
+    public func holdWhileReading(_ on: Bool) {
+        guard on != reading else { return }
+        reading = on
+        if on {
+            if playing { resumeAfterReading = true; hold(1) }
+        } else if resumeAfterReading {
+            resumeAfterReading = false
+            play()
+        }
     }
 
     // MARK: the renderer's side (MeshRenderer+FlexibleLattice)

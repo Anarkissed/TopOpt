@@ -49,7 +49,7 @@ final class FlexibleSurfaceNavTests: XCTestCase {
         let ws = try FlexibleSource.code("WorkspacePlaceholder.swift")
         let open = try XCTUnwrap(ws.range(of: "private func openLatticeSettingsIfUnconfigured() {"))
         XCTAssertTrue(ws[open.upperBound...].prefix(900).contains("guard !latticeSettingsSavedThisSession, !showLatticeWizard else { return }"))
-        XCTAssertTrue(ws.contains("onExit: { showFlexiblePage = false; latticeSettingsSavedThisSession = true; flexibleMain.didExitSettings() })"))
+        XCTAssertTrue(ws.contains("onExit: { showFlexiblePage = false; latticeSettingsSavedThisSession = true; flexibleMain.didExitSettings(solver: FlexibleStressSolver(app: model, sim: latticeSim)) })"))
         // the way back is #354's one door (goToStage) — the Surface snapshot / discard rule holds
         XCTAssertTrue(ws.contains("guard enabled else { return }\n            goToStage(dest)"))
     }

@@ -194,7 +194,13 @@ final class FlexibleMainViewsTests: XCTestCase {
         XCTAssertEqual(read.rho, rho, accuracy: 1e-6)
         let L = Swift.min(Swift.max(3.0915 * Double(inputs.wallMM) / Swift.min(Swift.max(rho, 0.05), 0.9),
                                     Double(inputs.lMinMM)), Double(inputs.lMaxMM))
-        XCTAssertEqual(read.cellMM, L, accuracy: 1e-4, "the gyroid's cell at that ρ")
+        // ★ RE-PINNED (batch C verification): the cell DRAWN there — the ladder's rung (or the
+        // blend of two), not the continuous law it is aimed at
+        let r = FlexibleLatticeField.rungs(L: Float(L), lMin: inputs.lMinMM)
+        let drawnCell = r.w <= 0 ? Double(r.La) : (r.w >= 1 ? Double(r.Lb)
+            : Double(2 * Float.pi / ((1 - r.w) * 2 * Float.pi / r.La + r.w * 2 * Float.pi / r.Lb)))
+        XCTAssertEqual(read.cellMM, drawnCell, accuracy: 1e-4, "the gyroid's drawn cell at that ρ")
+        XCTAssertEqual(read.cellBlended, r.w > 0 && r.w < 1)
         var honey = inputs; honey.topology = .honeycomb
         XCTAssertEqual(FlexibleProbe.cellMM(rho: rho, honey), Double(honey.honeycombCellMM), accuracy: 1e-6, "honeycomb: one cell")
         // the legend's span is the pass's own (the masked ρ, min…max)
@@ -246,7 +252,8 @@ final class FlexibleMainViewsTests: XCTestCase {
                                                              stress: (field, peak), ghost: nil))
         let firstMap = try XCTUnwrap(overlay.flatStart.values.min())
         XCTAssertLessThan(simd_distance(rgb(noHeat, firstMap), stressRGB(firstMap)), 1e-5, "Stress takes the map when Heat is off")
-        XCTAssertEqual(noHeat[firstMap * 8 + 5], 0, "…and it is not held opaque")
+        // ★ RE-PINNED (batch C verification): held opaque like the heat it replaces, so it reads in X-ray
+        XCTAssertEqual(noHeat[firstMap * 8 + 5], 1, "…held opaque, like the heat it replaces")
         // no stress: a main-page role colour fills a part triangle Flexible leaves clay (on his pad
         // every face is pressed or resting, so triangle 0 is made clay here), and never one it tints
         var clay = plain
@@ -281,31 +288,31 @@ final class FlexibleMainViewsTests: XCTestCase {
     // MARK: stress under Flexible
 
     @MainActor
-    func testStressUnderFlexibleSolvesOnce() throws {
+    func testStressUnderFlexibleSolvesOnce() async throws {
         XCTAssertTrue(FlexibleStressTrigger.shouldRun(hasField: false, stale: false, running: false))
         XCTAssertTrue(FlexibleStressTrigger.shouldRun(hasField: true, stale: true, running: false))
         XCTAssertFalse(FlexibleStressTrigger.shouldRun(hasField: true, stale: false, running: false))
         XCTAssertFalse(FlexibleStressTrigger.shouldRun(hasField: false, stale: false, running: true), "never twice")
+        // ★ RE-WRITTEN (batch C verification): the REAL solver over a stub sim — the hand-over is
+        // driven, not assigned (the old test set `stressSolver` itself and could not see that it
+        // only arrived from the toggles' body)
+        let gate = FlexibleBatchCVerifyTests.Gate()
+        let sim = LatticeSimModel(runner: FlexibleBatchCVerifyTests.stubRunner(gate))
+        let solver = FlexibleStressSolver(sim: sim, context: { FlexibleBatchCVerifyTests.context() })
         let stage = FlexibleMainStage()
-        var runs = 0
-        // the workspace's solver, as H5' writes it (FlexibleBatchCHookTests pins that line)
-        stage.stressSolver = {
-            if FlexibleStressTrigger.shouldRun(hasField: stage.stressReady, stale: false, running: stage.stressRunning) {
-                runs += 1; stage.stressRunning = true
-            }
-        }
+        stage.attach(solver)
         stage.toggleStress()
         XCTAssertTrue(stage.stress)
-        XCTAssertEqual(runs, 1, "Stress on with no field: the solve runs")
-        XCTAssertFalse(stage.xray, "the part turns solid so the colours read")
+        XCTAssertEqual(sim.phase, .running, "Stress on with no field: the solve runs")
+        XCTAssertTrue(stage.xray, "X-ray is left alone (it used to turn off, and the walls with it)")
         stage.toggleStress(); stage.toggleStress()
-        XCTAssertEqual(runs, 1, "…once: it is running")
-        stage.stressRunning = false; stage.stressReady = true
+        try await FlexibleBatchCVerifyTests.settle { sim.phase != .running }
+        XCTAssertEqual(gate.runs, 1, "…once: it was running")
         stage.toggleStress(); stage.toggleStress()
-        XCTAssertEqual(runs, 1, "a field in hand is not solved again")
-        stage.stressReady = false
-        stage.didExitSettings()
-        XCTAssertEqual(runs, 2, "Save & Exit starts it when there is none")
+        XCTAssertNotEqual(sim.phase, .running, "a field in hand is not solved again")
+        try await FlexibleBatchCVerifyTests.settle { true }
+        XCTAssertEqual(gate.runs, 1)
+        XCTAssertEqual(stage.stressState, .ready)
         // ★ RED CONTROL: the octet's gate (startStressSolveIfNeeded) never opens for a fresh Flexible part
         var s = LatticeSettings(); s.flexible = FlexibleStageSettings(materialID: "varioshore_tpu")
         XCTAssertFalse(FlexibleStressTrigger.octetGate(s), "control: routed through the octet gate it never runs")
@@ -339,7 +346,7 @@ final class FlexibleMainViewsTests: XCTestCase {
         for (name, v) in Self.viewports {
             for chip: CGFloat in [0, 221] {
                 let chrome = mainChrome(v, chip: chip)
-                let keep = FlexibleMainLegendLayout.keepOut(viewport: v, bottomClearance: clearance, chipColumnWidth: chip, simulating: true)
+                let keep = FlexibleMainLegendLayout.keepOut(viewport: v, bottomClearance: clearance, chipColumnWidth: chip)
                 for kinds in sets {
                     let placed = FlexibleMainLegendLayout.place(kinds, minimized: [], viewport: v, keepOut: keep)
                     XCTAssertEqual(Set(placed.keys), Set(kinds), "every legend has a place at \(name)")
@@ -421,6 +428,14 @@ final class FlexibleMainViewsTests: XCTestCase {
         await m.waitForIdle()
         stage.refresh()
         XCTAssertNotNil(stage.drawn, "premise: the lattice is drawn, the map is its depths")
+        // ★ BATCH C VERIFICATION: a lattice core designed (varioShore) — "Squish · mm"; the lattice
+        // legend's ends are scanned ONCE per generation, never per body pass (every orbit frame)
+        XCTAssertEqual(stage.legendTitle(.dent), "Squish · mm")
+        let scans = stage.latticeSpanScans
+        let e1 = try XCTUnwrap(stage.latticeEnds()), e2 = try XCTUnwrap(stage.latticeEnds())
+        print("FLEX-LEGEND lattice ends '\(e1.lo)' … '\(e1.hi)' · scans for two reads: \(stage.latticeSpanScans - scans)")
+        XCTAssertEqual(stage.latticeSpanScans - scans, 1, "one scan per lattice generation")
+        XCTAssertEqual(e1.lo, e2.lo); XCTAssertEqual(e1.hi, e2.hi)
         let overlay = try XCTUnwrap(stage.overlay)
         let dents = try XCTUnwrap(stage.channels?.dents)
         let a = FlexFaceKey(region: FlexibleHisProject.topA, rotation: 0)
@@ -456,8 +471,8 @@ final class FlexibleMainViewsTests: XCTestCase {
         let restCol = FlexibleProbe.dentHit(origin: cam.eye, dir: dir, overlay: overlay, columns: cols, dents: dents, scale: 0)
         print("FLEX-PROBE stage control: the rest surface under the ray is column \(restCol.map { "\($0.column)" } ?? "none")")
         XCTAssertNotEqual(restCol?.column, c, "control: read off the undented surface, the tap lands on another column")
-        // Stress on (X-ray off, as the Stress button leaves it), a field in hand: a tap on a side of
-        // the part that is not pressed reads the stress — and the key follows
+        // Stress on (X-ray off, so a tap on the solid part reads the part), a field in hand: a tap on
+        // a side of the part that is not pressed reads the stress — and the key follows
         let b = try XCTUnwrap(r.project.viewerMesh).bounds
         let field = Self.field(nx: 60, ny: 60, nz: 14, origin: SIMD3<Double>(b.min) - 1, spacing: 2) { i, _, _ in Float(1 + i) }
         stage.stress = true
@@ -479,6 +494,6 @@ final class FlexibleMainViewsTests: XCTestCase {
         let s = try XCTUnwrap(stage.reading)
         print("FLEX-PROBE stage side tap with the dent drilled in: '\(s.text)' (\(s.kind))")
         XCTAssertEqual(s.kind, .stress, "no dent on the ray, Stress on: it reads the stress (and the key follows)")
-        XCTAssertEqual(s.value, String(format: "%.2f", try XCTUnwrap(FlexibleProbe.stress(field, at: sideRest.point))))
+        XCTAssertEqual(s.value, FlexibleProbe.mpa(try XCTUnwrap(FlexibleProbe.stress(field, at: sideRest.point))))
     }
 }

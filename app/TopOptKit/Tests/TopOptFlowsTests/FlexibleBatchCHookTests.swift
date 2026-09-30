@@ -20,7 +20,13 @@ final class FlexibleBatchCHookTests: XCTestCase {
         let ws = try FlexibleSource.text("WorkspacePlaceholder.swift")
         let pins: [(String, String)] = [
             ("H4'", "vertexTints: visible.surfaceEditing ? surfaceVertexTints : flexibleMain.tints(project, on: stage, roles: roleTints, stress: latticeStressField),"),
-            ("H5'", "if flexibleMain.owns(project, stage) { FlexibleMainViewToggles(main: flexibleMain, stressReady: latticeStressField != nil, stressRunning: latticeSimIsRunning, solve: { if let ctx = model.makeLatticeSimContext(), FlexibleStressTrigger.shouldRun(hasField: latticeSim.field != nil, stale: latticeSim.isStale(against: ctx.fingerprint), running: latticeSimIsRunning) { latticeSim.run(ctx) } }) }"),
+            // ★ RE-PINNED (batch C verification): the toggles take the workspace's solver
+            // (FlexibleStressSolve.swift — the regions the load case reaches, the sim's state said)
+            ("H5'", "if flexibleMain.owns(project, stage) { FlexibleMainViewToggles(main: flexibleMain, solver: FlexibleStressSolver(app: model, sim: latticeSim)) }"),
+            // ★ and Settings' Save & Exit hands it over too (the first Exit, before the toggles rendered)
+            ("H2'", "flexibleMain.didExitSettings(solver: FlexibleStressSolver(app: model, sim: latticeSim)) })"),
+            // ★ #354's "grading your lattice" banner stands down under Flexible (it grades nothing there)
+            ("B1", "if latticeSimIsRunning, !simBannerDismissed, !flexibleMain.owns(project, stage) { simRunningBanner }"),
             ("H6", "if flexibleMain.owns(project, stage) { FlexibleMainLegends(main: flexibleMain, mode: $latticeLegendMode, projection: projection, settle: settleQuat, bottomClearance: bottomBarClearance, chipColumnWidth: force.gravityIsSet ? (settingsChipWidths.values.max() ?? 0) : 0) }"),
             ("H7", "if flexibleMain.read(project, mode: latticeLegendMode, face: fid, point: pt) { return true }"),
             ("H8", "onLatticeProbe: latticeLegendMode.drilledIn && flexibleMain.wantsWallProbe(latticeLegendMode)"),
@@ -62,8 +68,14 @@ final class FlexibleBatchCHookTests: XCTestCase {
         XCTAssertTrue(first.contains("guard project.lattice.enabled, project.lattice.needsStressSolve else {"))
         let h5 = try XCTUnwrap(ws.range(of: "FlexibleMainViewToggles(main: flexibleMain,"))
         let line = String(ws[h5.lowerBound...].prefix(while: { $0 != "\n" }))
-        XCTAssertTrue(line.contains("latticeSim.run(ctx)"))
+        XCTAssertTrue(line.contains("FlexibleStressSolver(app: model, sim: latticeSim)"))
         XCTAssertFalse(line.contains("startStressSolveIfNeeded"), "not through the octet's gate")
+        let solver = try FlexibleSource.code("FlexibleStressSolve.swift")
+        XCTAssertTrue(solver.contains("sim.run(ctx)"), "the solver runs the workspace's own sim")
+        XCTAssertFalse(solver.contains("startStressSolveIfNeeded()"), "…never through the octet's gate")
+        // the banner keeps its pinned parts; the Flexible gate is ONE extra clause on its line
+        XCTAssertTrue(ws.contains("if latticeSimIsRunning, !simBannerDismissed, !flexibleMain.owns(project, stage) { simRunningBanner }"))
+        XCTAssertTrue(ws.contains("!(latticeSimIsRunning && !simBannerDismissed) { strutBakingBanner }"), "#354's rebake banner rule is untouched")
     }
 
     // MARK: the Settings page's legend reads too
@@ -77,10 +89,25 @@ final class FlexibleBatchCHookTests: XCTestCase {
         XCTAssertLessThan(drilled.lowerBound, select.lowerBound, "while drilled in, a tap reads — it never reaches tapFace")
         XCTAssertTrue(page.contains("onLatticeProbeExit: legendDrilled ?"), "a double tap anywhere comes back out")
         XCTAssertTrue(page.contains("FlexibleProbe.dentReading(model: model,"), "the page reads through the one dent probe")
+        // ★ RE-PINNED (batch C verification): the legend's BODY lets every touch through — the
+        // curve points and the curve line under it stay live (his img 9: the Y curve's end point
+        // sat inside the legend box) — and only its tab row takes the tap that drills in and out
         let legend = try XCTUnwrap(page.range(of: "struct FlexibleLegend: View {"))
         let callout = try XCTUnwrap(page.range(of: "struct FlexibleReadingCallout: View {"))
-        XCTAssertFalse(page[legend.upperBound..<callout.lowerBound].contains(".allowsHitTesting(false)"), "the legend takes the tap now")
-        XCTAssertTrue(page.contains(".onTapGesture { legendDrilled.toggle(); reading = nil }"), "a tap on the legend drills in (and out)")
+        XCTAssertTrue(page[legend.upperBound..<callout.lowerBound].contains(".allowsHitTesting(false)"),
+                      "the legend's body passes touches through")
+        XCTAssertEqual(page.components(separatedBy: ".onTapGesture { legendDrilled.toggle(); reading = nil }").count - 1, 1,
+                       "one tap target drills in (and out)")
+        let placed = try XCTUnwrap(page.range(of: "@ViewBuilder private func legend(in size: CGSize) -> some View {"))
+        let legendBody = String(page[placed.upperBound...].prefix(1400))
+        let tab = try XCTUnwrap(legendBody.range(of: ".frame(height: FlexibleLegend.tabHeight)"))
+        let tap = try XCTUnwrap(legendBody.range(of: ".onTapGesture { legendDrilled.toggle(); reading = nil }"))
+        XCTAssertLessThan(tab.lowerBound, tap.lowerBound, "the tap target is the tab row's height")
+        XCTAssertTrue(legendBody.contains(".overlay(alignment: .top) {"), "…laid over the top of the legend")
+        // ★ RED CONTROL: batch C's whole-legend tap target is gone
+        XCTAssertFalse(legendBody.contains(".contentShape(Rectangle())\n            .onTapGesture { legendDrilled.toggle(); reading = nil }"),
+                       "control: the whole legend no longer takes the tap")
+        XCTAssertLessThanOrEqual(FlexibleLegend.tabHeight, 34, "a strip, not the legend")
     }
 
     // MARK: M4 — the probe finds a Flexible wall (GPU)

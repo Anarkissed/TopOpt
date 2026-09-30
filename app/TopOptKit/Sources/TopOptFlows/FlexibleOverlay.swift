@@ -48,6 +48,37 @@ public struct FlexibleOverlayMesh {
     /// (`keptTriangles[v / 3]`). The dent's uvt is interpolated from them; core's to_uv + t
     /// is affine, so the interpolation is exact (FlexibleOverlayClipTests).
     public let keptWeights: [SIMD3<Double>]
+    /// ★ BATCH C VERIFICATION (the Stress view): the part's triangles SUBDIVIDED for colour
+    /// (`build(maxEdgeMM:)`), nil when not. His pad is 12 triangles: Stress, sampled per vertex,
+    /// read its corners only (24 flat vertices, every one 0.000 MPa) — a flat blue while the
+    /// legend claimed 0 … 0.05 MPa, and a tap read another number than the colour under it.
+    /// Each kept triangle is split by longest-edge bisection to `maxEdgeMM`; the DENT of a
+    /// sub-vertex is the linear blend of its kept triangle's corner dents, so the drawn
+    /// geometry is exactly the unsubdivided one (no new seam) — only the colour gets finer.
+    public let subdivision: Subdivision?
+
+    public struct Subdivision {
+        /// Per kept (unsubdivided) triangle: its source triangle, and its three corners'
+        /// barycentric weights in that source (3 per kept triangle).
+        public let source: [Int]
+        public let cornerWeights: [SIMD3<Double>]
+        /// Per drawn part triangle: the kept triangle it was cut from.
+        public let subOf: [Int]
+        /// Per drawn part FLAT vertex: its barycentric weights in that kept triangle.
+        public let bary: [SIMD3<Double>]
+    }
+
+    /// The main page's subdivision edge for `part`: ~1.3 of a 64-voxel solve's voxels along its
+    /// longest side (the Stress field's own pitch), so a colour is never interpolated across
+    /// more than about one voxel.
+    public static func stressEdgeMM(_ part: ViewerMesh) -> Double {
+        let b = part.bounds
+        let e = b.max - b.min
+        return Swift.max(0.5, Double(Swift.max(e.x, Swift.max(e.y, e.z))) / 48)
+    }
+    /// The most sub-triangles one kept triangle is cut into (2^14), and in all.
+    static let maxSubdivisionDepth = 14
+    static let maxSubTriangles = 400_000
 
     /// The part's own mesh (minus the pressed regions) plus one quad per column of every face.
     ///
@@ -56,12 +87,78 @@ public struct FlexibleOverlayMesh {
     /// is dropped; only the pieces inside a pressed region go. So the part's own surface runs
     /// right up to the map along the cut, and never under it.
     public static func build(part: ViewerMesh, faces: [FlexibleOverlayFace],
-                             splitPlanes: [Int: [RegionCut]] = [:]) -> FlexibleOverlayMesh {
+                             splitPlanes: [Int: [RegionCut]] = [:], maxEdgeMM: Double? = nil) -> FlexibleOverlayMesh {
         var pos = part.positions
         var idx: [Int32] = []
         var fid: [Int32] = []
         var kept: [Int] = []
         var keptFace: [Int] = [], keptCentroid: [SIMD3<Double>] = [], weights: [SIMD3<Double>] = []
+        // ★ the subdivision (nil ⇒ none: every kept triangle is drawn as it was)
+        let edge = maxEdgeMM.map { e -> Double in
+            // never more than maxSubTriangles in all: the edge grows with the part's area
+            var area = 0.0
+            for t in 0..<part.triangleCount {
+                let v = (0..<3).map { j -> SIMD3<Double> in
+                    let b = Int(part.indices[3 * t + j]) * 3
+                    return SIMD3(Double(part.positions[b]), Double(part.positions[b + 1]), Double(part.positions[b + 2]))
+                }
+                area += simd_length(simd_cross(v[1] - v[0], v[2] - v[0])) / 2
+            }
+            let each = Swift.max(e, 1e-3)
+            let estimate = area / (0.25 * each * each)
+            return estimate > Double(maxSubTriangles) ? each * (estimate / Double(maxSubTriangles)).squareRoot() : each
+        }
+        var subSource: [Int] = [], subCorners: [SIMD3<Double>] = [], subOf: [Int] = [], subBary: [SIMD3<Double>] = []
+        let unit = [SIMD3<Double>(1, 0, 0), SIMD3(0, 1, 0), SIMD3(0, 0, 1)]
+        /// One kept triangle (source `t`, face `f`, corners `p` with source weights `w`; `at`:
+        /// the vertices already in `pos`, or nil to append them) — drawn whole, or cut to `edge`.
+        func emit(_ t: Int, _ f: Int, _ p: [SIMD3<Double>], _ w: [SIMD3<Double>], at: [Int32]?) {
+            let longest = Swift.max(simd_distance(p[0], p[1]), Swift.max(simd_distance(p[1], p[2]), simd_distance(p[2], p[0])))
+            guard let edge, longest > edge else {
+                kept.append(t); keptFace.append(f); keptCentroid.append((p[0] + p[1] + p[2]) / 3)
+                weights += w
+                if let at { idx += at } else {
+                    let base = Int32(pos.count / 3)
+                    for q in p { pos += [Float(q.x), Float(q.y), Float(q.z)] }
+                    idx += [base, base + 1, base + 2]
+                }
+                fid.append(Int32(f))
+                if edge != nil {
+                    subOf.append(subSource.count); subBary += unit
+                    subSource.append(t); subCorners += w
+                }
+                return
+            }
+            let me = subSource.count
+            subSource.append(t); subCorners += w
+            // longest-edge bisection, in barycentric coordinates of this kept triangle (the
+            // winding is kept: each half is (A, M, C) / (M, B, C) of its longest edge AB)
+            var stack: [([SIMD3<Double>], Int)] = [(unit, 0)]
+            func at3(_ b: SIMD3<Double>) -> SIMD3<Double> { b.x * p[0] + b.y * p[1] + b.z * p[2] }
+            while let top = stack.popLast() {
+                let (b, depth) = top
+                let q = b.map(at3)
+                let l = [simd_distance(q[0], q[1]), simd_distance(q[1], q[2]), simd_distance(q[2], q[0])]
+                let i = l[0] >= l[1] && l[0] >= l[2] ? 0 : (l[1] >= l[2] ? 1 : 2)
+                if l[i] > edge, depth < maxSubdivisionDepth {
+                    // (a, c, o) is the triangle rotated cyclically (same winding) so the split
+                    // edge a–c comes first; both halves keep that winding
+                    let a = b[i], c = b[(i + 1) % 3], o = b[(i + 2) % 3]
+                    let m = (a + c) / 2
+                    stack.append(([m, c, o], depth + 1)); stack.append(([a, m, o], depth + 1))
+                    continue
+                }
+                kept.append(t); keptFace.append(f); keptCentroid.append((q[0] + q[1] + q[2]) / 3)
+                let base = Int32(pos.count / 3)
+                for j in 0..<3 {
+                    pos += [Float(q[j].x), Float(q[j].y), Float(q[j].z)]
+                    weights.append(b[j].x * w[0] + b[j].y * w[1] + b[j].z * w[2])
+                }
+                idx += [base, base + 1, base + 2]
+                fid.append(Int32(f))
+                subOf.append(me); subBary += b
+            }
+        }
         var planes = splitPlanes
         for f in faces where !f.cuts.isEmpty {
             for face in f.faces { for c in f.cuts { FlexibleFacePieces.add(c, to: &planes[face, default: []]) } }
@@ -82,30 +179,38 @@ public struct FlexibleOverlayMesh {
             let facePlanes = planes[f] ?? []
             guard !facePlanes.isEmpty else {
                 // no sector on this face: the triangle as it is
-                kept.append(t); keptFace.append(f); keptCentroid.append((a + b + c) / 3)
-                weights += identity
-                idx += [Int32(i0), Int32(i1), Int32(i2)]
-                fid.append(Int32(f))
+                emit(t, f, [a, b, c], identity, at: [Int32(i0), Int32(i1), Int32(i2)])
                 continue
             }
             for piece in FlexibleFacePieces.pieces(a, b, c, planes: facePlanes) {
                 // replaced by a pressed sector's map: this piece is on its side of every cut
                 if pressed.contains(where: { FaceRegionGeometry.inside(piece.centroid, $0.cuts) }) { continue }
                 if piece.whole {
-                    kept.append(t); keptFace.append(f); keptCentroid.append(piece.centroid)
-                    weights += identity
-                    idx += [Int32(i0), Int32(i1), Int32(i2)]
-                    fid.append(Int32(f))
+                    if edge == nil {
+                        kept.append(t); keptFace.append(f); keptCentroid.append(piece.centroid)
+                        weights += identity
+                        idx += [Int32(i0), Int32(i1), Int32(i2)]
+                        fid.append(Int32(f))
+                    } else {
+                        emit(t, f, [a, b, c], identity, at: [Int32(i0), Int32(i1), Int32(i2)])
+                    }
                     continue
                 }
-                let base = Int32(pos.count / 3)
-                for p in piece.points { pos += [Float(p.x), Float(p.y), Float(p.z)] }
+                if edge == nil {
+                    let base = Int32(pos.count / 3)
+                    for p in piece.points { pos += [Float(p.x), Float(p.y), Float(p.z)] }
+                    for (x, y, z) in FlexibleFacePieces.fan(piece.points.count) {
+                        kept.append(t); keptFace.append(f)
+                        keptCentroid.append((piece.points[x] + piece.points[y] + piece.points[z]) / 3)
+                        weights += [piece.weights[x], piece.weights[y], piece.weights[z]]
+                        idx += [base + Int32(x), base + Int32(y), base + Int32(z)]
+                        fid.append(Int32(f))
+                    }
+                    continue
+                }
                 for (x, y, z) in FlexibleFacePieces.fan(piece.points.count) {
-                    kept.append(t); keptFace.append(f)
-                    keptCentroid.append((piece.points[x] + piece.points[y] + piece.points[z]) / 3)
-                    weights += [piece.weights[x], piece.weights[y], piece.weights[z]]
-                    idx += [base + Int32(x), base + Int32(y), base + Int32(z)]
-                    fid.append(Int32(f))
+                    emit(t, f, [piece.points[x], piece.points[y], piece.points[z]],
+                         [piece.weights[x], piece.weights[y], piece.weights[z]], at: nil)
                 }
             }
         }
@@ -133,7 +238,9 @@ public struct FlexibleOverlayMesh {
                               faceGeometry: part.faceGeometry, pseudoFaces: part.pseudoFaces)
         return FlexibleOverlayMesh(mesh: mesh, partFlatVertices: kept.count * 3, keptTriangles: kept,
                                    flatStart: flatStart, keptFace: keptFace, keptCentroid: keptCentroid,
-                                   keptWeights: weights)
+                                   keptWeights: weights,
+                                   subdivision: edge == nil ? nil : Subdivision(source: subSource, cornerWeights: subCorners,
+                                                                                subOf: subOf, bary: subBary))
     }
 
     // MARK: colour
@@ -236,13 +343,10 @@ public struct FlexibleOverlayMesh {
             }
             // the part: the linear ramp from the face (full) to the far end (none)
             guard let uvt = partUVT[k], st.pitchMM > 0 else { continue }
-            for v in 0..<partFlatVertices {
-                // ★ its source triangle's corners in the ORIGINAL part's flat buffer (the uvt
-                // order), weighted by where this vertex sits in it (a clipped piece's corner
-                // lies inside its source; an uncut triangle's weights are the identity)
-                let src = keptTriangles[v / 3] * 3
-                guard 3 * (src + 2) + 2 < uvt.count, v < keptWeights.count else { continue }
-                let wv = keptWeights[v]
+            /// The dent (mm along the load) at the point with barycentric weights `wv` in source
+            /// triangle `src / 3` — nil where this face's stack does not move it.
+            func ramp(src: Int, _ wv: SIMD3<Double>) -> (dd: Double, r: Double)? {
+                guard 3 * (src + 2) + 2 < uvt.count else { return nil }
                 var u = 0.0, w = 0.0, t = 0.0
                 for j in 0..<3 where wv[j] != 0 {
                     u += wv[j] * uvt[3 * (src + j)]; w += wv[j] * uvt[3 * (src + j) + 1]; t += wv[j] * uvt[3 * (src + j) + 2]
@@ -250,13 +354,35 @@ public struct FlexibleOverlayMesh {
                 let iu = Int((u / st.pitchMM).rounded(.down)), iv = Int((w / st.pitchMM).rounded(.down))
                 let iuC = min(max(iu, 0), st.nu - 1), ivC = min(max(iv, 0), st.nv - 1)
                 // a vertex on the face's own edge sits half a pitch outside the last column
-                guard abs(iu - iuC) <= 1, abs(iv - ivC) <= 1, st.nu > 0, st.nv > 0 else { continue }
+                guard abs(iu - iuC) <= 1, abs(iv - ivC) <= 1, st.nu > 0, st.nv > 0 else { return nil }
                 let col = st.cell[ivC * st.nu + iuC]
-                guard col >= 0, col < d.count, let dd = d[col], dd > 0 else { continue }
+                guard col >= 0, col < d.count, let dd = d[col], dd > 0 else { return nil }
                 let c = st.columns[col]
                 let span = c.exitT - c.entryT
-                guard span > 1e-6, t >= c.entryT - 0.5 * st.pitchMM, t <= c.exitT + 0.5 * st.pitchMM else { continue }
-                let r = max(0, min(1, (c.exitT - t) / span))
+                guard span > 1e-6, t >= c.entryT - 0.5 * st.pitchMM, t <= c.exitT + 0.5 * st.pitchMM else { return nil }
+                return (dd, max(0, min(1, (c.exitT - t) / span)))
+            }
+            if let s = subdivision {
+                // ★ each drawn vertex: the linear blend of its KEPT triangle's corner dents — the
+                // geometry is the unsubdivided one's exactly; only the colour is finer
+                var corner = [Double](repeating: 0, count: s.cornerWeights.count)
+                for i in s.source.indices {
+                    for j in 0..<3 { corner[3 * i + j] = ramp(src: s.source[i] * 3, s.cornerWeights[3 * i + j]).map { $0.dd * $0.r } ?? 0 }
+                }
+                for v in 0..<Swift.min(partFlatVertices, s.bary.count) {
+                    let i = s.subOf[v / 3], b = s.bary[v]
+                    let x = b.x * corner[3 * i] + b.y * corner[3 * i + 1] + b.z * corner[3 * i + 2]
+                    guard x != 0 else { continue }
+                    out[v * 3] += Float(l.x * x); out[v * 3 + 1] += Float(l.y * x); out[v * 3 + 2] += Float(l.z * x)
+                }
+                continue
+            }
+            for v in 0..<partFlatVertices {
+                // ★ its source triangle's corners in the ORIGINAL part's flat buffer (the uvt
+                // order), weighted by where this vertex sits in it (a clipped piece's corner
+                // lies inside its source; an uncut triangle's weights are the identity)
+                guard v < keptWeights.count, let x = ramp(src: keptTriangles[v / 3] * 3, keptWeights[v]) else { continue }
+                let dd = x.dd, r = x.r
                 out[v * 3] += Float(l.x * dd * r); out[v * 3 + 1] += Float(l.y * dd * r); out[v * 3 + 2] += Float(l.z * dd * r)
             }
         }

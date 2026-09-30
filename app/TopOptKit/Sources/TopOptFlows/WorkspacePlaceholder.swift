@@ -1305,7 +1305,7 @@ public struct WorkspacePlaceholder: View {
                 // the entire app. Please add to the TO page side-by-side just below
                 // the position gizmo (with padding between them)"). The Surface
                 // stage keeps them in its own tray, where the rest of its tools are.
-                if flexibleMain.owns(project, stage) { FlexibleMainViewToggles(main: flexibleMain, stressReady: latticeStressField != nil, stressRunning: latticeSimIsRunning, solve: { if let ctx = model.makeLatticeSimContext(), FlexibleStressTrigger.shouldRun(hasField: latticeSim.field != nil, stale: latticeSim.isStale(against: ctx.fingerprint), running: latticeSimIsRunning) { latticeSim.run(ctx) } }) }   // Flexible (PR #362) H5 (+C): X-ray / Dent heat / Stress / Lattice; Stress solved directly (never through startStressSolveIfNeeded's octet gate)
+                if flexibleMain.owns(project, stage) { FlexibleMainViewToggles(main: flexibleMain, solver: FlexibleStressSolver(app: model, sim: latticeSim)) }   // Flexible (PR #362) H5 (+C): X-ray / Dent heat / Stress / Lattice; Stress solved directly (never through startStressSolveIfNeeded's octet gate — FlexibleStressSolve.swift)
                 else if viewerMesh != nil, visible.wireframe, !visible.surfaceEditing {
                     viewModeToggles
                 }
@@ -1330,7 +1330,7 @@ public struct WorkspacePlaceholder: View {
                 }
                 if flexibleMain.owns(project, stage) { FlexibleMainLegends(main: flexibleMain, mode: $latticeLegendMode, projection: projection, settle: settleQuat, bottomClearance: bottomBarClearance, chipColumnWidth: force.gravityIsSet ? (settingsChipWidths.values.max() ?? 0) : 0) }   // Flexible (PR #362) H6: one legend per view (Squish / Stress / Lattice), tap to read (FlexibleMainLegends.swift)
                 // ★ "Simulation running", top-centre (maintainer, 2026-08-18).
-                if latticeSimIsRunning, !simBannerDismissed { simRunningBanner }
+                if latticeSimIsRunning, !simBannerDismissed, !flexibleMain.owns(project, stage) { simRunningBanner }   // Flexible (PR #362): not under Flexible — it grades no lattice there; the Stress legend says "Simulating…"
                 // ★ AND THE GEOMETRY REBAKE. Only when the FEA banner is NOT up:
                 // both sit top-centre, and two capsules in one place is worse
                 // than the more specific one winning. The solve is the longer
@@ -1393,7 +1393,7 @@ public struct WorkspacePlaceholder: View {
             if showFlexiblePage, project.lattice.flexible != nil {
                 FlexibleStagePage(project: project, model: flexibleMain.model(for: project, materialsPath: FlexibleResources.materialsPath,
                                   stampsPath: FlexibleResources.stampsPath, persist: { model.persistCurrentProject() }),
-                                  onExit: { showFlexiblePage = false; latticeSettingsSavedThisSession = true; flexibleMain.didExitSettings() })
+                                  onExit: { showFlexiblePage = false; latticeSettingsSavedThisSession = true; flexibleMain.didExitSettings(solver: FlexibleStressSolver(app: model, sim: latticeSim)) })
                     .transition(.opacity).zIndex(48)
             }
             if showLatticeModeSheet, let mode = project.lattice.stageMode {

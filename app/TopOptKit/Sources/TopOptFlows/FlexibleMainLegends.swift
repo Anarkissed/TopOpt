@@ -3,15 +3,19 @@
 // maintainer: "each data view has its own legend on the right edge … tapping a legend switches
 // it to 'Tap the part to read' … legends never cover buttons").
 //
-// ★ THE LEGENDS: 'Squish · mm' (the dent's own DS ramp), 'Stress in the solid part · MPa'
-// (Stress's rainbow; "Simulating…" while it solves), 'Lattice · density' (the walls' pale →
-// green). X-ray has none (his answer). Each is #354's LatticeLegendChrome — the same squircle,
-// (i) and caret as the octet key — with ONE line, a ramp, its two ends.
+// ★ THE LEGENDS: 'Squish · mm' (the dent's own DS ramp; "What you drew · mm" while the map is
+// his drawing — batch C verification), 'Stress in the solid part · MPa' (Stress's rainbow;
+// "Simulating…" while it solves, "Couldn't simulate" + Retry, or what to add first),
+// 'Lattice · density' (the walls' pale → green). X-ray has none (his answer). Each is #354's
+// LatticeLegendChrome — the same squircle, (i) and caret as the octet key — with ONE line, a
+// ramp, its two ends.
 //
 // ★ TAP A LEGEND → it reads "TAP THE PART TO READ" (the main page's `latticeLegendMode =
 // .colour(kind.id)`, so #354's own gates hold: a face tap is consumed, primitives hide, a
-// double tap anywhere comes back out). A tap on the part pins a callout at that spot — value
-// and unit — and marks it on the ramp. Tap the legend again (or double tap) to leave.
+// double tap anywhere comes back out). A tap on the part pins the value — in the accent blue,
+// in its own squircle (#354's LatticeLegendReading) — at that spot, and marks it on the ramp;
+// the squish holds still while a legend reads. Tap the legend again (or double tap) to leave.
+// The tap never moves the legends.
 //
 // ★ WHERE THEY GO (FlexibleMainLegendLayout, pure — FlexibleMainViewsTests measures it at
 // iPad 13" and 11", both orientations): the trailing edge, from the vertical centre out,
@@ -38,19 +42,22 @@ public enum FlexibleMainLegendLayout {
         public let expanded: Bool
     }
 
+    /// The left panel strip (Selections, the stage buttons and the title above it).
+    public static func leftStrip(viewport v: CGSize) -> CGRect {
+        CGRect(x: 0, y: 0, width: PageChrome.edge + PageChrome.panelWidth, height: v.height)
+    }
+
     /// The main page's buttons a legend must not cover.
-    public static func keepOut(viewport v: CGSize, bottomClearance: CGFloat, chipColumnWidth: CGFloat,
-                               simulating: Bool) -> [CGRect] {
+    public static func keepOut(viewport v: CGSize, bottomClearance: CGFloat, chipColumnWidth: CGFloat) -> [CGRect] {
         var k: [CGRect] = [
             FlexibleLegendPlacement.gizmoFrame(viewport: v),
-            FlexibleMainViewToggles.frame(viewport: v, simulating: simulating),
+            FlexibleMainViewToggles.frame(viewport: v),
             // the forward nav + Settings column, left of the gizmo (top-right)
             CGRect(x: v.width - PageChrome.gizmoClearance - 240, y: 0, width: 240,
                    height: PageChrome.gizmoAlignedTop + 2 * (PageChrome.compactButton + PageChrome.gap)),
             // the bottom bar
             CGRect(x: 0, y: v.height - bottomClearance, width: v.width, height: bottomClearance),
-            // the left panel strip (Selections, the stage buttons and the title above it)
-            CGRect(x: 0, y: 0, width: PageChrome.edge + PageChrome.panelWidth, height: v.height),
+            leftStrip(viewport: v),
         ]
         if chipColumnWidth > 0 {
             let h = FlexibleMainPlayerSlot.chipColumnHeight
@@ -163,13 +170,17 @@ public struct FlexibleMainLegends: View {
         .onChange(of: main.reading) { r in
             if let r, let k = drilled, k != r.kind { mode = r.kind.mode }
         }
-        // out of the key (a double tap, the legend tapped again): the callout goes
+        // out of the key (a double tap, the legend tapped again): the callout goes; while a
+        // legend reads, the squish holds still (the reading stays on the surface it was read on)
         .onChange(of: mode) { m in
-            if FlexibleReadKind(mode: m) == nil { main.clearReading() }
+            let reading = FlexibleReadKind(mode: m) != nil
+            if !reading { main.clearReading() }
+            main.noteDrill(reading)
         }
         .onDisappear {
             if drilled != nil { mode = .groups }
             main.clearReading()
+            main.noteDrill(false)
         }
     }
 
@@ -180,13 +191,13 @@ public struct FlexibleMainLegends: View {
             LatticeLegendChrome(tab: drilled == k ? "TAP THE PART TO READ" : "TAP TO READ", width: p.frame.width,
                                 minimized: Binding(get: { main.minimized.contains(k) },
                                                    set: { if $0 { main.minimized.insert(k) } else { main.minimized.remove(k) } }),
-                                info: k == .dent ? main.dentInfo : k.info) {
+                                info: k == .dent ? main.dentInfo : (k == .stress ? main.stressInfo : k.info)) {
                 content(k)
             }
             .overlay(RoundedRectangle(cornerRadius: DS.Radius.panel, style: .continuous)
                 .strokeBorder(DS.Color.accent.color, lineWidth: drilled == k ? 1.5 : 0))
             .contentShape(Rectangle())
-            .onTapGesture { toggle(k) }
+            .onTapGesture { mode = main.legendTapped(k, mode: mode) }
             .latticeBandChipKeepOut()
             .accessibilityIdentifier("flexible-legend-\(k.rawValue)")
         } else {
@@ -209,20 +220,10 @@ public struct FlexibleMainLegends: View {
         }
     }
 
-    private func toggle(_ k: FlexibleReadKind) {
-        if drilled == k {
-            mode = .groups
-        } else {
-            main.clearReading()
-            main.legendPriority = k
-            mode = k.mode
-        }
-    }
-
     @ViewBuilder private func content(_ k: FlexibleReadKind) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: DS.Space.xs) {
-                Text(k.title)
+                Text(main.legendTitle(k))
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(DS.Color.textPrimary.color)
                     .lineLimit(1).minimumScaleFactor(0.75)
@@ -233,23 +234,42 @@ public struct FlexibleMainLegends: View {
                         .foregroundStyle(DS.Color.textTertiary.color)
                 }
             }
-            if k == .stress, main.stressField == nil || main.stressPeak <= 0 {
+            if k == .stress, !main.stressDrawable {
+                // ★ BATCH C VERIFICATION: the solve SAYS what it is doing — "Simulating…" (the
+                // one place the wait is said), "Couldn't simulate" + Retry (core's words behind
+                // the (i)), or what to add first ("Stress needs an anchor on Topology")
+                let state = main.stressState
                 HStack(spacing: DS.Space.xs) {
-                    if main.stressRunning { ProgressView().controlSize(.mini).tint(DS.Color.textPrimary.color) }
-                    Text(main.stressRunning ? "Simulating…" : "No stress yet")
+                    if state.isRunning { ProgressView().controlSize(.mini).tint(DS.Color.textPrimary.color) }
+                    if case .failed = state {
+                        Image(systemName: "exclamationmark.circle.fill").font(.system(size: 12, weight: .bold))
+                            .foregroundStyle(DS.Color.warning.color)
+                    }
+                    Text(state.line ?? FlexibleStressState.idle.line ?? "")
                         .font(.system(size: 12, weight: .medium))
                         .foregroundStyle(DS.Color.textSecondary.color)
+                        .lineLimit(1).minimumScaleFactor(0.8)
+                        .accessibilityIdentifier("flexible-stress-state")
+                    Spacer(minLength: 0)
+                    if state.retries {
+                        Button("Retry") { main.retryStress() }
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(DS.Color.accent.color)
+                            .buttonStyle(.plain)
+                            .accessibilityIdentifier("flexible-stress-retry")
+                    }
                 }
                 .frame(height: 29, alignment: .leading)
             } else {
+                let e = ends(k)
                 ramp(k)
                     .frame(height: 10)
                     .clipShape(RoundedRectangle(cornerRadius: 3))
                     .overlay(marker(k))
                 HStack {
-                    Text(ends(k).lo)
+                    Text(e.lo)
                     Spacer(minLength: DS.Space.xs)
-                    Text(ends(k).hi)
+                    Text(e.hi)
                 }
                 .font(.system(size: 11, weight: .medium)).monospacedDigit()
                 .foregroundStyle(DS.Color.textSecondary.color)
@@ -285,12 +305,11 @@ public struct FlexibleMainLegends: View {
         case .dent:
             return ("0 mm", String(format: "%.1f mm", main.dentMaxMM))
         case .stress:
-            return ("0", "\(LatticeStressTint.legendTicks(peakMPa: main.stressPeak).first ?? "—") MPa")
+            return main.stressEnds
         case .lattice:
-            guard let g = main.model?.lattice else { return ("", "") }
-            let s = FlexibleProbe.latticeSpan(g.inputs)
-            func end(_ rho: Double) -> String { String(format: "%.0f%% · %.1f mm", rho * 100, FlexibleProbe.cellMM(rho: rho, g.inputs)) }
-            return (end(s.lowerBound), end(s.upperBound))
+            // once per lattice generation (a full scan of the mask), never per body pass
+            guard let e = main.latticeEnds() else { return ("", "") }
+            return (e.lo, e.hi)
         }
     }
 
@@ -300,23 +319,35 @@ public struct FlexibleMainLegends: View {
     /// space"), in the MTKView's own space (it ignores the safe area).
     @ViewBuilder private var callout: some View {
         if drilled != nil, let r = main.reading, let s = main.screenPoint(r.anchor) {
-            HStack(spacing: 5) {
-                Image(systemName: "arrowtriangle.left.fill")
-                    .font(.system(size: 11))
-                    .foregroundStyle(DS.Color.accent.color)
-                Text(r.text)
-                    .font(.system(size: 13, weight: .semibold)).monospacedDigit()
-                    .foregroundStyle(DS.Color.textPrimary.color)
-            }
-            .padding(.horizontal, 9).padding(.vertical, 6)
-            .background(Capsule().fill(DS.Surface.panel.color.opacity(0.95))
-                .overlay(Capsule().strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
-            .fixedSize()
-            .offset(x: s.x + 8, y: s.y - 15)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            .ignoresSafeArea()
-            .allowsHitTesting(false)
-            .accessibilityIdentifier("flexible-reading-callout")
+            FlexibleReadingTag(reading: r)
+                .offset(x: s.x + 2, y: s.y - FlexibleReadingTag.halfHeight)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .ignoresSafeArea()
+                .allowsHitTesting(false)
+                .accessibilityIdentifier("flexible-reading-callout")
         }
+    }
+}
+
+/// ★ A TAPPED VALUE, IN THE ACCENT BLUE, IN ITS OWN SQUIRCLE (#354's standing rule on
+/// LatticeLegendReading: "same with every single tapped value" — batch C verification: the
+/// Flexible readings were white text in a capsule). The arrow's tip sits on the tapped point;
+/// the value is #354's own LatticeLegendReading. Both Flexible pages pin it at the tap.
+struct FlexibleReadingTag: View {
+    let reading: FlexibleReading
+    /// Half the squircle's height (value + unit): the arrow, centred on it, sits on the point.
+    static let halfHeight: CGFloat = 30
+
+    var body: some View {
+        HStack(spacing: 3) {
+            Image(systemName: "arrowtriangle.left.fill")
+                .font(.system(size: 11))
+                .foregroundStyle(DS.Color.accent.color)
+            LatticeLegendReading(value: reading.value, unit: reading.unit)
+                .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(DS.Surface.panel.color.opacity(0.94)))
+        }
+        .fixedSize()
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(reading.text)
     }
 }

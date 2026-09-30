@@ -18,7 +18,9 @@ public enum FlexiblePageChannels {
     /// every cut, and a sector's tint (and its map) stops exactly at the cut (round 3, item
     /// 2). nil only when there is neither a map nor a sector (the page then tints the part's
     /// own triangles, which no cut crosses).
-    public static func overlay(model: FlexibleStageModel) -> FlexibleOverlayMesh? {
+    /// `maxEdgeMM` (the MAIN page, batch C verification): the part's triangles cut that fine for
+    /// the Stress colours (FlexibleOverlayMesh.Subdivision — the dent's geometry is unchanged).
+    public static func overlay(model: FlexibleStageModel, maxEdgeMM: Double? = nil) -> FlexibleOverlayMesh? {
         guard let part = model.project.viewerMesh else { return nil }
         let regions = model.regions
         let faces: [FlexibleOverlayFace] = model.loadedKeys.compactMap { k in
@@ -28,7 +30,7 @@ public enum FlexiblePageChannels {
         }
         let planes = FlexibleFacePieces.planes(of: regions, mesh: part)
         guard !faces.isEmpty || !planes.isEmpty else { return nil }
-        return FlexibleOverlayMesh.build(part: part, faces: faces, splitPlanes: planes)
+        return FlexibleOverlayMesh.build(part: part, faces: faces, splitPlanes: planes, maxEdgeMM: maxEdgeMM)
     }
 
     /// Everything MetalMeshView reads for the map: per-vertex tints, the dent (mm per flat

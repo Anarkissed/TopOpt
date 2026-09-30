@@ -49,6 +49,15 @@ public enum FlexibleReadKind: String, CaseIterable, Identifiable, Sendable {
     }
     public var mode: LatticeLegendMode { .colour(id) }
 
+    /// ★ BATCH C VERIFICATION: the dent legend's line while the map shows HIS drawing (no
+    /// lattice drawn, or a shape-only one that predicts no squish) — FlexibleMainStage.legendTitle.
+    public static let drawnTitle = "What you drew · mm"
+    /// The dent legend's line for the lattice the map is drawn from (nil: his live drawing).
+    public static func dentTitle(drawn: FlexibleGeneratedLattice?) -> String {
+        guard let g = drawn, !g.shapeOnly else { return drawnTitle }
+        return FlexibleReadKind.dent.title
+    }
+
     /// The legend's one line (his words).
     public var title: String {
         switch self {
@@ -72,12 +81,12 @@ public enum FlexibleReadKind: String, CaseIterable, Identifiable, Sendable {
         case .lattice: return "Lattice"
         }
     }
-    /// Behind the (i): one sentence.
+    /// Behind the (i): ONE sentence (batch C verification: each was two).
     public var info: String {
         switch self {
-        case .dent: return "What you drew, drawn deeper so it reads. Tap here, then the part: the true mm at that spot."
-        case .stress: return "Where the main page's loads go in the SOLID part — not in the TPU lattice. Tap here, then the part: MPa at that spot."
-        case .lattice: return "How dense the walls are — denser is firmer. Tap here, then a wall: its density and cell."
+        case .dent: return "What you drew, drawn deeper so it reads — tap here, then the part, for the true mm there."
+        case .stress: return "Where the main page's loads go in the SOLID part, not the TPU lattice — tap here, then the part, for MPa there."
+        case .lattice: return "How dense the walls are (denser is firmer) — tap here, then a wall, for its density and cell."
         }
     }
     /// What a tap that finds nothing to read says.
@@ -139,6 +148,9 @@ public enum FlexibleProbe {
         public let point: SIMD3<Float>
         /// The ray parameter (distance from the origin, `dir` unit).
         public let t: Float
+        /// The same point of the quad at REST (its barycentric place on the undented triangle) —
+        /// where the quad's colour was sampled.
+        public var rest: SIMD3<Float> = .zero
     }
 
     /// The first map quad, AS DRAWN (rest + `scale` × dent), that the ray meets — nil when it
@@ -154,6 +166,7 @@ public enum FlexibleProbe {
             if let d, scale != 0 { p += scale * SIMD3<Float>(d[3 * v], d[3 * v + 1], d[3 * v + 2]) }
             return p
         }
+        func rest(_ v: Int) -> SIMD3<Float> { SIMD3<Float>(pos[3 * v], pos[3 * v + 1], pos[3 * v + 2]) }
         var best: DentHit?
         for (key, start) in overlay.flatStart {
             let count = columns[key] ?? 0
@@ -161,12 +174,52 @@ public enum FlexibleProbe {
                 let q = start + c * 6
                 guard q + 5 < n else { break }
                 for tri in [(q, q + 1, q + 2), (q + 3, q + 4, q + 5)] {
-                    guard let t = rayTriangle(origin, dir, at(tri.0), at(tri.1), at(tri.2)), t > 0 else { continue }
-                    if best == nil || t < best!.t { best = DentHit(key: key, column: c, point: origin + dir * t, t: t) }
+                    guard let h = rayTriangleUV(origin, dir, at(tri.0), at(tri.1), at(tri.2)), h.t > 0 else { continue }
+                    if best == nil || h.t < best!.t {
+                        let r = (1 - h.u - h.v) * rest(tri.0) + h.u * rest(tri.1) + h.v * rest(tri.2)
+                        best = DentHit(key: key, column: c, point: origin + dir * h.t, t: h.t, rest: r)
+                    }
                 }
             }
         }
         return best
+    }
+
+    /// The drawn (dented) map under a tap, from the tap's rest `point` along the view `dir`:
+    /// where it is drawn and where that point sits at rest. `onlyIfOnMap` (X-ray off): only
+    /// when the tap itself landed on the map. The dent probe's cast, for the Stress reading.
+    @MainActor
+    public static func drawnMapHit(model: FlexibleStageModel, overlay: FlexibleOverlayMesh, dents: [Float]?, scale: Float,
+                                   point: SIMD3<Float>, dir: SIMD3<Float>, onlyIfOnMap: Bool) -> (point: SIMD3<Float>, rest: SIMD3<Float>)? {
+        guard simd_length_squared(dir) > 1e-12 else { return nil }
+        let u = simd_normalize(dir)
+        var cols: [FlexFaceKey: Int] = [:]
+        for (k, st) in model.stacks { cols[k] = st.columns.count }
+        let b = overlay.mesh.bounds
+        let origin = point - u * (simd_length(b.max - b.min) * 4 + 100)
+        if onlyIfOnMap {
+            guard let r = dentHit(origin: origin, dir: u, overlay: overlay, columns: cols, dents: nil, scale: 0),
+                  simd_distance(r.point, point) < 0.3 else { return nil }
+        }
+        guard let h = dentHit(origin: origin, dir: u, overlay: overlay, columns: cols, dents: dents, scale: scale) else { return nil }
+        return (h.point, h.rest)
+    }
+
+    /// `rayTriangle` with the hit's barycentric (u, v) on (a → b, a → c).
+    static func rayTriangleUV(_ o: SIMD3<Float>, _ d: SIMD3<Float>, _ a: SIMD3<Float>, _ b: SIMD3<Float>,
+                              _ c: SIMD3<Float>) -> (t: Float, u: Float, v: Float)? {
+        let e1 = b - a, e2 = c - a
+        let p = simd_cross(d, e2)
+        let det = simd_dot(e1, p)
+        guard abs(det) > 1e-12 else { return nil }
+        let inv = 1 / det
+        let s = o - a
+        let u = simd_dot(s, p) * inv
+        guard u >= -1e-5, u <= 1 + 1e-5 else { return nil }
+        let q = simd_cross(s, e1)
+        let v = simd_dot(d, q) * inv
+        guard v >= -1e-5, u + v <= 1 + 1e-5 else { return nil }
+        return (simd_dot(e2, q) * inv, u, v)
     }
 
     /// Möller–Trumbore, two-sided (a map quad is seen from either side in X-ray).
@@ -220,6 +273,16 @@ public enum FlexibleProbe {
 
     // MARK: stress
 
+    /// MPa to THREE significant digits ("0.0462", "1.50", "12.3", "123") — his pad peaks at
+    /// 0.046 MPa, where "%.2f" read 0.00 … 0.05 (batch C verification; the octet key reads %.3f).
+    public static func mpa(_ v: Double) -> String {
+        guard v.isFinite else { return "—" }
+        let a = abs(v)
+        if a == 0 { return "0" }
+        let digits = Swift.max(0, 2 - Int(log10(a).rounded(.down)))
+        return String(format: "%.\(digits)f", v)
+    }
+
     /// The solid part's von Mises at `p` (MPa): the field's own trilinear sample; a point up to
     /// one voxel outside the voxel-centre grid (the part's own surface) reads the nearest point
     /// of the grid's box. nil further out — no number the solve did not make.
@@ -237,7 +300,10 @@ public enum FlexibleProbe {
 
     public struct LatticeRead: Equatable, Sendable {
         public let rho: Double
+        /// The cell DRAWN there (`drawnCell`: the ladder's rung, or the blend of two).
         public let cellMM: Double
+        /// Inside a blend of two rungs (the reading says "≈").
+        public var cellBlended = false
         /// The rest point the wall was drawn from (the squish pulled back).
         public let rest: SIMD3<Float>
     }
@@ -249,11 +315,30 @@ public enum FlexibleProbe {
         let pb = FlexibleSquishField.pullback(p, faces: faces, squish: s)
         guard pb.air <= 0 else { return nil }
         let rho = Double(inputs.rho.sample(pb.p0))
-        return LatticeRead(rho: rho, cellMM: cellMM(rho: rho, inputs), rest: pb.p0)
+        let c = drawnCell(rho: rho, inputs)
+        return LatticeRead(rho: rho, cellMM: c.mm, cellBlended: c.blended, rest: pb.p0)
     }
 
-    /// The cell the field draws at ρ (FlexibleLatticeField): the gyroid's L = 3.0915·t/ρ in
-    /// [Lmin, Lmax]; the honeycomb's one d.
+    /// ★ BATCH C VERIFICATION: the cell the walls are DRAWN with at ρ. The gyroid is a ladder of
+    /// true gyroids (FlexibleLatticeField.rungs, Lmin·2^(j/4)): a pure rung where the blend
+    /// weight is 0 or 1, else the blended wavenumber's cell ((1−w)·ka + w·kb) — not the
+    /// continuous law 3.0915·t/ρ, which is up to ~4 % off what is drawn (his t = 0.42 mm at
+    /// ρ 0.22: the law 5.90 mm, the rung 5.77 mm). The honeycomb: its one d.
+    public static func drawnCell(rho: Double, _ f: FlexibleLatticeInputs) -> (mm: Double, blended: Bool) {
+        switch f.topology {
+        case .honeycomb: return (Double(f.honeycombCellMM), false)
+        case .gyroid:
+            let L = Float(cellMM(rho: rho, f))
+            let r = FlexibleLatticeField.rungs(L: L, lMin: f.lMinMM)
+            if r.w <= 0 { return (Double(r.La), false) }
+            if r.w >= 1 { return (Double(r.Lb), false) }
+            let k = (1 - r.w) * (2 * Float.pi / r.La) + r.w * (2 * Float.pi / r.Lb)
+            return (Double(2 * Float.pi / k), true)
+        }
+    }
+
+    /// The cell the field INTENDS at ρ (FlexibleLatticeField): the gyroid's L = 3.0915·t/ρ in
+    /// [Lmin, Lmax] (the ladder then draws `drawnCell`); the honeycomb's one d.
     public static func cellMM(rho: Double, _ f: FlexibleLatticeInputs) -> Double {
         switch f.topology {
         case .honeycomb: return Double(f.honeycombCellMM)
@@ -289,8 +374,10 @@ public enum FlexibleProbe {
 /// `vertexTints` write the SAME buffer and never blend (the stress buffer is sized to the part
 /// mesh and dropped for the overlay mesh), so the main Flexible page composes everything into
 /// the 8-wide vertexTints: Heat owns the pressed faces' map quads (opaque), Stress owns the
-/// rest of the part (and the map when Heat is off), the Flexible face tints then the main
-/// page's group colours fill what is left, and X-ray ghosts every vertex that is not opaque.
+/// rest of the part (and the map when Heat is off — opaque too), the Flexible face tints then
+/// the main page's group colours fill what is left, and X-ray ghosts every vertex that is not
+/// opaque. (★ Batch C verification: the stage never asks for Heat AND Stress — they are the two
+/// colourings of the map, one at a time; `heat: true` with a stress field stays defined here.)
 public enum FlexibleMainTints {
     public static func compose(base: [Float]?, overlay: FlexibleOverlayMesh?, part: ViewerMesh?, heat: Bool,
                                roles: [FaceID: SIMD4<Float>], stress: (field: LatticeDemandField, peak: Double)?,
@@ -322,7 +409,9 @@ public enum FlexibleMainTints {
             for v in partVerts..<n {
                 guard let c = stressColour(v) else { continue }
                 put(v, c)
-                out[v * 8 + 5] = 0
+                // ★ BATCH C VERIFICATION: held OPAQUE, like the heat it replaces — the map reads
+                // the same (and hides the same) whichever colouring it carries
+                out[v * 8 + 5] = 1
             }
         }
         if let g = ghost { FlexibleOverlayMesh.markGhost(&out, colour: g) }

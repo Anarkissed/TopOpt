@@ -52,22 +52,32 @@ public final class FlexibleMainStage: ObservableObject {
     // MARK: batch C — Stress, the legends, tap-to-read (FlexibleMainStage+Views.swift)
 
     /// ★ STRESS (item T): the solid part's FEA from the main page's loads, coloured over the
-    /// part. Off by default; on, it turns X-ray off so its colours read (toggleStress).
+    /// part. Off by default. ★ BATCH C VERIFICATION: on, it takes the pressed map from Heat (one
+    /// colouring of the map at a time — toggleStress); X-ray and the lattice are left alone.
     @Published public var stress = false
     /// The reading a tap pinned while a legend is drilled in (one publish per tap).
     @Published public internal(set) var reading: FlexibleReading?
     /// Legends he minimised (the caret), and the one placed first (a pill he tapped open).
     @Published public var minimized: Set<FlexibleReadKind> = []
     @Published public var legendPriority: FlexibleReadKind?
-    /// The workspace's solve (H5' hands it over each render): run only when there is no field
-    /// or it is stale, and never twice (FlexibleStressTrigger).
+    /// The workspace's solve (H5' and H2 hand over a FlexibleStressSolver — `attach`): run only
+    /// when there is no field for these inputs, never twice (FlexibleStressTrigger).
     var stressSolver: (() -> Void)?
-    var stressReady = false
-    var stressRunning = false
+    /// ★ BATCH C VERIFICATION: what the solve is doing — the sim's own phase, or why it could not
+    /// start — ONE published value (it failed silently on his project: "No stress yet" for ever).
+    @Published public internal(set) var stressState: FlexibleStressState = .idle
+    var stressRunning: Bool { stressState.isRunning }
+    /// The sim whose phase is observed, and that observation.
+    weak var stressSim: LatticeSimModel?
+    var stressPhaseObservation: AnyCancellable?
     /// The field the page shows (stashed from H4's call), its identity and its peak.
     var stressField: LatticeDemandField?
     var stressKey = 0
     var stressPeak = 0.0
+    /// The lattice legend's two ends and span, per lattice generation (a full scan of the mask —
+    /// never per body pass), and how many scans were made (tests).
+    var latticeEndsCache: (generation: Int, span: ClosedRange<Double>, lo: String, hi: String)?
+    var latticeSpanScans = 0
     /// The view the tap came through (H6 hands the projection and the settle each render).
     var viewFrame: LatticeBandChipFrame?
     /// The composed ONE tint array, and what it was composed from.
@@ -149,7 +159,11 @@ public final class FlexibleMainStage: ObservableObject {
 
     /// Settings' Save & Exit (H2's onExit): back on the main page, build the lattice — now if
     /// the designs are in, else as soon as they land (`modelChanged`).
-    public func didExitSettings() {
+    /// ★ BATCH C VERIFICATION: H2 hands the solver over HERE too — it used to arrive only from
+    /// the toggles' body, which had not rendered yet when Settings opened in the same action
+    /// that made the stage Flexible, so the first Exit started nothing.
+    public func didExitSettings(solver: FlexibleStressSolver? = nil) {
+        if let solver { attach(solver) }
         frozen = false
         visible = true
         model?.checkStampShown = nil
@@ -158,7 +172,9 @@ public final class FlexibleMainStage: ObservableObject {
         noteLoads()        // what Settings did to the groups (a weight written back) is in hand
         refresh()
         buildIfReady()
-        requestStressIfNeeded()   // ★ BATCH C (item T): the solid part's FEA starts on Save & Exit
+        // ★ BATCH C (item T) — re-solved on Exit only while Stress SHOWS: nothing on screen reads
+        // a field otherwise, and an unasked solve competes with the lattice build Exit starts
+        if stress { requestStressIfNeeded() }
     }
 
     /// The pill's tap: the page opens on the one thing to fix.
@@ -310,7 +326,9 @@ public final class FlexibleMainStage: ObservableObject {
         let keys = m.loadedKeys.filter { m.stacks[$0] != nil && m.geometry[$0] != nil }
         let oKey = keys.map { "\($0.region)/\($0.rotation)" }.joined(separator: ",") + "|" + m.regions.key
         if overlayKey != oKey {
-            overlay = FlexiblePageChannels.overlay(model: m)
+            // ★ BATCH C VERIFICATION: the part's triangles cut fine enough for the Stress colours
+            // (his pad is 12 triangles); the dent's geometry is unchanged
+            overlay = FlexiblePageChannels.overlay(model: m, maxEdgeMM: m.project.viewerMesh.map(FlexibleOverlayMesh.stressEdgeMM))
             overlayKey = oKey
         }
         // the map is the lattice's while one is shown (X-ray only gates the walls here)
@@ -325,7 +343,7 @@ public final class FlexibleMainStage: ObservableObject {
         if let g = drawn {
             if playedGeneration != g.generation {
                 playedGeneration = g.generation
-                loop.autoPlay(reduceMotion: reduceMotion())
+                loop.autoPlay(reduceMotion: reduceMotion())   // (held still while a legend reads)
             }
         } else if loop.playing || loop.held != 1 {
             loop.hold(1)   // his live drawing (no lattice) holds at the full squish

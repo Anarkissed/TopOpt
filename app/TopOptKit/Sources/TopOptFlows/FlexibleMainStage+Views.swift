@@ -21,42 +21,95 @@ extension FlexibleMainStage {
 
     // MARK: Stress (item T)
 
-    /// The Stress button: on — and X-ray off, so the colours read on a solid part (a ghost
-    /// shows them only at its silhouette); the solve starts if there is no field. Off: off.
+    /// The Stress button. ★ BATCH C VERIFICATION: Stress and Heat are the two colourings of the
+    /// pressed map, so turning Stress on takes the map from Heat (and Heat on takes it back) —
+    /// with both on, Heat kept the map and Stress was left the part's 24 corner vertices, one
+    /// flat blue (his project). X-ray and the lattice are NOT touched (it used to turn X-ray off,
+    /// and with it the walls and their legend). The solve starts if there is no field.
     public func toggleStress() {
         if stress { stress = false; return }
-        if xray { xray = false }
+        if heat { heat = false }
         stress = true
         requestStressIfNeeded()
     }
+    /// The Dent heat button — the other colouring of the map (see toggleStress).
+    public func toggleHeat() {
+        if heat { heat = false; return }
+        if stress { stress = false }
+        heat = true
+    }
 
-    /// Ask the workspace's solver (H5') — it runs only when there is no field or its inputs
-    /// moved (FlexibleStressTrigger over the fingerprint) and none is running. Called by the
-    /// Stress button, by Settings' Save & Exit, and — while Stress shows — by a main-page edit.
+    /// Ask the workspace's solver — it runs only when there is no field for these inputs (or the
+    /// last one failed) and none is running. Called by the Stress button, by Settings' Save &
+    /// Exit while Stress shows, by a main-page edit while Stress shows, and by Retry.
     func requestStressIfNeeded() {
         guard !stressRunning else { return }
         stressSolver?()
     }
+    /// The Stress legend's Retry.
+    public func retryStress() { requestStressIfNeeded() }
 
-    /// H5': what the workspace knows about its solve, handed over on each render (no publish).
-    func noteStress(ready: Bool, running: Bool, solve: (() -> Void)?) {
-        stressReady = ready
-        stressRunning = running
-        if let solve { stressSolver = solve }
+    /// H5' / H2: the workspace's solver, and its sim's phase observed (delivered on the next
+    /// run-loop turn — never a publish inside the view update that handed it over).
+    public func attach(_ s: FlexibleStressSolver) {
+        stressSolver = { [weak self] in self?.noteOutcome(s.start()) }
+        guard stressSim !== s.sim else { return }
+        stressSim = s.sim
+        stressPhaseObservation = s.sim.$phase
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.syncStress() }
+    }
+
+    /// The sim's phase AS IT IS NOW (a delivery arrives a turn late, and may be stale).
+    func syncStress() {
+        guard let p = stressSim?.phase else { return }
+        phaseChanged(p)
+    }
+
+    func noteOutcome(_ o: FlexibleStressSolver.Outcome) {
+        switch o {
+        case .blocked(let line): setStress(.blocked(line))
+        case .started, .running: setStress(.running)
+        case .current: setStress(.ready)
+        }
+    }
+
+    func phaseChanged(_ p: LatticeSimModel.Phase) {
+        switch p {
+        case .running: setStress(.running)
+        case .complete: setStress(.ready)
+        case .failed(let why): setStress(.failed(why))
+        case .idle: if stressState == .running { setStress(.idle) }   // cancelled; a blocker stays said
+        }
+    }
+
+    private func setStress(_ s: FlexibleStressState) { if stressState != s { stressState = s } }
+
+    /// A field that may be drawn: in hand, not refused since (a failed or blocked solve is said,
+    /// never painted over with the last field's colours).
+    var stressDrawable: Bool {
+        guard stressField != nil, stressPeak > 0 else { return false }
+        switch stressState {
+        case .failed, .blocked: return false
+        default: return true
+        }
     }
 
     // MARK: the ONE tint array (H4')
 
-    /// H4': the part with its map quads, coloured — Heat on the map, Stress on the part (when
-    /// on), the Flexible face tints, the main page's group colours where Flexible has none,
+    /// H4': the part with its map quads, coloured — Heat or Stress on the map, Stress on the part
+    /// (when on), the Flexible face tints, the main page's group colours where Flexible has none,
     /// X-ray's ghost on everything not opaque. Composed only when an input changed.
-    public func tints(_ project: ProjectModel, on stage: WorkspaceStage, roles: [FaceID: SIMD4<Float>],
+    /// ★ BATCH C VERIFICATION: INERT off the Flexible stage — nothing noted, hashed or composed,
+    /// and `roles` (an autoclosure) not even evaluated, on every other page's body pass.
+    public func tints(_ project: ProjectModel, on stage: WorkspaceStage, roles: @autoclosure () -> [FaceID: SIMD4<Float>],
                       stress field: LatticeDemandField?) -> [Float]? {
-        noteStressField(field)
         guard current(project, stage) != nil, let c = channels else { return nil }
+        noteStressField(field)
+        let roles = roles()
         var h = Hasher()
         for k in roles.keys.sorted() { h.combine(k); h.combine(roles[k]!) }
-        let showStress = stress && stressField != nil && stressPeak > 0
+        let showStress = stress && stressDrawable
         let key = "\(generation)|\(h.finalize())|\(showStress ? stressKey : 0)|\(xray)|\(heat)|\(overlay != nil)"
         if key == composedKey { return composed }
         composedKey = key
@@ -100,18 +153,60 @@ extension FlexibleMainStage {
     /// Where each legend goes (FlexibleMainLegendLayout — the player keeps clear of these).
     public func legendFrames(viewport: CGSize, bottomClearance: CGFloat, chipColumnWidth: CGFloat) -> [FlexibleReadKind: FlexibleMainLegendLayout.Placed] {
         let keep = FlexibleMainLegendLayout.keepOut(viewport: viewport, bottomClearance: bottomClearance,
-                                                    chipColumnWidth: chipColumnWidth, simulating: stress && stressRunning)
+                                                    chipColumnWidth: chipColumnWidth)
         return FlexibleMainLegendLayout.place(legendKinds, minimized: minimized, viewport: viewport, keepOut: keep,
                                               priority: legendPriority)
     }
 
+    /// A tap on an open legend: into its reading, or back out. ★ BATCH C VERIFICATION: it never
+    /// reorders the legends (it set the placement priority, and at 11" landscape the tapped
+    /// legend jumped 260 pt from under his finger) — only a pill he opens is placed first.
+    public func legendTapped(_ k: FlexibleReadKind, mode: LatticeLegendMode) -> LatticeLegendMode {
+        if FlexibleReadKind(mode: mode) == k { return .groups }
+        clearReading()
+        return k.mode
+    }
+
+    /// A legend went into (or out of) its reading: the squish holds still meanwhile, so the
+    /// pinned reading stays on the surface it was read from (FlexibleSquishLoop.holdWhileReading).
+    public func noteDrill(_ on: Bool) { loop.holdWhileReading(on) }
+
+    /// The legend's one line. ★ BATCH C VERIFICATION: the dent's is "What you drew · mm" while
+    /// the map shows his drawing (no lattice drawn, or a shape-only one — "no squish
+    /// predicted"), and "Squish · mm" only for a lattice core designed.
+    public func legendTitle(_ k: FlexibleReadKind) -> String {
+        k == .dent ? FlexibleReadKind.dentTitle(drawn: drawn) : k.title
+    }
+
     /// The dent legend's "×k" (the map is drawn k times deeper).
     public var dentExaggeration: Int { Int(channels?.exaggeration ?? 1) }
-    /// The dent legend's (i): what the map is ("What you drew", "What the lattice was built
-    /// from") and why it looks deeper than it is.
+    /// The dent legend's (i), ONE sentence: what the map is and why it looks deeper than it is.
     public var dentInfo: String {
-        let line = channels?.legendLine ?? ""
-        return (line.isEmpty ? "" : line + ": ") + "drawn \(dentExaggeration)× deeper so it reads. Tap here, then the part: the true mm at that spot."
+        let what = (channels?.legendLine ?? "").components(separatedBy: " · ").first ?? ""
+        return (what.isEmpty ? "The map" : what) + " is drawn \(dentExaggeration)× deeper so it reads — tap here, then the part, for the true mm."
+    }
+    /// The Stress legend's (i): core's own words after a refusal, else what the view is.
+    public var stressInfo: String {
+        if case .failed(let why) = stressState { return "Core could not solve the solid part: \(why)" }
+        return FlexibleReadKind.stress.info
+    }
+
+    /// The Stress legend's ends: 0 … the peak, three significant digits (his pad peaks at
+    /// 0.0462 MPa — "0.05" read as a round number it is not).
+    public var stressEnds: (lo: String, hi: String) { ("0", FlexibleProbe.mpa(stressPeak) + " MPa") }
+
+    /// The lattice legend's ends ("18% · 9.2 mm") and span, once per lattice generation.
+    public func latticeEnds() -> (lo: String, hi: String, span: ClosedRange<Double>)? {
+        guard let g = model?.lattice else { return nil }
+        if let c = latticeEndsCache, c.generation == g.generation { return (c.lo, c.hi, c.span) }
+        latticeSpanScans += 1
+        let s = FlexibleProbe.latticeSpan(g.inputs)
+        func end(_ rho: Double) -> String {
+            let c = FlexibleProbe.drawnCell(rho: rho, g.inputs)
+            return String(format: "%.0f%% · %@%.1f mm", rho * 100, c.blended ? "≈" : "", c.mm)
+        }
+        latticeEndsCache = (g.generation, s, end(s.lowerBound), end(s.upperBound))
+        return (end(s.lowerBound), end(s.upperBound), s)
     }
 
     // MARK: tap-to-read (H7, H8)
@@ -150,8 +245,19 @@ extension FlexibleMainStage {
             return FlexibleProbe.dentReading(model: m, overlay: overlay, dents: channels?.dents, scale: currentScale,
                                              drawnLattice: drawn, point: p, dir: dir, onlyIfOnMap: !xray)
         case .stress:
-            guard stress, let f = stressField, stressPeak > 0, let v = FlexibleProbe.stress(f, at: p) else { return nil }
-            return FlexibleReading(kind: .stress, value: String(format: "%.2f", v), unit: "MPa", fraction: v / stressPeak, anchor: p)
+            guard stress, stressDrawable, let f = stressField else { return nil }
+            // ★ BATCH C VERIFICATION: with Stress on, the MAP is stress-coloured (its rest vertices
+            // sampled) and drawn dented — so a tap on it is read where the drawn map meets the
+            // view ray, at that point's REST place (the colour's own sample), not at the undented
+            // surface under the ray
+            var at = p, anchor = p
+            if !heat, let m = model, let o = overlay, let dir = viewFrame?.viewDirection(at: p),
+               let hit = FlexibleProbe.drawnMapHit(model: m, overlay: o, dents: channels?.dents, scale: currentScale,
+                                                   point: p, dir: dir, onlyIfOnMap: !xray) {
+                at = hit.rest; anchor = hit.point
+            }
+            guard let v = FlexibleProbe.stress(f, at: at) else { return nil }
+            return FlexibleReading(kind: .stress, value: FlexibleProbe.mpa(v), unit: "MPa", fraction: v / stressPeak, anchor: anchor)
         case .lattice:
             return nil   // walls are read through the G-buffer probe (readLattice)
         }
@@ -173,10 +279,10 @@ extension FlexibleMainStage {
             reading = FlexibleReading(kind: .lattice, value: "—", unit: FlexibleReadKind.lattice.nothingHere, fraction: nil, anchor: p)
             return true
         }
-        let span = FlexibleProbe.latticeSpan(g.inputs)
+        let span = latticeEnds()?.span ?? FlexibleProbe.latticeSpan(g.inputs)
         let w = span.upperBound - span.lowerBound
         reading = FlexibleReading(kind: .lattice, value: "\(Int((r.rho * 100).rounded()))%",
-                                  unit: String(format: "density · %.1f mm cell", r.cellMM),
+                                  unit: String(format: "density · %@%.1f mm cell", r.cellBlended ? "≈" : "", r.cellMM),
                                   fraction: w > 1e-6 ? min(1, max(0, (r.rho - span.lowerBound) / w)) : 0, anchor: p)
         return true
     }

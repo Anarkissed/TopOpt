@@ -22,7 +22,7 @@ final class FlexibleMainPageHookTests: XCTestCase {
         let pins: [(String, String)] = [
             ("H1", "@StateObject private var flexibleMain = FlexibleMainStage()"),
             ("H2", "FlexibleStagePage(project: project, model: flexibleMain.model(for: project, materialsPath: FlexibleResources.materialsPath,"),
-            ("H2", "onExit: { showFlexiblePage = false; latticeSettingsSavedThisSession = true; flexibleMain.didExitSettings() })"),
+            ("H2", "onExit: { showFlexiblePage = false; latticeSettingsSavedThisSession = true; flexibleMain.didExitSettings(solver: FlexibleStressSolver(app: model, sim: latticeSim)) })"),   // ★ re-pinned (batch C verification): the solver on the first Exit
             ("H3", "flexibleLattice: flexibleMain.layer(project, stage: stage, pageUp: fullScreenPageUp))"),
             ("H4", "MetalMeshView(mesh: flexibleMain.mesh(project, on: stage) ?? stageMesh,"),
             // ★ batch C (re-pinned on purpose): the ONE tint array composes Stress and the group colours too
@@ -32,7 +32,7 @@ final class FlexibleMainPageHookTests: XCTestCase {
             ("H4", "flexDisplacements: flexibleMain.dents(project, on: stage), flexScale: flexibleMain.dentScale(project, on: stage),"),
             ("H4", "bodyAlpha: flexibleMain.bodyAlpha(project, on: stage) ?? latticePreviewBodyAlpha,"),
             // ★ batch C (re-pinned on purpose): the toggles gain Stress, solved directly (FlexibleBatchCHookTests pins the whole line)
-            ("H5", "if flexibleMain.owns(project, stage) { FlexibleMainViewToggles(main: flexibleMain, stressReady: latticeStressField != nil,"),
+            ("H5", "if flexibleMain.owns(project, stage) { FlexibleMainViewToggles(main: flexibleMain, solver: FlexibleStressSolver(app: model, sim: latticeSim)) }"),   // ★ re-pinned (batch C verification)
             // ★ batch B review: from Topology the pill goes to the Lattice stage first (Exit then shows the lattice)
             ("H10", "if project.lattice.flexible == nil { latticeThisButton } else { FlexibleMainStatusPill(main: flexibleMain, open: { if stage != .lattice { goToStage(.lattice) }; showFlexiblePage = true }) }"),
             // ★ batch B review: the player clears the bottom-right chip column (Gravity …) in its row

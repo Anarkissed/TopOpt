@@ -75,58 +75,46 @@ private struct FlexibleMainStatusPillBody: View {
 
 /// H5 / H5': the main Flexible page's views, where `viewModeToggles` sits (below the gizmo, on
 /// `edge`) — the same 40 pt buttons. X-ray, Dent heat, Stress, Lattice (batch C: Stress). X-ray,
-/// Heat and Lattice on by default; any mix works (Lattice turns X-ray on; Stress turns it off,
-/// so its colours read on a solid part).
-/// ★ STRESS IS SOLVED DIRECTLY (item T): `solve` is the workspace's own `latticeSim.run(ctx)`,
-/// never `startStressSolveIfNeeded` (gated on `lattice.enabled && needsStressSolve`, which a
-/// fresh Flexible part never passes). While it solves the button spins and says "Simulating…".
+/// Heat and Lattice on by default. Lattice turns X-ray on (the walls are drawn in X-ray);
+/// ★ BATCH C VERIFICATION: Stress and Dent heat are the two colourings of the pressed map — one
+/// at a time (FlexibleMainStage.toggleStress); Stress leaves X-ray and the lattice alone.
+/// ★ STRESS IS SOLVED DIRECTLY (item T): `solver` is the workspace's own FlexibleStressSolver
+/// (latticeSim + the regions the load case reaches), never `startStressSolveIfNeeded` (gated on
+/// `lattice.enabled && needsStressSolve`, which a fresh Flexible part never passes). While it
+/// solves the button spins; the Stress legend says "Simulating…" — once (the #354 banner and a
+/// caption under this row said it too: four times).
 public struct FlexibleMainViewToggles: View {
     @ObservedObject var main: FlexibleMainStage
-    let stressReady: Bool
-    let stressRunning: Bool
-    let solve: (() -> Void)?
+    let solver: FlexibleStressSolver?
 
-    public init(main: FlexibleMainStage, stressReady: Bool = false, stressRunning: Bool = false, solve: (() -> Void)? = nil) {
+    public init(main: FlexibleMainStage, solver: FlexibleStressSolver? = nil) {
         self.main = main
-        self.stressReady = stressReady
-        self.stressRunning = stressRunning
-        self.solve = solve
+        self.solver = solver
     }
 
     static let heatIcon = "thermometer.medium"
     static let stressIcon = "waveform.path.ecg"
     static let buttons = 4
-    /// The "Simulating…" line under the row while the solve runs.
-    static let captionHeight: CGFloat = 18
 
     public var body: some View {
-        // what the workspace knows about its solve (no publish)
-        let _ = main.noteStress(ready: stressReady, running: stressRunning, solve: solve)
-        VStack(alignment: .trailing, spacing: 2) {
-            HStack(spacing: DS.Space.s) {
-                FlexibleViewButton(icon: "square.stack.3d.up", label: "X-ray", on: main.xray) { main.xray.toggle() }
-                    .accessibilityIdentifier("flexible-main-view-xray")
-                // ★ a thermometer reads "heat" (the stacked-layers glyph did not — batch B review)
-                FlexibleViewButton(icon: FlexibleMainViewToggles.heatIcon, label: "Dent heat", on: main.heat) { main.heat.toggle() }
-                    .accessibilityIdentifier("flexible-main-view-heat")
-                FlexibleViewButton(icon: FlexibleMainViewToggles.stressIcon, label: stressRunning ? "Simulating…" : "Stress",
-                                   on: main.stress) { main.toggleStress() }
-                    .overlay {
-                        if stressRunning, main.stress {
-                            ProgressView().controlSize(.small).tint(DS.Color.textPrimary.color).allowsHitTesting(false)
-                        }
+        // the workspace's solver (no publish: its sim's phase arrives on the next run-loop turn)
+        let _ = solver.map { main.attach($0) }
+        HStack(spacing: DS.Space.s) {
+            FlexibleViewButton(icon: "square.stack.3d.up", label: "X-ray", on: main.xray) { main.xray.toggle() }
+                .accessibilityIdentifier("flexible-main-view-xray")
+            // ★ a thermometer reads "heat" (the stacked-layers glyph did not — batch B review)
+            FlexibleViewButton(icon: FlexibleMainViewToggles.heatIcon, label: "Dent heat", on: main.heat) { main.toggleHeat() }
+                .accessibilityIdentifier("flexible-main-view-heat")
+            FlexibleViewButton(icon: FlexibleMainViewToggles.stressIcon, label: main.stressRunning ? "Simulating…" : "Stress",
+                               on: main.stress) { main.toggleStress() }
+                .overlay {
+                    if main.stressRunning, main.stress {
+                        ProgressView().controlSize(.small).tint(DS.Color.textPrimary.color).allowsHitTesting(false)
                     }
-                    .accessibilityIdentifier("flexible-main-view-stress")
-                FlexibleViewButton(icon: "cube.transparent", label: "Lattice", on: main.latticeShown) { main.toggleLattice() }
-                    .accessibilityIdentifier("flexible-main-view-lattice")
-            }
-            if stressRunning, main.stress {
-                Text("Simulating…")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(DS.Color.textSecondary.color)
-                    .frame(height: Self.captionHeight)
-                    .accessibilityIdentifier("flexible-main-stress-simulating")
-            }
+                }
+                .accessibilityIdentifier("flexible-main-view-stress")
+            FlexibleViewButton(icon: "cube.transparent", label: "Lattice", on: main.latticeShown) { main.toggleLattice() }
+                .accessibilityIdentifier("flexible-main-view-lattice")
         }
         .latticeBandChipKeepOut()
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
@@ -135,11 +123,10 @@ public struct FlexibleMainViewToggles: View {
     }
 
     /// Where the toggles sit, for the player's and the legends' keep-outs (four 40 pt buttons,
-    /// `s` apart; the "Simulating…" line under them while the solve runs).
-    static func frame(viewport: CGSize, simulating: Bool = false) -> CGRect {
+    /// `s` apart).
+    static func frame(viewport: CGSize) -> CGRect {
         let w = CGFloat(buttons) * 40 + CGFloat(buttons - 1) * DS.Space.s
-        return CGRect(x: viewport.width - PageChrome.edge - w, y: PageChrome.belowGizmo, width: w,
-                      height: 40 + (simulating ? 2 + captionHeight : 0))
+        return CGRect(x: viewport.width - PageChrome.edge - w, y: PageChrome.belowGizmo, width: w, height: 40)
     }
 }
 
@@ -167,7 +154,10 @@ public struct FlexibleMainPlayerSlot: View {
 
     public static func keepOut(viewport: CGSize, bottomClearance: CGFloat = 0, chipColumnWidth: CGFloat = 0,
                                legends: [CGRect]? = nil) -> [CGRect] {
-        var k = [FlexibleMainViewToggles.frame(viewport: viewport)]
+        var k = [FlexibleMainViewToggles.frame(viewport: viewport),
+                 // ★ BATCH C VERIFICATION: the left panel strip (Selections, the stage buttons) —
+                 // at 11" portrait the player sat inside the Selections column
+                 FlexibleMainLegendLayout.leftStrip(viewport: viewport)]
         // ★ BATCH C: the legends' real frames (FlexibleMainLegendLayout); the reserved slot
         // only when none are handed over
         if let legends { k += legends } else if let l = FlexibleLegendPlacement.legend(size: legendSize, viewport: viewport) { k.append(l) }

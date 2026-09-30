@@ -79,7 +79,16 @@ final class FlexibleLegendPlacementTests: XCTestCase {
                                   "a player place at \(name)")
             let legend = try XCTUnwrap(FlexibleLegendPlacement.legend(size: FlexibleMainPlayerSlot.legendSize, viewport: v))
             print("FLEX-PLACE main \(name): player \(p.integral) · legend slot \(legend.integral)")
-            XCTAssertEqual(p.midX, v.width / 2, accuracy: 0.5, "bottom-centre")
+            // ★ RE-PINNED (batch C verification): bottom-centre of the page — unless that would sit
+            // in the Selections column (13" / 11" portrait), then centred in the free span right of it
+            let strip = FlexibleMainLegendLayout.leftStrip(viewport: v)
+            XCTAssertFalse(p.intersects(strip), "clear of the Selections column at \(name)")
+            if (v.width - p.width) / 2 >= strip.maxX + FlexibleLegendPlacement.gap {
+                XCTAssertEqual(p.midX, v.width / 2, accuracy: 0.5, "bottom-centre")
+            } else {
+                XCTAssertEqual(p.midX, (strip.maxX + FlexibleLegendPlacement.gap + v.width - e) / 2, accuracy: 0.5,
+                               "centred right of the Selections column")
+            }
             clearOf(p, k.merging(["legend": legend]) { a, _ in a }, "the player", name)
             clearOf(legend, k.merging(["player": p]) { a, _ in a }, "the legend slot", name)
         }

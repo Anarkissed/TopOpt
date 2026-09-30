@@ -161,6 +161,8 @@ public struct FlexibleStagePage: View {
         .onChange(of: model.stacks.count) { _ in rebuildOverlay() }
         // the legend went (no dent to show): it cannot stay drilled in
         .onChange(of: dents == nil && model.checkStampShown == nil) { gone in if gone { legendDrilled = false; reading = nil } }
+        // ★ while the legend reads, the squish holds still (the reading stays on its surface)
+        .onChange(of: legendDrilled) { loop.holdWhileReading($0) }
         .onChange(of: model.latticeBuilding) { _ in refreshChannels() }
         .onReceive(model.objectWillChange.debounce(for: .milliseconds(16), scheduler: RunLoop.main)) { _ in
             refreshChannels()
@@ -420,10 +422,21 @@ public struct FlexibleStagePage: View {
     /// The legend, placed by FlexibleLegendPlacement.legend against the gizmo and the top line
     /// (its own size measured; trailing-centred until the first measurement).
     @ViewBuilder private func legend(in size: CGSize) -> some View {
+        // ★ BATCH C VERIFICATION: the legend's BODY lets every touch through (a curve point or
+        // the curve line under it stays live — "tap the line adds a point"); only its tab row
+        // ("TAP TO READ") takes the tap that drills in and out
         let view = FlexibleLegend(model: model, drawnLattice: drawnLattice, drilled: legendDrilled,
                                   reading: legendDrilled ? reading : nil)
-            .contentShape(Rectangle())
-            .onTapGesture { legendDrilled.toggle(); reading = nil }
+            .overlay(alignment: .top) {
+                Color.clear
+                    .frame(maxWidth: .infinity).frame(height: FlexibleLegend.tabHeight)
+                    .contentShape(Rectangle())
+                    .onTapGesture { legendDrilled.toggle(); reading = nil }
+                    .accessibilityElement()
+                    .accessibilityLabel(legendDrilled ? "Stop reading" : "Tap to read")
+                    .accessibilityAddTraits(.isButton)
+                    .accessibilityIdentifier("flexible-settings-legend-tab")
+            }
             .accessibilityIdentifier("flexible-settings-legend")
             .background(GeometryReader { g in
                 Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["legend": g.frame(in: .global)])
@@ -768,6 +781,9 @@ struct FlexibleLegend: View {
     var drawnLattice: FlexibleGeneratedLattice? = nil
     var drilled = false
     var reading: FlexibleReading? = nil
+    /// The tab row's height — the only part of the legend that takes a tap (the padding above
+    /// the "TAP TO READ" line, the line, and half the gap under it).
+    static let tabHeight: CGFloat = DS.Space.ml + 16
 
     var body: some View {
         let shown = FlexibleShownValues(model: model, drawnLattice: drawnLattice)
@@ -813,6 +829,8 @@ struct FlexibleLegend: View {
         .background(RoundedRectangle(cornerRadius: DS.Radius.panel).fill(DS.Surface.panel.color)
             .overlay(RoundedRectangle(cornerRadius: DS.Radius.panel)
                 .strokeBorder((drilled ? DS.Color.accent : DS.Color.strokePanel).color, lineWidth: drilled ? 1.5 : 1)))
+        // ★ PASS-THROUGH (batch C verification): the page lays the tab's tap target over it
+        .allowsHitTesting(false)
     }
 }
 
@@ -824,22 +842,12 @@ struct FlexibleReadingCallout: View {
 
     var body: some View {
         if let r = reading, let s = proj.projection?.project(r.anchor) {
-            HStack(spacing: 5) {
-                Image(systemName: "arrowtriangle.left.fill")
-                    .font(.system(size: 11))
-                    .foregroundStyle(DS.Color.accent.color)
-                Text(r.text)
-                    .font(.system(size: 13, weight: .semibold)).monospacedDigit()
-                    .foregroundStyle(DS.Color.textPrimary.color)
-            }
-            .padding(.horizontal, 9).padding(.vertical, 6)
-            .background(Capsule().fill(DS.Surface.panel.color.opacity(0.95))
-                .overlay(Capsule().strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
-            .fixedSize()
-            .offset(x: s.x + 8, y: s.y - 15)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            .allowsHitTesting(false)
-            .accessibilityIdentifier("flexible-reading-callout")
+            // ★ the value in the accent blue, in its own squircle (FlexibleReadingTag)
+            FlexibleReadingTag(reading: r)
+                .offset(x: s.x + 2, y: s.y - FlexibleReadingTag.halfHeight)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .allowsHitTesting(false)
+                .accessibilityIdentifier("flexible-reading-callout")
         }
     }
 }
