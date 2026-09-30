@@ -40,12 +40,24 @@ public final class FlexibleMainStage: ObservableObject {
     @Published public var xray = true { didSet { if oldValue != xray { refresh() } } }
     @Published public var heat = true { didSet { if oldValue != heat { refresh() } } }
     @Published public var latticeOn = true { didSet { if oldValue != latticeOn { refresh() } } }
+    /// ★ BATCH B REVIEW: the walls are drawn only in X-ray (the body is opaque otherwise), so
+    /// X-ray off made the Lattice button look broken. The button shows what is DRAWN, and
+    /// turning it on turns X-ray on.
+    public var latticeShown: Bool { latticeOn && xray }
+    public func toggleLattice() {
+        if latticeShown { latticeOn = false } else { xray = true; latticeOn = true }
+    }
 
     /// The squish, one number, stepped by the renderer (FlexibleSquishLoop).
     public let loop = FlexibleSquishLoop()
     public private(set) var model: FlexibleStageModel?
     private var projectID: UUID?
     private var observation: AnyCancellable?
+    /// ★ BATCH B REVIEW: the PROJECT, observed too — the main page's own edits (a new grid, a
+    /// lattice region, a group's weight, an undo) reach the lattice without Settings opening.
+    private var projectObservation: AnyCancellable?
+    /// The main page's loads as last acted on (the groups and their forces).
+    private var seenLoads: (groups: [SelectionGroup], force: ForceModel)?
     /// A full-screen page (Settings) is up: nothing recomputes or builds under it.
     public private(set) var frozen = false
     /// The main page is showing the Flexible lattice stage.
@@ -99,6 +111,10 @@ public final class FlexibleMainStage: ObservableObject {
         observation = m.objectWillChange
             .debounce(for: .milliseconds(120), scheduler: RunLoop.main)
             .sink { [weak self] _ in self?.modelChanged() }
+        seenLoads = nil
+        projectObservation = project.objectWillChange
+            .debounce(for: .milliseconds(250), scheduler: RunLoop.main)
+            .sink { [weak self] _ in self?.projectChanged() }
         return m
     }
 
@@ -109,6 +125,8 @@ public final class FlexibleMainStage: ObservableObject {
         visible = true
         model?.checkStampShown = nil
         model?.pendingFix = nil
+        model?.retryFailedBuild()   // his Save & Exit asks for the build: a failed one is tried once more
+        noteLoads()        // what Settings did to the groups (a weight written back) is in hand
         refresh()
         buildIfReady()
     }
@@ -171,7 +189,8 @@ public final class FlexibleMainStage: ObservableObject {
     public var fullLabel: String {
         guard let m = model else { return "Full load" }
         let shown = Set(m.lattice?.squishedKeys.map(\.region) ?? [])
-        return FlexibleSquishLoop.fullLabel(weightsKg: m.settings.loadedFaces.filter { shown.contains($0.faceRegionID) }.map(\.weightKg))
+        return FlexibleSquishLoop.fullLabel(weightsKg: m.settings.loadedFaces.filter { shown.contains($0.faceRegionID) }.map(\.weightKg),
+                                            shapeOnly: m.lattice?.shapeOnly == true)
     }
 
     /// The bottom pill (H10).
@@ -199,6 +218,7 @@ public final class FlexibleMainStage: ObservableObject {
         let m = ensure(project)
         if isNew { attached &+= 1 }
         guard visible else { return }
+        noteLoads()
         m.openScene()
         refresh()
         buildIfReady()
@@ -210,12 +230,44 @@ public final class FlexibleMainStage: ObservableObject {
         buildIfReady()
     }
 
+    private func noteLoads() {
+        guard let p = model?.project else { return }
+        seenLoads = (p.selection.groups, p.force)
+    }
+
+    /// ★ THE MAIN PAGE'S OWN EDITS (batch B review). The stage heard only the model, so a new
+    /// grid (quality), a new lattice region (a group's role), a new bead, a group's weight —
+    /// and the two-finger UNDO, which restores `lattice.flexible` behind the model's back —
+    /// left the old lattice "ready", or a stale one hidden behind "Building…" with no build.
+    /// Now: the scene the project describes differs from the one opened, the groups moved,
+    /// or the settings moved without the pipeline ⇒ `openScene()` (a new key re-opens; the same
+    /// key re-reads the groups and re-runs the designs), and the lattice rebuilds when they
+    /// land. Debounced, only while the stage shows, never under Settings.
+    func projectChanged() {
+        guard !frozen, visible, let m = model, m.sceneState != .opening else { return }
+        let p = m.project
+        let key = m.currentSceneKey
+        let failed: Bool = { if case .failed = m.sceneState { return true } else { return false } }()
+        let sceneMoved = (m.sceneState == .ready && key != m.openedKey) || (failed && key != m.openAttemptKey)
+        let loadsMoved = seenLoads.map { $0.groups != p.selection.groups || $0.force != p.force } ?? true
+        if sceneMoved || loadsMoved || m.settingsOutranPipeline {
+            noteLoads()
+            m.openScene()
+            refresh()
+        }
+        buildIfReady()
+    }
+
     /// Build when nothing blocks and the designs are in: the first time the stage shows, after
     /// Exit, and whenever a later edit left the lattice stale — never per drag (the model's
     /// changes reach here debounced, and nothing builds while Settings is up).
     func buildIfReady() {
         guard let m = model, !frozen, m.sceneState == .ready, !m.latticeBuilding,
-              m.lattice == nil || m.latticeIsStale else { return }
+              m.lattice == nil || m.latticeIsStale,
+              // ★ a build that failed on these settings and this scene is not retried (it
+              // looped: the failure published, the page rebuilt, it failed …); an edit or a new
+              // scene clears it
+              m.latticeFailure == nil else { return }
         let r = m.readiness
         guard r.isReady, !r.designing else { return }
         m.generateLattice()
@@ -264,18 +316,24 @@ public struct FlexibleMainStatus: Equatable, Sendable {
     /// The issue a tap opens Settings on.
     public let fix: FlexibleIssue?
 
+    /// ★ BATCH B REVIEW: the pill reads "Lattice" over this line, so the line never says
+    /// "Lattice" again ("Lattice / Lattice ready").
     public static let opening = "Opening the part…"
-    /// Before the stage ever opened this project (the Topology stage's bar).
-    public static let notOpened = "Tap to set up the lattice"
-    public static let building = "Building the lattice…"
-    public static let ready = "Lattice ready"
+    /// Before the stage opened this project this session (another stage's bar): a tap goes to
+    /// the Lattice stage and opens Settings.
+    public static let notOpened = "Tap to open"
+    public static let building = "Building…"
+    public static let ready = "Ready"
 
-    /// The rule: the one thing to fix (readiness.oneLine) → building (opening, designing, no
+    /// The rule: the one thing to fix (readiness.oneLine) → a failed build (core's words; ★
+    /// batch B review: it was "Building…" for ever) → building (opening, designing, no
     /// lattice yet, stale) → ready (the shape-only label for a calibrate-first filament).
     public static func of(readiness: FlexibleReadiness?, sceneReady: Bool, isBuilding: Bool,
-                          lattice: FlexibleGeneratedLattice?, stale: Bool) -> FlexibleMainStatus {
+                          lattice: FlexibleGeneratedLattice?, stale: Bool, failure: String? = nil) -> FlexibleMainStatus {
         guard let r = readiness, sceneReady else { return .init(line: opening, tone: .building, fix: nil) }
-        if let first = r.blocking.first { return .init(line: r.oneLine, tone: .fix, fix: first) }
+        // ★ the SHORT form (it truncated mid-sentence at 11" portrait); the pop-up says it whole
+        if let first = r.blocking.first { return .init(line: first.pill, tone: .fix, fix: first) }
+        if let failure, !isBuilding { return .init(line: FlexibleReadiness.buildFailedLine(failure), tone: .fix, fix: nil) }
         if isBuilding || r.designing || lattice == nil || stale { return .init(line: building, tone: .building, fix: nil) }
         return .init(line: lattice?.shapeOnlyLabel ?? ready, tone: .ready, fix: nil)
     }
@@ -285,6 +343,6 @@ public struct FlexibleMainStatus: Equatable, Sendable {
         guard let m else { return .init(line: notOpened, tone: .idle, fix: nil) }
         if case .failed = m.sceneState { return .init(line: "The part could not be opened", tone: .fix, fix: nil) }
         return of(readiness: m.sceneState == .ready ? m.readiness : nil, sceneReady: m.sceneState == .ready,
-                  isBuilding: m.latticeBuilding, lattice: m.lattice, stale: m.latticeIsStale)
+                  isBuilding: m.latticeBuilding, lattice: m.lattice, stale: m.latticeIsStale, failure: m.latticeFailure)
     }
 }

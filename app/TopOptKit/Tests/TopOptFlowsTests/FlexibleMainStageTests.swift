@@ -4,8 +4,8 @@
 //     page only observes the stage's one model. RED CONTROL: a page-owned model (a fresh
 //     FlexibleStageModel, what the @StateObject was) has none;
 //   * Exit while designs are still in flight ⇒ the lattice builds once they land;
-//   * the bottom pill says readiness.oneLine while something blocks, then "Building…", then
-//     "Lattice ready";
+//   * the bottom pill says the one thing to fix (its short form) while something blocks, then
+//     "Building…", then "Ready";
 //   * the squish never publishes into WorkspacePlaceholder: during a 2 s loop the stage's
 //     objectWillChange fires at most twice. RED CONTROL: a stage that publishes the phase
 //     fires about 60 times;
@@ -91,7 +91,9 @@ final class FlexibleMainStageTests: XCTestCase {
         await m.waitForIdle()
         let s = stage.status
         XCTAssertEqual(s.tone, .fix)
-        XCTAssertEqual(s.line, m.readiness.oneLine, "the pill says the one thing to fix")
+        // ★ batch B review: the pill's SHORT form (the whole sentence truncated at 11" portrait)
+        XCTAssertEqual(s.line, m.readiness.blocking.first?.pill, "the pill says the one thing to fix")
+        XCTAssertEqual(s.line, "Fix: Face 3 & Face 5 share a stack")
         XCTAssertEqual(s.fix?.kind, .sharedStack)
         stage.openFix()
         XCTAssertEqual(m.pendingFix?.kind, .sharedStack, "a tap opens Settings on that fix")

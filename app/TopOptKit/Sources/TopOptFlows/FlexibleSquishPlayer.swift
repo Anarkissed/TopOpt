@@ -134,7 +134,11 @@ public final class FlexibleSquishLoop: ObservableObject {
     }
 
     /// The timeline's end label: the full design load ("10 kg", "10 kg each"), else "Full load".
-    public static func fullLabel(weightsKg: [Double]) -> String {
+    /// ★ BATCH B REVIEW: a SHAPE-ONLY lattice ("no squish predicted") ends "As drawn" — a weight
+    /// there read as "at 10 kg it squishes this much", the very prediction its label disowns.
+    public static let asDrawn = "As drawn"
+    public static func fullLabel(weightsKg: [Double], shapeOnly: Bool = false) -> String {
+        if shapeOnly { return asDrawn }
         let w = weightsKg.filter { $0 > 0 }
         guard let first = w.first else { return "Full load" }
         if w.count == 1 { return FlexibleRowCopy.kgText(first) }

@@ -193,7 +193,8 @@ final class FlexibleReadinessTests: XCTestCase {
     func testThePopUpOpensOnlyOnANewIssueHisActionCaused() {
         let block = FlexibleReadiness.evaluate(inputs([face(3), face(5)], conflicts: [(a: 3, b: 5)]))
         let clear = FlexibleReadiness.evaluate(inputs([face(3)]))
-        // opening a project that already has it: its line says so, no pop-up
+        // an action-only prompt (no popExisting — the page's pop-once-on-open is pinned in
+        // FlexibleBatchBReviewUXTests): an issue that stood before any action does not pop
         var p = FlexibleFixPrompt(actionSerial: 4)
         XCTAssertNil(p.next(block, actionSerial: 4, settled: true), "no action on this visit")
         // noise (a recompute re-reports it) never pops

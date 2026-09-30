@@ -165,8 +165,27 @@ public final class FlexibleStageModel: ObservableObject {
     /// Bumped by every action of HIS that can create a problem (press, rest, a weight, the
     /// trash, a filament): the fix pop-up opens only on a NEW blocking issue an action caused.
     @Published public private(set) var actionSerial = 0
-    /// A one-line note for an automatic fix ("Nozzle temperature set to Auto — …").
-    @Published public var toast: String?
+    /// A one-line note for an automatic fix ("Nozzle temperature set to Auto — …"). ★ BATCH B
+    /// REVIEW: it clears ITSELF after `toastSeconds` — an auto-fix can land while the main page
+    /// shows (no Settings page up to clear it), and the page's own clear only heard a change,
+    /// so a toast set before it opened stayed under the line for the whole visit.
+    @Published public var toast: String? { didSet { scheduleToastClear() } }
+    /// ★ BATCH B REVIEW: a design run (designs AND core's stack conflicts) is scheduled and has
+    /// not landed — the pop-up waits for it before it pops a blocker that stands on opening
+    /// (a calibrate-first map lands before the conflicts do).
+    @Published public private(set) var designsInFlight = false
+    var toastSeconds: Double = 3.5
+    private var toastTask: Task<Void, Never>?
+    private func scheduleToastClear() {
+        toastTask?.cancel()
+        guard let t = toast else { return }
+        let ns = UInt64(max(0, toastSeconds) * 1e9)
+        toastTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: ns)
+            guard let self, !Task.isCancelled, self.toast == t else { return }
+            self.toast = nil
+        }
+    }
     /// The issue the page opens its pop-up on when it appears (the main page's pill).
     @Published public var pendingFix: FlexibleIssue?
 
@@ -302,6 +321,8 @@ public final class FlexibleStageModel: ObservableObject {
 
     /// The scene's key: everything that changes the part, grid, mask or regions —
     /// NOT the faces, curves or filament (those re-run designs, never the scene).
+    /// ★ BATCH B REVIEW: the bead width too — the scene job sends it (min_extrudable_width_mm)
+    /// and the shared model now keeps its scene for the whole session.
     private func sceneKey() -> String {
         guard let file = project.importedFile else { return "" }
         let regions = project.latticeJobRegions().regions.map(\.wireDictionary)
@@ -309,7 +330,11 @@ public final class FlexibleStageModel: ObservableObject {
             .map { String(decoding: $0, as: UTF8.self) } ?? ""
         let (b, p) = buildDirections
         return "\(file.path)|\(project.quality.resolution)|\(r)|\(self.regions.key)|\(b)|\(p.map { "\($0)" } ?? "-")"
+            + "|\(project.printParams.strutLineWidthMM)"
     }
+
+    /// The scene key the project describes NOW (the main page compares it with the opened one).
+    var currentSceneKey: String { sceneKey() }
 
     /// ★ ROUND 3 (item 1.2): the main run's build directions — `loads.build_dir` = −gravity
     /// (+Z when gravity is unset) and the plate normal only when he declared one.
@@ -326,8 +351,25 @@ public final class FlexibleStageModel: ObservableObject {
     /// Core's sentence with sector ids replaced by the app's names.
     public func text(_ s: String) -> String { regions.renamed(s, mesh: project.viewerMesh) }
 
-    /// The key the ready scene was opened with.
-    private var openedKey: String?
+    /// The region "no pressed face" offers to press (FlexibleReadiness.suggestedFace), cached
+    /// per mesh, build direction and split — a split face offers the sector at its centroid.
+    private var suggestedCache: (key: String, region: Int?)?
+    func suggestedPressRegion() -> Int? {
+        guard let mesh = project.viewerMesh else { return nil }
+        let up = buildDirections.0
+        let key = "\(mesh.triangleCount)|\(mesh.faceIDs.count)|\(up)|\(regions.key)"
+        if let c = suggestedCache, c.key == key { return c.region }
+        let region = FlexibleReadiness.suggestedFace(mesh: mesh, up: up).map {
+            regions.region(at: $0.centroid, face: $0.face, mesh: mesh)
+        }
+        suggestedCache = (key, region)
+        return region
+    }
+
+    /// The key the ready scene was opened with (the lattice is keyed by it too).
+    private(set) var openedKey: String?
+    /// The key the last open was ATTEMPTED with (a failed open is retried only on a new one).
+    private(set) var openAttemptKey: String?
 
     public func openScene() {
         guard sceneState != .opening else { return }
@@ -340,6 +382,7 @@ public final class FlexibleStageModel: ObservableObject {
             recomputeAll()
             return
         }
+        openAttemptKey = key
         guard let job = try? sceneJob() else {
             sceneState = .failed("This project has no imported part to open.")
             return
@@ -587,14 +630,17 @@ public final class FlexibleStageModel: ObservableObject {
     }
 
     private func scheduleDesigns(delayNS: UInt64) {
+        pipelineSettings = settings
         designGeneration += 1
         let gen = designGeneration
         designTask?.cancel()
         guard let path = materialsPath, let mat = settings.materialID else {
             designs = [:]
             designErrors = [:]
+            if designsInFlight { designsInFlight = false }
             return
         }
+        if !designsInFlight { designsInFlight = true }
         let faces = settings.loadedFaces.filter { stacks[FlexFaceKey(region: $0.faceRegionID, rotation: $0.rotationDeg)] != nil }
         let temp = designTempC, build = self.build, grids = stampGrids
         let checkStamps = settings.checkStamps
@@ -649,6 +695,7 @@ public final class FlexibleStageModel: ObservableObject {
             let (o, fe, ss, ch, co, er) = (out, faceErrors, s, checks, conflicts, err)
             await MainActor.run {
                 guard gen == self.designGeneration else { return }
+                self.designsInFlight = false
                 self.designs = o
                 self.designErrors = fe
                 for (k, v) in ss { self.liveS[k] = v }
@@ -759,8 +806,34 @@ public final class FlexibleStageModel: ObservableObject {
     /// ★ ROUND 3 BATCH B: FlexibleReadiness decides (the old gate's order was the bug); nil
     /// when nothing blocks.
     public var latticeRefusal: String? { readiness.refusal }
-    /// The generated lattice no longer matches the settings (a face or the filament changed).
-    public var latticeIsStale: Bool { lattice.map { $0.settingsKey != settings.hashValue } ?? false }
+    /// The generated lattice no longer matches the settings (a face or the filament changed)
+    /// — ★ BATCH B REVIEW: or the SCENE it was built on (a new grid, a new lattice region, a
+    /// new bead on the main page; the shared model keeps its lattice across the session).
+    public var latticeIsStale: Bool {
+        lattice.map { $0.settingsKey != settings.hashValue || ($0.sceneKey != nil && $0.sceneKey != openedKey) } ?? false
+    }
+
+    /// What a build is keyed by: the settings and the scene.
+    private var latticeBuildKey: String { "\(settings.hashValue)|\(openedKey ?? "")" }
+    /// The key the last build FAILED on.
+    private var latticeFailedKey: String?
+    /// ★ BATCH B REVIEW: a failed build is LATCHED against what it was built from — the main
+    /// page tried again on every change it caused itself (the failure published, the page
+    /// rebuilt, it failed …), for ever, behind "Building the lattice…". Core's words while the
+    /// settings and the scene are the ones that failed; nil once either changes.
+    public var latticeFailure: String? {
+        guard let e = latticeError, latticeFailedKey == latticeBuildKey else { return nil }
+        return e
+    }
+
+    /// His explicit Save & Exit asks for the build again (once per Exit — never a loop).
+    public func retryFailedBuild() { latticeFailedKey = nil }
+
+    /// The settings the design pipeline last ran for (every design run is scheduled here).
+    private(set) var pipelineSettings: FlexibleStageSettings?
+    /// ★ BATCH B REVIEW: the settings moved without the pipeline — an undo / redo on the MAIN
+    /// page (its two-finger tap restores `lattice.flexible` behind the model's back).
+    var settingsOutranPipeline: Bool { sceneState == .ready && pipelineSettings != settings }
 
     /// Bumped per build — the token the preview uploads once per.
     private var latticeGeneration = 0
@@ -821,6 +894,7 @@ public final class FlexibleStageModel: ObservableObject {
         let (builtKeys, faceDepths, faceNoLattice, extentMM, drawnFaces) = (order, depths, noLattice, extent, drawn)
         let depthForBand = shallowest.isFinite ? shallowest : 0
         let build = self.build, key = settings.hashValue, temp = designTempC ?? 0
+        let builtOn = openedKey, buildKey = latticeBuildKey
         let label = shapeOnly ? FlexibleReadiness.shapeOnlyLabel(material?.displayName ?? "This filament") : nil
         let regions = self.regions
         let skinOff: [(face: Int, cuts: [RegionCut])] = faces.filter { !$0.skinOn }.flatMap { f in
@@ -830,8 +904,10 @@ public final class FlexibleStageModel: ObservableObject {
         latticeBuilding = true
         latticeError = nil
         let worker = self.worker
+        let failWith = controlFailBuild
         track(Task.detached(priority: .userInitiated) {
             do {
+                if let failWith { throw TopOptError(message: failWith) }
                 let field: FlexDensityField
                 if shapeOnly {
                     // ★ core's mask, the drawn map's density inside the printable band
@@ -850,15 +926,22 @@ public final class FlexibleStageModel: ObservableObject {
                 let g = FlexibleGeneratedLattice(inputs: inputs, faces: squishFaces, keys: builtKeys, columnDepths: faceDepths,
                                                  columnNoLattice: faceNoLattice, extentMM: extentMM, generation: generation,
                                                  topology: build.topology, tempC: temp, settingsKey: key,
-                                                 squishedKeys: squished, shapeOnlyLabel: label)
+                                                 squishedKeys: squished, shapeOnlyLabel: label, sceneKey: builtOn)
                 await MainActor.run { self.lattice = g; self.latticeBuilding = false }
             } catch {
-                await MainActor.run { self.latticeError = "\(error)"; self.latticeBuilding = false }
+                await MainActor.run {
+                    self.latticeFailedKey = buildKey
+                    self.latticeError = "\(error)"
+                    self.latticeBuilding = false
+                }
             }
         })
     }
 
     public func discardLattice() { lattice = nil }
+
+    /// Test control only: the next builds throw this (a builder or core refusal on the build).
+    var controlFailBuild: String?
 
     // MARK: the run job (S5)
 

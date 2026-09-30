@@ -44,17 +44,21 @@ public struct FlexibleGeneratedLattice: Sendable {
     /// only — no squish predicted" (his words). nil for a designed lattice.
     public let shapeOnlyLabel: String?
     public var shapeOnly: Bool { shapeOnlyLabel != nil }
+    /// ★ BATCH B REVIEW: the scene it was built on (FlexibleStageModel's opened key) — a new
+    /// grid or lattice region leaves it stale, not "Lattice ready". nil: not keyed (tests).
+    public let sceneKey: String?
 
     public init(inputs: FlexibleLatticeInputs, faces: [FlexibleSquishFace], keys: [FlexFaceKey] = [],
                 columnDepths: [FlexFaceKey: [Double?]] = [:], columnNoLattice: [FlexFaceKey: [Bool]] = [:],
                 extentMM: Double = 0, generation: Int = 0, topology: String, tempC: Double, settingsKey: Int,
-                squishedKeys: [FlexFaceKey]? = nil, shapeOnlyLabel: String? = nil) {
+                squishedKeys: [FlexFaceKey]? = nil, shapeOnlyLabel: String? = nil, sceneKey: String? = nil) {
         self.inputs = inputs; self.faces = faces; self.keys = keys
         self.columnDepths = columnDepths; self.columnNoLattice = columnNoLattice
         self.extentMM = extentMM; self.generation = generation
         self.topology = topology; self.tempC = tempC; self.settingsKey = settingsKey
         self.squishedKeys = squishedKeys ?? Array(keys.prefix(FlexibleSquishField.maxFaces))
         self.shapeOnlyLabel = shapeOnlyLabel
+        self.sceneKey = sceneKey
     }
 
     /// The deepest buildable squish over all faces (mm, full load), for the exaggeration.

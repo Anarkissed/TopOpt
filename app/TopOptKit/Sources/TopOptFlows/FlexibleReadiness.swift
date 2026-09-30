@@ -18,7 +18,7 @@
 // ★ WHAT NEVER BLOCKS: a calibrate-first filament (9 of 10 — Exit builds a SHAPE-ONLY
 // lattice, "<filament>: shape only — no squish predicted", his answer), more than four
 // pressed faces (the walls use every face; the squish is shown on the 4 largest), and
-// "still being designed" (Exit proceeds; the main page says "Building the lattice…").
+// "still being designed" (Exit proceeds; the main page's pill says "Building…").
 // ★ SILENT AUTO-FIXES (with a toast): temperature_not_tested → Auto; topology_no_data /
 // honeycomb_side_stack → Gyroid.
 //
@@ -26,6 +26,7 @@
 // "calibrate-first" (which no longer blocks) before the one thing that did (faces 3 and 5).
 
 import Foundation
+import simd
 import TopOptKit
 
 /// One button on the fix pop-up.
@@ -59,6 +60,8 @@ public struct FlexibleIssue: Equatable, Identifiable, Sendable {
         case noFilament, noPressedFace, sharedStack, noStack, noWeight, refused, designFailed
         // never blocking
         case stillDesigning, shapeOnly, squishOnFour
+        /// The last build failed on these settings and this scene (core's words; batch B review).
+        case buildFailed
     }
     /// Stable across recomputes: the kind and the faces it names (the pop-up shows a NEW one).
     public let id: String
@@ -69,6 +72,24 @@ public struct FlexibleIssue: Equatable, Identifiable, Sendable {
     public let oneLine: String
     public let blocking: Bool
     public let fixes: [FlexibleFix]
+    /// ★ BATCH B REVIEW: the main page's pill form — short enough to read whole in the bottom
+    /// bar at 11" portrait ("Fix: Face 3 & Face 5 share a stack"); the full sentence is on the
+    /// pop-up the pill opens.
+    public let pill: String
+
+    /// Every face the issue names — its own, then the other its fixes rest (a shared stack:
+    /// both ends; the pop-up pulses them all and turns the camera to see both).
+    public var named: [Int] {
+        var out: [Int] = region.map { [$0] } ?? []
+        for f in fixes { if case .rest(let r) = f, !out.contains(r) { out.append(r) } }
+        return out
+    }
+
+    public init(id: String, kind: Kind, region: Int?, oneLine: String, blocking: Bool, fixes: [FlexibleFix],
+                pill: String? = nil) {
+        self.id = id; self.kind = kind; self.region = region; self.oneLine = oneLine
+        self.blocking = blocking; self.fixes = fixes; self.pill = pill ?? oneLine
+    }
 }
 
 /// A fix the app applies itself (a toast says so).
@@ -88,6 +109,8 @@ public struct FlexibleReadiness: Equatable, Sendable {
     public var refusal: String? { blocking.first?.oneLine }
     public var shapeOnly: Bool { issues.contains { $0.kind == .shapeOnly } }
     public var designing: Bool { issues.contains { $0.kind == .stillDesigning } }
+    /// The last build failed (never blocks Exit — but the line is not "ready" green).
+    public var buildFailed: Bool { issues.contains { $0.kind == .buildFailed } }
 
     /// The Settings page's top line (and the main page pill's text while something blocks).
     public var oneLine: String {
@@ -95,6 +118,7 @@ public struct FlexibleReadiness: Equatable, Sendable {
         if let first = b.first {
             return "\(b.count) thing\(b.count == 1 ? "" : "s") to fix: \(first.oneLine)"
         }
+        if let failed = issues.first(where: { $0.kind == .buildFailed }) { return failed.oneLine }
         if let four = issues.first(where: { $0.kind == .squishOnFour }) {
             return "Ready · \(four.oneLine)"
         }
@@ -103,6 +127,12 @@ public struct FlexibleReadiness: Equatable, Sendable {
 
     public static let ready = "Ready: Exit builds the lattice"
     public static let readyShapeOnly = "Ready: Exit builds a shape-only lattice"
+
+    /// ★ BATCH B REVIEW: a failed build is SAID (it was invisible: "Building the lattice…" for
+    /// ever) — core's first sentence, on the Settings line and the main page's pill.
+    public static func buildFailedLine(_ error: String) -> String {
+        "Couldn't build the lattice: \(firstSentence(error))"
+    }
 
     /// "<filament>: shape only — no squish predicted" (his words for the calibrate-first lattice).
     public static func shapeOnlyLabel(_ filament: String) -> String {
@@ -147,6 +177,12 @@ public struct FlexibleReadiness: Equatable, Sendable {
         public var calibrateFirst: Bool
         /// The filament a one-tap "pick a filament" chooses (the one with data).
         public var withData: (id: String, name: String)?
+        /// ★ BATCH B REVIEW: any filament at all (the first in the catalogue) — the pick when
+        /// none has data (it builds a shape-only lattice). nil only with no catalogue.
+        public var anyFilament: (id: String, name: String)?
+        /// ★ BATCH B REVIEW: the face that most likely carries weight (FlexibleReadiness.
+        /// suggestedFace) — "no pressed face" with nothing selected had NO button.
+        public var suggested: Int?
         public var pressed: [Face]
         /// core's stack conflicts among the pressed faces (a, b in core's order).
         public var conflicts: [(a: Int, b: Int)]
@@ -159,17 +195,22 @@ public struct FlexibleReadiness: Equatable, Sendable {
         public var removable: (Int) -> Bool
         /// A main-page group gives it its weight (pressing needs no pad).
         public var inherited: (Int) -> Bool
+        /// The last build failed on these settings and this scene (core's words).
+        public var buildFailure: String?
 
         public init(materialID: String?, materialName: String?, calibrateFirst: Bool,
                     withData: (id: String, name: String)?, pressed: [Face], conflicts: [(a: Int, b: Int)],
                     nozzleIsAuto: Bool = true, topologyIsGyroid: Bool = false, selected: Int? = nil,
                     name: @escaping (Int) -> String = { "Face \($0)" },
                     removable: @escaping (Int) -> Bool = { _ in true },
-                    inherited: @escaping (Int) -> Bool = { _ in false }) {
+                    inherited: @escaping (Int) -> Bool = { _ in false }, buildFailure: String? = nil,
+                    anyFilament: (id: String, name: String)? = nil, suggested: Int? = nil) {
             self.materialID = materialID; self.materialName = materialName; self.calibrateFirst = calibrateFirst
             self.withData = withData; self.pressed = pressed; self.conflicts = conflicts
             self.nozzleIsAuto = nozzleIsAuto; self.topologyIsGyroid = topologyIsGyroid; self.selected = selected
             self.name = name; self.removable = removable; self.inherited = inherited
+            self.buildFailure = buildFailure
+            self.anyFilament = anyFilament; self.suggested = suggested
         }
     }
 
@@ -185,21 +226,27 @@ public struct FlexibleReadiness: Equatable, Sendable {
             i.removable(r) ? [.rest(r), .remove(r)] : [.rest(r)]
         }
 
-        // 1. no filament — a legacy project only (New TopOpt picks one)
+        // 1. no filament — a legacy project only (New TopOpt picks one). ★ Every blocking issue
+        // has a button (batch B review): the filament with data, else any filament (a
+        // shape-only lattice); with no catalogue at all there is nothing to pick, and Exit is
+        // not held on it (the build then says why)
         if i.materialID == nil {
+            let pick = i.withData ?? i.anyFilament
             out.append(FlexibleIssue(id: "noFilament", kind: .noFilament, region: nil,
                                      oneLine: "Pick the filament you print with",
-                                     blocking: true,
-                                     fixes: i.withData.map { [.pickFilament(id: $0.id, name: $0.name)] } ?? []))
+                                     blocking: pick != nil,
+                                     fixes: pick.map { [.pickFilament(id: $0.id, name: $0.name)] } ?? [],
+                                     pill: "Fix: pick a filament"))
         }
-        // 2. no pressed face
+        // 2. no pressed face — the selected face, else the one most likely to carry weight
         if i.pressed.isEmpty {
-            let target = i.selected
+            let target = i.selected ?? i.suggested
             out.append(FlexibleIssue(id: "noPressedFace", kind: .noPressedFace, region: target,
                                      oneLine: target.map { "Press \(name($0)) or tap the face that carries weight" }
                                         ?? "Tap the face that carries weight, then press it",
                                      blocking: true,
-                                     fixes: target.map { [.press($0)] } ?? []))
+                                     fixes: target.map { [.press($0)] } ?? [],
+                                     pill: "Fix: press the face that carries weight"))
         }
         // 3. two pressed faces sharing a stack — ★ FIRST among the per-face issues: on his
         // project it is THE one thing (the old gate said "calibrate-first" before it)
@@ -211,7 +258,8 @@ public struct FlexibleReadiness: Equatable, Sendable {
             out.append(FlexibleIssue(id: "sharedStack|\(key)", kind: .sharedStack, region: c.b,
                                      oneLine: "\(name(c.a)) and \(name(c.b)) press the same material",
                                      blocking: true,
-                                     fixes: [.rest(c.b), .rest(c.a)]))
+                                     fixes: [.rest(c.b), .rest(c.a)],
+                                     pill: "Fix: \(name(c.a)) & \(name(c.b)) share a stack"))
         }
         // 4–7. per pressed face
         for f in i.pressed {
@@ -219,13 +267,15 @@ public struct FlexibleReadiness: Equatable, Sendable {
             if let e = f.stackError {
                 out.append(FlexibleIssue(id: "noStack|\(r)", kind: .noStack, region: r,
                                          oneLine: "\(name(r)) can't be squished here: \(firstSentence(e))",
-                                         blocking: true, fixes: restOrRemove(r)))
+                                         blocking: true, fixes: restOrRemove(r),
+                                         pill: "Fix: \(name(r)) can't be squished"))
                 continue
             }
             if !(f.weightKg > 0) {
                 out.append(FlexibleIssue(id: "noWeight|\(r)", kind: .noWeight, region: r,
                                          oneLine: "How much weight presses \(name(r))?",
-                                         blocking: true, fixes: [.weight(r)] + restOrRemove(r).prefix(1)))
+                                         blocking: true, fixes: [.weight(r)] + restOrRemove(r).prefix(1),
+                                         pill: "Fix: the weight on \(name(r))"))
                 continue
             }
             // a calibrate-first filament designs nothing — its lattice needs only the drawing
@@ -245,12 +295,14 @@ public struct FlexibleReadiness: Equatable, Sendable {
                 } else {
                     out.append(FlexibleIssue(id: "refused|\(r)|\(code)", kind: .refused, region: r,
                                              oneLine: "\(name(r)): \(firstSentence(reason))",
-                                             blocking: true, fixes: restOrRemove(r)))
+                                             blocking: true, fixes: restOrRemove(r),
+                                             pill: "Fix: \(name(r)) can't be designed"))
                 }
             case .failed(let why):
                 out.append(FlexibleIssue(id: "designFailed|\(r)", kind: .designFailed, region: r,
                                          oneLine: "\(name(r)): \(firstSentence(why))",
-                                         blocking: true, fixes: restOrRemove(r)))
+                                         blocking: true, fixes: restOrRemove(r),
+                                         pill: "Fix: \(name(r)) can't be designed"))
             case .pending, .ok:
                 break
             }
@@ -272,12 +324,44 @@ public struct FlexibleReadiness: Equatable, Sendable {
                                      oneLine: "Still designing — Exit builds it when it lands",
                                      blocking: false, fixes: []))
         }
+        if let e = i.buildFailure {
+            out.append(FlexibleIssue(id: "buildFailed", kind: .buildFailed, region: nil,
+                                     oneLine: buildFailedLine(e), blocking: false, fixes: []))
+        }
         if i.pressed.count > FlexibleSquishField.maxFaces {
             out.append(FlexibleIssue(id: "squishOnFour", kind: .squishOnFour, region: nil,
                                      oneLine: "Squish shown on the \(FlexibleSquishField.maxFaces) largest of \(i.pressed.count) faces",
                                      blocking: false, fixes: []))
         }
         return FlexibleReadiness(issues: out, autoFixes: auto)
+    }
+
+    /// ★ THE FACE THAT MOST LIKELY CARRIES WEIGHT (batch B review): the face with the most
+    /// area facing `up` (against gravity — the build direction); the largest when none faces
+    /// up. One pass over the triangles. nil for a mesh with no face ids.
+    public static func suggestedFace(mesh: ViewerMesh, up: SIMD3<Double>) -> (face: Int, centroid: SIMD3<Double>)? {
+        guard !mesh.faceIDs.isEmpty, simd_length(up) > 1e-9 else { return nil }
+        let u = simd_normalize(up)
+        var area: [Int32: Double] = [:], upArea: [Int32: Double] = [:], centroid: [Int32: SIMD3<Double>] = [:]
+        let pos = mesh.positions, idx = mesh.indices
+        func p(_ i: UInt32) -> SIMD3<Double> {
+            let k = Int(i) * 3
+            return SIMD3(Double(pos[k]), Double(pos[k + 1]), Double(pos[k + 2]))
+        }
+        for t in 0..<min(mesh.triangleCount, mesh.faceIDs.count) {
+            let a = p(idx[3 * t]), b = p(idx[3 * t + 1]), c = p(idx[3 * t + 2])
+            let n = simd_cross(b - a, c - a) * 0.5
+            let ar = simd_length(n)
+            guard ar > 0 else { continue }
+            let f = mesh.faceIDs[t]
+            area[f, default: 0] += ar
+            upArea[f, default: 0] += max(0, simd_dot(n, u))
+            centroid[f, default: .zero] += (a + b + c) / 3 * ar
+        }
+        let facingUp = upArea.filter { $0.value > 1e-9 }
+        let pool = facingUp.isEmpty ? area : facingUp
+        guard let best = pool.max(by: { $0.value != $1.value ? $0.value < $1.value : $0.key > $1.key }) else { return nil }
+        return (Int(best.key), (centroid[best.key] ?? .zero) / max(area[best.key] ?? 1, 1e-12))
     }
 
     /// core's sentences can run on; the line keeps the first one, without its full stop.
@@ -315,13 +399,27 @@ public struct FlexibleFixPrompt: Equatable, Sendable {
     public private(set) var known: Set<String> = []
     /// The action serial the last decision covered.
     public private(set) var coveredAction = 0
+    /// ★ BATCH B REVIEW ("blockers surface AT ONCE as a pop-up"): a blocker that already stands
+    /// when the page OPENS pops ONCE, as soon as the scene and designs settle — it had only
+    /// turned the line orange. Then only a new one his action causes.
+    public private(set) var openPending = false
 
-    public init(actionSerial: Int = 0) { coveredAction = actionSerial }
+    public init(actionSerial: Int = 0, popExisting: Bool = false) {
+        coveredAction = actionSerial
+        openPending = popExisting
+    }
 
-    /// The issue to pop, if any. `settled`: no design or stack is in flight (an action with no
-    /// new issue is then covered, so later noise cannot claim it).
+    /// The issue to pop, if any. `settled`: the scene is open and no design or stack is in
+    /// flight (an action with no new issue is then covered, so later noise cannot claim it).
     public mutating func next(_ r: FlexibleReadiness, actionSerial: Int, settled: Bool) -> FlexibleIssue? {
         let current = r.blocking
+        if openPending {
+            guard settled else { return nil }
+            openPending = false
+            known = Set(current.map(\.id))
+            coveredAction = max(coveredAction, actionSerial)
+            return current.first
+        }
         let fresh = current.filter { !known.contains($0.id) }
         known = Set(current.map(\.id))
         if let first = fresh.first, actionSerial > coveredAction {
@@ -330,6 +428,13 @@ public struct FlexibleFixPrompt: Equatable, Sendable {
         }
         if settled { coveredAction = max(coveredAction, actionSerial) }
         return nil
+    }
+
+    /// ★ THE POP-UP SHOWS THE ISSUE AS IT IS NOW (batch B review): it kept the value it was
+    /// opened with, so after he tapped the face it told him to, "no pressed face" still showed
+    /// no [Press …] button. The same issue (by id) in the current readiness; nil once it is gone.
+    public static func live(_ shown: FlexibleIssue, in r: FlexibleReadiness) -> FlexibleIssue? {
+        r.blocking.first { $0.id == shown.id }
     }
 }
 
@@ -362,6 +467,7 @@ extension FlexibleStageModel {
                                           drawn: liveS[k] != nil, areaMM2: st?.areaMM2 ?? 0)
         }
         let withData = catalogue.first { $0.noPrediction == nil }.map { (id: $0.id, name: $0.displayName) }
+        let anyFilament = catalogue.first.map { (id: $0.id, name: $0.displayName) }
         let pressedIDs = Set(s.loadedFaces.map(\.faceRegionID))
         return FlexibleReadiness.Inputs(
             materialID: s.materialID, materialName: material?.displayName ?? s.materialID,
@@ -375,7 +481,10 @@ extension FlexibleStageModel {
             selected: selectedRegion,
             name: { [weak self] r in self?.displayName(r) ?? "Face \(r)" },
             removable: { [mainPageLoads] r in mainPageLoads.canRemove(r) },
-            inherited: { [mainPageLoads] r in mainPageLoads.entry(r)?.role == .pressed })
+            inherited: { [mainPageLoads] r in mainPageLoads.entry(r)?.role == .pressed },
+            buildFailure: latticeFailure, anyFilament: anyFilament,
+            // only asked for when it is needed (nothing pressed, nothing selected)
+            suggested: s.loadedFaces.isEmpty && selectedRegion == nil ? suggestedPressRegion() : nil)
     }
 
     public var readiness: FlexibleReadiness { FlexibleReadiness.evaluate(readinessInputs) }
