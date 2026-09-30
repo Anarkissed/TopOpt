@@ -132,15 +132,16 @@ public struct FlexibleStagePage: View {
     /// (MetalMeshView, tint flags.z), so the outline reads and the inside shows.
     static let xrayBodyAlpha: Float = 0.04
 
-    /// The generated lattice while it is DRAWN: X-ray on, and not being rebuilt. The map and
-    /// the dent then come from its own depths (FlexibleShownValues).
+    /// The generated lattice while it is DRAWN: X-ray on, not being rebuilt, and still what the
+    /// settings describe. The map and the dent then come from its own depths (FlexibleShownValues).
     private var drawnLattice: FlexibleGeneratedLattice? {
-        xray && !model.latticeBuilding && latticeShows ? model.lattice : nil
+        FlexibleLatticePreview.drawn(model.lattice, xray: xray, building: model.latticeBuilding,
+                                     checkStampShown: model.checkStampShown, stale: model.latticeIsStale)
     }
 
-    /// The lattice owns the map (no stamp shown) — FlexibleLatticePreview.latticeShows.
+    /// The lattice owns the map (no stamp shown, not stale) — FlexibleLatticePreview.latticeShows.
     private var latticeShows: Bool {
-        FlexibleLatticePreview.latticeShows(checkStampShown: model.checkStampShown)
+        FlexibleLatticePreview.latticeShows(checkStampShown: model.checkStampShown, stale: model.latticeIsStale)
     }
 
     /// 0 → 1 → 0 over one period (FlexAnimation's cosine ease, Results screen) while the

@@ -100,6 +100,30 @@ final class FlexibleShownValuesTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(hi - lo, 0.5 * want)
     }
 
+    /// ★ THE DENT FOLLOWS THE CHIP (verification of round 3): while the depth chip is dragged
+    /// the designs still hold the OLD deepest squish, so the map is the drawing × the NEW one —
+    /// the dent fills the prism as it moves, on a filament with data too (varioShore).
+    @MainActor
+    func testTheDentFollowsTheChipWhileItIsDragged() throws {
+        let p = try FlexibleSquishTests.pad()
+        let n = p.stack.columns.count
+        let s = p.design.columns.map(\.s)
+        XCTAssertEqual(s.count, n)
+        let face = FlexibleFaceSettings(faceRegionID: 101, weightKg: 30, deepestMM: 6)   // dragged from 3 to 6
+        var inp = FlexibleShownValues.Inputs(loadedFaces: [face], stacks: [p.key: p.stack], designs: [p.key: p.design],
+                                             liveS: [p.key: s], checks: [:], checkStamps: [], checkStampShown: nil,
+                                             showBuildable: false, editingDepth: true)
+        let dragging = FlexibleShownValues(inp, drawnLattice: nil)
+        let got = (dragging.values[p.key] ?? []).compactMap { if case .depth(let d) = $0 { return d } else { return nil } }
+        XCTAssertEqual(got.max() ?? 0, (s.max() ?? 0) * 6, accuracy: 1e-9, "S × the new deepest")
+        XCTAssertEqual(dragging.label, "What you drew")
+        // ★ RED CONTROL: not editing, the design's target (the OLD 3 mm) is shown
+        inp.editingDepth = false
+        let design = FlexibleShownValues(inp, drawnLattice: nil)
+        let old = (design.values[p.key] ?? []).compactMap { if case .depth(let d) = $0 { return d } else { return nil } }
+        XCTAssertLessThan(old.max() ?? 0, (s.max() ?? 0) * 6 - 1, "control: the design lags at the old deepest")
+    }
+
     // MARK: the dent's own ramp (his answer: never purple; Stress keeps its rainbow)
 
     /// Hue (degrees) and saturation of an RGBA.

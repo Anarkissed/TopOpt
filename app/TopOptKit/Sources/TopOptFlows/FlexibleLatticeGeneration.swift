@@ -104,11 +104,22 @@ public enum FlexibleLatticePreview {
     }
 
     /// The generated lattice owns the map, the dent and the walls whenever no check stamp is
-    /// shown; a stamp's dent ("Dent under the stamp") keeps its own map. ★ ROUND 3: the
-    /// X / Y / 3D steps are gone (both curves are drawn at once and the map always bends),
-    /// so the rule no longer depends on a step.
-    public static func latticeShows(checkStampShown: UUID?) -> Bool {
-        checkStampShown == nil
+    /// shown AND it still matches the settings; a stamp's dent ("Dent under the stamp") keeps
+    /// its own map. ★ ROUND 3: the X / Y / 3D steps are gone (both curves are drawn at once
+    /// and the map always bends), so the rule no longer depends on a step.
+    /// ★ A STALE LATTICE NEVER OWNS THE MAP (verification of round 3): once a curve, the depth
+    /// or a weight changed, the map is his live drawing, held still — the lattice's old depths
+    /// looping beside it hid every edit (the rule a curve step used to give) — and its walls
+    /// hide rather than squish by numbers the dent is not drawn with.
+    public static func latticeShows(checkStampShown: UUID?, stale: Bool = false) -> Bool {
+        checkStampShown == nil && !stale
+    }
+
+    /// The lattice the page DRAWS (and whose depths the map shows): only in X-ray, not while a
+    /// new one builds, and only while it owns the map (`latticeShows`). The page's one call.
+    public static func drawn(_ lattice: FlexibleGeneratedLattice?, xray: Bool, building: Bool,
+                             checkStampShown: UUID?, stale: Bool) -> FlexibleGeneratedLattice? {
+        xray && !building && latticeShows(checkStampShown: checkStampShown, stale: stale) ? lattice : nil
     }
 
     /// What the page's "a fresh lattice is shown" reset is keyed on: the GENERATION, so

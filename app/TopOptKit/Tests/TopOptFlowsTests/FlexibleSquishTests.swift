@@ -332,6 +332,40 @@ final class FlexibleSquishTests: XCTestCase {
         XCTAssertTrue(lat.animated)
     }
 
+    /// ★ A STALE LATTICE NEVER OWNS THE MAP (verification of round 3): once he edits a curve
+    /// after Generate, the map is his live drawing, held still, and the stale walls hide —
+    /// the protection the old curve step gave (8046e80a), restored without the steps.
+    @MainActor
+    func testAStaleLatticeNeverOwnsTheMap() throws {
+        let p = try Self.pad()
+        let face = FlexibleFaceSettings(faceRegionID: 101, weightKg: 30, deepestMM: 3)
+        let depths = FlexibleSquishFace.buildableDepths(stack: p.stack, design: p.design)
+        let g = Self.generated(faces: [FlexibleSquishFace(stack: p.stack, depthsMM: depths)])
+        let n = p.stack.columns.count
+        let inp = FlexibleShownValues.Inputs(loadedFaces: [face], stacks: [p.key: p.stack], designs: [:],
+                                             liveS: [p.key: [Double](repeating: 0.5, count: n)], checks: [:],
+                                             checkStamps: [], checkStampShown: nil, showBuildable: false)
+        let drawn = FlexibleLatticePreview.drawn(g, xray: true, building: false, checkStampShown: nil, stale: true)
+        XCTAssertNil(drawn, "a stale lattice is not the page's map")
+        let live = FlexibleShownValues(inp, drawnLattice: drawn)
+        XCTAssertEqual(live.label, "What you drew")
+        XCTAssertFalse(live.animated, "his edit holds still")
+        XCTAssertEqual(FlexibleLatticePreview.inputs(xray: true, lattice: g, building: false,
+                                                     latticeShows: FlexibleLatticePreview.latticeShows(checkStampShown: nil, stale: true))?.hidden,
+                       true, "…and its walls hide")
+        // ★ RED CONTROL: not stale, the lattice owns the map and loops (the round-3 build did
+        // this for a stale one too)
+        let fresh = FlexibleShownValues(inp, drawnLattice: FlexibleLatticePreview.drawn(g, xray: true, building: false,
+                                                                                      checkStampShown: nil, stale: false))
+        XCTAssertEqual(fresh.label, "What the lattice was built from")
+        XCTAssertTrue(fresh.animated)
+        // the page asks the one rule, with the staleness
+        let root = FlexibleHisProject.repoRoot.appendingPathComponent("app/TopOptKit/Sources/TopOptFlows")
+        let page = try String(contentsOf: root.appendingPathComponent("FlexibleStagePage.swift"), encoding: .utf8)
+        XCTAssertTrue(page.contains("FlexibleLatticePreview.drawn(model.lattice, xray: xray, building: model.latticeBuilding,"))
+        XCTAssertTrue(page.contains("stale: model.latticeIsStale)"))
+    }
+
     @MainActor
     func testTheMapAndDentComeFromTheLatticeWhileItIsDrawn() throws {
         let p = try Self.pad()

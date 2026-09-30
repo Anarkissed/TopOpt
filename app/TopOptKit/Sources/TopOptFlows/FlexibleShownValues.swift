@@ -15,6 +15,12 @@
 // deepest), 1, 10), capped so no column's shown dent passes 0.65 of its own lattice depth
 // (the dent never pushes through the far wall), and — with a lattice — by the shader's
 // clamp (`maxSafeScale`). The legend says "shown ×k"; the depth prism uses the same k.
+// ★ THE PRISM IS CAPPED TOO (verification of round 3): the prism is k × the DEEPEST squish
+// (S = 1), not k × what the drawing reaches — a mostly-firm drawing (S 0.09 everywhere) got
+// × 10 and a 30 mm prism out through a 20 mm part. `prismCap` holds k × deepest to 0.65 of
+// every pressed column's lattice depth as well.
+// ★ WHILE THE DEPTH CHIP IS DRAGGED the map is the drawing S × the NEW deepest (the
+// designs still hold the old one until release), so the dent fills the prism as it moves.
 
 import Foundation
 import TopOptKit
@@ -46,12 +52,14 @@ struct FlexibleShownValues {
         var checkStamps: [FlexibleCheckStamp]
         var checkStampShown: UUID?
         var showBuildable: Bool
+        /// The depth chip is being dragged: the designs are for the OLD deepest squish.
+        var editingDepth = false
     }
 
     static func inputs(_ m: FlexibleStageModel) -> Inputs {
         Inputs(loadedFaces: m.settings.loadedFaces, stacks: m.stacks, designs: m.designs, liveS: m.liveS,
                checks: m.checks, checkStamps: m.settings.checkStamps, checkStampShown: m.checkStampShown,
-               showBuildable: m.showBuildable)
+               showBuildable: m.showBuildable, editingDepth: m.frozenExaggeration != nil)
     }
 
     init(model m: FlexibleStageModel, drawnLattice: FlexibleGeneratedLattice? = nil) {
@@ -79,8 +87,9 @@ struct FlexibleShownValues {
             showsDent = true
             animated = true
             let rule = Self.exaggerationRule(maxDepthMM: maxDepth, extentMM: g.extentMM)
-            let thin = Self.thinCap(values: values, stacks: m.stacks)
-            exaggeration = Self.cappedExaggeration(rule: min(rule, thin ?? rule), maxSafeScale: g.maxSafeScale)
+            let thin = min(Self.thinCap(values: values, stacks: m.stacks) ?? rule,
+                           Self.prismCap(loadedFaces: m.loadedFaces, stacks: m.stacks) ?? rule)
+            exaggeration = Self.cappedExaggeration(rule: min(rule, thin), maxSafeScale: g.maxSafeScale)
             return
         }
         let checkID = m.checkStampShown
@@ -96,7 +105,7 @@ struct FlexibleShownValues {
                 label = "Dent under the stamp"
                 continue
             }
-            if let d = m.designs[k], d.refusal == nil {
+            if !m.editingDepth, let d = m.designs[k], d.refusal == nil {
                 // core's own copy of the drawing (its target), or — after Generate — what can
                 // be built; core's no-lattice columns stay unpainted
                 values[k] = d.columns.map { c in
@@ -115,14 +124,15 @@ struct FlexibleShownValues {
         showsDent = !values.isEmpty
         for v in values.values { for x in v { if case .depth(let d) = x { maxDepth = max(maxDepth, d) } } }
         // ONE SCALE FOR DRAWN AND BUILDABLE: coloured against the same maximum
-        if checkID == nil {
+        if checkID == nil, !m.editingDepth {
             for d in m.designs.values where d.refusal == nil {
                 maxDepth = max(maxDepth, d.targetDepthRange?.upperBound ?? 0, d.buildableDepthRange?.upperBound ?? 0)
             }
         }
         let ext = m.stacks.values.map { max($0.uExtentMM, $0.vExtentMM) }.max() ?? 0
         let rule = Self.exaggerationRule(maxDepthMM: maxDepth, extentMM: ext)
-        exaggeration = max(1, min(rule, Self.thinCap(values: values, stacks: m.stacks) ?? rule))
+        exaggeration = max(1, min(rule, Self.thinCap(values: values, stacks: m.stacks) ?? rule,
+                                  Self.prismCap(loadedFaces: m.loadedFaces, stacks: m.stacks) ?? rule))
     }
 
     /// × 1…10, so the deepest squish reads as about a fifth of the face (an integer: the
@@ -148,6 +158,20 @@ struct FlexibleShownValues {
                 guard l > 0 else { continue }
                 cap = min(cap, thinCap(depthMM: d, latticeMM: l))
             }
+        }
+        return cap.isFinite ? cap : nil
+    }
+
+    /// The depth prism's own cap: k × a pressed face's DEEPEST squish (S = 1) stays within
+    /// `thinShare` of each of its columns' lattice depth — the prism floor never leaves the part.
+    /// nil when no pressed face has a stack.
+    static func prismCap(loadedFaces: [FlexibleFaceSettings], stacks: [FlexFaceKey: FlexStackInfo]) -> Double? {
+        var cap = Double.infinity
+        for f in loadedFaces {
+            guard let st = stacks[FlexFaceKey(region: f.faceRegionID, rotation: f.rotationDeg)] else { continue }
+            let l = st.columns.map(\.latticeMM).filter { $0 > 0 }.min() ?? 0
+            guard l > 0 else { continue }
+            cap = min(cap, thinCap(depthMM: f.deepestMM, latticeMM: l))
         }
         return cap.isFinite ? cap : nil
     }
