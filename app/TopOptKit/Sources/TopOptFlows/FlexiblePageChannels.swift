@@ -44,8 +44,10 @@ public enum FlexiblePageChannels {
 
     /// Per-column colours + the dent, from the model's current copies of core's results.
     /// The page calls this on every change (FlexibleStagePage.refreshChannels).
+    /// `heat` false (the main page's Heat view off): the map quads take no colour — the dent
+    /// still moves them, so the ghost itself squishes.
     public static func channels(model: FlexibleStageModel, overlay: FlexibleOverlayMesh?, xray: Bool,
-                                drawnLattice: FlexibleGeneratedLattice?) -> Channels {
+                                drawnLattice: FlexibleGeneratedLattice?, heat: Bool = true) -> Channels {
         // part regions: loaded / resting / selected / linked other end / conflict — by REGION,
         // so a split sector is tinted on its own side of its cuts (FlexibleRegions)
         let regions = model.regions
@@ -102,12 +104,15 @@ public enum FlexiblePageChannels {
                 }
             }
         }
-        let tints = overlay.tints(partTint: tintOf, columnColours: colours, ghost: xray ? FlexibleColours.ghost : nil)
+        let tints = overlay.tints(partTint: tintOf, columnColours: heat ? colours : [:], ghost: xray ? FlexibleColours.ghost : nil)
         guard shown.showsDent else {
             return Channels(tints: tints, dents: nil, exaggeration: 0, animated: false, legendLine: "")
         }
         var depths: [FlexFaceKey: [Double?]] = [:]
         for (k, vals) in shown.values {
+            // ★ BATCH B: with a lattice drawn, only the faces whose squish is SHOWN (the four
+            // largest) dent — the others hold still, as their walls do
+            if let g = drawnLattice, !g.squishedKeys.contains(k) { continue }
             depths[k] = vals.map { if case .depth(let d) = $0 { return d } else { return nil } }
         }
         let dents = overlay.displacements(depths: depths, stacks: model.stacks,

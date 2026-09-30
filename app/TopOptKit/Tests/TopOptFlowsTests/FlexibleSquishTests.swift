@@ -407,13 +407,23 @@ final class FlexibleSquishTests: XCTestCase {
         XCTAssertEqual(dent(latA), dent(built))
     }
 
-    func testGenerateRefusesMoreThanFourLoadedFaces() {
-        for n in 0...4 { XCTAssertNil(FlexibleLatticeGate.faceCountRefusal(n), "\(n) faces") }
-        let why = FlexibleLatticeGate.faceCountRefusal(5)
-        XCTAssertNotNil(why, "control: a fifth face must be refused, not silently dropped")
-        let s = why ?? ""
-        XCTAssertTrue(s.hasSuffix("."))
-        XCTAssertFalse(s.dropLast().contains(". "), "one sentence: \(s)")
+    /// ★ RE-PINNED DELIBERATELY (round 3 batch B, item 9 — "exit is blocked only when truly
+    /// needed"): was `testGenerateRefusesMoreThanFourLoadedFaces`. A fifth pressed face no
+    /// longer refuses the lattice: the walls use every face and the squish is SHOWN on the
+    /// four largest (the pass's slots), which the readiness line says in one line — so no
+    /// face is dropped without a word, which is what the old test guarded.
+    func testMoreThanFourPressedFacesNeverBlockAndAreSaidInOneLine() {
+        func r(_ n: Int) -> FlexibleReadiness {
+            FlexibleReadiness.evaluate(FlexibleReadiness.Inputs(
+                materialID: "varioshore_tpu", materialName: "varioShore", calibrateFirst: false, withData: nil,
+                pressed: (0..<n).map { FlexibleReadiness.Face(region: $0, weightKg: 10, stacked: true, design: .ok) },
+                conflicts: []))
+        }
+        for n in 1...4 { XCTAssertEqual(r(n).oneLine, FlexibleReadiness.ready, "\(n) faces") }
+        let five = r(5)
+        XCTAssertTrue(five.isReady, "a fifth face never blocks")
+        XCTAssertEqual(five.oneLine, "Ready · Squish shown on the 4 largest of 5 faces", "…and is said, not silently dropped")
+        XCTAssertFalse(five.oneLine.contains(". "), "one line")
         XCTAssertEqual(FlexibleSquishField.maxFaces, 4)
     }
 }

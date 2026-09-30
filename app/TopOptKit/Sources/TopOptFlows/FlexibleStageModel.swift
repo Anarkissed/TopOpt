@@ -124,6 +124,8 @@ public final class FlexibleStageModel: ObservableObject {
     public let library: FlexibleStampLibrary?
     private let persist: () -> Void
     private let worker = FlexibleWorker()
+    /// The bridge worker, for tests that read core through the same open scene.
+    var workerForTests: FlexibleWorker { worker }
 
     // what the screens show
     @Published public private(set) var catalogue: [FlexMaterialInfo] = []
@@ -155,6 +157,18 @@ public final class FlexibleStageModel: ObservableObject {
     @Published public private(set) var lattice: FlexibleGeneratedLattice?
     @Published public private(set) var latticeBuilding = false
     @Published public private(set) var latticeError: String?
+    /// ★ ROUND 3 BATCH B (item 9): core's words per face, kept PER KEY — a face core could
+    /// not stack (no blind retry: the next scene open clears it) or could not design (one
+    /// face's throw no longer leaves every later face "still being designed").
+    @Published public private(set) var stackErrors: [FlexFaceKey: String] = [:]
+    @Published public private(set) var designErrors: [FlexFaceKey: String] = [:]
+    /// Bumped by every action of HIS that can create a problem (press, rest, a weight, the
+    /// trash, a filament): the fix pop-up opens only on a NEW blocking issue an action caused.
+    @Published public private(set) var actionSerial = 0
+    /// A one-line note for an automatic fix ("Nozzle temperature set to Auto — …").
+    @Published public var toast: String?
+    /// The issue the page opens its pop-up on when it appears (the main page's pill).
+    @Published public var pendingFix: FlexibleIssue?
 
     private var pendingStacks: Set<FlexFaceKey> = []
     /// Every bridge call in flight (scene, stacks, drawn maps, the lattice) — awaited by
@@ -259,6 +273,7 @@ public final class FlexibleStageModel: ObservableObject {
     }
 
     public func pickMaterial(_ id: String) {
+        actionSerial += 1
         edit { s in
             s.materialID = id
             // a temperature from another filament is not one this one was tested at (R10)
@@ -311,9 +326,20 @@ public final class FlexibleStageModel: ObservableObject {
     /// Core's sentence with sector ids replaced by the app's names.
     public func text(_ s: String) -> String { regions.renamed(s, mesh: project.viewerMesh) }
 
+    /// The key the ready scene was opened with.
+    private var openedKey: String?
+
     public func openScene() {
         guard sceneState != .opening else { return }
         let key = sceneKey()
+        // ★ THE SHARED MODEL (batch B): Settings re-opens over the main page's model — the same
+        // part, the same scene: keep its stacks (and the overlay the main page draws) and only
+        // re-read the main page's groups
+        if sceneState == .ready, openedKey == key {
+            adoptMainPageLoads(recompute: false)
+            recomputeAll()
+            return
+        }
         guard let job = try? sceneJob() else {
             sceneState = .failed("This project has no imported part to open.")
             return
@@ -328,6 +354,9 @@ public final class FlexibleStageModel: ObservableObject {
                     self.stacks = [:]
                     self.geometry = [:]
                     self.pendingStacks = []
+                    self.stackErrors = [:]
+                    self.designErrors = [:]
+                    self.openedKey = key
                     self.sceneState = .ready
                     // ★ ROUND 3 (item 1.2): the main page's loads arrive as pressed / resting faces
                     self.adoptMainPageLoads(recompute: false)
@@ -393,6 +422,7 @@ public final class FlexibleStageModel: ObservableObject {
     public func press(_ region: Int, kg: Double? = nil) -> Bool {
         let inherited = mainPageLoads.entry(region).flatMap { $0.role == .pressed ? $0 : nil }
         guard inherited != nil || (kg ?? 0) > 0 else { return false }
+        actionSerial += 1
         edit { s in
             var f = s.face(region) ?? FlexibleFaceSettings(faceRegionID: region)
             f.role = "loaded"
@@ -409,6 +439,7 @@ public final class FlexibleStageModel: ObservableObject {
     /// [It rests here] / [Rests]: HIS choice on this page, so it is unlinked (weightFrom nil)
     /// and no re-sync presses it again — not a write-back, not a re-open (`adopt(into:)`).
     public func rest(_ region: Int) {
+        actionSerial += 1
         edit { s in
             var f = s.face(region) ?? FlexibleFaceSettings(faceRegionID: region, role: "resting")
             f.role = "resting"
@@ -425,6 +456,7 @@ public final class FlexibleStageModel: ObservableObject {
     /// the area split stays consistent. A face in no group keeps it as its own.
     public func setWeight(_ region: Int, kg: Double) {
         guard kg > 0 else { return }
+        actionSerial += 1
         if let f = settings.face(region), let g = f.weightFrom,
            let total = mainPageLoads.groupKg(forRegion: region, kg: kg) {
             project.force.setWeight(g, kg: total)
@@ -441,6 +473,7 @@ public final class FlexibleStageModel: ObservableObject {
     @discardableResult
     public func removeFace(_ region: Int) -> Bool {
         guard mainPageLoads.canRemove(region) else { return false }
+        actionSerial += 1
         edit { $0.removeFace(region) }
         relinkedWeights[region] = nil
         if selectedRegion == region { selectedRegion = settings.faces.first?.faceRegionID }
@@ -455,7 +488,8 @@ public final class FlexibleStageModel: ObservableObject {
     public func design(_ region: Int) -> FlexFaceDesignInfo? { key(region).flatMap { designs[$0] } }
 
     private func ensureStack(_ region: Int) {
-        guard sceneState == .ready, let k = key(region), stacks[k] == nil, !pendingStacks.contains(k) else { return }
+        guard sceneState == .ready, let k = key(region), stacks[k] == nil, !pendingStacks.contains(k),
+              stackErrors[k] == nil else { return }   // ★ no blind retry of a face core refused to stack
         pendingStacks.insert(k)
         let partFlat = project.viewerMesh?.flat.positions ?? []
         let worker = self.worker
@@ -465,7 +499,11 @@ public final class FlexibleStageModel: ObservableObject {
                 let g = try await worker.withScene { try FlexFaceGeometry.compute(scene: $0, key: k, stack: st, partFlat: partFlat) }
                 await MainActor.run { self.stacks[k] = st; self.geometry[k] = g; self.recomputeAll() }
             } catch {
-                await MainActor.run { self.lastError = "\(error)"; self.pendingStacks.remove(k) }
+                await MainActor.run {
+                    self.lastError = "\(error)"
+                    self.stackErrors[k] = "\(error)"
+                    self.pendingStacks.remove(k)
+                }
             }
         })
     }
@@ -531,12 +569,30 @@ public final class FlexibleStageModel: ObservableObject {
         })
     }
 
+    /// ★ ONE FACE'S THROW NO LONGER STOPS THE NEXT (round 3 batch B, item 9). The designs ran
+    /// in ONE do/catch: a face core threw for (weight 0 — "weight must be > 0") left every
+    /// LATER face undesigned, "still being designed" for ever. Each face now has its own
+    /// catch, and its words are kept against its key.
+    nonisolated static func designEach<K: Hashable, F, D>(_ faces: [F], key: (F) -> K,
+                                                           cancelled: () -> Bool = { Task.isCancelled },
+                                                           _ body: (F) async throws -> D) async
+        -> (designs: [K: D], errors: [K: String], cancelled: Bool) {
+        var out: [K: D] = [:], errs: [K: String] = [:]
+        for f in faces {
+            if cancelled() { return (out, errs, true) }
+            do { out[key(f)] = try await body(f) }
+            catch { errs[key(f)] = "\(error)" }
+        }
+        return (out, errs, false)
+    }
+
     private func scheduleDesigns(delayNS: UInt64) {
         designGeneration += 1
         let gen = designGeneration
         designTask?.cancel()
         guard let path = materialsPath, let mat = settings.materialID else {
             designs = [:]
+            designErrors = [:]
             return
         }
         let faces = settings.loadedFaces.filter { stacks[FlexFaceKey(region: $0.faceRegionID, rotation: $0.rotationDeg)] != nil }
@@ -547,52 +603,77 @@ public final class FlexibleStageModel: ObservableObject {
             if delayNS > 0 { try? await Task.sleep(nanoseconds: delayNS) }
             if Task.isCancelled { return }
             var out: [FlexFaceKey: FlexFaceDesignInfo] = [:]
+            var faceErrors: [FlexFaceKey: String] = [:]
             var s: [FlexFaceKey: [Double]] = [:]
             var checks: [UUID: FlexStampCheckInfo] = [:]
             var conflicts: [FlexConflictInfo] = []
             var err: String?
+            let keys = faces.map { FlexFaceKey(region: $0.faceRegionID, rotation: $0.rotationDeg) }
             do {
-                let keys = faces.map { FlexFaceKey(region: $0.faceRegionID, rotation: $0.rotationDeg) }
                 conflicts = try await worker.withScene {
                     try $0.conflicts(faces: keys.map(\.region), rotations: keys.map(\.rotation))
-                }
-                if let temp {
-                    for f in faces {
-                        if Task.isCancelled { return }
-                        let k = FlexFaceKey(region: f.faceRegionID, rotation: f.rotationDeg)
-                        let stamp = f.designStamp.flatMap { grids[$0.id] }
-                        let d = try await worker.withScene {
-                            try $0.design(materialsPath: path, materialID: mat, tempC: temp, face: k.region,
-                                          rotation: k.rotation, map: f.map, weightN: f.weightN,
-                                          stamp: stamp, build: build)
-                        }
-                        out[k] = d
-                        s[k] = d.columns.map(\.s)
-                    }
-                    for c in checkStamps {
-                        guard let f = faces.first(where: { $0.faceRegionID == c.faceRegionID }),
-                              let g = grids[c.stamp.id], out[FlexFaceKey(region: f.faceRegionID, rotation: f.rotationDeg)]?.refusal == nil
-                        else { continue }
-                        checks[c.stamp.id] = try await worker.withScene {
-                            try $0.checkStamp(materialsPath: path, materialID: mat, tempC: temp,
-                                              face: f.faceRegionID, rotation: f.rotationDeg, stamp: g, build: build)
-                        }
-                    }
                 }
             } catch {
                 err = "\(error)"
             }
+            if let temp {
+                let r = await Self.designEach(faces, key: { FlexFaceKey(region: $0.faceRegionID, rotation: $0.rotationDeg) }) { f in
+                    let k = FlexFaceKey(region: f.faceRegionID, rotation: f.rotationDeg)
+                    let stamp = f.designStamp.flatMap { grids[$0.id] }
+                    return try await worker.withScene {
+                        try $0.design(materialsPath: path, materialID: mat, tempC: temp, face: k.region,
+                                      rotation: k.rotation, map: f.map, weightN: f.weightN,
+                                      stamp: stamp, build: build)
+                    }
+                }
+                if r.cancelled { return }
+                out = r.designs
+                faceErrors = r.errors
+                for (k, d) in out { s[k] = d.columns.map(\.s) }
+                if err == nil, let first = faceErrors.values.first { err = first }
+                for c in checkStamps {
+                    guard let f = faces.first(where: { $0.faceRegionID == c.faceRegionID }),
+                          let g = grids[c.stamp.id], out[FlexFaceKey(region: f.faceRegionID, rotation: f.rotationDeg)]?.refusal == nil
+                    else { continue }
+                    do {
+                        checks[c.stamp.id] = try await worker.withScene {
+                            try $0.checkStamp(materialsPath: path, materialID: mat, tempC: temp,
+                                              face: f.faceRegionID, rotation: f.rotationDeg, stamp: g, build: build)
+                        }
+                    } catch {
+                        if err == nil { err = "\(error)" }
+                    }
+                }
+            }
             if Task.isCancelled { return }
-            let (o, ss, ch, co, er) = (out, s, checks, conflicts, err)
+            let (o, fe, ss, ch, co, er) = (out, faceErrors, s, checks, conflicts, err)
             await MainActor.run {
                 guard gen == self.designGeneration else { return }
                 self.designs = o
+                self.designErrors = fe
                 for (k, v) in ss { self.liveS[k] = v }
                 self.checks = ch
                 self.conflicts = co
                 self.lastError = er
+                self.applyAutoFixes()
             }
         }
+    }
+
+    /// ★ SILENT AUTO-FIXES (decisions): a refusal with an obvious fix is fixed, with a toast —
+    /// temperature_not_tested → Auto; topology_no_data / honeycomb_side_stack → Gyroid.
+    func applyAutoFixes() {
+        let fixes = readiness.autoFixes
+        guard !fixes.isEmpty else { return }
+        edit { s in
+            for f in fixes {
+                switch f.what {
+                case .temperatureAuto: s.nozzleTempC = nil
+                case .topologyGyroid: s.topology = "gyroid"
+                }
+            }
+        }
+        toast = fixes.map(\.toast).joined(separator: " · ")
     }
 
     // MARK: Auto (S3)
@@ -673,37 +754,74 @@ public final class FlexibleStageModel: ObservableObject {
         return FlexibleCore.stampError(g)
     }
 
-    // MARK: Generate lattice (FlexibleLatticeGeneration.swift)
+    // MARK: the lattice (FlexibleLatticeGeneration.swift) — built on Save & Exit (batch B)
 
-    public var latticeRefusal: String? { FlexibleLatticeGate.refusal(self) }
+    /// ★ ROUND 3 BATCH B: FlexibleReadiness decides (the old gate's order was the bug); nil
+    /// when nothing blocks.
+    public var latticeRefusal: String? { readiness.refusal }
     /// The generated lattice no longer matches the settings (a face or the filament changed).
     public var latticeIsStale: Bool { lattice.map { $0.settingsKey != settings.hashValue } ?? false }
 
-    /// Bumped per Generate — the token the preview uploads once per.
+    /// Bumped per build — the token the preview uploads once per.
     private var latticeGeneration = 0
 
+    /// The squish faces in the order the pass takes them: the LARGEST first, so its four
+    /// slots (`FlexibleSquishField.maxFaces`) squish the four largest (plan item 9: more than
+    /// four pressed faces no longer blocks; the walls use every face).
+    nonisolated static func squishOrder<K>(_ faces: [(key: K, areaMM2: Double)]) -> [K] {
+        faces.enumerated().sorted { a, b in
+            a.element.areaMM2 != b.element.areaMM2 ? a.element.areaMM2 > b.element.areaMM2 : a.offset < b.offset
+        }.map(\.element.key)
+    }
+
+    /// Build the lattice: core's density field from the designs, or — for a calibrate-first
+    /// filament — the SHAPE-ONLY field (FlexibleGeometryOnlyLattice) from core's mask and the
+    /// drawn map. Refused only by a blocking readiness issue.
     public func generateLattice() {
-        guard latticeRefusal == nil, !latticeBuilding, let part = project.viewerMesh else { return }
+        let ready = readiness
+        // blocked, or still designing (a face without its design would be left out silently)
+        guard ready.isReady, !ready.designing, !latticeBuilding, let part = project.viewerMesh else { return }
         let faces = settings.loadedFaces
-        let keys = faces.map { FlexFaceKey(region: $0.faceRegionID, rotation: $0.rotationDeg) }
-        // ★ ONE ARRAY PER FACE for the walls AND the dent: core's buildable depths, kept on
-        // the lattice so the map drawn beside it is the one it squishes by
-        var squish: [FlexibleSquishFace] = [], built: [FlexFaceKey] = []
+        let shapeOnly = material?.noPrediction != nil
+        let allKeys = faces.map { FlexFaceKey(region: $0.faceRegionID, rotation: $0.rotationDeg) }
+        // ★ ONE ARRAY PER FACE for the walls AND the dent: core's buildable depths — or, shape
+        // only, the drawing itself (S × deepest) — kept on the lattice so the map drawn beside
+        // it is the one it squishes by
+        var squish: [FlexFaceKey: FlexibleSquishFace] = [:], built: [FlexFaceKey] = []
         var depths: [FlexFaceKey: [Double?]] = [:], noLattice: [FlexFaceKey: [Bool]] = [:]
-        var extent = 0.0
-        for k in keys {
-            guard let st = stacks[k], let d = designs[k] else { continue }
-            let dk = FlexibleSquishFace.buildableDepths(stack: st, design: d)
-            squish.append(FlexibleSquishFace(stack: st, depthsMM: dk))
+        var drawn: [FlexibleGeometryOnlyLattice.Face] = []
+        var extent = 0.0, shallowest = Double.infinity
+        for (f, k) in zip(faces, allKeys) {
+            guard let st = stacks[k] else { continue }
+            let dk: [Double?]
+            if shapeOnly {
+                guard let sv = liveS[k] else { continue }
+                dk = st.columns.indices.map { i in
+                    i < sv.count && st.columns[i].latticeMM > 0 ? sv[i] * f.deepestMM : nil
+                }
+                noLattice[k] = st.columns.map { $0.latticeMM <= 0 }
+                drawn.append(.init(stack: st, s: sv))
+                let lat = st.columns.map(\.latticeMM).filter { $0 > 0 }
+                if !lat.isEmpty { shallowest = min(shallowest, lat.reduce(0, +) / Double(lat.count)) }
+            } else {
+                guard let d = designs[k] else { continue }
+                dk = FlexibleSquishFace.buildableDepths(stack: st, design: d)
+                noLattice[k] = st.columns.indices.map { $0 < d.columns.count && d.columns[$0].status == "no_lattice" }
+            }
+            squish[k] = FlexibleSquishFace(stack: st, depthsMM: dk)
             built.append(k)
             depths[k] = dk
-            noLattice[k] = st.columns.indices.map { $0 < d.columns.count && d.columns[$0].status == "no_lattice" }
             extent = max(extent, st.uExtentMM, st.vExtentMM)
         }
+        let order = Self.squishOrder(built.map { (key: $0, areaMM2: stacks[$0]?.areaMM2 ?? 0) })
+        let squishFaces = order.compactMap { squish[$0] }
+        let squished = Array(order.prefix(FlexibleSquishField.maxFaces))
         latticeGeneration += 1
         let generation = latticeGeneration
-        let (squishFaces, builtKeys, faceDepths, faceNoLattice, extentMM) = (squish, built, depths, noLattice, extent)
+        let (builtKeys, faceDepths, faceNoLattice, extentMM, drawnFaces) = (order, depths, noLattice, extent, drawn)
+        let depthForBand = shallowest.isFinite ? shallowest : 0
         let build = self.build, key = settings.hashValue, temp = designTempC ?? 0
+        let label = shapeOnly ? FlexibleReadiness.shapeOnlyLabel(material?.displayName ?? "This filament") : nil
         let regions = self.regions
         let skinOff: [(face: Int, cuts: [RegionCut])] = faces.filter { !$0.skinOn }.flatMap { f in
             regions.faces(of: f.faceRegionID, mesh: part).map { (face: $0, cuts: regions.cuts(of: f.faceRegionID)) }
@@ -714,15 +832,25 @@ public final class FlexibleStageModel: ObservableObject {
         let worker = self.worker
         track(Task.detached(priority: .userInitiated) {
             do {
-                let field = try await worker.withScene {
-                    try $0.densityField(faces: keys.map(\.region), rotations: keys.map(\.rotation), build: build)
+                let field: FlexDensityField
+                if shapeOnly {
+                    // ★ core's mask, the drawn map's density inside the printable band
+                    let mask = try await worker.withScene { try $0.latticeMask(build: build) }
+                    let band = try FlexibleGeometryOnlyLattice.band(topology: build.topology, beadsPerWall: build.beadsPerWall,
+                                                                    beadWidthMM: build.beadWidthMM, latticeDepthMM: depthForBand)
+                    field = FlexibleGeometryOnlyLattice.field(mask: mask, faces: drawnFaces, band: band)
+                } else {
+                    field = try await worker.withScene {
+                        try $0.densityField(faces: builtKeys.map(\.region), rotations: builtKeys.map(\.rotation), build: build)
+                    }
                 }
                 let inputs = try FlexibleLatticeBuilder.inputs(
                     field: field, part: part, topology: build.topology, beadsPerWall: build.beadsPerWall,
                     beadWidthMM: build.beadWidthMM, buildDir: buildDir, skinOffFaces: skinOff)
                 let g = FlexibleGeneratedLattice(inputs: inputs, faces: squishFaces, keys: builtKeys, columnDepths: faceDepths,
                                                  columnNoLattice: faceNoLattice, extentMM: extentMM, generation: generation,
-                                                 topology: build.topology, tempC: temp, settingsKey: key)
+                                                 topology: build.topology, tempC: temp, settingsKey: key,
+                                                 squishedKeys: squished, shapeOnlyLabel: label)
                 await MainActor.run { self.lattice = g; self.latticeBuilding = false }
             } catch {
                 await MainActor.run { self.latticeError = "\(error)"; self.latticeBuilding = false }

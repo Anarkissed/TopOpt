@@ -83,7 +83,8 @@ struct FlexibleShownValues {
                 }
             }
             for v in values.values { for x in v { if case .depth(let d) = x { maxDepth = max(maxDepth, d) } } }
-            label = "What the lattice was built from"
+            // ★ BATCH B: a SHAPE-ONLY lattice was built from the drawing itself (no prediction)
+            label = g.shapeOnly ? "What you drew" : "What the lattice was built from"
             showsDent = true
             animated = true
             let rule = Self.exaggerationRule(maxDepthMM: maxDepth, extentMM: g.extentMM)
