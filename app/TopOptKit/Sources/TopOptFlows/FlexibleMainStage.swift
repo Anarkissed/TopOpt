@@ -503,9 +503,9 @@ public struct FlexibleMainStatus: Equatable, Sendable {
         if let failure, !isBuilding { return .init(line: FlexibleReadiness.buildFailedLine(failure), tone: .fix, fix: nil) }
         if isBuilding || r.designing || lattice == nil || stale { return .init(line: building, tone: .building, fix: nil) }
         // ★ C2 VERIFICATION: what core can't take as it stands is a preview, never the Ready green
+        // (the hold is the one source: a calibrate-first filament's hold carries his shape-only label)
         if let hold { return .init(line: hold, tone: .preview, fix: nil) }
-        if let label = lattice?.shapeOnlyLabel { return .init(line: label, tone: .preview, fix: nil) }
-        return .init(line: ready, tone: .ready, fix: nil)
+        return .init(line: lattice?.shapeOnlyLabel ?? ready, tone: .ready, fix: nil)
     }
 
     @MainActor
