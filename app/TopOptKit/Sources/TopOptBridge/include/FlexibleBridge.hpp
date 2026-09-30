@@ -478,4 +478,83 @@ FlexRunResult flexible_run_job(const std::string& job_json, const std::string& j
                                const std::string& out_dir, const std::string& materials_path,
                                const std::string& fingerprint, BridgeError& err);
 
+// ---------------------------------------------------------------------------
+// ── BATCH G: the squish as ONE 3D displacement field — the app's setup, core's solver ──
+// (round 5, batch G; maintainer: "is there a way to ensure that the squish sim also squeezes
+// out the sides of the object? I'd like it to actually bend and move and squish like it would
+// in real life"). One squeeze group's force on its pressed faces (core's column pressures,
+// sector cuts respected), resting faces held (a pinch or a hand squeeze with no resting face:
+// inertia relief + a 3-2-1 minimal constraint, the rigid motion removed afterwards), the sides
+// free — solved by core's EXISTING heterogeneous matrix-free MG-CG (fea_solve_mgcg_matfree) on
+// the scene's own voxel grid (coarsened by one rule, flexible_squish_coarsen), each voxel's
+// modulus the SECANT of core's tested squish curve at its own density and operating strain
+// (flexible_squish_modulus). Linear small-strain physics, a DISPLAY field: the app scales it so
+// its deepest zone moves exactly core's deepest squish. Core itself is not edited; the setup
+// lives in the app's private flexible_squish_fe.cpp.
+using FlexFloats = std::vector<float>;
+using FlexBytes = std::vector<uint8_t>;
+struct FlexSquishPress {                // one pressed face of the squeeze group
+  int32_t face_region_id = -1;
+  int32_t rotation_deg = 0;
+  std::vector<double> column_pressure_mpa;  // parallel to the stack's columns (core's design)
+};
+using FlexSquishPresses = std::vector<FlexSquishPress>;
+struct FlexSquishLaw {
+  std::string materials_path, material_id, topology;  // gyroid | honeycomb
+  double temp_c = 0.0;
+  bool shape_only = false;               // calibrate-first: E = max(rho, 0.05)^2 (relative units)
+};
+struct FlexSquishRequest {
+  FlexSquishPresses pressed;
+  std::vector<int32_t> resting_region_ids;
+  FlexFloats rho;        // per SCENE voxel (x fastest): < 0 not lattice; else the printed core rho
+  FlexFloats strain_op;  // per scene voxel: its column's strain under THIS group; 0 = none
+  FlexFloats skin_frac;  // per scene voxel: the share inside the skin, 0..1
+  FlexSquishLaw law;
+  double poisson = 0.3, tolerance = 1e-4, deadline_ms = 20000;
+  int32_t coarsen = 0;   // 0 = the rule (flexible_squish_coarsen)
+  int32_t control = 0;   // TESTS ONLY (bits: 1 nu=0 . 2 anchor patch . 4 ignore cuts .
+                         // 8 uniform pressure . 16 uniform E . 32 lattice=solid . 64 no extension
+                         // . 128 roller rest . 256 nominal-strain law . 512 other 3-2-1 nodes
+                         // . 1024 unprojected traction); the app sends 0
+};
+struct FlexSquishSolution {
+  bool ok = false;
+  std::string failure;
+  std::string bc_mode;                   // rest | exit | free | patch (control 2)
+  int32_t coarsen = 1;
+  int32_t nx = 0, ny = 0, nz = 0;        // FE NODE counts
+  double spacing = 0.0;
+  double origin[3] = {0, 0, 0};          // node (0,0,0) = the grid's corner
+  FlexFloats u;                          // 3 per node, mm, RAW (uncalibrated), extended to every node
+  FlexBytes solved;                      // per node: 1 = a node the solver owned (a solid element's)
+  int32_t elements = 0, iterations = 0, mg_levels = 0;
+  bool used_multigrid = false;
+  double residual = 0, setup_ms = 0, solve_ms = 0, e_min_mpa = 0, e_max_mpa = 0;
+  double applied_force_n[3] = {0, 0, 0};  // the presses' loads, summed (before inertia relief)
+  double applied_force_abs_n = 0;         // sum of the presses' force magnitudes
+  double held_reaction_n[3] = {0, 0, 0};  // K u - f summed over the held (rest / exit) DOFs
+  double anchor_reaction_n = 0;           // |K u - f| over the pinned DOFs (free: the six 3-2-1 pins)
+  int32_t threads_before = 0, threads_during = 0, threads_after = 0;  // posture receipt
+  // receipts the tests read: each press's nodal loads (flattened per press) and its force
+  std::vector<int32_t> press_load_offsets;  // size presses + 1, into press_load_nodes
+  std::vector<int32_t> press_load_nodes;
+  std::vector<double> press_load_xyz;       // 3 per entry of press_load_nodes, N
+  std::vector<double> press_force_n;        // the design force each press was normalised to
+  std::vector<double> press_raw_force_n;    // sum of p * projected area before normalising
+  std::vector<int32_t> held_nodes;          // rest / exit: the held sole nodes
+  std::vector<int32_t> pinned_dofs;         // 3 * node + component, every Dirichlet DOF
+  std::vector<int32_t> resting_missing;     // resting ids the scene does not declare
+};
+FlexSquishSolution flexible_scene_squish_solve(int64_t scene, const FlexSquishRequest& req,
+                                               BridgeError& err);
+// One scene voxel's modulus (MPa; relative units under shape_only) by the law above: the secant
+// of core's curve at clamp(strain, 0.02, the strain limit) (0.05, the initial modulus, when
+// strain == 0), mixed with the solid modulus by the skin share; rho < 0 = solid.
+double flexible_squish_modulus(const FlexSquishLaw& law, double rho, double strain,
+                               double skin_frac, int32_t control, BridgeError& err);
+// The coarsening factor of the FE grid for an nx x ny x nz scene grid: 1 up to 120 000 voxels,
+// 2 up to 960 000, else 4 (FlexibleFE.coarsen is its Swift twin; a test holds them together).
+int32_t flexible_squish_coarsen(int32_t nx, int32_t ny, int32_t nz);
+
 }  // namespace topoptbridge

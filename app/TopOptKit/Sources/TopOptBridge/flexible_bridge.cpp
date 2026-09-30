@@ -6,7 +6,9 @@
 // only the map and the design.
 
 #include "FlexibleBridge.hpp"
+#include "flexible_squish_fe.hpp"  // ★ BATCH G: the squish sim's setup (private)
 
+#include <algorithm>
 #include <cmath>
 #include <filesystem>
 #include <map>
@@ -1006,6 +1008,51 @@ FlexRunResult flexible_run_job(const std::string& job_json, const std::string& j
     o = FlexRunResult{};
   }
   return o;
+}
+
+// ★ BATCH G: one squeeze group's squish as a 3D displacement field — see FlexibleBridge.hpp.
+// Under the scene's lock only what the solve needs is COPIED (the grid, each pressed face's region
+// and stack — built and cached here as the Settings page builds them —, the resting regions); the
+// part is read through the scene's shared_ptr (immutable after open, and kept alive through a
+// concurrent close). The lock is RELEASED before the solve, so the Settings page's design calls
+// never wait seconds on it.
+FlexSquishSolution flexible_scene_squish_solve(int64_t scene, const FlexSquishRequest& req,
+                                               BridgeError& err) {
+  try {
+    auto s = scene_at(scene);
+    squishfe::Setup setup;
+    {
+      std::lock_guard<std::mutex> lock(s->mu);
+      setup.grid = s->grid;
+      for (const FlexSquishPress& p : req.pressed)
+        setup.pressed.push_back({region_of(*s, p.face_region_id), stack_of(*s, p.face_region_id, p.rotation_deg)});
+      for (int32_t id : req.resting_region_ids) {
+        const auto it = std::find_if(s->regions.begin(), s->regions.end(),
+                                     [id](const topopt::ResolvedFaceRegion& r) { return r.id == id; });
+        if (it == s->regions.end()) setup.resting_missing.push_back(id);
+        else setup.resting.push_back(*it);
+      }
+    }
+    setup.model = &s->model;
+    return squishfe::solve(setup, req, *data_at(req.law.materials_path));
+  } catch (const std::exception& e) {
+    fail(err, e);
+    return FlexSquishSolution{};
+  }
+}
+
+double flexible_squish_modulus(const FlexSquishLaw& law, double rho, double strain,
+                               double skin_frac, int32_t control, BridgeError& err) {
+  try {
+    return squishfe::modulus(law, *data_at(law.materials_path), rho, strain, skin_frac, control);
+  } catch (const std::exception& e) {
+    fail(err, e);
+    return 0.0;
+  }
+}
+
+int32_t flexible_squish_coarsen(int32_t nx, int32_t ny, int32_t nz) {
+  return squishfe::coarsen(nx, ny, nz);
 }
 
 }  // namespace topoptbridge
