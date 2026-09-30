@@ -2,8 +2,9 @@
 //
 // Layout follows the lattice Settings page (LatticeSetupWizard): the part fills the
 // screen, "Exit" top-left in the accent capsule, a one-line notice top-centre, and ONE
-// panel bottom-left (PageChrome.edge inset, DS.Surface.panel, DS.Radius.panel) whose tabs
-// walk the spec's flow: Filament → Squish → Auto → Physics → Stamps.
+// panel bottom-left (PageChrome.edge inset, DS.Surface.panel, DS.Radius.panel). ★ ROUND 3:
+// its tabs are Face | Stamps | More, every row one line (FlexibleFacePanel); the page is
+// always in X-ray; the legend sits on the trailing edge, centred.
 //
 // ★ NOTHING ON THIS PAGE COMPUTES A SQUISH NUMBER. It draws FlexibleStageModel's copies of
 // core's results (M9). Numbers carry their tier and ± band (R7); a column core could not
@@ -109,7 +110,7 @@ public struct FlexibleStagePage: View {
         // be built, the densities it was made from, in X-ray: the 3D view, no stamp.
         .onChange(of: FlexibleLatticePreview.freshKey(model.lattice)) { gen in
             if gen != nil {
-                model.showBuildable = true; model.tab = .squish
+                model.showBuildable = true; model.tab = .face
                 model.checkStampShown = nil
             }
             refreshChannels()
@@ -346,8 +347,8 @@ public struct FlexibleStagePage: View {
         case .failed(let why): return "The part could not be opened: \(why)"
         default: break
         }
-        if model.settings.faces.isEmpty, model.tab == .squish {
-            return "Tap a face on the part to mark where the weight goes."
+        if model.settings.faces.isEmpty, model.tab == .face {
+            return "Tap a face on the part."
         }
         return "Flexible · no strength certificate · every number shows its tier and ± band."
     }
@@ -366,18 +367,17 @@ public struct FlexibleStagePage: View {
                         .foregroundStyle(DS.Color.textTertiary.color).lineLimit(1)
                 }
             }
+            // ★ ROUND 3 (item 5): Face | Stamps | More — one-line rows, details behind (i)
             FlexChips(options: FlexibleStageModel.Tab.allCases.map { ($0.rawValue, $0.rawValue) },
                       selection: model.tab.rawValue, id: "flexible-tab") {
-                model.tab = FlexibleStageModel.Tab(rawValue: $0) ?? .filament
+                model.tab = FlexibleStageModel.Tab(rawValue: $0) ?? .face
             }
             ScrollView(.vertical, showsIndicators: true) {
                 VStack(alignment: .leading, spacing: DS.Space.m) {
                     switch model.tab {
-                    case .filament: FlexibleFilamentPane(model: model)
-                    case .squish: FlexibleSquishPane(model: model, padTarget: $padTarget)
-                    case .auto: FlexibleAutoPane(model: model)
-                    case .physics: FlexiblePhysicsPane(model: model)
+                    case .face: FlexibleFacePanel(model: model, padTarget: $padTarget)
                     case .stamps: FlexibleStampsPane(model: model, padTarget: $padTarget)
+                    case .more: FlexibleMorePanel(model: model)
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -418,7 +418,7 @@ struct FlexibleStageOverlays: View {
         ZStack {
             // ★ ROUND 3: BOTH curves on the selected pressed face, on its own two edges, at once
             // ("X and Y always combined"); the frame arrows went with the frame rotation.
-            if model.tab == .squish, let r = model.selectedRegion, let k = model.key(r),
+            if model.tab == .face, let r = model.selectedRegion, let k = model.key(r),
                let g = model.geometry[k], let f = model.settings.face(r), f.isLoaded {
                 ForEach(["x", "y"], id: \.self) { axis in
                     FlexibleCurveEditor(projection: proj.projection,
@@ -549,230 +549,6 @@ struct FlexTierBadge: View {
         .foregroundStyle(tier.tier == "estimated" ? DS.Color.warning.color : DS.Color.textSecondary.color)
         .padding(.horizontal, 8).padding(.vertical, 3)
         .background(Capsule().fill(DS.Color.fillSubtle.color))
-    }
-}
-
-// MARK: - Filament (S1)
-
-struct FlexibleFilamentPane: View {
-    @ObservedObject var model: FlexibleStageModel
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: DS.Space.m) {
-            if let e = model.catalogueError { FlexCaption(text: e, colour: DS.Color.danger.color) }
-            if let m = model.material { temperature(m) }
-            FlexSectionTitle(text: "Filament")
-            ForEach(model.catalogue) { m in row(m) }
-            FlexSectionTitle(text: "Walls")
-            FlexChips(options: [("1", "1 bead"), ("2", "2 beads")],
-                      selection: String(model.settings.beadsPerWall), id: "flexible-beads") { v in
-                model.edit { $0.beadsPerWall = Int(v) ?? 1 }
-            }
-            FlexCaption(text: model.settings.beadsPerWall == 2
-                        ? "2-bead walls are unverified: numbers carry the estimated band until they are tested."
-                        : "Walls one bead wide — how the published tests were printed.")
-            FlexCaption(text: String(format: "Bead %.2f mm, from Print Parameters — the same bead the other stages send.",
-                                     model.project.printParams.strutLineWidthMM))
-        }
-    }
-
-    private func tierLabel(_ m: FlexMaterialInfo) -> String {
-        switch m.tier {
-        case "literature": return "published data"
-        case "calibrate_first": return "calibrate first"
-        case "proxy_candidate": return "calibrate first"
-        default: return m.tier
-        }
-    }
-
-    @ViewBuilder private func row(_ m: FlexMaterialInfo) -> some View {
-        let on = model.settings.materialID == m.id
-        Button { model.pickMaterial(m.id) } label: {
-            VStack(alignment: .leading, spacing: 3) {
-                HStack {
-                    Text(m.displayName).font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(DS.Color.textPrimary.color).lineLimit(1)
-                    Spacer()
-                    Text(tierLabel(m)).font(.system(size: 10.5, weight: .bold))
-                        .foregroundStyle(m.noPrediction == nil ? DS.Color.okGreen.color : DS.Color.warning.color)
-                        .padding(.horizontal, 7).padding(.vertical, 2)
-                        .background(Capsule().fill(DS.Color.fillSubtle.color))
-                }
-                HStack(spacing: 6) {
-                    if let s = m.shoreA { Text("Shore \(Int(s))A") }
-                    if m.foaming { Text("· foaming") }
-                    if !m.testedTempsC.isEmpty {
-                        Text("· tested at " + m.testedTempsC.map { "\(Int($0)) °C" }.joined(separator: ", "))
-                    }
-                }
-                .font(.system(size: 11)).foregroundStyle(DS.Color.textTertiary.color)
-                if m.noPrediction != nil {
-                    Text("Calibrate first — geometry only")
-                        .font(.system(size: 11, weight: .semibold)).foregroundStyle(DS.Color.warning.color)
-                }
-            }
-            .padding(10)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(RoundedRectangle(cornerRadius: 12)
-                .fill(on ? DS.Color.fillSelected.color : DS.Color.fillSubtle.color))
-            .overlay(RoundedRectangle(cornerRadius: 12)
-                .strokeBorder(on ? FlexibleStageStyle.accent.opacity(0.6) : Color.clear, lineWidth: 1))
-        }
-        .buttonStyle(.plain)
-        .accessibilityIdentifier("flexible-filament-\(m.id)")
-    }
-
-    @ViewBuilder private func temperature(_ m: FlexMaterialInfo) -> some View {
-        FlexSectionTitle(text: "Nozzle temperature")
-        if let np = m.noPrediction {
-            // R7: empty fields with the reason, never a greyed guess
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Calibrate first — geometry only").font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(DS.Color.warning.color)
-                FlexCaption(text: np.reason)
-                FlexCaption(text: "Squish, density and depth stay empty for this filament. The lattice can still be placed and drawn.")
-            }
-        } else {
-            let opts = [("auto", "Auto")] + m.testedTempsC.map { (String(Int($0)), "\(Int($0)) °C") }
-            FlexChips(options: opts, selection: model.settings.nozzleTempC.map { String(Int($0)) } ?? "auto",
-                      id: "flexible-temp") { v in
-                model.edit { $0.nozzleTempC = v == "auto" ? nil : Double(v) }
-            }
-            FlexCaption(text: "Only the temperatures this filament was tested at are offered; foaming filaments change softness with temperature, and the app never guesses between them.")
-            if let t = model.settings.nozzleTempC {
-                let note = model.temperatureNote(t)
-                if !note.isEmpty { FlexCaption(text: "\(Int(t)) °C: \(note)", colour: DS.Color.warning.color) }
-            }
-        }
-    }
-}
-
-// MARK: - Squish (S2)
-
-struct FlexibleSquishPane: View {
-    @ObservedObject var model: FlexibleStageModel
-    @Binding var padTarget: String?
-
-    private var faces: [FlexibleFaceSettings] { model.settings.faces }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: DS.Space.m) {
-            if faces.isEmpty {
-                FlexCaption(text: "Tap a face on the part to mark where the weight goes. Its other end lights up.")
-            } else if let r = model.selectedRegion ?? faces.first?.faceRegionID, let f = model.settings.face(r) {
-                stepper(r)
-                conflictNote(r)
-                faceSettings(f)
-                if f.isLoaded { results(f) }
-                FlexibleSliceView(model: model)
-            }
-            if let np = model.material?.noPrediction {
-                // R7: empty fields with the reason — core's own sentence
-                Text("Calibrate first — geometry only").font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(DS.Color.warning.color)
-                FlexCaption(text: np.reason)
-                FlexCaption(text: "The curves can be drawn; no squish, density or depth is predicted.")
-            }
-        }
-        .onAppear { if model.selectedRegion == nil { model.selectedRegion = faces.first?.faceRegionID } }
-    }
-
-    private func faceName(_ region: Int) -> String { model.name(region) }
-
-    @ViewBuilder private func stepper(_ r: Int) -> some View {
-        let i = faces.firstIndex { $0.faceRegionID == r } ?? 0
-        HStack {
-            Button { model.selectedRegion = faces[(i + faces.count - 1) % faces.count].faceRegionID } label: {
-                Image(systemName: "chevron.left").font(.system(size: 13, weight: .bold))
-            }.buttonStyle(.plain).accessibilityIdentifier("flexible-face-prev")
-            Spacer()
-            VStack(spacing: 1) {
-                Text("Face \(i + 1) of \(faces.count)").font(.system(size: 14, weight: .semibold))
-                Text(faceName(r)).font(.system(size: 11)).foregroundStyle(DS.Color.textTertiary.color)
-            }
-            Spacer()
-            Button { model.selectedRegion = faces[(i + 1) % faces.count].faceRegionID } label: {
-                Image(systemName: "chevron.right").font(.system(size: 13, weight: .bold))
-            }.buttonStyle(.plain).accessibilityIdentifier("flexible-face-next")
-        }
-        .foregroundStyle(DS.Color.textPrimary.color)
-    }
-
-    @ViewBuilder private func conflictNote(_ r: Int) -> some View {
-        if let c = model.conflicts.first(where: { $0.faceA == r || $0.faceB == r }) {
-            // M13: core's two face names
-            FlexCaption(text: "\(faceName(c.faceA).capitalized) and \(faceName(c.faceB)) both push the same material along the same line (\(Int(c.overlapMM3.rounded())) mm³ shared). One squish profile per stack: mark one of them as where it rests.",
-                        colour: DS.Color.warning.color)
-        }
-    }
-
-    @ViewBuilder private func faceSettings(_ f: FlexibleFaceSettings) -> some View {
-        let r = f.faceRegionID
-        FlexChips(options: [("loaded", "Carries weight"), ("resting", "Rests here")], selection: f.role,
-                  id: "flexible-role") { v in model.edit { s in var g = f; g.role = v; s.setFace(g) } }
-        if let st = model.stack(r) {
-            let links = st.exitRegions.map { "\(faceName($0.id)) \(Int(($0.fraction * 100).rounded())) %" }
-            FlexCaption(text: "Other end: " + (links.isEmpty ? "not found" : links.joined(separator: ", ")),
-                        colour: DS.Color.accentCyan.color)
-            if st.side { FlexCaption(text: "Side face · gyroid only · estimated", colour: DS.Color.warning.color) }
-            if st.normalSpreadFlag {
-                FlexCaption(text: String(format: "This face bends %.0f° — the map is projected along one direction.", st.normalSpreadDeg),
-                            colour: DS.Color.warning.color)
-            }
-            FlexCaption(text: String(format: "%.0f × %.0f mm · %d columns, %.1f mm apart · lattice %.1f–%.1f mm deep",
-                                     st.uExtentMM, st.vExtentMM, st.columns.count, st.pitchMM, st.latticeMMMin, st.latticeMMMax))
-        } else if model.sceneState == .ready {
-            FlexCaption(text: "Finding this face's stack…")
-        }
-        if f.isLoaded {
-            FlexNumberChip(key: "weight-\(r)", title: "Weight", unit: "kg", value: f.weightKg, padTarget: $padTarget) { v in
-                model.edit { s in var g = f; g.weightKg = v; s.setFace(g) }
-            }
-            FlexCaption(text: String(format: "%.1f N at 9.80665 m/s²", f.weightN))
-            FlexNumberChip(key: "deepest-\(r)", title: "Deepest squish", unit: "mm", value: f.deepestMM, padTarget: $padTarget) { v in
-                model.edit { s in var g = f; g.deepestMM = v; s.setFace(g) }
-            }
-            HStack {
-                Text("Frame").font(.system(size: 12, weight: .semibold)).foregroundStyle(DS.Color.textPrimary.color)
-                Spacer()
-                Button { rotate(f, -90) } label: { Image(systemName: "rotate.left") }
-                    .buttonStyle(.plain).accessibilityIdentifier("flexible-rotate-left")
-                Text("\(f.rotationDeg)°").font(.system(size: 13, weight: .semibold)).monospacedDigit()
-                Button { rotate(f, 90) } label: { Image(systemName: "rotate.right") }
-                    .buttonStyle(.plain).accessibilityIdentifier("flexible-rotate-right")
-            }
-            .foregroundStyle(DS.Color.textPrimary.color)
-        }
-        HStack {
-            VStack(alignment: .leading, spacing: 1) {
-                Text("Skin").font(.system(size: 12, weight: .semibold)).foregroundStyle(DS.Color.textPrimary.color)
-                FlexCaption(text: f.skinOn ? "A solid skin covers this face." : "No skin: edges and side walls squish too.")
-            }
-            Spacer()
-            GlassToggle(isOn: f.skinOn) { model.edit { s in var g = f; g.skinOn.toggle(); s.setFace(g) } }
-                .accessibilityIdentifier("flexible-skin")
-        }
-        Button { model.removeFace(r) } label: {
-            Label("Remove this face", systemImage: "trash").font(.system(size: 12, weight: .medium))
-                .foregroundStyle(DS.Color.danger.color)
-        }.buttonStyle(.plain)
-    }
-
-    private func rotate(_ f: FlexibleFaceSettings, _ by: Int) {
-        model.edit { s in var g = f; g.rotationDeg = ((g.rotationDeg + by) % 360 + 360) % 360; s.setFace(g) }
-        model.selectedRegion = f.faceRegionID
-    }
-
-    @ViewBuilder private func results(_ f: FlexibleFaceSettings) -> some View {
-        if let d = model.design(f.faceRegionID) {
-            if let r = d.refusal {
-                FlexCaption(text: r.reason, colour: DS.Color.warning.color)
-            } else {
-                FlexibleFaceResult(design: d, model: model)
-            }
-        } else if model.settings.materialID == nil {
-            FlexCaption(text: "Pick a filament to see what the lattice can do here.")
-        }
     }
 }
 

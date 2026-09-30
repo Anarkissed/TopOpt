@@ -109,8 +109,9 @@ extension FlexStackInfo {
 @MainActor
 public final class FlexibleStageModel: ObservableObject {
 
+    /// ★ ROUND 3 (item 5): Face | Stamps | More (Filament / Squish / Auto / Physics folded in).
     public enum Tab: String, CaseIterable, Identifiable {
-        case filament = "Filament", squish = "Squish", auto = "Auto", physics = "Physics", stamps = "Stamps"
+        case face = "Face", stamps = "Stamps", more = "More"
         public var id: String { rawValue }
     }
     public enum SceneState: Equatable {
@@ -130,7 +131,7 @@ public final class FlexibleStageModel: ObservableObject {
     @Published public private(set) var bands: FlexErrorBandsInfo?
     @Published public private(set) var sceneState: SceneState = .idle
     @Published public private(set) var sceneInfo: FlexibleScene.Info?
-    @Published public var tab: Tab = .filament
+    @Published public var tab: Tab = .face
     @Published public var selectedRegion: Int?
     @Published public var showBuildable = false
     @Published public private(set) var stacks: [FlexFaceKey: FlexStackInfo] = [:]
@@ -142,9 +143,6 @@ public final class FlexibleStageModel: ObservableObject {
     @Published public private(set) var recommendationError: String?
     @Published public private(set) var checks: [UUID: FlexStampCheckInfo] = [:]
     @Published public private(set) var stampGrids: [UUID: FlexStamp] = [:]
-    @Published public private(set) var slice: FlexFieldSliceInfo?
-    @Published public var sliceAxis = 0
-    @Published public var sliceFraction = 0.5
     /// Check mode shows the stamp's dent instead of the design's (M14).
     @Published public var checkStampShown: UUID?
     /// The curve point showing its × (round 3, item 8); a tap anywhere on the part clears it.
@@ -356,7 +354,7 @@ public final class FlexibleStageModel: ObservableObject {
         NSLog("DIAG flexible tap face %d → region %d (known %d)", face, region, settings.face(region) != nil ? 1 : 0)
         curvePoint = nil
         selectedRegion = region
-        if tab == .filament { tab = .squish }
+        if tab == .more { tab = .face }
         ensureStack(region)
     }
 
@@ -546,8 +544,6 @@ public final class FlexibleStageModel: ObservableObject {
         let faces = settings.loadedFaces.filter { stacks[FlexFaceKey(region: $0.faceRegionID, rotation: $0.rotationDeg)] != nil }
         let temp = designTempC, build = self.build, grids = stampGrids
         let checkStamps = settings.checkStamps
-        let sliceAxis = self.sliceAxis, sliceFraction = self.sliceFraction
-        let info = sceneInfo
         let worker = self.worker
         designTask = Task.detached(priority: .userInitiated) {
             if delayNS > 0 { try? await Task.sleep(nanoseconds: delayNS) }
@@ -556,7 +552,6 @@ public final class FlexibleStageModel: ObservableObject {
             var s: [FlexFaceKey: [Double]] = [:]
             var checks: [UUID: FlexStampCheckInfo] = [:]
             var conflicts: [FlexConflictInfo] = []
-            var slice: FlexFieldSliceInfo?
             var err: String?
             do {
                 let keys = faces.map { FlexFaceKey(region: $0.faceRegionID, rotation: $0.rotationDeg) }
@@ -585,28 +580,18 @@ public final class FlexibleStageModel: ObservableObject {
                                               face: f.faceRegionID, rotation: f.rotationDeg, stamp: g, build: build)
                         }
                     }
-                    let designed = keys.filter { out[$0]?.refusal == nil && out[$0] != nil }
-                    if conflicts.isEmpty, !designed.isEmpty, let info {
-                        let n = [info.nx, info.ny, info.nz][sliceAxis]
-                        let idx = max(0, min(n - 1, Int(Double(n) * sliceFraction)))
-                        slice = try await worker.withScene {
-                            try $0.densitySlice(faces: designed.map(\.region), rotations: designed.map(\.rotation),
-                                                build: build, axis: sliceAxis, index: idx)
-                        }
-                    }
                 }
             } catch {
                 err = "\(error)"
             }
             if Task.isCancelled { return }
-            let (o, ss, ch, co, sl, er) = (out, s, checks, conflicts, slice, err)
+            let (o, ss, ch, co, er) = (out, s, checks, conflicts, err)
             await MainActor.run {
                 guard gen == self.designGeneration else { return }
                 self.designs = o
                 for (k, v) in ss { self.liveS[k] = v }
                 self.checks = ch
                 self.conflicts = co
-                self.slice = sl
                 self.lastError = er
             }
         }

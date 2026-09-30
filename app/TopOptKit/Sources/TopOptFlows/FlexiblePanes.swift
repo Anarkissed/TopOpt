@@ -1,5 +1,6 @@
-// FlexiblePanes — Auto, Physics, Stamps and the density cross-section (task
-// 2026-09-29-flexible-screens S2–S4). Every number here is a copy of a core result.
+// FlexiblePanes — Auto's and Physics' details (inside the More tab's (i)) and the Stamps tab
+// (task 2026-09-29-flexible-screens S2–S4; round 3 removed the density cross-section). Every
+// number here is a copy of a core result.
 
 import SwiftUI
 import UniformTypeIdentifiers
@@ -12,18 +13,14 @@ import TopOptKit
 struct FlexibleAutoPane: View {
     @ObservedObject var model: FlexibleStageModel
 
+    /// ★ ROUND 3: Auto's DETAILS, shown inside the More tab's "Auto" (i). The feel and the
+    /// lattice family are one-line rows now (FlexibleFacePanel); this is the reasoning.
     var body: some View {
         VStack(alignment: .leading, spacing: DS.Space.m) {
-            FlexSectionTitle(text: "How should it feel?")
-            FlexChips(options: [("springy", "Springy"), ("damped", "Damped")], selection: model.settings.feel,
-                      id: "flexible-feel") { v in model.edit { $0.feel = v } }
-            FlexCaption(text: model.settings.feel == "springy"
-                        ? "Bounces back: prefers gyroid (lowest energy loss, best recovery)."
-                        : "Soaks up the push: prefers honeycomb (bigger loop, firmer).")
             if model.material?.noPrediction != nil {
                 FlexCaption(text: "Auto needs tested data; this filament is calibrate-first.", colour: DS.Color.warning.color)
             } else if model.settings.loadedFaces.isEmpty {
-                FlexCaption(text: "Mark a face that carries weight first (Squish).")
+                FlexCaption(text: "Press a face first.")
             } else if let r = model.recommendation {
                 recommendation(r)
             } else if let e = model.recommendationError {
@@ -85,13 +82,9 @@ struct FlexibleAutoPane: View {
         return c.massG.map { String(format: "fits · %.0f g", $0) } ?? "fits"
     }
 
-    /// R5: override allowed; a pick core has no data for shows "no data here".
+    /// R5: an override core has no data for says "no data here" (the chips are the More
+    /// tab's "Lattice" row).
     @ViewBuilder private var overrides: some View {
-        FlexSectionTitle(text: "Override")
-        FlexChips(options: [("auto", "Auto"), ("gyroid", "Gyroid"), ("honeycomb", "Honeycomb")],
-                  selection: model.settings.topology, id: "flexible-topology") { v in
-            model.edit { $0.topology = v }
-        }
         if model.settings.topology != "auto" {
             let t = model.designTempC ?? 0
             if let c = model.candidate(topology: model.settings.topology, tempC: t), !c.eligible || !c.hasData {
@@ -266,88 +259,6 @@ struct FlexibleCurveChart: View {
     }
 }
 
-// MARK: - Density cross-section (C1 problem #3: draw the owner map)
-
-struct FlexibleSliceView: View {
-    @ObservedObject var model: FlexibleStageModel
-    @State private var showOwner = false
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            FlexSectionTitle(text: "Density cross-section")
-            HStack {
-                FlexChips(options: [("0", "X"), ("1", "Y"), ("2", "Z")], selection: String(model.sliceAxis),
-                          id: "flexible-slice-axis") { v in model.sliceAxis = Int(v) ?? 0; model.recomputeAll() }
-                FlexChips(options: [("rho", "Density"), ("owner", "Owner")], selection: showOwner ? "owner" : "rho",
-                          id: "flexible-slice-kind") { v in showOwner = v == "owner" }
-            }
-            Slider(value: Binding(get: { model.sliceFraction },
-                                  set: { model.sliceFraction = $0 }), in: 0.02...0.98) { editing in
-                if !editing { model.recomputeAll() }
-            }
-            .tint(FlexibleStageStyle.accent)
-            if let s = model.slice {
-                sliceImage(s)
-                let owners = Set(s.owner.filter { $0 >= 0 }).sorted()
-                if showOwner {
-                    HStack(spacing: 8) {
-                        ForEach(owners, id: \.self) { o in
-                            HStack(spacing: 4) {
-                                Rectangle().fill(ownerColour(o, owners)).frame(width: 10, height: 10)
-                                Text(model.name(o)).font(.system(size: 10.5))
-                                    .foregroundStyle(DS.Color.textSecondary.color)
-                            }
-                        }
-                    }
-                }
-                ForEach(Array(s.handovers.enumerated()), id: \.offset) { _, h in
-                    FlexCaption(text: "\(model.name(h.faceA).capitalized) and \(model.name(h.faceB)) "
-                                + String(format: "hand over across %.0f mm³, blended over %.0f mm³ (nearest face, one cell wide).",
-                                         h.overlapMM3, h.blendedMM3))
-                }
-                if s.unassignedVoxels > 0 {
-                    FlexCaption(text: "\(s.unassignedVoxels) lattice voxels are under no loaded face — no density is chosen there yet.")
-                }
-            } else {
-                FlexCaption(text: "Appears once a face is designed (and no two loaded faces share a stack).")
-            }
-        }
-    }
-
-    private func ownerColour(_ o: Int, _ owners: [Int]) -> Color {
-        let i = owners.firstIndex(of: o) ?? 0
-        return DS.Color.groupPalette[i % DS.Color.groupPalette.count].color
-    }
-
-    @ViewBuilder private func sliceImage(_ s: FlexFieldSliceInfo) -> some View {
-        let owners = Set(s.owner.filter { $0 >= 0 }).sorted()
-        let rhoMax = max(0.01, s.density.max() ?? 1)
-        Canvas { ctx, size in
-            guard s.width > 0, s.height > 0 else { return }
-            let cw = size.width / CGFloat(s.width), ch = size.height / CGFloat(s.height)
-            for j in 0..<s.height {
-                for i in 0..<s.width {
-                    let k = j * s.width + i
-                    let d = s.density[k]
-                    guard d >= 0 else { continue }                      // not lattice
-                    let rect = CGRect(x: CGFloat(i) * cw, y: size.height - CGFloat(j + 1) * ch, width: cw + 0.3, height: ch + 0.3)
-                    let c: Color
-                    if showOwner { c = s.owner[k] >= 0 ? ownerColour(s.owner[k], owners) : DS.Color.textQuaternary.color }
-                    else if d == 0 { c = DS.Color.textQuaternary.color }
-                    else { c = DS.Color.textPrimary.color.opacity(0.15 + 0.85 * d / rhoMax) }
-                    ctx.fill(Path(rect), with: .color(c))
-                }
-            }
-        }
-        .aspectRatio(CGFloat(max(1, s.width)) / CGFloat(max(1, s.height)), contentMode: .fit)
-        .frame(maxHeight: 180)
-        .frame(maxWidth: .infinity)
-        .accessibilityIdentifier("flexible-slice")
-        Text(String(format: "Brighter = denser (to ρ %.2f). Grey = lattice with no loaded face above it.", rhoMax))
-            .font(.system(size: 10)).foregroundStyle(DS.Color.textTertiary.color)
-    }
-}
-
 // MARK: - Stamps (S4, M14)
 
 struct FlexibleStampsPane: View {
@@ -379,7 +290,7 @@ struct FlexibleStampsPane: View {
                 if let e = importError { FlexCaption(text: e, colour: DS.Color.danger.color) }
                 placed(r, f, st)
             } else {
-                FlexCaption(text: "Mark a face that carries weight first (Squish).")
+                FlexCaption(text: "Press a face first (Face tab).")
             }
         }
         .fileImporter(isPresented: $importing, allowedContentTypes: [.svg, .png, .jpeg, .image]) { result in
