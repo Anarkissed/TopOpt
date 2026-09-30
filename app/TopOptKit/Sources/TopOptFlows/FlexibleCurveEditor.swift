@@ -56,6 +56,8 @@ struct FlexibleCurveEditor: View {
     let onChange: (FlexCurve) -> Void
     let onCommit: () -> Void
     @State private var dragIndex: Int?
+    /// Finger − point at the drag's start: the point moves WITH the finger, never jumps to it.
+    @State private var grab: CGSize = .zero
     @State private var refusal: String?
 
     private func screen(_ w: SIMD3<Double>) -> CGPoint? {
@@ -200,12 +202,26 @@ struct FlexibleCurveEditor: View {
         onCommit()
     }
 
+    /// ★ A TAP IS NOT A DRAG (verification of round 3): at 1 pt a tap that wobbled 1–2 pt
+    /// jumped the point to the finger (the 44 pt target is off-centre) and saved it, beside
+    /// the × it asked for. A drag starts at `dragStartPoints` and is RELATIVE to the grab.
+    static let dragStartPoints: CGFloat = 6
+
+    /// Where the dragged point goes: the finger, minus where on the point it was grabbed.
+    static func dragged(location: CGPoint, grab: CGSize) -> CGPoint {
+        CGPoint(x: location.x - grab.width, y: location.y - grab.height)
+    }
+
     private func pointDrag(_ k: Int) -> some Gesture {
-        DragGesture(minimumDistance: 1, coordinateSpace: .named(FlexibleStageSpace.name))
+        DragGesture(minimumDistance: Self.dragStartPoints, coordinateSpace: .named(FlexibleStageSpace.name))
             .onChanged { g in
+                if dragIndex != k, k < curve.x.count, let p = screen(drawn(curve.x[k], curve.y[k])) {
+                    grab = CGSize(width: g.startLocation.x - p.x, height: g.startLocation.y - p.y)
+                }
                 dragIndex = k
                 if selected != nil { selected = nil }
-                guard k < curve.x.count, let (t, h) = param(at: g.location, near: curve.x[k]) else { return }
+                guard k < curve.x.count,
+                      let (t, h) = param(at: Self.dragged(location: g.location, grab: grab), near: curve.x[k]) else { return }
                 var c = curve
                 let last = c.x.count - 1
                 if k > 0 && k < last {
@@ -217,6 +233,7 @@ struct FlexibleCurveEditor: View {
             }
             .onEnded { _ in
                 dragIndex = nil
+                grab = .zero
                 onCommit()
             }
     }

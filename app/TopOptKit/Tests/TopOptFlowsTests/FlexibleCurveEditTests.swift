@@ -107,4 +107,20 @@ final class FlexibleCurveEditTests: XCTestCase {
         XCTAssertFalse(page.contains("flexible-add-point"), "the + point button is gone")
         XCTAssertFalse(page.contains("Up = softer"), "the backwards caption is gone")
     }
+
+    /// ★ A TAP IS NOT A DRAG (verification of round 3): a tap that wobbles 1–2 pt must not
+    /// move the point, and a drag moves it WITH the finger from where it was grabbed.
+    /// RED CONTROL: the old absolute rule put the point under the finger — 11 pt off here.
+    func testATapDoesNotMoveAPointAndADragIsRelative() throws {
+        XCTAssertGreaterThanOrEqual(FlexibleCurveEditor.dragStartPoints, 6, "a 1–2 pt wobble stays a tap")
+        let grab = CGSize(width: 10, height: 5)                 // grabbed 10 pt right, 5 pt below its centre
+        let p = FlexibleCurveEditor.dragged(location: CGPoint(x: 110, y: 205), grab: grab)
+        XCTAssertEqual(p, CGPoint(x: 100, y: 200), "the point stays where it was grabbed from")
+        let old = CGPoint(x: 110, y: 205)                        // the finger itself
+        XCTAssertGreaterThan(hypot(old.x - 100, old.y - 200), 10, "control: the old rule jumped it to the finger")
+        let editor = try String(contentsOf: FlexibleHisProject.repoRoot
+            .appendingPathComponent("app/TopOptKit/Sources/TopOptFlows/FlexibleCurveEditor.swift"), encoding: .utf8)
+        XCTAssertTrue(editor.contains("DragGesture(minimumDistance: Self.dragStartPoints"))
+        XCTAssertTrue(editor.contains("param(at: Self.dragged(location: g.location, grab: grab)"))
+    }
 }

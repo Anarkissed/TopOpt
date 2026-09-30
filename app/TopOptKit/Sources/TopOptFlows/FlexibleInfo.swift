@@ -10,7 +10,7 @@ import SwiftUI
 import TopOptDesign
 import TopOptKit
 
-/// The (i): a 28 pt glyph in a 44 pt target that opens a popover with the long text.
+/// The (i): a 15 pt glyph in a 44 pt target (it was 32 × 32) that opens a popover with the long text.
 struct FlexInfoButton<Extra: View>: View {
     let title: String
     let text: String
@@ -22,12 +22,15 @@ struct FlexInfoButton<Extra: View>: View {
         self.title = title; self.text = text; self.id = id; self.extra = extra()
     }
 
+    /// The hit target (pt): the HIG's 44.
+    static var target: CGFloat { 44 }
+
     var body: some View {
         Button { shown = true } label: {
             Image(systemName: "info.circle")
                 .font(.system(size: 15, weight: .regular))
                 .foregroundStyle(DS.Color.textTertiary.color)
-                .frame(width: 32, height: 32)
+                .frame(width: FlexInfoButton.target, height: FlexInfoButton.target)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -54,24 +57,27 @@ extension FlexInfoButton where Extra == EmptyView {
     }
 }
 
-/// One row: its ONE line (never wrapped), its control, and its (i).
+/// One row: its ONE line (never wrapped), its control, and its (i). `warning` colours the
+/// line when it says something he must act on (Auto that cannot meet the curve…).
 struct FlexRow<Control: View, Extra: View>: View {
     let line: String
     let info: String
     var id: String = "flexible-row"
+    var warning = false
     let control: Control
     let extra: Extra
 
-    init(_ line: String, info: String, id: String = "flexible-row",
+    init(_ line: String, info: String, id: String = "flexible-row", warning: Bool = false,
          @ViewBuilder control: () -> Control, @ViewBuilder extra: () -> Extra) {
-        self.line = line; self.info = info; self.id = id; self.control = control(); self.extra = extra()
+        self.line = line; self.info = info; self.id = id; self.warning = warning
+        self.control = control(); self.extra = extra()
     }
 
     var body: some View {
         HStack(spacing: DS.Space.s) {
             Text(line)
                 .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(DS.Color.textPrimary.color)
+                .foregroundStyle(warning ? DS.Color.warning.color : DS.Color.textPrimary.color)
                 .lineLimit(1).minimumScaleFactor(0.85)
                 .layoutPriority(1)
             Spacer(minLength: DS.Space.xs)
@@ -84,14 +90,27 @@ struct FlexRow<Control: View, Extra: View>: View {
 }
 
 extension FlexRow where Extra == EmptyView {
-    init(_ line: String, info: String, id: String = "flexible-row", @ViewBuilder control: () -> Control) {
-        self.init(line, info: info, id: id, control: control) { EmptyView() }
+    init(_ line: String, info: String, id: String = "flexible-row", warning: Bool = false, @ViewBuilder control: () -> Control) {
+        self.init(line, info: info, id: id, warning: warning, control: control) { EmptyView() }
     }
 }
 
 extension FlexRow where Control == EmptyView, Extra == EmptyView {
-    init(_ line: String, info: String, id: String = "flexible-row") {
-        self.init(line, info: info, id: id, control: { EmptyView() }) { EmptyView() }
+    init(_ line: String, info: String, id: String = "flexible-row", warning: Bool = false) {
+        self.init(line, info: info, id: id, warning: warning, control: { EmptyView() }) { EmptyView() }
+    }
+}
+
+/// The one-line warning under a row (the selected face's refusal, unreached columns…): said
+/// on the panel, the (i) only explains.
+struct FlexWarningLine: View {
+    let text: String
+    var id: String = "flexible-row-warning"
+    var body: some View {
+        Text(text)
+            .font(.system(size: 12, weight: .semibold)).foregroundStyle(DS.Color.warning.color)
+            .lineLimit(1).minimumScaleFactor(0.85)
+            .accessibilityIdentifier(id)
     }
 }
 

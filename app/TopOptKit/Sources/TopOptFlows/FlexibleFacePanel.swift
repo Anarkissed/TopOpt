@@ -6,7 +6,7 @@
 // depth prism and the stamps are edited ON THE PART, so the panel only names and switches.
 // No wizard. Tabs: Face | Stamps | More.
 //
-// ★ FACE: two part rows — the filament ("varioShore TPU · has squish data") and the feel —
+// ★ FACE: two part rows — the filament ("varioShore TPU · squish data") and the feel —
 // then, for the face selected on the model:
 //   1. its name, [Pressed | Rests]                      (a tap on the part only SELECTS)
 //   2. its weight, from the main page's group (editing it writes back to the group)
@@ -18,8 +18,12 @@
 // ★ REMOVED (round 3): Both / Either / Centre (always both), the X / Y / 3D steps (the map
 // always bends), the frame rotation, 1 / 2 beads (always 1), the density cross-section and
 // its slider, and every long caption.
-// ★ MORE: nozzle temperature, the lattice family, Auto's pick, walls, physics — read-mostly,
-// every one with a working default, so nothing required hides there.
+// ★ MORE: nozzle temperature, the lattice family, Auto's pick, physics (walls folded in) —
+// read-mostly, every one with a working default, so nothing required hides there.
+// ★ VERIFICATION OF ROUND 3: what he must know is ON the panel — the selected face's refusal
+// or unreached columns (FlexWarningLine), Auto that cannot meet the curve or picked nothing,
+// a missing filament list; Feel and Lattice are hidden for a calibrate-first filament (they
+// change nothing there yet); chips take their own widths so no label reads "…".
 
 import SwiftUI
 import TopOptDesign
@@ -34,10 +38,12 @@ struct FlexibleFacePanel: View {
     var body: some View {
         VStack(alignment: .leading, spacing: DS.Space.xs) {
             filamentRow
-            FlexRow(FlexibleRowCopy.feel, info: FlexibleRowCopy.Info.feel, id: "flexible-row-feel") {
-                FlexChips(options: [("springy", "Springy"), ("damped", "Damped")], selection: model.settings.feel,
-                          id: "flexible-feel") { v in model.edit { $0.feel = v } }
-                    .frame(width: 190)
+            if model.material?.noPrediction == nil {
+                FlexRow(FlexibleRowCopy.feel, info: FlexibleRowCopy.Info.feel, id: "flexible-row-feel") {
+                    FlexChips(options: FlexibleRowCopy.feelOptions, selection: model.settings.feel,
+                              id: "flexible-feel", equalWidths: false) { v in model.edit { $0.feel = v } }
+                        .fixedSize()
+                }
             }
             Divider().overlay(DS.Color.strokeSubtle.color).padding(.vertical, DS.Space.xs)
             faceRows
@@ -51,8 +57,10 @@ struct FlexibleFacePanel: View {
 
     private var filamentRow: some View {
         let m = model.material
-        return FlexRow(FlexibleRowCopy.filament(name: m?.displayName, hasData: m != nil && m?.noPrediction == nil),
-                       info: FlexibleRowCopy.Info.filament, id: "flexible-row-filament") {
+        let missing = model.catalogueError != nil
+        return FlexRow(missing ? FlexibleRowCopy.catalogueMissing
+                               : FlexibleRowCopy.filament(name: m?.displayName, hasData: m != nil && m?.noPrediction == nil),
+                       info: FlexibleRowCopy.Info.filament, id: "flexible-row-filament", warning: missing) {
             Menu {
                 ForEach(model.catalogue) { c in
                     Button { model.pickMaterial(c.id) } label: {
@@ -94,10 +102,10 @@ struct FlexibleFacePanel: View {
 
     @ViewBuilder private func markedRows(_ r: Int, _ f: FlexibleFaceSettings) -> some View {
         FlexRow(name(r), info: FlexibleRowCopy.Info.face, id: "flexible-row-face") {
-            FlexChips(options: [("loaded", "Pressed"), ("resting", "Rests")], selection: f.role, id: "flexible-role") { v in
+            FlexChips(options: FlexibleRowCopy.roleOptions, selection: f.role, id: "flexible-role", equalWidths: false) { v in
                 if v == "loaded" { pressOrAsk(r) } else { model.rest(r) }
             }
-            .frame(width: 170)
+            .fixedSize()
             // ★ NO TRASH FOR A FACE A MAIN-PAGE GROUP HOLDS: the next re-sync would bring it
             // back (the group is the one truth) — [Rests] is the Flexible page's way out
             if model.mainPageLoads.canRemove(r) {
@@ -118,11 +126,10 @@ struct FlexibleFacePanel: View {
                 .accessibilityIdentifier("flexible-row-pressed-on-main")
         }
         if let c = model.conflicts.first(where: { $0.faceA == r || $0.faceB == r }) {
-            Text(FlexibleRowCopy.sharesStack(with: name(c.faceA == r ? c.faceB : c.faceA)))
-                .font(.system(size: 12, weight: .semibold)).foregroundStyle(DS.Color.warning.color)
-                .lineLimit(1)
-                .accessibilityIdentifier("flexible-row-conflict")
+            FlexWarningLine(text: FlexibleRowCopy.sharesStack(with: name(c.faceA == r ? c.faceB : c.faceA)),
+                            id: "flexible-row-conflict")
         }
+        if f.isLoaded, let w = warning(r) { FlexWarningLine(text: w) }
         if f.isLoaded {
             let e = model.mainPageLoads.entry(r)
             let fromGroup = f.weightFrom != nil && e?.groupID == f.weightFrom
@@ -140,12 +147,12 @@ struct FlexibleFacePanel: View {
                 // ★ BATCH D: the Stamp shape (squish by stamp: flat curves + design_stamp, the
                 // stamp's weight as the face's, the prism on its footprint) lands here. Until
                 // then it is shown, and disabled — the curves are this build's shape.
-                FlexChips(options: [("curves", "Curves"), ("stamp", "Stamp")], selection: f.shape ?? "curves",
-                          id: "flexible-shape", disabled: ["stamp"]) { v in
+                FlexChips(options: FlexibleRowCopy.shapeOptions, selection: f.shape ?? "curves",
+                          id: "flexible-shape", disabled: ["stamp"], equalWidths: false) { v in
                     guard v == "curves" else { return }
                     model.edit { s in guard var g = s.face(r) else { return }; g.shape = nil; s.setFace(g) }
                 }
-                .frame(width: 170)
+                .fixedSize()
             }
             FlexRow(FlexibleRowCopy.deepest(f.deepestMM), info: FlexibleRowCopy.Info.deepest, id: "flexible-row-deepest") {
                 FlexEditPill(key: "deepest-\(r)", title: FlexibleRowCopy.deepestTitle, unit: "mm", value: f.deepestMM,
@@ -173,6 +180,14 @@ struct FlexibleFacePanel: View {
             GlassToggle(isOn: f.skinOn) { model.edit { s in guard var g = s.face(r) else { return }; g.skinOn.toggle(); s.setFace(g) } }
                 .accessibilityIdentifier("flexible-skin")
         }
+    }
+
+    /// The selected face's one warning line (FlexibleRowCopy.faceWarning), or nil.
+    private func warning(_ r: Int) -> String? {
+        let d = model.design(r)
+        return FlexibleRowCopy.faceWarning(refusalCode: d?.refusal?.code, refusalReason: d?.refusal.map { model.text($0.reason) },
+                                           unreachedColumns: d.map { $0.tooFirm + $0.tooSoft + $0.beyondData } ?? 0,
+                                           side: model.stack(r)?.side ?? false)
     }
 
     @ViewBuilder private func unmarkedRow(_ r: Int) -> some View {
@@ -216,13 +231,15 @@ struct FlexibleMorePanel: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: DS.Space.xs) {
+            let calibrateFirst = model.material?.noPrediction != nil
             if let m = model.material, m.noPrediction == nil {
                 FlexRow(FlexibleRowCopy.temperature, info: FlexibleRowCopy.Info.temperature, id: "flexible-row-temp") {
-                    FlexChips(options: [("auto", "Auto")] + m.testedTempsC.map { (String(Int($0)), "\(Int($0))°") },
-                              selection: model.settings.nozzleTempC.map { String(Int($0)) } ?? "auto", id: "flexible-temp") { v in
+                    FlexChips(options: FlexibleRowCopy.temperatureOptions(m.testedTempsC),
+                              selection: model.settings.nozzleTempC.map { String(Int($0)) } ?? "auto", id: "flexible-temp",
+                              equalWidths: false) { v in
                         model.edit { $0.nozzleTempC = v == "auto" ? nil : Double(v) }
                     }
-                    .frame(width: 210)
+                    .fixedSize()
                 } extra: {
                     if let t = model.settings.nozzleTempC, !model.temperatureNote(t).isEmpty {
                         FlexInfoText("\(Int(t)) °C: \(model.temperatureNote(t))", warning: true)
@@ -231,17 +248,19 @@ struct FlexibleMorePanel: View {
             } else {
                 FlexRow(FlexibleRowCopy.temperatureNoData, info: FlexibleRowCopy.Info.temperature, id: "flexible-row-temp")
             }
-            FlexRow(FlexibleRowCopy.topology, info: FlexibleRowCopy.Info.topology, id: "flexible-row-topology") {
-                FlexChips(options: [("auto", "Auto"), ("gyroid", "Gyroid"), ("honeycomb", "Honeycomb")],
-                          selection: model.settings.topology, id: "flexible-topology") { v in model.edit { $0.topology = v } }
-                    .frame(width: 230)
+            if !calibrateFirst {
+                FlexRow(FlexibleRowCopy.topology, info: FlexibleRowCopy.Info.topology, id: "flexible-row-topology") {
+                    FlexChips(options: FlexibleRowCopy.topologyOptions, selection: model.settings.topology,
+                              id: "flexible-topology", equalWidths: false) { v in model.edit { $0.topology = v } }
+                        .fixedSize()
+                }
             }
-            FlexRow(autoLine, info: FlexibleRowCopy.Info.auto, id: "flexible-row-auto") {
+            let auto = autoLine
+            FlexRow(auto.text, info: FlexibleRowCopy.Info.auto, id: "flexible-row-auto", warning: auto.warning) {
                 EmptyView()
             } extra: {
                 FlexibleAutoPane(model: model)
             }
-            FlexRow(FlexibleRowCopy.walls, info: FlexibleRowCopy.Info.walls, id: "flexible-row-walls")
             FlexRow(FlexibleRowCopy.physics, info: FlexibleRowCopy.Info.physics, id: "flexible-row-physics") {
                 EmptyView()
             } extra: {
@@ -250,10 +269,13 @@ struct FlexibleMorePanel: View {
         }
     }
 
-    private var autoLine: String {
-        if model.material?.noPrediction != nil { return FlexibleRowCopy.autoNoData }
-        guard let r = model.recommendation, r.chosen else { return FlexibleRowCopy.autoWaiting }
-        return FlexibleRowCopy.auto(topology: r.topology, tempC: r.tempC)
+    private var autoLine: (text: String, warning: Bool) {
+        let r = model.recommendation
+        return FlexibleRowCopy.autoLine(noData: model.material?.noPrediction != nil,
+                                        pressedFaces: model.settings.loadedFaces.count,
+                                        chosen: r?.chosen, reachable: r?.reachable,
+                                        error: model.recommendationError != nil,
+                                        topology: r?.topology ?? "", tempC: r?.tempC)
     }
 }
 

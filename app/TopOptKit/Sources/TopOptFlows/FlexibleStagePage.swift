@@ -323,11 +323,20 @@ public struct FlexibleStagePage: View {
         .padding(PageChrome.edge)
     }
 
-    private var notice: some View {
+    /// ★ ONLY WHEN THERE IS SOMETHING TO SAY (verification of round 3: "only what is
+    /// necessary"): opening, a failure, or "Tap a face on the part." — the permanent
+    /// "no strength certificate" line is gone (it lives in the Physics (i) and the modal).
+    @ViewBuilder private var notice: some View {
+        if let text = noticeText {
+            noticePill(text)
+        }
+    }
+
+    private func noticePill(_ text: String) -> some View {
         VStack {
             HStack(spacing: DS.Space.s) {
                 Image(systemName: "info.circle.fill").font(.system(size: 13))
-                Text(noticeText)
+                Text(text)
                     .font(.system(size: 13, weight: .medium))
                     .lineLimit(2)
             }
@@ -342,7 +351,7 @@ public struct FlexibleStagePage: View {
         .allowsHitTesting(false)
     }
 
-    private var noticeText: String {
+    private var noticeText: String? {
         switch model.sceneState {
         case .opening: return "Opening the part — its faces, stacks and lattice region."
         case .failed(let why): return "The part could not be opened: \(why)"
@@ -351,7 +360,7 @@ public struct FlexibleStagePage: View {
         if model.settings.faces.isEmpty, model.tab == .face {
             return "Tap a face on the part."
         }
-        return "Flexible · no strength certificate · every number shows its tier and ± band."
+        return nil
     }
 
     // MARK: the panel
@@ -363,10 +372,7 @@ public struct FlexibleStagePage: View {
                 Text("Flexible").font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(DS.Color.textPrimary.color)
                 Spacer()
-                if let m = model.material {
-                    Text(m.displayName).font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(DS.Color.textTertiary.color).lineLimit(1)
-                }
+                // (the filament is the Face tab's first row — not said twice)
             }
             // ★ ROUND 3 (item 5): Face | Stamps | More — one-line rows, details behind (i)
             FlexChips(options: FlexibleStageModel.Tab.allCases.map { ($0.rawValue, $0.rawValue) },
@@ -463,6 +469,9 @@ struct FlexChips: View {
     let selection: String
     var id: String = "flexible-chip"
     var disabled: Set<String> = []
+    /// false: each chip its own width (the panel's rows — "Honeycomb" read "Honeyco…" in an
+    /// equal third of a fixed frame).
+    var equalWidths = true
     let onPick: (String) -> Void
 
     var body: some View {
@@ -477,7 +486,7 @@ struct FlexChips: View {
                                             : DS.Color.textTertiary.color))
                         .lineLimit(1).minimumScaleFactor(0.8)
                         .padding(.horizontal, 10).padding(.vertical, 7)
-                        .frame(maxWidth: .infinity)
+                        .frame(maxWidth: equalWidths ? .infinity : nil)
                         .background(Capsule().fill(on ? DS.Color.fillSelected.color : Color.clear))
                 }
                 .buttonStyle(.plain)
