@@ -518,7 +518,8 @@ struct FlexSquishRequest {
   int32_t control = 0;   // TESTS ONLY (bits: 1 nu=0 . 2 anchor patch . 4 ignore cuts .
                          // 8 uniform pressure . 16 uniform E . 32 lattice=solid . 64 no extension
                          // . 128 every rest slides . 256 nominal-strain law . 512 other pins
-                         // . 1024 unprojected traction . 2048 every rest bonded); the app sends 0
+                         // . 1024 unprojected traction . 2048 every rest bonded — the app's one
+                         // retry when a solve whose rests slide does not converge); else the app sends 0
 };
 struct FlexSquishSolution {
   bool ok = false;

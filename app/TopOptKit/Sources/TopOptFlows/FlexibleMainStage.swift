@@ -137,7 +137,9 @@ public final class FlexibleMainStage: ObservableObject {
     public var simNote: String? {
         // ★ BATCH G: the sims' own line wins while it lasts ("Simulating the squish…")
         if let n = feNote { return n }
-        guard let g = shownLattice, let id = g.shownSimID else { return nil }
+        // ★ BATCH G: "Play all" (the default with two groups) is the whole lattice — its note is the
+        // first group's miss (FlexibleGeneratedLattice.simNote(for: "all"))
+        guard let g = shownLattice, let id = g.shownSimID ?? g.shownSim?.id else { return nil }
         return g.simNote(for: id)
     }
     public private(set) var model: FlexibleStageModel?
@@ -177,8 +179,13 @@ public final class FlexibleMainStage: ObservableObject {
     var squishBusy: (() -> Bool)?
     /// The Stress solve waited for a sim (it starts when the sims go idle).
     var stressWaiting = false
+    var squishIdleObservation: AnyCancellable?
     /// Test control only: draw today's COLUMN squish even with the sims landed (the BEFORE renders).
     var controlColumnSquish = false
+    /// Test control only: a failed sim holds the loop at rest (no column fallback — the red control).
+    var controlNoFallback = false
+    /// Tests: the next refresh rebuilds the overlay (a mesh rebuild mid Play all).
+    func forceOverlayRebuildForTests() { overlayKey = nil }
     /// Reduced motion (tests pin it).
     var reduceMotion: () -> Bool = {
         #if canImport(UIKit)
@@ -194,6 +201,9 @@ public final class FlexibleMainStage: ObservableObject {
         // ★ C2 VERIFICATION: the Export step's buttons act through the stage (the model, the note,
         // the way to the Lattice stage are its)
         coreRun.onFix = { [weak self] f in self?.coreFix(f) }
+        // ★ BATCH G: a Stress solve that waited for a squish sim starts when the last one leaves core
+        squishIdleObservation = NotificationCenter.default.publisher(for: FlexibleSquishSolver.idleNotification)
+            .sink { [weak self] _ in self?.squishIdle() }
     }
 
     // MARK: the one model per project (H2)
@@ -409,7 +419,7 @@ public final class FlexibleMainStage: ObservableObject {
 
     /// ★ BATCH G: the sims went idle — a Stress solve that waited for them starts now.
     func squishIdle() {
-        guard stressWaiting else { return }
+        guard stressWaiting, !FlexibleSquishSolver.solving else { return }
         stressWaiting = false
         stressSolver?()
     }
@@ -509,7 +519,7 @@ public final class FlexibleMainStage: ObservableObject {
                     playedGeneration = g.generation
                     loop.restartFromRest(reduceMotion: reduceMotion())
                 }
-            } else if fe.pending {
+            } else if fe.pending || (controlNoFallback && fe.failure != nil) {
                 // the sims run: the lattice is shown, held at rest ("Simulating the squish…")
                 loop.sequenceCount = 1
                 if loop.playing || loop.held != 0 { loop.hold(0) }

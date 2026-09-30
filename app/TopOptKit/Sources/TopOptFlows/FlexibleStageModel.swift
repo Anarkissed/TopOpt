@@ -244,7 +244,7 @@ public final class FlexibleStageModel: ObservableObject {
     /// `waitForIdle` so nothing is still inside core when its owner goes away.
     private var inFlight: [UUID: Task<Void, Never>] = [:]
 
-    private func track(_ t: Task<Void, Never>) {
+    func track(_ t: Task<Void, Never>) {
         let id = UUID()
         inFlight[id] = t
         Task { @MainActor [weak self] in

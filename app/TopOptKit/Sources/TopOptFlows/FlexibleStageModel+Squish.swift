@@ -36,7 +36,8 @@ extension FlexibleStageModel {
         if s != squish { squish = s }   // one publish: "Simulating the squish…"
         squishSolver.onResult = { [weak self] gen, id, state in self?.squishLanded(gen, id, state) }
         let worker = squishWorker
-        Task { @MainActor [weak self] in
+        // (tracked: `waitForIdle` waits for the hand-over too, so no sim starts after it returned)
+        track(Task { @MainActor [weak self] in
             let scene = await worker.sceneRef()
             guard let self, self.feRequest?.generation == r.generation, self.lattice?.generation == r.generation else { return }
             guard let scene else {
@@ -45,7 +46,7 @@ extension FlexibleStageModel {
             }
             self.squishSolver.schedule(r, scene: scene, first: first)
             self.feRequest = nil   // the solver holds it until its last sim
-        }
+        })
     }
 
     /// One sim finished: kept only if it is for the lattice still shown.

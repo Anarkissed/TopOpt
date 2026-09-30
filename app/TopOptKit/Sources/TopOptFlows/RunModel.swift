@@ -1311,6 +1311,7 @@ public final class RunModel: ObservableObject {
         }
 
         scheduler.runInBackground { [weak self] in
+            FlexibleSquishSolver.waitUntilOutOfCore()   // Flexible (PR #362, batch G): never two solves in core's matrix-free pool (FlexibleSquishSolver)
             let result: Result<OptimizeOutcome, Error>
             do {
                 let o = try runner(request, { rung, count, iter in

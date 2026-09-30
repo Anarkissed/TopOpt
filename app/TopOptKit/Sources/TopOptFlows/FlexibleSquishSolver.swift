@@ -30,6 +30,19 @@ public final class FlexibleSquishSolver {
 
     /// Process-wide: a sim is inside core right now (the Stress solve waits on it).
     nonisolated public static var solving: Bool { inFlight.value > 0 }
+    /// ★ Block the CALLING (background) thread until no sim is inside core (at most `timeoutS`).
+    /// Core's matrix-free ApplyPool is process-global and not safe for two solves at once — two
+    /// solves in it DEADLOCK (measured: a sim and a direct load-case solve, both waiting on the
+    /// pool's condition variable for ever). A topology run calls this before it enters core
+    /// (RunModel's one hook); no new sim starts meanwhile (the run is in AppModel.runningIDs, which
+    /// FlexibleStressSolver.busy reads). Core brief: a thread-safe pool.
+    nonisolated public static func waitUntilOutOfCore(timeoutS: Double = 60) {
+        let end = Date().addingTimeInterval(timeoutS)
+        while inFlight.value > 0, Date() < end { usleep(10_000) }
+    }
+    /// Posted on the main queue when the last sim in core (of ANY model) comes out — a Stress solve
+    /// that waited starts then, whichever model's sim it waited for (another project's included).
+    public static let idleNotification = Notification.Name("FlexibleSquishSolver.idle")
     nonisolated static let inFlight = AtomicCount()
     /// The most sims ever inside core at once (tests: must stay 1).
     nonisolated static var maxObservedConcurrency: Int { inFlight.maximum }
@@ -56,6 +69,8 @@ public final class FlexibleSquishSolver {
     /// The bridge's control bits and the sim's deadline (a 1 ms deadline forces a failure).
     var controlBits = 0
     var controlDeadlineMS: Double?
+    /// These sims run with a 1 ms deadline (they fail; the others solve).
+    var controlFailSimIDs: Set<String> = []
 
     public init() {}
 
@@ -116,7 +131,8 @@ public final class FlexibleSquishSolver {
             guard let sim = r.sims.first(where: { $0.id == id }) else { continue }
             running.append(id)
             solveCount += 1
-            let bits = controlBits, deadline = controlDeadlineMS ?? FlexibleFE.deadlineMS
+            let bits = controlBits
+            let deadline = controlFailSimIDs.contains(id) ? 1 : (controlDeadlineMS ?? FlexibleFE.deadlineMS)
             // (the rule is the SERIAL queue; the red control's concurrency needs a concurrent one)
             let q = controlConcurrency > 1 ? DispatchQueue.global(qos: .utility) : queue
             Task { @MainActor [weak self] in
@@ -125,6 +141,9 @@ public final class FlexibleSquishSolver {
                         Self.inFlight.increment()
                         let out = FlexibleFERequest.solve(sim, of: r, on: scene, control: bits, deadlineMS: deadline)
                         Self.inFlight.decrement()
+                        if Self.inFlight.value == 0 {
+                            DispatchQueue.main.async { NotificationCenter.default.post(name: Self.idleNotification, object: nil) }
+                        }
                         cont.resume(returning: out)
                     }
                 }

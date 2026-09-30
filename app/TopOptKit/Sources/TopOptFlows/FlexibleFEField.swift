@@ -48,6 +48,9 @@ public struct FlexibleFEField: Sendable, Equatable {
     /// k as the deepest zone asked for it (before the band): > 2 ⇒ the sim found the part that many
     /// times stiffer than core's columns (FlexibleFE.calibrationBand).
     public private(set) var coreRatio: Double = 1
+    /// The sliding rests' solve did not converge and the sim was solved with every rest bonded (a
+    /// stiffer picture — FlexibleFERequest.solve's one retry).
+    public var restsBonded = false
     /// The band held k back (the field moves less, or more, than the map reads).
     public var clamped: Bool { abs(coreRatio - scale) > 1e-9 * max(1, abs(scale)) && !uncalibrated }
     /// Identity (fields are compared by it, never by their megabytes).

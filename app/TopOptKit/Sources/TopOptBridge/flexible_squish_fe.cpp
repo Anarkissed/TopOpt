@@ -48,6 +48,11 @@ constexpr double kEpsMin = 0.02;
 // Iacob's specimen: 12.5 mm high, 1.6 mm of skins — core's loader converts nominal to core strain
 // by 12.5 / 10.9 (data.cpp). Used ONLY by the test control 256 (the law read on the nominal axis).
 constexpr double kNominalToCore = 12.5 / 10.9;
+// ★ THE SOLVE IS BOUNDED BY ITERATIONS TOO. Core polls the deadline once every 256 CG iterations,
+// so a multigrid solve that crawls (a loaded or slow device) could run far past its 20 s budget
+// (measured: ~150 s under heavy CPU load) before the poll. His pad converges in 13–150 iterations;
+// past this cap core throws its non-convergence (a value here: the column squish plays).
+constexpr int kMaxIterations = 600;
 
 enum Control : int {
   kPoissonZero = 1,
@@ -831,7 +836,7 @@ FlexSquishSolution solve(const Setup& s, const FlexSquishRequest& req, const fx:
         const double ts = topopt::steady_clock_ms();
         try {
           topopt::CgInfo info;
-          sol = topopt::fea_solve_mgcg_matfree(fe.g, fe.E, nu, bcs, loads, req.tolerance, 0, &info, nullptr, nullptr);
+          sol = topopt::fea_solve_mgcg_matfree(fe.g, fe.E, nu, bcs, loads, req.tolerance, kMaxIterations, &info, nullptr, nullptr);
           out.iterations = info.iterations;
           out.residual = info.residual;
           out.used_multigrid = info.used_multigrid;

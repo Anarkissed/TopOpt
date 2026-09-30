@@ -46,6 +46,11 @@ final class FlexibleFEFieldTests: XCTestCase {
                 }
             } : nil)
             FlexibleSquishFixture.log(m, split ? "his split" : "his")
+            if !split {
+                // his Covered pad as saved: the sim finds it ~3.6× stiffer than core's columns (its skin
+                // plates and walls carry load) — the band holds k at 2 and says so
+                XCTAssertEqual(m.squish["group-1"]?.field?.clamped, true, "his covered pad is held by the band")
+            }
             for (sim, st) in m.squishSims {
                 let f = try XCTUnwrap(st?.field, "\(sim.id) landed")
                 let (_, _, s2) = try await FlexibleSquishFixture.resolve(m, sim.id)
@@ -70,6 +75,29 @@ final class FlexibleFEFieldTests: XCTestCase {
         let k32 = raw.calibration(sim32.targets).k
         print(String(format: "FLEX-G CAL control 32 (lattice = solid): k asked %.1f", k32))
         XCTAssertGreaterThan(k32, 10, "control: the solid's modulus is far too stiff for core's columns")
+    }
+
+    /// A calibrate-first filament (TPU 95A, his img 1): the SHAPE-ONLY lattice runs the same sim,
+    /// its law max(ρ, 0.05)² in relative units, calibrated to the DRAWN depths — never held by the
+    /// band (its k is only a unit conversion). RED CONTROL: the same raw field held by the band
+    /// would not reach the drawing.
+    func testShapeOnlyLatticeRunsTheSameSim() async throws {
+        let (_, m) = try await FlexibleSquishFixture.his(self, "his TPU 95A") { m in m.pickMaterial("tpu95a_generic") }
+        let g = try XCTUnwrap(m.lattice)
+        XCTAssertTrue(g.shapeOnly)
+        let f = try XCTUnwrap(m.squish["group-1"]?.field, "the shape-only lattice's sim landed")
+        let (s, r, sim) = try await FlexibleSquishFixture.resolve(m)
+        XCTAssertTrue(r.law.shapeOnly)
+        let c = f.calibration(sim.targets)
+        print(String(format: "FLEX-G SHAPE-ONLY TPU 95A: bc %@ · k %.3g (unclamped %@) · zone ratio %.4f over %d columns · E %.3g…%.3g (relative)",
+                     f.bcMode, f.scale, "\(!f.clamped)", c.k, c.zone, s.eMinMPa, s.eMaxMPa))
+        XCTAssertFalse(f.clamped, "a unit conversion is never held by the band")
+        XCTAssertEqual(c.k, 1, accuracy: 0.01, "the deepest zone moves the DRAWN depth")
+        XCTAssertLessThanOrEqual(s.eMaxMPa, 1 + 1e-9, "relative units: the solid is 1")
+        // ★ RED CONTROL: the band on a relative law misses the drawing
+        let raw = FlexibleFEField(solution: s, simID: sim.id, generation: r.generation)
+        let banded = raw.calibrated(to: sim.targets)
+        XCTAssertGreaterThan(abs(banded.calibration(sim.targets).k - 1), 0.01, "control: the band would not reach the drawing")
     }
 
     // MARK: - the dent follows the drawing
@@ -251,6 +279,7 @@ final class FlexibleFEFieldTests: XCTestCase {
             return worst
         }
         _ = s5
+        XCTAssertLessThanOrEqual(Double(k), f.maxSafeScale, "the page's ×k is held by the field's own safe scale")
         let det = Self.minDet(f, scale: k), gap = planes(k)
         print("FLEX-G CROSS his pinch at the page's ×\(k) (safe ×\(f.maxSafeScale)): min det \(det) · the faces keep \(gap) of their gap")
         XCTAssertGreaterThanOrEqual(det, 0.1, "no cell folds")
@@ -354,8 +383,13 @@ final class FlexibleFEFieldTests: XCTestCase {
         // the U6 case: his bottom pressed too — {0, Top A, Top B, 3, 5} in one group
         let (_, m) = try await FlexibleSquishFixture.his(self, "his five faces") { m in _ = m.press(0) }
         let g = try XCTUnwrap(m.lattice)
+        FlexibleSquishFixture.log(m, "his five faces")
         let f = try XCTUnwrap(m.squish["group-1"]?.field)
         XCTAssertEqual(m.squeezeGroups.count, 1)
+        // nothing of this group rests on an anvil: the sliding rests' solve stalls, and the one retry
+        // with every rest bonded lands (said in the receipt)
+        print("FLEX-G FIVE: rests bonded by the retry \(f.restsBonded)")
+        XCTAssertTrue(f.restsBonded, "the sliding solve did not converge; the bonded retry landed")
         var moves: [Int: Float] = [:]
         for k in g.keys {
             let st = try XCTUnwrap(m.stacks[k])
@@ -366,10 +400,16 @@ final class FlexibleFEFieldTests: XCTestCase {
             }
             moves[k.region] = sum / Float(st.columns.count)
         }
-        let deepest = moves.values.max() ?? 0
+        let largest = moves.values.map(abs).max() ?? 0
         print("FLEX-G FIVE: faces \(g.keys.map(\.region)) · mean motion along each load \(moves.sorted { $0.key < $1.key }.map { "\($0.key): \($0.value)" })")
         XCTAssertEqual(moves.count, 5)
-        for (r, v) in moves { XCTAssertGreaterThan(v, 0.3 * deepest, "face \(r) moves (no four-slot limit)") }
+        // every pressed face moves (no four-slot limit) …
+        for (r, v) in moves { XCTAssertGreaterThan(abs(v), 0.15 * largest, "face \(r) moves") }
+        // … and each pinched pair closes: 3 and 5 both move in; the top (196 N down) and the bottom
+        // (98 N up) close on each other while the body sags between the gripping side walls
+        XCTAssertGreaterThan(moves[3] ?? 0, 0); XCTAssertGreaterThan(moves[5] ?? 0, 0)
+        let top = ((moves[FlexibleHisProject.topA] ?? 0) + (moves[FlexibleHisProject.topB] ?? 0)) / 2
+        XCTAssertGreaterThan(top + (moves[0] ?? 0), 0.1, "the top and the bottom close on each other")
         // ★ RED CONTROL: D2's four column slots keep the pinch whole and leave a face still
         let slots = FlexibleSqueezeGroups.squishSlots(g.keys, pinchedWith: g.pinchedWith)
         print("FLEX-G FIVE control: the column path squishes \(slots.shown) of \(g.keys.count)")
@@ -378,7 +418,7 @@ final class FlexibleFEFieldTests: XCTestCase {
 
     func testSectorLoadsStayOnTheirSide() async throws {
         let (_, m) = try await FlexibleSquishFixture.his(self)
-        let (s, _, sim) = try await FlexibleSquishFixture.resolve(m)
+        let (s, r0, sim) = try await FlexibleSquishFixture.resolve(m)
         let ia = try XCTUnwrap(sim.pressed.firstIndex { $0.face == FlexibleHisProject.topA })
         let ib = try XCTUnwrap(sim.pressed.firstIndex { $0.face == FlexibleHisProject.topB })
         let stA = try XCTUnwrap(m.stacks[FlexFaceKey(region: FlexibleHisProject.topA, rotation: 0)])
@@ -396,6 +436,22 @@ final class FlexibleFEFieldTests: XCTestCase {
         if aHigh { XCTAssertGreaterThanOrEqual(xs.min() ?? 0, 50 - s.spacing - 1e-9) } else { XCTAssertLessThanOrEqual(xs.max() ?? 100, 50 + s.spacing + 1e-9) }
         XCTAssertEqual(sumA, design(ia, stA), accuracy: 1e-6 * design(ia, stA))
         XCTAssertEqual(sumA + sumB, design(ia, stA) + design(ib, stB), accuracy: 1e-6 * (design(ia, stA) + design(ib, stB)))
+        // his SIDES on a grid COARSER than their columns (×2, as at Fine): 7 × 3.125 = 21.9 mm of voxels
+        // for a 20.3 mm column footprint — the raw traction over-reads by the staircase, and the
+        // loads are renormalised to core's design force
+        var coarse = r0.request(sim)
+        coarse.coarsen = 2
+        let ref = await m.squishWorker.sceneRef()
+        let c2 = try XCTUnwrap(ref).squishSolve(coarse)
+        XCTAssertTrue(c2.ok, c2.failure)
+        for face in [3, 5] {
+            let k = try XCTUnwrap(sim.pressed.firstIndex { $0.face == face })
+            let st = try XCTUnwrap(m.stacks[FlexFaceKey(region: face, rotation: 0)])
+            let sum = simd_length(c2.pressLoads[k].reduce(SIMD3<Double>.zero) { $0 + $1.force })
+            print(String(format: "FLEX-G SECTOR face %d on the ×2 grid: Σ %.6f N · design %.6f N · raw Σ p·projected area %.6f N", face, sum, design(k, st), c2.pressRawForceN[k]))
+            XCTAssertGreaterThan(abs(c2.pressRawForceN[k] - design(k, st)), 1e-3 * design(k, st), "premise: the coarse staircase differs")
+            XCTAssertEqual(sum, design(k, st), accuracy: 1e-6 * design(k, st), "face \(face): the design force, not the staircase's")
+        }
         // ★ RED CONTROL (4): the cuts ignored — top A's loads cover the whole top, its raw Σ doubles
         let (c4, _, _) = try await FlexibleSquishFixture.resolve(m, control: 4)
         let xs4 = c4.pressLoads[ia].map { c4.position($0.node).x }

@@ -174,6 +174,11 @@ final class FlexibleSqueezeGroupsModelTests: XCTestCase {
         addTeardownBlock { r.cleanup() }
         let stage = FlexibleMainStage()
         stage.reduceMotion = { true }
+        // ★ RE-PINNED (round 5 batch G): this pins the COLUMN path's pick — today the fallback while a
+        // group's 3D sim runs or when it failed (the sims, once landed, move the whole body by one
+        // field: FlexibleSquishSolverTests); held on the column path so the sims landing mid-test
+        // cannot race it
+        stage.controlColumnSquish = true
         let m = stage.model(for: r.project, materialsPath: FlexibleHisProject.materialsPath,
                             stampsPath: FlexibleHisProject.stampsPath, persist: {})
         addTeardownBlock { @MainActor in await m.waitForIdle() }
@@ -186,8 +191,13 @@ final class FlexibleSqueezeGroupsModelTests: XCTestCase {
         await m.waitForIdle()
         stage.refresh()
         XCTAssertEqual(stage.sims.map(\.id), ["group-1", "group-2", "all"])
+        // ★ RE-PINNED (round 5 batch G, his "a way to play the different sims"): the default is
+        // "Play all" (D2's was group 1) — group 1 is picked here to pin its faces
+        XCTAssertEqual(stage.shownLattice?.shownSim?.kind, .playAll, "the default: Play all")
+        stage.pick("group-1")
+        stage.refresh()
         let first = try XCTUnwrap(stage.layer(r.project, stage: .lattice, pageUp: false))
-        XCTAssertEqual(Set(first.faces.map(\.load.x)), [0], "the default: group 1, the top's faces (load −Z)")
+        XCTAssertEqual(Set(first.faces.map(\.load.x)), [0], "group 1: the top's faces (load −Z)")
         stage.pick("group-2")
         stage.refresh()
         let sides = try XCTUnwrap(stage.layer(r.project, stage: .lattice, pageUp: false))
@@ -214,7 +224,7 @@ final class FlexibleSqueezeGroupsModelTests: XCTestCase {
         stage.pick(FlexibleSim.allID)
         stage.refresh()
         let all = try XCTUnwrap(stage.layer(r.project, stage: .lattice, pageUp: false))
-        XCTAssertEqual(all.faces.count, 4, "all at once: every face")
+        XCTAssertEqual(all.faces.count, 4, "Play all on the column path: every face")
         // ★ RED CONTROL: the lattice itself (unpicked) squishes every face
         XCTAssertEqual(try XCTUnwrap(m.lattice).faces.count, 4, "control: without the pick every face squishes")
     }

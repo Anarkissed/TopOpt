@@ -116,9 +116,19 @@ public struct FlexibleFERequest: Sendable {
     public static func solve(_ sim: Sim, of r: FlexibleFERequest, on scene: FlexibleScene,
                              control: Int = 0, deadlineMS: Double = FlexibleFE.deadlineMS) -> Result<FlexibleFEField, FlexibleSquishFailure> {
         do {
-            let s = try scene.squishSolve(r.request(sim, control: control, deadlineMS: deadlineMS))
+            var s = try scene.squishSolve(r.request(sim, control: control, deadlineMS: deadlineMS))
+            // ★ A squeeze whose rests SLIDE leaves near-rigid modes held by one pin each; on a
+            // high-contrast part multigrid can stall there (his pad with the bottom pressed too:
+            // no convergence in 600 iterations; bonded: 221). Retry ONCE with every rest bonded
+            // (the design's rule) — a stiffer picture, still one continuous field.
+            var retried = false
+            if !s.ok, s.freeModes > 0, s.bcMode == "rest", control & FlexibleFE.bondedRests == 0 {
+                let bonded = try scene.squishSolve(r.request(sim, control: control | FlexibleFE.bondedRests, deadlineMS: deadlineMS))
+                if bonded.ok { s = bonded; retried = true }
+            }
             guard s.ok else { return .failure(FlexibleSquishFailure(why: s.failure)) }
-            let raw = FlexibleFEField(solution: s, simID: sim.id, generation: r.generation)
+            var raw = FlexibleFEField(solution: s, simID: sim.id, generation: r.generation)
+            raw.restsBonded = retried
             return .success(raw.calibrated(to: sim.targets, band: r.law.shapeOnly ? nil : FlexibleFE.calibrationBand))
         } catch {
             return .failure(FlexibleSquishFailure(why: "\(error)"))

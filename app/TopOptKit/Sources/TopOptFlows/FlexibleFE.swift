@@ -42,6 +42,9 @@ public enum FlexibleFE {
     public static let calibrationBand: ClosedRange<Double> = 0.5...2
     /// |Σf| ≤ this · Σ|f|: a balanced squeeze (the bridge's rule, said here for the tests).
     public static let balanced = 0.02
+    /// The bridge's control bit that bonds every rest (the design's rule): the app's one retry when a
+    /// solve whose rests slide does not converge.
+    public static let bondedRests = 2048
 
     /// The FE grid's coarsening factor — the Swift twin of `flexible_squish_coarsen`
     /// (FlexibleSquishCoarsenTests holds the two together).
