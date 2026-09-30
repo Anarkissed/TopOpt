@@ -1,6 +1,445 @@
 # Handoff — 2026-09-29-flexible-screens (TRACK app, A1): the Flexible screens
 
-## Round 4 · batch C2 — verification pass (read this first)
+## Round 5 · batch G — a realistic squish: one continuous 3D field per squeeze group (read this first)
+
+Your words: "is there a way to ensure that the squish sim also squeezes out the sides of the object?
+I'd like it to actually bend and move and squish like it would in real life. Also, I'd like a way to
+play the different sims if there are multiple ways to squeeze/squish a model. Can you do all this
+along with the lattice?"
+
+Judged on YOUR project 0004, restored through `AppModel.open`, on C1's plain pad, on a cylinder and
+on the M2 stand.
+The main page was rendered offscreen by the shipping renderer, BEFORE and AFTER. The app was NOT
+launched, so none of this has been seen on a screen yet.
+
+**What you will see on the main Flexible page:**
+- **Save & Exit.**
+  - The lattice appears at once, held at rest.
+  - The player's note reads **"Simulating the squish…"** for a few seconds.
+  - Then the part plays.
+- **The part moves as one body.**
+  - The pressed faces sink and the free sides BULGE out (on C1's pad the sides move out by 35 % of
+    the top's squish).
+  - The ghost, the bent heat map and the lattice walls move together, by one 3D field and one
+    flexScale.
+- **Two or more squeeze groups.**
+  - The picker lists "Group 1 · Top A + Top B", "Group 2 · Face 3 + Face 5", then **"Play all"**.
+  - "Play all" is the default. It plays Group 1 in and out, then Group 2 in and out, and so on.
+  - The swap happens at rest, so nothing pops.
+  - "All at once" is gone: your groups are separate squeezes.
+- **The numbers do not change.** The colours, the legend's ends and tap-to-read are core's per-column
+  depths. The 3D sim gives the SHAPE, scaled so its deepest zone moves core's deepest squish.
+- **The four defects from batch B are gone** (before / after frames below):
+  - the speckled seam along top A | top B;
+  - the flap of the top map past the pressed side wall;
+  - the torn, speckled pressed side face;
+  - the pinched heat planes crossing.
+- **Honesty, behind the Squish legend's (i)**, one sentence:
+  - normally: "…moves by a linear 3D sim scaled to core's squish; real TPU stiffens and thin walls can
+    fold";
+  - on your Covered pad: "…a linear 3D sim that finds this part 4× stiffer than core's columns (its
+    skin and walls carry load), so it moves less than the map reads";
+  - after the one retry with every rest bonded: "…a linear 3D sim with every rest held fast
+    (sliding, it did not settle)…";
+  - where even ×1 is past small strain (the M2 stand): "…a linear 3D sim that leaves small strain
+    here, so the picture can fold where real TPU would stiffen".
+- **If a sim fails** (or runs past its budget):
+  - that group plays today's column squish, with "Simple squish · the sim failed";
+  - core's words are behind the (i);
+  - "Play all" skips it.
+- **The Settings page does not change.** While you drag a curve, the dent is still the instant
+  column dent.
+
+**What it does to YOUR pad (as saved: one group — Top A, Top B and the Face 3 | Face 5 pinch; 0, 2 and
+4 resting):**
+- **The solve.** 64 × 64 × 13 voxels, 53 k elements, 125 multigrid iterations, 2.3 s on this Mac
+  (a Debug build of the app's bridge on Release core).
+- **Your Covered finish's skin carries the load.**
+  - The sim finds the part 3.6× stiffer than core's columns. The skin plates and walls work in
+    parallel with the lattice, and core's columns ignore them.
+  - So k is held at 2 (the band below), and the part moves about half of what the heat map reads.
+  - The picture is ×2 (the column squish was ×4). A bigger ×k would fold the field there: its peak
+    local compression is 21 % at ×1.
+- **Your img-4 split (top | sides).**
+  - The top group is inside the band (k 1.83) and plays at ×4.
+  - The sides group asks 4.5 and is held at 2.
+- **With [Face 5 rests]:** asked 13.6, held at 2.
+
+**On the M2 stand** (my probe's case: the pocket floor pressed at 5 kg, the bottom resting; every
+voxel is lattice):
+- The sim lands in about 4 s (Jacobi-CG, 2 556 iterations; multigrid stagnates there).
+- The U's walls splay out and the tower leans; the column squish only dented the pocket floor.
+- It asks k 12.9 (held at 2), and even ×1 is past the small-strain bound (‖∇u‖ 0.83 in the part),
+  so the page plays ×1 and the (i) says the picture can fold. The renders show no fold.
+
+**Deviations from the design (each with its reason):**
+1. **A rest grips only where it is an ANVIL.**
+   - The design bonded every resting face. On your pad that glued the pad to the table under a side
+     squeeze: k 7.7 for the sides group, 13.6 with [Face 5 rests], against the design's own sanity
+     band [0.5, 2].
+   - Now a resting face that a pressed stack of the group exits through is bonded (its friction
+     holds under the load). Any other rest slides, with its normal held.
+   - The rigid modes that leaves free are treated like a free squeeze: inertia relief, one pin each,
+     and the rigid motion removed.
+   - Measured: a ±X pinch on a sliding bottom squeezes exactly as with nothing resting (9.73 mm);
+     bonded, 3.73 mm.
+2. **k is kept inside [0.5, 2]**, flagged and said when held.
+   - One scalar stretched to 13.6 sank a soft spot 20 mm through your 20 mm pad (frame
+     `G_his0004rest5_group-1_after_iso_a100.png` of the first run).
+   - A shape-only lattice is never held: its k is a unit conversion.
+3. **gmax is the EXACT maximum of ‖∇u‖₂**: the trilinear Jacobian peaks at a cell corner. The design
+   asked for a looser Frobenius-of-maxima bound; the injectivity rule s · gmax ≤ ½ is unchanged.
+4. **The FE squish probe is held to its parts.**
+   - The GPU-vs-twin pull-back is 1.4 µm, and the lattice at the GPU's own rest point is 1.2 µm.
+   - The whole chain is not held to 5 µm (0.115 mm): the gyroid's distance estimate is steep near
+     its sheets and amplifies the hardware filter's µm.
+5. **The display solve is bounded by a WORK budget as well as its 20 s deadline.**
+   - Core polls the deadline every 256 CG iterations. Under heavy CPU load one sim took ~150 s.
+   - Core gives multigrid at most 300 V-cycles, then restarts Jacobi-CG from zero. The cap bounds
+     that Jacobi-CG: elements × iterations ≤ 5·10⁷ (about 4 s on this Mac), never under 600 —
+     939 on your pad, 3 763 on the M2 stand.
+   - A fixed 600 (my first cut) FAILED the M2 stand: every voxel there is lattice
+     (E 0.16–34 MPa), multigrid stagnates, and Jacobi-CG needs 2 556 iterations for 1e-4. The stand
+     played the column squish with "Simple squish · the sim failed".
+   - Past the cap core's non-convergence is a value, and the column squish plays. A failure now
+     names which solver gave up ("multigrid built, 300 V-cycles, then N Jacobi-CG iterations,
+     residual r") behind the (i).
+6. **FOUND: two solves in core's matrix-free pool DEADLOCK** (sampled: both threads waiting on
+   `ApplyPool::run`'s condition variable for ever).
+   - The design's "threads = 1 makes the pool safe" is false: the pool is process-global and
+     another solve raised the count mid-sim.
+   - The gates are now both ways:
+     - no sim starts beside the Stress solve or a run;
+     - the Stress solve waits for the sims (a process-wide idle signal);
+     - a topology run waits on its background thread until no sim is in core (RunModel's one hook).
+   - Core brief #18 (a thread-safe pool) is now urgent.
+7. **FOUND in the targeted suite: a topology run leaves core's production toggles armed.**
+   - The M2 stand's test passed alone and failed in the suite (core's deadline, 73 s).
+   - Sampled: the sim's Jacobi-CG fallback was building a GenEO eigenbasis (LOBPCG).
+     `configure_production_options` arms GenEO and Krylov recycling for the whole process, and
+     nothing disarms them. In the app, any topology run earlier in the session does the same.
+   - The sim's posture now pins both OFF and gives them back (the receipt says before / during /
+     after). With GenEO armed the stand's sim takes ~4 s again.
+   - I first blamed the wait for the solver (the deadline started at the request) and changed that
+     too: the deadline now starts once the sim holds the solver, and the wait is reported
+     (`wait_ms`). A test proves the queued case; it was not what failed the stand.
+   - Core's deadline also throws from inside the recurrence before `info` is filled, so a deadline
+     failure now says the clock ("after N ms of solving, at CG iteration i") instead of a row of
+     zeros.
+   - ★ In two of the three runs where the stand's test failed, the test process then CRASHED (SIGSEGV in the next test, copying a
+     `FlexSquishSolutionInfo`; `xctest-2026-09-30-164119.ips`). With GenEO pinned off it did not
+     recur in the re-run of the same classes. The cause is NOT proven; GenEO's process-global
+     basis, built for one system and met by the next, is my suspect.
+
+**Not done (and why):**
+- **Nothing has been seen on a device or simulator.** I must not launch the app. The iOS build
+  succeeds.
+- **Large-strain / hyperelastic TPU, buckling of thin skins, a per-voxel Poisson ratio, friction** —
+  core brief #19–#28. The sim is linear small-strain; the (i) says so.
+- **The octet's and Organic's own core solves are not held back by the sims.** They run on other
+  sections of the Lattice stage; only the Flexible Stress solve and topology runs are gated. Core
+  brief #18.
+- **T16's own frame budget was RED in the Release run** (the column path, 18.26 ms > 16 ms; see
+  "Release numbers"). Not A/B'd against the pre-G build.
+- **The field outside the part is steep where two parts of it move apart** (the extension). On
+  the M2 stand the air cells reach ‖∇u‖ 2.51 against 0.83 in the part and its surface cells, so
+  the safe scale reads 0.20 instead of 0.60. Both are under ×1, which the page floors at, so
+  nothing changes on screen today. A smoother (harmonic) extension would fix the reading.
+- **A group's sim is not re-solved while you drag on the main page.** It re-solves when a
+  main-page group or load change rebuilds the lattice (never per frame).
+
+**Your call:**
+- **Your Covered pad moves about half of what its heat map reads.** The sim says its skin carries
+  the load and core's columns do not see it. Keep it honest (as now, said in the (i)), or scale the
+  field fully to core's depth (k 3.6: a fold-limited ×1 picture)?
+- **"Play all" plays the groups in turn and "All at once" is gone.** Should a simultaneous squeeze
+  come back as its own sim? Linear superposition makes it cheap.
+- **Resting faces:** they grip where they carry the group's load and slide elsewhere. Say if a rest
+  should always grip (glued) or always slide (a smooth table).
+- **A squeeze of yours that no rest grips can be stiff to solve.** Your pad with the bottom pressed
+  too has no anvil (every exit face is pressed), so its rests slide. Multigrid then stalls, and the
+  app retries once with every rest bonded (a stiffer picture; the Squish legend's (i) says so). Keep that retry,
+  or show the column squish there instead?
+
+### Release numbers (M2 Pro, this Mac; opt-in probes)
+
+Command: `FLEX_G_PERF=1 swift test -c release -Xswiftc -enable-testing --filter "FlexibleSquishPerfProbe|FlexibleFEPassPerfTests|FlexibleLatticePassPerfTests"`.
+
+**One sim, wall clock, three repeats each** (gates: your pad ≤ 4 s, C1's pad ≤ 3 s — both met; the stand is measured, not gated):
+
+| case | grid | elements | iterations | multigrid | wall ms |
+|---|---|---|---|---|---|
+| your pad, Fast | 64 × 64 × 13, ×1 | 53 248 | 125 | 3 levels | 2409 / 2396 / 2395 |
+| your pad, Fine | 128 × 128 × 26, ×2 | 53 248 | 126 | 3 levels | 2442 / 2430 / 2427 |
+| C1's pad (covered) | 100 × 100 × 20, ×2 | 53 248 | 119 | 3 levels | 2296 / 2321 / 2310 |
+| the M2 stand (top pressed 5 kg, bottom resting) | 64 × 16 × 59, ×1 | 13 287 | 2 556 (Jacobi-CG; cap 3 763) | stagnated (300 V-cycles), then Jacobi-CG | 3926 / 3906 (k asked 12.9, held at 2) |
+
+- The first Release run had the M2 stand FAILED: "CG did not reach the requested tolerance within
+  max_iterations" after 1 942 ms — the fixed 600 cap (deviation 5). The row above is the re-run
+  with the work budget (`--filter FlexibleSquishPerfProbe/testTheM2Stand`, same flags).
+
+**The frame** (1152 px, MSAA 4×, X-ray; 15 frames each after 1 warm-up):
+- the FE frame's median is 15.79 ms (min 14.51, max 23.44);
+- the same gyroid squished by the column path: 18.03 ms (min 15.12, max 26.77);
+- hidden: 1.92 ms (the control: the timer sees the march).
+- The bar (FE ≤ column + 3 ms) is met. In this run the FE frame was not slower than the column
+  frame; one run cannot say more than that (the two medians are 2 ms apart, inside the spread).
+
+**T16's own frame budget went RED in the same run**: the gyroid squished by the COLUMN path,
+median 18.26 ms > 16 ms (min 12.82, max 23.36; n 9). That frame adds only one uniform branch
+from batch G (`feK.x` is 0 with no field bound, so `flx_pullback` takes the column path).
+T16 measured it at 12.94–16.35 ms under ~40 % background GPU load; this run shared the Mac with other sessions too. I did NOT A/B it
+against the pre-G build, so a G cost there is not ruled out. Re-measure on an idle GPU and on the
+iPad.
+
+### The before / after frames
+
+The main page's own picture, rendered by the shipping renderer:
+- the overlay, tints, X-ray alpha, lattice layer and dents that FlexibleMainStage hands MetalMeshView;
+- settled like the page, at rest / half / full;
+- BEFORE is today's column squish (the stage's test switch), AFTER is the group's field with its mesh
+  (`FlexibleSquishEvidenceProbe`, opt-in).
+
+The contact sheet `g/G_before_after.png` (scratchpad) shows:
+
+| row | before | after |
+|---|---|---|
+| his 0004, iso, full | the speckled seam along x = 50, flaps at both side walls | one surface, no seam |
+| his 0004, right, full | lattice speckle through the grey pressed side, two flaps | a clean face |
+| his img-4 split, the sides group, front | the top map stands out past both walls | the sides bend in, the top follows |
+| C1's pad, top pressed, bare | the map dents, the walls stay straight | the top dents; the sides move out ~1 mm at ×2 (barely visible at this scale — the numbers are in the tests) |
+| C1's pad, ±X pinch, nothing resting | torn middle, the map through the part | the faces curve in, top and front bow out |
+| the M2 stand, pocket floor pressed | only the floor dents (×4) | the U's walls splay, the tower leans (×1); no tearing |
+
+Every frame is in `g/ev2` (the pad), `g/ev3` (your project) and `g/ev4` (the M2 stand). Each case has three views, each at
+rest, half and full squish.
+
+### Hook lines in #354 / main files
+
+| hook | file · anchor | ± | why |
+|---|---|---|---|
+| HG1 | RunModel.swift · `scheduler.runInBackground { [weak self] in` | +1 | `FlexibleSquishSolver.waitUntilOutOfCore()`: a topology run waits on its background thread until no squish sim is in core's matrix-free pool (two solves there deadlock; a new sim cannot start meanwhile — the run is in `runningIDs`). |
+
+Nothing else outside the track:
+- `git diff --numstat` shows RunModel.swift 1 0.
+- WorkspacePlaceholder, MetalMeshView, LatticeSettings, ProjectModel and LatticeStageMode are
+  untouched, and no case was added. core/ is untouched.
+- The pinned strings (SmoothingPageRound2Tests, the first 900 characters of
+  `startStressSolveIfNeeded`) are untouched.
+- The FE data reaches the renderer through the existing H3 (`layer`) and H4 (`dents`). The swap
+  uses `MeshRenderer.setFlexDisplacements` (already internal) from the track's own extension.
+
+New files:
+- bridge: `flexible_squish_fe.hpp` / `.cpp` (private to the bridge target) and
+  `FlexibleKit+Squish.swift`;
+- Swift: `FlexibleFE`, `FlexibleFEField`, `FlexibleFERequest`, `FlexibleSquishSolver`,
+  `FlexibleStageModel+Squish`, `FlexibleMainStage+Squish`.
+
+Edited track files:
+- `FlexibleBridge.hpp` (a section appended) and `flexible_bridge.cpp` (the entry point);
+- `FlexibleLatticeShader` (the FE block, `flx_fe_pullback`, texture 6, the probe);
+- `FlexibleLatticePass` (upload, bind, frame block, probes);
+- `MeshRenderer+FlexibleLattice` (the sequence and the swap);
+- `FlexibleSquish` (the layer's fields, the Swift twin's FE branch);
+- `FlexibleSquishPlayer` (cycles, sequence, pause / scrub / play);
+- `FlexibleSqueezeGroups`, `FlexibleRowCopy`, `FlexibleLatticeGeneration` (Play all);
+- `FlexibleStageModel` (the request built in the build task, the cache, the solver, `sceneRef`);
+- `FlexibleMainStage` / `+Views` (the FE view, the overlay edge, dents, notes, the (i), the gates);
+- `FlexibleShownValues` (the uncapped rule), `FlexibleStressSolve` (`busy`, `.waiting`) and
+  `FlexibleProbe` (the lattice read through the field).
+
+### Decisions (00-decisions.md)
+
+- New rows D-R5-G1 … G7: the field, the law, the rests, the calibration band, the injectivity cap,
+  Play all, and never two solves in the pool.
+- D-R4-15 and D-R4-18 are amended to point at them.
+
+### Core brief (G — what the app does itself today that core should own; #1–#17 stand)
+
+- **#18 (URGENT) A thread-safe matrix-free ApplyPool, or a per-call thread count.**
+  - Two solves in the pool deadlock (sampled).
+  - The app now keeps its squish sims apart from the Flexible Stress solve and from topology runs.
+    It cannot see the octet's or Organic's own solves on the other sections.
+- **#19 A `flexible::squish_field` API** so this setup moves into core and into the receipt: the
+  group's loads by column pressure (sector cuts), the rests (anvils grip, others slide), inertia
+  relief + minimal pins for free modes, the secant law, the calibration and its k.
+- **#20 Large-strain hyperelastic FE for TPU lattices**: Ogden or Mooney–Rivlin fitted to the curve
+  tables, loading AND unloading, contact at the rests, and a platen for the press. The app's
+  secant-per-voxel linear model is a display approximation.
+- **#21 Buckling of thin skins and side walls** (at least linear eigen-buckling). Real one-bead TPU
+  walls fold outward under a top press; the linear FE cannot show it.
+- **#22 A homogenised anisotropic law for TPU gyroid / honeycomb**, and LATERAL-strain (Poisson)
+  data in the curve tables. ν = 0.3 is an assumption today.
+- **#23 A per-voxel Poisson ratio and a locking-free element** (B-bar or selective reduced
+  integration), so solid TPU (ν ≈ 0.48) and thin skins in bending are not over-stiff.
+- **#24 The column model ignores side skins, neighbour shear and the bulge.**
+  - On his Covered pad the 3D sim is 3.6× stiffer than the columns (the sides group 4.5×; with
+    [Face 5 rests] 13.6×).
+  - Core should design, or at least report, the depth with the 3D solve and its k.
+- **#25 Solid modulus per nozzle temperature.** varioShore foams above ~210 °C; the TDS 50 MPa is
+  for 210 °C / 100 % flow.
+- **#26 Rigid stamp contact as a load case** (check stamps as selectable sims; the request already
+  takes per-column pressures).
+- **#27 Friction at the rests and a platen with friction.** Today a rest is bonded where it is the
+  group's anvil and sliding elsewhere — the two linear limits.
+- **#28 Where a pinch's halves meet.** The FE's zero-displacement plane is the evidence for #6: the
+  app splits at the column's middle.
+- **#29 A nonlinear (Newton on σ(ε; ρ)) or tangent-updated solve**, so a voxel's operating strain is
+  self-consistent instead of taken from core's 1D column.
+- **#30 A deadline polled inside the multigrid loop** (it is polled every 256 CG iterations, so a
+  crawling solve overran 20 s by ~130 s under load); the app caps its display solve by a work
+  budget.
+- **#32 A per-call solver configuration.** `configure_production_options` sets process-global
+  toggles (GenEO, recycling, threads) that outlive the run; every other caller must pin them. The
+  squish sim now does, but the octet's and Organic's own solves on the Lattice stage do not.
+- **#31 Multigrid stagnates on a slender all-lattice part.** On the M2 stand (64 × 16 × 59, 3.41 mm
+  voxels) the V-cycle needs 217 cycles even at a UNIFORM modulus, and never reaches 1e-4 (nor 1e-2)
+  in its 300 at the real 220× contrast. Its iterate is then thrown away and Jacobi-CG starts from
+  zero (2 556 iterations). Arming the algebraic level 1 changed nothing in a quick check. A warm
+  start from the stagnated iterate would save ~⅓ of the solve.
+
+### Tests
+
+Every new test states its RED control inline. That control is the wrong behaviour, computed beside
+the right one, and it must fail the same assertion.
+
+NEW, in TopOptKitTests (the bridge, on C1's pad):
+- `FlexibleSquishModulusTests` (2): the law is the secant of core's curve.
+  - 0.1744 MPa initial, 0.122 at 0.2294, 50 solid, the Voigt skin, the clamps, shape-only ρ².
+  - Control 256 (the table's nominal axis) gives 0.20.
+- `FlexibleSquishFETests` (12), each with its control:
+  - the sides bulge 34.8 % (ν = 0: 0.00 %);
+  - a symmetric pad mirrors to 2.8e-5 (an off-centre stamp: 1.01);
+  - the ±X pinch with nothing resting: equal and opposite, the pins carry 1.5e-5 N of 196 N (a patch
+    anchor: 0.34 N, the faces 2.66 / 7.07 mm);
+  - another pin choice gives the same field to 3.7e-5 (the patch: 1.18);
+  - the rest holds and carries 294.3 N (a roller slides 1.24 mm);
+  - a side squeeze does not glue the pad to its rest (9.73 mm, as free; bonded 3.73);
+  - the loads sum to the design force (unprojected: 162 N for 150);
+  - a stamp stays local (uniform: the rim 100 %);
+  - the posture is restored and a missed deadline is a value;
+  - a sim queued behind another keeps its whole budget (measured from the request, its wait +
+    solve is past it);
+  - with GenEO armed (as a topology run leaves it) the sim solves with it OFF and gives it back
+    (control 16384: left as found, it is on during the sim);
+  - 1e-4 is within 0.004 % of 1e-8 (1e-1: 3.8 %);
+  - the coarsening rule.
+
+NEW, in TopOptFlowsTests (the app's pipeline, your project, C1's pad, a cylinder):
+- `FlexibleFEFieldTests` (12):
+  - the calibration (above; control 32 asks k 304);
+  - the dent follows your drawing (centroid x 76.5 mm; uniform E: 50.0);
+  - no seam: 571 top A | top B pairs, 569 bitwise equal (the per-region column dent steps 0.93 mm);
+  - no flap: the top map's edge follows face 5 by ≥ 0.998 (the column dent: 0.0);
+  - the planes never cross at the page's ×2: det ≥ 0.65, 97 % of the gap kept (control ×7.3: det
+    −0.26);
+  - the mesh samples the field exactly and is cut to 1.5625 mm (the column dent is 1.07 mm off at the
+    side);
+  - the extension on a cylinder: gmax equal inside and over the box, 0 / 432 pull-backs fail (zeros
+    outside: 33×, 178 / 432);
+  - five pressed faces all move (the column slots: 3 of 5);
+  - a sector's loads stay on its side, and on the ×2 grid your sides are renormalised from 90.5 N to
+    core's 98.07 N (control 4 doubles the raw traction);
+  - the shape-only (TPU 95A) sim;
+  - the (i) is one sentence in every state, including "with every rest held fast" after the
+    bonded retry;
+  - the M2 stand gets its field with GenEO armed in the process: multigrid stagnates, 2 556 of 3 763 Jacobi-CG iterations, within
+    0.15 % of a 1e-8 reference (control 8192, the old fixed 600: core's non-convergence);
+  - the five-face pinch's (i) says the rests were held fast (an unflagged field is silent).
+- `FlexibleFEPassTests` (5, GPU):
+  - the inverse: GPU vs the rest point 3.2 µm at ×2, GPU vs the twin 3.1 µm (one iteration:
+    1.62 mm);
+  - the lattice and the ghost move together on your faces 3 and 5 (0.5 / 0.9 µm; the column dent
+    4.0 / 4.9 mm);
+  - the FE uniform block by name;
+  - rest pixel-identical (0 of 102 400; the field applied: 31 873);
+  - the squish probe held to its two parts.
+- `FlexibleSquishPlayAllTests` (5):
+  - Play all in turn: 0, 1, 2, 0, every swap at amount ≤ 1e-5 (D2's single entry: group 0
+    throughout);
+  - pause / scrub / play keep the group;
+  - the renderer swaps field and mesh in ONE step (a late mesh is a one-frame mismatch);
+  - 0 publishes over 3 wraps (a per-wrap publisher fires 3);
+  - the picker (D2's list is the control).
+- `FlexibleSquishSolverTests` (5):
+  - one solve at a time, the shown sim first (peak 1; concurrency 2 peaks 2);
+  - a superseded generation dropped, and a pick never re-solves;
+  - the gates both ways;
+  - the column fallback with its line and core's words (no fallback: nothing plays);
+  - H4 follows the renderer live, the stage's overlay is cut to the sim's grid, and a tap on face 3's
+    bent map reads 1.52 mm = core's column.
+- `FlexibleSquishCoarsenTests` (2): the Swift twin is the bridge's rule (off by one voxel: RED).
+- Opt-in: `FlexibleSquishEvidenceProbe` (the renders; the M2 stand's case is new), `FlexibleSquishPerfProbe`
+  and `FlexibleFEPassPerfTests` (Release).
+
+RE-PINNED, each with its reason in the test:
+- `FlexibleSqueezeGroupsTests` and `FlexibleSqueezeGroupsReviewUITests`: "All at once" → "Play all".
+- `FlexibleSqueezeGroupsReviewUXTests`: comments only (the note on "all").
+- `FlexibleLatticePassTests`: the FE block in the uniform echo.
+- `FlexibleSqueezeGroupsModelTests`: the pick is held on the column path (the sims landing mid-test
+  would race it), and its default is now Play all.
+
+Deleted-test sweep (`git diff f7c30c10 -- app/TopOptKit/Tests`, this batch only): no test was
+deleted or renamed.
+
+Mutation runs: each breaks one production rule in a separate build, runs the test that pins it, then
+restores the file (`g/mut_run.log`). All 15 are RED (G11 first ran GREEN — not caught — and its
+test was strengthened: the renormalisation is pinned on the ×2 grid):
+```
+G1  the shader never dispatches to the FE field      ⇒ the walls' pull-back lands 1.66 / 1.57 mm from the ghost (2)
+G2  the renderer swaps the field without its mesh    ⇒ mesh -1 ≠ the field's (2)
+G3  the calibration band off                         ⇒ "his covered pad is held by the band" (1)
+G4  every rest bonded (the design's rule)            ⇒ 0 free modes, the sole does not slide, 3.73 < 7.79 mm (3)
+G5  Play all plays the first group only              ⇒ the sequence 1 ≠ 2 (2)
+G6  H4 hands a copy taken at refresh                 ⇒ H4 ≠ the renderer's mesh (1)
+G7  the Stress solve does not wait for a sim         ⇒ "the Stress solve waits for the sim" (1)
+G8  a sim of an old lattice is stored                ⇒ the stale result shown (1)
+G9  the overlay not cut to the sim's grid            ⇒ the longest edge 1.82 > 1.5626 mm (1)
+G10 the page's ×k keeps the column clamp in FE mode  ⇒ ×4 > the field's safe ×2.43 (1)
+G11 the loads not renormalised to the design force   ⇒ 90.52 ≠ 98.07 N on the ×2 grid (2)
+G12 the work budget off: the old fixed 600           ⇒ the M2 stand's sim does not land (1)
+G13 the bonded retry never said behind the (i)       ⇒ the five-face (i) is silent about it (2)
+G14 the deadline measured from the request           ⇒ the queued sim: "deadline passed before … began" (1)
+G15 GenEO left armed for the sim                     ⇒ the M2 stand with GenEO armed: core's deadline, 74.8 s (1)
+```
+
+### Build and suite (raw lines, this Mac)
+
+iOS (Debug, the simulator 147E56A1…, DerivedData flexA1), on the final tree:
+```
+** BUILD SUCCEEDED **
+```
+The app's `TopOpt.debug.dylib` is stamped 17:40:49 and holds the new bridge string ("ms of solving,
+at CG iteration"). It was NOT installed or launched.
+
+Targeted suite (`swift test --filter` with the classes of `g/filter2.txt`, 175 suites), on the tree
+before the last one-line fix:
+```
+Executed 1185 tests, with 21 tests skipped and 15 failures (0 unexpected) in 2139.900 (2140.025) seconds
+   2 AppModelTests.testReopenedThreeMFProjectReimportsTheStlWorkingCopy          (known)
+   4 AppModelTests.testThreeMFImportNormalisesToStlWorkingCopyAndKeepsProvenance (known)
+   2 AppModelTests.testThreeMFImportOptimisesOnDeviceEndToEnd                    (known)
+   1 LatticeSimSolveTriggerTests.testTheTriggerRefusesOnAllThreeGrounds          (known)
+   6 FlexibleSquishSolverTests.testFailureFallsBackToTheColumnSquish             (mine — fixed below)
+FLEX-G M2 STAND: 13287 elements · … · 2556 of 3763 iterations · 3914 ms · … 0.00149
+```
+- The fallback test forced a failure with a 1 ms deadline. Now that the deadline starts once the
+  sim holds the solver, 1 ms outlives a solve that converges before core's first poll. The control
+  is now 1 ns (`FlexibleSquishSolver`, one line).
+- Re-run after that fix (the solver, Play all, bridge, coarsen, modulus and pass classes):
+  `Executed 31 tests, with 0 failures (0 unexpected) in 140.290 seconds`.
+- No test process crashed in either run.
+
+### Commits (PR #362's branch `claude/flexible-screens`; nothing pushed)
+
+- `d599e0d2` the squish sim's bridge (the FE solve on core's matrix-free MG-CG).
+- `4fc983b4` each squeeze group's 3D sim wired through the app; Play all.
+- `b2345866` never two solves in core's pool; the bounded display solve; the bonded retry.
+- `40ceff62` the work budget, the posture's GenEO / recycling pin, the deadline start, the (i)
+  lines, the M2 stand's test and renders.
+- The next commit: this section and DECISIONS D-R5-G1…G7 (D-R4-15 and D-R4-18 amended).
+
+## Round 4 · batch C2 — verification pass
 
 The C2 verifier reported 14 findings: 4 majors and 10 minors (two of them are the same "Building…"
 tap, seen from the code and from the screen). I checked each one on YOUR project 0004, restored
