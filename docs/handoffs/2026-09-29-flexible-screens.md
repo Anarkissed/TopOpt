@@ -1,6 +1,214 @@
 # Handoff — 2026-09-29-flexible-screens (TRACK app, A1): the Flexible screens
 
-## Round 3 · batch B — Exit always leaves a lattice on the main Flexible page (read this first)
+## Round 3 · batch B — verification pass (read this first)
+
+A verifier read batch B against your rules on YOUR project 0004 (headless renders; the app
+was not launched). I confirmed each finding myself, on the code and on your restored project.
+Every major has a test that went RED on the code as batch B left it. Each minor has a test
+whose inline control shows the old rule failing. I fixed every major and the cheap, safe
+minors. One minor is not done; it is listed below with the reason.
+
+**What changes for you:**
+- **Exit → the lattice always follows your edits on the main page.** Before, it was kept as
+  "Lattice ready" after a new quality (grid), a new lattice region or a new bead width. After
+  the two-finger UNDO on the main page, it vanished behind "Building the lattice…" and no build
+  ever started. Now the lattice is keyed by the scene it was built on. The main page also
+  watches the project (a quarter-second debounce, only while it shows), so it re-opens or
+  re-designs and rebuilds.
+  - On your project: Fast → Fine gives grid 64×64×13 → 128×128×26 and generation 1 → 2.
+  - "sides" set to Lattice gives latticeVoxels 53248 → 4992 and generation 1 → 2.
+  - An undo gives a build within 3 s. Undoing [Face 5 rests] makes the pill say the 3/5
+    conflict again, not "Building…".
+- **A build that fails is said, once.** It had retried for ever (8 starts in 4 s) behind
+  "Building the lattice…", and the error had no reader anywhere. Now there is ONE attempt per
+  (settings, scene). The pill and the Settings line say "Couldn't build the lattice: <core's
+  first sentence>" in warning colour. It is tried again after your next edit, or once more
+  when you Save & Exit, and it never blocks Exit.
+- **No lattice outside the part.** With face 3's skin off, walls hung up to 12 mm outside the
+  part while it squished. The preview's part-distance grid has no margin: its last texel lies
+  ON face 3, and beyond it the clamped distance read 0. Beyond the grid, the distance is now
+  at least the distance to the grid's box, in the shader and in its Swift twin. On a box
+  whose grid ends on a face, GPU F ≤ 0.001 went from 6344 points to 0 of 17784 at s = 0, 2
+  and 4. The same probe just inside the face still finds the walls.
+  - **My first version of this fix was wrong.** It took max(SDF, 0) inside the grid as well,
+    so every interior distance became ≥ 0 and no wall was drawn anywhere. The full suite
+    caught it (FlexibleLatticePassTests: "0 in a wall"; FlexibleInPassCompositeTests: nothing
+    covered). My own positive control had counted F ≤ 0 and passed on the broken code. The
+    control now counts F < −0.01, in the GPU and in the Swift twin, and a mutation run
+    restoring the broken line turns it RED (0 wall points inside).
+  - Every lattice suite is back to its baseline numbers: 43868 px covered at the 0.04 ghost,
+    and 50 of 256 probe points in a wall.
+- **The main view gives the battery back.** Settings going up, a stale lattice, or leaving
+  the stage mid-play had left #354's main view drawing at display rate. It now returns to
+  on-demand drawing, and the dent returns to the page's own squish instead of freezing
+  mid-cycle (1321 px → 0 px differ). The Settings page's loop is now stepped by the renderer
+  too, so its whole body no longer re-renders 30 times a second while it plays.
+- **Every blocker has a button.**
+  - With no main-page load and nothing selected, the pop-up says "Press Face 1 or tap the
+    face that carries weight" with [Press Face 1]. Face 1 is the face with the most area
+    facing up (the pad's top). Before, the pop-up had no button at all.
+  - With no filament that has data, the pop-up offers any filament (shape-only).
+  - The pop-up now shows the issue as it is NOW: after you tap the face it names, its button
+    follows.
+- **The blocker pops up at once when Settings opens** (your rule), once, after the scene and
+  the designs have landed.
+  - A shared stack pulses BOTH faces, one after the other.
+  - The camera turns to an oblique corner view from above (Top-Back-Left on your pad). The old
+    face-on view of Face 5 hid Face 3 behind it and turned its curve edge-on.
+- **Nothing covers Undo / Redo or the gizmo.** At 11" portrait the top line ran over Redo and
+  part of Undo and swallowed their taps, and [Fix] sat half under the gizmo. Now the top line
+  takes the band right of the Exit row and left of the gizmo. Where that band is narrower than
+  460 pt (every portrait iPad up to 11"), it takes its own row under Exit. The pop-up sits
+  under it, clear of the gizmo.
+  - The legend is placed by the same placement function the tests measure.
+  - The main page's player keeps clear of the bottom-right chip column (Gravity …).
+- **Words:**
+  - The main pill no longer says "Lattice / Lattice ready". It says "Ready", "Building…",
+    "Tap to open", and a blocker in short: "Fix: Face 3 & Face 5 share a stack". The whole
+    sentence is on the pop-up.
+  - A shape-only lattice's timeline ends "As drawn", never "10 kg".
+  - A toast clears itself even when no Settings page is up.
+- **Main-page views:**
+  - Dent heat now shows a thermometer.
+  - The Lattice button shows what is drawn. With X-ray off it reads off, and turning it on
+    turns X-ray on.
+- **From Topology** the pill goes to the Lattice stage first, then opens Settings, so Exit
+  shows the lattice.
+
+**Rejected:** none. Every finding reproduced.
+
+**Not done (and why):**
+- **Curve points under the Settings panel at 11" portrait** (4 of top A's 7). This needs the
+  camera to frame the part right of or above the panel, which means a viewport offset in
+  #354's `OrbitCameraModel`. That is not a one-line hook, so I left it for your call rather
+  than change the shared camera.
+- **Face tags ('3', '5') on the part while the pop-up is up**: not added. Both faces pulse
+  and the camera shows both, but the pop-up still names them "Face 3 / Face 5".
+- **The camera does not turn to a face with no stack yet** (the "no pressed face" pop-up on a
+  fresh part). The turn needs the face's stack. The face is still selected and the button
+  presses it.
+- **No simulator check** (the launch is refused to me). The Release frame budget was not
+  re-measured.
+- **Carried over from batch B:** the main-page mesh swap still reframes the camera (#354's
+  `applyMesh`), and the per-update tint hash on large parts.
+
+**Your call:**
+- **Popping on open.** A blocker standing when Settings opens now pops once (your "at once").
+  Batch B had deliberately not popped on open. Say if once per visit is too much.
+- **The "no pressed face" suggestion** is the face with the most area facing up (against
+  gravity). Say if you prefer the face nearest the camera.
+
+### Each finding, confirmed on the code (RED before the fix → after)
+
+| # | finding (verifier) | confirmed by | before → after |
+|---|---|---|---|
+| C1 | a failed build retries for ever; the error is never shown | `testAFailedBuildIsTriedOnceAndSaid` (his project, TPU 95A, a forced builder refusal) | 8 starts in 4 s, pill "Building the lattice…" → 1 start, pill and Settings line "Couldn't build the lattice: …"; Save & Exit retries exactly once; an edit rebuilds. Control: an unforced build starts exactly once |
+| C2 | a new grid / lattice region keeps the old lattice "ready" | `testANewGridOnTheMainPageRebuilds`, `testANewLatticeRegionOnTheMainPageRebuilds`, `testTheSceneKeyFollowsTheBeadWidth` | grid 64×64×13 → 64×64×13, generation 1 → 1 (timed out) → 128×128×26, generation 2; latticeVoxels 53248 → 4992, generation 2; the key moves with the bead width |
+| C3 | main-page undo: stale, walls hidden, "Building…" for ever | `testAnUndoOnTheMainPageRebuilds` | 0 builds in 3 s, pill "Building the lattice…"; undoing [Face 5 rests] still "Building…" → 1 build, generation 3, "Ready"; the conflict is said ("Fix: Face 3 & Face 5 …") |
+| C4 | the main view keeps continuous rendering once the loop is taken away; the dent freezes mid-cycle | `testTheLoopTakenAwayMidPlayGivesTheViewBack`, `testTheLoopTakenAwayRestoresTheViewsOwnSquish` | isPaused false (detached and torn down) → true; 1321 of 16384 px off the page's own scale → 0. Control: a pause re-pauses |
+| U1 | walls up to 12 mm outside the part while it squishes | `testNoWallOutsideThePartsGrid` (a box whose SDF grid ends ON a face, skin off) | GPU and Swift F ≤ 0.001 at 6344 of 17784 points beyond the face at s = 0 / 2 / 4 → 0 (min F 0.5). Control: walls inside the same face; GPU/Swift parity < 0.02 mm |
+| C5 / U3 | "no pressed face" / "no filament" pop-ups with NO button; the pop-up stale after his tap | `testEveryBlockingIssueHasOneToThreeFixes`, `testNoPressedFaceOffersThePadsTop`, `testThePopUpShowsTheIssueAsItIsNow` | 0 fixes (control, the old rule) → [Press Face 1] on the pad; any filament; the live issue shows [Press Face 3] after the tap |
+| U2 / U6 | the top line covers Redo/Undo and puts [Fix] under the gizmo; the pop-up covers the gizmo (11" portrait) | `testTheTopLineAndThePopUpClearTheExitRowAndTheGizmo` (744 / 820 / 834 / 1032 portrait, 1194 / 1376 landscape) + page pins | the old pill (190,30 453×40) ∩ redo and gizmo, the old pop-up ∩ gizmo (controls) → the band (24,80 573×40) at 11" portrait, the pop-up (80,132 460×…), no intersection anywhere |
+| U4 | shape-only timeline ends "10 kg" | `testTheShapeOnlyTimelineEndsAsDrawn` | → "As drawn" |
+| U5 | no pop-up on opening; the shared stack shows one face face-on | `testABlockerStandingWhenThePageOpensPopsOnce`, `testASharedStackIsSeenObliquely`, `testThePipelineSaysWhenADesignRunIsInFlight` | the old prompt silent (control) → pops once when settled; LEFT face-on (control) → Top-Back-Left corner; both faces named and pulsed |
+| U7 | pill truncates the fix; "Lattice / Lattice ready" | `testThePillReadsWholeAndSaysLatticeOnce`, `FlexibleMainStageTests.testThePillSaysTheReadinessLine` | → "Fix: Face 3 & Face 5 share a stack", "Ready", "Building…", "Tap to open" |
+| C7 | a toast set with Settings closed never clears | `testAToastClearsItselfWithNoPageUp` | the model clears it (0.2 s in the test, 3.5 s live) |
+| U9 | icons; X-ray off hides the lattice with Lattice on | `testTheLatticeViewTurnsXRayOn` | thermometer for Dent heat; the Lattice button shows what is drawn and turns X-ray on |
+| C6 / U10 | the main player's keep-outs omit the chip column | `testTheMainPlayerClearsTheChipColumn` | a 280 pt chip under the old player (control) → the player moves left (101…441 at 11" portrait) |
+| C8 | the legend test measures a function the page never calls | page pin `FlexibleLegendPlacement.legend(size: measured, …)` | the Settings legend is placed by that function (the gizmo and the top line as keep-outs) |
+| U12 | the Settings page re-renders 30×/s while the squish plays | `testTheSettingsPageLetsTheRendererStepTheSquish` | the renderer steps the loop while a lattice is drawn; the ticker only for his live drawing |
+| U13 | the pill on Topology: "Tap to set up", Exit shows no lattice | H10 pin | a tap goes to the Lattice stage, then Settings; "Tap to open" |
+| U11 | 4 of 7 curve points under the panel at 11" portrait | confirmed from the verifier's screenshots | **not fixed** (needs #354's camera) |
+
+### Hook lines in #354 files changed this pass (each grepped after the edit; pinned)
+
+| hook | file · anchor | ± | why |
+|---|---|---|---|
+| H10 | WorkspacePlaceholder · `FlexibleMainStatusPill(main: flexibleMain, open: {` | ~1 | `open: { if stage != .lattice { goToStage(.lattice) }; showFlexiblePage = true }` — from another stage the pill lands on the Lattice stage, so Exit shows the lattice (`goToStage` is #354's one way to change stage) |
+| P | WorkspacePlaceholder · `FlexibleMainPlayerSlot(main: flexibleMain, bottomClearance: bottomBarClearance` | ~1 | `, chipColumnWidth: force.gravityIsSet ? (settingsChipWidths.values.max() ?? 0) : 0` — the player clears `bottomRightControls` (shown under the same condition, widths already measured by #354) |
+| M3 | MetalMeshView · `if renderer.applyFlexibleLattice(inputs.flexibleLattice, device: view.device` | ~1 | `, baseScale: appliedFlexScale` — the coordinator's own flexScale comes back when a loop lets go |
+
+No other #354 / main file changed. Everything else is in track files: FlexibleMainStage,
+FlexibleStageModel, FlexibleReadiness, FlexibleStagePage, FlexibleFixPopup,
+FlexibleLegendPlacement, FlexibleMainStatusPill, FlexibleSquishPlayer, FlexibleLatticeGeneration,
+FlexibleLatticeField, FlexibleLatticeShader, MeshRenderer+FlexibleLattice.
+
+### Tests (raw)
+
+RED first, on the code as batch B left it (only a test seam added — `controlFailBuild`):
+```
+Executed 9 tests, with 23 failures (0 unexpected)
+FLEX-REVIEW failed build: starts in 4 s 8 · … · pill 'Building the lattice…' building · Settings line 'Ready: Exit builds a shape-only lattice'
+FLEX-REVIEW new grid: 64x64x13 → 64x64x13 · generation 1 → 1 · stale false · pill 'Lattice ready'
+FLEX-REVIEW new region: latticeVoxels 53248 → 53248 · generation 1 → 1 · pill 'Lattice ready'
+FLEX-REVIEW undo: builds started in 3 s 0 · generation 2 → 2 · stale true · pill 'Building the lattice…'
+FLEX-REVIEW undo of [Face 5 rests]: pill 'Building the lattice…' building
+FLEX-REVIEW beyond the grid's last texel, s=0.0: GPU F ≤ 0.001 at 6344 of 17784 (min 0.0) · Swift 6344
+FLEX-REVIEW loop detached mid-play: paused false · setNeedsDisplay false
+FLEX-REVIEW pass torn down mid-play: paused false
+FLEX-REVIEW squish after the loop left: 1321 of 16384 px differ from the page's own scale
+```
+(My first undo test passed on the old code. A model publish left over from the rebuild before
+the undo reached the stage's debounce AFTER the undo and started the build. With a 1 s settle
+before the undo — which is what the app does, with its run loop running — it is RED: 0 builds.)
+
+Targeted suite after the fixes (every Flexible* suite + UnifiedShading, LatticePreviewBodyAlpha,
+LatticeGBufferMask, LatticeThreeAlgorithmsDraw, OrganicCapsuleImpostor, Viewer, StageBackdrop,
+SmoothingPageRound2, LatticeStageMode, LatticeSettingsPersist, ProjectStore, UndoHistory,
+SurfaceStage, LatticeSimSolveTrigger, batch B's list, and EVERY suite that scans a file I
+touched — WorkspacePlaceholder, MetalMeshView, MeshRenderer+FlexibleLattice, FlexibleStagePage:
+FrozenRegionAsMaterial, LatticeGradingWiring, LatticeProbeSampling, LatticeRegionCap,
+LatticeSDFAlignment, LatticeShellAndMarchAgree, OrganicAutoGradeAndFreeze,
+OrganicDeadWallParity, OrganicLookAndVisibility, OrganicPreviewParameterParity,
+OrganicPreviewSpeedAndRim, OrganicSolidRim, ProtectFreezeVsSolidity, SmoothingPage,
+SmoothingPreviewGate, SmoothingRound3, SmoothingRound4, SurfaceStageGestures, VariantRetention):
+```
+Executed 655 tests, with 9 tests skipped and 1 failure (0 unexpected) in 631.990 (632.050) seconds
+  the one failure: LatticeSimSolveTriggerTests.testTheTriggerRefusesOnAllThreeGrounds (known, pre-existing)
+```
+Every Flexible suite again at the final source (after "Save & Exit retries a failed build once"):
+```
+Executed 185 tests, with 4 tests skipped and 0 failures (0 unexpected) in 108.351 (108.370) seconds
+FLEX-REVIEW failed build: starts in 4 s 1 · error The lattice builder refused: no printable cell. More words. · pill 'Couldn't build the lattice: The lattice builder refused: no printable cell' fix · Settings line 'Couldn't build the lattice: The lattice builder refused: no printable cell'
+FLEX-REVIEW control build: starts 1 · pill 'TPU 95A: shape only — no squish predicted'
+FLEX-REVIEW new grid: 64x64x13 → 128x128x26 · generation 1 → 2 · stale false · pill 'Ready'
+FLEX-REVIEW new region: latticeVoxels 53248 → 4992 · generation 1 → 2 · pill 'Ready'
+FLEX-REVIEW undo: builds started in 3 s 1 · generation 2 → 3 · stale false · pill 'Ready'
+FLEX-REVIEW undo of [Face 5 rests]: pill 'Fix: Face 3 & Face 5 share a stack' fix
+FLEX-REVIEW beyond the grid's last texel, s=0.0: GPU F ≤ 0.001 at 0 of 17784 (min 0.5) · Swift 0
+FLEX-REVIEW beyond the grid's last texel, s=2.0: GPU F ≤ 0.001 at 0 of 17784 (min 0.5) · Swift 0
+FLEX-REVIEW beyond the grid's last texel, s=4.0: GPU F ≤ 0.001 at 0 of 17784 (min 0.5) · Swift 0
+FLEX-REVIEW loop detached mid-play: paused true · setNeedsDisplay true
+FLEX-REVIEW pass torn down mid-play: paused true
+FLEX-REVIEW squish after the loop left: 0 of 16384 px differ from the page's own scale
+FLEX-REVIEW no load: 'Press Face 1 or tap the face that carries weight' fixes [TopOptFlows.FlexibleFix.press(1)] (top face 1)
+FLEX-REVIEW shared stack camera: Top-Back-Left
+FLEX-PLACE top line 11" portrait: band (24.0, 80.0, 573.0, 40.0) · pop-up (80.0, 132.0, 461.0, 130.0) · gizmo (610.0, 13.0, 211.0, 211.0)
+FLEX-PLACE top line mini portrait: band (24.0, 80.0, 483.0, 40.0) · pop-up (35.0, 132.0, 461.0, 130.0) · gizmo (520.0, 13.0, 211.0, 211.0)
+FLEX-PLACE top line 13" portrait: band (262.0, 26.0, 533.0, 40.0) · pop-up (179.0, 78.0, 461.0, 130.0) · gizmo (808.0, 13.0, 211.0, 211.0)
+FLEX-PLACE top line 11" landscape: band (262.0, 26.0, 695.0, 40.0) · pop-up (260.0, 78.0, 461.0, 130.0) · gizmo (970.0, 13.0, 211.0, 211.0)
+FLEX-PLACE main player 834×1194 chip 280: (101.0, 1040.0, 340.0, 46.0) · chip (530.0, 1038.0, 280.0, 48.0)
+FLEX-T5 covered at 0.04 ghost: 43868 of 147456; opaque shell 0; control (ghost kept in the G-buffer) 0
+FLEX-PROBE gyroid: max |gpu − swift| = 0.00095558167 mm over 256 points (50 in a wall, 206 not); …
+```
+Mutation run (the shader's first version restored, the test run, the file restored; grep
+shows no marker): `testNoWallOutsideThePartsGrid` → "control: walls inside the part (s = 0.0)
+… 0 is not greater than 100", in the GPU and in the Swift twin.
+
+**iOS build:** `xcodebuild -project app/TopOpt.xcodeproj -scheme TopOpt -configuration Debug
+-destination id=147E56A1… -derivedDataPath …/flexA1 build` → `** BUILD SUCCEEDED **` (exit 0), no
+warning in a Flexible file. The app was not launched.
+
+**Deleted-test sweep:** none deleted. Re-pinned on purpose:
+- FlexibleMainPageHookTests: H10 and P (their new lines), the `settled:` expression, and new
+  pins for the page's placement and live pop-up.
+- FlexibleMainStageTests: the pill says the short form.
+- FlexibleReadinessTests: one comment (that prompt is action-only).
+
+## Round 3 · batch B — Exit always leaves a lattice on the main Flexible page
+
+(Batch B as it was built. The verification pass above changes several of the lines quoted
+here: the pill says "Ready" / "Building…"; a blocker standing on opening now pops once.)
 
 **What you will see** (judged headlessly on YOUR project 0004 restored through `AppModel.open`,
 and on C1's pad; the app was not launched — nothing here has been seen on a screen yet):
