@@ -230,10 +230,15 @@ final class FlexiblePinchTests: XCTestCase {
     @MainActor
     func testThePinchedFieldIsTwoSegments() async throws {
         let (_, m) = try await his { m in
-            // only the pinch: the top rests; face 3 soft (4 mm), face 5 firm (1 mm)
+            // only the pinch: the top rests; both sides drawn as the same dome (his face 3 was drawn
+            // FIRM in the middle — its flipped curve is 0 there), face 3 deep (4 mm), face 5 shallow (1 mm)
             m.rest(FlexibleHisProject.topA); m.rest(FlexibleHisProject.topB)
             m.edit { s in
-                for (r, mm) in [(3, 4.0), (5, 1.0)] { var f = s.face(r)!; f.deepestMM = mm; s.setFace(f) }
+                for (r, mm) in [(3, 4.0), (5, 1.0)] {
+                    var f = s.face(r)!
+                    f.deepestMM = mm; f.curveX = FlexibleFaceSettings.defaultCurve; f.curveY = FlexibleFaceSettings.defaultCurve
+                    s.setFace(f)
+                }
             }
         }
         XCTAssertEqual(Set(m.settings.loadedFaces.map(\.faceRegionID)), [3, 5])
@@ -254,9 +259,14 @@ final class FlexiblePinchTests: XCTestCase {
         print("FLEX-PINCH two segments: near face 3 ρ \(got3) (its half \(s3.buildableDensity[c3.col])) · near face 5 ρ \(got5) (its half \(s5.buildableDensity[c5.col]))")
         XCTAssertEqual(Double(got3), s3.buildableDensity[c3.col], accuracy: 0.02, "face 3's half near face 3")
         XCTAssertEqual(Double(got5), s5.buildableDensity[c5.col], accuracy: 0.02, "face 5's half near face 5")
-        // ★ RED CONTROL: the two halves differ — one profile (face 3's everywhere) would put face
-        // 3's density beside face 5
-        XCTAssertGreaterThan(abs(s3.buildableDensity[c3.col] - s5.buildableDensity[c5.col]), 0.02,
-                             "control: a soft face 3 and a firm face 5 are two different halves")
+        // each half is its OWN face's: the face drawn to squish 1 mm is the firmer half
+        XCTAssertGreaterThan(s5.buildableDensity[c5.col], s3.buildableDensity[c3.col] + 0.02,
+                             "face 5 (1 mm) is firmer than face 3 (4 mm)")
+        XCTAssertGreaterThan(Double(got5), Double(got3) + 0.02, "…in the field too")
+        // ★ RED CONTROL: ONE profile (face 3's design over the whole column) would put face 3's
+        // density beside face 5 — softer than face 5's own half
+        let one = try XCTUnwrap(m.designs[Self.k3]).columns[c3.col].buildableDensity
+        print("FLEX-PINCH control: one profile (face 3's, 100 mm) ρ \(one) beside face 5")
+        XCTAssertGreaterThan(abs(one - s5.buildableDensity[c5.col]), 0.02, "control: one profile is not face 5's half")
     }
 }

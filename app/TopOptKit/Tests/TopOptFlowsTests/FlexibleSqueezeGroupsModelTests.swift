@@ -86,6 +86,31 @@ final class FlexibleSqueezeGroupsModelTests: XCTestCase {
         XCTAssertEqual(old.face(5)?.weightKg, 10, "control: the old write left face 5 at 10 kg")
     }
 
+    /// A face of his own moved into a group takes that group's ONE force; a face a main-page Load
+    /// group presses keeps the main page's weight (the group line says the range).
+    @MainActor
+    func testAMovedFaceTakesItsNewGroupsForce() async throws {
+        let (r, m) = try await his()
+        m.newGroup(with: 3)
+        let two = try XCTUnwrap(m.squeezeGroup(of: 3))
+        m.setGroupForce(two.id, kg: 6)
+        XCTAssertEqual(m.settings.face(3)?.weightKg ?? 0, 6, accuracy: 1e-9)
+        XCTAssertEqual(m.settings.face(5)?.weightKg ?? 0, 10, accuracy: 1e-9, "premise: group 1 still 10 kg")
+        m.moveToGroup(5, two.id)
+        XCTAssertEqual(m.settings.face(5)?.weightKg ?? 0, 6, accuracy: 1e-9, "face 5 joins group 2 at its 6 kg")
+        XCTAssertEqual(m.groupForce(try XCTUnwrap(m.squeezeGroup(of: 5))), 6...6)
+        // top A (the main page's Top) moved in keeps Top's 10 kg: the group says 6–10 kg
+        m.moveToGroup(FlexibleHisProject.topA, try XCTUnwrap(m.squeezeGroup(of: 5)).id)
+        let top = try XCTUnwrap(r.project.selection.groups.first { $0.name == "Top" })
+        XCTAssertEqual(r.project.force.kind(for: top.id).weightKg ?? 0, 10, accuracy: 1e-9, "the main page is not written by a move")
+        let g = try XCTUnwrap(m.squeezeGroup(of: 5))
+        XCTAssertEqual(m.groupLine(g), "Group 2 · Top A + 2 more · Squeeze 6–10 kg")
+        // ★ RED CONTROL: a move that keeps the face's own weight leaves one group with two forces
+        var kept = m.settings
+        var f = try XCTUnwrap(kept.face(FlexibleHisProject.topB)); f.squeezeGroup = g.id; kept.setFace(f)
+        XCTAssertEqual(kept.face(FlexibleHisProject.topB)?.weightKg, 10, "control: without the rule top B would bring its 10 kg")
+    }
+
     @MainActor
     func testAStackSharedInOrAcrossGroupsNeverBlocks() async throws {
         let (_, m) = try await his()

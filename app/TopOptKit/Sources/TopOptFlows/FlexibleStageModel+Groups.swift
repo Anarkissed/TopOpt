@@ -93,11 +93,21 @@ extension FlexibleStageModel {
 
     // MARK: his actions
 
-    /// Move a pressed face into the group stored as `groupID`.
+    /// Move a pressed face into the group stored as `groupID`. ★ ONE FORCE PER GROUP: a face of
+    /// his own takes the group's force (a face a main-page Load group presses keeps that group's
+    /// weight — the main page is its one truth; the group line then says the range).
     public func moveToGroup(_ region: Int, _ groupID: Int) {
         guard squeezeGroup(of: region)?.id != groupID else { return }
+        let force = squeezeGroups.first { $0.id == groupID }.flatMap { groupForce($0) }
         actionSerial += 1
-        edit { FlexibleSqueezeGroups.move(region, to: groupID, in: &$0) }
+        edit { s in
+            FlexibleSqueezeGroups.move(region, to: groupID, in: &s)
+            if let f = force, f.upperBound - f.lowerBound < 0.05, f.upperBound > 0,
+               var face = s.face(region), face.weightFrom == nil {
+                face.weightKg = f.upperBound
+                s.setFace(face)
+            }
+        }
     }
 
     /// A new group made from `region` (nil: not pressed, or already alone in its group).
