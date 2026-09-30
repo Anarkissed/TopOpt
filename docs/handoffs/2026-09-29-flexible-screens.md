@@ -1,6 +1,238 @@
 # Handoff — 2026-09-29-flexible-screens (TRACK app, A1): the Flexible screens
 
-## Round 4 · batch C2 — the main Flexible page (read this first)
+## Round 4 · batch C2 — verification pass (read this first)
+
+The C2 verifier reported 14 findings: 4 majors and 10 minors (two of them are the same "Building…"
+tap, seen from the code and from the screen). I checked each one on YOUR project 0004, restored
+through `AppModel.open`, and on the plain pad. I fixed all four majors and every cheap minor.
+The view row was hosted offscreen at 11" and 13" in both orientations and clicked. The app was NOT
+launched, so none of this has been seen on a screen yet.
+
+**What changes for you on the main Flexible page:**
+- **The big Lattice button is green "Ready" only when core can take the job.** On your project as
+  saved (Face 3 and Face 5 pinch the pad) C2 showed the green "Lattice · Ready". A tap then ended
+  on "Not sent" with nothing to do. Now:
+  - the pill reads **"Lattice · Preview · core can't pinch yet"**, grey with a green outline. The
+    lattice preview is built and shown as before;
+  - a tap opens the Export step on **"Not sent: core can't press Face 3 and Face 5 at once"**, with
+    **[Send with Face 5 resting] [Send with Face 3 resting]**;
+  - [Send with Face 5 resting] sends the job with Face 5 resting in the job only. Core answers
+    **"Core designed it · Face 5 resting · Gyroid · 240 °C · 3 faces"**. Your pinch stays in
+    Settings and in the preview;
+  - tapping the pill again keeps core's answer and both buttons.
+- **Two squeeze groups (your img 4, the sides in Group 2):** the pill reads **"Preview · core runs
+  one group at a time"**. The step offers **[Send Group 1 only] [Send Group 2 only, Face 5
+  resting]** (Group 2 holds your pinch, so one end of it rests too). Group 2 gives "Core designed
+  it · Group 2 only, Face 5 resting · Gyroid · 190 °C · 1 face".
+- **TPU 95A (img 1):** the pill keeps your label, **"TPU 95A: shape only — no squish predicted"**,
+  in the preview look, not the green.
+  - A tap says **"Not sent: TPU 95A has no squish data yet"**, with core's own sentence behind the
+    (i), and one button: **[Use colorFabb varioShore TPU]**.
+  - That button switches the filament and closes the step. The lattice rebuilds, "Lattice ready"
+    appears, Ready turns green, and the next tap sends it: core designs it.
+  - The job is no longer sent just to be refused. Core refuses it from the same catalogue entry the
+    app reads. A test asks core's runner directly and gets the same code (`calibrate_first`) and
+    sentence.
+- **Ready on another stage sends what you set NOW.** C2 sent the job from BEFORE an edit you made on
+  Topology. Example: you change the "Top" Load group from 10 to 20 kg on Topology, then tap
+  "Lattice · Ready":
+  - C2: core got 10 kg (the stage re-reads the main page only while it shows);
+  - now: nothing is sent. You are taken to the Lattice stage, where "Still building — it shows here
+    when ready" appears and the lattice rebuilds with 20 kg. Ready comes back, and the next tap
+    sends 20 kg (the face's `weight_n` in core's job: 98.07 → 196.13 N).
+- **"Lattice · Building…" tapped on Topology or Surface takes you to the Lattice stage** (no
+  Settings). C2's tap did nothing you could see: builds only start on the Lattice stage, and the
+  note is only drawn there.
+- **The "Lattice ready" note is now on the same line as the three view buttons, to their left.**
+  It was under them.
+  - The legends stay where batch C put them. On your project at 13" landscape, with the Gravity
+    chip, all three are back in one column at the right edge. C2 moved Stress and Lattice 260 pt
+    to the left, over the part.
+  - The whole note is [Show]'s tap target (40 pt tall). It was the 13 pt word alone.
+- **The Export step:**
+  - "Waits on core's Flexible exporter" is said once, under core's line. [Export STL] and
+    [Export G-code] are plain greyed buttons.
+  - The (i) no longer shows a temp-folder path. The previous run's temp folder is deleted when the
+    next job is sent.
+  - The scrim, outline and shadow now use DS tokens.
+- **A project with no part file** says "Not sent: the part's file is missing". C2 said "press a face
+  first".
+
+**Each finding, checked:**
+
+| # | finding | verdict | evidence (raw lines below) |
+|---|---|---|---|
+| 1 | major · Ready on Topology sends the weight from before his edit | CONFIRMED, fixed | RED run on C2: `tap Ready → runs 1 · to the Lattice stage 0× · face 1000103 10.0 → 10.0 kg · stale false · pill 'Ready'` |
+| 2 | major · "Building…" on another stage is a dead tap | CONFIRMED, fixed (H10) | RED run on C2: `designing at Exit true … off-stage 2 s: lattice false building false · pill 'Building…'`, no navigation |
+| 3 | minor · Swift 6 warning in FlexibleCoreRun.swift:168 | CONFIRMED, fixed | now `await self?.land(result, for: job)` (a main-actor method); no warning in any file this pass touched (build logs) |
+| 4 | minor · the targeted filter missed 10 suites | CONFIRMED, fixed | the filter is now built from CLASS names: every class in a Flexible* file, the brief's list, and every class in a file that mentions WorkspacePlaceholder (157 classes, including all 10) |
+| 5 | minor · no file ⇒ "press a face first" | CONFIRMED, fixed | `EncodeError.noPart`; C2's line was `Not sent: press a face first` |
+| 6 | major · pinch / two groups: green Ready, then a dead end | CONFIRMED, fixed | RED run on C2: `pill 'Ready' tone ready`, step `Not sent: core can't press both ends yet`, no button |
+| 7 | major · TPU 95A: green pill, job sent to be refused, no fix | CONFIRMED, fixed | RED run on C2: `("ready") is not equal to ("preview")`, `runs 1` |
+| 8 | minor · the note band pushes legends into a second column | CONFIRMED, fixed | control (C2's band, 13l, chips 222): `lattice (844,590) · stress (844,454)`; now `dent (1104,294) lattice (1104,566) stress (1104,430)` |
+| 9 | minor · "Building…" off the Lattice stage does nothing visible | the same as #2 | — |
+| 10 | minor · a failed build opens Settings with no pop-up | CONFIRMED, NOT changed | a failed build has no fix the app knows; Settings' top line gives core's words, and Save & Exit already retries once (`didExitSettings → retryFailedBuild`). A [Try again] pop-up would only repeat Exit. Your call |
+| 11 | minor · the step is text only; a temp path behind (i) | PARTLY fixed | path dropped, old folders deleted; core's heat maps are SVG files, which SwiftUI on iOS 16 cannot draw without an SVG renderer (not done) |
+| 12 | minor · the wait line twice; raw colours | CONFIRMED, fixed | once; `DS.Color.scrim`, `DS.Color.strokePanel`, `DS.Shadow.sheet` |
+| 13 | minor · [Show] is a 13 pt word | CONFIRMED, fixed | the whole 40 pt note; a hosted click on its ICON shows the lattice (RED on C2) |
+| 14 | minor · carried over: the flap past the pressed side walls | CONFIRMED, not C2's | batch G's displacement field |
+
+One finding needed a narrower claim than the verifier's (#8). At 11" landscape with the Gravity
+chip, batch C's own layout already used a second legend column. With the note beside the row,
+that column's top legend sits at y 491, as it did in C2; batch C had it at y 219. At every size the
+note never pushes a legend out of the trailing column. Everywhere else — 13" in both orientations,
+11" portrait, 820 and 744 pt wide screens, and 11" landscape without the chip — the legends are
+exactly where batch C put them (the test compares every frame).
+
+**Not done (and why):**
+- **Nothing has been seen on a device or simulator.** I must not launch the app. The iOS build
+  succeeds (below). The view row was hosted and clicked offscreen.
+- **A failed build still opens Settings without a pop-up** (#10). Its fix is unknown to the app, and
+  Exit retries it.
+- **Core's heat maps are not shown in the Export step** (#11). They are SVG files.
+- **Core still cannot run a pinch or several squeeze groups** (core brief #1, #2, #6). The buttons
+  send what it can: one end resting, or one group.
+- **The render defects from B** (seam speckle, the flap, the torn side face) are batch G's.
+- **#354's latent Surface / Settings overlap** (4b11beb3) is carried over.
+
+**Your call:**
+- A "send with one end resting" answer is core's design for THAT job, not for your pinch. Should
+  the step show both ends' answers side by side?
+- [Use colorFabb varioShore TPU] changes your filament in one tap. Should it open Settings on the
+  filament row instead?
+- C2's three questions still stand: "Tap to open" from Topology still opens Settings; only the
+  Lattice button's Exit turns the view on; the note shows for 4 s (now beside the row).
+
+### Hook lines in #354 files (this pass)
+
+| hook | file · anchor | ± | why |
+|---|---|---|---|
+| H10' | WorkspacePlaceholder · `if project.lattice.flexible == nil { latticeThisButton } else { FlexibleMainStatusPill(main: flexibleMain, open: { if stage != .lattice { goToStage(.lattice) }; showFlexiblePage = true }` | 1 line edited (+0 −0 lines) | appends `, goToLattice: { if stage != .lattice { goToStage(.lattice) } })`, so "Building…" on another stage goes to the Lattice stage, and so does a Ready whose lattice your edits there made stale. No Settings. |
+
+WorkspacePlaceholder in this pass: `git diff --numstat` 1 1 (one line edited). H5, the Export mount,
+`requestLatticeRun`, `startStressSolveIfNeeded` (its first 900 characters) and every other pinned
+string are untouched. MetalMeshView, LatticeSettings, ProjectModel and LatticeStageMode are
+untouched. No case was added. core/ is untouched.
+
+New file: `FlexibleCoreHold.swift` (the rule: what core can't take, and what it can). Edited track
+files: `FlexibleCoreRun.swift`, `FlexibleExportSheet.swift`, `FlexibleMainLatticeView.swift`,
+`FlexibleMainStage.swift`, `FlexibleMainStatusPill.swift`, `FlexibleStageModel.swift`
+(`runJobJSON(resting:)`, `.noPart`), `FlexibleJob.swift` (`EncodeError.noPart`).
+
+### Decisions (00-decisions.md)
+
+- New rows: D-R4-24 (the pill never promises what core will refuse: the preview tone and the
+  step's 1–3 buttons), D-R4-25 (Ready sends what you set now; "Building…" on another stage goes to
+  the Lattice stage), D-R4-26 (the note beside the row; the wait said once).
+- D-R4-22 and D-R4-23 are amended to point at them.
+
+### Tests
+
+Written FIRST and run RED against C2's code, with stubs of the new API that keep C2's behaviour
+(`c2v/red1_keep.log`): **11 of 11 failed, 94 failures** — `Executed 11 tests, with 94 failures (0
+unexpected) in 32.638 (32.639) seconds`. The two hosted tests failed on C2's note under the row
+and on a click on the note's icon.
+
+NEW: `FlexibleMainPageRound4VerifyTests` (9):
+- **Ready on another stage** (his project, Face 5 resting, the "Top" group 10 → 20 kg on Topology):
+  nothing sent, taken to the Lattice stage, the model has 20 kg, stale; there it rebuilds, Ready,
+  and the job core receives carries 20 kg.
+- **"Building…" off the Lattice stage**: it goes there. Control: on the Lattice stage it goes
+  nowhere. Also the real case: Exit, then ‹ Topology while the designs are in flight.
+- **The hold rule as values**: one pinch, two pinches, two groups, a group with a pinch inside,
+  four groups (3 buttons), the order, the pill's line ≤ 44 characters, the preview fill ≠ the
+  Ready green (control: Ready IS the green).
+- **His pinch**: a preview, the named line, two buttons; each end sent and answered (core's parser
+  reads the pressed faces); his settings unchanged; the answer stands on a second tap; the first
+  run's temp folder deleted; no path behind the (i).
+- **Two groups (img 4)**: a preview; both groups offered; each button's job parsed by core; Group 2
+  sent and answered.
+- **TPU 95A**: a preview with his label; not sent; core's catalogue sentence behind the (i).
+  POSITIVE CONTROL: core's own runner, asked directly, refuses this job with the same code and
+  sentence. [Use colorFabb varioShore TPU] → the step closes, the lattice rebuilds, Ready, sent,
+  designed.
+- **A part with no file**: `.noPart`, its own line (control: ≠ "press a face first").
+- **The note beside the row** at 13l / 13p / 11l / 11p / 820 / 744 pt, with and without the chip
+  column: on the row's line, left of it, clear of the left panel. No legend leaves the trailing
+  column. Where batch C's row-only keep-out held them all there, every frame is identical. RED
+  CONTROL: C2's band under the row, at 13l with 222 pt of chips, puts Stress and Lattice at
+  x 844.
+- **The Export step's source**: the wait line once and not in `card(`; no raw colours; the fix
+  buttons; no `MainActor.run { guard let self` in the run.
+
+Re-pinned, each with its reason in the test:
+- `FlexibleMainPageRound4Tests`: the pill's source (`goToLattice`); the pinch's line names the
+  faces; TPU 95A is a preview and is not sent (core's own runner gives the one-line refusal);
+  `testTheNoteBandIsReservedUnderTheViewRow` → `testTheNoteBandIsReservedBesideTheViewRow`; H10.
+- `FlexibleMainPageRound4HostedTests`: `testTheRowAndTheNoteSitInTheirReservedFrames` →
+  `testTheRowAndTheNoteSitSideBySideInTheirFrames` (beside the row, clear of the left panel;
+  control: not in C2's band); the note's [Show] is clicked on its icon.
+- `FlexibleMainPageHookTests` (H10).
+- `FlexibleMainStageTests` and `FlexibleBatchBReviewTests`: his pinch rebuilt, and TPU 95A, are a
+  PREVIEW pill, not the green Ready.
+
+Deleted-test sweep of this pass (`git diff 38963bbe..HEAD -- app/TopOptKit/Tests`): no test
+deleted. Two were renamed with their re-pin (above); 9 were added.
+
+Mutation runs. Each breaks one rule, rebuilds, runs the test that pins it, then restores the file
+from git (`git status` clean afterwards). All 12 are RED:
+```
+V1  Ready sends without catching up (C2)          ⇒ ("1") is not equal to ("0") - the job from before his edit is never sent (8)
+V2  Building… off-stage stays put (C2)            ⇒ ("0") is not equal to ("1") - off the Lattice stage: the tap goes there (3)
+V3  the pill ignores the hold                     ⇒ ("ready") is not equal to ("preview") - never the green Ready while core can't take it (2)
+V4  a calibrate-first filament not held           ⇒ ("ready") is not equal to ("preview") - not the green Ready (5)
+V5  the step ignores the hold (C2's bare line)    ⇒ ("Not sent: core can't press both ends yet") is not equal to (… Face 3 and Face 5 at once) (2)
+V6  a fix's resting faces ignored                 ⇒ ("0") is not equal to ("1") — nothing reached core (2)
+V7  the previous temp folder kept                 ⇒ the previous run's temp folder is deleted (1)
+V8  a group's own pinch not rested                ⇒ (["Send Group 1 only"]) is not equal to ([… "Send Group 2 only, Face 5 resting"]) (2)
+V9  the note back under the row (C2)              ⇒ ("303.5") is not equal to ("255.5") — on the row's line (23)
+V10 only the word "Show" is the target (C2)       ⇒ [Show] shows the lattice (2, hosted click on the icon)
+V11 no file says "press a face first" (C2)        ⇒ (Mark at least one face …) is not equal to (The part's file is missing …) (2)
+V12 the pill's hold blind to squeeze groups       ⇒ ("Preview · core can't pinch yet") is not equal to ("Preview · core runs one group at a time") (2)
+```
+
+Raw lines (the green run):
+```
+FLEX-C2V TPU 95A: pill 'TPU 95A: shape only — no squish predicted' tone preview · step 'Not sent: TPU 95A has no squish data yet' · button [Use colorFabb varioShore TPU] · core's own runner: calibrate_first
+FLEX-C2V V1 designing at Exit true building false · off-stage 2 s: lattice false building false · pill 'Building…' tap wait
+FLEX-C2V pinch: pill 'Preview · core can’t pinch yet' tone preview
+FLEX-C2V pinch: step 'Not sent: core can’t press Face 3 and Face 5 at once' · (i) 'A pinch is the app's preview for now: core designs one squish profile per stack.' · buttons ["Send with Face 5 resting", "Send with Face 3 resting"]
+FLEX-C2V pinch: [Send with Face 5 resting] → 'Core designed it · Face 5 resting · Gyroid · 240 °C · 3 faces' · (i) 'Core wrote its receipt, heat maps and CSVs (21 files). It designs the density, not the printable file yet.'
+FLEX-C2V V4 group 92E96F3A-D8F7-4FB0-AF8D-56230DFB6BC0: 10.0 → 20.0 kg on Topology · tap Ready → runs 0 · to the Lattice stage 1× · note Optional(TopOptFlows.FlexibleMainNote.Kind.building) · face 1000103 10.0 → 20.0 kg · stale true · pill 'Building…'
+FLEX-C2V V4 sent: face 1000103 weight_n 98.06649999999999 → 196.13299999999998 · core 'Core designed it · Gyroid · 240 °C · 3 faces'
+FLEX-C2V note 13l chips 222.0: note (928.0, 235.0, 280.0, 41.0) · legends ["dent (1104.0, 294.0, 248.0, 124.0)", "lattice (1104.0, 566.0, 248.0, 124.0)", "stress (1104.0, 430.0, 248.0, 124.0)"]
+FLEX-C2V note 11l chips 222.0: note (746.0, 235.0, 280.0, 41.0) · legends ["dent (922.0, 355.0, 248.0, 124.0)", "lattice (662.0, 491.0, 248.0, 124.0)", "stress (662.0, 355.0, 248.0, 124.0)"]
+FLEX-C2V note control 13l chips 222 with C2's under-row band: ["dent (1104.0, 454.0, 248.0, 124.0)", "lattice (844.0, 590.0, 248.0, 124.0)", "stress (844.0, 454.0, 248.0, 124.0)"]
+FLEX-C2V groups: ["Group 1 · Top A + Top B · Squeeze 10 kg", "Group 2 · Face 3 + Face 5 · Squeeze 10 kg"] · pill 'Preview · core runs one group at a time' · buttons ["Send Group 1 only", "Send Group 2 only, Face 5 resting"]
+FLEX-C2V groups: [Send Group 2 only, Face 5 resting] → 'Core designed it · Group 2 only, Face 5 resting · Gyroid · 190 °C · 1 face'
+```
+
+The targeted suite ran on the committed tree (d85a8bb0), after the mutation runs. Its filter is
+built from CLASS names (`c2v/filter.txt`, 157 classes): every class in a Flexible* file, the
+brief's list, and every class in a file that mentions WorkspacePlaceholder. That includes the 10
+the C2 filter missed, and AppModelTests, which brings in its three known 3MF failures. Raw:
+```
+Executed 1043 tests, with 15 tests skipped and 9 failures (0 unexpected) in 1662.039 (1662.132) seconds
+  failing cases (all known, pre-existing):
+  AppModelTests testReopenedThreeMFProjectReimportsTheStlWorkingCopy
+  AppModelTests testThreeMFImportNormalisesToStlWorkingCopyAndKeepsProvenance
+  AppModelTests testThreeMFImportOptimisesOnDeviceEndToEnd
+  LatticeSimSolveTriggerTests testTheTriggerRefusesOnAllThreeGrounds
+Test Suite 'GroupViewEnforcementTests' passed … 'SurfaceStageNoRegressionTests' passed … 'TransformGizmoTests' passed
+```
+
+**iOS build (the committed tree, d85a8bb0):** `xcodebuild -project app/TopOpt.xcodeproj -scheme
+TopOpt -configuration Debug -destination id=147E56A1… -derivedDataPath …/flexA1 build` → `** BUILD
+SUCCEEDED **` (exit 0), with no warning in any file this pass touched. The SwiftPM build shows no
+warning in them either (C2's `FlexibleCoreRun.swift:168` Swift 6 warning is gone). The app was not
+launched.
+
+### Commits (on claude/flexible-screens, not pushed)
+
+61daa708 the verification fixes and their tests · d85a8bb0 the pill's preview tone has ONE source,
+the hold · (this handoff + DECISIONS D-R4-24 … 26, D-R4-22 / 23 amended).
+
+## Round 4 · batch C2 — the main Flexible page
 
 Your notes on the main page after testing batches A + B (img 5, img 6) and your answer 2, built on
 the main Flexible page. Judged headlessly on the pad and on YOUR project 0004 restored through
