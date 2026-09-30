@@ -160,8 +160,9 @@ extension Array where Element == FlexibleSquishFace {
 public enum FlexibleSquishField {
     /// The largest share of a column's span the face may travel (the inverse divides by 1 − a).
     public static let maxRatio: Float = 0.95
-    /// The shader's face slots. Generate refuses more loaded faces than this
-    /// (`FlexibleLatticeGate.faceCountRefusal`) rather than dropping any silently.
+    /// The shader's face slots. ★ ROUND 3 BATCH B: more pressed faces no longer refuse the
+    /// lattice — the walls use every face, the faces are handed over LARGEST FIRST and the
+    /// squish is shown on the first four ("squish shown on the 4 largest of 7 faces").
     public static let maxFaces = 4
 
     public struct Pull: Equatable, Sendable {
@@ -235,10 +236,15 @@ public struct FlexibleLatticeLayerInputs: Equatable {
     /// True while a new lattice is being built: the superseded one must not draw (the
     /// octet's `latticeHidden` rule during a rebake).
     public var hidden: Bool
+    /// ★ BATCH B: the MAIN page's squish loop — the renderer steps it every frame
+    /// (MeshRenderer+FlexibleLattice.stepFlexibleLoop), so the squish never publishes into
+    /// WorkspacePlaceholder's body. nil ⇒ the view's own flexScale (the Settings page).
+    public var loop: FlexibleSquishLoop?
 
-    public init(lattice: FlexibleLatticeInputs, faces: [FlexibleSquishFace], token: Int, hidden: Bool = false) {
-        self.lattice = lattice; self.faces = faces; self.token = token; self.hidden = hidden
+    public init(lattice: FlexibleLatticeInputs, faces: [FlexibleSquishFace], token: Int, hidden: Bool = false,
+                loop: FlexibleSquishLoop? = nil) {
+        self.lattice = lattice; self.faces = faces; self.token = token; self.hidden = hidden; self.loop = loop
     }
 
-    public static func == (a: Self, b: Self) -> Bool { a.token == b.token && a.hidden == b.hidden }
+    public static func == (a: Self, b: Self) -> Bool { a.token == b.token && a.hidden == b.hidden && a.loop === b.loop }
 }

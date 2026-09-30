@@ -24,6 +24,7 @@
 
 #if canImport(MetalKit)
 import MetalKit
+import QuartzCore
 
 extension MeshRenderer {
 
@@ -82,7 +83,49 @@ extension MeshRenderer {
             pass.hidden = inputs.hidden
             changed = true
         }
+        if pass.loop !== inputs.loop {
+            pass.loop = inputs.loop
+            changed = true
+        }
         return changed
+    }
+
+    // MARK: the main page's squish loop (round 3 batch B)
+
+    /// ★ THE MAIN PAGE'S SQUISH RUNS IN THE RENDERER (plan: a 30 fps publish would re-run
+    /// WorkspacePlaceholder's 11.7k-line body 30 times a second). The loop's scale for a frame
+    /// at `now`, or nil when no loop drives this view (no Flexible pass, nothing uploaded, or
+    /// no loop handed over — then #354's flexScale stands, byte for byte).
+    /// Hidden walls still loop the DENT (the Lattice view off keeps the squish on the map).
+    func flexibleLoopScale(now: CFTimeInterval) -> Float? {
+        guard let pass = flexibleLattice, pass.token >= 0, let loop = pass.loop else { return nil }
+        return loop.scale(at: now)
+    }
+
+    /// The top of `draw(in:)`: set THIS frame's flexScale from the loop — the one float the
+    /// dent's vertices and the walls both read — and keep frames coming while it plays.
+    /// Returns true while the loop needs continuous frames (the settle's end must not pause
+    /// the view under it). A pause or a drag draws its frame and returns the view to
+    /// on-demand drawing (battery), unless a settle or a pulse still animates.
+    @discardableResult
+    func stepFlexibleLoop(in view: MTKView, now: CFTimeInterval = CACurrentMediaTime()) -> Bool {
+        guard let s = flexibleLoopScale(now: now), let loop = flexibleLattice?.loop else { return false }
+        loop.attach(view)
+        setFlexScale(s)
+        if loop.playing {
+            if view.isPaused { view.isPaused = false }
+            if view.enableSetNeedsDisplay { view.enableSetNeedsDisplay = false }
+            loop.renderingContinuously = true
+            return true
+        }
+        if loop.renderingContinuously {
+            loop.renderingContinuously = false
+            if !isSettling && !isPulsing {
+                view.isPaused = true
+                view.enableSetNeedsDisplay = true
+            }
+        }
+        return false
     }
 }
 #endif

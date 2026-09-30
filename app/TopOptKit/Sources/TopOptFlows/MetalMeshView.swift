@@ -3281,6 +3281,7 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
 
     func draw(in view: MTKView) {
         let wasAnimating = isSettling || isPulsing
+        let flexLooping = stepFlexibleLoop(in: view)   // Flexible (PR #362): the main page's squish loop sets THIS frame's flexScale (MeshRenderer+FlexibleLattice.swift); false ⇒ #354's frame
         if isSettling { stepSettle() }
         if isPulsing { stepPulse() }   // advance the detent flash (item 2), re-uploading its tint
         guard let cmd = queue.makeCommandBuffer() else { return }
@@ -3298,7 +3299,7 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         if let drawable = view.currentDrawable { cmd.present(drawable) }
         cmd.commit()
         // The settle/pulse finished this frame → return to on-demand drawing (battery).
-        if wasAnimating && !isSettling && !isPulsing {
+        if wasAnimating && !isSettling && !isPulsing && !flexLooping {
             view.isPaused = true
             view.enableSetNeedsDisplay = true
         }
@@ -6090,6 +6091,7 @@ extension MetalMeshView {
         private var appliedReveal: Float = 1
         /// M7.viz.3: whether flex displacements are uploaded, and the last scale.
         private var appliedFlex = false
+        private var appliedFlexArray: [Float]?   // Flexible (PR #362): the dent uploaded — a new dent on the same mesh re-uploads (Array == is O(1) on the same storage)
         private var appliedFlexScale: Float = 0
         /// M7.viz.4: whether load-path segments are uploaded, and the last flow phase.
         private var appliedLoadPath = false
@@ -6376,8 +6378,9 @@ extension MetalMeshView {
             // / when they first arrive (they only depend on the mesh + field, not the
             // phase); the scale is a cheap per-frame uniform that drives the loop.
             if let flex = inputs.flexDisplacements {
-                if dirty || !appliedFlex {
+                if dirty || !appliedFlex || flex != appliedFlexArray {
                     appliedFlex = true
+                    appliedFlexArray = flex
                     renderer.setFlexDisplacements(flex)
                     dirty = true
                 }

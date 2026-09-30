@@ -110,6 +110,9 @@ final class FlexibleLatticePass {
     private(set) var token = -1
     /// Hidden while a new lattice builds: the volumes stay, only the march is skipped.
     var hidden = false
+    /// ★ BATCH B: the MAIN page's squish loop (FlexibleSquishLoop), stepped by the renderer
+    /// every frame (MeshRenderer.stepFlexibleLoop). nil ⇒ the view's own flexScale.
+    var loop: FlexibleSquishLoop?
     private(set) var uploadCount = 0
     /// The grids AS THE GPU SEES THEM (a mismatched pair resampled onto one grid) — what
     /// every parity test compares against.
