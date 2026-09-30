@@ -109,7 +109,7 @@ public final class FlexibleMainStage: ObservableObject {
     /// firmer material wins where they share): "Group 2 squishes 1.2 of 3.0 mm · firmer wins".
     public var simNote: String? {
         guard let g = shownLattice, let id = g.shownSimID else { return nil }
-        return g.simNotes[id]
+        return g.simNote(for: id)
     }
     public private(set) var model: FlexibleStageModel?
     private var projectID: UUID?

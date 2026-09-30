@@ -115,7 +115,9 @@ final class FlexibleRowCopyTests: XCTestCase {
         // the panel shows them (source pins)
         let root = FlexibleHisProject.repoRoot.appendingPathComponent("app/TopOptKit/Sources/TopOptFlows")
         let panel = (try? String(contentsOf: root.appendingPathComponent("FlexibleFacePanel.swift"), encoding: .utf8)) ?? ""
-        XCTAssertTrue(panel.contains("if f.isLoaded, let w = warning(r) { FlexWarningLine(text: w) }"))
+        // ★ RE-PINNED (D2 review): the warning is a static the tests call — a PINCHED face counts
+        // the columns its two halves cannot reach (FlexibleSqueezeGroupsReviewTests)
+        XCTAssertTrue(panel.contains("if f.isLoaded, let w = Self.warning(model: model, region: r) { FlexWarningLine(text: w) }"))
         XCTAssertTrue(panel.contains("FlexibleRowCopy.autoLine("))
         XCTAssertTrue(panel.contains("warning: auto.warning"))
         XCTAssertFalse(panel.contains(".frame(width: 2"), "no chip row squeezed into a fixed frame")

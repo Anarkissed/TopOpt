@@ -4,6 +4,8 @@
 // the values show up and get modified below to match the value saved to the face. And make
 // it obvious that it's selectable.").
 //
+// ★ D2 REVIEW: the pressed faces are listed UNDER THEIR SQUEEZE GROUP'S HEADER ("Group 1 ·
+// Squeeze [10 kg ✎]" — FlexibleSqueezeGroupHeader), the resting faces after them.
 // ★ ONE BIG ROW PER FACE — "Top A · Pressed · 10 kg" / "Face 0 · Rests" — pressed faces first,
 // each a 48 pt button with a chevron. A tap SELECTS that region (a split sector as itself,
 // `FlexibleStageModel.select`) and the part shows it selected. Every row is one line
@@ -27,6 +29,8 @@ struct FlexibleFaceList: View {
     static let rowHeight: CGFloat = 48
     /// The selected face's card (the panel scrolls to it).
     static func cardID(_ region: Int) -> String { "flexible-face-card-\(region)" }
+    /// A squeeze group's header.
+    static func groupID(_ number: Int) -> String { "flexible-group-header-\(number)" }
 
     struct Row: Equatable, Identifiable {
         let region: Int
@@ -54,8 +58,31 @@ struct FlexibleFaceList: View {
         }
     }
 
+    /// ★ D2 REVIEW: the list IN SECTIONS — each squeeze group's header, then its pressed faces;
+    /// then the resting faces (no header). A value, so a test reads the page's own order.
+    struct Section: Identifiable {
+        let group: FlexibleSqueezeGroupRows.Row?
+        let rows: [Row]
+        var id: Int { group?.number ?? 0 }
+    }
+
+    @MainActor
+    static func sections(model: FlexibleStageModel) -> [Section] {
+        let rows = rows(model: model)
+        var out: [Section] = []
+        var placed = Set<Int>()
+        for g in FlexibleSqueezeGroupRows.rows(model: model) {
+            let members = Set(g.regions)
+            let mine = rows.filter { $0.pressed && members.contains($0.region) }
+            mine.forEach { placed.insert($0.region) }
+            out.append(Section(group: g, rows: mine))
+        }
+        let rest = rows.filter { !placed.contains($0.region) }
+        if !rest.isEmpty { out.append(Section(group: nil, rows: rest)) }
+        return out
+    }
+
     var body: some View {
-        let rows = Self.rows(model: model)
         VStack(alignment: .leading, spacing: 6) {
             FlexSectionTitle(text: FlexibleRowCopy.facesTitle)
             if let r = model.selectedRegion {
@@ -64,18 +91,40 @@ struct FlexibleFaceList: View {
             } else {
                 FlexRow(FlexibleRowCopy.noFace, info: FlexibleRowCopy.Info.noFace, id: "flexible-row-noface")
             }
-            ForEach(rows) { row in
-                if row.selected {
-                    card(row.region)
-                } else {
-                    Button { model.select(row.region) } label: { label(row) }
-                        .buttonStyle(.plain)
-                        .accessibilityIdentifier("flexible-face-row-\(row.region)")
-                        .accessibilityLabel(row.line)
-                        .accessibilityAddTraits(.isButton)
+            // ★ D2 REVIEW: each squeeze group's header ("Group 1 · Squeeze [10 kg ✎]"), its faces
+            // right under it — then the resting faces
+            ForEach(Self.sections(model: model)) { section in
+                if let g = section.group {
+                    FlexibleSqueezeGroupHeader(model: model, row: g, padTarget: $padTarget)
                 }
+                ForEach(section.rows) { row in item(row) }
             }
-            squeezeGroupRows
+            if model.squeezeGroups.count > 1, model.groupsShareMaterial, model.groupMisses.isEmpty {
+                Text(FlexibleRowCopy.groupsShare)
+                    .font(.system(size: 12, weight: .medium)).foregroundStyle(DS.Color.textSecondary.color)
+                    .lineLimit(1).minimumScaleFactor(0.85)
+                    .accessibilityIdentifier("flexible-groups-share")
+            }
+        }
+        // the whole list's frame (the hosted test: where D2's group section began — under it)
+        .background(GeometryReader { g in
+            Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["faceList": g.frame(in: .global)])
+        }.allowsHitTesting(false))
+    }
+
+    /// A face: the selected one open as its card, the others a big row that selects it.
+    @ViewBuilder private func item(_ row: Row) -> some View {
+        if row.selected {
+            card(row.region)
+        } else {
+            Button { model.select(row.region) } label: { label(row) }
+                .buttonStyle(.plain)
+                .background(GeometryReader { g in
+                    Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["faceRow-\(row.region)": g.frame(in: .global)])
+                }.allowsHitTesting(false))
+                .accessibilityIdentifier("flexible-face-row-\(row.region)")
+                .accessibilityLabel(row.line)
+                .accessibilityAddTraits(.isButton)
         }
     }
 
@@ -120,12 +169,10 @@ struct FlexibleFaceList: View {
         .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 
-    // MARK: ★ SQUEEZE GROUPS (round 4 batch D2) — right under the faces.
+    // MARK: ★ SQUEEZE GROUPS (round 4 batch D2; D2 review: headers IN the list)
     // His img 4: "there needs to be a setting that says Groups faces together — preferably the
     // face area in the settings. The user should group all of them together, or group two sides
-    // together with another two sides as a different group". One line per group — its faces and
-    // its ONE squeeze force (his answer 1) — FlexibleSqueezeGroupRows; a face moves from its card.
-    @ViewBuilder private var squeezeGroupRows: some View {
-        FlexibleSqueezeGroupRows(model: model, padTarget: $padTarget)
-    }
+    // together with another two sides as a different group". Each group's header carries its ONE
+    // squeeze force (his answer 1) in its pill — FlexibleSqueezeGroupHeader; a face moves from
+    // its card.
 }

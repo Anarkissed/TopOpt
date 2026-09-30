@@ -79,7 +79,9 @@ struct FlexibleSettingsPanel: View {
     private var revealKey: String {
         let r = model.selectedRegion
         let f = r.flatMap { model.settings.face($0) }
-        return "\(r ?? -1)|\(model.tab.rawValue)|\(f?.role ?? "-")|\(f?.isStampShape ?? false)|\(minimized)"
+        // ★ D2 REVIEW: a move to another squeeze group moves the card under that group's header
+        let group = r.flatMap { model.squeezeGroup(of: $0)?.id } ?? 0
+        return "\(r ?? -1)|\(model.tab.rawValue)|\(f?.role ?? "-")|\(f?.isStampShape ?? false)|\(minimized)|g\(group)"
             + "|\(Int(cardHeight / 4))|\(Int(scrollHeight / 4))"
     }
 

@@ -173,6 +173,25 @@ public enum FlexibleRowCopy {
         let head = "\(groupName(number)) · ", tail = " · \(squeeze(force))"
         return fit(head + faceList(names, room: maxChars - head.count - tail.count) + tail)
     }
+    /// ★ D2 REVIEW: a group's HEADER in the face list — "Group 1 · Squeeze" ("Squeeze" with one
+    /// pressed face); the force is in its pill (`squeezeValue`) and its faces are listed under it.
+    /// D2's one line with the faces AND the force was cut at the force on every iPad.
+    public static func groupHeader(number: Int, single: Bool) -> String {
+        single ? "Squeeze" : "\(groupName(number)) · Squeeze"
+    }
+    /// The force in the header's pill: "10 kg" · "6–10 kg" · "—".
+    public static func squeezeValue(_ force: ClosedRange<Double>?) -> String {
+        guard let f = force else { return "—" }
+        if f.upperBound - f.lowerBound < 0.05 { return kgText(f.upperBound) }
+        return "\(kgNumber(f.lowerBound))–\(kgText(f.upperBound))"
+    }
+    /// ★ D2 REVIEW: under a group's header when it will squish less than designed (the lattice
+    /// carries every group; the firmer wins): "Squishes ~0.3 of 2.6 mm · Group 2 firmer".
+    public static func groupMissLine(asBuiltMM: Double, designedMM: Double, firmer: Int) -> String {
+        fit(String(format: "Squishes ~%.1f of %.1f mm · %@ firmer", asBuiltMM, designedMM, groupName(firmer)))
+    }
+    /// A pinched face whose two-segment design failed: it keeps core's one profile for now.
+    public static func pinchedOneProfile(with other: String) -> String { fit("Pinched with \(fit(other, 16)) · one profile for now") }
     /// The squish player's picker: "Group 2 · Face 3 + Face 5" / "All at once".
     public static func simTitle(number: Int, names: [String]) -> String {
         let head = "\(groupName(number)) · "
@@ -189,6 +208,16 @@ public enum FlexibleRowCopy {
     /// firmer there (the player's line): "Group 2 squishes 1.2 of 3.0 mm · firmer wins".
     public static func groupMisses(number: Int, asBuiltMM: Double, designedMM: Double) -> String {
         fit(String(format: "%@ squishes %.1f of %.1f mm · firmer wins", groupName(number), asBuiltMM, designedMM))
+    }
+    /// ★ D2 REVIEW: said BEFORE Exit, when separate groups compete for material (the pop-up and
+    /// the top line): "Group 1 would squish ~0.3 of 2.6 mm: Group 2 needs firmer material".
+    public static func groupCompetes(number: Int, asBuiltMM: Double, designedMM: Double, firmer: Int) -> String {
+        String(format: "%@ would squish ~%.1f of %.1f mm: %@ needs firmer material",
+               groupName(number), asBuiltMM, designedMM, groupName(firmer))
+    }
+    /// The same, short (the Settings page's top line: "Ready · …").
+    public static func groupMissesEstimate(number: Int, asBuiltMM: Double, designedMM: Double) -> String {
+        String(format: "%@ squishes ~%.1f of %.1f mm · firmer wins", groupName(number), asBuiltMM, designedMM)
     }
     /// A pressed face pinched with another of its group (two segments).
     public static func pinched(with other: String) -> String { fit("Pinched with \(fit(other, 16)) · two halves") }
@@ -244,7 +273,7 @@ public enum FlexibleRowCopy {
         public static let filament = "The filament the lattice is printed in. Only colorFabb varioShore TPU has published squish data: its dents are predicted, with a tier and ± band. Every other filament is \"calibrate first\": no squish in mm is predicted and no lattice is sized from it until coupons are measured."
         public static let feel = "Springy bounces back and prefers gyroid (lowest energy loss, best recovery). Damped soaks up the push and prefers honeycomb (bigger loop, firmer). Auto weighs both."
         public static let face = "Pressed: this face carries weight and squishes. Rests: it sits on something and carries no squish of its own. A face in a main-page Load group arrives pressed; an Anchor group's faces arrive resting. Tap a face on the part to select it."
-        public static let weight = "The weight pressing this face. It comes from the main page's Load group and changing it here changes the group. A group over several faces is split by area, the way the solver spreads it; a press at an angle counts its straight-in part (cos θ)."
+        public static let weight = "This face's share of its squeeze group's force. The force is set on the group's row above the faces ([10 kg ✎]) — one force per group, written back to the main page's Load group when it comes from one. A main-page group over several faces is split by area, the way the solver spreads it; a press at an angle counts its straight-in part (cos θ)."
         public static let shape = "Curves: the X and Y curves drawn on the face's two edges, always combined — soft only where both say soft. A point nearer the face is squishier. Tap the line to add a point; tap a point for an × to delete it. Stamp: the face is shaped by ONE stamp — what presses it — and sinks the deepest squish under it; drag its handle on the part to move it. One or the other, never both."
         public static let finish = "The whole part's outside. None: the lattice runs to the surface everywhere. Rim: a solid band along every edge, the faces open. Skin: a thin skin over the lattice with round holes in it. Covered: a solid skin everywhere. Only Covered reaches the solver today; Rim and Skin are drawn by the app (the line under the row says so). Rim's band is 2 mm; Skin is 0.8 mm thick with 3 mm holes (1.5 mm radius) 5 mm apart."
         public static let stamp = "What presses this face: pick one from the list, or import an SVG outline or an image (darker presses harder). Its weight is the face's weight."
@@ -256,7 +285,7 @@ public enum FlexibleRowCopy {
         public static let topology = "Auto picks gyroid or honeycomb for the feel you chose. Honeycomb has test data only when pressed along its prism axis, so a side face is gyroid only."
         public static let noFace = "Tap a face on the part to select it, then press it or let it rest. Faces from the main page's Load and Anchor groups are already set."
         /// ★ ROUND 4 (D2).
-        public static let groups = "Faces in one group are squeezed at the same time with the same force — like two hands pressing equally; each face keeps its own curve. Two opposite faces in one group are a pinch: each half of the part between them is designed for its own face. Separate groups are separate squeezes: the lattice is built for all of them, and where two groups need the same material the firmer one wins. A face from a main-page Load group shares that group's weight with its other faces by area."
+        public static let groups = "Faces in one group are squeezed at the same time with the same force — like two hands pressing equally; each face keeps its own curve. The force is the pill beside the group: tap it to change it (it changes the main page's Load group too). To make a group, open a pressed face below and tap + New; tap a group's number to move a face there; × joins a group to the first other one. Two opposite faces in one group are a pinch: each half of the part between them is designed for its own face. Separate groups are separate squeezes: the lattice is built for all of them, and where two groups need the same material the firmer one wins — a group that will squish less than drawn says so under its row. A main-page Load group is one hand: its faces move together and share its weight by area."
         public static let groupRow = "Move this face to another squeeze group, or make a new group from it."
     }
 }

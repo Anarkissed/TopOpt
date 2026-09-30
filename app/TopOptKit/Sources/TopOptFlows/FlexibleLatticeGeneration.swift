@@ -57,13 +57,16 @@ public struct FlexibleGeneratedLattice: Sendable {
     public let sharedVoxels: Int
     /// The sim this view of the lattice squishes (`showing`); nil = every face.
     public let shownSimID: String?
+    /// ★ D2 REVIEW: the faces each face is pinched with — the four squish slots keep a pinch
+    /// WHOLE (FlexibleSqueezeGroups.squishSlots), in every view of the lattice.
+    public let pinchedWith: [FlexFaceKey: [FlexFaceKey]]
 
     public init(inputs: FlexibleLatticeInputs, faces: [FlexibleSquishFace], keys: [FlexFaceKey] = [],
                 columnDepths: [FlexFaceKey: [Double?]] = [:], columnNoLattice: [FlexFaceKey: [Bool]] = [:],
                 extentMM: Double = 0, generation: Int = 0, topology: String, tempC: Double, settingsKey: Int,
                 squishedKeys: [FlexFaceKey]? = nil, shapeOnlyLabel: String? = nil, sceneKey: String? = nil,
                 sims: [FlexibleSim] = [], simNotes: [String: String] = [:], sharedVoxels: Int = 0,
-                shownSimID: String? = nil) {
+                shownSimID: String? = nil, pinchedWith: [FlexFaceKey: [FlexFaceKey]] = [:]) {
         self.inputs = inputs; self.faces = faces; self.keys = keys
         self.columnDepths = columnDepths; self.columnNoLattice = columnNoLattice
         self.extentMM = extentMM; self.generation = generation
@@ -72,6 +75,16 @@ public struct FlexibleGeneratedLattice: Sendable {
         self.shapeOnlyLabel = shapeOnlyLabel
         self.sceneKey = sceneKey
         self.sims = sims; self.simNotes = simNotes; self.sharedVoxels = sharedVoxels; self.shownSimID = shownSimID
+        self.pinchedWith = pinchedWith
+    }
+
+    /// ★ D2 REVIEW: the faces the pass squishes — exactly `squishedKeys` (the pass takes the
+    /// first four of what it is handed; with a pinch kept whole there may be fewer than four,
+    /// and the next face must not slip into the empty slot alone).
+    public var squishFaces: [FlexibleSquishFace] {
+        let shown = Set(squishedKeys)
+        guard keys.count == faces.count else { return Array(faces.prefix(FlexibleSquishField.maxFaces)) }
+        return zip(keys, faces).filter { shown.contains($0.0) }.map(\.1)
     }
 
     /// The picker's default: the first group (a real squeeze), or nil (every face) with one sim.
@@ -86,14 +99,16 @@ public struct FlexibleGeneratedLattice: Sendable {
         let wanted = Set(sim.keys)
         var byKey: [FlexFaceKey: FlexibleSquishFace] = [:]
         for (k, f) in zip(keys, faces) { byKey[k] = f }
-        let simKeys = keys.filter { wanted.contains($0) }
+        let slots = FlexibleSqueezeGroups.squishSlots(keys.filter { wanted.contains($0) }, pinchedWith: pinchedWith)
+        let simKeys = slots.order
         return FlexibleGeneratedLattice(
             inputs: inputs, faces: simKeys.compactMap { byKey[$0] }, keys: simKeys,
             columnDepths: columnDepths.filter { wanted.contains($0.key) },
             columnNoLattice: columnNoLattice.filter { wanted.contains($0.key) },
             extentMM: extentMM, generation: generation, topology: topology, tempC: tempC, settingsKey: settingsKey,
-            squishedKeys: Array(simKeys.prefix(FlexibleSquishField.maxFaces)), shapeOnlyLabel: shapeOnlyLabel,
-            sceneKey: sceneKey, sims: sims, simNotes: simNotes, sharedVoxels: sharedVoxels, shownSimID: sim.id)
+            squishedKeys: Array(simKeys.prefix(slots.shown)), shapeOnlyLabel: shapeOnlyLabel,
+            sceneKey: sceneKey, sims: sims, simNotes: simNotes, sharedVoxels: sharedVoxels, shownSimID: sim.id,
+            pinchedWith: pinchedWith)
     }
 
     /// The sim this view shows ("All at once" when nothing narrower is shown).
@@ -113,8 +128,17 @@ public struct FlexibleGeneratedLattice: Sendable {
         faces.flatMap(\.cells).reduce(0) { Swift.max($0, $1.w > 0.5 ? Double($1.x) : 0) }
     }
     /// The largest exaggeration at which the walls still follow the dent (no column's face
-    /// passes the shader's 0.95 clamp).
-    public var maxSafeScale: Double { faces.maxSafeScale }
+    /// passes the shader's 0.95 clamp) — over the faces the pass squishes.
+    public var maxSafeScale: Double { squishFaces.maxSafeScale }
+
+    /// ★ D2 REVIEW: the player's note for sim `id` — its own, and on "All at once" the first
+    /// group's that misses (every group squeezes there, so the miss is on screen too).
+    public func simNote(for id: String?) -> String? {
+        guard let id else { return nil }
+        if let n = simNotes[id] { return n }
+        guard id == FlexibleSim.allID else { return nil }
+        return sims.lazy.compactMap { self.simNotes[$0.id] }.first
+    }
 }
 
 /// What the page hands MetalMeshView for the lattice.
@@ -135,7 +159,7 @@ public enum FlexibleLatticePreview {
     public static func inputs(xray: Bool, lattice: FlexibleGeneratedLattice?, building: Bool,
                               latticeShows: Bool = true, loop: FlexibleSquishLoop? = nil) -> FlexibleLatticeLayerInputs? {
         guard let g = lattice else { return nil }
-        return FlexibleLatticeLayerInputs(lattice: g.inputs, faces: g.faces, token: g.generation,
+        return FlexibleLatticeLayerInputs(lattice: g.inputs, faces: g.squishFaces, token: g.generation,
                                           hidden: building || !xray || !latticeShows, loop: loop,
                                           facesToken: g.facesToken)
     }

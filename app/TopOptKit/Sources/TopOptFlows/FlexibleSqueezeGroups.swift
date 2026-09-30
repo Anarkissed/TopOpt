@@ -90,31 +90,69 @@ public enum FlexibleSqueezeGroups {
         }
     }
 
-    /// Move a pressed face into the group stored as `groupID`.
-    public static func move(_ region: Int, to groupID: Int, in s: inout FlexibleStageSettings) {
-        guard var f = s.face(region), f.isLoaded else { return }
-        f.squeezeGroup = groupID
-        s.setFace(f)
+    /// Move a pressed face into the group stored as `groupID`. ★ D2 REVIEW: `hand` — the faces
+    /// that move WITH it (its main-page Load group's faces: one hand is never split across two
+    /// squeeze groups, or one group's force would rewrite another's through the main page).
+    public static func move(_ region: Int, to groupID: Int, hand: [Int]? = nil, in s: inout FlexibleStageSettings) {
+        guard s.face(region)?.isLoaded == true else { return }
+        for r in Set((hand ?? []) + [region]) {
+            guard var g = s.face(r), g.isLoaded else { continue }
+            g.squeezeGroup = groupID
+            s.setFace(g)
+        }
         normalise(&s)
     }
 
-    /// A NEW group holding `region` alone, numbered after the last. nil (nothing changes) for a
-    /// face that is not pressed or is already alone in its group.
+    /// A NEW group holding `region` (and its `hand`), numbered after the last. nil (nothing
+    /// changes) for a face that is not pressed or whose hand is already its group.
     @discardableResult
-    public static func newGroup(with region: Int, in s: inout FlexibleStageSettings) -> Int? {
-        guard let f = s.face(region), f.isLoaded, let g = group(of: region, in: s), g.regions.count > 1 else { return nil }
+    public static func newGroup(with region: Int, hand: [Int]? = nil, in s: inout FlexibleStageSettings) -> Int? {
+        guard let f = s.face(region), f.isLoaded, let g = group(of: region, in: s) else { return nil }
+        let moving = Set((hand ?? []) + [region])
+        guard g.regions.contains(where: { !moving.contains($0) }) else { return nil }
         let next = (groups(s).map(\.id).max() ?? first) + 1
-        move(region, to: next, in: &s)
+        move(region, to: next, hand: hand, in: &s)
         return group(of: region, in: s)?.number
     }
 
-    /// Remove a group: its faces join the first OTHER group. No-op for the only group.
-    public static func remove(group groupID: Int, in s: inout FlexibleStageSettings) {
+    /// Remove a group: its faces join `target` (★ D2 REVIEW: "Join the groups" names it), else
+    /// the first OTHER group. No-op for the only group.
+    public static func remove(group groupID: Int, into target: Int? = nil, in s: inout FlexibleStageSettings) {
         let gs = groups(s)
         guard gs.count > 1, gs.contains(where: { $0.id == groupID }),
-              let target = gs.first(where: { $0.id != groupID }) else { return }
+              let into = gs.first(where: { $0.id != groupID && (target == nil || $0.id == target) }) else { return }
         for i in s.faces.indices where s.faces[i].isLoaded && id(s.faces[i]) == groupID {
-            s.faces[i].squeezeGroup = target.id
+            s.faces[i].squeezeGroup = into.id
+        }
+        normalise(&s)
+    }
+
+    /// ★ D2 REVIEW: the faces of `region`'s HAND — every pressed face linked to the same
+    /// main-page Load group (the main page presses them with one weight, split by area); a face
+    /// of his own is its own hand.
+    public static func hand(of region: Int, settings s: FlexibleStageSettings, loads: FlexibleMainPageLoads) -> [Int] {
+        guard let f = s.face(region), let from = f.weightFrom, let e = loads.entry(region), e.groupID == from,
+              e.role == .pressed else { return [region] }
+        return s.loadedFaces.filter { g in
+            g.weightFrom == from && loads.entry(g.faceRegionID).map { $0.groupID == from && $0.role == .pressed } == true
+        }.map(\.faceRegionID)
+    }
+
+    /// ★ D2 REVIEW: a hand split across squeeze groups (a main-page edit added a face to a Load
+    /// group whose faces sit in two groups, or a project from before this rule) is united in the
+    /// group of its first face — one force per hand.
+    public static func uniteHands(_ s: inout FlexibleStageSettings, loads: FlexibleMainPageLoads) {
+        var seen = Set<Int>()
+        for f in s.loadedFaces where !seen.contains(f.faceRegionID) {
+            let h = hand(of: f.faceRegionID, settings: s, loads: loads)
+            h.forEach { seen.insert($0) }
+            guard h.count > 1 else { continue }
+            let gid = id(f)
+            for r in h where r != f.faceRegionID {
+                guard var g = s.face(r), id(g) != gid else { continue }
+                g.squeezeGroup = gid == first ? nil : gid
+                s.setFace(g)
+            }
         }
         normalise(&s)
     }
@@ -170,8 +208,10 @@ public enum FlexibleSqueezeGroups {
 
     /// The hands of a group: a face linked to a main-page Load group (weightFrom = that group,
     /// still pressed by it) is that group's hand; any other pressed face is its own.
+    /// ★ D2 REVIEW: `liveKg` reads a main-page group's weight from the PROJECT (the one source of
+    /// truth) — the cached entry went stale when the Settings page's undo restored the project.
     public static func hands(_ g: FlexibleSqueezeGroup, settings s: FlexibleStageSettings,
-                             loads: FlexibleMainPageLoads) -> [Hand] {
+                             loads: FlexibleMainPageLoads, liveKg: ((UUID) -> Double?)? = nil) -> [Hand] {
         var out: [Hand] = []
         var byGroup: [UUID: Int] = [:]
         for r in g.regions {
@@ -181,7 +221,7 @@ public enum FlexibleSqueezeGroups {
                     out[i] = Hand(mainGroup: from, kg: out[i].kg, regions: out[i].regions + [r])
                 } else {
                     byGroup[from] = out.count
-                    out.append(Hand(mainGroup: from, kg: e.groupKg, regions: [r]))
+                    out.append(Hand(mainGroup: from, kg: liveKg?(from) ?? e.groupKg, regions: [r]))
                 }
             } else {
                 out.append(Hand(mainGroup: nil, kg: f.weightKg, regions: [r]))
@@ -193,8 +233,8 @@ public enum FlexibleSqueezeGroups {
     /// The group's squeeze force: one number when every hand agrees (within 0.05 kg), else the
     /// range (a project from before groups, whose faces had their own weights). nil: no hand.
     public static func force(_ g: FlexibleSqueezeGroup, settings s: FlexibleStageSettings,
-                             loads: FlexibleMainPageLoads) -> ClosedRange<Double>? {
-        let kg = hands(g, settings: s, loads: loads).map(\.kg)
+                             loads: FlexibleMainPageLoads, liveKg: ((UUID) -> Double?)? = nil) -> ClosedRange<Double>? {
+        let kg = hands(g, settings: s, loads: loads, liveKg: liveKg).map(\.kg)
         guard let lo = kg.min(), let hi = kg.max() else { return nil }
         return hi - lo < 0.05 ? hi...hi : lo...hi
     }
@@ -219,6 +259,38 @@ public enum FlexibleSqueezeGroups {
                                    short: FlexibleRowCopy.simAllShort, keys: ordered(groups.flatMap(\.regions))))
         }
         return out
+    }
+
+    // MARK: ★ D2 REVIEW: the pass's four squish slots never split a pinch
+
+    /// `ordered` (largest first) reordered so the first `slots` hold WHOLE pinches: faces joined
+    /// by a pinch (`pinchedWith`, both directions) fill the slots together or not at all — with
+    /// five pressed faces the pass had squished face 3 while its partner, face 5, stood still.
+    /// A pinch larger than the slots takes its largest faces. `shown`: how many faces squish.
+    public static func squishSlots<K: Hashable>(_ ordered: [K], pinchedWith: [K: [K]],
+                                                slots: Int = FlexibleSquishField.maxFaces) -> (order: [K], shown: Int) {
+        guard ordered.count > slots, !pinchedWith.isEmpty else { return (ordered, min(slots, ordered.count)) }
+        let present = Set(ordered)
+        var unitOf: [K: Int] = [:], units: [[K]] = []
+        for k in ordered where unitOf[k] == nil {
+            var comp: [K] = [], stack = [k]
+            unitOf[k] = units.count
+            while let x = stack.popLast() {
+                comp.append(x)
+                for y in pinchedWith[x] ?? [] where present.contains(y) && unitOf[y] == nil {
+                    unitOf[y] = units.count
+                    stack.append(y)
+                }
+            }
+            units.append(comp)
+        }
+        var chosen = Set<K>(), used = Set<Int>()
+        for k in ordered {
+            guard let u = unitOf[k], !used.contains(u) else { continue }
+            if chosen.count + units[u].count <= slots { units[u].forEach { chosen.insert($0) }; used.insert(u) }
+        }
+        guard !chosen.isEmpty else { return (ordered, slots) }
+        return (ordered.filter { chosen.contains($0) } + ordered.filter { !chosen.contains($0) }, chosen.count)
     }
 
     // MARK: colours

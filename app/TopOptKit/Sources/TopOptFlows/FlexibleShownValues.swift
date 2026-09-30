@@ -56,6 +56,11 @@ struct FlexibleShownValues {
         var editingDepth = false
         /// ★ ROUND 4 (D1): a Stamp face's footprint, per column 0…1 (FlexibleStageModel.stampFootprint).
         var stampFootprints: [FlexFaceKey: [Double]] = [:]
+        /// ★ D2 REVIEW: the columns a pinch halves, per face — the dent may use only the HALF there
+        /// (a Top + Bottom pinch drew both maps 12 mm into a 20 mm pad: they crossed).
+        var pinched: [FlexFaceKey: [Bool]] = [:]
+        /// ★ D2 REVIEW: the pinched faces' two-segment designs (what the lattice is built from).
+        var segments: [FlexFaceKey: FlexiblePinch.Segments] = [:]
     }
 
     static func inputs(_ m: FlexibleStageModel) -> Inputs {
@@ -66,9 +71,14 @@ struct FlexibleShownValues {
                 feet[FlexFaceKey(region: f.faceRegionID, rotation: f.rotationDeg)] = foot
             }
         }
+        var pinched: [FlexFaceKey: [Bool]] = [:]
+        for f in settings.loadedFaces {
+            if let p = m.pinchedColumns(f.faceRegionID) { pinched[FlexFaceKey(region: f.faceRegionID, rotation: f.rotationDeg)] = p }
+        }
         return Inputs(loadedFaces: settings.loadedFaces, stacks: m.stacks, designs: m.designs, liveS: m.liveS,
                       checks: m.checks, checkStamps: settings.checkStamps, checkStampShown: m.checkStampShown,
-                      showBuildable: m.showBuildable, editingDepth: m.frozenExaggeration != nil, stampFootprints: feet)
+                      showBuildable: m.showBuildable, editingDepth: m.frozenExaggeration != nil, stampFootprints: feet,
+                      pinched: pinched, segments: m.segments)
     }
 
     init(model m: FlexibleStageModel, drawnLattice: FlexibleGeneratedLattice? = nil) {
@@ -97,8 +107,8 @@ struct FlexibleShownValues {
             showsDent = true
             animated = true
             let rule = Self.exaggerationRule(maxDepthMM: maxDepth, extentMM: g.extentMM)
-            let thin = min(Self.thinCap(values: values, stacks: m.stacks) ?? rule,
-                           Self.prismCap(loadedFaces: m.loadedFaces, stacks: m.stacks) ?? rule)
+            let thin = min(Self.thinCap(values: values, stacks: m.stacks, pinched: m.pinched) ?? rule,
+                           Self.prismCap(loadedFaces: m.loadedFaces, stacks: m.stacks, pinched: m.pinched) ?? rule)
             exaggeration = Self.cappedExaggeration(rule: min(rule, thin), maxSafeScale: g.maxSafeScale)
             return
         }
@@ -127,9 +137,14 @@ struct FlexibleShownValues {
             if !m.editingDepth, let d = m.designs[k], d.refusal == nil {
                 // core's own copy of the drawing (its target), or — after Generate — what can
                 // be built; core's no-lattice columns stay unpainted
-                values[k] = d.columns.map { c in
+                // ★ D2 REVIEW: a pinched face's "what can be built" is its HALVES' (the lattice's)
+                let sg = m.segments[k]
+                values[k] = d.columns.enumerated().map { i, c in
                     if c.status == "no_lattice" { return .solid }
-                    if m.showBuildable { return c.buildableOK ? .depth(c.buildableDepthMM) : .noNumber }
+                    if m.showBuildable {
+                        if let sg, i < sg.buildableDepthMM.count { return sg.buildableDepthMM[i].map { .depth($0) } ?? .noNumber }
+                        return c.buildableOK ? .depth(c.buildableDepthMM) : .noNumber
+                    }
                     return .depth(c.targetDepthMM)
                 }
                 if label.isEmpty { label = m.showBuildable ? "What can be built (estimate)" : "What you drew" }
@@ -150,8 +165,8 @@ struct FlexibleShownValues {
         }
         let ext = m.stacks.values.map { max($0.uExtentMM, $0.vExtentMM) }.max() ?? 0
         let rule = Self.exaggerationRule(maxDepthMM: maxDepth, extentMM: ext)
-        exaggeration = max(1, min(rule, Self.thinCap(values: values, stacks: m.stacks) ?? rule,
-                                  Self.prismCap(loadedFaces: m.loadedFaces, stacks: m.stacks) ?? rule))
+        exaggeration = max(1, min(rule, Self.thinCap(values: values, stacks: m.stacks, pinched: m.pinched) ?? rule,
+                                  Self.prismCap(loadedFaces: m.loadedFaces, stacks: m.stacks, pinched: m.pinched) ?? rule))
     }
 
     /// × 1…10, so the deepest squish reads as about a fifth of the face (an integer: the
@@ -167,13 +182,17 @@ struct FlexibleShownValues {
     /// The largest integer k at which no column's shown dent (k × its depth) passes
     /// `thinShare` of that column's lattice depth — nil when nothing dents. Never below 1:
     /// at × 1 the dent is the drawing itself (the depth chip clamps it to the lattice depth).
-    static func thinCap(values: [FlexFaceKey: [FlexShownValue]], stacks: [FlexFaceKey: FlexStackInfo]) -> Double? {
+    /// ★ D2 REVIEW: a column a pinch halves counts HALF its lattice depth (its partner's dent
+    /// comes from the other end), so k × d ≤ 0.65 of the half and the two maps never cross.
+    static func thinCap(values: [FlexFaceKey: [FlexShownValue]], stacks: [FlexFaceKey: FlexStackInfo],
+                        pinched: [FlexFaceKey: [Bool]] = [:]) -> Double? {
         var cap = Double.infinity
         for (k, v) in values {
             guard let st = stacks[k] else { continue }
+            let lat = FlexibleDepthPrism.effectiveLattice(st, pinched: pinched[k])
             for (i, x) in v.enumerated() where i < st.columns.count {
                 guard case .depth(let d) = x, d > 1e-9 else { continue }
-                let l = st.columns[i].latticeMM
+                let l = lat[i]
                 guard l > 0 else { continue }
                 cap = min(cap, thinCap(depthMM: d, latticeMM: l))
             }
@@ -184,11 +203,13 @@ struct FlexibleShownValues {
     /// The depth prism's own cap: k × a pressed face's DEEPEST squish (S = 1) stays within
     /// `thinShare` of each of its columns' lattice depth — the prism floor never leaves the part.
     /// nil when no pressed face has a stack.
-    static func prismCap(loadedFaces: [FlexibleFaceSettings], stacks: [FlexFaceKey: FlexStackInfo]) -> Double? {
+    static func prismCap(loadedFaces: [FlexibleFaceSettings], stacks: [FlexFaceKey: FlexStackInfo],
+                         pinched: [FlexFaceKey: [Bool]] = [:]) -> Double? {
         var cap = Double.infinity
         for f in loadedFaces {
-            guard let st = stacks[FlexFaceKey(region: f.faceRegionID, rotation: f.rotationDeg)] else { continue }
-            let l = st.columns.map(\.latticeMM).filter { $0 > 0 }.min() ?? 0
+            let k = FlexFaceKey(region: f.faceRegionID, rotation: f.rotationDeg)
+            guard let st = stacks[k] else { continue }
+            let l = FlexibleDepthPrism.effectiveLattice(st, pinched: pinched[k]).filter { $0 > 0 }.min() ?? 0
             guard l > 0 else { continue }
             cap = min(cap, thinCap(depthMM: f.deepestMM, latticeMM: l))
         }

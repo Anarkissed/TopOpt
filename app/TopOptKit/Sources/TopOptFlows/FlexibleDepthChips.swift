@@ -167,8 +167,10 @@ struct FlexibleDepthChips: View {
                           let d = FlexibleDepthPrism.depth(handle: h, rayOrigin: ray.origin, rayDir: ray.dir, k: kk) {
                     raw = d
                 } else { return }
-                let r = FlexibleDepthPrism.resolve(rawMM: raw, latticeMM: st.latticeMMMax,
-                                                   limitMM: FlexibleDepthPrism.dragLimit(stack: st, k: kk), held: held)
+                // ★ D2 REVIEW: a pinched face stops at the HALF its design uses
+                let pinched = model.pinchedColumns(region)
+                let r = FlexibleDepthPrism.resolve(rawMM: raw, latticeMM: FlexibleDepthPrism.latticeMax(st, pinched: pinched),
+                                                   limitMM: FlexibleDepthPrism.dragLimit(stack: st, k: kk, pinched: pinched), held: held)
                 if r.didSnap { ClearanceHaptics.detent() }
                 held = r.held
                 model.edit({ s in

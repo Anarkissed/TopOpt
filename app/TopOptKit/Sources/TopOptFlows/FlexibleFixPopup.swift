@@ -48,6 +48,10 @@ struct FlexibleFixPopup: View {
             HStack(spacing: DS.Space.s) {
                 ForEach(Array(issue.fixes.prefix(3).enumerated()), id: \.offset) { i, fix in
                     fixButton(fix, primary: i == 0)
+                        // each button's frame reaches the page (a hosted test clicks it)
+                        .background(GeometryReader { g in
+                            Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["fix-\(Self.id(fix))": g.frame(in: .global)])
+                        }.allowsHitTesting(false))
                 }
             }
         }
@@ -104,6 +108,8 @@ struct FlexibleFixPopup: View {
         case .weight(let r): return "weight-\(r)"
         case .press(let r): return "press-\(r)"
         case .pickFilament(let id, _): return "filament-\(id)"
+        case .joinGroups(let from, let into): return "join-\(from)-\(into)"
+        case .keepApart: return "keep-apart"
         }
     }
 
@@ -115,6 +121,8 @@ struct FlexibleFixPopup: View {
         case .remove(let r): model.removeFace(r)
         case .press(let r): model.press(r)
         case .pickFilament(let id, _): model.pickMaterial(id)
+        case .joinGroups(let from, let into): model.mergeGroup(from, into: into)
+        case .keepApart: break   // the pop-up closes; the groups stay apart
         case .weight: break   // the pad commits
         }
     }

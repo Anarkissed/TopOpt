@@ -133,6 +133,8 @@ final class FlexibleSqueezeGroupsModelTests: XCTestCase {
     @MainActor
     func testSeparateGroupsAreSeparateSqueezesAndTheFirmerWins() async throws {
         let (_, m) = try await his { self.sidesApart($0) }
+        // ★ D2 REVIEW: the ~24 MB combined field is kept only when a test asks
+        m.keepCombinedField = true
         XCTAssertEqual(m.squeezeGroups.map(\.regions.count), [2, 2])
         XCTAssertTrue(m.pinches.count == 1, "3 and 5 still pinch, in group 2")
         XCTAssertTrue(m.groupsShareMaterial, "the top's columns and the sides' cross the same pad")

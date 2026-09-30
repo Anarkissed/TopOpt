@@ -44,6 +44,11 @@ public enum FlexibleFix: Hashable, Sendable {
     case press(Int)
     /// "[varioShore TPU]": the filament with squish data.
     case pickFilament(id: String, name: String)
+    /// ★ D2 REVIEW: "[Join the groups]": group `from`'s faces join group `into` (one squeeze; each
+    /// face keeps its own curve).
+    case joinGroups(from: Int, into: Int)
+    /// "[Keep apart]": the groups stay separate (the pop-up closes).
+    case keepApart
 
     /// The button's words (one line, ≤ 3 words where it can).
     public func title(_ name: (Int) -> String) -> String {
@@ -53,6 +58,8 @@ public enum FlexibleFix: Hashable, Sendable {
         case .weight: return "Type the weight"
         case .press(let r): return "Press \(name(r))"
         case .pickFilament(_, let n): return n
+        case .joinGroups: return "Join the groups"
+        case .keepApart: return "Keep apart"
         }
     }
 }
@@ -63,6 +70,10 @@ public struct FlexibleIssue: Equatable, Identifiable, Sendable {
         case noFilament, noPressedFace, noStack, noWeight, refused, designFailed
         // never blocking
         case stillDesigning, shapeOnly, squishOnFour
+        /// ★ D2 REVIEW: separate groups share material and one squishes less than designed
+        /// (the firmer wins) — it POPS on the action that caused it, with [Join the groups]
+        /// [Keep apart], but never blocks Exit.
+        case groupsCompete
         /// The last build failed on these settings and this scene (core's words; batch B review).
         case buildFailed
     }
@@ -107,6 +118,11 @@ public struct FlexibleReadiness: Equatable, Sendable {
     public let autoFixes: [FlexibleAutoFix]
 
     public var blocking: [FlexibleIssue] { issues.filter(\.blocking) }
+    /// ★ D2 REVIEW: what the pop-up opens on — every blocker, and separate groups that compete
+    /// for material (never a blocker; it pops on the action that caused it).
+    public var popping: [FlexibleIssue] { issues.filter { $0.blocking || $0.kind == .groupsCompete } }
+    /// The first competing group (the top line says it; its [Fix] reopens the choice).
+    public var competing: FlexibleIssue? { issues.first { $0.kind == .groupsCompete } }
     public var isReady: Bool { blocking.isEmpty }
     /// The old gate's one sentence (kept for callers that only need "why not").
     public var refusal: String? { blocking.first?.oneLine }
@@ -122,6 +138,7 @@ public struct FlexibleReadiness: Equatable, Sendable {
             return "\(b.count) thing\(b.count == 1 ? "" : "s") to fix: \(first.oneLine)"
         }
         if let failed = issues.first(where: { $0.kind == .buildFailed }) { return failed.oneLine }
+        if let c = competing { return "Ready · \(c.pill)" }
         if let four = issues.first(where: { $0.kind == .squishOnFour }) {
             return "Ready · \(four.oneLine)"
         }
@@ -198,6 +215,14 @@ public struct FlexibleReadiness: Equatable, Sendable {
         public var inherited: (Int) -> Bool
         /// The last build failed on these settings and this scene (core's words).
         public var buildFailure: String?
+        /// ★ D2 REVIEW: how many faces the pass squishes (its four slots keep a pinch whole, so it
+        /// can be fewer than four); nil ⇒ the four largest.
+        public var squishShown: Int?
+        /// ★ D2 REVIEW: the groups that will squish less than designed once the lattice carries
+        /// every group (FlexibleGroupEstimate) — said at once, never a blocker.
+        public var groupMisses: [FlexibleGroupEstimate.Miss] = []
+        /// A group's first face (the pop-up selects it) and its faces (named).
+        public var groupRegions: (Int) -> [Int] = { _ in [] }
 
         public init(materialID: String?, materialName: String?, calibrateFirst: Bool,
                     withData: (id: String, name: String)?, pressed: [Face],
@@ -318,9 +343,23 @@ public struct FlexibleReadiness: Equatable, Sendable {
             out.append(FlexibleIssue(id: "buildFailed", kind: .buildFailed, region: nil,
                                      oneLine: buildFailedLine(e), blocking: false, fixes: []))
         }
+        // ★ D2 REVIEW: separate groups whose shared material leaves one squishing less than he
+        // drew — said AT ONCE (the pop-up opens on the action that caused it), with the choice
+        for m in i.groupMisses {
+            let faces = i.groupRegions(m.groupID)
+            out.append(FlexibleIssue(id: "groupMiss|\(m.groupID)|\(m.firmerID)", kind: .groupsCompete, region: faces.first,
+                                     oneLine: FlexibleRowCopy.groupCompetes(number: m.number, asBuiltMM: m.asBuiltMM,
+                                                                            designedMM: m.designedMM, firmer: m.firmerNumber),
+                                     blocking: false,
+                                     fixes: [.joinGroups(from: m.groupID, into: m.firmerID), .keepApart],
+                                     pill: FlexibleRowCopy.groupMissesEstimate(number: m.number, asBuiltMM: m.asBuiltMM, designedMM: m.designedMM)))
+        }
         if i.pressed.count > FlexibleSquishField.maxFaces {
+            let shown = min(FlexibleSquishField.maxFaces, i.squishShown ?? FlexibleSquishField.maxFaces)
             out.append(FlexibleIssue(id: "squishOnFour", kind: .squishOnFour, region: nil,
-                                     oneLine: "Squish shown on the \(FlexibleSquishField.maxFaces) largest of \(i.pressed.count) faces",
+                                     oneLine: shown == FlexibleSquishField.maxFaces
+                                        ? "Squish shown on the \(FlexibleSquishField.maxFaces) largest of \(i.pressed.count) faces"
+                                        : "Squish shown on \(shown) of \(i.pressed.count) faces · pinches whole",
                                      blocking: false, fixes: []))
         }
         return FlexibleReadiness(issues: out, autoFixes: auto)
@@ -402,13 +441,15 @@ public struct FlexibleFixPrompt: Equatable, Sendable {
     /// The issue to pop, if any. `settled`: the scene is open and no design or stack is in
     /// flight (an action with no new issue is then covered, so later noise cannot claim it).
     public mutating func next(_ r: FlexibleReadiness, actionSerial: Int, settled: Bool) -> FlexibleIssue? {
-        let current = r.blocking
+        // ★ D2 REVIEW: separate groups that compete for material pop too — on the action that
+        // caused them only (never on opening the page)
+        let current = r.popping
         if openPending {
             guard settled else { return nil }
             openPending = false
             known = Set(current.map(\.id))
             coveredAction = max(coveredAction, actionSerial)
-            return current.first
+            return r.blocking.first
         }
         let fresh = current.filter { !known.contains($0.id) }
         known = Set(current.map(\.id))
@@ -424,7 +465,7 @@ public struct FlexibleFixPrompt: Equatable, Sendable {
     /// opened with, so after he tapped the face it told him to, "no pressed face" still showed
     /// no [Press …] button. The same issue (by id) in the current readiness; nil once it is gone.
     public static func live(_ shown: FlexibleIssue, in r: FlexibleReadiness) -> FlexibleIssue? {
-        r.blocking.first { $0.id == shown.id }
+        r.popping.first { $0.id == shown.id }
     }
 }
 
@@ -460,7 +501,7 @@ extension FlexibleStageModel {
         }
         let withData = catalogue.first { $0.noPrediction == nil }.map { (id: $0.id, name: $0.displayName) }
         let anyFilament = catalogue.first.map { (id: $0.id, name: $0.displayName) }
-        return FlexibleReadiness.Inputs(
+        var i = FlexibleReadiness.Inputs(
             materialID: s.materialID, materialName: material?.displayName ?? s.materialID,
             calibrateFirst: calibrateFirst, withData: withData, pressed: pressed,
             nozzleIsAuto: s.nozzleTempC == nil, topologyIsGyroid: s.topology == "gyroid",
@@ -471,6 +512,18 @@ extension FlexibleStageModel {
             buildFailure: latticeFailure, anyFilament: anyFilament,
             // only asked for when it is needed (nothing pressed, nothing selected)
             suggested: s.loadedFaces.isEmpty && selectedRegion == nil ? suggestedPressRegion() : nil)
+        // ★ D2 REVIEW: the pass's slots keep a pinch whole; separate groups that compete
+        if s.loadedFaces.count > FlexibleSquishField.maxFaces {
+            let keys = loadedKeys.filter { stacks[$0] != nil }
+            i.squishShown = FlexibleSqueezeGroups.squishSlots(Self.squishOrder(keys.map { (key: $0, areaMM2: stacks[$0]?.areaMM2 ?? 0) }),
+                                                              pinchedWith: pinchedKeys(keys)).shown
+        }
+        if squeezeGroups.count > 1 {
+            i.groupMisses = groupMisses
+            let gs = squeezeGroups
+            i.groupRegions = { id in gs.first { $0.id == id }?.regions ?? [] }
+        }
+        return i
     }
 
     public var readiness: FlexibleReadiness { FlexibleReadiness.evaluate(readinessInputs) }

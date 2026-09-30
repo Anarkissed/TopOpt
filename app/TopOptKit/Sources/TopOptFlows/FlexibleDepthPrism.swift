@@ -208,9 +208,27 @@ enum FlexibleDepthPrism {
     /// (k × depth) stays inside every column's lattice — else a drag toward the lattice depth
     /// at × 4 drew a prism four lattices deep, out through the part. The lattice depth itself
     /// when k is 1; after release k is re-chosen for the new depth and the next drag goes on.
-    static func dragLimit(stack st: FlexStackInfo, k: Double) -> Double {
-        let shallowest = st.columns.map(\.latticeMM).filter { $0 > 0 }.min() ?? st.latticeMMMax
-        return max(minMM, min(st.latticeMMMax, shallowest / max(1, k)))
+    /// ★ D2 REVIEW: a pinched face's lattice is the HALF its design uses (`pinched`).
+    static func dragLimit(stack st: FlexStackInfo, k: Double, pinched: [Bool]? = nil) -> Double {
+        let lat = effectiveLattice(st, pinched: pinched)
+        let deepest = latticeMax(st, pinched: pinched)
+        let shallowest = lat.filter { $0 > 0 }.min() ?? deepest
+        return max(minMM, min(deepest, shallowest / max(1, k)))
+    }
+
+    /// ★ D2 REVIEW: each column's lattice depth as a face's dent may use it — HALF where a pinch
+    /// halves the column (the half nearer the face is designed for it; the partner's dent comes
+    /// from the other end). The chip, the pad and the exaggeration stop there.
+    static func effectiveLattice(_ st: FlexStackInfo, pinched: [Bool]?) -> [Double] {
+        st.columns.indices.map { i in
+            st.columns[i].latticeMM * (pinched.map { i < $0.count && $0[i] } == true ? FlexiblePinch.segmentShare : 1)
+        }
+    }
+
+    /// The deepest a face's squish may be set: its deepest column's (half where pinched).
+    static func latticeMax(_ st: FlexStackInfo, pinched: [Bool]?) -> Double {
+        guard let p = pinched, p.contains(true) else { return st.latticeMMMax }
+        return effectiveLattice(st, pinched: p).max() ?? st.latticeMMMax
     }
 
     /// One drag sample: raw mm → snapped (with the held detent) → clamped to `limitMM` (the

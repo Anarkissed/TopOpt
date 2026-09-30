@@ -287,7 +287,7 @@ extension FlexibleMainStage {
     public func readLattice(_ project: ProjectModel, mode: LatticeLegendMode, model p: SIMD3<Float>) -> Bool {
         guard let kind = FlexibleReadKind(mode: mode) else { return false }
         guard kind == .lattice, let g = shownLattice else { return true }
-        guard let r = FlexibleProbe.lattice(g.inputs, faces: g.faces, squish: currentScale, at: p) else {
+        guard let r = FlexibleProbe.lattice(g.inputs, faces: g.squishFaces, squish: currentScale, at: p) else {
             reading = FlexibleReading(kind: .lattice, value: "—", unit: FlexibleReadKind.lattice.nothingHere, fraction: nil, anchor: p)
             return true
         }

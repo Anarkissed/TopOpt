@@ -146,6 +146,12 @@ public final class FlexibleStageModel: ObservableObject {
     /// ★ ROUND 4 (D2): the TWO-SEGMENT designs of the faces a pinch presses (FlexiblePinch) —
     /// run with the designs; a face that is not pinched has none (core's own design stands).
     @Published public private(set) var segments: [FlexFaceKey: FlexiblePinch.Segments] = [:]
+    /// ★ D2 REVIEW: a pinched face whose two-segment design threw (its words) — it keeps core's
+    /// one profile and its card says so; the other faces keep their halves.
+    @Published public private(set) var segmentErrors: [FlexFaceKey: String] = [:]
+    /// ★ D2 REVIEW: the groups that will squish less than designed once the lattice carries every
+    /// group (the firmer wins) — known with the designs, BEFORE Exit (FlexibleGroupEstimate).
+    @Published public private(set) var groupMisses: [FlexibleGroupEstimate.Miss] = []
     @Published public private(set) var recommendation: FlexRecommendationInfo?
     @Published public private(set) var recommendationError: String?
     @Published public private(set) var checks: [UUID: FlexStampCheckInfo] = [:]
@@ -166,8 +172,11 @@ public final class FlexibleStageModel: ObservableObject {
     @Published public private(set) var latticeBuilding = false
     @Published public private(set) var latticeError: String?
     /// ★ ROUND 4 (D2): the density field the last lattice was built from (groups combined
-    /// firmer-wins, pinches as two segments) — kept for the tests and the as-built reading.
+    /// firmer-wins, pinches as two segments). ★ D2 REVIEW: kept ONLY when a test asks
+    /// (`keepCombinedField`) — at 128³ it is ~24 MB (Float ρ + Int owner) nothing else reads.
     private(set) var lastCombinedField: FlexDensityField?
+    /// Test control only: keep the combined field after a build.
+    var keepCombinedField = false
     /// ★ ROUND 3 BATCH B (item 9): core's words per face, kept PER KEY — a face core could
     /// not stack (no blind retry: the next scene open clears it) or could not design (one
     /// face's throw no longer leaves every later face "still being designed").
@@ -474,17 +483,36 @@ public final class FlexibleStageModel: ObservableObject {
     /// holds it keeps its weight as his own. Sealed as one undo step. Called when the scene
     /// opens and after every write-back.
     public func adoptMainPageLoads(recompute: Bool = true) {
-        guard let mesh = project.viewerMesh else { return }
-        let loads = FlexibleMainPageLoads.derive(
-            groups: project.selection.groups, force: project.force, faceRegions: project.faceRegions,
-            mesh: mesh, regions: regions, load: { [stacks] r in stacks[FlexFaceKey(region: r, rotation: 0)]?.load })
+        guard let loads = deriveMainPageLoads() else { return }
         mainPageLoads = loads
         let before = settings
         var relinked: [Int: Double] = [:]
-        edit({ s in relinked = loads.adopt(into: &s) }, recompute: recompute)
+        edit({ s in relinked = Self.adopt(loads, into: &s) }, recompute: recompute)
         relinkedWeights.merge(relinked) { old, _ in old }
         if settings != before { project.sealUndoStep() }
         if selectedRegion == nil { selectedRegion = settings.loadedFaces.first?.faceRegionID }
+    }
+
+    private func deriveMainPageLoads() -> FlexibleMainPageLoads? {
+        guard let mesh = project.viewerMesh else { return nil }
+        return FlexibleMainPageLoads.derive(
+            groups: project.selection.groups, force: project.force, faceRegions: project.faceRegions,
+            mesh: mesh, regions: regions, load: { [stacks] r in stacks[FlexFaceKey(region: r, rotation: 0)]?.load })
+    }
+
+    /// ★ D2 REVIEW: the main page's loads re-read into the cache ONLY — no edit, no undo step
+    /// (the Settings page's undo / redo restored the project; the cache must follow it).
+    public func refreshMainPageLoads() {
+        if let loads = deriveMainPageLoads(), loads != mainPageLoads { mainPageLoads = loads }
+    }
+
+    /// ★ D2 REVIEW: the adopt, then the squeeze groups kept whole — a face the main page rests
+    /// holds no group, a face it presses again joins a group that EXISTS (a stale id made a
+    /// "Group 2" nobody made), and a main-page hand sits in one group.
+    nonisolated static func adopt(_ loads: FlexibleMainPageLoads, into s: inout FlexibleStageSettings) -> [Int: Double] {
+        let relinked = loads.adopt(into: &s)
+        FlexibleSqueezeGroups.uniteHands(&s, loads: loads)
+        return relinked
     }
 
     /// [Press it]: the main page's weight when the face is in a Load group; else `kg` (the
@@ -684,6 +712,8 @@ public final class FlexibleStageModel: ObservableObject {
             designs = [:]
             designErrors = [:]
             segments = [:]
+            segmentErrors = [:]
+            groupMisses = []
             if designsInFlight { designsInFlight = false }
             return
         }
@@ -707,6 +737,8 @@ public final class FlexibleStageModel: ObservableObject {
             var checks: [UUID: FlexStampCheckInfo] = [:]
             var conflicts: [FlexConflictInfo] = []
             var segs: [FlexFaceKey: FlexiblePinch.Segments] = [:]
+            var segErrs: [FlexFaceKey: String] = [:]
+            var misses: [FlexibleGroupEstimate.Miss] = []
             var err: String?
             let keys = faces.map { FlexFaceKey(region: $0.faceRegionID, rotation: $0.rotationDeg) }
             do {
@@ -746,16 +778,22 @@ public final class FlexibleStageModel: ObservableObject {
                 }
                 // ★ ROUND 4 (D2): a PINCH (two faces of one group on one stack) — each face's
                 // pinched columns designed over their half, through core's own table
+                // ★ D2 REVIEW: each face its own catch (one throw no longer drops every pinch)
                 do {
                     let law = try FlexiblePinch.Law.core(materialsPath: path, materialID: mat, tempC: temp, build: build)
-                    segs = try Self.pinchSegments(settings: snapshot, conflicts: conflicts, designs: out,
-                                                  stacks: stackSnap, cuts: cuts, law: law)
+                    (segs, segErrs) = Self.pinchSegments(settings: snapshot, conflicts: conflicts, designs: out,
+                                                         stacks: stackSnap, cuts: cuts, law: law)
+                    // ★ D2 REVIEW: separate groups — which will squish less than designed once the
+                    // lattice carries them all (the firmer wins), said BEFORE Exit
+                    misses = try Self.groupEstimate(settings: snapshot, designs: out, segments: segs,
+                                                    stacks: stackSnap, cuts: cuts, law: law)
                 } catch {
                     if err == nil { err = "\(error)" }
                 }
             }
             if Task.isCancelled { return }
             let (o, fe, ss, ch, co, er, sg) = (out, faceErrors, s, checks, conflicts, err, segs)
+            let (se, mi) = (segErrs, misses)
             await MainActor.run {
                 guard gen == self.designGeneration else { return }
                 self.designsInFlight = false
@@ -765,6 +803,8 @@ public final class FlexibleStageModel: ObservableObject {
                 self.checks = ch
                 self.conflicts = co
                 self.segments = sg
+                self.segmentErrors = se
+                if self.groupMisses != mi { self.groupMisses = mi }
                 self.designedInputs = inputKeys
                 self.lastError = er
                 self.applyAutoFixes()
@@ -962,7 +1002,12 @@ public final class FlexibleStageModel: ObservableObject {
             depths[k] = dk
             extent = max(extent, st.uExtentMM, st.vExtentMM)
         }
-        let order = Self.squishOrder(built.map { (key: $0, areaMM2: stacks[$0]?.areaMM2 ?? 0) })
+        // ★ D2 REVIEW: the pass's four slots never split a pinch (face 5 stood still while face 3
+        // squished with five pressed faces)
+        let pinchedWith = pinchedKeys(built)
+        let slots = FlexibleSqueezeGroups.squishSlots(Self.squishOrder(built.map { (key: $0, areaMM2: stacks[$0]?.areaMM2 ?? 0) }),
+                                                      pinchedWith: pinchedWith)
+        let order = slots.order, squishShown = slots.shown
         // ★ ROUND 4 (D2): the squeeze groups over the faces built, and whether each has a pinch
         let builtSet = Set(order)
         let partners = FlexibleSqueezeGroups.partners(pinches)
@@ -1052,7 +1097,7 @@ public final class FlexibleStageModel: ObservableObject {
                             for plan in plans {
                                 let want = plan.keys.compactMap { designedSnap[$0]?.buildableDepthMM.compactMap { $0 }.max() }.max() ?? 0
                                 let got = plan.keys.compactMap { faceDepths[$0]?.compactMap { $0 }.max() }.max() ?? 0
-                                if want > 0, got < 0.9 * want {
+                                if FlexibleGroupEstimate.misses(designedMM: want, asBuiltMM: got) {
                                     notes[FlexibleSim.groupID(plan.number)] =
                                         FlexibleRowCopy.groupMisses(number: plan.number, asBuiltMM: got, designedMM: want)
                                 }
@@ -1067,11 +1112,13 @@ public final class FlexibleStageModel: ObservableObject {
                 let g = FlexibleGeneratedLattice(inputs: inputs, faces: faceList, keys: builtKeys, columnDepths: faceDepths,
                                                  columnNoLattice: faceNoLattice, extentMM: extentMM, generation: generation,
                                                  topology: build.topology, tempC: temp, settingsKey: key,
-                                                 squishedKeys: Array(builtKeys.prefix(FlexibleSquishField.maxFaces)),
+                                                 squishedKeys: Array(builtKeys.prefix(squishShown)),
                                                  shapeOnlyLabel: label, sceneKey: builtOn,
-                                                 sims: sims, simNotes: notes, sharedVoxels: shared)
+                                                 sims: sims, simNotes: notes, sharedVoxels: shared, pinchedWith: pinchedWith)
                 let combined = field
-                await MainActor.run { self.lattice = g; self.lastCombinedField = combined; self.latticeBuilding = false }
+                let keep = await MainActor.run { self.keepCombinedField }
+                let kept = keep ? combined : nil
+                await MainActor.run { self.lattice = g; self.lastCombinedField = kept; self.latticeBuilding = false }
             } catch {
                 await MainActor.run {
                     self.latticeFailedKey = buildKey
@@ -1105,6 +1152,7 @@ public final class FlexibleStageModel: ObservableObject {
             stampGrids: stampGrids)
         inputs.sectorRegions = regions.wire
         (inputs.buildDir, inputs.plateDir) = buildDirections
+        inputs.pinches = pinches.map { [$0.a, $0.b] }
         return try FlexibleJob.runJobJSON(inputs)
     }
 }

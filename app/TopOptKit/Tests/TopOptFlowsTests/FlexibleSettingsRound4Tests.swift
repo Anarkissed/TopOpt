@@ -64,12 +64,13 @@ final class FlexibleSettingsRound4Tests: XCTestCase {
         // rows open INSIDE its row (the card), not below the whole list
         XCTAssertTrue(panel.contains("FlexibleFaceList(model: model, padTarget: $padTarget)"))
         let list = try FlexibleSource.text("FlexibleFaceList.swift")
-        // ★ RE-PINNED (round 4 batch D2): the marked place now holds the squeeze-group rows
-        XCTAssertTrue(list.contains("FlexibleSqueezeGroupRows(model: model, padTarget: $padTarget)"), "D2's group rows under the faces")
+        // ★ RE-PINNED (D2 review): each squeeze group is a HEADER in the list, its faces under it
+        // (D2's rows under the whole list sat below the panel's fold and were cut at the force)
+        XCTAssertTrue(list.contains("FlexibleSqueezeGroupHeader(model: model, row: g, padTarget: $padTarget)"), "the group headers in the list")
         XCTAssertTrue(list.contains("model.select(row.region)"))
         // ★ RE-PINNED (D1 verification): the selected row is the open card (selected), the others buttons
         XCTAssertTrue(list.contains(".accessibilityAddTraits(.isSelected)"))
-        XCTAssertTrue(list.contains("if row.selected {\n                    card(row.region)"))
+        XCTAssertTrue(list.contains("if row.selected {\n            card(row.region)"))
     }
 
     // MARK: - the panel only as tall as it needs to be; minimize (img 1)

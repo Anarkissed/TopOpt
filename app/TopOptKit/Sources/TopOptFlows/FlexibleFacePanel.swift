@@ -9,7 +9,8 @@
 // ★ FACE: three part rows — the filament ("varioShore TPU · squish data"), the feel and the
 // finish (round 4) — the face LIST (round 4), then, for the face selected in it or on the model:
 //   1. its name, [Pressed | Rests]                      (a tap on the part only SELECTS)
-//   2. its weight, from the main page's group (editing it writes back to the group)
+//   2. its weight — ★ D2 review: only its SHARE where it is not its squeeze group's force; the
+//      force itself is set on the group's header in the list (one control)
 //   3. Shape [Curves] [Stamp]                           (Stamp: its one stamp's rows follow)
 //   4. Deepest squish (the purple chip drags it on the part)
 // A face not set yet shows [Press it] [It rests here]; pressing a face with no main-page
@@ -139,11 +140,21 @@ struct FlexibleFaceRows: View {
 
     private func name(_ r: Int) -> String { model.faceName(r) }
 
+    /// ★ D2 REVIEW: the open card's dot is its SQUEEZE GROUP's colour (as its list row's) — it
+    /// was always green, so Face 5 in Group 2 showed blue in the list and green when opened.
+    @MainActor
+    static func dot(model: FlexibleStageModel, region r: Int) -> RGBA {
+        guard let f = model.settings.face(r) else { return DS.Color.textTertiary }
+        guard f.isLoaded else { return DS.Color.accentCyan }
+        guard model.squeezeGroups.count > 1, let g = model.squeezeGroup(of: r) else { return DS.Color.accentGreen }
+        return FlexibleSqueezeGroups.colour(number: g.number)
+    }
+
     /// The card's first row: the face's dot and name, as the list row, at its height.
     private func header<C: View>(_ r: Int, pressed: Bool?, @ViewBuilder control: () -> C) -> some View {
         HStack(spacing: DS.Space.s) {
             Circle()
-                .fill((pressed == nil ? DS.Color.textTertiary : (pressed! ? DS.Color.accentGreen : DS.Color.accentCyan)).color)
+                .fill(Self.dot(model: model, region: r).color)
                 .frame(width: 10, height: 10)
             FlexRow(name(r), info: FlexibleRowCopy.Info.face, id: "flexible-row-face") { control() }
         }
@@ -178,18 +189,23 @@ struct FlexibleFaceRows: View {
         // ★ ROUND 4 (D2): two faces of one group on one stack are a PINCH — never a warning
         // (round 3 said "Shares a stack with …" and blocked Exit): each half is its own face's
         if f.isLoaded, let other = model.pinchPartners(r).first {
-            Text(FlexibleRowCopy.pinched(with: name(other)))
+            // ★ D2 REVIEW: a face whose two-segment design threw keeps core's one profile — said
+            let oneProfile = model.key(r).map { model.segmentErrors[$0] != nil } ?? false
+            Text(oneProfile ? FlexibleRowCopy.pinchedOneProfile(with: name(other)) : FlexibleRowCopy.pinched(with: name(other)))
                 .font(.system(size: 12, weight: .medium)).foregroundStyle(DS.Color.textSecondary.color)
                 .lineLimit(1)
                 .accessibilityIdentifier("flexible-row-pinch")
         }
-        if f.isLoaded, let w = warning(r) { FlexWarningLine(text: w) }
+        if f.isLoaded, let w = Self.warning(model: model, region: r) { FlexWarningLine(text: w) }
         if f.isLoaded {
             let e = model.mainPageLoads.entry(r)
             let fromGroup = f.weightFrom != nil && e?.groupID == f.weightFrom
-            FlexRow(FlexibleRowCopy.weight(face: f, entry: e), info: FlexibleRowCopy.Info.weight, id: "flexible-row-weight") {
-                FlexEditPill(key: "weight-\(r)", title: FlexibleRowCopy.weightTitle, unit: "kg", value: f.weightKg,
-                             padTarget: $padTarget) { model.setWeight(r, kg: $0) }
+            // ★ D2 REVIEW: ONE CONTROL FOR THE FORCE — the group's header pill. The card's bare
+            // "10 kg ✎" set the WHOLE group's force (and the main page's) without saying so; the
+            // card now says the face's own share only where it differs from the group's force
+            // ("5 kg of Top's 10 kg"), with no pencil
+            if let line = Self.weightLine(model: model, region: r) {
+                FlexRow(line, info: FlexibleRowCopy.Info.weight, id: "flexible-row-weight")
             }
             if fromGroup, let old = model.relinkedWeights[r], let e {
                 Text(FlexibleRowCopy.relinked(oldKg: old, group: e.groupName))
@@ -211,7 +227,8 @@ struct FlexibleFaceRows: View {
             FlexRow(FlexibleRowCopy.deepest(f.deepestMM), info: FlexibleRowCopy.Info.deepest, id: "flexible-row-deepest") {
                 FlexEditPill(key: "deepest-\(r)", title: FlexibleRowCopy.deepestTitle, unit: "mm", value: f.deepestMM,
                              padTarget: $padTarget) { v in
-                    let lattice = model.stack(r)?.latticeMMMax ?? v
+                    // ★ D2 REVIEW: a pinched face's deepest squish stops at the half its design uses
+                    let lattice = model.stack(r).map { FlexibleDepthPrism.latticeMax($0, pinched: model.pinchedColumns(r)) } ?? v
                     model.edit { s in
                         guard var g = s.face(r) else { return }
                         g.deepestMM = FlexibleDepthPrism.clamp(v, latticeMM: lattice)
@@ -233,11 +250,30 @@ struct FlexibleFaceRows: View {
     }
 
     /// The selected face's one warning line (FlexibleRowCopy.faceWarning), or nil.
-    private func warning(_ r: Int) -> String? {
+    /// ★ D2 REVIEW: a PINCHED face counts the columns its two HALVES cannot reach (the lattice is
+    /// built from them) — core's whole-column design said 832 on his face 3, the halves miss 412.
+    @MainActor
+    static func warning(model: FlexibleStageModel, region r: Int) -> String? {
         let d = model.design(r)
+        let unreached: Int
+        if let k = model.key(r), let sg = model.segments[k] {
+            unreached = sg.status.filter { $0 == "too_soft" || $0 == "too_firm" || $0 == "beyond_data" }.count
+        } else {
+            unreached = d.map { $0.tooFirm + $0.tooSoft + $0.beyondData } ?? 0
+        }
         return FlexibleRowCopy.faceWarning(refusalCode: d?.refusal?.code, refusalReason: d?.refusal.map { model.text($0.reason) },
-                                           unreachedColumns: d.map { $0.tooFirm + $0.tooSoft + $0.beyondData } ?? 0,
-                                           side: model.stack(r)?.side ?? false)
+                                           unreachedColumns: unreached, side: model.stack(r)?.side ?? false)
+    }
+
+    /// ★ D2 REVIEW: the card's weight line — only where the face's weight is not its group's one
+    /// force (a share of a main-page group, a press at an angle, faces of their own weights from
+    /// before groups); nil where the group's header already says it.
+    @MainActor
+    static func weightLine(model: FlexibleStageModel, region r: Int) -> String? {
+        guard let f = model.settings.face(r), f.isLoaded else { return nil }
+        if let g = model.squeezeGroup(of: r), let force = model.groupForce(g), force.upperBound - force.lowerBound < 0.05,
+           abs(force.upperBound - f.weightKg) < 0.05 { return nil }
+        return FlexibleRowCopy.weight(face: f, entry: model.mainPageLoads.entry(r))
     }
 
     @ViewBuilder private func unmarkedRow(_ r: Int) -> some View {

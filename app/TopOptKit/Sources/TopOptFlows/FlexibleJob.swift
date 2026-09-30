@@ -42,6 +42,11 @@ public enum FlexibleJob {
         /// core assumed +Z, so a part whose gravity is not −Z got the wrong side faces.
         public var buildDir: SIMD3<Double>?
         public var plateDir: SIMD3<Double>?
+        /// ★ D2 REVIEW: the PINCHES among the pressed faces (two faces of one squeeze group on one
+        /// stack — FlexibleSqueezeGroups.pinches over core's stack conflicts), each as [a, b]. A
+        /// run job with any is refused HERE (core refuses one stack pressed from both ends), not
+        /// only in the model's wrapper — every caller that builds Inputs must fill it.
+        public var pinches: [[Int]] = []
 
         public init(modelPath: String, resolution: Int, beadWidthMM: Double, faceCount: Int,
                     settings: FlexibleStageSettings, regions: [[String: Any]] = [],
@@ -79,6 +84,7 @@ public enum FlexibleJob {
         guard !i.settings.loadedFaces.isEmpty else { throw EncodeError.noLoadedFace }
         // ★ ROUND 4 (D2): core designs ONE squeeze (core brief: load cases)
         guard FlexibleSqueezeGroups.groups(i.settings).count <= 1 else { throw EncodeError.squeezeGroups }
+        guard i.pinches.isEmpty else { throw EncodeError.pinch }
         var faces: [[String: Any]] = []
         let finish = i.settings.finishMode
         for f in i.settings.faces { faces.append(try faceEntry(f, finish: finish, stamps: i.stampGrids)) }

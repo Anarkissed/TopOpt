@@ -110,11 +110,26 @@ final class FlexibleSqueezeGroupsUITests: XCTestCase {
             XCTAssertTrue(h.pumpUntil(5) { m.squeezeGroups.count == 2 }, "\(tag): a click on + New makes group 2")
             XCTAssertEqual(m.squeezeGroup(of: 3)?.number, 2)
             m.moveToGroup(5, try XCTUnwrap(m.squeezeGroup(of: 3)).id)
+            // ★ RE-PINNED (D2 review): the move makes the top share the sides' firmer material — the
+            // pop-up opens at once and selects top A; [Keep apart] closes it, face 3's card reopens
+            // under group 2's header (FlexibleSqueezeGroupsReviewUITests pins the pop-up itself)
+            XCTAssertTrue(h.pumpUntil(60) { self.h.local(host, "fix-keep-apart") != nil }, "\(tag): the pop-up opens")
+            let keep = try XCTUnwrap(h.local(host, "fix-keep-apart"))
+            h.click(host, CGPoint(x: keep.midX, y: keep.midY))
+            XCTAssertTrue(h.pumpUntil(3) { self.h.local(host, "fix-keep-apart") == nil })
+            m.select(3)
             h.pump(0.8)
             let rows = FlexibleSqueezeGroupRows.rows(model: m)
-            XCTAssertEqual(rows.map(\.line), ["Group 1 · Top A + Top B · Squeeze 10 kg", "Group 2 · Face 3 + Face 5 · Squeeze 10 kg"])
+            // ★ RE-PINNED (D2 review): each group is a HEADER in the face list, its force in its pill
+            // (D2's one line with the faces and the force was cut at the force on every iPad —
+            // FlexibleSqueezeGroupsReviewUITests measures it); the faces are listed under it
+            XCTAssertEqual(rows.map(\.line), ["Group 1 · Squeeze", "Group 2 · Squeeze"])
+            XCTAssertEqual(rows.map(\.value), ["10 kg", "10 kg"])
+            XCTAssertEqual(m.squeezeGroups.map { m.groupLine($0) }, ["Group 1 · Top A + Top B · Squeeze 10 kg", "Group 2 · Face 3 + Face 5 · Squeeze 10 kg"])
             let r1 = try XCTUnwrap(h.local(host, "groupRow-1")), r2 = try XCTUnwrap(h.local(host, "groupRow-2"))
-            XCTAssertLessThanOrEqual(r1.height, 50, "\(tag): group 1 is ONE line")
+            // ★ RE-PINNED (D2 review): group 1's header carries its one warning line (it will squish
+            // less than drawn once the sides' firmer material is built)
+            XCTAssertLessThanOrEqual(r1.height, rows[0].miss == nil ? 50 : 68, "\(tag): group 1 is ONE line (and its miss)")
             XCTAssertLessThanOrEqual(r2.height, 50, "\(tag): group 2 is ONE line")
             XCTAssertTrue(m.groupsShareMaterial, "the top's and the sides' columns cross his pad")
             report.append(String(format: "%@: + New at (%.0f, %.0f) → 2 groups · rows %.0f pt / %.0f pt", tag, chips.maxX - 22, chips.midY, r1.height, r2.height))
@@ -217,7 +232,9 @@ final class FlexibleSqueezeGroupsUITests: XCTestCase {
 
     func testThePlayerWithItsPickerKeepsClearOfButtonsAndLegends() throws {
         let picker = FlexibleSquishPlayer.size(picker: true, note: true)
-        XCTAssertGreaterThan(picker.width, FlexibleLegendPlacement.playerSize.width)
+        // ★ RE-PINNED (D2 review): the picker and the note sit in ONE ROW ABOVE the capsule — it
+        // no longer widens it (inside, it left the timeline ~32 pt at 11" portrait)
+        XCTAssertEqual(picker.width, FlexibleLegendPlacement.playerSize.width)
         XCTAssertGreaterThan(picker.height, FlexibleLegendPlacement.playerSize.height)
         var report: [String] = []
         var oldHits = 0

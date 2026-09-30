@@ -281,7 +281,7 @@ public struct FlexibleStagePage: View {
            fixShown == nil {
             present(i)
         }
-        if let f = fixShown, !r.blocking.contains(where: { $0.id == f.id }) { fixShown = nil }
+        if let f = fixShown, !r.popping.contains(where: { $0.id == f.id }) { fixShown = nil }
     }
 
     /// Open the pop-up on `issue`: select its face, pulse every face it names (a shared stack:
@@ -370,8 +370,7 @@ public struct FlexibleStagePage: View {
                     // the project's own snapshot history: every Flexible setting is undoable (S5)
                     ForEach([(true, "arrow.uturn.backward"), (false, "arrow.uturn.forward")], id: \.1) { undo, icon in
                         Button {
-                            if undo { project.performUndo() } else { project.performRedo() }
-                            model.recomputeAll()
+                            Self.history(undo: undo, project: project, model: model)
                         } label: {
                             Image(systemName: icon).font(.system(size: 15, weight: .semibold))
                                 .foregroundStyle(DS.Color.textPrimary.color)
@@ -391,6 +390,17 @@ public struct FlexibleStagePage: View {
             Spacer()
         }
         .padding(PageChrome.edge)
+    }
+
+    /// ★ THE PAGE'S UNDO / REDO: the project's own snapshot history, then — ★ D2 REVIEW — the
+    /// main page's loads re-read (no edit, no undo step: the redo stack survives) before the
+    /// designs re-run. The cached loads had kept the undone weight: a group line read
+    /// "Squeeze 10–12 kg", the pencil seeded 12 and the next press asked for the pad.
+    @MainActor
+    static func history(undo: Bool, project: ProjectModel, model: FlexibleStageModel) {
+        if undo { project.performUndo() } else { project.performRedo() }
+        model.refreshMainPageLoads()
+        model.recomputeAll()
     }
 
     /// The toast line's height under the top line (the pop-up goes below it).
@@ -492,11 +502,12 @@ public struct FlexibleStagePage: View {
                 noticePill(text, icon: "info.circle.fill", colour: DS.Color.textSecondary.color, fix: nil)
             } else if model.sceneState == .ready {
                 let r = model.readiness
-                let good = r.isReady && !r.buildFailed   // a failed build is said in warning colour
+                // a failed build, and ★ (D2 review) separate groups that compete, in warning colour
+                let good = r.isReady && !r.buildFailed && r.competing == nil
                 noticePill(r.oneLine,
                            icon: good ? "checkmark.circle.fill" : "exclamationmark.circle.fill",
                            colour: (good ? FlexibleStageStyle.accentToken : DS.Color.warning).color,
-                           fix: r.blocking.first)
+                           fix: r.blocking.first ?? r.competing)
             }
             if let t = model.toast {
                 Text(t).font(.system(size: 12, weight: .medium)).foregroundStyle(DS.Color.textSecondary.color)

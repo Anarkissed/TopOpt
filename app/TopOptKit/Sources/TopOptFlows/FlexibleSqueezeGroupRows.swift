@@ -1,86 +1,158 @@
-// FlexibleSqueezeGroupRows — the squeeze groups on the Settings panel's Face area, under the
-// face list (task 2026-09-29-flexible-screens, round 4 batch D2; his img 4: "there needs to be a
-// setting that says Groups faces together — preferably the face area in the settings").
+// FlexibleSqueezeGroupRows — the squeeze groups on the Settings panel's Face area (task
+// 2026-09-29-flexible-screens, round 4 batch D2; his img 4: "there needs to be a setting that says
+// Groups faces together — preferably the face area in the settings").
 //
-// ★ ONE LINE PER GROUP, its faces and its ONE force: "Group 1 · Top A + 3 more · Squeeze 10 kg"
-// with the group's colour (FlexibleSqueezeGroups.palette — the part's pressed faces take it
-// too), a pencil for the force (the shared number pad; it writes the main page's Load groups
-// back — FlexibleStageModel.setGroupForce) and, with two or more groups, an × that removes the
-// group (its faces join the first other group). A face is MOVED from its card in the list
-// (FlexibleFaceRows: "Squeeze group [1] [2] [+ New]"). With two or more groups that share
-// material, one line says the firmer wins. Nothing here can block Exit.
+// ★ D2 REVIEW: EACH GROUP IS A HEADER IN THE FACE LIST, its faces beneath it. D2 put one line per
+// group UNDER all seven face rows — "Group 1 · Top A + Top B · Squeeze 10 kg" beside a pencil, an
+// × and an (i) in a 372 pt row — and SwiftUI cut the line to "Group 1 · Top A + Top B · Squ…": the
+// ONE force, the very number the section exists to show, never showed. And under an open face
+// card the section sat below the panel's fold in landscape. Now:
+//   * the header is "Group 1 · Squeeze" (just "Squeeze" with one pressed face) with the FORCE IN
+//     ITS PILL — "[10 kg ✎]", the shared number pad; it writes the main page's Load groups back
+//     (FlexibleStageModel.setGroupForce) — then, with two or more groups, an × (its faces join
+//     the first other group at ITS force) and the (i);
+//   * the group's faces are listed right under it (FlexibleFaceList), so the grouping is seen,
+//     and the header of the face he works on sits right above its card;
+//   * a group that will squish less than designed once the lattice carries every group says so
+//     under its header in one warning line (FlexibleGroupEstimate — before Exit);
+//   * group colours: the dot, the faces' dots, the open card's dot.
+// A face is MOVED from its card (FlexibleFaceGroupRow: "Squeeze group [1] [2] [+ New]"). Nothing
+// here can block Exit.
 
 import SwiftUI
 import TopOptDesign
 import TopOptKit
 
-struct FlexibleSqueezeGroupRows: View {
-    @ObservedObject var model: FlexibleStageModel
-    @Binding var padTarget: String?
+enum FlexibleSqueezeGroupRows {
 
-    /// One row as the panel shows it (a value, so a test reads the page's own lines).
+    /// One group header as the panel shows it (a value, so a test reads the page's own lines).
     struct Row: Equatable, Identifiable {
         let id: Int
         let number: Int
+        /// "Group 1 · Squeeze" / "Squeeze".
         let line: String
+        /// The force in the pill: "10 kg" / "6–10 kg".
+        let value: String
+        /// The pad's seed.
         let kg: Double
         let removable: Bool
+        /// Under the header, when the group will squish less than designed (the firmer wins).
+        let miss: String?
+        let regions: [Int]
     }
+
+    /// Test control only: the D2 header's long line ("Group 1 · Top A + Top B · Squeeze 10 kg"),
+    /// to prove the hosted width measurement sees a cut line.
+    @MainActor static var controlLongLine = false
 
     @MainActor
     static func rows(model: FlexibleStageModel) -> [Row] {
         let gs = model.squeezeGroups
+        let single = model.settings.loadedFaces.count == 1
         return gs.map { g in
-            Row(id: g.id, number: g.number, line: model.groupLine(g), kg: model.groupForce(g)?.upperBound ?? 0,
-                removable: gs.count > 1)
+            let force = model.groupForce(g)
+            let line = controlLongLine ? model.groupLine(g) : FlexibleRowCopy.groupHeader(number: g.number, single: single)
+            return Row(id: g.id, number: g.number, line: line, value: FlexibleRowCopy.squeezeValue(force),
+                       kg: force?.upperBound ?? 0, removable: gs.count > 1,
+                       miss: model.groupMiss(g.id).map {
+                           FlexibleRowCopy.groupMissLine(asBuiltMM: $0.asBuiltMM, designedMM: $0.designedMM, firmer: $0.firmerNumber)
+                       },
+                       regions: g.regions)
         }
     }
+}
+
+/// ★ ONE GROUP'S HEADER in the face list: its dot, "Group 1 · Squeeze", [10 kg ✎], × and (i).
+struct FlexibleSqueezeGroupHeader: View {
+    @ObservedObject var model: FlexibleStageModel
+    let row: FlexibleSqueezeGroupRows.Row
+    @Binding var padTarget: String?
 
     var body: some View {
-        let rows = Self.rows(model: model)
-        if !rows.isEmpty {
-            VStack(alignment: .leading, spacing: 6) {
-                FlexSectionTitle(text: FlexibleRowCopy.groupsTitle)
-                    .padding(.top, DS.Space.xs)
-                ForEach(rows) { row in
-                    HStack(spacing: DS.Space.s) {
-                        Circle().fill(FlexibleSqueezeGroups.colour(number: row.number).color)
-                            .frame(width: 10, height: 10)
-                        FlexRow(row.line, info: FlexibleRowCopy.Info.groups, id: "flexible-group-\(row.number)") {
-                            FlexEditPill(key: "group-\(row.id)", title: FlexibleRowCopy.groupName(row.number) + " · squeeze",
-                                         unit: "kg", value: row.kg, padTarget: $padTarget) { model.setGroupForce(row.id, kg: $0) }
-                            if row.removable {
-                                Button { model.removeGroup(row.id) } label: {
-                                    Image(systemName: "xmark").font(.system(size: 12, weight: .semibold))
-                                        .foregroundStyle(DS.Color.textTertiary.color)
-                                        .frame(width: 32, height: 32)
-                                        .contentShape(Rectangle())
-                                }
-                                .buttonStyle(.plain)
-                                .background(GeometryReader { g in
-                                    Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["groupRemove-\(row.number)": g.frame(in: .global)])
-                                }.allowsHitTesting(false))
-                                .accessibilityLabel("Remove \(FlexibleRowCopy.groupName(row.number))")
-                                .accessibilityIdentifier("flexible-group-remove-\(row.number)")
-                            }
-                        }
-                    }
-                    .padding(.horizontal, DS.Space.m)
-                    .frame(minHeight: 44)
-                    .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(DS.Color.fillSubtle.color))
-                    // its frame reaches the page (the hosted test reads each group's ONE line)
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: DS.Space.s) {
+                Circle().fill(FlexibleSqueezeGroups.colour(number: row.number).color)
+                    .frame(width: 10, height: 10)
+                Text(row.line)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(DS.Color.textPrimary.color)
+                    .lineLimit(1).minimumScaleFactor(0.85)
+                    .layoutPriority(1)
+                    // the line's own frame (the hosted test measures it against the words)
                     .background(GeometryReader { g in
-                        Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["groupRow-\(row.number)": g.frame(in: .global)])
+                        Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["groupLine-\(row.number)": g.frame(in: .global)])
                     }.allowsHitTesting(false))
+                    .accessibilityIdentifier("flexible-group-\(row.number)-line")
+                Spacer(minLength: DS.Space.xs)
+                FlexValuePill(key: "group-\(row.id)", value: row.value,
+                              title: FlexibleRowCopy.groupName(row.number) + " · squeeze", unit: "kg", seed: row.kg,
+                              padTarget: $padTarget) { model.setGroupForce(row.id, kg: $0) }
+                if row.removable {
+                    Button { model.removeGroup(row.id) } label: {
+                        Image(systemName: "xmark").font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(DS.Color.textTertiary.color)
+                            .frame(width: 32, height: 32)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .background(GeometryReader { g in
+                        Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["groupRemove-\(row.number)": g.frame(in: .global)])
+                    }.allowsHitTesting(false))
+                    .accessibilityLabel("Remove \(FlexibleRowCopy.groupName(row.number))")
+                    .accessibilityIdentifier("flexible-group-remove-\(row.number)")
                 }
-                if rows.count > 1, model.groupsShareMaterial {
-                    Text(FlexibleRowCopy.groupsShare)
-                        .font(.system(size: 12, weight: .medium)).foregroundStyle(DS.Color.textSecondary.color)
-                        .lineLimit(1).minimumScaleFactor(0.85)
-                        .accessibilityIdentifier("flexible-groups-share")
-                }
+                FlexInfoButton(title: FlexibleRowCopy.groupName(row.number), text: FlexibleRowCopy.Info.groups,
+                               id: "flexible-group-\(row.number)-info")
+            }
+            .frame(minHeight: 44)
+            if let miss = row.miss {
+                FlexWarningLine(text: miss, id: "flexible-group-\(row.number)-miss")
+                    .padding(.leading, 18)
             }
         }
+        .padding(.horizontal, DS.Space.m)
+        .background(RoundedRectangle(cornerRadius: 12, style: .continuous)
+            .fill(FlexibleSqueezeGroups.colour(number: row.number).color.opacity(0.10)))
+        // its frame reaches the page (the hosted test checks it is on the panel)
+        .background(GeometryReader { g in
+            Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["groupRow-\(row.number)": g.frame(in: .global)])
+        }.allowsHitTesting(false))
+        .id(FlexibleFaceList.groupID(row.number))
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("flexible-group-\(row.number)")
+    }
+}
+
+/// A value pill that opens the shared number pad: "[10 kg ✎]" — the value IS the control.
+struct FlexValuePill: View {
+    let key: String
+    let value: String
+    let title: String
+    let unit: String
+    let seed: Double
+    @Binding var padTarget: String?
+    let onValue: (Double) -> Void
+
+    var body: some View {
+        Button { padTarget = key } label: {
+            HStack(spacing: 4) {
+                Text(value)
+                    .font(.system(size: 13, weight: .semibold)).monospacedDigit()
+                    .foregroundStyle(DS.Color.textPrimary.color)
+                    .lineLimit(1).fixedSize()
+                Image(systemName: "pencil")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(DS.Color.textSecondary.color)
+            }
+            .padding(.horizontal, 10)
+            .frame(height: 32)
+            .background(Capsule().fill(DS.Surface.valuePill.color))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(title) \(value)")
+        .accessibilityIdentifier("flexible-number-\(key)")
+        .modifier(FlexPadCommit(key: key, padTarget: $padTarget,
+                                config: .init(title: title, unit: unit, allowsDecimal: true), seed: seed, commit: onValue))
     }
 }
 
@@ -89,13 +161,17 @@ struct FlexibleFaceGroupRow: View {
     @ObservedObject var model: FlexibleStageModel
     let region: Int
 
-    /// The chips: every group by its number, then "+ New" when the face shares its group.
+    /// The chips: every group by its number, then "+ New" when the face's group holds a face
+    /// outside its HAND (★ D2 review: a main-page Load group's faces move together).
     @MainActor
     static func options(model: FlexibleStageModel, region: Int) -> [(id: String, label: String)] {
         let gs = model.squeezeGroups
         let mine = model.squeezeGroup(of: region)
+        let hand = Set(model.hand(of: region))
         var out = gs.map { (id: "\($0.id)", label: "\($0.number)") }
-        if (mine?.regions.count ?? 0) > 1 { out.append((id: "new", label: FlexibleRowCopy.newGroupChip)) }
+        if mine?.regions.contains(where: { !hand.contains($0) }) == true {
+            out.append((id: "new", label: FlexibleRowCopy.newGroupChip))
+        }
         return out
     }
 

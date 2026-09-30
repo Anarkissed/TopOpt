@@ -166,9 +166,14 @@ public final class FlexibleSquishLoop: ObservableObject {
 }
 
 /// The control: [▶︎] Rest ——●—— 10 kg, in the Results player's capsule.
-/// ★ ROUND 4 (D2): with two or more squeeze groups, a GROUP PICKER leads the capsule —
-/// "[Group 1 ▾]": each group's squeeze (only its faces squish), or "All at once" — and a group
-/// that squishes less than it was designed for says so in one line above the capsule.
+/// ★ ROUND 4 (D2): with two or more squeeze groups, a GROUP PICKER — "[● Group 1 ▾]": each
+/// group's squeeze (only its faces squish), or "All at once" — and a group that squishes less
+/// than it was designed for says so in one line.
+/// ★ D2 REVIEW: the picker and that line sit in ONE ROW ABOVE the capsule. Inside the capsule the
+/// picker took ~81 pt, and at 11" portrait (the capsule placed at 294 pt) it left the timeline he
+/// asked to drag about 32 pt. The capsule now keeps its own width for the timeline (≥ 120 pt at
+/// every iPad size — FlexibleSqueezeGroupsReviewUITests), and the picker, outside the capsule's
+/// 30 Hz TimelineView, is not redrawn under an open menu.
 struct FlexibleSquishPlayer: View {
     @ObservedObject var loop: FlexibleSquishLoop
     let fullLabel: String
@@ -178,34 +183,49 @@ struct FlexibleSquishPlayer: View {
     var sims: [FlexibleSim] = []
     var shown: FlexibleSim?
     var onPick: (String) -> Void = { _ in }
-    /// "Group 2 squishes 1.2 of 3.0 mm · firmer wins" — above the capsule.
+    /// "Group 2 squishes 1.2 of 3.0 mm · firmer wins" — beside the picker, above the capsule.
     var note: String?
 
-    /// The player's size: wider with the picker, taller with the note.
+    /// The player's size: the capsule, and — with the picker or a note — the row above it.
     static func size(picker: Bool, note: Bool) -> CGSize {
         let s = FlexibleLegendPlacement.playerSize
-        return CGSize(width: s.width + (picker ? pickerWidth : 0), height: s.height + (note ? noteHeight : 0))
+        return CGSize(width: s.width, height: s.height + (picker || note ? topRowHeight + rowGap : 0))
     }
-    static let pickerWidth: CGFloat = 104
-    static let noteHeight: CGFloat = 22
+    static let topRowHeight: CGFloat = 30
+    static let rowGap: CGFloat = 4
+    /// The shortest timeline the capsule keeps (pt).
+    static let minTimeline: CGFloat = 120
+
+    /// Test control only: D2's layout — the picker INSIDE the capsule (to prove the hosted
+    /// measurement sees the squeezed timeline).
+    @MainActor static var controlInlinePicker = false
 
     var body: some View {
-        VStack(spacing: 4) {
-            if let note {
-                Text(note)
-                    .dsStyle(DS.TypeScale.footnote)
-                    .foregroundStyle(DS.Color.textSecondary.color)
-                    .lineLimit(1).minimumScaleFactor(0.8)
-                    .padding(.horizontal, DS.Space.m).padding(.vertical, 2)
-                    .background(Capsule().fill(DS.Surface.bar.color))
-                    .frame(height: Self.noteHeight - 4)
-                    .accessibilityIdentifier("flexible-squish-note")
+        let inline = Self.controlInlinePicker
+        VStack(alignment: .leading, spacing: Self.rowGap) {
+            if (sims.count > 1 && !inline) || note != nil {
+                HStack(spacing: DS.Space.s) {
+                    if sims.count > 1 && !inline { picker }
+                    if let note {
+                        Text(note)
+                            .dsStyle(DS.TypeScale.footnote)
+                            .foregroundStyle(DS.Color.textSecondary.color)
+                            .lineLimit(1).minimumScaleFactor(0.75)
+                            .padding(.horizontal, DS.Space.m).frame(height: Self.topRowHeight - 6)
+                            .background(Capsule().fill(DS.Surface.bar.color))
+                            .accessibilityIdentifier("flexible-squish-note")
+                    }
+                }
+                .frame(height: Self.topRowHeight)
+                .frame(maxWidth: width, alignment: .leading)
             }
-            capsule
+            capsule(inlinePicker: inline && sims.count > 1)
         }
+        .frame(width: width)
         .accessibilityIdentifier("flexible-squish-player")
     }
 
+    /// "[● Group 1 ▾]" — the shown squeeze's colour and name; the menu lists every squeeze.
     private var picker: some View {
         Menu {
             ForEach(sims) { sim in
@@ -215,7 +235,10 @@ struct FlexibleSquishPlayer: View {
                 .accessibilityIdentifier("flexible-squish-sim-\(sim.id)")
             }
         } label: {
-            HStack(spacing: 4) {
+            HStack(spacing: 5) {
+                if case .group(let n)? = shown?.kind {
+                    Circle().fill(FlexibleSqueezeGroups.colour(number: n).color).frame(width: 8, height: 8)
+                }
                 Text(shown?.short ?? FlexibleRowCopy.simAllShort)
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(DS.Color.textPrimary.color)
@@ -223,17 +246,19 @@ struct FlexibleSquishPlayer: View {
                 Image(systemName: "chevron.up.chevron.down").font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(DS.Color.textSecondary.color)
             }
-            .padding(.horizontal, 10).frame(height: 30)
-            .background(Capsule().fill(DS.Color.fillSelected.color))
+            .padding(.horizontal, 10).frame(height: Self.topRowHeight)
+            .background(Capsule().fill(DS.Surface.bar.color)
+                .overlay(Capsule().strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
         }
+        .fixedSize()
         .accessibilityLabel("Which squeeze plays")
         .accessibilityIdentifier("flexible-squish-picker")
     }
 
-    private var capsule: some View {
+    private func capsule(inlinePicker: Bool) -> some View {
         TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: !loop.playing)) { _ in
             HStack(spacing: DS.Space.sm) {
-                if sims.count > 1 { picker }
+                if inlinePicker { picker }
                 Button { loop.toggle() } label: {
                     Image(systemName: loop.playing ? "pause.fill" : "play.fill")
                         .font(.system(size: 12, weight: .bold))
@@ -250,6 +275,10 @@ struct FlexibleSquishPlayer: View {
                     .lineLimit(1).fixedSize()
                 Slider(value: Binding(get: { loop.amount }, set: { loop.scrub(to: $0) }), in: 0...1)
                     .tint(DS.Color.accent.color)
+                    // its frame reaches the page (the hosted test measures the timeline)
+                    .background(GeometryReader { g in
+                        Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["playerTimeline": g.frame(in: .global)])
+                    }.allowsHitTesting(false))
                     .accessibilityLabel("Squish")
                     .accessibilityIdentifier("flexible-squish-timeline")
                 Text(fullLabel)

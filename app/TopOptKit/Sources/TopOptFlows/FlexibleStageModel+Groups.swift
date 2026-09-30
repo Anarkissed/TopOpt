@@ -23,8 +23,17 @@ extension FlexibleStageModel {
     }
 
     /// A group's ONE squeeze force (a range only for faces of their own weights from before groups).
+    /// ★ D2 REVIEW: a main-page hand's weight is read from the project, live (one source of truth).
     public func groupForce(_ g: FlexibleSqueezeGroup) -> ClosedRange<Double>? {
-        FlexibleSqueezeGroups.force(g, settings: settings, loads: mainPageLoads)
+        FlexibleSqueezeGroups.force(g, settings: settings, loads: mainPageLoads, liveKg: liveMainKg)
+    }
+
+    /// The main page's Load group's weight now (nil: not a Load group).
+    var liveMainKg: (UUID) -> Double? { { [project] id in project.force.kind(for: id).weightKg } }
+
+    /// ★ D2 REVIEW: the faces that move with `region` (its main-page Load group's faces).
+    public func hand(of region: Int) -> [Int] {
+        FlexibleSqueezeGroups.hand(of: region, settings: settings, loads: mainPageLoads)
     }
 
     /// The group's one line: "Group 1 · Face 3 + Face 5 · Squeeze 10 kg".
@@ -71,13 +80,18 @@ extension FlexibleStageModel {
     /// face of a pinch (two faces of one group on one stack) gets its pinched columns designed
     /// over their half (FlexiblePinch.design, core's table); a face with no pinched column, or
     /// refused by core, keeps core's own design (no entry).
+    /// ★ D2 REVIEW: ONE FACE'S THROW NO LONGER DROPS EVERY PINCH (the rule designEach set for the
+    /// designs): each face has its own catch; a face that threw keeps core's one profile (the
+    /// lattice builds from `FlexiblePinch.core`) and its words are kept against its key — its
+    /// card says "one profile for now".
     nonisolated static func pinchSegments(settings: FlexibleStageSettings, conflicts: [FlexConflictInfo],
                                           designs: [FlexFaceKey: FlexFaceDesignInfo], stacks: [FlexFaceKey: FlexStackInfo],
-                                          cuts: [Int: [RegionCut]], law: FlexiblePinch.Law) throws -> [FlexFaceKey: FlexiblePinch.Segments] {
+                                          cuts: [Int: [RegionCut]], law: FlexiblePinch.Law)
+        -> (segments: [FlexFaceKey: FlexiblePinch.Segments], errors: [FlexFaceKey: String]) {
         let partners = FlexibleSqueezeGroups.partners(FlexibleSqueezeGroups.pinches(conflicts, settings))
-        guard !partners.isEmpty else { return [:] }
+        guard !partners.isEmpty else { return ([:], [:]) }
         func key(_ r: Int) -> FlexFaceKey? { settings.face(r).map { FlexFaceKey(region: r, rotation: $0.rotationDeg) } }
-        var out: [FlexFaceKey: FlexiblePinch.Segments] = [:]
+        var out: [FlexFaceKey: FlexiblePinch.Segments] = [:], errors: [FlexFaceKey: String] = [:]
         for (region, others) in partners.sorted(by: { $0.key < $1.key }) {
             guard let k = key(region), let st = stacks[k], let d = designs[k], d.refusal == nil else { continue }
             let with = others.compactMap { o -> (stack: FlexStackInfo, cuts: [RegionCut])? in
@@ -86,9 +100,64 @@ extension FlexibleStageModel {
             }
             let pinched = FlexiblePinch.pinchedColumns(st, partners: with)
             guard pinched.contains(true) else { continue }
-            out[k] = try FlexiblePinch.design(d, stack: st, pinched: pinched, law: law)
+            do { out[k] = try FlexiblePinch.design(d, stack: st, pinched: pinched, law: law) }
+            catch { errors[k] = "\(error)" }
+        }
+        return (out, errors)
+    }
+
+    /// ★ D2 REVIEW: separate groups, estimated with the designs (FlexibleGroupEstimate): which
+    /// group will squish less than it was designed for once the lattice carries every group.
+    nonisolated static func groupEstimate(settings: FlexibleStageSettings, designs: [FlexFaceKey: FlexFaceDesignInfo],
+                                          segments: [FlexFaceKey: FlexiblePinch.Segments], stacks: [FlexFaceKey: FlexStackInfo],
+                                          cuts: [Int: [RegionCut]], law: FlexiblePinch.Law) throws -> [FlexibleGroupEstimate.Miss] {
+        let gs = FlexibleSqueezeGroups.groups(settings)
+        guard gs.count > 1 else { return [] }
+        let groups = gs.map { g in
+            FlexibleGroupEstimate.Group(id: g.id, number: g.number, faces: g.regions.compactMap { r -> FlexibleGroupEstimate.Face? in
+                guard let f = settings.face(r) else { return nil }
+                let k = FlexFaceKey(region: r, rotation: f.rotationDeg)
+                guard let st = stacks[k], let d = designs[k], d.refusal == nil else { return nil }
+                return FlexibleGroupEstimate.Face(region: r, stack: st, cuts: cuts[r] ?? [],
+                                                  segments: segments[k] ?? FlexiblePinch.core(d, stack: st),
+                                                  pressureMPa: d.columns.map(\.pressureMPa))
+            })
+        }
+        return try FlexibleGroupEstimate.estimate(groups, strainUnder: law.strainUnder)
+    }
+
+    /// The miss of group `groupID` (nil: it squishes as designed, or one group).
+    public func groupMiss(_ groupID: Int) -> FlexibleGroupEstimate.Miss? {
+        squeezeGroups.count > 1 ? groupMisses.first { $0.groupID == groupID } : nil
+    }
+
+    /// The pinch partners among `keys` (both directions) — the squish slots keep them whole.
+    func pinchedKeys(_ keys: [FlexFaceKey]) -> [FlexFaceKey: [FlexFaceKey]] {
+        let byRegion = Dictionary(keys.map { ($0.region, $0) }, uniquingKeysWith: { a, _ in a })
+        var out: [FlexFaceKey: [FlexFaceKey]] = [:]
+        for (r, others) in FlexibleSqueezeGroups.partners(pinches) {
+            guard let k = byRegion[r] else { continue }
+            out[k] = others.compactMap { byRegion[$0] }
         }
         return out
+    }
+
+    /// The squish order (largest first) with the four slots holding whole pinches.
+    nonisolated static func squishOrder<K: Hashable>(_ faces: [(key: K, areaMM2: Double)], pinchedWith: [K: [K]]) -> [K] {
+        FlexibleSqueezeGroups.squishSlots(squishOrder(faces), pinchedWith: pinchedWith).order
+    }
+
+    /// ★ D2 REVIEW: which columns of a pressed face a pinch halves (its two-segment design's,
+    /// else computed from the stacks — a calibrate-first filament has no design); nil: none.
+    /// The dent's exaggeration and the depth chip stop at the HALF there.
+    public func pinchedColumns(_ region: Int) -> [Bool]? {
+        guard let k = key(region) else { return nil }
+        if let sg = segments[k] { return sg.pinched.contains(true) ? sg.pinched : nil }
+        let others = pinchPartners(region)
+        guard !others.isEmpty, let st = stacks[k] else { return nil }
+        let with = others.compactMap { o in stack(o).map { (stack: $0, cuts: regions.cuts(of: o)) } }
+        let p = FlexiblePinch.pinchedColumns(st, partners: with)
+        return p.contains(true) ? p : nil
     }
 
     // MARK: his actions
@@ -96,35 +165,60 @@ extension FlexibleStageModel {
     /// Move a pressed face into the group stored as `groupID`. ★ ONE FORCE PER GROUP: a face of
     /// his own takes the group's force (a face a main-page Load group presses keeps that group's
     /// weight — the main page is its one truth; the group line then says the range).
+    /// ★ D2 REVIEW: a main-page Load group is ONE hand — its faces move TOGETHER (moving one of
+    /// them alone let one group's force rewrite another's through the main page).
     public func moveToGroup(_ region: Int, _ groupID: Int) {
         guard squeezeGroup(of: region)?.id != groupID else { return }
         let force = squeezeGroups.first { $0.id == groupID }.flatMap { groupForce($0) }
+        let hand = hand(of: region)
         actionSerial += 1
         edit { s in
-            FlexibleSqueezeGroups.move(region, to: groupID, in: &s)
-            if let f = force, f.upperBound - f.lowerBound < 0.05, f.upperBound > 0,
-               var face = s.face(region), face.weightFrom == nil {
-                face.weightKg = f.upperBound
-                s.setFace(face)
-            }
+            FlexibleSqueezeGroups.move(region, to: groupID, hand: hand, in: &s)
+            Self.takeForce(force, regions: hand, in: &s)
         }
     }
 
-    /// A new group made from `region` (nil: not pressed, or already alone in its group).
+    /// A face of his own that joins a group takes the group's ONE force (a face a main-page Load
+    /// group presses keeps the main page's weight — the main page is its one truth).
+    nonisolated static func takeForce(_ force: ClosedRange<Double>?, regions: [Int], in s: inout FlexibleStageSettings) {
+        guard let f = force, f.upperBound - f.lowerBound < 0.05, f.upperBound > 0 else { return }
+        for r in regions {
+            guard var face = s.face(r), face.isLoaded, face.weightFrom == nil else { continue }
+            face.weightKg = f.upperBound
+            s.setFace(face)
+        }
+    }
+
+    /// A new group made from `region` and its hand (nil: not pressed, or its hand is already
+    /// the whole group).
     @discardableResult
     public func newGroup(with region: Int) -> Int? {
         var s = settings
-        guard let n = FlexibleSqueezeGroups.newGroup(with: region, in: &s) else { return nil }
+        guard let n = FlexibleSqueezeGroups.newGroup(with: region, hand: hand(of: region), in: &s) else { return nil }
         actionSerial += 1
         edit { $0 = s }
         return n
     }
 
     /// Remove a group: its faces join the first other group (never the only group).
+    /// ★ D2 REVIEW: like a move, they take THAT group's one force — the merged group had kept
+    /// both forces ("Squeeze 6–10 kg"), and the next press asked for the pad.
     public func removeGroup(_ groupID: Int) {
-        guard squeezeGroups.count > 1 else { return }
+        mergeGroup(groupID, into: nil)
+    }
+
+    /// ★ D2 REVIEW ("Join the groups"): every face of group `groupID` joins group `target` (nil:
+    /// the first other group) at its force. One undoable edit.
+    public func mergeGroup(_ groupID: Int, into target: Int?) {
+        let gs = squeezeGroups
+        guard gs.count > 1, let from = gs.first(where: { $0.id == groupID }),
+              let into = gs.first(where: { $0.id != groupID && (target == nil || $0.id == target) }) else { return }
+        let force = groupForce(into)
         actionSerial += 1
-        edit { FlexibleSqueezeGroups.remove(group: groupID, in: &$0) }
+        edit { s in
+            FlexibleSqueezeGroups.remove(group: groupID, into: into.id, in: &s)
+            Self.takeForce(force, regions: from.regions, in: &s)
+        }
     }
 
     /// ★ ONE FORCE PER GROUP (his answer 1): every hand of the group presses with `kg` — a
@@ -133,7 +227,7 @@ extension FlexibleStageModel {
     public func setGroupForce(_ groupID: Int, kg: Double) {
         guard kg > 0, kg.isFinite, let g = squeezeGroups.first(where: { $0.id == groupID }) else { return }
         actionSerial += 1
-        let hands = FlexibleSqueezeGroups.hands(g, settings: settings, loads: mainPageLoads)
+        let hands = FlexibleSqueezeGroups.hands(g, settings: settings, loads: mainPageLoads, liveKg: liveMainKg)
         var wroteMain = false
         for h in hands {
             guard let main = h.mainGroup else { continue }
