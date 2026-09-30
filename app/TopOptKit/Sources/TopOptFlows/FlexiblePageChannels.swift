@@ -112,7 +112,9 @@ public enum FlexiblePageChannels {
         }
         let dents = overlay.displacements(depths: depths, stacks: model.stacks,
                                           partUVT: model.geometry.mapValues(\.partUVT))
-        return Channels(tints: tints, dents: dents, exaggeration: shown.exaggeration, animated: shown.animated,
-                        legendLine: shown.legendLine)
+        // ★ one k while the depth chip is dragged (FlexibleDepthChips freezes it on the model)
+        let k = model.frozenExaggeration ?? shown.exaggeration
+        return Channels(tints: tints, dents: dents, exaggeration: k, animated: shown.animated,
+                        legendLine: "\(shown.label) · shown ×\(Int(k))")
     }
 }

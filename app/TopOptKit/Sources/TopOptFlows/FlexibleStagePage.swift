@@ -45,6 +45,12 @@ public struct FlexibleStagePage: View {
     /// from any angle, even edge-on (img 1); the X-ray button under the gizmo is gone.
     private let xray = true
     @State private var showExport = false
+    /// The panel's and the legend's frames (global), and the stage's — for the chips' keep-out.
+    @State private var frames: [String: CGRect] = [:]
+    private var keepOut: [CGRect] {
+        guard let st = frames["stage"] else { return [] }
+        return ["panel", "legend"].compactMap { frames[$0]?.offsetBy(dx: -st.minX, dy: -st.minY) }
+    }
     private let ticker = Timer.publish(every: 1.0 / 30.0, on: .main, in: .common).autoconnect()
     static let squishPeriodS = 2.4
 
@@ -75,6 +81,9 @@ public struct FlexibleStagePage: View {
                 // "legends never cover buttons" — it covered Generate in the bottom corner)
                 if dents != nil || model.checkStampShown != nil {
                     FlexibleLegend(model: model, drawnLattice: drawnLattice)
+                        .background(GeometryReader { g in
+                            Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["legend": g.frame(in: .global)])
+                        }.allowsHitTesting(false))
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
                         .padding(.trailing, PageChrome.edge)
                 }
@@ -110,6 +119,7 @@ public struct FlexibleStagePage: View {
         .onReceive(model.objectWillChange.debounce(for: .milliseconds(16), scheduler: RunLoop.main)) { _ in
             refreshChannels()
         }
+        .onPreferenceChange(FlexibleKeepOutKey.self) { frames = $0 }
         .accessibilityIdentifier("flexible-stage-page")
     }
 
@@ -167,6 +177,8 @@ public struct FlexibleStagePage: View {
                     if proj.projection != q { proj.projection = q }
                 },
                 flexDisplacements: dents, flexScale: dentScale,
+                // ★ ROUND 3 (item 1.1): the selected face's deepest squish as a prism × k
+                clearanceVolumes: FlexibleDepthPrism.renderItems(model: model, k: dentExaggeration),
                 // ★ THE DENT READS THROUGH THE PART (maintainer, 2026-09-29): while a dent is
                 // shown the body drops to 30 % and the dented map stays at 100 %.
                 bodyAlpha: xray ? Self.xrayBodyAlpha : (dents != nil ? Self.dentBodyAlpha : 1),
@@ -177,9 +189,12 @@ public struct FlexibleStagePage: View {
                 flexibleLattice: FlexibleLatticePreview.inputs(xray: xray, lattice: model.lattice,
                                                                building: model.latticeBuilding,
                                                                latticeShows: latticeShows))
-            FlexibleStageOverlays(model: model, proj: proj)
+            FlexibleStageOverlays(model: model, proj: proj, exaggeration: dentExaggeration, keepOut: keepOut)
         }
         .coordinateSpace(name: FlexibleStageSpace.name)
+        .background(GeometryReader { g in
+            Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["stage": g.frame(in: .global)])
+        }.allowsHitTesting(false))
         .ignoresSafeArea()
     }
 
@@ -375,6 +390,17 @@ public struct FlexibleStagePage: View {
             .overlay(RoundedRectangle(cornerRadius: DS.Radius.panel)
                 .strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
         .dsShadow(DS.Shadow.panel)
+        .background(GeometryReader { g in
+            Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["panel": g.frame(in: .global)])
+        }.allowsHitTesting(false))
+    }
+}
+
+/// The frames the depth chips keep out of (the panel, the legend) and the stage's own.
+struct FlexibleKeepOutKey: PreferenceKey {
+    static var defaultValue: [String: CGRect] = [:]
+    static func reduce(value: inout [String: CGRect], nextValue: () -> [String: CGRect]) {
+        value.merge(nextValue()) { $1 }
     }
 }
 
@@ -383,6 +409,10 @@ public struct FlexibleStagePage: View {
 struct FlexibleStageOverlays: View {
     @ObservedObject var model: FlexibleStageModel
     @ObservedObject var proj: FlexibleProjectionBox
+    /// The page's exaggeration (the dent's and the prism's k).
+    var exaggeration: Double = 1
+    /// Where a chip cannot be reached (the panel, the legend), in stage points.
+    var keepOut: [CGRect] = []
 
     var body: some View {
         ZStack {
@@ -399,6 +429,8 @@ struct FlexibleStageOverlays: View {
                                         onChange: { c in setCurve(r, axis, c) },
                                         onCommit: { model.save() })
                 }
+                // ★ ROUND 3 (item 1.1): the deepest squish, dragged out as a prism
+                FlexibleDepthChips(model: model, projection: proj.projection, k: exaggeration, keepOut: keepOut)
             }
             if model.tab == .stamps {
                 FlexibleStampHandles(model: model, projection: proj.projection)

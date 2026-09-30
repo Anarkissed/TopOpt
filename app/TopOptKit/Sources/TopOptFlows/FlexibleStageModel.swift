@@ -149,6 +149,9 @@ public final class FlexibleStageModel: ObservableObject {
     @Published public var checkStampShown: UUID?
     /// The curve point showing its × (round 3, item 8); a tap anywhere on the part clears it.
     @Published public var curvePoint: FlexCurvePoint?
+    /// ★ ROUND 3 (item 1.1): the page's exaggeration k, FROZEN while the depth chip is dragged
+    /// — the dent, the prism and the chip hold one scale while the finger moves.
+    @Published public var frozenExaggeration: Double?
     @Published public private(set) var lastError: String?
     /// The generated lattice (Generate button) and its build state.
     @Published public private(set) var lattice: FlexibleGeneratedLattice?

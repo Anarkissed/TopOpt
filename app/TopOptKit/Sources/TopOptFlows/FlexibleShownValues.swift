@@ -56,6 +56,8 @@ struct FlexibleShownValues {
 
     init(model m: FlexibleStageModel, drawnLattice: FlexibleGeneratedLattice? = nil) {
         self.init(Self.inputs(m), drawnLattice: drawnLattice)
+        // one k while the depth chip is dragged
+        if let k = m.frozenExaggeration { exaggeration = k }
     }
 
     init(_ m: Inputs, drawnLattice: FlexibleGeneratedLattice?) {
