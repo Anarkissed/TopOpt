@@ -109,8 +109,11 @@ final class FlexibleMainStageTests: XCTestCase {
         XCTAssertEqual(stage.status.line, FlexibleMainStatus.building)
         try await FlexibleHisProject.waitFor(120, "the lattice") { m.lattice != nil || m.latticeError != nil }
         await m.waitForIdle()
-        XCTAssertEqual(stage.status.line, FlexibleMainStatus.ready)
-        XCTAssertEqual(stage.status.tone, .ready)
+        // ★ RE-PINNED (round 4 C2 verification): faces 3 and 5 pinch again — the preview is built,
+        // but core can't take a pinch yet, so the pill is a PREVIEW, never the green Ready (a tap
+        // opens the Export step on each end resting — FlexibleCoreHold)
+        XCTAssertEqual(stage.status.line, FlexibleCoreHold.pill(.pinch, shapeOnlyLabel: nil))
+        XCTAssertEqual(stage.status.tone, .preview)
         XCTAssertEqual(FlexibleMainStatus.of(model: nil).line, FlexibleMainStatus.notOpened, "before the stage ever opened")
     }
 
@@ -127,7 +130,9 @@ final class FlexibleMainStageTests: XCTestCase {
         try await FlexibleHisProject.waitFor(120, "the shape-only lattice") { m.lattice != nil || m.latticeError != nil }
         await m.waitForIdle()
         XCTAssertEqual(stage.status.line, "TPU 95A: shape only — no squish predicted")
-        XCTAssertEqual(stage.status.tone, .ready)
+        // ★ RE-PINNED (round 4 C2 verification): his label, on a PREVIEW pill — core refuses a
+        // calibrate-first filament, so it is never the green Ready
+        XCTAssertEqual(stage.status.tone, .preview)
     }
 
     // MARK: the loop never publishes into the workspace

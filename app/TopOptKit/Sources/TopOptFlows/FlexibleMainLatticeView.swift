@@ -19,10 +19,14 @@
 // hides it; with nothing that can come (nothing pressed, no filament, a failed build …) it opens
 // Settings, and that Settings' Save & Exit turns the view on.
 // ★ THE NOTE: once per build this page started, when it lands — "Lattice ready", with [Show]
-// when the view is hidden — under the view row, in a band every legend and the player already
-// keep out of (reserved: a note coming and going never moves a legend). It hides itself.
+// when the view is hidden — ★ C2 VERIFICATION: on the view row's OWN line, left of the three
+// buttons (the band C2 reserved UNDER the row pushed two legends into a second column at 13"
+// landscape with his Gravity chip column, for a note that shows 4 s). The whole note is [Show]'s
+// target (it was the 13 pt word). It hides itself.
 // ★ THE BIG BUTTON: Ready → core and the Export step (FlexibleCoreRun); the one thing to fix →
-// Settings on its pop-up; building → nothing opens (the note says it is still building).
+// Settings on its pop-up; building → nothing opens (the note says it is still building) —
+// ★ C2 VERIFICATION: on another stage it takes him to the Lattice stage (builds start only
+// there; C2's note was drawn only there, a dead tap on Topology).
 
 import Foundation
 import SwiftUI
@@ -87,9 +91,10 @@ public final class FlexibleMainNote: ObservableObject {
         case .building: return "Still building \u{2014} it shows here when ready"
         }
     }
-    /// The note's size (the band reserved under the view row).
-    public static let height: CGFloat = 34
-    public static let width: CGFloat = 300
+    /// The note's size: ★ C2 VERIFICATION — as tall as the row's buttons (the whole note is
+    /// [Show]'s target), at most 280 wide beside them (narrower where the left panel is near).
+    public static let height: CGFloat = 40
+    public static let width: CGFloat = 280
 }
 
 extension FlexibleMainStage {
@@ -126,8 +131,11 @@ extension FlexibleMainStage {
 
     /// The big bottom Lattice button (H10's pill): Ready → core and the Export step; the one
     /// thing to fix → Settings on its pop-up; building → nothing opens (his img 6), the note says
-    /// it is still building.
-    public func pillTapped(_ s: FlexibleMainStatus, open: () -> Void) {
+    /// it is still building. ★ C2 VERIFICATION: `goToLattice` (H10) — on another stage "Building…"
+    /// takes him to the Lattice stage (builds start only there), and so does a Ready whose
+    /// lattice his edits there have made stale (`sendToCore`).
+    public func pillTapped(_ s: FlexibleMainStatus, open: () -> Void, goToLattice: @escaping () -> Void = {}) {
+        self.goToLattice = goToLattice
         switch s.tap {
         case .send:
             sendToCore()
@@ -135,58 +143,71 @@ extension FlexibleMainStage {
             if s.fix != nil { openFix() }
             open()
         case .wait:
+            if !visible { goToLattice() }
             note.post(.building)
         }
-    }
-
-    /// Send the job Settings describes to core's Flexible runner, and open the Export step.
-    public func sendToCore() {
-        guard let m = model else { return }
-        coreRun.send(m)
     }
 }
 
 extension FlexibleMainViewToggles {
-    /// The note's band, under the row, trailing (inside `frame`, which every legend and the
-    /// player keep out of).
+    /// The note's band: ★ C2 VERIFICATION — on the row's own line, left of the three buttons, clear
+    /// of the left panel (inside `frame`, which every legend and the player keep out of — and
+    /// which now ends where the row ends, so the note costs the legends nothing).
     public static func noteFrame(viewport: CGSize) -> CGRect {
         let row = rowFrame(viewport: viewport)
-        return CGRect(x: viewport.width - PageChrome.edge - FlexibleMainNote.width, y: row.maxY + DS.Space.s,
-                      width: FlexibleMainNote.width, height: FlexibleMainNote.height)
+        let room = row.minX - DS.Space.s - (FlexibleMainLegendLayout.leftStrip(viewport: viewport).maxX + DS.Space.s)
+        let w = max(0, min(FlexibleMainNote.width, room))
+        return CGRect(x: row.minX - DS.Space.s - w, y: row.midY - FlexibleMainNote.height / 2,
+                      width: w, height: FlexibleMainNote.height)
     }
 }
 
-/// The note, drawn under the view row. It observes only the note (and the stage's view flag).
+/// The note, drawn beside the view row. It observes only the note (and the stage's view flag).
 struct FlexibleMainNoteView: View {
     @ObservedObject var note: FlexibleMainNote
     @ObservedObject var main: FlexibleMainStage
+    /// Its band's width (FlexibleMainViewToggles.noteFrame).
+    var maxWidth: CGFloat = FlexibleMainNote.width
 
     var body: some View {
         if let k = note.kind {
-            HStack(spacing: DS.Space.s) {
-                Image(systemName: k == .ready ? "checkmark.circle.fill" : "hourglass")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle((k == .ready ? FlexibleStageStyle.accentToken : DS.Color.textSecondary).color)
-                Text(FlexibleMainNote.line(k))
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(DS.Color.textPrimary.color)
-                    .lineLimit(1).minimumScaleFactor(0.8)
-                    .accessibilityIdentifier("flexible-main-note")
-                if k == .ready, !main.latticeShown {
-                    Button("Show") { main.showFromNote() }
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(DS.Color.accent.color)
+            let showable = k == .ready && !main.latticeShown
+            Group {
+                if showable {
+                    // ★ C2 VERIFICATION: the WHOLE note is [Show] (the word alone was ~36 × 16 pt)
+                    Button { main.showFromNote() } label: { capsule(k, showable: true) }
                         .buttonStyle(.plain)
                         .accessibilityIdentifier("flexible-main-note-show")
+                } else {
+                    capsule(k, showable: false)
                 }
             }
-            .padding(.horizontal, DS.Space.m)
-            .frame(height: FlexibleMainNote.height)
-            .background(Capsule().fill(DS.Surface.panel.color.opacity(0.94))
-                .overlay(Capsule().strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
             .latticeBandChipKeepOut()
-            .frame(maxWidth: FlexibleMainNote.width, alignment: .trailing)
+            .frame(maxWidth: maxWidth, alignment: .trailing)
             .transition(.opacity)
         }
+    }
+
+    private func capsule(_ k: FlexibleMainNote.Kind, showable: Bool) -> some View {
+        HStack(spacing: DS.Space.s) {
+            Image(systemName: k == .ready ? "checkmark.circle.fill" : "hourglass")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle((k == .ready ? FlexibleStageStyle.accentToken : DS.Color.textSecondary).color)
+            Text(FlexibleMainNote.line(k))
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(DS.Color.textPrimary.color)
+                .lineLimit(1).minimumScaleFactor(0.8)
+                .accessibilityIdentifier("flexible-main-note")
+            if showable {
+                Text("Show")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(DS.Color.accent.color)
+            }
+        }
+        .padding(.horizontal, DS.Space.m)
+        .frame(height: FlexibleMainNote.height)
+        .background(Capsule().fill(DS.Surface.panel.color.opacity(0.94))
+            .overlay(Capsule().strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
+        .contentShape(Capsule())
     }
 }

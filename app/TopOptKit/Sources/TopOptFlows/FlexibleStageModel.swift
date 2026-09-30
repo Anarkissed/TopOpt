@@ -1139,16 +1139,30 @@ public final class FlexibleStageModel: ObservableObject {
 
     // MARK: the run job (S5)
 
-    public func runJobJSON() throws -> String {
-        guard let file = project.importedFile else { throw FlexibleJob.EncodeError.noLoadedFace }
+    /// The run job. ★ C2 VERIFICATION: `resting` — pressed faces that REST in this job only (the
+    /// Export step's [Send with Face 5 resting] / [Send Group 1 only]: what core can run of a
+    /// pinch or of several squeeze groups); his settings are untouched. A part with no file is
+    /// its own error (C2 told him "press a face first").
+    public func runJobJSON(resting: Set<Int> = []) throws -> String {
+        guard let file = project.importedFile else { throw FlexibleJob.EncodeError.noPart }
+        var s = settings
+        if !resting.isEmpty {
+            for r in resting {
+                guard var f = s.face(r), f.isLoaded else { continue }
+                f.role = "resting"
+                s.setFace(f)
+            }
+            FlexibleSqueezeGroups.normalise(&s)
+        }
+        let pinches = FlexibleSqueezeGroups.pinches(conflicts, s)
         // ★ ROUND 4 (D2): what core cannot run yet (core brief) is said, never sent to be refused
-        if squeezeGroups.count > 1 { throw FlexibleJob.EncodeError.squeezeGroups }
+        if FlexibleSqueezeGroups.groups(s).count > 1 { throw FlexibleJob.EncodeError.squeezeGroups }
         if !pinches.isEmpty { throw FlexibleJob.EncodeError.pinch }
         let faceCount = max(file.faceCount, (project.viewerMesh?.faceIDs.max().map { Int($0) + 1 }) ?? 0)
         var inputs = FlexibleJob.Inputs(
             modelPath: file.path, resolution: project.quality.resolution,
             beadWidthMM: project.printParams.strutLineWidthMM, faceCount: faceCount,
-            settings: settings, regions: project.latticeJobRegions().regions.map(\.wireDictionary),
+            settings: s, regions: project.latticeJobRegions().regions.map(\.wireDictionary),
             stampGrids: stampGrids)
         inputs.sectorRegions = regions.wire
         (inputs.buildDir, inputs.plateDir) = buildDirections

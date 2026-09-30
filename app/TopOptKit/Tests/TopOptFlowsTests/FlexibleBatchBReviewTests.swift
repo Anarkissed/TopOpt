@@ -107,7 +107,9 @@ final class FlexibleBatchBReviewTests: XCTestCase {
         try await FlexibleHisProject.waitFor(120, "the rebuild after an edit") { m.lattice != nil }
         await m.waitForIdle()
         XCTAssertNil(m.latticeError)
-        XCTAssertEqual(stage.status.tone, .ready)
+        // ★ RE-PINNED (round 4 C2 verification): TPU 95A's shape-only lattice is a PREVIEW (core
+        // refuses the filament) — built, not failed, and never the green Ready
+        XCTAssertEqual(stage.status.tone, .preview)
     }
 
     /// ★ POSITIVE CONTROL for the count: an unforced build starts exactly once.
@@ -239,7 +241,10 @@ final class FlexibleBatchBReviewTests: XCTestCase {
         }
         await m.waitForIdle()
         print("FLEX-REVIEW undo of [Face 5 rests]: pill '\(stage.status.line)' \(stage.status.tone) · pinches \(m.pinches.count)")
-        XCTAssertEqual(stage.status.line, FlexibleMainStatus.ready)
+        // ★ RE-PINNED (round 4 C2 verification): rebuilt — and, the pinch being the app's preview
+        // only (core brief #6), the pill is a PREVIEW, never the green Ready (nor "Building…")
+        XCTAssertEqual(stage.status.line, FlexibleCoreHold.pill(.pinch, shapeOnlyLabel: nil))
+        XCTAssertEqual(stage.status.tone, .preview)
         XCTAssertEqual(m.pinches.map { "\($0.a)|\($0.b)" }, ["3|5"], "control: the conflict round 3 blocked on is still core's")
     }
 

@@ -12,6 +12,11 @@
 // (FlexibleMainStage.pillTapped → FlexibleCoreRun); the one thing to fix → Settings on its
 // pop-up; building → nothing opens. It used to open Settings on EVERY tap, a ready lattice
 // included — his img 6.
+// ★ C2 VERIFICATION: a PREVIEW tone — the lattice preview is built, but core can't take the job
+// as it stands (his pinch, two squeeze groups, a calibrate-first filament): never the Ready
+// green; its tap opens the Export step on why and what core CAN run. `goToLattice` (H10): on
+// another stage "Building…" (and a Ready his edits there made stale) takes him to the Lattice
+// stage, where builds start.
 //
 // Also here: the Flexible view toggles (H5 — Dent heat, Stress, Lattice; C2: no X-ray button)
 // and the main page's squish player slot.
@@ -22,18 +27,34 @@ import TopOptDesign
 public struct FlexibleMainStatusPill: View {
     @ObservedObject var main: FlexibleMainStage
     let open: () -> Void
+    let goToLattice: () -> Void
 
-    public init(main: FlexibleMainStage, open: @escaping () -> Void) {
+    public init(main: FlexibleMainStage, open: @escaping () -> Void, goToLattice: @escaping () -> Void = {}) {
         self.main = main
         self.open = open
+        self.goToLattice = goToLattice
     }
 
     public var body: some View {
         // the model's own changes (designs landing, the build) redraw ONLY this pill
         if let m = main.model {
-            FlexibleMainStatusPillBody(model: m, main: main, open: open)
+            FlexibleMainStatusPillBody(model: m, main: main, open: open, goToLattice: goToLattice)
         } else {
             Self.pill(FlexibleMainStatus.of(model: nil), action: open)
+        }
+    }
+
+    /// The pill's fill: the Ready green only when core can take the job (★ C2 VERIFICATION).
+    static func fill(_ t: FlexibleMainStatus.Tone) -> RGBA {
+        t == .ready ? FlexibleStageStyle.accentToken : DS.Color.fillDisabled
+    }
+    /// Its outline: warning for a fix, the green for a preview (the preview is good; core can't
+    /// take it yet), the panel's otherwise.
+    static func stroke(_ t: FlexibleMainStatus.Tone) -> RGBA {
+        switch t {
+        case .fix: return DS.Color.warning
+        case .preview: return FlexibleStageStyle.accentToken
+        default: return DS.Color.strokePanel
         }
     }
 
@@ -54,9 +75,8 @@ public struct FlexibleMainStatusPill: View {
             }
             .foregroundStyle(DS.Color.textPrimary.color)
             .padding(.vertical, 11).padding(.horizontal, DS.Space.xl3)
-            .background(Capsule().fill((s.tone == .ready ? FlexibleStageStyle.accentToken : DS.Color.fillDisabled).color)
-                .overlay(Capsule().strokeBorder((s.tone == .fix ? DS.Color.warning : DS.Color.strokePanel).color,
-                                                lineWidth: s.tone == .ready ? 0 : 1)))
+            .background(Capsule().fill(fill(s.tone).color)
+                .overlay(Capsule().strokeBorder(stroke(s.tone).color, lineWidth: s.tone == .ready ? 0 : 1)))
             .dsShadow(s.tone == .ready ? DS.Shadow.accentGlow : DS.Shadow.panel)
         }
         .buttonStyle(.plain)
@@ -69,16 +89,18 @@ private struct FlexibleMainStatusPillBody: View {
     @ObservedObject var main: FlexibleMainStage
     @ObservedObject var run: FlexibleCoreRun
     let open: () -> Void
+    let goToLattice: () -> Void
 
-    init(model: FlexibleStageModel, main: FlexibleMainStage, open: @escaping () -> Void) {
-        self.model = model; self.main = main; self._run = ObservedObject(wrappedValue: main.coreRun); self.open = open
+    init(model: FlexibleStageModel, main: FlexibleMainStage, open: @escaping () -> Void, goToLattice: @escaping () -> Void) {
+        self.model = model; self.main = main; self._run = ObservedObject(wrappedValue: main.coreRun)
+        self.open = open; self.goToLattice = goToLattice
     }
 
     var body: some View {
         // ★ C2: while core runs the job, the pill says so (a tap shows the run)
         let s = FlexibleMainStatus.of(model: model).whileSending(run.isSending)
         FlexibleMainStatusPill.pill(s) {
-            main.pillTapped(s, open: open)
+            main.pillTapped(s, open: open, goToLattice: goToLattice)
         }
     }
 }
@@ -88,7 +110,8 @@ private struct FlexibleMainStatusPillBody: View {
 /// X-ray button: the Lattice view IS the X-ray rendering (FlexibleMainStage.xray). Heat and
 /// Lattice on by default. The Lattice button shows / hides the lattice, or — with nothing to
 /// show — opens Settings, whose Exit turns the view on (`openSettings`, H5's closure). The
-/// "Lattice ready" note sits under the row (FlexibleMainNoteView);
+/// "Lattice ready" note sits on the row's line, left of the buttons (FlexibleMainNoteView — ★ C2
+/// verification: it was under the row);
 /// ★ BATCH C VERIFICATION: Stress and Dent heat are the two colourings of the pressed map — one
 /// at a time (FlexibleMainStage.toggleStress); Stress leaves X-ray and the lattice alone.
 /// ★ STRESS IS SOLVED DIRECTLY (item T): `solver` is the workspace's own FlexibleStressSolver
@@ -115,37 +138,40 @@ public struct FlexibleMainViewToggles: View {
     public var body: some View {
         // the workspace's solver (no publish: its sim's phase arrives on the next run-loop turn)
         let _ = solver.map { main.attach($0) }
-        VStack(alignment: .trailing, spacing: DS.Space.s) {
+        GeometryReader { g in
             HStack(spacing: DS.Space.s) {
-                // ★ a thermometer reads "heat" (the stacked-layers glyph did not — batch B review)
-                FlexibleViewButton(icon: FlexibleMainViewToggles.heatIcon, label: "Dent heat", on: main.heat) { main.toggleHeat() }
-                    .accessibilityIdentifier("flexible-main-view-heat")
-                FlexibleViewButton(icon: FlexibleMainViewToggles.stressIcon, label: main.stressRunning ? "Simulating…" : "Stress",
-                                   on: main.stress) { main.toggleStress() }
-                    .overlay {
-                        if main.stressRunning, main.stress {
-                            ProgressView().controlSize(.small).tint(DS.Color.textPrimary.color).allowsHitTesting(false)
+                // ★ C2: "Lattice ready" — ★ C2 VERIFICATION: beside the row, in the band `frame` holds
+                FlexibleMainNoteView(note: main.note, main: main, maxWidth: Self.noteFrame(viewport: g.size).width)
+                HStack(spacing: DS.Space.s) {
+                    // ★ a thermometer reads "heat" (the stacked-layers glyph did not — batch B review)
+                    FlexibleViewButton(icon: FlexibleMainViewToggles.heatIcon, label: "Dent heat", on: main.heat) { main.toggleHeat() }
+                        .accessibilityIdentifier("flexible-main-view-heat")
+                    FlexibleViewButton(icon: FlexibleMainViewToggles.stressIcon, label: main.stressRunning ? "Simulating…" : "Stress",
+                                       on: main.stress) { main.toggleStress() }
+                        .overlay {
+                            if main.stressRunning, main.stress {
+                                ProgressView().controlSize(.small).tint(DS.Color.textPrimary.color).allowsHitTesting(false)
+                            }
                         }
+                        .accessibilityIdentifier("flexible-main-view-stress")
+                    // ★ C2: shows / hides the lattice — or, with nothing to show, opens Settings
+                    FlexibleViewButton(icon: "cube.transparent", label: "Lattice", on: main.latticeShown) {
+                        main.latticeButtonTapped(openSettings: openSettings)
                     }
-                    .accessibilityIdentifier("flexible-main-view-stress")
-                // ★ C2: shows / hides the lattice — or, with nothing to show, opens Settings
-                FlexibleViewButton(icon: "cube.transparent", label: "Lattice", on: main.latticeShown) {
-                    main.latticeButtonTapped(openSettings: openSettings)
+                        .accessibilityIdentifier("flexible-main-view-lattice")
                 }
-                    .accessibilityIdentifier("flexible-main-view-lattice")
+                .latticeBandChipKeepOut()
             }
-            .latticeBandChipKeepOut()
-            // ★ C2: "Lattice ready" — in the band `frame` reserves under the row
-            FlexibleMainNoteView(note: main.note, main: main)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+            .padding(.top, PageChrome.belowGizmo)
+            .padding(.trailing, PageChrome.edge)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
-        .padding(.top, PageChrome.belowGizmo)
-        .padding(.trailing, PageChrome.edge)
     }
 
     /// Where the toggles sit, for the player's and the legends' keep-outs: the row (three 40 pt
-    /// buttons, `s` apart) AND the note's band under it (★ C2: reserved, so a note coming and
-    /// going never moves a legend).
+    /// buttons, `s` apart) AND the note's band beside it (★ C2: reserved, so a note coming and
+    /// going never moves a legend; ★ C2 VERIFICATION: on the row's line, so it ends where the row
+    /// ends and costs the legends nothing).
     static func frame(viewport: CGSize) -> CGRect {
         rowFrame(viewport: viewport).union(noteFrame(viewport: viewport))
     }

@@ -11475,7 +11475,7 @@ public struct WorkspacePlaceholder: View {
             printParamsButton
             // ★ LATTICE, TO THE LEFT OF OPTIMIZE (maintainer, 2026-08-17: "Make
             // it exactly like Optimize button, but to the left of it").
-            if project.lattice.flexible == nil { latticeThisButton } else { FlexibleMainStatusPill(main: flexibleMain, open: { if stage != .lattice { goToStage(.lattice) }; showFlexiblePage = true }) }   // Flexible (PR #362) H10: from any stage the pill lands on the Lattice stage, so Exit shows the lattice
+            if project.lattice.flexible == nil { latticeThisButton } else { FlexibleMainStatusPill(main: flexibleMain, open: { if stage != .lattice { goToStage(.lattice) }; showFlexiblePage = true }, goToLattice: { if stage != .lattice { goToStage(.lattice) } }) }   // Flexible (PR #362) H10: from any stage the pill lands on the Lattice stage, so Exit shows the lattice (C2 verification: "Building…" there goes to the Lattice stage only, where builds start)
             optimizeButton
         }
         // ★ THE BAR MEASURES ITSELF. Its height is not a constant: Optimize grows

@@ -69,6 +69,9 @@ public final class FlexibleMainStage: ObservableObject {
     /// export path"): core's Flexible runner and the Export step (its own object, observed only
     /// by the pill and the Export mount).
     public let coreRun = FlexibleCoreRun()
+    /// ★ C2 VERIFICATION: how the pill takes him to the Lattice stage (H10 hands it over with each
+    /// tap) — builds start only there.
+    var goToLattice: (() -> Void)?
 
     // MARK: batch C — Stress, the legends, tap-to-read (FlexibleMainStage+Views.swift)
 
@@ -167,7 +170,11 @@ public final class FlexibleMainStage: ObservableObject {
         #endif
     }
 
-    public init() {}
+    public init() {
+        // ★ C2 VERIFICATION: the Export step's buttons act through the stage (the model, the note,
+        // the way to the Lattice stage are its)
+        coreRun.onFix = { [weak self] f in self?.coreFix(f) }
+    }
 
     // MARK: the one model per project (H2)
 
@@ -289,6 +296,61 @@ public final class FlexibleMainStage: ObservableObject {
         FlexibleMainStatus.of(model: model)
     }
 
+    // MARK: ★ C2 VERIFICATION — Ready sends what he set NOW (edits on another stage included)
+
+    /// The main page moved since the stage last read it: a new scene (grid, region, bead), the
+    /// groups or their forces (a weight typed on Topology), or the settings behind the pipeline
+    /// (an undo). The stage re-reads the main page only while it shows (`projectChanged`).
+    func mainPageMoved(_ m: FlexibleStageModel) -> Bool {
+        let p = m.project
+        let key = m.currentSceneKey
+        let failed: Bool = { if case .failed = m.sceneState { return true } else { return false } }()
+        let sceneMoved = (m.sceneState == .ready && key != m.openedKey) || (failed && key != m.openAttemptKey)
+        let loadsMoved = seenLoads.map { $0.groups != p.selection.groups || $0.force != p.force } ?? true
+        return sceneMoved || loadsMoved || m.settingsOutranPipeline
+    }
+
+    /// The big button's Ready: send the job Settings describes to core's Flexible runner and open
+    /// the Export step. ★ C2 VERIFICATION (the verifier's V4): tapped on another stage after a
+    /// main-page edit there, C2 sent the job from BEFORE the edit (the group is the one source of
+    /// truth — his weight never reached core). The model catches up first; if the lattice no
+    /// longer matches, nothing is sent: it rebuilds (on the Lattice stage) and Ready comes back.
+    public func sendToCore() {
+        guard let m = model else { return }
+        if mainPageMoved(m) {
+            let before = m.settings
+            noteLoads()
+            m.openScene()   // (the same scene: re-reads the groups at once; a new one re-opens)
+            refresh()
+            if m.settings != before || m.sceneState != .ready || m.lattice == nil || m.latticeIsStale {
+                rebuildFirst()
+                return
+            }
+        }
+        coreRun.send(m)
+    }
+
+    /// The lattice must be rebuilt before anything is sent: on the Lattice stage it builds (now,
+    /// or when the designs land); elsewhere the pill takes him there, where builds start.
+    func rebuildFirst() {
+        if visible { buildIfReady() } else { goToLattice?() }
+        note.post(.building)
+    }
+
+    /// A button of the Export step: send what core can run, or use the filament with data (the
+    /// step closes; the lattice rebuilds and "Lattice ready" says when).
+    func coreFix(_ f: FlexibleCoreFix) {
+        guard let m = model else { return }
+        switch f {
+        case .send:
+            coreRun.send(m, fix: f)
+        case .useFilament(let id, _):
+            m.pickMaterial(id)
+            coreRun.close()
+            rebuildFirst()
+        }
+    }
+
     // MARK: reacting (never inside a view update)
 
     private func note(_ project: ProjectModel, owned: Bool, pageUp: Bool) {
@@ -321,7 +383,7 @@ public final class FlexibleMainStage: ObservableObject {
         buildIfReady()
     }
 
-    private func noteLoads() {
+    func noteLoads() {
         guard let p = model?.project else { return }
         seenLoads = (p.selection.groups, p.force)
     }
@@ -336,12 +398,7 @@ public final class FlexibleMainStage: ObservableObject {
     /// land. Debounced, only while the stage shows, never under Settings.
     func projectChanged() {
         guard !frozen, visible, let m = model, m.sceneState != .opening else { return }
-        let p = m.project
-        let key = m.currentSceneKey
-        let failed: Bool = { if case .failed = m.sceneState { return true } else { return false } }()
-        let sceneMoved = (m.sceneState == .ready && key != m.openedKey) || (failed && key != m.openAttemptKey)
-        let loadsMoved = seenLoads.map { $0.groups != p.selection.groups || $0.force != p.force } ?? true
-        if sceneMoved || loadsMoved || m.settingsOutranPipeline {
+        if mainPageMoved(m) {
             noteLoads()
             m.openScene()
             refresh()
@@ -414,7 +471,10 @@ public final class FlexibleMainStage: ObservableObject {
 
 /// What the bottom pill says (H10), as a value.
 public struct FlexibleMainStatus: Equatable, Sendable {
-    public enum Tone: Equatable, Sendable { case ready, building, fix, idle }
+    /// ★ C2 VERIFICATION: `preview` — the lattice preview is built, but core can't take the job
+    /// as it stands (a pinch, several squeeze groups, a calibrate-first filament —
+    /// FlexibleCoreHold): never the Ready green; its tap opens the Export step on why.
+    public enum Tone: Equatable, Sendable { case ready, building, fix, idle, preview }
     public let line: String
     public let tone: Tone
     /// The issue a tap opens Settings on.
@@ -431,15 +491,21 @@ public struct FlexibleMainStatus: Equatable, Sendable {
 
     /// The rule: the one thing to fix (readiness.oneLine) → a failed build (core's words; ★
     /// batch B review: it was "Building…" for ever) → building (opening, designing, no
-    /// lattice yet, stale) → ready (the shape-only label for a calibrate-first filament).
+    /// lattice yet, stale) → ★ C2 VERIFICATION: a PREVIEW when core can't take the job as it
+    /// stands (`hold`: a pinch, several squeeze groups; the shape-only label for a
+    /// calibrate-first filament) → ready.
     public static func of(readiness: FlexibleReadiness?, sceneReady: Bool, isBuilding: Bool,
-                          lattice: FlexibleGeneratedLattice?, stale: Bool, failure: String? = nil) -> FlexibleMainStatus {
+                          lattice: FlexibleGeneratedLattice?, stale: Bool, failure: String? = nil,
+                          hold: String? = nil) -> FlexibleMainStatus {
         guard let r = readiness, sceneReady else { return .init(line: opening, tone: .building, fix: nil) }
         // ★ the SHORT form (it truncated mid-sentence at 11" portrait); the pop-up says it whole
         if let first = r.blocking.first { return .init(line: first.pill, tone: .fix, fix: first) }
         if let failure, !isBuilding { return .init(line: FlexibleReadiness.buildFailedLine(failure), tone: .fix, fix: nil) }
         if isBuilding || r.designing || lattice == nil || stale { return .init(line: building, tone: .building, fix: nil) }
-        return .init(line: lattice?.shapeOnlyLabel ?? ready, tone: .ready, fix: nil)
+        // ★ C2 VERIFICATION: what core can't take as it stands is a preview, never the Ready green
+        if let hold { return .init(line: hold, tone: .preview, fix: nil) }
+        if let label = lattice?.shapeOnlyLabel { return .init(line: label, tone: .preview, fix: nil) }
+        return .init(line: ready, tone: .ready, fix: nil)
     }
 
     @MainActor
@@ -447,6 +513,7 @@ public struct FlexibleMainStatus: Equatable, Sendable {
         guard let m else { return .init(line: notOpened, tone: .idle, fix: nil) }
         if case .failed = m.sceneState { return .init(line: "The part could not be opened", tone: .fix, fix: nil) }
         return of(readiness: m.sceneState == .ready ? m.readiness : nil, sceneReady: m.sceneState == .ready,
-                  isBuilding: m.latticeBuilding, lattice: m.lattice, stale: m.latticeIsStale, failure: m.latticeFailure)
+                  isBuilding: m.latticeBuilding, lattice: m.lattice, stale: m.latticeIsStale, failure: m.latticeFailure,
+                  hold: m.coreHoldKind.map { FlexibleCoreHold.pill($0, shapeOnlyLabel: m.lattice?.shapeOnlyLabel) })
     }
 }

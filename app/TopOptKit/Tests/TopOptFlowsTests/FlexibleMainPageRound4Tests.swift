@@ -17,6 +17,7 @@ import XCTest
 import simd
 @testable import TopOptFlows
 @testable import TopOptKit
+import TopOptDesign
 
 final class FlexibleMainPageRound4Tests: XCTestCase {
 
@@ -183,7 +184,8 @@ final class FlexibleMainPageRound4Tests: XCTestCase {
         XCTAssertEqual(sending.tap, .send)
         XCTAssertEqual(ready.whileSending(false), ready)
         let pill = try FlexibleSource.code("FlexibleMainStatusPill.swift")
-        XCTAssertTrue(pill.contains("main.pillTapped(s, open: open)"), "the pill asks the stage what its tap does")
+        // ★ RE-PINNED (C2 verification): H10's goToLattice too ("Building…" on another stage)
+        XCTAssertTrue(pill.contains("main.pillTapped(s, open: open, goToLattice: goToLattice)"), "the pill asks the stage what its tap does")
         // ★ RED CONTROL: batch B's pill — every tap opened Settings, a ready lattice included
         XCTAssertFalse(pill.contains("if s.fix != nil { main.openFix() }\n            open()"),
                        "control: the old body opened Settings on every tap")
@@ -261,7 +263,9 @@ final class FlexibleMainPageRound4Tests: XCTestCase {
         XCTAssertTrue(run.shown)
         guard case .notSent(let line, let why) = run.phase else { return XCTFail("not sent: \(run.phase)") }
         print("FLEX-CORE his project as saved: '\(line)' · (i) '\(why)'")
-        XCTAssertEqual(line, FlexibleCoreRun.notSentLine(.pinch))
+        // ★ RE-PINNED (C2 verification): the line names his two faces (FlexibleCoreHold), and the
+        // step offers each end resting (FlexibleMainPageRound4VerifyTests)
+        XCTAssertEqual(line, "Not sent: core can\u{2019}t press \(m.displayName(3)) and \(m.displayName(5)) at once")
         XCTAssertEqual(run.runs, 0, "nothing reached core")
         // ★ POSITIVE CONTROL: face 5 rests — the same tap sends it (the counter can move)
         m.rest(5)
@@ -276,8 +280,10 @@ final class FlexibleMainPageRound4Tests: XCTestCase {
         }
     }
 
-    /// A calibrate-first filament: the page's lattice is shape-only (D-R3-12) and its pill reads
-    /// Ready; sent, core's own runner refuses it — said in one line, core's sentence behind (i).
+    /// A calibrate-first filament: the page's lattice is shape-only (D-R3-12). ★ RE-PINNED (C2
+    /// verification): its pill is a PREVIEW, not Ready, and its tap sends nothing (core refuses
+    /// the filament from the catalogue entry the app reads — FlexibleMainPageRound4VerifyTests);
+    /// core's own refusal, when one comes back, is said in one line, its sentence behind (i).
     @MainActor
     func testACalibrateFirstFilamentIsCoresRefusalInOneLine() async throws {
         let pm = try FlexibleHisProject.padProject(FlexibleStageSettings(materialID: "tpu95a_generic"))
@@ -291,14 +297,18 @@ final class FlexibleMainPageRound4Tests: XCTestCase {
         stage.didExitSettings()
         try await FlexibleHisProject.waitFor(120, "the shape-only lattice") { m.lattice != nil || m.latticeError != nil }
         await m.waitForIdle()
-        XCTAssertEqual(stage.status.tone, .ready, "premise: the pill reads Ready (\(stage.status.line))")
+        XCTAssertEqual(stage.status.tone, .preview, "premise: a preview, not Ready (\(stage.status.line))")
         stage.pillTapped(stage.status, open: { XCTFail("Ready never opens Settings") })
-        try await FlexibleHisProject.waitFor(120, "core's answer") { !stage.coreRun.isSending }
-        guard case .ran(let rep) = stage.coreRun.phase, let refusal = rep.refusal else {
-            return XCTFail("core refuses a calibrate-first filament: \(stage.coreRun.phase)")
-        }
-        print("FLEX-CORE TPU 95A: '\(stage.coreRun.line)' · code \(refusal.code) · (i) '\(stage.coreRun.info ?? "-")'")
-        XCTAssertEqual(stage.coreRun.line, "Core refused it: no squish data for this filament yet", "one short line")
+        XCTAssertEqual(stage.coreRun.runs, 0, "a refusal known before the tap is not sent")
+        // core's own runner, asked directly, refuses it — and that answer reads in one short line
+        let out = FileManager.default.temporaryDirectory.appendingPathComponent("flex-c2-\(UUID().uuidString)").path
+        defer { try? FileManager.default.removeItem(atPath: out) }
+        let r = try FlexibleCore.runJob(jobJSON: try m.runJobJSON(), jobDir: (try XCTUnwrap(pm.importedFile).path as NSString).deletingLastPathComponent,
+                                        outDir: out, materialsPath: FlexibleHisProject.materialsPath, fingerprint: CoreFingerprint.value)
+        let rep = FlexibleCoreRunReport.of(r, outDir: out, seconds: 0)
+        let refusal = try XCTUnwrap(rep.refusal, "core refuses a calibrate-first filament")
+        print("FLEX-CORE TPU 95A: '\(rep.line)' · code \(refusal.code) · the step says '\(stage.coreRun.line)' · (i) '\(stage.coreRun.info ?? "-")'")
+        XCTAssertEqual(rep.line, "Core refused it: no squish data for this filament yet", "one short line")
         // ★ CONTROL: core's own sentence is far too long for one line (it names five brands)
         XCTAssertGreaterThan(refusal.reason.count, 80)
         XCTAssertEqual(stage.coreRun.info, "\(refusal.reason) (\(refusal.code))", "core's whole sentence behind the (i)")
@@ -317,7 +327,7 @@ final class FlexibleMainPageRound4Tests: XCTestCase {
 
     func testTheExportStepSaysTheExportsWaitOnCoreInOneLine() throws {
         let code = try FlexibleSource.code("FlexibleExportSheet.swift")
-        XCTAssertTrue(code.contains("Text(FlexibleCoreRun.exportsWait)"), "each card's one line")
+        XCTAssertTrue(code.contains("Text(FlexibleCoreRun.exportsWait)"), "the exports' one line (C2 verification: once, not per card)")
         XCTAssertTrue(code.contains("Text(run.line)"), "core's answer in one line")
         XCTAssertFalse(code.contains("The part with its lattice, one closed solid"), "no second line on a card")
         XCTAssertTrue(code.contains("public struct FlexibleExportMount: View"))
@@ -325,21 +335,23 @@ final class FlexibleMainPageRound4Tests: XCTestCase {
 
     // MARK: the note's place
 
-    /// The note sits under the view row, inside the frame every legend and the player keep out of
-    /// (reserved, so a note coming and going never moves a legend).
-    func testTheNoteBandIsReservedUnderTheViewRow() {
+    /// The note sits in a band inside the frame every legend and the player keep out of
+    /// (reserved, so a note coming and going never moves a legend). ★ RE-PINNED (C2 verification):
+    /// BESIDE the row, on its line — the band under it pushed two legends into a second column at
+    /// 13" landscape with his Gravity chip column (FlexibleMainPageRound4VerifyTests).
+    func testTheNoteBandIsReservedBesideTheViewRow() {
         let viewports: [(String, CGSize)] = [("13l", CGSize(width: 1376, height: 1032)), ("13p", CGSize(width: 1032, height: 1376)),
                                              ("11l", CGSize(width: 1194, height: 834)), ("11p", CGSize(width: 834, height: 1194))]
         for (name, v) in viewports {
             let f = FlexibleMainViewToggles.frame(viewport: v), n = FlexibleMainViewToggles.noteFrame(viewport: v)
             XCTAssertTrue(f.contains(n), "the note band is inside the reserved frame at \(name)")
-            XCTAssertEqual(n.maxX, v.width - PageChrome.edge, accuracy: 0.5, "trailing, under the row")
+            XCTAssertEqual(n.maxX, FlexibleMainViewToggles.rowFrame(viewport: v).minX - DS.Space.s, accuracy: 0.5, "beside the row, left of it")
             let keep = FlexibleMainLegendLayout.keepOut(viewport: v, bottomClearance: 94, chipColumnWidth: 0)
             let placed = FlexibleMainLegendLayout.place([.dent, .stress, .lattice], minimized: [], viewport: v, keepOut: keep)
             for (k, p) in placed { XCTAssertFalse(p.frame.intersects(n), "the \(k) legend clears the note at \(name)") }
             print("FLEX-NOTE \(name): row+note \(f.integral) · note \(n.integral) · legends \(placed.map { "\($0.key.rawValue) \($0.value.frame.integral) \($0.value.expanded ? "open" : "pill")" }.sorted())")
             // ★ RED CONTROL: batch C's frame (the row alone) does not hold the note
-            let rowOnly = CGRect(x: f.minX, y: f.minY, width: f.width, height: 40)
+            let rowOnly = FlexibleMainViewToggles.rowFrame(viewport: v)
             XCTAssertFalse(rowOnly.contains(n), "control: the row-only frame leaves the note unreserved")
         }
     }
@@ -353,8 +365,9 @@ final class FlexibleMainPageRound4Tests: XCTestCase {
             "if project.lattice.flexible != nil { FlexibleExportMount(run: flexibleMain.coreRun).zIndex(48) }",
         ]
         for p in pins { XCTAssertEqual(ws.components(separatedBy: p).count - 1, 1, "exactly once: \(p)") }
-        // H10 is untouched: the pill's own body decides (send / Settings / wait)
-        XCTAssertTrue(ws.contains("FlexibleMainStatusPill(main: flexibleMain, open: { if stage != .lattice { goToStage(.lattice) }; showFlexiblePage = true })"))
+        // H10: the pill's own body decides (send / Settings / wait) — ★ RE-PINNED (C2 verification):
+        // plus goToLattice ("Building…" on another stage goes to the Lattice stage only)
+        XCTAssertTrue(ws.contains("FlexibleMainStatusPill(main: flexibleMain, open: { if stage != .lattice { goToStage(.lattice) }; showFlexiblePage = true }, goToLattice: { if stage != .lattice { goToStage(.lattice) } })"))
         // #354's octet Lattice run is untouched
         XCTAssertTrue(ws.contains("private func requestLatticeRun() {\n        guard canLatticeThis else { return }"))
     }

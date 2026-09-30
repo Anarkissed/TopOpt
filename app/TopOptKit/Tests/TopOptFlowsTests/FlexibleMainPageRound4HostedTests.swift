@@ -2,14 +2,18 @@
 // (offscreen, never the app) and CLICKED (task 2026-09-29-flexible-screens, round 4 batch C2):
 //   * three buttons, no X-ray; the row and the "Lattice ready" note sit inside the frames every
 //     legend and the player keep out of (FlexibleMainViewToggles.rowFrame / noteFrame), at 11"
-//     and 13", both orientations — the note's longest line included;
+//     and 13", both orientations — the note's longest line included. ★ C2 VERIFICATION: the note
+//     sits on the row's own line, LEFT of the three buttons (its band under the row pushed two
+//     legends into a second column at 13" landscape with his Gravity chip column);
 //   * a click on Lattice with nothing to show opens Settings (the workspace's closure); with a
-//     lattice it hides / shows it; the note's [Show] shows it.
+//     lattice it hides / shows it; the note's [Show] shows it — ★ C2 VERIFICATION: anywhere on
+//     the note (its target was the 13 pt word alone).
 #if canImport(AppKit)
 import XCTest
 import SwiftUI
 import AppKit
 @testable import TopOptFlows
+import TopOptDesign
 
 private final class C2HostWindow: NSWindow {
     override var canBecomeKey: Bool { true }
@@ -60,7 +64,8 @@ final class FlexibleMainPageRound4HostedTests: XCTestCase {
     static let sizes: [(String, CGSize)] = [("11l", CGSize(width: 1194, height: 834)), ("11p", CGSize(width: 834, height: 1194)),
                                              ("13p", CGSize(width: 1032, height: 1376)), ("13l", CGSize(width: 1376, height: 1032))]
 
-    func testTheRowAndTheNoteSitInTheirReservedFrames() {
+    /// ★ RE-PINNED (C2 verification): the note beside the row, on its line — no longer under it.
+    func testTheRowAndTheNoteSitSideBySideInTheirFrames() {
         for (name, size) in Self.sizes {
             for kind in [FlexibleMainNote.Kind.ready, .building] {
                 let stage = FlexibleMainStage()
@@ -73,12 +78,16 @@ final class FlexibleMainPageRound4HostedTests: XCTestCase {
                 let got = h.frames.all.filter { $0.width > 1 }
                 print("FLEX-HOSTED \(name) \(kind): drawn \(got.map(\.integral)) · row slot \(row.integral) · note band \(band.integral)")
                 XCTAssertEqual(got.count, 2, "the row and the note at \(name)")
-                let drawnRow = got.min { $0.minY < $1.minY } ?? .zero, note = got.max { $0.minY < $1.minY } ?? .zero
+                let drawnRow = got.max { $0.minX < $1.minX } ?? .zero, note = got.min { $0.minX < $1.minX } ?? .zero
                 XCTAssertTrue(row.insetBy(dx: -1, dy: -1).contains(drawnRow), "the three buttons fill their slot at \(name): \(drawnRow) in \(row)")
                 XCTAssertEqual(drawnRow.width, row.width, accuracy: 1, "three 40 pt buttons, no X-ray")
                 XCTAssertTrue(band.insetBy(dx: -1, dy: -1).contains(note), "the \(kind) note inside its band at \(name): \(note) in \(band)")
-                // ★ RED CONTROL: batch C's reserved frame (the row alone) does not hold the note
-                XCTAssertFalse(row.contains(note), "control: the row's frame alone leaves the note unreserved")
+                XCTAssertLessThanOrEqual(note.maxX, drawnRow.minX, "left of the buttons at \(name)")
+                XCTAssertEqual(note.midY, drawnRow.midY, accuracy: 1, "on the row's line at \(name)")
+                XCTAssertFalse(note.intersects(FlexibleMainLegendLayout.leftStrip(viewport: size)), "clear of the left panel at \(name)")
+                // ★ RED CONTROL: C2's band under the row does not hold the note any more
+                let c2Band = CGRect(x: size.width - PageChrome.edge - 300, y: row.maxY + DS.Space.s, width: 300, height: 34)
+                XCTAssertFalse(c2Band.insetBy(dx: -1, dy: -1).contains(note), "control: not in C2's band under the row")
             }
         }
     }
@@ -111,8 +120,10 @@ final class FlexibleMainPageRound4HostedTests: XCTestCase {
         stage.note.seconds = 60
         stage.note.post(.ready)
         pump(0.3)
-        let note = h.frames.all.filter { $0.width > 1 }.max { $0.minY < $1.minY } ?? .zero
-        click(h, CGPoint(x: note.maxX - 30, y: note.midY))
+        // ★ C2 VERIFICATION: the WHOLE note is [Show]'s target — clicked at its icon, far from the word
+        let note = h.frames.all.filter { $0.width > 1 }.min { $0.minX < $1.minX } ?? .zero
+        XCTAssertGreaterThanOrEqual(note.height, 40, "a target as tall as the row's buttons")
+        click(h, CGPoint(x: note.minX + 16, y: note.midY))
         XCTAssertTrue(stage.latticeShown, "[Show] shows the lattice")
         XCTAssertNil(stage.note.kind, "…and the note goes")
     }

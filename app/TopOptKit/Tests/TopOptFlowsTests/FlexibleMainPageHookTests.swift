@@ -34,7 +34,8 @@ final class FlexibleMainPageHookTests: XCTestCase {
             // ★ batch C (re-pinned on purpose): the toggles gain Stress, solved directly (FlexibleBatchCHookTests pins the whole line)
             ("H5", "if flexibleMain.owns(project, stage) { FlexibleMainViewToggles(main: flexibleMain, solver: FlexibleStressSolver(app: model, sim: latticeSim), openSettings: { showFlexiblePage = true }) }"),   // ★ re-pinned (batch C verification; round 4 C2: openSettings)
             // ★ batch B review: from Topology the pill goes to the Lattice stage first (Exit then shows the lattice)
-            ("H10", "if project.lattice.flexible == nil { latticeThisButton } else { FlexibleMainStatusPill(main: flexibleMain, open: { if stage != .lattice { goToStage(.lattice) }; showFlexiblePage = true }) }"),
+            // ★ re-pinned (round 4 C2 verification): "Building…" on another stage goes to the Lattice stage only
+            ("H10", "if project.lattice.flexible == nil { latticeThisButton } else { FlexibleMainStatusPill(main: flexibleMain, open: { if stage != .lattice { goToStage(.lattice) }; showFlexiblePage = true }, goToLattice: { if stage != .lattice { goToStage(.lattice) } }) }"),
             // ★ batch B review: the player clears the bottom-right chip column (Gravity …) in its row
             ("P", "if flexibleMain.owns(project, stage) { FlexibleMainPlayerSlot(main: flexibleMain, bottomClearance: bottomBarClearance, chipColumnWidth: force.gravityIsSet ? (settingsChipWidths.values.max() ?? 0) : 0) }"),
         ]

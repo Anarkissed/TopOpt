@@ -7,10 +7,14 @@
 // "Core designed it · Gyroid · 230 °C · 3 faces", "Core refused it: …", "Not sent: …" — with
 // the whole sentence (or where core's receipt and heat maps are) behind the (i).
 //
-// ★ BOTH CARDS ARE DISABLED UNTIL CORE HAS THE FLEXIBLE LATTICE (maintainer, 2026-09-29:
+// ★ BOTH EXPORTS ARE DISABLED UNTIL CORE HAS THE FLEXIBLE LATTICE (maintainer, 2026-09-29:
 // "The exports aren't supposed to happen until core gets to it"). Core's Flexible runner writes
-// receipts and heat maps, no mesh; each card says so in ONE line
-// (FlexibleCoreRun.exportsWait). Disabled look: the G-code button's fillDisabled / textDisabled.
+// receipts and heat maps, no mesh; ★ C2 VERIFICATION: the step says so ONCE, under core's line
+// (it was said once per card), and the two exports are bare disabled buttons.
+// ★ C2 VERIFICATION: when core can't take the job as it stands (FlexibleCoreHold — his pinch,
+// two squeeze groups, a calibrate-first filament), 1–3 buttons under core's line send what it
+// CAN run or use the filament with squish data (his rule: "1-3 fix buttons"). DS tokens only
+// (the scrim, the stroke and the shadow were raw colours).
 //
 // Mounted by one #354 line in WorkspacePlaceholder (FlexibleExportMount — on any stage, since
 // the pill is on every stage's bottom bar).
@@ -43,7 +47,7 @@ public struct FlexibleExportSheet: View {
 
     public var body: some View {
         ZStack {
-            Rectangle().fill(.ultraThinMaterial).overlay(Color.black.opacity(0.45)).ignoresSafeArea()
+            Rectangle().fill(.ultraThinMaterial).overlay(DS.Color.scrim.color).ignoresSafeArea()
                 .onTapGesture { onClose() }
             VStack(alignment: .leading, spacing: DS.Space.l) {
                 HStack(alignment: .firstTextBaseline) {
@@ -58,18 +62,26 @@ public struct FlexibleExportSheet: View {
                     .accessibilityIdentifier("flexible-export-close")
                 }
                 coreRow
-                HStack(alignment: .top, spacing: DS.Space.m) {
-                    card("STL", button: "Export STL", id: "flexible-export-stl-disabled")
-                    card("G-code", button: "Export G-code", id: "flexible-export-gcode-disabled")
+                if let fixes = run.hold?.fixes, !fixes.isEmpty {
+                    fixRow(fixes)
                 }
-                .fixedSize(horizontal: false, vertical: true)
+                VStack(alignment: .leading, spacing: DS.Space.s) {
+                    Text(FlexibleCoreRun.exportsWait)
+                        .font(.system(size: 14)).foregroundStyle(DS.Color.textSecondary.color)
+                        .lineLimit(1).minimumScaleFactor(0.85)
+                        .accessibilityIdentifier("flexible-export-wait")
+                    HStack(spacing: DS.Space.m) {
+                        card("Export STL", id: "flexible-export-stl-disabled")
+                        card("Export G-code", id: "flexible-export-gcode-disabled")
+                    }
+                }
             }
             .padding(DS.Space.xl4)
             .frame(maxWidth: 820)
             .fixedSize(horizontal: false, vertical: true)
             .background(RoundedRectangle(cornerRadius: DS.Radius.sheet, style: .continuous).fill(DS.Surface.sheet.color))
-            .overlay(RoundedRectangle(cornerRadius: DS.Radius.sheet, style: .continuous).stroke(Color.white.opacity(0.10), lineWidth: 1))
-            .shadow(color: .black.opacity(0.45), radius: 40, y: 18)
+            .overlay(RoundedRectangle(cornerRadius: DS.Radius.sheet, style: .continuous).stroke(DS.Color.strokePanel.color, lineWidth: 1))
+            .dsShadow(DS.Shadow.sheet)
             .padding(.horizontal, PageChrome.edge)
         }
         .accessibilityIdentifier("flexible-export-sheet")
@@ -102,26 +114,34 @@ public struct FlexibleExportSheet: View {
         .frame(minHeight: FlexInfoButton<EmptyView>.target)
     }
 
-    private func card(_ title: String, button: String, id: String) -> some View {
-        VStack(alignment: .leading, spacing: DS.Space.s) {
-            HStack(spacing: DS.Space.xs) {
-                Circle().fill(DS.Color.textTertiary.color).frame(width: 10, height: 10)
-                Text(title).font(.system(size: 21, weight: .semibold)).foregroundStyle(DS.Color.textPrimary.color)
+    /// ★ C2 VERIFICATION: what core CAN run (or the filament with data), 1–3 big buttons.
+    private func fixRow(_ fixes: [FlexibleCoreFix]) -> some View {
+        HStack(spacing: DS.Space.s) {
+            ForEach(Array(fixes.prefix(3).enumerated()), id: \.offset) { i, f in
+                let sent = run.sentFix == f
+                Button { run.onFix?(f) } label: {
+                    Text(f.title)
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(i == 0 ? FlexibleStageStyle.onAccent : DS.Color.textPrimary.color)
+                        .lineLimit(1).minimumScaleFactor(0.8)
+                        .padding(.vertical, 12).padding(.horizontal, DS.Space.l)
+                        .frame(minWidth: 120)
+                        .background(Capsule().fill(i == 0 ? FlexibleStageStyle.accent : DS.Color.chipSolid.color))
+                        .overlay(Capsule().strokeBorder(DS.Color.textPrimary.color, lineWidth: 1.5).opacity(sent ? 1 : 0))
+                }
+                .buttonStyle(.plain)
+                .disabled(run.isSending)
+                .accessibilityIdentifier("flexible-export-fix-\(f.id)")
             }
-            Text(FlexibleCoreRun.exportsWait)
-                .font(.system(size: 14)).foregroundStyle(DS.Color.textSecondary.color)
-                .lineLimit(1).minimumScaleFactor(0.85)
-            Spacer(minLength: DS.Space.m)
-            Text(button)
-                .font(.system(size: 16, weight: .semibold)).foregroundStyle(DS.Color.textDisabled.color)
-                .frame(maxWidth: .infinity).padding(.vertical, DS.Space.s + 6)
-                .background(Capsule().fill(DS.Color.fillDisabled.color))
-                .accessibilityIdentifier(id)
         }
-        .padding(DS.Space.l)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous).fill(DS.Surface.dialog.color))
-        .overlay(RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous)
-            .stroke(DS.Color.textTertiary.color.opacity(0.35), lineWidth: 1))
+    }
+
+    /// A disabled export (core writes no printable file yet): the G-code button's disabled look.
+    private func card(_ button: String, id: String) -> some View {
+        Text(button)
+            .font(.system(size: 16, weight: .semibold)).foregroundStyle(DS.Color.textDisabled.color)
+            .frame(maxWidth: .infinity).padding(.vertical, DS.Space.s + 6)
+            .background(Capsule().fill(DS.Color.fillDisabled.color))
+            .accessibilityIdentifier(id)
     }
 }

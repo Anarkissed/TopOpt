@@ -60,6 +60,8 @@ public enum FlexibleJob {
     public enum EncodeError: Error, Equatable, CustomStringConvertible {
         case noFilament
         case noLoadedFace
+        /// ★ C2 VERIFICATION: the project has no imported file (C2 said "press a face first").
+        case noPart
         case missingStampGrid(UUID)
         /// ★ ROUND 4 (D2): two or more squeeze groups — core designs one squeeze (core brief).
         case squeezeGroups
@@ -70,6 +72,7 @@ public enum FlexibleJob {
             switch self {
             case .noFilament: return "Pick a filament first."
             case .noLoadedFace: return "Mark at least one face as carrying weight."
+            case .noPart: return "The part's file is missing \u{2014} import it again."
             case .missingStampGrid: return "A stamp has not been laid on its face yet."
             case .squeezeGroups: return "Squeeze groups are the app's preview for now: core designs one squeeze at a time."
             case .pinch: return "A pinch is the app's preview for now: core designs one squish profile per stack."

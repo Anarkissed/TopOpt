@@ -20,6 +20,11 @@
 //
 // ★ WHAT CORE CANNOT RUN IS SAID, NEVER SENT (D2): several squeeze groups, a pinch — the
 // encoder throws, the Export step says it in one line ("Not sent: …"), core's reason behind (i).
+// ★ C2 VERIFICATION — AND IT IS KNOWN BEFORE THE TAP (FlexibleCoreHold): the pill is a preview,
+// not the green Ready, and the step offers what core CAN run (1–3 buttons: each end of a pinch
+// resting, each group alone — in the job only — or the filament with squish data). A
+// calibrate-first filament is no longer sent to be refused: core refuses it from the very
+// catalogue entry the app reads (its code and sentence are behind the (i)).
 // ★ A STAGE REFUSAL IS CORE'S ANSWER (a calibrate-first filament, two loaded faces on one
 // stack): "Core refused it: …" in one line, core's whole sentence behind (i).
 // ★ EXPORTS WAIT ON CORE: core's Flexible runner writes receipts, heat maps and CSVs — no mesh
@@ -33,6 +38,9 @@ import TopOptKit
 public struct FlexibleCoreRunReport: Equatable, Sendable {
     /// Core's stage refusal (code + sentence), or nil when it designed the lattice.
     public let refusal: FlexRefusal?
+    /// ★ C2 VERIFICATION: what was sent when it was not the whole job ("Face 5 resting",
+    /// "Group 1 only") — nil for the job Settings describes.
+    public var scope: String? = nil
     /// The loaded faces core designed (its receipt's `faces`).
     public let faces: Int
     /// What core's recommender chose (nil on a refusal).
@@ -47,6 +55,7 @@ public struct FlexibleCoreRunReport: Equatable, Sendable {
     public var line: String {
         if let r = refusal { return Self.refusalLine(r) }
         var parts = ["Core designed it"]
+        if let s = scope { parts.append(s) }
         if let t = topology { parts.append(t.prefix(1).uppercased() + t.dropFirst()) }
         if let c = tempC { parts.append(String(format: "%.0f \u{00B0}C", c)) }
         parts.append(faces == 1 ? "1 face" : "\(faces) faces")
@@ -70,13 +79,15 @@ public struct FlexibleCoreRunReport: Equatable, Sendable {
     }
 
     /// Read core's answer: the refusal from the result, the choices from its receipt.
-    public static func of(_ r: FlexRunInfo, outDir: String, seconds: Double) -> FlexibleCoreRunReport {
+    public static func of(_ r: FlexRunInfo, outDir: String, seconds: Double, scope: String? = nil) -> FlexibleCoreRunReport {
         let receipt = (try? JSONSerialization.jsonObject(with: Data(r.receiptJSON.utf8))) as? [String: Any] ?? [:]
         let faces = (receipt["faces"] as? [Any])?.count ?? 0
-        return FlexibleCoreRunReport(refusal: r.refusal, faces: faces,
-                                     topology: r.refusal == nil ? receipt["topology"] as? String : nil,
-                                     tempC: r.refusal == nil ? (receipt["nozzle_temp_c"] as? NSNumber)?.doubleValue : nil,
-                                     outDir: outDir, files: r.files, seconds: seconds)
+        var rep = FlexibleCoreRunReport(refusal: r.refusal, faces: faces,
+                                        topology: r.refusal == nil ? receipt["topology"] as? String : nil,
+                                        tempC: r.refusal == nil ? (receipt["nozzle_temp_c"] as? NSNumber)?.doubleValue : nil,
+                                        outDir: outDir, files: r.files, seconds: seconds)
+        rep.scope = scope
+        return rep
     }
 }
 
@@ -84,7 +95,7 @@ public struct FlexibleCoreRunReport: Equatable, Sendable {
 /// by the workspace's body).
 @MainActor
 public final class FlexibleCoreRun: ObservableObject {
-    public enum Phase: Equatable {
+    public enum Phase: Equatable, Sendable {
         case idle
         case sending
         case ran(FlexibleCoreRunReport)
@@ -97,8 +108,18 @@ public final class FlexibleCoreRun: ObservableObject {
     @Published public private(set) var phase: Phase = .idle
     /// The Export step is up.
     @Published public private(set) var shown = false
+    /// ★ C2 VERIFICATION: why the job Settings describes is not sent as it stands, and what can
+    /// be sent instead (the step's 1–3 buttons) — read on each tap of the pill.
+    @Published public private(set) var hold: FlexibleCoreHold?
     /// The document the phase answers (the same job is not sent twice).
     public private(set) var sentJob: String?
+    /// The step's button that sent it (nil: the job Settings describes).
+    public private(set) var sentFix: FlexibleCoreFix?
+    /// ★ C2 VERIFICATION: a button of the step was tapped (the main stage acts on it — the model
+    /// and the stage's navigation are its).
+    public var onFix: ((FlexibleCoreFix) -> Void)?
+    /// The last run's temp folder (deleted when the next job is sent — they were never cleaned).
+    private var lastOut: String?
     /// How many times core was called (tests).
     var runs = 0
     /// Core's Flexible runner (tests may stand in for it).
@@ -120,6 +141,7 @@ public final class FlexibleCoreRun: ObservableObject {
         switch e {
         case .noFilament: return "Not sent: pick a filament first"
         case .noLoadedFace: return "Not sent: press a face first"
+        case .noPart: return "Not sent: the part\u{2019}s file is missing"
         case .missingStampGrid: return "Not sent: a stamp is not on its face yet"
         case .squeezeGroups: return "Not sent: core runs one squeeze group at a time"
         case .pinch: return "Not sent: core can\u{2019}t press both ends yet"
@@ -127,48 +149,89 @@ public final class FlexibleCoreRun: ObservableObject {
     }
 
     /// Ready's tap: open the Export step and send the job Settings describes — unless core's
-    /// answer to this very job is already in hand, or a run is in flight.
+    /// answer to this very job is already in hand, or a run is in flight. ★ C2 VERIFICATION: a job
+    /// core cannot take as it stands (FlexibleCoreHold) is not sent: the step says why and offers
+    /// what core can run; an answer the step already has for one of its own buttons stands.
     public func send(_ m: FlexibleStageModel) {
         shown = true
         guard !isSending else { return }
+        hold = m.coreHold
+        if let h = hold {
+            if let f = sentFix, h.fixes.contains(f), case .ran = phase,
+               (try? m.runJobJSON(resting: Set(f.resting))) == sentJob { return }
+            sentJob = nil; sentFix = nil
+            phase = .notSent(line: h.line, why: h.why)
+            return
+        }
         let job: String
         do {
             job = try m.runJobJSON()
         } catch let e as FlexibleJob.EncodeError {
-            sentJob = nil
+            sentJob = nil; sentFix = nil
             phase = .notSent(line: Self.notSentLine(e), why: e.description)
             return
         } catch {
-            sentJob = nil
+            sentJob = nil; sentFix = nil
             phase = .notSent(line: "Not sent", why: "\(error)")
             return
         }
-        if job == sentJob, case .ran = phase { return }   // the same job: its answer stands
+        if job == sentJob, sentFix == nil, case .ran = phase { return }   // the same job: its answer stands
+        start(job, model: m, fix: nil)
+    }
+
+    /// ★ C2 VERIFICATION: one of the step's buttons that SENDS — the job with those faces resting
+    /// (in the job only). A filament button is the stage's (it changes his settings).
+    public func send(_ m: FlexibleStageModel, fix: FlexibleCoreFix) {
+        guard case .send = fix, !isSending else { return }
+        shown = true
+        let job: String
+        do {
+            job = try m.runJobJSON(resting: Set(fix.resting))
+        } catch let e as FlexibleJob.EncodeError {
+            phase = .notSent(line: Self.notSentLine(e), why: e.description)
+            return
+        } catch {
+            phase = .notSent(line: "Not sent", why: "\(error)")
+            return
+        }
+        if job == sentJob, case .ran = phase { return }
+        start(job, model: m, fix: fix)
+    }
+
+    private func start(_ job: String, model m: FlexibleStageModel, fix: FlexibleCoreFix?) {
         guard let materials = m.materialsPath, let file = m.project.importedFile else {
-            sentJob = nil
+            sentJob = nil; sentFix = nil
             phase = .failed("The filament catalogue or the part is missing")
             return
         }
         let dir = (file.path as NSString).deletingLastPathComponent
         let out = FileManager.default.temporaryDirectory.appendingPathComponent("flexible-\(UUID().uuidString)", isDirectory: true).path
+        if let old = lastOut { try? FileManager.default.removeItem(atPath: old) }
+        lastOut = out
         sentJob = job
+        sentFix = fix
         phase = .sending
         runs += 1
         let runner = self.runner
+        let scope = fix?.scope
         let t0 = Date()
         Task.detached(priority: .userInitiated) { [weak self] in
             let result: Phase
             do {
                 let r = try runner(job, dir, out, materials)
-                result = .ran(FlexibleCoreRunReport.of(r, outDir: out, seconds: Date().timeIntervalSince(t0)))
+                result = .ran(FlexibleCoreRunReport.of(r, outDir: out, seconds: Date().timeIntervalSince(t0), scope: scope))
             } catch {
                 result = .failed("\(error)")
             }
-            await MainActor.run {
-                guard let self, self.sentJob == job else { return }
-                self.phase = result
-            }
+            await self?.land(result, for: job)
         }
+    }
+
+    /// Core's answer, on the main actor (★ C2 VERIFICATION: a method — the captured `self` was
+    /// read inside MainActor.run, a Swift 6 error).
+    private func land(_ result: Phase, for job: String) {
+        guard sentJob == job else { return }
+        phase = result
     }
 
     /// The Export step's close (the run, if any, carries on and its answer stays).
@@ -191,7 +254,8 @@ public final class FlexibleCoreRun: ObservableObject {
         case .idle, .sending: return nil
         case .ran(let r):
             if let f = r.refusal { return "\(f.reason) (\(f.code))" }
-            return "Core\u{2019}s receipt, heat maps and CSVs (\(r.files.count) files) are in \(r.outDir). It designs the density, not the printable file yet."
+            // ★ C2 VERIFICATION: no temp path (useless on an iPad)
+            return "Core wrote its receipt, heat maps and CSVs (\(r.files.count) files). It designs the density, not the printable file yet."
         case .notSent(_, let why): return why
         case .failed(let why): return why
         }
@@ -206,7 +270,8 @@ extension FlexibleMainStatus {
 
     public var tap: Tap {
         switch tone {
-        case .ready: return .send
+        // ★ C2 VERIFICATION: a preview core can't take as it stands opens the Export step on why
+        case .ready, .preview: return .send
         case .fix, .idle: return .openSettings
         case .building: return .wait
         }
@@ -214,7 +279,7 @@ extension FlexibleMainStatus {
 
     /// While core runs the job: the pill says so; a tap shows the run (still `.send`).
     public func whileSending(_ on: Bool) -> FlexibleMainStatus {
-        guard on, tone == .ready else { return self }
-        return FlexibleMainStatus(line: Self.sending, tone: .ready, fix: nil)
+        guard on, tone == .ready || tone == .preview else { return self }
+        return FlexibleMainStatus(line: Self.sending, tone: tone, fix: nil)
     }
 }
