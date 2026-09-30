@@ -379,7 +379,7 @@ public enum LatticeRegionMask {
                                to regions: [LatticeRegionSpec],
                                whenEmpty: EmptyRegionPolicy = .latticeEverything)
         -> LatticeVoxelGrid {
-        guard regions.contains(where: { $0.role == .include }) else {
+        guard LatticeJobIncludeGate.hasIncludeWall(regions) else {
             switch whenEmpty {
             case .latticeEverything: return grid
             case .latticeNothing:

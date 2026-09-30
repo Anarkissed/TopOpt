@@ -64,6 +64,9 @@ public struct LatticePage: View {
     let onBackToSetup: () -> Void
     /// L17: re-run the preview with the CURRENT settings (rebake the strut scene).
     let onRefreshPreview: () -> Void
+    /// ★ ruling 4 (item 6, 2026-09-30): wherever "nothing set to lattice" shows on this page, one
+    /// tap takes him to where walls are marked (navigation only). nil ⇒ no tap is offered.
+    let onMarkWalls: (() -> Void)?
     /// TEST SEAM for the offscreen evidence captures: ImageRenderer does not
     /// render platform-backed containers (ScrollView), so the evidence generator
     /// renders the panel as a plain stack. Production always scrolls.
@@ -112,6 +115,7 @@ public struct LatticePage: View {
                 variantRegionsWithoutShape: [String] = [],
                 variantJobRefusal: String? = nil,
                 variantJobCoreRefusal: String? = nil,
+                onMarkWalls: (() -> Void)? = nil,
                 staticRender: Bool = false) {
         self.model = model
         self.project = project
@@ -135,6 +139,7 @@ public struct LatticePage: View {
         self.variantRegionsWithoutShape = variantRegionsWithoutShape
         self.variantJobRefusal = variantJobRefusal
         self.variantJobCoreRefusal = variantJobCoreRefusal
+        self.onMarkWalls = onMarkWalls
         self.staticRender = staticRender
     }
 
@@ -209,7 +214,10 @@ public struct LatticePage: View {
             cellSummary: cellSummaryText,
             designBoxActive: project.designBox.isActive,
             densityRefusals:
-                LatticeSectorDensity.refusals(project.latticeSectorDensityRows()))
+                LatticeSectorDensity.refusals(project.latticeSectorDensityRows()),
+            // ★ ruling 4 (item 5): the ONE definition, on the emission the run would send
+            includeRefusal: LatticeJobIncludeGate.optimizeRefusal(
+                latticeEnabled: project.lattice.enabled, regions: project.latticeJobRegions().regions))
     }
 
     private var clearanceCount: Int { project.clearanceSpecs().count }
@@ -235,7 +243,7 @@ public struct LatticePage: View {
             protectedGroups: force.protectedGroups(in: groups),
             roles: project.lattice.groupRoles,
             anyIncludeDeclared:
-                project.latticeJobRegions().regions.contains { $0.role == .include })
+                LatticeJobIncludeGate.hasIncludeWall(project.latticeJobRegions().regions))
     }
 
     // MARK: body
@@ -1548,7 +1556,7 @@ public struct LatticePage: View {
                  + "member a coarse light one. No cell is entered here.")
                 .dsStyle(DS.TypeScale.caption2)
                 .foregroundStyle(DS.Color.textQuaternary.color)
-            if !project.latticeJobRegions().regions.contains(where: { $0.role == .include }) {
+            if !LatticeJobIncludeGate.hasIncludeWall(project.latticeJobRegions().regions) {
                 // Fit derives FROM the declared include regions. With none declared
                 // there is nothing to derive from, and saying so here is cheaper
                 // than a receipt that latticed nothing.
@@ -1878,11 +1886,7 @@ public struct LatticePage: View {
                     .foregroundStyle(DS.Color.warning.color)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            if let placeholder = p.placeholder {
-                Text(placeholder).dsStyle(DS.TypeScale.caption)
-                    .foregroundStyle(DS.Color.textTertiary.color)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
+            if let placeholder = p.placeholder { forecastPlaceholder(placeholder, marksWalls: p.marksWalls) }
             if let headline = p.headline {
                 Text(headline).dsStyle(DS.TypeScale.caption).fontWeight(.semibold)
                     .foregroundStyle((p.warn ? DS.Color.warning : DS.Color.textPrimary).color)
@@ -1906,6 +1910,25 @@ public struct LatticePage: View {
               p.placeholder, p.headline]
                 + p.reasons + p.advice)
                 .compactMap { $0 }.joined(separator: ". "))
+    }
+
+    /// The drawer's one-line placeholder. ★ ruling 4 (item 6): "nothing set to lattice" is one tap
+    /// from the walls.
+    @ViewBuilder private func forecastPlaceholder(_ text: String, marksWalls: Bool) -> some View {
+        if marksWalls, let go = onMarkWalls {
+            Button(action: go) {
+                WallMarkingSubline(text: text, marks: true, style: DS.TypeScale.caption)
+                    .foregroundStyle(DS.Color.textTertiary.color)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .buttonStyle(.plain)
+            .accessibilityHint(WallMarkingSubline.hint)
+            .accessibilityIdentifier("lattice-forecast-mark-walls")
+        } else {
+            Text(text).dsStyle(DS.TypeScale.caption)
+                .foregroundStyle(DS.Color.textTertiary.color)
+                .fixedSize(horizontal: false, vertical: true)
+        }
     }
 
     private func summaryRow(_ k: String, _ v: String, warn: Bool) -> some View {
@@ -1961,13 +1984,16 @@ public struct LatticePage: View {
         // choice (re-running the whole ladder) is never the one a thumb lands on
         // by default.
         let tint: RGBA = a.primary ? DS.Color.accent : DS.Surface.panel
+        // ★ ruling 4 (item 6): refused for want of an include wall — greyed, and the tap goes to
+        // where walls are marked
+        let marks = !a.enabled && a.marksWalls && onMarkWalls != nil
         return Button {
-            guard a.enabled else { return }
-            action()
+            if a.enabled { action() } else if marks { onMarkWalls?() }
         } label: {
             VStack(spacing: 2) {
                 Text(a.label).dsStyle(DS.TypeScale.headline)
-                Text(a.sub).font(.system(size: 11.5, weight: .semibold)).opacity(0.72)
+                WallMarkingSubline(text: a.sub, marks: marks)
+                    .font(.system(size: 11.5, weight: .semibold)).opacity(0.72)
                     .lineLimit(2).multilineTextAlignment(.center)
             }
             .foregroundStyle((a.enabled ? DS.Color.textPrimary : DS.Color.textDisabled).color)
@@ -1980,9 +2006,9 @@ public struct LatticePage: View {
             .dsShadow(a.enabled && a.primary ? DS.Shadow.accentGlow : DS.Shadow.panel)
         }
         .buttonStyle(.plain)
-        .disabled(!a.enabled)
+        .disabled(!a.enabled && !marks)
         .accessibilityLabel(a.label)
-        .accessibilityHint(a.sub)
+        .accessibilityHint(marks ? WallMarkingSubline.hint : a.sub)
     }
 
     // MARK: entry gate (B1)

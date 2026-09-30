@@ -139,7 +139,7 @@ final class LatticeOldRetainedRunTests: XCTestCase {
         XCTAssertTrue(ws.contains("if job.coreRefusal == nil { pass.forecastJob = job.json }"), "★ never sent when refused")
         XCTAssertTrue(ws.contains("if let why = job.coreRefusal { model.toast = why; return }"), "the run")
         XCTAssertTrue(ws.contains("if let why = job.coreRefusal { throw RelatticeError(why) }"), "Check sizes")
-        XCTAssertTrue(ws.contains("variantJobCoreRefusal: pass.coreRefusal)"), "the page gets it")
+        XCTAssertTrue(ws.contains("variantJobCoreRefusal: pass.coreRefusal,"), "the page gets it")
         XCTAssertTrue(page.contains("case .variantJobRefused: if actions.optimize.enabled { onOptimize() }"),
                       "★ the one tap is the Optimize path itself")
         XCTAssertTrue(page.contains("variantJobRefusal: variantJobCoreRefusal,"), "the banner reads it")

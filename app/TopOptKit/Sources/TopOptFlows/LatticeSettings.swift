@@ -2489,7 +2489,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
             // handed the emitted bytes to core's parser rather than checking a key
             // list — a job.json that dies at validation is not a degraded run, it is
             // no run. The page says so on the control; this is the structural half.
-            if mode == .fit && !regions.contains(where: { $0.role == .include }) {
+            if mode == .fit && !LatticeJobIncludeGate.hasIncludeWall(regions) {
                 mode = .fixed
             }
             // ★★ D2 (maintainer, 2026-09-03), applied ONCE after every fallback:

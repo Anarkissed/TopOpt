@@ -281,8 +281,10 @@ final class LatticeVariantTests: XCTestCase {
         var root = URL(fileURLWithPath: #filePath); for _ in 0..<3 { root.deleteLastPathComponent() }
         let ws = try String(contentsOf: root.appendingPathComponent("Sources/TopOptFlows/WorkspacePlaceholder.swift"),
                             encoding: .utf8)
-        XCTAssertTrue(ws.contains("guard project.lattice.enabled else { return LatticeJobIncludeGate.latticeModeOff }"))
-        XCTAssertTrue(ws.contains("if n == 0 { return LatticeJobIncludeGate.nothingSetToLattice }"))
+        // ★ ruling 4 (2026-09-30): the stage asks the gate itself — one definition, one home
+        XCTAssertTrue(ws.contains("if let why = latticeStageRefusal { return why }"))
+        XCTAssertTrue(ws.contains("private var latticeStageRefusal: String? {\n"
+                                  + "        LatticeJobIncludeGate.refusal(latticeEnabled: project.lattice.enabled,"))
         XCTAssertFalse(ws.contains("return \"nothing set to lattice\""), "one home for the words")
         // every variant document is gated: the one builder refuses, the run and Check sizes say why
         XCTAssertTrue(ws.contains("guard LatticeJobIncludeGate.refusal(latticeEnabled: project.lattice.enabled,")

@@ -824,7 +824,7 @@ public struct LatticeSDFScene {
             self.unselectedSkinMM = LatticeSDFRenderer.outlineBeamMM(lineWidthMM: beadMM > 0 ? beadMM : (organic?.minExtrudableWidthMM ?? 0.45), voxelMM: voxelHere)
             self.unselectedRimMM = Swift.max(self.unselectedSkinMM, self.organicSolidRimMM)
             NSLog("%@", band.diag)
-        } else if regions.contains(where: { $0.role == .include }) {
+        } else if LatticeJobIncludeGate.hasIncludeWall(regions) {
             // ★★★ THE REGION IS THE FACE — NOT THE FACE PLUS A MARGIN (maintainer,
             // 2026-08-21: the primitive is "ONLY AS BIG AS THE FACE … Never bigger.
             // Never smaller.").
@@ -2328,7 +2328,7 @@ extension LatticeSDFScene: LatticeSDFPreviewSummary {
     public var previewLabel: String { preview.previewLabel }
 
     /// ★ ruling (g): whether an include region was emitted — the list the clip used.
-    public var hasIncludeRegion: Bool { regions.contains { $0.role == .include } }
+    public var hasIncludeRegion: Bool { LatticeJobIncludeGate.hasIncludeWall(regions) }
 
     /// ★ WHAT THE BANNER SAYS THE RUN WILL BUILD. Empty when the job states nothing,
     /// because then the job IS doubled and there is nothing to caveat.
@@ -2964,7 +2964,7 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
         // (`LatticeThreeAlgorithmsDrawTests` renders one with no cells at all).
         if scene.algorithm == "stepped",
            steppedCellMM.isEmpty || steppedCellMM.count != scene.regions.count,
-           scene.regions.contains(where: { $0.role == .include }) {
+           LatticeJobIncludeGate.hasIncludeWall(scene.regions) {
             NSLog("DIAG stepped bake DEFERRED — algorithm is stepped but "
                   + "steppedCellMM has \(steppedCellMM.count) entries for "
                   + "\(scene.regions.count) regions; layer stays hidden rather "
@@ -3163,7 +3163,7 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
         if baked == nil, let sweep = cellSweep {
             baked = gradedCellField(scene: scene, sweep: sweep, retains: retains)
             if baked != nil,
-               scene.regions.contains(where: { $0.role == .include }) {
+               LatticeJobIncludeGate.hasIncludeWall(scene.regions) {
                 doubledSolidCellsArmed = true
             }
         }

@@ -128,6 +128,8 @@ final class OrganicForecastRouteTests: XCTestCase {
         XCTAssertTrue(ws.contains("probe.jobRoute = OrganicForecast.currentJobRoute"), "Check sizes stamps the route")
         let wz = try String(contentsOf: dir.appendingPathComponent("LatticeSetupWizard.swift"), encoding: .utf8)
         XCTAssertTrue(wz.contains("if project.lattice.organicSizesNeedRecheck, organicProbeState != .running {"))
-        XCTAssertTrue(wz.contains("shortNote(OrganicForecast.recheckLine(checkRefusal: organicProbeRefusal), warning: true)"))
+        // ★ ruling 4 (2026-09-30): the same line; where a missing wall is the reason it is one tap
+        // from the walls
+        XCTAssertTrue(wz.contains("refusalNote(OrganicForecast.recheckLine(checkRefusal: organicProbeRefusal),"))
     }
 }

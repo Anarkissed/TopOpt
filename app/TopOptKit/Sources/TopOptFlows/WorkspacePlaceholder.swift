@@ -1403,6 +1403,8 @@ public struct WorkspacePlaceholder: View {
                     // octet bake behind the forced one on every Save & Exit.
                 }
                 .organicProbeDriver(makeOrganicProbeDriver())
+                // ★ ruling 4 (item 6): its "nothing set to lattice" lines leave by its own exit
+                .wallMarking { goToWallMarking() }
                 // ★ the stage draws with the workspace-owned camera the one gizmo follows
                 .stageCamera(wizardCamera)
                 // ★ the wall editor's cover hides the gizmo (2026-09-21)
@@ -3771,7 +3773,9 @@ public struct WorkspacePlaceholder: View {
                     variantFacesWithoutShape: pass.facesWithoutShape,
                     variantRegionsWithoutShape: pass.regionsWithoutShape,
                     variantJobRefusal: pass.refusal,
-                    variantJobCoreRefusal: pass.coreRefusal)
+                    variantJobCoreRefusal: pass.coreRefusal,
+                    // ★ ruling 4 (item 6): "nothing set to lattice" is one tap from the walls
+                    onMarkWalls: { goToWallMarking() })
             .ignoresSafeArea(.keyboard)
     }
 
@@ -4697,8 +4701,7 @@ public struct WorkspacePlaceholder: View {
         // property is now only the two inputs it is asked for.
         return LatticePreviewBodyAlpha.value(
             latticeLayerDrawn: latticeLayerIsDrawn,
-            hasIncludeRegion: project.latticeJobRegions().regions
-                .contains { $0.role == .include },
+            hasIncludeRegion: LatticeJobIncludeGate.hasIncludeWall(project.latticeJobRegions().regions),
             nothingToLattice: latticePreviewHasNothingToDraw)
     }
 
@@ -5530,6 +5533,21 @@ public struct WorkspacePlaceholder: View {
         stage = dest
         latticeDisclosure.closeAll()
         if dest == .lattice { refreshLatticeFaceCards() }
+    }
+
+    /// ★★ RULING 4 (item 6, maintainer 2026-09-30): THE ONE TAP wherever "nothing set to lattice"
+    /// shows — to where walls are marked: the Lattice stage, its Selections open. NAVIGATION
+    /// ONLY: it creates no wall and sets no role (pinned by `LatticeIncludeGateTests`). From a
+    /// variant's page, the page closes as its own Close closes it (the variant is left).
+    private func goToWallMarking() {
+        if showLatticePage { closeLatticePage() }
+        if stage != .lattice { goToStage(.lattice) }
+        selectionsCollapsed = false
+    }
+    /// Whether that tap would take him anywhere. On the Lattice stage with Selections open he is
+    /// already where walls are marked, so the line stays a plain line — never a dead tap.
+    private var wallMarkingTapGoesSomewhere: Bool {
+        showLatticePage || stage != .lattice || selectionsCollapsed
     }
 
     /// Whether anything has been committed since entering the stage (or since the
@@ -11540,6 +11558,11 @@ public struct WorkspacePlaceholder: View {
         // "any lattice" to "graded" by the device-failure task, because PR 285
         // taught core to run the uniform case).
         guard latticeDesignBoxConflict == nil else { return false }
+        // ★★ RULING 4 (item 5, 2026-09-30): lattice on and no include wall ⇒ refused on the
+        // button, before the run starts, in the stage's words — core would lattice every variant
+        // WHOLE. The page's Optimize reads this same value (`baseCanOptimize`), and every start
+        // (`requestRun`, `startRun`, the page's "Optimize again") is gated on it.
+        guard latticeOptimizeRefusal == nil else { return false }
         guard force.canOptimize(in: selection.groups,
                                 minimizePlastic: project.minimizePlastic,
                                 latticeRoleGroups: latticeRoleGroupIDs)
@@ -11560,9 +11583,17 @@ public struct WorkspacePlaceholder: View {
                                            graded: project.lattice.densityMode == .sim)
     }
 
+    /// ★ ruling 4 (item 5): why Optimize may not start with this lattice — the ONE definition
+    /// of "has an include wall" (`LatticeJobIncludeGate`), on the emission the run would send.
+    private var latticeOptimizeRefusal: String? {
+        LatticeJobIncludeGate.optimizeRefusal(latticeEnabled: project.lattice.enabled,
+                                              regions: project.latticeJobRegions().regions)
+    }
+
     /// The Optimize sub-label, reflecting the minimize-plastic mode + the load case.
     private var optimizeSummary: String {
         if let why = latticeDesignBoxConflict { return why }
+        if let why = latticeOptimizeRefusal { return why }
         if force.phase == .setup { return "set gravity first" }
         if force.hasPending(in: selection.groups,
                             latticeRoleGroups: latticeRoleGroupIDs) {
@@ -11614,24 +11645,18 @@ public struct WorkspacePlaceholder: View {
     /// this screen to DO, not a modifier on the first.
     private var latticeThisButton: some View {
         let ok = canLatticeThis
+        let summary = latticeThisSummary
+        // ★ ruling 4 (item 6): greyed, and its tap takes him to where walls are marked
+        let marks = !ok && wallMarkingTapGoesSomewhere && LatticeJobIncludeGate.opensWallMarking(summary)
         return Button {
-            guard ok else { return }
-            requestLatticeRun()
+            if ok { requestLatticeRun() } else if marks { goToWallMarking() }
         } label: {
-            VStack(spacing: 1) {
-                Text("Lattice").dsStyle(DS.TypeScale.bodyStrong).fontWeight(.semibold)
-                Text(latticeThisSummary)
-                    .font(.system(size: 10.5, weight: .semibold))
-                    .opacity(0.75)
-            }
-            .foregroundStyle((ok ? DS.Color.textPrimary : DS.Color.textDisabled).color)
-            .padding(.vertical, 11).padding(.horizontal, DS.Space.xl3)
-            .background(Capsule().fill(ok ? DS.Color.accent.color : DS.Color.fillDisabled.color)
-                .overlay(Capsule().strokeBorder(ok ? .clear : DS.Color.strokePanel.color, lineWidth: 1)))
-            .dsShadow(ok ? DS.Shadow.accentGlow : DS.Shadow.panel)
+            StageActionCapsuleLabel(title: "Lattice", summary: summary, ok: ok, marks: marks,
+                                    horizontalPadding: DS.Space.xl3)
         }
         .buttonStyle(.plain)
-        .disabled(!ok)
+        .disabled(!ok && !marks)
+        .accessibilityHint(marks ? WallMarkingSubline.hint : summary)
         .accessibilityIdentifier("lattice-this-button")
     }
 
@@ -11681,52 +11706,44 @@ public struct WorkspacePlaceholder: View {
           && !TopOptKit.organicStructuralCertificationWired)
     }
 
-    /// ★ OFFER, NEVER SUBSTITUTE (ruling Aug 5; 2026-09-03): an organic Fit with no
-    /// declared region is REFUSED here, in words — never remapped to Auto. Core would
-    /// refuse `fit` with nothing to fit into ("a job that declares none states no
-    /// requirement to fit"), so the job is not written.
-    private var organicFitWithoutRegion: Bool {
-        project.lattice.isOrganic && project.lattice.cellSizeMode == .fit
-            && !project.latticeJobRegions().regions.contains(where: { $0.role == .include })
+    /// ★★ RULING 4 (maintainer, 2026-09-30): the stage asks the ONE question a variant and
+    /// Optimize ask (`LatticeJobIncludeGate`) — an exclude-only project lattices nothing, so
+    /// "Lattice" greys with the reason it already showed. It used to ask only whether ANY region
+    /// was emitted, and an exclude-only list would have latticed the whole part but those walls.
+    /// (An organic Fit with no include wall — "OFFER, NEVER SUBSTITUTE", ruling Aug 5 — is the
+    /// same refusal and was already said in these words first; its own branch was unreachable.)
+    private var latticeStageRefusal: String? {
+        LatticeJobIncludeGate.refusal(latticeEnabled: project.lattice.enabled,
+                                      regions: project.latticeJobRegions().regions)
     }
 
     var canLatticeThis: Bool {
-        project.lattice.enabled && !project.latticeJobRegions().regions.isEmpty
-            && organicStructuralGateOpen && !organicFitWithoutRegion
+        latticeStageRefusal == nil && organicStructuralGateOpen
     }
 
     private var latticeThisSummary: String {
         // (The words live in `LatticeJobIncludeGate`, so a variant's refusal is the stage's by
         // construction — ruling c, 2026-09-30.)
-        guard project.lattice.enabled else { return LatticeJobIncludeGate.latticeModeOff }
-        let n = project.latticeJobRegions().regions
-            .filter { $0.role == .include }.count
-        if n == 0 { return LatticeJobIncludeGate.nothingSetToLattice }
+        if let why = latticeStageRefusal { return why }
         if !organicStructuralGateOpen { return TopOptKit.organicStructuralGateMessage }
-        if organicFitWithoutRegion { return "organic Fit needs a declared lattice region — pick Auto or declare one" }
+        let n = project.latticeJobRegions().regions.filter { $0.role == .include }.count
         return "\(n) region\(n > 1 ? "s" : "") · no optimization"
     }
 
     private var optimizeButton: some View {
         let ok = canOptimize
+        let summary = optimizeSummary
+        // ★ ruling 4 (item 6): greyed, and its tap takes him to where walls are marked
+        let marks = !ok && wallMarkingTapGoesSomewhere && LatticeJobIncludeGate.opensWallMarking(summary)
         return Button {
-            guard ok else { return }
-            requestRun()
+            if ok { requestRun() } else if marks { goToWallMarking() }
         } label: {
-            VStack(spacing: 1) {
-                Text("Optimize").dsStyle(DS.TypeScale.bodyStrong).fontWeight(.semibold)
-                Text(optimizeSummary)
-                    .font(.system(size: 10.5, weight: .semibold))
-                    .opacity(0.75)
-            }
-            .foregroundStyle((ok ? DS.Color.textPrimary : DS.Color.textDisabled).color)
-            .padding(.vertical, 11).padding(.horizontal, DS.Space.xl5)
-            .background(Capsule().fill(ok ? DS.Color.accent.color : DS.Color.fillDisabled.color)
-                .overlay(Capsule().strokeBorder(ok ? .clear : DS.Color.strokePanel.color, lineWidth: 1)))
-            .dsShadow(ok ? DS.Shadow.accentGlow : DS.Shadow.panel)
+            StageActionCapsuleLabel(title: "Optimize", summary: summary, ok: ok, marks: marks,
+                                    horizontalPadding: DS.Space.xl5)
         }
         .buttonStyle(.plain)
-        .disabled(!ok)
+        .disabled(!ok && !marks)
+        .accessibilityHint(marks ? WallMarkingSubline.hint : summary)
     }
 }
 

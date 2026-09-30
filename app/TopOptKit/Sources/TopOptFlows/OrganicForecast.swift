@@ -251,6 +251,9 @@ public struct OrganicForecast: Equatable, Sendable, Codable {
     /// cannot act, its refusal is said instead of pointing at a button that is not there (as
     /// `uncheckedSummary` does).
     public static let recheckTitle = "Sizes need re-checking"
+    /// ★ ruling 4 (item 8, 2026-09-30): under Auto there is no Check sizes button on screen — the
+    /// line itself is the tap that runs it.
+    public static let recheckTapLine = recheckTitle + " — tap to " + checkSizesTitle.lowercased() + "."
     public static func recheckLine(checkRefusal: String? = nil) -> String {
         if let r = checkRefusal, !r.isEmpty { return recheckTitle + ". " + r }
         return recheckTitle + " — tap " + checkSizesTitle + "."

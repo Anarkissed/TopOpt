@@ -380,6 +380,9 @@ public struct LatticePageActions: Equatable, Sendable {
         public let enabled: Bool
         /// True for the action a plain tap should land on.
         public let primary: Bool
+        /// ★ ruling 4 (item 6): refused for want of an include wall — greyed, and its tap takes
+        /// him to where walls are marked instead of doing nothing.
+        public var marksWalls: Bool = false
     }
 
     /// Lattice the finished variant. nil when the page was not opened from one.
@@ -406,7 +409,8 @@ public struct LatticePageActions: Equatable, Sendable {
                 relattice: nil,
                 optimize: Action(label: optimizeSurface.label,
                                  sub: optimizeSurface.sub,
-                                 enabled: optimizeSurface.enabled, primary: true))
+                                 enabled: optimizeSurface.enabled, primary: true,
+                                 marksWalls: optimizeSurface.marksWalls))
         }
         let pct = Int((v.requestedVolumeFraction * 100).rounded())
         let re: Action
@@ -429,7 +433,8 @@ public struct LatticePageActions: Equatable, Sendable {
             // Disabled with the stage's words; after `unavailable` (setting walls cannot fix a
             // run that kept no design), before the forecast (none is asked for).
             re = Action(label: "Lattice this variant", sub: why,
-                        enabled: false, primary: true)
+                        enabled: false, primary: true,
+                        marksWalls: LatticeJobIncludeGate.opensWallMarking(why))
         } else if let f = forecast, f.regionVoxels > 0, f.wouldLatticeVoxels == 0 {
             // NOTHING WOULD BE LATTICED (task
             // 2026-08-04-variant-volume-fraction-mismatch, bar B3 / L3). This is
@@ -475,7 +480,8 @@ public struct LatticePageActions: Equatable, Sendable {
             label: "Optimize from scratch",
             sub: "re-runs the whole ladder from the original part · " +
                  optimizeSurface.sub,
-            enabled: optimizeSurface.enabled && !running, primary: false)
+            enabled: optimizeSurface.enabled && !running, primary: false,
+            marksWalls: optimizeSurface.marksWalls && !running)
         return LatticePageActions(relattice: re, optimize: opt)
     }
 }
@@ -565,18 +571,41 @@ public enum LatticeVariantFaceWalls {
 /// complaint, so the refusal is the app's, read from the EMITTED regions: a legacy include
 /// primitive is an include wall; a marked face with no shape, a cut sector, a Solid/Off wall
 /// is not.
+///
+/// ★★ RULING 4 (maintainer, 2026-09-30): ONE definition of "has an include wall", shared by the
+/// stage, a variant and Optimize — `hasIncludeWall` is the only place the question is asked of a
+/// region list (pinned by `LatticeIncludeGateTests`):
+/// - the stage: an exclude-only project greys "Lattice" with the reason it already shows;
+/// - Optimize: with lattice on and no include wall it is refused on the button, before the run
+///   starts, in the same words — never lattice every variant whole;
+/// - wherever "nothing set to lattice" shows, one tap takes him to where walls are marked
+///   (`opensWallMarking`) — navigation only, never a wall made for him.
 public enum LatticeJobIncludeGate {
     /// The stage's own words (`WorkspacePlaceholder.latticeThisSummary`) — one home.
     public static let latticeModeOff = "lattice mode is off"
     public static let nothingSetToLattice = "nothing set to lattice"
+    /// ★ THE definition: an emitted region list lattices something only through an include wall.
+    /// Core lattices the WHOLE printed set when a job declares none.
+    public static func hasIncludeWall(_ regions: [LatticeRegionSpec]) -> Bool {
+        regions.contains { $0.role == .include }
+    }
     /// Why the job may not be written; nil when it may. Lattice off first, as the stage says it.
-    public static func refusal(latticeEnabled: Bool, includeCount: Int) -> String? {
+    public static func refusal(latticeEnabled: Bool, hasIncludeWall: Bool) -> String? {
         guard latticeEnabled else { return latticeModeOff }
-        return includeCount > 0 ? nil : nothingSetToLattice
+        return hasIncludeWall ? nil : nothingSetToLattice
     }
     public static func refusal(latticeEnabled: Bool, regions: [LatticeRegionSpec]) -> String? {
-        refusal(latticeEnabled: latticeEnabled,
-                includeCount: regions.filter { $0.role == .include }.count)
+        refusal(latticeEnabled: latticeEnabled, hasIncludeWall: hasIncludeWall(regions))
+    }
+    /// ★ ruling 4 (item 5): why Optimize may not start. Lattice OFF is no refusal — the run is
+    /// topology only; lattice ON with no include wall is, in the same words.
+    public static func optimizeRefusal(latticeEnabled: Bool, regions: [LatticeRegionSpec]) -> String? {
+        latticeEnabled && !hasIncludeWall(regions) ? nothingSetToLattice : nil
+    }
+    /// ★ ruling 4 (item 6): the refusal a wall fixes — wherever it shows, one tap takes him to
+    /// where walls are marked. Every other refusal is said without a tap.
+    public static func opensWallMarking(_ refusal: String?) -> Bool {
+        refusal == nothingSetToLattice
     }
 }
 

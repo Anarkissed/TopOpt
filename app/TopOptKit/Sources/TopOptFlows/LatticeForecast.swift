@@ -466,6 +466,8 @@ public struct LatticeForecastPanel: Equatable, Sendable {
     public let advice: [String]
     /// Draw it as a warning rather than plain information.
     public let warn: Bool
+    /// ★ ruling 4 (item 6): the placeholder is "nothing set to lattice" — its tap goes to the walls
+    public var marksWalls: Bool = false
 
     public static func compute(state: LatticeForecastModel.State,
                                describesCurrentJob: Bool,
@@ -480,7 +482,8 @@ public struct LatticeForecastPanel: Equatable, Sendable {
         // in the stage's words, instead of "Checking…" for a question never sent.
         if let why = refusal {
             return LatticeForecastPanel(title: title, placeholder: "Can’t forecast: \(why).",
-                                        headline: nil, reasons: [], advice: [], warn: true)
+                                        headline: nil, reasons: [], advice: [], warn: true,
+                                        marksWalls: LatticeJobIncludeGate.opensWallMarking(why))
         }
         if let why = coreRefusal {
             return LatticeForecastPanel(title: title, placeholder: why,

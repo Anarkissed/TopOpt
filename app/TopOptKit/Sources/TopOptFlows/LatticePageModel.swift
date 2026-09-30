@@ -234,6 +234,8 @@ public struct LatticeOptimizeSurface: Equatable, Sendable {
     public let enabled: Bool
     public let label: String
     public let sub: String
+    /// ★ ruling 4 (item 6): refused for want of an include wall — the tap goes to the walls
+    public var marksWalls: Bool = false
 
     /// `designBoxActive` is the project's CURRENT design box. A lattice job with one
     /// is refused by core before any solve (`run_job.cpp`), so the button that would
@@ -251,7 +253,10 @@ public struct LatticeOptimizeSurface: Equatable, Sendable {
                                // (task 2026-08-16-per-sector-density-override).
                                // Empty by default, so every existing call site and
                                // every project that dials nothing is unchanged.
-                               densityRefusals: [(name: String, why: String)] = []) -> LatticeOptimizeSurface {
+                               densityRefusals: [(name: String, why: String)] = [],
+                               // ★★ ruling 4 (item 5, 2026-09-30): lattice on and no include
+                               // wall (`LatticeJobIncludeGate.optimizeRefusal`) — nil ⇒ none
+                               includeRefusal: String? = nil) -> LatticeOptimizeSurface {
         // The cell phrase the button claims. In AUTO / SWEPT cell mode there is no
         // single target cell to name — the page passes the mode's own summary
         // ("Auto 4.6 mm", "Swept 4.6–8.0 mm") so the button never states a target the
@@ -264,6 +269,13 @@ public struct LatticeOptimizeSurface: Equatable, Sendable {
         guard latticeEnabled else {
             return LatticeOptimizeSurface(enabled: baseCanOptimize, label: "Optimize",
                                           sub: "topology only · \(baseSummary)")
+        }
+        // ★★ RULING 4 (item 5): nothing set to lattice ⇒ refused on the button, before the run
+        // starts, in the stage's words — core would lattice every variant WHOLE. First among the
+        // lattice refusals: with no wall there is no lattice for the others to be about.
+        if let why = includeRefusal {
+            return LatticeOptimizeSurface(enabled: false, label: "Optimize", sub: why,
+                                          marksWalls: LatticeJobIncludeGate.opensWallMarking(why))
         }
         // The core refusal, surfaced BEFORE the configuration rather than after it.
         if let why = LatticeCoreCapability.liveConflict(
