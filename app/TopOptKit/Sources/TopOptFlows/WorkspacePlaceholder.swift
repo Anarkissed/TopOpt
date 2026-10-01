@@ -95,6 +95,10 @@ public struct WorkspacePlaceholder: View {
     /// When a hold last completed: the finger's release then also lands as the
     /// button's tap, and that tap must not undo what the hold just set.
     @State private var viewModeHoldFiredAt = Date.distantPast
+    /// When the press now (or last) on a hold-capable view button began — so the release's tap is
+    /// swallowed by the press, not by a clock (`ViewModeHold`, 2026-10-01).
+    @State private var viewModePressBeganAt: Date? = nil
+    @GestureState private var viewModePressDown = false
     /// ★ WHICH LEVEL THE LATTICE KEY IS ON, and the reading taken by tapping a
     /// strut (maintainer, 2026-08-19). Drilling in also HIDES the primitives and
     /// handles — he asked for the part unobstructed while reading the scale, and a
@@ -802,7 +806,7 @@ public struct WorkspacePlaceholder: View {
                               // wall BEHIND a strut and missed entirely where the id
                               // pass said "background". This only has to make sure a
                               // tap cannot also change the selection while reading.
-                              if latticeLegendMode.drilledIn { return true }
+                              if legendDrilledIn { return true }
                               guard let m = viewerMesh else { return false }
                               if visible.surfaceEditing {
                                   handleSurfacePick(fid, at: pt, mesh: m)
@@ -816,14 +820,14 @@ public struct WorkspacePlaceholder: View {
                           },
                           // ★ Only while drilled in — the PRESENCE of this closure is
                           // what makes a tap read a strut instead of selecting a face.
-                          onLatticeProbe: latticeLegendMode.drilledIn
+                          onLatticeProbe: legendDrilledIn
                               ? { model, world, cellMM, density in
                                   setLatticeProbe(at: model, world: world,
                                                   bakedCellMM: cellMM,
                                                   bakedDensity: density)
                               } : nil,
                           // ★ …and the way back out, from anywhere on the viewport.
-                          onLatticeProbeExit: latticeLegendMode.drilledIn
+                          onLatticeProbeExit: legendDrilledIn
                               ? {
                                   latticeLegendMode = .groups
                                   latticeLegendProbe = nil
@@ -948,11 +952,11 @@ public struct WorkspacePlaceholder: View {
                               || !surfacePreviewLineBuffer.isEmpty,
                           designBox: (showDesignGizmo && !showSmoothingPage
                                       && visible.designBox
-                                      && !latticeLegendMode.drilledIn)
+                                      && !legendDrilledIn)
                               ? project.designBox.box : nil,
                           keepOutBoxes: (showDesignGizmo && !showSmoothingPage
                                          && visible.keepOuts
-                                         && !latticeLegendMode.drilledIn)
+                                         && !legendDrilledIn)
                               ? project.designBox.keepOuts : [],
                           // Keep-clear v2 (Part 3): the true red clearance volumes, drawn
                           // whenever gravity is set (edit phase) so the user can SEE and
@@ -990,7 +994,7 @@ public struct WorkspacePlaceholder: View {
                           clearanceVolumes:
                               (showLatticePage
                                || (force.phase == .edit && !fullScreenPageUp))
-                              && !latticeLegendMode.drilledIn
+                              && !legendDrilledIn
                               ? stageVolumeItems : [],
                           // Strut preview (2026-07-30 alignment handoff, bar A3): while the
                           // raymarched lattice layer is up there is ONE visible object — the
@@ -1191,7 +1195,7 @@ public struct WorkspacePlaceholder: View {
                 // legend!"). The first cut gated only the three GIZMO overlays; the
                 // ⬇ load/anchor markers are drawn here and were still sitting over
                 // the struts he was trying to read.
-                if visible.groupPrimitives, !latticeLegendMode.drilledIn {
+                if visible.groupPrimitives, !legendDrilledIn {
                     arrowsOverlay.ignoresSafeArea()             // D6: force arrow shafts
                 }
                 // Gravity direction (round 2, item 4): the arrow is shown ONLY while gravity is
@@ -1205,7 +1209,7 @@ public struct WorkspacePlaceholder: View {
                 // 2026-08-19: "hide any primitives and handles when someone taps
                 // into the legend"). He is reading struts against a scale; a gizmo
                 // box sitting over them hides the thing being read.
-                if showDesignGizmo, visible.designBox, !latticeLegendMode.drilledIn {
+                if showDesignGizmo, visible.designBox, !legendDrilledIn {
                     designGizmoOverlay.ignoresSafeArea()            // dom-app resize/move handles
                 }
                 // DEFECT 2: the manual-primitive transform gizmo (translate on one axis / plane /
@@ -1213,17 +1217,17 @@ public struct WorkspacePlaceholder: View {
                 // grabbed. Rendered BENEATH the clearance chips below, so the 330 pt gizmo box can
                 // never occlude a value chip (the chip/knob hit areas are small and the rest of that
                 // overlay is hit-transparent, so gizmo drags in empty box space still reach it).
-                if force.phase == .edit, visible.groupPrimitives, !latticeLegendMode.drilledIn {
+                if force.phase == .edit, visible.groupPrimitives, !legendDrilledIn {
                     primitiveGizmoOverlay.ignoresSafeArea()
                 }
                 // Keep-clear Phase B: the draggable clearance handles (wall → margin, caps →
                 // axial, face → depth) and the floating glass value pill near the selection — ON TOP
                 // of the gizmo so the values stay readable while transforming.
-                if force.phase == .edit, visible.groupPrimitives, !latticeLegendMode.drilledIn {
+                if force.phase == .edit, visible.groupPrimitives, !legendDrilledIn {
                     clearanceHandlesOverlay.ignoresSafeArea()
                 }
                 // ★ §3d — THE 3D DEPTH-PLANE HANDLES, the lattice stage's own tool.
-                if visible.latticeDepthPlanes, !latticeLegendMode.drilledIn {
+                if visible.latticeDepthPlanes, !legendDrilledIn {
                     latticeDepthHandlesOverlay.ignoresSafeArea()
                 }
                 // ★ §6(g) — THE HOVERED CUT LINE, the surface stage's own tool.
@@ -1232,7 +1236,7 @@ public struct WorkspacePlaceholder: View {
             // The lattice region's transform gizmo — only while the lattice panel is open
             // and a region exists, so it never coincides with the force gizmo (U5). It is
             // the LATTICE page's own tool, so it is not gated with the workspace's.
-            if !showSmoothingPage, !latticeLegendMode.drilledIn {
+            if !showSmoothingPage, !legendDrilledIn {
                 latticeRegionGizmoOverlay.ignoresSafeArea()
             }
             // ★★ THE BAND CHIPS — lattice-only view only (his 2026-09-27). BELOW the
@@ -1240,7 +1244,7 @@ public struct WorkspacePlaceholder: View {
             // off the chrome's measured frames. Not while the key is drilled in: a tap
             // there reads a strut.
             if !fullScreenPageUp, viewerMesh != nil, visible.latticeControls,
-               !latticeLegendMode.drilledIn {
+               !legendDrilledIn {
                 latticeBandChipsOverlay.ignoresSafeArea()
             }
 
@@ -1312,7 +1316,7 @@ public struct WorkspacePlaceholder: View {
                    !(showStrutPreview && strutScene != nil) {
                     stressLegend
                 }
-                if showStrutPreview, strutScene != nil {
+                if latticeLegendMounted {
                     latticeDensityLegend
                     latticeProbeCallout
                 }
@@ -2958,6 +2962,15 @@ public struct WorkspacePlaceholder: View {
         .onChange(of: stage) { s in
             if s == .lattice { openLatticeSettingsIfUnconfigured() }
         }
+        // ★★ THE PREVIEW GOING OFF ENDS THE VIEWS THAT LIVE ON IT (his 2026-10-01). Five paths
+        // turn it off — the cube, the mode sheet's delete, lattice mode off, the page's own
+        // switch — and none cleared lattice only or the key's drill-in, so both outlived it.
+        .onChange(of: showStrutPreview) { on in
+            guard !on else { return }
+            latticeOnly = false
+            latticeLegendMode = .groups
+            latticeLegendProbe = nil
+        }
         // Graded follow-up: when a run's accepted variants land (streamed or final),
         // rebake the strut scene so its radii grade by the fresh von Mises field.
         // Keyed on acceptedCount (cheap, Equatable); no-op while the preview is off.
@@ -4370,7 +4383,7 @@ public struct WorkspacePlaceholder: View {
         // orbit instead of sitting where the finger used to be. `projection` is
         // republished by the coordinator on every camera change, so this recomputes
         // exactly when the part moves.
-        if latticeLegendMode.drilledIn, let p = latticeLegendProbe,
+        if legendDrilledIn, let p = latticeLegendProbe,
            let screen = projection?.project(p.worldPoint) {
             let klass = LatticeStructureClass.allCases.first { $0.id == p.groupID }
             HStack(spacing: 5) {
@@ -4660,7 +4673,8 @@ public struct WorkspacePlaceholder: View {
     /// this value is the cheap, reversible half, and it is worth seeing on the
     /// device before writing the expensive half.
     private var latticePreviewBodyAlpha: Float {
-        if latticeOnly, showStrutPreview { return 0 }   // ★ lattice only: the body goes
+        // ★ lattice only: the body goes — once the lattice is on screen (2026-10-01)
+        if latticeOnlyViewOn { return LatticePreviewBodyAlpha.latticeOnly(showing: latticeOnlyShowing) }
         // ★★★ THE BODY MAY ONLY BE HIDDEN WHERE A LATTICE IS ACTUALLY DRAWN
         // (maintainer, 2026-08-20: his new `M2 verticalStand THICK` opened to a shadow
         // on the stage floor and NOTHING drawn — "rotating doesn't help, so it isn't
@@ -7335,49 +7349,27 @@ public struct WorkspacePlaceholder: View {
             if visible.latticeControls {
                 viewModeButton("cube.transparent", label: "Lattice preview",
                                on: showStrutPreview,
-                               tint: latticeOnly && showStrutPreview ? DS.Color.warning : nil,
+                               tint: latticeOnlyViewOn ? DS.Color.warning : nil,
                                // ★ HOLD 3 s = lattice only; let go and it stays. A tap
                                // then goes back to the plain preview (his 2026-09-14).
+                               // ★★ Both read the VIEW (`latticeOnlyViewOn`), not the flag:
+                               // a flag left over with the preview off made the hold a
+                               // silent no-op and the next tap look dead (his 2026-10-01).
+                               // And the hold arms the preview exactly as the tap does —
+                               // the lattice switch, settings first, the stage's FEA.
                                onLongPress: {
-                                   guard !latticeOnly else { return }
+                                   guard !latticeOnlyViewOn else { return }
                                    latticeOnly = true
-                                   if !showStrutPreview {
-                                       showStrutPreview = true
-                                       if strutScene == nil { buildStrutScene() }
-                                   }
+                                   if !showStrutPreview { armLatticePreview() }
                                    flashLatticeOnly("LATTICE ONLY")
                                }) {
-                    if latticeOnly {
+                    if latticeOnlyViewOn {
                         latticeOnly = false            // back to the lattice preview
                     } else if showStrutPreview {
                         showStrutPreview = false
                     } else {
-                        // ★★ THE ACTUAL LATTICE-VIEW BUTTON (maintainer, 2026-08-19:
-                        // "lattice View button still didn't open up settings", after
-                        // three misses). There are TWO places `showStrutPreview` is
-                        // turned on — the `previewOn` binding in the lattice overlay,
-                        // which I kept editing, and THIS `viewModeButton`, which is
-                        // the cube in the round cluster he actually presses.
-                        //
-                        // ★ AND SETTINGS COME FIRST, BEFORE ANY BAKE ("It should do
-                        // so *immediately* without giving a chance for the lattice to
-                        // load if the setting hasn't been saved yet"). The preview is
-                        // armed but NOT built here; the wizard's Save & Exit is what
-                        // bakes it, so nothing expensive starts behind the sheet.
-                        showStrutPreview = true
-                        // ★ lattice mode off ⇒ the settings, every time: Save & Exit
-                        // is what turns it on, and nothing bakes until it is on.
-                        if !project.lattice.enabled {
-                            showLatticeWizard = true
-                            return
-                        }
-                        if !latticeSettingsSavedThisSession {
-                            openLatticeSettingsIfUnconfigured()
-                            return
-                        }
-                        startStressSolveIfNeeded()
-                        refreshLatticeStressPeak()
-                        if strutScene == nil { buildStrutScene() }
+                        latticeOnly = false
+                        armLatticePreview()
                     }
                 }
                 // ★★ THE STRESS VIEW, BELOW THE PREVIEW BUTTON (maintainer,
@@ -7415,8 +7407,10 @@ public struct WorkspacePlaceholder: View {
                                 onLongPress: (() -> Void)? = nil,
                                 action: @escaping () -> Void) -> some View {
         Button(action: {
-            // ★ The release that ends a 3 s hold is also delivered as a tap; swallow it.
-            if Date().timeIntervalSince(viewModeHoldFiredAt) < 1.5 { return }
+            // ★ The release that ends a 3 s hold is also delivered as a tap; swallow it —
+            // by the press it ends, not by a clock (`ViewModeHold`, 2026-10-01).
+            if ViewModeHold.swallowsTap(holdFiredAt: viewModeHoldFiredAt,
+                                        pressBeganAt: viewModePressBeganAt, now: Date()) { return }
             action()
         }) {
             Image(systemName: icon)
@@ -7444,8 +7438,48 @@ public struct WorkspacePlaceholder: View {
             LongPressGesture(minimumDuration: 3.0)
                 .onEnded { _ in viewModeHoldFiredAt = Date(); onLongPress?() },
             including: onLongPress == nil ? .none : .all)
+        // ★ …and the PRESS it belongs to: down at touch-down, reset by SwiftUI on release or
+        // cancel (a `@GestureState` cannot stick), stamped below.
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 0)
+                .updating($viewModePressDown) { _, down, _ in down = true },
+            including: onLongPress == nil ? .none : .all)
+        .onChange(of: viewModePressDown) { down in
+            if down { viewModePressBeganAt = Date() }
+        }
         .accessibilityLabel(label)
         .accessibilityIdentifier("view-mode-\(label.lowercased())")
+    }
+
+    /// ★ ARM THE LATTICE PREVIEW — the cube's tap, and its hold when the preview is off (one
+    /// path, so the hold can no longer skip the lattice switch, settings-first or the FEA).
+    private func armLatticePreview() {
+        // ★★ THE ACTUAL LATTICE-VIEW BUTTON (maintainer, 2026-08-19:
+        // "lattice View button still didn't open up settings", after
+        // three misses). There are TWO places `showStrutPreview` is
+        // turned on — the `previewOn` binding in the lattice overlay,
+        // which I kept editing, and THIS `viewModeButton`, which is
+        // the cube in the round cluster he actually presses.
+        //
+        // ★ AND SETTINGS COME FIRST, BEFORE ANY BAKE ("It should do
+        // so *immediately* without giving a chance for the lattice to
+        // load if the setting hasn't been saved yet"). The preview is
+        // armed but NOT built here; the wizard's Save & Exit is what
+        // bakes it, so nothing expensive starts behind the sheet.
+        showStrutPreview = true
+        // ★ lattice mode off ⇒ the settings, every time: Save & Exit
+        // is what turns it on, and nothing bakes until it is on.
+        if !project.lattice.enabled {
+            showLatticeWizard = true
+            return
+        }
+        if !latticeSettingsSavedThisSession {
+            openLatticeSettingsIfUnconfigured()
+            return
+        }
+        startStressSolveIfNeeded()
+        refreshLatticeStressPeak()
+        if strutScene == nil { buildStrutScene() }
     }
 
     /// Flash a large badge over the viewport for a moment (lattice only on/off).
@@ -7476,12 +7510,41 @@ public struct WorkspacePlaceholder: View {
     /// part that is still drawn.
     private var latticeOnlyViewOn: Bool { latticeOnly && showStrutPreview }
 
+    /// ★★ LATTICE ONLY HIDES THE PART ONLY ONCE THE LATTICE IS ON SCREEN (his 2026-10-01: "I am
+    /// also not able to go to 'Lattice Only' view", in Structural). The layer is hidden while a
+    /// BAKE runs (every settings change) and while the stage's FEA runs (a Sim project's first
+    /// solve, or after a load-case change) — `hidden: strutBakeInFlight || latticeSimIsRunning` —
+    /// and the body was dropped to 0 regardless, so lattice only showed an EMPTY STAGE until the
+    /// lattice came back. The part now stays until the lattice is drawn — the body alpha and the
+    /// band chips read this one value.
+    private var latticeOnlyShowing: Bool {
+        LatticePreviewBodyAlpha.latticeOnlyShowing(viewOn: latticeOnlyViewOn,
+                                                   layerDrawn: latticeLayerIsDrawn,
+                                                   simRunning: latticeSimIsRunning,
+                                                   nothingToDraw: latticePreviewHasNothingToDraw)
+    }
+
+    /// ★★ THE KEY'S DRILL-IN ONLY COUNTS WHILE THE KEY IS ON SCREEN (his 2026-10-01: "in
+    /// Structural, the face-prism isn't showing up whatsoever"). Tapping the key hides the
+    /// prisms, handles and gizmos so he can read a strut (2026-08-19) — but the mode outlived
+    /// the key: turning the preview off, or the mode sheet's delete (the only way from Aesthetic
+    /// to Structural), unmounted the legend and left `.colour` set, so the prism, the depth knobs
+    /// and the band chips stayed hidden and face taps were swallowed, with the only way out
+    /// ("Double-tap anywhere to go back") written on the legend that was gone. Every read goes
+    /// through this; the mode is also reset when the preview goes off. A MINIMIZED key is not
+    /// drilled in either: its column carries no "Double-tap anywhere to go back", so the hides
+    /// would again have no visible way out.
+    private var latticeLegendMounted: Bool { showStrutPreview && strutScene != nil }
+    private var legendDrilledIn: Bool {
+        latticeLegendMounted && !latticeLegendMinimized && latticeLegendMode.drilledIn
+    }
+
     /// ★ The band chips COULD be drawn now: the overlay's own gates (its placement in the body
     /// and its `if`), except the hide switch. The Hide/Show chip exists only then — a toggle
     /// over nothing is a dead control (§2b).
     private var bandChipsAvailable: Bool {
-        latticeOnlyViewOn && visible.latticeControls && viewerMesh != nil
-            && !latticeLegendMode.drilledIn
+        latticeOnlyShowing && visible.latticeControls && viewerMesh != nil
+            && !legendDrilledIn
             && !(strutScene?.bandDecisions.isEmpty ?? true)
     }
 
@@ -7500,14 +7563,14 @@ public struct WorkspacePlaceholder: View {
     /// The chips themselves. Re-laid out on every render — `projection` is republished on
     /// every orbit, so each chip rides its face; placement is `LatticeBandChipLayout`.
     @ViewBuilder private var latticeBandChipsOverlay: some View {
-        if latticeOnlyViewOn, !bandChipsHidden, let scene = strutScene, !scene.bandDecisions.isEmpty {
+        if latticeOnlyShowing, !bandChipsHidden, let scene = strutScene, !scene.bandDecisions.isEmpty {
             GeometryReader { geo in
                 // the keep-out frames are `.global`; this layer ignores the safe area like
                 // the MTKView, so the difference is the layer's own origin (0 full-screen)
                 let origin = geo.frame(in: .global).origin
                 let chips = LatticeBandChipLayout.layout(
                     scene: scene, treatments: project.lattice.bandTreatments,
-                    frame: latticeBandChipFrame, latticeOnly: latticeOnlyViewOn,
+                    frame: latticeBandChipFrame, latticeOnly: latticeOnlyShowing,
                     keepOut: bandChipKeepOut.map { $0.offsetBy(dx: -origin.x, dy: -origin.y) })
                 ZStack(alignment: .topLeading) {
                     ForEach(chips) { c in
