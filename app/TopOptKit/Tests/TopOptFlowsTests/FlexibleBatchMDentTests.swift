@@ -82,8 +82,8 @@ final class FlexibleBatchMDentTests: XCTestCase {
         let d1: [Double] = (FlexibleShownValues(inputs, drawnLattice: nil).values[key] ?? []).map { if case .depth(let d) = $0 { return d } else { return 0 } }
         let vs = try Self.valleys(m, 3)
         func mean(_ x: [Double], _ ids: [Int]) -> Double { ids.isEmpty ? 0 : ids.map { x[$0] }.reduce(0, +) / Double(ids.count) }
-        print(String(format: "FLEX-M SETTINGS Face 3 (L %.1f mm): between the fingertips (%d columns) the dent is %.0f%% of the deepest · the footprint alone %.0f%%",
-                     FlexibleStampSpread.lengthMM(st), vs.count, 100 * mean(depth, vs) / f.deepestMM, 100 * mean(d1, vs) / f.deepestMM))
+        print(String(format: "FLEX-M SETTINGS Face 3 (σ %.1f mm): between the fingertips (%d columns) the dent is %.0f%% of the deepest · the footprint alone %.0f%%",
+                     FlexibleStampSpread.sigmaMM(st), vs.count, 100 * mean(depth, vs) / f.deepestMM, 100 * mean(d1, vs) / f.deepestMM))
         XCTAssertGreaterThan(vs.count, 10)
         XCTAssertGreaterThanOrEqual(mean(depth, vs) / f.deepestMM, 0.85, "the four fingertips merge into one press")
         XCTAssertLessThan(mean(d1, vs) / f.deepestMM, 0.5, "control: the footprint alone leaves four pits")
@@ -100,13 +100,17 @@ final class FlexibleBatchMDentTests: XCTestCase {
                      100 * step(depth), 100 * step(d1)))
         XCTAssertLessThan(step(depth), 0.25, "graded out of the stamp, no cut")
         XCTAssertGreaterThan(step(d1), 0.25, "control: the footprint's own wall")
-        // Top A's elbow on a 20 mm top spreads less (L 4 mm): its outside ring sinks, far ground does not
+        // Top A's elbow on a 20 mm top spreads less than Face 3's fingertips on a 100 mm-deep side.
+        // ★ RE-PINNED BY BATCH M2 (V10 of batch M's verification: the Settings dent was a steep trench that
+        // disagreed with the main page's sim): the spread is now ONE Gaussian of σ = 0.45 × the face's
+        // lattice depth over core's press / stiffness (FlexibleStampSpread.dent, fitted to the 3D sim —
+        // FlexibleBatchM2Tests), no longer batch M's e^(−r / 0.2·depth) wall; the depth rule is the same
         let ka = try XCTUnwrap(m.key(FlexibleHisProject.topA)), sa = try XCTUnwrap(m.stacks[ka])
-        let la = FlexibleStampSpread.lengthMM(sa), ls = FlexibleStampSpread.lengthMM(st)
-        print(String(format: "FLEX-M SETTINGS spread lengths: Top A (lattice %.1f mm) L %.1f mm · Face 3 (lattice %.1f mm) L %.1f mm",
+        let la = FlexibleStampSpread.sigmaMM(sa), ls = FlexibleStampSpread.sigmaMM(st)
+        print(String(format: "FLEX-M SETTINGS spread σ: Top A (lattice %.1f mm) %.1f mm · Face 3 (lattice %.1f mm) %.1f mm",
                      sa.latticeMMMean, la, st.latticeMMMean, ls))
-        XCTAssertEqual(la, 0.2 * sa.latticeMMMean, accuracy: 1e-9)
-        XCTAssertEqual(ls, 0.2 * st.latticeMMMean, accuracy: 1e-9)
+        XCTAssertEqual(la, 0.45 * sa.latticeMMMean, accuracy: 1e-9)
+        XCTAssertEqual(ls, 0.45 * st.latticeMMMean, accuracy: 1e-9)
         // ── a tap reads the colour under it (the blend of its triangle's corners) ──
         let start = try XCTUnwrap(overlay.flatStart[key])
         let vals = try XCTUnwrap(now.mapValues)

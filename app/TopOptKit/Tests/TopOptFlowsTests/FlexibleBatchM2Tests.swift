@@ -5,7 +5,7 @@
 //   V12: the Settings page's dent legends (the open one and its folded bar) were 24 flat blocks; the
 //        main page's card is a smooth gradient. Now both read the main page's ONE ramp
 //        (FlexibleMainLegendRow.ramp). RED: the 24 blocks, measured by the same instrument.
-//   V10: the Settings page's stamp dent (the next commit).
+//   V10: the Settings page's stamp dent (see testTheTwoPagesAgreeOnAFourFingertipStamp).
 #if canImport(MetalKit) && canImport(AppKit)
 import XCTest
 import SwiftUI
@@ -179,5 +179,151 @@ final class FlexibleBatchM2Tests: XCTestCase {
         }
     }
 
+    // MARK: - V10: the Settings page's stamp dent spreads as the main page's 3D sim does
+
+    /// The pad (100 × 100 × 20, C1's) with the four-fingertip stamp on its top (`kg`, `deepest`), its
+    /// bottom resting — through Save & Exit, the main page's sim landed (the main page's map IS the sim).
+    func fingertipPad(kg: Double, deepest: Double) async throws -> (FlexibleMainStage, FlexibleStageModel, Int) {
+        let pm = try FlexibleHisProject.padProject(FlexibleStageSettings(materialID: "varioshore_tpu"))
+        let stage = FlexibleMainStage()
+        stage.reduceMotion = { true }
+        let m = stage.model(for: pm, materialsPath: FlexibleHisProject.materialsPath, stampsPath: FlexibleHisProject.stampsPath, persist: {})
+        addTeardownBlock { @MainActor in await m.waitForIdle() }
+        m.openScene()
+        try await FlexibleHisProject.waitFor(90, "the pad") { m.sceneState == .ready }
+        let mesh = try XCTUnwrap(pm.viewerMesh)
+        let top = FlexibleHisProject.topFace(mesh)
+        _ = m.press(top, kg: kg)
+        m.rest(FlexibleSquishFixture.bottomFace(mesh))
+        try await FlexibleHisProject.waitFor(60, "the top's stack") { m.stack(top) != nil }
+        m.setShape(top, "stamp")
+        let fingers = try XCTUnwrap(m.library?.stamps.first { $0.id == "four_fingers" })
+        m.setStamp(top, source: .library(fingers.id), shape: fingers)
+        m.edit { s in if var f = s.face(top) { f.deepestMM = deepest; s.setFace(f) } }
+        try await FlexibleHisProject.waitFor(60, "the stamp's grid") { m.stampDent(top) != nil }
+        try await FlexibleSquishFixture.settle(m, "the fingertip pad")
+        stage.didExitSettings()
+        stage.apply(pm, owned: true, pageUp: false)
+        try await FlexibleHisProject.waitFor(400, "the fingertip pad's sim") {
+            stage.refresh()
+            return m.lattice != nil && !m.squish.isEmpty && !m.squish.values.contains(.pending)
+        }
+        await m.squishSolver.waitForIdle()
+        stage.refresh()
+        return (stage, m, top)
+    }
+
+    /// Along one line of columns: the RMS and the largest difference of two colour fractions.
+    static func agreement(_ a: [Double], _ b: [Double], _ line: [Int]) -> (rms: Double, max: Double) {
+        let d = line.compactMap { c -> Double? in a[c].isFinite && b[c].isFinite ? a[c] - b[c] : nil }
+        guard !d.isEmpty else { return (.nan, .nan) }
+        return ((d.map { $0 * $0 }.reduce(0, +) / Double(d.count)).squareRoot(), d.map(abs).max()!)
+    }
+
+    /// The drawn dent's SAW-TOOTH on face `key`: per column quad, how far its two triangles' crease
+    /// lifts off the other diagonal — |(c0 + c2) − (c1 + c3)| / 2 of its corners' dents (mm along the
+    /// load, × the page's exaggeration: what is DRAWN), over the column pitch. 0 for a plane; a steep
+    /// curved wall drawn by two flat triangles per column zig-zags at the pitch.
+    static func tooth(_ dents: [Float], overlay o: FlexibleOverlayMesh, key: FlexFaceKey, stack st: FlexStackInfo, exaggeration: Double) -> Double {
+        guard let start = o.flatStart[key] else { return .nan }
+        let l = SIMD3<Float>(st.load)
+        func along(_ v: Int) -> Double { Double(simd_dot(SIMD3(dents[3 * v], dents[3 * v + 1], dents[3 * v + 2]), l)) }
+        var worst = 0.0
+        for c in st.columns.indices {
+            let q = start + 6 * c
+            guard 3 * (q + 5) + 2 < dents.count else { break }
+            // the quad's flat order [0, 2, 1, 0, 3, 2] (FlexibleOverlayMesh.quadOrder): corners 0 → v0, 1 → v2, 2 → v1, 3 → v4
+            let c0 = along(q), c1 = along(q + 2), c2 = along(q + 1), c3 = along(q + 4)
+            worst = max(worst, abs((c0 + c2) - (c1 + c3)) / 2 * exaggeration / st.pitchMM)
+        }
+        return worst
+    }
+
+    /// His round-5 V10 (batch M verification): "the Settings page's stamp dent is a steep trench with
+    /// saw-tooth edges and disagrees with the main page". Same face, same stamp: the Settings page's
+    /// column dent and the main page's map (the 3D sim's own squish), each as the colour it is drawn in
+    /// (over its own legend's top), along the row through the four fingertips and the line across them.
+    /// RED CONTROL: batch M's spread (the footprint, a full sink under all of it, e^(−r / 0.2·depth)).
+    func testTheTwoPagesAgreeOnAFourFingertipStamp() async throws {
+        defer { FlexibleStampSpread.controlBatchMSpread = false }
+        for (kg, deepest, rmsCap, maxCap) in [(3.0, 6.0, 0.07, 0.13), (10.0, 3.0, 0.09, 0.20)] {
+            let (stage, m, top) = try await fingertipPad(kg: kg, deepest: deepest)
+            let tag = String(format: "%.0f kg, %.0f mm", kg, deepest)
+            XCTAssertTrue(stage.fe.active, "\(tag): premise: the main page's map is the 3D sim")
+            let key = try XCTUnwrap(m.key(top)), st = try XCTUnwrap(m.stacks[key])
+            let mainO = try XCTUnwrap(stage.overlay), mainStart = try XCTUnwrap(mainO.flatStart[key])
+            let heat = try XCTUnwrap(stage.heatValues)
+            XCTAssertGreaterThan(stage.dentMaxMM, 0)
+            // ★ THE DENT'S SHAPE on each page: its value per column over the face's own deepest — the colour
+            // it is drawn in whenever the page's legend tops at that face (the main page's card does here;
+            // the Settings legend tops at core's buildable range when that is deeper — an older rule,
+            // printed beside, not what V10 is about)
+            func shape(_ x: [Double]) -> [Double] {
+                let top = x.filter(\.isFinite).max() ?? 0
+                return x.map { $0.isFinite && top > 0 ? $0 / top : .nan }
+            }
+            // the main page's map per column: the mean of its quad's six vertex values (the sim's mm)
+            let mainMM: [Double] = st.columns.indices.map { c in
+                let v = (0..<6).map { Double(heat[mainStart + 6 * c + $0]) }
+                return v.allSatisfy(\.isFinite) ? v.reduce(0, +) / 6 : .nan
+            }
+            let main = shape(mainMM)
+            // the Settings page's per column (its own rule: FlexibleShownValues, no lattice drawn), mm
+            func settings() -> (frac: [Double], mm: [Double], shown: FlexibleShownValues) {
+                let shown = FlexibleShownValues(model: m)
+                let v = shown.values[key] ?? []
+                let mm: [Double] = st.columns.indices.map { c in
+                    if c < v.count, case .depth(let d) = v[c] { return d }
+                    return .nan
+                }
+                return (shape(mm), mm, shown)
+            }
+            // the lines: the row through the stamp (most of its footprint) and the column across it
+            let foot = try XCTUnwrap(m.stampFootprint(top))
+            var rowSum: [Int: Double] = [:], colSum: [Int: Double] = [:]
+            for (c, col) in st.columns.enumerated() { rowSum[col.iv, default: 0] += foot[c]; colSum[col.iu, default: 0] += foot[c] }
+            let iv = try XCTUnwrap(rowSum.max { $0.value < $1.value }?.key), iu = try XCTUnwrap(colSum.max { $0.value < $1.value }?.key)
+            let row = st.columns.indices.filter { st.columns[$0].iv == iv }.sorted { st.columns[$0].iu < st.columns[$1].iu }
+            let across = st.columns.indices.filter { st.columns[$0].iu == iu }.sorted { st.columns[$0].iv < st.columns[$1].iv }
+            // the Settings page's drawn dent and its saw-tooth (its own channels, as the page hands them over)
+            let so = try XCTUnwrap(FlexiblePageChannels.overlay(model: m))
+            func drawnTooth() throws -> Double {
+                let ch = FlexiblePageChannels.channels(model: m, overlay: so, xray: true, drawnLattice: nil)
+                return Self.tooth(try XCTUnwrap(ch.dents), overlay: so, key: key, stack: st, exaggeration: ch.exaggeration)
+            }
+            let now = settings()
+            let toothNow = try drawnTooth()
+            let rNow = Self.agreement(now.frac, main, row), aNow = Self.agreement(now.frac, main, across)
+            FlexibleStampSpread.controlBatchMSpread = true
+            let old = settings()
+            let toothOld = try drawnTooth()
+            FlexibleStampSpread.controlBatchMSpread = false
+            let rOld = Self.agreement(old.frac, main, row), aOld = Self.agreement(old.frac, main, across)
+            func line(_ x: [Double], _ ids: [Int]) -> String { stride(from: 0, to: ids.count, by: 3).map { String(format: "%.2f", x[ids[$0]]) }.joined(separator: " ") }
+            print("FLEX-M2 AGREE \(tag): row iv \(iv) (\(row.count) columns) · across iu \(iu) (\(across.count))")
+            print("FLEX-M2 AGREE \(tag) row    main:     \(line(main, row))")
+            print("FLEX-M2 AGREE \(tag) row    settings: \(line(now.frac, row))")
+            print("FLEX-M2 AGREE \(tag) row    batch M:  \(line(old.frac, row))")
+            print("FLEX-M2 AGREE \(tag) across main:     \(line(main, across))")
+            print("FLEX-M2 AGREE \(tag) across settings: \(line(now.frac, across))")
+            print("FLEX-M2 AGREE \(tag) across batch M:  \(line(old.frac, across))")
+            print(String(format: "FLEX-M2 AGREE %@: settings vs main — row rms %.3f max %.3f · across rms %.3f max %.3f | batch M's spread — row rms %.3f max %.3f · across rms %.3f max %.3f",
+                         tag, rNow.rms, rNow.max, aNow.rms, aNow.max, rOld.rms, rOld.max, aOld.rms, aOld.max))
+            print(String(format: "FLEX-M2 TOOTH %@: the drawn dent's largest crease over the pitch %.3f (×%.0f) · batch M's spread %.3f (×%.0f) · the face's deepest %.2f mm (the Settings legend tops at %.2f) · the main page's face top %.2f mm (its card %.2f)",
+                         tag, toothNow, now.shown.exaggeration, toothOld, old.shown.exaggeration, now.mm.filter(\.isFinite).max() ?? 0,
+                         now.shown.maxDepth, mainMM.filter(\.isFinite).max() ?? 0, stage.dentMaxMM))
+            XCTAssertGreaterThan(row.count, 40); XCTAssertGreaterThan(across.count, 40)
+            XCTAssertLessThanOrEqual(rNow.rms, rmsCap, "\(tag): along the fingertips the two pages show the same colours")
+            XCTAssertLessThanOrEqual(rNow.max, maxCap, "\(tag): …nowhere more than \(maxCap) of the ramp apart")
+            XCTAssertLessThanOrEqual(aNow.rms, rmsCap, "\(tag): across the stamp too")
+            XCTAssertLessThanOrEqual(aNow.max, maxCap, "\(tag): …across the stamp, nowhere more than \(maxCap) apart")
+            XCTAssertEqual(now.mm.filter(\.isFinite).max() ?? 0, deepest, accuracy: 1e-9, "\(tag): the deepest is still his deepest squish")
+            XCTAssertLessThan(toothNow, 0.08, "\(tag): no saw-tooth — a crease under 8 % of the pitch")
+            // ★ RED CONTROL: batch M's spread disagrees with the main page and zig-zags
+            XCTAssertTrue(rOld.rms > rmsCap || rOld.max > maxCap || aOld.rms > rmsCap || aOld.max > maxCap,
+                          "control: batch M's spread is not what the main page shows")
+            XCTAssertGreaterThan(toothOld, 0.08, "control: batch M's steep wall zig-zags at the pitch")
+        }
+    }
 }
 #endif
