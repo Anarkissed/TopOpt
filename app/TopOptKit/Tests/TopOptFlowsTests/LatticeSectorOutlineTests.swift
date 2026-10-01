@@ -409,6 +409,21 @@ final class LatticeSectorOutlineTests: XCTestCase {
         XCTAssertEqual(Self.area(whole.regions[0]), 10000, accuracy: 1e-6)
     }
 
+    /// A member with no outline to clip is a SKIPPED face, as it is unclipped — never "clipped away".
+    func testAMemberWithNoOutlineIsStillCountedSkipped() {
+        let gid = UUID()
+        let group = SelectionGroup(id: gid, name: "C", colorIndex: 0, faces: [], regionIDs: [103])
+        let noOutline: LatticeRegionEmission.ResolvedFace = .plane(center: SIMD3(50, 50, 20), normal: SIMD3(0, 0, 1),
+                                                                   halfUMM: 50, halfWMM: 50, outlineLoops: [], neighbours: [])
+        func run(_ cuts: [[RegionCut]]) -> LatticeRegionEmission.Result {
+            LatticeRegionEmission.regions(groups: [group], roles: [gid: .include], primitives: { _ in [] },
+                                          includePrimitives: [], faceDepthMM: 4, regionMembers: { _, _ in [1] },
+                                          regionCuts: { _, _ in cuts }, resolve: { _ in noOutline })
+        }
+        XCTAssertEqual(run([[]]).skippedFaces, 1, "control: unclipped, a face with no outline is skipped")
+        XCTAssertEqual(run([[Self.cutX50]]).skippedFaces, 1, "★ and so it is inside a piece")
+    }
+
     // MARK: - unsplit projects: the hooks reduce to what was
 
     /// ★ On every project with no cut and no union of pieces the two hook closures ARE the old
@@ -428,4 +443,32 @@ final class LatticeSectorOutlineTests: XCTestCase {
         let f = p.latticeRegionMemberFaces(kids[0]).first ?? 0
         XCTAssertEqual(p.latticeRegionCutSets(kids[0], face: f).first?.count, 1)
     }
+
+    // MARK: - the row's 3D depth primitive
+
+    /// ★ The Selections row's 3D depth primitive for 'top A' sits over top A (x ≥ 50), not over the
+    /// whole top it was cut from. Control: the uncut 'top' region's primitive spans the whole face.
+    func testTheRowsDepthPrimitiveSitsOverThePiece() throws {
+        func xRange(_ p: ProjectModel, _ ref: LatticeSelectableRef) throws -> (lo: Float, hi: Float) {
+            let plane = try XCTUnwrap(p.latticeDepthPlanes().first { $0.ref == ref }, "the row has a primitive")
+            guard case let .shell(shell) = plane.volume.shape else { XCTFail("a shell"); return (0, 0) }
+            let xs = shell.base.map(\.x)
+            return (xs.min() ?? -1, xs.max() ?? -1)
+        }
+        let pad = Self.splitPad()
+        let a = try xRange(pad.p, .region(group: pad.gid, region: pad.a))
+        XCTAssertEqual(a.lo, 50, accuracy: 1e-3, "★ top A's primitive starts at the cut")
+        XCTAssertEqual(a.hi, 100, accuracy: 1e-3)
+        // control: the whole 'top' region in a group of its own spans the face
+        let whole = Self.splitPad()
+        let g2 = whole.p.selection.addGroup()
+        whole.p.selection.addRegions([whole.top], to: g2)
+        whole.p.force.sync(groups: whole.p.selection.groups)
+        whole.p.force.setProtected(g2, true)
+        whole.p.lattice.groupRoles[g2] = .include
+        let t = try xRange(whole.p, .region(group: g2, region: whole.top))
+        XCTAssertEqual(t.lo, 0, accuracy: 1e-3, "control: the uncut face's primitive spans 0…100")
+        XCTAssertEqual(t.hi, 100, accuracy: 1e-3)
+    }
 }
+

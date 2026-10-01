@@ -2216,7 +2216,7 @@ public final class ProjectModel: ObservableObject {
         return latticeFacePrimitive(faces: members, ref: ref, group: group,
                                     key: rid, role: role,
                                     depthMM: latticeSlabDepthMM(ref, in: group),
-                                    in: mesh)
+                                    in: latticeSectorMesh(rid) ?? mesh)   // ★ batch E: a split piece's own surface
     }
 
     /// A stable NEGATIVE sentinel face key for a manual primitive, so it never

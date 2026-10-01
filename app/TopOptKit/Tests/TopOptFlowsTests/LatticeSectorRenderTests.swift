@@ -141,4 +141,34 @@ final class LatticeSectorRenderTests: XCTestCase {
         XCTAssertLessThan(Double(min(ca.lo, ca.hi)), 0.05 * Double(ca.lo + ca.hi), "★ top A: nothing on top B's half")
         XCTAssertLessThan(Double(min(cb.lo, cb.hi)), 0.05 * Double(cb.lo + cb.hi), "★ top B: nothing on top A's half")
     }
+
+    /// EVIDENCE ONLY (FLEX_E_EVIDENCE_DIR): his split pad, the #354 octet preview from an oblique
+    /// view, the part ghosted — top A alone (his img 4 state, after) and both halves (the seam).
+    func testEvidenceFrames() throws {
+        guard let dir = ProcessInfo.processInfo.environment["FLEX_E_EVIDENCE_DIR"] else { throw XCTSkip("FLEX_E_EVIDENCE_DIR") }
+        guard let device = MTLCreateSystemDefaultDevice() else { throw XCTSkip("no GPU") }
+        let mesh = LatticeSectorOutlineTests.pad()
+        let whole: [LatticeRegionSpec] = {
+            let pad = LatticeSectorOutlineTests.splitPad()
+            pad.p.selection.addRegions([pad.b], to: pad.gid)
+            pad.p.force.sync(groups: pad.p.selection.groups)
+            pad.p.writeLatticeDepthMM(.region(group: pad.gid, region: pad.b), mm: 25)
+            return pad.p.latticeJobRegions().regions
+        }()
+        for (name, regions) in [("topA", padRegions(topA: true).1), ("topA_and_topB", whole)] {
+            for (view, az, el) in [("iso", Float(0.7), Float(0.55)), ("above", Float(0), Float(1.45))] {
+                guard let r = MeshRenderer(device: device, sampleCount: 4) else { throw XCTSkip("renderer") }
+                try XCTSkipUnless(r.latticePipelinesDidBuild)
+                r.setMesh(mesh)
+                r.showGround = false
+                r.camera.frame(mesh.bounds)
+                r.camera.setOrientation(azimuth: az, elevation: el)
+                r.setLatticeScene(scene(mesh, regions, algorithm: "doubled"), token: 1)
+                r.latticeParams = LatticeProxyParams(latticeID: "octet", cellMM: 8, minRelativeDensity: 0.1, maxRelativeDensity: 0.5)
+                r.setBodyAlpha(0.25)
+                let px = try XCTUnwrap(r.renderOffscreen(size: 640, stage: false))
+                LatticeQuiltFrameProbe.writePNG(px, size: 640, to: dir + "/E_split_pad_\(name)_\(view).png")
+            }
+        }
+    }
 }

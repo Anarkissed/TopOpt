@@ -92,7 +92,9 @@ public enum LatticeSectorOutline {
             if !planar, untouched, kept.count == base.count, let w = whole { out.append(w); continue }
             out += kept
         }
-        return Pieces(shapes: out, clipped: true, clippedAway: out.isEmpty && !base.isEmpty)
+        // a face whose shapes have no outline to clip is SKIPPED (as unclipped), not clipped away
+        let clippable = base.contains { if case let .plane(_, _, _, _, l, _) = $0 { return !l.isEmpty }; return false }
+        return Pieces(shapes: out, clipped: true, clippedAway: out.isEmpty && clippable)
     }
 
     /// `face` clipped to every half-space of `cuts` (a point p is kept where
@@ -448,6 +450,50 @@ extension ProjectModel {
         if LatticeSectorSurfaceMemo.byKey.count > 4096 { LatticeSectorSurfaceMemo.byKey = [:] }
         LatticeSectorSurfaceMemo.byKey[key] = has
         return has
+    }
+}
+
+extension ProjectModel {
+
+    /// ★ BATCH E: the surface a split piece covers — its member faces' triangles CLIPPED to the
+    /// piece's half-spaces, welded — so the Selections row's 3D depth primitive (`FaceOffsetShell`)
+    /// sits over the piece and not over the whole face it was cut from. nil for a region with no cut
+    /// (or a union of pieces, which draws no primitive today): that path is unchanged.
+    func latticeSectorMesh(_ rid: RegionID) -> ViewerMesh? {
+        guard let r = faceRegions.region(rid), !r.cuts.isEmpty, !r.isUnionOfParts, let mesh = viewerMesh
+        else { return nil }
+        let members = Set(FaceRegionGeometry.members(of: r, in: mesh).map { Int32($0) })
+        var v: [Float] = [], idx: [Int32] = [], fid: [Int32] = []
+        struct Key: Hashable { let x: Int64, y: Int64, z: Int64 }
+        var weld: [Key: Int32] = [:]
+        func vid(_ p: SIMD3<Double>) -> Int32 {
+            let k = Key(x: Int64((p.x * 1e5).rounded()), y: Int64((p.y * 1e5).rounded()), z: Int64((p.z * 1e5).rounded()))
+            if let i = weld[k] { return i }
+            let i = Int32(v.count / 3)
+            v += [Float(p.x), Float(p.y), Float(p.z)]
+            weld[k] = i
+            return i
+        }
+        func at(_ i: UInt32) -> SIMD3<Double> {
+            let b = Int(i) * 3
+            return SIMD3(Double(mesh.positions[b]), Double(mesh.positions[b + 1]), Double(mesh.positions[b + 2]))
+        }
+        var t = 0
+        while t + 2 < mesh.indices.count {
+            let tri = t / 3
+            defer { t += 3 }
+            guard tri < mesh.faceIDs.count, members.contains(mesh.faceIDs[tri]) else { continue }
+            let poly = SurfacePatternAxis.clipPolygon([at(mesh.indices[t]), at(mesh.indices[t + 1]), at(mesh.indices[t + 2])],
+                                                      to: r.cuts)
+            guard poly.count >= 3 else { continue }
+            let ids = poly.map(vid)
+            for k in 1..<(ids.count - 1) where ids[0] != ids[k] && ids[k] != ids[k + 1] && ids[0] != ids[k + 1] {
+                idx += [ids[0], ids[k], ids[k + 1]]
+                fid.append(mesh.faceIDs[tri])
+            }
+        }
+        guard !idx.isEmpty else { return nil }
+        return ViewerMesh(vertices: v, indices: idx, faceIDs: fid, faceGeometry: mesh.faceGeometry)
     }
 }
 
