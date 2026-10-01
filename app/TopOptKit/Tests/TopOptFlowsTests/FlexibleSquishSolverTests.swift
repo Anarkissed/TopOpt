@@ -81,6 +81,11 @@ final class FlexibleSquishSolverTests: XCTestCase {
 
     func testWaitsForOtherCoreSolves() async throws {
         let (_, m) = try await his(threeGroups: false)
+        // ★ RE-PINNED (round 5 batch N): this test is the QUICK sims' gate. Once they land, each group is
+        // now refined in steps under the same claim, and a refine keeps core until it yields at its next
+        // increment — "the Stress solve runs once the sims are idle" would wait on it (its own gate,
+        // yield included, is pinned by FlexibleBatchNRefineTests.testANewLatticeCancelsTheRefineAnd…)
+        m.squishSolver.controlNoRefine = true
         // another core solve runs: no sim starts
         var busy = true
         m.squishSolver.busy = { busy }

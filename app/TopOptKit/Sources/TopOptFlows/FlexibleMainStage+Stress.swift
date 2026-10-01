@@ -35,11 +35,11 @@ extension FlexibleMainStage {
     /// One field's stress (cached per field): its node field, its true peak and its colour scale's top.
     func feStress(_ f: FlexibleFEField) -> (field: LatticeDemandField, peak: Double, top: Double)? {
         let key = "\(f.serial)|\(f.scale)"
-        if let c = feStressCache[f.simID], c.key == key { return (c.field, c.peak, c.top) }
+        if let c = feStressCache[f.versionKey], c.key == key { return (c.field, c.peak, c.top) }   // ★ BATCH N: per VERSION
         guard let field = FlexibleFEStress.field(f) else { return nil }
         let peak = LatticeStressTint.peakMPa(field)
         let top = controlStressScaleIsPeak ? peak : FlexibleFEStress.scaleTop(field)
-        feStressCache[f.simID] = (key, field, peak, top)
+        feStressCache[f.versionKey] = (key, field, peak, top)
         return (field, peak, top)
     }
 

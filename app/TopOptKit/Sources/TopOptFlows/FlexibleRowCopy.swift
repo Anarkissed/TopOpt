@@ -344,7 +344,7 @@ public enum FlexibleRowCopy {
         public static let groupRow = "Move this face to another squeeze group, or make a new group from it."
         /// ★ ROUND 5 (batch S).
         public static let squeeze = "The ONE force every face of this group presses with, at the same time — like two hands pressing equally. Tap the number to type it, or drag it up or down. Tap the unit to show weights in kg, lb, N or kN (stored the same). It changes the main page's Load group when a face comes from one."
-        public static let colour = "This group's colour on the part: its faces are framed in it on this page and on the main Flexible page. Pick a colour another group wears and the two swap."
+        public static let colour = "This group's colour on the part: its faces are framed in it on this page and on the main Flexible page. Pick a colour another group wears and the two swap. There are eight; from the ninth group on they repeat, and a repeated colour carries its group's number on the tab and on the faces."
         public static let curvePoint = "How far the curve squishes at the selected point, in mm of this face's deepest squish. Drag the point on the part, or type it here."
     }
 }

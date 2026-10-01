@@ -217,12 +217,9 @@ struct FlexibleLegendBar: View {
 
     var body: some View {
         VStack(spacing: 6) {
-            VStack(spacing: 0) {
-                ForEach((0..<24).reversed(), id: \.self) { i in
-                    FlexibleColours.depthColour(fraction: Double(i) / 23).color.frame(width: 18)
-                }
-            }
-            .frame(height: Self.barHeight)
+            // ★ BATCH M2 (V12): the main page's ONE smooth ramp, deepest at the top — never 24 flat blocks
+            FlexibleMainLegendRow.ramp(.dent, vertical: true)
+            .frame(width: 18, height: Self.barHeight)
             .clipShape(RoundedRectangle(cornerRadius: 3, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: 3, style: .continuous)
                 .strokeBorder(DS.Color.strokeSubtle.color, lineWidth: 1))

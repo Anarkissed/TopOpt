@@ -116,6 +116,29 @@ public struct FlexSquishSolutionInfo: Sendable {
     /// ★ BATCH M: per FE element ((nx−1)(ny−1)(nz−1), x fastest), the modulus it was solved with
     /// (MPa; relative units under shape only), 0 where no solid — the stress view's C.
     public var elementE: [Float] = []
+    /// ★ BATCH N: the STEPPED solve's receipt (a linear solve: one solve at load factor 1).
+    public var session: Int64 = 0
+    public var loadFactor = 1.0
+    public var fixedPointIterations = 0
+    public var fixedPointConverged = false
+    public var fixedPointChange = 0.0
+    public var cgIterationsTotal = 0
+    public var mgSkipped = false
+    public var stepMS = 0.0
+    /// The solid elements' principal compressive strain (the curves' axis) at this field.
+    public var strainP50 = 0.0, strainP99 = 0.0, strainMax = 0.0
+    /// Elements past the curves' last tested strain.
+    public var beyondDataElements = 0
+    /// Elements the last iterate updated by their STRESS (where the curve stiffens).
+    public var stressUpdates = 0
+    /// ★ BATCH N VERIFICATION: the last solve's damping (1 = undamped — only an undamped solve may
+    /// stop an increment).
+    public var fixedPointOmega = 1.0
+    /// The part's elements, those whose volume GROWS > 30 % under the press (a turn the small-strain
+    /// sim draws as a stretch) and the largest volume ratio det(I + ∇u).
+    public var solidElements = 0
+    public var inflatedElements = 0
+    public var volumeRatioMax = 0.0
 
     /// Node (a, b, c)'s index (x fastest).
     public func node(_ a: Int, _ b: Int, _ c: Int) -> Int { (c * ny + b) * nx + a }
@@ -132,6 +155,15 @@ extension FlexibleScene {
     /// One squeeze group's squish field (core's solver; seconds on a large part — call it OFF the
     /// main thread and off any actor that serialises design calls).
     public func squishSolve(_ r: FlexSquishRequestInfo) throws -> FlexSquishSolutionInfo {
+        let q = squishRequest(r)
+        var err = topoptbridge.BridgeError()
+        let s = topoptbridge.flexible_scene_squish_solve(handle, q, &err)
+        try FlexConv.check(err)
+        return FlexSquishConv.info(s)
+    }
+
+    /// The bridge's request for `r` (★ BATCH N: shared by the linear solve and the stepped one).
+    func squishRequest(_ r: FlexSquishRequestInfo) -> topoptbridge.FlexSquishRequest {
         var q = topoptbridge.FlexSquishRequest()
         var presses = topoptbridge.FlexSquishPresses()
         for p in r.pressed {
@@ -152,9 +184,13 @@ extension FlexibleScene {
         q.deadline_ms = r.deadlineMS
         q.coarsen = Int32(r.coarsen)
         q.control = Int32(r.control)
-        var err = topoptbridge.BridgeError()
-        let s = topoptbridge.flexible_scene_squish_solve(handle, q, &err)
-        try FlexConv.check(err)
+        return q
+    }
+}
+
+extension FlexSquishConv {
+    /// The bridge's solution as plain values.
+    static func info(_ s: topoptbridge.FlexSquishSolution) -> FlexSquishSolutionInfo {
         // ★ hoist every vector ONCE (a C++ member read in a Swift loop copies the whole vector)
         let u = Array(s.u), solved = Array(s.solved).map { $0 != 0 }
         let offs = Array(s.press_load_offsets).map { Int($0) }
@@ -183,6 +219,23 @@ extension FlexibleScene {
             heldNodes: Array(s.held_nodes).map { Int($0) }, pinnedDOFs: Array(s.pinned_dofs).map { Int($0) },
             restingMissing: Array(s.resting_missing).map { Int($0) }, farAnvils: Int(s.far_anvils))
         info.elementE = Array(s.element_e)
+        info.session = s.session
+        info.loadFactor = s.load_factor
+        info.fixedPointIterations = Int(s.fixed_point_iterations)
+        info.fixedPointConverged = s.fixed_point_converged
+        info.fixedPointChange = s.fixed_point_change
+        info.cgIterationsTotal = Int(s.cg_iterations_total)
+        info.mgSkipped = s.mg_skipped
+        info.stepMS = s.step_ms
+        info.strainP50 = s.strain_p50
+        info.strainP99 = s.strain_p99
+        info.strainMax = s.strain_max
+        info.beyondDataElements = Int(s.beyond_data_elements)
+        info.stressUpdates = Int(s.stress_updates)
+        info.fixedPointOmega = s.fixed_point_omega
+        info.solidElements = Int(s.solid_elements)
+        info.inflatedElements = Int(s.inflated_elements)
+        info.volumeRatioMax = s.volume_ratio_max
         return info
     }
 }

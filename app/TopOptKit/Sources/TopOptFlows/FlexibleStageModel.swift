@@ -186,6 +186,9 @@ public final class FlexibleStageModel: ObservableObject {
     /// ★ BATCH G: each squeeze group's squish sim for the CURRENT lattice (by sim id): pending,
     /// its calibrated FE field, or core's words. One publish per landed sim (FlexibleStageModel+Squish).
     @Published public internal(set) var squish: [String: FlexibleSquishState] = [:]
+    /// ★ BATCH N: each group's squish solved IN STEPS (FlexibleFERefine), once its quick sim landed:
+    /// running (n of 8), its refined field, or kept (the quick one stays — why). Same generation as `squish`.
+    @Published public internal(set) var refine: [String: FlexibleRefineState] = [:]
     /// The lattice generation `squish` belongs to.
     public internal(set) var squishGeneration: Int?
     /// What the sims need, built in the lattice's build task (released once the solver has it).

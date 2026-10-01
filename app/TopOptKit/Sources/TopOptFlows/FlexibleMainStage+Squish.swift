@@ -51,12 +51,35 @@ struct FlexibleFEView: Equatable {
     /// A field of the sequence was solved with every rest held fast (its sliding solve did not
     /// settle — the one retry): the (i) says so.
     var restsBonded = false
+    // ★ BATCH N: the squish solved in steps (FlexibleFERefine)
+    /// Quick fields kept beside their refined version while the renderer may still show them (not in
+    /// the sequence — the renderer swaps the refined one in at the cycle's rest point).
+    var retained: [Int] = []
+    /// The sequence's group refining now: its sim, the increment being solved, of (★ verification:
+    /// the line names the group).
+    var refining: (id: String, step: Int, total: Int)?
+    /// A group of the sequence whose refine did not land: its one line ("the stepped sim did not settle").
+    var refineKept: String?
+    /// Every field of the sequence ON SCREEN was solved in steps (the (i) says so).
+    var stepped = false
+    /// ★ BATCH N VERIFICATION: the sequence AS ON SCREEN — each entry the version the renderer shows (a
+    /// quick field kept beside its refined one stands in for it until the swap at rest). The legend's
+    /// top, the colours of what is on screen, the dent row and the (i) read this, never the newest
+    /// version (they had jumped mid-squeeze when a refine landed).
+    var shownSequence: [Int] = []
+    /// The load factor the stepped fields on screen are at (the largest): "pressed at 2× your weights".
+    var pressedAt: Double?
+    /// A stepped field on screen has elements that GROW under the press — a turn the small-strain sim
+    /// draws as a stretch (his Group 1's lifted edge): the (i) says so.
+    var turned = false
     /// The FE field moves the picture.
     var active: Bool { !sequence.isEmpty }
 
     static func == (a: Self, b: Self) -> Bool {
         a.token == b.token && a.sequence == b.sequence && a.pending == b.pending && a.failure == b.failure
-            && a.requested == b.requested && a.skipped == b.skipped
+            && a.requested == b.requested && a.skipped == b.skipped && a.retained == b.retained
+            && a.refining?.id == b.refining?.id && a.refining?.step == b.refining?.step && a.refining?.total == b.refining?.total
+            && a.refineKept == b.refineKept && a.shownSequence == b.shownSequence
     }
 }
 
@@ -84,7 +107,19 @@ extension FlexibleMainStage {
             v.pending = unscheduled
             return v
         }
-        v.fields = groups.compactMap { $0.state?.field }.filter { $0.generation == g.generation }
+        // ★ BATCH N: each group's DISPLAYED version — its refined field once it landed, else the quick one;
+        // a quick field the renderer still shows stays beside it (after the groups', out of the sequence)
+        // until the renderer swaps the refined one in at rest
+        let quick = groups.compactMap { $0.state?.field }.filter { $0.generation == g.generation }
+        v.fields = quick.map { q in m.refinedField(q.simID, generation: g.generation) ?? q }
+        if !controlNoRefineView {
+            for q in quick where m.refinedField(q.simID, generation: g.generation) != nil && loop.shownKey == q.versionKey {
+                v.retained.append(v.fields.count)
+                v.fields.append(q)
+            }
+        } else {
+            v.fields = quick
+        }
         v.mesh = v.fields.map { feMesh(for: $0) }
         v.sequence = seqIDs.compactMap { id in v.fields.firstIndex { $0.simID == id } }
         v.pending = seqIDs.contains { m.squish[$0] == .pending } || unscheduled
@@ -95,21 +130,47 @@ extension FlexibleMainStage {
         for f in v.fields { h.combine(f.serial); h.combine(f.scale) }
         h.combine(overlaySerial)
         v.token = h.finalize()
-        v.safeScale = v.sequence.map { v.fields[$0].maxSafeScale }.min() ?? .infinity
-        v.coreRatio = v.sequence.map { v.fields[$0] }.first { $0.clamped }?.coreRatio
-        v.restsBonded = v.sequence.contains { v.fields[$0].restsBonded }
-        v.foldShare = v.sequence.compactMap { v.fields[$0].foldShare }.min()
-        v.partSafeScale = v.sequence.map { v.fields[$0].partSafeScale }.min() ?? .infinity
+        // ★ BATCH N VERIFICATION: what the renderer SHOWS of the sequence — a refined field whose quick one
+        // is still on screen (kept beside it) is read as that quick one until the swap at rest
+        v.shownSequence = v.sequence.map { i in
+            guard !controlLegendByNewestVersion, v.fields[i].refined,
+                  let j = v.retained.first(where: { v.fields[$0].simID == v.fields[i].simID }) else { return i }
+            return j
+        }
+        let shown = v.shownSequence
+        v.safeScale = shown.map { v.fields[$0].maxSafeScale }.min() ?? .infinity
+        v.coreRatio = shown.map { v.fields[$0] }.first { $0.clamped }?.coreRatio
+        v.restsBonded = shown.contains { v.fields[$0].restsBonded }
+        v.foldShare = shown.compactMap { v.fields[$0].foldShare }.min()
+        v.partSafeScale = shown.map { v.fields[$0].partSafeScale }.min() ?? .infinity
+        // ★ BATCH N: the refine's line — the group on screen first
+        if !controlNoRefineView {
+            let order = ([playingSimID ?? ""] + seqIDs).filter { seqIDs.contains($0) }
+            for id in order {
+                if case .running(let n, let t)? = m.refine[id] { v.refining = (id, n, t); break }
+            }
+            for id in order {
+                if case .kept(let why, _)? = m.refine[id] { v.refineKept = why; break }
+            }
+            v.stepped = !shown.isEmpty && shown.allSatisfy { v.fields[$0].refined }
+            // ★ BATCH N VERIFICATION: the force the stepped picture is at, and its turns drawn as stretches
+            let stepped = shown.map { v.fields[$0] }.filter(\.refined)
+            v.pressedAt = stepped.isEmpty || stepped.contains(where: \.uncalibrated) ? nil : stepped.map(\.scale).max()
+            v.turned = stepped.contains { ($0.refine?.inflated ?? 0) > 0 }
+        }
         return v
     }
+
+    /// ★ BATCH N: the sim the loop names as playing (Play all's turn), else the pick.
+    private var playingSimID: String? { loop.playingSimID ?? shownSim }
 
     /// A field's mesh displacements on the current overlay (cached per overlay and field).
     func feMesh(for f: FlexibleFEField) -> [Float] {
         guard let o = overlay else { return [] }
         let key = "\(overlaySerial)|\(f.serial)|\(f.scale)"
-        if let c = feMeshCache[f.simID], c.key == key { return c.mesh }
+        if let c = feMeshCache[f.versionKey], c.key == key { return c.mesh }
         let mesh = f.meshDisplacements(positions: o.mesh.flat.positions)
-        feMeshCache[f.simID] = (key, mesh)
+        feMeshCache[f.versionKey] = (key, mesh)   // ★ BATCH N: per VERSION (the quick and the refined one at once)
         return mesh
     }
 
@@ -130,7 +191,7 @@ extension FlexibleMainStage {
     func feMapValues(_ f: FlexibleFEField, _ m: FlexibleStageModel) -> [Float]? {
         guard let o = overlay else { return nil }
         let key = "\(overlaySerial)|\(f.serial)|\(f.scale)"
-        if let c = feValueCache[f.simID], c.key == key { return c.values }
+        if let c = feValueCache[f.versionKey], c.key == key { return c.values }
         let keys = Set(m.lattice?.sims.first { $0.id == f.simID }?.keys ?? [])
         let ratio = 1 / Swift.max(1e-6, f.foldShare ?? 1)
         var perColumn: [FlexFaceKey: [Double?]] = [:]
@@ -142,22 +203,31 @@ extension FlexibleMainStage {
             }
         }
         let out = o.mapCornerValues(perColumn, stacks: m.stacks)
-        feValueCache[f.simID] = (key, out)
+        feValueCache[f.versionKey] = (key, out)
         return out
     }
 
     /// The FE heat of the sequence on screen: every face by its OWN group's sim (the pick's field; under
     /// "Play all" each group's faces by theirs — the renderer swaps in each turn's own, which match it on
     /// that group's faces) and the ONE scale over every field of it.
-    func feHeat(_ m: FlexibleStageModel) -> (first: [Float], scaleMM: Double)? {
+    /// ★ BATCH N VERIFICATION: of the sequence AS ON SCREEN (`shownSequence`): a refined field that landed
+    /// mid-squeeze no longer moves the legend's top or recolours the quick one still playing (his Group
+    /// 1: 23.72 → 20.98 mm at the landing). `nextScaleMM`: the scale once every refined version is on
+    /// screen — the refined versions' own colours are made on it, so the swap at rest is their only change.
+    func feHeat(_ m: FlexibleStageModel) -> (first: [Float], scaleMM: Double, nextScaleMM: Double)? {
         guard fe.active, !controlColumnHeat else { return nil }
-        let all = fe.sequence.compactMap { i in i < fe.fields.count ? feMapValues(fe.fields[i], m) : nil }
-        guard var union = all.first else { return nil }
-        for v in all.dropFirst() {
-            for i in union.indices where i < v.count && !union[i].isFinite && v[i].isFinite { union[i] = v[i] }
+        func heat(_ seq: [Int]) -> (union: [Float], top: Double)? {
+            let all = seq.compactMap { i in i < fe.fields.count ? feMapValues(fe.fields[i], m) : nil }
+            guard var union = all.first else { return nil }
+            for v in all.dropFirst() {
+                for i in union.indices where i < v.count && !union[i].isFinite && v[i].isFinite { union[i] = v[i] }
+            }
+            let top = all.map { $0.reduce(Float(0)) { $1.isFinite ? Swift.max($0, $1) : $0 } }.max() ?? 0
+            return top > 1e-6 ? (union, Double(top)) : nil
         }
-        let top = all.map { $0.reduce(Float(0)) { $1.isFinite ? Swift.max($0, $1) : $0 } }.max() ?? 0
-        return top > 1e-6 ? (union, Double(top)) : nil
+        guard let now = heat(fe.shownSequence.isEmpty ? fe.sequence : fe.shownSequence) else { return nil }
+        let next = fe.shownSequence == fe.sequence ? now.top : (heat(fe.sequence)?.top ?? now.top)
+        return (now.union, now.top, next)
     }
 
     /// The heat a tap reads now: the field on screen's (FE), else the page's corner values.
@@ -171,7 +241,7 @@ extension FlexibleMainStage {
     var feShownMesh: [Float]? {
         let v = fe
         guard v.active else { return nil }
-        let i = v.sequence.contains(loop.shownIndex) ? loop.shownIndex : v.sequence[0]
+        let i = feShownIndex(v)
         return i < v.mesh.count ? v.mesh[i] : nil
     }
 
@@ -179,20 +249,33 @@ extension FlexibleMainStage {
     var feShownField: FlexibleFEField? {
         let v = fe
         guard v.active else { return nil }
-        let i = v.sequence.contains(loop.shownIndex) ? loop.shownIndex : v.sequence[0]
+        let i = feShownIndex(v)
         return i < v.fields.count ? v.fields[i] : nil
+    }
+
+    /// ★ BATCH N: the index of the field the renderer shows — by its VERSION (a quick field kept beside
+    /// its refined one until the swap at rest), else by the loop's index, else the sequence's first.
+    func feShownIndex(_ v: FlexibleFEView) -> Int {
+        if let key = loop.shownKey, let i = v.fields.firstIndex(where: { $0.versionKey == key }) { return i }
+        return v.sequence.contains(loop.shownIndex) ? loop.shownIndex : v.sequence[0]
     }
 
     /// The dent H4 hands the renderer and the taps read: the FE mesh on screen, else the column dent.
     var shownDents: [Float]? { feShownMesh ?? channels?.dents }
 
     /// The player's note from the sims: "Simulating the squish…" while one of the sequence runs,
-    /// "Simple squish · the sim failed" when it fell back, "Group 2 skipped · its sim failed" when
+    /// "Squish sim failed" when it fell back, "Group 2's sim failed" when
     /// Play all plays the others.
     var feNote: String? {
         if fe.pending { return FlexibleFE.pending }
         if fe.failure != nil { return FlexibleFE.failed }
         if let id = fe.skipped.first, let sim = sims.first(where: { $0.id == id }) { return FlexibleFE.skipped(sim.short) }
+        // ★ BATCH N: the quick squish plays while the steps run, then the refined one swaps in at rest
+        // (★ verification: the group named — "Refining Group 2… 3/8")
+        if let r = fe.refining {
+            return FlexibleFERefine.refining(sims.first { $0.id == r.id }?.short ?? "the squish", r.step, of: r.total)
+        }
+        if let why = fe.refineKept { return FlexibleFERefine.kept(why) }
         return nil
     }
 
@@ -215,16 +298,21 @@ extension FlexibleMainStage {
     /// a combo"): under "Play all" each group's OWN colours — only its faces' heat, on the page's
     /// one scale — computed per landed group of the sequence (refresh), composed with the rest of
     /// the page in `tints` and swapped in by the renderer WITH that group's field and mesh.
-    func playAllBaseTints(_ m: FlexibleStageModel, scaleMM: Double) -> [String: [Float]] {
-        guard fe.active, fe.sequence.count > 1, let lat = m.lattice, !controlPlayAllCombo else { return [:] }
+    /// ★ BATCH N VERIFICATION: each version on ITS scale — a quick field kept on screen on today's
+    /// (`scaleMM`), the sequence's versions on the scale they will play on (`nextScaleMM`).
+    func playAllBaseTints(_ m: FlexibleStageModel, scaleMM: Double, nextScaleMM: Double? = nil) -> [String: [Float]] {
+        guard fe.active, fe.sequence.count > 1 || !fe.retained.isEmpty, let lat = m.lattice, !controlPlayAllCombo else { return [:] }
         var out: [String: [Float]] = [:]
-        for i in fe.sequence where i < fe.fields.count {
+        // ★ BATCH N: …and each quick field kept beside its refined version (the renderer swaps the
+        // refined one's colours in with its shape, at rest) — keyed by VERSION
+        for i in fe.sequence + fe.retained where i < fe.fields.count {
             let id = fe.fields[i].simID
             let d = FlexibleLatticePreview.drawn(lat.showing(id), xray: true, building: m.latticeBuilding,
                                                  checkStampShown: nil, stale: m.latticeIsStale)
             // ★ BATCH M: each turn's heat is its own sim's dent, on the page's one scale
-            out[id] = FlexiblePageChannels.channels(model: m, overlay: overlay, xray: false, drawnLattice: d, heat: heat,
-                                                    depthScaleMM: scaleMM, mapValues: feMapValues(fe.fields[i], m)).tints
+            let scale = fe.retained.contains(i) ? scaleMM : (nextScaleMM ?? scaleMM)
+            out[fe.fields[i].versionKey] = FlexiblePageChannels.channels(model: m, overlay: overlay, xray: false, drawnLattice: d, heat: heat,
+                                                                        depthScaleMM: scale, mapValues: feMapValues(fe.fields[i], m)).tints
         }
         return out
     }

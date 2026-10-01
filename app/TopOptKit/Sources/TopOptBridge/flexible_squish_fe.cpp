@@ -24,6 +24,8 @@
 #include <cmath>
 #include <cstdint>
 #include <limits>
+#include <map>
+#include <memory>
 #include <mutex>
 #include <stdexcept>
 #include <string>
@@ -81,6 +83,11 @@ enum Control : int {
   kFixedCap = 8192,
   kKeepGlobals = 16384,
   kNoFarAnvil = 32768,
+  // ★ BATCH N VERIFICATION (tests only): every increment's secant iterations start DAMPED (ω = ¼), so
+  // the convergence rule is exercised on a damped solve; and the RED control of that rule — batch N's
+  // first one, where a damped solve's small change counted as converged.
+  kStartDamped = 65536,
+  kDampedConverges = 131072,
 };
 
 std::mutex g_squish_fe_mu;
@@ -119,6 +126,54 @@ struct Law {
     if (rho < 0.0 || (control & kLatticeSolid)) return es;
     const double f = std::min(1.0, std::max(0.0, skin));
     const double e = f * es + (1.0 - f) * lattice(rho, strain, control);
+    return std::max(e, 1e-4 * es);
+  }
+
+  // ── ★ BATCH N: the STEPPED solve's law — the secant at the voxel's OWN strain ──────────────
+  // Up to the curves' last tested strain (strain_limit, 0.25) it IS core's curve: σ(ε; ρ) / ε,
+  // the same row interpolation core designs with (ε clamped below at 0.02, where the secant is the
+  // initial modulus). PAST the data (`past`):
+  //   0 — the curve held at its last tested secant (no stiffening: the linear law's clamp) —
+  //       the red control, and what the tested data alone says;
+  //   1 — DENSIFICATION (Gibson & Ashby, Cellular Solids §5.3: a cellular solid's cells close at
+  //       ε_D = 1 − 1.4 ρ, where the stress rises without bound): σ(ε) = σ_L ((ε_D − ε_L) /
+  //       (ε_D − ε))^m for ε_L < ε < ε_D, m = E_t(ε_L) (ε_D − ε_L) / σ_L so stress AND slope join
+  //       the curve at its last tested strain ε_L (C¹); the secant is capped at the solid modulus.
+  //       A TEXTBOOK law past his data — said in the (i) and the handoff; core brief: curves
+  //       tested to densification.
+  int past = 1;
+  double densification = 1.4;
+  double densification_strain(double r) const {
+    const double lim = set.strain_limit();
+    return std::min(0.95, std::max(lim + 0.05, 1.0 - densification * r));
+  }
+  double lattice_at(double rho, double strain) const {
+    if (relative) {
+      const double r = std::max(rho, 0.05);
+      return r * r;
+    }
+    const double r = std::min(std::max(rho, set.density_min()), set.density_max());
+    const double lim = set.strain_limit();
+    const double e = std::max(strain, kEpsMin);
+    if (e <= lim) {
+      const fx::StressResult s = fx::stress_at(set, e, r);
+      return s.ok && s.stress_mpa > 0.0 ? s.stress_mpa / e : 0.0;
+    }
+    const fx::StressResult sl = fx::stress_at(set, lim, r);
+    if (!sl.ok || !(sl.stress_mpa > 0.0)) return 0.0;
+    if (past == 0) return sl.stress_mpa / lim;
+    const fx::StressResult s2 = fx::stress_at(set, lim - 0.01, r);
+    const double et = s2.ok ? (sl.stress_mpa - s2.stress_mpa) / 0.01 : sl.stress_mpa / lim;
+    const double ed = densification_strain(r);
+    if (e >= ed - 1e-3) return es;
+    const double m = std::max(0.1, et * (ed - lim) / sl.stress_mpa);
+    const double sigma = sl.stress_mpa * std::pow((ed - lim) / (ed - e), m);
+    return std::min(sigma / e, es);
+  }
+  double voxel_at(double rho, double strain, double skin, int control) const {
+    if (rho < 0.0 || (control & kLatticeSolid)) return es;
+    const double f = std::min(1.0, std::max(0.0, skin));
+    const double e = f * es + (1.0 - f) * lattice_at(rho, strain);
     return std::max(e, 1e-4 * es);
   }
 };
@@ -422,23 +477,38 @@ struct Posture {
   Posture& operator=(const Posture&) = delete;
 };
 
-}  // namespace
+// ── the problem: the FE grid, its loads, its rests and pins, built ONCE (§1.1, §1.4, §1.5) ──
+// ★ BATCH N: split out of `solve` so the STEPPED (material-nonlinear) solve re-solves the SAME
+// system — the same grid, loads, rests, pins and inertia relief — with new per-element moduli.
+struct Problem {
+  FE fe;
+  Law law;
+  int control = 0;
+  double nu = 0.3;
+  double tolerance = 1e-4;
+  double deadline_ms = 0.0;
+  std::size_t N = 0;
+  // per FE cell (x fastest): its scene voxels that are not empty (CSR) — the coarsening's average
+  std::vector<int> elem_off;
+  std::vector<int> elem_vox;
+  std::vector<double> mass;
+  std::vector<double> f;  // the loads at the DESIGN force (λ = 1), inertia-relieved on free modes
+  std::vector<topopt::DirichletBC> bcs;
+  std::size_t heldCount = 0;
+  std::string mode;
+  std::vector<std::vector<double>> freeModes;
+  Vec3 cm{0, 0, 0};
+  double Ls = 1.0;
 
-int coarsen(int nx, int ny, int nz) {
-  const long long box = static_cast<long long>(std::max(nx, 0)) * std::max(ny, 0) * std::max(nz, 0);
-  if (box <= 120000) return 1;
-  if (box <= 960000) return 2;
-  return 4;
-}
+  Vec3 psi(const double* phi, int node) const {
+    const Vec3 r = sub(fe.pos(node), cm);
+    return add(Vec3{phi[0], phi[1], phi[2]}, mul(cross(Vec3{phi[3], phi[4], phi[5]}, r), 1.0 / Ls));
+  }
+};
 
-double modulus(const FlexSquishLaw& law, const fx::FlexibleData& data, double rho, double strain,
-               double skin_frac, int control) {
-  return make_law(law, data).voxel(rho, strain, skin_frac, control);
-}
-
-FlexSquishSolution solve(const Setup& s, const FlexSquishRequest& req, const fx::FlexibleData& data) {
-  FlexSquishSolution out;
-  const double t0 = topopt::steady_clock_ms();
+// Everything but the moduli. False with `out.failure` set (a value); malformed input throws.
+bool build(const Setup& s, const FlexSquishRequest& req, const fx::FlexibleData& data, Problem& P,
+           FlexSquishSolution& out) {
   const topopt::VoxelGrid& sg = s.grid;
   const std::size_t nvox = sg.voxel_count();
   if (req.rho.size() != nvox || req.strain_op.size() != nvox || req.skin_frac.size() != nvox)
@@ -448,27 +518,15 @@ FlexSquishSolution solve(const Setup& s, const FlexSquishRequest& req, const fx:
   if (s.pressed.empty()) throw std::invalid_argument("squish sim: no pressed face");
   if (s.model == nullptr) throw std::invalid_argument("squish sim: no part");
   const int control = req.control;
+  P.control = control;
+  P.nu = (control & kPoissonZero) ? 0.0 : req.poisson;
+  P.tolerance = req.tolerance;
+  P.deadline_ms = req.deadline_ms;
   out.resting_missing = s.resting_missing;
-
-  // ── the law, per scene voxel ──
-  const Law law = make_law(req.law, data);
-  std::vector<double> Es(nvox, 0.0);
-  double emin = std::numeric_limits<double>::infinity(), emax = 0.0, esum = 0.0;
-  std::size_t esolid = 0;
-  for (std::size_t v = 0; v < nvox; ++v) {
-    if (sg.tags[v] == topopt::VoxelTag::Empty) continue;
-    Es[v] = law.voxel(req.rho[v], req.strain_op[v], req.skin_frac[v], control);
-    esum += Es[v];
-    ++esolid;
-  }
-  if (control & kUniformE) {
-    const double mean = esolid > 0 ? esum / static_cast<double>(esolid) : law.es;
-    for (std::size_t v = 0; v < nvox; ++v)
-      if (sg.tags[v] != topopt::VoxelTag::Empty) Es[v] = mean;
-  }
+  P.law = make_law(req.law, data);
 
   // ── the FE grid (§1.1): core's grid, coarsened by the rule ──
-  FE fe;
+  FE& fe = P.fe;
   fe.c = req.coarsen > 0 ? req.coarsen : coarsen(sg.nx, sg.ny, sg.nz);
   const int c = fe.c;
   fe.g.nx = (sg.nx + c - 1) / c;
@@ -478,12 +536,12 @@ FlexSquishSolution solve(const Setup& s, const FlexSquishRequest& req, const fx:
   fe.g.origin = sg.origin;
   fe.g.tags.assign(static_cast<std::size_t>(fe.g.nx) * fe.g.ny * fe.g.nz, topopt::VoxelTag::Empty);
   fe.E.assign(fe.g.tags.size(), 0.0);
-  const double inv = 1.0 / static_cast<double>(c * c * c);
+  P.elem_off.assign(fe.g.tags.size() + 1, 0);
+  P.elem_vox.clear();
   for (int k = 0; k < fe.g.nz; ++k)
     for (int j = 0; j < fe.g.ny; ++j)
       for (int i = 0; i < fe.g.nx; ++i) {
-        double sum = 0.0;
-        bool any = false;
+        const std::size_t e = fe.g.index(i, j, k);
         for (int dk = 0; dk < c; ++dk)
           for (int dj = 0; dj < c; ++dj)
             for (int di = 0; di < c; ++di) {
@@ -491,21 +549,19 @@ FlexSquishSolution solve(const Setup& s, const FlexSquishRequest& req, const fx:
               if (ii >= sg.nx || jj >= sg.ny || kk >= sg.nz) continue;
               const std::size_t v = sg.index(ii, jj, kk);
               if (sg.tags[v] == topopt::VoxelTag::Empty) continue;
-              any = true;
-              sum += Es[v];
+              P.elem_vox.push_back(static_cast<int>(v));
             }
-        if (!any) continue;
-        const std::size_t e = fe.g.index(i, j, k);
-        fe.g.tags[e] = topopt::VoxelTag::Interior;
-        fe.E[e] = std::max(sum * inv, 1e-4 * law.es);
-        emin = std::min(emin, fe.E[e]);
-        emax = std::max(emax, fe.E[e]);
-        ++out.elements;
+        P.elem_off[e + 1] = static_cast<int>(P.elem_vox.size());
+        if (P.elem_off[e + 1] > P.elem_off[e]) {
+          fe.g.tags[e] = topopt::VoxelTag::Interior;
+          ++out.elements;
+        }
       }
   fe.nnx = fe.g.nx + 1;
   fe.nny = fe.g.ny + 1;
   fe.nnz = fe.g.nz + 1;
   const std::size_t N = fe.nodes();
+  P.N = N;
   const double h = fe.g.spacing;
   out.coarsen = c;
   out.nx = fe.nnx;
@@ -515,15 +571,11 @@ FlexSquishSolution solve(const Setup& s, const FlexSquishRequest& req, const fx:
   out.origin[0] = fe.g.origin.x;
   out.origin[1] = fe.g.origin.y;
   out.origin[2] = fe.g.origin.z;
-  out.e_min_mpa = std::isfinite(emin) ? emin : 0.0;
-  out.e_max_mpa = emax;
-  // ★ batch M: each element's modulus, for the app's stress view (von Mises from this field)
-  out.element_e.resize(fe.E.size());
-  for (std::size_t e = 0; e < fe.E.size(); ++e) out.element_e[e] = static_cast<float>(fe.E[e]);
   if (out.elements == 0) throw std::invalid_argument("squish sim: the part has no solid voxel");
 
   // nodal mass (solid voxels incident / 8) and which nodes a solid element owns
-  std::vector<double> mass(N, 0.0);
+  std::vector<double>& mass = P.mass;
+  mass.assign(N, 0.0);
   for (int k = 0; k < fe.g.nz; ++k)
     for (int j = 0; j < fe.g.ny; ++j)
       for (int i = 0; i < fe.g.nx; ++i) {
@@ -536,15 +588,16 @@ FlexSquishSolution solve(const Setup& s, const FlexSquishRequest& req, const fx:
   for (std::size_t n = 0; n < N; ++n) out.solved[n] = mass[n] > 0.0 ? 1 : 0;
 
   // ── the loads (§1.5): each pressed face's exposed cell faces, by column pressure ──
-  std::vector<double> f(3 * N, 0.0);
+  std::vector<double>& f = P.f;
+  f.assign(3 * N, 0.0);
   Vec3 applied{0, 0, 0};
   out.press_load_offsets.push_back(0);
   std::vector<int> pressedFaces;
   for (const Press& p : s.pressed)
     for (int face : p.region.member_faces) pressedFaces.push_back(face);
   for (std::size_t k = 0; k < s.pressed.size(); ++k) {
-    const Press& P = s.pressed[k];
-    const fx::Stack& st = P.stack;
+    const Press& Pr = s.pressed[k];
+    const fx::Stack& st = Pr.stack;
     const std::vector<double>& pc = req.pressed[k].column_pressure_mpa;
     const Vec3 load = st.frame.load;
     double F = 0.0, A = 0.0;
@@ -554,8 +607,8 @@ FlexSquishSolution solve(const Setup& s, const FlexSquishRequest& req, const fx:
       A += st.columns[col].area_mm2;
     }
     const double mean = A > 0.0 ? F / A : 0.0;
-    std::vector<int> slab = member_voxels(fe.g, *s.model, P.region.member_triangles);
-    if (!(control & kIgnoreCuts)) slab = topopt::cut_voxels(fe.g, slab, P.region.cuts);
+    std::vector<int> slab = member_voxels(fe.g, *s.model, Pr.region.member_triangles);
+    if (!(control & kIgnoreCuts)) slab = topopt::cut_voxels(fe.g, slab, Pr.region.cuts);
     std::vector<double> local(3 * N, 0.0);
     std::vector<int> touched;
     double raw = 0.0;
@@ -622,11 +675,11 @@ FlexSquishSolution solve(const Setup& s, const FlexSquishRequest& req, const fx:
   out.applied_force_n[2] = applied.z;
   if (!(out.applied_force_abs_n > 0.0)) {
     out.failure = "no pressed face reaches a solid voxel of the sim's grid";
-    return out;
+    return false;
   }
 
   // ── the boundary conditions (§1.4) ──
-  std::vector<topopt::DirichletBC> bcs;
+  std::vector<topopt::DirichletBC>& bcs = P.bcs;
   std::vector<char> pinned(3 * N, 0);
   auto pin = [&](int node, int comp) {
     const std::size_t b = 3 * static_cast<std::size_t>(node) + static_cast<std::size_t>(comp);
@@ -680,7 +733,7 @@ FlexSquishSolution solve(const Setup& s, const FlexSquishRequest& req, const fx:
     }
   };
   const bool balanced = norm(applied) <= 0.02 * out.applied_force_abs_n;
-  std::string mode;
+  std::string& mode = P.mode;
   if (control & kAnchorPatch) {
     // TEST CONTROL: a naive patch anchor — every DOF of the solid voxel nearest the grid's min
     // corner, no inertia relief, no rigid removal
@@ -753,6 +806,7 @@ FlexSquishSolution solve(const Setup& s, const FlexSquishRequest& req, const fx:
   std::sort(out.held_nodes.begin(), out.held_nodes.end());
   out.held_nodes.erase(std::unique(out.held_nodes.begin(), out.held_nodes.end()), out.held_nodes.end());
   const std::size_t heldCount = bcs.size();
+  P.heldCount = heldCount;
 
   // ── the rigid modes the rests leave FREE (all six for a squeeze nothing rests against) ──
   // θ = [t; L·ω] (L the part's size, so the six coordinates weigh alike): a rigid motion moves
@@ -769,28 +823,27 @@ FlexSquishSolution solve(const Setup& s, const FlexSquishRequest& req, const fx:
     hi = {std::max(hi.x, p.x), std::max(hi.y, p.y), std::max(hi.z, p.z)};
   }
   cm = mul(cm, 1.0 / msum);
+  P.cm = cm;
   const Vec3 ext = sub(hi, lo);
   const double Ls = std::max({ext.x, ext.y, ext.z, 1e-9});
-  auto row = [&](int node, int c, double out6[6]) {
+  P.Ls = Ls;
+  auto row = [&](int node, int c2, double out6[6]) {
     const Vec3 r = sub(fe.pos(node), cm);
     Vec3 e{0, 0, 0};
-    if (c == 0) e.x = 1; else if (c == 1) e.y = 1; else e.z = 1;
+    if (c2 == 0) e.x = 1; else if (c2 == 1) e.y = 1; else e.z = 1;
     const Vec3 m = mul(cross(r, e), 1.0 / Ls);
     out6[0] = e.x; out6[1] = e.y; out6[2] = e.z; out6[3] = m.x; out6[4] = m.y; out6[5] = m.z;
   };
-  auto psi = [&](const double* phi, int node) {
-    const Vec3 r = sub(fe.pos(node), cm);
-    return add(Vec3{phi[0], phi[1], phi[2]}, mul(cross(Vec3{phi[3], phi[4], phi[5]}, r), 1.0 / Ls));
-  };
   std::vector<double> gram(36, 0.0);
-  auto accumulate = [&](std::vector<double>& G, int node, int c) {
+  auto accumulate = [&](std::vector<double>& G, int node, int c2) {
     double r6[6];
-    row(node, c, r6);
+    row(node, c2, r6);
     for (int a = 0; a < 6; ++a)
       for (int b = 0; b < 6; ++b) G[a * 6 + b] += r6[a] * r6[b];
   };
   for (std::size_t q = 0; q < heldCount; ++q) accumulate(gram, bcs[q].node, bcs[q].component);
-  std::vector<std::vector<double>> freeModes = null_modes(gram);
+  std::vector<std::vector<double>>& freeModes = P.freeModes;
+  freeModes = null_modes(gram);
   if (mode == "patch") freeModes.clear();
   out.free_modes = static_cast<int32_t>(freeModes.size());
   const int d = static_cast<int>(freeModes.size());
@@ -804,7 +857,7 @@ FlexSquishSolution solve(const Setup& s, const FlexSquishRequest& req, const fx:
       const Vec3 fn{f[3 * n], f[3 * n + 1], f[3 * n + 2]};
       if (mass[n] <= 0.0 && fn.x == 0.0 && fn.y == 0.0 && fn.z == 0.0) continue;
       std::vector<Vec3> ps(static_cast<std::size_t>(d));
-      for (int i = 0; i < d; ++i) ps[static_cast<std::size_t>(i)] = psi(freeModes[static_cast<std::size_t>(i)].data(), static_cast<int>(n));
+      for (int i = 0; i < d; ++i) ps[static_cast<std::size_t>(i)] = P.psi(freeModes[static_cast<std::size_t>(i)].data(), static_cast<int>(n));
       for (int i = 0; i < d; ++i) {
         g[static_cast<std::size_t>(i)] += dot(fn, ps[static_cast<std::size_t>(i)]);
         if (mass[n] <= 0.0) continue;
@@ -816,7 +869,7 @@ FlexSquishSolution solve(const Setup& s, const FlexSquishRequest& req, const fx:
     for (std::size_t n = 0; n < N; ++n) {
       if (mass[n] <= 0.0) continue;
       Vec3 acc{0, 0, 0};
-      for (int i = 0; i < d; ++i) acc = add(acc, mul(psi(freeModes[static_cast<std::size_t>(i)].data(), static_cast<int>(n)), a[static_cast<std::size_t>(i)]));
+      for (int i = 0; i < d; ++i) acc = add(acc, mul(P.psi(freeModes[static_cast<std::size_t>(i)].data(), static_cast<int>(n)), a[static_cast<std::size_t>(i)]));
       f[3 * n] -= mass[n] * acc.x;
       f[3 * n + 1] -= mass[n] * acc.y;
       f[3 * n + 2] -= mass[n] * acc.z;
@@ -864,19 +917,317 @@ FlexSquishSolution solve(const Setup& s, const FlexSquishRequest& req, const fx:
     }
     if (!null_modes(G).empty()) {
       out.failure = "the squish sim found no stable anchoring for this squeeze";
-      return out;
+      return false;
     }
   }
   out.bc_mode = mode;
   for (const auto& b : bcs) out.pinned_dofs.push_back(3 * b.node + b.component);
+  return true;
+}
 
+// fe.E from per-scene-voxel moduli (the coarsening's average — empty sub-voxels count 0 —
+// floored at 1e-4 · E_solid), and the receipt's range and per-element moduli.
+template <class PerVoxel>
+void assign_moduli(Problem& P, PerVoxel&& modulus_of, FlexSquishSolution& out) {
+  const int c = P.fe.c;
+  const double inv = 1.0 / static_cast<double>(c * c * c);
+  double emin = std::numeric_limits<double>::infinity(), emax = 0.0;
+  for (std::size_t e = 0; e + 1 < P.elem_off.size(); ++e) {
+    const int a = P.elem_off[e], b = P.elem_off[e + 1];
+    if (a == b) { P.fe.E[e] = 0.0; continue; }
+    double sum = 0.0;
+    for (int q = a; q < b; ++q) sum += modulus_of(static_cast<std::size_t>(P.elem_vox[static_cast<std::size_t>(q)]), e);
+    P.fe.E[e] = std::max(sum * inv, 1e-4 * P.law.es);
+    emin = std::min(emin, P.fe.E[e]);
+    emax = std::max(emax, P.fe.E[e]);
+  }
+  out.e_min_mpa = std::isfinite(emin) ? emin : 0.0;
+  out.e_max_mpa = emax;
+  // ★ batch M: each element's modulus, for the app's stress view (von Mises from this field)
+  out.element_e.resize(P.fe.E.size());
+  for (std::size_t e = 0; e < P.fe.E.size(); ++e) out.element_e[e] = static_cast<float>(P.fe.E[e]);
+}
+
+// One solve of K(E) u = λ f by core's matrix-free MG-CG — or, once a stepped session's multigrid
+// has STAGNATED, by core's matrix-free Jacobi-CG directly (what core's own per-run latch does;
+// the latch is thread-local and a session's steps run on whichever thread the app's serial queue
+// gives them) — warm-started from `guess` when given (core's initial_guess: an accelerator only,
+// the stopping test is unchanged). The CALLER holds the bridge mutex and the posture. False with
+// `failure` set (which solver gave up, or the clock).
+bool core_solve(const Problem& P, double lambda, const topopt::FeaSolution* guess, bool jacobi_only,
+                int max_iterations, topopt::FeaSolution& sol, topopt::CgInfo& info, std::string& failure) {
   std::vector<topopt::NodalLoad> loads;
-  for (std::size_t q = 0; q < 3 * N; ++q)
-    if (f[q] != 0.0) loads.push_back({static_cast<int>(q / 3), static_cast<int>(q % 3), f[q]});
+  for (std::size_t q = 0; q < 3 * P.N; ++q)
+    if (P.f[q] != 0.0) loads.push_back({static_cast<int>(q / 3), static_cast<int>(q % 3), lambda * P.f[q]});
+  const double ts = topopt::steady_clock_ms();
+  // core fills `info` before it throws its non-convergence, so a failure says WHICH solver gave
+  // up (the hierarchy never built, or the V-cycles stagnated and Jacobi-CG ran out). Its deadline
+  // throws from INSIDE the recurrence, before `info` is filled: say the clock.
+  try {
+    sol = jacobi_only ? topopt::fea_solve_cg_matfree(P.fe.g, P.fe.E, P.nu, P.bcs, loads, P.tolerance, max_iterations,
+                                                     &info, guess, nullptr)
+                      : topopt::fea_solve_mgcg_matfree(P.fe.g, P.fe.E, P.nu, P.bcs, loads, P.tolerance, max_iterations,
+                                                       &info, nullptr, guess);
+  } catch (const topopt::SolverDeadlineExceeded& e) {
+    failure = std::string(e.what()) + " (after " +
+              std::to_string(static_cast<long long>(topopt::steady_clock_ms() - ts)) + " ms of solving, at CG iteration " +
+              std::to_string(e.iterations) + ", residual " + std::to_string(e.residual) + ")";
+  } catch (const topopt::SolverNonConvergence& e) {
+    failure = std::string(e.what()) + " (multigrid " + (info.hier_built ? "built" : "not built") + ", " +
+              std::to_string(info.mg_cycles_attempted) + " V-cycles, then " + std::to_string(info.iterations) +
+              " Jacobi-CG iterations, residual " + std::to_string(info.residual) + ")";
+  } catch (const std::exception& e) {
+    failure = e.what();
+  }
+  if (failure.empty() && sol.u.size() != 3 * P.N)
+    failure = "the solver returned " + std::to_string(sol.u.size()) + " DOFs for " + std::to_string(3 * P.N);
+  return failure.empty();
+}
+
+// The reactions (K u − λ f at the held and pinned DOFs, by core's own matrix-free apply), the
+// rigid removal on the free modes and the extension outside the solid (§1.7) → out.u, out.ok.
+void finish(const Problem& P, double lambda, std::vector<double> u, FlexSquishSolution& out) {
+  const FE& fe = P.fe;
+  const std::size_t N = P.N;
+  {
+    const std::vector<double> Ku = topopt::fea_matfree_apply(fe.g, fe.E, P.nu, u);
+    double r2 = 0.0;
+    for (std::size_t q = 0; q < P.bcs.size(); ++q) {
+      const auto& b = P.bcs[q];
+      const std::size_t i = 3 * static_cast<std::size_t>(b.node) + static_cast<std::size_t>(b.component);
+      const double r = Ku[i] - lambda * P.f[i];
+      if (q < P.heldCount && P.mode != "patch") {
+        out.held_reaction_n[b.component] += r;   // the rests (or the linked other end)
+      } else {
+        r2 += r * r;                              // the pins (the patch control's DOFs)
+      }
+    }
+    out.anchor_reaction_n = std::sqrt(r2);
+  }
+
+  const int d = static_cast<int>(P.freeModes.size());
+  if (d > 0) {
+    // ★ the mass-weighted best-fit motion in the FREE rigid modes removed (least squares), so the
+    // pins' choice leaves no trace
+    std::vector<double> Mg(static_cast<std::size_t>(d * d), 0.0), b(static_cast<std::size_t>(d), 0.0);
+    for (std::size_t n = 0; n < N; ++n) {
+      if (P.mass[n] <= 0.0) continue;
+      const Vec3 un{u[3 * n], u[3 * n + 1], u[3 * n + 2]};
+      std::vector<Vec3> ps(static_cast<std::size_t>(d));
+      for (int i = 0; i < d; ++i) ps[static_cast<std::size_t>(i)] = P.psi(P.freeModes[static_cast<std::size_t>(i)].data(), static_cast<int>(n));
+      for (int i = 0; i < d; ++i) {
+        b[static_cast<std::size_t>(i)] += P.mass[n] * dot(un, ps[static_cast<std::size_t>(i)]);
+        for (int j = 0; j < d; ++j) Mg[static_cast<std::size_t>(i * d + j)] += P.mass[n] * dot(ps[static_cast<std::size_t>(i)], ps[static_cast<std::size_t>(j)]);
+      }
+    }
+    gauss(Mg, b, d);
+    for (std::size_t n = 0; n < N; ++n) {
+      if (P.mass[n] <= 0.0) continue;
+      Vec3 rg{0, 0, 0};
+      for (int i = 0; i < d; ++i) rg = add(rg, mul(P.psi(P.freeModes[static_cast<std::size_t>(i)].data(), static_cast<int>(n)), b[static_cast<std::size_t>(i)]));
+      u[3 * n] -= rg.x;
+      u[3 * n + 1] -= rg.y;
+      u[3 * n + 2] -= rg.z;
+    }
+  }
+
+  // ── the extension outside the solid (§1.7): each BFS layer the mean of its filled neighbours ──
+  std::vector<char> filled(N, 0);
+  for (std::size_t n = 0; n < N; ++n) filled[n] = out.solved[n];
+  if (!(P.control & kNoExtension)) {
+    std::vector<int> layer;
+    for (std::size_t n = 0; n < N; ++n)
+      if (!filled[n]) u[3 * n] = u[3 * n + 1] = u[3 * n + 2] = 0.0;
+    for (;;) {
+      layer.clear();
+      for (std::size_t n = 0; n < N; ++n) {
+        if (filled[n]) continue;
+        const int a = static_cast<int>(n) % fe.nnx, b = (static_cast<int>(n) / fe.nnx) % fe.nny,
+                  cc = static_cast<int>(n) / (fe.nnx * fe.nny);
+        for (int dd = 0; dd < 6; ++dd) {
+          const int aa = a + kDir[dd][0], bb = b + kDir[dd][1], c2 = cc + kDir[dd][2];
+          if (aa < 0 || bb < 0 || c2 < 0 || aa >= fe.nnx || bb >= fe.nny || c2 >= fe.nnz) continue;
+          if (filled[static_cast<std::size_t>(fe.node(aa, bb, c2))]) { layer.push_back(static_cast<int>(n)); break; }
+        }
+      }
+      if (layer.empty()) break;
+      std::vector<double> vals(3 * layer.size(), 0.0);
+      for (std::size_t q = 0; q < layer.size(); ++q) {
+        const int n = layer[q];
+        const int a = n % fe.nnx, b = (n / fe.nnx) % fe.nny, cc = n / (fe.nnx * fe.nny);
+        int cnt = 0;
+        for (int dd = 0; dd < 6; ++dd) {
+          const int aa = a + kDir[dd][0], bb = b + kDir[dd][1], c2 = cc + kDir[dd][2];
+          if (aa < 0 || bb < 0 || c2 < 0 || aa >= fe.nnx || bb >= fe.nny || c2 >= fe.nnz) continue;
+          const std::size_t m = static_cast<std::size_t>(fe.node(aa, bb, c2));
+          if (!filled[m]) continue;
+          vals[3 * q] += u[3 * m];
+          vals[3 * q + 1] += u[3 * m + 1];
+          vals[3 * q + 2] += u[3 * m + 2];
+          ++cnt;
+        }
+        for (int k = 0; k < 3; ++k) vals[3 * q + k] /= std::max(cnt, 1);
+      }
+      for (std::size_t q = 0; q < layer.size(); ++q) {
+        const std::size_t n = static_cast<std::size_t>(layer[q]);
+        u[3 * n] = vals[3 * q];
+        u[3 * n + 1] = vals[3 * q + 1];
+        u[3 * n + 2] = vals[3 * q + 2];
+        filled[n] = 1;
+      }
+    }
+  } else {
+    for (std::size_t n = 0; n < N; ++n)
+      if (!filled[n]) u[3 * n] = u[3 * n + 1] = u[3 * n + 2] = 0.0;
+  }
+
+  out.u.resize(3 * N);
+  for (std::size_t q = 0; q < 3 * N; ++q) out.u[q] = static_cast<float>(u[q]);
+  out.ok = true;
+}
+
+// ── ★ BATCH N: the strain each element is at ─────────────────────────────────────────────
+// The smallest eigenvalue of a symmetric 3×3 (closed form; a = xx, b = yy, c = zz, d = xy,
+// e = yz, f = xz).
+double min_eig_sym(double a, double b, double c, double d, double e, double f) {
+  const double p1 = d * d + e * e + f * f;
+  if (p1 < 1e-30) return std::min({a, b, c});
+  const double q = (a + b + c) / 3.0;
+  const double p2 = (a - q) * (a - q) + (b - q) * (b - q) + (c - q) * (c - q) + 2.0 * p1;
+  const double p = std::sqrt(p2 / 6.0);
+  if (p < 1e-300) return q;
+  const double B00 = (a - q) / p, B11 = (b - q) / p, B22 = (c - q) / p, B01 = d / p, B12 = e / p, B02 = f / p;
+  const double det = B00 * (B11 * B22 - B12 * B12) - B01 * (B01 * B22 - B12 * B02) + B02 * (B01 * B12 - B11 * B02);
+  const double r = std::min(1.0, std::max(-1.0, det / 2.0));
+  const double phi = std::acos(r) / 3.0;
+  return q + 2.0 * p * std::cos(phi + 2.0 * 3.14159265358979323846 / 3.0);
+}
+
+// ★ THE STRAIN MEASURE: each solid element's PRINCIPAL COMPRESSIVE STRAIN at its centre,
+// ε_c = max(0, −λ_min(sym ∇u)). Core's curves are UNIAXIAL compression tests — strain = the
+// specimen's depth ÷ its height, along the press, the sides free — and in that test the most
+// compressive principal strain IS the test's strain whatever the Poisson ratio (the volumetric
+// strain would be (1 − 2ν)·ε there, i.e. depend on the ν = 0.3 the tables cannot back). The
+// symmetric part drops the rotation (a rigid turn closes no cell); under shear γ it reads γ/2 —
+// the compressive diagonal, along which a sheared cell does close. Small strain, like the solve.
+// ★ BATCH N VERIFICATION: `dets` (when given) — each solid element's det(I + ∇u) at its centre, its
+// volume ratio. Under a press a lattice never GROWS; past ~1.3 an element is a TURN that the
+// small-strain kinematics draw as a stretch (his Group 1's edge above the thumb: up to 1.97×).
+void element_strains(const Problem& P, const std::vector<double>& u, std::vector<double>& eps,
+                     std::vector<double>* dets = nullptr) {
+  const FE& fe = P.fe;
+  const double s = 0.25 / fe.g.spacing;
+  eps.assign(fe.E.size(), 0.0);
+  if (dets != nullptr) dets->assign(fe.E.size(), 1.0);
+  for (int k = 0; k < fe.g.nz; ++k)
+    for (int j = 0; j < fe.g.ny; ++j)
+      for (int i = 0; i < fe.g.nx; ++i) {
+        if (!fe.g.solid(i, j, k)) continue;
+        double G[3][3] = {{0, 0, 0}, {0, 0, 0}, {0, 0, 0}};  // G[c][a] = ∂u_c / ∂x_a
+        for (int a = 0; a < 3; ++a)
+          for (int p = 0; p < 2; ++p)
+            for (int q = 0; q < 2; ++q) {
+              int o0[3], o1[3];
+              o0[a] = 0;
+              o1[a] = 1;
+              o0[(a + 1) % 3] = o1[(a + 1) % 3] = p;
+              o0[(a + 2) % 3] = o1[(a + 2) % 3] = q;
+              const std::size_t n0 = static_cast<std::size_t>(fe.node(i + o0[0], j + o0[1], k + o0[2]));
+              const std::size_t n1 = static_cast<std::size_t>(fe.node(i + o1[0], j + o1[1], k + o1[2]));
+              for (int c = 0; c < 3; ++c) G[c][a] += u[3 * n1 + c] - u[3 * n0 + c];
+            }
+        for (auto& r : G)
+          for (double& x : r) x *= s;
+        const double lmin = min_eig_sym(G[0][0], G[1][1], G[2][2], 0.5 * (G[0][1] + G[1][0]),
+                                        0.5 * (G[1][2] + G[2][1]), 0.5 * (G[0][2] + G[2][0]));
+        eps[fe.g.index(i, j, k)] = std::max(0.0, -lmin);
+        if (dets != nullptr) {
+          const double a00 = 1 + G[0][0], a01 = G[0][1], a02 = G[0][2];
+          const double a10 = G[1][0], a11 = 1 + G[1][1], a12 = G[1][2];
+          const double a20 = G[2][0], a21 = G[2][1], a22 = 1 + G[2][2];
+          (*dets)[fe.g.index(i, j, k)] = a00 * (a11 * a22 - a12 * a21) - a01 * (a10 * a22 - a12 * a20) +
+                                         a02 * (a10 * a21 - a11 * a20);
+        }
+      }
+}
+
+// ★ BATCH N VERIFICATION: an element whose volume grows past this under the press is drawn by a turn
+// the small-strain sim cannot follow (the receipt counts them; the (i) says so where there are any).
+constexpr double kInflatedVolume = 1.3;
+
+// ── ★ BATCH N: a stepped session — the problem built once, solved again and again ─────────
+struct Session {
+  Problem P;
+  std::vector<float> rho, skin;  // per scene voxel: the law's inputs
+  FlexSquishSolution base;        // the setup's receipts (every step's out starts from them)
+  std::vector<double> u;          // the last RAW field (the next step's warm start)
+  double lambda = 0.0;
+  bool jacobi_only = false;       // the session's multigrid stagnated: Jacobi-CG directly
+  int steps = 0;
+  // ★ BATCH N VERIFICATION: the secant iteration's state, kept across calls AT THE SAME load factor
+  // (the app calls one solve at a time, so a cancel or a waiting solve is heard between solves) and
+  // reset when the load factor changes (a new increment)
+  double omega = 1.0;
+  double prev_change = std::numeric_limits<double>::infinity();
+};
+std::mutex g_sessions_mu;
+std::map<int64_t, std::unique_ptr<Session>> g_sessions;
+int64_t g_next_session = 1;
+
+Session* session_at(int64_t id) {
+  std::lock_guard<std::mutex> lock(g_sessions_mu);
+  const auto it = g_sessions.find(id);
+  return it == g_sessions.end() ? nullptr : it->second.get();
+}
+
+}  // namespace
+
+int coarsen(int nx, int ny, int nz) {
+  const long long box = static_cast<long long>(std::max(nx, 0)) * std::max(ny, 0) * std::max(nz, 0);
+  if (box <= 120000) return 1;
+  if (box <= 960000) return 2;
+  return 4;
+}
+
+double modulus(const FlexSquishLaw& law, const fx::FlexibleData& data, double rho, double strain,
+               double skin_frac, int control) {
+  return make_law(law, data).voxel(rho, strain, skin_frac, control);
+}
+
+double step_modulus(const FlexSquishLaw& law, const fx::FlexibleData& data, double rho, double strain,
+                    double skin_frac, const FlexSquishStepOptions& opt) {
+  Law L = make_law(law, data);
+  L.past = opt.law_past_data;
+  L.densification = opt.densification_coeff;
+  return L.voxel_at(rho, strain, skin_frac, 0);
+}
+
+FlexSquishSolution solve(const Setup& s, const FlexSquishRequest& req, const fx::FlexibleData& data) {
+  FlexSquishSolution out;
+  const double t0 = topopt::steady_clock_ms();
+  Problem P;
+  if (!build(s, req, data, P, out)) return out;
+  const int control = req.control;
+  // ── the law, per scene voxel, at its column's strain under THIS group (the linear solve) ──
+  const std::size_t nvox = s.grid.voxel_count();
+  std::vector<double> Es(nvox, 0.0);
+  double esum = 0.0;
+  std::size_t esolid = 0;
+  for (std::size_t v = 0; v < nvox; ++v) {
+    if (s.grid.tags[v] == topopt::VoxelTag::Empty) continue;
+    Es[v] = P.law.voxel(req.rho[v], req.strain_op[v], req.skin_frac[v], control);
+    esum += Es[v];
+    ++esolid;
+  }
+  if (control & kUniformE) {
+    const double mean = esolid > 0 ? esum / static_cast<double>(esolid) : P.law.es;
+    for (std::size_t v = 0; v < nvox; ++v)
+      if (s.grid.tags[v] != topopt::VoxelTag::Empty) Es[v] = mean;
+  }
+  assign_moduli(P, [&](std::size_t v, std::size_t) { return Es[v]; }, out);
 
   // ── the solve (§1.6): core's matrix-free MG-CG, under the posture ──
   out.setup_ms = topopt::steady_clock_ms() - t0;
-  const double nu = (control & kPoissonZero) ? 0.0 : req.poisson;
   topopt::FeaSolution sol;
   {
     // control 4096: a reference solve (the budget lifted — the deadline still holds); control
@@ -904,24 +1255,8 @@ FlexSquishSolution solve(const Setup& s, const FlexSquishRequest& req, const fx:
                       std::to_string(static_cast<long long>(req.deadline_ms)) + " ms budget)";
       } else {
         const double ts = topopt::steady_clock_ms();
-        // core fills `info` before it throws its non-convergence, so a failure says WHICH solver
-        // gave up (the hierarchy never built, or the V-cycles stagnated and Jacobi-CG ran out). Its
-        // deadline throws from INSIDE the recurrence, before `info` is filled: say the clock.
         topopt::CgInfo info;
-        try {
-          sol = topopt::fea_solve_mgcg_matfree(fe.g, fe.E, nu, bcs, loads, req.tolerance, out.max_iterations, &info, nullptr, nullptr);
-        } catch (const topopt::SolverDeadlineExceeded& e) {
-          out.failure = std::string(e.what()) + " (after " +
-                        std::to_string(static_cast<long long>(topopt::steady_clock_ms() - ts)) + " ms of solving, at CG iteration " +
-                        std::to_string(e.iterations) + ", residual " + std::to_string(e.residual) + ")";
-        } catch (const topopt::SolverNonConvergence& e) {
-          out.failure = std::string(e.what()) + " (multigrid " + (info.hier_built ? "built" : "not built") +
-                        ", " + std::to_string(info.mg_cycles_attempted) + " V-cycles, then " +
-                        std::to_string(info.iterations) + " Jacobi-CG iterations, residual " +
-                        std::to_string(info.residual) + ")";
-        } catch (const std::exception& e) {
-          out.failure = e.what();
-        }
+        core_solve(P, 1.0, nullptr, false, out.max_iterations, sol, info, out.failure);
         out.iterations = info.iterations;
         out.residual = info.residual;
         out.used_multigrid = info.used_multigrid;
@@ -933,108 +1268,238 @@ FlexSquishSolution solve(const Setup& s, const FlexSquishRequest& req, const fx:
     out.geneo_after = topopt::fea_geneo_twolevel_enabled();
   }
   if (!out.failure.empty()) return out;
-  if (sol.u.size() != 3 * N) {
-    out.failure = "the solver returned " + std::to_string(sol.u.size()) + " DOFs for " + std::to_string(3 * N);
-    return out;
-  }
+  out.cg_iterations_total = out.iterations;
+  out.fixed_point_iterations = 1;
+  finish(P, 1.0, std::move(sol.u), out);
+  return out;
+}
 
-  // ── the reactions: K u − f at the pinned DOFs (core's own matrix-free apply) ──
-  {
-    const std::vector<double> Ku = topopt::fea_matfree_apply(fe.g, fe.E, nu, sol.u);
-    double r2 = 0.0;
-    for (std::size_t q = 0; q < bcs.size(); ++q) {
-      const auto& b = bcs[q];
-      const std::size_t i = 3 * static_cast<std::size_t>(b.node) + static_cast<std::size_t>(b.component);
-      const double r = Ku[i] - f[i];
-      if (q < heldCount && mode != "patch") {
-        out.held_reaction_n[b.component] += r;   // the rests (or the linked other end)
-      } else {
-        r2 += r * r;                              // the pins (the patch control's DOFs)
-      }
-    }
-    out.anchor_reaction_n = std::sqrt(r2);
-  }
-
-  std::vector<double> u = std::move(sol.u);
-  if (d > 0) {
-    // ★ the mass-weighted best-fit motion in the FREE rigid modes removed (least squares), so the
-    // pins' choice leaves no trace
-    std::vector<double> Mg(static_cast<std::size_t>(d * d), 0.0), b(static_cast<std::size_t>(d), 0.0);
-    for (std::size_t n = 0; n < N; ++n) {
-      if (mass[n] <= 0.0) continue;
-      const Vec3 un{u[3 * n], u[3 * n + 1], u[3 * n + 2]};
-      std::vector<Vec3> ps(static_cast<std::size_t>(d));
-      for (int i = 0; i < d; ++i) ps[static_cast<std::size_t>(i)] = psi(freeModes[static_cast<std::size_t>(i)].data(), static_cast<int>(n));
-      for (int i = 0; i < d; ++i) {
-        b[static_cast<std::size_t>(i)] += mass[n] * dot(un, ps[static_cast<std::size_t>(i)]);
-        for (int j = 0; j < d; ++j) Mg[static_cast<std::size_t>(i * d + j)] += mass[n] * dot(ps[static_cast<std::size_t>(i)], ps[static_cast<std::size_t>(j)]);
-      }
-    }
-    gauss(Mg, b, d);
-    for (std::size_t n = 0; n < N; ++n) {
-      if (mass[n] <= 0.0) continue;
-      Vec3 rg{0, 0, 0};
-      for (int i = 0; i < d; ++i) rg = add(rg, mul(psi(freeModes[static_cast<std::size_t>(i)].data(), static_cast<int>(n)), b[static_cast<std::size_t>(i)]));
-      u[3 * n] -= rg.x;
-      u[3 * n + 1] -= rg.y;
-      u[3 * n + 2] -= rg.z;
-    }
-  }
-
-  // ── the extension outside the solid (§1.7): each BFS layer the mean of its filled neighbours ──
-  std::vector<char> filled(N, 0);
-  for (std::size_t n = 0; n < N; ++n) filled[n] = out.solved[n];
-  if (!(control & kNoExtension)) {
-    std::vector<int> layer;
-    for (std::size_t n = 0; n < N; ++n)
-      if (!filled[n]) u[3 * n] = u[3 * n + 1] = u[3 * n + 2] = 0.0;
-    for (;;) {
-      layer.clear();
-      for (std::size_t n = 0; n < N; ++n) {
-        if (filled[n]) continue;
-        const int a = static_cast<int>(n) % fe.nnx, b = (static_cast<int>(n) / fe.nnx) % fe.nny,
-                  cc = static_cast<int>(n) / (fe.nnx * fe.nny);
-        for (int d = 0; d < 6; ++d) {
-          const int aa = a + kDir[d][0], bb = b + kDir[d][1], c2 = cc + kDir[d][2];
-          if (aa < 0 || bb < 0 || c2 < 0 || aa >= fe.nnx || bb >= fe.nny || c2 >= fe.nnz) continue;
-          if (filled[static_cast<std::size_t>(fe.node(aa, bb, c2))]) { layer.push_back(static_cast<int>(n)); break; }
-        }
-      }
-      if (layer.empty()) break;
-      std::vector<double> vals(3 * layer.size(), 0.0);
-      for (std::size_t q = 0; q < layer.size(); ++q) {
-        const int n = layer[q];
-        const int a = n % fe.nnx, b = (n / fe.nnx) % fe.nny, cc = n / (fe.nnx * fe.nny);
-        int cnt = 0;
-        for (int d = 0; d < 6; ++d) {
-          const int aa = a + kDir[d][0], bb = b + kDir[d][1], c2 = cc + kDir[d][2];
-          if (aa < 0 || bb < 0 || c2 < 0 || aa >= fe.nnx || bb >= fe.nny || c2 >= fe.nnz) continue;
-          const std::size_t m = static_cast<std::size_t>(fe.node(aa, bb, c2));
-          if (!filled[m]) continue;
-          vals[3 * q] += u[3 * m];
-          vals[3 * q + 1] += u[3 * m + 1];
-          vals[3 * q + 2] += u[3 * m + 2];
-          ++cnt;
-        }
-        for (int k = 0; k < 3; ++k) vals[3 * q + k] /= std::max(cnt, 1);
-      }
-      for (std::size_t q = 0; q < layer.size(); ++q) {
-        const std::size_t n = static_cast<std::size_t>(layer[q]);
-        u[3 * n] = vals[3 * q];
-        u[3 * n + 1] = vals[3 * q + 1];
-        u[3 * n + 2] = vals[3 * q + 2];
-        filled[n] = 1;
-      }
-    }
-  } else {
-    for (std::size_t n = 0; n < N; ++n)
-      if (!filled[n]) u[3 * n] = u[3 * n + 1] = u[3 * n + 2] = 0.0;
-  }
-
-  out.u.resize(3 * N);
-  for (std::size_t q = 0; q < 3 * N; ++q) out.u[q] = static_cast<float>(u[q]);
+// ── ★ BATCH N: the squish solved in STEPS ─────────────────────────────────────────────────
+FlexSquishSolution step_begin(const Setup& s, const FlexSquishRequest& req, const fx::FlexibleData& data,
+                              const FlexSquishStepOptions& opt) {
+  FlexSquishSolution out;
+  const double t0 = topopt::steady_clock_ms();
+  auto S = std::make_unique<Session>();
+  if (!build(s, req, data, S->P, out)) return out;
+  S->P.law.past = opt.law_past_data;
+  S->P.law.densification = opt.densification_coeff;
+  S->rho.assign(req.rho.begin(), req.rho.end());
+  S->skin.assign(req.skin_frac.begin(), req.skin_frac.end());
+  out.setup_ms = topopt::steady_clock_ms() - t0;
+  out.max_iterations = (req.control & kLongSolve) ? kMaxIterationsCap
+                       : (req.control & kFixedCap) ? kMinIterations
+                                                   : iteration_cap(out.elements);
+  S->base = out;
+  std::lock_guard<std::mutex> lock(g_sessions_mu);
+  const int64_t id = g_next_session++;
+  g_sessions[id] = std::move(S);
+  out.session = id;
   out.ok = true;
   return out;
+}
+
+FlexSquishSolution step(int64_t id, double load_factor, int max_iterations, double tolerance) {
+  Session* S = session_at(id);
+  if (S == nullptr) throw std::invalid_argument("squish steps: no session " + std::to_string(id));
+  if (!(load_factor > 0.0) || !std::isfinite(load_factor))
+    throw std::invalid_argument("squish steps: a load factor of " + std::to_string(load_factor));
+  Problem& P = S->P;
+  FlexSquishSolution out = S->base;
+  out.session = id;
+  out.ok = false;
+  out.load_factor = load_factor;
+  const double t0 = topopt::steady_clock_ms();
+  const std::size_t cells = P.fe.E.size();
+  // ★ BATCH N VERIFICATION: the same load factor as the last call CONTINUES its increment (the damping
+  // and the last change carry on); another one starts an increment afresh
+  const bool same_increment =
+      S->steps > 0 && std::fabs(load_factor - S->lambda) <= 1e-12 * std::max(1.0, std::fabs(load_factor));
+  if (!same_increment) {
+    S->omega = (P.control & kStartDamped) ? 0.25 : 1.0;
+    S->prev_change = std::numeric_limits<double>::infinity();
+  }
+  // the predictor: the last field scaled to this load (zero before the first step)
+  std::vector<double> u = S->u;
+  if (u.size() == 3 * P.N && S->lambda > 0.0) {
+    const double r = load_factor / S->lambda;
+    for (double& x : u) x *= r;
+  } else {
+    u.assign(3 * P.N, 0.0);
+  }
+  std::vector<double> eps, target(cells, 0.0), prevE = P.fe.E;
+  int stress_updates = 0;
+  // ★ THE UPDATE, PER ELEMENT. The plain secant update E ← E_s(ε) is exact where the element's
+  // STRAIN is set by its neighbours, but where its STRESS is (a column carrying the press) its map
+  // has slope −g', g' = d ln E_s / d ln ε = E_t / E_s − 1 — past 1 where the curve stiffens
+  // steeply (densification: E_t ≫ E_s) and the iterates swing (measured on his Group 1: 4–18 %
+  // per solve, an element thrown past ε_D and back, never settling). So where the curve STIFFENS
+  // (g' > 0, or the element is past ε_D) the element keeps the STRESS it carried, σ = E ε, and
+  // takes the curve's modulus AT that stress: ε* = σ_c⁻¹(σ), E ← σ / ε* — exact where the stress is
+  // set, a contraction (g' / (1 + g') < 1) where the strain is; where the curve is flat or softens
+  // (−1 < g' ≤ 0, the tested range) the strain update, a contraction both ways.
+  constexpr double kDl = 0.02;
+  const double inv_c3 = 1.0 / static_cast<double>(P.fe.c * P.fe.c * P.fe.c);
+  auto mean_law = [&](std::size_t e, double strain) {
+    double sum = 0.0;
+    for (int q = P.elem_off[e]; q < P.elem_off[e + 1]; ++q) {
+      const std::size_t v = static_cast<std::size_t>(P.elem_vox[static_cast<std::size_t>(q)]);
+      sum += P.law.voxel_at(S->rho[v], strain, S->skin[v], P.control);
+    }
+    return sum * inv_c3;
+  };
+  auto moduli = [&](const std::vector<double>& strain) {
+    stress_updates = 0;
+    for (std::size_t e = 0; e < cells; ++e) {
+      if (P.elem_off[e] == P.elem_off[e + 1]) { target[e] = 0.0; continue; }
+      const double es = std::max(strain[e], kEpsMin);
+      const double at = mean_law(e, es);
+      const double up = mean_law(e, es * (1.0 + kDl));
+      const double g = at > 0.0 && up > 0.0 ? std::log(up / at) / std::log1p(kDl) : 0.0;
+      target[e] = at;
+      if (g <= 1e-9 || prevE[e] <= 0.0 || at <= 0.0) continue;
+      // the stress it carried, and the strain the curve gives it (σ(ε) = Ē(ε) ε rises monotonically)
+      const double sigma = prevE[e] * es;
+      double lo = 0.0, hi = es;
+      while (mean_law(e, hi) * hi < sigma && hi < 4.0) hi *= 1.5;
+      for (int k = 0; k < 40; ++k) {
+        const double mid = 0.5 * (lo + hi);
+        if (mean_law(e, std::max(mid, 1e-9)) * mid < sigma) lo = mid; else hi = mid;
+      }
+      const double star = std::max(0.5 * (lo + hi), 1e-9);
+      target[e] = sigma / star;
+      ++stress_updates;
+    }
+  };
+  int solves = 0, cg = 0;
+  bool converged = false;
+  double change = 1.0, prev_change = S->prev_change, omega = S->omega, omega_used = omega;
+  {
+    const double tw = topopt::steady_clock_ms();
+    std::lock_guard<std::mutex> lock(g_squish_fe_mu);
+    out.wait_ms = topopt::steady_clock_ms() - tw;
+    const double deadline_abs = P.deadline_ms > 0.0 ? topopt::steady_clock_ms() + P.deadline_ms : 0.0;
+    out.threads_before = topopt::fea_matfree_thread_count();
+    out.geneo_before = topopt::fea_geneo_twolevel_enabled();
+    {
+      Posture posture(deadline_abs, (P.control & kKeepGlobals) != 0);
+      out.threads_during = topopt::fea_matfree_thread_count();
+      out.geneo_during = topopt::fea_geneo_twolevel_enabled();
+      out.recycling_during = topopt::fea_krylov_recycling_enabled();
+      const double ts = topopt::steady_clock_ms();
+      for (int it = 0; it < std::max(1, max_iterations); ++it) {
+        element_strains(P, u, eps);
+        moduli(eps);
+        // damped in log-modulus only if the iterates grow apart anyway (ω halves, never under ¼)
+        omega_used = omega;
+        for (std::size_t e = 0; e < cells; ++e) {
+          if (target[e] <= 0.0) { P.fe.E[e] = 0.0; continue; }
+          const double t = std::max(target[e], 1e-4 * P.law.es);
+          if (prevE[e] <= 0.0 || omega >= 1.0) { P.fe.E[e] = t; continue; }
+          P.fe.E[e] = std::exp(omega * std::log(t) + (1.0 - omega) * std::log(prevE[e]));
+        }
+        topopt::FeaSolution guess;
+        guess.u = u;
+        topopt::FeaSolution sol;
+        topopt::CgInfo info;
+        if (!core_solve(P, load_factor, &guess, S->jacobi_only, out.max_iterations, sol, info, out.failure)) break;
+        ++solves;
+        cg += info.iterations;
+        if (!S->jacobi_only && !info.used_multigrid && info.hier_built) S->jacobi_only = true;
+        out.iterations = info.iterations;
+        out.residual = info.residual;
+        out.used_multigrid = info.used_multigrid;
+        out.mg_levels = info.mg_levels;
+        double du = 0.0, big = 0.0;
+        for (std::size_t q = 0; q < sol.u.size(); ++q) {
+          du = std::max(du, std::fabs(sol.u[q] - u[q]));
+          big = std::max(big, std::fabs(sol.u[q]));
+        }
+        change = big > 0.0 ? du / big : 0.0;
+        u = std::move(sol.u);
+        prevE = P.fe.E;
+        if (change <= tolerance) {
+          // ★ BATCH N VERIFICATION: only an UNDAMPED solve may stop. A damped one moved the moduli only
+          // part of the way to the curve, so its small change says nothing about the distance to the
+          // fixed point (his Group 1 stopped on a ¼-damped 1.6 % change 7 % — 1.5 mm — short of it, and
+          // the next undamped solve moved 4.2 %). So the next solve is undamped, and it decides.
+          if (omega_used >= 1.0 || (P.control & kDampedConverges)) { converged = true; break; }
+          omega = 1.0;
+          prev_change = std::numeric_limits<double>::infinity();
+          continue;
+        }
+        if (change > prev_change) omega = std::max(0.25, 0.5 * omega);
+        prev_change = change;
+      }
+      out.solve_ms = topopt::steady_clock_ms() - ts;
+    }
+    out.threads_after = topopt::fea_matfree_thread_count();
+    out.geneo_after = topopt::fea_geneo_twolevel_enabled();
+  }
+  out.stress_updates = stress_updates;
+  out.fixed_point_iterations = solves;
+  out.fixed_point_converged = converged;
+  out.fixed_point_change = change;
+  out.fixed_point_omega = omega_used;
+  out.cg_iterations_total = cg;
+  out.mg_skipped = S->jacobi_only;
+  out.step_ms = topopt::steady_clock_ms() - t0;
+  if (!out.failure.empty()) return out;   // the session keeps its last good field
+  S->u = u;
+  S->lambda = load_factor;
+  S->steps += 1;
+  // (a call that CONTINUES a converged increment starts undamped — the tests' check solve)
+  S->omega = converged ? 1.0 : omega;
+  S->prev_change = converged ? std::numeric_limits<double>::infinity() : prev_change;
+  // the receipt: the moduli the field was solved with, and the strain it is at
+  double emin = std::numeric_limits<double>::infinity(), emax = 0.0;
+  out.element_e.resize(cells);
+  for (std::size_t e = 0; e < cells; ++e) {
+    out.element_e[e] = static_cast<float>(P.fe.E[e]);
+    if (P.fe.E[e] > 0.0) { emin = std::min(emin, P.fe.E[e]); emax = std::max(emax, P.fe.E[e]); }
+  }
+  out.e_min_mpa = std::isfinite(emin) ? emin : 0.0;
+  out.e_max_mpa = emax;
+  std::vector<double> dets;
+  element_strains(P, u, eps, &dets);
+  std::vector<double> solid;
+  const double lim = P.law.relative ? 1.0 : P.law.set.strain_limit();
+  for (std::size_t e = 0; e < cells; ++e) {
+    if (P.elem_off[e] == P.elem_off[e + 1]) continue;
+    solid.push_back(eps[e]);
+    if (eps[e] > lim) out.beyond_data_elements += 1;
+    out.volume_ratio_max = std::max(out.volume_ratio_max, dets[e]);
+    if (dets[e] > kInflatedVolume) out.inflated_elements += 1;
+  }
+  out.solid_elements = static_cast<int32_t>(solid.size());
+  if (!solid.empty()) {
+    auto pct = [&](double p) {
+      std::vector<double> c2 = solid;
+      const std::size_t k = std::min(c2.size() - 1, static_cast<std::size_t>(p * static_cast<double>(c2.size())));
+      std::nth_element(c2.begin(), c2.begin() + static_cast<std::ptrdiff_t>(k), c2.end());
+      return c2[k];
+    };
+    out.strain_p50 = pct(0.5);
+    out.strain_p99 = pct(0.99);
+    out.strain_max = *std::max_element(solid.begin(), solid.end());
+  }
+  finish(P, load_factor, std::move(u), out);
+  return out;
+}
+
+void step_end(int64_t id) {
+  std::unique_ptr<Session> dead;
+  {
+    std::lock_guard<std::mutex> lock(g_sessions_mu);
+    const auto it = g_sessions.find(id);
+    if (it == g_sessions.end()) return;
+    dead = std::move(it->second);
+    g_sessions.erase(it);
+  }
+}
+
+int64_t live_sessions() {
+  std::lock_guard<std::mutex> lock(g_sessions_mu);
+  return static_cast<int64_t>(g_sessions.size());
 }
 
 }  // namespace squishfe

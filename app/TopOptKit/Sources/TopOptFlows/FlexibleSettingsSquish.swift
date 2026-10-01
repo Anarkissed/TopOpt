@@ -36,9 +36,10 @@ public enum FlexibleSettingsSquish {
     }
 
     /// The sim id of `g` when the current lattice has a landed field for it.
+    /// ★ BATCH N: its REFINED field once that landed (the squish solved in steps), else its quick one.
     static func field(model m: FlexibleStageModel, group g: FlexibleSqueezeGroup) -> FlexibleFEField? {
         guard let l = m.lattice, !m.latticeIsStale, m.squishGeneration == l.generation,
-              let f = m.squish[FlexibleSim.groupID(g.number)]?.field, f.generation == l.generation else { return nil }
+              let f = m.shownSquishField(FlexibleSim.groupID(g.number)), f.generation == l.generation else { return nil }
         return f
     }
 

@@ -248,6 +248,14 @@ public final class FlexibleMainStage: ObservableObject {
     var controlColumnSquish = false
     /// Test control only: a failed sim holds the loop at rest (no column fallback — the red control).
     var controlNoFallback = false
+    /// ★ BATCH N, test control only: the page ignores the refined fields (batch G / M — the quick field
+    /// and its fold cut for ever; the red control of the swap and the line).
+    var controlNoRefineView = false
+    /// ★ BATCH N VERIFICATION, test controls only: the legend's top, the dent row's field and the (i) read
+    /// the NEWEST version (batch N — a refine landing mid-squeeze moved them while the quick field
+    /// played); the page does not refresh when the renderer swaps a refined version in at rest.
+    var controlLegendByNewestVersion = false
+    var controlNoSwapRefresh = false
     /// Tests: the next refresh rebuilds the overlay (a mesh rebuild mid Play all).
     func forceOverlayRebuildForTests() { overlayKey = nil }
     /// Reduced motion (tests pin it).
@@ -268,6 +276,14 @@ public final class FlexibleMainStage: ObservableObject {
         // ★ BATCH G: a Stress solve that waited for a squish sim starts when the last one leaves core
         squishIdleObservation = NotificationCenter.default.publisher(for: FlexibleSquishSolver.idleNotification)
             .sink { [weak self] _ in self?.squishIdle() }
+        // ★ BATCH N VERIFICATION: the renderer swapped a refined version in at rest — the legend's top, the
+        // dent row and the (i) follow it now (the next runloop turn: never inside the renderer's frame)
+        loop.onVersionSwap = { [weak self] in
+            DispatchQueue.main.async { [weak self] in
+                guard let self, !self.controlNoSwapRefresh else { return }
+                self.refresh()
+            }
+        }
     }
 
     // MARK: the one model per project (H2)
@@ -617,7 +633,7 @@ public final class FlexibleMainStage: ObservableObject {
                                               controlColumnColours: controlColumnHeat)
         FlexibleGroupFrames.paint(&c.tints, overlay: overlay, model: m)   // ★ S1: each face framed in its group's colour
         let shown = FlexibleShownValues(model: m, drawnLattice: drawn)
-        dentMaxMM = feNow?.scaleMM ?? shown.maxDepth
+        dentMaxMM = feNow?.scaleMM ?? shown.maxDepth   // ★ BATCH N VERIFICATION: the sequence AS ON SCREEN
         heatValues = c.mapValues
         dentMapShown = overlay?.flatStart.isEmpty == false && dentMaxMM > 0   // ★ BATCH M (M6): the dent view's X-ray
         // ★ BATCH M VERIFICATION: …but not on the column FALLBACK (a lattice drawn, its sims failed — or none,
@@ -627,7 +643,7 @@ public final class FlexibleMainStage: ObservableObject {
         dentOnColumnFallback = drawn != nil && !fe.active && !fe.pending && !controlDentXrayOnFallback
         // ★ BATCH G: the field moves the ghost, the heat plane and the walls; ×k capped so the map
         // stays injective (the planes never cross)
-        feBaseTints = playAllBaseTints(m, scaleMM: dentMaxMM)
+        feBaseTints = playAllBaseTints(m, scaleMM: dentMaxMM, nextScaleMM: feNow?.nextScaleMM)
         if fe.active {
             c.exaggeration = FlexibleShownValues.cappedExaggeration(rule: shown.uncappedExaggeration, maxSafeScale: fe.safeScale)
             c.dents = feShownMesh
@@ -682,7 +698,7 @@ public final class FlexibleMainStage: ObservableObject {
                    String(describing: (fe.active ? nil : c.dents).map { VertexTintKey($0).hash }),   // (FE: the token below)
                    "\(c.exaggeration)", "\(drawn?.generation ?? -1)", "\(drawn?.facesToken ?? -1)", "\(m.latticeBuilding)",
                    "\(m.lattice?.generation ?? -1)", "\(m.latticeIsStale)", oKey, "\(latticeAvailable)",
-                   "\(fe.token)", "\(fe.sequence)", "\(fe.pending)", fe.failure ?? "", "\(xray)", "\(stress)"].joined(separator: "|")
+                   "\(fe.token)", "\(fe.sequence)", "\(fe.shownSequence)", "\(fe.pending)", fe.failure ?? "", "\(xray)", "\(stress)"].joined(separator: "|")
         channels = c
         if channelsKey != key {
             channelsKey = key

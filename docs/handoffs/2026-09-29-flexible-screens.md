@@ -1,6 +1,939 @@
 # Handoff — 2026-09-29-flexible-screens (TRACK app, A1): the Flexible screens
 
-## Round 5 · batch E review — what the check found once a piece was latticed (read this first)
+## Round 5 · batch C5 — eight group colours, the ninth group's number, and your answers of 2026-09-30 (read this first)
+
+Your five answers are recorded below and in DECISIONS (D-R5-C5-1 … C5-8). One of them, "Add more colour tokens", needed code. The others confirm what the app already does. **The app was NOT launched: nothing here has been seen on a device or simulator.** The pictures are offscreen: the Settings page hosted in a window, and the model drawn by the shipping renderer.
+
+**What you will see:**
+- **Eight group colours, all design-system tokens** (six are new): green, pink, mint, blue, yellow, teal, olive, terracotta. Never purple (purple is the depth prism).
+  - I chose them by measuring, not by eye. Any two of the eight are at least 16 apart (OKLab ΔE; 15 is the usual "easy to tell apart" floor). They stay at least 10 apart for a red- or green-blind reader. Batch S's green and orange were only 7 apart for that reader.
+  - Each reads on the dark stage (at least 4.5 : 1 contrast), and each stays clear of colours that already mean something on these pages: the warning amber, the danger red, the resting faces' cyan, the selected face's white, and the prism's purple.
+- **Group 2 is now pink and Group 3 mint, no longer orange and red.** Orange and red were not just similar to the warning colours. They WERE the warning amber ("Fix 1 thing", the fix pop-up, a group's "Squishes ~1.4 of 2.6 mm" line) and the danger red (a refused face, a curve point's ×). Both also sat on the dent's rainbow: red is exactly the reddest dent. Pink and mint are off the rainbow. Green (group 1) and blue (group 4) stay.
+  - **On your project 0004, Group 2 (Face 3) changes from orange to pink.**
+  - A colour you picked in batch S keeps its slot: a stored "orange" shows as pink, a stored "red" as mint.
+- **The Colour row shows all eight swatches on one line** (measured at 11" and 13", portrait and landscape).
+- **From the ninth group on, the colours repeat, and a repeated colour carries its group's number.** Group 9 is green like group 1, so both are numbered. With eight groups or fewer nothing is numbered.
+  - **The rail tab:** the group's dot becomes a disc with its number.
+  - **The faces:** the number is painted into the face's dent map, like the frame. The digits are in the group's colour on a near-black plate, about a fifth of the face's shorter side. The plate sits inside the frame, where the map squishes least, so it never covers the deepest dent.
+  - The digits stand upright (the part's up) and read from outside. They move with the dent and appear on both pages, in every view.
+- **The face card's "Squeeze group" row:** with many groups, its 1 2 3 … 9 chips pushed the words "Squeeze group" off the row. Once the chips no longer fit beside the whole words, the row shows one chip, "● Group 9 ▾", that opens a menu of the groups (and + New). Measured on your pad: chips up to five groups, the menu chip from six. Before C5, six chips were drawn by squeezing the words.
+
+**Your answers (2026-09-30), recorded:**
+
+| your call (where it was asked) | your answer | what it means now |
+|---|---|---|
+| The design system has only four group colours that aren't purple. What should groups 5 and up do? (S verification, call 7; S's U6) | "Add more colour tokens" | Eight DS tokens. Groups 2 and 3 moved off the warning and danger colours. Past eight, the number shows on the tab and the faces (D-R5-C5-1 … 4) |
+| Deleting a face a main-page group holds (S, call 1) | "Flexible only" | The main page's load group keeps the face. As built; nothing changed (D-R5-C5-5) |
+| Reset all drops the faces added on this page (S verification, call 6) | "Start fully fresh" (only the main-page faces, default values) | As built; nothing changed (D-R5-C5-6) |
+| Group 1's reddest dent is Face 5's top edge, 23.7 mm, above your thumb's 11.4 mm (13.5 set). Should the colours stop at the depth you set? (M, M verification) | "Show the sim's real depths" | The colours stay on the 3D sim's own squish. Kept as it is (D-R5-C5-7) |
+| G's fold cut: keep it? (G verification) | "Is there no way to fold realistically instead?" | Batch N, already on this branch: the squish is solved again in steps. A field that settles is never cut; the cut is only the fallback (D-R5-N5, D-R5-C5-8) |
+
+Each call is also marked ★ ANSWERED where it was asked, below.
+
+**Deviations (each with its reason):**
+1. **Groups 2 and 3 changed colour.** You were asked about groups 5 and up, and the lead's brief said to keep groups 1–4 only if they did not look like a warning. They do: S's orange and red ARE the DS warning and danger tokens (ΔE 0), and both lie on the dent rainbow (ΔE 1.7 and 0.7).
+2. **The number on a face is painted into the map, not drawn as a disc over the part.** My first version drew discs. In the render, a disc at a face's middle hung 15–20 mm above the face once the dent played at ×5, and it read as belonging to the wall behind. A SwiftUI disc cannot follow the dent: on the main page the squish loop runs inside the renderer.
+3. **The data-viz method's lightness band is not applied.** It is meant for chart marks: 0.48–0.67 in OKLCH for dark charts. Group 1's own green is at 0.76, and thin frames on a near-black 3D stage need light colours. Every other check of that method is applied, over ALL pairs (any two groups' faces can sit side by side).
+
+**Not done (and why):**
+- **Nothing has been seen on a device or simulator.** The iOS build succeeds; I must not launch the app.
+- **The main Flexible page was not re-rendered.** Its frames and numbers come from the same call as the Settings page (`FlexibleGroupFrames.paint`, D-R5-X1), and the hosted test pins that call. It was not drawn for C5.
+- **A number seen through the part from BEHIND reads mirrored**, as print on glass would. In X-ray the far faces show their frames and plates; a "9" on a far face reads as a mirrored 9.
+- **A plate near a tall pressed wall can be hidden behind that wall's map at some angles.** On the 9-group prism, the top face's "1" sits in its least-squished corner, under the back walls. From the 3/4 views most of it is hidden behind them; looking down (C5_prism_nine_groups_down.png) it shows.
+- **Terracotta (group 8) is the dimmest colour** (4.5 : 1, the floor). Its one-column frame on a thin side face is hard to see. That is why it is last.
+
+**Your call:**
+1. **Reset all and the weight unit** (S's call 2, still open): your "Start fully fresh" answered which faces come back, not the unit. Reset all still keeps lb / N if you chose one. Should it go back to kg?
+2. **Group 2 is now pink on your project** (it was orange): OK, or pick another order?
+3. **A number on a far face reads mirrored through the X-ray body.** Leave it (it is printed on the face), or show the digits only on faces turned towards you? That would mean repainting them as the camera turns.
+4. **The thin-face question (D-R5-X2) still stands** for green, blue, yellow and teal, which lie on the dent rainbow. On faces under 16 columns across, a frame has no near-black gap.
+5. **From six groups, a face's "Squeeze group" row is the menu chip** (two taps to move a face) instead of the chips (one tap). Keep it, or allow narrower chips? They would be about 19 pt wide, under the comfortable finger size.
+
+### Each item → where → pinned by (RED control beside it)
+
+| item | where | pinned by (RED control) |
+|---|---|---|
+| Eight colours, DS tokens, never purple, fixed order | `DS.Color.squeezeGroupPalette` (DesignSystem.swift); `FlexibleGroupColour` (FlexibleGroupColours.swift) | `FlexibleGroupPaletteTests.testThePaletteIsEightDSTokensInAFixedOrderNeverPurple` (the instruments see `accentPurple` and indigo #5E5CE6) |
+| Every pair tellable apart, also colour-blind | the token values | `…testEveryPairIsTellableApartForEveryoneAndUnderColourBlindness` (S's four: 7.1 < 8; a twin of green: < 15) |
+| Readable on the stage, its number readable on it | the token values; `FlexibleGroupNumbers.ink` | `…testEveryColourReadsOnTheDarkStageAndUnderItsNumber` (`accentDeep` fails 4.5 : 1) |
+| Not a warning / refusal / rest / selection / purple; groups 2–3 off the heat | the token values and order | `…testNoGroupColourIsAWarningARefusalTheRestsTheSelectionOrTheHeat` (S's orange = warning, red = danger, ΔE 0; on the heat 1.7 / 0.7) |
+| S's stored names keep their slot | `FlexibleGroupColour.stored`, `canonical` | `…testRoundFiveSStoredNamesKeepTheirSlot` (read by raw value, S's "red" is lost: two greens) |
+| Past eight: cycle, number where a colour is shared | `FlexibleGroupNumbers.shared`, `railNumber` | `…testBeyondTheEighthGroupTheColoursCycleAndTheNumberShowsWhereAColourIsShared` (a count rule misses group 1 and a stored pick) |
+| The number painted: upright, read from outside, on the heat, where the map squishes least | `FlexibleGroupNumbers.axes`, `plate`, `paint` | `…testTheNumberIsPaintedUprightOnTheHeatWhereTheFaceSquishesLeast` (a mirrored and an upside-down plate read back wrong; a map-blind plate sits on more squish) |
+| On a real part: rail numbers 1 and 9 only, digits in the group colour through the frames' paint, upright on the sides | `FlexibleGroupFrames.paint` → `FlexibleGroupNumbers.paint`; the rail's icon | hosted `FlexibleGroupPaletteHostedTests.testNineGroupsNumberTheSharedColourOnTheRailAndOnTheirOwnFaces` (eight groups: nothing painted) |
+| Eight swatches on one line, "Colour" whole | `FlexibleColourSwatches` (26 pt, 3 apart) | hosted `…testEightSwatchesOnOneLineAndSixGroupsWearSixColours`, 4 sizes (mutation M7: 40 pt swatches) |
+| "Squeeze group" row: chips while they fit, else "● Group 9 ▾" | `FlexibleFaceGroupRow` (`ViewThatFits`, priority 0.5) | hosted nine-groups test: the menu, the words' 95 pt kept (mutation M8: always the chips) |
+
+### Hook lines in #354 / main files
+| file | anchor | +/− | why |
+|---|---|---|---|
+| `Sources/TopOptDesign/DesignSystem.swift` | after `groupPalette`'s closing `]` (`RGBA(hex: 0xBF5AF2), // E` / `]`) | +14 −0 | his OK to add colour tokens: `groupPink`, `groupMint`, `groupYellow`, `groupTeal`, `groupOlive`, `groupTerracotta` and `squeezeGroupPalette` (eight, in order), with a comment that they are not in the HTML |
+
+No other #354 / main file: WorkspacePlaceholder, MetalMeshView, LatticeSettings, ProjectModel, ForceModel and LatticeStageMode are untouched, and no case was added. (A first cut mounted SwiftUI discs from FlexibleMainLegends and FlexibleStagePage; both edits were reverted before the commit.)
+
+Flexible track files: `FlexibleGroupNumbers.swift` (new, +194); FlexibleGroupColours (+39 −14: the enum, `stored`, the numbers' paint after the frames'); FlexibleSettingsRail (+20 −5: the swatches, the rail's numbered dot); FlexibleSqueezeGroupRows (+52 −7: chips or the menu chip); FlexibleSqueezeGroups (+4 −4, comments); FlexibleRowCopy (+1 −1: the Colour (i) says eight, then numbers).
+
+### Tests
+- NEW `FlexibleGroupPaletteTests` (7, pure; OKLab ΔE, Machado 2009, WCAG computed in the test).
+- NEW hosted `FlexibleGroupPaletteHostedTests` (2): eight swatches and six groups on his pad at 11" and 13", portrait and landscape; nine groups on an octagonal prism (written by the test: eight sides and the top pressed, one group each).
+- NEW `FlexibleGroupPaletteEvidenceProbe` (opt-in, `FLEX_C5_EVIDENCE_DIR`).
+- RE-PINNED, each with its reason in the test (S's colour names): `FlexibleRound5SettingsTests` (defaults green / pink / mint; the palette is the eight tokens; group 2's colour is pink), `FlexibleRound5SettingsVerifyTests` (normal form and the carry in today's names), `FlexibleSqueezeGroupsTests.testGroupColoursAreDSTokensAndNeverPurple` (the eight), `FlexibleRound5EvidenceProbe` (.orange / .red → .pink / .terracotta).
+
+Mutations (`batch_c5/C5_mutations.txt`): each breaks one rule in production, rebuilds, runs its pinning test, and restores from git.
+```
+M1  the palette back to S (pink = DS.warning, mint = DS.danger) ... RED  FlexibleGroupPaletteTests (5 failures in 7 tests)
+M2  numbers by a COUNT, not by a shared colour .................... RED  testBeyond… (5)
+M3  S's stored names dropped ...................................... RED  testRoundFiveS… (5)
+M4  the plate read from inside (right = out × up) ................. RED  testTheNumberIsPainted… (4)
+M5  the plate placed with no regard to the map .................... RED  testTheNumberIsPainted… (3)
+M6  the plate allowed on the frame and its gap .................... RED  testTheNumberIsPainted… (1)
+M7  40 pt swatches (eight do not fit) ............................. GREEN at first — NOT caught: the row squeezed
+    "Colour" to 2 pt and every frame check still held; the test now measures the words' room → RED (4)
+M8  the group row always the chips (no menu) ...................... RED  hosted nine groups (6)
+M9  the numbers not painted by the frames (the pages' call) ....... RED  hosted nine groups (2)
+M10 the rail tab never numbered ................................... RED  hosted nine groups (1)
+```
+
+### Evidence (`docs/handoffs/evidence/2026-09-29-flexible-screens/batch_c5/`; offscreen, not device screenshots)
+- `C5_<11l|11p|13p|13l>_six_groups.png`: the Settings page hosted with batch S's six groups on his pad. The rail shows six colours, the open group's Colour row shows all eight swatches on one line, and Face 4's card shows the "● Group 6 ▾" menu chip. Crop: `C5_11l_six_groups_colour_row_crop.png`.
+- `C5_settings_six_groups_{iso,top}.png`: his pad by the shipping renderer, six groups framed (green, pink, mint, blue, yellow, teal), Group 2 playing.
+- `C5_<11l|13p>_nine_groups_prism.png`: nine groups. The rail's Group 1 and Group 9 carry numbered discs; Group 9's face card shows the menu chip (crop: `C5_11l_nine_groups_group_row_menu_crop.png`).
+- `C5_prism_nine_groups_{iso,top,down}.png`: the prism by the shipping renderer. Group 9's "9" is on its side face: from behind, through the X-ray body, it reads mirrored. The top face's "1" is under the back walls in iso / top, and reads plainly in `down`.
+- `C5_test_prints.txt`: every printed measurement.
+- Looked at: the frames on his thin side faces are one column. Mint, yellow and teal read; terracotta (group 8) is the dimmest, which is why it is last.
+
+### Build and suite (raw lines, this Mac; side worktree `wt-n`)
+```
+C5 suites (after the last change): FlexibleGroupPaletteTests  Executed 7 tests, with 0 failures (0 unexpected) in 0.249 s
+  FlexibleGroupPaletteHostedTests  Executed 2 tests, with 0 failures (0 unexpected) in 63.547 s
+  FlexibleGroupPaletteEvidenceProbe (FLEX_C5_EVIDENCE_DIR set)  Executed 1 test, with 0 failures (0 unexpected) in 9.487 s
+Affected suites first (FlexibleRound5Settings*, FlexibleSqueezeGroups*, FlexibleMergeR5SMTests, TopOptDesignTests, FlexibleRowCopyTests,
+  FlexibleMainViewsTests, FlexibleRound5SquishExitTests): Executed 100 tests, with 0 failures (0 unexpected) in 408.111 s
+Targeted suite (every Flexible* suite + UnifiedShading, LatticePreviewBodyAlpha, LatticeGBufferMask, LatticeThreeAlgorithmsDraw,
+  OrganicCapsuleImpostor, Viewer, StageBackdrop, SmoothingPageRound2, LatticeStageMode, LatticeSettingsPersist, ProjectStore,
+  UndoHistory, SurfaceStage, LatticeSimSolveTrigger, TopOptDesign, SelectionModel), load average up to ~19 (other agents):
+  Executed 641 tests, with 28 tests skipped and 1 failure (0 unexpected) in 4029.790 (4029.932) seconds
+  LatticeSimSolveTriggerTests.testTheTriggerRefusesOnAllThreeGrounds — known, pre-existing
+  (the 28 skipped are the opt-in probes; FlexibleFEFieldTests.testExtensionOutsideTheSolid PASSED here, 17.213 s)
+FLEX-C5 palette all pairs: worst normal ΔE 16.2 (groups 4–6) · worst protan/deutan ΔE 10.2 (groups 1–7)
+FLEX-C5 control (round 5 S): worst normal ΔE 18.4 · worst protan/deutan ΔE 7.1 (groups 1–2)
+FLEX-C5 contrast: 1 Green bg 10.0 gap 8.9 · 2 Pink bg 10.2 gap 9.1 · 3 Mint bg 16.1 gap 14.4 · 4 Blue bg 5.6 gap 5.0 · 5 Yellow bg 15.5
+  gap 13.9 · 6 Teal bg 5.1 gap 4.6 · 7 Olive bg 6.4 gap 5.8 · 8 Terracotta bg 4.5 gap 4.0 (the number's ink = the stage background)
+FLEX-C5 meanings: 1 Green nearest resting cyan 23.1 heat 5.0 · 2 Pink nearest warning amber 16.5 heat 14.3 · 3 Mint nearest selected
+  white 16.6 heat 14.8 · 4 Blue nearest depth-prism purple 21.0 heat 7.9 · 5 Yellow nearest warning amber 17.0 heat 3.0 · 6 Teal nearest
+  resting cyan 23.2 heat 8.2 · 7 Olive nearest warning amber 17.0 heat 12.9 · 8 Terracotta nearest danger red 16.1 heat 15.9
+FLEX-C5 control: S's orange → warning 0.0, heat 1.7 · S's red → danger 0.0, heat 0.7
+FLEX-C5 plate: 9 at u 2–6 v 2–8 · squish under it 0.275 vs the face's mean 0.393
+FLEX-C5-HOSTED swatches: (all four sizes) row x 209–438 (w 229, h 32) · words from 138 need 42 · panel x 24–504 · rail to 110 ·
+  group row (six groups, Face 4's card): menu x 325–430
+FLEX-C5-HOSTED 11l / 13p group row (nine groups): control x 326–430 in card 118–490 · words need 95 pt
+FLEX-C5-HOSTED nine groups: shared [1, 9] · rail [1, nil, nil, nil, nil, nil, nil, nil, 9] · lit 44 · Group 1 face 1 64×64 · up (0,−1)
+  right (1,0) · 140 plate columns · Group 9 face 5 27×26 · up (0,1) right (−1,0) · 35 plate columns
+Scratch measurement (his pad, 11" landscape, Face 3's card; the scratch test was deleted): 2–5 groups → chips · 6 groups → menu
+iOS: xcodebuild -project app/TopOpt.xcodeproj -scheme TopOpt -configuration Debug -destination id=147E56A1-C8CA-4B9D-BE6C-CF230589A83A
+  -derivedDataPath …/DerivedData/flexA1n build → ** BUILD SUCCEEDED ** (FlexibleGroupNumbers.o built from wt-n's source; the log
+  compiles wt-n/…/FlexibleGroupNumbers.swift). The app was not launched. Both scratch builds were deleted afterwards.
+```
+Note for the lead: during the suite (18:12), something outside this batch replaced `wt-n/app/TopOptKit/vendor` (a symlink to the lead's vendor) with `vendor -> vendor-own`, an untracked `vendor-own/` holding its own TopOptCore.xcframework. The suite's binary was built before that. The M8 re-run and the iOS build ran after it, against vendor-own. I did not touch or commit it.
+
+### Decisions (00-decisions.md)
+New rows D-R5-C5-1 … C5-8. D-R5-S1 and D-R5-X2 carry a ★ C5 note.
+
+### Commits (`claude/flexible-screens-n`; nothing pushed)
+- `6afa7d89`: the palette (DS tokens), the numbers, the swatches, the menu chip, the three new suites and the re-pins.
+- `d6b7427d`: the group row's priority, and the stronger hosted checks (the words' room, the pages' paint route); the probe's down view.
+- The next commit: this section, DECISIONS D-R5-C5-1 … 8 (S1 and X2 annotated), your answers marked where they were asked, and the evidence (`batch_c5/`).
+
+## Round 5 · batch N — verification pass
+
+Batch N's verifier found ten things. Each is confirmed below with my own run (not the verifier's word),
+fixed where the app can fix it, and pinned by a test with a RED control computed beside it. **The app was
+NOT launched: nothing here has been seen on a device or simulator.** Pictures are offscreen frames of the
+shipping renderer.
+
+**What changes for you on the main Flexible page:**
+- **The refined squish is closer to right.** A refine used to stop on a damped step that said "settled"
+  while the field was still 7 % (1.5 mm) short. Now only an undamped step can stop it. Your Group 1 now
+  stops 8 solves into its last increment. Eight more undamped solves from where it stops move it 0.32 mm
+  (1.4 %); from the old stop they had moved it 1.5 mm (7 %). The refine takes 18.5 s in Release (it was
+  16.7 s).
+- **The note names the group and never blanks.** "Refining Group 1… 1/8" appears the moment the refine
+  starts. It counts the increment being solved, so it shows 8/8 while the slowest step runs. Then
+  "Refining Group 2… 1/8". Before, it went blank for 1.5 s, stalled on 7/8, then restarted at 1/8 unnamed.
+- **Every note fits, whole, beside the Play-all picker at 11" portrait.** "Refine didn't settle" /
+  "Refine took too long" / "Refine failed" replace "Quick squish · the refine did not settle", which was
+  cut to "Quick squish · the refine did…". Batch G's two lines were cut there too. They now read
+  "Squish sim failed" and "Group 2's sim failed".
+- **Nothing changes mid-squeeze when the refined squish lands.** The legend's top, the colours and the (i)
+  stay with the quick squish still playing. They change at the rest point, together with the shape. Your
+  Group 1's legend top had jumped 23.72 → 20.98 mm mid-squeeze and recoloured the quick squish.
+- **The (i) now says the force and the turns.** For your Group 1: "…finding this part 7× stiffer than core's
+  columns (its skin and walls carry load), pressed at 2× your weights, with no buckling or self-contact, and
+  big turns drawn as stretches (an edge it turns far rises) — tap here, then the part, for the mm there."
+  Group 2 says "pressed at 1.6× your weights" and nothing about turns, because none of its elements grow.
+- **A new lattice stops a refine within one solve.** It used to wait for the whole increment: up to 6
+  solves, 6.5 s on your Group 1. A Stress solve waiting for core gets it within one solve too.
+
+**What is still wrong, and it is the first thing you will see on Group 1** (`batch_n_verify/NV_his_g1_front_2x_vs_his_weights.png`):
+- At full squeeze the whole Face 5 end **leans over** (about 30°). Its top edge **rises 7.96 mm** while
+  the elbow sinks 6.55 mm. That is not how a TPU lattice takes a thumb. "No element turns inside out"
+  was true but not the whole story. **1 321 of 53 248 elements GROW by more than 30 % under the press**
+  (up to 2.1×). A press never grows a lattice, so that growth is a turn that the small-strain sim draws as
+  a stretch. Two more causes: ν = 0.3 holds even where the cells are crushed, and the bottom is held fast.
+  The walls there look shattered with the heat off (`VN_walls_g1_front_crest_zoom_rest_stepped_uncut.png`:
+  their pull-back misses the steep field).
+- **At your real weights (λ 1) it is better but not gone** (same sheet, bottom row): the end leans about
+  half as far, but its top edge still rises **4.98 mm** while the elbow sinks 2.45 mm. So playing at your
+  weights is a choice about the force, not a fix for the lean.
+- Only core can fix the lean: #36 (large deformation), #41 (ν falling as the cells crush).
+- **How much of your pad is past the tested curves:** 34 % of Group 1's part and 38 % of Group 2's are
+  squeezed beyond the last tested strain (25 %). There the shape comes from the textbook densification
+  law, not your filament's data.
+
+### Your call (updated)
+1. **Group 1's force.** Keep 2× your weights (the band's edge — the shape is deeper and leans more), or play
+   every group at your real weights (λ 1) whenever the sim finds the part stiffer than core's columns? The
+   lean stays either way until core #36 / #41.
+2. **The densification past your data** — unchanged (34–38 % of your pad lives there): keep it, or test the
+   filament to 60–70 % squish.
+
+### Each finding → verdict → what changed → pinned by
+| # | finding (severity) | verdict, my run | what changed | pinned by (RED control) |
+|---|---|---|---|---|
+| 1 | "2 % converged" measured the DAMPED step — Group 1 7 % from its fixed point (major) | CONFIRMED: the bridge stopped on `change ≤ tol` whatever ω; on C1's over-squished patch with every increment starting damped, the next undamped solve moved 5.1–6.5 % after a "converged" damped stop | only an undamped solve stops (`flexible_squish_fe.cpp`); 10 solves on the last increment (was 6); the receipt carries ω; his Group 1 stops 8 solves into its last increment, 0.32 mm (1.4 %) from 8 more undamped solves (the old stop: 1.52 mm, 7 %); 23 solves, 18.5 s Release (was 21, 16.7 s). Being nearer its fixed point, its edge is steeper: the walls' pull-back misses 493 cells (worst 3.12 mm; was 402, 2.19 mm) | `FlexibleSquishStepsTests.testOnlyAnUndampedSolveStopsAnIncrement`: next undamped ≤ 0.97 % (RED `controlDampedConverges`: 6.5 %); his r5 test: the stop's ω = 1; mutation NV1 |
+| 2 | "0 inverted" beside rotation that INFLATES the lattice up to 1.97× (major) | CONFIRMED: the receipt now counts it — his Group 1 1 321 elements > 1.3 (max 2.1), Group 2 0 (max 1.10) | `inflated_elements` / `volume_ratio_max` in the step receipt; the (i) says "big turns drawn as stretches" where any; D-R5-N5 amended; the handoff says it with numbers | his r5 test: Group 1 > 0 and said; Group 2 = 0 and NOT said (the red control) |
+| 3 | a third of his groups on the untested law; never stated (minor) | CONFIRMED: 34 % (G1), 38 % (G2) past 0.25 | said here and in D-R5-NV6; the probe prints it | printed by the his r5 test and the probe |
+| 4 | cancel / yield only between increments (minor) | CONFIRMED by reading (`step()` looped up to 6 solves with no poll) | ONE solve per bridge call; the session keeps the damping across calls at the same λ; cancel, yield and the budget polled between solves | `FlexibleBatchNVerifyTests.testACancelIsHeardBetweenSolvesNotOnlyBetweenIncrements`: 1 solve after the cancel (RED `pollPerIncrement`: 3); mutations NV2, NV6 |
+| 5 | Group 1 at full size leans, its top edge rises 7.5 mm (UX major) | CONFIRMED (picture above; 7.96 mm after finding 1's fix) | not fixable app-side: said in the (i) ("pressed at 2×", "big turns drawn as stretches"); his call with a λ 1 picture; core #36 / #41 | the (i) pins in the his r5 test; `FlexibleBatchNEvidenceProbe.testHisGroup1AtTheBandEdgeAgainstHisWeights` (opt-in) |
+| 6 | walls look shattered under the ridge (UX minor) | CONFIRMED (the verifier's frame, kept as evidence) | nothing app-side (it follows the ridge); said here | — |
+| 7 | the fallback lines are cut at 11" portrait (UX minor) | CONFIRMED, wider than reported: "Quick squish · the refine did not settle" is cut at EVERY size (drawn 152–224 of 232 pt); batch G's two lines at 11" portrait | short lines (above) | `…testEveryRefineLineIsWholeBesideTheLivePlayAllPicker`: the note's DRAWN frame ≥ its natural width at 11"/13" × both orientations × Play all live / a pick (RED: the old line, cut) |
+| 8 | the line blanks, stalls at 7/8, restarts unnamed (UX minor) | CONFIRMED by reading (set after the first increment; posted at each end) | set when the refine claims core; posted at each increment's START; named | `…testTheRefineLineAppearsAtOnceNamesTheGroupAndCountsTheIncrementBeingSolved` (pad: "Simulating…" → "Refining Group 1… 1/8" … "8/8" → none, no blank); mutations NV2, NV3 |
+| 9 | legend top, colours and (i) change mid-squeeze at landing (UX minor) | CONFIRMED on C1's pad: top 2.920 → 2.969 mm and colours changed by 0.039 at the landing | `FlexibleFEView.shownSequence` (the version ON SCREEN) drives the legend, the colours on screen, the dent row and the (i); refined versions coloured on their own scale; the page refreshes on the renderer's version swap (`FlexibleSquishLoop.onVersionSwap`) | `…testTheLegendTheColoursAndTheInfoFollowTheVersionOnScreen` (RED: the newest version — 2.969 and 0.039 at the landing; no refresh on the swap — the (i) stays the quick one's); mutations NV4, NV5 |
+| 10 | the picture is at 2× his weights, unsaid (UX minor) | CONFIRMED | the stepped (i): ", pressed at 2× your weights" whenever λ ≠ 1 | his r5 test: Group 1 "2×", Group 2 "1.6×" |
+
+Also found and fixed: a refine that did not settle on a field that was never cut said nothing about it in
+the (i) (the reason lived only in the cut's sentence). Every linear sentence now carries it. Pinned by
+`FlexibleBatchNRefineTests.testARefineThatDoesNotSettleKeepsTheQuickFieldAndSaysWhy`.
+
+### The numbers after the fix (Release, this Mac — opt-in `FlexibleBatchNProbe`, `FLEX_N_EXTRA=8` more undamped solves from the stop)
+`FLEX_N_PROBE=1 FLEX_N_EXTRA=8 FLEX_N_CASES=his0004,bare,covered,m2 swift test -c release -Xswiftc -enable-testing --filter FlexibleBatchNProbe/testTheSteppedSolveOn`
+(load average 9.2 → 5.5 during the run; raw lines in `batch_n_verify/NV_release_probe.txt`). Every stop was an undamped solve.
+
+| case · group | stepped λ (asked) | inverted · min det | walls missed (worst) | elements growing > 30 % (max det) | past the tested data | increments · solves · refine | the stop vs 8 more undamped solves |
+|---|---|---|---|---|---|---|---|
+| his r5 · Group 1 | 2 (6.83) | 0 · 0.339 | 493 (3.12 mm) | **1 321 (2.11)** | **34 %** | 8 · 23 · **18.5 s** (last increment 8 solves, 7.9 s) | 0.32 mm (1.4 %) — was 1.52 mm (7 %) |
+| his r5 · Group 2 | 1.634 (1.65) | 0 · 0.579 | 0 (0.02 mm) | 0 (1.10) | **38 %** | 9 · 18 · 15.9 s | 0.08 mm (0.3 %) |
+| his 0004 as saved | 2 (3.06) | 0 · 0.796 | 0 | 0 (1.02) | 0 % | 8 · 11 · 11.9 s | 0.01 mm (0.5 %) |
+| C1's pad, bare | 1.367 (1.37) | 0 · 0.846 | 0 | 0 (0.99) | 0 % | 8 · 10 · 5.0 s | 0.02 mm (0.8 %) |
+| C1's pad, covered | 1.534 (1.52) | 0 · 0.822 | 0 | 0 (1.01) | 0 % | 9 · 12 · 13.8 s | 0.02 mm (0.7 %) |
+| the M2 stand (5 kg) | 2 (11.63) | 0 · 0.450 | 0 | 0 (1.24) | 0.4 % (54 elements) | 8 · 10 · 12.7 s | 0.03 mm (0.4 %) |
+
+- His Group 1 already has 151 growing elements at λ 1 (increment 4), so playing at his weights does not remove them.
+- **A cancel or a waiting Stress solve now waits at most ONE solve.** On your pad that is about 0.4–1.2 s in
+  Release. The worst is the M2 stand's first solve (multigrid stagnates, then Jacobi-CG): 2–4 s. It was
+  up to a whole increment: 6.5 s on your Group 1, 6 solves under one 20 s deadline.
+- Each refine is still under the ~30 s bar on this Mac. The iPad estimate stands: 5–19 s a group on an M-series iPad, about 1.5–2× that on an A-series one.
+
+### Hook lines in #354 / main files
+**None.** WorkspacePlaceholder, MetalMeshView, LatticeSettings, ProjectModel, ResultsModel, FaceRegion,
+RunModel, LatticeSimModel and LatticeStageMode are untouched; core/ is untouched; the pinned strings
+(SmoothingPageRound2Tests, the first 900 characters of `startStressSolveIfNeeded`) are untouched.
+Track files edited: `flexible_squish_fe.cpp/.hpp`, `FlexibleBridge.hpp` (the undamped rule, the session's
+damping across calls, the inflation receipt, two test control bits), `FlexibleKit+Squish(+Steps).swift`
+(the receipt, the control bits), `FlexibleFERefine` (one solve per call, the line at each start, the short
+lines, the receipt, the probes' `inspect` / `band`), `FlexibleSquishSolver` (the line at the claim, the
+per-increment red control), `FlexibleStageModel+Squish` (`running(step:)`), `FlexibleFE` (the (i): force,
+turns, the reason on every linear sentence; batch G's two lines), `FlexibleMainStage` / `+Squish` / `+Views`
+(`shownSequence`, the scales, the swap refresh, the named line), `FlexibleSquishPlayer` (`onVersionSwap`,
+`noteShown`, the note's frame preference), `MeshRenderer+FlexibleLattice` (`noteShown`).
+
+### Tests
+NEW (each with its RED control): `FlexibleSquishStepsTests.testOnlyAnUndampedSolveStopsAnIncrement`;
+`FlexibleBatchNVerifyTests` (4: the cancel between solves, the version on screen, the line, the drawn width).
+RE-PINNED (reasons in the tests): `FlexibleBatchNRefineTests` — the line "Refining Group 1… n/8", the kept line
+"Refine didn't settle" and its (i), the his r5 (i) (force, turns), the stop's ω; `FlexibleSquishStepsTests.stepped`
+— 10 solves on the last increment (FlexibleFERefine.finalIterations).
+Deleted-test sweep (`git diff 91e22dbc -- app/TopOptKit/Tests`, removed `func test` lines): none.
+
+### Mutation runs (each breaks one rule in production, rebuilds, runs its pinning test, restores from a snapshot; `batch_n_verify/NV_mutations.txt`)
+```
+NV1  a damped solve may stop                       ⇒ testOnlyAnUndampedSolveStopsAnIncrement: 4 damped stops, next 6.5 % (2)
+NV2  the line posted at each increment's END       ⇒ testACancelIsHeardBetweenSolves: 0 solves after the cancel (2)
+NV3  no line when the refine claims core           ⇒ testTheRefineLineAppearsAtOnce: a blank after "Simulating…" (1)
+NV4  the legend reads the NEWEST version           ⇒ testTheLegend…: top, (i), colours move at the landing (5)
+NV5  the swap does not refresh the page            ⇒ testTheLegend…: the (i) and the top stay the quick one's (2)
+NV6  nobody listens between solves                 ⇒ testACancelIsHeardBetweenSolves: 3 solves after the cancel (2)
+every restore byte-identical; `swift build --build-tests` 0 after the last
+```
+
+### Evidence (`docs/handoffs/evidence/2026-09-29-flexible-screens/batch_n_verify/`)
+- `NV_his_g1_front_2x_vs_his_weights.png`, `NV_his_g1_faces5_2x_vs_his_weights.png` — Group 1 at rest, as
+  shipped (2×) and at your weights (λ 1), full squeeze, after finding 1's fix (opt-in
+  `FLEX_N_EVIDENCE_DIR=<dir> swift test --filter FlexibleBatchNEvidenceProbe/testHisGroup1AtTheBandEdgeAgainstHisWeights`);
+  `NV_his_g1_2x_vs_his_weights.txt` — the rise / sink numbers and both (i).
+- `VN_his_g1_front_zoom_rest_stepped_uncut.png`, `VN_walls_g1_front_crest_zoom_rest_stepped_uncut.png` — the
+  verifier's frames at `91e22dbc` (rest / stepped full / linear uncut full; heat on, walls with heat off).
+- `NV_focused_tests.txt` — every printed line of the new and re-pinned tests; `NV_mutations.txt`;
+  `NV_release_probe.txt` — the Release probe.
+
+### Build and suite (raw lines, this Mac)
+- Targeted suite (Debug; the same classes as batch N's: every Flexible* class + UnifiedShadingTests,
+  LatticePreviewBodyAlphaTests, LatticeGBufferMaskTests, LatticeThreeAlgorithmsDrawTests,
+  OrganicCapsuleImpostorTests, ViewerTests, StageBackdropTests, SmoothingPageRound2Tests, LatticeStageModeTests,
+  LatticeSettingsPersistTests, ProjectStoreTests, UndoHistoryTests, SurfaceStageTests, LatticeSimSolveTriggerTests,
+  LatticeOvernightBatchTests, LatticePageTests, LatticeSimRegionLayerTests, ResultsModelTests; another session's
+  xctest at ~100 % CPU throughout), on the tree committed as `8f93398a`:
+  `Executed 699 tests, with 27 tests skipped and 1 failure (0 unexpected) in 3859.036 (3859.099) seconds`.
+  - The one failure is the known `LatticeSimSolveTriggerTests.testTheTriggerRefusesOnAllThreeGrounds`.
+  - `ViewerTests`: `Executed 33 tests, with 0 failures`; `FlexibleBatchNVerifyTests` 4 / 0;
+    `FlexibleBatchNRefineTests` 4 / 0; `FlexibleSquishStepsTests` 6 / 0.
+- Focused runs before it: FlexibleSquishStepsTests + FlexibleBatchNVerifyTests `Executed 10 tests, with 0
+  failures (0 unexpected) in 259.647`; FlexibleBatchNRefineTests + the width test: 1 failure — my own new pin
+  (a kept refine's reason in the (i)) found the field that was never cut said nothing — fixed, re-run
+  `Executed 1 test, with 0 failures`.
+- iOS (Debug, the simulator 147E56A1…, DerivedData flexA1n) at `8f93398a`: `** BUILD SUCCEEDED **`.
+  `TopOpt.debug.dylib` (15:59, 70.2 MB) holds "Refining ", "Refine didn't settle", "big turns drawn as
+  stretches", "pressed at ", "Squish sim failed". Not installed, not launched. flexA1n and the package
+  `.build` (Debug, then Release) were deleted afterwards (disk).
+
+### Decisions (00-decisions.md)
+- New: D-R5-NV1 … NV6. Amended in place (★): D-R5-N1, N5, N6, G6.
+
+### Commits (`claude/flexible-screens-n`; nothing pushed)
+- `515d6145` the bridge: only an undamped solve stops an increment; a call at the same load factor continues it; the inflation receipt; testOnlyAnUndampedSolveStopsAnIncrement.
+- `8f93398a` the app: one solve per call; the legend, colours and (i) by the version on screen; the line named, at once, whole; the (i)'s force and turns; FlexibleBatchNVerifyTests; the re-pins; the probes.
+- The next commit: this section, DECISIONS D-R5-NV1 … NV6 (N1 / N5 / N6 / G6 amended), the evidence, the probe's refine-time column.
+
+## Round 5 · batch N — a squish that folds realistically (★ read the verification pass above first)
+
+Your words, on batch G's fold cut: **"Is there no way to fold realistically instead?"**
+
+What I said I would do: solve the squish in STEPS, each voxel taking the stiffness core's tested curve
+gives at ITS OWN squish, so the zones the linear sim over-squishes firm up and the full-size picture
+stays smooth without the cut. That is built. **One thing I told you was wrong, and it matters:** I said
+the curves already say TPU lattice stiffens as its cells close. For your filament they do not — see
+"The curves" below. The stiffening the stepped sim needs comes from a textbook law past your data,
+and the (i) says so.
+
+Judged on YOUR project as you left it for round 5 (`his_project_0004_r5`, restored through
+`AppModel.open`), on 0004 as saved, on C1's pads and on the M2 stand. **The app was NOT launched: nothing
+here has been seen on a device or simulator.** The pictures are offscreen frames of the shipping renderer.
+
+**What you will see on the main Flexible page:**
+- **Save & Exit:** the lattice at rest with "Simulating the squish…", then the QUICK squish plays (batch
+  G's linear sim, as today). The note beside the picker then reads **"Refining the squish… 3/8"** while the
+  steps run — the group on screen first, then the others. (★ verification: "Refining Group 1… 3/8", from the
+  moment the refine starts, counting the step being solved.)
+- **The refined squish swaps in at REST.** When it lands, the renderer swaps its shape, its mesh and its
+  colours in at the next rest point of the loop (at once while paused). Nothing pops mid-squeeze.
+- **Not cut.** The refined squish plays at its full calibrated size: the dent row reads **"×1"** (your
+  Group 1 read "×0.2", Group 2 "×0.5"). No element of it turns inside out. (★ verification: but on your
+  Group 1, 1 321 elements GROW > 30 % — a turn drawn as a stretch; see the verification pass.)
+- **The (i), one sentence:** "The colours and the shape are a 3D sim solved in steps on the tested squish
+  curves (past their end, untested, the cells close and firm up), finding this part 7× stiffer than core's columns (its
+  skin and walls carry load), with no buckling or self-contact — tap here, then the part, for the mm there."
+  (★ verification: now also "pressed at 2× your weights" and, where elements grow, "big turns drawn as
+  stretches (an edge it turns far rises)".)
+- **The colours, tap-to-read and Stress read the refined field.** The Stress (i) says "stepped 3D sim".
+- **If a refine does not settle, fails, or runs past 120 s:** the quick squish stays, with batch G's fold
+  cut (now only a fallback) and ONE line: "Quick squish · the refine did not settle" (or "…took too
+  long" / "…failed"). (★ verification: "Refine didn't settle" / "Refine took too long" / "Refine failed" —
+  the long ones were cut beside the picker.)
+- **A new lattice** (Save & Exit again) cancels a refine at its next increment. (★ verification: its next
+  SOLVE.)
+- **The Settings page** is unchanged, except that the selected group's dent uses its refined field once it
+  exists.
+
+**What it does to YOUR pad** (Release, this Mac; the full table is below):
+- **Group 1** (Top A's elbow + Top B + Face 5's 10 kg thumb): the quick sim, uncut at its calibrated
+  size, turns **24 cells inside out** (the reason batch G cut it to 23 %). Refined: **0** (the smallest
+  det 0.25), at full size — 8 increments, 21 solves, **16.7 s**. The crushed zone under the thumb firms
+  up: its strain stops at 0.70 (the quick field at the same size asks 1.18).
+- **Group 2** (Face 3's four fingertips): batch G cut it to 53 % (its gradient, not an inversion). Refined:
+  0 inverted (det ≥ 0.58), 0 of 53 248 wall cells missed, **15.7 s**. Its calibration came back INSIDE
+  the band: the stepped field asks 1.65× the force (the quick one 2.09, held at 2), so it plays at 1.63×.
+- **0004 as saved:** never cut; refined in 11.8 s (it asks 3.06, held at 2).
+
+**What is still not realistic (and why):**
+- (★ verification: understated — the whole Face 5 end leans ~30° and its top edge rises ~8 mm; see the
+  verification pass.) **Your Group 1's top edge above the thumb rises into a crest** (frame `batch_n/N_his_r5_group-1_stepped_faces5_a100.png`). Two reasons, both
+  outside a material law: ν = 0.3 everywhere, so the crushed zone bulges sideways as solid rubber would
+  (a crushed foam bulges far less — core brief #22/#23), and the strip between the thumb and the top
+  TURNS (‖∇u‖ 2.1, almost all rotation; small-strain kinematics draw a turn as a stretch). No cell inverts,
+  but the lattice walls there are drawn up to 2.2 mm off (402 of 53 248 cells; the quick field uncut: 665,
+  9.25 mm). Only a large-deformation solver draws that edge truly (core brief #36).
+- **No buckling, no snap-through, no self-contact** — the (i) says so.
+- **The band [0.5, 2] still holds the force.** Your Group 1 asks 6.8× (its elbow zone is that much stiffer
+  in 3D than core's columns) and plays at 2× your weights — a 20 kg thumb.
+
+### The curves (the premise, corrected)
+
+Core's curves for your filament (varioShore TPU, gyroid, 240 °C) have two tested points, at 10 % and 20 %
+squish, and are allowed to 25 %. Between them the lattice SOFTENS (a plateau), it does not stiffen:
+
+| ρ (core) | secant at 2–10 % | at 15 % | at 20 % | at 25 % (the data's end) |
+|---|---|---|---|---|
+| 0.15 (your pad: 0.14–0.17) | 0.211 MPa | 0.190 | 0.172 | 0.161 (−24 %) |
+| 0.20 | 0.570 | 0.528 | 0.494 | 0.474 |
+| 0.30 | 1.195 | 1.167 | 1.145 | 1.132 |
+
+Cells close (densification) at about ε_D = 1 − 1.4 ρ ≈ 79 % for your pad — far past the data. So the
+stepped law is core's curve up to 25 % and Gibson & Ashby's densification past it, joined smoothly (C¹),
+capped at the solid filament (50 MPa). With the tested data alone (the curve held at its last tested
+secant — the red control) the stepped field folds MORE than the linear one: your Group 1, 91 inverted
+cells against the linear 24.
+
+### How it works (D-R5-N1 … N6)
+- **The same problem, solved again and again.** The bridge builds the group's problem once (grid, loads by
+  column pressure, rests, far anvils, pins, inertia relief — batch G's, split into build / solve / finish;
+  the linear solve is rebuilt on the same pieces and its 12 bridge tests pass unchanged) and keeps it in a
+  session. Each step solves it at a load factor λ.
+- **The strain a voxel is at:** its principal compressive strain, max(0, −λ_min(sym ∇u)) — the uniaxial
+  test's own axis whatever ν (the volumetric strain would hang on the assumed ν = 0.3); rotation dropped.
+- **Secant iterations,** damped in log-modulus, warm-started from the last field scaled to the new load
+  (core's `initial_guess`); where the curve stiffens an element is updated by the STRESS it carried (the
+  curve inverted at it). The plain secant update swung 4–18 % per solve on your Group 1 and never settled.
+  Stop at 2 % of the largest motion, or 3 solves per increment (6 on the last). (★ verification: on an
+  UNDAMPED solve only; 10 on the last.)
+- **8 increments** to the calibrated load, then the calibration RE-DECIDED on the stepped field: the load
+  factor whose deepest zone compresses core's depth (from the last two increments, ≤ 2 correction steps),
+  inside the band [0.5, 2].
+- **Once a session's multigrid stagnates** (the M2 stand), core's matrix-free Jacobi-CG directly — what
+  core's own per-run latch does, which is thread-local and cannot follow a session across the queue's threads.
+- **One claim on core:** a refine holds the same claim as a sim, yields it between increments to a solve
+  that waits for it, and is not counted as `solving` (the Stress solve starts and its claim waits at most
+  one increment). No quick sim of a new lattice claims core beside a refine still finishing its increment.
+
+### The numbers (Release, M2 Pro, this Mac — opt-in `FlexibleBatchNProbe`, load average 5–7) (★ before the verification's fix — the new ones are in the verification pass)
+
+`FLEX_N_PROBE=1 FLEX_N_CASES=his0004,bare,covered,m2 swift test -c release -Xswiftc -enable-testing --filter FlexibleBatchNProbe`
+
+| case · group | quick sim: k asked → held (cut) | quick, uncut: inverted · min det · walls missed (worst) · gmax | stepped: λ asked → used | stepped: inverted · min det · walls missed (worst) · gmax | increments · solves · total | quick solve |
+|---|---|---|---|---|---|---|
+| his r5 · Group 1 | 7.39 → 2 (23 %) | 24 · −0.201 · 665 (9.25 mm) · 2.20 | 6.82 → 2 | **0 · 0.250** · 402 (2.19 mm) · 2.13 | 8 · 21 · **16.7 s** | 0.70 s |
+| his r5 · Group 2 | 2.09 → 2 (53 %) | 0 · 0.514 · 0 · 0.94 | 1.65 → **1.63** | 0 · 0.579 · 0 (0.02 mm) · 0.83 | 9 · 18 · **15.7 s** | 1.12 s |
+| his 0004 as saved | 3.64 → 2 (—) | 0 · 0.825 · 0 · 0.21 | 3.06 → 2 | 0 · 0.796 · 0 · 0.24 | 8 · 11 · **11.8 s** | 2.44 s |
+| C1's pad, bare | 1.37 (—) | 0 · 0.843 · 0 · 0.20 | 1.37 → 1.37 | 0 · 0.846 · 0 · 0.20 | 8 · 10 · **5.0 s** | 0.68 s |
+| C1's pad, covered | 1.62 (—) | 0 · 0.827 · 0 · 0.18 | 1.52 → 1.53 | 0 · 0.822 · 0 · 0.18 | 9 · 12 · **13.8 s** | 2.32 s |
+| the M2 stand (5 kg) | 12.87 → 2 (60 %) | 0 · 0.564 · 0 · 0.83 | 11.63 → 2 | 0 · 0.450 · 0 · 1.05 | 8 · 10 · **12.4 s** | 4.09 s |
+
+Per increment (ms): his Group 1 1198 · 1134 · 1149 · 1171 · 1186 · 1198 · 2803 · 6535; Group 2 1550 · 449 ·
+675 · 2833 · 2635 · 1574 · 1826 · 1940 · (correction) 1813; 0004 2790 · 408 · 404 · 407 · 407 · 1333 · 2837 ·
+2910; C1 bare 1093 · 411 · 410 · 414 · 419 · 414 · 492 · 1071; C1 covered 2678 · 412 · 410 · 414 · 426 · 1380 ·
+2925 · 3230 · 1542; the M2 stand 3877 · 5 · 247 · 953 · 2401 · 1568 · 1569 · 1523 (Jacobi-CG after the first
+stagnation).
+- A solve is ~0.4–0.6 s on your pad (most of it the multigrid hierarchy, rebuilt as the moduli change);
+  early increments, below the curve's first knee, settle in one solve.
+- **Every case is under the ~30 s bar on this Mac**, so nothing was cut. **iPad (estimate, not measured):**
+  the solve runs on ONE thread; an M-series iPad is about this Mac's single core (5–17 s a group), an
+  A-series one 1.5–2× slower (up to ~35 s a group). With two groups the second lands ~30–70 s after Save & Exit.
+
+### Deviations (each with its reason)
+1. **The law past the data densifies (a textbook law)** — the curves soften up to their end (above).
+2. **Elements on the stiffening branch are updated by their stress**, not their strain — the plain secant
+   never settled on your Group 1.
+3. **The refine starts after ALL quick sims** of the lattice (not right after its own group's) — the quick
+   pictures first, everywhere.
+4. **`waitForIdle` (the tests' teardown) cancels refines** — 42 test files wait for idle; a refine would
+   have added ~15–60 s to each. `FlexibleStageModel.waitForRefines` waits for them.
+5. **Stress from the stepped field** is σ at the calibrated load ÷ λ (exact at λ = 1) — the app's stress
+   view divides by k as before.
+
+### Not done (and why)
+- **Nothing seen on a device or simulator** (track rule). The iOS build succeeds (below).
+- **The crest on your Group 1** — rotation and ν = 0.3 (above); a large-deformation solver in core.
+- **The walls' pull-back where the field is steeper than ½** (your Group 1's edge only): the fixed-point
+  inverse does not converge where the field turns faster than it moves; a Newton pull-back on the GPU would
+  (not attempted: frame-budget risk, and the edge itself is not right yet).
+- **The legend's top** (the deepest mm) follows the refined field as soon as it lands; the colours on the
+  part swap with its shape, at rest. (★ verification: FIXED — the legend, the colours and the (i) follow the
+  version on screen.)
+- **The Settings page swaps to the refined field at once** (nothing plays mid-squeeze there).
+- **Measured on C1's pad only, not on yours:** "the squish spreads to the neighbours and the sides bulge
+  more" — a 21 kg press on a 15 mm patch: the ring 15–30 mm out sinks 16 % of what sinks under the patch
+  (linear 12 %), the free sides move out 2.8 % of it (linear 2.3 %), while the crushed zone under the patch
+  stops at 0.67 strain (linear 1.16). Printed by the test, not pinned.
+
+### Your call
+1. **Group 1 at 2× your weights** (the band edge, D-R5-G4) shows a 20 kg thumb crushing the side. Play it at
+   your real weights (λ 1) when the sim finds the part far stiffer than core's columns?
+2. **The densification law past the data** (79 % for your pad). Keep it, or test your filament to 60–70 %
+   squish (your rig) so core's curves cover it?
+
+### Core brief (batch N; #1–#35 stand)
+- **#36 Large-deformation (geometric nonlinearity)**: a total-Lagrangian solve so a turning edge turns (your
+  Group 1's edge above the thumb: ‖∇u‖ 2.1, mostly rotation).
+- **#37 Buckling and snap-through**: thin walls and skins that fold sideways under a press (at least a
+  linear eigen-buckling check; an arc-length path for snap-through).
+- **#38 Self-contact**: a squish that folds a face onto another.
+- **#39 A native nonlinear solve** (Newton on σ(ε; ρ), its tangent, load stepping, a line search) owning
+  what `flexible_squish_fe.cpp` does in the app (the session, the secant steps, the stress update).
+- **#40 Curves to densification**: the tables stop at 25 %; the stiffening a squish needs is past 60 %.
+- **#41 A per-voxel Poisson ratio** that falls as cells crush (re #22/#23).
+
+### Each requirement → where → pinned by (RED control, computed beside it)
+| requirement | where | pinned by |
+|---|---|---|
+| the law: core's curve, then densification | `flexible_squish_fe.cpp` `Law::lattice_at` | `FlexibleSquishStepsTests.testTheSteppedLawIsCoresCurveUpToItsDataThenDensifies` (held at the data's end: ×0.97) |
+| the over-squished zone firms up | stepped session | `…testTheOverSquishedZoneFirmsUpAndNothingInverts`: peak strain 1.163 → 0.667 (linear moduli 1.163; held 1.573) |
+| 0 inverted at full size where linear had > 0 | stepped session | same: 299 → 0 (min det 0.353; held 989); `FlexibleBatchNRefineTests.testHisRound5GroupsRefineAndNeverInvertAtFullSize`: Group 1 24 → 0 (the quick field) |
+| the free sides still bulge | stepped session | `…testTheFreeSidesStillBulge`: 34.5 % of the top (ν = 0: 0.0 %) |
+| a symmetric pad stays symmetric | stepped session | `…testASymmetricPadStaysSymmetric`: 8e-5 (an off-centre stamp: 1.01) |
+| per-group fields stay per group | the solver's per-group refine | his r5 test: Group 2 → Face 5 0.000 mm, Top A −1.72 mm (out) vs Group 1's Top A 3.18 mm in (a combo request: both in one field) |
+| the fold cut NOT applied when converged | `FlexibleFEField.stepped` | his r5 test: no cut, "×1", the (i) (the page ignoring the refines: "cut to 23 %", "×0.2") |
+| a non-converged refine keeps the quick field + one line | `FlexibleFERefine`, `feNote` | `…testARefineThatDoesNotSettleKeepsTheQuickFieldAndSaysWhy` (the settled refine: no line) |
+| swap at rest | `FlexibleLatticePass.setFESequence/uploadFE`, `stepFlexibleFE` | `…testTheRefinedFieldSwapsInAtRest` (the swap at once: mid-squeeze, amount 1.0) |
+| cancellation and the core gate | `FlexibleSquishSolver`, `FlexibleCoreGate.yieldSim` | `…testANewLatticeCancelsTheRefineAndAWaitingSolveGetsCoreBetweenIncrements`: stops 1.7 s after the new lattice, the waiting solve in 0.5 s, peak 1 sim (ignoring the cancel: 24 s; never yielding: 25 s) |
+
+### Hook lines in #354 / main files
+**None.** WorkspacePlaceholder, MetalMeshView, LatticeSettings, ProjectModel, ResultsModel, FaceRegion,
+RunModel, LatticeSimModel and LatticeStageMode are untouched; no LatticeStageMode case was added; core/ is
+untouched (the stepped session is the app's bridge code); the pinned strings (SmoothingPageRound2Tests,
+the first 900 characters of `startStressSolveIfNeeded`) are untouched.
+
+New files: `FlexibleKit+SquishSteps.swift` (TopOptKit), `FlexibleFERefine.swift` (TopOptFlows); tests
+`FlexibleSquishStepsTests` (TopOptKitTests), `FlexibleBatchNRefineTests`, and the opt-in
+`FlexibleBatchNProbe` / `FlexibleBatchNEvidenceProbe` (TopOptFlowsTests).
+Edited track files: `flexible_squish_fe.cpp/.hpp` (build / solve / finish, the session, the law past the
+data, the strain, the stress update), `FlexibleBridge.hpp` + `flexible_bridge.cpp` (the session's entry
+points and receipts), `FlexibleKit+Squish.swift` (the shared request and solution conversion),
+`FlexibleFEField` (`refine`, `versionKey`, `stepped`), `FlexibleFE` (the (i)), `FlexibleSquishSolver` (the
+refine queue, the cancel token, `yieldSim`, refines not `solving`), `FlexibleStageModel` / `+Squish`
+(`refine`, `shownSquishField`), `FlexibleMainStage` / `+Squish` / `+Views` / `+Stress` (versions, the note,
+the (i), caches and tints by version), `FlexibleSquishPlayer` (`shownKey`), `FlexibleLatticePass` +
+`MeshRenderer+FlexibleLattice` (the swap at rest), `FlexibleSettingsSquish` (the refined field).
+
+### Tests
+NEW, each with its RED control computed beside it (the table above):
+- `FlexibleSquishStepsTests` (5, the bridge on C1's pad).
+- `FlexibleBatchNRefineTests` (4, the app on his round-5 project and C1's pad): his groups refined and never
+  inverted at full size, per group, never cut, the (i), "×1", Stress and the Settings page on the refined
+  field; the swap at rest; a refine that does not settle; the cancel and the gate (four modes).
+
+RE-PINNED, each with its reason in the test:
+- `FlexibleSquishSolverTests.testWaitsForOtherCoreSolves` — the QUICK sims' gate: refines off in it (a refine
+  keeps core until its next increment; its own gate is in FlexibleBatchNRefineTests).
+- `FlexibleSquishVerifyGTests.testPlayAllPlaysEachGroupAlone`, `FlexibleMergeR5SMTests.testEveryPlayAllTurnWearsEveryGroupsFrame`
+  — each turn's colours are keyed by its VERSION ("group-1·stepped" once its refine landed, which it may
+  mid-test). Found by the focused run (151 s: the refines landed during the test).
+
+Deleted-test sweep (`git diff ccc2008b -- app/TopOptKit/Tests`, removed `func test` / class lines): none.
+
+### Mutation runs (each breaks one rule in production, rebuilds, runs its pinning test, restores from git; `batch_n/N_mutations.txt`)
+```
+MN1  the law held at the data's end (no densification)        ⇒ his r5: Group 1 91 inverted, min det −0.636 (2)
+MN2  no stress update where the curve stiffens                ⇒ the zone test: the stepped solve does not settle (1)
+MN3  the shown version unbound at once on a re-upload         ⇒ the swap test: the refined field mid-squeeze (2)
+MN4  a stepped field cut like the quick one                   ⇒ his r5: foldShare 0.23 / 0.60, "×0.2" / "×0.6" (4)
+MN5  the model's cancel leaves the refine running             ⇒ FIRST GREEN — the page's next schedule cancelled the old token
+                                                                too; the test now drops the lattice's sims without a new
+                                                                schedule (latticeLanded(nil)) beside the "new lattice" mode —
+                                                                re-run: RED (2: ran on 24 s, its result landed)
+MN6  the refine never yields core                             ⇒ the gate test: the waiting solve waits for the end (3)
+MN7  a quick sim claims core beside a refine still finishing  ⇒ the gate test: peak 2 sims (2)
+MN8  the kept line never said                                 ⇒ the not-settled test (1)
+MN9  every element's strain read as 0 (the linear law)        ⇒ the zone test: peak 1.16, inverted (4)
+MN10 the renderer's colours keyed by sim, not version         ⇒ the swap test: the quick colours stay (3)
+restore: git checkout, `swift build --build-tests` 0
+```
+
+### Evidence (`docs/handoffs/evidence/2026-09-29-flexible-screens/batch_n/`)
+Offscreen frames of the shipping renderer (what FlexibleMainStage hands MetalMeshView, settled like the
+page): "quick, fold-cut" = batch G / M's quick field with its cut (the stage's `controlNoRefineView`),
+"stepped" = the refined field, at rest / half / full (`FLEX_N_EVIDENCE_DIR=<dir> swift test --filter FlexibleBatchNEvidenceProbe`).
+- `N_his_r5_sheet.png` — your round-5 pad, both groups, two views. Group 1 stepped: the top sags under the
+  elbow, Face 5 is pushed in by the thumb, and the edge above it rises into the crest (above). Group 2
+  stepped: Face 3 pressed in its full 25 mm, the four fingertips' waves along its top edge, Face 5 still.
+- `N_his_r5_group1_faces5_full_pair.png`, `N_his_r5_group-1_stepped_faces5_a100.png` — the crest, close.
+- `N_his_r5_group2_iso_full_pair.png` — Group 2 at full size: cut to 53 % vs stepped (×1.63 the force).
+- `N_m2stand_sheet.png`, `N_m2stand_front_full_pair.png` — the M2 stand: the pocket floor sinks further
+  (max 7.4 mm vs 4.1), the U and the tower barely change; no tear.
+- `N_release_his_r5.txt`, `N_release_0004_pads_m2.txt` — the Release probe's raw lines; `N_mutations.txt`.
+
+### Build and suite (raw lines, this Mac)
+- Targeted suite (Debug; every Flexible* class + UnifiedShadingTests, LatticePreviewBodyAlphaTests,
+  LatticeGBufferMaskTests, LatticeThreeAlgorithmsDrawTests, OrganicCapsuleImpostorTests, ViewerTests,
+  StageBackdropTests, SmoothingPageRound2Tests, LatticeStageModeTests, LatticeSettingsPersistTests,
+  ProjectStoreTests, UndoHistoryTests, SurfaceStageTests, LatticeSimSolveTriggerTests, LatticeOvernightBatchTests,
+  LatticePageTests, LatticeSimRegionLayerTests, ResultsModelTests; another session's xctest at ~860 % CPU
+  for part of it), on `dbd00866` + the two test edits of `8193a7d6`:
+  `Executed 693 tests, with 26 tests skipped and 1 failure (0 unexpected) in 3707.420 (3707.484) seconds`.
+  - The one failure is the known `LatticeSimSolveTriggerTests.testTheTriggerRefusesOnAllThreeGrounds`.
+  - `ViewerTests`: `Executed 33 tests, with 0 failures`.
+- Re-run after `8193a7d6` (the kept line, the (i), the retry; the suites they touch):
+  FlexibleBatchNRefineTests, FlexibleBatchMStressTests, FlexibleSquishSolverTests, FlexibleSquishStepsTests:
+  `Executed 18 tests, with 0 failures (0 unexpected) in 564.014 (564.018) seconds`.
+- Earlier in the pass (the G and M suites the wiring touches): FlexibleSquishSolverTests,
+  FlexibleSquishPlayAllTests, FlexibleSquishVerifyGTests, FlexibleFEVerifyGTests, FlexibleBatchMGroupTests,
+  FlexibleCoreClaimTests, FlexibleSquishFETests, FlexibleFEPassTests, FlexibleSquishModulusTests,
+  FlexibleSquishCoarsenTests: 43 tests, 4 failures — the three re-pinned above (the refines landed mid-test),
+  fixed and green in the suite.
+- iOS (Debug, the simulator 147E56A1…, DerivedData flexA1n) at `8193a7d6`: `** BUILD SUCCEEDED **`.
+  `TopOpt.debug.dylib` (13:11) holds "Refining the squish", "past their end, untested" and 299
+  FlexibleFERefine / flexible_squish_step symbols. Not installed, not launched. The package `.build` and
+  flexA1n were deleted afterwards (disk).
+
+### Decisions (00-decisions.md)
+- New: D-R5-N1 … N6 (the stepped solve; the strain measure and the secant with the stress update; the law
+  past the data; the calibration as a load factor; never cut when converged — the fallback; progressive,
+  one claim, the swap at rest).
+- D-R5-G4 and D-R5-G5 amended in place (★ batch N).
+
+### Commits (`claude/flexible-screens-n`; nothing pushed)
+- `feeedcb0` the bridge: the squish solved in steps (the session, the law past the data, the stress update) + FlexibleSquishStepsTests.
+- `dbd00866` the app: each group refined after the quick one, shown first, swapped in at rest, never cut when it settles; the re-pins; the probes.
+- `8193a7d6` the kept line fits one line, the (i) says "untested", a retried sim is refined, the cancel test pins the model's own cancel.
+- The next commit: this section, DECISIONS D-R5-N1 … N6 (G4 / G5 amended), the evidence.
+
+## Round 5 · batch M2 — verification pass
+
+Batch M2's verification found seven things in the Settings page's stamp dent (below batch M2's own section). Two were
+major: your Face 3 lost its fingertip foci, and the agreement test claimed colours while it measured shapes. Both are
+answered here, along with the cheap minors. **The app was NOT launched: nothing here has been seen on a device or
+simulator.** The pictures are offscreen frames of the shipping renderer, plus face-on colour maps drawn from the probe's
+per-column dumps.
+
+**What you will see on the Settings page:**
+- **Your Face 3 (Group 2's four fingertips) shows four foci again**, rising and dipping where the main page's sim does.
+  Batch M2 drew one smooth hill there (`batch_m2_verify/M2V_his_face3_iso_before_after_main.png`,
+  `…/M2V_his_face3_face_on_shape.png`).
+- **A dragged stamp no longer jumps when core's new design arrives.** Before: a thumb at 10 kg jumped by 0.06–0.08 of
+  the deepest. Nor does a new stamp jump when core's first design arrives: on Face 3 the valleys between fingertips
+  read 72 % of the deepest, then 88 % once the design landed. Now they read 83 %, then 88 %.
+- C1's pad looks as it did in batch M2 (`…/M2V_pad4_settings_before_after_main.png`).
+- **The rigid flat plate is unchanged.** It still sinks deepest in the middle, with its outline higher. The main page's
+  sim of that same plate does the same: its middle is flat and the pad's walls hold its outline
+  (`…/M2V_flat_plate_top_shape.png`).
+
+**What was wrong, and what changed** (`FlexibleStampSpread`; D-R5-MV9, D-R5-MV10):
+- **The near Gaussian's width came from the lattice depth**: σ 0.25 × depth = 25 mm on your 100 mm-deep side, wider
+  than the fingertips' 17–19 mm spacing. A fingertip's focus is as wide as the fingertip, and on a deep lattice the
+  broad press outweighs it. Now:
+  ```
+  σ_near = min(0.25 × depth, 0.4 × the stamp's feature)    feature: the radius of the largest disc in its
+                                                           footprint (a fingertip ≈ 6 mm, a thumb ≈ 9, a palm ≈ 40)
+  σ_far  = 0.5 × depth
+  near weight = 0.35 × σ_near / σ_far                     ρ₀ = 0.25 (each σ ≥ one column pitch)
+  ```
+  Refitted jointly on six faces from `FlexibleBatchM2Probe`'s dumps (the fit's scripts are in the session scratchpad).
+- **The three numbers** (core's even press round the stamp, its density under and outside the stamp) were read from the
+  last design under the stamp's NEW footprint. Now they come from the design's own press: under = half its peak over
+  core's even press or more; outside = at the even press.
+- **Before core's first design** (or while core refuses one), the even press round the stamp was 0. Now it is the
+  stamp's area over the face's, which is core's own reading (soft stamps: the whole grid; rigid: what lands on the
+  face). On your Face 3 it equals core's to 4 places (0.2826, tested).
+
+**The numbers** (each page over its face's deepest, i.e. the shape; batch M → batch M2 → now):
+| face, stamp | whole-face RMS | foci vs the sim: correlation, size | along / across the stamp (RMS / max) |
+|---|---|---|---|
+| C1's pad, 4 fingertips, 3 kg / 6 mm | 0.116 → 0.047 → **0.044** | 0.99, 1.10 × → **0.98, 1.11 ×** | 0.047 / 0.112 · 0.038 / 0.070 |
+| C1's pad, 4 fingertips, 10 kg / 3 mm | 0.266 → 0.072 → **0.080** | 0.98, 0.67 × → **0.98, 0.68 ×** | 0.074 / 0.149 · 0.072 / 0.125 |
+| C1's pad, thumb, 10 kg / 4 mm | 0.192 → 0.051 → **0.066** | | 0.051 / 0.083 · 0.055 / 0.081 |
+| **your Face 3** (Group 2's fingertips) | 0.194 → 0.088 → **0.064** | **0.36, 0.31 × (one hill) → 0.98, 0.87 ×** | 0.054 / 0.175 · 0.021 / 0.063 |
+| your Top A (Group 1) | 0.263 → 0.167 → **0.147** | | |
+| your Face 5 (Group 1's thumb) | 0.342 → 0.450 → **0.310** | | |
+| C1's pad, rigid flat plate, 10 kg / 4 mm (not fitted) | batch M2 0.235 → **0.241** (one plane, a full sink: 0.451) | | |
+| C1's pad, palm, 10 kg / 4 mm (not fitted) | batch M2 0.165 → **0.167** | | |
+
+- The pad's 10 kg case and the thumb read a little further from the sim than batch M2 did. That is the price of
+  holding your Face 3's foci.
+- The drawn saw-tooth is 0.038 / 0.030 of the column pitch (batch M2: 0.036 / 0.027; the test's limit is 0.08).
+
+### Each finding → verdict → what changed → pinned by
+| # | Finding | Verdict | What changed | Pinned by (RED control) |
+|---|---|---|---|---|
+| 1, 3 | Your Face 3 loses the four fingertip foci the main page shows (correct · major; ux · major) | CONFIRMED (my replica matched the shipped column to 1e-5: correlation 0.36, 0.31 ×) | σ_near from the stamp's feature; the near weight falls with depth; refitted (D-R5-MV9) | `FlexibleBatchM2VerifyTests.testHisFace3KeepsItsFourFingertipFociOnTheSettingsPage` on your round-5 project through Save & Exit: correlation 0.98, 0.87 ×, whole-face RMS 0.064; Top A and Face 5 no worse than batch M2 (RED: `Rule.batchM2`, 0.36 / 0.31 ×) |
+| 2 | The rigid "Flat plate (whole face)" draws as a dome (correct · minor) | CONFIRMED as described (outline 0.54 of the deepest). **The suggested fix is REJECTED by measurement:** the main page's sim of the same plate is not one plane either — its middle is flat (0.93–0.98) and C1's walls hold the outline at 0.07. A full sink under the plate is further from the main page (RMS 0.451 against 0.241). The palm's sim is not uniform under the stamp either (0.56–0.99). | none; `FLEX_M2_PAD_CASES=whole` added to the probe | `testAWholeFaceRigidPlateFollowsTheMainPagesSim`: the middle half within 0.008 (the sim's 0.055); the outline below the middle; RMS 0.241 ≤ 0.26 (RED: one plane, 0.451; its outline 1.0) |
+| 4 | The same stamp is a different colour on the two pages; the test pins shapes while its messages claim colours (ux · major) | CONFIRMED. As drawn, each page over its own legend's top: 10 kg / 3 mm row RMS 0.369, max 0.503; 3 kg / 6 mm 0.045 | The test's doc comment and messages now say SHAPE; the drawn colours are printed (`FLEX-M2 DRAWN`). **The legend's top is unchanged — your call 1 below** | `FlexibleBatchM2Tests.testTheTwoPagesAgreeOnAFourFingertipStamp` (shape) |
+| 5 | Face 5 reads worse than batch M (ux · minor) | CONFIRMED at batch M2 (0.450). Now 0.310, better than batch M's 0.342 | (by finding 1's refit). The suggested cap on the far σ (a share of the face's smaller side) is rejected: your Face 3 has the same 100 × 20 shape, and its sim is broad (0.72–1.0 along it) | the same test (Face 5 no worse than batch M2) |
+| 6 | The pad's outline sags while editing (ux · minor) | CONFIRMED (pad outline ~0.08–0.13 of the deepest, the sim's 0.01–0.03). **Not fixed.** The suggested fade to 0 at the outline would break your project: your Top A's and Face 3's sims hold nothing there (outline medians 0.32–0.45 and 0.72–0.88, against 0.40 and 0.90 inside). One face's picture cannot tell a holding wall from a free edge | — | listed under NOT matched (D-R5-MV9) |
+| 7 | A dragged stamp pops when core's design lands (ux · minor) | CONFIRMED (thumb, 10 kg / 4 mm, dragged 20 mm: 0.064 RMS, max 0.079 under the new rule's constants; the verifier's 0.081 under batch M2's) | the three numbers from the design's own press (D-R5-MV10) | `testADraggedStampDoesNotPopWhenCoresDesignLands`: the dent moves 0.190 at once, the pop is 0.000 (RED: the M2 rule's numbers on the same drag, 0.064) |
+| — | (found while fixing) The first design arrived as a jump; `FlexibleBatchMDentTests` had read the page BEFORE the design landed, and batch M2's 25 mm σ hid it | — | `Design.beforeDesign`: b = the stamp's area / the face's | `FlexibleBatchMDentTests` (re-pinned): b 0.2826 before = core's 0.2826; the valleys 83 % before, 88 % after (RED: no even press, 72 %) |
+
+**Corrections to batch M2's section below** (marked ★ M2 VERIFICATION in place):
+- "each fingertip still a focus" held on the pad only.
+- "(By construction — no test drags a stamp)": it popped.
+- Its table's Face 3 row now gives the lost foci.
+- Its "What changed" now points here.
+- Batch M's verification row V10 ("FIXED in batch M2") held on the pad only.
+
+**Not done, and why:**
+- **Nothing seen on a device or simulator** (track rule). The iOS build succeeds (below).
+- **The colours as drawn still differ wherever the two legends top differently** (your call 1). The SHAPES agree.
+- **The outline** (finding 6): C1's pad holds it and your project does not, and a picture of one face cannot know
+  which. Your Face 3's ends read 0.62 here against the sim's 0.72–0.80.
+- **Group 1's press across two faces** (Face 5's sim peaks at its top edge, pulled by Top A): core brief #35, open.
+- The rule is fitted on six faces of two parts. New geometries may agree less; `FlexibleBatchM2Probe` re-dumps both
+  pages for a refit.
+
+**Your call:**
+1. **The Settings legend's top** (this decides whether "the graded dent colours in both views" is done for stamps):
+   - keep "drawn and buildable on one scale"; or
+   - top it at the face's deepest, so a stamp's deepest point is red on both pages.
+
+   At 10 kg / 3 mm the Settings legend tops at 5.5 mm (core's buildable range). The 3 mm stamp then reads green-yellow
+   there and red on the main page.
+2. (batch M2's, still open) The face round a stamp sinking a little under core's even press: keep it, or show the
+   stamp's own press only?
+
+### Mutation runs (each breaks one rule in `FlexibleStampSpread.swift`, rebuilds, runs its pinning tests, restores from git; `m2v/mut/run.log` in the session scratchpad)
+```
+MA  Rule.shipped = batch M2's rule (σ 0.25 / 0.6 × depth, weight 0.3, ρ₀ 0.2)  ⇒ testHisFace3… RED (4: foci 0.36 / 0.31 ×, RMS 0.088, σ_near 25 mm)
+MC  the near weight fixed at 0.3 (the new σ)                                ⇒ testHisFace3… + testTheTwoPagesAgree… RED (7: foci 3.56 × / 2.46 ×, rows 0.115 / 0.246)
+MD  the three numbers read under the CURRENT footprint again                ⇒ testADraggedStamp… RED (2: pop 0.064, max 0.079)
+ME  no even press before core's first design                                ⇒ FlexibleBatchMDentTests RED (2: b 0 ≠ 0.2826, valleys 0.717)
+MF  the stamp's feature broken (1e9 mm)                                     ⇒ testHisFace3… + testADraggedStamp… RED (5: foci 0.36, Face 5 0.483 > 0.450, the thumb's feature)
+restore build 0; the source back to 9a92882e (git status: only this pass's docs)
+```
+Tests first: the three new tests were written against the fixed code. Their RED controls run in every pass, by the same
+instrument: batch M2's rule, the M2 numbers on the same drag, and one plane.
+
+### Hook lines in #354 / main files
+**None.** `FlexibleStampSpread.swift` plus tests. WorkspacePlaceholder, MetalMeshView, LatticeSettings, ProjectModel,
+ResultsModel, FaceRegion and LatticeStageMode are untouched. No LatticeStageMode case was added, core/ is untouched,
+and the pinned strings are untouched.
+
+### Tests
+- NEW: `FlexibleBatchM2VerifyTests` (3, above).
+- RE-PINNED, each with its reason in the test:
+  - `FlexibleBatchMDentTests`: the σ rule. The test now measures once core's design has landed, and checks the even
+    press before it lands.
+  - `FlexibleBatchM2Tests`: the agreement test's wording, from colours to SHAPE, plus the printed drawn colours.
+- Deleted-test sweep (`git diff 933e4ecc -- app/TopOptKit/Tests`, removed `func test` lines): none.
+- PROBE: `FLEX_M2_PAD_CASES=whole` adds the flat plate, the foam-test foot and the palm. The probe prints each stamp's
+  feature, σ and near weight. `FLEX_M2_BEFORE=m2` renders batch M2 as "before", with four level views round your part.
+
+### Evidence (`docs/handoffs/evidence/2026-09-29-flexible-screens/batch_m2_verify/`)
+- `M2V_his_face3_face_on_shape.png`: your Face 3 face-on, the main page's sim, batch M2 and now, as colour maps (each
+  over the face's deepest), plus the row through the fingertips plotted (white sim, grey batch M2, yellow now).
+- `M2V_his_face3_iso_before_after_main.png`: the Settings page as you edit (batch M2: one arch; now: the foci) beside
+  the main page's Group 2.
+- `M2V_pad4_settings_before_after_main.png`: C1's pad, four fingertips, 3 kg / 6 mm. Batch M2 and now are nearly alike;
+  the main page is beside them.
+- `M2V_flat_plate_top_shape.png`: the rigid flat plate, the main page's sim, the Settings page now, and one plane.
+
+### Build and suite (raw lines, this Mac)
+- Targeted suite at `9a92882e`, Debug, with the merge pass's filter (29 names: every Flexible* class plus
+  UnifiedShadingTests, LatticePreviewBodyAlphaTests, LatticeGBufferMaskTests, LatticeThreeAlgorithmsDrawTests,
+  OrganicCapsuleImpostorTests, ViewerTests, StageBackdropTests, SmoothingPageRound2Tests, LatticeStageModeTests,
+  LatticeSettingsPersistTests, ProjectStoreTests, UndoHistoryTests, SurfaceStageTests, LatticeSimSolveTriggerTests and 14
+  more of #354's and the hook-adjacent suites; `ViewerTests` is a name of its own):
+  `Executed 716 tests, with 22 tests skipped and 1 failure (0 unexpected) in 3031.325 (3031.392) seconds`.
+  - The one failure is the known `LatticeSimSolveTriggerTests.testTheTriggerRefusesOnAllThreeGrounds`.
+  - `ViewerTests`: `Executed 33 tests, with 0 failures`.
+  - `FlexibleBatchM2VerifyTests` 3/3, `FlexibleBatchM2Tests` 2/2 and `FlexibleBatchMDentTests` 2/2 passed in the run.
+  - The +3 against batch M2's 713 are the three new tests.
+- Focused run before the suite: `FlexibleBatchM2VerifyTests|FlexibleBatchM2Tests|FlexibleBatchMDentTests|FlexibleSettingsRound4Tests|FlexibleRound5SettingsTests|FlexibleSettingsVerifyD1Tests`,
+  `Executed 43 tests, with 0 failures`.
+- iOS (Debug, the simulator 147E56A1…, DerivedData flexA1n): `** BUILD SUCCEEDED **` at `9a92882e`.
+  `TopOpt.debug.dylib` (09:54) holds `FlexibleStageModel.stampAreaMM2` and `FlexibleStampSpread.Design.beforeDesign`
+  (nm). Not installed and not launched. The package `.build` and flexA1n were deleted afterwards (disk).
+
+### Decisions (00-decisions.md)
+- New: D-R5-MV9 (the spread's σ and weights; the whole-face stamps; what it does not match, incl. the colours — your
+  call) and D-R5-MV10 (the three numbers from the design's own press; b before the first design).
+- D-R5-MV8 amended in place (★ its σ and its numbers' reading superseded).
+
+### Commits (`claude/flexible-screens-n`; nothing pushed)
+- `9a92882e` the fix: your Face 3's foci, nothing pops when core's design lands, the plate measured, the test's
+  wording, and the probe.
+- The next commit: this section, the inline ★ marks in batch M2's section, DECISIONS D-R5-MV9 / MV10 (D-R5-MV8
+  amended), and the evidence.
+
+## Round 5 · batch M2 — the Settings page's dent in BOTH views (V12, V10), and batch M's verification on record
+
+Your round-5 words: "this and the graded dent colours should be in both views" and "dent colours back to
+the FEA rainbow. And this is in BOTH views". Batch M's verification found two places on the SETTINGS
+page that still broke that (V12, V10); they waited for batch S's Settings page to merge, and are fixed
+here. This pass also committed that verification's own handoff section, which a network outage had
+left unwritten to the repo (below, "Round 5 · batch M — verification pass"). **The app was NOT
+launched: nothing here has been seen on a device or simulator.** The pictures are offscreen frames of
+the shipping renderer and SwiftUI's own render of the legends.
+
+**What you will see on the Settings page:**
+- **The dent legend is one smooth bar, like the main page's card** — open and folded. Before: 24 flat
+  colour blocks.
+- **A stamp's dent looks like the main page's.** Before, your four fingertips were four flat-bottomed
+  pits in a steep trench, its edge zig-zagging at the column pitch. Now it is one soft press:
+  - each fingertip still a focus — the colours rise and dip where the main page's sim does; ★ M2 VERIFICATION: on C1's
+    20 mm pad only — on your Face 3 (100 mm deep) it drew ONE hill (correlation 0.36, 0.31 × the sim's swing). Fixed in
+    the verification pass above;
+  - the press fades out gently, over about the lattice's depth, with no edge and no zig-zag;
+  - the face round it sinks a little, as the sim's does (core's even press there).
+- **It follows your finger.** The footprint moves the dent at once; the spread's shape takes three
+  numbers from core's last design (its even press round the stamp, its density under and outside it),
+  so it settles as core's new design arrives. (By construction — no test drags a stamp.) ★ M2 VERIFICATION: it
+  POPPED when the new design arrived (a thumb at 10 kg: 0.064–0.08 of the deepest) — the three numbers were read under
+  the new footprint. Fixed and tested in the verification pass above.
+
+**What was wrong:**
+- **V12:** `FlexibleStagePage`'s legend and `FlexibleSettingsPanel`'s folded bar each drew 24 blocks
+  of the ramp. The main page's card already drew a gradient (`FlexibleMainLegendRow.ramp`).
+- **V10:** batch M's spread sank the stamp's FULL depth under all of its footprint, then fell off as
+  e^(−r / 0.2 × depth). On C1's 20 mm pad that is a 4 mm wall, drawn ×2, with two flat triangles per
+  1.56 mm column: a trench whose edge zig-zags. The 3D sim spreads a press much wider, keeps the
+  fingertips as foci, and sinks the whole face a little under core's even press.
+
+**What changed (`FlexibleStampSpread.dent`, D-R5-MV8):** (★ M2 VERIFICATION: the σ, the weights and ρ₀ below are
+superseded by D-R5-MV9, the three numbers' reading by D-R5-MV10 — see the verification pass above.)
+```
+press   = footprint + b (1 − footprint)       b: core's even press round the stamp ÷ its peak
+squish  = press ÷ (0.2 + ρ)                   ρ: core's density under the stamp / outside it
+dent    = squish ⊛ (0.3 G(σ 0.25 × depth) + 0.7 G(σ 0.6 × depth)), over its deepest
+```
+- The near Gaussian keeps each fingertip's focus; the far one is the broad press.
+- The deepest point is still your deepest squish.
+- Both Gaussians run over the face's own columns only, as two separable passes.
+- Fitted to the sim's own map, column for column (`FlexibleBatchM2Probe`).
+- **The mesh is unchanged** (two triangles per column). The zig-zag was the wall's steepness: at the sim's
+  spread the drawn crease is 0.036 of the column pitch (batch M 0.105), under the test's 0.08, so no
+  finer sampling was needed.
+
+**The numbers (each page over its face's deepest, i.e. the shape you see in colour):**
+| face, stamp | whole face RMS: M2 (batch M) | along the fingertips: RMS / max | across: RMS / max | foci vs the sim | saw-tooth |
+|---|---|---|---|---|---|
+| C1's pad, 4 fingertips, 3 kg, 6 mm | 0.047 (0.116) | 0.044 / 0.117 (0.086 / 0.206) | 0.043 / 0.071 (0.125 / 0.215) | corr 0.99, 1.10 × (pits 1.92 ×) | 0.036 (0.105) |
+| C1's pad, 4 fingertips, 10 kg, 3 mm | 0.072 (0.266) | 0.071 / 0.163 (0.101 / 0.242) | 0.058 / 0.118 (0.283 / 0.397) | corr 0.98, 0.67 × (pits 1.59 ×) | 0.027 (0.105) |
+| C1's pad, thumb, 10 kg, 4 mm | 0.051 (0.192) | | | | |
+| your Face 3 (Group 2's fingertips) | 0.088 (0.194) | | | ★ M2 VERIFICATION: corr 0.36, 0.31 × — the foci LOST (now 0.98, 0.87 ×) | |
+| your Top A (Group 1) | 0.167 (0.263) | | | | |
+| your Face 5 (Group 1's thumb) | **0.450 (0.342) — worse** | | | | |
+
+Saw-tooth = the drawn dent's largest crease across a column quad, over the column pitch.
+
+**Not done, and why:**
+- **Nothing seen on a device or simulator** (track rule). The iOS build succeeds.
+- **Your Group 1 cannot agree face by face.** Its sim presses the top and Face 5 together, and Face 5's
+  dent peaks at its top edge, pulled by the top's press (batch M's "your call" on Group 1's colours).
+  A picture of one face cannot carry another face's press. Face 5 reads worse than batch M (RMS 0.45 against
+  0.34): batch M's flat-bottomed stamp happened to sit closer to that skewed field. Core brief #35.
+- **The pad's edges.** The sim's stiff side walls hold the top's edge at ~0.02 of the deepest. The
+  Settings page reads 0.13–0.20 there, because a picture of one face does not know its walls. In the iso
+  view the face's outline sags slightly with it.
+- **The Settings legend's top.** At 10 kg / 3 mm the Settings legend tops at 5.5 mm, core's buildable range
+  ("drawn and buildable on one scale", an older rule). The 3 mm stamp then reads at 55 % of the ramp
+  (green-yellow), where the main page's reads red. The shapes agree; that scale rule is unchanged.
+- **Right after Save & Exit** the Settings page moves the part by the 3D sim (batch S, D-R5-S2). Only its
+  colours are the drawing's. While you edit, both the dent and the colours are the drawing's.
+
+**Your call:**
+1. **The Settings legend's top** when core can build deeper than you drew: keep "drawn and buildable on
+   one scale", or top it at your deepest so the stamp reads red on both pages?
+2. **The face round the stamp sinking a little** (core's even press, as the sim shows): keep it, or show
+   the stamp's own press only (the far face blue)?
+
+### Each finding → what changed → pinned by
+| # | Finding | What changed (file) | Pinned by (RED control) |
+|---|---|---|---|
+| V12 | the Settings page's dent legends are 24 flat blocks | both draw `FlexibleMainLegendRow.ramp(.dent, vertical:)` at their old sizes (`FlexibleStagePage.FlexibleLegend`, `FlexibleSettingsPanel.FlexibleLegendBar`) | `FlexibleBatchM2Tests.testTheSettingsPagesDentLegendsAreTheMainPagesSmoothRamp`: renders both and reads the ramp pixel by pixel — identical neighbours 4 % / 0 %, longest flat run 2 / 1 px, the main page's ramp colour for colour (0.6 / 255), blue end to red end (RED: batch S's 24 blocks by the same instrument, 95 % / 81 %, 18 / 6 px) |
+| V10 | the Settings stamp dent is a steep, saw-toothed trench and disagrees with the main page | `FlexibleStampSpread.dent` + `Design` (the three numbers) + `gaussian` (separable); `stampDent` calls it | `FlexibleBatchM2Tests.testTheTwoPagesAgreeOnAFourFingertipStamp`: C1's pad with four fingertips at 3 kg / 6 mm and 10 kg / 3 mm through Save & Exit, the sim landed; the Settings column dent against the main page's map along the fingertips and across them, the foci, the saw-tooth — the table above (RED: batch M's spread, `controlBatchMSpread`) |
+
+### Hook lines in #354 / main files
+**None.** Every line is in a Flexible file: `FlexibleStampSpread`, `FlexibleStagePage`, and
+`FlexibleSettingsPanel`, plus tests. WorkspacePlaceholder, MetalMeshView, LatticeSettings, ProjectModel,
+ResultsModel, FaceRegion and LatticeStageMode are untouched. No case was added. core/ is untouched,
+and the pinned strings are untouched.
+
+### Tests
+NEW: `FlexibleBatchM2Tests` (2, above); the opt-in `FlexibleBatchM2Probe`
+(`FLEX_M2_PROBE_DIR=<dir> swift test --filter FlexibleBatchM2Probe`). Its `testDump…` writes both pages
+per stamp face as CSV, which is what the spread was fitted on. Its `testBeforeAfterFrames` renders the
+evidence below.
+
+RE-PINNED, each with its reason in the test:
+- `FlexibleShownValuesTests`: its source pin read the blocks' `depthColour(fraction: Double(i) / 23)`. It
+  now reads both legends' `FlexibleMainLegendRow.ramp(.dent…`.
+- `FlexibleBatchMDentTests`: the spread length (0.2 × depth) is now the two σ (0.25 / 0.6 × depth). Its
+  other claims hold: between Face 3's fingertips 88 % of the deepest (≥ 85 %), the largest
+  neighbour step 2 %.
+- `FlexibleSettingsRound4Tests`' "the stamp sinks where it sits": "dented" was d > 1e-6. It is now a
+  quarter of the deepest or more, because the face round the stamp sinks a little (as the sim's does). 423
+  of 4 096 columns, 160 under the stamp; Curves (the RED control) 3 552.
+- Deleted-test sweep (`git diff fb715885 -- app/TopOptKit/Tests`, removed `func test` lines): none.
+
+Mutation runs (each breaks one rule, rebuilds, runs its pinning test, restores the file; all RED;
+`m2/mut*/run.log` in the session scratchpad):
+```
+MUT1 FlexibleLegend back to 24 blocks          ⇒ testTheSettingsPagesDentLegends… (identical 95 %, flat 18 px)
+MUT2 FlexibleLegendBar back to 24 blocks       ⇒ testTheSettingsPagesDentLegends… (identical 81 %, flat 6 px)
+N3   stampDent = batch M's spread              ⇒ testTheTwoPagesAgree… 13 failures (agreement, saw-tooth 0.105, foci 1.92 ×)
+N4   core's design ignored (b = 0, ρ even)     ⇒ testTheTwoPagesAgree… 5 failures (10 kg across RMS 0.236, max 0.352 — the stamp's stiffer lattice no longer lifts the face round it)
+N5   no stiffness (press ÷ 0.2 everywhere)     ⇒ testTheTwoPagesAgree… 2 failures (10 kg across RMS 0.133, max 0.213 — only the 10 kg case's stiffness contrast pins it)
+N6   the far Gaussian only                     ⇒ testTheTwoPagesAgree… 10 failures (the foci gone: correlation 0.74 / 0.61, 0.41 / 0.30 × the sim's swing)
+N7   the near Gaussian only                    ⇒ testTheTwoPagesAgree… 7 failures (the foci too strong: 2.12 × at 3 kg; across 0.107 / 0.157)
+N8   the Gaussians not normalised              ⇒ testTheTwoPagesAgree… 8 failures (the far one swamps the near one: foci 0.54 / 0.37 ×)
+```
+(MUT3–MUT6 ran on the commit before the foci, with one Gaussian: all RED as well.)
+
+### Batch M's verification, re-checked and committed (V1–V15)
+- Its section, written but never committed, is below ("Round 5 · batch M — verification pass").
+- Every claim was checked against the code at `fb715885` and against the pass's own logs. Its corrections are
+  marked ★ M2:
+  - The Stress row's words carry "· MPa".
+  - V4's ViewerTests ran in the merge pass's suite and in this one, not in its own (its full run never came back).
+  - V5 / V13's re-renders were never made. The legend card is re-rendered here (`batch_m2/M2_main_legend_card.png`).
+  - V6's IMG6 lines were never run. They were run here, below.
+- **Its mutation run finished after the outage: A and B both RED, the source restored and rebuilt clean**
+  (`restore build 0`).
+- Its V1 / V11 frames are committed as two sheets (`batch_m_verify/`).
+
+**V6 — your img 6 at the device's pixel count** (2752 px, Fine, your round-5 project, Group 1 from behind-left,
+`FLEX_MV_DEVICE=1 FLEX_M_PROBE_DIR=… swift test --filter FlexibleBatchMVerifyTests/testHisImg6RowsAtTheDevicesPixelCount`):
+```
+FLEX-MV IMG6 before_column_opaque (2752 px): near plane 1941236 px · one-row dashes 13956 (no walls: 10753) · walls through it 50434 (2.60%)
+FLEX-MV IMG6 now_column (2752 px): near plane 1941236 px · one-row dashes 10753 (no walls: 10753) · walls through it 0 (0.00%)
+FLEX-MV IMG6 now_fe_dent (2752 px): near plane 1954200 px · one-row dashes 9992 (no walls: 9984) · walls through it 0 (0.00%)
+FLEX-MV IMG6 batchM_fe_dent (2752 px): near plane 1954200 px · one-row dashes 8610 (no walls: 9984) · walls through it 1020565 (52.22%)
+FLEX-MV IMG6 now_fe_stress (2752 px): near plane 1954223 px · one-row dashes 9752 (no walls: 9752) · walls through it 0 (0.00%)
+FLEX-MV IMG6 batchM_fe_stress (2752 px): near plane 1954223 px · one-row dashes 20234 (no walls: 9752) · walls through it 222236 (11.37%)
+```
+The build you saw (the column squish, opaque walls, no planes' depth) put walls through 2.6 % of the
+near plane and 3 203 extra one-row dashes. Now: 0 walls through it in every view, and the dashes within 8
+of the no-walls count (`batch_m2/M2_img6_device.png`).
+
+### Evidence (`docs/handoffs/evidence/2026-09-29-flexible-screens/batch_m2/`, `…/batch_m_verify/`)
+- `M2_pad4_settings_before_after_main.png` — C1's pad, four fingertips, 3 kg / 6 mm. Rows: the Settings page as you edit
+  before (batch M: four pits in a trench), after, and the main page's sim. Views: iso, top, back-left.
+- `M2_pad4_settings_saved_before_after.png` — the same Settings page right after Save & Exit (the part moved by the
+  sim, the colours the drawing's): four red discs before, one press with four foci after.
+- `M2_sawtooth_zoom_before_after.png` — the iso view up close: the trench's zig-zag "flames" before, a smooth slope
+  after.
+- `M2_his_face3_settings_before_after_main.png` — your round-5 project with Face 3 (Group 2) selected, as you
+  edit: before, after, and the main page's Group 2.
+- `M2_legends_before_after.png` — batch S's 24-block bars (the RED control's own render), the Settings
+  page's open legend and folded bar now, and the main page's card.
+- `M2_main_legend_card.png` — the main page's ONE card re-rendered at this HEAD (V5).
+- `M2_img6_device.png` — V6's six frames at 2752 px, downscaled.
+- `batch_m_verify/MV_depth_sheet.png`, `MV_stress_stripes_sheet.png` — the verification's V1 / V11 frames
+  (below).
+
+### Build and suite (raw lines, this Mac)
+- Targeted suite at `7ff48d34`, Debug, on a Mac shared with another session's full suite (load 5–6). It used
+  the merge pass's filter: every Flexible* class plus UnifiedShadingTests, LatticePreviewBodyAlphaTests,
+  LatticeGBufferMaskTests, LatticeThreeAlgorithmsDrawTests, OrganicCapsuleImpostorTests, ViewerTests,
+  StageBackdropTests, SmoothingPageRound2Tests, LatticeStageModeTests, LatticeSettingsPersistTests,
+  ProjectStoreTests, UndoHistoryTests, SurfaceStageTests, LatticeSimSolveTriggerTests and 14 more (#354's and the hook-adjacent)
+  suites (29 names, `ViewerTests` its own):
+  `Executed 713 tests, with 22 tests skipped and 1 failure (0 unexpected) in 2997.693 (2997.760) seconds`.
+  - The one failure is the known `LatticeSimSolveTriggerTests.testTheTriggerRefusesOnAllThreeGrounds`.
+  - `ViewerTests`: `Executed 33 tests, with 0 failures`.
+  - `FlexibleBatchM2Tests` 2/2 and `FlexibleBatchMVerifyTests` passed in the run.
+  - The +5 against the merge's 708: 2 new tests and 3 opt-in probes (skipped without their env var, so 22 skipped against 19).
+- iOS (Debug, the simulator 147E56A1…, DerivedData flexA1n): `** BUILD SUCCEEDED **` at `7ff48d34`. `TopOpt.debug.dylib` (07:19) holds `FlexibleStampSpread.sigmasMM` and `controlBatchMSpread` (nm). Not installed, not launched; the scratch builds deleted afterwards (disk).
+
+### Decisions (00-decisions.md)
+- New: D-R5-MV7 (the Settings legends are the main page's ramp) and D-R5-MV8 (the stamp spreads as the sim
+  does, with the numbers above and what it does not match).
+- D-R5-M4 amended in place (★ its spread is replaced).
+
+### Commits (`claude/flexible-screens-n`; nothing pushed)
+- `b70f0582` V12: the Settings page's dent legends are the main page's smooth ramp.
+- `b8f93ee9` V10: the Settings page spreads a stamp as the main page's 3D sim does. This was one Gaussian;
+  the renders showed the four foci merged into one flat blob.
+- `7ff48d34` V10: keep each fingertip's focus with two Gaussians, near and far (the foci check added).
+- The next commit: this section, the verification pass's section, DECISIONS D-R5-MV7 / MV8, and the evidence.
+
+## Round 5 · batch E review — what the check found once a piece was latticed
 
 A second pass checked batch E against your pad, both as saved and with the taps. It reported 13
 findings (two of them the same). I confirmed all 12 and rejected none. All are fixed below except
@@ -330,7 +1263,7 @@ D-R5-E1 … D-R5-E6 (round 5 · batch E).
   built there). The Flexible commits stay here.
 
 
-## Round 5 · merge — batch S into batch M, and the syncs (read this first)
+## Round 5 · merge — batch S into batch M, and the syncs
 
 Batch S (the Settings page) was built in a side worktree while batch M (the main page) was built here.
 This pass merged them, synced the other branches, and ran the targeted suite and the iOS build on the
@@ -372,7 +1305,7 @@ are offscreen frames from the shipping renderer and the hosted panel's pixels.
   off the map. Each control now also removes the planes' depth. T6: 26 372 of 30 929 px, and with the
   planes' depth 0 (now asserted). T8: 23 900.
 - Its DECISIONS rows (D-R5-MV1…MV6) were never committed. This pass committed them unchanged (645f0973).
-  It wrote no handoff section; its commit message (07a43ea0) is the record.
+  It wrote no handoff section; its commit message (07a43ea0) is the record. (★ Batch M2: its section had been written but not committed — it is now below, "Round 5 · batch M — verification pass", re-checked.)
 
 **Your call:**
 - **Group colours against the rainbow (D-R5-X2).** S chose green, orange, red and blue, with blue last,
@@ -383,7 +1316,11 @@ are offscreen frames from the shipping renderer and the hosted panel's pixels.
     shows an orange frame against yellow-orange heat (main page, group 2).
   - Group 1's green frames also match the lattice density legend's green.
   - Options: (a) keep it; (b) always keep the gap, even 1 column; (c) another cue for the frame.
-- Batch S's open calls (1)–(7) and batch M's still stand (their sections below).
+  - ★ C5 (2026-09-30): his "Add more colour tokens" changed the palette — groups 2 and 3 are now pink
+    and mint, OFF the heat (D-R5-C5-2); green, blue, yellow and teal still lie on it, so this thin-face
+    question still stands.
+- Batch S's open calls (1)–(7) and batch M's still stand (their sections below). (★ C5: S's 1, 6 and 7
+  and M's colour-cap call are answered — see batch C5.)
 
 **Not merged — Blocked:** `#358 claude/raster-receipt-fields` (5 commits to `4764ca7e`, the lattice-types
 strut law). It conflicts in `core/src/cli/job.cpp`, which is not ours. At the end of `parse_job`, two
@@ -428,6 +1365,98 @@ after the fixes (FlexibleSquishPlayer.o newer than its source).
 **Commits:** 645f0973 (M verification's DECISIONS), 4fb372e8 (sync #354), 02c307f4 (merge S),
 ef1c1fc5 (frames per turn, the player's dot, the two re-pins), 2f047278 (the in-pass controls), and
 the next commit (this section, D-R5-X1/X2, evidence).
+
+## Round 5 · batch M — verification pass
+
+*(Written by the verification pass, which lost its network before committing it; committed by batch M2
+after every claim was re-checked against the code at `fb715885` — tests named, numbers against the
+pass's own logs, hook lines grepped. Corrections are marked ★ M2.)*
+
+An independent check of batch M found two correctness defects, four UX defects and seven smaller
+issues. Each one was confirmed on the code (or rejected), then fixed or routed. Everything was judged on
+YOUR round-5 project, restored through `AppModel.open`. These are offscreen frames and test numbers only:
+the app was built for the simulator and NOT launched.
+
+**What you will see, compared with batch M:**
+- **Stress stays on your groups.** Save & Exit with Stress on used to drop it back to "Stress in the solid
+  part · Couldn't simulate" (your img 4 again) while the lattice rebuilt. Now the row reads "Stress ·
+  each group in turn · MPa" and "Simulating…" until the new sims land.
+- **Group 1's Stress is no longer one flat blue.** Each group's colours now run up to that group's own
+  95th percentile. The legend's end reads "≥ 0.0726 MPa", and the (i) names the true peak (0.799 MPa, one
+  spot at Face 5's edge). A tap still reads the true MPa. Under "Play all" each turn has its own scale,
+  and the legend names the group that is playing.
+- **The lattice in front of a far dent plane shows through it as a ghost.** Before, a pressed face on the
+  far side, seen through the part, painted over the whole lattice inside its outline. The near planes stay
+  solid. The Stress view with the lattice on is no longer striped either.
+- **The dent legend's "×k" tells the truth.** Group 1's plane moves 0.2 times the mm its colour reads, so
+  the legend now says "×0.2" (Group 2 says "×0.5"). Batch M said "×1".
+- **A failed sim no longer shows broken planes.** When the sims fail and the simple column squish plays,
+  the dent view keeps the body solid, as before batch M.
+- **The folded legend sits on the screen's edge, like the octet's.** 150 pt bars, 30 pt apart, with the
+  reading's arrow on its bar.
+
+**Your call (not changed):** in Group 1, the reddest dent is Face 5's top edge (23.7 mm), above your thumb
+(11.4 mm under it, 13.5 set). That is the 3D sim's own squish. Should the colours stop at the depth you set?
+★ ANSWERED (2026-09-30): **"Show the sim's real depths"** — kept as it is (D-R5-C5-7).
+
+### Each finding → verdict → what changed → pinned by
+| # | Finding (lens · severity) | Verdict | What changed | Pinned by (RED control) |
+|---|---|---|---|---|
+| V1 | A far-side dent plane paints over the ghost walls in front of it (correct · major) | CONFIRMED: the far plane covered the walls (0.34 % of it changed; walls ARE in front on 96 %) | The solid planes' depth goes into the G-buffer before the march (`flx_map_depth`, `encodeMapDepth`). The march's depth is tested 0.5 mm further along its ray (`mapDepthBiasMM`). `flx_ghost_walls` is drawn AFTER the body. Two hook lines: one new, one moved. | `FlexibleBatchMVerifyTests.testTheGhostWallsAreDepthOrderedAgainstTheSolidPlanes`: far planes 23.3 % shown (RED: mutation A, the old order — 0.32 %); near planes 0 (RED: no planes' depth, 16.5–62.4 %; mutation B, the hook removed — 53.4 / 62.4 / 16.5 %) |
+| V2 | Stress still asks the solid solve when the lattice is stale or rebuilding (correct · major) | CONFIRMED: 1 solid solve per Save & Exit, and 1 more per held-back solve | `feStressRoute` follows the page's squeeze groups; `stressView` runs while the lattice comes; "Simulates once the lattice is built" when it cannot come; `squishIdle` re-checks the route | `testStressNeverAsksTheSolidSolveAcrossSaveAndExitAnEditAndARebuild`: 0 calls (RED: batch M's route, 1 then 2 calls, row "Stress in the solid part · MPa") |
+| V3 | The legend names "Group 1" while Play all is still simulating (correct · minor) | CONFIRMED | `stressShownGroup`: the pick, or under Play all the turn playing, else "each group in turn" | same test (RED: batch M's words, "Stress · Group 1 · MPa") |
+| V4 | The targeted run never ran ViewerTests (correct · minor) | CONFIRMED: `…|ViewerTestsFlexibleBatchBReviewTests` glued two names together | the filter is fixed (189 names, `ViewerTests` its own) | ★ M2: the pass's own full run never came back (the outage). ViewerTests ran in the merge pass's targeted suite (33 tests, 0 failures) and in batch M2's (above) |
+| V5 | The legend-card evidence predates the gradient commit (correct · minor) | CONFIRMED (22:30 render, 22:42 commit) | ★ M2: the pass's folder holds no re-render of the card. Batch M2 re-rendered it at its HEAD (`batch_m2/M2_main_legend_card.png`) | — |
+| V6 | His img-6 rows were never reproduced (correct · minor) | CONFIRMED for batch M | the opt-in `testHisImg6RowsAtTheDevicesPixelCount` (FLEX_MV_DEVICE + FLEX_M_PROBE_DIR): the build he saw against this one at the device's pixel count | ★ M2: the pass never ran it (no IMG6 lines in its logs). Batch M2 ran it: the IMG6 lines in batch M2's section |
+| V7 | Group 1's (and Play all's) Stress is one flat colour (ux · major) | CONFIRMED: 98 % of the part in the bottom fifth | each field on its own scale, topped at the 95th percentile (`FlexibleFEStress.scaleTop`); "≥ x MPa"; the (i) names the peak; per turn under Play all, named in the row (`FlexibleMainLegendRow` observes the loop); the walls' texture carries each field's fraction | `testEachGroupsStressIsOnItsOwnScaleAndThePartIsNotOneColour`: Group 1 49.9 / 28.1 / 7.3 / 7.7 / 7.1 % per fifth, Group 2 0 / 0 / 31.9 / 39.7 / 28.4 % (RED: one peak scale, 98 % / 100 %) |
+| V8 | M6's X-ray exposes the column fallback's broken planes (ux · major) | CONFIRMED | `dentOnColumnFallback`: no dent X-ray when a drawn lattice's map is the column squish | `testTheColumnFallbackKeepsTheDentViewSolid` (RED: batch M's rule) |
+| V9 | Group 1's reddest dent is Face 5's top edge, and the planes move 0.23× the colours (ux · major) | CONFIRMED. The colour cap is HIS CALL | the "×k" now shows what is drawn (`dentDrawnFactor`: ×k × the shown field's fold cut, per turn); the colours are unchanged | `testTheDentRowsFactorIsWhatTheMapIsDrawnAt`: drawn / coloured measured 0.245 and 0.533 against "×0.2" / "×0.5" (RED: "×1") |
+| V10 | Settings stamp trench saw-tooth; the two pages disagree (ux · minor) | CONFIRMED | routed until batch S merged. ★ M2: FIXED in batch M2 (the stamp spreads as the sim does). ★ M2 VERIFICATION: on C1's pad — his Face 3's foci were lost until the M2 verification pass (D-R5-MV9) | ★ M2: `FlexibleBatchM2Tests.testTheTwoPagesAgreeOnAFourFingertipStamp` |
+| V11 | Stress + Lattice still stripes at device resolution (ux · minor) | CONFIRMED | fixed by V1's planes' depth (the opaque walls behind a solid plane are never marched) | `testTheStressViewsOpaqueWallsNeverStripeTheSolidPlanes`: 0 of 80 311 px at 640 px; at 1600 px 1 306 of 661 946 (0.20 %, under its 0.5 % cap) — 1 259 of them more than 10 px inside the map's outline, on the one 1 px crease where the top meets Face 5 (the residual panel of `batch_m_verify/MV_stress_stripes_sheet.png`) (RED: no planes' depth, 23.3 % / 11.9 %) |
+| V12 | The Settings page's dent legends are 24 flat blocks (ux · minor) | CONFIRMED | routed until batch S merged (`FlexibleStagePage.swift` and `FlexibleSettingsPanel.swift` were S's). ★ M2: FIXED in batch M2 (`FlexibleMainLegendRow.ramp(.dent, vertical:)` on both) | ★ M2: `FlexibleBatchM2Tests.testTheSettingsPagesDentLegendsAreTheMainPagesSmoothRamp` |
+| V13 | Two evidence images predate the final code (ux · minor) | CONFIRMED | ★ M2: not re-rendered by the pass (its folder holds only the V1 / V11 frames, now in `batch_m_verify/`). Batch M2's renders are at its own HEAD | — |
+| V14 | The folded card differs from the octet's minimised key (ux · minor) | CONFIRMED | `foldedEdge` 0, `foldedBar` 18 × 150, `foldedSpacing` 30, the reading's arrow on its bar | `testTheFoldedCardIsTheOctetsMinimisedKeyOnTheVeryEdge` (RED: batch M's PageChrome.edge) |
+| V15 | During a rebuild the Stress row flips to the solid part, and a solid solve still starts (ux · minor) | CONFIRMED (same cause as V2) | V2's fix | V2's test |
+
+### Hook lines in #354 / main files (this pass; each grepped after the edit — ★ M2: re-grepped at `fb715885`, both present as written)
+| hook | file · anchor | ± | why |
+|---|---|---|---|
+| HMV1 | MetalMeshView.swift · `encodeDepthPrepass`, just before `// Flexible (#362): the third writer — …`: `encodeFlexibleMapDepth(penc, depthState: depthState, vertices: vbuf, flex: fbuf, tints: tintBuffer, count: vertexDrawCount, clipFromModel: uniforms.mvp, squish: flexScale)   // Flexible (#362) batch M verification: …` | +1 | the solid dent planes' depth goes into the G-buffer before the Flexible march. It passes the renderer's own private buffers, which the extension cannot reach. It is a no-op unless the Flexible pass draws and the see-through body is out of the G-buffer (`MeshRenderer+FlexibleLattice.encodeFlexibleMapDepth`), so the octet's frame is unchanged |
+| HM2 (moved) | MetalMeshView.swift · `if wantsLattice, flexibleWallsGhosted, let gb = gbuffer { encodeFlexibleGhostWalls(enc, gbuffer: gb, mainSize: mainSize) }   // …` moved from before `// Flexible X-ray (#362): the see-through body AFTER …` to just after that block's `countedDraw(enc, .triangle, vertexDrawCount) }` | +1 −1 | the ghost walls are drawn after the see-through body, so a far plane no longer paints over them |
+
+HM1 (batch M's `!flexibleWallsGhosted` on #354's lsdf_shade) is unchanged. Nothing else outside the track
+was touched: WorkspacePlaceholder, LatticeSettings, ProjectModel, ResultsModel, FaceRegion and
+LatticeStageMode are untouched, no case was added, core/ is untouched, and the pinned strings are
+untouched. Batch S's modal views and FlexibleStagePage are untouched too (★ M2: `git show --stat 07a43ea0`
+lists Flexible* files, MeshRenderer+FlexibleLattice and the one MetalMeshView change only).
+
+### Mutation runs (★ M2: the run finished after the outage; `fixM/mut/run.log` in the session scratchpad)
+Each broke one hook in the main worktree at `07a43ea0`, rebuilt, ran its pinning test, and restored the
+file (`git checkout`), then rebuilt clean (`restore build 0`). Both RED:
+```
+A  the ghost walls drawn BEFORE the body (batch M's order)  ⇒ testTheGhostWallsAreDepthOrdered… 4 failures:
+   far planes 0.32 % shown (needs > 5 %), and its in-test no-depth control reads 0 (the old order hides them)
+B  the planes' depth hook line removed                     ⇒ testTheGhostWallsAreDepthOrdered… + testTheStressViews…
+   5 failures: near planes 53.4 / 62.4 / 16.5 % (needs < 0.2 %); Stress 23.3 % at 640 px, 11.9 % at 1600 px
+```
+
+### Tests and suite (★ M2, from the pass's own logs)
+- `FlexibleBatchMVerifyTests` (new, 7 + the opt-in IMG6): `Executed 7 tests, with 0 failures (0 unexpected) in 837.296 seconds`.
+- The suites it touched (`FlexibleBatchMLegendTests`, `FlexibleBatchMStressTests`, `FlexibleBatchMXrayTests`,
+  `FlexibleLatticePassTests`, `FlexibleMainPageRound4Tests`): 30 tests, 2 failures — both in
+  `FlexibleBatchMXrayTests.testTheSolidDentPlaneIsNeverStripedByTheWalls`, whose control (the opaque walls
+  striping the plane) the planes' depth now stops. Re-pinned (the near planes only, the old frame in full):
+  `Executed 2 tests, with 0 failures`.
+- Its full targeted run never came back (the outage). The merge pass ran it: two in-pass controls (T6, T8)
+  read 0 for the same reason — fixed in `2f047278` — then `Executed 708 tests, with 19 tests skipped and 1
+  failure (0 unexpected)`, the known `LatticeSimSolveTriggerTests.testTheTriggerRefusesOnAllThreeGrounds`.
+
+### Evidence (`docs/handoffs/evidence/2026-09-29-flexible-screens/batch_m_verify/`)
+- `MV_depth_sheet.png` — his round-5 pad, the dent view with the lattice: group 2 from the back left (the
+  far plane) and group 1 iso; each as now (ghost walls in front of the far plane, the near planes solid),
+  the old opaque walls, and without the planes' depth (walls through the near planes).
+- `MV_stress_stripes_sheet.png` — the Stress view with the lattice at 640 and 1600 px, with and without the
+  planes' depth, and the 1600 px residual: one 1 px line, the crease where the top meets Face 5.
 
 ## Round 5 · batch M — your round-5 notes on the main page and the dent visuals
 
@@ -495,16 +1524,16 @@ none of this has been seen on a screen yet.
     core's columns — G's (i) already said so). I did not change G's physics; core brief #24 / #35.
 - **On the Settings page, steep stamp walls still show a slight saw-tooth** at the column pitch
   (1.56 mm at Fast): two flat triangles per column cannot draw a steep curved wall perfectly. The colour
-  itself is continuous.
+  itself is continuous. (★ Batch M2: the wall is no longer steep — the stamp spreads as the sim does; the saw-tooth 0.105 → 0.036 of the pitch.)
 - **The Settings page's own legend bar** is still 24 small blocks (FlexibleStagePage is batch S's
-  page); the main page's card uses smooth gradients.
+  page); the main page's card uses smooth gradients. (★ Batch M2: both Settings legends are the main page's gradient now.)
 - **Core still designs a stamp under the stamp alone** (core brief #33): the spread is in the
   Settings page's picture and in the 3D sim, not in core's density.
 - **The solid-part Stress route without a lattice** still fails on your project (the union region,
   above).
 
 **Your call:**
-- **Group 1's colours:** show the sim's own squish (now — Face 5's top edge reads 23.7 mm, more than the
+- **Group 1's colours** (★ ANSWERED 2026-09-30: **"Show the sim's real depths"** — kept, D-R5-C5-7): show the sim's own squish (now — Face 5's top edge reads 23.7 mm, more than the
   13.5 you set), or cap the colours at the deepest you set (the edge would read 13.5, like the thumb's
   middle)?
 - **The spread on the Settings page:** L = 0.2 × the lattice depth (4 mm on your top, 20 mm on your
@@ -732,7 +1761,7 @@ A verifier read batch S against your words and found 21 things (2 lenses: correc
 | U3 (major) | "Width · 20 mm long [66 mm]"; a stored 65.5 mm shows 66 | CONFIRMED | two boxes (Width, Length), proportions kept (`FlexibleStampSize`); one decimal when the value has one |
 | U4 | re-picking a swatch reads "Save & Exit" | CONFIRMED | colours in normal form (`FlexibleSqueezeGroups.canonical`) |
 | U5 | view off: Save & Exit leaves the lattice stale, so the main page's 3D squish falls back to the column model | CONFIRMED | no code change. The consequence is now part of your call 3 below. The main-page pill is in batch M's file |
-| U6 | > 4 groups reuse colours; orange / red are the warning / danger tokens | CONFIRMED | not changed: the DS has only these four tokens besides purple (the depth prism), cyan (resting) and white (selected) — **your call** below |
+| U6 | > 4 groups reuse colours; orange / red are the warning / danger tokens | CONFIRMED | not changed: the DS has only these four tokens besides purple (the depth prism), cyan (resting) and white (selected) — **your call** below (★ C5: ANSWERED — "Add more colour tokens": eight tokens, groups 2–3 off the warning / danger colours, then numbered; D-R5-C5-1…4) |
 | U7 | on the main page's column fallback a side wall's opaque frame pokes through the top face | CONFIRMED (verifier's render) | NOT fixed. The geometry is older than S: the column model pushes a side face's top columns through the top face, and its heat-coloured columns already poked through the same way. The opaque frame makes it visible. A fix means the column model must know when a displaced column crosses another face. That belongs to the main page's dent work (batch M), so it is left as an open issue |
 | U8 | relinked line in kg; Settings player "Full load" | CONFIRMED | `relinked(…, unit:)`; `FlexibleSettingsSquish.fullLabel` = the playing group's force (`squeezeValue(_:unit:)`) |
 | U9 | the deepest box scrubs up = more, the depth chip down = deeper; 3 pt slop | slop CONFIRMED and fixed (8 pt, vertical start). Direction NOT changed | the box is a value dial, and up = more on every box on the page (the iOS convention). The chip is a handle ON the part that follows the dent plane into it. Flipping one box would make it the only one that runs backwards |
@@ -741,13 +1770,13 @@ A verifier read batch S against your words and found 21 things (2 lenses: correc
 | U13 | FlexibleSquishPlayer.swift and FlexibleRowCopy.swift are also edited in the lead's tree | CONFIRMED (verifier read the lead's diff) | merge notes below |
 
 **Your call (updated):**
-1. Deleting a face a main-page group holds leaves that group unchanged, so the main run still presses it. Should deleting top A here also take it out of the main page's Top group?
-2. Reset all keeps your weight unit. Should it go back to kg?
+1. Deleting a face a main-page group holds leaves that group unchanged, so the main run still presses it. Should deleting top A here also take it out of the main page's Top group? ★ ANSWERED (2026-09-30): **"Flexible only"** — the main page's group keeps it; as built (D-R5-C5-5).
+2. Reset all keeps your weight unit. Should it go back to kg? (★ still open: his "Start fully fresh" answer to 6 does not say; the unit is kept.)
 3. **Save & Exit with the Lattice view off** only stores ("View off · tap to build"). **Consequence:** with no new bake, the lattice stays stale. Every 3D sim needs a current lattice, so until you turn the view on, the main page's Heat and Stress squish is the old column preview, with no bulge. Round 4 built it anyway. Which do you want?
 4. The frame is ~3 % of the face (3 mm on your 100 mm pad) plus a 1.6 mm dark gap. Thicker or thinner?
 5. **NEW: after an edit on the Settings page, the 3D sim waits for Save & Exit.** It needs the lattice built on Exit. Should the Settings page re-run the playing group's sim on the last-built lattice once your edits settle (an approximation: the old lattice, the new loads)? If not, the "Column preview · Save & Exit for the 3D sim" line stays.
-6. **NEW: Reset all** starts from the main page's faces only, so faces you added on this page are dropped. Should it keep every listed face, with its values reset?
-7. **NEW: groups 5 and up re-use the four colours, and orange and red are also the warning and danger colours.** Accept four, or add a second cue for groups 5+ (e.g. the group number on the frame)?
+6. **NEW: Reset all** starts from the main page's faces only, so faces you added on this page are dropped. Should it keep every listed face, with its values reset? ★ ANSWERED (2026-09-30): **"Start fully fresh"** (only the main-page faces, default values) — as built (D-R5-C5-6).
+7. **NEW: groups 5 and up re-use the four colours, and orange and red are also the warning and danger colours.** Accept four, or add a second cue for groups 5+ (e.g. the group number on the frame)? ★ ANSWERED (2026-09-30): **"Add more colour tokens"** — batch C5: eight DS tokens, groups 2–3 no longer the warning / danger colours, past eight the number on the tab and painted on the faces (D-R5-C5-1…4).
 
 **Merge notes for the lead (with batch M):**
 - `FlexibleSquishPlayer.swift`:
@@ -938,7 +1967,7 @@ Judged on YOUR project 0004, restored through `AppModel.open`; the Settings page
 3. **[Rests] and [+ New] are tabs, and [Model] also holds the More rows.** The rail replaces the Face | More chips.
 4. **The rail tab has two tiny lines** (name, face count), as asked ("its colour, its name, its face count"). Every setting row is one line.
 5. **With nothing changed, Exit is never blocked** (a legacy project's missing filament included): leaving changes nothing on the main page.
-6. **A group with more than 4 groups re-uses the colours** (four distinct DS tokens exist that are not purple, cyan or white).
+6. **A group with more than 4 groups re-uses the colours** (four distinct DS tokens exist that are not purple, cyan or white). (★ C5: superseded — eight tokens, then numbered; D-R5-C5-1…3.)
 
 **Not done (and why):**
 - **Nothing has been seen on a device or simulator.** I must not launch the app. The iOS build succeeds.
@@ -946,8 +1975,8 @@ Judged on YOUR project 0004, restored through `AppModel.open`; the Settings page
 - **Batch M's files**: the main page's dent colours, legends and Stress are M's. S touched five main-page files with small listed hooks (below) — the lead merges them with M's.
 
 **Your call:**
-- **Deleting a face a main-page group holds leaves the main page's group as it is**, so the main run still presses it. Should deleting top A on the Flexible page also take it out of the main page's Top group?
-- **Reset all keeps your weight unit.** Should it go back to kg too?
+- **Deleting a face a main-page group holds leaves the main page's group as it is**, so the main run still presses it. Should deleting top A on the Flexible page also take it out of the main page's Top group? ★ ANSWERED (2026-09-30): **"Flexible only"** (D-R5-C5-5).
+- **Reset all keeps your weight unit.** Should it go back to kg too? (★ still open — see the verification pass's call 2.)
 - **Save & Exit with the Lattice view off** stores and waits for the view ("View off · tap to build"). Round 4 built it anyway and said "Lattice ready [Show]". Which do you want? (The verification pass adds the consequence: until the view is on, the main page's squish is the column preview, with no bulge.)
 - **Frame width** is ~3 % of the face (3 mm on your 100 mm pad), plus a 1.6 mm dark gap. Thicker / thinner?
 
@@ -1236,6 +2265,9 @@ Your round-5 notes that touch G's field were checked here too:
 **Your call:**
 - **The fold cut.** Your Group 1 now moves 23 % of its calibrated size (≈ 7 % of core's numbers on
   Face 5). The alternative is to let ×k go below 1 and say "×0.2" on the legend. Keep the cut?
+  ★ ANSWERED (2026-09-30): **"Is there no way to fold realistically instead?"** → batch N (landed on this
+  branch): the squish is solved again in steps; a converged field is never cut, and the cut is now only
+  the fallback (D-R5-N5, D-R5-C5-8).
 - **The far end held as a wall** (a side press squeezes against the opposite face, as core's columns
   assume). Or should an unpressed far face stay free, with the part balanced as batch G did?
 - **Top B lifting next to the thumb** (above): leave it (it is what a linear body does), or say it

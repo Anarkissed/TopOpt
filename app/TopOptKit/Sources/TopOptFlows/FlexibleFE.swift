@@ -66,9 +66,12 @@ public enum FlexibleFE {
     /// The player's note while the shown group's sim runs.
     public static let pending = "Simulating the squish…"
     /// The player's note when the shown group's sim failed (core's words behind the (i)).
-    public static let failed = "Simple squish · the sim failed"
+    /// ★ BATCH N VERIFICATION: "Simple squish · the sim failed" was cut beside the live Play-all picker
+    /// at 11" portrait (152 of 183 pt — FlexibleBatchNVerifyTests pins every player line whole).
+    public static let failed = "Squish sim failed"
     /// ★ BATCH G VERIFICATION: "Play all" plays the others while this group's sim failed.
-    public static func skipped(_ group: String) -> String { "\(group) skipped · its sim failed" }
+    /// ★ BATCH N VERIFICATION: "Group 2 skipped · its sim failed" was cut there too (152 of 193 pt).
+    public static func skipped(_ group: String) -> String { "\(group)'s sim failed" }
     /// The Squish legend's (i), in FE mode — one sentence. `stiffer`: the sim found the part this
     /// many times stiffer than core's columns (k past its band) — said, since it then moves less
     /// than the map reads. `largeStrain`: even the page's ×k is past s · gmax ≤ ½. `bonded`: the
@@ -77,34 +80,68 @@ public enum FlexibleFE {
     /// ★ BATCH G VERIFICATION: `foldShare` — the field was cut to this share of its calibrated size
     /// so it never folds at ×1 (FlexibleFEField.calibrated) — said; and a band-held k is said in
     /// every case (it hid behind the large-strain sentence: his Face 5 moved ~⅓ of what it read).
+    /// ★ BATCH N: `stepped` — the field was solved IN STEPS on the tested curves (FlexibleFERefine): said,
+    /// with what it is not (no buckling, no self-contact), and never a cut; `kept` — its refine did not
+    /// land, so the quick linear field (and its fold cut, the fallback) stays: why, in the cut's place.
+    /// ★ BATCH N VERIFICATION: `pressedAt` — the load factor of a stepped field (the calibration is a LOAD
+    /// factor, so the mm he reads are at it: "pressed at 2× your weights"; his Group 1 and the M2 stand
+    /// had said nothing); `turned` — the stepped field has elements that GROW under the press, a turn the
+    /// small-strain sim draws as a stretch (his Group 1's edge above the thumb lifts 7.5 mm).
     public static func info(exaggeration k: Int, stiffer: Double? = nil, largeStrain: Bool = false, bonded: Bool = false,
-                            foldShare: Double? = nil) -> String {
-        let sim = bonded ? "a linear 3D sim with every rest held fast (sliding, it did not settle)" : "a linear 3D sim"
-        let finds: String = {
-            if let r = stiffer, r > 1 { return String(format: " that finds this part %.0f× stiffer than core's columns (its skin and walls carry load)", r) }
-            if let r = stiffer, r > 0, r < 1 { return String(format: " that finds this part %.0f× softer than core's columns", 1 / r) }
-            return ""
-        }()
-        // ★ BATCH M (M5): the COLOURS are the sim's squish too (FlexibleMainStage+Squish.feMapValues), so
-        // a tap reads the mm there — never "core's mm" any more
-        if let share = foldShare {
-            let pct = Swift.max(1, Int((share * 100).rounded()))
-            return "The colours and the shape are \(sim)\(finds), its motion cut to \(pct)% so the picture never folds (the sim leaves small strain here) — tap here, then the part, for the mm there."
+                            foldShare: Double? = nil, stepped: Bool = false, kept: String? = nil,
+                            pressedAt: Double? = nil, turned: Bool = false) -> String {
+        if stepped {
+            let held = bonded ? " with every rest held fast" : ""
+            let finds: String = {
+                if let r = stiffer, r > 1 { return String(format: ", finding this part %.0f× stiffer than core's columns (its skin and walls carry load)", r) }
+                if let r = stiffer, r > 0, r < 1 { return String(format: ", finding this part %.0f× softer than core's columns", 1 / r) }
+                return ""
+            }()
+            let pressed: String = {
+                guard let l = pressedAt, l > 0, abs(l - 1) > 0.05 else { return "" }
+                let x = abs(l - l.rounded()) < 0.05 ? "\(Int(l.rounded()))" : String(format: "%.1f", l)
+                return ", pressed at \(x)× your weights"
+            }()
+            let deeper = k > 1 ? ", shown \(k)× deeper" : ""
+            let limits = turned ? ", with no buckling or self-contact, and big turns drawn as stretches (an edge it turns far rises)"
+                                : ", with no buckling or self-contact"
+            return "The colours and the shape are a 3D sim\(held) solved in steps on the tested squish curves (past their end, untested, the cells close and firm up)\(finds)\(pressed)\(deeper)\(limits) — tap here, then the part, for the mm there."
         }
-        if largeStrain {
-            // even ×1 is past s · gmax ≤ ½: the linear sim has left small strain here
-            if !finds.isEmpty {
-                return "The colours and the shape are \(sim)\(finds), and it leaves small strain here, so the picture can fold where real TPU would stiffen — tap here, then the part, for the mm there."
+        // ★ BATCH N VERIFICATION: a refine that did not land says why on EVERY linear sentence — it was
+        // said only inside the cut's (a quick field that was never cut said nothing of it)
+        func linear() -> String {
+            let sim = bonded ? "a linear 3D sim with every rest held fast (sliding, it did not settle)" : "a linear 3D sim"
+            let finds: String = {
+                if let r = stiffer, r > 1 { return String(format: " that finds this part %.0f× stiffer than core's columns (its skin and walls carry load)", r) }
+                if let r = stiffer, r > 0, r < 1 { return String(format: " that finds this part %.0f× softer than core's columns", 1 / r) }
+                return ""
+            }()
+            // ★ BATCH M (M5): the COLOURS are the sim's squish too (FlexibleMainStage+Squish.feMapValues), so
+            // a tap reads the mm there — never "core's mm" any more
+            if let share = foldShare {
+                let pct = Swift.max(1, Int((share * 100).rounded()))
+                // ★ BATCH N: the cut is the FALLBACK — when the stepped sim did not land, its reason replaces the strain note
+                let why = kept ?? "the sim leaves small strain here"
+                return "The colours and the shape are \(sim)\(finds), its motion cut to \(pct)% so the picture never folds (\(why)) — tap here, then the part, for the mm there."
             }
-            return "The colours and the shape are \(sim) that leaves small strain here, so the picture can fold where real TPU would stiffen — tap here, then the part, for the mm there."
+            if largeStrain {
+                // even ×1 is past s · gmax ≤ ½: the linear sim has left small strain here
+                if !finds.isEmpty {
+                    return "The colours and the shape are \(sim)\(finds), and it leaves small strain here, so the picture can fold where real TPU would stiffen — tap here, then the part, for the mm there."
+                }
+                return "The colours and the shape are \(sim) that leaves small strain here, so the picture can fold where real TPU would stiffen — tap here, then the part, for the mm there."
+            }
+            if let r = stiffer, r > 1 {
+                return String(format: "The colours and the shape are %@ that finds this part %.0f× stiffer than core's columns (its skin and walls carry load), so it squishes less than you drew, shown %d× deeper — tap here, then the part, for the mm there.", sim, r, k)
+            }
+            if let r = stiffer, r > 0, r < 1 {
+                return String(format: "The colours and the shape are %@ that finds this part %.0f× softer than core's columns, so it squishes more than you drew, shown %d× deeper — tap here, then the part, for the mm there.", sim, 1 / r, k)
+            }
+            return "The colours and the shape are \(sim) scaled to core's squish, shown \(k)× deeper; real TPU stiffens and thin walls can fold — tap here, then the part, for the mm there."
         }
-        if let r = stiffer, r > 1 {
-            return String(format: "The colours and the shape are %@ that finds this part %.0f× stiffer than core's columns (its skin and walls carry load), so it squishes less than you drew, shown %d× deeper — tap here, then the part, for the mm there.", sim, r, k)
-        }
-        if let r = stiffer, r > 0, r < 1 {
-            return String(format: "The colours and the shape are %@ that finds this part %.0f× softer than core's columns, so it squishes more than you drew, shown %d× deeper — tap here, then the part, for the mm there.", sim, 1 / r, k)
-        }
-        return "The colours and the shape are \(sim) scaled to core's squish, shown \(k)× deeper; real TPU stiffens and thin walls can fold — tap here, then the part, for the mm there."
+        let sentence = linear()
+        guard let why = kept, foldShare == nil else { return sentence }
+        return sentence.replacingOccurrences(of: " — tap here, then the part,", with: " (\(why)) — tap here, then the part,")
     }
     /// The Squish legend's (i) after a failed sim — one sentence, core's words kept.
     public static func failedInfo(_ why: String, exaggeration k: Int) -> String {

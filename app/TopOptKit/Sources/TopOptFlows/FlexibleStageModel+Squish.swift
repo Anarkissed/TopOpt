@@ -20,6 +20,7 @@ extension FlexibleStageModel {
         squishScheduled = nil
         squishGeneration = request?.generation ?? lattice?.generation
         if !squish.isEmpty { squish = [:] }
+        if !refine.isEmpty { refine = [:] }   // ★ BATCH N: the old lattice's refines with it
     }
 
     /// The squish sims of the lattice shown: start them (the shown sim `first`), once per
@@ -35,6 +36,10 @@ extension FlexibleStageModel {
         for sim in r.sims where s[sim.id] == nil { s[sim.id] = .pending }
         if s != squish { squish = s }   // one publish: "Simulating the squish…"
         squishSolver.onResult = { [weak self] gen, id, state in self?.squishLanded(gen, id, state) }
+        // ★ BATCH N: once the quick sims landed, each group is solved again in steps (the shown first)
+        squishSolver.linearField = { [weak self] id in self?.squish[id]?.field }
+        squishSolver.onRefineProgress = { [weak self] gen, id, done, total in self?.refineProgressed(gen, id, done, total) }
+        squishSolver.onRefine = { [weak self] gen, id, outcome in self?.refineLanded(gen, id, outcome) }
         let worker = squishWorker
         // (tracked: `waitForIdle` waits for the hand-over too, so no sim starts after it returned)
         track(Task { @MainActor [weak self] in
@@ -61,6 +66,51 @@ extension FlexibleStageModel {
     func squishLanded(_ generation: Int, _ id: String, _ state: FlexibleSquishState) {
         guard controlIgnoreSquishGeneration || (generation == lattice?.generation && generation == squishGeneration) else { return }
         squish[id] = state
+    }
+
+    // MARK: ★ BATCH N — the squish solved in steps
+
+    /// The refined field of `id` for the lattice `generation` (nil: none landed).
+    public func refinedField(_ id: String, generation: Int) -> FlexibleFEField? {
+        guard let f = refine[id]?.field, f.generation == generation else { return nil }
+        return f
+    }
+
+    /// The field a group's squish shows: its refined field once landed, else its quick one.
+    public func shownSquishField(_ id: String) -> FlexibleFEField? {
+        guard let q = squish[id]?.field else { return nil }
+        return refinedField(id, generation: q.generation) ?? q
+    }
+
+    /// A refine claimed core or started an increment (`step`: the one being solved; a late report never
+    /// overwrites a result).
+    func refineProgressed(_ generation: Int, _ id: String, _ step: Int, _ total: Int) {
+        guard generation == lattice?.generation, generation == squishGeneration else { return }
+        switch refine[id] {
+        case .ready?, .kept?: return
+        default: break
+        }
+        let next = FlexibleRefineState.running(step: step, total: total)
+        if refine[id] != next { refine[id] = next }
+    }
+
+    /// A refine ended: its field, or the quick one kept with why (a cancelled one leaves no trace).
+    func refineLanded(_ generation: Int, _ id: String, _ outcome: FlexibleFERefine.Outcome) {
+        guard generation == lattice?.generation, generation == squishGeneration else { return }
+        switch outcome {
+        case .refined(let f): refine[id] = .ready(f)
+        case .kept(let why, let detail, _): refine[id] = .kept(why: why, detail: detail)
+        case .cancelled: refine[id] = nil
+        }
+    }
+
+    /// Tests: wait until no refine of the current lattice is still running (or `timeoutS`).
+    func waitForRefines(timeoutS: Double = 600) async {
+        let start = Date()
+        while Date().timeIntervalSince(start) < timeoutS {
+            if squishSolver.refineIdle { return }
+            try? await Task.sleep(nanoseconds: 50_000_000)
+        }
     }
 
     /// The group sims of the current lattice, in group order, with their states.

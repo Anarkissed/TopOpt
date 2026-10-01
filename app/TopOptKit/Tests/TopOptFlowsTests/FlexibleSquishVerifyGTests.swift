@@ -215,7 +215,10 @@ final class FlexibleSquishVerifyGTests: XCTestCase {
         XCTAssertTrue(s.playAllLive)
         let seq = s.fe.sequence
         XCTAssertEqual(seq.map { s.fe.fields[$0].simID }, ["group-1", "group-2"])
-        XCTAssertEqual(Set(s.feBaseTints.keys), ["group-1", "group-2"])
+        // ★ RE-PINNED (round 5 batch N): each group's colours are keyed by its VERSION — "group-1", or
+        // "group-1·stepped" once its refine (the squish solved in steps) landed, which it may in this test
+        XCTAssertEqual(Set(s.feBaseTints.keys.map { $0.replacingOccurrences(of: FlexibleFERefine.versionSuffix, with: "") }),
+                       ["group-1", "group-2"])
         // the page's tints follow the group the renderer shows — each group's own faces coloured
         s.loop.shownIndex = seq[0]
         let t1 = try XCTUnwrap(s.tints(r.project, on: .lattice, roles: [:], stress: nil))
@@ -249,11 +252,13 @@ final class FlexibleSquishVerifyGTests: XCTestCase {
             t = 1000 + Double(i) * P / 10 + P / 20
             rend.stepFlexibleLoop(in: view, now: t)
             let shown = pass.feFields[pass.feShown].simID
+            // ★ RE-PINNED (round 5 batch N): the colours swapped in are the shown VERSION's (see above)
+            let version = pass.feFields[pass.feShown].versionKey
             if seen.last != shown { seen.append(shown) }
-            if pass.feTintsShown != shown || s.loop.playingSimID != shown { mismatches += 1 }
+            if pass.feTintsShown != version || s.loop.playingSimID != shown { mismatches += 1 }
             labels.insert(player().pickerLabel)
             // the page hands the renderer's group too (a re-upload never shows another group's)
-            if s.tints(r.project, on: .lattice, roles: [:], stress: nil) != s.feTintBox.tints(shown) { mismatches += 1 }
+            if s.tints(r.project, on: .lattice, roles: [:], stress: nil) != s.feTintBox.tints(version) { mismatches += 1 }
             if player().shownNote != m.lattice?.simNote(for: shown) { mismatches += 1 }
         }
         print("FLEX-GV PLAY ALL: turns \(seen) · picker \(labels.sorted()) · tint / label / note mismatches \(mismatches)")

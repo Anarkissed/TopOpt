@@ -259,8 +259,15 @@ struct FlexibleSettingsRailView: View {
         case .model:
             Image(systemName: "cube").font(.system(size: 14, weight: .semibold)).foregroundStyle(DS.Color.textPrimary.color)
         case .group(let id):
-            Circle().fill((model.railGroup(id).map { model.groupColour($0) } ?? DS.Color.accentGreen).color)
-                .frame(width: 14, height: 14)
+            // ★ C5: a colour another group also wears (past the eighth group) — the tab's dot carries
+            // the number, the same disc as on the group's faces
+            if let g = model.railGroup(id), let n = FlexibleGroupNumbers.railNumber(g, in: model.settings) {
+                FlexibleGroupNumberDisc(colour: model.groupColour(g), number: n, size: FlexibleGroupNumbers.railSize)
+                    .accessibilityIdentifier("flexible-rail-number-\(n)")
+            } else {
+                Circle().fill((model.railGroup(id).map { model.groupColour($0) } ?? DS.Color.accentGreen).color)
+                    .frame(width: 14, height: 14)
+            }
         case .rests:
             Circle().fill(DS.Color.accentCyan.color).frame(width: 14, height: 14)
         case .newGroup:
@@ -390,18 +397,22 @@ struct FlexibleGroupTabHeader: View {
     }
 }
 
-/// ★ S1: the four colours, the group's own ringed; a tap picks (a colour another group wears swaps).
+/// ★ S1: the colours, the group's own ringed; a tap picks (a colour another group wears swaps).
+/// ★ C5: EIGHT (his "Add more colour tokens") on the same one line — 26 pt each (the 20 pt dot and
+/// its ring), 3 pt apart; the hosted test measures the row inside the tab at every iPad size.
 struct FlexibleColourSwatches: View {
     @ObservedObject var model: FlexibleStageModel
     let group: FlexibleSqueezeGroup
+    static let swatch = CGSize(width: 26, height: 32)
+    static let spacing: CGFloat = 3
     var body: some View {
         let mine = FlexibleSqueezeGroups.colourChoice(of: group, in: model.settings)
-        HStack(spacing: 6) {
+        HStack(spacing: Self.spacing) {
             ForEach(FlexibleGroupColour.allCases) { c in
                 Button { model.setGroupColour(group.id, c) } label: {
                     Circle().fill(c.rgba.color).frame(width: 20, height: 20)
                         .overlay(Circle().strokeBorder(DS.Color.textPrimary.color, lineWidth: c == mine ? 2 : 0).padding(-3))
-                        .frame(width: 30, height: 32).contentShape(Rectangle())
+                        .frame(width: Self.swatch.width, height: Self.swatch.height).contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(c.name)
@@ -409,6 +420,10 @@ struct FlexibleColourSwatches: View {
                 .accessibilityIdentifier("flexible-colour-\(group.number)-\(c.rawValue)")
             }
         }
+        // the row's drawn frame (the hosted test: eight swatches, one line, inside the tab)
+        .background(GeometryReader { g in
+            Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["colourSwatches-\(group.number)": g.frame(in: .global)])
+        }.allowsHitTesting(false))
     }
 }
 

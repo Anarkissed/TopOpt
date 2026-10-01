@@ -21,8 +21,8 @@
 //   * SEPARATE groups are separate squeezes (sims). The preview lattice is built for all of
 //     them: where two groups need the same material the FIRMER wins (FlexibleGroupField), and
 //     the page says so in one line. The squish player picks a group (or all at once).
-// Group colours are DS tokens — green, orange, red, blue — never purple; ★ round 5 (S1): chosen
-// per group (FlexibleGroupColours).
+// Group colours are DS tokens, never purple; ★ round 5 (S1): chosen per group; ★ C5: eight
+// (green, pink, mint, blue, yellow, teal, olive, terracotta), then round again, numbered (FlexibleGroupColours).
 
 import Foundation
 import TopOptDesign
@@ -305,9 +305,9 @@ public enum FlexibleSqueezeGroups {
     // MARK: colours
 
     /// A group's DEFAULT colour — DS tokens, NEVER purple: green (group 1, the pressed faces' own
-    /// colour), orange, red, blue, then round again. FlexibleSqueezeGroupsTests pins it.
+    /// colour), then the palette in order, then round again. FlexibleSqueezeGroupsTests pins it.
     /// ★ ROUND 5 (S1): he picks each group's colour in its folder tab (FlexibleGroupColours —
-    /// `FlexibleStageModel.groupColour`); blue moved LAST (the dent heat is blue → cyan → white).
+    /// `FlexibleStageModel.groupColour`). ★ C5: eight DS tokens (DS.Color.squeezeGroupPalette).
     public static let palette: [RGBA] = FlexibleGroupColour.allCases.map(\.rgba)
     public static func colour(number: Int) -> RGBA { palette[(max(1, number) - 1) % palette.count] }
 }

@@ -246,9 +246,15 @@ final class FlexibleSettingsRound4Tests: XCTestCase {
         let (m, top) = try await padModel()
         let key = try XCTUnwrap(m.key(top))
         let st = try XCTUnwrap(m.stacks[key])
+        // ★ RE-PINNED BY BATCH M2 (V10 of batch M's verification; his round 5: the stamp should be "pulling
+        // lattice next to it in" — "in BOTH views"): the Settings page now spreads the stamp as the 3D sim
+        // does, so the face round it sinks a little too (two Gaussians of 0.25 and 0.6 × the lattice depth, and
+        // core's even press elsewhere) — "dented" is now a quarter of the deepest or more, which still holds the
+        // rule: the stamp sinks where it sits, the far face does not take its squish; Curves dents it all
         func dented() -> Int {
-            let v = FlexibleShownValues(model: m).values[key] ?? []
-            return v.filter { if case .depth(let d) = $0 { return d > 1e-6 } else { return false } }.count
+            let shown = FlexibleShownValues(model: m)
+            let v = shown.values[key] ?? []
+            return v.filter { if case .depth(let d) = $0 { return d > 0.25 * shown.maxDepth } else { return false } }.count
         }
         try await FlexibleHisProject.waitFor(30, "the drawn map") { m.liveS[key] != nil }
         let curvesDented = dented()

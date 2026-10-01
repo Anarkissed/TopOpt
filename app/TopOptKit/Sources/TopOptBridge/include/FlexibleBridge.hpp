@@ -564,9 +564,61 @@ struct FlexSquishSolution {
   std::vector<int32_t> held_nodes;          // rest / exit: the held sole nodes
   std::vector<int32_t> pinned_dofs;         // 3 * node + component, every Dirichlet DOF
   std::vector<int32_t> resting_missing;     // resting ids the scene does not declare
+  // ★ BATCH N: the STEPPED solve's receipt (a linear solve: one solve, load factor 1)
+  int64_t session = 0;                      // step_begin: the session to step (0: none — see failure)
+  double load_factor = 1.0;                 // x the design force this field is at
+  int32_t fixed_point_iterations = 0;       // core solves this step took (secant iterations)
+  bool fixed_point_converged = false;       // the last iterate moved <= tolerance x max|u| AND was
+                                            // UNDAMPED (batch N verification: a damped solve's small
+                                            // change does not say the field has settled)
+  double fixed_point_change = 0;            // that last relative change
+  double fixed_point_omega = 1;             // the last solve's damping (1 = undamped)
+  int32_t solid_elements = 0;               // the part's elements (the shares below are of them)
+  int32_t inflated_elements = 0;            // solid elements whose volume GROWS > 30 % (det(I + grad u)
+                                            // > 1.3 at the centre): a turn the small-strain sim
+                                            // draws as a stretch — never a press
+  double volume_ratio_max = 0;              // the largest det(I + grad u) over the solid elements
+  int32_t cg_iterations_total = 0;          // CG iterations over this step's solves
+  bool mg_skipped = false;                  // the session's multigrid stagnated: Jacobi-CG directly
+  double step_ms = 0;                       // the whole step (waits, solves, the receipt, the finish)
+  double strain_p50 = 0, strain_p99 = 0, strain_max = 0;  // the solid elements' principal
+                                            // compressive strain (the curves' axis) at this field
+  int32_t beyond_data_elements = 0;         // elements past the curves' last tested strain
+  int32_t stress_updates = 0;               // elements the last iterate updated by their STRESS
+                                            // (where the curve stiffens) rather than their strain
 };
 FlexSquishSolution flexible_scene_squish_solve(int64_t scene, const FlexSquishRequest& req,
                                                BridgeError& err);
+// ── BATCH N: the squish solved in STEPS (material-nonlinear; maintainer: "Is there no way to
+// fold realistically instead?") ──
+// The SAME problem as flexible_scene_squish_solve (grid, loads, rests, pins, inertia relief),
+// built once; each step solves it at `load_factor` x the design force with every voxel's modulus
+// the SECANT of core's tested curve at the voxel's OWN principal compressive strain — damped
+// fixed-point iterations u <- K(E(eps(u)))^-1 (lambda f), warm-started (core's initial_guess) from
+// the last step's field scaled to the new load, until an UNDAMPED solve moves max|du| <=
+// tolerance x max|u|, or `max_iterations` solves. A call at the SAME load factor as the last one
+// continues its increment (its damping carries on — the app calls ONE solve at a time so a cancel or
+// a waiting solve is heard between solves); another load factor starts an increment afresh. Skin and
+// solid voxels keep their moduli. Same posture, mutex, deadline (per call) and work budget (per
+// solve) as the linear solve.
+struct FlexSquishStepOptions {
+  int32_t law_past_data = 1;        // past the curves' last tested strain: 0 = the curve held at its
+                                    // last tested secant (no stiffening — the red control); 1 =
+                                    // densification (Gibson & Ashby: sigma -> infinity at
+                                    // eps_D = 1 - c rho, joined C1 to the curve)
+  double densification_coeff = 1.4;  // c in eps_D = 1 - c rho
+};
+FlexSquishSolution flexible_scene_squish_step_begin(int64_t scene, const FlexSquishRequest& req,
+                                                    const FlexSquishStepOptions& opt, BridgeError& err);
+FlexSquishSolution flexible_squish_step(int64_t session, double load_factor, int32_t max_iterations,
+                                        double tolerance, BridgeError& err);
+void flexible_squish_step_end(int64_t session);
+// TESTS: sessions not yet ended (a cancelled refine must end its own).
+int64_t flexible_squish_live_sessions();
+// One voxel's modulus by the STEPPED law (MPa) at its own strain — the tests' reading of the curve
+// and of the densification past it.
+double flexible_squish_step_modulus(const FlexSquishLaw& law, double rho, double strain, double skin_frac,
+                                    const FlexSquishStepOptions& opt, BridgeError& err);
 // One scene voxel's modulus (MPa; relative units under shape_only) by the law above: the secant
 // of core's curve at clamp(strain, 0.02, the strain limit) (0.05, the initial modulus, when
 // strain == 0), mixed with the solid modulus by the skin share; rho < 0 = solid.

@@ -225,11 +225,13 @@ extension MeshRenderer {
         // ★ BATCH G VERIFICATION: "Play all" plays each group ALONE — its own colours come in with its
         // field and mesh (a stale set, from another overlay, is never applied: it must match the mesh)
         let id = pass.feFields[want].simID
-        if let t = pass.feTints?.tints(id), want < pass.feMesh.count, t.count / 8 == pass.feMesh[want].count / 3 {
+        // ★ BATCH N: each VERSION's own colours (a refined field's heat swaps in with its shape, at rest)
+        let key = pass.feFields[want].versionKey
+        if let t = pass.feTints?.tints(key), want < pass.feMesh.count, t.count / 8 == pass.feMesh[want].count / 3 {
             setVertexTints(t)
-            pass.feTintsShown = id
+            pass.feTintsShown = key
         }
-        loop.shownIndex = want
+        loop.noteShown(index: want, key: key, simID: id)   // ★ BATCH N VERIFICATION: a version swap refreshes the page
         loop.notePlaying(id)
     }
 }

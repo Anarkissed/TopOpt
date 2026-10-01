@@ -18,6 +18,13 @@
 // Before this, the gate was checked in pump() and the sim entered core one main-actor hop later,
 // and `busy()` read the Stress model's PHASE, which Cancel drops while its solve keeps running —
 // the verifier put a sim inside core beside a running Stress solve both ways.
+// ★ BATCH N: THEN EACH GROUP AGAIN, IN STEPS (FlexibleFERefine). Once every quick sim of the request
+// has finished, each group whose quick field landed is refined — the shown group first, one at a
+// time, under the SAME claim (taken in the step that commits it). Between SOLVES (★ verification:
+// it was between increments — up to 6 solves, 6.5 s on his Group 1, with nobody listening) the
+// refine yields core to a solve that waits for it (`FlexibleCoreGate.yieldSim`) and stops if its
+// lattice was replaced (`cancel` — its current solve finishes, its session ends, its result is
+// dropped). The request (the per-voxel arrays) is kept until the last refine ends.
 
 import Foundation
 import TopOptKit
@@ -36,8 +43,10 @@ public enum FlexibleSquishState: Equatable, Sendable {
 public final class FlexibleSquishSolver {
 
     /// Process-wide: a sim holds core right now (claimed, queued on the bridge or solving — the
-    /// Stress solve waits on it).
-    nonisolated public static var solving: Bool { inFlight.value > 0 }
+    /// Stress solve waits on it). ★ BATCH N: a REFINE is not counted here — it yields core to a
+    /// waiting solve between solves (`FlexibleCoreGate.yieldSim`), so the Stress solve starts
+    /// and its claim waits at most one solve instead of the whole refine.
+    nonisolated public static var solving: Bool { inFlight.quickInCore > 0 }
     /// Posted on the main queue when the last sim in core (of ANY model) comes out — a Stress solve
     /// that waited starts then, whichever model's sim it waited for (another project's included).
     public static let idleNotification = Notification.Name("FlexibleSquishSolver.idle")
@@ -53,6 +62,14 @@ public final class FlexibleSquishSolver {
     var onResult: (Int, String, FlexibleSquishState) -> Void = { _, _, _ in }
     /// The queue ran dry (the Stress solve it held back may start).
     var onIdle: () -> Void = {}
+    // ★ BATCH N: the refines
+    /// The landed quick field of a sim (the model's cache) — what its refine starts from.
+    var linearField: (String) -> FlexibleFEField? = { _ in nil }
+    /// On the main actor: (generation, sim id, the increment being solved, total) — ★ verification: once
+    /// when the refine CLAIMS core (step 1, so the line never blanks) and at each increment's start.
+    var onRefineProgress: (Int, String, Int, Int) -> Void = { _, _, _, _ in }
+    /// One per ended refine, on the main actor.
+    var onRefine: (Int, String, FlexibleFERefine.Outcome) -> Void = { _, _, _ in }
 
     private let queue = DispatchQueue(label: "app.topopt.flexible.fe", qos: .utility)
     private var request: FlexibleFERequest?
@@ -64,6 +81,13 @@ public final class FlexibleSquishSolver {
     /// ★ BATCH M (M3): sims of the current request that failed — the request is KEPT while one has (a
     /// Stress Retry re-runs it without rebuilding the lattice).
     private var failedIDs: Set<String> = []
+    /// ★ BATCH N: the refines still to run (the shown first), the one running, and its cancel flag.
+    private var refineOrder: [String] = []
+    private(set) var refining: String?
+    /// The generation of the refine running (tests: an old lattice's refine stopping).
+    private(set) var refiningGeneration: Int?
+    private var refineToken = FlexibleRefineToken()
+    private(set) var refineCount = 0
 
     // test controls (the app never sets them)
     /// How many sims may be in flight at once (the rule is ONE; a red control sets 2).
@@ -73,6 +97,22 @@ public final class FlexibleSquishSolver {
     var controlDeadlineMS: Double?
     /// These sims run with a 1 ms deadline (they fail; the others solve).
     var controlFailSimIDs: Set<String> = []
+    /// ★ BATCH N controls: no refine at all (batch G / M — the quick field only); the refine's
+    /// increments, its law past the data, its tolerance and iterations (one solve per increment: it does
+    /// not settle), its budget; a refine that ignores `cancel`; one that never yields core.
+    var controlNoRefine = false
+    var controlRefineIncrements: Int?
+    var controlRefinePastData: FlexSquishPastData?
+    var controlRefineUnsettled = false
+    var controlRefineBudgetS: Double?
+    var controlRefineIgnoresCancel = false
+    var controlRefineNoYield = false
+    /// Each pause between a refine's solves waits this long first (tests: a cancel or a waiting solve
+    /// lands mid-refine).
+    var controlRefineStepDelayS = 0.0
+    /// ★ BATCH N VERIFICATION, RED control: batch N's first loop — one bridge call per increment, the
+    /// cancel and the waiting solve heard only between increments.
+    var controlRefinePollPerIncrement = false
     /// RED CONTROL of the one claim: the pre-verification gate — `busy()` checked in pump(), the sim
     /// counted only once it runs on the queue, whatever else holds core.
     var controlLateClaim = false
@@ -86,7 +126,11 @@ public final class FlexibleSquishSolver {
     var generation: Int? { request?.generation }
     /// Pending sim ids, in the order they will run.
     var pending: [String] { order }
-    var isIdle: Bool { running.isEmpty && (order.isEmpty || request == nil) }
+    var isIdle: Bool { running.isEmpty && (order.isEmpty || request == nil) && refining == nil && (refineOrder.isEmpty || request == nil) }
+    /// ★ BATCH N: no refine runs or waits.
+    var refineIdle: Bool { isIdle }
+    /// The refines still queued (tests).
+    var pendingRefines: [String] { refineOrder }
 
     /// Solve every sim of `r` on `scene` — `first` (the shown sim) before the others.
     func schedule(_ r: FlexibleFERequest, scene: FlexibleScene, first: String?) {
@@ -94,12 +138,21 @@ public final class FlexibleSquishSolver {
         self.scene = scene
         failedIDs = []
         order = r.sims.map(\.id)
+        // ★ BATCH N: every group refined after the quick sims (none for a shape-only lattice: its law
+        // is a unit conversion, nothing to step)
+        refineToken.cancel()
+        refineToken = FlexibleRefineToken()
+        refineOrder = controlNoRefine || r.law.shapeOnly ? [] : r.sims.map(\.id)
         if let first { promote(first) }
         pump()
     }
 
-    /// A pick of a sim still pending: it runs next.
+    /// A pick of a sim still pending: it runs next (its refine too).
     func promote(_ id: String) {
+        if let i = refineOrder.firstIndex(of: id), i > 0 {
+            refineOrder.remove(at: i)
+            refineOrder.insert(id, at: 0)
+        }
         guard let i = order.firstIndex(of: id), i > 0 else { return }
         order.remove(at: i)
         order.insert(id, at: 0)
@@ -112,6 +165,9 @@ public final class FlexibleSquishSolver {
         request = nil
         scene = nil
         failedIDs = []
+        // ★ BATCH N: a refine running stops after its current increment (its result is dropped)
+        refineOrder = []
+        if !controlRefineIgnoresCancel { refineToken.cancel() }
         finishIfIdle()
     }
 
@@ -121,12 +177,18 @@ public final class FlexibleSquishSolver {
         guard let r = request, r.sims.contains(where: { $0.id == id }), !running.contains(id) else { return false }
         failedIDs.remove(id)
         if !order.contains(id) { order.insert(id, at: 0) }
+        // ★ BATCH N: its refine was dropped with the failed quick sim — it follows the retry
+        if !controlNoRefine, !r.law.shapeOnly, refining != id, !refineOrder.contains(id) { refineOrder.insert(id, at: 0) }
         pump()
         return true
     }
 
     /// Returns once nothing is queued or running (tests' teardown: no bridge call outlives them).
+    /// ★ BATCH N: a refine queued or running is CANCELLED first (its current increment finishes) —
+    /// the quick sims are what this waits for; `FlexibleStageModel.waitForRefines` waits for refines.
     func waitForIdle(timeoutS: Double = 180) async {
+        refineOrder = []
+        if refining != nil, !controlRefineIgnoresCancel { refineToken.cancel() }
         if isIdle { return }
         let start = Date()
         while !isIdle, Date().timeIntervalSince(start) < timeoutS {
@@ -136,7 +198,9 @@ public final class FlexibleSquishSolver {
 
     private func pump() {
         guard let r = request, let scene else { finishIfIdle(); return }
-        while running.count < max(1, controlConcurrency), let id = order.first {
+        // ★ BATCH N: a refine still on the queue (a cancelled one finishing its increment) goes first —
+        // a new lattice's quick sim never claims core beside it
+        while running.count < max(1, controlConcurrency), refining == nil, let id = order.first {
             // ★ the claim is taken HERE, on the main actor, in the step that commits the sim
             let late = controlLateClaim
             if busy() || !(late || Self.inFlight.tryEnterSim()) {
@@ -176,7 +240,77 @@ public final class FlexibleSquishSolver {
                 self?.finished(r.generation, id, result)
             }
         }
+        if order.isEmpty, running.isEmpty { pumpRefine(r, scene) }
         finishIfIdle()
+    }
+
+    /// ★ BATCH N: the next refine, once every quick sim has finished — claimed like a sim.
+    private func pumpRefine(_ r: FlexibleFERequest, _ scene: FlexibleScene) {
+        while refining == nil, let id = refineOrder.first {
+            guard let sim = r.sims.first(where: { $0.id == id }), let lin = linearField(id), lin.generation == r.generation else {
+                refineOrder.removeFirst()   // its quick sim failed (or none): nothing to refine
+                continue
+            }
+            let late = controlLateClaim
+            if busy() || !(late || Self.inFlight.tryEnterSim(yieldable: true)) {
+                guard !retrying else { return }
+                retrying = true
+                Task { @MainActor [weak self] in
+                    try? await Task.sleep(nanoseconds: UInt64(Self.busyRetryS * 1e9))
+                    self?.retrying = false
+                    self?.pump()
+                }
+                return
+            }
+            refineOrder.removeFirst()
+            refining = id
+            refiningGeneration = r.generation
+            refineCount += 1
+            let token = refineToken
+            let gen = r.generation
+            let bits = controlBits
+            let incs = controlRefineIncrements ?? FlexibleFERefine.increments
+            let past = controlRefinePastData ?? FlexibleFERefine.pastData
+            let budget = controlRefineBudgetS ?? FlexibleFERefine.budgetS
+            let unsettled = controlRefineUnsettled, noYield = controlRefineNoYield, ignore = controlRefineIgnoresCancel
+            let delay = controlRefineStepDelayS, perIncrement = controlRefinePollPerIncrement
+            let q = queue
+            // ★ BATCH N VERIFICATION: the line from the moment the refine claims core (it blanked ~1.5 s
+            // while the first increment ran) — in the same main-actor step as the claim
+            onRefineProgress(gen, id, 1, incs)
+            Task { @MainActor [weak self] in
+                let outcome: FlexibleFERefine.Outcome = await withCheckedContinuation { cont in
+                    q.async {
+                        if late { Self.inFlight.increment(yieldable: true) }
+                        let o = FlexibleFERefine.run(
+                            sim, of: r, on: scene, linear: lin, control: bits, pastData: past, increments: incs, budgetS: budget,
+                            unsettled: unsettled, pollPerIncrement: perIncrement,
+                            cancelled: { !ignore && token.isCancelled },
+                            between: {
+                                if delay > 0 { usleep(useconds_t(delay * 1e6)) }
+                                if !noYield { Self.inFlight.yieldSim() }
+                            },
+                            progress: { step, total in
+                                Task { @MainActor [weak self] in self?.onRefineProgress(gen, id, step, total) }
+                            })
+                        if Self.inFlight.leaveSim(yieldable: true) { Self.postIdle() }
+                        cont.resume(returning: o)
+                    }
+                }
+                self?.refineFinished(gen, id, outcome)
+            }
+            return
+        }
+    }
+
+    private func refineFinished(_ generation: Int, _ id: String, _ outcome: FlexibleFERefine.Outcome) {
+        if refining == id { refining = nil; refiningGeneration = nil }
+        onRefine(generation, id, outcome)
+        if request?.generation == generation, order.isEmpty, running.isEmpty, refineOrder.isEmpty, failedIDs.isEmpty {
+            request = nil
+            scene = nil
+        }
+        pump()
     }
 
     private func finished(_ generation: Int, _ id: String, _ result: Result<FlexibleFEField, FlexibleSquishFailure>) {
@@ -187,8 +321,9 @@ public final class FlexibleSquishSolver {
             if request?.generation == generation { failedIDs.insert(id) }
             onResult(generation, id, .failed(e.why))
         }
-        if request?.generation == generation, order.isEmpty, running.isEmpty, failedIDs.isEmpty {
+        if request?.generation == generation, order.isEmpty, running.isEmpty, failedIDs.isEmpty, refineOrder.isEmpty, refining == nil {
             // ★ the per-voxel arrays (~12 B per scene voxel + 4 per sim) are released after the last solve
+            // (★ BATCH N: and the last refine)
             request = nil
             self.scene = nil
         }
@@ -201,7 +336,7 @@ public final class FlexibleSquishSolver {
 
     private func finishIfIdle() {
         guard isIdle else { return }
-        if request != nil, order.isEmpty, failedIDs.isEmpty { request = nil; scene = nil }
+        if request != nil, order.isEmpty, failedIDs.isEmpty, refineOrder.isEmpty { request = nil; scene = nil }
         onIdle()
     }
 }
@@ -222,9 +357,13 @@ public final class FlexibleCoreGate: @unchecked Sendable {
     static let shared = FlexibleCoreGate()
     private let cond = NSCondition()
     private var sims = 0, peak = 0, others = 0, othersWaiting = 0
+    /// ★ BATCH N: of `sims`, the refines (they yield between increments).
+    private var yieldable = 0
 
     /// Sims holding core now.
     var value: Int { cond.lock(); defer { cond.unlock() }; return sims }
+    /// ★ BATCH N: quick sims holding core now (a refine yields; FlexibleSquishSolver.solving).
+    var quickInCore: Int { cond.lock(); defer { cond.unlock() }; return sims - yieldable }
     /// Other solves (Stress, octet, a local run) holding core now.
     var othersInCore: Int { cond.lock(); defer { cond.unlock() }; return others }
     /// Other solves waiting for the sims to leave (they go before the next queued sim).
@@ -235,18 +374,42 @@ public final class FlexibleCoreGate: @unchecked Sendable {
 
     /// A sim claims core — only when no other solve holds it or waits for it (the other goes next:
     /// a run or a Stress solve is never starved by the queue of sims). Never blocks.
-    func tryEnterSim() -> Bool {
+    func tryEnterSim(yieldable y: Bool = false) -> Bool {
         cond.lock(); defer { cond.unlock() }
         guard others == 0, othersWaiting == 0 else { return false }
         sims += 1
+        if y { yieldable += 1 }
         peak = max(peak, sims)
         return true
     }
+    /// ★ BATCH N: a refine between solves (★ verification: it was between increments), on its queue — when another solve WAITS for core it goes
+    /// first: the sim leaves, waits until no other solve holds or waits for core and no sim is in it
+    /// (never two in core), then claims it again. Returns the seconds it yielded (0: nobody waited).
+    @discardableResult
+    func yieldSim() -> Double {
+        cond.lock(); defer { cond.unlock() }
+        guard othersWaiting > 0 else { return 0 }
+        let t0 = Date()
+        sims = max(0, sims - 1)
+        yieldable = max(0, yieldable - 1)
+        yields += 1
+        cond.broadcast()
+        while others > 0 || othersWaiting > 0 || sims > 0 { cond.wait() }
+        sims += 1
+        yieldable += 1
+        peak = max(peak, sims)
+        return Date().timeIntervalSince(t0)
+    }
+    /// How many times a refine yielded core (tests).
+    var yieldCount: Int { cond.lock(); defer { cond.unlock() }; return yields }
+    private var yields = 0
+
     /// A sim leaves core; true when it was the last.
     @discardableResult
-    func leaveSim() -> Bool {
+    func leaveSim(yieldable y: Bool = false) -> Bool {
         cond.lock(); defer { cond.unlock() }
         sims = max(0, sims - 1)
+        if y { yieldable = max(0, yieldable - 1) }
         cond.broadcast()
         return sims == 0
     }
@@ -268,7 +431,7 @@ public final class FlexibleCoreGate: @unchecked Sendable {
         cond.broadcast()
     }
     // tests: count a sim in core without the gate (a sim of another model, the red controls)
-    func increment() { cond.lock(); sims += 1; peak = max(peak, sims); cond.unlock() }
+    func increment(yieldable y: Bool = false) { cond.lock(); sims += 1; if y { yieldable += 1 }; peak = max(peak, sims); cond.unlock() }
     func decrement() { _ = leaveSim() }
 
     /// ★ LatticeSimModel's runner (the Stress view's solve, the octet's) inside core — its ONE hook.
@@ -305,4 +468,12 @@ public final class FlexibleCoreGate: @unchecked Sendable {
         set { cond.lock(); othersDoNotClaim = newValue; cond.unlock() }
     }
     private var othersDoNotClaim = false
+}
+
+/// ★ BATCH N: a refine's cancel flag (set on the main actor, read on the sims' queue).
+final class FlexibleRefineToken: @unchecked Sendable {
+    private let lock = NSLock()
+    private var cancelled = false
+    func cancel() { lock.lock(); cancelled = true; lock.unlock() }
+    var isCancelled: Bool { lock.lock(); defer { lock.unlock() }; return cancelled }
 }
