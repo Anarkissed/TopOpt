@@ -330,10 +330,11 @@ final class LatticeSectorOutlineTests: XCTestCase {
         XCTAssertEqual(LatticeSectorOutline.evenOddArea(uv), 5000, accuracy: 1e-6, "★ half the face on the wire")
     }
 
-    /// ★ "Frozen" only when protected — and never "Out of regime". The words, and where they are
-    /// used (a source pin on the row chip and the drawer, which are #354's files).
-    func testTheWordsSayProtectedOnlyWhenProtected() throws {
-        XCTAssertEqual(LatticeSectorOutline.notLatticedWords(protected: true), "Protected, not latticed")
+    /// ★ Never "Frozen", never "Out of regime" (batch E review: two words, protected or not). The
+    /// words, and where they are used (a source pin on the row chip and the drawer, #354's files).
+    func testTheWordsAreTwoAndNeverFrozen() throws {
+        // ★ RE-PINNED (batch E review): two words either way (the row's capsule wrapped three)
+        XCTAssertEqual(LatticeSectorOutline.notLatticedWords(protected: true), "Not latticed")
         XCTAssertEqual(LatticeSectorOutline.notLatticedWords(protected: false), "Not latticed")
         for w in [true, false].map(LatticeSectorOutline.notLatticedWords) {
             XCTAssertFalse(w.lowercased().contains("frozen"))
@@ -343,12 +344,12 @@ final class LatticeSectorOutlineTests: XCTestCase {
         XCTAssertEqual(unprotected.headline?.text, "Not latticed", "★ an unprotected region is never called frozen")
         XCTAssertNotEqual(unprotected.headline?.verdict, .outOfRegime, "★ never 'Out of regime'")
         let protected = LatticeRegionDrawer.make(card: nil, depthMM: 7, held: true, latticeReachesTheRun: false)
-        XCTAssertEqual(protected.headline?.text, "Protected, not latticed")
+        XCTAssertEqual(protected.headline?.text, "Not latticed")
         // the row chip reads the group's protection
         var root = URL(fileURLWithPath: #filePath); for _ in 0..<3 { root.deleteLastPathComponent() }
         let wp = try String(contentsOf: root.appendingPathComponent("Sources/TopOptFlows/WorkspacePlaceholder.swift"), encoding: .utf8)
         XCTAssertTrue(wp.contains("Text(LatticeSectorOutline.notLatticedWords(protected: force.isProtected(g.id)))"),
-                      "the row chip says Protected only for a protected group")
+                      "the row chip reads the words")
     }
 
     // MARK: - the emission, pure

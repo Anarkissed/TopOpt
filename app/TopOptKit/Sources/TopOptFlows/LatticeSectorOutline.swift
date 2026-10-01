@@ -45,13 +45,21 @@ public enum LatticeSectorOutline {
     /// A loop smaller than this (mm²) is a sliver of arithmetic, not surface.
     static let minAreaMM2 = 1e-9
 
-    // MARK: - the words (his rule: "Frozen" only when it is protected, never "Out of regime")
+    // MARK: - the words (his rule: never "Frozen", never "Out of regime")
 
     /// ★ THE ROW CHIP AND THE DRAWER HEADLINE for a region whose lattice choice reaches no run (a
-    /// piece with no surface on this model, a stale region): three words, plain. "Protected" is his
-    /// word for what the main page calls frozen — and only when the group IS protected.
+    /// piece with no surface on this model, a stale region). ★ BATCH E REVIEW: two words, either way
+    /// — the chip sits in a 9 pt capsule beside Lattice / Solid / Off / depth, where "Frozen, not
+    /// latticed" wrapped to two lines (img 4) and "Protected, not latticed" would too; the group's
+    /// shield already says Protected. (`protected` is kept so the hooks read the same.)
     public static func notLatticedWords(protected: Bool) -> String {
-        protected ? "Protected, not latticed" : "Not latticed"
+        "Not latticed"
+    }
+
+    /// ★ BATCH E REVIEW: a card's held voxels scaled to the piece's share of its face (nil ⇒ the face's).
+    public static func heldVoxels(_ voxels: Int, share: Double?) -> Int {
+        guard let share, share.isFinite else { return voxels }
+        return Int((Double(voxels) * Swift.max(0, Swift.min(1, share))).rounded())
     }
 
     // MARK: - one face, clipped to one piece
@@ -310,11 +318,17 @@ public enum LatticeSectorOutline {
         return total
     }
 
-    // MARK: - a piece cut again meets its neighbour at a T
+    // MARK: - a piece meets its neighbours at a T
 
-    /// ★ Split every own-face edge of a clipped piece where another prism of the SAME face has a
-    /// vertex inside it, so `finishSeams` — which pairs edges end to end — sees the seam between a
-    /// half and the two quarters cut from its sibling. Pieces only: an unsplit prism is untouched.
+    /// ★ Split every edge where a piece's edge starts or stops along it, so `finishSeams` — which
+    /// decides an edge WHOLE (end to end, or by its midpoint) — decides each stretch on its own:
+    ///   * a piece cut again: the long cut edge of its sibling is split at the T, so the half and
+    ///     the two quarters cut from it pair as seams;
+    ///   * ★ (batch E review) a face whose edge only HALF borders a latticed piece (face 2's top edge
+    ///     under top A, x 50…100, and under unlatticed top B, x 0…50): split at x = 50, the stretch
+    ///     under top A is a seam and the one under top B stays a RIM. Unsplit, the edge's midpoint
+    ///     lay on top A's edge and the whole edge lost its rim.
+    /// A pair is split only when one of the two is a piece: with no piece the prisms are untouched.
     static func meetAtTJunctions(_ out: inout [LatticeRegionSpec], pieces: Set<Int>) {
         guard !pieces.isEmpty else { return }
         func world(_ r: LatticeRegionSpec) -> ((SIMD2<Double>) -> SIMD3<Double>)? {
@@ -323,29 +337,29 @@ public enum LatticeSectorOutline {
             let (bu, bv) = LatticeRegionMask.basis(n)
             return { r.origin + bu * $0.x + bv * $0.y }
         }
-        var byFace: [FaceID: [(region: Int, p: SIMD3<Double>)]] = [:]
+        var verts: [(region: Int, p: SIMD3<Double>)] = []
         for (i, r) in out.enumerated() where r.kind == .face && r.role == .include {
-            guard let raw = r.rawFaceID, let w = world(r) else { continue }
-            for loop in r.outlineLoops { for q in loop { byFace[raw, default: []].append((i, w(q))) } }
+            guard let w = world(r) else { continue }
+            for loop in r.outlineLoops { for q in loop { verts.append((i, w(q))) } }
         }
         let tolMM = 1e-4
-        for ri in pieces.sorted() where ri < out.count {
-            let r = out[ri]
-            guard r.kind == .face, r.role == .include, let raw = r.rawFaceID, let w = world(r),
-                  !r.outlineSeamFaces.isEmpty else { continue }
-            let others = (byFace[raw] ?? []).filter { $0.region != ri }
+        for ri in out.indices where out[ri].kind == .face && out[ri].role == .include {
+            guard let w = world(out[ri]) else { continue }
+            // a piece meets every latticed prism; any other prism meets the pieces only
+            let others = verts.filter { $0.region != ri && (pieces.contains(ri) || pieces.contains($0.region)) }
             guard !others.isEmpty else { continue }
-            var loops = r.outlineLoops, seams = r.outlineSeams, faces = r.outlineSeamFaces
+            var loops = out[ri].outlineLoops, seams = out[ri].outlineSeams, faces = out[ri].outlineSeamFaces
             var changed = false
-            for l in loops.indices where l < faces.count {
+            for l in loops.indices {
                 let loop = loops[l]
+                let hasF = l < faces.count && faces[l].count == loop.count
+                let hasS = l < seams.count && seams[l].count == loop.count
                 var nl: Loop = [], ns: [Bool] = [], nf: [Int?] = []
                 for i in loop.indices {
                     let a = loop[i], b = loop[(i + 1) % loop.count]
-                    let fi: Int? = i < faces[l].count ? faces[l][i] : nil
-                    let si = l < seams.count && i < seams[l].count ? seams[l][i] : false
+                    let fi: Int? = hasF ? faces[l][i] : nil
+                    let si = hasS ? seams[l][i] : false
                     nl.append(a); ns.append(si); nf.append(fi)
-                    guard fi == Int(raw) else { continue }            // only an edge across its own face
                     let A = w(a), d = w(b) - A
                     let len = simd_length(d)
                     guard len > 2 * tolMM else { continue }
@@ -364,8 +378,8 @@ public enum LatticeSectorOutline {
                     }
                 }
                 loops[l] = nl
-                if l < seams.count { seams[l] = ns }
-                faces[l] = nf
+                if hasS { seams[l] = ns }
+                if hasF { faces[l] = nf }
             }
             if changed {
                 out[ri].outlineLoops = loops
@@ -494,6 +508,43 @@ extension ProjectModel {
         }
         guard !idx.isEmpty else { return nil }
         return ViewerMesh(vertices: v, indices: idx, faceIDs: fid, faceGeometry: mesh.faceGeometry)
+    }
+}
+
+extension ProjectModel {
+
+    /// ★ BATCH E REVIEW: the share of its card's face a CUT piece covers, by key. The drawer's card is
+    /// built on a region's first member face (`latticeCardFace`, #354's rule) — for a piece that read
+    /// the WHOLE face's grams (top A "Hands over 218.5 g" for a slab of half the top). Area of the
+    /// face clipped to the piece over the face's own area, both in the face's own frame (each planar
+    /// facet of a curved face). Only pieces are listed: every other card is its face, unchanged.
+    public func latticeCardHeldShares() -> [String: Double] {
+        guard let mesh = viewerMesh else { return [:] }
+        var out: [String: Double] = [:]
+        func area(_ shapes: [LatticeRegionEmission.ResolvedFace]) -> Double? {
+            var total = 0.0
+            for sh in shapes {
+                guard case let .plane(_, _, _, _, loops, _) = sh, !loops.isEmpty else { return nil }
+                total += LatticeSectorOutline.evenOddArea(loops)
+            }
+            return total
+        }
+        for g in selection.groups where lattice.groupRoles[g.id] != nil {
+            for ref in latticeSelectableRefs(g) {
+                guard case let .region(_, rid) = ref, let r = faceRegions.region(rid), !r.cuts.isEmpty,
+                      let f = latticeCardFace(ref, in: g) else { continue }
+                let resolved = LatticeRegionEmission.planeFor(face: f, in: mesh)
+                let facets = LatticeFaceFacets.facets(face: f, in: mesh)
+                var planar = false
+                if let w = resolved, case .plane = w { planar = true }
+                guard let whole = area(planar ? [resolved!] : facets), whole > 1e-9 else { continue }
+                let piece = LatticeSectorOutline.pieces(f, cutSets: latticeRegionCutSets(rid, face: f),
+                                                        resolve: { _ in resolved }, facets: { _ in facets })
+                guard let kept = area(piece.shapes) else { continue }   // a cylinder kept whole: the face's
+                out[ref.key] = Swift.max(0, Swift.min(1, kept / whole))
+            }
+        }
+        return out
     }
 }
 

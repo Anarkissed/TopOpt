@@ -10826,6 +10826,7 @@ public struct WorkspacePlaceholder: View {
         let densityGCM3 = model.densityGCm3(for: project.material)
         let depthsCopy = depths
         let rhosCopy = rhos
+        let sharesCopy = project.latticeCardHeldShares()   // ★ batch E review: a cut piece holds its share of the face
         Task.detached(priority: .userInitiated) {
             guard let preview = try? TopOptKit.faceSlabPreview(
                 stepPath: path, faceIDs: ids, depthsMM: depthsCopy,
@@ -10834,7 +10835,7 @@ public struct WorkspacePlaceholder: View {
             for (i, fid) in ids.enumerated() where i < preview.voxels.count {
                 byKey[keysCopy[i]] = LatticeFaceCardDerivation.card(
                     faceID: fid, depthMM: depthsCopy[i],
-                    heldVoxels: preview.voxels[i], spacingMM: preview.spacingMM,
+                    heldVoxels: LatticeSectorOutline.heldVoxels(preview.voxels[i], share: sharesCopy[keysCopy[i]]), spacingMM: preview.spacingMM,
                     densityGCM3: densityGCM3, topology: topology,
                     // ★ THE MODE'S OWN DENSITY, WHICH NO CALL SITE PASSED UNTIL
                     // NOW (task 2026-08-17-lattice-stage-repair §1d). nil is

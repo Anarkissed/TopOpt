@@ -95,7 +95,7 @@ public enum LatticeRegionEmission {
         /// emission floors it. nil ⇒ the run lattices no face prism for that face (a bolt, no
         /// role, lattice off, no shape) — its protection keeps its own depth.
         public func slabDepthMM(runFaceID id: Int) -> Double? {
-            regions.first { $0.kind == .face && $0.faceID == id }?.depthMM
+            regions.first { $0.kind == .face && $0.faceID == id && !$0.sectorPiece }?.depthMM   // ★ batch E review: a piece is not its face
         }
 
         /// ★★ THE DEPTH A REGION'S SLAB EMITS (maintainer, 2026-10-01, round 3 ruling a): the
@@ -455,7 +455,7 @@ public enum LatticeRegionEmission {
                         s.selectableKey = ref.key
                         s.rawFaceID = f
                         if role == .include, let sf = synthetic { s.syntheticStress = true; s.syntheticFoci = sf.foci(for: ref.key) }
-                        if piece.clipped { sectorPieces.insert(out.count) }
+                        if piece.clipped { s.sectorPiece = true; sectorPieces.insert(out.count) }
                         out.append(s); emitted += 1
                     }
                     if emitted == 0, !piece.clippedAway { skipped += 1 }
