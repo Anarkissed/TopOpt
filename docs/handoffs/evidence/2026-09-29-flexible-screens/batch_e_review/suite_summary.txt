@@ -1,0 +1,18 @@
+# Targeted suite on 10cf60e0 (filter TopOptFlowsTests\.(Flexible|Lattice|UnifiedShadingTests|ViewerTests|StageBackdropTests|Smoothing|ProjectStoreTests|UndoHistoryTests|Surface|FaceRegion|OrganicCapsuleImpostorTests|BottomBarMeasurementTests|FrozenRegion|GroupViewStateTests|Organic|ProtectFreezeVsSolidityTests|StrutLineWidthTests|Variant))
+	 Executed 2051 tests, with 44 tests skipped and 4 failures (0 unexpected) in 13748.744 (13748.938) seconds
+	 Executed 2051 tests, with 44 tests skipped and 4 failures (0 unexpected) in 13748.744 (13748.940) seconds
+Test Case '-[TopOptFlowsTests.LatticeCellGradingTests testGradingChangesTheRenderedLattice]' failed (10.971 seconds).
+Test Case '-[TopOptFlowsTests.LatticeSimSolveTriggerTests testTheTriggerRefusesOnAllThreeGrounds]' failed (0.016 seconds).
+Test Case '-[TopOptFlowsTests.OrganicSampleCubeTests testThickerIsLiveAndNeverRetraces]' failed (0.001 seconds).
+Test Case '-[TopOptFlowsTests.OrganicVariantCacheTests testTheKeyIgnoresThicknessAndFollowsCoreAndTopology]' failed (0.002 seconds).
+# 2a6bf173 (card-share cache): LatticeSector* + AppModelTests
+	 Executed 17 tests, with 0 failures (0 unexpected) in 0.825 (0.826) seconds
+	 Executed 2 tests, with 0 failures (0 unexpected) in 0.299 (0.299) seconds
+	 Executed 31 tests, with 8 failures (0 unexpected) in 0.688 (0.690) seconds
+	 Executed 56 tests, with 8 failures (0 unexpected) in 2.910 (2.915) seconds
+	 Executed 56 tests, with 8 failures (0 unexpected) in 2.910 (2.916) seconds
+	 Executed 6 tests, with 0 failures (0 unexpected) in 1.099 (1.099) seconds
+Test Case '-[TopOptFlowsTests.AppModelTests testReopenedThreeMFProjectReimportsTheStlWorkingCopy]' failed (0.517 seconds).
+Test Case '-[TopOptFlowsTests.AppModelTests testThreeMFImportNormalisesToStlWorkingCopyAndKeepsProvenance]' failed (0.001 seconds).
+Test Case '-[TopOptFlowsTests.AppModelTests testThreeMFImportOptimisesOnDeviceEndToEnd]' failed (0.001 seconds).
+# iOS: ** BUILD SUCCEEDED ** on 10cf60e0 and again on 2a6bf173

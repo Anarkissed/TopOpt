@@ -1,5 +1,141 @@
 # Handoff — 2026-09-29-flexible-screens (TRACK app, A1): the Flexible screens
 
+## Round 5 · batch E review — what the check found once a piece was latticed (read this first)
+
+A second pass checked batch E against your pad, both as saved and with the taps. It reported 13
+findings (two of them the same). I confirmed all 12 and rejected none. All are fixed below except
+three: the colour cue on the part, the drawer's doubled label, and the two calls only you can make.
+**The app was not launched: nothing here has been seen on a device or the simulator.**
+
+**Main page (Topology / Lattice stage):**
+- **A piece no longer changes its face's protection.** Before this fix, latticing 'top A' at 25 mm
+  silently deepened a protect-only top from 5 mm to 25 mm across the WHOLE top, top B included. It
+  stays 5 mm now. (`top A`'s prism goes to core without the face's id: it is a piece, not face 1.)
+- **A job core refused runs again.** Face 1 protected + Lattice at 6 mm in one group, top A at 25 mm
+  in another, had become "face 1 is BOTH protected and a lattice region, at two different depths".
+  Core accepts it now.
+- **Rims along an edge that half borders a piece.** Face 2's top edge is a seam where it meets
+  latticed top A (x 50…100) and keeps its rim under unlatticed top B (x 0…50). It had lost the rim
+  along the whole edge.
+- **The grams for a piece.** Top A's drawer counted the whole top's material ("Hands over 218.5 g").
+  It now counts top A's half.
+- **The chip is two words: "Not latticed"**, protected or not. "Protected, not latticed" would have
+  wrapped to two lines in the row, like "Frozen, not latticed" in img 4. The Lattice page's line for
+  protect + "lattice here" now reads "TO keeps its shape, the inside is latticed", without "frozen".
+
+**Flexible:**
+- **The big Lattice pill still starts core.** With "No lattice under Top B" on it, every tap
+  re-opened Settings and core was out of reach. The line stays, but the tap now goes to the Export
+  step, as for any preview. The fix lives on Settings' line [Fix] and in the pop-up.
+- **It pops when the page opens**, with the face selected: "Top B has no lattice under it, so it
+  can't squish" [Lattice under it] [Top B rests].
+- **One tap for several faces.** Your round-5 copy shows "Only 23 % of Face 3 has lattice under it"
+  with **[Lattice under both] [Face 3 rests]**. One tap, one undo step, both faces pulse.
+- **Calibrate-first keeps your label**: the pill reads "TPU 95A: shape only — no squish predicted",
+  and the Settings line reads "Ready · shape only · No lattice under Top B".
+- **"Deepest squish" on a face with no lattice under it** now reads "No lattice under it"
+  [Lattice under it]. The 3D chip is hidden. Before, it showed "3.0 mm" and silently clamped every
+  edit to 0.5 mm. Your 3.0 mm is kept.
+- **The face's stack line gives the share**: "lattice under 23 % · 100.0–100.0 mm deep". It had
+  read "lattice 100.0–100.0 mm deep" while 77 % of the face had none.
+- **The toast names the protected selection**: "Top B: lattice under it, 20 mm deep · new
+  protected selection “Top B”".
+
+**Not done:**
+- **No colour or hatch on the part** for a pressed face without lattice under it. The cue is text
+  only (pill, line, pop-up, row).
+- **The drawer's leftover headline still shows two labels**: "No material  Not latticed". It only
+  appears for a region with no surface left on the model. Removing the verdict label would take
+  another WorkspacePlaceholder hook.
+- **The pop-up appears each time Settings opens** while a face has no lattice under it, the same as
+  a blocker. It has no "keep as is" button.
+- **Most Flexible suites still restore your pad WITH the taps** (they test drawing, the dent and the
+  stress on a fully latticed pad). The as-saved view is pinned in its own tests (below).
+- **Not seen on a device or the simulator.** The iOS build succeeds.
+- **Cherry-pick for #354** still not built on #354's branch.
+
+**Your call (open):**
+1. **Should a pressed face ALWAYS get lattice under it, with no tap?** (call 4 from batch E, still
+   open). As saved, your round-3 copy lattices only top A (top B: 0 of 2048 columns). Your round-5
+   copy lattices a 4.2 mm slab under the top, with Faces 3 and 5 at 192 of 832 columns. It now pops
+   once and is fixed in one tap.
+2. **The union's 4 mm** (call 1 from batch E, still open). Top A's 25 mm is folded under 'Union of
+   2', whose row reads 4.0 mm (the group's default). Should a folded piece's own depth win?
+3. **New: a latticed piece of a face protected WHOLE in another group.** The piece is latticed to its
+   own depth. The face keeps its own protection, so the Optimize run may thin the material under the
+   piece below that depth. The alternative is to also protect the piece's area to the piece's depth
+   (as a whole latticed face already is). Which?
+
+### How (one line each)
+
+- `LatticeRegionSpec.sectorPiece` marks a prism clipped to a piece. `slabDepthMM(runFaceID:)` skips
+  it, and `wireDictionary` sends it without `face_id`. Core's depth tie, and the receipts that
+  map regions back to faces, are keyed on the face.
+- `LatticeSectorOutline.meetAtTJunctions` now splits ANY latticed prism's edge where a piece's edge
+  starts or stops along it (and a piece's edge where another prism's does). With no piece, nothing
+  is touched.
+- `ProjectModel.latticeCardHeldShares()`: a cut piece's card holds its share of its first member
+  face (clipped area over face area); `LatticeSectorOutline.heldVoxels` scales the voxel count.
+- Flexible: `FlexibleLatticeUnder.mainStatus` sets the pill's line and its preview tone;
+  `readyLine` keeps "shape only"; `offerAll` adds [Lattice under both]; `nothingToSquish` /
+  `stackInfo` give the row and the stack line; the new file `FlexibleLatticeUnderViews.swift`
+  holds the row. `FlexibleFixPrompt` pops the face on open.
+
+### Hook lines in #354 / main files (this pass; each grepped after the edit)
+
+| file | anchor | +/− | why |
+|---|---|---|---|
+| LatticeSettings.swift | after `public var selectableKey: String? = nil`: `public var sectorPiece: Bool = false` (+ its doc line) | +2 | the mark |
+| LatticeSettings.swift | `if let fid = faceID, !sectorPiece { entry["face_id"] = fid }` | 1 edited | a piece is not its face on the wire |
+| LatticeRegionEmission.swift | `slabDepthMM(runFaceID:)`: `… && $0.faceID == id && !$0.sectorPiece }?.depthMM` | 1 edited | a piece never sets its face's protection |
+| LatticeRegionEmission.swift | `if piece.clipped { s.sectorPiece = true; sectorPieces.insert(out.count) }` | 1 edited | mark it |
+| WorkspacePlaceholder.swift | `refreshLatticeFaceCards`: `let sharesCopy = project.latticeCardHeldShares()` | +1 | the piece's share |
+| WorkspacePlaceholder.swift | `heldVoxels: LatticeSectorOutline.heldVoxels(preview.voxels[i], share: sharesCopy[keysCopy[i]])` | 1 edited | the drawer's grams |
+| FrozenRegionLatticeStatus.swift | the protect + "lattice here" reason: "… — TO keeps its shape, the inside is latticed." | 2 edited | never "frozen" |
+
+No core file. No case added to `LatticeStageMode`. MetalMeshView untouched.
+`LatticeSectorOutline.swift` is batch E's own new file. The Flexible half touches Flexible files
+only: FlexibleLatticeUnder, FlexibleReadiness, FlexibleMainStage, FlexibleFixPopup,
+FlexibleFacePanel, FlexibleDepthChips, and the new FlexibleLatticeUnderViews.
+
+### Tests
+
+| test | pins | RED control |
+|---|---|---|
+| `LatticeSectorReviewTests` (new, 6) | the whole top keeps its own protection, with no `face_id` on the piece and core accepting (control: the whole top latticed is one 25 mm slab and names face 1). Protected + 6 mm face beside a 25 mm piece: core accepts (in-test control: the same emission unmarked is refused, "two different depths"). Face 2's top edge: rim 0…50 / seam 50…100 (controls: both halves give seam 0…100; top off gives rim 0…100). The preview reads −0.5 mm under B and −19.5 under A. Top A's card share is 0.5 (controls: whole top has none; a cut at x = 90 gives 0.1). The words. | R1a, R1b, R1c, R2, R3, R4, R5 |
+| `FlexibleLatticeUnderReviewTests` (new, 7) | the pill's tone and tap (control: batch E's `fix` tone opened Settings); his label and "shape only"; the pop on open (control: no pop without the open; a blocker first); [Lattice under both / all 3] (controls: one face; a face with no one-tap edit); the deepest row and the stack line; his pad AS SAVED, rounds 3 and 5 | F1–F7 |
+| re-pinned | `LatticeSectorOutlineTests` (the words; the test renamed `testTheWordsAreTwoAndNeverFrozen`), `LatticeSeparationRegionTests` (words), `ProtectFreezeVsSolidityTests` (no "frozen"), `FlexibleLatticeUnderTests` (tone + tap), `FlexibleBatchBReviewTests.testANewLatticeRegionOnTheMainPageRebuilds` (as saved, voxels 26 624 → 29 120 plus the key), `FlexibleReadinessTests.testHisProjectAsSavedHasNothingToFix` (also as saved: "Ready · No lattice under Top B") | — |
+
+Mutation runs: `batch_e_review/mutations_review.txt` (14 of 14 RED). Stage job bytes:
+`batch_e_review/stage_job_hashes_review.txt`. His 10 unsplit projects are byte-identical to
+before/after/final. The split pad loses `face_id` on its pieces only
+(`pad_stage_job_review.diff`).
+
+### Build and suite (raw lines, this Mac)
+
+- `swift build --build-tests` → `Build complete!` (core untouched).
+- **Targeted suite** on `10cf60e0` (the same filter as batch E): `Executed 2051 tests, with 44 tests
+  skipped and 4 failures (0 unexpected) in 13748.744 (13748.938) seconds`. The 4 are the known ones:
+  `LatticeCellGradingTests.testGradingChangesTheRenderedLattice`,
+  `LatticeSimSolveTriggerTests.testTheTriggerRefusesOnAllThreeGrounds`,
+  `OrganicSampleCubeTests.testThickerIsLiveAndNeverRetraces`,
+  `OrganicVariantCacheTests.testTheKeyIgnoresThicknessAndFollowsCoreAndTopology`. Batch E's re-pinned
+  `LatticeVariantFaceWallsTests` passes.
+- On `2a6bf173` (the card-share follow-up): `LatticeSector*` 25 tests, 0 failures. `AppModelTests`:
+  only the known 3MF ×3.
+- **iOS:** `xcodebuild … -derivedDataPath …/DerivedData/flexA1 build` → `** BUILD SUCCEEDED **`
+  on `10cf60e0` and again on `2a6bf173`. The app was not launched or installed.
+- `batch_e_review/suite_summary.txt`.
+
+### Commits (nothing pushed)
+
+- `f7026df0` — #354 side: a piece is not its face; edges per stretch; a piece's grams; "Not latticed".
+- `10cf60e0` — Flexible: the pill sends; pops on open; one tap for all; the deepest row; the toast.
+- `2a6bf173` — #354 side, follow-up: the card-share pass resolves each face once.
+- the next commit: this section, DECISIONS D-R5-E7…E12, evidence (`batch_e_review/`).
+- **For #354: cherry-pick `f7026df0` and `2a6bf173`** after batch E's `ad00765f`, `3cb4da7d`,
+  `7a9e0302`. Not built on #354's branch.
+
 ## Round 5 · batch E — "a protected face isn't frozen" (your item 4)
 
 Your words: "For some reason a protected face is considered frozen - however, that is how we make a
