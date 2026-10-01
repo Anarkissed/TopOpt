@@ -39,8 +39,10 @@ public final class FlexSquishSteps: @unchecked Sendable {
     deinit { end() }
 
     /// One step: the problem at `loadFactor` × the design force, up to `iterations` secant solves
-    /// until max|Δu| ≤ `tolerance` · max|u|. The field is RAW (mm at that load), extended like the
-    /// linear solve's.
+    /// until an UNDAMPED solve moves max|Δu| ≤ `tolerance` · max|u|. The field is RAW (mm at that
+    /// load), extended like the linear solve's. ★ BATCH N VERIFICATION: a call at the SAME load factor
+    /// as the last one CONTINUES its increment (its damping carries on) — FlexibleFERefine calls one
+    /// solve at a time, so a cancel or a waiting solve is heard between solves.
     public func step(loadFactor: Double, iterations: Int, tolerance: Double) throws -> FlexSquishSolutionInfo {
         guard session > 0, !ended else { throw TopOptError(message: "the squish steps' session has ended") }
         var err = topoptbridge.BridgeError()
@@ -58,6 +60,12 @@ public final class FlexSquishSteps: @unchecked Sendable {
 
     /// TESTS: sessions alive in the bridge (a cancelled refine must leave none).
     public static var liveSessions: Int { Int(topoptbridge.flexible_squish_live_sessions()) }
+
+    /// ★ BATCH N VERIFICATION, test control bits (the request's `control`): every increment starts
+    /// DAMPED (ω = ¼), and the RED control of the convergence rule — a damped solve's small change
+    /// counts as converged (batch N's first rule).
+    public static let controlStartDamped = 65536
+    public static let controlDampedConverges = 131072
 }
 
 extension FlexibleScene {

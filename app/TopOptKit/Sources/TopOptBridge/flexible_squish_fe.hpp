@@ -42,6 +42,8 @@ int coarsen(int nx, int ny, int nz);
 // ★ BATCH N: the squish solved in STEPS (material-nonlinear). `step_begin` builds the problem ONCE
 // (out.session > 0; a failure is a value, malformed input throws); each `step` solves it at a load
 // factor by damped secant iterations, warm-started from the last step; `step_end` frees it.
+// ★ Batch N verification: only an UNDAMPED solve may stop an increment, and a call at the same load
+// factor continues the last one's increment (the app calls one solve at a time).
 FlexSquishSolution step_begin(const Setup& s, const FlexSquishRequest& req,
                               const topopt::flexible::FlexibleData& data, const FlexSquishStepOptions& opt);
 FlexSquishSolution step(int64_t session, double load_factor, int max_iterations, double tolerance);

@@ -52,7 +52,8 @@ final class FlexibleSquishStepsTests: XCTestCase {
         XCTAssertTrue(steps.setup.ok, steps.setup.failure)
         var all: [FlexSquishSolutionInfo] = []
         for i in 1...n {
-            let s = try steps.step(loadFactor: lambda * Double(i) / Double(n), iterations: i == n ? 6 : 3, tolerance: 0.02)
+            // (★ batch N verification: 10 on the last — FlexibleFERefine.finalIterations; only an undamped solve stops)
+            let s = try steps.step(loadFactor: lambda * Double(i) / Double(n), iterations: i == n ? 10 : 3, tolerance: 0.02)
             XCTAssertTrue(s.ok, s.failure)
             all.append(s)
         }
@@ -241,6 +242,55 @@ final class FlexibleSquishStepsTests: XCTestCase {
         let eo = FE.mirrorError(o)
         print(String(format: "FLEX-N SYMMETRY control (off-centre): %.3g (x) · %.3g (y)", eo.x, eo.y))
         XCTAssertGreaterThan(max(eo.x, eo.y), 0.05, "control: an off-centre stamp is not symmetric")
+    }
+
+    // MARK: - ★ BATCH N VERIFICATION: only an UNDAMPED solve stops an increment
+
+    /// The verifier, on his Group 1: the last increment stopped on a ¼-DAMPED solve whose change was
+    /// 1.6 % — a damped solve moves the moduli only part of the way to the curve, so its change is small
+    /// whatever the distance — and the next undamped solve moved 4.2 % (the field was 7 %, 1.5 mm, short of
+    /// its fixed point). Here every increment STARTS damped (the test control), on the over-squished patch:
+    /// each converged increment must have stopped on an undamped solve, and one more undamped solve from
+    /// it must move ≤ the tolerance. RED CONTROL: batch N's rule (a damped change counts) — the next
+    /// undamped solve moves past it.
+    func testOnlyAnUndampedSolveStopsAnIncrement() throws {
+        let pad = try FE.pad()
+        let rho = pad.rho { _ in 0.15 }
+        let press = try Self.patch(pad, weightN: 210, radius: 15)
+        var worstNext: [String: Double] = [:]
+        for (name, control) in [("rule", FlexSquishSteps.controlStartDamped),
+                                ("RED control (a damped change counts)", FlexSquishSteps.controlStartDamped | FlexSquishSteps.controlDampedConverges)] {
+            let r = Self.request(pad, pressed: [press], resting: [FE.bottom], rho: rho, control: control)
+            let steps = try pad.scene.squishSteps(r)
+            defer { steps.end() }
+            var lines: [String] = []
+            var worst = 0.0
+            var convergedDamped = 0
+            for i in 1...4 {
+                let lambda = Double(i) / 4
+                let s = try steps.step(loadFactor: lambda, iterations: 20, tolerance: 0.02)
+                XCTAssertTrue(s.ok, s.failure)
+                guard s.fixedPointConverged else { lines.append(String(format: "λ %.2f ✗ after %d", lambda, s.fixedPointIterations)); continue }
+                if s.fixedPointOmega < 1 { convergedDamped += 1 }
+                // one more UNDAMPED solve from the field it stopped on (a fresh increment at the same λ would
+                // restart damped: the session continues THIS one, whose damping the stop left at 1)
+                let next = try steps.step(loadFactor: lambda, iterations: 1, tolerance: 0.02)
+                XCTAssertTrue(next.ok, next.failure)
+                worst = max(worst, next.fixedPointChange)
+                lines.append(String(format: "λ %.2f ✓ %d solves, last ω %.2f change %.4f → next undamped %.4f (ω %.2f)", lambda,
+                                    s.fixedPointIterations, s.fixedPointOmega, s.fixedPointChange, next.fixedPointChange, next.fixedPointOmega))
+            }
+            worstNext[name] = worst
+            print("FLEX-NV UNDAMPED \(name): " + lines.joined(separator: " · "))
+            if control & FlexSquishSteps.controlDampedConverges == 0 {
+                XCTAssertEqual(convergedDamped, 0, "no increment stops on a damped solve")
+                XCTAssertLessThanOrEqual(worst, 0.02, "the field it stopped on is within the tolerance of the next undamped solve")
+            } else {
+                XCTAssertGreaterThan(convergedDamped, 0, "control: increments stop on damped solves")
+                XCTAssertGreaterThan(worst, 0.02, "control: …and the next undamped solve moves past the tolerance")
+            }
+        }
+        print("FLEX-NV UNDAMPED worst next change: \(worstNext)")
     }
 
     func testAStepIsTheLinearProblemAndASessionEnds() throws {

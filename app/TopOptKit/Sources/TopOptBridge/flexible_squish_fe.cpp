@@ -83,6 +83,11 @@ enum Control : int {
   kFixedCap = 8192,
   kKeepGlobals = 16384,
   kNoFarAnvil = 32768,
+  // ★ BATCH N VERIFICATION (tests only): every increment's secant iterations start DAMPED (ω = ¼), so
+  // the convergence rule is exercised on a damped solve; and the RED control of that rule — batch N's
+  // first one, where a damped solve's small change counted as converged.
+  kStartDamped = 65536,
+  kDampedConverges = 131072,
 };
 
 std::mutex g_squish_fe_mu;
@@ -1105,10 +1110,15 @@ double min_eig_sym(double a, double b, double c, double d, double e, double f) {
 // strain would be (1 − 2ν)·ε there, i.e. depend on the ν = 0.3 the tables cannot back). The
 // symmetric part drops the rotation (a rigid turn closes no cell); under shear γ it reads γ/2 —
 // the compressive diagonal, along which a sheared cell does close. Small strain, like the solve.
-void element_strains(const Problem& P, const std::vector<double>& u, std::vector<double>& eps) {
+// ★ BATCH N VERIFICATION: `dets` (when given) — each solid element's det(I + ∇u) at its centre, its
+// volume ratio. Under a press a lattice never GROWS; past ~1.3 an element is a TURN that the
+// small-strain kinematics draw as a stretch (his Group 1's edge above the thumb: up to 1.97×).
+void element_strains(const Problem& P, const std::vector<double>& u, std::vector<double>& eps,
+                     std::vector<double>* dets = nullptr) {
   const FE& fe = P.fe;
   const double s = 0.25 / fe.g.spacing;
   eps.assign(fe.E.size(), 0.0);
+  if (dets != nullptr) dets->assign(fe.E.size(), 1.0);
   for (int k = 0; k < fe.g.nz; ++k)
     for (int j = 0; j < fe.g.ny; ++j)
       for (int i = 0; i < fe.g.nx; ++i) {
@@ -1131,8 +1141,19 @@ void element_strains(const Problem& P, const std::vector<double>& u, std::vector
         const double lmin = min_eig_sym(G[0][0], G[1][1], G[2][2], 0.5 * (G[0][1] + G[1][0]),
                                         0.5 * (G[1][2] + G[2][1]), 0.5 * (G[0][2] + G[2][0]));
         eps[fe.g.index(i, j, k)] = std::max(0.0, -lmin);
+        if (dets != nullptr) {
+          const double a00 = 1 + G[0][0], a01 = G[0][1], a02 = G[0][2];
+          const double a10 = G[1][0], a11 = 1 + G[1][1], a12 = G[1][2];
+          const double a20 = G[2][0], a21 = G[2][1], a22 = 1 + G[2][2];
+          (*dets)[fe.g.index(i, j, k)] = a00 * (a11 * a22 - a12 * a21) - a01 * (a10 * a22 - a12 * a20) +
+                                         a02 * (a10 * a21 - a11 * a20);
+        }
       }
 }
+
+// ★ BATCH N VERIFICATION: an element whose volume grows past this under the press is drawn by a turn
+// the small-strain sim cannot follow (the receipt counts them; the (i) says so where there are any).
+constexpr double kInflatedVolume = 1.3;
 
 // ── ★ BATCH N: a stepped session — the problem built once, solved again and again ─────────
 struct Session {
@@ -1143,6 +1164,11 @@ struct Session {
   double lambda = 0.0;
   bool jacobi_only = false;       // the session's multigrid stagnated: Jacobi-CG directly
   int steps = 0;
+  // ★ BATCH N VERIFICATION: the secant iteration's state, kept across calls AT THE SAME load factor
+  // (the app calls one solve at a time, so a cancel or a waiting solve is heard between solves) and
+  // reset when the load factor changes (a new increment)
+  double omega = 1.0;
+  double prev_change = std::numeric_limits<double>::infinity();
 };
 std::mutex g_sessions_mu;
 std::map<int64_t, std::unique_ptr<Session>> g_sessions;
@@ -1284,6 +1310,14 @@ FlexSquishSolution step(int64_t id, double load_factor, int max_iterations, doub
   out.load_factor = load_factor;
   const double t0 = topopt::steady_clock_ms();
   const std::size_t cells = P.fe.E.size();
+  // ★ BATCH N VERIFICATION: the same load factor as the last call CONTINUES its increment (the damping
+  // and the last change carry on); another one starts an increment afresh
+  const bool same_increment =
+      S->steps > 0 && std::fabs(load_factor - S->lambda) <= 1e-12 * std::max(1.0, std::fabs(load_factor));
+  if (!same_increment) {
+    S->omega = (P.control & kStartDamped) ? 0.25 : 1.0;
+    S->prev_change = std::numeric_limits<double>::infinity();
+  }
   // the predictor: the last field scaled to this load (zero before the first step)
   std::vector<double> u = S->u;
   if (u.size() == 3 * P.N && S->lambda > 0.0) {
@@ -1338,7 +1372,7 @@ FlexSquishSolution step(int64_t id, double load_factor, int max_iterations, doub
   };
   int solves = 0, cg = 0;
   bool converged = false;
-  double change = 1.0, prev_change = std::numeric_limits<double>::infinity(), omega = 1.0;
+  double change = 1.0, prev_change = S->prev_change, omega = S->omega, omega_used = omega;
   {
     const double tw = topopt::steady_clock_ms();
     std::lock_guard<std::mutex> lock(g_squish_fe_mu);
@@ -1356,6 +1390,7 @@ FlexSquishSolution step(int64_t id, double load_factor, int max_iterations, doub
         element_strains(P, u, eps);
         moduli(eps);
         // damped in log-modulus only if the iterates grow apart anyway (ω halves, never under ¼)
+        omega_used = omega;
         for (std::size_t e = 0; e < cells; ++e) {
           if (target[e] <= 0.0) { P.fe.E[e] = 0.0; continue; }
           const double t = std::max(target[e], 1e-4 * P.law.es);
@@ -1382,7 +1417,16 @@ FlexSquishSolution step(int64_t id, double load_factor, int max_iterations, doub
         change = big > 0.0 ? du / big : 0.0;
         u = std::move(sol.u);
         prevE = P.fe.E;
-        if (change <= tolerance) { converged = true; break; }
+        if (change <= tolerance) {
+          // ★ BATCH N VERIFICATION: only an UNDAMPED solve may stop. A damped one moved the moduli only
+          // part of the way to the curve, so its small change says nothing about the distance to the
+          // fixed point (his Group 1 stopped on a ¼-damped 1.6 % change 7 % — 1.5 mm — short of it, and
+          // the next undamped solve moved 4.2 %). So the next solve is undamped, and it decides.
+          if (omega_used >= 1.0 || (P.control & kDampedConverges)) { converged = true; break; }
+          omega = 1.0;
+          prev_change = std::numeric_limits<double>::infinity();
+          continue;
+        }
         if (change > prev_change) omega = std::max(0.25, 0.5 * omega);
         prev_change = change;
       }
@@ -1395,6 +1439,7 @@ FlexSquishSolution step(int64_t id, double load_factor, int max_iterations, doub
   out.fixed_point_iterations = solves;
   out.fixed_point_converged = converged;
   out.fixed_point_change = change;
+  out.fixed_point_omega = omega_used;
   out.cg_iterations_total = cg;
   out.mg_skipped = S->jacobi_only;
   out.step_ms = topopt::steady_clock_ms() - t0;
@@ -1402,6 +1447,9 @@ FlexSquishSolution step(int64_t id, double load_factor, int max_iterations, doub
   S->u = u;
   S->lambda = load_factor;
   S->steps += 1;
+  // (a call that CONTINUES a converged increment starts undamped — the tests' check solve)
+  S->omega = converged ? 1.0 : omega;
+  S->prev_change = converged ? std::numeric_limits<double>::infinity() : prev_change;
   // the receipt: the moduli the field was solved with, and the strain it is at
   double emin = std::numeric_limits<double>::infinity(), emax = 0.0;
   out.element_e.resize(cells);
@@ -1411,14 +1459,18 @@ FlexSquishSolution step(int64_t id, double load_factor, int max_iterations, doub
   }
   out.e_min_mpa = std::isfinite(emin) ? emin : 0.0;
   out.e_max_mpa = emax;
-  element_strains(P, u, eps);
+  std::vector<double> dets;
+  element_strains(P, u, eps, &dets);
   std::vector<double> solid;
   const double lim = P.law.relative ? 1.0 : P.law.set.strain_limit();
   for (std::size_t e = 0; e < cells; ++e) {
     if (P.elem_off[e] == P.elem_off[e + 1]) continue;
     solid.push_back(eps[e]);
     if (eps[e] > lim) out.beyond_data_elements += 1;
+    out.volume_ratio_max = std::max(out.volume_ratio_max, dets[e]);
+    if (dets[e] > kInflatedVolume) out.inflated_elements += 1;
   }
+  out.solid_elements = static_cast<int32_t>(solid.size());
   if (!solid.empty()) {
     auto pct = [&](double p) {
       std::vector<double> c2 = solid;

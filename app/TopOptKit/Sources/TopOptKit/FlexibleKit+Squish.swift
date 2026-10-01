@@ -131,6 +131,14 @@ public struct FlexSquishSolutionInfo: Sendable {
     public var beyondDataElements = 0
     /// Elements the last iterate updated by their STRESS (where the curve stiffens).
     public var stressUpdates = 0
+    /// ★ BATCH N VERIFICATION: the last solve's damping (1 = undamped — only an undamped solve may
+    /// stop an increment).
+    public var fixedPointOmega = 1.0
+    /// The part's elements, those whose volume GROWS > 30 % under the press (a turn the small-strain
+    /// sim draws as a stretch) and the largest volume ratio det(I + ∇u).
+    public var solidElements = 0
+    public var inflatedElements = 0
+    public var volumeRatioMax = 0.0
 
     /// Node (a, b, c)'s index (x fastest).
     public func node(_ a: Int, _ b: Int, _ c: Int) -> Int { (c * ny + b) * nx + a }
@@ -224,6 +232,10 @@ extension FlexSquishConv {
         info.strainMax = s.strain_max
         info.beyondDataElements = Int(s.beyond_data_elements)
         info.stressUpdates = Int(s.stress_updates)
+        info.fixedPointOmega = s.fixed_point_omega
+        info.solidElements = Int(s.solid_elements)
+        info.inflatedElements = Int(s.inflated_elements)
+        info.volumeRatioMax = s.volume_ratio_max
         return info
     }
 }
