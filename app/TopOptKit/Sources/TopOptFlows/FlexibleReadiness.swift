@@ -49,6 +49,9 @@ public enum FlexibleFix: Hashable, Sendable {
     case joinGroups(from: Int, into: Int)
     /// "[Keep apart]": the groups stay separate (the pop-up closes).
     case keepApart
+    /// ★ BATCH E: "[Lattice under it]" — the main page's own edit that puts lattice under the face
+    /// (FlexibleLatticeUnder).
+    case latticeUnder(Int)
 
     /// The button's words (one line, ≤ 3 words where it can).
     public func title(_ name: (Int) -> String) -> String {
@@ -60,6 +63,7 @@ public enum FlexibleFix: Hashable, Sendable {
         case .pickFilament(_, let n): return n
         case .joinGroups: return "Join the groups"
         case .keepApart: return "Keep apart"
+        case .latticeUnder: return "Lattice under it"
         }
     }
 }
@@ -74,6 +78,9 @@ public struct FlexibleIssue: Equatable, Identifiable, Sendable {
         /// (the firmer wins) — it POPS on the action that caused it, with [Join the groups]
         /// [Keep apart], but never blocks Exit.
         case groupsCompete
+        /// ★ BATCH E: a pressed face with (almost) no lattice under it cannot squish — said at once
+        /// with [Lattice under it] [<face> rests], never a blocker (FlexibleLatticeUnder).
+        case noLatticeUnder
         /// The last build failed on these settings and this scene (core's words; batch B review).
         case buildFailed
     }
@@ -120,9 +127,11 @@ public struct FlexibleReadiness: Equatable, Sendable {
     public var blocking: [FlexibleIssue] { issues.filter(\.blocking) }
     /// ★ D2 REVIEW: what the pop-up opens on — every blocker, and separate groups that compete
     /// for material (never a blocker; it pops on the action that caused it).
-    public var popping: [FlexibleIssue] { issues.filter { $0.blocking || $0.kind == .groupsCompete } }
+    public var popping: [FlexibleIssue] { issues.filter { $0.blocking || $0.kind == .groupsCompete || $0.kind == .noLatticeUnder } }
     /// The first competing group (the top line says it; its [Fix] reopens the choice).
     public var competing: FlexibleIssue? { issues.first { $0.kind == .groupsCompete } }
+    /// ★ BATCH E: the non-blocking issue the readiness line's [Fix] opens (competing groups first).
+    public var advisory: FlexibleIssue? { competing ?? FlexibleLatticeUnder.first(self) }
     public var isReady: Bool { blocking.isEmpty }
     /// The old gate's one sentence (kept for callers that only need "why not").
     public var refusal: String? { blocking.first?.oneLine }
@@ -139,6 +148,7 @@ public struct FlexibleReadiness: Equatable, Sendable {
         }
         if let failed = issues.first(where: { $0.kind == .buildFailed }) { return failed.oneLine }
         if let c = competing { return "Ready · \(c.pill)" }
+        if let n = FlexibleLatticeUnder.first(self) { return "Ready · \(n.pill)" }
         if let four = issues.first(where: { $0.kind == .squishOnFour }) {
             return "Ready · \(four.oneLine)"
         }
@@ -183,10 +193,15 @@ public struct FlexibleReadiness: Equatable, Sendable {
         public var drawn: Bool
         /// The stack's area (mm²), for "the 4 largest".
         public var areaMM2: Double
+        /// ★ BATCH E: the share of its columns with lattice under them (core's count); nil before
+        /// its stack.
+        public var latticedShare: Double?
         public init(region: Int, weightKg: Double, stacked: Bool, stackError: String? = nil,
-                    design: DesignState = .pending, drawn: Bool = false, areaMM2: Double = 0) {
+                    design: DesignState = .pending, drawn: Bool = false, areaMM2: Double = 0,
+                    latticedShare: Double? = nil) {
             self.region = region; self.weightKg = weightKg; self.stacked = stacked
             self.stackError = stackError; self.design = design; self.drawn = drawn; self.areaMM2 = areaMM2
+            self.latticedShare = latticedShare
         }
     }
 
@@ -223,6 +238,8 @@ public struct FlexibleReadiness: Equatable, Sendable {
         public var groupMisses: [FlexibleGroupEstimate.Miss] = []
         /// A group's first face (the pop-up selects it) and its faces (named).
         public var groupRegions: (Int) -> [Int] = { _ in [] }
+        /// ★ BATCH E: [Lattice under it] has a one-tap main-page edit for this face.
+        public var canLatticeUnder: (Int) -> Bool = { _ in false }
 
         public init(materialID: String?, materialName: String?, calibrateFirst: Bool,
                     withData: (id: String, name: String)?, pressed: [Face],
@@ -292,6 +309,10 @@ public struct FlexibleReadiness: Equatable, Sendable {
                                          blocking: true, fixes: [.weight(r)] + restOrRemove(r).prefix(1),
                                          pill: "Fix: the weight on \(name(r))"))
                 continue
+            }
+            // ★ BATCH E: no (or little) lattice under a pressed face — said, never blocking
+            if let share = f.latticedShare, share < FlexibleLatticeUnder.minShare {
+                out.append(FlexibleLatticeUnder.issue(r, share: share, name: name(r), canFix: i.canLatticeUnder(r)))
             }
             // a calibrate-first filament designs nothing — its lattice needs only the drawing
             guard !i.calibrateFirst else { continue }
@@ -497,7 +518,8 @@ extension FlexibleStageModel {
             }
             return FlexibleReadiness.Face(region: f.faceRegionID, weightKg: f.weightKg, stacked: st != nil,
                                           stackError: stackErrors[k].map { text($0) }, design: design,
-                                          drawn: liveS[k] != nil, areaMM2: st?.areaMM2 ?? 0)
+                                          drawn: liveS[k] != nil, areaMM2: st?.areaMM2 ?? 0,
+                                          latticedShare: latticedShare(f.faceRegionID))
         }
         let withData = catalogue.first { $0.noPrediction == nil }.map { (id: $0.id, name: $0.displayName) }
         let anyFilament = catalogue.first.map { (id: $0.id, name: $0.displayName) }
@@ -518,6 +540,7 @@ extension FlexibleStageModel {
             i.squishShown = FlexibleSqueezeGroups.squishSlots(Self.squishOrder(keys.map { (key: $0, areaMM2: stacks[$0]?.areaMM2 ?? 0) }),
                                                               pinchedWith: pinchedKeys(keys)).shown
         }
+        i.canLatticeUnder = { [weak self] r in self?.latticeUnderPlan(r) != nil }   // ★ batch E
         if squeezeGroups.count > 1 {
             i.groupMisses = groupMisses
             let gs = squeezeGroups

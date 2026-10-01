@@ -570,12 +570,12 @@ public struct FlexibleStagePage: View {
             } else if model.sceneState == .ready {
                 let r = model.readiness
                 // a failed build, and ★ (D2 review) separate groups that compete, in warning colour
-                let good = r.isReady && !r.buildFailed && r.competing == nil
+                let good = r.isReady && !r.buildFailed && r.advisory == nil   // ★ batch E: competing, or no lattice under a face
                 // ★ ROUND 5 (S9): it names the button — "Save & Exit builds…" only once something changed
                 noticePill(FlexibleSettingsExit.readyLine(r.oneLine, modified: FlexibleSettingsExit.modified(model.settings, since: opened)),
                            icon: good ? "checkmark.circle.fill" : "exclamationmark.circle.fill",
                            colour: (good ? FlexibleStageStyle.accentToken : DS.Color.warning).color,
-                           fix: r.blocking.first ?? r.competing)
+                           fix: r.blocking.first ?? r.advisory)
             }
             if let t = model.toast {
                 Text(t).font(.system(size: 12, weight: .medium)).foregroundStyle(DS.Color.textSecondary.color)

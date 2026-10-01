@@ -111,6 +111,7 @@ struct FlexibleFixPopup: View {
         case .pickFilament(let id, _): return "filament-\(id)"
         case .joinGroups(let from, let into): return "join-\(from)-\(into)"
         case .keepApart: return "keep-apart"
+        case .latticeUnder(let r): return "lattice-under-\(r)"
         }
     }
 
@@ -125,6 +126,7 @@ struct FlexibleFixPopup: View {
         case .joinGroups(let from, let into): model.mergeGroup(from, into: into)
         case .keepApart: break   // the pop-up closes; the groups stay apart
         case .weight: break   // the pad commits
+        case .latticeUnder(let r): model.latticeUnder(r)   // ★ batch E: the main page's own edit
         }
     }
 

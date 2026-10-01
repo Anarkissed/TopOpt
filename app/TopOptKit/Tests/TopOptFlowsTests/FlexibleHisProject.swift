@@ -47,8 +47,24 @@ enum FlexibleHisProject {
         repoRoot.appendingPathComponent("docs/handoffs/evidence/2026-09-29-flexible-screens/his_project_0004_r5")
     }
 
+    /// ★ BATCH E (his item 4): a split piece is latticed now, so the Flexible lattice sits where his
+    /// main page's Lattice roles put it — no longer, by accident, the whole part. On each copy of his
+    /// project the readiness then offers [Lattice under it] for the pressed faces left without lattice;
+    /// these are those taps (`FlexibleLatticeUnderTests` pins this list to what the page offers).
+    /// The suites written on the whole-part lattice restore his project WITH them (their placement is
+    /// the part again); `asSaved` restores it as he saved it.
+    static func latticeUnderTaps(_ src: URL) -> [FlexibleLatticeUnder.Plan] {
+        switch src.lastPathComponent {
+        case "his_project_0004": return [.newGroup(face: nil, region: 104, name: "Top B", depthMM: 20)]
+        case "his_project_0004_r5": return [.newGroup(face: 3, region: nil, name: "Face 3", depthMM: 50),
+                                            .newGroup(face: 5, region: nil, name: "Face 5", depthMM: 50)]
+        default: return []
+        }
+    }
+
     /// His folder under a store of our own, opened through `AppModel.open` (`source`: another copy).
-    static func restore(_ source: URL? = nil) throws -> Restored {
+    /// ★ BATCH E: with the [Lattice under it] taps above unless `asSaved`.
+    static func restore(_ source: URL? = nil, asSaved: Bool = false) throws -> Restored {
         let src = source ?? dir
         let snap = try JSONDecoder().decode(ProjectSnapshot.self, from: Data(contentsOf: src.appendingPathComponent("project.json")))
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("his-flexible-\(UUID().uuidString)", isDirectory: true)
@@ -66,6 +82,7 @@ enum FlexibleHisProject {
         app.open(recent)
         let pm = try XCTUnwrap(app.project)
         XCTAssertNotNil(pm.viewerMesh, "his part must restore")
+        if !asSaved { for tap in latticeUnderTaps(src) { pm.flexibleLatticeUnder(tap) } }
         return Restored(app: app, project: pm, root: root)
     }
 

@@ -357,7 +357,7 @@ public final class FlexibleMainStage: ObservableObject {
     /// The pill's tap: the page opens on the one thing to fix.
     public func openFix() {
         guard let m = model else { return }
-        m.pendingFix = m.readiness.blocking.first
+        m.pendingFix = m.readiness.blocking.first ?? FlexibleLatticeUnder.first(m.readiness)   // ★ batch E
     }
 
     // MARK: what the main page reads (pure reads — safe inside the body)
@@ -728,6 +728,8 @@ public struct FlexibleMainStatus: Equatable, Sendable {
         if isBuilding || r.designing || lattice == nil || stale { return .init(line: building, tone: .building, fix: nil) }
         // ★ C2 VERIFICATION: what core can't take as it stands is a preview, never the Ready green
         // (the hold is the one source: a calibrate-first filament's hold carries his shape-only label)
+        // ★ BATCH E: a pressed face with no lattice under it is said here too (before a hold: it has a fix)
+        if let n = FlexibleLatticeUnder.first(r) { return .init(line: n.pill, tone: .fix, fix: n) }
         if let hold { return .init(line: hold, tone: .preview, fix: nil) }
         return .init(line: lattice?.shapeOnlyLabel ?? ready, tone: .ready, fix: nil)
     }
