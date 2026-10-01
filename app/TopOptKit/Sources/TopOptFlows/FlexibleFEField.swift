@@ -70,6 +70,14 @@ public struct FlexibleFEField: Sendable, Equatable {
     public var partSafeScale: Double { gmaxPart > 1e-12 ? FlexibleFE.safeGradient / gmaxPart : .infinity }
     /// Identity (fields are compared by it, never by their megabytes).
     public let serial: Int
+    /// ★ BATCH N: the field was solved in STEPS (material-nonlinear — FlexibleFERefine), with its
+    /// receipt; nil: the quick linear sim. The renderer carries it through its half-rounded copy.
+    public internal(set) var refine: FlexibleFERefine.Receipt?
+    /// Solved in steps.
+    public var refined: Bool { refine != nil }
+    /// ★ BATCH N: this VERSION of the sim — the renderer, its tints and the page find the field on
+    /// screen by it (a refined field swaps in for the linear one of the same sim at REST).
+    public var versionKey: String { refined ? simID + FlexibleFERefine.versionSuffix : simID }
 
     public static func == (a: Self, b: Self) -> Bool {
         a.serial == b.serial && a.simID == b.simID && a.generation == b.generation && a.scale == b.scale
@@ -298,6 +306,21 @@ public struct FlexibleFEField: Sendable, Equatable {
         var f = scaled(by: k, uncalibrated: c.uncalibrated, asked: c.k)
         f.clamped = !c.uncalibrated && abs(banded - c.k) > 1e-9 * Swift.max(1, abs(c.k))
         f.foldShare = share
+        return f
+    }
+
+    /// ★ BATCH N: the STEPPED solve's field (FlexibleFERefine). Its u is mm at `loadFactor` × the
+    /// design force — which IS its calibrated size (k = the load factor: the force, not the field,
+    /// was scaled); `asked`: the load factor the deepest zone asked for (before the band). Never
+    /// cut: the fold cut is the LINEAR field's fallback (D-R5-N*).
+    public static func stepped(_ s: FlexSquishSolutionInfo, simID: String, generation: Int, asked: Double,
+                               uncalibrated: Bool, receipt: FlexibleFERefine.Receipt) -> FlexibleFEField {
+        var f = FlexibleFEField(solution: s, simID: simID, generation: generation)
+        f.scale = s.loadFactor
+        f.coreRatio = asked
+        f.uncalibrated = uncalibrated
+        f.clamped = !uncalibrated && abs(s.loadFactor - asked) > 1e-6 * Swift.max(1, abs(asked))
+        f.refine = receipt
         return f
     }
 }

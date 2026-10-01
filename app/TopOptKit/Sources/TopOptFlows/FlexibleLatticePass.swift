@@ -455,7 +455,9 @@ final class FlexibleLatticePass {
     /// the set of landed fields); a pick only changes the SEQUENCE. The field on screen stays bound
     /// if it is still there (a group landing in Play all never pops the one playing).
     func uploadFE(_ l: FlexibleLatticeLayerInputs) {
-        let shownID = feActive ? feFields[feShown].simID : nil
+        // ★ BATCH N: found again by its VERSION — a refined field of the sim on screen waits for the
+        // cycle's rest point (stepFlexibleFE) instead of replacing it mid-squeeze
+        let shownID = feActive ? feFields[feShown].versionKey : nil
         feToken = l.feToken
         feUploadCount += 1
         feTex = []
@@ -466,17 +468,31 @@ final class FlexibleLatticePass {
             feFields.append(Self.halfRounded(f))
         }
         feMesh = Array(l.feMesh.prefix(feFields.count))
-        feShown = shownID.flatMap { id in feFields.firstIndex { $0.simID == id } } ?? -1
+        let was = feShown
+        feShown = shownID.flatMap { id in feFields.firstIndex { $0.versionKey == id } } ?? -1
         setFESequence(l.feSequence)
+        // the page's H4 finds the field on screen by the same version
+        if feShown >= 0, feShown != was || loop?.shownKey != shownID, let lp = loop {
+            lp.shownIndex = feShown
+            lp.shownKey = feFields[feShown].versionKey
+        }
     }
 
     /// The loop's sequence (indices into the fields). The field on screen is kept when it is still
     /// in it; otherwise the next step binds the sequence's own (a pick shows at once).
     func setFESequence(_ seq: [Int]) {
         feSequence = seq.filter { $0 >= 0 && $0 < feFields.count }
-        if feShown >= 0, !feSequence.contains(feShown) { feShown = -1 }
+        // ★ BATCH N: a field on screen whose SIM is still in the sequence (its refined version took its
+        // place) stays bound until the cycle's rest point — the swap never lands mid-squeeze
+        if feShown >= 0, !feSequence.contains(feShown),
+           !(feShown < feFields.count && feSequence.contains { feFields[$0].simID == feFields[feShown].simID }) || controlVersionSwapAtOnce {
+            feShown = -1
+        }
         if feSequence.isEmpty { feShown = -1 }
     }
+    /// RED CONTROL (tests only): batch G's rule — a field not in the sequence is unbound at once, so a
+    /// refined version replaces the quick one mid-squeeze.
+    var controlVersionSwapAtOnce = false
 
     /// Bind field `i` (the renderer's swap, at rest).
     func bindFE(_ i: Int) { feShown = (i >= 0 && i < feTex.count) ? i : -1 }
@@ -517,6 +533,7 @@ final class FlexibleLatticePass {
         var r = FlexibleFEField(simID: f.simID, generation: f.generation, nx: f.nx, ny: f.ny, nz: f.nz,
                                 origin: f.origin, spacing: f.spacing, u: u, solved: f.solved, bcMode: f.bcMode)
         r = r.scaled(by: 1)
+        r.refine = f.refine   // ★ BATCH N: the version travels with the copy (the swap at rest finds it)
         return r
     }
 

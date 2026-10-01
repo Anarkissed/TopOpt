@@ -77,13 +77,16 @@ final class FlexibleMergeR5SMTests: XCTestCase {
         XCTAssertTrue(s.playAllLive)
         let seq = s.fe.sequence
         XCTAssertEqual(seq.map { s.fe.fields[$0].simID }, ["group-1", "group-2"])
-        XCTAssertEqual(Set(s.feBaseTints.keys), ["group-1", "group-2"])
+        // ★ RE-PINNED (round 5 batch N): each turn's colours are keyed by its VERSION — "group-1", or
+        // "group-1·stepped" once its refine (the squish solved in steps) landed, which it may in this test
+        XCTAssertEqual(Set(s.feBaseTints.keys.map { $0.replacingOccurrences(of: FlexibleFERefine.versionSuffix, with: "") }),
+                       ["group-1", "group-2"])
         func turns() throws -> [(id: String, checked: Int, wrong: Int)] {
             try seq.map { i in
                 s.loop.shownIndex = i
                 let t = try XCTUnwrap(s.tints(r.project, on: .lattice, roles: [:], stress: nil))
                 let id = s.fe.fields[i].simID
-                XCTAssertEqual(t, s.feTintBox.tints(id), "the page hands the turn the renderer shows")
+                XCTAssertEqual(t, s.feTintBox.tints(s.fe.fields[i].versionKey), "the page hands the turn the renderer shows")
                 let f = frameCheck(t, o, m)
                 return (id, f.checked, f.wrong)
             }

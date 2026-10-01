@@ -77,8 +77,21 @@ public enum FlexibleFE {
     /// ★ BATCH G VERIFICATION: `foldShare` — the field was cut to this share of its calibrated size
     /// so it never folds at ×1 (FlexibleFEField.calibrated) — said; and a band-held k is said in
     /// every case (it hid behind the large-strain sentence: his Face 5 moved ~⅓ of what it read).
+    /// ★ BATCH N: `stepped` — the field was solved IN STEPS on the tested curves (FlexibleFERefine): said,
+    /// with what it is not (no buckling, no self-contact), and never a cut; `kept` — its refine did not
+    /// land, so the quick linear field (and its fold cut, the fallback) stays: why, in the cut's place.
     public static func info(exaggeration k: Int, stiffer: Double? = nil, largeStrain: Bool = false, bonded: Bool = false,
-                            foldShare: Double? = nil) -> String {
+                            foldShare: Double? = nil, stepped: Bool = false, kept: String? = nil) -> String {
+        if stepped {
+            let held = bonded ? " with every rest held fast" : ""
+            let finds: String = {
+                if let r = stiffer, r > 1 { return String(format: ", finding this part %.0f× stiffer than core's columns (its skin and walls carry load)", r) }
+                if let r = stiffer, r > 0, r < 1 { return String(format: ", finding this part %.0f× softer than core's columns", 1 / r) }
+                return ""
+            }()
+            let deeper = k > 1 ? ", shown \(k)× deeper" : ""
+            return "The colours and the shape are a 3D sim\(held) solved in steps on the tested squish curves (past them the cells close and firm up)\(finds)\(deeper), with no buckling or self-contact — tap here, then the part, for the mm there."
+        }
         let sim = bonded ? "a linear 3D sim with every rest held fast (sliding, it did not settle)" : "a linear 3D sim"
         let finds: String = {
             if let r = stiffer, r > 1 { return String(format: " that finds this part %.0f× stiffer than core's columns (its skin and walls carry load)", r) }
@@ -89,7 +102,9 @@ public enum FlexibleFE {
         // a tap reads the mm there — never "core's mm" any more
         if let share = foldShare {
             let pct = Swift.max(1, Int((share * 100).rounded()))
-            return "The colours and the shape are \(sim)\(finds), its motion cut to \(pct)% so the picture never folds (the sim leaves small strain here) — tap here, then the part, for the mm there."
+            // ★ BATCH N: the cut is the FALLBACK — when the stepped sim did not land, its reason replaces the strain note
+            let why = kept ?? "the sim leaves small strain here"
+            return "The colours and the shape are \(sim)\(finds), its motion cut to \(pct)% so the picture never folds (\(why)) — tap here, then the part, for the mm there."
         }
         if largeStrain {
             // even ×1 is past s · gmax ≤ ½: the linear sim has left small strain here

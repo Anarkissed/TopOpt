@@ -131,14 +131,15 @@ extension FlexibleMainStage {
             // ★ BATCH M VERIFICATION: each group's field on ITS OWN scale (its top — FlexibleFEStress.scaleTop);
             // RED CONTROL: one scale at the sequence's peak (Group 2's turn at 7 % of Group 1's, one blue)
             let onePeak = fe.sequence.compactMap { i in i < fe.fields.count ? feStress(fe.fields[i])?.peak : nil }.max() ?? 0
-            func stressOf(_ id: String?) -> (LatticeDemandField, Double)? {
+            // ★ BATCH N: by VERSION (a quick field kept beside its refined one colours by its own stress)
+            func stressOf(_ key: String?) -> (LatticeDemandField, Double)? {
                 guard showStress else { return nil }
                 guard feRoute else { return (stressField!, stressPeak) }
-                guard let f = fe.fields.first(where: { $0.simID == id }) ?? fe.sequence.first.map({ fe.fields[$0] }),
+                guard let f = fe.fields.first(where: { $0.versionKey == key }) ?? fe.sequence.first.map({ fe.fields[$0] }),
                       let s = feStress(f) else { return nil }
                 return (s.field, controlStressScaleIsPeak ? onePeak : s.top)
             }
-            let first = fe.sequence.first.map { fe.fields[$0].simID }
+            let first = fe.sequence.first.map { fe.fields[$0].versionKey }
             composed = FlexibleMainTints.compose(base: c.tints, overlay: overlay, part: project.viewerMesh, heat: heat,
                                                  roles: roles, stress: stressOf(first), ghost: xray ? FlexibleColours.ghost : nil)
             if let m = model { FlexibleGroupFrames.paint(&composed, overlay: overlay, model: m) }   // ★ S1: the group frames in every view (Stress too)
@@ -150,9 +151,9 @@ extension FlexibleMainStage {
                                                     roles: roles, stress: stressOf(id), ghost: xray ? FlexibleColours.ghost : nil)
             }
             // ★ BATCH M (M3): Stress under Play all with Heat off — each turn its own stress too
-            if showStress, feRoute, per.isEmpty, fe.sequence.count > 1, let base = c.tints {
-                for i in fe.sequence where i < fe.fields.count {
-                    let id = fe.fields[i].simID
+            if showStress, feRoute, per.isEmpty, fe.sequence.count > 1 || !fe.retained.isEmpty, let base = c.tints {
+                for i in fe.sequence + fe.retained where i < fe.fields.count {
+                    let id = fe.fields[i].versionKey
                     per[id] = FlexibleMainTints.compose(base: base, overlay: overlay, part: project.viewerMesh, heat: heat,
                                                         roles: roles, stress: stressOf(id), ghost: xray ? FlexibleColours.ghost : nil)
                 }
@@ -165,7 +166,7 @@ extension FlexibleMainStage {
             feTintBox.set(per)
         }
         // …and the page hands the one the RENDERER shows now (a re-upload never shows another group's)
-        if let id = feShownField?.simID, let t = feTintBox.tints(id) { return t }
+        if let id = feShownField?.versionKey, let t = feTintBox.tints(id) { return t }
         return composed
     }
 
@@ -299,14 +300,18 @@ extension FlexibleMainStage {
         if fe.active {
             // ★ BATCH G VERIFICATION: small strain judged on the PART's own gradient (the extension
             // outside it is not the picture), a fold cut said, a band-held k said in every case
+            // ★ BATCH N: solved in steps — said, with what it is not (no buckling, no self-contact)
             return FlexibleFE.info(exaggeration: dentExaggeration, stiffer: fe.coreRatio,
                                    largeStrain: Double(dentExaggeration) > fe.partSafeScale, bonded: fe.restsBonded,
-                                   foldShare: fe.foldShare)
+                                   foldShare: fe.foldShare, stepped: fe.stepped,
+                                   kept: fe.stepped ? nil : fe.refineKept)
         }
         if let why = fe.failure { return FlexibleFE.failedInfo(why, exaggeration: dentExaggeration) }
         let what = (channels?.legendLine ?? "").components(separatedBy: " · ").first ?? ""
         return (what.isEmpty ? "The map" : what) + " is drawn \(dentExaggeration)× deeper so it reads — tap here, then the part, for the true mm."
     }
+    /// ★ BATCH N: "stepped" once the field on screen was solved in steps, else "linear".
+    var stressSimWord: String { feShownField?.refined == true ? "stepped" : "linear" }
     /// The Stress legend's (i): core's own words after a refusal, else what the view is.
     public var stressInfo: String {
         // ★ BATCH M (M3): the group's own sim — what it is, or core's words after a failure
@@ -314,9 +319,9 @@ extension FlexibleMainStage {
             if case .failed(let why) = stressView { return "The 3D sim of \(g) failed: \(why.replacingOccurrences(of: ". ", with: "; "))" }
             // ★ BATCH M VERIFICATION: the bar tops out below the peak (FlexibleFEStress.scaleTop) — said here
             if let s = feShownStress, s.peak > s.top * 1.0001 {
-                return "Von Mises in the part under \(g)'s squeeze, from its linear 3D sim with each voxel's own stiffness; the bar tops out at \(FlexibleProbe.mpa(s.top)) MPa so the spread reads (the peak, \(FlexibleProbe.mpa(s.peak)) MPa, is one spot) — tap here, then the part, for MPa there."
+                return "Von Mises in the part under \(g)'s squeeze, from its \(stressSimWord) 3D sim with each voxel's own stiffness; the bar tops out at \(FlexibleProbe.mpa(s.top)) MPa so the spread reads (the peak, \(FlexibleProbe.mpa(s.peak)) MPa, is one spot) — tap here, then the part, for MPa there."
             }
-            return "Von Mises in the part under \(g)'s squeeze, from its linear 3D sim with each voxel's own stiffness — tap here, then the part, for MPa there."
+            return "Von Mises in the part under \(g)'s squeeze, from its \(stressSimWord) 3D sim with each voxel's own stiffness — tap here, then the part, for MPa there."
         }
         if case .failed(let why) = stressState { return "Core could not solve the solid part: \(why)" }
         return FlexibleReadKind.stress.info

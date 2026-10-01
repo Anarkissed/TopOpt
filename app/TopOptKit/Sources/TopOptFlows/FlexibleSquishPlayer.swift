@@ -50,8 +50,13 @@ public final class FlexibleSquishLoop: ObservableObject {
     public var sequenceCount = 1
     /// The cycle held while paused (so pause / scrub / play keep the group on screen).
     public private(set) var heldCycle = 0
-    /// The sequence entry the renderer shows now (set by the renderer's swap).
-    public var shownIndex = 0
+    /// The sequence entry the renderer shows now (set by the renderer's swap). Setting it forgets
+    /// `shownKey` (a caller that names an index means that index).
+    public var shownIndex = 0 { didSet { shownKey = nil } }
+    /// ★ BATCH N: the VERSION of the sim the renderer shows (FlexibleFEField.versionKey) — set by the
+    /// renderer's swap after `shownIndex`. A refined field joins the page's fields while the renderer
+    /// still shows the quick one, so the page finds the field on screen by this, not by an index.
+    public var shownKey: String?
     /// ★ BATCH G VERIFICATION: the sim the renderer shows now — PUBLISHED on a change only (once per
     /// "Play all" turn, to this control alone), so the picker says which group plays.
     @Published public private(set) var playingSimID: String?

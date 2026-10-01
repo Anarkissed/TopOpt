@@ -248,6 +248,9 @@ public final class FlexibleMainStage: ObservableObject {
     var controlColumnSquish = false
     /// Test control only: a failed sim holds the loop at rest (no column fallback — the red control).
     var controlNoFallback = false
+    /// ★ BATCH N, test control only: the page ignores the refined fields (batch G / M — the quick field
+    /// and its fold cut for ever; the red control of the swap and the line).
+    var controlNoRefineView = false
     /// Tests: the next refresh rebuilds the overlay (a mesh rebuild mid Play all).
     func forceOverlayRebuildForTests() { overlayKey = nil }
     /// Reduced motion (tests pin it).
