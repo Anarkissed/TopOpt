@@ -90,7 +90,7 @@ public enum FlexibleFE {
                 return ""
             }()
             let deeper = k > 1 ? ", shown \(k)× deeper" : ""
-            return "The colours and the shape are a 3D sim\(held) solved in steps on the tested squish curves (past them the cells close and firm up)\(finds)\(deeper), with no buckling or self-contact — tap here, then the part, for the mm there."
+            return "The colours and the shape are a 3D sim\(held) solved in steps on the tested squish curves (past their end, untested, the cells close and firm up)\(finds)\(deeper), with no buckling or self-contact — tap here, then the part, for the mm there."
         }
         let sim = bonded ? "a linear 3D sim with every rest held fast (sliding, it did not settle)" : "a linear 3D sim"
         let finds: String = {

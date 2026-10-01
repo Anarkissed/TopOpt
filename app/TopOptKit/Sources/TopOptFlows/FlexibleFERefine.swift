@@ -54,12 +54,13 @@ public enum FlexibleFERefine {
 
     /// The player's note while the shown group refines.
     public static func refining(_ done: Int, of total: Int) -> String { "Refining the squish… \(done)/\(total)" }
-    /// The player's note when the refine failed and the quick linear squish stays.
-    public static func kept(_ why: String) -> String { "Quick squish kept · \(why)" }
+    /// The player's note when the refine failed and the quick linear squish stays (≤ 44 characters —
+    /// FlexibleRowCopy.maxChars; the reason also stands in the (i)'s cut sentence).
+    public static func kept(_ why: String) -> String { "Quick squish · \(why)" }
     /// The short reasons (one line each).
-    public static let notSettled = "the stepped sim did not settle"
-    public static let tooLong = "the stepped sim took too long"
-    public static let failedShort = "the stepped sim failed"
+    public static let notSettled = "the refine did not settle"
+    public static let tooLong = "the refine took too long"
+    public static let failedShort = "the refine failed"
 
     /// One increment's receipt.
     public struct Step: Sendable, Equatable {

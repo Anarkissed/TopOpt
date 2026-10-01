@@ -178,6 +178,23 @@ final class FlexibleSquishStepsTests: XCTestCase {
         XCTAssertEqual(s.inverted, 0, "no element inverts at full size")
         XCTAssertGreaterThan(s.minDet, 0.05)
         XCTAssertGreaterThan(h.peak, 0.8 * l.peak, "RED control 2: held at its data's end the zone does NOT firm up")
+        // measured (printed): the squish SPREADS to the neighbours, and the free sides bulge
+        func spread(_ s: FlexSquishSolutionInfo) -> (inside: Double, ring: Double, side: Double) {
+            var a = 0.0, na = 0, b = 0.0, nb = 0
+            for v in 0..<(s.nx * s.ny * s.nz) where s.solved[v] {
+                let p = s.position(v)
+                guard abs(p.z - 20) < 1e-6 else { continue }
+                let r = hypot(p.x - 50, p.y - 50), sink = -s.displacement(v).z
+                if r <= 15 { a += sink; na += 1 } else if r <= 30 { b += sink; nb += 1 }
+            }
+            let sides: [(SIMD3<Double>, SIMD3<Double>)] = [(SIMD3(0, 50, 10), SIMD3(-1, 0, 0)), (SIMD3(100, 50, 10), SIMD3(1, 0, 0)),
+                                                            (SIMD3(50, 0, 10), SIMD3(0, -1, 0)), (SIMD3(50, 100, 10), SIMD3(0, 1, 0))]
+            return (a / Double(max(na, 1)), b / Double(max(nb, 1)), sides.map { simd_dot(FE.u(s, $0.0), $0.1) }.reduce(0, +) / 4)
+        }
+        let sl = spread(lin), ss = spread(st)
+        print(String(format: "FLEX-N SPREAD linear: under the patch %.2f mm, the ring 15–30 mm %.2f mm (%.0f%%), the sides out %.3f mm (%.1f%% of under) · stepped: %.2f, %.2f (%.0f%%), %.3f mm (%.1f%%)",
+                     sl.inside, sl.ring, 100 * sl.ring / sl.inside, sl.side, 100 * sl.side / sl.inside,
+                     ss.inside, ss.ring, 100 * ss.ring / ss.inside, ss.side, 100 * ss.side / ss.inside))
     }
 
     // MARK: - the sides, the symmetry, the problem

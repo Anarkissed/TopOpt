@@ -171,6 +171,8 @@ public final class FlexibleSquishSolver {
         guard let r = request, r.sims.contains(where: { $0.id == id }), !running.contains(id) else { return false }
         failedIDs.remove(id)
         if !order.contains(id) { order.insert(id, at: 0) }
+        // ★ BATCH N: its refine was dropped with the failed quick sim — it follows the retry
+        if !controlNoRefine, !r.law.shapeOnly, refining != id, !refineOrder.contains(id) { refineOrder.insert(id, at: 0) }
         pump()
         return true
     }

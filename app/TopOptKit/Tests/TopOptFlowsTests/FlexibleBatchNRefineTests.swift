@@ -137,6 +137,11 @@ final class FlexibleBatchNRefineTests: XCTestCase {
             XCTAssertNil(stage.simNote, "\(id): the refine's line is gone once it landed")
             XCTAssertEqual(stage.stressSimWord, "stepped", "\(id): Stress reads the refined field")
         }
+        // ── the Settings page shows the selected group's refined field once it exists ──
+        for g in m.squeezeGroups {
+            let f = FlexibleSettingsSquish.field(model: m, group: g)
+            XCTAssertEqual(f?.versionKey, FlexibleSim.groupID(g.number) + FlexibleFERefine.versionSuffix, "Settings: group \(g.number)'s refined field")
+        }
         // ★ RED CONTROL: the page ignoring the refines — batch M's quick field, cut, said
         stage.controlNoRefineView = true
         stage.pick("group-1")
@@ -250,6 +255,12 @@ final class FlexibleBatchNRefineTests: XCTestCase {
                 guard case .kept(let why, _)? = state else { XCTFail("kept: \(String(describing: state))"); continue }
                 XCTAssertEqual(why, FlexibleFERefine.notSettled)
                 XCTAssertEqual(stage.simNote, FlexibleFERefine.kept(FlexibleFERefine.notSettled), "one line why")
+                for w in [FlexibleFERefine.notSettled, FlexibleFERefine.tooLong, FlexibleFERefine.failedShort] {
+                    XCTAssertLessThanOrEqual(FlexibleFERefine.kept(w).count, FlexibleRowCopy.maxChars, "one line: \(FlexibleFERefine.kept(w))")
+                }
+                XCTAssertLessThanOrEqual(FlexibleFERefine.refining(8, of: 8).count, FlexibleRowCopy.maxChars)
+                // ★ RED CONTROL: the first wording ran past the line
+                XCTAssertGreaterThan("Quick squish kept · the stepped sim did not settle".count, FlexibleRowCopy.maxChars, "control: too long")
                 XCTAssertFalse(stage.fe.stepped, "the quick field stays")
                 XCTAssertEqual(stage.feShownField?.versionKey, "group-1")
                 XCTAssertFalse(stage.dentInfo.contains("solved in steps"))
@@ -263,7 +274,10 @@ final class FlexibleBatchNRefineTests: XCTestCase {
     }
 
     func testANewLatticeCancelsTheRefineAndAWaitingSolveGetsCoreBetweenIncrements() async throws {
-        for mode in ["rule", "ignores cancel", "never yields"] {
+        // "rule": the lattice's sims dropped (a lattice with none lands) — only the model's cancel stops the
+        // refine; "new lattice": Save & Exit again — the page schedules the new lattice's sims (which cancels
+        // the old token too); the two controls on the first path
+        for mode in ["rule", "new lattice", "ignores cancel", "never yields"] {
             let before = FlexSquishSteps.liveSessions
             let (stage, m) = try await pad {
                 $0.squishSolver.controlRefineStepDelayS = 0.4
@@ -291,11 +305,18 @@ final class FlexibleBatchNRefineTests: XCTestCase {
             let waited = Date().timeIntervalSince(t1)
             let yields = FlexibleCoreGate.shared.yieldCount - yieldsBefore
             let stillRunning = m.squishSolver.refiningGeneration == oldGen
-            // a new lattice (Save & Exit after an edit): the old one's refine stops between increments
-            m.squishSolver.controlNoRefine = true   // (the new lattice refines nothing — only the old one is watched)
-            m.generateLattice()
-            try await FlexibleHisProject.waitFor(120, "the new lattice") { (m.lattice?.generation ?? oldGen) != oldGen }
-            let t0 = Date()
+            let t0: Date
+            if mode == "new lattice" {
+                // Save & Exit after an edit: the old lattice's refine stops between increments
+                m.squishSolver.controlNoRefine = true   // (the new lattice refines nothing — only the old one is watched)
+                m.generateLattice()
+                try await FlexibleHisProject.waitFor(120, "the new lattice") { (m.lattice?.generation ?? oldGen) != oldGen }
+                t0 = Date()
+            } else {
+                // the lattice's sims dropped (FlexibleStageModel.latticeLanded with no request): the model's cancel
+                t0 = Date()
+                m.latticeLanded(nil)
+            }
             while m.squishSolver.refiningGeneration == oldGen, Date().timeIntervalSince(t0) < 120 { try await Task.sleep(nanoseconds: 50_000_000) }
             let stopS = Date().timeIntervalSince(t0)
             try await Task.sleep(nanoseconds: 300_000_000)
@@ -305,16 +326,18 @@ final class FlexibleBatchNRefineTests: XCTestCase {
             XCTAssertEqual(simsInside, 0, "never beside a sim")
             XCTAssertLessThanOrEqual(FlexibleCoreGate.shared.maximum, 1, "one sim in core at a time")
             XCTAssertEqual(FlexSquishSteps.liveSessions, before, "its session ended")
-            XCTAssertNil(m.refine["group-1"], "the old lattice's refine left no result on the new one")
             switch mode {
-            case "rule":
+            case "rule", "new lattice":
+                XCTAssertNil(m.refine["group-1"], "\(mode): the cancelled refine left no result")
                 XCTAssertGreaterThan(yields, 0, "the refine yielded core between increments")
                 XCTAssertLessThan(waited, 5, "…so the waiting solve got core within an increment")
                 XCTAssertTrue(stillRunning, "…and the refine went on after it")
-                XCTAssertLessThan(stopS, 6, "a new lattice stops it at the next increment")
+                XCTAssertLessThan(stopS, 6, "\(mode): stopped at the next increment")
             case "ignores cancel":
-                // ★ RED CONTROL: a refine that ignores the cancel runs every remaining increment
+                // ★ RED CONTROL: a refine that ignores the cancel runs every remaining increment, and its
+                // result lands on a lattice that dropped its sims
                 XCTAssertGreaterThan(stopS, 6, "control: it ran on")
+                XCTAssertNotNil(m.refine["group-1"], "control: its result landed")
             default:
                 // ★ RED CONTROL: a refine that never yields — the waiting solve waits for its END
                 XCTAssertEqual(yields, 0, "control: no yield")
