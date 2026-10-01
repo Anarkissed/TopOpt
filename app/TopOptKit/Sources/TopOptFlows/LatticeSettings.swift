@@ -1676,8 +1676,8 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
     /// number the 3D depth plane drags (§3d). Absent ⇒ `groupDepthMM` ⇒
     /// `paintDepthMM`, so nothing about an untouched project moves. It is the DRAGGED
     /// depth: the emitted slab is this plus the in-plane expand, and a protected,
-    /// latticed face is protected to that emitted slab (`faceProtectionSpecs` reads the
-    /// emission's own depth — ruling 2, 2026-09-30).
+    /// latticed face or region is protected to that emitted slab (`faceProtectionSpecs`
+    /// reads the emission's own depth — ruling 2, 2026-09-30; round 3 ruling a, 2026-10-01).
     public var selectableDepthMM: [String: Double]
 
     /// ★ THE PER-SELECTABLE DENSITY — the store `LatticeRegionEmission` recorded

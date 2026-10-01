@@ -8,6 +8,8 @@ import TopOptKit
 /// so a protected, latticed face is protected to the depth its prism EMITS (depth + expand; a
 /// negative expand shrinks both), read from the emission — never a second calculation. Only jobs
 /// core refuses today change. Every verdict here is core's own parser's.
+/// ★★ ROUND 3 RULING (a) (2026-10-01): and a protected, latticed REGION likewise — even though core
+/// accepted the old encoding (its tie checks face ids only), which left the slab's last mm unfrozen.
 @MainActor
 final class LatticeProtectionFollowsSlabTests: XCTestCase {
 
@@ -85,16 +87,57 @@ final class LatticeProtectionFollowsSlabTests: XCTestCase {
         XCTAssertNil(TopOptKit.jobSchemaError(try stageDocument(p)))
     }
 
-    /// Region protections are NOT changed (core does not tie them; the ruling changes only refused
-    /// jobs): the region's prisms go deeper with its expand, its protection stays the dragged depth.
-    func testARegionsProtectionDoesNotFollowItsExpand() throws {
-        let (p, gid, rid) = VariantFacePrismFixture.project()
-        p.writeLatticeExpandMM(.region(group: gid, region: rid), mm: 4.15)
-        let members = p.latticeJobRegions().regions.filter { $0.selectableKey == LatticeSelectableRef.region(group: gid, region: rid).key }
-        XCTAssertEqual(members.count, 2)
-        XCTAssertTrue(members.allSatisfy { abs($0.depthMM - 24.15) < 1e-9 }, "control: its prisms reach 24.15 mm")
-        XCTAssertEqual(p.faceProtectionSpecs().regionDepthsMM, [20], "★ its protection stays 20 (reported, not changed)")
-        XCTAssertNil(TopOptKit.jobSchemaError(try stageDocument(p)), "core does not tie region protections")
+    /// ★★ ROUND 3 RULING (a) (maintainer, 2026-10-01): A REGION FOLLOWS ITS SLAB TOO. A
+    /// protected, latticed region is protected to the depth its prisms emit (depth + expand; a
+    /// negative expand shrinks both), the same one value from the emission as ruling 2. Core does
+    /// not tie region protections, so the old encoding was ACCEPTED — silently leaving the last
+    /// `expand` mm of the slab unfrozen (his stand's region 101: 20 against 24.15 mm).
+    func testARegionsProtectionFollowsItsSlab() throws {
+        for e in [4.15, -2.0] {
+            let (p, gid, rid) = VariantFacePrismFixture.project()
+            let key = LatticeSelectableRef.region(group: gid, region: rid).key
+            p.writeLatticeExpandMM(.region(group: gid, region: rid), mm: e)
+            let members = p.latticeJobRegions().regions.filter { $0.selectableKey == key }
+            XCTAssertEqual(members.count, 2, "control: the region's two member prisms")
+            XCTAssertTrue(members.allSatisfy { abs($0.depthMM - (20 + e)) < 1e-9 }, "control: they reach 20 + \(e) mm")
+            let prot = p.faceProtectionSpecs()
+            XCTAssertEqual(prot.regionIDs, [rid])
+            XCTAssertEqual(prot.regionDepthsMM, [members[0].depthMM], "★ expand \(e): the region's protection is its slab")
+            XCTAssertEqual(p.latticeJobRegions().slabDepthMM(selectableKey: key), members[0].depthMM)
+            let doc = try stageDocument(p)
+            let why = TopOptKit.jobSchemaError(doc)
+            XCTAssertNil(why, "core accepts — \(why ?? "")")
+            // the wire carries it
+            let loads = try XCTUnwrap((try JSONSerialization.jsonObject(with: doc) as? [String: Any])?["loads"] as? [String: Any])
+            let entry = try XCTUnwrap((loads["face_protections"] as? [[String: Any]])?.first { $0["region_id"] as? Int == Int(rid) })
+            XCTAssertEqual(try XCTUnwrap(entry["depth_mm"] as? Double), 20 + e, accuracy: 1e-9, "★ on the wire")
+        }
+    }
+
+    /// The region's protection keeps its own depth wherever the run lattices no prism under its
+    /// key — and an unexpanded region's bytes do not move.
+    func testARegionWithNoSlabOrNoExpandKeepsItsDepth() throws {
+        // no expand: the protection was already the slab's depth, byte for byte
+        do {
+            let (p, _, _) = VariantFacePrismFixture.project()
+            XCTAssertEqual(p.faceProtectionSpecs().regionDepthsMM, [20], "no expand ⇒ 20, as before")
+        }
+        // the region declared Off: no prism under its key ⇒ the dragged depth, even with an expand
+        do {
+            let (p, gid, rid) = VariantFacePrismFixture.project()
+            let ref = LatticeSelectableRef.region(group: gid, region: rid)
+            p.writeLatticeExpandMM(ref, mm: 4.15)
+            p.lattice.selectableRoles[ref.key] = .off
+            XCTAssertNil(p.latticeJobRegions().slabDepthMM(selectableKey: ref.key), "control: Off emits nothing")
+            XCTAssertEqual(p.faceProtectionSpecs().regionDepthsMM, [20], "★ no slab ⇒ its dragged depth")
+        }
+        // a protected group with no lattice role: the global protection depth
+        do {
+            let (p, gid, rid) = VariantFacePrismFixture.project()
+            p.writeLatticeExpandMM(.region(group: gid, region: rid), mm: 4.15)
+            p.lattice.groupRoles[gid] = nil
+            XCTAssertEqual(p.faceProtectionSpecs().regionDepthsMM, [p.force.faceProtectDepthMM], "★ unlatticed ⇒ the global depth")
+        }
     }
 
     /// A protected, latticed BORE is emitted as a bolt (no face prism, no depth on the wire): its

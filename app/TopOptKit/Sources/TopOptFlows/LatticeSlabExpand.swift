@@ -20,8 +20,8 @@
 //
 // ★★ WHAT THIS DOES AND DOES NOT PROTECT. The expand grows the LATTICE REGION — its
 // outline in plane, and its far end deeper (2026-09-23) — and a protected, latticed
-// face is protected to that deeper slab too (ruling 2, 2026-09-30: `faceProtectionSpecs`
-// reads the depth the emission wrote; core's tie makes the two ONE slab). IN PLANE it
+// face (ruling 2, 2026-09-30) or region (round 3 ruling a, 2026-10-01) is protected to that
+// deeper slab too: `faceProtectionSpecs` reads the depth the emission wrote, one slab. IN PLANE it
 // is held only partly: core's `mask_step_face` freezes the solid voxels within
 // (N − ½)·h of the face's OWN triangles (a 3D point-to-triangle distance), so beyond
 // the face's edge only a rounded collar of that radius is held; the band's far corner

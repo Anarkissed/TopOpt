@@ -625,7 +625,11 @@ public final class ProjectModel: ObservableObject {
     /// The app used to send the dragged depth here and depth + expand on the prism: two depths
     /// for one slab, which core refused. A face with no face prism (a bolt, no role) keeps the
     /// depth it had: its group's `LatticeSlabDepth` when latticed, else the global depth.
-    /// Region protections are unchanged (core does not tie them; see the region loop).
+    /// ★★ AND SO IS A PROTECTED, LATTICED REGION (maintainer, 2026-10-01, round 3 ruling a):
+    /// `regionDepthsMM` reads the depth the region's prisms emit, through the same emission
+    /// (`slabDepthMM(selectableKey:)`). Core does not tie region protections yet, so this was
+    /// never refused — it was silently wrong: his stand's region 101 was frozen to 20 mm while its
+    /// slab reached 24.15 mm, and the optimizer emptied up to 25 voxels of that last 4.15 mm.
     public func faceProtectionSpecs()
         -> (faceIDs: [Int], depthMM: Double, depthsMM: [Double],
             regionIDs: [RegionID], regionDepthsMM: [Double]) {
@@ -681,19 +685,20 @@ public final class ProjectModel: ObservableObject {
             // children both resolve to the same surface; emitting both describes it
             // twice with two roles and two depths, and the run keeps whichever was
             // written last. `surfaceEffectiveRegions` is the one definition.
-            // ★ NOT FOLLOWING THE EXPAND (ruling 2 changes only jobs core refuses, and core does
-            // not tie region protections): a region's protection stays its dragged depth, so an
-            // expanded region's prisms reach deeper than its protection (his stand: region 101
-            // at 24.15 mm against 20). Reported, not changed.
+            // ★★ THE DEPTH ITS SLAB EMITS (round 3 ruling a, 2026-10-01): a protected, latticed
+            // region is ONE slab, like a face (ruling 2) — the protection reads the depth the
+            // region's prisms emit (depth + expand). With no prism under its key it keeps the
+            // depth it had. His stand's region 101: 20 -> 24.15 mm (the R2b control's bytes).
             for r in surfaceEffectiveRegions(of: g) where !seenRegions.contains(r) {
                 seenRegions.insert(r)
-                let d = latticed
+                let key = LatticeSelectableRef.region(group: g.id, region: r).key
+                let d = emission.slabDepthMM(selectableKey: key) ?? (latticed
                     ? LatticeSlabDepth.depthMM(
                         ref: .region(group: g.id, region: r), group: g.id,
                         perSelectable: lattice.selectableDepthMM,
                         perGroup: lattice.groupDepthMM,
                         fallbackMM: lattice.paintDepthMM)
-                    : force.faceProtectDepthMM
+                    : force.faceProtectDepthMM)
                 regionIDs.append(r)
                 regionDepths.append(d)
             }

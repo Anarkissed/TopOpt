@@ -23,9 +23,10 @@
 //
 // Pure derivation over value types (no view, no model), so the guarantee is
 // headlessly testable. ★ This is the DRAGGED depth. What a face's slab EMITS is this
-// plus its in-plane expand (`LatticeRegionEmission`), and a protected, latticed face is
-// protected to the emitted number (ruling 2, 2026-09-30 — `faceProtectionSpecs` reads
-// `LatticeRegionEmission.Result.slabDepthMM`), so core's tie sees one depth per slab.
+// plus its in-plane expand (`LatticeRegionEmission`), and a protected, latticed face (ruling 2,
+// 2026-09-30) or region (round 3 ruling a, 2026-10-01) is protected to the emitted number —
+// `faceProtectionSpecs` reads `LatticeRegionEmission.Result.slabDepthMM` — so every slab has one
+// depth.
 
 import Foundation
 
