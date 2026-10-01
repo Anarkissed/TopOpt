@@ -45,7 +45,7 @@ enum FlexibleStampSpread {
     }
 
     /// The footprint `foot` (per column, 0…1) spread with decay length `L` on the stack's column
-    /// grid: min(1, max(foot, foot ⊛ K / the same at the stamp's outline)), K ∝ e^(−r / L).
+    /// grid: max(foot, softCap(foot ⊛ K / the same at the stamp's outline)), K ∝ e^(−r / L).
     static func spread(_ foot: [Double], stack st: FlexStackInfo, lengthMM L: Double) -> [Double] {
         let cols = st.columns
         guard foot.count == cols.count, st.nu > 0, st.nv > 0, st.pitchMM > 0, L > 0 else { return foot }
@@ -82,7 +82,19 @@ enum FlexibleStampSpread {
         edge.sort()
         let level = edge.isEmpty ? 0.5 : edge[edge.count / 2]
         guard level > 1e-12 else { return foot }
-        return foot.indices.map { Swift.min(1, Swift.max(foot[$0], conv[$0] / level)) }
+        return foot.indices.map { Swift.max(foot[$0], softCap(conv[$0] / level)) }
+    }
+
+    /// The spread's full-sink cap, SMOOTH (C¹): x below 1 − δ, 1 above 1 + δ, a parabola between (a
+    /// hard min(1, x) creased the ground between merged fingertips). Under the stamp the footprint itself
+    /// is 1, so the stamp still sinks the full depth.
+    static let capBlend = 0.3
+    static func softCap(_ x: Double) -> Double {
+        let d = capBlend
+        if x <= 1 - d { return x }
+        if x >= 1 + d { return 1 }
+        let t = x - (1 - d)
+        return x - t * t / (4 * d)
     }
 }
 

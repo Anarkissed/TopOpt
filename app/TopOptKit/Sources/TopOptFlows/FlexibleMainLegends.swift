@@ -239,9 +239,7 @@ public struct FlexibleMainLegends: View {
             Button { main.legendMinimized = false } label: {
                 HStack(alignment: .center, spacing: 8) {
                     ForEach(kinds) { k in
-                        VStack(spacing: 0) {
-                            ForEach(0..<24, id: \.self) { i in k.rampColour(1 - Double(i) / 23).color }
-                        }
+                        ramp(k, vertical: true)
                         .frame(width: 18, height: 120)
                         .clipShape(RoundedRectangle(cornerRadius: 3, style: .continuous))
                         .overlay(RoundedRectangle(cornerRadius: 3, style: .continuous).strokeBorder(DS.Color.strokeSubtle.color, lineWidth: 1))
@@ -321,12 +319,11 @@ public struct FlexibleMainLegends: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private func ramp(_ k: FlexibleReadKind) -> some View {
-        HStack(spacing: 0) {
-            ForEach(0..<24, id: \.self) { i in
-                k.rampColour(Double(i) / 23).color
-            }
-        }
+    /// ★ BATCH M (M5): a SMOOTH bar (the ramp's own stops blended — 24 flat blocks read as bands
+    /// beside a heat that no longer has any).
+    private func ramp(_ k: FlexibleReadKind, vertical: Bool = false) -> some View {
+        LinearGradient(colors: (0...16).map { k.rampColour(Double($0) / 16).color },
+                       startPoint: vertical ? .bottom : .leading, endPoint: vertical ? .top : .trailing)
     }
 
     /// The pinned reading's place on the ramp.
