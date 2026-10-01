@@ -1042,6 +1042,57 @@ FlexSquishSolution flexible_scene_squish_solve(int64_t scene, const FlexSquishRe
   }
 }
 
+// ★ BATCH N: the stepped solve — the setup copied under the scene's lock exactly as the linear
+// solve's (the part is read only while the problem is built), then the session owns its state.
+FlexSquishSolution flexible_scene_squish_step_begin(int64_t scene, const FlexSquishRequest& req,
+                                                    const FlexSquishStepOptions& opt, BridgeError& err) {
+  try {
+    auto s = scene_at(scene);
+    squishfe::Setup setup;
+    {
+      std::lock_guard<std::mutex> lock(s->mu);
+      setup.grid = s->grid;
+      for (const FlexSquishPress& p : req.pressed)
+        setup.pressed.push_back({region_of(*s, p.face_region_id), stack_of(*s, p.face_region_id, p.rotation_deg)});
+      for (int32_t id : req.resting_region_ids) {
+        const auto it = std::find_if(s->regions.begin(), s->regions.end(),
+                                     [id](const topopt::ResolvedFaceRegion& r) { return r.id == id; });
+        if (it == s->regions.end()) setup.resting_missing.push_back(id);
+        else setup.resting.push_back(*it);
+      }
+    }
+    setup.model = &s->model;
+    return squishfe::step_begin(setup, req, *data_at(req.law.materials_path), opt);
+  } catch (const std::exception& e) {
+    fail(err, e);
+    return FlexSquishSolution{};
+  }
+}
+
+FlexSquishSolution flexible_squish_step(int64_t session, double load_factor, int32_t max_iterations,
+                                        double tolerance, BridgeError& err) {
+  try {
+    return squishfe::step(session, load_factor, max_iterations, tolerance);
+  } catch (const std::exception& e) {
+    fail(err, e);
+    return FlexSquishSolution{};
+  }
+}
+
+void flexible_squish_step_end(int64_t session) { squishfe::step_end(session); }
+
+int64_t flexible_squish_live_sessions() { return squishfe::live_sessions(); }
+
+double flexible_squish_step_modulus(const FlexSquishLaw& law, double rho, double strain, double skin_frac,
+                                    const FlexSquishStepOptions& opt, BridgeError& err) {
+  try {
+    return squishfe::step_modulus(law, *data_at(law.materials_path), rho, strain, skin_frac, opt);
+  } catch (const std::exception& e) {
+    fail(err, e);
+    return 0.0;
+  }
+}
+
 double flexible_squish_modulus(const FlexSquishLaw& law, double rho, double strain,
                                double skin_frac, int32_t control, BridgeError& err) {
   try {
