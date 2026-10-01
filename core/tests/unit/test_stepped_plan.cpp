@@ -37,7 +37,7 @@ static std::string join(const std::vector<double>& v) {
 
 static void expect_menu(const char* what, double base, double bead,
                         const std::vector<double>& want) {
-  const std::vector<double> got = stepped_size_menu(base, bead);
+  const std::vector<double> got = stepped_size_menu(LatticeTopology::Octet, base, bead);
   std::printf("  menu %-22s base %.4g bead %.2f -> [%s]\n", what, base, bead,
               join(got).c_str());
   CHECK(got.size() == want.size(), what);
@@ -59,7 +59,7 @@ static void test_menu_matches_the_brief() {
   // the menu stops at quarters. The bound is on the TILE, not on the base.
   expect_menu("10.31 mm base", 10.31, 0.45, {10.31, 7.73, 6.87, 5.16, 3.44, 2.58});
 
-  const std::vector<int> d12 = stepped_admitted_divisors(12.0, 0.45);
+  const std::vector<int> d12 = stepped_admitted_divisors(LatticeTopology::Octet, 12.0, 0.45);
   CHECK(std::find(d12.begin(), d12.end(), 5) != d12.end(),
         "12 mm base: fifths are admitted (tile 2.4 prints open)");
   CHECK(std::find(d12.begin(), d12.end(), 6) == d12.end(),
@@ -67,7 +67,7 @@ static void test_menu_matches_the_brief() {
   // ★ THE CONTROL. If every divisor were admitted the menu above would be a coincidence
   // of arithmetic rather than the density bound doing work. At a FATTER bead more
   // families must fall away.
-  const std::vector<int> fat = stepped_admitted_divisors(12.0, 0.90);
+  const std::vector<int> fat = stepped_admitted_divisors(LatticeTopology::Octet, 12.0, 0.90);
   CHECK(fat.size() < d12.size(),
         "CONTROL: a fatter bead admits FEWER families -- the density bound is live");
 }
@@ -86,7 +86,7 @@ static void test_menus_match_the_previews_live_histogram() {
                                     6.00,  5.16,  4.80, 4.00, 3.44, 3.00, 2.58, 2.40};
   std::vector<double> mine;
   for (double base : {12.0, 10.31})
-    for (double s : stepped_size_menu(base, 0.45)) mine.push_back(s);
+    for (double s : stepped_size_menu(LatticeTopology::Octet, base, 0.45)) mine.push_back(s);
   std::sort(mine.begin(), mine.end(), std::greater<double>());
   mine.erase(std::unique(mine.begin(), mine.end(),
                          [](double a, double b) { return std::fabs(a - b) < 1e-9; }),
@@ -122,8 +122,8 @@ static void test_menus_match_the_previews_live_histogram() {
 static void test_structural_menu_is_the_floor_alone() {
   const double bead = 0.45;
   const double floor_mm = 4.0 * bead;      // the app's stated structural floor: 4 beads
-  const std::vector<double> aesthetic = stepped_size_menu(12.0, bead, 0.0, true);
-  const std::vector<double> structural = stepped_size_menu(12.0, bead, floor_mm, false);
+  const std::vector<double> aesthetic = stepped_size_menu(LatticeTopology::Octet, 12.0, bead, 0.0, true);
+  const std::vector<double> structural = stepped_size_menu(LatticeTopology::Octet, 12.0, bead, floor_mm, false);
   std::printf("  menu aesthetic  [%s]\n", join(aesthetic).c_str());
   std::printf("  menu structural [%s]  (floor %.2f mm)\n", join(structural).c_str(),
               floor_mm);
@@ -142,7 +142,7 @@ static void test_structural_menu_is_the_floor_alone() {
     CHECK(x > 2.2, "aesthetic menu: nothing that fine survives the 20 % rule");
   }
   // ★ AND THE FLOOR STILL BITES. Raise it and the fine families go, bound or no bound.
-  const std::vector<double> tight = stepped_size_menu(12.0, bead, 2.5, false);
+  const std::vector<double> tight = stepped_size_menu(LatticeTopology::Octet, 12.0, bead, 2.5, false);
   CHECK(tight.size() < structural.size(),
         "structural menu CONTROL: the floor is doing the work -- raise it and families "
         "fall away, so 'no 20 % rule' does not mean 'no bound'");
@@ -156,7 +156,7 @@ static void test_structural_menu_is_the_floor_alone() {
 static void test_depth_is_clean() {
   for (double base : {12.0, 10.31, 8.0, 6.5, 20.0}) {
     for (double bead : {0.45, 0.60, 0.90}) {
-      const std::vector<double> menu = stepped_size_menu(base, bead);
+      const std::vector<double> menu = stepped_size_menu(LatticeTopology::Octet, base, bead);
       for (double s : menu) {
         const double rem = base - std::floor(base / s + 1e-9) * s;
         if (rem < 1e-9) continue;                     // s tiles the base exactly
@@ -178,7 +178,7 @@ static void test_depth_is_clean() {
 
 // ── THE MENU IS A MENU: sorted, unique, and bounded by the base ─────────────────
 static void test_menu_shape() {
-  const std::vector<double> menu = stepped_size_menu(12.0, 0.45);
+  const std::vector<double> menu = stepped_size_menu(LatticeTopology::Octet, 12.0, 0.45);
   CHECK(!menu.empty(), "menu: it is not empty");
   CHECK(std::fabs(menu.front() - 12.0) < 1e-9, "menu: the base is the largest entry");
   for (std::size_t i = 1; i < menu.size(); ++i) {
@@ -192,7 +192,7 @@ static void test_menu_shape() {
 
   // A base too fine to subdivide yields itself alone -- never an empty menu, which would
   // leave the packer with nothing to place.
-  const std::vector<double> tiny = stepped_size_menu(1.2, 0.45);
+  const std::vector<double> tiny = stepped_size_menu(LatticeTopology::Octet, 1.2, 0.45);
   CHECK(tiny.size() == 1 && std::fabs(tiny.front() - 1.2) < 1e-9,
         "menu: a base too fine to subdivide is its own menu, not an empty one");
 }
@@ -236,7 +236,7 @@ static void test_group_keeps_each_cells_own_rho() {
         const double dx = 3.0 * i, dy = 3.0 * j, dz = 3.0 * k;
         cells.push_back(at(dx, dy, dz, rho_for(dx, dy, dz)));
       }
-  const SteppedPlanCheck v = stepped_validate_plan(cells, {reg}, 0.45);
+  const SteppedPlanCheck v = stepped_validate_plan(LatticeTopology::Octet, cells, {reg}, 0.45);
   CHECK(v.ok, "rho: the fixture plan is valid");
   const std::vector<SteppedCellGroup> gs = stepped_group_cells(cells, {reg});
   CHECK(gs.size() == 1, "rho: one family, one group");
@@ -312,7 +312,7 @@ static void test_strut_radius_matches_the_sent_rho() {
     cells.push_back(c);
   }
   const SteppedPlanCheck v =
-      stepped_validate_plan(cells, {reg}, bead, 0.0, true, SteppedMenu::Halves);
+      stepped_validate_plan(LatticeTopology::Octet, cells, {reg}, bead, 0.0, true, SteppedMenu::Halves);
   CHECK(v.ok, "parity: the fixture plan validates under the doubled menu");
 
   const std::vector<SteppedCellGroup> gs = stepped_group_cells(cells, {reg});
@@ -423,9 +423,9 @@ static void test_outline_beam_width() {
 static void test_doubled_menu_is_halves_only() {
   const double base = 12.0, bead = 0.45;
   const std::vector<double> halves =
-      stepped_size_menu(base, bead, 0.0, true, SteppedMenu::Halves);
+      stepped_size_menu(LatticeTopology::Octet, base, bead, 0.0, true, SteppedMenu::Halves);
   const std::vector<double> anystep =
-      stepped_size_menu(base, bead, 0.0, true, SteppedMenu::AnyStep);
+      stepped_size_menu(LatticeTopology::Octet, base, bead, 0.0, true, SteppedMenu::AnyStep);
   std::printf("  doubled menu:");
   for (double s : halves) std::printf(" %.4g", s);
   std::printf("  (any-step has %zu sizes)\n", anystep.size());
@@ -461,7 +461,7 @@ static void test_doubled_menu_is_halves_only() {
     std::vector<SteppedCell> cells = {at(0, 0, 0, 6.0), at(6, 0, 0, 3.0),
                                       at(6, 3, 0, 3.0), at(0, 6, 0, 6.0)};
     const SteppedPlanCheck v =
-        stepped_validate_plan(cells, {reg}, bead, 0.0, true, SteppedMenu::Halves);
+        stepped_validate_plan(LatticeTopology::Octet, cells, {reg}, bead, 0.0, true, SteppedMenu::Halves);
     std::printf("  doubled plan: %s\n", v.ok ? "ok" : v.error.c_str());
     CHECK(v.ok, "doubled: a halving pack is accepted");
     CHECK(v.cells == 4, "doubled: every cell counted");
@@ -469,13 +469,13 @@ static void test_doubled_menu_is_halves_only() {
   {   // ★ THE CONTROL: the same validator must REFUSE a 9
     std::vector<SteppedCell> cells = {at(0, 0, 0, 9.0)};
     const SteppedPlanCheck v =
-        stepped_validate_plan(cells, {reg}, bead, 0.0, true, SteppedMenu::Halves);
+        stepped_validate_plan(LatticeTopology::Octet, cells, {reg}, bead, 0.0, true, SteppedMenu::Halves);
     CHECK(!v.ok, "doubled: a 9 mm any-step cell is REFUSED on the halving ladder");
     CHECK(v.error.find("menu") != std::string::npos,
           "doubled: and the refusal names the menu, with the cell");
     // the same plan under any-step is fine, so the refusal is the MENU and not the cell
     const SteppedPlanCheck a =
-        stepped_validate_plan(cells, {reg}, bead, 0.0, true, SteppedMenu::AnyStep);
+        stepped_validate_plan(LatticeTopology::Octet, cells, {reg}, bead, 0.0, true, SteppedMenu::AnyStep);
     CHECK(a.ok, "doubled: and that very cell is accepted under any-step -- the menu is "
                 "what refused it, not the geometry");
   }
@@ -498,7 +498,7 @@ static void test_plan_validation() {
   {   // a legitimate pack: a 9 at the face, 3 mm tiles behind and beside it
     std::vector<SteppedCell> cells = {at(0, 0, 0, 9.0), at(9, 0, 0, 3.0),
                                       at(0, 9, 0, 3.0), at(3, 9, 0, 3.0)};
-    const SteppedPlanCheck v = stepped_validate_plan(cells, {reg}, 0.45);
+    const SteppedPlanCheck v = stepped_validate_plan(LatticeTopology::Octet, cells, {reg}, 0.45);
     std::printf("  plan: %s  hist [%s]\n", v.ok ? "ok" : v.error.c_str(),
                 v.histogram_line.c_str());
     CHECK(v.ok, "plan: a 9 with 3 mm tiles behind and beside it is accepted");
@@ -508,7 +508,7 @@ static void test_plan_validation() {
   }
   {   // ★ a size that is not on the menu -- 10 mm, the entry the sixths would have given
     std::vector<SteppedCell> cells = {at(0, 0, 0, 10.0)};
-    const SteppedPlanCheck v = stepped_validate_plan(cells, {reg}, 0.45);
+    const SteppedPlanCheck v = stepped_validate_plan(LatticeTopology::Octet, cells, {reg}, 0.45);
     CHECK(!v.ok, "plan: 10 mm is refused -- it is only reachable from the sixths");
     CHECK(v.error.find("not on that region's menu") != std::string::npos &&
               v.error.find("cell 0") != std::string::npos,
@@ -517,20 +517,20 @@ static void test_plan_validation() {
   }
   {   // off its family's tile grid: a 3 mm cell must start on a multiple of 3
     std::vector<SteppedCell> cells = {at(1.5, 0, 0, 3.0)};
-    const SteppedPlanCheck v = stepped_validate_plan(cells, {reg}, 0.45);
+    const SteppedPlanCheck v = stepped_validate_plan(LatticeTopology::Octet, cells, {reg}, 0.45);
     CHECK(!v.ok, "plan: a 3 mm cell at offset 1.5 is off its family's tile grid");
     CHECK(v.error.find("tile") != std::string::npos, "plan: and says so");
   }
   {   // ★ 6 mm is BOTH 12/2 and 2*(12/4), so offset 3 is legitimate on the quarters grid
     std::vector<SteppedCell> cells = {at(3, 0, 0, 6.0)};
-    const SteppedPlanCheck v = stepped_validate_plan(cells, {reg}, 0.45);
+    const SteppedPlanCheck v = stepped_validate_plan(LatticeTopology::Octet, cells, {reg}, 0.45);
     CHECK(v.ok,
           "plan: a size reachable from several families is valid on ANY of their grids -- "
           "refusing offset 3 for a 6 mm cell would outlaw a pack the packer may make");
   }
   {   // overlap
     std::vector<SteppedCell> cells = {at(0, 0, 0, 9.0), at(6, 0, 0, 3.0)};
-    const SteppedPlanCheck v = stepped_validate_plan(cells, {reg}, 0.45);
+    const SteppedPlanCheck v = stepped_validate_plan(LatticeTopology::Octet, cells, {reg}, 0.45);
     CHECK(!v.ok, "plan: a 3 mm cell inside the 9 mm cell is an overlap");
     CHECK(v.error.find("OVERLAPS") != std::string::npos &&
               v.error.find("cell 0") != std::string::npos,
@@ -540,14 +540,14 @@ static void test_plan_validation() {
   {   // a cell naming a region that was never declared
     SteppedCell c = at(0, 0, 0, 3.0);
     c.region_id = 7;
-    const SteppedPlanCheck v = stepped_validate_plan({c}, {reg}, 0.45);
+    const SteppedPlanCheck v = stepped_validate_plan(LatticeTopology::Octet, {c}, {reg}, 0.45);
     CHECK(!v.ok && v.error.find("region 7") != std::string::npos,
           "plan: a cell in an undeclared region is refused by name");
   }
   {   // ★ THE CONTROL: the accepted pack above must not be accepted by a validator that
       // accepts everything. A base-sized cell somewhere absurd is still refused.
     std::vector<SteppedCell> cells = {at(0, 0, 0, 7.0)};
-    const SteppedPlanCheck v = stepped_validate_plan(cells, {reg}, 0.45);
+    const SteppedPlanCheck v = stepped_validate_plan(LatticeTopology::Octet, cells, {reg}, 0.45);
     CHECK(!v.ok, "CONTROL: 7 mm is not on the 12 mm menu and is refused");
   }
 }
@@ -573,7 +573,7 @@ static void test_grouping_preserves_every_cell() {
   const std::vector<SteppedCell> cells = {at(0, 0, 0, 9.0),  at(9, 0, 0, 3.0),
                                           at(0, 9, 0, 3.0),  at(3, 9, 0, 3.0),
                                           at(9, 3, 0, 3.0),  at(0, 0, 12, 12.0)};
-  CHECK(stepped_validate_plan(cells, {reg}, 0.45).ok, "grouping: the fixture is a valid plan");
+  CHECK(stepped_validate_plan(LatticeTopology::Octet, cells, {reg}, 0.45).ok, "grouping: the fixture is a valid plan");
 
   const std::vector<SteppedCellGroup> gs = stepped_group_cells(cells, {reg});
   std::printf("  groups:");
@@ -727,7 +727,7 @@ static void test_packed_slot_covers_exactly_once() {
         if (!in_nine) put(x, y, z, 3.0);
       }
 
-  const SteppedPlanCheck v = stepped_validate_plan(cells, {reg}, 0.45);
+  const SteppedPlanCheck v = stepped_validate_plan(LatticeTopology::Octet, cells, {reg}, 0.45);
   std::printf("  packed slot: %zu cells -> %s [%s]\n", cells.size(),
               v.ok ? "valid" : v.error.c_str(), v.histogram_line.c_str());
   CHECK(v.ok, "packed slot: the arrangement validates -- sizes on the menu, on their "
@@ -761,7 +761,7 @@ static void test_packed_slot_covers_exactly_once() {
   std::vector<SteppedCell> cut;
   for (const SteppedCell& c : cells)
     if (!(c.origin.x < 3.0)) cut.push_back(c);
-  const SteppedPlanCheck vc = stepped_validate_plan(cut, {reg}, 0.45);
+  const SteppedPlanCheck vc = stepped_validate_plan(LatticeTopology::Octet, cut, {reg}, 0.45);
   CHECK(vc.ok, "outline-cut slot: still a valid arrangement");
   std::size_t cut_once = 0, cut_bad = 0;
   for (double x = 3.0 + h / 2; x < 12.0; x += h)
@@ -782,7 +782,7 @@ static void test_packed_slot_covers_exactly_once() {
   // the doubled count has to rise, or the sampling above is proving nothing.
   std::vector<SteppedCell> broken = cells;
   broken.back().origin = Vec3{3, 3, 0};
-  const SteppedPlanCheck vb = stepped_validate_plan(broken, {reg}, 0.45);
+  const SteppedPlanCheck vb = stepped_validate_plan(LatticeTopology::Octet, broken, {reg}, 0.45);
   CHECK(!vb.ok && vb.error.find("OVERLAPS") != std::string::npos,
         "CONTROL: a tile moved onto the 9 IS caught as an overlap -- the check has teeth");
 }

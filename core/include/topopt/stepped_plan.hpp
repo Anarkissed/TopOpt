@@ -26,6 +26,7 @@
 // generally COARSER limit. `min_cell_mm` is how a caller states that floor; the density
 // bound is applied on top of it, never instead of it.
 
+#include "topopt/lattice.hpp"  // LatticeTopology
 #include <array>
 #include <cstddef>
 #include <string>
@@ -72,14 +73,21 @@ enum class SteppedMenu {
   Halves,    // S, S/2, S/4, ... -- "doubled"
 };
 
-std::vector<double> stepped_size_menu(double base_cell_mm, double bead_mm,
-                                      double min_tile_mm = 0.0,
+// ★ `topo` IS FIRST AND HAS NO DEFAULT (task 2026-09-28-lattice-types-core). The
+// "prints open" admission asks a density question -- a bead-wide strut in this tile
+// must leave the cell mostly air -- and that is a per-type measurement. It read
+// octet's law for every type; it now reads the job's. First, because the trailing
+// parameters have defaults that callers rely on, and no default here, because a
+// defaulted topology is how one type gets another's numbers.
+std::vector<double> stepped_size_menu(LatticeTopology topo, double base_cell_mm,
+                                      double bead_mm, double min_tile_mm = 0.0,
                                       bool apply_prints_open = true,
                                       SteppedMenu menu = SteppedMenu::AnyStep);
 
 // The divisors whose tile was admitted, ascending. Exposed because the packer places on a
 // family's own tile grid and the receipt reports per family.
-std::vector<int> stepped_admitted_divisors(double base_cell_mm, double bead_mm,
+std::vector<int> stepped_admitted_divisors(LatticeTopology topo,
+                                           double base_cell_mm, double bead_mm,
                                            double min_tile_mm = 0.0,
                                            bool apply_prints_open = true,
                                            SteppedMenu menu = SteppedMenu::AnyStep);
@@ -139,7 +147,10 @@ struct SteppedPlanCheck {
 // 2*(12/4), and either alignment is legitimate); and no two cells overlap. Region
 // containment is NOT checked here -- it needs the outline and the material, which live
 // with the caller.
-SteppedPlanCheck stepped_validate_plan(const std::vector<SteppedCell>& cells,
+// ★ `topo` FIRST, no default: the menu this validates against is a per-type
+// density question (see stepped_size_menu).
+SteppedPlanCheck stepped_validate_plan(LatticeTopology topo,
+                                       const std::vector<SteppedCell>& cells,
                                        const std::vector<SteppedPlanRegion>& regions,
                                        double bead_mm, double min_tile_mm = 0.0,
                                        bool apply_prints_open = true,
