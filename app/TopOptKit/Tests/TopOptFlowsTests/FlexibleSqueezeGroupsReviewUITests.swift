@@ -94,7 +94,7 @@ final class FlexibleSqueezeGroupsReviewUITests: XCTestCase {
 
     func testTheGroupHeadersAreWholeAndOnThePanel() throws {
         var report: [String] = []
-        var cutControl = 0, foldControl = 0
+        var oneHeader = 0
         for (tag, size) in FlexibleSettingsPageHostedTests.sizes {
             let his = try FlexibleHisProject.restore()
             defer { his.cleanup() }
@@ -149,7 +149,7 @@ final class FlexibleSqueezeGroupsReviewUITests: XCTestCase {
             XCTAssertLessThan(g2.maxY, card.minY + 1, "\(tag): the header sits above face 5's card")
             // ★ RED CONTROL: D2's one list drew BOTH groups' headers — the tab draws only its own
             XCTAssertEqual(FlexibleFaceList.sections(model: m).compactMap(\.group).count, 2, "control: D2's list had both headers")
-            if local(host, "groupRow-1") == nil { foldControl += 1; cutControl += 1 }
+            if local(host, "groupRow-1") == nil { oneHeader += 1 }
             click(host, CGPoint(x: x2.midX, y: x2.midY))
             XCTAssertTrue(pumpUntil(5) { m.squeezeGroups.count == 1 }, "\(tag): a click on group 2's × removes it")
             XCTAssertEqual(m.groupForce(m.squeezeGroups[0]), 10...10)
@@ -157,9 +157,10 @@ final class FlexibleSqueezeGroupsReviewUITests: XCTestCase {
             host.window.orderOut(nil); host.window.contentView = nil
         }
         print("FLEX-REVIEW-HOSTED headers\n  " + report.joined(separator: "\n  "))
-        // (round 5: the two counters now count the sizes where the OTHER group's header is off the open tab)
-        XCTAssertGreaterThanOrEqual(cutControl, 4, "one header per tab at every size")
-        XCTAssertGreaterThanOrEqual(foldControl, 1)
+        // ★ S VERIFICATION: ONE check (not a control) — at every size only the open tab's header is
+        // drawn. The red control is D2's `sections` above (both headers); round 5's re-pin had kept
+        // two counters bumped on the same condition, which could not go red apart
+        XCTAssertEqual(oneHeader, FlexibleSettingsPageHostedTests.sizes.count, "one header per tab at every size")
     }
 
     // MARK: the player's timeline

@@ -175,7 +175,15 @@ final class FlexibleRound5SettingsTests: XCTestCase {
         let key = m.settings.designInputs.hashValue
         m.newGroup(with: 3)
         let g2 = try XCTUnwrap(m.squeezeGroup(of: 3))
-        XCTAssertEqual(m.settings.groupColours?[String(g2.id)], "orange", "stored: it keeps it when group 1 goes")
+        // ★ RE-PINNED (batch S verification): colours are stored in NORMAL FORM — group 2's orange is
+        // its number's own, so nothing is stored; `normalise` carries the colour it is SHOWN in through
+        // a renumber either way (FlexibleRound5SettingsVerifyTests pins the carry with its control)
+        XCTAssertEqual(FlexibleSqueezeGroups.colourChoice(of: g2, in: m.settings), .orange, "the first free colour")
+        XCTAssertNil(m.settings.groupColours, "its number's own colour: no entry")
+        var gone = m.settings
+        FlexibleSqueezeGroups.remove(group: FlexibleSqueezeGroups.first, into: g2.id, in: &gone)
+        XCTAssertEqual(FlexibleSqueezeGroups.groups(gone).map { FlexibleSqueezeGroups.colourChoice(of: $0, in: gone) }, [.orange],
+                       "it keeps orange when group 1 goes (renumbered 1)")
         let key2 = m.settings.designInputs.hashValue
         XCTAssertNotEqual(key2, key, "premise: a new group IS a design change")
         m.setGroupColour(g2.id, .blue)
@@ -321,13 +329,17 @@ final class FlexibleRound5SettingsTests: XCTestCase {
         let edited = m.settings
         m.resetAll()
         let reset = m.settings
-        // a brand-new Flexible setup of the same part, opened by the page's own pipeline
+        // a brand-new Flexible setup of the same part, opened by the page's own pipeline.
+        // ★ S VERIFICATION: from the APP's entry (WorkspacePlaceholder: `project.lattice.flexible =
+        // FlexibleStageSettings()`), then the page's own actions — the filament D-R5-S5 rules a new
+        // setup starts with (batch F's preselect is not on this branch) and his unit — never the
+        // constructor `freshSettings` itself uses
         let fresh = try FlexibleHisProject.restore()
         addTeardownBlock { fresh.cleanup() }
-        var s0 = FlexibleStageSettings(materialID: m.defaultMaterialID)
-        s0.weightUnit = "lb"
-        fresh.project.lattice.flexible = s0
+        fresh.project.lattice.flexible = FlexibleStageSettings()
         let n = try await FlexibleHisProject.openedModel(fresh.project, test: self)
+        n.pickMaterial(try XCTUnwrap(n.defaultMaterialID))
+        n.setWeightUnit(.lb)
         await n.waitForIdle()
         print("FLEX-R5 reset: \(reset.faces.map { "\($0.faceRegionID):\($0.role):\($0.weightKg)" }) · material \(reset.materialID ?? "-") · fresh \(n.settings.faces.map { "\($0.faceRegionID):\($0.role):\($0.weightKg)" })")
         XCTAssertEqual(reset, n.settings, "Reset all == a brand-new setup of this part")
