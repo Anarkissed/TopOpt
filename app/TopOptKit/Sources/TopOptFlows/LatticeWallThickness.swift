@@ -297,6 +297,20 @@ public struct LatticeFaceWallThickness: Codable, Hashable, Sendable {
         self.startMM = startMM; self.endMM = endMM; self.profile = profile
     }
     public var isFull: Bool { startMM <= 0 && endMM == nil && profile == nil }
+
+    // ★★ ROUND 3 RULING (c) (maintainer, 2026-10-01): a wall saved between 604736ae and bc3cf67f
+    // has no `startMM` — that build wrote only {endMM, profile}, and bc3cf67f brought the start
+    // back as a stored field. Synthesized decoding ignores the `= 0` default and threw keyNotFound,
+    // so his project 102117B9 vanished from the list. Absent ⇒ 0: where every wall started then,
+    // and where the field's own range starts. DECODING ONLY — `encode(to:)` stays synthesized,
+    // so every saved file re-encodes byte for byte as before.
+    private enum CodingKeys: String, CodingKey { case startMM, endMM, profile }
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        startMM = try c.decodeIfPresent(Double.self, forKey: .startMM) ?? 0
+        endMM = try c.decodeIfPresent(Double.self, forKey: .endMM)
+        profile = try c.decodeIfPresent(LatticeWallProfile.self, forKey: .profile)
+    }
 }
 
 /// What the user asked for — the request, not the answer. The default is the whole
