@@ -689,10 +689,21 @@ public final class ProjectModel: ObservableObject {
             // region is ONE slab, like a face (ruling 2) — the protection reads the depth the
             // region's prisms emit (depth + expand). With no prism under its key it keeps the
             // depth it had. His stand's region 101: 20 -> 24.15 mm (the R2b control's bytes).
+            // ★ A SPLIT OR CUT PARENT (round 3 review, 2026-10-01): the emission lattices the
+            // group's OWN regions (a whole-face parent emits its whole surface under its key; a cut
+            // child emits nothing of its own), while the protection walks the effective regions —
+            // the children. So each child reads the slab its surface is latticed through: its own
+            // key first, else the group's region it descends from.
+            var slabVia: [RegionID: Double] = [:]
+            for raw in g.regionIDs {
+                guard let d = emission.slabDepthMM(selectableKey: LatticeSelectableRef.region(group: g.id, region: raw).key)
+                else { continue }
+                for e in surfaceEffectiveRegions(from: raw) where slabVia[e] == nil { slabVia[e] = d }
+            }
             for r in surfaceEffectiveRegions(of: g) where !seenRegions.contains(r) {
                 seenRegions.insert(r)
                 let key = LatticeSelectableRef.region(group: g.id, region: r).key
-                let d = emission.slabDepthMM(selectableKey: key) ?? (latticed
+                let d = emission.slabDepthMM(selectableKey: key) ?? slabVia[r] ?? (latticed
                     ? LatticeSlabDepth.depthMM(
                         ref: .region(group: g.id, region: r), group: g.id,
                         perSelectable: lattice.selectableDepthMM,
@@ -2461,7 +2472,11 @@ public final class ProjectModel: ObservableObject {
         guard let m = LatticeVariantProtectionTie.parse(coreError: coreError) else {
             return LatticeVariantProtectionTie.coreWords(coreError)
         }
-        let prism = regions.first { $0.kind == .face && $0.faceID == m.faceID }
+        // ★ the prism core REJECTED: on this face, at core's wall depth (core prints %f) — a face can
+        // carry two prisms (a direct face of one group, a region member in another), and core
+        // stops at the first that differs, not the first that exists (round 3 review)
+        let prism = regions.first { $0.kind == .face && $0.faceID == m.faceID && abs($0.depthMM - m.wallMM) < 1e-5 }
+            ?? regions.first { $0.kind == .face && $0.faceID == m.faceID }
         var ref: LatticeSelectableRef? = nil
         if let key = prism?.selectableKey {
             for g in selection.groups {
@@ -2479,7 +2494,7 @@ public final class ProjectModel: ObservableObject {
         // it — at or below zero, or below the wall's minimum depth (`LatticeSlabDepth.minMM`, where
         // every depth write clamps), no depth clears the tie, so only Optimize again is offered.
         let setTo = m.protectionMM - expand
-        let settable = setTo >= LatticeSlabDepth.minMM - 1e-9
+        let settable = setTo >= LatticeSlabDepth.minMM - 1e-9 && setTo <= LatticeSlabDepth.maxMM + 1e-9
         return LatticeVariantProtectionTie.sentence(m, wallName: name, setToMM: settable ? setTo : nil)
     }
 

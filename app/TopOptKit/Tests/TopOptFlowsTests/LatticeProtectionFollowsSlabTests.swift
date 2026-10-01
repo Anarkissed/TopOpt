@@ -114,6 +114,29 @@ final class LatticeProtectionFollowsSlabTests: XCTestCase {
         }
     }
 
+    /// ★ ROUND 3 REVIEW (2026-10-01): a SPLIT parent. The emission lattices the group's own region
+    /// (a whole-face parent emits its whole surface under its key; its cut children emit nothing of
+    /// their own) while the protection walks the effective regions — the children. Each child must
+    /// follow the slab its surface is latticed through: the parent's.
+    func testASplitRegionsChildrenFollowTheirParentsSlab() throws {
+        let (p, gid, rid) = VariantFacePrismFixture.project()
+        let kids = p.faceRegions.splitManual(rid, point: SIMD3(10, 5, 4.5), normal: SIMD3(0, 1, 0))
+        XCTAssertEqual(kids.count, 2, "control: two children")
+        p.writeLatticeExpandMM(.region(group: gid, region: rid), mm: 4.15)
+        let emission = p.latticeJobRegions()
+        XCTAssertEqual(emission.slabDepthMM(selectableKey: LatticeSelectableRef.region(group: gid, region: rid).key) ?? 0,
+                       24.15, accuracy: 1e-9, "control: the parent's prisms carry the surface at 24.15")
+        for k in kids {
+            XCTAssertNil(emission.slabDepthMM(selectableKey: LatticeSelectableRef.region(group: gid, region: k).key),
+                         "control: a cut child emits nothing of its own")
+        }
+        let prot = p.faceProtectionSpecs(emission: emission)
+        XCTAssertEqual(Set(prot.regionIDs), Set(kids), "control: the protection walks the children")
+        XCTAssertEqual(prot.regionDepthsMM.count, 2)
+        for d in prot.regionDepthsMM { XCTAssertEqual(d, 24.15, accuracy: 1e-9, "★ each child follows its parent's slab") }
+        XCTAssertNil(TopOptKit.jobSchemaError(try stageDocument(p)))
+    }
+
     /// The region's protection keeps its own depth wherever the run lattices no prism under its
     /// key — and an unexpanded region's bytes do not move.
     func testARegionWithNoSlabOrNoExpandKeepsItsDepth() throws {

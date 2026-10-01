@@ -176,6 +176,14 @@ public struct ProjectStore {
         projectDir(id).appendingPathComponent("project.json")
     }
 
+    /// ★ round 3 (review, 2026-10-01): whether the folder still holds its project. The background
+    /// writes (results, re-lattice artifacts) write only into a project that still exists — a write
+    /// queued before a delete must never recreate the folder without its project.json, which Home
+    /// would then list as a "Can’t open" card nobody can remove.
+    public func holdsProject(id: UUID) -> Bool {
+        fm.fileExists(atPath: snapshotURL(id).path)
+    }
+
     /// The path (as a String, for the bridge importer) of a project's copied model.
     public func modelPath(id: UUID, fileName: String) -> String {
         projectDir(id).appendingPathComponent(fileName).path
@@ -228,7 +236,8 @@ public struct ProjectStore {
     /// design that was stored to drift apart.
     public func saveRelatticeArtifacts(jobJSON: Data, designBin: Data,
                                        id: UUID) throws {
-        try fm.createDirectory(at: projectDir(id), withIntermediateDirectories: true)
+        // only beside a project that still exists (see `holdsProject`)
+        guard holdsProject(id: id) else { return }
         try jobJSON.write(to: runJobURL(id: id), options: .atomic)
         // A DESIGN-LESS PAIR IS A REAL STATE (task
         // 2026-08-03-variant-postprocessing-fix): a run killed mid-ladder, or one

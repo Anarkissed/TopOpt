@@ -110,6 +110,42 @@ final class LatticeOldRetainedRunTests: XCTestCase {
         XCTAssertTrue(pm.contains("let settable = setTo >= LatticeSlabDepth.minMM - 1e-9"), "the wall's own minimum, one constant")
     }
 
+    /// ★ ROUND 3 REVIEW (2026-10-01): and none ABOVE the maximum a wall can be set to (50 mm) — a
+    /// 50 mm skin under a wall with a −10 mm expand would need 60, which clamps to 50 and is refused.
+    func testNoDepthIsSuggestedAboveTheMaximum() throws {
+        let (p, gid, _) = VariantFacePrismFixture.project()
+        p.writeLatticeExpandMM(.face(group: gid, face: 1), mm: -10)
+        let old = try VariantFacePrismFixture.original(bareProtection: [1], depthMM: 50)
+        let err = try XCTUnwrap(try coreErrors(p, retained: old).first?.1)
+        XCTAssertTrue(sentence(p, err).hasSuffix("Optimize again with this wall."), "★ 60 mm cannot be set: \(sentence(p, err))")
+        // the boundary: exactly the maximum is suggested, and true
+        p.writeLatticeExpandMM(.face(group: gid, face: 1), mm: 0)
+        let err2 = try XCTUnwrap(try coreErrors(p, retained: old).first?.1)
+        XCTAssertTrue(sentence(p, err2).hasSuffix("or set the wall to 50 mm."), sentence(p, err2))
+        p.writeLatticeDepthMM(.face(group: gid, face: 1), mm: 50)
+        XCTAssertTrue(try coreErrors(p, retained: old).allSatisfy { $0.1 == nil }, "★ 50 mm clears it")
+    }
+
+    /// ★ ROUND 3 REVIEW (2026-10-01): the wall named is the one core REJECTED. A face can carry two
+    /// prisms — a direct face of one group, a region member in another — and core stops at the first
+    /// that differs from the protection, not at the first that exists.
+    func testTheWallNamedIsTheOneCoreRejected() throws {
+        let (p, _, _) = VariantFacePrismFixture.project()
+        let top = p.faceRegions.union(faces: [1], named: "top")
+        let gB = p.selection.addGroup()
+        p.selection.addRegions([top], to: gB)
+        p.force.sync(groups: p.selection.groups)
+        p.force.setProtected(gB, true)          // a declared kind, so it may carry a lattice role
+        p.lattice.groupRoles[gB] = .include
+        p.writeLatticeDepthMM(.region(group: gB, region: top), mm: 12)
+        let onFace1 = p.latticeJobRegions().regions.filter { $0.kind == .face && $0.rawFaceID == 1 }
+        XCTAssertEqual(onFace1.map(\.depthMM).sorted(), [12, 20], "control: face 1 carries two prisms")
+        let old = try VariantFacePrismFixture.original(bareProtection: [Int(p.runFaceID(1))], depthMM: 20)
+        let err = try XCTUnwrap(try coreErrors(p, retained: old).first?.1)
+        XCTAssertTrue(err.contains("the protection is 20.000000 mm and the lattice region is 12.000000 mm"), err)
+        XCTAssertTrue(sentence(p, err).contains("under top,"), "★ the region core stopped at, not Face 1: \(sentence(p, err))")
+    }
+
     /// The wall is named as its Selections row names it: a face region's member names the region.
     func testTheWallIsNamedAsItsRowNamesIt() throws {
         let (p, _, rid) = VariantFacePrismFixture.project()

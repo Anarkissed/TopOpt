@@ -100,7 +100,8 @@ public final class AppModel: ObservableObject {
     private var runCancellables: [UUID: AnyCancellable] = [:]
     /// Serial queue for the (potentially large) results encode/decode + file IO, so
     /// persisting/restoring variants never blocks the main thread (persist-c).
-    private static let resultsQueue = DispatchQueue(label: "app.topopt.results", qos: .utility)
+    /// Internal (not private) so the write-after-delete race test can hold the queue.
+    static let resultsQueue = DispatchQueue(label: "app.topopt.results", qos: .utility)
     /// Non-nil shows a transient toast (the design pill); the view clears it.
     @Published public var toast: String?
 
@@ -775,6 +776,11 @@ public final class AppModel: ObservableObject {
         thumbnails[id] = nil
         recentProjects.removeAll { $0.id == id }
         store.delete(id: id)
+        // ★ AND AGAIN BEHIND ANY WRITE STILL QUEUED (round 3 review, 2026-10-01): the background
+        // writes check `holdsProject` first, and this serial-queue delete removes anything one of
+        // them managed between that check and its write — a deleted project never comes back.
+        let s = store
+        Self.resultsQueue.async { s.delete(id: id) }
     }
 
     // MARK: - Recents / navigation
@@ -988,10 +994,12 @@ public final class AppModel: ObservableObject {
             }
             let dto = OutcomeCodec.dto(from: outcome)
             let url = store.resultsURL(id: project.id)
-            let dir = url.deletingLastPathComponent()
+            let resultsStore = store, resultsID = project.id
             Self.resultsQueue.async {
-                guard let data = try? OutcomeCodec.encode(dto) else { return }
-                try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+                // ★ only into a project that still exists: a write queued before a delete must
+                // never recreate its folder without project.json (round 3 review, 2026-10-01)
+                guard resultsStore.holdsProject(id: resultsID),
+                      let data = try? OutcomeCodec.encode(dto) else { return }
                 try? data.write(to: url, options: .atomic)
             }
             // The RE-LATTICE artifacts, beside the results they describe (task

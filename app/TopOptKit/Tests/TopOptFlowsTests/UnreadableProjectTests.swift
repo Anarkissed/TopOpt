@@ -174,6 +174,51 @@ final class UnreadableProjectTests: XCTestCase {
                        "“startMM” is missing in lattice › wallThickness › faces › f:820422E9-A2C0-4546-95C2-B1AD18E207DC:2")
     }
 
+    /// ★ ROUND 3 REVIEW (2026-10-01): a deleted project never comes back. Results and re-lattice
+    /// artifacts are written on a serial background queue; a write still queued when he deletes the
+    /// project used to recreate its folder WITHOUT project.json — which fix 2 would now list as a
+    /// "Can’t open" card nobody can remove. Forced deterministically: the queue is held, the writes
+    /// are queued, the project is deleted, then the queue is released and drained.
+    func testADeletedProjectsQueuedWritesNeverBringItBack() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("race-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = ProjectStore(rootDir: root)
+        let model = AppModel(materialsPath: Self.repoCore.appendingPathComponent("src/materials/materials.json").path,
+                             rulesPath: Self.repoCore.appendingPathComponent("src/settings/rules.json").path, store: store)
+        model.loadMaterials(); model.newTopOpt(); model.selectMaterial("PLA")
+        XCTAssertTrue(model.importFile(atPath: Self.repoCore.appendingPathComponent("tests/fixtures/stl/cube_10mm.stl").path,
+                                       displayName: "Race.stl"))
+        model.continueToWorkspace()
+        let pm = try XCTUnwrap(model.project)
+        let id = pm.id
+        let variant = OptimizeVariant(requestedVolumeFraction: 0.5, achievedVolumeFraction: 0.5, massGrams: 1,
+                                      supportVolumeVoxels: 0, meshTriangleCount: 1, worstCaseMargin: 2, accepted: true,
+                                      v3Passes: true, meshVertices: [0, 0, 0, 1, 0, 0, 0, 1, 0], meshIndices: [0, 1, 2])
+        pm.run.restoreOutcome(OptimizeOutcome(variants: [variant], stoppedOnMargin: false, cancelled: false, acceptedCount: 1))
+        pm.relatticeArtifacts = RelatticeArtifacts(jobJSON: Data("{}".utf8), designBin: Data([1, 2, 3]))
+        XCTAssertTrue(pm.hasResults, "control: there are results to write")
+        let dir = root.appendingPathComponent(id.uuidString)
+
+        let gate = DispatchSemaphore(value: 0)
+        AppModel.resultsQueue.async { gate.wait() }            // hold the serial queue
+        model.persistCurrentProject()                           // results + artifacts queued behind it
+        XCTAssertTrue(store.holdsProject(id: id), "control: saved")
+        model.deleteProject(id: id)                             // the folder goes now
+        XCTAssertFalse(FileManager.default.fileExists(atPath: dir.path))
+        gate.signal()
+        AppModel.resultsQueue.sync {}                           // drain every queued write
+        XCTAssertFalse(FileManager.default.fileExists(atPath: dir.path), "★ the queued writes did not bring it back")
+        XCTAssertTrue(store.loadAll().unreadable.isEmpty, "★ no ghost Can’t open card")
+
+        // the guard itself: a write aimed at a project that no longer exists creates nothing
+        try store.saveRelatticeArtifacts(jobJSON: Data("{}".utf8), designBin: Data([1]), id: id)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: dir.path), "★ no folder without its project")
+        var src = URL(fileURLWithPath: #filePath); for _ in 0..<3 { src.deleteLastPathComponent() }
+        let app = try String(contentsOf: src.appendingPathComponent("Sources/TopOptFlows/AppModel.swift"), encoding: .utf8)
+        XCTAssertTrue(app.contains("guard resultsStore.holdsProject(id: resultsID),"), "the results write checks first")
+        XCTAssertTrue(app.contains("Self.resultsQueue.async { s.delete(id: id) }"), "and the delete runs again behind it")
+    }
+
     /// ★ The app lists them apart from the projects it can open, and never deletes one.
     func testTheAppShowsThemButNeverOpensOrDeletesThem() throws {
         let (root, ids) = try storeWithUnreadables()
