@@ -393,7 +393,7 @@ int main() {
         double a = -1.0, b = -2.0;
         bool athrew = false, bthrew = false;
         try { a = octet_relative_density(c, r); } catch (const std::exception&) { athrew = true; }
-        try { b = lattice_relative_density(LatticeTopology::Octet, c, r); }
+        try { b = lattice_density_from_strut(LatticeTopology::Octet, c, r); }
         catch (const std::exception&) { bthrew = true; }
         ++n;
         // Including the inputs octet itself REFUSES (a radius that fills the cell):
@@ -412,7 +412,7 @@ int main() {
       const std::string name = lattice_topology_name(t);
       bool threw = false, named = false;
       try {
-        (void)lattice_relative_density(t, 8.0, 0.4);
+        (void)lattice_density_from_strut(t, 8.0, 0.4);
       } catch (const LatticeDiameterLawNotMeasured& e) {
         threw = true;
         named = std::string(e.what()).find(name) != std::string::npos;

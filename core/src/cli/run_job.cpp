@@ -6728,7 +6728,7 @@ LatticeVariantOutcome lattice_one_variant(
     // rho the printed geometry (cell + uniform strut radius) implies, on the
     // library basis (the E5 preflight already proved it in-band).
     rho_uniform =
-        lattice_relative_density(lat_topo, job.lattice.cell_mm, job.lattice.strut_radius_mm);
+        lattice_density_from_strut(lat_topo, job.lattice.cell_mm, job.lattice.strut_radius_mm);
     // UNIFORM cell activation under a DESIGN BOX (task
     // 2026-08-03-design-box-recertification). The uniform path has always passed a
     // NULL predicate, which means "lattice every cell the boundary cannot prove
@@ -9695,7 +9695,7 @@ LatticeVariantJobResult lattice_variant_job(const JobDescription& job,
         "strut radius instead.");
   if (!job.grading.present) {
     const double lat_rho =
-        lattice_relative_density(
+        lattice_density_from_strut(
             lattice_topology_from_id(job.grading.topology), job.lattice.cell_mm, job.lattice.strut_radius_mm);
     const double lo = lattice_rho_min(LatticeTopology::Octet);
     const double hi = lattice_rho_max(LatticeTopology::Octet);
@@ -11110,7 +11110,7 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
     // still enforced per voxel inside analyze_fixed_design (E5 / H4b).
     if (!job.grading.present) {
       const double lat_rho =
-          lattice_relative_density(
+          lattice_density_from_strut(
               lattice_topology_from_id(job.grading.topology), job.lattice.cell_mm, job.lattice.strut_radius_mm);
       const double lo = lattice_rho_min(LatticeTopology::Octet);
       const double hi = lattice_rho_max(LatticeTopology::Octet);

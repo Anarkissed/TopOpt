@@ -358,7 +358,7 @@ double lattice_strut_diameter_mm(LatticeTopology topo, double rho,
 // strut/cell 0.20, see octet_aesthetic_density_ceiling's note). That is a measured
 // fact about octet, not a bug, and it is why both directions have to be measured per
 // type rather than one inverted.
-double lattice_relative_density(LatticeTopology topo, double cell_mm,
+double lattice_density_from_strut(LatticeTopology topo, double cell_mm,
                                 double strut_radius_mm);
 
 // ── ★ TWO KEYS, ONE TYPE (reviewer, 2026-09-30) ──────────────────────
