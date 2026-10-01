@@ -22,9 +22,11 @@
 // region emission are derived from it. There is no second number to disagree.
 //
 // Pure derivation over value types (no view, no model), so the guarantee is
-// headlessly testable — and the call sites are pinned by
-// `LatticeDepthTieTests.testEveryCallSiteReadsTheOneNumber`, because a value-type
-// test that no shipping code calls has shipped a defect five times in this repo.
+// headlessly testable. ★ This is the DRAGGED depth. What a face's slab EMITS is this
+// plus its in-plane expand (`LatticeRegionEmission`), and a protected, latticed face (ruling 2,
+// 2026-09-30) or region (round 3 ruling a, 2026-10-01) is protected to the emitted number —
+// `faceProtectionSpecs` reads `LatticeRegionEmission.Result.slabDepthMM` — so every slab has one
+// depth.
 
 import Foundation
 
@@ -116,7 +118,11 @@ public enum LatticeSlabDepth {
     /// THE ASSERTION (bar R2), as a function rather than a comment: for every face
     /// that is both protected and latticed, the protection depth and the lattice
     /// region depth are the same number. Returns the faces where they are not —
-    /// EMPTY is the only shippable answer, and the run path checks it.
+    /// EMPTY is the only shippable answer.
+    ///
+    /// A TEST MIRROR ONLY. No run path calls it: core's parser refuses a job whose two depths
+    /// differ (job.cpp's depth tie, on the stage's job and a variant's alike), and the app must
+    /// not re-implement that check (maintainer, 2026-09-30, ruling a).
     public static func mismatches(protections: [(faceID: Int, depthMM: Double)],
                                   regions: [(faceID: Int, depthMM: Double)])
         -> [(faceID: Int, protectionMM: Double, regionMM: Double)] {

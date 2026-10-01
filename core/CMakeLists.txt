@@ -99,7 +99,12 @@ add_library(topopt
   src/mesh/surface_operator.cpp
   src/mesh/lattice_gen.cpp
   src/mesh/organic_lattice.cpp
+  src/mesh/lattice_lslt.cpp
+  src/mesh/lattice_union_volume.cpp
+  src/mesh/lattice_dc.cpp
   src/mesh/lattice_boundary.cpp
+  src/mesh/stepped_plan.cpp
+  src/voxel/voxel_sdf.cpp
   src/mesh/lattice_void.cpp
   src/voxel/voxelize.cpp
   src/voxel/clearance.cpp
@@ -324,6 +329,10 @@ target_compile_definitions(test_lattice_gen PRIVATE
   LATTICE_TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
 add_test(NAME lattice_gen COMMAND test_lattice_gen)
 
+add_executable(test_stepped_plan tests/unit/test_stepped_plan.cpp)
+target_link_libraries(test_stepped_plan PRIVATE topopt)
+add_test(NAME stepped_plan COMMAND test_stepped_plan)
+
 # The lattice boundary finish (handoff 2026-07-29-lattice-boundary-finish): the
 # shared boundary predicate, solid-safe clipping (B3 is adversarial against a
 # centreline-clipped variant), overlap activation, the anchored skin/collar, and
@@ -386,6 +395,13 @@ add_test(NAME grading COMMAND test_grading)
 add_executable(test_lattice_refusal tests/unit/test_lattice_refusal.cpp)
 target_link_libraries(test_lattice_refusal PRIVATE topopt)
 add_test(NAME lattice_refusal COMMAND test_lattice_refusal)
+
+# ★ One definition of density -> strut diameter, per type, plus R1's refusal
+# (task 2026-09-28-lattice-types-core). Octet must come through bit-for-bit (R9);
+# every type without a measured table must refuse rather than borrow octet's.
+add_executable(test_strut_diameter_per_type tests/unit/test_strut_diameter_per_type.cpp)
+target_link_libraries(test_strut_diameter_per_type PRIVATE topopt)
+add_test(NAME strut_diameter_per_type COMMAND test_strut_diameter_per_type)
 
 # Harness-side lattice material model C(rho) (multiscale-lattice-feasibility
 # probe, 2026-07-31). The model itself lives in tests/harness/
@@ -2075,6 +2091,22 @@ if(OpenCASCADE_FOUND AND Eigen3_FOUND)
   endif()
   add_test(NAME cli_demo COMMAND test_cli)
 
+  # ★ THE SIZE PROBE AND THE RUN MUST AGREE ABOUT WHICH WALLS ARE DEAD
+  # (#354's audit, 2026-09-29). The domain the synthesis runs over is chosen in
+  # run_job.cpp, inside one of its anonymous namespaces (:67-7774), so no unit test
+  # can name the decision -- run_job.cpp itself IS linked and reachable, via
+  # production_loadcase_from_job, but nothing inside those namespaces is. The only way
+  # to see WHICH domain the probe passes is therefore to run the binary: one `lattice-variant` on a tiny L-prism
+  # fixture (~4 s at resolution 48) writes both organic_probe.json and run_info.json,
+  # and the test compares the dead verdicts AND the numbers behind them.
+  add_executable(test_organic_dead_parity tests/validation/test_organic_dead_parity.cpp)
+  target_link_libraries(test_organic_dead_parity PRIVATE topopt)
+  target_compile_definitions(test_organic_dead_parity PRIVATE
+    ORGANIC_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/organic"
+    CLI_TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}"
+    TOPOPT_CLI_EXE="$<TARGET_FILE:topopt_cli>")
+  add_test(NAME cli_organic_dead_parity COMMAND test_organic_dead_parity)
+
   # Task 2026-08-03-variant-postprocessing-fix (defect 1): design.bin is
   # published AFTER EVERY VARIANT, not once at the end of the ladder. Runs the
   # real topopt-cli as a subprocess and reads the container back at the moment
@@ -2326,3 +2358,46 @@ if(OpenCASCADE_FOUND AND Eigen3_FOUND)
     add_test(NAME threemf_import COMMAND test_3mf_import)
   endif()
 endif()
+
+add_executable(lslt_probe EXCLUDE_FROM_ALL tests/tools/lslt_probe.cpp)
+target_link_libraries(lslt_probe PRIVATE topopt)
+
+# ══ THE FLEXIBLE STAGE — SQUISH MATHS (task 2026-09-28-flexible-squish-maths, C1) ══
+# docs/design/flexibles/02-squish-model.md. Pure data + geometry over the base
+# library's own types (StepModel, VoxelGrid, face regions, clearances): no Eigen, no
+# OCCT, no lib3mf. It is in the ALWAYS-BUILT library on purpose — the app (A1) calls
+# these functions through the bridge on every slice, including the OCCT-free iOS
+# ones, and DECISIONS 2026-09-27 item 4 says the app never re-implements them.
+target_sources(topopt PRIVATE
+  src/flexible/json.cpp
+  src/flexible/data.cpp
+  src/flexible/squish.cpp
+  src/flexible/curve.cpp
+  src/flexible/faces.cpp
+  src/flexible/field.cpp
+  src/flexible/recommend.cpp
+  src/flexible/job_block.cpp
+  src/flexible/run.cpp)
+
+set(TOPOPT_FLEXIBLE_MATERIALS_JSON
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/materials/flexible_materials.json")
+foreach(_flex_test data squish curve faces field recommend job run)
+  add_executable(test_flexible_${_flex_test} tests/unit/test_flexible_${_flex_test}.cpp)
+  target_link_libraries(test_flexible_${_flex_test} PRIVATE topopt)
+  target_compile_definitions(test_flexible_${_flex_test} PRIVATE
+    FLEXIBLE_MATERIALS_JSON_PATH="${TOPOPT_FLEXIBLE_MATERIALS_JSON}"
+    FLEXIBLE_TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+  add_test(NAME flexible_${_flex_test} COMMAND test_flexible_${_flex_test})
+endforeach()
+if(TARGET topopt_cli)
+  # run_job / analyze_job / lattice_variant_job / preflight_job exist in this
+  # configuration: test that each refuses a job carrying a flexible block.
+  target_compile_definitions(test_flexible_run PRIVATE TOPOPT_FLEXIBLE_TEST_RUNNERS)
+  # `topopt-cli flexible` reads the live catalogue by default; --flexible-materials
+  # overrides it.
+  target_compile_definitions(topopt_cli PRIVATE
+    TOPOPT_CLI_DEFAULT_FLEXIBLE_MATERIALS="${TOPOPT_FLEXIBLE_MATERIALS_JSON}")
+endif()
+# Evidence: core's lookup against Iacob 2024 Table 2, as a Markdown table.
+add_executable(flexible_spot_table EXCLUDE_FROM_ALL tests/tools/flexible_spot_table.cpp)
+target_link_libraries(flexible_spot_table PRIVATE topopt)

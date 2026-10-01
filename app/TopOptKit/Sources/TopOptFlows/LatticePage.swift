@@ -64,6 +64,9 @@ public struct LatticePage: View {
     let onBackToSetup: () -> Void
     /// L17: re-run the preview with the CURRENT settings (rebake the strut scene).
     let onRefreshPreview: () -> Void
+    /// ★ ruling 4 (item 6, 2026-09-30): wherever "nothing set to lattice" shows on this page, one
+    /// tap takes him to where walls are marked (navigation only). nil ⇒ no tap is offered.
+    let onMarkWalls: (() -> Void)?
     /// TEST SEAM for the offscreen evidence captures: ImageRenderer does not
     /// render platform-backed containers (ScrollView), so the evidence generator
     /// renders the panel as a plain stack. Production always scrolls.
@@ -82,6 +85,17 @@ public struct LatticePage: View {
     /// Runs the forecast. Injected because it is a worker round trip; nil in the
     /// previews and offscreen captures, where the page renders without one.
     let driveForecast: (@Sendable (Data) async throws -> LatticeForecast)?
+    /// ★ ruling V1 (2026-09-29): marked faces with no shape to lattice, which this variant's
+    /// job leaves out (0 off a variant; every other face wall is carried as its prism)
+    let variantFacesWithoutShape: Int
+    /// ★ ruling (g) (2026-09-30): face regions (by name) the variant's job leaves out
+    let variantRegionsWithoutShape: [String]
+    /// ★ ruling (c) (2026-09-30): why the variant's job may not be written ("nothing set to
+    /// lattice"); nil off a variant or when it may
+    let variantJobRefusal: String?
+    /// ★ ruling 3 (2026-09-30): core's own refusal of the variant's job, in his words (an old run's
+    /// protection at another depth than the wall today); nil off a variant or when core accepts
+    let variantJobCoreRefusal: String?
 
     public init(model: AppModel, project: ProjectModel, run: RunModel,
                 sim: LatticeSimModel, page: LatticePageModel,
@@ -97,6 +111,11 @@ public struct LatticePage: View {
                 forecast: LatticeForecastModel = LatticeForecastModel(),
                 forecastJob: Data? = nil,
                 driveForecast: (@Sendable (Data) async throws -> LatticeForecast)? = nil,
+                variantFacesWithoutShape: Int = 0,
+                variantRegionsWithoutShape: [String] = [],
+                variantJobRefusal: String? = nil,
+                variantJobCoreRefusal: String? = nil,
+                onMarkWalls: (() -> Void)? = nil,
                 staticRender: Bool = false) {
         self.model = model
         self.project = project
@@ -116,6 +135,11 @@ public struct LatticePage: View {
         self.forecast = forecast
         self.forecastJob = forecastJob
         self.driveForecast = driveForecast
+        self.variantFacesWithoutShape = variantFacesWithoutShape
+        self.variantRegionsWithoutShape = variantRegionsWithoutShape
+        self.variantJobRefusal = variantJobRefusal
+        self.variantJobCoreRefusal = variantJobCoreRefusal
+        self.onMarkWalls = onMarkWalls
         self.staticRender = staticRender
     }
 
@@ -166,7 +190,10 @@ public struct LatticePage: View {
     }
     private var banner: LatticePageBanner? {
         LatticePageBanner.derive(simPhase: sim.phase, simStale: simStale,
-                                 optimizing: optimizing, runFailure: runFailureText)
+                                 optimizing: optimizing, runFailure: runFailureText,
+                                 // ★ ruling 3: said before any tap, with one tap to Optimize again
+                                 variantJobRefusal: variantJobCoreRefusal,
+                                 optimizeEnabled: actions.optimize.enabled)
     }
     private var simGate: LatticeSimGate {
         LatticeSimGate.compute(latticeOn: project.lattice.enabled,
@@ -187,7 +214,10 @@ public struct LatticePage: View {
             cellSummary: cellSummaryText,
             designBoxActive: project.designBox.isActive,
             densityRefusals:
-                LatticeSectorDensity.refusals(project.latticeSectorDensityRows()))
+                LatticeSectorDensity.refusals(project.latticeSectorDensityRows()),
+            // ★ ruling 4 (item 5): the ONE definition, on the emission the run would send
+            includeRefusal: LatticeJobIncludeGate.optimizeRefusal(
+                latticeEnabled: project.lattice.enabled, regions: project.latticeJobRegions().regions))
     }
 
     private var clearanceCount: Int { project.clearanceSpecs().count }
@@ -213,7 +243,7 @@ public struct LatticePage: View {
             protectedGroups: force.protectedGroups(in: groups),
             roles: project.lattice.groupRoles,
             anyIncludeDeclared:
-                project.latticeJobRegions().regions.contains { $0.role == .include })
+                LatticeJobIncludeGate.hasIncludeWall(project.latticeJobRegions().regions))
     }
 
     // MARK: body
@@ -514,7 +544,7 @@ public struct LatticePage: View {
         switch k {
         case .simRunning: return DS.Color.accent
         case .simComplete: return DS.Color.okGreen
-        case .simStale, .smoothingStale: return DS.Color.warning
+        case .simStale, .smoothingStale, .variantJobRefused: return DS.Color.warning
         case .optimizing: return RGBA(hex: 0x5E5CE6)
         case .failed: return DS.Color.danger
         }
@@ -523,7 +553,7 @@ public struct LatticePage: View {
         switch k {
         case .simRunning, .optimizing: return "circle.fill"
         case .simComplete: return "checkmark"
-        case .simStale, .smoothingStale: return "exclamationmark"
+        case .simStale, .smoothingStale, .variantJobRefused: return "exclamationmark"
         case .failed: return "xmark"
         }
     }
@@ -534,6 +564,9 @@ public struct LatticePage: View {
             if let ctx = model.makeLatticeSimContext() { sim.run(ctx) }
         case .optimizing: run.cancel()
         case .failed: page.go(nil)
+        // ★ ruling 3: the one tap — the SAME path as "Optimize from scratch", replace-results
+        // confirmation included; offered only while that path is open
+        case .variantJobRefused: if actions.optimize.enabled { onOptimize() }
         // The smoothing-stale banner is not a LATTICE-page state; it is derived
         // and shown by the smoothing page. Listed for exhaustiveness so a future
         // kind cannot be added without a decision here.
@@ -866,16 +899,28 @@ public struct LatticePage: View {
 
     // MARK: topology pane (B0 — core truth only; L14 — one line, one footnote)
 
+    /// ★★ LATTICE TYPES U1/U2 (2026-10-01): the same catalog the Lattice stage's chips read —
+    /// every type in the round's order; only an offered one can be picked; a greyed row carries a
+    /// mark, and ONE footnote per distinct reason says why (L14: never a per-row sentence).
+    private var topologyEntries: [LatticeTypeEntry] { LatticeTypeCatalog.entriesFromCore() }
+    static let footnoteMarks = ["*", "†", "‡", "§", "¶"]
+    /// The distinct reasons in row order, each with its mark.
+    static func footnotes(_ entries: [LatticeTypeEntry]) -> [(mark: String, reason: String)] {
+        var out: [(mark: String, reason: String)] = []
+        for e in entries { if let r = e.reason, !out.contains(where: { $0.reason == r }) {
+            out.append((footnoteMarks[min(out.count, footnoteMarks.count - 1)], r)) } }
+        return out
+    }
+
     private var topologyPane: some View {
-        VStack(spacing: 7) {
-            ForEach(topologyRows) { row in
-                topologyRowButton(row)
+        let entries = topologyEntries
+        let notes = Self.footnotes(entries)
+        return VStack(spacing: 7) {
+            ForEach(entries) { e in
+                topologyRowButton(e, mark: notes.first { $0.reason == e.reason }?.mark)
             }
-            // L14: ONE footnote for every asterisked row — never a per-row
-            // "certifies · no geometry yet" sentence. The split still comes from
-            // core's two sets (B0); this is presentation only.
-            if topologyRows.contains(where: { !$0.generatable }) {
-                Text("* the geometry does not exist yet")
+            ForEach(notes, id: \.mark) { n in
+                Text("\(n.mark) \(n.reason)")
                     .dsStyle(DS.TypeScale.caption)
                     .foregroundStyle(DS.Color.warning.color)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -884,20 +929,24 @@ public struct LatticePage: View {
         }
     }
 
-    private func topologyRowButton(_ row: LatticeTopologyRow) -> some View {
-        let selected = project.lattice.topologyID == row.id
-        return Button { project.lattice.topologyID = row.id } label: {
+    private func topologyRowButton(_ e: LatticeTypeEntry, mark: String?) -> some View {
+        let selected = project.lattice.topologyID == e.id
+        return Button {
+            // ★ only an offered type is ever written — a greyed one says why in its footnote
+            guard e.offered else { return }
+            project.lattice.topologyID = e.id
+        } label: {
             HStack(spacing: DS.Space.sm) {
-                // L14: the name on ONE line; a non-generatable topology is GREYED
-                // with an orange asterisk pointing at the single footnote.
+                // L14: the name on ONE line; a type core doesn't offer is GREYED with an orange
+                // mark pointing at its footnote.
                 HStack(alignment: .top, spacing: 2) {
-                    Text(row.displayName)
+                    Text(e.displayName)
                         .dsStyle(DS.TypeScale.bodyStrong)
-                        .foregroundStyle((row.generatable ? DS.Color.textPrimary
-                                                          : DS.Color.textTertiary).color)
+                        .foregroundStyle((e.offered ? DS.Color.textPrimary
+                                                    : DS.Color.textTertiary).color)
                         .lineLimit(1)
-                    if !row.generatable {
-                        Text("*").font(.system(size: 13, weight: .bold))
+                    if let mark, !e.offered {
+                        Text(mark).font(.system(size: 13, weight: .bold))
                             .foregroundStyle(DS.Color.warning.color)
                     }
                 }
@@ -916,6 +965,78 @@ public struct LatticePage: View {
                                   lineWidth: 1)))
         }
         .buttonStyle(.plain)
+        .accessibilityHint(e.reason ?? "")
+        .accessibilityIdentifier("lattice-topology-\(e.id)")
+    }
+
+    // MARK: the algorithm card
+
+    /// Core's algorithm names, in core's own order. Read once per body pass — it is a
+    /// three-element vector over the bridge, not a computation.
+    private var algorithmNames: [String] { TopOptKit.latticeAlgorithmNames }
+
+    /// One line each, saying what CHANGES rather than what it is called. All three are
+    /// core's own descriptions from `lattice_algorithm.hpp`, compressed — the app does
+    /// not get to characterise an algorithm it did not write.
+    private func algorithmBlurb(_ name: String) -> String {
+        switch name {
+        case "stepped":
+            return "One cell per region, taken exactly as derived. Regions meet at "
+                 + "cells that do not line up, and the receipt counts the strut ends "
+                 + "left floating."
+        case "organic":
+            return "Struts traced along the stress lines instead of a repeating cell. "
+                 + "Spacing is the input; the strut width stays constant."
+        default:
+            return "The doubled ladder. Cell sizes step by halves, so a coarse cell's "
+                 + "corners land on the fine grid and neighbouring cells share nodes."
+        }
+    }
+
+    private var algorithmCard: some View {
+        card {
+            HStack(alignment: .firstTextBaseline) {
+                Text("Lattice algorithm").dsStyle(DS.TypeScale.body)
+                Spacer()
+            }
+            segment(algorithmNames.map { $0.capitalized },
+                    selected: algorithmNames.firstIndex(
+                        of: project.lattice.resolvedAlgorithm) ?? 0,
+                    // All three are always selectable: core's refusal is about the
+                    // MODE it is paired with, and a control that greys out without
+                    // saying why is the failure `algorithmRefusalReason` exists to
+                    // avoid. The reason is shown instead, in core's own words.
+                    enabled: [Bool](repeating: true, count: algorithmNames.count)) { i in
+                guard i >= 0, i < algorithmNames.count else { return }
+                project.lattice.algorithm = algorithmNames[i]
+            }
+            Text(algorithmBlurb(project.lattice.resolvedAlgorithm))
+                .dsStyle(DS.TypeScale.caption)
+                .foregroundStyle(DS.Color.textSecondary.color)
+                .fixedSize(horizontal: false, vertical: true)
+            // ★★★ THE REFUSAL, AT THE PICKER RATHER THAN AFTER THE SOLVE. Core will
+            // not run organic under a structural claim; learning that from a job that
+            // dies after the FEA is the worst possible place to learn it. The sentence
+            // and the permission both come from core — see
+            // `LatticeSettings.algorithmRefusalReason`.
+            if let refusal = project.lattice.algorithmRefusalReason {
+                Text(refusal)
+                    .dsStyle(DS.TypeScale.caption)
+                    .foregroundStyle(DS.Color.warning.color)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("lattice-algorithm-refusal")
+            }
+            // ★ AND WHAT THE PREVIEW CAN ACTUALLY SHOW. The marcher draws the doubled
+            // ladder only; saying so here means the picture on the stage is never taken
+            // for a picture of stepped or organic.
+            if project.lattice.resolvedAlgorithm != (algorithmNames.first ?? "doubled") {
+                Text("The preview draws the doubled ladder — the regions, depths and "
+                     + "densities it shows are the same, the strut pattern is not.")
+                    .dsStyle(DS.TypeScale.caption)
+                    .foregroundStyle(DS.Color.textQuaternary.color)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
     }
 
     // MARK: cell + density pane (B0b — the band is core's; L8 — tappable numbers)
@@ -964,6 +1085,10 @@ public struct LatticePage: View {
                         .foregroundStyle(DS.Color.okGreen.color)
                 }
             }
+            // ★ NO ALGORITHM CARD HERE. One was added on 2026-08-21 and removed the
+            // same day: the WIZARD already has this control ("Cell transition"), and it
+            // is the one he actually uses. Two controls for one job key is how the two
+            // drift — the algorithm is now written from `LatticeCellTransition` alone.
             // Density range card — the BAND IS CORE'S for the selected topology.
             card {
                 HStack(alignment: .firstTextBaseline) {
@@ -1449,15 +1574,23 @@ public struct LatticePage: View {
                  + "member a coarse light one. No cell is entered here.")
                 .dsStyle(DS.TypeScale.caption2)
                 .foregroundStyle(DS.Color.textQuaternary.color)
-            if !project.latticeJobRegions().regions.contains(where: { $0.role == .include }) {
+            if !LatticeJobIncludeGate.hasIncludeWall(project.latticeJobRegions().regions) {
                 // Fit derives FROM the declared include regions. With none declared
                 // there is nothing to derive from, and saying so here is cheaper
                 // than a receipt that latticed nothing.
-                Text("Add at least one lattice region first — this mode derives the "
-                     + "cell from the regions you declare, so with none declared "
-                     + "there is nothing to fit to.")
-                    .dsStyle(DS.TypeScale.caption)
-                    .foregroundStyle(RGBA(hex: 0xFFCF7A).color)
+                // ★★ ROUND 3 RULING (b) (2026-10-01): one gate, one sentence — with lattice ON this
+                // reports the gate's condition, so it says "nothing set to lattice" with the one
+                // tap; with lattice OFF it reports a different one and keeps its words.
+                let why = LatticeJobIncludeGate.refusal(latticeEnabled: project.lattice.enabled, hasIncludeWall: false)
+                if let why, LatticeJobIncludeGate.opensWallMarking(why) {
+                    fitPaneNothingSet(why)
+                } else {
+                    Text("Add at least one lattice region first — this mode derives the "
+                         + "cell from the regions you declare, so with none declared "
+                         + "there is nothing to fit to.")
+                        .dsStyle(DS.TypeScale.caption)
+                        .foregroundStyle(RGBA(hex: 0xFFCF7A).color)
+                }
             }
         }
     }
@@ -1756,6 +1889,7 @@ public struct LatticePage: View {
         case .none: return "None"
         case .rim: return "Rim only"
         case .fullSkin: return "Full skin · diagrid"
+        case .covered: return "Covered · solid wall"
         }
     }
 
@@ -1771,11 +1905,14 @@ public struct LatticePage: View {
             Text(p.title.uppercased()).font(.system(size: 11, weight: .semibold))
                 .tracking(0.7)
                 .foregroundStyle((p.warn ? DS.Color.warning : DS.Color.textQuaternary).color)
-            if let placeholder = p.placeholder {
-                Text(placeholder).dsStyle(DS.TypeScale.caption)
-                    .foregroundStyle(DS.Color.textTertiary.color)
+            // ★ ruling V1 (2026-09-29): a variant's forecast never silently omits a face wall
+            if let scope = LatticeVariantFaceWalls.line(withoutShape: variantFacesWithoutShape,
+                                                        regions: variantRegionsWithoutShape) {
+                Text(scope).dsStyle(DS.TypeScale.caption)
+                    .foregroundStyle(DS.Color.warning.color)
                     .fixedSize(horizontal: false, vertical: true)
             }
+            if let placeholder = p.placeholder { forecastPlaceholder(placeholder, marksWalls: p.marksWalls) }
             if let headline = p.headline {
                 Text(headline).dsStyle(DS.TypeScale.caption).fontWeight(.semibold)
                     .foregroundStyle((p.warn ? DS.Color.warning : DS.Color.textPrimary).color)
@@ -1794,8 +1931,48 @@ public struct LatticePage: View {
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel(
-            ([p.title, p.placeholder, p.headline] + p.reasons + p.advice)
+            ([p.title, LatticeVariantFaceWalls.line(withoutShape: variantFacesWithoutShape,
+                                                    regions: variantRegionsWithoutShape),
+              p.placeholder, p.headline]
+                + p.reasons + p.advice)
                 .compactMap { $0 }.joined(separator: ". "))
+    }
+
+    /// ★ round 3 ruling (b): the Fit pane's "nothing set to lattice", one tap from the walls — the
+    /// gate's sentence in the warning colour every other surface gives it.
+    @ViewBuilder private func fitPaneNothingSet(_ text: String) -> some View {
+        if let go = onMarkWalls {
+            Button(action: go) {
+                WallMarkingSubline(text: text, marks: true, style: DS.TypeScale.caption)
+                    .foregroundStyle(DS.Color.warning.color)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .buttonStyle(.plain)
+            .accessibilityHint(WallMarkingSubline.hint)
+            .accessibilityIdentifier("lattice-fit-mark-walls")
+        } else {
+            Text(text).dsStyle(DS.TypeScale.caption)
+                .foregroundStyle(DS.Color.warning.color)
+        }
+    }
+
+    /// The drawer's one-line placeholder. ★ ruling 4 (item 6): "nothing set to lattice" is one tap
+    /// from the walls.
+    @ViewBuilder private func forecastPlaceholder(_ text: String, marksWalls: Bool) -> some View {
+        if marksWalls, let go = onMarkWalls {
+            Button(action: go) {
+                WallMarkingSubline(text: text, marks: true, style: DS.TypeScale.caption)
+                    .foregroundStyle(DS.Color.textTertiary.color)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .buttonStyle(.plain)
+            .accessibilityHint(WallMarkingSubline.hint)
+            .accessibilityIdentifier("lattice-forecast-mark-walls")
+        } else {
+            Text(text).dsStyle(DS.TypeScale.caption)
+                .foregroundStyle(DS.Color.textTertiary.color)
+                .fixedSize(horizontal: false, vertical: true)
+        }
     }
 
     private func summaryRow(_ k: String, _ v: String, warn: Bool) -> some View {
@@ -1819,7 +1996,8 @@ public struct LatticePage: View {
         LatticePageActions.compute(variant: variantContext,
                                    optimizeSurface: optimizeSurface,
                                    running: optimizing,
-                                   forecast: forecast.forecast(for: forecastJob))
+                                   forecast: forecast.forecast(for: forecastJob),
+                                   jobRefusal: variantJobRefusal ?? variantJobCoreRefusal)
     }
 
     /// THE FORECAST, IN THE REVIEW DRAWER (bar F3). The button carries the refusal
@@ -1829,7 +2007,8 @@ public struct LatticePage: View {
     private var forecastPanel: LatticeForecastPanel {
         LatticeForecastPanel.compute(
             state: forecast.state,
-            describesCurrentJob: forecastJob != nil && forecast.describes == forecastJob)
+            describesCurrentJob: forecastJob != nil && forecast.describes == forecastJob,
+            refusal: variantJobRefusal, coreRefusal: variantJobCoreRefusal)
     }
 
     private var optimizeButton: some View {
@@ -1849,13 +2028,16 @@ public struct LatticePage: View {
         // choice (re-running the whole ladder) is never the one a thumb lands on
         // by default.
         let tint: RGBA = a.primary ? DS.Color.accent : DS.Surface.panel
+        // ★ ruling 4 (item 6): refused for want of an include wall — greyed, and the tap goes to
+        // where walls are marked
+        let marks = !a.enabled && a.marksWalls && onMarkWalls != nil
         return Button {
-            guard a.enabled else { return }
-            action()
+            if a.enabled { action() } else if marks { onMarkWalls?() }
         } label: {
             VStack(spacing: 2) {
                 Text(a.label).dsStyle(DS.TypeScale.headline)
-                Text(a.sub).font(.system(size: 11.5, weight: .semibold)).opacity(0.72)
+                WallMarkingSubline(text: a.sub, marks: marks)
+                    .font(.system(size: 11.5, weight: .semibold)).opacity(0.72)
                     .lineLimit(2).multilineTextAlignment(.center)
             }
             .foregroundStyle((a.enabled ? DS.Color.textPrimary : DS.Color.textDisabled).color)
@@ -1868,9 +2050,9 @@ public struct LatticePage: View {
             .dsShadow(a.enabled && a.primary ? DS.Shadow.accentGlow : DS.Shadow.panel)
         }
         .buttonStyle(.plain)
-        .disabled(!a.enabled)
+        .disabled(!a.enabled && !marks)
         .accessibilityLabel(a.label)
-        .accessibilityHint(a.sub)
+        .accessibilityHint(marks ? WallMarkingSubline.hint : a.sub)
     }
 
     // MARK: entry gate (B1)
