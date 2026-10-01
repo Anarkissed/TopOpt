@@ -728,8 +728,9 @@ public struct FlexibleMainStatus: Equatable, Sendable {
         if isBuilding || r.designing || lattice == nil || stale { return .init(line: building, tone: .building, fix: nil) }
         // ★ C2 VERIFICATION: what core can't take as it stands is a preview, never the Ready green
         // (the hold is the one source: a calibrate-first filament's hold carries his shape-only label)
-        // ★ BATCH E: a pressed face with no lattice under it is said here too (before a hold: it has a fix)
-        if let n = FlexibleLatticeUnder.first(r) { return .init(line: n.pill, tone: .fix, fix: n) }
+        // ★ BATCH E (+ review): a pressed face with no lattice under it is said here too — never a
+        // fix tone: the big button still SENDS (FlexibleLatticeUnder.mainStatus); his shape-only label first
+        if let s = FlexibleLatticeUnder.mainStatus(r, hold: hold) { return s }
         if let hold { return .init(line: hold, tone: .preview, fix: nil) }
         return .init(line: lattice?.shapeOnlyLabel ?? ready, tone: .ready, fix: nil)
     }

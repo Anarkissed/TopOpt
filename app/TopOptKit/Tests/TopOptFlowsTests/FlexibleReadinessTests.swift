@@ -25,8 +25,8 @@ final class FlexibleReadinessTests: XCTestCase {
 
     /// His project restored, its scene open and every pressed face designed (the pipeline idle).
     @MainActor
-    private func his(material: String? = nil) async throws -> (FlexibleHisProject.Restored, FlexibleStageModel) {
-        let r = try FlexibleHisProject.restore()
+    private func his(material: String? = nil, asSaved: Bool = false) async throws -> (FlexibleHisProject.Restored, FlexibleStageModel) {
+        let r = try FlexibleHisProject.restore(asSaved: asSaved)
         addTeardownBlock { r.cleanup() }
         if let material { r.project.lattice.flexible?.materialID = material }
         let m = try await FlexibleHisProject.openedModel(r.project, test: self)
@@ -80,6 +80,13 @@ final class FlexibleReadinessTests: XCTestCase {
         XCTAssertEqual(m.pinches.map { "\($0.a)|\($0.b)" }, ["3|5"], "3 and 5: a pinch in group 1")
         // ★ RED CONTROL: round 3's rule said exactly this one thing
         XCTAssertEqual(round3Blockers(m), ["Face 3 and Face 5 press the same material"], "control: the old blocker")
+        // ★ BATCH E REVIEW: `his()` restores WITH the [Lattice under it] taps (FlexibleHisProject). AS
+        // SAVED — the main page latticing top A only — nothing blocks either; the line says Top B
+        let (_, saved) = try await his(asSaved: true)
+        print("FLEX-READY his project as saved (no taps): \(saved.readiness.blocking.count) blocking — \(saved.readiness.oneLine)")
+        XCTAssertTrue(saved.readiness.isReady)
+        XCTAssertEqual(saved.readiness.oneLine, "Ready · No lattice under Top B")
+        XCTAssertEqual(FlexibleExitDecision.decide(saved.readiness), .exit, "Exit still builds")
     }
 
     @MainActor

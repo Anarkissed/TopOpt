@@ -85,7 +85,11 @@ final class FlexibleLatticeUnderTests: XCTestCase {
         let status = FlexibleMainStatus.of(model: m)
         print("E-FLEX main status: \(status.line) · lattice \(m.lattice != nil) error \(m.latticeError ?? "-")")
         XCTAssertEqual(status.line, "No lattice under Top B", "★ the main page's pill")
-        XCTAssertEqual(status.fix?.id, issue.id, "its tap opens the fix")
+        XCTAssertEqual(status.fix?.id, issue.id, "it carries the fix")
+        // ★ RE-PINNED (batch E review): a preview tone — the big button still SENDS (its fix is on
+        // Settings' line and the pop-up that opens with the page); the fix tone opened Settings on every tap
+        XCTAssertEqual(status.tone, .preview)
+        XCTAssertEqual(status.tap, .send)
         XCTAssertEqual(m.readiness.oneLine, "Ready · No lattice under Top B", "the Settings line")
         // the one tap: a main-page group of its own, protected + Lattice, as deep as the pad under it
         XCTAssertEqual(m.latticeUnderPlan(b), .newGroup(face: nil, region: 104, name: "Top B", depthMM: 20))

@@ -112,6 +112,7 @@ struct FlexibleFixPopup: View {
         case .joinGroups(let from, let into): return "join-\(from)-\(into)"
         case .keepApart: return "keep-apart"
         case .latticeUnder(let r): return "lattice-under-\(r)"
+        case .latticeUnderAll(let rs): return "lattice-under-all-\(rs.map(String.init).joined(separator: "-"))"
         }
     }
 
@@ -127,6 +128,7 @@ struct FlexibleFixPopup: View {
         case .keepApart: break   // the pop-up closes; the groups stay apart
         case .weight: break   // the pad commits
         case .latticeUnder(let r): model.latticeUnder(r)   // ★ batch E: the main page's own edit
+        case .latticeUnderAll(let rs): model.latticeUnder(all: rs)   // ★ batch E review: one tap, one undo step
         }
     }
 

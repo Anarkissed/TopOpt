@@ -24,8 +24,8 @@ final class FlexibleBatchBReviewTests: XCTestCase {
     // MARK: his project, ready (Face 5 rests), on the main page
 
     @MainActor
-    private func hisStage(material: String) throws -> (FlexibleHisProject.Restored, FlexibleMainStage, FlexibleStageModel) {
-        let r = try FlexibleHisProject.restore()
+    private func hisStage(material: String, asSaved: Bool = false) throws -> (FlexibleHisProject.Restored, FlexibleMainStage, FlexibleStageModel) {
+        let r = try FlexibleHisProject.restore(asSaved: asSaved)
         addTeardownBlock { r.cleanup() }
         r.project.lattice.flexible?.materialID = material
         let stage = FlexibleMainStage()
@@ -38,8 +38,8 @@ final class FlexibleBatchBReviewTests: XCTestCase {
 
     /// Open the scene, rest Face 5, wait until nothing blocks and the designs are in.
     @MainActor
-    private func ready(_ material: String) async throws -> (FlexibleHisProject.Restored, FlexibleMainStage, FlexibleStageModel) {
-        let (r, stage, m) = try hisStage(material: material)
+    private func ready(_ material: String, asSaved: Bool = false) async throws -> (FlexibleHisProject.Restored, FlexibleMainStage, FlexibleStageModel) {
+        let (r, stage, m) = try hisStage(material: material, asSaved: asSaved)
         m.openScene()
         try await FlexibleHisProject.waitFor(60, "his scene and stacks") {
             m.sceneState == .ready && m.loadedKeys.allSatisfy { m.stacks[$0] != nil }
@@ -54,8 +54,8 @@ final class FlexibleBatchBReviewTests: XCTestCase {
 
     /// Exit (the main page shows the stage), then wait for the first lattice.
     @MainActor
-    private func built(_ material: String) async throws -> (FlexibleHisProject.Restored, FlexibleMainStage, FlexibleStageModel) {
-        let (r, stage, m) = try await ready(material)
+    private func built(_ material: String, asSaved: Bool = false) async throws -> (FlexibleHisProject.Restored, FlexibleMainStage, FlexibleStageModel) {
+        let (r, stage, m) = try await ready(material, asSaved: asSaved)
         stage.didExitSettings()
         try await FlexibleHisProject.waitFor(120, "the first lattice") { m.lattice != nil || m.latticeError != nil }
         await m.waitForIdle()
@@ -166,7 +166,10 @@ final class FlexibleBatchBReviewTests: XCTestCase {
 
     @MainActor
     func testANewLatticeRegionOnTheMainPageRebuilds() async throws {
-        let (r, stage, m) = try await built("varioshore_tpu")
+        // ★ RE-PINNED AGAIN (batch E review): his project AS SAVED — the lattice under top A only — so
+        // a new main-page region over the sides MOVES voxels (with the fixture's taps the lattice is
+        // already the whole part and the voxel count could not see the new region)
+        let (r, stage, m) = try await built("varioshore_tpu", asSaved: true)
         let g1 = try XCTUnwrap(m.lattice?.generation)
         let v1 = m.sceneInfo?.latticeVoxels ?? -1
         let k1 = m.openedKey
@@ -179,11 +182,9 @@ final class FlexibleBatchBReviewTests: XCTestCase {
         }
         await m.waitForIdle()
         print("FLEX-REVIEW new region: latticeVoxels \(v1) → \(m.sceneInfo?.latticeVoxels ?? -1) · generation \(g1) → \(m.lattice?.generation ?? -1) · pill '\(stage.status.line)'")
-        // ★ RE-PINNED (batch E): the scene re-opened on the new regions — by its KEY (the regions are in
-        // it). The voxel count was the old premise: his restored pad now carries lattice under every
-        // pressed face (FlexibleHisProject's [Lattice under it] taps), the whole part, so a new region
-        // over it moves no voxel.
+        // the scene re-opened on the new regions: its KEY (the regions are in it) and its voxels
         XCTAssertNotEqual(m.openedKey, k1, "premise: the scene re-opened on the new region")
+        XCTAssertNotEqual(m.sceneInfo?.latticeVoxels, v1, "★ the new region moved the lattice")
         XCTAssertGreaterThan(m.lattice?.generation ?? g1, g1)
     }
 

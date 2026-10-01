@@ -57,6 +57,72 @@ public enum FlexibleLatticeUnder {
     public static func first(_ r: FlexibleReadiness) -> FlexibleIssue? {
         r.issues.first { $0.kind == .noLatticeUnder }
     }
+
+    // MARK: ★ BATCH E REVIEW — said everywhere, blocking nothing
+
+    /// ★ THE MAIN PAGE'S PILL with a face left without lattice. Never the `fix` tone: that tone's tap
+    /// opens Settings, so on his saved pad EVERY tap of the big Lattice button re-opened the pop-up
+    /// and core was out of reach (his round 4 rule: "the large bottom buttons are for exports and
+    /// starting the actual core process"). A PREVIEW tone — the tap sends (the Export step says what
+    /// core can take) — and the fix lives on Settings' line and the pop-up that opens with the page.
+    /// A calibrate-first filament keeps HIS label ('<filament>: shape only — no squish predicted');
+    /// otherwise the face is said before core's other holds. nil ⇒ nothing to say.
+    public static func mainStatus(_ r: FlexibleReadiness, hold: String?) -> FlexibleMainStatus? {
+        guard let n = first(r) else { return nil }
+        if r.shapeOnly, let hold { return FlexibleMainStatus(line: hold, tone: .preview, fix: n) }
+        return FlexibleMainStatus(line: n.pill, tone: .preview, fix: n)
+    }
+
+    /// The Settings page's top line: ★ a calibrate-first filament keeps "shape only" on it.
+    public static func readyLine(_ n: FlexibleIssue, shapeOnly: Bool) -> String {
+        shapeOnly ? "Ready · shape only · \(n.pill)" : "Ready · \(n.pill)"
+    }
+
+    /// "[Lattice under both]" / "[Lattice under all 3]".
+    public static func allTitle(_ n: Int) -> String {
+        n == 2 ? "Lattice under both" : "Lattice under all \(n)"
+    }
+
+    /// ★ SEVERAL FACES, ONE TAP (his round-5 pad: Face 3 and Face 5 at 23 %). Every face that has a
+    /// one-tap edit gets [Lattice under both / all N] in place of its own [Lattice under it]; its
+    /// [<face> rests] stays. One face: unchanged.
+    static func offerAll(_ issues: inout [FlexibleIssue]) {
+        let fixable = issues.filter { $0.kind == .noLatticeUnder }
+            .compactMap { i in i.fixes.contains { if case .latticeUnder = $0 { return true }; return false } ? i.region : nil }
+        guard fixable.count >= 2 else { return }
+        issues = issues.map { i in
+            guard i.kind == .noLatticeUnder, let r = i.region, fixable.contains(r) else { return i }
+            let rest = i.fixes.filter { if case .latticeUnder = $0 { return false }; return true }
+            return FlexibleIssue(id: i.id, kind: i.kind, region: r, oneLine: i.oneLine, blocking: i.blocking,
+                                 fixes: [.latticeUnderAll(fixable)] + rest, pill: i.pill)
+        }
+    }
+
+    /// ★ NO LATTICE AT ALL UNDER A PRESSED FACE: its deepest squish has nothing to sink into. The
+    /// Settings row and the 3D chip said "3.0 mm" and quietly clamped every edit to 0.5 mm ("Kept
+    /// within 0.1–0.5 mm"); now the row says why and offers the fix, and the stored value is kept.
+    /// nil (no stack yet) ⇒ not said.
+    public static func nothingToSquish(latticeMaxMM: Double?) -> Bool {
+        guard let m = latticeMaxMM else { return false }
+        return m < FlexibleDepthPrism.minMM
+    }
+
+    /// The deepest-squish row's one line when there is nothing to squish into.
+    public static let deepestNoLattice = "No lattice under it"
+
+    /// ★ The face's stack line (behind the (i)): the share of its columns with lattice under them is
+    /// said — "lattice 100.0–100.0 mm deep" read as all of Face 3 while 77 % of it had none (core's
+    /// min/max skip the empty columns).
+    public static func stackInfo(uMM: Double, vMM: Double, columns: Int, pitchMM: Double,
+                                 latticed: Int, minMM: Double, maxMM: Double) -> String {
+        let base = String(format: "%.0f × %.0f mm · %d columns, %.1f mm apart", uMM, vMM, columns, pitchMM)
+        guard columns > 0, latticed < columns else {
+            return base + String(format: " · lattice %.1f–%.1f mm deep", minMM, maxMM)
+        }
+        if latticed <= 0 { return base + " · no lattice under it" }
+        let pct = Int((100 * Double(latticed) / Double(columns)).rounded())
+        return base + String(format: " · lattice under %d %% · %.1f–%.1f mm deep", pct, minMM, maxMM)
+    }
 }
 
 // MARK: - the model: what the tap does
@@ -115,12 +181,46 @@ extension FlexibleStageModel {
         project.sealUndoStep()
         let group = project.flexibleLatticeUnder(plan)
         project.sealUndoStep()
-        switch plan {
-        case .declare: toast = "\(displayName(region)): set to Lattice in \(group)"
-        case let .newGroup(_, _, name, depth):
-            toast = "\(name): lattice under it, \(Int(depth.rounded())) mm deep · a new group on Topology"
-        }
+        toast = FlexibleLatticeUnder.toast(plan, name: displayName(region), group: group)
         openScene()   // the lattice moved: the scene re-opens on it
+    }
+
+    /// ★ BATCH E REVIEW: [Lattice under both / all N] — each face's own edit (its plan read just
+    /// before it is applied, so one face's edit can cover the next), ONE undo step, one re-open.
+    public func latticeUnder(all regions: [Int]) {
+        let todo = regions.filter { latticeUnderPlan($0) != nil }
+        guard !todo.isEmpty else { return }
+        actionSerial += 1
+        project.sealUndoStep()
+        var names: [String] = [], made = 0
+        for r in todo {
+            guard let plan = latticeUnderPlan(r) else { continue }
+            project.flexibleLatticeUnder(plan)
+            names.append(displayName(r))
+            if case .newGroup = plan { made += 1 }
+        }
+        project.sealUndoStep()
+        toast = FlexibleLatticeUnder.toastAll(names, newSelections: made)
+        openScene()
+    }
+}
+
+extension FlexibleLatticeUnder {
+    /// ★ BATCH E REVIEW: the toast names what changed on the MAIN page — a new group there is a
+    /// PROTECTED selection (it changes his Optimize runs), never just "a new group" (which collided
+    /// with the Flexible page's own "Group 1 · Squeeze").
+    static func toast(_ plan: Plan, name: String, group: String) -> String {
+        switch plan {
+        case .declare: return "\(name): set to Lattice in \(group)"
+        case let .newGroup(_, _, n, depth):
+            return "\(n): lattice under it, \(Int(depth.rounded())) mm deep · new protected selection \u{201C}\(n)\u{201D}"
+        }
+    }
+
+    static func toastAll(_ names: [String], newSelections: Int) -> String {
+        let who = names.count == 2 ? "\(names[0]) and \(names[1])" : names.joined(separator: ", ")
+        guard newSelections > 0 else { return "\(who): set to Lattice on the main page" }
+        return "\(who): lattice under them · \(newSelections) new protected selection\(newSelections == 1 ? "" : "s")"
     }
 }
 

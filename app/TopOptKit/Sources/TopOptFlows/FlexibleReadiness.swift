@@ -52,6 +52,9 @@ public enum FlexibleFix: Hashable, Sendable {
     /// ★ BATCH E: "[Lattice under it]" — the main page's own edit that puts lattice under the face
     /// (FlexibleLatticeUnder).
     case latticeUnder(Int)
+    /// ★ BATCH E REVIEW: "[Lattice under both]" — the same edit for every pressed face said to have
+    /// no lattice under it, in one tap (one undo step).
+    case latticeUnderAll([Int])
 
     /// The button's words (one line, ≤ 3 words where it can).
     public func title(_ name: (Int) -> String) -> String {
@@ -64,6 +67,7 @@ public enum FlexibleFix: Hashable, Sendable {
         case .joinGroups: return "Join the groups"
         case .keepApart: return "Keep apart"
         case .latticeUnder: return "Lattice under it"
+        case .latticeUnderAll(let rs): return FlexibleLatticeUnder.allTitle(rs.count)
         }
     }
 }
@@ -103,6 +107,7 @@ public struct FlexibleIssue: Equatable, Identifiable, Sendable {
     public var named: [Int] {
         var out: [Int] = region.map { [$0] } ?? []
         for f in fixes { if case .rest(let r) = f, !out.contains(r) { out.append(r) } }
+        for f in fixes { if case .latticeUnderAll(let rs) = f { for r in rs where !out.contains(r) { out.append(r) } } }   // ★ batch E review
         return out
     }
 
@@ -148,7 +153,7 @@ public struct FlexibleReadiness: Equatable, Sendable {
         }
         if let failed = issues.first(where: { $0.kind == .buildFailed }) { return failed.oneLine }
         if let c = competing { return "Ready · \(c.pill)" }
-        if let n = FlexibleLatticeUnder.first(self) { return "Ready · \(n.pill)" }
+        if let n = FlexibleLatticeUnder.first(self) { return FlexibleLatticeUnder.readyLine(n, shapeOnly: shapeOnly) }
         if let four = issues.first(where: { $0.kind == .squishOnFour }) {
             return "Ready · \(four.oneLine)"
         }
@@ -383,6 +388,7 @@ public struct FlexibleReadiness: Equatable, Sendable {
                                         : "Squish shown on \(shown) of \(i.pressed.count) faces · pinches whole",
                                      blocking: false, fixes: []))
         }
+        FlexibleLatticeUnder.offerAll(&out)   // ★ batch E review: several faces — one tap for all
         return FlexibleReadiness(issues: out, autoFixes: auto)
     }
 
@@ -470,7 +476,7 @@ public struct FlexibleFixPrompt: Equatable, Sendable {
             openPending = false
             known = Set(current.map(\.id))
             coveredAction = max(coveredAction, actionSerial)
-            return r.blocking.first
+            return r.blocking.first ?? FlexibleLatticeUnder.first(r)   // ★ batch E review: said at once
         }
         let fresh = current.filter { !known.contains($0.id) }
         known = Set(current.map(\.id))

@@ -199,7 +199,8 @@ final class FlexibleMainPageRound4VerifyTests: XCTestCase {
         XCTAssertEqual(FlexibleMainStatus(line: "x", tone: .preview, fix: nil).tap, .send, "its tap opens the Export step on it")
     }
 
-    /// His project as saved: faces 3 and 5 pinch the pad. C2's pill read the green "Ready" and a
+    /// His project (with the [Lattice under it] tap FlexibleHisProject replays — AS SAVED the pill
+    /// names Top B first: FlexibleLatticeUnderReviewTests): faces 3 and 5 pinch the pad. C2's pill read the green "Ready" and a
     /// tap ended on "Not sent" with nothing to do. Now the pill says what it is (a preview core
     /// can't take yet), and the Export step names the faces and offers each end.
     @MainActor

@@ -77,6 +77,8 @@ struct FlexibleDepthChips: View {
         ZStack {
             if let r = model.selectedRegion, let f = model.settings.face(r), f.isLoaded, let key = model.key(r),
                let st = model.stacks[key], let proj = projection,
+               // ★ batch E review: no lattice under the face — nothing to drag into (the row says why)
+               !FlexibleLatticeUnder.nothingToSquish(latticeMaxMM: FlexibleDepthPrism.latticeMax(st, pinched: model.pinchedColumns(r))),
                let h = Self.handle(model: model, k: k), let p = proj.project(h.anchor),
                FlexibleDepthChipLayout.shows(p, dragging: dragging || model.frozenExaggeration != nil,
                                              keepOut: keepOut, viewport: proj.viewportSize) {

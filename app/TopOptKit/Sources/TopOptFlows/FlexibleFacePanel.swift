@@ -244,29 +244,36 @@ struct FlexibleFaceRows: View {
             if f.isStampShape { FlexibleFaceStampRows(model: model, region: r, padTarget: $padTarget) }
             // ★ ROUND 5 (S3): the number in its own box — tap for the keypad, drag up / down
             let latticeMax = model.stack(r).map { FlexibleDepthPrism.latticeMax($0, pinched: model.pinchedColumns(r)) }
-            FlexRow(FlexibleRowCopy.deepestRow, info: FlexibleRowCopy.Info.deepest, id: "flexible-row-deepest") {
-                FlexNumberBox(key: "deepest-\(r)", title: FlexibleRowCopy.deepestTitle,
-                              spec: FlexibleNumberSpecs.deepest(mm: f.deepestMM, latticeMM: latticeMax),
-                              padTarget: $padTarget, onNote: { model.toast = $0 }) { v in
-                    // ★ D2 REVIEW: a pinched face's deepest squish stops at the half its design uses
-                    let lattice = latticeMax ?? v
-                    model.edit { s in
-                        guard var g = s.face(r) else { return }
-                        g.deepestMM = FlexibleDepthPrism.clamp(v, latticeMM: lattice)
-                        s.setFace(g)
+            // ★ BATCH E REVIEW: no lattice under the face — the row says so and offers the fix; the
+            // stored value is kept (the box clamped every edit to 0.5 mm, silently)
+            if FlexibleLatticeUnder.nothingToSquish(latticeMaxMM: latticeMax) {
+                FlexibleDeepestNoLatticeRow(model: model, region: r)
+            } else {
+                FlexRow(FlexibleRowCopy.deepestRow, info: FlexibleRowCopy.Info.deepest, id: "flexible-row-deepest") {
+                    FlexNumberBox(key: "deepest-\(r)", title: FlexibleRowCopy.deepestTitle,
+                                  spec: FlexibleNumberSpecs.deepest(mm: f.deepestMM, latticeMM: latticeMax),
+                                  padTarget: $padTarget, onNote: { model.toast = $0 }) { v in
+                        // ★ D2 REVIEW: a pinched face's deepest squish stops at the half its design uses
+                        let lattice = latticeMax ?? v
+                        model.edit { s in
+                            guard var g = s.face(r) else { return }
+                            g.deepestMM = FlexibleDepthPrism.clamp(v, latticeMM: lattice)
+                            s.setFace(g)
+                        }
+                    }
+                } extra: {
+                    if let d = model.design(r) {
+                        if let why = d.refusal { FlexInfoText(model.text(why.reason), warning: true) }
+                        else { FlexibleFaceResult(design: d, model: model) }
+                    }
+                    if let st = model.stack(r) {
+                        FlexInfoText(FlexibleLatticeUnder.stackInfo(uMM: st.uExtentMM, vMM: st.vExtentMM, columns: st.columns.count,
+                                                                    pitchMM: st.pitchMM, latticed: st.latticedColumns,
+                                                                    minMM: st.latticeMMMin, maxMM: st.latticeMMMax))   // ★ batch E review: the share
+                        if st.side { FlexInfoText("Side face · gyroid only · estimated", warning: true) }
                     }
                 }
-            } extra: {
-                if let d = model.design(r) {
-                    if let why = d.refusal { FlexInfoText(model.text(why.reason), warning: true) }
-                    else { FlexibleFaceResult(design: d, model: model) }
-                }
-                if let st = model.stack(r) {
-                    FlexInfoText(String(format: "%.0f × %.0f mm · %d columns, %.1f mm apart · lattice %.1f–%.1f mm deep",
-                                        st.uExtentMM, st.vExtentMM, st.columns.count, st.pitchMM, st.latticeMMMin, st.latticeMMMax))
-                    if st.side { FlexInfoText("Side face · gyroid only · estimated", warning: true) }
-                }
-            }
+            }   // ★ batch E review
             // ★ ROUND 5 (S3): the curve point showing its × on the part — its squish as a number box
             if !f.isStampShape, let p = model.curvePoint, p.region == r {
                 let c = p.axis == "y" ? f.curveY : f.curveX
