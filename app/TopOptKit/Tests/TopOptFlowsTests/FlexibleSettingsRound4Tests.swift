@@ -248,8 +248,8 @@ final class FlexibleSettingsRound4Tests: XCTestCase {
         let st = try XCTUnwrap(m.stacks[key])
         // ★ RE-PINNED BY BATCH M2 (V10 of batch M's verification; his round 5: the stamp should be "pulling
         // lattice next to it in" — "in BOTH views"): the Settings page now spreads the stamp as the 3D sim
-        // does, so the face round it sinks a little too (a Gaussian of 0.45 × the lattice depth, and core's
-        // even press elsewhere) — "dented" is now a quarter of the deepest or more, which still holds the
+        // does, so the face round it sinks a little too (two Gaussians of 0.25 and 0.6 × the lattice depth, and
+        // core's even press elsewhere) — "dented" is now a quarter of the deepest or more, which still holds the
         // rule: the stamp sinks where it sits, the far face does not take its squish; Curves dents it all
         func dented() -> Int {
             let shown = FlexibleShownValues(model: m)

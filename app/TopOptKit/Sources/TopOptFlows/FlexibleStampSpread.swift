@@ -14,16 +14,20 @@
 //     press(x)   = foot(x) + b · (1 − foot(x))          — the stamp, plus core's even press round it
 //     squish(x)  = press(x) / (ρ₀ + ρ(x))               — a denser column squishes less (ρ: core's
 //                                                         density under the stamp / outside it)
-//     dent(x)    = (squish ⊛ G_σ)(x) / its deepest       — one Gaussian of σ = 0.45 × the face's
-//                                                         lattice depth, the face's own columns only
-// The deepest point is still his deepest squish (each fingertip's focus); the fingertips merge into
-// one press (the ground between them 0.9 of it on his Face 3), the dent fades with no edge, and the
-// face's far ground sinks by core's even press — as the sim's does. FITTED to the 3D sim's own map
-// (FlexibleBatchM2Probe, column for column, normalised by each page's top): C1's pad with four
-// fingertips at 3 kg / 6 mm RMS 0.05 (batch M 0.12), at 10 kg / 3 mm 0.07 (0.27), a thumb 0.06
-// (0.19), his Face 3 0.06 (0.19). NOT matched: a face whose group presses ANOTHER face beside it
-// (his Group 1: Face 5's sim peaks at its top edge, pulled by the top's press) — one face's picture
-// cannot carry the other's (core brief #35).
+//     dent(x)    = (squish ⊛ (0.3 G_near + 0.7 G_far))(x) / its deepest
+//                  — two Gaussians, σ 0.25 and 0.6 × the face's lattice depth, the face's own columns
+//                  only: the near one keeps each fingertip's FOCUS, the far one is the broad press
+// The deepest point is still his deepest squish (a fingertip's focus); the fingertips merge into one
+// press with their foci showing (his "it should have foci but expand out … combining the foci into a
+// single input"), the dent fades with no edge, and the face's far ground sinks by core's even press —
+// as the sim's does. FITTED to the 3D sim's own map (FlexibleBatchM2Probe dumps both pages per stamp
+// face; column for column, each over its face's deepest): C1's pad with four fingertips at 3 kg / 6 mm
+// RMS 0.05 (batch M 0.12), at 10 kg / 3 mm 0.07 (0.27), a thumb 0.05 (0.19), his Face 3 0.09 (0.19);
+// along the fingertips the foci rise and dip with the sim's (correlation 0.99 / 0.98, 1.1 / 0.7 × its
+// swing; batch M's pits swung 1.9 / 1.6 ×, one Gaussian of 0.45 × depth about half — the foci gone).
+// NOT matched: a face
+// whose group presses ANOTHER face beside it (his Group 1: Face 5's sim peaks at its top edge, pulled
+// by the top's press) — one face's picture cannot carry the other's (core brief #35).
 // ★ THE SCALARS, NOT core's per-column numbers: the footprint moves the instant the stamp is dragged,
 // core's design follows a moment later — b and ρ are read from the last design as three numbers, so
 // the dent follows his finger at once (no design yet: b = 0, ρ even — the footprint alone, spread).
@@ -36,13 +40,16 @@ import TopOptKit
 
 enum FlexibleStampSpread {
 
-    /// σ of the spread as a share of the face's mean lattice depth (≥ one column pitch) — FITTED to the
-    /// 3D sim (see above): his 20 mm top and C1's pad spread over σ 9 mm, his 100 mm-deep sides 45 mm.
-    static let sigmaShareOfDepth = 0.45
+    /// The two Gaussians' σ as shares of the face's mean lattice depth (each ≥ one column pitch), and the
+    /// far one's weight — FITTED to the 3D sim (see above): on his 20 mm top and C1's pad σ 5 and 12 mm,
+    /// on his 100 mm-deep sides 25 and 60 mm.
+    static let nearShareOfDepth = 0.25
+    static let farShareOfDepth = 0.6
+    static let farWeight = 0.7
     /// ρ₀: the stiffness floor of a column (its squish is the press over ρ₀ + ρ) — FITTED with σ.
     static let stiffnessFloor = 0.2
-    /// The Gaussian is cut at this many σ (e^−4.5 ≈ 1 %).
-    static let reach = 3.0
+    /// A Gaussian is cut at this many σ (e^−8 ≈ 0.03 %).
+    static let reach = 4.0
 
     /// What core's design says round the stamp: its even press elsewhere over the stamp's peak, and the
     /// density it designed under the stamp and outside it (medians). `.none` before a design.
@@ -70,14 +77,14 @@ enum FlexibleStampSpread {
         init() {}
     }
 
-    /// The spread's σ for a face's stack (mm).
-    static func sigmaMM(_ st: FlexStackInfo) -> Double {
-        Swift.max(st.pitchMM, sigmaShareOfDepth * st.latticeMMMean)
+    /// The spread's two σ for a face's stack (mm).
+    static func sigmasMM(_ st: FlexStackInfo) -> (near: Double, far: Double) {
+        (Swift.max(st.pitchMM, nearShareOfDepth * st.latticeMMMean), Swift.max(st.pitchMM, farShareOfDepth * st.latticeMMMean))
     }
 
     /// The stamp's designed dent per column (0…1, its deepest 1): the press over each column's
-    /// stiffness, spread by one Gaussian of `sigmaMM` over the face's own columns.
-    static func dent(_ foot: [Double], stack st: FlexStackInfo, design: Design, sigmaMM: Double) -> [Double] {
+    /// stiffness, spread by the two Gaussians over the face's own columns.
+    static func dent(_ foot: [Double], stack st: FlexStackInfo, design: Design, sigmasMM: (near: Double, far: Double)) -> [Double] {
         guard foot.count == st.columns.count, !foot.isEmpty else { return foot }
         let squish = foot.map { f -> Double in
             let f = Swift.min(1, Swift.max(0, f))
@@ -85,20 +92,25 @@ enum FlexibleStampSpread {
             let rho = f * design.densityUnder + (1 - f) * design.densityOutside
             return press / (stiffnessFloor + rho)
         }
-        let s = gaussian(squish, stack: st, sigmaMM: sigmaMM)
+        let near = gaussian(squish, stack: st, sigmaMM: sigmasMM.near), far = gaussian(squish, stack: st, sigmaMM: sigmasMM.far)
+        let s = zip(near, far).map { (1 - farWeight) * $0 + farWeight * $1 }
         guard let top = s.max(), top > 1e-12 else { return foot }
         return s.map { Swift.max(0, $0 / top) }
     }
 
     /// `x` (one value per column) convolved with a Gaussian of `sigmaMM` on the stack's column grid —
-    /// SEPARABLE (along u, then along v), zero where the face has no column (the face's own ground
-    /// only, as its outline holds the sim's). O(cells × taps): a 64 × 64 face at σ 9 mm is ~0.3 M.
+    /// SEPARABLE (along u, then along v), zero where the face has no column (the face's own ground only,
+    /// as its outline holds the sim's). O(cells × taps): a 64 × 64 face at
+    /// σ 12 mm is ~0.4 M.
     static func gaussian(_ x: [Double], stack st: FlexStackInfo, sigmaMM: Double) -> [Double] {
         let nu = st.nu, nv = st.nv
         guard nu > 0, nv > 0, st.cell.count == nu * nv, st.pitchMM > 0, sigmaMM > 0, x.count == st.columns.count else { return x }
         let sig = sigmaMM / st.pitchMM
         let r = Swift.min(Swift.max(nu, nv), Int((reach * sig).rounded(.up)))
-        let taps = (0...r).map { exp(-0.5 * Double($0 * $0) / (sig * sig)) }
+        // normalised over the WHOLE Gaussian (σ√(2π) per axis, exact for σ ≥ one pitch), not over the face —
+        // a far σ wider than the face keeps its own weight beside the near one
+        let norm = sig * (2 * Double.pi).squareRoot()
+        let taps = (0...r).map { exp(-0.5 * Double($0 * $0) / (sig * sig)) / norm }
         var grid = [Double](repeating: 0, count: nu * nv)
         for (i, c) in st.cell.enumerated() where c >= 0 && c < x.count { grid[i] = x[c] }
         var pass = [Double](repeating: 0, count: nu * nv)
@@ -192,7 +204,7 @@ enum FlexibleStampSpread {
 
 extension FlexibleStageModel {
     /// ★ BATCH M (M2) → ★ BATCH M2: a Stamp face's DESIGNED squish per column (0…1, its deepest 1) — the
-    /// stamp's press spread as the 3D sim spreads it, its foci merged (FlexibleStampSpread.dent) — what
+    /// stamp's press spread as the 3D sim spreads it, its foci merged and showing (FlexibleStampSpread.dent) — what
     /// the Settings page's map shows and dents by. nil for a Curves face or before the grid is laid.
     /// The depth prism still stands on the stamp itself (`stampFootprint`).
     public func stampDent(_ r: Int) -> [Double]? {
@@ -201,6 +213,6 @@ extension FlexibleStageModel {
             return FlexibleStampSpread.spread(foot, stack: st, lengthMM: FlexibleStampSpread.lengthMM(st))
         }
         let design = FlexibleStampSpread.Design(key(r).flatMap { designs[$0] }, foot: foot)
-        return FlexibleStampSpread.dent(foot, stack: st, design: design, sigmaMM: FlexibleStampSpread.sigmaMM(st))
+        return FlexibleStampSpread.dent(foot, stack: st, design: design, sigmasMM: FlexibleStampSpread.sigmasMM(st))
     }
 }

@@ -239,6 +239,28 @@ final class FlexibleBatchM2Tests: XCTestCase {
         return worst
     }
 
+    /// The FOCI along a line: the line's rise and dip round its own 9-column moving mean, inside the
+    /// stamp's extent (`foot` > 0.02) — its correlation with the reference's and its size over it.
+    static func foci(_ x: [Double], _ ref: [Double], line: [Int], foot: [Double]) -> (corr: Double, size: Double) {
+        let inside = line.filter { foot[$0] > 0.02 }
+        guard let lo = line.firstIndex(of: inside.first ?? -1), let hi = line.lastIndex(of: inside.last ?? -1), hi - lo > 10 else { return (.nan, .nan) }
+        func detrend(_ v: [Double]) -> [Double] {
+            let seg = (lo...hi).map { v[line[$0]] }
+            return seg.indices.map { i in
+                let w = (-4...4).map { seg[min(seg.count - 1, max(0, i + $0))] }
+                return seg[i] - w.reduce(0, +) / 9
+            }
+        }
+        let a = detrend(x), b = detrend(ref)
+        guard a.allSatisfy(\.isFinite), b.allSatisfy(\.isFinite) else { return (.nan, .nan) }
+        func mean(_ v: [Double]) -> Double { v.reduce(0, +) / Double(v.count) }
+        let ma = mean(a), mb = mean(b)
+        let sab = zip(a, b).map { ($0 - ma) * ($1 - mb) }.reduce(0, +)
+        let saa = a.map { ($0 - ma) * ($0 - ma) }.reduce(0, +), sbb = b.map { ($0 - mb) * ($0 - mb) }.reduce(0, +)
+        guard saa > 0, sbb > 0 else { return (.nan, .nan) }
+        return (sab / (saa * sbb).squareRoot(), (saa / sbb).squareRoot())
+    }
+
     /// His round-5 V10 (batch M verification): "the Settings page's stamp dent is a steep trench with
     /// saw-tooth edges and disagrees with the main page". Same face, same stamp: the Settings page's
     /// column dent and the main page's map (the 3D sim's own squish), each as the colour it is drawn in
@@ -299,6 +321,7 @@ final class FlexibleBatchM2Tests: XCTestCase {
             let toothOld = try drawnTooth()
             FlexibleStampSpread.controlBatchMSpread = false
             let rOld = Self.agreement(old.frac, main, row), aOld = Self.agreement(old.frac, main, across)
+            let fNow = Self.foci(now.frac, main, line: row, foot: foot), fOld = Self.foci(old.frac, main, line: row, foot: foot)
             func line(_ x: [Double], _ ids: [Int]) -> String { stride(from: 0, to: ids.count, by: 3).map { String(format: "%.2f", x[ids[$0]]) }.joined(separator: " ") }
             print("FLEX-M2 AGREE \(tag): row iv \(iv) (\(row.count) columns) · across iu \(iu) (\(across.count))")
             print("FLEX-M2 AGREE \(tag) row    main:     \(line(main, row))")
@@ -309,6 +332,8 @@ final class FlexibleBatchM2Tests: XCTestCase {
             print("FLEX-M2 AGREE \(tag) across batch M:  \(line(old.frac, across))")
             print(String(format: "FLEX-M2 AGREE %@: settings vs main — row rms %.3f max %.3f · across rms %.3f max %.3f | batch M's spread — row rms %.3f max %.3f · across rms %.3f max %.3f",
                          tag, rNow.rms, rNow.max, aNow.rms, aNow.max, rOld.rms, rOld.max, aOld.rms, aOld.max))
+            print(String(format: "FLEX-M2 FOCI %@: along the fingertips the Settings dent rises and dips with the main page's — correlation %.2f, %.2f × its size | batch M's spread %.2f, %.2f ×",
+                         tag, fNow.corr, fNow.size, fOld.corr, fOld.size))
             print(String(format: "FLEX-M2 TOOTH %@: the drawn dent's largest crease over the pitch %.3f (×%.0f) · batch M's spread %.3f (×%.0f) · the face's deepest %.2f mm (the Settings legend tops at %.2f) · the main page's face top %.2f mm (its card %.2f)",
                          tag, toothNow, now.shown.exaggeration, toothOld, old.shown.exaggeration, now.mm.filter(\.isFinite).max() ?? 0,
                          now.shown.maxDepth, mainMM.filter(\.isFinite).max() ?? 0, stage.dentMaxMM))
@@ -319,10 +344,15 @@ final class FlexibleBatchM2Tests: XCTestCase {
             XCTAssertLessThanOrEqual(aNow.max, maxCap, "\(tag): …across the stamp, nowhere more than \(maxCap) apart")
             XCTAssertEqual(now.mm.filter(\.isFinite).max() ?? 0, deepest, accuracy: 1e-9, "\(tag): the deepest is still his deepest squish")
             XCTAssertLessThan(toothNow, 0.08, "\(tag): no saw-tooth — a crease under 8 % of the pitch")
+            // his "it should have foci but expand out … combining the foci into a single input": one press,
+            // each fingertip still a focus — rising and dipping where the sim's does, about as much
+            XCTAssertGreaterThan(fNow.corr, 0.9, "\(tag): the fingertips' foci are where the main page's are")
+            XCTAssertTrue(fNow.size > 0.5 && fNow.size < 1.5, "\(tag): …and about as strong (\(fNow.size) × the main page's)")
             // ★ RED CONTROL: batch M's spread disagrees with the main page and zig-zags
             XCTAssertTrue(rOld.rms > rmsCap || rOld.max > maxCap || aOld.rms > rmsCap || aOld.max > maxCap,
                           "control: batch M's spread is not what the main page shows")
             XCTAssertGreaterThan(toothOld, 0.08, "control: batch M's steep wall zig-zags at the pitch")
+            XCTAssertFalse(fOld.size > 0.5 && fOld.size < 1.5, "control: batch M's fingertips are pits, not the sim's foci (\(fOld.size) ×)")
         }
     }
 }

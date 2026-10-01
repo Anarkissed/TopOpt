@@ -5,7 +5,9 @@
 //     FLEX_M2_PROBE_DIR=<dir> swift test --filter FlexibleBatchM2Probe
 #if canImport(MetalKit)
 import XCTest
+import MetalKit
 import simd
+import TopOptDesign
 @testable import TopOptFlows
 @testable import TopOptKit
 
@@ -125,6 +127,93 @@ final class FlexibleBatchM2Probe: XCTestCase {
         await m.squishSolver.waitForIdle()
         stage.refresh()
         try Self.dump(stage, m, tag: "his_r5", to: dir)
+    }
+
+    // MARK: the before / after frames (the shipping renderer, offscreen)
+
+    /// The Settings page's own picture, as `FlexibleStagePage.refreshChannels` composes it: the overlay
+    /// (cut to the sim's grid while its field moves the part), the channels (X-ray), the group frames, and
+    /// the dent — `edited`: the column preview he sees after any edit (FlexibleSettingsSquish.columnDents
+    /// of the playing group); else what the page plays right after Save & Exit (FlexibleSettingsSquish.shown).
+    static func renderSettingsPage(_ m: FlexibleStageModel, _ pm: ProjectModel, edited: Bool, to url: URL,
+                                   view: (String, Float, Float), size: Int = 900) throws {
+        let device = try XCTUnwrap(MTLCreateSystemDefaultDevice())
+        let edge = edited ? nil : FlexibleSettingsSquish.overlayEdge(model: m)
+        let overlay = try XCTUnwrap(edge.map { FlexiblePageChannels.overlay(model: m, maxEdgeMM: $0) } ?? FlexiblePageChannels.overlay(model: m))
+        var c = FlexiblePageChannels.channels(model: m, overlay: overlay, xray: true, drawnLattice: nil)
+        FlexibleGroupFrames.paint(&c.tints, overlay: overlay, model: m)
+        var dents = c.dents, k = c.exaggeration
+        if edited {
+            if let g = m.playingGroup { dents = FlexibleSettingsSquish.columnDents(model: m, overlay: overlay, regions: Set(g.regions)) }
+        } else {
+            var cache: (key: String, dents: [Float])?
+            let sq = FlexibleSettingsSquish.shown(model: m, overlay: overlay, channels: c, feCache: &cache)
+            dents = sq.dents; k = sq.exaggeration
+        }
+        let mr = try XCTUnwrap(MeshRenderer(device: device, sampleCount: 4))
+        mr.setMesh(overlay.mesh)
+        let settle = pm.force.settleRotation ?? simd_quatf(from: SIMD3<Float>(0, 0, -1), to: SIMD3<Float>(0, -1, 0))
+        mr.beginSettle(to: settle, duration: 0)
+        mr.camera.setOrientation(azimuth: view.1, elevation: view.2)
+        if let t = c.tints { mr.setVertexTints(t) }
+        mr.setBodyAlpha(FlexibleStagePage.xrayBodyAlpha)
+        if let d = dents { mr.setFlexDisplacements(d) }
+        mr.setFlexScale(Float(k))
+        let bg = DS.Color.background
+        let px = try XCTUnwrap(mr.renderOffscreen(size: size, clear: MTLClearColor(red: bg.r, green: bg.g, blue: bg.b, alpha: 1)))
+        try FlexibleLatticeEvidenceProbe.writeBGRA(px, size: size, to: url)
+    }
+
+    static let views: [(String, Float, Float)] = [("iso", .pi / 4, .pi / 6), ("top", .pi / 5, 1.2), ("backleft", -3 * .pi / 4, 0.55)]
+
+    /// Batch M2's before / after: the Settings page with a four-fingertip stamp (C1's pad, 3 kg, 6 mm),
+    /// as he edits and right after Save & Exit, batch M's spread (before) and batch M2's (after), and the
+    /// main page beside it; his round-5 project's Settings page with Face 3 (Group 2's fingertips) selected.
+    func testBeforeAfterFrames() async throws {
+        guard let dir = Self.dir else { throw XCTSkip("FLEX_M2_PROBE_DIR") }
+        defer { FlexibleStampSpread.controlBatchMSpread = false }
+        let (stage, m) = try await pad(stamp: "four_fingers", kg: 3, deepest: 6)
+        let pm = m.project
+        for (tag, control) in [("before", true), ("after", false)] {
+            FlexibleStampSpread.controlBatchMSpread = control
+            for v in Self.views {
+                try Self.renderSettingsPage(m, pm, edited: true, to: dir.appendingPathComponent("M2_\(tag)_pad4_settings_edited_\(v.0).png"), view: v)
+                try Self.renderSettingsPage(m, pm, edited: false, to: dir.appendingPathComponent("M2_\(tag)_pad4_settings_saved_\(v.0).png"), view: v)
+            }
+        }
+        FlexibleStampSpread.controlBatchMSpread = false
+        for v in Self.views {
+            try FlexibleBatchMProbe.render(stage, pm, to: dir.appendingPathComponent("M2_pad4_main_\(v.0).png"), amount: 1, view: v)
+        }
+        // his round-5 project: Face 3 selected (Group 2's four fingertips play), and the main page's Group 2
+        let r = try FlexibleHisProject.restore(FlexibleHisProject.round5Dir)
+        addTeardownBlock { r.cleanup() }
+        let his = FlexibleMainStage()
+        his.reduceMotion = { true }
+        let hm = his.model(for: r.project, materialsPath: FlexibleHisProject.materialsPath, stampsPath: FlexibleHisProject.stampsPath, persist: {})
+        addTeardownBlock { @MainActor in await hm.waitForIdle() }
+        hm.openScene()
+        try await FlexibleSquishFixture.settle(hm, "his round 5")
+        his.didExitSettings()
+        his.apply(r.project, owned: true, pageUp: false)
+        try await FlexibleHisProject.waitFor(400, "his round 5: the sims") {
+            his.refresh()
+            return hm.lattice != nil && !hm.squish.isEmpty && !hm.squish.values.contains(.pending)
+        }
+        await hm.squishSolver.waitForIdle()
+        hm.select(3)
+        for (tag, control) in [("before", true), ("after", false)] {
+            FlexibleStampSpread.controlBatchMSpread = control
+            for v in Self.views {
+                try Self.renderSettingsPage(hm, r.project, edited: true, to: dir.appendingPathComponent("M2_\(tag)_his_settings_face3_edited_\(v.0).png"), view: v)
+            }
+        }
+        FlexibleStampSpread.controlBatchMSpread = false
+        his.pick("group-2"); his.refresh()
+        for v in Self.views {
+            try FlexibleBatchMProbe.render(his, r.project, to: dir.appendingPathComponent("M2_his_main_group-2_\(v.0).png"), amount: 1, view: v)
+        }
+        try FlexibleBatchMProbe.renderLegend(his, to: dir.appendingPathComponent("M2_main_legend_card.png"))
     }
 }
 #endif
