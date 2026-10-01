@@ -167,6 +167,10 @@ final class LatticeVariantFaceWallsTests: XCTestCase {
     /// sector — is counted and NAMED, on the stage and on variants, in the same notice; never a
     /// silent drop. A child whose whole-face parent emitted in the same group is NOT named: the
     /// parent's prisms carry its surface.
+    /// ★ RE-PINNED (batch E, his item 4 "a protected face isn't frozen"): a cut sector is no longer
+    /// dropped — it is latticed on its own side of the cut (`LatticeSectorOutline`). So a child with
+    /// a role of its own is EMITTED (not named), and the sentence is pinned on a piece that really has
+    /// no surface (a cut where the wall is not). The old premise was the bug.
     func testACutSectorIsCountedAndNamedOnTheStageAndTheVariant() throws {
         let (p, gid, rid) = VariantFacePrismFixture.project()
         XCTAssertEqual(p.latticeJobRegions().skippedRegionNames, [], "control: nothing dropped")
@@ -176,24 +180,31 @@ final class LatticeVariantFaceWallsTests: XCTestCase {
         // the parent and its cut children in ONE group: the parent emits, the children ride it
         p.selection.addRegions(kids, to: gid)
         XCTAssertNotNil(p.latticeRegionMembers(rid), "control: the parent is whole faces")
-        XCTAssertNil(p.latticeRegionMembers(kids[0]), "control: a child is a cut sector")
-        XCTAssertEqual(p.latticeJobRegions().skippedRegionNames, [], "★ an emitted parent carries its children")
-        // …but only with the CHILD'S OWN role: an Off parent emits nothing, and a parent with
-        // another role drops the child's own choice — either way the child is named
+        XCTAssertNotNil(p.latticeRegionMembers(kids[0]), "★ batch E: a cut child keeps its surface — it is latticed")
         let parentKey = LatticeSelectableRef.region(group: gid, region: rid).key
         let childKey = LatticeSelectableRef.region(group: gid, region: kids[0]).key
+        XCTAssertEqual(p.latticeJobRegions().skippedRegionNames, [], "★ an emitted parent carries its children")
+        XCTAssertFalse(p.latticeJobRegions().regions.contains { $0.selectableKey == childKey },
+                       "★ batch E: the surface is told once, by the parent")
+        // …only with the CHILD'S OWN role: an Off parent emits nothing, and a child with another role
+        // keeps its own choice — ★ batch E: either way the child is now EMITTED on its own side
         p.lattice.selectableRoles[parentKey] = .off
-        XCTAssertTrue(p.latticeJobRegions().skippedRegionNames.contains("wall A"), "★ an Off parent carries nothing")
+        XCTAssertEqual(p.latticeJobRegions().skippedRegionNames, [], "★ batch E: an Off parent leaves the child to lattice")
+        XCTAssertTrue(p.latticeJobRegions().regions.contains { $0.selectableKey == childKey && $0.role == .include })
         p.lattice.selectableRoles[parentKey] = nil
         p.lattice.selectableRoles[childKey] = .exclude
-        XCTAssertEqual(p.latticeJobRegions().skippedRegionNames, ["wall A"], "★ a Solid child under a Lattice parent")
+        XCTAssertEqual(p.latticeJobRegions().skippedRegionNames, [], "★ batch E: a Solid child under a Lattice parent is emitted Solid")
+        XCTAssertTrue(p.latticeJobRegions().regions.contains { $0.selectableKey == childKey && $0.role == .exclude })
         p.lattice.selectableRoles[childKey] = nil
         XCTAssertEqual(p.latticeJobRegions().skippedRegionNames, [], "control: same role again ⇒ carried")
-        // the cut child ALONE: dropped from the job, and NAMED
-        p.selection.setRegions([kids[0]], for: gid)
+        // a piece with NO SURFACE (cut where the wall is not), ALONE: dropped from the job, and NAMED
+        let bare = p.faceRegions.splitManual(rid, point: SIMD3(10, 50, 5), normal: SIMD3(0, 1, 0))
+        XCTAssertNil(p.latticeRegionMembers(bare[0]), "control: nothing of the wall lies at y ≥ 50")
+        XCTAssertEqual(p.faceRegions.region(bare[0])?.name, "wall A")
+        p.selection.setRegions([bare[0]], for: gid)
         let stage = p.latticeJobRegions()
         XCTAssertEqual(stage.skippedRegionNames, ["wall A"], "★ counted and named, never silent")
-        XCTAssertFalse(stage.regions.contains { $0.selectableKey == LatticeSelectableRef.region(group: gid, region: kids[0]).key },
+        XCTAssertFalse(stage.regions.contains { $0.selectableKey == LatticeSelectableRef.region(group: gid, region: bare[0]).key },
                        "control: it really is not in the job")
         XCTAssertEqual(stage.regions.count, before.count - 2, "the whole region's two prisms are gone; nothing else moved")
         // …and the variant says the same, in the same sentence
@@ -207,7 +218,7 @@ final class LatticeVariantFaceWallsTests: XCTestCase {
         XCTAssertEqual(LatticePreviewBanner.make(previewOn: true, hasModel: true, scene: scene),
                        .drawing("L · the region “wall A” has no shape to lattice and is not shown"))
         // a region set to Off is no wall: not named
-        p.lattice.selectableRoles[LatticeSelectableRef.region(group: gid, region: kids[0]).key] = .off
+        p.lattice.selectableRoles[LatticeSelectableRef.region(group: gid, region: bare[0]).key] = .off
         XCTAssertEqual(p.latticeJobRegions().skippedRegionNames, [])
         // the empty preview still names a drop, never only the depth advice
         let empty = LatticePreviewSummaryValues(interiorVoxelCount: 0, previewLabel: "L",
