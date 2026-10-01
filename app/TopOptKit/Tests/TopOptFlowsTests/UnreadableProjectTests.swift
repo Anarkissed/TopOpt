@@ -116,4 +116,91 @@ final class UnreadableProjectTests: XCTestCase {
         }
         XCTAssertEqual(Set(ProjectStore(rootDir: root).loadAllSnapshots().map(\.id)), Set(ids), "★ the store lists every one")
     }
+    // MARK: fix 2 — the store never drops a project silently
+
+    /// A folder of folders, each a different way a project can be unreadable, plus one readable.
+    private func storeWithUnreadables() throws -> (root: URL, ids: [String: UUID]) {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("unreadable-store-\(UUID().uuidString)", isDirectory: true)
+        var ids: [String: UUID] = [:]
+        let fixture = try Data(contentsOf: Self.fixtures.appendingPathComponent("102117B9_project.json"))
+        func folder(_ key: String, _ data: Data?) throws {
+            let id = key == "readable" ? Self.hisID : UUID()
+            ids[key] = id
+            let d = root.appendingPathComponent(id.uuidString, isDirectory: true)
+            try FileManager.default.createDirectory(at: d, withIntermediateDirectories: true)
+            if let data { try data.write(to: d.appendingPathComponent("project.json")) }
+        }
+        try folder("readable", fixture)                                     // his, now readable
+        var obj = try XCTUnwrap(JSONSerialization.jsonObject(with: fixture) as? [String: Any])
+        obj["material"] = nil
+        try folder("missingKey", try JSONSerialization.data(withJSONObject: obj))
+        try folder("notJSON", Data("{ this is not json".utf8))
+        try folder("noFile", nil)
+        try FileManager.default.createDirectory(at: root.appendingPathComponent("not-a-project"), withIntermediateDirectories: true)
+        return (root, ids)
+    }
+
+    private func fingerprint(_ root: URL) throws -> [String: Data] {
+        var out: [String: Data] = [:]
+        let e = FileManager.default.enumerator(at: root, includingPropertiesForKeys: nil)!
+        for case let u as URL in e where !u.hasDirectoryPath {
+            out[u.path] = try Data(contentsOf: u)
+        }
+        return out
+    }
+
+    /// ★ Every UUID folder is listed: readable ones as projects, the rest as "Can’t open" with the
+    /// reason. Reading writes NOTHING — every file is byte-identical after.
+    func testTheStoreListsEveryProjectAndTouchesNothing() throws {
+        let (root, ids) = try storeWithUnreadables()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let before = try fingerprint(root)
+        let all = ProjectStore(rootDir: root).loadAll()
+        XCTAssertEqual(all.readable.map(\.id), [Self.hisID])
+        let byID = Dictionary(uniqueKeysWithValues: all.unreadable.map { ($0.id, $0) })
+        XCTAssertEqual(Set(byID.keys), Set([ids["missingKey"]!, ids["notJSON"]!, ids["noFile"]!]), "★ none dropped")
+        XCTAssertEqual(byID[ids["missingKey"]!]?.reason, "“material” is missing")
+        XCTAssertEqual(byID[ids["missingKey"]!]?.name, "M2 verticalStand", "its name, read from the file")
+        XCTAssertEqual(byID[ids["notJSON"]!]?.reason, "project.json is not valid JSON")
+        XCTAssertNil(byID[ids["notJSON"]!]?.name)
+        XCTAssertEqual(byID[ids["noFile"]!]?.reason, "project.json is missing")
+        XCTAssertEqual(try fingerprint(root), before, "★ never modified")
+        XCTAssertEqual(ProjectStore(rootDir: root).loadAllSnapshots().map(\.id), [Self.hisID], "the readable list is as before")
+        // the reason his own file gave before fix 1, in the same words
+        let keyErr = DecodingError.keyNotFound(TestKey("startMM"), .init(
+            codingPath: [TestKey("lattice"), TestKey("wallThickness"), TestKey("faces"), TestKey(Self.wallKey)],
+            debugDescription: ""))
+        XCTAssertEqual(ProjectReadFailure.reason(keyErr),
+                       "“startMM” is missing in lattice › wallThickness › faces › f:820422E9-A2C0-4546-95C2-B1AD18E207DC:2")
+    }
+
+    /// ★ The app lists them apart from the projects it can open, and never deletes one.
+    func testTheAppShowsThemButNeverOpensOrDeletesThem() throws {
+        let (root, ids) = try storeWithUnreadables()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let model = AppModel(materialsPath: nil, store: ProjectStore(rootDir: root))
+        XCTAssertEqual(model.recentProjects.map(\.id), [Self.hisID])
+        XCTAssertEqual(Set(model.unreadableProjects.map(\.id)), Set([ids["missingKey"]!, ids["notJSON"]!, ids["noFile"]!]))
+        let before = try fingerprint(root)
+        for u in model.unreadableProjects { model.deleteProject(id: u.id) }
+        XCTAssertEqual(try fingerprint(root), before, "★ delete refuses an unreadable project: its file is never deleted")
+        XCTAssertEqual(model.unreadableProjects.count, 3, "still listed")
+        // Home: one card each, titled "Can’t open", with nothing to tap
+        var src = URL(fileURLWithPath: #filePath); for _ in 0..<3 { src.deleteLastPathComponent() }
+        let home = try String(contentsOf: src.appendingPathComponent("Sources/TopOptFlows/HomeView.swift"), encoding: .utf8)
+        XCTAssertTrue(home.contains("ForEach(model.unreadableProjects) { UnreadableProjectCard(entry: $0) }"))
+        XCTAssertEqual(UnreadableProjectCard.title, "Can’t open")
+        let card = String(home[home.range(of: "struct UnreadableProjectCard: View {")!.lowerBound...])
+        let body = String(card[..<card.range(of: "\n}\n")!.lowerBound])
+        for action in ["Button", ".contextMenu", "onTapGesture", "model.open", "deleteProject", "onDelete", "onOpen"] {
+            XCTAssertFalse(body.contains(action), "★ nothing to tap on a Can’t open card: \(action)")
+        }
+    }
+}
+
+private struct TestKey: CodingKey {
+    var stringValue: String; var intValue: Int? { nil }
+    init(_ s: String) { stringValue = s }
+    init?(stringValue: String) { self.stringValue = stringValue }
+    init?(intValue: Int) { nil }
 }

@@ -87,6 +87,9 @@ public final class AppModel: ObservableObject {
     // MARK: Recents + toast
 
     @Published public private(set) var recentProjects: [RecentProject] = []
+    /// ★ ROUND 3 RULING (c) (2026-10-01): projects on disk the store cannot read — shown on Home as
+    /// "Can’t open" with the reason, never dropped, never opened, never deleted (see `deleteProject`).
+    @Published public private(set) var unreadableProjects: [UnreadableProject] = []
     /// Rendered Library thumbnails, keyed by project id. Generated from the imported
     /// mesh this launch (in-memory; on-disk-only recents show the frosted fallback).
     @Published public private(set) var thumbnails: [UUID: CGImage] = [:]
@@ -215,10 +218,12 @@ public final class AppModel: ObservableObject {
         savedPresets = presetStore.load()
         // Seed the recents grid from disk (lazy: projects are re-imported only when
         // opened). persist-b.
-        recentProjects = store.loadAllSnapshots().map {
+        let onDisk = store.loadAll()
+        recentProjects = onDisk.readable.map {
             RecentProject(id: $0.id, name: $0.name, materialName: $0.material,
                           process: $0.process, optimized: $0.optimized ?? false)
         }
+        unreadableProjects = onDisk.unreadable
         // Cold-launch re-attach (handoffs 119 + 121): surface EVERY remote job still
         // outstanding when the app last died. `RemoteRun` removes a job's record on its
         // terminal resolution or user cancel, so leftover records mean the app died
@@ -753,6 +758,9 @@ public final class AppModel: ObservableObject {
     /// being deleted is the one currently open, returns to Home first. Safe for an id
     /// that was never loaded this launch (only the on-disk folder + recents entry).
     public func deleteProject(id: UUID) {
+        // ★ round 3 ruling (c): an unreadable project's file is never modified or deleted — Home
+        // offers no delete on it; this refuses one anyway.
+        guard !unreadableProjects.contains(where: { $0.id == id }) else { return }
         if let pm = projectsById[id] { pm.run.cancel() }
         runCancellables[id]?.cancel()
         runCancellables[id] = nil
