@@ -343,6 +343,13 @@ int main(int argc, char** argv) {
   // so a stale binary announces itself before it does any work.
   std::fprintf(stderr, "topopt-cli: core %s, built %s %s\n",
                TOPOPT_BUILD_FINGERPRINT, __DATE__, __TIME__);
+  // ★ AND STATE IT TO THE LIBRARY, BEFORE ANY DISPATCH. `analyze` (below),
+  // `preflight` and `lattice-variant` all return before the RunObservability further
+  // down is built, and both `analyze_job` and `lattice_variant_job` used to construct
+  // a DEFAULT one for their receipt -- so their run_info.json said
+  // fingerprint "unknown" on every run. Stated here, once, so no receipt path has to
+  // remember it and there is no second copy of these two macros anywhere.
+  topopt::set_build_identity(TOPOPT_BUILD_FINGERPRINT, __DATE__ " " __TIME__);
   // Version / build fingerprint, one parseable line, for the worker /health probe.
   if (argc >= 2 &&
       (std::string(argv[1]) == "--version" || std::string(argv[1]) == "version")) {
