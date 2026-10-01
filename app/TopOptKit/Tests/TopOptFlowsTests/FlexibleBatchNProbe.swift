@@ -161,8 +161,8 @@ final class FlexibleBatchNProbe: XCTestCase {
                     rc = f.refine!
                     let inv = inverted(f, 1)
                     let pb = FlexibleFEVerifyGTests.pullback(f, 1)
-                    print(String(format: "FLEX-N STEPPED %@ %@ past %d: REFINED λ %.3f (asked %.2f) · gmax part %.3f · max|u| %.2f mm · inverted %d (min det %.3f) · pull-back misses %d of %d (worst %.2f mm) · %d solves · %.1f s · past the data %d of %d (%.0f%%) · grow > 30%% %d (max det %.2f)%@",
-                                 what, sim.id, mode.rawValue, f.scale, f.coreRatio, f.gmaxPart, f.maxDisplacement, inv.count, inv.minDet, pb.1, pb.0, pb.2, rc.solves, wall,
+                    print(String(format: "FLEX-N STEPPED %@ %@ past %d: REFINED λ %.3f (asked %.2f) · gmax part %.3f · max|u| %.2f mm · inverted %d (min det %.3f) · pull-back misses %d of %d (worst %.2f mm) · %d solves · %.1f s (the refine; %.1f s with the extra solves) · past the data %d of %d (%.0f%%) · grow > 30%% %d (max det %.2f)%@",
+                                 what, sim.id, mode.rawValue, f.scale, f.coreRatio, f.gmaxPart, f.maxDisplacement, inv.count, inv.minDet, pb.1, pb.0, pb.2, rc.solves, rc.totalMS / 1000, wall,
                                  rc.beyondData, rc.solid, 100 * Double(rc.beyondData) / Double(max(1, rc.solid)), rc.inflated,
                                  rc.steps.last?.volumeRatioMax ?? 0, distance))
                 case .kept(let why, let detail, let receipt):
