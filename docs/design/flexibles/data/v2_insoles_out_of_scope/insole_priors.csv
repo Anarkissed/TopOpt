@@ -1,0 +1,14 @@
+item,value,unit,context,source,url
+walking peak pressure - hallux,280.4 +/- 83.0,kPa,Pedar in-shoe; 53 subjects; standard shoes,Gait & Posture 2007 normative study (URL not matched - the research report did not tie a link to this study),
+walking peak pressure - heel,264.3 +/- 44.1,kPa,same,Gait & Posture 2007 normative study,
+walking peak pressure - MTH1,248 +/- 70.1,kPa,same,Gait & Posture 2007 normative study,
+walking peak pressure - MTH2,246.5 +/- 48.3,kPa,same,Gait & Posture 2007 normative study,
+walking peak pressure - MTH3,224.7 +/- 50.4,kPa,same,Gait & Posture 2007 normative study,
+offloading region threshold,> 200,kPa,sensels over 200 kPa defined as offload regions,Muir et al. Clinical Biomechanics 2022 (VA CLiMB),https://pubmed.ncbi.nlm.nih.gov/35987171/
+pressure-based insole reduction (Full),-32 kPa (-14%),kPa,12 healthy participants vs standard of care; p = 0.001,Muir et al. 2022,https://pubmed.ncbi.nlm.nih.gov/35987171/
+pressure-based insole reduction (Hybrid),-50 kPa (-20%),kPa,12 healthy participants,Muir et al. 2022,https://pubmed.ncbi.nlm.nih.gov/35987171/
+diabetic trial reduction,22% (pressure-based) / 24% (FE-designed),%,25 adults with diabetes; beyond standard of care p < 0.001; PREPRINT not peer-reviewed,medRxiv 2025 doi 10.1101/2025.08.07.25333211 (NCT05301478),https://doi.org/10.1101/2025.08.07.25333211
+optimum cushioning stiffness effect,-46% +/- 14%,% peak pressure,choosing optimum stiffness per person; stiffer needed for higher BMI (rs = 0.609 / p = 0.021),Chatzistergos et al. Gait & Posture 2020,
+static standing averages,hindfoot ~60-72 / forefoot ~23-29,platform units (kPa presumed),160 adults; averages not peaks,ResearchGate 206102348,https://www.researchgate.net/publication/206102348_Plantar_Pressure_Assessment_in_Healthy_Adult's_Feet_during_Standing_and_Walking
+design goal conflict,offload vs even-squish,-,Diabetic offloading makes hotspots SOFTER; Iacob comfort insoles put the STIFFEST honeycomb under the highest-pressure zone. The UI must make the user pick the goal.,research synthesis,
+US regulatory,Class I (mostly 510(k)-exempt),-,orthotic accessories under 21 CFR 890; medical claims create device obligations - market as comfort only,FDA,https://www.accessdata.fda.gov/scripts/cdrh/cfdocs/cfpcd/classification.cfm?id=3034

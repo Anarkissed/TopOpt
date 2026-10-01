@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "status": "DRAFT - reviewer-set TYPICAL ADULT SIZES, not from an anthropometric dataset. They are starting points: the user scales every stamp. Maintainer may adjust.",
+  "units": "mm",
+  "default_press": {"soft": "weight spread evenly over the stamp shape (bodies, hands)", "rigid": "everything under the stamp sinks the same distance (plates, blocks)"},
+  "stamps": [
+    {"id": "fingertip", "name": "Fingertip", "shape": "ellipse", "width_mm": 12, "length_mm": 16, "press": "soft", "note": "Below ~3 cells wide on most lattices - expect the 'too small to predict well' flag."},
+    {"id": "thumb", "name": "Thumb pad", "shape": "ellipse", "width_mm": 20, "length_mm": 26, "press": "soft"},
+    {"id": "four_fingers", "name": "Four fingertips", "shape": "group", "members": [
+      {"shape": "ellipse", "width_mm": 12, "length_mm": 16, "offset_mm": [-27, 0]},
+      {"shape": "ellipse", "width_mm": 12, "length_mm": 16, "offset_mm": [-9, 4]},
+      {"shape": "ellipse", "width_mm": 12, "length_mm": 16, "offset_mm": [9, 4]},
+      {"shape": "ellipse", "width_mm": 11, "length_mm": 14, "offset_mm": [27, 0]}
+    ], "press": "soft"},
+    {"id": "palm", "name": "Palm", "shape": "ellipse", "width_mm": 80, "length_mm": 95, "press": "soft"},
+    {"id": "fist", "name": "Fist (knuckles flat)", "shape": "rounded_rect", "width_mm": 85, "length_mm": 40, "corner_mm": 15, "press": "soft"},
+    {"id": "heel", "name": "Heel", "shape": "ellipse", "width_mm": 60, "length_mm": 75, "press": "soft"},
+    {"id": "knee", "name": "Knee", "shape": "ellipse", "width_mm": 60, "length_mm": 70, "press": "soft"},
+    {"id": "elbow", "name": "Elbow", "shape": "ellipse", "width_mm": 40, "length_mm": 50, "press": "soft"},
+    {"id": "flat_plate", "name": "Flat plate (whole face)", "shape": "whole_face", "press": "rigid"},
+    {"id": "ifd_foot", "name": "Foam-test foot (ASTM D3574 IFD)", "shape": "circle", "diameter_mm": 203, "press": "rigid", "note": "The indentor the foam industry uses for IFD ratings - lets results be compared with foam spec sheets."}
+  ],
+  "import": {
+    "svg": "outline only; closed paths filled; the SVG's own units if present, otherwise the user sets the size",
+    "image": "PNG/JPG; alpha or dark pixels = contact; GREYSCALE = relative pressure (darker presses harder), normalised so the total equals the stated weight; the user sets the real width in mm"
+  }
+}
