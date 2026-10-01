@@ -236,6 +236,9 @@ public final class FlexibleMainStage: ObservableObject {
     var controlLoopByGeneration = false
     var controlReadSimsBeforeStart = false
     var controlPlayAllCombo = false
+    /// Test control only (★ the S + M merge): "Play all"'s turns composed WITHOUT the group frames (batch S
+    /// framed the composed tints only, and the renderer swaps a turn's own in — the frames vanished).
+    var controlTurnsWithoutFrames = false
     /// ★ the gate: another core solve runs (the Stress view's sim, a topology run) — FlexibleStressSolver.busy
     var squishBusy: (() -> Bool)?
     /// The Stress solve waited for a sim (it starts when the sims go idle).

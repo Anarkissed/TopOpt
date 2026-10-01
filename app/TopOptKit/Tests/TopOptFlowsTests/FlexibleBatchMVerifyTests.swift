@@ -314,19 +314,19 @@ final class FlexibleBatchMVerifyTests: XCTestCase {
 
     /// The map's interior pixels (2 px in from its outline), split NEAR (seen with the body solid) and FAR
     /// (seen only through the ghost body).
+    /// ★ MERGE WITH BATCH S (`perFace`, the default): the interior of EACH FACE's solid quads, keyed one face
+    /// at a time — so a crease where two solid faces meet is an outline, like the map's own edge. Batch S
+    /// frames every pressed face in its group's colour, opaque, in every view: under group 2's turn group
+    /// 1's frames are solid planes too, and where the top's frame meets Face 5's the two planes, each lifted
+    /// along its own normal, leave the seam batch M measured on the Stress view at 1600 px (a 1 px line
+    /// along the crease — testTheStressViewsOpaqueWallsNeverStripeTheSolidPlanes). `perFace: false` is batch
+    /// M's mask (every solid quad keyed at once: the crease counts as interior).
     static func mapPixels(_ stage: FlexibleMainStage, _ pm: ProjectModel, _ m: FlexibleStageModel, layer: FlexibleLatticeLayerInputs,
-                          view: (Float, Float), size: Int) throws -> (near: [Int], far: [Int]) {
-        var key = try XCTUnwrap(stage.tints(pm, on: .lattice, roles: [:], stress: nil))
+                          view: (Float, Float), size: Int, perFace: Bool = true) throws -> (near: [Int], far: [Int]) {
+        let base = try XCTUnwrap(stage.tints(pm, on: .lattice, roles: [:], stress: nil))
         let o = try XCTUnwrap(stage.overlay)
-        for (k, start) in o.flatStart {
-            guard let st = m.stacks[k] else { continue }
-            for v in start..<(start + 6 * st.columns.count) where key[v * 8 + 5] > 0.5 {
-                key[v * 8] = 0; key[v * 8 + 1] = 1; key[v * 8 + 2] = 0
-            }
-        }
+        let faces = o.flatStart.keys.filter { m.stacks[$0] != nil }.sorted { o.flatStart[$0]! < o.flatStart[$1]! }
         var hidden = layer; hidden.hidden = true
-        let ghost = try frame(stage, pm, layer: hidden, tints: key, view: view, size: size)
-        let solid = try frame(stage, pm, layer: hidden, tints: key, bodyAlpha: 1, view: view, size: size)
         func keyed(_ px: [UInt8], _ x: Int, _ y: Int) -> Bool {
             guard x >= 0, y >= 0, x < size, y < size else { return false }
             let p = y * size + x
@@ -338,11 +338,26 @@ final class FlexibleBatchMVerifyTests: XCTestCase {
             for dy in -2...2 { for dx in -2...2 where !keyed(px, x + dx, y + dy) { return false } }
             return true
         }
-        var near: [Int] = [], far: [Int] = []
-        for p in 0..<(size * size) {
-            if interior(solid, p) { near.append(p) } else if interior(ghost, p) { far.append(p) }
+        var near = Set<Int>(), far = Set<Int>()
+        for group in perFace ? faces.map({ [$0] }) : [faces] {
+            // the keyed faces' solid quads in the key green; every OTHER solid quad a neutral grey (not keyed)
+            var key = base, any = false
+            for k in faces {
+                let start = o.flatStart[k]!, n = 6 * m.stacks[k]!.columns.count
+                for v in start..<(start + n) where key[v * 8 + 5] > 0.5 {
+                    if group.contains(k) { key[v * 8] = 0; key[v * 8 + 1] = 1; key[v * 8 + 2] = 0; any = true }
+                    else { key[v * 8] = 0.35; key[v * 8 + 1] = 0.35; key[v * 8 + 2] = 0.35 }
+                }
+            }
+            guard any else { continue }
+            let ghost = try frame(stage, pm, layer: hidden, tints: key, view: view, size: size)
+            let solid = try frame(stage, pm, layer: hidden, tints: key, bodyAlpha: 1, view: view, size: size)
+            for p in 0..<(size * size) {
+                if interior(solid, p) { near.insert(p) } else if interior(ghost, p) { far.insert(p) }
+            }
         }
-        return (near, far)
+        far.subtract(near)
+        return (near.sorted(), far.sorted())
     }
 
     static func changed(_ a: [UInt8], _ b: [UInt8], _ px: [Int], over: Int = 20) -> Int {
@@ -375,6 +390,10 @@ final class FlexibleBatchMVerifyTests: XCTestCase {
             // the bias's part: the planes' depth with no bias (the walls' cut faces level with the lifted plane)
             let noBias = try Self.frame(stage, pm, layer: layer, view: v, size: size) { $0.controlNoMapDepthBias = true }
             let nearGhost = Self.changed(ghost, none, px.near), nearNoDepth = Self.changed(noDepth, none, px.near)
+            // batch M's one mask (a crease between two solid faces counted as interior) — for the record
+            let wholeNear = try Self.mapPixels(stage, pm, m, layer: layer, view: v, size: size, perFace: false).near
+            let creaseThrough = Self.changed(ghost, none, wholeNear) - nearGhost
+            print("FLEX-MV DEPTH \(name): per-face interiors \(px.near.count) px of batch M's one mask's \(wholeNear.count) · walls through the CREASES between solid faces (batch M's 1 px seam): \(creaseThrough) px")
             let nearNoBias = Self.changed(noBias, none, px.near)
             print(String(format: "FLEX-MV DEPTH %@: the planes' depth without the %.1f mm bias: walls through the near plane %d (%.2f%%)",
                          name, FlexibleLatticePass.mapDepthBiasMM, nearNoBias, 100 * Double(nearNoBias) / Double(max(1, px.near.count))))

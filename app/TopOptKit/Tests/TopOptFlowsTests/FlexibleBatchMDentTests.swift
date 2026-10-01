@@ -20,11 +20,14 @@ final class FlexibleBatchMDentTests: XCTestCase {
 
     /// The largest colour difference between map vertices of `key` that sit at the SAME place (two
     /// quads' shared corner) — 0 for a continuous heat, the step between two columns for blocks.
-    static func seamJump(_ tints: [Float], overlay o: FlexibleOverlayMesh, key: FlexFaceKey, columns: Int) -> (jump: Float, shared: Int) {
+    /// `only`: the columns to compare (nil: every column of the face).
+    static func seamJump(_ tints: [Float], overlay o: FlexibleOverlayMesh, key: FlexFaceKey, columns: Int,
+                         only: Set<Int>? = nil) -> (jump: Float, shared: Int) {
         guard let start = o.flatStart[key] else { return (0, 0) }
         let pos = o.mesh.flat.positions
         var byPlace: [SIMD3<Int32>: [Int]] = [:]
-        for v in start..<(start + columns * 6) where v * 8 + 3 < tints.count && tints[v * 8 + 3] > 0 {
+        for v in start..<(start + columns * 6) where v * 8 + 3 < tints.count && tints[v * 8 + 3] > 0
+            && only.map({ $0.contains((v - start) / 6) }) != false {
             let p = SIMD3<Float>(pos[3 * v], pos[3 * v + 1], pos[3 * v + 2])
             byPlace[SIMD3<Int32>(p * 1000, rounding: .toNearestOrEven), default: []].append(v)
         }
@@ -171,7 +174,14 @@ final class FlexibleBatchMDentTests: XCTestCase {
             let sim = st.columns.indices.map(col)
             let missing = sim.filter { !$0.isFinite }.count
             // ── M5: continuous ──
-            let a = Self.seamJump(tNow, overlay: overlay, key: key, columns: st.columns.count)
+            // ★ MERGE WITH BATCH S: the face's outermost columns are S1's group FRAME (a uniform band in
+            // the group's colour, then a near-black gap — deliberately NOT the heat; D-R5-S1), so the
+            // heat's grading is measured over the heat band; the whole face reads the frame's edge
+            let heatBand = Set(FlexibleGroupFrames.bands(st).enumerated().filter { $0.element == .heat }.map(\.offset))
+            let a = Self.seamJump(tNow, overlay: overlay, key: key, columns: st.columns.count, only: heatBand)
+            let whole = Self.seamJump(tNow, overlay: overlay, key: key, columns: st.columns.count)
+            XCTAssertGreaterThanOrEqual(a.shared, st.columns.count / 2, "\(g): the heat band's shared corners are measured")
+            XCTAssertGreaterThan(whole.jump, 0.05, "\(g): the frame's edge is a step (S1) — the band excluded is the frame")
             // ── M2: spread out of the stamp (its ring 0–3 mm outside, over under it) ──
             let cov = try XCTUnwrap(m.stampCoverage(face))
             let inside = st.columns.indices.filter { cov[$0] >= 0.5 }
@@ -188,14 +198,14 @@ final class FlexibleBatchMDentTests: XCTestCase {
             stage.controlColumnHeat = true
             stage.refresh()
             let tOld = try XCTUnwrap(stage.channels?.tints)
-            let b = Self.seamJump(tOld, overlay: overlay, key: key, columns: st.columns.count)
+            let b = Self.seamJump(tOld, overlay: overlay, key: key, columns: st.columns.count, only: heatBand)
             let shownOld = FlexibleShownValues(model: m, drawnLattice: stage.drawn)
             let core: [Double] = (shownOld.values[key] ?? []).map { if case .depth(let d) = $0 { return d } else { return .nan } }
             let grey = core.filter { !$0.isFinite }.count
             stage.controlColumnHeat = false
             stage.refresh()
-            print(String(format: "FLEX-M MAIN %@ face %d: heat = the sim's dent on %d of %d columns (core's numbers: %d grey 'no number') · step at a shared corner %.4f (core's columns %.4f) · ring 0–3 mm %.0f%% of under the stamp (core's %.0f%%) · scale %.2f mm",
-                         g, face, st.columns.count - missing, st.columns.count, grey, a.jump, b.jump,
+            print(String(format: "FLEX-M MAIN %@ face %d: heat = the sim's dent on %d of %d columns (core's numbers: %d grey 'no number') · step at a shared corner of the heat band %.4f (core's columns %.4f; the whole face with S1's frame %.4f) · ring 0–3 mm %.0f%% of under the stamp (core's %.0f%%) · scale %.2f mm",
+                         g, face, st.columns.count - missing, st.columns.count, grey, a.jump, b.jump, whole.jump,
                          100 * mean(sim, ring) / mean(sim, inside), 100 * mean(core, ring) / mean(core, inside), stage.dentMaxMM))
             XCTAssertEqual(missing, 0, "\(g): the sim colours every column of its face")
             XCTAssertLessThan(a.jump, 1e-4, "\(g): graded — no step between quads")

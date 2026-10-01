@@ -125,7 +125,7 @@ extension FlexibleMainStage {
         // all turn its own below), on the sequence's one scale
         let feRoute = feStressRoute
         let key = "\(generation)|\(h.finalize())|\(showStress ? (feRoute ? fe.token : stressKey) : 0)|\(xray)|\(heat)|\(overlay != nil)|"
-            + feBaseTints.keys.sorted().joined(separator: ",") + "|\(controlStressScaleIsPeak)"
+            + feBaseTints.keys.sorted().joined(separator: ",") + "|\(controlStressScaleIsPeak)|\(controlTurnsWithoutFrames)"
         if key != composedKey {
             composedKey = key
             // ★ BATCH M VERIFICATION: each group's field on ITS OWN scale (its top — FlexibleFEStress.scaleTop);
@@ -157,8 +157,9 @@ extension FlexibleMainStage {
                                                         roles: roles, stress: stressOf(id), ghost: xray ? FlexibleColours.ghost : nil)
                 }
             }
-            // ★ S1 (merge): each Play all turn wears the group frames too
-            if let m = model {
+            // ★ S1 (merge): each Play all turn wears the group frames too (the renderer swaps a turn's own
+            // tints in with its field — FlexibleMergeR5SMTests; RED: controlTurnsWithoutFrames)
+            if let m = model, !controlTurnsWithoutFrames {
                 for id in Array(per.keys) { FlexibleGroupFrames.paint(&per[id], overlay: overlay, model: m) }
             }
             feTintBox.set(per)

@@ -242,6 +242,12 @@ struct FlexibleSquishPlayer: View {
         if let g = playingGroup { return FlexibleRowCopy.playAllPlaying(g.short) }
         return shown?.short ?? FlexibleRowCopy.simAllShort
     }
+    /// ★ the S + M merge: the picker's dot — the PLAYING group (batch M: under a live "Play all" the group on
+    /// screen, else the pick) in its CHOSEN colour (batch S); nil for "Play all" between turns.
+    var dotColour: RGBA? {
+        if case .group(let n)? = (playingGroup ?? shown)?.kind { return colour(n) }
+        return nil
+    }
     /// The line beside the picker (the playing group's own under a live "Play all").
     var shownNote: String? { noteFor.map { $0(playingGroup?.id) } ?? note }
 
@@ -304,8 +310,8 @@ struct FlexibleSquishPlayer: View {
             }
         } label: {
             HStack(spacing: 5) {
-                if case .group(let n)? = (playingGroup ?? shown)?.kind {
-                    Circle().fill(colour(n).color).frame(width: 8, height: 8)
+                if let c = dotColour {
+                    Circle().fill(c.color).frame(width: 8, height: 8)
                 }
                 Text(pickerLabel)
                     .font(.system(size: 12, weight: .semibold))
