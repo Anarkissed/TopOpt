@@ -1,6 +1,166 @@
 # Handoff — 2026-09-29-flexible-screens (TRACK app, A1): the Flexible screens
 
-## Round 5 · batch S — the Settings page: folder tabs, group colours, number boxes, units, Reset all, every face deletable, Exit vs Save & Exit (read this first)
+## Round 5 · batch S — verification pass (read this first)
+
+A verifier read batch S against your words and found 21 things (2 lenses: correctness and your UX rules). I checked each one on the code and on your project 0004 before changing anything. **20 were confirmed; 1 was confirmed only in part** (the weight range). Every fix has a test with a red control, and each fix was put back and its test run: **16 mutations, all RED**. **The app was NOT launched: nothing here has been seen on a device or simulator.**
+
+**What changes for you on the Settings page:**
+- **A number box no longer changes when you only touch it.** Before, a 3 pt wobble on a box rounded its value to the step grid, so 98.07 N became 100 N, 22.05 lb became 22 lb and 7.3 kg became 7.5 kg. A weight was then written back to the main page's Load group. Now:
+  - the value stays put until your finger has moved it half a step;
+  - a drag that ends within half a step changes nothing;
+  - a drag starts only after 8 pt (was 3) of mostly up/down movement, and those 8 pt are not counted;
+  - a sideways wobble is never a drag.
+- **A weight typed outside the main page's own limits (0.1–500 kg) is set to the limit, and one line says so:** "Kept within 0.1–500 kg". Before, 50 g was dropped without a word. "0 kg does nothing · kept 10 kg" when you type 0. A weight under 1 shows two decimals ("0.25 kg", not "0.3").
+- **Tapping a group's own colour again (or picking another and then the original) leaves the button on "Exit".** Before, it read "Save & Exit" with nothing visibly changed.
+- **Every group keeps its colour when an earlier group is removed**, including groups made before round 5 that never had a colour picked. Before, only picked colours survived a renumber.
+- **[+ New]: tap the face on the part and the group is made** (the tab says "Tap the face that starts it"). Before, the tap only selected the face and left the tab. The rows are one per hand: "Top A + Top B → Group 2". Before, there were two rows, and each moved both faces.
+- **The stamp's size is two boxes, Width [65.5 mm] and Length [20 mm]**. Either one keeps the stamp's proportions. Before, one row read "Width · 20 mm long [66 mm]", and the box rounded your 65.5 mm to 66.
+- **When the column preview stands in for the 3D sim, one line above the player says why:**
+  - "Column preview · Save & Exit for the 3D sim" (you edited since the last Save & Exit);
+  - "Column preview · no lattice built yet";
+  - "Column preview · 3D sim running";
+  - "Column preview · the 3D sim failed".
+  Nothing is said while you drag. Before, the fold and bulge changed to the column dent with no word.
+- **The player ends on the playing group's force in your unit** ("10 kg", "22 lb"), the number in its Squeeze box. Before, your Group 1 (Top A 5 kg + Top B 5 kg of Top's 10 kg, faces 3 and 5 at 10 kg) read "Full load".
+- **"Was 7 kg · now Top's weight" follows your unit** ("Was 15.4 lb …").
+- **A curve's end point near the group picker is drawn again.** Only the picker (with its note) and the capsule are kept clear of the curves, not the empty rest of the picker's row. On your Face 3 at 11" landscape the Y curve's end now peeks out under the picker's lower-left corner, and its lower half takes a drag. Before, it was not drawn at all (`S_11l_group2_keypad.png`, before and after). The player does not yet move out of a point's way.
+- **"Groups share material: the firmer one wins" shows only on a group's tab**, not under [Rests]. The group tab's (i) now describes the folder tab and the Squeeze box. It used to mention "the pill beside the group", which is gone.
+- **Exit with nothing changed is counted from the moment the page appears.** An edit on the [Model] tab while the part is still opening now counts as a change. Before, it read "nothing changed yet" and Exit skipped saving it. The open's own re-read of the main page's loads is still not counted as your change.
+
+**Each finding → verdict → what changed:**
+
+| # | finding | verdict | what changed |
+|---|---|---|---|
+| C1 (major) | a touch on a number box rounds an off-grid value and writes a weight back to the main page | CONFIRMED (98.0665 N → 100 N on −3 pt; 7.3 kg → 7.5 kg) | scrub relative to its start (half-step dead zone), 8 pt slop not counted, vertical start only; `FlexNumberScrub.shown(raw:spec:)`, `startsScrub` |
+| C2 | weight range 0.1–500 kgf drops a lighter weight silently, clamps a heavier one | PARTLY: the range IS the main page's own (`ForceModel.minWeightKg / maxWeightKg`; its `setWeight` clamps to them, so a Load group can never hold > 500 kgf). The silent drop and the rounding of small weights were real | the constants named; a positive value under the floor takes the floor; refused / clamped values SAID in one line (`typedNote` → the page's toast); < 1 shows two decimals |
+| C3 | an edit while the part opens counts as "nothing changed" | CONFIRMED | snapshot at onAppear; at `.ready` the open's own adopt is applied to it (`FlexibleStageModel.openedSnapshot`), never re-taken |
+| C4 | the S9 evidence test passes with the S9 fix removed | CONFIRMED (with a current lattice the Save & Exit path changes nothing visible) | new `testExitWithNothingChangedLeavesTheViewOffAndNothingDeferred`: view off and opened by the view button. Without the fix, Save & Exit's path turns the view on, so the test goes RED (V13). The failed-build test is the other S9 evidence. The review UI test's two counters, bumped on one condition, became one honest check |
+| C5 | a group with no stored colour changes colour on a renumber | CONFIRMED (green/orange/red → [1,2] green, [3] orange) | `normalise` carries the colour each group was SHOWN in (pick, or its old number's default), then stores it in normal form |
+| C6 / U2 | [+ New]: a tap on the part leaves the tab and makes nothing; two rows for one hand | CONFIRMED | `tapFace` on [+ New] calls `startGroup(with:)` for a candidate; `newGroupHands` = one row per hand ("Top A + Top B → Group 2") |
+| C7 / U12 | stale (i) ("the pill beside the group"); "Width · 95 mm long"; `stampSizeRow` unused; the share note under [Rests] | CONFIRMED | `Info.groups` rewritten; Width and Length rows (`stampSizeRow`, `stampLengthRow`); the share note on group tabs only |
+| C8 | "Reset == fresh" builds fresh with Reset's own constructor; "as New TopOpt preselects" unsupported (batch F not here) | CONFIRMED | the test's fresh project now starts at the APP's entry (`FlexibleStageSettings()`, WorkspacePlaceholder) and takes the page's own actions (the D-R5-S5 filament, his unit); the claim is reworded in the source and here |
+| U1 (major) | after any edit the 3D fold drops to the column dent with no line | CONFIRMED | the four column-preview lines above. Re-running the sim on the Settings page is **your call** (below): the sim needs the lattice built on Save & Exit, and the Settings page never builds one (D-R4-6) |
+| U3 (major) | "Width · 20 mm long [66 mm]"; a stored 65.5 mm shows 66 | CONFIRMED | two boxes (Width, Length), proportions kept (`FlexibleStampSize`); one decimal when the value has one |
+| U4 | re-picking a swatch reads "Save & Exit" | CONFIRMED | colours in normal form (`FlexibleSqueezeGroups.canonical`) |
+| U5 | view off: Save & Exit leaves the lattice stale, so the main page's 3D squish falls back to the column model | CONFIRMED | no code change. The consequence is now part of your call 3 below. The main-page pill is in batch M's file |
+| U6 | > 4 groups reuse colours; orange / red are the warning / danger tokens | CONFIRMED | not changed: the DS has only these four tokens besides purple (the depth prism), cyan (resting) and white (selected) — **your call** below |
+| U7 | on the main page's column fallback a side wall's opaque frame pokes through the top face | CONFIRMED (verifier's render) | NOT fixed. The geometry is older than S: the column model pushes a side face's top columns through the top face, and its heat-coloured columns already poked through the same way. The opaque frame makes it visible. A fix means the column model must know when a displaced column crosses another face. That belongs to the main page's dent work (batch M), so it is left as an open issue |
+| U8 | relinked line in kg; Settings player "Full load" | CONFIRMED | `relinked(…, unit:)`; `FlexibleSettingsSquish.fullLabel` = the playing group's force (`squeezeValue(_:unit:)`) |
+| U9 | the deepest box scrubs up = more, the depth chip down = deeper; 3 pt slop | slop CONFIRMED and fixed (8 pt, vertical start). Direction NOT changed | the box is a value dial, and up = more on every box on the page (the iOS convention). The chip is a handle ON the part that follows the dent plane into it. Flipping one box would make it the only one that runs backwards |
+| U10 | a curve end point hides under the group picker (11" landscape) | CONFIRMED; PARTLY fixed | the player reports its drawn parts (`playerTopRow`, `playerCapsule`); `FlexibleStagePage.stageKeepOut` keeps out only those. On his Face 3 at 11" landscape the end point is drawn again, but it sits at the picker's corner and only its lower half is clear. Making the player dodge projected points is not done |
+| U11 | Reset drops the faces he added here; the fresh card opens on "Can't reach your curve" | CONFIRMED | your call below. The warning comes from round 4's default dome (it misses columns on your top) and is older than this pass |
+| U13 | FlexibleSquishPlayer.swift and FlexibleRowCopy.swift are also edited in the lead's tree | CONFIRMED (verifier read the lead's diff) | merge notes below |
+
+**Your call (updated):**
+1. Deleting a face a main-page group holds leaves that group unchanged, so the main run still presses it. Should deleting top A here also take it out of the main page's Top group?
+2. Reset all keeps your weight unit. Should it go back to kg?
+3. **Save & Exit with the Lattice view off** only stores ("View off · tap to build"). **Consequence:** with no new bake, the lattice stays stale. Every 3D sim needs a current lattice, so until you turn the view on, the main page's Heat and Stress squish is the old column preview, with no bulge. Round 4 built it anyway. Which do you want?
+4. The frame is ~3 % of the face (3 mm on your 100 mm pad) plus a 1.6 mm dark gap. Thicker or thinner?
+5. **NEW: after an edit on the Settings page, the 3D sim waits for Save & Exit.** It needs the lattice built on Exit. Should the Settings page re-run the playing group's sim on the last-built lattice once your edits settle (an approximation: the old lattice, the new loads)? If not, the "Column preview · Save & Exit for the 3D sim" line stays.
+6. **NEW: Reset all** starts from the main page's faces only, so faces you added on this page are dropped. Should it keep every listed face, with its values reset?
+7. **NEW: groups 5 and up re-use the four colours, and orange and red are also the warning and danger colours.** Accept four, or add a second cue for groups 5+ (e.g. the group number on the frame)?
+
+**Merge notes for the lead (with batch M):**
+- `FlexibleSquishPlayer.swift`:
+  - S changed the picker's dot to `colour(n)`;
+  - this pass adds two `FlexibleKeepOutKey` preference backgrounds: the top row's and the capsule's drawn frames;
+  - the lead's tree changes the picker condition to `(playingGroup ?? shown)?.kind`.
+  Keep all three.
+- `FlexibleRowCopy.swift`: the lead's tree changes `stampMainPage` to "Main page: the 3D sim presses the stamp". Keep the lead's string. S's cards still show it under the stamp rows.
+- The five main-page hook files listed under batch S below are not touched by this pass.
+
+**Hook lines in this pass:** none in a #354 / main file. The pass only READS `ForceModel.minWeightKg / maxWeightKg`; `ForceModel.swift` is unchanged. No case was added to LatticeStageMode. Flexible track files only:
+- FlexibleNumberBox;
+- FlexibleSettingsRail;
+- FlexibleGroupColours;
+- FlexibleSqueezeGroups;
+- FlexibleStageModel(+Groups);
+- FlexibleSettingsReset;
+- FlexibleSettingsSquish;
+- FlexibleStagePage;
+- FlexibleSquishPlayer;
+- FlexibleFaceStamp;
+- FlexibleFacePanel;
+- FlexibleFaceList;
+- FlexibleSqueezeGroupRows;
+- FlexibleRowCopy.
+
+**Tests:**
+- NEW `FlexibleRound5SettingsVerifyTests` (9). Each test states its red control inline:
+  - nudges commit nothing at 6 values × 4 nudges (control: round 5's absolute snap rewrote 24 of 24);
+  - clamped and said;
+  - colours in normal form and carried as shown;
+  - an edit while opening counts, and the open's adopt does not;
+  - a tap on the part starts the group, with one row per hand;
+  - Width and Length;
+  - the player's column lines and group force;
+  - the keep-out is the player's drawn parts;
+  - the share note on group tabs only.
+- NEW hosted `FlexibleRound5SettingsVerifyHostedTests` (1): the page itself appears while the part is still opening. An edit then reads "Save & Exit"; the open's own re-read reads "Exit" (FLEX-R5V-HOSTED: "the open changed the settings true · title 'Exit'" / "… title 'Save & Exit'").
+- NEW in `FlexibleRound5SquishExitTests`: `testExitWithNothingChangedLeavesTheViewOffAndNothingDeferred`. The column-preview line is also checked in both S2 tests.
+- RE-PINNED, each with its reason in the test:
+  - `FlexibleRound5SettingsTests.testANewGroupTakesAFreeColour…`: no entry for a number's own colour; it keeps orange when group 1 goes;
+  - `…testResetAllIsABrandNewSetupOfThisPartAndUndoable`: fresh from the app's entry;
+  - `FlexibleRowCopyTests`: the Width and Length rows, the hand row, the column lines and the unit-aware relinked line;
+  - `FlexibleSqueezeGroupsReviewUITests`: one check instead of two counters on one condition.
+
+Mutations (`scratchpad/s5v/mut/summary.txt`), each rebuilt and run on its pinning test:
+```
+V1  round 5's absolute snap (no half-step dead zone) ........ RED (24) testANudgeNeverRewritesAnOffGridValue
+V2  a typed weight under the floor is dropped ............... RED (2)  testATypedWeightOutsideTheMainPagesLimitsIsClampedAndSaid
+V3  every colour pick stored (no normal form) ............... RED (5)  testColoursAreStoredInNormalFormAndCarriedAsShown
+V4  a renumber carries only STORED colours .................. RED (2)  same
+V5  the S9 snapshot re-taken at .ready (model) .............. RED (1)  testAnEditWhileThePartOpensCountsAndTheOpensOwnReadDoesNot
+V16 the page re-takes the S9 snapshot at .ready (wiring) .... RED (1)  hosted testThePageCountsAnEditMadeWhileThePartOpens
+V6  a tap on the part on [+ New] only selects ............... RED (4)  testATapOnThePartStartsTheNewGroupAndTheRowsAreHands
+V7  [+ New] lists one row per face .......................... RED (2)  same
+V8  the stamp box shows whole mm only ....................... RED (1)  testTheStampsWidthAndLengthAreTwoBoxesThatKeepItsProportions
+V9  no line for the column preview .......................... RED (3)  testThePlayerSays… + SquishExit testOnlyTheSelectedFacesGroup…
+V10 the player ends on the faces' own weights ............... RED (3)  testThePlayerSaysWhyTheColumnPreviewPlaysAndEndsOnTheGroupsForce
+V14 the relinked line in kg whatever the unit ............... RED (1)  same
+V11 the whole player kept out of the curves ................. RED (1)  testTheCurvesKeepOutIsThePlayersDrawnPartsNotItsWholeWidth
+V12 "Groups share material" under every tab ................. RED (1)  testTheSharedMaterialNoteIsOnlyOnAGroupsTab
+V13 S9a: Exit (nothing changed) runs Save & Exit's path ...... RED (1)  testExitWithNothingChangedLeavesTheViewOffAndNothingDeferred
+V15 round 5's 3 pt slop ..................................... RED (1)  testANudgeNeverRewritesAnOffGridValue
+```
+
+Build and suite (raw lines, this Mac, side worktree `wt-r5s`):
+```
+Targeted suite (every Flexible* suite + UnifiedShading, LatticePreviewBodyAlpha, LatticeGBufferMask, LatticeThreeAlgorithmsDraw,
+OrganicCapsuleImpostor, Viewer, StageBackdrop, SmoothingPageRound2, LatticeStageMode, LatticeSettingsPersist, ProjectStore,
+UndoHistory, SurfaceStage, LatticeSimSolveTrigger), FLEX_S_EVIDENCE_DIR set, load average up to 227 (other agents):
+Executed 529 tests, with 11 tests skipped and 3 failures (1 unexpected) in 1375.400 (1375.474) seconds
+  LatticeSimSolveTriggerTests.testTheTriggerRefusesOnAllThreeGrounds — known, pre-existing
+  FlexibleFEFieldTests.testExtensionOutsideTheSolid — "cannot open STL file: …/wt-r5s/evidence/2026-07-30-lattice-skin-freeform/…":
+    this side worktree is SPARSE (.git/worktrees/wt-r5s/info/sparse-checkout excludes that evidence folder; set outside this
+    task, as batch S reported) — run it in the lead's worktree
+  FlexibleMainPageLoadsTests.testThePadCommitsOnceWhenItCloses — MINE: its source pin read the literal
+    "if !open, let v = buffer.closed(spec)"; re-pinned to the close's body (one buffer.closed, one onCommit, only as it closes);
+    rerun: Executed 10 tests, with 0 failures (0 unexpected) in 3.312 (3.314) seconds
+Affected suites first (FlexibleRound5Settings, Round5SquishExit, SqueezeGroups, SqueezeGroupsReview, SqueezeGroupsModel,
+  LegendPlacement, MainPageHook, SettingsRound4): Executed 62 tests, with 0 failures (0 unexpected) in 124.606 (124.613) seconds
+FlexibleRound5SettingsVerifyTests: Executed 9 tests, with 0 failures (0 unexpected) in 3.577 (3.579) seconds
+FLEX-R5V opening (edit false): the open's adopt changed the settings = true · modified = false
+FLEX-R5V opening (edit true): the open's adopt changed the settings = true · modified = true
+FLEX-R5V new tab: candidates [1000103, 1000104, 3, 5] · rows [["Top A", "Top B"], ["Face 3"], ["Face 5"]]
+FLEX-R5V colours: same swatch / back / swap-and-back all equal · unstored group 3 → 2 keeps red (stored ["2": "red"])
+FLEX-R5V player: group 1 faces ["Top A 5.0 kg", "Top B 5.0 kg", "Face 3 10.0 kg", "Face 5 10.0 kg"] · force 10.0...10.0 · label '10 kg'
+FLEX-R5V S9 exit, view off: latticeOn false · deferred false · showOnExit false
+FLEX-R5V-HOSTED opening: edit while opening false: the open changed the settings true · title 'Exit'
+                          edit while opening true: the open changed the settings true · title 'Save & Exit'
+iOS: xcodebuild -project app/TopOpt.xcodeproj -scheme TopOpt -configuration Debug -destination id=147E56A1-C8CA-4B9D-BE6C-CF230589A83A
+  -derivedDataPath …/DerivedData/flexA1s build → ** BUILD SUCCEEDED ** (FlexibleNumberBox.o newer than its source; the log compiles
+  wt-r5s/…/FlexibleSettingsSquish.swift). The app was not launched.
+Evidence: the hosted page re-shot at 4 sizes (scratchpad/s5v/ev/S_<size>_*.png): the player reads "● Group 2 ▾  Column preview ·
+  no lattice built yet" and ends on "10 kg"; Face 3's Y-curve end is drawn at the picker's corner (crop: scratchpad/s5v/crop_picker.png;
+  batch S's: crop_picker_before.png, not drawn).
+```
+
+**Commits (on `claude/flexible-screens-r5s`; nothing pushed):** 0ae23c45 (the fixes and their tests, with FlexibleRowCopyTests' re-pin, which it needs to compile) · 0d6c1808 (re-pins) · 3ddad0ea (the box's source pin) · this section with D-R5-SV1..SV6.
+
+## Round 5 · batch S — the Settings page: folder tabs, group colours, number boxes, units, Reset all, every face deletable, Exit vs Save & Exit
+
+(The verification pass above corrects this section where they differ.)
 
 Your words (img 1–3), with your clarifications:
 - "The different groups should have different coloured faces on the model body, assigned in the settings modal." — "This should be in the settings page too".
@@ -24,12 +184,12 @@ Judged on YOUR project 0004, restored through `AppModel.open`; the Settings page
   - **[Model]** holds the filament, Feel and Finish, then the More rows (nozzle, lattice, Auto, physics).
   - A face you tap on the model opens its own group's tab, even from [Model].
   - A face you press on a group's tab joins THAT group.
-  - [+ New] lists the faces that can start a new group ("Top B → Group 3"). A tap makes the group and opens its tab.
+  - [+ New] lists one row per hand that can start a new group ("Top A + Top B → Group 3": a main-page group's faces move together). A tap on a row, or on the face on the part, makes the group and opens its tab (verification pass).
   - The panel is 480 pt wide (400 before): the tab beside the rail keeps round 4's 372 pt, so every row still fits. It still hugs its rows and still folds to its header.
 - **Each group has its own colour** (S1).
   - You pick it on the group's tab. The four colours are green, orange, red and blue, all DS tokens and never purple.
   - Picking a colour another group wears swaps the two, so each group keeps its own.
-  - A new group takes the first free colour. A group keeps its colour when an earlier group goes and it is renumbered.
+  - A new group takes the first free colour. A group keeps its colour when an earlier group goes and it is renumbered — any group, picked or not (verification pass; before it, only a picked colour survived).
   - Blue is last because the dent heat is deep blue → cyan → white, and a blue frame sinks into it.
   - **On the model, each pressed face is FRAMED in its group's colour.** The pressed face's body IS its heat map, so the heat keeps the inside:
     - a band of the face's outermost columns (≈ 3 % of its longer side; at most an eighth of its shorter side) in the group colour;
@@ -48,7 +208,7 @@ Judged on YOUR project 0004, restored through `AppModel.open`; the Settings page
   - The boxes are:
     - a group's squeeze;
     - the deepest squish (0.5 mm steps, up to the lattice);
-    - the stamp's width (1 mm);
+    - the stamp's width and its length, two boxes (1 mm steps; either keeps the stamp's proportions — verification pass);
     - the stamp's turn (15° steps, wrapping round; replaces the quarter-turn button);
     - **a curve point's squish in mm** (while a point shows its ×).
   - The pencil buttons are gone. A row whose number is in its box no longer repeats it ("Deepest squish [3 mm]").
@@ -58,7 +218,7 @@ Judged on YOUR project 0004, restored through `AppModel.open`; the Settings page
   - The unit is saved with the project. It never makes the lattice stale.
 - **[Reset all]** is in the modal's header (S5).
   - It asks in one line: "Reset every setting here? [Reset] [Cancel]".
-  - Reset gives exactly what a brand-new Flexible setup of this part is:
+  - Reset gives a brand-new Flexible setup of this part with the default filament (D-R5-S5 rules it: the app's own entry, `FlexibleStageSettings()`, has no filament on this branch):
     - the filament with squish data (varioShore TPU), Springy, Covered, Auto;
     - the main page's Load and Anchor groups read again as faces at their weights (on your pad: Top A pressed, 10 kg, and Face 0 resting);
     - one group, and nothing deleted.
@@ -85,7 +245,7 @@ Judged on YOUR project 0004, restored through `AppModel.open`; the Settings page
 
 **Deviations (each with its reason):**
 1. **Frames, not whole faces, carry the group colour.** The pressed face's body is replaced by its heat map (the overlay), so a whole-face tint would hide the heat. The frame plus a near-black gap is the one mark no heat ramp draws: blue → cyan → white today, and a rainbow if batch M switches to it.
-2. **On the Settings page the 3D field plays only while the lattice is current** (no edit since the last Save & Exit). The field belongs to the lattice built on Exit; the Settings page never builds one (D-R4-6). Any edit → the column preview of the selected group at once.
+2. **On the Settings page the 3D field plays only while the lattice is current** (no edit since the last Save & Exit). The field belongs to the lattice built on Exit; the Settings page never builds one (D-R4-6). Any edit → the column preview of the selected group at once, and (verification pass) one line above the player says so: "Column preview · Save & Exit for the 3D sim".
 3. **[Rests] and [+ New] are tabs, and [Model] also holds the More rows.** The rail replaces the Face | More chips.
 4. **The rail tab has two tiny lines** (name, face count), as asked ("its colour, its name, its face count"). Every setting row is one line.
 5. **With nothing changed, Exit is never blocked** (a legacy project's missing filament included): leaving changes nothing on the main page.
@@ -99,7 +259,7 @@ Judged on YOUR project 0004, restored through `AppModel.open`; the Settings page
 **Your call:**
 - **Deleting a face a main-page group holds leaves the main page's group as it is**, so the main run still presses it. Should deleting top A on the Flexible page also take it out of the main page's Top group?
 - **Reset all keeps your weight unit.** Should it go back to kg too?
-- **Save & Exit with the Lattice view off** stores and waits for the view ("View off · tap to build"). Round 4 built it anyway and said "Lattice ready [Show]". Which do you want?
+- **Save & Exit with the Lattice view off** stores and waits for the view ("View off · tap to build"). Round 4 built it anyway and said "Lattice ready [Show]". Which do you want? (The verification pass adds the consequence: until the view is on, the main page's squish is the column preview, with no bulge.)
 - **Frame width** is ~3 % of the face (3 mm on your 100 mm pad), plus a 1.6 mm dark gap. Thicker / thinner?
 
 **What it does on YOUR pad (measured, his project 0004 restored):**
@@ -111,7 +271,7 @@ Judged on YOUR project 0004, restored through `AppModel.open`; the Settings page
   - Face 3 selected: only Face 3 dents (2.96 mm).
   - Round 4's page dented all four at once.
 - **The playing group, 3D:** with the lattice built and both sims landed, Top A plays Group 1's own field and Face 3 plays Group 2's. The two fields differ by up to 0.98 mm.
-- **Exit with nothing changed, on C1's pad under the main stage:**
+- **Exit with nothing changed, on C1's pad under the main stage** (verification pass: these numbers do NOT go red without the fix — with a current lattice Save & Exit's path changes nothing visible; the tests that do are "does not retry a failed build" and "leaves the view off and nothing deferred"):
   - lattice generation 1 → 1;
   - picture generation 5 → 5;
   - still playing;
