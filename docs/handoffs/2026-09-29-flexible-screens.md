@@ -1,6 +1,161 @@
 # Handoff — 2026-09-29-flexible-screens (TRACK app, A1): the Flexible screens
 
-## Round 5 · batch M2 — the Settings page's dent in BOTH views (V12, V10), and batch M's verification on record (read this first)
+## Round 5 · batch M2 — verification pass (read this first)
+
+Batch M2's verification found seven things in the Settings page's stamp dent (below batch M2's own section). Two were
+major: your Face 3 lost its fingertip foci, and the agreement test claimed colours while it measured shapes. Both are
+answered here, along with the cheap minors. **The app was NOT launched: nothing here has been seen on a device or
+simulator.** The pictures are offscreen frames of the shipping renderer, plus face-on colour maps drawn from the probe's
+per-column dumps.
+
+**What you will see on the Settings page:**
+- **Your Face 3 (Group 2's four fingertips) shows four foci again**, rising and dipping where the main page's sim does.
+  Batch M2 drew one smooth hill there (`batch_m2_verify/M2V_his_face3_iso_before_after_main.png`,
+  `…/M2V_his_face3_face_on_shape.png`).
+- **A dragged stamp no longer jumps when core's new design arrives.** Before: a thumb at 10 kg jumped by 0.06–0.08 of
+  the deepest. Nor does a new stamp jump when core's first design arrives: on Face 3 the valleys between fingertips
+  read 72 % of the deepest, then 88 % once the design landed. Now they read 83 %, then 88 %.
+- C1's pad looks as it did in batch M2 (`…/M2V_pad4_settings_before_after_main.png`).
+- **The rigid flat plate is unchanged.** It still sinks deepest in the middle, with its outline higher. The main page's
+  sim of that same plate does the same: its middle is flat and the pad's walls hold its outline
+  (`…/M2V_flat_plate_top_shape.png`).
+
+**What was wrong, and what changed** (`FlexibleStampSpread`; D-R5-MV9, D-R5-MV10):
+- **The near Gaussian's width came from the lattice depth**: σ 0.25 × depth = 25 mm on your 100 mm-deep side, wider
+  than the fingertips' 17–19 mm spacing. A fingertip's focus is as wide as the fingertip, and on a deep lattice the
+  broad press outweighs it. Now:
+  ```
+  σ_near = min(0.25 × depth, 0.4 × the stamp's feature)    feature: the radius of the largest disc in its
+                                                           footprint (a fingertip ≈ 6 mm, a thumb ≈ 9, a palm ≈ 40)
+  σ_far  = 0.5 × depth
+  near weight = 0.35 × σ_near / σ_far                     ρ₀ = 0.25 (each σ ≥ one column pitch)
+  ```
+  Refitted jointly on six faces from `FlexibleBatchM2Probe`'s dumps (the fit's scripts are in the session scratchpad).
+- **The three numbers** (core's even press round the stamp, its density under and outside the stamp) were read from the
+  last design under the stamp's NEW footprint. Now they come from the design's own press: under = half its peak over
+  core's even press or more; outside = at the even press.
+- **Before core's first design** (or while core refuses one), the even press round the stamp was 0. Now it is the
+  stamp's area over the face's, which is core's own reading (soft stamps: the whole grid; rigid: what lands on the
+  face). On your Face 3 it equals core's to 4 places (0.2826, tested).
+
+**The numbers** (each page over its face's deepest, i.e. the shape; batch M → batch M2 → now):
+| face, stamp | whole-face RMS | foci vs the sim: correlation, size | along / across the stamp (RMS / max) |
+|---|---|---|---|
+| C1's pad, 4 fingertips, 3 kg / 6 mm | 0.116 → 0.047 → **0.044** | 0.99, 1.10 × → **0.98, 1.11 ×** | 0.047 / 0.112 · 0.038 / 0.070 |
+| C1's pad, 4 fingertips, 10 kg / 3 mm | 0.266 → 0.072 → **0.080** | 0.98, 0.67 × → **0.98, 0.68 ×** | 0.074 / 0.149 · 0.072 / 0.125 |
+| C1's pad, thumb, 10 kg / 4 mm | 0.192 → 0.051 → **0.066** | | 0.051 / 0.083 · 0.055 / 0.081 |
+| **your Face 3** (Group 2's fingertips) | 0.194 → 0.088 → **0.064** | **0.36, 0.31 × (one hill) → 0.98, 0.87 ×** | 0.054 / 0.175 · 0.021 / 0.063 |
+| your Top A (Group 1) | 0.263 → 0.167 → **0.147** | | |
+| your Face 5 (Group 1's thumb) | 0.342 → 0.450 → **0.310** | | |
+| C1's pad, rigid flat plate, 10 kg / 4 mm (not fitted) | batch M2 0.235 → **0.241** (one plane, a full sink: 0.451) | | |
+| C1's pad, palm, 10 kg / 4 mm (not fitted) | batch M2 0.165 → **0.167** | | |
+
+- The pad's 10 kg case and the thumb read a little further from the sim than batch M2 did. That is the price of
+  holding your Face 3's foci.
+- The drawn saw-tooth is 0.038 / 0.030 of the column pitch (batch M2: 0.036 / 0.027; the test's limit is 0.08).
+
+### Each finding → verdict → what changed → pinned by
+| # | Finding | Verdict | What changed | Pinned by (RED control) |
+|---|---|---|---|---|
+| 1, 3 | Your Face 3 loses the four fingertip foci the main page shows (correct · major; ux · major) | CONFIRMED (my replica matched the shipped column to 1e-5: correlation 0.36, 0.31 ×) | σ_near from the stamp's feature; the near weight falls with depth; refitted (D-R5-MV9) | `FlexibleBatchM2VerifyTests.testHisFace3KeepsItsFourFingertipFociOnTheSettingsPage` on your round-5 project through Save & Exit: correlation 0.98, 0.87 ×, whole-face RMS 0.064; Top A and Face 5 no worse than batch M2 (RED: `Rule.batchM2`, 0.36 / 0.31 ×) |
+| 2 | The rigid "Flat plate (whole face)" draws as a dome (correct · minor) | CONFIRMED as described (outline 0.54 of the deepest). **The suggested fix is REJECTED by measurement:** the main page's sim of the same plate is not one plane either — its middle is flat (0.93–0.98) and C1's walls hold the outline at 0.07. A full sink under the plate is further from the main page (RMS 0.451 against 0.241). The palm's sim is not uniform under the stamp either (0.56–0.99). | none; `FLEX_M2_PAD_CASES=whole` added to the probe | `testAWholeFaceRigidPlateFollowsTheMainPagesSim`: the middle half within 0.008 (the sim's 0.055); the outline below the middle; RMS 0.241 ≤ 0.26 (RED: one plane, 0.451; its outline 1.0) |
+| 4 | The same stamp is a different colour on the two pages; the test pins shapes while its messages claim colours (ux · major) | CONFIRMED. As drawn, each page over its own legend's top: 10 kg / 3 mm row RMS 0.369, max 0.503; 3 kg / 6 mm 0.045 | The test's doc comment and messages now say SHAPE; the drawn colours are printed (`FLEX-M2 DRAWN`). **The legend's top is unchanged — your call 1 below** | `FlexibleBatchM2Tests.testTheTwoPagesAgreeOnAFourFingertipStamp` (shape) |
+| 5 | Face 5 reads worse than batch M (ux · minor) | CONFIRMED at batch M2 (0.450). Now 0.310, better than batch M's 0.342 | (by finding 1's refit). The suggested cap on the far σ (a share of the face's smaller side) is rejected: your Face 3 has the same 100 × 20 shape, and its sim is broad (0.72–1.0 along it) | the same test (Face 5 no worse than batch M2) |
+| 6 | The pad's outline sags while editing (ux · minor) | CONFIRMED (pad outline ~0.08–0.13 of the deepest, the sim's 0.01–0.03). **Not fixed.** The suggested fade to 0 at the outline would break your project: your Top A's and Face 3's sims hold nothing there (outline medians 0.32–0.45 and 0.72–0.88, against 0.40 and 0.90 inside). One face's picture cannot tell a holding wall from a free edge | — | listed under NOT matched (D-R5-MV9) |
+| 7 | A dragged stamp pops when core's design lands (ux · minor) | CONFIRMED (thumb, 10 kg / 4 mm, dragged 20 mm: 0.064 RMS, max 0.079 under the new rule's constants; the verifier's 0.081 under batch M2's) | the three numbers from the design's own press (D-R5-MV10) | `testADraggedStampDoesNotPopWhenCoresDesignLands`: the dent moves 0.190 at once, the pop is 0.000 (RED: the M2 rule's numbers on the same drag, 0.064) |
+| — | (found while fixing) The first design arrived as a jump; `FlexibleBatchMDentTests` had read the page BEFORE the design landed, and batch M2's 25 mm σ hid it | — | `Design.beforeDesign`: b = the stamp's area / the face's | `FlexibleBatchMDentTests` (re-pinned): b 0.2826 before = core's 0.2826; the valleys 83 % before, 88 % after (RED: no even press, 72 %) |
+
+**Corrections to batch M2's section below** (marked ★ M2 VERIFICATION in place):
+- "each fingertip still a focus" held on the pad only.
+- "(By construction — no test drags a stamp)": it popped.
+- Its table's Face 3 row now gives the lost foci.
+- Its "What changed" now points here.
+- Batch M's verification row V10 ("FIXED in batch M2") held on the pad only.
+
+**Not done, and why:**
+- **Nothing seen on a device or simulator** (track rule). The iOS build succeeds (below).
+- **The colours as drawn still differ wherever the two legends top differently** (your call 1). The SHAPES agree.
+- **The outline** (finding 6): C1's pad holds it and your project does not, and a picture of one face cannot know
+  which. Your Face 3's ends read 0.62 here against the sim's 0.72–0.80.
+- **Group 1's press across two faces** (Face 5's sim peaks at its top edge, pulled by Top A): core brief #35, open.
+- The rule is fitted on six faces of two parts. New geometries may agree less; `FlexibleBatchM2Probe` re-dumps both
+  pages for a refit.
+
+**Your call:**
+1. **The Settings legend's top** (this decides whether "the graded dent colours in both views" is done for stamps):
+   - keep "drawn and buildable on one scale"; or
+   - top it at the face's deepest, so a stamp's deepest point is red on both pages.
+
+   At 10 kg / 3 mm the Settings legend tops at 5.5 mm (core's buildable range). The 3 mm stamp then reads green-yellow
+   there and red on the main page.
+2. (batch M2's, still open) The face round a stamp sinking a little under core's even press: keep it, or show the
+   stamp's own press only?
+
+### Mutation runs (each breaks one rule in `FlexibleStampSpread.swift`, rebuilds, runs its pinning tests, restores from git; `m2v/mut/run.log` in the session scratchpad)
+```
+MA  Rule.shipped = batch M2's rule (σ 0.25 / 0.6 × depth, weight 0.3, ρ₀ 0.2)  ⇒ testHisFace3… RED (4: foci 0.36 / 0.31 ×, RMS 0.088, σ_near 25 mm)
+MC  the near weight fixed at 0.3 (the new σ)                                ⇒ testHisFace3… + testTheTwoPagesAgree… RED (7: foci 3.56 × / 2.46 ×, rows 0.115 / 0.246)
+MD  the three numbers read under the CURRENT footprint again                ⇒ testADraggedStamp… RED (2: pop 0.064, max 0.079)
+ME  no even press before core's first design                                ⇒ FlexibleBatchMDentTests RED (2: b 0 ≠ 0.2826, valleys 0.717)
+MF  the stamp's feature broken (1e9 mm)                                     ⇒ testHisFace3… + testADraggedStamp… RED (5: foci 0.36, Face 5 0.483 > 0.450, the thumb's feature)
+restore build 0; the source back to 9a92882e (git status: only this pass's docs)
+```
+Tests first: the three new tests were written against the fixed code. Their RED controls run in every pass, by the same
+instrument: batch M2's rule, the M2 numbers on the same drag, and one plane.
+
+### Hook lines in #354 / main files
+**None.** `FlexibleStampSpread.swift` plus tests. WorkspacePlaceholder, MetalMeshView, LatticeSettings, ProjectModel,
+ResultsModel, FaceRegion and LatticeStageMode are untouched. No LatticeStageMode case was added, core/ is untouched,
+and the pinned strings are untouched.
+
+### Tests
+- NEW: `FlexibleBatchM2VerifyTests` (3, above).
+- RE-PINNED, each with its reason in the test:
+  - `FlexibleBatchMDentTests`: the σ rule. The test now measures once core's design has landed, and checks the even
+    press before it lands.
+  - `FlexibleBatchM2Tests`: the agreement test's wording, from colours to SHAPE, plus the printed drawn colours.
+- Deleted-test sweep (`git diff 933e4ecc -- app/TopOptKit/Tests`, removed `func test` lines): none.
+- PROBE: `FLEX_M2_PAD_CASES=whole` adds the flat plate, the foam-test foot and the palm. The probe prints each stamp's
+  feature, σ and near weight. `FLEX_M2_BEFORE=m2` renders batch M2 as "before", with four level views round your part.
+
+### Evidence (`docs/handoffs/evidence/2026-09-29-flexible-screens/batch_m2_verify/`)
+- `M2V_his_face3_face_on_shape.png`: your Face 3 face-on, the main page's sim, batch M2 and now, as colour maps (each
+  over the face's deepest), plus the row through the fingertips plotted (white sim, grey batch M2, yellow now).
+- `M2V_his_face3_iso_before_after_main.png`: the Settings page as you edit (batch M2: one arch; now: the foci) beside
+  the main page's Group 2.
+- `M2V_pad4_settings_before_after_main.png`: C1's pad, four fingertips, 3 kg / 6 mm. Batch M2 and now are nearly alike;
+  the main page is beside them.
+- `M2V_flat_plate_top_shape.png`: the rigid flat plate, the main page's sim, the Settings page now, and one plane.
+
+### Build and suite (raw lines, this Mac)
+- Targeted suite at `9a92882e`, Debug, with the merge pass's filter (29 names: every Flexible* class plus
+  UnifiedShadingTests, LatticePreviewBodyAlphaTests, LatticeGBufferMaskTests, LatticeThreeAlgorithmsDrawTests,
+  OrganicCapsuleImpostorTests, ViewerTests, StageBackdropTests, SmoothingPageRound2Tests, LatticeStageModeTests,
+  LatticeSettingsPersistTests, ProjectStoreTests, UndoHistoryTests, SurfaceStageTests, LatticeSimSolveTriggerTests and 14
+  more of #354's and the hook-adjacent suites; `ViewerTests` is a name of its own):
+  `Executed 716 tests, with 22 tests skipped and 1 failure (0 unexpected) in 3031.325 (3031.392) seconds`.
+  - The one failure is the known `LatticeSimSolveTriggerTests.testTheTriggerRefusesOnAllThreeGrounds`.
+  - `ViewerTests`: `Executed 33 tests, with 0 failures`.
+  - `FlexibleBatchM2VerifyTests` 3/3, `FlexibleBatchM2Tests` 2/2 and `FlexibleBatchMDentTests` 2/2 passed in the run.
+  - The +3 against batch M2's 713 are the three new tests.
+- Focused run before the suite: `FlexibleBatchM2VerifyTests|FlexibleBatchM2Tests|FlexibleBatchMDentTests|FlexibleSettingsRound4Tests|FlexibleRound5SettingsTests|FlexibleSettingsVerifyD1Tests`,
+  `Executed 43 tests, with 0 failures`.
+- iOS (Debug, the simulator 147E56A1…, DerivedData flexA1n): `** BUILD SUCCEEDED **` at `9a92882e`.
+  `TopOpt.debug.dylib` (09:54) holds `FlexibleStageModel.stampAreaMM2` and `FlexibleStampSpread.Design.beforeDesign`
+  (nm). Not installed and not launched. The package `.build` and flexA1n were deleted afterwards (disk).
+
+### Decisions (00-decisions.md)
+- New: D-R5-MV9 (the spread's σ and weights; the whole-face stamps; what it does not match, incl. the colours — your
+  call) and D-R5-MV10 (the three numbers from the design's own press; b before the first design).
+- D-R5-MV8 amended in place (★ its σ and its numbers' reading superseded).
+
+### Commits (`claude/flexible-screens-n`; nothing pushed)
+- `9a92882e` the fix: your Face 3's foci, nothing pops when core's design lands, the plate measured, the test's
+  wording, and the probe.
+- The next commit: this section, the inline ★ marks in batch M2's section, DECISIONS D-R5-MV9 / MV10 (D-R5-MV8
+  amended), and the evidence.
+
+## Round 5 · batch M2 — the Settings page's dent in BOTH views (V12, V10), and batch M's verification on record
 
 Your round-5 words: "this and the graded dent colours should be in both views" and "dent colours back to
 the FEA rainbow. And this is in BOTH views". Batch M's verification found two places on the SETTINGS
@@ -15,12 +170,16 @@ the shipping renderer and SwiftUI's own render of the legends.
   colour blocks.
 - **A stamp's dent looks like the main page's.** Before, your four fingertips were four flat-bottomed
   pits in a steep trench, its edge zig-zagging at the column pitch. Now it is one soft press:
-  - each fingertip still a focus — the colours rise and dip where the main page's sim does;
+  - each fingertip still a focus — the colours rise and dip where the main page's sim does; ★ M2 VERIFICATION: on C1's
+    20 mm pad only — on your Face 3 (100 mm deep) it drew ONE hill (correlation 0.36, 0.31 × the sim's swing). Fixed in
+    the verification pass above;
   - the press fades out gently, over about the lattice's depth, with no edge and no zig-zag;
   - the face round it sinks a little, as the sim's does (core's even press there).
 - **It follows your finger.** The footprint moves the dent at once; the spread's shape takes three
   numbers from core's last design (its even press round the stamp, its density under and outside it),
-  so it settles as core's new design arrives. (By construction — no test drags a stamp.)
+  so it settles as core's new design arrives. (By construction — no test drags a stamp.) ★ M2 VERIFICATION: it
+  POPPED when the new design arrived (a thumb at 10 kg: 0.064–0.08 of the deepest) — the three numbers were read under
+  the new footprint. Fixed and tested in the verification pass above.
 
 **What was wrong:**
 - **V12:** `FlexibleStagePage`'s legend and `FlexibleSettingsPanel`'s folded bar each drew 24 blocks
@@ -30,7 +189,8 @@ the shipping renderer and SwiftUI's own render of the legends.
   1.56 mm column: a trench whose edge zig-zags. The 3D sim spreads a press much wider, keeps the
   fingertips as foci, and sinks the whole face a little under core's even press.
 
-**What changed (`FlexibleStampSpread.dent`, D-R5-MV8):**
+**What changed (`FlexibleStampSpread.dent`, D-R5-MV8):** (★ M2 VERIFICATION: the σ, the weights and ρ₀ below are
+superseded by D-R5-MV9, the three numbers' reading by D-R5-MV10 — see the verification pass above.)
 ```
 press   = footprint + b (1 − footprint)       b: core's even press round the stamp ÷ its peak
 squish  = press ÷ (0.2 + ρ)                   ρ: core's density under the stamp / outside it
@@ -50,7 +210,7 @@ dent    = squish ⊛ (0.3 G(σ 0.25 × depth) + 0.7 G(σ 0.6 × depth)), over it
 | C1's pad, 4 fingertips, 3 kg, 6 mm | 0.047 (0.116) | 0.044 / 0.117 (0.086 / 0.206) | 0.043 / 0.071 (0.125 / 0.215) | corr 0.99, 1.10 × (pits 1.92 ×) | 0.036 (0.105) |
 | C1's pad, 4 fingertips, 10 kg, 3 mm | 0.072 (0.266) | 0.071 / 0.163 (0.101 / 0.242) | 0.058 / 0.118 (0.283 / 0.397) | corr 0.98, 0.67 × (pits 1.59 ×) | 0.027 (0.105) |
 | C1's pad, thumb, 10 kg, 4 mm | 0.051 (0.192) | | | | |
-| your Face 3 (Group 2's fingertips) | 0.088 (0.194) | | | | |
+| your Face 3 (Group 2's fingertips) | 0.088 (0.194) | | | ★ M2 VERIFICATION: corr 0.36, 0.31 × — the foci LOST (now 0.98, 0.87 ×) | |
 | your Top A (Group 1) | 0.167 (0.263) | | | | |
 | your Face 5 (Group 1's thumb) | **0.450 (0.342) — worse** | | | | |
 
@@ -331,7 +491,7 @@ the app was built for the simulator and NOT launched.
 | V7 | Group 1's (and Play all's) Stress is one flat colour (ux · major) | CONFIRMED: 98 % of the part in the bottom fifth | each field on its own scale, topped at the 95th percentile (`FlexibleFEStress.scaleTop`); "≥ x MPa"; the (i) names the peak; per turn under Play all, named in the row (`FlexibleMainLegendRow` observes the loop); the walls' texture carries each field's fraction | `testEachGroupsStressIsOnItsOwnScaleAndThePartIsNotOneColour`: Group 1 49.9 / 28.1 / 7.3 / 7.7 / 7.1 % per fifth, Group 2 0 / 0 / 31.9 / 39.7 / 28.4 % (RED: one peak scale, 98 % / 100 %) |
 | V8 | M6's X-ray exposes the column fallback's broken planes (ux · major) | CONFIRMED | `dentOnColumnFallback`: no dent X-ray when a drawn lattice's map is the column squish | `testTheColumnFallbackKeepsTheDentViewSolid` (RED: batch M's rule) |
 | V9 | Group 1's reddest dent is Face 5's top edge, and the planes move 0.23× the colours (ux · major) | CONFIRMED. The colour cap is HIS CALL | the "×k" now shows what is drawn (`dentDrawnFactor`: ×k × the shown field's fold cut, per turn); the colours are unchanged | `testTheDentRowsFactorIsWhatTheMapIsDrawnAt`: drawn / coloured measured 0.245 and 0.533 against "×0.2" / "×0.5" (RED: "×1") |
-| V10 | Settings stamp trench saw-tooth; the two pages disagree (ux · minor) | CONFIRMED | routed until batch S merged. ★ M2: FIXED in batch M2 (the stamp spreads as the sim does) | ★ M2: `FlexibleBatchM2Tests.testTheTwoPagesAgreeOnAFourFingertipStamp` |
+| V10 | Settings stamp trench saw-tooth; the two pages disagree (ux · minor) | CONFIRMED | routed until batch S merged. ★ M2: FIXED in batch M2 (the stamp spreads as the sim does). ★ M2 VERIFICATION: on C1's pad — his Face 3's foci were lost until the M2 verification pass (D-R5-MV9) | ★ M2: `FlexibleBatchM2Tests.testTheTwoPagesAgreeOnAFourFingertipStamp` |
 | V11 | Stress + Lattice still stripes at device resolution (ux · minor) | CONFIRMED | fixed by V1's planes' depth (the opaque walls behind a solid plane are never marched) | `testTheStressViewsOpaqueWallsNeverStripeTheSolidPlanes`: 0 of 80 311 px at 640 px; at 1600 px 1 306 of 661 946 (0.20 %, under its 0.5 % cap) — 1 259 of them more than 10 px inside the map's outline, on the one 1 px crease where the top meets Face 5 (the residual panel of `batch_m_verify/MV_stress_stripes_sheet.png`) (RED: no planes' depth, 23.3 % / 11.9 %) |
 | V12 | The Settings page's dent legends are 24 flat blocks (ux · minor) | CONFIRMED | routed until batch S merged (`FlexibleStagePage.swift` and `FlexibleSettingsPanel.swift` were S's). ★ M2: FIXED in batch M2 (`FlexibleMainLegendRow.ramp(.dent, vertical:)` on both) | ★ M2: `FlexibleBatchM2Tests.testTheSettingsPagesDentLegendsAreTheMainPagesSmoothRamp` |
 | V13 | Two evidence images predate the final code (ux · minor) | CONFIRMED | ★ M2: not re-rendered by the pass (its folder holds only the V1 / V11 frames, now in `batch_m_verify/`). Batch M2's renders are at its own HEAD | — |
