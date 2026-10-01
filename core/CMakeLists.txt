@@ -396,6 +396,13 @@ add_executable(test_lattice_refusal tests/unit/test_lattice_refusal.cpp)
 target_link_libraries(test_lattice_refusal PRIVATE topopt)
 add_test(NAME lattice_refusal COMMAND test_lattice_refusal)
 
+# ★ One definition of density -> strut diameter, per type, plus R1's refusal
+# (task 2026-09-28-lattice-types-core). Octet must come through bit-for-bit (R9);
+# every type without a measured table must refuse rather than borrow octet's.
+add_executable(test_strut_diameter_per_type tests/unit/test_strut_diameter_per_type.cpp)
+target_link_libraries(test_strut_diameter_per_type PRIVATE topopt)
+add_test(NAME strut_diameter_per_type COMMAND test_strut_diameter_per_type)
+
 # Harness-side lattice material model C(rho) (multiscale-lattice-feasibility
 # probe, 2026-07-31). The model itself lives in tests/harness/
 # lattice_material_model.hpp (nothing in production consumes it); this test
