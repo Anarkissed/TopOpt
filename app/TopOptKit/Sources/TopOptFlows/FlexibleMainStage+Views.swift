@@ -43,6 +43,12 @@ extension FlexibleMainStage {
     /// last one failed) and none is running. Called by the Stress button, by Settings' Save &
     /// Exit while Stress shows, by a main-page edit while Stress shows, and by Retry.
     func requestStressIfNeeded() {
+        // ★ BATCH M (M3): with a lattice, Stress is each group's own sim (they run with the lattice) —
+        // a failed one is re-run; the solid part's solve is never asked
+        if feStressRoute {
+            if let id = feStressRetryID { model?.retrySquishSim(id); refresh() }
+            return
+        }
         guard !stressRunning else { return }
         stressSolver?()
     }
@@ -92,6 +98,7 @@ extension FlexibleMainStage {
     /// A field that may be drawn: in hand, not refused since (a failed or blocked solve is said,
     /// never painted over with the last field's colours).
     var stressDrawable: Bool {
+        if feStressRoute { return stressView == .ready && feShownStress != nil }   // ★ BATCH M (M3)
         guard stressField != nil, stressPeak > 0 else { return false }
         switch stressState {
         case .failed, .blocked: return false
@@ -114,19 +121,38 @@ extension FlexibleMainStage {
         var h = Hasher()
         for k in roles.keys.sorted() { h.combine(k); h.combine(roles[k]!) }
         let showStress = stress && stressDrawable
-        let key = "\(generation)|\(h.finalize())|\(showStress ? stressKey : 0)|\(xray)|\(heat)|\(overlay != nil)|"
+        // ★ BATCH M (M3): on the FE route, each group's OWN stress (the sequence's first here; each Play
+        // all turn its own below), on the sequence's one scale
+        let feRoute = feStressRoute
+        let key = "\(generation)|\(h.finalize())|\(showStress ? (feRoute ? fe.token : stressKey) : 0)|\(xray)|\(heat)|\(overlay != nil)|"
             + feBaseTints.keys.sorted().joined(separator: ",")
         if key != composedKey {
             composedKey = key
-            let stressIn = showStress ? (stressField!, stressPeak) : nil
+            let peak = feRoute ? feStressPeak : stressPeak
+            func stressOf(_ id: String?) -> (LatticeDemandField, Double)? {
+                guard showStress else { return nil }
+                guard feRoute else { return (stressField!, stressPeak) }
+                guard let f = fe.fields.first(where: { $0.simID == id }) ?? fe.sequence.first.map({ fe.fields[$0] }),
+                      let s = feStress(f) else { return nil }
+                return (s.field, peak)
+            }
+            let first = fe.sequence.first.map { fe.fields[$0].simID }
             composed = FlexibleMainTints.compose(base: c.tints, overlay: overlay, part: project.viewerMesh, heat: heat,
-                                                 roles: roles, stress: stressIn, ghost: xray ? FlexibleColours.ghost : nil)
+                                                 roles: roles, stress: stressOf(first), ghost: xray ? FlexibleColours.ghost : nil)
             // ★ BATCH G VERIFICATION: "Play all" — each group's own colours, composed the same way; the
             // renderer swaps them in with the group's field (FlexibleFETints)
             var per: [String: [Float]] = [:]
             for (id, base) in feBaseTints {
                 per[id] = FlexibleMainTints.compose(base: base, overlay: overlay, part: project.viewerMesh, heat: heat,
-                                                    roles: roles, stress: stressIn, ghost: xray ? FlexibleColours.ghost : nil)
+                                                    roles: roles, stress: stressOf(id), ghost: xray ? FlexibleColours.ghost : nil)
+            }
+            // ★ BATCH M (M3): Stress under Play all with Heat off — each turn its own stress too
+            if showStress, feRoute, per.isEmpty, fe.sequence.count > 1, let base = c.tints {
+                for i in fe.sequence where i < fe.fields.count {
+                    let id = fe.fields[i].simID
+                    per[id] = FlexibleMainTints.compose(base: base, overlay: overlay, part: project.viewerMesh, heat: heat,
+                                                        roles: roles, stress: stressOf(id), ghost: xray ? FlexibleColours.ghost : nil)
+                }
             }
             feTintBox.set(per)
         }
@@ -166,12 +192,41 @@ extension FlexibleMainStage {
         return out
     }
 
-    /// Where each legend goes (FlexibleMainLegendLayout — the player keeps clear of these).
-    public func legendFrames(viewport: CGSize, bottomClearance: CGFloat, chipColumnWidth: CGFloat) -> [FlexibleReadKind: FlexibleMainLegendLayout.Placed] {
+    /// ★ BATCH M (M4): the ONE card's place (FlexibleMainLegendLayout.placeCard) — clear of every
+    /// button; nil with nothing to show.
+    public func legendCard(viewport: CGSize, bottomClearance: CGFloat, chipColumnWidth: CGFloat) -> FlexibleMainLegendLayout.Placed? {
+        let kinds = legendKinds
+        guard !kinds.isEmpty else { return nil }
         let keep = FlexibleMainLegendLayout.keepOut(viewport: viewport, bottomClearance: bottomClearance,
                                                     chipColumnWidth: chipColumnWidth)
-        return FlexibleMainLegendLayout.place(legendKinds, minimized: minimized, viewport: viewport, keepOut: keep,
-                                              priority: legendPriority)
+        return FlexibleMainLegendLayout.placeCard(rows: kinds.count, minimized: legendMinimized, viewport: viewport, keepOut: keep)
+    }
+
+    /// Where the legend is, per kind (the player keeps clear of these): ★ BATCH M (M4) every kind
+    /// is the ONE card.
+    public func legendFrames(viewport: CGSize, bottomClearance: CGFloat, chipColumnWidth: CGFloat) -> [FlexibleReadKind: FlexibleMainLegendLayout.Placed] {
+        guard let card = legendCard(viewport: viewport, bottomClearance: bottomClearance, chipColumnWidth: chipColumnWidth) else { return [:] }
+        var out: [FlexibleReadKind: FlexibleMainLegendLayout.Placed] = [:]
+        for k in legendKinds { out[k] = card }
+        return out
+    }
+
+    /// ★ BATCH M (M4): a tap on the card — into its reading (the first scale's: the dent or Stress, else
+    /// the walls), or back out.
+    public func cardTapped(mode: LatticeLegendMode) -> LatticeLegendMode {
+        if FlexibleReadKind(mode: mode) != nil { return .groups }
+        guard let first = legendKinds.first else { return mode }
+        clearReading()
+        return first.mode
+    }
+
+    /// The card's (i): its first scale's (the dent's — the sim and its cut — or Stress's).
+    public var cardInfo: String {
+        switch legendKinds.first {
+        case .dent: return dentInfo
+        case .stress: return stressInfo
+        default: return FlexibleReadKind.lattice.info
+        }
     }
 
     /// A tap on an open legend: into its reading, or back out. ★ BATCH C VERIFICATION: it never
@@ -191,6 +246,8 @@ extension FlexibleMainStage {
     /// the map shows his drawing (no lattice drawn, or a shape-only one — "no squish
     /// predicted"), and "Squish · mm" only for a lattice core designed.
     public func legendTitle(_ k: FlexibleReadKind) -> String {
+        // ★ BATCH M (M3): the Stress view names the group whose sim it shows
+        if k == .stress, let g = stressGroupWords { return "Stress · \(g) · MPa" }
         guard k == .dent else { return k.title }
         // ★ VERIFICATION OF D1: a Stamp face's squish here is core's — the WHOLE face sinks
         // (core brief #10) — while Settings shows the stamp he drew; the legend says so
@@ -227,13 +284,20 @@ extension FlexibleMainStage {
     }
     /// The Stress legend's (i): core's own words after a refusal, else what the view is.
     public var stressInfo: String {
+        // ★ BATCH M (M3): the group's own sim — what it is, or core's words after a failure
+        if let g = stressGroupWords {
+            if case .failed(let why) = stressView { return "The 3D sim of \(g) failed: \(why.replacingOccurrences(of: ". ", with: "; "))" }
+            return "Von Mises in the part under \(g)'s squeeze, from its linear 3D sim with each voxel's own stiffness — tap here, then the part, for MPa there."
+        }
         if case .failed(let why) = stressState { return "Core could not solve the solid part: \(why)" }
         return FlexibleReadKind.stress.info
     }
 
     /// The Stress legend's ends: 0 … the peak, three significant digits (his pad peaks at
     /// 0.0462 MPa — "0.05" read as a round number it is not).
-    public var stressEnds: (lo: String, hi: String) { ("0", FlexibleProbe.mpa(stressPeak) + " MPa") }
+    public var stressEnds: (lo: String, hi: String) {
+        ("0", FlexibleProbe.mpa(feStressRoute ? feStressPeak : stressPeak) + " MPa")   // ★ M3: the sequence's one scale
+    }
 
     /// The lattice legend's ends ("18% · 9.2 mm") and span, once per lattice generation.
     public func latticeEnds() -> (lo: String, hi: String, span: ClosedRange<Double>)? {
@@ -258,6 +322,11 @@ extension FlexibleMainStage {
         viewFrame = LatticeBandChipFrame(projection: projection, modelCentre: c, modelRotation: settle)
     }
 
+    /// The view's direction through `p` (the tap's ray) — tests may pin it (`controlViewDirection`).
+    func viewDirection(at p: SIMD3<Float>) -> SIMD3<Float>? { controlViewDirection ?? viewFrame?.viewDirection(at: p) }
+    /// Tests: look along this direction.
+    func noteViewForTests(direction: SIMD3<Float>) { controlViewDirection = simd_normalize(direction) }
+
     /// A reading's screen point (the callout), or nil off screen.
     public func screenPoint(_ anchor: SIMD3<Float>) -> CGPoint? { viewFrame?.project(anchor) }
 
@@ -281,23 +350,28 @@ extension FlexibleMainStage {
     func surfaceReading(_ kind: FlexibleReadKind, at p: SIMD3<Float>) -> FlexibleReading? {
         switch kind {
         case .dent:
-            guard let m = model, let dir = viewFrame?.viewDirection(at: p) else { return nil }
+            guard let m = model, let dir = viewDirection(at: p) else { return nil }
+            // ★ BATCH M (M5): the value under the tap, as its colour was blended (FE: the sim's dent)
             return FlexibleProbe.dentReading(model: m, overlay: overlay, dents: shownDents, scale: currentScale,
-                                             drawnLattice: drawn, point: p, dir: dir, onlyIfOnMap: !xray)
+                                             drawnLattice: drawn, point: p, dir: dir, onlyIfOnMap: !xray,
+                                             mapValues: shownHeatValues, maxMM: dentMaxMM)
         case .stress:
-            guard stress, stressDrawable, let f = stressField else { return nil }
+            // ★ BATCH M (M3): the shown group's own stress on the FE route
+            guard stress, stressDrawable, let f = feStressRoute ? feShownStress?.field : stressField else { return nil }
+            let peak = feStressRoute ? feStressPeak : stressPeak
             // ★ BATCH C VERIFICATION: with Stress on, the MAP is stress-coloured (its rest vertices
             // sampled) and drawn dented — so a tap on it is read where the drawn map meets the
             // view ray, at that point's REST place (the colour's own sample), not at the undented
             // surface under the ray
             var at = p, anchor = p
-            if !heat, let m = model, let o = overlay, let dir = viewFrame?.viewDirection(at: p),
+            if !heat, let m = model, let o = overlay, let dir = viewDirection(at: p),
                let hit = FlexibleProbe.drawnMapHit(model: m, overlay: o, dents: shownDents, scale: currentScale,
                                                    point: p, dir: dir, onlyIfOnMap: !xray) {
                 at = hit.rest; anchor = hit.point
             }
             guard let v = FlexibleProbe.stress(f, at: at) else { return nil }
-            return FlexibleReading(kind: .stress, value: FlexibleProbe.mpa(v), unit: "MPa", fraction: v / stressPeak, anchor: anchor)
+            return FlexibleReading(kind: .stress, value: FlexibleProbe.mpa(v), unit: "MPa", fraction: peak > 0 ? min(1, v / peak) : 0,
+                                   anchor: anchor)
         case .lattice:
             return nil   // walls are read through the G-buffer probe (readLattice)
         }
@@ -307,16 +381,34 @@ extension FlexibleMainStage {
     /// the stress must reach the surface (the probe claims any tap near a wall first).
     public func wantsWallProbe(_ mode: LatticeLegendMode) -> Bool {
         guard let k = FlexibleReadKind(mode: mode) else { return true }
-        return k == .lattice
+        // ★ BATCH M (M4): one card — while it reads and the walls are in it, a tap may land on a wall
+        // (`readLattice` then reads the dent plane instead where one is what he sees)
+        return k == .lattice || legendKinds.contains(.lattice)
     }
 
     /// H8: a wall the probe found while a Flexible legend is drilled in — read at its rest point
     /// (never handed to the octet's setLatticeProbe).
     public func readLattice(_ project: ProjectModel, mode: LatticeLegendMode, model p: SIMD3<Float>) -> Bool {
         guard let kind = FlexibleReadKind(mode: mode) else { return false }
-        guard kind == .lattice, let g = shownLattice else { return true }
+        // ★ BATCH M (M4): the ONE card — the solid dent plane (or Stress's map) where it is what he sees
+        // on that ray: always over ghost walls (the dent view), only nearer than an opaque wall
+        if legendKinds.contains(.lattice), let k = legendKinds.first(where: { $0 != .lattice }), let m = model, let o = overlay,
+           let dir = viewDirection(at: p),
+           let hit = FlexibleProbe.drawnMapHit(model: m, overlay: o, dents: shownDents, scale: currentScale, point: p, dir: dir,
+                                               onlyIfOnMap: false),
+           ghostWalls || simd_dot(hit.point - p, simd_normalize(dir)) < 0 {
+            if let r = surfaceReading(k, at: hit.point) { reading = r; return true }
+        }
+        guard kind == .lattice || legendKinds.contains(.lattice), let g = shownLattice else { return true }
         guard let r = FlexibleProbe.lattice(g.inputs, faces: g.squishFaces, squish: currentScale, at: p, fe: feShownField) else {
             reading = FlexibleReading(kind: .lattice, value: "—", unit: FlexibleReadKind.lattice.nothingHere, fraction: nil, anchor: p)
+            return true
+        }
+        // ★ BATCH M (M3): Stress colours the walls — the wall reads its group's von Mises at its rest point
+        if stress, feStressRoute, stressDrawable, let st = feShownStress, let v = FlexibleProbe.stress(st.field, at: r.rest) {
+            reading = FlexibleReading(kind: .stress, value: FlexibleProbe.mpa(v),
+                                      unit: "MPa · \(Int((r.rho * 100).rounded()))% density",
+                                      fraction: st.peak > 0 ? min(1, v / st.peak) : 0, anchor: p)
             return true
         }
         let span = latticeEnds()?.span ?? FlexibleProbe.latticeSpan(g.inputs)

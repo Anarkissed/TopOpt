@@ -260,6 +260,10 @@ public struct FlexibleLatticeLayerInputs: Equatable {
     /// sim id — a reference the page keeps current; the renderer swaps them in WITH the group's
     /// field and mesh. nil (or no entry) ⇒ the page's one tint array stands.
     public var feTints: FlexibleFETints?
+    /// ★ BATCH M (M6): the dent view is on — the walls are drawn as a ghost under the solid dent planes.
+    public var ghostWalls = false
+    /// ★ BATCH M (M3): Stress is on (each group's own sim) — the walls take its rainbow: 1 / the top (1/MPa).
+    public var stressInvMPa: Float = 0
 
     public init(lattice: FlexibleLatticeInputs, faces: [FlexibleSquishFace], token: Int, hidden: Bool = false,
                 loop: FlexibleSquishLoop? = nil, facesToken: Int? = nil) {
@@ -270,5 +274,6 @@ public struct FlexibleLatticeLayerInputs: Equatable {
     public static func == (a: Self, b: Self) -> Bool {
         a.token == b.token && a.hidden == b.hidden && a.loop === b.loop && a.facesToken == b.facesToken
             && a.feToken == b.feToken && a.feSequence == b.feSequence
+            && a.ghostWalls == b.ghostWalls && a.stressInvMPa == b.stressInvMPa
     }
 }

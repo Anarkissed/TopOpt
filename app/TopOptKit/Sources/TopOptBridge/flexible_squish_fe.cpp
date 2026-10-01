@@ -517,6 +517,9 @@ FlexSquishSolution solve(const Setup& s, const FlexSquishRequest& req, const fx:
   out.origin[2] = fe.g.origin.z;
   out.e_min_mpa = std::isfinite(emin) ? emin : 0.0;
   out.e_max_mpa = emax;
+  // ★ batch M: each element's modulus, for the app's stress view (von Mises from this field)
+  out.element_e.resize(fe.E.size());
+  for (std::size_t e = 0; e < fe.E.size(); ++e) out.element_e[e] = static_cast<float>(fe.E[e]);
   if (out.elements == 0) throw std::invalid_argument("squish sim: the part has no solid voxel");
 
   // nodal mass (solid voxels incident / 8) and which nodes a solid element owns

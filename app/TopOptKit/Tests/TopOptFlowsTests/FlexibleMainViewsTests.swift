@@ -486,9 +486,19 @@ final class FlexibleMainViewsTests: XCTestCase {
         // Stress on (X-ray off, so a tap on the solid part reads the part), a field in hand: a tap on
         // a side of the part that is not pressed reads the stress — and the key follows
         let b = try XCTUnwrap(r.project.viewerMesh).bounds
-        let field = Self.field(nx: 60, ny: 60, nz: 14, origin: SIMD3<Double>(b.min) - 1, spacing: 2) { i, _, _ in Float(1 + i) }
-        stage.stress = true
+        var field = Self.field(nx: 60, ny: 60, nz: 14, origin: SIMD3<Double>(b.min) - 1, spacing: 2) { i, _, _ in Float(1 + i) }
+        // ★ RE-PINNED (batch M): Stress takes the map from the dent (the two never on together), and with the
+        // dent view off and the lattice hidden the part is solid (M6: the DENT view is X-ray too); with a
+        // lattice, Stress is its group's own sim (M3) — read once it lands
+        stage.toggleStress()
         stage.latticeOn = false   // ★ round 4 (C2): X-ray off = the lattice view hidden (no X-ray button)
+        try await FlexibleHisProject.waitFor(300, "the group's sim") {
+            stage.refresh()
+            return !m.squish.isEmpty && !m.squish.values.contains(.pending)
+        }
+        stage.refresh()
+        XCTAssertFalse(stage.xray, "no dent view, no lattice: the solid part")
+        if let fe = stage.feShownStress { field = fe.field }
         _ = stage.tints(r.project, on: .lattice, roles: [:], stress: field)
         let low = b.min.z + 2, mid = (b.min + b.max) / 2
         var side: (hit: FacePicker.Hit, toEye: SIMD3<Float>)?

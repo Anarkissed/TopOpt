@@ -69,6 +69,39 @@ public enum FlexibleMainLegendLayout {
 
     /// Each kind's frame: open where a column has room (from the vertical centre out), else a
     /// pill. `priority` is placed first (the drilled-in legend, or a pill he tapped open).
+    /// ★ BATCH M (M4): the ONE card's size — every active scale stacked in one squircle (the octet's
+    /// single key): the header, then one ~50 pt row per scale; folded, a column of bars.
+    public static let rowHeight: CGFloat = 62
+    public static func cardSize(rows: Int, minimized: Bool) -> CGSize {
+        let n = CGFloat(Swift.max(1, rows))
+        if minimized { return CGSize(width: n * 26 + 46, height: 150) }
+        return CGSize(width: width, height: height + (n - 1) * rowHeight)
+    }
+
+    /// ★ BATCH M (M4): where the ONE card goes — the trailing edge from the vertical centre out, clear
+    /// of every button (the same search as one legend), then a second column; nil when nothing fits.
+    public static func placeCard(rows: Int, minimized: Bool, viewport v: CGSize, keepOut: [CGRect],
+                                 edge: CGFloat = PageChrome.edge) -> Placed? {
+        let size = cardSize(rows: rows, minimized: minimized)
+        let gap = FlexibleLegendPlacement.gap
+        let blockers = keepOut.map { $0.insetBy(dx: -gap, dy: -gap) }
+        for c in 0..<columns {
+            let x = v.width - edge - size.width - CGFloat(c) * (width + gap)
+            let centre = (v.height - size.height) / 2
+            var d: CGFloat = 0
+            while d < v.height {
+                for y in d == 0 ? [centre] : [centre - d, centre + d] {
+                    let r = CGRect(x: x, y: y, width: size.width, height: size.height)
+                    if r.minX >= edge, r.minY >= edge, r.maxY <= v.height - edge, !blockers.contains(where: { $0.intersects(r) }) {
+                        return Placed(frame: r, expanded: !minimized)
+                    }
+                }
+                d += step
+            }
+        }
+        return nil
+    }
+
     public static func place(_ kinds: [FlexibleReadKind], minimized: Set<FlexibleReadKind>, viewport v: CGSize,
                              keepOut: [CGRect], priority: FlexibleReadKind? = nil,
                              edge: CGFloat = PageChrome.edge) -> [FlexibleReadKind: Placed] {
@@ -151,13 +184,12 @@ public struct FlexibleMainLegends: View {
         let kinds = main.legendKinds
         ZStack {
             GeometryReader { g in
-                let placed = main.legendFrames(viewport: g.size, bottomClearance: bottomClearance, chipColumnWidth: chipColumnWidth)
-                ForEach(kinds) { k in
-                    if let p = placed[k] {
-                        legend(k, p)
-                            .frame(width: p.frame.width, height: p.frame.height, alignment: .top)
-                            .position(x: p.frame.midX, y: p.frame.midY)
-                    }
+                // ★ BATCH M (M4, his img 4: "The legends should combine into a singular modal. Please
+                // review the other lattice sections to understand"): ONE card, like the octet's key
+                if !kinds.isEmpty, let p = main.legendCard(viewport: g.size, bottomClearance: bottomClearance, chipColumnWidth: chipColumnWidth) {
+                    card(kinds, p)
+                        .frame(width: p.frame.width, height: p.frame.height, alignment: .top)
+                        .position(x: p.frame.midX, y: p.frame.midY)
                 }
             }
             callout
@@ -184,41 +216,51 @@ public struct FlexibleMainLegends: View {
         }
     }
 
-    // MARK: one legend
+    // MARK: ★ BATCH M (M4): the ONE card
 
-    @ViewBuilder private func legend(_ k: FlexibleReadKind, _ p: FlexibleMainLegendLayout.Placed) -> some View {
+    /// Every active scale in one squircle (#354's LatticeLegendChrome, the octet key's): the dent OR
+    /// Stress row, then the walls' density; tap it → "TAP THE PART TO READ" (a tap on the part reads
+    /// whichever is under the finger); the caret folds it to a column of bars (tap to open).
+    @ViewBuilder private func card(_ kinds: [FlexibleReadKind], _ p: FlexibleMainLegendLayout.Placed) -> some View {
         if p.expanded {
-            LatticeLegendChrome(tab: drilled == k ? "TAP THE PART TO READ" : "TAP TO READ", width: p.frame.width,
-                                minimized: Binding(get: { main.minimized.contains(k) },
-                                                   set: { if $0 { main.minimized.insert(k) } else { main.minimized.remove(k) } }),
-                                info: k == .dent ? main.dentInfo : (k == .stress ? main.stressInfo : k.info)) {
-                content(k)
+            LatticeLegendChrome(tab: drilled != nil ? "TAP THE PART TO READ" : "TAP TO READ", width: p.frame.width,
+                                minimized: $main.legendMinimized, info: main.cardInfo) {
+                VStack(alignment: .leading, spacing: 12) {
+                    ForEach(kinds) { k in content(k) }
+                }
             }
             .overlay(RoundedRectangle(cornerRadius: DS.Radius.panel, style: .continuous)
-                .strokeBorder(DS.Color.accent.color, lineWidth: drilled == k ? 1.5 : 0))
+                .strokeBorder(DS.Color.accent.color, lineWidth: drilled != nil ? 1.5 : 0))
             .contentShape(Rectangle())
-            .onTapGesture { mode = main.legendTapped(k, mode: mode) }
+            .onTapGesture { mode = main.cardTapped(mode: mode) }
             .latticeBandChipKeepOut()
-            .accessibilityIdentifier("flexible-legend-\(k.rawValue)")
+            .accessibilityIdentifier("flexible-legend-card")
         } else {
-            Button {
-                main.minimized.remove(k)
-                main.legendPriority = k
-            } label: {
-                HStack(spacing: DS.Space.xs) {
-                    ramp(k).frame(width: 22, height: 8).clipShape(RoundedRectangle(cornerRadius: 2))
-                    Text(k.short).font(.system(size: 12, weight: .semibold)).foregroundStyle(DS.Color.textPrimary.color)
-                    Image(systemName: "chevron.down").font(.system(size: 10, weight: .bold)).foregroundStyle(DS.Color.accent.color)
+            Button { main.legendMinimized = false } label: {
+                HStack(alignment: .center, spacing: 8) {
+                    ForEach(kinds) { k in
+                        VStack(spacing: 0) {
+                            ForEach(0..<24, id: \.self) { i in k.rampColour(1 - Double(i) / 23).color }
+                        }
+                        .frame(width: 18, height: 120)
+                        .clipShape(RoundedRectangle(cornerRadius: 3, style: .continuous))
+                        .overlay(RoundedRectangle(cornerRadius: 3, style: .continuous).strokeBorder(DS.Color.strokeSubtle.color, lineWidth: 1))
+                    }
+                    Image(systemName: "chevron.down").font(.system(size: 11, weight: .bold)).foregroundStyle(DS.Color.accent.color)
                 }
                 .frame(width: p.frame.width, height: p.frame.height)
-                .background(Capsule().fill(DS.Surface.panel.color.opacity(0.94))
-                    .overlay(Capsule().strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
+                .background(RoundedRectangle(cornerRadius: DS.Radius.panelSmall, style: .continuous)
+                    .fill(DS.Surface.panel.color.opacity(0.94))
+                    .overlay(RoundedRectangle(cornerRadius: DS.Radius.panelSmall, style: .continuous)
+                        .strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
             }
             .buttonStyle(.plain)
             .latticeBandChipKeepOut()
-            .accessibilityIdentifier("flexible-legend-pill-\(k.rawValue)")
+            .accessibilityIdentifier("flexible-legend-card-folded")
         }
     }
+
+    // MARK: one row of the card
 
     @ViewBuilder private func content(_ k: FlexibleReadKind) -> some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -238,14 +280,14 @@ public struct FlexibleMainLegends: View {
                 // ★ BATCH C VERIFICATION: the solve SAYS what it is doing — "Simulating…" (the
                 // one place the wait is said), "Couldn't simulate" + Retry (core's words behind
                 // the (i)), or what to add first ("Stress needs an anchor on Topology")
-                let state = main.stressState
+                let state = main.stressView   // ★ BATCH M (M3): the group's sim on the FE route
                 HStack(spacing: DS.Space.xs) {
                     if state.isRunning { ProgressView().controlSize(.mini).tint(DS.Color.textPrimary.color) }
                     if case .failed = state {
                         Image(systemName: "exclamationmark.circle.fill").font(.system(size: 12, weight: .bold))
                             .foregroundStyle(DS.Color.warning.color)
                     }
-                    Text(state.line ?? FlexibleStressState.idle.line ?? "")
+                    Text(main.stressLine ?? FlexibleStressState.idle.line ?? "")
                         .font(.system(size: 12, weight: .medium))
                         .foregroundStyle(DS.Color.textSecondary.color)
                         .lineLimit(1).minimumScaleFactor(0.8)

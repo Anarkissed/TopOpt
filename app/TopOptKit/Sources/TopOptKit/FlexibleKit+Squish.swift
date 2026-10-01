@@ -113,6 +113,9 @@ public struct FlexSquishSolutionInfo: Sendable {
     public let restingMissing: [Int]
     /// Far ends of pressed stacks held along their normal beside the rests (their anvils).
     public var farAnvils: Int = 0
+    /// ★ BATCH M: per FE element ((nx−1)(ny−1)(nz−1), x fastest), the modulus it was solved with
+    /// (MPa; relative units under shape only), 0 where no solid — the stress view's C.
+    public var elementE: [Float] = []
 
     /// Node (a, b, c)'s index (x fastest).
     public func node(_ a: Int, _ b: Int, _ c: Int) -> Int { (c * ny + b) * nx + a }
@@ -165,7 +168,7 @@ extension FlexibleScene {
                 })
             }
         }
-        return FlexSquishSolutionInfo(
+        var info = FlexSquishSolutionInfo(
             ok: s.ok, failure: String(s.failure), bcMode: String(s.bc_mode), freeModes: Int(s.free_modes), coarsen: Int(s.coarsen),
             nx: Int(s.nx), ny: Int(s.ny), nz: Int(s.nz), spacing: s.spacing, origin: FlexConv.v3(s.origin),
             u: u, solved: solved, elements: Int(s.elements), iterations: Int(s.iterations), mgLevels: Int(s.mg_levels), maxIterations: Int(s.max_iterations),
@@ -179,6 +182,8 @@ extension FlexibleScene {
             pressLoads: loads, pressForceN: Array(s.press_force_n), pressRawForceN: Array(s.press_raw_force_n),
             heldNodes: Array(s.held_nodes).map { Int($0) }, pinnedDOFs: Array(s.pinned_dofs).map { Int($0) },
             restingMissing: Array(s.resting_missing).map { Int($0) }, farAnvils: Int(s.far_anvils))
+        info.elementE = Array(s.element_e)
+        return info
     }
 }
 

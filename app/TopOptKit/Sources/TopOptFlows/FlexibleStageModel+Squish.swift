@@ -49,6 +49,14 @@ extension FlexibleStageModel {
         })
     }
 
+    /// ★ BATCH M (M3): the Stress legend's Retry — re-run a failed sim of the lattice shown (its request
+    /// is kept while one has failed); without it, the lattice is rebuilt (its sims come with it).
+    public func retrySquishSim(_ id: String) {
+        guard squish[id]?.failure != nil else { return }
+        squish[id] = .pending
+        if !squishSolver.retry(id) { generateLattice() }
+    }
+
     /// One sim finished: kept only if it is for the lattice still shown.
     func squishLanded(_ generation: Int, _ id: String, _ state: FlexibleSquishState) {
         guard controlIgnoreSquishGeneration || (generation == lattice?.generation && generation == squishGeneration) else { return }

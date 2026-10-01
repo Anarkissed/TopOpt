@@ -85,24 +85,26 @@ public enum FlexibleFE {
             if let r = stiffer, r > 0, r < 1 { return String(format: " that finds this part %.0f× softer than core's columns", 1 / r) }
             return ""
         }()
+        // ★ BATCH M (M5): the COLOURS are the sim's squish too (FlexibleMainStage+Squish.feMapValues), so
+        // a tap reads the mm there — never "core's mm" any more
         if let share = foldShare {
             let pct = Swift.max(1, Int((share * 100).rounded()))
-            return "The shape moves by \(sim)\(finds), cut to \(pct)% so the picture never folds (the sim leaves small strain here) — tap here, then the part, for core's mm."
+            return "The colours and the shape are \(sim)\(finds), its motion cut to \(pct)% so the picture never folds (the sim leaves small strain here) — tap here, then the part, for the mm there."
         }
         if largeStrain {
             // even ×1 is past s · gmax ≤ ½: the linear sim has left small strain here
             if !finds.isEmpty {
-                return "The shape moves by \(sim)\(finds), and it leaves small strain here, so the picture can fold where real TPU would stiffen — tap here, then the part, for core's mm."
+                return "The colours and the shape are \(sim)\(finds), and it leaves small strain here, so the picture can fold where real TPU would stiffen — tap here, then the part, for the mm there."
             }
-            return "The shape moves by \(sim) that leaves small strain here, so the picture can fold where real TPU would stiffen — tap here, then the part, for core's mm."
+            return "The colours and the shape are \(sim) that leaves small strain here, so the picture can fold where real TPU would stiffen — tap here, then the part, for the mm there."
         }
         if let r = stiffer, r > 1 {
-            return String(format: "The shape is drawn %d× deeper and moves by %@ that finds this part %.0f× stiffer than core's columns (its skin and walls carry load), so it moves less than the map reads — tap here, then the part, for core's mm.", k, sim, r)
+            return String(format: "The colours and the shape are %@ that finds this part %.0f× stiffer than core's columns (its skin and walls carry load), so it squishes less than you drew, shown %d× deeper — tap here, then the part, for the mm there.", sim, r, k)
         }
         if let r = stiffer, r > 0, r < 1 {
-            return String(format: "The shape is drawn %d× deeper and moves by %@ that finds this part %.0f× softer than core's columns, so it moves more than the map reads — tap here, then the part, for core's mm.", k, sim, 1 / r)
+            return String(format: "The colours and the shape are %@ that finds this part %.0f× softer than core's columns, so it squishes more than you drew, shown %d× deeper — tap here, then the part, for the mm there.", sim, 1 / r, k)
         }
-        return "The shape is drawn \(k)× deeper and moves by \(sim) scaled to core's squish; real TPU stiffens and thin walls can fold — tap here, then the part, for the true mm."
+        return "The colours and the shape are \(sim) scaled to core's squish, shown \(k)× deeper; real TPU stiffens and thin walls can fold — tap here, then the part, for the mm there."
     }
     /// The Squish legend's (i) after a failed sim — one sentence, core's words kept.
     public static func failedInfo(_ why: String, exaggeration k: Int) -> String {

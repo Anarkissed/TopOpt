@@ -539,6 +539,9 @@ struct FlexSquishSolution {
   double origin[3] = {0, 0, 0};          // node (0,0,0) = the grid's corner
   FlexFloats u;                          // 3 per node, mm, RAW (uncalibrated), extended to every node
   FlexBytes solved;                      // per node: 1 = a node the solver owned (a solid element's)
+  FlexFloats element_e;                  // ★ batch M: per FE ELEMENT ((nx-1)(ny-1)(nz-1), x fastest), the
+                                         // modulus it was solved with (MPa; relative units under
+                                         // shape_only), 0 = no solid — the app's stress view (sigma = C : eps)
   int32_t elements = 0, iterations = 0, mg_levels = 0;
   int32_t max_iterations = 0;            // the solve's cap: a WORK budget (elements x iterations)
   bool used_multigrid = false;

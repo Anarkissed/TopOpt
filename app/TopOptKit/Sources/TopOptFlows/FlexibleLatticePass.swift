@@ -168,6 +168,70 @@ final class FlexibleLatticePass {
     /// Drawn this frame: uploaded and not hidden.
     var isDrawable: Bool { !hidden && rmTex != nil && dsTex != nil && base != nil }
 
+    // ── ★ BATCH M ──
+    /// (M6) The dent view is on: the walls are drawn as a GHOST under the solid dent planes
+    /// (`encodeGhostWalls`, in place of #354's opaque lsdf_shade — MeshRenderer.flexibleWallsGhosted).
+    var ghostWalls = false
+    /// (M3) Stress is on: the walls take the rainbow by the group's von Mises — 1 / the scale's top
+    /// (1/MPa); 0 = the density ramp.
+    var stressInvMPa: Float = 0
+    /// The ghost's face-on alpha and its silhouette's extra (the body's ghost is 0.04 + 0.5).
+    static let ghostWallAlpha: Float = 0.12
+    static let ghostWallRim: Float = 0.55
+    private var ghostPipelines: [Int: MTLRenderPipelineState] = [:]
+    private lazy var ghostDepthState: MTLDepthStencilState? = {
+        let d = MTLDepthStencilDescriptor()
+        d.depthCompareFunction = .always
+        d.isDepthWriteEnabled = false
+        return device.makeDepthStencilState(descriptor: d)
+    }()
+    /// How many ghost-wall composites were encoded (tests).
+    private(set) var ghostEncodes = 0
+
+    /// The ghost composite's pipeline for the main pass (its formats, its sample count; blended
+    /// premultiplied "over", no depth write). nil when it cannot be built — then the walls stay opaque.
+    func ghostPipeline(sampleCount: Int) -> MTLRenderPipelineState? {
+        if let p = ghostPipelines[sampleCount] { return p }
+        guard let vf = library.makeFunction(name: "flx_vertex"), let ff = library.makeFunction(name: "flx_ghost_walls") else { return nil }
+        let pd = MTLRenderPipelineDescriptor()
+        pd.label = "flx_ghost_walls"
+        pd.vertexFunction = vf
+        pd.fragmentFunction = ff
+        pd.colorAttachments[0].pixelFormat = MeshRenderer.colorFormat
+        pd.colorAttachments[0].isBlendingEnabled = true
+        pd.colorAttachments[0].rgbBlendOperation = .add
+        pd.colorAttachments[0].alphaBlendOperation = .add
+        pd.colorAttachments[0].sourceRGBBlendFactor = .one
+        pd.colorAttachments[0].sourceAlphaBlendFactor = .one
+        pd.colorAttachments[0].destinationRGBBlendFactor = .oneMinusSourceAlpha
+        pd.colorAttachments[0].destinationAlphaBlendFactor = .oneMinusSourceAlpha
+        pd.depthAttachmentPixelFormat = MeshRenderer.depthFormat
+        pd.rasterSampleCount = sampleCount
+        guard let p = try? device.makeRenderPipelineState(descriptor: pd) else { return nil }
+        ghostPipelines[sampleCount] = p
+        return p
+    }
+
+    /// ★ BATCH M (M6): the walls as a ghost, in the main colour pass (one full-screen triangle reading
+    /// the G-buffer the prepass filled). Returns false (and draws nothing) without a pipeline.
+    @discardableResult
+    func encodeGhostWalls(_ enc: MTLRenderCommandEncoder, sampleCount: Int, normal: MTLTexture, albedo: MTLTexture,
+                          mainSize: (w: Int, h: Int)) -> Bool {
+        guard enc.device === device, let pipe = ghostPipeline(sampleCount: sampleCount), let ds = ghostDepthState else { return false }
+        struct Ghost { var size: SIMD4<Float>; var look: SIMD4<Float> }
+        var g = Ghost(size: SIMD4(Float(mainSize.w), Float(mainSize.h), Float(albedo.width), Float(albedo.height)),
+                      look: SIMD4(Self.ghostWallAlpha, Self.ghostWallRim, 0, 0))
+        enc.setRenderPipelineState(pipe)
+        enc.setDepthStencilState(ds)
+        enc.setCullMode(.none)
+        enc.setFragmentBytes(&g, length: MemoryLayout<Ghost>.stride, index: 0)
+        enc.setFragmentTexture(normal, index: 0)
+        enc.setFragmentTexture(albedo, index: 1)
+        enc.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
+        ghostEncodes += 1
+        return true
+    }
+
     // ── the march's constants: the shipping values, and knobs for DIAGNOSIS ONLY (the tests'
     // fine reference march and their red controls turn them; nothing in the app does) ──
     var stepFactor: Float = 0.6, minStepMM: Float = 0.02
@@ -361,14 +425,17 @@ final class FlexibleLatticePass {
     /// Bind field `i` (the renderer's swap, at rest).
     func bindFE(_ i: Int) { feShown = (i >= 0 && i < feTex.count) ? i : -1 }
 
-    /// A field as one rgba16Float 3D texture: xyz = u (mm at full load), w = 0.
+    /// A field as one rgba16Float 3D texture: xyz = u (mm at full load), ★ batch M (M3): w = the node's
+    /// von Mises (MPa, FlexibleFEStress — 0 for a field without moduli), the walls' Stress colour.
     private func makeFieldTexture(_ f: FlexibleFEField) -> MTLTexture? {
         let n = f.nx * f.ny * f.nz
         guard f.nx > 0, f.ny > 0, f.nz > 0, f.u.count == n else { return nil }
+        let vm = FlexibleFEStress.field(f)?.vonMises
         var packed = [UInt16](repeating: 0, count: 4 * n)
         for i in 0..<n {
             packed[4 * i] = Self.halfBits(f.u[i].x); packed[4 * i + 1] = Self.halfBits(f.u[i].y)
             packed[4 * i + 2] = Self.halfBits(f.u[i].z)
+            if let vm, i < vm.count { packed[4 * i + 3] = Self.halfBits(vm[i]) }
         }
         let d = MTLTextureDescriptor()
         d.textureType = .type3D
@@ -595,7 +662,7 @@ final class FlexibleLatticePass {
         let pale = LatticeStructureColour.pale, dense = FlexibleLatticePass.denseWall
         f.sparse = SIMD4(Float(pale.r), Float(pale.g), Float(pale.b), 1)
         f.dense = SIMD4(Float(dense.r), Float(dense.g), Float(dense.b), 1)
-        f.rhoSpan = SIMD4(rhoSpan.x, rhoSpan.y, 0, 0)
+        f.rhoSpan = SIMD4(rhoSpan.x, rhoSpan.y, stressInvMPa > 0 && feActive ? 1 : 0, stressInvMPa)   // ★ batch M (M3)
         enc.setRenderPipelineState(gbufferPipeline)
         enc.setDepthStencilState(depthState)
         enc.setCullMode(.none)

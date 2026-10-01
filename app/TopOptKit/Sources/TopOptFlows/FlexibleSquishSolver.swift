@@ -61,6 +61,9 @@ public final class FlexibleSquishSolver {
     private var running: [String] = []
     private var retrying = false
     private(set) var solveCount = 0
+    /// ★ BATCH M (M3): sims of the current request that failed — the request is KEPT while one has (a
+    /// Stress Retry re-runs it without rebuilding the lattice).
+    private var failedIDs: Set<String> = []
 
     // test controls (the app never sets them)
     /// How many sims may be in flight at once (the rule is ONE; a red control sets 2).
@@ -89,6 +92,7 @@ public final class FlexibleSquishSolver {
     func schedule(_ r: FlexibleFERequest, scene: FlexibleScene, first: String?) {
         request = r
         self.scene = scene
+        failedIDs = []
         order = r.sims.map(\.id)
         if let first { promote(first) }
         pump()
@@ -107,7 +111,18 @@ public final class FlexibleSquishSolver {
         order = []
         request = nil
         scene = nil
+        failedIDs = []
         finishIfIdle()
+    }
+
+    /// ★ BATCH M (M3): re-run sim `id` of the request still held (a failed one). False when the request
+    /// is gone (the caller rebuilds the lattice instead).
+    func retry(_ id: String) -> Bool {
+        guard let r = request, r.sims.contains(where: { $0.id == id }), !running.contains(id) else { return false }
+        failedIDs.remove(id)
+        if !order.contains(id) { order.insert(id, at: 0) }
+        pump()
+        return true
     }
 
     /// Returns once nothing is queued or running (tests' teardown: no bridge call outlives them).
@@ -168,9 +183,11 @@ public final class FlexibleSquishSolver {
         if let i = running.firstIndex(of: id) { running.remove(at: i) }
         switch result {
         case .success(let f): onResult(generation, id, .ready(f))
-        case .failure(let e): onResult(generation, id, .failed(e.why))
+        case .failure(let e):
+            if request?.generation == generation { failedIDs.insert(id) }
+            onResult(generation, id, .failed(e.why))
         }
-        if request?.generation == generation, order.isEmpty, running.isEmpty {
+        if request?.generation == generation, order.isEmpty, running.isEmpty, failedIDs.isEmpty {
             // ★ the per-voxel arrays (~12 B per scene voxel + 4 per sim) are released after the last solve
             request = nil
             self.scene = nil
@@ -184,7 +201,7 @@ public final class FlexibleSquishSolver {
 
     private func finishIfIdle() {
         guard isIdle else { return }
-        if request != nil, order.isEmpty { request = nil; scene = nil }
+        if request != nil, order.isEmpty, failedIDs.isEmpty { request = nil; scene = nil }
         onIdle()
     }
 }

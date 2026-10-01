@@ -3477,7 +3477,7 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         // composited OVER this frame: it could not be occluded by anything, could not
         // receive this frame's occlusion, and was lit by its own key light. That is
         // what "pasted on" was.
-        if wantsLattice, let lpipe = latticeShadePipeline, let gb = gbuffer {
+        if wantsLattice, !flexibleWallsGhosted, let lpipe = latticeShadePipeline, let gb = gbuffer {   // Flexible (#362) batch M: not while the dent view ghosts the walls
             var lu = LatShadeUniforms()
             let proj = camera.projectionMatrix(aspect: aspect)
             // The depth curve, read straight off the matrix the frame is drawn with:
@@ -3510,6 +3510,7 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
             enc.setFragmentTexture(gb.albedo, index: 3)
             countedDraw(enc, .triangle, 3)
         }
+        if wantsLattice, flexibleWallsGhosted, let gb = gbuffer { encodeFlexibleGhostWalls(enc, gbuffer: gb, mainSize: mainSize) }   // Flexible (#362) batch M (M6): the walls as a ghost, no depth (MeshRenderer+FlexibleLattice.swift)
         // Flexible X-ray (#362): the see-through body AFTER the opaque lattice shade; lsdf_shade rebound only fragment 0/2 + textures 0-3 (UnifiedShading.swift:1705-1711)
         if ghostAfterLattice {
             enc.setRenderPipelineState(translucentBodyPipeline ?? pipeline); enc.setDepthStencilState(translucentBodyDepthState)

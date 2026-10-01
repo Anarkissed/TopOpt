@@ -52,6 +52,21 @@ extension MeshRenderer {
     /// Test control only: bind the lattice-only AO to the re-issued body.
     var flexibleGhostKeepsAO: Bool { flexibleLattice?.controlKeepAOForGhost == true }
 
+    /// ★ BATCH M (M6): the dent view is on — the Flexible walls are drawn as a GHOST in the main pass
+    /// (`encodeFlexibleGhostWalls`) instead of by #354's opaque lsdf_shade: no depth written, so the solid
+    /// dent planes drawn after them cover them (his img 6: the walls' cut faces at the part's surface
+    /// striped the map). Only while the Flexible pass draws (the octet's layer is never on its stage).
+    var flexibleWallsGhosted: Bool {
+        guard flexibleLatticeInFrame, let fx = flexibleLattice, fx.ghostWalls else { return false }
+        return fx.ghostPipeline(sampleCount: sampleCount) != nil
+    }
+
+    /// ★ BATCH M (M6): the hook's one call — the ghost walls from the G-buffer the prepass filled.
+    func encodeFlexibleGhostWalls(_ enc: MTLRenderCommandEncoder, gbuffer gb: (depth: MTLTexture, normal: MTLTexture, albedo: MTLTexture),
+                                  mainSize: (w: Int, h: Int)) {
+        flexibleLattice?.encodeGhostWalls(enc, sampleCount: sampleCount, normal: gb.normal, albedo: gb.albedo, mainSize: mainSize)
+    }
+
     /// THE ONE ENTRY POINT for the Flexible lattice (called from the view's apply). Uploads
     /// once per TOKEN; `hidden` flips without re-uploading; nil tears the pass down.
     /// Returns true when the frame must be redrawn. The pass is built on `device` — the
@@ -94,6 +109,9 @@ extension MeshRenderer {
             changed = true
         }
         if pass.feTints !== inputs.feTints { pass.feTints = inputs.feTints }
+        // ★ BATCH M: the dent view's ghost walls (M6) and the Stress view's wall colours (M3)
+        if pass.ghostWalls != inputs.ghostWalls { pass.ghostWalls = inputs.ghostWalls; changed = true }
+        if pass.stressInvMPa != inputs.stressInvMPa { pass.stressInvMPa = inputs.stressInvMPa; changed = true }
         if pass.hidden != inputs.hidden {
             pass.hidden = inputs.hidden
             changed = true

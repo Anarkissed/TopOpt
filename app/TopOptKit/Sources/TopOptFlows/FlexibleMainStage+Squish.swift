@@ -113,6 +113,59 @@ extension FlexibleMainStage {
         return mesh
     }
 
+    /// ★ BATCH M (M5, M2b — his round-5 img 5: "The dent colours are not expanding out and graded";
+    /// img 4: the stamps "seen as isolated areas … it should have foci but expand out, pulling lattice
+    /// next to it in"). In FE mode the heat is the 3D sim's OWN squish: per column of the group's
+    /// pressed faces, how much the sim COMPRESSES it along its load (entry − exit, to the middle where
+    /// a pinch halves it — `FlexibleFEField.columnCompression`, core's own quantity and the one the
+    /// calibration matches), then the corner mean at every map vertex (`mapCornerValues` — the colour
+    /// grades across the map with no step). In mm at the CALIBRATED size: the sim scaled to core's
+    /// deepest squish within the band [0.5, 2] (FlexibleFE.calibrationBand), the fold cut taken back
+    /// out (`/ foldShare` — the cut only keeps the PICTURE from folding at ×1). Where the sim and core
+    /// agree (his Group 2: k 2.09) the fingertips read core's 24.5 mm; where the sim finds the part
+    /// far stiffer (his Group 1: k asked 7.4, held at 2 — the Squish (i) says so) the heat reads what
+    /// the sim squishes, not core's number: × the asked k put 88 mm on his 100 mm-deep Face 5, which
+    /// the band exists to refuse. A column the sim stretches reads 0. NaN off the group's faces.
+    /// Cached per (overlay, field).
+    func feMapValues(_ f: FlexibleFEField, _ m: FlexibleStageModel) -> [Float]? {
+        guard let o = overlay else { return nil }
+        let key = "\(overlaySerial)|\(f.serial)|\(f.scale)"
+        if let c = feValueCache[f.simID], c.key == key { return c.values }
+        let keys = Set(m.lattice?.sims.first { $0.id == f.simID }?.keys ?? [])
+        let ratio = 1 / Swift.max(1e-6, f.foldShare ?? 1)
+        var perColumn: [FlexFaceKey: [Double?]] = [:]
+        for k in o.flatStart.keys where keys.contains(k) {
+            guard let st = m.stacks[k] else { continue }
+            let pinched = m.pinchedColumns(k.region) ?? []
+            perColumn[k] = st.columns.indices.map { c in
+                Swift.max(0, f.columnCompression(stack: st, col: c, pinched: c < pinched.count && pinched[c]) * ratio)
+            }
+        }
+        let out = o.mapCornerValues(perColumn, stacks: m.stacks)
+        feValueCache[f.simID] = (key, out)
+        return out
+    }
+
+    /// The FE heat of the sequence on screen: every face by its OWN group's sim (the pick's field; under
+    /// "Play all" each group's faces by theirs — the renderer swaps in each turn's own, which match it on
+    /// that group's faces) and the ONE scale over every field of it.
+    func feHeat(_ m: FlexibleStageModel) -> (first: [Float], scaleMM: Double)? {
+        guard fe.active, !controlColumnHeat else { return nil }
+        let all = fe.sequence.compactMap { i in i < fe.fields.count ? feMapValues(fe.fields[i], m) : nil }
+        guard var union = all.first else { return nil }
+        for v in all.dropFirst() {
+            for i in union.indices where i < v.count && !union[i].isFinite && v[i].isFinite { union[i] = v[i] }
+        }
+        let top = all.map { $0.reduce(Float(0)) { $1.isFinite ? Swift.max($0, $1) : $0 } }.max() ?? 0
+        return top > 1e-6 ? (union, Double(top)) : nil
+    }
+
+    /// The heat a tap reads now: the field on screen's (FE), else the page's corner values.
+    var shownHeatValues: [Float]? {
+        if let f = feShownField, let m = model, let v = feMapValues(f, m) { return v }
+        return heatValues
+    }
+
     /// The mesh displacements the renderer shows NOW (the loop's shown field) — H4's `dents` in FE
     /// mode, so a mesh rebuild re-uploads the sim on screen, and tap-to-read casts against it.
     var feShownMesh: [Float]? {
@@ -169,8 +222,9 @@ extension FlexibleMainStage {
             let id = fe.fields[i].simID
             let d = FlexibleLatticePreview.drawn(lat.showing(id), xray: true, building: m.latticeBuilding,
                                                  checkStampShown: nil, stale: m.latticeIsStale)
+            // ★ BATCH M: each turn's heat is its own sim's dent, on the page's one scale
             out[id] = FlexiblePageChannels.channels(model: m, overlay: overlay, xray: false, drawnLattice: d, heat: heat,
-                                                    depthScaleMM: scaleMM).tints
+                                                    depthScaleMM: scaleMM, mapValues: feMapValues(fe.fields[i], m)).tints
         }
         return out
     }

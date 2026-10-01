@@ -37,6 +37,9 @@ public struct FlexibleFEField: Sendable, Equatable {
     public private(set) var u: [SIMD3<Float>]
     /// Per node: a solid element owns it (the rest is the extension outside the solid).
     public let solved: [Bool]
+    /// ★ BATCH M (M3): per ELEMENT ((nx−1)(ny−1)(nz−1), x fastest) the modulus it was solved with (MPa),
+    /// 0 where no solid — empty for a field built from parts. The Stress view's C (FlexibleFEStress).
+    public private(set) var elementE: [Float] = []
     /// k: the calibration factor applied to the raw solve.
     public private(set) var scale: Double
     /// max ‖∇u‖₂ over every cell (per unit s) — `gradientBound`.
@@ -85,6 +88,7 @@ public struct FlexibleFEField: Sendable, Equatable {
         for n in u.indices where 3 * n + 2 < s.u.count { u[n] = SIMD3(s.u[3 * n], s.u[3 * n + 1], s.u[3 * n + 2]) }
         self.u = u
         solved = s.solved
+        elementE = s.elementE
         scale = 1
         gmax = 0
         maxDisplacement = 0
@@ -99,10 +103,11 @@ public struct FlexibleFEField: Sendable, Equatable {
 
     /// A field from its parts (tests, the probes).
     public init(simID: String, generation: Int, nx: Int, ny: Int, nz: Int, origin: SIMD3<Float>, spacing: Float,
-                u: [SIMD3<Float>], solved: [Bool]? = nil, bcMode: String = "rest") {
+                u: [SIMD3<Float>], solved: [Bool]? = nil, bcMode: String = "rest", elementE: [Float] = []) {
         self.simID = simID; self.generation = generation
         self.nx = nx; self.ny = ny; self.nz = nz; self.origin = origin; self.spacing = spacing
         self.u = u
+        self.elementE = elementE
         self.solved = solved ?? [Bool](repeating: true, count: u.count)
         scale = 1; gmax = 0; maxDisplacement = 0
         self.bcMode = bcMode; iterations = 0; solveMS = 0; coarsen = 1; uncalibrated = false

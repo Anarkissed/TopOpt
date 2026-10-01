@@ -49,7 +49,17 @@ public final class FlexibleMainStage: ObservableObject {
     public var latticeShown: Bool { latticeOn && latticeAvailable }
     /// ★ C2: X-ray is no longer a button — it is the Lattice view's rendering (the walls are only
     /// ever seen through the ghost), so the two are on together and off together.
-    public var xray: Bool { latticeShown }
+    /// ★ BATCH M (M6, his round-5 img 6: "When the dent view is selected, the xray view should also
+    /// initiate (that's why there is no point to include the actual button), showing the lattice (if
+    /// selected) as a ghost and the dents bending through the ghosts … make it solid"): the DENT view
+    /// turns X-ray on too — the body a ghost, the dent planes solid; with the lattice shown its walls
+    /// are a ghost as well (`ghostWalls`, the layer's).
+    public var xray: Bool { latticeShown || dentXray }
+    /// The dent view is on and has a map to show (kept by `refresh` — read on every body pass).
+    public var dentXray: Bool { heat && dentMapShown }
+    var dentMapShown = false
+    /// The walls are drawn as a ghost under the solid dent planes (the dent view and the lattice on).
+    public var ghostWalls: Bool { dentXray && latticeShown }
     public func toggleLattice() {
         latticeOn = !latticeShown
     }
@@ -84,13 +94,15 @@ public final class FlexibleMainStage: ObservableObject {
     /// Legends he minimised (the caret), and the one placed first (a pill he tapped open).
     @Published public var minimized: Set<FlexibleReadKind> = []
     @Published public var legendPriority: FlexibleReadKind?
+    /// ★ BATCH M (M4): the ONE legend card folded to its column of bars (the caret; a tap opens it).
+    @Published public var legendMinimized = false
     /// The workspace's solve (H5' and H2 hand over a FlexibleStressSolver — `attach`): run only
     /// when there is no field for these inputs, never twice (FlexibleStressTrigger).
     var stressSolver: (() -> Void)?
     /// ★ BATCH C VERIFICATION: what the solve is doing — the sim's own phase, or why it could not
     /// start — ONE published value (it failed silently on his project: "No stress yet" for ever).
     @Published public internal(set) var stressState: FlexibleStressState = .idle
-    var stressRunning: Bool { stressState.isRunning }
+    var stressRunning: Bool { stressView.isRunning }   // ★ BATCH M: the FE route's state too
     /// The sim whose phase is observed, and that observation.
     weak var stressSim: LatticeSimModel?
     var stressPhaseObservation: AnyCancellable?
@@ -104,6 +116,8 @@ public final class FlexibleMainStage: ObservableObject {
     var latticeSpanScans = 0
     /// The view the tap came through (H6 hands the projection and the settle each render).
     var viewFrame: LatticeBandChipFrame?
+    /// Tests only: the view's direction, pinned.
+    var controlViewDirection: SIMD3<Float>?
     /// The composed ONE tint array, and what it was composed from.
     var composedKey: String?
     var composed: [Float]?
@@ -174,6 +188,15 @@ public final class FlexibleMainStage: ObservableObject {
     var fe = FlexibleFEView()
     /// Each field's mesh displacements on the overlay, keyed by (overlay, field).
     var feMeshCache: [String: (key: String, mesh: [Float])] = [:]
+    /// ★ BATCH M (M5): each field's dent heat at every map vertex (FlexibleMainStage+Squish.feMapValues).
+    var feValueCache: [String: (key: String, values: [Float])] = [:]
+    /// ★ BATCH M (M3): each field's stress (FlexibleMainStage+Stress.feStress).
+    var feStressCache: [String: (key: String, field: LatticeDemandField, peak: Double)] = [:]
+    /// The heat's values the map is coloured by NOW (FE: the field shown first; else the corner means)
+    /// — a tap reads them (H7), so the number is the colour under it.
+    var heatValues: [Float]?
+    /// Test control only: one colour per column (the blocks of his img 5 — the red control of M5).
+    var controlColumnHeat = false
     /// Bumped per overlay rebuild (the mesh cache and the pass's FE token follow it).
     var overlaySerial = 0
     /// The lattice generation the loop started its FE sequence for (from rest).
@@ -259,7 +282,7 @@ public final class FlexibleMainStage: ObservableObject {
         // ★ BATCH G: no sim starts beside another core solve; a Stress solve it held back starts after
         m.squishSolver.busy = { [weak self] in self?.squishBusy?() ?? false }
         m.squishSolver.onIdle = { [weak self] in self?.squishIdle() }
-        fe = FlexibleFEView(); feMeshCache = [:]; fePlayedGeneration = nil
+        fe = FlexibleFEView(); feMeshCache = [:]; feValueCache = [:]; feStressCache = [:]; fePlayedGeneration = nil
         feStartedKey = nil; fallbackKey = nil; heldForSims = false; fallbackSim = nil; feBaseTints = [:]; feTintBox.set([:])
         seenLoads = nil
         projectObservation = project.objectWillChange
@@ -342,7 +365,10 @@ public final class FlexibleMainStage: ObservableObject {
         if fe.active, fresh, !pageUp {
             inputs?.fe = fe.fields; inputs?.feMesh = fe.mesh; inputs?.feSequence = fe.sequence; inputs?.feToken = fe.token
             inputs?.feTints = feTintBox   // ★ "Play all": each group's own colours, swapped in with its field
+            // ★ BATCH M (M3): Stress on — the walls take each group's own stress (the sequence's one scale)
+            if stress, feStressRoute, stressDrawable, feStressPeak > 0 { inputs?.stressInvMPa = Float(1 / feStressPeak) }
         }
+        inputs?.ghostWalls = ghostWalls   // ★ BATCH M (M6): the dent view ghosts the walls under the solid planes
         return inputs
     }
 
@@ -557,12 +583,19 @@ public final class FlexibleMainStage: ObservableObject {
         self.drawn = drawn
         // ★ BATCH C: the channels WITHOUT the ghost — Stress and the group colours are composed
         // in first (FlexibleMainTints), then X-ray ghosts what is not opaque
-        var c = FlexiblePageChannels.channels(model: m, overlay: overlay, xray: false, drawnLattice: drawn, heat: heat)
+        // ★ BATCH M (M5, M2b): in FE mode the heat IS the sim's dent — at every vertex of the shown
+        // group's faces, on ONE scale over the groups of the sequence (Play all's turns compare)
+        let feNow = feHeat(m)
+        var c = FlexiblePageChannels.channels(model: m, overlay: overlay, xray: false, drawnLattice: drawn, heat: heat,
+                                              depthScaleMM: feNow?.scaleMM, mapValues: feNow?.first,
+                                              controlColumnColours: controlColumnHeat)
         let shown = FlexibleShownValues(model: m, drawnLattice: drawn)
-        dentMaxMM = shown.maxDepth
+        dentMaxMM = feNow?.scaleMM ?? shown.maxDepth
+        heatValues = c.mapValues
+        dentMapShown = overlay?.flatStart.isEmpty == false && dentMaxMM > 0   // ★ BATCH M (M6): the dent view's X-ray
         // ★ BATCH G: the field moves the ghost, the heat plane and the walls; ×k capped so the map
         // stays injective (the planes never cross)
-        feBaseTints = playAllBaseTints(m, scaleMM: shown.maxDepth)
+        feBaseTints = playAllBaseTints(m, scaleMM: dentMaxMM)
         if fe.active {
             c.exaggeration = FlexibleShownValues.cappedExaggeration(rule: shown.uncappedExaggeration, maxSafeScale: fe.safeScale)
             c.dents = feShownMesh
@@ -617,7 +650,7 @@ public final class FlexibleMainStage: ObservableObject {
                    String(describing: (fe.active ? nil : c.dents).map { VertexTintKey($0).hash }),   // (FE: the token below)
                    "\(c.exaggeration)", "\(drawn?.generation ?? -1)", "\(drawn?.facesToken ?? -1)", "\(m.latticeBuilding)",
                    "\(m.lattice?.generation ?? -1)", "\(m.latticeIsStale)", oKey, "\(latticeAvailable)",
-                   "\(fe.token)", "\(fe.sequence)", "\(fe.pending)", fe.failure ?? ""].joined(separator: "|")
+                   "\(fe.token)", "\(fe.sequence)", "\(fe.pending)", fe.failure ?? "", "\(xray)", "\(stress)"].joined(separator: "|")
         channels = c
         if channelsKey != key {
             channelsKey = key

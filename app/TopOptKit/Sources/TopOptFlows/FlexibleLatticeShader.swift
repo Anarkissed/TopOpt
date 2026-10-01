@@ -85,9 +85,19 @@ enum FlexibleLatticeShader {
         float4x4 eyeFromModel;            // V·M (uniforms.modelView)
         float4x4 eyeNormalBasis;          // rotation of V·M (uniforms.normalMatrix)
         float4 sparse, dense;             // LatticeStructureColour.pale / FlexibleLatticePass.denseWall
-        float4 rhoSpan;                   // x = lo, y = hi (the in-mask ρ span)
+        float4 rhoSpan;                   // x = lo, y = hi (the in-mask ρ span); ★ batch M: z = 1: the
+                                          // walls take the Stress rainbow, w = 1 / its top (1/MPa)
         float4 tail;
     };
+
+    // ★ BATCH M (M3, M7): the FEA rainbow (ResultsModel.stressColor's five stops, FlexibleColours.depthStops)
+    static float3 flx_rainbow(float t) {
+        const float3 c[5] = { float3(28, 60, 170) / 255.0f, float3(0, 170, 220) / 255.0f, float3(60, 190, 110) / 255.0f,
+                              float3(250, 220, 60) / 255.0f, float3(255, 70, 50) / 255.0f };
+        float x = clamp(t, 0.0f, 1.0f) * 4.0f;
+        int i = min(3, int(x));
+        return mix(c[i], c[i + 1], x - float(i));
+    }
 
     // ── FlexGrid.sample on a packed 2-channel volume, exactly ─────────────────────────────
     static inline float2 flx_at(texture3d<float> T, int i, int j, int k) {
@@ -489,10 +499,46 @@ enum FlexibleLatticeShader {
         FlxGBuf o;
         o.eyeZ = -(F.eyeFromModel * float4(h.p, 1.0f)).z;   // eye looks down −Z → positive into the screen
         o.enormal = float4(eyeN, 0.0f);
-        o.albedo = float4(mix(F.sparse.rgb, F.dense.rgb, clamp(0.25f + 0.75f * frac, 0.0f, 1.0f)), 1.0f);
+        float3 albedo = mix(F.sparse.rgb, F.dense.rgb, clamp(0.25f + 0.75f * frac, 0.0f, 1.0f));
+        // ★ BATCH M (M3): Stress on — the wall takes the group's von Mises at its REST point (the FE
+        // field's w: node stress, MPa), on the page's one scale
+        if (F.rhoSpan.z > 0.5f && U.feK.x > 0.5f) {
+            constexpr sampler smp(coord::normalized, filter::linear, address::clamp_to_edge);
+            float vm = feT.sample(smp, ((p0 - U.feO.xyz) / U.feO.w + 0.5f) / U.feN.xyz).w;
+            albedo = flx_rainbow(vm * F.rhoSpan.w);
+        }
+        o.albedo = float4(albedo, 1.0f);
         float4 clip = F.clipFromModel * float4(h.p, 1.0f);
         o.depth = clamp(clip.z / max(clip.w, 1e-6f), 0.0f, 1.0f);
         return o;
+    }
+
+    // ── ★ BATCH M (M6): THE WALLS AS A GHOST ─────────────────────────────────────────────
+    // His round-5 img 6: "When the dent view is selected, the xray view should also initiate …
+    // showing the lattice (if selected) as a ghost and the dents bending through the ghosts. Get
+    // rid of the stripes and make it solid." In the main colour pass, in place of #354's opaque
+    // lsdf_shade: each lattice pixel of the G-buffer (albedo.a = the mask) drawn like the body's
+    // ghost — faint face-on, lit at the silhouette, in the wall's own colour — blended, writing NO
+    // depth, so the solid dent planes drawn after it cover it wherever they are (the walls' cut
+    // faces at the part's surface no longer stripe the map).
+    struct FlxGhost {
+        float4 size;    // xy = the main target (px), zw = the G-buffer (px)
+        float4 look;    // x = face-on alpha, y = the silhouette's extra alpha
+    };
+
+    fragment float4 flx_ghost_walls(FlxVOut in [[stage_in]],
+                                    constant FlxGhost& G [[buffer(0)]],
+                                    texture2d<float> gNormal [[texture(0)]],
+                                    texture2d<float> gAlbedo [[texture(1)]]) {
+        float2 uv = in.pos.xy / max(G.size.xy, float2(1.0f));
+        uint2 px = uint2(clamp(uv * G.size.zw, float2(0.0f), G.size.zw - 1.0f));
+        float4 alb = gAlbedo.read(px);
+        if (alb.a < 0.5f) { discard_fragment(); }
+        float3 n = gNormal.read(px).xyz;
+        float gr = pow(1.0f - clamp(abs(n.z), 0.0f, 1.0f), 2.2f);
+        float3 rgb = clamp(alb.rgb * (0.35f + 0.9f * gr), 0.0f, 1.0f);
+        float a = clamp(G.look.x + G.look.y * gr, 0.0f, 1.0f);
+        return float4(rgb * a, a);   // premultiplied
     }
 
     // ── test kernels ─────────────────────────────────────────────────────────────────────
