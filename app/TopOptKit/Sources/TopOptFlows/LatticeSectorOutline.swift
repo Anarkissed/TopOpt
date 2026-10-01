@@ -529,12 +529,20 @@ extension ProjectModel {
             }
             return total
         }
+        // each face resolved once per call (a grid split puts many pieces on one face); its facets
+        // only when it is not a plane
+        var byFace: [FaceID: (resolved: LatticeRegionEmission.ResolvedFace?, facets: [LatticeRegionEmission.ResolvedFace])] = [:]
         for g in selection.groups where lattice.groupRoles[g.id] != nil {
             for ref in latticeSelectableRefs(g) {
                 guard case let .region(_, rid) = ref, let r = faceRegions.region(rid), !r.cuts.isEmpty,
                       let f = latticeCardFace(ref, in: g) else { continue }
-                let resolved = LatticeRegionEmission.planeFor(face: f, in: mesh)
-                let facets = LatticeFaceFacets.facets(face: f, in: mesh)
+                if byFace[f] == nil {
+                    let w = LatticeRegionEmission.planeFor(face: f, in: mesh)
+                    var isPlane = false
+                    if let w, case .plane = w { isPlane = true }
+                    byFace[f] = (w, isPlane ? [] : LatticeFaceFacets.facets(face: f, in: mesh))
+                }
+                let resolved = byFace[f]!.resolved, facets = byFace[f]!.facets
                 var planar = false
                 if let w = resolved, case .plane = w { planar = true }
                 guard let whole = area(planar ? [resolved!] : facets), whole > 1e-9 else { continue }
