@@ -1,6 +1,105 @@
 # Handoff — 2026-09-29-flexible-screens (TRACK app, A1): the Flexible screens
 
-## Round 5 · batch M — your round-5 notes on the main page and the dent visuals (read this first)
+## Round 5 · merge — batch S into batch M, and the syncs (read this first)
+
+Batch S (the Settings page) was built in a side worktree while batch M (the main page) was built here.
+This pass merged them, synced the other branches, and ran the targeted suite and the iOS build on the
+result. **The app was NOT launched: nothing here has been seen on a device or simulator.** The pictures
+are offscreen frames from the shipping renderer and the hosted panel's pixels.
+
+**What you see now (both batches together):**
+- **Settings page:** the folder tabs on the left ([Model], one tab per group in its colour, [Rests],
+  [+ New]); each pressed face framed in its group's colour; the selected group squishing alone; the
+  number boxes, units, Reset all, delete, Exit / Save & Exit — all from batch S. The dent heat and
+  its legend are batch M's FEA rainbow, graded per vertex, with the stamp's spread.
+- **Main page:** batch M's per-group sims, Stress per group, one legend card, the dent view as X-ray
+  with ghost walls. Batch S's group frames now show in **every** view, including each "Play all" turn.
+- Pictures: `evidence/2026-09-29-flexible-screens/merge_r5/R5merge_settings_page.png`,
+  `R5merge_main_page.png`, `R5merge_crease_seam.png`.
+
+**What the merge had to fix (each with a test and a red control):**
+1. **The frames vanished under "Play all"** (the main page's default). The renderer swaps each turn's
+   own tints in with its field (batch G verification), and batch S had framed only the composed tints.
+   The frames are now painted into every turn's tints. `FlexibleMergeR5SMTests`, on your project split
+   as img 4: 0 of 8 280 framed vertices off on both turns; red control (`controlTurnsWithoutFrames`):
+   8 280 of 8 280 off.
+2. **The player's dot** is the group playing now (batch M) in the colour you chose (batch S)
+   (`FlexibleSquishPlayer.dotColour`). The red controls are each side's own rule: S's shows no dot
+   under Play all, M's shows the default orange instead of your blue.
+3. **Two batch M checks measured the frames as if they were heat.**
+   - The main page's "graded" check now measures the heat band. The frame is a deliberate step
+     (D-R5-S1). Heat band step 0.0000; core's column colours (the red control) 1.2490 / 0.2062.
+   - The depth check now keys each face's interior separately, so a crease between two solid faces
+     counts as an edge.
+4. **The crease seam (open, not fixed).** Under group 2's turn, group 1's frames are solid planes. Where
+   the top's frame meets Face 5's, the two lifted planes leave batch M's known 1 px seam, and walls
+   show through it: 525 px from the back left, 0 in the other views. Every face's interior reads 0;
+   the no-depth control reads 28.8–59.8 %. `R5merge_crease_seam.png` shows it.
+
+**Found on the way — batch M verification's fallout (fixed):**
+- The verification pass committed without a full run (its result never came back). Two in-pass
+  controls (T6 ghost-first, T8 lattice AO) read 0, because the dent planes' depth now keeps the walls
+  off the map. Each control now also removes the planes' depth. T6: 26 372 of 30 929 px, and with the
+  planes' depth 0 (now asserted). T8: 23 900.
+- Its DECISIONS rows (D-R5-MV1…MV6) were never committed. This pass committed them unchanged (645f0973).
+  It wrote no handoff section; its commit message (07a43ea0) is the record.
+
+**Your call:**
+- **Group colours against the rainbow (D-R5-X2).** S chose green, orange, red and blue, with blue last,
+  when the dent heat was blue → cyan → white. M then made the heat the FEA rainbow, so all four group
+  colours are now on the heat ramp.
+  - On big faces the frame's near-black gap keeps it apart.
+  - On a thin side face there is no gap (fewer than 16 columns across). Your Face 3, 64 × 13 columns,
+    shows an orange frame against yellow-orange heat (main page, group 2).
+  - Group 1's green frames also match the lattice density legend's green.
+  - Options: (a) keep it; (b) always keep the gap, even 1 column; (c) another cue for the frame.
+- Batch S's open calls (1)–(7) and batch M's still stand (their sections below).
+
+**Not merged — Blocked:** `#358 claude/raster-receipt-fields` (5 commits to `4764ca7e`, the lattice-types
+strut law). It conflicts in `core/src/cli/job.cpp`, which is not ours. At the end of `parse_job`, two
+blocks were inserted before `return job;` on each side:
+- #361's Flexible block (`05ee339e`, C1);
+- #358's "one resolved topology" write-back (`4764ca7e`).
+
+Keeping both looks like the resolution, but it is core's call. #361 meets the same conflict when it
+syncs #358. Nothing was merged from #358; `git merge-tree` showed the conflict, and no merge was started.
+
+**Merges (merge-only, nothing pushed):**
+- `4fb372e8` Sync: merge #354 (`8f2504c2`, 17 commits). No conflicts. app/ only relative to this
+  branch: the core/ changes were already here through the #358 syncs, so no `build_core.sh` was needed.
+  It touched our hook files (WorkspacePlaceholder, MetalMeshView, LatticeSettings, ProjectModel) with
+  no conflicts. The hook suites are green.
+- `02c307f4` Merge batch S (`claude/flexible-screens-r5s`, 7 commits to `8feed6aa`). There were
+  conflicts in our own files only, and each one kept both sides:
+  - FlexibleSquishPlayer: M's picker condition, S's colour(n) dot, S's keep-out backgrounds.
+  - FlexibleMainStatusPill: M's playAllLive / noteFor and S's colour closure.
+  - FlexibleMainStage: M's FE heat channels, then S's frames.
+  - FlexibleMainStage+Views: M's per-group composition, then S's frames after it.
+  - This handoff: every section kept.
+  - Every line either side added to the five main-page files is in the result (checked line by line).
+- #361 `claude/flexible-squish-maths` and `main` were already contained.
+- **No new hook in a #354/main file.** The only source lines this pass added are in Flexible files:
+  a test control in FlexibleMainStage, the frames-per-turn paint and its key in
+  FlexibleMainStage+Views, and `dotColour` in FlexibleSquishPlayer.
+
+**Tests:** targeted suite (all Flexible* + the hook-adjacent suites + #354's new suites). The final run
+(after the fixes): `Executed 708 tests, with 19 tests skipped and 1 failure (0 unexpected) in 3990.545 seconds` — the one failure is the known `LatticeSimSolveTriggerTests.testTheTriggerRefusesOnAllThreeGrounds`. The first run, before the fixes: 706 tests, 19 skipped, 5 failing tests
+(the known `LatticeSimSolveTriggerTests.testTheTriggerRefusesOnAllThreeGrounds`, plus the four above).
+`FlexibleFEFieldTests.testExtensionOutsideTheSolid` (which could not run in batch S's sparse worktree)
+passes here. iOS: `xcodebuild … -derivedDataPath …/DerivedData/flexA1 build` → ** BUILD SUCCEEDED **
+after the fixes (FlexibleSquishPlayer.o newer than its source).
+
+**Seen in the renders, older than the merge:**
+- A curve point's white depth pill renders with faint text in the hosted panel (batch S's own render
+  shows the same).
+- On macOS the player's picker label renders without its dot (an AppKit pop-up). On iOS the label is
+  the HStack.
+
+**Commits:** 645f0973 (M verification's DECISIONS), 4fb372e8 (sync #354), 02c307f4 (merge S),
+ef1c1fc5 (frames per turn, the player's dot, the two re-pins), 2f047278 (the in-pass controls), and
+the next commit (this section, D-R5-X1/X2, evidence).
+
+## Round 5 · batch M — your round-5 notes on the main page and the dent visuals
 
 Your seven notes on img 4–6 (taken on the build before batch G), and "this and the graded dent colours
 should be in both views". Judged on YOUR project as you left it for round 5 (`his_project_0004_r5`:
@@ -3959,8 +4058,8 @@ number from C1's core through the bridge.
 | branch | last synced commit |
 |---|---|
 | #361 `claude/flexible-squish-maths` (base) | `23196cfb` Handoff: FULL CHECK — core 140/140 … (morning sync) |
-| #354 `claude/topopt-holes-quilting-298212` | `e0021963` Dead walls are core's verdict everywhere … (morning sync) |
-| #358 `claude/raster-receipt-fields` | `5be7862a` unsupported_spans_seen: the comment said "not printed" and they are printed |
+| #354 `claude/topopt-holes-quilting-298212` | `8f2504c2` Handoff, round 3: regions follow the slab … (round 5 merge, `4fb372e8`) |
+| #358 `claude/raster-receipt-fields` | `90d9f874` Five follow-ups … (`f7c30c10`); **`4764ca7e` NOT merged — conflicts in core/src/cli/job.cpp (see "Round 5 · merge")** |
 | `main` | `f932266f` Merge pull request #360 (lattice types setup) |
 
 - **Merges.** `ee3cd779` (Sync: merge #354) and `8c666f6c` (Sync: merge #358) merged with no

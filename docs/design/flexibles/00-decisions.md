@@ -151,6 +151,13 @@ These OVERRIDE the rows they name. Agents: do not "fix" them back.
 | D-R5-SV5 | **(verification) The stamp's Width and Length are two number boxes**; either one scales the other by the stamp's own proportions; one decimal when the value has one. | D-R5-S3's one width box with the length in its label |
 | D-R5-SV6 | **(verification) On the Settings page the column preview SAYS why it stands in for the 3D sim** (one line above the player: edited since Save & Exit / no lattice yet / running / failed; nothing while dragging or for a shape-only lattice), and the player ends on the playing group's ONE force in his unit. The Settings page still never builds a lattice or re-runs a sim (D-R4-6; his call asked). The curves' keep-out is the player's DRAWN parts. | D-R5-S2's silent fallback; the faces' weights as the player's label |
 
+### Round 5 · the merge of batch S into batch M
+
+| # | Decision | Overrides |
+|---|---|---|
+| D-R5-X1 | **The group frames ride batch M's per-group composition**: painted after M's composition into the shown tints AND into each "Play all" turn's own tints (the renderer swaps a turn's tints in with its field — without this the frames vanished under the default Play all; FlexibleMergeR5SMTests). The player's dot is the PLAYING group (M) in its CHOSEN colour (S). | — |
+| D-R5-X2 | **D-R5-S1's reason for "blue last" is void**: D-R5-M1 made the dent the FEA rainbow (blue → cyan → green → yellow → red), so all four group colours now lie ON the dent ramp; a frame stays apart from the heat by its uniform band and — only on faces ≥ 16 columns across — the near-black gap. On a thin side face (his Face 3, 64 × 13 columns: no gap) the orange frame sits against yellow-orange heat. Not changed: his call (always keep the gap; or another cue). | D-R5-S1's "blue LAST, the dent heat is blue → cyan → white" (the reason only) |
+
 ## 2. Reviewer defaults — NOT yet ruled (agents: keep them, do not change silently)
 
 | # | Default | Why |
