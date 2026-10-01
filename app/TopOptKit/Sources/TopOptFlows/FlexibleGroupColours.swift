@@ -4,11 +4,18 @@
 // different coloured faces on the model body, assigned in the settings modal." — and: "This should
 // be in the settings page too").
 //
-// ★ THE PALETTE: four DS tokens, never purple (purple is the depth prism) — green, orange, red,
-// blue. They stay apart from each other and read on the dark stage. BLUE IS LAST: the dent heat is
-// deep blue → cyan → white (DS accentDeep → accentCyan → textPrimary), so a blue frame would sink
-// into its own map; the first three groups never meet it by default. Cyan (the resting faces) and
-// white (the selected face) are taken.
+// ★ THE PALETTE (★ round 5 C5 — his answer "Add more colour tokens"): EIGHT DS tokens
+// (DS.Color.squeezeGroupPalette), never purple (purple is the depth prism) — green, pink, mint, blue,
+// yellow, teal, olive, terracotta. Chosen by the numbers (FlexibleGroupPaletteTests), not by eye: every
+// PAIR ≥ 15 OKLab ΔE (≥ 8 for a colour-blind reader); each ≥ 4.5 : 1 on the stage; none is a colour
+// the pages already MEAN — S's orange and red WERE the warning amber (Fix N things, the fix pop-up, a
+// group's miss) and the danger red (a refused face, a point's ×), and both lay on the dent heat's
+// rainbow (red IS the reddest dent), so groups 2 and 3 are now pink and mint, off the heat. Green
+// (group 1) and blue (group 4) stay. Cyan (the resting faces) and white (the selected face) are taken.
+// Terracotta is LAST: the darkest (4.5 : 1), its thin frame on a side face read dimmest in the renders.
+// A name S stored ("orange", "red") keeps its SLOT (`stored`): pink, mint.
+// ★ BEYOND THE PALETTE the colours cycle (group 9 = green), and a group whose colour another group
+// also wears shows its NUMBER on its rail tab and on its faces (FlexibleGroupNumbers).
 // ★ STORED PER GROUP (FlexibleStageSettings.groupColours, by the group's stored number); a new group
 // takes the first colour no other group wears; picking a colour another group wears SWAPS the two
 // (each group keeps its own); renumbering (a group removed) carries each colour with its group
@@ -28,7 +35,8 @@ import TopOptDesign
 import TopOptKit
 
 public enum FlexibleGroupColour: String, CaseIterable, Codable, Sendable, Identifiable {
-    case green, orange, red, blue
+    // ★ C5: the order IS DS.Color.squeezeGroupPalette's (group 1 … 8)
+    case green, pink, mint, blue, yellow, teal, olive, terracotta
 
     public var id: String { rawValue }
 
@@ -36,17 +44,32 @@ public enum FlexibleGroupColour: String, CaseIterable, Codable, Sendable, Identi
     public var rgba: RGBA {
         switch self {
         case .green: return DS.Color.accentGreen
-        case .orange: return DS.Color.warning
-        case .red: return DS.Color.danger
+        case .pink: return DS.Color.groupPink
+        case .mint: return DS.Color.groupMint
         case .blue: return DS.Color.accent
+        case .yellow: return DS.Color.groupYellow
+        case .teal: return DS.Color.groupTeal
+        case .olive: return DS.Color.groupOlive
+        case .terracotta: return DS.Color.groupTerracotta
         }
     }
 
     public var name: String { rawValue.capitalized }
 
-    /// The default for group `number` (1-based): green, orange, red, blue, then round again.
+    /// The default for group `number` (1-based): the palette in order, then round again.
     public static func byNumber(_ number: Int) -> FlexibleGroupColour {
         allCases[(max(1, number) - 1) % allCases.count]
+    }
+
+    /// ★ C5: a STORED name — today's, or round 5 S's, which keeps its slot: "orange" (S's group-2
+    /// colour) is pink, "red" (S's group-3 colour) is mint. Nil for anything else.
+    public static func stored(_ raw: String?) -> FlexibleGroupColour? {
+        guard let raw else { return nil }
+        switch raw {
+        case "orange": return .pink
+        case "red": return .mint
+        default: return FlexibleGroupColour(rawValue: raw)
+        }
     }
 }
 
@@ -54,7 +77,7 @@ extension FlexibleSqueezeGroups {
 
     /// The colour group `g` wears in `s`: its stored pick, else its number's default.
     public static func colourChoice(of g: FlexibleSqueezeGroup, in s: FlexibleStageSettings) -> FlexibleGroupColour {
-        s.groupColours?[String(g.id)].flatMap(FlexibleGroupColour.init(rawValue:)) ?? .byNumber(g.number)
+        FlexibleGroupColour.stored(s.groupColours?[String(g.id)]) ?? .byNumber(g.number)
     }
 
     /// The colour of the group SHOWN as `number` (the player's sims are numbered) in `s`.
@@ -85,8 +108,8 @@ extension FlexibleSqueezeGroups {
         guard let map, !map.isEmpty else { return nil }
         var out: [String: String] = [:]
         for g in gs {
-            guard let v = map[String(g.id)], let c = FlexibleGroupColour(rawValue: v), c != .byNumber(g.number) else { continue }
-            out[String(g.id)] = v
+            guard let c = FlexibleGroupColour.stored(map[String(g.id)]), c != .byNumber(g.number) else { continue }
+            out[String(g.id)] = c.rawValue   // ★ C5: today's name (an S-era "red" is written "mint")
         }
         return out.isEmpty ? nil : out
     }
@@ -117,8 +140,7 @@ extension FlexibleSqueezeGroups {
     static func shownColours(_ s: FlexibleStageSettings, ids: [Int]) -> [String: String] {
         var out: [String: String] = [:]
         for id in ids {
-            out[String(id)] = s.groupColours?[String(id)].flatMap(FlexibleGroupColour.init(rawValue:))?.rawValue
-                ?? FlexibleGroupColour.byNumber(id).rawValue
+            out[String(id)] = (FlexibleGroupColour.stored(s.groupColours?[String(id)]) ?? FlexibleGroupColour.byNumber(id)).rawValue
         }
         return out
     }
@@ -215,5 +237,8 @@ public enum FlexibleGroupFrames {
                 }
             }
         }
+        // ★ C5: past the eighth group a shared colour carries its group's NUMBER, painted on the heat
+        // the same way (FlexibleGroupNumbers) — on both pages, in every view and Play-all turn
+        FlexibleGroupNumbers.paint(&t, overlay: o, model: m)
     }
 }

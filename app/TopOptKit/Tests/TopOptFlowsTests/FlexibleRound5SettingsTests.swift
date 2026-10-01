@@ -143,10 +143,12 @@ final class FlexibleRound5SettingsTests: XCTestCase {
         FlexibleSqueezeGroups.newGroup(with: 2, in: &s)
         FlexibleSqueezeGroups.newGroup(with: 3, in: &s)
         var gs = FlexibleSqueezeGroups.groups(s)
-        XCTAssertEqual(gs.map { FlexibleSqueezeGroups.colourChoice(of: $0, in: s) }, [.green, .orange, .red], "the defaults")
-        // pick red for group 1: group 3 (red) takes group 1's green — each keeps its own
-        FlexibleSqueezeGroups.setColour(.red, group: gs[0].id, in: &s)
-        XCTAssertEqual(FlexibleSqueezeGroups.groups(s).map { FlexibleSqueezeGroups.colourChoice(of: $0, in: s) }, [.red, .orange, .green])
+        // ★ RE-PINNED (round 5 C5): groups 2 and 3 are pink and mint (S's orange and red were the
+        // warning and danger tokens — FlexibleGroupPaletteTests); the rule under test is unchanged
+        XCTAssertEqual(gs.map { FlexibleSqueezeGroups.colourChoice(of: $0, in: s) }, [.green, .pink, .mint], "the defaults")
+        // pick mint for group 1: group 3 (mint) takes group 1's green — each keeps its own
+        FlexibleSqueezeGroups.setColour(.mint, group: gs[0].id, in: &s)
+        XCTAssertEqual(FlexibleSqueezeGroups.groups(s).map { FlexibleSqueezeGroups.colourChoice(of: $0, in: s) }, [.mint, .pink, .green])
         // remove group 2: group 3 is renumbered 2 — and stays GREEN
         gs = FlexibleSqueezeGroups.groups(s)
         var noRemap = s
@@ -155,15 +157,16 @@ final class FlexibleRound5SettingsTests: XCTestCase {
         XCTAssertEqual(after.count, 2)
         XCTAssertEqual(after[1].regions, [3])
         XCTAssertEqual(FlexibleSqueezeGroups.colourChoice(of: after[1], in: s), .green, "a group keeps its colour through a renumber")
-        // ★ RED CONTROL: the renumber WITHOUT carrying the colours reads group 2's default (orange)
+        // ★ RED CONTROL: the renumber WITHOUT carrying the colours reads group 2's default (pink)
         for i in noRemap.faces.indices where noRemap.faces[i].squeezeGroup == 2 { noRemap.faces[i].squeezeGroup = nil }
         for i in noRemap.faces.indices where noRemap.faces[i].squeezeGroup == 3 { noRemap.faces[i].squeezeGroup = 2 }
         let stale = FlexibleSqueezeGroups.groups(noRemap)[1]
         XCTAssertNotEqual(FlexibleSqueezeGroups.colourChoice(of: stale, in: noRemap), .green, "control: without the carry it changes colour")
-        // the palette: DS tokens, four distinct, never purple, blue last (the dent heat is blue)
+        // the palette: DS tokens, distinct, never purple — ★ RE-PINNED (round 5 C5): EIGHT tokens, his
+        // "Add more colour tokens" (DS.Color.squeezeGroupPalette; FlexibleGroupPaletteTests measures them)
         let p = FlexibleGroupColour.allCases.map(\.rgba)
-        XCTAssertEqual(p, [DS.Color.accentGreen, DS.Color.warning, DS.Color.danger, DS.Color.accent])
-        XCTAssertEqual(Set(p.map { "\($0.r)|\($0.g)|\($0.b)" }).count, 4, "distinct")
+        XCTAssertEqual(p, DS.Color.squeezeGroupPalette)
+        XCTAssertEqual(Set(p.map { "\($0.r)|\($0.g)|\($0.b)" }).count, 8, "distinct")
         for c in p { XCTAssertFalse(FlexibleShownValuesTests.isPurple(c), "never purple") }
         XCTAssertFalse(p.contains(DS.Color.accentCyan), "cyan is the resting faces'")
         XCTAssertTrue(FlexibleShownValuesTests.isPurple(DS.Color.accentPurple), "control: the instrument sees purple")
@@ -178,12 +181,13 @@ final class FlexibleRound5SettingsTests: XCTestCase {
         // ★ RE-PINNED (batch S verification): colours are stored in NORMAL FORM — group 2's orange is
         // its number's own, so nothing is stored; `normalise` carries the colour it is SHOWN in through
         // a renumber either way (FlexibleRound5SettingsVerifyTests pins the carry with its control)
-        XCTAssertEqual(FlexibleSqueezeGroups.colourChoice(of: g2, in: m.settings), .orange, "the first free colour")
+        // ★ RE-PINNED (round 5 C5): group 2's colour is pink (was orange)
+        XCTAssertEqual(FlexibleSqueezeGroups.colourChoice(of: g2, in: m.settings), .pink, "the first free colour")
         XCTAssertNil(m.settings.groupColours, "its number's own colour: no entry")
         var gone = m.settings
         FlexibleSqueezeGroups.remove(group: FlexibleSqueezeGroups.first, into: g2.id, in: &gone)
-        XCTAssertEqual(FlexibleSqueezeGroups.groups(gone).map { FlexibleSqueezeGroups.colourChoice(of: $0, in: gone) }, [.orange],
-                       "it keeps orange when group 1 goes (renumbered 1)")
+        XCTAssertEqual(FlexibleSqueezeGroups.groups(gone).map { FlexibleSqueezeGroups.colourChoice(of: $0, in: gone) }, [.pink],
+                       "it keeps pink when group 1 goes (renumbered 1)")
         let key2 = m.settings.designInputs.hashValue
         XCTAssertNotEqual(key2, key, "premise: a new group IS a design change")
         m.setGroupColour(g2.id, .blue)
@@ -322,7 +326,7 @@ final class FlexibleRound5SettingsTests: XCTestCase {
         m.setWeightUnit(.lb)
         m.edit { $0.feel = "damped"; $0.finish = "none"; $0.topology = "gyroid" }
         m.newGroup(with: 3)
-        m.setGroupColour(FlexibleSqueezeGroups.first, .red)
+        m.setGroupColour(FlexibleSqueezeGroups.first, .mint)   // ★ C5: S's red is gone (mint holds its slot)
         m.removeFace(FlexibleHisProject.topA)
         m.edit { s in guard var f = s.face(5) else { return }; f.deepestMM = 6; s.setFace(f) }
         try await settle(m)

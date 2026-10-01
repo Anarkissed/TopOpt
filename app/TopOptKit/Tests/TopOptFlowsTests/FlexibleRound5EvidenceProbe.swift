@@ -77,8 +77,8 @@ final class FlexibleRound5EvidenceProbe: XCTestCase {
             }
             print("FLEX-R5-EVIDENCE settings \(tag): playing Group \(sq.groupNumber ?? -1) · k \(sq.exaggeration) · FE \(sq.fe)")
         }
-        // his pick: Group 2 in blue, Group 1 in red
-        m.setGroupColour(2, .blue); m.setGroupColour(1, .red)
+        // his pick: Group 2 in blue, Group 1 in terracotta (★ C5: S's red is gone)
+        m.setGroupColour(2, .blue); m.setGroupColour(1, .terracotta)
         m.select(3)
         var c = FlexiblePageChannels.channels(model: m, overlay: o, xray: true, drawnLattice: nil)
         FlexibleGroupFrames.paint(&c.tints, overlay: o, model: m)
@@ -86,7 +86,7 @@ final class FlexibleRound5EvidenceProbe: XCTestCase {
         let sq = FlexibleSettingsSquish.shown(model: m, overlay: o, channels: c, feCache: &cache)
         try render(mesh: o.mesh, tints: c.tints, dents: sq.dents, scale: Float(sq.exaggeration), bodyAlpha: FlexibleStagePage.xrayBodyAlpha,
                    settle: settle, view: Self.views[0], device: device, to: dir.appendingPathComponent("S_settings_picked_red_blue_iso.png"))
-        m.setGroupColour(1, .green); m.setGroupColour(2, .orange)
+        m.setGroupColour(1, .green); m.setGroupColour(2, .pink)
         // ── the main Flexible page after Save & Exit (the column squish; the lattice built)
         stage.didExitSettings()
         stage.apply(r.project, owned: true, pageUp: false)

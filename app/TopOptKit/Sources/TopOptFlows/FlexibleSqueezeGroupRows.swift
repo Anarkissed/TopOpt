@@ -153,15 +153,56 @@ struct FlexibleFaceGroupRow: View {
     var body: some View {
         if let mine = model.squeezeGroup(of: region), model.settings.loadedFaces.count > 1 {
             FlexRow(FlexibleRowCopy.groupRow, info: FlexibleRowCopy.Info.groupRow, id: "flexible-row-group") {
-                FlexChips(options: Self.options(model: model, region: region), selection: "\(mine.id)",
-                          id: "flexible-group", equalWidths: false) { v in
-                    if v == "new" { model.newGroup(with: region) } else if let g = Int(v) { model.moveToGroup(region, g) }
+                // ★ C5: the chips while they fit beside the row's words; past that (his ninth group on
+                // the C5 render pushed "Squeeze group" off its own row) ONE menu chip, "● Group 9 ▾"
+                ViewThatFits(in: .horizontal) {
+                    FlexChips(options: Self.options(model: model, region: region), selection: "\(mine.id)",
+                              id: "flexible-group", equalWidths: false) { v in pick(v) }
+                        .fixedSize()
+                        .background(frame("groupChips"))
+                    menu(mine).fixedSize().background(frame("groupMenu"))
                 }
-                .fixedSize()
-                .background(GeometryReader { g in
-                    Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["groupChips": g.frame(in: .global)])
-                }.allowsHitTesting(false))
             }
         }
+    }
+
+    private func pick(_ v: String) {
+        if v == "new" { model.newGroup(with: region) } else if let g = Int(v) { model.moveToGroup(region, g) }
+    }
+
+    private func frame(_ key: String) -> some View {
+        GeometryReader { g in
+            Color.clear.preference(key: FlexibleKeepOutKey.self, value: [key: g.frame(in: .global)])
+        }.allowsHitTesting(false)
+    }
+
+    /// The compact chip: the face's group in its colour; the menu lists every group (and + New).
+    private func menu(_ mine: FlexibleSqueezeGroup) -> some View {
+        Menu {
+            ForEach(Self.options(model: model, region: region), id: \.id) { o in
+                Button { pick(o.id) } label: {
+                    if o.id == "\(mine.id)" { Label(Self.menuTitle(o, model: model), systemImage: "checkmark") }
+                    else { Text(Self.menuTitle(o, model: model)) }
+                }
+            }
+        } label: {
+            HStack(spacing: 6) {
+                Circle().fill(model.groupColour(mine).color).frame(width: 10, height: 10)
+                Text(FlexibleRowCopy.groupName(mine.number)).font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(DS.Color.textPrimary.color)
+                Image(systemName: "chevron.down").font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(DS.Color.textSecondary.color)
+            }
+            .padding(.horizontal, 12).padding(.vertical, 9)
+            .background(Capsule().fill(DS.Color.background.opacity(0.35).color))
+            .overlay(Capsule().strokeBorder(DS.Color.strokeSubtle.color, lineWidth: 1))
+        }
+        .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden)   // the label as drawn (its own ▾)
+        .accessibilityIdentifier("flexible-group-menu")
+    }
+
+    /// A menu line: "Group 3", or "+ New".
+    static func menuTitle(_ o: (id: String, label: String), model: FlexibleStageModel) -> String {
+        Int(o.label).map { FlexibleRowCopy.groupName($0) } ?? o.label
     }
 }

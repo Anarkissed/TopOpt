@@ -125,42 +125,44 @@ final class FlexibleRound5SettingsVerifyTests: XCTestCase {
         FlexibleSqueezeGroups.newGroup(with: 3, in: &s)
         let before = s
         let gs = FlexibleSqueezeGroups.groups(s)
+        // ★ RE-PINNED (round 5 C5): S's orange / red are pink / mint (group 2's and 3's defaults); the
+        // normal form and the carry under test are unchanged
         // re-picking the swatch a group already wears: nothing changed
-        FlexibleSqueezeGroups.setColour(.orange, group: gs[1].id, in: &s)
+        FlexibleSqueezeGroups.setColour(.pink, group: gs[1].id, in: &s)
         XCTAssertEqual(s, before, "the same swatch: equal settings (the button stays \"Exit\")")
         // another, then the original back: equal again
         FlexibleSqueezeGroups.setColour(.blue, group: gs[1].id, in: &s)
         XCTAssertNotEqual(s, before)
-        FlexibleSqueezeGroups.setColour(.orange, group: gs[1].id, in: &s)
+        FlexibleSqueezeGroups.setColour(.pink, group: gs[1].id, in: &s)
         XCTAssertEqual(s, before, "back to the original: equal")
         // a swap and back
-        FlexibleSqueezeGroups.setColour(.red, group: gs[0].id, in: &s)
+        FlexibleSqueezeGroups.setColour(.mint, group: gs[0].id, in: &s)
         FlexibleSqueezeGroups.setColour(.green, group: gs[0].id, in: &s)
         XCTAssertEqual(s, before, "a swap and back: equal")
         // ★ RED CONTROL: round 5 stored every pick — the same swatch made the settings differ
         var raw = before
-        raw.groupColours = ["2": "orange"]
+        raw.groupColours = ["2": "pink"]
         XCTAssertNotEqual(raw, before, "control: an explicit entry for the default differs")
 
         // an UNSTORED colour is carried through a renumber (the groups made before round 5)
         let shown = FlexibleSqueezeGroups.groups(s).map { FlexibleSqueezeGroups.colourChoice(of: $0, in: s) }
-        XCTAssertEqual(shown, [.green, .orange, .red])
+        XCTAssertEqual(shown, [.green, .pink, .mint])
         XCTAssertNil(s.groupColours, "premise: nothing stored")
         let gs2 = FlexibleSqueezeGroups.groups(s)
         var control = s
         FlexibleSqueezeGroups.remove(group: gs2[1].id, into: gs2[0].id, in: &s)
         let after = FlexibleSqueezeGroups.groups(s)
         XCTAssertEqual(after.map(\.regions), [[1, 2], [3]])
-        XCTAssertEqual(FlexibleSqueezeGroups.colourChoice(of: after[1], in: s), .red, "group 3, now shown as 2, stays red")
+        XCTAssertEqual(FlexibleSqueezeGroups.colourChoice(of: after[1], in: s), .mint, "group 3, now shown as 2, stays mint")
         XCTAssertEqual(FlexibleSqueezeGroups.colourChoice(of: after[0], in: s), .green)
-        XCTAssertEqual(s.groupColours, ["2": "red"], "stored only where it differs from the number's default")
-        // ★ RED CONTROL: round 5 carried only STORED picks — group 3 turned orange
+        XCTAssertEqual(s.groupColours, ["2": "mint"], "stored only where it differs from the number's default")
+        // ★ RED CONTROL: round 5 carried only STORED picks — group 3 turned pink
         for i in control.faces.indices where control.faces[i].squeezeGroup == gs2[1].id { control.faces[i].squeezeGroup = nil }
         for i in control.faces.indices where control.faces[i].squeezeGroup == 3 { control.faces[i].squeezeGroup = 2 }
         control.groupColours = FlexibleSqueezeGroups.remapColours(control.groupColours, rank: [1: 1, 3: 2])
-        XCTAssertEqual(FlexibleSqueezeGroups.colourChoice(of: FlexibleSqueezeGroups.groups(control)[1], in: control), .orange,
+        XCTAssertEqual(FlexibleSqueezeGroups.colourChoice(of: FlexibleSqueezeGroups.groups(control)[1], in: control), .pink,
                        "control: the old carry changed its colour")
-        print("FLEX-R5V colours: same swatch / back / swap-and-back all equal · unstored group 3 → 2 keeps red (stored \(s.groupColours ?? [:]))")
+        print("FLEX-R5V colours: same swatch / back / swap-and-back all equal · unstored group 3 → 2 keeps mint (stored \(s.groupColours ?? [:]))")
     }
 
     // MARK: - S9: an edit while the part opens is a change

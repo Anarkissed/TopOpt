@@ -95,9 +95,12 @@ final class FlexibleSqueezeGroupsTests: XCTestCase {
 
     func testGroupColoursAreDSTokensAndNeverPurple() {
         XCTAssertEqual(FlexibleSqueezeGroups.colour(number: 1), DS.Color.accentGreen, "group 1 keeps the pressed faces' green")
-        // ★ RE-PINNED (round 5, S1): he picks each group's colour; the DEFAULTS run green, orange, red,
-        // blue — blue LAST, the dent heat is deep blue → cyan → white and a blue frame sank into it
-        XCTAssertEqual(FlexibleSqueezeGroups.palette, [DS.Color.accentGreen, DS.Color.warning, DS.Color.danger, DS.Color.accent])
+        // ★ RE-PINNED (round 5, S1): he picks each group's colour; ★ RE-PINNED (round 5 C5, his "Add more
+        // colour tokens"): the DEFAULTS are the eight DS tokens in order — green, pink, mint, blue, yellow,
+        // teal, olive, clay (FlexibleGroupPaletteTests measures them; S's orange / red were the
+        // warning / danger tokens)
+        XCTAssertEqual(FlexibleSqueezeGroups.palette, DS.Color.squeezeGroupPalette)
+        XCTAssertEqual(FlexibleSqueezeGroups.palette.count, 8)
         for n in 1...12 {
             XCTAssertFalse(FlexibleShownValuesTests.isPurple(FlexibleSqueezeGroups.colour(number: n)), "group \(n) is never purple")
         }
