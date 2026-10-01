@@ -162,6 +162,10 @@ struct FlexibleFaceGroupRow: View {
                         .background(frame("groupChips"))
                     menu(mine).fixedSize().background(frame("groupMenu"))
                 }
+                // offered the row's whole width before its spacer (the words keep theirs: priority 1),
+                // so the chips show whenever they fit beside the WHOLE words (measured: up to five
+                // groups; six chips need ≈ 186 pt, a few more than the row leaves)
+                .layoutPriority(0.5)
             }
         }
     }

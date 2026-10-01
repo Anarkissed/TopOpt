@@ -127,10 +127,23 @@ final class FlexibleGroupPaletteHostedTests: XCTestCase {
             XCTAssertGreaterThan(row.minX, rail.maxX, "\(tag): beside the rail")
             XCTAssertLessThanOrEqual(row.maxX, panel.maxX - 8, "\(tag): inside the panel")
             XCTAssertGreaterThanOrEqual(row.minX, line.minX, "\(tag): inside the tab's column")
+            // the row's words keep their room: "Colour" whole to the left of the swatches (the row's
+            // control is right-aligned before its (i), so an overflow squeezes the words first)
+            let words = ("Colour" as NSString).size(withAttributes: [.font: NSFont.systemFont(ofSize: 13, weight: .semibold)]).width
+            XCTAssertGreaterThanOrEqual(row.minX - line.minX, words + 8, "\(tag): \"Colour\" keeps its \(Int(words.rounded())) pt")
             // ★ RED CONTROL (a mutation run, C5_mutations.txt): 40 pt swatches push the row past the panel
             // and this test goes RED — the instrument sees an overflow
-            report.append(String(format: "%@ row x %.0f–%.0f (w %.0f, h %.0f) · panel x %.0f–%.0f · rail to %.0f", tag,
-                                 row.minX, row.maxX, row.width, row.height, panel.minX, panel.maxX, rail.maxX))
+            report.append(String(format: "%@ row x %.0f–%.0f (w %.0f, h %.0f) · words from %.0f need %.0f · panel x %.0f–%.0f · rail to %.0f", tag,
+                                 row.minX, row.maxX, row.width, row.height, line.minX, words, panel.minX, panel.maxX, rail.maxX))
+            // the selected face's "Squeeze group" row: ONE line, its words whole, whichever control fits
+            // (the chips while they fit beside the whole words, else the "● Group 6 ▾" menu chip)
+            let card = try XCTUnwrap(local(h, "faceCard"), "\(tag): the selected face's card")
+            let control = try XCTUnwrap(local(h, "groupChips") ?? local(h, "groupMenu"), "\(tag): the group row's control")
+            let groupWords = ("Squeeze group" as NSString).size(withAttributes: [.font: NSFont.systemFont(ofSize: 13, weight: .semibold)]).width
+            XCTAssertGreaterThanOrEqual(control.minX - card.minX, groupWords, "\(tag): \"Squeeze group\" keeps its room")
+            XCTAssertLessThanOrEqual(control.maxX, card.maxX, "\(tag): inside the card")
+            XCTAssertLessThanOrEqual(control.height, 36, "\(tag): one line")
+            report.append("\(tag) group row: \(local(h, "groupChips") != nil ? "chips" : "menu") x \(Int(control.minX))–\(Int(control.maxX))")
             snapshot(h, "C5_\(tag)_six_groups.png")
         }
         print("FLEX-C5-HOSTED swatches: " + report.joined(separator: " | "))
@@ -215,9 +228,13 @@ final class FlexibleGroupPaletteHostedTests: XCTestCase {
         // the faces: groups 1 and 9 (and only they) carry their number, painted on the heat of each face,
         // its up the part's up (+Z on this prism) and read from outside
         let o = try XCTUnwrap(FlexiblePageChannels.overlay(model: m))
-        var t = try XCTUnwrap(FlexiblePageChannels.channels(model: m, overlay: o, xray: true, drawnLattice: nil).tints)
-        let lit = FlexibleGroupNumbers.paint(&t, overlay: o, model: m)
+        let base = try XCTUnwrap(FlexiblePageChannels.channels(model: m, overlay: o, xray: true, drawnLattice: nil).tints)
+        var probe = base
+        let lit = FlexibleGroupNumbers.paint(&probe, overlay: o, model: m)
         XCTAssertGreaterThan(lit, 0, "digits painted")
+        // the PAGES' call — the frames' paint (both pages, every view, every Play-all turn) — paints them
+        var t = base
+        FlexibleGroupFrames.paint(&t, overlay: o, model: m)
         let (up, fallback) = FlexibleGroupNumbers.upAndFallback(m)
         XCTAssertGreaterThan(up.z, 0.99, "the prism stands on its bottom: up is +Z")
         var lines: [String] = []

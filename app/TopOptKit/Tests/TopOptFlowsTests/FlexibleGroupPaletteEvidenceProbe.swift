@@ -81,7 +81,8 @@ final class FlexibleGroupPaletteEvidenceProbe: XCTestCase {
         try await FlexibleSquishFixture.settle(pmModel, "nine groups")
         let pSettle = simd_quatf(from: SIMD3<Float>(0, 0, -1), to: SIMD3<Float>(0, -1, 0))
         let (po, ptints, psq) = try settingsPicture(pmModel)
-        for v in Self.views {
+        // and straight down: the top face's "1" sits in its least-squished corner, under the back walls
+        for v in Self.views + [("down", Float(0), Float(1.45))] {
             let url = dir.appendingPathComponent("C5_prism_nine_groups_\(v.0).png")
             try render(mesh: po.mesh, tints: ptints, dents: psq.dents, scale: Float(psq.exaggeration), bodyAlpha: FlexibleStagePage.xrayBodyAlpha,
                        settle: pSettle, view: v, device: device, to: url)
