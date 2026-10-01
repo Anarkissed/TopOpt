@@ -15,6 +15,10 @@
 // ★ SAFE TO EXAGGERATE (`gradientBound`): gmax is the EXACT maximum of ‖∇u‖₂ over every cell
 // (the trilinear Jacobian peaks at a cell corner), so at s · gmax ≤ ½ the map p ↦ p + s·u(p) is
 // injective and its fixed-point inverse converges (FlexibleShownValues caps the page's ×k by it).
+// ★ NEVER PAST ITS OWN FOLD AT ×1 (batch G verification): the page never draws below ×1, so a
+// field whose calibrated k would put the PART's own gradient past ½ at ×1 is cut to k·gmax = ½
+// (`foldShare` — said in the Squish legend's (i)). His Group 1 at k 2 was at s·gmax 2.2: the
+// walls' pull-back missed by up to 9.2 mm and 445 columns of the pressed Top B rose 7.8 mm.
 
 import Foundation
 import simd
@@ -52,7 +56,15 @@ public struct FlexibleFEField: Sendable, Equatable {
     /// stiffer picture — FlexibleFERequest.solve's one retry).
     public var restsBonded = false
     /// The band held k back (the field moves less, or more, than the map reads).
-    public var clamped: Bool { abs(coreRatio - scale) > 1e-9 * max(1, abs(scale)) && !uncalibrated }
+    public private(set) var clamped = false
+    /// ★ The share of the calibrated k kept so the picture never folds at ×1 (nil: not cut).
+    public private(set) var foldShare: Double?
+    /// max ‖∇u‖₂ over the PART's cells (all 8 corners solved) — the fold cap's gradient (the
+    /// extension outside the part may be steeper where pieces move apart: the M2 stand's air 2.51
+    /// vs 0.83 in the part).
+    public private(set) var gmaxPart: Double = 0
+    /// The largest scale the PART's own map stays injective at.
+    public var partSafeScale: Double { gmaxPart > 1e-12 ? FlexibleFE.safeGradient / gmaxPart : .infinity }
     /// Identity (fields are compared by it, never by their megabytes).
     public let serial: Int
 
@@ -101,6 +113,7 @@ public struct FlexibleFEField: Sendable, Equatable {
     private mutating func refreshBounds() {
         maxDisplacement = u.reduce(0) { Swift.max($0, simd_length($1)) }
         gmax = gradientBound()
+        gmaxPart = gradientBound(solvedOnly: true)
     }
 
     /// This field with every displacement × k (the calibration). `asked`: the k the deepest zone
@@ -265,11 +278,22 @@ public struct FlexibleFEField: Sendable, Equatable {
     }
 
     /// This field scaled so its deepest zone compresses core's squish there — k kept inside
-    /// `band` (nil: unbounded — a shape-only lattice, whose law is in relative units).
-    public func calibrated(to targets: [Target], band: ClosedRange<Double>? = FlexibleFE.calibrationBand) -> FlexibleFEField {
+    /// `band` (nil: unbounded — a shape-only lattice, whose law is in relative units) — and, with
+    /// `foldCap`, cut so the part's own map stays injective at the page's ×1 (k · gmaxPart ≤ ½).
+    public func calibrated(to targets: [Target], band: ClosedRange<Double>? = FlexibleFE.calibrationBand,
+                           foldCap: Bool = true) -> FlexibleFEField {
         let c = calibration(targets)
-        let k = band.map { Swift.min($0.upperBound, Swift.max($0.lowerBound, c.k)) } ?? c.k
-        return scaled(by: c.uncalibrated ? 1 : k, uncalibrated: c.uncalibrated, asked: c.k)
+        let banded = c.uncalibrated ? 1 : (band.map { Swift.min($0.upperBound, Swift.max($0.lowerBound, c.k)) } ?? c.k)
+        var k = banded
+        var share: Double?
+        if foldCap, gmaxPart * k > FlexibleFE.safeGradient {
+            k = FlexibleFE.safeGradient / gmaxPart
+            share = k / banded
+        }
+        var f = scaled(by: k, uncalibrated: c.uncalibrated, asked: c.k)
+        f.clamped = !c.uncalibrated && abs(banded - c.k) > 1e-9 * Swift.max(1, abs(c.k))
+        f.foldShare = share
+        return f
     }
 }
 

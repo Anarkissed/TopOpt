@@ -80,6 +80,7 @@ enum Control : int {
   kLongSolve = 4096,
   kFixedCap = 8192,
   kKeepGlobals = 16384,
+  kNoFarAnvil = 32768,
 };
 
 std::mutex g_squish_fe_mu;
@@ -697,15 +698,38 @@ FlexSquishSolution solve(const Setup& s, const FlexSquishRequest& req, const fx:
     mode = "patch";
   }
   if (mode.empty() && !s.resting.empty()) {
+    std::vector<int> restingFaces;
     for (const auto& r : s.resting) {
       std::vector<int> nodes;
       Vec3 n;
       sole(r.member_triangles, r.cuts, nodes, n);
       bool anvil = false;
-      for (int face : r.member_faces)
+      for (int face : r.member_faces) {
+        restingFaces.push_back(face);
         if (std::find(anvilFaces.begin(), anvilFaces.end(), face) != anvilFaces.end()) anvil = true;
+      }
       const bool bonded = (control & kRollerRest) ? false : ((control & kBondedRests) != 0 || anvil);
       hold(nodes, n, bonded);
+    }
+    // ★ THE FAR END IS THE ANVIL (batch G verification): a pressed stack's other end that neither
+    // rests nor is pressed by this group is where core designs its columns to be squeezed against
+    // — held along its normal (a smooth wall). Without it a side press on a pad lying on a table
+    // (his Group 2: Face 3 alone, the bottom resting) balanced its push by inertia relief, and in
+    // the frame that removes the part's motion the far face (Face 5) moved IN 4.25 mm — it read as
+    // a two-sided pinch; and his Group 1's 10 kg thumb on Face 5 sheared the pad over its gripped
+    // bottom (s·gmax 2.2 at ×1: the walls tore and Top B rose 7.8 mm). Control 32768: batch G's rule.
+    if (!(control & kNoFarAnvil)) {
+      for (int face : anvilFaces) {
+        if (std::find(restingFaces.begin(), restingFaces.end(), face) != restingFaces.end()) continue;
+        std::vector<int> tris;
+        for (std::size_t t = 0; t < s.model->triangle_face.size(); ++t)
+          if (s.model->triangle_face[t] == face) tris.push_back(static_cast<int>(t));
+        std::vector<int> nodes;
+        Vec3 n;
+        sole(tris, {}, nodes, n);
+        hold(nodes, n, false);
+        if (!nodes.empty()) out.far_anvils += 1;
+      }
     }
     if (!bcs.empty()) mode = "rest";
   }

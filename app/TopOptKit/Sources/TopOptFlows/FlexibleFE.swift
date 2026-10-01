@@ -67,15 +67,33 @@ public enum FlexibleFE {
     public static let pending = "Simulating the squish…"
     /// The player's note when the shown group's sim failed (core's words behind the (i)).
     public static let failed = "Simple squish · the sim failed"
+    /// ★ BATCH G VERIFICATION: "Play all" plays the others while this group's sim failed.
+    public static func skipped(_ group: String) -> String { "\(group) skipped · its sim failed" }
     /// The Squish legend's (i), in FE mode — one sentence. `stiffer`: the sim found the part this
     /// many times stiffer than core's columns (k past its band) — said, since it then moves less
     /// than the map reads. `largeStrain`: even the page's ×k is past s · gmax ≤ ½. `bonded`: the
     /// sliding rests' solve did not settle and the one retry held every rest fast (a stiffer
     /// picture) — said.
-    public static func info(exaggeration k: Int, stiffer: Double? = nil, largeStrain: Bool = false, bonded: Bool = false) -> String {
+    /// ★ BATCH G VERIFICATION: `foldShare` — the field was cut to this share of its calibrated size
+    /// so it never folds at ×1 (FlexibleFEField.calibrated) — said; and a band-held k is said in
+    /// every case (it hid behind the large-strain sentence: his Face 5 moved ~⅓ of what it read).
+    public static func info(exaggeration k: Int, stiffer: Double? = nil, largeStrain: Bool = false, bonded: Bool = false,
+                            foldShare: Double? = nil) -> String {
         let sim = bonded ? "a linear 3D sim with every rest held fast (sliding, it did not settle)" : "a linear 3D sim"
+        let finds: String = {
+            if let r = stiffer, r > 1 { return String(format: " that finds this part %.0f× stiffer than core's columns (its skin and walls carry load)", r) }
+            if let r = stiffer, r > 0, r < 1 { return String(format: " that finds this part %.0f× softer than core's columns", 1 / r) }
+            return ""
+        }()
+        if let share = foldShare {
+            let pct = Swift.max(1, Int((share * 100).rounded()))
+            return "The shape moves by \(sim)\(finds), cut to \(pct)% so the picture never folds (the sim leaves small strain here) — tap here, then the part, for core's mm."
+        }
         if largeStrain {
             // even ×1 is past s · gmax ≤ ½: the linear sim has left small strain here
+            if !finds.isEmpty {
+                return "The shape moves by \(sim)\(finds), and it leaves small strain here, so the picture can fold where real TPU would stiffen — tap here, then the part, for core's mm."
+            }
             return "The shape moves by \(sim) that leaves small strain here, so the picture can fold where real TPU would stiffen — tap here, then the part, for core's mm."
         }
         if let r = stiffer, r > 1 {

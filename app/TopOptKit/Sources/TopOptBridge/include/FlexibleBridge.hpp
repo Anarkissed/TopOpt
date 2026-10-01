@@ -521,8 +521,9 @@ struct FlexSquishRequest {
                          // . 1024 unprojected traction . 2048 every rest bonded — the app's one
                          // retry when a solve whose rests slide does not converge) . 4096 the
                          // iteration budget lifted (a reference solve) . 8192 the old fixed 600
-                         // iterations . 16384 core's GenEO + Krylov recycling left as found); else
-                         // the app sends 0
+                         // iterations . 16384 core's GenEO + Krylov recycling left as found
+                         // . 32768 a pressed stack's far end NOT held when other faces rest —
+                         // batch G's rule, the red control of the far anvil); else the app sends 0
 };
 struct FlexSquishSolution {
   bool ok = false;
@@ -530,6 +531,8 @@ struct FlexSquishSolution {
   std::string bc_mode;                   // rest | exit | free | patch (control 2)
   int32_t free_modes = 0;                // rigid modes the rests leave free (6: nothing rests), each
                                          // relieved (inertia relief) and pinned by one DOF
+  int32_t far_anvils = 0;                // pressed stacks' far ends held along their normal beside
+                                         // the rests (neither resting nor pressed by the group)
   int32_t coarsen = 1;
   int32_t nx = 0, ny = 0, nz = 0;        // FE NODE counts
   double spacing = 0.0;

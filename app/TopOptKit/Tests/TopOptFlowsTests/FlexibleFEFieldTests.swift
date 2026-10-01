@@ -61,7 +61,9 @@ final class FlexibleFEFieldTests: XCTestCase {
                              sim.id, f.scale, f.coreRatio, "\(f.clamped)", c.k, c.zone))
                 if f.clamped {
                     // past the band: held at its edge and SAID (the (i) names how much stiffer)
-                    XCTAssertEqual(f.scale, FlexibleFE.calibrationBand.upperBound, accuracy: 1e-9)
+                    // ★ RE-PINNED (batch G verification): …and cut below the edge when even that would
+                    // fold at ×1 (FlexibleFEField.foldShare, said too)
+                    XCTAssertEqual(f.scale, FlexibleFE.calibrationBand.upperBound * (f.foldShare ?? 1), accuracy: 1e-9)
                     XCTAssertGreaterThan(f.coreRatio, FlexibleFE.calibrationBand.upperBound)
                     XCTAssertTrue(FlexibleFE.info(exaggeration: 1, stiffer: f.coreRatio).contains("stiffer than core's columns"))
                 } else {

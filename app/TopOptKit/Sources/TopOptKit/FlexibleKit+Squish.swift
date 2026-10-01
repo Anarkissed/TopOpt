@@ -111,6 +111,8 @@ public struct FlexSquishSolutionInfo: Sendable {
     /// 3 · node + component of every Dirichlet DOF.
     public let pinnedDOFs: [Int]
     public let restingMissing: [Int]
+    /// Far ends of pressed stacks held along their normal beside the rests (their anvils).
+    public var farAnvils: Int = 0
 
     /// Node (a, b, c)'s index (x fastest).
     public func node(_ a: Int, _ b: Int, _ c: Int) -> Int { (c * ny + b) * nx + a }
@@ -176,7 +178,7 @@ extension FlexibleScene {
             recyclingDuring: s.recycling_during,
             pressLoads: loads, pressForceN: Array(s.press_force_n), pressRawForceN: Array(s.press_raw_force_n),
             heldNodes: Array(s.held_nodes).map { Int($0) }, pinnedDOFs: Array(s.pinned_dofs).map { Int($0) },
-            restingMissing: Array(s.resting_missing).map { Int($0) })
+            restingMissing: Array(s.resting_missing).map { Int($0) }, farAnvils: Int(s.far_anvils))
     }
 }
 
