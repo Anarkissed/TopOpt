@@ -1,5 +1,199 @@
 # Handoff — 2026-09-29-flexible-screens (TRACK app, A1): the Flexible screens
 
+## Round 5 · batch E — "a protected face isn't frozen" (your item 4)
+
+Your words: "For some reason a protected face is considered frozen - however, that is how we make a
+lattice and protected from TO. Please fix this so a protected face isn't frozen."
+
+**The cause was the split, not protection.** 'top A' on your pad is a cut piece of face 1 (region
+103, x ≥ 50), and your 'Top' group is not even protected (Protect is on 'sides' and 'bottom' only).
+#354's rule dropped every cut piece — and every union of pieces — from the lattice, so:
+- the row said "Frozen, not latticed" under "Out of regime" (img 4);
+- the Lattice button said "nothing set to lattice";
+- the Flexible job, given no lattice region, latticed the WHOLE part.
+
+Fixed on this branch, as you asked, in its own commits. Three of them touch only #354's rule and its
+tests and are built to cherry-pick onto #354 (`ad00765f`, `3cb4da7d`, `7a9e0302`; simulated onto #354's
+head `606c613a`: clean; not built there). **The app was NOT launched: nothing here has been seen on a
+device or simulator.**
+
+**What you will see:**
+- **Main page, Selections:** 'top A' reads like any latticed piece — no "Frozen" chip, no "Out of
+  regime". The Lattice button lattices it.
+- **The lattice sits only on top A's side of the cut** (offscreen frames of the shipping renderer on
+  a pad built like yours — 100 × 100 × 20, top cut at x = 50 — `batch_e/E_split_pad_topA_iso.png`,
+  `…_topA_above.png`; your own project is checked by the numbers below, not rendered). With top B latticed too, the two halves meet with no wall between them
+  (`…_topA_and_topB_iso.png`); with top B not latticed, the lattice ends at the cut under a wall, as it
+  does at any face edge.
+- **The words, when a region still cannot be latticed** (only a region with no surface left on the
+  model): "Protected, not latticed" for a protected group, else "Not latticed". Never "Frozen", never
+  "Out of regime".
+- **Your 'Union of 2'** (round 5: top A + top B in 'Top') is latticed too, both halves, at the union
+  row's depth (4 mm — the row you see; 'top A' and its 25 mm are folded under it).
+- **This also changes Structural and Aesthetic runs** for any split piece set to Lattice. None of
+  your other projects has one: their job bytes are identical (below).
+
+**The Flexible side (your pad) — the lattice now goes where your main page says:**
+- **Round 3 copy (img 4):** the Flexible lattice is top A's 25 mm prism — the right half of the pad.
+  Top B is still pressed, with no lattice under it, so it cannot squish. The page says so at once:
+  - Settings line: "Ready · No lattice under Top B" with [Fix];
+  - main page pill: "No lattice under Top B" (a tap opens the fix);
+  - the pop-up: "Top B has no lattice under it, so it can't squish" — **[Lattice under it] [Top B
+    rests]**.
+- **[Lattice under it]** makes a main-page group 'Top B', **Protected + Lattice** (your rule), 20 mm
+  deep (the pad under it). No load moves. One undo step. The part re-opens with lattice under every
+  column of top B.
+  (A face already in a group that may carry a lattice role gets that row's own "Lattice" tap instead.)
+- **Round 5 copy:** the union lattices the top 4 mm. Faces 3 and 5 have lattice under only 23 % of
+  their columns: "Only 23 % of Face 3 has lattice under it". [Lattice under it] makes 'Face 3' and
+  'Face 5' (50 mm each). After those two taps the whole pad is latticed again.
+- **Never a blocker.** Exit still builds the lattice; the face just would not squish.
+
+**Not done:**
+- **Not seen on a device or the simulator** (track rule). The iOS build succeeds.
+- **The cherry-pick onto #354 was simulated (clean), not built.** #354 is 11 commits ahead of what
+  this branch has merged.
+- **The HIS_PROJECT_DIR probes** (`LatticeHisProjectRenderProbe`, `LatticeHisSteppedBakeProbe`) were not
+  run. They need a model.step. Your stand has no split piece, so its stage job is byte-identical and
+  their picture cannot move. Your pad is an STL; its pictures are the frames above.
+- **A union of pieces still gets no 3D depth handle** on the main page (it had none before). A cut
+  piece's handle now sits over the piece only.
+- **A protected union of pieces**: the protection still goes to core as region 105 with no faces
+  (`FaceRegion.kitSpec` carries no parts — batch M's "Couldn't simulate"). Not touched; #354's.
+
+**Your call:**
+1. **The round-5 'Top' row reads 4 mm** (the union's own row). The run follows it; 'top A' (25 mm)
+   is folded under the union, as the Selections list shows. Should a folded piece's own depth win
+   where it differs?
+2. **[Lattice under it] makes a new protected group** when the face is in none. The other choice is to
+   add the face to the group that presses it (e.g. top B into 'Top', as you did in round 5) — but that
+   group's load would then spread over it. Which?
+3. **The threshold**: the line appears when under half of a pressed face's columns have lattice.
+4. **Or no tap at all**: should a pressed Flexible face ALWAYS get lattice under it? That would change
+   round 3's rule ("the main page's Lattice roles decide where the Flexible lattice goes").
+
+### How it works (`LatticeSectorOutline.swift`, new)
+
+- A piece is its member faces ∩ its half-spaces. On a planar face — or each planar facet of a curved
+  one (`LatticeFaceFacets`) — every half-space is a half-PLANE in the face's own frame. Each member's
+  outline loops are clipped to it and emitted as ordinary face prisms under the piece's own key (its
+  role, depth, expand, density). Core's `region_contains`, #354's previews and C1 Flexible all read
+  `outline_uv` even-odd: **no core change**.
+- The clip keeps loops simple: a cut across a concave outline gives separate loops, never a
+  zero-width bridge along the cut (a bridge would be an outline edge over air, and every rim reads
+  edges). Sutherland–Hodgman is only the fallback.
+- **The cut edge** reads the piece's own face: `finishSeams` makes it a SEAM when the sibling piece is
+  latticed and leaves it a RIM when not. A piece cut again first has its neighbour's long edge split
+  at the T (the seam test matches edges end to end).
+- **One surface, told once:** a piece whose ancestor in the same group (its union, the face it was cut
+  from) emits its surface with the same role is skipped — ruling (g)'s own test, so it is never named
+  as left out either.
+- **Byte-identical without cuts:** a face no cut touches takes exactly the shapes it always took.
+- **The expand** crosses a cut edge like any face edge (your "every direction"), unless it is a seam.
+- **The row's 3D depth handle** for a piece is built from the piece's own clipped surface.
+- Protected + Lattice on a piece: latticed, and protected to the depth its slab emits (round 3
+  ruling a); core's parser accepts the stage job.
+
+### Hook lines in #354 / main files (each grepped after the edit)
+
+| file | anchor | +/− | why |
+|---|---|---|---|
+| ProjectModel.swift | `latticeJobRegions`: `regionMembers: { [weak self] gid, rid in self?.latticeEmittedRegionMembers(gid, rid) },` | 1 edited | one surface told once (the dedupe) |
+| ProjectModel.swift | `regionCuts: { [weak self] rid, f in self?.latticeRegionCutSets(rid, face: f) ?? [[]] },   // ★ batch E` | +1 | each member's half-spaces |
+| ProjectModel.swift | `latticeRegionMembers`: `if let r = faceRegions.region(rid), !r.cuts.isEmpty \|\| !r.parts.isEmpty { return latticeSectorMembers(rid) }` and its doc line | +1, 1 edited | a piece / union reaches the run iff it keeps surface |
+| ProjectModel.swift | `latticeRegionDepthPlane`: `in: latticeSectorMesh(rid) ?? mesh)   // ★ batch E: a split piece's own surface` | 1 edited | the row's handle over the piece |
+| LatticeRegionEmission.swift | `regionCuts: (RegionID, FaceID) -> [[RegionCut]] = { _, _ in [[]] },` (+ its comment) | +2 | the parameter; its default keeps every call byte-identical |
+| LatticeRegionEmission.swift | `var sectorPieces = Set<Int>()` | +1 | the prisms that were clipped |
+| LatticeRegionEmission.swift | `let piece = LatticeSectorOutline.pieces(…)` / `for r in piece.shapes {` | +1, 1 edited | the member loop through the clip |
+| LatticeRegionEmission.swift | `if piece.clipped { sectorPieces.insert(out.count) }` | +1 | |
+| LatticeRegionEmission.swift | `if emitted == 0, !piece.clippedAway { skipped += 1 }` | 1 edited | a face outside the piece is not a skipped face |
+| LatticeRegionEmission.swift | `LatticeSectorOutline.meetAtTJunctions(&out, pieces: sectorPieces)` before `finishSeams` | +1 | the T |
+| WorkspacePlaceholder.swift | the row chip: `Text(LatticeSectorOutline.notLatticedWords(protected: force.isProtected(g.id)))` | 1 edited | "Protected" only when protected |
+| WorkspacePlaceholder.swift | `static let latticeRegionNotConsumed = LatticeSectorOutline.notLatticedWords(protected: true)` | 1 edited | never "Frozen" |
+| LatticeRegionDrawer.swift | the unreachable headline: the words + `.noMaterial`; `verdict: .noMaterial` | 2 edited | never "Out of regime" |
+
+No core file. No new case in `LatticeStageMode`. The Flexible half touches Flexible files only
+(FlexibleReadiness, FlexibleFixPopup, FlexibleStagePage, FlexibleMainStage; new FlexibleLatticeUnder).
+
+### #354 tests changed (where the old behaviour IS the bug)
+
+- `LatticeSeparationRegionTests.testARegionsLatticeChoiceIsCapturedAndTheRowSaysItIsNotConsumed`:
+  "Frozen, not latticed" → "Protected, not latticed" (the drawer is `held: true`), and not `.outOfRegime`.
+- `LatticeRegionEmissionFaceRegionsTests.testACutSectorAndAnExcludedRegionEmitNothing`: comment only
+  (nil members still emit nothing; a cut sector now has members). Name kept.
+- `LatticeVariantFaceWallsTests.testACutSectorIsCountedAndNamedOnTheStageAndTheVariant` (ruling g): a cut
+  child is now latticed (told once by a parent with the same role; emitted Include under an Off parent,
+  Exclude as a Solid child — never named); the naming, the variant line and the banners are pinned on
+  a piece with no surface (the wall cut at y = 50).
+
+**Flexible tests changed:** `FlexibleBatchBReviewTests.testANewLatticeRegionOnTheMainPageRebuilds` (the
+scene re-opened: by its key, not its voxel count — the taps made the lattice the whole part).
+`FlexibleHisProject.restore` replays the taps (`asSaved: true` restores his project as saved).
+
+### Proof
+
+**His projects' stage job bytes, before (`fb715885`) and after (`ad00765f`, and again on `7a9e0302`)**, dumped with the app's own
+`makeLatticeRunRequest` (`LatticeJobJSONDump`, `SWIFT_DETERMINISTIC_HASHING=1`), each from a fresh copy:
+- his store (P2, the 7 projects round 3 hashed) and the A1 simulator (4 projects): **10 of 10 unsplit
+  projects byte-identical** (the stand 68BF7B74 `38913b3fe56f021f` = `38913b3fe56f021f`, …);
+- the split pad moves, as intended: round 3 copy 0 → 1 lattice region (top A, 25 mm, outline x 50…100),
+  round 5 copy / live 0 → 2 (the union's halves, 4 mm). Their cell window moves with it (Auto now has
+  an include wall).
+- `batch_e/stage_job_hashes.txt`, `pad_r3_stage_job.diff`, `pad_r5_stage_job.diff`.
+
+**Tests** (each comparison has its control beside it; every behaviour test RED by mutation):
+
+| test | pins | RED control |
+|---|---|---|
+| `LatticeSectorOutlineTests` (17) | the clip: half the face on its own side (positional), x = 90 → 1000 mm², the cut edge reads the own face, a hole, a U gives two loops and no bridge, outside/inside/two cuts, a tilted face; the emission: no cut = unchanged, a piece's side only, a face outside the piece is not skipped, a face with no outline is; the pad: reaches the run, one prism on x ≥ 50, seam vs rim, the T, protected + latticed + core accepts, the words, the handle | 6 RED before the hooks (`red_before_hooks.txt`); mutations M1–M10, D1, D2 RED |
+| `LatticeSectorRenderTests` (3 + evidence) | the preview's region field (octet "doubled", stepped): top A 22 620 voxels on x > 50, 0 on x < 50 — top B latticed: the mirror; organic: 1 485 capsules, every one at x ≥ 51.04; real frames: top A lights 6 648 px on one half and 0 on the other, top B the opposite | the flip (top B) in each; mutations M3–M5 RED |
+| `LatticeSectorHisProjectTests` (2) | your round 3 copy: top A one prism, 5000 mm², x 50…100, 25 mm, nothing left out; round 5: the union's two halves, top A told once, 10 000 mm² with no overlap, a seam | M2 (no dedupe), M3, M4, M7 RED |
+| `FlexibleLatticeUnderTests` (3) | the rule on values; your pad: FlexibleJob.regions = top A's prism, top B 0 % / top A 100 %, said, the main pill, the tap makes 'Top B' (protected, Lattice, 20 mm), top B then 100 %; the fixture's taps are the page's own offer | mutations F1–F7 RED |
+
+Mutation runs: `batch_e/mutations_region_fix.txt` (10 of 11 RED; M11 — "an empty cut set still goes
+through the clip" — is an equivalent mutant: the clip returns the face untouched), 
+`mutations_flexible.txt` (7 of 7 RED), and D1/D2 (2 of 2 RED).
+
+### Build and suite (raw lines, this Mac)
+
+- `swift build --build-tests` → `Build complete!` (every build in this batch; core untouched, no
+  `build_core.sh`).
+- **Targeted suite** on `120e4d76` (every `Flexible*`, every `Lattice*`, `Organic*`, `Smoothing*`,
+  `Surface*`, `FaceRegion*`, `Variant*`, `FrozenRegion*`, `UnifiedShadingTests`, `ViewerTests`,
+  `StageBackdropTests`, `ProjectStoreTests`, `UndoHistoryTests`, `BottomBarMeasurementTests`,
+  `GroupViewStateTests`, `ProtectFreezeVsSolidityTests`, `StrutLineWidthTests`):
+  `Executed 2038 tests, with 44 tests skipped and 13 failures (0 unexpected) in 13676.728 (13676.913) seconds`.
+  The failing tests: the four known — `LatticeCellGradingTests.testGradingChangesTheRenderedLattice`,
+  `LatticeSimSolveTriggerTests.testTheTriggerRefusesOnAllThreeGrounds`,
+  `OrganicSampleCubeTests.testThickerIsLiveAndNeverRetraces`,
+  `OrganicVariantCacheTests.testTheKeyIgnoresThicknessAndFollowsCoreAndTopology` — and
+  `LatticeVariantFaceWallsTests.testACutSectorIsCountedAndNamedOnTheStageAndTheVariant`, which pinned
+  the old drop; re-pinned in `7a9e0302` (rerun: `Executed 8 tests, with 0 failures`; RED with the old
+  member rule: 5 assertions). `AppModelTests` (3MF ×3, known) is outside this filter.
+- Before the fixture's taps (the region fix alone), the first 51 `Flexible*` tests already showed 3
+  failures — `FlexibleBatchMDentTests` ×2 and `FlexibleBatchMVerifyTests.testEachGroupsStressIsOnItsOwnScaleAndThePartIsNotOneColour`
+  (their whole-part lattice was gone); with the taps all three pass (`Executed 3 tests, with 0 failures`).
+  That run was stopped there to test the final code once.
+- **iOS:** `xcodebuild … -derivedDataPath …/DerivedData/flexA1 build` → `** BUILD SUCCEEDED **`;
+  `LatticeSectorOutline.o`, `FlexibleLatticeUnder.o`, `ProjectModel.o`, `FlexibleReadiness.o` newer
+  than their sources.
+
+### Decisions (00-decisions.md)
+
+D-R5-E1 … D-R5-E6 (round 5 · batch E).
+
+### Commits (PR #362's branch `claude/flexible-screens`; nothing pushed)
+
+- `ad00765f` — #354 side: a split piece is latticed on its own side of the cut; the words.
+- `cfc76743` — the Flexible half: [Lattice under it]; the fixture's taps.
+- `3cb4da7d` — #354 side, follow-up: the piece's depth handle; a face with no outline is skipped.
+- `120e4d76` — a Flexible re-pin (`FlexibleBatchBReviewTests`: the scene's key, not its voxel count).
+- `7a9e0302` — #354 side: ruling (g)'s test re-pinned (`LatticeVariantFaceWallsTests`).
+- the next commit: this section, DECISIONS D-R5-E1…E6, evidence (`batch_e/`).
+- **For #354: cherry-pick `ad00765f`, `3cb4da7d`, `7a9e0302`** (simulated onto `606c613a`: clean; not
+  built there). The Flexible commits stay here.
+
+
 ## Round 5 · merge — batch S into batch M, and the syncs (read this first)
 
 Batch S (the Settings page) was built in a side worktree while batch M (the main page) was built here.

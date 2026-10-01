@@ -1,0 +1,26 @@
+# targeted suite on 120e4d76
+build EXIT 0
+Thu Oct  1 06:59:43 EDT 2026
+120e4d76
+	 Executed 2038 tests, with 44 tests skipped and 13 failures (0 unexpected) in 13676.728 (13676.913) seconds
+Test Case '-[TopOptFlowsTests.LatticeCellGradingTests testGradingChangesTheRenderedLattice]' failed (10.939 seconds).
+Test Case '-[TopOptFlowsTests.LatticeSimSolveTriggerTests testTheTriggerRefusesOnAllThreeGrounds]' failed (0.011 seconds).
+Test Case '-[TopOptFlowsTests.LatticeVariantFaceWallsTests testACutSectorIsCountedAndNamedOnTheStageAndTheVariant]' failed (0.479 seconds).
+Test Case '-[TopOptFlowsTests.OrganicSampleCubeTests testThickerIsLiveAndNeverRetraces]' failed (0.001 seconds).
+Test Case '-[TopOptFlowsTests.OrganicVariantCacheTests testTheKeyIgnoresThicknessAndFollowsCoreAndTopology]' failed (0.003 seconds).
+EXIT 1
+Thu Oct  1 10:47:41 EDT 2026
+
+# the re-pinned LatticeVariantFaceWallsTests after 7a9e0302
+	 Executed 8 tests, with 0 failures (0 unexpected) in 2.851 (2.854) seconds
+
+# region fix alone (ad00765f, before the fixture taps), the first 51 Flexible tests
+Test Case '-[TopOptFlowsTests.FlexibleBatchMDentTests testTheMainPageHeatIsTheSimsDentGradedAndSpreadOutOfEachStamp]' failed (80.049 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleBatchMDentTests testTheSettingsPageHeatIsGradedAndTheFingertipsMergeIntoOnePress]' failed (39.455 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleBatchMVerifyTests testEachGroupsStressIsOnItsOwnScaleAndThePartIsNotOneColour]' failed (90.303 seconds).
+
+# with the taps
+	 Executed 3 tests, with 0 failures (0 unexpected) in 223.208 (223.210) seconds
+
+# iOS
+** BUILD SUCCEEDED **
