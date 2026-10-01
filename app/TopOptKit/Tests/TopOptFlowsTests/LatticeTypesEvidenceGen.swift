@@ -42,6 +42,35 @@ final class LatticeTypesEvidenceGen: XCTestCase {
         capture(view, name: "picker_type_chips.png", size: CGSize(width: 1240, height: 200))
     }
 
+    /// ★ Review 2026-10-01: a project SAVED with a type core can't run (the old pane wrote "sc").
+    /// The Type row lights it greyed and says why at once; Octet beside it is the live fix; the
+    /// stage's two buttons refuse in the same sentence, each with the chevron whose tap opens Settings.
+    func testWriteAStaleSavedType() throws {
+        guard enabled else { throw XCTSkip("set TOPOPT_LATTICE_TYPES_EVIDENCE=1") }
+        let entries = LatticeTypeCatalog.entriesFromCore()
+        let why = try XCTUnwrap(LatticeTypeCatalog.selectionRefusal("sc", in: entries))
+        let view = VStack(alignment: .leading, spacing: DS.Space.l) {
+            VStack(alignment: .leading, spacing: DS.Space.xs) {
+                HStack(spacing: DS.Space.xs) {
+                    ForEach(entries.prefix(5)) { e in
+                        LatticeSetupWizard.typeChipLabel(e.displayName, on: e.id == "sc", greyed: !e.offered)
+                    }
+                }
+                LatticeSetupWizard.note(why)
+            }
+            .frame(width: PageChrome.panelWidth - 2 * DS.Space.ml, alignment: .leading)
+            .clipped()
+            .padding(DS.Space.ml)
+            .background(RoundedRectangle(cornerRadius: DS.Radius.panelSmall).fill(DS.Surface.panel.color))
+            HStack(spacing: DS.Space.m) {
+                StageActionCapsuleLabel(title: "Lattice", summary: why, ok: false, marks: true, horizontalPadding: DS.Space.xl3)
+                StageActionCapsuleLabel(title: "Optimize", summary: why, ok: false, marks: true, horizontalPadding: DS.Space.xl5)
+            }
+        }
+        .padding(DS.Space.xl4)
+        capture(view, name: "stale_saved_type.png", size: CGSize(width: 900, height: 300))
+    }
+
     /// The variant page's topology pane: the same catalog, one footnote per reason.
     func testWriteTheTopologyPane() throws {
         guard enabled else { throw XCTSkip("set TOPOPT_LATTICE_TYPES_EVIDENCE=1") }

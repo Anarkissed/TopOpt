@@ -60,7 +60,9 @@ final class LatticeTypeCatalogTests: XCTestCase {
     /// ★ Both pickers read the one catalog, and neither can write a type it does not offer.
     func testBothPickersReadTheCatalogAndNeverPickAGreyedType() throws {
         let wiz = try src("LatticeSetupWizard.swift"), page = try src("LatticePage.swift")
-        XCTAssertTrue(wiz.contains("ForEach(LatticeTypeCatalog.entriesFromCore()) { e in typeChip(e) }"), "the Lattice stage's chips")
+        XCTAssertTrue(wiz.contains("let entries = LatticeTypeCatalog.entriesFromCore()")
+                      && wiz.contains("ForEach(entries) { e in typeChip(e, fixesStale: e.offered && stale != nil) }"),
+                      "the Lattice stage's chips")
         XCTAssertTrue(page.contains("private var topologyEntries: [LatticeTypeEntry] { LatticeTypeCatalog.entriesFromCore() }"), "the page's pane")
         XCTAssertTrue(page.contains("guard e.offered else { return }\n            project.lattice.topologyID = e.id"),
                       "★ the page never writes a greyed type")

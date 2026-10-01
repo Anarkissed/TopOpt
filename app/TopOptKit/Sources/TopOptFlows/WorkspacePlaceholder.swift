@@ -11588,7 +11588,26 @@ public struct WorkspacePlaceholder: View {
     private var latticeOptimizeRefusal: String? {
         LatticeJobIncludeGate.optimizeRefusal(latticeEnabled: project.lattice.enabled,
                                               regions: project.latticeJobRegions().regions)
+            ?? latticeTypeRefusal
     }
+
+    /// ★ REVIEW 2026-10-01: a saved type core can't run (written by the variant page's old,
+    /// unguarded pane) gives the run NO lattice block — Optimize ran the part bare and said
+    /// nothing; "Lattice" failed on core's generic message. Both refuse on the button, in the
+    /// picker's own sentence (`LatticeTypeCatalog.selectionRefusal`), and the tap opens Settings,
+    /// where the offered chip is the fix. A different condition from "nothing set to lattice",
+    /// so its own words. Lattice off asks nothing.
+    private var latticeTypeRefusal: String? {
+        project.lattice.enabled ? LatticeTypeCatalog.selectionRefusal(project.lattice.topologyID) : nil
+    }
+    /// The tap on a button greyed by `latticeTypeRefusal`: the Lattice stage's Settings, where the
+    /// Type row says why and the offered chip fixes it. Navigation only — never a type picked.
+    private func goToLatticeType() {
+        if showLatticePage { closeLatticePage() }
+        if stage != .lattice { goToStage(.lattice) }
+        showLatticeWizard = true
+    }
+    private static let latticeTypeTapHint = "Opens the lattice settings"
 
     /// The Optimize sub-label, reflecting the minimize-plastic mode + the load case.
     private var optimizeSummary: String {
@@ -11648,15 +11667,17 @@ public struct WorkspacePlaceholder: View {
         let summary = latticeThisSummary
         // ★ ruling 4 (item 6): greyed, and its tap takes him to where walls are marked
         let marks = !ok && wallMarkingTapGoesSomewhere && LatticeJobIncludeGate.opensWallMarking(summary)
+        // ★ review 2026-10-01: greyed by a saved type core can't run — the tap opens Settings
+        let opensType = !ok && summary == latticeTypeRefusal
         return Button {
-            if ok { requestLatticeRun() } else if marks { goToWallMarking() }
+            if ok { requestLatticeRun() } else if marks { goToWallMarking() } else if opensType { goToLatticeType() }
         } label: {
-            StageActionCapsuleLabel(title: "Lattice", summary: summary, ok: ok, marks: marks,
+            StageActionCapsuleLabel(title: "Lattice", summary: summary, ok: ok, marks: marks || opensType,
                                     horizontalPadding: DS.Space.xl3)
         }
         .buttonStyle(.plain)
-        .disabled(!ok && !marks)
-        .accessibilityHint(marks ? WallMarkingSubline.hint : summary)
+        .disabled(!ok && !marks && !opensType)
+        .accessibilityHint(marks ? WallMarkingSubline.hint : opensType ? Self.latticeTypeTapHint : summary)
         .accessibilityIdentifier("lattice-this-button")
     }
 
@@ -11715,6 +11736,7 @@ public struct WorkspacePlaceholder: View {
     private var latticeStageRefusal: String? {
         LatticeJobIncludeGate.refusal(latticeEnabled: project.lattice.enabled,
                                       regions: project.latticeJobRegions().regions)
+            ?? latticeTypeRefusal
     }
 
     var canLatticeThis: Bool {
@@ -11735,15 +11757,17 @@ public struct WorkspacePlaceholder: View {
         let summary = optimizeSummary
         // ★ ruling 4 (item 6): greyed, and its tap takes him to where walls are marked
         let marks = !ok && wallMarkingTapGoesSomewhere && LatticeJobIncludeGate.opensWallMarking(summary)
+        // ★ review 2026-10-01: greyed by a saved type core can't run — the tap opens Settings
+        let opensType = !ok && summary == latticeTypeRefusal
         return Button {
-            if ok { requestRun() } else if marks { goToWallMarking() }
+            if ok { requestRun() } else if marks { goToWallMarking() } else if opensType { goToLatticeType() }
         } label: {
-            StageActionCapsuleLabel(title: "Optimize", summary: summary, ok: ok, marks: marks,
+            StageActionCapsuleLabel(title: "Optimize", summary: summary, ok: ok, marks: marks || opensType,
                                     horizontalPadding: DS.Space.xl5)
         }
         .buttonStyle(.plain)
-        .disabled(!ok && !marks)
-        .accessibilityHint(marks ? WallMarkingSubline.hint : summary)
+        .disabled(!ok && !marks && !opensType)
+        .accessibilityHint(marks ? WallMarkingSubline.hint : opensType ? Self.latticeTypeTapHint : summary)
     }
 }
 

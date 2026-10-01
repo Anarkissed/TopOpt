@@ -77,4 +77,26 @@ public enum LatticeTypeCatalog {
     public static var offeredIDs: Set<String> {
         Set(entriesFromCore().filter(\.offered).map(\.id))
     }
+
+    /// A greyed type's line — its name and core's reason. The one sentence for the condition,
+    /// wherever it shows (the picker's tap, the Lattice and Optimize buttons, the stage's line).
+    public static func reasonLine(_ e: LatticeTypeEntry) -> String {
+        "\(e.displayName): \(e.reason ?? "")"
+    }
+
+    /// ★ REVIEW 2026-10-01: a type saved BEFORE the catalog still rides a project — the variant
+    /// page's old pane wrote any certifiable id unguarded. Its run carries NO lattice block
+    /// (`LatticeSettings.runSpec` is nil for a type core can't build), so Optimize ran the part
+    /// with no lattice and said nothing. Every start asks this first and says why. Never
+    /// migrated: the pick stays his, and runs by itself once core makes the type live.
+    /// nil when the type may run; an id core does not know at all is neither built nor certified.
+    public static func selectionRefusal(_ id: String, in entries: [LatticeTypeEntry]) -> String? {
+        guard let e = entries.first(where: { $0.id == id }) else {
+            return "\(LatticeType.displayName(forID: id)): \(notBuiltOrCertified)"
+        }
+        return e.offered ? nil : reasonLine(e)
+    }
+    public static func selectionRefusal(_ id: String) -> String? {
+        selectionRefusal(id, in: entriesFromCore())
+    }
 }
