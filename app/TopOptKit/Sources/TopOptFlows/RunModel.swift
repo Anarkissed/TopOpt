@@ -1311,7 +1311,8 @@ public final class RunModel: ObservableObject {
         }
 
         scheduler.runInBackground { [weak self] in
-            FlexibleSquishSolver.waitUntilOutOfCore()   // Flexible (PR #362, batch G): never two solves in core's matrix-free pool (FlexibleSquishSolver)
+            let flexCore = remote ? nil : FlexibleCoreGate.claimForRun(); defer { flexCore?.leave() }   // Flexible (PR #362, batch G): a LOCAL run claims core's matrix-free pool (waits while a squish sim holds it; FlexibleCoreGate)
+            if (flexCore?.waitedS ?? 0) > 0.05 { scheduler.runOnMain { guard let s = self, s.token === token, s.watchdogCancel != nil else { return }; s.watchdogCancel?(); s.watchdogCancel = s.watchdog.arm { [weak s] in s?.watchdogFired(token) } } }   // Flexible (batch G): the wait never eats the stall watchdog's grace — re-armed after it
             let result: Result<OptimizeOutcome, Error>
             do {
                 let o = try runner(request, { rung, count, iter in

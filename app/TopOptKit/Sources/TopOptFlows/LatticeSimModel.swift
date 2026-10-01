@@ -216,7 +216,7 @@ public final class LatticeSimModel: ObservableObject {
         let runner = self.runner
         Task.detached(priority: .userInitiated) { [weak self] in
             let outcome: Result<TopOptKit.SimAnalysisResult, Error> =
-                Result { try runner(ctx) }
+                Result { try FlexibleCoreGate.whileInCore { try runner(ctx) } }   // Flexible (PR #362, batch G): core's matrix-free pool held while this solve is IN it (a cancelled one too) — no squish sim enters beside it
             await MainActor.run { [weak self] in
                 guard let self, self.generation == gen else { return }  // cancelled/superseded
                 switch outcome {
