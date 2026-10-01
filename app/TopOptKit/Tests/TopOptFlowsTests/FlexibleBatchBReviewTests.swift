@@ -169,6 +169,7 @@ final class FlexibleBatchBReviewTests: XCTestCase {
         let (r, stage, m) = try await built("varioshore_tpu")
         let g1 = try XCTUnwrap(m.lattice?.generation)
         let v1 = m.sceneInfo?.latticeVoxels ?? -1
+        let k1 = m.openedKey
         let sides = try XCTUnwrap(r.project.selection.groups.first { $0.name == "sides" }?.id)
         let before = r.project.latticeJobRegions().regions.count
         r.project.lattice.groupRoles[sides] = .include
@@ -178,7 +179,11 @@ final class FlexibleBatchBReviewTests: XCTestCase {
         }
         await m.waitForIdle()
         print("FLEX-REVIEW new region: latticeVoxels \(v1) → \(m.sceneInfo?.latticeVoxels ?? -1) · generation \(g1) → \(m.lattice?.generation ?? -1) · pill '\(stage.status.line)'")
-        XCTAssertNotEqual(m.sceneInfo?.latticeVoxels, v1, "premise: the scene re-opened on the new region")
+        // ★ RE-PINNED (batch E): the scene re-opened on the new regions — by its KEY (the regions are in
+        // it). The voxel count was the old premise: his restored pad now carries lattice under every
+        // pressed face (FlexibleHisProject's [Lattice under it] taps), the whole part, so a new region
+        // over it moves no voxel.
+        XCTAssertNotEqual(m.openedKey, k1, "premise: the scene re-opened on the new region")
         XCTAssertGreaterThan(m.lattice?.generation ?? g1, g1)
     }
 
