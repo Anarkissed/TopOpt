@@ -1560,11 +1560,19 @@ public struct LatticePage: View {
                 // Fit derives FROM the declared include regions. With none declared
                 // there is nothing to derive from, and saying so here is cheaper
                 // than a receipt that latticed nothing.
-                Text("Add at least one lattice region first — this mode derives the "
-                     + "cell from the regions you declare, so with none declared "
-                     + "there is nothing to fit to.")
-                    .dsStyle(DS.TypeScale.caption)
-                    .foregroundStyle(RGBA(hex: 0xFFCF7A).color)
+                // ★★ ROUND 3 RULING (b) (2026-10-01): one gate, one sentence — with lattice ON this
+                // reports the gate's condition, so it says "nothing set to lattice" with the one
+                // tap; with lattice OFF it reports a different one and keeps its words.
+                let why = LatticeJobIncludeGate.refusal(latticeEnabled: project.lattice.enabled, hasIncludeWall: false)
+                if let why, LatticeJobIncludeGate.opensWallMarking(why) {
+                    fitPaneNothingSet(why)
+                } else {
+                    Text("Add at least one lattice region first — this mode derives the "
+                         + "cell from the regions you declare, so with none declared "
+                         + "there is nothing to fit to.")
+                        .dsStyle(DS.TypeScale.caption)
+                        .foregroundStyle(RGBA(hex: 0xFFCF7A).color)
+                }
             }
         }
     }
@@ -1910,6 +1918,24 @@ public struct LatticePage: View {
               p.placeholder, p.headline]
                 + p.reasons + p.advice)
                 .compactMap { $0 }.joined(separator: ". "))
+    }
+
+    /// ★ round 3 ruling (b): the Fit pane's "nothing set to lattice", one tap from the walls — the
+    /// gate's sentence in the warning colour every other surface gives it.
+    @ViewBuilder private func fitPaneNothingSet(_ text: String) -> some View {
+        if let go = onMarkWalls {
+            Button(action: go) {
+                WallMarkingSubline(text: text, marks: true, style: DS.TypeScale.caption)
+                    .foregroundStyle(DS.Color.warning.color)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .buttonStyle(.plain)
+            .accessibilityHint(WallMarkingSubline.hint)
+            .accessibilityIdentifier("lattice-fit-mark-walls")
+        } else {
+            Text(text).dsStyle(DS.TypeScale.caption)
+                .foregroundStyle(DS.Color.warning.color)
+        }
     }
 
     /// The drawer's one-line placeholder. ★ ruling 4 (item 6): "nothing set to lattice" is one tap

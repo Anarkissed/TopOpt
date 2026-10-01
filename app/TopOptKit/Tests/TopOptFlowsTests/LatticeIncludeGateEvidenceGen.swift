@@ -104,7 +104,24 @@ final class LatticeIncludeGateEvidenceGen: XCTestCase {
                 name: "page_variant_include_wall_control.png", size: CGSize(width: 1024, height: 1366))
     }
 
-    private func page(_ p: ProjectModel, refusal: String?, canOptimize: Bool) -> some View {
+    /// ★ round 3 ruling (b): the Fit pane ("Per region") — lattice ON with no include wall says the
+    /// gate's sentence with the tap; lattice OFF keeps its own words (a different condition).
+    func testWriteTheFitPane() throws {
+        guard enabled else { throw XCTSkip("set TOPOPT_INCLUDE_GATE_EVIDENCE=1") }
+        let landscape = CGSize(width: 1366, height: 1024)
+        for (name, latticeOn) in [("fit_pane_nothing_set_to_lattice.png", true), ("fit_pane_lattice_off_keeps_its_words.png", false)] {
+            let (p, gid, _) = VariantFacePrismFixture.project()
+            p.force.setGravity(direction: SIMD3(0, 0, -1))
+            p.lattice.groupRoles[gid] = .exclude
+            p.lattice.cellSizeMode = .fit
+            p.lattice.enabled = latticeOn
+            capture(page(p, refusal: p.variantLatticeJobRefusal(), canOptimize: false, pane: .cellDensity),
+                    name: name, size: landscape)
+        }
+    }
+
+    private func page(_ p: ProjectModel, refusal: String?, canOptimize: Bool,
+                      pane: LatticePageModel.Pane? = nil) -> some View {
         // an anchor and a load, so the page's own anchor-and-load gate is satisfied
         let a = p.selection.addGroup(); p.selection.addFaces([0], to: a); p.force.makeAnchor(a)
         let l = p.selection.addGroup(); p.selection.addFaces([4], to: l); p.force.makeLoad(l)
@@ -118,7 +135,8 @@ final class LatticeIncludeGateEvidenceGen: XCTestCase {
                                       provenance: .variant(runName: "M2 verticalStand", variantIndex: 3, date: nil)),
             artifacts: RelatticeArtifacts(jobJSON: Data("{}".utf8), designBin: Data([1, 2, 3])), unavailable: nil)
         let pm = LatticePageModel()
-        pm.reviewOpen = true
+        pm.reviewOpen = pane == nil
+        pm.pane = pane
         return LatticePage(model: AppModel(materialsPath: nil), project: p, run: RunModel(),
                            sim: LatticeSimModel(), page: pm, variantContext: ctx,
                            previewOn: .constant(false),

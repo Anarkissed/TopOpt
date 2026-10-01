@@ -1346,7 +1346,20 @@ public struct LatticeSetupWizard: View {
                     model.setCellSizeMode(.fit); rebuild()
                 }
             }
-            if !fitPossible { shortNote("Needs a lattice region") }
+            // ★★ ROUND 3 RULING (b) (maintainer, 2026-10-01): one gate, one sentence. With lattice
+            // ON this line reports exactly the gate's condition (no include wall), so it says the
+            // gate's words with the one tap to the walls. With lattice OFF it reports a different
+            // condition (the job's emission is empty because the mode is off; the gate says
+            // "lattice mode is off"), so it keeps its own words.
+            if !fitPossible {
+                let why = LatticeJobIncludeGate.refusal(latticeEnabled: project.lattice.enabled, hasIncludeWall: false)
+                if let why, LatticeJobIncludeGate.opensWallMarking(why) {
+                    refusalNote(why, marksWalls: markWalls != nil)
+                        .accessibilityIdentifier("wizard-organic-fit-nothing-set")
+                } else {
+                    shortNote("Needs a lattice region")
+                }
+            }
             if organicManual { organicManualLists(fitPossible: fitPossible) }
             // ★★ RULING 4 (item 8, 2026-09-30): under Auto a stale Check-sizes answer stops
             // steering the preview (its window and floor are read only from a current answer) —

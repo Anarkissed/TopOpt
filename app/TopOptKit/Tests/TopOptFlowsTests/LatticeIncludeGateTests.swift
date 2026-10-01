@@ -239,4 +239,48 @@ final class LatticeIncludeGateTests: XCTestCase {
         XCTAssertTrue(try member(wiz, "private func runCheckSizes()")
             .contains("guard organicProbeRefusal == nil, organicProbeState != .running, let drive = probeDriver else { return }"))
     }
+    // MARK: round 3 ruling (b) — the two other phrasings
+
+    /// ★★ ROUND 3 RULING (b) (maintainer, 2026-10-01): "Needs a lattice region" (the wizard) and
+    /// "Add at least one lattice region first" (the Fit pane) report the gate's condition when
+    /// lattice is ON — so there they say the gate's sentence with the one tap. When lattice is OFF
+    /// the job's emission is empty for another reason (the gate says "lattice mode is off"), a
+    /// different condition: their own words stay.
+    func testTheOtherPhrasingsSayTheGatesSentenceWhereTheyReportItsCondition() throws {
+        // the premise: with lattice off the emission is empty even with walls marked
+        let (p, _, _) = VariantFacePrismFixture.project()
+        XCTAssertTrue(LatticeJobIncludeGate.hasIncludeWall(p.latticeJobRegions().regions), "control: an include wall")
+        p.lattice.enabled = false
+        XCTAssertTrue(p.latticeJobRegions().regions.isEmpty, "★ lattice off ⇒ no emission, walls or not")
+        XCTAssertEqual(LatticeJobIncludeGate.refusal(latticeEnabled: false, hasIncludeWall: false), "lattice mode is off")
+        XCTAssertFalse(LatticeJobIncludeGate.opensWallMarking("lattice mode is off"), "⇒ the old words, no tap")
+        // lattice on, no wall (3418E167 as it was: lattice on, organic, no roles): the gate's sentence + tap
+        let thick = ProjectModel(id: UUID(), name: "THICK", material: "PLA", process: .fdm, importedFile: nil, importedMesh: nil)
+        thick.viewerMesh = VariantFacePrismFixture.bandedCube()
+        thick.lattice.enabled = true
+        thick.lattice.algorithm = "organic"
+        XCTAssertFalse(LatticeJobIncludeGate.hasIncludeWall(thick.latticeJobRegions().regions))
+        let why = try XCTUnwrap(LatticeJobIncludeGate.refusal(latticeEnabled: true, hasIncludeWall: false))
+        XCTAssertEqual(why, "nothing set to lattice")
+        XCTAssertTrue(LatticeJobIncludeGate.opensWallMarking(why), "★ one gate, one sentence, one tap")
+
+        let wiz = try src("LatticeSetupWizard.swift"), page = try src("LatticePage.swift")
+        XCTAssertTrue(wiz.contains("""
+            if !fitPossible {
+                let why = LatticeJobIncludeGate.refusal(latticeEnabled: project.lattice.enabled, hasIncludeWall: false)
+                if let why, LatticeJobIncludeGate.opensWallMarking(why) {
+                    refusalNote(why, marksWalls: markWalls != nil)
+"""), "★ the wizard: the gate's sentence, the tap through Save & Exit")
+        XCTAssertEqual(wiz.components(separatedBy: "shortNote(\"Needs a lattice region\")").count - 1, 1)
+        XCTAssertTrue(wiz.contains("} else {\n                    shortNote(\"Needs a lattice region\")"), "lattice off keeps its words")
+        XCTAssertTrue(page.contains("""
+                if let why, LatticeJobIncludeGate.opensWallMarking(why) {
+                    fitPaneNothingSet(why)
+                } else {
+                    Text("Add at least one lattice region first
+"""), "★ the Fit pane: the gate's sentence; lattice off keeps its words")
+        let tap = try member(page, "@ViewBuilder private func fitPaneNothingSet")
+        XCTAssertTrue(tap.contains("Button(action: go)") && tap.contains("WallMarkingSubline(text: text, marks: true"),
+                      "the one tap, the existing look")
+    }
 }
