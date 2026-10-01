@@ -1,6 +1,278 @@
 # Handoff — 2026-09-29-flexible-screens (TRACK app, A1): the Flexible screens
 
-## Round 5 · batch M2 — verification pass (read this first)
+## Round 5 · batch N — a squish that folds realistically (read this first)
+
+Your words, on batch G's fold cut: **"Is there no way to fold realistically instead?"**
+
+What I said I would do: solve the squish in STEPS, each voxel taking the stiffness core's tested curve
+gives at ITS OWN squish, so the zones the linear sim over-squishes firm up and the full-size picture
+stays smooth without the cut. That is built. **One thing I told you was wrong, and it matters:** I said
+the curves already say TPU lattice stiffens as its cells close. For your filament they do not — see
+"The curves" below. The stiffening the stepped sim needs comes from a textbook law past your data,
+and the (i) says so.
+
+Judged on YOUR project as you left it for round 5 (`his_project_0004_r5`, restored through
+`AppModel.open`), on 0004 as saved, on C1's pads and on the M2 stand. **The app was NOT launched: nothing
+here has been seen on a device or simulator.** The pictures are offscreen frames of the shipping renderer.
+
+**What you will see on the main Flexible page:**
+- **Save & Exit:** the lattice at rest with "Simulating the squish…", then the QUICK squish plays (batch
+  G's linear sim, as today). The note beside the picker then reads **"Refining the squish… 3/8"** while the
+  steps run — the group on screen first, then the others.
+- **The refined squish swaps in at REST.** When it lands, the renderer swaps its shape, its mesh and its
+  colours in at the next rest point of the loop (at once while paused). Nothing pops mid-squeeze.
+- **Not cut.** The refined squish plays at its full calibrated size: the dent row reads **"×1"** (your
+  Group 1 read "×0.2", Group 2 "×0.5"). No element of it turns inside out.
+- **The (i), one sentence:** "The colours and the shape are a 3D sim solved in steps on the tested squish
+  curves (past their end, untested, the cells close and firm up), finding this part 7× stiffer than core's columns (its
+  skin and walls carry load), with no buckling or self-contact — tap here, then the part, for the mm there."
+- **The colours, tap-to-read and Stress read the refined field.** The Stress (i) says "stepped 3D sim".
+- **If a refine does not settle, fails, or runs past 120 s:** the quick squish stays, with batch G's fold
+  cut (now only a fallback) and ONE line: "Quick squish · the refine did not settle" (or "…took too
+  long" / "…failed").
+- **A new lattice** (Save & Exit again) cancels a refine at its next increment.
+- **The Settings page** is unchanged, except that the selected group's dent uses its refined field once it
+  exists.
+
+**What it does to YOUR pad** (Release, this Mac; the full table is below):
+- **Group 1** (Top A's elbow + Top B + Face 5's 10 kg thumb): the quick sim, uncut at its calibrated
+  size, turns **24 cells inside out** (the reason batch G cut it to 23 %). Refined: **0** (the smallest
+  det 0.25), at full size — 8 increments, 21 solves, **16.7 s**. The crushed zone under the thumb firms
+  up: its strain stops at 0.70 (the quick field at the same size asks 1.18).
+- **Group 2** (Face 3's four fingertips): batch G cut it to 53 % (its gradient, not an inversion). Refined:
+  0 inverted (det ≥ 0.58), 0 of 53 248 wall cells missed, **15.7 s**. Its calibration came back INSIDE
+  the band: the stepped field asks 1.65× the force (the quick one 2.09, held at 2), so it plays at 1.63×.
+- **0004 as saved:** never cut; refined in 11.8 s (it asks 3.06, held at 2).
+
+**What is still not realistic (and why):**
+- **Your Group 1's top edge above the thumb rises into a crest** (frame `batch_n/N_his_r5_group-1_stepped_faces5_a100.png`). Two reasons, both
+  outside a material law: ν = 0.3 everywhere, so the crushed zone bulges sideways as solid rubber would
+  (a crushed foam bulges far less — core brief #22/#23), and the strip between the thumb and the top
+  TURNS (‖∇u‖ 2.1, almost all rotation; small-strain kinematics draw a turn as a stretch). No cell inverts,
+  but the lattice walls there are drawn up to 2.2 mm off (402 of 53 248 cells; the quick field uncut: 665,
+  9.25 mm). Only a large-deformation solver draws that edge truly (core brief #36).
+- **No buckling, no snap-through, no self-contact** — the (i) says so.
+- **The band [0.5, 2] still holds the force.** Your Group 1 asks 6.8× (its elbow zone is that much stiffer
+  in 3D than core's columns) and plays at 2× your weights — a 20 kg thumb.
+
+### The curves (the premise, corrected)
+
+Core's curves for your filament (varioShore TPU, gyroid, 240 °C) have two tested points, at 10 % and 20 %
+squish, and are allowed to 25 %. Between them the lattice SOFTENS (a plateau), it does not stiffen:
+
+| ρ (core) | secant at 2–10 % | at 15 % | at 20 % | at 25 % (the data's end) |
+|---|---|---|---|---|
+| 0.15 (your pad: 0.14–0.17) | 0.211 MPa | 0.190 | 0.172 | 0.161 (−24 %) |
+| 0.20 | 0.570 | 0.528 | 0.494 | 0.474 |
+| 0.30 | 1.195 | 1.167 | 1.145 | 1.132 |
+
+Cells close (densification) at about ε_D = 1 − 1.4 ρ ≈ 79 % for your pad — far past the data. So the
+stepped law is core's curve up to 25 % and Gibson & Ashby's densification past it, joined smoothly (C¹),
+capped at the solid filament (50 MPa). With the tested data alone (the curve held at its last tested
+secant — the red control) the stepped field folds MORE than the linear one: your Group 1, 91 inverted
+cells against the linear 24.
+
+### How it works (D-R5-N1 … N6)
+- **The same problem, solved again and again.** The bridge builds the group's problem once (grid, loads by
+  column pressure, rests, far anvils, pins, inertia relief — batch G's, split into build / solve / finish;
+  the linear solve is rebuilt on the same pieces and its 12 bridge tests pass unchanged) and keeps it in a
+  session. Each step solves it at a load factor λ.
+- **The strain a voxel is at:** its principal compressive strain, max(0, −λ_min(sym ∇u)) — the uniaxial
+  test's own axis whatever ν (the volumetric strain would hang on the assumed ν = 0.3); rotation dropped.
+- **Secant iterations,** damped in log-modulus, warm-started from the last field scaled to the new load
+  (core's `initial_guess`); where the curve stiffens an element is updated by the STRESS it carried (the
+  curve inverted at it). The plain secant update swung 4–18 % per solve on your Group 1 and never settled.
+  Stop at 2 % of the largest motion, or 3 solves per increment (6 on the last).
+- **8 increments** to the calibrated load, then the calibration RE-DECIDED on the stepped field: the load
+  factor whose deepest zone compresses core's depth (from the last two increments, ≤ 2 correction steps),
+  inside the band [0.5, 2].
+- **Once a session's multigrid stagnates** (the M2 stand), core's matrix-free Jacobi-CG directly — what
+  core's own per-run latch does, which is thread-local and cannot follow a session across the queue's threads.
+- **One claim on core:** a refine holds the same claim as a sim, yields it between increments to a solve
+  that waits for it, and is not counted as `solving` (the Stress solve starts and its claim waits at most
+  one increment). No quick sim of a new lattice claims core beside a refine still finishing its increment.
+
+### The numbers (Release, M2 Pro, this Mac — opt-in `FlexibleBatchNProbe`, load average 5–7)
+
+`FLEX_N_PROBE=1 FLEX_N_CASES=his0004,bare,covered,m2 swift test -c release -Xswiftc -enable-testing --filter FlexibleBatchNProbe`
+
+| case · group | quick sim: k asked → held (cut) | quick, uncut: inverted · min det · walls missed (worst) · gmax | stepped: λ asked → used | stepped: inverted · min det · walls missed (worst) · gmax | increments · solves · total | quick solve |
+|---|---|---|---|---|---|---|
+| his r5 · Group 1 | 7.39 → 2 (23 %) | 24 · −0.201 · 665 (9.25 mm) · 2.20 | 6.82 → 2 | **0 · 0.250** · 402 (2.19 mm) · 2.13 | 8 · 21 · **16.7 s** | 0.70 s |
+| his r5 · Group 2 | 2.09 → 2 (53 %) | 0 · 0.514 · 0 · 0.94 | 1.65 → **1.63** | 0 · 0.579 · 0 (0.02 mm) · 0.83 | 9 · 18 · **15.7 s** | 1.12 s |
+| his 0004 as saved | 3.64 → 2 (—) | 0 · 0.825 · 0 · 0.21 | 3.06 → 2 | 0 · 0.796 · 0 · 0.24 | 8 · 11 · **11.8 s** | 2.44 s |
+| C1's pad, bare | 1.37 (—) | 0 · 0.843 · 0 · 0.20 | 1.37 → 1.37 | 0 · 0.846 · 0 · 0.20 | 8 · 10 · **5.0 s** | 0.68 s |
+| C1's pad, covered | 1.62 (—) | 0 · 0.827 · 0 · 0.18 | 1.52 → 1.53 | 0 · 0.822 · 0 · 0.18 | 9 · 12 · **13.8 s** | 2.32 s |
+| the M2 stand (5 kg) | 12.87 → 2 (60 %) | 0 · 0.564 · 0 · 0.83 | 11.63 → 2 | 0 · 0.450 · 0 · 1.05 | 8 · 10 · **12.4 s** | 4.09 s |
+
+Per increment (ms): his Group 1 1198 · 1134 · 1149 · 1171 · 1186 · 1198 · 2803 · 6535; Group 2 1550 · 449 ·
+675 · 2833 · 2635 · 1574 · 1826 · 1940 · (correction) 1813; 0004 2790 · 408 · 404 · 407 · 407 · 1333 · 2837 ·
+2910; C1 bare 1093 · 411 · 410 · 414 · 419 · 414 · 492 · 1071; C1 covered 2678 · 412 · 410 · 414 · 426 · 1380 ·
+2925 · 3230 · 1542; the M2 stand 3877 · 5 · 247 · 953 · 2401 · 1568 · 1569 · 1523 (Jacobi-CG after the first
+stagnation).
+- A solve is ~0.4–0.6 s on your pad (most of it the multigrid hierarchy, rebuilt as the moduli change);
+  early increments, below the curve's first knee, settle in one solve.
+- **Every case is under the ~30 s bar on this Mac**, so nothing was cut. **iPad (estimate, not measured):**
+  the solve runs on ONE thread; an M-series iPad is about this Mac's single core (5–17 s a group), an
+  A-series one 1.5–2× slower (up to ~35 s a group). With two groups the second lands ~30–70 s after Save & Exit.
+
+### Deviations (each with its reason)
+1. **The law past the data densifies (a textbook law)** — the curves soften up to their end (above).
+2. **Elements on the stiffening branch are updated by their stress**, not their strain — the plain secant
+   never settled on your Group 1.
+3. **The refine starts after ALL quick sims** of the lattice (not right after its own group's) — the quick
+   pictures first, everywhere.
+4. **`waitForIdle` (the tests' teardown) cancels refines** — 42 test files wait for idle; a refine would
+   have added ~15–60 s to each. `FlexibleStageModel.waitForRefines` waits for them.
+5. **Stress from the stepped field** is σ at the calibrated load ÷ λ (exact at λ = 1) — the app's stress
+   view divides by k as before.
+
+### Not done (and why)
+- **Nothing seen on a device or simulator** (track rule). The iOS build succeeds (below).
+- **The crest on your Group 1** — rotation and ν = 0.3 (above); a large-deformation solver in core.
+- **The walls' pull-back where the field is steeper than ½** (your Group 1's edge only): the fixed-point
+  inverse does not converge where the field turns faster than it moves; a Newton pull-back on the GPU would
+  (not attempted: frame-budget risk, and the edge itself is not right yet).
+- **The legend's top** (the deepest mm) follows the refined field as soon as it lands; the colours on the
+  part swap with its shape, at rest.
+- **The Settings page swaps to the refined field at once** (nothing plays mid-squeeze there).
+- **Measured on C1's pad only, not on yours:** "the squish spreads to the neighbours and the sides bulge
+  more" — a 21 kg press on a 15 mm patch: the ring 15–30 mm out sinks 16 % of what sinks under the patch
+  (linear 12 %), the free sides move out 2.8 % of it (linear 2.3 %), while the crushed zone under the patch
+  stops at 0.67 strain (linear 1.16). Printed by the test, not pinned.
+
+### Your call
+1. **Group 1 at 2× your weights** (the band edge, D-R5-G4) shows a 20 kg thumb crushing the side. Play it at
+   your real weights (λ 1) when the sim finds the part far stiffer than core's columns?
+2. **The densification law past the data** (79 % for your pad). Keep it, or test your filament to 60–70 %
+   squish (your rig) so core's curves cover it?
+
+### Core brief (batch N; #1–#35 stand)
+- **#36 Large-deformation (geometric nonlinearity)**: a total-Lagrangian solve so a turning edge turns (your
+  Group 1's edge above the thumb: ‖∇u‖ 2.1, mostly rotation).
+- **#37 Buckling and snap-through**: thin walls and skins that fold sideways under a press (at least a
+  linear eigen-buckling check; an arc-length path for snap-through).
+- **#38 Self-contact**: a squish that folds a face onto another.
+- **#39 A native nonlinear solve** (Newton on σ(ε; ρ), its tangent, load stepping, a line search) owning
+  what `flexible_squish_fe.cpp` does in the app (the session, the secant steps, the stress update).
+- **#40 Curves to densification**: the tables stop at 25 %; the stiffening a squish needs is past 60 %.
+- **#41 A per-voxel Poisson ratio** that falls as cells crush (re #22/#23).
+
+### Each requirement → where → pinned by (RED control, computed beside it)
+| requirement | where | pinned by |
+|---|---|---|
+| the law: core's curve, then densification | `flexible_squish_fe.cpp` `Law::lattice_at` | `FlexibleSquishStepsTests.testTheSteppedLawIsCoresCurveUpToItsDataThenDensifies` (held at the data's end: ×0.97) |
+| the over-squished zone firms up | stepped session | `…testTheOverSquishedZoneFirmsUpAndNothingInverts`: peak strain 1.163 → 0.667 (linear moduli 1.163; held 1.573) |
+| 0 inverted at full size where linear had > 0 | stepped session | same: 299 → 0 (min det 0.353; held 989); `FlexibleBatchNRefineTests.testHisRound5GroupsRefineAndNeverInvertAtFullSize`: Group 1 24 → 0 (the quick field) |
+| the free sides still bulge | stepped session | `…testTheFreeSidesStillBulge`: 34.5 % of the top (ν = 0: 0.0 %) |
+| a symmetric pad stays symmetric | stepped session | `…testASymmetricPadStaysSymmetric`: 8e-5 (an off-centre stamp: 1.01) |
+| per-group fields stay per group | the solver's per-group refine | his r5 test: Group 2 → Face 5 0.000 mm, Top A −1.72 mm (out) vs Group 1's Top A 3.18 mm in (a combo request: both in one field) |
+| the fold cut NOT applied when converged | `FlexibleFEField.stepped` | his r5 test: no cut, "×1", the (i) (the page ignoring the refines: "cut to 23 %", "×0.2") |
+| a non-converged refine keeps the quick field + one line | `FlexibleFERefine`, `feNote` | `…testARefineThatDoesNotSettleKeepsTheQuickFieldAndSaysWhy` (the settled refine: no line) |
+| swap at rest | `FlexibleLatticePass.setFESequence/uploadFE`, `stepFlexibleFE` | `…testTheRefinedFieldSwapsInAtRest` (the swap at once: mid-squeeze, amount 1.0) |
+| cancellation and the core gate | `FlexibleSquishSolver`, `FlexibleCoreGate.yieldSim` | `…testANewLatticeCancelsTheRefineAndAWaitingSolveGetsCoreBetweenIncrements`: stops 1.7 s after the new lattice, the waiting solve in 0.5 s, peak 1 sim (ignoring the cancel: 24 s; never yielding: 25 s) |
+
+### Hook lines in #354 / main files
+**None.** WorkspacePlaceholder, MetalMeshView, LatticeSettings, ProjectModel, ResultsModel, FaceRegion,
+RunModel, LatticeSimModel and LatticeStageMode are untouched; no LatticeStageMode case was added; core/ is
+untouched (the stepped session is the app's bridge code); the pinned strings (SmoothingPageRound2Tests,
+the first 900 characters of `startStressSolveIfNeeded`) are untouched.
+
+New files: `FlexibleKit+SquishSteps.swift` (TopOptKit), `FlexibleFERefine.swift` (TopOptFlows); tests
+`FlexibleSquishStepsTests` (TopOptKitTests), `FlexibleBatchNRefineTests`, and the opt-in
+`FlexibleBatchNProbe` / `FlexibleBatchNEvidenceProbe` (TopOptFlowsTests).
+Edited track files: `flexible_squish_fe.cpp/.hpp` (build / solve / finish, the session, the law past the
+data, the strain, the stress update), `FlexibleBridge.hpp` + `flexible_bridge.cpp` (the session's entry
+points and receipts), `FlexibleKit+Squish.swift` (the shared request and solution conversion),
+`FlexibleFEField` (`refine`, `versionKey`, `stepped`), `FlexibleFE` (the (i)), `FlexibleSquishSolver` (the
+refine queue, the cancel token, `yieldSim`, refines not `solving`), `FlexibleStageModel` / `+Squish`
+(`refine`, `shownSquishField`), `FlexibleMainStage` / `+Squish` / `+Views` / `+Stress` (versions, the note,
+the (i), caches and tints by version), `FlexibleSquishPlayer` (`shownKey`), `FlexibleLatticePass` +
+`MeshRenderer+FlexibleLattice` (the swap at rest), `FlexibleSettingsSquish` (the refined field).
+
+### Tests
+NEW, each with its RED control computed beside it (the table above):
+- `FlexibleSquishStepsTests` (5, the bridge on C1's pad).
+- `FlexibleBatchNRefineTests` (4, the app on his round-5 project and C1's pad): his groups refined and never
+  inverted at full size, per group, never cut, the (i), "×1", Stress and the Settings page on the refined
+  field; the swap at rest; a refine that does not settle; the cancel and the gate (four modes).
+
+RE-PINNED, each with its reason in the test:
+- `FlexibleSquishSolverTests.testWaitsForOtherCoreSolves` — the QUICK sims' gate: refines off in it (a refine
+  keeps core until its next increment; its own gate is in FlexibleBatchNRefineTests).
+- `FlexibleSquishVerifyGTests.testPlayAllPlaysEachGroupAlone`, `FlexibleMergeR5SMTests.testEveryPlayAllTurnWearsEveryGroupsFrame`
+  — each turn's colours are keyed by its VERSION ("group-1·stepped" once its refine landed, which it may
+  mid-test). Found by the focused run (151 s: the refines landed during the test).
+
+Deleted-test sweep (`git diff ccc2008b -- app/TopOptKit/Tests`, removed `func test` / class lines): none.
+
+### Mutation runs (each breaks one rule in production, rebuilds, runs its pinning test, restores from git; `batch_n/N_mutations.txt`)
+```
+MN1  the law held at the data's end (no densification)        ⇒ his r5: Group 1 91 inverted, min det −0.636 (2)
+MN2  no stress update where the curve stiffens                ⇒ the zone test: the stepped solve does not settle (1)
+MN3  the shown version unbound at once on a re-upload         ⇒ the swap test: the refined field mid-squeeze (2)
+MN4  a stepped field cut like the quick one                   ⇒ his r5: foldShare 0.23 / 0.60, "×0.2" / "×0.6" (4)
+MN5  the model's cancel leaves the refine running             ⇒ FIRST GREEN — the page's next schedule cancelled the old token
+                                                                too; the test now drops the lattice's sims without a new
+                                                                schedule (latticeLanded(nil)) beside the "new lattice" mode —
+                                                                re-run: RED (2: ran on 24 s, its result landed)
+MN6  the refine never yields core                             ⇒ the gate test: the waiting solve waits for the end (3)
+MN7  a quick sim claims core beside a refine still finishing  ⇒ the gate test: peak 2 sims (2)
+MN8  the kept line never said                                 ⇒ the not-settled test (1)
+MN9  every element's strain read as 0 (the linear law)        ⇒ the zone test: peak 1.16, inverted (4)
+MN10 the renderer's colours keyed by sim, not version         ⇒ the swap test: the quick colours stay (3)
+restore: git checkout, `swift build --build-tests` 0
+```
+
+### Evidence (`docs/handoffs/evidence/2026-09-29-flexible-screens/batch_n/`)
+Offscreen frames of the shipping renderer (what FlexibleMainStage hands MetalMeshView, settled like the
+page): "quick, fold-cut" = batch G / M's quick field with its cut (the stage's `controlNoRefineView`),
+"stepped" = the refined field, at rest / half / full (`FLEX_N_EVIDENCE_DIR=<dir> swift test --filter FlexibleBatchNEvidenceProbe`).
+- `N_his_r5_sheet.png` — your round-5 pad, both groups, two views. Group 1 stepped: the top sags under the
+  elbow, Face 5 is pushed in by the thumb, and the edge above it rises into the crest (above). Group 2
+  stepped: Face 3 pressed in its full 25 mm, the four fingertips' waves along its top edge, Face 5 still.
+- `N_his_r5_group1_faces5_full_pair.png`, `N_his_r5_group-1_stepped_faces5_a100.png` — the crest, close.
+- `N_his_r5_group2_iso_full_pair.png` — Group 2 at full size: cut to 53 % vs stepped (×1.63 the force).
+- `N_m2stand_sheet.png`, `N_m2stand_front_full_pair.png` — the M2 stand: the pocket floor sinks further
+  (max 7.4 mm vs 4.1), the U and the tower barely change; no tear.
+- `N_release_his_r5.txt`, `N_release_0004_pads_m2.txt` — the Release probe's raw lines; `N_mutations.txt`.
+
+### Build and suite (raw lines, this Mac)
+- Targeted suite (Debug; every Flexible* class + UnifiedShadingTests, LatticePreviewBodyAlphaTests,
+  LatticeGBufferMaskTests, LatticeThreeAlgorithmsDrawTests, OrganicCapsuleImpostorTests, ViewerTests,
+  StageBackdropTests, SmoothingPageRound2Tests, LatticeStageModeTests, LatticeSettingsPersistTests,
+  ProjectStoreTests, UndoHistoryTests, SurfaceStageTests, LatticeSimSolveTriggerTests, LatticeOvernightBatchTests,
+  LatticePageTests, LatticeSimRegionLayerTests, ResultsModelTests; another session's xctest at ~860 % CPU
+  for part of it), on `dbd00866` + the two test edits of `8193a7d6`:
+  `Executed 693 tests, with 26 tests skipped and 1 failure (0 unexpected) in 3707.420 (3707.484) seconds`.
+  - The one failure is the known `LatticeSimSolveTriggerTests.testTheTriggerRefusesOnAllThreeGrounds`.
+  - `ViewerTests`: `Executed 33 tests, with 0 failures`.
+- Re-run after `8193a7d6` (the kept line, the (i), the retry; the suites they touch):
+  FlexibleBatchNRefineTests, FlexibleBatchMStressTests, FlexibleSquishSolverTests, FlexibleSquishStepsTests:
+  `Executed 18 tests, with 0 failures (0 unexpected) in 564.014 (564.018) seconds`.
+- Earlier in the pass (the G and M suites the wiring touches): FlexibleSquishSolverTests,
+  FlexibleSquishPlayAllTests, FlexibleSquishVerifyGTests, FlexibleFEVerifyGTests, FlexibleBatchMGroupTests,
+  FlexibleCoreClaimTests, FlexibleSquishFETests, FlexibleFEPassTests, FlexibleSquishModulusTests,
+  FlexibleSquishCoarsenTests: 43 tests, 4 failures — the three re-pinned above (the refines landed mid-test),
+  fixed and green in the suite.
+- iOS (Debug, the simulator 147E56A1…, DerivedData flexA1n) at `8193a7d6`: `** BUILD SUCCEEDED **`.
+  `TopOpt.debug.dylib` (13:11) holds "Refining the squish", "past their end, untested" and 299
+  FlexibleFERefine / flexible_squish_step symbols. Not installed, not launched. The package `.build` and
+  flexA1n were deleted afterwards (disk).
+
+### Decisions (00-decisions.md)
+- New: D-R5-N1 … N6 (the stepped solve; the strain measure and the secant with the stress update; the law
+  past the data; the calibration as a load factor; never cut when converged — the fallback; progressive,
+  one claim, the swap at rest).
+- D-R5-G4 and D-R5-G5 amended in place (★ batch N).
+
+### Commits (`claude/flexible-screens-n`; nothing pushed)
+- `feeedcb0` the bridge: the squish solved in steps (the session, the law past the data, the stress update) + FlexibleSquishStepsTests.
+- `dbd00866` the app: each group refined after the quick one, shown first, swapped in at rest, never cut when it settles; the re-pins; the probes.
+- `8193a7d6` the kept line fits one line, the (i) says "untested", a retried sim is refined, the cancel test pins the model's own cancel.
+- The next commit: this section, DECISIONS D-R5-N1 … N6 (G4 / G5 amended), the evidence.
+
+## Round 5 · batch M2 — verification pass
 
 Batch M2's verification found seven things in the Settings page's stamp dent (below batch M2's own section). Two were
 major: your Face 3 lost its fingertip foci, and the agreement test claimed colours while it measured shapes. Both are
