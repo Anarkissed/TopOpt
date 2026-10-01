@@ -10428,7 +10428,7 @@ public struct WorkspacePlaceholder: View {
             // latticing it — core's `lattice.regions` are geometry predicates and
             // a region is a voxel set (PR 331 §6). Three words, not silence.
             if !project.latticeReachesTheRun(ref), role != nil {
-                Text(Self.latticeRegionNotConsumed)
+                Text(LatticeSectorOutline.notLatticedWords(protected: force.isProtected(g.id)))
                     .font(.system(size: 9, weight: .bold))
                     .foregroundStyle(DS.Color.warning.color)
                     .padding(.vertical, 2).padding(.horizontal, 5)
@@ -10471,7 +10471,7 @@ public struct WorkspacePlaceholder: View {
     /// ★ Three words (R7). The region's depth IS consumed — it is PR 331's
     /// per-sector protection depth; what the run cannot consume yet is the
     /// lattice half.
-    static let latticeRegionNotConsumed = "Frozen, not latticed"
+    static let latticeRegionNotConsumed = LatticeSectorOutline.notLatticedWords(protected: true)   // ★ batch E: never "Frozen"
 
     /// PR 331 §5c's small-face policy, applied to this list: a selectable holding
     /// fewer voxels than the sliver floor is dimmed. Faces and regions alike, from

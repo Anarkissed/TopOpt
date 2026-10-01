@@ -318,6 +318,8 @@ public enum LatticeRegionEmission {
                                // (a cut sector — a voxel set, PR 331 §6). Every member
                                // emitted carries the REGION's key, role, depth, density.
                                regionMembers: (UUID, RegionID) -> [FaceID]? = { _, _ in nil },
+                               // ★ BATCH E: a split piece's half-spaces per member (LatticeSectorOutline); [[]] ⇒ the whole face
+                               regionCuts: (RegionID, FaceID) -> [[RegionCut]] = { _, _ in [[]] },
                                // ★ RULING (g): the name a DROPPED face region (group, region, its
                                // resolved role, the group's role) is reported under, or nil when it
                                // is not a wall to report — the project says so for a region gone
@@ -339,6 +341,7 @@ public enum LatticeRegionEmission {
         var skipped = 0
         var droppedNames: [String] = []
         var droppedSeen = Set<RegionID>()
+        var sectorPieces = Set<Int>()   // ★ batch E: the prisms clipped to a split piece
         /// every resolved shape of a face: the one plane/cylinder, else its facets
         func shapes(_ f: FaceID) -> [ResolvedFace] {
             if let r = resolve(f) { return [r] }
@@ -440,7 +443,8 @@ public enum LatticeRegionEmission {
                 let depth = selectableDepthMM[ref.key] ?? groupDepth
                 for f in members where !direct.contains(f) {
                     var emitted = 0
-                    for r in shapes(f) {
+                    let piece = LatticeSectorOutline.pieces(f, cutSets: regionCuts(rid, f), resolve: resolve, facets: facets)
+                    for r in piece.shapes {
                         guard var s = spec(for: r, role: role, depthMM: depth,
                                            faceID: runFaceID(f),
                                            expandMM: selectableExpandMM[ref.key] ?? 0,
@@ -451,9 +455,10 @@ public enum LatticeRegionEmission {
                         s.selectableKey = ref.key
                         s.rawFaceID = f
                         if role == .include, let sf = synthetic { s.syntheticStress = true; s.syntheticFoci = sf.foci(for: ref.key) }
+                        if piece.clipped { sectorPieces.insert(out.count) }
                         out.append(s); emitted += 1
                     }
-                    if emitted == 0 { skipped += 1 }
+                    if emitted == 0, !piece.clippedAway { skipped += 1 }
                 }
             }
         }
@@ -462,6 +467,7 @@ public enum LatticeRegionEmission {
         // run id, and it carries the tilt to the prism across it — tan(half the dihedral),
         // positive where the two prisms diverge with depth — so `LatticeRegionMask` can
         // flare each prism to the bisector plane and adjacent prisms meet without a wedge.
+        LatticeSectorOutline.meetAtTJunctions(&out, pieces: sectorPieces)   // ★ batch E: pieces only
         finishSeams(&out, runFaceID: runFaceID, solidAt: solidAt)
         return Result(regions: out, skippedFaces: skipped, skippedRegionNames: droppedNames)
     }
