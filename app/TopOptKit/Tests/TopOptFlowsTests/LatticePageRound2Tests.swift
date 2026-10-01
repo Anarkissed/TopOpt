@@ -534,17 +534,15 @@ final class LatticePageRound2Tests: XCTestCase {
 
     func testTopologyListShowsOneFootnoteNotPerRowBadges() throws {
         let src = try String(contentsOf: sourceURL("LatticePage.swift"), encoding: .utf8)
-        // Exactly one footnote, and no per-row badge sentence in the pane.
-        XCTAssertEqual(src.components(separatedBy: "* the geometry does not exist yet").count - 1, 1,
-                       "ONE footnote carries the explanation")
+        // ★ Re-pinned for lattice types U1 (2026-10-01): still no per-row sentence — each greyed
+        // row carries a MARK, and ONE footnote per distinct reason (core's facts) explains it.
+        XCTAssertTrue(src.contains("Text(\"\\(n.mark) \\(n.reason)\")"), "the footnotes, one per reason")
         XCTAssertTrue(src.contains("lineLimit(1)"), "topology names render on one line")
-        // The presentation still derives from CORE's split (B0 stands): the rows
-        // and their generatable flags are LatticeTopologyPicker's, and a
-        // certifiable-only topology exists today to exercise the asterisk.
-        let rows = LatticeTopologyPicker.rowsFromCore()
-        XCTAssertTrue(rows.contains { !$0.generatable },
-                      "core still has certifiable-but-ungeneratable rows (else the footnote hides)")
-        XCTAssertTrue(rows.contains { $0.generatable })
+        let entries = LatticeTypeCatalog.entriesFromCore()
+        let notes = LatticePage.footnotes(entries)
+        XCTAssertEqual(notes.count, Set(entries.compactMap(\.reason)).count, "★ one footnote per distinct reason, no more")
+        XCTAssertTrue(entries.contains { !$0.offered }, "core still has types it does not offer (else no footnote)")
+        XCTAssertTrue(entries.contains { $0.offered })
     }
 
     // MARK: - regions emission unit coverage
