@@ -115,15 +115,23 @@ final class FlexibleInPassCompositeTests: XCTestCase {
         xray(r, box, inputs: Fx.boxInputs(.gyroid), token: 1, device: device)
         let inFoot = Fx.differing(a, c, where: { foot[$0] })
         let outside = Fx.differing(a, c, where: { !foot[$0] && mask[$0] })
+        // ★ BATCH M VERIFICATION (D-R5-MV3): the map's depth is in the G-buffer, so a wall behind the opaque
+        // map is never marched — the draw order alone no longer puts walls on it (a SECOND guard). The
+        // control restores batch M's frame first (no planes' depth), then the old order
         pass.controlDrawGhostFirst = true
+        let aFirstWithDepth = try frame(r)
+        pass.controlNoMapDepth = true
         let aFirst = try frame(r)
         pass.controlDrawGhostFirst = false
+        pass.controlNoMapDepth = false
         let firstFoot = Fx.differing(aFirst, c, where: { foot[$0] })
-        print("FLEX-T6 footprint \(inFoot.of) px: A≠C at \(inFoot.differ); outside the map, lattice px A≠C \(outside.differ)/\(outside.of); control (ghost first) footprint A≠C \(firstFoot.differ)")
+        let firstWithDepth = Fx.differing(aFirstWithDepth, c, where: { foot[$0] })
+        print("FLEX-T6 footprint \(inFoot.of) px: A≠C at \(inFoot.differ); outside the map, lattice px A≠C \(outside.differ)/\(outside.of); control (ghost first, no planes' depth) footprint A≠C \(firstFoot.differ); ghost first WITH the planes' depth \(firstWithDepth.differ)")
         XCTAssertGreaterThan(inFoot.of, 1000, "the map must cover part of the frame")
         XCTAssertLessThanOrEqual(Double(inFoot.differ), 0.005 * Double(inFoot.of), "the opaque map must hide the walls behind it")
         XCTAssertGreaterThan(Double(outside.differ), 0.2 * Double(outside.of), "positive control: the lattice shows outside the map")
         XCTAssertGreaterThan(Double(firstFoot.differ), 0.3 * Double(inFoot.of), "control: shading after the ghost paints walls over the map")
+        XCTAssertLessThanOrEqual(Double(firstWithDepth.differ), 0.005 * Double(inFoot.of), "the planes' depth alone keeps the walls off the map")
     }
 
     func testGhostVeilsTheLattice() throws {
@@ -217,9 +225,14 @@ final class FlexibleInPassCompositeTests: XCTestCase {
         xray(r, box, inputs: Fx.boxInputs(.gyroid), token: 1, device: device)
         let pass = try XCTUnwrap(r.flexibleLattice)
         let a = try frame(r)
+        // ★ BATCH M VERIFICATION (D-R5-MV3): with the map's depth in the G-buffer no wall is marched behind
+        // the map, so the lattice-only AO has nothing to print there — the control restores batch M's
+        // frame too (no planes' depth) to show the instrument still sees the AO when it is bound
         pass.controlKeepAOForGhost = true
+        pass.controlNoMapDepth = true
         let aAO = try frame(r)
         pass.controlKeepAOForGhost = false
+        pass.controlNoMapDepth = false
         // E: a ready pass with no lattice anywhere (mask all zero)
         var empty = Fx.boxInputs(.gyroid)
         empty.mask.values = [Float](repeating: 0, count: empty.mask.values.count)
