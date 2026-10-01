@@ -11608,6 +11608,10 @@ public struct WorkspacePlaceholder: View {
         showLatticeWizard = true
     }
     private static let latticeTypeTapHint = "Opens the lattice settings"
+    /// Whether a greyed Lattice or Optimize is greyed by that saved type — then its tap opens Settings.
+    private func opensLatticeType(_ ok: Bool, _ summary: String) -> Bool {
+        !ok && summary == latticeTypeRefusal
+    }
 
     /// The Optimize sub-label, reflecting the minimize-plastic mode + the load case.
     private var optimizeSummary: String {
@@ -11662,13 +11666,12 @@ public struct WorkspacePlaceholder: View {
     ///
     /// Same stature as Optimize, deliberately: it is the other thing you can ask
     /// this screen to DO, not a modifier on the first.
+    /// ★ ruling 4 (item 6): greyed, and its tap takes him to where walls are marked.
     private var latticeThisButton: some View {
         let ok = canLatticeThis
         let summary = latticeThisSummary
-        // ★ ruling 4 (item 6): greyed, and its tap takes him to where walls are marked
         let marks = !ok && wallMarkingTapGoesSomewhere && LatticeJobIncludeGate.opensWallMarking(summary)
-        // ★ review 2026-10-01: greyed by a saved type core can't run — the tap opens Settings
-        let opensType = !ok && summary == latticeTypeRefusal
+        let opensType = opensLatticeType(ok, summary)
         return Button {
             if ok { requestLatticeRun() } else if marks { goToWallMarking() } else if opensType { goToLatticeType() }
         } label: {
@@ -11752,13 +11755,12 @@ public struct WorkspacePlaceholder: View {
         return "\(n) region\(n > 1 ? "s" : "") · no optimization"
     }
 
+    /// ★ ruling 4 (item 6): greyed, and its tap takes him to where walls are marked.
     private var optimizeButton: some View {
         let ok = canOptimize
         let summary = optimizeSummary
-        // ★ ruling 4 (item 6): greyed, and its tap takes him to where walls are marked
         let marks = !ok && wallMarkingTapGoesSomewhere && LatticeJobIncludeGate.opensWallMarking(summary)
-        // ★ review 2026-10-01: greyed by a saved type core can't run — the tap opens Settings
-        let opensType = !ok && summary == latticeTypeRefusal
+        let opensType = opensLatticeType(ok, summary)
         return Button {
             if ok { requestRun() } else if marks { goToWallMarking() } else if opensType { goToLatticeType() }
         } label: {

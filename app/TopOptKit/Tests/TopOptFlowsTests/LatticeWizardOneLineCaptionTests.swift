@@ -41,9 +41,14 @@ final class LatticeWizardOneLineCaptionTests: XCTestCase {
     func testOnlyTheOctetTrussIsOffered() {
         XCTAssertEqual(LatticeSetupWizard.offeredTypeIDs, ["octet"])
         let s = src
-        XCTAssertTrue(s.contains("guard offered else { typeReason = \"\\(e.displayName): \\(e.reason ?? \"\")\"; return }"),
+        XCTAssertTrue(s.contains("guard offered else { typeReason = LatticeTypeCatalog.reasonLine(e); return }"),
                       "★ a tap on a type not offered never selects — it says why")
-        XCTAssertTrue(s.contains(".disabled(organicOn)"), "only Organic disables the chips outright")
+        let bcc = LatticeTypeCatalog.entriesFromCore().first { $0.id == "bcc" }!
+        XCTAssertEqual(LatticeTypeCatalog.reasonLine(bcc), "BCC: Core can’t build this type yet.", "…in one sentence")
+        // only Organic disables the chips outright — except the offered chip that fixes a saved
+        // type core can't run (review 2026-10-01, `LatticeStaleTypeTests`)
+        XCTAssertTrue(s.contains("let inert = organicOn && !fixesStale") && s.contains(".disabled(inert)"),
+                      "only Organic disables the chips outright")
         XCTAssertTrue(LatticeTypeCatalog.order.count > 1, "the others stay VISIBLE (greyed), not removed")
     }
 }
