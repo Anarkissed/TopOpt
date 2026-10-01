@@ -643,11 +643,14 @@ public enum LatticeVariantProtectionTie {
         return r == r.rounded() ? String(format: "%.0f", r) : String(format: "%g", r)
     }
     /// His sentence. `setToMM` is the depth to set the wall to — core's protection, less the wall's
-    /// own in-plane expand when it has one (its slab reaches depth + expand).
-    public static func sentence(_ m: Mismatch, wallName: String, setToMM: Double) -> String {
-        "This result was optimized with a \(mm(m.protectionMM)) mm protected skin under \(wallName), "
-            + "but the wall is \(mm(m.wallMM)) mm deep. Optimize again with this wall, "
-            + "or set the wall to \(mm(setToMM)) mm."
+    /// own in-plane expand when it has one (its slab reaches depth + expand; ruling 3's accepted
+    /// deviation). ★ nil ⇒ no depth can clear it (round 3, 2026-10-01: at or below zero, or below the
+    /// wall's minimum depth) — the sentence then offers Optimize again only.
+    public static func sentence(_ m: Mismatch, wallName: String, setToMM: Double?) -> String {
+        let head = "This result was optimized with a \(mm(m.protectionMM)) mm protected skin under \(wallName), "
+            + "but the wall is \(mm(m.wallMM)) mm deep. Optimize again with this wall"
+        guard let setTo = setToMM else { return head + "." }
+        return head + ", or set the wall to \(mm(setTo)) mm."
     }
     /// Any OTHER refusal of a variant document is said in core's own words, less its file prefix.
     public static func coreWords(_ coreError: String) -> String {

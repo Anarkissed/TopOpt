@@ -2475,7 +2475,12 @@ public final class ProjectModel: ObservableObject {
         }
         let name = ref.map(latticeSelectableName) ?? "Face \(m.faceID)"
         let expand = prism?.selectableKey.map { LatticeSlabExpand.clamp(lattice.selectableExpandMM[$0] ?? 0) } ?? 0
-        return LatticeVariantProtectionTie.sentence(m, wallName: name, setToMM: m.protectionMM - expand)
+        // ★ ROUND 3 (maintainer, 2026-10-01): a depth is suggested only when the wall can be set to
+        // it — at or below zero, or below the wall's minimum depth (`LatticeSlabDepth.minMM`, where
+        // every depth write clamps), no depth clears the tie, so only Optimize again is offered.
+        let setTo = m.protectionMM - expand
+        let settable = setTo >= LatticeSlabDepth.minMM - 1e-9
+        return LatticeVariantProtectionTie.sentence(m, wallName: name, setToMM: settable ? setTo : nil)
     }
 
     /// ★ RULING (g) (maintainer, 2026-09-30): the name a face region the run cannot consume is

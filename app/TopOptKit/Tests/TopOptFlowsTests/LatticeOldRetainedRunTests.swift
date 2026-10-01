@@ -69,6 +69,47 @@ final class LatticeOldRetainedRunTests: XCTestCase {
         XCTAssertTrue(try coreErrors(p, retained: old).allSatisfy { $0.1 == nil }, "★ 3 mm + its 2 mm expand = the 5 mm skin")
     }
 
+    /// ★ ROUND 3 (maintainer, 2026-10-01): when the skin less the expand is at or below zero, or below
+    /// the wall's minimum depth, no depth can clear the tie — the sentence offers Optimize again only.
+    /// The boundary (exactly the minimum) still offers it, and that remedy is true.
+    func testNoDepthIsSuggestedWhenNoneCanClearIt() throws {
+        for e in [5.0, 4.5] {        // 5 − 5 = 0; 5 − 4.5 = 0.5 < 1 mm
+            let (p, gid, _) = VariantFacePrismFixture.project()
+            p.writeLatticeExpandMM(.face(group: gid, face: 1), mm: e)
+            let old = try VariantFacePrismFixture.original(bareProtection: [1], depthMM: 5)
+            let err = try XCTUnwrap(try coreErrors(p, retained: old).first?.1, "control: core refuses it")
+            XCTAssertEqual(sentence(p, err),
+                           "This result was optimized with a 5 mm protected skin under Face 1, but the wall is "
+                           + LatticeVariantProtectionTie.mm(20 + e) + " mm deep. Optimize again with this wall.",
+                           "★ expand \(e): no depth suggested")
+            if e == 4.5 {
+                // why: the nearest settable depth (the 1 mm minimum) still reaches 1 + 4.5 ≠ 5 — refused
+                p.writeLatticeDepthMM(.face(group: gid, face: 1), mm: 0.5)
+                let prism = try XCTUnwrap(p.latticeJobRegions().regions.first { $0.kind == .face && $0.faceID == 1 })
+                XCTAssertEqual(prism.depthMM, LatticeSlabDepth.minMM + e, accuracy: 1e-9, "control: 0.5 clamps to the 1 mm minimum")
+                XCTAssertNotNil(try coreErrors(p, retained: old).first?.1, "★ no settable depth clears it")
+            }
+        }
+        // the boundary: 5 − 4 = 1 mm, exactly the minimum — suggested, and true
+        let (p, gid, _) = VariantFacePrismFixture.project()
+        p.writeLatticeExpandMM(.face(group: gid, face: 1), mm: 4)
+        let old = try VariantFacePrismFixture.original(bareProtection: [1], depthMM: 5)
+        let err = try XCTUnwrap(try coreErrors(p, retained: old).first?.1)
+        XCTAssertTrue(sentence(p, err).hasSuffix("Optimize again with this wall, or set the wall to 1 mm."), sentence(p, err))
+        p.writeLatticeDepthMM(.face(group: gid, face: 1), mm: 1)
+        XCTAssertTrue(try coreErrors(p, retained: old).allSatisfy { $0.1 == nil }, "★ 1 mm + its 4 mm expand = the 5 mm skin")
+        // the bare form, and the banner still carries the one tap
+        let bare = LatticeVariantProtectionTie.sentence(.init(faceID: 1, protectionMM: 5, wallMM: 25), wallName: "Face 1", setToMM: nil)
+        XCTAssertEqual(bare, "This result was optimized with a 5 mm protected skin under Face 1, but the wall is 25 mm deep. "
+                       + "Optimize again with this wall.")
+        let b = try XCTUnwrap(LatticePageBanner.derive(simPhase: .idle, simStale: false, optimizing: false, runFailure: nil,
+                                                       variantJobRefusal: bare, optimizeEnabled: true))
+        XCTAssertEqual(b.body, bare); XCTAssertEqual(b.actionLabel, "Optimize again", "★ Optimize again only")
+        var root = URL(fileURLWithPath: #filePath); for _ in 0..<3 { root.deleteLastPathComponent() }
+        let pm = try String(contentsOf: root.appendingPathComponent("Sources/TopOptFlows/ProjectModel.swift"), encoding: .utf8)
+        XCTAssertTrue(pm.contains("let settable = setTo >= LatticeSlabDepth.minMM - 1e-9"), "the wall's own minimum, one constant")
+    }
+
     /// The wall is named as its Selections row names it: a face region's member names the region.
     func testTheWallIsNamedAsItsRowNamesIt() throws {
         let (p, _, rid) = VariantFacePrismFixture.project()
