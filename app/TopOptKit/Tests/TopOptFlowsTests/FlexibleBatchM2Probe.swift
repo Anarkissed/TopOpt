@@ -56,8 +56,10 @@ final class FlexibleBatchM2Probe: XCTestCase {
                              tag, g, k.region, st.pitchMM, st.nu, st.nv, st.latticeMMMean, face.deepestMM, f.scale,
                              f.foldShare.map { String(format: "%.3f", $0) } ?? "-", stage.dentMaxMM, url.lastPathComponent))
                 if let s = face.activeStamp {
-                    print(String(format: "FLEX-M2 %@ face %d stamp: centre (%.2f, %.2f) %.1f × %.1f mm, turn %d°", tag, k.region,
-                                 s.centreU, s.centreV, s.widthMM, s.lengthMM, s.rotationDeg))
+                    let sig = FlexibleStampSpread.sigmasMM(st, foot: foot)
+                    print(String(format: "FLEX-M2 %@ face %d stamp: centre (%.2f, %.2f) %.1f × %.1f mm, turn %.0f°, %@ · feature %.2f mm · σ %.2f / %.2f mm, near weight %.3f", tag, k.region,
+                                 s.centreU, s.centreV, s.widthMM, s.lengthMM, s.rotationDeg, s.rigid ? "rigid" : "soft",
+                                 FlexibleStampSpread.featureMM(foot, stack: st), sig.near, sig.far, FlexibleStampSpread.Rule.shipped.nearWeight(sig)))
                 }
             }
         }
@@ -97,9 +99,14 @@ final class FlexibleBatchM2Probe: XCTestCase {
 
     func testDumpThePadStamps() async throws {
         guard let dir = Self.dir else { throw XCTSkip("FLEX_M2_PROBE_DIR") }
-        let cases: [(String, Double, Double)] = ProcessInfo.processInfo.environment["FLEX_M2_PAD_CASES"] == "all"
-            ? [("four_fingers", 3, 6), ("four_fingers", 10, 3), ("thumb", 10, 4)]
-            : [("four_fingers", 3, 6)]
+        // ★ M2 VERIFICATION: "whole" — the library's whole-face and large stamps (the rigid flat plate,
+        // the rigid foam-test foot, the soft palm), outside the six faces the rule was fitted on
+        let cases: [(String, Double, Double)]
+        switch ProcessInfo.processInfo.environment["FLEX_M2_PAD_CASES"] {
+        case "all"?: cases = [("four_fingers", 3, 6), ("four_fingers", 10, 3), ("thumb", 10, 4)]
+        case "whole"?: cases = [("flat_plate", 10, 4), ("ifd_foot", 10, 4), ("palm", 10, 4)]
+        default: cases = [("four_fingers", 3, 6)]
+        }
         for (s, kg, d) in cases {
             let (stage, m) = try await pad(stamp: s, kg: kg, deepest: d)
             try Self.dump(stage, m, tag: "pad_\(s)_\(Int(kg))kg_\(Int(d))mm", to: dir)
@@ -171,17 +178,22 @@ final class FlexibleBatchM2Probe: XCTestCase {
     /// main page beside it; his round-5 project's Settings page with Face 3 (Group 2's fingertips) selected.
     func testBeforeAfterFrames() async throws {
         guard let dir = Self.dir else { throw XCTSkip("FLEX_M2_PROBE_DIR") }
-        defer { FlexibleStampSpread.controlBatchMSpread = false }
+        // ★ M2 VERIFICATION: FLEX_M2_BEFORE=m2 — "before" is batch M2's rule (σ_near 0.25 × depth), not batch M's
+        let beforeIsM2 = ProcessInfo.processInfo.environment["FLEX_M2_BEFORE"] == "m2"
+        func before(_ on: Bool) {
+            if beforeIsM2 { FlexibleStampSpread.controlRule = on ? .batchM2 : nil } else { FlexibleStampSpread.controlBatchMSpread = on }
+        }
+        defer { FlexibleStampSpread.controlBatchMSpread = false; FlexibleStampSpread.controlRule = nil }
         let (stage, m) = try await pad(stamp: "four_fingers", kg: 3, deepest: 6)
         let pm = m.project
         for (tag, control) in [("before", true), ("after", false)] {
-            FlexibleStampSpread.controlBatchMSpread = control
+            before(control)
             for v in Self.views {
                 try Self.renderSettingsPage(m, pm, edited: true, to: dir.appendingPathComponent("M2_\(tag)_pad4_settings_edited_\(v.0).png"), view: v)
                 try Self.renderSettingsPage(m, pm, edited: false, to: dir.appendingPathComponent("M2_\(tag)_pad4_settings_saved_\(v.0).png"), view: v)
             }
         }
-        FlexibleStampSpread.controlBatchMSpread = false
+        before(false)
         for v in Self.views {
             try FlexibleBatchMProbe.render(stage, pm, to: dir.appendingPathComponent("M2_pad4_main_\(v.0).png"), amount: 1, view: v)
         }
@@ -202,15 +214,17 @@ final class FlexibleBatchM2Probe: XCTestCase {
         }
         await hm.squishSolver.waitForIdle()
         hm.select(3)
+        // ★ M2 VERIFICATION: and four level views round the part — one of them looks at Face 3 face-on
+        let hisViews = Self.views + [("side0", 0, 0), ("side90", .pi / 2, 0), ("side180", .pi, 0), ("side270", -.pi / 2, 0)]
         for (tag, control) in [("before", true), ("after", false)] {
-            FlexibleStampSpread.controlBatchMSpread = control
-            for v in Self.views {
+            before(control)
+            for v in hisViews {
                 try Self.renderSettingsPage(hm, r.project, edited: true, to: dir.appendingPathComponent("M2_\(tag)_his_settings_face3_edited_\(v.0).png"), view: v)
             }
         }
-        FlexibleStampSpread.controlBatchMSpread = false
+        before(false)
         his.pick("group-2"); his.refresh()
-        for v in Self.views {
+        for v in hisViews {
             try FlexibleBatchMProbe.render(his, r.project, to: dir.appendingPathComponent("M2_his_main_group-2_\(v.0).png"), amount: 1, view: v)
         }
         try FlexibleBatchMProbe.renderLegend(his, to: dir.appendingPathComponent("M2_main_legend_card.png"))

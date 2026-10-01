@@ -57,8 +57,16 @@ final class FlexibleBatchMDentTests: XCTestCase {
         let r = try FlexibleHisProject.restore(FlexibleHisProject.round5Dir)
         addTeardownBlock { r.cleanup() }
         let m = try await FlexibleHisProject.openedModel(r.project, test: self)
-        try await FlexibleHisProject.waitFor(60, "the stamps' grids") { m.stampFootprint(3) != nil && m.stampFootprint(5) != nil }
+        try await FlexibleHisProject.waitFor(60, "the stamps' grids") {
+            m.stampFootprint(3) != nil && m.stampFootprint(5) != nil && m.stampFootprint(FlexibleHisProject.topA) != nil
+        }
         await m.waitForIdle()
+        // ★ RE-PINNED BY THE M2 VERIFICATION: the page's stamp dent reads core's design (its even press round
+        // the stamp, the density under it) as the main page's sim does — measured once core's design has
+        // LANDED (what he sees a moment after an edit); before it lands, see "before core's design" below.
+        // (This test used to read the page before the design landed — batch M2's σ 25 mm hid the difference.)
+        try await FlexibleSquishFixture.settle(m, "his round 5")
+        try await FlexibleHisProject.waitFor(120, "core's design of Face 3") { m.design(3) != nil }
         let key = try XCTUnwrap(m.key(3)), st = try XCTUnwrap(m.stacks[key])
         let f = try XCTUnwrap(m.settings.face(3))
         // the page's own call (FlexibleStagePage.refreshChannels: X-ray, no lattice drawn)
@@ -81,11 +89,25 @@ final class FlexibleBatchMDentTests: XCTestCase {
         inputs.stampFootprints[key] = try XCTUnwrap(m.stampFootprint(3))   // ★ RED: D1's footprint (no spread)
         let d1: [Double] = (FlexibleShownValues(inputs, drawnLattice: nil).values[key] ?? []).map { if case .depth(let d) = $0 { return d } else { return 0 } }
         let vs = try Self.valleys(m, 3)
+        let foot3 = try XCTUnwrap(m.stampFootprint(3))
+        let des3 = FlexibleStampSpread.Design(m.design(3), columns: st.columns.count)
+        print(String(format: "FLEX-M SETTINGS Face 3: core's design %@ — even press %.3f of the peak, density under %.3f / outside %.3f",
+                     m.design(3) == nil ? "NOT landed" : (m.design(3)?.refusal != nil ? "refused" : "landed"), des3.background, des3.densityUnder, des3.densityOutside))
         func mean(_ x: [Double], _ ids: [Int]) -> Double { ids.isEmpty ? 0 : ids.map { x[$0] }.reduce(0, +) / Double(ids.count) }
         print(String(format: "FLEX-M SETTINGS Face 3 (σ %.1f / %.1f mm): between the fingertips (%d columns) the dent is %.0f%% of the deepest · the footprint alone %.0f%%",
-                     FlexibleStampSpread.sigmasMM(st).near, FlexibleStampSpread.sigmasMM(st).far, vs.count, 100 * mean(depth, vs) / f.deepestMM, 100 * mean(d1, vs) / f.deepestMM))
+                     FlexibleStampSpread.sigmasMM(st, foot: foot3).near, FlexibleStampSpread.sigmasMM(st, foot: foot3).far, vs.count, 100 * mean(depth, vs) / f.deepestMM, 100 * mean(d1, vs) / f.deepestMM))
         XCTAssertGreaterThan(vs.count, 10)
         XCTAssertGreaterThanOrEqual(mean(depth, vs) / f.deepestMM, 0.85, "the four fingertips merge into one press")
+        // ★ M2 VERIFICATION — before core's design lands: the even press round the stamp from the stamp itself
+        // (its area over the face's: core's own reading), so the first design does not arrive as a jump
+        let pre = FlexibleStampSpread.Design.beforeDesign(stampAreaMM2: m.stampAreaMM2(3) ?? 0, faceAreaMM2: st.footprintAreaMM2)
+        let dPre = FlexibleStampSpread.dent(foot3, stack: st, design: pre)
+        let dNone = FlexibleStampSpread.dent(foot3, stack: st, design: .none)   // RED: no even press until core designs
+        print(String(format: "FLEX-M SETTINGS Face 3 before core's design: even press %.4f of the peak (core's, once landed: %.4f) · between the fingertips %.0f%% of the deepest (landed %.0f%%) · with none %.0f%%",
+                     pre.background, des3.background, 100 * mean(dPre, vs), 100 * mean(depth, vs) / f.deepestMM, 100 * mean(dNone, vs)))
+        XCTAssertEqual(pre.background, des3.background, accuracy: 0.005, "before the design, the even press is already core's")
+        XCTAssertGreaterThanOrEqual(mean(dPre, vs), 0.8, "…and the fingertips already merge into one press")
+        XCTAssertLessThan(mean(dNone, vs), 0.75, "control: with no even press the valleys sink (the first design arrived as a jump)")
         XCTAssertLessThan(mean(d1, vs) / f.deepestMM, 0.5, "control: the footprint alone leaves four pits")
         XCTAssertEqual(depth.max() ?? 0, f.deepestMM, accuracy: 1e-9, "the deepest squish is still the stamp's sink")
         // no hard cut at the footprint's edge: the largest step between neighbouring columns
@@ -105,14 +127,23 @@ final class FlexibleBatchMDentTests: XCTestCase {
         // disagreed with the main page's sim): the spread is now two Gaussians, σ 0.25 and 0.6 × the face's
         // lattice depth, over core's press / stiffness (FlexibleStampSpread.dent, fitted to the 3D sim —
         // FlexibleBatchM2Tests), no longer batch M's e^(−r / 0.2·depth) wall; the depth rule is the same
+        // ★ RE-PINNED BY THE M2 VERIFICATION (his Face 3 lost its four foci: σ_near 0.25 × 100 mm = 25 mm
+        // blurred fingertips 17–19 mm apart into one hill): the BROAD press still follows the depth
+        // (σ_far 0.5 × the face's lattice depth); the near σ is the smaller of 0.25 × the depth and 0.4 ×
+        // the stamp's own feature (the radius of the largest disc in its footprint) — a fingertip's focus
+        // is as wide as the fingertip, on a 20 mm top or a 100 mm-deep side
         let ka = try XCTUnwrap(m.key(FlexibleHisProject.topA)), sa = try XCTUnwrap(m.stacks[ka])
-        let la = FlexibleStampSpread.sigmasMM(sa), ls = FlexibleStampSpread.sigmasMM(st)
-        print(String(format: "FLEX-M SETTINGS spread σ: Top A (lattice %.1f mm) %.1f / %.1f mm · Face 3 (lattice %.1f mm) %.1f / %.1f mm",
-                     sa.latticeMMMean, la.near, la.far, st.latticeMMMean, ls.near, ls.far))
-        XCTAssertEqual(la.near, 0.25 * sa.latticeMMMean, accuracy: 1e-9)
-        XCTAssertEqual(la.far, 0.6 * sa.latticeMMMean, accuracy: 1e-9)
-        XCTAssertEqual(ls.near, 0.25 * st.latticeMMMean, accuracy: 1e-9)
-        XCTAssertEqual(ls.far, 0.6 * st.latticeMMMean, accuracy: 1e-9)
+        let footA = try XCTUnwrap(m.stampFootprint(FlexibleHisProject.topA))
+        let la = FlexibleStampSpread.sigmasMM(sa, foot: footA), ls = FlexibleStampSpread.sigmasMM(st, foot: foot3)
+        let fa = FlexibleStampSpread.featureMM(footA, stack: sa), fs = FlexibleStampSpread.featureMM(foot3, stack: st)
+        print(String(format: "FLEX-M SETTINGS spread σ: Top A (lattice %.1f mm, feature %.1f mm) %.1f / %.1f mm · Face 3 (lattice %.1f mm, feature %.1f mm) %.1f / %.1f mm",
+                     sa.latticeMMMean, fa, la.near, la.far, st.latticeMMMean, fs, ls.near, ls.far))
+        XCTAssertEqual(la.far, 0.5 * sa.latticeMMMean, accuracy: 1e-9)
+        XCTAssertEqual(ls.far, 0.5 * st.latticeMMMean, accuracy: 1e-9)
+        XCTAssertLessThan(la.far, ls.far, "the broad press spreads further through the deeper lattice")
+        XCTAssertEqual(la.near, max(sa.pitchMM, min(0.25 * sa.latticeMMMean, 0.4 * fa)), accuracy: 1e-9)
+        XCTAssertEqual(ls.near, max(st.pitchMM, min(0.25 * st.latticeMMMean, 0.4 * fs)), accuracy: 1e-9)
+        XCTAssertLessThan(ls.near, 0.25 * st.latticeMMMean, "a fingertip's focus is the fingertip's width, not the 100 mm depth's")
         // ── a tap reads the colour under it (the blend of its triangle's corners) ──
         let start = try XCTUnwrap(overlay.flatStart[key])
         let vals = try XCTUnwrap(now.mapValues)

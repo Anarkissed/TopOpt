@@ -263,8 +263,13 @@ final class FlexibleBatchM2Tests: XCTestCase {
 
     /// His round-5 V10 (batch M verification): "the Settings page's stamp dent is a steep trench with
     /// saw-tooth edges and disagrees with the main page". Same face, same stamp: the Settings page's
-    /// column dent and the main page's map (the 3D sim's own squish), each as the colour it is drawn in
-    /// (over its own legend's top), along the row through the four fingertips and the line across them.
+    /// column dent and the main page's map (the 3D sim's own squish), each over the face's own deepest —
+    /// the dent's SHAPE — along the row through the four fingertips and the line across them.
+    /// ★ M2 VERIFICATION: this pins the SHAPE, not the colours. Each page colours by its OWN legend's top
+    /// (the Settings page: what he drew and core's buildable range, FlexibleShownValues.maxDepth; the main
+    /// page: the sim's deepest), so the colours agree only where both tops are the face's deepest (3 kg /
+    /// 6 mm); at 10 kg / 3 mm the Settings legend tops at core's buildable 5.5 mm and the stamp reads
+    /// green-yellow beside the main page's red — his call (printed: "FLEX-M2 DRAWN").
     /// RED CONTROL: batch M's spread (the footprint, a full sink under all of it, e^(−r / 0.2·depth)).
     func testTheTwoPagesAgreeOnAFourFingertipStamp() async throws {
         defer { FlexibleStampSpread.controlBatchMSpread = false }
@@ -337,9 +342,16 @@ final class FlexibleBatchM2Tests: XCTestCase {
             print(String(format: "FLEX-M2 TOOTH %@: the drawn dent's largest crease over the pitch %.3f (×%.0f) · batch M's spread %.3f (×%.0f) · the face's deepest %.2f mm (the Settings legend tops at %.2f) · the main page's face top %.2f mm (its card %.2f)",
                          tag, toothNow, now.shown.exaggeration, toothOld, old.shown.exaggeration, now.mm.filter(\.isFinite).max() ?? 0,
                          now.shown.maxDepth, mainMM.filter(\.isFinite).max() ?? 0, stage.dentMaxMM))
+            // ★ M2 VERIFICATION: the colours as DRAWN — each page over its own legend's top (not asserted: the
+            // Settings legend's top is his call)
+            let drawnSettings = now.mm.map { $0.isFinite && now.shown.maxDepth > 0 ? $0 / now.shown.maxDepth : .nan }
+            let drawnMain = mainMM.map { $0.isFinite && stage.dentMaxMM > 0 ? $0 / stage.dentMaxMM : .nan }
+            let dRow = Self.agreement(drawnSettings, drawnMain, row), dAcross = Self.agreement(drawnSettings, drawnMain, across)
+            print(String(format: "FLEX-M2 DRAWN %@: each page over its own legend's top (Settings %.2f mm, main %.2f mm) — row rms %.3f max %.3f · across rms %.3f max %.3f",
+                         tag, now.shown.maxDepth, stage.dentMaxMM, dRow.rms, dRow.max, dAcross.rms, dAcross.max))
             XCTAssertGreaterThan(row.count, 40); XCTAssertGreaterThan(across.count, 40)
-            XCTAssertLessThanOrEqual(rNow.rms, rmsCap, "\(tag): along the fingertips the two pages show the same colours")
-            XCTAssertLessThanOrEqual(rNow.max, maxCap, "\(tag): …nowhere more than \(maxCap) of the ramp apart")
+            XCTAssertLessThanOrEqual(rNow.rms, rmsCap, "\(tag): along the fingertips the two pages' dent has the same shape")
+            XCTAssertLessThanOrEqual(rNow.max, maxCap, "\(tag): …nowhere more than \(maxCap) of the face's deepest apart")
             XCTAssertLessThanOrEqual(aNow.rms, rmsCap, "\(tag): across the stamp too")
             XCTAssertLessThanOrEqual(aNow.max, maxCap, "\(tag): …across the stamp, nowhere more than \(maxCap) apart")
             XCTAssertEqual(now.mm.filter(\.isFinite).max() ?? 0, deepest, accuracy: 1e-9, "\(tag): the deepest is still his deepest squish")
