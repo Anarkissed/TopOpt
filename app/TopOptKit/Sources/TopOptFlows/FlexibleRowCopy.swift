@@ -94,15 +94,12 @@ public enum FlexibleRowCopy {
 
     /// ★ ROUND 4 (D1): the Stamp shape's rows (the face's ONE stamp).
     public static func stamp(name: String) -> String { fit("Stamp · \(name)", 34) }
-    /// ★ ROUND 5 (S3): the width is in its box; the line says the other side ("Size · 20 mm long").
-    public static func stampSize(widthMM: Double, lengthMM: Double) -> String {
-        fit(String(format: "Width · %.0f mm long", lengthMM))
-    }
     public static func stampTurn(_ deg: Double) -> String { "Turned \(Int(deg.rounded()))°" }
     public static let stampPress = "Press"
     public static let stampPressOptions: [(id: String, label: String)] = [("soft", "Soft"), ("rigid", "Rigid")]
     public static let stampImport = "Import an SVG or image…"
     public static let stampWidthTitle = "Stamp width"
+    public static let stampLengthTitle = "Stamp length"
     public static func stampOffFace(_ n: Double) -> String { fit(String(format: "%.1f N of the stamp lands off the face", n)) }
     /// ★ VERIFICATION OF D1: the main page's lattice sinks the whole face under a stamp today
     /// (core brief #10) — this page's map is the stamp he drew. Said on the panel.
@@ -192,6 +189,13 @@ public enum FlexibleRowCopy {
         if f.upperBound - f.lowerBound < 0.05 { return kgText(f.upperBound) }
         return "\(kgNumber(f.lowerBound))–\(kgText(f.upperBound))"
     }
+    /// ★ S VERIFICATION: the same in the page's unit — the Settings player's end label for the
+    /// playing group ("10 kg", "22 lb", "6–10 kg"); it read "Full load" for his Group 1.
+    public static func squeezeValue(_ force: ClosedRange<Double>?, unit: FlexibleWeightUnit) -> String {
+        guard unit != .kg, let f = force else { return squeezeValue(force) }
+        if f.upperBound - f.lowerBound < 0.05 { return weightText(f.upperBound, unit) }
+        return "\(FlexibleWeightUnit.number(unit.fromKg(f.lowerBound), decimals: unit.decimals))–\(weightText(f.upperBound, unit))"
+    }
     /// ★ D2 REVIEW: under a group's header when it will squish less than designed (the lattice
     /// carries every group; the firmer wins): "Squishes ~0.3 of 2.6 mm · Group 2 firmer".
     public static func groupMissLine(asBuiltMM: Double, designedMM: Double, firmer: Int) -> String {
@@ -252,8 +256,9 @@ public enum FlexibleRowCopy {
     /// [Rests] chosen here on a face a main-page Load group presses: said, never hidden.
     public static func pressedOnMainPage(group: String) -> String { fit("\(fit(group, 16)) presses it on the main page") }
     /// A weight of his own the group's replaced (one source of truth: the group).
-    public static func relinked(oldKg: Double, group: String) -> String {
-        fit("Was \(kgText(oldKg)) · now \(fit(group, 16))'s weight")
+    /// ★ S VERIFICATION: in the page's unit (it stayed in kg).
+    public static func relinked(oldKg: Double, group: String, unit: FlexibleWeightUnit = .kg) -> String {
+        fit("Was \(weightText(oldKg, unit)) · now \(fit(group, 16))'s weight")
     }
 
     // MARK: ★ round 5 (batch S): the folder rail, the number boxes, the units
@@ -270,12 +275,25 @@ public enum FlexibleRowCopy {
     /// [+]: which face starts the new group.
     public static func newGroupTitle(_ n: Int) -> String { "New: \(groupName(n))" }
     public static let newGroupPick = "Tap the face that starts it"
+    /// ★ S VERIFICATION: one row per HAND on [+ New] — a main-page group's faces move together
+    /// ("Top A + Top B → Group 3"; two rows had each moved both).
+    public static func newGroupRow(names: [String], number: Int) -> String {
+        let tail = " → \(groupName(number))"
+        return fit(faceList(names, room: maxChars - tail.count) + tail)
+    }
     public static let newGroupNone = "Press two faces first"
     /// ★ S2: above the Settings page's player while the group's 3D sim moves the part.
     public static let settingsSimNote = "3D sim · as last saved"
+    /// ★ S VERIFICATION: …and while the COLUMN preview stands in for it (it changed character with
+    /// no word): why, and what brings the 3D sim back.
+    public static let settingsColumnEdited = "Column preview · Save & Exit for the 3D sim"
+    public static let settingsColumnNoLattice = "Column preview · no lattice built yet"
+    public static let settingsColumnRunning = "Column preview · 3D sim running"
+    public static let settingsColumnFailed = "Column preview · the 3D sim failed"
     /// ★ S3: a row whose number is in its box says only what it is (the number is not said twice).
     public static let deepestRow = "Deepest squish"
     public static let stampSizeRow = "Width"
+    public static let stampLengthRow = "Length"
     public static let stampTurnRow = "Turn"
     public static func curvePointRow(axis: String) -> String { "Point on \(axis.uppercased())" }
     public static let curvePointTitle = "Squish here"
@@ -309,7 +327,7 @@ public enum FlexibleRowCopy {
         public static let shape = "Curves: the X and Y curves drawn on the face's two edges, always combined — soft only where both say soft. A point nearer the face is squishier. Tap the line to add a point; tap a point for an × to delete it. Stamp: the face is shaped by ONE stamp — what presses it — and sinks the deepest squish under it; drag its handle on the part to move it. One or the other, never both."
         public static let finish = "The whole part's outside. None: the lattice runs to the surface everywhere. Rim: a solid band along every edge, the faces open. Skin: a thin skin over the lattice with round holes in it. Covered: a solid skin everywhere. Only Covered reaches the solver today; Rim and Skin are drawn by the app (the line under the row says so). Rim's band is 2 mm; Skin is 0.8 mm thick with 3 mm holes (1.5 mm radius) 5 mm apart."
         public static let stamp = "What presses this face: pick one from the list, or import an SVG outline or an image (darker presses harder). Its weight is the face's weight."
-        public static let stampSize = "The stamp's real width; its length follows its own proportions (the line says it)."
+        public static let stampSize = "The stamp's real size: type its width or its length, or drag either up or down — the other follows the stamp's own proportions, so its outline is never stretched."
         public static let stampTurn = "Turns the stamp on the face, in degrees: type an angle, or drag the number up or down (15° a step)."
         public static let stampPress = "Soft spreads the weight evenly under the stamp (a hand, a foot). Rigid sinks evenly, like a flat plate."
         public static let deepest = "How far the softest spot sinks under the full weight. Drag the chip on the part: while you drag, a glass prism shows how deep it goes (drawn ×k, the same exaggeration as the dent). It snaps every 0.5 mm and at the lattice depth, and never goes deeper than the lattice. One drag stops where the drawn prism meets the lattice; let go and drag again to go deeper."
@@ -317,7 +335,7 @@ public enum FlexibleRowCopy {
         public static let topology = "Auto picks gyroid or honeycomb for the feel you chose. Honeycomb has test data only when pressed along its prism axis, so a side face is gyroid only."
         public static let noFace = "Tap a face on the part to select it, then press it or let it rest. Faces from the main page's Load and Anchor groups are already set."
         /// ★ ROUND 4 (D2).
-        public static let groups = "Faces in one group are squeezed at the same time with the same force — like two hands pressing equally; each face keeps its own curve. The force is the pill beside the group: tap it to change it (it changes the main page's Load group too). To make a group, open a pressed face below and tap + New; tap a group's number to move a face there; × joins a group to the first other one. Two opposite faces in one group are a pinch: each half of the part between them is designed for its own face. Separate groups are separate squeezes: the lattice is built for all of them, and where two groups need the same material the firmer one wins — a group that will squish less than drawn says so under its row. A main-page Load group is one hand: its faces move together and share its weight by area."
+        public static let groups = "Faces in one group are squeezed at the same time with the same force — like two hands pressing equally; each face keeps its own curve. Each group is a folder tab on the left; its Squeeze box is its one force: tap it to type, or drag it up or down (it changes the main page's Load group too). To make a group, open the + New tab and pick the face that starts it (here or on the part); in a face's card, tap a group's number to move the face there; × joins this group to the first other one. Two opposite faces in one group are a pinch: each half of the part between them is designed for its own face. Separate groups are separate squeezes: the lattice is built for all of them, and where two groups need the same material the firmer one wins — a group that will squish less than drawn says so on its tab. A main-page Load group is one hand: its faces move together and share its weight by area."
         public static let groupRow = "Move this face to another squeeze group, or make a new group from it."
         /// ★ ROUND 5 (batch S).
         public static let squeeze = "The ONE force every face of this group presses with, at the same time — like two hands pressing equally. Tap the number to type it, or drag it up or down. Tap the unit to show weights in kg, lb, N or kN (stored the same). It changes the main page's Load group when a face comes from one."

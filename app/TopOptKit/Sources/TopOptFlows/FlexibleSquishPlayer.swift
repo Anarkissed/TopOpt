@@ -253,10 +253,18 @@ struct FlexibleSquishPlayer: View {
                             .accessibilityIdentifier("flexible-squish-note")
                     }
                 }
+                // ★ S VERIFICATION: the row's DRAWN extent (the picker and the note), so the Settings
+                // page keeps only it clear of the curves — not the empty rest of the row
+                .background(GeometryReader { g in
+                    Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["playerTopRow": g.frame(in: .global)])
+                }.allowsHitTesting(false))
                 .frame(height: Self.topRowHeight)
                 .frame(maxWidth: width, alignment: .leading)
             }
             capsule(inlinePicker: inline && sims.count > 1)
+                .background(GeometryReader { g in
+                    Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["playerCapsule": g.frame(in: .global)])
+                }.allowsHitTesting(false))
         }
         .frame(width: width)
         .accessibilityIdentifier("flexible-squish-player")

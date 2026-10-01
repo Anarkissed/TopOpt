@@ -483,6 +483,13 @@ public final class FlexibleStageModel: ObservableObject {
         let region = regions.region(at: point, face: face, mesh: project.viewerMesh)
         NSLog("DIAG flexible tap face %d → region %d (known %d)", face, region, settings.face(region) != nil ? 1 : 0)
         curvePoint = nil
+        // ★ S VERIFICATION: on the [+ New] tab ("Tap the face that starts it") a tap on a face that
+        // can start a group STARTS it (with its hand) — it had only selected the face and left the tab
+        if rail == .newGroup, newGroupCandidates.contains(region) {
+            startGroup(with: region)
+            ensureStack(region)
+            return
+        }
         selectedRegion = region
         if tab == .more { tab = .face }
         ensureStack(region)

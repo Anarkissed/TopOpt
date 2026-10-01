@@ -3,8 +3,9 @@
 //
 // ★ S5 — "Create a "reset all" button to reset all inputs and start anew." One button on the
 // modal, a one-line confirm, one UNDOABLE edit. Afterwards the settings are EXACTLY a brand-new
-// Flexible setup of this part (`freshSettings`): the default filament (the one with squish data,
-// as New TopOpt preselects), feel and finish; the main page's Load and Anchor groups read again as
+// Flexible setup of this part (`freshSettings`): the default filament (the one with squish data —
+// D-R5-S5's ruling; the app's own entry, WorkspacePlaceholder's `FlexibleStageSettings()`, has none
+// on this branch, batch F's preselect is not here), feel and finish; the main page's Load and Anchor groups read again as
 // pressed / resting faces at their weights, every face at its defaults; one squeeze group; nothing
 // deleted. The weight UNIT is kept — it is how he reads weights, not an input of the part.
 // ★ S9 — "If there are *any* modifications, it should say "Save & Exit". This will run the lattice
@@ -51,6 +52,18 @@ extension FlexibleStageModel {
         frozenExaggeration = nil
         selectedRegion = settings.loadedFaces.first?.faceRegionID ?? settings.faces.first?.faceRegionID
         save()   // one undo step (the project's snapshot history)
+    }
+
+    /// ★ S9 (S VERIFICATION): the page's "nothing changed" snapshot once a part that was still
+    /// opening as the page appeared is open — the settings as the page appeared, with the open's
+    /// own read of the main page's loads applied (the same loads, the same rule as
+    /// `adoptMainPageLoads`). The open's adopt is not his edit; an edit he made while it opened
+    /// (the [Model] tab is live) is not in it, so it still reads "Save & Exit". (Re-taking the
+    /// snapshot at .ready had counted that edit as "nothing changed".)
+    public func openedSnapshot(appeared: FlexibleStageSettings) -> FlexibleStageSettings {
+        var s = appeared
+        if project.viewerMesh != nil { _ = Self.adopt(mainPageLoads, into: &s) }
+        return FlexibleSettingsMigration.migrated(s)
     }
 
     /// ★ S9: the page's Exit with nothing changed (read once by the main page).

@@ -112,6 +112,20 @@ extension FlexibleStageModel {
         }
     }
 
+    /// ★ S VERIFICATION: the [+ New] tab's rows — ONE per hand (a main-page Load group's faces move
+    /// together: "Top A + Top B → Group 3"; two rows had each moved both).
+    public var newGroupHands: [[Int]] {
+        let cands = newGroupCandidates, inList = Set(cands)
+        var seen = Set<Int>(), out: [[Int]] = []
+        for r in cands where !seen.contains(r) {
+            let h = hand(of: r).filter { inList.contains($0) }
+            let one = h.contains(r) ? h : [r]
+            one.forEach { seen.insert($0) }
+            out.append(one)
+        }
+        return out
+    }
+
     /// [+] → a face: a NEW group from it (and its hand); its tab opens.
     public func startGroup(with region: Int) {
         guard newGroup(with: region) != nil else { return }
@@ -359,7 +373,7 @@ struct FlexibleGroupTabHeader: View {
                               title: FlexibleRowCopy.groupName(group.number) + " · squeeze",
                               spec: FlexibleNumberSpecs.weight(kg: kg, unit: unit),
                               padTarget: $padTarget, units: FlexibleWeightUnit.allCases,
-                              onUnit: { model.setWeightUnit($0) }) { v in
+                              onUnit: { model.setWeightUnit($0) }, onNote: { model.toast = $0 }) { v in
                     model.setGroupForce(group.id, kg: unit.toKg(v))
                 }
             }
@@ -432,7 +446,7 @@ struct FlexibleNewGroupTab: View {
     @ObservedObject var model: FlexibleStageModel
     var body: some View {
         let next = model.squeezeGroups.count + 1
-        let candidates = model.newGroupCandidates
+        let candidates = model.newGroupHands
         VStack(alignment: .leading, spacing: 6) {
             Text(FlexibleRowCopy.newGroupTitle(next))
                 .font(.system(size: 15, weight: .semibold)).foregroundStyle(DS.Color.textPrimary.color)
@@ -441,12 +455,13 @@ struct FlexibleNewGroupTab: View {
                 .font(.system(size: 12, weight: .medium)).foregroundStyle(DS.Color.textSecondary.color)
                 .lineLimit(1).minimumScaleFactor(0.85)
                 .accessibilityIdentifier("flexible-new-group-line")
-            ForEach(candidates, id: \.self) { r in
+            ForEach(candidates, id: \.self) { hand in
+                let r = hand[0]
                 Button { model.startGroup(with: r) } label: {
                     HStack(spacing: DS.Space.s) {
                         Circle().fill((model.squeezeGroup(of: r).map { model.groupColour($0) } ?? DS.Color.accentGreen).color)
                             .frame(width: 10, height: 10)
-                        Text(FlexibleRowCopy.fit("\(model.faceName(r)) → \(FlexibleRowCopy.groupName(next))"))
+                        Text(FlexibleRowCopy.newGroupRow(names: hand.map { model.faceName($0) }, number: next))
                             .font(.system(size: 14, weight: .medium)).foregroundStyle(DS.Color.textPrimary.color)
                             .lineLimit(1).minimumScaleFactor(0.85)
                         Spacer(minLength: DS.Space.xs)
@@ -468,20 +483,33 @@ struct FlexibleNewGroupTab: View {
 
 /// ★ S3: each number field's rules in one place (the tests read them).
 enum FlexibleNumberSpecs {
-    /// A weight (a group's force), in the page's unit: 0.1 … 500 kgf.
+    /// A weight (a group's force), in the page's unit: the main page's own limits (ForceModel —
+    /// 0.1 … 500 kgf: its `setWeight` clamps to them, so a Load group can hold nothing else).
+    /// ★ S VERIFICATION: a weight under 1 (in the unit shown) keeps two decimals ("0.05 kg", not
+    /// "0.1"), and a typed value outside the limits is clamped and SAID (FlexNumberSpec.typedNote).
     static func weight(kg: Double, unit: FlexibleWeightUnit) -> FlexNumberSpec {
-        FlexNumberSpec(value: unit.fromKg(kg), unit: unit.label, step: unit.step,
-                       range: unit.fromKg(0.1)...unit.fromKg(500), decimals: unit.decimals)
+        let v = unit.fromKg(kg)
+        return FlexNumberSpec(value: v, unit: unit.label, step: unit.step,
+                              range: unit.fromKg(ForceModel.minWeightKg)...unit.fromKg(ForceModel.maxWeightKg),
+                              decimals: v > 0 && v < 1 ? max(unit.decimals, 2) : unit.decimals)
     }
     /// The deepest squish: 0.5 mm steps (the depth chip's snap), up to the lattice's depth.
     static func deepest(mm: Double, latticeMM: Double?) -> FlexNumberSpec {
         let hi = max(0.5, latticeMM ?? 100)
         return FlexNumberSpec(value: mm, unit: "mm", step: 0.5, range: 0.1...hi, decimals: 1)
     }
-    /// A stamp's width: whole mm, up to the face's longer side.
+    /// A stamp's width: whole mm steps, up to the face's longer side. ★ S VERIFICATION: a stored
+    /// 65.5 mm shows "65.5" (it read "66"); the drag still steps whole mm.
     static func stampWidth(mm: Double, faceMM: Double?) -> FlexNumberSpec {
-        FlexNumberSpec(value: mm, unit: "mm", step: 1, range: 1...max(1, faceMM ?? 500), decimals: 0)
+        FlexNumberSpec(value: mm, unit: "mm", step: 1, range: 1...max(1, faceMM ?? 500), decimals: wholeOrTenth(mm))
     }
+    /// ★ S VERIFICATION: the stamp's LENGTH, its own box (the line had said "Width · 20 mm long"
+    /// beside the width's box) — typing it scales the width by the stamp's own proportions.
+    static func stampLength(mm: Double, faceMM: Double?) -> FlexNumberSpec {
+        FlexNumberSpec(value: mm, unit: "mm", step: 1, range: 1...max(1, faceMM ?? 500), decimals: wholeOrTenth(mm))
+    }
+    /// 0 decimals for a whole number, 1 for a tenth.
+    static func wholeOrTenth(_ v: Double) -> Int { abs(v - v.rounded()) < 0.05 ? 0 : 1 }
     /// A stamp's turn: 15° steps, round the circle.
     static func stampTurn(deg: Double) -> FlexNumberSpec {
         FlexNumberSpec(value: deg, unit: "°", step: 15, range: 0...360, decimals: 0, wraps: true)

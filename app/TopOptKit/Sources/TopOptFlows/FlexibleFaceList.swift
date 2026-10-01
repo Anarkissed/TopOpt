@@ -112,7 +112,9 @@ struct FlexibleFaceList: View {
                     ForEach(section.rows) { row in item(row) }
                 }
             }
-            if model.squeezeGroups.count > 1, model.groupsShareMaterial, model.groupMisses.isEmpty {
+            // ★ S VERIFICATION: on a GROUP's tab only (it repeated under [Rests], where no group is)
+            if Self.showsShareNote(only: only, joinGroup: joinGroup),
+               model.squeezeGroups.count > 1, model.groupsShareMaterial, model.groupMisses.isEmpty {
                 Text(FlexibleRowCopy.groupsShare)
                     .font(.system(size: 12, weight: .medium)).foregroundStyle(DS.Color.textSecondary.color)
                     .lineLimit(1).minimumScaleFactor(0.85)
@@ -124,6 +126,10 @@ struct FlexibleFaceList: View {
             Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["faceList": g.frame(in: .global)])
         }.allowsHitTesting(false))
     }
+
+    /// "Groups share material: the firmer one wins" belongs to a group's tab (or round 4's whole
+    /// list) — never the [Rests] tab's faces.
+    static func showsShareNote(only: [Int]?, joinGroup: Int?) -> Bool { only == nil || joinGroup != nil }
 
     /// A face: the selected one open as its card, the others a big row that selects it.
     @ViewBuilder private func item(_ row: Row) -> some View {

@@ -63,6 +63,9 @@ extension FlexibleSqueezeGroups {
     }
 
     /// Give group `id` the colour `c`; a group already wearing `c` takes `id`'s old colour (a swap).
+    /// ★ S VERIFICATION: stored in NORMAL FORM (`canonical`) — re-picking the swatch a group wears,
+    /// or picking another and then the original, leaves the settings EQUAL to before (the exit
+    /// button said "Save & Exit" with nothing visibly changed).
     public static func setColour(_ c: FlexibleGroupColour, group id: Int, in s: inout FlexibleStageSettings) {
         let gs = groups(s)
         guard let g = gs.first(where: { $0.id == id }) else { return }
@@ -72,7 +75,20 @@ extension FlexibleSqueezeGroups {
             map[String(other.id)] = old.rawValue
         }
         map[String(id)] = c.rawValue
-        s.groupColours = map
+        s.groupColours = canonical(map, groups: gs)
+    }
+
+    /// ★ S VERIFICATION: the stored picks in normal form — only a colour that DIFFERS from its
+    /// group's default (its number's), only for a group that exists; nil when none is left. Two
+    /// settings that show the same colours are then equal.
+    static func canonical(_ map: [String: String]?, groups gs: [FlexibleSqueezeGroup]) -> [String: String]? {
+        guard let map, !map.isEmpty else { return nil }
+        var out: [String: String] = [:]
+        for g in gs {
+            guard let v = map[String(g.id)], let c = FlexibleGroupColour(rawValue: v), c != .byNumber(g.number) else { continue }
+            out[String(g.id)] = v
+        }
+        return out.isEmpty ? nil : out
     }
 
     /// The first colour no group in `s` wears (a new group's), else its number's default.
@@ -91,6 +107,20 @@ extension FlexibleSqueezeGroups {
             out[String(n)] = v
         }
         return out.isEmpty ? nil : out
+    }
+
+    /// ★ S VERIFICATION: each group's colour AS IT IS SHOWN, by stored id — its pick, else the
+    /// default of the number it is shown as. Every edit ends in `normalise`, so before an edit the
+    /// stored ids ARE the shown numbers; `normalise` carries these (not only the stored picks), so
+    /// a group that never had a pick keeps its colour too when an earlier group goes (a group
+    /// made before round 5 changed colour there).
+    static func shownColours(_ s: FlexibleStageSettings, ids: [Int]) -> [String: String] {
+        var out: [String: String] = [:]
+        for id in ids {
+            out[String(id)] = s.groupColours?[String(id)].flatMap(FlexibleGroupColour.init(rawValue:))?.rawValue
+                ?? FlexibleGroupColour.byNumber(id).rawValue
+        }
+        return out
     }
 }
 

@@ -201,7 +201,9 @@ extension FlexibleStageModel {
         if let g = FlexibleSqueezeGroups.groups(s).first(where: { $0.number == n }) {
             var map = s.groupColours ?? [:]
             map[String(g.id)] = colour.rawValue
-            s.groupColours = map
+            // ★ S VERIFICATION: normal form — its number's own colour needs no entry (`normalise`
+            // carries what it is shown in through a renumber either way)
+            s.groupColours = FlexibleSqueezeGroups.canonical(map, groups: FlexibleSqueezeGroups.groups(s))
         }
         actionSerial += 1
         edit { $0 = s }

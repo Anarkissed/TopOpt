@@ -12,6 +12,10 @@
 //     pill's idea — GlassValuePill / ClearanceScrub — turned upright), snapped to the field's step,
 //     clamped to its range. The box shows the value as it moves; it is committed ONCE, on release
 //     (one undo step, and a weight written back to the main page once, not per point).
+//     ★ S VERIFICATION: a scrub is RELATIVE to where it started — the value stays put until the
+//     finger has moved it half a step (a 98.0665 N weight nudged 3 pt had snapped to 100 N and
+//     rewritten the main page's Load group); a drag that ends within half a step commits nothing.
+//     It starts only after `tapSlop` (8 pt) of mostly VERTICAL travel, and that slop is not counted.
 // A weight box also switches its unit (kg / lb / N / kN — FlexibleWeightUnit) from a menu on the
 // unit itself; the number never moves when the unit does (storage is kgf).
 // ★ PURE PARTS (FlexibleNumberBoxTests): the spec's clamp / wrap / snap / format, the scrub, the
@@ -59,12 +63,29 @@ public struct FlexNumberSpec: Equatable, Sendable {
     public var text: String { Self.format(value, decimals: decimals) }
     public static func format(_ v: Double, decimals: Int) -> String { FlexibleWeightUnit.number(v, decimals: decimals) }
 
-    /// What a value typed on the keypad commits: nil below the range's start (a "0 kg" means
-    /// nothing — the old value stays), else clamped (a 50 mm deepest squish stops at the lattice).
+    /// What a value typed on the keypad commits: nil for nothing typed, or for 0 or less where the
+    /// range starts above 0 (a "0 kg" means nothing — the old value stays); else clamped (a 50 mm
+    /// deepest squish stops at the lattice; ★ S VERIFICATION: a positive value under the floor —
+    /// 0.05 kg — takes the floor, as the main page's own weight does, and `typedNote` says so).
     public func typed(_ v: Double?) -> Double? {
         guard let v, v.isFinite else { return nil }
-        if !wraps, v < range.lowerBound - 1e-12 { return nil }
+        if !wraps, v < range.lowerBound - 1e-12, v <= 0 || range.lowerBound <= 0 { return nil }
         return clamped(v)
+    }
+
+    /// ★ S VERIFICATION: the one line said when a typed value is not what commits — refused
+    /// ("0 kg does nothing · kept 10 kg") or clamped ("Kept within 0.1–500 kg"). nil otherwise.
+    public func typedNote(_ v: Double?, committed: Double?) -> String? {
+        guard let v, v.isFinite, !wraps else { return nil }
+        guard let c = committed else {
+            return "\(Self.format(v, decimals: max(decimals, 2))) \(unit) does nothing · kept \(text) \(unit)"
+        }
+        guard abs(c - v) > 1e-9 else { return nil }
+        return "Kept within \(Self.rangeEnd(range.lowerBound, decimals))–\(Self.rangeEnd(range.upperBound, decimals)) \(unit)"
+    }
+    /// A range end as the note says it (a small one keeps two more decimals: "0.1", "0.22").
+    static func rangeEnd(_ v: Double, _ decimals: Int) -> String {
+        format(v, decimals: abs(v) < 1 ? min(3, decimals + 2) : decimals)
     }
 }
 
@@ -86,12 +107,26 @@ public enum FlexNumberScrub {
     }
 
     /// One update: the raw (unsnapped) value accumulates, clamped so a reversal answers at once;
-    /// what the box shows is it snapped to the step.
+    /// what the box shows is it snapped to the step — ★ S VERIFICATION: RELATIVE to the value the
+    /// scrub started from (`spec.value`): until the finger has moved it half a step the box shows
+    /// that value unchanged (an off-grid 98.0665 N is never rounded to 100 N by a nudge), after it
+    /// the step grid (100 N, 95 N, 7.5 kg).
     public static func scrub(raw: Double, deltaY: Double, spec: FlexNumberSpec) -> (raw: Double, shown: Double) {
         let next = spec.wraps ? raw + increment(deltaY: deltaY, step: spec.step)
                               : spec.clamped(raw + increment(deltaY: deltaY, step: spec.step))
-        return (next, spec.snapped(next))
+        return (next, shown(raw: next, spec: spec))
     }
+
+    /// What the box shows for a raw scrub value: the start value inside the half-step dead zone,
+    /// else the step grid.
+    public static func shown(raw: Double, spec: FlexNumberSpec) -> Double {
+        guard spec.step > 0, abs(raw - spec.value) < spec.step / 2 - 1e-12 else { return spec.snapped(raw) }
+        return spec.value
+    }
+
+    /// ★ S VERIFICATION: does a drag's first move start a scrub? Only a mostly VERTICAL one (a
+    /// sideways or diagonal wobble of a tap is not a scrub).
+    public static func startsScrub(dx: Double, dy: Double) -> Bool { abs(dy) > abs(dx) }
 }
 
 /// What the keypad typed, held until it CLOSES (then the spec decides what commits).
@@ -116,14 +151,19 @@ struct FlexNumberBox: View {
     /// A weight box: the units it can switch to, and the switch.
     var units: [FlexibleWeightUnit] = []
     var onUnit: (FlexibleWeightUnit) -> Void = { _ in }
+    /// ★ S VERIFICATION: the one line when a typed value is refused or clamped (the page's toast).
+    var onNote: ((String) -> Void)? = nil
     /// Commit (the unit it shows): once per keypad close, once per drag release.
     let onCommit: (Double) -> Void
 
     @State private var scrub: (raw: Double, shown: Double)?
     @State private var lastY: CGFloat = 0
+    /// ★ S VERIFICATION: a drag that began sideways (never a scrub, to its end).
+    @State private var sideways = false
     @State private var buffer = FlexNumberPadBuffer()
-    /// A drag must travel this far before it scrubs (below it the touch is a tap).
-    static let tapSlop: CGFloat = 3
+    /// A drag must travel this far before it scrubs (below it the touch is a tap). ★ S
+    /// VERIFICATION: 8 pt (was 3) — a finger's tap wanders more than 3 pt.
+    static let tapSlop: CGFloat = 8
     static let height: CGFloat = 32
 
     var body: some View {
@@ -171,7 +211,11 @@ struct FlexNumberBox: View {
         .numberPad(Binding(get: { padTarget == key }, set: { if !$0, padTarget == key { padTarget = nil } }),
                    config: .init(title: title, unit: spec.unit, allowsDecimal: true), seed: spec.value) { buffer.typed($0) }
         .onChange(of: padTarget == key) { open in
-            if !open, let v = buffer.closed(spec), abs(v - spec.value) > 1e-12 { onCommit(v) }
+            guard !open else { return }
+            let typed = buffer.pending
+            let v = buffer.closed(spec)
+            if let note = spec.typedNote(typed, committed: v) { onNote?(note) }
+            if let v, abs(v - spec.value) > 1e-12 { onCommit(v) }
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(title)
@@ -212,12 +256,20 @@ struct FlexNumberBox: View {
         }
     }
 
-    /// Up / down scrubs, once the finger has travelled `tapSlop` (below it the Button's tap opens
-    /// the keypad); committed once, on release.
+    /// Up / down scrubs, once the finger has travelled `tapSlop` mostly vertically (below it the
+    /// Button's tap opens the keypad); committed once, on release — and only when the value moved.
     private var drag: some Gesture {
         DragGesture(minimumDistance: Self.tapSlop)
             .onChanged { g in
-                if scrub == nil { scrub = (spec.value, spec.value); lastY = 0 }
+                if sideways { return }
+                if scrub == nil {
+                    // the slop is not counted: the scrub starts where the finger is now
+                    guard FlexNumberScrub.startsScrub(dx: Double(g.translation.width), dy: Double(g.translation.height)) else {
+                        sideways = true; return
+                    }
+                    scrub = (spec.value, spec.value); lastY = g.translation.height
+                    return
+                }
                 let dy = Double(g.translation.height - lastY)
                 lastY = g.translation.height
                 guard dy != 0, let s = scrub else { return }
@@ -227,6 +279,7 @@ struct FlexNumberBox: View {
                 let done = scrub
                 scrub = nil
                 lastY = 0
+                sideways = false
                 if let done, abs(done.shown - spec.value) > 1e-12 { onCommit(done.shown) }
             }
     }

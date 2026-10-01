@@ -6,7 +6,10 @@
 //   S9 "Exit" with nothing changed leaves the main page exactly as it was — no rebuild (a failed
 //      build is not retried), no restart of the squish, no new sim (RED: Save & Exit's path retries);
 //      Save & Exit with the Lattice view OFF only stores, and the bake runs when the view is turned
-//      on (RED: with the view on, the same Save & Exit bakes).
+//      on (RED: with the view on, the same Save & Exit bakes). ★ S VERIFICATION: Exit with nothing
+//      changed, the view off and opened by the view button, leaves the view off and nothing deferred
+//      (RED: Save & Exit's path turns it on) — the test that goes red without the early return; the
+//      "leaves the main page alone" numbers do not (with a current lattice that path shows nothing).
 import XCTest
 import simd
 @testable import TopOptFlows
@@ -48,6 +51,8 @@ final class FlexibleRound5SquishExitTests: XCTestCase {
             var cache: (key: String, dents: [Float])?
             let sq = FlexibleSettingsSquish.shown(model: m, overlay: o, channels: c, feCache: &cache)
             XCTAssertFalse(sq.fe, "no lattice yet: the column preview")
+            // ★ S VERIFICATION: …and the player says why
+            XCTAssertEqual(FlexibleSettingsSquish.note(model: m, fe: sq.fe), FlexibleRowCopy.settingsColumnNoLattice)
             XCTAssertEqual(sq.groupNumber, m.squeezeGroup(of: sel)?.number)
             let moved = Self.quadMotion(try XCTUnwrap(sq.dents), overlay: o, model: m)
             let all = Self.quadMotion(try XCTUnwrap(c.dents), overlay: o, model: m)
@@ -92,6 +97,9 @@ final class FlexibleRound5SquishExitTests: XCTestCase {
         let s3 = FlexibleSettingsSquish.shown(model: m, overlay: o, channels: c, feCache: &cache)
         XCTAssertFalse(s3.fe, "behind the settings: the column preview")
         XCTAssertEqual(FlexibleSettingsSquish.note(model: m, fe: true), FlexibleRowCopy.settingsSimNote)
+        // ★ S VERIFICATION: the column preview after an edit SAYS so, and what brings the fold back
+        // (round 5's page changed character with no word — its note was nil here)
+        XCTAssertEqual(FlexibleSettingsSquish.note(model: m, fe: s3.fe), FlexibleRowCopy.settingsColumnEdited)
     }
 
     // MARK: - S9
@@ -149,6 +157,30 @@ final class FlexibleRound5SquishExitTests: XCTestCase {
         XCTAssertEqual(stage.generation, pictureGen, "the main page's picture did not change")
         XCTAssertEqual(saves, savesBefore, "nothing saved")
         XCTAssertFalse(m.exitUnchanged, "the flag is read once")
+    }
+
+    /// ★ S VERIFICATION: an Exit-unchanged case where the Save & Exit path VISIBLY acts — the
+    /// Lattice view off, and Settings opened by the view button (Save & Exit turns the view on and
+    /// marks the bake deferred). The test above passed with the early return removed (with a
+    /// current lattice the Save & Exit path changes nothing visible); this one goes RED.
+    @MainActor
+    func testExitWithNothingChangedLeavesTheViewOffAndNothingDeferred() async throws {
+        let (stage, m, pm) = try await padStage()
+        stage.didExitSettings()
+        stage.apply(pm, owned: true, pageUp: false)
+        try await FlexibleHisProject.waitFor(120, "the lattice") { m.lattice != nil && !m.latticeBuilding }
+        stage.latticeOn = false
+        stage.showLatticeOnExit = true   // as the Lattice view button opens Settings
+        visitSettings(stage, pm, unchanged: true)
+        await m.waitForIdle()
+        print("FLEX-R5V S9 exit, view off: latticeOn \(stage.latticeOn) · deferred \(m.latticeBuildDeferred) · showOnExit \(stage.showLatticeOnExit)")
+        XCTAssertFalse(stage.latticeOn, "Exit with nothing changed: the view stays off")
+        XCTAssertFalse(m.latticeBuildDeferred, "…and nothing is left for it to bake")
+        XCTAssertFalse(stage.showLatticeOnExit, "…and the button's request is spent")
+        // ★ RED CONTROL: Save & Exit from the same state turns the view on
+        stage.showLatticeOnExit = true
+        visitSettings(stage, pm, unchanged: false)
+        XCTAssertTrue(stage.latticeOn, "control: Save & Exit turns the view on")
     }
 
     @MainActor

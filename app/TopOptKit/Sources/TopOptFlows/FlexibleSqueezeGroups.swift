@@ -93,8 +93,9 @@ public enum FlexibleSqueezeGroups {
             let n = rank[id(s.faces[i])] ?? first
             s.faces[i].squeezeGroup = n == first ? nil : n
         }
-        // ★ ROUND 5 (S1): each group's colour goes with it to its new number
-        s.groupColours = remapColours(s.groupColours, rank: rank)
+        // ★ ROUND 5 (S1): each group's colour goes with it to its new number — ★ S VERIFICATION: the
+        // colour it was SHOWN in (a pick or its old number's default), kept in normal form
+        s.groupColours = canonical(remapColours(shownColours(s, ids: order), rank: rank), groups: groups(s))
     }
 
     /// Move a pressed face into the group stored as `groupID`. ★ D2 REVIEW: `hand` — the faces

@@ -88,7 +88,8 @@ struct FlexibleSqueezeGroupHeader: View {
                 let unit = model.weightUnit
                 FlexNumberBox(key: "group-\(row.id)", title: FlexibleRowCopy.groupName(row.number) + " · squeeze",
                               spec: FlexibleNumberSpecs.weight(kg: row.kg, unit: unit), padTarget: $padTarget,
-                              units: FlexibleWeightUnit.allCases, onUnit: { model.setWeightUnit($0) }) { v in
+                              units: FlexibleWeightUnit.allCases, onUnit: { model.setWeightUnit($0) },
+                              onNote: { model.toast = $0 }) { v in
                     model.setGroupForce(row.id, kg: unit.toKg(v))
                 }
                 if row.removable {

@@ -226,7 +226,7 @@ struct FlexibleFaceRows: View {
                 FlexRow(line, info: FlexibleRowCopy.Info.weight, id: "flexible-row-weight")
             }
             if fromGroup, let old = model.relinkedWeights[r], let e {
-                Text(FlexibleRowCopy.relinked(oldKg: old, group: e.groupName))
+                Text(FlexibleRowCopy.relinked(oldKg: old, group: e.groupName, unit: model.weightUnit))
                     .font(.system(size: 12, weight: .medium)).foregroundStyle(DS.Color.textSecondary.color)
                     .lineLimit(1)
                     .accessibilityIdentifier("flexible-row-relinked")
@@ -247,7 +247,7 @@ struct FlexibleFaceRows: View {
             FlexRow(FlexibleRowCopy.deepestRow, info: FlexibleRowCopy.Info.deepest, id: "flexible-row-deepest") {
                 FlexNumberBox(key: "deepest-\(r)", title: FlexibleRowCopy.deepestTitle,
                               spec: FlexibleNumberSpecs.deepest(mm: f.deepestMM, latticeMM: latticeMax),
-                              padTarget: $padTarget) { v in
+                              padTarget: $padTarget, onNote: { model.toast = $0 }) { v in
                     // ★ D2 REVIEW: a pinched face's deepest squish stops at the half its design uses
                     let lattice = latticeMax ?? v
                     model.edit { s in
@@ -275,7 +275,7 @@ struct FlexibleFaceRows: View {
                             id: "flexible-row-curve-point") {
                         FlexNumberBox(key: "curve-\(r)-\(p.axis)-\(p.index)", title: FlexibleRowCopy.curvePointTitle,
                                       spec: FlexibleNumberSpecs.curvePoint(mm: c.y[p.index] * f.deepestMM, deepestMM: f.deepestMM),
-                                      padTarget: $padTarget) { v in model.setCurvePoint(p, mm: v) }
+                                      padTarget: $padTarget, onNote: { model.toast = $0 }) { v in model.setCurvePoint(p, mm: v) }
                     }
                 }
             }

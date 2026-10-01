@@ -230,15 +230,21 @@ struct FlexibleFaceStampRows: View {
                 if let p {
                     // ★ ROUND 5 (S3): every number in its own box — tap for the keypad, drag up / down
                     let faceMM = model.stack(region).map { max($0.uExtentMM, $0.vExtentMM) }
-                    FlexRow(FlexibleRowCopy.stampSize(widthMM: p.widthMM, lengthMM: p.lengthMM),
-                            info: FlexibleRowCopy.Info.stampSize, id: "flexible-row-stamp-size") {
+                    // ★ S VERIFICATION: Width and Length, each its own box (the line had read "Width ·
+                    // 20 mm long" beside the 66 mm width box) — either one scales the other by the
+                    // stamp's own proportions
+                    FlexRow(FlexibleRowCopy.stampSizeRow, info: FlexibleRowCopy.Info.stampSize, id: "flexible-row-stamp-size") {
                         FlexNumberBox(key: "stamp-size-\(region)", title: FlexibleRowCopy.stampWidthTitle,
                                       spec: FlexibleNumberSpecs.stampWidth(mm: p.widthMM, faceMM: faceMM),
-                                      padTarget: $padTarget) { v in
-                            model.updateStamp(region) { q in
-                                let k = q.widthMM > 0 ? v / q.widthMM : 1
-                                q.widthMM = v; q.lengthMM *= k
-                            }
+                                      padTarget: $padTarget, onNote: { model.toast = $0 }) { v in
+                            model.updateStamp(region) { FlexibleStampSize.setWidth(v, of: &$0) }
+                        }
+                    }
+                    FlexRow(FlexibleRowCopy.stampLengthRow, info: FlexibleRowCopy.Info.stampSize, id: "flexible-row-stamp-length") {
+                        FlexNumberBox(key: "stamp-length-\(region)", title: FlexibleRowCopy.stampLengthTitle,
+                                      spec: FlexibleNumberSpecs.stampLength(mm: p.lengthMM, faceMM: faceMM),
+                                      padTarget: $padTarget, onNote: { model.toast = $0 }) { v in
+                            model.updateStamp(region) { FlexibleStampSize.setLength(v, of: &$0) }
                         }
                     }
                     FlexRow(FlexibleRowCopy.stampTurnRow, info: FlexibleRowCopy.Info.stampTurn,
@@ -289,6 +295,21 @@ struct FlexibleFaceStampRows: View {
                 importError = "\(error)"
             }
         }
+    }
+}
+
+/// ★ S VERIFICATION: the stamp's two size boxes — either side typed (or scrubbed) scales the other by
+/// the stamp's own proportions (its outline is never stretched).
+public enum FlexibleStampSize {
+    public static func setWidth(_ mm: Double, of p: inout FlexibleStampPlacement) {
+        guard mm > 0, mm.isFinite else { return }
+        let k = p.widthMM > 0 ? mm / p.widthMM : 1
+        p.widthMM = mm; p.lengthMM *= k
+    }
+    public static func setLength(_ mm: Double, of p: inout FlexibleStampPlacement) {
+        guard mm > 0, mm.isFinite else { return }
+        let k = p.lengthMM > 0 ? mm / p.lengthMM : 1
+        p.lengthMM = mm; p.widthMM *= k
     }
 }
 
