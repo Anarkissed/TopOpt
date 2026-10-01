@@ -1,0 +1,12 @@
+FLEX-C5 contrast: 1 Green bg 10.0 gap 8.9 number 10.0 · 2 Pink bg 10.2 gap 9.1 number 10.2 · 3 Mint bg 16.1 gap 14.4 number 16.1 · 4 Blue bg 5.6 gap 5.0 number 5.6 · 5 Yellow bg 15.5 gap 13.9 number 15.5 · 6 Teal bg 5.1 gap 4.6 number 5.1 · 7 Olive bg 6.4 gap 5.8 number 6.4 · 8 Terracotta bg 4.5 gap 4.0 number 4.5
+FLEX-C5 control (round 5 S): worst normal ΔE 18.4 · worst protan/deutan ΔE 7.1 (groups 1–2)
+FLEX-C5 control: S's orange → warning 0.0, heat 1.7 · S's red → danger 0.0, heat 0.7
+FLEX-C5 meanings: 1 Green nearest resting cyan 23.1 heat 5.0 · 2 Pink nearest warning amber 16.5 heat 14.3 · 3 Mint nearest selected white 16.6 heat 14.8 · 4 Blue nearest depth-prism purple 21.0 heat 7.9 · 5 Yellow nearest warning amber 17.0 heat 3.0 · 6 Teal nearest resting cyan 23.2 heat 8.2 · 7 Olive nearest warning amber 17.0 heat 12.9 · 8 Terracotta nearest danger red 16.1 heat 15.9
+FLEX-C5 palette all pairs: worst normal ΔE 16.2 (groups 4–6) · worst protan/deutan ΔE 10.2 (groups 1–7)
+FLEX-C5 plate: 9 at u 2–6 v 2–8 · squish under it 0.275 vs the face's mean 0.393
+FLEX-C5-EVIDENCE his pad: groups ["1=green:[1000103]", "2=pink:[3]", "3=mint:[5]", "4=blue:[1000104]", "5=yellow:[2]", "6=teal:[4]"] · playing 2
+FLEX-C5-EVIDENCE prism: groups ["1=green", "2=pink", "3=mint", "4=blue", "5=yellow", "6=teal", "7=olive", "8=terracotta", "9=green"] · numbered [1, 9]
+FLEX-C5-HOSTED 11l group row: control x 326–430 in card 118–490 · words need 95 pt
+FLEX-C5-HOSTED 13p group row: control x 326–430 in card 118–490 · words need 95 pt
+FLEX-C5-HOSTED nine groups: shared [1, 9] · rail [Optional(1), nil, nil, nil, nil, nil, nil, nil, Optional(9)] · lit 44 · Group 1 face 1 64×64 · up Step(du: 0, dv: -1) right Step(du: 1, dv: 0) · 140 plate columns · Group 9 face 5 27×26 · up Step(du: 0, dv: 1) right Step(du: -1, dv: 0) · 35 plate columns
+FLEX-C5-HOSTED swatches: 11l row x 209–438 (w 229, h 32) · words from 138 need 42 · panel x 24–504 · rail to 110 | 11l group row: menu x 325–430 | 11p row x 209–438 (w 229, h 32) · words from 138 need 42 · panel x 24–504 · rail to 110 | 11p group row: menu x 325–430 | 13p row x 209–438 (w 229, h 32) · words from 138 need 42 · panel x 24–504 · rail to 110 | 13p group row: menu x 325–430 | 13l row x 209–438 (w 229, h 32) · words from 138 need 42 · panel x 24–504 · rail to 110 | 13l group row: menu x 325–430

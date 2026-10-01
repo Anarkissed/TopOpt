@@ -1,6 +1,150 @@
 # Handoff — 2026-09-29-flexible-screens (TRACK app, A1): the Flexible screens
 
-## Round 5 · batch N — verification pass (read this first)
+## Round 5 · batch C5 — eight group colours, the ninth group's number, and your answers of 2026-09-30 (read this first)
+
+Your five answers are recorded below and in DECISIONS (D-R5-C5-1 … C5-8). One of them, "Add more colour tokens", needed code. The others confirm what the app already does. **The app was NOT launched: nothing here has been seen on a device or simulator.** The pictures are offscreen: the Settings page hosted in a window, and the model drawn by the shipping renderer.
+
+**What you will see:**
+- **Eight group colours, all design-system tokens** (six are new): green, pink, mint, blue, yellow, teal, olive, terracotta. Never purple (purple is the depth prism).
+  - I chose them by measuring, not by eye. Any two of the eight are at least 16 apart (OKLab ΔE; 15 is the usual "easy to tell apart" floor). They stay at least 10 apart for a red- or green-blind reader. Batch S's green and orange were only 7 apart for that reader.
+  - Each reads on the dark stage (at least 4.5 : 1 contrast), and each stays clear of colours that already mean something on these pages: the warning amber, the danger red, the resting faces' cyan, the selected face's white, and the prism's purple.
+- **Group 2 is now pink and Group 3 mint, no longer orange and red.** Orange and red were not just similar to the warning colours. They WERE the warning amber ("Fix 1 thing", the fix pop-up, a group's "Squishes ~1.4 of 2.6 mm" line) and the danger red (a refused face, a curve point's ×). Both also sat on the dent's rainbow: red is exactly the reddest dent. Pink and mint are off the rainbow. Green (group 1) and blue (group 4) stay.
+  - **On your project 0004, Group 2 (Face 3) changes from orange to pink.**
+  - A colour you picked in batch S keeps its slot: a stored "orange" shows as pink, a stored "red" as mint.
+- **The Colour row shows all eight swatches on one line** (measured at 11" and 13", portrait and landscape).
+- **From the ninth group on, the colours repeat, and a repeated colour carries its group's number.** Group 9 is green like group 1, so both are numbered. With eight groups or fewer nothing is numbered.
+  - **The rail tab:** the group's dot becomes a disc with its number.
+  - **The faces:** the number is painted into the face's dent map, like the frame. The digits are in the group's colour on a near-black plate, about a fifth of the face's shorter side. The plate sits inside the frame, where the map squishes least, so it never covers the deepest dent.
+  - The digits stand upright (the part's up) and read from outside. They move with the dent and appear on both pages, in every view.
+- **The face card's "Squeeze group" row:** with many groups, its 1 2 3 … 9 chips pushed the words "Squeeze group" off the row. Once the chips no longer fit beside the whole words, the row shows one chip, "● Group 9 ▾", that opens a menu of the groups (and + New). Measured on your pad: chips up to five groups, the menu chip from six. Before C5, six chips were drawn by squeezing the words.
+
+**Your answers (2026-09-30), recorded:**
+
+| your call (where it was asked) | your answer | what it means now |
+|---|---|---|
+| The design system has only four group colours that aren't purple. What should groups 5 and up do? (S verification, call 7; S's U6) | "Add more colour tokens" | Eight DS tokens. Groups 2 and 3 moved off the warning and danger colours. Past eight, the number shows on the tab and the faces (D-R5-C5-1 … 4) |
+| Deleting a face a main-page group holds (S, call 1) | "Flexible only" | The main page's load group keeps the face. As built; nothing changed (D-R5-C5-5) |
+| Reset all drops the faces added on this page (S verification, call 6) | "Start fully fresh" (only the main-page faces, default values) | As built; nothing changed (D-R5-C5-6) |
+| Group 1's reddest dent is Face 5's top edge, 23.7 mm, above your thumb's 11.4 mm (13.5 set). Should the colours stop at the depth you set? (M, M verification) | "Show the sim's real depths" | The colours stay on the 3D sim's own squish. Kept as it is (D-R5-C5-7) |
+| G's fold cut: keep it? (G verification) | "Is there no way to fold realistically instead?" | Batch N, already on this branch: the squish is solved again in steps. A field that settles is never cut; the cut is only the fallback (D-R5-N5, D-R5-C5-8) |
+
+Each call is also marked ★ ANSWERED where it was asked, below.
+
+**Deviations (each with its reason):**
+1. **Groups 2 and 3 changed colour.** You were asked about groups 5 and up, and the lead's brief said to keep groups 1–4 only if they did not look like a warning. They do: S's orange and red ARE the DS warning and danger tokens (ΔE 0), and both lie on the dent rainbow (ΔE 1.7 and 0.7).
+2. **The number on a face is painted into the map, not drawn as a disc over the part.** My first version drew discs. In the render, a disc at a face's middle hung 15–20 mm above the face once the dent played at ×5, and it read as belonging to the wall behind. A SwiftUI disc cannot follow the dent: on the main page the squish loop runs inside the renderer.
+3. **The data-viz method's lightness band is not applied.** It is meant for chart marks: 0.48–0.67 in OKLCH for dark charts. Group 1's own green is at 0.76, and thin frames on a near-black 3D stage need light colours. Every other check of that method is applied, over ALL pairs (any two groups' faces can sit side by side).
+
+**Not done (and why):**
+- **Nothing has been seen on a device or simulator.** The iOS build succeeds; I must not launch the app.
+- **The main Flexible page was not re-rendered.** Its frames and numbers come from the same call as the Settings page (`FlexibleGroupFrames.paint`, D-R5-X1), and the hosted test pins that call. It was not drawn for C5.
+- **A number seen through the part from BEHIND reads mirrored**, as print on glass would. In X-ray the far faces show their frames and plates; a "9" on a far face reads as a mirrored 9.
+- **A plate near a tall pressed wall can be hidden behind that wall's map at some angles.** On the 9-group prism, the top face's "1" sits in its least-squished corner, under the back walls. From the 3/4 views most of it is hidden behind them; looking down (C5_prism_nine_groups_down.png) it shows.
+- **Terracotta (group 8) is the dimmest colour** (4.5 : 1, the floor). Its one-column frame on a thin side face is hard to see. That is why it is last.
+
+**Your call:**
+1. **Reset all and the weight unit** (S's call 2, still open): your "Start fully fresh" answered which faces come back, not the unit. Reset all still keeps lb / N if you chose one. Should it go back to kg?
+2. **Group 2 is now pink on your project** (it was orange): OK, or pick another order?
+3. **A number on a far face reads mirrored through the X-ray body.** Leave it (it is printed on the face), or show the digits only on faces turned towards you? That would mean repainting them as the camera turns.
+4. **The thin-face question (D-R5-X2) still stands** for green, blue, yellow and teal, which lie on the dent rainbow. On faces under 16 columns across, a frame has no near-black gap.
+5. **From six groups, a face's "Squeeze group" row is the menu chip** (two taps to move a face) instead of the chips (one tap). Keep it, or allow narrower chips? They would be about 19 pt wide, under the comfortable finger size.
+
+### Each item → where → pinned by (RED control beside it)
+
+| item | where | pinned by (RED control) |
+|---|---|---|
+| Eight colours, DS tokens, never purple, fixed order | `DS.Color.squeezeGroupPalette` (DesignSystem.swift); `FlexibleGroupColour` (FlexibleGroupColours.swift) | `FlexibleGroupPaletteTests.testThePaletteIsEightDSTokensInAFixedOrderNeverPurple` (the instruments see `accentPurple` and indigo #5E5CE6) |
+| Every pair tellable apart, also colour-blind | the token values | `…testEveryPairIsTellableApartForEveryoneAndUnderColourBlindness` (S's four: 7.1 < 8; a twin of green: < 15) |
+| Readable on the stage, its number readable on it | the token values; `FlexibleGroupNumbers.ink` | `…testEveryColourReadsOnTheDarkStageAndUnderItsNumber` (`accentDeep` fails 4.5 : 1) |
+| Not a warning / refusal / rest / selection / purple; groups 2–3 off the heat | the token values and order | `…testNoGroupColourIsAWarningARefusalTheRestsTheSelectionOrTheHeat` (S's orange = warning, red = danger, ΔE 0; on the heat 1.7 / 0.7) |
+| S's stored names keep their slot | `FlexibleGroupColour.stored`, `canonical` | `…testRoundFiveSStoredNamesKeepTheirSlot` (read by raw value, S's "red" is lost: two greens) |
+| Past eight: cycle, number where a colour is shared | `FlexibleGroupNumbers.shared`, `railNumber` | `…testBeyondTheEighthGroupTheColoursCycleAndTheNumberShowsWhereAColourIsShared` (a count rule misses group 1 and a stored pick) |
+| The number painted: upright, read from outside, on the heat, where the map squishes least | `FlexibleGroupNumbers.axes`, `plate`, `paint` | `…testTheNumberIsPaintedUprightOnTheHeatWhereTheFaceSquishesLeast` (a mirrored and an upside-down plate read back wrong; a map-blind plate sits on more squish) |
+| On a real part: rail numbers 1 and 9 only, digits in the group colour through the frames' paint, upright on the sides | `FlexibleGroupFrames.paint` → `FlexibleGroupNumbers.paint`; the rail's icon | hosted `FlexibleGroupPaletteHostedTests.testNineGroupsNumberTheSharedColourOnTheRailAndOnTheirOwnFaces` (eight groups: nothing painted) |
+| Eight swatches on one line, "Colour" whole | `FlexibleColourSwatches` (26 pt, 3 apart) | hosted `…testEightSwatchesOnOneLineAndSixGroupsWearSixColours`, 4 sizes (mutation M7: 40 pt swatches) |
+| "Squeeze group" row: chips while they fit, else "● Group 9 ▾" | `FlexibleFaceGroupRow` (`ViewThatFits`, priority 0.5) | hosted nine-groups test: the menu, the words' 95 pt kept (mutation M8: always the chips) |
+
+### Hook lines in #354 / main files
+| file | anchor | +/− | why |
+|---|---|---|---|
+| `Sources/TopOptDesign/DesignSystem.swift` | after `groupPalette`'s closing `]` (`RGBA(hex: 0xBF5AF2), // E` / `]`) | +14 −0 | his OK to add colour tokens: `groupPink`, `groupMint`, `groupYellow`, `groupTeal`, `groupOlive`, `groupTerracotta` and `squeezeGroupPalette` (eight, in order), with a comment that they are not in the HTML |
+
+No other #354 / main file: WorkspacePlaceholder, MetalMeshView, LatticeSettings, ProjectModel, ForceModel and LatticeStageMode are untouched, and no case was added. (A first cut mounted SwiftUI discs from FlexibleMainLegends and FlexibleStagePage; both edits were reverted before the commit.)
+
+Flexible track files: `FlexibleGroupNumbers.swift` (new, +194); FlexibleGroupColours (+39 −14: the enum, `stored`, the numbers' paint after the frames'); FlexibleSettingsRail (+20 −5: the swatches, the rail's numbered dot); FlexibleSqueezeGroupRows (+52 −7: chips or the menu chip); FlexibleSqueezeGroups (+4 −4, comments); FlexibleRowCopy (+1 −1: the Colour (i) says eight, then numbers).
+
+### Tests
+- NEW `FlexibleGroupPaletteTests` (7, pure; OKLab ΔE, Machado 2009, WCAG computed in the test).
+- NEW hosted `FlexibleGroupPaletteHostedTests` (2): eight swatches and six groups on his pad at 11" and 13", portrait and landscape; nine groups on an octagonal prism (written by the test: eight sides and the top pressed, one group each).
+- NEW `FlexibleGroupPaletteEvidenceProbe` (opt-in, `FLEX_C5_EVIDENCE_DIR`).
+- RE-PINNED, each with its reason in the test (S's colour names): `FlexibleRound5SettingsTests` (defaults green / pink / mint; the palette is the eight tokens; group 2's colour is pink), `FlexibleRound5SettingsVerifyTests` (normal form and the carry in today's names), `FlexibleSqueezeGroupsTests.testGroupColoursAreDSTokensAndNeverPurple` (the eight), `FlexibleRound5EvidenceProbe` (.orange / .red → .pink / .terracotta).
+
+Mutations (`batch_c5/C5_mutations.txt`): each breaks one rule in production, rebuilds, runs its pinning test, and restores from git.
+```
+M1  the palette back to S (pink = DS.warning, mint = DS.danger) ... RED  FlexibleGroupPaletteTests (5 failures in 7 tests)
+M2  numbers by a COUNT, not by a shared colour .................... RED  testBeyond… (5)
+M3  S's stored names dropped ...................................... RED  testRoundFiveS… (5)
+M4  the plate read from inside (right = out × up) ................. RED  testTheNumberIsPainted… (4)
+M5  the plate placed with no regard to the map .................... RED  testTheNumberIsPainted… (3)
+M6  the plate allowed on the frame and its gap .................... RED  testTheNumberIsPainted… (1)
+M7  40 pt swatches (eight do not fit) ............................. GREEN at first — NOT caught: the row squeezed
+    "Colour" to 2 pt and every frame check still held; the test now measures the words' room → RED (4)
+M8  the group row always the chips (no menu) ...................... RED  hosted nine groups (6)
+M9  the numbers not painted by the frames (the pages' call) ....... RED  hosted nine groups (2)
+M10 the rail tab never numbered ................................... RED  hosted nine groups (1)
+```
+
+### Evidence (`docs/handoffs/evidence/2026-09-29-flexible-screens/batch_c5/`; offscreen, not device screenshots)
+- `C5_<11l|11p|13p|13l>_six_groups.png`: the Settings page hosted with batch S's six groups on his pad. The rail shows six colours, the open group's Colour row shows all eight swatches on one line, and Face 4's card shows the "● Group 6 ▾" menu chip. Crop: `C5_11l_six_groups_colour_row_crop.png`.
+- `C5_settings_six_groups_{iso,top}.png`: his pad by the shipping renderer, six groups framed (green, pink, mint, blue, yellow, teal), Group 2 playing.
+- `C5_<11l|13p>_nine_groups_prism.png`: nine groups. The rail's Group 1 and Group 9 carry numbered discs; Group 9's face card shows the menu chip (crop: `C5_11l_nine_groups_group_row_menu_crop.png`).
+- `C5_prism_nine_groups_{iso,top,down}.png`: the prism by the shipping renderer. Group 9's "9" is on its side face: from behind, through the X-ray body, it reads mirrored. The top face's "1" is under the back walls in iso / top, and reads plainly in `down`.
+- `C5_test_prints.txt`: every printed measurement.
+- Looked at: the frames on his thin side faces are one column. Mint, yellow and teal read; terracotta (group 8) is the dimmest, which is why it is last.
+
+### Build and suite (raw lines, this Mac; side worktree `wt-n`)
+```
+C5 suites (after the last change): FlexibleGroupPaletteTests  Executed 7 tests, with 0 failures (0 unexpected) in 0.249 s
+  FlexibleGroupPaletteHostedTests  Executed 2 tests, with 0 failures (0 unexpected) in 63.547 s
+  FlexibleGroupPaletteEvidenceProbe (FLEX_C5_EVIDENCE_DIR set)  Executed 1 test, with 0 failures (0 unexpected) in 9.487 s
+Affected suites first (FlexibleRound5Settings*, FlexibleSqueezeGroups*, FlexibleMergeR5SMTests, TopOptDesignTests, FlexibleRowCopyTests,
+  FlexibleMainViewsTests, FlexibleRound5SquishExitTests): Executed 100 tests, with 0 failures (0 unexpected) in 408.111 s
+Targeted suite (every Flexible* suite + UnifiedShading, LatticePreviewBodyAlpha, LatticeGBufferMask, LatticeThreeAlgorithmsDraw,
+  OrganicCapsuleImpostor, Viewer, StageBackdrop, SmoothingPageRound2, LatticeStageMode, LatticeSettingsPersist, ProjectStore,
+  UndoHistory, SurfaceStage, LatticeSimSolveTrigger, TopOptDesign, SelectionModel), load average up to ~19 (other agents):
+  Executed 641 tests, with 28 tests skipped and 1 failure (0 unexpected) in 4029.790 (4029.932) seconds
+  LatticeSimSolveTriggerTests.testTheTriggerRefusesOnAllThreeGrounds — known, pre-existing
+  (the 28 skipped are the opt-in probes; FlexibleFEFieldTests.testExtensionOutsideTheSolid PASSED here, 17.213 s)
+FLEX-C5 palette all pairs: worst normal ΔE 16.2 (groups 4–6) · worst protan/deutan ΔE 10.2 (groups 1–7)
+FLEX-C5 control (round 5 S): worst normal ΔE 18.4 · worst protan/deutan ΔE 7.1 (groups 1–2)
+FLEX-C5 contrast: 1 Green bg 10.0 gap 8.9 · 2 Pink bg 10.2 gap 9.1 · 3 Mint bg 16.1 gap 14.4 · 4 Blue bg 5.6 gap 5.0 · 5 Yellow bg 15.5
+  gap 13.9 · 6 Teal bg 5.1 gap 4.6 · 7 Olive bg 6.4 gap 5.8 · 8 Terracotta bg 4.5 gap 4.0 (the number's ink = the stage background)
+FLEX-C5 meanings: 1 Green nearest resting cyan 23.1 heat 5.0 · 2 Pink nearest warning amber 16.5 heat 14.3 · 3 Mint nearest selected
+  white 16.6 heat 14.8 · 4 Blue nearest depth-prism purple 21.0 heat 7.9 · 5 Yellow nearest warning amber 17.0 heat 3.0 · 6 Teal nearest
+  resting cyan 23.2 heat 8.2 · 7 Olive nearest warning amber 17.0 heat 12.9 · 8 Terracotta nearest danger red 16.1 heat 15.9
+FLEX-C5 control: S's orange → warning 0.0, heat 1.7 · S's red → danger 0.0, heat 0.7
+FLEX-C5 plate: 9 at u 2–6 v 2–8 · squish under it 0.275 vs the face's mean 0.393
+FLEX-C5-HOSTED swatches: (all four sizes) row x 209–438 (w 229, h 32) · words from 138 need 42 · panel x 24–504 · rail to 110 ·
+  group row (six groups, Face 4's card): menu x 325–430
+FLEX-C5-HOSTED 11l / 13p group row (nine groups): control x 326–430 in card 118–490 · words need 95 pt
+FLEX-C5-HOSTED nine groups: shared [1, 9] · rail [1, nil, nil, nil, nil, nil, nil, nil, 9] · lit 44 · Group 1 face 1 64×64 · up (0,−1)
+  right (1,0) · 140 plate columns · Group 9 face 5 27×26 · up (0,1) right (−1,0) · 35 plate columns
+Scratch measurement (his pad, 11" landscape, Face 3's card; the scratch test was deleted): 2–5 groups → chips · 6 groups → menu
+iOS: xcodebuild -project app/TopOpt.xcodeproj -scheme TopOpt -configuration Debug -destination id=147E56A1-C8CA-4B9D-BE6C-CF230589A83A
+  -derivedDataPath …/DerivedData/flexA1n build → ** BUILD SUCCEEDED ** (FlexibleGroupNumbers.o built from wt-n's source; the log
+  compiles wt-n/…/FlexibleGroupNumbers.swift). The app was not launched. Both scratch builds were deleted afterwards.
+```
+Note for the lead: during the suite (18:12), something outside this batch replaced `wt-n/app/TopOptKit/vendor` (a symlink to the lead's vendor) with `vendor -> vendor-own`, an untracked `vendor-own/` holding its own TopOptCore.xcframework. The suite's binary was built before that. The M8 re-run and the iOS build ran after it, against vendor-own. I did not touch or commit it.
+
+### Decisions (00-decisions.md)
+New rows D-R5-C5-1 … C5-8. D-R5-S1 and D-R5-X2 carry a ★ C5 note.
+
+### Commits (`claude/flexible-screens-n`; nothing pushed)
+- `6afa7d89`: the palette (DS tokens), the numbers, the swatches, the menu chip, the three new suites and the re-pins.
+- `d6b7427d`: the group row's priority, and the stronger hosted checks (the words' room, the pages' paint route); the probe's down view.
+- The next commit: this section, DECISIONS D-R5-C5-1 … 8 (S1 and X2 annotated), your answers marked where they were asked, and the evidence (`batch_c5/`).
+
+## Round 5 · batch N — verification pass
 
 Batch N's verifier found ten things. Each is confirmed below with my own run (not the verifier's word),
 fixed where the app can fix it, and pinned by a test with a RED control computed beside it. **The app was
@@ -842,7 +986,11 @@ are offscreen frames from the shipping renderer and the hosted panel's pixels.
     shows an orange frame against yellow-orange heat (main page, group 2).
   - Group 1's green frames also match the lattice density legend's green.
   - Options: (a) keep it; (b) always keep the gap, even 1 column; (c) another cue for the frame.
-- Batch S's open calls (1)–(7) and batch M's still stand (their sections below).
+  - ★ C5 (2026-09-30): his "Add more colour tokens" changed the palette — groups 2 and 3 are now pink
+    and mint, OFF the heat (D-R5-C5-2); green, blue, yellow and teal still lie on it, so this thin-face
+    question still stands.
+- Batch S's open calls (1)–(7) and batch M's still stand (their sections below). (★ C5: S's 1, 6 and 7
+  and M's colour-cap call are answered — see batch C5.)
 
 **Not merged — Blocked:** `#358 claude/raster-receipt-fields` (5 commits to `4764ca7e`, the lattice-types
 strut law). It conflicts in `core/src/cli/job.cpp`, which is not ours. At the end of `parse_job`, two
@@ -919,6 +1067,7 @@ the app was built for the simulator and NOT launched.
 
 **Your call (not changed):** in Group 1, the reddest dent is Face 5's top edge (23.7 mm), above your thumb
 (11.4 mm under it, 13.5 set). That is the 3D sim's own squish. Should the colours stop at the depth you set?
+★ ANSWERED (2026-09-30): **"Show the sim's real depths"** — kept as it is (D-R5-C5-7).
 
 ### Each finding → verdict → what changed → pinned by
 | # | Finding (lens · severity) | Verdict | What changed | Pinned by (RED control) |
@@ -1054,7 +1203,7 @@ none of this has been seen on a screen yet.
   above).
 
 **Your call:**
-- **Group 1's colours:** show the sim's own squish (now — Face 5's top edge reads 23.7 mm, more than the
+- **Group 1's colours** (★ ANSWERED 2026-09-30: **"Show the sim's real depths"** — kept, D-R5-C5-7): show the sim's own squish (now — Face 5's top edge reads 23.7 mm, more than the
   13.5 you set), or cap the colours at the deepest you set (the edge would read 13.5, like the thumb's
   middle)?
 - **The spread on the Settings page:** L = 0.2 × the lattice depth (4 mm on your top, 20 mm on your
@@ -1282,7 +1431,7 @@ A verifier read batch S against your words and found 21 things (2 lenses: correc
 | U3 (major) | "Width · 20 mm long [66 mm]"; a stored 65.5 mm shows 66 | CONFIRMED | two boxes (Width, Length), proportions kept (`FlexibleStampSize`); one decimal when the value has one |
 | U4 | re-picking a swatch reads "Save & Exit" | CONFIRMED | colours in normal form (`FlexibleSqueezeGroups.canonical`) |
 | U5 | view off: Save & Exit leaves the lattice stale, so the main page's 3D squish falls back to the column model | CONFIRMED | no code change. The consequence is now part of your call 3 below. The main-page pill is in batch M's file |
-| U6 | > 4 groups reuse colours; orange / red are the warning / danger tokens | CONFIRMED | not changed: the DS has only these four tokens besides purple (the depth prism), cyan (resting) and white (selected) — **your call** below |
+| U6 | > 4 groups reuse colours; orange / red are the warning / danger tokens | CONFIRMED | not changed: the DS has only these four tokens besides purple (the depth prism), cyan (resting) and white (selected) — **your call** below (★ C5: ANSWERED — "Add more colour tokens": eight tokens, groups 2–3 off the warning / danger colours, then numbered; D-R5-C5-1…4) |
 | U7 | on the main page's column fallback a side wall's opaque frame pokes through the top face | CONFIRMED (verifier's render) | NOT fixed. The geometry is older than S: the column model pushes a side face's top columns through the top face, and its heat-coloured columns already poked through the same way. The opaque frame makes it visible. A fix means the column model must know when a displaced column crosses another face. That belongs to the main page's dent work (batch M), so it is left as an open issue |
 | U8 | relinked line in kg; Settings player "Full load" | CONFIRMED | `relinked(…, unit:)`; `FlexibleSettingsSquish.fullLabel` = the playing group's force (`squeezeValue(_:unit:)`) |
 | U9 | the deepest box scrubs up = more, the depth chip down = deeper; 3 pt slop | slop CONFIRMED and fixed (8 pt, vertical start). Direction NOT changed | the box is a value dial, and up = more on every box on the page (the iOS convention). The chip is a handle ON the part that follows the dent plane into it. Flipping one box would make it the only one that runs backwards |
@@ -1291,13 +1440,13 @@ A verifier read batch S against your words and found 21 things (2 lenses: correc
 | U13 | FlexibleSquishPlayer.swift and FlexibleRowCopy.swift are also edited in the lead's tree | CONFIRMED (verifier read the lead's diff) | merge notes below |
 
 **Your call (updated):**
-1. Deleting a face a main-page group holds leaves that group unchanged, so the main run still presses it. Should deleting top A here also take it out of the main page's Top group?
-2. Reset all keeps your weight unit. Should it go back to kg?
+1. Deleting a face a main-page group holds leaves that group unchanged, so the main run still presses it. Should deleting top A here also take it out of the main page's Top group? ★ ANSWERED (2026-09-30): **"Flexible only"** — the main page's group keeps it; as built (D-R5-C5-5).
+2. Reset all keeps your weight unit. Should it go back to kg? (★ still open: his "Start fully fresh" answer to 6 does not say; the unit is kept.)
 3. **Save & Exit with the Lattice view off** only stores ("View off · tap to build"). **Consequence:** with no new bake, the lattice stays stale. Every 3D sim needs a current lattice, so until you turn the view on, the main page's Heat and Stress squish is the old column preview, with no bulge. Round 4 built it anyway. Which do you want?
 4. The frame is ~3 % of the face (3 mm on your 100 mm pad) plus a 1.6 mm dark gap. Thicker or thinner?
 5. **NEW: after an edit on the Settings page, the 3D sim waits for Save & Exit.** It needs the lattice built on Exit. Should the Settings page re-run the playing group's sim on the last-built lattice once your edits settle (an approximation: the old lattice, the new loads)? If not, the "Column preview · Save & Exit for the 3D sim" line stays.
-6. **NEW: Reset all** starts from the main page's faces only, so faces you added on this page are dropped. Should it keep every listed face, with its values reset?
-7. **NEW: groups 5 and up re-use the four colours, and orange and red are also the warning and danger colours.** Accept four, or add a second cue for groups 5+ (e.g. the group number on the frame)?
+6. **NEW: Reset all** starts from the main page's faces only, so faces you added on this page are dropped. Should it keep every listed face, with its values reset? ★ ANSWERED (2026-09-30): **"Start fully fresh"** (only the main-page faces, default values) — as built (D-R5-C5-6).
+7. **NEW: groups 5 and up re-use the four colours, and orange and red are also the warning and danger colours.** Accept four, or add a second cue for groups 5+ (e.g. the group number on the frame)? ★ ANSWERED (2026-09-30): **"Add more colour tokens"** — batch C5: eight DS tokens, groups 2–3 no longer the warning / danger colours, past eight the number on the tab and painted on the faces (D-R5-C5-1…4).
 
 **Merge notes for the lead (with batch M):**
 - `FlexibleSquishPlayer.swift`:
@@ -1488,7 +1637,7 @@ Judged on YOUR project 0004, restored through `AppModel.open`; the Settings page
 3. **[Rests] and [+ New] are tabs, and [Model] also holds the More rows.** The rail replaces the Face | More chips.
 4. **The rail tab has two tiny lines** (name, face count), as asked ("its colour, its name, its face count"). Every setting row is one line.
 5. **With nothing changed, Exit is never blocked** (a legacy project's missing filament included): leaving changes nothing on the main page.
-6. **A group with more than 4 groups re-uses the colours** (four distinct DS tokens exist that are not purple, cyan or white).
+6. **A group with more than 4 groups re-uses the colours** (four distinct DS tokens exist that are not purple, cyan or white). (★ C5: superseded — eight tokens, then numbered; D-R5-C5-1…3.)
 
 **Not done (and why):**
 - **Nothing has been seen on a device or simulator.** I must not launch the app. The iOS build succeeds.
@@ -1496,8 +1645,8 @@ Judged on YOUR project 0004, restored through `AppModel.open`; the Settings page
 - **Batch M's files**: the main page's dent colours, legends and Stress are M's. S touched five main-page files with small listed hooks (below) — the lead merges them with M's.
 
 **Your call:**
-- **Deleting a face a main-page group holds leaves the main page's group as it is**, so the main run still presses it. Should deleting top A on the Flexible page also take it out of the main page's Top group?
-- **Reset all keeps your weight unit.** Should it go back to kg too?
+- **Deleting a face a main-page group holds leaves the main page's group as it is**, so the main run still presses it. Should deleting top A on the Flexible page also take it out of the main page's Top group? ★ ANSWERED (2026-09-30): **"Flexible only"** (D-R5-C5-5).
+- **Reset all keeps your weight unit.** Should it go back to kg too? (★ still open — see the verification pass's call 2.)
 - **Save & Exit with the Lattice view off** stores and waits for the view ("View off · tap to build"). Round 4 built it anyway and said "Lattice ready [Show]". Which do you want? (The verification pass adds the consequence: until the view is on, the main page's squish is the column preview, with no bulge.)
 - **Frame width** is ~3 % of the face (3 mm on your 100 mm pad), plus a 1.6 mm dark gap. Thicker / thinner?
 
@@ -1786,6 +1935,9 @@ Your round-5 notes that touch G's field were checked here too:
 **Your call:**
 - **The fold cut.** Your Group 1 now moves 23 % of its calibrated size (≈ 7 % of core's numbers on
   Face 5). The alternative is to let ×k go below 1 and say "×0.2" on the legend. Keep the cut?
+  ★ ANSWERED (2026-09-30): **"Is there no way to fold realistically instead?"** → batch N (landed on this
+  branch): the squish is solved again in steps; a converged field is never cut, and the cut is now only
+  the fallback (D-R5-N5, D-R5-C5-8).
 - **The far end held as a wall** (a side press squeezes against the opposite face, as core's columns
   assume). Or should an unpressed far face stay free, with the part balanced as batch G did?
 - **Top B lifting next to the thumb** (above): leave it (it is what a linear body does), or say it
