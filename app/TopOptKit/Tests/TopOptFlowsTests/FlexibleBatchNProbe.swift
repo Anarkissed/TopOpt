@@ -135,8 +135,25 @@ final class FlexibleBatchNProbe: XCTestCase {
                          full.gmaxPart, full.maxDisplacement, li.count, li.minDet, lp.1, lp.2, lin.solveMS))
             for mode in modes {
                 let t0 = Date()
+                // ★ BATCH N VERIFICATION: how far the field it stopped on is from its fixed point — more
+                // undamped solves at the same load (the session continues the converged increment)
+                var distance = ""
+                let extra = Int(env["FLEX_N_EXTRA"] ?? "") ?? 0
                 let o = FlexibleFERefine.run(sim, of: req, on: scene, linear: lin, pastData: mode,
-                                             increments: Int(env["FLEX_N_INC"] ?? "") ?? FlexibleFERefine.increments)
+                                             increments: Int(env["FLEX_N_INC"] ?? "") ?? FlexibleFERefine.increments,
+                                             inspect: extra <= 0 ? nil : { steps, stop in
+                    var changes: [String] = []
+                    var lastU = stop.u
+                    for _ in 0..<extra {
+                        guard let x = try? steps.step(loadFactor: stop.loadFactor, iterations: 1, tolerance: 0), x.ok else { break }
+                        changes.append(String(format: "%.4f", x.fixedPointChange))
+                        lastU = x.u
+                    }
+                    var du: Float = 0, big: Float = 0
+                    for i in 0..<min(lastU.count, stop.u.count) { du = max(du, abs(lastU[i] - stop.u[i])); big = max(big, abs(lastU[i])) }
+                    distance = String(format: " · %d more undamped solves: %@ · the stop is %.2f mm (%.1f%% of max|u|) from them",
+                                      changes.count, changes.joined(separator: " "), du, big > 0 ? 100 * du / big : 0)
+                })
                 let wall = Date().timeIntervalSince(t0)
                 let rc: FlexibleFERefine.Receipt
                 switch o {
@@ -144,8 +161,10 @@ final class FlexibleBatchNProbe: XCTestCase {
                     rc = f.refine!
                     let inv = inverted(f, 1)
                     let pb = FlexibleFEVerifyGTests.pullback(f, 1)
-                    print(String(format: "FLEX-N STEPPED %@ %@ past %d: REFINED λ %.3f (asked %.2f) · gmax part %.3f · max|u| %.2f mm · inverted %d (min det %.3f) · pull-back misses %d of %d (worst %.2f mm) · %d solves · %.1f s",
-                                 what, sim.id, mode.rawValue, f.scale, f.coreRatio, f.gmaxPart, f.maxDisplacement, inv.count, inv.minDet, pb.1, pb.0, pb.2, rc.solves, wall))
+                    print(String(format: "FLEX-N STEPPED %@ %@ past %d: REFINED λ %.3f (asked %.2f) · gmax part %.3f · max|u| %.2f mm · inverted %d (min det %.3f) · pull-back misses %d of %d (worst %.2f mm) · %d solves · %.1f s · past the data %d of %d (%.0f%%) · grow > 30%% %d (max det %.2f)%@",
+                                 what, sim.id, mode.rawValue, f.scale, f.coreRatio, f.gmaxPart, f.maxDisplacement, inv.count, inv.minDet, pb.1, pb.0, pb.2, rc.solves, wall,
+                                 rc.beyondData, rc.solid, 100 * Double(rc.beyondData) / Double(max(1, rc.solid)), rc.inflated,
+                                 rc.steps.last?.volumeRatioMax ?? 0, distance))
                 case .kept(let why, let detail, let receipt):
                     rc = receipt
                     print("FLEX-N STEPPED \(what) \(sim.id) past \(mode.rawValue): KEPT '\(why)' — \(detail) · \(String(format: "%.1f", wall)) s")
@@ -153,8 +172,9 @@ final class FlexibleBatchNProbe: XCTestCase {
                     print("FLEX-N STEPPED \(sim.id): cancelled"); continue
                 }
                 for (i, s) in rc.steps.enumerated() {
-                    print(String(format: "FLEX-N   step %d λ %.3f: %d solves · change %.4f %@ · CG %d · %.0f ms · strain p99 %.3f max %.3f · beyond data %d · by stress %d%@",
-                                 i + 1, s.loadFactor, s.solves, s.change, s.converged ? "✓" : "✗", s.cgIterations, s.ms, s.strainP99, s.strainMax, s.beyondData, s.stressUpdates, s.mgSkipped ? " · Jacobi-CG" : ""))
+                    print(String(format: "FLEX-N   step %d λ %.3f: %d solves · change %.4f %@ (last ω %.2f) · CG %d · %.0f ms · strain p99 %.3f max %.3f · beyond data %d · by stress %d · grow > 30%% %d%@",
+                                 i + 1, s.loadFactor, s.solves, s.change, s.converged ? "✓" : "✗", s.omega, s.cgIterations, s.ms, s.strainP99, s.strainMax, s.beyondData, s.stressUpdates,
+                                 s.inflated, s.mgSkipped ? " · Jacobi-CG" : ""))
                 }
             }
         }

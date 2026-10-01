@@ -17,13 +17,21 @@
 // time, the shown group first; a new lattice cancels it between increments; it yields core to a
 // solve that waits for it between increments (FlexibleCoreGate). A refine that does not converge,
 // fails or runs past its budget keeps the linear field (with the fold cut) and says why in one line.
+// ★ BATCH N VERIFICATION. (1) Only an UNDAMPED solve may stop an increment (the bridge): his Group 1
+// had stopped on a ¼-damped 1.6 % change, 7 % (1.5 mm) short of its fixed point. (2) ONE solve per
+// bridge call, so a cancel, a waiting solve and the budget are heard between SOLVES, not only
+// between increments (his Group 1's last increment ran 6.5 s with nobody listening). (3) The line
+// counts the increment being SOLVED, from the moment the refine claims core, and names the group:
+// "Refining Group 2… 3/8" (it had blanked 1.5 s, stalled on 7/8 through the slowest increment, then
+// restarted at 1/8 for the next group unnamed).
 
 import Foundation
 import TopOptKit
 
 /// ★ BATCH N: a group's refine on the model (FlexibleStageModel.refine).
 public enum FlexibleRefineState: Equatable, Sendable {
-    case running(done: Int, total: Int)
+    /// ★ BATCH N VERIFICATION: `step` — the increment being SOLVED (1-based; set when the refine claims core).
+    case running(step: Int, total: Int)
     case ready(FlexibleFEField)
     /// The quick field stays: one short line, and the detail behind the (i).
     case kept(why: String, detail: String)
@@ -36,8 +44,11 @@ public enum FlexibleFERefine {
     public static let increments = 8
     /// Secant solves per increment (the last increment, and each correction, get `finalIterations`).
     public static let iterationsPerIncrement = 3
-    public static let finalIterations = 6
-    /// An increment has converged when the last solve moved the field by ≤ this × its largest motion.
+    /// ★ BATCH N VERIFICATION: 6 → 10 — only an undamped solve may stop now, and his Group 1's last
+    /// increment needs 8 (6 damped, then 2 undamped).
+    public static let finalIterations = 10
+    /// An increment has converged when its last solve was UNDAMPED and moved the field by ≤ this × its
+    /// largest motion (the bridge's rule).
     public static let tolerance = 0.02
     /// The calibration is re-decided until the deepest zone compresses core's depth within this.
     public static let calibrationTolerance = 0.03
@@ -52,12 +63,23 @@ public enum FlexibleFERefine {
 
     // MARK: copy (one line each)
 
-    /// The player's note while the shown group refines.
-    public static func refining(_ done: Int, of total: Int) -> String { "Refining the squish… \(done)/\(total)" }
-    /// The player's note when the refine failed and the quick linear squish stays (≤ 44 characters —
-    /// FlexibleRowCopy.maxChars; the reason also stands in the (i)'s cut sentence).
-    public static func kept(_ why: String) -> String { "Quick squish · \(why)" }
-    /// The short reasons (one line each).
+    /// The player's note while a group of the sequence refines: the group and the increment being
+    /// SOLVED — "Refining Group 2… 3/8". ★ BATCH N VERIFICATION: named (Play all's next group had
+    /// restarted at 1/8 unnamed beside the picker's "All · Group 1") and short enough to sit WHOLE beside
+    /// the live Play-all picker at 11" portrait (FlexibleBatchNVerifyTests pins the drawn width).
+    public static func refining(_ group: String, _ step: Int, of total: Int) -> String { "Refining \(group)… \(step)/\(total)" }
+    /// The player's note when the refine did not land and the quick linear squish stays. ★ BATCH N
+    /// VERIFICATION: the reason alone, short — "Quick squish · the refine did not settle" was cut to
+    /// "Quick squish · the refine did…" beside the live picker at 11" portrait; the (i) keeps the
+    /// sentence ("its motion cut to 23 % … (the refine did not settle)").
+    public static func kept(_ why: String) -> String {
+        switch why {
+        case notSettled: return "Refine didn't settle"
+        case tooLong: return "Refine took too long"
+        default: return "Refine failed"
+        }
+    }
+    /// The short reasons (they stand in the (i)'s cut sentence).
     public static let notSettled = "the refine did not settle"
     public static let tooLong = "the refine took too long"
     public static let failedShort = "the refine failed"
@@ -76,6 +98,13 @@ public enum FlexibleFERefine {
         public var mgSkipped: Bool
         /// Elements updated by their stress (the curve stiffening there) in the last iterate.
         public var stressUpdates: Int = 0
+        /// ★ BATCH N VERIFICATION: the last solve's damping (1 = undamped: only that may stop), the part's
+        /// elements, those whose volume grows > 30 % (a turn drawn as a stretch — the (i) says so) and the
+        /// largest volume ratio.
+        public var omega: Double = 1
+        public var solid: Int = 0
+        public var inflated: Int = 0
+        public var volumeRatioMax: Double = 0
     }
 
     /// The whole refine's receipt (the handoff's numbers).
@@ -92,6 +121,13 @@ public enum FlexibleFERefine {
         public var totalMS = 0.0
         public var pastData: Int32 = FlexibleFERefine.pastData.rawValue
         public var solves: Int { steps.reduce(0) { $0 + $1.solves } }
+        /// ★ BATCH N VERIFICATION: the field's elements whose volume grows > 30 % under the press — a turn
+        /// the small-strain sim draws as a stretch (his Group 1's lifted edge); the (i) says so when any.
+        public var inflated: Int { steps.last?.inflated ?? 0 }
+        /// The field's elements squeezed past the curves' last tested strain (there the shape is the
+        /// textbook densification's), and the part's elements.
+        public var beyondData: Int { steps.last?.beyondData ?? 0 }
+        public var solid: Int { steps.last?.solid ?? 0 }
     }
 
     public enum Outcome: Sendable {
@@ -99,7 +135,8 @@ public enum FlexibleFERefine {
         /// Not converged / failed / over budget: the linear field stays (`why`: one short line;
         /// `detail`: core's words or the numbers, behind the (i)).
         case kept(why: String, detail: String, receipt: Receipt)
-        case cancelled
+        /// ★ BATCH N VERIFICATION: with the receipt so far (the tests count the solves after the cancel).
+        case cancelled(Receipt)
     }
 
     /// The load factors of the increments up to `target`.
@@ -137,12 +174,19 @@ public enum FlexibleFERefine {
     }
 
     /// Refine `sim` (seconds — on the sims' serial queue, never the main thread). `linear`: its
-    /// landed linear field (its k and its rests). `between` runs after each increment (the yield to
-    /// a waiting solve); `progress` reports (done, total) increments; `cancelled` is polled between
-    /// increments.
+    /// landed linear field (its k and its rests). `between` runs between SOLVES (the yield to a waiting
+    /// solve); `progress` reports (the increment being solved, total) at each increment's START;
+    /// `cancelled` and the budget are polled between solves.
+    /// Test controls: `iterations` (per increment, last), `tolerance`; `pollPerIncrement` — RED control
+    /// of the verification: batch N's first loop (one bridge call per increment, nobody listening inside);
+    /// `inspect` — the probes' look at a converged session before it ends (its distance to the fixed point);
+    /// `band` — the calibration band (the probes' "at his weights" picture: [0.5, 1]).
     public static func run(_ sim: FlexibleFERequest.Sim, of r: FlexibleFERequest, on scene: FlexibleScene,
                            linear: FlexibleFEField, control: Int = 0, pastData: FlexSquishPastData = pastData,
                            increments n: Int = increments, budgetS: Double = budgetS, unsettled: Bool = false,
+                           iterations: (each: Int, last: Int)? = nil, tolerance tol: Double = tolerance,
+                           pollPerIncrement: Bool = false, inspect: ((FlexSquishSteps, FlexSquishSolutionInfo) -> Void)? = nil,
+                           band bandOverride: ClosedRange<Double>? = nil,
                            cancelled: () -> Bool = { false }, between: () -> Void = {},
                            progress: (Int, Int) -> Void = { _, _ in }) -> Outcome {
         let t0 = Date()
@@ -150,7 +194,7 @@ public enum FlexibleFERefine {
         receipt.linearAsked = linear.coreRatio
         receipt.linearK = linear.scale / (linear.foldShare ?? 1)
         receipt.pastData = pastData.rawValue
-        let band = r.law.shapeOnly ? nil : Optional(FlexibleFE.calibrationBand)
+        let band = r.law.shapeOnly ? nil : Optional(bandOverride ?? FlexibleFE.calibrationBand)
         func clampBand(_ x: Double) -> Double { band.map { Swift.min($0.upperBound, Swift.max($0.lowerBound, x)) } ?? x }
         func elapsed() -> Double { Date().timeIntervalSince(t0) }
         // the same rests as the linear field that landed (its one bonded retry carried over)
@@ -168,32 +212,73 @@ public enum FlexibleFERefine {
         var last: FlexSquishSolutionInfo?
         var history: [(lambda: Double, fe: Double)] = []
         var core = 0.0
-        func doStep(_ lambda: Double, final: Bool) -> String? {
-            let out: FlexSquishSolutionInfo
-            do {
-                // (the red control `unsettled`: one solve per increment and a tolerance no field meets)
-                out = try steps.step(loadFactor: lambda, iterations: unsettled ? 1 : (final ? finalIterations : iterationsPerIncrement),
-                                     tolerance: unsettled ? 1e-12 : tolerance)
-            } catch { return "\(error)" }
-            receipt.steps.append(Step(loadFactor: lambda, solves: out.fixedPointIterations, change: out.fixedPointChange,
-                                      converged: out.fixedPointConverged, cgIterations: out.cgIterationsTotal, ms: out.stepMS,
-                                      strainP99: out.strainP99, strainMax: out.strainMax, beyondData: out.beyondDataElements,
-                                      mgSkipped: out.mgSkipped, stressUpdates: out.stressUpdates))
-            guard out.ok else { return out.failure }
+        var at = (increment: 0, of: lambdas.count)
+        enum End { case failed(String), cancelled, overBudget }
+        func overBudget() -> Outcome {
+            .kept(why: tooLong, detail: String(format: "%.0f s past the %.0f s budget at increment %d of %d", elapsed(), budgetS,
+                                               at.increment, at.of), receipt: receipt)
+        }
+        /// One increment (or correction) at `lambda`: up to its cap of secant solves, ONE per bridge call
+        /// (the session carries the damping across calls at the same λ), a cancel / a waiting solve / the
+        /// budget heard between them. nil: it solved (converged or at its cap).
+        func doStep(_ lambda: Double, final: Bool) -> End? {
+            // (the red control `unsettled`: one solve per increment and a tolerance no field meets)
+            let cap = unsettled ? 1 : (final ? (iterations?.last ?? finalIterations) : (iterations?.each ?? iterationsPerIncrement))
+            let tolNow = unsettled ? 1e-12 : tol
+            var step = Step(loadFactor: lambda, solves: 0, change: 1, converged: false, cgIterations: 0, ms: 0,
+                            strainP99: 0, strainMax: 0, beyondData: 0, mgSkipped: false)
+            var out: FlexSquishSolutionInfo?
+            defer { receipt.steps.append(step) }
+            let calls = pollPerIncrement ? 1 : cap
+            for k in 0..<calls {
+                if k > 0 {
+                    // ★ between SOLVES: a new lattice stops the refine here, a waiting solve gets core here
+                    if cancelled() { return .cancelled }
+                    between()
+                    if elapsed() > budgetS { return .overBudget }
+                }
+                let o: FlexSquishSolutionInfo
+                do {
+                    o = try steps.step(loadFactor: lambda, iterations: pollPerIncrement ? cap : 1, tolerance: tolNow)
+                } catch { return .failed("\(error)") }
+                step.solves += o.fixedPointIterations
+                step.cgIterations += o.cgIterationsTotal
+                step.ms += o.stepMS
+                step.change = o.fixedPointChange
+                step.converged = o.fixedPointConverged
+                step.omega = o.fixedPointOmega
+                step.mgSkipped = o.mgSkipped
+                step.stressUpdates = o.stressUpdates
+                guard o.ok else { return .failed(o.failure) }
+                step.strainP99 = o.strainP99
+                step.strainMax = o.strainMax
+                step.beyondData = o.beyondDataElements
+                step.solid = o.solidElements
+                step.inflated = o.inflatedElements
+                step.volumeRatioMax = o.volumeRatioMax
+                out = o
+                if o.fixedPointConverged { break }
+            }
+            guard let out else { return .failed("no solve") }
             last = out
             let f = FlexibleFEField(solution: out, simID: sim.id, generation: r.generation)
             if let z = zoneSums(f, sim.targets) { core = z.core; history.append((lambda, z.fe)) }
             return nil
         }
+        func ended(_ e: End) -> Outcome {
+            switch e {
+            case .failed(let why): return .kept(why: why.contains("deadline") ? tooLong : failedShort, detail: why, receipt: receipt)
+            case .cancelled: return .cancelled(receipt)
+            case .overBudget: return overBudget()
+            }
+        }
         for (i, lambda) in lambdas.enumerated() {
-            if cancelled() { return .cancelled }
-            if let why = doStep(lambda, final: i == lambdas.count - 1) {
-                return .kept(why: why.contains("deadline") ? tooLong : failedShort, detail: why, receipt: receipt)
-            }
+            if cancelled() { return .cancelled(receipt) }
+            at.increment = i + 1
+            // ★ at the START: the line counts the increment being solved (8/8 while the last one runs)
             progress(i + 1, lambdas.count)
-            if elapsed() > budgetS {
-                return .kept(why: tooLong, detail: String(format: "%.0f s past the %.0f s budget at increment %d of %d", elapsed(), budgetS, i + 1, lambdas.count), receipt: receipt)
-            }
+            if let e = doStep(lambda, final: i == lambdas.count - 1) { return ended(e) }
+            if elapsed() > budgetS { return overBudget() }
             between()
         }
         // ★ THE CALIBRATION, RE-DECIDED on the stepped field: the load factor whose deepest zone
@@ -205,10 +290,8 @@ public enum FlexibleFERefine {
                 asked = nextLoadFactor(a, b, core: core)
                 let next = clampBand(asked)
                 if abs(next / b.lambda - 1) <= calibrationTolerance { break }
-                if cancelled() { return .cancelled }
-                if let why = doStep(next, final: true) {
-                    return .kept(why: why.contains("deadline") ? tooLong : failedShort, detail: why, receipt: receipt)
-                }
+                if cancelled() { return .cancelled(receipt) }
+                if let e = doStep(next, final: true) { return ended(e) }
                 between()
             }
             if let b = history.last, b.fe > 1e-12 {
@@ -225,9 +308,10 @@ public enum FlexibleFERefine {
             let s = receipt.steps.last
             return .kept(why: notSettled,
                          detail: String(format: "the last increment moved %.1f%% after %d solves (tolerance %.0f%%)",
-                                        100 * (s?.change ?? 1), s?.solves ?? 0, 100 * tolerance),
+                                        100 * (s?.change ?? 1), s?.solves ?? 0, 100 * tol),
                          receipt: receipt)
         }
+        inspect?(steps, out)
         let f = FlexibleFEField.stepped(out, simID: sim.id, generation: r.generation, asked: asked,
                                         uncalibrated: linear.uncalibrated, receipt: receipt)
         var g = f

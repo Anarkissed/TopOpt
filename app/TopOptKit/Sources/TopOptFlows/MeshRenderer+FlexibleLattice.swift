@@ -231,8 +231,7 @@ extension MeshRenderer {
             setVertexTints(t)
             pass.feTintsShown = key
         }
-        loop.shownIndex = want
-        loop.shownKey = key
+        loop.noteShown(index: want, key: key, simID: id)   // ★ BATCH N VERIFICATION: a version swap refreshes the page
         loop.notePlaying(id)
     }
 }

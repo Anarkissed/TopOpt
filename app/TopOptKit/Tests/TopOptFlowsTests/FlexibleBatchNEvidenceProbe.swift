@@ -90,6 +90,62 @@ final class FlexibleBatchNEvidenceProbe: XCTestCase {
                        device: device, dir: dir)
     }
 
+    /// ★ BATCH N VERIFICATION — his call #1, on screen: his Group 1 as shipped (the band holds the load at
+    /// 2× his weights: its Face 5 end leans and its top edge rises) against the same stepped sim at HIS
+    /// weights (λ 1, the band [0.5, 1]), full squeeze, end-on and from Face 5's side; and the top layer's
+    /// largest rise and sink for each.
+    func testHisGroup1AtTheBandEdgeAgainstHisWeights() async throws {
+        guard let dir = Self.dir else { throw XCTSkip("FLEX_N_EVIDENCE_DIR") }
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let device = try XCTUnwrap(MTLCreateSystemDefaultDevice())
+        let r = try FlexibleHisProject.restore(FlexibleHisProject.round5Dir)
+        addTeardownBlock { r.cleanup() }
+        let (stage, m) = try await stage(r.project, "his round 5") { $0.keepFERequest = true }
+        try await refined(stage, m)
+        stage.pick("group-1")
+        stage.refresh()
+        let shipped = try XCTUnwrap(m.refinedField("group-1", generation: try XCTUnwrap(m.lattice?.generation)))
+        let probe = FlexibleSquishEvidenceProbe()
+        let views: [(String, Float, Float)] = [("front", 0, 0.03), ("faces5", .pi * 0.75, 0.35)]
+        func shoot(_ tag: String, _ f: FlexibleFEField) throws {
+            print("FLEX-NV-EVIDENCE his group-1 \(tag): λ \(String(format: "%.3f", f.scale)) · \(Self.motion(f)) · (i) '\(stage.dentInfo)'")
+            for v in views { try probe.render(stage, r.project, name: "NV_his_g1_\(tag)", amount: 1, view: v, device: device, dir: dir) }
+        }
+        try shoot("shipped_lambda2", shipped)
+        // the same stepped sim at HIS weights
+        let req = try XCTUnwrap(m.lastFERequest)
+        let ref = await m.squishWorker.sceneRef()
+        let scene = try XCTUnwrap(ref)
+        let sim = try XCTUnwrap(req.sims.first { $0.id == "group-1" })
+        let lin = try XCTUnwrap(m.squish["group-1"]?.field)
+        guard case .refined(let atOne) = FlexibleFERefine.run(sim, of: req, on: scene, linear: lin, band: 0.5...1) else {
+            XCTFail("the refine at his weights"); return
+        }
+        m.refine["group-1"] = .ready(atOne)
+        stage.forceOverlayRebuildForTests()
+        stage.refresh()
+        try shoot("his_weights_lambda1", atOne)
+        for v in views { try probe.render(stage, r.project, name: "NV_his_g1_rest", amount: 0, view: v, device: device, dir: dir) }
+    }
+
+    /// Up / down motion of the field's top layer of solved nodes (z up in the part's frame).
+    static func motion(_ f: FlexibleFEField) -> String {
+        var zTop: Float = -.infinity
+        for c in 0..<f.nz { for b in 0..<f.ny { for a in 0..<f.nx where f.solved[f.node(a, b, c)] {
+            zTop = max(zTop, f.origin.z + Float(c) * f.spacing)
+        } } }
+        var up: Float = 0, down: Float = 0, upAt = SIMD3<Float>.zero, downAt = SIMD3<Float>.zero
+        for c in 0..<f.nz { for b in 0..<f.ny { for a in 0..<f.nx where f.solved[f.node(a, b, c)] {
+            let p = f.origin + SIMD3<Float>(Float(a), Float(b), Float(c)) * f.spacing
+            guard p.z >= zTop - 1.01 * f.spacing else { continue }
+            let u = f.u[f.node(a, b, c)]
+            if u.z > up { up = u.z; upAt = p }
+            if -u.z > down { down = -u.z; downAt = p }
+        } } }
+        return String(format: "top layer: rises up to %.2f mm at (%.0f, %.0f, %.0f), sinks up to %.2f mm at (%.0f, %.0f, %.0f) · max|u| %.2f mm",
+                      up, upAt.x, upAt.y, upAt.z, down, downAt.x, downAt.y, downAt.z, f.maxDisplacement)
+    }
+
     func testTheM2StandLinearAgainstStepped() async throws {
         guard let dir = Self.dir else { throw XCTSkip("FLEX_N_EVIDENCE_DIR") }
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)

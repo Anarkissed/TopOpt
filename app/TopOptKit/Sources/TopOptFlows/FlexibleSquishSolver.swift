@@ -20,10 +20,11 @@
 // the verifier put a sim inside core beside a running Stress solve both ways.
 // ★ BATCH N: THEN EACH GROUP AGAIN, IN STEPS (FlexibleFERefine). Once every quick sim of the request
 // has finished, each group whose quick field landed is refined — the shown group first, one at a
-// time, under the SAME claim (taken in the step that commits it). Between increments the refine
-// yields core to a solve that waits for it (`FlexibleCoreGate.yieldSim`) and stops if its lattice
-// was replaced (`cancel` — its current increment finishes, its session ends, its result is dropped).
-// The request (the per-voxel arrays) is kept until the last refine ends.
+// time, under the SAME claim (taken in the step that commits it). Between SOLVES (★ verification:
+// it was between increments — up to 6 solves, 6.5 s on his Group 1, with nobody listening) the
+// refine yields core to a solve that waits for it (`FlexibleCoreGate.yieldSim`) and stops if its
+// lattice was replaced (`cancel` — its current solve finishes, its session ends, its result is
+// dropped). The request (the per-voxel arrays) is kept until the last refine ends.
 
 import Foundation
 import TopOptKit
@@ -43,8 +44,8 @@ public final class FlexibleSquishSolver {
 
     /// Process-wide: a sim holds core right now (claimed, queued on the bridge or solving — the
     /// Stress solve waits on it). ★ BATCH N: a REFINE is not counted here — it yields core to a
-    /// waiting solve between increments (`FlexibleCoreGate.yieldSim`), so the Stress solve starts
-    /// and its claim waits at most one increment instead of the whole refine.
+    /// waiting solve between solves (`FlexibleCoreGate.yieldSim`), so the Stress solve starts
+    /// and its claim waits at most one solve instead of the whole refine.
     nonisolated public static var solving: Bool { inFlight.quickInCore > 0 }
     /// Posted on the main queue when the last sim in core (of ANY model) comes out — a Stress solve
     /// that waited starts then, whichever model's sim it waited for (another project's included).
@@ -64,7 +65,8 @@ public final class FlexibleSquishSolver {
     // ★ BATCH N: the refines
     /// The landed quick field of a sim (the model's cache) — what its refine starts from.
     var linearField: (String) -> FlexibleFEField? = { _ in nil }
-    /// One per finished increment, on the main actor: (generation, sim id, done, total).
+    /// On the main actor: (generation, sim id, the increment being solved, total) — ★ verification: once
+    /// when the refine CLAIMS core (step 1, so the line never blanks) and at each increment's start.
     var onRefineProgress: (Int, String, Int, Int) -> Void = { _, _, _, _ in }
     /// One per ended refine, on the main actor.
     var onRefine: (Int, String, FlexibleFERefine.Outcome) -> Void = { _, _, _ in }
@@ -105,8 +107,12 @@ public final class FlexibleSquishSolver {
     var controlRefineBudgetS: Double?
     var controlRefineIgnoresCancel = false
     var controlRefineNoYield = false
-    /// Each refine increment waits this long first (tests: a cancel or a waiting solve lands mid-refine).
+    /// Each pause between a refine's solves waits this long first (tests: a cancel or a waiting solve
+    /// lands mid-refine).
     var controlRefineStepDelayS = 0.0
+    /// ★ BATCH N VERIFICATION, RED control: batch N's first loop — one bridge call per increment, the
+    /// cancel and the waiting solve heard only between increments.
+    var controlRefinePollPerIncrement = false
     /// RED CONTROL of the one claim: the pre-verification gate — `busy()` checked in pump(), the sim
     /// counted only once it runs on the queue, whatever else holds core.
     var controlLateClaim = false
@@ -267,22 +273,25 @@ public final class FlexibleSquishSolver {
             let past = controlRefinePastData ?? FlexibleFERefine.pastData
             let budget = controlRefineBudgetS ?? FlexibleFERefine.budgetS
             let unsettled = controlRefineUnsettled, noYield = controlRefineNoYield, ignore = controlRefineIgnoresCancel
-            let delay = controlRefineStepDelayS
+            let delay = controlRefineStepDelayS, perIncrement = controlRefinePollPerIncrement
             let q = queue
+            // ★ BATCH N VERIFICATION: the line from the moment the refine claims core (it blanked ~1.5 s
+            // while the first increment ran) — in the same main-actor step as the claim
+            onRefineProgress(gen, id, 1, incs)
             Task { @MainActor [weak self] in
                 let outcome: FlexibleFERefine.Outcome = await withCheckedContinuation { cont in
                     q.async {
                         if late { Self.inFlight.increment(yieldable: true) }
                         let o = FlexibleFERefine.run(
                             sim, of: r, on: scene, linear: lin, control: bits, pastData: past, increments: incs, budgetS: budget,
-                            unsettled: unsettled,
+                            unsettled: unsettled, pollPerIncrement: perIncrement,
                             cancelled: { !ignore && token.isCancelled },
                             between: {
                                 if delay > 0 { usleep(useconds_t(delay * 1e6)) }
                                 if !noYield { Self.inFlight.yieldSim() }
                             },
-                            progress: { done, total in
-                                Task { @MainActor [weak self] in self?.onRefineProgress(gen, id, done, total) }
+                            progress: { step, total in
+                                Task { @MainActor [weak self] in self?.onRefineProgress(gen, id, step, total) }
                             })
                         if Self.inFlight.leaveSim(yieldable: true) { Self.postIdle() }
                         cont.resume(returning: o)
@@ -373,7 +382,7 @@ public final class FlexibleCoreGate: @unchecked Sendable {
         peak = max(peak, sims)
         return true
     }
-    /// ★ BATCH N: a refine between increments, on its queue — when another solve WAITS for core it goes
+    /// ★ BATCH N: a refine between solves (★ verification: it was between increments), on its queue — when another solve WAITS for core it goes
     /// first: the sim leaves, waits until no other solve holds or waits for core and no sim is in it
     /// (never two in core), then claims it again. Returns the seconds it yielded (0: nobody waited).
     @discardableResult

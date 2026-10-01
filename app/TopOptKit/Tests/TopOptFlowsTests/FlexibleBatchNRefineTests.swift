@@ -73,7 +73,8 @@ final class FlexibleBatchNRefineTests: XCTestCase {
         try await refines(stage, m, notes: &notes)
         print("FLEX-N NOTES his r5: \(notes)")
         XCTAssertTrue(notes.contains(FlexibleFE.pending), "the quick sims first: \(notes)")
-        XCTAssertTrue(notes.contains { $0.hasPrefix("Refining the squish… ") && $0.hasSuffix("/\(FlexibleFERefine.increments)") },
+        // ★ RE-PINNED (batch N verification): the line names the group and counts the increment being solved
+        XCTAssertTrue(notes.contains { $0.hasPrefix("Refining Group 1… ") && $0.hasSuffix("/\(FlexibleFERefine.increments)") },
                       "then the steps, counted: \(notes)")
         for (id, quick) in [("group-1", quick1), ("group-2", quick2)] {
             guard case .ready(let f)? = m.refine[id] else { XCTFail("\(id): \(String(describing: m.refine[id]))"); continue }
@@ -86,6 +87,13 @@ final class FlexibleBatchNRefineTests: XCTestCase {
                          qi.count, qi.minDet, qp.1, qp.2, f.scale, f.coreRatio, si.count, si.minDet, sp.1, sp.2, full.gmaxPart, f.gmaxPart,
                          rc.steps.count, rc.solves, rc.totalMS / 1000, "\(rc.converged)"))
             XCTAssertTrue(rc.converged, "\(id): the stepped solve settles")
+            // ★ BATCH N VERIFICATION: …on an UNDAMPED solve (his Group 1 had stopped on a ¼-damped one, 7 % short)
+            XCTAssertEqual(rc.steps.last?.omega ?? 0, 1, "\(id): the solve that stopped was undamped")
+            let last = try XCTUnwrap(rc.steps.last)
+            print(String(format: "FLEX-NV HIS %@: last increment λ %.3f · %d solves · change %.4f · ω %.2f · beyond data %d of %d (%.0f%%) · inflated (det > 1.3) %d (max det %.2f) · increments %@",
+                         id, last.loadFactor, last.solves, last.change, last.omega, last.beyondData, last.solid,
+                         100 * Double(last.beyondData) / Double(max(1, last.solid)), last.inflated, last.volumeRatioMax,
+                         rc.steps.map { String(format: "%.2f:%d%@%@", $0.loadFactor, $0.solves, $0.converged ? "✓" : "✗", $0.omega < 1 ? "d" : "") }.joined(separator: " ")))
             XCTAssertNil(f.foldShare, "\(id): converged — the fold cut is NOT applied")
             XCTAssertEqual(si.count, 0, "\(id): no cell inverts at full size")
             XCTAssertGreaterThan(si.minDet, 0)
@@ -131,6 +139,19 @@ final class FlexibleBatchNRefineTests: XCTestCase {
             let info = stage.dentInfo
             print("FLEX-N HIS (i) \(id): \(info) · dent row \(stage.dentFactorLabel) · note \(stage.simNote ?? "-")")
             XCTAssertTrue(info.contains("solved in steps") && info.contains("no buckling or self-contact"), info)
+            // ★ BATCH N VERIFICATION: the force it is at, and (Group 1 only) the turns drawn as stretches
+            let f = try XCTUnwrap(stage.feShownField)
+            let inflated = f.refine?.inflated ?? -1
+            if id == "group-1" {
+                XCTAssertTrue(info.contains("pressed at 2× your weights"), "\(id): at the band's edge — said: \(info)")
+                XCTAssertGreaterThan(inflated, 0, "\(id): its edge above the thumb grows under the press (a turn drawn as a stretch)")
+                XCTAssertTrue(info.contains("big turns drawn as stretches"), "\(id): …said: \(info)")
+            } else {
+                // ★ RED CONTROL of the turn clause: Group 2 has no element that grows — nothing said
+                XCTAssertEqual(inflated, 0, "\(id): no element grows under its press")
+                XCTAssertFalse(info.contains("turns drawn as stretches"), "\(id): nothing to say")
+                XCTAssertTrue(info.contains(String(format: "pressed at %.1f× your weights", f.scale)), "\(id): its own load factor: \(info)")
+            }
             XCTAssertFalse(info.contains("cut to"), "\(id): no cut said")
             XCTAssertFalse(info.contains(". "), "one sentence")
             XCTAssertEqual(stage.dentFactorLabel, "×1", "\(id): drawn at its full size")
@@ -255,12 +276,17 @@ final class FlexibleBatchNRefineTests: XCTestCase {
                 guard case .kept(let why, _)? = state else { XCTFail("kept: \(String(describing: state))"); continue }
                 XCTAssertEqual(why, FlexibleFERefine.notSettled)
                 XCTAssertEqual(stage.simNote, FlexibleFERefine.kept(FlexibleFERefine.notSettled), "one line why")
+                // ★ RE-PINNED (batch N verification): "Refine didn't settle" — the drawn width is pinned in
+                // FlexibleBatchNVerifyTests (the 40-character line was cut beside the live picker at 11" portrait)
+                XCTAssertEqual(stage.simNote, "Refine didn't settle")
                 for w in [FlexibleFERefine.notSettled, FlexibleFERefine.tooLong, FlexibleFERefine.failedShort] {
                     XCTAssertLessThanOrEqual(FlexibleFERefine.kept(w).count, FlexibleRowCopy.maxChars, "one line: \(FlexibleFERefine.kept(w))")
                 }
-                XCTAssertLessThanOrEqual(FlexibleFERefine.refining(8, of: 8).count, FlexibleRowCopy.maxChars)
+                XCTAssertLessThanOrEqual(FlexibleFERefine.refining("Group 1", 8, of: 8).count, FlexibleRowCopy.maxChars)
                 // ★ RED CONTROL: the first wording ran past the line
                 XCTAssertGreaterThan("Quick squish kept · the stepped sim did not settle".count, FlexibleRowCopy.maxChars, "control: too long")
+                // …and the (i) still says the cut and why
+                XCTAssertTrue(stage.dentInfo.contains("(the refine did not settle)"), stage.dentInfo)
                 XCTAssertFalse(stage.fe.stepped, "the quick field stays")
                 XCTAssertEqual(stage.feShownField?.versionKey, "group-1")
                 XCTAssertFalse(stage.dentInfo.contains("solved in steps"))

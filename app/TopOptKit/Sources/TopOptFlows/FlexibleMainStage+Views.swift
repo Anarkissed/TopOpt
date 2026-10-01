@@ -139,7 +139,7 @@ extension FlexibleMainStage {
                       let s = feStress(f) else { return nil }
                 return (s.field, controlStressScaleIsPeak ? onePeak : s.top)
             }
-            let first = fe.sequence.first.map { fe.fields[$0].versionKey }
+            let first = (fe.shownSequence.first ?? fe.sequence.first).map { fe.fields[$0].versionKey }   // ★ N verification: as on screen
             composed = FlexibleMainTints.compose(base: c.tints, overlay: overlay, part: project.viewerMesh, heat: heat,
                                                  roles: roles, stress: stressOf(first), ghost: xray ? FlexibleColours.ghost : nil)
             if let m = model { FlexibleGroupFrames.paint(&composed, overlay: overlay, model: m) }   // ★ S1: the group frames in every view (Stress too)
@@ -301,10 +301,12 @@ extension FlexibleMainStage {
             // ★ BATCH G VERIFICATION: small strain judged on the PART's own gradient (the extension
             // outside it is not the picture), a fold cut said, a band-held k said in every case
             // ★ BATCH N: solved in steps — said, with what it is not (no buckling, no self-contact)
+            // ★ BATCH N VERIFICATION: …the force it is at ("pressed at 2× your weights") and, where it has
+            // elements that grow under the press, that it draws big turns as stretches
             return FlexibleFE.info(exaggeration: dentExaggeration, stiffer: fe.coreRatio,
                                    largeStrain: Double(dentExaggeration) > fe.partSafeScale, bonded: fe.restsBonded,
                                    foldShare: fe.foldShare, stepped: fe.stepped,
-                                   kept: fe.stepped ? nil : fe.refineKept)
+                                   kept: fe.stepped ? nil : fe.refineKept, pressedAt: fe.pressedAt, turned: fe.turned)
         }
         if let why = fe.failure { return FlexibleFE.failedInfo(why, exaggeration: dentExaggeration) }
         let what = (channels?.legendLine ?? "").components(separatedBy: " · ").first ?? ""

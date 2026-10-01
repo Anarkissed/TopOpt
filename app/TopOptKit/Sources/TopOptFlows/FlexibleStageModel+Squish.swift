@@ -82,14 +82,15 @@ extension FlexibleStageModel {
         return refinedField(id, generation: q.generation) ?? q
     }
 
-    /// A refine finished an increment (a late one never overwrites a result).
-    func refineProgressed(_ generation: Int, _ id: String, _ done: Int, _ total: Int) {
+    /// A refine claimed core or started an increment (`step`: the one being solved; a late report never
+    /// overwrites a result).
+    func refineProgressed(_ generation: Int, _ id: String, _ step: Int, _ total: Int) {
         guard generation == lattice?.generation, generation == squishGeneration else { return }
         switch refine[id] {
         case .ready?, .kept?: return
         default: break
         }
-        let next = FlexibleRefineState.running(done: done, total: total)
+        let next = FlexibleRefineState.running(step: step, total: total)
         if refine[id] != next { refine[id] = next }
     }
 

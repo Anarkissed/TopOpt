@@ -57,6 +57,18 @@ public final class FlexibleSquishLoop: ObservableObject {
     /// renderer's swap after `shownIndex`. A refined field joins the page's fields while the renderer
     /// still shows the quick one, so the page finds the field on screen by this, not by an index.
     public var shownKey: String?
+    /// ★ BATCH N VERIFICATION: the renderer swapped a sim's OTHER version in (its refined field for its
+    /// quick one, at rest) — the page refreshes so the legend's top, the dent row and the (i) follow the
+    /// field on screen. Not published (nothing else needs it; Play all's turns change the SIM, not this).
+    public var onVersionSwap: (() -> Void)?
+    /// The renderer's swap: `index` / `key` on screen (a version swap of the same sim calls `onVersionSwap`).
+    func noteShown(index: Int, key: String, simID: String) {
+        let before = shownKey
+        shownIndex = index
+        shownKey = key
+        let suffix = FlexibleFERefine.versionSuffix
+        if let b = before, b != key, (b.hasSuffix(suffix) ? String(b.dropLast(suffix.count)) : b) == simID { onVersionSwap?() }
+    }
     /// ★ BATCH G VERIFICATION: the sim the renderer shows now — PUBLISHED on a change only (once per
     /// "Play all" turn, to this control alone), so the picker says which group plays.
     @Published public private(set) var playingSimID: String?
@@ -284,6 +296,11 @@ struct FlexibleSquishPlayer: View {
                             .lineLimit(1).minimumScaleFactor(0.75)
                             .padding(.horizontal, DS.Space.m).frame(height: Self.topRowHeight - 6)
                             .background(Capsule().fill(DS.Surface.bar.color))
+                            // ★ BATCH N VERIFICATION: the note's DRAWN frame (the hosted test pins every
+                            // line WHOLE beside the live Play-all picker at 11" portrait)
+                            .background(GeometryReader { g in
+                                Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["playerNote": g.frame(in: .global)])
+                            }.allowsHitTesting(false))
                             .accessibilityIdentifier("flexible-squish-note")
                     }
                 }
