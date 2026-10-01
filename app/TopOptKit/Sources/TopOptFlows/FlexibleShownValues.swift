@@ -57,7 +57,8 @@ struct FlexibleShownValues {
         var showBuildable: Bool
         /// The depth chip is being dragged: the designs are for the OLD deepest squish.
         var editingDepth = false
-        /// ★ ROUND 4 (D1): a Stamp face's footprint, per column 0…1 (FlexibleStageModel.stampFootprint).
+        /// ★ ROUND 4 (D1): a Stamp face's footprint, per column 0…1 — ★ BATCH M (M2): its designed
+        /// squish, the footprint spread out with its foci merged (FlexibleStageModel.stampDent).
         var stampFootprints: [FlexFaceKey: [Double]] = [:]
         /// ★ D2 REVIEW: the columns a pinch halves, per face — the dent may use only the HALF there
         /// (a Top + Bottom pinch drew both maps 12 mm into a 20 mm pad: they crossed).
@@ -69,8 +70,10 @@ struct FlexibleShownValues {
     static func inputs(_ m: FlexibleStageModel) -> Inputs {
         let settings = m.settings
         var feet: [FlexFaceKey: [Double]] = [:]
+        // ★ BATCH M (M2): the stamp's DESIGNED squish — its footprint spread out, its foci merged
+        // into one press (FlexibleStampSpread) — not the footprint's isolated pits
         for f in settings.loadedFaces where f.isStampShape {
-            if let foot = m.stampFootprint(f.faceRegionID) {
+            if let foot = m.stampDent(f.faceRegionID) {
                 feet[FlexFaceKey(region: f.faceRegionID, rotation: f.rotationDeg)] = foot
             }
         }
@@ -130,8 +133,8 @@ struct FlexibleShownValues {
                 continue
             }
             if let foot = m.stampFootprints[k] {
-                // ★ ROUND 4 (D1): a Stamp face shows its stamp SINKING where it sits (the
-                // deepest squish under it, nothing beside it) — his drawing, not a prediction
+                // ★ ROUND 4 (D1): a Stamp face shows its stamp SINKING where it sits — his drawing,
+                // not a prediction; ★ BATCH M (M2): and dragging the face round it (the spread)
                 values[k] = foot.enumerated().map { i, w in
                     i < st.columns.count && st.columns[i].latticeMM <= 0 ? .solid : .depth(w * f.deepestMM)
                 }

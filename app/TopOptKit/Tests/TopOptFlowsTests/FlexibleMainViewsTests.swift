@@ -52,14 +52,17 @@ final class FlexibleMainViewsTests: XCTestCase {
         let shared = FlexibleReadKind.dent.id
         XCTAssertEqual(FlexibleReadKind.duplicateIDs([("dent", shared), ("stress", shared), ("lattice", FlexibleReadKind.lattice.id)]),
                        ["stress"], "control: a shared id is found")
-        // the dent's ramp is not the stress ramp (one hue family vs the rainbow)
+        // ★ RE-PINNED (batch M, M7 — his round-5 img 6: "we can use the same colours. Please switch the
+        // dent colours to the original FEA legend colours"): the dent and Stress read ONE rainbow (the two
+        // views are never on together); the walls keep their own pale → green
         func hues(_ k: FlexibleReadKind) -> [Double] {
             (0...20).map { k.rampColour(Double($0) / 20) }
                 .map(FlexibleShownValuesTests.hueSat).filter { $0.s > 0.15 }.map(\.h)
         }
-        let dent = hues(.dent), stress = hues(.stress)
-        XCTAssertLessThan((dent.max() ?? 0) - (dent.min() ?? 0), 40, "the dent ramp is one hue family")
-        XCTAssertGreaterThan((stress.max() ?? 0) - (stress.min() ?? 0), 150, "Stress keeps its rainbow")
+        let dent = hues(.dent), stress = hues(.stress), walls = hues(.lattice)
+        XCTAssertEqual(dent, stress, "the dent and Stress share the FEA rainbow")
+        XCTAssertGreaterThan((dent.max() ?? 0) - (dent.min() ?? 0), 150, "a rainbow")
+        XCTAssertLessThan((walls.max() ?? 0) - (walls.min() ?? 0), 40, "control: the walls' ramp is one hue family, not the rainbow")
     }
 
     @MainActor
@@ -141,7 +144,15 @@ final class FlexibleMainViewsTests: XCTestCase {
         XCTAssertEqual(hit.key, a)
         XCTAssertEqual(hit.column, c, "the tap on the drawn dent reads the column he sees")
         XCTAssertEqual(reading.kind, .dent)
-        XCTAssertEqual(reading.value, String(format: "%.2f", mm), "the exact value, with its unit")
+        // ★ RE-PINNED (batch M, M5): the value AT THE POINT — the hit triangle's corner values blended as the
+        // GPU blends their colours (the column's own number sits at its centre; the corners are the
+        // means of the columns round them), so the number is the colour under the tap
+        let corner = overlay.mapCornerValues(FlexibleShownValues(model: m).values.mapValues { v in
+            v.map { if case .depth(let d) = $0 { return d } else { return nil } }
+        }, stacks: m.stacks)
+        let blend = Double(hit.bary.x * corner[hit.verts[0]] + hit.bary.y * corner[hit.verts[1]] + hit.bary.z * corner[hit.verts[2]])
+        XCTAssertEqual(reading.value, String(format: "%.2f", blend), "the value under the tap, with its unit")
+        XCTAssertEqual(blend, mm, accuracy: 0.15 * mm, "…near the column's own number")
         XCTAssertEqual(reading.unit, "mm")
         XCTAssertLessThan(simd_distance(reading.anchor, drawn), 1.5, "the callout sits where he tapped")
         XCTAssertNotNil(atRest)
@@ -230,7 +241,8 @@ final class FlexibleMainViewsTests: XCTestCase {
         let pos = overlay.mesh.flat.positions
         func stressRGB(_ v: Int) -> SIMD3<Float> {
             let p = SIMD3<Float>(pos[3 * v], pos[3 * v + 1], pos[3 * v + 2])
-            let c = LatticeStressTint.colour(fraction: (FlexibleProbe.stress(field, at: p) ?? 0) / peak)
+            // ★ RE-PINNED (batch M, M7): the Flexible Stress view reads the ONE FEA rainbow
+            let c = FlexibleColours.stressTint(fraction: (FlexibleProbe.stress(field, at: p) ?? 0) / peak)
             return SIMD3(c.x, c.y, c.z)
         }
         func rgb(_ a: [Float], _ v: Int) -> SIMD3<Float> { SIMD3(a[v * 8], a[v * 8 + 1], a[v * 8 + 2]) }

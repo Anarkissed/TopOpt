@@ -98,15 +98,13 @@ public enum FlexibleReadKind: String, CaseIterable, Identifiable, Sendable {
         }
     }
 
-    /// The legend's ramp: the dent's own DS ramp (never purple), Stress's rainbow, the walls'
-    /// pale → green (FlexibleLatticePass's own colours).
+    /// The legend's ramp: ★ BATCH M (M7) the dent AND Stress read the ONE FEA rainbow
+    /// (FlexibleColours.depthColour — never on together); the walls' pale → green
+    /// (FlexibleLatticePass's own colours). Never purple.
     @MainActor
     public func rampColour(_ f: Double) -> RGBA {
         switch self {
-        case .dent: return FlexibleColours.depthColour(fraction: f)
-        case .stress:
-            let c = LatticeStressTint.colour(fraction: f)
-            return RGBA(Double(c.x) * 255, Double(c.y) * 255, Double(c.z) * 255)
+        case .dent, .stress: return FlexibleColours.depthColour(fraction: f)
         case .lattice: return FlexibleProbe.latticeColour(fraction: f)
         }
     }
@@ -151,6 +149,10 @@ public enum FlexibleProbe {
         /// The same point of the quad at REST (its barycentric place on the undented triangle) —
         /// where the quad's colour was sampled.
         public var rest: SIMD3<Float> = .zero
+        /// ★ BATCH M (M5): the hit triangle's three flat vertices and the hit's barycentric weights on
+        /// them — the GPU blends the vertices' heat by these, so a reading interpolates the same way.
+        public var verts: [Int] = []
+        public var bary: SIMD3<Float> = .zero
     }
 
     /// The first map quad, AS DRAWN (rest + `scale` × dent), that the ray meets — nil when it
@@ -177,7 +179,8 @@ public enum FlexibleProbe {
                     guard let h = rayTriangleUV(origin, dir, at(tri.0), at(tri.1), at(tri.2)), h.t > 0 else { continue }
                     if best == nil || h.t < best!.t {
                         let r = (1 - h.u - h.v) * rest(tri.0) + h.u * rest(tri.1) + h.v * rest(tri.2)
-                        best = DentHit(key: key, column: c, point: origin + dir * h.t, t: h.t, rest: r)
+                        best = DentHit(key: key, column: c, point: origin + dir * h.t, t: h.t, rest: r,
+                                       verts: [tri.0, tri.1, tri.2], bary: SIMD3(1 - h.u - h.v, h.u, h.v))
                     }
                 }
             }
@@ -239,13 +242,17 @@ public enum FlexibleProbe {
     }
 
     /// The dent he TAPPED, read: the ray from the tap's rest `point` along the view `dir`, cast
-    /// against the drawn map; that column's value from FlexibleShownValues (the colour's own
-    /// number). `onlyIfOnMap` (X-ray off, the body opaque): only when the tap itself landed on
-    /// the map — a tap on the part's own surface cannot see a map behind it.
+    /// against the drawn map. ★ BATCH M (M5): the value AT THE POINT, blended from the hit
+    /// triangle's three vertex values exactly as the GPU blends their colours — `mapValues` (the
+    /// page's own: FlexiblePageChannels.Channels.mapValues, or the 3D sim's on the main page), or,
+    /// when not handed, the corner values of FlexibleShownValues (the Settings page's colours).
+    /// A "no number" or solid column still says so. `maxMM`: the ramp's top (the legend's).
+    /// `onlyIfOnMap` (X-ray off, the body opaque): only when the tap itself landed on the map — a
+    /// tap on the part's own surface cannot see a map behind it.
     @MainActor
     public static func dentReading(model: FlexibleStageModel, overlay: FlexibleOverlayMesh?, dents: [Float]?, scale: Float,
                                    drawnLattice: FlexibleGeneratedLattice?, point: SIMD3<Float>, dir: SIMD3<Float>,
-                                   onlyIfOnMap: Bool = false) -> FlexibleReading? {
+                                   onlyIfOnMap: Bool = false, mapValues: [Float]? = nil, maxMM: Double? = nil) -> FlexibleReading? {
         guard let overlay, simd_length_squared(dir) > 1e-12 else { return nil }
         let u = simd_normalize(dir)
         var cols: [FlexFaceKey: Int] = [:]
@@ -259,6 +266,17 @@ public enum FlexibleProbe {
         }
         guard let hit = dentHit(origin: origin, dir: u, overlay: overlay, columns: cols, dents: dents, scale: scale) else { return nil }
         let shown = FlexibleShownValues(model: model, drawnLattice: drawnLattice)
+        let top = maxMM ?? shown.maxDepth
+        // ★ the value under the tap, blended as the colour is (a column with no value keeps its state)
+        let values = mapValues ?? overlay.mapCornerValues(shown.values.mapValues { v in
+            v.map { if case .depth(let d) = $0 { return d } else { return nil } }
+        }, stacks: model.stacks)
+        let vs = hit.verts.map { $0 < values.count ? values[$0] : Float.nan }
+        if vs.count == 3, vs.allSatisfy(\.isFinite) {
+            let mm = Double(hit.bary.x * vs[0] + hit.bary.y * vs[1] + hit.bary.z * vs[2])
+            return FlexibleReading(kind: .dent, value: String(format: "%.2f", mm), unit: "mm",
+                                   fraction: top > 0 ? min(1, max(0, mm / top)) : 0, anchor: hit.point)
+        }
         guard let vals = shown.values[hit.key], hit.column < vals.count else { return nil }
         switch vals[hit.column] {
         case .depth(let mm):
@@ -406,7 +424,7 @@ public enum FlexibleMainTints {
         func stressColour(_ v: Int) -> SIMD4<Float>? {
             guard let s = stress, s.peak > 0 else { return nil }
             let p = SIMD3<Float>(pos[3 * v], pos[3 * v + 1], pos[3 * v + 2])
-            return LatticeStressTint.colour(fraction: (FlexibleProbe.stress(s.field, at: p) ?? 0) / s.peak)
+            return FlexibleColours.stressTint(fraction: (FlexibleProbe.stress(s.field, at: p) ?? 0) / s.peak)   // ★ M7: the one rainbow
         }
         for v in 0..<partVerts {
             if let c = stressColour(v) { put(v, c); continue }

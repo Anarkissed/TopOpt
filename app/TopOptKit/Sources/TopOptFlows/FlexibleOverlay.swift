@@ -251,8 +251,15 @@ public struct FlexibleOverlayMesh {
     /// dent"): with `ghost` set, every vertex that is not the opaque map is flagged
     /// flags.z = 1 and drawn by MetalMeshView as a ghost — faint face-on, lit at the
     /// silhouette — in its own tint, or in `ghost` where it had none.
+    /// ★ BATCH M (M5, his round-5 img 5: "The dent colours are not expanding out and graded. They are
+    /// a singular colour and have a direct cut between colours"): `vertexColour` colours each map
+    /// VERTEX (a quad corner) on its own — the GPU then blends it across the quad, so the heat runs
+    /// continuously from corner to corner (FlexiblePageChannels hands the corner's own value: the
+    /// same corner mean the dent moves it by, or the 3D sim's dent there). A column quad with no colour
+    /// (alpha 0: solid) stays uncoloured; nil ⇒ the column's own colour (a "no number" grey).
     public func tints(partTint: (Int, SIMD3<Double>) -> SIMD4<Float>?,
                       columnColours: [FlexFaceKey: [SIMD4<Float>]],
+                      vertexColour: ((Int) -> SIMD4<Float>?)? = nil,
                       ghost: SIMD4<Float>? = nil) -> [Float] {
         let n = mesh.flat.vertexCount
         var out = [Float](repeating: 0, count: n * 8)
@@ -269,6 +276,7 @@ public struct FlexibleOverlayMesh {
                 for j in 0..<6 {
                     let v = start + c * 6 + j
                     guard v < n else { break }
+                    let col = col.w > 0 ? (vertexColour?(v) ?? col) : col
                     out[v * 8] = col.x; out[v * 8 + 1] = col.y; out[v * 8 + 2] = col.z; out[v * 8 + 3] = col.w
                     // flags.y: the map stays fully opaque when the body is drawn see-through
                     if col.w > 0 { out[v * 8 + 5] = 1 }
@@ -308,34 +316,9 @@ public struct FlexibleOverlayMesh {
             // the column quads: the full depth, each CORNER the mean of the columns that
             // share it, so neighbouring quads stay joined and the dented surface is closed
             if let start = flatStart[k] {
-                func depth(_ iu: Int, _ iv: Int) -> Double? {
-                    let c = st.column(iu, iv)
-                    guard c >= 0, c < d.count else { return nil }
-                    return d[c]
-                }
-                // `flat`: one flat vertex AT this corner (its place, for the other regions)
-                func corner(_ cu: Int, _ cv: Int, flat v: Int) -> Double {
-                    var sum = 0.0, n = 0
-                    for (du, dv) in [(-1, -1), (0, -1), (-1, 0), (0, 0)] {
-                        if let x = depth(cu + du, cv + dv) { sum += x; n += 1 }
-                    }
-                    // ★ ACROSS THE CUT: the other loaded regions' columns at this very corner
-                    // (same place, same load) — the sectors of a split face stay joined
-                    if let shared {
-                        for x in shared.depths(at: v, load: l, except: k) { sum += x; n += 1 }
-                    }
-                    return n > 0 ? sum / Double(n) : 0
-                }
-                // the quad's corners in build order, then its six flat vertices
-                let order = [0, 2, 1, 0, 3, 2]
-                for (c, col) in st.columns.enumerated() where c < d.count {
-                    let q = start + c * 6
-                    let cs = [corner(col.iu, col.iv, flat: q + Self.flatOfCorner[0]),
-                              corner(col.iu + 1, col.iv, flat: q + Self.flatOfCorner[1]),
-                              corner(col.iu + 1, col.iv + 1, flat: q + Self.flatOfCorner[2]),
-                              corner(col.iu, col.iv + 1, flat: q + Self.flatOfCorner[3])]
+                for (c, cs) in quadCorners(k, d, st, shared: shared) {
                     for j in 0..<6 {
-                        let v = start + c * 6 + j, dd = cs[order[j]]
+                        let v = start + c * 6 + j, dd = cs[Self.quadOrder[j]] ?? 0
                         guard v < n, dd > 0 else { continue }
                         out[v * 3] += Float(l.x * dd); out[v * 3 + 1] += Float(l.y * dd); out[v * 3 + 2] += Float(l.z * dd)
                     }
@@ -392,6 +375,67 @@ public struct FlexibleOverlayMesh {
     /// Corner i (build order: (iu, iv), (iu+1, iv), (iu+1, iv+1), (iu, iv+1)) of a column
     /// quad is its flat vertex `flatOfCorner[i]` (the quad's flat order is [0, 2, 1, 0, 3, 2]).
     static let flatOfCorner = [0, 2, 1, 4]
+    /// A quad's six flat vertices, as corners (build order).
+    static let quadOrder = [0, 2, 1, 0, 3, 2]
+
+    /// Face `k`'s column quads' four corner values (build order) from `d` (one value per column,
+    /// nil = none): each corner the MEAN of the columns that share it — and, across a split face's
+    /// cut, of the other loaded regions' columns at that very place (`shared`) — nil where none of
+    /// them has a value. Only for columns with a value of their own. The ONE rule for the dent's
+    /// corners and (★ batch M, M5) the heat's: the colour at a corner is the depth it moved by.
+    func quadCorners(_ k: FlexFaceKey, _ d: [Double?], _ st: FlexStackInfo, shared: SharedCorners?) -> [(Int, [Double?])] {
+        guard let start = flatStart[k] else { return [] }
+        func depth(_ iu: Int, _ iv: Int) -> Double? {
+            let c = st.column(iu, iv)
+            guard c >= 0, c < d.count else { return nil }
+            return d[c]
+        }
+        // `flat`: one flat vertex AT this corner (its place, for the other regions)
+        func corner(_ cu: Int, _ cv: Int, flat v: Int) -> Double? {
+            var sum = 0.0, n = 0
+            for (du, dv) in [(-1, -1), (0, -1), (-1, 0), (0, 0)] {
+                if let x = depth(cu + du, cv + dv) { sum += x; n += 1 }
+            }
+            // ★ ACROSS THE CUT: the other loaded regions' columns at this very corner
+            // (same place, same load) — the sectors of a split face stay joined
+            if let shared {
+                for x in shared.depths(at: v, load: st.load, except: k) { sum += x; n += 1 }
+            }
+            return n > 0 ? sum / Double(n) : nil
+        }
+        var out: [(Int, [Double?])] = []
+        for (c, col) in st.columns.enumerated() where c < d.count {
+            let q = start + c * 6
+            out.append((c, [corner(col.iu, col.iv, flat: q + Self.flatOfCorner[0]),
+                            corner(col.iu + 1, col.iv, flat: q + Self.flatOfCorner[1]),
+                            corner(col.iu + 1, col.iv + 1, flat: q + Self.flatOfCorner[2]),
+                            corner(col.iu, col.iv + 1, flat: q + Self.flatOfCorner[3])]))
+        }
+        return out
+    }
+
+    /// ★ BATCH M (M5): per flat vertex, the map's value AT THAT VERTEX (NaN where it has none): each
+    /// quad corner of a column that has a value takes the corner mean `quadCorners` gives — the very
+    /// number the dent moves that corner by — so the colour is continuous across every quad edge and
+    /// every sector cut, and graded inside each quad by the GPU (no block, no hard step). A column
+    /// with no value (a "no number", a solid one) keeps NaN on its six vertices.
+    public func mapCornerValues(_ values: [FlexFaceKey: [Double?]], stacks: [FlexFaceKey: FlexStackInfo],
+                                joinRegions: Bool = true) -> [Float] {
+        let n = mesh.flat.vertexCount
+        var out = [Float](repeating: .nan, count: n)
+        let shared = joinRegions ? SharedCorners(self, depths: values, stacks: stacks) : nil
+        for (k, d) in values {
+            guard let st = stacks[k], let start = flatStart[k] else { continue }
+            for (c, cs) in quadCorners(k, d, st, shared: shared) where d[c] != nil {
+                for j in 0..<6 {
+                    let v = start + c * 6 + j
+                    guard v < n, let x = cs[Self.quadOrder[j]] else { continue }
+                    out[v] = Float(x)
+                }
+            }
+        }
+        return out
+    }
 
     /// Every loaded region's column-quad corners, by PLACE: what a corner of one region
     /// finds of the others at the same point. Places are hashed on a 0.01 mm grid (and its
@@ -450,27 +494,36 @@ public struct FlexibleOverlayMesh {
 /// Colours for the overlay: the depth ramp and the flags, all from DS tokens. Never purple.
 @MainActor
 public enum FlexibleColours {
-    public static func depth(_ mm: Double, max: Double) -> SIMD4<Float> {
+    public nonisolated static func depth(_ mm: Double, max: Double) -> SIMD4<Float> {
         let c = depthColour(fraction: max > 0 ? mm / max : 0)
         return SIMD4(Float(c.r), Float(c.g), Float(c.b), 0.95)
     }
-    /// ★ ROUND 3 (his answers): THE DENT'S OWN RAMP, from DS tokens — "make it deep blue →
-    /// cyan → white" (2026-09-30): accentDeep (no squish) → accentCyan → textPrimary (the
-    /// deepest). One hue family, brighter = deeper, so it can never be read as the Stress
-    /// rainbow the main page shows beside it (ResultsModel.stressColor keeps that one) — and
-    /// never purple. FlexibleShownValuesTests pins both. The map AND its legend read it.
-    public static let depthStops: [RGBA] = [
-        DS.Color.accentDeep,
-        DS.Color.accentCyan,
-        DS.Color.textPrimary,
+    /// ★ BATCH M (M7, his round-5 img 6): "the FEA physics view and the dent view can't be viewed
+    /// together … we can use the same colours. Please switch the dent colours to the original FEA
+    /// legend colours" — "in BOTH views". The dent's ramp IS the FEA legend's rainbow
+    /// (ResultsModel.stressColor: blue → cyan → green → yellow → red, deeper = hotter), on the
+    /// Settings page and the main page, the map AND every legend that shows it; the main page's
+    /// Stress view reads the SAME ramp (`stressTint` — the two views are never on together, so one
+    /// rainbow serves both). It overturns his "deep blue → cyan → white" of 2026-09-30 and round 3's
+    /// "the dent ramp is its own" (FlexibleShownValuesTests pins the new rule). Never purple.
+    /// (The FEA legend's own five stops — `ResultsModel.stressColor`, a main-actor member, has them
+    /// too; this twin is callable from any context and FlexibleShownValuesTests holds the two equal
+    /// at 41 fractions.)
+    public nonisolated static let depthStops: [RGBA] = [
+        RGBA(28, 60, 170), RGBA(0, 170, 220), RGBA(60, 190, 110), RGBA(250, 220, 60), RGBA(255, 70, 50),
     ]
-    public static func depthColour(fraction f: Double) -> RGBA {
+    public nonisolated static func depthColour(fraction f: Double) -> RGBA {
         let x = min(1, max(0, f.isFinite ? f : 0)) * Double(depthStops.count - 1)
         let i = min(depthStops.count - 2, Int(x)), t = x - Double(i)
         return mix(depthStops[i], depthStops[i + 1], t)
     }
-    /// a + (b − a)·t, per channel (two DS tokens blended).
-    static func mix(_ a: RGBA, _ b: RGBA, _ t: Double) -> RGBA {
+    /// The main page's Stress view on the part (and the walls): the SAME rainbow, opaque.
+    public nonisolated static func stressTint(fraction f: Double) -> SIMD4<Float> {
+        let c = depthColour(fraction: f)
+        return SIMD4(Float(c.r), Float(c.g), Float(c.b), 1)
+    }
+    /// a + (b − a)·t, per channel (two stops blended).
+    nonisolated static func mix(_ a: RGBA, _ b: RGBA, _ t: Double) -> RGBA {
         RGBA((a.r + (b.r - a.r) * t) * 255, (a.g + (b.g - a.g) * t) * 255, (a.b + (b.b - a.b) * t) * 255)
     }
     public static func token(_ c: RGBA, _ a: Float) -> SIMD4<Float> {
@@ -485,7 +538,7 @@ public enum FlexibleColours {
     public static let linkedEnd = token(DS.Color.accentCyan, 0.45)
     public static let restingFace = token(DS.Color.accentCyan, 0.25)
     /// The X-ray ghost's glow (the body's clay under X-ray).
-    /// ★ Neutral white, not cyan: the dent ramp runs blue → cyan → white (2026-09-30), and a
-    /// cyan ghost would read as part of the map.
+    /// ★ Neutral white, not cyan: the dent ramp is the FEA rainbow (batch M), and a saturated ghost
+    /// would read as part of the map.
     public static let ghost = token(DS.Color.textPrimary, 1)
 }

@@ -42,6 +42,11 @@ public enum FlexiblePageChannels {
         public var animated: Bool
         /// The legend's one line ("What you drew · shown ×7"); empty when nothing is shown.
         public var legendLine: String
+        /// ★ BATCH M (M5): the heat's value at every map vertex (mm; NaN: none) — what each corner
+        /// was coloured by, so a tap reads the colour under it (FlexibleProbe.dentReading).
+        public var mapValues: [Float]? = nil
+        /// The heat's top end (mm): the value the ramp's red is.
+        public var heatScaleMM: Double = 0
     }
 
     /// Per-column colours + the dent, from the model's current copies of core's results.
@@ -50,9 +55,16 @@ public enum FlexiblePageChannels {
     /// still moves them, so the ghost itself squishes.
     /// `depthScaleMM`: the heat ramp's deepest end (nil: this lattice's own deepest) — ★ batch G
     /// verification: "Play all"'s per-group colours keep the page's ONE scale (the legend's).
+    /// ★ BATCH M (M5, M2): the heat is coloured PER VERTEX, by the value at that corner (the corner
+    /// mean the dent moves it by — `FlexibleOverlayMesh.mapCornerValues`), so it grades continuously
+    /// across the map with no block and no hard cut; `mapValues` (the main page's 3D sim — FE mode)
+    /// replaces those values: the sim's own dent at every vertex of the shown group's faces, which
+    /// spreads out from each stamp and merges the foci. `controlColumnColours` (tests only): the old
+    /// one colour per column — the red control of the blocks.
     public static func channels(model: FlexibleStageModel, overlay: FlexibleOverlayMesh?, xray: Bool,
                                 drawnLattice: FlexibleGeneratedLattice?, heat: Bool = true,
-                                depthScaleMM: Double? = nil) -> Channels {
+                                depthScaleMM: Double? = nil, mapValues: [Float]? = nil,
+                                controlColumnColours: Bool = false) -> Channels {
         // part regions: loaded / resting / selected / linked other end — by REGION, so a split
         // sector is tinted on its own side of its cuts (FlexibleRegions).
         // ★ ROUND 4 (D2): no "conflict" tint — two faces on one stack are a pinch (one group) or
@@ -104,20 +116,36 @@ public enum FlexiblePageChannels {
             return Channels(tints: n > 0 ? out : nil, dents: nil, exaggeration: 0, animated: false, legendLine: "")
         }
         let shown = FlexibleShownValues(model: model, drawnLattice: drawnLattice)
+        let scale = depthScaleMM ?? shown.maxDepth
         var colours: [FlexFaceKey: [SIMD4<Float>]] = [:]
+        var numbers: [FlexFaceKey: [Double?]] = [:]
         for k in model.loadedKeys {
             guard let vals = shown.values[k] else { continue }
-            colours[k] = vals.map { v in
+            numbers[k] = vals.map { if case .depth(let d) = $0 { return d } else { return nil } }
+            let start = overlay.flatStart[k]
+            colours[k] = vals.enumerated().map { c, v in
+                // ★ FE mode: every column of the shown group the sim reaches is coloured by it (it
+                // moves — a solid one too); a face the sim does not colour stays uncoloured
+                if let fe = mapValues {
+                    guard let start, start + c * 6 < fe.count, fe[start + c * 6].isFinite else { return SIMD4(0, 0, 0, 0) }
+                    return FlexibleColours.depth(Double(fe[start + c * 6]), max: scale)
+                }
                 switch v {
-                case .depth(let mm): return FlexibleColours.depth(mm, max: depthScaleMM ?? shown.maxDepth)
+                case .depth(let mm): return FlexibleColours.depth(mm, max: scale)
                 case .noNumber: return FlexibleColours.noNumber
                 case .solid: return SIMD4(0, 0, 0, 0)
                 }
             }
         }
-        let tints = overlay.tints(partTint: tintOf, columnColours: heat ? colours : [:], ghost: xray ? FlexibleColours.ghost : nil)
+        // ★ the value at every map vertex: the sim's (FE), else the corner mean of the shown numbers
+        let values = controlColumnColours ? nil : (mapValues ?? overlay.mapCornerValues(numbers, stacks: model.stacks))
+        let vertexColour: ((Int) -> SIMD4<Float>?)? = values.map { vals in
+            { v in v < vals.count && vals[v].isFinite ? FlexibleColours.depth(Double(vals[v]), max: scale) : nil }
+        }
+        let tints = overlay.tints(partTint: tintOf, columnColours: heat ? colours : [:], vertexColour: heat ? vertexColour : nil,
+                                  ghost: xray ? FlexibleColours.ghost : nil)
         guard shown.showsDent else {
-            return Channels(tints: tints, dents: nil, exaggeration: 0, animated: false, legendLine: "")
+            return Channels(tints: tints, dents: nil, exaggeration: 0, animated: false, legendLine: "", mapValues: values, heatScaleMM: scale)
         }
         var depths: [FlexFaceKey: [Double?]] = [:]
         for (k, vals) in shown.values {
@@ -131,6 +159,6 @@ public enum FlexiblePageChannels {
         // ★ one k while the depth chip is dragged (FlexibleDepthChips freezes it on the model)
         let k = model.frozenExaggeration ?? shown.exaggeration
         return Channels(tints: tints, dents: dents, exaggeration: k, animated: shown.animated,
-                        legendLine: "\(shown.label) · shown ×\(Int(k))")
+                        legendLine: "\(shown.label) · shown ×\(Int(k))", mapValues: values, heatScaleMM: scale)
     }
 }
