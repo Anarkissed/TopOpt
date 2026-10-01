@@ -206,10 +206,15 @@ final class FlexibleShownValuesTests: XCTestCase {
         let mm = FlexibleColours.depth(3, max: 12)
         let at = ResultsModel.stressColor(fraction: 0.25)
         XCTAssertLessThan(abs(Double(mm.x) - at.r) + abs(Double(mm.y) - at.g) + abs(Double(mm.z) - at.b), 1e-6, "the map's quads")
-        // the Settings page's legend and panel read depthColour (source: they follow it)
+        // the Settings page's legend and its folded bar read the main page's ramp (source: they follow it)
+        // ★ RE-PINNED BY BATCH M2 (V12 of batch M's verification: they were 24 flat blocks of depthColour;
+        // now the main page's ONE smooth gradient of the same rainbow — FlexibleBatchM2Tests measures the
+        // pixels, its RED control the 24 blocks)
         let root = FlexibleHisProject.repoRoot.appendingPathComponent("app/TopOptKit/Sources/TopOptFlows")
         XCTAssertTrue(try String(contentsOf: root.appendingPathComponent("FlexibleStagePage.swift"), encoding: .utf8)
-            .contains("FlexibleColours.depthColour(fraction: Double(i) / 23)"), "the Settings page's legend")
+            .contains("FlexibleMainLegendRow.ramp(.dent).frame(width: 216, height: 10)"), "the Settings page's legend")
+        XCTAssertTrue(try String(contentsOf: root.appendingPathComponent("FlexibleSettingsPanel.swift"), encoding: .utf8)
+            .contains("FlexibleMainLegendRow.ramp(.dent, vertical: true)"), "the Settings page's folded legend")
         // never purple
         XCTAssertFalse(fea.contains(where: Self.isPurple), "never purple")
         XCTAssertFalse(FlexibleColours.depthStops.contains(where: Self.isPurple))

@@ -878,11 +878,9 @@ struct FlexibleLegend: View {
             Text(shown.legendLine).font(.system(size: 12, weight: .semibold)).foregroundStyle(DS.Color.textPrimary.color)
                 .lineLimit(1).minimumScaleFactor(0.8)
                 .accessibilityIdentifier("flexible-legend-line")
-            HStack(spacing: 0) {
-                ForEach(0..<24, id: \.self) { i in
-                    FlexibleColours.depthColour(fraction: Double(i) / 23).color.frame(width: 9, height: 10)
-                }
-            }
+            // ★ BATCH M2 (V12; his round 5: "the graded dent colours should be in both views"): the main
+            // page's ONE smooth ramp (FlexibleMainLegendRow.ramp), never 24 flat blocks
+            FlexibleMainLegendRow.ramp(.dent).frame(width: 216, height: 10)
             .overlay(alignment: .topLeading) {
                 if let f = reading?.fraction {
                     Image(systemName: "arrowtriangle.up.fill")
