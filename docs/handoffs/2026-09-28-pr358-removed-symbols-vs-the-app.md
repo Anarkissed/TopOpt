@@ -291,3 +291,19 @@ note, measured at h/√3 = 0.984 mm on a 1.705 mm voxel). Neither part exercises
 grid with a keep-out where the sets DO differ (printed 512, certified 408), and goes
 red on 5 checks when the intersection is dropped — that is where the guarantee lives,
 not in either part's numbers.
+
+### Open item carried forward: a convex-edge fixture
+
+The certification-mask term of `lattice_synthesis_domain()` is guarded by
+`test_lattice_clip_shell`'s synthetic keep-out grid (printed 512, certified 408), and
+that is where the maintainer has decided the guarantee should live for now (reviewer,
+2026-09-30: "No convex-edge fixture now"). What no fixture exercises is the term that
+could separate the sets on a REAL part: the shell base rejecting posture voxels at a
+CONVEX EDGE, where the marching-cubes isosurface chamfers the voxel-cube union
+(measured h/√3 = 0.984 mm on a 1.705 mm voxel — `lattice_boundary_for`'s note, and
+evidence/2026-08-08-strut-clip-matches-shell/s1b_surface_gap.csv).
+
+**Open item:** a real part with a convex edge INSIDE a lattice region, to be built only
+if a probe/run mismatch ever appears. Until then the probe and the run cannot differ,
+because they call the same function — which is the point of that change, since its
+measured effect on every part available was nil.

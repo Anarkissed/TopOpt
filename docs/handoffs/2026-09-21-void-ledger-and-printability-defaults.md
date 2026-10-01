@@ -195,3 +195,13 @@ The measurement does not support a refusal-based argument either way — nothing
 refuses. It does show that the default as it stands ships every configuration with
 no flat base. Whether that is right is a product decision about what "prints" means,
 and it is his. Core will do either; the defaults are not changed in this commit.
+
+**CLOSED (maintainer, 2026-09-30): mats stay off, no code change** — organic already
+grades to solid at the outline (his 2026-09-05 and 2026-09-08 rulings;
+`organic_solid_rim_mm`, default `-1.0` ⇒ one base cell, applied on every graded
+organic run), and that is the foundation, so a mat adds nothing. Note the column this
+table reports it in: "flat base" is `base_mat_clusters`, which has exactly one writer
+(`core/src/mesh/organic_lattice.cpp:3931`, inside the mat-emission block) and counts
+**mats only, never the solid rim** — so **none** in that column does not mean the part
+has nothing flat on the bed, and the "11 of 11 shipping without a flat base" figure
+above should be read as "without a MAT".
