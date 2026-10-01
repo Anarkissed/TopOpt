@@ -88,6 +88,20 @@ public struct LatticeSetupWizard: View {
         return copy
     }
 
+    /// ★★ RULING 4 (item 6, 2026-09-30): wherever "nothing set to lattice" shows here, one tap
+    /// takes him to where walls are marked. The wizard leaves by its ONE exit (Save & Exit —
+    /// "your settings are saved whether or not you refresh") and then this runs. nil ⇒ no tap.
+    private var markWalls: (() -> Void)? = nil
+    public func wallMarking(_ go: (() -> Void)?) -> LatticeSetupWizard {
+        var copy = self
+        copy.markWalls = go
+        return copy
+    }
+    private func exitToWallMarking() {
+        saveAndClose()
+        markWalls?()
+    }
+
     public init(project: ProjectModel, onExit: @escaping () -> Void) {
         self.project = project
         self.camera = OrbitCameraModel()
@@ -725,9 +739,10 @@ public struct LatticeSetupWizard: View {
     }
 
     @State private var wallFacesCache: [LatticeWallEditorFace] = []
-    /// ★ ruling (c): the include walls the job carries, from the SAME emission as the cache
-    /// above (one per change, never one per read); nil until the first rebuild
-    @State private var includeWallCountCache: Int? = nil
+    /// ★ ruling (c): whether the job carries an include wall (ruling 4's one definition), from
+    /// the SAME emission as the cache above (one per change, never one per read); nil until the
+    /// first rebuild
+    @State private var hasIncludeWallCache: Bool? = nil
     private static let wallGreen = Color(red: 0x30 / 255, green: 0xD1 / 255, blue: 0x58 / 255)
     /// What the mode list says about a wall's drawing.
     static func profileSummary(_ p: LatticeWallProfile?) -> String {
@@ -1299,7 +1314,7 @@ public struct LatticeSetupWizard: View {
 
             // ── Cell size (items 1, 3): Auto only WITH a simulation, Fit only WITHOUT ──
             sectionTitle("Cell size", info: "cell-size", Self.infoCellSize + Self.infoNoSimulation)
-            let fitPossible = project.latticeJobRegions().regions.contains(where: { $0.role == .include })
+            let fitPossible = LatticeJobIncludeGate.hasIncludeWall(project.latticeJobRegions().regions)
             HStack(spacing: DS.Space.xs) {
                 if model.simulateStresses {
                     organicPill("Auto", on: model.cellSizeMode == .auto, enabled: true) {
@@ -1331,8 +1346,28 @@ public struct LatticeSetupWizard: View {
                     model.setCellSizeMode(.fit); rebuild()
                 }
             }
-            if !fitPossible { shortNote("Needs a lattice region") }
+            // ★★ ROUND 3 RULING (b) (maintainer, 2026-10-01): one gate, one sentence. With lattice
+            // ON this line reports exactly the gate's condition (no include wall), so it says the
+            // gate's words with the one tap to the walls. With lattice OFF it reports a different
+            // condition (the job's emission is empty because the mode is off; the gate says
+            // "lattice mode is off"), so it keeps its own words.
+            if !fitPossible {
+                let why = LatticeJobIncludeGate.refusal(latticeEnabled: project.lattice.enabled, hasIncludeWall: false)
+                if let why, LatticeJobIncludeGate.opensWallMarking(why) {
+                    refusalNote(why, marksWalls: markWalls != nil)
+                        .accessibilityIdentifier("wizard-organic-fit-nothing-set")
+                } else {
+                    shortNote("Needs a lattice region")
+                }
+            }
             if organicManual { organicManualLists(fitPossible: fitPossible) }
+            // ★★ RULING 4 (item 8, 2026-09-30): under Auto a stale Check-sizes answer stops
+            // steering the preview (its window and floor are read only from a current answer) —
+            // say so here too. The line itself is the one tap: it runs Check sizes.
+            if !organicManual, model.simulateStresses, model.cellSizeMode == .auto,
+               project.lattice.organicSizesNeedRecheck {
+                organicAutoRecheck
+            }
 
             // ── Density (item 5: "Manual", not "Thicker") ──
             sectionTitle("Density", info: "density", Self.infoDensity)
@@ -1532,8 +1567,17 @@ public struct LatticeSetupWizard: View {
 
     /// ★ A caption of a few words (his item 8). Anything longer belongs in an (i).
     private func shortNote(_ text: String, warning: Bool = false) -> some View {
+        Self.note(text, warning: warning)
+    }
+    static func note(_ text: String, warning: Bool = false) -> some View {
         Text(text).dsStyle(DS.TypeScale.caption2)
             .foregroundStyle((warning ? DS.Color.warning : DS.Color.textQuaternary).color)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+    /// ★ ruling 4: a warning note that is itself a tap — the note's own look, and a chevron.
+    static func tapNote(_ text: String) -> some View {
+        WallMarkingSubline(text: text, marks: true, style: DS.TypeScale.caption2)
+            .foregroundStyle(DS.Color.warning.color)
             .fixedSize(horizontal: false, vertical: true)
     }
 
@@ -1609,44 +1653,67 @@ public struct LatticeSetupWizard: View {
     /// would lattice the whole variant — so Check sizes refuses, in the stage's words. Asked only
     /// when there IS a variant to check (the driver exists only then).
     private var organicIncludeRefusal: String? {
+        organicIncludeWhy.map { "Can’t check sizes: \($0)." }
+    }
+    /// The gate's own words (ruling 4's one definition), before "Can’t check sizes" is put on them.
+    private var organicIncludeWhy: String? {
         guard probeDriver != nil else { return nil }
-        let n = includeWallCountCache
-            ?? project.variantLatticeJobRegions().regions.filter { $0.role == .include }.count
-        guard let why = LatticeJobIncludeGate.refusal(latticeEnabled: project.lattice.enabled,
-                                                      includeCount: n) else { return nil }
-        return "Can’t check sizes: \(why)."
+        let has = hasIncludeWallCache
+            ?? LatticeJobIncludeGate.hasIncludeWall(project.variantLatticeJobRegions().regions)
+        return LatticeJobIncludeGate.refusal(latticeEnabled: project.lattice.enabled, hasIncludeWall: has)
+    }
+    /// ★ ruling 4 (item 6): Check sizes is refused for want of an include wall — every line that
+    /// says so is one tap from the walls.
+    private var organicRefusalMarksWalls: Bool {
+        markWalls != nil && organicIncludeRefusal != nil && organicProbeRefusal == organicIncludeRefusal
+            && LatticeJobIncludeGate.opensWallMarking(organicIncludeWhy)
+    }
+    /// A warning note; when a wall is what it lacks, its tap leaves by Save & Exit for the walls.
+    @ViewBuilder private func refusalNote(_ text: String, marksWalls: Bool) -> some View {
+        if marksWalls {
+            Button { exitToWallMarking() } label: { Self.tapNote(text) }
+            .buttonStyle(.plain)
+            .accessibilityHint(WallMarkingSubline.hint)
+        } else {
+            shortNote(text, warning: true)
+        }
+    }
+    /// ★ THE ONE Check-sizes submission — the button's, and under Auto the re-check line's
+    /// (ruling 4, item 8). Refused, running or without a driver, it does nothing.
+    private func runCheckSizes() {
+        guard organicProbeRefusal == nil, organicProbeState != .running, let drive = probeDriver else { return }
+        var cells = LatticeSettings.organicProbeCellsMM
+        if model.organicPickedSeparationMM > 0,
+           !cells.contains(where: { abs($0 - model.organicPickedSeparationMM) < 1e-6 }) {
+            cells.append(model.organicPickedSeparationMM)
+        }
+        var grades = LatticeSettings.organicProbeGradesMM
+        if model.organicPickedGradeMM.count == 2, !grades.contains(model.organicPickedGradeMM) {
+            grades.append(model.organicPickedGradeMM)
+        }
+        organicProbeState = .running
+        // ★ AND THE RECOMMENDATION (brief 2026-09-06): core generates its own
+        // candidates across the band and returns FIT and AUTO picks; the look
+        // target is the Aesthetic lever, the margin the Structural one.
+        let recommend = RelatticeRun.Recommend(
+            mode: "auto", lookCellsAcross: model.organicLookCellsAcross,
+            margin: LatticeSettings.organicRecommendMargin,
+            steps: LatticeSettings.organicRecommendSteps)
+        Task { @MainActor in
+            do {
+                let probe = try await drive(cells.sorted(), grades, recommend)
+                project.lattice.organicForecast = probe
+                organicProbeState = .idle
+            } catch {
+                organicProbeState = .failed("\(error)")
+            }
+        }
     }
     private var organicCheckSizesButton: some View {
         let refusal = organicProbeRefusal
         let running = organicProbeState == .running
         return Button {
-            guard refusal == nil, !running, let drive = probeDriver else { return }
-            var cells = LatticeSettings.organicProbeCellsMM
-            if model.organicPickedSeparationMM > 0,
-               !cells.contains(where: { abs($0 - model.organicPickedSeparationMM) < 1e-6 }) {
-                cells.append(model.organicPickedSeparationMM)
-            }
-            var grades = LatticeSettings.organicProbeGradesMM
-            if model.organicPickedGradeMM.count == 2, !grades.contains(model.organicPickedGradeMM) {
-                grades.append(model.organicPickedGradeMM)
-            }
-            organicProbeState = .running
-            // ★ AND THE RECOMMENDATION (brief 2026-09-06): core generates its own
-            // candidates across the band and returns FIT and AUTO picks; the look
-            // target is the Aesthetic lever, the margin the Structural one.
-            let recommend = RelatticeRun.Recommend(
-                mode: "auto", lookCellsAcross: model.organicLookCellsAcross,
-                margin: LatticeSettings.organicRecommendMargin,
-                steps: LatticeSettings.organicRecommendSteps)
-            Task { @MainActor in
-                do {
-                    let probe = try await drive(cells.sorted(), grades, recommend)
-                    project.lattice.organicForecast = probe
-                    organicProbeState = .idle
-                } catch {
-                    organicProbeState = .failed("\(error)")
-                }
-            }
+            runCheckSizes()
         } label: {
             HStack(spacing: 4) {
                 if running { ProgressView().controlSize(.mini) }
@@ -1741,7 +1808,8 @@ public struct LatticeSetupWizard: View {
         // ★ RULING (d) (2026-09-30): an answer measured on an older job route is kept but not
         // used — one line says so, and what checks the sizes again (or why nothing can)
         if project.lattice.organicSizesNeedRecheck, organicProbeState != .running {
-            shortNote(OrganicForecast.recheckLine(checkRefusal: organicProbeRefusal), warning: true)
+            refusalNote(OrganicForecast.recheckLine(checkRefusal: organicProbeRefusal),
+                        marksWalls: organicRefusalMarksWalls)
                 .accessibilityIdentifier("wizard-organic-sizes-recheck")
         }
         // ★ RULING (c) (2026-09-30): Check sizes shows only when it can act, so a job with no
@@ -1750,7 +1818,7 @@ public struct LatticeSetupWizard: View {
         if let why = organicIncludeRefusal, !project.lattice.organicSizesNeedRecheck,
            project.lattice.currentOrganicForecast?.uncheckedSummary(
                structural: structural, grades: model.simulateStresses, checkRefusal: why) == nil {
-            shortNote(why, warning: true)
+            refusalNote(why, marksWalls: organicRefusalMarksWalls)
                 .accessibilityIdentifier("wizard-organic-check-refused")
         }
         // ★ ruling V3 (2026-09-29): not one size's stress bar was computed — say so, and
@@ -1758,7 +1826,7 @@ public struct LatticeSetupWizard: View {
         if let none = project.lattice.currentOrganicForecast?.uncheckedSummary(
             structural: structural, grades: model.simulateStresses, checkRefusal: organicProbeRefusal) {
             HStack(spacing: DS.Space.xs) {
-                shortNote(none.line, warning: true)
+                refusalNote(none.line, marksWalls: organicRefusalMarksWalls)
                 infoButton("none-checked", none.info)
             }
             .accessibilityIdentifier("wizard-organic-none-checked")
@@ -1768,6 +1836,34 @@ public struct LatticeSetupWizard: View {
                                                    regions: project.lattice.currentOrganicForecast?.regionsWithoutShape ?? []) {
             shortNote(line, warning: true)
                 .accessibilityIdentifier("wizard-organic-face-walls-left-out")
+        }
+    }
+
+    /// ★★ RULING 4 (item 8): the Auto re-check line. Tapping it runs Check sizes (the button's
+    /// own path); while it runs it says so; where Check sizes cannot act it says why instead —
+    /// and when the reason is a missing wall, that line is the tap to the walls.
+    @ViewBuilder private var organicAutoRecheck: some View {
+        if organicProbeState == .running {
+            HStack(spacing: DS.Space.xs) {
+                ProgressView().controlSize(.mini)
+                shortNote("Checking…")
+            }
+            .accessibilityIdentifier("wizard-organic-auto-recheck")
+        } else if organicProbeRefusal == nil {
+            Button { runCheckSizes() } label: { Self.tapNote(OrganicForecast.recheckTapLine) }
+            .buttonStyle(.plain)
+            .accessibilityHint(OrganicForecast.checkSizesHelp)
+            .accessibilityIdentifier("wizard-organic-auto-recheck")
+        } else {
+            refusalNote(OrganicForecast.recheckLine(checkRefusal: organicProbeRefusal),
+                        marksWalls: organicRefusalMarksWalls)
+                .accessibilityIdentifier("wizard-organic-auto-recheck")
+        }
+        if case let .failed(why) = organicProbeState {
+            HStack(spacing: DS.Space.xs) {
+                shortNote("Check failed", warning: true)
+                infoButton("check-failed", why)
+            }
         }
     }
 
@@ -2763,7 +2859,7 @@ public struct LatticeSetupWizard: View {
     private func rebuild(force: Bool = false) {
         let regions = project.latticeJobRegions().regions
         wallFacesCache = computeWallEditorFaces(from: regions)
-        includeWallCountCache = regions.filter { $0.role == .include }.count
+        hasIncludeWallCache = LatticeJobIncludeGate.hasIncludeWall(regions)
         guard force else {
             sampleIsStale = true
             return

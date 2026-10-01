@@ -39,7 +39,15 @@ public enum LatticeFaceOutline {
 
     /// A closed loop in the face plane's (u, v) millimetres, relative to the
     /// plane origin. Counter-clockwise-ness is NOT normalised: the containment
-    /// test below is a crossing count, which does not care.
+    /// test below is a crossing count, which does not care — and core's even-odd
+    /// test works from each edge's directed pair, which a rotation keeps and a
+    /// reversal would not.
+    ///
+    /// ★ ONE ORDER FOR ONE OUTLINE (maintainer, 2026-09-30, ruling 1): each loop starts at
+    /// its smallest WORLD vertex (x, then y, then z), and the loops are ordered by their
+    /// rotated vertex sequence — so an outer loop comes before its holes on the usual
+    /// faces, and the same face gives the same bytes in every call and every launch.
+    /// (They came out in hash order before: the stage's job bytes differed between launches.)
     public typealias Loop = [SIMD2<Double>]
 
     /// Quantised endpoint key, so two triangles that share an edge agree it is
@@ -134,6 +142,10 @@ public enum LatticeFaceOutline {
         var count: [EdgeK: Int] = [:]
         var ends: [EdgeK: (SIMD3<Double>, SIMD3<Double>)] = [:]
         var ownFace: [EdgeK: Int32] = [:]
+        // ★ ruling 1: every edge in the order the triangle scan first meets it — the ONLY
+        // order the walk below iterates in (a Dictionary's keys and a Set's `first` are hash
+        // order, per instance)
+        var firstSeen: [EdgeK] = []
         var t = 0
         while t + 2 < mesh.indices.count {
             let tri = t / 3
@@ -145,6 +157,7 @@ public enum LatticeFaceOutline {
                 for e in 0..<3 {
                     let a = p[e], b = p[(e + 1) % 3]
                     let k = EdgeK(a, b)
+                    if count[k] == nil { firstSeen.append(k) }
                     count[k, default: 0] += 1
                     ends[k] = (a, b)
                     ownFace[k] = tri < mesh.faceIDs.count ? mesh.faceIDs[tri] : -1
@@ -152,7 +165,7 @@ public enum LatticeFaceOutline {
             }
             t += 3
         }
-        let border = count.filter { $0.value == 1 }.keys
+        let border = firstSeen.filter { count[$0] == 1 }
         guard !border.isEmpty else { return [] }
         // the face across each boundary edge: the mesh's other triangle on that edge
         let all = edgeFaces(in: mesh)
@@ -172,11 +185,11 @@ public enum LatticeFaceOutline {
             adjacency[Key(e.0), default: []].append(k)
             adjacency[Key(e.1), default: []].append(k)
         }
-        var unused = Set(border)
-        var out: [(loop: Loop, neighbours: [FaceID?])] = []
-        while let seed = unused.first {
-            guard let e0 = ends[seed] else { unused.remove(seed); continue }
-            unused.remove(seed)
+        var used = Set<EdgeK>()
+        var out: [(loop: Loop, neighbours: [FaceID?], key: [SIMD3<Double>])] = []
+        for seed in border where !used.contains(seed) {
+            guard let e0 = ends[seed] else { used.insert(seed); continue }
+            used.insert(seed)
             var loop3: [SIMD3<Double>] = [e0.0, e0.1]
             var edgeKeys: [EdgeK] = [seed]
             var here = Key(e0.1)
@@ -184,9 +197,9 @@ public enum LatticeFaceOutline {
             var guardCount = 0
             while here != start, guardCount < border.count + 2 {
                 guardCount += 1
-                guard let next = adjacency[here]?.first(where: { unused.contains($0) }),
+                guard let next = adjacency[here]?.first(where: { !used.contains($0) }),
                       let ne = ends[next] else { break }
-                unused.remove(next)
+                used.insert(next)
                 let ka = Key(ne.0)
                 let step = (ka == here) ? ne.1 : ne.0
                 loop3.append(step)
@@ -196,16 +209,45 @@ public enum LatticeFaceOutline {
             guard loop3.count >= 3 else { continue }
             // Drop the duplicated closing point if the walk came all the way back.
             if Key(loop3[loop3.count - 1]) == start { loop3.removeLast() }
-            let flat: Loop = loop3.map { p in
+            // edge i is loop[i] → loop[i+1]; the walk appended one key per step in order
+            var nb: [FaceID?] = (0..<loop3.count).map { i in i < edgeKeys.count ? across(edgeKeys[i]) : nil }
+            if nb.count < loop3.count { nb += [FaceID?](repeating: nil, count: loop3.count - nb.count) }
+            // ★ ruling 1: start at the smallest world vertex — the loop and its per-edge
+            // neighbours rotated together, so edge i stays loop[i] → loop[i+1]; never reversed
+            let k = canonicalStart(loop3)
+            let world = Array(loop3[k...] + loop3[..<k])
+            nb = Array(nb[k...] + nb[..<k])
+            let flat: Loop = world.map { p in
                 let d = p - origin
                 return SIMD2<Double>(simd_dot(d, u), simd_dot(d, v))
             }
-            // edge i is loop[i] → loop[i+1]; the walk appended one key per step in order
-            var nb: [FaceID?] = (0..<flat.count).map { i in i < edgeKeys.count ? across(edgeKeys[i]) : nil }
-            if nb.count < flat.count { nb += [FaceID?](repeating: nil, count: flat.count - nb.count) }
-            if flat.count >= 3 { out.append((flat, nb)) }
+            if flat.count >= 3 { out.append((flat, nb, world)) }
         }
-        return out
+        // ★ ruling 1: the loops in one order — by their rotated world vertex sequence
+        out.sort { worldLess($0.key, $1.key) }
+        return out.map { ($0.loop, $0.neighbours) }
+    }
+
+    /// (x, then y, then z) — the order a loop's start and the loops themselves are chosen by.
+    static func worldLess(_ a: SIMD3<Double>, _ b: SIMD3<Double>) -> Bool {
+        if a.x != b.x { return a.x < b.x }
+        if a.y != b.y { return a.y < b.y }
+        return a.z < b.z
+    }
+    /// Sequence order: vertex by vertex, then the shorter first.
+    static func worldLess(_ a: [SIMD3<Double>], _ b: [SIMD3<Double>]) -> Bool {
+        for (p, q) in zip(a, b) where p != q { return worldLess(p, q) }
+        return a.count < b.count
+    }
+    /// The rotation that starts the loop at its smallest vertex; a vertex met twice (a pinch)
+    /// takes the rotation whose whole sequence is smallest.
+    static func canonicalStart(_ loop: [SIMD3<Double>]) -> Int {
+        guard var best = loop.indices.first else { return 0 }
+        for i in loop.indices.dropFirst() where worldLess(loop[i], loop[best]) { best = i }
+        let ties = loop.indices.filter { loop[$0] == loop[best] }
+        guard ties.count > 1 else { return best }
+        func rot(_ k: Int) -> [SIMD3<Double>] { Array(loop[k...] + loop[..<k]) }
+        return ties.min { worldLess(rot($0), rot($1)) } ?? best
     }
 
     // MARK: - containment + distance, in the plane

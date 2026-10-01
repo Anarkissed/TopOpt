@@ -115,8 +115,7 @@ final class LatticeRunSpecSharedTests: XCTestCase {
         }
         XCTAssertEqual(try text(variant.gradingDictionary()), try text(stage.gradingDictionary()),
                        "★ the stage's Auto-resolved grading")
-        XCTAssertEqual(VariantFacePrismFixture.canonical(variant.regions), VariantFacePrismFixture.canonical(stage.regions),
-                       "and the stage's walls")
+        XCTAssertEqual(variant.regions, stage.regions, "and the stage's walls")
         XCTAssertEqual(variant.cellSizeMode, stage.cellSizeMode)
         XCTAssertEqual(variant.reportRegionCells, stage.reportRegionCells)
         XCTAssertEqual(stage.cellSizeMode, "swept", "control: Auto resolved to a swept window")
@@ -155,7 +154,8 @@ final class LatticeRunSpecSharedTests: XCTestCase {
             try String(contentsOf: root.appendingPathComponent("Sources/TopOptFlows/\(f)"), encoding: .utf8)
         }
         let app = try src("AppModel.swift"), ws = try src("WorkspacePlaceholder.swift")
-        XCTAssertTrue(app.contains("let latticeSpec = project.latticeRunSpec(emission: project.latticeJobRegions())"))
+        XCTAssertTrue(app.contains("let latticeSpec = project.latticeRunSpec(emission: emission)"))
+        XCTAssertTrue(app.contains("let emission = project.latticeJobRegions()"), "one emission (ruling 2)")
         XCTAssertFalse(app.contains("LatticeAutoPosture.applied("), "the recipe moved")
         XCTAssertFalse(app.contains(".runSpec("), "the recipe moved")
         XCTAssertTrue(ws.contains("guard let spec = project.latticeRunSpec(emission: emission),"), "the variant's job")

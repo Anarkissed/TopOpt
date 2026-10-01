@@ -88,6 +88,25 @@ public enum LatticeRegionEmission {
         /// never a silent drop. Never emitted, so no job's bytes move. Only the regions the
         /// caller's `droppedRegionName` names are listed (see there).
         public var skippedRegionNames: [String] = []
+
+        /// ★★ THE DEPTH A FACE'S SLAB EMITS (maintainer, 2026-09-30, ruling 2) — the ONE number
+        /// core's depth tie compares a protection with (job.cpp: every kind "face" region naming
+        /// the face id, either role): the dragged depth plus the expand, floored where the
+        /// emission floors it. nil ⇒ the run lattices no face prism for that face (a bolt, no
+        /// role, lattice off, no shape) — its protection keeps its own depth.
+        public func slabDepthMM(runFaceID id: Int) -> Double? {
+            regions.first { $0.kind == .face && $0.faceID == id }?.depthMM
+        }
+
+        /// ★★ THE DEPTH A REGION'S SLAB EMITS (maintainer, 2026-10-01, round 3 ruling a): the
+        /// same one value for a face REGION — every member prism (and every facet of a curved
+        /// member) of the region is emitted under its selectable key at one depth, the dragged
+        /// depth plus the expand, floored at 0.1. nil ⇒ the run lattices no face prism under that
+        /// key (an Off role, a cut sector, members that are cylinders or direct faces, lattice
+        /// off) — its protection keeps its own depth.
+        public func slabDepthMM(selectableKey key: String) -> Double? {
+            regions.first { $0.kind == .face && $0.selectableKey == key }?.depthMM
+        }
     }
 
     /// One manual primitive → one region entry with `role`. `depthMM` is the

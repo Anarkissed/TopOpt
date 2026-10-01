@@ -1677,10 +1677,10 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
 
     /// ★ THE PER-PRIMITIVE DEPTH — the same override shape as the role, for the
     /// number the 3D depth plane drags (§3d). Absent ⇒ `groupDepthMM` ⇒
-    /// `paintDepthMM`, so nothing about an untouched project moves. It is STILL
-    /// the protection depth as well: `ProjectModel.faceProtectionSpecs()` and
-    /// `latticeJobRegions()` both resolve through `LatticeSlabDepth`, per face
-    /// (bar R4).
+    /// `paintDepthMM`, so nothing about an untouched project moves. It is the DRAGGED
+    /// depth: the emitted slab is this plus the in-plane expand, and a protected,
+    /// latticed face or region is protected to that emitted slab (`faceProtectionSpecs`
+    /// reads the emission's own depth — ruling 2, 2026-09-30; round 3 ruling a, 2026-10-01).
     public var selectableDepthMM: [String: Double]
 
     /// ★ THE PER-SELECTABLE DENSITY — the store `LatticeRegionEmission` recorded
@@ -2495,7 +2495,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
             // handed the emitted bytes to core's parser rather than checking a key
             // list — a job.json that dies at validation is not a degraded run, it is
             // no run. The page says so on the control; this is the structural half.
-            if mode == .fit && !regions.contains(where: { $0.role == .include }) {
+            if mode == .fit && !LatticeJobIncludeGate.hasIncludeWall(regions) {
                 mode = .fixed
             }
             // ★★ D2 (maintainer, 2026-09-03), applied ONCE after every fallback:

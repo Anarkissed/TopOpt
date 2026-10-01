@@ -617,12 +617,27 @@ public final class ProjectModel: ObservableObject {
     /// for an STL project (no B-rep faces) or when nothing is protected → the run is
     /// byte-identical. Face ids are deduped (a face never appears twice).
     ///
-    /// ★ THE DEPTH IS THE ONE THE USER DRAGGED (task 2026-08-12 §0a). `depthsMM`
-    /// is parallel to `faceIDs`: for a group that also carries a lattice role it
-    /// is that group's `LatticeSlabDepth` — the SAME number its lattice region
-    /// carries — so the barrier is exactly as deep as the lattice it feeds. For a
-    /// protect-only group it is the project's global depth, unchanged.
+    /// ★★ A PROTECTED, LATTICED FACE IS PROTECTED TO THE DEPTH ITS SLAB EMITS (maintainer,
+    /// 2026-09-30, ruling 2; his 2026-09-23 ruling: the expand moves the far end deeper). Core's
+    /// tie makes protect + lattice on one face ONE slab, so `depthsMM` reads the very number the
+    /// emission wrote on that face's prism (`LatticeRegionEmission.Result.slabDepthMM`: depth +
+    /// expand, floored at 0.1; a negative expand shrinks both) — never a second calculation.
+    /// The app used to send the dragged depth here and depth + expand on the prism: two depths
+    /// for one slab, which core refused. A face with no face prism (a bolt, no role) keeps the
+    /// depth it had: its group's `LatticeSlabDepth` when latticed, else the global depth.
+    /// ★★ AND SO IS A PROTECTED, LATTICED REGION (maintainer, 2026-10-01, round 3 ruling a):
+    /// `regionDepthsMM` reads the depth the region's prisms emit, through the same emission
+    /// (`slabDepthMM(selectableKey:)`). Core does not tie region protections yet, so this was
+    /// never refused — it was silently wrong: his stand's region 101 was frozen to 20 mm while its
+    /// slab reached 24.15 mm, and the optimizer emptied up to 25 voxels of that last 4.15 mm.
     public func faceProtectionSpecs()
+        -> (faceIDs: [Int], depthMM: Double, depthsMM: [Double],
+            regionIDs: [RegionID], regionDepthsMM: [Double]) {
+        faceProtectionSpecs(emission: latticeJobRegions())
+    }
+
+    /// The same, reading the given emission — the one the job's lattice regions come from.
+    public func faceProtectionSpecs(emission: LatticeRegionEmission.Result)
         -> (faceIDs: [Int], depthMM: Double, depthsMM: [Double],
             regionIDs: [RegionID], regionDepthsMM: [Double]) {
         guard viewerMesh != nil else {
@@ -644,14 +659,16 @@ public final class ProjectModel: ObservableObject {
                 // per face now, so the protection is resolved per face through the
                 // SAME `LatticeSlabDepth` call the region emission makes — which is
                 // what keeps R4 true when two faces of one group hold two depths.
-                let d = latticed
+                let run = Int(resolvedRunFaceID(f))
+                // ★ ruling 2: the depth its slab emits, when the run lattices a prism on it
+                let d = emission.slabDepthMM(runFaceID: run) ?? (latticed
                     ? LatticeSlabDepth.depthMM(
                         ref: .face(group: g.id, face: f), group: g.id,
                         perSelectable: lattice.selectableDepthMM,
                         perGroup: lattice.groupDepthMM,
                         fallbackMM: lattice.paintDepthMM)
-                    : force.faceProtectDepthMM
-                ids.append(Int(resolvedRunFaceID(f)))
+                    : force.faceProtectDepthMM)
+                ids.append(run)
                 depths.append(d)
             }
             // ★ EACH REGION CARRIES ITS OWN DEPTH — which is what makes a grid
@@ -668,15 +685,31 @@ public final class ProjectModel: ObservableObject {
             // children both resolve to the same surface; emitting both describes it
             // twice with two roles and two depths, and the run keeps whichever was
             // written last. `surfaceEffectiveRegions` is the one definition.
+            // ★★ THE DEPTH ITS SLAB EMITS (round 3 ruling a, 2026-10-01): a protected, latticed
+            // region is ONE slab, like a face (ruling 2) — the protection reads the depth the
+            // region's prisms emit (depth + expand). With no prism under its key it keeps the
+            // depth it had. His stand's region 101: 20 -> 24.15 mm (the R2b control's bytes).
+            // ★ A SPLIT OR CUT PARENT (round 3 review, 2026-10-01): the emission lattices the
+            // group's OWN regions (a whole-face parent emits its whole surface under its key; a cut
+            // child emits nothing of its own), while the protection walks the effective regions —
+            // the children. So each child reads the slab its surface is latticed through: its own
+            // key first, else the group's region it descends from.
+            var slabVia: [RegionID: Double] = [:]
+            for raw in g.regionIDs {
+                guard let d = emission.slabDepthMM(selectableKey: LatticeSelectableRef.region(group: g.id, region: raw).key)
+                else { continue }
+                for e in surfaceEffectiveRegions(from: raw) where slabVia[e] == nil { slabVia[e] = d }
+            }
             for r in surfaceEffectiveRegions(of: g) where !seenRegions.contains(r) {
                 seenRegions.insert(r)
-                let d = latticed
+                let key = LatticeSelectableRef.region(group: g.id, region: r).key
+                let d = emission.slabDepthMM(selectableKey: key) ?? slabVia[r] ?? (latticed
                     ? LatticeSlabDepth.depthMM(
                         ref: .region(group: g.id, region: r), group: g.id,
                         perSelectable: lattice.selectableDepthMM,
                         perGroup: lattice.groupDepthMM,
                         fallbackMM: lattice.paintDepthMM)
-                    : force.faceProtectDepthMM
+                    : force.faceProtectDepthMM)
                 regionIDs.append(r)
                 regionDepths.append(d)
             }
@@ -2418,6 +2451,51 @@ public final class ProjectModel: ObservableObject {
     /// The name a face region goes by — on the Selections row AND in the left-out notice.
     public func latticeRegionName(_ rid: RegionID) -> String {
         faceRegions.region(rid)?.name ?? "Region \(rid)"
+    }
+
+    /// A selectable's short name — the Selections row's, and the one ruling 3's sentence uses.
+    /// Two words at most (R7).
+    public func latticeSelectableName(_ ref: LatticeSelectableRef) -> String {
+        switch ref {
+        case let .face(_, f): return "Face \(runFaceID(f))"
+        case .primitive: return "Primitive"
+        case let .region(_, rid): return latticeRegionName(rid)
+        }
+    }
+
+    /// ★ RULING 3 (maintainer, 2026-09-30): core's refusal of a variant document, in his words.
+    /// Core's depth tie → "This result was optimized with a X mm protected skin under [wall], but
+    /// the wall is Y mm deep. …", the wall named as its Selections row names it (the prism core
+    /// stopped at, in wire order); any other refusal → core's own words. Nothing is re-derived:
+    /// X and Y are core's.
+    public func variantJobCoreRefusal(coreError: String, regions: [LatticeRegionSpec]) -> String {
+        guard let m = LatticeVariantProtectionTie.parse(coreError: coreError) else {
+            return LatticeVariantProtectionTie.coreWords(coreError)
+        }
+        // ★ the prism core REJECTED: on this face, at core's wall depth (core prints %f) — a face can
+        // carry two prisms (a direct face of one group, a region member in another), and core
+        // stops at the first that differs, not the first that exists (round 3 review)
+        let prism = regions.first { $0.kind == .face && $0.faceID == m.faceID && abs($0.depthMM - m.wallMM) < 1e-5 }
+            ?? regions.first { $0.kind == .face && $0.faceID == m.faceID }
+        var ref: LatticeSelectableRef? = nil
+        if let key = prism?.selectableKey {
+            for g in selection.groups {
+                if let f = g.faces.first(where: { LatticeSelectableRef.face(group: g.id, face: $0).key == key }) {
+                    ref = .face(group: g.id, face: f); break
+                }
+                if let r = g.regionIDs.first(where: { LatticeSelectableRef.region(group: g.id, region: $0).key == key }) {
+                    ref = .region(group: g.id, region: r); break
+                }
+            }
+        }
+        let name = ref.map(latticeSelectableName) ?? "Face \(m.faceID)"
+        let expand = prism?.selectableKey.map { LatticeSlabExpand.clamp(lattice.selectableExpandMM[$0] ?? 0) } ?? 0
+        // ★ ROUND 3 (maintainer, 2026-10-01): a depth is suggested only when the wall can be set to
+        // it — at or below zero, or below the wall's minimum depth (`LatticeSlabDepth.minMM`, where
+        // every depth write clamps), no depth clears the tie, so only Optimize again is offered.
+        let setTo = m.protectionMM - expand
+        let settable = setTo >= LatticeSlabDepth.minMM - 1e-9 && setTo <= LatticeSlabDepth.maxMM + 1e-9
+        return LatticeVariantProtectionTie.sentence(m, wallName: name, setToMM: settable ? setTo : nil)
     }
 
     /// ★ RULING (g) (maintainer, 2026-09-30): the name a face region the run cannot consume is

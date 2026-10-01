@@ -34,8 +34,9 @@ variant. It now carries faces 15 and 2 and region 101's three facets (see "The s
   on the button, the forecast and Check sizes. It is never latticed whole.
 - **(d)** A Check-sizes answer stored before this route is kept but no longer used. The wizard says
   "Sizes need re-checking — tap Check sizes."
-- **(e)** Tapping a face on a variant says: "You can't pick faces on an optimised result — the walls
-  you marked on the part carry over."
+- **(e)** Tapping a face on a variant says: "You can’t pick faces on an optimized result — the walls
+  you marked on the part carry over." (House style since ruling 5; round 1 had "can't" and
+  "optimised".)
 - **(g)** A face region the run cannot consume, such as a cut sector, is counted and **named**. The
   stage's preview banner names it, and so do the variant's Check sizes, forecast and re-lattice.
 
@@ -52,6 +53,9 @@ variant. It now carries faces 15 and 2 and region 101's three facets (see "The s
 The numbers are at the end: "The stand", "Hashes", "Tests" and "The suite". Commits:
 - **25e8f869**: the route, with rulings (a), (c)–(g);
 - **044dd9ab**: ruling (b).
+
+**Round 2 (2026-09-30).** The nine open items below were ruled, plus a tenth. Seven commits and
+the #358 sync followed; see "Round 2" at the end.
 
 ## Step 1: the five answers
 
@@ -293,7 +297,7 @@ refused.
 - (f) **RULED: the notice wording is accepted.** Unchanged, byte for byte for faces.
 - (g) **RULED: count and name dropped cut sectors, stage and variants, same notice.** Done.
 
-Open, and needing his ruling:
+Open, and needing his ruling (**all nine ruled 2026-09-30; see "Round 2" at the end**):
 1. **An expand on a protected, latticed face wall is refused by core's depth tie on the STAGE
    job.** The region sends depth + expand; the protection sends the depth alone.
    **Verified through core's parser:** face 1 is protected at 20 mm and given a 1 mm expand. The
@@ -325,7 +329,9 @@ Open, and needing his ruling:
    the stage emission several times per pass for the bake, Fit and the wizard. A Release number, or
    a cache keyed on the emission's inputs, is the follow-up if you see the page stutter.
 9. **Project 102117B9** ("M2 verticalStand", organic Structural) is not listed by the project
-   store in these runs; it has no `results.plist`. So it was not dumped. The other six were.
+   store in these runs, so it was not dumped. The other six were. **CORRECTED in round 2:** the
+   cause is not a missing `results.plist`, which four listed projects also lack. Its `project.json`
+   no longer decodes; see ruling 7.
 
 ## The stand (M2, 68BF7B74): before and after
 
@@ -433,3 +439,669 @@ New or rewritten, each seen failing with its fix undone:
   The raymarch timing test passed this time. 18 new tests take the count from 2578 to 2596; the
   one extra skip is the environment-gated stand probe.
 
+
+## Round 2 (2026-09-30): the nine open items ruled, plus one
+
+The maintainer ruled on the nine items above and added a tenth (project 102117B9). Each ruling is
+its own commit, in his order, and the six stage projects were hashed after each:
+
+| commit | ruling |
+|---|---|
+| **03f7aadc** | 1. outline order, fixed at the source |
+| **5e4f9f8f** | 2. protection follows the slab |
+| **3fdff70c** | 3. old retained runs: said before any tap, one tap to Optimize again |
+| **42d935b6** | 4. one "has an include wall"; gates; the one tap; Auto's stale line |
+| **6e4931ca** | 5. the tap refusal in the house style |
+| **3c3dfa59** | 6. speed, measured in Release: no cache needed |
+| — | 7. project 102117B9: found, reported, not fixed |
+| **7793ee0f** | the #358 sync (90d9f874), one-way |
+| **f201f7de** | after the sync: the parse-time frame canary; a core-source pin re-anchored |
+
+### In plain words
+
+- **The stage's job bytes no longer depend on the hash seed.** The same project now gives the
+  same job every time, in every process. Core's output is byte-identical to before on the stand.
+  Three projects' hashes moved once, by loop rotation only.
+- **An expand on a protected, latticed face is no longer refused.** The protection now goes as
+  deep as the slab the wall emits: depth + expand, and a negative expand shrinks both. Only jobs
+  core used to refuse change.
+- **An old result whose run froze a wall at a different depth is said before you tap anything**,
+  in these words (the test's case): "This result was optimized with a 5 mm protected skin under
+  Face 1, but the wall is 20 mm deep. Optimize again with this wall, or set the wall to 5 mm." "Optimize again" is
+  one tap on the banner. It goes through the usual "Replace your results?" confirmation.
+- **Nothing set to lattice is refused everywhere, in the same words, and one tap takes you to the
+  walls.** That covers:
+  - the stage's Lattice (for an exclude-only project too, which it used to let through);
+  - Optimize, which used to lattice every variant whole;
+  - a variant's two buttons and its forecast drawer;
+  - Settings' Check-sizes lines.
+
+  The tap takes you to the Lattice stage with Selections open. It never makes a wall for you.
+- **Under Auto, a stale Check-sizes answer now says so**: "Sizes need re-checking — tap to check
+  sizes." The line itself runs Check sizes.
+- **The tap refusal on a variant**: "You can’t pick faces on an optimized result — the walls you
+  marked on the part carry over."
+- **Speed:** the two calls ruling 6 asked about take 1.84 ms in Release on his stand. That is under
+  the 8 ms bar, so no cache was added.
+- **Project 102117B9 is missing from the app's project list.** Its file no longer decodes: a
+  wall-thickness entry saved before `startMM` existed. Found and proven, not fixed.
+
+### Ruling 1: one order for one outline, at the source
+
+**What.** `LatticeFaceOutline.loopsWithNeighbours` is the only production builder of outline
+loops. It used to take its boundary edges, its adjacency lists and each loop's seed in hash order
+(a `Dictionary`'s keys and `Set(border).first`). Now:
+- the edges come in triangle-scan order;
+- each loop is rotated to start at its smallest world vertex, and its neighbours are rotated with
+  it;
+- the loops are sorted by that rotated sequence;
+- the walk's winding is kept.
+
+Core's even-odd test reads directed pairs, and a rotation keeps every pair. The variant-only
+re-sort (`RelatticeJobBuilder.canonicalOutline`) is gone: there is one definition.
+
+**Proof of done: without `SWIFT_DETERMINISTIC_HASHING`.**
+- At fba04bd0, two no-env dump processes DIFFERED on 68BF7B74, 92A8016E and 570B38E2.
+- After the fix, two no-env processes and a deterministic one agree on all six projects.
+- Five in-process repeats (`TOPOPT_JOB_REPEAT=5`) are identical.
+
+**Core's output is byte-identical** (topopt-cli at aecef72c; old-order document vs new-order
+document):
+
+| case | forecast | full run: STL (before / after / after again) | receipt regions | positive control: one vertex moved 5 mm |
+|---|---|---|---|---|
+| stand, as saved | identical (cc40b78c…, 9700 voxels / 3132 latticed) | not run | — | — |
+| stand, organic | identical (b98e7e83…, 9700 / 9700) | 4bc797b0… = 4bc797b0… = 4bc797b0… | identical | forecast 9700 → 9643 voxels, STL f0c0e97c…: **moved** |
+| 570B38E2, doubled | identical (2c32fa71…, 8002 / 288) | 80405dc6… = 80405dc6… = 80405dc6… | identical | forecast 8002 → 7924 moved; STL **did not move**: only 148 voxels are latticed, so the STL cannot see this change. The forecast is the sensitive check here |
+| 92A8016E, octet | core refuses both, with the same message (grading + a design box on `lattice_variant`) | — | — | — |
+
+**Meaning changes.**
+- **One-time hash change**, loop rotation only; a python check shows everything else is
+  byte-identical:
+  - stand 297527188edbe40a → c4b03acf387d178f (5 loops rotated);
+  - 92A8016E fc032b16b1bce281 → 225865c83c64cb23;
+  - 570B38E2 7269596833201a0e → 43a0828a8bbb1e1d;
+  - 3418E167, AA4C7953 and 887AC498 are unchanged.
+
+  The stand's organic stage document moved 0dac7a1407e14232 → 81827b81b9ef7194, order only.
+- **The variant document's loops now start where the stage's do.** The re-sort used to pick its own
+  start.
+- **Deleted test:** `testTheVariantDocumentIsStableAcrossCalls`. It is replaced by
+  `testOneOutlineOrderForTheStageAndTheVariant` and by `LatticeFaceOutlineOrderTests` (4 tests):
+  - the start does not depend on triangle order;
+  - each neighbour stays on its edge;
+  - the outer loop comes first;
+  - a pinch vertex chains one way.
+- **Honest limit.** The in-process repeat tests did NOT catch the fix when it was reverted: hash
+  order within one process is often stable. The two-process no-env dumps are the control that
+  carries the proof.
+
+### Ruling 2: protection follows the slab
+
+**What.**
+- `faceProtectionSpecs(emission:)` reads the depth the wall's prism emits
+  (`LatticeRegionEmission.Result.slabDepthMM(runFaceID:)`: depth + expand). That is one value, not
+  a second calculation.
+- `makeRunRequest` builds ONE emission and passes it to both the protections and the lattice spec.
+- A protected face that is not latticed keeps its dragged depth.
+
+**Before and after, through core's parser.** On a stand copy, face 15 was given a +1 mm expand:
+- before: refused, "the protection is 12.000000 mm and the lattice region is 13.000000 mm";
+- after: accepted, with the protection at 13 mm.
+
+Only jobs core refused change; all six stage hashes are unchanged. The expand item is out of the
+core brief: core's tie was right, and the app was sending two depths for one slab.
+
+**Region 101: two depths for one slab, which core accepts (reported, not changed).** A face
+REGION's protection is unchanged. On his stand, region 101 is protected by region id at 20 mm
+and latticed as three face-23 facets at 24.15 mm (20 + its 4.15 mm expand). Core's tie
+(job.cpp:2439-2467) compares only FACE-id protections with face-kind regions, so it does not see
+this. The job is accepted, and the deepest 4.15 mm of that slab is not frozen: core's own comment
+calls that "void the optimizer removed". Making region protections follow the slab would change
+the stand's stage bytes (the R2b control moved its hash to 43a02161a5bab447), and ruling 2 allows
+only refused jobs to change. **Needs his ruling:** should a region's protection follow its slab
+too? Should core's tie also check region protections? That would be a core brief.
+
+**Report only: is the in-plane part of an expand protected?** Partly. Core's protection
+(`mask_step_face`, face_tag.cpp:162-205) freezes part-SOLID voxels whose centre lies within
+(N − ½)·h of the face's OWN triangles, measured as 3D distance. N is the protection depth in
+layers. The in-plane collar the expand adds beyond the face's edge is therefore protected only
+inside a rounded profile:
+- at the surface, out to about the full slab depth;
+- at depth z, out to √(D² − z²), where D = (N − ½)·h;
+- near the slab's floor, not at all.
+
+A collar voxel at in-plane distance e beyond the edge is unprotected below z ≈ √(D² − e²). On the
+stand (face 15: 13 mm slab, 1 mm collar) that leaves only the floor corner. Protection never frees
+void; it pins existing part material only.
+
+**RED:**
+- the old depths back: 4 red;
+- regions following the expand: 1 red, and the stand hash moves to 43a02161a5bab447;
+- the bolt keeping its dragged depth undone: 1 red;
+- the source pin: 1 red.
+
+### Ruling 3: old retained runs
+
+**Run, not read.** The stand's variant job was given an old run's protections: bare ids [15, 2] at
+the global 5 mm. topopt-cli refused it with "face 15 is BOTH protected and a lattice region, at two
+different depths: the protection is 5.000000 mm and the lattice region is 12.000000 mm". `face_id`
+is kept and the tie is not dodged.
+
+**Where it is said.** The app asks core's OWN parser (`TopOptKit.jobSchemaError`, the same core the
+worker runs) on the one document `relatticeJobJSON` builds. It asks where the page already asks
+about the variant's job: a worker and a retained design. The answer shows:
+- on the page banner, before any tap, as "Can’t lattice this variant" with the sentence, and one
+  tap, **Optimize again**. That is the Optimize path itself, "Replace your results?" included, and
+  it is offered only while Optimize is open;
+- on "Lattice this variant", disabled, with the sentence as its sub-line;
+- in the forecast drawer;
+- in Check sizes;
+- in the run's toast.
+
+A document core refuses is never sent as a forecast.
+
+**The sentence.** "This result was optimized with a [X] mm protected skin under [wall], but the
+wall is [Y] mm deep. Optimize again with this wall, or set the wall to [X] mm."
+- The numbers are core's, read from its message (`LatticeVariantProtectionTie`); nothing is
+  re-derived.
+- The wall is named as its Selections row names it.
+- **One change from the ruled text:** a wall with an in-plane expand is told to set its depth to
+  X − expand, because its slab reaches depth + expand (ruling 2). With no expand this is X, as
+  ruled. The test sets the wall to 3 mm with a 2 mm expand against a 5 mm skin, and core accepts.
+- Any other core refusal is said in core's own words.
+
+**RED:**
+- a parser that misses core's message: 5 red;
+- the remedy ignoring the expand: 1 red;
+- the forecast sent despite a refusal: 1 red.
+
+### Ruling 4: gates and the one tap
+
+**One definition.** `LatticeJobIncludeGate.hasIncludeWall` is the only place the question "does
+this region list lattice anything?" is asked. The following all call it:
+- the stage, a variant, Optimize (the workspace's and the page's);
+- the wizard;
+- the preview's clip and body alpha;
+- the job builder's Fit fallback.
+
+A pin finds the predicate written exactly once.
+
+**The stage (item 4).** "Lattice" used to ask only whether ANY region was emitted. An exclude-only
+project therefore got an enabled button saying "nothing set to lattice". It now greys, with that
+same reason.
+
+**Optimize (item 5).** With lattice on and no include wall, `canOptimize` refuses before the run
+starts, and its sub-line says "nothing set to lattice". The page's Optimize and "Optimize from
+scratch" say the same, because every start path reads that gate. Lattice off is no refusal: the run
+is topology only.
+
+**Changed for one real project:** 3418E167 "M2 verticalStand THICK" has lattice on and no walls.
+Its Optimize is now greyed; before, it would have latticed every variant whole. Turn lattice off
+there, or mark a wall.
+
+**One tap (item 6).**
+- Wherever "nothing set to lattice" shows, the control stays greyed, with the same words and a
+  chevron (›).
+- Its tap goes to where walls are marked: the Lattice stage, with Selections open
+  (`goToWallMarking`).
+- It is navigation only: no wall, no role, no save (pinned).
+- From a variant's page, the page closes as its own Close does.
+- Every other refusal carries no tap.
+
+The surfaces are:
+- the stage's Lattice and Optimize;
+- "Lattice this variant" and "Optimize from scratch";
+- the forecast drawer;
+- the wizard's three Check-sizes lines (the re-check line, the check-refused note and the
+  none-checked line).
+
+**Auto (item 8).** Under Auto, the preview's window and the organic floor are read only from a
+CURRENT answer, so a stale one stopped steering without a word. The wizard now shows "Sizes need
+re-checking — tap to check sizes." under Auto, and the line is the tap:
+- it runs the one Check-sizes submission, now shared with the button (`runCheckSizes`);
+- while running, it says "Checking…";
+- where Check sizes cannot act, it says why, and a missing wall is again one tap from the walls.
+
+**The look.** DS tokens only. The bottom bar's two capsules are now one view
+(`StageActionCapsuleLabel`), and the wizard's notes are `note`/`tapNote`, so the screenshots render
+the app's own views: `evidence/2026-09-30-ruling4-gates/`, from `LatticeIncludeGateEvidenceGen`
+with `TOPOPT_INCLUDE_GATE_EVIDENCE=1`.
+- `bottom_bar_before_after.png`: before, after on Topology, after on the Lattice stage, and the
+  include-wall control.
+- `page_variant_nothing_set_to_lattice.png`: both buttons and the drawer.
+- `page_variant_include_wall_control.png`: unchanged.
+- `wizard_recheck_lines.png`: Manual (unchanged), Auto, running, the wall refusal, and another
+  reason.
+
+The live device frame is his.
+
+**Decisions I made, for him to overrule:**
+- **No dead tap.** On the Lattice stage with Selections already open he is already where walls are
+  marked, so the line stays plain there.
+- **The wizard leaves by its one exit**, Save & Exit, which saves. It has no other way out.
+- **Toasts cannot carry a tap.** The run's toast "Can’t lattice this variant: nothing set to
+  lattice." is only a backstop behind a greyed button.
+- **Other words, same fact, left as they were:** the wizard's "Needs a lattice region" and the Fit
+  pane's "Add at least one lattice region first — …". Should they become "nothing set to lattice"
+  with the tap?
+- **New words to approve:** "Sizes need re-checking — tap to check sizes." The Manual line beside
+  the button still says "— tap Check sizes."
+
+**RED:**
+- the stage's old any-region gate: 3 red;
+- Optimize ungated: 6 red;
+- the tap never offered: 6 red;
+- the Auto line removed: 1 red;
+- a second definition of the predicate: 1 red.
+
+### Ruling 5: the house style
+
+"You can’t pick faces on an optimized result — the walls you marked on the part carry over." It
+uses a curly ’ and "optimized". The test pins the sentence, no straight apostrophe, and no
+"optimised". RED: the old sentence back turns 3 assertions red.
+
+### Ruling 6: speed
+
+`LatticePagePassTimingProbe`, Release, Mac14,12, his stand (stepped, 5 regions). 5 warm-ups, then
+50 timed passes, run twice:
+
+| call, per page pass | median (run 1 / run 2) |
+|---|---|
+| one emission | 0.92 / 0.93 ms |
+| **the ruling's two calls** | **1.84 / 1.84 ms** (p90 1.96 / 1.95) |
+| the variant pass now (one emission, gate, spec, document, core's parser) | 1.56 / 1.55 ms |
+| canOptimize (include gate + `makeRunRequest`) | 1.96 / 1.91 ms |
+| body alpha | 0.92 / 0.93 ms |
+| the page rendered offscreen (every section, plus layout and raster; an upper bound) | 22.3 / 22.0 ms |
+| the whole pass | 27.5 / 27.3 ms |
+| negative control: the whole pass with lattice OFF | 17.4 / 16.6 ms |
+
+- Positive control: Debug gives 17 ms per emission and 34 ms for the two.
+- `_ = page.body` alone measured 0.01 ms, because its sections are built lazily. It timed nothing,
+  which is why the page is rendered instead.
+- **1.84 ms is under 8 ms, so no cache.** Whether the page visibly stutters is his call on the
+  iPad, which is slower than this Mac.
+
+### Ruling 7: project 102117B9 (M2 verticalStand)
+
+**It is a real project, and the app does not list it.** Item 9 above said it "has no
+`results.plist`". **That was wrong.** Four listed projects (3418E167, 887AC498, 92A8016E and
+AA4C7953) have none either. The store lists a project only if its `project.json` decodes, and a
+failed decode is dropped silently: `ProjectStore.snapshot(id:)` uses `try?`, and
+`loadAllSnapshots` passes over the nil.
+
+**Why it fails, run and not read.** The app's own decoder on a copy of his file:
+- as saved: `keyNotFound 'startMM'` at `lattice.wallThickness.faces.f:820422E9-…:2`;
+- the same copy with `"startMM": 0` added: decodes, as "M2 verticalStand".
+
+**How it happened.**
+- His file was saved at 2026-09-21 22:43:31 by a build from 604736ae. There,
+  `LatticeFaceWallThickness` wrote only `{endMM, profile}`.
+- bc3cf67f (22:56 the same night) made `startMM` a stored field. It kept synthesized decoding, and
+  synthesized decoding does not use the `= 0` default. Every build since then fails on this file.
+- Its sibling `LatticeWallCurvesPoint` has a hand-written decoder for exactly this case.
+- The control: the stand (68BF7B74) is listed, and all three of its entries carry `startMM`.
+
+**What the app shows.** The Home grid is `recentProjects`, seeded from `loadAllSnapshots`, so he
+does not see it either. The folder is intact on disk; the simulator's `project.json` is
+byte-identical to the snapshot. The project is authored work, not a stub:
+- the stand's model;
+- an anchor on face 18;
+- a 10 lb load on four regions;
+- include walls on faces 2 (12 mm) and 15 (11 mm);
+- organic, Structural, simulation on;
+- a drawn Manual grade on face 2.
+
+**Not fixed, per the ruling.** Two changes for a ruling:
+- a tolerant decoder for `startMM` (absent means 0), as `LatticeWallCurvesPoint` has;
+- the store saying when a project fails to decode, instead of dropping it.
+
+### The #358 sync (90d9f874)
+
+**Merged one-way by SHA** as 7793ee0f. It brings six linear #358 commits, 8414af47 … 90d9f874:
+core, core tests and one doc. There are no merges, no app files and nothing from Flexible; the
+Flexible branch contains 90d9f874 only because it merged #358. Then `build_core.sh` ran, and the
+app's `CoreFingerprint` is 7793ee0fab7f. The CLI was rebuilt with `--target topopt_cli`.
+
+**Stop conditions: neither fired.**
+- **Stage hashes: all six unchanged**, so no capability probe flipped. See the table below.
+- **No size verdict moved.** The stand's c1 documents ran on the pre-sync CLI (aecef72c, kept as
+  a copy) and the post-sync CLI (7793ee0f). Each Check sizes was stopped at
+  `organic_probe.json`, as the app does:
+  - variant probe and stage probe: 18 candidates each, with the same approvals, predicted
+    verdicts, rooting and components;
+  - recommendation: Fit 5.654 mm, Auto 3.576–6 mm, band 3.41–6 mm, and the printability,
+    resolution, member and extent floors, all identical;
+  - both forecasts: identical (9675 region voxels, with 1649 and 9675 latticed).
+
+  Traced lengths moved on two candidates (for example 77,714 → 82,815 mm), which the ruling
+  allows.
+- **Limit:** his stand's probe runs on Aesthetic, so no strength check runs (0/18 checked, 0
+  structurally approved) and rooting is 1.0 on every candidate. The comparison's teeth are the
+  18 aesthetic approvals and the recommendation. A structural verdict was not exercised.
+
+**The sync reaches the app (positive control).** 12ff5880 moved the in-plane frame check to
+parse time:
+- the stand's stage job with face 15's `frame_u` along the normal parsed clean on the pre-sync
+  CLI, ran the load case, and failed only at run time with core's frame-mismatch error;
+- on the post-sync CLI it is refused at parse time: "frame axes must lie IN the face plane
+  (u . n = 1.000000 …)";
+- the untilted control runs on both.
+
+In process, `testTheLinkedCoreRefusesAnOutOfPlaneFrameAtParseTime` pins the same thing through
+the app's own parser. The app's frames, built from the unit normal, pass.
+
+**One app pin moved with core.**
+`OrganicForecastTests.testGreenAndTheStructuralPickNeedACertificateThatRan` pins core's
+certificate branch, and 154ce24f moved the skip into `organic_probe_certificate_skip`. The pin
+now reads the helper and the new branch, with the same invariant:
+- None only with a structural question, a network, and no more segments than the 600,000 cap;
+- `cert_ok` is set once, from the certificate's margin, inside the branch that runs it.
+
+Each form is red on the other core. Committed as **f201f7de**, with the canary.
+
+**Tests after the sync.** Targeted (Check sizes, the forecast, every test that asks core's
+parser, and the stepped-cell tests): 201 tests, 0 failures. The iOS build succeeded against the
+new xcframework.
+
+**#358's FYI, as it lands here.** Stepped and any-step plans resolve region ids by include
+order now. A project whose region list has an exclude wall before an include wall will RUN such a
+plan instead of being refused. None of the six stage projects has an exclude wall, so none of them
+changes.
+
+### Tests (round 2)
+
+| test | what it pins | RED control |
+|---|---|---|
+| `LatticeFaceOutlineOrderTests` (4), `testOneOutlineOrderForTheStageAndTheVariant` | ruling 1 | R1a/R1b/R1d (the hash order back) |
+| `LatticeProtectionFollowsSlabTests` (6), `testTheExpandDeepensTheProtectionWithTheSlab` | ruling 2 | R2a, R2b, R2c, R2e |
+| `LatticeOldRetainedRunTests` (7) | ruling 3, through core's parser | R3a, R3c, R3d |
+| `LatticeIncludeGateTests` (7) | ruling 4 | R4a–R4e |
+| `testVariantAuthoringTurnsFaceTappingOffWithAReason` | ruling 5 | the old sentence |
+| `LatticePagePassTimingProbe` | ruling 6 (env-gated) | Debug and lattice-off |
+
+Pins updated in the same commits to the new code shapes, never loosened:
+- ruling 1: `LatticeVariantTests` (`VariantFacePrismFixture.canonical` gives way to plain equality);
+- ruling 2: `LatticeSlabExpandTests` (the expand now deepens the protection: [20] becomes [25]) and
+  the `LatticeRunSpecSharedTests` call site;
+- ruling 3: `LatticeVariantFaceWallsTests`, `LatticeVariantTests` and
+  `OrganicSyntheticStressTests` (`relatticeJobJSON` takes the pass's emission);
+- ruling 4: `LatticeVariantTests` (the stage's refusal), `OrganicForecastRouteTests` (the
+  re-check line) and `LatticeOldRetainedRunTests` (the page call site gained `onMarkWalls`);
+- the sync: `OrganicForecastTests` (core's certificate branch, re-anchored).
+
+Every control was restored byte-identical from a snapshot. The ruling-4 commit was amended once, before any push,
+to re-anchor the ruling-3 pin its call-site change broke. Its "159 tests, 0 failures" comes from
+the rerun after that fix.
+
+**Per commit:**
+- targeted runs: ruling 1, 219 tests (1 skipped); ruling 2, 153; ruling 3, 104; ruling 4, 159;
+  ruling 5, 21. 0 failures in each;
+- iOS app build succeeded after each source commit, with the changed objects' timestamps checked;
+- the stage hashes after every commit are below.
+
+### Hashes: the stage job, round 2
+
+No-env dumps, taken without `SWIFT_DETERMINISTIC_HASHING`, on a fresh copy of the Projects folder
+each run:
+
+| project | C1 (ruling 1) | C2 | C3 | C4 | C5 | C6 | sync |
+|---|---|---|---|---|---|---|---|
+| **M2 stand 68BF7B74** | c4b03acf387d178f | = | = | = | = | = | = |
+| **octet 92A8016E** | 225865c83c64cb23 | = | = | = | = | = | = |
+| 570B38E2 (doubled) | 43a0828a8bbb1e1d | = | = | = | = | = | = |
+| 3418E167 | c264e572ab70049c | = | = | = | = | = | = |
+| AA4C7953 | 3e6f162cb36212a9 | = | = | = | = | = | = |
+| 887AC498 | b457718dfc23ab42 | = | = | = | = | = | = |
+
+### The suite (round 2)
+
+At **f201f7de**, after every ruling and the sync: **2625 tests, 40 skipped, 12 failed assertions
+in 7 test cases, exactly the known 7:**
+- `AppModelTests`, the three 3MF tests;
+- `LatticeCellGradingTests.testGradingChangesTheRenderedLattice`;
+- `LatticeSimSolveTriggerTests.testTheTriggerRefusesOnAllThreeGrounds`;
+- `OrganicSampleCubeTests.testThickerIsLiveAndNeverRetraces`;
+- `OrganicVariantCacheTests.testTheKeyIgnoresThicknessAndFollowsCoreAndTopology`.
+
+**Against 044dd9ab** (2596 tests, 36 skipped), the difference is 29 tests, all new this round:
+- `LatticeFaceOutlineOrderTests`, 4;
+- `LatticeProtectionFollowsSlabTests`, 6;
+- `LatticeOldRetainedRunTests`, 7;
+- `LatticeIncludeGateTests`, 7;
+- the sync canary, 1;
+- `LatticeIncludeGateEvidenceGen`, 3, skipped without its env;
+- `LatticePagePassTimingProbe`, 1, skipped without its env.
+
+The 4 new skips are those env-gated ones.
+
+The run took 3 h 17 min (11848 s), because two other sessions' builds and test runs held the load
+average at 50–134 for most of it. The wall-clock test `LatticeSDFProfileTests.testRaymarchCostOnMaintainerBracket`
+passed anyway.
+
+## Round 3 (2026-10-01): regions follow the slab, one sentence, no false depth, 102117B9 back
+
+Round 2 was accepted. The maintainer's round-3 rulings, each its own commit:
+
+| commit | ruling |
+|---|---|
+| **87f792d9** | (a) a protected, latticed REGION is protected to the depth its slab emits |
+| **44882880** | (a) core brief: tie region-id protections; the in-plane collar measured |
+| **cd312825** | (b) "Needs a lattice region" / "Add at least one lattice region first" say the gate's sentence with the one tap, where they report its condition |
+| **e8564e90** | ruling 3's deviation accepted, plus: no depth suggested when none can clear the tie |
+| **211299c3** | (c) a wall saved without its start decodes at 0, so 102117B9 opens again |
+| **072eded0** | (c) the store never drops a project silently: "Can’t open" with the reason |
+| **f11e0abc** | four defects an adversarial review found before the push, fixed |
+
+### In plain words
+
+- **His stand's curved region (101) is now protected all the way down its lattice slab**: 24.15 mm
+  instead of 20.
+  - Measured on a re-run of his stand's loads: the optimizer had been emptying up to 25 voxels
+    (about 1 cm³) of that last 4.15 mm. With the fix it empties none.
+  - Only the stand's job changes, by one number.
+  - A core brief asks core to refuse such mismatches from now on.
+- **One gate, one sentence.** The wizard's "Needs a lattice region" and the Fit pane's "Add at least
+  one lattice region first" now say "nothing set to lattice", with the tap to the walls, whenever
+  lattice is on. With lattice off they mean something else (the mode is off), so they keep their
+  words.
+- **An old run's sentence never suggests a depth he can't set.** When the skin less the expand is
+  at or below zero, or below 1 mm, it offers only Optimize again.
+- **102117B9 opens again**, with all its walls and its drawn grade. If a project ever can't be
+  read again, Home shows it as "Can’t open" with the reason. Nothing can open, rename or delete it,
+  and the store never writes to it.
+
+### Snapshots
+
+His live store moved after round 2's P0 copy: the stand (68BF7B74) and 3418E167 were re-saved on
+2026-09-30 at 23:21 and 23:22.
+- The stand's Group C face order changed from [15, 2] to [2, 15].
+- 3418E167 is now stepped, with 2 include walls (it was organic with no walls).
+
+Round 3 is hashed on **P1**, a read-only copy of the live store taken 2026-10-01 00:09. P0 is kept
+for continuity with round 2. **P2** (2026-10-01, later) is identical to P1, and it is what the
+"every project decodes" proof ran on.
+
+### Ruling (a): regions follow the slab
+
+**What changed.**
+- `LatticeRegionEmission.Result.slabDepthMM(selectableKey:)`: every member prism and facet of a
+  region is emitted under its key at one depth (dragged + expand, floored at 0.1).
+- `faceProtectionSpecs`' region loop reads it. With no prism under the key (Off, a cut sector,
+  cylinder or direct-face members, lattice off), a region keeps today's depth.
+
+**Bytes: only the stand moves**, the one project with a protected, latticed region with an expand.
+The diff is one line, region 101's `depth_mm` 20 → 24.15.
+
+| snapshot | stand 68BF7B74 before → after | the others |
+|---|---|---|
+| P1 (live) | 8c81cec07b534bc5 → **3fd5d1b2388fe949** | unchanged |
+| P0 | c4b03acf387d178f → **43a02161a5bab447** (round 2's R2b prediction) | unchanged |
+
+**What the optimizer emptied, run and not estimated.** Counted by core's own forecast counters on
+the stand's optimize run. That run is his stand's stage loads with mode `minimize_plastic` on CLI
+aecef72c, NOT his retained result. Rungs are 0.68 / 0.52 / 0.38 / 0.26.
+
+| region 101's slab, part-solid voxels | count | emptied BEFORE (protected to 20 mm) | emptied AFTER (re-optimized, 24.15 mm) |
+|---|---|---|---|
+| the last 4.15 mm | 521 | **0 / 9 / 22 / 25** (25 × 39.67 mm³ ≈ 0.99 cm³) | **0 / 0 / 0 / 0** |
+| the slab cut at 20 mm | 3291 | 0 / 0 / 0 / 0 | — |
+
+- Region 101's freeze goes 3376 → 3780 voxels: 7 layers, 23.87 mm effective.
+- The positive controls are all exact: every freeze count equals the run's receipt, and an
+  independent recount matches.
+- Re-running the unchanged job gave a byte-identical `design.bin`.
+- Full method: `docs/handoffs/2026-10-01-core-brief-region-protection-tie.md` and its evidence
+  folder.
+
+**The core brief** (44882880):
+1. Tie region-id protections in core. It must land AFTER 87f792d9. Three traps:
+   - face-id spaces;
+   - a direct face that is also a region member;
+   - **equal mm are not equal voxels**: 68 slab voxels stay outside region 101's own 7-layer
+     freeze even after the fix. They are held only by the neighbouring walls' protections.
+2. The collar, measured only: 413 voxels. 37 are outside region 101's own freeze at 20 mm and 6
+   at 24.15 mm. 0 are outside every freeze, and 0 were emptied at any rung, before or after.
+
+**Tests:**
+- `testARegionsProtectionDoesNotFollowItsExpand` is flipped to `testARegionsProtectionFollowsItsSlab`
+  (expand +4.15 and −2; specs, wire, core's parser);
+- new `testARegionWithNoSlabOrNoExpandKeepsItsDepth`;
+- RED: the old depth turns 4 assertions red.
+
+### Ruling (b): one gate, one sentence
+
+Both strings showed whenever the job's emission had no include wall, and that emission is empty
+in two cases:
+- **Lattice ON, no include wall:** exactly the gate's condition. Both now say "nothing set to
+  lattice" with the one tap. The wizard's leaves by Save & Exit (confirmed); the Fit pane's calls
+  `onMarkWalls`.
+- **Lattice OFF:** the emission is empty because the mode is off, whatever walls are marked. That
+  is the gate's "lattice mode is off", **a different condition, so both keep their words.** You
+  reach it with the wizard open while lattice is off, or after the variant page's "Lattice infill"
+  toggle.
+
+Evidence: `evidence/2026-09-30-ruling4-gates/fit_pane_nothing_set_to_lattice.png` and
+`fit_pane_lattice_off_keeps_its_words.png`.
+
+**Other phrasings of a related fact, reported and not changed:**
+- `FrozenRegionLatticeStatus` says "the whole part is latticed" when no include wall exists. That
+  is stale since rulings (c) and 4: such a job is refused, not latticed whole.
+- The preview banner offers depth advice when there is no include wall (from reading, not run).
+- "Mark a wall to size the cells", "mark a wall to lattice" and the toast "Import a part and set a
+  lattice region first." each report a different condition. The toast fires only once an include
+  wall exists; its cause is a missing file or config.
+
+### Ruling 3's deviation, and no false depth
+
+- Accepted: "set the wall to X − expand".
+- New (e8564e90): when X − expand is at or below zero, or below the wall's minimum depth, the
+  sentence ends "Optimize again with this wall." and the banner keeps its Optimize again tap.
+- The minimum is one constant, `LatticeSlabDepth.minMM` = 1 mm, which every depth write clamps to.
+- Tested through core's parser:
+  - expand 5 and 4.5 on a 5 mm skin: no depth;
+  - setting 0.5 clamps to 1 and is still refused;
+  - expand 4 gives "set the wall to 1 mm", and that is accepted.
+
+**Edges for him, not decided:**
+- With a negative expand, X − expand can exceed the 50 mm maximum. The ruling covers the low end
+  only.
+- The sentence rounds to 0.01 mm while core's tie is exact to 1e-9. A protection with more
+  decimals could be shown as a value that is refused again.
+
+### Ruling (c): 102117B9, and the store
+
+**Fix 1 (211299c3).** `LatticeFaceWallThickness` decodes a missing `startMM` as 0. Encoding is
+unchanged, byte for byte (pinned). The proof uses a COPY of his file,
+`Tests/TopOptFlowsTests/Fixtures/102117B9_project.json`:
+- it decodes, and the wall keeps startMM 0 and its 43-column profile;
+- opened through a temp store with his STEP, it lists and opens;
+- it shows the walls the file declares: **Group C "include" over its 15 faces**. Faces 2 and 15
+  are at their own 12 and 11 mm, the other 13 at 4 mm: 177 face prisms, 0 skipped.
+  (Round 2 named only faces 2 and 15. That was incomplete; the group's other 13 faces are walls
+  too.)
+- Its first stage dump is 3f19f920e5c96a5a. It is new, caused by (c); there is no before.
+
+**Every project currently in the store decodes** (P2, through the real decoder and the store):
+
+| id | name | saved |
+|---|---|---|
+| 102117B9 | M2 verticalStand | 2026-09-21 |
+| 3418E167 | M2 verticalStand THICK | 2026-09-30 23:22 |
+| 570B38E2 | DOUBLED test (Claude copy) | 2026-08-25 |
+| 68BF7B74 | M2 verticalStand | 2026-09-30 23:21 |
+| 887AC498 | shelvesb | 2026-09-05 |
+| 92A8016E | l bracket 3 | 2026-08-20 |
+| AA4C7953 | M2 verticalStand THICK | 2026-08-21 |
+
+**Fix 2 (072eded0).**
+- `ProjectStore.read(id:)` / `loadAll()` list every UUID folder, readable or not, and reading
+  writes nothing.
+- Three silent drops now say why:
+  - a decode error, with its key and path;
+  - a newer schema;
+  - a folder with no `project.json`.
+- `AppModel.unreadableProjects` is kept apart from recents, so a "Can’t open" card never reaches
+  `open()`, which would start an empty project with the same id. `deleteProject` refuses one.
+- Home shows "Can’t open" with the reason, in the recent card's frame and tokens. The card has
+  nothing to tap (pinned).
+- Evidence: `evidence/2026-10-01-cant-open/cant_open_cards.png`.
+
+**Notes for him:**
+- **The next save of 102117B9** (Home, backgrounding, rename) writes `"startMM":0` into his file.
+  That is the app saving a project he opened; the store itself never writes.
+- **The same trap, latent:** `OrganicForecast.Predicted` has 5 defaulted fields added after
+  forecasts were first saved. No project in his store holds a stored forecast, so nothing breaks
+  today. Making it tolerant would turn a bad forecast into a silent nil, so it is his call.
+- **Other silent paths, outside this ruling:**
+  - `restoreFromDisk` opens an empty workspace when the model fails to import;
+  - a results file that fails to decode is dropped;
+  - a remote job whose project is unreadable says "may have been deleted".
+
+### The review before the push (f11e0abc)
+
+An adversarial review of the round's diff confirmed four defects, each now fixed, tested, and
+RED-controlled. The other claims were refuted.
+
+1. **A deleted project could come back as a "Can’t open" card nobody can remove.** Results and
+   re-lattice artifacts are written on a serial background queue. A write still queued at the
+   delete recreated the folder WITHOUT `project.json`, and fix 2 listed it, with no delete. Two
+   halves:
+   - the writes go only into a folder that still holds its project (`ProjectStore.holdsProject`);
+   - `deleteProject` deletes again behind the queue.
+
+   The test is deterministic: hold the queue, persist, delete, release, drain.
+2. **(a) missed a split or cut region.** The emission lattices the group's own region, while the
+   protection walks its children, so they fell back to the dragged depth. Each child now reads the
+   slab its surface is latticed through. Test: a split region with a 4.15 mm expand protects both
+   children at 24.15.
+3. **The sentence could suggest more than 50 mm.** Every depth write clamps to [1, 50], so a depth
+   is now suggested only inside [1, 50].
+4. **The sentence could name the wrong wall** when a face carries two prisms. Core stops at the
+   prism that differs, and the app now matches it by core's wall depth too. This one predates
+   round 3.
+
+None of the seven projects' bytes move.
+
+### Tests (round 3)
+
+| test | what it pins | RED |
+|---|---|---|
+| `testARegionsProtectionFollowsItsSlab` (flipped), `testARegionWithNoSlabOrNoExpandKeepsItsDepth`, `testASplitRegionsChildrenFollowTheirParentsSlab` | (a) | the old depth: 4 red; no parent lookup: 20 |
+| `testTheOtherPhrasingsSayTheGatesSentenceWhereTheyReportItsCondition` | (b) | wizard, Fit pane |
+| `testNoDepthIsSuggestedWhenNoneCanClearIt`, `testNoDepthIsSuggestedAboveTheMaximum`, `testTheWallNamedIsTheOneCoreRejected` | ruling 3 | always a depth; no ceiling; first prism |
+| `testAWallSavedWithoutItsStartDecodesAtZero`, `testHisProjectDecodesAndShowsTheSameWalls`, `testEveryProjectInTheStoreCopyDecodes` (env-gated) | (c) fix 1 | no decoder: all red, 102117B9 dropped |
+| `testTheStoreListsEveryProjectAndTouchesNothing`, `testTheAppShowsThemButNeverOpensOrDeletesThem`, `testStoreSkipsNewerSchema` (extended), `testADeletedProjectsQueuedWritesNeverBringItBack` | (c) fix 2 | silent drop; delete unguarded; the race |
+
+Every RED control was restored byte-identical from a snapshot.
+
+**Per commit:** the iOS build succeeded with fresh objects, and the stage hashes are in the
+ruling sections.
+
+**Targeted, after f11e0abc:** every test class round 3 touches or reads, 39 classes, ran 417 tests
+with 11 env-gated skips and 8 failed assertions. **All 8 are in the three known AppModel 3MF test
+cases**, which fail because lib3mf is not in the macOS slice; they are pre-existing.
+
+**The full suite** runs once before the lattice-types handoff (that task's own tier), and it
+covers this round.

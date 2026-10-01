@@ -1433,6 +1433,8 @@ public struct WorkspacePlaceholder: View {
                     // octet bake behind the forced one on every Save & Exit.
                 }
                 .organicProbeDriver(makeOrganicProbeDriver())
+                // ★ ruling 4 (item 6): its "nothing set to lattice" lines leave by its own exit
+                .wallMarking { goToWallMarking() }
                 // ★ the stage draws with the workspace-owned camera the one gizmo follows
                 .stageCamera(wizardCamera)
                 // ★ the wall editor's cover hides the gizmo (2026-09-21)
@@ -3512,12 +3514,13 @@ public struct WorkspacePlaceholder: View {
     /// have no shape to lattice (the stage's job leaves them out too), so each of the three
     /// surfaces can say so (ruling V1, 2026-09-29) — the note this used to post was drawn on
     /// the page the run then closed, so nobody ever saw it.
-    private func relatticeJobJSON() -> (json: Data, spec: LatticeSpec, facesWithoutShape: Int, regionsWithoutShape: [String])? {
+    private func relatticeJobJSON(emission given: LatticeRegionEmission.Result? = nil)
+        -> (json: Data, spec: LatticeSpec, facesWithoutShape: Int, regionsWithoutShape: [String], coreRefusal: String?)? {
         guard let ctx = latticeVariantContext, let art = ctx.artifacts else { return nil }
         // The regions as the stage sends them (bar Z11; ruling a, 2026-09-30): each face wall
         // as its full prism on the original part, face_id included as provenance, so core's
         // depth tie checks it against the protection this variant's run froze.
-        let emission = project.variantLatticeJobRegions()
+        let emission = given ?? project.variantLatticeJobRegions()
         // ★ RULING (c) (2026-09-30): no include wall ⇒ no document — core would lattice the
         // WHOLE variant. The backstop for all three callers (the forecast, Check sizes, the
         // run); each says why in the stage's words (`project.variantLatticeJobRefusal()`).
@@ -3535,29 +3538,42 @@ public struct WorkspacePlaceholder: View {
         guard let spec = project.latticeRunSpec(emission: emission),
               let json = try? RelatticeJobBuilder.build(
                 original: art.jobJSON, variant: ctx, lattice: spec) else { return nil }
-        return (json, spec, emission.skippedFaces, emission.skippedRegionNames)
+        // ★ RULING 3 (2026-09-30): core's OWN parser on this very document — the same core the
+        // worker runs (RelatticeRun refuses a worker whose fingerprint differs) — so a job core
+        // refuses (an old run's protection at another depth than the wall today) is said before
+        // any tap, in his words, and never sent.
+        let coreRefusal = TopOptKit.jobSchemaError(json).map {
+            project.variantJobCoreRefusal(coreError: $0, regions: emission.regions)
+        }
+        return (json, spec, emission.skippedFaces, emission.skippedRegionNames, coreRefusal)
     }
 
-    /// ★ THE VARIANT JOB'S FACTS FOR THE PAGE, from ONE emission (read once per page pass):
-    /// what the job leaves out — marked faces that have no shape to lattice, and face regions the
-    /// run cannot consume, by name (rulings V1 and g) — and why it may not be written at all
-    /// (ruling c). Nothing off a variant. The forecast drawer states them even when no forecast
-    /// can be produced.
-    private var latticeVariantJobFacts: (faces: Int, regions: [String], refusal: String?) {
-        guard latticeVariantContext != nil else { return (0, [], nil) }
+    /// ★ THE VARIANT JOB FOR ONE PAGE PASS, from ONE emission and one document:
+    /// - what the job leaves out — marked faces that have no shape to lattice, and face regions
+    ///   the run cannot consume, by name (rulings V1 and g);
+    /// - why it may not be written at all (ruling c);
+    /// - and, where the app already asks core about the variant's job (a worker and a retained
+    ///   design: the forecast's own conditions), core's own verdict on the document (ruling 3);
+    /// - the forecast's input and identity: that document — never sent when core refuses it,
+    ///   nil without a worker, a retained design or a variant (the drawer says so).
+    private struct LatticeVariantJobPass {
+        var facesWithoutShape = 0
+        var regionsWithoutShape: [String] = []
+        var refusal: String? = nil
+        var coreRefusal: String? = nil
+        var forecastJob: Data? = nil
+    }
+    private var latticeVariantJobPass: LatticeVariantJobPass {
+        guard latticeVariantContext != nil else { return LatticeVariantJobPass() }
         let e = project.variantLatticeJobRegions()
-        return (e.skippedFaces, e.skippedRegionNames,
-                LatticeJobIncludeGate.refusal(latticeEnabled: project.lattice.enabled,
-                                              regions: e.regions))
-    }
-
-    /// The forecast's input and identity: the job above, but only when a forecast
-    /// can actually be produced. No worker, no retained design, no variant ⇒ nil,
-    /// and the drawer says so rather than spinning forever.
-    private var latticeForecastJob: Data? {
-        guard showLatticePage, compute.activeRemote != nil,
-              latticeVariantContext?.artifacts != nil else { return nil }
-        return relatticeJobJSON()?.json
+        var pass = LatticeVariantJobPass(
+            facesWithoutShape: e.skippedFaces, regionsWithoutShape: e.skippedRegionNames,
+            refusal: LatticeJobIncludeGate.refusal(latticeEnabled: project.lattice.enabled, regions: e.regions))
+        guard pass.refusal == nil, showLatticePage, compute.activeRemote != nil,
+              latticeVariantContext?.artifacts != nil, let job = relatticeJobJSON(emission: e) else { return pass }
+        pass.coreRefusal = job.coreRefusal
+        if job.coreRefusal == nil { pass.forecastJob = job.json }
+        return pass
     }
 
     /// ★ THE ORGANIC CELL-SIZE PROBE (final contract 2026-09-05): the SAME inputs
@@ -3582,6 +3598,8 @@ public struct WorkspacePlaceholder: View {
             guard let job = relatticeJobJSON() else {
                 throw RelatticeError("There is nothing to check yet. Optimize the part first.")
             }
+            // ★ ruling 3: a job core refuses is never sent — said in his words
+            if let why = job.coreRefusal { throw RelatticeError(why) }
             let inputs = RelatticeRun.Inputs(
                 config: config, modelPath: path, jobJSON: job.json,
                 designBin: designBin, projectName: name,
@@ -3649,6 +3667,9 @@ public struct WorkspacePlaceholder: View {
                 + "job document."
             return
         }
+        // ★ ruling 3: a job core refuses is never sent — the button already says it; this is
+        // the second layer
+        if let why = job.coreRefusal { model.toast = why; return }
         // BAR Z2, app side: the document about to be submitted must differ from
         // the one that produced this variant ONLY in the lattice question. If any
         // load-case key moved, refuse HERE — before the worker spends solves
@@ -3717,7 +3738,7 @@ public struct WorkspacePlaceholder: View {
     }
 
     private var latticePageOverlay: some View {
-        let facts = latticeVariantJobFacts
+        let pass = latticeVariantJobPass
         return LatticePage(model: model, project: project, run: run,
                     sim: latticeSim, page: latticePageModel,
                     variantField: latticePageVariantField,
@@ -3780,11 +3801,14 @@ public struct WorkspacePlaceholder: View {
                     // job document is both the input and the identity, and the
                     // driver is nil exactly when no forecast is possible.
                     forecast: latticeForecast,
-                    forecastJob: latticeForecastJob,
+                    forecastJob: pass.forecastJob,
                     driveForecast: makeForecastDriver(),
-                    variantFacesWithoutShape: facts.faces,
-                    variantRegionsWithoutShape: facts.regions,
-                    variantJobRefusal: facts.refusal)
+                    variantFacesWithoutShape: pass.facesWithoutShape,
+                    variantRegionsWithoutShape: pass.regionsWithoutShape,
+                    variantJobRefusal: pass.refusal,
+                    variantJobCoreRefusal: pass.coreRefusal,
+                    // ★ ruling 4 (item 6): "nothing set to lattice" is one tap from the walls
+                    onMarkWalls: { goToWallMarking() })
             .ignoresSafeArea(.keyboard)
     }
 
@@ -4710,8 +4734,7 @@ public struct WorkspacePlaceholder: View {
         // property is now only the two inputs it is asked for.
         return LatticePreviewBodyAlpha.value(
             latticeLayerDrawn: latticeLayerIsDrawn,
-            hasIncludeRegion: project.latticeJobRegions().regions
-                .contains { $0.role == .include },
+            hasIncludeRegion: LatticeJobIncludeGate.hasIncludeWall(project.latticeJobRegions().regions),
             nothingToLattice: latticePreviewHasNothingToDraw)
     }
 
@@ -5543,6 +5566,21 @@ public struct WorkspacePlaceholder: View {
         stage = dest
         latticeDisclosure.closeAll()
         if dest == .lattice { refreshLatticeFaceCards() }
+    }
+
+    /// ★★ RULING 4 (item 6, maintainer 2026-09-30): THE ONE TAP wherever "nothing set to lattice"
+    /// shows — to where walls are marked: the Lattice stage, its Selections open. NAVIGATION
+    /// ONLY: it creates no wall and sets no role (pinned by `LatticeIncludeGateTests`). From a
+    /// variant's page, the page closes as its own Close closes it (the variant is left).
+    private func goToWallMarking() {
+        if showLatticePage { closeLatticePage() }
+        if stage != .lattice { goToStage(.lattice) }
+        selectionsCollapsed = false
+    }
+    /// Whether that tap would take him anywhere. On the Lattice stage with Selections open he is
+    /// already where walls are marked, so the line stays a plain line — never a dead tap.
+    private var wallMarkingTapGoesSomewhere: Bool {
+        showLatticePage || stage != .lattice || selectionsCollapsed
     }
 
     /// Whether anything has been committed since entering the stage (or since the
@@ -10455,12 +10493,7 @@ public struct WorkspacePlaceholder: View {
 
     /// A selectable's short name on its row. Two words at most (R7).
     private func latticePrimitiveName(_ ref: LatticeSelectableRef) -> String {
-        switch ref {
-        case let .face(_, f): return "Face \(project.runFaceID(f))"
-        case .primitive: return "Primitive"
-        case let .region(_, rid):
-            return project.latticeRegionName(rid)
-        }
+        project.latticeSelectableName(ref)   // one definition (ruling 3 names walls with it)
     }
 
     /// ★ One primitive's own answer: Lattice / Solid / Off (§3c). Three, not two —
@@ -11558,6 +11591,11 @@ public struct WorkspacePlaceholder: View {
         // "any lattice" to "graded" by the device-failure task, because PR 285
         // taught core to run the uniform case).
         guard latticeDesignBoxConflict == nil else { return false }
+        // ★★ RULING 4 (item 5, 2026-09-30): lattice on and no include wall ⇒ refused on the
+        // button, before the run starts, in the stage's words — core would lattice every variant
+        // WHOLE. The page's Optimize reads this same value (`baseCanOptimize`), and every start
+        // (`requestRun`, `startRun`, the page's "Optimize again") is gated on it.
+        guard latticeOptimizeRefusal == nil else { return false }
         guard force.canOptimize(in: selection.groups,
                                 minimizePlastic: project.minimizePlastic,
                                 latticeRoleGroups: latticeRoleGroupIDs)
@@ -11578,9 +11616,17 @@ public struct WorkspacePlaceholder: View {
                                            graded: project.lattice.densityMode == .sim)
     }
 
+    /// ★ ruling 4 (item 5): why Optimize may not start with this lattice — the ONE definition
+    /// of "has an include wall" (`LatticeJobIncludeGate`), on the emission the run would send.
+    private var latticeOptimizeRefusal: String? {
+        LatticeJobIncludeGate.optimizeRefusal(latticeEnabled: project.lattice.enabled,
+                                              regions: project.latticeJobRegions().regions)
+    }
+
     /// The Optimize sub-label, reflecting the minimize-plastic mode + the load case.
     private var optimizeSummary: String {
         if let why = latticeDesignBoxConflict { return why }
+        if let why = latticeOptimizeRefusal { return why }
         if force.phase == .setup { return "set gravity first" }
         if force.hasPending(in: selection.groups,
                             latticeRoleGroups: latticeRoleGroupIDs) {
@@ -11632,24 +11678,18 @@ public struct WorkspacePlaceholder: View {
     /// this screen to DO, not a modifier on the first.
     private var latticeThisButton: some View {
         let ok = canLatticeThis
+        let summary = latticeThisSummary
+        // ★ ruling 4 (item 6): greyed, and its tap takes him to where walls are marked
+        let marks = !ok && wallMarkingTapGoesSomewhere && LatticeJobIncludeGate.opensWallMarking(summary)
         return Button {
-            guard ok else { return }
-            requestLatticeRun()
+            if ok { requestLatticeRun() } else if marks { goToWallMarking() }
         } label: {
-            VStack(spacing: 1) {
-                Text("Lattice").dsStyle(DS.TypeScale.bodyStrong).fontWeight(.semibold)
-                Text(latticeThisSummary)
-                    .font(.system(size: 10.5, weight: .semibold))
-                    .opacity(0.75)
-            }
-            .foregroundStyle((ok ? DS.Color.textPrimary : DS.Color.textDisabled).color)
-            .padding(.vertical, 11).padding(.horizontal, DS.Space.xl3)
-            .background(Capsule().fill(ok ? DS.Color.accent.color : DS.Color.fillDisabled.color)
-                .overlay(Capsule().strokeBorder(ok ? .clear : DS.Color.strokePanel.color, lineWidth: 1)))
-            .dsShadow(ok ? DS.Shadow.accentGlow : DS.Shadow.panel)
+            StageActionCapsuleLabel(title: "Lattice", summary: summary, ok: ok, marks: marks,
+                                    horizontalPadding: DS.Space.xl3)
         }
         .buttonStyle(.plain)
-        .disabled(!ok)
+        .disabled(!ok && !marks)
+        .accessibilityHint(marks ? WallMarkingSubline.hint : summary)
         .accessibilityIdentifier("lattice-this-button")
     }
 
@@ -11699,52 +11739,44 @@ public struct WorkspacePlaceholder: View {
           && !TopOptKit.organicStructuralCertificationWired)
     }
 
-    /// ★ OFFER, NEVER SUBSTITUTE (ruling Aug 5; 2026-09-03): an organic Fit with no
-    /// declared region is REFUSED here, in words — never remapped to Auto. Core would
-    /// refuse `fit` with nothing to fit into ("a job that declares none states no
-    /// requirement to fit"), so the job is not written.
-    private var organicFitWithoutRegion: Bool {
-        project.lattice.isOrganic && project.lattice.cellSizeMode == .fit
-            && !project.latticeJobRegions().regions.contains(where: { $0.role == .include })
+    /// ★★ RULING 4 (maintainer, 2026-09-30): the stage asks the ONE question a variant and
+    /// Optimize ask (`LatticeJobIncludeGate`) — an exclude-only project lattices nothing, so
+    /// "Lattice" greys with the reason it already showed. It used to ask only whether ANY region
+    /// was emitted, and an exclude-only list would have latticed the whole part but those walls.
+    /// (An organic Fit with no include wall — "OFFER, NEVER SUBSTITUTE", ruling Aug 5 — is the
+    /// same refusal and was already said in these words first; its own branch was unreachable.)
+    private var latticeStageRefusal: String? {
+        LatticeJobIncludeGate.refusal(latticeEnabled: project.lattice.enabled,
+                                      regions: project.latticeJobRegions().regions)
     }
 
     var canLatticeThis: Bool {
-        project.lattice.enabled && !project.latticeJobRegions().regions.isEmpty
-            && organicStructuralGateOpen && !organicFitWithoutRegion
+        latticeStageRefusal == nil && organicStructuralGateOpen
     }
 
     private var latticeThisSummary: String {
         // (The words live in `LatticeJobIncludeGate`, so a variant's refusal is the stage's by
         // construction — ruling c, 2026-09-30.)
-        guard project.lattice.enabled else { return LatticeJobIncludeGate.latticeModeOff }
-        let n = project.latticeJobRegions().regions
-            .filter { $0.role == .include }.count
-        if n == 0 { return LatticeJobIncludeGate.nothingSetToLattice }
+        if let why = latticeStageRefusal { return why }
         if !organicStructuralGateOpen { return TopOptKit.organicStructuralGateMessage }
-        if organicFitWithoutRegion { return "organic Fit needs a declared lattice region — pick Auto or declare one" }
+        let n = project.latticeJobRegions().regions.filter { $0.role == .include }.count
         return "\(n) region\(n > 1 ? "s" : "") · no optimization"
     }
 
     private var optimizeButton: some View {
         let ok = canOptimize
+        let summary = optimizeSummary
+        // ★ ruling 4 (item 6): greyed, and its tap takes him to where walls are marked
+        let marks = !ok && wallMarkingTapGoesSomewhere && LatticeJobIncludeGate.opensWallMarking(summary)
         return Button {
-            guard ok else { return }
-            requestRun()
+            if ok { requestRun() } else if marks { goToWallMarking() }
         } label: {
-            VStack(spacing: 1) {
-                Text("Optimize").dsStyle(DS.TypeScale.bodyStrong).fontWeight(.semibold)
-                Text(optimizeSummary)
-                    .font(.system(size: 10.5, weight: .semibold))
-                    .opacity(0.75)
-            }
-            .foregroundStyle((ok ? DS.Color.textPrimary : DS.Color.textDisabled).color)
-            .padding(.vertical, 11).padding(.horizontal, DS.Space.xl5)
-            .background(Capsule().fill(ok ? DS.Color.accent.color : DS.Color.fillDisabled.color)
-                .overlay(Capsule().strokeBorder(ok ? .clear : DS.Color.strokePanel.color, lineWidth: 1)))
-            .dsShadow(ok ? DS.Shadow.accentGlow : DS.Shadow.panel)
+            StageActionCapsuleLabel(title: "Optimize", summary: summary, ok: ok, marks: marks,
+                                    horizontalPadding: DS.Space.xl5)
         }
         .buttonStyle(.plain)
-        .disabled(!ok)
+        .disabled(!ok && !marks)
+        .accessibilityHint(marks ? WallMarkingSubline.hint : summary)
     }
 }
 

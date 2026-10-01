@@ -77,8 +77,7 @@ final class LatticeVariantFaceWallsTests: XCTestCase {
         p.selection.pickFaces([42])
         XCTAssertEqual(p.latticeJobRegions().skippedFaces, 1, "control: the stage leaves it out too")
         XCTAssertEqual(p.variantLatticeJobRegions().skippedFaces, 1)
-        XCTAssertEqual(VariantFacePrismFixture.canonical(p.variantLatticeJobRegions().regions),
-                       VariantFacePrismFixture.canonical(p.latticeJobRegions().regions),
+        XCTAssertEqual(p.variantLatticeJobRegions().regions, p.latticeJobRegions().regions,
                        "the rest of the walls still travel")
         XCTAssertEqual(LatticeVariantFaceWalls.line(withoutShape: 1),
                        "1 marked face has no shape to lattice and is left out.")
@@ -116,13 +115,13 @@ final class LatticeVariantFaceWallsTests: XCTestCase {
             .facesWithoutShape, "★ a V1 answer's count meant every face wall — not read as this one")
         // every surface draws it, from the job's own count
         let ws = try src("WorkspacePlaceholder.swift")
-        XCTAssertTrue(ws.contains("return (json, spec, emission.skippedFaces, emission.skippedRegionNames)"),
-                      "the job's own count, with the job's own spec")
+        XCTAssertTrue(ws.contains("return (json, spec, emission.skippedFaces, emission.skippedRegionNames, coreRefusal)"),
+                      "the job's own count, with the job's own spec (and core's verdict, ruling 3)")
         XCTAssertTrue(ws.contains("probe.facesWithoutShape = job.facesWithoutShape"), "Check sizes stamps its answer")
         XCTAssertTrue(ws.contains("probe.regionsWithoutShape = job.regionsWithoutShape.isEmpty ? nil : job.regionsWithoutShape"))
         XCTAssertTrue(ws.contains("variantFacesWithoutShape: withoutShape,\n                variantRegionsWithoutShape: regionsWithoutShape))"),
                       "the re-lattice result carries it")
-        XCTAssertTrue(ws.contains("variantFacesWithoutShape: facts.faces,\n                    variantRegionsWithoutShape: facts.regions,"),
+        XCTAssertTrue(ws.contains("variantFacesWithoutShape: pass.facesWithoutShape,\n                    variantRegionsWithoutShape: pass.regionsWithoutShape,"),
                       "the forecast drawer gets it, from ONE emission per pass")
         XCTAssertTrue(try src("LatticePage.swift").contains(
             "if let scope = LatticeVariantFaceWalls.line(withoutShape: variantFacesWithoutShape,\n"
@@ -335,5 +334,27 @@ final class LatticeVariantFaceWallsTests: XCTestCase {
         XCTAssertEqual(regions, p.latticeJobRegions().regions)
         XCTAssertTrue(try src("ProjectModel.swift").contains(
             "public func variantLatticeJobRegions() -> LatticeRegionEmission.Result {\n        latticeJobRegions()\n    }"))
+    }
+    /// ★ THE #358 SYNC'S CANARY (2026-09-30): core's in-plane frame check now fires at PARSE time
+    /// (12ff5880). Before the sync the app's linked core let an out-of-plane frame through its
+    /// parser (Q1's J8, a dead check) and the job died only at run time, after the load case —
+    /// so this test goes red on a stale core. The app's own frames are built from the unit normal
+    /// and pass (the control).
+    func testTheLinkedCoreRefusesAnOutOfPlaneFrameAtParseTime() throws {
+        let (p, _, _) = VariantFacePrismFixture.project()
+        let docs = try VariantFacePrismFixture.variantDocuments(p)
+        for (label, doc) in docs {
+            XCTAssertNil(TopOptKit.jobSchemaError(doc), "control: the app's own \(label) document parses")
+            var obj = try XCTUnwrap(JSONSerialization.jsonObject(with: doc) as? [String: Any])
+            var lat = try XCTUnwrap(obj["lattice"] as? [String: Any])
+            var regions = try XCTUnwrap(lat["regions"] as? [[String: Any]])
+            let i = try XCTUnwrap(regions.firstIndex { ($0["geometry"] as? [String: Any])?["frame_u"] != nil })
+            var g = try XCTUnwrap(regions[i]["geometry"] as? [String: Any])
+            g["frame_u"] = g["normal"]          // the u axis along the normal: out of the face plane
+            regions[i]["geometry"] = g; lat["regions"] = regions; obj["lattice"] = lat
+            let why = try XCTUnwrap(TopOptKit.jobSchemaError(try JSONSerialization.data(withJSONObject: obj)),
+                                    "★ \(label): refused at parse time by the synced core")
+            XCTAssertTrue(why.contains("frame axes must lie IN the face plane"), why)
+        }
     }
 }

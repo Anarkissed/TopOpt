@@ -380,6 +380,9 @@ public struct LatticePageActions: Equatable, Sendable {
         public let enabled: Bool
         /// True for the action a plain tap should land on.
         public let primary: Bool
+        /// ★ ruling 4 (item 6): refused for want of an include wall — greyed, and its tap takes
+        /// him to where walls are marked instead of doing nothing.
+        public var marksWalls: Bool = false
     }
 
     /// Lattice the finished variant. nil when the page was not opened from one.
@@ -406,7 +409,8 @@ public struct LatticePageActions: Equatable, Sendable {
                 relattice: nil,
                 optimize: Action(label: optimizeSurface.label,
                                  sub: optimizeSurface.sub,
-                                 enabled: optimizeSurface.enabled, primary: true))
+                                 enabled: optimizeSurface.enabled, primary: true,
+                                 marksWalls: optimizeSurface.marksWalls))
         }
         let pct = Int((v.requestedVolumeFraction * 100).rounded())
         let re: Action
@@ -429,7 +433,8 @@ public struct LatticePageActions: Equatable, Sendable {
             // Disabled with the stage's words; after `unavailable` (setting walls cannot fix a
             // run that kept no design), before the forecast (none is asked for).
             re = Action(label: "Lattice this variant", sub: why,
-                        enabled: false, primary: true)
+                        enabled: false, primary: true,
+                        marksWalls: LatticeJobIncludeGate.opensWallMarking(why))
         } else if let f = forecast, f.regionVoxels > 0, f.wouldLatticeVoxels == 0 {
             // NOTHING WOULD BE LATTICED (task
             // 2026-08-04-variant-volume-fraction-mismatch, bar B3 / L3). This is
@@ -475,7 +480,8 @@ public struct LatticePageActions: Equatable, Sendable {
             label: "Optimize from scratch",
             sub: "re-runs the whole ladder from the original part · " +
                  optimizeSurface.sub,
-            enabled: optimizeSurface.enabled && !running, primary: false)
+            enabled: optimizeSurface.enabled && !running, primary: false,
+            marksWalls: optimizeSurface.marksWalls && !running)
         return LatticePageActions(relattice: re, optimize: opt)
     }
 }
@@ -522,9 +528,10 @@ public struct LatticeVariantAuthoring: Equatable, Sendable {
             note: Self.variantTapRefusal)
     }
 
-    /// ★ Ruling (e), verbatim.
+    /// ★ Ruling (e), in the house style (ruling 5, 2026-09-30: a curly ’ and "optimized" — "His
+    /// rule was mine to phrase; the house style wins").
     public static let variantTapRefusal =
-        "You can't pick faces on an optimised result — the walls you marked on the part carry over."
+        "You can’t pick faces on an optimized result — the walls you marked on the part carry over."
 }
 
 // MARK: - region emission against a variant
@@ -565,17 +572,89 @@ public enum LatticeVariantFaceWalls {
 /// complaint, so the refusal is the app's, read from the EMITTED regions: a legacy include
 /// primitive is an include wall; a marked face with no shape, a cut sector, a Solid/Off wall
 /// is not.
+///
+/// ★★ RULING 4 (maintainer, 2026-09-30): ONE definition of "has an include wall", shared by the
+/// stage, a variant and Optimize — `hasIncludeWall` is the only place the question is asked of a
+/// region list (pinned by `LatticeIncludeGateTests`):
+/// - the stage: an exclude-only project greys "Lattice" with the reason it already shows;
+/// - Optimize: with lattice on and no include wall it is refused on the button, before the run
+///   starts, in the same words — never lattice every variant whole;
+/// - wherever "nothing set to lattice" shows, one tap takes him to where walls are marked
+///   (`opensWallMarking`) — navigation only, never a wall made for him.
 public enum LatticeJobIncludeGate {
     /// The stage's own words (`WorkspacePlaceholder.latticeThisSummary`) — one home.
     public static let latticeModeOff = "lattice mode is off"
     public static let nothingSetToLattice = "nothing set to lattice"
+    /// ★ THE definition: an emitted region list lattices something only through an include wall.
+    /// Core lattices the WHOLE printed set when a job declares none.
+    public static func hasIncludeWall(_ regions: [LatticeRegionSpec]) -> Bool {
+        regions.contains { $0.role == .include }
+    }
     /// Why the job may not be written; nil when it may. Lattice off first, as the stage says it.
-    public static func refusal(latticeEnabled: Bool, includeCount: Int) -> String? {
+    public static func refusal(latticeEnabled: Bool, hasIncludeWall: Bool) -> String? {
         guard latticeEnabled else { return latticeModeOff }
-        return includeCount > 0 ? nil : nothingSetToLattice
+        return hasIncludeWall ? nil : nothingSetToLattice
     }
     public static func refusal(latticeEnabled: Bool, regions: [LatticeRegionSpec]) -> String? {
-        refusal(latticeEnabled: latticeEnabled,
-                includeCount: regions.filter { $0.role == .include }.count)
+        refusal(latticeEnabled: latticeEnabled, hasIncludeWall: hasIncludeWall(regions))
+    }
+    /// ★ ruling 4 (item 5): why Optimize may not start. Lattice OFF is no refusal — the run is
+    /// topology only; lattice ON with no include wall is, in the same words.
+    public static func optimizeRefusal(latticeEnabled: Bool, regions: [LatticeRegionSpec]) -> String? {
+        latticeEnabled && !hasIncludeWall(regions) ? nothingSetToLattice : nil
+    }
+    /// ★ ruling 4 (item 6): the refusal a wall fixes — wherever it shows, one tap takes him to
+    /// where walls are marked. Every other refusal is said without a tap.
+    public static func opensWallMarking(_ refusal: String?) -> Bool {
+        refusal == nothingSetToLattice
     }
 }
+
+// MARK: - a retained run core refuses (ruling 3)
+
+/// ★★ RULING 3 (maintainer, 2026-09-30): an old retained run froze a wall at another depth than
+/// the wall has today — core's depth tie refuses the variant's job before any solve. The app asks
+/// core's OWN parser (never re-deriving the tie) and says it in his words. This only turns core's
+/// message into that sentence: it reads core's numbers, never computes a verdict.
+public enum LatticeVariantProtectionTie {
+    public struct Mismatch: Equatable, Sendable {
+        /// The RUN face id core names.
+        public let faceID: Int
+        /// Core's two numbers, in mm.
+        public let protectionMM: Double
+        public let wallMM: Double
+    }
+    /// Core's refusal text (job.cpp's depth tie: "face N is BOTH protected and a lattice region, at
+    /// two different depths: the protection is X mm and the lattice region is Y mm. …") → its
+    /// numbers; nil for any other message.
+    public static func parse(coreError: String) -> Mismatch? {
+        let pattern = #"face (\d+) is BOTH protected and a lattice region, at two different depths: the protection is ([0-9.]+) mm and the lattice region is ([0-9.]+) mm"#
+        guard let re = try? NSRegularExpression(pattern: pattern),
+              let m = re.firstMatch(in: coreError, range: NSRange(coreError.startIndex..., in: coreError)),
+              let f = Range(m.range(at: 1), in: coreError), let x = Range(m.range(at: 2), in: coreError),
+              let y = Range(m.range(at: 3), in: coreError),
+              let face = Int(coreError[f]), let prot = Double(coreError[x]), let wall = Double(coreError[y])
+        else { return nil }
+        return Mismatch(faceID: face, protectionMM: prot, wallMM: wall)
+    }
+    /// A depth as a person writes it: 5, 12.5 — core's value rounded to 0.01 mm.
+    public static func mm(_ v: Double) -> String {
+        let r = (v * 100).rounded() / 100
+        return r == r.rounded() ? String(format: "%.0f", r) : String(format: "%g", r)
+    }
+    /// His sentence. `setToMM` is the depth to set the wall to — core's protection, less the wall's
+    /// own in-plane expand when it has one (its slab reaches depth + expand; ruling 3's accepted
+    /// deviation). ★ nil ⇒ no depth can clear it (round 3, 2026-10-01: at or below zero, or below the
+    /// wall's minimum depth) — the sentence then offers Optimize again only.
+    public static func sentence(_ m: Mismatch, wallName: String, setToMM: Double?) -> String {
+        let head = "This result was optimized with a \(mm(m.protectionMM)) mm protected skin under \(wallName), "
+            + "but the wall is \(mm(m.wallMM)) mm deep. Optimize again with this wall"
+        guard let setTo = setToMM else { return head + "." }
+        return head + ", or set the wall to \(mm(setTo)) mm."
+    }
+    /// Any OTHER refusal of a variant document is said in core's own words, less its file prefix.
+    public static func coreWords(_ coreError: String) -> String {
+        coreError.hasPrefix("job.json: ") ? String(coreError.dropFirst("job.json: ".count)) : coreError
+    }
+}
+

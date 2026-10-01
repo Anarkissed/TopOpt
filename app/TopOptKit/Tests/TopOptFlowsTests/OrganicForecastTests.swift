@@ -297,11 +297,22 @@ final class OrganicForecastTests: XCTestCase {
         let run = try flat("core/src/cli/run_job.cpp")
         XCTAssertTrue(run.contains("bool cert_ok = false;"))
         XCTAssertEqual(run.components(separatedBy: "cert_ok = ").count - 1, 2, "declared once, set once")
-        let branch = try XCTUnwrap(run.range(of: "if (want_cert && !psegs.empty() && psegs.size() <= 600000) {"))
+        // #358 (154ce24f, synced 2026-09-30) made the skip ONE tested decision,
+        // `organic_probe_certificate_skip`: None only with a structural question, a network, and
+        // no more segments than the cap — the old branch's own condition, reason by reason.
+        let hpp = try flat("core/include/topopt/organic_lattice.hpp")
+        XCTAssertTrue(hpp.contains("if (!want_cert) return OrganicProbeSkip::AestheticIntent; "
+                                   + "if (segments == 0) return OrganicProbeSkip::NoSegments; "
+                                   + "if (segments > cap) return OrganicProbeSkip::SegmentCap; "
+                                   + "return OrganicProbeSkip::None;"))
+        XCTAssertTrue(run.contains("constexpr std::size_t kProbeSegmentCap = 600000;"))
+        let branch = try XCTUnwrap(run.range(of: "if (skip == OrganicProbeSkip::None) {"))
+        let certify = try XCTUnwrap(run.range(of: "certify_organic_structural("))
         let set = try XCTUnwrap(run.range(of: "cert_ok = pc.margin >= 1.0;"))
-        let capped = try XCTUnwrap(run.range(of: "} else if (!psegs.empty()) {"))
-        XCTAssertTrue(branch.upperBound <= set.lowerBound && set.upperBound <= capped.lowerBound,
-                      "cert_ok is set only inside the branch that runs the certificate")
+        let ranTrue = try XCTUnwrap(run.range(of: #"\"predicted\": {\"ran\": true,"#))
+        XCTAssertTrue(branch.upperBound <= certify.lowerBound && certify.upperBound <= set.lowerBound
+                      && set.upperBound <= ranTrue.lowerBound,
+                      "cert_ok is set only inside the branch that runs the certificate, from its margin")
         XCTAssertTrue(run.contains("const bool approved_structural = ok_s && cert_ok;"))
         XCTAssertTrue(run.contains("row.certified = cert_ok;"))
         let lat = try flat("core/src/mesh/organic_lattice.cpp")

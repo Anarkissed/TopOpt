@@ -466,18 +466,27 @@ public struct LatticeForecastPanel: Equatable, Sendable {
     public let advice: [String]
     /// Draw it as a warning rather than plain information.
     public let warn: Bool
+    /// ★ ruling 4 (item 6): the placeholder is "nothing set to lattice" — its tap goes to the walls
+    public var marksWalls: Bool = false
 
     public static func compute(state: LatticeForecastModel.State,
                                describesCurrentJob: Bool,
                                combinedPathAvailable: Bool = false,
                                // ★ ruling (c): the job is refused, so no forecast is asked
-                               refusal: String? = nil)
+                               refusal: String? = nil,
+                               // ★ ruling 3: core refuses the document — its sentence, verbatim
+                               coreRefusal: String? = nil)
         -> LatticeForecastPanel {
         let title = "What this would produce"
         // ★ RULING (c) (2026-09-30): no document is written, so no forecast is asked — say why,
         // in the stage's words, instead of "Checking…" for a question never sent.
         if let why = refusal {
             return LatticeForecastPanel(title: title, placeholder: "Can’t forecast: \(why).",
+                                        headline: nil, reasons: [], advice: [], warn: true,
+                                        marksWalls: LatticeJobIncludeGate.opensWallMarking(why))
+        }
+        if let why = coreRefusal {
+            return LatticeForecastPanel(title: title, placeholder: why,
                                         headline: nil, reasons: [], advice: [], warn: true)
         }
         // A forecast that describes a DIFFERENT configuration is treated exactly

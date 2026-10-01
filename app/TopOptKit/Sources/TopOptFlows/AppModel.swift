@@ -87,6 +87,9 @@ public final class AppModel: ObservableObject {
     // MARK: Recents + toast
 
     @Published public private(set) var recentProjects: [RecentProject] = []
+    /// ★ ROUND 3 RULING (c) (2026-10-01): projects on disk the store cannot read — shown on Home as
+    /// "Can’t open" with the reason, never dropped, never opened, never deleted (see `deleteProject`).
+    @Published public private(set) var unreadableProjects: [UnreadableProject] = []
     /// Rendered Library thumbnails, keyed by project id. Generated from the imported
     /// mesh this launch (in-memory; on-disk-only recents show the frosted fallback).
     @Published public private(set) var thumbnails: [UUID: CGImage] = [:]
@@ -97,7 +100,8 @@ public final class AppModel: ObservableObject {
     private var runCancellables: [UUID: AnyCancellable] = [:]
     /// Serial queue for the (potentially large) results encode/decode + file IO, so
     /// persisting/restoring variants never blocks the main thread (persist-c).
-    private static let resultsQueue = DispatchQueue(label: "app.topopt.results", qos: .utility)
+    /// Internal (not private) so the write-after-delete race test can hold the queue.
+    static let resultsQueue = DispatchQueue(label: "app.topopt.results", qos: .utility)
     /// Non-nil shows a transient toast (the design pill); the view clears it.
     @Published public var toast: String?
 
@@ -215,10 +219,12 @@ public final class AppModel: ObservableObject {
         savedPresets = presetStore.load()
         // Seed the recents grid from disk (lazy: projects are re-imported only when
         // opened). persist-b.
-        recentProjects = store.loadAllSnapshots().map {
+        let onDisk = store.loadAll()
+        recentProjects = onDisk.readable.map {
             RecentProject(id: $0.id, name: $0.name, materialName: $0.material,
                           process: $0.process, optimized: $0.optimized ?? false)
         }
+        unreadableProjects = onDisk.unreadable
         // Cold-launch re-attach (handoffs 119 + 121): surface EVERY remote job still
         // outstanding when the app last died. `RemoteRun` removes a job's record on its
         // terminal resolution or user cancel, so leftover records mean the app died
@@ -272,7 +278,10 @@ public final class AppModel: ObservableObject {
         guard let project, let file = project.importedFile,
               let materialsPath, let rulesPath else { return nil }
         let lc = project.loadCase()
-        let protections = project.faceProtectionSpecs()
+        // ★ ONE emission for the protections AND the lattice regions (ruling 2): a protected,
+        // latticed face is protected to the depth its prism emits, so both read the same regions
+        let emission = project.latticeJobRegions()
+        let protections = project.faceProtectionSpecs(emission: emission)
         // The lattice block, gated by the core-read certifiable limits (handoff
         // 2026-07-29-lattice-mode-ui). runSpec returns nil unless lattice mode is on and
         // the settings are runnable-as-certified, so a non-lattice project yields the
@@ -289,7 +298,7 @@ public final class AppModel: ObservableObject {
         // which a variant's re-lattice job builds from too (ruling b, 2026-09-30). Resolved
         // from the EMITTED regions, not the role map, so a role whose face has no usable
         // B-rep geometry cannot select a mode with nothing to fit into.
-        let latticeSpec = project.latticeRunSpec(emission: project.latticeJobRegions())
+        let latticeSpec = project.latticeRunSpec(emission: emission)
         return RunRequest(modelPath: file.path, material: project.material,
                           materialsPath: materialsPath, rulesPath: rulesPath,
                           resolution: project.quality.resolution,
@@ -750,6 +759,9 @@ public final class AppModel: ObservableObject {
     /// being deleted is the one currently open, returns to Home first. Safe for an id
     /// that was never loaded this launch (only the on-disk folder + recents entry).
     public func deleteProject(id: UUID) {
+        // ★ round 3 ruling (c): an unreadable project's file is never modified or deleted — Home
+        // offers no delete on it; this refuses one anyway.
+        guard !unreadableProjects.contains(where: { $0.id == id }) else { return }
         if let pm = projectsById[id] { pm.run.cancel() }
         runCancellables[id]?.cancel()
         runCancellables[id] = nil
@@ -764,6 +776,11 @@ public final class AppModel: ObservableObject {
         thumbnails[id] = nil
         recentProjects.removeAll { $0.id == id }
         store.delete(id: id)
+        // ★ AND AGAIN BEHIND ANY WRITE STILL QUEUED (round 3 review, 2026-10-01): the background
+        // writes check `holdsProject` first, and this serial-queue delete removes anything one of
+        // them managed between that check and its write — a deleted project never comes back.
+        let s = store
+        Self.resultsQueue.async { s.delete(id: id) }
     }
 
     // MARK: - Recents / navigation
@@ -977,10 +994,12 @@ public final class AppModel: ObservableObject {
             }
             let dto = OutcomeCodec.dto(from: outcome)
             let url = store.resultsURL(id: project.id)
-            let dir = url.deletingLastPathComponent()
+            let resultsStore = store, resultsID = project.id
             Self.resultsQueue.async {
-                guard let data = try? OutcomeCodec.encode(dto) else { return }
-                try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+                // ★ only into a project that still exists: a write queued before a delete must
+                // never recreate its folder without project.json (round 3 review, 2026-10-01)
+                guard resultsStore.holdsProject(id: resultsID),
+                      let data = try? OutcomeCodec.encode(dto) else { return }
                 try? data.write(to: url, options: .atomic)
             }
             // The RE-LATTICE artifacts, beside the results they describe (task

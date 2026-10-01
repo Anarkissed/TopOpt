@@ -22,9 +22,11 @@
 // region emission are derived from it. There is no second number to disagree.
 //
 // Pure derivation over value types (no view, no model), so the guarantee is
-// headlessly testable — and the call sites are pinned by
-// `LatticeDepthTieTests.testEveryCallSiteReadsTheOneNumber`, because a value-type
-// test that no shipping code calls has shipped a defect five times in this repo.
+// headlessly testable. ★ This is the DRAGGED depth. What a face's slab EMITS is this
+// plus its in-plane expand (`LatticeRegionEmission`), and a protected, latticed face (ruling 2,
+// 2026-09-30) or region (round 3 ruling a, 2026-10-01) is protected to the emitted number —
+// `faceProtectionSpecs` reads `LatticeRegionEmission.Result.slabDepthMM` — so every slab has one
+// depth.
 
 import Foundation
 
