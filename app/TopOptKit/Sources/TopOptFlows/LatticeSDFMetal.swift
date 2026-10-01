@@ -211,9 +211,9 @@ public struct OrganicCapsule: Sendable, Equatable {
 /// overlay (`OptimizeVariant.stressTensorField`), so nothing had to be solved or
 /// exported; it only had to be handed over.
 public struct LatticeOrganicInput: Sendable {
-    /// Grid-indexed, 6 per voxel, in core's Voigt order. Must match `dims`.
-    /// `var` (2026-09-05) so the synthetic-stress pass can hand the tracer a
-    /// tensor with the unloaded walls filled in; everything else is the solve's.
+    /// Grid-indexed, 6 per voxel, in core's Voigt order. Must match `dims`. The solve's
+    /// REAL field, handed to core untouched — core synthesises the dead walls itself,
+    /// exactly as the run does (ruling C, 2026-09-29). `var` only for resampling.
     public var tensor: [Double]
     public var dims: (Int, Int, Int)
     public var originMM: SIMD3<Double>
@@ -273,17 +273,17 @@ public struct LatticeOrganicInput: Sendable {
     public var regionIDs: [Int32] = []
     /// ★ THE SEEDING BOOST (2026-09-21), ×1 = core's own tracer. See `LatticeWallThickness`.
     public var seedBoost: Double = 1
+    /// The walls offered to core's synthesis. The dead test takes no numbers from here:
+    /// the bridge makes the run's own call (0.02 and `kOrganicSyntheticDeadFloorMPa`).
     public var syntheticRegions: [TopOptKit.OrganicSyntheticRegionSpec] = []
-    public var syntheticDeadFraction: Double = OrganicSyntheticStress.deadFraction
-    /// ★ The absolute floor under that test, in MPa — see `deadMPaFloor`.
-    public var syntheticDeadMPa: Double = OrganicSyntheticStress.deadMPaFloor
     /// ★ THE SOLID RIM (maintainer, 2026-09-06: "Fit to shape means grade to solid at
     /// the edges. Always. And always on the *sides* … creating a solid outline"). The
-    /// run's `apply_organic_solid_rim` turns the candidates within this many mm of the
-    /// region's SIDE neighbours solid (never along the normal). The preview takes the
-    /// same number — the job's `organic_solid_rim_mm`, −1 ⇒ the window's low end — and
-    /// erodes each include face region IN-PLANE by it, so the shell keeps that band and
-    /// no strut is traced there. 0 ⇒ no rim.
+    /// run's `organic_solid_rim_band` (run_job.cpp) finds the candidates within this
+    /// many mm of the region's non-lattice SIDE neighbours (never along the normal),
+    /// KEEPS them as tracer candidates and turns them solid only after the trace
+    /// (ruling G), so the struts run through the band into the wall. The preview takes
+    /// the same number — the job's `organic_solid_rim_mm`, −1 ⇒ the window's low end —
+    /// counts the band, keeps it a candidate and draws it solid on top. 0 ⇒ no rim.
     public var solidRimMM: Double = 0
     /// ★ THE GRADE-TO-SHAPE BAND ON THE ORGANIC PATH (his 2026-09-18: "There should be
     /// some kind of gradient - like the thickness of the struts getting thicker and the
@@ -292,12 +292,6 @@ public struct LatticeOrganicInput: Sendable {
     /// and the per-voxel bead follows the spacing (core's law), so the struts thicken
     /// as the cells close up. 0 ⇒ no grade.
     public var shapeBandMM: Double = 0
-    /// ★ THE WALLS THAT ARE DEAD AS A WHOLE (2026-09-18 night): their tensor is zeroed
-    /// (`OrganicSyntheticStress.deadenWholeWalls`), so they must not enter the stress
-    /// statistics the spacing is graded by — zero would put them at the coarsest end of
-    /// the window ("some horizontal lines being added - but it's not enough"). They take
-    /// the window's MIDDLE spacing instead; the focal field only sets their directions.
-    public var deadRegionIDs: Set<Int> = []
     /// The grade's strength across the band (−1…+1) — `LatticeSettings.shapeFitGradeStrength`.
     public var shapeBandStrength: Double = 0
 
@@ -540,6 +534,8 @@ public struct LatticeSDFScene {
     /// ★ Faces the emission could not turn into a region (no usable B-rep
     /// geometry). Non-zero means the preview draws LESS than the user marked.
     public let skippedFaces: Int
+    /// ★ RULING (g): face regions (by name) the emission could not use — a cut sector.
+    public let skippedRegionNames: [String]
 
     /// ★ `regions` CLIPS THE PREVIEW TO WHAT IS ACTUALLY SET TO LATTICE
     /// (maintainer, 2026-08-17: "Can you confirm that the preview will only show
@@ -665,6 +661,7 @@ public struct LatticeSDFScene {
                 // 0 ⇒ no skin, which is `none`/`rim` and every pre-existing call.
                 skinMM: Double = 0,
                 skippedFaces: Int = 0,
+                skippedRegionNames: [String] = [],
                 // ★ one cell, in mm — the slab's floor (see `LatticeWallThickness`)
                 wallThicknessFloorMM: Double = 0,
                 // ★ per wall (selectable key), the depths its cells can be packed to (D1)
@@ -746,6 +743,7 @@ public struct LatticeSDFScene {
         for v in solid.values where v > 0.5 { solidInside += 1 }
         self.partInteriorVoxelCount = solidInside
         self.skippedFaces = skippedFaces
+        self.skippedRegionNames = skippedRegionNames
         self.skinMM = skinMM
         self.solidOccupancy = solid
         self.organicSolidRimMM = (algorithm == "organic" && (organic?.solidRimMM ?? 0) > 0) ? organic!.solidRimMM : 0
@@ -826,7 +824,7 @@ public struct LatticeSDFScene {
             self.unselectedSkinMM = LatticeSDFRenderer.outlineBeamMM(lineWidthMM: beadMM > 0 ? beadMM : (organic?.minExtrudableWidthMM ?? 0.45), voxelMM: voxelHere)
             self.unselectedRimMM = Swift.max(self.unselectedSkinMM, self.organicSolidRimMM)
             NSLog("%@", band.diag)
-        } else if regions.contains(where: { $0.role == .include }) {
+        } else if LatticeJobIncludeGate.hasIncludeWall(regions) {
             // ★★★ THE REGION IS THE FACE — NOT THE FACE PLUS A MARGIN (maintainer,
             // 2026-08-21: the primitive is "ONLY AS BIG AS THE FACE … Never bigger.
             // Never smaller.").
@@ -1461,8 +1459,8 @@ public struct LatticeSDFScene {
             // exactly make that work if the lattice stops without TOUCHING the rim").
             //
             // ★ WHAT THIS USED TO DO, AND WHY IT LEFT A GAP. It deleted the band's
-            // voxels from the candidate set before tracing — core's own
-            // `apply_organic_solid_rim`, mirrored. So the tracer never entered the band,
+            // voxels from the candidate set before tracing — core's old rim pass (which
+            // cleared the mask; since replaced by `organic_solid_rim_band`), mirrored. So the tracer never entered the band,
             // every curve was cut back to the eroded boundary, and the trim then took
             // another bite off each end. The rim was drawn starting where the region
             // ended, and between the two sat a strip of nothing: whole cells removed, as
@@ -1475,10 +1473,10 @@ public struct LatticeSDFScene {
             // has two surfaces to blend. The count is kept for the banner because "how
             // wide is the rim" is still a question worth answering.
             //
-            // ★ AND THE RUN HAS TO FOLLOW. Core still deletes the band
-            // (`apply_organic_solid_rim` sets `mask[e] = 0`), so until the wetted-join
-            // work lands there the preview shows struts entering the wall that the run
-            // will still cut back. Named in the handoff, not hidden here.
+            // ★ AND THE RUN FOLLOWS. Core keeps the band as tracer candidates and turns it
+            // solid AFTER the trace (ruling G, `organic_solid_rim_band`, run_job.cpp), so
+            // its struts also run into the wall; the wetted join is applied too, on the
+            // latticed set, but only in the dual-contoured file (core #358).
             var solidRimVoxels = 0
             // ★ NO DECLARED FACE ⇒ NO OUTLINE, so the block's EDGES take the band
             // instead — the sample cube's twelve bars, never its faces (his rule,
@@ -1609,6 +1607,28 @@ public struct LatticeSDFScene {
             //
             // ★ A SINGLE SIZE IS STILL A SINGLE SIZE. lo == hi ⇒ uniform, which is what
             // Manual with one number means.
+            // ★★ CORE DECIDES WHICH WALLS ARE DEAD (maintainer, 2026-09-29, ruling C: "Stop
+            // zeroing dead walls in the app, pass core the same tensor the run uses, and
+            // take the dead regions from core's report (fully_synthetic > 0). Preview = run
+            // by construction"). The app used to zero a wall it judged dead by its own p99
+            // (floor index, over every tagged voxel) before core saw it, so on a wall at
+            // the threshold the preview and the run could disagree. Now core is asked
+            // first — the run's own call, on the untouched tensor, these candidates and
+            // these ids — because a dead wall is graded at the window's middle BEFORE the
+            // trace. The trace's candidates are these same voxels: `sep > 0` on every one
+            // once graded, since the window's low end is > 0.
+            var deadRegionIDs = Set<Int>()
+            if n > 0, let rep = LatticeSDFScene.coreDeadWallVerdict(candidate: cand, input: o) {
+                organicSyntheticOut = rep
+                deadRegionIDs = rep.deadRegionIDs
+                // `fully_synthetic > 0` is the ruling's test; core's own flag is
+                // `whole_region`. They part only on a wall whose focal field is zero at
+                // every voxel — said aloud rather than assumed.
+                for r in rep.regions where (r.fullySynthetic > 0) != r.wholeRegion {
+                    NSLog("DIAG synthetic: region %d whole_region %d but fully_synthetic %d of %d",
+                          r.regionID, r.wholeRegion ? 1 : 0, r.fullySynthetic, r.voxels)
+                }
+            }
             var gradedNote = ""
             if n > 0 {
                 if hi - lo < 1e-9 {
@@ -1620,7 +1640,7 @@ public struct LatticeSDFScene {
                     sorted.reserveCapacity(n)
                     let exactIDs = o.regionIDs.count == cand.count
                     func isDead(_ e: Int) -> Bool {
-                        exactIDs && !o.deadRegionIDs.isEmpty && o.deadRegionIDs.contains(Int(o.regionIDs[e]))
+                        exactIDs && !deadRegionIDs.isEmpty && deadRegionIDs.contains(Int(o.regionIDs[e]))
                     }
                     var deadVoxels = 0
                     for e in 0..<cand.count where cand[e] {
@@ -1823,8 +1843,6 @@ public struct LatticeSDFScene {
                     transferTies: o.transferTies, tieSwirl: o.tieSwirl, beadMM: beadMM,
                     showRepairs: o.showRepairs,
                     regionIDs: o.regionIDs, syntheticRegions: o.syntheticRegions,
-                    syntheticDeadFraction: o.syntheticDeadFraction,
-                    syntheticDeadMPa: o.syntheticDeadMPa,
                     seedRatio: seedRatios.seed, testRatio: seedRatios.test, minLengthRatio: seedRatios.minLength),
                    t.field.count == fnx * fny * fnz {
                     organicEmittedOut = t.spans
@@ -1860,7 +1878,14 @@ public struct LatticeSDFScene {
                               lens[0].count, q(lens[0], 0.5), q(lens[0], 0.95), floating[0], q(floatLens[0], 0.5), oneFree[0],
                               lens[1].count, q(lens[1], 0.5), q(lens[1], 0.95), floating[1], q(floatLens[1], 0.5), oneFree[1], cell)
                     }
-                    organicSyntheticOut = t.synthetic
+                    // ★ The verdict shown is the pre-trace one (it also stands on the cached
+                    // path and when a trace fails). The trace made the same call on the same
+                    // voxels; if its dead set ever differs, that is a bug to see, not hide.
+                    if let ts = t.synthetic, organicSyntheticOut != nil, ts.deadRegionIDs != deadRegionIDs {
+                        NSLog("DIAG synthetic: the trace's dead walls %@ differ from the pre-trace verdict %@",
+                              ts.deadRegionIDs.sorted().description, deadRegionIDs.sorted().description)
+                    }
+                    if organicSyntheticOut == nil { organicSyntheticOut = t.synthetic }
                     organicPhaseOut = (t.traceSeconds, t.emitSeconds, t.bakeSeconds)
                     // ★ the tracer's own census, for his "not enough seeds" question (2026-09-21)
                     NSLog("DIAG organic trace census: curves %d connectors %d spans %d · %@%@ · %@ · band:%@",
@@ -2094,18 +2119,15 @@ public struct LatticeSDFScene {
                 // stress doesn't really show the foci as easily as expected … Why is it
                 // so jumbled up? Shouldn't the red be ONLY in the center of the foci?").
                 //
-                // ★ CORE NORMALISES EVERY SYNTHETIC VOXEL TO THE SAME MAGNITUDE.
-                // `synthesize_focal_stress` builds the focal tensor, then scales it by
-                // `target / tvm` so its von Mises equals the dead threshold EXACTLY —
-                // the spatial variation is divided out on purpose, and what is left
-                // varying is the tensor's DIRECTION, not its size. A von Mises map of
-                // that wall is therefore flat by construction: there is no magnitude
-                // peak at a focus to find.
+                // ★ CORE USED TO NORMALISE EVERY SYNTHETIC VOXEL TO THE SAME MAGNITUDE
+                // (`target / tvm` per voxel), so a synthesised wall's von Mises map was flat
+                // by construction. Core now applies ONE factor per region ("NORMALISE THE
+                // REGION ONCE, NOT EACH VOXEL", organic_lattice.cpp), so the falloff
+                // survives and the field peaks at the foci.
                 //
                 // Stretching p05…p95 of a flat field across the full ramp is stretching
-                // ROUNDING NOISE, which is the speckle he is looking at — my own
-                // per-region normalisation made it worse, not better. So the region is
-                // only renormalised when it has a real spread to show.
+                // ROUNDING NOISE, which is the speckle he was looking at. So a region is
+                // still only renormalised when it has a real spread to show.
                 if hi > lo, Double(hi - lo) > 0.05 * Double(abs(hi)) { loHi[id] = (lo, hi) }
             }
             if !loHi.isEmpty {
@@ -2286,8 +2308,27 @@ public struct LatticeSDFScene {
     }
 }
 
+extension LatticeSDFScene {
+    /// ★★ THE PREVIEW'S DEAD-WALL VERDICT IS CORE'S (maintainer, 2026-09-29, ruling C).
+    /// The run's own call (`synthesize_as_the_run` in the bridge: 0.02 and core's
+    /// `kOrganicSyntheticDeadFloorMPa`) on the input's UNTOUCHED tensor, its per-voxel
+    /// region ids and these candidates; the dead walls are `deadRegionIDs` of the
+    /// report (`fully_synthetic > 0`). nil when no wall is offered or the ids do not fit.
+    static func coreDeadWallVerdict(candidate: [Bool], input o: LatticeOrganicInput)
+        -> TopOptKit.OrganicSyntheticReport? {
+        guard !o.syntheticRegions.isEmpty, o.regionIDs.count == candidate.count else { return nil }
+        return TopOptKit.organicSyntheticReport(
+            nx: o.dims.0, ny: o.dims.1, nz: o.dims.2, spacingMM: o.spacingMM, origin: o.originMM,
+            candidate: candidate, stressTensor: o.tensor, regionIDs: o.regionIDs,
+            syntheticRegions: o.syntheticRegions)
+    }
+}
+
 extension LatticeSDFScene: LatticeSDFPreviewSummary {
     public var previewLabel: String { preview.previewLabel }
+
+    /// ★ ruling (g): whether an include region was emitted — the list the clip used.
+    public var hasIncludeRegion: Bool { LatticeJobIncludeGate.hasIncludeWall(regions) }
 
     /// ★ WHAT THE BANNER SAYS THE RUN WILL BUILD. Empty when the job states nothing,
     /// because then the job IS doubled and there is nothing to caveat.
@@ -2923,7 +2964,7 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
         // (`LatticeThreeAlgorithmsDrawTests` renders one with no cells at all).
         if scene.algorithm == "stepped",
            steppedCellMM.isEmpty || steppedCellMM.count != scene.regions.count,
-           scene.regions.contains(where: { $0.role == .include }) {
+           LatticeJobIncludeGate.hasIncludeWall(scene.regions) {
             NSLog("DIAG stepped bake DEFERRED — algorithm is stepped but "
                   + "steppedCellMM has \(steppedCellMM.count) entries for "
                   + "\(scene.regions.count) regions; layer stays hidden rather "
@@ -3122,7 +3163,7 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
         if baked == nil, let sweep = cellSweep {
             baked = gradedCellField(scene: scene, sweep: sweep, retains: retains)
             if baked != nil,
-               scene.regions.contains(where: { $0.role == .include }) {
+               LatticeJobIncludeGate.hasIncludeWall(scene.regions) {
                 doubledSolidCellsArmed = true
             }
         }

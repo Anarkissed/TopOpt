@@ -270,10 +270,15 @@ SyntheticStressReport synthesize_focal_stress(
     rr.region_id = cfg.region_id; rr.face_id = cfg.face_id; rr.foci = cfg.foci;
     rr.voxels = cnt;
     // ── ★ RULING H: THE WALL IS THE UNIT OF THE DECISION ────────────────────────
-    // p99 of the REAL field over this region, taken before a single voxel is written.
-    // A flagged region is synthesised WHOLE regardless -- a stated focus is an
-    // instruction, not a hint -- but p99 against the threshold is recorded so a wall
-    // that is actually carrying load cannot be flattened without it showing up.
+    // p99 of the REAL field over this region, taken before a single voxel is written,
+    // and it DECIDES -- see `rr.whole_region = rr.p99_under_threshold` below and the
+    // early `continue` that follows it. The flag says which walls to consider and
+    // where the foci go; the measurement says whether the wall is dead. A flagged
+    // wall that is carrying load is left ENTIRELY ALONE.
+    //
+    // (This comment claimed the opposite -- "synthesised WHOLE regardless" -- until
+    // 2026-09-29. That was the reading before two standing tests refused it, and the
+    // code was changed while the comment was not.)
     {
       std::vector<double> vms;
       vms.reserve(cnt);
@@ -6972,10 +6977,12 @@ OrganicRecommendation organic_recommend_select(const std::vector<OrganicRecommen
   auto uniform = [](const OrganicRecommendRow& r) { return std::fabs(r.hi - r.lo) < 1e-9; };
   auto set_fit = [&](const OrganicRecommendRow& r) {
     out.fit_found = true; out.fit_mm = r.hi; out.fit_margin = r.margin;
+    out.fit_certified = r.certified;
     out.fit_traced_mm = r.traced_mm; out.fit_source = r.source;
   };
   auto set_auto = [&](const OrganicRecommendRow& r) {
     out.auto_found = true; out.auto_lo_mm = r.lo; out.auto_hi_mm = r.hi; out.auto_margin = r.margin;
+    out.auto_certified = r.certified;
     out.auto_traced_mm = r.traced_mm; out.auto_source = r.source;
   };
   if (mode == "structural") {

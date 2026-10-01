@@ -39,6 +39,9 @@ final class LatticeJobJSONDump: XCTestCase {
             throw XCTSkip("set TOPOPT_PROJECT_ROOT and TOPOPT_PROJECT_ID")
         }
         let out = env["TOPOPT_JOB_OUT"] ?? NSTemporaryDirectory() + "job.json"
+        // ★ ruling 1 (2026-09-30): the stage's bytes must not depend on the hash seed — say
+        // which mode this dump ran in
+        print("SWIFT_DETERMINISTIC_HASHING=\(env["SWIFT_DETERMINISTIC_HASHING"] ?? "unset")")
 
         let store = ProjectStore(rootDir: URL(fileURLWithPath: root))
         let m = AppModel(materialsPath: Self.core("src/materials/materials.json"),
@@ -76,6 +79,23 @@ final class LatticeJobJSONDump: XCTestCase {
             withJSONObject: obj, options: [.prettyPrinted, .sortedKeys])
         try pretty.write(to: URL(fileURLWithPath: out))
         print("job.json (\(pretty.count) bytes) -> \(out)")
+        // ★ ruling 1: TOPOPT_JOB_REPEAT=N opens the same project N-1 more times in THIS process
+        // (fresh store, model, Sets and Dictionaries) and requires the same bytes every time
+        let repeats = Int(env["TOPOPT_JOB_REPEAT"] ?? "1") ?? 1
+        for r in 1..<max(1, repeats) {
+            let m2 = AppModel(materialsPath: Self.core("src/materials/materials.json"),
+                              rulesPath: Self.core("src/settings/rules.json"),
+                              store: ProjectStore(rootDir: URL(fileURLWithPath: root)))
+            m2.loadMaterials()
+            let again = try XCTUnwrap(m2.recentProjects.first(where: { $0.id == id }))
+            m2.open(again)
+            let req = try XCTUnwrap(m2.makeLatticeRunRequest())
+            let bytes = try JSONSerialization.data(
+                withJSONObject: try JSONSerialization.jsonObject(with: try RemoteRun.buildJobJSON(req)),
+                options: [.prettyPrinted, .sortedKeys])
+            XCTAssertEqual(bytes, pretty, "★ repeat \(r): the same project gave different job bytes in one process")
+        }
+        if repeats > 1 { print("repeats \(repeats): identical") }
         if let s = String(data: pretty, encoding: .utf8) { print(s) }
     }
 }

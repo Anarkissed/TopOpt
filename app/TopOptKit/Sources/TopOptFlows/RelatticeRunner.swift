@@ -142,6 +142,12 @@ public enum RelatticeJobBuilder {
             // density-override). This copy had already drifted — it dropped
             // `face_id` — which is the one-sided edit this file's own grading
             // comment above warns about, in the very next block.
+            // ★ BAR Z11 (maintainer, 2026-09-30, ruling a): the regions go out as the stage sends
+            // them, `face_id` INCLUDED. Core's variant path imports the ORIGINAL part, where the
+            // id is real, and it changes no geometry; keeping it keeps core's depth tie against
+            // the retained `loads.face_protections` (job.cpp's parse), its messages and its
+            // receipt echoes. The app does not re-implement the tie.
+            // (The outline's order is the emission's own — `LatticeFaceOutline`, ruling 1.)
             block["regions"] = lat.regions.map { $0.wireDictionary }
         }
         // Absent unless asked for, so a real re-lattice job is byte-identical to

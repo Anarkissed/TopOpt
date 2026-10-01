@@ -57,10 +57,11 @@ final class OrganicStatedStrutWidthTests: XCTestCase {
                        "★ no width stated ⇒ the key this build's shipped variants carry")
     }
 
-    /// Core keeps the topology and re-beads it: the same 3352 spans at every width, with
-    /// the radius scaled by its own calibration rather than to half the stated width
-    /// (0.90 mm stated ⇒ 0.345 mm radius, not 0.45). That is core's business; this pins
-    /// that the number ARRIVES, which is the part that was broken.
+    /// ★ A STATED WIDTH IS THE WIDTH (core #358, `bead_is_stated`; the bridge sets it
+    /// since 8105522b). This used to read "core re-beads it by its own calibration —
+    /// 0.90 mm stated ⇒ 0.345 mm radius, not 0.45 — that is core's business"; the run
+    /// skips that calibration for a stated width, and so does the preview now, so the
+    /// radius is exactly half the stated width. Pinned exactly, not just "it moved".
     func testCoreActsOnTheStatedWidth() throws {
         guard TopOptKit.latticeAlgorithmIsKnown("organic") else { throw XCTSkip("no organic on this core") }
         let n = 24, edge = 20.0, sp = edge / Double(n)
@@ -86,5 +87,7 @@ final class OrganicStatedStrutWidthTests: XCTestCase {
         print(String(format: "── stated 0.60 mm → r %.3f · stated 1.80 mm → r %.3f", thin, thick))
         XCTAssertGreaterThan(thick, thin * 1.5,
                              "★ a stated width must move the emitted radius")
+        XCTAssertEqual(thin, 0.3, accuracy: 1e-9, "★ stated 0.60 mm ⇒ r 0.30, uncalibrated, as the run ships it")
+        XCTAssertEqual(thick, 0.9, accuracy: 1e-9, "★ stated 1.80 mm ⇒ r 0.90")
     }
 }

@@ -52,12 +52,9 @@ final class OrganicSyntheticStressTests: XCTestCase {
                                                   spacingMM: 1, defaultFoci: 4, statedFoci: [:]).isEmpty)
     }
 
-    /// ★ THE WALL'S OWN STRESS DECIDES (his walk, 2026-09-07: "One literally has ZERO
-    /// stress on it … Why are they saying the same stress MPa?"). Core's synthesis
-    /// share answers a different question — how much core replaced, under a threshold
-    /// that is 2 % of the PART's peak — and on a lightly loaded part it called a wall
-    /// carrying a thousandth of the load "88 % real". The row now carries the wall's
-    /// own p99 and its share of the part's peak, and that share is the gate.
+    /// ★★ CORE'S VERDICT DECIDES (maintainer, 2026-09-29, ruling 1): a wall core
+    /// synthesised is barely loaded; one core left alone carries load — in plain words.
+    /// (The app's own share rule that stood here, and its two-number row, are retired.)
     func testTheReportMapsBackToWalls() {
         let a = wall(faceY: 0, normalY: 1, key: "f:a", faceID: 2)
         let b = wall(faceY: 20, normalY: -1, key: "f:b", faceID: 15)
@@ -65,52 +62,47 @@ final class OrganicSyntheticStressTests: XCTestCase {
                                                spacingMM: 1, defaultFoci: 4, statedFoci: [:])
         let report = TopOptKit.OrganicSyntheticReport(
             regions: [
-                .init(regionID: 1, faceID: 2, foci: 4, softMM: 5, voxels: 1600, fullySynthetic: 0, blended: 40),
-                .init(regionID: 2, faceID: 15, foci: 4, softMM: 5, voxels: 1600, fullySynthetic: 1500, blended: 80),
+                .init(regionID: 1, faceID: 2, foci: 4, softMM: 5, voxels: 1600, fullySynthetic: 0, blended: 0),
+                .init(regionID: 2, faceID: 15, foci: 4, softMM: 5, voxels: 1600, fullySynthetic: 1600, blended: 0),
             ],
-            voxelsInRegions: 3200, fullySynthetic: 1500, blended: 120, deadThreshold: 0.02, peakVonMises: 31)
-        // Wall 1 carries the load (p99 = 24 of the part's 31, 77 %); wall 2 carries a
-        // spill (0.4 of 31, 1.3 %) — his back wall. Core called BOTH mostly "real".
-        let stress: [Int: (p99: Double, max: Double)] = [1: (24, 28), 2: (0.4, 0.9)]
-        let walls = OrganicSyntheticStress.wallReports(from: report, plan: plan,
-                                                       stressByRegion: stress)
+            voxelsInRegions: 3200, fullySynthetic: 1600, blended: 0, deadThreshold: 0.005, peakVonMises: 31)
+        let walls = OrganicSyntheticStress.wallReports(from: report, plan: plan)
         XCTAssertEqual(walls.count, 2)
         let loaded = walls["f:a"]!, dead = walls["f:b"]!
-        XCTAssertFalse(loaded.dead)
-        XCTAssertEqual(loaded.stressShare, 24.0 / 31, accuracy: 1e-9)
-        XCTAssertTrue(loaded.statusText.hasPrefix("loaded"), loaded.statusText)
-        XCTAssertTrue(loaded.statusText.contains("24 MPa"), loaded.statusText)
-        // ★ THE ONE THAT WAS REFUSED: core says 96 % of it is real, its own stress says
-        // 1.3 % of the part's peak. It is unloaded, and its row says its OWN number.
-        XCTAssertEqual(dead.realShare, 1 - (1500 + 40) / 1600.0, accuracy: 1e-9)
-        XCTAssertTrue(dead.dead, "1.3 % of the part's peak is spill, not load")
-        XCTAssertEqual(dead.stressShare, 0.4 / 31, accuracy: 1e-9)
-        XCTAssertTrue(dead.statusText.hasPrefix("unloaded"), dead.statusText)
-        XCTAssertTrue(dead.statusText.contains("0.4 MPa"), dead.statusText)
-        XCTAssertNotEqual(loaded.statusText, dead.statusText, "★ two walls, two numbers")
+        XCTAssertFalse(loaded.dead, "core left it alone")
+        XCTAssertEqual(loaded.statusText, "Carries load")
+        XCTAssertTrue(dead.dead, "core synthesised it")
+        XCTAssertEqual(dead.statusText, "Barely loaded — a made-up load can be added")
         XCTAssertEqual(dead.faceID, 15)
         XCTAssertTrue(OrganicSyntheticStress.wallReports(from: nil, plan: plan).isEmpty)
     }
 
-    /// ★ The per-wall von Mises the row reports, measured from the tracer's own tensor.
-    func testEachWallsStressIsMeasuredFromTheTensor() {
-        // Two voxels in region 1 at 10/3/1 MPa (von Mises √67), two in region 2 at zero.
-        var t = [Double](repeating: 0, count: 6 * 4)
-        for i in 0..<2 { t[6 * i] = 10; t[6 * i + 1] = 3; t[6 * i + 2] = 1 }
-        let stress = OrganicSyntheticStress.wallStress(tensor: t, regionIDs: [1, 1, 2, 2])
-        XCTAssertEqual(stress[1]!.p99, (67.0).squareRoot(), accuracy: 1e-9)
-        XCTAssertEqual(stress[1]!.max, (67.0).squareRoot(), accuracy: 1e-9)
-        XCTAssertEqual(stress[2]!.p99, 0, accuracy: 1e-12, "a wall with no stress reads zero")
-        XCTAssertTrue(OrganicSyntheticStress.wallStress(tensor: [], regionIDs: [1]).isEmpty)
+    /// ★ A WALL IS ONE ROW however many regions it emits (a curved face's facets, a
+    /// region's member faces): core synthesised ANY of them ⇒ barely loaded, whatever
+    /// the order. The last region in plan order used to decide it.
+    func testAWallCoreSynthesisedInPartIsBarelyLoaded() {
+        let plan = OrganicSyntheticStress.Plan(regionIDs: [], regions: [], keyByID: [1: "f:c", 2: "f:c"])
+        func rows(_ first: Int, _ second: Int) -> TopOptKit.OrganicSyntheticReport {
+            .init(regions: [
+                .init(regionID: 1, faceID: 7, foci: 4, softMM: 0, voxels: 100, fullySynthetic: first, blended: 0),
+                .init(regionID: 2, faceID: 7, foci: 4, softMM: 0, voxels: 60, fullySynthetic: second, blended: 0)],
+                  voxelsInRegions: 160, fullySynthetic: first + second, blended: 0,
+                  deadThreshold: 0.005, peakVonMises: 1)
+        }
+        for (f, s) in [(100, 0), (0, 60)] {
+            let w = OrganicSyntheticStress.wallReports(from: rows(f, s), plan: plan)["f:c"]!
+            XCTAssertEqual(w.voxels, 160, "the wall's regions are summed")
+            XCTAssertTrue(w.dead, "★ core synthesised part of it (\(f), \(s)) — whichever region came last")
+        }
+        XCTAssertFalse(OrganicSyntheticStress.wallReports(from: rows(0, 0), plan: plan)["f:c"]!.dead)
     }
 
     func testTheConstantsAreTheRuns() {
         XCTAssertEqual(OrganicSyntheticStress.deadFraction, 0.02, "run_job passes 0.02")
-        XCTAssertEqual(OrganicSyntheticStress.loadedRealShare, 0.5)
-        XCTAssertEqual(OrganicSyntheticStress.loadedStressShare, 0.15,
-                       "a wall under 15 % of the part's peak carries spill, not load")
         XCTAssertEqual(OrganicSyntheticStress.clampFoci(0), 1)
         XCTAssertEqual(OrganicSyntheticStress.clampFoci(9), 5)
+        XCTAssertEqual(OrganicSyntheticStress.wallWord(loaded: true), "Carries load")
+        XCTAssertEqual(OrganicSyntheticStress.wallWord(loaded: false), "Barely loaded — a made-up load can be added")
     }
 
     // MARK: settings, project, drawer, job
@@ -120,81 +112,57 @@ final class OrganicSyntheticStressTests: XCTestCase {
         XCTAssertFalse(l.organicSyntheticStresses)
         XCTAssertEqual(l.organicSyntheticFoci, 4, "core's measured recipe")
         XCTAssertTrue(l.selectableSyntheticFoci.isEmpty)
-        XCTAssertTrue(l.selectableWallStressFraction.isEmpty)
+        XCTAssertTrue(l.selectableWallCoreDead.isEmpty)
         l.organicSyntheticStresses = true
         l.organicSyntheticFoci = 3
         l.selectableSyntheticFoci["f:a:1"] = 5
-        l.selectableWallStressFraction["f:a:1"] = 0.1
+        l.selectableWallCoreDead["f:a:1"] = true
         let data = try JSONEncoder().encode(l)
         let back = try JSONDecoder().decode(LatticeSettings.self, from: data)
         XCTAssertTrue(back.organicSyntheticStresses)
         XCTAssertEqual(back.organicSyntheticFoci, 3)
         XCTAssertEqual(back.selectableSyntheticFoci["f:a:1"], 5)
-        XCTAssertEqual(back.selectableWallStressFraction["f:a:1"], 0.1)
+        XCTAssertEqual(back.selectableWallCoreDead["f:a:1"], true)
         var obj = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
         obj.removeValue(forKey: "organicSyntheticStresses")
         obj.removeValue(forKey: "organicSyntheticFoci")
         obj.removeValue(forKey: "selectableSyntheticFoci")
-        obj.removeValue(forKey: "selectableWallStressShare")
+        obj.removeValue(forKey: "selectableWallCoreDead")
         let old = try JSONDecoder().decode(LatticeSettings.self,
                                            from: JSONSerialization.data(withJSONObject: obj))
         XCTAssertFalse(old.organicSyntheticStresses)
         XCTAssertEqual(old.organicSyntheticFoci, 4)
         XCTAssertTrue(old.selectableSyntheticFoci.isEmpty)
-        XCTAssertTrue(old.selectableWallStressFraction.isEmpty)
+        XCTAssertTrue(old.selectableWallCoreDead.isEmpty)
     }
 
-    /// ★★★ THE STORED NUMBER CHANGED MEANING, SO OLD VALUES MUST NOT BE READ
-    /// (2026-09-07). The key used to hold core's SYNTHESIS share (0.8–0.9 on a wall
-    /// carrying nothing); it now holds the wall's STRESS share, and "loaded" is 0.15.
-    /// Read as-is, every wall in every older project would refuse foci forever.
+    /// ★★★ THE STORED VALUE CHANGED MEANING, SO OLD VALUES MUST NOT BE READ — twice now.
+    /// 2026-09-07 core's synthesis share gave way to the app's stress share; 2026-09-29
+    /// (ruling 1) that gave way to CORE'S VERDICT. An old 0 meant "the app called it
+    /// unloaded" — his stand's 0.0203 MPa back wall among them, which core leaves alone —
+    /// so neither old key is read: the wall reads unmeasured until a bake asks core.
     @MainActor func testAnOlderProjectsWallNumbersAreNotReadUnderTheNewRule() throws {
         var l = LatticeSettings(enabled: true)
-        l.selectableWallStressFraction = ["f:a": 0.87]
+        l.selectableWallCoreDead = ["f:a": false]
         let obj = try XCTUnwrap(JSONSerialization.jsonObject(
             with: try JSONEncoder().encode(l)) as? [String: Any])
-        XCTAssertNotNil(obj["selectableWallStressShare"], "the new key is what is written")
-        XCTAssertNil(obj["selectableWallStressFraction"], "and the old name is not")
-        // An older snapshot, carrying core's synthesis share under the OLD key.
+        XCTAssertNotNil(obj["selectableWallCoreDead"], "the new key is what is written")
+        XCTAssertNil(obj["selectableWallStressShare"], "and neither old name is")
+        XCTAssertNil(obj["selectableWallStressFraction"])
+        // Older snapshots, under BOTH old keys.
         var older = obj
-        older.removeValue(forKey: "selectableWallStressShare")
+        older.removeValue(forKey: "selectableWallCoreDead")
+        older["selectableWallStressShare"] = ["f:a": 0, "f:b": 0.87]
         older["selectableWallStressFraction"] = ["f:a": 0.87, "f:b": 0.83]
         let back = try JSONDecoder().decode(
             LatticeSettings.self, from: JSONSerialization.data(withJSONObject: older))
-        XCTAssertTrue(back.selectableWallStressFraction.isEmpty,
-                      "★ the old numbers are ignored — the wall reads unmeasured until a bake measures it")
+        XCTAssertTrue(back.selectableWallCoreDead.isEmpty,
+                      "★ the old numbers are ignored — the wall reads unmeasured until a bake asks core")
         let p = ProjectModel(id: UUID(), name: "P", material: "PLA", process: .fdm,
                              importedFile: nil, importedMesh: nil)
         p.lattice = back
         XCTAssertNil(p.latticeWallLoaded(LatticeSelectableRef.face(group: UUID(), face: 2)),
                      "unmeasured, not loaded — so the foci are offered")
-    }
-
-    /// ★ A WALL ON AN IDLE PART IS NOT LOADED (his walk, 2026-09-07). His stand peaks
-    /// at 0.024 MPa against 31 MPa allowable; the back wall at 0.004 MPa came back
-    /// "loaded" for being 17 % of a very small number.
-    func testNoWallIsLoadedWhenThePartItselfCarriesNothing() {
-        var w = OrganicSyntheticStress.WallReport(key: "f:b", faceID: 15, voxels: 100,
-                                                  fullySynthetic: 0, blended: 0, foci: 4)
-        w.partPeakMPa = 0.024; w.wallP99MPa = 0.00411; w.allowableMPa = 31
-        XCTAssertEqual(w.stressShare, 0.00411 / 0.024, accuracy: 1e-9)
-        XCTAssertGreaterThan(w.stressShare, OrganicSyntheticStress.loadedStressShare,
-                             "17 % of the peak — the ranking alone would call it loaded")
-        XCTAssertFalse(w.partIsLoaded, "the part peaks at 0.08 % of allowable")
-        XCTAssertTrue(w.dead, "★ so it is unloaded and may take foci")
-        // ★ the row is two facts now (2026-09-07): the verdict and the wall's stress.
-        XCTAssertEqual(w.statusText, "unloaded · 0.00411 MPa")
-        // The wall that IS carrying the load on the same idle part: also unloaded.
-        var hot = w; hot.wallP99MPa = 0.0203
-        XCTAssertTrue(hot.dead, "nothing on an idle part is loaded")
-        // …and on a part that IS working, the ranking decides again.
-        var real = w
-        real.partPeakMPa = 25; real.wallP99MPa = 21
-        XCTAssertTrue(real.partIsLoaded)
-        XCTAssertFalse(real.dead, "84 % of a real peak is a loaded wall")
-        var spill = real; spill.wallP99MPa = 1.0
-        XCTAssertTrue(spill.dead, "4 % of a real peak is spill")
-        XCTAssertEqual(OrganicSyntheticStress.partLoadedAllowableShare, 0.02)
     }
 
     @MainActor func testProjectWriteClampsAndClears() {
@@ -209,38 +177,165 @@ final class OrganicSyntheticStressTests: XCTestCase {
         XCTAssertNil(p.latticeSelectableSyntheticFoci(ref), "out of 1…5 is refused, not clamped")
         p.writeLatticeSyntheticFoci(ref, foci: 1)
         XCTAssertEqual(p.latticeSelectableSyntheticFoci(ref), 1)
-        // A wall the bake measured as LOADED (real share ≥ ½) refuses the write.
+        // A wall core LEFT ALONE carries load and refuses the write.
         p.writeLatticeSyntheticFoci(ref, foci: nil)
-        p.recordLatticeWallStress([ref.key: 0.9])
+        p.recordLatticeWallVerdicts([ref.key: false])
         XCTAssertEqual(p.latticeWallLoaded(ref), true)
         p.writeLatticeSyntheticFoci(ref, foci: 3)
         XCTAssertNil(p.latticeSelectableSyntheticFoci(ref), "never foci on a loaded wall")
-        p.recordLatticeWallStress([ref.key: 0.1])
+        p.recordLatticeWallVerdicts([ref.key: true])
         XCTAssertEqual(p.latticeWallLoaded(ref), false)
         p.writeLatticeSyntheticFoci(ref, foci: 3)
         XCTAssertEqual(p.latticeSelectableSyntheticFoci(ref), 3)
         XCTAssertNil(p.latticeWallLoaded(LatticeSelectableRef.face(group: UUID(), face: 9)))
     }
 
-    @MainActor func testTheJobMarksOnlyUnloadedWalls() throws {
-        guard TopOptKit.latticeAlgorithmIsKnown("organic") else { throw XCTSkip("no organic on this core") }
+    /// ★★ RULING 2 (2026-09-29): with the switch on, the job flags EVERY include wall —
+    /// measured or not, loaded or not — and core decides on the run's own tensor.
+    /// Core's default for a flagged wall with no count is 4 foci it places itself.
+    @MainActor func testTheJobFlagsEveryIncludeWall() throws {
         let p = ProjectModel(id: UUID(), name: "P", material: "PLA", process: .fdm,
                              importedFile: nil, importedMesh: nil)
         let dead = LatticeSelectableRef.face(group: UUID(), face: 15)
         let live = LatticeSelectableRef.face(group: UUID(), face: 2)
+        let unmeasured = LatticeSelectableRef.face(group: UUID(), face: 9)
         p.lattice.algorithm = "organic"
         p.lattice.stageMode = .aesthetic
         p.lattice.organicSyntheticStresses = true
-        p.recordLatticeWallStress([dead.key: 0.1, live.key: 0.9])
+        p.recordLatticeWallVerdicts([dead.key: true, live.key: false])
         p.writeLatticeSyntheticFoci(dead, foci: 2)
-        XCTAssertEqual(p.latticeSyntheticWalls(), [dead.key: 2])
-        p.writeLatticeSyntheticFoci(dead, foci: nil)
-        XCTAssertEqual(p.latticeSyntheticWalls(), [dead.key: 4], "the lattice default")
+        let flags = try XCTUnwrap(p.latticeSyntheticFlags(), "switch on ⇒ flags")
+        XCTAssertEqual(flags.foci(for: dead.key), 2, "its own count")
+        XCTAssertEqual(flags.foci(for: live.key), 4, "★ a loaded wall is flagged too — core leaves it alone")
+        XCTAssertEqual(flags.foci(for: unmeasured.key), 4, "★ and one never measured")
+        XCTAssertEqual(flags.foci(for: nil), 4, "a wall with no selectable: the default")
+        p.lattice.organicSyntheticFoci = 3
+        XCTAssertEqual(p.latticeSyntheticFlags()?.foci(for: live.key), 3, "the lattice default")
         p.lattice.stageMode = .structural
-        XCTAssertTrue(p.latticeSyntheticWalls().isEmpty, "never under Structural")
+        XCTAssertNil(p.latticeSyntheticFlags(), "never under Structural")
         p.lattice.stageMode = .aesthetic
         p.lattice.organicSyntheticStresses = false
-        XCTAssertTrue(p.latticeSyntheticWalls().isEmpty, "switch off")
+        XCTAssertNil(p.latticeSyntheticFlags(), "switch off")
+        p.lattice.organicSyntheticStresses = true
+        p.lattice.algorithm = "octet"
+        XCTAssertNil(p.latticeSyntheticFlags(), "organic only")
+        // ★ the emission flags every INCLUDE wall with its count, never an exclude one, and
+        // a legacy include primitive (no selectable) takes the default
+        var root = URL(fileURLWithPath: #filePath); for _ in 0..<3 { root.deleteLastPathComponent() }
+        let em = try String(contentsOf: root.appendingPathComponent("Sources/TopOptFlows/LatticeRegionEmission.swift"),
+                            encoding: .utf8)
+        XCTAssertEqual(em.components(separatedBy: "if role == .include, let sf = synthetic { s.syntheticStress = true; s.syntheticFoci = sf.foci(for: ref.key) }").count - 1, 3,
+                       "primitive, face and region-member walls")
+        XCTAssertTrue(em.contains("if let sf = synthetic { s.syntheticStress = true; s.syntheticFoci = sf.foci(for: nil) }"))
+        XCTAssertFalse(em.contains("syntheticWalls"), "no measurement gates the job any more")
+    }
+
+    /// A project with an include group and an exclude group, each holding one placed bolt,
+    /// plus a legacy include primitive — organic, Aesthetic, simulation on, synthesis on.
+    @MainActor private func variantProject() -> (ProjectModel, inc: UUID, exc: UUID) {
+        let p = ProjectModel(id: UUID(), name: "P", material: "PLA", process: .fdm,
+                             importedFile: nil, importedMesh: nil)
+        var sel = SelectionModel(); let gi = sel.addGroup(); let ge = sel.addGroup(); p.selection = sel
+        let inc = p.force.addManualPrimitive(.defaultBolt(at: SIMD3(0, 0, 5), radiusMM: 3, halfLengthMM: 5), to: gi)
+        let exc = p.force.addManualPrimitive(.defaultBolt(at: SIMD3(20, 0, 5), radiusMM: 3, halfLengthMM: 5), to: ge)
+        // declared groups: the variant's job is the stage's, which lattices only an eligible
+        // group (the face-prism route, 2026-09-29)
+        p.force.sync(groups: p.selection.groups)
+        p.force.setProtected(gi, true); p.force.setProtected(ge, true)
+        p.lattice.includePrimitives = [.defaultBolt(at: SIMD3(40, 0, 5), radiusMM: 3, halfLengthMM: 5)]
+        p.lattice.enabled = true
+        p.lattice.groupRoles = [gi: .include, ge: .exclude]
+        p.lattice.algorithm = "organic"
+        p.lattice.stageMode = .aesthetic
+        p.lattice.simulateStresses = true
+        p.lattice.organicSyntheticStresses = true
+        return (p, inc, exc)
+    }
+
+    /// ★★ RULING 1 (2026-09-29): the RE-LATTICE job — Check sizes, the forecast and the
+    /// re-lattice run all read `variantLatticeJobRegions()` — flags every include wall
+    /// exactly as the main job does, with the wall's own count or the default; an
+    /// exclude wall never.
+    @MainActor func testTheReLatticeJobFlagsEveryIncludeWall() throws {
+        let (p, inc, _) = variantProject()
+        p.writeLatticeSyntheticFoci(.primitive(inc), foci: 2)
+        let regions = p.variantLatticeJobRegions().regions
+        let includes = regions.filter { $0.role == .include }, excludes = regions.filter { $0.role == .exclude }
+        XCTAssertEqual(includes.count, 2, "the placed bolt and the legacy include")
+        XCTAssertEqual(excludes.count, 1)
+        XCTAssertTrue(includes.allSatisfy(\.syntheticStress), "★ every include wall is flagged")
+        XCTAssertEqual(includes.compactMap(\.syntheticFoci).sorted(), [2, 4], "its own count, else the default")
+        XCTAssertFalse(excludes[0].syntheticStress, "★ never an exclude wall")
+        XCTAssertNil(excludes[0].syntheticFoci)
+        if TopOptKit.organicSyntheticStressWired {
+            XCTAssertTrue(includes.allSatisfy { $0.wireDictionary["synthetic_stress"] as? Bool == true })
+            XCTAssertNil(excludes[0].wireDictionary["synthetic_stress"])
+        }
+        // the gates: nothing flagged under Structural, synthesis off, octet, simulation off
+        for (label, change) in [("Structural", { (l: inout LatticeSettings) in l.stageMode = .structural }),
+                                ("synthesis off", { (l: inout LatticeSettings) in l.organicSyntheticStresses = false }),
+                                ("octet", { (l: inout LatticeSettings) in l.algorithm = "octet" }),
+                                ("simulation off", { (l: inout LatticeSettings) in l.setSimulateStresses(false) })] {
+            let (q, _, _) = variantProject()
+            change(&q.lattice)
+            XCTAssertFalse(q.variantLatticeJobRegions().regions.contains(where: \.syntheticStress), label)
+        }
+        // one builder for all three documents, and the variant path carries the flags
+        var root = URL(fileURLWithPath: #filePath); for _ in 0..<3 { root.deleteLastPathComponent() }
+        func src(_ f: String) throws -> String {
+            try String(contentsOf: root.appendingPathComponent("Sources/TopOptFlows/\(f)"), encoding: .utf8)
+        }
+        let pm = try src("ProjectModel.swift"), ws = try src("WorkspacePlaceholder.swift"), em = try src("LatticeRegionEmission.swift")
+        // the variant's job IS the stage's emission (the face-prism route, 2026-09-29)
+        XCTAssertTrue(pm.contains("public func variantLatticeJobRegions() -> LatticeRegionEmission.Result {\n        latticeJobRegions()\n    }"))
+        XCTAssertTrue(pm.contains("synthetic: latticeSyntheticFlags(),"), "which passes the flags")
+        XCTAssertEqual(p.variantLatticeJobRegions().regions, p.latticeJobRegions().regions)
+        XCTAssertTrue(ws.contains("let emission = given ?? project.variantLatticeJobRegions()"), "relatticeJobJSON builds from it")
+        XCTAssertGreaterThanOrEqual(ws.components(separatedBy: "relatticeJobJSON(").count - 1, 4,
+                                    "the definition plus the forecast, the Check-sizes probe and the run")
+        XCTAssertEqual(em.components(separatedBy: "if role == .include, let sf = synthetic { s.syntheticStress = true; s.syntheticFoci = sf.foci(for: ref.key) }").count - 1, 3,
+                       "a primitive, a face, a face region's member face")
+        XCTAssertTrue(em.contains("if let sf = synthetic { s.syntheticStress = true; s.syntheticFoci = sf.foci(for: nil) }"), "a legacy include")
+    }
+
+    /// ★★ RULING 2 (2026-09-29): "A hidden setting must not act." The synthesis toggle is
+    /// offered only with the simulation on, so it acts only then. A saved "on" with the
+    /// simulation off flags nothing — main job, re-lattice job, preview, Selections row —
+    /// and stays saved for when the switch comes back.
+    @MainActor func testASavedOnWithTheSimulationOffFlagsNothing() throws {
+        let (p, _, _) = variantProject()
+        // control: switch on ⇒ it acts
+        XCTAssertTrue(p.lattice.organicSyntheticStressesActive)
+        XCTAssertNotNil(p.latticeSyntheticFlags())
+        XCTAssertTrue(p.variantLatticeJobRegions().regions.contains(where: \.syntheticStress))
+        XCTAssertTrue(p.latticeJobRegions().regions.contains(where: \.syntheticStress))
+        // the real switch, off
+        p.lattice.setSimulateStresses(false)
+        XCTAssertTrue(p.lattice.organicSyntheticStresses, "★ the saved on stays saved")
+        XCTAssertFalse(p.lattice.organicSyntheticStressesActive)
+        XCTAssertNil(p.latticeSyntheticFlags(), "★ …and flags nothing")
+        XCTAssertFalse(p.variantLatticeJobRegions().regions.contains(where: \.syntheticStress))
+        XCTAssertFalse(p.latticeJobRegions().regions.contains(where: \.syntheticStress))
+        XCTAssertFalse(p.latticeJobRegions().regions.contains { $0.wireDictionary["synthetic_stress"] != nil })
+        // …and a project saved that way reads the same
+        let back = try JSONDecoder().decode(LatticeSettings.self, from: try JSONEncoder().encode(p.lattice))
+        XCTAssertTrue(back.organicSyntheticStresses); XCTAssertFalse(back.simulateStresses)
+        XCTAssertFalse(back.organicSyntheticStressesActive)
+        // the switch back on brings it back
+        p.lattice.setSimulateStresses(true)
+        XCTAssertNotNil(p.latticeSyntheticFlags())
+        // every reader goes through the one gate
+        var root = URL(fileURLWithPath: #filePath); for _ in 0..<3 { root.deleteLastPathComponent() }
+        func src(_ f: String) throws -> String {
+            try String(contentsOf: root.appendingPathComponent("Sources/TopOptFlows/\(f)"), encoding: .utf8)
+        }
+        let ws = try src("WorkspacePlaceholder.swift"), pm = try src("ProjectModel.swift")
+        XCTAssertTrue(ws.contains("let synthOn = project.lattice.organicSyntheticStressesActive && organicForBake != nil"),
+                      "the preview's synthesis")
+        XCTAssertTrue(ws.contains("guard lat.organicSyntheticStressesActive else { return nil }"), "the Selections row")
+        XCTAssertTrue(pm.contains("guard lattice.organicSyntheticStressesActive else { return nil }"), "the job")
+        XCTAssertFalse(ws.contains("lattice.organicSyntheticStresses\n") || ws.contains("lat.organicSyntheticStresses,"),
+                       "no raw read of the toggle acts")
     }
 
     /// Core's per-region keys travel only when the linked core's schema accepts them.
@@ -284,14 +379,14 @@ final class OrganicSyntheticStressTests: XCTestCase {
         XCTAssertTrue(withFoci.rows[i!].modifiable)
         XCTAssertNil(withFoci.rows.first { $0.label == "Stress on wall" }, "no bake yet ⇒ no verdict row")
         let measured = LatticeRegionDrawer.make(card: card, depthMM: 5, held: false,
-                                                syntheticFoci: "3", wallStress: "unloaded · 96% synthetic")
+                                                syntheticFoci: "3", wallStress: "Barely loaded — a made-up load can be added")
         let si = measured.rows.firstIndex { $0.label == "Stress on wall" }
         XCTAssertEqual(si, measured.rows.firstIndex { $0.label == "Foci" }.map { $0 + 1 })
         XCTAssertEqual(measured.rows[si!].kind, .fact)
         XCTAssertFalse(measured.rows.first { $0.label == "Foci" }!.disabled)
         let loaded = LatticeRegionDrawer.make(card: card, depthMM: 5, held: false,
                                               syntheticFoci: "—", fociDisabled: true,
-                                              wallStress: "loaded · 99% real")
+                                              wallStress: "Carries load")
         XCTAssertTrue(loaded.rows.first { $0.label == "Foci" }!.disabled, "greyed on a loaded wall")
     }
 

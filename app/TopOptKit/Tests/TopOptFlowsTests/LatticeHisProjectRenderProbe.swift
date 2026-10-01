@@ -44,8 +44,7 @@ final class LatticeHisProjectRenderProbe: XCTestCase {
         let plan = OrganicSyntheticStress.plan(regions: regions, dims: dims, originMM: origin, spacingMM: voxel,
                                                defaultFoci: lat.organicSyntheticFoci, statedFoci: lat.selectableSyntheticFoci)
         o.regionIDs = plan.regionIDs
-        o.syntheticRegions = plan.regions
-        o.deadRegionIDs = Set(plan.regions.map { Int($0.regionID) })
+        o.syntheticRegions = plan.regions   // core decides which are dead (ruling C)
         // ★ his chip choices, as the app hands them (`lat.bandTreatments`), plus HIS_BAND_OVERRIDES
         // = "face:20=0,cap:<key>=1" (1 = solid) on top
         var overrides = lat.bandTreatments

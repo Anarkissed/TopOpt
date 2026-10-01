@@ -95,8 +95,10 @@ final class OrganicMainWiringTests: XCTestCase {
                 "printability_floor_mm": 0.691, "resolution_floor_mm": 1.71,
                 "member_ceiling_mm": 6.0, "extent_ceiling_mm": 12.0, "look_cell_mm": 3.0,
                 "grade_ratio": 1.6, "look_cells_across": 8, "target_margin": 1.5,
-                "fit": ["found": true, "cell_mm": 3.0, "margin": 1.84, "traced_mm": 26100, "source": "look"],
-                "auto": ["found": true, "cell_min_mm": 3.0, "cell_max_mm": 4.8, "margin": 1.6, "traced_mm": 24000, "source": "look_pair"],
+                // ★ margin 0: what core writes on an AESTHETIC recommendation — its probe
+                // runs no certificate there (`want_cert`, run_job.cpp)
+                "fit": ["found": true, "cell_mm": 3.0, "margin": 0, "traced_mm": 26100, "source": "look"],
+                "auto": ["found": true, "cell_min_mm": 3.0, "cell_max_mm": 4.8, "margin": 0, "traced_mm": 24000, "source": "look_pair"],
                 "rejected": [["cell_min_mm": 6.0, "cell_max_mm": 6.0, "source": "grid", "reason": "rooted 0.91 < 0.95"]],
             ],
         ]
@@ -109,6 +111,68 @@ final class OrganicMainWiringTests: XCTestCase {
         XCTAssertTrue(r.boundsText.contains("grid 1.71 mm"))
         let f = OrganicSizeCheck.floor(from: r)
         XCTAssertEqual(f.mm, 1.71); XCTAssertTrue(f.resolutionBound)
+        // ★ an aesthetic recommendation shows NO margin — nothing, never "0.00"
+        let fit = try XCTUnwrap(r.fit), auto = try XCTUnwrap(r.auto)
+        XCTAssertFalse(r.showsMargin)
+        XCTAssertNil(r.tint, "★ no colour verdict under Aesthetic (ruling A)")
+        XCTAssertEqual(r.pillText(fit), "Fit 3 mm"); XCTAssertEqual(r.pillText(auto), "Auto 3–4.8 mm")
+        for t in [r.pillText(fit), r.pillText(auto), r.infoText(fit), r.infoText(auto)] {
+            XCTAssertFalse(t.contains("0.00") || t.contains("margin") || t.contains("·"), t)
+        }
+    }
+
+    /// ★ …and a STRUCTURAL one keeps its predicted margin (positive control for the above).
+    func testAStructuralRecommendationShowsItsMargin() throws {
+        let doc: [String: Any] = [
+            "organic_probe_version": 1, "candidates": [],
+            "recommendation": [
+                "ran": true, "mode": "structural", "band_lo_mm": 1.71, "band_hi_mm": 6.0, "collapsed": false,
+                "printability_floor_mm": 0.691, "resolution_floor_mm": 1.71,
+                "member_ceiling_mm": 6.0, "extent_ceiling_mm": 12.0, "look_cell_mm": 3.0,
+                "grade_ratio": 1.6, "look_cells_across": 8, "target_margin": 1.5,
+                "fit": ["found": true, "cell_mm": 3.0, "margin": 1.84, "traced_mm": 26100, "source": "grid"],
+                "auto": ["found": true, "cell_min_mm": 3.0, "cell_max_mm": 4.8, "margin": 1.6, "traced_mm": 24000, "source": "grid_pair"],
+                "rejected": [],
+            ],
+        ]
+        let r = try XCTUnwrap(OrganicForecast.parse(try JSONSerialization.data(withJSONObject: doc))?.recommendation)
+        XCTAssertTrue(r.showsMargin)
+        XCTAssertEqual(r.tint, .green, "a structural pick is rooted, certified and at the target margin")
+        XCTAssertEqual(r.pillText(try XCTUnwrap(r.fit)), "Fit 3 mm · 1.84")
+        XCTAssertEqual(r.pillText(try XCTUnwrap(r.auto)), "Auto 3–4.8 mm · 1.60")
+        XCTAssertTrue(r.infoText(try XCTUnwrap(r.auto)).contains("Predicted margin 1.60."))
+    }
+
+    /// ★ The wizard's pills are built by those helpers — a value-type test alone would
+    /// miss a call site that still formats the margin itself.
+    func testTheWizardPillsUseTheRecommendationsText() throws {
+        let src = try String(contentsOf: URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("Sources/TopOptFlows/LatticeSetupWizard.swift"), encoding: .utf8)
+        XCTAssertTrue(src.contains("organicPill(rec.pillText(a)"))
+        XCTAssertTrue(src.contains("organicPill(rec.pillText(f)"))
+        XCTAssertFalse(src.contains("Predicted margin %.2f"), "the wizard formats no margin of its own")
+        // ★ ruling A: the Recommended pills take the recommendation's own tint (nil under
+        // Aesthetic), the candidate pills are coloured only under Structural, and the (i)
+        // is the mode's own meaning — no certificate caveat appended under Aesthetic
+        XCTAssertFalse(src.contains("OrganicProbeTintModifier(tint: .green)"))
+        XCTAssertEqual(src.components(separatedBy: "OrganicProbeTintModifier(tint: rec.tint)").count - 1, 2)
+        XCTAssertFalse(src.contains("OrganicForecast.tint(c),"))
+        XCTAssertEqual(src.components(separatedBy: "OrganicForecast.tint(c, structural: structural)").count - 1, 2)
+        XCTAssertEqual(src.components(separatedBy: "OrganicForecast.meaning(structural: structural)").count - 1, 2)
+        XCTAssertFalse(src.contains("+ \" \" + OrganicForecast.notCertified"))
+        // ★ ruling V3 (2026-09-29): no bare "*" on a Structural pill that was never checked;
+        // the headings claim "Likely to certify" only when a size was; an unchecked
+        // Recommended pick is not offered under Structural; the Manual seed is selectable
+        XCTAssertFalse(src.contains("%g–%g mm*"))
+        XCTAssertTrue(src.contains("organicPill(m.label,"))
+        XCTAssertEqual(src.components(separatedBy: "label: c.pillText(structural: structural)").count - 1, 1)
+        XCTAssertEqual(src.components(separatedBy: "c.hoverText(structural: structural, probedIntent: probe.probedIntent)").count - 1, 2)
+        XCTAssertEqual(src.components(separatedBy: "organicProbePresent && structural && organicAnyChecked").count - 1, 2)
+        XCTAssertTrue(src.contains("uncheckedSummary(\n            structural: structural, grades: model.simulateStresses, checkRefusal: organicProbeRefusal)"))
+        XCTAssertTrue(src.contains("anyChecked(grades: model.simulateStresses)"), "the heading reads the list shown")
+        XCTAssertEqual(src.components(separatedBy: "enabled: !structural || rec.showsMargin").count - 1, 2)
+        XCTAssertTrue(src.contains("organicManualGrades.first(where: { $0.selectable })?.grade"))
     }
 
     /// §2: the receipt's certificate, ties, fillet, floors, recommendation and
@@ -138,7 +202,7 @@ final class OrganicMainWiringTests: XCTestCase {
         XCTAssertEqual(r.floorMM, 1.71)
         XCTAssertEqual(r.certificateLine, "Refused · margin 1.19 (p99) · the worst strut exceeds its allowable under distributed load · worst strut 1.31× allowable")
         XCTAssertEqual(r.unsupportedSpans, 1728)
-        XCTAssertEqual(r.repairsLine, "1728 spans left out: nothing to hold them up · 118 ties landed",
+        XCTAssertEqual(r.repairsLine, "1728 spans cross open air — printed as drawn, with nothing underneath · 118 ties landed",
                        "the fillet stage is gone (#358): its keys are not shown")
         XCTAssertEqual(r.fittingSeparationsMM, [4.5], "the FIT pick is the approved separation")
         XCTAssertEqual(r.recommendAutoLoMM, 3.0); XCTAssertEqual(r.recommendAutoHiMM, 5.0)

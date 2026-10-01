@@ -83,6 +83,30 @@ public enum LatticeRegionEmission {
         /// Faces that could not be synthesised (no usable B-rep geometry) — counted
         /// so the surface can say so instead of silently emitting less than marked.
         public let skippedFaces: Int
+        /// ★ RULING (g) (maintainer, 2026-09-30): face regions with a role that the run cannot
+        /// consume (a cut sector: `regionMembers` nil), by NAME, in emission order, each once —
+        /// never a silent drop. Never emitted, so no job's bytes move. Only the regions the
+        /// caller's `droppedRegionName` names are listed (see there).
+        public var skippedRegionNames: [String] = []
+
+        /// ★★ THE DEPTH A FACE'S SLAB EMITS (maintainer, 2026-09-30, ruling 2) — the ONE number
+        /// core's depth tie compares a protection with (job.cpp: every kind "face" region naming
+        /// the face id, either role): the dragged depth plus the expand, floored where the
+        /// emission floors it. nil ⇒ the run lattices no face prism for that face (a bolt, no
+        /// role, lattice off, no shape) — its protection keeps its own depth.
+        public func slabDepthMM(runFaceID id: Int) -> Double? {
+            regions.first { $0.kind == .face && $0.faceID == id }?.depthMM
+        }
+
+        /// ★★ THE DEPTH A REGION'S SLAB EMITS (maintainer, 2026-10-01, round 3 ruling a): the
+        /// same one value for a face REGION — every member prism (and every facet of a curved
+        /// member) of the region is emitted under its selectable key at one depth, the dragged
+        /// depth plus the expand, floored at 0.1. nil ⇒ the run lattices no face prism under that
+        /// key (an Off role, a cut sector, members that are cylinders or direct faces, lattice
+        /// off) — its protection keeps its own depth.
+        public func slabDepthMM(selectableKey key: String) -> Double? {
+            regions.first { $0.kind == .face && $0.selectableKey == key }?.depthMM
+        }
     }
 
     /// One manual primitive → one region entry with `role`. `depthMM` is the
@@ -280,10 +304,11 @@ public enum LatticeRegionEmission {
                                // (maintainer, 2026-08-17). Empty ⇒ 0 ⇒ the slab
                                // is exactly the face, byte-identical to before.
                                selectableExpandMM: [String: Double] = [:],
-                               // ★ THE UNLOADED WALLS (2026-09-05): selectable key →
-                               // foci count, ONLY for walls the bake measured as
-                               // unloaded with the switch on (ProjectModel resolves).
-                               syntheticWalls: [String: Int] = [:],
+                               // ★ THE SYNTHETIC-STRESS FLAGS (ruling 2, 2026-09-29): with the
+                               // switch on, EVERY include wall is flagged with its foci count
+                               // and core decides on the run's own tensor which are dead;
+                               // nil ⇒ none flagged (ProjectModel resolves the gates).
+                               synthetic: OrganicSyntheticStress.SyntheticFlags? = nil,
                                // ★★★ A GROUP'S FACE REGIONS (his 2026-09-22 00:31: "Face 23
                                // & like it" carried an include role and a depth and reached
                                // nothing — the emission walked `g.faces` only). A region
@@ -293,6 +318,14 @@ public enum LatticeRegionEmission {
                                // (a cut sector — a voxel set, PR 331 §6). Every member
                                // emitted carries the REGION's key, role, depth, density.
                                regionMembers: (UUID, RegionID) -> [FaceID]? = { _, _ in nil },
+                               // ★ RULING (g): the name a DROPPED face region (group, region, its
+                               // resolved role, the group's role) is reported under, or nil when it
+                               // is not a wall to report — the project says so for a region gone
+                               // from the model, or one whose surface an ancestor in the same group
+                               // already emits WITH THE SAME ROLE. Default: none named (a pure
+                               // emission that supplies no members).
+                               droppedRegionName: (UUID, RegionID, LatticeGroupRole, LatticeGroupRole) -> String?
+                                   = { _, _, _, _ in nil },
                                // ★ a face that does not resolve to ONE plane or cylinder may
                                // resolve to several planar FACETS (a curved wall) — see
                                // `LatticeFaceFacets`; empty ⇒ the face is skipped as before
@@ -304,6 +337,8 @@ public enum LatticeRegionEmission {
                                resolve: (FaceID) -> ResolvedFace?) -> Result {
         var out: [LatticeRegionSpec] = []
         var skipped = 0
+        var droppedNames: [String] = []
+        var droppedSeen = Set<RegionID>()
         /// every resolved shape of a face: the one plane/cylinder, else its facets
         func shapes(_ f: FaceID) -> [ResolvedFace] {
             if let r = resolve(f) { return [r] }
@@ -324,7 +359,10 @@ public enum LatticeRegionEmission {
             }
         }
         for (p, d) in includePrimitives {
-            if let s = spec(for: p, role: .include, depthMM: d) { out.append(s) }
+            if var s = spec(for: p, role: .include, depthMM: d) {
+                if let sf = synthetic { s.syntheticStress = true; s.syntheticFoci = sf.foci(for: nil) }
+                out.append(s)
+            }
         }
         for g in groups {
             guard let groupRole = roles[g.id] else { continue }
@@ -358,7 +396,7 @@ public enum LatticeRegionEmission {
                         for: g.id, role: role, densities: groupDensities,
                         stated: selectableDensity[LatticeSelectableRef.primitive(p.id).key])
                     s.selectableKey = ref.key
-                    if let n = syntheticWalls[ref.key] { s.syntheticStress = true; s.syntheticFoci = n }
+                    if role == .include, let sf = synthetic { s.syntheticStress = true; s.syntheticFoci = sf.foci(for: ref.key) }
                     out.append(s)
                 }
             }
@@ -380,7 +418,7 @@ public enum LatticeRegionEmission {
                         stated: selectableDensity[ref.key])
                     s.selectableKey = ref.key
                     s.rawFaceID = f
-                    if let n = syntheticWalls[ref.key] { s.syntheticStress = true; s.syntheticFoci = n }
+                    if role == .include, let sf = synthetic { s.syntheticStress = true; s.syntheticFoci = sf.foci(for: ref.key) }
                     out.append(s); emitted += 1
                 }
                 if emitted == 0 { skipped += 1 }
@@ -391,7 +429,14 @@ public enum LatticeRegionEmission {
                 let ref = LatticeSelectableRef.region(group: g.id, region: rid)
                 guard let role = LatticeSelectableRoles.role(
                     for: ref, groupRole: groupRole, overrides: selectableRoles) else { continue }
-                guard let members = regionMembers(g.id, rid) else { continue }
+                guard let members = regionMembers(g.id, rid) else {
+                    // ★ ruling (g): a region the run cannot consume is never dropped silently —
+                    // counted and named, once. `out` is untouched, so the job cannot move.
+                    if !droppedSeen.contains(rid), let name = droppedRegionName(g.id, rid, role, groupRole) {
+                        droppedSeen.insert(rid); droppedNames.append(name)
+                    }
+                    continue
+                }
                 let depth = selectableDepthMM[ref.key] ?? groupDepth
                 for f in members where !direct.contains(f) {
                     var emitted = 0
@@ -405,7 +450,7 @@ public enum LatticeRegionEmission {
                             stated: selectableDensity[ref.key])
                         s.selectableKey = ref.key
                         s.rawFaceID = f
-                        if let n = syntheticWalls[ref.key] { s.syntheticStress = true; s.syntheticFoci = n }
+                        if role == .include, let sf = synthetic { s.syntheticStress = true; s.syntheticFoci = sf.foci(for: ref.key) }
                         out.append(s); emitted += 1
                     }
                     if emitted == 0 { skipped += 1 }
@@ -418,7 +463,7 @@ public enum LatticeRegionEmission {
         // positive where the two prisms diverge with depth — so `LatticeRegionMask` can
         // flare each prism to the bisector plane and adjacent prisms meet without a wedge.
         finishSeams(&out, runFaceID: runFaceID, solidAt: solidAt)
-        return Result(regions: out, skippedFaces: skipped)
+        return Result(regions: out, skippedFaces: skipped, skippedRegionNames: droppedNames)
     }
 
     static func finishSeams(_ out: inout [LatticeRegionSpec], runFaceID: (FaceID) -> Int,
@@ -635,5 +680,34 @@ public enum LatticeRegionEmission {
         if let d = stated, d.isFinite, d > 0 { return d }
         guard let d = densities[id], d.isFinite, d > 0 else { return nil }
         return d
+    }
+}
+
+/// ★★ ONE SENTENCE FOR EVERY WALL THE EMISSION DROPS (ruling V1, 2026-09-29; the wording
+/// accepted 2026-09-30, ruling f; the regions named, ruling g). The stage's preview banner
+/// (`.notShown`) and a variant's Check sizes / forecast / re-lattice (`.leftOut`) all say it
+/// through this, so the two cannot drift. Face-only, the notice is the accepted sentence
+/// byte for byte.
+public enum LatticeWallsWithoutShape {
+    public enum Ending: Sendable { case leftOut, notShown }
+    /// One line: past this many, the rest are counted, not named.
+    static let namedMax = 3
+    public static func text(faces n: Int, regions names: [String], ending: Ending) -> String? {
+        var subjects: [String] = []
+        if n > 0 { subjects.append(n == 1 ? "1 marked face" : "\(n) marked faces") }
+        if !names.isEmpty {
+            var list = names.prefix(namedMax).map { "“\($0)”" }
+            if names.count > namedMax { list.append("\(names.count - namedMax) more") }
+            let joined = list.count == 1 ? list[0]
+                : list.dropLast().joined(separator: ", ") + " and " + list[list.count - 1]
+            subjects.append((names.count == 1 ? "the region " : "the regions ") + joined)
+        }
+        guard !subjects.isEmpty else { return nil }
+        let plural = n + names.count > 1
+        let s = subjects.joined(separator: " and ") + (plural ? " have" : " has")
+            + " no shape to lattice and " + (plural ? "are " : "is ")
+            + (ending == .leftOut ? "left out." : "not shown")
+        guard ending == .leftOut else { return s }
+        return s.prefix(1).uppercased() + s.dropFirst()
     }
 }

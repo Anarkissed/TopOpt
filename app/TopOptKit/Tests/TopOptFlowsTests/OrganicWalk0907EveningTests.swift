@@ -45,7 +45,7 @@ final class OrganicWalk0907EveningTests: XCTestCase {
         XCTAssertNotEqual(a.previewBakeInputs, b.previewBakeInputs,
                           "★ a real setting must not be invisible to the guard")
         b = a
-        b.selectableWallStressFraction["f:x:15"] = 0.42
+        b.selectableWallCoreDead["f:x:15"] = true
         XCTAssertEqual(a.previewBakeInputs, b.previewBakeInputs,
                        "★ a measurement the bake itself wrote must never re-arm it")
     }

@@ -362,13 +362,22 @@ public extension LatticeType {
     /// here nor in the family renders as itself, so a topology core adds tomorrow is
     /// at worst plainly named, never mislabelled.
     static func displayName(forID id: String) -> String {
-        if let t = family.first(where: { $0.id == id }) { return t.displayName }
+        // ★ LATTICE TYPES ROUND 1 — Q5's default names (00-decisions, 2026-09-28) for the eight
+        // types this round adds; Q5 is open, so these are the defaults until he rules.
         switch id {
+        case "sc": return "Simple cubic"
+        case "bcc": return "BCC"
+        case "fcc": return "FCC"
+        case "diamond": return "Diamond"
         case "kelvin": return "Kelvin"
-        case "rhombic": return "Rhombic"
+        case "rhombic": return "Rhombic dodecahedron"
+        case "gyroid": return "Gyroid"
+        case "schwarz_d": return "Schwarz-D"
         case "reentrant": return "Re-entrant"
-        default: return id
+        default: break
         }
+        if let t = family.first(where: { $0.id == id }) { return t.displayName }
+        return id
     }
 
     static let sc = build("sc", "Simple cubic", 8.4853,

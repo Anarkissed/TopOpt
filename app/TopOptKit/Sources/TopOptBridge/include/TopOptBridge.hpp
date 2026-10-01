@@ -1296,12 +1296,12 @@ std::vector<double> organic_preview_field(
     // B.5: "the preview bridge ... must call synthesize_focal_stress() on its tensor
     // with the same per-region config, or preview and run disagree on a dead wall").
     // region_id: one int per voxel, 0 = none, else the 1-based include region.
-    // synth: rows of 4 doubles [region_id, face_id, foci, soft_mm]. dead_fraction:
-    // the run's 0.02. Nothing runs when region_id_count != n or synth_count == 0.
+    // synth: rows of 4 doubles [region_id, face_id, foci, soft_mm]. The dead test is
+    // the RUN's call, verbatim (0.02 and core's kOrganicSyntheticDeadFloorMPa); the
+    // caller supplies no threshold. Nothing runs when region_id_count != n or
+    // synth_count < 4.
     const int* region_id, std::size_t region_id_count,
-    const double* synth, std::size_t synth_count, double synth_dead_fraction,
-    // ★ an absolute floor under the dead test, in MPa: `thr = max(fraction·peak, mpa)`
-    double synth_dead_mpa,
+    const double* synth, std::size_t synth_count,
     // ★ THE SEEDING BOOST (his 2026-09-21: "modify the algorithm being used by the beams
     // to create the preview. Add the required seeding boost"). Core's Jobard–Lefer
     // ratios, as multiples of the local separation: where the next seed is offered
@@ -1310,6 +1310,17 @@ std::vector<double> organic_preview_field(
     double seed_ratio, double test_ratio, double min_length_ratio,
     int fnx, int fny, int fnz, double fspacing,
     double fox, double foy, double foz, double band_mm);
+
+// ★ Core's dead-wall verdict without a trace (ruling C, 2026-09-29): the same call the
+// trace makes, returning only the report — see bridge.cpp for the layout.
+std::vector<double> organic_synthetic_report(
+    int nx, int ny, int nz, double spacing, double ox, double oy, double oz,
+    const std::uint8_t* candidate, std::size_t candidate_count,
+    const double* tensor, std::size_t tensor_count,
+    const int* region_id, std::size_t region_id_count,
+    const double* synth, std::size_t synth_count);
+// core's own absolute floor under the dead test (kOrganicSyntheticDeadFloorMPa)
+double organic_synthetic_dead_floor_mpa();
 
 // Bake a span list (7 doubles each: a, b, r) into the two-channel centreline field —
 // see `organic_spans_field` in bridge.cpp for the layout.

@@ -123,6 +123,54 @@ final class OrganicPreviewParameterParityTests: XCTestCase {
                              "★ the ties are the horizontal members and they must reach the preview")
     }
 
+    /// ★ A STATED WIDTH IS DRAWN AT THAT WIDTH (core #358 added `bead_is_stated`: the run
+    /// skips the bead calibration for a stated `organic_strut_width_mm` and ships radius =
+    /// stated/2, and the preview bridge never set it, so the picture still scaled every
+    /// radius by the calibration's k). A behavioural pin, since the source-text guard
+    /// above only proves the field is ASSIGNED, not that it is assigned the run's value.
+    func testAStatedWidthReachesThePreviewUncalibrated() throws {
+        guard TopOptKit.latticeAlgorithmIsKnown("organic") else { throw XCTSkip("no organic on this core") }
+        let n = 20
+        var tensor = [Double](repeating: 0, count: 6 * n * n * n)
+        for k in 0..<n { for j in 0..<n { for i in 0..<n {
+            let e = (k * n + j) * n + i
+            let x = Double(i) / Double(n - 1)
+            tensor[6 * e] = 4 + 2 * x; tensor[6 * e + 1] = 1; tensor[6 * e + 2] = 12
+        } } }
+        let cand = [Bool](repeating: true, count: n * n * n)
+        let sep = [Double](repeating: 3.0, count: n * n * n)
+        let stated = 0.8
+
+        func radii(strut: Double, bead: [Double]) -> [Double] {
+            guard let t = TopOptKit.organicTrace(
+                nx: n, ny: n, nz: n, spacingMM: 1.0, origin: .zero,
+                candidate: cand, stressTensor: tensor, separationMM: sep,
+                minExtrudableWidthMM: 0.42, buildDirection: SIMD3(0, 0, 1),
+                fieldDims: (2, 2, 2), fieldOrigin: .zero, fieldSpacingMM: Double(n), bandMM: 1,
+                rhoMin: 0.05, rhoMax: 0.6, strutDiameterMM: strut, beadMM: bead) else { return [] }
+            return t.spans.map(\.r).sorted()
+        }
+        let asStated = radii(strut: stated, bead: [])
+        // the SAME bead, handed over as the unstated per-voxel field: core calibrates it
+        let asField = radii(strut: 0, bead: [Double](repeating: stated, count: n * n * n))
+        func med(_ r: [Double]) -> Double { r.isEmpty ? .nan : r[r.count / 2] }
+        print("""
+
+        ── a stated strut width, through the preview bridge ─────────────────
+        stated \(stated) mm ...... \(asStated.count) spans, r \(asStated.first ?? .nan)–\(asStated.last ?? .nan), median \(med(asStated))
+        same bead unstated ... \(asField.count) spans, median r \(med(asField)) (calibrated, k ≈ \(med(asField) / (stated / 2)))
+        """)
+        XCTAssertFalse(asStated.isEmpty, "the trace emitted nothing")
+        XCTAssertFalse(asField.isEmpty, "the control trace emitted nothing")
+        // ★ positive control: on this fixture the calibration MOVES the radius, so an
+        // uncalibrated result below is a real difference, not a coincidence of k ≈ 1
+        XCTAssertGreaterThan(abs(med(asField) / (stated / 2) - 1), 0.02,
+                             "control: the calibration must move the radius on this fixture")
+        let off = asStated.filter { abs($0 - stated / 2) > 1e-9 }
+        XCTAssertEqual(off.count, 0, "★ a stated width ships at stated/2 in the run; the preview drew "
+                       + "\(off.count) of \(asStated.count) spans at another radius (e.g. \(off.first ?? 0))")
+    }
+
     /// The ties are a GROWN-path pass in core, so they belong in the sample cube's cache
     /// key only when the sample is grown — otherwise every traced variant this build
     /// ships is orphaned for a parameter that cannot change its geometry.

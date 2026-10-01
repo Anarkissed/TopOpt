@@ -1260,7 +1260,7 @@ iOS 26.5), dylib af8bc1831f4af5cd; Mac suites Debug.
     the log says so. `DIAG organic window:` names the window and its source.
     Measured: 12 mm wall, 1.7 mm voxel, 0.45 bead, look 8 ⇒ band 1.70–6.00 mm.
 44. **The solid rim, in the preview.** "Fit to shape means grade to solid at the
-    edges. Always. And always on the *sides*." The run's `apply_organic_solid_rim`
+    edges. Always. And always on the *sides*." The run's `apply_organic_solid_rim` *(superseded 2026-09-29: core replaced this with `organic_solid_rim_band`, which keeps the band as tracer candidates and turns it solid after the trace — ruling G)*
     turns candidates within `rim` of a SIDE neighbour solid (never along the normal);
     rim = `organic_solid_rim_mm`, −1 ⇒ the window's low end. The preview now erodes
     each include face region IN-PLANE by that number (`LatticeRegionSpec.inPlaneOffsetMM`,
@@ -1382,7 +1382,7 @@ iOS 26.5), dylib af8bc1831f4af5cd; Mac suites Debug.
     `latticeWallLoaded` needs no context it does not have.
 59. **THE PREVIEW APPLIED A SOLID RIM THE RUN DOES NOT.** run_job:
     `rim = organic_solid_rim_mm < 0 ? job.grading.cell_min_mm : organic_solid_rim_mm`,
-    and `apply_organic_solid_rim` returns immediately unless `rim > 0`. `cell_min_mm`
+    and `apply_organic_solid_rim` *(superseded 2026-09-29: core replaced this with `organic_solid_rim_band`, which keeps the band as tracer candidates and turns it solid after the trace — ruling G)* returns immediately unless `rim > 0`. `cell_min_mm`
     defaults to 0 and this app writes it ONLY when a GRADE was picked — so under Auto,
     and under a single Manual size, THE RUN RIMS NOTHING. The preview was taking the
     window's low end (3.96 mm on his stand) and eroding every face region by it, all
@@ -1464,7 +1464,7 @@ iOS 26.5), dylib af8bc1831f4af5cd; Mac suites Debug.
     invariants; organic keeps its own … and audits them in run_organic_step").
     Organic's own spacing floors RAISE the separation rather than solidifying anything.
     So a traced lattice has exactly ONE grade-to-solid in the whole run:
-    `apply_organic_solid_rim`.
+    `apply_organic_solid_rim` *(superseded 2026-09-29: core replaced this with `organic_solid_rim_band`, which keeps the band as tracer candidates and turns it solid after the trace — ruling G)*.
 72. **`OrganicSolidRim`** mirrors it arithmetic for arithmetic on the preview's grid:
     seeds are candidate voxels with a 6-neighbour that is solid material and NOT along
     the region normal (|dot| < 0.5 — along the normal is the floor or the open face);

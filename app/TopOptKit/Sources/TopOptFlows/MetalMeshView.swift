@@ -4386,7 +4386,7 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         // Declared ⇒ the region field. Undeclared (the sample block) ⇒ the CELL field,
         // which is what `gate.y == 2` reads. Both are bound here so the uniform and the
         // texture can never describe different volumes.
-        if (layer.scene?.regions ?? []).contains(where: { $0.role == .include }),
+        if LatticeJobIncludeGate.hasIncludeWall(layer.scene?.regions ?? []),
            let t = layer.regionTexture { return t }
         return layer.shellClipCellTexture ?? neutralShellClipTexture()
     }

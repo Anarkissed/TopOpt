@@ -197,7 +197,20 @@ public enum LatticePreviewBanner: Equatable, Sendable {
         // a depth set too shallow, or a face whose slab sits outside the solid.
         // Reporting "this part has no inside" for it would be a confident wrong
         // answer, and it is the one the user would act on.
+        // ★ ruling (g): what the emission dropped, said in BOTH branches — never silent.
+        let dropped = LatticeWallsWithoutShape.text(faces: scene.skippedFaces,
+                                                    regions: scene.skippedRegionNames,
+                                                    ending: .notShown)
         guard scene.interiorVoxelCount > 0 else {
+            // The drop first — it has no depth fix. The depth advice only for include walls that
+            // WERE emitted and reached no material: the stage clips an emission with no include
+            // wall to NOTHING (`.latticeNothing`), so every wall may be among the dropped.
+            // Kept near §5c's ~25 words.
+            if let dropped {
+                return .empty("Nothing to lattice — " + dropped
+                              + (scene.hasIncludeRegion
+                                 ? ". The rest reach no material: try a deeper slab." : "."))
+            }
             return .empty("Nothing to lattice — the faces you marked do not reach "
                           + "any material. Try a deeper slab.")
         }
@@ -248,12 +261,9 @@ public enum LatticePreviewBanner: Equatable, Sendable {
             // lattices on the part preview yet?" — it was, and the tensor never came)
             if let why = scene.organicNotDrawnReason { label += " — " + why }
         }
-        if scene.skippedFaces > 0 {
-            return .drawing(label + " · "
-                            + "\(scene.skippedFaces) marked "
-                            + (scene.skippedFaces == 1 ? "face has" : "faces have")
-                            + " no shape to lattice and are not shown")
-        }
+        // ★ The sentence is `LatticeWallsWithoutShape`'s — the variant notice's, so the two
+        // cannot drift (ruling g); a single face now reads "is not shown", not "are".
+        if let dropped { return .drawing(label + " · " + dropped) }
         return .drawing(label)
     }
 }
@@ -267,6 +277,10 @@ public struct LatticePreviewSummaryValues: Equatable, Sendable {
     /// with an interior, and no skipped faces.
     public var partInteriorVoxelCount: Int
     public var skippedFaces: Int
+    /// ★ ruling (g): face regions (by name) the emission could not use
+    public var skippedRegionNames: [String]
+    /// An include region was emitted — the stage clips to nothing without one.
+    public var hasIncludeRegion: Bool
     /// The algorithm the RUN will use, in core's own words ("doubled" / "stepped" /
     /// "organic"). Empty means "not stated", which core resolves to doubled — and a
     /// preview of doubled under a job that says doubled needs no caveat.
@@ -276,12 +290,16 @@ public struct LatticePreviewSummaryValues: Equatable, Sendable {
     public var algorithmDrawnFaithfully: Bool
     public init(interiorVoxelCount: Int, previewLabel: String,
                 partInteriorVoxelCount: Int? = nil, skippedFaces: Int = 0,
+                skippedRegionNames: [String] = [],
+                hasIncludeRegion: Bool = true,
                 algorithmName: String = "",
                 algorithmDrawnFaithfully: Bool = true) {
         self.interiorVoxelCount = interiorVoxelCount
         self.previewLabel = previewLabel
         self.partInteriorVoxelCount = partInteriorVoxelCount ?? interiorVoxelCount
         self.skippedFaces = skippedFaces
+        self.skippedRegionNames = skippedRegionNames
+        self.hasIncludeRegion = hasIncludeRegion
         self.algorithmName = algorithmName
         self.algorithmDrawnFaithfully = algorithmDrawnFaithfully
     }
@@ -305,6 +323,11 @@ public protocol LatticeSDFPreviewSummary {
     var partInteriorVoxelCount: Int { get }
     /// Faces marked by the user that the emission could not use.
     var skippedFaces: Int { get }
+    /// ★ ruling (g): face regions (by name) the emission could not use — a REQUIREMENT, so
+    /// no conformer can forget it.
+    var skippedRegionNames: [String] { get }
+    /// An include region was emitted (the stage clips to nothing without one) — a REQUIREMENT.
+    var hasIncludeRegion: Bool { get }
     var previewLabel: String { get }
     /// The algorithm the RUN will use, in core's own words. Defaulted so every
     /// existing conformer is unchanged and keeps meaning "doubled, faithfully".

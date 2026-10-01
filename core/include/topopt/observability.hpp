@@ -271,6 +271,16 @@ struct OrganicSyntheticRegionInfo {
   long long voxels = 0;
   long long fully = 0;
   long long blended = 0;
+  // ── ★ RULING H'S VERDICT FOR THIS WALL, IN THE RECEIPT (2026-09-29) ─────────
+  // Report-only. The verdict existed only on a stderr line ("[synthetic] region N
+  // ... -> DEAD, synthesised WHOLE"), so the run's DEAD SET could not be compared
+  // with the size probe's except by reading and parsing two logs -- which is how the
+  // two came to disagree unnoticed (#354's audit). `p99_von_mises` is the REAL
+  // field's p99 over this region's voxels in the synthesis domain, measured before a
+  // single voxel was written; `whole_region` is that p99 against the run's dead
+  // threshold (already in the receipt as synthetic_stress_dead_threshold).
+  bool whole_region = false;
+  double p99_von_mises = 0.0;
 };
 
 struct RunInfo {
@@ -1019,7 +1029,11 @@ struct RunInfo {
   std::vector<OrganicSyntheticRegionInfo> organic_synthetic_by_region;   // keyed by face_id
   double organic_solid_rim_mm = 0.0;        // grade-to-solid band at the outline
   long long organic_solid_rim_voxels = 0;
-  // spans over open air, counted and NOT repaired (the fillet was removed)
+  // Spans over open air: PRINTED AS DRAWN and counted. Not repaired, not deleted --
+  // the overhang fillet that used to flare them was removed for depositing blobs up
+  // to nine times the strut, and this count is the measurement that replaced it. Said
+  // explicitly because the generator's own field carried the opposite claim until
+  // 2026-09-29, and silence here would leave the same inference available.
   long long organic_unsupported_spans = 0;
   // ── ★ §3 PARITY: THE SPAN CENSUS, to be diffed against the app's own trace banner.
   // Measured on the spans that SHIP, after every pass -- which is the set the file is
