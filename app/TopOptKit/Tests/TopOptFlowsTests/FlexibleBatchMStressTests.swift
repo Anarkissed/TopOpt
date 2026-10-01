@@ -190,6 +190,12 @@ final class FlexibleBatchMStressTests: XCTestCase {
         m.squishSolver.controlFailSimIDs = []
         stage.retryStress()
         XCTAssertEqual(m.squish["group-2"], .pending, "Retry re-runs the group's sim")
+        stage.refresh()
+        XCTAssertTrue(stage.stressRunning, "Stress on, its sim running: the button says so")
+        stage.stress = false
+        XCTAssertFalse(stage.stressRunning, "Stress OFF: the button never reads 'Simulating…' for sims he did not ask Stress of")
+        XCTAssertTrue(stage.stressView.isRunning, "control: the sims' own state is running (batch M's first cut lit the button)")
+        stage.stress = true
         try await FlexibleHisProject.waitFor(120, "the retried sim") { m.squish["group-2"]?.field != nil }
         stage.refresh()
         XCTAssertEqual(m.lattice?.generation, generation, "…without rebuilding the lattice")

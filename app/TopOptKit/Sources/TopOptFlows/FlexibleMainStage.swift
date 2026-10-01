@@ -102,7 +102,9 @@ public final class FlexibleMainStage: ObservableObject {
     /// ★ BATCH C VERIFICATION: what the solve is doing — the sim's own phase, or why it could not
     /// start — ONE published value (it failed silently on his project: "No stress yet" for ever).
     @Published public internal(set) var stressState: FlexibleStressState = .idle
-    var stressRunning: Bool { stressView.isRunning }   // ★ BATCH M: the FE route's state too
+    /// ★ BATCH M: on the FE route only while Stress is ON (the sims run with every lattice — the Stress
+    /// button must not read "Simulating…" when he never asked for Stress).
+    var stressRunning: Bool { feStressRoute ? (stress && stressView.isRunning) : stressState.isRunning }
     /// The sim whose phase is observed, and that observation.
     weak var stressSim: LatticeSimModel?
     var stressPhaseObservation: AnyCancellable?

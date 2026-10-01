@@ -121,7 +121,13 @@ final class FlexibleMainPageRound4Tests: XCTestCase {
         // with a lattice: show / hide, never Settings
         stage.latticeButtonTapped(openSettings: { opened += 1 })
         XCTAssertFalse(stage.latticeShown, "hidden")
-        XCTAssertEqual(stage.bodyAlpha(pm, on: .lattice), 1)
+        // ★ RE-PINNED (batch M, M6 — his round-5 img 6: "When the dent view is selected, the xray view should
+        // also initiate"): the dent view (on, with a map) keeps the part a ghost; with it off the part is solid
+        XCTAssertTrue(stage.heat && stage.dentXray, "premise: the dent view shows a map")
+        XCTAssertEqual(stage.bodyAlpha(pm, on: .lattice), FlexibleStagePage.xrayBodyAlpha, "the dent view: X-ray")
+        stage.toggleStress(); stage.refresh()
+        XCTAssertEqual(stage.bodyAlpha(pm, on: .lattice), 1, "no dent view, no lattice: the solid part")
+        stage.toggleHeat(); stage.refresh()
         XCTAssertEqual(stage.layer(pm, stage: .lattice, pageUp: false)?.hidden, true, "the walls are not drawn")
         stage.latticeButtonTapped(openSettings: { opened += 1 })
         XCTAssertTrue(stage.latticeShown, "shown again")

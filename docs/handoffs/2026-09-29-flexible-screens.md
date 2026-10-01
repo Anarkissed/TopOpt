@@ -1,6 +1,267 @@
 # Handoff — 2026-09-29-flexible-screens (TRACK app, A1): the Flexible screens
 
-## Round 5 · batch G — verification pass (read this first)
+## Round 5 · batch M — your round-5 notes on the main page and the dent visuals (read this first)
+
+Your seven notes on img 4–6 (taken on the build before batch G), and "this and the graded dent colours
+should be in both views". Judged on YOUR project as you left it for round 5 (`his_project_0004_r5`:
+Group 1 = Top A's elbow + Top B + Face 5's 10 kg thumb, Group 2 = Face 3's four fingertips), restored
+through `AppModel.open`, and on C1's pad with a four-fingertip stamp on its top. The pictures below are
+offscreen frames of the shipping renderer — the app was built for the simulator but NOT launched, so
+none of this has been seen on a screen yet.
+
+**What you will see:**
+- **The dent colours are the FEA rainbow, on both pages** (M7): blue → cyan → green → yellow → red, the
+  original FEA legend's own five colours. The map, every legend that shows it, and the Stress view use
+  the same rainbow (the two are never on together). This replaces the deep blue → cyan → white of
+  2026-09-30, as you asked.
+- **The colours are graded, with no blocks and no hard cut** (M5), on both pages:
+  - each corner of the map takes its own value and the screen blends between them;
+  - a tap reads the number at that exact spot, so the number is the colour under your finger.
+- **On the main page the colours are the 3D sim's own squish** (M5, M2):
+  - they spread out of each stamp and the fingertips merge into one press (your Face 3: the ground
+    0–3 mm outside the fingertips reads 95 % of under them; core's own numbers there read 37 %);
+  - your Top A elbow is a soft cyan spot fading into the blue top, not a hard-edged disc.
+- **On the Settings page a stamp spreads out too** (M2): the four fingertips grade out and merge into one
+  press (between them: 88 % of the deepest squish; before: 13 %), still sinking the full depth under each.
+- **Pick Group 1 or Group 2: you see only that group, pressing in** (M1). Its own field, its own faces
+  moving INTO the part; "Play all" plays Group 1, then Group 2, and names the one playing.
+- **Stress works on your pad, per group** (M3):
+  - it shows the stress of the group you picked (or the one playing), from that group's own sim;
+  - on the part and, with the lattice on, on its walls; tap for MPa;
+  - the legend reads "Stress · Group 2 · MPa".
+  - If a sim fails it says why in one line ("Couldn't simulate: it took too long") with Retry.
+- **The dent view is X-ray, and the planes are solid** (M6):
+  - turning on the dent view makes the part a ghost even with the lattice off;
+  - with the lattice on, the walls are a faint ghost too, and the dent planes bend through them;
+  - **the stripes are gone** (they were the lattice walls' cut faces at the part's surface poking
+    through the plane).
+- **One legend card** (M4), like the octet's key: the Squish (or Stress) row and the lattice-density row
+  in one card on the right edge, clear of every button. Tap it to read; the caret folds it to a column
+  of bars.
+
+**What was wrong, and why:**
+- **M1 "group 1 showed group 2's animation … group 2 as a negative":** on your round-5 build (the
+  column squish, before G) the squish was per column and the groups shared walls. On G's field I found
+  no swapped or inverted group: every group picked binds its own field (renderer, mesh, player name),
+  and its pressed faces move in (Group 1: Top B 0.13, Top A 0.66, Face 5 1.83 mm at ×1; Group 2: Face 3
+  12.69 mm). Tests now hold this per group, with red controls (the index swapped, the sign flipped).
+- **M3 "Couldn't simulate":** your 'Top' group presses region 105 "Union of 2" (top A + top B). A
+  union keeps its members as *parts*, and the region spec handed to core has no parts
+  (`FaceRegion.kitSpec`), so core got region 105 with no faces and refused the whole solve: "face
+  region 105 resolves to NO faces on this model". That is #354's region mapping (outside this track),
+  and the Optimize run may hit it too — I did not change it. The Stress view no longer goes through that
+  solve when a lattice exists.
+- **M6 the stripes:** the lattice runs to the surface (Finish "None"), and its walls were drawn solid with
+  depth. Where a wall's cut face met the dent plane (lifted 0.05 mm), it won, in rows. On your pad: 4.3 %
+  of the top map's interior from above, 28.7 % from the iso view. Now: 0.
+
+**Not done (and why):**
+- **Nothing has been seen on a device or in the simulator** (track rule: never launch). The iOS build
+  succeeds.
+- **On Face 5 the sim squishes the top edge most, not the middle of the thumb.**
+  - Under each stamp the colours read close to what you set: the thumb 11.4 mm on average (you set
+    13.5), Top A's elbow 4.8 mm (4.0), Face 3's fingertips 25.8 mm (24.5).
+  - But Face 5's top edge, just above the thumb, reads 23.7 mm — the most on that face.
+  - That is Group 1's 3D sim (it presses the top and Face 5 together, and finds the part 7× stiffer than
+    core's columns — G's (i) already said so). I did not change G's physics; core brief #24 / #35.
+- **On the Settings page, steep stamp walls still show a slight saw-tooth** at the column pitch
+  (1.56 mm at Fast): two flat triangles per column cannot draw a steep curved wall perfectly. The colour
+  itself is continuous.
+- **The Settings page's own legend bar** is still 24 small blocks (FlexibleStagePage is batch S's
+  page); the main page's card uses smooth gradients.
+- **Core still designs a stamp under the stamp alone** (core brief #33): the spread is in the
+  Settings page's picture and in the 3D sim, not in core's density.
+- **The solid-part Stress route without a lattice** still fails on your project (the union region,
+  above).
+
+**Your call:**
+- **Group 1's colours:** show the sim's own squish (now — Face 5's top edge reads 23.7 mm, more than the
+  13.5 you set), or cap the colours at the deepest you set (the edge would read 13.5, like the thumb's
+  middle)?
+- **The spread on the Settings page:** L = 0.2 × the lattice depth (4 mm on your top, 20 mm on your
+  100 mm-deep sides), fitted to the sim of your pad. Wider or narrower?
+- **Stress with the lattice on:** the walls take the stress colours and the density row stays in the
+  card (a tap on a wall gives both). Or drop the density row while Stress is on?
+- **Your union region 105:** should the stage's region spec carry union parts (a #354 change), so the
+  Optimize run and the solid Stress solve see your 'Top' group's faces?
+
+### Each note → what changed (file) → pinned by
+| # | His note | What changed | Pinned by (RED control) |
+|---|---|---|---|
+| M1 | group 1 showed group 2's animation; group 2 "as a negative" | nothing in production (G's field binds per group); tests per group | FlexibleBatchMGroupTests (the other group's mesh; the flipped sign; the column fallback flipped) |
+| M2 | stamps are isolated; foci should merge into one input | the Settings page's stamp dent spreads (`FlexibleStampSpread`, `stampDent`); the main page's heat is the sim's own squish | FlexibleBatchMDentTests (the footprint alone; core's per-column numbers) |
+| M3 | Stress can't simulate; should be the playing / selected group | Stress = each group's own sim (`FlexibleFEStress`, `FlexibleMainStage+Stress`, the bridge's `element_e`, the walls' w channel); one-line failure + Retry on the kept request | FlexibleBatchMStressTests (the calibrated u; the other group's field; the request released) |
+| M4 | one legend, like the other lattice sections | ONE card (`FlexibleMainLegends.card`, `legendCard`, `cardTapped`, the wall probe reading the plane first) | FlexibleBatchMLegendTests (batch C's per-kind frames; the probe's wall reading) |
+| M5 | dent colours not graded, a hard cut | per-vertex colours (`FlexibleOverlayMesh.quadCorners` / `mapCornerValues`, `tints(vertexColour:)`), a tap reads the blend (`FlexibleProbe.dentReading`) | FlexibleBatchMDentTests, FlexibleMainViewsTests (one colour per column) |
+| M6 | dent view → X-ray, the lattice a ghost, no stripes, solid | `xray = latticeShown ∥ dentXray`, `ghostWalls`, `flx_ghost_walls`, two MetalMeshView hooks | FlexibleBatchMXrayTests (C2's rule; the opaque walls: 4.3 % / 28.7 % of the map) |
+| M7 | dent colours = the original FEA legend, both views | `FlexibleColours.depthStops` = ResultsModel.stressColor's stops, the Stress view reads the same | FlexibleShownValuesTests (the old deep blue → white ramp) |
+
+### Hook lines in #354 / main files (this batch; each grepped after the edit)
+| hook | file · anchor | ± | why |
+|---|---|---|---|
+| HM1 | MetalMeshView.swift · `if wantsLattice, let lpipe = latticeShadePipeline, let gb = gbuffer {` → `if wantsLattice, !flexibleWallsGhosted, let lpipe = latticeShadePipeline, let gb = gbuffer {   // Flexible (#362) batch M: …` | +1 −1 | #354's opaque lattice shade stands down while the dent view ghosts the Flexible walls (`MeshRenderer+FlexibleLattice.flexibleWallsGhosted`, false whenever the Flexible pass is not drawing — the octet's frame is byte-for-byte #354's) |
+| HM2 | MetalMeshView.swift · after that block: `if wantsLattice, flexibleWallsGhosted, let gb = gbuffer { encodeFlexibleGhostWalls(enc, gbuffer: gb, mainSize: mainSize) }   // …` | +1 | the walls drawn as a ghost from the G-buffer the prepass already filled, before the ghost body and the solid map |
+
+Nothing else outside the track: WorkspacePlaceholder, LatticeSettings, ProjectModel, ResultsModel,
+FaceRegion and LatticeStageMode are untouched, no case was added, core/ is untouched (the bridge is
+the app's), the pinned strings are untouched. Batch S's modal views (FlexibleSettingsPanel,
+FlexibleFacePanel, FlexibleFaceList / FaceRows, FlexibleSqueezeGroupRows) and FlexibleStagePage are
+untouched; the Settings page changed only through shared code (FlexiblePageChannels, FlexibleOverlay,
+FlexibleShownValues, FlexibleProbe, FlexibleStampSpread). **Merge note for S:** FlexiblePageChannels
+(`channels`) holds the group colours S owns AND batch M's per-vertex heat — keep both.
+
+New files: `FlexibleStampSpread`, `FlexibleFEStress`, `FlexibleMainStage+Stress`; tests
+`FlexibleBatchMDentTests`, `FlexibleBatchMGroupTests`, `FlexibleBatchMStressTests`,
+`FlexibleBatchMXrayTests`, `FlexibleBatchMLegendTests`, and the opt-in `FlexibleBatchMProbe`.
+
+### The numbers (his round-5 project unless said)
+- **M5 continuity** (the largest colour step where two quads share a corner): Settings page, Face 3:
+  0.0000 over 908 shared corners (one colour per column: 0.43); main page, Group 2 Face 3: 0.0000
+  (core's per-column colours: 1.25), Group 1 Top A: 0.0000 (0.21). A tap off a column's centre reads the
+  blend: 23 of 23 taps equal the colour's value; all 23 differ from the column's own number.
+- **M2 spread** (Settings page): L = 0.2 × lattice depth — his top (20 mm) 4.0 mm, his sides (100 mm)
+  20.0 mm. Between Face 3's fingertips: 88 % of the deepest (the footprint alone: 13 %); the largest step
+  between neighbouring columns 14 % of the deepest (the footprint: 27 %). The fit to the 3D sim (the sink
+  0–2 / 2–4 / 4–8 mm outside each stamp, over under it; `FlexibleBatchMProbe.testFEStampSpreadProfile`):
+  share 0.1 / 0.15 / 0.2 / 0.25 / 0.3 → Top A rms 0.20 / 0.14 / 0.13 / 0.14 / 0.17, Face 5 0.10 / 0.03 /
+  0.05 / 0.07 / 0.09, Face 3 0.16 / 0.11 / 0.08 / 0.06 / 0.04 — 0.2 is the best single share for the
+  three (Top A's ring also carries Top B's own press).
+- **M2/M5 main page** (the sim's squish, mm at the calibrated size; `FlexibleBatchMProbe.testFEHeatPerFace`):
+  Group 1 — Face 5 under the thumb 11.35 (146 columns; you set 13.5), max 23.72 at its top edge (u 49.2,
+  v 19.5), mean 8.05; Top A under the elbow 4.77 (644 columns; you set 4.0), max 5.65; Top B max 3.01
+  (3.0). Group 2 — Face 3 under the fingertips 25.80 (235 columns; you set 24.5), max 27.29, mean 23.88. The ring 0–3 mm outside the stamp over under it:
+  Face 3 95 % (core's columns 37 %), Top A 57 % (31 %). × the ASKED k instead: Face 5 87.65 mm.
+- **M1:** at ×1 (full load, as cut), each group's own faces move in — Group 1: Top B 0.128, Top A 0.658,
+  Face 5 1.826 mm (Group 2's field there: −0.683, −0.864, 0.000); Group 2: Face 3 12.691 mm (Group 1's
+  field: 0.000). Play all's turns: group-1, group-2, group-1, group-2 (the bound field = the one named).
+- **M3:** von Mises on known strains — uniaxial 0.015385 MPa (E ε / (1 + ν) = 0.015385), shear 0.013323
+  (√3 μ γ = 0.013323); a field × 3 reads the same. His pad: Group 1 peak 0.7990 MPa, Group 2 0.0575 MPa;
+  the part's colours are its own group's at 12 919 of 12 919 sampled vertices (the other group's: 26 and
+  2); a tap reads 0.0139 / 0.0214 MPa (the other group's there: 0.0214 / 0.0139). A forced failure
+  (1 ns budget): "Couldn't simulate: it took too long", core's words behind the (i); Retry re-runs it with
+  the lattice's generation unchanged (control, the request dropped: the lattice rebuilds).
+- **M6:** the map's interior (2 px in from its outline) — top view 126 174 px, iso 65 624 px; pixels where
+  the walls show through: 0 and 0 (the old opaque walls: 5 439 = 4.3 % and 18 859 = 28.7 %).
+- **M7:** the dent ramp's hue runs 6° … 226° (the FEA rainbow); the prism's nearest ramp colour is
+  0.431 RGB away.
+
+### Core brief (batch M; #1–#32 stand)
+- **#33 A stamp's press spreads, and its foci are one press.** design_stamp designs the density under
+  the stamp alone (weight ÷ footprint elsewhere). The 3D sim of his pad drags the face round a stamp over
+  ~0.2 × the layer's depth, and close fingertips merge. Core should design for that press (one force over
+  the merged foci), so the lattice matches what the Settings page draws and the main page plays.
+- **#34 Stress from the squish solve.** The app computes von Mises from the linear field (secant moduli,
+  ν = 0.3, small strain) and node-averages it. Core should return element stresses (and, with #20, the
+  large-strain ones), and say how far the linear numbers are from the real TPU.
+- **#35 Where the 3D sim and core's columns disagree past the band** (his Group 1: k asked 7.4), the heat
+  now shows the sim's squish: under the thumb 11.4 mm (13.5 set), but Face 5's top edge above it 23.7 mm.
+  Core should own that reconciliation (#24, now visible in colour).
+- **Found, NOT core (#354's app mapping):** `FaceRegion.kitSpec` carries no union `parts`, so a load or
+  anchor on a union region reaches core with no faces — his 'Top' group (region 105) made the solid Stress
+  solve refuse ("face region 105 resolves to NO faces"); the Optimize run builds its regions the same way.
+
+### Tests (every comparison with a RED control, computed beside it)
+NEW (TopOptFlowsTests):
+- `FlexibleBatchMDentTests` (2): the Settings page's heat graded (RED one colour per column) and the
+  fingertips merged (RED the footprint alone), a tap reads the blend (RED the column's number); the main
+  page's heat is the sim's on every column, graded (RED core's per-column colours) and spread (RED core's
+  island).
+- `FlexibleBatchMGroupTests` (1): each group binds its own field, H4 hands its mesh, its faces move in
+  (RED the other group's field; the sign flipped); the column fallback too; Play all names each turn.
+- `FlexibleBatchMStressTests` (4): the formula on known strains (RED the calibrated u); WHY his solid
+  solve failed (the union region); Stress follows the picker on the body and the walls (RED the other
+  group's field); a failure in one line + Retry without a rebuild (RED the request released), and the
+  Stress button spins only while Stress is on (RED the sims' own state).
+- `FlexibleBatchMXrayTests` (2): the dent view is X-ray and ghosts the walls (RED C2's rule) + the two
+  hook lines; the solid plane never striped (RED the opaque walls).
+- `FlexibleBatchMLegendTests` (2): one card clear of every button at 13" / 11", both orientations, open
+  and folded, chip column or not (RED batch C's two frames); a tap reads what is under the finger (RED a
+  wall is there to be read).
+- Opt-in `FlexibleBatchMProbe`: the WHY, the before / after frames, the spread fit, the heat per face.
+
+RE-PINNED, each with its reason in the test:
+- `FlexibleShownValuesTests`: `testTheDentRampIsItsOwnAndNeverPurple` → `testTheDentRampIsTheFEARainbowOnBothPagesAndNeverPurple`;
+  `testWhatIsDrawnOnThePartIsNotTheMapsGreen` → `testWhatIsDrawnOnThePartIsNotTheMapsColour` (renamed, not
+  deleted: the rule they pinned is overturned by his M7).
+- `FlexibleMainViewsTests`: the dent and Stress share one rainbow; a dent tap reads the blend under it;
+  the stage's Stress tap — Stress takes the map from the dent, and with a lattice reads the group's sim.
+
+Mutation runs (each breaks one rule in a mirror of the package, rebuilds, runs its pinning test; the file
+restored after): all 15 RED (`m/mut/mut_run.log` in the session scratchpad):
+```
+MM1  the dent ramp back to deep blue → cyan → white      ⇒ testTheDentRampIsTheFEARainbow… (45 failures)
+MM2  the Settings page's heat one colour per column       ⇒ testTheSettingsPageHeat… (2)
+MM3  no spread: the footprint alone                       ⇒ testTheSettingsPageHeat… (2)
+MM4  the main page's heat back to core's columns          ⇒ testTheMainPageHeat… (5)
+MM5  a tap reads the column's number                      ⇒ testTheSettingsPageHeat… (23)
+MM6  stress from the calibrated u (k not taken out)       ⇒ testVonMisesOfKnownStrains… (1)
+MM7  Stress does not follow the picker                    ⇒ testStressIsTheShownGroupsOwnSim… (2)
+MM8  the request released after a failure                 ⇒ testAFailedSimSaysWhy… (1)
+MM9  C2's X-ray rule                                      ⇒ testTheDentViewTurnsXRayOn… (2)
+MM10 the walls opaque under the dent view                 ⇒ testTheSolidDentPlaneIsNeverStriped… (2)
+MM11 a legend per scale (batch C)                         ⇒ testOneCardHoldsTheActiveScales… (32)
+MM12 the card reads the ghost wall behind the plane       ⇒ testTheCardReadsWhatIsUnderTheFinger (1)
+MM13 H4 hands the other group's mesh (index swapped)      ⇒ FlexibleBatchMGroupTests (9)
+MM14 the field's mesh sign flipped                        ⇒ FlexibleBatchMGroupTests (8)
+MM15 the walls never take the stress colours              ⇒ testStressIsTheShownGroupsOwnSim… (2)
+```
+Deleted-test sweep (`git diff 33edeb15 -- app/TopOptKit/Tests`, removed `func test` lines): the two
+renames above, nothing deleted.
+
+### Evidence (`docs/handoffs/evidence/2026-09-29-flexible-screens/batch_m/`)
+Offscreen frames of the shipping renderer (what FlexibleMainStage / the Settings page hand
+MetalMeshView, settled like the page, at full load), contact sheets:
+- `M_main_dent_before_after.png` — his round-5 pad, the dent view: BEFORE (this branch before batch M:
+  the deep-blue ramp, the hard-edged disc on Top A, the wall tops striping the map, four flat grey-blue
+  discs for the fingertips) and AFTER (each group at full load: the rainbow graded out of each stamp, the
+  four fingertips one press, the ghost body and ghost walls, the solid bent planes; the dent view with
+  the lattice off).
+- `M_main_stress_per_group.png` — Stress per group, with and without the lattice (walls in the stress
+  colours).
+- `M_fingertip_pad_settings_main_stress.png` — C1's pad with a four-fingertip stamp on its top: the
+  Settings page (the four foci graded and merged), the main page (the sim's squish), Stress; and his
+  project's Settings page.
+- `M_stripes_ghost_vs_opaque.png` — the ghost walls under the solid plane vs the old opaque walls, and his
+  img-6 view (back-left) on the column squish he saw.
+- `M_one_legend_card.png` — the ONE card (Squish + Lattice; Stress · Group 2 + Lattice), rendered by
+  SwiftUI's ImageRenderer at an iPad 13" page with the Gravity chip column.
+Re-render: `FLEX_M_PROBE_DIR=<dir> swift test --filter FlexibleBatchMProbe` (FLEX_M_TAG names the set).
+
+### Build and suite (raw lines, this Mac)
+- Targeted suite (G's 171-suite filter + every Flexible* class, LatticeRegionCapTests,
+  LatticeShellAndMarchAgreeTests, SmoothingViewerTests, LatticeOvernightBatchTests, LatticePageTests,
+  LatticeSimRegionLayerTests, ResultsModelTests — 188 names; Debug; other sessions' suites ran on the same
+  Mac): `Executed 1293 tests, with 26 tests skipped and 10 failures (0 unexpected) in 3454.617 (3454.740) seconds`.
+  - 8 are the known AppModelTests 3MF lines (testReopenedThreeMFProjectReimportsTheStlWorkingCopy ×2,
+    testThreeMFImportNormalisesToStlWorkingCopyAndKeepsProvenance ×4, testThreeMFImportOptimisesOnDeviceEndToEnd ×2),
+    1 is the known `LatticeSimSolveTriggerTests.testTheTriggerRefusesOnAllThreeGrounds`.
+  - The 10th was mine: `FlexibleMainPageRound4Tests.testTheLatticeButtonOpensSettingsWhenNothingCanShowAndExitShowsIt`
+    expected the solid part (alpha 1) with the lattice hidden — M6 keeps the X-ray while the dent view
+    shows a map. Re-pinned (the dent view: X-ray; dent off: solid).
+- Re-run after that re-pin and the Stress button's spinner rule (the suites they touch or that read the
+  stress state: FlexibleMainPageRound4Tests, FlexibleBatchMStressTests, FlexibleMainViewsTests,
+  FlexibleBatchCVerifyTests, FlexibleMainStageTests, FlexibleSquishPlayerTests, FlexibleStageTests + the
+  heat probe): `Executed 70 tests, with 0 failures (0 unexpected) in 413.025 (413.033) seconds`.
+- iOS (Debug, the simulator 147E56A1…, DerivedData flexA1): `** BUILD SUCCEEDED **`. `TopOpt.debug.dylib`
+  stamped 23:19 holds `flx_ghost_walls` and "Couldn't simulate: it took too long". Not installed, not
+  launched.
+
+### Decisions (00-decisions.md)
+- New rows D-R5-M1 … M7 (the FEA rainbow on both pages; the heat per vertex; the main page's heat = the
+  sim's own squish; the stamp's spread; Stress per group; the dent view's X-ray with ghost walls; one
+  legend card). D-R5-G4 amended (in FE mode the heat, legend and tap-to-read are the sim's).
+
+### Commits (PR #362's branch `claude/flexible-screens`; nothing pushed)
+- `69389996` the dent heat on BOTH pages — the FEA rainbow, graded per vertex, a stamp that spreads
+  (M7, M5, M2; shared code the Settings page already calls).
+- `bfe66d6b` the main page — the sim's own squish as the heat, each group's own Stress, the dent view's
+  X-ray with ghost walls, one legend card (M1–M6, M4) and the two MetalMeshView hooks.
+- `bdaa0111` a smooth cap on the stamp's spread; smooth legend bars.
+- The next commit: the Stress button's spinner only while Stress is on, the M6 re-pin of a C2 test, the
+  opt-in probe, the evidence sheets, this section and DECISIONS D-R5-M1…M7.
+
+
+## Round 5 · batch G — verification pass
 
 The G verifier reported 13 findings: 5 majors and 8 minors, from a correctness lens and a UX lens.
 Two of the majors are one bug seen from both sides (the first refresh after Save & Exit). I checked
