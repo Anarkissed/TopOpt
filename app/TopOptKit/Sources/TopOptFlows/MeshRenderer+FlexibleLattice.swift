@@ -93,6 +93,7 @@ extension MeshRenderer {
             pass.setFESequence(inputs.feSequence)
             changed = true
         }
+        if pass.feTints !== inputs.feTints { pass.feTints = inputs.feTints }
         if pass.hidden != inputs.hidden {
             pass.hidden = inputs.hidden
             changed = true
@@ -189,7 +190,15 @@ extension MeshRenderer {
             setFlexDisplacements(pass.feMesh[want])
             pass.feMeshShown = want
         }
+        // ★ BATCH G VERIFICATION: "Play all" plays each group ALONE — its own colours come in with its
+        // field and mesh (a stale set, from another overlay, is never applied: it must match the mesh)
+        let id = pass.feFields[want].simID
+        if let t = pass.feTints?.tints(id), want < pass.feMesh.count, t.count / 8 == pass.feMesh[want].count / 3 {
+            setVertexTints(t)
+            pass.feTintsShown = id
+        }
         loop.shownIndex = want
+        loop.notePlaying(id)
     }
 }
 #endif

@@ -101,8 +101,11 @@ public enum FlexibleRowCopy {
     public static func stampOffFace(_ n: Double) -> String { fit(String(format: "%.1f N of the stamp lands off the face", n)) }
     /// ★ VERIFICATION OF D1: the main page's lattice sinks the whole face under a stamp today
     /// (core brief #10) — this page's map is the stamp he drew. Said on the panel.
-    public static let stampMainPage = "Main page: whole face sinks, for now"
-    /// …and on the main page's dent legend, while a Stamp face's squish is shown there.
+    /// ★ BATCH G VERIFICATION: false since batch G — the main page's 3D sim presses the stamp where
+    /// it sits (core's per-column pressure), its neighbours dragged in; said so now.
+    public static let stampMainPage = "Main page: the 3D sim presses the stamp"
+    /// …and on the main page's dent legend, while a Stamp face's COLUMN squish is shown there (the
+    /// fallback after a failed sim — FlexibleMainStage.legendTitle).
     public static let stampMainLegend = "Squish · stamp: whole face"
 
     /// "10 kg from Top" · "6.0 kg of Top's 10 kg" (a group over several faces) · "7.1 kg at an angle".
@@ -200,6 +203,8 @@ public enum FlexibleRowCopy {
     }
     public static let simAll = "Play all"
     public static let simAllShort = "All"
+    /// ★ BATCH G VERIFICATION: the picker while "Play all" plays a group's own sim: "All · Group 2".
+    public static func playAllPlaying(_ group: String) -> String { "\(simAllShort) · \(group)" }
     /// The face card's group row and its chip that makes a new group.
     public static let groupRow = "Squeeze group"
     public static let newGroupChip = "+ New"

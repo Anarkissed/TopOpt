@@ -40,9 +40,16 @@ enum FlexibleHisProject {
         func cleanup() { try? FileManager.default.removeItem(at: root) }
     }
 
-    /// His folder under a store of our own, opened through `AppModel.open`.
-    static func restore() throws -> Restored {
-        let src = dir
+    /// ★ BATCH G VERIFICATION: his project as he left it for round 5 (his screenshots r5_16…r5_21):
+    /// copied from the simulator's store (saved 2026-09-30 16:52) — 'Pad split top', stamps on Top A,
+    /// Face 3 (Group 2) and Face 5 (a 10 kg thumb, Group 1).
+    static var round5Dir: URL {
+        repoRoot.appendingPathComponent("docs/handoffs/evidence/2026-09-29-flexible-screens/his_project_0004_r5")
+    }
+
+    /// His folder under a store of our own, opened through `AppModel.open` (`source`: another copy).
+    static func restore(_ source: URL? = nil) throws -> Restored {
+        let src = source ?? dir
         let snap = try JSONDecoder().decode(ProjectSnapshot.self, from: Data(contentsOf: src.appendingPathComponent("project.json")))
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("his-flexible-\(UUID().uuidString)", isDirectory: true)
         let pdir = root.appendingPathComponent(snap.id.uuidString, isDirectory: true)

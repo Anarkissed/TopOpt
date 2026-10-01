@@ -52,6 +52,10 @@ public final class FlexibleSquishLoop: ObservableObject {
     public private(set) var heldCycle = 0
     /// The sequence entry the renderer shows now (set by the renderer's swap).
     public var shownIndex = 0
+    /// ★ BATCH G VERIFICATION: the sim the renderer shows now — PUBLISHED on a change only (once per
+    /// "Play all" turn, to this control alone), so the picker says which group plays.
+    @Published public private(set) var playingSimID: String?
+    func notePlaying(_ id: String?) { if playingSimID != id { playingSimID = id } }
 
     public init() {}
 
@@ -212,12 +216,30 @@ struct FlexibleSquishPlayer: View {
     let fullLabel: String
     /// The capsule's width (FlexibleLegendPlacement.player); the slider takes what is left.
     var width: CGFloat = FlexibleLegendPlacement.playerSize.width
+    /// ★ BATCH G VERIFICATION: "Play all" plays its groups' own sims in turn — the picker and the
+    /// note follow the PLAYING group ("● All · Group 2", that group's own line): `playAllLive` while
+    /// the renderer plays them, `noteFor` the line for the sim playing (nil: `note`).
+    var playAllLive = false
+    var noteFor: ((String?) -> String?)?
     /// The squeezes to pick from (none, or one: no picker), the one shown, and the pick.
     var sims: [FlexibleSim] = []
     var shown: FlexibleSim?
     var onPick: (String) -> Void = { _ in }
     /// "Group 2 squishes 1.2 of 3.0 mm · firmer wins" — beside the picker, above the capsule.
     var note: String?
+
+    /// The group "Play all" plays now (nil: not playing its sims).
+    var playingGroup: FlexibleSim? {
+        guard playAllLive, shown?.kind == .playAll, let id = loop.playingSimID else { return nil }
+        return sims.first { $0.id == id && $0.kind != .playAll }
+    }
+    /// The picker's label: the pick, or under a live "Play all" "All · Group 2".
+    var pickerLabel: String {
+        if let g = playingGroup { return FlexibleRowCopy.playAllPlaying(g.short) }
+        return shown?.short ?? FlexibleRowCopy.simAllShort
+    }
+    /// The line beside the picker (the playing group's own under a live "Play all").
+    var shownNote: String? { noteFor.map { $0(playingGroup?.id) } ?? note }
 
     /// The player's size: the capsule, and — with the picker or a note — the row above it.
     static func size(picker: Bool, note: Bool) -> CGSize {
@@ -235,6 +257,7 @@ struct FlexibleSquishPlayer: View {
 
     var body: some View {
         let inline = Self.controlInlinePicker
+        let note = shownNote
         VStack(alignment: .leading, spacing: Self.rowGap) {
             if (sims.count > 1 && !inline) || note != nil {
                 HStack(spacing: DS.Space.s) {
@@ -269,10 +292,10 @@ struct FlexibleSquishPlayer: View {
             }
         } label: {
             HStack(spacing: 5) {
-                if case .group(let n)? = shown?.kind {
+                if case .group(let n)? = (playingGroup ?? shown)?.kind {
                     Circle().fill(FlexibleSqueezeGroups.colour(number: n).color).frame(width: 8, height: 8)
                 }
-                Text(shown?.short ?? FlexibleRowCopy.simAllShort)
+                Text(pickerLabel)
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(DS.Color.textPrimary.color)
                     .lineLimit(1).fixedSize()

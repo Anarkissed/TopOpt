@@ -129,7 +129,10 @@ public final class FlexibleMainStage: ObservableObject {
         if fe.active, loop.playing { loop.restartFromRest(reduceMotion: reduceMotion()) }
     }
     /// The lattice as the player shows it: only the picked squeeze's faces squish.
-    public var shownLattice: FlexibleGeneratedLattice? { model?.lattice?.showing(shownSim) }
+    public var shownLattice: FlexibleGeneratedLattice? { model?.lattice?.showing(playingSim) }
+    /// ★ BATCH G VERIFICATION: the squeeze on screen — the pick, or, when EVERY sim of "Play all"
+    /// failed, the first group (its column squish plays; never every group's faces at once).
+    var playingSim: String? { fallbackSim ?? shownSim }
     /// The sim on screen (nil: one group — nothing to pick).
     public var shownSimInfo: FlexibleSim? { sims.count > 1 ? shownLattice?.shownSim : nil }
     /// ★ ONE LINE when the shown group squishes less than it was designed for (another group's
@@ -175,6 +178,27 @@ public final class FlexibleMainStage: ObservableObject {
     var overlaySerial = 0
     /// The lattice generation the loop started its FE sequence for (from rest).
     var fePlayedGeneration: Int?
+    // ★ BATCH G VERIFICATION: the loop starts by (generation, the sequence ASKED FOR) — not by the
+    // generation alone, which left a failed only sim at rest and a pick that landed late unplayed
+    /// The FE sequence the loop last started (or saw playing): "generation|sim,sim".
+    var feStartedKey: String?
+    /// The column fallback the loop last auto-played: "generation|sim,sim".
+    var fallbackKey: String?
+    /// The loop was held at rest while the shown sims ran ("Simulating the squish…") — what lands
+    /// next (a field, or the fallback) plays from rest.
+    var heldForSims = false
+    /// Every sim of "Play all" failed: the group whose column squish plays instead.
+    var fallbackSim: String?
+    /// "Play all": each landed group's own tints before composition (refresh), and the composed
+    /// ones the renderer swaps in with the group's field.
+    var feBaseTints: [String: [Float]] = [:]
+    let feTintBox = FlexibleFETints()
+    /// Test controls only: batch G's loop rules (one start per generation) — the red control of the
+    /// keys above; the sims read BEFORE they are started (the Save & Exit flash); "Play all" as the
+    /// combo (every group's colours for every turn, every failed group's faces at once).
+    var controlLoopByGeneration = false
+    var controlReadSimsBeforeStart = false
+    var controlPlayAllCombo = false
     /// ★ the gate: another core solve runs (the Stress view's sim, a topology run) — FlexibleStressSolver.busy
     var squishBusy: (() -> Bool)?
     /// The Stress solve waited for a sim (it starts when the sims go idle).
@@ -236,11 +260,32 @@ public final class FlexibleMainStage: ObservableObject {
         m.squishSolver.busy = { [weak self] in self?.squishBusy?() ?? false }
         m.squishSolver.onIdle = { [weak self] in self?.squishIdle() }
         fe = FlexibleFEView(); feMeshCache = [:]; fePlayedGeneration = nil
+        feStartedKey = nil; fallbackKey = nil; heldForSims = false; fallbackSim = nil; feBaseTints = [:]; feTintBox.set([:])
         seenLoads = nil
         projectObservation = project.objectWillChange
             .debounce(for: .milliseconds(250), scheduler: RunLoop.main)
             .sink { [weak self] _ in self?.projectChanged() }
         return m
+    }
+
+    /// RED CONTROL: batch G's loop rules as they were (one FE start per generation; the column path
+    /// auto-plays once per generation, the pre-pending refresh included).
+    private func controlBatchGLoop(_ g: FlexibleGeneratedLattice) {
+        if fe.active {
+            loop.sequenceCount = fe.sequence.count
+            if fePlayedGeneration != g.generation {
+                fePlayedGeneration = g.generation
+                playedGeneration = g.generation
+                loop.restartFromRest(reduceMotion: reduceMotion())
+            }
+        } else if fe.pending || (controlNoFallback && fe.failure != nil) {
+            loop.sequenceCount = 1
+            if loop.playing || loop.held != 0 { loop.hold(0) }
+        } else if playedGeneration != g.generation {
+            loop.sequenceCount = 1
+            playedGeneration = g.generation
+            loop.autoPlay(reduceMotion: reduceMotion())
+        }
     }
 
     /// Settings' Save & Exit (H2's onExit): back on the main page, build the lattice — now if
@@ -290,12 +335,13 @@ public final class FlexibleMainStage: ObservableObject {
         guard let m = current(project, stage) else { return nil }
         let fresh = m.lattice != nil && !m.latticeIsStale
         // ★ ROUND 4 (D2): the picked squeeze's faces squish
-        var inputs = FlexibleLatticePreview.inputs(xray: xray, lattice: m.lattice?.showing(shownSim), building: m.latticeBuilding,
+        var inputs = FlexibleLatticePreview.inputs(xray: xray, lattice: m.lattice?.showing(playingSim), building: m.latticeBuilding,
                                                    latticeShows: latticeOn && fresh && !pageUp,
                                                    loop: fresh && !pageUp ? loop : nil)
         // ★ BATCH G: the squeeze groups' fields, their meshes and the sequence the loop plays
         if fe.active, fresh, !pageUp {
             inputs?.fe = fe.fields; inputs?.feMesh = fe.mesh; inputs?.feSequence = fe.sequence; inputs?.feToken = fe.token
+            inputs?.feTints = feTintBox   // ★ "Play all": each group's own colours, swapped in with its field
         }
         return inputs
     }
@@ -494,35 +540,71 @@ public final class FlexibleMainStage: ObservableObject {
             feMeshCache = [:]
         }
         // the map is the lattice's while one is shown (X-ray only gates the walls here)
-        let drawn = FlexibleLatticePreview.drawn(m.lattice?.showing(shownSim), xray: true, building: m.latticeBuilding,
+        var drawn = FlexibleLatticePreview.drawn(m.lattice?.showing(shownSim), xray: true, building: m.latticeBuilding,
                                                  checkStampShown: nil, stale: m.latticeIsStale)
+        // ★ BATCH G: the squeeze groups' 3D sims (started here — the shown sim first)
+        fe = feView(m, drawn: drawn)
+        // ★ BATCH G VERIFICATION: every sim of "Play all" failed — the FIRST group's column squish
+        // plays, the picker showing it (the column path has one squeeze at a time; "Play all" there
+        // squished every group's faces at once — the combo his round-5 (a) rejects)
+        fallbackSim = nil
+        if fe.failure != nil, fe.requested.count > 1, !controlPlayAllCombo, let first = fe.requested.first {
+            fallbackSim = first
+            drawn = FlexibleLatticePreview.drawn(m.lattice?.showing(first), xray: true, building: m.latticeBuilding,
+                                                 checkStampShown: nil, stale: m.latticeIsStale)
+            fe = feView(m, drawn: drawn)
+        }
         self.drawn = drawn
         // ★ BATCH C: the channels WITHOUT the ghost — Stress and the group colours are composed
         // in first (FlexibleMainTints), then X-ray ghosts what is not opaque
         var c = FlexiblePageChannels.channels(model: m, overlay: overlay, xray: false, drawnLattice: drawn, heat: heat)
         let shown = FlexibleShownValues(model: m, drawnLattice: drawn)
         dentMaxMM = shown.maxDepth
-        // ★ BATCH G: the squeeze groups' 3D sims — the field moves the ghost, the heat plane and the
-        // walls; ×k capped so the map stays injective (the planes never cross)
-        fe = feView(m, drawn: drawn)
+        // ★ BATCH G: the field moves the ghost, the heat plane and the walls; ×k capped so the map
+        // stays injective (the planes never cross)
+        feBaseTints = playAllBaseTints(m, scaleMM: shown.maxDepth)
         if fe.active {
             c.exaggeration = FlexibleShownValues.cappedExaggeration(rule: shown.uncappedExaggeration, maxSafeScale: fe.safeScale)
             c.dents = feShownMesh
         }
         loop.exaggeration = c.exaggeration
         if let g = drawn {
-            if fe.active {
+            let asked = "\(g.generation)|" + fe.requested.joined(separator: ",")
+            if controlLoopByGeneration {
+                controlBatchGLoop(g)
+            } else if fe.active {
                 loop.sequenceCount = fe.sequence.count
-                if fePlayedGeneration != g.generation {
-                    // the first field landed: the sequence starts from REST (sim 0)
-                    fePlayedGeneration = g.generation
-                    playedGeneration = g.generation
-                    loop.restartFromRest(reduceMotion: reduceMotion())
+                if feStartedKey != asked {
+                    feStartedKey = asked
+                    // the FIRST field of a new lattice, or the shown sequence coming out of "Simulating
+                    // the squish…" (a pick of a sim still solving): from REST (sim 0). A pick of a sim
+                    // already landed keeps his play / pause (pick() restarts a playing loop).
+                    if fePlayedGeneration != g.generation || heldForSims {
+                        fePlayedGeneration = g.generation
+                        playedGeneration = g.generation
+                        heldForSims = false
+                        loop.restartFromRest(reduceMotion: reduceMotion())
+                    }
                 }
             } else if fe.pending || (controlNoFallback && fe.failure != nil) {
                 // the sims run: the lattice is shown, held at rest ("Simulating the squish…")
                 loop.sequenceCount = 1
+                heldForSims = true
+                feStartedKey = nil
                 if loop.playing || loop.held != 0 { loop.hold(0) }
+            } else if fe.failure != nil {
+                // ★ the FALLBACK plays: the column squish, once per lattice and sequence — whenever the
+                // sims had held it at rest, or on a new lattice
+                loop.sequenceCount = 1
+                feStartedKey = nil
+                if fallbackKey != asked {
+                    fallbackKey = asked
+                    if heldForSims || playedGeneration != g.generation {
+                        heldForSims = false
+                        playedGeneration = g.generation
+                        loop.autoPlay(reduceMotion: reduceMotion())
+                    }
+                }
             } else if playedGeneration != g.generation {
                 loop.sequenceCount = 1
                 playedGeneration = g.generation

@@ -10,7 +10,13 @@
 // deepest zone moves exactly core's deepest squish.
 // ★ FALLBACK. A sim that fails (or runs past its deadline) plays today's column squish, with one
 // line ("Simple squish · the sim failed") and core's words behind the Squish legend's (i); a failed
-// sim is left out of Play all but stays pickable.
+// sim is left out of Play all but stays pickable, and Play all says so ("Group 2 skipped · its sim
+// failed"). When EVERY sim of Play all failed, the first group's column squish plays (never every
+// group's faces at once — his round-5 (a): "not as a combo").
+// ★ BATCH G VERIFICATION. The sims are started BEFORE they are read, so the very first refresh after
+// Save & Exit already sees them pending (it used to read an empty cache, fall to the column branch
+// and play the old column squish for ~1–2 s, then snap to rest); a lattice whose FE request is in
+// hand but not yet scheduled is pending too.
 
 import Foundation
 import simd
@@ -23,6 +29,10 @@ struct FlexibleFEView: Equatable {
     var mesh: [[Float]] = []
     /// What the loop plays (indices into `fields`): a pick is [g], "Play all" every landed group.
     var sequence: [Int] = []
+    /// The sims the page ASKED for (the pick, or every group under "Play all") — landed or not.
+    var requested: [String] = []
+    /// Sims of the request that failed while others play ("Play all" skips them — said).
+    var skipped: [String] = []
     /// The generation and the landed fields (the pass re-uploads by it).
     var token = 0
     /// A sim of the sequence still runs.
@@ -34,6 +44,10 @@ struct FlexibleFEView: Equatable {
     /// The sequence's first clamped field: how much stiffer (> 1) or softer the sim found the part
     /// than core's columns (the (i) says it).
     var coreRatio: Double?
+    /// The smallest share a field of the sequence was cut to so it never folds at ×1 (the (i)).
+    var foldShare: Double?
+    /// The largest scale every field's PART stays injective at (the (i)'s large-strain case).
+    var partSafeScale = Double.infinity
     /// A field of the sequence was solved with every rest held fast (its sliding solve did not
     /// settle — the one retry): the (i) says so.
     var restsBonded = false
@@ -42,6 +56,7 @@ struct FlexibleFEView: Equatable {
 
     static func == (a: Self, b: Self) -> Bool {
         a.token == b.token && a.sequence == b.sequence && a.pending == b.pending && a.failure == b.failure
+            && a.requested == b.requested && a.skipped == b.skipped
     }
 }
 
@@ -52,18 +67,29 @@ extension FlexibleMainStage {
     /// (overlay, field).
     func feView(_ m: FlexibleStageModel, drawn: FlexibleGeneratedLattice?) -> FlexibleFEView {
         guard let g = drawn, !m.latticeIsStale, !controlColumnSquish else { return FlexibleFEView() }
-        let groups = m.squishSims
-        let groupIDs = groups.map(\.sim.id)
+        let groupIDs = m.squishSims.map(\.sim.id)
         // the sequence: the pick, or every group ("Play all", or one group with nothing to pick)
         let seqIDs: [String] = g.shownSimID.flatMap { id in groupIDs.contains(id) ? [id] : nil } ?? groupIDs
+        // ★ started FIRST (it marks them pending in the same step), read AFTER — the red control
+        // reads first, as batch G did
+        let early = controlReadSimsBeforeStart ? m.squishSims : nil
         if visible, !frozen { m.startSquishSims(first: seqIDs.first) }
-        guard m.squishGeneration == g.generation, groups.contains(where: { $0.state != nil }) else { return FlexibleFEView() }
+        let groups = early ?? m.squishSims
+        // a lattice whose FE request is in hand but not scheduled yet: its sims are as good as pending
+        let unscheduled = !controlReadSimsBeforeStart && m.feRequest?.generation == g.generation
+            && m.squishScheduled != g.generation && !groupIDs.isEmpty
         var v = FlexibleFEView()
+        v.requested = seqIDs
+        guard m.squishGeneration == g.generation, groups.contains(where: { $0.state != nil }) else {
+            v.pending = unscheduled
+            return v
+        }
         v.fields = groups.compactMap { $0.state?.field }.filter { $0.generation == g.generation }
         v.mesh = v.fields.map { feMesh(for: $0) }
         v.sequence = seqIDs.compactMap { id in v.fields.firstIndex { $0.simID == id } }
-        v.pending = seqIDs.contains { m.squish[$0] == .pending }
+        v.pending = seqIDs.contains { m.squish[$0] == .pending } || unscheduled
         if v.sequence.isEmpty, !v.pending { v.failure = seqIDs.compactMap { m.squish[$0]?.failure }.first }
+        if !v.sequence.isEmpty { v.skipped = seqIDs.filter { m.squish[$0]?.failure != nil } }
         var h = Hasher()
         h.combine(g.generation)
         for f in v.fields { h.combine(f.serial); h.combine(f.scale) }
@@ -72,6 +98,8 @@ extension FlexibleMainStage {
         v.safeScale = v.sequence.map { v.fields[$0].maxSafeScale }.min() ?? .infinity
         v.coreRatio = v.sequence.map { v.fields[$0] }.first { $0.clamped }?.coreRatio
         v.restsBonded = v.sequence.contains { v.fields[$0].restsBonded }
+        v.foldShare = v.sequence.compactMap { v.fields[$0].foldShare }.min()
+        v.partSafeScale = v.sequence.map { v.fields[$0].partSafeScale }.min() ?? .infinity
         return v
     }
 
@@ -106,10 +134,54 @@ extension FlexibleMainStage {
     var shownDents: [Float]? { feShownMesh ?? channels?.dents }
 
     /// The player's note from the sims: "Simulating the squish…" while one of the sequence runs,
-    /// "Simple squish · the sim failed" when it fell back.
+    /// "Simple squish · the sim failed" when it fell back, "Group 2 skipped · its sim failed" when
+    /// Play all plays the others.
     var feNote: String? {
         if fe.pending { return FlexibleFE.pending }
         if fe.failure != nil { return FlexibleFE.failed }
+        if let id = fe.skipped.first, let sim = sims.first(where: { $0.id == id }) { return FlexibleFE.skipped(sim.short) }
         return nil
     }
+
+    /// "Play all" is playing its groups' own sims in turn (the picker says which — FlexibleSquishPlayer).
+    public var playAllLive: Bool { fe.active && fe.requested.count > 1 && !controlPlayAllCombo }
+
+    /// ★ BATCH G VERIFICATION: "Play all" plays each group ALONE — the note beside the picker is the
+    /// PLAYING group's own (its firmer-wins miss, or none), not the first group's for every turn.
+    /// `playing`: the sim the renderer shows now (FlexibleSquishLoop.playingSimID).
+    func simNote(playing id: String?) -> String? {
+        if let n = feNote { return n }
+        if let id, fe.active, fe.requested.count > 1, let g = shownLattice, g.shownSim?.kind == .playAll,
+           fe.requested.contains(id) {
+            return g.simNote(for: id)
+        }
+        return simNote
+    }
+
+    /// ★ BATCH G VERIFICATION (his round-5 (a): "based on the group's squish dynamics alone, not as
+    /// a combo"): under "Play all" each group's OWN colours — only its faces' heat, on the page's
+    /// one scale — computed per landed group of the sequence (refresh), composed with the rest of
+    /// the page in `tints` and swapped in by the renderer WITH that group's field and mesh.
+    func playAllBaseTints(_ m: FlexibleStageModel, scaleMM: Double) -> [String: [Float]] {
+        guard fe.active, fe.sequence.count > 1, let lat = m.lattice, !controlPlayAllCombo else { return [:] }
+        var out: [String: [Float]] = [:]
+        for i in fe.sequence where i < fe.fields.count {
+            let id = fe.fields[i].simID
+            let d = FlexibleLatticePreview.drawn(lat.showing(id), xray: true, building: m.latticeBuilding,
+                                                 checkStampShown: nil, stale: m.latticeIsStale)
+            out[id] = FlexiblePageChannels.channels(model: m, overlay: overlay, xray: false, drawnLattice: d, heat: heat,
+                                                    depthScaleMM: scaleMM).tints
+        }
+        return out
+    }
+}
+
+/// ★ BATCH G VERIFICATION: each group's composed tints under "Play all", by sim id — handed to the
+/// renderer by REFERENCE (FlexibleLatticeLayerInputs.feTints), which swaps them in with the field
+/// and the mesh at the cycle's rest point (MeshRenderer+FlexibleLattice.stepFlexibleFE). Main thread.
+public final class FlexibleFETints {
+    private(set) var bySim: [String: [Float]] = [:]
+    public init() {}
+    func set(_ t: [String: [Float]]) { bySim = t }
+    func tints(_ id: String) -> [Float]? { bySim[id] }
 }

@@ -114,12 +114,24 @@ extension FlexibleMainStage {
         var h = Hasher()
         for k in roles.keys.sorted() { h.combine(k); h.combine(roles[k]!) }
         let showStress = stress && stressDrawable
-        let key = "\(generation)|\(h.finalize())|\(showStress ? stressKey : 0)|\(xray)|\(heat)|\(overlay != nil)"
-        if key == composedKey { return composed }
-        composedKey = key
-        composed = FlexibleMainTints.compose(base: c.tints, overlay: overlay, part: project.viewerMesh, heat: heat,
-                                             roles: roles, stress: showStress ? (stressField!, stressPeak) : nil,
-                                             ghost: xray ? FlexibleColours.ghost : nil)
+        let key = "\(generation)|\(h.finalize())|\(showStress ? stressKey : 0)|\(xray)|\(heat)|\(overlay != nil)|"
+            + feBaseTints.keys.sorted().joined(separator: ",")
+        if key != composedKey {
+            composedKey = key
+            let stressIn = showStress ? (stressField!, stressPeak) : nil
+            composed = FlexibleMainTints.compose(base: c.tints, overlay: overlay, part: project.viewerMesh, heat: heat,
+                                                 roles: roles, stress: stressIn, ghost: xray ? FlexibleColours.ghost : nil)
+            // ★ BATCH G VERIFICATION: "Play all" — each group's own colours, composed the same way; the
+            // renderer swaps them in with the group's field (FlexibleFETints)
+            var per: [String: [Float]] = [:]
+            for (id, base) in feBaseTints {
+                per[id] = FlexibleMainTints.compose(base: base, overlay: overlay, part: project.viewerMesh, heat: heat,
+                                                    roles: roles, stress: stressIn, ghost: xray ? FlexibleColours.ghost : nil)
+            }
+            feTintBox.set(per)
+        }
+        // …and the page hands the one the RENDERER shows now (a re-upload never shows another group's)
+        if let id = feShownField?.simID, let t = feTintBox.tints(id) { return t }
         return composed
     }
 
@@ -182,7 +194,9 @@ extension FlexibleMainStage {
         guard k == .dent else { return k.title }
         // ★ VERIFICATION OF D1: a Stamp face's squish here is core's — the WHOLE face sinks
         // (core brief #10) — while Settings shows the stamp he drew; the legend says so
-        if let g = drawn, !g.shapeOnly, let m = model,
+        // ★ BATCH G VERIFICATION: …except in FE mode, where the 3D sim presses the stamp where it sits
+        // (core's per-column pressure) — "whole face" was false there
+        if let g = drawn, !g.shapeOnly, let m = model, !fe.active,
            Self.showsStampFace(squished: Set(g.squishedKeys.map(\.region)), settings: m.settings) {
             return FlexibleRowCopy.stampMainLegend
         }
@@ -201,8 +215,11 @@ extension FlexibleMainStage {
         // ★ BATCH G: the 3D sim, said in ONE sentence (linear physics, scaled to core's squish) —
         // or, after a failed sim, core's words
         if fe.active {
+            // ★ BATCH G VERIFICATION: small strain judged on the PART's own gradient (the extension
+            // outside it is not the picture), a fold cut said, a band-held k said in every case
             return FlexibleFE.info(exaggeration: dentExaggeration, stiffer: fe.coreRatio,
-                                   largeStrain: Double(dentExaggeration) > fe.safeScale, bonded: fe.restsBonded)
+                                   largeStrain: Double(dentExaggeration) > fe.partSafeScale, bonded: fe.restsBonded,
+                                   foldShare: fe.foldShare)
         }
         if let why = fe.failure { return FlexibleFE.failedInfo(why, exaggeration: dentExaggeration) }
         let what = (channels?.legendLine ?? "").components(separatedBy: " · ").first ?? ""

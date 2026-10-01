@@ -256,6 +256,10 @@ public struct FlexibleLatticeLayerInputs: Equatable {
     public var feSequence: [Int] = []
     /// The token the fields are uploaded by (the generation and the set of landed fields).
     public var feToken: Int = 0
+    /// ★ BATCH G VERIFICATION: under "Play all", each group's OWN tints (only its faces coloured), by
+    /// sim id — a reference the page keeps current; the renderer swaps them in WITH the group's
+    /// field and mesh. nil (or no entry) ⇒ the page's one tint array stands.
+    public var feTints: FlexibleFETints?
 
     public init(lattice: FlexibleLatticeInputs, faces: [FlexibleSquishFace], token: Int, hidden: Bool = false,
                 loop: FlexibleSquishLoop? = nil, facesToken: Int? = nil) {

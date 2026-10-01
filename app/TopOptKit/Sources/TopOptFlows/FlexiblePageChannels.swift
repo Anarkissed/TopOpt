@@ -48,8 +48,11 @@ public enum FlexiblePageChannels {
     /// The page calls this on every change (FlexibleStagePage.refreshChannels).
     /// `heat` false (the main page's Heat view off): the map quads take no colour — the dent
     /// still moves them, so the ghost itself squishes.
+    /// `depthScaleMM`: the heat ramp's deepest end (nil: this lattice's own deepest) — ★ batch G
+    /// verification: "Play all"'s per-group colours keep the page's ONE scale (the legend's).
     public static func channels(model: FlexibleStageModel, overlay: FlexibleOverlayMesh?, xray: Bool,
-                                drawnLattice: FlexibleGeneratedLattice?, heat: Bool = true) -> Channels {
+                                drawnLattice: FlexibleGeneratedLattice?, heat: Bool = true,
+                                depthScaleMM: Double? = nil) -> Channels {
         // part regions: loaded / resting / selected / linked other end — by REGION, so a split
         // sector is tinted on its own side of its cuts (FlexibleRegions).
         // ★ ROUND 4 (D2): no "conflict" tint — two faces on one stack are a pinch (one group) or
@@ -106,7 +109,7 @@ public enum FlexiblePageChannels {
             guard let vals = shown.values[k] else { continue }
             colours[k] = vals.map { v in
                 switch v {
-                case .depth(let mm): return FlexibleColours.depth(mm, max: shown.maxDepth)
+                case .depth(let mm): return FlexibleColours.depth(mm, max: depthScaleMM ?? shown.maxDepth)
                 case .noNumber: return FlexibleColours.noNumber
                 case .solid: return SIMD4(0, 0, 0, 0)
                 }

@@ -155,6 +155,10 @@ final class FlexibleLatticePass {
     var controlFEIterations: Int?
     /// The field whose mesh displacements the renderer last swapped in WITH it (tests read it).
     var feMeshShown = -1
+    /// ★ BATCH G VERIFICATION: "Play all"'s per-group tints (the page's reference), and the sim whose
+    /// tints the renderer last swapped in (tests read it).
+    var feTints: FlexibleFETints?
+    var feTintsShown: String?
     /// Test controls: swap mid-cycle; let the mesh lag the field by one frame.
     var controlSwapAnywhere = false
     var controlSwapMeshNextFrame = false
