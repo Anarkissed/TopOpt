@@ -86,7 +86,8 @@ enum FlexibleLatticeShader {
         float4x4 eyeNormalBasis;          // rotation of V·M (uniforms.normalMatrix)
         float4 sparse, dense;             // LatticeStructureColour.pale / FlexibleLatticePass.denseWall
         float4 rhoSpan;                   // x = lo, y = hi (the in-mask ρ span); ★ batch M: z = 1: the
-                                          // walls take the Stress rainbow, w = 1 / its top (1/MPa)
+                                          // walls take the Stress rainbow, w = its gain (1: the FE texture's
+                                          // w is already von Mises / the field's own top)
         float4 tail;
     };
 
@@ -469,6 +470,7 @@ enum FlexibleLatticeShader {
     fragment FlxGBuf flx_gbuffer(FlxVOut in [[stage_in]],
                                  constant FlxUniforms& U [[buffer(0)]],
                                  constant FlxFrame& F [[buffer(1)]],
+                                 constant float4& D [[buffer(2)]],   // ★ batch M verification: x = the depth bias (mm)
                                  texture3d<float> rmT [[texture(0)]],
                                  texture3d<float> dsT [[texture(1)]],
                                  array<texture2d<float>, 4> cols [[texture(2)]],
@@ -501,16 +503,47 @@ enum FlexibleLatticeShader {
         o.enormal = float4(eyeN, 0.0f);
         float3 albedo = mix(F.sparse.rgb, F.dense.rgb, clamp(0.25f + 0.75f * frac, 0.0f, 1.0f));
         // ★ BATCH M (M3): Stress on — the wall takes the group's von Mises at its REST point (the FE
-        // field's w: node stress, MPa), on the page's one scale
+        // field's w: node stress as a fraction of ITS field's top — each Play-all turn on its own scale)
         if (F.rhoSpan.z > 0.5f && U.feK.x > 0.5f) {
             constexpr sampler smp(coord::normalized, filter::linear, address::clamp_to_edge);
             float vm = feT.sample(smp, ((p0 - U.feO.xyz) / U.feO.w + 0.5f) / U.feN.xyz).w;
             albedo = flx_rainbow(vm * F.rhoSpan.w);
         }
         o.albedo = float4(albedo, 1.0f);
-        float4 clip = F.clipFromModel * float4(h.p, 1.0f);
+        // ★ BATCH M VERIFICATION: with the solid dent planes' depth in this buffer (flx_map_depth), a wall's
+        // DEPTH is tested D.x mm further along its ray, so the walls' cut faces at the part's surface —
+        // level with the 0.05 mm-lifted plane — lose to it instead of striping it in rows; its eye-Z (what
+        // the shade and the ghost read) is the true one
+        float4 clip = F.clipFromModel * float4(h.p + rd * D.x, 1.0f);
         o.depth = clamp(clip.z / max(clip.w, 1e-6f), 0.0f, 1.0f);
         return o;
+    }
+
+    // ── ★ BATCH M VERIFICATION: THE SOLID DENT PLANES' DEPTH, IN THE G-BUFFER ───────────────────
+    // The verifier: a FAR plane (a pressed face seen through the X-ray part) painted over every ghost
+    // wall in front of it — the ghost walls were drawn before the planes and wrote no depth. Now the
+    // planes' depth goes into the G-buffer BEFORE the march (MeshRenderer's vertex, flex and tint
+    // buffers — the same displaced map the body draws): a wall BEHIND a solid plane fails the depth
+    // test and is never marched into the buffer, a wall IN FRONT of one is. Depth only (no colour is
+    // written: the G-buffer's three attachments are declared with no write mask), only the solid
+    // fragments (the tint's flags.y — FlexibleOverlay's opaque map quads).
+    struct FlxMapU { float4x4 clipFromModel; float4 flex; };
+    struct FlxMapOut { float4 pos [[position]]; float solid [[flat]]; };
+
+    vertex FlxMapOut flx_map_vertex(uint vid [[vertex_id]],
+                                    const device float* verts [[buffer(0)]],   // pos.xyz + normal.xyz (stride 24)
+                                    constant FlxMapU& u [[buffer(1)]],
+                                    const device float* tints [[buffer(2)]],   // rgba + flags (stride 32)
+                                    const device packed_float3* disp [[buffer(3)]]) {
+        float3 p = float3(verts[vid * 6], verts[vid * 6 + 1], verts[vid * 6 + 2]) + u.flex.x * float3(disp[vid]);
+        FlxMapOut o;
+        o.pos = u.clipFromModel * float4(p, 1.0f);
+        o.solid = tints[vid * 8 + 5];
+        return o;
+    }
+
+    fragment void flx_map_depth(FlxMapOut in [[stage_in]]) {
+        if (in.solid < 0.5f) { discard_fragment(); }
     }
 
     // ── ★ BATCH M (M6): THE WALLS AS A GHOST ─────────────────────────────────────────────

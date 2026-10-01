@@ -172,9 +172,10 @@ final class FlexibleLatticePass {
     /// (M6) The dent view is on: the walls are drawn as a GHOST under the solid dent planes
     /// (`encodeGhostWalls`, in place of #354's opaque lsdf_shade — MeshRenderer.flexibleWallsGhosted).
     var ghostWalls = false
-    /// (M3) Stress is on: the walls take the rainbow by the group's von Mises — 1 / the scale's top
-    /// (1/MPa); 0 = the density ramp.
-    var stressInvMPa: Float = 0
+    /// (M3) Stress is on: the walls take the rainbow by the group's von Mises (false: the density ramp).
+    /// ★ BATCH M VERIFICATION: each field's texture carries von Mises / ITS OWN top (FlexibleFEStress.scaleTop),
+    /// so the walls of each "Play all" turn are on that group's own scale, like its body.
+    var stressWalls = false
     /// The ghost's face-on alpha and its silhouette's extra (the body's ghost is 0.04 + 0.5).
     static let ghostWallAlpha: Float = 0.12
     static let ghostWallRim: Float = 0.55
@@ -187,6 +188,61 @@ final class FlexibleLatticePass {
     }()
     /// How many ghost-wall composites were encoded (tests).
     private(set) var ghostEncodes = 0
+
+    // ── ★ BATCH M VERIFICATION: the solid dent planes' depth in the G-buffer (flx_map_depth) ──
+    /// How far (mm) a wall's DEPTH is pushed along its ray while the planes' depth is in the buffer: the
+    /// walls' cut faces at the part's surface sit level with the 0.05 mm-lifted plane and must lose to it
+    /// (his img 6's rows), a wall a millimetre in front of a far plane must not.
+    static let mapDepthBiasMM: Float = 0.5
+    /// Test controls only: no planes' depth (batch M's frame — a far plane covered every ghost wall in
+    /// front of it, the opaque walls striped the near ones); the planes' depth with no bias.
+    var controlNoMapDepth = false
+    var controlNoMapDepthBias = false
+    /// The planes' depth went into the G-buffer this frame (the march then biases its depth).
+    private var mapDepthThisFrame = false
+    /// How many map-depth draws were encoded (tests).
+    private(set) var mapDepthEncodes = 0
+    private lazy var mapDepthPipeline: MTLRenderPipelineState? = {
+        guard let vf = library.makeFunction(name: "flx_map_vertex"), let ff = library.makeFunction(name: "flx_map_depth") else { return nil }
+        let pd = MTLRenderPipelineDescriptor()
+        pd.label = "flx_map_depth"
+        pd.vertexFunction = vf
+        pd.fragmentFunction = ff
+        // the G-buffer's three attachments, declared — and never written (depth only)
+        pd.colorAttachments[0].pixelFormat = MeshRenderer.sceneDepthFormat
+        pd.colorAttachments[1].pixelFormat = MeshRenderer.gbufferNormalFormat
+        pd.colorAttachments[2].pixelFormat = MeshRenderer.gbufferAlbedoFormat
+        for i in 0..<3 { pd.colorAttachments[i].writeMask = [] }
+        pd.depthAttachmentPixelFormat = MeshRenderer.depthFormat
+        pd.rasterSampleCount = 1
+        return try? device.makeRenderPipelineState(descriptor: pd)
+    }()
+    var mapDepthPipelineDidBuild: Bool { mapDepthPipeline != nil }
+
+    /// ★ BATCH M VERIFICATION: the SOLID dent planes' depth into the G-buffer, before the march (the hook
+    /// in MeshRenderer's prepass — MeshRenderer+FlexibleLattice.encodeFlexibleMapDepth): the renderer's own
+    /// vertex, displacement and tint buffers at this frame's scale, so the depth is the plane the body
+    /// pass draws. Only the fragments its tints flag solid. Returns false (nothing drawn) otherwise.
+    @discardableResult
+    func encodeMapDepth(_ enc: MTLRenderCommandEncoder, depthState: MTLDepthStencilState, vertices: MTLBuffer, flex: MTLBuffer,
+                        tints: MTLBuffer, count: Int, clipFromModel: simd_float4x4, squish: Float) -> Bool {
+        mapDepthThisFrame = false
+        guard !controlNoMapDepth, isDrawable, count > 0, enc.device === device, let pipe = mapDepthPipeline,
+              vertices.length >= count * 24, flex.length >= count * 12, tints.length >= count * 32 else { return false }
+        struct MapU { var clip: simd_float4x4; var flex: SIMD4<Float> }
+        var u = MapU(clip: clipFromModel, flex: SIMD4(squish, 0, 0, 0))   // (the body's flexScale — never the march's test override)
+        enc.setRenderPipelineState(pipe)
+        enc.setDepthStencilState(depthState)
+        enc.setCullMode(.none)
+        enc.setVertexBuffer(vertices, offset: 0, index: 0)
+        enc.setVertexBytes(&u, length: MemoryLayout<MapU>.stride, index: 1)
+        enc.setVertexBuffer(tints, offset: 0, index: 2)
+        enc.setVertexBuffer(flex, offset: 0, index: 3)
+        enc.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: count)
+        mapDepthThisFrame = true
+        mapDepthEncodes += 1
+        return true
+    }
 
     /// The ghost composite's pipeline for the main pass (its formats, its sample count; blended
     /// premultiplied "over", no depth write). nil when it cannot be built — then the walls stay opaque.
@@ -426,11 +482,15 @@ final class FlexibleLatticePass {
     func bindFE(_ i: Int) { feShown = (i >= 0 && i < feTex.count) ? i : -1 }
 
     /// A field as one rgba16Float 3D texture: xyz = u (mm at full load), ★ batch M (M3): w = the node's
-    /// von Mises (MPa, FlexibleFEStress — 0 for a field without moduli), the walls' Stress colour.
+    /// von Mises as a FRACTION of the field's own top (FlexibleFEStress.scaleTop — 0 for a field without
+    /// moduli), the walls' Stress colour.
     private func makeFieldTexture(_ f: FlexibleFEField) -> MTLTexture? {
         let n = f.nx * f.ny * f.nz
         guard f.nx > 0, f.ny > 0, f.nz > 0, f.u.count == n else { return nil }
-        let vm = FlexibleFEStress.field(f)?.vonMises
+        let vm: [Float]? = FlexibleFEStress.field(f).flatMap { s in
+            let top = FlexibleFEStress.scaleTop(s)
+            return top > 0 ? s.vonMises.map { $0 / Float(top) } : nil
+        }
         var packed = [UInt16](repeating: 0, count: 4 * n)
         for i in 0..<n {
             packed[4 * i] = Self.halfBits(f.u[i].x); packed[4 * i + 1] = Self.halfBits(f.u[i].y)
@@ -662,12 +722,16 @@ final class FlexibleLatticePass {
         let pale = LatticeStructureColour.pale, dense = FlexibleLatticePass.denseWall
         f.sparse = SIMD4(Float(pale.r), Float(pale.g), Float(pale.b), 1)
         f.dense = SIMD4(Float(dense.r), Float(dense.g), Float(dense.b), 1)
-        f.rhoSpan = SIMD4(rhoSpan.x, rhoSpan.y, stressInvMPa > 0 && feActive ? 1 : 0, stressInvMPa)   // ★ batch M (M3)
+        f.rhoSpan = SIMD4(rhoSpan.x, rhoSpan.y, stressWalls && feActive ? 1 : 0, 1)   // ★ batch M (M3): w = 1, the texture is the fraction
         enc.setRenderPipelineState(gbufferPipeline)
         enc.setDepthStencilState(depthState)
         enc.setCullMode(.none)
         enc.setFragmentBytes(&u, length: MemoryLayout<Uniforms>.stride, index: 0)
         enc.setFragmentBytes(&f, length: MemoryLayout<Frame>.stride, index: 1)
+        // ★ BATCH M VERIFICATION: the walls' depth bias, only while the planes' depth is in the buffer
+        var bias = SIMD4<Float>(mapDepthThisFrame && !controlNoMapDepthBias ? Self.mapDepthBiasMM : 0, 0, 0, 0)
+        mapDepthThisFrame = false
+        enc.setFragmentBytes(&bias, length: MemoryLayout<SIMD4<Float>>.stride, index: 2)
         enc.setFragmentTexture(rm, index: 0)
         enc.setFragmentTexture(ds, index: 1)
         enc.setFragmentTextures(boundColumns(), range: FlexibleLatticeShader.columnSlot..<(FlexibleLatticeShader.columnSlot + FlexibleLatticeShader.maxFaces))

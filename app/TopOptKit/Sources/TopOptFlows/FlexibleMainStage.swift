@@ -56,8 +56,11 @@ public final class FlexibleMainStage: ObservableObject {
     /// are a ghost as well (`ghostWalls`, the layer's).
     public var xray: Bool { latticeShown || dentXray }
     /// The dent view is on and has a map to show (kept by `refresh` — read on every body pass).
-    public var dentXray: Bool { heat && dentMapShown }
+    public var dentXray: Bool { heat && dentMapShown && !dentOnColumnFallback }
     var dentMapShown = false
+    /// ★ BATCH M VERIFICATION: the map is the column squish of a drawn lattice (the FE field is not driving
+    /// it) — kept by `refresh`.
+    var dentOnColumnFallback = false
     /// The walls are drawn as a ghost under the solid dent planes (the dent view and the lattice on).
     public var ghostWalls: Bool { dentXray && latticeShown }
     public func toggleLattice() {
@@ -192,8 +195,17 @@ public final class FlexibleMainStage: ObservableObject {
     var feMeshCache: [String: (key: String, mesh: [Float])] = [:]
     /// ★ BATCH M (M5): each field's dent heat at every map vertex (FlexibleMainStage+Squish.feMapValues).
     var feValueCache: [String: (key: String, values: [Float])] = [:]
-    /// ★ BATCH M (M3): each field's stress (FlexibleMainStage+Stress.feStress).
-    var feStressCache: [String: (key: String, field: LatticeDemandField, peak: Double)] = [:]
+    /// ★ BATCH M (M3): each field's stress (FlexibleMainStage+Stress.feStress) — its peak and its scale's top.
+    var feStressCache: [String: (key: String, field: LatticeDemandField, peak: Double, top: Double)] = [:]
+    /// Test controls only (★ BATCH M VERIFICATION's red controls): batch M's Stress route (only a FRESH
+    /// lattice — a stale one fell to the solid part's solve); one scale at the sequence's PEAK; the
+    /// legend's words from the sims landed only; the dent view's X-ray on the column fallback too.
+    var controlStressRouteNeedsFreshLattice = false
+    var controlStressScaleIsPeak = false
+    var controlStressWordsByActiveOnly = false
+    var controlDentXrayOnFallback = false
+    /// Test control only: the dent row's "×k" without the fold cut (batch M's label — "×1" over a ¼ motion).
+    var controlDentLabelIgnoresFold = false
     /// The heat's values the map is coloured by NOW (FE: the field shown first; else the corner means)
     /// — a tap reads them (H7), so the number is the colour under it.
     var heatValues: [Float]?
@@ -367,8 +379,9 @@ public final class FlexibleMainStage: ObservableObject {
         if fe.active, fresh, !pageUp {
             inputs?.fe = fe.fields; inputs?.feMesh = fe.mesh; inputs?.feSequence = fe.sequence; inputs?.feToken = fe.token
             inputs?.feTints = feTintBox   // ★ "Play all": each group's own colours, swapped in with its field
-            // ★ BATCH M (M3): Stress on — the walls take each group's own stress (the sequence's one scale)
-            if stress, feStressRoute, stressDrawable, feStressPeak > 0 { inputs?.stressInvMPa = Float(1 / feStressPeak) }
+            // ★ BATCH M (M3): Stress on — the walls take each group's own stress (★ verification: each
+            // field on its own scale — the pass's texture carries the fraction of its top)
+            if stress, feStressRoute, stressDrawable { inputs?.stressWalls = true }
         }
         inputs?.ghostWalls = ghostWalls   // ★ BATCH M (M6): the dent view ghosts the walls under the solid planes
         return inputs
@@ -495,6 +508,9 @@ public final class FlexibleMainStage: ObservableObject {
     func squishIdle() {
         guard stressWaiting, !FlexibleSquishSolver.solving else { return }
         stressWaiting = false
+        // ★ BATCH M VERIFICATION: re-checked — a solid solve held back behind a sim is never started once
+        // the page's Stress is the groups' own sims (its answer would never be drawn)
+        guard !feStressRoute || controlStressRouteNeedsFreshLattice else { return }
         stressSolver?()
     }
 
@@ -595,6 +611,11 @@ public final class FlexibleMainStage: ObservableObject {
         dentMaxMM = feNow?.scaleMM ?? shown.maxDepth
         heatValues = c.mapValues
         dentMapShown = overlay?.flatStart.isEmpty == false && dentMaxMM > 0   // ★ BATCH M (M6): the dent view's X-ray
+        // ★ BATCH M VERIFICATION: …but not on the column FALLBACK (a lattice drawn, its sims failed — or none,
+        // a shape-only filament): its planes are core's per-column steps — 'no number' columns stand still
+        // among sunk ones and one face's plane crosses another's — which the solid body hid; there the
+        // dent view keeps the body solid (and the walls opaque), as before batch M
+        dentOnColumnFallback = drawn != nil && !fe.active && !fe.pending && !controlDentXrayOnFallback
         // ★ BATCH G: the field moves the ghost, the heat plane and the walls; ×k capped so the map
         // stays injective (the planes never cross)
         feBaseTints = playAllBaseTints(m, scaleMM: dentMaxMM)

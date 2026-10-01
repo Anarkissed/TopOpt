@@ -3510,7 +3510,6 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
             enc.setFragmentTexture(gb.albedo, index: 3)
             countedDraw(enc, .triangle, 3)
         }
-        if wantsLattice, flexibleWallsGhosted, let gb = gbuffer { encodeFlexibleGhostWalls(enc, gbuffer: gb, mainSize: mainSize) }   // Flexible (#362) batch M (M6): the walls as a ghost, no depth (MeshRenderer+FlexibleLattice.swift)
         // Flexible X-ray (#362): the see-through body AFTER the opaque lattice shade; lsdf_shade rebound only fragment 0/2 + textures 0-3 (UnifiedShading.swift:1705-1711)
         if ghostAfterLattice {
             enc.setRenderPipelineState(translucentBodyPipeline ?? pipeline); enc.setDepthStencilState(translucentBodyDepthState)
@@ -3518,6 +3517,7 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
             enc.setFragmentBytes(&shade, length: MemoryLayout<ShadeParams>.stride, index: 2)
             enc.setFragmentTexture(flexibleGhostKeepsAO ? (aoTex ?? neutralAOTexture()) : neutralAOTexture(), index: 0)
             countedDraw(enc, .triangle, vertexDrawCount) }
+        if wantsLattice, flexibleWallsGhosted, let gb = gbuffer { encodeFlexibleGhostWalls(enc, gbuffer: gb, mainSize: mainSize) }   // Flexible (#362) batch M (M6) + verification: the walls as a ghost, no depth, AFTER the see-through body (MeshRenderer+FlexibleLattice.swift)
 
         // Ground grid + contact shadow (M7.6 D2), drawn after the opaque mesh so it
         // blends, depth-tested so the part occludes it, depth-write off.
@@ -4676,6 +4676,7 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
                                     instanceCount: lattice.capsuleCount)
             }
         }
+        encodeFlexibleMapDepth(penc, depthState: depthState, vertices: vbuf, flex: fbuf, tints: tintBuffer, count: vertexDrawCount, clipFromModel: uniforms.mvp, squish: flexScale)   // Flexible (#362) batch M verification: the solid dent planes' depth before the march (MeshRenderer+FlexibleLattice.swift)
         // Flexible (#362): the third writer — same encoder, attachments and .less+write depth state as lsdf_gbuffer / capsule_gbuffer
         if flexibleLatticeInFrame, let fx = flexibleLattice,
            fx.encodeGBuffer(penc, depthState: depthState, camera: camera, modelRotation: modelRotation, modelCenter: modelCenter, aspect: aspect,

@@ -8,6 +8,9 @@
 //     depth, won the depth test over the 0.05 mm-lifted dent plane in rows (his img 6) — now the walls
 //     are a ghost with no depth and the solid plane covers them: on his project's top view the map's
 //     pixels are the same with the lattice shown as hidden — RED: the opaque walls (the old frame).
+//     ★ RE-PINNED (batch M verification): the NEAR planes' interior only — a FAR plane (seen through the
+//     part) now shows the ghost walls in front of it, as it must (FlexibleBatchMVerifyTests); and the
+//     control is the old frame in full: the opaque walls WITHOUT the planes' depth in the G-buffer.
 #if canImport(MetalKit)
 import XCTest
 import MetalKit
@@ -79,12 +82,20 @@ final class FlexibleBatchMXrayTests: XCTestCase {
         // the two hook lines in #354's MetalMeshView
         let mv = try FlexibleSource.code("MetalMeshView.swift")
         XCTAssertTrue(mv.contains("if wantsLattice, !flexibleWallsGhosted, let lpipe = latticeShadePipeline, let gb = gbuffer {"))
-        XCTAssertTrue(mv.contains("if wantsLattice, flexibleWallsGhosted, let gb = gbuffer { encodeFlexibleGhostWalls(enc, gbuffer: gb, mainSize: mainSize) }"))
+        let ghostLine = "if wantsLattice, flexibleWallsGhosted, let gb = gbuffer { encodeFlexibleGhostWalls(enc, gbuffer: gb, mainSize: mainSize) }"
+        XCTAssertEqual(mv.components(separatedBy: ghostLine).count, 2, "one ghost-walls hook")
+        // ★ BATCH M VERIFICATION: drawn AFTER the see-through body (a far plane painted over them before it)
+        let body = try XCTUnwrap(mv.range(of: "countedDraw(enc, .triangle, vertexDrawCount) }\n"), "the see-through body's draw")
+        XCTAssertGreaterThan(try XCTUnwrap(mv.range(of: ghostLine)).lowerBound, body.lowerBound, "the ghost walls come after the body")
+        // …and the solid planes' depth is in the G-buffer before the march
+        let mapDepth = try XCTUnwrap(mv.range(of: "encodeFlexibleMapDepth(penc, depthState: depthState, vertices: vbuf, flex: fbuf, tints: tintBuffer, count: vertexDrawCount, clipFromModel: uniforms.mvp, squish: flexScale)"))
+        XCTAssertLessThan(mapDepth.lowerBound, try XCTUnwrap(mv.range(of: "fx.encodeGBuffer(penc, depthState: depthState")).lowerBound)
     }
 
     /// One frame of what the stage hands MetalMeshView (MSAA 4×, X-ray), at `amount` of the page's ×k.
     static func frame(_ stage: FlexibleMainStage, _ pm: ProjectModel, layer: FlexibleLatticeLayerInputs?, tints: [Float]? = nil,
-                      amount: Float, view: (Float, Float), size: Int = 640) throws -> [UInt8] {
+                      amount: Float, view: (Float, Float), size: Int = 640,
+                      configure: (FlexibleLatticePass) -> Void = { _ in }) throws -> [UInt8] {
         let device = try XCTUnwrap(MTLCreateSystemDefaultDevice())
         let mr = try XCTUnwrap(MeshRenderer(device: device, sampleCount: 4))
         mr.setMesh(try XCTUnwrap(stage.mesh(pm, on: .lattice)))
@@ -94,6 +105,7 @@ final class FlexibleBatchMXrayTests: XCTestCase {
         if let t = tints ?? stage.tints(pm, on: .lattice, roles: [:], stress: nil) { mr.setVertexTints(t) }
         mr.setBodyAlpha(stage.bodyAlpha(pm, on: .lattice) ?? 1)
         mr.applyFlexibleLattice(layer, device: device)
+        if let pass = mr.flexibleLattice { configure(pass) }
         if let l = layer, !l.feSequence.isEmpty, let pass = mr.flexibleLattice {
             pass.bindFE(l.feSequence[0])
             mr.setFlexDisplacements(l.feMesh[l.feSequence[0]])
@@ -116,7 +128,9 @@ final class FlexibleBatchMXrayTests: XCTestCase {
             var opaqueLayer = lattice; opaqueLayer.ghostWalls = false   // ★ RED: the walls drawn as before
             let withWalls = try Self.frame(stage, pm, layer: lattice, amount: 1, view: v, size: size)
             let noWalls = try Self.frame(stage, pm, layer: hiddenLayer, amount: 1, view: v, size: size)
-            let opaque = try Self.frame(stage, pm, layer: opaqueLayer, amount: 1, view: v, size: size)
+            let opaque = try Self.frame(stage, pm, layer: opaqueLayer, amount: 1, view: v, size: size) { $0.controlNoMapDepth = true }
+            // ★ RE-PINNED (verification): the NEAR planes only (seen with the body solid)
+            let near = Set(try FlexibleBatchMVerifyTests.mapPixels(stage, pm, m, layer: lattice, view: v, size: size).near)
             // the map's pixels: a frame with the map's quads painted a flat key colour, no walls
             var key = try XCTUnwrap(stage.tints(pm, on: .lattice, roles: [:], stress: nil))
             let o = try XCTUnwrap(stage.overlay)
@@ -136,6 +150,7 @@ final class FlexibleBatchMXrayTests: XCTestCase {
                 return g > 90 && g > 2 * rr && g > 2 * b
             }
             func interior(_ p: Int) -> Bool {
+                guard near.contains(p) else { return false }
                 let x = p % size, y = p / size
                 for dy in -2...2 { for dx in -2...2 where !keyedAt(x + dx, y + dy) { return false } }
                 return true

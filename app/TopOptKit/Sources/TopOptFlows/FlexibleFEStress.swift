@@ -90,6 +90,26 @@ public enum FlexibleFEStress {
                                   spacingMM: Double(f.spacing), provenance: .solidSim(date: Date(), resolution: f.nx))
     }
 
+    /// ★ BATCH M VERIFICATION (the UX finding: Group 1's Stress — and "Play all"'s, the default — was ONE
+    /// flat colour: the scale's top was the single peak, a 0.799 MPa hot spot at Face 5's edge, so 97.9 %
+    /// of his part sat in the bottom fifth of the ramp). The colour scale's TOP: this percentile of the
+    /// stressed nodes' von Mises. Above it the ramp's last colour; the legend's end says "≥"; a tap still
+    /// reads the true MPa.
+    public static let scalePercentile = 0.95
+
+    /// The colour scale's top for a stress field (MPa): the `percentile` of its nodes above 0 (0: none).
+    public static func scaleTop(_ s: LatticeDemandField, percentile q: Double = scalePercentile) -> Double {
+        var v = s.vonMises.filter { $0 > 0 && $0.isFinite }
+        guard !v.isEmpty else { return 0 }
+        v.sort()
+        let i = Swift.min(v.count - 1, Swift.max(0, Int((q * Double(v.count - 1)).rounded())))
+        return Double(v[i])
+    }
+
+    /// ★ BATCH M VERIFICATION: the Stress line while the lattice the group sims run on cannot come yet (a
+    /// blocker the pill names, or a failed build) — never "Simulating…" for ever.
+    public static let waitsForLattice = "Simulates once the lattice is built"
+
     /// The Stress legend's one line while it cannot draw: why, in ONE line (core's words behind the (i)).
     public static func failedLine(_ why: String) -> String {
         let w = why.lowercased()

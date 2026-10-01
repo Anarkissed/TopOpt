@@ -142,8 +142,9 @@ final class FlexibleBatchMStressTests: XCTestCase {
             var match = 0, otherMatch = 0, n = 0
             for v in stride(from: 0, to: o.partFlatVertices, by: 7) {
                 let p = SIMD3<Float>(pos[3 * v], pos[3 * v + 1], pos[3 * v + 2])
-                let c = FlexibleColours.stressTint(fraction: (FlexibleProbe.stress(own, at: p) ?? 0) / shown.peak)
-                let d = FlexibleColours.stressTint(fraction: (FlexibleProbe.stress(other, at: p) ?? 0) / shown.peak)
+                // ★ RE-PINNED (batch M verification): on the field's OWN scale — its top (FlexibleFEStress.scaleTop)
+                let c = FlexibleColours.stressTint(fraction: (FlexibleProbe.stress(own, at: p) ?? 0) / shown.top)
+                let d = FlexibleColours.stressTint(fraction: (FlexibleProbe.stress(other, at: p) ?? 0) / shown.top)
                 let got = SIMD3(t[v * 8], t[v * 8 + 1], t[v * 8 + 2])
                 n += 1
                 if simd_distance(got, SIMD3(c.x, c.y, c.z)) < 1e-4 { match += 1 }
@@ -158,19 +159,19 @@ final class FlexibleBatchMStressTests: XCTestCase {
             let mr = try XCTUnwrap(MeshRenderer(device: device, sampleCount: 1))
             mr.setMesh(try XCTUnwrap(stage.mesh(r.project, on: .lattice)))
             mr.applyFlexibleLattice(layer, device: device)
-            print(String(format: "FLEX-M STRESS %@: peak %.4f MPa · part colours: its own field %d / %d, the other group's %d · tap %@ MPa (its own %.4f, the other's %.4f) · walls 1/%.4f",
-                         g, shown.peak, match, n, otherMatch, read.value, ownV, otherV, 1 / Double(layer.stressInvMPa)))
+            print(String(format: "FLEX-M STRESS %@: peak %.4f MPa · top %.4f · part colours: its own field %d / %d, the other group's %d · tap %@ MPa (its own %.4f, the other's %.4f) · walls %@",
+                         g, shown.peak, shown.top, match, n, otherMatch, read.value, ownV, otherV, layer.stressWalls ? "stress" : "density"))
             XCTAssertEqual(match, n, "\(g): the part is coloured by its own group's stress")
             XCTAssertLessThan(otherMatch, n / 2, "\(g): control: the other group's field is another picture")
             XCTAssertEqual(read.value, FlexibleProbe.mpa(ownV), "\(g): the tap reads its own group's MPa")
             XCTAssertNotEqual(FlexibleProbe.mpa(ownV), FlexibleProbe.mpa(otherV), "\(g): control: the other group's number differs")
-            XCTAssertEqual(Double(layer.stressInvMPa), 1 / shown.peak, accuracy: 1e-6 / shown.peak, "\(g): the walls take the stress")
-            XCTAssertEqual(mr.flexibleLattice?.stressInvMPa, layer.stressInvMPa)
+            XCTAssertTrue(layer.stressWalls, "\(g): the walls take the stress (each field on its own scale — the pass's texture)")
+            XCTAssertEqual(mr.flexibleLattice?.stressWalls, true)
         }
         XCTAssertNotEqual(peaks["group-1"], peaks["group-2"], "two groups, two fields")
         // Stress off: the walls go back to their density
         stage.toggleStress()
-        XCTAssertEqual(stage.layer(r.project, stage: .lattice, pageUp: false)?.stressInvMPa, 0)
+        XCTAssertEqual(stage.layer(r.project, stage: .lattice, pageUp: false)?.stressWalls, false)
     }
 
     func testAFailedSimSaysWhyInOneLineAndRetryRerunsItWithoutARebuild() async throws {

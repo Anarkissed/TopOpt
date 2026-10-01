@@ -53,9 +53,12 @@ extension MeshRenderer {
     var flexibleGhostKeepsAO: Bool { flexibleLattice?.controlKeepAOForGhost == true }
 
     /// ★ BATCH M (M6): the dent view is on — the Flexible walls are drawn as a GHOST in the main pass
-    /// (`encodeFlexibleGhostWalls`) instead of by #354's opaque lsdf_shade: no depth written, so the solid
-    /// dent planes drawn after them cover them (his img 6: the walls' cut faces at the part's surface
-    /// striped the map). Only while the Flexible pass draws (the octet's layer is never on its stage).
+    /// (`encodeFlexibleGhostWalls`) instead of by #354's opaque lsdf_shade, no depth written. ★ BATCH M
+    /// VERIFICATION: drawn AFTER the see-through body (it was before it, and a far plane seen through the
+    /// part painted over every ghost wall in front of it); the walls behind a solid plane are not in the
+    /// G-buffer at all (`encodeFlexibleMapDepth`), so the plane stays solid there and the ghost walls in
+    /// front of a plane blend over it. Only while the Flexible pass draws (the octet's layer is never on
+    /// its stage).
     var flexibleWallsGhosted: Bool {
         guard flexibleLatticeInFrame, let fx = flexibleLattice, fx.ghostWalls else { return false }
         return fx.ghostPipeline(sampleCount: sampleCount) != nil
@@ -65,6 +68,17 @@ extension MeshRenderer {
     func encodeFlexibleGhostWalls(_ enc: MTLRenderCommandEncoder, gbuffer gb: (depth: MTLTexture, normal: MTLTexture, albedo: MTLTexture),
                                   mainSize: (w: Int, h: Int)) {
         flexibleLattice?.encodeGhostWalls(enc, sampleCount: sampleCount, normal: gb.normal, albedo: gb.albedo, mainSize: mainSize)
+    }
+
+    /// ★ BATCH M VERIFICATION: the hook's one call in #354's prepass, just BEFORE the Flexible march — the
+    /// solid dent planes' depth into the G-buffer, so a wall behind a plane is never marched into it and a
+    /// wall in front of one is (FlexibleLatticePass.encodeMapDepth). Only while the see-through body is
+    /// out of the G-buffer (with the body in it, its own draw already holds the planes' depth).
+    func encodeFlexibleMapDepth(_ enc: MTLRenderCommandEncoder, depthState: MTLDepthStencilState, vertices: MTLBuffer,
+                                flex: MTLBuffer, tints: MTLBuffer?, count: Int, clipFromModel: simd_float4x4, squish: Float) {
+        guard flexibleLatticeInFrame, flexibleGhostOutOfGBuffer, let tints, let fx = flexibleLattice else { return }
+        fx.encodeMapDepth(enc, depthState: depthState, vertices: vertices, flex: flex, tints: tints, count: count,
+                          clipFromModel: clipFromModel, squish: squish)
     }
 
     /// THE ONE ENTRY POINT for the Flexible lattice (called from the view's apply). Uploads
@@ -111,7 +125,7 @@ extension MeshRenderer {
         if pass.feTints !== inputs.feTints { pass.feTints = inputs.feTints }
         // ★ BATCH M: the dent view's ghost walls (M6) and the Stress view's wall colours (M3)
         if pass.ghostWalls != inputs.ghostWalls { pass.ghostWalls = inputs.ghostWalls; changed = true }
-        if pass.stressInvMPa != inputs.stressInvMPa { pass.stressInvMPa = inputs.stressInvMPa; changed = true }
+        if pass.stressWalls != inputs.stressWalls { pass.stressWalls = inputs.stressWalls; changed = true }
         if pass.hidden != inputs.hidden {
             pass.hidden = inputs.hidden
             changed = true

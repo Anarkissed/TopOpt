@@ -72,9 +72,20 @@ public enum FlexibleMainLegendLayout {
     /// ★ BATCH M (M4): the ONE card's size — every active scale stacked in one squircle (the octet's
     /// single key): the header, then one ~50 pt row per scale; folded, a column of bars.
     public static let rowHeight: CGFloat = 62
+    /// ★ BATCH M VERIFICATION (the octet's minimised key, which he tuned: "attach the legend modal to the
+    /// very far right side of the screen", "a bit of a gap between the different levels to be able to see
+    /// the arrows separately"): folded, the bars are the octet's 18 × 150 pt, 30 pt apart, the card on
+    /// the screen's very edge (`foldedEdge`) with the reading's arrow on its bar.
+    public static let foldedBar = CGSize(width: 18, height: 150)
+    public static let foldedSpacing: CGFloat = 30
+    public static let foldedEdge: CGFloat = 0
     public static func cardSize(rows: Int, minimized: Bool) -> CGSize {
         let n = CGFloat(Swift.max(1, rows))
-        if minimized { return CGSize(width: n * 26 + 46, height: 150) }
+        if minimized {
+            // n bars, a 30 pt gap after each (the last before the chevron), the chevron, DS.Space.s padding
+            return CGSize(width: n * (foldedBar.width + foldedSpacing) + 12 + 2 * DS.Space.s,
+                          height: foldedBar.height + 2 * DS.Space.s)
+        }
         return CGSize(width: width, height: height + (n - 1) * rowHeight)
     }
 
@@ -237,12 +248,15 @@ public struct FlexibleMainLegends: View {
             .accessibilityIdentifier("flexible-legend-card")
         } else {
             Button { main.legendMinimized = false } label: {
-                HStack(alignment: .center, spacing: 8) {
+                // ★ BATCH M VERIFICATION: the octet's minimised key — 18 × 150 pt bars, 30 pt apart, each
+                // with its reading's arrow (LatticeLegendPanel.minimizedColumn)
+                HStack(alignment: .center, spacing: FlexibleMainLegendLayout.foldedSpacing) {
                     ForEach(kinds) { k in
                         ramp(k, vertical: true)
-                        .frame(width: 18, height: 120)
+                        .frame(width: FlexibleMainLegendLayout.foldedBar.width, height: FlexibleMainLegendLayout.foldedBar.height)
                         .clipShape(RoundedRectangle(cornerRadius: 3, style: .continuous))
                         .overlay(RoundedRectangle(cornerRadius: 3, style: .continuous).strokeBorder(DS.Color.strokeSubtle.color, lineWidth: 1))
+                        .overlay(alignment: .top) { foldedArrow(k) }
                     }
                     Image(systemName: "chevron.down").font(.system(size: 11, weight: .bold)).foregroundStyle(DS.Color.accent.color)
                 }
@@ -260,7 +274,61 @@ public struct FlexibleMainLegends: View {
 
     // MARK: one row of the card
 
+    /// ★ BATCH M VERIFICATION: one row per scale, observing the squish loop too — under "Play all" the
+    /// Stress row names the turn playing and shows ITS scale, and the dent's "×k" its field's fold cut,
+    /// as the renderer swaps the turn in (the loop's `playingSimID`; a turn, never a frame).
     @ViewBuilder private func content(_ k: FlexibleReadKind) -> some View {
+        FlexibleMainLegendRow(main: main, loop: main.loop, kind: k, drilled: drilled)
+    }
+
+    /// The reading's mark on a FOLDED bar (bottom → top), like the octet's minimised key.
+    @ViewBuilder private func foldedArrow(_ k: FlexibleReadKind) -> some View {
+        if let r = main.reading, r.kind == k, let f = r.fraction {
+            let h = FlexibleMainLegendLayout.foldedBar.height, w = FlexibleMainLegendLayout.foldedBar.width
+            HStack(spacing: 0) {
+                Rectangle().fill(DS.Color.accent.color).frame(width: w, height: 2)
+                Image(systemName: "arrowtriangle.left.fill").font(.system(size: 11)).foregroundStyle(DS.Color.accent.color)
+            }
+            .frame(width: w + 12, height: 12, alignment: .leading)
+            .offset(x: 6, y: CGFloat(1 - min(1, max(0, f))) * h - 6)
+            .allowsHitTesting(false)
+        }
+    }
+
+    /// ★ BATCH M (M5): a SMOOTH bar (the ramp's own stops blended — 24 flat blocks read as bands
+    /// beside a heat that no longer has any).
+    private func ramp(_ k: FlexibleReadKind, vertical: Bool = false) -> some View {
+        FlexibleMainLegendRow.ramp(k, vertical: vertical)
+    }
+
+    // MARK: the callout
+
+    /// ★ RE-PROJECTED EVERY RENDER (the octet's rule: "the arrow follows the position in 3D
+    /// space"), in the MTKView's own space (it ignores the safe area).
+    @ViewBuilder private var callout: some View {
+        if drilled != nil, let r = main.reading, let s = main.screenPoint(r.anchor) {
+            FlexibleReadingTag(reading: r)
+                .offset(x: s.x + 2, y: s.y - FlexibleReadingTag.halfHeight)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .ignoresSafeArea()
+                .allowsHitTesting(false)
+                .accessibilityIdentifier("flexible-reading-callout")
+        }
+    }
+}
+
+/// ★ BATCH M VERIFICATION: one row of the ONE card — its title (and the dent's "×k"), its ramp and ends,
+/// or Stress's one line while it cannot draw. It observes the squish LOOP as well as the stage: under
+/// "Play all" the renderer swaps a turn in (`playingSimID`), and the Stress row then names THAT group
+/// and shows its own scale, the dent's "×k" its own fold cut.
+struct FlexibleMainLegendRow: View {
+    @ObservedObject var main: FlexibleMainStage
+    @ObservedObject var loop: FlexibleSquishLoop
+    let kind: FlexibleReadKind
+    let drilled: FlexibleReadKind?
+
+    var body: some View {
+        let k = kind
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: DS.Space.xs) {
                 Text(main.legendTitle(k))
@@ -269,7 +337,7 @@ public struct FlexibleMainLegends: View {
                     .lineLimit(1).minimumScaleFactor(0.75)
                 Spacer(minLength: 0)
                 if k == .dent {
-                    Text("×\(main.dentExaggeration)")
+                    Text(main.dentFactorLabel)
                         .font(.system(size: 11, weight: .semibold)).monospacedDigit()
                         .foregroundStyle(DS.Color.textTertiary.color)
                 }
@@ -302,7 +370,7 @@ public struct FlexibleMainLegends: View {
                 .frame(height: 29, alignment: .leading)
             } else {
                 let e = ends(k)
-                ramp(k)
+                Self.ramp(k)
                     .frame(height: 10)
                     .clipShape(RoundedRectangle(cornerRadius: 3))
                     .overlay(marker(k))
@@ -321,7 +389,7 @@ public struct FlexibleMainLegends: View {
 
     /// ★ BATCH M (M5): a SMOOTH bar (the ramp's own stops blended — 24 flat blocks read as bands
     /// beside a heat that no longer has any).
-    private func ramp(_ k: FlexibleReadKind, vertical: Bool = false) -> some View {
+    static func ramp(_ k: FlexibleReadKind, vertical: Bool = false) -> some View {
         LinearGradient(colors: (0...16).map { k.rampColour(Double($0) / 16).color },
                        startPoint: vertical ? .bottom : .leading, endPoint: vertical ? .top : .trailing)
     }
@@ -349,21 +417,6 @@ public struct FlexibleMainLegends: View {
             // once per lattice generation (a full scan of the mask), never per body pass
             guard let e = main.latticeEnds() else { return ("", "") }
             return (e.lo, e.hi)
-        }
-    }
-
-    // MARK: the callout
-
-    /// ★ RE-PROJECTED EVERY RENDER (the octet's rule: "the arrow follows the position in 3D
-    /// space"), in the MTKView's own space (it ignores the safe area).
-    @ViewBuilder private var callout: some View {
-        if drilled != nil, let r = main.reading, let s = main.screenPoint(r.anchor) {
-            FlexibleReadingTag(reading: r)
-                .offset(x: s.x + 2, y: s.y - FlexibleReadingTag.halfHeight)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                .ignoresSafeArea()
-                .allowsHitTesting(false)
-                .accessibilityIdentifier("flexible-reading-callout")
         }
     }
 }

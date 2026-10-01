@@ -125,16 +125,18 @@ extension FlexibleMainStage {
         // all turn its own below), on the sequence's one scale
         let feRoute = feStressRoute
         let key = "\(generation)|\(h.finalize())|\(showStress ? (feRoute ? fe.token : stressKey) : 0)|\(xray)|\(heat)|\(overlay != nil)|"
-            + feBaseTints.keys.sorted().joined(separator: ",")
+            + feBaseTints.keys.sorted().joined(separator: ",") + "|\(controlStressScaleIsPeak)"
         if key != composedKey {
             composedKey = key
-            let peak = feRoute ? feStressPeak : stressPeak
+            // ★ BATCH M VERIFICATION: each group's field on ITS OWN scale (its top — FlexibleFEStress.scaleTop);
+            // RED CONTROL: one scale at the sequence's peak (Group 2's turn at 7 % of Group 1's, one blue)
+            let onePeak = fe.sequence.compactMap { i in i < fe.fields.count ? feStress(fe.fields[i])?.peak : nil }.max() ?? 0
             func stressOf(_ id: String?) -> (LatticeDemandField, Double)? {
                 guard showStress else { return nil }
                 guard feRoute else { return (stressField!, stressPeak) }
                 guard let f = fe.fields.first(where: { $0.simID == id }) ?? fe.sequence.first.map({ fe.fields[$0] }),
                       let s = feStress(f) else { return nil }
-                return (s.field, peak)
+                return (s.field, controlStressScaleIsPeak ? onePeak : s.top)
             }
             let first = fe.sequence.first.map { fe.fields[$0].simID }
             composed = FlexibleMainTints.compose(base: c.tints, overlay: overlay, part: project.viewerMesh, heat: heat,
@@ -199,7 +201,9 @@ extension FlexibleMainStage {
         guard !kinds.isEmpty else { return nil }
         let keep = FlexibleMainLegendLayout.keepOut(viewport: viewport, bottomClearance: bottomClearance,
                                                     chipColumnWidth: chipColumnWidth)
-        return FlexibleMainLegendLayout.placeCard(rows: kinds.count, minimized: legendMinimized, viewport: viewport, keepOut: keep)
+        // ★ BATCH M VERIFICATION: folded, on the screen's very edge — the octet's minimised key
+        return FlexibleMainLegendLayout.placeCard(rows: kinds.count, minimized: legendMinimized, viewport: viewport, keepOut: keep,
+                                                  edge: legendMinimized ? FlexibleMainLegendLayout.foldedEdge : PageChrome.edge)
     }
 
     /// Where the legend is, per kind (the player keeps clear of these): ★ BATCH M (M4) every kind
@@ -267,6 +271,21 @@ extension FlexibleMainStage {
 
     /// The dent legend's "×k" (the map is drawn k times deeper).
     public var dentExaggeration: Int { Int(channels?.exaggeration ?? 1) }
+    /// ★ BATCH M VERIFICATION (his Group 1: the planes moved a QUARTER of what the colours and the
+    /// legend's "×1" said): how many times deeper the map is DRAWN than the mm it is coloured and read
+    /// by — the page's ×k times the shown field's fold cut (FlexibleFEField.foldShare: the motion cut so
+    /// the picture never folds; the colours keep the calibrated mm).
+    public var dentDrawnFactor: Double {
+        let k = channels?.exaggeration ?? 1
+        guard fe.active, !controlDentLabelIgnoresFold, let share = feShownField?.foldShare else { return k }
+        return k * share
+    }
+    /// The "×k" the dent row shows: "×2", "×0.2", "×1.1".
+    public var dentFactorLabel: String { Self.factorLabel(dentDrawnFactor) }
+    nonisolated static func factorLabel(_ k: Double) -> String {
+        if abs(k - k.rounded()) < 0.05 { return "×\(Int(k.rounded()))" }
+        return k < 0.095 ? String(format: "×%.2f", k) : String(format: "×%.1f", k)
+    }
     /// The dent legend's (i), ONE sentence: what the map is and why it looks deeper than it is.
     public var dentInfo: String {
         // ★ BATCH G: the 3D sim, said in ONE sentence (linear physics, scaled to core's squish) —
@@ -287,6 +306,10 @@ extension FlexibleMainStage {
         // ★ BATCH M (M3): the group's own sim — what it is, or core's words after a failure
         if let g = stressGroupWords {
             if case .failed(let why) = stressView { return "The 3D sim of \(g) failed: \(why.replacingOccurrences(of: ". ", with: "; "))" }
+            // ★ BATCH M VERIFICATION: the bar tops out below the peak (FlexibleFEStress.scaleTop) — said here
+            if let s = feShownStress, s.peak > s.top * 1.0001 {
+                return "Von Mises in the part under \(g)'s squeeze, from its linear 3D sim with each voxel's own stiffness; the bar tops out at \(FlexibleProbe.mpa(s.top)) MPa so the spread reads (the peak, \(FlexibleProbe.mpa(s.peak)) MPa, is one spot) — tap here, then the part, for MPa there."
+            }
             return "Von Mises in the part under \(g)'s squeeze, from its linear 3D sim with each voxel's own stiffness — tap here, then the part, for MPa there."
         }
         if case .failed(let why) = stressState { return "Core could not solve the solid part: \(why)" }
@@ -294,9 +317,13 @@ extension FlexibleMainStage {
     }
 
     /// The Stress legend's ends: 0 … the peak, three significant digits (his pad peaks at
-    /// 0.0462 MPa — "0.05" read as a round number it is not).
+    /// 0.0462 MPa — "0.05" read as a round number it is not). ★ BATCH M VERIFICATION: on the FE route
+    /// the SHOWN field's own top — "≥ x MPa" (the ramp's last colour is everything above it; a tap
+    /// reads the true MPa).
     public var stressEnds: (lo: String, hi: String) {
-        ("0", FlexibleProbe.mpa(feStressRoute ? feStressPeak : stressPeak) + " MPa")   // ★ M3: the sequence's one scale
+        guard feStressRoute else { return ("0", FlexibleProbe.mpa(stressPeak) + " MPa") }
+        guard let s = feShownStress else { return ("0", "") }
+        return ("0", (s.peak > s.top * 1.0001 ? "≥ " : "") + FlexibleProbe.mpa(s.top) + " MPa")
     }
 
     /// The lattice legend's ends ("18% · 9.2 mm") and span, once per lattice generation.
@@ -358,7 +385,7 @@ extension FlexibleMainStage {
         case .stress:
             // ★ BATCH M (M3): the shown group's own stress on the FE route
             guard stress, stressDrawable, let f = feStressRoute ? feShownStress?.field : stressField else { return nil }
-            let peak = feStressRoute ? feStressPeak : stressPeak
+            let peak = feStressRoute ? (feShownStress?.top ?? 0) : stressPeak   // (the colour's scale: its top)
             // ★ BATCH C VERIFICATION: with Stress on, the MAP is stress-coloured (its rest vertices
             // sampled) and drawn dented — so a tap on it is read where the drawn map meets the
             // view ray, at that point's REST place (the colour's own sample), not at the undented
@@ -408,7 +435,7 @@ extension FlexibleMainStage {
         if stress, feStressRoute, stressDrawable, let st = feShownStress, let v = FlexibleProbe.stress(st.field, at: r.rest) {
             reading = FlexibleReading(kind: .stress, value: FlexibleProbe.mpa(v),
                                       unit: "MPa · \(Int((r.rho * 100).rounded()))% density",
-                                      fraction: st.peak > 0 ? min(1, v / st.peak) : 0, anchor: p)
+                                      fraction: st.top > 0 ? min(1, v / st.top) : 0, anchor: p)
             return true
         }
         let span = latticeEnds()?.span ?? FlexibleProbe.latticeSpan(g.inputs)
