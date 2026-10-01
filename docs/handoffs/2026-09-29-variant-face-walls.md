@@ -879,3 +879,229 @@ The 4 new skips are those env-gated ones.
 The run took 3 h 17 min (11848 s), because two other sessions' builds and test runs held the load
 average at 50–134 for most of it. The wall-clock test `LatticeSDFProfileTests.testRaymarchCostOnMaintainerBracket`
 passed anyway.
+
+## Round 3 (2026-10-01): regions follow the slab, one sentence, no false depth, 102117B9 back
+
+Round 2 was accepted. The maintainer's round-3 rulings, each its own commit:
+
+| commit | ruling |
+|---|---|
+| **87f792d9** | (a) a protected, latticed REGION is protected to the depth its slab emits |
+| **44882880** | (a) core brief: tie region-id protections; the in-plane collar measured |
+| **cd312825** | (b) "Needs a lattice region" / "Add at least one lattice region first" say the gate's sentence with the one tap, where they report its condition |
+| **e8564e90** | ruling 3's deviation accepted, plus: no depth suggested when none can clear the tie |
+| **211299c3** | (c) a wall saved without its start decodes at 0, so 102117B9 opens again |
+| **072eded0** | (c) the store never drops a project silently: "Can’t open" with the reason |
+| **f11e0abc** | four defects an adversarial review found before the push, fixed |
+
+### In plain words
+
+- **His stand's curved region (101) is now protected all the way down its lattice slab**: 24.15 mm
+  instead of 20.
+  - Measured on a re-run of his stand's loads: the optimizer had been emptying up to 25 voxels
+    (about 1 cm³) of that last 4.15 mm. With the fix it empties none.
+  - Only the stand's job changes, by one number.
+  - A core brief asks core to refuse such mismatches from now on.
+- **One gate, one sentence.** The wizard's "Needs a lattice region" and the Fit pane's "Add at least
+  one lattice region first" now say "nothing set to lattice", with the tap to the walls, whenever
+  lattice is on. With lattice off they mean something else (the mode is off), so they keep their
+  words.
+- **An old run's sentence never suggests a depth he can't set.** When the skin less the expand is
+  at or below zero, or below 1 mm, it offers only Optimize again.
+- **102117B9 opens again**, with all its walls and its drawn grade. If a project ever can't be
+  read again, Home shows it as "Can’t open" with the reason. Nothing can open, rename or delete it,
+  and the store never writes to it.
+
+### Snapshots
+
+His live store moved after round 2's P0 copy: the stand (68BF7B74) and 3418E167 were re-saved on
+2026-09-30 at 23:21 and 23:22.
+- The stand's Group C face order changed from [15, 2] to [2, 15].
+- 3418E167 is now stepped, with 2 include walls (it was organic with no walls).
+
+Round 3 is hashed on **P1**, a read-only copy of the live store taken 2026-10-01 00:09. P0 is kept
+for continuity with round 2. **P2** (2026-10-01, later) is identical to P1, and it is what the
+"every project decodes" proof ran on.
+
+### Ruling (a): regions follow the slab
+
+**What changed.**
+- `LatticeRegionEmission.Result.slabDepthMM(selectableKey:)`: every member prism and facet of a
+  region is emitted under its key at one depth (dragged + expand, floored at 0.1).
+- `faceProtectionSpecs`' region loop reads it. With no prism under the key (Off, a cut sector,
+  cylinder or direct-face members, lattice off), a region keeps today's depth.
+
+**Bytes: only the stand moves**, the one project with a protected, latticed region with an expand.
+The diff is one line, region 101's `depth_mm` 20 → 24.15.
+
+| snapshot | stand 68BF7B74 before → after | the others |
+|---|---|---|
+| P1 (live) | 8c81cec07b534bc5 → **3fd5d1b2388fe949** | unchanged |
+| P0 | c4b03acf387d178f → **43a02161a5bab447** (round 2's R2b prediction) | unchanged |
+
+**What the optimizer emptied, run and not estimated.** Counted by core's own forecast counters on
+the stand's optimize run. That run is his stand's stage loads with mode `minimize_plastic` on CLI
+aecef72c, NOT his retained result. Rungs are 0.68 / 0.52 / 0.38 / 0.26.
+
+| region 101's slab, part-solid voxels | count | emptied BEFORE (protected to 20 mm) | emptied AFTER (re-optimized, 24.15 mm) |
+|---|---|---|---|
+| the last 4.15 mm | 521 | **0 / 9 / 22 / 25** (25 × 39.67 mm³ ≈ 0.99 cm³) | **0 / 0 / 0 / 0** |
+| the slab cut at 20 mm | 3291 | 0 / 0 / 0 / 0 | — |
+
+- Region 101's freeze goes 3376 → 3780 voxels: 7 layers, 23.87 mm effective.
+- The positive controls are all exact: every freeze count equals the run's receipt, and an
+  independent recount matches.
+- Re-running the unchanged job gave a byte-identical `design.bin`.
+- Full method: `docs/handoffs/2026-10-01-core-brief-region-protection-tie.md` and its evidence
+  folder.
+
+**The core brief** (44882880):
+1. Tie region-id protections in core. It must land AFTER 87f792d9. Three traps:
+   - face-id spaces;
+   - a direct face that is also a region member;
+   - **equal mm are not equal voxels**: 68 slab voxels stay outside region 101's own 7-layer
+     freeze even after the fix. They are held only by the neighbouring walls' protections.
+2. The collar, measured only: 413 voxels. 37 are outside region 101's own freeze at 20 mm and 6
+   at 24.15 mm. 0 are outside every freeze, and 0 were emptied at any rung, before or after.
+
+**Tests:**
+- `testARegionsProtectionDoesNotFollowItsExpand` is flipped to `testARegionsProtectionFollowsItsSlab`
+  (expand +4.15 and −2; specs, wire, core's parser);
+- new `testARegionWithNoSlabOrNoExpandKeepsItsDepth`;
+- RED: the old depth turns 4 assertions red.
+
+### Ruling (b): one gate, one sentence
+
+Both strings showed whenever the job's emission had no include wall, and that emission is empty
+in two cases:
+- **Lattice ON, no include wall:** exactly the gate's condition. Both now say "nothing set to
+  lattice" with the one tap. The wizard's leaves by Save & Exit (confirmed); the Fit pane's calls
+  `onMarkWalls`.
+- **Lattice OFF:** the emission is empty because the mode is off, whatever walls are marked. That
+  is the gate's "lattice mode is off", **a different condition, so both keep their words.** You
+  reach it with the wizard open while lattice is off, or after the variant page's "Lattice infill"
+  toggle.
+
+Evidence: `evidence/2026-09-30-ruling4-gates/fit_pane_nothing_set_to_lattice.png` and
+`fit_pane_lattice_off_keeps_its_words.png`.
+
+**Other phrasings of a related fact, reported and not changed:**
+- `FrozenRegionLatticeStatus` says "the whole part is latticed" when no include wall exists. That
+  is stale since rulings (c) and 4: such a job is refused, not latticed whole.
+- The preview banner offers depth advice when there is no include wall (from reading, not run).
+- "Mark a wall to size the cells", "mark a wall to lattice" and the toast "Import a part and set a
+  lattice region first." each report a different condition. The toast fires only once an include
+  wall exists; its cause is a missing file or config.
+
+### Ruling 3's deviation, and no false depth
+
+- Accepted: "set the wall to X − expand".
+- New (e8564e90): when X − expand is at or below zero, or below the wall's minimum depth, the
+  sentence ends "Optimize again with this wall." and the banner keeps its Optimize again tap.
+- The minimum is one constant, `LatticeSlabDepth.minMM` = 1 mm, which every depth write clamps to.
+- Tested through core's parser:
+  - expand 5 and 4.5 on a 5 mm skin: no depth;
+  - setting 0.5 clamps to 1 and is still refused;
+  - expand 4 gives "set the wall to 1 mm", and that is accepted.
+
+**Edges for him, not decided:**
+- With a negative expand, X − expand can exceed the 50 mm maximum. The ruling covers the low end
+  only.
+- The sentence rounds to 0.01 mm while core's tie is exact to 1e-9. A protection with more
+  decimals could be shown as a value that is refused again.
+
+### Ruling (c): 102117B9, and the store
+
+**Fix 1 (211299c3).** `LatticeFaceWallThickness` decodes a missing `startMM` as 0. Encoding is
+unchanged, byte for byte (pinned). The proof uses a COPY of his file,
+`Tests/TopOptFlowsTests/Fixtures/102117B9_project.json`:
+- it decodes, and the wall keeps startMM 0 and its 43-column profile;
+- opened through a temp store with his STEP, it lists and opens;
+- it shows the walls the file declares: **Group C "include" over its 15 faces**. Faces 2 and 15
+  are at their own 12 and 11 mm, the other 13 at 4 mm: 177 face prisms, 0 skipped.
+  (Round 2 named only faces 2 and 15. That was incomplete; the group's other 13 faces are walls
+  too.)
+- Its first stage dump is 3f19f920e5c96a5a. It is new, caused by (c); there is no before.
+
+**Every project currently in the store decodes** (P2, through the real decoder and the store):
+
+| id | name | saved |
+|---|---|---|
+| 102117B9 | M2 verticalStand | 2026-09-21 |
+| 3418E167 | M2 verticalStand THICK | 2026-09-30 23:22 |
+| 570B38E2 | DOUBLED test (Claude copy) | 2026-08-25 |
+| 68BF7B74 | M2 verticalStand | 2026-09-30 23:21 |
+| 887AC498 | shelvesb | 2026-09-05 |
+| 92A8016E | l bracket 3 | 2026-08-20 |
+| AA4C7953 | M2 verticalStand THICK | 2026-08-21 |
+
+**Fix 2 (072eded0).**
+- `ProjectStore.read(id:)` / `loadAll()` list every UUID folder, readable or not, and reading
+  writes nothing.
+- Three silent drops now say why:
+  - a decode error, with its key and path;
+  - a newer schema;
+  - a folder with no `project.json`.
+- `AppModel.unreadableProjects` is kept apart from recents, so a "Can’t open" card never reaches
+  `open()`, which would start an empty project with the same id. `deleteProject` refuses one.
+- Home shows "Can’t open" with the reason, in the recent card's frame and tokens. The card has
+  nothing to tap (pinned).
+- Evidence: `evidence/2026-10-01-cant-open/cant_open_cards.png`.
+
+**Notes for him:**
+- **The next save of 102117B9** (Home, backgrounding, rename) writes `"startMM":0` into his file.
+  That is the app saving a project he opened; the store itself never writes.
+- **The same trap, latent:** `OrganicForecast.Predicted` has 5 defaulted fields added after
+  forecasts were first saved. No project in his store holds a stored forecast, so nothing breaks
+  today. Making it tolerant would turn a bad forecast into a silent nil, so it is his call.
+- **Other silent paths, outside this ruling:**
+  - `restoreFromDisk` opens an empty workspace when the model fails to import;
+  - a results file that fails to decode is dropped;
+  - a remote job whose project is unreadable says "may have been deleted".
+
+### The review before the push (f11e0abc)
+
+An adversarial review of the round's diff confirmed four defects, each now fixed, tested, and
+RED-controlled. The other claims were refuted.
+
+1. **A deleted project could come back as a "Can’t open" card nobody can remove.** Results and
+   re-lattice artifacts are written on a serial background queue. A write still queued at the
+   delete recreated the folder WITHOUT `project.json`, and fix 2 listed it, with no delete. Two
+   halves:
+   - the writes go only into a folder that still holds its project (`ProjectStore.holdsProject`);
+   - `deleteProject` deletes again behind the queue.
+
+   The test is deterministic: hold the queue, persist, delete, release, drain.
+2. **(a) missed a split or cut region.** The emission lattices the group's own region, while the
+   protection walks its children, so they fell back to the dragged depth. Each child now reads the
+   slab its surface is latticed through. Test: a split region with a 4.15 mm expand protects both
+   children at 24.15.
+3. **The sentence could suggest more than 50 mm.** Every depth write clamps to [1, 50], so a depth
+   is now suggested only inside [1, 50].
+4. **The sentence could name the wrong wall** when a face carries two prisms. Core stops at the
+   prism that differs, and the app now matches it by core's wall depth too. This one predates
+   round 3.
+
+None of the seven projects' bytes move.
+
+### Tests (round 3)
+
+| test | what it pins | RED |
+|---|---|---|
+| `testARegionsProtectionFollowsItsSlab` (flipped), `testARegionWithNoSlabOrNoExpandKeepsItsDepth`, `testASplitRegionsChildrenFollowTheirParentsSlab` | (a) | the old depth: 4 red; no parent lookup: 20 |
+| `testTheOtherPhrasingsSayTheGatesSentenceWhereTheyReportItsCondition` | (b) | wizard, Fit pane |
+| `testNoDepthIsSuggestedWhenNoneCanClearIt`, `testNoDepthIsSuggestedAboveTheMaximum`, `testTheWallNamedIsTheOneCoreRejected` | ruling 3 | always a depth; no ceiling; first prism |
+| `testAWallSavedWithoutItsStartDecodesAtZero`, `testHisProjectDecodesAndShowsTheSameWalls`, `testEveryProjectInTheStoreCopyDecodes` (env-gated) | (c) fix 1 | no decoder: all red, 102117B9 dropped |
+| `testTheStoreListsEveryProjectAndTouchesNothing`, `testTheAppShowsThemButNeverOpensOrDeletesThem`, `testStoreSkipsNewerSchema` (extended), `testADeletedProjectsQueuedWritesNeverBringItBack` | (c) fix 2 | silent drop; delete unguarded; the race |
+
+Every RED control was restored byte-identical from a snapshot.
+
+**Per commit:** the iOS build succeeded with fresh objects, and the stage hashes are in the
+ruling sections.
+
+**Targeted, after f11e0abc:** every test class round 3 touches or reads, 39 classes, ran 417 tests
+with 11 env-gated skips and 8 failed assertions. **All 8 are in the three known AppModel 3MF test
+cases**, which fail because lib3mf is not in the macOS slice; they are pre-existing.
+
+**The full suite** runs once before the lattice-types handoff (that task's own tier), and it
+covers this round.
