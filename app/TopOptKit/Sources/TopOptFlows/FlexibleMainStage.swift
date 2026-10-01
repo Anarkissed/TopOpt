@@ -43,7 +43,7 @@ public final class FlexibleMainStage: ObservableObject {
     /// … remove the xray view selector if the lattice view is going to use the rendering
     /// anyways"): the Lattice VIEW is his one choice. Shown, the part is the X-ray ghost with the
     /// walls inside; hidden, it is the solid part (Dent heat / Stress read on it). On by default.
-    @Published public var latticeOn = true { didSet { if oldValue != latticeOn { refresh() } } }
+    @Published public var latticeOn = true { didSet { if oldValue != latticeOn { refresh(); if latticeOn { bakeDeferred() } } } }   // ★ S9: a bake a Save & Exit left for the view
     /// What the Lattice button shows as on, and what is drawn: his choice AND a lattice to show
     /// (one drawn, or one on its way without Settings — `latticeAvailable`).
     public var latticeShown: Bool { latticeOn && latticeAvailable }
@@ -336,9 +336,13 @@ public final class FlexibleMainStage: ObservableObject {
         visible = true
         model?.checkStampShown = nil
         model?.pendingFix = nil
+        // ★ ROUND 5 (S9): "Exit" — nothing changed on Settings: the main page stays EXACTLY as it was
+        if model?.takeExitUnchanged() == true { showLatticeOnExit = false; return }
         model?.retryFailedBuild()   // his Save & Exit asks for the build: a failed one is tried once more
         // ★ C2: Settings opened by the Lattice view button (nothing to show) — Exit shows the view
         if showLatticeOnExit { showLatticeOnExit = false; latticeOn = true }
+        // ★ ROUND 5 (S9): with the Lattice view OFF, Save & Exit only STORES — the bake waits for the view
+        model?.latticeBuildDeferred = !latticeOn
         noteLoads()        // what Settings did to the groups (a weight written back) is in hand
         refresh()
         buildIfReady()
@@ -415,7 +419,7 @@ public final class FlexibleMainStage: ObservableObject {
         guard let m = model else { return "Full load" }
         let shown = Set(shownLattice?.squishedKeys.map(\.region) ?? [])
         return FlexibleSquishLoop.fullLabel(weightsKg: m.settings.loadedFaces.filter { shown.contains($0.faceRegionID) }.map(\.weightKg),
-                                            shapeOnly: m.lattice?.shapeOnly == true)
+                                            shapeOnly: m.lattice?.shapeOnly == true, unit: m.weightUnit)   // ★ S4
     }
 
     /// The bottom pill (H10).
@@ -552,6 +556,7 @@ public final class FlexibleMainStage: ObservableObject {
     func buildIfReady() {
         guard let m = model, !frozen, m.sceneState == .ready, !m.latticeBuilding,
               m.lattice == nil || m.latticeIsStale,
+              !m.latticeBuildDeferred || latticeOn,   // ★ S9: a Save & Exit with the view off only stored
               // ★ a build that failed on these settings and this scene is not retried (it
               // looped: the failure published, the page rebuilt, it failed …); an edit or a new
               // scene clears it
@@ -607,6 +612,7 @@ public final class FlexibleMainStage: ObservableObject {
         var c = FlexiblePageChannels.channels(model: m, overlay: overlay, xray: false, drawnLattice: drawn, heat: heat,
                                               depthScaleMM: feNow?.scaleMM, mapValues: feNow?.first,
                                               controlColumnColours: controlColumnHeat)
+        FlexibleGroupFrames.paint(&c.tints, overlay: overlay, model: m)   // ★ S1: each face framed in its group's colour
         let shown = FlexibleShownValues(model: m, drawnLattice: drawn)
         dentMaxMM = feNow?.scaleMM ?? shown.maxDepth
         heatValues = c.mapValues
@@ -701,6 +707,8 @@ public struct FlexibleMainStatus: Equatable, Sendable {
     public static let notOpened = "Tap to open"
     public static let building = "Building…"
     public static let ready = "Ready"
+    /// ★ ROUND 5 (S9): Save & Exit with the Lattice view off stored the settings; the bake waits.
+    public static let deferred = "View off · tap to build"
 
     /// The rule: the one thing to fix (readiness.oneLine) → a failed build (core's words; ★
     /// batch B review: it was "Building…" for ever) → building (opening, designing, no
@@ -725,6 +733,9 @@ public struct FlexibleMainStatus: Equatable, Sendable {
     public static func of(model m: FlexibleStageModel?) -> FlexibleMainStatus {
         guard let m else { return .init(line: notOpened, tone: .idle, fix: nil) }
         if case .failed = m.sceneState { return .init(line: "The part could not be opened", tone: .fix, fix: nil) }
+        // ★ ROUND 5 (S9): saved with the Lattice view off — nothing bakes until the view is on (a tap turns it on)
+        if m.latticeBuildDeferred, m.lattice == nil || m.latticeIsStale, m.sceneState == .ready,
+           m.readiness.blocking.isEmpty, !m.latticeBuilding { return .init(line: deferred, tone: .idle, fix: nil) }
         return of(readiness: m.sceneState == .ready ? m.readiness : nil, sceneReady: m.sceneState == .ready,
                   isBuilding: m.latticeBuilding, lattice: m.lattice, stale: m.latticeIsStale, failure: m.latticeFailure,
                   hold: m.coreHoldKind.map { FlexibleCoreHold.pill($0, shapeOnlyLabel: m.lattice?.shapeOnlyLabel) })

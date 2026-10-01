@@ -136,6 +136,7 @@ extension FlexibleMainStage {
     /// lattice his edits there have made stale (`sendToCore`).
     public func pillTapped(_ s: FlexibleMainStatus, open: () -> Void, goToLattice: @escaping () -> Void = {}) {
         self.goToLattice = goToLattice
+        if s.line == FlexibleMainStatus.deferred { latticeOn = true; return }   // ★ S9: saved with the view off — show it (it bakes)
         switch s.tap {
         case .send:
             sendToCore()

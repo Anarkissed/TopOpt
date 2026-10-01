@@ -45,6 +45,25 @@ struct FlexibleFacePanel: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: DS.Space.xs) {
+            FlexibleModelRows(model: model)
+            Divider().overlay(DS.Color.strokeSubtle.color).padding(.vertical, DS.Space.xs)
+            // ★ ROUND 4: the faces set on the main page — tap one and ITS rows open right under it
+            // (verification of D1: they sat below the whole list, off the panel on his project)
+            FlexibleFaceList(model: model, padTarget: $padTarget)
+        }
+        .onAppear {
+            if model.selectedRegion == nil { model.selectedRegion = model.settings.loadedFaces.first?.faceRegionID }
+        }
+    }
+}
+
+/// ★ ROUND 5 (S8): the WHOLE part's rows — filament, feel, finish — on the rail's [Model] tab (and
+/// at the top of round 4's one-list panel, FlexibleFacePanel, which the tests still measure).
+struct FlexibleModelRows: View {
+    @ObservedObject var model: FlexibleStageModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: DS.Space.xs) {
             filamentRow
             if model.material?.noPrediction == nil {
                 FlexRow(FlexibleRowCopy.feel, info: FlexibleRowCopy.Info.feel, id: "flexible-row-feel") {
@@ -74,13 +93,6 @@ struct FlexibleFacePanel: View {
                         .accessibilityIdentifier("flexible-row-finish-line")
                 }
             }
-            Divider().overlay(DS.Color.strokeSubtle.color).padding(.vertical, DS.Space.xs)
-            // ★ ROUND 4: the faces set on the main page — tap one and ITS rows open right under it
-            // (verification of D1: they sat below the whole list, off the panel on his project)
-            FlexibleFaceList(model: model, padTarget: $padTarget)
-        }
-        .onAppear {
-            if model.selectedRegion == nil { model.selectedRegion = model.settings.loadedFaces.first?.faceRegionID }
         }
     }
 
@@ -125,6 +137,8 @@ struct FlexibleFaceRows: View {
     @ObservedObject var model: FlexibleStageModel
     let region: Int
     @Binding var padTarget: String?
+    /// ★ ROUND 5 (S8): the folder tab's group — a face not set yet, pressed here, joins it.
+    var joinGroup: Int? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: DS.Space.xs) {
@@ -146,8 +160,9 @@ struct FlexibleFaceRows: View {
     static func dot(model: FlexibleStageModel, region r: Int) -> RGBA {
         guard let f = model.settings.face(r) else { return DS.Color.textTertiary }
         guard f.isLoaded else { return DS.Color.accentCyan }
-        guard model.squeezeGroups.count > 1, let g = model.squeezeGroup(of: r) else { return DS.Color.accentGreen }
-        return FlexibleSqueezeGroups.colour(number: g.number)
+        // ★ ROUND 5 (S1): the group's CHOSEN colour (group 1 is green until he picks another)
+        guard let g = model.squeezeGroup(of: r) else { return DS.Color.accentGreen }
+        return model.groupColour(g)
     }
 
     /// The card's first row: the face's dot and name, as the list row, at its height.
@@ -167,16 +182,19 @@ struct FlexibleFaceRows: View {
                 if v == "loaded" { pressOrAsk(r) } else { model.rest(r) }
             }
             .fixedSize()
-            // ★ NO TRASH FOR A FACE A MAIN-PAGE GROUP HOLDS: the next re-sync would bring it
-            // back (the group is the one truth) — [Rests] is the Flexible page's way out
-            if model.mainPageLoads.canRemove(r) {
-                Button { model.removeFace(r) } label: {
-                    Image(systemName: "trash").font(.system(size: 13)).foregroundStyle(DS.Color.textTertiary.color)
-                        .frame(width: 32, height: 32)
-                }
-                .buttonStyle(.plain)
-                .accessibilityIdentifier("flexible-face-remove")
+            // ★ ROUND 5 (S6, img 3: "All faces should be deletable"): the trash on EVERY face — a
+            // split sector, a face a main-page group holds (it leaves the Flexible setup; the main
+            // page's group is untouched and its re-sync no longer brings it back)
+            Button { model.removeFace(r) } label: {
+                Image(systemName: "trash").font(.system(size: 13)).foregroundStyle(DS.Color.textTertiary.color)
+                    .frame(width: 32, height: 32)
             }
+            .buttonStyle(.plain)
+            .background(GeometryReader { g in
+                Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["faceRemove-\(r)": g.frame(in: .global)])
+            }.allowsHitTesting(false))
+            .accessibilityLabel("Delete \(name(r))")
+            .accessibilityIdentifier("flexible-face-remove")
         }
         .background(askAnchor(r))
         // [Rests] chosen here on a face the main page presses: one line, never hidden
@@ -204,11 +222,11 @@ struct FlexibleFaceRows: View {
             // "10 kg ✎" set the WHOLE group's force (and the main page's) without saying so; the
             // card now says the face's own share only where it differs from the group's force
             // ("5 kg of Top's 10 kg"), with no pencil
-            if let line = Self.weightLine(model: model, region: r) {
+            if let line = Self.weightLine(model: model, region: r) {   // (a share: text — its force is the group's box)
                 FlexRow(line, info: FlexibleRowCopy.Info.weight, id: "flexible-row-weight")
             }
             if fromGroup, let old = model.relinkedWeights[r], let e {
-                Text(FlexibleRowCopy.relinked(oldKg: old, group: e.groupName))
+                Text(FlexibleRowCopy.relinked(oldKg: old, group: e.groupName, unit: model.weightUnit))
                     .font(.system(size: 12, weight: .medium)).foregroundStyle(DS.Color.textSecondary.color)
                     .lineLimit(1)
                     .accessibilityIdentifier("flexible-row-relinked")
@@ -224,11 +242,14 @@ struct FlexibleFaceRows: View {
                 .fixedSize()
             }
             if f.isStampShape { FlexibleFaceStampRows(model: model, region: r, padTarget: $padTarget) }
-            FlexRow(FlexibleRowCopy.deepest(f.deepestMM), info: FlexibleRowCopy.Info.deepest, id: "flexible-row-deepest") {
-                FlexEditPill(key: "deepest-\(r)", title: FlexibleRowCopy.deepestTitle, unit: "mm", value: f.deepestMM,
-                             padTarget: $padTarget) { v in
+            // ★ ROUND 5 (S3): the number in its own box — tap for the keypad, drag up / down
+            let latticeMax = model.stack(r).map { FlexibleDepthPrism.latticeMax($0, pinched: model.pinchedColumns(r)) }
+            FlexRow(FlexibleRowCopy.deepestRow, info: FlexibleRowCopy.Info.deepest, id: "flexible-row-deepest") {
+                FlexNumberBox(key: "deepest-\(r)", title: FlexibleRowCopy.deepestTitle,
+                              spec: FlexibleNumberSpecs.deepest(mm: f.deepestMM, latticeMM: latticeMax),
+                              padTarget: $padTarget, onNote: { model.toast = $0 }) { v in
                     // ★ D2 REVIEW: a pinched face's deepest squish stops at the half its design uses
-                    let lattice = model.stack(r).map { FlexibleDepthPrism.latticeMax($0, pinched: model.pinchedColumns(r)) } ?? v
+                    let lattice = latticeMax ?? v
                     model.edit { s in
                         guard var g = s.face(r) else { return }
                         g.deepestMM = FlexibleDepthPrism.clamp(v, latticeMM: lattice)
@@ -244,6 +265,18 @@ struct FlexibleFaceRows: View {
                     FlexInfoText(String(format: "%.0f × %.0f mm · %d columns, %.1f mm apart · lattice %.1f–%.1f mm deep",
                                         st.uExtentMM, st.vExtentMM, st.columns.count, st.pitchMM, st.latticeMMMin, st.latticeMMMax))
                     if st.side { FlexInfoText("Side face · gyroid only · estimated", warning: true) }
+                }
+            }
+            // ★ ROUND 5 (S3): the curve point showing its × on the part — its squish as a number box
+            if !f.isStampShape, let p = model.curvePoint, p.region == r {
+                let c = p.axis == "y" ? f.curveY : f.curveX
+                if p.index >= 0, p.index < c.y.count {
+                    FlexRow(FlexibleRowCopy.curvePointRow(axis: p.axis), info: FlexibleRowCopy.Info.curvePoint,
+                            id: "flexible-row-curve-point") {
+                        FlexNumberBox(key: "curve-\(r)-\(p.axis)-\(p.index)", title: FlexibleRowCopy.curvePointTitle,
+                                      spec: FlexibleNumberSpecs.curvePoint(mm: c.y[p.index] * f.deepestMM, deepestMM: f.deepestMM),
+                                      padTarget: $padTarget, onNote: { model.toast = $0 }) { v in model.setCurvePoint(p, mm: v) }
+                    }
                 }
             }
         }
@@ -273,7 +306,7 @@ struct FlexibleFaceRows: View {
         guard let f = model.settings.face(r), f.isLoaded else { return nil }
         if let g = model.squeezeGroup(of: r), let force = model.groupForce(g), force.upperBound - force.lowerBound < 0.05,
            abs(force.upperBound - f.weightKg) < 0.05 { return nil }
-        return FlexibleRowCopy.weight(face: f, entry: model.mainPageLoads.entry(r))
+        return FlexibleRowCopy.weight(face: f, entry: model.mainPageLoads.entry(r), unit: model.weightUnit)
     }
 
     @ViewBuilder private func unmarkedRow(_ r: Int) -> some View {
@@ -294,8 +327,9 @@ struct FlexibleFaceRows: View {
     }
 
     /// Press with the main page's weight, or ask for one ("How much weight presses here?").
+    /// ★ ROUND 5 (S8): pressed on a group's folder tab, it joins that group.
     private func pressOrAsk(_ r: Int) {
-        if !model.press(r) { padTarget = "press-\(r)" }
+        if !model.press(r, into: joinGroup) { padTarget = "press-\(r)" }
     }
 
     /// The anchor the "How much weight presses here?" pad pops from. ★ THE FACE IS PRESSED
@@ -304,8 +338,8 @@ struct FlexibleFaceRows: View {
     private func askAnchor(_ r: Int) -> some View {
         Color.clear
             .modifier(FlexPadCommit(key: "press-\(r)", padTarget: $padTarget,
-                                    config: .init(title: FlexibleRowCopy.askWeight, unit: "kg", allowsDecimal: true),
-                                    seed: nil) { v in model.press(r, kg: v) })
+                                    config: .init(title: FlexibleRowCopy.askWeight, unit: model.weightUnit.label, allowsDecimal: true),
+                                    seed: nil) { v in model.press(r, kg: model.weightUnit.toKg(v), into: joinGroup) })
             .allowsHitTesting(false)
     }
 }
@@ -367,31 +401,8 @@ struct FlexibleMorePanel: View {
     }
 }
 
-// MARK: - the edit pill
-
-/// A pencil pill that opens the shared number pad (every numeric input opens a keypad).
-struct FlexEditPill: View {
-    let key: String
-    let title: String
-    let unit: String
-    let value: Double
-    @Binding var padTarget: String?
-    let onValue: (Double) -> Void
-
-    var body: some View {
-        Button { padTarget = key } label: {
-            Image(systemName: "pencil")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(DS.Color.textPrimary.color)
-                .frame(width: 44, height: 32)
-                .background(Capsule().fill(DS.Surface.valuePill.color))
-        }
-        .buttonStyle(.plain)
-        .accessibilityIdentifier("flexible-number-\(key)")
-        .modifier(FlexPadCommit(key: key, padTarget: $padTarget,
-                                config: .init(title: title, unit: unit, allowsDecimal: true), seed: value, commit: onValue))
-    }
-}
+// ★ ROUND 5 (S3, "The pencil buttons go"): round 4's pencil pill (FlexEditPill) is gone — every
+// number is a FlexNumberBox (FlexibleNumberBox.swift).
 
 // MARK: - the number pad, committed ONCE when it closes
 

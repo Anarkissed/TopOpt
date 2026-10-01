@@ -237,7 +237,8 @@ public struct FlexibleMainPlayerSlot: View {
                                                       size: size) {
                 FlexibleSquishPlayer(loop: main.loop, fullLabel: main.fullLabel, width: r.width,
                                      playAllLive: main.playAllLive, noteFor: { main.simNote(playing: $0) },   // ★ G verification: the playing group
-                                     sims: sims, shown: main.shownSimInfo, onPick: { main.pick($0) }, note: note)
+                                     sims: sims, shown: main.shownSimInfo, onPick: { main.pick($0) }, note: note,
+                                     colour: { n in main.model?.groupColour(number: n) ?? FlexibleSqueezeGroups.colour(number: n) })   // ★ S1: his chosen colour
                     .latticeBandChipKeepOut()
                     .position(x: r.midX, y: r.midY)
             }

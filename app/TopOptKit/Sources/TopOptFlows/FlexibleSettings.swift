@@ -170,6 +170,21 @@ public struct FlexibleStageSettings: Codable, Equatable, Hashable, Sendable {
     /// "covered" (FlexibleFinish). nil ⇒ Covered, today's default. It replaces the per-face
     /// "Solid skin" row. OPTIONAL so old projects decode.
     public var finish: String?
+    /// ★ ROUND 5 (S1, his img 1: "The different groups should have different coloured faces on the
+    /// model body, assigned in the settings modal"): each squeeze group's colour, keyed by its
+    /// STORED group number ("1", "2" …) → a FlexibleGroupColour id. A group with no entry takes its
+    /// number's default. DISPLAY ONLY: never part of the lattice's key (`designInputs`).
+    /// OPTIONAL so old projects decode.
+    public var groupColours: [String: String]?
+    /// ★ ROUND 5 (S4, img 2: "Allow for a change of weight input: kg/lb/newtons/etc."): the unit
+    /// every weight box shows — "kg" | "lb" | "N" | "kN" (FlexibleWeightUnit); nil ⇒ kg. Storage
+    /// stays kgf everywhere (ForceModel's D5). DISPLAY ONLY. OPTIONAL so old projects decode.
+    public var weightUnit: String?
+    /// ★ ROUND 5 (S6, img 3: "All faces should be deletable"): faces he DELETED from the Flexible
+    /// setup that a main-page Load / Anchor group still holds — the re-sync (`adopt`) skips them,
+    /// so a deleted face stays deleted. The main-page group itself is untouched. Pressing the face
+    /// again takes it off this list. OPTIONAL so old projects decode.
+    public var removedRegions: [Int]?
 
     public init(materialID: String? = nil, nozzleTempC: Double? = nil, topology: String = "auto",
                 feel: String = "springy", beadsPerWall: Int = 1,
@@ -180,6 +195,16 @@ public struct FlexibleStageSettings: Codable, Equatable, Hashable, Sendable {
         self.feel = feel; self.beadsPerWall = beadsPerWall; self.faces = faces
         self.checkStamps = checkStamps; self.curveConvention = curveConvention
         self.finish = finish
+    }
+
+    /// ★ ROUND 5: the settings WITHOUT the display-only choices (group colours, the weight unit) —
+    /// what the designs and the lattice are built from. A colour or a unit changes the page, never
+    /// the lattice: the lattice's key and the pipeline's comparison read this.
+    public var designInputs: FlexibleStageSettings {
+        var c = self
+        c.groupColours = nil
+        c.weightUnit = nil
+        return c
     }
 
     /// The model-wide finish (nil or an unknown value ⇒ Covered).
@@ -201,4 +226,8 @@ public struct FlexibleStageSettings: Codable, Equatable, Hashable, Sendable {
         faces.removeAll { $0.faceRegionID == region }
         checkStamps.removeAll { $0.faceRegionID == region }
     }
+
+    /// ★ ROUND 5 (S6): is this face deleted from the Flexible setup (a main-page group still holds it)?
+    public func isRemoved(_ region: Int) -> Bool { removedRegions?.contains(region) ?? false }
+
 }

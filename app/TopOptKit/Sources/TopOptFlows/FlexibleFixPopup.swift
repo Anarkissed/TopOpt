@@ -78,8 +78,9 @@ struct FlexibleFixPopup: View {
                 .buttonStyle(.plain)
                 .accessibilityIdentifier("flexible-fix-weight")
                 .modifier(FlexPadCommit(key: "fix-\(r)", padTarget: $padTarget,
-                                        config: .init(title: FlexibleRowCopy.askWeight, unit: "kg", allowsDecimal: true),
-                                        seed: nil) { v in
+                                        config: .init(title: FlexibleRowCopy.askWeight, unit: model.weightUnit.label, allowsDecimal: true),
+                                        seed: nil) { typed in
+                    let v = model.weightUnit.toKg(typed)   // ★ ROUND 5 (S4): typed in the page's unit, stored in kgf
                     if model.settings.face(r)?.isLoaded == true { model.setWeight(r, kg: v) } else { model.press(r, kg: v) }
                     onDone()
                 })
@@ -89,9 +90,9 @@ struct FlexibleFixPopup: View {
                 .buttonStyle(.plain)
                 .accessibilityIdentifier("flexible-fix-press")
                 .modifier(FlexPadCommit(key: "fix-\(r)", padTarget: $padTarget,
-                                        config: .init(title: FlexibleRowCopy.askWeight, unit: "kg", allowsDecimal: true),
+                                        config: .init(title: FlexibleRowCopy.askWeight, unit: model.weightUnit.label, allowsDecimal: true),
                                         seed: nil) { v in
-                    model.press(r, kg: v)
+                    model.press(r, kg: model.weightUnit.toKg(v))
                     onDone()
                 })
         default:

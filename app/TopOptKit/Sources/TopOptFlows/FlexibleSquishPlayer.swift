@@ -192,12 +192,13 @@ public final class FlexibleSquishLoop: ObservableObject {
     /// ★ BATCH B REVIEW: a SHAPE-ONLY lattice ("no squish predicted") ends "As drawn" — a weight
     /// there read as "at 10 kg it squishes this much", the very prediction its label disowns.
     public static let asDrawn = "As drawn"
-    public static func fullLabel(weightsKg: [Double], shapeOnly: Bool = false) -> String {
+    /// ★ ROUND 5 (S4): in the page's weight unit (kg unchanged).
+    public static func fullLabel(weightsKg: [Double], shapeOnly: Bool = false, unit: FlexibleWeightUnit = .kg) -> String {
         if shapeOnly { return asDrawn }
         let w = weightsKg.filter { $0 > 0 }
         guard let first = w.first else { return "Full load" }
-        if w.count == 1 { return FlexibleRowCopy.kgText(first) }
-        if w.allSatisfy({ abs($0 - first) < 0.05 }) { return FlexibleRowCopy.kgText(first) + " each" }
+        if w.count == 1 { return FlexibleRowCopy.weightText(first, unit) }
+        if w.allSatisfy({ abs($0 - first) < 0.05 }) { return FlexibleRowCopy.weightText(first, unit) + " each" }
         return "Full load"
     }
 }
@@ -227,6 +228,9 @@ struct FlexibleSquishPlayer: View {
     var onPick: (String) -> Void = { _ in }
     /// "Group 2 squishes 1.2 of 3.0 mm · firmer wins" — beside the picker, above the capsule.
     var note: String?
+    /// ★ ROUND 5 (S1): a group's colour by its shown number — his CHOSEN colour (the default palette
+    /// when no model is at hand).
+    var colour: (Int) -> RGBA = { FlexibleSqueezeGroups.colour(number: $0) }
 
     /// The group "Play all" plays now (nil: not playing its sims).
     var playingGroup: FlexibleSim? {
@@ -272,10 +276,18 @@ struct FlexibleSquishPlayer: View {
                             .accessibilityIdentifier("flexible-squish-note")
                     }
                 }
+                // ★ S VERIFICATION: the row's DRAWN extent (the picker and the note), so the Settings
+                // page keeps only it clear of the curves — not the empty rest of the row
+                .background(GeometryReader { g in
+                    Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["playerTopRow": g.frame(in: .global)])
+                }.allowsHitTesting(false))
                 .frame(height: Self.topRowHeight)
                 .frame(maxWidth: width, alignment: .leading)
             }
             capsule(inlinePicker: inline && sims.count > 1)
+                .background(GeometryReader { g in
+                    Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["playerCapsule": g.frame(in: .global)])
+                }.allowsHitTesting(false))
         }
         .frame(width: width)
         .accessibilityIdentifier("flexible-squish-player")
@@ -293,7 +305,7 @@ struct FlexibleSquishPlayer: View {
         } label: {
             HStack(spacing: 5) {
                 if case .group(let n)? = (playingGroup ?? shown)?.kind {
-                    Circle().fill(FlexibleSqueezeGroups.colour(number: n).color).frame(width: 8, height: 8)
+                    Circle().fill(colour(n).color).frame(width: 8, height: 8)
                 }
                 Text(pickerLabel)
                     .font(.system(size: 12, weight: .semibold))

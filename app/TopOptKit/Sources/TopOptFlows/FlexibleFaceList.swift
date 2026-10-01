@@ -24,6 +24,11 @@ import TopOptKit
 struct FlexibleFaceList: View {
     @ObservedObject var model: FlexibleStageModel
     @Binding var padTarget: String?
+    /// ★ ROUND 5 (S8): only these faces (a folder tab's — no group headers: the tab is the group);
+    /// nil ⇒ every face under its group's header (round 4's list).
+    var only: [Int]? = nil
+    /// ★ ROUND 5 (S8): the group whose tab this is — a face not set yet, pressed here, joins it.
+    var joinGroup: Int? = nil
 
     /// A row's height: big, obviously a button (the HIG's 44 and then some).
     static let rowHeight: CGFloat = 48
@@ -52,9 +57,11 @@ struct FlexibleFaceList: View {
         let groups = model.squeezeGroups
         return ordered.map { f in
             Row(region: f.faceRegionID,
-                line: FlexibleRowCopy.faceRow(name: model.faceName(f.faceRegionID), pressed: f.isLoaded, kg: f.weightKg),
+                line: FlexibleRowCopy.faceRow(name: model.faceName(f.faceRegionID), pressed: f.isLoaded, kg: f.weightKg,
+                                              unit: model.weightUnit),
                 pressed: f.isLoaded, selected: f.faceRegionID == model.selectedRegion,
-                group: groups.count > 1 ? groups.first { $0.regions.contains(f.faceRegionID) }?.number : nil)
+                // ★ ROUND 5 (S1): its group's number always — the dot wears the group's CHOSEN colour
+                group: groups.first { $0.regions.contains(f.faceRegionID) }?.number)
         }
     }
 
@@ -91,15 +98,23 @@ struct FlexibleFaceList: View {
             } else {
                 FlexRow(FlexibleRowCopy.noFace, info: FlexibleRowCopy.Info.noFace, id: "flexible-row-noface")
             }
-            // ★ D2 REVIEW: each squeeze group's header ("Group 1 · Squeeze [10 kg ✎]"), its faces
-            // right under it — then the resting faces
-            ForEach(Self.sections(model: model)) { section in
-                if let g = section.group {
-                    FlexibleSqueezeGroupHeader(model: model, row: g, padTarget: $padTarget)
+            if let only {
+                // ★ ROUND 5 (S8): a folder tab's faces — the tab is the group (its header is the tab's)
+                let keep = Set(only)
+                ForEach(Self.rows(model: model).filter { keep.contains($0.region) }) { row in item(row) }
+            } else {
+                // ★ D2 REVIEW: each squeeze group's header ("Group 1 · Squeeze [10 kg ✎]"), its faces
+                // right under it — then the resting faces
+                ForEach(Self.sections(model: model)) { section in
+                    if let g = section.group {
+                        FlexibleSqueezeGroupHeader(model: model, row: g, padTarget: $padTarget)
+                    }
+                    ForEach(section.rows) { row in item(row) }
                 }
-                ForEach(section.rows) { row in item(row) }
             }
-            if model.squeezeGroups.count > 1, model.groupsShareMaterial, model.groupMisses.isEmpty {
+            // ★ S VERIFICATION: on a GROUP's tab only (it repeated under [Rests], where no group is)
+            if Self.showsShareNote(only: only, joinGroup: joinGroup),
+               model.squeezeGroups.count > 1, model.groupsShareMaterial, model.groupMisses.isEmpty {
                 Text(FlexibleRowCopy.groupsShare)
                     .font(.system(size: 12, weight: .medium)).foregroundStyle(DS.Color.textSecondary.color)
                     .lineLimit(1).minimumScaleFactor(0.85)
@@ -111,6 +126,10 @@ struct FlexibleFaceList: View {
             Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["faceList": g.frame(in: .global)])
         }.allowsHitTesting(false))
     }
+
+    /// "Groups share material: the firmer one wins" belongs to a group's tab (or round 4's whole
+    /// list) — never the [Rests] tab's faces.
+    static func showsShareNote(only: [Int]?, joinGroup: Int?) -> Bool { only == nil || joinGroup != nil }
 
     /// A face: the selected one open as its card, the others a big row that selects it.
     @ViewBuilder private func item(_ row: Row) -> some View {
@@ -131,7 +150,7 @@ struct FlexibleFaceList: View {
     /// ★ THE SELECTED FACE, OPEN IN PLACE: its rows inside its own row (filled, outlined in the
     /// accent). Its frame reaches the page ("faceCard") so a test can see it on the panel.
     private func card(_ region: Int) -> some View {
-        FlexibleFaceRows(model: model, region: region, padTarget: $padTarget)
+        FlexibleFaceRows(model: model, region: region, padTarget: $padTarget, joinGroup: joinGroup)
             .padding(.leading, DS.Space.m).padding(.trailing, DS.Space.s).padding(.bottom, DS.Space.xs)
             .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(DS.Color.fillSelected.color))
             .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
@@ -148,7 +167,7 @@ struct FlexibleFaceList: View {
     private func label(_ row: Row) -> some View {
         HStack(spacing: DS.Space.s) {
             Circle()
-                .fill((row.pressed ? (row.group.map { FlexibleSqueezeGroups.colour(number: $0) } ?? DS.Color.accentGreen)
+                .fill((row.pressed ? (row.group.map { model.groupColour(number: $0) } ?? DS.Color.accentGreen)
                        : DS.Color.accentCyan).color)
                 .frame(width: 10, height: 10)
             Text(row.line)

@@ -77,9 +77,28 @@ public struct FlexibleStagePage: View {
     /// ★ ROUND 4 (img 1): the panel and the legend fold away.
     @State private var panelMinimized = false
     @State private var legendMinimized = false
-    private var keepOut: [CGRect] {
+    /// ★ ROUND 5 (S9): the settings as they were when the page opened (once the part is open and the
+    /// main page's loads are read in) — "Exit" until something differs, "Save & Exit" after.
+    /// ★ S VERIFICATION: taken as the page APPEARS (an edit while the part is still opening counts);
+    /// once it is open, the open's own read of the main page's loads is applied to it
+    /// (FlexibleStageModel.openedSnapshot) — never re-taken from the settings he may have edited.
+    @State private var opened: FlexibleStageSettings?
+    @State private var openedSettled = false
+    /// ★ ROUND 5 (S2): the overlay's edge (the 3D sim's grid while its field moves the part), the
+    /// field's mesh displacements (cached per overlay and field), and the group that plays.
+    @State private var overlayEdge: Double?
+    @State private var feDents: (key: String, dents: [Float])?
+    @State private var playingNumber: Int?
+    @State private var playingFE = false
+    private var keepOut: [CGRect] { Self.stageKeepOut(frames) }
+    /// The chips', the stamp handle's and the curve editors' keep-outs, in the stage's frame.
+    /// ★ S VERIFICATION: the player as its two DRAWN parts — the capsule and its top row's picker
+    /// and note (the "Group 2 ▾" row made the whole player's width above the capsule a keep-out,
+    /// and a curve's end point hid under its empty right side at 11" landscape).
+    static func stageKeepOut(_ frames: [String: CGRect]) -> [CGRect] {
         guard let st = frames["stage"] else { return [] }
-        return ["panel", "legend", "player"].compactMap { frames[$0]?.offsetBy(dx: -st.minX, dy: -st.minY) }
+        let player = frames["playerCapsule"] != nil ? ["playerTopRow", "playerCapsule"] : ["player"]
+        return (["panel", "legend"] + player).compactMap { frames[$0]?.offsetBy(dx: -st.minX, dy: -st.minY) }
     }
     private let ticker = Timer.publish(every: 1.0 / 30.0, on: .main, in: .common).autoconnect()
     static let squishPeriodS = 2.4
@@ -142,12 +161,23 @@ public struct FlexibleStagePage: View {
             // when the scene and designs settle (batch B review: "blockers surface at once");
             // the main page's pill opens its own fix instead
             prompt = FlexibleFixPrompt(actionSerial: model.actionSerial, popExisting: model.pendingFix == nil)
+            let appeared = model.settings
             model.openScene()
+            // ★ ROUND 5 (S9): what "nothing changed" means — the settings once the part is open
+            // (★ S VERIFICATION: as the page appeared while it is still opening)
+            openedSettled = model.sceneState == .ready
+            opened = openedSettled ? model.settings : appeared
             rebuildOverlay()
             // the main page's pill opened Settings on a fix
             if let f = model.pendingFix { model.pendingFix = nil; present(f) }
         }
         .onChange(of: model.geometry.count) { _ in rebuildOverlay() }
+        // ★ ROUND 5 (S9): a part still opening as the page appeared — "unchanged" is what it opens with:
+        // ★ S VERIFICATION: the page's snapshot WITH the open's read of the main page's loads (an edit
+        // he made while it opened stays a change)
+        .onChange(of: model.sceneState == .ready) { ready in
+            if ready, !openedSettled, let o = opened { opened = model.openedSnapshot(appeared: o); openedSettled = true }
+        }
         .onReceive(ticker) { _ in
             // ★ THE SQUISH (the player's loop): only the scale moves — the displacements and
             // colours are rebuilt when the design changes, never per frame. ★ ROUND 4: no lattice
@@ -246,7 +276,11 @@ public struct FlexibleStagePage: View {
     }
 
     private func rebuildOverlay() {
-        overlay = FlexiblePageChannels.overlay(model: model)
+        // ★ ROUND 5 (S2): cut to the 3D sim's grid while its field moves the part (a big flat
+        // triangle bends with it), as the main page's overlay is
+        overlayEdge = FlexibleSettingsSquish.overlayEdge(model: model)
+        overlay = overlayEdge.map { FlexiblePageChannels.overlay(model: model, maxEdgeMM: $0) } ?? FlexiblePageChannels.overlay(model: model)
+        feDents = nil
         refreshChannels()
     }
 
@@ -262,7 +296,23 @@ public struct FlexibleStagePage: View {
     /// Per-column colours + the dent (FlexiblePageChannels — the page's one source), then the
     /// player's state and the fix pop-up's rule.
     private func refreshChannels() {
-        let c = FlexiblePageChannels.channels(model: model, overlay: overlay, xray: xray, drawnLattice: nil)
+        var c = FlexiblePageChannels.channels(model: model, overlay: overlay, xray: xray, drawnLattice: nil)
+        // ★ ROUND 5 (S1): each pressed face framed in its squeeze group's colour (FlexibleGroupFrames)
+        FlexibleGroupFrames.paint(&c.tints, overlay: overlay, model: model)
+        // ★ ROUND 5 (S2): only the SELECTED face's group squishes — its 3D field when current, else
+        // its faces' columns (FlexibleSettingsSquish)
+        if FlexibleSettingsSquish.overlayEdge(model: model) != overlayEdge { rebuildOverlay(); return }
+        let group = model.playingGroup
+        FlexibleSettingsSquish.startSims(model: model, group: group)
+        let sq = FlexibleSettingsSquish.shown(model: model, overlay: overlay, channels: c, feCache: &feDents)
+        c.dents = sq.dents
+        c.exaggeration = sq.exaggeration
+        if playingNumber != sq.groupNumber || playingFE != sq.fe {
+            let restart = playingNumber != nil
+            playingNumber = sq.groupNumber
+            playingFE = sq.fe
+            if restart, loop.playing { loop.restartFromRest(reduceMotion: reduceMotion) }
+        }
         tints = c.tints
         dents = c.dents
         dentExaggeration = c.exaggeration
@@ -313,7 +363,14 @@ public struct FlexibleStagePage: View {
 
     @ViewBuilder private func player(in size: CGSize) -> some View {
         if dents != nil, let r = playerFrame(size) {
-            FlexibleSquishPlayer(loop: loop, fullLabel: fullLabel, width: r.width)
+            // ★ ROUND 5 (S2): which group plays, in its colour ("● Group 2 ▾"); a pick selects that
+            // group's first face (the page plays the selected face's group)
+            let sims = FlexibleSettingsSquish.playerSims(model: model)
+            FlexibleSquishPlayer(loop: loop, fullLabel: fullLabel, width: r.width,
+                                 sims: sims, shown: sims.first { $0.id == playingNumber.map(FlexibleSim.groupID) },
+                                 onPick: { id in FlexibleSettingsSquish.pick(id, model: model) },
+                                 note: FlexibleSettingsSquish.note(model: model, fe: playingFE),
+                                 colour: { model.groupColour(number: $0) })
                 .background(GeometryReader { g in
                     Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["player": g.frame(in: .global)])
                 }.allowsHitTesting(false))
@@ -334,11 +391,8 @@ public struct FlexibleStagePage: View {
     }
 
     private var fullLabel: String {
-        let shown = model.lattice.map { Set($0.squishedKeys.map(\.region)) }
-        // a calibrate-first filament: the dent is what he drew — "As drawn", never a weight
-        return FlexibleSquishLoop.fullLabel(weightsKg: model.settings.loadedFaces
-            .filter { shown?.contains($0.faceRegionID) ?? true }.map(\.weightKg),
-                                            shapeOnly: model.material?.noPrediction != nil || model.lattice?.shapeOnly == true)
+        // ★ ROUND 5 (S2 / S4): the playing group's, in the page's unit (FlexibleSettingsSquish)
+        FlexibleSettingsSquish.fullLabel(model: model)
     }
 
     // MARK: chrome
@@ -350,22 +404,35 @@ public struct FlexibleStagePage: View {
                     // ★ BATCH B (item 9.3): Exit consults the readiness — blocked ONLY by what truly
                     // stops a lattice, and then it opens the fix instead of leaving
                     let r = model.readiness
+                    // ★ ROUND 5 (S9): "Exit" until something differs from how the page opened (a value —
+                    // undoing back reads "Exit" again); "Save & Exit" after; "Fix 1 thing" while blocked
+                    let modified = FlexibleSettingsExit.modified(model.settings, since: opened)
                     Button {
-                        switch FlexibleExitDecision.decide(model.readiness) {
+                        switch FlexibleSettingsExit.decide(model.readiness, modified: modified) {
                         case .exit:
-                            model.save()
+                            if modified {
+                                model.save()                  // Save & Exit: the main page bakes (Lattice view on)
+                            } else {
+                                model.exitUnchanged = true    // Exit: nothing moves on the main page
+                            }
                             onExit()
                         case .fix(let issue):
                             present(issue)
                         }
                     } label: {
-                        Text(FlexibleExitDecision.title(r))
+                        Text(FlexibleSettingsExit.title(r, modified: modified))
                             .dsStyle(DS.TypeScale.bodyStrong).fontWeight(.semibold)
                             .foregroundStyle(DS.Color.textPrimary.color)
                             .padding(.vertical, 12).padding(.horizontal, DS.Space.xl5)
-                            .background(Capsule().fill((r.isReady ? DS.Color.accent : DS.Color.warning).color))
+                            .background(Capsule().fill((r.isReady || !modified ? DS.Color.accent : DS.Color.warning).color))
                     }
                     .buttonStyle(.plain)
+                    .background(GeometryReader { g in
+                        // (and what it says, for the hosted test: "exitTitle:Save & Exit")
+                        Color.clear.preference(key: FlexibleKeepOutKey.self,
+                                               value: ["exitButton": g.frame(in: .global),
+                                                       "exitTitle:" + FlexibleSettingsExit.title(r, modified: modified): .zero])
+                    }.allowsHitTesting(false))
                     .accessibilityIdentifier("flexible-exit")
                     // the project's own snapshot history: every Flexible setting is undoable (S5)
                     ForEach([(true, "arrow.uturn.backward"), (false, "arrow.uturn.forward")], id: \.1) { undo, icon in
@@ -504,7 +571,8 @@ public struct FlexibleStagePage: View {
                 let r = model.readiness
                 // a failed build, and ★ (D2 review) separate groups that compete, in warning colour
                 let good = r.isReady && !r.buildFailed && r.competing == nil
-                noticePill(r.oneLine,
+                // ★ ROUND 5 (S9): it names the button — "Save & Exit builds…" only once something changed
+                noticePill(FlexibleSettingsExit.readyLine(r.oneLine, modified: FlexibleSettingsExit.modified(model.settings, since: opened)),
                            icon: good ? "checkmark.circle.fill" : "exclamationmark.circle.fill",
                            colour: (good ? FlexibleStageStyle.accentToken : DS.Color.warning).color,
                            fix: r.blocking.first ?? r.competing)

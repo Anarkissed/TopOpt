@@ -77,7 +77,7 @@ public enum FlexiblePageChannels {
         for f in model.settings.faces {
             var c = f.isLoaded ? FlexibleColours.loadedFace : FlexibleColours.restingFace
             if f.isLoaded, groups.count > 1, let g = groups.first(where: { $0.regions.contains(f.faceRegionID) }) {
-                c = FlexibleColours.token(FlexibleSqueezeGroups.colour(number: g.number), FlexibleColours.loadedFace.w)
+                c = FlexibleColours.token(model.groupColour(g), FlexibleColours.loadedFace.w)   // ★ S1: his chosen colour
             }
             regionTint.append((f.faceRegionID, c))
         }

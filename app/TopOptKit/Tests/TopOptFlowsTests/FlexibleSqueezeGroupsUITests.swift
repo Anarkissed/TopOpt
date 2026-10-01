@@ -113,7 +113,7 @@ final class FlexibleSqueezeGroupsUITests: XCTestCase {
             // ★ RE-PINNED (D2 review): the move makes the top share the sides' firmer material — the
             // pop-up opens at once and selects top A; [Keep apart] closes it, face 3's card reopens
             // under group 2's header (FlexibleSqueezeGroupsReviewUITests pins the pop-up itself)
-            XCTAssertTrue(h.pumpUntil(60) { self.h.local(host, "fix-keep-apart") != nil }, "\(tag): the pop-up opens")
+            XCTAssertTrue(h.pumpUntil(180) { self.h.local(host, "fix-keep-apart") != nil }, "\(tag): the pop-up opens")   // (180 s: 60 s missed under a load average of 45)
             let keep = try XCTUnwrap(h.local(host, "fix-keep-apart"))
             h.click(host, CGPoint(x: keep.midX, y: keep.midY))
             XCTAssertTrue(h.pumpUntil(3) { self.h.local(host, "fix-keep-apart") == nil })
@@ -126,13 +126,17 @@ final class FlexibleSqueezeGroupsUITests: XCTestCase {
             XCTAssertEqual(rows.map(\.line), ["Group 1 · Squeeze", "Group 2 · Squeeze"])
             XCTAssertEqual(rows.map(\.value), ["10 kg", "10 kg"])
             XCTAssertEqual(m.squeezeGroups.map { m.groupLine($0) }, ["Group 1 · Top A + Top B · Squeeze 10 kg", "Group 2 · Face 3 + Face 5 · Squeeze 10 kg"])
-            let r1 = try XCTUnwrap(h.local(host, "groupRow-1")), r2 = try XCTUnwrap(h.local(host, "groupRow-2"))
-            // ★ RE-PINNED (D2 review): group 1's header carries its one warning line (it will squish
-            // less than drawn once the sides' firmer material is built)
-            XCTAssertLessThanOrEqual(r1.height, rows[0].miss == nil ? 50 : 68, "\(tag): group 1 is ONE line (and its miss)")
-            XCTAssertLessThanOrEqual(r2.height, 50, "\(tag): group 2 is ONE line")
+            // ★ RE-PINNED (round 5, S8 — his img 3: "The groups should be separate folders"): each group
+            // is its own FOLDER TAB on the rail; the open tab shows ITS header (its name, Squeeze [box],
+            // Colour), and the other group's header is not in the list (D2 listed both)
+            let g2 = try XCTUnwrap(m.squeezeGroup(of: 3))
+            XCTAssertEqual(m.rail, .group(g2.id), "\(tag): face 3's tab is open")
+            XCTAssertNotNil(h.local(host, "flexible-rail-group-1"), "\(tag): group 1's tab is on the rail")
+            XCTAssertNotNil(h.local(host, "flexible-rail-group-2"), "\(tag): group 2's tab is on the rail")
+            let r2 = try XCTUnwrap(h.local(host, "groupRow-2"), "\(tag): the open tab's header")
+            XCTAssertNil(h.local(host, "groupRow-1"), "\(tag): the other group's header is on its own tab")
             XCTAssertTrue(m.groupsShareMaterial, "the top's and the sides' columns cross his pad")
-            report.append(String(format: "%@: + New at (%.0f, %.0f) → 2 groups · rows %.0f pt / %.0f pt", tag, chips.maxX - 22, chips.midY, r1.height, r2.height))
+            report.append(String(format: "%@: + New at (%.0f, %.0f) → 2 groups · group 2's tab header %.0f pt", tag, chips.maxX - 22, chips.midY, r2.height))
             // group 2's × (the row may sit under the fold: scroll it in by selecting its face)
             let x = try XCTUnwrap(h.local(host, "groupRemove-2"))
             if let v = h.local(host, "panelScroll"), x.minY >= v.minY, x.maxY <= v.maxY {
@@ -261,7 +265,9 @@ final class FlexibleSqueezeGroupsUITests: XCTestCase {
         let slot = try FlexibleSource.code("FlexibleMainStatusPill.swift")
         XCTAssertTrue(slot.contains("let size = FlexibleSquishPlayer.size(picker: sims.count > 1, note: note != nil)"))
         XCTAssertTrue(slot.contains("size: size) {"))
-        XCTAssertTrue(slot.contains("sims: sims, shown: main.shownSimInfo, onPick: { main.pick($0) }, note: note)"))
+        // ★ RE-PINNED (round 5, S1): the slot also hands the player his chosen group colours
+        XCTAssertTrue(slot.contains("sims: sims, shown: main.shownSimInfo, onPick: { main.pick($0) }, note: note,"))
+        XCTAssertTrue(slot.contains("colour: { n in main.model?.groupColour(number: n) ?? FlexibleSqueezeGroups.colour(number: n) })"))
     }
 }
 #endif

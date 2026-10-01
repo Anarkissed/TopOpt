@@ -194,7 +194,17 @@ extension FlexibleStageModel {
     @discardableResult
     public func newGroup(with region: Int) -> Int? {
         var s = settings
+        // ★ ROUND 5 (S1): the new group wears the first colour no group wears — STORED, so it keeps
+        // it when an earlier group goes and it is renumbered
+        let colour = FlexibleSqueezeGroups.freeColour(in: s, forNumber: squeezeGroups.count + 1)
         guard let n = FlexibleSqueezeGroups.newGroup(with: region, hand: hand(of: region), in: &s) else { return nil }
+        if let g = FlexibleSqueezeGroups.groups(s).first(where: { $0.number == n }) {
+            var map = s.groupColours ?? [:]
+            map[String(g.id)] = colour.rawValue
+            // ★ S VERIFICATION: normal form — its number's own colour needs no entry (`normalise`
+            // carries what it is shown in through a renumber either way)
+            s.groupColours = FlexibleSqueezeGroups.canonical(map, groups: FlexibleSqueezeGroups.groups(s))
+        }
         actionSerial += 1
         edit { $0 = s }
         return n

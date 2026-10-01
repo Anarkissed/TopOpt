@@ -63,7 +63,14 @@ final class FlexibleRowCopyTests: XCTestCase {
                   // ★ round 4 (D1): the face list, the finish and the Stamp shape's rows
                   FlexibleRowCopy.faceRow(name: FlexibleRowCopy.faceName(sector: longGroup, face: 1), pressed: true, kg: 123.4),
                   FlexibleRowCopy.faceRow(name: "Face 12", pressed: false, kg: 0), FlexibleRowCopy.finish,
-                  FlexibleRowCopy.stamp(name: longGroup), FlexibleRowCopy.stampSize(widthMM: 1234.5, lengthMM: 987.6),
+                  FlexibleRowCopy.stamp(name: longGroup),
+                  // ★ RE-PINNED (batch S verification): "Width · 20 mm long" beside the width's box is
+                  // gone — Width and Length are two rows, each with its own box
+                  FlexibleRowCopy.stampSizeRow, FlexibleRowCopy.stampLengthRow,
+                  FlexibleRowCopy.newGroupRow(names: [longGroup, longGroup, longGroup], number: 12),
+                  FlexibleRowCopy.relinked(oldKg: 123.4, group: longGroup, unit: .kN),
+                  FlexibleRowCopy.settingsColumnEdited, FlexibleRowCopy.settingsColumnNoLattice,
+                  FlexibleRowCopy.settingsColumnRunning, FlexibleRowCopy.settingsColumnFailed,
                   FlexibleRowCopy.stampTurn(270), FlexibleRowCopy.stampPress, FlexibleRowCopy.stampOffFace(1234.56)]
         for code in ["temperature_not_tested", "topology_no_data", "honeycomb_side_stack", "too_few_rows", "calibrate_first", "too_soft"] {
             lines.append(FlexibleRowCopy.faceWarning(refusalCode: code, refusalReason: String(repeating: "a long reason ", count: 9),
@@ -135,7 +142,8 @@ final class FlexibleRowCopyTests: XCTestCase {
     /// temperat…" and "Honeyco…" although both lines passed the 44-character rule.
     @MainActor
     func testEveryRowFitsThePanelInPoints() {
-        let content: CGFloat = 400 - 2 * DS.Space.ml          // FlexibleStagePage.panel
+        let content: CGFloat = FlexibleSettingsPanel.contentWidth   // ★ RE-PINNED (round 5, S8): the tab beside the rail
+        XCTAssertEqual(content, 400 - 2 * DS.Space.ml, "round 4's row width, kept beside the rail")
         let chips: [(String, [(id: String, label: String)])] = [
             (FlexibleRowCopy.feel, FlexibleRowCopy.feelOptions),
             ("Top A", FlexibleRowCopy.roleOptions),

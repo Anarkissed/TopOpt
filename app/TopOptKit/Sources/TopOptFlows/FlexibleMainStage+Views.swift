@@ -141,6 +141,7 @@ extension FlexibleMainStage {
             let first = fe.sequence.first.map { fe.fields[$0].simID }
             composed = FlexibleMainTints.compose(base: c.tints, overlay: overlay, part: project.viewerMesh, heat: heat,
                                                  roles: roles, stress: stressOf(first), ghost: xray ? FlexibleColours.ghost : nil)
+            if let m = model { FlexibleGroupFrames.paint(&composed, overlay: overlay, model: m) }   // ★ S1: the group frames in every view (Stress too)
             // ★ BATCH G VERIFICATION: "Play all" — each group's own colours, composed the same way; the
             // renderer swaps them in with the group's field (FlexibleFETints)
             var per: [String: [Float]] = [:]
@@ -155,6 +156,10 @@ extension FlexibleMainStage {
                     per[id] = FlexibleMainTints.compose(base: base, overlay: overlay, part: project.viewerMesh, heat: heat,
                                                         roles: roles, stress: stressOf(id), ghost: xray ? FlexibleColours.ghost : nil)
                 }
+            }
+            // ★ S1 (merge): each Play all turn wears the group frames too
+            if let m = model {
+                for id in Array(per.keys) { FlexibleGroupFrames.paint(&per[id], overlay: overlay, model: m) }
             }
             feTintBox.set(per)
         }

@@ -161,7 +161,7 @@ final class FlexibleSettingsVerifyD1Tests: XCTestCase {
         let panel = try FlexibleSource.code("FlexibleFacePanel.swift")
         XCTAssertTrue(panel.contains("FlexibleFinishSwatch(finish: finish)"), "the panel draws it, under the chips")
         // ★ the picture and its line fit the panel; beside the chips it cut "Finish" to "Fin…"
-        let content = FlexibleSettingsPanel.width - 2 * DS.Space.ml
+        let content = FlexibleSettingsPanel.contentWidth   // ★ RE-PINNED (round 5, S8): the tab beside the rail
         for f in FlexibleFinish.allCases {
             let line = FlexibleRowCopy.finishPreviewOnly(f) ?? FlexibleRowCopy.finishLine(f)
             XCTAssertLessThanOrEqual(line.count, FlexibleRowCopy.maxChars, line)
