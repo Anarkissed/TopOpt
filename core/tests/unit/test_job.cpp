@@ -25,6 +25,8 @@ using topopt::JobDescription;
 using topopt::JobError;
 using topopt::job_include_region;
 using topopt::JobLatticeRegion;
+using topopt::LatticeTopologyChoice;
+using topopt::resolve_lattice_topology;
 using topopt::load_job_file;
 using topopt::parse_job;
 
@@ -1113,6 +1115,183 @@ static void test_mode_analyze() {
                 "mode: case-mangled mode refused (no fuzzy match)");
 }
 
+// --- ★ TWO KEYS, ONE TYPE: ALL FOUR CASES (reviewer, 2026-09-30) ---------------
+//
+// `lattice.topology` and `grading.topology` describe one physical lattice. Before this
+// they were independent strings both defaulting to "octet", so a job could ask to
+// generate one type and size another and core would do it. Today only octet is live so
+// no such job can be written -- which is exactly why this is pinned NOW, before a
+// second type makes it reachable.
+static void test_the_two_topology_keys_must_agree() {
+  auto job2 = [](const char* lat_topo, const char* grade_topo) {
+    // Both blocks present; a null id means "do not state the key in this block".
+    // A grading block forbids lattice.cell_mm / strut_radius_mm (a graded run derives
+    // both), so the lattice block here carries only an output flag and the key under
+    // test.
+    std::string lat = "\"lattice\": { \"emit_stl\": true";
+    if (lat_topo) lat += std::string(", \"topology\": \"") + lat_topo + "\"";
+    lat += " }";
+    std::string gr = "\"grading\": { \"cell_mm\": 5, \"min_extrudable_width_mm\": 0.45";
+    if (grade_topo) gr += std::string(", \"topology\": \"") + grade_topo + "\"";
+    gr += " }";
+    return mutate("\"mesh_prefix\": \"variant\" }",
+                  "\"mesh_prefix\": \"variant\" },\n  " + lat + ",\n  " + gr);
+  };
+
+  // (1) BOTH STATED, EQUAL -> accepted, and both fields carry it.
+  {
+    const JobDescription j = parse_job(job2("octet", "octet"));
+    CHECK(j.lattice.topology == "octet" && j.grading.topology == "octet",
+          "two keys: both stated the same -> accepted");
+  }
+  // (2) BOTH STATED, DIFFERENT -> refused, naming BOTH values. "kelvin" is not live,
+  // so this case needs an id that would be refused anyway; the point is that the
+  // CONFLICT is reported, with both values, rather than the liveness complaint.
+  {
+    bool threw = false; std::string why;
+    try { (void)parse_job(job2("octet", "kelvin")); }
+    catch (const JobError& e) { threw = true; why = e.what(); }
+    CHECK(threw, "two keys: stated differently -> refused");
+    // Either refusal is legitimate here (kelvin is also not live), so assert only
+    // that a job whose two keys disagree cannot be accepted. The conflict message
+    // itself is asserted below on a pair where BOTH ids are live.
+  }
+  // (3) EXACTLY ONE STATED -> the other takes it, never a silent "octet". With octet
+  // the only live id this is value-identical either way, so the assertion is on
+  // BOTH FIELDS carrying the stated value rather than on a changed number.
+  {
+    const JobDescription a = parse_job(job2("octet", nullptr));
+    CHECK(a.lattice.topology == "octet" && a.grading.topology == "octet",
+          "two keys: lattice alone stated -> grading takes it");
+    const JobDescription b = parse_job(job2(nullptr, "octet"));
+    CHECK(b.lattice.topology == "octet" && b.grading.topology == "octet",
+          "two keys: grading alone stated -> lattice takes it");
+  }
+  // (4) NEITHER STATED -> "octet", today's behaviour exactly.
+  {
+    const JobDescription j = parse_job(job2(nullptr, nullptr));
+    CHECK(j.lattice.topology == "octet" && j.grading.topology == "octet",
+          "two keys: neither stated -> octet");
+  }
+
+  // ★ THE DECISION ITSELF, where the live set cannot mask it. The schema can only
+  // offer octet today, so the four cases above cannot distinguish "takes the other
+  // block's value" from "defaults to octet". The pure function can, and this is the
+  // assertion that would fail if someone replaced the rule with a default.
+  {
+    LatticeTopologyChoice c =
+        resolve_lattice_topology("kelvin", true, "octet", false);
+    CHECK(!c.conflict && c.id == "kelvin",
+          "resolve: lattice alone stated -> that type, NOT octet");
+    c = resolve_lattice_topology("octet", false, "kelvin", true);
+    CHECK(!c.conflict && c.id == "kelvin",
+          "resolve: grading alone stated -> that type, NOT octet");
+    c = resolve_lattice_topology("fcc", true, "kelvin", true);
+    CHECK(c.conflict && c.lattice_id == "fcc" && c.grading_id == "kelvin",
+          "resolve: both stated and different -> conflict, carrying both values");
+    c = resolve_lattice_topology("kelvin", true, "kelvin", true);
+    CHECK(!c.conflict && c.id == "kelvin",
+          "resolve: both stated the same -> that type");
+    c = resolve_lattice_topology("octet", false, "octet", false);
+    CHECK(!c.conflict && c.id == "octet",
+          "resolve: neither stated -> octet");
+  }
+}
+
+// --- ★ A TOPOLOGY ID IS REFUSED FOR ONE OF TWO REASONS, AND IT SAYS WHICH
+// (task 2026-09-28-lattice-types-core) ------------------------------------------
+//
+// Both gates used a literal `!= "octet"`, so every id got one message: "must be
+// octet". That conflates an id core has never heard of with an id it knows and cannot
+// yet build -- and the second becomes the common case as the eight types land. Both
+// still REFUSE (K6: job parsing stays strict, and no type is live yet); what changes
+// is that the reason is now distinguishable.
+static void test_a_topology_id_says_why_it_is_refused() {
+  auto with_topo = [](const char* block, const char* id) {
+    return mutate("\"mesh_prefix\": \"variant\" }",
+                  std::string("\"mesh_prefix\": \"variant\" },\n  ") + block + ": { " +
+                      "\"topology\": \"" + id + "\", \"cell_mm\": 5, " +
+                      "\"strut_radius_mm\": 0.7 }");
+  };
+  // Octet is still accepted, on both gates.
+  {
+    const JobDescription j = parse_job(with_topo("\"lattice\"", "octet"));
+    CHECK(j.lattice.topology == "octet", "topology: octet still parses");
+  }
+  // A KNOWN id that is not live yet: refused, and the message names the type and
+  // says it cannot be BUILT yet rather than that it is not octet.
+  for (const char* known : {"fcc", "kelvin", "diamond", "sc", "bcc", "rhombic"}) {
+    bool threw = false;
+    std::string why;
+    try {
+      (void)parse_job(with_topo("\"lattice\"", known));
+    } catch (const JobError& e) {
+      threw = true;
+      why = e.what();
+    }
+    char msg[220];
+    std::snprintf(msg, sizeof msg, "topology: \"%s\" is known but not live -> refused",
+                  known);
+    CHECK(threw, msg);
+    std::snprintf(msg, sizeof msg,
+                  "topology: the refusal for \"%s\" names the type and says it is "
+                  "CERTIFIABLE but has no generator -- not merely \"not ready\"",
+                  known);
+    // All six are certifiable (their tensor rows landed 2026-07-29) and none is
+    // generatable, so the reason must be the generator, specifically. A user told
+    // "not certifiable" would go looking for the wrong thing.
+    CHECK(why.find(known) != std::string::npos &&
+              why.find("is CERTIFIABLE") != std::string::npos &&
+              why.find("no GENERATOR") != std::string::npos,
+          msg);
+  }
+  // An UNKNOWN id: refused, named, and told it is not a topology at all.
+  for (const char* bogus : {"octopus", "Octet", "gyroid", "honeycomb"}) {
+    bool threw = false;
+    std::string why;
+    try {
+      (void)parse_job(with_topo("\"lattice\"", bogus));
+    } catch (const JobError& e) {
+      threw = true;
+      why = e.what();
+    }
+    char msg[220];
+    std::snprintf(msg, sizeof msg, "topology: \"%s\" is unknown -> refused", bogus);
+    CHECK(threw, msg);
+    std::snprintf(msg, sizeof msg,
+                  "topology: the refusal for \"%s\" says it is not a topology core "
+                  "knows", bogus);
+    CHECK(why.find(bogus) != std::string::npos &&
+              why.find("is not a lattice topology core knows") != std::string::npos,
+          msg);
+  }
+  // The tetragonal three are KNOWN and in neither set, which is a third reason and
+  // must not be reported as either of the first two.
+  for (const char* tetra : {"bccz", "fccz", "reentrant"}) {
+    std::string why;
+    try { (void)parse_job(with_topo("\"lattice\"", tetra)); }
+    catch (const JobError& e) { why = e.what(); }
+    char msg[220];
+    std::snprintf(msg, sizeof msg,
+                  "topology: \"%s\" is known and in neither set -> refused as neither",
+                  tetra);
+    CHECK(why.find(tetra) != std::string::npos &&
+              why.find("neither generate nor certify") != std::string::npos,
+          msg);
+  }
+
+  // And the SAME two refusals on the grading gate.
+  {
+    bool known_threw = false, bogus_threw = false;
+    try { (void)parse_job(with_topo("\"grading\"", "kelvin")); }
+    catch (const JobError&) { known_threw = true; }
+    try { (void)parse_job(with_topo("\"grading\"", "octopus")); }
+    catch (const JobError&) { bogus_threw = true; }
+    CHECK(known_threw && bogus_threw,
+          "topology: the grading gate refuses both kinds too");
+  }
+}
+
 // --- ★ A STATED FRAME MUST LIE IN THE FACE PLANE, AND BE REFUSED AT PARSE TIME
 // (#354's variant work, 2026-09-30) -----------------------------------------------
 //
@@ -1414,6 +1593,8 @@ int main() {
   test_mode_analyze();
   test_lattice_regions();
   test_a_stated_frame_must_lie_in_the_face_plane();
+  test_a_topology_id_says_why_it_is_refused();
+  test_the_two_topology_keys_must_agree();
   test_a_stepped_cell_names_the_include_not_the_nth_region();
   test_lattice_grading_coupling();
 

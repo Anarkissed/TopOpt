@@ -1977,6 +1977,32 @@ public enum TopOptKit {
     /// silently never being asked for. The lattice block is appended to it.
     static let latticeProbeBaseJob = #"{"model": "part.step", "material": "PLA", "mode": "minimize_plastic", "resolution": 48, "fixture_faces": [{"kind": "cylindrical", "radius_mm": 2.5}], "gravity": {"direction": [0.0, 0.0, -1.0], "magnitude_mm_s2": 9810.0}, "ladder": [0.7, 0.5, 0.3], "margin_stop": 1.5, "simp": {"max_iterations": 30}, "output": {"report": "report.json", "mesh_format": "3mf", "mesh_prefix": "variant"}}"#
 
+    /// ★★ LATTICE TYPES U1 (2026-10-01): does the linked core's JOB PARSER accept this topology
+    /// id in BOTH blocks a run sends it in (`lattice.topology` and `grading.topology`)? A type is
+    /// offered only when core can build it, certify it, AND run its job — today core's parser
+    /// refuses every id but "octet" (job.cpp:1229-1231, 1735-1737), so a type core lights up
+    /// without the parser is never offered with a job that dies. Two whole-job parses through
+    /// core's own schema; octet is the control — if octet itself is refused the probe has broken,
+    /// and it says so by refusing every id (never offering what it cannot confirm). Memoised.
+    public static func jobSchemaAcceptsTopology(_ id: String) -> Bool {
+        topologySchemaLock.lock(); defer { topologySchemaLock.unlock() }
+        if let v = topologySchemaMemo[id] { return v }
+        func accepts(_ t: String) -> Bool {
+            var lattice = latticeProbeBaseJob
+            lattice.removeLast()
+            lattice += #", "lattice": {"topology": ""# + t + #"", "cell_mm": 3.0, "strut_radius_mm": 0.4}}"#
+            let grading = latticeProbeBaseJob.replacingOccurrences(
+                of: #""output":"#,
+                with: #""grading": {"topology": ""# + t + #"", "min_extrudable_width_mm": 0.4, "cell_mm": 3.0}, "output":"#)
+            return jobSchemaError(Data(lattice.utf8)) == nil && jobSchemaError(Data(grading.utf8)) == nil
+        }
+        let v = accepts("octet") && accepts(id)
+        topologySchemaMemo[id] = v
+        return v
+    }
+    private static let topologySchemaLock = NSLock()
+    nonisolated(unsafe) private static var topologySchemaMemo: [String: Bool] = [:]
+
     private static func latticeProbeJob(key: String) -> Data {
         var text = latticeProbeBaseJob
         text.removeLast()   // the closing brace

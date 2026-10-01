@@ -70,6 +70,8 @@ public struct LatticeSetupWizard: View {
     /// ★ §5 — which numeric field has the keypad open. One at a time, keyed by the
     /// field's id, so every number on this page types as well as drags.
     @State private var numberPadField: String?
+    /// ★ lattice types U1: a greyed type chip, tapped, says why it can't be picked (core's facts)
+    @State private var typeReason: String?
 
     /// ★ "Check sizes" (final contract 2026-09-05): submits the re-lattice job with the
     /// candidate list and returns core's `organic_probe.json` answer. nil ⇒ no worker
@@ -2452,12 +2454,24 @@ public struct LatticeSetupWizard: View {
     /// per-appearance shuffling, nothing that moves a chip out from under a finger.
     /// The row still SCROLLS — there are more types than fit 348 pt — it just
     /// starts from the selected one instead of from whatever happens to be first.
+    /// ★★ LATTICE TYPES U1/U2 (2026-10-01): every type, in the round's order, from core's facts
+    /// (`LatticeTypeCatalog`) — offered ones selectable, the rest greyed; a greyed chip, tapped,
+    /// says why in a line under the row and never selects.
     private var typeRow: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: DS.Space.xs) {
-                ForEach(LatticeType.family, id: \.id) { t in typeChip(t) }
+        let entries = LatticeTypeCatalog.entriesFromCore()
+        // ★ REVIEW 2026-10-01: a SAVED type core can't run says so at once — its run would carry
+        // no lattice — not only when its chip is tapped. The offered chip beside it is the fix.
+        let stale = LatticeTypeCatalog.selectionRefusal(model.topologyID, in: entries)
+        return VStack(alignment: .leading, spacing: DS.Space.xs) {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: DS.Space.xs) {
+                    ForEach(entries) { e in typeChip(e, fixesStale: e.offered && stale != nil) }
+                }
+                .padding(.trailing, DS.Space.xs)
             }
-            .padding(.trailing, DS.Space.xs)
+            if let why = typeReason ?? stale {
+                shortNote(why).accessibilityIdentifier("wizard-type-reason")
+            }
         }
     }
 
@@ -2522,41 +2536,50 @@ public struct LatticeSetupWizard: View {
             && !TopOptKit.organicStructuralCertificationWired
     }
 
-    private func typeChip(_ t: LatticeType) -> some View {
+    private func typeChip(_ e: LatticeTypeEntry, fixesStale: Bool) -> some View {
         // ★ ONE selection in the Type group. Under Organic the topology is still
         // octet by core's law, but that is not the user's pick — showing "Octet
         // truss" lit beside a lit "Organic" read as two selections (on-device,
         // 2026-09-02 21:11). Tapping any type chip still leaves organic.
         let organicOn = model.cellTransition == .organicGrade
-        let on: Bool = (model.topologyID == t.id) && !organicOn
-        // ★ ONLY THE OCTET TRUSS FOR NOW (his 2026-09-18: "Grey out every other
-        // lattice type but Octet Truss"): the preview's density law, quilt ceiling
-        // and the octree bake are measured for the octet alone.
-        let offered = Self.offeredTypeIDs.contains(t.id)
-        // ★ GREYED while Organic is on (item 5): the switch below is the way back.
-        let ink: Color = ((organicOn || !offered) ? DS.Color.textQuaternary
-                          : on ? DS.Color.textPrimary : DS.Color.textTertiary).color
-        let fill: Color = on ? DS.Color.fillSelected.color : Color.clear
+        let on: Bool = (model.topologyID == e.id) && !organicOn
+        // ★★ THE OFFERED SET IS CORE'S (lattice types U1, 2026-10-01): build ∩ certify ∩ the job
+        // parser accepts it — the octet alone until core lights a type (it lifted his 2026-09-18
+        // "grey out every type but Octet Truss" type by type, M8).
+        let offered = e.offered
+        // ★ GREYED while Organic is on (item 5): the switch below is the way back — EXCEPT the
+        // offered chip that fixes a saved type core can't run (review 2026-10-01): under Organic
+        // that type still rides the job and drops the lattice, so the fix stays one tap, and the
+        // tap leaves Organic on (it only puts back the octet core's law runs organic on).
+        let inert = organicOn && !fixesStale
         return Button {
-            guard !organicOn, offered else { return }
-            model.setTopology(t.id)
+            guard !inert else { return }
+            guard offered else { typeReason = LatticeTypeCatalog.reasonLine(e); return }
+            typeReason = nil
+            if organicOn { model.topologyID = e.id } else { model.setTopology(e.id) }
         } label: {
-            Text(t.displayName)
-                .font(.system(size: 11, weight: .bold))
-                .lineLimit(1)
-                .fixedSize()                     // ★ §11(b): never truncate a type
-                .foregroundStyle(ink)
-                .padding(.vertical, 6)
-                .padding(.horizontal, DS.Space.sm)
-                .background(Capsule().fill(fill))
-                .overlay(Capsule().strokeBorder(DS.Color.strokeSubtle.color, lineWidth: 1))
+            Self.typeChipLabel(e.displayName, on: on, greyed: inert || !offered)
         }
         .buttonStyle(.plain)
-        .disabled(organicOn || !offered)
-        .accessibilityIdentifier("wizard-type-\(t.id)")
+        .disabled(inert)
+        .accessibilityHint(e.reason ?? "")
+        .accessibilityIdentifier("wizard-type-\(e.id)")
     }
-    /// The lattice types a user may pick today. The rest stay visible and greyed.
-    static let offeredTypeIDs: Set<String> = ["octet"]
+    /// One type chip's look — the app's own view, so the evidence renders exactly it.
+    static func typeChipLabel(_ name: String, on: Bool, greyed: Bool) -> some View {
+        Text(name)
+            .font(.system(size: 11, weight: .bold))
+            .lineLimit(1)
+            .fixedSize()                     // ★ §11(b): never truncate a type
+            .foregroundStyle((greyed ? DS.Color.textQuaternary : on ? DS.Color.textPrimary : DS.Color.textTertiary).color)
+            .padding(.vertical, 6)
+            .padding(.horizontal, DS.Space.sm)
+            .background(Capsule().fill(on ? DS.Color.fillSelected.color : Color.clear))
+            .overlay(Capsule().strokeBorder(DS.Color.strokeSubtle.color, lineWidth: 1))
+    }
+    /// The lattice types a user may pick today — core's (`LatticeTypeCatalog`). The rest stay
+    /// visible and greyed, with core's reason.
+    static var offeredTypeIDs: Set<String> { LatticeTypeCatalog.offeredIDs }
 
     /// ★ §9(a) — THE SWEEP WINDOW: two ends, both typed, plus what the sweep
     /// actually keys on and what a too-narrow window will do.

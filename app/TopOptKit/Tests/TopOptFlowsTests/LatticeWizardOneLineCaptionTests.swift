@@ -35,11 +35,20 @@ final class LatticeWizardOneLineCaptionTests: XCTestCase {
         }
     }
 
+    /// ★ Re-pinned for lattice types U1 (2026-10-01): the offered set is CORE's (build ∩ certify ∩
+    /// the job parser) — the octet alone today, exactly as his 2026-09-18 ruling had it, now lifted
+    /// type by type (M8). A type not offered still never selects: its tap only says why.
     func testOnlyTheOctetTrussIsOffered() {
         XCTAssertEqual(LatticeSetupWizard.offeredTypeIDs, ["octet"])
         let s = src
-        XCTAssertTrue(s.contains(".disabled(organicOn || !offered)"), "★ a type not offered is disabled")
-        XCTAssertTrue(s.contains("guard !organicOn, offered else { return }"), "★ …and a tap on it does nothing")
-        XCTAssertTrue(LatticeType.family.count > 1, "the others stay VISIBLE (greyed), not removed")
+        XCTAssertTrue(s.contains("guard offered else { typeReason = LatticeTypeCatalog.reasonLine(e); return }"),
+                      "★ a tap on a type not offered never selects — it says why")
+        let bcc = LatticeTypeCatalog.entriesFromCore().first { $0.id == "bcc" }!
+        XCTAssertEqual(LatticeTypeCatalog.reasonLine(bcc), "BCC: Core can’t build this type yet.", "…in one sentence")
+        // only Organic disables the chips outright — except the offered chip that fixes a saved
+        // type core can't run (review 2026-10-01, `LatticeStaleTypeTests`)
+        XCTAssertTrue(s.contains("let inert = organicOn && !fixesStale") && s.contains(".disabled(inert)"),
+                      "only Organic disables the chips outright")
+        XCTAssertTrue(LatticeTypeCatalog.order.count > 1, "the others stay VISIBLE (greyed), not removed")
     }
 }

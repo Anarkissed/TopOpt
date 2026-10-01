@@ -899,16 +899,28 @@ public struct LatticePage: View {
 
     // MARK: topology pane (B0 — core truth only; L14 — one line, one footnote)
 
+    /// ★★ LATTICE TYPES U1/U2 (2026-10-01): the same catalog the Lattice stage's chips read —
+    /// every type in the round's order; only an offered one can be picked; a greyed row carries a
+    /// mark, and ONE footnote per distinct reason says why (L14: never a per-row sentence).
+    private var topologyEntries: [LatticeTypeEntry] { LatticeTypeCatalog.entriesFromCore() }
+    static let footnoteMarks = ["*", "†", "‡", "§", "¶"]
+    /// The distinct reasons in row order, each with its mark.
+    static func footnotes(_ entries: [LatticeTypeEntry]) -> [(mark: String, reason: String)] {
+        var out: [(mark: String, reason: String)] = []
+        for e in entries { if let r = e.reason, !out.contains(where: { $0.reason == r }) {
+            out.append((footnoteMarks[min(out.count, footnoteMarks.count - 1)], r)) } }
+        return out
+    }
+
     private var topologyPane: some View {
-        VStack(spacing: 7) {
-            ForEach(topologyRows) { row in
-                topologyRowButton(row)
+        let entries = topologyEntries
+        let notes = Self.footnotes(entries)
+        return VStack(spacing: 7) {
+            ForEach(entries) { e in
+                topologyRowButton(e, mark: notes.first { $0.reason == e.reason }?.mark)
             }
-            // L14: ONE footnote for every asterisked row — never a per-row
-            // "certifies · no geometry yet" sentence. The split still comes from
-            // core's two sets (B0); this is presentation only.
-            if topologyRows.contains(where: { !$0.generatable }) {
-                Text("* the geometry does not exist yet")
+            ForEach(notes, id: \.mark) { n in
+                Text("\(n.mark) \(n.reason)")
                     .dsStyle(DS.TypeScale.caption)
                     .foregroundStyle(DS.Color.warning.color)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -917,20 +929,24 @@ public struct LatticePage: View {
         }
     }
 
-    private func topologyRowButton(_ row: LatticeTopologyRow) -> some View {
-        let selected = project.lattice.topologyID == row.id
-        return Button { project.lattice.topologyID = row.id } label: {
+    private func topologyRowButton(_ e: LatticeTypeEntry, mark: String?) -> some View {
+        let selected = project.lattice.topologyID == e.id
+        return Button {
+            // ★ only an offered type is ever written — a greyed one says why in its footnote
+            guard e.offered else { return }
+            project.lattice.topologyID = e.id
+        } label: {
             HStack(spacing: DS.Space.sm) {
-                // L14: the name on ONE line; a non-generatable topology is GREYED
-                // with an orange asterisk pointing at the single footnote.
+                // L14: the name on ONE line; a type core doesn't offer is GREYED with an orange
+                // mark pointing at its footnote.
                 HStack(alignment: .top, spacing: 2) {
-                    Text(row.displayName)
+                    Text(e.displayName)
                         .dsStyle(DS.TypeScale.bodyStrong)
-                        .foregroundStyle((row.generatable ? DS.Color.textPrimary
-                                                          : DS.Color.textTertiary).color)
+                        .foregroundStyle((e.offered ? DS.Color.textPrimary
+                                                    : DS.Color.textTertiary).color)
                         .lineLimit(1)
-                    if !row.generatable {
-                        Text("*").font(.system(size: 13, weight: .bold))
+                    if let mark, !e.offered {
+                        Text(mark).font(.system(size: 13, weight: .bold))
                             .foregroundStyle(DS.Color.warning.color)
                     }
                 }
@@ -949,6 +965,8 @@ public struct LatticePage: View {
                                   lineWidth: 1)))
         }
         .buttonStyle(.plain)
+        .accessibilityHint(e.reason ?? "")
+        .accessibilityIdentifier("lattice-topology-\(e.id)")
     }
 
     // MARK: the algorithm card
