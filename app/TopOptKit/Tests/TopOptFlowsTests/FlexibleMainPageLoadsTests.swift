@@ -304,7 +304,13 @@ final class FlexibleMainPageLoadsTests: XCTestCase {
         let box = try String(contentsOf: FlexibleHisProject.repoRoot
             .appendingPathComponent("app/TopOptKit/Sources/TopOptFlows/FlexibleNumberBox.swift"), encoding: .utf8)
         XCTAssertEqual(box.components(separatedBy: ".numberPad(").count - 1, 1)
-        XCTAssertTrue(box.contains("if !open, let v = buffer.closed(spec)"), "the box commits once, as its keypad closes")
+        // ★ RE-PINNED (batch S verification): the close now also reads what was typed, to SAY a refused
+        // or clamped value in one line — still one commit, as the keypad closes
+        let close = try XCTUnwrap(box.range(of: ".onChange(of: padTarget == key) { open in"), "the keypad's close")
+        let body = String(box[close.upperBound...].prefix(400))
+        XCTAssertTrue(body.contains("guard !open else { return }"), "only as it closes")
+        XCTAssertEqual(body.components(separatedBy: "buffer.closed(spec)").count - 1, 1, "the box commits once, as its keypad closes")
+        XCTAssertEqual(body.components(separatedBy: "onCommit(v)").count - 1, 1)
     }
 
     /// ★ loads.build_dir = −gravity reaches core's scene. RED CONTROL: without it, core's +Z.
