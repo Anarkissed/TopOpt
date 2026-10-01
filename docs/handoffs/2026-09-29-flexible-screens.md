@@ -1,6 +1,249 @@
 # Handoff — 2026-09-29-flexible-screens (TRACK app, A1): the Flexible screens
 
-## Round 5 · batch G — a realistic squish: one continuous 3D field per squeeze group (read this first)
+## Round 5 · batch G — verification pass (read this first)
+
+The G verifier reported 13 findings: 5 majors and 8 minors, from a correctness lens and a UX lens.
+Two of the majors are one bug seen from both sides (the first refresh after Save & Exit). I checked
+each one myself, on YOUR project 0004 as you left it for round 5 (copied from the simulator's store,
+saved 2026-09-30 16:52 — now `his_project_0004_r5` in the evidence folder), on the committed 0004
+and on C1's pad. I fixed every major and every minor except the stamp's COLOURS (V5's second half
+and V10, below). The app was built for the simulator but NOT launched, so none of this has been
+seen on a screen yet.
+
+Your round-5 notes that touch G's field were checked here too:
+- (a) "When in group 1, it showed group 2's animation … group 2 as a negative": picking a group
+  already played only its own field under G. What was still a combo was **"Play all"** (the
+  default): every group's heat colours stayed on while one group's field played, and nothing said
+  which group was playing. Fixed below. **Group 2 alone** also pulled Face 5 in (a two-sided pinch).
+  Fixed below.
+- (b) "the stamps are seen as isolated areas … it should … pull lattice next to it in": under G's
+  field the SHAPE already drags its neighbours. On your Top A thumb, the part 0–3 mm outside the
+  stamp sinks 58 % as far as under it; core's per-column numbers there are 30 %. A test now pins
+  this. The COLOURS are still core's per-column depths, so the colour still reads as an island (not
+  done, below).
+
+**What changes for you on the main Flexible page:**
+- **Save & Exit shows the lattice at rest until its 3D sim lands.** Batch G flashed the OLD column
+  squish (its plugs, seams and flaps) for about 1–2 s first, then snapped to rest. Now "Simulating
+  the squish…" shows from the first frame with the new lattice.
+- **"Play all" plays each group ALONE.**
+  - Each turn colours only that group's faces. The colours come in with the group's field and mesh
+    at the rest point, so nothing pops. All groups keep ONE colour scale (the legend's).
+  - The picker says which group is playing: "● All · Group 2", in that group's colour.
+  - The note beside it is that group's own line (its firmer-wins miss, or nothing).
+- **A group on its own no longer squeezes from both sides.** When a pressed face's far end is
+  neither pressed nor resting in that group, that far end is now held (like a wall): it is where
+  core designs the columns to be squeezed against.
+  - On your pad, Group 2 (Face 3 alone) now leaves Face 5 still: 0.000 mm. Batch G moved Face 5 in
+    by 49 % of Face 3's motion (4.25 mm on screen).
+  - Your Group 1's 10 kg thumb on Face 5 now squeezes the pad against Face 3. Before, it sheared
+    the pad over its gripped bottom.
+- **No picture folds at ×1 any more.** The page never draws below ×1. So a field whose calibrated
+  size would fold the part at ×1 is cut until it cannot (s · gmax ≤ ½ in the part, the rule batch G
+  already used for ×k above 1).
+  - Your Group 1 was 4.4× past that limit. The walls' pull-back missed by up to 9.2 mm near the
+    thumb (a lattice sliver through the heat plane), and Top B rose 7.8 mm. Now it is cut to 23 %:
+    the pull-back misses nowhere (0 of 53 248 cells). Your Group 2 is cut to 53 %; the M2 stand to
+    60 %; your saved pad and C1's pad are not cut.
+  - The Squish legend's (i) says it, in one sentence, with the band's k too: "…a linear 3D sim that
+    finds this part 7× stiffer than core's columns (its skin and walls carry load), cut to 23 % so
+    the picture never folds (the sim leaves small strain here)…". Batch G's (i) said only "the
+    picture can fold" there, and hid that Face 5 moved about ⅓ of what it read.
+- **If a sim fails, the squish still plays.**
+  - With one group, a failed sim now plays the column squish. Batch G left it at rest, next to
+    "Simple squish · the sim failed".
+  - Under "Play all", a failed group is said: "Group 2 skipped · its sim failed". Pick it to play
+    its simple squish.
+  - If EVERY sim of "Play all" failed, the first group's simple squish plays and the picker shows
+    that group. Batch G squished every group's faces at once there.
+- **A pick of a group whose sim is still solving plays as soon as it lands.** Batch G sat at rest
+  until you pressed play.
+- **The stamp lines are true again.** The dent legend reads "Squish · mm" while the 3D sim plays
+  (the sim presses the stamp where it sits). "Squish · stamp: whole face" is only for the column
+  fallback now. The Settings stamp row reads "Main page: the 3D sim presses the stamp" (it said
+  "whole face sinks, for now").
+
+**Also fixed (you will not see these):**
+- **Never two solves in core, as ONE claim.** Two solves in core's matrix-free pool deadlock (batch
+  G found it).
+  - The verifier put a squish sim inside core beside a running Stress solve, two ways. The gate was
+    checked a step before the sim entered core. And the Stress model's Cancel drops its phase
+    while its solve keeps running.
+  - Now a sim claims core in the same step that commits it. The Stress / octet solve
+    (`LatticeSimModel`) and a LOCAL topology run hold core for as long as they are really in it,
+    a cancelled solve included. A solve that waits goes before the next queued sim.
+- **A remote run no longer waits for the sims.** A LAN run never touches this device's pool.
+- **A local run that waited for a sim gets its full stall-watchdog grace.** The watchdog is
+  re-armed after the wait. Batch G counted up to 60 s of waiting against the 150 s grace, then
+  entered core anyway.
+
+**Not done (and why):**
+- **Nothing has been seen on a device or in the simulator** (track rule: never launch). The iOS
+  build succeeds.
+- **The stamp's COLOURS are still core's per-column depths**, in 1.56 mm blocks. Where core has no
+  number (Face 5's thumb: 149 of 149 columns; the pad's fingertips: 235 of 237), the spot is the
+  near-white "no number" grey. Smoothing the colour, or colouring those spots by the sim, changes
+  what the colours mean. That is the dent visuals (batch M) and core's "can't reach" columns.
+- **Top B still rises a little under Group 1.** 445 of its 2 048 columns move out, at most 1.8 mm at
+  ×1 (7.8 mm before the cut). This is the linear sim's physics: the 10 kg thumb on Face 5 lifts the
+  top next to it, and Top B's own press is 1 kg-ish. It is not flagged on screen.
+- **The octet's and Organic's own solves are still not gated** (core brief #18); the claim covers
+  the app's own callers.
+- **The "Play all" legend's ends stay the whole lattice's** (0–28.7 mm on your pad). Each turn's
+  colours use that one scale, so they are comparable across groups; the ends do not change per turn.
+
+**Your call:**
+- **The fold cut.** Your Group 1 now moves 23 % of its calibrated size (≈ 7 % of core's numbers on
+  Face 5). The alternative is to let ×k go below 1 and say "×0.2" on the legend. Keep the cut?
+- **The far end held as a wall** (a side press squeezes against the opposite face, as core's columns
+  assume). Or should an unpressed far face stay free, with the part balanced as batch G did?
+- **Top B lifting next to the thumb** (above): leave it (it is what a linear body does), or say it
+  in a line?
+- **"Play all" stays the default** with two or more groups, now playing each group alone. Or make
+  Group 1 the default and keep "Play all" as a choice (D2's default)?
+
+### Each finding, confirmed on the code → what changed
+| # | Finding (lens · severity) | Verdict | Fix (file) | Pinned by |
+|---|---|---|---|---|
+| V1 | a failed sim sits at rest when it is the only / first sim (correct · major) | CONFIRMED (VG-E: "failure true · playing false") | the sims are started BEFORE they are read, a request not yet scheduled is pending; the fallback auto-plays once per (generation, sequence asked) (`FlexibleMainStage+Squish.feView`, `FlexibleMainStage.refresh`) | FlexibleSquishVerifyGTests · testAFailedOnlySimPlaysTheColumnSquish (RED: batch G's order + loop) |
+| V2 | the gate can be bypassed, two ways (correct · major) | CONFIRMED (VG-H, VG-I: a sim in core beside the Stress solve) | `FlexibleCoreGate`: one lock; `tryEnterSim` in pump(), `whileInCore` (LatticeSimModel, HV1), `claimForRun` (RunModel, HV2); waiting solves go first | FlexibleCoreClaimTests (RED: `controlLateClaim` + `controlOthersDoNotClaim` = batch G's gate) |
+| V3 | a pick of a solving sim stays at rest when it lands (correct · minor) | CONFIRMED (VG-G) | the loop starts by (generation, sequence asked) and restarts when the shown sequence comes out of "Simulating…" | testAPickOfASolvingSimPlaysWhenItLands (RED: `controlLoopByGeneration`) |
+| V4 | the column fallback's Play all is the combo; a failed group skipped silently (correct · minor) | CONFIRMED (VG-D: 4 faces) | every sim of Play all failed ⇒ the first group's column squish (`fallbackSim`, the picker shows it); "Group 2 skipped · its sim failed" | testEveryFailedSimOfPlayAllPlaysOneGroup (RED: `controlPlayAllCombo`) |
+| V5 | stamp drag untested; colours still an island (correct · minor) | shape CONFIRMED OK and now pinned; colours NOT done (batch M) | — | FlexibleFEVerifyGTests · (c) (RED: core's per-column squish, 30 %) |
+| V6 | HG1 delays remote runs, eats the watchdog's grace, enters after 60 s (correct · minor) | CONFIRMED (code) | remote claims nothing; a local run claims without a timeout; the watchdog is re-armed after a wait (HV2) | testALocalRunClaimsCoreAndARemoteRunDoesNot (RED: no claim) |
+| V7 | Play all reads as a combo (ux · major) | CONFIRMED (probe: colours [3, 5, A, B] in both turns; label "All") | per-group tints (`playAllBaseTints`, `FlexibleFETints`) swapped by the renderer with the field and mesh; `loop.playingSimID` published per turn to the player; the picker "All · Group 2"; the playing group's note | testPlayAllPlaysEachGroupAlone (RED: `controlPlayAllCombo`) |
+| V8 | Save & Exit flashes the old column squish (ux · major) | CONFIRMED (the same cause as V1) | as V1 | testSaveAndExitHoldsTheLatticeAtRestUntilItsFieldLands — caught at the source, inside the refresh (RED: batch G's order) |
+| V9 | Group 1 4.4× past the fold limit at ×1 (ux · major) | CONFIRMED (pull-back misses 665 cells, worst 9.25 mm) | the fold cut (`FlexibleFEField.calibrated`, `foldShare`, k · gmax(part) ≤ ½); the far anvil (V11) | FlexibleFEVerifyGTests · (b) (RED: uncapped) |
+| V10 | the stamp's colours: pixel blocks, grey "no number" (ux · minor) | CONFIRMED | NOT done — batch M / core | — |
+| V11 | the legend "stamp: whole face" and the Settings row are false (ux · minor) | CONFIRMED | FE mode: "Squish · mm"; the row reworded (`FlexibleMainStage+Views.legendTitle`, `FlexibleRowCopy.stampMainPage`) | FlexibleFEVerifyGTests · (d) (RED: the column squish) |
+| V12 | Group 2 alone pulls Face 5 in 4.25 mm (ux · minor) | CONFIRMED (control 32768: 49 %) | the far end held along its normal beside the rests (`flexible_squish_fe.cpp`, `far_anvils`) | FlexibleFEVerifyGTests · (a) (RED: control 32768) |
+| V13 | the (i) hides ⅓ on Face 5 (ux · minor) | CONFIRMED | the (i) says the band's k in every case and the cut (`FlexibleFE.info(foldShare:)`) | testTheSquishInfoSaysTheBandAndTheCut; (e) |
+
+### Hook lines in #354 / main files (this pass; each grepped after the edit)
+| hook | file · anchor | ± | why |
+|---|---|---|---|
+| HV1 | LatticeSimModel.swift · `Result { try runner(ctx) }` → `Result { try FlexibleCoreGate.whileInCore { try runner(ctx) } }` | +1 −1 | the Stress / octet solve holds core's pool while it is IN it — a cancelled one too (its phase drops, its bridge call runs on) — so no squish sim enters beside it |
+| HV2 | RunModel.swift · `scheduler.runInBackground { [weak self] in` | +2 −1 against batch G (HG1's line replaced); +2 against the branch before G | a LOCAL run claims core (`FlexibleCoreGate.claimForRun`, released by `defer`), waiting while a sim holds it; a remote run claims nothing; after a wait the stall watchdog is re-armed so the wait never eats its grace |
+
+HG1 (`FlexibleSquishSolver.waitUntilOutOfCore()`) is gone: its rationale ("a new sim cannot start
+meanwhile — the run is in runningIDs") was wrong — `runningIDs` is updated a main-queue hop after
+the run starts.
+
+Nothing else outside the track: WorkspacePlaceholder, MetalMeshView, LatticeSettings, ProjectModel
+and LatticeStageMode are untouched, no case was added, core/ is untouched, the pinned strings are
+untouched. The renderer's tint swap uses `MeshRenderer.setVertexTints` (already internal) from the
+track's own extension.
+
+Edited track files: `FlexibleSquishSolver` (the claim), `FlexibleMainStage` / `+Squish` / `+Views`
+(read order, loop keys, the fallback group, per-group tints and notes, the legend line, the (i)),
+`FlexibleSquishPlayer` (the playing group), `FlexibleMainStatusPill` (hands it over),
+`MeshRenderer+FlexibleLattice` + `FlexibleLatticePass` + `FlexibleSquish` (the tint swap),
+`FlexiblePageChannels` (one colour scale), `FlexibleFEField` + `FlexibleFE` (the fold cut, the (i),
+the skipped line), `FlexibleRowCopy`, `flexible_squish_fe.cpp` + `FlexibleBridge.hpp` +
+`FlexibleKit+Squish` (the far anvil).
+
+### Decisions (00-decisions.md)
+- D-R5-G3 amended: the far end is held beside the rests.
+- D-R5-G5 amended: a field is cut so it never folds at ×1.
+- D-R5-G6 amended: Play all plays each group ALONE (colours, picker, note); the fallback rules.
+- D-R5-G7 amended: ONE claim on core.
+
+### Tests
+Every new test states its RED control inline — batch G's behaviour behind a test switch, computed
+beside the fix, must fail the same assertion — and each control was seen RED:
+- **FlexibleSquishVerifyGTests** (his 0004, Save & Exit, the page's own debounced refresh):
+  - `testSaveAndExitHoldsTheLatticeAtRestUntilItsFieldLands` — the loop's `$playing` is watched AT
+    THE SOURCE (a heavy first refresh holds the main actor, so a sampler missed the flash the
+    renderer would draw): 0 starts before the field; RED `controlReadSimsBeforeStart` +
+    `controlLoopByGeneration`: 1 ("started playing · fe pending false").
+  - `testAFailedOnlySimPlaysTheColumnSquish` — one group, its sim failing after the page saw it
+    pending (`controlFailDelayS`): playing, "Simple squish · the sim failed"; RED batch G: at rest.
+  - `testAPickOfASolvingSimPlaysWhenItLands` — RED `controlLoopByGeneration`: at rest.
+  - `testEveryFailedSimOfPlayAllPlaysOneGroup` — 2 faces (the top's), the picker on Group 1;
+    "Group 2 skipped · its sim failed"; RED `controlPlayAllCombo`: 4 faces.
+  - `testPlayAllPlaysEachGroupAlone` — per-turn quads equal the combo's on the group's own faces
+    and differ on the other's; 40 renderer steps: turns [1, 2, 1, 2], tint / label / note
+    mismatches 0, labels "All · Group 1", "All · Group 2"; RED `controlPlayAllCombo`: the top
+    coloured in Group 2's turn, the label "All".
+- **FlexibleCoreClaimTests**:
+  - `testASimClaimsCoreInTheStepThatCommitsIt` — claimed at commit, Stress → waiting, no overlap
+    (the Stress model then run straight waits in `whileInCore`); RED batch G's gate
+    (`controlLateClaim` + `controlOthersDoNotClaim`): started, overlap. (With the late claim alone
+    the result depended on who entered first — HV1 alone kept the sim out when it entered first.)
+  - `testACancelledStressSolveStillInCoreKeepsTheSimsOut` — RED `controlLateClaim`: overlap.
+  - `testALocalRunClaimsCoreAndARemoteRunDoesNot` — the local run waited, then ran without overlap,
+    watchdog armed 2×; the remote run ran beside the sim (0 local watchdogs); no sim started while a
+    run held core; RED `controlLateClaim`: 1 sim started, `controlOthersDoNotClaim`: the run beside the sim.
+  - `testAWaitingSolveGoesBeforeTheQueuedSims` — positive control: nothing waits → a sim claims.
+- **FlexibleFEVerifyGTests** (his round-5 project):
+  - `testHisRound5GroupsAloneNeverFoldAndTheStampDrags` — (a) Face 5 under Group 2 0.000 of
+    12.692 mm, RED control 32768: 2.125 of 4.332 (49 %); (b) both fields k · gmax(part) ≤ ½ and 0
+    of 53 248 pull-backs miss, RED uncapped Group 1 (k 2): s·gmax 2.20, 665 misses, worst 9.25 mm;
+    (c) Top A's stamp ring 58 % of inside, RED core's columns 30 %; (d) "Squish · mm", RED the
+    column squish: "Squish · stamp: whole face"; (e) the (i) says "7× stiffer" and "cut to 23 %".
+  - `testTheSquishInfoSaysTheBandAndTheCut` — one sentence each.
+- Re-pinned: `FlexibleFEFieldTests.testCalibrationMatchesCoresDeepestColumn` — a band-held k is the
+  band's edge × the fold share (1 when not cut).
+
+Each fix was also mutated back in production, rebuilt in a mirror of the package and its pinning
+test run. All 15 mutations went RED (`vfixG/mut_run.log` in the session scratchpad):
+- MV1 the renderer never swaps a group's tints → testPlayAllPlaysEachGroupAlone (40 mismatches);
+- MV2 HV1 removed (LatticeSimModel takes no claim) → testACancelledStressSolveStillInCoreKeepsTheSimsOut;
+- MV3 HV2's re-arm removed → testALocalRunClaimsCoreAndARemoteRunDoesNot (armed 1×, not 2×);
+- MV4 the fallback never auto-plays → testAFailedOnlySimPlaysTheColumnSquish;
+- MV5 the sims read before they start → testSaveAndExitHoldsTheLatticeAtRestUntilItsFieldLands;
+- MV6 no fold cut → testHisRound5… (s·gmax 2.20 and 0.94; 665 misses);
+- MV7 no far anvil → testHisRound5… (Face 5 2.27 of a 0.23 mm limit);
+- MV8 a queued sim jumps a waiting solve → testAWaitingSolveGoesBeforeTheQueuedSims;
+- MV9 FE mode keeps "stamp: whole face" → testHisRound5…;
+- MV10 a late pick not started → testAPickOfASolvingSimPlaysWhenItLands;
+- MV11 a failed group not said → testEveryFailedSimOfPlayAllPlaysOneGroup;
+- MV12 no fallback group (every face at once) → testEveryFailedSimOfPlayAllPlaysOneGroup (4 faces);
+- MV13 the picker never says the playing group → testPlayAllPlaysEachGroupAlone (["All"]);
+- MV14 the large-strain (i) drops the band → testTheSquishInfoSaysTheBandAndTheCut;
+- MV15 the late claim in production → testASimClaimsCoreInTheStepThatCommitsIt.
+
+Deleted-test sweep (`git diff 526b32e0 HEAD -- app/TopOptKit/Tests`, removed `func test` / class
+lines): none.
+
+### Build and suite (raw lines, this Mac)
+- Targeted suite (the builder's 175 suites + LatticeOvernightBatchTests, LatticePageTests,
+  LatticeSimRegionLayerTests and the three new ones; Debug; other sessions' suites were running on
+  the same Mac):
+  `Executed 1221 tests, with 21 tests skipped and 10 failures (0 unexpected) in 3173.088 (3173.223) seconds`.
+  - 8 of the 10 are the known AppModelTests 3MF ×3 lines, 1 is the known
+    `LatticeSimSolveTriggerTests.testTheTriggerRefusesOnAllThreeGrounds`.
+  - The 10th was mine: `FlexibleSqueezeGroupsUITests.testThePlayerWithItsPickerKeepsClearOfButtonsAndLegends`
+    pins the slot's call `…sims: sims, shown: main.shownSimInfo, onPick: { main.pick($0) }, note: note)`.
+    The two new player arguments now come before `sims:`, so the pin holds unchanged.
+- Re-run after that fix and the last gate changes (the suites they touch, or that scan the files):
+  FlexibleSqueezeGroupsUITests, FlexibleCoreClaimTests, FlexibleSquishVerifyGTests,
+  FlexibleSquishSolverTests, FlexibleLegendPlacementTests, FlexibleSqueezeGroupsReviewUITests,
+  FlexibleMainPageRound4Tests, FlexibleSquishPlayerTests, FlexibleSquishPlayAllTests:
+  `Executed 47 tests, with 1 failure` — the claim test's red control, which with the late claim
+  alone depended on who entered first; it is now batch G's whole gate, and
+  FlexibleCoreClaimTests ran twice since: `Executed 4 tests, with 0 failures (0 unexpected) in 57.400`
+  and `in 54.199`.
+- Earlier in this pass: FlexibleSquishSolverTests, FlexibleSquishPlayAllTests, FlexibleFEFieldTests,
+  FlexibleFEPassTests, FlexibleSquishFETests, FlexibleSquishCoarsenTests,
+  FlexibleSquishModulusTests, FlexibleSettingsVerifyD1Tests, FlexibleSqueezeGroupsModelTests:
+  `Executed 60 tests, with 0 failures (0 unexpected) in 457.398`.
+  - On the M2 stand the fold cut gives k 1.204 (it was 2.000). His saved pad keeps k 2.000
+    (gmax 0.21), and C1's pads keep 1.367 and 1.616.
+- iOS: `** BUILD SUCCEEDED **` (`xcodebuild … -destination id=147E56A1-… -derivedDataPath …/flexA1
+  build`) on the final tree. `TopOpt.debug.dylib` is stamped 20:28 and holds `FlexibleCoreGate`,
+  `claimForRun` and `playAllPlaying`. It was not installed or launched.
+
+### Commits (PR #362's branch `claude/flexible-screens`; nothing pushed)
+- a7dbbd5c — never two solves in core, as ONE claim (`FlexibleCoreGate`, HV1, HV2).
+- 17289c67 — a group alone squeezes against its far end; no field folds at ×1; the (i).
+- 616ceab7 — the main page: rest until the field lands, a failed sim plays, Play all plays each
+  group alone, the stamp lines, his round-5 project as evidence.
+- This handoff section and the DECISIONS amendments (the commit after them).
+
+## Round 5 · batch G — a realistic squish: one continuous 3D field per squeeze group
+
+(★ The verification pass above corrects parts of this section: Save & Exit no longer flashes the column squish first, "Play all" plays each group alone, a failed sim plays, a group squeezes against its far end, no field folds at ×1, and HG1 is replaced by HV2.)
 
 Your words: "is there a way to ensure that the squish sim also squeezes out the sides of the object?
 I'd like it to actually bend and move and squish like it would in real life. Also, I'd like a way to
@@ -218,7 +461,7 @@ rest, half and full squish.
 
 | hook | file · anchor | ± | why |
 |---|---|---|---|
-| HG1 | RunModel.swift · `scheduler.runInBackground { [weak self] in` | +1 | `FlexibleSquishSolver.waitUntilOutOfCore()`: a topology run waits on its background thread until no squish sim is in core's matrix-free pool (two solves there deadlock; a new sim cannot start meanwhile — the run is in `runningIDs`). |
+| HG1 | RunModel.swift · `scheduler.runInBackground { [weak self] in` | +1 | `FlexibleSquishSolver.waitUntilOutOfCore()`: a topology run waits on its background thread until no squish sim is in core's matrix-free pool (two solves there deadlock; a new sim cannot start meanwhile — the run is in `runningIDs`). ★ SUPERSEDED by HV2 (verification pass): `runningIDs` is updated a main-queue hop after the run starts, so a sim COULD start meanwhile; the wait also delayed remote runs, ate the watchdog's grace and gave up after 60 s. |
 
 Nothing else outside the track:
 - `git diff --numstat` shows RunModel.swift 1 0.
