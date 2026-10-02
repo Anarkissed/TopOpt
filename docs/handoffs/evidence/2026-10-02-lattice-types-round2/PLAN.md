@@ -1,0 +1,37 @@
+# Lattice types round 2: the maintainer's rulings and their status
+
+This file is kept in the repo so a session restart cannot lose it. Each item lands as its own commit, with:
+- RED controls;
+- stage hashes taken after it lands (`tools/`, and the procedure in `README.md`).
+
+The full suite runs before the handoff, and then the branch is pushed.
+
+## Accepted (2026-10-02)
+
+These are accepted:
+- (c) at 0c9648d3;
+- the Structural view-state fix at 4f63770c;
+- (b)'s frame-basis test (its commit comes after the sweep and the iOS build).
+
+## Rulings and status
+
+| # | Ruling | Status |
+|---|---|---|
+| R | **Remove the Regions popover everywhere.** UI only: the region model and every saved region stay. First confirm the Surface stage covers union, split and filter. If anything is reachable only through the popover, STOP and report. | open |
+| — | The per-face Cell dial stays Aesthetic-only. | no change |
+| 1 | **Floor key:** one named app constant `{"organic"}`, with a comment pointing at core's `lattice_beam_network_certified_algorithms()`. Swap to the core function at the next core sync; from then on it flips by itself. | open |
+| 2 | **Organic + Structural + manual Fit stays at 5** (organic untouched, U8). Report only: does the organic preview's cell match the run's at manual Fit under Structural? | open (report) |
+| 3 | **Stop sending `structural_certification: beam_network` on Stepped + Structural.** List the byte moves (3418E167). Land it BEFORE the next core sync, because #358 will refuse the key. The key comes back keyed on core's fact. | open |
+| 4 | **Default Grade proof: run it.** Converted copies are allowed and must be labelled "converted"; 570B38E2 is the native case. Fix the app-side causes first: R4, and R1 if it is the app's. The core-side causes go in one core brief, with a minimal failing job each. The enable switch stays OFF until every plan is accepted and the run's cell histogram equals the preview's. | open |
+| 5 | **Ceiling:** bridge `octet_aesthetic_density_ceiling()` now. Swap to `lattice_aesthetic_density_ceiling(octet)` at the next sync; the swap moves no bytes. | open |
+| a | **`named()` returns nil for an unknown id, and every caller handles it.** This includes the two WorkspacePlaceholder misroutes (limits and face card). | open |
+| S | **Sync core** (#358 at 349053df or later, and main). See the list below. | after 3 |
+
+**At the sync:**
+- Bring in `lattice_type_readiness_plain()` for the picker's words (brief item a).
+- Swap in `lattice_beam_network_certified_algorithms()` (ruling 1).
+- Swap in `lattice_aesthetic_density_ceiling(octet)` (ruling 5).
+- **Call `topopt::set_build_identity(CoreFingerprint.value, <linked core build time>)` once at bridge start-up, before the first bridge run.**
+  - It is set-once: a second call with a different value throws.
+  - Test it: an in-app relattice receipt names the linked core's fingerprint.
+  - Why: `bridge.cpp:1913` runs `lattice_variant_job` in-process, so the app's relattice receipts still stamp the fingerprint "unknown".
