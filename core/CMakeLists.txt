@@ -1735,6 +1735,12 @@ if(OpenCASCADE_FOUND)
     tests/harness/sector_density_cost_probe.cpp)
   target_link_libraries(sector_density_cost_probe PRIVATE topopt)
 
+  # ★ Sizing the beam-network certificate for any-step Stepped (reviewer,
+  # 2026-10-01). MEASURE ONLY -- nothing here is wired into the run.
+  add_executable(stepped_beam_cost_probe EXCLUDE_FROM_ALL
+                 tests/harness/stepped_beam_cost_probe.cpp)
+  target_link_libraries(stepped_beam_cost_probe PRIVATE topopt)
+
   add_executable(cad_probe EXCLUDE_FROM_ALL tests/harness/cad_probe.cpp)
   target_link_libraries(cad_probe PRIVATE topopt)
 
