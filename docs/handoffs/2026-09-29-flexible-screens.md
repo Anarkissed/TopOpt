@@ -1,6 +1,71 @@
 # Handoff — 2026-09-29-flexible-screens (TRACK app, A1): the Flexible screens
 
-## Round 5 · batch C5 — eight group colours, the ninth group's number, and your answers of 2026-09-30 (read this first)
+## Round 5 · the last syncs, the side-branch merge, and what was pushed (2026-10-02) (read this first)
+
+**Synced, one way (merge `--no-ff`, never rebase), no conflicts:**
+
+| Branch | Head | Merge commit | Core changed | Notes |
+|---|---|---|---|---|
+| #361 `claude/flexible-squish-maths` | `421fde3d` | `bd2457e5` | yes | contains main `f932266f`, #354 `606c613a` and #358 `4764ca7e`; the `core/src/cli/job.cpp` conflict (#361's Flexible block vs #358's topology write-back) was resolved UPSTREAM, both blocks kept |
+| #358 `claude/raster-receipt-fields` | `0a5f86df` | `6e75434c` | yes | the two commits past `4764ca7e`: a pure rename `lattice_relative_density` → `lattice_density_from_strut` (the app's bridge calls `octet_relative_density`, not the renamed function) and the lattice-types handoff |
+| #358 `claude/raster-receipt-fields` | `349053df` | `04664398` | yes | every receipt names the binary that wrote it (fingerprint "unknown" on relattice and analyze) |
+| #354 `claude/topopt-holes-quilting-298212` | `606c613a` | — | — | already contained through #361 |
+| main | `f932266f` | — | — | already contained through #361 |
+
+`app/scripts/build_core.sh` was run after each core change (exit 0).
+
+**Merged the side branch** `claude/flexible-screens-n` (batches M2, N and C5) as `6aa6bb96`. The only
+conflict was this handoff: both sides had added sections at the top. Both were kept, newest first.
+Earlier, the side branch `claude/flexible-screens-r5s` (batch S) was merged as `02c307f4`.
+
+**The full app suite on the pushed tree:** 3,155 tests listed, run in three parts. One `swift test` run outlives the shell's
+background limit, and the known headless-GPU process death stopped one part early.
+- **Passed:** 3,071, plus `LatticePreviewConfettiTests.testWhatThePreviewIsHandedOnHisPart`, re-run
+  alone after the GPU death (passed in 5.7 s).
+- **Failed: 7, all on the known pre-existing list:**
+  - `AppModelTests`: the three 3MF tests;
+  - `LatticeCellGradingTests.testGradingChangesTheRenderedLattice`;
+  - `LatticeSimSolveTriggerTests.testTheTriggerRefusesOnAllThreeGrounds`;
+  - `OrganicSampleCubeTests.testThickerIsLiveAndNeverRetraces`;
+  - `OrganicVariantCacheTests.testTheKeyIgnoresThicknessAndFollowsCoreAndTopology`.
+- **Every Flexible class (85) ran, and none failed.**
+- **Not run: `LatticeStaleTypeTests` (5 tests).** Its first test kills the process (SIGTRAP) every
+  time. **This is upstream, not round 5:** it reproduces the same way on #361's own head `421fde3d`
+  (a clean worktree with its own core build).
+  - Cause: #358's `4764ca7e` (one strut law per type, R1's refusal) makes
+    `lattice_strut_diameter_mm` throw for simple cubic. #354's `lattice_cell_bounds` in
+    `app/TopOptKit/Sources/TopOptBridge/bridge.cpp` calls `lattice_cell_printability_floor_mm` with no
+    try/catch, so a stale `"sc"` type aborts inside `LatticeBounds.compute` before the app's
+    stale-type gate can refuse it.
+  - #354 wrote the test against a core without that refusal. The two meet first in #361.
+  - Not fixed here: the file is #354's, and the fix belongs with #354/#361.
+
+**A correction I owe you (batch N, the realistic fold).** I told you the tested squish curves make TPU
+lattice stiffen as its cells close. For your filament they do not. varioShore gyroid at 240 °C SOFTENS
+between its tested points: the secant falls 24 % from 10 % to 25 % squish at ρ 0.15. The stepped solve's
+stiffening comes from a textbook densification law (Gibson & Ashby), joined smoothly past the data's end
+(25 %). And 34–38 % of your pad's two groups is squeezed past that point. Without that law, the stepped
+field folds MORE than the linear one (your Group 1: 91 inverted cells against 24). So "folds realistically"
+rests on an untested extrapolation. Core brief #40 asks for curves tested up to densification. See
+"Round 5 · batch N — a squish that folds realistically" below, section "The curves (the premise,
+corrected)".
+
+**What N gives on your pad:** Group 1 at full size has 0 inverted cells (the linear sim, uncut, had 24),
+so the fold cut is no longer applied. Group 2 is the same. It takes about 16 s per group on this Mac,
+after the quick squish. Still open: Group 1 plays at 2× your weights (the band edge, your call). Its top
+edge rises about 8 mm, and some lattice walls under that ridge look shattered with the heat view off.
+Both need core's large-deformation solver (#36) and per-voxel ν (#41).
+
+**Your open calls**, each in its section below:
+- **N:** 2× weights on Group 1; the densification law past your data.
+- **E:** a pressed face always latticed under it, without a tap? Should a folded piece's own depth win
+  over its union's 4 mm? A latticed piece of a face protected whole elsewhere.
+- **C5:** should Reset all reset the weight unit? Group 2 is now pink, not orange. Mirrored digits seen
+  through the X-ray body. The group menu chip from 6 groups.
+- **M2:** the Settings legend's top (buildable 5.5 mm vs the main page's red).
+- **Merge:** the thin-face frame gap (D-R5-X2).
+
+## Round 5 · batch C5 — eight group colours, the ninth group's number, and your answers of 2026-09-30
 
 Your five answers are recorded below and in DECISIONS (D-R5-C5-1 … C5-8). One of them, "Add more colour tokens", needed code. The others confirm what the app already does. **The app was NOT launched: nothing here has been seen on a device or simulator.** The pictures are offscreen: the Settings page hosted in a window, and the model drawn by the shipping renderer.
 
