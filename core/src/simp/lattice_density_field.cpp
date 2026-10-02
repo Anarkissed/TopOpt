@@ -130,7 +130,7 @@ bool lattice_density_printable(LatticeTopology topo, double rho, double cell_mm,
     // there is no measurement to borrow.
     return false;
   }
-  return octet_strut_diameter_mm(rho, cell_mm) >= min_extrudable_width_mm;
+  return lattice_strut_diameter_mm(topo, rho, cell_mm) >= min_extrudable_width_mm;
 }
 
 std::vector<LatticeRegionValidity> lattice_region_validity(

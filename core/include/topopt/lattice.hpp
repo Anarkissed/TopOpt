@@ -333,6 +333,106 @@ double lattice_subfloor_aggregate_cap_fraction();
 // ±quantization the handoff logs; a diameter quoted to microns is false precision.
 double octet_strut_diameter_mm(double rho, double cell_size_mm);
 
+// ── ★ THE ONE DEFINITION of density -> strut diameter, PER TYPE ─────────────
+// Every consumer goes through this: the printability floor, the minimum-density
+// bisection, the grading law, the cell plan, the emitters' radius fields and every
+// receipt that reports a strut size. `topo` is the JOB's topology, passed in -- never
+// defaulted, because a default would silently hand one type another's strut.
+//
+// Octet's branch returns EXACTLY `octet_strut_diameter_mm(rho, cell_size_mm)`, bit for
+// bit, which is what keeps R9 (octet byte-identical) true through this change.
+// Every other topology throws LatticeDiameterLawNotMeasured until its own table is
+// measured and landed.
+double lattice_strut_diameter_mm(LatticeTopology topo, double rho,
+                                 double cell_size_mm);
+
+// ── ★ THE SAME LAW, THE OTHER DIRECTION, PER TYPE ──────────────────────
+// (cell, strut radius) -> relative density, which is what a UNIFORM lattice job states
+// and what the stepped menu's "prints open" test asks about. Octet returns EXACTLY
+// `octet_relative_density`; every other type throws the SAME
+// LatticeDiameterLawNotMeasured the forward direction throws, because it is one
+// measurement with two directions and a type either has it or does not.
+//
+// Note the two directions are NOT exact inverses even for octet -- the forward density
+// law and the diameter table disagree by the round trip (0.211733 vs 0.218871 at
+// strut/cell 0.20, see octet_aesthetic_density_ceiling's note). That is a measured
+// fact about octet, not a bug, and it is why both directions have to be measured per
+// type rather than one inverted.
+double lattice_density_from_strut(LatticeTopology topo, double cell_mm,
+                                double strut_radius_mm);
+
+// ── ★ TWO KEYS, ONE TYPE (reviewer, 2026-09-30) ──────────────────────
+// A job carries `lattice.topology` and `grading.topology` as separate strings. They
+// describe ONE physical lattice -- the thing the generator builds is the thing the
+// grading law sizes -- so they must agree, and nothing used to make them. Both
+// defaulted to "octet", which hid the question entirely while octet was the only id.
+//
+// The rule:
+//   both stated and DIFFERENT  -> `conflict`, and the caller refuses naming both;
+//   exactly one stated         -> that value, for BOTH. Never a silent "octet":
+//                                 a job that states `grading.topology` alone means
+//                                 that type, and defaulting the other block to octet
+//                                 would generate one type and size another;
+//   neither stated             -> "octet", which is today's behaviour exactly.
+//
+// Pure, and takes the statedness flags rather than comparing against "octet", because
+// `topology: "octet"` STATED and absent are different inputs that happen to resolve
+// the same way -- a function that could not tell them apart would be untestable on
+// the case that matters.
+struct LatticeTopologyChoice {
+  std::string id;            // the one resolved id; "" when `conflict`
+  bool conflict = false;
+  std::string lattice_id;    // echoed so a refusal can name both values
+  std::string grading_id;
+};
+
+LatticeTopologyChoice resolve_lattice_topology(const std::string& lattice_id,
+                                               bool lattice_stated,
+                                               const std::string& grading_id,
+                                               bool grading_stated);
+
+// ── ★ M6: OFFERED MEANS GENERATABLE **AND** CERTIFIABLE ─────────────────
+// "A type is offered in a mode only when core reports it both generatable and
+// certifiable" (DECISIONS 2026-09-28 item 2, M6). Two sets, so four states, and a
+// refusal has to say WHICH is missing -- "not ready" sends the reader nowhere.
+//
+// ★ IT TAKES THE TWO SETS AS ARGUMENTS rather than calling
+// lattice_gen_topology_names() / lattice_certifiable_topology_names() itself, so a
+// unit test can reach all four states. With today's real sets only three are
+// reachable: nothing is generatable-but-not-certifiable, and that is exactly the
+// state a future type lands in between its generator and its rows. A branch no test
+// can enter is a branch nobody has checked.
+enum class LatticeTypeReadiness {
+  Live,               // in both sets
+  NotGeneratable,     // certifiable, no generator yet  <- FCC today
+  NotCertifiable,     // generatable, no validated tensor rows
+  NotEither,          // in neither                     <- bccz/fccz/reentrant today
+  UnknownId,          // not a topology id at all
+};
+
+const char* lattice_type_readiness_name(LatticeTypeReadiness r);
+
+// ★ THE SAME FACT IN PLAIN WORDS, FOR THE SCREEN (reviewer, 2026-09-30). The app
+// shows core's reason beside each greyed type, so the words a user reads are written
+// ONCE, here, next to the detailed message -- not paraphrased in Swift, where they
+// would drift from what core actually refused. Short enough for a picker row.
+//
+// The detailed messages (the schema refusals, and `lattice_type_readiness_name`)
+// stay as they are: those are for receipts and logs.
+const char* lattice_type_readiness_plain(LatticeTypeReadiness r);
+
+// `id` is the job's topology string. `generatable` and `certifiable` are the two name
+// sets. An id absent from both AND not a known topology name is UnknownId, which is a
+// different answer from NotEither: one is a typo, the other is a type core knows.
+LatticeTypeReadiness lattice_type_readiness(
+    const std::string& id, const std::vector<std::string>& generatable,
+    const std::vector<std::string>& certifiable);
+
+// ── ★ THE INVERSE OF lattice_topology_name ──────────────────────────────
+// The one place a job's topology string becomes the enum. Throws
+// std::invalid_argument on an unknown id, naming it; never defaults to octet.
+LatticeTopology lattice_topology_from_id(const std::string& id);
+
 // ★ DOES A STATED PER-REGION DENSITY REFUSE AT THIS CELL? (task
 // 2026-08-16-per-sector-density-override, bar R1'.)
 //
@@ -355,9 +455,20 @@ double octet_strut_diameter_mm(double rho, double cell_size_mm);
 // True means the strut this density produces at `cell_mm` is thinner than the
 // profile's extrusion width, i.e. it cannot be printed. NEVER clamped: the
 // caller refuses with the number.
-bool lattice_stated_density_unprintable(double stated_relative_density,
+// `topo` is the JOB's topology. Returns false the moment nothing was stated, BEFORE
+// consulting the diameter law, so an absent override never asks a question about a
+// type whose law is unmeasured.
+//
+// ★ THERE IS NO 3-ARGUMENT FORM (reviewer, 2026-09-30). One briefly existed,
+// delegating to Octet so this predicate's standing test would not have to change. It
+// was removed because it is default-shaped: a future caller on a Kelvin job could
+// reach octet's table through it, which is the exact failure R1 forbids. The topology
+// is stated at every call site, including the octet ones.
+bool lattice_stated_density_unprintable(LatticeTopology topo,
+                                        double stated_relative_density,
                                         double cell_mm,
                                         double min_extrudable_width_mm);
+
 
 // ★ THE PRINTABILITY FLOOR — the SMALLEST cell edge (mm) at which `topo`'s thinnest
 // certifiable strut (the one at lattice_rho_min) still prints at the stated minimum
@@ -569,6 +680,87 @@ double lattice_library_youngs_modulus();
 // resolution caveat (C6) and does not move the library row a query interpolates.
 double octet_relative_density(double cell_mm, double strut_radius_mm);
 
+// ── ★ THE AESTHETIC DENSITY CEILING (ruling D, maintainer 2026-09-18) ───────────
+// The density at which an octet cell's strut is a fifth of the cell across --
+// "prints open", the bound the preview caps an aesthetic quilt at and the one the
+// "Allow quilt" switch lifts. MEASURED from core's own law rather than written down:
+// 0.211733, and it is the SAME number at every cell size, because
+// octet_relative_density depends only on strut_radius/cell. (The app's note derives
+// "= 0.219, core's law inverted at a 4 mm cell"; the cell does not enter, and the two
+// numbers differ by 3.5 % -- the app inverts a measured table where this samples it
+// forward. Reported to the app 2026-09-19.)
+// ── ★ THE SOLID OUTLINE BEAM'S GEOMETRY (ruling B; brief §1.5) ─────────────────
+// One thin solid beam swept round a face outline, CENTRED on the outline, with the
+// cells keeping clear of it. The width is derived and never sent, so the preview and
+// the run cannot hold different numbers for it:
+//
+//     trim = clamp(0.35 * voxel, 0.10, 0.35)      -- the march's own trim
+//     beam = max(2 * bead, trim + 0.5 * voxel)
+//
+// On the maintainer's part (a 1.72 mm voxel at a 0.45 mm bead) that is 1.21 mm, which
+// is the number the brief quotes. The two terms are a floor each: a beam thinner than
+// two beads cannot be printed as a wall, and one thinner than the march's trim plus
+// half a voxel cannot be RESOLVED on the grid that carves it.
+inline double lattice_outline_beam_mm(double bead_mm, double voxel_mm) {
+  if (!(voxel_mm > 0.0)) return 0.0;
+  double trim = 0.35 * voxel_mm;
+  if (trim < 0.10) trim = 0.10;
+  if (trim > 0.35) trim = 0.35;
+  const double by_bead = 2.0 * (bead_mm > 0.0 ? bead_mm : 0.0);
+  const double by_grid = trim + 0.5 * voxel_mm;
+  return by_bead > by_grid ? by_bead : by_grid;
+}
+
+// THE BLEED. A wide shape-grade band would otherwise meet the beam as a hard step; at
+// B >= 25 mm the solid grows inward by a further (B - 15)/2 mm -- 5 mm at 25, 7.5 at
+// 30 -- and below 25 mm, nothing. A threshold, not a ramp, which is the app's rule.
+inline double lattice_outline_bleed_mm(double band_mm) {
+  return band_mm >= 25.0 ? 0.5 * (band_mm - 15.0) : 0.0;
+}
+
+inline constexpr double kOctetAestheticStrutPerCell = 0.20;
+// ★ AND IT IS THE PREIMAGE UNDER THE DIAMETER TABLE, NOT THE FORWARD DENSITY LAW.
+// Core holds TWO measured tables and they are not exact inverses of one another:
+//
+//     octet_relative_density(cell, radius)  at strut/cell 0.20 -> rho 0.211733
+//     octet_strut_diameter_mm(rho, cell)    preimage of 0.20   -> rho 0.218871
+//
+// A density arriving as stepped_cells[].rho is consumed by the DIAMETER table -- that
+// is what sizes the strut (ruling C) -- so the ceiling must be stated in the units that
+// table reads: 0.218871, which is the app's 0.219. Taking the forward law's 0.211733
+// and sending it through the diameter table builds strut/cell 0.196, UNDER the geometry
+// the maintainer ruled on. Both numbers are cell-independent; the gap is the tables'
+// round trip and not a cell effect. (Core first published 0.2117 here and told the app
+// its 0.219 was 3.5 % wrong; the app pushed back and was right.)
+//
+// Bisected rather than written down, so that if either table is re-measured this
+// follows it instead of silently becoming a different piece of geometry.
+inline double octet_aesthetic_density_ceiling() {
+  const double cell = 4.0;                    // any cell: the RATIO is what matters
+  const double want = kOctetAestheticStrutPerCell * cell;
+  double lo = 0.01, hi = 0.90;
+  for (int it = 0; it < 200; ++it) {
+    const double mid = 0.5 * (lo + hi);
+    (octet_strut_diameter_mm(mid, cell) < want ? lo : hi) = mid;
+  }
+  return 0.5 * (lo + hi);
+}
+
+// ── ★ R11: THE AESTHETIC CEILING, PER TYPE ───────────────────────────
+// Ruling D's "prints open" ceiling was stated for octet. R11 generalises its GEOMETRY
+// -- strut diameter <= 20 % of the cell -- not its number: each type's ceiling is that
+// same bisection through THAT type's own diameter table, so each has to be measured.
+//
+// Octet returns EXACTLY `octet_aesthetic_density_ceiling()`, asserted with `==` in
+// test_strut_diameter_per_type. Every other type throws
+// LatticeAestheticCeilingNotMeasured -- its OWN refusal, not the diameter law's, so a
+// caller can tell "this type has no ceiling yet" from "this type has no diameter law
+// yet" even though today the second implies the first.
+//
+// `octet_aesthetic_density_ceiling()` above is kept unchanged: core's own tests call it
+// (test_grading, test_stepped_plan) and it is the octet branch's implementation.
+double lattice_aesthetic_density_ceiling(LatticeTopology topo);
+
 // The resolution (voxels per cell edge) the octet tensor library was measured at,
 // and the basis octet_relative_density voxelizes on so a printed radius maps onto
 // the same rho scale the library rows carry (PR 198, vpc48).
@@ -594,6 +786,32 @@ struct LatticeDensityOutOfBand : std::runtime_error {
 // at an out-of-band density; this one is a topology the cubic model cannot represent).
 struct LatticeTopologyNotCertifiable : std::runtime_error {
   explicit LatticeTopologyNotCertifiable(const std::string& msg)
+      : std::runtime_error(msg) {}
+};
+
+// ── ★ R1: A TYPE WITH NO MEASURED DIAMETER LAW REFUSES (task
+// 2026-09-28-lattice-types-core) ──────────────────────────────────────────
+// Thrown by `lattice_strut_diameter_mm` (and therefore by the printability floor and
+// the minimum-density bisection that call it) for a topology whose density -> strut
+// diameter table has not been MEASURED yet. It never falls back to octet's table:
+// borrowing octet's diameter for another type is the exact failure R1 exists to stop,
+// and it would be invisible -- a wrong strut size prints, it does not throw.
+//
+// Distinct from LatticeTopologyNotCertifiable, which is about the TENSOR. A type can
+// be certifiable (its rows are landed) and still have no diameter law, which is
+// precisely the state all six new strut types are in at the moment this lands.
+struct LatticeDiameterLawNotMeasured : std::runtime_error {
+  explicit LatticeDiameterLawNotMeasured(const std::string& msg)
+      : std::runtime_error(msg) {}
+};
+
+// ★ R11's refusal, deliberately DISTINCT from the diameter law's. Today a type
+// without a diameter table cannot have a measured ceiling either, so the two arrive
+// together -- but they are different facts and a caller reporting "why can't I pick
+// this type" should be able to say which one is missing. Keeping one exception for
+// both would make the first type to land its table and not its ceiling indescribable.
+struct LatticeAestheticCeilingNotMeasured : std::runtime_error {
+  explicit LatticeAestheticCeilingNotMeasured(const std::string& msg)
       : std::runtime_error(msg) {}
 };
 

@@ -58,7 +58,7 @@ double cell_plan_finest_printable_cell_mm(LatticeTopology topo,
   // core's own law, never a literal, exactly as grading.cpp's `abs_floor_mm` is.
   const double abs_floor_mm =
       min_extrudable_width_mm /
-      octet_strut_diameter_mm(lattice_rho_max(topo), 1.0);
+      lattice_strut_diameter_mm(topo, lattice_rho_max(topo), 1.0);
   if (!(min_cell_size_mm > 0.0) || !(min_extrudable_width_mm > 0.0))
     return abs_floor_mm;
   const int Lmax = cell_plan_max_level(min_cell_size_mm, max_cell_size_mm);
@@ -67,7 +67,8 @@ double cell_plan_finest_printable_cell_mm(LatticeTopology topo,
     // The SAME predicate `plan_cell_sizes` applies per base cell, at the density most
     // favourable to it. A cell clearing this is one the plan can use somewhere; a cell
     // failing it can never be used by any base cell, at any density in the band.
-    if (octet_strut_diameter_mm(lattice_rho_max(topo), S) >= min_extrudable_width_mm)
+    if (lattice_strut_diameter_mm(topo, lattice_rho_max(topo), S) >=
+        min_extrudable_width_mm)
       return S;
   }
   return abs_floor_mm;
@@ -197,7 +198,8 @@ CellSizePlan plan_cell_sizes(const VoxelGrid& grid,
       // width_min is +inf where every member exceeds the EDT cap -> always clears.
       if (width_min[c] / S >= n_star) cap[c] = L;
       if (need[c] == kUnreachable &&
-          octet_strut_diameter_mm(rho_min[c], S) >= params.min_extrudable_width_mm)
+          lattice_strut_diameter_mm(params.topology, rho_min[c], S) >=
+              params.min_extrudable_width_mm)
         need[c] = L;
     }
   }
@@ -359,7 +361,7 @@ CellSizePlan plan_cell_sizes(const VoxelGrid& grid,
         const bool is_owner = (i == obi && j == obj && k == obk);
 
         const double S = P.cell_mm_at_level(L);
-        const double d = octet_strut_diameter_mm(rho_min[c], S);
+        const double d = lattice_strut_diameter_mm(params.topology, rho_min[c], S);
         const double cpm = width_min[c] / S;
         CellLevelReport& r = P.levels[static_cast<std::size_t>(L)];
         if (is_owner) { ++r.cells; ++P.latticed_cells; if (L > 0) ++P.cells_raised_to_floor; }
@@ -407,7 +409,7 @@ CellSizePlan plan_cell_sizes(const VoxelGrid& grid,
         if (!(width_min[c] / S >= n_star))
           throw std::logic_error(
               "plan_cell_sizes: emitted a cell below the cells-per-member floor");
-        if (!(octet_strut_diameter_mm(rho_min[c], S) >=
+        if (!(lattice_strut_diameter_mm(params.topology, rho_min[c], S) >=
               params.min_extrudable_width_mm))
           throw std::logic_error(
               "plan_cell_sizes: emitted a cell whose strut is under the stated "
@@ -658,7 +660,7 @@ CellSizePlan plan_cell_sizes_fit(const VoxelGrid& grid,
         const double rho_floor =
             lattice_min_density_for_strut(topo, S, params.min_extrudable_width_mm);
         const double rho_here = std::max(rho_min[c], rho_floor);
-        const double d = octet_strut_diameter_mm(rho_here, S);
+        const double d = lattice_strut_diameter_mm(params.topology, rho_here, S);
         const double cpm = width_min[c] / S;
         CellLevelReport& r = P.levels[static_cast<std::size_t>(L)];
         if (is_owner) { ++r.cells; ++P.latticed_cells; }
