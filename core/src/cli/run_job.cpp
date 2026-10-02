@@ -7830,6 +7830,22 @@ void apply_build_direction_options(MinimizePlasticOptions& options,
 //
 // Declared in job.hpp (no longer file-local) so job_loadcase_copy can assert the
 // round trip AT THIS SEAM rather than on the value type.
+// ★ THE ONE PLACE THE BINARY'S IDENTITY LIVES. See job.hpp's note. A function-local
+// static, so there is exactly one and its initialisation is thread-safe; the setter is
+// called by main() before any work starts.
+static RunObservability& mutable_build_identity() {
+  static RunObservability id;
+  return id;
+}
+
+void set_build_identity(const std::string& fingerprint,
+                        const std::string& build_time) {
+  mutable_build_identity().fingerprint = fingerprint;
+  mutable_build_identity().build_time = build_time;
+}
+
+const RunObservability& build_identity() { return mutable_build_identity(); }
+
 ProductionLoadCase production_loadcase_from_job(const JobDescription& job,
                                                const StepModel& model) {
   // ★ THE FIELD LEDGER — this copy is EXHAUSTIVE BY CONSTRUCTION.
@@ -9324,7 +9340,7 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
     an_org.lat.fill_mat = job.grading.organic_fill_mat;
     an_org.lat.trim_below_base = job.grading.organic_trim_below_base;
 
-    RunInfo gi = build_run_info(job, options, RunObservability{});
+    RunInfo gi = build_run_info(job, options, build_identity());
     gi.grading_present = true;
     gi.grading_algorithm = lattice_algorithm_name(an_alg);
     // ★ THE COMPARABLE NUMBER (bar R10): the solid volume THIS algorithm's own
@@ -10247,7 +10263,7 @@ LatticeVariantJobResult lattice_variant_job(const JobDescription& job,
   // ── run_info.json carrying the grading record, from the SAME filler the
   // analyze path uses so the two receipts cannot drift.
   {
-    RunInfo gi = build_run_info(job, options, RunObservability{});
+    RunInfo gi = build_run_info(job, options, build_identity());
     if (R.graded) {
       gi.grading_present = true;
       gi.grading_topology = lattice_topology_name(R.gf.posture.topology);

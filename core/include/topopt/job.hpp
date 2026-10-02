@@ -1237,6 +1237,31 @@ struct RunObservability {
   std::string build_time;
 };
 
+// ── ★ THE BINARY'S IDENTITY, STATED ONCE BY THE EXECUTABLE THAT OWNS IT ─────
+// (reviewer, 2026-10-01.) `run_info.json` exists to answer "which core did that run
+// use" (main.cpp:371) and for two of the three subcommands that write one it could
+// not: `analyze_job` and `lattice_variant_job` built their receipt with
+// `build_run_info(job, options, RunObservability{})` -- a DEFAULT-CONSTRUCTED
+// observability -- so `fingerprint` stayed "unknown" and `build_time` empty on every
+// run. `lattice-variant` is the app's relattice path.
+//
+// TOPOPT_BUILD_FINGERPRINT and __DATE__/__TIME__ are only meaningful in the
+// EXECUTABLE's translation unit (the define is on the `topopt_cli` target, and the
+// date macros bake when that file compiles), so the library cannot read them. The
+// executable states them once, here, before it dispatches; every receipt path reads
+// them from one place instead of each growing its own copy.
+//
+// ★ AND THE FAILURE MODE IS THE VISIBLE ONE. A caller that never sets the identity
+// leaves "unknown" -- the same value the defect produced, which reads as "nobody told
+// me" rather than as a plausible wrong SHA. `cli_run_info_fingerprint` asserts the
+// receipt equals the binary's own --version line, so forgetting the call is a red
+// test, not a quiet regression.
+void set_build_identity(const std::string& fingerprint,
+                        const std::string& build_time);
+
+// The identity last stated, or the defaults ("unknown", empty) when none was.
+const RunObservability& build_identity();
+
 // The outcome of run_job, exposing enough for callers (the CLI main and the
 // integration test) to summarize and verify the run without re-reading files.
 struct RunJobResult {
