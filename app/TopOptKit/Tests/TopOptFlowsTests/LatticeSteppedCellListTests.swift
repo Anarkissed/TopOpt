@@ -37,27 +37,29 @@ final class LatticeSteppedCellListTests: XCTestCase {
         var spec = LatticeSpec(topologyID: "octet", cellMM: 12, strutRadiusMM: 0.4,
                                generateRelativeDensity: 0.2, minRelativeDensity: 0.1,
                                maxRelativeDensity: 0.9)
-        spec.algorithm = "stepped"
+        spec.algorithm = "doubled"
         spec.steppedCells = [LatticeSteppedCellWire(regionID: 1, originMM: SIMD3(0, 0, 0), sizeMM: 9)]
-        XCTAssertEqual(LatticeSteppedCellWire.blockValue(for: spec, wired: true)?.count, 1)
-        XCTAssertNil(LatticeSteppedCellWire.blockValue(for: spec, wired: false), "an older core: no key")
-        var doubled = spec; doubled.algorithm = "doubled"
-        XCTAssertEqual(LatticeSteppedCellWire.blockValue(for: doubled, wired: true)?.count, 1,
-                       "ruling A: the list goes for Default Grade too")
+        // ★ ruling 4 (2026-10-02): only Default Grade, only when the plan switch is on
+        XCTAssertEqual(LatticeSteppedCellWire.blockValue(for: spec, wired: true, enabled: true)?.count, 1)
+        XCTAssertNil(LatticeSteppedCellWire.blockValue(for: spec, wired: true), "★ the switch is OFF in production")
+        XCTAssertNil(LatticeSteppedCellWire.blockValue(for: spec, wired: false, enabled: true), "an older core: no key")
+        var stepped = spec; stepped.algorithm = "stepped"
+        XCTAssertNil(LatticeSteppedCellWire.blockValue(for: stepped, wired: true, enabled: true),
+                     "★ Stepped (any-step) plans stay off in both intents")
         var organic = spec; organic.algorithm = "organic"
-        XCTAssertNil(LatticeSteppedCellWire.blockValue(for: organic, wired: true), "never under organic")
+        XCTAssertNil(LatticeSteppedCellWire.blockValue(for: organic, wired: true, enabled: true), "never under organic")
         // ruling C: the density rides with the cell, only when the bake graded it
         let dense = LatticeSteppedCellWire(regionID: 1, originMM: SIMD3(0, 0, 0), sizeMM: 9, rho: 0.31)
         XCTAssertEqual(dense.wireDictionary["rho"] as? Double, 0.31)
         XCTAssertNil(spec.steppedCells[0].wireDictionary["rho"], "no rho ⇒ no key")
         var empty = spec; empty.steppedCells = []
-        XCTAssertNil(LatticeSteppedCellWire.blockValue(for: empty, wired: true), "no plan ⇒ legacy stepped, no key")
+        XCTAssertNil(LatticeSteppedCellWire.blockValue(for: empty, wired: true, enabled: true), "no plan ⇒ no key")
 
         // Through the real builder, wired forced on: the key lands under `lattice`.
         let original = try JSONSerialization.data(withJSONObject: ["model": "p.step"])
         let data = try RelatticeJobBuilder.build(original: original, designFingerprint: 1,
                                                  achievedVolumeFraction: 0.3, designFileName: "d.3mf",
-                                                 lattice: spec, steppedCellsWired: true)
+                                                 lattice: spec, steppedCellsWired: true, steppedPlans: true)
         let job = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
         let lat = try XCTUnwrap(job["lattice"] as? [String: Any])
         let cells = try XCTUnwrap(lat["stepped_cells"] as? [[String: Any]])

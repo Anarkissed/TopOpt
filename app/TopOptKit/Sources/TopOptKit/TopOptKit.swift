@@ -2065,17 +2065,20 @@ public enum TopOptKit {
             with: #""grading": {"topology": "octet", "min_extrudable_width_mm": 0.4, "cell_mm": 3.0, "algorithm": "organic", "intent": "structural", "organic_structural_certification": "beam_network"}, "output":"#)
         return jobSchemaError(Data(text.utf8)) == nil
     }()
-    /// ★ ANY-STEP STEPPED (core reply, 2026-09-18): `lattice.stepped_cells` is accepted
-    /// only by a core that carries the packer's schema, and only alongside
-    /// `algorithm: "stepped"` — so the probe is a whole job with both. FALSE ⇒ the app
-    /// sends no plan and the run is the legacy one-cell-per-region Stepped (which
-    /// still works on every core). Probed once per launch.
+    /// ★ DOES THIS CORE'S SCHEMA TAKE `lattice.stepped_cells`? (core reply, 2026-09-18). It is
+    /// accepted only alongside a stepped/doubled grading block, so the probe is a whole job.
+    /// ★★ FIXED (maintainer, 2026-10-02, ruling 4): its document used to put lattice `cell_mm` +
+    /// `strut_radius_mm` beside the grading block — a pair core refuses ("lattice "cell_mm" is not
+    /// allowed with a "grading" block") — so it was false on EVERY core and the app had never sent
+    /// a plan. It now probes the document a Default Grade job actually is. Whether a plan is SENT
+    /// is a separate switch, `LatticeSteppedCellWire.defaultGradePlansEnabled` (off until core
+    /// accepts every project's plan). Probed once per launch.
     public static let steppedCellsWired: Bool = {
         var text = latticeProbeBaseJob.replacingOccurrences(
             of: #""output":"#,
-            with: #""grading": {"topology": "octet", "min_extrudable_width_mm": 0.4, "cell_mm": 3.0, "algorithm": "stepped"}, "output":"#)
+            with: #""grading": {"topology": "octet", "min_extrudable_width_mm": 0.4, "cell_mm": 3.0, "algorithm": "doubled"}, "output":"#)
         text.removeLast()
-        text += #", "lattice": {"topology": "octet", "cell_mm": 3.0, "strut_radius_mm": 0.4, "stepped_cells": [{"region_id": 1, "origin_mm": [0, 0, 0], "size_mm": 3.0}]}}"#
+        text += #", "lattice": {"topology": "octet", "stepped_cells": [{"region_id": 1, "origin_mm": [0, 0, 0], "size_mm": 3.0}]}}"#
         return jobSchemaError(Data(text.utf8)) == nil
     }()
     /// ★ The beam-network certificate under Stepped: the GENERIC key

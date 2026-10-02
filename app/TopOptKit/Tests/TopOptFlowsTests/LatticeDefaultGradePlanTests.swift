@@ -27,3 +27,28 @@ final class LatticeDefaultGradePlanTests: XCTestCase {
         XCTAssertFalse(try src("WorkspacePlaceholder.swift").contains("project.lattice.gradeStepStyle == .dyadic"))
     }
 }
+
+/// ★ Ruling 4: the probe is fixed, but SENDING stays off until the CLI proof passes; Stepped plans
+/// never go. Through the relattice builder (the stage job's builder has the same seam).
+final class LatticeDefaultGradePlanSwitchTests: XCTestCase {
+    func testPlansAreOffAndStepppedNeverSendsOne() throws {
+        XCTAssertFalse(LatticeSteppedCellWire.defaultGradePlansEnabled, "★ off until every plan is accepted")
+        var spec = LatticeSpec(topologyID: "octet", cellMM: 12, strutRadiusMM: 0.5,
+                               generateRelativeDensity: 0.3, minRelativeDensity: 0.1, maxRelativeDensity: 0.5)
+        spec.algorithm = "doubled"
+        spec.steppedCells = [LatticeSteppedCellWire(regionID: 1, originMM: .zero, sizeMM: 12)]
+        let original = try JSONSerialization.data(withJSONObject: ["model": "p.step"])
+        func cells(_ s: LatticeSpec, plans: Bool) throws -> Any? {
+            let data = try RelatticeJobBuilder.build(original: original, designFingerprint: 1,
+                                                     achievedVolumeFraction: 0.3, designFileName: "d.3mf",
+                                                     lattice: s, steppedCellsWired: TopOptKit.steppedCellsWired,
+                                                     steppedPlans: plans)
+            let job = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+            return (job["lattice"] as? [String: Any])?["stepped_cells"]
+        }
+        XCTAssertNil(try cells(spec, plans: LatticeSteppedCellWire.defaultGradePlansEnabled), "★ production: no plan")
+        XCTAssertNotNil(try cells(spec, plans: true), "the proof's seam: the plan rides")
+        var stepped = spec; stepped.algorithm = "stepped"
+        XCTAssertNil(try cells(stepped, plans: true), "★ never for Stepped")
+    }
+}

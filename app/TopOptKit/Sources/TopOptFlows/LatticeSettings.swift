@@ -604,13 +604,21 @@ public struct LatticeSteppedCellWire: Equatable, Sendable {
             return LatticeSteppedCellWire(regionID: id, originMM: c.originMM, sizeMM: c.sizeMM, rho: c.rho)
         }
     }
-    /// The block value for a job, or nil when nothing is to be written: only a Stepped
-    /// job carries the key (core refuses it under any other algorithm), only a
-    /// non-empty plan, and only a core whose schema accepts it (`wired`) — an unknown
-    /// key kills the whole job at parse.
-    public static func blockValue(for lat: LatticeSpec, wired: Bool) -> [[String: Any]]? {
-        // ruling A (2026-09-18): the placed list goes for Default Grade ("doubled") too.
-        guard wired, lat.algorithm == "stepped" || lat.algorithm == "doubled",
+    /// ★★ RULING 4 (maintainer, 2026-10-02): DEFAULT GRADE PLANS STAY OFF until every project's
+    /// plan is accepted by core and the run's cell histogram equals the preview's — the CLI proof
+    /// in docs/handoffs/evidence/2026-10-02-lattice-types-round2/. Separate from the schema probe
+    /// (`TopOptKit.steppedCellsWired`), which says only that core would PARSE the key.
+    public static let defaultGradePlansEnabled = false
+
+    /// The block value for a job, or nil when nothing is to be written. Only a DEFAULT GRADE
+    /// ("doubled") job may carry a plan — STEPPED (any-step) plans stay off in both intents until
+    /// core certifies any-step seams honestly (core's own comment: the tensor over-claims at
+    /// every seam) — only when enabled, only a non-empty plan, and only on a core whose schema
+    /// takes the key (`wired`; an unknown key kills the whole job at parse). `enabled` is the
+    /// test seam the proof uses; production passes the switch.
+    public static func blockValue(for lat: LatticeSpec, wired: Bool,
+                                  enabled: Bool = defaultGradePlansEnabled) -> [[String: Any]]? {
+        guard wired, enabled, lat.algorithm == "doubled",
               !lat.steppedCells.isEmpty else { return nil }
         return lat.steppedCells.map { $0.wireDictionary }
     }

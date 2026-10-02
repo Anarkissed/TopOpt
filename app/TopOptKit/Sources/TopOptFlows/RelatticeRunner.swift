@@ -74,7 +74,9 @@ public enum RelatticeJobBuilder {
                              forecastOnly: Bool = false,
                              /// Whether this core's schema takes `lattice.stepped_cells`
                              /// — the launch-time probe by default; a test may force it.
-                             steppedCellsWired: Bool = TopOptKit.steppedCellsWired) throws -> Data {
+                             steppedCellsWired: Bool = TopOptKit.steppedCellsWired,
+                             /// The Default Grade plan switch (ruling 4) — off in production.
+                             steppedPlans: Bool = LatticeSteppedCellWire.defaultGradePlansEnabled) throws -> Data {
         guard var job = (try? JSONSerialization.jsonObject(with: original))
                 as? [String: Any] else {
             throw BuildError("the retained job document is not readable JSON")
@@ -167,7 +169,8 @@ public enum RelatticeJobBuilder {
             block["emit_organic_spans"] = true
         }
         // ★ THE PLAN (2026-09-18): the preview's placed cells, verbatim.
-        if let cells = LatticeSteppedCellWire.blockValue(for: lat, wired: steppedCellsWired) {
+        if let cells = LatticeSteppedCellWire.blockValue(for: lat, wired: steppedCellsWired,
+                                                         enabled: steppedPlans) {
             block["stepped_cells"] = cells
         }
         job["lattice"] = block
