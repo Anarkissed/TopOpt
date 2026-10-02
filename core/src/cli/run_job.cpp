@@ -7839,8 +7839,29 @@ static RunObservability& mutable_build_identity() {
 
 void set_build_identity(const std::string& fingerprint,
                         const std::string& build_time) {
-  mutable_build_identity().fingerprint = fingerprint;
-  mutable_build_identity().build_time = build_time;
+  RunObservability& id = mutable_build_identity();
+  static bool stated = false;
+  // ★ SET ONCE (reviewer, 2026-10-02). Stating the SAME identity twice is harmless
+  // -- a second entry point in one process legitimately does it -- so that is a no-op.
+  // Stating a DIFFERENT one means two binaries' identities are in flight in one
+  // process, and every receipt written after the second call would carry the wrong
+  // one. That is unrecoverable from the receipt afterwards, so it REFUSES here,
+  // naming both. Not an assert: this must hold in Release, which is what ships.
+  // ★ AN EXPLICIT FLAG, NOT A SENTINEL SNIFF. The first version asked whether the
+  // identity "looked set" (fingerprint != "unknown" or a non-empty build_time), which
+  // cannot tell "nobody has stated it" from "someone deliberately stated unknown" --
+  // and in a process where nobody had stated anything it let a different value through
+  // silently. The test caught that. One bool, one meaning.
+  if (stated && (id.fingerprint != fingerprint || id.build_time != build_time))
+    throw std::invalid_argument(
+        "set_build_identity: the build identity is already \"" + id.fingerprint +
+        "\" / \"" + id.build_time + "\" and something is now setting it to \"" +
+        fingerprint + "\" / \"" + build_time +
+        "\". One process is one binary: a receipt written after this would name the "
+        "wrong core, and nothing downstream could tell. Set it once, before any work.");
+  id.fingerprint = fingerprint;
+  id.build_time = build_time;
+  stated = true;
 }
 
 const RunObservability& build_identity() { return mutable_build_identity(); }

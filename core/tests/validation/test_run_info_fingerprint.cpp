@@ -32,6 +32,8 @@
 #include <cstdlib>
 #include <fstream>
 #include <sstream>
+#include "topopt/job.hpp"
+
 #include <stdexcept>
 #include <string>
 
@@ -171,6 +173,90 @@ int main() {
       CHECK(!json_str(info, "build_time").empty(),
             "analyze: run_info build_time must not be empty");
     }
+  }
+
+  // ── 3. `run` — the third receipt path, and the one that already worked ──────
+  // ★ WHY IT IS HERE. `run` stamped its receipt from main.cpp's own copy of
+  // TOPOPT_BUILD_FINGERPRINT / __DATE__ __TIME__ — a SECOND route to the same two
+  // values. It now reads `build_identity()` like the other two, so the macros are
+  // named in exactly one place. This arm proves that change did not break the stamp
+  // it was already getting right; cli_demo and production_parity pin the rest of
+  // `run`'s receipt byte-wise, so between them nothing about `run` moves unnoticed.
+  {
+    const std::string job = tmp + "/fp_run.json";
+    write_file(job,
+               std::string("{\n  \"model\": \"") + ORGANIC_FIXTURE_DIR +
+                   "/dead_parity_tab.stl\",\n"
+                   "  \"material\": \"PLA\",\n"
+                   "  \"mode\": \"minimize_plastic\",\n"
+                   "  \"resolution\": 20,\n"
+                   "  \"simp\": { \"max_iterations\": 4 },\n"
+                   "  \"plsm\": { \"enabled\": true, \"max_iterations\": 3 },\n"
+                   "  \"output\": { \"mesh_format\": \"stl\", \"report\": "
+                   "\"report.json\", \"mesh_prefix\": \"r\" },\n"
+                   "  \"loads\": { \"anchor_face_ids\": [2], \"groups\": [ "
+                   "{ \"face_ids\": [9], \"force\": [0.0, 0.0, -200.0] } ],\n"
+                   "    \"minimize_plastic\": true, \"build_dir\": [0, 0, 1] }\n}\n");
+    const std::string info = run_and_read_run_info("run", job, tmp + "/fp_run");
+    if (info.empty()) {
+      // A `run` that refuses this small job is not this test's subject; say so rather
+      // than fail on it. cli_demo covers `run`'s receipt on the maintainer's fixture.
+      std::printf("  note: `run` wrote no run_info on the probe job; its stamp is "
+                  "covered by cli_demo / production_parity\n");
+    } else {
+      const std::string got = json_str(info, "fingerprint");
+      char msg[320];
+      std::snprintf(msg, sizeof msg,
+                    "run: run_info fingerprint is \"%s\", the binary's is \"%s\"",
+                    got.c_str(), fp.c_str());
+      CHECK(got == fp, msg);
+      CHECK(got != "unknown", "run: run_info fingerprint must never be \"unknown\"");
+      CHECK(!json_str(info, "build_time").empty(),
+            "run: run_info build_time must not be empty");
+    }
+  }
+
+  // ── 4. SET ONCE (reviewer, 2026-10-02) ──────────────────────────────────────
+  // Re-stating the SAME identity is a no-op: a second entry point in one process
+  // legitimately does it. A DIFFERENT one means two binaries' identities are in
+  // flight, and every receipt written afterwards would name the wrong core with
+  // nothing downstream able to tell — so it REFUSES, naming both. Not an assert:
+  // asserts compile out in Release, which is what ships.
+  {
+    // ★ STATE IT FIRST. Nobody has in THIS process -- the test binary is not the
+    // CLI -- and my first version read build_identity() straight off, got the
+    // never-stated defaults, and then "failed" because a different value was
+    // legitimately accepted. The rule is about RE-stating, so the test has to state
+    // once before it can test re-stating.
+    topopt::set_build_identity("abc123def456", "Oct  2 2026 00:00:00");
+    const std::string f0 = topopt::build_identity().fingerprint;
+    const std::string b0 = topopt::build_identity().build_time;
+    CHECK(f0 == "abc123def456" && b0 == "Oct  2 2026 00:00:00",
+          "set once: the first statement takes effect");
+    bool same_ok = true;
+    try {
+      topopt::set_build_identity(f0, b0);          // same value: no-op
+    } catch (const std::exception&) {
+      same_ok = false;
+    }
+    CHECK(same_ok, "set once: re-stating the SAME identity is a no-op");
+    CHECK(topopt::build_identity().fingerprint == f0 &&
+              topopt::build_identity().build_time == b0,
+          "set once: the no-op leaves the identity alone");
+
+    bool threw = false, named_both = false;
+    try {
+      topopt::set_build_identity("deadbeefcafe", "Jan  1 2000 00:00:00");
+    } catch (const std::invalid_argument& e) {
+      threw = true;
+      const std::string w = e.what();
+      named_both = w.find(f0) != std::string::npos &&
+                   w.find("deadbeefcafe") != std::string::npos;
+    }
+    CHECK(threw, "set once: a DIFFERENT identity must throw, not overwrite");
+    CHECK(named_both, "set once: the refusal names BOTH the old and the new identity");
+    CHECK(topopt::build_identity().fingerprint == f0,
+          "set once: the refused call left the identity unchanged");
   }
 
   if (g_failures == 0) {

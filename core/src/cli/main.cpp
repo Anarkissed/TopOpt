@@ -390,8 +390,14 @@ int main(int argc, char** argv) {
   // the question "which core did that run use" is answered by the run itself rather
   // than by `strings` after the fact.
   topopt::RunObservability obs;
-  obs.fingerprint = TOPOPT_BUILD_FINGERPRINT;
-  obs.build_time = __DATE__ " " __TIME__;
+  // ★ ONE SOURCE (reviewer, 2026-10-02). These two lines used to restate
+  // TOPOPT_BUILD_FINGERPRINT and __DATE__/__TIME__ -- a SECOND route to the same two
+  // values, so `run` stamped its receipt from here while `analyze` and
+  // `lattice-variant` stamped theirs from `build_identity()`. Two routes to one fact
+  // is how they drift. The macros are now named in exactly one place, the
+  // set_build_identity() call above, and every receipt reads what that stated.
+  obs.fingerprint = topopt::build_identity().fingerprint;
+  obs.build_time = topopt::build_identity().build_time;
   // ★ --threads N: HOW MUCH OF THE MACHINE THIS RUN MAY TAKE. 0 (the DEFAULT)
   // leaves the production rule alone — production_matfree_thread_count(), the
   // performance-core pin. It is a PURE PERFORMANCE CONTROL and cannot move a
