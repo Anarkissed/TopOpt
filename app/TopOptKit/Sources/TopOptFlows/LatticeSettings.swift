@@ -912,7 +912,12 @@ public struct LatticeSpec: Equatable, Sendable {
                 grading["intent"] = m == .structural ? "structural" : "aesthetic"
             }
             if stageMode == .structural {
-                if TopOptKit.steppedStructuralCertificationWired {
+                // ★★ RULING 3 (maintainer, 2026-10-02): NOT SENT where core does not run it. Core
+                // accepted the key on a Stepped job and certified with the tensor anyway, so the
+                // job and the receipt claimed a check that never happened. It comes back by
+                // itself when core's beam-network set holds "stepped" (and the schema takes it).
+                if TopOptKit.latticeBeamNetworkCertifiedAlgorithms.contains("stepped"),
+                   TopOptKit.steppedStructuralCertificationWired {
                     grading["structural_certification"] = "beam_network"
                 }
                 if let w = minExtrudableWidthMM, w > 0,

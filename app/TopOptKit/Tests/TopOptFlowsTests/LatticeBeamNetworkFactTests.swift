@@ -56,4 +56,25 @@ final class LatticeBeamNetworkFactTests: XCTestCase {
         XCTAssertFalse(ws.contains(".cellsPerMemberFloor(topology: project.lattice.topologyID,"),
                        "no display site left on the stage floor")
     }
+
+    /// Ruling 3: a Stepped + Structural job no longer names an instrument core does not run.
+    /// The intent still travels (core reads it), and so does the tile floor.
+    func testAStructuralSteppedJobNamesNoBeamNetwork() throws {
+        var lat = LatticeSettings(enabled: true)
+        lat.algorithm = "stepped"
+        lat.stageMode = .structural
+        lat.densityMode = .sim
+        let spec = try XCTUnwrap(lat.runSpec(limits: TopOptKit.latticeLimits(topology: "octet"),
+                                             generatable: true, lineWidthMM: 0.45))
+        let g = try XCTUnwrap(spec.gradingDictionary())
+        XCTAssertNil(g["structural_certification"], "★ core accepts the key but never runs it on Stepped")
+        if TopOptKit.gradingSchemaAccepts(key: "intent") {
+            XCTAssertEqual(g["intent"] as? String, "structural", "the intent still travels")
+        }
+        XCTAssertTrue(TopOptKit.steppedStructuralCertificationWired, "the schema still ACCEPTS it — accepting is not running")
+        // organic's own certificate key is a different key and is untouched
+        XCTAssertTrue(try src("LatticeSettings.swift")
+            .contains("if TopOptKit.latticeBeamNetworkCertifiedAlgorithms.contains(\"stepped\"),"),
+                      "★ it comes back keyed on core's fact")
+    }
 }
