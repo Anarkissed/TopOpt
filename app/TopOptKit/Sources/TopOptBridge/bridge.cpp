@@ -3032,6 +3032,13 @@ double lattice_subfloor_retention_fraction() {
   return topopt::lattice_subfloor_retention_stress_fraction();
 }
 
+double lattice_aesthetic_density_ceiling(const std::string& topology) {
+  topopt::LatticeTopology topo;
+  if (!lattice_topology_from_name(topology, topo)) return 0.0;
+  if (topo != topopt::LatticeTopology::Octet) return 0.0;
+  return topopt::octet_aesthetic_density_ceiling();
+}
+
 double lattice_strut_diameter_mm(const std::string& topology, double rho,
                                  double cell_size_mm) {
   topopt::LatticeTopology topo;

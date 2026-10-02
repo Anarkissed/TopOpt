@@ -1081,6 +1081,15 @@ public enum TopOptKit {
         topoptbridge.lattice_strut_diameter_mm(std.string(topology), rho, cellMM)
     }
 
+    /// ★★ CORE'S AESTHETIC DENSITY CEILING (maintainer, 2026-10-02, ruling 5: R12, one
+    /// definition) — octet's 0.218871… on the linked core; nil where core has none for the type.
+    /// Cell-independent: core's diameter table is linear in the cell. The app's own 24-step
+    /// bisection of that table is kept only as a test oracle (`aestheticDensityCeilingOracle`).
+    public static func latticeAestheticDensityCeiling(topology: String) -> Double? {
+        let c = topoptbridge.lattice_aesthetic_density_ceiling(std.string(topology))
+        return c > 0 ? c : nil
+    }
+
     /// ★ THE FORWARD LAW (core reply 5, 2026-09-20): the relative density a strut
     /// radius produces at a cell, sampled the way core samples it. 0 ⇒ no core law
     /// for this topology; 1 ⇒ the radius fills the cell.

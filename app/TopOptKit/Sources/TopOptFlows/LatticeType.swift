@@ -268,7 +268,21 @@ public struct LatticeType: Equatable, Sendable, Identifiable, Hashable {
     /// every other topology reports 1, i.e. nothing is capped.
     public var hasAestheticCeiling: Bool { id == "octet" }
 
+    /// ★★ CORE'S NUMBER (maintainer, 2026-10-02, ruling 5: R12, one definition). It was this
+    /// type's own 24-step bisection of core's diameter table (0.21887144446372986, half a
+    /// 2^-24 interval); core bisects 200 steps (0.21887141535615173). The same law, more
+    /// digits: every graded octet job's `max_relative_density` moves by -2.9e-8, nothing else.
+    /// The cell no longer matters (core's table is linear in the cell); it is kept in the
+    /// signature so every caller reads the same.
     public func aestheticDensityCeiling(cellMM: Double = 4) -> Double {
+        guard hasAestheticCeiling, cellMM > 0 else { return 1 }
+        guard let c = TopOptKit.latticeAestheticDensityCeiling(topology: id) else { return 1 }
+        return Swift.min(1, Swift.max(0, c))
+    }
+
+    /// The app's former bisection — a TEST ORACLE only, pinned to core's value within its own
+    /// tolerance (half the final interval, 2^-25). Never read by production.
+    func aestheticDensityCeilingOracle(cellMM: Double = 4) -> Double {
         guard hasAestheticCeiling, cellMM > 0 else { return 1 }
         let rho = relativeDensity(strutRadiusMM: 0.5 * Self.aestheticStrutRatioCeiling * cellMM,
                                   cellMM: cellMM)

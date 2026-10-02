@@ -25,7 +25,10 @@ AA4C7953-3152-4123-BCB5-EF5F8A08ABA3 a975ba0f83d9b383
 | b | (b) frame-basis test | 3f19f920e5c96a5a | 3fd5d1b2388fe949 | 225865c83c64cb23 | 43a0828a8bbb1e1d | 169fe967ff734cfa | 3e6f162cb36212a9 | b457718dfc23ab42 |
 | f1 | ruling (1): the floor keyed on the beam-network set | 3f19f920e5c96a5a | 3fd5d1b2388fe949 | 225865c83c64cb23 | 43a0828a8bbb1e1d | 169fe967ff734cfa | 3e6f162cb36212a9 | b457718dfc23ab42 |
 | f3 | ruling (3): no beam_network on Stepped + Structural | 3f19f920e5c96a5a | 3fd5d1b2388fe949 | 225865c83c64cb23 | 43a0828a8bbb1e1d | **2ad491fb516877fd** | 3e6f162cb36212a9 | b457718dfc23ab42 |
+| f5 | ruling (5): core's octet ceiling | 3f19f920e5c96a5a | **6dbb48fab4029f78** | **c4ca5d5ac009036d** | **2baaf9cbb94027c7** | **7ba46796d87e3b34** | 3e6f162cb36212a9 | b457718dfc23ab42 |
 
 The arm "b" equals the round-1 values: lt3/lt4 on P1 for the six unchanged projects, and p3base 169fe967ff734cfa for 3418E167. The script reproduces the old dumps.
 
 f3 moves 3418E167 only (Stepped + Structural in S1). Its job differs from f1 in exactly one line, `"structural_certification" : "beam_network"` removed from `grading`; with that key popped the two jobs are equal.
+
+f5 moves the four graded octet jobs: 68BF7B74, 92A8016E, 570B38E2 and 3418E167. In each, only `grading.max_relative_density` changes, from `0.21887144446372986` (the app's 24-step bisection, 7344107/2^25) to `0.21887141535615173` (core's `octet_aesthetic_density_ceiling()`, 200 steps). That is a change of −2.911e-8, and each job is otherwise identical. 102117B9 is organic and carries no cap; AA4C7953 and 887AC498 have no lattice block.

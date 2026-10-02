@@ -1146,6 +1146,13 @@ double lattice_subfloor_retention_fraction();
 
 double lattice_strut_diameter_mm(const std::string& topology, double rho,
                                  double cell_size_mm);
+/// ★ CORE'S AESTHETIC DENSITY CEILING for a topology (maintainer, 2026-10-02, ruling 5: R12, one
+/// definition). The linked core carries it for OCTET only, as the inline
+/// `octet_aesthetic_density_ceiling()` (the diameter table's preimage of strut/cell 0.20; core's
+/// own test asserts the per-type `lattice_aesthetic_density_ceiling(octet)` equals it exactly).
+/// Returns 0 when core has no ceiling for the type ("none measured"). At the next core sync this
+/// calls `lattice_aesthetic_density_ceiling(topo)`; for octet that swap moves no bytes.
+double lattice_aesthetic_density_ceiling(const std::string& topology);
 /// The forward law: the relative density a strut RADIUS produces at a cell (octet
 /// only; 0 = no core law, 1 = the radius fills the cell). Core reply 5, 2026-09-20.
 double lattice_relative_density(const std::string& topology, double strut_radius_mm,
