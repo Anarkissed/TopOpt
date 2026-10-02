@@ -1784,7 +1784,18 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
     /// behaviour; absent from every older snapshot ⇒ decodes to `.full`.
     public var gradingMode: LatticeGradingMode = .full
     /// How the fit-shape grade steps — stepped divisors or dyadic halving.
+    /// ★ The PREVIEW does not read this for a stepped/doubled job: it reads
+    /// `gradeStepsAreHalves`, which follows the algorithm. This remains the organic toggle's
+    /// memory of the last grade style.
     public var gradeStepStyle: LatticeGradeStepStyle = .stepped
+
+    /// ★★ DEFAULT GRADE IS HALVES, BY ITS ALGORITHM (maintainer, 2026-10-02, ruling 4, R4). The
+    /// preview packed by `gradeStepStyle`, which only the wizard's save syncs — the variant page's
+    /// picker writes `algorithm` alone and an absent key decodes to `.stepped` — so a Default
+    /// Grade project such as 570B38E2 (doubled, no gradeStepStyle) drew ANY-STEP sizes while
+    /// core grades doubled in halves (run_job.cpp:7003-7005). One rule now, the algorithm's:
+    /// "doubled" packs halves, "stepped" any step. No job key reads either.
+    public var gradeStepsAreHalves: Bool { algorithm == "doubled" }
     /// ★ THE PER-FACE CELL (mm), stated by the user — the dial the two new
     /// grading modes expose ("include a cell size value above density").
     /// Keyed by `LatticeSelectableRef.key`, like the density beside it. Absent

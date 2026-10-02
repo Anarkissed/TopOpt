@@ -125,7 +125,7 @@ final class LatticeHisSteppedBakeProbe: XCTestCase {
         mr.latticeLayerHeightMM = pm.printParams.layerHeightMM
         mr.latticeSteppedCellMM = cells
         mr.latticeSteppedShapeFit = lat.gradingMode.fitsShape
-        mr.latticeSteppedDyadicSteps = lat.gradeStepStyle == .dyadic
+        mr.latticeSteppedDyadicSteps = lat.gradeStepsAreHalves   // the app's rule (R4, 2026-10-02)
         mr.latticeSteppedCellStated = stated
         mr.setLatticeScene(s1, token: 1)
         mr.latticeDressingLevel = lat.boundary.previewDressingLevel

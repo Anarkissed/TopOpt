@@ -1123,7 +1123,7 @@ public struct WorkspacePlaceholder: View {
                                                      steppedShapeFit:
                                                         project.lattice.gradingMode.fitsShape,
                                                      steppedDyadicSteps:
-                                                        project.lattice.gradeStepStyle == .dyadic,
+                                                        project.lattice.gradeStepsAreHalves,
                                                      steppedCellStated:
                                                         latticePreviewSteppedStated,
                                                      // ★ Hide the superseded picture
