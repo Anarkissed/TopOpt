@@ -42,7 +42,7 @@ final class LatticeShapeGradeKeysTests: XCTestCase {
         var s = LatticeSettings(enabled: true); s.topologyID = "octet"; s.cellMM = 6
         s.allowQuilt = false
         let capped = try XCTUnwrap(s.runSpec(lineWidthMM: 0.45))
-        let ceiling = LatticeType.named("octet").aestheticDensityCeiling(cellMM: 6)
+        let ceiling = LatticeType.octet.aestheticDensityCeiling(cellMM: 6)
         XCTAssertEqual(capped.densityCapRho, ceiling, accuracy: 1e-12)
         XCTAssertGreaterThan(ceiling, 0.2); XCTAssertLessThan(ceiling, 0.23, "the diameter table's preimage of 0.20")
         let g = try XCTUnwrap(capped.gradingDictionary())

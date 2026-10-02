@@ -23,7 +23,7 @@ final class LatticeSampleSingleCellTests: XCTestCase {
     }
 
     private func run(_ member: Double, k: Int, dyadic: Bool) -> ViewerMesh {
-        LatticeSamplePatch.mesh(lattice: .named("octet"), cellMM: member,
+        LatticeSamplePatch.mesh(lattice: .octet, cellMM: member,
                                 cells: 2, relativeDensity: 0.3,
                                 boundary: .none, transition: .stepped,
                                 sides: 6, steppedCoarsePerHalf: k,

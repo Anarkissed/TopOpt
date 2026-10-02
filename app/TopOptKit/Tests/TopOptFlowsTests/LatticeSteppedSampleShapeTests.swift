@@ -22,7 +22,7 @@ final class LatticeSteppedSampleShapeTests: XCTestCase {
     }
 
     func testWhatTheSteppedSampleActuallyIs() throws {
-        let lat = LatticeType.named("octet")
+        let lat = LatticeType.octet
         for cells in [2, 3, 4, 5] {
             let stepped = LatticeSamplePatch.mesh(
                 lattice: lat, cellMM: 8, cells: cells, relativeDensity: 0.3,

@@ -356,22 +356,28 @@ public extension LatticeType {
     /// one on the LEFT. Currently it's the last in line and the default. It reads
     /// backwards. Place it on the far left of the list and first to view."*
     ///
-    /// It IS the default (`named(_:)` falls back to it, and the wizard opens on
-    /// it), and it was the seventh of seven — so the picker opened showing six
+    /// It IS the default (a new project and an absent key decode to it, and the wizard
+    /// opens on it — `named(_:)` no longer falls back to it), and it was the seventh of seven — so the picker opened showing six
     /// types the user had not chosen, with the chosen one off the right edge.
     /// The order is the picker's reading order and nothing else depends on it:
     /// the only other consumers iterate the whole list (`LatticeModeEvidenceGen`)
     /// or look up by id (`named`, `displayName(forID:)`).
     static let family: [LatticeType] = [octet, sc, bcc, bccz, fcc, fccz, diamond]
 
-    /// Look up a lattice by its stable id; falls back to `octet`.
-    static func named(_ id: String) -> LatticeType {
-        family.first { $0.id == id } ?? octet
+    /// Look up a lattice by its stable id — nil for an id this table does not carry.
+    /// ★★ NEVER OCTET IN DISGUISE (maintainer, 2026-10-02, item a): it used to fall back to
+    /// octet, so a kelvin, rhombic, gyroid, schwarz_d or re-entrant project — or any unknown id —
+    /// silently got octet's struts, strut law, aesthetic cap and core limits (the workspace asked
+    /// core for the RESOLVED type's limits and face card). Each caller now says what it does
+    /// without a law: refuse, skip, or ask core by the raw id. "" is nil too (the bake's "no strut
+    /// law" sentinel). Octet still resolves to itself, so no octet result moves.
+    static func named(_ id: String) -> LatticeType? {
+        family.first { $0.id == id }
     }
 
     /// A display name for ANY core topology id — including the ones this family
     /// carries no geometry for (kelvin / rhombic / reentrant, whose polyhedron-edge
-    /// cells are not ported). `named(_:)` falls back to octet, which would put the
+    /// cells are not ported). `named(_:)` once fell back to octet, which would put the
     /// WRONG name on a picker row or a reason string; this never does. An id neither
     /// here nor in the family renders as itself, so a topology core adds tomorrow is
     /// at worst plainly named, never mislabelled.

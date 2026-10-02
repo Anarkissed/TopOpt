@@ -182,9 +182,23 @@ public enum LatticeFaceCardDerivation {
     /// extrusion width. Leaving the parameters in place while ignoring them would
     /// have been the exact defect this task exists to remove — an input that
     /// looks like it decides something and does not.
+    /// A `LatticeType` is only ever read for its id here; the card asks core by id.
     public static func card(faceID: Int, depthMM: Double, heldVoxels: Int,
                             spacingMM: Double, densityGCM3: Double,
                             topology: LatticeType,
+                            declaredDensity: Double? = nil,
+                            minExtrudableWidthMM: Double,
+                            cellsPerMemberFloor: Double = 0) -> LatticeFaceCard {
+        card(faceID: faceID, depthMM: depthMM, heldVoxels: heldVoxels, spacingMM: spacingMM,
+             densityGCM3: densityGCM3, topologyID: topology.id, declaredDensity: declaredDensity,
+             minExtrudableWidthMM: minExtrudableWidthMM, cellsPerMemberFloor: cellsPerMemberFloor)
+    }
+
+    /// ★ BY THE RAW TOPOLOGY ID (item a, 2026-10-02): core is asked about the type the project
+    /// names — never a `LatticeType` that a lookup could have turned into octet.
+    public static func card(faceID: Int, depthMM: Double, heldVoxels: Int,
+                            spacingMM: Double, densityGCM3: Double,
+                            topologyID: String,
                             declaredDensity: Double? = nil,
                             // ★ PRINTABILITY IS ENTIRELY USER INPUT, and this is
                             // it: the minimum extrudable strut width from the
@@ -219,7 +233,7 @@ public enum LatticeFaceCardDerivation {
         // The certifiable band, read from CORE for THIS topology — the only use
         // left for it is clamping a DECLARED density, since there is no
         // certificate outside the band. Auto never touches it.
-        let limits = TopOptKit.latticeLimits(topology: topology.id)
+        let limits = TopOptKit.latticeLimits(topology: topologyID)
 
         // 1.0 declared means SOLID — no lattice, nothing saved — which is core's
         // own C0 rule (`kLatticeSolidAt`) and the reason bar R1 can be exact.
@@ -265,7 +279,7 @@ public enum LatticeFaceCardDerivation {
         // `LatticeSectorDensity` passes (`thinnestExtentMM`), for a face slab
         // whose in-plane extents exceed its depth.
         let d = TopOptKit.latticeRegionDerivation(
-            topology: topology.id, memberWidthMM: depthMM,
+            topology: topologyID, memberWidthMM: depthMM,
             minExtrudableWidthMM: minExtrudableWidthMM,
             // <= 0 means AUTO to the bridge. A declared density is clamped into
             // the band first — there is no certificate outside it — but its

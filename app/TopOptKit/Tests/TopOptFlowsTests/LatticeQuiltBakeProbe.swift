@@ -163,7 +163,7 @@ final class LatticeQuiltBakeProbe: XCTestCase {
         // carries its own copy of the rule, so it has to move with it or it stops
         // being a check on the app and becomes a second opinion.
         var floorMM = finestStated
-        let lat = LatticeType.named("octet")
+        let lat = LatticeType.octet
         while floorMM > 0 {
             let half = floorMM / 2
             let binds = LatticeSDFRenderer.floorTestAtCeiling ? h.rhoMax : h.rhoMin

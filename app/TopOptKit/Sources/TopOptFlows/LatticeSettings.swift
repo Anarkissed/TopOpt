@@ -1550,6 +1550,8 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
     public func manualThicknessRangeMM(limits: TopOptKit.LatticeLimits,
                                        lineWidthMM: Double) -> ClosedRange<Double> {
         let lo = Swift.max(0.05, lineWidthMM > 0 ? lineWidthMM : 0.4)
+        // ★ no strut law for the id (item a): no density ↔ thickness map, so no range to offer
+        guard let lattice else { return lo...(lo + 0.05) }
         var rhoMax = limits.certifiable && limits.rhoMax > 0 ? limits.rhoMax : 0.9
         // ★ the slider cannot offer a quilt unless Allow quilt is on (octet only)
         if !allowQuilt { rhoMax = Swift.min(rhoMax, lattice.aestheticDensityCeiling(cellMM: cellMM)) }
@@ -1567,7 +1569,8 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
     /// (see `LatticeType.printabilityDensityFloor`), which is exactly where the
     /// slider's own minimum sits, so the clamp only ever bites on a stale value.
     public func manualThicknessDensity(limits: TopOptKit.LatticeLimits) -> Double? {
-        guard !simulateStresses, let mm = manualStrutThicknessMM, mm > 0 else { return nil }
+        guard !simulateStresses, let mm = manualStrutThicknessMM, mm > 0,
+              let lattice else { return nil }   // no strut law (item a): no manual pin
         let rho = lattice.relativeDensity(strutRadiusMM: mm / 2, cellMM: cellMM)
         let floor = lattice.printabilityDensityFloor(lineWidthMM: 0, cellMM: cellMM)
         var hi = limits.certifiable && limits.rhoMax > 0 ? limits.rhoMax : 1
@@ -2321,9 +2324,10 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         }
     }
 
-    /// The resolved topology (never nil — an unknown id falls back to octet, matching
-    /// `LatticeType.named`).
-    public var lattice: LatticeType { LatticeType.named(topologyID) }
+    /// The resolved topology — nil for an id the Swift table lacks (item a, 2026-10-02: it used
+    /// to fall back to octet, which put octet's strut law under another type's name). Callers
+    /// say what they do without a law; a type core can't run is refused at the button first.
+    public var lattice: LatticeType? { LatticeType.named(topologyID) }
 
     /// A member-width estimate (mm) for the cells-per-member readout, taken from the
     /// region's smallest cross-section: a bolt's diameter, a face slab's smallest
@@ -2543,7 +2547,8 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
             spec.algorithm = algorithm
             spec.shapeGrade = gradingMode.fitsShape
             spec.shapeGradeBandMM = shapeFitBandMM
-            spec.densityCapRho = allowQuilt ? 0 : lattice.aestheticDensityCeiling(cellMM: cellMM)
+            // no law for the id (item a): 0 = no cap key, as for every uncapped type
+            spec.densityCapRho = allowQuilt ? 0 : (lattice?.aestheticDensityCeiling(cellMM: cellMM) ?? 0)
 
             // ★ ORGANIC — copied verbatim; `gradingDictionary()` owns every emission gate.
             spec.organicGrowth = organicGrowth
@@ -2565,6 +2570,10 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
             return spec
         }
         let genRho = b.generateRelativeDensity
+        // ★ no strut law for the id (item a): no uniform radius to build. Unreachable while
+        // `runnableAsCertified` needs a generatable type (octet), and a saved type core can't run
+        // is refused on the button first (the type catalog's refusal, b38aa074).
+        guard let lattice else { return nil }
         let radius = lattice.strutRadiusMM(relativeDensity: genRho, cellMM: cellMM)
         guard radius > 0 else { return nil }
         var spec2 = LatticeSpec(topologyID: topologyID, cellMM: cellMM, strutRadiusMM: radius,
@@ -2718,7 +2727,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
                                   // grade-to-shape reads its ends.
                                   uniformRelativeDensity: Swift.max(b.densityLo, Swift.min(
                                       0.5 * (b.densityLo + b.densityHi),
-                                      allowQuilt ? 1.0 : lattice.aestheticDensityCeiling(cellMM: cellMM))))
+                                      allowQuilt ? 1.0 : (lattice?.aestheticDensityCeiling(cellMM: cellMM) ?? 1.0))))
         p.shapeFitGradeStrength = shapeFitGradeStrength
         return p
     }
@@ -2915,10 +2924,10 @@ public struct LatticeBounds: Equatable, Sendable {
                                generatable: Bool = true,
                                memberMM: Double = 0,
                                lineWidthMM: Double = 0) -> LatticeBounds {
+        // nil for an id with no strut table (item a): no printability floor and no strut
+        // width to report — never octet's numbers under another type's name.
         let topo = settings.lattice
-        // Display name for the reasons. LatticeType.named falls back to octet for
-        // ids it has no geometry for (kelvin/rhombic), which would put the WRONG
-        // name in a reason string — resolve the name independently.
+        // Display name for the reasons — from the id, never from a resolved LatticeType.
         let name = LatticeType.displayName(forID: settings.topologyID)
 
         // Density: clamp the user's range into the core band. When core does not
@@ -2944,8 +2953,8 @@ public struct LatticeBounds: Equatable, Sendable {
         // ★ IT DEPENDS ON THE CELL TOO, quadratically: see
         // `LatticeType.printabilityDensityFloor`. Both bounds apply, so the floor
         // is whichever is higher, and the reason says which one bit.
-        let printFloor = topo.printabilityDensityFloor(lineWidthMM: lineWidthMM,
-                                                       cellMM: settings.cellMM)
+        let printFloor = topo?.printabilityDensityFloor(lineWidthMM: lineWidthMM,
+                                                        cellMM: settings.cellMM) ?? 0
         if printFloor > lo {
             lo = min(1, printFloor)
             loReason = "thinner than one \(mm(lineWidthMM)) extrusion at a \(mm(settings.cellMM)) cell "
@@ -3018,9 +3027,9 @@ public struct LatticeBounds: Equatable, Sendable {
         // see the parameter doc). The densest grading end
         // makes the thinnest… no: the densest end makes the THICKEST strut; the
         // printability risk is at the SPARSE end, so check the low density's radius.
-        let strutR = topo.strutRadiusMM(relativeDensity: lo, cellMM: settings.cellMM)
+        let strutR = topo?.strutRadiusMM(relativeDensity: lo, cellMM: settings.cellMM) ?? 0
         let floor = lineWidthMM > 0 ? 0.5 * lineWidthMM : 0
-        let tooThin = floor > 0 && strutR < floor - 1e-9
+        let tooThin = topo != nil && floor > 0 && strutR < floor - 1e-9
         let strutReason: String? = tooThin
             ? "struts reach \(String(format: "%.2f mm", strutR)) at the sparse end — thinner than one extrusion width (\(mm(lineWidthMM))), too thin to print"
             : nil

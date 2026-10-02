@@ -280,8 +280,8 @@ public struct LatticeWizardModel: Equatable, Sendable {
     /// receipt, never guessed here.
     public func organicCellCandidates(memberMM: Double?, lineWidthMM: Double,
                                       densityCeiling: Double) -> [Double] {
-        guard let w = memberMM, w > 0, lineWidthMM > 0 else { return [] }
-        let lat = LatticeType.named(topologyID)
+        guard let w = memberMM, w > 0, lineWidthMM > 0,
+              let lat = LatticeType.named(topologyID) else { return [] }   // no law (item a): nothing
         var out: [Double] = []
         for k in 1...12 {
             let c = w / Double(k)
@@ -500,7 +500,7 @@ public struct LatticeWizardModel: Equatable, Sendable {
         return nil
     }
 
-    public var lattice: LatticeType { LatticeType.named(topologyID) }
+    public var lattice: LatticeType? { LatticeType.named(topologyID) }
 
     // MARK: the moves
 
@@ -681,6 +681,9 @@ public struct LatticeWizardModel: Equatable, Sendable {
         // ★ AND THE GRADE REACHES IT TOO. A single cell has no transition to show, so
         // the cell view stays the one cell; the IN THE PART view is where the three
         // algorithms differ, which is also where the control lives.
+        // ★ no strut table for the id (item a): an empty sample — the Type row already says why
+        // (the type catalog's refusal line); never an octet cell under another name
+        guard let lattice else { return ViewerMesh(vertices: [], indices: [], faceIDs: []) }
         return LatticeSamplePatch.mesh(lattice: lattice, cellMM: cellMM,
                                        cells: cells,
                                        // ★ CLAMPED FOR LEGIBILITY, DISPLAY-ONLY,
@@ -710,8 +713,8 @@ public struct LatticeWizardModel: Equatable, Sendable {
     /// The triangle count the current stage will draw — the latency budget, known
     /// before the mesh is built.
     public var stageTriangleCount: Int {
-        LatticeSamplePatch.triangleCount(lattice: lattice,
-                                         cells: stage == .cell ? 1 : cellsAcross)
+        lattice.map { LatticeSamplePatch.triangleCount(lattice: $0,
+                                                       cells: stage == .cell ? 1 : cellsAcross) } ?? 0
     }
 }
 

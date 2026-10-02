@@ -367,7 +367,11 @@ public struct LatticeSDFPreview: Equatable, Sendable {
         self.segments = Self.centeredSegments(lattice)
     }
 
-    public init(latticeID: String) { self.init(lattice: LatticeType.named(latticeID)) }
+    /// nil for an id with no strut table (item a, 2026-10-02) — never octet's struts in disguise.
+    public init?(latticeID: String) {
+        guard let lattice = LatticeType.named(latticeID) else { return nil }
+        self.init(lattice: lattice)
+    }
 
     // MARK: honesty (bar P1)
 

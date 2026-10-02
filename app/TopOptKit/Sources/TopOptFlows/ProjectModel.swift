@@ -895,8 +895,10 @@ public final class ProjectModel: ObservableObject {
     /// between them. Every step moves the picture by the same amount, and 100 % is
     /// the fattest strut the law can actually produce rather than a number the
     /// geometry ignores.
-    public func latticeDensityBandDiametersMM(cellMM: Double) -> (lo: Double, hi: Double) {
-        let lat = LatticeType.named(lattice.topologyID)
+    /// nil when the topology id has no strut law (item a, 2026-10-02): there is no width
+    /// dial to show — never octet's widths under another type's name.
+    public func latticeDensityBandDiametersMM(cellMM: Double) -> (lo: Double, hi: Double)? {
+        guard let lat = LatticeType.named(lattice.topologyID) else { return nil }
         let bead = Swift.max(0.05, printParams.strutLineWidthMM)
         // The law's own ceiling: what a fully dense cell of this size produces.
         let solid = 2 * lat.strutRadiusMM(relativeDensity: 1, cellMM: cellMM)
@@ -915,12 +917,13 @@ public final class ProjectModel: ObservableObject {
     }
 
     /// A stored density → the percent to SHOW, 1…100 across the width band.
-    public func latticeDensityPercent(rho: Double, cellMM: Double) -> Double {
+    /// nil when the type has no strut law (item a): the drawer shows no percent.
+    public func latticeDensityPercent(rho: Double, cellMM: Double) -> Double? {
+        guard let lat = LatticeType.named(lattice.topologyID),
+              let b = latticeDensityBandDiametersMM(cellMM: cellMM) else { return nil }
         guard cellMM > 0 else { return 1 }
-        let b = latticeDensityBandDiametersMM(cellMM: cellMM)
         guard b.hi > b.lo else { return 1 }
-        let d = 2 * LatticeType.named(lattice.topologyID)
-            .strutRadiusMM(relativeDensity: rho, cellMM: cellMM)
+        let d = 2 * lat.strutRadiusMM(relativeDensity: rho, cellMM: cellMM)
         let t = (d - b.lo) / (b.hi - b.lo)
         return 1 + 99 * Swift.max(0, Swift.min(1, t))
     }
@@ -928,13 +931,14 @@ public final class ProjectModel: ObservableObject {
     /// A typed percent → the density to STORE. The inverse of the above, through
     /// core's own curve (`relativeDensity(strutRadiusMM:)` bisects it), so the
     /// number he types is the strut he gets.
-    public func latticeDensityForPercent(_ pct: Double, cellMM: Double) -> Double {
+    /// nil when the type has no strut law (item a): nothing to store from a percent.
+    public func latticeDensityForPercent(_ pct: Double, cellMM: Double) -> Double? {
+        guard let lat = LatticeType.named(lattice.topologyID),
+              let b = latticeDensityBandDiametersMM(cellMM: cellMM) else { return nil }
         guard cellMM > 0 else { return 0 }
-        let b = latticeDensityBandDiametersMM(cellMM: cellMM)
         let t = Swift.max(0, Swift.min(1, (pct - 1) / 99))
         let d = b.lo + t * (b.hi - b.lo)
-        let rho = LatticeType.named(lattice.topologyID)
-            .relativeDensity(strutRadiusMM: d / 2, cellMM: cellMM)
+        let rho = lat.relativeDensity(strutRadiusMM: d / 2, cellMM: cellMM)
         return Swift.min(1, Swift.max(0, rho))
     }
 
@@ -952,10 +956,15 @@ public final class ProjectModel: ObservableObject {
     /// quilt. Both ends from core's own strut law, nothing invented here.
     public func latticeAestheticDensityBand(cellMM: Double)
         -> (lo: Double, hi: Double) {
-        let lat = LatticeType.named(lattice.topologyID)
         let limits = TopOptKit.latticeLimits(topology: lattice.topologyID)
         var lo = limits.rhoMin
         var hi = 1.0
+        // ★ no strut law for the id (item a): core's band alone — no Swift printability floor,
+        // no quilt, no octet cap
+        guard let lat = LatticeType.named(lattice.topologyID) else {
+            if limits.rhoMax > lo { hi = limits.rhoMax }
+            return (lo, Swift.max(hi, Swift.min(1.0, lo + 1e-3)))
+        }
         if cellMM > 0 {
             if printParams.strutLineWidthMM > 0 {
                 let f0 = lat.printabilityDensityFloor(

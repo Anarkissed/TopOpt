@@ -127,8 +127,8 @@ public enum LatticeRegionCells {
                                        cellMM: Double, bead: Double) -> Bool {
         guard let s = scene, !project.lattice.allowQuilt, !s.allowQuilt,
               region < s.regionDrawnDensityP90.count else { return false }
-        let law = LatticeType.named(project.lattice.topologyID)
-        guard law.hasAestheticCeiling, s.drawnCeilingRho < s.drawnBand.hi else { return false }
+        guard let law = LatticeType.named(project.lattice.topologyID),   // no law: no octet rule (item a)
+              law.hasAestheticCeiling, s.drawnCeilingRho < s.drawnBand.hi else { return false }
         return quiltTrips(p90: s.regionDrawnDensityP90[region], lo: s.drawnBand.lo, ceiling: s.drawnCeilingRho,
                           smallerCellFloor: law.printabilityDensityFloor(lineWidthMM: bead, cellMM: cellMM))
     }

@@ -4218,7 +4218,8 @@ public struct WorkspacePlaceholder: View {
         LatticeLegendPanel(
             groups: latticeLegendGroups(),
             span: span,
-            mmAt: { 2 * topo.strutRadiusMM(relativeDensity: $0, cellMM: cell) },
+            // no strut law for the id (item a): the key shows densities without millimetres
+            mmAt: { rho in topo.map { 2 * $0.strutRadiusMM(relativeDensity: rho, cellMM: cell) } },
             mode: $latticeLegendMode,
             minimized: $latticeLegendMinimized,
             probe: latticeLegendProbe,
@@ -4298,8 +4299,9 @@ public struct WorkspacePlaceholder: View {
         if project.lattice.algorithm == "organic", cellMM > 0 {
             mm = TopOptKit.organicStrutDiameterMM(spacingMM: cellMM, relativeDensity: rho)
         } else {
-            mm = 2 * latticeProxy.params.lattice.strutRadiusMM(
-                relativeDensity: rho, cellMM: cellMM)
+            // no strut law for the id (item a): no strut width — never octet's
+            mm = latticeProxy.params.lattice.map { 2 * $0.strutRadiusMM(
+                relativeDensity: rho, cellMM: cellMM) } ?? 0
         }
         // ★ ONE CELL, READ ONCE, USED FOR BOTH LINES. It comes out of the baked field
         // (see above), so the strut millimetres and the cell millimetres are computed
@@ -10067,7 +10069,9 @@ public struct WorkspacePlaceholder: View {
     /// the diagnoses of the selectables that are ACTUALLY latticed, so the badge
     /// describes things that exist and that a handle can move.
     private func latticeDiagnosis(_ g: SelectionGroup) -> LatticeFaceDiagnosis {
-        let limits = TopOptKit.latticeLimits(topology: project.lattice.lattice.id)
+        // ★ the RAW id to core (item a, his misroute): `.lattice.id` was octet for any id the
+        // Swift table lacks, so a Kelvin project read octet's limits
+        let limits = TopOptKit.latticeLimits(topology: project.lattice.topologyID)
         let nozzle = project.printParams.strutLineWidthMM
         // ★ THE STAGE'S FLOOR, NOT THE ACCURACY FLOOR (his fix 3, 2026-08-24
         // late): the badge judged every face against core's floor of 5 whatever
@@ -10685,7 +10689,7 @@ public struct WorkspacePlaceholder: View {
         let autoRho = project.latticeDensityForPercent(
             ProjectModel.latticeAutoDensityPercent, cellMM: cardCell)
         let storedRho = project.latticeSelectableDensity(ref, in: g.id)
-            ?? (cardCell > 0 ? autoRho : (card?.relativeDensity ?? 0))
+            ?? (cardCell > 0 ? (autoRho ?? card?.relativeDensity ?? 0) : (card?.relativeDensity ?? 0))
         let relativePct = project.latticeDensityPercent(rho: storedRho,
                                                         cellMM: cardCell)
         // ★ THE CELL ROW IS A CONTROL ONLY UNDER THE NEW GRADING OPTIONS (his
@@ -10705,9 +10709,10 @@ public struct WorkspacePlaceholder: View {
             // "Auto · N%" — so a stored override (like the stale clamped 20%
             // that painted his 'default' quilt) is distinguishable from the
             // derived default at a glance. Typing 0 clears back to Auto.
+            // no strut law for the id (item a): no percent to show
             densityDisplay: aesthetic
-                ? (userStated ? String(format: "%.0f%%", relativePct)
-                              : String(format: "Auto · %.0f%%", relativePct))
+                ? relativePct.map { userStated ? String(format: "%.0f%%", $0)
+                                               : String(format: "Auto · %.0f%%", $0) }
                 : nil,
             cellControl: cellControl,
             // ★ "Auto · N mm" when nobody typed one — same escape hatch the
@@ -10845,7 +10850,9 @@ public struct WorkspacePlaceholder: View {
         latticeCardsToken += 1
         let token = latticeCardsToken
         let resolution = Self.latticeCardPreviewResolution
-        let topology = project.lattice.lattice
+        // ★ the RAW id (item a, his misroute): the card asks core by id; a resolved LatticeType
+        // was octet for any id the Swift table lacks
+        let topologyID = project.lattice.topologyID
         let widthMM = project.printParams.strutLineWidthMM
         // ★ THE STAGE'S FLOOR, derived once for the batch — the same expression
         // the bake uses, so the cards and the picture obey one law.
@@ -10867,7 +10874,7 @@ public struct WorkspacePlaceholder: View {
                 byKey[keysCopy[i]] = LatticeFaceCardDerivation.card(
                     faceID: fid, depthMM: depthsCopy[i],
                     heldVoxels: preview.voxels[i], spacingMM: preview.spacingMM,
-                    densityGCM3: densityGCM3, topology: topology,
+                    densityGCM3: densityGCM3, topologyID: topologyID,
                     // ★ THE MODE'S OWN DENSITY, WHICH NO CALL SITE PASSED UNTIL
                     // NOW (task 2026-08-17-lattice-stage-repair §1d). nil is
                     // AUTO and means core derives; a number is what the user

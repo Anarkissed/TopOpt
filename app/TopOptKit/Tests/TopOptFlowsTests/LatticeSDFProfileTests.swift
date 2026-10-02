@@ -127,7 +127,7 @@ final class LatticeSDFProfileTests: XCTestCase {
         print(String(format: "part: WallMount_ShelfBracket  bbox=%.0f×%.0f×%.0f mm  occupancy grid=%d×%d×%d (%.1f MB f16)",
                      b.x, b.y, b.z, scene.occupancy.nx, scene.occupancy.ny, scene.occupancy.nz,
                      Double(scene.occupancy.count * 2) / (1024 * 1024)))
-        print("segments in shader soup: \(scene.preview.segments.count) capsules (octet)")
+        print("segments in shader soup: \(scene.preview?.segments.count ?? 0) capsules (octet)")
         print("GEOMETRY: 0 triangles, 0 vertex buffers — a full-screen triangle + one uniform buffer, at EVERY cell.")
 
         print("P3/V2  cell |  @1024²  |  @2048²   (proxy busy scene: 0.31 ms @1024²; 134 body: 0.436 ms)")

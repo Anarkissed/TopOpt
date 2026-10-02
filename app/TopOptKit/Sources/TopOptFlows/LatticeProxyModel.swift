@@ -55,8 +55,10 @@ public final class LatticeProxyModel: ObservableObject {
     /// The sample-patch geometry (true struts + node blobs), for a live inset or a
     /// thumbnail. Small by construction (a few thousand triangles).
     public func samplePatchMesh() -> ViewerMesh {
-        LatticeSamplePatch.mesh(lattice: params.lattice, cellMM: params.cellMM,
-                                cells: patchCells, relativeDensity: patchRelativeDensity)
+        // ★ no law for the id (item a): nothing to draw — never octet's patch under its name
+        guard let lattice = params.lattice else { return ViewerMesh(vertices: [], indices: [], faceIDs: []) }
+        return LatticeSamplePatch.mesh(lattice: lattice, cellMM: params.cellMM,
+                                       cells: patchCells, relativeDensity: patchRelativeDensity)
     }
 
     /// A rendered thumbnail of the sample patch, memoised on the inputs that change
@@ -72,7 +74,7 @@ public final class LatticeProxyModel: ObservableObject {
     /// The sample patch's true triangle count (shown in the legend as the honest
     /// "this is all the geometry on the device" number).
     public var samplePatchTriangles: Int {
-        LatticeSamplePatch.triangleCount(lattice: params.lattice, cells: patchCells)
+        params.lattice.map { LatticeSamplePatch.triangleCount(lattice: $0, cells: patchCells) } ?? 0
     }
 
     // MARK: legend + cost (all local)

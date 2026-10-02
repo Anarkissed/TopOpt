@@ -349,7 +349,8 @@ public struct LatticeSDFScene {
         let t = (ceilingRho - rhoMin) / (rhoMax - rhoMin)
         return gamma > 0 ? pow(t, 1.0 / gamma) : t
     }
-    public var preview: LatticeSDFPreview
+    /// nil when the topology id has no strut table (item a): the march draws no segments.
+    public var preview: LatticeSDFPreview?
     public var occupancy: LatticeVoxelGrid
     /// Truncated signed distance of the part (mm, negative inside) — the flush
     /// boundary trim (round 3). Exact near the surface, so flat faces render straight.
@@ -1251,7 +1252,7 @@ public struct LatticeSDFScene {
         // demand that lands on `LatticeType.aestheticDensityCeiling` (strut = 0.20 of
         // the cell, windows half open). A STATED per-face density is not clamped: that
         // is the one manual way past the ceiling. Nothing about grade-to-shape moves.
-        let ceilingRho = LatticeType.named(latticeID).aestheticDensityCeiling()
+        let ceilingRho = LatticeType.named(latticeID)?.aestheticDensityCeiling() ?? 1   // no law: no cap (item a)
         let demandCap = Self.aestheticDemandCap(rhoMin: rhoMin, rhoMax: rhoMax, gamma: gamma,
                                                 ceilingRho: ceilingRho)
         func cap(_ grid: LatticeVoxelGrid?) -> (LatticeVoxelGrid?, Int) {
@@ -1279,7 +1280,7 @@ public struct LatticeSDFScene {
         if graded != nil || statedDemand != nil {
             NSLog(String(format: "DIAG densityCeiling rho=%.3f (strut/cell %.2f, octet=%@) band=[%.3f, %.3f] gamma=%.2f demandCap=%.3f cappedGraded=%d cappedStated=%d allowQuilt=%@",
                          ceilingRho, LatticeType.aestheticStrutRatioCeiling,
-                         LatticeType.named(latticeID).hasAestheticCeiling ? "yes" : "no",
+                         LatticeType.named(latticeID)?.hasAestheticCeiling == true ? "yes" : "no",
                          rhoMin, rhoMax, gamma, demandCap, cappedGradedCount, cappedStatedCount,
                          allowQuilt ? "yes" : "no"))
         }
@@ -2325,7 +2326,9 @@ extension LatticeSDFScene {
 }
 
 extension LatticeSDFScene: LatticeSDFPreviewSummary {
-    public var previewLabel: String { preview.previewLabel }
+    public var previewLabel: String {
+        preview?.previewLabel ?? "LATTICE PREVIEW — nothing to draw: no strut law for this type"
+    }
 
     /// ★ ruling (g): whether an include region was emitted — the list the clip used.
     public var hasIncludeRegion: Bool { LatticeJobIncludeGate.hasIncludeWall(regions) }
@@ -2691,7 +2694,7 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
         // here — the mesh view frames the shared model when a mesh lands, and that
         // framed camera is what both passes draw with. (Offscreen tests frame their
         // local camera explicitly.)
-        uploadSegments(scene.preview.segments)
+        uploadSegments(scene.preview?.segments ?? [])
         // ★ TWO CHANNELS (2026-09-26): r = the LATTICED part (every existing reader), g = the
         // part's own material, signed by the whole solid — the rim's "inside the model" bound
         sdfTex = makeCentrelineTexture(scene.partSDF, surface: scene.partMaterialSDF)
@@ -2810,7 +2813,9 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
                 // replaces the refused rungs now is solid, which is the behaviour he
                 // asked for. `TOPOPT_LATTICE_FLOOR_AT_HI=1` restores the ceiling test
                 // so both can be seen on the DEVICE, at one camera, from one binary.
-                let rhoStar = params.lattice.printabilityDensityFloor(
+                // ★ no strut law for the id (item a): nothing to stop on — no ladder below `finest`
+                guard let law = params.lattice else { break }
+                let rhoStar = law.printabilityDensityFloor(
                     lineWidthMM: lineWidthMM, cellMM: half)
                 let bindsAt = Self.floorTestAtCeiling
                     ? params.densitySpan.hi : params.densitySpan.lo
@@ -3063,7 +3068,7 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
                     shapeFit: steppedShapeFit,
                     dyadicSteps: steppedDyadicSteps,
                     cellIsUserStated: steppedCellStated,
-                    bandQuiltCeiling: LatticeType.named(params.latticeID).hasAestheticCeiling && !scene.allowQuilt
+                    bandQuiltCeiling: LatticeType.named(params.latticeID)?.hasAestheticCeiling == true && !scene.allowQuilt
                         ? scene.drawnCeilingRho : 1)
             }
             // ★★★ THE OCTREE BAKE replaces the per-coarse-texel decision (his 2026-09-14
@@ -3094,7 +3099,7 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
                     finestPrintsOpen: scene.stageMode != .structural,
                     bandAmount: LatticeSettings.gradeAmount(strength: params.shapeFitGradeStrength),
                     // ★ no quilt in the grade band either unless Allow quilt (his 2026-09-28)
-                    bandQuiltCeiling: LatticeType.named(params.latticeID).hasAestheticCeiling && !scene.allowQuilt
+                    bandQuiltCeiling: LatticeType.named(params.latticeID)?.hasAestheticCeiling == true && !scene.allowQuilt
                         ? scene.drawnCeilingRho : 1,
                     stats: &st) {
                     baked = o
@@ -3176,9 +3181,15 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
         // that densifying cannot cover.
         cellUnprintable = false
         if lineWidthMM > 0, params.cellMM > 0 {
-            let rhoStar = params.lattice.printabilityDensityFloor(
-                lineWidthMM: lineWidthMM, cellMM: params.cellMM)
-            if rhoStar > params.densitySpan.hi + 1e-9 { cellUnprintable = true }
+            // ★ no strut law for the id (item a): nothing buildable to draw — the empty field,
+            // never octet's struts under another type's name
+            if let law = params.lattice {
+                let rhoStar = law.printabilityDensityFloor(
+                    lineWidthMM: lineWidthMM, cellMM: params.cellMM)
+                if rhoStar > params.densitySpan.hi + 1e-9 { cellUnprintable = true }
+            } else {
+                cellUnprintable = true
+            }
         }
         if cellUnprintable {
             // ★★ AND IT COSTS NOTHING TO SAY SO. Baking an EMPTY field at the
@@ -3908,7 +3919,7 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
         let cell = Float(max(0.1, cellField?.baseCellMM ?? params.cellMM))
         let cellOrigin = cellGrid?.origin ?? bmin
         let (lo, hi) = drawnDensitySpan
-        let K = Float(max(1e-3, params.lattice.densityCoefficient))
+        let K = Float(max(1e-3, params.lattice?.densityCoefficient ?? 1))   // no law: no segments to draw
         // ★ THE MARCH READS PER-CELL DENSITY ONLY WHEN THIS IS SET — and it was set
         // only by a stress/demand field. A stepped/octree field carries a density per
         // TEXEL whatever the demand (the grade's quilt, the printability floor), and

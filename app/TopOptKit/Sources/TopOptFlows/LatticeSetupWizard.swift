@@ -2361,7 +2361,7 @@ public struct LatticeSetupWizard: View {
                 // ★★★ ALLOW QUILT (his ruling, 2026-09-12) — octet only. Off, every
                 // density is held under the aesthetic ceiling (strut a fifth of the
                 // cell). On, the manual methods may go past it; simulated ones never.
-                if LatticeType.named(model.topologyID).hasAestheticCeiling {
+                if LatticeType.named(model.topologyID)?.hasAestheticCeiling == true {
                     HStack(spacing: DS.Space.s) {
                         Text("Allow quilt").dsStyle(DS.TypeScale.caption)
                             .foregroundStyle(DS.Color.textPrimary.color)
@@ -2657,10 +2657,11 @@ public struct LatticeSetupWizard: View {
     /// jumping to an arbitrary default.
     private var currentThicknessMM: Double {
         if let mm = model.manualStrutThicknessMM { return mm }
-        let topo = LatticeType.named(model.topologyID)
+        let r = thicknessRangeMM
+        // ★ no strut law for the id (item a): the range's own lower end, never octet's strut
+        guard let topo = LatticeType.named(model.topologyID) else { return r.lowerBound }
         let derived = 2 * topo.strutRadiusMM(relativeDensity: model.relativeDensity,
                                              cellMM: model.cellMM)
-        let r = thicknessRangeMM
         return Swift.min(r.upperBound, Swift.max(r.lowerBound, derived))
     }
 

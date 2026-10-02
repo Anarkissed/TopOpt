@@ -1059,8 +1059,8 @@ extension LatticePreviewOccupancy {
         // in `drawnDensityHi` for the renderer and the callout to read.
         let quiltTop: Double = (shapeFit && !latticeID.isEmpty
                                 && densityHi > 0 && baseCellMM > 0)
-            ? Swift.min(1, LatticeType.named(latticeID).quiltRowDensity(cellMM: baseCellMM))
-            : 0
+            ? (LatticeType.named(latticeID).map { Swift.min(1, $0.quiltRowDensity(cellMM: baseCellMM)) } ?? 0)
+            : 0   // ★ no law for the id (item a): no quilt top, as for ""
         let drawnHi = Swift.max(densityHi, quiltTop)
         let gammaDrawn = densityGamma > 0 ? densityGamma : 1
         if drawnHi > densityHi + 1e-9 {
@@ -1911,11 +1911,10 @@ extension LatticePreviewOccupancy {
                                 // rather than drawing something unprintable — coarsening
                                 // is always available, and a coarser cell needs LESS
                                 // density, so this terminates.
-                                if lineWidthMM > 0, drawnHi > densityLo, !latticeID.isEmpty {
+                                if lineWidthMM > 0, drawnHi > densityLo, let lat = LatticeType.named(latticeID) {
                                     // The printable band is the STATED one outside the grade-to-solid
                                     // band; inside it the row is drawn at the quilt anyway.
                                     let printHi = shapeFit ? drawnHi : densityHi
-                                    let lat = LatticeType.named(latticeID)
                                     var rhoStar = lat.printabilityDensityFloor(
                                         lineWidthMM: lineWidthMM, cellMM: s)
                                     while rhoStar > printHi + 1e-9, n > 1 {
@@ -1946,8 +1945,7 @@ extension LatticePreviewOccupancy {
                             // aesthetic ceiling does not apply: it is the transition INTO solid,
                             // not a lattice look, and `LatticeSDFScene` caps only what it hands
                             // in; the raise happens here, after the cap.
-                            if let t = bandT, drawnHi > densityLo, !latticeID.isEmpty {
-                                let lat = LatticeType.named(latticeID)
+                            if let t = bandT, drawnHi > densityLo, let lat = LatticeType.named(latticeID) {
                                 let quilt = Swift.min(Swift.min(drawnHi, lat.quiltRowDensity(cellMM: s)), bandQuiltCeiling)
                                 let g = densityGamma > 0 ? densityGamma : 1
                                 let actNow = Double(Swift.max(0, Swift.min(1, activation[i])))
@@ -1965,8 +1963,8 @@ extension LatticePreviewOccupancy {
                             // the law can draw, the shader fills solid instead. Short
                             // climbs bleed less than one finest cell, which the cut-cell
                             // wrap covers anyway.
-                            if shapeFit, shapeFitBandMM > 0, !latticeID.isEmpty, drawnHi > densityLo {
-                                let q = LatticeType.named(latticeID).quiltRowDensity(cellMM: s)
+                            if shapeFit, shapeFitBandMM > 0, let lat = LatticeType.named(latticeID), drawnHi > densityLo {
+                                let q = lat.quiltRowDensity(cellMM: s)
                                 let g = densityGamma > 0 ? densityGamma : 1
                                 let act = Double(Swift.max(0, Swift.min(1, activation[i])))
                                 let rhoBase = densityLo + (drawnHi - densityLo) * pow(act, g)
