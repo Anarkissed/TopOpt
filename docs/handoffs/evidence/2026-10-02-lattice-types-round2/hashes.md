@@ -23,5 +23,6 @@ AA4C7953-3152-4123-BCB5-EF5F8A08ABA3 a975ba0f83d9b383
 | arm | commit | 102117B9 | 68BF7B74 (stand) | 92A8016E (octet) | 570B38E2 | 3418E167 | AA4C7953 | 887AC498 |
 |---|---|---|---|---|---|---|---|---|
 | b | (b) frame-basis test | 3f19f920e5c96a5a | 3fd5d1b2388fe949 | 225865c83c64cb23 | 43a0828a8bbb1e1d | 169fe967ff734cfa | 3e6f162cb36212a9 | b457718dfc23ab42 |
+| f1 | ruling (1): the floor keyed on the beam-network set | 3f19f920e5c96a5a | 3fd5d1b2388fe949 | 225865c83c64cb23 | 43a0828a8bbb1e1d | 169fe967ff734cfa | 3e6f162cb36212a9 | b457718dfc23ab42 |
 
 The arm "b" equals the round-1 values: lt3/lt4 on P1 for the six unchanged projects, and p3base 169fe967ff734cfa for 3418E167. The script reproduces the old dumps.

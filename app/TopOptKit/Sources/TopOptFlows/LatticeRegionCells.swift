@@ -49,8 +49,7 @@ public enum LatticeRegionCells {
             let floor = (project.lattice.stageMode ?? .structural)
                 .regionCellsPerMemberFloor(topology: project.lattice.topologyID,
                                            boundaryFinishWritten: project.lattice.singleCellMembers,
-                                           algorithm: project.lattice.resolvedAlgorithm,
-                                           beamNetworkCertified: TopOptKit.steppedStructuralCertificationWired)
+                                           algorithm: project.lattice.resolvedAlgorithm)
             let d = TopOptKit.latticeRegionDerivation(topology: project.lattice.topologyID,
                                                       memberWidthMM: w,
                                                       minExtrudableWidthMM: bead,

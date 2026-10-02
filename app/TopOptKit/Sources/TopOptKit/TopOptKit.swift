@@ -1957,6 +1957,16 @@ public enum TopOptKit {
         return e.isEmpty ? nil : e
     }
 
+    /// ★★ THE ALGORITHMS CORE CERTIFIES BY THE BEAM NETWORK (maintainer, 2026-10-02, ruling 1).
+    /// ONE named constant until the linked core publishes the fact: core's
+    /// `lattice_beam_network_certified_algorithms()` (#358), which returns {"organic"} — true
+    /// today, the run calls `certify_organic_structural` only under organic && structural
+    /// (run_job.cpp:7488). SWAP TO CORE'S FUNCTION AT THE NEXT CORE SYNC; from then on this flips
+    /// by itself when core wires Stepped. Core ACCEPTING `structural_certification: beam_network`
+    /// on a Stepped job (`steppedStructuralCertificationWired`, a schema probe) is not core
+    /// RUNNING it, so the probe is no longer the source of the Structural floor or of that key.
+    public static let latticeBeamNetworkCertifiedAlgorithms: Set<String> = ["organic"]
+
     /// ★ CORE'S FACE-PLANE BASIS (maintainer, 2026-10-01, item b), through core's own
     /// `resolve_clearance_manual` — the route the run takes. `frame` nil = derive (core's `u`,
     /// `w` for this RAW normal); a stated frame returns core's verdict on it: `conflict` true is

@@ -10075,11 +10075,12 @@ public struct WorkspacePlaceholder: View {
         // asked — wore "Won't certify" the moment its density was dialled. The
         // aesthetic stage makes no strength claim; its badge judges what it DOES
         // claim: the stage's own floor and the nozzle. Structural is unchanged.
+        // ★ the per-REGION floor the bake and the run use (2026-10-02): the card and the
+        // badge had stayed on the stage floor when the region floor moved (4fdcdc59).
         let floor = (project.lattice.stageMode ?? .structural)
-            .cellsPerMemberFloor(topology: project.lattice.topologyID,
-                                 utilisation: .nan,
-                                 boundaryFinishWritten:
-                                    project.lattice.singleCellMembers)
+            .regionCellsPerMemberFloor(topology: project.lattice.topologyID,
+                                       boundaryFinishWritten: project.lattice.singleCellMembers,
+                                       algorithm: project.lattice.resolvedAlgorithm)
         let each = latticedSelectableCards(g).map {
             LatticeFaceDiagnosis.of(card: $0,
                                     cellsPerMemberFloor: floor > 0
@@ -10848,11 +10849,12 @@ public struct WorkspacePlaceholder: View {
         let widthMM = project.printParams.strutLineWidthMM
         // ★ THE STAGE'S FLOOR, derived once for the batch — the same expression
         // the bake uses, so the cards and the picture obey one law.
+        // ★ the per-REGION floor the bake and the run use (2026-10-02): the card and the
+        // badge had stayed on the stage floor when the region floor moved (4fdcdc59).
         let stageFloor = (project.lattice.stageMode ?? .structural)
-            .cellsPerMemberFloor(topology: project.lattice.topologyID,
-                                 utilisation: .nan,
-                                 boundaryFinishWritten:
-                                    project.lattice.singleCellMembers)
+            .regionCellsPerMemberFloor(topology: project.lattice.topologyID,
+                                       boundaryFinishWritten: project.lattice.singleCellMembers,
+                                       algorithm: project.lattice.resolvedAlgorithm)
         let densityGCM3 = model.densityGCm3(for: project.material)
         let depthsCopy = depths
         let rhosCopy = rhos
