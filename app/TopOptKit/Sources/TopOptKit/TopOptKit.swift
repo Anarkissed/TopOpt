@@ -1957,6 +1957,26 @@ public enum TopOptKit {
         return e.isEmpty ? nil : e
     }
 
+    /// ★ CORE'S FACE-PLANE BASIS (maintainer, 2026-10-01, item b), through core's own
+    /// `resolve_clearance_manual` — the route the run takes. `frame` nil = derive (core's `u`,
+    /// `w` for this RAW normal); a stated frame returns core's verdict on it: `conflict` true is
+    /// the frame a stage job would be refused for, after the solve. nil if the bridge failed.
+    public struct CoreFacePlaneBasis: Equatable, Sendable {
+        public let valid: Bool
+        public let conflict: Bool
+        public let u: SIMD3<Double>
+        public let w: SIMD3<Double>
+    }
+    public static func coreFacePlaneBasis(normal n: SIMD3<Double>,
+                                          frame: (u: SIMD3<Double>, w: SIMD3<Double>)? = nil) -> CoreFacePlaneBasis? {
+        let u = frame?.u ?? .zero, w = frame?.w ?? .zero
+        let v = Array(topoptbridge.core_face_plane_basis(n.x, n.y, n.z, u.x, u.y, u.z, w.x, w.y, w.z))
+            .map { Double($0) }
+        guard v.count == 8 else { return nil }
+        return CoreFacePlaneBasis(valid: v[0] != 0, conflict: v[1] != 0,
+                                  u: SIMD3(v[2], v[3], v[4]), w: SIMD3(v[5], v[6], v[7]))
+    }
+
     /// Whether the schema probe proved itself on this build — a key core has always
     /// accepted probes true AND a nonsense key probes false. False ⇒ every
     /// `gradingSchemaAccepts` answer is a conservative false.

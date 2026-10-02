@@ -3264,6 +3264,29 @@ std::string job_schema_error(const std::string& job_json) {
   }
 }
 
+std::vector<double> core_face_plane_basis(double nx, double ny, double nz,
+                                          double fux, double fuy, double fuz,
+                                          double fwx, double fwy, double fwz) {
+  try {
+    topopt::ManualClearanceGeometry m;
+    m.kind = topopt::ClearanceKind::Face;
+    m.origin = topopt::Vec3{0.0, 0.0, 0.0};
+    m.normal = topopt::Vec3{nx, ny, nz};
+    m.half_u_mm = 1.0;
+    m.half_w_mm = 1.0;
+    m.frame_u = topopt::Vec3{fux, fuy, fuz};
+    m.frame_w = topopt::Vec3{fwx, fwy, fwz};
+    topopt::ClearanceParams p;
+    p.kind = topopt::ClearanceKind::Face;
+    p.slab_depth_mm = 1.0;
+    const topopt::ClearanceGeometry g = topopt::resolve_clearance_manual(m, p);
+    return {g.valid ? 1.0 : 0.0, g.frame_conflict ? 1.0 : 0.0,
+            g.u.x, g.u.y, g.u.z, g.w.x, g.w.y, g.w.z};
+  } catch (...) {
+    return {};
+  }
+}
+
 bool grading_schema_accepts(const std::string& key) {
   if (key.empty()) return false;
   if (!probe_reliable()) return false;  // cannot tell => do not emit

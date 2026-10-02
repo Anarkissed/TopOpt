@@ -1384,6 +1384,18 @@ bool grading_schema_accepts_cell_mode(const std::string& mode);
 // SHAPE rather than the wrong name. Never throws.
 std::string job_schema_error(const std::string& job_json);
 
+// ★ CORE'S FACE-PLANE BASIS FOR A RAW NORMAL, AND ITS VERDICT ON A STATED FRAME (maintainer,
+// 2026-10-01, item b). Core derives a face region's in-plane axes with `plane_basis`, which is
+// file-local (clearance.cpp's anonymous namespace); the public route that runs it — and core's
+// own frame-agreement check, which on a stage job only refuses AFTER the solve — is
+// `resolve_clearance_manual`. This calls it as the run does: kind Face, the RAW normal (core
+// normalises it), a unit slab, a unit rectangle, and the stated frame (all zero = "derive").
+// Returns [valid, frame_conflict, u.x, u.y, u.z, w.x, w.y, w.z]: the derived axes when no frame
+// is stated, the stated ones when core accepts them. Never throws.
+std::vector<double> core_face_plane_basis(double nx, double ny, double nz,
+                                          double fux, double fuy, double fuz,
+                                          double fwx, double fwy, double fwz);
+
 // Core's OWN default stress-fraction ceiling for sub-floor retention
 // (topopt::lattice_subfloor_retention_stress_fraction(), the number
 // `grading.subfloor_stress_fraction` overrides). Forwarded so the app can SHOW
