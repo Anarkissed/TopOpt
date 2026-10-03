@@ -9,6 +9,7 @@
 | #361 `claude/flexible-squish-maths` | `421fde3d` | `bd2457e5` | yes | contains main `f932266f`, #354 `606c613a` and #358 `4764ca7e`; the `core/src/cli/job.cpp` conflict (#361's Flexible block vs #358's topology write-back) was resolved UPSTREAM, both blocks kept |
 | #358 `claude/raster-receipt-fields` | `0a5f86df` | `6e75434c` | yes | the two commits past `4764ca7e`: a pure rename `lattice_relative_density` → `lattice_density_from_strut` (the app's bridge calls `octet_relative_density`, not the renamed function) and the lattice-types handoff |
 | #358 `claude/raster-receipt-fields` | `349053df` | `04664398` | yes | every receipt names the binary that wrote it (fingerprint "unknown" on relattice and analyze) |
+| #358 `claude/raster-receipt-fields` | `23e6154e` | `523dd2f9` | yes | one source for the build identity, stated once; the Stepped beam certificate sized (a core probe) — merged just before the push, then core rebuilt and the targeted suite re-run (below) |
 | #354 `claude/topopt-holes-quilting-298212` | `606c613a` | — | — | already contained through #361 |
 | main | `f932266f` | — | — | already contained through #361 |
 
@@ -39,6 +40,15 @@ background limit, and the known headless-GPU process death stopped one part earl
     stale-type gate can refuse it.
   - #354 wrote the test against a core without that refusal. The two meet first in #361.
   - Not fixed here: the file is #354's, and the fix belongs with #354/#361.
+
+**After the last #358 merge (`523dd2f9`), the targeted suite** (every Flexible class, plus the lattice /
+organic / page / receipt classes that read our hooked files; `LatticeStaleTypeTests` left out, see above):
+1 016 tests, 31 skipped, 2 failed:
+- `LatticeSimSolveTriggerTests.testTheTriggerRefusesOnAllThreeGrounds` (known);
+- **`FlexibleSqueezeGroupsUITests.testNewGroupAndRemoveGroupByClickingThePage`** — "11l: the pop-up
+  opens" waited its full 180 s. It passes alone (twice, 4/4), and it passed in the full run above.
+  It is ours and is being chased as an order-dependent leak (see the next section once found); it is
+  NOT a core change (the #358 commits touch core's CLI and receipts only).
 
 **A correction I owe you (batch N, the realistic fold).** I told you the tested squish curves make TPU
 lattice stiffen as its cells close. For your filament they do not. varioShore gyroid at 240 °C SOFTENS
