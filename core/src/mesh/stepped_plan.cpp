@@ -7,11 +7,12 @@
 #include <map>
 #include <unordered_map>
 
-#include "topopt/lattice.hpp"   // octet_relative_density
+#include "topopt/lattice.hpp"   // lattice_density_from_strut
 
 namespace topopt {
 
-std::vector<int> stepped_admitted_divisors(double base_cell_mm, double bead_mm,
+std::vector<int> stepped_admitted_divisors(LatticeTopology topo,
+                                           double base_cell_mm, double bead_mm,
                                            double min_tile_mm, bool apply_prints_open,
                                            SteppedMenu menu) {
   std::vector<int> out;
@@ -30,7 +31,7 @@ std::vector<int> stepped_admitted_divisors(double base_cell_mm, double bead_mm,
       if (apply_prints_open) {
         double rho = 1.0;
         try {
-          rho = octet_relative_density(tile, 0.5 * bead_mm);
+          rho = lattice_density_from_strut(topo, tile, 0.5 * bead_mm);
         } catch (const std::exception&) {
           break;
         }
@@ -50,7 +51,7 @@ std::vector<int> stepped_admitted_divisors(double base_cell_mm, double bead_mm,
     // on radius/cell, so this is a statement about the RATIO and nothing else.
     double rho = 1.0;
     try {
-      rho = octet_relative_density(tile, 0.5 * bead_mm);
+      rho = lattice_density_from_strut(topo, tile, 0.5 * bead_mm);
     } catch (const std::exception&) {
       continue;                          // the cell fills solid: emphatically not open
     }
@@ -60,7 +61,8 @@ std::vector<int> stepped_admitted_divisors(double base_cell_mm, double bead_mm,
   return out;
 }
 
-std::vector<double> stepped_size_menu(double base_cell_mm, double bead_mm,
+std::vector<double> stepped_size_menu(LatticeTopology topo, double base_cell_mm,
+                                      double bead_mm,
                                       double min_tile_mm, bool apply_prints_open,
                                       SteppedMenu which) {
   std::vector<double> menu;
@@ -70,11 +72,11 @@ std::vector<double> stepped_size_menu(double base_cell_mm, double bead_mm,
   // is what lets a 9 sit beside an 8; the dyadic ladder has no such sizes, and adding
   // them here would quietly make "doubled" accept an any-step plan.
   if (which == SteppedMenu::Halves) {
-    for (int n : stepped_admitted_divisors(base_cell_mm, bead_mm, min_tile_mm,
+    for (int n : stepped_admitted_divisors(topo, base_cell_mm, bead_mm, min_tile_mm,
                                            apply_prints_open, which))
       menu.push_back(base_cell_mm / n);
   } else
-  for (int n : stepped_admitted_divisors(base_cell_mm, bead_mm, min_tile_mm,
+  for (int n : stepped_admitted_divisors(topo, base_cell_mm, bead_mm, min_tile_mm,
                                         apply_prints_open)) {
     const double tile = base_cell_mm / n;
     for (int k = 1; k < n; ++k) menu.push_back(k * tile);
@@ -110,7 +112,8 @@ bool aligned_on_some_family(double offset, double size, double base, const std::
 
 }  // namespace
 
-SteppedPlanCheck stepped_validate_plan(const std::vector<SteppedCell>& cells,
+SteppedPlanCheck stepped_validate_plan(LatticeTopology topo,
+                                       const std::vector<SteppedCell>& cells,
                                        const std::vector<SteppedPlanRegion>& regions,
                                        double bead_mm, double min_tile_mm,
                                        bool apply_prints_open, SteppedMenu menu) {
@@ -125,8 +128,9 @@ SteppedPlanCheck stepped_validate_plan(const std::vector<SteppedCell>& cells,
   for (const SteppedPlanRegion& r : regions) {
     by_id[r.region_id] = &r;
     menu_of[r.region_id] =
-        stepped_size_menu(r.base_cell_mm, bead_mm, min_tile_mm, apply_prints_open, menu);
-    div_of[r.region_id] = stepped_admitted_divisors(r.base_cell_mm, bead_mm, min_tile_mm,
+        stepped_size_menu(topo, r.base_cell_mm, bead_mm, min_tile_mm,
+                          apply_prints_open, menu);
+    div_of[r.region_id] = stepped_admitted_divisors(topo, r.base_cell_mm, bead_mm, min_tile_mm,
                                                     apply_prints_open, menu);
   }
 

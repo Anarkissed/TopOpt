@@ -396,6 +396,13 @@ add_executable(test_lattice_refusal tests/unit/test_lattice_refusal.cpp)
 target_link_libraries(test_lattice_refusal PRIVATE topopt)
 add_test(NAME lattice_refusal COMMAND test_lattice_refusal)
 
+# ★ One definition of density -> strut diameter, per type, plus R1's refusal
+# (task 2026-09-28-lattice-types-core). Octet must come through bit-for-bit (R9);
+# every type without a measured table must refuse rather than borrow octet's.
+add_executable(test_strut_diameter_per_type tests/unit/test_strut_diameter_per_type.cpp)
+target_link_libraries(test_strut_diameter_per_type PRIVATE topopt)
+add_test(NAME strut_diameter_per_type COMMAND test_strut_diameter_per_type)
+
 # Harness-side lattice material model C(rho) (multiscale-lattice-feasibility
 # probe, 2026-07-31). The model itself lives in tests/harness/
 # lattice_material_model.hpp (nothing in production consumes it); this test
@@ -1728,6 +1735,12 @@ if(OpenCASCADE_FOUND)
     tests/harness/sector_density_cost_probe.cpp)
   target_link_libraries(sector_density_cost_probe PRIVATE topopt)
 
+  # ★ Sizing the beam-network certificate for any-step Stepped (reviewer,
+  # 2026-10-01). MEASURE ONLY -- nothing here is wired into the run.
+  add_executable(stepped_beam_cost_probe EXCLUDE_FROM_ALL
+                 tests/harness/stepped_beam_cost_probe.cpp)
+  target_link_libraries(stepped_beam_cost_probe PRIVATE topopt)
+
   add_executable(cad_probe EXCLUDE_FROM_ALL tests/harness/cad_probe.cpp)
   target_link_libraries(cad_probe PRIVATE topopt)
 
@@ -2099,6 +2112,18 @@ if(OpenCASCADE_FOUND AND Eigen3_FOUND)
     CLI_TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}"
     TOPOPT_CLI_EXE="$<TARGET_FILE:topopt_cli>")
   add_test(NAME cli_organic_dead_parity COMMAND test_organic_dead_parity)
+
+  # ★ Every subcommand that writes a receipt stamps the binary that wrote it
+  # (reviewer, 2026-10-01). `analyze` and `lattice-variant` return before main.cpp
+  # populates the fingerprint, so their run_info.json carried "unknown". Runs the real
+  # binary and compares the receipt against the binary's own --version line.
+  add_executable(test_run_info_fingerprint tests/validation/test_run_info_fingerprint.cpp)
+  target_link_libraries(test_run_info_fingerprint PRIVATE topopt)
+  target_compile_definitions(test_run_info_fingerprint PRIVATE
+    ORGANIC_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/organic"
+    CLI_TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}"
+    TOPOPT_CLI_EXE="$<TARGET_FILE:topopt_cli>")
+  add_test(NAME cli_run_info_fingerprint COMMAND test_run_info_fingerprint)
 
   # Task 2026-08-03-variant-postprocessing-fix (defect 1): design.bin is
   # published AFTER EVERY VARIANT, not once at the end of the ladder. Runs the

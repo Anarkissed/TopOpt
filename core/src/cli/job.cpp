@@ -3,6 +3,7 @@
 #include "topopt/grading.hpp"
 
 #include "topopt/lattice.hpp"
+#include "topopt/lattice_gen.hpp"  // lattice_gen_topology_names: the LIVE set
 
 #include "topopt/cell_plan.hpp"  // cell_size_mode_from_name (the ONE mode vocabulary)
 #include "topopt/lattice_algorithm.hpp"  // the ONE algorithm vocabulary (§4)
@@ -240,6 +241,61 @@ class JsonParser {
   throw JobError("job.json: " + msg);
 }
 
+// ── ★ ONE GATE FOR A TOPOLOGY ID (task 2026-09-28-lattice-types-core) ───────
+// Both `lattice.topology` and `grading.topology` came through a literal
+// `!= "octet"` test. That was correct while octet was the only type and it is the
+// wrong SHAPE for a round that adds eight: it conflates "I have never heard of this
+// id" with "I know this id and it is not ready", and it would have to be edited in
+// two places for every go-live.
+//
+// ★ AND "READY" IS BOTH SETS, NOT ONE (M6, reviewer 2026-09-30). DECISIONS
+// 2026-09-28 item 2: a type is offered only when core reports it both GENERATABLE and
+// CERTIFIABLE. An earlier draft of this gate asked only about the generatable set,
+// which would have refused FCC with the wrong reason -- FCC's tensor rows are landed,
+// so what it lacks is a generator, and a user told "not certifiable" would go looking
+// for the wrong thing. `lattice_type_readiness` asks both and names which is missing.
+//
+// Today no type is live, so this refuses exactly what the literal test refused: which
+// jobs core accepts is UNCHANGED. Only the message changes.
+void require_live_topology(const std::string& id, const char* where) {
+  const std::vector<std::string> gen = topopt::lattice_gen_topology_names();
+  const std::vector<std::string> cert = topopt::lattice_certifiable_topology_names();
+  const topopt::LatticeTypeReadiness r =
+      topopt::lattice_type_readiness(id, gen, cert);
+  if (r == topopt::LatticeTypeReadiness::Live) return;
+
+  std::string live;
+  for (const std::string& n : gen) {
+    bool both = false;
+    for (const std::string& c : cert) if (c == n) { both = true; break; }
+    if (both) live += (live.empty() ? "" : ", ") + ("\"" + n + "\"");
+  }
+  if (live.empty()) live = "(none)";
+
+  const std::string head = std::string(where) + " \"topology\": \"" + id + "\" ";
+  const std::string tail = " Types available now: " + live + ".";
+  switch (r) {
+    case topopt::LatticeTypeReadiness::UnknownId:
+      schema_fail(head + "is not a lattice topology core knows." + tail);
+    case topopt::LatticeTypeReadiness::NotGeneratable:
+      schema_fail(head +
+                  "is CERTIFIABLE -- its tensor rows are landed -- but core has no "
+                  "GENERATOR for it yet, so it cannot be built "
+                  "(docs/design/lattice-types, R1)." + tail);
+    case topopt::LatticeTypeReadiness::NotCertifiable:
+      schema_fail(head +
+                  "can be GENERATED but core has no validated cubic tensor rows for "
+                  "it, so it cannot be certified -- and every user-facing result is "
+                  "certified (M6)." + tail);
+    case topopt::LatticeTypeReadiness::NotEither:
+      schema_fail(head +
+                  "is a topology core knows but can neither generate nor certify "
+                  "yet." + tail);
+    case topopt::LatticeTypeReadiness::Live:
+      break;   // returned above
+  }
+}
+
 // A maintainer-comment key: ignored everywhere (the demo fixture's _comment /
 // _fixture_note / _gravity_note / _output_note).
 bool is_comment_key(const std::string& key) {
@@ -393,6 +449,12 @@ JobBox parse_box(const JsonValue& v, const std::string& name) {
 }  // namespace
 
 JobDescription parse_job(const std::string& json_text) {
+  // ★ TWO KEYS, ONE TYPE (reviewer, 2026-09-30). `lattice.topology` and
+  // `grading.topology` describe the same physical lattice, and the blocks are parsed
+  // far apart, so statedness is recorded here and reconciled once below -- after both
+  // blocks, because either may be absent.
+  bool lattice_topology_stated = false;
+  bool grading_topology_stated = false;
   JsonParser parser(json_text);
   const JsonValue root = parser.parse();
   if (root.type != JsonValue::Type::Object)
@@ -1226,9 +1288,8 @@ JobDescription parse_job(const std::string& json_text) {
     job.lattice.present = true;
     if (const JsonValue* t = find_key(lat, "topology")) {
       job.lattice.topology = require_nonempty_string(*t, "lattice.topology");
-      if (job.lattice.topology != "octet")
-        schema_fail("lattice \"topology\" must be \"octet\" (got \"" +
-                    job.lattice.topology + "\")");
+      lattice_topology_stated = true;
+      require_live_topology(job.lattice.topology, "lattice");
     }
     // Uniform geometry (cell_mm + strut_radius_mm): REQUIRED without a "grading"
     // block, REJECTED with one — a graded run derives the cell from
@@ -1732,9 +1793,8 @@ JobDescription parse_job(const std::string& json_text) {
     job.grading.present = true;
     if (const JsonValue* t = find_key(gr, "topology")) {
       job.grading.topology = require_nonempty_string(*t, "grading.topology");
-      if (job.grading.topology != "octet")
-        schema_fail("grading \"topology\" must be \"octet\" (got \"" +
-                    job.grading.topology + "\")");
+      grading_topology_stated = true;
+      require_live_topology(job.grading.topology, "grading");
     }
     // Cell-size mode (handoff 2026-08-01-lattice-cell-size-sweep). Absent => "fixed",
     // which is the pre-sweep schema exactly: cell_mm required, no ladder keys.
@@ -2469,6 +2529,25 @@ JobDescription parse_job(const std::string& json_text) {
     }
   }
 
+  // ── ★ ONE RESOLVED TOPOLOGY, WRITTEN BACK INTO BOTH BLOCKS ─────────────
+  // The decision is `resolve_lattice_topology` (lattice.cpp), where a test can reach
+  // it; this is the refusal and the write-back. Both fields carry the resolved value
+  // afterwards, so sizing (`grading.topology`) and generation (`lattice.topology`)
+  // cannot read different types however a caller reaches them.
+  {
+    const LatticeTopologyChoice tc = resolve_lattice_topology(
+        job.lattice.topology, lattice_topology_stated, job.grading.topology,
+        grading_topology_stated);
+    if (tc.conflict)
+      schema_fail(
+          "\"lattice.topology\" is \"" + tc.lattice_id + "\" and "
+          "\"grading.topology\" is \"" + tc.grading_id +
+          "\". They describe ONE lattice -- the geometry the generator builds is the "
+          "geometry the grading law sizes -- so they must name the same type. State "
+          "one of them, or state both the same.");
+    job.lattice.topology = tc.id;
+    job.grading.topology = tc.id;
+  }
   return job;
 }
 
