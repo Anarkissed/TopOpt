@@ -7,6 +7,7 @@ Made with round 2's `tools/dump_stage_hashes.sh` on snapshot S1-2026-10-02 (`SWI
 | fo | round 2 end (3ba44c7d) | 3f19f920e5c96a5a | 6dbb48fab4029f78 | c4ca5d5ac009036d | 2baaf9cbb94027c7 | 7ba46796d87e3b34 | 3e6f162cb36212a9 | b457718dfc23ab42 |
 | g | the one bridge guard + the stale-type gate | 3f19f920e5c96a5a | 6dbb48fab4029f78 | c4ca5d5ac009036d | 2baaf9cbb94027c7 | 7ba46796d87e3b34 | 3e6f162cb36212a9 | b457718dfc23ab42 |
 | o5 | ruling 5: organic one size as a one-size window | 3f19f920e5c96a5a | 6dbb48fab4029f78 | c4ca5d5ac009036d | 2baaf9cbb94027c7 | 7ba46796d87e3b34 | 3e6f162cb36212a9 | b457718dfc23ab42 |
+| l6 | ruling 6: the plan-not-sent line (blockValue reads the shared predicate) | 3f19f920e5c96a5a | 6dbb48fab4029f78 | c4ca5d5ac009036d | 2baaf9cbb94027c7 | 7ba46796d87e3b34 | 3e6f162cb36212a9 | b457718dfc23ab42 |
 
 g equals fo on all seven: the guard and the gate move no stage-job bytes.
 

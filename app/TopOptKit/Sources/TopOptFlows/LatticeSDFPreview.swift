@@ -23,6 +23,7 @@
 
 import Foundation
 import simd
+import TopOptKit
 
 /// One strut segment in CENTRED, cell-normalised coordinates: the cell spans
 /// `[-0.5, 0.5]³` and endpoints are the strut ends in that frame. The shader folds a
@@ -156,9 +157,19 @@ public enum LatticePreviewBanner: Equatable, Sendable {
         case .drawing(let t):
             if t.hasPrefix("★") { return "★ Preview differs from run" }
             if t.contains("shown as the doubled ladder") { return "Lattice preview · stand-in" }
+            if t.contains(Self.planNotSentSentence) { return Self.planNotSentCaption }
             return "Lattice preview · not the export"
         }
     }
+
+    /// ★★ RULING 6 (2026-10-03): the one plain line while a Default Grade or Stepped plan
+    /// is drawn but not sent. Not "coarser": measured on 3418E167, the run without the plan
+    /// laid 2.40 mm cells, finer than the preview's 3.00 mm — so the line says whose layout
+    /// it is, not which way it differs. The full sentence sits behind the (i).
+    public static let planNotSentCaption = "Run builds core's own layout"
+    public static let planNotSentSentence =
+        "the run currently builds core's own cell layout, not the cells shown here — "
+        + "they are not sent to it yet"
     /// The notice's width cap, in points: the Selections chip's column, short of the
     /// iPad chip that starts ~310 pt from the left edge on the 13-inch iPad.
     public static let noticeMaxWidthPT: Double = 280
@@ -175,7 +186,11 @@ public enum LatticePreviewBanner: Equatable, Sendable {
     /// "marched": a user who turned a toggle on is owed a sentence they can act on.
     public static func make(previewOn: Bool,
                             hasModel: Bool,
-                            scene: LatticeSDFPreviewSummary?) -> LatticePreviewBanner? {
+                            scene: LatticeSDFPreviewSummary?,
+                            // ★ ruling 6's test seams; production reads core's probe and the switch
+                            plansWired: Bool? = nil,
+                            plansEnabled: Bool = LatticeSteppedCellWire.defaultGradePlansEnabled)
+        -> LatticePreviewBanner? {
         guard previewOn else { return nil }
         guard hasModel else {
             return .empty("No lattice to show — there is no model open yet.")
@@ -260,6 +275,12 @@ public enum LatticePreviewBanner: Equatable, Sendable {
             // ★ AND WHY (maintainer, 2026-09-05: "have you implemented the organic
             // lattices on the part preview yet?" — it was, and the tensor never came)
             if let why = scene.organicNotDrawnReason { label += " — " + why }
+        }
+        // ★★ RULING 6: a Default Grade or Stepped plan drawn here that the job does not carry.
+        if LatticeSteppedCellWire.runBuildsCoresOwnLayout(
+            algorithm: scene.algorithmName, wired: plansWired ?? TopOptKit.steppedCellsWired,
+            enabled: plansEnabled) {
+            label += " · " + planNotSentSentence
         }
         // ★ The sentence is `LatticeWallsWithoutShape`'s — the variant notice's, so the two
         // cannot drift (ruling g); a single face now reads "is not shown", not "are".

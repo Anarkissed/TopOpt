@@ -618,9 +618,32 @@ public struct LatticeSteppedCellWire: Equatable, Sendable {
     /// test seam the proof uses; production passes the switch.
     public static func blockValue(for lat: LatticeSpec, wired: Bool,
                                   enabled: Bool = defaultGradePlansEnabled) -> [[String: Any]]? {
-        guard wired, enabled, lat.algorithm == "doubled",
+        guard sendsPlan(algorithm: lat.algorithm, wired: wired, enabled: enabled),
               !lat.steppedCells.isEmpty else { return nil }
         return lat.steppedCells.map { $0.wireDictionary }
+    }
+
+    /// The algorithms whose preview IS a per-region cell plan (the octree bake) —
+    /// `WorkspacePlaceholder.perRegionCellAlgorithms` must equal it.
+    public static let planPreviewAlgorithms: Set<String> = ["stepped", "doubled"]
+
+    /// ★ THE ONE PREDICATE the job and the preview's line share: would a job of this
+    /// algorithm carry the preview's plan? Only Default Grade, only with the switch on, only
+    /// on a core whose schema takes the key.
+    public static func sendsPlan(algorithm: String, wired: Bool,
+                                 enabled: Bool = defaultGradePlansEnabled) -> Bool {
+        wired && enabled && algorithm == "doubled"
+    }
+
+    /// ★★ RULING 6 (maintainer, 2026-10-03): "Default Grade and Stepped previews carry one
+    /// plain line saying the run currently builds core's own (coarser) layout. Show it only
+    /// while the plan isn't sent." True exactly when the preview draws a plan the job would
+    /// not carry — so the line goes by itself the day the switch flips, and stays for
+    /// Stepped, which never sends one.
+    public static func runBuildsCoresOwnLayout(algorithm: String, wired: Bool,
+                                               enabled: Bool = defaultGradePlansEnabled) -> Bool {
+        planPreviewAlgorithms.contains(algorithm)
+            && !sendsPlan(algorithm: algorithm, wired: wired, enabled: enabled)
     }
 }
 
