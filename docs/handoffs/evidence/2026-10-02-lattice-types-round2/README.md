@@ -45,3 +45,27 @@ The maintainer ruled on 2026-10-02 that the hash script, the store-snapshot proc
 ## Snapshots and hashes (recorded here, so they survive a restart)
 
 `hashes.md` holds, for each commit, the arm, the snapshot, and the seven hashes.
+
+## The Default Grade plan proof (ruling 4)
+
+6. **Run one project's proof:**
+   ```
+   zsh …/tools/dg_proof.sh S<n>-<date> <cli name> <project id> [convert]
+   ```
+   - It works on a fresh writable COPY from the snapshot. With `convert`, `tools/convert_default_grade.py` turns the copy into Default Grade and labels it "converted"; it refuses any path under the simulator container.
+   - The app's own bake and job builder run in `LatticeDefaultGradePlanProof` (opt-in, by environment). They write `job_plan.json` (the plan forced on) and `job_noplan.json` (production: plans off), assert that the two differ only by `lattice.stepped_cells`, and print the plan's histogram in core's format.
+   - Both jobs then go through the frozen CLI.
+   - Output: `scratch/evidence/dg/<id>/`.
+7. **Classify every refused cell:**
+   ```
+   python3 …/tools/classify_plan.py scratch/evidence/dg/<id>/job_plan.json
+   ```
+   - This is a Python port of core's plan check at the linked core. Core stops at the first bad cell; this reports every cell by cause (R1, R2, R3, R5).
+   - It also prints the exact positive-volume overlap count, which is the truth the overlap hash approximates.
+8. **Run the core brief's minimal jobs:**
+   ```
+   zsh …/core-brief-jobs/run.sh <topopt-cli> [workdir]
+   ```
+   - Every defect job should be refused and every control ACCEPTED.
+
+The results are in `dg_results.md`.
