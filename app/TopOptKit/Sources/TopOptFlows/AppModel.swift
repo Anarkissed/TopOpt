@@ -201,6 +201,8 @@ public final class AppModel: ObservableObject {
         remoteJobDefaults: UserDefaults = .standard,
         reattachRunnerFactory: ((RemoteRunnerConfig, String) -> RunModel.Runner)? = nil
     ) {
+        // ★ Before any bridge run: core's receipts name the core this app links (#358).
+        CoreBuildIdentity.state()
         self.materialsPath = materialsPath
         self.rulesPath = rulesPath
         // ★ The wizard's organic sample solves the PR 353 cube with the app's own FEA

@@ -1183,6 +1183,8 @@ public final class RunModel: ObservableObject {
     public static func bridgeRunner(_ request: RunRequest,
                                     _ progress: @escaping (Int, Int, Int) -> Bool,
                                     _ onVariant: @escaping (OptimizeOutcome) -> Void) throws -> OptimizeOutcome {
+        // ★ Core's receipts name the core this app links (#358): stated once, before a run.
+        CoreBuildIdentity.state()
         // ★ THE MODE DECIDES WHICH RUN THIS IS (maintainer, 2026-08-17). Routed
         // HERE, at the one on-device entry point every caller already goes
         // through, so a lattice request cannot reach the optimizer by taking a

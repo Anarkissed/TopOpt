@@ -29,7 +29,7 @@ These are accepted:
 | 4 | **Default Grade proof: run it.** Converted copies are allowed and must be labelled "converted"; 570B38E2 is the native case. Fix the app-side causes first: R4, and R1 if it is the app's. The core-side causes go in one core brief, with a minimal failing job each. The enable switch stays OFF until every plan is accepted and the run's cell histogram equals the preview's. | R4 done 20eb5edd; probe and switch (OFF) 5bf34e18. **The proof REFUSES every plan** (`dg_results.md`: 570B38E2 native, 68BF7B74/3418E167/92A8016E converted; 102117B9 pending). R1 (app anchor, constant per region) waits for a ruling. Core brief 2026-10-02-core-brief-default-grade-plan.md covers R2/R5/R3/R6 with fixture jobs and controls. R7 (app: overlapping prisms) is new |
 | 5 | **Ceiling:** bridge `octet_aesthetic_density_ceiling()` now. Swap to `lattice_aesthetic_density_ceiling(octet)` at the next sync; the swap moves no bytes. | done 1d1bde5e (4 projects, digits); the swap waits for the sync |
 | a | **`named()` returns nil for an unknown id, and every caller handles it.** This includes the two WorkspacePlaceholder misroutes (limits and face card). | done e5ab0325 |
-| S | **Sync core** (#358 at 349053df or later, and main). See the list below. | after 3 |
+| S | **Sync core** (#358 at 349053df or later, and main). See the list below. | merged 23e6154e (436819f6; main already in). Identity stated, readiness words and core's ceiling bridged; `lattice_beam_network_certified_algorithms` is not on #358 yet, so the constant stays. Hashes fs = f4b |
 
 **At the sync:**
 - Bring in `lattice_type_readiness_plain()` for the picker's words (brief item a).

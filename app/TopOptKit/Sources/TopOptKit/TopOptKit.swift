@@ -1043,6 +1043,45 @@ public enum TopOptKit {
     /// The core library version (topopt::version()); a trivial liveness check.
     public static var coreVersion: String { String(topoptbridge.core_version()) }
 
+    /// ★ STATE THE LINKED CORE'S IDENTITY TO CORE (#358, 349053df + 23e6154e). The on-device
+    /// lattice run calls core's `lattice_variant_job` IN-PROCESS, and core stamps every receipt's
+    /// `fingerprint` / `build_time` from what was stated here — "unknown" when nothing was. Core
+    /// takes it ONCE: the same identity again is a no-op, a different one throws (two binaries'
+    /// identities in one process). Call through `CoreBuildIdentity` (TopOptFlows), which holds
+    /// the generated fingerprint and states it before the first bridge run.
+    public static func stateCoreBuildIdentity(fingerprint: String, buildTime: String) throws {
+        var err = topoptbridge.BridgeError()
+        topoptbridge.state_core_build_identity(std.string(fingerprint), std.string(buildTime), &err)
+        try throwIfFailed(err)
+    }
+
+    /// The identity core holds now — `("unknown", "")` until one is stated.
+    public static var coreBuildIdentity: (fingerprint: String, buildTime: String) {
+        let v = Array(topoptbridge.core_build_identity()).map { String($0) }
+        return (v.first ?? "", v.count > 1 ? v[1] : "")
+    }
+
+    /// ★ CORE'S READINESS FOR A LATTICE TYPE (#358 `lattice_type_readiness`; brief item a).
+    /// The cases mirror core's enum in its declared order; `LatticeTypeReadinessFromCoreTests`
+    /// pins the mapping with core's own answers, so a reordering in core goes red.
+    public enum LatticeTypeReadiness: Int, Sendable, CaseIterable {
+        case live = 0, notGeneratable, notCertifiable, notEither, unknownId
+    }
+
+    /// Core's verdict for `id` against the two sets given (the app's pure form hands its own).
+    public static func latticeTypeReadiness(_ id: String, generatable: [String],
+                                            certifiable: [String]) -> LatticeTypeReadiness {
+        let r = topoptbridge.lattice_type_readiness(std.string(id),
+                                                    std.string(generatable.joined(separator: "\n")),
+                                                    std.string(certifiable.joined(separator: "\n")))
+        return LatticeTypeReadiness(rawValue: Int(r)) ?? .unknownId
+    }
+
+    /// Core's PLAIN line for a readiness (`lattice_type_readiness_plain`) — the picker's words.
+    public static func latticeTypeReadinessPlain(_ r: LatticeTypeReadiness) -> String {
+        String(topoptbridge.lattice_type_readiness_plain(Int32(r.rawValue)))
+    }
+
     // MARK: lattice certification limits (handoff 2026-07-29-lattice-mode-ui)
 
     /// The certifiable bounds the lattice-mode controls clamp to, READ FROM CORE at
@@ -1083,6 +1122,8 @@ public enum TopOptKit {
 
     /// ★★ CORE'S AESTHETIC DENSITY CEILING (maintainer, 2026-10-02, ruling 5: R12, one
     /// definition) — octet's 0.218871… on the linked core; nil where core has none for the type.
+    /// Since the #358 sync the bridge asks core's per-type `lattice_aesthetic_density_ceiling`
+    /// (octet's is the same double, so no byte moved); an unmeasured type is nil, never octet's.
     /// Cell-independent: core's diameter table is linear in the cell. The app's own 24-step
     /// bisection of that table is kept only as a test oracle (`aestheticDensityCeilingOracle`).
     public static func latticeAestheticDensityCeiling(topology: String) -> Double? {
@@ -1974,6 +2015,8 @@ public enum TopOptKit {
     /// by itself when core wires Stepped. Core ACCEPTING `structural_certification: beam_network`
     /// on a Stepped job (`steppedStructuralCertificationWired`, a schema probe) is not core
     /// RUNNING it, so the probe is no longer the source of the Structural floor or of that key.
+    /// ★ At the #358 sync (23e6154e) core does not yet publish the function, so the constant
+    /// stays; swap the moment a sync brings it in.
     public static let latticeBeamNetworkCertifiedAlgorithms: Set<String> = ["organic"]
 
     /// ★ CORE'S FACE-PLANE BASIS (maintainer, 2026-10-01, item b), through core's own

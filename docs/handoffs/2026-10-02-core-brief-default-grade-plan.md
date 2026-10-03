@@ -19,7 +19,7 @@ The jobs are in `docs/handoffs/evidence/2026-10-02-lattice-types-round2/core-bri
 docs/handoffs/evidence/2026-10-02-lattice-types-round2/core-brief-jobs/run.sh <topopt-cli> [workdir]
 ```
 
-Recorded at the linked core (`run_linked-19a1443b.log`, CLI built from a tree whose `core/` equals 19a1443b): every defect job is refused and every control is ACCEPTED, each in about 6 s. The plan check runs after SOLVE 1, so in the app every refusal costs a solve.
+Recorded at the linked core (`run_linked-19a1443b.log`, CLI built from a tree whose `core/` equals 19a1443b): every defect job is refused and every control is ACCEPTED, each in about 6 s. Re-run at #358 23e6154e (`run_sync-23e6154e.log`): the same six verdicts, word for word. The plan check runs after SOLVE 1, so in the app every refusal costs a solve.
 
 ## R2: the depth check projects the cell's MINIMUM corner
 

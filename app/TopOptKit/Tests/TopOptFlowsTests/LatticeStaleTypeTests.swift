@@ -38,12 +38,12 @@ final class LatticeStaleTypeTests: XCTestCase {
             XCTAssertNil(p.latticeRunSpec(emission: p.latticeJobRegions()),
                          "★ the mechanism: a type core can't build drops the lattice block (organic \(organic))")
             XCTAssertEqual(LatticeTypeCatalog.selectionRefusal(p.lattice.topologyID),
-                           "Simple cubic: Core can’t build this type yet.", "★ the picker's own sentence")
+                           "Simple cubic: Strength-checked, but not buildable yet", "★ the picker's own sentence (core's words)")
         }
     }
 
     /// ★ The gate is exactly the catalog: refused ⇔ not offered, for every id it shows — and an
-    /// id core does not know at all is neither built nor certified, never silently octet.
+    /// id core does not know at all gets core's "Not a lattice type", never silently octet.
     func testTheRefusalIsTheCatalogsReason() {
         let e = LatticeTypeCatalog.entries(generatable: ["octet", "fcc"], certifiable: ["octet", "fcc", "sc"],
                                            jobAccepts: { $0 != "fcc" })
@@ -53,7 +53,7 @@ final class LatticeStaleTypeTests: XCTestCase {
         }
         XCTAssertEqual(LatticeTypeCatalog.selectionRefusal("fcc", in: e), "FCC: Core’s run doesn’t accept this type yet.")
         XCTAssertEqual(LatticeTypeCatalog.selectionRefusal("lattice9", in: e),
-                       "lattice9: Core can’t build or certify this type yet.")
+                       "lattice9: Not a lattice type", "★ core's words for an id it does not know")
         // the linked core: every greyed id refuses, the octet alone runs
         for x in LatticeTypeCatalog.entriesFromCore() {
             XCTAssertEqual(LatticeTypeCatalog.selectionRefusal(x.id) == nil, x.offered, x.id)

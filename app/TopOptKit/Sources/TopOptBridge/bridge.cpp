@@ -2132,6 +2132,22 @@ SmokeResult bridge_smoke(const std::string& materials_path,
 
 std::string core_version() { return std::string(topopt::version()); }
 
+void state_core_build_identity(const std::string& fingerprint,
+                               const std::string& build_time, BridgeError& err) {
+  try {
+    topopt::set_build_identity(fingerprint, build_time);
+  } catch (const std::exception& e) {
+    err.ok = false;
+    err.message = e.what();
+    bridge_log(std::string("build identity: REFUSED: ") + e.what());
+  }
+}
+
+std::vector<std::string> core_build_identity() {
+  const topopt::RunObservability& id = topopt::build_identity();
+  return {id.fingerprint, id.build_time};
+}
+
 // --- lattice certification limits (handoff 2026-07-29-lattice-mode-ui) --------
 namespace {
 // Map a job-schema topology name to the core certification enum. ONLY names the
@@ -3035,8 +3051,14 @@ double lattice_subfloor_retention_fraction() {
 double lattice_aesthetic_density_ceiling(const std::string& topology) {
   topopt::LatticeTopology topo;
   if (!lattice_topology_from_name(topology, topo)) return 0.0;
-  if (topo != topopt::LatticeTopology::Octet) return 0.0;
-  return topopt::octet_aesthetic_density_ceiling();
+  // ★ Core's per-type ceiling (#358). Octet returns EXACTLY octet_aesthetic_density_ceiling()
+  // (core asserts it with ==), so this swap moves no bytes. Every other type REFUSES with its
+  // own error until its ceiling is measured; that is "none" to the app, never octet's number.
+  try {
+    return topopt::lattice_aesthetic_density_ceiling(topo);
+  } catch (const topopt::LatticeAestheticCeilingNotMeasured&) {
+    return 0.0;
+  }
 }
 
 double lattice_strut_diameter_mm(const std::string& topology, double rho,
@@ -3095,6 +3117,12 @@ LatticeCellBounds lattice_cell_bounds(const std::string& topology,
   topopt::LatticeTopology topo;
   if (!lattice_topology_from_name(topology, topo)) return b;  // valid stays false
   if (!(min_extrudable_width_mm > 0.0)) return b;
+  // ★ #358 (one strut law PER TYPE): the printability floor now goes through
+  // `lattice_strut_diameter_mm(topo)`, which REFUSES every type without a measured table
+  // (LatticeDiameterLawNotMeasured). Uncaught, that C++ throw crossed into Swift and
+  // trapped the process on a saved Kelvin project. Core's refusal is "no core number":
+  // the bounds stay invalid, exactly as for a type core does not know.
+  try {
   // BOTH numbers are core's, never invented here (bar R6): the printability floor is
   // core's own one law (topopt::lattice_cell_printability_floor_mm — the same
   // function the grading law and the dyadic cell plan call), and the cells-per-member
@@ -3119,6 +3147,10 @@ LatticeCellBounds lattice_cell_bounds(const std::string& topology,
       topopt::lattice_percolation_cells_per_member_min(topo);
   b.valid = true;
   return b;
+  } catch (const std::exception& e) {
+    bridge_log(std::string("lattice_cell_bounds(") + topology + "): core refused: " + e.what());
+    return LatticeCellBounds{};
+  }
 }
 
 LatticeRegionDerivation lattice_region_derivation(
@@ -3129,6 +3161,10 @@ LatticeRegionDerivation lattice_region_derivation(
   topopt::LatticeTopology topo;
   if (!lattice_topology_from_name(topology, topo)) return d;
   if (!(member_width_mm > 0.0) || !(min_extrudable_width_mm > 0.0)) return d;
+  // ★ #358: `lattice_derive_cell_for_member` and `lattice_min_density_for_strut` take the
+  // per-type strut law, which refuses a type without a measured table. That refusal is
+  // "no derivation" (valid false), never a C++ throw into Swift.
+  try {
   d.valid = true;
   d.rho_max = topopt::lattice_rho_max(topo);
   const topopt::LatticeCellDerivation w = topopt::lattice_derive_cell_for_member(
@@ -3164,6 +3200,10 @@ LatticeRegionDerivation lattice_region_derivation(
   d.out_of_regime = d.cells_per_member < n_star;
   d.prints = d.strut_mm + 1e-12 >= min_extrudable_width_mm;
   return d;
+  } catch (const std::exception& e) {
+    bridge_log(std::string("lattice_region_derivation(") + topology + "): core refused: " + e.what());
+    return LatticeRegionDerivation{};
+  }
 }
 
 std::vector<std::string> lattice_certifiable_topologies() {
@@ -3330,6 +3370,33 @@ bool grading_schema_accepts_cell_mode(const std::string& mode) {
 
 double lattice_subfloor_stress_fraction_default() {
   return topopt::lattice_subfloor_retention_stress_fraction();
+}
+
+namespace {
+std::vector<std::string> split_lines(const std::string& joined) {
+  std::vector<std::string> out;
+  std::string cur;
+  for (char c : joined) {
+    if (c == '\n') { if (!cur.empty()) out.push_back(cur); cur.clear(); }
+    else cur += c;
+  }
+  if (!cur.empty()) out.push_back(cur);
+  return out;
+}
+}  // namespace
+
+int lattice_type_readiness(const std::string& id, const std::string& generatable_lines,
+                           const std::string& certifiable_lines) {
+  return static_cast<int>(topopt::lattice_type_readiness(
+      id, split_lines(generatable_lines), split_lines(certifiable_lines)));
+}
+
+std::string lattice_type_readiness_plain(int readiness) {
+  using R = topopt::LatticeTypeReadiness;
+  for (R r : {R::Live, R::NotGeneratable, R::NotCertifiable, R::NotEither, R::UnknownId})
+    if (static_cast<int>(r) == readiness)
+      return std::string(topopt::lattice_type_readiness_plain(r));
+  return std::string();
 }
 
 std::vector<std::string> lattice_generatable_topologies() {

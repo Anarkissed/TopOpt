@@ -7,8 +7,10 @@
 // type core lights up is offered only with a job that will run. Today that is the octet alone.
 //
 // EVERY OTHER TYPE STAYS VISIBLE AND GREYED, WITH CORE'S REASON (03 §2; M1: BCCZ, FCCZ and
-// Re-entrant included). Core publishes no reason string yet (core brief 2026-09-28, item a), so the
-// reason is worded from core's own facts — which of the three it lacks — and changes nothing else.
+// Re-entrant included). ★ Since the #358 sync the verdict AND the words are core's
+// (`lattice_type_readiness` + `lattice_type_readiness_plain`, brief item a, maintainer round 2:
+// "bring in lattice_type_readiness_plain() for the picker words"). The app adds one line core has
+// no state for: built and certified, but core's job parser refuses the id (`jobRefused`).
 //
 // ORDER (03 §2, M4): Octet first, then the round's struts, then the sheets, then the types this
 // round does not offer. NAMES: Q5's defaults (`LatticeType.displayName(forID:)`).
@@ -40,27 +42,30 @@ public enum LatticeTypeCatalog {
         "bccz", "fccz", "reentrant",                              // M1: visible, greyed, last
     ]
 
-    /// The reasons, worded from core's facts until core publishes its own (brief item a).
-    public static let notBuilt = "Core can’t build this type yet."
-    public static let notCertified = "Core can’t certify this type yet."
-    public static let notBuiltOrCertified = "Core can’t build or certify this type yet."
+    /// The one reason core has no state for: it can build and certify the type, but its job
+    /// parser refuses the id, so a run would be refused.
     public static let jobRefused = "Core’s run doesn’t accept this type yet."
+
+    /// Core's words for a type it does not offer. A type on the round's list that core has no id
+    /// for yet (the sheets, brief item b) is told core's "neither" line: core's own "Not a lattice
+    /// type" would tell the user a planned type is not a lattice.
+    static func coreReason(_ id: String, generatable: [String], certifiable: [String]) -> String? {
+        switch TopOptKit.latticeTypeReadiness(id, generatable: generatable, certifiable: certifiable) {
+        case .live: return nil
+        case .unknownId where order.contains(id): return TopOptKit.latticeTypeReadinessPlain(.notEither)
+        case let r: return TopOptKit.latticeTypeReadinessPlain(r)
+        }
+    }
 
     /// The entries from core's three facts, given explicitly (the pure form the tests drive).
     public static func entries(generatable: [String], certifiable: [String],
                                jobAccepts: (String) -> Bool) -> [LatticeTypeEntry] {
-        let gen = Set(generatable), cert = Set(certifiable)
         // a type core adds that this list does not know yet still shows (after the round's)
         let extra = (generatable + certifiable).filter { !order.contains($0) }
         var seen = Set<String>()
         return (order + extra).filter { seen.insert($0).inserted }.map { id in
-            let reason: String?
-            switch (gen.contains(id), cert.contains(id)) {
-            case (true, true): reason = jobAccepts(id) ? nil : jobRefused
-            case (true, false): reason = notCertified
-            case (false, true): reason = notBuilt
-            case (false, false): reason = notBuiltOrCertified
-            }
+            let reason = coreReason(id, generatable: generatable, certifiable: certifiable)
+                ?? (jobAccepts(id) ? nil : jobRefused)
             return LatticeTypeEntry(id: id, displayName: LatticeType.displayName(forID: id),
                                     offered: reason == nil, reason: reason)
         }
@@ -89,10 +94,13 @@ public enum LatticeTypeCatalog {
     /// (`LatticeSettings.runSpec` is nil for a type core can't build), so Optimize ran the part
     /// with no lattice and said nothing. Every start asks this first and says why. Never
     /// migrated: the pick stays his, and runs by itself once core makes the type live.
-    /// nil when the type may run; an id core does not know at all is neither built nor certified.
+    /// nil when the type may run; an id the picker does not list gets core's words for it.
     public static func selectionRefusal(_ id: String, in entries: [LatticeTypeEntry]) -> String? {
         guard let e = entries.first(where: { $0.id == id }) else {
-            return "\(LatticeType.displayName(forID: id)): \(notBuiltOrCertified)"
+            let why = coreReason(id, generatable: TopOptKit.latticeGeneratableTopologies,
+                                 certifiable: TopOptKit.latticeCertifiableTopologies)
+                ?? TopOptKit.latticeTypeReadinessPlain(.unknownId)
+            return "\(LatticeType.displayName(forID: id)): \(why)"
         }
         return e.offered ? nil : reasonLine(e)
     }

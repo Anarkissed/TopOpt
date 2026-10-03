@@ -29,9 +29,14 @@ AA4C7953-3152-4123-BCB5-EF5F8A08ABA3 a975ba0f83d9b383
 | fa | item (a): named() returns nil for an unknown id | 3f19f920e5c96a5a | 6dbb48fab4029f78 | c4ca5d5ac009036d | 2baaf9cbb94027c7 | 7ba46796d87e3b34 | 3e6f162cb36212a9 | b457718dfc23ab42 |
 | f4a | ruling (4) R4: Default Grade packs halves by its algorithm | 3f19f920e5c96a5a | 6dbb48fab4029f78 | c4ca5d5ac009036d | 2baaf9cbb94027c7 | 7ba46796d87e3b34 | 3e6f162cb36212a9 | b457718dfc23ab42 |
 | f4b | ruling (4): the probe fixed, plans OFF, Stepped never | 3f19f920e5c96a5a | 6dbb48fab4029f78 | c4ca5d5ac009036d | 2baaf9cbb94027c7 | 7ba46796d87e3b34 | 3e6f162cb36212a9 | b457718dfc23ab42 |
+| fs | sync: #358 at 23e6154e (identity, readiness words, core's per-type ceiling, the bridge's refusal guards) | 3f19f920e5c96a5a | 6dbb48fab4029f78 | c4ca5d5ac009036d | 2baaf9cbb94027c7 | 7ba46796d87e3b34 | 3e6f162cb36212a9 | b457718dfc23ab42 |
 
 The arm "b" equals the round-1 values: lt3/lt4 on P1 for the six unchanged projects, and p3base 169fe967ff734cfa for 3418E167. The script reproduces the old dumps.
 
 f3 moves 3418E167 only (Stepped + Structural in S1). Its job differs from f1 in exactly one line, `"structural_certification" : "beam_network"` removed from `grading`; with that key popped the two jobs are equal.
 
 f5 moves the four graded octet jobs: 68BF7B74, 92A8016E, 570B38E2 and 3418E167. In each, only `grading.max_relative_density` changes, from `0.21887144446372986` (the app's 24-step bisection, 7344107/2^25) to `0.21887141535615173` (core's `octet_aesthetic_density_ceiling()`, 200 steps). That is a change of −2.911e-8, and each job is otherwise identical. 102117B9 is organic and carries no cap; AA4C7953 and 887AC498 have no lattice block.
+
+9dd60eb2 (the Default Grade proof) adds a test and documents only, so it cannot move a stage job; no arm was taken for it.
+
+fs equals f4b on all seven: the sync moves no stage-job bytes. In particular, core's per-type `lattice_aesthetic_density_ceiling(octet)` returns the same double as `octet_aesthetic_density_ceiling()`, as ruled.

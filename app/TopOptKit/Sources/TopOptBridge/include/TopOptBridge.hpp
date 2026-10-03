@@ -1070,6 +1070,18 @@ SmokeResult bridge_smoke(const std::string& materials_path,
 // call used as the most basic bridge liveness check.
 std::string core_version();
 
+// ★ THE LINKED CORE'S IDENTITY, STATED ONCE (#358, 349053df + 23e6154e). `run_lattice_job`
+// runs core's `lattice_variant_job` IN-PROCESS, and core stamps every receipt's
+// `fingerprint` / `build_time` from `topopt::build_identity()`, which only the executable that
+// owns the binary can state. Unstated, an in-app relattice receipt says "unknown". The app
+// states CoreFingerprint.value + .buildTime here before its first bridge run.
+// Set-once in core: the same identity again is a no-op; a DIFFERENT one throws (two binaries'
+// identities in one process), reported through `err`, never across the bridge.
+void state_core_build_identity(const std::string& fingerprint,
+                               const std::string& build_time, BridgeError& err);
+// The identity core holds now: {fingerprint, build_time} ({"unknown", ""} when unstated).
+std::vector<std::string> core_build_identity();
+
 // ---------------------------------------------------------------------------
 // Lattice certification limits (lattice mode UI, handoff 2026-07-29-lattice-mode-
 // ui). The app's lattice controls MUST be bounded by what the core actually
@@ -1150,8 +1162,9 @@ double lattice_strut_diameter_mm(const std::string& topology, double rho,
 /// definition). The linked core carries it for OCTET only, as the inline
 /// `octet_aesthetic_density_ceiling()` (the diameter table's preimage of strut/cell 0.20; core's
 /// own test asserts the per-type `lattice_aesthetic_density_ceiling(octet)` equals it exactly).
-/// Returns 0 when core has no ceiling for the type ("none measured"). At the next core sync this
-/// calls `lattice_aesthetic_density_ceiling(topo)`; for octet that swap moves no bytes.
+/// Returns 0 when core has no ceiling for the type ("none measured"). Since the #358 sync this
+/// is core's per-type `lattice_aesthetic_density_ceiling(topo)`, which returns exactly the octet
+/// number above (the swap moved no bytes) and refuses every unmeasured type, read here as 0.
 double lattice_aesthetic_density_ceiling(const std::string& topology);
 /// The forward law: the relative density a strut RADIUS produces at a cell (octet
 /// only; 0 = no core law, 1 = the radius fills the cell). Core reply 5, 2026-09-20.
@@ -1345,6 +1358,16 @@ std::vector<std::string> lattice_certifiable_topologies();
 // (topopt::lattice_gen_topology_names) — no mirrored list remains app-side, so
 // core enum growth reaches the picker with zero app changes. Never throws.
 std::vector<std::string> lattice_generatable_topologies();
+
+// ★ CORE'S READINESS for a lattice type and its PLAIN WORDS (brief item a; #358
+// `lattice_type_readiness` + `lattice_type_readiness_plain`). The two sets are passed in,
+// newline-joined, so the app's pure form (tests hand their own sets) and production ask core
+// the same question. Returns core's enum as its ordinal: 0 Live, 1 NotGeneratable,
+// 2 NotCertifiable, 3 NotEither, 4 UnknownId (the app pins the mapping with core's own sets).
+int lattice_type_readiness(const std::string& id, const std::string& generatable_lines,
+                           const std::string& certifiable_lines);
+// Core's plain line for a readiness ordinal; "" for an ordinal core does not have.
+std::string lattice_type_readiness_plain(int readiness);
 
 // ---------------------------------------------------------------------------
 // SUB-FLOOR RETENTION: what CORE's job schema accepts, and core's own ceiling
