@@ -1875,8 +1875,8 @@ public struct LatticeSetupWizard: View {
     }
 
     /// ★ THE RECOMMENDATION (brief 2026-09-06, §3 menu wiring): with a simulation the
-    /// AUTO pick (a graded window → cell_mode auto + min/max); without one the FIT
-    /// pick (one size → cell_mode fit + cell_mm). Fit is never offered with a
+    /// AUTO pick (a graded window → swept min/max); without one the FIT pick (one size →
+    /// a one-size swept window, min = max: ruling 5, 2026-10-03). Fit is never offered with a
     /// simulation (his item 1) and Auto never without (item 3). Collapsed ⇒ "no cell
     /// fits this wall — solid", with the bounds behind the (i).
     @ViewBuilder private func organicRecommendationRow(structural: Bool) -> some View {
@@ -2857,8 +2857,9 @@ public struct LatticeSetupWizard: View {
         // grading spread comes from the stress range; with none it is 1 and lo == hi.
         // `gradingDictionary` refuses a grade whose ends are equal, so writing it as a
         // grade left the job with NO cell keys at all and core chose for itself — the
-        // preview would then show a lattice the run does not build. A single size is
-        // `cell_mode fit` + `cell_mm`, which core honours exactly.
+        // preview would then show a lattice the run does not build. A single size is the
+        // one-size window `cell_min_mm` = `cell_max_mm` under swept (ruling 5, 2026-10-03:
+        // core refuses `cell_mode fit` + `cell_mm`).
         if w.hi > w.lo + 1e-9 {
             model.organicPickedSeparationMM = 0
             model.organicPickedGradeMM = [w.lo, w.hi]

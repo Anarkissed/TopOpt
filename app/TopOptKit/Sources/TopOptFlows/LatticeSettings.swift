@@ -1020,9 +1020,9 @@ public struct LatticeSpec: Equatable, Sendable {
             // `synthetic_foci`), written by `LatticeRegionSpec.wireDictionary` for every
             // include wall when the switch is on — core decides which are dead.
             // ★ NEVER `organic_shape_fit_only` ON AN ORGANIC JOB: core accepts it only
-            // with a cell window, and windows only on the SWEPT path (job.cpp), which
-            // D2 forbids for organic — a job carrying it is refused at validation
-            // (measured 2026-09-04 against job.cpp). For the RUN the switch means
+            // with a cell window (job.cpp). A Manual pick does now ride a swept window
+            // (ruling 5, 2026-10-03), but with lo == hi the ramp is the constant size, so
+            // the key would say nothing; it stays unwritten. For the RUN the switch means
             // Fit: one separation, no stress grading of the cell, shape fit kept.
             // ★ INTENT, STATED. Core refuses organic unless the job SAYS
             // "intent": "aesthetic" (run_job.cpp `refuse_organic_structural`): the
@@ -1040,16 +1040,18 @@ public struct LatticeSpec: Equatable, Sendable {
             // ★ The user's pick among certification's separations (maintainer,
             // 2026-09-03). `put` refuses it until core's schema accepts the key, so a
             // pick is stored and shown but never sent to a core that would refuse.
-            // ★ MANUAL ON THE WIRE (brief 2026-09-06): core has no organic size keys;
-            // a single size is `cell_mode: "fit"` + `cell_mm`, a grade is
-            // `cell_mode: "auto"` + `cell_min_mm`/`cell_max_mm` — the same keys the
-            // recommendation's FIT and AUTO buttons write.
-            if organicPickedSeparationMM > 0 {
-                grading["cell_mode"] = LatticeCellSizeMode.fit.rawValue
-                grading["cell_mm"] = organicPickedSeparationMM
-                grading.removeValue(forKey: "cell_min_mm"); grading.removeValue(forKey: "cell_max_mm")
-            } else if organicPickedGradeMM.count == 2, organicPickedGradeMM[0] > 0,
-                      organicPickedGradeMM[1] > organicPickedGradeMM[0] {
+            // ★★ MANUAL ON THE WIRE: a WINDOW, under swept, for one size and for a grade
+            // (maintainer, 2026-10-03, ruling 5: "the app sends a one-size window
+            // (cell_min_mm = cell_max_mm = the size), with no schema change. The app must
+            // never write a job core refuses"). The old single-size form — `cell_mode:
+            // "fit"` + `cell_mm` — is REFUSED by core's schema (job.cpp: "cell_mm" is not
+            // allowed with "cell_mode": "fit"), and the organic run never read a cell_mm
+            // anyway: its separation window is cell_min_mm/cell_max_mm, parsed only under
+            // swept, and core accepts min == max (`>=`). Core's own organic fixture is
+            // exactly this shape (tests/fixtures/organic/dead_parity.json: swept 3.0/3.0).
+            // One mapping for the job and the preview: `organicCellWindowMM`.
+            if let w = LatticeSettings.organicCellWindowMM(picked: organicPickedSeparationMM,
+                                                           grade: organicPickedGradeMM) {
                 // ★★★ A GRADE IS "swept", NOT "auto" (his walk, 2026-09-08: entering the
                 // lattice stage died on `job.json: grading "cell_min_mm" /
                 // "cell_max_mm" are only allowed with "cell_mode": "swept"`).
@@ -1067,8 +1069,8 @@ public struct LatticeSpec: Equatable, Sendable {
                 // accepted the document. Swept is the control, not a workaround for the
                 // schema.
                 grading["cell_mode"] = LatticeCellSizeMode.swept.rawValue
-                grading["cell_min_mm"] = organicPickedGradeMM[0]
-                grading["cell_max_mm"] = organicPickedGradeMM[1]
+                grading["cell_min_mm"] = w.lo
+                grading["cell_max_mm"] = w.hi
                 grading.removeValue(forKey: "cell_mm")
             }
             // ★★★ GROWTH NEEDS A STATED LAYER HEIGHT — a SCHEMA REFUSAL since the
@@ -1110,9 +1112,12 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
     ///
     /// run_job: `rim = organic_solid_rim_mm < 0 ? job.grading.cell_min_mm
     /// : organic_solid_rim_mm`, and `organic_solid_rim_band` returns an empty band
-    /// unless `rim > 0`. `cell_min_mm` defaults to 0 and this app writes it ONLY when a
-    /// GRADE was picked — under Auto, and under a single Manual size, the job carries no
-    /// `cell_min_mm` at all. So the run applies NO RIM in those cases.
+    /// unless `rim > 0`. `cell_min_mm` defaults to 0 and this app writes it ONLY with a
+    /// Manual pick — a grade, or since ruling 5 (2026-10-03) a single size as the
+    /// one-size window (s, s); under Auto the job carries no `cell_min_mm` at all, so
+    /// the run's fallback rim there is NONE. The job states `organic_solid_rim_mm`
+    /// whenever a bead is known (`organicSolidRimForJobMM`), so a single size never
+    /// falls back to a whole cell `s` of rim.
     ///
     /// ★ THE PREVIEW WAS TAKING THE WINDOW'S LOW END INSTEAD (3.96 mm under Auto on his
     /// stand) and eroding every face region by it — a band the run does not remove,
@@ -1153,14 +1158,20 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
     }
 
     public var organicPreviewSeparationWindowMM: (lo: Double, hi: Double) {
-        if organicPickedSeparationMM > 0 {
-            return (organicPickedSeparationMM, organicPickedSeparationMM)
-        }
-        if organicPickedGradeMM.count == 2, organicPickedGradeMM[0] > 0,
-           organicPickedGradeMM[1] > organicPickedGradeMM[0] {
-            return (organicPickedGradeMM[0], organicPickedGradeMM[1])
-        }
+        if let w = Self.organicCellWindowMM(picked: organicPickedSeparationMM,
+                                            grade: organicPickedGradeMM) { return w }
         return (cellMinMM > 0 ? cellMinMM : cellMM, cellMaxMM > 0 ? cellMaxMM : cellMM)
+    }
+
+    /// ★ THE ONE MAPPING from an organic Manual pick to the separation window — what the
+    /// job writes as `cell_min_mm`/`cell_max_mm` under swept AND what the preview traces
+    /// (ruling 5, 2026-10-03). A single size s is the window (s, s); a valid grade is
+    /// (lo, hi); no pick is nil (Auto: the job states no window). The single size wins
+    /// over a lingering grade, as it always has.
+    public static func organicCellWindowMM(picked: Double, grade: [Double]) -> (lo: Double, hi: Double)? {
+        if picked > 0 { return (picked, picked) }
+        if grade.count == 2, grade[0] > 0, grade[1] > grade[0] { return (grade[0], grade[1]) }
+        return nil
     }
 
     /// ★ WHAT A BAKE READS — with what a bake WRITES stripped out. The strut bake's
@@ -1383,8 +1394,8 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
     /// and the pop-up can offer them. Empty until a run's receipt carries them.
     public var organicFittingSeparationsMM: [Double] = []
     /// The user's pick among those (0 ⇒ none picked; core chooses under Fit). Travels
-    /// as `organic_separation_mm` the day core's schema accepts that key — gated in
-    /// `gradingDictionary()` like every organic key, never sent to a core that refuses.
+    /// as the one-size window `cell_min_mm` = `cell_max_mm` under swept (ruling 5,
+    /// 2026-10-03), `organicCellWindowMM` — a shape core's schema accepts.
     public var organicPickedSeparationMM: Double = 0
     /// ★ THE GRADES CERTIFICATION APPROVES (maintainer, 2026-09-03, item 3.1): with the
     /// simulation on, a Manual pick among the windows core reports as certifying —

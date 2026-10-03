@@ -1673,13 +1673,13 @@ public struct LatticeSDFScene {
             // will. `shapeFitOnly` replaces the stress-driven window by the depth ramp.
             var fitNote = ""
             if n > 0, o.shapeFit {
-                // ★ NO WINDOW, EVER, FOR ORGANIC (2026-09-04, and only landed now — the
-                // first edit missed its anchor and was reported done; see the handoff):
-                // core reads `cell_min/max` only on the SWEPT path and D2 never writes
-                // them for organic, so in the run `have_window` is false, the cap's
-                // floor is `kOrganicShapeFitMinCellRatio × spacing` (run_job.cpp), and
-                // the ONLY-mode ramp never runs. Passing (lo, hi) here floored the cap
-                // at `lo` — a swept-window behaviour no organic job can ask for.
+                // ★ NO WINDOW HERE (2026-09-04): under Auto the job states none, so in
+                // the run `have_window` is false and the cap's floor is
+                // `kOrganicShapeFitMinCellRatio × spacing` (run_job.cpp). ★ A MANUAL PICK
+                // NOW DOES carry one (ruling 5, 2026-10-03: a swept window, lo == hi for
+                // one size), and there core floors the cap at `cell_min_mm` — for one
+                // size that makes the run's shape fit inert. The preview still passes
+                // none; that difference is reported (round-3 handoff), not decided here.
                 // ★★★ CORE'S SHAPE FIT HAS TWO TERMS AND THE PREVIEW ONLY HAD ONE
                 // (his walk, 2026-09-07: "There should be a Grade to Shape that is
                 // always on"). Core caps the spacing at `min(member_width / n★,

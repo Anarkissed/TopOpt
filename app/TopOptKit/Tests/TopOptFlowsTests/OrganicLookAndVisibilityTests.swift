@@ -158,7 +158,7 @@ final class OrganicLookAndVisibilityTests: XCTestCase {
         // ★ AND THE JOB MUST CARRY IT EITHER WAY. Without a stress range the band's
         // spread is 1, so the window collapses to one size — `gradingDictionary` refuses
         // a grade whose ends are equal, and the job would have carried NO cell keys and
-        // let core choose. A single size goes out as `cell_mm`.
+        // let core choose. A single size goes out as the one-size window (ruling 5).
         XCTAssertTrue(wz.contains("model.organicPickedSeparationMM = w.lo"),
                       "★ a collapsed window is written as a single size")
         var spec = LatticeSpec(topologyID: "octet", cellMM: 8, strutRadiusMM: 0.6,
@@ -173,8 +173,10 @@ final class OrganicLookAndVisibilityTests: XCTestCase {
         } else {
             spec.organicPickedSeparationMM = fine.lo
             let g = try XCTUnwrap(spec.gradingDictionary())
-            XCTAssertEqual(g["cell_mm"] as? Double, fine.lo)
-            XCTAssertEqual(g["cell_mode"] as? String, "fit")
+            XCTAssertEqual(g["cell_min_mm"] as? Double, fine.lo)
+            XCTAssertEqual(g["cell_max_mm"] as? Double, fine.lo)
+            XCTAssertEqual(g["cell_mode"] as? String, "swept")
+            XCTAssertNil(g["cell_mm"], "★ ruling 5: never fit + cell_mm, which core refuses")
         }
     }
 

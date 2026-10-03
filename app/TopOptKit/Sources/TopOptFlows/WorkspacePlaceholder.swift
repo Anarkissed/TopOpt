@@ -5096,9 +5096,9 @@ public struct WorkspacePlaceholder: View {
         }()
         let organicLook = project.lattice.organicLookCellsAcross
         let organicLookPercent = project.lattice.organicLookPercent
-        // ★ THE RIM THE RUN WILL APPLY — see `organicRunSolidRimMM`. Under Auto and
-        // under a single Manual size the job carries no `cell_min_mm`, so the run's rim
-        // is 0 and the preview must not remove a band the run keeps.
+        // ★ THE RIM THE RUN WILL APPLY — see `organicRunSolidRimMM`. The job states the
+        // rim itself whenever a bead is known, so the run never falls back to a cell's
+        // worth; under Auto it carries no `cell_min_mm` and that fallback would be 0.
         // ★ THE PRINTABILITY FLOOR, not the bead — `max(1.535 × bead, one design voxel)`,
         // the probe's own number once it has run (his ruling, 2026-09-08).
         let organicRimSetting = project.lattice.organicRunSolidRimMM(
