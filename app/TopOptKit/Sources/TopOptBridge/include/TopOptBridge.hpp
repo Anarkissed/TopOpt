@@ -1082,6 +1082,18 @@ void state_core_build_identity(const std::string& fingerprint,
 // The identity core holds now: {fingerprint, build_time} ({"unknown", ""} when unstated).
 std::vector<std::string> core_build_identity();
 
+// ★★ THE ONE GUARD'S REASON CHANNEL (maintainer, 2026-10-03: "no core exception ever
+// crosses the bridge"). Every exported function runs through one guard in bridge.cpp: a
+// core exception becomes the function's invalid/error result, and its reason is kept
+// here, per thread, until the next bridge call on that thread returns normally (which
+// clears it). Read it right after a call whose result says it could not answer; a
+// result type with its own reason field (BridgeError, `reason`, `message`) carries the
+// same words. "" = the last call answered.
+std::string bridge_last_refusal();
+// The guard's own test hook: 0 → "answered"; 1 → a std::exception; 2 → a non-std
+// exception. 1 and 2 return "" with the reason in bridge_last_refusal().
+std::string bridge_guard_self_test(int kind);
+
 // ---------------------------------------------------------------------------
 // Lattice certification limits (lattice mode UI, handoff 2026-07-29-lattice-mode-
 // ui). The app's lattice controls MUST be bounded by what the core actually
@@ -1094,10 +1106,11 @@ struct LatticeLimits {
   // topopt::lattice_rho_min / lattice_rho_max. Meaningful only when `certifiable`.
   double rho_min = 0.0;
   double rho_max = 0.0;
-  // True iff the core certification library carries a homogenized tensor (and thus
-  // a band) for the topology — i.e. a run may lattice + certify it. Octet is the
-  // only true value today; the set widens as core's LatticeTopology enum grows, and
-  // this accessor reflects that with no app change.
+  // True iff core calls the type LIVE — it carries the homogenized tensor (and thus a
+  // band) AND can build it — so a run may lattice + certify it. Octet is the only true
+  // value today; the set widens as core's readiness widens, with no app change. A type
+  // core certifies but cannot build yet is false here with core's words in `reason`
+  // (2026-10-03): its floor would otherwise be octet's placeholder.
   bool certifiable = false;
   // The minimum number of cells that must span a member for the homogenized
   // certification to hold (the scale-separation ceiling: max printable cell =
@@ -1107,6 +1120,10 @@ struct LatticeLimits {
   // engages automatically once core returns a positive value here. This is NOT an
   // app-side limit: it is exactly whatever the core reports.
   double min_cells_per_member = 0.0;
+  // ★ Core's reason when it gives no numbers (maintainer, 2026-10-03): "" when it
+  // does. `certifiable` is true ONLY for a type core calls live — a type whose tensor
+  // core holds but cannot build yet gets its readiness words here, never octet's floor.
+  std::string reason;
 };
 
 // The certifiable limits for a lattice topology named as the job schema names it
@@ -1239,6 +1256,8 @@ struct LatticeCellBounds {
   // app's per-region receipt was doing exactly that. 0 ⇒ core states no percolation
   // floor for the topology.
   double percolation_cells_per_member_floor = 0.0;
+  // ★ Core's reason when `valid` is false (maintainer, 2026-10-03); "" when valid.
+  std::string reason;
 };
 LatticeCellBounds lattice_cell_bounds(const std::string& topology,
                                       double min_extrudable_width_mm);
@@ -1277,6 +1296,8 @@ struct LatticeRegionDerivation {
   // the condition core refuses the job on (refuse_unprintable_stated_density), so
   // the field can say so before the run rather than after.
   bool prints = false;
+  // ★ Core's reason when `valid` is false (maintainer, 2026-10-03); "" when valid.
+  std::string reason;
 };
 // ★ `cells_per_member_floor` — 0 keeps core's ACCURACY floor (5), which is what every
 // pre-existing caller gets. Pass the mode's own floor to derive the cell the mode

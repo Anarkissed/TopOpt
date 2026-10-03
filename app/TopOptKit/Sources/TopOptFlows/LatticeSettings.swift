@@ -2421,6 +2421,13 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
                         layerHeightMM: Double = 0)
         -> LatticeSpec? {
         guard enabled else { return nil }
+        // ★★ THE STALE-TYPE GATE (maintainer, 2026-10-03: "gate the stale type before
+        // LatticeBounds.compute, so the stale-type path never asks core for numbers it can't
+        // have"). Exactly the first two terms of `runnableAsCertified`, so every input that
+        // returned nil below still does and octet takes the same path; a type core cannot
+        // build or does not give numbers for never reaches the per-type bridge calls.
+        guard LatticeBounds.coreRuns(certifiable: limits.certifiable, generatable: generatable)
+        else { return nil }
         let b = LatticeBounds.compute(settings: self, limits: limits,
                                       generatable: generatable,
                                       memberMM: memberMM, lineWidthMM: lineWidthMM)
@@ -2984,9 +2991,11 @@ public struct LatticeBounds: Equatable, Sendable {
         // Topology. Certifiability and generatability are INDEPENDENT properties
         // (bar B0): the first is whether core carries a tensor (band displays), the
         // second is whether core's geometry generator can emit it (a run exists).
+        // ★ Core's own words when it gave no numbers (its readiness reason, 2026-10-03).
         let topoReason: String? = limits.certifiable
             ? nil
-            : "\(name) is preview-only — not yet certifiable, so a run won't lattice it"
+            : limits.reason.map { "\(name): \($0)" }
+                ?? "\(name) is preview-only — not yet certifiable, so a run won't lattice it"
         let genReason: String? = generatable
             ? nil
             : "\(name) certifies, but core has no geometry generator for it yet — a run can't lattice it"
@@ -3074,7 +3083,13 @@ public struct LatticeBounds: Equatable, Sendable {
     /// printable — `strutTooThin` is a sparse-end preview advisory only. A false here is
     /// why the job omits the lattice block; the reasons above say which condition failed.
     public var runnableAsCertified: Bool {
-        certifiable && generatable && !cellOverCeiling
+        Self.coreRuns(certifiable: certifiable, generatable: generatable) && !cellOverCeiling
+    }
+
+    /// Core gives this type's numbers AND can build it — the one definition the stale-type
+    /// gate (`LatticeSettings.runSpec`) and `runnableAsCertified` share.
+    public static func coreRuns(certifiable: Bool, generatable: Bool) -> Bool {
+        certifiable && generatable
     }
 
     /// The single relative density the RUN generates at. The shipped generator is

@@ -24,15 +24,19 @@ final class LatticeNamedNoOctetFallbackTests: XCTestCase {
     }
 
     /// A Kelvin graded job carries no octet cap (`max_relative_density` is octet's alone).
+    /// ★ 2026-10-03 (the one guard): core gives Kelvin no numbers until it is live — its
+    /// limits come back with core's readiness words, never octet's floor — so no Kelvin job
+    /// is built at all, even when a caller claims it is generatable: nothing octet can ride.
     func testAKelvinJobCarriesNoOctetCap() throws {
         var lat = LatticeSettings(enabled: true, topologyID: "kelvin")
         lat.densityMode = .sim
         let limits = TopOptKit.latticeLimits(topology: "kelvin")
-        guard limits.certifiable else { throw XCTSkip("core does not certify kelvin here") }
-        let spec = try XCTUnwrap(lat.runSpec(limits: limits, generatable: true, lineWidthMM: 0.45))
-        XCTAssertEqual(spec.densityCapRho, 0)
-        XCTAssertNil(try XCTUnwrap(spec.gradingDictionary())["max_relative_density"],
-                     "★ the octet aesthetic ceiling must not ride a Kelvin job")
+        XCTAssertFalse(limits.certifiable, "★ core gives a non-live type no numbers")
+        XCTAssertEqual([limits.rhoMin, limits.rhoMax, limits.minCellsPerMember], [0, 0, 0],
+                       "★ and never octet's band or floor")
+        XCTAssertTrue(limits.reason?.contains("not buildable") ?? false, limits.reason ?? "nil")
+        XCTAssertNil(lat.runSpec(limits: limits, generatable: true, lineWidthMM: 0.45),
+                     "★ no Kelvin job, so no octet cap can ride one")
         // control: octet still carries its cap
         var oct = lat; oct.topologyID = "octet"
         let o = try XCTUnwrap(oct.runSpec(limits: TopOptKit.latticeLimits(topology: "octet"),

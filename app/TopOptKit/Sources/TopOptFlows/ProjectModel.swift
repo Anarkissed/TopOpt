@@ -2341,6 +2341,15 @@ public final class ProjectModel: ObservableObject {
     /// bead. `emission` is the caller's own, so a count the caller states describes these
     /// regions. No policy here: a variant's zero-include refusal (ruling c) is its caller's.
     public func latticeRunSpec(emission: LatticeRegionEmission.Result) -> LatticeSpec? {
+        // ★★ THE STALE-TYPE GATE, BEFORE THE POSTURE (maintainer, 2026-10-03). A type core
+        // does not call live gets no run spec — and so its stale path asks core for no
+        // per-type number at all (the posture and the bounds both would). Core's own
+        // readiness, the same two facts `runSpec(topology:)` reads, so octet is untouched.
+        guard lattice.enabled,
+              TopOptKit.latticeTypeReadiness(lattice.topologyID,
+                                             generatable: TopOptKit.latticeGeneratableTopologies,
+                                             certifiable: TopOptKit.latticeCertifiableTopologies) == .live
+        else { return nil }
         let includes = emission.regions.filter { $0.role == .include }
         let resolvedLattice = LatticeAutoPosture.applied(
             to: lattice,

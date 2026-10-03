@@ -120,4 +120,37 @@ final class LatticeStaleTypeTests: XCTestCase {
         XCTAssertFalse(try src("LatticeWizardModel.swift").contains("selectionRefusal"), "★ never migrated")
         XCTAssertFalse(try src("LatticeSettings.swift").contains("selectionRefusal"), "★ never migrated on decode")
     }
+
+    /// ★★ MAINTAINER, 2026-10-03: "gate the stale type before LatticeBounds.compute, so the
+    /// stale-type path never asks core for numbers it can't have." With a recorder on every
+    /// per-type wrapper, building the run spec for a stale type reaches core for NOTHING; the
+    /// octet control does reach it (so the recorder is not measuring nothing). Before the gate
+    /// this path called latticeLimits, latticeStrutDiameterMM and latticeCellBounds — the
+    /// last one is what trapped on #361 421fde3d.
+    func testTheStaleTypePathAsksCoreNothing() {
+        let lock = NSLock()
+        var log: [(fn: String, topology: String)] = []
+        TopOptKit.perTypeCallRecorder = { fn, t in lock.lock(); log.append((fn, t)); lock.unlock() }
+        defer { TopOptKit.perTypeCallRecorder = nil }
+        func calls(_ id: String) -> [String] {
+            lock.lock(); defer { lock.unlock() }
+            return log.filter { $0.topology == id }.map(\.fn)
+        }
+        func clear() { lock.lock(); log.removeAll(); lock.unlock() }
+        let stale = Set(TopOptKit.latticeCertifiableTopologies).subtracting(TopOptKit.latticeGeneratableTopologies)
+        XCTAssertFalse(stale.isEmpty, "positive control: core certifies types it cannot build")
+        for organic in [false, true] {
+            let (p, _, _) = VariantFacePrismFixture.project(organic: organic)
+            clear()
+            XCTAssertNotNil(p.latticeRunSpec(emission: p.latticeJobRegions()), "control: octet runs")
+            XCTAssertFalse(calls("octet").isEmpty, "★ control: octet's path does ask core (organic \(organic))")
+            for id in stale.sorted() + ["gyroid", "lattice9"] {
+                p.lattice.topologyID = id
+                let e = p.latticeJobRegions()
+                clear()
+                XCTAssertNil(p.latticeRunSpec(emission: e), "\(id): no run spec")
+                XCTAssertEqual(calls(id), [], "★ \(id) (organic \(organic)): the stale path asks core nothing")
+            }
+        }
+    }
 }
