@@ -1,0 +1,13 @@
+$ topopt-cli flexible job.json --out out
+wrote face101_target_depth.svg
+wrote face101_columns.csv
+wrote face101_buildable_depth.svg
+wrote face101_density.svg
+wrote face101_cell_size.svg
+wrote face101_tier_flags.svg
+wrote field_xz_density.svg
+wrote field_xz_owner.svg
+wrote run_info.json
+flexible: ran; receipt in /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/flexible-squish-maths-7a3bc8/docs/handoffs/evidence/2026-09-28-flexible-squish-maths/a_pad_centre_soft/out/run_info.json
+topopt-cli: core 8759d85d3c7a, built Sep 28 2026 20:00:03
+exit code 0

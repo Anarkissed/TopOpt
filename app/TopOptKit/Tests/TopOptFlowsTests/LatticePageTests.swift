@@ -412,16 +412,37 @@ final class LatticePageTests: XCTestCase {
 
     // MARK: - B7 · no invalid boundary state
 
-    func testBoundaryIsAThreeWayAndSkinWithoutRimIsUnrepresentable() {
-        // The treatment is a 3-case enum mapping 1:1 onto core's job values; no
-        // sequence of taps can reach a fourth state because none exists to reach.
-        XCTAssertEqual(LatticeBoundaryTreatment.allCases.count, 3)
+    /// ★★ FOUR NOW, AND THE FOURTH IS A DIFFERENT AXIS — replaced, not weakened
+    /// (maintainer, 2026-08-19: "It might be worth adding a 'Covered' finish? For
+    /// anyone who doesn't care about seeing the lattice?").
+    ///
+    /// ★ WHAT THE ORIGINAL RULE WAS PROTECTING, and it still holds: the `skin`
+    /// field cannot express "skin without rim", because core's diagrid anchors to
+    /// the rim loops. That invariant is asserted below unchanged.
+    ///
+    /// ★ WHAT CHANGED: `covered` is not a fourth `skin` value. It rides on
+    /// `outer_finish` — a SECOND, independent field core has always had
+    /// (core/src/cli/job.cpp:1433) and the app had never sent. So the skin values
+    /// are still exactly core's three; the enum simply carries one more choice
+    /// that maps somewhere else.
+    func testBoundaryIsAFourWayAndSkinWithoutRimIsUnrepresentable() {
+        XCTAssertEqual(LatticeBoundaryTreatment.allCases.count, 4)
+        // ★ The cover is the ONLY one that sets an outer finish, and it leaves the
+        // skin field alone — the lattice underneath still runs to the edge.
+        XCTAssertEqual(LatticeBoundaryTreatment.covered.jobOuterFinish, "shell")
+        XCTAssertEqual(LatticeBoundaryTreatment.covered.jobSkinValue, "none")
+        for t in LatticeBoundaryTreatment.allCases where t != .covered {
+            XCTAssertNil(t.jobOuterFinish,
+                         "\(t) must not carry an outer finish — only Covered does")
+        }
         XCTAssertEqual(LatticeBoundaryTreatment.none.jobSkinValue, "none")
         XCTAssertEqual(LatticeBoundaryTreatment.rim.jobSkinValue, "rim")
         XCTAssertEqual(LatticeBoundaryTreatment.fullSkin.jobSkinValue, "diagrid",
                        "full skin IS rim + faces in core (the diagrid anchors to rim loops) — skin-without-rim cannot be expressed")
         XCTAssertEqual(Set(LatticeBoundaryTreatment.allCases.map(\.jobSkinValue)),
-                       ["none", "rim", "diagrid"], "exactly core's three skin modes")
+                       ["none", "rim", "diagrid"],
+                       "★ STILL exactly core's three skin modes — Covered adds a "
+                       + "choice on the OTHER axis, not a fourth skin")
 
         // Exhaustive tap walk: from every state, every tap lands in the same 3 states.
         for start in LatticeBoundaryTreatment.allCases {

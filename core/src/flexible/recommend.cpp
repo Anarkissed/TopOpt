@@ -1,0 +1,348 @@
+#include "topopt/flexible/recommend.hpp"
+
+#include <algorithm>
+#include <cmath>
+#include <cstdio>
+#include <stdexcept>
+#include <string>
+#include <vector>
+
+#include "topopt/flexible/squish.hpp"
+
+namespace topopt {
+namespace flexible {
+namespace {
+
+std::string fmt(double v, const char* f = "%.3g") {
+  char b[40];
+  std::snprintf(b, sizeof(b), f, v);
+  return b;
+}
+
+std::string deg(double t) { return fmt(t, "%g") + " \xC2\xB0""C"; }
+
+std::string label(const Candidate& c) { return c.topology + " at " + deg(c.temp_c); }
+
+FaceFailure failure_of(const Stack& st, const FaceDesign& d, const Candidate& c) {
+  FaceFailure f;
+  f.face_region_id = st.face_region_id;
+  f.topology = c.topology;
+  f.temp_c = c.temp_c;
+  bool first = true, nearest_first = true;
+  for (std::size_t k = 0; k < d.columns.size(); ++k) {
+    const ColumnDesign& cd = d.columns[k];
+    const bool target_bad = cd.status == "too_firm" || cd.status == "too_soft" || cd.status == "beyond_data";
+    const bool built_bad = cd.status == "ok" && !cd.buildable_ok;
+    const bool solid = cd.status == "no_lattice" && cd.target_depth_mm > 0.0;
+    if (!target_bad && !built_bad && !solid) continue;
+    if (built_bad) ++f.buildable_beyond_data;
+    if (solid) ++f.solid_under_map;
+    if (cd.status == "too_firm") ++f.too_firm;
+    if (cd.status == "too_soft") ++f.too_soft;
+    if (cd.status == "beyond_data") ++f.beyond_data;
+    const StackColumn& sc = st.columns[k];
+    if (first) {
+      f.u_min_mm = f.u_max_mm = sc.u_mm;
+      f.v_min_mm = f.v_max_mm = sc.v_mm;
+      first = false;
+    }
+    f.u_min_mm = std::min(f.u_min_mm, sc.u_mm);
+    f.u_max_mm = std::max(f.u_max_mm, sc.u_mm);
+    f.v_min_mm = std::min(f.v_min_mm, sc.v_mm);
+    f.v_max_mm = std::max(f.v_max_mm, sc.v_mm);
+    if (cd.nearest_known) {
+      if (nearest_first) {
+        f.nearest_depth_min_mm = f.nearest_depth_max_mm = cd.nearest_depth_mm;
+        nearest_first = false;
+      }
+      f.nearest_known = true;
+      f.nearest_depth_min_mm = std::min(f.nearest_depth_min_mm, cd.nearest_depth_mm);
+      f.nearest_depth_max_mm = std::max(f.nearest_depth_max_mm, cd.nearest_depth_mm);
+    }
+  }
+  std::string what;
+  if (f.too_firm)
+    what += std::to_string(f.too_firm) + " columns cannot squish that deep (even the softest "
+            "lattice is too firm)";
+  if (f.too_soft)
+    what += std::string(what.empty() ? "" : "; ") + std::to_string(f.too_soft) +
+            " columns cannot stay that shallow (even the firmest squishes further)";
+  if (f.solid_under_map)
+    what += std::string(what.empty() ? "" : "; ") + std::to_string(f.solid_under_map) +
+            " columns have squish drawn over SOLID (no lattice there to squish)";
+  if (f.buildable_beyond_data)
+    what += std::string(what.empty() ? "" : "; ") + std::to_string(f.buildable_beyond_data) +
+            " columns squish past the tested strain once smoothed to what can be built";
+  if (f.beyond_data)
+    what += std::string(what.empty() ? "" : "; ") + std::to_string(f.beyond_data) +
+            " columns ask for more squish than the tests measured";
+  f.text = label(c) + ", face " + std::to_string(f.face_region_id) + ": " + what + ", at u " +
+           fmt(f.u_min_mm) + "-" + fmt(f.u_max_mm) + " mm, v " + fmt(f.v_min_mm) + "-" +
+           fmt(f.v_max_mm) + " mm" +
+           (f.nearest_known ? "; nearest achievable there " + fmt(f.nearest_depth_min_mm) + "-" +
+                                  fmt(f.nearest_depth_max_mm) + " mm"
+            : (f.too_firm + f.too_soft + f.beyond_data) > 0
+                ? "; the nearest achievable squish is itself past the data"
+                : "; the drawn map is reachable column by column, but not once smoothed "
+                  "to what can be built");
+  return f;
+}
+
+// Order two candidates by the tiebreaks; returns the code that decided, "" if tied.
+std::string tiebreak(const Candidate& a, const Candidate& b, bool& a_wins) {
+  if (a.near_edge_columns != b.near_edge_columns) {
+    a_wins = a.near_edge_columns < b.near_edge_columns;
+    return "tiebreak_near_edge";
+  }
+  // H2: GRAMS, from the measured specimen densities (foamed 220/240 C rows are lighter
+  // than 190 C at the same core density); skipped when either mass is unknown.
+  if (a.mass_known && b.mass_known &&
+      std::fabs(a.mass_g - b.mass_g) > 1e-9 * std::max(a.mass_g, b.mass_g)) {
+    a_wins = a.mass_g < b.mass_g;
+    return "tiebreak_mass";
+  }
+  if (a.insideness != b.insideness) {
+    a_wins = a.insideness > b.insideness;
+    return "tiebreak_inside_data";
+  }
+  a_wins = true;  // input order
+  return "";
+}
+
+}  // namespace
+
+Recommendation recommend(const FlexibleData& data, const std::string& material_id,
+                         const std::vector<double>& temps,
+                         const std::vector<std::string>& topologies, const std::string& feel,
+                         int beads_per_wall, double bead_width_mm,
+                         const std::vector<FaceRequest>& faces) {
+  if (feel != "springy" && feel != "damped")
+    throw FlexibleError("feel must be \"springy\" or \"damped\" (got \"" + feel + "\")");
+  for (const std::string& t : topologies)
+    if (t != "gyroid" && t != "honeycomb")
+      throw FlexibleError("topology must be \"gyroid\" or \"honeycomb\" (got \"" + t + "\")");
+  if (faces.empty()) throw FlexibleError("recommend: at least one loaded face is required");
+  Recommendation r;
+  r.feel = feel;
+  const std::string preferred = feel == "springy" ? "gyroid" : "honeycomb";
+
+  std::vector<int> side_faces;
+  for (const FaceRequest& f : faces)
+    if (f.stack->frame.side) side_faces.push_back(f.stack->face_region_id);
+
+  for (const std::string& topo : topologies)
+    for (double t : temps) {
+      Candidate c;
+      c.topology = topo;
+      c.temp_c = t;
+      if (topo == "honeycomb" && !side_faces.empty()) {
+        c.eligible = false;
+        c.refusal = Refusal{"honeycomb_side_stack",
+                            "honeycomb is only tested pushed along its prisms (build Z "
+                            "\xC2\xB1""15\xC2\xB0""); face " + std::to_string(side_faces[0]) +
+                                " is pushed from the side, so it is gyroid-only (R6)"};
+        r.candidates.push_back(c);
+        continue;
+      }
+      const CurveSetResult cs = curve_set(data, material_id, t, topo);
+      if (cs.refusal.refused()) {
+        c.refusal = cs.refusal;
+        r.candidates.push_back(c);
+        continue;
+      }
+      c.has_data = true;
+      const BuildParams build{topo, beads_per_wall, bead_width_mm};
+      const double span = cs.set.density_max() - cs.set.density_min();
+      double inside = 0.0, mass_g = 0.0;
+      bool mass_known = true;
+      int n = 0;
+      for (const FaceRequest& f : faces) {
+        const TierBand tier = tier_band(data.catalogue.error_bands, cs.set.tier,
+                                        f.stack->frame.side, beads_per_wall);
+        const FaceDesign d = design_face(cs.set, *f.stack, f.map, f.weight_n, f.design_stamp,
+                                         build, tier);
+        int built_bad = 0;  // reachable targets the smoothing pushes past the data
+        for (const ColumnDesign& cd : d.columns)
+          if (cd.status == "ok" && !cd.buildable_ok) ++built_bad;
+        const int bad = d.too_firm + d.too_soft + d.beyond_data + built_bad + d.solid_under_map;
+        c.unreachable_columns += bad;
+        c.near_edge_columns += d.near_edge;
+        c.material_volume_mm3 += d.material_volume_mm3;
+        for (std::size_t k = 0; k < d.columns.size(); ++k) {
+          const ColumnDesign& cd = d.columns[k];
+          if (cd.status == "no_lattice") continue;
+          const MaybeNumber md = specimen_density_g_cm3(cs.set, cd.buildable_density);
+          if (!md.known) mass_known = false;
+          // g/cm3 x mm3 / 1000 = g
+          mass_g += md.value * f.stack->columns[k].area_mm2 * cd.height_mm / 1000.0;
+          inside += std::min(cd.buildable_density - cs.set.density_min(),
+                             cs.set.density_max() - cd.buildable_density) / span;
+          ++n;
+        }
+        if (bad > 0) c.failures.push_back(failure_of(*f.stack, d, c));
+      }
+      c.insideness = n > 0 ? inside / n : 0.0;
+      c.mass_known = mass_known;
+      c.mass_g = mass_known ? mass_g : 0.0;
+      c.reachable = c.unreachable_columns == 0;
+      r.candidates.push_back(c);
+    }
+
+  for (const Candidate& c : r.candidates)
+    if (!c.eligible) {
+      r.reasons.push_back({c.refusal.code, c.refusal.reason, side_faces.empty() ? -1 : side_faces[0]});
+      break;
+    }
+
+  std::vector<const Candidate*> with_data, reach;
+  for (const Candidate& c : r.candidates) {
+    if (c.has_data) with_data.push_back(&c);
+    if (c.has_data && c.reachable) reach.push_back(&c);
+  }
+  if (with_data.empty()) {
+    for (const Candidate& c : r.candidates)
+      if (c.eligible && c.refusal.refused()) {
+        r.reasons.push_back({c.refusal.code, c.refusal.reason, -1});
+        break;
+      }
+    r.sentence = "No recommendation: " +
+                 (r.reasons.empty() ? std::string("no candidate has data") : r.reasons.back().text);
+    return r;
+  }
+
+  // Step 3: the feel, among what reaches (or, if nothing reaches, among everything).
+  std::vector<const Candidate*> pool = reach.empty() ? with_data : reach;
+  if (reach.empty()) {
+    // the closest: fewest unreachable columns first
+    int best = pool.front()->unreachable_columns;
+    for (const Candidate* c : pool) best = std::min(best, c->unreachable_columns);
+    std::vector<const Candidate*> keep;
+    for (const Candidate* c : pool)
+      if (c->unreachable_columns == best) keep.push_back(c);
+    pool = keep;
+  }
+  std::vector<const Candidate*> fam;
+  for (const Candidate* c : pool)
+    if (c->topology == preferred) fam.push_back(c);
+  const std::string other = preferred == "gyroid" ? "honeycomb" : "gyroid";
+  if (!fam.empty()) {
+    bool other_weighed = false;
+    for (const Candidate& c : r.candidates)
+      if (c.topology == other) other_weighed = true;
+    if (other_weighed)
+      r.reasons.push_back({feel == "springy" ? "feel_springy_prefers_gyroid"
+                                             : "feel_damped_prefers_honeycomb",
+                           feel == "springy"
+                               ? "springy: gyroid has the smallest loss and the best recovery "
+                                 "(Chatpun 2025, Beloshenko 2021)"
+                               : "damped: honeycomb has the larger loading/unloading loop "
+                                 "(Chatpun 2025, Beloshenko 2021)",
+                           -1});
+    // Say why the other family lost when it was weighed on the data and missed.
+    int other_best = -1;
+    for (const Candidate& c : r.candidates)
+      if (c.topology == other && c.eligible && c.has_data && !c.reachable &&
+          (other_best < 0 || c.unreachable_columns < other_best))
+        other_best = c.unreachable_columns;
+    bool other_reaches = false;
+    for (const Candidate* c : reach)
+      if (c->topology == other) other_reaches = true;
+    if (other_best >= 0 && !other_reaches && !reach.empty())
+      r.reasons.push_back({"other_family_unreachable",
+                           other + " cannot meet the map here (at best " +
+                               std::to_string(other_best) + " columns out of reach)",
+                           -1});
+    pool = fam;
+  } else if (!reach.empty()) {
+    // The preferred family lost on the DATA (weighed and out of reach) or was never
+    // eligible (its reason is already stated above); say which.
+    bool preferred_weighed = false, preferred_eligible = false;
+    for (const Candidate& c : r.candidates)
+      if (c.topology == preferred) {
+        preferred_weighed = true;
+        if (c.eligible && c.has_data) preferred_eligible = true;
+      }
+    if (preferred_eligible)
+      r.reasons.push_back({"only_family_reachable",
+                           preferred + " (the " + feel + " choice) cannot meet the map here, so " +
+                               pool.front()->topology + " is the only family that can",
+                           -1});
+    else if (preferred_weighed)
+      r.reasons.push_back({"preferred_family_ineligible",
+                           preferred + " (the " + feel + " choice) is not available for this "
+                           "part, so " + pool.front()->topology + " is used",
+                           -1});
+  }
+
+  // Step 4: tiebreaks.
+  std::string decided;
+  const Candidate* best = pool[pick_by_tiebreaks(pool, decided)];
+  if (pool.size() > 1 && !decided.empty()) {
+    const char* text = decided == "tiebreak_near_edge"
+                           ? "fewest columns near an edge of the table"
+                           : decided == "tiebreak_mass"
+                                 ? "the least material, in grams from the measured specimen densities"
+                                 : "its densities sit furthest inside the table";
+    r.reasons.push_back({decided, label(*best) + ": " + text, -1});
+  }
+  r.chosen = true;
+  r.topology = best->topology;
+  r.temp_c = best->temp_c;
+  r.reachable = best->reachable;
+  if (!best->reachable) {
+    r.failures = best->failures;
+    r.reasons.push_back({"nothing_reachable",
+                         "no candidate meets every face; " + label(*best) +
+                             " comes closest (" + std::to_string(best->unreachable_columns) +
+                             " columns out of reach)",
+                         -1});
+    for (const FaceFailure& f : best->failures) {
+      r.reasons.push_back({"face_unreachable", f.text, f.face_region_id});
+      if (f.solid_under_map > 0)
+        r.reasons.push_back({"solid_under_map",
+                             "face " + std::to_string(f.face_region_id) + ": " +
+                                 std::to_string(f.solid_under_map) +
+                                 " columns ask for squish where the part is solid",
+                             f.face_region_id});
+    }
+    r.sentence = "Nothing fits every face: " + label(*best) + " comes closest; " +
+                 best->failures.front().text;
+    return r;
+  }
+  if (r.candidates.size() == 1)
+    r.reasons.push_back({"only_candidate", label(*best) + " is the only option weighed", -1});
+  std::string why;
+  for (const Reason& x : r.reasons) why += (why.empty() ? "" : "; ") + x.text;
+  r.sentence = label(*best) + " - " + (why.empty() ? std::string("fits every face") : why) +
+               ". Every face's squish fits inside the data.";
+  return r;
+}
+
+std::size_t pick_by_tiebreaks(const std::vector<const Candidate*>& pool, std::string& code) {
+  code.clear();
+  if (pool.empty()) return 0;
+  std::size_t best = 0;
+  for (std::size_t i = 1; i < pool.size(); ++i) {
+    bool a_wins = true;
+    tiebreak(*pool[best], *pool[i], a_wins);
+    if (!a_wins) best = i;
+  }
+  // H4: the code is the criterion that separated the winner from its CLOSEST rival —
+  // the one it beat at the latest criterion — not whichever comparison ran last.
+  static const char* order[] = {"tiebreak_near_edge", "tiebreak_mass", "tiebreak_inside_data"};
+  int deepest = -1;
+  for (std::size_t i = 0; i < pool.size(); ++i) {
+    if (i == best) continue;
+    bool a_wins = true;
+    const std::string c = tiebreak(*pool[best], *pool[i], a_wins);
+    int idx = 3;  // a full tie
+    for (int k = 0; k < 3; ++k)
+      if (c == order[k]) idx = k;
+    deepest = std::max(deepest, idx);
+  }
+  if (deepest >= 0 && deepest < 3) code = order[deepest];
+  return best;
+}
+
+}  // namespace flexible
+}  // namespace topopt

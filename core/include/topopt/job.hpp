@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <stdexcept>
 #include <array>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -10,6 +11,8 @@
 #include "topopt/loadcase.hpp"   // ProductionLoadCase
 #include "topopt/materials.hpp"  // MaterialLibrary
 #include "topopt/mesh.hpp"       // Vec3
+#include "topopt/organic_lattice.hpp"  // kOrganicDensityUnionSubdivDefault
+#include "topopt/stepped_plan.hpp"     // SteppedCell, SteppedPlanRegion
 #include "topopt/pipeline.hpp"   // MinimizePlasticResult
 #include "topopt/settings.hpp"   // SettingsRules
 #include "topopt/smooth.hpp"     // SmoothStats
@@ -175,6 +178,24 @@ struct JobLatticeRegion {
   double half_w_mm = 0.0;
   double depth_mm = 0.0;
   std::vector<std::vector<std::array<double, 2>>> outline_uv;   // the app's pocket outline
+  // ── ★ THE FRAME outline_uv IS EXPRESSED IN (app, 2026-09-22) ─────────────────
+  // Unit world vectors of the region's in-plane u and w axes. Core derives the same
+  // pair from the normal in plane_basis(), and the two have agreed so far BY
+  // COINCIDENCE OF CONSTRUCTION, not by contract: the app's basis(n) happens to be
+  // the same formula. The agreement was never derived -- it was FITTED, once, on the
+  // M2 stand in 2026-09-05 by running all eight frames (swap / negate either axis)
+  // and scoring them by include-region void fraction (11.9 % for the winner against
+  // 64-426 % for the rest). The margin is enormous, so the choice is not in doubt;
+  // but it was one part, one heuristic, and the winner's 11.9 % has never been
+  // explained. A convention fitted once is right until a face nobody tried.
+  //
+  // Sent, these END it: where present they are authoritative and the fitted
+  // convention is not consulted. They are still CHECKED against plane_basis() and a
+  // disagreement REFUSES, because running the outline on one frame and a future
+  // depth raster on another -- in silence, on some face nobody tested -- is the
+  // failure that is hardest to see. Absent (zero), today's behaviour is unchanged.
+  Vec3 frame_u{0.0, 0.0, 0.0};
+  Vec3 frame_w{0.0, 0.0, 0.0};
   // ★ WHICH B-REP FACE THIS REGION CAME FROM (task 2026-08-12 §0a). Optional,
   // -1 = "not from a face" (a hand-placed primitive). It exists so the ONE
   // number the user drags can be CHECKED: when a face region names a face that
@@ -206,6 +227,43 @@ struct JobLatticeRegion {
   double synthetic_soft_mm = 0.0;   // 0 = a quarter of the region's largest extent
 };
 
+// ── ★ AN INCLUDE-REGION ID COUNTS INCLUDES, NOT REGIONS (#354, 2026-09-30) ────
+// Every 1-based region id that crosses the bridge -- the per-voxel `region_ids`
+// `lattice_role_regions_from_job` assigns, `SteppedCell::region_id`,
+// `SteppedRegionCell::region_id`, `SyntheticStressRegionReport::region_id` -- is a
+// position among the job's INCLUDE regions, in declaration order. It is NOT an index
+// into `lattice.regions`, and the two coincide only while no exclude is declared
+// before an include.
+//
+// `run_job.cpp` built the stepped plan's frame with `regions[region_id - 1]`, so one
+// exclude declared first handed the plan the EXCLUDE's slot origin, normal and prism
+// depth. Measured: the identical include and the identical one-cell plan are ACCEPTED
+// with the include alone and REFUSED with an exclude first, the refusal quoting
+// offsets measured from the exclude's origin.
+//
+// Resolving the id is a decision, so it lives here where a test can reach it rather
+// than inline at the call site. ★ AND THE REASON IT COULD NOT BE REACHED THERE IS
+// NOT "nothing links run_job.cpp" (reviewer, 2026-09-30 -- an earlier version of this
+// comment said that and it is false). run_job.cpp is compiled into libtopopt and
+// test_job_loadcase_copy calls `production_loadcase_from_job` out of it. What hides
+// these decisions is the three ANONYMOUS NAMESPACES at run_job.cpp :67-7774,
+// :7934-8739 and :10673-10933. A job-schema fact like this one belongs here; a large
+// function that is not a schema fact is cheaper to move OUT of the anonymous
+// namespace and declare in an internal header without moving its body, which is the
+// precedent `production_loadcase_from_job` already sets.
+//
+// nullptr for an id below 1 or past the last include -- never a different region.
+inline const JobLatticeRegion* job_include_region(
+    const std::vector<JobLatticeRegion>& regions, int include_id_1based) {
+  if (include_id_1based < 1) return nullptr;
+  int seen = 0;
+  for (const JobLatticeRegion& r : regions) {
+    if (r.role != "include") continue;
+    if (++seen == include_id_1based) return &r;
+  }
+  return nullptr;
+}
+
 struct JobLattice {
   bool present = false;
   std::string topology = "octet";  // only "octet" is implemented
@@ -219,6 +277,17 @@ struct JobLattice {
   // Lattice role regions (see JobLatticeRegion). Empty => whole-part lattice,
   // byte-identical to the pre-regions schema.
   std::vector<JobLatticeRegion> regions;
+  // ★ ANY-STEP STEPPED: the cells the app placed, which core VALIDATES and does not
+  // repack. Sending the plan rather than the packer's inputs is what makes the preview a
+  // contract: the run lays down the arrangement the maintainer approved on screen, and a
+  // cell that does not satisfy the menu rule is REFUSED BY NAME rather than quietly
+  // replaced by something core preferred. Thousands of entries is normal.
+  // Empty => the legacy one-cell-per-region Stepped.
+  // `origin_mm` is the cell's minimum corner in MODEL space -- the same frame as
+  // lattice.regions[].geometry -- and `region_id` is 1-based in the job's own
+  // include-region order, so the frame each cell is stated in is DERIVED from the region
+  // it names rather than sent alongside it. Nothing to keep in step.
+  std::vector<SteppedCell> stepped_cells;
   // MULTISCALE LATTICE TO (task multiscale-lattice-to). false (the DEFAULT) is the
   // TWO-STEP pipeline every existing job runs: optimize assuming solid, then try to
   // lattice what survived. true asks the OPTIMIZER to place the lattice while it
@@ -443,10 +512,6 @@ struct JobGrading {
   // tracing and then repairing. Requires organic; default off so every existing job is
   // byte-identical.
   bool organic_growth = false;
-  // ★ The overhang FILLET is a printability repair (a span over open air is re-emitted
-  // as a 12-segment flare up to 2.5x the bead). Printability is user input, so the
-  // repair is a choice: absent means on (nothing existing changes), false skips it.
-  bool organic_overhang_fillet = true;
   // ★ grown only: transfer ties along the second principal direction, so the load
   // has a member to turn along (Michell's orthogonal family). The maintainer judged
   // the look on the M2 stand (2026-09-05, isostatic lines with the swirl at the
@@ -458,7 +523,90 @@ struct JobGrading {
   // distance of a solid-backed IN-PLANE boundary (the pocket's side walls, not its
   // floor or its open face) stays solid: the lattice grades into a solid frame it
   // can tie to. Absent (-1) = one base cell (cell_min_mm); 0 = off.
+  // ★ PRINTABILITY REPAIRS, ORGANIC. Each alters the geometry to help it print and each
+  // is OFF unless stated: `base_mat`/`fill_mat` add material to root the lattice,
+  // `trim_below_base` cuts what falls under the plate. They used to be hardcoded ON with
+  // no key at all.
+  bool organic_base_mat = false;
+  bool organic_fill_mat = false;
+  bool organic_trim_below_base = false;
   double organic_solid_rim_mm = -1.0;
+  // ── ★ THE SOLID OUTLINE BEAM (ruling B, maintainer 2026-09-18; brief §1.5) ─────
+  // The octet's counterpart to organic's solid rim: with the SHAPE GRADE on, the
+  // preview sweeps one thin solid beam round each face outline and the cells keep
+  // clear of it. Its width is not sent -- it is derived from the bead and the voxel by
+  // the formula in §1.5, so the two sides cannot drift on it:
+  //
+  //     trim = clamp(0.35 * voxel, 0.10, 0.35)
+  //     beam = max(2 * bead, trim + 0.5 * voxel)
+  //
+  // `shape_grade` false (the default) means NO outline beam at all -- the finish
+  // dressing is the edge -- and every job written before this is byte-identical.
+  bool shape_grade = false;
+  // B, the shape-grade band, in mm. Only the BLEED rule reads it: at B >= 25 mm the
+  // solid grows inward by a further (B - 15)/2 mm (5 mm at 25, 7.5 at 30); below 25,
+  // nothing. 0 = no bleed. The band's own density raise is the app's arithmetic and
+  // arrives per cell as stepped_cells[].rho (ruling C) -- core adds no band term.
+  double shape_grade_band_mm = 0.0;
+  // ★ Drive free organic strut ends this far INTO the solid they meet, then intersect
+  // the welded field with the part so nothing escapes a far face (organic_weld).
+  // 0 = off. Organic only.
+  double organic_strut_embed_mm = 0.0;
+  // ★ MESH THE LATTICE BY DUAL CONTOURING ITS OWN SDF instead of (as well as) welding a
+  // marching-cubes field, writing <prefix>_DC.stl beside the welded pair. OFF by default
+  // and additive: nothing already emitted changes. The weld under-reports the true union
+  // volume by 67 % and the analytic LSLT mesh by 28 %; this one reproduces it to within
+  // 1 %, and is watertight, at the cost of minutes rather than seconds. See
+  // topopt/lattice_dc.hpp.
+  bool organic_dual_contour = false;
+  // The base cell. 0 => derived from the thinnest strut, then raised if that would
+  // exceed the cell budget (the run reports which it used).
+  double organic_dc_cell_mm = 0.0;
+  // How far the fine surface may sit off a merged cell's vertex, in mm. This is the FILE
+  // SIZE dial: 0 => a tenth of the base cell, which on the M2 lattice was 40 % smaller
+  // than an unmerged mesh with no visible change.
+  double organic_dc_tolerance_mm = 0.0;
+  // ★ HOW THE CERTIFIED DENSITY MEASURES THE MATERIAL IN A VOXEL, and the default is now
+  // the one that measures something real. A positive k takes each voxel's share of the
+  // UNION by a deterministic k^3 subgrid: a point inside a strut crossing counts ONCE,
+  // however many struts meet there. 0 restores the old DEPOSIT, which walked pi*r^2*dl
+  // along every span and added it to the voxel it landed in, counting each crossing once
+  // PER STRUT -- and struts cross constantly, so it ran far high. Measured on the M2
+  // stand: the deposit said 57,661 mm3 where the shipped file holds 41,955; the union
+  // says 43,200, and the 3 % that remains is the certifiable band's own floor raising
+  // 3,840 voxels, not an error. k=6 is converged -- k=10 moves the answer by 0.08 % -- and
+  // costs about 17 s on that part.
+  //
+  // IT CHANGES THE CERTIFIED MARGIN, and the whole of that change is a correction: on the
+  // M2 stand 1,142 -> 956 effective 102.2 -> 85.6 (and 1,671 before the density was also
+  // taken on the spans that SHIP rather than the ones the tracer drew). 0 is kept so a
+  // run can be reproduced against the old figure, never because it is defensible.
+  int organic_density_union_subdiv = kOrganicDensityUnionSubdivDefault;
+  // ★ SOLVE THE BEAD FACTOR AGAINST THE SPANS THAT SHIP, by re-running the emission at a
+  // trial radius, rather than against the curves the tracer drew. Those are different
+  // networks -- on the M2 stand 63,324 mm3 of curves against 41,955 mm3 of shipped spans
+  // -- so a factor fitted to the first is a guess about the second.
+  //
+  // ★★ DEFAULT FALSE, AND THE REASON IS NOT CAUTION. Built, measured, and it revealed
+  // that the target is UNREACHABLE by thickening on this pipeline: the shipped volume
+  // FALLS as the bead grows, because the node merge welds any polyline finer than its own
+  // bead and a fatter strut therefore collapses the curve it belongs to. Measured trials
+  // on the M2 stand -- x1.00 -> 41,185 mm3 over 13,128 spans; x1.24 -> 37,150 over 8,039;
+  // x2.00 -> 1,615 over 27, with the node merge taking 25,515 mm of centreline down to
+  // 493. Until that merge rule is radius-independent, calibrating mass by bead scaling
+  // cannot work, and this switch exists to demonstrate that rather than to be used.
+  bool organic_calibrate_on_shipped = false;
+  // ★ THE FLOOR ON AN ANY-STEP TILE, and DELIBERATELY NOT NAMED `min_cell_mm`. This
+  // grading block already carries `cell_min_mm` -- the swept WINDOW's lower end, an
+  // entirely different quantity -- and a second key differing from it only in word order
+  // is a misconfiguration waiting to happen that no compiler or schema could ever catch.
+  // `stepped_min_tile_mm` says what it bounds: the tile S/n of an admitted family.
+  //
+  // Under a STRUCTURAL intent this is the ONLY lower bound: the 20 % "prints open" rule
+  // is aesthetic, and the beam-network certificate solves every strut rather than
+  // averaging them, so nothing structural depends on a cell being mostly air (see
+  // stepped_plan.hpp). Under an aesthetic intent both apply. 0 = no floor of its own.
+  double stepped_min_tile_mm = 0.0;
   double organic_scale = 1.0;
   bool organic_shape_fit = false;
   // ★★ SHAPE-FIT *ONLY* — the cell is a function of the SHAPE and nothing else; the
@@ -491,6 +639,14 @@ struct JobGrading {
   // where within the band to grade, never to leave it.
   double aesthetic_rho_min = 0.0;
   double aesthetic_rho_max = 0.0;
+  // ★ THE CAP THE PREVIEW APPLIES UNDER BOTH INTENTS (app, 2026-09-20). The app
+  // rescales every automatic density onto the aesthetic ceiling whenever "Allow quilt"
+  // is off -- aesthetic AND structural -- and had no key to tell core. Without it the
+  // run grades to the full certifiable band while the preview is capped, and the two
+  // are different objects. Unlike aesthetic_rho_min/max this is NOT intent-gated.
+  // 0 = off. When a structural certificate then fails against this cap, the refusal
+  // names "Allow quilt" rather than reporting a bare margin (ruling D).
+  double max_relative_density = 0.0;
   // AESTHETIC only: let the cells-per-member floor be COMPUTED from what the material
   // actually carries, instead of the fixed accuracy floor of 5. Off by default.
   bool aesthetic_adaptive_cells_per_member = false;
@@ -792,6 +948,9 @@ struct JobBox {
   Vec3 max{0.0, 0.0, 0.0};
 };
 
+// The Flexible stage's job block (topopt/flexible/job_block.hpp).
+struct JobFlexible;
+
 // A parsed, schema-valid job.json.
 struct JobDescription {
   std::string model;     // model file path; relative paths resolve against the
@@ -983,6 +1142,11 @@ struct JobDescription {
   bool has_design_box = false;
   JobBox design_box;
   std::vector<JobBox> keep_out_boxes;
+
+  // Optional "flexible" block (task 2026-09-28-flexible-squish-maths). Null when
+  // absent — every job without one is byte-identical. Run by `topopt-cli flexible`
+  // only; every other entry point refuses a job that carries one.
+  std::shared_ptr<const JobFlexible> flexible;
 };
 
 // Parse and schema-validate a job document. Throws JobError on malformed JSON,
@@ -1072,6 +1236,31 @@ struct RunObservability {
   // cost 21 minutes and three runs reading as "the code path is never reached".
   std::string build_time;
 };
+
+// ── ★ THE BINARY'S IDENTITY, STATED ONCE BY THE EXECUTABLE THAT OWNS IT ─────
+// (reviewer, 2026-10-01.) `run_info.json` exists to answer "which core did that run
+// use" (main.cpp:371) and for two of the three subcommands that write one it could
+// not: `analyze_job` and `lattice_variant_job` built their receipt with
+// `build_run_info(job, options, RunObservability{})` -- a DEFAULT-CONSTRUCTED
+// observability -- so `fingerprint` stayed "unknown" and `build_time` empty on every
+// run. `lattice-variant` is the app's relattice path.
+//
+// TOPOPT_BUILD_FINGERPRINT and __DATE__/__TIME__ are only meaningful in the
+// EXECUTABLE's translation unit (the define is on the `topopt_cli` target, and the
+// date macros bake when that file compiles), so the library cannot read them. The
+// executable states them once, here, before it dispatches; every receipt path reads
+// them from one place instead of each growing its own copy.
+//
+// ★ AND THE FAILURE MODE IS THE VISIBLE ONE. A caller that never sets the identity
+// leaves "unknown" -- the same value the defect produced, which reads as "nobody told
+// me" rather than as a plausible wrong SHA. `cli_run_info_fingerprint` asserts the
+// receipt equals the binary's own --version line, so forgetting the call is a red
+// test, not a quiet regression.
+void set_build_identity(const std::string& fingerprint,
+                        const std::string& build_time);
+
+// The identity last stated, or the defaults ("unknown", empty) when none was.
+const RunObservability& build_identity();
 
 // The outcome of run_job, exposing enough for callers (the CLI main and the
 // integration test) to summarize and verify the run without re-reading files.

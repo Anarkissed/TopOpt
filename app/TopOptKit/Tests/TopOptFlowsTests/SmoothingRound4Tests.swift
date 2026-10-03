@@ -565,8 +565,13 @@ final class SmoothingRound4Tests: XCTestCase {
                       "D5a: not on this page")
         XCTAssertTrue(ws.contains("keepOutBoxes: (showDesignGizmo && !showSmoothingPage"),
                       "D5a: nor its keep-out boxes")
-        XCTAssertTrue(ws.contains("&& visible.designBox)")
-                      && ws.contains("&& visible.keepOuts)"),
+        // ★ A THIRD TERM JOINED EACH CONDITION (2026-08-19): both are also hidden
+        // while the lattice KEY is drilled into a colour, so the part can be read
+        // unobstructed. The D5a and §2b guarantees are unchanged and still asserted
+        // — what moved is that the expression no longer CLOSES on `visible.*`, so
+        // pinning the bracket pinned the formatting rather than the rule.
+        XCTAssertTrue(ws.contains("&& visible.designBox")
+                      && ws.contains("&& visible.keepOuts"),
                       "§2b: and neither is drawn on the lattice stage")
         // AND THE OTHER PAGES ARE UNTOUCHED. The lattice page mounts the same
         // view; gating on `fullScreenPageUp` would have changed it too, which is

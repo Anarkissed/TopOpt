@@ -1,0 +1,45 @@
+## mesh_run
+same after masking timings/paths: build_orientation.json
+identical design.bin
+identical fields.bin
+same after masking timings/paths: iterations.csv
+identical loadcase.json
+identical report.json
+same after masking timings/paths: run_info.json
+identical variant_060.stl
+identical variant_060_alpha.f64
+same after masking timings/paths: variant_060_alpha.meta
+RESULT: IDENTICAL
+## demo_analyze
+identical analysis.json
+identical analysis_report.json
+same after masking timings/paths: build_orientation.json
+identical fields.bin
+RESULT: IDENTICAL
+## demo_run
+same after masking timings/paths: build_orientation.json
+identical design.bin
+identical fields.bin
+same after masking timings/paths: iterations.csv
+identical loadcase.json
+identical report.json
+same after masking timings/paths: run_info.json
+DIFFERENT variant_030.3mf (binary)
+identical variant_030_alpha.f64
+same after masking timings/paths: variant_030_alpha.meta
+DIFFERENT variant_050.3mf (binary)
+identical variant_050_alpha.f64
+same after masking timings/paths: variant_050_alpha.meta
+DIFFERENT variant_070.3mf (binary)
+identical variant_070_alpha.f64
+same after masking timings/paths: variant_070_alpha.meta
+RESULT: 3 DIFFERENCES
+
+## demo_run 3MF follow-up
+The three variant_*.3mf differ as zip files. Unpacked, every archived file has the
+same length and the 3D/3dmodel.model XML is identical except the p:UUID attributes on
+<object> and <build> (lib3mf writes a fresh random UUID per file, so two runs of the
+SAME binary differ there too). Every vertex and triangle is identical.
+Jobs: the demo fixture job (core/tests/fixtures/demo/job.json, `run` and `analyze`) and
+test_mesh_job.cpp's mesh_job("plate_bore.stl") as JSON; base binary = synced base
+d615a55c, new = this branch (05ee339e build).

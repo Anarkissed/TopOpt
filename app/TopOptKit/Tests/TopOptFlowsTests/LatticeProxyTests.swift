@@ -44,14 +44,34 @@ final class LatticeProxyTests: XCTestCase {
         }
     }
 
-    /// The density↔radius map is the exact inverse pair, at the reference point
-    /// density.txt uses (r/L = 0.1): octet ρ = 0.48, sc ρ = 0.08485.
-    func testDensityRadiusMapIsWorkerLaw() {
+    /// The density↔radius map is an exact INVERSE PAIR.
+    ///
+    /// ★★ REPLACED, NOT WEAKENED (2026-08-20). This used to pin octet's r/L at ρ =
+    /// 0.48 to **0.1** — the closed form `ρ = K·(r/L)²`, K = 48, which the app carried
+    /// as its own second octet law. Both halves of the pair now go through CORE's
+    /// measured diameter table (`lattice_strut_diameter_mm`, inverted by bisection),
+    /// so the reference point moves to r/L = 0.1653 and the old 0.1 is exactly the
+    /// 1.4x divergence `app-octet-strut-law-differs-from-core` recorded, now closed.
+    ///
+    /// ★ THE PROPERTY THE TEST WAS FOR SURVIVES INTACT, and is the important half:
+    /// forward then back must return the density you started from. That is what
+    /// `printabilityDensityFloor` depends on, and it was BROKEN in between — the
+    /// forward law moved to core and the inverse did not, so a round trip came back
+    /// 1.4x wrong for one commit.
+    func testDensityRadiusMapIsAnExactInversePair() {
         let octet = LatticeType.octet
         let r = octet.strutRadiusMM(relativeDensity: 0.48, cellMM: 8)
-        XCTAssertEqual(r / 8, 0.1, accuracy: 1e-6)                       // r/L = 0.1
-        XCTAssertEqual(octet.relativeDensity(strutRadiusMM: r, cellMM: 8), 0.48, accuracy: 1e-9)
-        XCTAssertEqual(LatticeType.sc.relativeDensity(strutRadiusMM: 0.8, cellMM: 8), 0.08485, accuracy: 1e-4)
+        XCTAssertEqual(r / 8, 0.1653, accuracy: 5e-4,
+                       "core's measured octet diameter at ρ = 0.48 — the old closed "
+                       + "form said 0.1, and that 1.65x is the divergence itself")
+        // 24 bisections ⇒ ~6e-8 in ρ; the old 1e-9 was a closed form's exactness and
+        // is not available from a table, so the bound is the method's own precision.
+        XCTAssertEqual(octet.relativeDensity(strutRadiusMM: r, cellMM: 8), 0.48,
+                       accuracy: 1e-6, "★ forward then back must return ρ")
+        // ★ AND A TOPOLOGY CORE HAS NO LAW FOR still answers, from the closed form —
+        // the fallback, exercised. Core carries a measured table for octet only.
+        XCTAssertEqual(LatticeType.sc.relativeDensity(strutRadiusMM: 0.8, cellMM: 8),
+                       0.08485, accuracy: 1e-4)
     }
 
     // MARK: grading — monotone, invertible, distinct colour

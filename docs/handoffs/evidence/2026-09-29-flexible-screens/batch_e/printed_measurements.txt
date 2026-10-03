@@ -1,0 +1,9 @@
+E-FLEX his_project_0004 offers [TopOptFlows.FlexibleLatticeUnder.Plan.newGroup(face: nil, region: Optional(104), name: "Top B", depthMM: 20.0)]
+E-FLEX his_project_0004_r5 offers [TopOptFlows.FlexibleLatticeUnder.Plan.newGroup(face: Optional(3), region: nil, name: "Face 3", depthMM: 50.0), TopOptFlows.FlexibleLatticeUnder.Plan.newGroup(face: Optional(5), region: nil, name: "Face 5", depthMM: 50.0)]
+E-FLEX main status: No lattice under Top B · lattice true error -
+E-HIS-R3 include 1 area 5000.0 depth 25.0 x-range 50.0…100.0
+E-HIS-R5 include 2 areas [5000.0, 5000.0] depth [4.0, 4.0]
+E-RENDER field doubled: topA left 0 right 22620 · topB left 22620 right 0
+E-RENDER field stepped: topA left 0 right 22620 · topB left 22620 right 0
+E-RENDER frames: topA lit lo 0 hi 6648 centroid 214.24368231046932 · topB lit lo 6648 hi 0 centroid 104.74503610108303
+E-RENDER organic: 1485 capsules, x 51.041668…99.041664 · 151 curves, 716 connectors, 8.00–8.00 mm spacing · graded 4.00–8.00 mm by stress (p05 8.185, p95 8.185 MPa) · stops: left region 302, d_test 0, no direction 0, step budget 0, turned 0, self-revisit 0 · seeds 151/3036 (too close 2341) · too short 0 · census mm: emitted 6161 → node_merge 5885 → support_prune 6278 → stranded_drop 6278 → branch_support 6278 → stranded_drop_2 6278 → written 6278 (110% of 5698 mm) · 1 written component · trace 0.2 s · repairs 0.2 s · bake 0.1 s

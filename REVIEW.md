@@ -1,0 +1,297 @@
+# Review — things that want your eyes
+
+Only taste/polish calls on **finished** work. Nothing here is half-done, and
+nothing here is something I could have checked myself.
+
+---
+
+## 1. The Covered wall on the wizard sample — how much should it hide?
+
+**Done:** four solid quad panels on the vertical faces, top and bottom left open
+so the lattice inside stays visible. Verified by measurement, not by eye: the
+panels sit at `x/z ±9.538` against the lattice's `±9.512` (outside it on all four
+sides) and are flush in `y` at `±9.512` (so the open ends are exactly level with
+the lattice). `LatticeCoveredWallTests` asserts all of that.
+
+**The call:** a real cover closes *every* face. The sample deliberately does not,
+because a fully closed box would hide the cell the sample exists to show. If you
+would rather it close all six and be honest at the cost of showing nothing, it is
+a one-line change (add the two `y` panels to the `panels` array in
+`LatticeSamplePatch`).
+
+---
+
+## 2. The density ceiling — 0.95 or core's 0.8999?
+
+You said "0.5–0.95 makes sense". The floor is done and derived from your printer
+(see below). The **ceiling** is a policy call I did not want to make for you:
+
+- Core certifies octet up to **0.89988**.
+- Asking for 0.95 puts the lattice **outside the certifiable band**, so the run
+  would be clamped back with a reason, or uncertified if the clamp were removed.
+
+**The call:** leave the ceiling at core's certifiable limit (current behaviour),
+or raise it to 0.95 and accept uncertified runs at the top end. One constant.
+
+---
+
+## 3. Auto's coarse end when core has not certified a cells-per-member ceiling
+
+`resolvedCellPlan` uses core's cells-per-member ceiling when it exists. When it
+does not, Auto falls back to **8× the floor** (three dyadic levels).
+
+**The call:** 8× is my judgement of "as coarse as a sweep can usefully go before
+the cell outgrows any real member". If you want it more or less aggressive under
+*minimise plastic*, it is one number.
+
+---
+
+## 4. The dressing weight for Rim and Diagrid
+
+Both are drawn as a **1.6× strut-radius thickening** at the region boundary —
+the same weight the wizard's sample block uses, so the part and the sample agree.
+
+Measured effect on your face 15: None 7,356 → Rim 7,419 → Skin 7,516 pixels.
+
+**The call:** 1.6× reads as a dressing rather than as more lattice. If you want
+the rim heavier or the diagrid more prominent, it is one constant each.
+
+---
+
+## 5. The lattice legend's tick format
+
+Each tick reads `NN% · X.XX mm` — the density **and** the strut thickness it
+produces at the current cell, because a percentage alone is not something you can
+hold against a nozzle. Five ticks, dense at the top, matching the stress legend.
+
+**The call:** if you would rather see density only (shorter, quieter) or
+thickness only, it is one function (`latticeLegendTicks`).
+
+---
+
+## 6. Two legends, one edge
+
+When the **stress view** and the **strut preview** are both on, only the stress
+legend shows — I suppressed the density legend rather than stack two colour bars
+on the same edge.
+
+**The call:** if you want both visible simultaneously, say where the second
+should sit.
+
+---
+
+# Not review items — open work, stated plainly
+
+## D2 · the artifacts — FOUND AND FIXED, ONE LINE
+
+Verified, not asserted: the two new guards passed on real GPU renders (3.5 s and
+6.4 s, so they rendered rather than skipped), and the full app suite is green —
+**2001 tests, 28 skipped, 0 failures**.
+
+**What it was.** `depth_fragment` — the shell's prepass shader — returns a `GBuf`
+that declares `float4 albedo [[color(2)]]` and writes 0 there, meaning "this pixel
+is the shell, not the lattice". But the shell's PIPELINE (`dpd`) only ever declared
+attachments 0 and 1. A pipeline writes only the attachments it declares, so that
+write was dropped and attachment 2 was left UNDEFINED over every shell pixel — and
+then stored, because the pass stores it.
+
+The deferred shade reads that attachment's alpha as its "is this pixel a strut"
+mask. Undefined alpha >= 128 reads as a strut, so the shade painted lattice colour
+across the shell, in a pattern that changed frame to frame. That is exactly what
+you photographed and described as struts behind the back wall.
+
+PR 340 added attachment 2 to the shader struct and to the lattice pipeline and
+missed the shell's. So the bug arrived with the unified pass — and the fix does NOT
+require reverting it, so I have not spent that budget you authorised.
+
+**What identified it.** Two facts that no depth race can produce:
+
+    shell drawn ....  [2111, 8816, 8853, 2251, 9008, 8423, ...]   spread 6,897
+    shell absent ...  [6040 x10]                                  spread     0
+
+Half those readings are ABOVE 6,040 — the count with the shell not drawn at all.
+A shell can only occlude, so more struts with it than without is impossible; that
+impossibility is what said "undefined memory", not "numerical jitter". And the
+values clustered in two groups rather than smearing, which is tile contents, not a
+race. It also explains why `cullMode`, `discard_fragment()`, split passes and
+depth-write changes all did nothing: none of them touched the missing declaration.
+
+    after the fix .. spread 0, and the shell-drawn count sits at or below the
+                     unoccluded ceiling on every render
+
+**Guarded by `LatticeGBufferMaskTests`**, two assertions: the mask is bit-exact
+across renders with the shell drawn, and — the one with no escape — drawing the
+shell can never yield MORE strut pixels than omitting it. The second is physics
+rather than taste, and it would have caught this even if the garbage had been
+repeatable. I also swept for the same class of defect: only two pipelines ever
+declare attachment 1, and the 3-attachment pass has one construction site, so this
+was the only instance.
+
+## The core xcframework was stale, and it HUNG the app suite
+
+Separately, and worth knowing because it cost the first two test runs: the app
+suite wedged inside `~vector<JobLatticeRegion>()` — a destructor — reached from
+`DefaultArmingEvidenceGen`. That is an ABI mismatch, and it is mine: I added
+`outline_uw` and `outline_loop_start` to `JobLatticeRegion` in `core/job.hpp`, but
+`app/TopOptKit/vendor/TopOptCore.xcframework` still dated from **Aug 17** and was
+compiled against the old layout, while `bridge.cpp` compiles against the new
+header. Destruction then walks garbage.
+
+It presented as a hang in `ContactShadingTests` (a suite that normally takes 0.5 s)
+because the log is block-buffered and ends mid-line — the true location only came
+out of a process sample. `app/scripts/build_core.sh` is running now; the app suite
+cannot be trusted until it finishes.
+
+## A SECOND artifact, found by looking — NOT fixed, and characterised
+
+The one you reported is fixed. But you told me to look rather than assert, so I put
+the build on the simulator and rotated your L-bracket around, and there is a
+**second, different** artifact underneath. I am not going to pretend I fixed it.
+
+**What it looks like.** Turn the strut preview on and look at the part from BELOW.
+The underside of the latticed slab carries dark speckle — sparse isolated dots at
+one angle, dense mottling at another. From above, and from either side, it is clean.
+
+**What I established about it:**
+
+- It is **the march, not the mesh**. Toggling the strut preview OFF makes the same
+  surface perfectly clean — no dots at all. So nothing is wrong with his geometry or
+  with the region highlight.
+- It is **deterministic**. Five consecutive frames of the live app are byte-identical
+  (`md5` on `simctl` captures), and three more after a camera nudge. The nudge
+  changed the hash, which proves the capture reflects live rendering rather than a
+  stale buffer — so "identical" means stable, not frozen.
+- It is therefore **NOT the bug I fixed**, which was undefined memory and changed
+  every frame. It is also not caused by that fix: an undeclared attachment can only
+  have put garbage IN, and this survives with the attachment correctly declared.
+
+**My hypothesis was WRONG, and I tested it rather than leaving it standing.** I
+guessed the cause was the region's INNER face: it is deliberately unpadded (padding
+it would lattice material you never declared), and on the L-bracket it is
+coincident with the slab's bottom surface, where the shell's discard test
+`regionTex.sample(...) <= 0.0` reads a ~0 field and could flip per pixel.
+
+Two experiments say no:
+
+    azimuth sweep, far side of the region .... 0-29 lattice px, no small components
+    depth sweep, region punched through ...... one clean component at every depth
+
+            depth 11.0 mm .... 882 px, 1 component, 0 small
+            depth 109.1 mm ... 10,183 px, 1 component, 0 small
+            depth 218.275 mm . 20,668 px, 1 component, 0 small   <- EXACT coincidence
+            depth 223.3 mm ... 20,668 px, 1 component, 0 small
+
+At exactly the part's own thickness the inner face lies ON the far surface — the
+coincidence I predicted — and the render is still clean. I also tried the half-voxel
+bias on the live app and the speckle survived it. So the inner-face coincidence is
+not the mechanism, and a bias on that test is not the fix.
+
+(That depth sweep first reported IDENTICAL numbers at every depth, because I reused
+`token: 1` and the rebake was skipped — the same stale-key trap as the one fixed in
+the app. The numbers above are from the corrected run, where they move; a sweep whose
+output does not change with its input is measuring nothing.)
+
+**The graded-density idea is refuted too.** That was my next-best candidate — your
+project runs sim/graded density and every earlier probe ran `field: nil`. A/B on the
+same scene, four camera angles:
+
+    UNIFORM  az 0.70 el  0.40 ... 4,739 px, 2 comps, 1 small
+    GRADED   az 0.70 el  0.40 ... 4,827 px, 1 comp,  0 small
+    UNIFORM  az 0.70 el -1.15 ... 5,764 px, 2 comps, 1 small
+    GRADED   az 0.70 el -1.15 ... 5,852 px, 1 comp,  0 small
+    UNIFORM  az 2.36 el  0.15 ... 7,776 px, 3 comps, 2 small
+    GRADED   az 2.36 el  0.15 ... 8,060 px, 1 comp,  0 small
+
+Graded produces FEWER specks, not more. And the absolute numbers are the real
+finding: 0-2 small components everywhere, which is nothing — a couple of pixels of
+genuine silhouette detail.
+
+**So: the defect does not reproduce on `M2_verticalStand` under any condition I can
+reach** — any angle, any region depth including exact coincidence with the far
+surface, uniform or graded. It reproduces immediately on `l bracket 3` in the app.
+
+That is now a conclusion rather than an assumption, and it points at the part.
+
+**So I read `l bracket 3`'s real settings out of the simulator** (read-only — I did
+not copy your project anywhere), and there is a strong candidate I could not have
+guessed from the fixture:
+
+    densityMode ............ "sim"        simulateStresses ... true
+    minRelativeDensity ..... 0            maxRelativeDensity . 1
+    cellSizeMode / cellMM .. auto, 8mm    (min 4, max 8)
+    region depth ........... 8mm          paintDepthMM ....... 4
+    boundary ............... "none"       designBox .......... true
+    topology ............... octet        minimizePlastic .... true
+
+**`minRelativeDensity: 0`.** With a sim-driven field and a floor of ZERO, cells in
+unstressed material drive the strut radius toward zero — sub-pixel geometry, which a
+sphere-tracer hits or misses inconsistently from one pixel to the next. That is a
+much better fit for sparse specks than either mechanism I refuted, and it explains
+why the fixture stayed clean: my graded probe ran the fixture's own params, with the
+thin end of the field largely outside the region.
+
+It also matches something already known here — see the note on lattice zero-density
+having produced defects before.
+
+**AND IT REPRODUCES.** I ran exactly that on the existing fixture — one variable,
+where the near-zero end of the field lands:
+
+    thin end OUTSIDE the region      thin end INSIDE the region
+    az 0.70  1 comp,  0 specks       az 0.70   4 comps,  3 specks
+    az 1.57  1 comp,  0 specks       az 1.57  55 comps, 54 specks
+    az 2.36  1 comp,  0 specks       az 2.36   3 comps,  2 specks
+
+Same part, same camera, same region, same everything else. Moving the zero-density
+end inside the region takes the speck count from 0 to 54. **That is the underside
+speckle**, and the cause is `minRelativeDensity: 0`: unstressed cells drive the
+strut radius toward zero, and a strut thinner than a pixel is hit or missed from one
+pixel to the next.
+
+It is not the region plane, it is not the unified pass, and it is not the attachment
+bug I fixed. It is sub-pixel geometry, which is why it looked like dust rather than
+like structure.
+
+---
+
+## ★ THE ONE DECISION I NEED FROM YOU (it is a one-branch change)
+
+A strut at density ~0 is not printable and not really there. Two honest ways to
+draw it, and this is a taste call about what the preview should SAY:
+
+**(a) Draw nothing below the printable floor.** Cells whose strut is thinner than
+the nozzle can lay simply do not render. The preview then shows only lattice that
+will actually exist, and the speckle is gone because the geometry is gone. The risk
+is that a region can look EMPTY where the sim asked for almost nothing — which is
+arguably the truth, but it is a strong visual claim.
+
+**(b) Clamp the rendered radius to the printable floor.** Every cell keeps a visible
+strut, never thinner than one extrusion. Nothing vanishes, the speckle is gone
+because nothing is sub-pixel any more — but the preview then draws struts slightly
+FATTER than the density asks for at the thin end, so the picture flatters the part.
+
+I lean to (a), because you have said repeatedly that the preview must not show
+material the run will not produce, and because `minRelativeDensity: 0` on your
+project is what asked for nothing in the first place. But (b) is the safer-looking
+one and I am not going to pick between "shows nothing" and "shows a white lie" on
+your behalf.
+
+Either is one branch at the point the radius is computed. Tell me which and it is
+done, with the A/B above as the guard (0 specks required, and the guard fails today
+at 54).
+
+
+**Nothing about this is in the tree.** Three probe files were written and all three
+deleted: two metrics that returned clean numbers on a dirty picture, and this sweep.
+The one change I made to production code for it — the half-voxel bias — is reverted.
+
+## The notification's equal padding (D3)
+
+Deferred at your instruction after three failed attempts. The last approach
+(measure both cluster edges, pad out to each, centre in the remainder) is in the
+tree and did not achieve equal gaps on screen.
+
+## Not started
+
+Nothing else. `outer_finish` for **Covered** and the region outline both reach core,
+and the xcframework rebuild above is what makes them take effect in a real run.
+Core itself is verified green: 100% of 125 tests.

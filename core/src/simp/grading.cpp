@@ -177,7 +177,18 @@ GradedField grade_lattice(const VoxelGrid& grid,
   GradedField out;
   // ── the limits, READ from core (never hardcoded here) ──────────────────────────
   const double rho_lo = lattice_rho_min(topo);
-  const double rho_hi = lattice_rho_max(topo);
+  // ★ THE STATED CAP, UNDER EITHER INTENT (see GradingLawParams). Lowering the band's
+  // TOP, not the density of any one voxel: everything downstream -- the aesthetic
+  // range, the percentile, the histogram's ceiling count that ruling D's refusal reads
+  // -- then answers to the capped band without a second notion of "the top" existing.
+  const double rho_hi_band = lattice_rho_max(topo);
+  const double rho_hi = params.max_relative_density > 0.0
+                            ? std::min(rho_hi_band, params.max_relative_density)
+                            : rho_hi_band;
+  if (params.max_relative_density > 0.0 && !(rho_hi > rho_lo))
+    throw std::invalid_argument(
+        "grade_lattice: max_relative_density is at or below the certifiable band's "
+        "floor, so no density is admissible");
   const double n_star = lattice_cells_per_member_min(topo);
   out.band_rho_min = rho_lo;
   out.band_rho_max = rho_hi;
@@ -246,7 +257,7 @@ GradedField grade_lattice(const VoxelGrid& grid,
   // construction and measured (bar R1).
   const double abs_floor_mm =
       params.min_extrudable_width_mm /
-      octet_strut_diameter_mm(rho_hi, 1.0);  // = w / phi(rho_max)
+      lattice_strut_diameter_mm(params.topology, rho_hi, 1.0);  // = w / phi(rho_max)
   // AUTO takes `floor_mm` itself — UNCHANGED, deliberately (bar S4): past runs stay
   // reproducible and the default path stays byte-identical. FIXED takes the caller's
   // target, raised only to the floor that actually binds. SWEPT's cell is per-region
@@ -592,7 +603,8 @@ GradedField grade_lattice(const VoxelGrid& grid,
     const double rho_r = std::min(rho_hi, std::max(rho_lo, rho_of(e)));
     for (int L = 0; L <= out.cell_plan.max_level; ++L) {
       const double S = out.cell_plan.cell_mm_at_level(L);
-      if (octet_strut_diameter_mm(rho_r, S) >= params.min_extrudable_width_mm)
+      if (lattice_strut_diameter_mm(params.topology, rho_r, S) >=
+          params.min_extrudable_width_mm)
         return S;
     }
     return 0.0;
@@ -687,7 +699,7 @@ GradedField grade_lattice(const VoxelGrid& grid,
           out.subfloor_flags[e] = 1;
           ++out.subfloor_retained_voxels;
           if (GradedField::SubfloorRegion* rr = region_record(e)) ++rr->retained_voxels;
-          const double d_r = octet_strut_diameter_mm(rho_r, cell);
+          const double d_r = lattice_strut_diameter_mm(params.topology, rho_r, cell);
           if (rho_r < rho_min_used) rho_min_used = rho_r;
           if (rho_r > rho_max_used) rho_max_used = rho_r;
           if (width[e] < min_width) min_width = width[e];
@@ -737,7 +749,7 @@ GradedField grade_lattice(const VoxelGrid& grid,
       if (rho > rho_max_used) rho_max_used = rho;
       if (width[e] < min_width) min_width = width[e];
       if (cpm < min_cpm) min_cpm = cpm;
-      const double d = octet_strut_diameter_mm(rho, cell);
+      const double d = lattice_strut_diameter_mm(params.topology, rho, cell);
       if (d < min_d) min_d = d;
       if (d > max_d) max_d = d;
       if (d < params.min_extrudable_width_mm) out.any_strut_below_min = true;
@@ -876,7 +888,7 @@ GradedField grade_lattice(const VoxelGrid& grid,
       if (rho > rho_max_used) rho_max_used = rho;
       if (width[e] < min_width) min_width = width[e];
       if (cpm < min_cpm) min_cpm = cpm;
-      const double d = octet_strut_diameter_mm(rho, ce);
+      const double d = lattice_strut_diameter_mm(params.topology, rho, ce);
       if (d < min_d) min_d = d;
       if (d > max_d) max_d = d;
       if (d < params.min_extrudable_width_mm) out.any_strut_below_min = true;
@@ -1009,7 +1021,7 @@ GradedField grade_lattice(const VoxelGrid& grid,
             post.relative_density[e] = rho_c;
             ++out.latticed_voxels;
             const double cpm_r = width[e] / ce_r;
-            const double d_r = octet_strut_diameter_mm(rho_c, ce_r);
+            const double d_r = lattice_strut_diameter_mm(params.topology, rho_c, ce_r);
             // IS THIS VOXEL ACTUALLY BELOW THE FLOOR? Not necessarily, and the
             // difference matters. The plan rejects a base cell using the THINNEST
             // member anywhere in it, so a cell can be rejected while individual
@@ -1065,7 +1077,7 @@ GradedField grade_lattice(const VoxelGrid& grid,
       if (rho > rho_max_used) rho_max_used = rho;
       if (width[e] < min_width) min_width = width[e];
       if (cpm < min_cpm) min_cpm = cpm;
-      const double d = octet_strut_diameter_mm(rho, ce);
+      const double d = lattice_strut_diameter_mm(params.topology, rho, ce);
       if (d < min_d) min_d = d;
       if (d > max_d) max_d = d;
       if (d < params.min_extrudable_width_mm) out.any_strut_below_min = true;
@@ -1168,7 +1180,8 @@ GradedField grade_lattice(const VoxelGrid& grid,
     // ★ the octet strut width is not organic's strut width: organic's bead is
     // floored at the extrudable width in its own candidate loop.
     if (!params.organic_geometry &&
-        !(octet_strut_diameter_mm(rho, ce) >= params.min_extrudable_width_mm) &&
+        !(lattice_strut_diameter_mm(params.topology, rho, ce) >=
+          params.min_extrudable_width_mm) &&
         (swept || fit))
       throw std::logic_error(
           "grade_lattice: plan emitted a strut under the stated minimum "
