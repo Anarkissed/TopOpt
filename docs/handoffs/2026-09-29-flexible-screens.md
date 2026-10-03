@@ -40,6 +40,11 @@ background limit, and the known headless-GPU process death stopped one part earl
     stale-type gate can refuse it.
   - #354 wrote the test against a core without that refusal. The two meet first in #361.
   - Not fixed here: the file is #354's, and the fix belongs with #354/#361.
+  - **The maintainer's ruling (2026-10-03):** diagnosis confirmed; the fix is #354's (every bridge call
+    catches core's exceptions; `lattice_cell_bounds` returns invalid with core's reason). Keep
+    `LatticeStaleTypeTests` EXCLUDED until that fix reaches this branch through #354 -> #361, then
+    re-include it and confirm it passes. On 2026-10-03 the fix was on #354 (`877bdb88`, head
+    `efa8f81b`) and not yet in #361 (`421fde3d`); this branch has not merged #354 directly to get it early.
 
 **After the last #358 merge (`523dd2f9`), the targeted suite** (every Flexible class, plus the lattice /
 organic / page / receipt classes that read our hooked files; `LatticeStaleTypeTests` left out, see above):
