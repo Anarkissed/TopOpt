@@ -13,7 +13,7 @@ final class LatticeSamplePatchTests: XCTestCase {
     /// table's proxy number is the real one).
     func testTriangleCountMatchesBuiltMesh() {
         for id in ["octet", "bcc", "sc", "diamond"] {
-            let lat = LatticeType.named(id)
+            let lat = LatticeType.named(id)!
             let declared = LatticeSamplePatch.triangleCount(lattice: lat, cells: 2)
             let mesh = LatticeSamplePatch.mesh(lattice: lat, cellMM: 8, cells: 2, relativeDensity: 0.4)
             XCTAssertEqual(mesh.triangleCount, declared, "\(id) declared vs built tris")

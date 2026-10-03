@@ -157,6 +157,12 @@ xcodebuild -create-xcframework \
   -library "$LIB_IOSDEV" \
   -output "$XCF" >/dev/null
 echo "==> created $XCF"
+# The linked core's BUILD TIME, taken the moment its libraries are assembled, in the
+# CLI's own format (`__DATE__ " " __TIME__`, e.g. "Oct  2 2026 19:01:09" -- %e pads
+# the day with a space as __DATE__ does). The bridge states it to core with the
+# fingerprint below (`topopt::set_build_identity`), so an in-app run's receipt
+# names the core that wrote it instead of "unknown" (#358, 349053df).
+BUILD_TIME="$(LC_ALL=C date '+%b %e %Y %H:%M:%S')"
 
 # --- core build fingerprint (LAN offload, handoff 097) -----------------------
 # Write the git SHA of the core we just built into a generated Swift file the
@@ -182,9 +188,12 @@ cat > "$FP_FILE" <<EOF
 enum CoreFingerprint {
     /// The core git SHA this app was built against ("dev" when git is unavailable).
     static let value = "$FINGERPRINT"
+    /// When the linked core's libraries were assembled, in the CLI's \`__DATE__ __TIME__\`
+    /// format. Stated to core once, with \`value\`, before the first bridge run.
+    static let buildTime = "$BUILD_TIME"
 }
 EOF
-echo "==> wrote $FP_FILE (fingerprint=$FINGERPRINT)"
+echo "==> wrote $FP_FILE (fingerprint=$FINGERPRINT, built $BUILD_TIME)"
 
 # --- vendor headers + OCCT libs (package-relative paths only) -----------------
 ln -sfn "$CORE_DIR/include" "$VENDOR/include"

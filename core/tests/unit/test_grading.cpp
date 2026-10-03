@@ -112,6 +112,41 @@ int main() {
   CHECK(gf.cells_per_member_floor == n_star,
         "report floor == lattice_cells_per_member_min");
 
+  // ---- 1a. ★ max_relative_density: A CAP UNDER *EITHER* INTENT (app, 2026-09-20)
+  // aesthetic_rho_min/max are aesthetic-only by design -- they say where WITHIN the
+  // band an aesthetic run grades. The preview caps every automatic density at the
+  // aesthetic ceiling under BOTH intents whenever "Allow quilt" is off, and had no key
+  // to say so; without this the run grades to the full band (top ~0.90) while the
+  // preview is capped near 0.219 and the two are different objects.
+  {
+    const double cap = octet_aesthetic_density_ceiling();
+    GradingLawParams cp = p;                 // p leaves intent at its Structural default
+    cp.max_relative_density = cap;
+    const GradedField C = grade_lattice(thick, dens, demand, nullptr, cp);
+    double hi_seen = 0.0;
+    std::size_t latticed = 0;
+    for (std::size_t e = 0; e < N; ++e)
+      if (!C.posture.mask.empty() && C.posture.mask[e]) {
+        ++latticed;
+        hi_seen = std::max(hi_seen, C.posture.relative_density[e]);
+      }
+    std::printf("  cap: structural intent, cap %.6f -> highest emitted rho %.6f over "
+                "%zu latticed voxel(s); uncapped reaches %.6f\n",
+                cap, hi_seen, latticed, gf.rho_max_used);
+    CHECK(latticed > 0, "cap: the capped run still lattices something");
+    CHECK(hi_seen <= cap + 1e-9,
+          "cap: NO voxel exceeds it -- and this is a STRUCTURAL run, where "
+          "aesthetic_rho_max would have been ignored");
+    // ★ THE CONTROL. Without the cap the same field must go HIGHER, or this test is
+    // measuring a run that never wanted the band's top in the first place.
+    CHECK(gf.rho_max_used > cap + 1e-6,
+          "CONTROL: the uncapped run really does exceed the cap, so the cap is doing "
+          "the work and not the demand field");
+    CHECK(C.band_rho_max <= cap + 1e-9,
+          "cap: the reported band top is the capped one, so ruling D's refusal and the "
+          "histogram's ceiling count both answer to the cap");
+  }
+
   // ---- 1b. ★ PER-REGION STATED DENSITY (task 2026-08-16-per-sector-density-
   //      override). The law must grade a voxel to the STATED density where one is
   //      given, and derive exactly as before where none is — in the SAME field, so

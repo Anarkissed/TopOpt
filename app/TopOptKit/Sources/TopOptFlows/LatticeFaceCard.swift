@@ -182,9 +182,23 @@ public enum LatticeFaceCardDerivation {
     /// extrusion width. Leaving the parameters in place while ignoring them would
     /// have been the exact defect this task exists to remove — an input that
     /// looks like it decides something and does not.
+    /// A `LatticeType` is only ever read for its id here; the card asks core by id.
     public static func card(faceID: Int, depthMM: Double, heldVoxels: Int,
                             spacingMM: Double, densityGCM3: Double,
                             topology: LatticeType,
+                            declaredDensity: Double? = nil,
+                            minExtrudableWidthMM: Double,
+                            cellsPerMemberFloor: Double = 0) -> LatticeFaceCard {
+        card(faceID: faceID, depthMM: depthMM, heldVoxels: heldVoxels, spacingMM: spacingMM,
+             densityGCM3: densityGCM3, topologyID: topology.id, declaredDensity: declaredDensity,
+             minExtrudableWidthMM: minExtrudableWidthMM, cellsPerMemberFloor: cellsPerMemberFloor)
+    }
+
+    /// ★ BY THE RAW TOPOLOGY ID (item a, 2026-10-02): core is asked about the type the project
+    /// names — never a `LatticeType` that a lookup could have turned into octet.
+    public static func card(faceID: Int, depthMM: Double, heldVoxels: Int,
+                            spacingMM: Double, densityGCM3: Double,
+                            topologyID: String,
                             declaredDensity: Double? = nil,
                             // ★ PRINTABILITY IS ENTIRELY USER INPUT, and this is
                             // it: the minimum extrudable strut width from the
@@ -196,7 +210,15 @@ public enum LatticeFaceCardDerivation {
                             // 3x. 0 means UNKNOWN, and an unknown printability
                             // does not certify: the card falls to `outOfRegime`
                             // rather than quietly passing the strut test.
-                            minExtrudableWidthMM: Double) -> LatticeFaceCard {
+                            minExtrudableWidthMM: Double,
+                            // ★★★ THE STAGE'S OWN FLOOR (2026-08-24 night). 0 =
+                            // core's accuracy floor of 5 — which is what every
+                            // card silently derived at while the AESTHETIC stage
+                            // baked at 1: his card said "Cell 2.40 · Density 20%
+                            // · Out of regime 5.0 cells across" about a face the
+                            // bake was laying at 12 mm and 5%. The card must be
+                            // derived under the same law as the picture.
+                            cellsPerMemberFloor: Double = 0) -> LatticeFaceCard {
         let voxelMM3 = spacingMM * spacingMM * spacingMM
         let volume = Double(heldVoxels) * voxelMM3
         let mass = volume * densityGCM3 / 1000.0          // mm³ · g/cm³ → g
@@ -211,7 +233,7 @@ public enum LatticeFaceCardDerivation {
         // The certifiable band, read from CORE for THIS topology — the only use
         // left for it is clamping a DECLARED density, since there is no
         // certificate outside the band. Auto never touches it.
-        let limits = TopOptKit.latticeLimits(topology: topology.id)
+        let limits = TopOptKit.latticeLimits(topology: topologyID)
 
         // 1.0 declared means SOLID — no lattice, nothing saved — which is core's
         // own C0 rule (`kLatticeSolidAt`) and the reason bar R1 can be exact.
@@ -257,15 +279,20 @@ public enum LatticeFaceCardDerivation {
         // `LatticeSectorDensity` passes (`thinnestExtentMM`), for a face slab
         // whose in-plane extents exceed its depth.
         let d = TopOptKit.latticeRegionDerivation(
-            topology: topology.id, memberWidthMM: depthMM,
+            topology: topologyID, memberWidthMM: depthMM,
             minExtrudableWidthMM: minExtrudableWidthMM,
             // <= 0 means AUTO to the bridge. A declared density is clamped into
             // the band first — there is no certificate outside it — but its
             // PRINTABILITY is never clamped: core reports the strut it really
             // makes and `prints` says whether it comes out of the nozzle.
+            // ★ AESTHETIC states densities OUTSIDE the certifiable band by
+            // design (the control's ceiling is the quilt, not rhoMax), so with
+            // a relaxed floor in force the stated number rides unclamped.
             statedRelativeDensity: declaredDensity.map {
-                min(max($0, limits.rhoMin), limits.rhoMax)
-            } ?? 0)
+                cellsPerMemberFloor > 0 ? $0
+                    : min(max($0, limits.rhoMin), limits.rhoMax)
+            } ?? 0,
+            cellsPerMemberFloor: cellsPerMemberFloor)
 
         // ★ NO CORE NUMBER IS NOT A PASS (bar R2). An unknown extrusion width, a
         // topology core carries no law for, or a member no (cell, density) pair

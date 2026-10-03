@@ -251,6 +251,31 @@ ClearanceGeometry resolve_clearance_manual(const ManualClearanceGeometry& geom,
     g.outline_uv = geom.outline_uv;
     if (const char* f = std::getenv("TOPOPT_OUTLINE_UV_FRAME")) g.outline_frame = std::atoi(f);
     else g.outline_frame = kOutlineUvFrame;
+    // ── ★ STATED AXES END THE FITTED CONVENTION (app, 2026-09-22) ──────────────
+    // Where the job names the frame its outline is in, that is the frame: the axes
+    // become the basis and the frame BITS ARE CLEARED, because those bits exist
+    // only to map the app's pair onto a basis core guessed. Guessing is over.
+    //
+    // ★ AND A DISAGREEMENT IS A REFUSAL, not a silent preference. The two sides
+    // derive the same basis today by coincidence of construction; if a future face
+    // makes them differ, running the outline on one frame and anything else on the
+    // other -- quietly, on a face nobody tested -- is the failure that is hardest
+    // to see. A mirrored outline has the same AREA as a correct one, which is how
+    // the last frame bug survived a handoff that said it was fixed.
+    const double fu = norm(geom.frame_u), fw = norm(geom.frame_w);
+    if (fu > 1e-9 && fw > 1e-9) {
+      const Vec3 su{geom.frame_u.x / fu, geom.frame_u.y / fu, geom.frame_u.z / fu};
+      const Vec3 sw{geom.frame_w.x / fw, geom.frame_w.y / fw, geom.frame_w.z / fw};
+      // 1e-6 is far tighter than any frame BIT can hide in: a swap or a negation
+      // moves an axis by a right angle or a half turn, never by a microradian.
+      if (std::fabs(dot(su, g.u) - 1.0) > 1e-6 || std::fabs(dot(sw, g.w) - 1.0) > 1e-6) {
+        g.frame_conflict = true;
+        return g;                 // invalid: the caller refuses and names the face
+      }
+      g.u = su;
+      g.w = sw;
+      g.outline_frame = 0;        // the stated axes ARE the frame; no mapping left
+    }
     if (g.u_hi > g.u_lo && g.w_hi > g.w_lo) g.valid = true;
   }
   return g;

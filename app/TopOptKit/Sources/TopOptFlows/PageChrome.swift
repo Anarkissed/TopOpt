@@ -195,6 +195,11 @@ public enum PageChrome {
     /// Top inset of the first chrome row — the value of `DS.Space.xl3`.
     public static let topInset: CGFloat = 22
 
+    /// ★ WHERE THE LATTICE MODE CHIP SITS — directly under the stage's back button, so
+    /// "Structural" / "Aesthetic" reads as part of the stage's own identity rather than
+    /// as another control. One row below `topInset` plus the back button's height.
+    public static let stageModeChipTop: CGFloat = 168
+
     // MARK: - button sizing (the "all the buttons feel different" fix)
 
     /// A round icon button (back / undo / redo): 52 × 52.

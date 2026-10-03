@@ -87,9 +87,9 @@ final class DesignOverhaulRound2Tests: XCTestCase {
         let widths: [SettingsChipID: CGFloat] = [
             .gravity: 140, .minimizePlastic: 175, .quality: 120, .designBox: 200,
             .faceProtectDepth: 160, .paint: 190, .buildOrientation: 210,
-            .cadFaces: 155]
+            .cadFaces: 155, .bandChips: 130]      // ★ the Hide/Show chips toggle (2026-09-28)
         let order = BottomChipOrder.sorted(SettingsChipID.allCases, widths: widths)
-        XCTAssertEqual(order, [.quality, .gravity, .cadFaces, .faceProtectDepth,
+        XCTAssertEqual(order, [.quality, .bandChips, .gravity, .cadFaces, .faceProtectDepth,
                                .minimizePlastic, .paint, .designBox, .buildOrientation])
     }
 
@@ -119,7 +119,7 @@ final class DesignOverhaulRound2Tests: XCTestCase {
         // chip or this stops testing "unmeasured parks last".
         let widths: [SettingsChipID: CGFloat] = [
             .quality: 120, .gravity: 130, .minimizePlastic: 150, .faceProtectDepth: 160,
-            .paint: 170, .buildOrientation: 180, .cadFaces: 140]
+            .paint: 170, .buildOrientation: 180, .cadFaces: 140, .bandChips: 125]
         // .designBox unmeasured → last.
         XCTAssertEqual(BottomChipOrder.sorted(SettingsChipID.allCases, widths: widths).last, .designBox)
     }
