@@ -410,3 +410,192 @@ run, which the task forbids me to decide.
      certificate supports.
    - **Decision:** core runs the beam network for Stepped, or the preview goes back to the
      homogenised floor?
+
+---
+
+# Round 2 (2026-10-02): the maintainer's rulings
+
+PR #354's branch, app only: no file under `core/` was edited; core arrived only by the one-way merge
+of #358. The rulings and their status are tracked in
+`docs/handoffs/evidence/2026-10-02-lattice-types-round2/PLAN.md`; the reproducible evidence (tools,
+procedure, hashes) is in that folder.
+
+## In plain words
+
+- **Every ruling is done, except two that stopped as ruled.**
+  - The **Regions popover** stopped: several things are reachable only through it (list below).
+  - The **Default Grade plan switch** stays OFF: core refuses every plan that reaches its check (proof below).
+- **The type picker now speaks core's words.**
+  - The six strut types read "Strength-checked, but not buildable yet".
+  - BCC + Z, FCC + Z and Re-entrant read "Not buildable or strength-checked yet".
+  - **One wording choice is yours.** Core has no id for Gyroid and Schwarz-D yet, so core's own line
+    for them would be "Not a lattice type". The picker gives them core's "Not buildable or
+    strength-checked yet" instead (LatticeTypeCatalog.coreReason).
+- **In-app lattice receipts now name the core that wrote them.** They said "unknown" before. The test
+  runs a real lattice job through the app's one on-device entry and reads `run_info.json`:
+  fingerprint `436819f6e6c8`, build time `Oct  2 2026 20:05:22`.
+- **Two crashes found and fixed. Neither reached your store:**
+  1. **The preview crashed on a Stepped or Default Grade project with more than 127 include regions.**
+     The bake stored each texel's region in an 8-bit number. The proof hit it on 102117B9 converted
+     to Default Grade (177 regions). Your 102117B9 is organic, which never runs that bake. Fixed in
+     3ba44c7d.
+  2. **After the #358 sync, a project saved with a non-octet type (e.g. Kelvin) would have crashed
+     the app.** #358 gives every type its own strut law and refuses the types without a measured
+     table. Two bridge functions let that refusal escape into Swift. The full targeted run caught it
+     before anything shipped; both now read core's refusal as "no number". Fixed in 877bdb88.
+     The Flexible track's session hit the same abort independently (`LatticeStaleTypeTests` on #361
+     at 421fde3d, with `sc`) and reported it upstream; this is the fix on #354's side.
+- **No stage-job byte moved this round except where ruled:** 3418E167 (ruling 3) and the four graded
+  octet projects' ceiling digits (ruling 5). The sync and the fixes move nothing (hashes below).
+- **What needs you:** six decisions under "Round 2: needs a ruling".
+- **A process incident, disclosed earlier:** in this round I stopped another session's test process
+  (pid 42308) with a broad name pattern. I now stop only processes whose working directory I have
+  checked is this worktree.
+
+## Per ruling
+
+| # | Ruling | Result | Commit |
+|---|---|---|---|
+| — | Structural view state (face prism and Lattice only) | accepted | 4f63770c |
+| (c) | The silent drop through a legacy include primitive, logged | accepted | 0c9648d3 |
+| (b) | The app's face frame vs core's plane basis, through the bridge | done: 4 tests over the six axes, oblique normals and both sides of the switch | e6c32aa1 |
+| R | Remove the Regions popover | **STOPPED**: popover-only capabilities exist (below) | — |
+| — | Per-face Cell dial stays Aesthetic-only | no change | — |
+| 1 | Structural floor keyed on the beam-network set: one constant `{"organic"}` | done; #358 at 23e6154e does not publish `lattice_beam_network_certified_algorithms()` yet, so the constant stays | f15ebfe7 |
+| 2 | Organic + Structural + manual Fit stays at 5; report only | **reported: they do not match** (below) | — |
+| 3 | No `structural_certification: beam_network` on Stepped + Structural | done; 3418E167 moves by exactly that one key | 96a1b9bd |
+| 4 | Default Grade proof: run it; app causes first; core brief; switch OFF | R4 fixed (20eb5edd); probe fixed and switch OFF (5bf34e18); proof run on 5 projects (9dd60eb2, `dg_results.md`); core brief with minimal jobs | 20eb5edd, 5bf34e18, 9dd60eb2 |
+| 5 | The octet ceiling is core's number | done; four graded octet jobs move by −2.9e-8 in `max_relative_density`; swapped to core's per-type function at the sync, no byte moved | 1d1bde5e, 877bdb88 |
+| (a) | `named()` returns nil for an unknown id | done; the two workspace misroutes ask core by the raw id | e5ab0325 |
+| S | Sync core: readiness words, identity, the ceiling swap | done | 436819f6 (merge), 877bdb88 |
+
+## Ruling 4: the Default Grade proof
+
+Full table: `docs/handoffs/evidence/2026-10-02-lattice-types-round2/dg_results.md`. Every plan that reaches core's check is refused (three of five projects; core refuses 92A8016E and 102117B9 earlier, for reasons unrelated to the plan); without the plan, core accepts and lays its own, far coarser cells
+(570B38E2, native: 7 cells of 12 mm against the preview's 4,198 cells of 2.6–6 mm).
+
+The causes, counted per cell (`tools/classify_plan.py`, a port of core's check that reports every
+cell, not the first):
+- **R1, the app's: the in-plane slot origin.** The app shifts each region's grid in-plane to fit more
+  base cells; core lays the plan from the region's sent origin, and no key carries the shift. One
+  constant offset per region explains every R1 cell. Needs your ruling (below).
+- **R2, R3, R5, R6, core's:** one brief, `docs/handoffs/2026-10-02-core-brief-default-grade-plan.md`,
+  with a minimal failing job and a one-change control for R2, R3 and R5, on core's own fixture. All
+  six verdicts are the same at the linked core and at #358 23e6154e.
+- **R7, the app's (new): overlapping prisms.** On the stand, the 24.15 mm facet prisms run into both
+  walls, and the plan lists both regions' cells over the same space: 1,367 real overlaps.
+- **R4, the app's:** fixed (Default Grade now packs halves by its algorithm).
+- **102117B9 (converted) never reaches the plan check.** Core refuses its job with or without the plan: the swept window it inherited from the organic settings (1.17–2.4 mm) is under core's octet printability floor at the 0.45 mm bead (4.93 mm). The preview drew 21,245 cells there; its floor edge reads 1.8 mm. That gap between the two floors deserves a look on a real Structural octet project; this copy is not a state he can reach.
+- **92A8016E:** his original stage job is graded with a design box, which core refuses before any
+  work. The app already refuses that setup first (`latticeDesignBoxConflict`); nothing new.
+
+## Ruling 2: organic + Structural + manual Fit (report only)
+
+The preview and the run do not match, and do not build the cell from the same quantity:
+- **One size picked (`cell_mode: "fit"` + `cell_mm`): core refuses the job** at schema validation
+  (job.cpp:1775-1784; also at 23e6154e). The app writes exactly this (LatticeSettings.swift:1034-1037),
+  and `OrganicMainWiringTests` pins it, so those tests pass while describing a document core refuses.
+  The variant path catches it before sending; the optimize path has no pre-check.
+- **Fit with no size:** in quiet regions the preview draws about 5.5 mm, the run about 2.2–3.1 mm
+  (estimates from the formulas, 102117B9); the preview is about 1.8–2.5× coarser. Busy regions match
+  at the voxel floor. The run's cap is the part's member width / 5; the preview's is the candidate
+  mask's width / 2.
+- **A grade:** the windows match by construction; the shape-fit floor and cap still differ.
+Nothing was changed, as ruled.
+
+## The Regions popover: STOPPED
+
+None of his 9 saved regions depends on the popover (every one is a single face, no filter, no
+cuts), so removing the UI would lose no data, only abilities. Reachable **only** through the popover:
+- a **filter-backed union** ("Fillets & chamfers", "Bores of one size", "Small faces"), and the
+  **drift** warning that only such a region has;
+- the **Small faces** filter with numeric area and radius sliders;
+- **Dissolve** a region back into plain faces;
+- **Undo split** on a region at any later time (header Undo reaches back only within the session);
+- **add or drop one face** on an existing region;
+- a **grid split over a whole multi-face region** in its own frame, including cylindrical sectors
+  around a shared axis, up to 64 (Surface Pattern frames from one face and caps at 12).
+
+Possible defect, from reading only: patterning a face inside a Surface **union** aims at the union,
+which owns no faces, so the cells would hold none. No test covers it.
+
+## Observed, not fixed
+
+- **The octree bake is slow with many regions: 1,815.6 s (30 min) for 102117B9 as Default Grade,
+  177 regions, on this Mac.** On an iPad that preview would effectively hang. The cause is the
+  anchor search (`LatticeOctreeBake.swift:344-424`):
+  - It tries 8³ = 512 in-plane shifts when the regions' normals span all three axes.
+  - For each shift it walks every region's base slots over the **whole part's** extent, not the
+    region's own footprint.
+
+  So the cost scales with regions × part area: 5 regions on the stand are quick, 177 are about 35×
+  the work per shift. Slots outside a region's outline score nothing (`fitsBox` fails on the first
+  outline read), so limiting each region's walk to its prism's bounding box would give the same
+  answer. Not changed this round; it is the next thing to do before Default Grade is enabled on a
+  many-region part.
+- **The drawer's "Cell 2.40 mm" on the stand** is not explained by the cells-per-member floor. The
+  face card takes the slab depth as the member width; the bake uses the measured width (75 mm). Two
+  sources for one number.
+
+## Round 2: needs a ruling
+
+1. **R1 (the Default Grade plan's slot origin).** (a) The app anchors each region's grid at the
+   region's origin and drops its anchor search: this changes the preview you approved. Or (b) core
+   takes a per-region `slot_origin_mm` (or in-plane anchor) on `lattice.regions`, which its own header
+   already describes, used by validation, grouping and laying alike.
+2. **R7 (overlapping prisms in the plan).** The preview gives each texel one owner; the plan lists
+   every cell that painted any texel. One owner per space needs a rule for a cell split between two
+   regions: drop it from the later region, or split it into the earlier region's halves. Either
+   changes what the plan says; neither moves a byte while the switch is OFF.
+3. **Gyroid and Schwarz-D's words:** core's "Not a lattice type", or the "Not buildable or
+   strength-checked yet" the picker shows now.
+4. **The Regions popover:** where each popover-only capability should live before it goes, or keep
+   it.
+5. **Organic single-size Fit:** core refuses `cell_mm` with `cell_mode: "fit"`. Either the app sends a
+   one-size window (`swept` with min = max), or core accepts the pair.
+6. **The Default Grade switch** stays OFF until core lands R2/R3/R5 and R1 and R7 are decided.
+
+## Round 2: test evidence
+
+- **Targeted run after the sync** (every class that pins a touched file, plus the round's classes):
+  253 tests, 0 failures, 2 skipped (`LatticePageRound2Tests.testCoreCLIParsesTheEmittedRegions`,
+  `UnreadableProjectTests.testEveryProjectInTheStoreCopyDecodes`: both need local data).
+- **RED controls:**
+  - the identity call disabled → the in-app receipt says "unknown" with an empty build time (4
+    failures);
+  - two readiness cases swapped → the mapping test fails (2 failures);
+  - the bridge guard absent → `LatticeNamedNoOctetFallbackTests.testAKelvinJobCarriesNoOctetCap`
+    traps the process (crash report `xctest-2026-10-02-204458.ips`, `latticeCellBounds` →
+    `lattice_cell_bounds`);
+  - the octree owner still `Int8` → `LatticeOctreeManyRegionsTests` traps with "Not enough bits".
+- **Stage hashes:** `hashes.md`. fs (the sync) and fo (the overflow fix) equal f4b on all seven
+  projects.
+- **Core ctest at the merged core** (byte-identical to #358 23e6154e): 132 of 133 passed in the parallel run, where `cli_demo` hit my own 1,800 s cap at low
+  priority beside the proof's bake; alone it passed in 2,401 s. So 133 of 133.
+- **iOS simulator build:** BUILD SUCCEEDED at 877bdb88; the binary carries #358's strings (core's
+  readiness words and the set-once refusal).
+- **Full suite at 3ba44c7d** (2026-10-02 21:43 → 2026-10-03 00:37, one detached `swift test`):
+  ```
+  Executed 2690 tests, with 48 tests skipped and 12 failures (0 unexpected) in 10381.219 (10381.439) seconds
+  SUITE-EXIT 1
+  ```
+  The 12 assertion failures fall in exactly the **known 7 tests**, at the same lines as round 1:
+  - `AppModelTests` 3MF ×3 (AppModelTests.swift:205-209, 235-237, 267-268): this build has no lib3mf;
+  - `LatticeCellGradingTests.testGradingChangesTheRenderedLattice` (:245, 298 vs 500);
+  - `LatticeSimSolveTriggerTests.testTheTriggerRefusesOnAllThreeGrounds` (LatticeStressTintTests.swift:195);
+  - `OrganicSampleCubeTests.testThickerIsLiveAndNeverRetraces` (:64);
+  - `OrganicVariantCacheTests.testTheKeyIgnoresThicknessAndFollowsCoreAndTopology` (:41).
+
+  No new failure. No process death: the suite ran start to end. The files it rewrites under
+  `docs/handoffs/assets/` and `evidence/` were restored before committing.
+
+## Round 2: warnings for the next run
+
+- **#358's per-type strut law throws** (`LatticeDiameterLawNotMeasured`) for every type without a
+  measured table, through about 30 core paths. Every bridge function that resolves a topology must
+  catch it; a C++ throw into Swift traps the process. Today: `lattice_cell_bounds` and
+  `lattice_region_derivation` catch it; the others are octet-gated or already wrapped.
+- **`set_build_identity` is set-once per process.** `CoreBuildIdentity` states it from a `static let`;
+  never state a second value.
+- **Swap to `lattice_beam_network_certified_algorithms()`** the moment a sync brings it in (ruling 1).
+- **The proof needs his projects:** `tools/dg_proof.sh` on a snapshot, never his store.
