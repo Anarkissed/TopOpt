@@ -439,7 +439,9 @@ extension LatticePreviewOccupancy {
         var origin = [SIMD3<Float>](repeating: SIMD3<Float>(repeating: 0), count: grid.count)
         var bandT = [Float](repeating: 1, count: grid.count)
         var outlineMM = [Float](repeating: 1e3, count: grid.count)
-        var owner = [Int8](repeating: -1, count: grid.count)
+        // ★ The first region to claim each texel. Int32, like `cellOf`: an Int8 trapped on the
+        // 128th include region (102117B9 as Default Grade has 177; the proof, 2026-10-02).
+        var owner = [Int32](repeating: -1, count: grid.count)
         var isFinest = [Bool](repeating: false, count: grid.count)
         var cells: [LatticeSteppedCell] = []
         var cellOf = [Int32](repeating: -1, count: grid.count)   // texel → cell index
@@ -648,7 +650,7 @@ extension LatticePreviewOccupancy {
                             } else {
                                 guard occupied(c) || occupiedNear(c) else { continue }
                             }
-                            owner[idx] = Int8(ladder.region)
+                            owner[idx] = Int32(ladder.region)
                             cellOf[idx] = Int32(cells.count)
                             isFinest[idx] = finest
                             size[idx] = halfRepresentable(Float(S))

@@ -30,6 +30,7 @@ AA4C7953-3152-4123-BCB5-EF5F8A08ABA3 a975ba0f83d9b383
 | f4a | ruling (4) R4: Default Grade packs halves by its algorithm | 3f19f920e5c96a5a | 6dbb48fab4029f78 | c4ca5d5ac009036d | 2baaf9cbb94027c7 | 7ba46796d87e3b34 | 3e6f162cb36212a9 | b457718dfc23ab42 |
 | f4b | ruling (4): the probe fixed, plans OFF, Stepped never | 3f19f920e5c96a5a | 6dbb48fab4029f78 | c4ca5d5ac009036d | 2baaf9cbb94027c7 | 7ba46796d87e3b34 | 3e6f162cb36212a9 | b457718dfc23ab42 |
 | fs | sync: #358 at 23e6154e (identity, readiness words, core's per-type ceiling, the bridge's refusal guards) | 3f19f920e5c96a5a | 6dbb48fab4029f78 | c4ca5d5ac009036d | 2baaf9cbb94027c7 | 7ba46796d87e3b34 | 3e6f162cb36212a9 | b457718dfc23ab42 |
+| fo | the octree bake's region owner widened (Int8 → Int32) | 3f19f920e5c96a5a | 6dbb48fab4029f78 | c4ca5d5ac009036d | 2baaf9cbb94027c7 | 7ba46796d87e3b34 | 3e6f162cb36212a9 | b457718dfc23ab42 |
 
 The arm "b" equals the round-1 values: lt3/lt4 on P1 for the six unchanged projects, and p3base 169fe967ff734cfa for 3418E167. The script reproduces the old dumps.
 
