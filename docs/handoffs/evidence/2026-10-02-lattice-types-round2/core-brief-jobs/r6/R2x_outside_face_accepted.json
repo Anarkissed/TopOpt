@@ -1,5 +1,5 @@
 {
- "_comment": "R3: two cells 36 mm apart in x and 10 mm in z (37.4 mm); the overlap hash key has no region id and offsets are region-relative, so they share key (0,0,0).",
+ "_comment": "R2 corollary: the -y region's cell one layer IN FRONT of the face (y in [12,15], outside the prism y in [0,12] and outside the part). The min-corner projection reads 0..3 mm and ACCEPTS it.",
  "bake_build_orientation": "off",
  "grading": {
   "algorithm": "doubled",
@@ -20,33 +20,14 @@
      "half_u_mm": 6.0,
      "half_w_mm": 6.0,
      "normal": [
-      0,
-      1.0,
-      0
+      0.0,
+      -1.0,
+      0.0
      ],
      "origin": [
       18.0,
-      0.0,
+      12.0,
       8.0
-     ]
-    },
-    "kind": "face",
-    "role": "include"
-   },
-   {
-    "geometry": {
-     "depth_mm": 12.0,
-     "half_u_mm": 4.0,
-     "half_w_mm": 4.0,
-     "normal": [
-      0,
-      1.0,
-      0
-     ],
-     "origin": [
-      54.0,
-      0.0,
-      18.0
      ]
     },
     "kind": "face",
@@ -58,19 +39,10 @@
    {
     "origin_mm": [
      18.0,
-     0.0,
+     12.0,
      8.0
     ],
     "region_id": 1,
-    "size_mm": 3.0
-   },
-   {
-    "origin_mm": [
-     54.0,
-     0.0,
-     18.0
-    ],
-    "region_id": 2,
     "size_mm": 3.0
    }
   ],

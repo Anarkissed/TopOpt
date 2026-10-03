@@ -1,5 +1,5 @@
 {
- "_comment": "R3: two cells 36 mm apart in x and 10 mm in z (37.4 mm); the overlap hash key has no region id and offsets are region-relative, so they share key (0,0,0).",
+ "_comment": "Reference for R6b: the 1.5 mm cell sent at x=22.5, on its own grid, where R6b's cell is predicted to be laid.",
  "bake_build_orientation": "off",
  "grading": {
   "algorithm": "doubled",
@@ -20,33 +20,14 @@
      "half_u_mm": 6.0,
      "half_w_mm": 6.0,
      "normal": [
-      0,
-      1.0,
-      0
+      0.0,
+      -1.0,
+      0.0
      ],
      "origin": [
       18.0,
-      0.0,
+      12.0,
       8.0
-     ]
-    },
-    "kind": "face",
-    "role": "include"
-   },
-   {
-    "geometry": {
-     "depth_mm": 12.0,
-     "half_u_mm": 4.0,
-     "half_w_mm": 4.0,
-     "normal": [
-      0,
-      1.0,
-      0
-     ],
-     "origin": [
-      54.0,
-      0.0,
-      18.0
      ]
     },
     "kind": "face",
@@ -58,7 +39,7 @@
    {
     "origin_mm": [
      18.0,
-     0.0,
+     9.0,
      8.0
     ],
     "region_id": 1,
@@ -66,12 +47,12 @@
    },
    {
     "origin_mm": [
-     54.0,
-     0.0,
-     18.0
+     22.5,
+     10.5,
+     8.0
     ],
-    "region_id": 2,
-    "size_mm": 3.0
+    "region_id": 1,
+    "size_mm": 1.5
    }
   ],
   "topology": "octet"

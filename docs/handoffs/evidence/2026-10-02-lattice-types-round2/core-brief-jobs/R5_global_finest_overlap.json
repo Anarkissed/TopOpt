@@ -1,5 +1,5 @@
 {
- "_comment": "R5: two TOUCHING 1.625 mm cells on region 2's own halving grid (base 3.25). The overlap hash uses ONE finest tile across ALL regions — 0.625, region 1's (base 2.5) — and 1.625/0.625 = 2.6: the span rounds UP to 3 tiles while the second cell's start (2.6) rounds DOWN to 3, so they share a slot.",
+ "_comment": "R5: two TOUCHING 1.625 mm cells on region 2's own halving grid (base 3.25). The overlap hash uses ONE finest tile across ALL regions — 0.625, region 1's (base 2.5) — and 1.625/0.625 = 2.6: the first cell starts at slot 3 (1.625/0.625 = 2.6 rounds up) and spans 3 slots (3-5); the second starts at 3.25/0.625 = 5.2 -> slot 5, so slot 5 is shared.",
  "bake_build_orientation": "off",
  "grading": {
   "algorithm": "doubled",

@@ -1,13 +1,14 @@
 {
- "_comment": "R3: two cells 36 mm apart in x and 10 mm in z (37.4 mm); the overlap hash key has no region id and offsets are region-relative, so they share key (0,0,0).",
+ "_comment": "Reference: the same 8.7 mm cell sent at z 25.4 (offset 17.4 = 2 x 8.7), on its own size's grid.",
  "bake_build_orientation": "off",
  "grading": {
-  "algorithm": "doubled",
+  "algorithm": "stepped",
   "cell_max_mm": 3.0,
   "cell_min_mm": 3.0,
   "cell_mode": "swept",
   "min_extrudable_width_mm": 0.45,
-  "topology": "octet"
+  "topology": "octet",
+  "intent": "aesthetic"
  },
  "lattice": {
   "emit_3mf": false,
@@ -17,36 +18,17 @@
    {
     "geometry": {
      "depth_mm": 12.0,
-     "half_u_mm": 6.0,
-     "half_w_mm": 6.0,
+     "half_u_mm": 30.0,
+     "half_w_mm": 30.0,
      "normal": [
-      0,
+      0.0,
       1.0,
-      0
+      0.0
      ],
      "origin": [
       18.0,
       0.0,
       8.0
-     ]
-    },
-    "kind": "face",
-    "role": "include"
-   },
-   {
-    "geometry": {
-     "depth_mm": 12.0,
-     "half_u_mm": 4.0,
-     "half_w_mm": 4.0,
-     "normal": [
-      0,
-      1.0,
-      0
-     ],
-     "origin": [
-      54.0,
-      0.0,
-      18.0
      ]
     },
     "kind": "face",
@@ -59,19 +41,10 @@
     "origin_mm": [
      18.0,
      0.0,
-     8.0
+     25.4
     ],
     "region_id": 1,
-    "size_mm": 3.0
-   },
-   {
-    "origin_mm": [
-     54.0,
-     0.0,
-     18.0
-    ],
-    "region_id": 2,
-    "size_mm": 3.0
+    "size_mm": 8.7
    }
   ],
   "topology": "octet"
