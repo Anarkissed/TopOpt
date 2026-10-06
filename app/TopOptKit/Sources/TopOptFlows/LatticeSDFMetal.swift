@@ -3110,7 +3110,11 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
                     NSLog("DIAG octree pitch=\(String(format: "%.2f", st.pitchMM)) kept=[\(kept)] edge=\(st.slotsCut) "
                           + "texels=\(st.texelsPainted) band=\(params.shapeFitBandMM) floor=\(Self.printableFloorBeads * lineWidthMM) "
                           + "solidBand=\(String(format: "%.2f", solidBandMM)) anchor=\(String(format: "(%.1f,%.1f,%.1f) in %.1fs", st.anchorShiftMM.x, st.anchorShiftMM.y, st.anchorShiftMM.z, st.anchorSeconds)) drawnHi=\(o.drawnDensityHi) "
-                          + "why=[\(why)] noLadder=\(st.noLadderRegions) t=\(String(format: "%.2f", st.seconds))s")
+                          + "why=[\(why)] noLadder=\(st.noLadderRegions) t=\(String(format: "%.2f", st.seconds))s "
+                          + "walk=anchor:\(st.anchorSlotsWalked) place:\(st.placeSlotsWalked) shifts=\(st.anchorBaseVolumes.count) "
+                          + "fp=\(st.footprintBounded.keys.sorted().map { "\($0)=\(st.footprintBounded[$0]!)" }.joined(separator: ",")) "
+                          + "unb=\(st.footprintUnbounded.keys.sorted().map { "\($0)=\(st.footprintUnbounded[$0]!)" }.joined(separator: ",")) "
+                          + "raster=\(String(format: "%.1f", st.rasterSeconds))s place=\(String(format: "%.1f", st.placeSeconds))s")
                 }
             }
         }
