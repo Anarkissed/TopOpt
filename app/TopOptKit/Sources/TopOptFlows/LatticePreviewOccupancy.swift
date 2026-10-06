@@ -695,6 +695,9 @@ public struct LatticeCellField: Sendable {
     /// the job's `lattice.stepped_cells` carries so the run lays down exactly what the
     /// preview drew. Empty on every path but the octree bake.
     public var steppedCells: [LatticeSteppedCell] = []
+    /// Texel → index into `steppedCells` (−1 unpainted): which cell, and so which region,
+    /// owns each texel. The octree bake writes it; R7's proof reads it (2026-10-05).
+    public var steppedTexelCell: [Int32] = []
     public let baseCellMM: Double
     public let maxLevel: Int
     /// True when this came from core's plan rather than the uniform fallback — the

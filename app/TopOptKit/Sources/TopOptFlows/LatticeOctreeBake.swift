@@ -1031,6 +1031,7 @@ extension LatticePreviewOccupancy {
                                 solidDepthMM: solidDepth,
                                 solidBandMM: beam)
         field.steppedCells = cells
+        field.steppedTexelCell = cellOf
         return field
     }
 }
