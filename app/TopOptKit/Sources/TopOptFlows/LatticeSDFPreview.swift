@@ -163,9 +163,10 @@ public enum LatticePreviewBanner: Equatable, Sendable {
     }
 
     /// ★★ RULING 6 (2026-10-03): the one plain line while a Default Grade or Stepped plan
-    /// is drawn but not sent. Not "coarser": measured on 3418E167, the run without the plan
-    /// laid 2.40 mm cells, finer than the preview's 3.00 mm — so the line says whose layout
-    /// it is, not which way it differs. The full sentence sits behind the (i).
+    /// is drawn but not sent. Not "coarser": the line says whose layout it is, not which way
+    /// it differs — the run's own layout is not always coarser, and on 3418E167 (Stepped, no
+    /// plan) core lays none at all: it refuses ("the stepped algorithm derived no region cell",
+    /// frozen CLI 436819f6, 2026-10-05). The full sentence sits behind the (i).
     public static let planNotSentCaption = "Run builds core's own layout"
     public static let planNotSentSentence =
         "the run currently builds core's own cell layout, not the cells shown here — "
