@@ -7,15 +7,32 @@ import TopOptKit
 /// keeps its memo and calls this.
 @MainActor
 public enum LatticeRegionCells {
+    /// One region's measured wall and the cell the bake lays there — the pair the drawer and
+    /// the bake share (item 5, 2026-10-05: one number, one source).
+    public struct RegionCell: Equatable, Sendable {
+        public let measuredWidthMM: Double
+        public let cellMM: Double
+        public static let none = RegionCell(measuredWidthMM: 0, cellMM: 0)
+    }
+
     /// One cell per region (0 for a non-include or a zero depth), `W / N*` of the region's own
     /// measured wall, divided a whole number of times across min(depth, wall).
     public static func cellsMM(project: ProjectModel, scene: LatticeSDFScene?,
                                regions: [LatticeRegionSpec], widthPercentile: Double,
                                quiltStep: Bool = false) -> [Double] {
+        guard project.printParams.strutLineWidthMM > 0 else { return [] }
+        return regionCells(project: project, scene: scene, regions: regions,
+                           widthPercentile: widthPercentile, quiltStep: quiltStep).map(\.cellMM)
+    }
+
+    /// `cellsMM` with the wall each cell was derived from — the body is the bake's, once.
+    public static func regionCells(project: ProjectModel, scene: LatticeSDFScene?,
+                                   regions: [LatticeRegionSpec], widthPercentile: Double,
+                                   quiltStep: Bool = false) -> [RegionCell] {
         let bead = project.printParams.strutLineWidthMM
         guard bead > 0 else { return [] }
-        return regions.enumerated().map { ri, r -> Double in
-            guard r.role == .include, r.depthMM > 0 else { return 0 }
+        return regions.enumerated().map { ri, r -> RegionCell in
+            guard r.role == .include, r.depthMM > 0 else { return .none }
             // ★ THE REGION'S OWN MEASURED MATERIAL, not the depth the user typed —
             // the cell is W / N* for THIS region. Falls back to the declared depth
             // only when nothing is measured.
@@ -54,7 +71,7 @@ public enum LatticeRegionCells {
                                                       memberWidthMM: w,
                                                       minExtrudableWidthMM: bead,
                                                       cellsPerMemberFloor: floor)
-            guard d.valid, d.cellMM > 0 else { return 0 }
+            guard d.valid, d.cellMM > 0 else { return RegionCell(measuredWidthMM: w, cellMM: 0) }
             // ★★★ THE FIT DEPTH IS THE **MATERIAL'S**, NEVER THE DECLARATION'S
             // (his ruling, 2026-08-24 evening: "I'd rather it never overshoot —
             // that a 13mm cell never be on a 12mm wall; instead have a 12mm cell
@@ -113,8 +130,46 @@ public enum LatticeRegionCells {
                 NSLog("DIAG quiltStep r\(ri) p90 %.3f ceiling %.3f allowQuilt %@ → n %.0f cell %.3f",
                       s.regionDrawnDensityP90[ri], s.drawnCeilingRho, s.allowQuilt ? "yes" : "no", n, effDepth / n)
             }
-            return effDepth / n
+            return RegionCell(measuredWidthMM: w, cellMM: effDepth / n)
         }
+    }
+
+    /// ★★ THE DRAWER'S CELL IS THE BAKE'S (maintainer, 2026-10-03, item 5: "the drawer's 'Cell
+    /// 2.40 mm' and the bake use the same member width (the measured one)"). Per selectable key
+    /// (`LatticeRegionSpec.selectableKey`, the drawer's own key), the wall the bake measured and
+    /// the cell it lays, for the algorithms whose preview is the per-region bake (Stepped and
+    /// Default Grade: p50, the quilt step, a stated cell winning — `steppedCellsMM`'s exact
+    /// inputs). A key spanning several regions (a curved face's facets) reports the governing
+    /// one — the finest cell — and the span. Empty with no bake yet, or under any other
+    /// algorithm, so those drawers stay on the declared depth and core's own derivation.
+    public struct SelectableCell: Equatable, Sendable {
+        public let measuredWidthMM: Double
+        public let cellMM: Double
+        public let cellRangeMM: ClosedRange<Double>
+    }
+    public static func selectableCells(project: ProjectModel, scene: LatticeSDFScene?) -> [String: SelectableCell] {
+        guard scene != nil, ["stepped", "doubled"].contains(project.lattice.algorithm) else { return [:] }
+        let regions = project.latticeJobRegions().regions
+        let derived = regionCells(project: project, scene: scene, regions: regions,
+                                  widthPercentile: 0.5, quiltStep: true)
+        // the stated cell wins, exactly as `steppedCellsMM` (the bake's cells) does it
+        let stated = statedCellByFace(project.lattice)
+        let cells = regions.indices.map { i -> Double in
+            guard i < derived.count else { return 0 }
+            if let f = regions[i].faceID, let mm = stated[f], mm > 0 { return mm }
+            return derived[i].cellMM
+        }
+        var out: [String: SelectableCell] = [:]
+        for (i, r) in regions.enumerated() where r.role == .include && i < derived.count && i < cells.count {
+            guard let key = r.selectableKey, cells[i] > 0 else { continue }
+            let mine = SelectableCell(measuredWidthMM: derived[i].measuredWidthMM, cellMM: cells[i],
+                                      cellRangeMM: cells[i]...cells[i])
+            guard let had = out[key] else { out[key] = mine; continue }
+            let span = Swift.min(had.cellRangeMM.lowerBound, cells[i])...Swift.max(had.cellRangeMM.upperBound, cells[i])
+            let gov = cells[i] < had.cellMM ? mine : had
+            out[key] = SelectableCell(measuredWidthMM: gov.measuredWidthMM, cellMM: gov.cellMM, cellRangeMM: span)
+        }
+        return out
     }
 
     /// The median drawn density that counts as AT the ceiling: the top fifth of [floor, ceiling].

@@ -5345,6 +5345,11 @@ public struct WorkspacePlaceholder: View {
                 }
                 strutScene = scene
                 strutSceneToken += 1
+                // ★ item 5 (2026-10-05): the drawer's cell is the bake's, at the wall the bake
+                // measured — re-derive the cards once the final picture has landed
+                if isLastStage, Self.perRegionCellAlgorithms.contains(project.lattice.algorithm) {
+                    refreshLatticeFaceCards()
+                }
                 // ★★★ THE TRACED PICTURE IS A PICTURE (2026-09-07). This read
                 // `strutBakeInFlight = !isLastStage`, and `latticeLayerIsDrawn` hides
                 // the layer while that is true — so stage one baked a lattice and then
@@ -10867,13 +10872,18 @@ public struct WorkspacePlaceholder: View {
         let densityGCM3 = model.densityGCm3(for: project.material)
         let depthsCopy = depths
         let rhosCopy = rhos
+        // ★★ ONE NUMBER, ONE SOURCE (maintainer, 2026-10-03, item 5): the wall the bake measured
+        // and the cell it lays there, per drawer — nil (declared depth, core's derivation) with no
+        // bake yet or under an algorithm whose bake does not derive region cells.
+        let baked = LatticeRegionCells.selectableCells(project: project, scene: strutScene)
+        let bakedCopy = keys.map { baked[$0] }
         Task.detached(priority: .userInitiated) {
             guard let preview = try? TopOptKit.faceSlabPreview(
                 stepPath: path, faceIDs: ids, depthsMM: depthsCopy,
                 resolution: resolution) else { return }
             var byKey: [String: LatticeFaceCard] = [:]
             for (i, fid) in ids.enumerated() where i < preview.voxels.count {
-                byKey[keysCopy[i]] = LatticeFaceCardDerivation.card(
+                var card = LatticeFaceCardDerivation.card(
                     faceID: fid, depthMM: depthsCopy[i],
                     heldVoxels: preview.voxels[i], spacingMM: preview.spacingMM,
                     densityGCM3: densityGCM3, topologyID: topologyID,
@@ -10895,7 +10905,11 @@ public struct WorkspacePlaceholder: View {
                     // without it would fall back to "cannot tell", never to a
                     // silent pass.
                     minExtrudableWidthMM: widthMM,
-                    cellsPerMemberFloor: stageFloor)
+                    cellsPerMemberFloor: stageFloor,
+                    memberWidthMM: bakedCopy[i]?.measuredWidthMM,
+                    cellMM: bakedCopy[i]?.cellMM)
+                card.cellRangeMM = bakedCopy[i]?.cellRangeMM
+                byKey[keysCopy[i]] = card
             }
             // The group cards keep their UUID key (the group row reads them by
             // group id); everything else is keyed by `LatticeSelectableRef.key`.

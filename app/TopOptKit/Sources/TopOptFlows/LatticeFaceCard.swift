@@ -115,9 +115,15 @@ public struct LatticeFaceCard: Equatable, Sendable {
     public var heldText: String {
         heldVoxels == 0 ? "—" : String(format: "%.1f g", heldMassG)
     }
-    /// "3.2 mm cell".
+    /// ★ When one drawer covers several regions whose baked cells differ (a curved face's facets),
+    /// the span the bake lays across them; the card's numbers are the governing (finest) one's.
+    public var cellRangeMM: ClosedRange<Double>? = nil
+    /// "3.2 mm cell" — or "4.67–12.00 mm" across a drawer's regions.
     public var cellText: String {
-        cellMM > 0 ? String(format: "%.2f mm", cellMM) : "—"
+        if let r = cellRangeMM, r.upperBound - r.lowerBound > 0.005 {
+            return String(format: "%.2f–%.2f mm", r.lowerBound, r.upperBound)
+        }
+        return cellMM > 0 ? String(format: "%.2f mm", cellMM) : "—"
     }
     /// "38%".
     public var densityText: String {
@@ -188,10 +194,12 @@ public enum LatticeFaceCardDerivation {
                             topology: LatticeType,
                             declaredDensity: Double? = nil,
                             minExtrudableWidthMM: Double,
-                            cellsPerMemberFloor: Double = 0) -> LatticeFaceCard {
+                            cellsPerMemberFloor: Double = 0,
+                            memberWidthMM: Double? = nil, cellMM: Double? = nil) -> LatticeFaceCard {
         card(faceID: faceID, depthMM: depthMM, heldVoxels: heldVoxels, spacingMM: spacingMM,
              densityGCM3: densityGCM3, topologyID: topology.id, declaredDensity: declaredDensity,
-             minExtrudableWidthMM: minExtrudableWidthMM, cellsPerMemberFloor: cellsPerMemberFloor)
+             minExtrudableWidthMM: minExtrudableWidthMM, cellsPerMemberFloor: cellsPerMemberFloor,
+             memberWidthMM: memberWidthMM, cellMM: cellMM)
     }
 
     /// ★ BY THE RAW TOPOLOGY ID (item a, 2026-10-02): core is asked about the type the project
@@ -218,7 +226,15 @@ public enum LatticeFaceCardDerivation {
                             // · Out of regime 5.0 cells across" about a face the
                             // bake was laying at 12 mm and 5%. The card must be
                             // derived under the same law as the picture.
-                            cellsPerMemberFloor: Double = 0) -> LatticeFaceCard {
+                            cellsPerMemberFloor: Double = 0,
+                            // ★★ ONE NUMBER, ONE SOURCE (maintainer, 2026-10-03, item 5: "the
+                            // drawer's 'Cell 2.40 mm' and the bake use the same member width
+                            // (the measured one)"). The wall the bake measured and the cell it
+                            // lays there (`LatticeRegionCells.selectableCells`); nil = the
+                            // declared depth and core's own derivation, as before (no bake yet,
+                            // or an algorithm whose bake does not derive region cells).
+                            memberWidthMM: Double? = nil,
+                            cellMM: Double? = nil) -> LatticeFaceCard {
         let voxelMM3 = spacingMM * spacingMM * spacingMM
         let volume = Double(heldVoxels) * voxelMM3
         let mass = volume * densityGCM3 / 1000.0          // mm³ · g/cm³ → g
@@ -279,7 +295,7 @@ public enum LatticeFaceCardDerivation {
         // `LatticeSectorDensity` passes (`thinnestExtentMM`), for a face slab
         // whose in-plane extents exceed its depth.
         let d = TopOptKit.latticeRegionDerivation(
-            topology: topologyID, memberWidthMM: depthMM,
+            topology: topologyID, memberWidthMM: memberWidthMM.flatMap { $0 > 0 ? $0 : nil } ?? depthMM,
             minExtrudableWidthMM: minExtrudableWidthMM,
             // <= 0 means AUTO to the bridge. A declared density is clamped into
             // the band first — there is no certificate outside it — but its
@@ -292,7 +308,8 @@ public enum LatticeFaceCardDerivation {
                 cellsPerMemberFloor > 0 ? $0
                     : min(max($0, limits.rhoMin), limits.rhoMax)
             } ?? 0,
-            cellsPerMemberFloor: cellsPerMemberFloor)
+            cellsPerMemberFloor: cellsPerMemberFloor,
+            cellMM: cellMM.flatMap { $0 > 0 ? $0 : nil } ?? 0)
 
         // ★ NO CORE NUMBER IS NOT A PASS (bar R2). An unknown extrusion width, a
         // topology core carries no law for, or a member no (cell, density) pair

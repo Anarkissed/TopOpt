@@ -1311,10 +1311,13 @@ struct LatticeRegionDerivation {
 // ★ `cells_per_member_floor` — 0 keeps core's ACCURACY floor (5), which is what every
 // pre-existing caller gets. Pass the mode's own floor to derive the cell the mode
 // actually allows: on an 11 mm wall, 5 gives a 2.20 mm cell and 2 gives 5.50 mm.
+// ★ `cell_mm` (item 5, 2026-10-05): > 0 states the cell — the one the preview lays at the
+// measured width — and the density, strut and cells-across are core's at that cell; 0 derives
+// it as before (max(width / floor, core's printable minimum)).
 LatticeRegionDerivation lattice_region_derivation(
     const std::string& topology, double member_width_mm,
     double min_extrudable_width_mm, double stated_relative_density,
-    double cells_per_member_floor);
+    double cells_per_member_floor, double cell_mm);
 
 // ★★★ THE ORGANIC LATTICE'S TRACED CENTRELINES, for the preview. See bridge.cpp for
 // the flat layout and for why the tensor — not a scalar — is the input that gates this.

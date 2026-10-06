@@ -3197,7 +3197,7 @@ LatticeCellBounds lattice_cell_bounds(const std::string& topology,
 LatticeRegionDerivation lattice_region_derivation(
     const std::string& topology, double member_width_mm,
     double min_extrudable_width_mm, double stated_relative_density,
-    double cells_per_member_floor) {
+    double cells_per_member_floor, double cell_mm) {
   // ★ #358: `lattice_derive_cell_for_member` and `lattice_min_density_for_strut` take the
   // per-type strut law, which refuses a type without a measured table: valid = false
   // with core's reason, never a C++ throw into Swift.
@@ -3232,7 +3232,11 @@ LatticeRegionDerivation lattice_region_derivation(
     const double n_star = cells_per_member_floor > 0.0
                               ? cells_per_member_floor
                               : topopt::lattice_cells_per_member_min(topo);
-    d.cell_mm = std::max(member_width_mm / n_star, w.min_printable_cell_mm);
+    // ★ ONE NUMBER, ONE SOURCE (maintainer, 2026-10-03, item 5): a caller that already holds
+    // the cell the preview lays (the bake's, at the measured width) states it, and the density,
+    // strut and cells-across below are core's at THAT cell. 0 = derive it, as before.
+    d.cell_mm = cell_mm > 0.0 ? cell_mm
+                              : std::max(member_width_mm / n_star, w.min_printable_cell_mm);
     const double rho = topopt::lattice_min_density_for_strut(topo, d.cell_mm,
                                                              min_extrudable_width_mm);
     d.derived_relative_density = rho >= 0.0 ? rho : d.rho_max;

@@ -2020,11 +2020,15 @@ public enum TopOptKit {
         // ★ THE FLOOR THE CELL IS DERIVED AGAINST. 0 = core's accuracy floor (5), the
         // default every pre-existing caller had. The cell is `width / floor`, so this
         // is the difference between a 2.20 mm and a 5.50 mm cell on an 11 mm wall.
-        cellsPerMemberFloor: Double = 0) -> LatticeRegionDerivation {
+        cellsPerMemberFloor: Double = 0,
+        // ★ ONE NUMBER, ONE SOURCE (item 5, 2026-10-05): the cell the preview lays, when the
+        // caller has it — core then gives the density, strut and cells-across at THAT cell.
+        // 0 = core derives the cell, as before.
+        cellMM: Double = 0) -> LatticeRegionDerivation {
         notePerTypeCall(#function, topology)
         let d = topoptbridge.lattice_region_derivation(
             std.string(topology), memberWidthMM, minExtrudableWidthMM,
-            statedRelativeDensity, cellsPerMemberFloor)
+            statedRelativeDensity, cellsPerMemberFloor, cellMM)
         let why = String(d.reason)
         return LatticeRegionDerivation(
             valid: d.valid, feasible: d.feasible, cellMM: d.cell_mm,
