@@ -3025,10 +3025,16 @@ public struct LatticeBounds: Equatable, Sendable {
         // Topology. Certifiability and generatability are INDEPENDENT properties
         // (bar B0): the first is whether core carries a tensor (band displays), the
         // second is whether core's geometry generator can emit it (a run exists).
-        // ★ Core's own words when it gave no numbers (its readiness reason, 2026-10-03).
+        // ★ Core's own words when it gave no numbers (its readiness reason, 2026-10-03), in the
+        // picker's plain sentence — "Kelvin: Strength-checked, but not buildable yet" (Q2,
+        // 2026-10-05: where the band was, core's readiness words, not a blank). The bridge's
+        // reason quotes the id again; it is the fallback for an id the catalog cannot word.
         let topoReason: String? = limits.certifiable
             ? nil
-            : limits.reason.map { "\(name): \($0)" }
+            : (LatticeTypeCatalog.coreReason(settings.topologyID,
+                                             generatable: TopOptKit.latticeGeneratableTopologies,
+                                             certifiable: TopOptKit.latticeCertifiableTopologies)
+                ?? limits.reason).map { "\(name): \($0)" }
                 ?? "\(name) is preview-only — not yet certifiable, so a run won't lattice it"
         let genReason: String? = generatable
             ? nil

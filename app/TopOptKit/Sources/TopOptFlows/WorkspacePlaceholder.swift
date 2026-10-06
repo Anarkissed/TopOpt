@@ -10730,7 +10730,9 @@ public struct WorkspacePlaceholder: View {
             // in this row (the run's "carried load, untouched" line): the ruling names
             // the preview's core call, and the offer beside it reads that same verdict.
             wallStress: latticeSyntheticFociRow(ref) == nil ? nil
-                : project.latticeWallLoaded(ref).map(OrganicSyntheticStress.wallWord(loaded:)))
+                : project.latticeWallLoaded(ref).map(OrganicSyntheticStress.wallWord(loaded:)),
+            // ★ Q2: a saved type core does not call live — its words lead the drawer
+            typeRefusal: latticeTypeRefusal)
         latticeDrawerBody(drawer, depthDrag: latticePrimitiveDepthDrag(g, ref),
                           identifier: "lattice-drawer-\(ref.key)",
                           writeDepth: { mm in

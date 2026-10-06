@@ -316,7 +316,9 @@ public struct LatticeOptimizeSurface: Equatable, Sendable {
                 sub: "auto density needs a strut line width (the grading printability floor) — set your wall line widths in print settings")
         }
         if let b = bounds, !b.runnableAsCertified {
-            let why = b.generatableReason ?? b.topologyReason ?? b.cellReason ?? "settings not certifiable"
+            // core's readiness words first (Q2, 2026-10-05): every type core does not call live is
+            // also not certifiable now, and the app's "certifies, but…" line is wrong for BCCZ
+            let why = b.topologyReason ?? b.generatableReason ?? b.cellReason ?? "settings not certifiable"
             return LatticeOptimizeSurface(enabled: false, label: "Optimize", sub: why)
         }
         // THE FORECAST IS NOT SHOWN HERE — see LatticePageActions. It describes the

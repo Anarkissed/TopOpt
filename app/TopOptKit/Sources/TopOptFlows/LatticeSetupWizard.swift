@@ -2241,6 +2241,11 @@ public struct LatticeSetupWizard: View {
                     simDerivedNote("Derived from the simulated density. "
                                    + "To pin it, pin Density and Cell size.")
                         .accessibilityIdentifier("wizard-thickness-derived")
+                } else if let why = LatticeTypeCatalog.selectionRefusal(model.topologyID) {
+                    // ★ Q2 (2026-10-05): a saved type core does not call live has no band, so
+                    // no printable range to scrub — core's readiness words where it was.
+                    shortNote(why, warning: true)
+                        .accessibilityIdentifier("wizard-thickness-no-band")
                 } else {
                     // ★★ A THICKNESS IN MILLIMETRES (maintainer, 2026-08-19: "Off
                     // makes a sliding number value visible; controlling the

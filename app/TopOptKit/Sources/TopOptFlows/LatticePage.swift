@@ -157,6 +157,13 @@ public struct LatticePage: View {
     private var generatable: Bool {
         TopOptKit.latticeGeneratableTopologies.contains(project.lattice.topologyID)
     }
+    /// ★ Q2 (2026-10-05): "A type core doesn't call live gets no band. Show core's readiness
+    /// words where the band was, not a blank." The picker's own sentence ("Kelvin: Strength-
+    /// checked, but not buildable yet"); nil while core gives the type a band.
+    private var typeLine: String? {
+        limits.certifiable ? nil
+            : (LatticeTypeCatalog.selectionRefusal(project.lattice.topologyID) ?? limits.reason)
+    }
     // The page's bounds and refusal text. `lineWidthMM` is the STRUT width, not a
     // wall bead (task 2026-08-06-strut-line-width-field) — the same value
     // AppModel.makeRunRequest sends to the job, so what this page refuses and what
@@ -213,8 +220,9 @@ public struct LatticePage: View {
             lineWidthMM: project.printParams.strutLineWidthMM,
             cellSummary: cellSummaryText,
             designBoxActive: project.designBox.isActive,
-            densityRefusals:
-                LatticeSectorDensity.refusals(project.latticeSectorDensityRows()),
+            // a type with no band has no per-region density to refuse (Q2): its own line leads
+            densityRefusals: typeLine == nil
+                ? LatticeSectorDensity.refusals(project.latticeSectorDensityRows()) : [],
             // ★ ruling 4 (item 5): the ONE definition, on the emission the run would send
             includeRefusal: LatticeJobIncludeGate.optimizeRefusal(
                 latticeEnabled: project.lattice.enabled, regions: project.latticeJobRegions().regions))
@@ -737,7 +745,12 @@ public struct LatticePage: View {
             ladderRow(key: "Cell & density",
                       value: "\(cellSummaryText) · \(densityRangeText)",
                       flag: nil, flagTint: nil, chevron: true) {
-                if limits.certifiable { miniBand }
+                if limits.certifiable { miniBand } else if let t = typeLine {
+                    Text(t).font(.system(size: 9.5))
+                        .foregroundStyle(DS.Color.warning.color)
+                        .multilineTextAlignment(.trailing).lineLimit(2)
+                        .frame(maxWidth: 160, alignment: .trailing)
+                }
             } action: { page.go(.cellDensity) }
             // 4 · Regions & faces — opens THE Selections library, the exact panel
             // the TO page uses (L18). No second selection UX exists here.
@@ -778,6 +791,10 @@ public struct LatticePage: View {
     private var ladderTopologyFlag: (text: String, tint: RGBA) {
         guard let r = selectedRow else { return ("unknown", DS.Color.warning) }
         if r.certifiable && r.generatable { return ("certifiable", DS.Color.okGreen) }
+        // core's readiness words, not the app's (Q2); the value beside it names the type
+        if let why = LatticeTypeCatalog.entriesFromCore().first(where: { $0.id == r.id })?.reason {
+            return (why, DS.Color.warning)
+        }
         if r.certifiable { return ("no geometry yet", DS.Color.warning) }
         return ("preview only", DS.Color.warning)
     }
@@ -1121,7 +1138,8 @@ public struct LatticePage: View {
                     Text(bandNote).dsStyle(DS.TypeScale.caption)
                         .foregroundStyle((inBand ? DS.Color.okGreen : DS.Color.warning).color)
                 } else {
-                    Text("No certifiable band — core carries no tensor for \(topologyDisplayName).")
+                    // core's readiness words where the band note was (Q2)
+                    Text(typeLine ?? "")
                         .dsStyle(DS.TypeScale.caption)
                         .foregroundStyle(DS.Color.warning.color)
                 }
@@ -1643,14 +1661,21 @@ public struct LatticePage: View {
                         .font(.system(size: 11))
                         .foregroundStyle(DS.Color.textPrimary.opacity(0.42).color)
                 }
-                ForEach(rows) { r in sectorDensityRow(r) }
-                // The refusals core WOULD raise, raised here instead — before the
-                // import rather than after it. Named per region, never a count.
-                ForEach(LatticeSectorDensity.refusals(rows), id: \.name) { f in
-                    Text("\(f.name): \(f.why)")
-                        .font(.system(size: 10.5))
+                if let t = typeLine {
+                    // no band for a type core does not call live: core's words, once (Q2)
+                    Text(t).font(.system(size: 10.5))
                         .foregroundStyle(DS.Color.warning.color)
                         .fixedSize(horizontal: false, vertical: true)
+                } else {
+                    ForEach(rows) { r in sectorDensityRow(r) }
+                    // The refusals core WOULD raise, raised here instead — before the
+                    // import rather than after it. Named per region, never a count.
+                    ForEach(LatticeSectorDensity.refusals(rows), id: \.name) { f in
+                        Text("\(f.name): \(f.why)")
+                            .font(.system(size: 10.5))
+                            .foregroundStyle(DS.Color.warning.color)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -1859,9 +1884,9 @@ public struct LatticePage: View {
         VStack(alignment: .leading, spacing: DS.Space.s) {
             Text("REVIEW").font(.system(size: 11, weight: .semibold)).tracking(0.7)
                 .foregroundStyle(DS.Color.textQuaternary.color)
-            summaryRow("Topology", topologyDisplayName
-                + (selectedRow.map { $0.certifiable && $0.generatable } == true ? "" : " (can't run)"),
-                warn: selectedRow.map { !($0.certifiable && $0.generatable) } ?? true)
+            summaryRow("Topology", typeLine ?? (topologyDisplayName
+                + (selectedRow.map { $0.certifiable && $0.generatable } == true ? "" : " (can't run)")),
+                warn: typeLine != nil || (selectedRow.map { !($0.certifiable && $0.generatable) } ?? true))
             summaryRow("Cell / density",
                        "\(cellSummaryText) · \(densityRangeText)",
                        warn: bounds.cellOverCeiling)
