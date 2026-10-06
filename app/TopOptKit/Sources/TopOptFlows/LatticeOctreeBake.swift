@@ -45,6 +45,12 @@ extension LatticePreviewOccupancy {
         public var anchorSeconds: Double = 0
         public var rasterSeconds: Double = 0
         public var cellsPlaced = 0
+        // ★ R7 (2026-10-03): centre ownership between regions whose cells overlap.
+        public var contestedCells = 0          // candidates overlapping another region's
+        public var cellsYielded = 0            // contested cells whose centre another region owns
+        public var straddlerPairs = 0          // contested pairs that BOTH keep (each centre is its own)
+        public var texelsReassigned = 0        // texels a better-ranked region took from another
+        public var cellsEmptied = 0            // plan cells left with no texel after that
     }
 
     /// The densest a bead-wide strut may make the finest rung (core's measured law):
@@ -57,6 +63,9 @@ extension LatticePreviewOccupancy {
     /// A tilted face's slots cover the prism's real extent along the axis; false = the
     /// centre-plane anchoring (a test's control only).
     nonisolated(unsafe) static var tiltedSpanEnabled = true
+    /// ★★ R7: cells and texels shared by two regions go to the owner of their centre; false =
+    /// declaration order, the bake before 2026-10-03 (the proof's "before" arm only).
+    nonisolated(unsafe) static var centreOwnershipEnabled = true
 
     /// How far toward the quilt a cell ABOVE the finest rung thickens at the outline
     /// when it lies in the band (the finest rung goes all the way).
@@ -457,6 +466,38 @@ extension LatticePreviewOccupancy {
             }
             return false
         }
+        // ★★ R7 — ONE OWNER PER CELL, DECIDED BY ITS CENTRE (maintainer, 2026-10-03), never by
+        // declaration order ("order-dependent ownership would change the lattice when he
+        // reorders walls"):
+        //   • the region whose prism contains the cell's centre owns it;
+        //   • a centre inside two prisms goes to the region whose face plane is nearer (the
+        //     mitre the emission's seams draw);
+        //   • an exact tie goes to the lower region id;
+        //   • cells stay whole.
+        // Each region places its cells exactly as before, without regard to the others —
+        // pass 0 only collects them. Between the passes every candidate that overlaps another
+        // region's candidate is judged by its centre among the regions contesting it, and
+        // yields when another of them owns that centre. Pass 1 paints the survivors, and a
+        // texel two regions both cover goes to the better-ranked one at its middle by the same
+        // rule — so nothing depends on the order the regions arrive in, and nothing changes
+        // where no two regions' cells meet.
+        struct Candidate { let region: Int; let lo: SIMD3<Double>; let S: Double }
+        var candidates: [Candidate] = []
+        var accepted: [Bool] = []
+        var seq = 0
+        /// (outside its prism?, distance from its face plane, region id) — lower ranks better.
+        func rank(_ r: Int, _ p: SIMD3<Double>) -> (Int, Double, Int) {
+            let reg = regions[r]
+            let inside = LatticeRegionMask.contains(p, region: reg) ? 0 : 1
+            return (inside, abs(simd_dot(p - reg.origin, LatticeRegionMask.unit(reg.normal))), r)
+        }
+        func outranks(_ a: (Int, Double, Int), _ b: (Int, Double, Int)) -> Bool {
+            if a.0 != b.0 { return a.0 < b.0 }
+            if abs(a.1 - b.1) > 1e-9 { return a.1 < b.1 }
+            return a.2 < b.2                                   // an exact tie: the lower id
+        }
+        for pass in (Self.centreOwnershipEnabled ? [0, 1] : [1]) {
+        seq = 0
         for ladder in ladders {
             let region = regions[ladder.region]
             let n = LatticeRegionMask.unit(region.normal)
@@ -559,6 +600,9 @@ extension LatticePreviewOccupancy {
             // inside it, so every texel with any of its extent inside the outline is
             // painted as a plain cell and the band is drawn over it.
             func paint(_ lo: SIMD3<Double>, _ S: Double, finest: Bool, edge: Bool, nearest: Double) {
+                let mySeq = seq; seq += 1
+                if pass == 0 { candidates.append(Candidate(region: ladder.region, lo: lo, S: S)); return }
+                if Self.centreOwnershipEnabled, !accepted[mySeq] { stats.cellsYielded += 1; return }
                 let ph = tilingPhase(region: region, cellMM: S, origin: grid.origin) ?? 0
                 // The cell's origin in texel units, modulo its size in texel units.
                 let m = S / pitch
@@ -617,7 +661,16 @@ extension LatticePreviewOccupancy {
                             let cx = gorigin.x + (Double(i) + 0.5) * pitch
                             guard inSlot(cx, 0) else { continue }
                             let idx = (k * gny + j) * gnx + i
-                            guard owner[idx] < 0 else { continue }          // first region wins
+                            if owner[idx] >= 0 {
+                                // the same region: its first cell keeps the texel (the packer's
+                                // fill pass relies on it). Another region: the better rank at the
+                                // texel's middle (R7); with R7 off, the first region wins.
+                                guard Self.centreOwnershipEnabled, Int(owner[idx]) != ladder.region,
+                                      outranks(rank(ladder.region, SIMD3<Double>(cx, cy, cz)),
+                                               rank(Int(owner[idx]), SIMD3<Double>(cx, cy, cz)))
+                                else { continue }
+                                stats.texelsReassigned += 1
+                            }
                             var c = SIMD3<Double>(cx, cy, cz)                // the texel's middle
                             // the face-plane texel's test point, just inside the plane
                             c[axis] = Swift.min(Swift.max(c[axis], lo[axis] + 0.25 * pitch), hiS[axis] - 0.25 * pitch)
@@ -688,7 +741,7 @@ extension LatticePreviewOccupancy {
                 let finestLevel = level == ladder.sizes.count - 1
                 let centreOK = finestLevel || !(shapeFit && shapeFitBandMM > 0 && sBase > f + 1e-9)
                     || dc >= shapeFitBandMM * (S - f) / (sBase - f) - 1e-9
-                if level == 0 {
+                if level == 0 && pass == 1 {
                     let key = "r\(ladder.region)/" + (ok ? (centreOK ? "kept" : "band") : lastFail)
                     stats.why[key, default: 0] += 1
                 }
@@ -848,6 +901,60 @@ extension LatticePreviewOccupancy {
             for k in i0.z...i1.z { for j in i0.y...i1.y { for i in i0.x...i1.x {
                 place(SIMD3<Int>(i, j, k), level: 0)
             }}}
+        }
+        if pass == 0 {
+            // ── R7: judge every candidate another region's candidate overlaps ──────────
+            accepted = [Bool](repeating: true, count: candidates.count)
+            let big = candidates.map(\.S).max() ?? 0
+            var contest = [[Int]](repeating: [], count: candidates.count)
+            if big > 0 {
+                func key(_ p: SIMD3<Double>) -> SIMD3<Int> {
+                    SIMD3<Int>(Int((p.x / big).rounded(.down)), Int((p.y / big).rounded(.down)),
+                               Int((p.z / big).rounded(.down)))
+                }
+                var buckets: [SIMD3<Int>: [Int]] = [:]
+                for (i, c) in candidates.enumerated() { buckets[key(c.lo), default: []].append(i) }
+                for (i, a) in candidates.enumerated() {
+                    let ka = key(a.lo)
+                    for dz in -1...1 { for dy in -1...1 { for dx in -1...1 {
+                        for j in buckets[ka &+ SIMD3<Int>(dx, dy, dz)] ?? [] where j > i {
+                            let b = candidates[j]
+                            guard a.region != b.region else { continue }
+                            var overlap = true
+                            for ax in 0..<3 where Swift.min(a.lo[ax] + a.S, b.lo[ax] + b.S)
+                                - Swift.max(a.lo[ax], b.lo[ax]) <= 1e-6 { overlap = false }
+                            if overlap { contest[i].append(j); contest[j].append(i) }
+                        }
+                    }}}
+                }
+            }
+            for (i, c) in candidates.enumerated() where !contest[i].isEmpty {
+                stats.contestedCells += 1
+                let centre = c.lo + SIMD3<Double>(repeating: 0.5 * c.S)
+                var best = rank(c.region, centre)
+                for r in Set(contest[i].map { candidates[$0].region }) {
+                    let rr = rank(r, centre)
+                    if outranks(rr, best) { best = rr }
+                }
+                // a contesting region whose prism CONTAINS the centre owns it; a centre in no
+                // contesting prism has no owner by the rule, and the cell stays
+                if best.0 == 0, best.2 != c.region { accepted[i] = false }
+            }
+            for (i, js) in contest.enumerated() where accepted[i] {
+                stats.straddlerPairs += js.filter { $0 > i && accepted[$0] }.count
+            }
+        }
+        }
+        // R7: a plan cell another region's texels all went to is no longer in the plan.
+        if Self.centreOwnershipEnabled {
+            var count = [Int](repeating: 0, count: cells.count)
+            for ci in cellOf where ci >= 0 { count[Int(ci)] += 1 }
+            var remap = [Int32](repeating: -1, count: cells.count)
+            var kept: [LatticeSteppedCell] = []
+            for (i, c) in cells.enumerated() where count[i] > 0 { remap[i] = Int32(kept.count); kept.append(c) }
+            stats.cellsEmptied = cells.count - kept.count
+            for i in cellOf.indices where cellOf[i] >= 0 { cellOf[i] = remap[Int(cellOf[i])] }
+            cells = kept
         }
 
         // Density: the demand's activation over the drawn span (widened to the quilt),
