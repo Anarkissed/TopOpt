@@ -71,7 +71,10 @@ final class LatticeSteppedCellListTests: XCTestCase {
         let src = try String(contentsOf: URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
             .appendingPathComponent("Sources/TopOptFlows/LatticeSettings.swift"), encoding: .utf8)
-        XCTAssertTrue(src.contains("grading[\"stepped_min_tile_mm\"] = LatticeSDFRenderer.printableFloorBeads * w"))
+        // ★★ Q3(i) (reviewer, 2026-10-05): core's floor at the job's own cap, not four beads
+        XCTAssertTrue(src.contains("grading[\"stepped_min_tile_mm\"] = floor"))
+        XCTAssertTrue(src.contains("let floor = TopOptKit.latticeMinPrintableCellMM(topology: topologyID, minExtrudableWidthMM: w,"))
+        XCTAssertFalse(src.contains("printableFloorBeads"), "★ the four-bead rule is retired")
         XCTAssertFalse(src.contains("grading[\"min_cell_mm\"]"), "★ min_cell_mm was never a key")
         // Documented, not asserted: true only on a core carrying the any-step schema.
         print("steppedCellsWired = \(TopOptKit.steppedCellsWired); "

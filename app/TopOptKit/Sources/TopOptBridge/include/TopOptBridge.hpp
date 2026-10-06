@@ -1175,6 +1175,15 @@ double lattice_subfloor_retention_fraction();
 
 double lattice_strut_diameter_mm(const std::string& topology, double rho,
                                  double cell_size_mm);
+/// ★★ CORE'S PRINTABLE FLOOR AT THE JOB'S CAP (reviewer, 2026-10-05, Q3(i)): the smallest cell
+/// whose strut prints one `min_extrudable_width_mm` bead at the densest density the job allows —
+/// the band top capped by `max_relative_density` (0 = not sent = uncapped), composed as
+/// grade_lattice does (core/src/simp/grading.cpp:184-187, 258-260). 2.25 mm at a 0.45 mm bead
+/// with the octet's aesthetic cap, 1.173 mm uncapped (Allow quilt on). Live types only: 0 and
+/// `bridge_last_refusal()` with core's readiness words otherwise.
+double lattice_min_printable_cell_mm(const std::string& topology,
+                                     double min_extrudable_width_mm,
+                                     double max_relative_density);
 /// ★ CORE'S AESTHETIC DENSITY CEILING for a topology (maintainer, 2026-10-02, ruling 5: R12, one
 /// definition). The linked core carries it for OCTET only, as the inline
 /// `octet_aesthetic_density_ceiling()` (the diameter table's preimage of strut/cell 0.20; core's

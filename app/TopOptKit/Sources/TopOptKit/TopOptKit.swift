@@ -1152,6 +1152,20 @@ public enum TopOptKit {
         return topoptbridge.lattice_strut_diameter_mm(std.string(topology), rho, cellMM)
     }
 
+    /// ★★ CORE'S PRINTABLE FLOOR AT THE JOB'S CAP (reviewer, 2026-10-05, Q3(i): "use core's
+    /// floor. With Allow quilt on, that's 1.173 mm at a 0.45 bead … Read it from core; don't copy
+    /// the number."). The smallest cell whose strut prints one bead at the densest density the
+    /// job allows: `maxRelativeDensity` is the cap the job writes (`grading.max_relative_density`;
+    /// 0 when it writes none). Composed in the bridge from core's own band top and diameter law,
+    /// as grade_lattice does — core has no public function that takes the cap (#358 D1).
+    /// nil for a type core does not call live (`lastCoreRefusal` says why) or a bead of 0.
+    public static func latticeMinPrintableCellMM(topology: String, minExtrudableWidthMM w: Double,
+                                                 maxRelativeDensity cap: Double) -> Double? {
+        notePerTypeCall(#function, topology)
+        let v = topoptbridge.lattice_min_printable_cell_mm(std.string(topology), w, cap)
+        return v > 0 && v.isFinite ? v : nil
+    }
+
     /// ★★ CORE'S AESTHETIC DENSITY CEILING (maintainer, 2026-10-02, ruling 5: R12, one
     /// definition) — octet's 0.218871… on the linked core; nil where core has none for the type.
     /// Since the #358 sync the bridge asks core's per-type `lattice_aesthetic_density_ceiling`

@@ -3088,6 +3088,28 @@ double lattice_strut_diameter_mm(const std::string& topology, double rho,
   });
 }
 
+double lattice_min_printable_cell_mm(const std::string& topology,
+                                     double min_extrudable_width_mm,
+                                     double max_relative_density) {
+  // ★★ Q3(i) (reviewer, 2026-10-05): "use core's floor … Read it from core; don't copy the
+  // number." The smallest cell whose strut prints a bead at the densest density the JOB allows,
+  // composed exactly as grade_lattice does it — core has no public function that takes the
+  // cap (#358 D1): the band top capped by `grading.max_relative_density`
+  // (core/src/simp/grading.cpp:184-187), then w / φ(ρ_hi, 1) (grading.cpp:258-260). The swept
+  // plan's per-cell predicate (cell_plan.cpp:197-204) can lay no rung below it. A cap of 0 (not
+  // sent, Allow quilt on) is core's uncapped dense floor, = lattice_cell_bounds' densest.
+  return guarded_empty("lattice_min_printable_cell_mm", [&]() -> double {
+    const topopt::LatticeTopology topo = live_topology(topology);
+    if (!(min_extrudable_width_mm > 0.0)) return 0.0;
+    const double band_top = topopt::lattice_rho_max(topo);
+    const double rho_hi = (max_relative_density > 0.0 && std::isfinite(max_relative_density))
+                              ? std::min(band_top, max_relative_density)
+                              : band_top;
+    const double per_mm = topopt::lattice_strut_diameter_mm(topo, rho_hi, 1.0);
+    return per_mm > 0.0 ? min_extrudable_width_mm / per_mm : 0.0;
+  });
+}
+
 // ★★ THE FORWARD LAW (core reply 5, 2026-09-20: "the aesthetic ceiling is 0.211733,
 // not 0.219 … you invert it, core samples it forward"). `octet_relative_density`
 // depends only on radius/cell, so every cell gives the same number for the same

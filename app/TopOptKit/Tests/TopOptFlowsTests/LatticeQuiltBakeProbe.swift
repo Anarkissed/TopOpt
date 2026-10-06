@@ -184,7 +184,7 @@ final class LatticeQuiltBakeProbe: XCTestCase {
         return LatticePreviewOccupancy.octreeCellField(
             occupancy: i.scene.occupancy, demand: nil, regions: i.scene.regions,
             cellMM: i.cells, lineWidthMM: i.h.lineWidthMM,
-            realFloorMM: LatticeSDFRenderer.printableFloorBeads * i.h.lineWidthMM,
+            realFloorMM: LatticeSettings.tileFloorMM(topologyID: "octet", beadMM: i.h.lineWidthMM, allowQuilt: false) ?? 0,
             shapeFitBandMM: i.h.shapeFitBandMM, shapeFit: i.h.shapeFit,
             densityLo: i.h.rhoMin, densityHi: i.h.rhoMax, densityGamma: i.h.gamma,
             latticeID: "octet", stats: &st)

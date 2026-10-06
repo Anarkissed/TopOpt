@@ -938,6 +938,10 @@ public struct LatticeSpec: Equatable, Sendable {
         // ALONE (core: "the 20 % rule has no structural content"), the same number the
         // preview's bake uses under Structural. Each key only once core's schema
         // accepts it — never a key that would kill the job.
+        // The cap this job writes (see THE DENSITY CAP below), decided once: the stepped tile
+        // floor reads the same value, so the two keys cannot disagree.
+        let capWritten: Double = algorithm != "organic" && densityCapRho > 0 && densityCapRho < 1
+            && TopOptKit.gradingSchemaAccepts(key: "max_relative_density") ? densityCapRho : 0
         if algorithm == "stepped" {
             if let m = stageMode, TopOptKit.gradingSchemaAccepts(key: "intent") {
                 grading["intent"] = m == .structural ? "structural" : "aesthetic"
@@ -951,9 +955,14 @@ public struct LatticeSpec: Equatable, Sendable {
                    TopOptKit.steppedStructuralCertificationWired {
                     grading["structural_certification"] = "beam_network"
                 }
+                // ★★ Q3(i) (reviewer, 2026-10-05): core's printable floor at the cap THIS job
+                // writes (below), not the retired "four beads" — the same function the preview's
+                // tiles read (`LatticeSettings.tileFloorMM`). No core number, no key.
                 if let w = minExtrudableWidthMM, w > 0,
-                   TopOptKit.gradingSchemaAccepts(key: "stepped_min_tile_mm") {
-                    grading["stepped_min_tile_mm"] = LatticeSDFRenderer.printableFloorBeads * w
+                   TopOptKit.gradingSchemaAccepts(key: "stepped_min_tile_mm"),
+                   let floor = TopOptKit.latticeMinPrintableCellMM(topology: topologyID, minExtrudableWidthMM: w,
+                                                                   maxRelativeDensity: capWritten) {
+                    grading["stepped_min_tile_mm"] = floor
                 }
             }
         }
@@ -965,9 +974,8 @@ public struct LatticeSpec: Equatable, Sendable {
         // table's preimage of strut/cell 0.20 (≈ 0.219), the same number the preview
         // rescales onto. Absent when Allow quilt lifts it, when the topology has no
         // ceiling (1), for organic (no octet band to cap), or on a core without the key.
-        if algorithm != "organic", densityCapRho > 0, densityCapRho < 1,
-           TopOptKit.gradingSchemaAccepts(key: "max_relative_density") {
-            grading["max_relative_density"] = densityCapRho
+        if capWritten > 0 {
+            grading["max_relative_density"] = capWritten
         }
         // ══════════════════════════════════════════════════════════════════════
         // ★ THE SHAPE GRADE (core reply 5, 2026-09-20). Core draws no outline beam
@@ -1113,6 +1121,22 @@ public struct LatticeSpec: Equatable, Sendable {
 /// (part of the run-request identity, so an edit re-enables Optimize). OFF by default
 /// ⇒ byte-identical to a non-lattice project (BAR U1).
 public struct LatticeSettings: Codable, Equatable, Sendable {
+
+    /// ★★ THE TILE FLOOR, ONE SOURCE (reviewer, 2026-10-05, Q3(i): "use core's floor. With Allow
+    /// quilt on, that's 1.173 mm at a 0.45 bead. The Sep 14 'about 1.8 mm' rule is retired. Read
+    /// it from core; don't copy the number."). Core's printable floor at the cap the job writes —
+    /// the type's aesthetic ceiling unless Allow quilt lifts it (`runSpec`'s `densityCapRho`; a
+    /// ceiling of 1 is no cap): 2.25 mm at a 0.45 mm bead with Allow quilt off, 1.173 with it on.
+    /// The preview's tiles (the octree menu, the per-texel bake, the wall depth steps) read it;
+    /// the job's `grading.stepped_min_tile_mm` reads the same function at the cap it writes.
+    /// nil: core gave no number (a type it does not call live, or no bead) — nothing is baked on
+    /// a made-up floor.
+    public static func tileFloorMM(topologyID: String, beadMM: Double, allowQuilt: Bool) -> Double? {
+        let ceiling = allowQuilt ? 1 : (LatticeType.named(topologyID)?.aestheticDensityCeiling() ?? 1)
+        let cap = ceiling > 0 && ceiling < 1 ? ceiling : 0
+        return TopOptKit.latticeMinPrintableCellMM(topology: topologyID, minExtrudableWidthMM: beadMM,
+                                                   maxRelativeDensity: cap)
+    }
 
     /// ★ THE PREVIEW TRACES AT THE JOB'S NUMBERS (2026-09-06). The bake used to read
     /// `cellMinMM`/`cellMaxMM` while the job wrote `organicPickedGradeMM` — on his

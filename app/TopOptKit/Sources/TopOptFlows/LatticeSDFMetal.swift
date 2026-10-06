@@ -2764,11 +2764,8 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
         ProcessInfo.processInfo.environment["TOPOPT_LATTICE_FLOOR_AT_HI"] == "1"
     }
 
-    /// ★ THE REAL PRINTABLE FLOOR is a few beads of cell (his 2026-09-14: "~1.8 mm,
-    /// the one that will be quilted automatically" at a 0.45 mm bead). The edge of
-    /// every shape-graded lattice goes down to it; the density-bound floor below is
-    /// what the interior ladder still respects.
-    static let printableFloorBeads: Double = 4.0
+    // ★ THE REAL PRINTABLE FLOOR was four beads of cell (his 2026-09-14: "~1.8 mm"). RETIRED
+    // 2026-10-05 (reviewer, Q3(i)): the floor is core's, read through `LatticeSettings.tileFloorMM`.
     /// The octree bake (2026-09-14); false falls back to the per-texel stepped bake.
     static var octreeBake: Bool = true
 
@@ -3004,7 +3001,17 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
         // region stated a cell.
         if !steppedCellMM.isEmpty, steppedCellMM.count == scene.regions.count {
             let stated = steppedCellMM.filter { $0 > 0 }
-            if let finest = stated.min(), finest > 0 {
+            // ★★ Q3(i) (reviewer, 2026-10-05): the finest tile is core's printable floor at the
+            // job's cap (`LatticeSettings.tileFloorMM`), not four beads. nil = core gave no
+            // number for this type: nothing is baked on a made-up floor. No bead, no floor (0).
+            let tileFloorMM: Double? = lineWidthMM > 0
+                ? LatticeSettings.tileFloorMM(topologyID: params.latticeID, beadMM: lineWidthMM,
+                                              allowQuilt: scene.allowQuilt)
+                : 0
+            if tileFloorMM == nil {
+                NSLog("DIAG stepped NOT BAKED — no core floor for \(params.latticeID): \(TopOptKit.lastCoreRefusal ?? "-")")
+            }
+            if let finest = stated.min(), finest > 0, let tileFloorMM {
                 baked = LatticePreviewOccupancy.steppedCellField(
                     occupancy: scene.occupancy, demand: scene.drawnDemand ?? scene.demand,
                     regions: scene.regions, cellMM: steppedCellMM,
@@ -3056,7 +3063,7 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
                     // The finest cell that still prints a bead-wide strut — the halving
                     // stops here rather than at the edge, so the rim is buildable.
                     finestCellMM: steppedFinestPrintableCellMM(finest: finest),
-                    realFloorMM: Self.printableFloorBeads * lineWidthMM,
+                    realFloorMM: tileFloorMM,
                     shapeFitBandMM: params.shapeFitBandMM,
                     // ★ THE STRUT MUST STAY ONE BEAD WIDE AS THE CELL SHRINKS, so the
                     // bake needs the printability law and the band it may move inside.
@@ -3074,7 +3081,7 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
             // ★★★ THE OCTREE BAKE replaces the per-coarse-texel decision (his 2026-09-14
             // rules: fewest cells, largest that fit, smallest only where nothing larger
             // goes, solid for the rest). `octreeBake` false is the revert switch.
-            if Self.octreeBake, let finest = stated.min(), finest > 0 {
+            if Self.octreeBake, let finest = stated.min(), finest > 0, let tileFloorMM {
                 var st = LatticePreviewOccupancy.OctreeBakeStats()
                 // ★ THE SOLID OUTLINE'S WIDTH: two beads at least, and never less than
                 // the march's own trim plus half a voxel, so the struts of the cells
@@ -3087,7 +3094,7 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
                     occupancy: scene.prismOccupancy, demand: scene.drawnDemand ?? scene.demand,
                     regions: scene.regions, cellMM: steppedCellMM,
                     lineWidthMM: lineWidthMM,
-                    realFloorMM: Self.printableFloorBeads * lineWidthMM,
+                    realFloorMM: tileFloorMM,
                     shapeFitBandMM: params.shapeFitBandMM,
                     shapeFit: steppedShapeFit,
                     solidBandMM: solidBandMM,
@@ -3108,7 +3115,7 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
                         .map { String(format: "%.2f=%d", $0, st.slotsKept[$0]!) }.joined(separator: " ")
                     let why = st.why.keys.sorted().map { "\($0)=\(st.why[$0]!)" }.joined(separator: " ")
                     NSLog("DIAG octree pitch=\(String(format: "%.2f", st.pitchMM)) kept=[\(kept)] edge=\(st.slotsCut) "
-                          + "texels=\(st.texelsPainted) band=\(params.shapeFitBandMM) floor=\(Self.printableFloorBeads * lineWidthMM) "
+                          + "texels=\(st.texelsPainted) band=\(params.shapeFitBandMM) floor=\(tileFloorMM) "
                           + "solidBand=\(String(format: "%.2f", solidBandMM)) anchor=\(String(format: "(%.1f,%.1f,%.1f) in %.1fs", st.anchorShiftMM.x, st.anchorShiftMM.y, st.anchorShiftMM.z, st.anchorSeconds)) drawnHi=\(o.drawnDensityHi) "
                           + "why=[\(why)] noLadder=\(st.noLadderRegions) t=\(String(format: "%.2f", st.seconds))s "
                           + "walk=anchor:\(st.anchorSlotsWalked) place:\(st.placeSlotsWalked) shifts=\(st.anchorBaseVolumes.count) "
