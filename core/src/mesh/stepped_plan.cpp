@@ -7,7 +7,7 @@
 #include <map>
 #include <unordered_map>
 
-#include "topopt/lattice.hpp"   // lattice_relative_density
+#include "topopt/lattice.hpp"   // lattice_density_from_strut
 
 namespace topopt {
 
@@ -31,7 +31,7 @@ std::vector<int> stepped_admitted_divisors(LatticeTopology topo,
       if (apply_prints_open) {
         double rho = 1.0;
         try {
-          rho = lattice_relative_density(topo, tile, 0.5 * bead_mm);
+          rho = lattice_density_from_strut(topo, tile, 0.5 * bead_mm);
         } catch (const std::exception&) {
           break;
         }
@@ -51,7 +51,7 @@ std::vector<int> stepped_admitted_divisors(LatticeTopology topo,
     // on radius/cell, so this is a statement about the RATIO and nothing else.
     double rho = 1.0;
     try {
-      rho = lattice_relative_density(topo, tile, 0.5 * bead_mm);
+      rho = lattice_density_from_strut(topo, tile, 0.5 * bead_mm);
     } catch (const std::exception&) {
       continue;                          // the cell fills solid: emphatically not open
     }

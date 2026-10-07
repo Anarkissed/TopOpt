@@ -307,3 +307,31 @@ evidence/2026-08-08-strut-clip-matches-shell/s1b_surface_gap.csv).
 if a probe/run mismatch ever appears. Until then the probe and the run cannot differ,
 because they call the same function — which is the point of that change, since its
 measured effect on every part available was nil.
+
+## MEANING CHANGES, addendum 3 (2026-10-01) — lattice types round 1
+
+Nothing removed or renamed in core's public surface except one rename, listed first.
+
+| what | was | is | app impact |
+|---|---|---|---|
+| `lattice_relative_density(topo, …)` (free function, added and renamed within this round) | that name | `lattice_density_from_strut(topo, …)` | **none** — it never existed outside this round. `SimpParams::lattice_relative_density`, the pre-existing field it collided with, is untouched. Grepped PR 354: no hits for either name as a function |
+| a job stating `lattice.topology` and `grading.topology` as DIFFERENT types | accepted; sizing read one, generation the other | **REFUSED at parse time**, naming both values | **none.** The app writes both from one setting — `RemoteRunner.swift:758`, `RelatticeRunner.swift:107` and `LatticeSettings.swift:850` all send `lat.topologyID`. Confirmed by grep, not taken on trust |
+| the refusal text for an unknown/not-ready topology | `lattice "topology" must be "octet" (got "X")` | names the type AND which half is missing: not a topology at all / certifiable but not generatable / generatable but not certifiable / neither | **none** — grepped PR 354 for the old message text: no matches. The app should now read `lattice_type_readiness_plain()` instead of wording its own |
+| `run_info.json` `fingerprint` / `build_time` on `lattice-variant` and graded `analyze` | `"unknown"` and `""` on every run | the binary's real SHA and build time | **none found** — `git grep` over PR 354's `app/` for `run_info.*fingerprint` / `fingerprint.*run_info` returns nothing; the app checks versions via `--version` and the worker's advertised fingerprint |
+
+### The fingerprint defect, for the record
+
+Not the worktree (`git -C core rev-parse` resolves fine there), and not only the
+dispatch order. `analyze_job` (run_job.cpp:9341) and `lattice_variant_job` (:10263)
+each built their receipt with `build_run_info(job, options, RunObservability{})` — a
+**default-constructed** observability — so they would have reported "unknown" even if
+`main()` had populated its own `obs` before dispatching. Fixed by having the
+executable state its identity once (`set_build_identity`, called before any dispatch)
+and both receipt paths read it.
+
+★ `analyze` is affected **only when a `grading` block is present**: its write site sits
+inside `if (job.grading.present)` (:9157), and that guard's own comment says no
+run_info is written otherwise. My first version of the test used an ungraded analyze
+job, wrote no run_info, and failed for the wrong reason — mapping a write site to its
+function is not the same as reaching it. `preflight` writes no run_info at all and is
+unaffected.

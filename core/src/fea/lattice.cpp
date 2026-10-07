@@ -652,7 +652,7 @@ bool lattice_stated_density_unprintable(LatticeTopology topo,
 // trip over all ten.
 //
 // An unknown id REFUSES, naming what it was given. It never falls back to octet.
-double lattice_relative_density(LatticeTopology topo, double cell_mm,
+double lattice_density_from_strut(LatticeTopology topo, double cell_mm,
                                 double strut_radius_mm) {
   switch (topo) {
     case LatticeTopology::Octet:
@@ -669,7 +669,7 @@ double lattice_relative_density(LatticeTopology topo, double cell_mm,
       break;
   }
   throw LatticeDiameterLawNotMeasured(
-      std::string("lattice_relative_density: no measured density law for \"") +
+      std::string("lattice_density_from_strut: no measured density law for \"") +
       lattice_topology_name(topo) +
       "\" yet. This is the (cell, radius) -> rho direction of the same measurement as "
       "lattice_strut_diameter_mm, and octet's voxelisation is NOT used for another "
