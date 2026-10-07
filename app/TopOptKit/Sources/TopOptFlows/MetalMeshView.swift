@@ -6911,6 +6911,9 @@ extension MetalMeshView {
 
         /// ★ §1(b) — THE SECOND TAP, from a finger.
         @objc func handleDoubleTap(_ g: UITapGestureRecognizer) {
+            // ★ LEAVING THE KEY IS NOT AN EDIT (2026-10-01): a finger may always do it, even
+            // while pencil-only input is on — otherwise a drilled-in key had no finger way out.
+            if let onLatticeProbeExit { onLatticeProbeExit(); return }
             guard inputDiscipline.admits(.finger, .edit) else { return }
             pickDouble(g)
         }

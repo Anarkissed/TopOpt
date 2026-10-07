@@ -29,7 +29,7 @@ final class LatticeOctetQuiltAndBandTests: XCTestCase {
         XCTAssertFalse(LatticeRegionCells.quiltTrips(p90: 0.219, lo: lo, ceiling: ceiling,
                                                      smallerCellFloor: LatticePreviewOccupancy.finestRungMaxDensity + 0.01))
         // ★ the octet's 6.015 mm cell prints open with his 0.45 mm bead; a 2.0 mm one does not
-        let law = LatticeType.named("octet")
+        let law = LatticeType.octet
         XCTAssertLessThanOrEqual(law.printabilityDensityFloor(lineWidthMM: 0.45, cellMM: 6.015), LatticePreviewOccupancy.finestRungMaxDensity)
         XCTAssertGreaterThan(law.printabilityDensityFloor(lineWidthMM: 0.45, cellMM: 2.0), LatticePreviewOccupancy.finestRungMaxDensity)
     }
@@ -137,7 +137,7 @@ final class LatticeOctetQuiltAndBandTests: XCTestCase {
     /// never by closing the windows; the control (ceiling 1, today's) raises the band's finest
     /// cells toward the quilt.
     func testTheGradeBandStopsAtTheCeilingWithoutAllowQuilt() throws {
-        let ceiling = LatticeType.named("octet").aestheticDensityCeiling()
+        let ceiling = LatticeType.octet.aestheticDensityCeiling()
         func maxBandDensity(_ bc: Double, amount: Double = 1) throws -> Double {
             let (b, _) = bake(tiltDeg: 0, bandCeiling: bc, amount: amount)
             let baked = try XCTUnwrap(b)
@@ -146,7 +146,7 @@ final class LatticeOctetQuiltAndBandTests: XCTestCase {
             for (i, a) in baked.field.values.enumerated() where a >= 0 && baked.steppedCellMM[i] > 0 {
                 let s = Double(baked.steppedCellMM[i])
                 // what the printability floor alone would force at this cell
-                let floor = LatticeType.named("octet").printabilityDensityFloor(lineWidthMM: 0.45, cellMM: s)
+                let floor = LatticeType.octet.printabilityDensityFloor(lineWidthMM: 0.45, cellMM: s)
                 let rho = 0.073 + (top - 0.073) * Double(a)
                 m = Swift.max(m, rho - Swift.max(0, floor - ceiling))
             }

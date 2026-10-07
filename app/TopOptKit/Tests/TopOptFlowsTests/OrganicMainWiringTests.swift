@@ -41,15 +41,17 @@ final class OrganicMainWiringTests: XCTestCase {
         XCTAssertNil(try XCTUnwrap(traced.gradingDictionary())["organic_transfer_ties"], "ties are the grown path's")
     }
 
-    /// Manual on the wire: one size = cell_mode fit + cell_mm; a grade = cell_mode
-    /// auto + cell_min/max — the same keys the recommendation's buttons write.
+    /// Manual on the wire (ruling 5, 2026-10-03): one size = the one-size window, swept with
+    /// cell_min_mm == cell_max_mm; a grade = swept with lo < hi. Never fit + cell_mm, which
+    /// core's schema refuses.
     func testManualMapsOntoTheCellKeys() throws {
         var s = spec(structural: false)
         s.organicPickedSeparationMM = 4.5
         let g = try XCTUnwrap(s.gradingDictionary())
-        XCTAssertEqual(g["cell_mode"] as? String, "fit")
-        XCTAssertEqual(g["cell_mm"] as? Double, 4.5)
-        XCTAssertNil(g["cell_min_mm"]); XCTAssertNil(g["organic_separation_mm"])
+        XCTAssertEqual(g["cell_mode"] as? String, "swept")
+        XCTAssertEqual(g["cell_min_mm"] as? Double, 4.5)
+        XCTAssertEqual(g["cell_max_mm"] as? Double, 4.5)
+        XCTAssertNil(g["cell_mm"]); XCTAssertNil(g["organic_separation_mm"])
         var t = spec(structural: false)
         t.organicPickedGradeMM = [3, 5]
         let h = try XCTUnwrap(t.gradingDictionary())
@@ -265,14 +267,15 @@ final class OrganicMainWiringTests: XCTestCase {
         XCTAssertEqual(g["cell_min_mm"] as? Double, 1.81)
         XCTAssertEqual(g["cell_max_mm"] as? Double, 3.62)
         XCTAssertNil(g["cell_mm"], "a target alongside a ladder is a conflict core refuses")
-        // A single size is still fit + cell_mm, and carries no window at all.
+        // ★ A single size is the one-size window (ruling 5, 2026-10-03), never fit + cell_mm.
         var one = spec(structural: false)
         one.organicPickedSeparationMM = 3.5
         one.organicPickedGradeMM = []
         let f = try XCTUnwrap(one.gradingDictionary())
-        XCTAssertEqual(f["cell_mode"] as? String, "fit")
-        XCTAssertEqual(f["cell_mm"] as? Double, 3.5)
-        XCTAssertNil(f["cell_min_mm"]); XCTAssertNil(f["cell_max_mm"])
+        XCTAssertEqual(f["cell_mode"] as? String, "swept")
+        XCTAssertEqual(f["cell_min_mm"] as? Double, 3.5)
+        XCTAssertEqual(f["cell_max_mm"] as? Double, 3.5)
+        XCTAssertNil(f["cell_mm"])
         // ★ AND THE RULE ITSELF, READ FROM CORE rather than restated here: the refusal
         // this test exists for is a literal in job.cpp.
         let root: URL = {
@@ -284,5 +287,115 @@ final class OrganicMainWiringTests: XCTestCase {
         XCTAssertTrue(jobCpp.contains("are only allowed with "),
                       "★ core still refuses a window outside swept; if this line goes, "
                       + "re-read the rule before relaxing the app")
+        XCTAssertTrue(jobCpp.contains("must be >= \\\"cell_min_mm\\\""),
+                      "★ equal ends pass because core's rule is >=, read from job.cpp")
+    }
+}
+
+/// ★★ MAINTAINER, 2026-10-03, RULING 5: "Organic single-size Fit: the app sends a one-size
+/// window (cell_min_mm = cell_max_mm = the size), with no schema change. The app must never
+/// write a job core refuses: add a test that core's parser accepts what the app writes."
+/// Every organic cell shape the app can write, through the app's REAL builders (the stage's
+/// `lattice_part` document, and the variant's run, forecast and Check-sizes documents), parsed
+/// by core's own `parse_job`. Before this ruling the single size was `fit` + `cell_mm` and
+/// core refused every one of those documents; nothing caught it, because the old tests read
+/// the dictionary the app built and never handed it to core.
+@MainActor
+final class OrganicJobsCoreAcceptsTests: XCTestCase {
+
+    private enum Pick: String, CaseIterable { case single, grade, auto, fitNoPick }
+
+    private func project(_ pick: Pick) -> ProjectModel {
+        let (p, _, _) = VariantFacePrismFixture.project(organic: true)
+        switch pick {
+        case .single:
+            p.lattice.setSimulateStresses(false); p.lattice.cellSizeMode = .fit
+            p.lattice.organicPickedSeparationMM = 4
+        case .grade:
+            p.lattice.setSimulateStresses(true); p.lattice.cellSizeMode = .fit
+            p.lattice.organicPickedGradeMM = [3, 5]
+        case .auto:
+            p.lattice.setSimulateStresses(true); p.lattice.cellSizeMode = .auto
+        case .fitNoPick:
+            p.lattice.setSimulateStresses(false); p.lattice.cellSizeMode = .fit
+        }
+        return p
+    }
+
+    /// The stage's `lattice_part` document, built the way the app builds it.
+    private func stageDocument(_ p: ProjectModel) throws -> Data {
+        let spec = try XCTUnwrap(p.latticeRunSpec(emission: p.latticeJobRegions()), "no run spec")
+        let request = RunRequest(
+            modelPath: "/tmp/part.step", material: "PLA", materialsPath: "", rulesPath: "",
+            resolution: 64, projectName: "organic", anchorFaceIDs: [0],
+            loadGroups: [TopOptKit.LoadGroupSpec(faceIDs: [4], force: SIMD3(0, 0, -250))],
+            minimizePlastic: true, buildDirection: SIMD3(0, 0, 1), infillPercent: 40, wallLoops: 3,
+            wallLineWidthOuterMM: 0.45, wallLineWidthInnerMM: 0.45,
+            lattice: spec, jobMode: "lattice_part")
+        return try RemoteRun.buildJobJSON(request)
+    }
+
+    private func grading(_ doc: Data) throws -> [String: Any] {
+        let job = try XCTUnwrap(JSONSerialization.jsonObject(with: doc) as? [String: Any])
+        return try XCTUnwrap(job["grading"] as? [String: Any], "an organic job carries a grading block")
+    }
+
+    func testCoresParserAcceptsEveryOrganicCellShapeTheAppWrites() throws {
+        guard TopOptKit.latticeAlgorithmIsKnown("organic") else { throw XCTSkip("no organic in core") }
+        for pick in Pick.allCases {
+            let p = project(pick)
+            let stage = try stageDocument(p)
+            var docs = [("stage", stage)]
+            docs += try VariantFacePrismFixture.variantDocuments(p)
+            for (name, doc) in docs {
+                XCTAssertNil(TopOptKit.jobSchemaError(doc),
+                             "★ \(pick.rawValue) \(name): core refuses — \(TopOptKit.jobSchemaError(doc) ?? "")")
+            }
+            let g = try grading(stage)
+            switch pick {
+            case .single:
+                XCTAssertEqual(g["cell_mode"] as? String, "swept")
+                XCTAssertEqual(g["cell_min_mm"] as? Double, 4)
+                XCTAssertEqual(g["cell_max_mm"] as? Double, 4)
+                XCTAssertNil(g["cell_mm"], "★ never fit + cell_mm")
+            case .grade:
+                XCTAssertEqual(g["cell_mode"] as? String, "swept")
+                XCTAssertEqual(g["cell_min_mm"] as? Double, 3)
+                XCTAssertEqual(g["cell_max_mm"] as? Double, 5)
+            case .auto:
+                XCTAssertNil(g["cell_min_mm"]); XCTAssertNil(g["cell_mm"])
+            case .fitNoPick:
+                XCTAssertEqual(g["cell_mode"] as? String, "fit")
+                XCTAssertNil(g["cell_mm"]); XCTAssertNil(g["cell_min_mm"])
+            }
+            // the preview traces the window the job states — one mapping, both sides
+            if pick == .single || pick == .grade {
+                let w = p.lattice.organicPreviewSeparationWindowMM
+                XCTAssertEqual(g["cell_min_mm"] as? Double, w.lo, pick.rawValue)
+                XCTAssertEqual(g["cell_max_mm"] as? Double, w.hi, pick.rawValue)
+            }
+        }
+    }
+
+    /// The test cannot be green by accident: the old single-size shape spliced back in is
+    /// refused by core (the parser does reach the grading block), and an inverted window is
+    /// refused too (equal ends pass because core's rule is `>=`, not because nothing checks).
+    func testTheControlsAreRefused() throws {
+        guard TopOptKit.latticeAlgorithmIsKnown("organic") else { throw XCTSkip("no organic in core") }
+        let stage = try stageDocument(project(.single))
+        var job = try XCTUnwrap(JSONSerialization.jsonObject(with: stage) as? [String: Any])
+        var g = try XCTUnwrap(job["grading"] as? [String: Any])
+        g["cell_mode"] = "fit"; g["cell_mm"] = 4.0
+        g.removeValue(forKey: "cell_min_mm"); g.removeValue(forKey: "cell_max_mm")
+        job["grading"] = g
+        let old = try JSONSerialization.data(withJSONObject: job)
+        XCTAssertTrue(TopOptKit.jobSchemaError(old)?.contains("\"cell_mm\" is not allowed") ?? false,
+                      "★ control: the pre-ruling shape is refused — \(TopOptKit.jobSchemaError(old) ?? "nil")")
+        g["cell_mode"] = "swept"; g.removeValue(forKey: "cell_mm")
+        g["cell_min_mm"] = 4.0; g["cell_max_mm"] = 3.5
+        job["grading"] = g
+        let inverted = try JSONSerialization.data(withJSONObject: job)
+        XCTAssertTrue(TopOptKit.jobSchemaError(inverted)?.contains("must be >=") ?? false,
+                      "★ control: an inverted window is refused — \(TopOptKit.jobSchemaError(inverted) ?? "nil")")
     }
 }

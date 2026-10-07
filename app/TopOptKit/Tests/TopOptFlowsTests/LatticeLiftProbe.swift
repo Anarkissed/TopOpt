@@ -46,7 +46,7 @@ final class LatticeLiftProbe: XCTestCase {
             latticeID: "octet") else {
             return XCTFail("bake produced nothing")
         }
-        let lat = LatticeType.named("octet")
+        let lat = LatticeType.octet
         // Per cell size: activation -> the rho the SHADER computes -> the strut mm.
         var bySize: [Float: [Double]] = [:]
         for i in 0..<baked.steppedCellMM.count where baked.steppedCellMM[i] > 0 {

@@ -904,7 +904,8 @@ public final class ResultsModel: ObservableObject {
                  + receipt.lines(percolationFloor: pf > 0 ? pf : nil)
                  + [LatticeRegionCellReceipt.scopeNote]
         }()
-        let name = LatticeType.named(r.topologyID).displayName
+        // ★ the run's own id, named — never "Octet truss" for a type the table lacks (item a)
+        let name = LatticeType.displayName(forID: r.topologyID)
         // BAR B6 — THE PREVIEW AND THE BUILD, RECONCILED (task
         // 2026-08-04-variant-volume-fraction-mismatch). This clause used to read,
         // unconditionally whenever anything scoped the preview:

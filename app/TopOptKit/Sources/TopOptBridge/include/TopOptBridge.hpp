@@ -1070,6 +1070,30 @@ SmokeResult bridge_smoke(const std::string& materials_path,
 // call used as the most basic bridge liveness check.
 std::string core_version();
 
+// ★ THE LINKED CORE'S IDENTITY, STATED ONCE (#358, 349053df + 23e6154e). `run_lattice_job`
+// runs core's `lattice_variant_job` IN-PROCESS, and core stamps every receipt's
+// `fingerprint` / `build_time` from `topopt::build_identity()`, which only the executable that
+// owns the binary can state. Unstated, an in-app relattice receipt says "unknown". The app
+// states CoreFingerprint.value + .buildTime here before its first bridge run.
+// Set-once in core: the same identity again is a no-op; a DIFFERENT one throws (two binaries'
+// identities in one process), reported through `err`, never across the bridge.
+void state_core_build_identity(const std::string& fingerprint,
+                               const std::string& build_time, BridgeError& err);
+// The identity core holds now: {fingerprint, build_time} ({"unknown", ""} when unstated).
+std::vector<std::string> core_build_identity();
+
+// ★★ THE ONE GUARD'S REASON CHANNEL (maintainer, 2026-10-03: "no core exception ever
+// crosses the bridge"). Every exported function runs through one guard in bridge.cpp: a
+// core exception becomes the function's invalid/error result, and its reason is kept
+// here, per thread, until the next bridge call on that thread returns normally (which
+// clears it). Read it right after a call whose result says it could not answer; a
+// result type with its own reason field (BridgeError, `reason`, `message`) carries the
+// same words. "" = the last call answered.
+std::string bridge_last_refusal();
+// The guard's own test hook: 0 → "answered"; 1 → a std::exception; 2 → a non-std
+// exception. 1 and 2 return "" with the reason in bridge_last_refusal().
+std::string bridge_guard_self_test(int kind);
+
 // ---------------------------------------------------------------------------
 // Lattice certification limits (lattice mode UI, handoff 2026-07-29-lattice-mode-
 // ui). The app's lattice controls MUST be bounded by what the core actually
@@ -1082,10 +1106,11 @@ struct LatticeLimits {
   // topopt::lattice_rho_min / lattice_rho_max. Meaningful only when `certifiable`.
   double rho_min = 0.0;
   double rho_max = 0.0;
-  // True iff the core certification library carries a homogenized tensor (and thus
-  // a band) for the topology — i.e. a run may lattice + certify it. Octet is the
-  // only true value today; the set widens as core's LatticeTopology enum grows, and
-  // this accessor reflects that with no app change.
+  // True iff core calls the type LIVE — it carries the homogenized tensor (and thus a
+  // band) AND can build it — so a run may lattice + certify it. Octet is the only true
+  // value today; the set widens as core's readiness widens, with no app change. A type
+  // core certifies but cannot build yet is false here with core's words in `reason`
+  // (2026-10-03): its floor would otherwise be octet's placeholder.
   bool certifiable = false;
   // The minimum number of cells that must span a member for the homogenized
   // certification to hold (the scale-separation ceiling: max printable cell =
@@ -1095,6 +1120,10 @@ struct LatticeLimits {
   // engages automatically once core returns a positive value here. This is NOT an
   // app-side limit: it is exactly whatever the core reports.
   double min_cells_per_member = 0.0;
+  // ★ Core's reason when it gives no numbers (maintainer, 2026-10-03): "" when it
+  // does. `certifiable` is true ONLY for a type core calls live — a type whose tensor
+  // core holds but cannot build yet gets its readiness words here, never octet's floor.
+  std::string reason;
 };
 
 // The certifiable limits for a lattice topology named as the job schema names it
@@ -1146,6 +1175,23 @@ double lattice_subfloor_retention_fraction();
 
 double lattice_strut_diameter_mm(const std::string& topology, double rho,
                                  double cell_size_mm);
+/// ★★ CORE'S PRINTABLE FLOOR AT THE JOB'S CAP (reviewer, 2026-10-05, Q3(i)): the smallest cell
+/// whose strut prints one `min_extrudable_width_mm` bead at the densest density the job allows —
+/// the band top capped by `max_relative_density` (0 = not sent = uncapped), composed as
+/// grade_lattice does (core/src/simp/grading.cpp:184-187, 258-260). 2.25 mm at a 0.45 mm bead
+/// with the octet's aesthetic cap, 1.173 mm uncapped (Allow quilt on). Live types only: 0 and
+/// `bridge_last_refusal()` with core's readiness words otherwise.
+double lattice_min_printable_cell_mm(const std::string& topology,
+                                     double min_extrudable_width_mm,
+                                     double max_relative_density);
+/// ★ CORE'S AESTHETIC DENSITY CEILING for a topology (maintainer, 2026-10-02, ruling 5: R12, one
+/// definition). The linked core carries it for OCTET only, as the inline
+/// `octet_aesthetic_density_ceiling()` (the diameter table's preimage of strut/cell 0.20; core's
+/// own test asserts the per-type `lattice_aesthetic_density_ceiling(octet)` equals it exactly).
+/// Returns 0 when core has no ceiling for the type ("none measured"). Since the #358 sync this
+/// is core's per-type `lattice_aesthetic_density_ceiling(topo)`, which returns exactly the octet
+/// number above (the swap moved no bytes) and refuses every unmeasured type, read here as 0.
+double lattice_aesthetic_density_ceiling(const std::string& topology);
 /// The forward law: the relative density a strut RADIUS produces at a cell (octet
 /// only; 0 = no core law, 1 = the radius fills the cell). Core reply 5, 2026-09-20.
 double lattice_relative_density(const std::string& topology, double strut_radius_mm,
@@ -1219,6 +1265,8 @@ struct LatticeCellBounds {
   // app's per-region receipt was doing exactly that. 0 ⇒ core states no percolation
   // floor for the topology.
   double percolation_cells_per_member_floor = 0.0;
+  // ★ Core's reason when `valid` is false (maintainer, 2026-10-03); "" when valid.
+  std::string reason;
 };
 LatticeCellBounds lattice_cell_bounds(const std::string& topology,
                                       double min_extrudable_width_mm);
@@ -1257,14 +1305,19 @@ struct LatticeRegionDerivation {
   // the condition core refuses the job on (refuse_unprintable_stated_density), so
   // the field can say so before the run rather than after.
   bool prints = false;
+  // ★ Core's reason when `valid` is false (maintainer, 2026-10-03); "" when valid.
+  std::string reason;
 };
 // ★ `cells_per_member_floor` — 0 keeps core's ACCURACY floor (5), which is what every
 // pre-existing caller gets. Pass the mode's own floor to derive the cell the mode
 // actually allows: on an 11 mm wall, 5 gives a 2.20 mm cell and 2 gives 5.50 mm.
+// ★ `cell_mm` (item 5, 2026-10-05): > 0 states the cell — the one the preview lays at the
+// measured width — and the density, strut and cells-across are core's at that cell; 0 derives
+// it as before (max(width / floor, core's printable minimum)).
 LatticeRegionDerivation lattice_region_derivation(
     const std::string& topology, double member_width_mm,
     double min_extrudable_width_mm, double stated_relative_density,
-    double cells_per_member_floor);
+    double cells_per_member_floor, double cell_mm);
 
 // ★★★ THE ORGANIC LATTICE'S TRACED CENTRELINES, for the preview. See bridge.cpp for
 // the flat layout and for why the tensor — not a scalar — is the input that gates this.
@@ -1339,6 +1392,16 @@ std::vector<std::string> lattice_certifiable_topologies();
 // core enum growth reaches the picker with zero app changes. Never throws.
 std::vector<std::string> lattice_generatable_topologies();
 
+// ★ CORE'S READINESS for a lattice type and its PLAIN WORDS (brief item a; #358
+// `lattice_type_readiness` + `lattice_type_readiness_plain`). The two sets are passed in,
+// newline-joined, so the app's pure form (tests hand their own sets) and production ask core
+// the same question. Returns core's enum as its ordinal: 0 Live, 1 NotGeneratable,
+// 2 NotCertifiable, 3 NotEither, 4 UnknownId (the app pins the mapping with core's own sets).
+int lattice_type_readiness(const std::string& id, const std::string& generatable_lines,
+                           const std::string& certifiable_lines);
+// Core's plain line for a readiness ordinal; "" for an ordinal core does not have.
+std::string lattice_type_readiness_plain(int readiness);
+
 // ---------------------------------------------------------------------------
 // SUB-FLOOR RETENTION: what CORE's job schema accepts, and core's own ceiling
 // (task 2026-08-05-lattice-retention-app-control).
@@ -1383,6 +1446,18 @@ bool grading_schema_accepts_cell_mode(const std::string& mode);
 // re-lattice of a growth variant, in 48 ms, on a key whose value was the wrong
 // SHAPE rather than the wrong name. Never throws.
 std::string job_schema_error(const std::string& job_json);
+
+// ★ CORE'S FACE-PLANE BASIS FOR A RAW NORMAL, AND ITS VERDICT ON A STATED FRAME (maintainer,
+// 2026-10-01, item b). Core derives a face region's in-plane axes with `plane_basis`, which is
+// file-local (clearance.cpp's anonymous namespace); the public route that runs it — and core's
+// own frame-agreement check, which on a stage job only refuses AFTER the solve — is
+// `resolve_clearance_manual`. This calls it as the run does: kind Face, the RAW normal (core
+// normalises it), a unit slab, a unit rectangle, and the stated frame (all zero = "derive").
+// Returns [valid, frame_conflict, u.x, u.y, u.z, w.x, w.y, w.z]: the derived axes when no frame
+// is stated, the stated ones when core accepts them. Never throws.
+std::vector<double> core_face_plane_basis(double nx, double ny, double nz,
+                                          double fux, double fuy, double fuz,
+                                          double fwx, double fwy, double fwz);
 
 // Core's OWN default stress-fraction ceiling for sub-floor retention
 // (topopt::lattice_subfloor_retention_stress_fraction(), the number

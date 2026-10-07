@@ -118,7 +118,7 @@ final class LatticeSteppedCapPhaseAndDepthProbe: XCTestCase {
         // The band the way `proxyParams` builds it: the stored range (his project
         // stores 0…1) clamped through `LatticeBounds.compute` into core's certifiable
         // band, floored at the printability floor. NOT the aesthetic display band.
-        let lat = LatticeType.named("octet")
+        let lat = LatticeType.octet
         var settings = LatticeSettings()
         settings.topologyID = "octet"
         settings.cellMM = fc.statedCellMM

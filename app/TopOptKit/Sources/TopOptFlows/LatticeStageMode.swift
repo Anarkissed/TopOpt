@@ -151,10 +151,17 @@ public enum LatticeStageMode: String, Codable, Hashable, Sendable, CaseIterable 
     /// Default-Grade region under Structural takes the aesthetic floor (2, or 1 with a
     /// finish) once that certificate is what the job asks for. On a core without it the
     /// homogenised floor stays, and so does the 2.4 mm wall.
+    /// ★★ KEYED ON WHAT CORE RUNS, NOT WHAT ITS SCHEMA ACCEPTS (maintainer, 2026-10-02, ruling
+    /// 1): the relaxation applies only to an algorithm in core's beam-network set
+    /// (`TopOptKit.latticeBeamNetworkCertifiedAlgorithms`, {"organic"} today) — so Stepped and
+    /// Default Grade under Structural are back on the homogenised floor (5), the floor the run's
+    /// tensor certificate actually needs, until core wires them. Organic is untouched (U8): it is
+    /// not relaxed here whatever the set says.
     public func regionCellsPerMemberFloor(topology: String, boundaryFinishWritten: Bool,
-                                          algorithm: String, beamNetworkCertified: Bool) -> Double {
-        if self == .structural, beamNetworkCertified,
-           algorithm == "stepped" || algorithm == "doubled" {
+                                          algorithm: String,
+                                          beamNetworkAlgorithms: Set<String> = TopOptKit.latticeBeamNetworkCertifiedAlgorithms) -> Double {
+        if self == .structural, algorithm == "stepped" || algorithm == "doubled",
+           beamNetworkAlgorithms.contains(algorithm) {
             return LatticeStageMode.aesthetic.cellsPerMemberFloor(
                 topology: topology, utilisation: .nan,
                 boundaryFinishWritten: boundaryFinishWritten)

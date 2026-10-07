@@ -139,7 +139,7 @@ final class LatticeBandChipsTests: XCTestCase {
             return XCTFail("overlay moved")
         }
         let overlay = String(ws[o.lowerBound...].prefix(900))
-        XCTAssertTrue(overlay.contains("if latticeOnlyViewOn"), "★ chips only in lattice-only view")
+        XCTAssertTrue(overlay.contains("if latticeOnlyShowing"), "★ chips only while lattice only is SHOWING (2026-10-01)")
         XCTAssertTrue(ws.contains("private var latticeOnlyViewOn: Bool { latticeOnly && showStrutPreview }"))
     }
 
@@ -198,11 +198,11 @@ final class LatticeBandChipsTests: XCTestCase {
             guard let r = src.range(of: marker) else { return "" }
             return String(src[r.lowerBound...].prefix(n))
         }
-        XCTAssertTrue(body(after: "private var latticeBandChipsOverlay").contains("if latticeOnlyViewOn, !bandChipsHidden"),
+        XCTAssertTrue(body(after: "private var latticeBandChipsOverlay").contains("if latticeOnlyShowing, !bandChipsHidden"),
                       "the overlay ignores the hide switch")
         XCTAssertTrue(src.contains("case .bandChips: return bandChipsAvailable"), "the toggle is not gated on chips to hide")
         let avail = body(after: "private var bandChipsAvailable", 400)
-        XCTAssertTrue(avail.contains("latticeOnlyViewOn") && avail.contains("bandDecisions.isEmpty"))
+        XCTAssertTrue(avail.contains("latticeOnlyShowing") && avail.contains("bandDecisions.isEmpty"))
         let chip = body(after: "private var bandChipsToggleChip", 1600)
         XCTAssertTrue(chip.contains("\"Hide chips\"") && chip.contains("\"Show chips\"") && chip.contains("bandChipsHidden.toggle()"))
         XCTAssertTrue(src.contains("case .bandChips: bandChipsToggleChip.background(chipWidthReader(id))"),
