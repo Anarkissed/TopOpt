@@ -51,6 +51,10 @@ extension LatticePreviewOccupancy {
         public var straddlerPairs = 0          // contested pairs that BOTH keep (each centre is its own)
         public var texelsReassigned = 0        // texels a better-ranked region took from another
         public var cellsEmptied = 0            // plan cells left with no texel after that
+        // ★ R7's step-down (2026-10-07): a yielded cell tries its own region's next rung.
+        public var stepDownRounds = 0          // extra walks until no cell yields
+        public var cellsSteppedDown = 0        // yielded cells whose children were tried
+        public var cellsDroppedAtFinest = 0    // yielded cells at the region's finest rung (air)
         /// Every in-plane shift's base-cell volume, in search order — the whole search, so a
         /// proof compares all of it and not only the winner.
         public var anchorBaseVolumes: [Double] = []
@@ -80,6 +84,13 @@ extension LatticePreviewOccupancy {
     /// ★★ R7: cells and texels shared by two regions go to the owner of their centre; false =
     /// declaration order, the bake before 2026-10-03 (the proof's "before" arm only).
     nonisolated(unsafe) static var centreOwnershipEnabled = true
+    /// ★★ R7's STEP-DOWN (reviewer, 2026-10-07, ruling 6: "A yielded cell steps down a rung on
+    /// its own region's grid. Each child is judged by its own centre; iterate. Stop at the
+    /// region's finest rung."); false = R7 as first landed, where a yielded cell's own share of
+    /// the seam was left as air (the proof's "before" arm only).
+    nonisolated(unsafe) static var stepDownEnabled = true
+    /// A bound on the rounds, never reached on his parts (a cell yields at most once per rung).
+    nonisolated(unsafe) static var stepDownMaxRounds = 32
 
     // ★★ EACH REGION'S ANCHOR SEARCH WALKS ITS OWN FOOTPRINT (maintainer, 2026-10-03: "Octree
     // bake: limit each region's anchor search to its footprint. Prove it with identical bakes
@@ -738,8 +749,25 @@ extension LatticePreviewOccupancy {
             if abs(a.1 - b.1) > 1e-9 { return a.1 < b.1 }
             return a.2 < b.2                                   // an exact tie: the lower id
         }
-        for pass in (Self.centreOwnershipEnabled ? [0, 1] : [1]) {
+        // ★★ THE STEP-DOWN (reviewer, 2026-10-07, ruling 6). A cell that yielded is, on the next
+        // walk, treated as one that does not fit: its own region tries its next rung there — the
+        // dyadic children, or the any-step packer's smaller sizes — and each of those is judged
+        // by its own centre in the next contest. Pass 0 repeats until no cell yields; a yielded
+        // cell at the region's finest rung is dropped (air). Cells stay whole throughout.
+        struct CellKey: Hashable { let r: Int; let x: Int64; let y: Int64; let z: Int64; let s: Int64 }
+        func cellKey(_ r: Int, _ lo: SIMD3<Double>, _ S: Double) -> CellKey {
+            CellKey(r: r, x: Int64((lo.x * 1e4).rounded()), y: Int64((lo.y * 1e4).rounded()),
+                    z: Int64((lo.z * 1e4).rounded()), s: Int64((S * 1e4).rounded()))
+        }
+        var yieldedKeys = Set<CellKey>()
+        func hasYielded(_ r: Int, _ lo: SIMD3<Double>, _ S: Double) -> Bool {
+            !yieldedKeys.isEmpty && yieldedKeys.contains(cellKey(r, lo, S))
+        }
+        let finestByRegion = Dictionary(ladders.map { ($0.region, $0.sizes.last ?? 0) }, uniquingKeysWith: { a, _ in a })
+        var pass = Self.centreOwnershipEnabled ? 0 : 1
+        while true {
         seq = 0
+        candidates.removeAll(keepingCapacity: true)
         for ladder in ladders {
             let region = regions[ladder.region]
             let n = LatticeRegionMask.unit(region.normal)
@@ -983,11 +1011,14 @@ extension LatticePreviewOccupancy {
                 let finestLevel = level == ladder.sizes.count - 1
                 let centreOK = finestLevel || !(shapeFit && shapeFitBandMM > 0 && sBase > f + 1e-9)
                     || dc >= shapeFitBandMM * (S - f) / (sBase - f) - 1e-9
+                // ★ a cell that yielded steps down: it is not painted here, its region's next rung
+                // is tried below; at the finest rung it is dropped
+                let yielded = hasYielded(ladder.region, lo, S)
                 if level == 0 && pass == 1 {
-                    let key = "r\(ladder.region)/" + (ok ? (centreOK ? "kept" : "band") : lastFail)
+                    let key = "r\(ladder.region)/" + (ok ? (centreOK ? (yielded ? "stepped" : "kept") : "band") : lastFail)
                     stats.why[key, default: 0] += 1
                 }
-                if ok && centreOK {
+                if ok && centreOK && !yielded {
                     paint(lo, S, finest: finestLevel, edge: false, nearest: nearest)
                     return
                 }
@@ -1015,6 +1046,7 @@ extension LatticePreviewOccupancy {
                 // the depth slab is air, not a plain cell — his "lattice jutting out of
                 // the rim" was this fall-through painting it.
                 if slabFailed { return }
+                if yielded { return }                          // the finest rung: air
                 if outlineFailed {
                     if farthest > 0 { paint(lo, S, finest: true, edge: true, nearest: nearest) }
                 } else {
@@ -1100,7 +1132,7 @@ extension LatticePreviewOccupancy {
                         let (ok, nearest, _) = fits(lo, S, fast: true)
                         let centreOK = isF || !(shapeFit && shapeFitBandMM > 0 && sBase > f + 1e-9)
                             || dc >= shapeFitBandMM * (S - f) / (sBase - f) - 1e-9
-                        guard ok && centreOK else { continue }
+                        guard ok && centreOK, !hasYielded(ladder.region, lo, S) else { continue }
                         paint(lo, S, finest: isF, edge: false, nearest: nearest)
                         take(i, span)
                     }
@@ -1121,6 +1153,7 @@ extension LatticePreviewOccupancy {
                     if dc < -0.87 * f { continue }
                     let (ok, nearest, farthest) = fits(lo, f)
                     if slabFailed { continue }                 // ★ outside the slab is air
+                    if hasYielded(ladder.region, lo, f) { continue }   // R7: the finest rung yielded
                     if ok || !outlineFailed {
                         paint(lo, f, finest: true, edge: false, nearest: nearest)
                     } else if farthest > 0 {
@@ -1174,6 +1207,9 @@ extension LatticePreviewOccupancy {
         }
         if pass == 0 {
             // ── R7: judge every candidate another region's candidate overlaps ──────────
+            // (counted for the final round only)
+            stats.contestedCells = 0
+            stats.straddlerPairs = 0
             accepted = [Bool](repeating: true, count: candidates.count)
             let big = candidates.map(\.S).max() ?? 0
             var contest = [[Int]](repeating: [], count: candidates.count)
@@ -1213,7 +1249,22 @@ extension LatticePreviewOccupancy {
             for (i, js) in contest.enumerated() where accepted[i] {
                 stats.straddlerPairs += js.filter { $0 > i && accepted[$0] }.count
             }
+            // ★ the step-down: a round that yielded anything walks again, the yielded cells now
+            // trying their next rung
+            if Self.stepDownEnabled, stats.stepDownRounds < Self.stepDownMaxRounds {
+                var grew = false
+                for (i, c) in candidates.enumerated() where !accepted[i] {
+                    guard yieldedKeys.insert(cellKey(c.region, c.lo, c.S)).inserted else { continue }
+                    grew = true
+                    if c.S > (finestByRegion[c.region] ?? 0) + 1e-9 { stats.cellsSteppedDown += 1 }
+                    else { stats.cellsDroppedAtFinest += 1 }
+                }
+                if grew { stats.stepDownRounds += 1; continue }
+            }
+            pass = 1
+            continue
         }
+        break
         }
         // R7: a plan cell another region's texels all went to is no longer in the plan.
         if Self.centreOwnershipEnabled {

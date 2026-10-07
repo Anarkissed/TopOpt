@@ -96,7 +96,9 @@ final class LatticeOctreeCentreOwnershipTests: XCTestCase {
             let (ba, _) = try bake(s, order: [1, 0], dyadic: dyadic)
             XCTAssertEqual(ab.field.origin, ba.field.origin, "the same texel grid either way (dyadic \(dyadic))")
             XCTAssertGreaterThan(st.contestedCells, 0, "positive control: the prisms do meet")
-            XCTAssertGreaterThan(st.cellsYielded, 0, "★ and the rule acts there")
+            // ★ and the rule acts there — since the step-down (2026-10-07) a yielded cell steps down
+            // or is dropped at its finest rung over the rounds, so nothing yields in the painting pass
+            XCTAssertGreaterThan(st.cellsSteppedDown + st.cellsDroppedAtFinest, 0, "★ and the rule acts there")
             XCTAssertEqual(cellSet(ab, s, order: [0, 1]), cellSet(ba, s, order: [1, 0]),
                            "★ the plan does not depend on declaration order (dyadic \(dyadic))")
             XCTAssertEqual(texelArrays(ab), texelArrays(ba), "★ nor does the picture (dyadic \(dyadic))")
@@ -140,6 +142,40 @@ final class LatticeOctreeCentreOwnershipTests: XCTestCase {
             checked += 1
         }}
         XCTAssertGreaterThan(checked, 0, "positive control: there are contested cells left to check")
+    }
+
+    /// ★★ THE STEP-DOWN (reviewer, 2026-10-07, ruling 6): "A yielded cell steps down a rung on its
+    /// own region's grid. Each child is judged by its own centre; iterate. Stop at the region's
+    /// finest rung." The air R7 left where a yielded cell's own share of the seam was shrinks; no
+    /// kept cell's centre is another region's (the test above runs with it on); the new cells are
+    /// all smaller than their region's base, inside the space its yielded cells had.
+    func testAYieldedCellStepsDownOnItsOwnGrid() throws {
+        let s = corner()
+        let saved = LatticePreviewOccupancy.stepDownEnabled
+        defer { LatticePreviewOccupancy.stepDownEnabled = saved }
+        for dyadic in [true, false] {
+            let (off, _) = try bake(s, order: [0, 1], dyadic: dyadic, ownership: false)
+            LatticePreviewOccupancy.stepDownEnabled = false
+            let (noStep, stNo) = try bake(s, order: [0, 1], dyadic: dyadic)
+            LatticePreviewOccupancy.stepDownEnabled = true
+            let (step, st) = try bake(s, order: [0, 1], dyadic: dyadic)
+            XCTAssertEqual(off.field.origin, step.field.origin)
+            func air(_ f: LatticeCellField) -> Int {
+                zip(off.steppedCellMM, f.steppedCellMM).filter { $0.0 > 0 && $0.1 <= 0 }.count
+            }
+            XCTAssertGreaterThan(stNo.cellsYielded, 0, "positive control: R7 alone yields cells here")
+            XCTAssertGreaterThan(st.cellsSteppedDown, 0, "★ yielded cells step down (dyadic \(dyadic))")
+            XCTAssertGreaterThanOrEqual(st.stepDownRounds, 1)
+            XCTAssertEqual(st.cellsYielded, 0, "the rounds converge: nothing yields in the painting pass")
+            XCTAssertLessThan(air(step), air(noStep), "★ the yielded cells' own share is filled (dyadic \(dyadic))")
+            let before = Set(noStep.steppedCells.map { "\($0.region)|\($0.originMM)|\($0.sizeMM)" })
+            for c in step.steppedCells where !before.contains("\(c.region)|\(c.originMM)|\(c.sizeMM)") {
+                XCTAssertLessThan(c.sizeMM, s.cells[c.region] - 1e-9, "a new cell is a smaller rung of its own region")
+            }
+            print("R7-STEPDOWN-SYNTH dyadic \(dyadic): rounds \(st.stepDownRounds) stepped \(st.cellsSteppedDown) "
+                  + "dropped at finest \(st.cellsDroppedAtFinest) | air texels: R7 alone \(air(noStep)) → with the step-down \(air(step)) "
+                  + "| cells \(noStep.steppedCells.count) → \(step.steppedCells.count)")
+        }
     }
 
     /// ★ Where no two regions' cells meet, nothing changes: the bake is bit-identical with the rule
