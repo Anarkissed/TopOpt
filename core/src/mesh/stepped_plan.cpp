@@ -208,14 +208,45 @@ SteppedPlanCheck stepped_validate_plan(LatticeTopology topo,
       if (nl > 0.0) {
         const double nx = reg.normal.x / nl, ny = reg.normal.y / nl, nz = reg.normal.z / nl;
         const double s0 = ox * nx + oy * ny + oz * nz;
-        const double s1 = s0 + cell.size_mm;
-        if (s0 < -1e-6 || s1 > reg.depth_mm + 1e-6) {
+        // ★ PROJECT THE CUBE, NOT ONE CORNER (R2, #354's core brief 2026-10-02).
+        // `origin` is the cell's MINIMUM corner, so s0 + size is the cell's far face
+        // only when the normal points the way that makes the minimum corner the NEAR
+        // one -- a positive axis normal. On a wall whose normal has a negative
+        // component the minimum corner is the cell's FAR end along n, and this read the
+        // deepest legal layer one cell too deep (refusing 1,467 sound cells on the
+        // stand's -y wall alone) while accepting a cell sitting entirely in FRONT of
+        // the face. The cube's eight corners are o + S*b for b in {0,1}^3, so its
+        // extent along n is [s0 + S*sum(min(0,n_i)), s0 + S*sum(max(0,n_i))]. For an
+        // axis normal that is exact, and for a positive axis normal it is unchanged.
+        // For a TILTED facet the extent is sum(|n_i|)*S, wider than S, so this is
+        // stricter there than the old read -- see R2b in the handoff: what containment
+        // a tilted facet's cells must satisfy is the maintainer's rule, not core's to
+        // invent, and no projection accepts a cell that starts in front of the plane.
+        const double n_lo = std::min(0.0, nx) + std::min(0.0, ny) + std::min(0.0, nz);
+        const double n_hi = std::max(0.0, nx) + std::max(0.0, ny) + std::max(0.0, nz);
+        const double s_lo = s0 + cell.size_mm * n_lo;
+        const double s_hi = s0 + cell.size_mm * n_hi;
+        // ★ ONE CONTAINMENT RULE FOR EVERY FACE, axis-aligned or tilted (reviewer's
+        // ruling 1, 2026-10-05, settling R2, R2x and R2b together). The cell's CENTRE
+        // must lie in the prism, and its FAR side must not pass the prism's depth. Its
+        // NEAR side may stand in front of the face plane: that is how the app covers a
+        // tilted facet -- it starts the span in front of the plane so the cube covers
+        // the slant -- and what lies outside the part is not laid. A near-side bound is
+        // what would have refused the stand's 90 face-23 facet cells for doing the one
+        // thing that makes them cover their face.
+        // The centre is the cube's centre projected: s0 + (S/2)*(nx + ny + nz).
+        const double s_mid = s0 + 0.5 * cell.size_mm * (nx + ny + nz);
+        if (s_mid < -1e-6 || s_mid > reg.depth_mm + 1e-6 ||
+            s_hi > reg.depth_mm + 1e-6) {
           std::snprintf(msg, sizeof msg,
                         "stepped cell %zu in region %d (%.4g mm at %.4g, %.4g, %.4g) lies "
-                        "from %.4g to %.4g mm along the region normal, outside its %.4g mm "
-                        "prism",
+                        "from %.4g to %.4g mm along the region normal with its centre at "
+                        "%.4g, outside its %.4g mm prism: the centre must lie in the prism "
+                        "and the far side must not pass it, though the near side may stand "
+                        "in front of the face",
+
                         c, cell.region_id, cell.size_mm, cell.origin.x, cell.origin.y,
-                        cell.origin.z, s0, s1, reg.depth_mm);
+                        cell.origin.z, s_lo, s_hi, s_mid, reg.depth_mm);
           out.error = msg;
           return out;
         }

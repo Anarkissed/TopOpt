@@ -214,6 +214,100 @@ static void test_menu_shape() {
 // wrong strut width to every cell -- silently, with a plausible-looking lattice. The
 // cells here are deliberately sent in an order that the sort must change, and each
 // one's rho is a function of its own position so a mispairing cannot look right.
+// ── R2 / R2x / R2b: ONE CONTAINMENT RULE FOR EVERY FACE ───────────────────────
+// `origin` is the cell's MINIMUM corner (stepped_plan.hpp). The depth check projected
+// that corner and added the size along the normal, which is the cell's span only when
+// the normal points the way that makes the minimum corner the near one -- a POSITIVE
+// axis normal. On a wall whose normal has a negative component the minimum corner is
+// the cell's DEEPEST point, so every layer read one cell too deep: the deepest layer
+// was refused (1,467 sound cells on the stand's -y wall) and a cell one layer in FRONT
+// of the face -- outside the prism and outside the part -- was accepted, and laid, on
+// the part's face (R2x: 612 triangles at y 11.55-12.45).
+//
+// The reviewer's ruling of 2026-10-05 settles R2, R2x and R2b with ONE rule for every
+// face, axis-aligned or tilted:
+//   - the cell's CENTRE must lie in the prism, 0 <= s_mid <= depth;
+//   - its FAR side must not pass the depth, using the cube's true projection interval
+//     [s0 + S*sum(min(0,n_i)), s0 + S*sum(max(0,n_i))];
+//   - its NEAR side MAY stand in front of the face plane.
+// That last clause is the one worth a test of its own, and it is the one a "fix" that
+// merely swapped the sign would get wrong. The app starts a tilted facet's span in
+// front of the plane BY DESIGN, so the cube covers the slant; what falls outside the
+// part is not laid. A near-side bound would refuse the stand's 90 face-23 facet cells
+// for doing the one thing that makes them cover their face. So the tilted case below
+// is asserted ACCEPTED while its near side stands 2.12 mm in front of the plane, and
+// it is what distinguishes this rule from any one-sided reading of the interval.
+static void test_depth_projects_the_cube_not_one_corner() {
+  auto region = [](Vec3 normal, Vec3 face_at) {
+    SteppedPlanRegion reg;
+    reg.region_id = 1;
+    reg.base_cell_mm = 3.0;
+    reg.slot_origin = face_at;
+    reg.normal = normal;
+    reg.depth_mm = 12.0;
+    return reg; };
+  auto cell_at = [](Vec3 at) {
+    SteppedCell c;
+    c.region_id = 1;
+    c.origin = at;
+    c.size_mm = 3.0;   // the base size, so alignment is not what is being tested
+    return c; };
+  auto ok = [](const SteppedPlanRegion& reg, const SteppedCell& c) {
+    return stepped_validate_plan(LatticeTopology::Octet, {c}, {reg}, 0.45).ok; };
+
+  // ── the -y wall: face plane y = 12, prism y in [0, 12] ──
+  const SteppedPlanRegion neg = region(Vec3{0.0, -1.0, 0.0}, Vec3{18.0, 12.0, 8.0});
+  // The deepest layer, y in [0, 3]: 9 to 12 mm along the normal, centre at 10.5. This
+  // is the brief's R2_min_corner_depth.json, which core refused.
+  CHECK(ok(neg, cell_at(Vec3{18.0, 0.0, 8.0})),
+        "R2: the deepest layer of a -y wall is inside its own prism");
+  CHECK(ok(neg, cell_at(Vec3{18.0, 9.0, 8.0})),
+        "R2: and so is the layer against the -y face");
+  // One layer deeper: the far side reaches 15 mm past a 12 mm prism.
+  const SteppedPlanCheck past =
+      stepped_validate_plan(LatticeTopology::Octet, {cell_at(Vec3{18.0, -3.0, 8.0})},
+                            {neg}, 0.45);
+  CHECK(!past.ok, "R2: a cell whose far side passes the prism is refused");
+  CHECK(past.error.find("region 1") != std::string::npos &&
+            past.error.find("prism") != std::string::npos,
+        "R2: and the refusal names the region and what it left");
+  // ★ R2x: one layer in FRONT of the face, y in [12, 15]. Its centre projects to
+  // -1.5 mm, outside the prism. The one-corner check read it as 0 to 3 and laid it.
+  const SteppedPlanCheck in_front =
+      stepped_validate_plan(LatticeTopology::Octet, {cell_at(Vec3{18.0, 12.0, 8.0})},
+                            {neg}, 0.45);
+  CHECK(!in_front.ok,
+        "R2x: a cell wholly in front of a -y face is refused, not accepted and laid");
+
+  // ── the +y wall: unchanged by the fix, which is half the point ──
+  const SteppedPlanRegion pos = region(Vec3{0.0, 1.0, 0.0}, Vec3{18.0, 0.0, 8.0});
+  CHECK(ok(pos, cell_at(Vec3{18.0, 0.0, 8.0})), "R2: +y, the layer at the face is inside");
+  CHECK(ok(pos, cell_at(Vec3{18.0, 9.0, 8.0})), "R2: +y, the deepest layer is inside");
+  CHECK(!ok(pos, cell_at(Vec3{18.0, 12.0, 8.0})),
+        "R2: +y, a cell past the prism is refused");
+  CHECK(!ok(pos, cell_at(Vec3{18.0, -3.0, 8.0})),
+        "R2: +y, a cell in front of the face is refused -- its centre is outside");
+
+  // ── ★ R2b, THE TILTED FACET: the near side may stand in front of the plane ──
+  // A 45-degree normal. At the slot origin itself the cube straddles the plane: its
+  // projection runs -2.12 to +2.12 mm (the extent along n is sqrt(2)*S, wider than S)
+  // while its centre sits exactly ON the plane, inside the prism. The app places such
+  // cells deliberately so the cube covers the slant. Offset zero keeps the alignment
+  // check out of this: it is a multiple of every size.
+  const double r2 = 0.70710678118654752;
+  const SteppedPlanRegion tilt =
+      region(Vec3{0.0, -r2, r2}, Vec3{18.0, 12.0, 8.0});
+  CHECK(ok(tilt, cell_at(Vec3{18.0, 12.0, 8.0})),
+        "R2b: a tilted facet's cell is accepted with its near side in front of the plane");
+  // But the centre still has to be in the prism, and the far side still bounded.
+  CHECK(!ok(tilt, cell_at(Vec3{18.0, 15.0, 5.0})),
+        "R2b: a tilted cell whose CENTRE leaves the prism is still refused");
+  // This one has its centre INSIDE (10.61 mm of a 12 mm prism) and fails only on its
+  // far side (12.73 mm), so it is what tests the far-side bound rather than the centre.
+  CHECK(!ok(tilt, cell_at(Vec3{18.0, 12.0, 23.0})),
+        "R2b: and so is one whose centre is inside but whose far side passes the depth");
+}
+
 static void test_group_keeps_each_cells_own_rho() {
   SteppedPlanRegion reg;
   reg.region_id = 1;
@@ -795,6 +889,7 @@ int main() {
   test_depth_is_clean();
   test_menu_shape();
   test_plan_validation();
+  test_depth_projects_the_cube_not_one_corner();
   test_doubled_menu_is_halves_only();
   test_group_keeps_each_cells_own_rho();
   test_outline_beam_width();

@@ -319,6 +319,25 @@ Nothing removed or renamed in core's public surface except one rename, listed fi
 | the refusal text for an unknown/not-ready topology | `lattice "topology" must be "octet" (got "X")` | names the type AND which half is missing: not a topology at all / certifiable but not generatable / generatable but not certifiable / neither | **none** — grepped PR 354 for the old message text: no matches. The app should now read `lattice_type_readiness_plain()` instead of wording its own |
 | `run_info.json` `fingerprint` / `build_time` on `lattice-variant` and graded `analyze` | `"unknown"` and `""` on every run | the binary's real SHA and build time | **none found** — `git grep` over PR 354's `app/` for `run_info.*fingerprint` / `fingerprint.*run_info` returns nothing; the app checks versions via `--version` and the worker's advertised fingerprint |
 
+## MEANING CHANGES, addendum 4 (2026-10-07) — the plan validator's containment rule
+
+From #354's core brief of 2026-10-02 (R2, R2x, R2b) and the reviewer's ruling of
+2026-10-05. ONE containment rule now applies to every face, axis-aligned or tilted: the
+cell's CENTRE must lie in the region's prism, its FAR side must not pass the depth
+(cube's true projection interval), and its NEAR side MAY stand in front of the face plane.
+
+| what | was | is | app impact |
+|---|---|---|---|
+| a cell in the deepest layer of a region whose normal has a NEGATIVE component | REFUSED, "lies from 12 to 15 mm … outside its 12 mm prism" — the check projected the cell's minimum corner, which on such a face is its deepest point, so every layer read one cell too deep | ACCEPTED | **intended, and it unblocks the app.** 1,467 cells on the stand's -y wall alone were refused this way, every one false, and the check runs after SOLVE 1 so each refusal cost a solve |
+| a cell lying wholly in FRONT of the face plane, outside the prism and outside the part | ACCEPTED and LAID — 612 lattice triangles sitting on the part's face, every vertex at y 11.55–12.45 (R2x) | **REFUSED**, naming the interval, the centre and which clause bound | **intended.** This is a false ACCEPTANCE being closed: core was emitting geometry outside the part. A plan that relied on it was already producing a wrong part |
+| a TILTED facet's cell whose near side starts in front of the plane but whose centre is inside | accepted (the one-corner read happened to allow it) | ACCEPTED — explicitly, by rule | **none, and deliberately so.** The app starts a facet's span in front of the plane BY DESIGN so the cube covers the slant (`LatticeOctreeBake.swift:187-202`); a near-side bound would have refused the stand's 90 face-23 facet cells. Guarded by a 45° test that goes RED if a near-side bound is reintroduced |
+| the depth refusal's wording | reported `s0` and `s0 + size` | reports the projection interval, the centre, and that the centre must be inside while the near side may stand in front | **none** — grepped PR 354's `app/` for the old sentence: no matches |
+
+Net: jobs whose regions have positive axis normals and whose cells sit inside the prism
+are unchanged. Jobs with negative-normal walls or tilted facets change verdict — which is
+the point of the brief. `test_stepped_plan.cpp` had never set `normal` or `depth_mm`, so
+this check was wholly untested before this commit.
+
 ### The fingerprint defect, for the record
 
 Not the worktree (`git -C core rev-parse` resolves fine there), and not only the
