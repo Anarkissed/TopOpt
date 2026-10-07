@@ -144,10 +144,11 @@ final class LatticeR7OwnershipProof: XCTestCase {
         // ── the two bakes, one process, one scene
         var lastStats = LatticePreviewOccupancy.OctreeBakeStats()
         LatticePreviewOccupancy.octreeBakeObserver = { _, st in lastStats = st }
-        func bakeOnce(ownership: Bool, stepDown: Bool = true, token: Int) throws
+        func bakeOnce(ownership: Bool, stepDown: Bool = true, incremental: Bool = true, token: Int) throws
             -> (LatticeCellField, [LatticeSteppedCell], [LatticeRegionSpec], LatticePreviewOccupancy.OctreeBakeStats) {
             LatticePreviewOccupancy.centreOwnershipEnabled = ownership
             LatticePreviewOccupancy.stepDownEnabled = stepDown
+            LatticePreviewOccupancy.stepDownIncremental = incremental
             baked = nil
             mr.setLatticeScene(s1, token: token)
             let b = try XCTUnwrap(baked, "the bake handed back no plan")
@@ -156,9 +157,11 @@ final class LatticeR7OwnershipProof: XCTestCase {
         }
         let saved = LatticePreviewOccupancy.centreOwnershipEnabled
         let savedStep = LatticePreviewOccupancy.stepDownEnabled
+        let savedIncr = LatticePreviewOccupancy.stepDownIncremental
         defer {
             LatticePreviewOccupancy.centreOwnershipEnabled = saved
             LatticePreviewOccupancy.stepDownEnabled = savedStep
+            LatticePreviewOccupancy.stepDownIncremental = savedIncr
             LatticePreviewOccupancy.octreeBakeObserver = nil
         }
         let (before, cellsBefore, regionsBefore, _) = try bakeOnce(ownership: false, token: 11)
@@ -166,6 +169,13 @@ final class LatticeR7OwnershipProof: XCTestCase {
         let (again, cellsAgain, _, _) = try bakeOnce(ownership: true, token: 13)   // null control
         // R7 as first landed (2026-10-05), a yielded cell's share left as air — the step-down's "before"
         let (noStep, cellsNoStep, _, stNoStep) = try bakeOnce(ownership: true, stepDown: false, token: 14)
+        // the rounds re-walk only the slots holding a newly yielded cell: the same bake as full re-walks
+        let (full, cellsFull, _, stFull) = try bakeOnce(ownership: true, incremental: false, token: 15)
+        XCTAssertEqual(full.steppedCellMM, after.steppedCellMM, "★ incremental rounds = full re-walks, bit for bit")
+        XCTAssertEqual(full.field.values.map(\.bitPattern), after.field.values.map(\.bitPattern))
+        XCTAssertEqual(full.steppedOrigin, after.steppedOrigin)
+        XCTAssertEqual(cellsFull, cellsAfter)
+        print("R7-INCR rounds \(stAfter.stepDownRounds) slots re-walked \(stAfter.stepDownSlotsRewalked) vs \(stFull.stepDownRounds) full walks of \(stFull.placeSlotsWalked / Swift.max(1, stFull.stepDownRounds + 2)) slots | place \(String(format: "%.1f", stAfter.placeSeconds)) s vs \(String(format: "%.1f", stFull.placeSeconds)) s (Debug)")
         print("R7-STEPDOWN rounds \(stAfter.stepDownRounds) stepped down \(stAfter.cellsSteppedDown) dropped at the finest rung \(stAfter.cellsDroppedAtFinest) | contested \(stAfter.contestedCells) yielded in the final pass \(stAfter.cellsYielded) straddler pairs \(stAfter.straddlerPairs) | without the step-down: yielded \(stNoStep.cellsYielded)")
         XCTAssertEqual(before.field.origin, after.field.origin, "★ the same texel grid (else the diff means nothing)")
         XCTAssertEqual([before.field.nx, before.field.ny, before.field.nz], [after.field.nx, after.field.ny, after.field.nz])

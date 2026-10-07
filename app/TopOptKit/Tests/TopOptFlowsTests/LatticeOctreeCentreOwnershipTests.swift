@@ -178,6 +178,27 @@ final class LatticeOctreeCentreOwnershipTests: XCTestCase {
         }
     }
 
+    /// ★ The rounds after the first re-walk only the slots that hold a newly yielded cell — the same
+    /// bake, bit for bit, as re-walking every slot every round (the control), for less work.
+    func testIncrementalRoundsAreTheSameBake() throws {
+        let s = corner()
+        let saved = LatticePreviewOccupancy.stepDownIncremental
+        defer { LatticePreviewOccupancy.stepDownIncremental = saved }
+        for dyadic in [true, false] {
+            LatticePreviewOccupancy.stepDownIncremental = false
+            let (full, stFull) = try bake(s, order: [0, 1], dyadic: dyadic)
+            LatticePreviewOccupancy.stepDownIncremental = true
+            let (inc, stInc) = try bake(s, order: [0, 1], dyadic: dyadic)
+            XCTAssertGreaterThan(stInc.stepDownRounds, 0, "positive control: there are rounds to save")
+            XCTAssertEqual(texelArrays(full), texelArrays(inc), "★ bit-identical (dyadic \(dyadic))")
+            XCTAssertEqual(full.steppedCells, inc.steppedCells)
+            XCTAssertEqual(stFull.stepDownRounds, stInc.stepDownRounds)
+            XCTAssertEqual(stFull.cellsSteppedDown, stInc.cellsSteppedDown)
+            XCTAssertLessThan(stInc.stepDownSlotsRewalked, stFull.placeSlotsWalked, "less work")
+            print("R7-INCR-SYNTH dyadic \(dyadic): rounds \(stInc.stepDownRounds) slots re-walked \(stInc.stepDownSlotsRewalked) vs full walks \(stFull.placeSlotsWalked) / \(stInc.placeSlotsWalked)")
+        }
+    }
+
     /// ★ Where no two regions' cells meet, nothing changes: the bake is bit-identical with the rule
     /// on and off.
     func testNothingChangesWhereRegionsDoNotMeet() throws {
