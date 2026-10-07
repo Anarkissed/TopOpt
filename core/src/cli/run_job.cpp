@@ -6397,6 +6397,16 @@ LatticeVariantOutcome lattice_one_variant(
   // every lattice voxel that has a non-lattice neighbour IN THE FACE PLANE. On a voxel
   // grid that IS a true parallel offset of the outline, and unlike a polygon offset it
   // cannot self-overlap at a corner -- which is the property §1.5 asks for.
+  // ── ★ D10/E3: WHAT THE GRADE LEFT, counted BEFORE anything downstream clears it ──
+  // `region_ungradeable` above answers "could the law lattice anything at all". It runs
+  // BEFORE the outline beam, and the beam can take every voxel the law kept. Keeping the
+  // count here is what lets the refusal below name which of the two emptied the mask,
+  // instead of blaming the grade for the beam's work.
+  std::size_t latticed_after_grade = 0;
+  if (graded)
+    for (char m : mask)
+      if (m) ++latticed_after_grade;
+
   if (graded && R.algorithm != LatticeAlgorithm::Organic && job.grading.shape_grade) {
     const double beam =
         lattice_outline_beam_mm(job.grading.min_extrudable_width_mm, solved_grid.spacing);
@@ -6445,6 +6455,66 @@ LatticeVariantOutcome lattice_one_variant(
     // future certificate asks for embedment depth, this is the line to revisit.
   }
 
+  // ── ★ D10/E3: AN EMPTY LATTICE IS A REFUSAL, ON EVERY ALGORITHM ──────────────
+  // (#354's core brief 2026-10-06; reviewer's ruling 2026-10-07.) The ungradeable test
+  // above fires only when the LAW could lattice nothing. When the law latticed voxels and
+  // something downstream took all of them -- the outline beam does exactly that, and on
+  // #354's 3418E167 it took all 4 that survived a swept grade -- the run used to carry on
+  // with an empty mask and finish. Doubled then reported "over 0 voxels" and
+  // "verdict: ACCEPTED" with interior_volume_mm3 0; Stepped refused a few lines below,
+  // but blamed region ids and recommended the algorithm that accepts nothing.
+  //
+  // A refusal costs a solve. THIS costs a print, so it is the more expensive of the two
+  // to get wrong, and it is checked here -- once, for every algorithm, at the point where
+  // the mask is final -- rather than in each algorithm's own branch.
+  //
+  // NOTE on "every algorithm": the beam cannot be the cause under organic, because
+  // `shape_grade` is refused at parse time for organic (job.cpp:2115). The check is still
+  // unconditional, so that anything else that empties the mask is caught by the same
+  // sentence rather than by nothing.
+  if (graded) {
+    std::size_t latticed_now = 0;
+    for (char m : mask)
+      if (m) ++latticed_now;
+    if (latticed_now == 0) {
+      R.ungradeable = true;
+      const long long cleared = R.outline_beam_voxels;
+      std::string why =
+          "no lattice remains to emit, so there is nothing to certify or print -- "
+          "refusing rather than writing a file with zero struts in it and calling it a "
+          "lattice. The grading law latticed " +
+          std::to_string(latticed_after_grade) + " of this variant's " +
+          std::to_string(gf.region_voxels) + " candidate voxels";
+      if (cleared > 0) {
+        // The beam is the cause, and its reach is the number to act on.
+        why += ", and then the outline beam turned " + std::to_string(cleared) +
+               " voxel(s) solid -- every one that was left. Its reach is " +
+               json_num(R.outline_beam_mm) + " mm of beam plus " +
+               json_num(R.outline_bleed_mm) + " mm of bleed = " +
+               json_num(R.outline_inward_mm) +
+               " mm inward from the region outline, set by \"shape_grade_band_mm\" " +
+               json_num(job.grading.shape_grade_band_mm) +
+               " mm; a band of 25 mm or more adds the bleed. Either narrow the band so "
+               "the beam does not reach across the region, or widen the region: a "
+               "lattice needs more depth than the solid beam that frames it.";
+      } else {
+        why +=
+            ", and nothing remained by the time the lattice was emitted. The outline beam "
+            "cleared none, so the loss is upstream of it.";
+      }
+      why += " The law's own fallbacks over the voxels it rejected: "
+             "member_too_thin_for_cell=" +
+             std::to_string(gf.fallback_member_too_thin) +
+             ", strut_unprintable_at_every_cell=" +
+             std::to_string(gf.fallback_strut_unprintable) +
+             ", irrecoverable_by_any_cell_size=" +
+             std::to_string(gf.fallback_irrecoverable_by_cell) + ".";
+      R.ungradeable_reason = why;
+      R.gf = gf;
+      return R;
+    }
+  }
+
   // ── ★ STEPPED (task 2026-08-21-organic-lattice, §4) ────────────────────────
   // One cell per DECLARED region, derived from that region's own FEA-driven density
   // and its own member width, taken VERBATIM. The per-voxel cell field it produces is
@@ -6469,7 +6539,8 @@ LatticeVariantOutcome lattice_one_variant(
           " region(s) had no measurable member width. Stepped derives ONE CELL PER "
           "DECLARED REGION from that region's own FEA density and member width, so a "
           "job whose latticed voxels carry no region id has nothing for it to key "
-          "on — use \"algorithm\": \"doubled\".";
+          "on. No algorithm is recommended here: the one this sentence used to name "
+          "accepts an empty lattice silently, which is the defect above.";
       R.gf = gf;
       return R;
     }

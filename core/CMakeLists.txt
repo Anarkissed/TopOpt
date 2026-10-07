@@ -2113,6 +2113,19 @@ if(OpenCASCADE_FOUND AND Eigen3_FOUND)
     TOPOPT_CLI_EXE="$<TARGET_FILE:topopt_cli>")
   add_test(NAME cli_organic_dead_parity COMMAND test_organic_dead_parity)
 
+  # ★ D10/E3: an empty post-beam mask is a REFUSAL, not a finished part. The decision
+  # sits in run_job.cpp's anonymous namespace and what is under test is what a RUN
+  # concludes, so this runs the binary: one job whose lattice the outline beam clears
+  # entirely (must refuse) and its control, whose lattice survives (must still accept
+  # with a NON-EMPTY lattice, so the pair cannot both pass by refusing everything).
+  add_executable(test_empty_post_beam_mask tests/validation/test_empty_post_beam_mask.cpp)
+  target_link_libraries(test_empty_post_beam_mask PRIVATE topopt)
+  target_compile_definitions(test_empty_post_beam_mask PRIVATE
+    ORGANIC_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/organic"
+    CLI_TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}"
+    TOPOPT_CLI_EXE="$<TARGET_FILE:topopt_cli>")
+  add_test(NAME cli_empty_post_beam_mask COMMAND test_empty_post_beam_mask)
+
   # ★ Every subcommand that writes a receipt stamps the binary that wrote it
   # (reviewer, 2026-10-01). `analyze` and `lattice-variant` return before main.cpp
   # populates the fingerprint, so their run_info.json carried "unknown". Runs the real

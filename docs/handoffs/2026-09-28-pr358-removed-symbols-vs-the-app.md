@@ -338,6 +338,26 @@ are unchanged. Jobs with negative-normal walls or tilted facets change verdict �
 the point of the brief. `test_stepped_plan.cpp` had never set `normal` or `depth_mm`, so
 this check was wholly untested before this commit.
 
+## MEANING CHANGES, addendum 5 (2026-10-07) — an empty lattice is a refusal
+
+From #354's core brief of 2026-10-06 (D10/E3) and the reviewer's ruling of 2026-10-07.
+
+| what | was | is | app impact |
+|---|---|---|---|
+| a job whose grade latticed voxels that the outline beam then cleared ENTIRELY, under `doubled` | **ACCEPTED** — "over 0 voxels", `verdict: ACCEPTED`, `interior_volume_mm3` 0, a finished part with no lattice in it | **REFUSED**, naming what the grade latticed, what the beam cleared, the beam's reach and the band that set it | **the app must expect a refusal where it used to get a file.** This is a false ACCEPTANCE being closed: #354 hit it on 3418E167 converted to Doubled. A refusal costs a solve; this was costing a print |
+| the same case under `stepped` | refused, but blamed "0 latticed voxels carrying 0 distinct region ids … 0 region(s) had no measurable member width" and recommended `"algorithm": "doubled"` | refused with the SAME sentence as doubled, naming the beam | **better diagnosis, same verdict.** The old sentence pointed at region ids, which were not the cause, and recommended the path that accepted nothing |
+| any refusal recommending an algorithm | `use "algorithm": "doubled"` | no algorithm is recommended anywhere on this path | **none** — grepped PR 354's `app/` for the old sentence: no matches |
+
+Note on scope: the beam cannot be the cause under `organic`, because `shape_grade` is
+refused at parse time for organic (job.cpp:2115), so organic has no post-BEAM empty mask
+to reach. The check is unconditional regardless, so anything else that empties the mask is
+caught by the same sentence instead of by nothing.
+
+Unchanged: a job whose lattice survives the beam. The control fixture
+(`empty_after_beam_control.json`, a 10 mm band, under the 25 mm bleed threshold) keeps 440
+of its 750 voxels and is still accepted — and the test requires that count to be non-zero,
+so a future change that emptied every lattice could not pass as "it refuses correctly".
+
 ### The fingerprint defect, for the record
 
 Not the worktree (`git -C core rev-parse` resolves fine there), and not only the
