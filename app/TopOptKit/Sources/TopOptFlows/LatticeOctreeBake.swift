@@ -85,6 +85,34 @@ extension LatticePreviewOccupancy {
     /// ★★ R7: cells and texels shared by two regions go to the owner of their centre; false =
     /// declaration order, the bake before 2026-10-03 (the proof's "before" arm only).
     nonisolated(unsafe) static var centreOwnershipEnabled = true
+    /// ★★ R7's OWNERSHIP RULE, ONE PURE FUNCTION (reviewer, 2026-10-07: "Core will export
+    /// stepped_region_owner(point, regions) with ownership. At that sync, R7 calls it through the
+    /// guarded bridge and your Swift rule goes. Add a parity test"). Everything the bake decides by
+    /// ownership — a contested cell's centre, a shared texel's middle — goes through `owner(of:…)`
+    /// and `ownerRank`, so the swap and the parity test each touch one function.
+    /// (outside its prism?, distance from its face plane, region id) — lower ranks better.
+    public typealias OwnerRank = (outside: Int, planeDistanceMM: Double, region: Int)
+    public static func ownerRank(_ p: SIMD3<Double>, region r: Int, regions: [LatticeRegionSpec]) -> OwnerRank {
+        let reg = regions[r]
+        let inside = LatticeRegionMask.contains(p, region: reg) ? 0 : 1
+        return (inside, abs(simd_dot(p - reg.origin, LatticeRegionMask.unit(reg.normal))), r)
+    }
+    public static func outranks(_ a: OwnerRank, _ b: OwnerRank) -> Bool {
+        if a.outside != b.outside { return a.outside < b.outside }
+        if abs(a.planeDistanceMM - b.planeDistanceMM) > 1e-9 { return a.planeDistanceMM < b.planeDistanceMM }
+        return a.region < b.region                             // an exact tie: the lower id
+    }
+    /// The region that owns point `p` among `candidates` (all regions when nil): the best rank
+    /// among those whose prism CONTAINS it; nil when no candidate's prism does.
+    public static func owner(of p: SIMD3<Double>, regions: [LatticeRegionSpec], among candidates: [Int]? = nil) -> Int? {
+        var best: OwnerRank? = nil
+        for r in candidates ?? Array(regions.indices) {
+            let rr = ownerRank(p, region: r, regions: regions)
+            guard rr.outside == 0 else { continue }
+            if let b = best { if outranks(rr, b) { best = rr } } else { best = rr }
+        }
+        return best?.region
+    }
     /// ★★ R7's STEP-DOWN (reviewer, 2026-10-07, ruling 6: "A yielded cell steps down a rung on
     /// its own region's grid. Each child is judged by its own centre; iterate. Stop at the
     /// region's finest rung."); false = R7 as first landed, where a yielded cell's own share of
@@ -745,17 +773,8 @@ extension LatticePreviewOccupancy {
         var candidates: [Candidate] = []
         var accepted: [Bool] = []
         var currentSlot = SlotTag(ladder: -1, idx: SIMD3<Int>(repeating: 0))
-        /// (outside its prism?, distance from its face plane, region id) — lower ranks better.
-        func rank(_ r: Int, _ p: SIMD3<Double>) -> (Int, Double, Int) {
-            let reg = regions[r]
-            let inside = LatticeRegionMask.contains(p, region: reg) ? 0 : 1
-            return (inside, abs(simd_dot(p - reg.origin, LatticeRegionMask.unit(reg.normal))), r)
-        }
-        func outranks(_ a: (Int, Double, Int), _ b: (Int, Double, Int)) -> Bool {
-            if a.0 != b.0 { return a.0 < b.0 }
-            if abs(a.1 - b.1) > 1e-9 { return a.1 < b.1 }
-            return a.2 < b.2                                   // an exact tie: the lower id
-        }
+        func rank(_ r: Int, _ p: SIMD3<Double>) -> OwnerRank { Self.ownerRank(p, region: r, regions: regions) }
+        func outranks(_ a: OwnerRank, _ b: OwnerRank) -> Bool { Self.outranks(a, b) }
         // ★★ THE STEP-DOWN (reviewer, 2026-10-07, ruling 6). A cell that yielded is, on the next
         // walk, treated as one that does not fit: its own region tries its next rung there — the
         // dyadic children, or the any-step packer's smaller sizes — and each of those is judged
@@ -1258,14 +1277,10 @@ extension LatticePreviewOccupancy {
             for (i, c) in candidates.enumerated() where !contest[i].isEmpty {
                 stats.contestedCells += 1
                 let centre = c.lo + SIMD3<Double>(repeating: 0.5 * c.S)
-                var best = rank(c.region, centre)
-                for r in Set(contest[i].map { candidates[$0].region }) {
-                    let rr = rank(r, centre)
-                    if outranks(rr, best) { best = rr }
-                }
-                // a contesting region whose prism CONTAINS the centre owns it; a centre in no
-                // contesting prism has no owner by the rule, and the cell stays
-                if best.0 == 0, best.2 != c.region { accepted[i] = false }
+                // the owner among the cell's region and its contesters: a region whose prism
+                // CONTAINS the centre; a centre in no such prism has no owner, and the cell stays
+                let among = [c.region] + Set(contest[i].map { candidates[$0].region }).sorted()
+                if let o = Self.owner(of: centre, regions: regions, among: among), o != c.region { accepted[i] = false }
             }
             for (i, js) in contest.enumerated() where accepted[i] {
                 stats.straddlerPairs += js.filter { $0 > i && accepted[$0] }.count
