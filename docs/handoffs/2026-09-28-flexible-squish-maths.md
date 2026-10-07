@@ -588,3 +588,114 @@ from Flexible; they belong to #354's/#358's owners.
 **Side effect, handled:** the app suite rewrites other tasks' evidence files
 (`docs/handoffs/assets/*.png`, `evidence/**`). They were restored to their committed
 contents; four that a docs commit had swept in (`91e1f0d1`) were restored in `592d9155`.
+
+## C1 addendum: angled presses (maintainer ruling 2026-10-07, via the reviewer)
+
+**What:** a press may state a direction, and may span 2+ ADJACENT face regions (an edge
+or a corner) as ONE footprint: one frame, one stack, one squish map, one stamp grid.
+#362's 3D squish and overlays read this stack; the app never recomputes the direction.
+
+**Wire form** (`flexible.faces[]`, loaded entries only):
+- `"press_direction": [x, y, z]`: optional, model frame, normalised by core. When absent,
+  the load is today's area-weighted inward normal, byte-identical.
+- `"face_region_ids": [a, b, …]`: 2 or more adjacent regions, used INSTEAD of
+  `"face_region_id"` (both together are refused). The press is named by its first id;
+  check_stamps and the file names use that id. A region may be in only one press.
+- `job_schema` accepts both keys only in the flexible block; a lattice region carrying
+  `press_direction` is refused as an unknown key (tested).
+
+**Core:**
+- `face_frame(…, const Vec3* press_direction)` and `face_frame_cut(…, press_direction)`:
+  with a direction, load = that direction; X/Y follow the principal-axis rule on the
+  footprint projected perpendicular to it; `build_angle` / `side` come from it, so more
+  than 15° off Z is a side press under the unchanged R6 and tier rules (gyroid only,
+  'estimated').
+- `build_press_stack(model, footprint[], regions, grid, mask, rotation, build_dir, pitch,
+  press_direction*)`: one stack over the union, with rays along the direction through the
+  projected footprint. It refuses, with FlexibleError naming the region(s):
+  - a direction that does not point INTO the part over every footprint triangle
+    (outward or edge-on);
+  - a non-adjacent set (connectivity through shared mesh edges, `face_adjacency`);
+  - a multi-region footprint containing a cut sector (not yet; a sector pressed alone,
+    angled or not, works);
+  - a region listed twice.
+- `build_stack(face, …)` is unchanged; its new `footprint_region_ids = {face.id}`.
+  `Stack` gains `footprint_region_ids`, `press_direction_given`, `press_direction`.
+- Conflicts and handover need no new code: `find_stack_conflicts` tests the 15° same-axis
+  rule against the press's direction; a voxel's depth is measured from the footprint
+  surface along that ray (its nearest footprint face); the blend is one cell across the
+  boundary, as before.
+- **Receipt:** a `"press"` block per face, written ONLY when a new key is present:
+  `{"footprint_face_region_ids": […], "direction": [x, y, z] | "inward normal",
+  "build_angle_deg", "side"}`. The frame block (direction, build angle, side) and the
+  conflicts / handover blocks were already there.
+
+**Tests, red first** (stubs reproduced today's behaviour: direction ignored, footprint
+= first region):
+- `test_flexible_press` (new): 19 of 25 checks red before the fix, 25/25 after:
+  - cube edge at 45° (load, side, 5,091 ± 2 % columns, exits half bottom / half left,
+    X across the edge 84.85 mm, Y along it 60 mm);
+  - cube corner at 54.74° (hexagon ± 2 %, exits a third each to bottom / left / front,
+    the tie rule);
+  - edge without a direction (the union's inward normal);
+  - tilted top face 20° (tan 20° of the columns leave through the side); no direction =
+    build_stack exactly;
+  - refusals: outward, edge-on, an edge press along the top face, non-adjacent
+    top + bottom (names both), multi-region with a sector;
+  - a single angled sector works;
+  - a vertical edge press crossing a top press (one handover pair, blended);
+  - an angled press within 15° of a loaded bottom (conflict).
+- `test_flexible_job` +12 checks: the keys, every refusal, and the keys refused outside
+  the flexible block. Before the fix the parser refused `face_region_ids` (crash).
+- `test_flexible_run` +5 checks: an edge press runs end to end; the receipt's press block
+  is exact; R6 makes it gyroid-only; an outward press is refused naming the region; a
+  plain job's receipt has no press block. 3 red before the fix.
+
+**Byte-identity without the new keys:** all earlier flexible suites pass unchanged, and
+re-running scenarios (a)–(c) through the new binary changes ONLY the provenance lines
+(`fingerprint`, `build_time`). Every SVG, CSV and receipt value is identical.
+
+**A real bug found and fixed on the way: `principal_2d`.** When the larger principal
+moment lay along the second basis axis and the off-diagonal was rounding noise (~1e-12,
+not exactly 0), the eigenvector `(l1 − c, b)` was two noise terms and X pointed
+anywhere. The cube edge's X came out ALONG the edge, skewed 1.7°. It now takes whichever
+of `(l1 − c, b)` and `(b, l1 − a)` is larger. The edge-frame check was the red test.
+Scenarios (a)–(c) are unaffected (identical output).
+
+**Evidence (d) `d_cube_top_and_vertical_edge_press`:**
+- a 60 mm cube pressed on top (10 kg) and on its vertical +X/+Y edge (15 kg, along
+  (−1, −1, 0), centre → edge curve);
+- 90° apart: one handover (101, 103), 34,671 mm³ blended, no conflict;
+- the edge press is side (90°), 'estimated', gyroid only;
+- its other end is the −Y and −X faces (0.51 / 0.49).
+- **Finding for #362:** an edge press's columns run from 0.7 to 84.7 mm long (rays near
+  the footprint's rim cut only a small corner). The 762 columns under 12.7 mm squish past
+  the tested strain under the even pressure: dark red on the tier map. That is geometry,
+  not a bug. The app should expect a "beyond the data" rim on edge and corner presses
+  unless the drawn squish fades to the rim.
+
+### Meaning changes (addendum)
+
+| where | before | now | test |
+|---|---|---|---|
+| `faces.cpp` `principal_2d` | a near-diagonal moment matrix whose long axis was the 2nd basis axis gave a noise-driven X | the larger of the two eigenvector forms | `test_flexible_press` "edge: X is the long (84.9 mm) direction across the edge" |
+| flexible job block | a loaded face named one region; its load was always the inward normal | optional `press_direction`; optional `face_region_ids` (2+ adjacent regions, one footprint) | `test_flexible_job` `test_press_keys`; `test_flexible_press`; `test_flexible_run` |
+| flexible receipt | — | a `press` block, only when a new key is present | `test_flexible_run` (exact string; absent on a plain job) |
+
+### BRIDGE CONTRACT additions (for #362 / A1)
+
+- `Stack build_press_stack(model, std::vector<const ResolvedFaceRegion*> footprint,
+  regions, grid, lattice_mask, rotation_deg, build_dir, pitch_mm, const Vec3*
+  press_direction /* nullptr = inward normal */)`. Throws FlexibleError naming the
+  region on: an outward or edge-on direction, a non-adjacent set, a multi-region press
+  with a cut sector, a region listed twice.
+- `FaceFrame face_frame(…, const Vec3* press_direction = nullptr)`,
+  `face_frame_cut(…, press_direction)`.
+- `Stack::footprint_region_ids`, `press_direction_given`, `press_direction` (unit);
+  `frame.load`, `frame.build_angle_deg`, `frame.side` follow the direction.
+- Everything downstream (`design_face`, `check_stamp`, `find_stack_conflicts`,
+  `assemble_density_field`, `recommend`) takes the press stack unchanged.
+
+NOT in scope (per the ruling): off-axis curve data (the tables stay build-Z; the side
+rule covers angled presses until the rig measures face, edge and corner coupons); large
+deformation, folds and self-contact.

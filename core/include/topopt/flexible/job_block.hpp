@@ -66,6 +66,13 @@ struct JobFlexibleFace {
   std::vector<double> curve_x_x, curve_x_y;
   std::vector<double> curve_y_x, curve_y_y;
   std::vector<double> curve_c_x, curve_c_y;
+  // ANGLED PRESSES (C1 addendum). `footprint_region_ids`: 2+ adjacent regions pressed
+  // as ONE footprint (an edge or corner), the press named by the first (= face_region_id);
+  // empty for a single-face press. `press_direction`: the stated direction (model frame,
+  // normalised by core) when `has_press_direction`; else the inward normal.
+  std::vector<int> footprint_region_ids;
+  bool has_press_direction = false;
+  Vec3 press_direction{0, 0, 0};
   bool has_design_stamp = false;
   flexible::StampGrid design_stamp;
   bool skin_on = true;

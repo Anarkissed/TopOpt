@@ -2381,7 +2381,7 @@ target_sources(topopt PRIVATE
 
 set(TOPOPT_FLEXIBLE_MATERIALS_JSON
   "${CMAKE_CURRENT_SOURCE_DIR}/src/materials/flexible_materials.json")
-foreach(_flex_test data squish curve faces field recommend job run)
+foreach(_flex_test data squish curve faces field recommend job run press)
   add_executable(test_flexible_${_flex_test} tests/unit/test_flexible_${_flex_test}.cpp)
   target_link_libraries(test_flexible_${_flex_test} PRIVATE topopt)
   target_compile_definitions(test_flexible_${_flex_test} PRIVATE

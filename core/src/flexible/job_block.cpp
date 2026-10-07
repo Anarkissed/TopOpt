@@ -169,13 +169,33 @@ std::shared_ptr<const JobFlexible> parse_flexible_block(const std::string& job_j
     const std::string fw = w + ".faces[" + std::to_string(i) + "]";
     const Value& fv = json::as_object(faces.arr[i], fw);
     JobFlexibleFace face;
-    face.face_region_id = json::as_int(json::require(fv, "face_region_id", fw), fw + ".face_region_id");
-    if (declared.find(face.face_region_id) == declared.end())
-      json::fail(fw + ".face_region_id", std::to_string(face.face_region_id) +
-                                             " is not declared in \"loads.face_regions\"");
-    if (!seen.insert(face.face_region_id).second)
-      json::fail(fw + ".face_region_id",
-                 std::to_string(face.face_region_id) + " appears twice; one entry per face");
+    // A press names ONE region ("face_region_id") or 2+ adjacent regions pressed as one
+    // footprint ("face_region_ids": an edge or corner press, named by its first id).
+    std::vector<int> ids;
+    if (const Value* list = json::find(fv, "face_region_ids")) {
+      if (json::find(fv, "face_region_id"))
+        json::fail(fw, "give \"face_region_id\" or \"face_region_ids\", not both");
+      json::as_array(*list, fw + ".face_region_ids");
+      for (std::size_t k = 0; k < list->arr.size(); ++k)
+        ids.push_back(json::as_int(list->arr[k], fw + ".face_region_ids[" + std::to_string(k) + "]"));
+      if (ids.size() < 2)
+        json::fail(fw + ".face_region_ids", "needs at least 2 regions (one region: \"face_region_id\")");
+      for (std::size_t a = 0; a < ids.size(); ++a)
+        for (std::size_t b = a + 1; b < ids.size(); ++b)
+          if (ids[a] == ids[b])
+            json::fail(fw + ".face_region_ids", std::to_string(ids[a]) + " is listed twice");
+      face.footprint_region_ids = ids;
+    } else {
+      ids.push_back(json::as_int(json::require(fv, "face_region_id", fw), fw + ".face_region_id"));
+    }
+    face.face_region_id = ids.front();
+    for (int id : ids) {
+      if (declared.find(id) == declared.end())
+        json::fail(fw + ".face_region_id", std::to_string(id) + " is not declared in \"loads.face_regions\"");
+      if (!seen.insert(id).second)
+        json::fail(fw + ".face_region_id",
+                   std::to_string(id) + " appears twice; one entry per face (a region is in one press)");
+    }
     face.role = json::as_string(json::require(fv, "role", fw), fw + ".role");
     face.skin_on = json::as_bool(json::require(fv, "skin_on", fw), fw + ".skin_on");
     if (face.role == "resting") {
@@ -185,10 +205,19 @@ std::shared_ptr<const JobFlexible> parse_flexible_block(const std::string& job_j
     }
     if (face.role != "loaded") json::fail(fw + ".role", "must be \"loaded\" or \"resting\"");
     ++loaded;
-    json::reject_unknown(fv, {"face_region_id", "role", "skin_on", "frame_rotation_deg", "weight_n",
-                              "deepest_squish_mm", "mode", "curve_x", "curve_y",
-                              "curve_centre_edge", "design_stamp"},
+    json::reject_unknown(fv, {"face_region_id", "face_region_ids", "press_direction", "role", "skin_on",
+                              "frame_rotation_deg", "weight_n", "deepest_squish_mm", "mode", "curve_x",
+                              "curve_y", "curve_centre_edge", "design_stamp"},
                          fw);
+    if (const Value* pd = json::find(fv, "press_direction")) {
+      const std::string pw = fw + ".press_direction";
+      if (!pd->is_array() || pd->arr.size() != 3) json::fail(pw, "must be [x, y, z]");
+      face.press_direction = {json::as_number(pd->arr[0], pw + "[0]"), json::as_number(pd->arr[1], pw + "[1]"),
+                              json::as_number(pd->arr[2], pw + "[2]")};
+      const Vec3& d = face.press_direction;
+      if (!(d.x * d.x + d.y * d.y + d.z * d.z > 0.0)) json::fail(pw, "must be non-zero");
+      face.has_press_direction = true;
+    }
     json::require_all(fv, {"weight_n", "deepest_squish_mm", "mode"}, fw);
     if (const Value* r = json::find(fv, "frame_rotation_deg")) {
       face.frame_rotation_deg = json::as_int(*r, fw + ".frame_rotation_deg");

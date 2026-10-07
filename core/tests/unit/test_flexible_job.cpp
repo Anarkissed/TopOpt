@@ -193,6 +193,58 @@ static void test_refusals() {
         "relative_density belongs to the other stages");
 }
 
+// C1 addendum: angled presses — `press_direction` and `face_region_ids` (2+ adjacent
+// regions as one footprint), in the flexible block only.
+static void test_press_keys() {
+  const std::string edge =
+      "{\"face_region_ids\":[101,103],\"press_direction\":[-1,0,-1],\"role\":\"loaded\","
+      "\"weight_n\":100,\"deepest_squish_mm\":2,\"mode\":\"both\",\"curve_x\":[[0,1],[1,1]],"
+      "\"curve_y\":[[0,1],[1,1]],\"skin_on\":true}";
+  const JobDescription j = parse_job(job(body("[" + edge + "]")));
+  const JobFlexibleFace& f = j.flexible->faces[0];
+  CHECK(f.face_region_id == 101 && f.footprint_region_ids == std::vector<int>({101, 103}) &&
+            f.has_press_direction && f.press_direction.x == -1 && f.press_direction.z == -1,
+        "an edge press: named by its first id, footprint and direction kept");
+  const JobDescription t = parse_job(job(body("[" + replace(kFace, "\"skin_on\":true",
+                                                         "\"skin_on\":true,\"press_direction\":[0.2,0,-1]") + "]")));
+  CHECK(t.flexible->faces[0].has_press_direction && t.flexible->faces[0].footprint_region_ids.empty(),
+        "a tilted single-face press");
+  CHECK(!parse_job(job(body())).flexible->faces[0].has_press_direction, "absent: no direction");
+  CHECK(refused(job(body("[" + replace(edge, "\"face_region_ids\":[101,103]",
+                                       "\"face_region_id\":101,\"face_region_ids\":[101,103]") + "]")),
+                "not both"),
+        "face_region_id and face_region_ids together are refused");
+  CHECK(refused(job(body("[" + replace(edge, "[101,103]", "[101]") + "]")), "at least 2"),
+        "a one-region list is refused (use face_region_id)");
+  CHECK(refused(job(body("[" + replace(edge, "[101,103]", "[101,101]") + "]")), "twice"),
+        "a repeated region is refused");
+  CHECK(refused(job(body("[" + replace(edge, "[101,103]", "[101,999]") + "]")), "not declared"),
+        "an undeclared region in a footprint is refused");
+  CHECK(refused(job(body("[" + replace(edge, "[-1,0,-1]", "[0,0,0]") + "]")), "press_direction"),
+        "a zero direction is refused");
+  CHECK(refused(job(body("[" + replace(edge, "[-1,0,-1]", "[1,0]") + "]")), "press_direction"),
+        "a two-number direction is refused");
+  CHECK(refused(job(body("[" + edge + "," + kFace + "]")), "appears twice"),
+        "a region in two presses is refused");
+  CHECK(refused(job(body("[{\"face_region_id\":100,\"role\":\"resting\",\"skin_on\":true,"
+                         "\"press_direction\":[0,0,1]}," + kFace + "]")),
+                "unknown key \"press_direction\""),
+        "a resting face takes no direction");
+  // job_schema: the keys exist ONLY in the flexible block.
+  bool lattice_refused = false;
+  try {
+    parse_job("{\"model\":\"pad.stl\",\"material\":\"PLA\",\"mode\":\"analyze\",\"resolution\":10,"
+              "\"output\":{\"report\":\"r.json\",\"mesh_format\":\"stl\",\"mesh_prefix\":\"v\"},"
+              "\"loads\":{\"face_regions\":[{\"id\":101,\"add\":[1]}]},"
+              "\"lattice\":{\"cell_mm\":5,\"strut_radius_mm\":0.5,\"regions\":[{\"role\":\"include\","
+              "\"kind\":\"region\",\"region_id\":101,\"press_direction\":[0,0,-1],"
+              "\"geometry\":{\"depth_mm\":5}}]}}");
+  } catch (const JobError& e) {
+    lattice_refused = std::string(e.what()).find("press_direction") != std::string::npos;
+  }
+  CHECK(lattice_refused, "press_direction is refused outside the flexible block");
+}
+
 static void test_region_mask() {
   StepModel m = flexible_test::box(100, 100, 20);
   const VoxelGrid g = voxelize(m.mesh, 50);  // 2 mm
@@ -222,6 +274,7 @@ int main() {
   test_parse();
   test_refusals();
   test_region_mask();
+  test_press_keys();
   std::printf("test_flexible_job: %d checks, %d failures\n", g_checks, g_failures);
   return g_failures == 0 ? 0 : 1;
 }

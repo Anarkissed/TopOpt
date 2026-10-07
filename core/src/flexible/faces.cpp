@@ -77,15 +77,21 @@ void principal_2d(double a, double b, double c, double& dx, double& dy, bool& ti
   const double r = std::sqrt(0.25 * (a - c) * (a - c) + b * b);
   const double l1 = mean + r, l2 = mean - r;
   tied = !(l1 > 0.0) || (l1 - l2) <= 1e-4 * std::fabs(l1);
-  if (std::fabs(b) > 1e-300) {
-    dx = l1 - c;
-    dy = b;
-  } else if (a >= c) {
+  // Two expressions of the same eigenvector, (l1 - c, b) and (b, l1 - a). Take the
+  // LARGER: when b is rounding noise and the long axis is the second basis axis, the
+  // first is two noise terms and points anywhere (an edge press's X came out along the
+  // edge, 1.7 degrees skewed; C1 addendum).
+  const double ux = l1 - c, uy = b, wx = b, wy = l1 - a;
+  if (ux * ux + uy * uy >= wx * wx + wy * wy) {
+    dx = ux;
+    dy = uy;
+  } else {
+    dx = wx;
+    dy = wy;
+  }
+  if (!(dx * dx + dy * dy > 0.0)) {  // isotropic: any axis (the caller's tie rule decides)
     dx = 1;
     dy = 0;
-  } else {
-    dx = 0;
-    dy = 1;
   }
   const double n = std::sqrt(dx * dx + dy * dy);
   dx /= n;
@@ -318,7 +324,7 @@ double axis_angle_deg(const Vec3& a, const Vec3& b) {
 }
 
 FaceFrame face_frame(const TriangleMesh& mesh, const std::vector<int>& triangles,
-                     int rotation_deg, const Vec3& build_dir) {
+                     int rotation_deg, const Vec3& build_dir, const Vec3* press_direction) {
   FaceFrame f;
   if (rotation_deg % 90 != 0)
     throw FlexibleError("frame_rotation_deg must be a multiple of 90 (got " +
@@ -358,9 +364,10 @@ FaceFrame face_frame(const TriangleMesh& mesh, const std::vector<int>& triangles
     return f;
   }
   const Vec3 n = unit(sum);
-  f.load = mul(n, -1.0);
+  // An ANGLED press states its direction; otherwise the load is the inward normal.
+  f.load = press_direction != nullptr ? unit(*press_direction) : mul(n, -1.0);
   f.area_mm2 = area;
-  f.projected_area_mm2 = dot(sum, n);
+  f.projected_area_mm2 = dot(sum, mul(f.load, -1.0));
   f.centroid = mul(cen, 1.0 / area);
   // spread: two-sweep over triangles of non-negligible area
   {
@@ -433,10 +440,28 @@ FaceFrame face_frame(const TriangleMesh& mesh, const std::vector<int>& triangles
   return f;
 }
 
+namespace {
+Stack stack_impl(const StepModel& model, const ResolvedFaceRegion& face,
+                 const std::vector<ResolvedFaceRegion>& regions, const VoxelGrid& grid,
+                 const std::vector<char>& lattice_mask, int rotation_deg, const Vec3& build_dir,
+                 double pitch_mm, const Vec3* press_direction);
+}  // namespace
+
 Stack build_stack(const StepModel& model, const ResolvedFaceRegion& face,
                   const std::vector<ResolvedFaceRegion>& regions, const VoxelGrid& grid,
                   const std::vector<char>& lattice_mask, int rotation_deg,
                   const Vec3& build_dir, double pitch_mm) {
+  Stack s = stack_impl(model, face, regions, grid, lattice_mask, rotation_deg, build_dir, pitch_mm,
+                       nullptr);
+  s.footprint_region_ids = {face.id};
+  return s;
+}
+
+namespace {
+Stack stack_impl(const StepModel& model, const ResolvedFaceRegion& face,
+                 const std::vector<ResolvedFaceRegion>& regions, const VoxelGrid& grid,
+                 const std::vector<char>& lattice_mask, int rotation_deg, const Vec3& build_dir,
+                 double pitch_mm, const Vec3* press_direction) {
   if (!(pitch_mm > 0.0) || !std::isfinite(pitch_mm))
     throw FlexibleError("build_stack: the column pitch must be > 0");
   if (model.triangle_face.size() != model.mesh.triangles.size())
@@ -446,7 +471,8 @@ Stack build_stack(const StepModel& model, const ResolvedFaceRegion& face,
   s.pitch_mm = pitch_mm;
   s.cuts = face.cuts;
   // A sector (a region with cuts) is framed from its own clipped geometry (B6).
-  s.frame = face_frame_cut(model.mesh, face.member_triangles, face.cuts, rotation_deg, build_dir);
+  s.frame = face_frame_cut(model.mesh, face.member_triangles, face.cuts, rotation_deg, build_dir,
+                           press_direction);
   if (!s.frame.valid)
     throw FlexibleError("face region " + std::to_string(face.id) + ": " + s.frame.reason);
   const TraceOut t = trace(model, face, s.frame, grid, lattice_mask, pitch_mm);
@@ -499,6 +525,7 @@ Stack build_stack(const StepModel& model, const ResolvedFaceRegion& face,
   std::sort(s.exit_regions.begin(), s.exit_regions.end(), by_share);
   return s;
 }
+}  // namespace
 
 bool passes_cuts(const std::vector<RegionCut>& cuts, const Vec3& p) {
   for (const RegionCut& c : cuts) {
@@ -510,8 +537,8 @@ bool passes_cuts(const std::vector<RegionCut>& cuts, const Vec3& p) {
 
 FaceFrame face_frame_cut(const TriangleMesh& mesh, const std::vector<int>& triangles,
                          const std::vector<RegionCut>& cuts, int rotation_deg,
-                         const Vec3& build_dir) {
-  if (cuts.empty()) return face_frame(mesh, triangles, rotation_deg, build_dir);
+                         const Vec3& build_dir, const Vec3* press_direction) {
+  if (cuts.empty()) return face_frame(mesh, triangles, rotation_deg, build_dir, press_direction);
   // Clip every triangle by every half-space (Sutherland–Hodgman on a convex polygon),
   // then fan the pieces into a mesh of their own. The winding is kept, so the load
   // direction is the clipped face's own.
@@ -546,9 +573,101 @@ FaceFrame face_frame_cut(const TriangleMesh& mesh, const std::vector<int>& trian
       clipped.triangles.push_back({base, base + static_cast<int>(i), base + static_cast<int>(i) + 1});
     }
   }
-  FaceFrame f = face_frame(clipped, ids, rotation_deg, build_dir);
+  FaceFrame f = face_frame(clipped, ids, rotation_deg, build_dir, press_direction);
   if (!f.valid && ids.empty()) f.reason = "the region's cuts leave nothing of its faces";
   return f;
+}
+
+Stack build_press_stack(const StepModel& model,
+                        const std::vector<const ResolvedFaceRegion*>& footprint,
+                        const std::vector<ResolvedFaceRegion>& regions, const VoxelGrid& grid,
+                        const std::vector<char>& lattice_mask, int rotation_deg,
+                        const Vec3& build_dir, double pitch_mm, const Vec3* press_direction) {
+  if (footprint.empty()) throw FlexibleError("a press needs at least one face region");
+  auto name = [](const ResolvedFaceRegion* r) { return "face region " + std::to_string(r->id); };
+  for (std::size_t i = 0; i < footprint.size(); ++i)
+    for (std::size_t j = i + 1; j < footprint.size(); ++j)
+      if (footprint[i]->id == footprint[j]->id)
+        throw FlexibleError(name(footprint[i]) + " appears twice in one press");
+  if (footprint.size() > 1) {
+    for (const ResolvedFaceRegion* r : footprint)
+      if (!r->cuts.empty())
+        throw FlexibleError(name(r) + " is a cut sector; an edge or corner press made of sectors is "
+                            "not supported yet (press the sector alone, or use whole regions)");
+    // ADJACENCY: the regions must form one connected footprint through shared mesh edges.
+    const std::vector<std::vector<int>> adj = face_adjacency(model);
+    auto touches = [&](const ResolvedFaceRegion* a, const ResolvedFaceRegion* b) {
+      for (int fa : a->member_faces)
+        for (int fb : b->member_faces) {
+          if (fa == fb) return true;
+          if (fa >= 0 && static_cast<std::size_t>(fa) < adj.size() &&
+              std::binary_search(adj[static_cast<std::size_t>(fa)].begin(),
+                                 adj[static_cast<std::size_t>(fa)].end(), fb))
+            return true;
+        }
+      return false;
+    };
+    std::vector<char> reached(footprint.size(), 0);
+    std::vector<std::size_t> todo{0};
+    reached[0] = 1;
+    while (!todo.empty()) {
+      const std::size_t i = todo.back();
+      todo.pop_back();
+      for (std::size_t j = 0; j < footprint.size(); ++j)
+        if (!reached[j] && touches(footprint[i], footprint[j])) {
+          reached[j] = 1;
+          todo.push_back(j);
+        }
+    }
+    for (std::size_t j = 0; j < footprint.size(); ++j)
+      if (!reached[j])
+        throw FlexibleError(name(footprint[0]) + " and " + name(footprint[j]) +
+                            " are not adjacent (no shared edge); an edge or corner press needs "
+                            "one connected footprint");
+  }
+  Vec3 dir{0, 0, 0};
+  if (press_direction != nullptr) {
+    const double n = norm(*press_direction);
+    if (!std::isfinite(n) || !(n > 0.0))
+      throw FlexibleError("press_direction must be a finite, non-zero vector");
+    dir = mul(*press_direction, 1.0 / n);
+    // INTO THE PART over the whole footprint: every triangle must face against it.
+    for (const ResolvedFaceRegion* r : footprint)
+      for (int ti : r->member_triangles) {
+        if (ti < 0 || static_cast<std::size_t>(ti) >= model.mesh.triangles.size()) continue;
+        const auto& t = model.mesh.triangles[static_cast<std::size_t>(ti)];
+        const Vec3& a = model.mesh.vertices[static_cast<std::size_t>(t[0])];
+        const Vec3& b = model.mesh.vertices[static_cast<std::size_t>(t[1])];
+        const Vec3& c = model.mesh.vertices[static_cast<std::size_t>(t[2])];
+        const Vec3 av = cross(sub(b, a), sub(c, a));
+        const double an = norm(av);
+        if (!(an > 1e-12)) continue;
+        if (!(dot(av, dir) < -1e-9 * an))
+          throw FlexibleError("press_direction does not point into the part over " + name(r) +
+                              ": part of it faces along the direction or edge-on to it");
+      }
+  }
+  ResolvedFaceRegion u;  // the footprint as one region
+  u.id = footprint[0]->id;
+  u.name = footprint[0]->name;
+  u.cuts = footprint.size() == 1 ? footprint[0]->cuts : std::vector<RegionCut>{};
+  for (const ResolvedFaceRegion* r : footprint) {
+    u.member_faces.insert(u.member_faces.end(), r->member_faces.begin(), r->member_faces.end());
+    u.member_triangles.insert(u.member_triangles.end(), r->member_triangles.begin(),
+                              r->member_triangles.end());
+    u.area_mm2 += r->area_mm2;
+  }
+  std::sort(u.member_faces.begin(), u.member_faces.end());
+  u.member_faces.erase(std::unique(u.member_faces.begin(), u.member_faces.end()), u.member_faces.end());
+  std::sort(u.member_triangles.begin(), u.member_triangles.end());
+  u.member_triangles.erase(std::unique(u.member_triangles.begin(), u.member_triangles.end()),
+                           u.member_triangles.end());
+  Stack s = stack_impl(model, u, regions, grid, lattice_mask, rotation_deg, build_dir, pitch_mm,
+                       press_direction != nullptr ? &dir : nullptr);
+  for (const ResolvedFaceRegion* r : footprint) s.footprint_region_ids.push_back(r->id);
+  s.press_direction_given = press_direction != nullptr;
+  if (s.press_direction_given) s.press_direction = dir;
+  return s;
 }
 
 }  // namespace flexible
