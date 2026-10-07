@@ -5,6 +5,7 @@
 
 #include "topopt/flexible/faces.hpp"
 #include "topopt/flexible/field.hpp"
+#include "topopt/flexible/squish.hpp"
 
 #include <cmath>
 #include <cstdio>
@@ -153,7 +154,7 @@ static void test_refusals(const Cube& c) {
         "an edge press whose direction runs along the top face is refused, naming the top");
   CHECK(refused([&] { c.press({101, 100}, nullptr); }, {"101", "100", "adjacent"}),
         "a non-adjacent pair (top + bottom) is refused, naming both");
-  // a multi-region footprint containing a cut sector: not supported yet
+  // (sector footprints: see test_corner_sectors)
   std::vector<FaceRegionSpec> sp = one_region_per_face();
   FaceRegionSpec half;
   half.id = 200;
@@ -161,14 +162,105 @@ static void test_refusals(const Cube& c) {
   half.cuts = {RegionCut{{30, 0, 0}, {1, 0, 0}, false}};
   sp.push_back(half);
   const std::vector<ResolvedFaceRegion> rs2 = resolve_face_regions(c.m, sp);
-  CHECK(refused([&] {
-          build_press_stack(c.m, {&region(rs2, 200), &region(rs2, 103)}, rs2, c.g, c.lat, 0, kZ, 1.0, &de);
-        }, {"200", "sector"}),
-        "a multi-region press with a cut sector is refused (not yet supported)");
   // a cut sector pressed ALONE at an angle still works
   const Vec3 d{-std::sin(0.2), 0, -std::cos(0.2)};
   const Stack h = build_press_stack(c.m, {&region(rs2, 200)}, rs2, c.g, c.lat, 0, kZ, 1.0, &d);
   CHECK(veq(h.frame.load, unit(d)) && h.columns.size() > 0, "a single angled sector is pressed");
+}
+
+// RULING (2026-10-07): cut SECTORS in multi-face presses. The realistic corner press is
+// the corner AREA of each face; the rest of each face keeps its own press, so sectors
+// share one face between a face press and a corner press.
+static void test_corner_sectors() {
+  const StepModel m = box(60, 60, 60);
+  const VoxelGrid g = voxelize(m.mesh, 60);
+  std::vector<FaceRegionSpec> sp = one_region_per_face();
+  auto sector = [&](int id, int face, std::vector<RegionCut> cuts) {
+    FaceRegionSpec r;
+    r.id = id;
+    r.add = {face};
+    r.cuts = cuts;
+    sp.push_back(r);
+  };
+  // the 20 mm corner area at (60, 60, 60) of the top (+Z), right (+X) and back (+Y)
+  sector(301, 1, {RegionCut{{40, 0, 0}, {1, 0, 0}, false}, RegionCut{{0, 40, 0}, {0, 1, 0}, false}});
+  sector(303, 3, {RegionCut{{0, 40, 0}, {0, 1, 0}, false}, RegionCut{{0, 0, 40}, {0, 0, 1}, false}});
+  sector(304, 4, {RegionCut{{40, 0, 0}, {1, 0, 0}, false}, RegionCut{{0, 0, 40}, {0, 0, 1}, false}});
+  // the rest of the top keeps its own straight press: x < 40 (one half-space region)
+  sector(311, 1, {RegionCut{{40, 0, 0}, {-1, 0, 0}, true}});
+  const std::vector<ResolvedFaceRegion> rs = resolve_face_regions(m, sp);
+  const std::vector<char> lat = all_solid(g);
+  const Vec3 dc = unit({-1, -1, -1});
+  const Stack k = build_press_stack(m, {&region(rs, 301), &region(rs, 303), &region(rs, 304)}, rs, g, lat, 0, kZ,
+                                    1.0, &dc);
+  const double hex = 3.0 * 400.0 / std::sqrt(3.0);  // three 20x20 areas seen at cos = 1/√3
+  CHECK(veq(k.frame.load, dc) && k.frame.side && std::fabs(k.columns.size() - hex) <= 0.03 * hex,
+        "a corner press of three corner SECTORS: its own stack, the projected hexagon");
+  CHECK(std::fabs(k.frame.area_mm2 - 1200.0) < 1e-6, "the frame is the three sectors' area (clipped), not the faces'");
+  bool inside = true;
+  for (const StackColumn& col : k.columns) {
+    const Vec3 p = k.frame.from_uv(col.u_mm, col.v_mm);
+    const Vec3 e{p.x + dc.x * col.entry_t, p.y + dc.y * col.entry_t, p.z + dc.z * col.entry_t};
+    if (e.x < 40 - 1e-6 || e.y < 40 - 1e-6 || e.z < 40 - 1e-6) inside = false;
+  }
+  CHECK(inside, "every column enters through a corner sector (x, y, z >= 40)");
+  // the rest of the top, pressed straight down, alongside: a handover, not a conflict;
+  // a voxel under the rest of the top belongs to the top press alone.
+  const Stack rest = build_press_stack(m, {&region(rs, 311)}, rs, g, lat, 0, kZ, 1.0, nullptr);
+  CHECK(find_stack_conflicts(g, lat, {&rest, &k}).empty(), "the rest-of-top press and the corner press do not conflict");
+  // a region in the corner press and the top's full region in another press is the
+  // job layer's refusal (one press per region); core still refuses a non-adjacent pair:
+  CHECK(refused([&] {
+          build_press_stack(m, {&region(rs, 301), &region(rs, 100)}, rs, g, lat, 0, kZ, 1.0, &dc);
+        }, {"301", "100", "adjacent"}),
+        "a top sector + the bottom is still refused as non-adjacent");
+  // a direction that points out of one sector refuses, naming it
+  const Vec3 bad = unit({-1, -1, 1});
+  CHECK(refused([&] {
+          build_press_stack(m, {&region(rs, 301), &region(rs, 303)}, rs, g, lat, 0, kZ, 1.0, &bad);
+        }, {"301", "into the part"}),
+        "a direction out of the top sector is refused, naming it");
+}
+
+// B5 for sector presses: the stack owns only voxels that project onto ITS sectors, even
+// inside a column cell that straddles a sector's edge.
+static void test_sector_ownership() {
+  const StepModel m = box(60, 60, 60);
+  const VoxelGrid g = voxelize(m.mesh, 75);  // 0.8 mm voxels, a pitch that straddles x = 40
+  std::vector<FaceRegionSpec> sp = one_region_per_face();
+  FaceRegionSpec t;
+  t.id = 401;
+  t.add = {1};
+  // a DIAGONAL cut (x + y >= 70), so column cells straddle the sector's edge
+  t.cuts = {RegionCut{{35, 35, 0}, {1, 1, 0}, false}};
+  sp.push_back(t);
+  const std::vector<ResolvedFaceRegion> rs = resolve_face_regions(m, sp);
+  const std::vector<char> lat = all_solid(g);
+  const Vec3 d = unit({-1, 0, -1});
+  const Stack e = build_press_stack(m, {&region(rs, 401), &region(rs, 103)}, rs, g, lat, 0, kZ, 1.3, &d);
+  const FlexibleData fd = load_flexible_data(FLEXIBLE_MATERIALS_JSON_PATH);
+  const CurveSet s = curve_set(fd, "varioshore_tpu", 220, "gyroid").set;
+  SquishMap mp;
+  mp.mode = "both";
+  mp.x_x = mp.y_x = {0, 1};
+  mp.x_y = mp.y_y = {1, 1};
+  mp.deepest_squish_mm = 4;
+  const BuildParams bp{"gyroid", 1, 0.42};
+  const FaceDesign de = design_face(s, e, mp, 30 * 9.81, nullptr, bp, tier_band(fd.catalogue.error_bands, s.tier, true, 1));
+  const DensityField f = assemble_density_field(g, lat, {{&e, &de}}, bp);
+  int stray = 0, owned = 0;
+  for (int k = 0; k < g.nz; ++k)
+    for (int j = 0; j < g.ny; ++j)
+      for (int i = 0; i < g.nx; ++i) {
+        if (!(f.density[g.index(i, j, k)] > 0.0)) continue;
+        ++owned;
+        const Vec3 p = g.voxel_center(i, j, k);
+        // back along the press to the surface: the top (z = 60) or the right (x = 60)
+        const double x_on_top = p.x + (60.0 - p.z);
+        if (x_on_top <= 60.0 && x_on_top + p.y < 70.0 - 1e-9) ++stray;
+      }
+  std::printf("  sector press: %d voxels owned, %d project onto the top outside the sector\n", owned, stray);
+  CHECK(owned > 0 && stray == 0, "a sector press owns no voxel that projects outside its sector");
 }
 
 static void test_conflicts() {
@@ -215,6 +307,8 @@ int main() {
   test_edge_and_corner(c);
   test_tilted_single_face(c);
   test_refusals(c);
+  test_corner_sectors();
+  test_sector_ownership();
   test_conflicts();
   std::printf("test_flexible_press: %d checks, %d failures\n", g_checks, g_failures);
   return g_failures == 0 ? 0 : 1;

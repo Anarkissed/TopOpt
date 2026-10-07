@@ -13,6 +13,11 @@
 
 namespace topopt {
 namespace flexible {
+// Clip `triangles` of `mesh` by every half-space in `cuts` and append the pieces (fanned)
+// to `clipped`, their indices to `ids`. Winding kept.
+void clip_into(const TriangleMesh& mesh, const std::vector<int>& triangles,
+               const std::vector<RegionCut>& cuts, TriangleMesh& clipped, std::vector<int>& ids);
+
 namespace {
 
 constexpr double kPi = 3.14159265358979323846;
@@ -151,12 +156,18 @@ struct Tracer {
   int bnu = 1, bnv = 1;
   std::vector<std::vector<int>> bins;
 
-  Tracer(const StepModel& m, const FaceFrame& f, const ResolvedFaceRegion& face, double pitch)
+  std::vector<int> part;  // per member triangle: which footprint part (multi-sector presses)
+
+  Tracer(const StepModel& m, const FaceFrame& f, const ResolvedFaceRegion& face, double pitch,
+         const std::vector<int>* tri_part)
       : model(m), frame(f) {
     const std::size_t nt = m.mesh.triangles.size();
     member.assign(nt, 0);
+    part.assign(nt, 0);
     for (int t : face.member_triangles)
       if (t >= 0 && static_cast<std::size_t>(t) < nt) member[static_cast<std::size_t>(t)] = 1;
+    if (tri_part != nullptr)
+      for (std::size_t t = 0; t < nt && t < tri_part->size(); ++t) part[t] = (*tri_part)[t];
     area_vec.resize(nt);
     bu0 = f.u_min - pitch;
     bv0 = f.v_min - pitch;
@@ -209,10 +220,15 @@ struct TraceOut {
   int unresolved = 0;
 };
 
+// `part_cuts` (multi-sector presses): each footprint part's own cuts, triangle → part in
+// `tri_part`; an entry hit counts only where it passes ITS part's cuts. Null = one part
+// with `face.cuts`, tested at the first entry hit (the original rule).
 TraceOut trace(const StepModel& model, const ResolvedFaceRegion& face, const FaceFrame& f,
-               const VoxelGrid& grid, const std::vector<char>& mask, double pitch) {
+               const VoxelGrid& grid, const std::vector<char>& mask, double pitch,
+               const std::vector<std::vector<RegionCut>>* part_cuts = nullptr,
+               const std::vector<int>* tri_part = nullptr) {
   TraceOut out;
-  const Tracer tr(model, f, face, pitch);
+  const Tracer tr(model, f, face, pitch, tri_part);
   out.nu = std::max(1, static_cast<int>(std::ceil(f.u_extent_mm / pitch - 1e-9)));
   out.nv = std::max(1, static_cast<int>(std::ceil(f.v_extent_mm / pitch - 1e-9)));
   double diag = 0.0;
@@ -235,6 +251,7 @@ TraceOut trace(const StepModel& model, const ResolvedFaceRegion& face, const Fac
       const Vec3 o = add(f.centroid, add(mul(f.x_axis, uc), mul(f.y_axis, vc)));
       double t_entry = 1e300;
       bool entered = false;
+      int entry_part = 0;
       for (int ti : *bin) {
         const std::size_t t = static_cast<std::size_t>(ti);
         if (!tr.member[t] || dot(tr.area_vec[t], f.load) >= 0.0) continue;  // entering only
@@ -244,8 +261,12 @@ TraceOut trace(const StepModel& model, const ResolvedFaceRegion& face, const Fac
                      model.mesh.vertices[static_cast<std::size_t>(tri[1])],
                      model.mesh.vertices[static_cast<std::size_t>(tri[2])], th) &&
             th < t_entry) {
+          if (part_cuts != nullptr &&
+              !passes_cuts((*part_cuts)[static_cast<std::size_t>(tr.part[t])], add(o, mul(f.load, th))))
+            continue;  // this sector's triangle, but outside the sector
           t_entry = th;
           entered = true;
+          entry_part = tr.part[t];
         }
       }
       if (!entered) continue;
@@ -266,6 +287,7 @@ TraceOut trace(const StepModel& model, const ResolvedFaceRegion& face, const Fac
       col.v_mm = v;
       col.area_mm2 = pitch * pitch;
       col.entry_t = t_entry;
+      col.part = entry_part;
       double t_exit = 1e300;
       for (int ti : *bin) {
         const std::size_t t = static_cast<std::size_t>(ti);
@@ -444,7 +466,9 @@ namespace {
 Stack stack_impl(const StepModel& model, const ResolvedFaceRegion& face,
                  const std::vector<ResolvedFaceRegion>& regions, const VoxelGrid& grid,
                  const std::vector<char>& lattice_mask, int rotation_deg, const Vec3& build_dir,
-                 double pitch_mm, const Vec3* press_direction);
+                 double pitch_mm, const Vec3* press_direction,
+                 const std::vector<std::vector<RegionCut>>* part_cuts = nullptr,
+                 const std::vector<int>* tri_part = nullptr, const FaceFrame* frame = nullptr);
 }  // namespace
 
 Stack build_stack(const StepModel& model, const ResolvedFaceRegion& face,
@@ -461,7 +485,9 @@ namespace {
 Stack stack_impl(const StepModel& model, const ResolvedFaceRegion& face,
                  const std::vector<ResolvedFaceRegion>& regions, const VoxelGrid& grid,
                  const std::vector<char>& lattice_mask, int rotation_deg, const Vec3& build_dir,
-                 double pitch_mm, const Vec3* press_direction) {
+                 double pitch_mm, const Vec3* press_direction,
+                 const std::vector<std::vector<RegionCut>>* part_cuts, const std::vector<int>* tri_part,
+                 const FaceFrame* frame) {
   if (!(pitch_mm > 0.0) || !std::isfinite(pitch_mm))
     throw FlexibleError("build_stack: the column pitch must be > 0");
   if (model.triangle_face.size() != model.mesh.triangles.size())
@@ -471,11 +497,13 @@ Stack stack_impl(const StepModel& model, const ResolvedFaceRegion& face,
   s.pitch_mm = pitch_mm;
   s.cuts = face.cuts;
   // A sector (a region with cuts) is framed from its own clipped geometry (B6).
-  s.frame = face_frame_cut(model.mesh, face.member_triangles, face.cuts, rotation_deg, build_dir,
-                           press_direction);
+  s.frame = frame != nullptr ? *frame
+                             : face_frame_cut(model.mesh, face.member_triangles, face.cuts, rotation_deg,
+                                              build_dir, press_direction);
+  if (part_cuts != nullptr) s.part_cuts = *part_cuts;
   if (!s.frame.valid)
     throw FlexibleError("face region " + std::to_string(face.id) + ": " + s.frame.reason);
-  const TraceOut t = trace(model, face, s.frame, grid, lattice_mask, pitch_mm);
+  const TraceOut t = trace(model, face, s.frame, grid, lattice_mask, pitch_mm, part_cuts, tri_part);
   if (t.columns.empty())
     throw FlexibleError("face region " + std::to_string(face.id) + " has no column at a " +
                         std::to_string(pitch_mm) + " mm pitch");
@@ -501,6 +529,39 @@ Stack stack_impl(const StepModel& model, const ResolvedFaceRegion& face,
     }
   }
   if (s.latticed_columns == 0) s.lattice_mm_min = 0.0;
+  if (!s.cuts.empty() || !s.part_cuts.empty()) {
+    // Bin the footprint triangles by column cell for stack_owns_projection.
+    s.cell_tris.assign(static_cast<std::size_t>(s.nu) * static_cast<std::size_t>(s.nv), {});
+    for (int ti : face.member_triangles) {
+      if (ti < 0 || static_cast<std::size_t>(ti) >= model.mesh.triangles.size()) continue;
+      const auto& tri = model.mesh.triangles[static_cast<std::size_t>(ti)];
+      Stack::FootTri ft{model.mesh.vertices[static_cast<std::size_t>(tri[0])],
+                        model.mesh.vertices[static_cast<std::size_t>(tri[1])],
+                        model.mesh.vertices[static_cast<std::size_t>(tri[2])],
+                        tri_part != nullptr ? (*tri_part)[static_cast<std::size_t>(ti)] : 0};
+      if (dot(cross(sub(ft.b, ft.a), sub(ft.c, ft.a)), s.frame.load) >= 0.0) continue;  // not facing the press
+      double u0 = 1e300, u1 = -1e300, v0 = 1e300, v1 = -1e300;
+      for (const Vec3* q : {&ft.a, &ft.b, &ft.c}) {
+        double u = 0, v = 0;
+        s.frame.to_uv(*q, u, v);
+        u0 = std::min(u0, u);
+        u1 = std::max(u1, u);
+        v0 = std::min(v0, v);
+        v1 = std::max(v1, v);
+      }
+      const int i0 = std::max(0, static_cast<int>(std::floor(u0 / pitch_mm))),
+                i1 = std::min(s.nu - 1, static_cast<int>(std::floor(u1 / pitch_mm)));
+      const int j0 = std::max(0, static_cast<int>(std::floor(v0 / pitch_mm))),
+                j1 = std::min(s.nv - 1, static_cast<int>(std::floor(v1 / pitch_mm)));
+      if (i0 > i1 || j0 > j1) continue;
+      const int idx = static_cast<int>(s.foot_tris.size());
+      s.foot_tris.push_back(ft);
+      for (int j = j0; j <= j1; ++j)
+        for (int i = i0; i <= i1; ++i)
+          s.cell_tris[static_cast<std::size_t>(j) * static_cast<std::size_t>(s.nu) + static_cast<std::size_t>(i)]
+              .push_back(idx);
+    }
+  }
   s.lattice_mm_mean = s.latticed_columns ? lat_sum / s.latticed_columns : 0.0;
   s.exit_unresolved_fraction = static_cast<double>(t.unresolved) /
                                static_cast<double>(s.columns.size());
@@ -544,6 +605,14 @@ FaceFrame face_frame_cut(const TriangleMesh& mesh, const std::vector<int>& trian
   // direction is the clipped face's own.
   TriangleMesh clipped;
   std::vector<int> ids;
+  clip_into(mesh, triangles, cuts, clipped, ids);
+  FaceFrame f = face_frame(clipped, ids, rotation_deg, build_dir, press_direction);
+  if (!f.valid && ids.empty()) f.reason = "the region's cuts leave nothing of its faces";
+  return f;
+}
+
+void clip_into(const TriangleMesh& mesh, const std::vector<int>& triangles,
+               const std::vector<RegionCut>& cuts, TriangleMesh& clipped, std::vector<int>& ids) {
   for (int ti : triangles) {
     if (ti < 0 || static_cast<std::size_t>(ti) >= mesh.triangles.size()) continue;
     const auto& t = mesh.triangles[static_cast<std::size_t>(ti)];
@@ -573,9 +642,6 @@ FaceFrame face_frame_cut(const TriangleMesh& mesh, const std::vector<int>& trian
       clipped.triangles.push_back({base, base + static_cast<int>(i), base + static_cast<int>(i) + 1});
     }
   }
-  FaceFrame f = face_frame(clipped, ids, rotation_deg, build_dir, press_direction);
-  if (!f.valid && ids.empty()) f.reason = "the region's cuts leave nothing of its faces";
-  return f;
 }
 
 Stack build_press_stack(const StepModel& model,
@@ -590,10 +656,6 @@ Stack build_press_stack(const StepModel& model,
       if (footprint[i]->id == footprint[j]->id)
         throw FlexibleError(name(footprint[i]) + " appears twice in one press");
   if (footprint.size() > 1) {
-    for (const ResolvedFaceRegion* r : footprint)
-      if (!r->cuts.empty())
-        throw FlexibleError(name(r) + " is a cut sector; an edge or corner press made of sectors is "
-                            "not supported yet (press the sector alone, or use whole regions)");
     // ADJACENCY: the regions must form one connected footprint through shared mesh edges.
     const std::vector<std::vector<int>> adj = face_adjacency(model);
     auto touches = [&](const ResolvedFaceRegion* a, const ResolvedFaceRegion* b) {
@@ -662,12 +724,70 @@ Stack build_press_stack(const StepModel& model,
   std::sort(u.member_triangles.begin(), u.member_triangles.end());
   u.member_triangles.erase(std::unique(u.member_triangles.begin(), u.member_triangles.end()),
                            u.member_triangles.end());
-  Stack s = stack_impl(model, u, regions, grid, lattice_mask, rotation_deg, build_dir, pitch_mm,
-                       press_direction != nullptr ? &dir : nullptr);
+  bool any_cuts = false;
+  for (const ResolvedFaceRegion* r : footprint) any_cuts = any_cuts || !r->cuts.empty();
+  Stack s;
+  if (footprint.size() > 1 && any_cuts) {
+    // SECTORS IN A MULTI-FACE PRESS (ruling 2026-10-07): each part keeps its OWN cuts.
+    // The frame is built from every part's triangles clipped by its own cuts; the trace
+    // accepts an entry hit only inside its part; each column records its part, so the
+    // stack owns only what projects onto its sectors (B5).
+    std::vector<std::vector<RegionCut>> part_cuts;
+    std::vector<int> tri_part(model.mesh.triangles.size(), 0);
+    TriangleMesh clipped;
+    std::vector<int> ids;
+    for (std::size_t k = 0; k < footprint.size(); ++k) {
+      part_cuts.push_back(footprint[k]->cuts);
+      for (int t : footprint[k]->member_triangles)
+        if (t >= 0 && static_cast<std::size_t>(t) < tri_part.size()) {
+          for (std::size_t j = 0; j < k; ++j)
+            if (std::binary_search(footprint[j]->member_triangles.begin(),
+                                   footprint[j]->member_triangles.end(), t))
+              throw FlexibleError(name(footprint[j]) + " and " + name(footprint[k]) +
+                                  " are sectors of the SAME face in one press; give the press "
+                                  "one region for that face");
+          tri_part[static_cast<std::size_t>(t)] = static_cast<int>(k);
+        }
+      clip_into(model.mesh, footprint[k]->member_triangles, footprint[k]->cuts, clipped, ids);
+    }
+    const FaceFrame fr = face_frame(clipped, ids, rotation_deg, build_dir, press_direction != nullptr ? &dir : nullptr);
+    if (!fr.valid) throw FlexibleError(name(footprint[0]) + ": " + fr.reason);
+    s = stack_impl(model, u, regions, grid, lattice_mask, rotation_deg, build_dir, pitch_mm,
+                   press_direction != nullptr ? &dir : nullptr, &part_cuts, &tri_part, &fr);
+  } else {
+    s = stack_impl(model, u, regions, grid, lattice_mask, rotation_deg, build_dir, pitch_mm,
+                   press_direction != nullptr ? &dir : nullptr);
+  }
   for (const ResolvedFaceRegion* r : footprint) s.footprint_region_ids.push_back(r->id);
   s.press_direction_given = press_direction != nullptr;
   if (s.press_direction_given) s.press_direction = dir;
   return s;
+}
+
+bool stack_owns_projection(const Stack& s, const Vec3& p) {
+  if (s.cuts.empty() && s.part_cuts.empty()) return true;
+  double u = 0, v = 0;
+  s.frame.to_uv(p, u, v);
+  const int iu = static_cast<int>(std::floor(u / s.pitch_mm)), iv = static_cast<int>(std::floor(v / s.pitch_mm));
+  if (iu < 0 || iv < 0 || iu >= s.nu || iv >= s.nv || s.cell_tris.empty()) return false;
+  const Vec3 back = mul(s.frame.load, -1.0);
+  double best = 1e300;
+  int part = -1;
+  Vec3 hit{0, 0, 0};
+  for (int k : s.cell_tris[static_cast<std::size_t>(iv) * static_cast<std::size_t>(s.nu) +
+                           static_cast<std::size_t>(iu)]) {
+    const Stack::FootTri& ft = s.foot_tris[static_cast<std::size_t>(k)];
+    double th = 0.0;
+    if (line_hit(p, back, ft.a, ft.b, ft.c, th) && th >= -1e-9 && th < best) {
+      best = th;
+      part = ft.part;
+      hit = add(p, mul(back, th));
+    }
+  }
+  if (part < 0) return false;
+  const std::vector<RegionCut>& cuts =
+      s.part_cuts.empty() ? s.cuts : s.part_cuts[static_cast<std::size_t>(part)];
+  return passes_cuts(cuts, hit);
 }
 
 }  // namespace flexible

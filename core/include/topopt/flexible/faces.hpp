@@ -93,6 +93,7 @@ struct StackColumn {
   int iu = 0, iv = 0;        // cell in the column grid
   double u_mm = 0.0, v_mm = 0.0;
   double area_mm2 = 0.0;     // pitch² (⟂ load)
+  int part = 0;              // which footprint part it enters through (multi-sector presses)
   double entry_t = 0.0;      // along the load, from the frame plane to the face
   double exit_t = 0.0;       // ... to where the ray leaves the part
   double lattice_mm = 0.0;   // latticed length inside [entry, exit]
@@ -117,6 +118,17 @@ struct Stack {
   // direction when the press is angled (`press_direction_given`; else the load is the
   // inward normal).
   std::vector<int> footprint_region_ids;
+  // A multi-face press of SECTORS: each footprint part's own cuts (index = column.part).
+  // Empty otherwise (a single region uses `cuts`).
+  std::vector<std::vector<RegionCut>> part_cuts;
+  // For stacks with cuts (sectors): the footprint's triangles (vertices + part) binned by
+  // column cell, so ownership can cast each voxel's OWN ray back to the surface (B5).
+  struct FootTri {
+    Vec3 a, b, c;
+    int part = 0;
+  };
+  std::vector<FootTri> foot_tris;
+  std::vector<std::vector<int>> cell_tris;  // nu*nv -> indices into foot_tris
   bool press_direction_given = false;
   Vec3 press_direction{0, 0, 0};  // unit, when given
   FaceFrame frame;
@@ -164,13 +176,21 @@ bool passes_cuts(const std::vector<RegionCut>& cuts, const Vec3& p);
 //   - a direction that does not point INTO the part over every footprint triangle
 //     (any triangle facing along it or edge-on);
 //   - a footprint whose regions are not connected by shared mesh edges (non-adjacent);
-//   - a multi-region footprint containing a cut sector (not supported yet).
+//   - two sectors of the SAME face in one press (give that face one region).
+// A footprint may mix whole regions and cut SECTORS (the corner AREA of each face,
+// ruling 2026-10-07): each part keeps its own cuts.
 // build_stack(face, …) is build_press_stack({&face}, …, nullptr), unchanged.
 Stack build_press_stack(const StepModel& model,
                         const std::vector<const ResolvedFaceRegion*>& footprint,
                         const std::vector<ResolvedFaceRegion>& regions, const VoxelGrid& grid,
                         const std::vector<char>& lattice_mask, int rotation_deg,
                         const Vec3& build_dir, double pitch_mm, const Vec3* press_direction);
+
+// Does stack `s` own model point `p` under its sector cuts? Casts p back along the load
+// to the footprint surface (the triangles binned at its column cell), and tests the cuts
+// of the part it lands on. True for a stack without cuts. False when the back-ray misses
+// the footprint (p projects outside it) or lands outside its sector (B5).
+bool stack_owns_projection(const Stack& s, const Vec3& p);
 
 // Angle between two load LINES (0..90°): the sign of a direction does not matter.
 double axis_angle_deg(const Vec3& a, const Vec3& b);

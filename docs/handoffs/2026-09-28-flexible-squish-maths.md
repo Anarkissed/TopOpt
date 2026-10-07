@@ -616,9 +616,21 @@ or a corner) as ONE footprint: one frame, one stack, one squish map, one stamp g
   - a direction that does not point INTO the part over every footprint triangle
     (outward or edge-on);
   - a non-adjacent set (connectivity through shared mesh edges, `face_adjacency`);
-  - a multi-region footprint containing a cut sector (not yet; a sector pressed alone,
-    angled or not, works);
-  - a region listed twice.
+  - a region listed twice; two sectors of the SAME face in one press.
+- **Cut SECTORS in multi-face presses (reviewer ruling, 2026-10-07):** a footprint may
+  mix whole regions and sectors, e.g. the corner AREA of each face, while the rest of each
+  face keeps its own press (one press per region still holds, so sectors are how a face
+  is shared).
+  - Each part keeps its own cuts. The frame is built from every part's triangles clipped
+    by its own cuts (`clip_into`).
+  - The trace accepts an entry hit only inside its part, and each column records its part.
+  - Ownership (B5) casts the voxel's OWN ray back along the press to the footprint
+    (`stack_owns_projection`, triangles binned per column cell) and tests the cuts of the
+    sector it lands on. The column's entry depth is not enough: on a face tilted to the
+    press, and at the fold between two faces, a voxel in a column can project onto a
+    different place.
+  - Adjacency between sectors is face-level (sectors of adjacent faces, or a sector and
+    a whole adjacent face).
 - `build_stack(face, …)` is unchanged; its new `footprint_region_ids = {face.id}`.
   `Stack` gains `footprint_region_ids`, `press_direction_given`, `press_direction`.
 - Conflicts and handover need no new code: `find_stack_conflicts` tests the 15° same-axis
@@ -645,6 +657,16 @@ or a corner) as ONE footprint: one frame, one stack, one squish map, one stamp g
   - a single angled sector works;
   - a vertical edge press crossing a top press (one handover pair, blended);
   - an angled press within 15° of a loaded bottom (conflict).
+- `test_flexible_press`, sectors (red first: the old code refused them):
+  - a corner press of three 20 mm corner sectors: the projected hexagon ± 3 %, frame
+    area exactly 1200 mm² (clipped), every column entering through a sector;
+  - the rest of the top (its own sector) pressed straight down alongside: no conflict;
+  - non-adjacent and outward refusals name the sector;
+  - **ownership:** an edge press of a DIAGONALLY cut top sector (x + y ≥ 70) + the right
+    face, at 0.8 mm voxels. Every voxel the field assigns traces back onto the sector:
+    312,565 owned, 0 stray. Controls: with the cut test removed, 901 strays (red); my
+    first attempt (column entry depth, then the entry facet's plane) left 593 strays at
+    the fold, which is why ownership casts each voxel's own ray.
 - `test_flexible_job` +12 checks: the keys, every refusal, and the keys refused outside
   the flexible block. Before the fix the parser refused `face_region_ids` (crash).
 - `test_flexible_run` +5 checks: an edge press runs end to end; the receipt's press block
@@ -691,7 +713,9 @@ Scenarios (a)–(c) are unaffected (identical output).
   with a cut sector, a region listed twice.
 - `FaceFrame face_frame(…, const Vec3* press_direction = nullptr)`,
   `face_frame_cut(…, press_direction)`.
-- `Stack::footprint_region_ids`, `press_direction_given`, `press_direction` (unit);
+- `bool stack_owns_projection(stack, p)`: B5 ownership for sector stacks.
+- `Stack::footprint_region_ids`, `press_direction_given`, `press_direction` (unit),
+  `part_cuts` (multi-sector presses), `StackColumn::part`;
   `frame.load`, `frame.build_angle_deg`, `frame.side` follow the direction.
 - Everything downstream (`design_face`, `check_stamp`, `find_stack_conflicts`,
   `assemble_density_field`, `recommend`) takes the press stack unchanged.
