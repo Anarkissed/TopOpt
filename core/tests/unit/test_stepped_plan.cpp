@@ -4,6 +4,7 @@
 // sizes would pack a part that does not match the preview the maintainer approved.
 #include "topopt/beam_network.hpp"
 #include "topopt/stepped_plan.hpp"
+#include "topopt/lattice_algorithm.hpp"
 #include "topopt/lattice.hpp"
 
 #include <algorithm>
@@ -803,6 +804,50 @@ int main() {
   test_packed_slot_covers_exactly_once();
   test_subdivision_preserves_the_member();
   test_seam_welds_only_when_subdivided();
+  // ── ★ WHICH CERTIFICATE RUNS (task 2026-09-28-lattice-types-core) ───────────
+  // `refuse_stepped_structural` REQUIRES any-step Stepped under Structural to name
+  // `structural_certification: "beam_network"`, and core did not run it: the only call
+  // sat inside `algorithm == "organic" && intent == "structural"`, so the TENSOR
+  // certified instead -- the exact seam over-claim that refusal exists to prevent.
+  // The decision is now one pure function, here, where a test can reach it, including
+  // the combinations no job can produce today.
+  {
+    using topopt::LatticeAlgorithm;
+    using topopt::LatticeCertificateKind;
+    using topopt::lattice_certificate_kind;
+
+    CHECK(lattice_certificate_kind(LatticeAlgorithm::Stepped, true) ==
+              LatticeCertificateKind::BeamNetwork,
+          "certificate: any-step Stepped (a plan is present) takes the BEAM NETWORK");
+    CHECK(lattice_certificate_kind(LatticeAlgorithm::Stepped, false) ==
+              LatticeCertificateKind::HomogenisedTensor,
+          "certificate: legacy Stepped (no plan) keeps the tensor");
+    CHECK(lattice_certificate_kind(LatticeAlgorithm::Organic, true) ==
+                  LatticeCertificateKind::BeamNetwork &&
+              lattice_certificate_kind(LatticeAlgorithm::Organic, false) ==
+                  LatticeCertificateKind::BeamNetwork,
+          "certificate: organic takes the beam network, plan or not");
+    // Both bits for Doubled, because a plan must NOT silently change its instrument.
+    CHECK(lattice_certificate_kind(LatticeAlgorithm::Doubled, true) ==
+                  LatticeCertificateKind::HomogenisedTensor &&
+              lattice_certificate_kind(LatticeAlgorithm::Doubled, false) ==
+                  LatticeCertificateKind::HomogenisedTensor,
+          "certificate: Doubled keeps the tensor whether or not a plan is present");
+
+    const std::vector<std::string> bn =
+        topopt::lattice_beam_network_certified_algorithms();
+    bool org = false, step = false, dbl = false;
+    for (const std::string& n : bn) {
+      org = org || n == "organic";
+      step = step || n == "stepped";
+      dbl = dbl || n == "doubled";
+    }
+    CHECK(org, "certificate names: organic is beam-network certified");
+    CHECK(step, "certificate names: stepped is beam-network certified (any-step)");
+    CHECK(!dbl, "certificate names: doubled is NOT -- it keeps the tensor");
+    CHECK(bn.size() == 2, "certificate names: exactly those two today");
+  }
+
   std::printf("%s: %d checks, %d failures\n", g_failures == 0 ? "PASS" : "FAIL", g_checks,
               g_failures);
   return g_failures == 0 ? 0 : 1;
