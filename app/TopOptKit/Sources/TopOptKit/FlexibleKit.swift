@@ -201,6 +201,25 @@ public struct FlexStackInfo: Equatable, Sendable {
     public let latticedColumns: Int
     public let latticeMMMin: Double, latticeMMMean: Double, latticeMMMax: Double
     public let stackMMMax: Double
+    /// ★ S1 (#361's 254cb137 — the spec's V2): a SECTOR's ownership is core's own, asked once (see
+    /// FlexSectorVerdict). nil: a stack without cuts (core owns every voxel its columns hold).
+    public var sector: FlexSectorVerdict? = nil
+}
+
+/// ★ S1 (#361's 254cb137 — the spec's V2): core's ownership of a SECTOR stack's voxels. Core's
+/// `in_stack` keeps, of the voxels a sector's columns hold, only those `stack_owns_projection` owns:
+/// the voxel's OWN ray cast back onto the footprint, tested against the cuts of the part it lands on
+/// (it left the old rule — the point projected back by its depth, which the app's port mirrored). Asked
+/// in ONE batch, when the stack is read, for every voxel centre of the scene's grid the columns hold;
+/// `refused` are the voxels core does NOT own (linear grid index, x fastest).
+public struct FlexSectorVerdict: Equatable, Sendable {
+    public let origin: SIMD3<Double>
+    public let spacing: Double
+    public let nx: Int, ny: Int, nz: Int
+    public let refused: Set<Int>
+    public init(origin: SIMD3<Double>, spacing: Double, nx: Int, ny: Int, nz: Int, refused: Set<Int>) {
+        self.origin = origin; self.spacing = spacing; self.nx = nx; self.ny = ny; self.nz = nz; self.refused = refused
+    }
 }
 
 public struct FlexColumnDesign: Equatable, Sendable {
