@@ -47,10 +47,11 @@
 #       is the second basis axis the old (l1 − c, b) was (0, b) and normalised to an exact axis; the new (b, l1 − a)
 #       keeps b/(l1 − a) ≈ 1.5e-18 — the covariance's rounding noise, now carried instead of rounded away.
 #       His pad's top (face 1, regions 1000103 top A / 1000104 top B on r5) and bottom (face 0): UNCHANGED.
-#   (b) frames_m2.txt — 372 lines over 29 regions of the M2 stand (STEP): sub-micro changes, the same cause.
+#   (b) frames_m2.txt — 372 lines over 28 regions of the M2 stand (STEP): sub-micro changes, the same cause.
+#       (★ S1 verification: the counts corrected — 28 regions, not 29; 22 with moved column depths, not 20.)
 #       Every changed region's xAxis/yAxis/uMin/uExtent moved by ulps to 1e-8 relative; the pressed top, face 20:
 #       X axis turned 4.0e-7 degrees (in-plane component −1.62e-8 → −9.25e-9), uMin −68.500001148616803 →
-#       −68.500001042524886, uExtent 137.00000049431847 → ~137.0000004; 20 regions' column depths moved by
+#       −68.500001042524886, uExtent 137.00000049431847 → ~137.0000004; 22 regions' column depths moved by
 #       ≤ 6e-9 relative (sha256-depth, row digests, sampled columns, latticeMM min/mean/max), resting face 18's
 #       axis turned 4.4e-9 degrees. No column count, no lattice count, no exit face changed in any region.
 #       CAUSE: principal_2d, 3121151e.
@@ -87,6 +88,11 @@
 #     No sector fixture went red, so FlexibleStackMembership's cut test is NOT replaced (the spec replaces it with a
 #     batched bridge call to core's stack_owns_projection only if one does). Note: every sector fixture is flat and
 #     perpendicular to its load; no fixture has a CURVED sector, where the two rules differ.
+#     ★ S1 VERIFICATION: a curved-sector fixture DID go red — FlexibleS1VerifyTests, the cylinder's side split by
+#     x ≥ 3 then x + 2z ≥ 37: the app's field differed from core's on 23 voxels (|Δρ| ≤ 0.256; c. 2c889951). The
+#     cut test is REPLACED (26769e2b): the bridge's flexible_scene_stack asks core's stack_owns_projection once for
+#     every voxel a sector's columns hold (FlexStackInfo.sector); owners differ on 0 in all three curved cases; the
+#     old cut test (the verdict stripped) is the red control (23). The controls above, re-run: unchanged.
 #
 # (4) RE-RECORDED AS THE POST-S1 BASE
 #     RECORD=1 SWIFT_DETERMINISTIC_HASHING=1 FLEX_AP_BASE=11b264e8 swift test --skip-build --filter 'TopOptFlowsTests\.FlexibleAngledGoldenRecorder/'
