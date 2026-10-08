@@ -1217,9 +1217,14 @@ struct FitRegionCell {
 // r0_density_range.txt.
 void fill_fit_region_cell(FitRegionCell& f, LatticeTopology topo,
                           double min_extrudable_width_mm, double n_star,
-                          double stated_density = 0.0) {
-  const LatticeCellDerivation d =
-      lattice_derive_cell_for_member(topo, f.extent_mm, min_extrudable_width_mm);
+                          double stated_density = 0.0,
+                          // ★ D1: the job's density cap. Fit's cell floor and its derived
+                          // density both hang off the smallest printable cell, and that is
+                          // the capped one -- `fit.min_printable_cell_mm` was the capped
+                          // number while the per-region receipt printed the uncapped one.
+                          double max_relative_density = 0.0) {
+  const LatticeCellDerivation d = lattice_derive_cell_for_member(
+      topo, f.extent_mm, min_extrudable_width_mm, 0.0, max_relative_density);
   f.min_printable_cell_mm = d.min_printable_cell_mm;
   f.min_width_certifiable_mm = d.min_member_width_certifiable_mm;
   f.min_width_buildable_mm = d.min_member_width_buildable_mm;
@@ -1229,9 +1234,16 @@ void fill_fit_region_cell(FitRegionCell& f, LatticeTopology topo,
   f.feasible = d.feasible_percolation;
   if (!f.feasible) return;
   f.cell_mm = std::max(f.extent_mm / n_star, d.min_printable_cell_mm);
-  const double rho =
-      lattice_min_density_for_strut(topo, f.cell_mm, min_extrudable_width_mm);
-  f.derived_relative_density = rho >= 0.0 ? rho : lattice_rho_max(topo);
+  const double rho = lattice_min_density_for_strut(
+      topo, f.cell_mm, min_extrudable_width_mm, max_relative_density);
+  // ★ D1: when nothing in the band prints at this cell the fallback is the densest the
+  // JOB allows, not the band's top -- reporting a density the job forbids is the same
+  // defect one line up.
+  const double band_top_allowed =
+      (std::isfinite(max_relative_density) && max_relative_density > 0.0)
+          ? std::min(lattice_rho_max(topo), max_relative_density)
+          : lattice_rho_max(topo);
+  f.derived_relative_density = rho >= 0.0 ? rho : band_top_allowed;
   f.stated_relative_density = stated_density;
   f.relative_density =
       stated_density > 0.0 ? stated_density : f.derived_relative_density;
@@ -1273,7 +1285,8 @@ std::vector<FitRegionCell> fit_region_cells(const JobDescription& job,
       f.extent_mm =
           region_thinnest_extent_mm(*roles->includes[include_index].mask);
       fill_fit_region_cell(f, topo, min_extrudable_width_mm, n_star,
-                           r.relative_density);
+                           r.relative_density,
+                                                                                                job.grading.max_relative_density);
       out.push_back(f);
       ++include_index;
       continue;
@@ -1308,7 +1321,8 @@ std::vector<FitRegionCell> fit_region_cells(const JobDescription& job,
     f.job_region_index = ri;
     f.extent_mm = lattice_region_thinnest_extent_mm(r);
     fill_fit_region_cell(f, topo, min_extrudable_width_mm, n_star,
-                         r.relative_density);
+                         r.relative_density,
+                                                                                            job.grading.max_relative_density);
     out.push_back(f);
   }
   return out;
@@ -1557,9 +1571,9 @@ double planned_cell_mm(const JobDescription& job, bool swept_light_floor) {
   const double floor_mm = lattice_cell_printability_floor_mm(
       topo, job.grading.min_extrudable_width_mm);
   // S2: the cell below which NO density in the band prints — the bound Fixed applies.
-  const double abs_floor_mm =
-      job.grading.min_extrudable_width_mm /
-      lattice_strut_diameter_mm(topo, lattice_rho_max(topo), 1.0);
+  // ★ D1: ONE function, and it takes the cap. This was the UNCAPPED floor.
+  const double abs_floor_mm = lattice_min_printable_cell_mm(
+      topo, job.grading.min_extrudable_width_mm, job.grading.max_relative_density);
   CellSizeMode mode = CellSizeMode::Fixed;
   if (!resolve_cell_mode(job.grading.cell_mode, mode))
     return floor_mm;  // unknown mode is refused downstream; report the floor
@@ -1586,7 +1600,8 @@ double planned_cell_mm(const JobDescription& job, bool swept_light_floor) {
                  : cell_plan_finest_printable_cell_mm(
                        topo, job.grading.cell_min_mm,
                        job.grading.cell_max_mm,
-                       job.grading.min_extrudable_width_mm);
+                       job.grading.min_extrudable_width_mm,
+                       job.grading.max_relative_density);  // D1: the cap
     case CellSizeMode::Fit: {
       double finest = 0.0;
       for (const FitRegionCell& f :
@@ -6077,8 +6092,9 @@ LatticeVariantOutcome lattice_one_variant(
 
       const double w_min = job.grading.min_extrudable_width_mm;
       const double n_star = lattice_cells_per_member_min(LatticeTopology::Octet);
-      const double phi_hi = lattice_strut_diameter_mm(lat_topo, 
-          lattice_rho_max(LatticeTopology::Octet), 1.0);
+      // ★ D1: phi at the densest density THE JOB allows, not the band's top.
+      const double phi_hi =
+          w_min / lattice_min_printable_cell_mm(lat_topo, w_min, job.grading.max_relative_density);
 
       for (int want : ids_to_report) {
         LatticeGradedReceipt::RegionCellReport rc;
@@ -6109,10 +6125,11 @@ LatticeVariantOutcome lattice_one_variant(
         // 0 when the part carries no demand at all — the same convention the law
         // uses, and the reason retention disarms itself in that case.
         rc.stress_fraction = part_peak > 0.0 ? peak / part_peak : 0.0;
-        rc.at_thinnest =
-            lattice_derive_cell_for_member(LatticeTopology::Octet, tmin, w_min);
-        rc.at_thickest =
-            lattice_derive_cell_for_member(LatticeTopology::Octet, tmax, w_min);
+        // ★ D1: with the job's cap, so the row reports the floor the run applies.
+        rc.at_thinnest = lattice_derive_cell_for_member(
+            LatticeTopology::Octet, tmin, w_min, 0.0, job.grading.max_relative_density);
+        rc.at_thickest = lattice_derive_cell_for_member(
+            LatticeTopology::Octet, tmax, w_min, 0.0, job.grading.max_relative_density);
 
         // ── THE VERDICT, resolved from measurements only, in the order §2 states.
         // A region carrying load is kept solid by the law regardless of geometry,
@@ -11329,8 +11346,9 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
       // own gate table.
       std::string swept_unprintable_note;
       if (job.grading.present && pf_mode == CellSizeMode::Swept && w_min_fc > 0.0) {
+        // ★ D1: the swept frontier is the capped floor -- the plan can lay no rung below it.
         const double frontier_mm =
-            w_min_fc / lattice_strut_diameter_mm(topo, lattice_rho_max(topo), 1.0);
+            lattice_min_printable_cell_mm(topo, w_min_fc, job.grading.max_relative_density);
         if (job.grading.cell_max_mm < frontier_mm)
           swept_unprintable_note =
               "\n     ★ AND SEPARATELY: your whole swept window (" +
@@ -11581,8 +11599,8 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
           include_regions > 0 && w_min_fc > 0.0 && !(pf_fit && fit_any_feasible);
       if (pf_decidable) {
         const double perc_floor = lattice_percolation_cells_per_member_min(topo);
-        const LatticeCellDerivation d =
-            lattice_derive_cell_for_member(topo, thinnest_mm, w_min_fc);
+        const LatticeCellDerivation d = lattice_derive_cell_for_member(
+            topo, thinnest_mm, w_min_fc, 0.0, job.grading.max_relative_density);
         // Does the PLANNED cell percolate across the thinnest declared region?
         const double planned_cpm = thinnest_mm / cell_mm;
         const bool planned_percolates = planned_cpm >= perc_floor;
@@ -11608,7 +11626,7 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
               json_num(d.min_member_width_certifiable_mm) +
               " mm for a CERTIFIED one — or use a strut line width of at most " +
               json_num((thinnest_mm / perc_floor) *
-                       lattice_strut_diameter_mm(topo, lattice_rho_max(topo), 1.0)) +
+                       (w_min_fc / lattice_min_printable_cell_mm(topo, w_min_fc, job.grading.max_relative_density))) +
               " mm. Your thinnest region has " + json_num(thinnest_mm) +
               " mm. Both are your call, not this pipeline's.";
           std::string why =
@@ -11696,8 +11714,7 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
           // this message names is a remedy the code path no longer overrides.
           if (job.grading.present)
             why += "     A graded cell is raised only to " +
-                   json_num(w_min_fc / lattice_strut_diameter_mm(topo, 
-                                           lattice_rho_max(topo), 1.0)) +
+                   json_num(lattice_min_printable_cell_mm(topo, w_min_fc, job.grading.max_relative_density)) +
                    " mm (the cell below which no density in the band prints), and "
                    "the density is raised with it so the strut still clears your "
                    "strut line width.\n";

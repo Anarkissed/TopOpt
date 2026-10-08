@@ -305,7 +305,9 @@ std::vector<LatticeRegionValidity> lattice_region_validity(
     const VoxelGrid& grid, const std::vector<int>& region_id,
     const std::vector<LatticeRegionSpec>& regions,
     const std::vector<double>& member_width_mm, LatticeTopology topo,
-    double cell_mm, double min_extrudable_width_mm);
+    double cell_mm, double min_extrudable_width_mm,
+    // ★ D1: the job's density cap; 0 = not sent (the band's top, as before).
+    double max_relative_density = 0.0);
 
 // ── the resolved field ──────────────────────────────────────────────────────
 
