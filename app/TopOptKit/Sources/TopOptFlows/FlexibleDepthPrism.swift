@@ -269,15 +269,15 @@ enum FlexibleDepthPrism {
         guard k > 0, !controlOnlyWhileDragging || dragging else { return [] }   // (RED CONTROL: round 3's rule)
         let all = views.contains(.prisms) && !controlOnlyWhileDragging
         let regions = all ? model.settings.loadedFaces.map(\.faceRegionID) : sel.map { [$0] } ?? []
-        return regions.compactMap { r in
+        return regions.flatMap { r -> [ClearanceRenderItem] in
             guard let f = model.settings.face(r), let key = model.key(r), let st = model.stacks[key], let g = model.geometry[key],
                   let v = volume(region: r, stack: st, centres: g.centres, depthMM: f.deepestMM, k: k,
-                                 footprint: model.prismFootprint(r)) else { return nil }
-            if r == sel, dragging { return ClearanceRenderItem(volume: v, selected: true, tint: FlexibleStageStyle.facePrismTint) }
+                                 footprint: model.prismFootprint(r)) else { return [] }
+            if r == sel, dragging { return [ClearanceRenderItem(volume: v, selected: true, tint: FlexibleStageStyle.facePrismTint)] }
             let bright = r == sel && all
-            return ClearanceRenderItem(volume: v, selected: r == sel, tint: FlexibleStageStyle.facePrismTint,
-                                       faceAlpha: bright ? viewSelectedFaceAlpha : restFaceAlpha,
-                                       edgeAlpha: bright ? viewSelectedEdgeAlpha : restEdgeAlpha)
+            return [ClearanceRenderItem(volume: v, selected: r == sel, tint: FlexibleStageStyle.facePrismTint,
+                                        faceAlpha: bright ? viewSelectedFaceAlpha : restFaceAlpha,
+                                        edgeAlpha: bright ? viewSelectedEdgeAlpha : restEdgeAlpha)]
         }
     }
 }

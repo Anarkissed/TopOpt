@@ -196,10 +196,33 @@ final class FlexibleRound6Tests: XCTestCase {
         return out
     }
 
-    /// The items with their fill turned off (their outline alone) — what marks the outline's pixels.
-    static func outlineOnly(_ items: [ClearanceRenderItem]) -> [ClearanceRenderItem] {
-        items.map { ClearanceRenderItem(volume: $0.volume, selected: $0.selected, tint: $0.tint, faceAlpha: 0,
-                                        edgeAlpha: $0.edgeAlpha ?? 0.8, surfaceOnly: $0.surfaceOnly) }
+    /// The pixels the items' OUTLINES cover, drawn GEOMETRICALLY (each segment the pass draws — a glass's boundary;
+    /// a shell's base and floor boundaries and their joins — projected and rasterised, then grown by 2 px), so a fill
+    /// effect (a contact wash) is never mistaken for an outline. (A first cut rendered the items with their fill at 0:
+    /// through the contact pipeline that render carried the wash too, and masked it — the mutation run found it.)
+    func outlineMask(_ items: [ClearanceRenderItem], _ sc: Scene, _ cam: Cam, device: MTLDevice) throws -> [Bool] {
+        let proj = CameraProjection(viewProjection: try renderer(sc, cam, device: device).clipFromModel(aspect: 1),
+                                    viewportSize: CGSize(width: Self.size, height: Self.size))
+        var mask = [Bool](repeating: false, count: Self.size * Self.size)
+        func line(_ a: SIMD3<Float>, _ b: SIMD3<Float>) {
+            guard let p = proj.project(a), let q = proj.project(b) else { return }
+            let n = Int(max(abs(q.x - p.x), abs(q.y - p.y)).rounded(.up)) + 1
+            for i in 0...n {
+                let t = CGFloat(i) / CGFloat(n)
+                let x = Int((p.x + (q.x - p.x) * t).rounded()), y = Int((p.y + (q.y - p.y) * t).rounded())
+                if x >= 0, y >= 0, x < Self.size, y < Self.size { mask[y * Self.size + x] = true }
+            }
+        }
+        for item in items {
+            guard case .shell(let s) = item.volume.shape else { continue }
+            for (a, b) in Self.boundaryEdges(s) {
+                line(s.base[Int(a)], s.base[Int(b)])
+                if !item.surfaceOnly {
+                    line(s.offset[Int(a)], s.offset[Int(b)]); line(s.base[Int(a)], s.offset[Int(a)])
+                }
+            }
+        }
+        return Self.dilate(mask, 2)
     }
 
     /// An item's shell with its triangles reversed (`doubled`: both windings — a cull-none glass).
@@ -311,7 +334,7 @@ final class FlexibleRound6Tests: XCTestCase {
         XCTAssertGreaterThan(dots[1 - front], 0.3, "the other faces away (a pinch: opposite walls)")
         let lit = try render(sc, Self.iso, walls, device: device)
         let d = Self.delta(base, lit)
-        let outline = Self.dilate(Self.delta(base, try render(sc, Self.iso, Self.outlineOnly(walls), device: device)).map { $0 > 0 }, 2)
+        let outline = try outlineMask(walls, sc, Self.iso, device: device)
         var byBucket: [String: [Int]] = [:]
         for i in d.indices where ids[i] == UInt32(frontFace) && !outline[i] { byBucket[Self.bucket(base, i), default: []].append(d[i]) }
         XCTAssertFalse(byBucket.isEmpty)
@@ -328,11 +351,12 @@ final class FlexibleRound6Tests: XCTestCase {
         XCTAssertEqual(stray, 0, "no Group-2 fill elsewhere")
         // the back member alone: its outline, never its fill
         let backOnly = Self.delta(base, try render(sc, Self.iso, [back], device: device))
-        let backOutline = Self.dilate(Self.delta(base, try render(sc, Self.iso, Self.outlineOnly([back]), device: device)).map { $0 > 0 }, 2)
+        let backOutline = try outlineMask([back], sc, Self.iso, device: device)
         let backFill = backOnly.indices.filter { backOnly[$0] > 0 && !backOutline[$0] }.count
         note("back member face \(back.volume.faceID): fill pixels off its outline \(backFill) · outline pixels \(backOutline.filter { $0 }.count)")
         XCTAssertEqual(backFill, 0, "a back-facing member draws its outline only")
-        XCTAssertGreaterThan(backOutline.filter { $0 }.count, 100, "…and its outline does draw")
+        let backLines = backOnly.indices.filter { backOnly[$0] > 0 && backOutline[$0] }.count
+        XCTAssertGreaterThan(backLines, 100, "…and its outline does draw (\(backLines) pixels)")
 
         // ── the Groups view, from above (img3): the bottom (Rests) glass alone changes nothing inside the top
         let groups = FlexibleGroupWalls.items(model: m, views: [.groups], mesh: part)
@@ -340,7 +364,7 @@ final class FlexibleRound6Tests: XCTestCase {
         let topIDs = try faceIDs(sc, Self.topCam, device: device)
         let topBase = try render(sc, Self.topCam, [], device: device)
         let restsD = Self.delta(topBase, try render(sc, Self.topCam, [rests], device: device))
-        let restsOutline = Self.dilate(Self.delta(topBase, try render(sc, Self.topCam, Self.outlineOnly([rests]), device: device)).map { $0 > 0 }, 2)
+        let restsOutline = try outlineMask([rests], sc, Self.topCam, device: device)
         let restsFill = restsD.indices.filter { topIDs[$0] == 1 && restsD[$0] > 0 && !restsOutline[$0] }.count
         note("Groups view, top: the bottom glass's fill inside the top face \(restsFill) pixels")
         XCTAssertEqual(restsFill, 0, "the bottom wall never tints the top through the X-ray")
@@ -352,7 +376,7 @@ final class FlexibleRound6Tests: XCTestCase {
         // ★ RED CONTROL (reversed winding): the top's own glass, wound the other way, draws no fill from above
         m.rail = .group(1)
         let topWall = try XCTUnwrap(FlexibleGroupWalls.items(model: m, views: [], mesh: part).first { $0.volume.faceID == 1 })
-        let topOutline = Self.dilate(Self.delta(topBase, try render(sc, Self.topCam, Self.outlineOnly([topWall]), device: device)).map { $0 > 0 }, 2)
+        let topOutline = try outlineMask([topWall], sc, Self.topCam, device: device)
         let topD = Self.delta(topBase, try render(sc, Self.topCam, [topWall], device: device))
         let topFill = topD.indices.filter { topIDs[$0] == 1 && !topOutline[$0] }.map { topD[$0] }
         let rev = Self.delta(topBase, try render(sc, Self.topCam, [Self.rewound(topWall, doubled: false)], device: device))
@@ -367,7 +391,7 @@ final class FlexibleRound6Tests: XCTestCase {
             let cIDs = try faceIDs(sc, cam, device: device)
             let cb = try render(sc, cam, [], device: device)
             let cd = Self.delta(cb, try render(sc, cam, [topWall], device: device))
-            let co = Self.dilate(Self.delta(cb, try render(sc, cam, Self.outlineOnly([topWall]), device: device)).map { $0 > 0 }, 2)
+            let co = try outlineMask([topWall], sc, cam, device: device)
             let fill = cd.indices.filter { cIDs[$0] == 1 && !co[$0] }.map { cd[$0] }
             let st = Stats(fill)
             note("top glass \(cam.name): \(st)")
@@ -385,7 +409,7 @@ final class FlexibleRound6Tests: XCTestCase {
             let pIDs = try faceIDs(sc, cam, device: device)
             let pb = try render(sc, cam, [], device: device)
             let pd = Self.delta(pb, try render(sc, cam, prism, device: device))
-            let po = Self.dilate(Self.delta(pb, try render(sc, cam, Self.outlineOnly(prism), device: device)).map { $0 > 0 }, 2)
+            let po = try outlineMask(prism, sc, cam, device: device)
             let dent = pd.indices.filter { pIDs[$0] == 2 && pd[$0] > 0 && !po[$0] }.map { pd[$0] }
             let all = pd.indices.filter { pd[$0] > 0 && !po[$0] }.map { pd[$0] }
             note("face 2's faint prism \(cam.name): over its dent \(Stats(dent)) · its whole fill \(Stats(all))")
@@ -400,7 +424,7 @@ final class FlexibleRound6Tests: XCTestCase {
         XCTAssertEqual(five.count, 5)
         let vb = try render(sc, Self.iso, [], device: device)
         let vd = Self.delta(vb, try render(sc, Self.iso, five, device: device))
-        let vo = Self.dilate(Self.delta(vb, try render(sc, Self.iso, Self.outlineOnly(five), device: device)).map { $0 > 0 }, 2)
+        let vo = try outlineMask(five, sc, Self.iso, device: device)
         let vfill = Stats(vd.indices.filter { vd[$0] > 0 && !vo[$0] }.map { vd[$0] })
         note("Prisms view (5) \(Self.iso.name): \(vfill)")
         XCTAssertLessThanOrEqual(vfill.median, 25, "the Prisms view stays faint")

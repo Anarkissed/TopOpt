@@ -539,12 +539,12 @@ public struct FlexibleStagePage: View {
                             Color.clear
                                 .frame(maxWidth: .infinity).frame(height: FlexibleLegend.tabHeight)
                                 .contentShape(Rectangle())
-                                .onTapGesture { if dents != nil { legendDrilled.toggle(); reading = nil } }   // ★ R6: TAP TO READ only with a dent
+                                .onTapGesture { legendDrilled.toggle(); reading = nil }
                                 .accessibilityElement()
                                 .accessibilityLabel(legendDrilled ? "Stop reading" : "Tap to read")
                                 .accessibilityAddTraits(.isButton)
                                 .accessibilityIdentifier("flexible-settings-legend-tab")
-                                .accessibilityHidden(dents == nil)
+                                .allowsHitTesting(dents != nil).accessibilityHidden(dents == nil)   // ★ R6: TAP TO READ only with a dent
                             Button { legendMinimized = true } label: {
                                 Image(systemName: "chevron.up")
                                     .font(.system(size: 11, weight: .bold))

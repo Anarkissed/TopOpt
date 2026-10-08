@@ -1,0 +1,268 @@
+# Round 6 (task 2026-09-29-flexible-screens; the maintainer's tasks of 2026-10-08, items 1 and 3) — the targeted suite, the re-runs,
+# the goldens under both hash modes, the stage hashes and the iOS build, raw. Debug, swift test --skip-build, this Mac.
+# BASE: 30198e91 (the S1 head 24a8b6a2 is a fast-forward of it but is NOT on claude/flexible-screens; per the spec's fallback this
+# track did not merge: hook H15 and the main page's [Prisms] button / legend row / tags wait for S1, and R6-3g / 3h / 3i SKIP,
+# printed, until WorkspacePlaceholder has #354's legendDrilledIn). build_core.sh was NOT re-run: the base is unchanged and the
+# vendored core's fingerprint (CoreFingerprint.generated.swift, 523dd2f90b04) is core's HEAD at 30198e91.
+# Commits: fbb55f59 tests first (red; A1) · ac54b7bf the implementation (A2, items 1 and 3) · this one (two pinned texts
+# restored after the suite, R6-1d's outline mask made geometric after the mutation run, the evidence).
+#
+# HOOKS in #354/main files (for #354; re-grep each anchor):
+#   A1  app/TopOptKit/Sources/TopOptFlows/ClearanceGeometry.swift   anchor `public struct ClearanceRenderItem`   +8 -1
+#       faceAlpha / edgeAlpha / surfaceOnly, init defaults nil / nil / false (every existing call site unchanged).
+#   A2  app/TopOptKit/Sources/TopOptFlows/MetalMeshView.swift   +32 -6
+#       stored buffers after `clearanceLineCount`; in `func setClearanceVolumes`: the reset, the FAINT / GLASS arrays and
+#       `target`, `tri`, the alpha lines (`item.faceAlpha ??` / `item.edgeAlpha ??`, an item with alphas pushed STRAIGHT),
+#       `case let .shell(s):` (a glass: no offset, no skirt, its outline), the two buffers; after the clearance `encodeVolume(`:
+#       FAINT (groundPipeline, no contact), setCullMode(.back), GLASS, setCullMode(.none). No shader change.
+#       ★ FINDING for #354: ground_fragment / contact_fragment multiply the vertex colour by its alpha AGAIN after the pass's
+#       own premul — every clearance volume today composites rgb·a² over (1-a)·dst (a 0.42 keep-out face adds 18 % colour and
+#       dims 42 %). Left as is for nil-alpha items (byte-identical); only items with their own alphas are pushed straight.
+#   H15 WorkspacePlaceholder.swift  anchor `? stageVolumeItems : [],`  +1 -1  — NOT applied (S1 base only; the line above it is
+#       S1's `&& !legendDrilledIn`, so applying it at 30198e91 would conflict with S1).
+#
+# (1) TARGETED SUITE, unseeded, detached (nohup; watched by PID), LatticeStaleTypeTests left out (not the S1 base):
+#     swift test --skip-build --filter 'TopOptFlowsTests\.(Flexible[A-Za-z0-9]*|ProjectStoreTests|UndoHistoryTests|LatticeSettingsPersistTests|ViewerTests|SmoothingPageRound2Tests|LatticeSimSolveTriggerTests|LatticeGradeToSolidBandTests|LatticeIncludeGateTests|LatticeModeTests|LatticeVariantFaceWallsTests|OrganicCapsuleImpostorTests|OrganicForecastRouteTests|ProtectFreezeVsSolidityTests|StrutLineWidthTests|LatticeLegendColourTests|LatticeRegionCapTests|LatticeSDFAlignmentTests|LatticeShellAndMarchAgreeTests|SmoothingRound3Tests|SmoothingRound4Tests|SmoothingViewerTests|SurfaceStageGesturesTests|UnifiedShadingTests|ClearanceDerivationTests|ContactShadingTests|ClearanceHeuristicBracketTests|LatticePageRound2Tests|ManualPrimitiveTests)/'
+#   = every Flexible* class, AP1's 14 others (the 8 directory readers among them), and every class that pins a touched file
+#   (grep -l on Tests for each touched file's name): Flexible* + LatticeLegendColourTests LatticeRegionCapTests
+#   LatticeSDFAlignmentTests LatticeShellAndMarchAgreeTests OrganicCapsuleImpostorTests SmoothingRound3Tests SmoothingRound4Tests
+#   SmoothingViewerTests SurfaceStageGesturesTests UnifiedShadingTests, and the ClearanceRenderItem / clearance-pass readers
+#   ClearanceDerivationTests ContactShadingTests ClearanceHeuristicBracketTests LatticePageRound2Tests ManualPrimitiveTests.
+	 Executed 833 tests, with 44 tests skipped and 15 failures (0 unexpected) in 4033.270 (4033.367) seconds
+#   15 failures in 6 tests:
+#   - FlexibleBatchCHookTests.testTheSettingsPageLegendDrillsInAndTapsDoNotSelect (2) — OURS: a source pin of the legend's tap
+#     (`.onTapGesture { legendDrilled.toggle(); reading = nil }`), which round 6 had wrapped in `if dents != nil`. FIXED: the pinned
+#     text restored, the no-dent case is `.allowsHitTesting(dents != nil)` on the tab instead;
+#   - FlexibleSettingsVerifyD1Tests.testAStampDentHasNoTeethAndItsPrismStandsOnASmoothOutline (1) — OURS: a source pin
+#     (`footprint: model.prismFootprint(r)) else { return [] }`); renderItems' compactMap had `return nil`. FIXED: a flatMap
+#     that returns [] (the pinned text again);
+#   - FlexibleSqueezeGroupsUITests.testNewGroupAndRemoveGroupByClickingThePage (2) — the known intermittent hosted test; ALONE: passed;
+#   - FlexibleSquishVerifyGTests.testPlayAllPlaysEachGroupAlone (1: 40 tint/label/note mismatches) — 248 s in the suite against 60 s
+#     alone; ALONE: passed, 0 mismatches; and again in the hosted re-run of (2) below: FlexibleSquishVerifyGTests 5 of 5;
+#   - FlexibleBatchNVerifyTests.testEveryRefineLineIsWholeBesideTheLivePlayAllPicker (8) — known (text metrics since Xcode 27); it
+#     reads the main toggles row, which round 6 does not touch (no 4th button on this base);
+#   - LatticeSimSolveTriggerTests.testTheTriggerRefusesOnAllThreeGrounds (1) — known.
+#   Per class:
+#     ClearanceDerivationTests passed: Executed 17 tests, with 0 failures (0 unexpected) in 0.015 (0.016) seconds
+#     ClearanceHeuristicBracketTests passed: Executed 2 tests, with 0 failures (0 unexpected) in 0.081 (0.081) seconds
+#     ContactShadingTests passed: Executed 6 tests, with 0 failures (0 unexpected) in 0.530 (0.531) seconds
+#     FlexibleAngledGoldenRecorder passed: Executed 10 tests, with 10 tests skipped and 0 failures (0 unexpected) in 0.004 (0.005) seconds
+#     FlexibleAngledGoldenTests passed: Executed 13 tests, with 0 failures (0 unexpected) in 13.791 (13.792) seconds
+#     FlexibleBatchBReviewTests passed: Executed 10 tests, with 0 failures (0 unexpected) in 98.243 (98.244) seconds
+#     FlexibleBatchBReviewUXTests passed: Executed 13 tests, with 0 failures (0 unexpected) in 0.613 (0.614) seconds
+#     FlexibleBatchCHookTests failed: Executed 4 tests, with 2 failures (0 unexpected) in 2.682 (2.682) seconds
+#     FlexibleBatchCVerifyTests passed: Executed 14 tests, with 0 failures (0 unexpected) in 19.481 (19.482) seconds
+#     FlexibleBatchM2Probe passed: Executed 3 tests, with 3 tests skipped and 0 failures (0 unexpected) in 0.001 (0.001) seconds
+#     FlexibleBatchM2Tests passed: Executed 2 tests, with 0 failures (0 unexpected) in 48.585 (48.585) seconds
+#     FlexibleBatchM2VerifyTests passed: Executed 3 tests, with 0 failures (0 unexpected) in 45.925 (45.925) seconds
+#     FlexibleBatchMDentTests passed: Executed 2 tests, with 0 failures (0 unexpected) in 48.010 (48.010) seconds
+#     FlexibleBatchMGroupTests passed: Executed 1 test, with 0 failures (0 unexpected) in 49.401 (49.402) seconds
+#     FlexibleBatchMLegendTests passed: Executed 2 tests, with 0 failures (0 unexpected) in 60.395 (60.395) seconds
+#     FlexibleBatchMProbe passed: Executed 5 tests, with 5 tests skipped and 0 failures (0 unexpected) in 0.002 (0.002) seconds
+#     FlexibleBatchMStressTests passed: Executed 4 tests, with 0 failures (0 unexpected) in 101.560 (101.561) seconds
+#     FlexibleBatchMVerifyTests passed: Executed 8 tests, with 1 test skipped and 0 failures (0 unexpected) in 613.057 (613.058) seconds
+#     FlexibleBatchMXrayTests passed: Executed 2 tests, with 0 failures (0 unexpected) in 178.714 (178.714) seconds
+#     FlexibleBatchNEvidenceProbe passed: Executed 3 tests, with 3 tests skipped and 0 failures (0 unexpected) in 0.002 (0.003) seconds
+#     FlexibleBatchNProbe passed: Executed 3 tests, with 3 tests skipped and 0 failures (0 unexpected) in 0.001 (0.001) seconds
+#     FlexibleBatchNRefineTests passed: Executed 4 tests, with 0 failures (0 unexpected) in 283.574 (283.575) seconds
+#     FlexibleBatchNVerifyTests failed: Executed 4 tests, with 8 failures (0 unexpected) in 188.976 (188.977) seconds
+#     FlexibleCoreClaimTests passed: Executed 4 tests, with 0 failures (0 unexpected) in 41.567 (41.569) seconds
+#     FlexibleCurveEditTests passed: Executed 7 tests, with 0 failures (0 unexpected) in 0.008 (0.008) seconds
+#     FlexibleDepthPrismTests passed: Executed 11 tests, with 0 failures (0 unexpected) in 0.782 (0.783) seconds
+#     FlexibleFEFieldTests passed: Executed 12 tests, with 0 failures (0 unexpected) in 165.185 (165.186) seconds
+#     FlexibleFEPassPerfTests passed: Executed 1 test, with 1 test skipped and 0 failures (0 unexpected) in 0.003 (0.003) seconds
+#     FlexibleFEPassTests passed: Executed 5 tests, with 0 failures (0 unexpected) in 16.936 (16.937) seconds
+#     FlexibleFEVerifyGTests passed: Executed 2 tests, with 0 failures (0 unexpected) in 42.870 (42.870) seconds
+#     FlexibleGeometryOnlyLatticeTests passed: Executed 3 tests, with 0 failures (0 unexpected) in 0.201 (0.201) seconds
+#     FlexibleGroupFieldPerfTests passed: Executed 1 test, with 1 test skipped and 0 failures (0 unexpected) in 0.001 (0.001) seconds
+#     FlexibleGroupPaletteEvidenceProbe passed: Executed 1 test, with 1 test skipped and 0 failures (0 unexpected) in 0.000 (0.001) seconds
+#     FlexibleGroupPaletteHostedTests passed: Executed 2 tests, with 0 failures (0 unexpected) in 45.494 (45.495) seconds
+#     FlexibleGroupPaletteTests passed: Executed 7 tests, with 0 failures (0 unexpected) in 0.231 (0.231) seconds
+#     FlexibleInPassCompositeTests passed: Executed 10 tests, with 0 failures (0 unexpected) in 19.507 (19.508) seconds
+#     FlexibleLatticeEvidenceProbe passed: Executed 1 test, with 1 test skipped and 0 failures (0 unexpected) in 0.001 (0.001) seconds
+#     FlexibleLatticeFieldTests passed: Executed 4 tests, with 0 failures (0 unexpected) in 3.149 (3.150) seconds
+#     FlexibleLatticeGradingTests passed: Executed 2 tests, with 0 failures (0 unexpected) in 2.147 (2.147) seconds
+#     FlexibleLatticePassPerfTests passed: Executed 1 test, with 1 test skipped and 0 failures (0 unexpected) in 0.001 (0.001) seconds
+#     FlexibleLatticePassTests passed: Executed 10 tests, with 0 failures (0 unexpected) in 13.809 (13.810) seconds
+#     FlexibleLatticeUnderReviewTests passed: Executed 7 tests, with 0 failures (0 unexpected) in 15.474 (15.475) seconds
+#     FlexibleLatticeUnderTests passed: Executed 3 tests, with 0 failures (0 unexpected) in 2.619 (2.619) seconds
+#     FlexibleLegendPlacementTests passed: Executed 4 tests, with 0 failures (0 unexpected) in 0.008 (0.008) seconds
+#     FlexibleMainPageHookTests passed: Executed 3 tests, with 0 failures (0 unexpected) in 0.231 (0.231) seconds
+#     FlexibleMainPageLoadsTests passed: Executed 10 tests, with 0 failures (0 unexpected) in 2.833 (2.834) seconds
+#     FlexibleMainPageRound4HostedTests passed: Executed 2 tests, with 0 failures (0 unexpected) in 3.809 (3.810) seconds
+#     FlexibleMainPageRound4Tests passed: Executed 12 tests, with 0 failures (0 unexpected) in 27.984 (27.985) seconds
+#     FlexibleMainPageRound4VerifyTests passed: Executed 9 tests, with 0 failures (0 unexpected) in 84.044 (84.045) seconds
+#     FlexibleMainStageTests passed: Executed 8 tests, with 0 failures (0 unexpected) in 22.589 (22.590) seconds
+#     FlexibleMainViewsTests passed: Executed 10 tests, with 0 failures (0 unexpected) in 30.676 (30.677) seconds
+#     FlexibleMergeR5SMTests passed: Executed 1 test, with 0 failures (0 unexpected) in 0.001 (0.001) seconds
+#     FlexibleOverlayClipTests passed: Executed 6 tests, with 0 failures (0 unexpected) in 0.715 (0.716) seconds
+#     FlexibleOverlaySeamTests passed: Executed 2 tests, with 0 failures (0 unexpected) in 0.734 (0.735) seconds
+#     FlexiblePinchTests passed: Executed 7 tests, with 0 failures (0 unexpected) in 6.116 (6.116) seconds
+#     FlexiblePressFixturesTests passed: Executed 2 tests, with 0 failures (0 unexpected) in 0.790 (0.791) seconds
+#     FlexiblePressReframeTests passed: Executed 2 tests, with 0 failures (0 unexpected) in 0.080 (0.080) seconds
+#     FlexiblePressReviewTests passed: Executed 12 tests, with 0 failures (0 unexpected) in 2.139 (2.141) seconds
+#     FlexiblePressSaveTests passed: Executed 8 tests, with 0 failures (0 unexpected) in 1.792 (1.793) seconds
+#     FlexibleReadinessTests passed: Executed 10 tests, with 0 failures (0 unexpected) in 4.404 (4.406) seconds
+#     FlexibleRegionsTests passed: Executed 3 tests, with 0 failures (0 unexpected) in 0.048 (0.048) seconds
+#     FlexibleRound5EvidenceProbe passed: Executed 1 test, with 1 test skipped and 0 failures (0 unexpected) in 0.003 (0.003) seconds
+#     FlexibleRound5SettingsHostedTests passed: Executed 4 tests, with 0 failures (0 unexpected) in 96.617 (96.618) seconds
+#     FlexibleRound5SettingsTests passed: Executed 11 tests, with 0 failures (0 unexpected) in 8.570 (8.571) seconds
+#     FlexibleRound5SettingsVerifyTests passed: Executed 9 tests, with 0 failures (0 unexpected) in 2.617 (2.617) seconds
+#     FlexibleRound5SquishExitTests passed: Executed 6 tests, with 0 failures (0 unexpected) in 147.986 (147.987) seconds
+#     FlexibleRound6EvidenceProbe passed: Executed 2 tests, with 2 tests skipped and 0 failures (0 unexpected) in 0.002 (0.003) seconds
+#     FlexibleRound6HostedTests passed: Executed 10 tests, with 2 tests skipped and 0 failures (0 unexpected) in 189.503 (189.505) seconds
+#     FlexibleRound6Tests passed: Executed 6 tests, with 1 test skipped and 0 failures (0 unexpected) in 23.724 (23.725) seconds
+#     FlexibleRowCopyTests passed: Executed 4 tests, with 0 failures (0 unexpected) in 0.306 (0.306) seconds
+#     FlexibleSettingsMigrationTests passed: Executed 5 tests, with 0 failures (0 unexpected) in 0.007 (0.008) seconds
+#     FlexibleSettingsPageHostedTests passed: Executed 2 tests, with 0 failures (0 unexpected) in 94.034 (94.034) seconds
+#     FlexibleSettingsRound4Tests passed: Executed 14 tests, with 0 failures (0 unexpected) in 5.996 (5.998) seconds
+#     FlexibleSettingsVerifyD1Tests failed: Executed 10 tests, with 1 failure (0 unexpected) in 1.980 (1.981) seconds
+#     FlexibleShownValuesTests passed: Executed 6 tests, with 0 failures (0 unexpected) in 1.074 (1.075) seconds
+#     FlexibleSqueezeGroupsModelTests passed: Executed 7 tests, with 0 failures (0 unexpected) in 19.052 (19.053) seconds
+#     FlexibleSqueezeGroupsPressTests passed: Executed 4 tests, with 0 failures (0 unexpected) in 0.885 (0.885) seconds
+#     FlexibleSqueezeGroupsReviewTests passed: Executed 8 tests, with 0 failures (0 unexpected) in 6.747 (6.748) seconds
+#     FlexibleSqueezeGroupsReviewUITests passed: Executed 2 tests, with 0 failures (0 unexpected) in 80.909 (80.909) seconds
+#     FlexibleSqueezeGroupsReviewUXTests passed: Executed 5 tests, with 0 failures (0 unexpected) in 8.933 (8.934) seconds
+#     FlexibleSqueezeGroupsTests passed: Executed 8 tests, with 0 failures (0 unexpected) in 0.014 (0.014) seconds
+#     FlexibleSqueezeGroupsUITests failed: Executed 4 tests, with 2 failures (0 unexpected) in 36.846 (36.848) seconds
+#     FlexibleSquishCoarsenTests passed: Executed 2 tests, with 0 failures (0 unexpected) in 0.448 (0.448) seconds
+#     FlexibleSquishEvidenceProbe passed: Executed 3 tests, with 3 tests skipped and 0 failures (0 unexpected) in 0.002 (0.002) seconds
+#     FlexibleSquishPerfProbe passed: Executed 2 tests, with 2 tests skipped and 0 failures (0 unexpected) in 0.001 (0.002) seconds
+#     FlexibleSquishPlayAllTests passed: Executed 5 tests, with 0 failures (0 unexpected) in 1.194 (1.194) seconds
+#     FlexibleSquishPlayerTests passed: Executed 6 tests, with 0 failures (0 unexpected) in 0.736 (0.736) seconds
+#     FlexibleSquishSolverTests passed: Executed 5 tests, with 0 failures (0 unexpected) in 118.789 (118.789) seconds
+#     FlexibleSquishTests passed: Executed 11 tests, with 0 failures (0 unexpected) in 4.871 (4.874) seconds
+#     FlexibleSquishVerifyGTests failed: Executed 5 tests, with 1 failure (0 unexpected) in 782.873 (782.873) seconds
+#     FlexibleStageTests passed: Executed 15 tests, with 0 failures (0 unexpected) in 1.642 (1.644) seconds
+#     FlexibleSurfaceNavTests passed: Executed 3 tests, with 0 failures (0 unexpected) in 0.094 (0.095) seconds
+#     LatticeGradeToSolidBandTests passed: Executed 11 tests, with 0 failures (0 unexpected) in 6.655 (6.657) seconds
+#     LatticeIncludeGateTests passed: Executed 8 tests, with 0 failures (0 unexpected) in 2.756 (2.757) seconds
+#     LatticeLegendColourTests passed: Executed 18 tests, with 0 failures (0 unexpected) in 0.122 (0.123) seconds
+#     LatticeModeTests passed: Executed 17 tests, with 0 failures (0 unexpected) in 0.051 (0.052) seconds
+#     LatticePageRound2Tests passed: Executed 15 tests, with 1 test skipped and 0 failures (0 unexpected) in 0.051 (0.052) seconds
+#     LatticeRegionCapTests passed: Executed 6 tests, with 0 failures (0 unexpected) in 0.216 (0.217) seconds
+#     LatticeSDFAlignmentTests passed: Executed 7 tests, with 2 tests skipped and 0 failures (0 unexpected) in 2.925 (2.926) seconds
+#     LatticeSettingsPersistTests passed: Executed 4 tests, with 0 failures (0 unexpected) in 0.004 (0.005) seconds
+#     LatticeShellAndMarchAgreeTests passed: Executed 3 tests, with 0 failures (0 unexpected) in 23.132 (23.132) seconds
+#     LatticeSimSolveTriggerTests failed: Executed 2 tests, with 1 failure (0 unexpected) in 0.013 (0.013) seconds
+#     LatticeVariantFaceWallsTests passed: Executed 8 tests, with 0 failures (0 unexpected) in 1.689 (1.690) seconds
+#     ManualPrimitiveTests passed: Executed 34 tests, with 0 failures (0 unexpected) in 0.022 (0.025) seconds
+#     OrganicCapsuleImpostorTests passed: Executed 4 tests, with 0 failures (0 unexpected) in 36.674 (36.674) seconds
+#     OrganicForecastRouteTests passed: Executed 4 tests, with 0 failures (0 unexpected) in 0.208 (0.209) seconds
+#     ProjectStoreTests passed: Executed 5 tests, with 0 failures (0 unexpected) in 0.021 (0.021) seconds
+#     ProtectFreezeVsSolidityTests passed: Executed 7 tests, with 0 failures (0 unexpected) in 0.069 (0.070) seconds
+#     SmoothingPageRound2Tests passed: Executed 21 tests, with 0 failures (0 unexpected) in 0.315 (0.316) seconds
+#     SmoothingRound3Tests passed: Executed 27 tests, with 0 failures (0 unexpected) in 0.157 (0.159) seconds
+#     SmoothingRound4Tests passed: Executed 29 tests, with 0 failures (0 unexpected) in 0.599 (0.601) seconds
+#     SmoothingViewerTests passed: Executed 12 tests, with 0 failures (0 unexpected) in 0.029 (0.030) seconds
+#     StrutLineWidthTests passed: Executed 12 tests, with 0 failures (0 unexpected) in 0.514 (0.515) seconds
+#     UndoHistoryTests passed: Executed 10 tests, with 0 failures (0 unexpected) in 0.633 (0.634) seconds
+#     UnifiedShadingTests passed: Executed 11 tests, with 0 failures (0 unexpected) in 7.002 (7.004) seconds
+#     ViewerTests passed: Executed 33 tests, with 0 failures (0 unexpected) in 0.340 (0.342) seconds
+#
+# (2) AFTER THE TWO FIXES (rebuilt): every class that pins FlexibleStagePage.swift or FlexibleDepthPrism.swift, deterministic:
+#     env SWIFT_DETERMINISTIC_HASHING=1 swift test --skip-build --filter 'TopOptFlowsTests\.(FlexibleBatchCHookTests|FlexibleBatchBReviewUXTests|FlexibleBatchCVerifyTests|FlexibleDepthPrismTests|FlexibleCurveEditTests|FlexibleMainPageHookTests|FlexibleLegendPlacementTests|FlexibleOverlayClipTests|FlexibleRound6HostedTests|FlexibleSettingsVerifyD1Tests|FlexibleShownValuesTests|FlexibleRound6Tests|FlexibleSettingsRound4Tests|FlexibleSquishTests)/'
+	 Executed 119 tests, with 3 tests skipped and 0 failures (0 unexpected) in 227.713 (227.726) seconds
+#   (3 skipped: R6-3g, 3h, 3i — the S1 base). And the hosted classes that tap or measure the Settings legend, with the two
+#   in-suite failures above, unseeded:
+#     swift test --skip-build --filter 'TopOptFlowsTests\.(FlexibleBatchM2Tests|FlexibleBatchMVerifyTests|FlexibleMainViewsTests|FlexibleSettingsPageHostedTests|FlexibleSqueezeGroupsReviewUITests|FlexibleSqueezeGroupsUITests|FlexibleSquishVerifyGTests)/'
+	 Executed 33 tests, with 1 test skipped and 0 failures (0 unexpected) in 1379.250 (1379.257) seconds
+#   ALONE, before them: FlexibleSquishVerifyGTests/testPlayAllPlaysEachGroupAlone passed (mismatches 0), FlexibleSqueezeGroupsUITests/
+#   testNewGroupAndRemoveGroupByClickingThePage passed.
+#
+# (3) THE ROUND 6 TESTS, deterministic (SWIFT_DETERMINISTIC_HASHING=1), after ac54b7bf — 42 tests (R6 classes, the re-pinned
+#   FlexibleDepthPrismTests / FlexibleBatchMDentTests / nine-group palette, FlexibleMergeR5SMTests, FlexibleRound5SettingsTests):
+	 Executed 42 tests, with 3 tests skipped and 0 failures (0 unexpected) in 394.408 (394.415) seconds
+FLEX-M MAIN group-2 face 3: heat = the sim's dent on 832 of 832 columns (core's numbers: 90 grey 'no number') · step at a shared corner of the heat band 0.0000 (core's columns 1.2490; the whole face, no frame since round 6, 0.0000) · ring 0–3 mm 95% of under the stamp (core's 37%) · scale 27.29 mm
+FLEX-M MAIN group-1 face 1000103: heat = the sim's dent on 2048 of 2048 columns (core's numbers: 0 grey 'no number') · step at a shared corner of the heat band 0.0000 (core's columns 0.2062; the whole face, no frame since round 6, 0.0000) · ring 0–3 mm 57% of under the stamp (core's 31%) · scale 23.72 mm
+FLEX-C5-HOSTED nine groups: shared [1, 9] · rail [Optional(1), nil, nil, nil, nil, nil, nil, nil, Optional(9)]
+FLEX-R6-3d 11l legendPrismsRow (920.0, 449.5, 161.5, 15.0) · 11l legendGroupsRow (920.0, 470.5, 123.0, 16.0) · 13p legendPrismsRow (758.0, 720.5, 161.5, 15.0) · 13p legendGroupsRow (758.0, 741.5, 123.0, 16.0)
+FLEX-R6-1e discs ["1@face 1", "9@face 5"] · digits lit 0 (control 44) · count rule [1, 2, 3, 4, 5, 6, 7, 8, 9]
+FLEX-R6 SKIP -[FlexibleRound6HostedTests testPrismsTurnsTheLatticeViewOnItself]: the base is not S1 — the main page's [Prisms] button waits (step 6)
+FLEX-R6-3a face 2: prism 57.0 mm (k 3 × 19.0) · alphas 0.05 / 0.40 · chip on its floor
+FLEX-R6 SKIP -[FlexibleRound6HostedTests testTheFourMainButtonsClearTheNoteLegendAndPlayer]: the base is not S1 — the main page's [Prisms] button waits (step 6)
+FLEX-R6-3f active Top → [1] · Prisms view → [1, 2, 3, 4, 5]
+FLEX-R6-1a
+FLEX-R6-3b prisms [1, 4, 2, 3, 5] · tags face 1 12.0 mm, face 3 24.5 mm, face 4 22.5 mm, face 5 19.5 mm
+FLEX-R6-1b
+FLEX-R6-3c
+FLEX-R6-1c cube top: 2 triangles · area 3600.000 mm² (want 3600) · outline 4 edges 240.000 mm
+FLEX-R6-1f paints 4 · channels calls 3
+FLEX-R6-3e views: settings same true · modified false · key true · serial true — control: same false · modified true · serial false
+FLEX-R6 SKIP R6-3i: the base is not S1 (no legendDrilledIn) — hook H15 waits
+FLEX-R6-1d positive control: round 5's frames change 30424 pixels at iso (img2)
+FLEX-R6-1d nil-alpha (dragged prism) render hash ecb1a3868a761708f533735b474319a9f69e4ac9aeea28ba80190ea68f584ff0 (recorded before A2 under SWIFT_DETERMINISTIC_HASHING=1: ecb1a3868a761708f533735b474319a9f69e4ac9aeea28ba80190ea68f584ff0) · two renderers differ on 0 pixels · deterministic hashing true
+FLEX-R6-1d Group 2 at iso (img2): face 2 faces the camera (ray · n -0.43), face 4 faces away (0.73)
+FLEX-R6-1d glass face 2 over cyan: n 1685 · min 18 · median 18 · p90 18 · max 19
+FLEX-R6-1d glass face 2 over dark: n 25136 · min 18 · median 19 · p90 19 · max 19
+FLEX-R6-1d glass face 2 over green: n 2184 · min 14 · median 18 · p90 18 · max 19
+FLEX-R6-1d Group 2 pixels outside its front member and outlines: 0
+FLEX-R6-1d back member face 4: fill pixels off its outline 0 · outline pixels 6139
+FLEX-R6-1d Groups view, top: the bottom glass's fill inside the top face 0 pixels
+FLEX-R6-1d control (cull none): 202183 pixels
+FLEX-R6-1d top glass (group 1) from above: n 244639 · min 3 · median 10 · p90 12 · max 14 · control (reversed winding): 0 pixels
+FLEX-R6-1d top glass face-on top: n 272429 · min 3 · median 11 · p90 13 · max 13
+FLEX-R6-1d top glass zoomed out: n 14487 · min 3 · median 11 · p90 13 · max 13
+FLEX-R6-1d top glass grazing: n 16799 · min 8 · median 10 · p90 13 · max 14
+FLEX-R6-1d face 2's faint prism top (img3): over its dent n 73 · min 20 · median 20 · p90 20 · max 20 · its whole fill n 300 · min 5 · median 10 · p90 20 · max 20
+FLEX-R6-1d face 2's faint prism iso (img2): over its dent n 715 · min 10 · median 20 · p90 20 · max 20 · its whole fill n 1669 · min 7 · median 14 · p90 20 · max 20
+FLEX-R6-1d Prisms view (5) iso (img2): n 10813 · min 6 · median 10 · p90 23 · max 36
+FLEX-R6-1d alphas: glass 0.08 / 0.40, open 0.13 / 0.60 · prism at rest 0.05 / 0.40, selected in the view 0.09 / 0.60 · k 1.0
+#   (the multi-line prints of R6-1a, R6-1b and R6-3c in that run:)
+FLEX-R6-1a
+  positive control (Lattice on, heat off, round 5's frames): 7992 frame vertices checked, 0 wrong · 7992 inked
+  heat off: inked vertices per turn — group-1 0 · group-2 0 · group-3 0 · composed 0
+  heat on: inked vertices per turn — group-1 0 · group-2 0 · group-3 0 · composed 0
+  Stress: inked vertices per turn — group-1 0 · group-2 0 · group-3 0 · composed 0
+  no map: face 0 plain (control: pink)
+FLEX-R6-1b
+  .group(2) → [2, 4]
+  .group(3) → [3, 5]
+  .rests → [0]
+  the Groups view → [0, 1, 2, 3, 4, 5], open {4, 2} at 0.13/0.6
+  composeTints: inked 0 (map) · 0 (no overlay)
+  controls: frames → 7992 inked · every group → [0, 1, 2, 3, 4, 5]
+FLEX-R6-3c
+  11l buttons (1082.0, 235.5, 88.0, 40.0) · gizmo (970.5, 13.500000000000002, 210.0, 210.0) · legend (906.0, 333.5, 264.0, 167.0) · control: overlap with the chips true
+  11p buttons (722.0, 235.5, 88.0, 40.0) · gizmo (610.5, 13.500000000000002, 210.0, 210.0) · legend (546.0, 513.5, 264.0, 167.0) · control: overlap with the chips true
+  13p buttons (920.0, 235.5, 88.0, 40.0) · gizmo (808.5, 13.500000000000002, 210.0, 210.0) · legend (744.0, 604.5, 264.0, 167.0) · control: overlap with the chips true
+  13l buttons (1264.0, 235.5, 88.0, 40.0) · gizmo (1152.5, 13.500000000000002, 210.0, 210.0) · legend (1088.0, 432.5, 264.0, 167.0) · control: overlap with the chips true
+#   R6-1d after the geometric outline mask (this commit):
+FLEX-R6-1d positive control: round 5's frames change 30424 pixels at iso (img2)
+FLEX-R6-1d nil-alpha (dragged prism) render hash ecb1a3868a761708f533735b474319a9f69e4ac9aeea28ba80190ea68f584ff0 (recorded before A2 under SWIFT_DETERMINISTIC_HASHING=1: ecb1a3868a761708f533735b474319a9f69e4ac9aeea28ba80190ea68f584ff0) · two renderers differ on 0 pixels · deterministic hashing true
+FLEX-R6-1d Group 2 at iso (img2): face 2 faces the camera (ray · n -0.43), face 4 faces away (0.73)
+FLEX-R6-1d glass face 2 over cyan: n 1697 · min 18 · median 18 · p90 18 · max 19
+FLEX-R6-1d glass face 2 over dark: n 25392 · min 18 · median 19 · p90 19 · max 19
+FLEX-R6-1d glass face 2 over green: n 2218 · min 14 · median 18 · p90 18 · max 19
+FLEX-R6-1d Group 2 pixels outside its front member and outlines: 0
+FLEX-R6-1d back member face 4: fill pixels off its outline 0 · outline pixels 5546
+FLEX-R6-1d Groups view, top: the bottom glass's fill inside the top face 0 pixels
+FLEX-R6-1d control (cull none): 202115 pixels
+FLEX-R6-1d top glass (group 1) from above: n 245263 · min 3 · median 10 · p90 12 · max 14 · control (reversed winding): 0 pixels
+FLEX-R6-1d top glass face-on top: n 273075 · min 3 · median 11 · p90 13 · max 13
+FLEX-R6-1d top glass zoomed out: n 14640 · min 3 · median 11 · p90 13 · max 13
+FLEX-R6-1d top glass grazing: n 17286 · min 8 · median 10 · p90 13 · max 14
+FLEX-R6-1d face 2's faint prism top (img3): over its dent n 122 · min 20 · median 20 · p90 20 · max 20 · its whole fill n 527 · min 5 · median 9 · p90 20 · max 20
+FLEX-R6-1d face 2's faint prism iso (img2): over its dent n 1112 · min 10 · median 20 · p90 20 · max 20 · its whole fill n 2584 · min 7 · median 14 · p90 20 · max 20
+FLEX-R6-1d Prisms view (5) iso (img2): n 13622 · min 6 · median 10 · p90 23 · max 36
+FLEX-R6-1d alphas: glass 0.08 / 0.40, open 0.13 / 0.60 · prism at rest 0.05 / 0.40, selected in the view 0.09 / 0.60 · k 1.0
+#
+# (4) GOLDENS + every press class under SWIFT_DETERMINISTIC_HASHING=1 (raw subtree bytes included):
+#     SWIFT_DETERMINISTIC_HASHING=1 swift test --skip-build --filter 'FlexibleAngledGoldenTests|FlexiblePressFixturesTests|FlexibleStageTests|FlexiblePressSaveTests|FlexibleSqueezeGroupsPressTests|FlexiblePressReframeTests|FlexiblePressReviewTests'
+	 Executed 56 tests, with 0 failures (0 unexpected) in 19.230 (19.237) seconds
+#   43 "FLEX-AP GOLDEN … identical" lines, 0 DIFFERS (AP0's goldens: the base on 30198e91).
+#   Unseeded: swift test --skip-build --filter 'FlexibleAngledGoldenTests|FlexiblePressSaveTests|FlexibleSqueezeGroupsPressTests|FlexiblePressReframeTests|FlexiblePressReviewTests'
+	 Executed 39 tests, with 0 failures (0 unexpected) in 17.044 (17.049) seconds
+#   36 identical, 0 DIFFERS; 1 PART-SKIP (the raw subtree bytes need deterministic hashing; (4) ran them).
+#
+# (5) STAGE-JOB HASHES: angled_presses/stage_job_hashes.sh unchanged (frozen inputs checked), SWIFT_DETERMINISTIC_HASHING=1,
+#   TOPOPT_JOB_REPEAT=3 -> stage_job_hashes_r6.txt: 16 of 16 rows identical to stage_job_hashes_base.txt (AP0), the 13 source
+#   lines identical; control+ still moves the hash (31646a7163500d78).
+#
+# (6) iOS BUILD (the given command) and INSTALL — never launched:
+#     xcodebuild -project app/TopOpt.xcodeproj -scheme TopOpt -configuration Debug -destination id=147E56A1-C8CA-4B9D-BE6C-CF230589A83A -derivedDataPath /Users/nadim/Library/Developer/Xcode/DerivedData/flexA1 build
+#     ** BUILD SUCCEEDED **
+#     (FlexibleDepthPrism.swift and FlexibleStagePage.swift recompiled after the two fixes; the first build of ac54b7bf also succeeded)
+#     xcrun simctl install 147E56A1-C8CA-4B9D-BE6C-CF230589A83A …/Debug-iphonesimulator/TopOpt.app -> exit 0 (device Booted; not launched).
+#     The INSTALLED TopOpt.debug.dylib: mtime Oct  8 19:12:20 2026 = the build product's; strings: flexible-settings-view-prisms 1,
+#     flexible-settings-view-groups 1, "Stamp turn" 1, "Prism = squish shown" 1.
