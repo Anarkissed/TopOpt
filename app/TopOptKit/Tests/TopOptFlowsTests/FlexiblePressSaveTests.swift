@@ -64,7 +64,7 @@ final class FlexiblePressSaveTests: XCTestCase {
         let free = simd_normalize(SIMD3<Double>(0.123456789, -0.3, -1))
         let face5 = try XCTUnwrap(s.face(5), "premise: face 5 is pressed in r5")
         let tilt = FlexiblePress(id: UUID(uuidString: "AE000001-0000-4000-8000-000000000002")!,
-                                 regions: [5], direction: free, snap: nil, settings: face5, drawnIn: 5)
+                                 regions: [5], direction: free, snap: nil, settings: face5, drawnIn: .face(5))
         s.removeFace(5)
         s.setPresses([edge, tilt])
         pm.lattice.flexible = s
@@ -77,7 +77,8 @@ final class FlexiblePressSaveTests: XCTestCase {
         let saved = try XCTUnwrap(((json["lattice"] as? [String: Any])?["flexible"] as? [String: Any])?["presses"] as? [[String: Any]])
         XCTAssertEqual(saved.count, 2, "two presses in the file")
         XCTAssertEqual(saved.compactMap { $0["snap"] as? String }, ["halfway"], "the free tilt's nil snap is omitted")
-        XCTAssertEqual(saved.compactMap { $0["drawnIn"] as? Int }, [5], "the edge's nil drawnIn is omitted")
+        XCTAssertEqual(saved.compactMap { ($0["drawnIn"] as? [String: Any])?["face"] as? Int }, [5],
+                       "the edge's nil drawnIn is omitted; the tilt's is {\"face\": 5}")
 
         // a NEW app over the same store: the app's own restore
         let core = FlexibleHisProject.repoRoot.appendingPathComponent("core")
@@ -93,7 +94,7 @@ final class FlexiblePressSaveTests: XCTestCase {
         // every component's bits against the Double he aimed (not the struct's copy: a struct that rounded it
         // would compare equal to itself)
         for (got, (want, aimed)) in zip(back.presses ?? [], zip([edge, tilt], [halfway, free])) {
-            print("FLEX-AP1 round trip \(want.kind): aimed \(aimed) bits \(Self.bits(aimed).map { String($0, radix: 16) }) → \(Self.bits(got.direction).map { String($0, radix: 16) }) · snap \(got.snap ?? "nil") · drawnIn \(got.drawnIn.map(String.init) ?? "nil")")
+            print("FLEX-AP1 round trip \(want.kind): aimed \(aimed) bits \(Self.bits(aimed).map { String($0, radix: 16) }) → \(Self.bits(got.direction).map { String($0, radix: 16) }) · snap \(got.snap ?? "nil") · drawnIn \(got.drawnIn.map { "\($0)" } ?? "nil")")
             XCTAssertEqual(Self.bits(got.direction), Self.bits(aimed), "★ \(want.kind): the direction he aimed, bit for bit")
             XCTAssertEqual(got.snap, want.snap)
             XCTAssertEqual(got.drawnIn, want.drawnIn)
@@ -294,7 +295,7 @@ final class FlexiblePressSaveTests: XCTestCase {
         let id = try XCTUnwrap(m.tilt(topA, direction: simd_normalize(SIMD3(0.3, 0, -1)), snap: nil))
         let p = try XCTUnwrap(m.press(id))
         XCTAssertEqual(p.settings, before, "★ the struct, intact: weight, link, curves, stamp, group")
-        XCTAssertEqual(p.drawnIn, topA, "drawn in its face's frame")
+        XCTAssertEqual(p.drawnIn, .face(topA), "drawn in its face's frame")
         XCTAssertEqual(p.regions, [topA])
         XCTAssertEqual(p.kind, .tilted)
         XCTAssertNil(m.settings.face(topA), "it left the faces (its design leaves the page)")

@@ -17,25 +17,23 @@
 // of core's axes (which old axis a new one runs along, and its sign) and the stamp's heading measured
 // between two of core's mapped points. No frame, column or design is computed here.
 //
-// ★ WHAT WAITS ON CORE (AP9). `FlexibleFrameRef.press` — a press's OWN frame — is core's
-// build_press_stack, which this branch's core does not have (it arrives with #361's addendum, S1) and
-// which the bridge does not call before the seam (AP9: flexible_scene_register_press and stack_of's
-// dispatch of synthetic ids). Until then `FlexibleSceneFrames` throws `Waiting.pressFrame` for it, so
-// re-expressing a tilt, a straighten or a direction change through a press's frame waits: a tilt keeps
-// its inputs in the face's frame (`FlexiblePress.drawnIn`), and straightening it back needs no reframe.
-// Face frames — a declared region's stack, from_uv and to_uvt — are core's today, through the open scene.
+// ★ A FRAME IS NAMED BY VALUE (AP1 review). A press's own frame is `FlexibleFrameRef.press` of a
+// `FlexiblePressFrame` — its footprint and its direction, equal only bit for bit (FlexiblePress.swift) —
+// never the press's id: a re-aim or a footprint change is then two frames (from, to) that core is asked
+// for in turn, and the frame the inputs were drawn in can be SAVED (`FlexiblePress.drawnIn`).
+//
+// ★ WHAT WAITS ON CORE (AP9). A press's OWN frame is core's build_press_stack, which this branch's core
+// does not have (it arrives with #361's addendum, S1) and which the bridge does not call before the
+// seam (AP9: flexible_scene_register_press and stack_of's dispatch of synthetic ids). Until then
+// `FlexibleSceneFrames` throws `Waiting.pressFrame` for it, so re-expressing a tilt, a straighten or a
+// direction change through a press's frame waits: a tilt keeps its inputs in the face's frame
+// (`drawnIn` = `.face(region)`), and a re-aim or a member change records the frame they were drawn in
+// (`FlexiblePress.aim` / `setMembers`) for AP9 to reframe from. Face frames — a declared region's stack,
+// from_uv and to_uvt — are core's today, through the open scene.
 
 import Foundation
 import simd
 import TopOptKit
-
-/// One of core's frames.
-public enum FlexibleFrameRef: Hashable, Sendable {
-    /// A declared region's own frame (a whole face or a sector; rotation 0 since round 3).
-    case face(Int)
-    /// A press's own frame: core's build_press_stack — through the bridge from AP9 only.
-    case press(UUID)
-}
 
 /// Core's answers about a frame. Every value is core's; nothing implementing this may compute a frame.
 public protocol FlexibleFrameSource {
@@ -101,7 +99,8 @@ public enum FlexiblePressReframe {
     }
 
     /// `f`'s curves and stamp, from core's frame `from` to core's frame `to` (see the file comment).
-    /// The same frame returns `f` unchanged, bit for bit.
+    /// The same frame (a press frame: the same footprint and the same direction, bit for bit) returns
+    /// `f` unchanged, bit for bit, without asking core.
     public static func reframe(_ f: FlexibleFaceSettings, from: FlexibleFrameRef, to: FlexibleFrameRef,
                                frames: FlexibleFrameSource) throws -> Result {
         guard from != to else { return Result(settings: f, swapped: false, reversedX: false, reversedY: false) }

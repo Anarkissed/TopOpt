@@ -37,6 +37,9 @@ final class FlexiblePressReframeTests: XCTestCase {
         return Split(scene: scene, frames: FlexibleSceneFrames(scene), top: top, topB: topB, model: model)
     }
 
+    /// A press frame (core's build_press_stack, AP9): the top pressed along -Z.
+    static func someFrame(_ sp: Split) -> FlexiblePressFrame { FlexiblePressFrame(regions: [sp.top], direction: SIMD3(0, 0, -1)) }
+
     static let cx = FlexCurve(x: [0, 0.3, 1], y: [0.2, 0.9, 0.5])
     static let cy = FlexCurve(x: [0, 0.8, 1], y: [0.7, 0.1, 0.35])
 
@@ -125,11 +128,11 @@ final class FlexiblePressReframeTests: XCTestCase {
         let same = try FlexiblePressReframe.reframe(f, from: .face(sp.top), to: .face(sp.top), frames: sp.frames)
         XCTAssertEqual(same.settings, f)
         XCTAssertNil(same.toast)
-        XCTAssertThrowsError(try FlexiblePressReframe.reframe(f, from: .face(sp.top), to: .press(UUID()), frames: sp.frames)) {
+        XCTAssertThrowsError(try FlexiblePressReframe.reframe(f, from: .face(sp.top), to: .press(Self.someFrame(sp)), frames: sp.frames)) {
             XCTAssertEqual($0 as? FlexiblePressReframe.Waiting, .pressFrame, "a press's frame is core's build_press_stack — AP9")
             print("FLEX-AP1 reframe waits: \($0)")
         }
-        XCTAssertThrowsError(try sp.frames.stack(.press(UUID())))
+        XCTAssertThrowsError(try sp.frames.stack(.press(Self.someFrame(sp))))
 
         // the model's wrapper, through the page's own open scene of the same split pad
         let pm = try FlexibleHisProject.padProject(FlexibleStageSettings(materialID: "varioshore_tpu"))
@@ -139,7 +142,7 @@ final class FlexiblePressReframeTests: XCTestCase {
         let pure = try FlexiblePressReframe.reframe(f, from: .face(sp.top), to: .face(sp.topB), frames: sp.frames)
         XCTAssertEqual(viaModel, pure, "the open scene gives core's same frames")
         do {
-            _ = try await m.reframed(f, from: .face(sp.top), to: .press(UUID()))
+            _ = try await m.reframed(f, from: .face(sp.top), to: .press(Self.someFrame(sp)))
             XCTFail("a press frame must wait on core")
         } catch {
             XCTAssertEqual(error as? FlexiblePressReframe.Waiting, .pressFrame)

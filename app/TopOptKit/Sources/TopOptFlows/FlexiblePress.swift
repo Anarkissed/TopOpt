@@ -45,12 +45,16 @@ public struct FlexiblePress: Codable, Equatable, Hashable, Sendable, Identifiabl
     /// Everything else, as a face press saves it (curves, deepest, shape, stamp, squeeze group, weight
     /// and its link): faceRegionID == regions[0], role "loaded", rotationDeg 0.
     public var settings: FlexibleFaceSettings
-    /// The straight frame (a face's region) its curves and stamp were drawn in, until core frames the
-    /// press (AP9 clears it). nil = drawn in the press's own frame. OPTIONAL, omitted when nil.
-    public var drawnIn: Int?
+    /// ★ THE FRAME OF RECORD (AP1 review): the one of core's frames its curves and stamp were drawn in,
+    /// when that is not the press's CURRENT frame (`frame`) — a tilt's face (`.face(region)`), or the
+    /// press's own frame before a footprint or direction change that core has not re-expressed them
+    /// through yet (`setMembers`, `aim`; AP9 reframes from it and clears it). A VALUE, so a direction
+    /// core refuses, a member deleted on Surface or a scene not open yet never loses the frame they are
+    /// in. nil = drawn in its current frame. OPTIONAL, omitted when nil.
+    public var drawnIn: FlexibleFrameRef?
 
     public init(id: UUID = UUID(), regions: [Int], direction: SIMD3<Double>, snap: String? = nil,
-                settings: FlexibleFaceSettings, drawnIn: Int? = nil) {
+                settings: FlexibleFaceSettings, drawnIn: FlexibleFrameRef? = nil) {
         self.id = id
         self.regions = regions
         self.direction = direction
@@ -96,6 +100,37 @@ public struct FlexiblePress: Codable, Equatable, Hashable, Sendable, Identifiabl
 
     /// The squeeze group it is in (stored number; nil ⇒ 1, as a face).
     public var squeezeGroup: Int { settings.squeezeGroup ?? FlexibleSqueezeGroups.first }
+
+    // MARK: its frames (core's; named here, never computed)
+
+    /// Its own frame, as core is asked for it (AP9's registration: the footprint and the direction).
+    public var frame: FlexiblePressFrame { FlexiblePressFrame(regions: regions, direction: direction) }
+
+    /// The frame its curves and stamp are expressed in: the frame of record, else its own.
+    public var inputsFrame: FlexibleFrameRef { drawnIn ?? .press(frame) }
+
+    /// ★ THE ONE WAY TO CHANGE THE FOOTPRINT (AP4's "Use the corner parts", "Leave them out"). The name
+    /// core gives it follows regions[0]; a snap whose target left — or the halfway, which moves with the
+    /// members — holds no more (free); inputs drawn in the old footprint's frame keep it as their frame
+    /// of record. false (nothing changes): no member, or the same members.
+    @discardableResult
+    public mutating func setMembers(_ members: [Int]) -> Bool {
+        // AP1 REVIEW TESTS FIRST — RED STUB: the members only (the name, the snap and the frame of record stale)
+        regions = members
+        return true
+    }
+
+    /// ★ THE ONE WAY TO RE-AIM (AP3's chips, degrees box and knob). A direction that is not finite or
+    /// has no length is refused (false: a NaN makes every later save of the project fail, and core
+    /// refuses a zero press_direction). Inputs drawn in the old direction's frame keep it as their
+    /// frame of record.
+    @discardableResult
+    public mutating func aim(_ d: SIMD3<Double>, snap: String?) -> Bool {
+        // AP1 REVIEW TESTS FIRST — RED STUB: no guard, no frame of record
+        direction = d
+        self.snap = snap
+        return true
+    }
 
     /// "Corner · Top A + Face 3 + Face 2", fitted to one line (`regionName` names a region).
     public func name(_ regionName: (Int) -> String) -> String {
@@ -169,6 +204,64 @@ public struct FlexiblePress: Codable, Equatable, Hashable, Sendable, Identifiabl
     }
 }
 
+// MARK: - core's frames, named by value (saved: `FlexiblePress.drawnIn`)
+
+/// ★ A PRESS'S OWN FRAME, named by what core frames: its footprint and its direction — exactly AP9's
+/// registration request to the bridge (footprint ids, direction, rotation 0). Two directions are two
+/// frames: equal only BIT FOR BIT, so a re-aim by one ulp is a frame change that core re-expresses
+/// the inputs through (FlexiblePressReframe), never a silent no-op.
+public struct FlexiblePressFrame: Codable, Hashable, Sendable {
+    public var regions: [Int]
+    public var direction: SIMD3<Double>
+
+    public init(regions: [Int], direction: SIMD3<Double>) {
+        self.regions = regions
+        self.direction = direction
+    }
+
+    static func bits(_ v: SIMD3<Double>) -> [UInt64] { [v.x.bitPattern, v.y.bitPattern, v.z.bitPattern] }
+
+    public static func == (a: FlexiblePressFrame, b: FlexiblePressFrame) -> Bool {
+        // AP1 REVIEW TESTS FIRST — RED STUB: named by its footprint only (as by the press's id)
+        a.regions == b.regions
+    }
+    public func hash(into h: inout Hasher) {
+        h.combine(regions)
+    }
+}
+
+/// One of core's frames. Saved (`FlexiblePress.drawnIn`) as `{"face": r}` or
+/// `{"press": {"direction": [x, y, z], "regions": [...]}}`.
+public enum FlexibleFrameRef: Hashable, Sendable, Codable {
+    /// A declared region's own frame (a whole face or a sector; rotation 0 since round 3).
+    case face(Int)
+    /// A press's own frame: core's build_press_stack — through the bridge from AP9 only.
+    case press(FlexiblePressFrame)
+
+    private enum CodingKeys: String, CodingKey { case face, press }
+    private enum PressKeys: String, CodingKey { case regions, direction }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        if let r = try c.decodeIfPresent(Int.self, forKey: .face) { self = .face(r); return }
+        if let p = try c.decodeIfPresent(FlexiblePressFrame.self, forKey: .press) { self = .press(p); return }
+        throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath,
+                                                debugDescription: "a frame names a face or a press"))
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case .face(let r): try c.encode(r, forKey: .face)
+        case .press(let p):
+            // AP1 REVIEW TESTS FIRST — RED STUB: the direction written through Float
+            var n = c.nestedContainer(keyedBy: PressKeys.self, forKey: .press)
+            try n.encode(p.regions, forKey: .regions)
+            try n.encode(SIMD3<Double>(SIMD3<Float>(p.direction)), forKey: .direction)
+        }
+    }
+}
+
 // MARK: - storage on the settings
 
 extension FlexibleStageSettings {
@@ -207,7 +300,7 @@ extension FlexibleStageSettings {
     public mutating func tiltFace(_ region: Int, direction: SIMD3<Double>, snap: String?, id: UUID = UUID()) -> UUID? {
         guard let f = face(region), f.isLoaded, pressHolding(region) == nil else { return nil }
         faces.removeAll { $0.faceRegionID == region }
-        setPress(FlexiblePress(id: id, regions: [region], direction: direction, snap: snap, settings: f, drawnIn: region))
+        setPress(FlexiblePress(id: id, regions: [region], direction: direction, snap: snap, settings: f, drawnIn: .face(region)))
         FlexibleSqueezeGroups.normalise(&self)
         return id
     }
