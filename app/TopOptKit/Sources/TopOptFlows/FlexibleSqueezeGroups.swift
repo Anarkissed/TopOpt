@@ -293,12 +293,13 @@ public enum FlexibleSqueezeGroups {
                 out.append(Hand(mainGroup: nil, kg: f.weightKg, regions: [r]))
             }
         }
-        // ★ AP1: a press LINKED to a main-page Load group that still holds a member is that group's hand
-        // (its force goes through the press's members by area); any other press is its own hand
+        // ★ AP1: a press LINKED to a main-page Load group that still PRESSES a member is that group's hand
+        // (its force goes through the press's members by area); any other press is its own hand (★ AP1
+        // review: a group that only pulls or shears its members is no hand of it — as for a face)
         for pid in g.presses {
             guard let p = s.press(pid) else { continue }
             if let from = p.settings.weightFrom,
-               let e = p.regions.lazy.compactMap({ loads.entry($0) }).first(where: { $0.groupID == from && $0.role != .rests }) {
+               let e = p.regions.lazy.compactMap({ loads.entry($0) }).first(where: { $0.groupID == from && $0.role == .pressed }) {
                 if let i = byGroup[from] {
                     out[i] = Hand(mainGroup: from, kg: out[i].kg, regions: out[i].regions, presses: out[i].presses + [pid])
                 } else {

@@ -24,8 +24,17 @@
 //
 // ★ TILT AND STRAIGHTEN MOVE ONE STRUCT, INTACT. A tilt moves the pressed face's FlexibleFaceSettings
 // into a press (its weight and its link kept; `drawnIn` = the face, the frame its curves and stamp were
-// drawn in); straighten moves it back into `faces`. Re-expressing inputs between two of core's frames is
-// FlexiblePressReframe.
+// drawn in; `faceIndex` = where it sat in `faces`); straighten moves it back into `faces` AT THAT PLACE,
+// so a tilt and a straighten leave his setup — and the job written from it — exactly as they were.
+// Re-expressing inputs between two of core's frames is FlexiblePressReframe.
+//
+// ★ AP1 REVIEW (the verifier's findings, confirmed). A direction that is not finite or has no length is
+// never stored (`isAimable`: one NaN made every later save fail; core refuses a zero press_direction).
+// The frame of record is a VALUE (`FlexibleFrameRef`: a face, or a press frame = footprint + direction,
+// equal bit for bit), and `setMembers` / `aim` are the only ways to change a press's footprint or
+// direction, so it stays honest. A link needs a group that PRESSES a member (a group that only pulls or
+// shears them is no squish: the pad asks, as for a face), and the linked weight is summed in his pick
+// order — the same bits on every call and every re-sync.
 
 import Foundation
 import simd
@@ -52,9 +61,13 @@ public struct FlexiblePress: Codable, Equatable, Hashable, Sendable, Identifiabl
     /// core refuses, a member deleted on Surface or a scene not open yet never loses the frame they are
     /// in. nil = drawn in its current frame. OPTIONAL, omitted when nil.
     public var drawnIn: FlexibleFrameRef?
+    /// ★ A TILTED FACE's place in `faces` before the tilt (AP1 review): straighten puts it back there
+    /// (clamped), so tilt + straighten leave `faces` — its order is the run job's face order and part of
+    /// the lattice's key — as they were. nil: not a tilted face. OPTIONAL, omitted when nil.
+    public var faceIndex: Int?
 
     public init(id: UUID = UUID(), regions: [Int], direction: SIMD3<Double>, snap: String? = nil,
-                settings: FlexibleFaceSettings, drawnIn: FlexibleFrameRef? = nil) {
+                settings: FlexibleFaceSettings, drawnIn: FlexibleFrameRef? = nil, faceIndex: Int? = nil) {
         self.id = id
         self.regions = regions
         self.direction = direction
@@ -65,6 +78,13 @@ public struct FlexiblePress: Codable, Equatable, Hashable, Sendable, Identifiabl
         f.rotationDeg = 0
         self.settings = f
         self.drawnIn = drawnIn
+        self.faceIndex = faceIndex
+    }
+
+    /// ★ Can this be stored as a press direction? Finite, with a length (core refuses a zero
+    /// press_direction, and a NaN makes the project's JSON unwritable — every later save would fail).
+    public static func isAimable(_ d: SIMD3<Double>) -> Bool {
+        d.x.isFinite && d.y.isFinite && d.z.isFinite && simd_length(d) >= 1e-9
     }
 
     // MARK: derived
@@ -115,8 +135,15 @@ public struct FlexiblePress: Codable, Equatable, Hashable, Sendable, Identifiabl
     /// of record. false (nothing changes): no member, or the same members.
     @discardableResult
     public mutating func setMembers(_ members: [Int]) -> Bool {
-        // AP1 REVIEW TESTS FIRST — RED STUB: the members only (the name, the snap and the frame of record stale)
+        guard let first = members.first, members != regions else { return false }
+        if drawnIn == nil { drawnIn = .press(frame) }
         regions = members
+        settings.faceRegionID = first
+        switch snapTarget {
+        case .halfway?: snap = nil
+        case .face(let r)?: if !members.contains(r) { snap = nil }
+        case .build?, nil: break
+        }
         return true
     }
 
@@ -126,7 +153,8 @@ public struct FlexiblePress: Codable, Equatable, Hashable, Sendable, Identifiabl
     /// frame of record.
     @discardableResult
     public mutating func aim(_ d: SIMD3<Double>, snap: String?) -> Bool {
-        // AP1 REVIEW TESTS FIRST — RED STUB: no guard, no frame of record
+        guard Self.isAimable(d) else { return false }
+        if drawnIn == nil, FlexiblePressFrame.bits(d) != FlexiblePressFrame.bits(direction) { drawnIn = .press(frame) }
         direction = d
         self.snap = snap
         return true
@@ -155,24 +183,36 @@ public struct FlexiblePress: Codable, Equatable, Hashable, Sendable, Identifiabl
         case ask
     }
 
+    /// ★ Does main-page group `group` PRESS at least one of `regions` (an entry of role .pressed: it
+    /// pushes into that face, c > 0)? A group that only pulls or shears them is not a squish — the face
+    /// rule asks the pad for such a face (`FlexibleStageModel.press`), and so does a press over them.
+    public static func pressed(_ regions: [Int], by group: UUID, loads: FlexibleMainPageLoads) -> Bool {
+        regions.contains { r in loads.entry(r).map { $0.groupID == group && $0.role == .pressed } == true }
+    }
+
     /// The ONE main-page Load group the members' entries name (a member in no group, or resting in an
-    /// Anchor group, names none). nil when they name none — or two different groups (no one force).
+    /// Anchor group, names none), when it PRESSES at least one of them. nil when they name none, two
+    /// different groups (no one force), or a group that only pulls or shears them.
     public static func loadGroup(of regions: [Int], loads: FlexibleMainPageLoads) -> UUID? {
         let named = Set(regions.compactMap { r in loads.entry(r).flatMap { $0.role == .rests ? nil : $0.groupID } })
-        return named.count == 1 ? named.first : nil
+        guard named.count == 1, let g = named.first, pressed(regions, by: g, loads: loads) else { return nil }
+        return g
     }
 
     /// The force main-page group `group` puts through `regions`: Σ share × the group's weight over the
     /// members it holds — BEFORE the at-an-angle cos (FlexibleMainPageLoads' `pressFraction`), because the
-    /// press points along its own arrow. nil when the group holds none of them (any more).
+    /// press points along its own arrow. ★ Summed in his pick order, each member once: the same BITS on
+    /// every call (a Set's order is per instance, and Σ of 3+ doubles depends on it). nil when the group
+    /// presses none of them (any more).
     public static func linkedKg(regions: [Int], group: UUID, loads: FlexibleMainPageLoads) -> Double? {
-        var kg = 0.0, held = false
-        for r in Set(regions) {
+        guard pressed(regions, by: group, loads: loads) else { return nil }
+        var kg = 0.0
+        var seen = Set<Int>()
+        for r in regions where seen.insert(r).inserted {
             guard let e = loads.entry(r), e.groupID == group, e.role != .rests else { continue }
             kg += e.share * e.groupKg
-            held = true
         }
-        return held ? kg : nil
+        return kg
     }
 
     /// The rule, in its order: the link, then the squeeze group's ONE force, then the pad.
@@ -188,8 +228,9 @@ public struct FlexiblePress: Codable, Equatable, Hashable, Sendable, Identifiabl
     /// ★ THE RE-SYNC (D-R3-6): every LINKED press takes its group's force through its members again, so a
     /// group edit on the main page (or the squeeze group's pill, which writes the main group) reaches it.
     /// A press whose group no longer holds any member keeps its weight as his own, unlinked — the rule a
-    /// face follows (FlexibleMainPageLoads.adopt). `loads` must be the FULL main-page read: the face
-    /// re-sync's copy has the press members filtered out.
+    /// face follows (FlexibleMainPageLoads.adopt) — and so does one whose group no longer PRESSES any
+    /// member (it turned to pull them). `loads` must be the FULL main-page read: the face re-sync's copy
+    /// has the press members filtered out.
     public static func adoptWeights(_ loads: FlexibleMainPageLoads, into s: inout FlexibleStageSettings) {
         guard var ps = s.presses else { return }
         for i in ps.indices {
@@ -222,11 +263,11 @@ public struct FlexiblePressFrame: Codable, Hashable, Sendable {
     static func bits(_ v: SIMD3<Double>) -> [UInt64] { [v.x.bitPattern, v.y.bitPattern, v.z.bitPattern] }
 
     public static func == (a: FlexiblePressFrame, b: FlexiblePressFrame) -> Bool {
-        // AP1 REVIEW TESTS FIRST — RED STUB: named by its footprint only (as by the press's id)
-        a.regions == b.regions
+        a.regions == b.regions && bits(a.direction) == bits(b.direction)
     }
     public func hash(into h: inout Hasher) {
         h.combine(regions)
+        h.combine(Self.bits(direction))
     }
 }
 
@@ -239,7 +280,6 @@ public enum FlexibleFrameRef: Hashable, Sendable, Codable {
     case press(FlexiblePressFrame)
 
     private enum CodingKeys: String, CodingKey { case face, press }
-    private enum PressKeys: String, CodingKey { case regions, direction }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -253,11 +293,7 @@ public enum FlexibleFrameRef: Hashable, Sendable, Codable {
         var c = encoder.container(keyedBy: CodingKeys.self)
         switch self {
         case .face(let r): try c.encode(r, forKey: .face)
-        case .press(let p):
-            // AP1 REVIEW TESTS FIRST — RED STUB: the direction written through Float
-            var n = c.nestedContainer(keyedBy: PressKeys.self, forKey: .press)
-            try n.encode(p.regions, forKey: .regions)
-            try n.encode(SIMD3<Double>(SIMD3<Float>(p.direction)), forKey: .direction)
+        case .press(let p): try c.encode(p, forKey: .press)
         }
     }
 }
@@ -274,8 +310,10 @@ extension FlexibleStageSettings {
 
     public func press(_ id: UUID) -> FlexiblePress? { presses?.first { $0.id == id } }
 
-    /// Replace or add a press (by id).
+    /// Replace or add a press (by id). ★ A press whose direction cannot be stored (`isAimable`) is
+    /// ignored: one NaN would make every later save of the project fail.
     public mutating func setPress(_ p: FlexiblePress) {
+        guard FlexiblePress.isAimable(p.direction) else { return }
         var list = presses ?? []
         if let i = list.firstIndex(where: { $0.id == p.id }) { list[i] = p } else { list.append(p) }
         setPresses(list)
@@ -294,26 +332,30 @@ extension FlexibleStageSettings {
     public func pressHolding(_ region: Int) -> FlexiblePress? { presses?.first { $0.regions.contains(region) } }
 
     /// ★ TILT: the pressed face `region` becomes a 1-region press, its settings moved INTACT (weight,
-    /// link, curves, stamp, group), drawn in its own face's frame. nil (nothing changes): not a pressed
-    /// face, or already in a press.
+    /// link, curves, stamp, group), drawn in its own face's frame, its place in `faces` kept. nil
+    /// (nothing changes): not a pressed face, already in a press, or a direction that cannot be stored.
     @discardableResult
     public mutating func tiltFace(_ region: Int, direction: SIMD3<Double>, snap: String?, id: UUID = UUID()) -> UUID? {
-        guard let f = face(region), f.isLoaded, pressHolding(region) == nil else { return nil }
+        guard FlexiblePress.isAimable(direction), let i = faces.firstIndex(where: { $0.faceRegionID == region }),
+              faces[i].isLoaded, pressHolding(region) == nil else { return nil }
+        let f = faces[i]
         faces.removeAll { $0.faceRegionID == region }
-        setPress(FlexiblePress(id: id, regions: [region], direction: direction, snap: snap, settings: f, drawnIn: .face(region)))
+        setPress(FlexiblePress(id: id, regions: [region], direction: direction, snap: snap, settings: f,
+                               drawnIn: .face(region), faceIndex: i))
         FlexibleSqueezeGroups.normalise(&self)
         return id
     }
 
-    /// ★ STRAIGHTEN: a tilted press goes back into `faces`, its settings moved INTACT. false (nothing
-    /// changes): not a 1-region press, or the face is in `faces` already (a clash — its own fix).
-    /// Inputs drawn in the face's frame (`drawnIn` == the face) need no re-expressing; one drawn in the
-    /// press's own frame (only once core frames presses, AP9) is re-expressed there first.
+    /// ★ STRAIGHTEN: a tilted press goes back into `faces`, its settings moved INTACT, AT THE PLACE IT
+    /// SAT before the tilt (`faceIndex`, clamped; a 1-region press that was never a face goes last).
+    /// false (nothing changes): not a 1-region press, or the face is in `faces` already (a clash — its
+    /// own fix). Inputs drawn in the face's frame (`drawnIn` == the face) need no re-expressing; one drawn
+    /// in a press frame (only once core frames presses, AP9) is re-expressed there first.
     @discardableResult
     public mutating func straightenPress(_ id: UUID) -> Bool {
         guard let p = press(id), p.kind == .tilted, let region = p.regions.first, face(region) == nil else { return false }
         removePress(id)
-        setFace(p.settings)
+        faces.insert(p.settings, at: min(max(0, p.faceIndex ?? faces.count), faces.count))
         FlexibleSqueezeGroups.normalise(&self)
         return true
     }

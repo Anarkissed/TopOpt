@@ -467,6 +467,7 @@ public struct FlexibleStagePage: View {
     static func history(undo: Bool, project: ProjectModel, model: FlexibleStageModel) {
         if undo { project.performUndo() } else { project.performRedo() }
         model.refreshMainPageLoads()
+        model.historyRestored()   // ★ AP1 review: a press card follows the history
         model.recomputeAll()
     }
 

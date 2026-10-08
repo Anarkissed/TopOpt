@@ -562,7 +562,8 @@ public final class FlexibleStageModel: ObservableObject {
         // ★ ROUND 5 (S6): a face he DELETED stays deleted — the re-sync skips it (the main page's
         // group still holds it; that is his to change there)
         // ★ ANGLED PRESSES (AP1): a press member is never re-pressed or re-rested as a face (a face that
-        // is ALSO in a press — a clash, spec §8 — keeps its own link until he resolves it)
+        // is ALSO in a press — a clash, spec §8 — keeps its own link until he resolves it: D-AP1-2, pinned
+        // by FlexiblePressReviewTests.testAClashFaceKeepsItsLinkThroughTheReSync)
         let removed = Set(s.removedRegions ?? []).union(s.pressRegions.subtracting(s.faces.map(\.faceRegionID)))
         let full = loads
         let loads = removed.isEmpty ? loads : FlexibleMainPageLoads(entries: loads.entries.filter { !removed.contains($0.key) })
