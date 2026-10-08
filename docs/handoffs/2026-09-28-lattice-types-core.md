@@ -215,6 +215,73 @@ discover.
 The test harnesses are deliberately left alone: none of them reads the fingerprint, and
 touching eleven test files to set a field they ignore would be churn.
 
+## The weld piece: why the margin moved, and the question it leaves open
+
+The reviewer ruled on 2026-10-07: ship the GLOBAL weld piece, do not ship per-strut. The
+diagnosis behind that ruling, and the one question it does not answer, are here because
+the answer is about the INSTRUMENT, not about a defect.
+
+**What was measured.** Core already writes a per-member dump for the governing load case
+(`TOPOPT_ORGANIC_STRESS_DUMP`: A, B, radius, stress, knockdown), so all of this came out
+of the probe's own runs with NO core change. Frozen probe `216fcdb618ca0cb1608d`,
+byte-identical to the binary behind `stepped_weld_piece_ab.txt`, so the A/B table and
+these numbers are one measurement. The control: recomputing core's own convention
+reproduces the printed p99, max and margin on all six runs exactly. Scripts and raw
+output: `evidence/2026-09-28-lattice-types-core/stepped_weld_statistic.txt`,
+`weld_statistic.py`, `weld_field_compare.py`.
+
+**Margins (1/ratio_p99), global -> per-strut:**
+
+| plan | core's p99 | p99 by LENGTH | p99 by VOLUME | max |
+|---|---|---|---|---|
+| 500 | 179.0 -> 174.9 (-2.3%) | 177.6 -> 179.3 (+1.0%) | 191.6 -> 191.3 (-0.2%) | 33.9 -> 41.2 |
+| 2000 | 165.7 -> 138.9 (-16.2%) | 165.9 -> 150.9 (-9.0%) | 207.1 -> 191.6 (-7.5%) | 32.1 -> 11.3 |
+| 8000 | 149.8 -> 126.7 (-15.4%) | 150.4 -> 136.0 (-9.6%) | 193.8 -> 177.8 (-8.3%) | 9.2 -> 14.7 |
+
+The hypothesis under test was that the shift is the STATISTIC: core takes one sample per
+member regardless of length, so coarsening the thick struts' pieces tilts the population
+toward thin, highly stressed ones. That is half right. Reweighting removes about half the
+shift (16.2 -> 9.0 at plan 2000) and about nine points survive every reweighting. The MAX
+moves in opposite directions by plan -- down at 500 and 8000, up 2.8x at 2000 -- so it is
+one element in a million and settles nothing either way.
+
+**What settles it is the stress FIELD.** A length-weighted mean is invariant to how
+finely a strut is cut, so a difference in it is a difference in the field, not the
+sampling. (The first version of that instrument FAILED ITS OWN CONTROL -- per-bin strut
+length differed by 466%, because pieces are binned by midpoint and a thin bin gains or
+loses a whole piece -- and those numbers were discarded. The kept version holds total
+strut length identical to 7 figures and restricts bin comparisons to bins whose length
+matches within 1%, reporting the covered fraction.) The whole-pocket length-weighted mean
+stress rises **+7.25% (500), +18.89% (2000), +12.38% (8000)**; of the comparable bins only
+18.5-30.5% agree within 5%, and individual bins move -56% to +230%. The load path
+redistributes: the mechanics changed.
+
+**The size of it.** Global cuts every strut at 0.354-0.377 mm, so a joint lands at most
+0.19 mm from where the struts actually meet. Per-strut cuts the thickest strut
+(r = 1.0973) at 2.1213 mm, so at most **1.06 mm -- 5.6x further**, about half the finest
+cell. A thin strut arriving mid-span on a thick one has no node there and fuses to one up
+to that far away. No join is LOST either way (floating_ends 0 under both rules, and the
+reviewer's fusion proof holds: the reach `r_a + r_b` grows with `r_a` at the same rate the
+piece does). But "no join lost" is not "the same joints".
+
+**And why organic is sound as shipped.** Core's statistic is a length-weighted estimate
+only to the extent the pieces are equal. Under the global rule the spread is
+0.3536-0.3771 mm at plan 2000 -- 7%, and that spread IS the remainder pieces organic
+leaves -- and core's per-element p99 lands within **0.12-0.78%** of the length-weighted
+one on all three plans. Under per-strut, pieces span 0.354-2.12 mm (6x) and the two differ
+by 2.5-8.6%. So organic's statistic does not depend on exact uniformity, and it is sound
+BECAUSE the global rule keeps pieces near-uniform. That is a second reason to ship global,
+independent of the margin.
+
+**OPEN QUESTION (reviewer, 2026-10-07: parked, blocks nothing).** What is the correct
+joint treatment for a mixed-radius lattice when a thin strut meets a thick one between
+that strut's nodes? Every rule measured here fuses it to a NODE, so the joint lands at an
+offset, and the only question the measurement settles is which rule makes that offset
+smaller. Whether offsetting a joint at all is acceptable modelling practice -- as against
+splitting the thick strut at the arrival point, or adding a rigid link -- is a research
+question, not a defect. It does not block the Stepped certificate: global is the smaller
+error of the two available, by 5.6x.
+
 ## Open items
 
 - **A real part with a convex edge inside a lattice region** (carried from the #358

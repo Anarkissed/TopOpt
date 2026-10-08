@@ -4,6 +4,7 @@
 // sizes would pack a part that does not match the preview the maintainer approved.
 #include "topopt/beam_network.hpp"
 #include "topopt/stepped_plan.hpp"
+#include "topopt/lattice_algorithm.hpp"
 #include "topopt/lattice.hpp"
 
 #include <algorithm>
@@ -213,6 +214,345 @@ static void test_menu_shape() {
 // wrong strut width to every cell -- silently, with a plausible-looking lattice. The
 // cells here are deliberately sent in an order that the sort must change, and each
 // one's rho is a function of its own position so a mispairing cannot look right.
+// ── R6: WHAT GROUPING LAYS IS WHAT THE PLAN SENT ──────────────────────────────
+// `stepped_group_cells` bucketed by (region, size) and gave each bucket ONE grid of that
+// size walked back from the slot origin, then took each cell's index as
+// llround((origin - grid origin)/size). A cell that was not a whole number of its own
+// size from the slot origin was therefore ROUNDED to the nearest grid point -- measured
+// at up to half its size, and the run lays exactly that grid. Nothing refused it and no
+// receipt recorded it; only the STL showed it.
+//
+// Core's own packed-slot fixture has the defect. `test_packed_slot_covers_exactly_once`
+// (left untouched, as the reviewer ruled -- it checks the SENT plan's coverage, which is
+// still a valid property) packs a 12 mm slot with a 9 mm cell at (3, 3, 0) and 37 threes.
+// The 9 sits one quarter-tile in, so it is not on its own 9 mm grid. Sampled on the cells
+// as SENT every point is covered once; sampled on the cells as GROUPED -- which is what
+// the run lays -- #354 measured 7,344 once, 3,240 uncovered and 3,240 DOUBLE covered,
+// with the 9 laid at (0, 0, 0). This test samples the grouped cells, which is the
+// property that was broken.
+static void test_grouped_cells_cover_the_slot_exactly_once() {
+  SteppedPlanRegion reg;
+  reg.region_id = 1;
+  reg.base_cell_mm = 12.0;
+  reg.slot_origin = Vec3{0.0, 0.0, 0.0};
+
+  std::vector<SteppedCell> cells;
+  auto add = [&](double x, double y, double z, double s) {
+    SteppedCell c;
+    c.region_id = 1;
+    c.origin = Vec3{x, y, z};
+    c.size_mm = s;
+    cells.push_back(c); };
+  add(3.0, 3.0, 0.0, 9.0);
+  for (int i = 0; i < 4; ++i)
+    for (int j = 0; j < 4; ++j)
+      for (int k = 0; k < 4; ++k) {
+        const double x = 3.0 * i, y = 3.0 * j, z = 3.0 * k;
+        if (!(x >= 3.0 && y >= 3.0 && z < 9.0)) add(x, y, z, 3.0);
+      }
+  CHECK(cells.size() == 38, "grouped coverage: the fixture is the 9 plus 37 threes");
+
+  const std::vector<SteppedCellGroup> gs = stepped_group_cells(cells, {reg});
+  // Coverage sampled on the GROUPED cells: group origin + index * size, which is exactly
+  // what run_job lays (PR.origin = g.origin, PR.cell_mm = g.size_mm, `latticed` marking
+  // the indices).
+  const double h = 0.5;
+  const int n = static_cast<int>(12.0 / h);
+  long long once = 0, none = 0, doubled = 0;
+  for (int a = 0; a < n; ++a)
+    for (int b = 0; b < n; ++b)
+      for (int c = 0; c < n; ++c) {
+        const double x = h / 2 + a * h, y = h / 2 + b * h, z = h / 2 + c * h;
+        int hits = 0;
+        for (const SteppedCellGroup& g : gs)
+          for (const std::array<int, 3>& ix : g.cells) {
+            const double ox = g.origin.x + ix[0] * g.size_mm;
+            const double oy = g.origin.y + ix[1] * g.size_mm;
+            const double oz = g.origin.z + ix[2] * g.size_mm;
+            if (x >= ox && x < ox + g.size_mm && y >= oy && y < oy + g.size_mm &&
+                z >= oz && z < oz + g.size_mm)
+              ++hits;
+          }
+        if (hits == 1) ++once;
+        else if (hits == 0) ++none;
+        else ++doubled;
+      }
+  CHECK(none == 0, "grouped coverage: no point of the slot is left BARE by what is laid");
+  CHECK(doubled == 0, "grouped coverage: and no point is covered TWICE");
+  CHECK(once == 13824, "grouped coverage: every one of the 13,824 sample points once");
+}
+
+// And the identity directly, for the three placements #354 measured core moving: a base
+// cell 1 mm off its grid (R6), a three-tile cell one tile in (R6c, which core laid ON TOP
+// of its neighbour), and a k-tile cell at the start of the second base slot (R6d, moved
+// 2.9 mm). After grouping, index -> position must give back the origin that was sent.
+static void test_grouping_lays_every_cell_where_it_was_sent() {
+  auto check_one = [](const char* what, Vec3 slot, double base,
+                      const std::vector<std::pair<Vec3, double>>& sent) {
+    SteppedPlanRegion reg;
+    reg.region_id = 1;
+    reg.base_cell_mm = base;
+    reg.slot_origin = slot;
+    std::vector<SteppedCell> cells;
+    for (const auto& s : sent) {
+      SteppedCell c;
+      c.region_id = 1;
+      c.origin = s.first;
+      c.size_mm = s.second;
+      cells.push_back(c);
+    }
+    const std::vector<SteppedCellGroup> gs = stepped_group_cells(cells, {reg});
+    std::size_t laid = 0;
+    double worst = 0.0;
+    for (const SteppedCellGroup& g : gs)
+      for (const std::array<int, 3>& ix : g.cells) {
+        ++laid;
+        const Vec3 at{g.origin.x + ix[0] * g.size_mm, g.origin.y + ix[1] * g.size_mm,
+                      g.origin.z + ix[2] * g.size_mm};
+        // the nearest sent cell of this size, and how far the laid one is from it
+        // ★ THE TOLERANCES, and why they are not 1e-9. stepped_group_cells keys a group
+        // on llround(size * 1e6), so a group's size is its sent size QUANTISED TO A
+        // NANOMETRE: 14.5/6 arrives as 2.4166666666666665 and comes back as 2.416667, a
+        // 3.3e-7 mm difference. A 1e-9 match therefore finds no cell at all and reports
+        // a move of 1e300 -- which is what the first draft of this test did. The bound
+        // below is 1e-5 mm: five orders of magnitude under the movements being tested
+        // (0.75 to 2.9 mm) and 45,000 times under the bead, so it cannot hide a
+        // re-anchoring while tolerating the quantisation.
+        double best = 1e300;
+        for (const auto& s : sent) {
+          if (std::fabs(s.second - g.size_mm) > 2e-6) continue;
+          const double d = std::max(std::max(std::fabs(at.x - s.first.x),
+                                             std::fabs(at.y - s.first.y)),
+                                    std::fabs(at.z - s.first.z));
+          best = std::min(best, d);
+        }
+        worst = std::max(worst, best);
+      }
+    if (laid != sent.size() || !(worst < 1e-5))
+      std::fprintf(stderr, "  [%s] laid %zu of %zu, worst move %.6g mm\n", what, laid,
+                   sent.size(), worst);
+    CHECK(laid == sent.size(), what);
+    CHECK(worst < 1e-5, what);
+  };
+  // R6: a 3 mm BASE cell 1 mm off its own grid in x. Core laid it at 18, 1 mm away.
+  check_one("R6: a base cell off its grid is laid where SENT, not on the grid",
+            Vec3{18.0, 12.0, 8.0}, 3.0, {{Vec3{19.0, 9.0, 8.0}, 3.0}});
+  // R6c: a one-tile cell and a three-tile cell one tile in, on a 14.5 mm base's sixths.
+  // Core laid the big one at 18, on top of the tile.
+  check_one("R6c: a three-tile cell one tile in is laid where SENT, not on its neighbour",
+            Vec3{18.0, 0.0, 8.0}, 14.5,
+            {{Vec3{18.0, 0.0, 8.0}, 14.5 / 6.0},
+             {Vec3{18.0 + 14.5 / 6.0, 0.0, 8.0}, 3.0 * (14.5 / 6.0)}});
+  // R6d: an 8.7 mm cell at the start of the SECOND base slot. Core laid it 2.9 mm on.
+  check_one("R6d: a k-tile cell at the second slot is laid where SENT",
+            Vec3{18.0, 0.0, 8.0}, 14.5,
+            {{Vec3{18.0, 0.0, 8.0 + 14.5}, 3.0 * (14.5 / 5.0)}});
+}
+
+// ── R5, R3 and a FALSE ACCEPTANCE (#354's core brief, 2026-10-02) ──────────────
+// Overlap was decided by a hash of ONE finest tile -- the smallest size on ANY
+// region's menu -- each cell claiming llround(size/finest) slots from slot
+// llround(offset/finest). The comment carried the assumption: "every cell is a whole
+// number of those on every axis". Three things go wrong with it.
+//
+//  R5  It holds only if every region's ladder nests in every other's. Where a
+//      size/tile ratio has a fraction above a half, the span rounds UP while the next
+//      cell's start rounds DOWN, so two cells that merely TOUCH share a slot. One of
+//      his projects produced 1,458 such collisions, every one false.
+//  R3  The key is (i, j, k) alone and offsets are measured from each region's OWN slot
+//      origin, so two cells at the same relative offset collide however far apart they
+//      are. The brief's pair is 36 mm apart.
+//  ★   And the same rounding hides REAL overlaps. Where the printability rule leaves a
+//      region's menu holding nothing but its base (it does for every base at a 0.45 mm
+//      bead -- see the menus below), the hash tile EQUALS the cell, so a cell is one
+//      slot wide and two cells half a cell apart round into different slots. Base-size
+//      cells are exempt from the alignment check, so a non-multiple offset is exactly
+//      what the app sends today: two cells overlapping by half their width are
+//      ACCEPTED. A false refusal costs a solve; this one ships a wrong part.
+//
+// So the hash cannot be repaired by changing its tile or its key: it is replaced by an
+// exact test of the cells' boxes, bucketed only to find candidates. Each case below
+// states its own premise, because every one of them would pass vacuously if the menus
+// moved underneath it, and both ways of REFUSING stay tested -- the app reports 1,367
+// REAL cross-region overlapping pairs on the stand, so a fix that simply stopped
+// comparing across regions would pass R3 and ship those.
+static void test_overlap_is_exact_not_a_shared_tile() {
+  auto reg = [](int id, double base, Vec3 at) {
+    SteppedPlanRegion r;
+    r.region_id = id;
+    r.base_cell_mm = base;
+    r.slot_origin = at;
+    return r; };
+  auto cell = [](int id, Vec3 at, double size) {
+    SteppedCell c;
+    c.region_id = id;
+    c.origin = at;
+    c.size_mm = size;
+    return c; };
+  const double bead = 0.45;
+
+  // ── R5: two cells that touch, on their own region's own tile grid ──
+  // prints_open is OFF here for one reason: with it on, a 2.5 or 3.25 mm base admits
+  // NOTHING below itself, and a test of sub-base sizes would have no sizes to use.
+  const SteppedPlanRegion r1 = reg(1, 2.5, Vec3{18.0, 0.0, 8.0});
+  const SteppedPlanRegion r2 = reg(2, 3.25, Vec3{54.0, 0.0, 18.0});
+  const std::vector<double> m1 =
+      topopt::stepped_size_menu(LatticeTopology::Octet, 2.5, bead, 0.0, false);
+  const std::vector<double> m2 =
+      topopt::stepped_size_menu(LatticeTopology::Octet, 3.25, bead, 0.0, false);
+  double finest = 0.0;
+  for (const std::vector<double>* m : {&m1, &m2})
+    for (double s : *m)
+      if (finest <= 0.0 || s < finest) finest = s;
+  const double size = 2.0 * (3.25 / 5.0);   // 1.3 mm: region 2's own family-5 tile, x2
+  bool on_menu = false;
+  for (double s : m2) if (std::fabs(s - size) < 1e-9) on_menu = true;
+  CHECK(on_menu, "R5 premise: 1.3 mm is on region 2's own menu");
+  const double ratio = size / finest;
+  CHECK(std::fabs(ratio - std::floor(ratio + 0.5)) > 0.1,
+        "R5 premise: and it is NOT a whole number of the GLOBAL finest tile, which is "
+        "the condition that rounded a touch into an overlap");
+  const std::vector<SteppedCell> touching{
+      cell(2, Vec3{54.0 + size, 0.0, 18.0}, size),
+      cell(2, Vec3{54.0 + 2.0 * size, 0.0, 18.0}, size)};
+  const SteppedPlanCheck t = stepped_validate_plan(LatticeTopology::Octet, touching,
+                                                   {r1, r2}, bead, 0.0, false);
+  CHECK(t.ok, "R5: two cells that touch on their own grid do not overlap");
+
+  // ── R3: the same relative offset in two regions, 36 mm apart ──
+  const SteppedPlanRegion a = reg(1, 3.0, Vec3{18.0, 0.0, 8.0});
+  const SteppedPlanRegion b = reg(2, 3.0, Vec3{54.0, 0.0, 18.0});
+  CHECK(54.0 - (18.0 + 3.0) > 0.0, "R3 premise: the two cells are disjoint in space");
+  const SteppedPlanCheck far = stepped_validate_plan(
+      LatticeTopology::Octet,
+      {cell(1, Vec3{18.0, 0.0, 8.0}, 3.0), cell(2, Vec3{54.0, 0.0, 18.0}, 3.0)},
+      {a, b}, bead);
+  CHECK(far.ok, "R3: cells 36 mm apart in different regions do not overlap");
+
+  // ── ★ the false acceptance: a base-only menu, so the tile IS the cell ──
+  const std::vector<double> m3 =
+      topopt::stepped_size_menu(LatticeTopology::Octet, 3.0, bead);
+  CHECK(m3.size() == 1 && std::fabs(m3.front() - 3.0) < 1e-9,
+        "premise: at a 0.45 mm bead a 3 mm base admits only itself, so the hash tile "
+        "was the cell");
+  const SteppedPlanCheck hidden = stepped_validate_plan(
+      LatticeTopology::Octet,
+      {cell(1, Vec3{18.0, 0.0, 8.0}, 3.0), cell(1, Vec3{19.5, 0.0, 8.0}, 3.0)},
+      {a}, bead);
+  CHECK(!hidden.ok,
+        "overlap: two base cells half a cell apart DO overlap and must be refused");
+
+  // ── and the refusals that must survive the change ──
+  const SteppedPlanCheck rich = stepped_validate_plan(
+      LatticeTopology::Octet,
+      {cell(1, Vec3{18.0, 0.0, 8.0}, 2.5), cell(1, Vec3{19.0, 0.0, 8.0}, 2.5)},
+      {reg(1, 2.5, Vec3{18.0, 0.0, 8.0})}, bead, 0.0, false);
+  CHECK(!rich.ok, "overlap: a real overlap inside one region is still refused");
+  const SteppedPlanCheck xr = stepped_validate_plan(
+      LatticeTopology::Octet,
+      {cell(1, Vec3{18.0, 0.0, 8.0}, 3.0), cell(2, Vec3{19.5, 0.0, 8.0}, 3.0)},
+      {a, reg(2, 3.0, Vec3{19.5, 0.0, 8.0})}, bead);
+  CHECK(!xr.ok, "overlap: a real overlap ACROSS two regions is still refused");
+  CHECK(xr.error.find("region 1") != std::string::npos &&
+            xr.error.find("region 2") != std::string::npos,
+        "overlap: and a cross-region refusal names BOTH regions, because 'OVERLAPS "
+        "cell 0' alone does not say where to look");
+}
+
+// ── R2 / R2x / R2b: ONE CONTAINMENT RULE FOR EVERY FACE ───────────────────────
+// `origin` is the cell's MINIMUM corner (stepped_plan.hpp). The depth check projected
+// that corner and added the size along the normal, which is the cell's span only when
+// the normal points the way that makes the minimum corner the near one -- a POSITIVE
+// axis normal. On a wall whose normal has a negative component the minimum corner is
+// the cell's DEEPEST point, so every layer read one cell too deep: the deepest layer
+// was refused (1,467 sound cells on the stand's -y wall) and a cell one layer in FRONT
+// of the face -- outside the prism and outside the part -- was accepted, and laid, on
+// the part's face (R2x: 612 triangles at y 11.55-12.45).
+//
+// The reviewer's ruling of 2026-10-05 settles R2, R2x and R2b with ONE rule for every
+// face, axis-aligned or tilted:
+//   - the cell's CENTRE must lie in the prism, 0 <= s_mid <= depth;
+//   - its FAR side must not pass the depth, using the cube's true projection interval
+//     [s0 + S*sum(min(0,n_i)), s0 + S*sum(max(0,n_i))];
+//   - its NEAR side MAY stand in front of the face plane.
+// That last clause is the one worth a test of its own, and it is the one a "fix" that
+// merely swapped the sign would get wrong. The app starts a tilted facet's span in
+// front of the plane BY DESIGN, so the cube covers the slant; what falls outside the
+// part is not laid. A near-side bound would refuse the stand's 90 face-23 facet cells
+// for doing the one thing that makes them cover their face. So the tilted case below
+// is asserted ACCEPTED while its near side stands 2.12 mm in front of the plane, and
+// it is what distinguishes this rule from any one-sided reading of the interval.
+static void test_depth_projects_the_cube_not_one_corner() {
+  auto region = [](Vec3 normal, Vec3 face_at) {
+    SteppedPlanRegion reg;
+    reg.region_id = 1;
+    reg.base_cell_mm = 3.0;
+    reg.slot_origin = face_at;
+    reg.normal = normal;
+    reg.depth_mm = 12.0;
+    return reg; };
+  auto cell_at = [](Vec3 at) {
+    SteppedCell c;
+    c.region_id = 1;
+    c.origin = at;
+    c.size_mm = 3.0;   // the base size, so alignment is not what is being tested
+    return c; };
+  auto ok = [](const SteppedPlanRegion& reg, const SteppedCell& c) {
+    return stepped_validate_plan(LatticeTopology::Octet, {c}, {reg}, 0.45).ok; };
+
+  // ── the -y wall: face plane y = 12, prism y in [0, 12] ──
+  const SteppedPlanRegion neg = region(Vec3{0.0, -1.0, 0.0}, Vec3{18.0, 12.0, 8.0});
+  // The deepest layer, y in [0, 3]: 9 to 12 mm along the normal, centre at 10.5. This
+  // is the brief's R2_min_corner_depth.json, which core refused.
+  CHECK(ok(neg, cell_at(Vec3{18.0, 0.0, 8.0})),
+        "R2: the deepest layer of a -y wall is inside its own prism");
+  CHECK(ok(neg, cell_at(Vec3{18.0, 9.0, 8.0})),
+        "R2: and so is the layer against the -y face");
+  // One layer deeper: the far side reaches 15 mm past a 12 mm prism.
+  const SteppedPlanCheck past =
+      stepped_validate_plan(LatticeTopology::Octet, {cell_at(Vec3{18.0, -3.0, 8.0})},
+                            {neg}, 0.45);
+  CHECK(!past.ok, "R2: a cell whose far side passes the prism is refused");
+  CHECK(past.error.find("region 1") != std::string::npos &&
+            past.error.find("prism") != std::string::npos,
+        "R2: and the refusal names the region and what it left");
+  // ★ R2x: one layer in FRONT of the face, y in [12, 15]. Its centre projects to
+  // -1.5 mm, outside the prism. The one-corner check read it as 0 to 3 and laid it.
+  const SteppedPlanCheck in_front =
+      stepped_validate_plan(LatticeTopology::Octet, {cell_at(Vec3{18.0, 12.0, 8.0})},
+                            {neg}, 0.45);
+  CHECK(!in_front.ok,
+        "R2x: a cell wholly in front of a -y face is refused, not accepted and laid");
+
+  // ── the +y wall: unchanged by the fix, which is half the point ──
+  const SteppedPlanRegion pos = region(Vec3{0.0, 1.0, 0.0}, Vec3{18.0, 0.0, 8.0});
+  CHECK(ok(pos, cell_at(Vec3{18.0, 0.0, 8.0})), "R2: +y, the layer at the face is inside");
+  CHECK(ok(pos, cell_at(Vec3{18.0, 9.0, 8.0})), "R2: +y, the deepest layer is inside");
+  CHECK(!ok(pos, cell_at(Vec3{18.0, 12.0, 8.0})),
+        "R2: +y, a cell past the prism is refused");
+  CHECK(!ok(pos, cell_at(Vec3{18.0, -3.0, 8.0})),
+        "R2: +y, a cell in front of the face is refused -- its centre is outside");
+
+  // ── ★ R2b, THE TILTED FACET: the near side may stand in front of the plane ──
+  // A 45-degree normal. At the slot origin itself the cube straddles the plane: its
+  // projection runs -2.12 to +2.12 mm (the extent along n is sqrt(2)*S, wider than S)
+  // while its centre sits exactly ON the plane, inside the prism. The app places such
+  // cells deliberately so the cube covers the slant. Offset zero keeps the alignment
+  // check out of this: it is a multiple of every size.
+  const double r2 = 0.70710678118654752;
+  const SteppedPlanRegion tilt =
+      region(Vec3{0.0, -r2, r2}, Vec3{18.0, 12.0, 8.0});
+  CHECK(ok(tilt, cell_at(Vec3{18.0, 12.0, 8.0})),
+        "R2b: a tilted facet's cell is accepted with its near side in front of the plane");
+  // But the centre still has to be in the prism, and the far side still bounded.
+  CHECK(!ok(tilt, cell_at(Vec3{18.0, 15.0, 5.0})),
+        "R2b: a tilted cell whose CENTRE leaves the prism is still refused");
+  // This one has its centre INSIDE (10.61 mm of a 12 mm prism) and fails only on its
+  // far side (12.73 mm), so it is what tests the far-side bound rather than the centre.
+  CHECK(!ok(tilt, cell_at(Vec3{18.0, 12.0, 23.0})),
+        "R2b: and so is one whose centre is inside but whose far side passes the depth");
+}
+
 static void test_group_keeps_each_cells_own_rho() {
   SteppedPlanRegion reg;
   reg.region_id = 1;
@@ -794,6 +1134,10 @@ int main() {
   test_depth_is_clean();
   test_menu_shape();
   test_plan_validation();
+  test_depth_projects_the_cube_not_one_corner();
+  test_overlap_is_exact_not_a_shared_tile();
+  test_grouped_cells_cover_the_slot_exactly_once();
+  test_grouping_lays_every_cell_where_it_was_sent();
   test_doubled_menu_is_halves_only();
   test_group_keeps_each_cells_own_rho();
   test_outline_beam_width();
@@ -803,6 +1147,50 @@ int main() {
   test_packed_slot_covers_exactly_once();
   test_subdivision_preserves_the_member();
   test_seam_welds_only_when_subdivided();
+  // ── ★ WHICH CERTIFICATE RUNS (task 2026-09-28-lattice-types-core) ───────────
+  // `refuse_stepped_structural` REQUIRES any-step Stepped under Structural to name
+  // `structural_certification: "beam_network"`, and core did not run it: the only call
+  // sat inside `algorithm == "organic" && intent == "structural"`, so the TENSOR
+  // certified instead -- the exact seam over-claim that refusal exists to prevent.
+  // The decision is now one pure function, here, where a test can reach it, including
+  // the combinations no job can produce today.
+  {
+    using topopt::LatticeAlgorithm;
+    using topopt::LatticeCertificateKind;
+    using topopt::lattice_certificate_kind;
+
+    CHECK(lattice_certificate_kind(LatticeAlgorithm::Stepped, true) ==
+              LatticeCertificateKind::BeamNetwork,
+          "certificate: any-step Stepped (a plan is present) takes the BEAM NETWORK");
+    CHECK(lattice_certificate_kind(LatticeAlgorithm::Stepped, false) ==
+              LatticeCertificateKind::HomogenisedTensor,
+          "certificate: legacy Stepped (no plan) keeps the tensor");
+    CHECK(lattice_certificate_kind(LatticeAlgorithm::Organic, true) ==
+                  LatticeCertificateKind::BeamNetwork &&
+              lattice_certificate_kind(LatticeAlgorithm::Organic, false) ==
+                  LatticeCertificateKind::BeamNetwork,
+          "certificate: organic takes the beam network, plan or not");
+    // Both bits for Doubled, because a plan must NOT silently change its instrument.
+    CHECK(lattice_certificate_kind(LatticeAlgorithm::Doubled, true) ==
+                  LatticeCertificateKind::HomogenisedTensor &&
+              lattice_certificate_kind(LatticeAlgorithm::Doubled, false) ==
+                  LatticeCertificateKind::HomogenisedTensor,
+          "certificate: Doubled keeps the tensor whether or not a plan is present");
+
+    const std::vector<std::string> bn =
+        topopt::lattice_beam_network_certified_algorithms();
+    bool org = false, step = false, dbl = false;
+    for (const std::string& n : bn) {
+      org = org || n == "organic";
+      step = step || n == "stepped";
+      dbl = dbl || n == "doubled";
+    }
+    CHECK(org, "certificate names: organic is beam-network certified");
+    CHECK(step, "certificate names: stepped is beam-network certified (any-step)");
+    CHECK(!dbl, "certificate names: doubled is NOT -- it keeps the tensor");
+    CHECK(bn.size() == 2, "certificate names: exactly those two today");
+  }
+
   std::printf("%s: %d checks, %d failures\n", g_failures == 0 ? "PASS" : "FAIL", g_checks,
               g_failures);
   return g_failures == 0 ? 0 : 1;

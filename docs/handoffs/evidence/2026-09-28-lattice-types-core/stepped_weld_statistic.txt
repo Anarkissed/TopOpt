@@ -1,0 +1,81 @@
+# WHY THE MARGIN MOVED between the two weld-piece rules.
+# Frozen probe 216fcdb618ca0cb1608d -- BYTE-IDENTICAL to the binary that produced
+# stepped_weld_piece_ab.txt, so these runs and that A/B table are one measurement.
+# Per-member data is core's OWN dump (TOPOPT_ORGANIC_STRESS_DUMP), for the
+# governing load case. No core change; the three statistics are computed by
+# weld_statistic.py and the field comparison by weld_field_compare.py, both
+# committed beside this file.
+# NO WALL-CLOCK IS QUOTED FROM THIS RUN: the analysis ran on the same box while
+# the last certificate was solving. Times come from stepped_weld_piece_ab.txt.
+
+=== THE THREE STATISTICS the reviewer asked for, on all three plans ===
+# 'p99 core' is core's own convention and is the CONTROL: it must reproduce the
+# probe's printed p99/max/margin, and it does, on all six runs.
+plan/rule            members      max  p99 core  p99 same   p99 byL   p99 byV   (margins)     max    core    same     byL     byV
+500_global            60,192   0.0295    0.0056    0.0056    0.0056    0.0052               33.9   179.0   178.8   177.6   191.6
+                   control: stress p99 (core rule) 0.3073 MPa, stress max 1.622 MPa -- must match the probe's printed p99/max; margin 179 must match its printed margin
+                   r0.4012: 0.498 of members / 0.482 of length (mean piece 0.7071 mm); r0.5243: 0.097 of members / 0.106 of length (mean piece 0.7955 mm); r0.8673: 0.242 of members / 0.235 of length (mean piece 0.7071 mm); r1.0973: 0.163 of members / 0.177 of length (mean piece 0.7955 mm)
+500_per-strut         46,776   0.0243    0.0057    0.0057    0.0056    0.0052               41.2   174.9   174.8   179.3   191.3
+                   control: stress p99 (core rule) 0.3144 MPa, stress max 1.334 MPa -- must match the probe's printed p99/max; margin 174.9 must match its printed margin
+                   r0.4012: 0.640 of members / 0.482 of length (mean piece 0.7071 mm); r0.5243: 0.125 of members / 0.106 of length (mean piece 0.7955 mm); r0.8673: 0.156 of members / 0.235 of length (mean piece 1.414 mm); r1.0973: 0.079 of members / 0.177 of length (mean piece 2.121 mm)
+2000_global          286,488   0.0312    0.0060    0.0060    0.0060    0.0048               32.1   165.7   165.7   165.9   207.1
+                   control: stress p99 (core rule) 0.3319 MPa, stress max 1.714 MPa -- must match the probe's printed p99/max; margin 165.7 must match its printed margin
+                   r0.1898: 0.443 of members / 0.439 of length (mean piece 0.3536 mm); r0.4012: 0.209 of members / 0.207 of length (mean piece 0.3536 mm); r0.5243: 0.179 of members / 0.178 of length (mean piece 0.3536 mm); r0.8673: 0.096 of members / 0.101 of length (mean piece 0.3771 mm); r1.0973: 0.073 of members / 0.076 of length (mean piece 0.3744 mm)
+2000_per-strut       190,776   0.0884    0.0072    0.0072    0.0066    0.0052               11.3   138.9   138.9   150.9   191.6
+                   control: stress p99 (core rule) 0.3959 MPa, stress max 4.861 MPa -- must match the probe's printed p99/max; margin 138.9 must match its printed margin
+                   r0.1898: 0.666 of members / 0.439 of length (mean piece 0.3536 mm); r0.4012: 0.157 of members / 0.207 of length (mean piece 0.7071 mm); r0.5243: 0.120 of members / 0.178 of length (mean piece 0.7955 mm); r0.8673: 0.038 of members / 0.101 of length (mean piece 1.414 mm); r1.0973: 0.019 of members / 0.076 of length (mean piece 2.121 mm)
+8000_global        1,101,144   0.1085    0.0067    0.0067    0.0066    0.0052                9.2   149.8   149.8   150.4   193.8
+                   control: stress p99 (core rule) 0.3672 MPa, stress max 5.967 MPa -- must match the probe's printed p99/max; margin 149.8 must match its printed margin
+                   r0.1898: 0.340 of members / 0.345 of length (mean piece 0.3536 mm); r0.2378: 0.226 of members / 0.206 of length (mean piece 0.3182 mm); r0.4012: 0.163 of members / 0.166 of length (mean piece 0.3536 mm); r0.5243: 0.140 of members / 0.142 of length (mean piece 0.3536 mm); r0.8673: 0.075 of members / 0.081 of length (mean piece 0.3771 mm); r1.0973: 0.057 of members / 0.061 of length (mean piece 0.3744 mm)
+8000_per-strut       764,328   0.0679    0.0079    0.0079    0.0074    0.0056               14.7   126.7   126.7   136.0   177.8
+                   control: stress p99 (core rule) 0.434 MPa, stress max 3.734 MPa -- must match the probe's printed p99/max; margin 126.7 must match its printed margin
+                   r0.1898: 0.490 of members / 0.345 of length (mean piece 0.3536 mm); r0.2378: 0.260 of members / 0.206 of length (mean piece 0.3977 mm); r0.4012: 0.118 of members / 0.166 of length (mean piece 0.7071 mm); r0.5243: 0.090 of members / 0.142 of length (mean piece 0.7955 mm); r0.8673: 0.029 of members / 0.081 of length (mean piece 1.414 mm); r1.0973: 0.014 of members / 0.061 of length (mean piece 2.121 mm)
+
+=== DID THE STRESS FIELD CHANGE? (plan 2000, then 500, then 8000) ===
+--- plan 2000
+control 1: total strut length 102366.4 mm vs 102366.4 mm (-0.0000%) -- must be ~0
+whole-pocket LENGTH-weighted mean stress: global 0.06838 MPa, per-strut 0.08130 MPa  (+18.89%)
+control 2: 209/500 shared 8 mm bins have matching strut length within 1%, carrying 64.9% of the total length
+of those bins, mean stress agrees within 5%: 39/209 (18.7%)
+most changed comparable bins (length-weighted mean, global -> per-strut):
+  bin (11, 4, 2)  0.02543 -> 0.01012 MPa  (-60.2%)  peak 0.0473 -> 0.0281
+  bin (7, 4, 2)  0.02643 -> 0.01295 MPa  (-51.0%)  peak 0.0488 -> 0.0316
+  bin (16, 4, 2)  0.02020 -> 0.01468 MPa  (-27.4%)  peak 0.0426 -> 0.0368
+  bin (9, 4, 2)  0.02402 -> 0.04491 MPa  (+86.9%)  peak 0.0754 -> 0.1302
+  bin (13, 4, 2)  0.02592 -> 0.04930 MPa  (+90.2%)  peak 0.0697 -> 0.1425
+  bin (15, 2, 1)  0.01743 -> 0.03379 MPa  (+93.8%)  peak 0.0662 -> 0.1492
+--- plan 500
+control 1: total strut length 43945.3 mm vs 43945.3 mm (-0.0000%) -- must be ~0
+whole-pocket LENGTH-weighted mean stress: global 0.05257 MPa, per-strut 0.05639 MPa  (+7.25%)
+control 2: 213/400 shared 8 mm bins have matching strut length within 1%, carrying 57.4% of the total length
+of those bins, mean stress agrees within 5%: 65/213 (30.5%)
+most changed comparable bins (length-weighted mean, global -> per-strut):
+  bin (12, 4, 3)  0.01164 -> 0.00680 MPa  (-41.6%)  peak 0.0254 -> 0.0144
+  bin (10, 4, 2)  0.00941 -> 0.00551 MPa  (-41.4%)  peak 0.0251 -> 0.0089
+  bin (11, 4, 2)  0.00970 -> 0.00578 MPa  (-40.4%)  peak 0.0236 -> 0.0132
+  bin (10, 3, 1)  0.01003 -> 0.02282 MPa  (+127.5%)  peak 0.0351 -> 0.1678
+  bin (18, 3, 1)  0.01093 -> 0.04260 MPa  (+289.7%)  peak 0.0444 -> 0.2477
+  bin (9, 3, 1)  0.00925 -> 0.05259 MPa  (+468.5%)  peak 0.0288 -> 0.3424
+--- plan 8000
+control 1: total strut length 383763.8 mm vs 383763.8 mm (-0.0000%) -- must be ~0
+whole-pocket LENGTH-weighted mean stress: global 0.06703 MPa, per-strut 0.07533 MPa  (+12.38%)
+control 2: 259/1200 shared 8 mm bins have matching strut length within 1%, carrying 32.0% of the total length
+of those bins, mean stress agrees within 5%: 48/259 (18.5%)
+most changed comparable bins (length-weighted mean, global -> per-strut):
+  bin (11, 4, 2)  0.02705 -> 0.01187 MPa  (-56.1%)  peak 0.0479 -> 0.0396
+  bin (7, 4, 2)  0.02866 -> 0.01629 MPa  (-43.2%)  peak 0.0539 -> 0.0432
+  bin (19, 1, 4)  0.08475 -> 0.06735 MPa  (-20.5%)  peak 1.6186 -> 0.3168
+  bin (16, 2, 3)  0.03960 -> 0.09226 MPa  (+132.9%)  peak 0.1386 -> 1.0969
+  bin (7, 2, 3)  0.03685 -> 0.09025 MPa  (+144.9%)  peak 0.1240 -> 1.1805
+  bin (18, 3, 9)  0.01869 -> 0.06167 MPa  (+230.0%)  peak 0.0741 -> 0.2755
+
+=== THE SIZE OF THE OFFSET EFFECT: piece length per strut radius ===
+# A joint between a thin strut and a thick one can only fuse at a NODE of the
+# thick strut, so the furthest it can land from where the struts actually meet is
+# half that strut's piece.
+plan 500  global   : r=0.4012: piece 0.7071 (offset <= 0.3536); r=0.5243: piece 0.7955 (offset <= 0.3977); r=0.8673: piece 0.7071 (offset <= 0.3536); r=1.0973: piece 0.7955 (offset <= 0.3977)
+plan 500  per-strut: r=0.4012: piece 0.7071 (offset <= 0.3536); r=0.5243: piece 0.7955 (offset <= 0.3977); r=0.8673: piece 1.4142 (offset <= 0.7071); r=1.0973: piece 2.1213 (offset <= 1.0607)
+plan 2000 global   : r=0.1898: piece 0.3536 (offset <= 0.1768); r=0.4012: piece 0.3536 (offset <= 0.1768); r=0.5243: piece 0.3536 (offset <= 0.1768); r=0.8673: piece 0.3771 (offset <= 0.1886); r=1.0973: piece 0.3744 (offset <= 0.1872)
+plan 2000 per-strut: r=0.1898: piece 0.3536 (offset <= 0.1768); r=0.4012: piece 0.7071 (offset <= 0.3536); r=0.5243: piece 0.7955 (offset <= 0.3977); r=0.8673: piece 1.4142 (offset <= 0.7071); r=1.0973: piece 2.1213 (offset <= 1.0607)
+plan 8000 global   : r=0.1898: piece 0.3536 (offset <= 0.1768); r=0.2378: piece 0.3182 (offset <= 0.1591); r=0.4012: piece 0.3536 (offset <= 0.1768); r=0.5243: piece 0.3536 (offset <= 0.1768); r=0.8673: piece 0.3771 (offset <= 0.1886); r=1.0973: piece 0.3744 (offset <= 0.1872)
+plan 8000 per-strut: r=0.1898: piece 0.3536 (offset <= 0.1768); r=0.2378: piece 0.3977 (offset <= 0.1989); r=0.4012: piece 0.7071 (offset <= 0.3536); r=0.5243: piece 0.7955 (offset <= 0.3977); r=0.8673: piece 1.4142 (offset <= 0.7071); r=1.0973: piece 2.1213 (offset <= 1.0607)
