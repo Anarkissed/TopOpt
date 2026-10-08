@@ -9,6 +9,7 @@ Made with round 2's `tools/dump_stage_hashes.sh` on snapshot S1-2026-10-02 (`SWI
 | o5 | ruling 5: organic one size as a one-size window | 3f19f920e5c96a5a | 6dbb48fab4029f78 | c4ca5d5ac009036d | 2baaf9cbb94027c7 | 7ba46796d87e3b34 | 3e6f162cb36212a9 | b457718dfc23ab42 |
 | l6 | ruling 6: the plan-not-sent line (blockValue reads the shared predicate) | 3f19f920e5c96a5a | 6dbb48fab4029f78 | c4ca5d5ac009036d | 2baaf9cbb94027c7 | 7ba46796d87e3b34 | 3e6f162cb36212a9 | b457718dfc23ab42 |
 | t5 | R7 + anchor footprint + Q2 + Q3(i): core's tile floor (67595f19 + this) | 3f19f920e5c96a5a | 6dbb48fab4029f78 | c4ca5d5ac009036d | 2baaf9cbb94027c7 | **c89da26e6a71021c** | 3e6f162cb36212a9 | b457718dfc23ab42 |
+| t7 | R7 step-down + the Stepped line + the organic rim's floor in the job (round 4) | **d08fc7a7650675b4** | 6dbb48fab4029f78 | c4ca5d5ac009036d | 2baaf9cbb94027c7 | c89da26e6a71021c | 3e6f162cb36212a9 | b457718dfc23ab42 |
 
 g equals fo on all seven: the guard and the gate move no stage-job bytes.
 
@@ -18,3 +19,7 @@ t5 equals l6 on six of seven: R7, the anchor footprint and Q2 are preview/UI onl
 in ONE key, `grading.stepped_min_tile_mm` 1.8 → 2.25 — Q3(i): core's printable floor at the cap the
 job writes (Allow quilt off), not four beads. Core reads that key only when validating a plan, and no
 Stepped job carries one, so the run is unchanged.
+
+t7 equals t5 on six of seven: the R7 step-down and the Stepped line are preview only. 102117B9 (organic)
+moves in ONE key, `grading.organic_solid_rim_mm` 0.691 → 1.705 mm — the job's automatic rim is now the
+printability floor the preview draws, max(1.535 × bead, one design voxel) (item 2, measured).

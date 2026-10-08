@@ -61,20 +61,30 @@ final class LatticePlanNotSentLineTests: XCTestCase {
     func testTheBannerSaysItInOneLine() throws {
         for a in ["doubled", "stepped"] {
             let b = try banner(a)
-            XCTAssertEqual(b.caption, LatticePreviewBanner.planNotSentCaption, a)
+            let line = LatticePreviewBanner.planNotSentLine(algorithm: a)
+            XCTAssertEqual(b.caption, line.caption, a)
             XCTAssertLessThanOrEqual(b.caption.count, 34, "one line in the Selections column")
             XCTAssertFalse(b.caption.contains("—")); XCTAssertFalse(b.caption.contains("\n"))
-            XCTAssertTrue(b.text.contains(LatticePreviewBanner.planNotSentSentence), a)
+            XCTAssertTrue(b.text.contains(line.sentence), a)
             XCTAssertTrue(b.text.hasPrefix("octet · 8.00 mm"), "the preview's own label stays first")
         }
+        // Default Grade keeps its line, word for word (literals: a later edit to the constant goes red)
+        let dg = try banner("doubled")
+        XCTAssertEqual(dg.caption, "Run builds core's own layout")
+        XCTAssertTrue(dg.text.contains("the run currently builds core's own cell layout, not the cells shown here"))
+        XCTAssertFalse(dg.text.contains(LatticePreviewBanner.planNotSentSteppedSentence))
         // CONTROLS
         let on = try banner("doubled", enabled: true)
         XCTAssertEqual(on.caption, "Lattice preview · not the export", "★ the plan rides: no line")
         XCTAssertFalse(on.text.contains(LatticePreviewBanner.planNotSentSentence))
-        XCTAssertEqual(try banner("stepped", enabled: true).caption, LatticePreviewBanner.planNotSentCaption)
+        XCTAssertEqual(try banner("stepped", enabled: true).caption, LatticePreviewBanner.planNotSentSteppedCaption,
+                       "★ Stepped never sends a plan")
         for a in ["organic", ""] {
             XCTAssertFalse(try banner(a).text.contains(LatticePreviewBanner.planNotSentSentence), a)
+            XCTAssertFalse(try banner(a).text.contains(LatticePreviewBanner.planNotSentSteppedSentence), a)
         }
+        XCTAssertEqual(try banner("stepped", label: "★ PREVIEW DOES NOT MATCH THE RUN — x  octet").caption,
+                       "★ Preview differs from run", "a mismatch still wins over Stepped's line too")
         XCTAssertEqual(try banner("doubled", label: "★ PREVIEW DOES NOT MATCH THE RUN — x  octet").caption,
                        "★ Preview differs from run", "a mismatch still wins")
     }
@@ -87,5 +97,31 @@ final class LatticePlanNotSentLineTests: XCTestCase {
         let call = try XCTUnwrap(ws.range(of: "LatticePreviewBanner.make(previewOn: showStrutPreview,"))
         let window = String(ws[call.lowerBound...].prefix(300))
         XCTAssertFalse(window.contains("plansEnabled:") || window.contains("plansWired:"))
+    }
+
+    /// ★★ RULING 1 (reviewer, 2026-10-07): the Stepped preview says plainly that the run lays ONE cell
+    /// size per region and can refuse thin walls — not the shared "core's own layout" line. Literals,
+    /// so the copy cannot drift by an edit to the constant. RED on the ruling-6 code.
+    func testSteppedSaysTheRunLaysOneCellPerRegion() throws {
+        for wired in [false, true] {
+            for enabled in [false, true] {
+                let b = try banner("stepped", enabled: enabled, wired: wired)
+                XCTAssertEqual(b.caption, "Run: one cell per region", "wired \(wired) enabled \(enabled)")
+                XCTAssertNotEqual(b.caption, "Run builds core's own layout")
+                XCTAssertTrue(b.text.contains("lays one cell size per region"))
+                XCTAssertTrue(b.text.contains("can refuse walls too thin for it"))
+                XCTAssertFalse(b.text.contains("the run currently builds core's own cell layout"))
+            }
+        }
+        // his rules for the caption: a few plain words, no jargon
+        let cap = LatticePreviewBanner.planNotSentSteppedCaption
+        XCTAssertLessThanOrEqual(cap.split(whereSeparator: \.isWhitespace).count, 5)
+        XCTAssertFalse(cap.lowercased().contains("core"))
+        XCTAssertFalse(LatticePreviewBanner.planNotSentSteppedSentence.lowercased().contains("core"))
+        // the two sentences cannot be mistaken for each other by the caption's dispatch
+        XCTAssertFalse(LatticePreviewBanner.planNotSentSteppedSentence.contains(LatticePreviewBanner.planNotSentSentence))
+        XCTAssertFalse(LatticePreviewBanner.planNotSentSentence.contains(LatticePreviewBanner.planNotSentSteppedSentence))
+        // no pre-send refusal: the job is unchanged — Stepped carries no plan and nothing blocks
+        XCTAssertNil(LatticeSteppedCellWire.blockValue(for: spec("stepped"), wired: true, enabled: true))
     }
 }
