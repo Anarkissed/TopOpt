@@ -747,6 +747,13 @@ const char* lattice_type_readiness_plain(LatticeTypeReadiness r) {
   return "Not a lattice type";
 }
 
+const std::vector<std::string>& lattice_planned_topology_ids() {
+  // Deleted at K2: once a type is in the enum, the sets answer for it and a name here
+  // would shadow the real answer.
+  static const std::vector<std::string> planned{"gyroid", "schwarz_d"};
+  return planned;
+}
+
 LatticeTypeReadiness lattice_type_readiness(
     const std::string& id, const std::vector<std::string>& generatable,
     const std::vector<std::string>& certifiable) {
@@ -757,6 +764,10 @@ LatticeTypeReadiness lattice_type_readiness(
                             LatticeTopology::Rhombic, LatticeTopology::Bccz,
                             LatticeTopology::Fccz, LatticeTopology::Reentrant})
     if (id == lattice_topology_name(t)) { known = true; break; }
+  // A PLANNED id is one core knows and has not built: not a typo, so not UnknownId.
+  if (!known)
+    for (const std::string& n : lattice_planned_topology_ids())
+      if (id == n) { known = true; break; }
   bool gen = false, cert = false;
   for (const std::string& n : generatable) if (n == id) { gen = true; break; }
   for (const std::string& n : certifiable) if (n == id) { cert = true; break; }

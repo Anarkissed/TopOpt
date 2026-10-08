@@ -1246,7 +1246,7 @@ static void test_a_topology_id_says_why_it_is_refused() {
           msg);
   }
   // An UNKNOWN id: refused, named, and told it is not a topology at all.
-  for (const char* bogus : {"octopus", "Octet", "gyroid", "honeycomb"}) {
+  for (const char* bogus : {"octopus", "Octet", "gyroids", "honeycomb"}) {
     bool threw = false;
     std::string why;
     try {
@@ -1267,7 +1267,14 @@ static void test_a_topology_id_says_why_it_is_refused() {
   }
   // The tetragonal three are KNOWN and in neither set, which is a third reason and
   // must not be reported as either of the first two.
-  for (const char* tetra : {"bccz", "fccz", "reentrant"}) {
+  // ── ★ AND SO ARE THE PLANNED SHEET TYPES (reviewer's ruling, 2026-10-07) ──────
+  // `gyroid` and `schwarz_d` moved into this loop FROM the unknown-id loop above. They
+  // are on the go-live list, so "not a topology core knows" was the wrong answer -- it is
+  // what core says about a TYPO, and it would have the app tell the user they misspelled a
+  // type core is going to ship. This is not a loosened assertion: the message checked here
+  // is the more specific of the two, and `gyroids` now holds the unknown-id loop's place
+  // so a sheet-type-shaped near-miss still proves the distinction is kept.
+  for (const char* tetra : {"bccz", "fccz", "reentrant", "gyroid", "schwarz_d"}) {
     std::string why;
     try { (void)parse_job(with_topo("\"lattice\"", tetra)); }
     catch (const JobError& e) { why = e.what(); }
