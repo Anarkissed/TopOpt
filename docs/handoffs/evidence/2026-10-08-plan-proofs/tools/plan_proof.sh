@@ -28,7 +28,7 @@ esac
 anystep=0; [[ "$conv" == convert-stepped-aesthetic || "$conv" == stepped ]] && anystep=1
 ( cd "$REPO/app/TopOptKit" && DG_PROJECT_DIR="$work" DG_OUT="$out" DG_ANY_STEP=$anystep swift test --skip-build \
     --filter LatticeDefaultGradePlanProof > "$out/harness.log" 2>&1 )
-grep -E "DG-PROJECT|DG-PLAN|DG-JOBS|DG-WITHHELD|DG-SLOT|error:|skipped" "$out/harness.log" | sed 's/^.*\] //'
+grep -E "DG-PROJECT|DG-PLAN|DG-JOBS|DG-WITHHELD|DG-SLOT|DG-K2|error:|skipped" "$out/harness.log" | sed 's/^.*\] //'
 fi
 [[ "$phase" == harness ]] && exit 0
 # the third arm: the plan job asking core for what it ships, strut by strut (welded spans), so the
@@ -41,7 +41,7 @@ if j.get('lattice', {}).get('stepped_cells'):
     j['lattice']['emit_organic_spans'] = True
     json.dump(j, open(sys.argv[2], 'w'), indent=1, sort_keys=True)
 PY
-for a in plan noplan plan_spans; do
+for a in plan noplan plan_spans plan_k2; do
   [[ -s "$out/job_$a.json" ]] || { echo "no job_$a.json"; continue; }
   mkdir -p "$out/run_$a"
   ( cd "$out" && /usr/bin/time -p "$cli" lattice-variant "job_$a.json" --out "run_$a" \

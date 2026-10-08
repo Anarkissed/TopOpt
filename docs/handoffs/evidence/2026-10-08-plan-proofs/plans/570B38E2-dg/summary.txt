@@ -1,0 +1,33 @@
+# 570B38E2 dg (his, unconverted)
+
+Frozen CLI core 30982e5284b2 (#358 at 36f5fdde).
+
+DG-PROJECT DOUBLED test (Claude copy) algorithm doubled stage Optional(TopOptFlows.LatticeStageMode.aesthetic) step-halves true density sim cells auto
+DG-PLAN doubled: 4198 cell(s) over 2 region(s) | 6.02=125 5.16=543 3.01=2479 2.58=1051
+DG-PLAN per region: r1=1594 r2=2604
+DG-SLOT-ORIGINS 2 region(s) carry slot_origin_mm
+DG-JOBS /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-stage-frontend-37bee1/scratch/evidence/plans/570B38E2-3C6E-46E0-BCF6-26BE1595D204/dg model model.step
+
+## job_noplan: exit 0 verdict: ACCEPTED
+
+## job_plan: exit 0 verdict: ACCEPTED
+[stepped] doubled (halves) plan: 4198 cell(s) over 2 region(s) in 4 pass(es) | 6.02=125 5.16=543 3.01=2479 2.58=1051
+
+## job_plan_spans: exit 0 verdict: ACCEPTED
+[stepped] doubled (halves) plan: 4198 cell(s) over 2 region(s) in 4 pass(es) | 6.02=125 5.16=543 3.01=2479 2.58=1051
+
+## cell for cell (compare_plan_spans.py on the spans run)
+CELLS-VS-SPANS plan cells 4198 | laid 4188 | NOT laid 10 | struts 133308: in a plan cell 133308, FOREIGN 0
+per size (plan / laid): 6.02=125/125 5.16=543/543 3.01=2479/2478 2.58=1051/1042
+  not laid: region 1 2.578 mm at [-13.119631111621857, 1.1044653058052063, 15.468360543251038]
+  not laid: region 1 2.578 mm at [90.00277251005173, 1.1044653058052063, 54.13926190137863]
+  not laid: region 1 2.578 mm at [64.22217160463333, 1.1044653058052063, 69.60762244462967]
+  not laid: region 1 2.578 mm at [69.37829178571701, 1.1044653058052063, 64.45150226354599]
+  not laid: region 1 2.578 mm at [66.80023169517517, 1.1044653058052063, 67.02956235408783]
+  not laid: region 1 2.578 mm at [59.06605142354965, 1.1044653058052063, 74.76374262571335]
+  not laid: region 1 2.578 mm at [61.64411151409149, 1.1044653058052063, 72.18568253517151]
+  not laid: region 1 2.578 mm at [56.48799133300781, 1.1044653058052063, 77.34180271625519]
+  not laid: region 1 2.578 mm at [46.175750970840454, 1.1044653058052063, 97.9662834405899]
+  not laid: region 2 3.008 mm at [43.16801419854164, -39.88676282763481, 66.17020899057388]
+
+model model.step sha256 bdf5646481e370ba (not committed)

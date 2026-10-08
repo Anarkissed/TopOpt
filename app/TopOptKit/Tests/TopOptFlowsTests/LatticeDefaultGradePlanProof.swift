@@ -60,7 +60,9 @@ final class LatticeDefaultGradePlanProof: XCTestCase {
         let mesh = try XCTUnwrap(pm.viewerMesh)
         let lat = pm.lattice
         print("DG-PROJECT \(pm.name) algorithm \(lat.algorithm) stage \(String(describing: lat.stageMode)) step-halves \(lat.gradeStepsAreHalves) density \(lat.densityMode) cells \(lat.cellSizeMode)")
-        try XCTSkipUnless(lat.algorithm == "doubled", "not a Default Grade project (convert the copy first)")
+        // ★ round 5: Aesthetic Stepped too, behind its test switch (DG_ANY_STEP=1)
+        try XCTSkipUnless(lat.algorithm == "doubled" || (lat.algorithm == "stepped" && env["DG_ANY_STEP"] == "1"),
+                          "not a Default Grade project (convert the copy first), nor Stepped with DG_ANY_STEP=1")
 
         // ── the stage solve (the field the bake grades by)
         var stageField: LatticeDemandField? = nil
@@ -161,6 +163,27 @@ final class LatticeDefaultGradePlanProof: XCTestCase {
             if case .failure(let why) = LatticeSteppedCellWire.slotOrigins(lat.steppedCells, regions: lat.regions,
                                                                            slotOriginWired: TopOptKit.regionSlotOriginWired) {
                 print("DG-WITHHELD \(why.reason) | \(why)")
+                // ★ FOR #358's K2 (the reviewer, 2026-10-08: "slot_origin_mm becomes a grid phase, with
+                // depth measured from the region's own plane"): the plan the app withholds, written as
+                // the job K2 must accept — every planned region stamped with the bake's grid point,
+                // on its plane or not. The app never sends this; core at 36f5fdde refuses it.
+                var k2 = try XCTUnwrap(JSONSerialization.jsonObject(with: withPlan) as? [String: Any])
+                var lk = try XCTUnwrap(k2["lattice"] as? [String: Any])
+                lk["stepped_cells"] = lat.steppedCells.map { $0.wireDictionary }
+                var grid: [Int: SIMD3<Double>] = [:]
+                for c in lat.steppedCells { if let so = c.slotOriginMM, grid[c.regionID] == nil { grid[c.regionID] = so } }
+                if var regs = lk["regions"] as? [[String: Any]] {
+                    var id = 0
+                    for (i, r) in lat.regions.enumerated() where r.role == .include {
+                        id += 1
+                        guard let so = grid[id], var g = regs[i]["geometry"] as? [String: Any] else { continue }
+                        g["slot_origin_mm"] = [so.x, so.y, so.z]; regs[i]["geometry"] = g
+                    }
+                    lk["regions"] = regs
+                }
+                k2["lattice"] = lk
+                try pretty(JSONSerialization.data(withJSONObject: k2)).write(to: out.appendingPathComponent("job_plan_k2.json"))
+                print("DG-K2-JOB job_plan_k2.json: \(lat.steppedCells.count) cells, \(grid.count) regions stamped (withheld by the app)")
             } else {
                 print("DG-WITHHELD the switch did not send the plan (algorithm \(lat.algorithm), wired \(TopOptKit.steppedCellsWired))")
             }
