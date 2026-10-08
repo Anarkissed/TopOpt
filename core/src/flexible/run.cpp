@@ -566,6 +566,24 @@ FlexibleRunResult run_flexible_job(const JobDescription& job, const std::string&
   for (const JobFlexibleFace& f : fx.faces)
     if (f.role == "loaded") loaded.push_back(&f);
   stacks.reserve(loaded.size());
+  // A3: no two presses share surface (a face and its own sector, overlapping sectors).
+  {
+    std::vector<PressFootprint> presses;
+    for (const JobFlexibleFace* f : loaded) {
+      PressFootprint p;
+      p.press_id = f->face_region_id;
+      if (f->footprint_region_ids.empty())
+        p.regions.push_back(&find_region(f->face_region_id));
+      else
+        for (int id : f->footprint_region_ids) p.regions.push_back(&find_region(id));
+      presses.push_back(p);
+    }
+    try {
+      refuse_shared_footprints(model.mesh, presses);
+    } catch (const FlexibleError& e) {
+      throw JobError(e.what());
+    }
+  }
   for (const JobFlexibleFace* f : loaded) {
     try {
       if (f->footprint_region_ids.empty() && !f->has_press_direction) {
@@ -703,6 +721,7 @@ FlexibleRunResult run_flexible_job(const JobDescription& job, const std::string&
                           .add("build_angle_deg", jnum(fr.build_angle_deg))
                           .add("side", jbool(fr.side))
                           .str());
+      fo.add("press_api_version", jnum(kPressApiVersion));
     }
     std::vector<std::string> links, rlinks;
     for (const StackLink& l : st.exit_faces)
@@ -1023,6 +1042,8 @@ FlexibleRunResult run_flexible_job(const JobDescription& job, const std::string&
       ",\n  \"resolution\": " + jnum(job.resolution) + ",\n  \"flexible\": " + result.receipt_json +
       "\n}\n";
   write_text(out_path("run_info.json"), run_info);
+  result.stacks = std::move(stacks);  // A5: what the receipt was written from
+  result.field = std::move(field);
   return result;
 }
 

@@ -203,6 +203,12 @@ struct DensityField {
   // chosen there — C2 decides, and the receipt counts it); else the core density.
   std::vector<double> density;
   std::vector<int> owner;  // face_region_id with the larger weight; -1 = none
+  // A6 (reviewer 2026-10-08): the owner's blend weight (1 where one stack reaches, in
+  // [0.5, 1) inside a handover's blend, 0 where there is no owner) and the RUNNER-UP:
+  // the face_region_id of the other stack under the voxel (-1 = none). The density is
+  // owner_weight · ρ_owner + (1 − owner_weight) · ρ_runner_up.
+  std::vector<double> owner_weight;
+  std::vector<int> runner_up;
   long long lattice_voxels = 0, assigned_voxels = 0, unassigned_voxels = 0;
   std::vector<Handover> handovers;
 };

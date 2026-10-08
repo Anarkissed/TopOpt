@@ -293,6 +293,31 @@ static void test_conflicts() {
               f.handovers[0].overlap_mm3 > 0 && f.handovers[0].blended_mm3 > 0 &&
               f.handovers[0].blended_mm3 < f.handovers[0].overlap_mm3;
   CHECK(pair, "the edge press and the top press overlap: one handover pair, blended");
+  // A6: per voxel, the owner's blend weight and the RUNNER-UP owner (the other stack
+  // under it). Where only one stack reaches: weight 1, no runner-up.
+  {
+    const double vv = g.voxel_volume();
+    long long two = 0, blended = 0;
+    bool sane = f.owner_weight.size() == f.owner.size() && f.runner_up.size() == f.owner.size();
+    for (std::size_t i = 0; sane && i < f.owner.size(); ++i) {
+      if (f.owner[i] < 0) {
+        sane = f.runner_up[i] == -1 && f.owner_weight[i] == 0.0;
+        continue;
+      }
+      if (!(f.owner_weight[i] >= 0.5 && f.owner_weight[i] <= 1.0)) sane = false;
+      if (f.runner_up[i] != -1) {
+        ++two;
+        if (f.runner_up[i] == f.owner[i]) sane = false;
+      } else if (f.owner_weight[i] != 1.0) {
+        sane = false;
+      }
+      if (f.owner_weight[i] < 1.0) ++blended;
+    }
+    CHECK(sane, "A6: weight in [0.5, 1], runner-up a different face, -1 and 1 where one stack reaches");
+    CHECK(!f.handovers.empty() && std::fabs(two * vv - f.handovers[0].overlap_mm3) < 1e-6 &&
+              std::fabs(blended * vv - f.handovers[0].blended_mm3) < 1e-6 && blended > 0,
+          "A6: runner-up voxels ARE the handover's overlap; weight < 1 ARE its blended volume");
+  }
   // An edge press only 11 degrees off Z over the top stack: the SAME axis (15 degrees),
   // so one profile per stack refuses it.
   const Vec3 dn = unit({-0.2, 0, -1});
@@ -300,6 +325,75 @@ static void test_conflicts() {
   const Stack bottom = build_press_stack(m, {&region(rs, 100)}, rs, g, lat, 0, kZ, 2.0, nullptr);
   const std::vector<StackConflict> cf = find_stack_conflicts(g, lat, {&steep, &bottom});
   CHECK(cf.size() == 1 && cf[0].axis_angle_deg < 15.0, "an angled press within 15 degrees of a loaded bottom: refused");
+}
+
+// FOLLOW-UP (reviewer 2026-10-08, #362's asks).
+// A3: two presses whose footprints share any SURFACE are refused, naming both presses: a
+// face and its own sector, or two overlapping sectors. Complementary sectors (they meet
+// only along a line) are not.
+static void test_shared_footprints() {
+  const StepModel m = box(60, 60, 60);
+  std::vector<FaceRegionSpec> sp = one_region_per_face();
+  auto sector = [&](int id, int face, std::vector<RegionCut> cuts) {
+    FaceRegionSpec r;
+    r.id = id;
+    r.add = {face};
+    r.cuts = cuts;
+    sp.push_back(r);
+  };
+  sector(301, 1, {RegionCut{{40, 0, 0}, {1, 0, 0}, false}, RegionCut{{0, 40, 0}, {0, 1, 0}, false}});
+  sector(303, 3, {RegionCut{{0, 40, 0}, {0, 1, 0}, false}, RegionCut{{0, 0, 40}, {0, 0, 1}, false}});
+  sector(311, 1, {RegionCut{{40, 0, 0}, {-1, 0, 0}, true}});   // x < 40: complementary to 301
+  sector(321, 1, {RegionCut{{30, 0, 0}, {1, 0, 0}, false}});   // x >= 30: overlaps 301 and 311
+  const std::vector<ResolvedFaceRegion> rs = resolve_face_regions(m, sp);
+  auto P = [&](int id, std::vector<int> ids) {
+    PressFootprint p;
+    p.press_id = id;
+    for (int r : ids) p.regions.push_back(&region(rs, r));
+    return p;
+  };
+  auto refuses = [&](std::vector<PressFootprint> ps, std::vector<std::string> needles) {
+    return refused([&] { refuse_shared_footprints(m.mesh, ps); }, needles);
+  };
+  CHECK(refuses({P(101, {101}), P(301, {301})}, {"101", "301", "share"}),
+        "A3: a face and its own sector in two presses: refused, naming both");
+  CHECK(refuses({P(301, {301, 303}), P(101, {101})}, {"301", "101", "share"}),
+        "A3: a corner press holding a top sector + the whole top: refused");
+  CHECK(refuses({P(321, {321}), P(311, {311})}, {"321", "311"}),
+        "A3: two overlapping sectors of one face: refused");
+  bool ok = true;
+  try {
+    refuse_shared_footprints(m.mesh, {P(301, {301, 303}), P(311, {311}), P(100, {100})});
+  } catch (...) {
+    ok = false;
+  }
+  CHECK(ok, "A3: complementary sectors (x >= 40 | x < 40) and other faces: accepted");
+}
+
+// A10: ONE normaliser. The stack's direction, the frame's load and the receipt are all
+// press_unit(d), bit for bit; zero and non-finite refuse.
+static void test_one_normaliser(const Cube& c) {
+  const Vec3 d{-3, 0, -4};
+  const Vec3 u = press_unit(d);
+  CHECK(u.x == -0.6 && u.y == 0.0 && u.z == -0.8, "A10: press_unit(-3, 0, -4) = (-0.6, 0, -0.8)");
+  const Stack s = c.press({101, 103}, &d);
+  CHECK(s.press_direction.x == u.x && s.press_direction.y == u.y && s.press_direction.z == u.z &&
+            s.frame.load.x == u.x && s.frame.load.y == u.y && s.frame.load.z == u.z,
+        "A10: the stack's direction and its frame's load ARE press_unit(d), bit for bit");
+  const Vec3 zero{0, 0, 0}, nan{std::nan(""), 0, -1};
+  CHECK(refused([&] { press_unit(zero); }, {"press_direction"}), "A10: zero refused");
+  CHECK(refused([&] { press_unit(nan); }, {"press_direction"}), "A10: NaN refused");
+}
+
+// A7 / A12: the press API's version, and the three functions the app calls stay public.
+static_assert(kPressApiVersion == 1, "A7: the press API version");
+static void test_public_surface() {
+  FaceFrame (*ffc)(const TriangleMesh&, const std::vector<int>&, const std::vector<RegionCut>&, int,
+                   const Vec3&, const Vec3*) = &face_frame_cut;
+  std::vector<std::vector<int>> (*fa)(const StepModel&) = &face_adjacency;
+  bool (*sop)(const Stack&, const Vec3&) = &stack_owns_projection;
+  CHECK(ffc != nullptr && fa != nullptr && sop != nullptr,
+        "A12: face_frame_cut, face_adjacency, stack_owns_projection are public");
 }
 
 int main() {
@@ -310,6 +404,9 @@ int main() {
   test_corner_sectors();
   test_sector_ownership();
   test_conflicts();
+  test_shared_footprints();
+  test_one_normaliser(c);
+  test_public_surface();
   std::printf("test_flexible_press: %d checks, %d failures\n", g_checks, g_failures);
   return g_failures == 0 ? 0 : 1;
 }

@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <iterator>
 #include <map>
 #include <stdexcept>
 #include <string>
@@ -387,7 +388,7 @@ FaceFrame face_frame(const TriangleMesh& mesh, const std::vector<int>& triangles
   }
   const Vec3 n = unit(sum);
   // An ANGLED press states its direction; otherwise the load is the inward normal.
-  f.load = press_direction != nullptr ? unit(*press_direction) : mul(n, -1.0);
+  f.load = press_direction != nullptr ? press_unit(*press_direction) : mul(n, -1.0);
   f.area_mm2 = area;
   f.projected_area_mm2 = dot(sum, mul(f.load, -1.0));
   f.centroid = mul(cen, 1.0 / area);
@@ -689,10 +690,7 @@ Stack build_press_stack(const StepModel& model,
   }
   Vec3 dir{0, 0, 0};
   if (press_direction != nullptr) {
-    const double n = norm(*press_direction);
-    if (!std::isfinite(n) || !(n > 0.0))
-      throw FlexibleError("press_direction must be a finite, non-zero vector");
-    dir = mul(*press_direction, 1.0 / n);
+    dir = press_unit(*press_direction);  // A10: the one normaliser
     // INTO THE PART over the whole footprint: every triangle must face against it.
     for (const ResolvedFaceRegion* r : footprint)
       for (int ti : r->member_triangles) {
@@ -762,6 +760,54 @@ Stack build_press_stack(const StepModel& model,
   s.press_direction_given = press_direction != nullptr;
   if (s.press_direction_given) s.press_direction = dir;
   return s;
+}
+
+Vec3 press_unit(const Vec3& d) {
+  const double n = std::sqrt(d.x * d.x + d.y * d.y + d.z * d.z);
+  if (!std::isfinite(n) || !(n > 0.0))
+    throw FlexibleError("press_direction must be a finite, non-zero vector");
+  return {d.x / n, d.y / n, d.z / n};
+}
+
+void refuse_shared_footprints(const TriangleMesh& mesh, const std::vector<PressFootprint>& presses) {
+  auto area_of = [](const TriangleMesh& m, const std::vector<int>& ids) {
+    double a = 0.0;
+    for (int t : ids) {
+      const auto& tr = m.triangles[static_cast<std::size_t>(t)];
+      const Vec3& p = m.vertices[static_cast<std::size_t>(tr[0])];
+      const Vec3& q = m.vertices[static_cast<std::size_t>(tr[1])];
+      const Vec3& r = m.vertices[static_cast<std::size_t>(tr[2])];
+      a += 0.5 * norm(cross(sub(q, p), sub(r, p)));
+    }
+    return a;
+  };
+  for (std::size_t i = 0; i < presses.size(); ++i)
+    for (std::size_t j = i + 1; j < presses.size(); ++j)
+      for (const ResolvedFaceRegion* a : presses[i].regions)
+        for (const ResolvedFaceRegion* b : presses[j].regions) {
+          std::vector<int> ta = a->member_triangles, tb = b->member_triangles, shared;
+          std::sort(ta.begin(), ta.end());
+          std::sort(tb.begin(), tb.end());
+          std::set_intersection(ta.begin(), ta.end(), tb.begin(), tb.end(), std::back_inserter(shared));
+          if (shared.empty()) continue;
+          // The shared triangles inside BOTH regions' cuts (the intersection of the
+          // half-spaces is convex, so clipping by the union of the cuts is exact).
+          std::vector<RegionCut> both = a->cuts;
+          both.insert(both.end(), b->cuts.begin(), b->cuts.end());
+          TriangleMesh clipped;
+          std::vector<int> ids;
+          clip_into(mesh, shared, both, clipped, ids);
+          const double area = area_of(clipped, ids);
+          if (!(area > 1e-6)) continue;
+          char buf[64];
+          std::snprintf(buf, sizeof(buf), "%.6g", area);
+          throw FlexibleError("presses " + std::to_string(presses[i].press_id) + " and " +
+                              std::to_string(presses[j].press_id) + " share surface (face region " +
+                              std::to_string(a->id) + " and face region " + std::to_string(b->id) +
+                              " overlap by " + buf +
+                              " mm2); a surface is pressed by one press: split the face so the "
+                              "sectors do not overlap");
+        }
 }
 
 bool stack_owns_projection(const Stack& s, const Vec3& p) {

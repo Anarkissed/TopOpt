@@ -709,8 +709,9 @@ Scenarios (a)–(c) are unaffected (identical output).
 - `Stack build_press_stack(model, std::vector<const ResolvedFaceRegion*> footprint,
   regions, grid, lattice_mask, rotation_deg, build_dir, pitch_mm, const Vec3*
   press_direction /* nullptr = inward normal */)`. Throws FlexibleError naming the
-  region on: an outward or edge-on direction, a non-adjacent set, a multi-region press
-  with a cut sector, a region listed twice.
+  region on: an outward or edge-on direction, a non-adjacent set, two sectors of the
+  SAME face in one press, a region listed twice. (Sectors of different faces in one
+  press are supported: ruling 2026-10-07.)
 - `FaceFrame face_frame(…, const Vec3* press_direction = nullptr)`,
   `face_frame_cut(…, press_direction)`.
 - `bool stack_owns_projection(stack, p)`: B5 ownership for sector stacks.
@@ -723,3 +724,84 @@ Scenarios (a)–(c) are unaffected (identical output).
 NOT in scope (per the ruling): off-axis curve data (the tables stay build-Z; the side
 rule covers angled presses until the rig measures face, edge and corner coupons); large
 deformation, folds and self-contact.
+
+## C1 addendum follow-up: #362's asks (reviewer 2026-10-08)
+
+Tests first. The new checks were red against stubs: 10 failures across `flexible_press`
+and `flexible_run`, then green. Two mutation controls went red and were then restored:
+- A3: clip the shared triangles by ONE region's cuts only. Complementary sectors are then
+  refused.
+- A6: set the runner-up only inside the blend. The overlap count no longer matches.
+
+| ask | what | where | test |
+|---|---|---|---|
+| A3 | Two presses whose footprints share any SURFACE are refused, naming both presses and both regions with the shared area: a face and its own sector, or two overlapping sectors. The shared triangles are clipped by BOTH regions' cuts (an intersection of half-spaces is convex, so this is exact). Area > 1e-6 mm² refuses; complementary sectors meet only along a line and pass. In the job this is a JobError, like every other press refusal. | `refuse_shared_footprints(mesh, std::vector<PressFootprint>)` in faces.hpp; called by `run_flexible_job` over every loaded press before any stack is built | `test_flexible_press` `test_shared_footprints` (4 checks); `test_flexible_run` "A3 ... refused at the job" |
+| A5 | `FlexibleRunResult::stacks`: one per loaded press, in job order. `FlexibleRunResult::field`: the density field, empty on a refusal. Both are VALUES: what the receipt and the files were written from. | run.hpp | `test_flexible_run` "A5" (2 checks) |
+| A6 | `DensityField::owner_weight` (1 where one stack reaches, [0.5, 1) in a blend, 0 with no owner) and `DensityField::runner_up` (the other stack's face_region_id, -1 = none). density = w·ρ_owner + (1−w)·ρ_runner_up. | field.hpp / field.cpp | `test_flexible_press` `test_conflicts`: the runner-up voxels ARE the handover's overlap volume, and weight < 1 IS its blended volume, exactly |
+| A7 | `inline constexpr int kPressApiVersion = 1;` It is also written as `press_api_version` beside the receipt's `press` block, only when that block is present. | faces.hpp; run.cpp | `static_assert` in `test_flexible_press` |
+| A10 | `Vec3 press_unit(const Vec3&)` is THE normaliser: d/\|d\| by division; zero or non-finite throws "press_direction ...". `build_press_stack` and `face_frame` both call it, so the stack's direction, the frame's load and the receipt are the same bits. The job block stores the vector as written and only checks that it is non-zero. | faces.hpp / faces.cpp | `test_one_normaliser`: (−3,0,−4) → exactly (−0.6,0,−0.8), the same bits in the stack and the frame; zero and NaN refused |
+| A12 | `face_frame_cut` (faces.hpp), `face_adjacency` (face_region.hpp) and `stack_owns_projection` (faces.hpp) stay public. | — | `test_public_surface` takes each one's address with its exact signature |
+
+**A1: the keys are final.** `face_region_ids` (2+ adjacent regions, the press named by
+the first; not together with `face_region_id`) and `press_direction` ([x, y, z],
+non-zero, model frame; loaded faces only), exactly as 3121151e parses them. This
+follow-up adds no wire key.
+
+**A2: which existing presses' X axis moved with the `principal_2d` fix.** I measured
+this rather than reading it. A probe (not committed) computed the OLD and the NEW
+principal axis on every frame that core's flexible tests and the evidence harness
+build: 57 frames.
+
+| press | load | old X | new X | moved |
+|---|---|---|---|---|
+| evidence (a), (b): top of the 100×100×20 pad | −Z | tied: +X | same | no |
+| evidence (c): top and +X side of the block | −Z, −X | — | same | no |
+| evidence (d): vertical +X/+Y edge press (born after the fix) | (−1,−1,0)/√2 | (0.03,−0.03,−1.00): along the edge | (0.71,−0.71,0): across it | 87.5° |
+| `test_flexible_press`: top+right edge press | (−1,0,−1)/√2 | (0.03,−1.00,−0.03): along the edge | (0.71,0,−0.71) | 87.5° |
+| `test_flexible_press`: steep top+right press (−0.2,0,−1) | 11° off −Z | (0.30,0.95,−0.06) | (0.98,0,−0.20) | 72.3° |
+| `test_flexible_faces`: the 10° FOLDED test face (one face, inward normal, no press key) | 5° off −Z | (0.01,1.00,0.00): the SHORT 10 mm side | (1.00,0,−0.09): the long 20 mm side | 89.4° |
+| every other frame (51) | | | | no |
+
+So the one pre-addendum press that moved is the 10° folded test face. The old code gave
+it the SHORT axis, and no test pinned that face's X. The others are addendum presses,
+built after the fix.
+
+In general, the old code went wrong only where the in-plane cross moment is rounding
+noise (a face symmetric about the frame's basis axes) and the long axis is the SECOND
+basis axis. Axis-aligned faces whose cross moment is exactly 0, and tied faces, never
+moved. On a real meshed part this needs an exactly symmetric, non-axis-aligned
+footprint, so expect it to be rare. The app's saved jobs were not available to this
+probe.
+
+**A9 (proposal only, no data added): when the "estimated" label clears.** Today
+`tier_band` labels every side stack (more than 15° from build Z) "estimated", because
+every table row was pushed along build Z. Proposed table field, per curve entry, under
+`specimen`:
+
+```
+"load_build_angle_deg": 0      // the coupon's load line, measured from build Z (0..90)
+```
+
+- Absent means 0. Every existing row is a build-Z coupon, so no file changes.
+- The loader would accept 0..90 and refuse anything else, naming the entry.
+- A curve set would carry `load_build_angle_deg` from its rows. A set whose rows disagree
+  is refused: one set, one direction.
+- `tier_band` would take the press's `frame.build_angle_deg`. The label clears to the
+  set's own tier and band only when the chosen set has MEASURED rows (tier `literature`
+  or `calibrated`, never `proxy`) for this material, temperature and topology within
+  `kSideStackDeg` (15°) of that angle. Otherwise it stays "estimated" with the proxy
+  band, exactly as now.
+- The lookup would then read those rows, not the build-Z rows.
+- The SW / face, edge and corner coupons from the rig would be entered with 90, 45 or
+  54.74 as measured.
+
+None of this is implemented until the maintainer approves it and the data exists.
+
+### Meaning changes (follow-up)
+
+| where | before | now | test |
+|---|---|---|---|
+| `run_flexible_job` | a face and its own sector (or overlapping sectors) in two presses ran, and conflicted or handed over | refused (JobError) naming both presses | `test_flexible_run` A3 |
+| `press_unit` | d · (1/\|d\|) | d / \|d\| (the last bit can differ; the receipt prints 6 significant digits, so unchanged) | `test_one_normaliser` |
+| receipt | — | `press_api_version: 1` beside the `press` block, only when that block is present | — |
+

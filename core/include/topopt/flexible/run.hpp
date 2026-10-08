@@ -3,6 +3,8 @@
 #include <string>
 #include <vector>
 
+#include "topopt/flexible/faces.hpp"  // Stack
+#include "topopt/flexible/field.hpp"  // DensityField
 #include "topopt/job.hpp"
 
 namespace topopt {
@@ -39,6 +41,11 @@ struct FlexibleRunResult {
   std::string refusal_reason;
   std::string receipt_json;        // the `flexible` block of run_info.json
   std::vector<std::string> files;  // written, relative to out_dir
+  // A5 (reviewer 2026-10-08): the run's stacks, one per LOADED press in job order, and
+  // its density field (empty on a refusal), as values — what the receipt and the files
+  // were written from, for the app's bit test against its own.
+  std::vector<flexible::Stack> stacks;
+  flexible::DensityField field;
 };
 
 // Which binary ran (the CLI's own fingerprint, as every run_info.json records it).
