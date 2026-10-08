@@ -139,6 +139,6 @@ final class LatticeTypeReadinessFromCoreTests: XCTestCase {
         XCTAssertEqual(why("gyroid"), "Not buildable or strength-checked yet")
         XCTAssertEqual(TopOptKit.latticeTypeReadiness("gyroid", generatable: TopOptKit.latticeGeneratableTopologies,
                                                       certifiable: TopOptKit.latticeCertifiableTopologies),
-                       .unknownId, "core has no gyroid id yet (brief item b) — the catalog's one adaptation")
+                       .notEither, "★ #358 at 36f5fdde carries a gyroid id: core's own \"neither\" (was .unknownId at 23e6154e)")
     }
 }
