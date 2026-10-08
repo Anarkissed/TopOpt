@@ -3092,22 +3092,14 @@ double lattice_strut_diameter_mm(const std::string& topology, double rho,
 double lattice_min_printable_cell_mm(const std::string& topology,
                                      double min_extrudable_width_mm,
                                      double max_relative_density) {
-  // ★★ Q3(i) (reviewer, 2026-10-05): "use core's floor … Read it from core; don't copy the
-  // number." The smallest cell whose strut prints a bead at the densest density the JOB allows,
-  // composed exactly as grade_lattice does it — core has no public function that takes the
-  // cap (#358 D1): the band top capped by `grading.max_relative_density`
-  // (core/src/simp/grading.cpp:184-187), then w / φ(ρ_hi, 1) (grading.cpp:258-260). The swept
-  // plan's per-cell predicate (cell_plan.cpp:197-204) can lay no rung below it. A cap of 0 (not
-  // sent, Allow quilt on) is core's uncapped dense floor, = lattice_cell_bounds' densest.
+  // ★★ E1 (#358 26a37f64; the reviewer's ruling, 2026-10-08: "merge it, delete the bridge's own
+  // composition, call core's function, and pin the literals 2.25 / 1.173"). Core's ONE function for
+  // the smallest cell whose strut prints a bead at the densest density the job allows — the same
+  // name and signature the bridge used, now core's: a cap of 0 or non-finite means NOT SENT, and a
+  // cap below the band floor is refused by name (the guard hands Swift core's reason, 0 here).
   return guarded_empty("lattice_min_printable_cell_mm", [&]() -> double {
-    const topopt::LatticeTopology topo = live_topology(topology);
-    if (!(min_extrudable_width_mm > 0.0)) return 0.0;
-    const double band_top = topopt::lattice_rho_max(topo);
-    const double rho_hi = (max_relative_density > 0.0 && std::isfinite(max_relative_density))
-                              ? std::min(band_top, max_relative_density)
-                              : band_top;
-    const double per_mm = topopt::lattice_strut_diameter_mm(topo, rho_hi, 1.0);
-    return per_mm > 0.0 ? min_extrudable_width_mm / per_mm : 0.0;
+    return topopt::lattice_min_printable_cell_mm(live_topology(topology), min_extrudable_width_mm,
+                                                 max_relative_density);
   });
 }
 
@@ -3198,7 +3190,7 @@ LatticeCellBounds lattice_cell_bounds(const std::string& topology,
 LatticeRegionDerivation lattice_region_derivation(
     const std::string& topology, double member_width_mm,
     double min_extrudable_width_mm, double stated_relative_density,
-    double cells_per_member_floor, double cell_mm) {
+    double cells_per_member_floor, double cell_mm, double max_relative_density) {
   // ★ #358: `lattice_derive_cell_for_member` and `lattice_min_density_for_strut` take the
   // per-type strut law, which refuses a type without a measured table: valid = false
   // with core's reason, never a C++ throw into Swift.
@@ -3212,8 +3204,11 @@ LatticeRegionDerivation lattice_region_derivation(
     }
     d.valid = true;
     d.rho_max = topopt::lattice_rho_max(topo);
+    // ★ E1/D1 (#358 26a37f64): the job's cap reaches core's derivation, so the floor is the
+    // run's — w / phi(min(rho_max, cap)) — not the uncapped band top's.
     const topopt::LatticeCellDerivation w = topopt::lattice_derive_cell_for_member(
-        topo, member_width_mm, min_extrudable_width_mm, cells_per_member_floor);
+        topo, member_width_mm, min_extrudable_width_mm, cells_per_member_floor,
+        max_relative_density);
     // FEASIBLE is percolation, not accuracy — the same boundary run_job draws, and
     // for the same reason: buildable-and-uncertifiable is a verdict, not a refusal.
     d.feasible = w.feasible_percolation;
@@ -3239,8 +3234,13 @@ LatticeRegionDerivation lattice_region_derivation(
     d.cell_mm = cell_mm > 0.0 ? cell_mm
                               : std::max(member_width_mm / n_star, w.min_printable_cell_mm);
     const double rho = topopt::lattice_min_density_for_strut(topo, d.cell_mm,
-                                                             min_extrudable_width_mm);
-    d.derived_relative_density = rho >= 0.0 ? rho : d.rho_max;
+                                                             min_extrudable_width_mm,
+                                                             max_relative_density);
+    // ★ nothing in the band prints at this cell: the densest the JOB allows (E1's "one the brief
+    // did not list", run_job:1239), never the uncapped band top
+    const double capped_top = (max_relative_density > 0.0 && std::isfinite(max_relative_density))
+                                  ? std::min(d.rho_max, max_relative_density) : d.rho_max;
+    d.derived_relative_density = rho >= 0.0 ? rho : capped_top;
     d.relative_density = stated_relative_density > 0.0 ? stated_relative_density
                                                        : d.derived_relative_density;
     d.strut_mm = topopt::lattice_strut_diameter_mm(topo, d.relative_density, d.cell_mm);

@@ -1317,7 +1317,9 @@ struct LatticeRegionDerivation {
 LatticeRegionDerivation lattice_region_derivation(
     const std::string& topology, double member_width_mm,
     double min_extrudable_width_mm, double stated_relative_density,
-    double cells_per_member_floor, double cell_mm);
+    double cells_per_member_floor, double cell_mm,
+    // ★ the job's density cap (#358 E1/D1): every floor at min(rho_max, cap); 0 = not sent
+    double max_relative_density);
 
 // ★★★ THE ORGANIC LATTICE'S TRACED CENTRELINES, for the preview. See bridge.cpp for
 // the flat layout and for why the tensor — not a scalar — is the input that gates this.

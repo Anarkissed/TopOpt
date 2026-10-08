@@ -2024,11 +2024,14 @@ public enum TopOptKit {
         // ★ ONE NUMBER, ONE SOURCE (item 5, 2026-10-05): the cell the preview lays, when the
         // caller has it — core then gives the density, strut and cells-across at THAT cell.
         // 0 = core derives the cell, as before.
-        cellMM: Double = 0) -> LatticeRegionDerivation {
+        cellMM: Double = 0,
+        // ★ THE JOB'S DENSITY CAP (#358 E1/D1, 26a37f64): core derives every floor at
+        // min(rho_max, cap). 0 = not sent, core's uncapped band — the old answer exactly.
+        maxRelativeDensity: Double = 0) -> LatticeRegionDerivation {
         notePerTypeCall(#function, topology)
         let d = topoptbridge.lattice_region_derivation(
             std.string(topology), memberWidthMM, minExtrudableWidthMM,
-            statedRelativeDensity, cellsPerMemberFloor, cellMM)
+            statedRelativeDensity, cellsPerMemberFloor, cellMM, maxRelativeDensity)
         let why = String(d.reason)
         return LatticeRegionDerivation(
             valid: d.valid, feasible: d.feasible, cellMM: d.cell_mm,

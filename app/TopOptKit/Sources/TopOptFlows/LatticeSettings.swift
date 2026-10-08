@@ -1244,10 +1244,18 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
     /// nil: core gave no number (a type it does not call live, or no bead) — nothing is baked on
     /// a made-up floor.
     public static func tileFloorMM(topologyID: String, beadMM: Double, allowQuilt: Bool) -> Double? {
+        TopOptKit.latticeMinPrintableCellMM(topology: topologyID, minExtrudableWidthMM: beadMM,
+                                            maxRelativeDensity: jobDensityCap(topologyID: topologyID,
+                                                                              allowQuilt: allowQuilt))
+    }
+    /// ★ THE CAP THE JOB WRITES (`grading.max_relative_density`), ONE SOURCE: the type's aesthetic
+    /// ceiling unless Allow quilt lifts it; 0 = no cap (a ceiling of 1, an unknown type, organic).
+    /// Core's derivations take it since #358's E1/D1 (26a37f64), so the preview passes the SAME cap
+    /// the job writes — or its floors are the uncapped 1.173 mm where the run's are 2.25.
+    public static func jobDensityCap(topologyID: String, allowQuilt: Bool, algorithm: String = "") -> Double {
+        guard algorithm != "organic" else { return 0 }
         let ceiling = allowQuilt ? 1 : (LatticeType.named(topologyID)?.aestheticDensityCeiling() ?? 1)
-        let cap = ceiling > 0 && ceiling < 1 ? ceiling : 0
-        return TopOptKit.latticeMinPrintableCellMM(topology: topologyID, minExtrudableWidthMM: beadMM,
-                                                   maxRelativeDensity: cap)
+        return ceiling > 0 && ceiling < 1 ? ceiling : 0
     }
 
     /// ★ THE PREVIEW TRACES AT THE JOB'S NUMBERS (2026-09-06). The bake used to read

@@ -204,11 +204,12 @@ public enum LatticeFaceCardDerivation {
                             declaredDensity: Double? = nil,
                             minExtrudableWidthMM: Double,
                             cellsPerMemberFloor: Double = 0,
-                            memberWidthMM: Double? = nil, cellMM: Double? = nil) -> LatticeFaceCard {
+                            memberWidthMM: Double? = nil, cellMM: Double? = nil,
+                            maxRelativeDensity: Double = 0) -> LatticeFaceCard {
         card(faceID: faceID, depthMM: depthMM, heldVoxels: heldVoxels, spacingMM: spacingMM,
              densityGCM3: densityGCM3, topologyID: topology.id, declaredDensity: declaredDensity,
              minExtrudableWidthMM: minExtrudableWidthMM, cellsPerMemberFloor: cellsPerMemberFloor,
-             memberWidthMM: memberWidthMM, cellMM: cellMM)
+             memberWidthMM: memberWidthMM, cellMM: cellMM, maxRelativeDensity: maxRelativeDensity)
     }
 
     /// ★ BY THE RAW TOPOLOGY ID (item a, 2026-10-02): core is asked about the type the project
@@ -243,7 +244,9 @@ public enum LatticeFaceCardDerivation {
                             // declared depth and core's own derivation, as before (no bake yet,
                             // or an algorithm whose bake does not derive region cells).
                             memberWidthMM: Double? = nil,
-                            cellMM: Double? = nil) -> LatticeFaceCard {
+                            cellMM: Double? = nil,
+                            // ★ the job's density cap (#358 E1/D1); 0 = not sent
+                            maxRelativeDensity: Double = 0) -> LatticeFaceCard {
         let voxelMM3 = spacingMM * spacingMM * spacingMM
         let volume = Double(heldVoxels) * voxelMM3
         let mass = volume * densityGCM3 / 1000.0          // mm³ · g/cm³ → g
@@ -318,7 +321,9 @@ public enum LatticeFaceCardDerivation {
                     : min(max($0, limits.rhoMin), limits.rhoMax)
             } ?? 0,
             cellsPerMemberFloor: cellsPerMemberFloor,
-            cellMM: cellMM.flatMap { $0 > 0 ? $0 : nil } ?? 0)
+            cellMM: cellMM.flatMap { $0 > 0 ? $0 : nil } ?? 0,
+            // ★ the job's cap (#358 E1/D1): core's floors as the run applies them
+            maxRelativeDensity: maxRelativeDensity)
 
         // ★ NO CORE NUMBER IS NOT A PASS (bar R2). An unknown extrusion width, a
         // topology core carries no law for, or a member no (cell, density) pair

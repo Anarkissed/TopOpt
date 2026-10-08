@@ -10908,6 +10908,10 @@ public struct WorkspacePlaceholder: View {
         // card's held voxels (and so its grams) are the face's, scaled by that share; nil = whole
         let sharesCopy = project.latticeCardHeldShares()
         let organicCards = project.lattice.algorithm == "organic"
+        // ★ the job's cap (#358 E1/D1): the card's floors are the run's
+        let capCopy = LatticeSettings.jobDensityCap(topologyID: project.lattice.topologyID,
+                                                    allowQuilt: project.lattice.allowQuilt,
+                                                    algorithm: project.lattice.algorithm)
         Task.detached(priority: .userInitiated) {
             guard let preview = try? TopOptKit.faceSlabPreview(
                 stepPath: path, faceIDs: ids, depthsMM: depthsCopy,
@@ -10939,7 +10943,8 @@ public struct WorkspacePlaceholder: View {
                     minExtrudableWidthMM: widthMM,
                     cellsPerMemberFloor: stageFloor,
                     memberWidthMM: bakedCopy[i]?.measuredWidthMM,
-                    cellMM: bakedCopy[i]?.cellMM)
+                    cellMM: bakedCopy[i]?.cellMM,
+                    maxRelativeDensity: capCopy)
                 card.cellRangeMM = bakedCopy[i]?.cellRangeMM
                 // ★★ ruling A (2026-10-08): whose number the drawer's "Cells across" is
                 card.cellsAcrossSource = organicCards ? .none : (bakedCopy[i] != nil ? .estimate : .core)
