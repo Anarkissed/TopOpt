@@ -1,7 +1,9 @@
 // FlexibleAngledGoldenTests — the ruling's last test, from batch AP0 on: "every existing face press is
 // unchanged: job bytes and stage hashes identical" (task 2026-10-07, angled presses; spec §14, §15).
 // The goldens were recorded at 01ec5e3c, before any angled-press code (FlexibleAngledGoldenRecorder);
-// S1 re-bases them after the #361 sync and every later batch must equal that base.
+// S1 re-based them after the #361 sync, at the final merge 11b264e8 (every difference attributed in
+// docs/handoffs/evidence/2026-09-29-flexible-screens/angled_presses/s1_goldens.txt), and every later
+// batch must equal that base.
 //
 // Each comparison has its RED control beside it — a pin that can actually SEE the change it guards:
 //   * run-job bytes: one face at +0.001 kg changes exactly ONE line (weight_n), and a one-byte edit
@@ -10,12 +12,13 @@
 //     the canonical form sees one changed group depth and is blind only to the UUID pairs' ORDER;
 //   * frames: one column's entry + 1 ulp is caught;
 //   * fields: one voxel's owner + 1 is caught;
-//   * the probe: each form is pinned to its OWN base text (the edge is refused for its missing
-//     face_region_id, the tilt for its unknown press_direction — critique core-purity #1);
+//   * the probe: each form keeps its OWN base text (the edge is refused for its missing
+//     face_region_id, the tilt for its unknown press_direction — critique core-purity #1); since S1 core
+//     accepts both, and a tilt with an unknown key (press_directionX) is refused;
 //   * stage jobs: a lattice-stage setting the stage job reads changes the bytes, while a Flexible face
 //     weight does NOT — the stage job (and the LatticeJobJSONDump hashes) cannot see lattice.flexible,
 //     so the run-job and subtree goldens carry the Flexible claim.
-// FLEX_AP_MUTATE=weight | other-send | nil-rule | ulp | edge-as-tilt | send-weight | owner | depth feeds
+// FLEX_AP_MUTATE=weight | other-send | nil-rule | ulp | unknown-key | send-weight | owner | depth feeds
 // a control's change into the MAIN comparison, to prove that comparison goes RED on it
 // (FLEX_AP_GOLDEN_DIR = a perturbed copy proves the same for every golden file).
 //
@@ -284,27 +287,47 @@ final class FlexibleAngledGoldenTests: XCTestCase {
                       "control: the scan sees a fingerprint in a golden line")
     }
 
-    // MARK: - the probe's base refusals
+    // MARK: - the probe: accepted since S1, the base refusals kept
 
-    /// The probe's documents (spec §10) through core's own parser: the control parses, and each angled
-    /// form gets ITS OWN recorded base refusal. After S1 core accepts both: S1 flips this test and
-    /// keeps probe_refusals_base.json for AP6's injected-probe test (the recorder never overwrites it).
-    func testProbeDocumentsGetTheRecordedBaseRefusals() throws {
+    /// The probe's documents (spec §10) through core's own parser. At the base (01ec5e3c, core 523dd2f9)
+    /// core refused each angled form with ITS OWN text (the edge for its missing face_region_id, the tilt
+    /// for its unknown press_direction — critique core-purity #1): probe_refusals_base.json, which AP6's
+    /// injected-probe test reads and the recorder never overwrites.
+    /// ★ S1 FLIP (renamed from testProbeDocumentsGetTheRecordedBaseRefusals): since the #361 sync (C1
+    /// addendum 3121151e) core ACCEPTS both forms — the answers the recorder wrote at the post-S1 base to
+    /// probe_answers.json (every key null) — and the control still parses.
+    /// FLEX_AP_MUTATE=unknown-key feeds a tilt whose key is press_directionX into the main comparison: core
+    /// refuses it, so the test goes RED (the parser is strict — "accepted" is core knowing the key).
+    func testProbeDocumentsAreAcceptedSinceS1AndTheBaseRefusalsAreKept() throws {
+        // the base, as AP0 recorded it (kept for AP6)
         let golden = try G.read("probe_refusals_base.json")
         let obj = try XCTUnwrap(try JSONSerialization.jsonObject(with: Data(golden.utf8)) as? [String: Any])
-        let tiltText = try XCTUnwrap(obj["tilt"] as? String, "the base refuses the tilt")
-        let edgeText = try XCTUnwrap(obj["edge"] as? String, "the base refuses the edge")
+        let tiltText = try XCTUnwrap(obj["tilt"] as? String, "the base refused the tilt")
+        let edgeText = try XCTUnwrap(obj["edge"] as? String, "the base refused the edge")
         XCTAssertTrue(obj["control"] is NSNull, "the control parsed at the base")
-        let now = try G.probeAnswers()
-        print("FLEX-AP probe now: control \(String(describing: now["control"] ?? nil)) · tilt '\(now["tilt"].flatMap { $0 } ?? "accepted")' · edge '\(now["edge"].flatMap { $0 } ?? "accepted")'")
-        XCTAssertNil(now["control"] ?? "missing", "★ the control (the entry exactly as faceEntry writes it) must parse")
-        XCTAssertEqual(now["tilt"] ?? nil, tiltText)
-        XCTAssertEqual((G.mutation == "edge-as-tilt" ? now["tilt"] : now["edge"]) ?? nil, edgeText)
-        // ★ RED CONTROL: each form has its OWN text — the edge is refused before its direction is read
-        XCTAssertNotEqual(tiltText, edgeText, "control: the two forms are told apart")
+        XCTAssertNotEqual(tiltText, edgeText, "the base told the two forms apart")
         XCTAssertTrue(tiltText.contains("press_direction"), tiltText)
         XCTAssertTrue(edgeText.contains("face_region_id"), edgeText)
         XCTAssertFalse(edgeText.contains("press_direction"), "the edge's base refusal is its missing id, not the direction")
+
+        // ★ this core's answers: every form accepted, as recorded at the post-S1 base
+        var now = try G.probeAnswers()
+        if G.mutation == "unknown-key" {
+            var x = try G.controlEntry()
+            x["press_directionX"] = [0.0, 0.0, -1.0]
+            now["tilt"] = TopOptKit.jobSchemaError(Data(try G.probeDocument(x).utf8))
+        }
+        print("FLEX-AP probe now: control \(now["control"].flatMap { $0 } ?? "accepted") · tilt \(now["tilt"].flatMap { $0 } ?? "accepted") · edge \(now["edge"].flatMap { $0 } ?? "accepted")")
+        let answers = try XCTUnwrap(try JSONSerialization.jsonObject(with: Data(try G.read("probe_answers.json").utf8)) as? [String: Any])
+        for k in ["control", "tilt", "edge"] {
+            XCTAssertTrue(answers[k] is NSNull, "the post-S1 base recorded \(k) as accepted: \(String(describing: answers[k]))")
+            XCTAssertNil(now[k] ?? "missing", "★ core accepts the \(k) document")
+        }
+        // ★ RED CONTROL: an unknown key beside the same entry is refused, by its name
+        var unknown = try G.controlEntry()
+        unknown["press_directionX"] = [0.0, 0.0, -1.0]
+        let refused = TopOptKit.jobSchemaError(Data(try G.probeDocument(unknown).utf8))
+        XCTAssertTrue(refused?.contains("press_directionX") == true, "control: core refuses a key it does not know: \(refused ?? "accepted")")
     }
 
     // MARK: - the stage job (what LatticeJobJSONDump hashes)

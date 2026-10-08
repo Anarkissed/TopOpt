@@ -769,14 +769,14 @@ final class FlexibleAngledGoldenRecorder: XCTestCase {
 
     func testRecord7Manifest() throws {
         try G.write("MANIFEST.txt", """
-        # Angled presses (task 2026-10-07), batch AP0: the BASE goldens of \(G.baseLabel)
-        # (claude/flexible-screens, PR #362), recorded BEFORE any angled-press code by
-        # FlexibleAngledGoldenRecorder (RECORD=1, \(G.hashingMode)), built against core \(CoreFingerprint.value).
+        # Angled presses (task 2026-10-07): the BASE goldens of \(G.baseLabel) (claude/flexible-screens, PR #362),
+        # recorded by FlexibleAngledGoldenRecorder (RECORD=1, \(G.hashingMode)), built against core \(CoreFingerprint.value).
         # The core fingerprint is the repo HEAD when build_core.sh ran, so it lives HERE only: no compared golden
         # line carries it (testNoComparedGoldenCarriesTheCoreFingerprint). Read by FlexibleAngledGoldenTests.
-        # S1 (the #361 sync) re-runs them, REPORTS every difference with the commit that caused it, and re-records
-        # them as the post-S1 base (FLEX_AP_BASE=<the merge>) — except probe_refusals_base.json, which the recorder
-        # never overwrites (AP6 reads the base texts; a later core's differing answers go to probe_answers.json).
+        # AP0 recorded the first base at 01ec5e3c, BEFORE any angled-press code. S1 (the #361 sync) re-ran them,
+        # REPORTED every difference with the commit that caused it, and re-recorded them as the post-S1 base
+        # (FLEX_AP_BASE=<the final merge>) — except probe_refusals_base.json, which the recorder never overwrites
+        # (AP6 reads the base texts; a later core's differing answers go to probe_answers.json).
         # Every later batch must equal that base.
         c1_pad_pure_run_job.json          FlexibleJob.runJobJSON(FlexibleStageTests.inputs(settings())) — paths as $REPO
         c1_pad_pure_stamp_run_job.json    the same, face 1 shaped Stamp (thumb, centred, 2 mm pitch)
@@ -799,7 +799,8 @@ final class FlexibleAngledGoldenRecorder: XCTestCase {
                                           field of each squeeze group (density / owner SHA-256s, owner histogram, per-layer
                                           SHA-256s, voxel counts, handovers) or its refusal, and the app's combined field
                                           (C1 pad, his 0004, his 0004_r5)
-        probe_refusals_base.json          core's answer to the probe's control / tilt / edge documents (null = accepted)
+        probe_refusals_base.json          the BASE core's answer to the probe's control / tilt / edge documents (null = accepted), AP0's
+        probe_answers.json                this core's answers, written when they differ from the base's (since S1: all accepted)
         rounded_slab.txt                  the two slabs' pseudo-faces and which wrap (core's normal-spread flag, or its "normals cancel" refusal)
 
         """)
