@@ -2370,7 +2370,26 @@ public final class ProjectModel: ObservableObject {
             layerHeightMM: printParams.layerHeightMM)
         // ★ The preview's placed cells ride with a Stepped run (2026-09-18).
         spec?.steppedCells = latticePreviewSteppedCells
+        // ★★ THE RIM'S FLOOR, ONE NUMBER (item 2, measured 2026-10-06): the job's automatic rim
+        // is the printability floor max(1.535 × bead, one design voxel) — his 2026-09-08 rule,
+        // the number the preview draws (`organicRunSolidRimMM(floorMM: organicFloor.mm)`). The
+        // spec carried a field for it that nothing filled, so the job fell back to the bead
+        // term alone: 0.691 mm on 102117B9 against the preview's 1.705.
+        if spec?.algorithm == "organic" { spec?.organicRimFloorMM = organicFloor.mm }
         return spec
+    }
+
+    /// ★★ THE ORGANIC WINDOW THE JOB CARRIES, as core reads it (item 2, measured 2026-10-06):
+    /// `have_window = cell_min_mm > 0 && cell_max_mm >= cell_min_mm` (run_job.cpp:4522). With
+    /// one, core floors its shape fit at `cell_min_mm` (4799-4801) — for one size, lo == hi, the
+    /// fit shrinks nothing; without one, at half the spacing. The preview's shape fit reads the
+    /// same window so it shrinks exactly what the run does. nil = the job states none (Auto).
+    public var organicJobWindowMM: (lo: Double, hi: Double)? {
+        guard lattice.algorithm == "organic",
+              let g = latticeRunSpec(emission: latticeJobRegions())?.gradingDictionary(),
+              let lo = g["cell_min_mm"] as? Double, let hi = g["cell_max_mm"] as? Double,
+              lo > 0, hi >= lo else { return nil }
+        return (lo, hi)
     }
 
     /// ★ RULING (c) (maintainer, 2026-09-30): why a variant's job may not be written, in the

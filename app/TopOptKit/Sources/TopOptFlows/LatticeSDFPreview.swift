@@ -157,6 +157,7 @@ public enum LatticePreviewBanner: Equatable, Sendable {
         case .drawing(let t):
             if t.hasPrefix("★") { return "★ Preview differs from run" }
             if t.contains("shown as the doubled ladder") { return "Lattice preview · stand-in" }
+            if t.contains(Self.planNotSentSteppedSentence) { return Self.planNotSentSteppedCaption }
             if t.contains(Self.planNotSentSentence) { return Self.planNotSentCaption }
             return "Lattice preview · not the export"
         }
@@ -171,6 +172,22 @@ public enum LatticePreviewBanner: Equatable, Sendable {
     public static let planNotSentSentence =
         "the run currently builds core's own cell layout, not the cells shown here — "
         + "they are not sent to it yet"
+    /// ★★ RULING 1 (reviewer, 2026-10-07): "the Stepped preview's line says plainly that the run
+    /// currently lays one cell size per region and can refuse thin walls" — no composed copy of
+    /// core's rule, no pre-send refusal. No plan reaches a Stepped run (`sendsPlan` is Default
+    /// Grade's only); core lays ONE cell per region, max(W_med/5, w/φ(median ρ))
+    /// (run_job.cpp:4117-4120), and refuses when no region derives one (6459-6474) — his
+    /// 3418E167, after 171 s. Default Grade keeps the line above.
+    public static let planNotSentSteppedCaption = "Run: one cell per region"
+    public static let planNotSentSteppedSentence =
+        "the run currently lays one cell size per region, not the cells shown here — "
+        + "and can refuse walls too thin for it"
+    /// The plan-not-sent line for an algorithm: Stepped's own, else Default Grade's.
+    public static func planNotSentLine(algorithm: String) -> (caption: String, sentence: String) {
+        algorithm == LatticeCellTransition.stepped.coreAlgorithm
+            ? (planNotSentSteppedCaption, planNotSentSteppedSentence)
+            : (planNotSentCaption, planNotSentSentence)
+    }
     /// The notice's width cap, in points: the Selections chip's column, short of the
     /// iPad chip that starts ~310 pt from the left edge on the 13-inch iPad.
     public static let noticeMaxWidthPT: Double = 280
@@ -281,7 +298,7 @@ public enum LatticePreviewBanner: Equatable, Sendable {
         if LatticeSteppedCellWire.runBuildsCoresOwnLayout(
             algorithm: scene.algorithmName, wired: plansWired ?? TopOptKit.steppedCellsWired,
             enabled: plansEnabled) {
-            label += " · " + planNotSentSentence
+            label += " · " + planNotSentLine(algorithm: scene.algorithmName).sentence
         }
         // ★ The sentence is `LatticeWallsWithoutShape`'s — the variant notice's, so the two
         // cannot drift (ruling g); a single face now reads "is not shown", not "are".

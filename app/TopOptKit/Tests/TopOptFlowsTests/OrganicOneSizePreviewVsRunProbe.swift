@@ -209,6 +209,7 @@ final class OrganicOneSizePreviewVsRunProbe: XCTestCase {
                 }
                 if var o = organicIn {
                     o.solidRimMM = Swift.max(0, rimPreview)
+                    o.jobWindowMM = pm.organicJobWindowMM          // as WorkspacePlaceholder does
                     o.shapeBandMM = lat.organicShapeFit ? lat.shapeFitBandMM : 0
                     o.shapeBandStrength = lat.shapeFitGradeStrength
                     o.depthStaggerCellMM = lat.organicDepthStagger ? Swift.max(o.separationMinMM, o.separationMaxMM) : 0

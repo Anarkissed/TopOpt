@@ -5136,6 +5136,8 @@ public struct WorkspacePlaceholder: View {
         // the probe's own number once it has run (his ruling, 2026-09-08).
         let organicRimSetting = project.lattice.organicRunSolidRimMM(
             floorMM: project.organicFloor.mm)
+        // ★ read on main, with the rest of the bake's inputs: the window the job carries
+        let organicJobWindow = project.organicJobWindowMM
         let organicDepthStagger = project.lattice.organicDepthStagger
         let organicIsStructural = stageMode == .structural
         let spansForBake = latticeOrganicSpans
@@ -5237,6 +5239,8 @@ public struct WorkspacePlaceholder: View {
                 // band he photographed. `organicRunSolidRimMM(beadMM:)` answers for
                 // every mode now, and the job carries the same number.
                 o.solidRimMM = Swift.max(0, organicRimSetting)
+                // ★ the job's own window, so the shape fit floors where core's does (item 2)
+                o.jobWindowMM = organicJobWindow
                 // ★ the grade-to-shape band reaches organic (2026-09-18): its own Fit to
                 // shape switch arms it, the same millimetres the octet uses
                 o.shapeBandMM = lat.organicShapeFit ? lat.shapeFitBandMM : 0

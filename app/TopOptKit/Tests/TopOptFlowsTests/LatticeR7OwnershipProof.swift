@@ -142,19 +142,41 @@ final class LatticeR7OwnershipProof: XCTestCase {
         mr.latticeSteppedDyadicSteps = lat.gradeStepsAreHalves
         mr.latticeSteppedCellStated = regions.map { r in r.faceID.map { statedByFace[$0] != nil } ?? false }
         // ── the two bakes, one process, one scene
-        func bakeOnce(ownership: Bool, token: Int) throws -> (LatticeCellField, [LatticeSteppedCell], [LatticeRegionSpec]) {
+        var lastStats = LatticePreviewOccupancy.OctreeBakeStats()
+        LatticePreviewOccupancy.octreeBakeObserver = { _, st in lastStats = st }
+        func bakeOnce(ownership: Bool, stepDown: Bool = true, incremental: Bool = true, token: Int) throws
+            -> (LatticeCellField, [LatticeSteppedCell], [LatticeRegionSpec], LatticePreviewOccupancy.OctreeBakeStats) {
             LatticePreviewOccupancy.centreOwnershipEnabled = ownership
+            LatticePreviewOccupancy.stepDownEnabled = stepDown
+            LatticePreviewOccupancy.stepDownIncremental = incremental
             baked = nil
             mr.setLatticeScene(s1, token: token)
             let b = try XCTUnwrap(baked, "the bake handed back no plan")
             let f = try XCTUnwrap(mr.latticeLayerForTests?.cellField, "no cell field")
-            return (f, b.cells, b.regions)
+            return (f, b.cells, b.regions, lastStats)
         }
         let saved = LatticePreviewOccupancy.centreOwnershipEnabled
-        defer { LatticePreviewOccupancy.centreOwnershipEnabled = saved }
-        let (before, cellsBefore, regionsBefore) = try bakeOnce(ownership: false, token: 11)
-        let (after, cellsAfter, _) = try bakeOnce(ownership: true, token: 12)
-        let (again, cellsAgain, _) = try bakeOnce(ownership: true, token: 13)   // null control
+        let savedStep = LatticePreviewOccupancy.stepDownEnabled
+        let savedIncr = LatticePreviewOccupancy.stepDownIncremental
+        defer {
+            LatticePreviewOccupancy.centreOwnershipEnabled = saved
+            LatticePreviewOccupancy.stepDownEnabled = savedStep
+            LatticePreviewOccupancy.stepDownIncremental = savedIncr
+            LatticePreviewOccupancy.octreeBakeObserver = nil
+        }
+        let (before, cellsBefore, regionsBefore, _) = try bakeOnce(ownership: false, token: 11)
+        let (after, cellsAfter, _, stAfter) = try bakeOnce(ownership: true, token: 12)
+        let (again, cellsAgain, _, _) = try bakeOnce(ownership: true, token: 13)   // null control
+        // R7 as first landed (2026-10-05), a yielded cell's share left as air — the step-down's "before"
+        let (noStep, cellsNoStep, _, stNoStep) = try bakeOnce(ownership: true, stepDown: false, token: 14)
+        // the rounds re-walk only the slots holding a newly yielded cell: the same bake as full re-walks
+        let (full, cellsFull, _, stFull) = try bakeOnce(ownership: true, incremental: false, token: 15)
+        XCTAssertEqual(full.steppedCellMM, after.steppedCellMM, "★ incremental rounds = full re-walks, bit for bit")
+        XCTAssertEqual(full.field.values.map(\.bitPattern), after.field.values.map(\.bitPattern))
+        XCTAssertEqual(full.steppedOrigin, after.steppedOrigin)
+        XCTAssertEqual(cellsFull, cellsAfter)
+        print("R7-INCR rounds \(stAfter.stepDownRounds) slots re-walked \(stAfter.stepDownSlotsRewalked) vs \(stFull.stepDownRounds) full walks of \(stFull.placeSlotsWalked / Swift.max(1, stFull.stepDownRounds + 2)) slots | place \(String(format: "%.1f", stAfter.placeSeconds)) s vs \(String(format: "%.1f", stFull.placeSeconds)) s (Debug)")
+        print("R7-STEPDOWN rounds \(stAfter.stepDownRounds) stepped down \(stAfter.cellsSteppedDown) dropped at the finest rung \(stAfter.cellsDroppedAtFinest) | contested \(stAfter.contestedCells) yielded in the final pass \(stAfter.cellsYielded) straddler pairs \(stAfter.straddlerPairs) | without the step-down: yielded \(stNoStep.cellsYielded)")
         XCTAssertEqual(before.field.origin, after.field.origin, "★ the same texel grid (else the diff means nothing)")
         XCTAssertEqual([before.field.nx, before.field.ny, before.field.nz], [after.field.nx, after.field.ny, after.field.nz])
         XCTAssertEqual(after.steppedCellMM, again.steppedCellMM, "null control: two ON bakes agree")
@@ -209,75 +231,85 @@ final class LatticeR7OwnershipProof: XCTestCase {
         XCTAssertGreaterThan(sb.a, 0, "positive control: the declaration-order bake has such overlaps")
         try sa.straddlers.joined(separator: "\n").write(to: out.appendingPathComponent("r7_straddlers_after.txt"), atomically: true, encoding: .utf8)
 
-        // ── the preview changes only where a texel's OWNER changed
+        // ── the preview changes only where a texel's OWNER changed, or in a cell that stepped down
         let g = before.field
         let pitch = Double(g.spacing.x)
         let gorigin = SIMD3<Double>(g.origin)
-        XCTAssertEqual(before.steppedTexelCell.count, g.nx * g.ny * g.nz)
-        XCTAssertEqual(after.steppedTexelCell.count, g.nx * g.ny * g.nz)
         func ownerRegion(_ f: LatticeCellField, _ cells: [LatticeSteppedCell], _ idx: Int) -> Int {
             let ci = Int(f.steppedTexelCell[idx])
             return ci >= 0 && ci < cells.count ? cells[ci].region : -1
         }
-        // the cells the rule took out of the plan (they yielded): a same-owner change inside one
-        // is still a change in a cell whose owner changed
         func ck(_ c: LatticeSteppedCell) -> String { "\(c.region)|\(c.originMM)|\(c.sizeMM)" }
-        let afterKeys = Set(cellsAfter.map(ck))
-        let gone = cellsBefore.filter { !afterKeys.contains(ck($0)) }
-        let goneKeys = Set(gone.map(ck))
-        let beforeKeys = Set(cellsBefore.map(ck))
         /// The texel's own cell, by the bake's texel → cell index (exact; a face-plane texel's
         /// middle sits up to a pitch OUTSIDE its cell's box, so a box test misses it).
         func cellOf(_ f: LatticeCellField, _ cells: [LatticeSteppedCell], _ idx: Int) -> LatticeSteppedCell? {
             let ci = Int(f.steppedTexelCell[idx])
             return ci >= 0 && ci < cells.count ? cells[ci] : nil
         }
-        var sameOwnerInGone = 0, sameOwnerNewCell = 0
-        var changed = 0, ownerChanged = 0, sameOwner = 0, samples: [String] = []
-        var flows: [String: Int] = [:]
-        var emptied: [String: Int] = [:]   // texels left with no cell, by whose space they are
-        for k in 0..<g.nz { for j in 0..<g.ny { for i in 0..<g.nx {
-            let idx = (k * g.ny + j) * g.nx + i
-            let differ = before.field.values[idx].bitPattern != after.field.values[idx].bitPattern
-                || before.steppedCellMM[idx].bitPattern != after.steppedCellMM[idx].bitPattern
-                || before.steppedPhase[idx].bitPattern != after.steppedPhase[idx].bitPattern
-                || before.steppedOrigin[idx] != after.steppedOrigin[idx]
-                || before.level[idx].bitPattern != after.level[idx].bitPattern
-            guard differ else { continue }
-            changed += 1
-            let ob = ownerRegion(before, cellsBefore, idx), oa = ownerRegion(after, cellsAfter, idx)
-            if ob != oa {
-                ownerChanged += 1; flows["r\(ob)→r\(oa)", default: 0] += 1
-                if oa < 0, ob >= 0 {
-                    // lattice → no cell: whose space is it, point by point (the same rank)?
-                    let mid = gorigin + (SIMD3<Double>(Double(i), Double(j), Double(k)) + 0.5) * pitch
-                    var best: (Int, Double, Int)? = nil
-                    for r in regionsBefore.indices {
-                        let rr = rank(r, mid)
-                        guard rr.0 == 0 else { continue }
-                        if let b = best { if abs(rr.1 - b.1) > 1e-9 ? rr.1 < b.1 : rr.2 < b.2 { best = rr } } else { best = rr }
+        /// Every texel the rule-off bake and `after` disagree on, classified; returns the texels
+        /// that changed outside any cell whose owner changed or that stepped down, and the air.
+        func texelDiff(_ after: LatticeCellField, _ cellsAfter: [LatticeSteppedCell], _ tag: String)
+            -> (sameOwnerElsewhere: Int, emptied: Int) {
+            XCTAssertEqual(after.steppedTexelCell.count, g.nx * g.ny * g.nz)
+            XCTAssertEqual(after.field.origin, g.origin, "★ the same texel grid (\(tag))")
+            let afterKeys = Set(cellsAfter.map(ck))
+            let gone = cellsBefore.filter { !afterKeys.contains(ck($0)) }
+            let goneKeys = Set(gone.map(ck))
+            let beforeKeys = Set(cellsBefore.map(ck))
+            var sameOwnerInGone = 0, sameOwnerNewCell = 0
+            var changed = 0, ownerChanged = 0, sameOwner = 0, samples: [String] = []
+            var flows: [String: Int] = [:]
+            var emptied: [String: Int] = [:]   // texels left with no cell, by whose space they are
+            for k in 0..<g.nz { for j in 0..<g.ny { for i in 0..<g.nx {
+                let idx = (k * g.ny + j) * g.nx + i
+                let differ = before.field.values[idx].bitPattern != after.field.values[idx].bitPattern
+                    || before.steppedCellMM[idx].bitPattern != after.steppedCellMM[idx].bitPattern
+                    || before.steppedPhase[idx].bitPattern != after.steppedPhase[idx].bitPattern
+                    || before.steppedOrigin[idx] != after.steppedOrigin[idx]
+                    || before.level[idx].bitPattern != after.level[idx].bitPattern
+                guard differ else { continue }
+                changed += 1
+                let ob = ownerRegion(before, cellsBefore, idx), oa = ownerRegion(after, cellsAfter, idx)
+                if ob != oa {
+                    ownerChanged += 1; flows["r\(ob)→r\(oa)", default: 0] += 1
+                    if oa < 0, ob >= 0 {
+                        // lattice → no cell: whose space is it, point by point (the same rank)?
+                        let mid = gorigin + (SIMD3<Double>(Double(i), Double(j), Double(k)) + 0.5) * pitch
+                        var best: (Int, Double, Int)? = nil
+                        for r in regionsBefore.indices {
+                            let rr = rank(r, mid)
+                            guard rr.0 == 0 else { continue }
+                            if let b = best { if abs(rr.1 - b.1) > 1e-9 ? rr.1 < b.1 : rr.2 < b.2 { best = rr } } else { best = rr }
+                        }
+                        let who = best.map { $0.2 == ob ? "its-own" : "r\($0.2)'s" } ?? "no-prism"
+                        emptied[who, default: 0] += 1
                     }
-                    let who = best.map { $0.2 == ob ? "its-own" : "r\($0.2)'s" } ?? "no-prism"
-                    emptied[who, default: 0] += 1
+                } else {
+                    let mid = gorigin + (SIMD3<Double>(Double(i), Double(j), Double(k)) + 0.5) * pitch
+                    let cb = cellOf(before, cellsBefore, idx), ca = cellOf(after, cellsAfter, idx)
+                    // its cell before yielded (or stepped down), or its cell after is one the
+                    // first-wins bake had left with no texel — both are cells whose owner changed
+                    if let cb, goneKeys.contains(ck(cb)) { sameOwnerInGone += 1; continue }
+                    if let ca, !beforeKeys.contains(ck(ca)) { sameOwnerNewCell += 1; continue }
+                    sameOwner += 1
+                    if samples.count < 8 {
+                        samples.append(String(format: "(%.2f,%.2f,%.2f) r%d size %.2f→%.2f", mid.x, mid.y, mid.z, ob,
+                                              before.steppedCellMM[idx], after.steppedCellMM[idx])
+                                       + " cell \(cb.map(ck) ?? "-") → \(ca.map(ck) ?? "-")")
+                    }
                 }
-            } else {
-                let mid = gorigin + (SIMD3<Double>(Double(i), Double(j), Double(k)) + 0.5) * pitch
-                let cb = cellOf(before, cellsBefore, idx), ca = cellOf(after, cellsAfter, idx)
-                // its cell before yielded, or its cell after is one the first-wins bake had left
-                // with no texel (a cell R7 let in) — both are cells whose owner changed
-                if let cb, goneKeys.contains(ck(cb)) { sameOwnerInGone += 1; continue }
-                if let ca, !beforeKeys.contains(ck(ca)) { sameOwnerNewCell += 1; continue }
-                sameOwner += 1
-                if samples.count < 8 {
-                    samples.append(String(format: "(%.2f,%.2f,%.2f) r%d size %.2f→%.2f", mid.x, mid.y, mid.z, ob,
-                                          before.steppedCellMM[idx], after.steppedCellMM[idx])
-                                   + " cell \(cb.map(ck) ?? "-") → \(ca.map(ck) ?? "-")")
-                }
-            }
-        }}}
-        print("R7-TEXELS changed \(changed) owner-changed \(ownerChanged) \(flows.sorted { $0.key < $1.key }) same-owner-inside-a-yielded-cell \(sameOwnerInGone) same-owner-in-a-cell-R7-let-in \(sameOwnerNewCell) same-owner-elsewhere \(sameOwner) of \(g.nx * g.ny * g.nz) | cells yielded \(gone.count) \(samples)")
-        print("R7-EMPTIED texels left with no cell \(emptied.values.reduce(0, +)) (\(String(format: "%.0f", Double(emptied.values.reduce(0, +)) * pitch * pitch * pitch)) mm³ at pitch \(String(format: "%.3f", pitch))) by whose space: \(emptied.sorted { $0.key < $1.key })")
-        XCTAssertEqual(sameOwner, 0, "★ the preview changes only in cells whose owner changed")
+            }}}
+            let air = emptied.values.reduce(0, +)
+            print("\(tag)-TEXELS changed \(changed) owner-changed \(ownerChanged) \(flows.sorted { $0.key < $1.key }) same-owner-inside-a-yielded-or-stepped-cell \(sameOwnerInGone) same-owner-in-a-new-cell \(sameOwnerNewCell) same-owner-elsewhere \(sameOwner) of \(g.nx * g.ny * g.nz) | cells gone \(gone.count) \(samples)")
+            print("\(tag)-AIR texels left with no cell \(air) (\(String(format: "%.0f", Double(air) * pitch * pitch * pitch)) mm³ at pitch \(String(format: "%.3f", pitch))) by whose space: \(emptied.sorted { $0.key < $1.key })")
+            return (sameOwner, air)
+        }
+        let dNo = texelDiff(noStep, cellsNoStep, "R7-NOSTEP")
+        let dStep = texelDiff(after, cellsAfter, "R7")
+        XCTAssertEqual(dStep.sameOwnerElsewhere, 0, "★ the preview changes only in cells whose owner changed or that stepped down")
+        XCTAssertEqual(dNo.sameOwnerElsewhere, 0)
+        XCTAssertLessThan(dStep.emptied, dNo.emptied, "★ the step-down fills the yielded cells' own share")
+        XCTAssertEqual(split(cellsNoStep).a, 0, "R7 without the step-down keeps (a) at 0 too")
 
         // ── the after-plan as a job, for classify_plan.py (core's check, every cell)
         let request = try XCTUnwrap(model.makeLatticeRunRequest(), "no stage job")

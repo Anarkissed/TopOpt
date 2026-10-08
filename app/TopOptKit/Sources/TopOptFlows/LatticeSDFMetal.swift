@@ -258,6 +258,9 @@ public struct LatticeOrganicInput: Sendable {
     /// `OrganicShapeFit` (core's rule is inline in the CLI; see that file).
     public var shapeFit: Bool = false
     public var shapeFitOnly: Bool = false
+    /// ★ The window the JOB carries (`ProjectModel.organicJobWindowMM`) — core's shape fit floors
+    /// at its low end when there is one; nil = none (Auto), where it floors at half the spacing.
+    public var jobWindowMM: (lo: Double, hi: Double)? = nil
     /// ★ Is a shell written for curve ends to land on? run_job: `outer_finish !=
     /// "skin"`. A BARE lattice (the sample; a part without Covered) has none, so ends
     /// that leave the region are not anchors and the trim cuts them back — the run's
@@ -1700,7 +1703,7 @@ public struct LatticeSDFScene {
                 let fit = OrganicShapeFit.apply(spacing: sep, candidate: cand,
                                                 nx: tnx, ny: tny, nz: tnz,
                                                 voxelMM: o.spacingMM,
-                                                window: nil, only: false,
+                                                window: o.jobWindowMM, only: false,
                                                 memberMM: member.count == cand.count ? member : [],
                                                 cellsAcrossMember: OrganicShapeFit.cellsAcrossMember)
                 sep = fit.spacing
