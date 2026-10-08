@@ -151,11 +151,11 @@ final class LatticeLegendColourTests: XCTestCase {
     /// behaviours he asked for by name, and both are easy to drop in a refactor.
     func testTappingWhileDrilledInReadsTheLatticeAndDoubleTapExits() throws {
         let ws = try source("WorkspacePlaceholder.swift")
-        XCTAssertTrue(ws.contains("if latticeLegendMode.drilledIn { return true }"),
+        XCTAssertTrue(ws.contains("if legendDrilledIn { return true }"),
                       "★ a tap while drilled in must be CONSUMED by the face path — "
                       + "the READING comes from `onLatticeProbe`, and returning false "
                       + "here would let the same tap regroup a face while he reads it")
-        XCTAssertTrue(ws.contains("onLatticeProbeExit: latticeLegendMode.drilledIn"),
+        XCTAssertTrue(ws.contains("onLatticeProbeExit: legendDrilledIn"),
                       "★ a double tap must come back out to the colour list — and it "
                       + "hangs off `onLatticeProbeExit`, not `onPickDouble`, because "
                       + "leaving the key must not require a face under the finger")
@@ -212,7 +212,7 @@ final class LatticeLegendColourTests: XCTestCase {
                       "★ the probe must take the NEAREST strut texel in a window "
                       + "around the tap, or a fingertip is asked to hit one pixel")
         let ws = try source("WorkspacePlaceholder.swift")
-        XCTAssertTrue(ws.contains("onLatticeProbe: latticeLegendMode.drilledIn"),
+        XCTAssertTrue(ws.contains("onLatticeProbe: legendDrilledIn"),
                       "★ …and it is armed only while the key is drilled in")
         // ★★ AND IT MUST NOT EAT THE DOUBLE TAP. `pickDouble` resolves the second
         // tap through the SAME `pick(...)`, passing a `deliver` closure; a probe that
@@ -236,7 +236,7 @@ final class LatticeLegendColourTests: XCTestCase {
                      "arrowsOverlay", "latticeDepthHandlesOverlay", "latticeRegionGizmoOverlay"] {
             guard let r = ws.range(of: gate) else { return XCTFail("\(gate) must exist") }
             let around = String(ws[..<r.lowerBound].suffix(400))
-            XCTAssertTrue(around.contains("!latticeLegendMode.drilledIn"),
+            XCTAssertTrue(around.contains("!legendDrilledIn"),
                           "★ \(gate) must be hidden while the key is drilled in")
         }
     }

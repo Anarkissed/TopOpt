@@ -136,7 +136,7 @@ final class LatticeAcceptanceTests: XCTestCase {
                        "★ minimize plastic must not change the lattice's demand at all")
         // the cap is defined on the SCENE's own band (its init defaults are 0…1 here),
         // not on the 0.05…0.90 band this file uses for its strut arithmetic
-        let ceiling = LatticeType.named("octet").aestheticDensityCeiling(cellMM: cell)
+        let ceiling = LatticeType.octet.aestheticDensityCeiling(cellMM: cell)
         let cap = LatticeSDFScene.aestheticDemandCap(rhoMin: on.drawnBand.lo, rhoMax: on.drawnBand.hi,
                                                      gamma: 1, ceilingRho: ceiling)
         XCTAssertLessThanOrEqual(Double(maxOn), cap + 1e-6,

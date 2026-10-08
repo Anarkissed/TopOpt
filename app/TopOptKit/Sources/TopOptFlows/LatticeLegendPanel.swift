@@ -269,14 +269,15 @@ public struct LatticeLegendPanel: View {
     @State private var infoOpen: Set<UUID> = []
     private let groups: [LatticeLegendGroup]
     private let span: (lo: Double, hi: Double)
-    private let mmAt: (Double) -> Double
+    /// nil when the topology has no strut law (item a): the density shows without millimetres.
+    private let mmAt: (Double) -> Double?
     @Binding private var mode: LatticeLegendMode
     @Binding private var minimized: Bool
     private let probe: LatticeLegendProbe?
     private let stress: LatticeLegendStress?
 
     public init(groups: [LatticeLegendGroup], span: (lo: Double, hi: Double),
-                mmAt: @escaping (Double) -> Double,
+                mmAt: @escaping (Double) -> Double?,
                 mode: Binding<LatticeLegendMode>,
                 minimized: Binding<Bool> = .constant(false),
                 probe: LatticeLegendProbe?,
@@ -703,7 +704,7 @@ public struct LatticeLegendPanel: View {
             let f = 1.0 - Double(i) / 2.0
             let rho = span.lo + (span.hi - span.lo) * f
             return (String(format: "%.0f%%", rho * 100),
-                    String(format: "%.2f mm", mmAt(rho)))
+                    mmAt(rho).map { String(format: "%.2f mm", $0) } ?? "")
         }
     }
 
@@ -739,7 +740,8 @@ public struct LatticeLegendPanel: View {
         (0..<3).map { i in
             let f = 1.0 - Double(i) / 2.0
             let rho = span.lo + (span.hi - span.lo) * f
-            return String(format: "%.0f%% · %.2f mm", rho * 100, mmAt(rho))
+            return mmAt(rho).map { String(format: "%.0f%% · %.2f mm", rho * 100, $0) }
+                ?? String(format: "%.0f%%", rho * 100)
         }
     }
 

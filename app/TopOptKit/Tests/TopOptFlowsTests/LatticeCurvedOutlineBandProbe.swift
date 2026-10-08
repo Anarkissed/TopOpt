@@ -898,7 +898,7 @@ extension LatticeCurvedOutlineBandProbe {
         var hh = P.His(); hh.boundaryFinishWritten = false
         let i = try P.inputs(hh, faces: LatticeRefusedCellProbe.hisFaces)
         guard let cf = P.bake(i) else { throw XCTSkip("no bake") }
-        let lat = LatticeType.named("octet")
+        let lat = LatticeType.octet
         let lw = hh.lineWidthMM, lo = hh.rhoMin, hi = hh.rhoMax
         let S0 = i.cells.filter { $0 > 0 }.min() ?? 1
 
@@ -955,7 +955,7 @@ extension LatticeCurvedOutlineBandProbe {
 
     /// The ladder floor, as the product computes it.
     private func floor(finest: Double, lineWidthMM: Double, binds: Double) -> Double {
-        let lat = LatticeType.named("octet")
+        let lat = LatticeType.octet
         var s = finest
         while s > 0 {
             let half = s / 2
@@ -967,7 +967,7 @@ extension LatticeCurvedOutlineBandProbe {
     }
 
     func testNoRungSurvivesThatTheDensityBandCannotPrint() throws {
-        let lat = LatticeType.named("octet")
+        let lat = LatticeType.octet
         let lw = 0.45
         // His part's region cells, and two others so the rule is pinned as a rule and
         // not as one part's arithmetic.
@@ -1021,7 +1021,7 @@ extension LatticeCurvedOutlineBandProbe {
     /// stops at his region cell. This pins the difference so the ceiling test cannot
     /// come back without someone reading why it went.
     func testTheCeilingTestIsWhatReachedTheMergedBand() throws {
-        let lat = LatticeType.named("octet")
+        let lat = LatticeType.octet
         let lw = 0.45, finest = 5.156120181083679
         let atCeiling = floor(finest: finest, lineWidthMM: lw, binds: 0.90)
         let atFloor = floor(finest: finest, lineWidthMM: lw, binds: 0.05)
@@ -1054,7 +1054,7 @@ extension LatticeCurvedOutlineBandProbe {
     /// 0.0% against a 5% band), which is why the fix worked there. It bites as soon as
     /// the wall is thin enough to derive a small cell.
     func testAThinWallIsAboveTheBandBeforeAnyGradingAtAll() throws {
-        let lat = LatticeType.named("octet")
+        let lat = LatticeType.octet
         let lw = 0.45, lo = 0.05
         // His part: the region cell is free — nothing forced.
         for cell in [5.156120181083679, 6.0] {

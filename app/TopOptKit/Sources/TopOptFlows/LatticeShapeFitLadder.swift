@@ -41,7 +41,8 @@ public enum LatticeShapeFitLadder {
                              densityCeiling: Double = 1) -> Int? {
         guard lineWidthMM > 0, lineWidthMM.isFinite,
               cellMM > 0, cellMM.isFinite else { return nil }
-        let lattice = LatticeType.named(topologyID)
+        // ★ no strut law for the id (item a): nothing to say, as for a missing bead
+        guard let lattice = LatticeType.named(topologyID) else { return nil }
         let ceiling = min(max(densityCeiling, 0), 1)
         var finest = cellMM
         var count = 1

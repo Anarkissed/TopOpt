@@ -124,6 +124,35 @@ int main() {
           "H1: unknown values are empty CSV fields, never 'nan' or a stand-in number");
   }
 
+  // C1 addendum: an EDGE press (top + right, 45 degrees) runs end to end; its receipt
+  // carries the press (footprint, direction, build angle, side). A plain job's has none.
+  CHECK(ri.find("\"press\"") == std::string::npos, "no new keys: no press block (receipt unchanged)");
+  {
+    const std::string edge =
+        "{\"face_region_ids\":[101,103],\"press_direction\":[-1,0,-1],\"role\":\"loaded\","
+        "\"weight_n\":100,\"deepest_squish_mm\":1,\"mode\":\"both\",\"curve_x\":[[0,1],[1,1]],"
+        "\"curve_y\":[[0,1],[1,1]],\"skin_on\":true}";
+    const FlexibleRunResult re = run("edge", job("varioshore_tpu", "220", "auto", "[" + edge + "]"));
+    CHECK(!re.refused, "an edge press runs");
+    CHECK(re.receipt_json.find("\"press\": {\"footprint_face_region_ids\": [101, 103], "
+                               "\"direction\": [-0.707107, 0, -0.707107], \"build_angle_deg\": 45, "
+                               "\"side\": true}") != std::string::npos,
+          "the receipt names the footprint, the direction, 45 degrees and side");
+    CHECK(re.receipt_json.find("honeycomb_side_stack") != std::string::npos,
+          "an angled press past 15 degrees is gyroid-only (R6)");
+    const std::string up =
+        "{\"face_region_id\":101,\"press_direction\":[0,0,1],\"role\":\"loaded\",\"weight_n\":100,"
+        "\"deepest_squish_mm\":1,\"mode\":\"both\",\"curve_x\":[[0,1],[1,1]],\"curve_y\":[[0,1],[1,1]],"
+        "\"skin_on\":true}";
+    bool threw = false;
+    try {
+      run("up", job("varioshore_tpu", "220", "auto", "[" + up + "]"));
+    } catch (const JobError& e) {
+      threw = std::string(e.what()).find("101") != std::string::npos;
+    }
+    CHECK(threw, "an outward press is refused, naming the region");
+  }
+
   // Refusals: named, receipt still written, the drawn map still written.
   r = run("stack", job("varioshore_tpu", "220", "auto",
                        "[" + kTop + ",{\"face_region_id\":100,\"role\":\"loaded\",\"weight_n\":100,"

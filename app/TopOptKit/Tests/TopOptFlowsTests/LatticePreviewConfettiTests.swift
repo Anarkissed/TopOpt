@@ -178,7 +178,7 @@ final class LatticePreviewConfettiTests: XCTestCase {
         let activeNoField = cellsNoField.values.filter { $0 >= 0 }.count
 
         // The strut radii the preview actually renders, in MILLIMETRES (§4a).
-        let preview = scene.preview
+        let preview = try XCTUnwrap(scene.preview, "octet has a strut table")
         let rLo = Double(preview.normalizedRadius(relativeDensity: params.minRelativeDensity))
             * params.cellMM
         let rHi = Double(preview.normalizedRadius(relativeDensity: params.maxRelativeDensity))
@@ -366,7 +366,7 @@ final class LatticePreviewConfettiTests: XCTestCase {
         // On, model, scene baked but the part has no interior to fill.
         let hollow = LatticePreviewSummaryValues(
             interiorVoxelCount: 0,
-            previewLabel: LatticeSDFPreview(latticeID: "octet").previewLabel)
+            previewLabel: LatticeSDFPreview(lattice: .octet).previewLabel)
         let empty = try XCTUnwrap(
             LatticePreviewBanner.make(previewOn: true, hasModel: true, scene: hollow))
         XCTAssertTrue(empty.isEmpty)
@@ -374,7 +374,7 @@ final class LatticePreviewConfettiTests: XCTestCase {
         // And the shipping case is UNCHANGED — the honesty label, byte for byte.
         let full = LatticePreviewSummaryValues(
             interiorVoxelCount: 1,
-            previewLabel: LatticeSDFPreview(latticeID: "octet").previewLabel)
+            previewLabel: LatticeSDFPreview(lattice: .octet).previewLabel)
         let drawing = try XCTUnwrap(
             LatticePreviewBanner.make(previewOn: true, hasModel: true, scene: full))
         XCTAssertFalse(drawing.isEmpty)

@@ -163,7 +163,7 @@ final class LatticeQuiltBakeProbe: XCTestCase {
         // carries its own copy of the rule, so it has to move with it or it stops
         // being a check on the app and becomes a second opinion.
         var floorMM = finestStated
-        let lat = LatticeType.named("octet")
+        let lat = LatticeType.octet
         while floorMM > 0 {
             let half = floorMM / 2
             let binds = LatticeSDFRenderer.floorTestAtCeiling ? h.rhoMax : h.rhoMin
@@ -184,7 +184,7 @@ final class LatticeQuiltBakeProbe: XCTestCase {
         return LatticePreviewOccupancy.octreeCellField(
             occupancy: i.scene.occupancy, demand: nil, regions: i.scene.regions,
             cellMM: i.cells, lineWidthMM: i.h.lineWidthMM,
-            realFloorMM: LatticeSDFRenderer.printableFloorBeads * i.h.lineWidthMM,
+            realFloorMM: LatticeSettings.tileFloorMM(topologyID: "octet", beadMM: i.h.lineWidthMM, allowQuilt: false) ?? 0,
             shapeFitBandMM: i.h.shapeFitBandMM, shapeFit: i.h.shapeFit,
             densityLo: i.h.rhoMin, densityHi: i.h.rhoMax, densityGamma: i.h.gamma,
             latticeID: "octet", stats: &st)

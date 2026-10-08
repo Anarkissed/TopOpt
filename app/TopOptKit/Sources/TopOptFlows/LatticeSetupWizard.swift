@@ -1875,8 +1875,8 @@ public struct LatticeSetupWizard: View {
     }
 
     /// ★ THE RECOMMENDATION (brief 2026-09-06, §3 menu wiring): with a simulation the
-    /// AUTO pick (a graded window → cell_mode auto + min/max); without one the FIT
-    /// pick (one size → cell_mode fit + cell_mm). Fit is never offered with a
+    /// AUTO pick (a graded window → swept min/max); without one the FIT pick (one size →
+    /// a one-size swept window, min = max: ruling 5, 2026-10-03). Fit is never offered with a
     /// simulation (his item 1) and Auto never without (item 3). Collapsed ⇒ "no cell
     /// fits this wall — solid", with the bounds behind the (i).
     @ViewBuilder private func organicRecommendationRow(structural: Bool) -> some View {
@@ -2241,6 +2241,11 @@ public struct LatticeSetupWizard: View {
                     simDerivedNote("Derived from the simulated density. "
                                    + "To pin it, pin Density and Cell size.")
                         .accessibilityIdentifier("wizard-thickness-derived")
+                } else if let why = LatticeTypeCatalog.selectionRefusal(model.topologyID) {
+                    // ★ Q2 (2026-10-05): a saved type core does not call live has no band, so
+                    // no printable range to scrub — core's readiness words where it was.
+                    shortNote(why, warning: true)
+                        .accessibilityIdentifier("wizard-thickness-no-band")
                 } else {
                     // ★★ A THICKNESS IN MILLIMETRES (maintainer, 2026-08-19: "Off
                     // makes a sliding number value visible; controlling the
@@ -2361,7 +2366,7 @@ public struct LatticeSetupWizard: View {
                 // ★★★ ALLOW QUILT (his ruling, 2026-09-12) — octet only. Off, every
                 // density is held under the aesthetic ceiling (strut a fifth of the
                 // cell). On, the manual methods may go past it; simulated ones never.
-                if LatticeType.named(model.topologyID).hasAestheticCeiling {
+                if LatticeType.named(model.topologyID)?.hasAestheticCeiling == true {
                     HStack(spacing: DS.Space.s) {
                         Text("Allow quilt").dsStyle(DS.TypeScale.caption)
                             .foregroundStyle(DS.Color.textPrimary.color)
@@ -2657,10 +2662,11 @@ public struct LatticeSetupWizard: View {
     /// jumping to an arbitrary default.
     private var currentThicknessMM: Double {
         if let mm = model.manualStrutThicknessMM { return mm }
-        let topo = LatticeType.named(model.topologyID)
+        let r = thicknessRangeMM
+        // ★ no strut law for the id (item a): the range's own lower end, never octet's strut
+        guard let topo = LatticeType.named(model.topologyID) else { return r.lowerBound }
         let derived = 2 * topo.strutRadiusMM(relativeDensity: model.relativeDensity,
                                              cellMM: model.cellMM)
-        let r = thicknessRangeMM
         return Swift.min(r.upperBound, Swift.max(r.lowerBound, derived))
     }
 
@@ -2856,8 +2862,9 @@ public struct LatticeSetupWizard: View {
         // grading spread comes from the stress range; with none it is 1 and lo == hi.
         // `gradingDictionary` refuses a grade whose ends are equal, so writing it as a
         // grade left the job with NO cell keys at all and core chose for itself — the
-        // preview would then show a lattice the run does not build. A single size is
-        // `cell_mode fit` + `cell_mm`, which core honours exactly.
+        // preview would then show a lattice the run does not build. A single size is the
+        // one-size window `cell_min_mm` = `cell_max_mm` under swept (ruling 5, 2026-10-03:
+        // core refuses `cell_mode fit` + `cell_mm`).
         if w.hi > w.lo + 1e-9 {
             model.organicPickedSeparationMM = 0
             model.organicPickedGradeMM = [w.lo, w.hi]

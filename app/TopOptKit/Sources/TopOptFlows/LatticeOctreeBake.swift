@@ -45,6 +45,26 @@ extension LatticePreviewOccupancy {
         public var anchorSeconds: Double = 0
         public var rasterSeconds: Double = 0
         public var cellsPlaced = 0
+        // ★ R7 (2026-10-03): centre ownership between regions whose cells overlap.
+        public var contestedCells = 0          // candidates overlapping another region's
+        public var cellsYielded = 0            // contested cells whose centre another region owns
+        public var straddlerPairs = 0          // contested pairs that BOTH keep (each centre is its own)
+        public var texelsReassigned = 0        // texels a better-ranked region took from another
+        public var cellsEmptied = 0            // plan cells left with no texel after that
+        /// Every in-plane shift's base-cell volume, in search order — the whole search, so a
+        /// proof compares all of it and not only the winner.
+        public var anchorBaseVolumes: [Double] = []
+        /// The second pass's volumes (children scored), by shift index.
+        public var anchorChildVolumes: [Int: Double] = [:]
+        /// Slots the anchor search walked, over every shift and both passes (deterministic work).
+        public var anchorSlotsWalked = 0
+        /// Level-0 slots the bake's walk visited (deterministic work).
+        public var placeSlotsWalked = 0
+        public var placeSeconds: Double = 0
+        /// Which footprints bounded a walk ("anchor/raster", "anchor/rect", "place/outline",
+        /// "place/rect"), and which fell back to the whole extent, keyed by reason.
+        public var footprintBounded: [String: Int] = [:]
+        public var footprintUnbounded: [String: Int] = [:]
     }
 
     /// The densest a bead-wide strut may make the finest rung (core's measured law):
@@ -57,6 +77,169 @@ extension LatticePreviewOccupancy {
     /// A tilted face's slots cover the prism's real extent along the axis; false = the
     /// centre-plane anchoring (a test's control only).
     nonisolated(unsafe) static var tiltedSpanEnabled = true
+    /// ★★ R7: cells and texels shared by two regions go to the owner of their centre; false =
+    /// declaration order, the bake before 2026-10-03 (the proof's "before" arm only).
+    nonisolated(unsafe) static var centreOwnershipEnabled = true
+
+    // ★★ EACH REGION'S ANCHOR SEARCH WALKS ITS OWN FOOTPRINT (maintainer, 2026-10-03: "Octree
+    // bake: limit each region's anchor search to its footprint. Prove it with identical bakes
+    // on two projects."). The search used to walk every ladder's base slots over the WHOLE
+    // occupancy for each of up to 512 shifts — 1,815.6 s of a 1,946 s bake on 102117B9 as
+    // Default Grade (177 regions, Debug). A slot can only add volume when its pulled-in corners
+    // read at least `band` (> 0) off the outline, and the outline read is the region's raster,
+    // which is exactly −1e3 outside its own (u, v) window (or, with no outline loops, the
+    // rectangle ±halfU/±halfW). So a slot whose box — with the next rung's children, which
+    // can overhang it — misses the world box of {p : (u, v)(p) ∈ window, p[axis] ∈ the slots'
+    // axis range} adds NOTHING, and skipping it leaves every shift's running sum the same
+    // sequence of `+=` operands: the same doubles, the same argmax and ties, the same bake.
+    // The window is the RASTER's, not the outline's bounding box: the raster reads inside past
+    // a seam edge (up to cap·tilt) and past a positive expand, and the window holds both. It is
+    // intersected with where the raster's bilinear read can rise above 0 at all — the outline's
+    // box ± (that expand or seam reach + one raster step + 0.5 mm) — because the raster window
+    // itself pads EVERY region by the largest region's cell + 2 mm (26 mm on his stand), which
+    // left the search walking 98–100 % of the part on his two Stepped projects.
+    // The bake's level-0 walk is bounded the same way by its own gate (a slot whose centre
+    // reads further out than 0.87·S does nothing), with whole-extent fallbacks wherever that
+    // window cannot be bounded (a seam with no cap/tilt, a near-flat edge the crossing test
+    // skips, a non-finite input). The switches below are TEST CONTROLS; production is the
+    // defaults.
+    /// The anchor search walks each ladder's footprint only (false = the whole extent, the
+    /// control arm of the identical-bake proof).
+    nonisolated(unsafe) static var anchorFootprintEnabled = true
+    /// The bake's level-0 walk is bounded by the place() gate's window (false = the whole extent).
+    nonisolated(unsafe) static var placeFootprintEnabled = true
+    /// RED CONTROL ONLY: shrinks every footprint box by this much per side (mm). 0 in production.
+    nonisolated(unsafe) static var footprintInsetForTestsMM = 0.0
+    /// Slots of slack each side of a footprint, for rounding (1 in production).
+    nonisolated(unsafe) static var footprintSlackSlots = 1
+    /// RED CONTROL ONLY: replaces a region's anchor window (e.g. the outline's own bounding box,
+    /// to show the raster window is what a seam needs). nil in production.
+    nonisolated(unsafe) static var anchorWindowOverrideForTests: ((LatticeRegionSpec) -> FootprintWindow?)? = nil
+    /// Test hook: every finished octree bake, with its stats. nil in production.
+    nonisolated(unsafe) static var octreeBakeObserver: ((LatticeCellField, OctreeBakeStats) -> Void)? = nil
+
+    /// A rectangle in a face's own (u, v) plane, mm.
+    typealias FootprintWindow = (uLo: Double, uHi: Double, vLo: Double, vHi: Double)
+
+    /// ★ THE WORLD BOX OF A FACE FOOTPRINT: the exact axis-aligned bounds of
+    /// {p : (dot(p − o, bu), dot(p − o, bv)) ∈ window, p[axis] ∈ along}, with (bu, bv) the
+    /// region's own basis. That set is the image of window × along under an invertible affine
+    /// map (|n[axis]| > 0.5), so its eight vertices bound it — axis-aligned and tilted faces
+    /// alike. nil when anything is not finite (the caller then walks everything).
+    static func footprintBox(window w: FootprintWindow, along: (lo: Double, hi: Double),
+                             origin o: SIMD3<Double>, normal n: SIMD3<Double>, axis: Int)
+        -> (lo: SIMD3<Double>, hi: SIMD3<Double>)? {
+        guard axis >= 0, axis < 3, abs(n[axis]) > 0.5 else { return nil }
+        let (bu, bv) = LatticeRegionMask.basis(n)
+        var lo = SIMD3<Double>(repeating: .infinity), hi = SIMD3<Double>(repeating: -.infinity)
+        for u in [w.uLo, w.uHi] { for v in [w.vLo, w.vHi] { for z in [along.lo, along.hi] {
+            let s = (z - o[axis] - u * bu[axis] - v * bv[axis]) / n[axis]
+            let p = o + bu * u + bv * v + n * s
+            guard p.x.isFinite, p.y.isFinite, p.z.isFinite else { return nil }
+            // written out: simd_min/max would ignore a NaN instead of refusing it
+            for a in 0..<3 {
+                if p[a] < lo[a] { lo[a] = p[a] }
+                if p[a] > hi[a] { hi[a] = p[a] }
+            }
+        }}}
+        return (lo, hi)
+    }
+
+    /// The in-plane slot index range whose slots can reach `box`: slot i's points lie in
+    /// [start + i·S + reach.lo, start + i·S + reach.hi], which meets [A, B] only when
+    /// (A − reach.hi − start)/S ≤ i ≤ (B − reach.lo − start)/S. `slack` slots each side
+    /// absorb rounding; clamped to [0, count) in Double before any Int conversion. The axis
+    /// itself keeps its whole range. nil when a bound is not finite.
+    static func footprintSlots(box: (lo: SIMD3<Double>, hi: SIMD3<Double>), start: SIMD3<Double>, S: Double,
+                               reach: (lo: Double, hi: Double), count: SIMD3<Int>, axis: Int,
+                               inset: Double, slack: Int) -> (first: SIMD3<Int>, last: SIMD3<Int>)? {
+        guard S > 0, S.isFinite else { return nil }
+        var first = SIMD3<Int>(repeating: 0), last = count &- 1
+        for a in 0..<3 where a != axis {
+            let iLo = ((box.lo[a] + inset - reach.hi - start[a]) / S).rounded(.down) - Double(slack)
+            let iHi = ((box.hi[a] - inset - reach.lo - start[a]) / S).rounded(.up) + Double(slack)
+            guard iLo.isFinite, iHi.isFinite else { return nil }
+            first[a] = Int(Swift.max(0, Swift.min(Double(count[a]), iLo)))
+            last[a] = Int(Swift.max(-1, Swift.min(Double(count[a] - 1), iHi)))
+        }
+        return (first, last)
+    }
+
+    /// ★ WHERE place()'S GATE CAN PASS, in the face's (u, v): a level-0 slot does nothing unless
+    /// its centre reads −(signedDistanceAcrossSeams − offset) ≥ −0.87·S — so the window is
+    /// `outlineWindow` with an inner reach of 0.87·S. With no outline loops the read is
+    /// `contains`, i.e. the rectangle ±halfU/±halfW. nil (and why) when a cell is so large that
+    /// −1e3 passes, or wherever `outlineWindow` cannot bound the read. `shrinkMM` is a test's RED.
+    static func gateWindow(region: LatticeRegionSpec, S: Double, shrinkMM: Double = 0)
+        -> (window: FootprintWindow?, why: String) {
+        guard S.isFinite, S > 0, 0.87 * S < 1e3 else { return (nil, "cell") }
+        guard region.inPlaneOffsetMM.isFinite else { return (nil, "nonfinite") }
+        if region.outlineLoops.isEmpty {
+            let hu = region.halfUMM, hw = region.halfWMM
+            guard hu.isFinite, hw.isFinite else { return (nil, "nonfinite") }
+            return ((-hu, hu, -hw, hw), "rect")
+        }
+        return outlineWindow(region: region, inner: 0.87 * S, pad: 0, shrinkMM: shrinkMM)
+    }
+
+    /// ★ WHERE THE ANCHOR SEARCH'S RASTER CAN READ ANYTHING ABOVE 0, in the face's (u, v). The
+    /// raster's nodes hold −(signedDistanceAcrossSeams − offset) and a read is their bilinear
+    /// blend. A node further than r = max(max(0, offset), the largest seam cap·tilt) outside the
+    /// outline's bounding box holds a NEGATIVE value (the reasons are `outlineWindow`'s), and a
+    /// blend of non-positive values with non-negative weights is non-positive in IEEE
+    /// arithmetic, sign for sign. The stencil reaches one raster step `h` from the point and
+    /// 0.5 mm more absorbs rounding — so outside bbox ± (r + 0.5 + h) every read is ≤ 0 < band.
+    /// Intersected with the raster's own window (outside which it reads exactly −1e3) this is the
+    /// region's footprint; the raster window alone — the bbox padded by baseMax + 2 mm, the
+    /// LARGEST region's cell, for every region — is the fallback.
+    static func rasterReadWindow(region: LatticeRegionSpec, h: Double, shrinkMM: Double = 0)
+        -> (window: FootprintWindow?, why: String) {
+        guard h.isFinite, h > 0, region.inPlaneOffsetMM.isFinite else { return (nil, "nonfinite") }
+        guard !region.outlineLoops.isEmpty else { return (nil, "empty") }
+        return outlineWindow(region: region, inner: 0, pad: 0.5 + h, shrinkMM: shrinkMM)
+    }
+
+    /// The outline's bounding box ± (max(inner + max(0, offset), the largest seam cap·tilt) + pad)
+    /// in (u, v): outside it −(signedDistanceAcrossSeams(uv) − offset) < −inner. There the
+    /// crossing count is even (so the sign is outside), the distance to every true edge exceeds
+    /// the reach, and a seam flip needs the nearest edge within its cap·tilt. nil (and why)
+    /// wherever that cannot be bounded: a seam without a positive cap and a tilt (the flip is
+    /// then unbounded), an edge with 0 < |dy| ≤ 1e-12 (the crossing test skips it, so parity can
+    /// flip far from the outline), a non-finite input, or a reach past 1e5 (an all-seam outline
+    /// reads ±1e6).
+    static func outlineWindow(region: LatticeRegionSpec, inner: Double, pad: Double, shrinkMM: Double = 0)
+        -> (window: FootprintWindow?, why: String) {
+        let off = region.inPlaneOffsetMM
+        guard off.isFinite, inner.isFinite, pad.isFinite else { return (nil, "nonfinite") }
+        var lo = SIMD2<Double>(repeating: .infinity), hi = SIMD2<Double>(repeating: -.infinity)
+        var flip = 0.0
+        for (l, loop) in region.outlineLoops.enumerated() {
+            let m = loop.count
+            let sm = l < region.outlineSeams.count ? region.outlineSeams[l] : []
+            let tl = l < region.outlineSeamTilt.count ? region.outlineSeamTilt[l] : []
+            let cl = l < region.outlineSeamDepthMM.count ? region.outlineSeamDepthMM[l] : []
+            for i in 0..<m {
+                let a = loop[i], b = loop[(i + 1) % m]
+                guard a.x.isFinite, a.y.isFinite else { return (nil, "nonfinite") }
+                for c in 0..<2 {
+                    if a[c] < lo[c] { lo[c] = a[c] }
+                    if a[c] > hi[c] { hi[c] = a[c] }
+                }
+                let dy = b.y - a.y
+                if dy != 0, abs(dy) <= 1e-12 { return (nil, "parity") }
+                if i < sm.count, sm[i] {
+                    guard i < tl.count, i < cl.count, cl[i] > 0, cl[i].isFinite, tl[i].isFinite
+                    else { return (nil, "seam") }
+                    flip = Swift.max(flip, Swift.max(0, cl[i] * tl[i]))
+                }
+            }
+        }
+        guard lo.x <= hi.x, lo.y <= hi.y else { return (nil, "empty") }
+        let r = Swift.max(inner + Swift.max(0, off), flip)
+        guard r.isFinite, r < 1e5 else { return (nil, "reach") }
+        let w = r + pad - shrinkMM
+        return ((lo.x - w, hi.x + w, lo.y - w, hi.y + w), "outline")
+    }
 
     /// How far toward the quilt a cell ABOVE the finest rung thickens at the outline
     /// when it lies in the band (the finest rung goes all the way).
@@ -341,13 +524,67 @@ extension LatticePreviewOccupancy {
             rasters[ladder.region] = OutlineRaster(origin: lo, h: h, nu: nu, nv: nv, values: vals)
         }
         stats.rasterSeconds = Date().timeIntervalSince(tRaster)
+        // ★★ EACH LADDER'S FOOTPRINT, once per bake (maintainer, 2026-10-03 — see
+        // `anchorFootprintEnabled`): the world box of the region's outline-read window over the
+        // slots' axis range, children's overhang included. Outside it every pulled-in corner
+        // reads exactly −1e3 < band, so those slots add nothing to any shift's volume.
+        let footprintInset = Self.footprintInsetForTestsMM
+        let footprintSlack = Self.footprintSlackSlots
+        var anchorBoxes = [(lo: SIMD3<Double>, hi: SIMD3<Double>, reach: Double)?](repeating: nil, count: ladders.count)
+        if Self.anchorFootprintEnabled {
+            if band > -1e3, band.isFinite {
+                for (li, ladder) in ladders.enumerated() {
+                    let region = regions[ladder.region]
+                    let n = LatticeRegionMask.unit(region.normal)
+                    let axis = ladder.axis, S = ladder.sizes[0], plane = region.origin[axis]
+                    var w: FootprintWindow, kind: String
+                    if let r = rasters[ladder.region] {
+                        // OutlineRaster.at reads −1e3 unless u ∈ [origin, origin + (nu − 1)·h)
+                        w = (r.origin.x, r.origin.x + Double(r.nu - 1) * r.h,
+                             r.origin.y, r.origin.y + Double(r.nv - 1) * r.h)
+                        // ...and nothing above 0 outside the outline's read window: both hold
+                        let (rw, why) = Self.rasterReadWindow(region: region, h: r.h)
+                        if let rw {
+                            w = (Swift.max(w.uLo, rw.uLo), Swift.min(w.uHi, rw.uHi),
+                                 Swift.max(w.vLo, rw.vLo), Swift.min(w.vHi, rw.vHi))
+                            kind = "outline"
+                        } else {
+                            kind = "raster:" + why
+                        }
+                    } else {
+                        // no loops: `contains`, the rectangle (always false for a B-rep face)
+                        w = (-region.halfUMM, region.halfUMM, -region.halfWMM, region.halfWMM)
+                        kind = "rect"
+                    }
+                    if let o = Self.anchorWindowOverrideForTests?(region) { w = o; kind = "test" }
+                    // the children pass scores round(S/S1)³ cells of S1 from the slot's corner,
+                    // which for a two-thirds rung overhang the slot (2 × 2/3 = 4/3)
+                    let reach = ladder.sizes.count > 1
+                        ? Swift.max(S, Double(Int((S / ladder.sizes[1]).rounded())) * ladder.sizes[1]) : S
+                    let axisI0 = Int((ladder.span.lo / S).rounded(.down))
+                    let axisN = Swift.max(1, Int((ladder.span.hi / S).rounded(.up)) - axisI0)
+                    let along = n[axis] > 0
+                        ? (lo: plane + Double(axisI0) * S, hi: plane + Double(axisI0 + axisN - 1) * S + reach)
+                        : (lo: plane - Double(axisI0 + axisN) * S, hi: plane - Double(axisI0 + 1) * S + reach)
+                    if let b = Self.footprintBox(window: w, along: along, origin: region.origin, normal: n, axis: axis) {
+                        anchorBoxes[li] = (b.lo, b.hi, reach)
+                        stats.footprintBounded["anchor/" + kind, default: 0] += 1
+                    } else {
+                        stats.footprintUnbounded["anchor/nonfinite", default: 0] += 1
+                    }
+                }
+            } else {
+                stats.footprintUnbounded["anchor/band", default: 0] += ladders.count
+            }
+        }
+        var anchorWalked = 0
         func keptVolume(shift: SIMD3<Double>, children: Bool) -> Double {
             let go = SIMD3<Double>(occ.origin) - shift
             let ext = SIMD3<Double>(Double(occ.nx - 1) * Double(occ.spacing.x),
                                     Double(occ.ny - 1) * Double(occ.spacing.y),
                                     Double(occ.nz - 1) * Double(occ.spacing.z)) + shift
             var volume = 0.0
-            for ladder in ladders {
+            for (li, ladder) in ladders.enumerated() {
                 let region = regions[ladder.region]
                 let n = LatticeRegionMask.unit(region.normal)
                 let (bu, bv) = LatticeRegionMask.basis(n)
@@ -376,7 +613,17 @@ extension LatticePreviewOccupancy {
                     }}}
                     return true
                 }
-                for k in 0..<count.z { for j in 0..<count.y { for i in 0..<count.x {
+                // ★ only the slots that can reach the footprint (in-plane; the axis keeps its
+                // whole range) — every other slot adds exactly nothing
+                var first = SIMD3<Int>(repeating: 0), last = count &- 1
+                if let b = anchorBoxes[li],
+                   let r = Self.footprintSlots(box: (b.lo, b.hi), start: go, S: S, reach: (0, b.reach),
+                                               count: count, axis: axis, inset: footprintInset, slack: footprintSlack) {
+                    first = r.first; last = r.last
+                }
+                guard first.x <= last.x, first.y <= last.y, first.z <= last.z else { continue }
+                anchorWalked += (last.x - first.x + 1) * (last.y - first.y + 1) * (last.z - first.z + 1)
+                for k in first.z...last.z { for j in first.y...last.y { for i in first.x...last.x {
                     var idx = SIMD3<Int>(i, j, k)
                     idx[axis] += axisI0
                     var lo = SIMD3<Double>(repeating: 0)
@@ -416,11 +663,15 @@ extension LatticePreviewOccupancy {
         let tSearch = Date()
         let baseVolumes = combos.map { keptVolume(shift: $0, children: false) }
         let bestBase = baseVolumes.max() ?? 0
-        for (shift, v0) in zip(combos, baseVolumes) where v0 >= bestBase - baseMax * baseMax * baseMax - 1e-9 {
+        stats.anchorBaseVolumes = baseVolumes
+        // the same order and the same comparisons as the zip it replaces
+        for (ci, shift) in combos.enumerated() where baseVolumes[ci] >= bestBase - baseMax * baseMax * baseMax - 1e-9 {
             let v = keptVolume(shift: shift, children: true)
+            stats.anchorChildVolumes[ci] = v
             if v > bestVolume + 1e-9 { bestVolume = v; bestShift = shift }
         }
         stats.anchorShiftMM = bestShift
+        stats.anchorSlotsWalked = anchorWalked
         stats.anchorSeconds = Date().timeIntervalSince(tSearch)
 
         // The texel grid at that pitch, from the chosen anchor, with the demand
@@ -439,7 +690,9 @@ extension LatticePreviewOccupancy {
         var origin = [SIMD3<Float>](repeating: SIMD3<Float>(repeating: 0), count: grid.count)
         var bandT = [Float](repeating: 1, count: grid.count)
         var outlineMM = [Float](repeating: 1e3, count: grid.count)
-        var owner = [Int8](repeating: -1, count: grid.count)
+        // ★ The first region to claim each texel. Int32, like `cellOf`: an Int8 trapped on the
+        // 128th include region (102117B9 as Default Grade has 177; the proof, 2026-10-02).
+        var owner = [Int32](repeating: -1, count: grid.count)
         var isFinest = [Bool](repeating: false, count: grid.count)
         var cells: [LatticeSteppedCell] = []
         var cellOf = [Int32](repeating: -1, count: grid.count)   // texel → cell index
@@ -455,6 +708,38 @@ extension LatticePreviewOccupancy {
             }
             return false
         }
+        // ★★ R7 — ONE OWNER PER CELL, DECIDED BY ITS CENTRE (maintainer, 2026-10-03), never by
+        // declaration order ("order-dependent ownership would change the lattice when he
+        // reorders walls"):
+        //   • the region whose prism contains the cell's centre owns it;
+        //   • a centre inside two prisms goes to the region whose face plane is nearer (the
+        //     mitre the emission's seams draw);
+        //   • an exact tie goes to the lower region id;
+        //   • cells stay whole.
+        // Each region places its cells exactly as before, without regard to the others —
+        // pass 0 only collects them. Between the passes every candidate that overlaps another
+        // region's candidate is judged by its centre among the regions contesting it, and
+        // yields when another of them owns that centre. Pass 1 paints the survivors, and a
+        // texel two regions both cover goes to the better-ranked one at its middle by the same
+        // rule — so nothing depends on the order the regions arrive in, and nothing changes
+        // where no two regions' cells meet.
+        struct Candidate { let region: Int; let lo: SIMD3<Double>; let S: Double }
+        var candidates: [Candidate] = []
+        var accepted: [Bool] = []
+        var seq = 0
+        /// (outside its prism?, distance from its face plane, region id) — lower ranks better.
+        func rank(_ r: Int, _ p: SIMD3<Double>) -> (Int, Double, Int) {
+            let reg = regions[r]
+            let inside = LatticeRegionMask.contains(p, region: reg) ? 0 : 1
+            return (inside, abs(simd_dot(p - reg.origin, LatticeRegionMask.unit(reg.normal))), r)
+        }
+        func outranks(_ a: (Int, Double, Int), _ b: (Int, Double, Int)) -> Bool {
+            if a.0 != b.0 { return a.0 < b.0 }
+            if abs(a.1 - b.1) > 1e-9 { return a.1 < b.1 }
+            return a.2 < b.2                                   // an exact tie: the lower id
+        }
+        for pass in (Self.centreOwnershipEnabled ? [0, 1] : [1]) {
+        seq = 0
         for ladder in ladders {
             let region = regions[ladder.region]
             let n = LatticeRegionMask.unit(region.normal)
@@ -557,6 +842,9 @@ extension LatticePreviewOccupancy {
             // inside it, so every texel with any of its extent inside the outline is
             // painted as a plain cell and the band is drawn over it.
             func paint(_ lo: SIMD3<Double>, _ S: Double, finest: Bool, edge: Bool, nearest: Double) {
+                let mySeq = seq; seq += 1
+                if pass == 0 { candidates.append(Candidate(region: ladder.region, lo: lo, S: S)); return }
+                if Self.centreOwnershipEnabled, !accepted[mySeq] { stats.cellsYielded += 1; return }
                 let ph = tilingPhase(region: region, cellMM: S, origin: grid.origin) ?? 0
                 // The cell's origin in texel units, modulo its size in texel units.
                 let m = S / pitch
@@ -615,7 +903,16 @@ extension LatticePreviewOccupancy {
                             let cx = gorigin.x + (Double(i) + 0.5) * pitch
                             guard inSlot(cx, 0) else { continue }
                             let idx = (k * gny + j) * gnx + i
-                            guard owner[idx] < 0 else { continue }          // first region wins
+                            if owner[idx] >= 0 {
+                                // the same region: its first cell keeps the texel (the packer's
+                                // fill pass relies on it). Another region: the better rank at the
+                                // texel's middle (R7); with R7 off, the first region wins.
+                                guard Self.centreOwnershipEnabled, Int(owner[idx]) != ladder.region,
+                                      outranks(rank(ladder.region, SIMD3<Double>(cx, cy, cz)),
+                                               rank(Int(owner[idx]), SIMD3<Double>(cx, cy, cz)))
+                                else { continue }
+                                stats.texelsReassigned += 1
+                            }
                             var c = SIMD3<Double>(cx, cy, cz)                // the texel's middle
                             // the face-plane texel's test point, just inside the plane
                             c[axis] = Swift.min(Swift.max(c[axis], lo[axis] + 0.25 * pitch), hiS[axis] - 0.25 * pitch)
@@ -648,7 +945,7 @@ extension LatticePreviewOccupancy {
                             } else {
                                 guard occupied(c) || occupiedNear(c) else { continue }
                             }
-                            owner[idx] = Int8(ladder.region)
+                            owner[idx] = Int32(ladder.region)
                             cellOf[idx] = Int32(cells.count)
                             isFinest[idx] = finest
                             size[idx] = halfRepresentable(Float(S))
@@ -686,7 +983,7 @@ extension LatticePreviewOccupancy {
                 let finestLevel = level == ladder.sizes.count - 1
                 let centreOK = finestLevel || !(shapeFit && shapeFitBandMM > 0 && sBase > f + 1e-9)
                     || dc >= shapeFitBandMM * (S - f) / (sBase - f) - 1e-9
-                if level == 0 {
+                if level == 0 && pass == 1 {
                     let key = "r\(ladder.region)/" + (ok ? (centreOK ? "kept" : "band") : lastFail)
                     stats.why[key, default: 0] += 1
                 }
@@ -843,9 +1140,91 @@ extension LatticePreviewOccupancy {
                     i1[ax] = Int((ext[ax] / sBase).rounded(.up))
                 }
             }
-            for k in i0.z...i1.z { for j in i0.y...i1.y { for i in i0.x...i1.x {
-                place(SIMD3<Int>(i, j, k), level: 0)
-            }}}
+            // ★ ONLY WHERE THE GATE CAN PASS (2026-10-03): place() returns before any effect
+            // when the slot's centre reads further out than 0.87·S, and `why` is counted after
+            // that gate — so walking only the centres inside the gate's window is the same bake.
+            let tPlace = Date()
+            if Self.placeFootprintEnabled {
+                let (w, why) = Self.gateWindow(region: region, S: sBase)
+                // the slot centres' range along the axis
+                let along = n[axis] > 0
+                    ? (lo: plane + (Double(i0[axis]) + 0.5) * sBase, hi: plane + (Double(i1[axis]) + 0.5) * sBase)
+                    : (lo: plane - (Double(i1[axis]) + 0.5) * sBase, hi: plane - (Double(i0[axis]) + 0.5) * sBase)
+                if let w,
+                   let b = Self.footprintBox(window: w, along: along, origin: region.origin, normal: n, axis: axis),
+                   let r = Self.footprintSlots(box: b, start: gorigin, S: sBase, reach: (0.5 * sBase, 0.5 * sBase),
+                                               count: i1 &+ 1, axis: axis, inset: footprintInset, slack: footprintSlack) {
+                    for a in 0..<3 where a != axis {
+                        i0[a] = Swift.max(i0[a], r.first[a])
+                        i1[a] = Swift.min(i1[a], r.last[a])
+                    }
+                    // per region once — the painting pass (R7 walks twice; the work below counts both)
+                    if pass == 1 { stats.footprintBounded["place/" + why, default: 0] += 1 }
+                } else if pass == 1 {
+                    stats.footprintUnbounded["place/" + (w == nil ? why : "nonfinite"), default: 0] += 1
+                }
+            }
+            if i0.x <= i1.x, i0.y <= i1.y, i0.z <= i1.z {
+                stats.placeSlotsWalked += (i1.x - i0.x + 1) * (i1.y - i0.y + 1) * (i1.z - i0.z + 1)
+                for k in i0.z...i1.z { for j in i0.y...i1.y { for i in i0.x...i1.x {
+                    place(SIMD3<Int>(i, j, k), level: 0)
+                }}}
+            }
+            stats.placeSeconds += Date().timeIntervalSince(tPlace)
+        }
+        if pass == 0 {
+            // ── R7: judge every candidate another region's candidate overlaps ──────────
+            accepted = [Bool](repeating: true, count: candidates.count)
+            let big = candidates.map(\.S).max() ?? 0
+            var contest = [[Int]](repeating: [], count: candidates.count)
+            if big > 0 {
+                func key(_ p: SIMD3<Double>) -> SIMD3<Int> {
+                    SIMD3<Int>(Int((p.x / big).rounded(.down)), Int((p.y / big).rounded(.down)),
+                               Int((p.z / big).rounded(.down)))
+                }
+                var buckets: [SIMD3<Int>: [Int]] = [:]
+                for (i, c) in candidates.enumerated() { buckets[key(c.lo), default: []].append(i) }
+                for (i, a) in candidates.enumerated() {
+                    let ka = key(a.lo)
+                    for dz in -1...1 { for dy in -1...1 { for dx in -1...1 {
+                        for j in buckets[ka &+ SIMD3<Int>(dx, dy, dz)] ?? [] where j > i {
+                            let b = candidates[j]
+                            guard a.region != b.region else { continue }
+                            var overlap = true
+                            for ax in 0..<3 where Swift.min(a.lo[ax] + a.S, b.lo[ax] + b.S)
+                                - Swift.max(a.lo[ax], b.lo[ax]) <= 1e-6 { overlap = false }
+                            if overlap { contest[i].append(j); contest[j].append(i) }
+                        }
+                    }}}
+                }
+            }
+            for (i, c) in candidates.enumerated() where !contest[i].isEmpty {
+                stats.contestedCells += 1
+                let centre = c.lo + SIMD3<Double>(repeating: 0.5 * c.S)
+                var best = rank(c.region, centre)
+                for r in Set(contest[i].map { candidates[$0].region }) {
+                    let rr = rank(r, centre)
+                    if outranks(rr, best) { best = rr }
+                }
+                // a contesting region whose prism CONTAINS the centre owns it; a centre in no
+                // contesting prism has no owner by the rule, and the cell stays
+                if best.0 == 0, best.2 != c.region { accepted[i] = false }
+            }
+            for (i, js) in contest.enumerated() where accepted[i] {
+                stats.straddlerPairs += js.filter { $0 > i && accepted[$0] }.count
+            }
+        }
+        }
+        // R7: a plan cell another region's texels all went to is no longer in the plan.
+        if Self.centreOwnershipEnabled {
+            var count = [Int](repeating: 0, count: cells.count)
+            for ci in cellOf where ci >= 0 { count[Int(ci)] += 1 }
+            var remap = [Int32](repeating: -1, count: cells.count)
+            var kept: [LatticeSteppedCell] = []
+            for (i, c) in cells.enumerated() where count[i] > 0 { remap[i] = Int32(kept.count); kept.append(c) }
+            stats.cellsEmptied = cells.count - kept.count
+            for i in cellOf.indices where cellOf[i] >= 0 { cellOf[i] = remap[Int(cellOf[i])] }
+            cells = kept
         }
 
         // Density: the demand's activation over the drawn span (widened to the quilt),
@@ -922,6 +1301,8 @@ extension LatticePreviewOccupancy {
                                 solidDepthMM: solidDepth,
                                 solidBandMM: beam)
         field.steppedCells = cells
+        field.steppedTexelCell = cellOf
+        Self.octreeBakeObserver?(field, stats)
         return field
     }
 }

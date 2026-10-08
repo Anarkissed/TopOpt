@@ -568,8 +568,19 @@ FlexibleRunResult run_flexible_job(const JobDescription& job, const std::string&
   stacks.reserve(loaded.size());
   for (const JobFlexibleFace* f : loaded) {
     try {
-      stacks.push_back(build_stack(model, find_region(f->face_region_id), regions, grid, mask,
-                                   f->frame_rotation_deg, build, pitch));
+      if (f->footprint_region_ids.empty() && !f->has_press_direction) {
+        stacks.push_back(build_stack(model, find_region(f->face_region_id), regions, grid, mask,
+                                     f->frame_rotation_deg, build, pitch));
+      } else {
+        // C1 addendum: an angled and/or edge/corner press — one footprint, one stack.
+        std::vector<const ResolvedFaceRegion*> fp;
+        if (f->footprint_region_ids.empty())
+          fp.push_back(&find_region(f->face_region_id));
+        else
+          for (int id : f->footprint_region_ids) fp.push_back(&find_region(id));
+        stacks.push_back(build_press_stack(model, fp, regions, grid, mask, f->frame_rotation_deg, build,
+                                           pitch, f->has_press_direction ? &f->press_direction : nullptr));
+      }
     } catch (const FlexibleError& e) {
       throw JobError(e.what());
     }
@@ -682,6 +693,17 @@ FlexibleRunResult run_flexible_job(const JobDescription& job, const std::string&
                         .add("build_angle_deg", jnum(fr.build_angle_deg))
                         .add("side", jbool(fr.side))
                         .str());
+    if (!jf.footprint_region_ids.empty() || jf.has_press_direction) {
+      std::vector<double> ids;
+      for (int id : st.footprint_region_ids) ids.push_back(id);
+      fo.add("press", Obj()
+                          .add("footprint_face_region_ids", jarr(ids))
+                          .add("direction", st.press_direction_given ? jvec(st.press_direction)
+                                                                     : jstr("inward normal"))
+                          .add("build_angle_deg", jnum(fr.build_angle_deg))
+                          .add("side", jbool(fr.side))
+                          .str());
+    }
     std::vector<std::string> links, rlinks;
     for (const StackLink& l : st.exit_faces)
       links.push_back(Obj().add("face_id", jnum(l.id)).add("area_fraction", jnum(l.area_fraction)).str());

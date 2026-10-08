@@ -22,7 +22,7 @@ final class LatticeAestheticDensityControlTests: XCTestCase {
         let bead = p.printParams.strutLineWidthMM
         // A 2.0 mm cell has a REAL floor (~20% at a 0.45 bead) — a big cell's
         // floor is ~0 and would make this test vacuous.
-        let floor = LatticeType.named(p.lattice.topologyID)
+        let floor = LatticeType.named(p.lattice.topologyID)!
             .printabilityDensityFloor(lineWidthMM: bead, cellMM: 2.0)
         XCTAssertGreaterThan(floor, 0.05)
         // Below the printable floor clamps UP to it…
@@ -36,7 +36,7 @@ final class LatticeAestheticDensityControlTests: XCTestCase {
         // an automatic clamp (his ruling: "We set the minimum - but never the maximum").
         p.writeLatticeDensity(ref, fraction: 1.0, cellMM: 2.0)
         let held = p.lattice.selectableDensity[ref.key] ?? 0
-        let ceiling = LatticeType.named(p.lattice.topologyID).aestheticDensityCeiling(cellMM: 2.0)
+        let ceiling = LatticeType.named(p.lattice.topologyID)!.aestheticDensityCeiling(cellMM: 2.0)
         XCTAssertEqual(held, p.latticeAestheticDensityBand(cellMM: 2.0).hi, accuracy: 1e-9)
         // at a 2 mm cell one bead is already past the ceiling: the printable floor wins
         // (a cell that small cannot be under the ceiling at all), so the top is the

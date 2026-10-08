@@ -252,7 +252,12 @@ public enum LatticeWallDepthSteps {
     public static func forWalls(_ lattice: LatticeSettings, regions: [LatticeRegionSpec],
                                 beadMM: Double) -> [String: [Double]] {
         guard lattice.algorithm != "organic" else { return [:] }
-        let floorMM = LatticeSDFRenderer.printableFloorBeads * max(0, beadMM)
+        // ★★ Q3(i) (2026-10-05): core's floor at the job's cap, the preview's own (one source).
+        // No core number for the type ⇒ no steps (continuous), never a made-up floor.
+        guard let floorMM = beadMM > 0
+                ? LatticeSettings.tileFloorMM(topologyID: lattice.topologyID, beadMM: beadMM,
+                                              allowQuilt: lattice.allowQuilt)
+                : 0 else { return [:] }
         let structural = (lattice.stageMode ?? .structural) == .structural
         var out: [String: [Double]] = [:]
         for r in regions where r.role == .include && r.kind == .face && r.depthMM > 0 {

@@ -38,12 +38,12 @@ final class LatticeStaleTypeTests: XCTestCase {
             XCTAssertNil(p.latticeRunSpec(emission: p.latticeJobRegions()),
                          "★ the mechanism: a type core can't build drops the lattice block (organic \(organic))")
             XCTAssertEqual(LatticeTypeCatalog.selectionRefusal(p.lattice.topologyID),
-                           "Simple cubic: Core can’t build this type yet.", "★ the picker's own sentence")
+                           "Simple cubic: Strength-checked, but not buildable yet", "★ the picker's own sentence (core's words)")
         }
     }
 
     /// ★ The gate is exactly the catalog: refused ⇔ not offered, for every id it shows — and an
-    /// id core does not know at all is neither built nor certified, never silently octet.
+    /// id core does not know at all gets core's "Not a lattice type", never silently octet.
     func testTheRefusalIsTheCatalogsReason() {
         let e = LatticeTypeCatalog.entries(generatable: ["octet", "fcc"], certifiable: ["octet", "fcc", "sc"],
                                            jobAccepts: { $0 != "fcc" })
@@ -53,7 +53,7 @@ final class LatticeStaleTypeTests: XCTestCase {
         }
         XCTAssertEqual(LatticeTypeCatalog.selectionRefusal("fcc", in: e), "FCC: Core’s run doesn’t accept this type yet.")
         XCTAssertEqual(LatticeTypeCatalog.selectionRefusal("lattice9", in: e),
-                       "lattice9: Core can’t build or certify this type yet.")
+                       "lattice9: Not a lattice type", "★ core's words for an id it does not know")
         // the linked core: every greyed id refuses, the octet alone runs
         for x in LatticeTypeCatalog.entriesFromCore() {
             XCTAssertEqual(LatticeTypeCatalog.selectionRefusal(x.id) == nil, x.offered, x.id)
@@ -119,5 +119,38 @@ final class LatticeStaleTypeTests: XCTestCase {
         // the model's topology is the project's after Save & Exit — never migrated on open
         XCTAssertFalse(try src("LatticeWizardModel.swift").contains("selectionRefusal"), "★ never migrated")
         XCTAssertFalse(try src("LatticeSettings.swift").contains("selectionRefusal"), "★ never migrated on decode")
+    }
+
+    /// ★★ MAINTAINER, 2026-10-03: "gate the stale type before LatticeBounds.compute, so the
+    /// stale-type path never asks core for numbers it can't have." With a recorder on every
+    /// per-type wrapper, building the run spec for a stale type reaches core for NOTHING; the
+    /// octet control does reach it (so the recorder is not measuring nothing). Before the gate
+    /// this path called latticeLimits, latticeStrutDiameterMM and latticeCellBounds — the
+    /// last one is what trapped on #361 421fde3d.
+    func testTheStaleTypePathAsksCoreNothing() {
+        let lock = NSLock()
+        var log: [(fn: String, topology: String)] = []
+        TopOptKit.perTypeCallRecorder = { fn, t in lock.lock(); log.append((fn, t)); lock.unlock() }
+        defer { TopOptKit.perTypeCallRecorder = nil }
+        func calls(_ id: String) -> [String] {
+            lock.lock(); defer { lock.unlock() }
+            return log.filter { $0.topology == id }.map(\.fn)
+        }
+        func clear() { lock.lock(); log.removeAll(); lock.unlock() }
+        let stale = Set(TopOptKit.latticeCertifiableTopologies).subtracting(TopOptKit.latticeGeneratableTopologies)
+        XCTAssertFalse(stale.isEmpty, "positive control: core certifies types it cannot build")
+        for organic in [false, true] {
+            let (p, _, _) = VariantFacePrismFixture.project(organic: organic)
+            clear()
+            XCTAssertNotNil(p.latticeRunSpec(emission: p.latticeJobRegions()), "control: octet runs")
+            XCTAssertFalse(calls("octet").isEmpty, "★ control: octet's path does ask core (organic \(organic))")
+            for id in stale.sorted() + ["gyroid", "lattice9"] {
+                p.lattice.topologyID = id
+                let e = p.latticeJobRegions()
+                clear()
+                XCTAssertNil(p.latticeRunSpec(emission: e), "\(id): no run spec")
+                XCTAssertEqual(calls(id), [], "★ \(id) (organic \(organic)): the stale path asks core nothing")
+            }
+        }
     }
 }

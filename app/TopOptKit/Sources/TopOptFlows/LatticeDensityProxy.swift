@@ -75,8 +75,8 @@ public struct LatticeProxyParams: Equatable, Sendable, Codable {
         self.uniformRelativeDensity = uniformRelativeDensity
     }
 
-    /// The resolved lattice (never nil — unknown ids fall back to octet).
-    public var lattice: LatticeType { LatticeType.named(latticeID) }
+    /// The resolved lattice — nil for an id the Swift table lacks (item a, 2026-10-02).
+    public var lattice: LatticeType? { LatticeType.named(latticeID) }
 
     /// ρmax clamped to be ≥ ρmin, so the legend range is always non-degenerate.
     public var densitySpan: (lo: Double, hi: Double) {

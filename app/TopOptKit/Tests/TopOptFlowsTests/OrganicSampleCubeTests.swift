@@ -146,6 +146,9 @@ final class OrganicSampleCubeTests: XCTestCase {
         let accepted = TopOptKit.gradingSchemaAccepts(key: "organic_separation_mm")
         XCTAssertEqual(g["organic_separation_mm"] != nil, accepted,
                        "written exactly when core's schema accepts the key (\(accepted) on this core)")
-        XCTAssertEqual(g["cell_mode"] as? String, "fit")
+        // ★ ruling 5 (2026-10-03): the pick rides as the one-size window under swept
+        XCTAssertEqual(g["cell_mode"] as? String, "swept")
+        XCTAssertEqual(g["cell_min_mm"] as? Double, 3)
+        XCTAssertEqual(g["cell_max_mm"] as? Double, 3)
     }
 }

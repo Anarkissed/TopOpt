@@ -1043,6 +1043,70 @@ public enum TopOptKit {
     /// The core library version (topopt::version()); a trivial liveness check.
     public static var coreVersion: String { String(topoptbridge.core_version()) }
 
+    /// ★★ CORE'S REASON FOR THE LAST REFUSAL ON THIS THREAD (maintainer, 2026-10-03: "no
+    /// core exception ever crosses the bridge"). Every bridge function runs through one
+    /// guard: a core exception becomes that function's invalid result and its reason is
+    /// kept here until the next bridge call on the thread returns normally. Read it right
+    /// after a call whose result says it could not answer. nil = the last call answered.
+    public static var lastCoreRefusal: String? {
+        let s = String(topoptbridge.bridge_last_refusal())
+        return s.isEmpty ? nil : s
+    }
+
+    /// The guard's own test hook (BridgeGuardTests): 0 answers, 1 throws a
+    /// std::exception, 2 throws something that is not one.
+    public static func bridgeGuardSelfTest(_ kind: Int) -> String {
+        String(topoptbridge.bridge_guard_self_test(Int32(kind)))
+    }
+
+    /// ★ TEST SEAM (maintainer, 2026-10-03: "the stale-type path never asks core for
+    /// numbers it can't have"). Every per-type wrapper reports (function, topology) here
+    /// first. nil in production; a test installs a recorder to prove a path asks core
+    /// nothing for a given type.
+    nonisolated(unsafe) public static var perTypeCallRecorder: ((String, String) -> Void)?
+    static func notePerTypeCall(_ function: String, _ topology: String) {
+        perTypeCallRecorder?(function, topology)
+    }
+
+    /// ★ STATE THE LINKED CORE'S IDENTITY TO CORE (#358, 349053df + 23e6154e). The on-device
+    /// lattice run calls core's `lattice_variant_job` IN-PROCESS, and core stamps every receipt's
+    /// `fingerprint` / `build_time` from what was stated here — "unknown" when nothing was. Core
+    /// takes it ONCE: the same identity again is a no-op, a different one throws (two binaries'
+    /// identities in one process). Call through `CoreBuildIdentity` (TopOptFlows), which holds
+    /// the generated fingerprint and states it before the first bridge run.
+    public static func stateCoreBuildIdentity(fingerprint: String, buildTime: String) throws {
+        var err = topoptbridge.BridgeError()
+        topoptbridge.state_core_build_identity(std.string(fingerprint), std.string(buildTime), &err)
+        try throwIfFailed(err)
+    }
+
+    /// The identity core holds now — `("unknown", "")` until one is stated.
+    public static var coreBuildIdentity: (fingerprint: String, buildTime: String) {
+        let v = Array(topoptbridge.core_build_identity()).map { String($0) }
+        return (v.first ?? "", v.count > 1 ? v[1] : "")
+    }
+
+    /// ★ CORE'S READINESS FOR A LATTICE TYPE (#358 `lattice_type_readiness`; brief item a).
+    /// The cases mirror core's enum in its declared order; `LatticeTypeReadinessFromCoreTests`
+    /// pins the mapping with core's own answers, so a reordering in core goes red.
+    public enum LatticeTypeReadiness: Int, Sendable, CaseIterable {
+        case live = 0, notGeneratable, notCertifiable, notEither, unknownId
+    }
+
+    /// Core's verdict for `id` against the two sets given (the app's pure form hands its own).
+    public static func latticeTypeReadiness(_ id: String, generatable: [String],
+                                            certifiable: [String]) -> LatticeTypeReadiness {
+        let r = topoptbridge.lattice_type_readiness(std.string(id),
+                                                    std.string(generatable.joined(separator: "\n")),
+                                                    std.string(certifiable.joined(separator: "\n")))
+        return LatticeTypeReadiness(rawValue: Int(r)) ?? .unknownId
+    }
+
+    /// Core's PLAIN line for a readiness (`lattice_type_readiness_plain`) — the picker's words.
+    public static func latticeTypeReadinessPlain(_ r: LatticeTypeReadiness) -> String {
+        String(topoptbridge.lattice_type_readiness_plain(Int32(r.rawValue)))
+    }
+
     // MARK: lattice certification limits (handoff 2026-07-29-lattice-mode-ui)
 
     /// The certifiable bounds the lattice-mode controls clamp to, READ FROM CORE at
@@ -1057,11 +1121,17 @@ public enum TopOptKit {
         public let rhoMax: Double
         public let certifiable: Bool
         public let minCellsPerMember: Double
-        public init(rhoMin: Double, rhoMax: Double, certifiable: Bool, minCellsPerMember: Double) {
+        /// ★ Core's reason when it gives no numbers (maintainer, 2026-10-03); nil when it
+        /// does. `certifiable` is true only for a type core calls LIVE: a type whose tensor
+        /// core holds but cannot build yet is refused with core's readiness words.
+        public let reason: String?
+        public init(rhoMin: Double, rhoMax: Double, certifiable: Bool, minCellsPerMember: Double,
+                    reason: String? = nil) {
             self.rhoMin = rhoMin
             self.rhoMax = rhoMax
             self.certifiable = certifiable
             self.minCellsPerMember = minCellsPerMember
+            self.reason = reason
         }
     }
 
@@ -1078,7 +1148,34 @@ public enum TopOptKit {
     /// and printed those numbers in millimetres beside it.
     public static func latticeStrutDiameterMM(topology: String, relativeDensity rho: Double,
                                               cellMM: Double) -> Double {
-        topoptbridge.lattice_strut_diameter_mm(std.string(topology), rho, cellMM)
+        notePerTypeCall(#function, topology)
+        return topoptbridge.lattice_strut_diameter_mm(std.string(topology), rho, cellMM)
+    }
+
+    /// ★★ CORE'S PRINTABLE FLOOR AT THE JOB'S CAP (reviewer, 2026-10-05, Q3(i): "use core's
+    /// floor. With Allow quilt on, that's 1.173 mm at a 0.45 bead … Read it from core; don't copy
+    /// the number."). The smallest cell whose strut prints one bead at the densest density the
+    /// job allows: `maxRelativeDensity` is the cap the job writes (`grading.max_relative_density`;
+    /// 0 when it writes none). Composed in the bridge from core's own band top and diameter law,
+    /// as grade_lattice does — core has no public function that takes the cap (#358 D1).
+    /// nil for a type core does not call live (`lastCoreRefusal` says why) or a bead of 0.
+    public static func latticeMinPrintableCellMM(topology: String, minExtrudableWidthMM w: Double,
+                                                 maxRelativeDensity cap: Double) -> Double? {
+        notePerTypeCall(#function, topology)
+        let v = topoptbridge.lattice_min_printable_cell_mm(std.string(topology), w, cap)
+        return v > 0 && v.isFinite ? v : nil
+    }
+
+    /// ★★ CORE'S AESTHETIC DENSITY CEILING (maintainer, 2026-10-02, ruling 5: R12, one
+    /// definition) — octet's 0.218871… on the linked core; nil where core has none for the type.
+    /// Since the #358 sync the bridge asks core's per-type `lattice_aesthetic_density_ceiling`
+    /// (octet's is the same double, so no byte moved); an unmeasured type is nil, never octet's.
+    /// Cell-independent: core's diameter table is linear in the cell. The app's own 24-step
+    /// bisection of that table is kept only as a test oracle (`aestheticDensityCeilingOracle`).
+    public static func latticeAestheticDensityCeiling(topology: String) -> Double? {
+        notePerTypeCall(#function, topology)
+        let c = topoptbridge.lattice_aesthetic_density_ceiling(std.string(topology))
+        return c > 0 ? c : nil
     }
 
     /// ★ THE FORWARD LAW (core reply 5, 2026-09-20): the relative density a strut
@@ -1086,7 +1183,8 @@ public enum TopOptKit {
     /// for this topology; 1 ⇒ the radius fills the cell.
     public static func latticeRelativeDensity(topology: String, strutRadiusMM: Double,
                                               cellMM: Double) -> Double {
-        topoptbridge.lattice_relative_density(std.string(topology), strutRadiusMM, cellMM)
+        notePerTypeCall(#function, topology)
+        return topoptbridge.lattice_relative_density(std.string(topology), strutRadiusMM, cellMM)
     }
 
     /// ★★ CORE'S LOCAL MEMBER THICKNESS (mm per voxel), for the preview.
@@ -1659,6 +1757,7 @@ public enum TopOptKit {
                                            /// that the mode had already relaxed to 2.
                                            cellsPerMemberFloor: Double = 0)
         -> LatticeCellSizePlan? {
+        notePerTypeCall(#function, topology)
         let n = nx * ny * nz
         guard nx > 0, ny > 0, nz > 0, candidate.count == n,
               relativeDensity.count == n, memberWidthMM.count == n else { return nil }
@@ -1752,7 +1851,8 @@ public enum TopOptKit {
     ///   report rather than substitute a guess for.
     public static func latticeAestheticCellsPerMemberFloor(
         topology: String, utilisation: Double, errorBudget: Double = 0) -> Double {
-        topoptbridge.lattice_aesthetic_cells_per_member_floor(
+        notePerTypeCall(#function, topology)
+        return topoptbridge.lattice_aesthetic_cells_per_member_floor(
             std.string(topology), utilisation, errorBudget)
     }
 
@@ -1765,7 +1865,8 @@ public enum TopOptKit {
     /// finish re-ties the struts a one-cell member severs; without one it stays 2.
     public static func latticeAestheticCellsPerMemberHardFloor(
         topology: String, boundaryFinishWritten: Bool = false) -> Double {
-        topoptbridge.lattice_aesthetic_cells_per_member_hard_floor(
+        notePerTypeCall(#function, topology)
+        return topoptbridge.lattice_aesthetic_cells_per_member_hard_floor(
             std.string(topology), boundaryFinishWritten)
     }
 
@@ -1806,10 +1907,13 @@ public enum TopOptKit {
     }
 
     public static func latticeLimits(topology: String) -> LatticeLimits {
+        notePerTypeCall(#function, topology)
         let lim = topoptbridge.lattice_limits(std.string(topology))
+        let why = String(lim.reason)
         return LatticeLimits(rhoMin: lim.rho_min, rhoMax: lim.rho_max,
                              certifiable: lim.certifiable,
-                             minCellsPerMember: lim.min_cells_per_member)
+                             minCellsPerMember: lim.min_cells_per_member,
+                             reason: why.isEmpty ? nil : why)
     }
 
     /// The CELL-SIZE bounds the Auto / Fixed / Swept control must respect, BOTH read
@@ -1839,9 +1943,12 @@ public enum TopOptKit {
         ///   its certificate is out of regime; below this one the strut network is
         ///   not connected and the generator emits debris. 0 ⇒ core states none.
         public let percolationCellsPerMemberFloor: Double
+        /// ★ Core's reason when `valid` is false (maintainer, 2026-10-03); nil when valid.
+        public let reason: String?
         public init(printabilityFloorMM: Double, cellsPerMemberFloor: Double,
                     valid: Bool, printabilityFloorDensestMM: Double = 0,
-                    percolationCellsPerMemberFloor: Double = 0) {
+                    percolationCellsPerMemberFloor: Double = 0, reason: String? = nil) {
+            self.reason = reason
             self.percolationCellsPerMemberFloor = percolationCellsPerMemberFloor
             self.printabilityFloorMM = printabilityFloorMM
             self.cellsPerMemberFloor = cellsPerMemberFloor
@@ -1855,14 +1962,17 @@ public enum TopOptKit {
     /// `topoptbridge::lattice_cell_bounds`; never throws.
     public static func latticeCellBounds(topology: String,
                                          minExtrudableWidthMM: Double) -> LatticeCellBounds {
+        notePerTypeCall(#function, topology)
         let b = topoptbridge.lattice_cell_bounds(std.string(topology), minExtrudableWidthMM)
+        let why = String(b.reason)
         return LatticeCellBounds(printabilityFloorMM: b.printability_floor_mm,
                                  cellsPerMemberFloor: b.cells_per_member_floor,
                                  valid: b.valid,
                                  printabilityFloorDensestMM:
                                     b.printability_floor_densest_mm,
                                  percolationCellsPerMemberFloor:
-                                    b.percolation_cells_per_member_floor)
+                                    b.percolation_cells_per_member_floor,
+                                 reason: why.isEmpty ? nil : why)
     }
 
     /// ★ ONE REGION'S DERIVATION, AS CORE COMPUTES IT (task
@@ -1886,10 +1996,14 @@ public enum TopOptKit {
         /// False is exactly what core refuses the job on, so the field can say so
         /// before the run instead of an hour into it.
         public let prints: Bool
+        /// ★ Core's reason when `valid` is false (maintainer, 2026-10-03); nil when valid.
+        public let reason: String?
         public init(valid: Bool, feasible: Bool, cellMM: Double,
                     derivedRelativeDensity: Double, rhoMax: Double,
                     relativeDensity: Double, strutMM: Double,
-                    cellsPerMember: Double, outOfRegime: Bool, prints: Bool) {
+                    cellsPerMember: Double, outOfRegime: Bool, prints: Bool,
+                    reason: String? = nil) {
+            self.reason = reason
             self.valid = valid; self.feasible = feasible; self.cellMM = cellMM
             self.derivedRelativeDensity = derivedRelativeDensity
             self.rhoMax = rhoMax; self.relativeDensity = relativeDensity
@@ -1906,16 +2020,23 @@ public enum TopOptKit {
         // ★ THE FLOOR THE CELL IS DERIVED AGAINST. 0 = core's accuracy floor (5), the
         // default every pre-existing caller had. The cell is `width / floor`, so this
         // is the difference between a 2.20 mm and a 5.50 mm cell on an 11 mm wall.
-        cellsPerMemberFloor: Double = 0) -> LatticeRegionDerivation {
+        cellsPerMemberFloor: Double = 0,
+        // ★ ONE NUMBER, ONE SOURCE (item 5, 2026-10-05): the cell the preview lays, when the
+        // caller has it — core then gives the density, strut and cells-across at THAT cell.
+        // 0 = core derives the cell, as before.
+        cellMM: Double = 0) -> LatticeRegionDerivation {
+        notePerTypeCall(#function, topology)
         let d = topoptbridge.lattice_region_derivation(
             std.string(topology), memberWidthMM, minExtrudableWidthMM,
-            statedRelativeDensity, cellsPerMemberFloor)
+            statedRelativeDensity, cellsPerMemberFloor, cellMM)
+        let why = String(d.reason)
         return LatticeRegionDerivation(
             valid: d.valid, feasible: d.feasible, cellMM: d.cell_mm,
             derivedRelativeDensity: d.derived_relative_density,
             rhoMax: d.rho_max, relativeDensity: d.relative_density,
             strutMM: d.strut_mm, cellsPerMember: d.cells_per_member,
-            outOfRegime: d.out_of_regime, prints: d.prints)
+            outOfRegime: d.out_of_regime, prints: d.prints,
+            reason: why.isEmpty ? nil : why)
     }
 
     /// The topology names the core can RUN and certify today (the seven cubic
@@ -1955,6 +2076,38 @@ public enum TopOptKit {
         let text = String(data: jobJSON, encoding: .utf8) ?? ""
         let e = String(topoptbridge.job_schema_error(std.string(text)))
         return e.isEmpty ? nil : e
+    }
+
+    /// ★★ THE ALGORITHMS CORE CERTIFIES BY THE BEAM NETWORK (maintainer, 2026-10-02, ruling 1).
+    /// ONE named constant until the linked core publishes the fact: core's
+    /// `lattice_beam_network_certified_algorithms()` (#358), which returns {"organic"} — true
+    /// today, the run calls `certify_organic_structural` only under organic && structural
+    /// (run_job.cpp:7488). SWAP TO CORE'S FUNCTION AT THE NEXT CORE SYNC; from then on this flips
+    /// by itself when core wires Stepped. Core ACCEPTING `structural_certification: beam_network`
+    /// on a Stepped job (`steppedStructuralCertificationWired`, a schema probe) is not core
+    /// RUNNING it, so the probe is no longer the source of the Structural floor or of that key.
+    /// ★ At the #358 sync (23e6154e) core does not yet publish the function, so the constant
+    /// stays; swap the moment a sync brings it in.
+    public static let latticeBeamNetworkCertifiedAlgorithms: Set<String> = ["organic"]
+
+    /// ★ CORE'S FACE-PLANE BASIS (maintainer, 2026-10-01, item b), through core's own
+    /// `resolve_clearance_manual` — the route the run takes. `frame` nil = derive (core's `u`,
+    /// `w` for this RAW normal); a stated frame returns core's verdict on it: `conflict` true is
+    /// the frame a stage job would be refused for, after the solve. nil if the bridge failed.
+    public struct CoreFacePlaneBasis: Equatable, Sendable {
+        public let valid: Bool
+        public let conflict: Bool
+        public let u: SIMD3<Double>
+        public let w: SIMD3<Double>
+    }
+    public static func coreFacePlaneBasis(normal n: SIMD3<Double>,
+                                          frame: (u: SIMD3<Double>, w: SIMD3<Double>)? = nil) -> CoreFacePlaneBasis? {
+        let u = frame?.u ?? .zero, w = frame?.w ?? .zero
+        let v = Array(topoptbridge.core_face_plane_basis(n.x, n.y, n.z, u.x, u.y, u.z, w.x, w.y, w.z))
+            .map { Double($0) }
+        guard v.count == 8 else { return nil }
+        return CoreFacePlaneBasis(valid: v[0] != 0, conflict: v[1] != 0,
+                                  u: SIMD3(v[2], v[3], v[4]), w: SIMD3(v[5], v[6], v[7]))
     }
 
     /// Whether the schema probe proved itself on this build — a key core has always
@@ -2026,17 +2179,20 @@ public enum TopOptKit {
             with: #""grading": {"topology": "octet", "min_extrudable_width_mm": 0.4, "cell_mm": 3.0, "algorithm": "organic", "intent": "structural", "organic_structural_certification": "beam_network"}, "output":"#)
         return jobSchemaError(Data(text.utf8)) == nil
     }()
-    /// ★ ANY-STEP STEPPED (core reply, 2026-09-18): `lattice.stepped_cells` is accepted
-    /// only by a core that carries the packer's schema, and only alongside
-    /// `algorithm: "stepped"` — so the probe is a whole job with both. FALSE ⇒ the app
-    /// sends no plan and the run is the legacy one-cell-per-region Stepped (which
-    /// still works on every core). Probed once per launch.
+    /// ★ DOES THIS CORE'S SCHEMA TAKE `lattice.stepped_cells`? (core reply, 2026-09-18). It is
+    /// accepted only alongside a stepped/doubled grading block, so the probe is a whole job.
+    /// ★★ FIXED (maintainer, 2026-10-02, ruling 4): its document used to put lattice `cell_mm` +
+    /// `strut_radius_mm` beside the grading block — a pair core refuses ("lattice "cell_mm" is not
+    /// allowed with a "grading" block") — so it was false on EVERY core and the app had never sent
+    /// a plan. It now probes the document a Default Grade job actually is. Whether a plan is SENT
+    /// is a separate switch, `LatticeSteppedCellWire.defaultGradePlansEnabled` (off until core
+    /// accepts every project's plan). Probed once per launch.
     public static let steppedCellsWired: Bool = {
         var text = latticeProbeBaseJob.replacingOccurrences(
             of: #""output":"#,
-            with: #""grading": {"topology": "octet", "min_extrudable_width_mm": 0.4, "cell_mm": 3.0, "algorithm": "stepped"}, "output":"#)
+            with: #""grading": {"topology": "octet", "min_extrudable_width_mm": 0.4, "cell_mm": 3.0, "algorithm": "doubled"}, "output":"#)
         text.removeLast()
-        text += #", "lattice": {"topology": "octet", "cell_mm": 3.0, "strut_radius_mm": 0.4, "stepped_cells": [{"region_id": 1, "origin_mm": [0, 0, 0], "size_mm": 3.0}]}}"#
+        text += #", "lattice": {"topology": "octet", "stepped_cells": [{"region_id": 1, "origin_mm": [0, 0, 0], "size_mm": 3.0}]}}"#
         return jobSchemaError(Data(text.utf8)) == nil
     }()
     /// ★ The beam-network certificate under Stepped: the GENERIC key

@@ -25,7 +25,7 @@ final class LatticeProxyTests: XCTestCase {
         let expected: [String: Int] = ["sc": 3, "bcc": 8, "bccz": 9, "fcc": 12,
                                        "fccz": 13, "diamond": 16, "octet": 24]
         for (id, n) in expected {
-            XCTAssertEqual(LatticeType.named(id).struts.count, n, "\(id) canonical strut count")
+            XCTAssertEqual(LatticeType.named(id)!.struts.count, n, "\(id) canonical strut count")
         }
     }
 
@@ -38,7 +38,7 @@ final class LatticeProxyTests: XCTestCase {
             "fccz": 9.4853, "diamond": 6.9282, "octet": 16.9706,
         ]
         for (id, mult) in expected {
-            let lat = LatticeType.named(id)
+            let lat = LatticeType.named(id)!
             let got = lat.canonicalStrutLengthMM(cellMM: 8) / 8
             XCTAssertEqual(got, mult, accuracy: 1e-3, "\(id) canonical length multiple")
         }

@@ -10,6 +10,10 @@ import TopOptKit
 /// 1.8 mm printable floor. The beam-network certificate has no such floor.
 final class LatticeStructuralRegionFloorTests: XCTestCase {
 
+    /// ★ Ruling 1 (2026-10-02): the relaxation now keys on core's beam-network SET, not a
+    /// schema probe — see `LatticeBeamNetworkFactTests`. Under a set that holds the algorithm
+    /// the strut network is solved and the aesthetic floor applies; under today's set
+    /// ({"organic"}) the homogenised floor stays — his 2.4 mm wall.
     func testStructuralSteppedTakesTheAestheticFloorOnlyUnderTheBeamCertificate() throws {
         let homog = LatticeStageMode.structural.cellsPerMemberFloor(topology: "octet", utilisation: .nan)
         let aesthetic = LatticeStageMode.aesthetic.cellsPerMemberFloor(topology: "octet", utilisation: .nan)
@@ -17,17 +21,17 @@ final class LatticeStructuralRegionFloorTests: XCTestCase {
         XCTAssertGreaterThan(homog, aesthetic, "core's homogenised floor (5) sits above the aesthetic one (2)")
         for alg in ["stepped", "doubled"] {
             XCTAssertEqual(LatticeStageMode.structural.regionCellsPerMemberFloor(
-                topology: "octet", boundaryFinishWritten: false, algorithm: alg, beamNetworkCertified: true),
+                topology: "octet", boundaryFinishWritten: false, algorithm: alg, beamNetworkAlgorithms: [alg]),
                 aesthetic, "★ \(alg) under a beam-network certificate: the strut network is solved, not homogenised")
             XCTAssertEqual(LatticeStageMode.structural.regionCellsPerMemberFloor(
-                topology: "octet", boundaryFinishWritten: false, algorithm: alg, beamNetworkCertified: false),
-                homog, "★ \(alg) on a core without the certificate: the homogenised floor stays — his 2.4 mm wall")
+                topology: "octet", boundaryFinishWritten: false, algorithm: alg, beamNetworkAlgorithms: ["organic"]),
+                homog, "★ \(alg) on a core that does not certify it so: the homogenised floor stays — his 2.4 mm wall")
         }
         // organic and the aesthetic stage are untouched by the rule
         XCTAssertEqual(LatticeStageMode.structural.regionCellsPerMemberFloor(
-            topology: "octet", boundaryFinishWritten: false, algorithm: "organic", beamNetworkCertified: true), homog)
+            topology: "octet", boundaryFinishWritten: false, algorithm: "organic", beamNetworkAlgorithms: ["organic"]), homog)
         XCTAssertEqual(LatticeStageMode.aesthetic.regionCellsPerMemberFloor(
-            topology: "octet", boundaryFinishWritten: false, algorithm: "stepped", beamNetworkCertified: true), aesthetic)
+            topology: "octet", boundaryFinishWritten: false, algorithm: "stepped", beamNetworkAlgorithms: ["stepped"]), aesthetic)
     }
 
     /// The numbers he saw, reproduced: a 12.03 mm wall at floor 5 is a 2.4 mm cell.
