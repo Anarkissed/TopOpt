@@ -1,12 +1,17 @@
 # Angled presses (task 2026-10-07), batch AP0: the stage-job BASE at 01ec5e3c (core 523dd2f90b04), before any
 # angled-press code. Dumped with the app's own makeLatticeRunRequest (LatticeJobJSONDump), SWIFT_DETERMINISTIC_HASHING=1,
 # TOPOPT_JOB_REPEAT=3 (three opens in one process, identical), each project from a FRESH copy; hash = the first 16 hex
-# of SHA-256 over the dumped job.json. Script: stage_job_hashes.sh + mutate_project.py (this folder). Run twice, by two
-# launches each (the scratch run and the committed script): every row identical.
+# of SHA-256 over the dumped job.json. Script: stage_job_hashes.sh + mutate_project.py (this folder).
 #
-# The S0 set (13 rows, batch E review's): his 7-project store copy = the frozen snapshot S1-2026-10-02 (lattice-stage
-# frontend worktree, scratch/evidence/snapshots, with its own .sha256 — the project.json hashes below match it); the A1
-# simulator store (4); r3 / r5 = the committed copies of 'Pad split top' (his_project_0004, his_project_0004_r5).
+# The S0 set (13 rows, batch E review's), FROZEN in s0_frozen/ (README.txt, SHA256SUMS; AP0 fix-up 2026-10-08):
+#   his7/  his 7-project store copy = the read-only snapshot S1-2026-10-02 of the lattice-stage frontend worktree;
+#   a1/    the A1 simulator store's four projects (copied from the LIVE store, whose hashes matched these);
+#   r3 / r5 = the committed copies of 'Pad split top' (his_project_0004, his_project_0004_r5).
+# The script CHECKS every input against s0_frozen/SHA256SUMS and the r3 / r5 sums it holds and stops (exit 2) on a
+# moved byte, before any row is dumped (red control: one changed letter in a1/…-0003/project.json -> exit 2).
+# History: the first AP0 dump read his7 from the other worktree's scratch and the A1 rows from the live store; this
+# file is the SAME dump from the frozen copies — all 13 source lines and all 16 rows identical (the A1 rows were
+# labelled "base his" then; "base A1" now).
 # The A1 store's 0004 and the committed r5 copy give the SAME stage job (5d7e9c764fb087b1) from different project.json.
 # These hashes are NOT batch E review's (e.g. r5 b6a9c4fc28b81d94 then): the branch has merged #354 / #358 / #361 since;
 # they are this base, for S1 and every later batch to compare with.
@@ -14,14 +19,19 @@
 # ★ WHAT THESE HASHES CAN AND CANNOT SEE.
 #   control+  a lattice-stage setting the stage job reads (his "Top" include group's depth 4 -> 5 mm): the hash MOVES.
 #   control-  a Flexible face weight (lattice.flexible.faces[Top B].weightKg 5 -> 6): the hash does NOT move.
-#   The stage job cannot see lattice.flexible at all (previewBakeInputs strips it, app/TopOptKit/Sources/TopOptFlows/LatticeSettings.swift:1167, H12;
-#   RemoteRunner never reads it). So these rows guard #354's job only; the Flexible claim ("every existing face press
-#   is unchanged") is carried by the run-job, scene-job, frame and lattice-subtree goldens in
+#   The stage job cannot see lattice.flexible at all: it is built by AppModel.makeLatticeRunRequest and
+#   RemoteRun.buildJobJSON, and neither reads lattice.flexible (no `.flexible` in AppModel.swift or RemoteRun*.swift).
+#   (previewBakeInputs, LatticeSettings.swift:1167, H12, is a different thing: the octet PREVIEW bake's trigger, which
+#   drops lattice.flexible so a Flexible edit never re-bakes it.) control- is this dump's measurement; the AP0
+#   verifier's own driver (fresh r5 copies, the same settings) also left 5d7e9c764fb087b1 for a loaded face set
+#   resting, lattice.flexible = null and cellMM 8 -> 10 under auto. So these rows guard #354's job only; the Flexible claim ("every existing face press is
+#   unchanged") is carried by the run-job (every existing send of his 0004, his r5 and the A1 store's three Flexible
+#   projects, frozen), scene-job, frame, field/design and lattice-subtree goldens in
 #   app/TopOptKit/Tests/TopOptFlowsTests/Fixtures/angled_press_goldens (FlexibleAngledGoldenTests), whose controls
 #   are in ap0_red_runs.txt.
 #   again     r5 dumped once more, another fresh copy and launch: identical (the negative control).
 #
-# sources (first 16 hex of SHA-256; compare with stage_job_hashes_base.txt before comparing rows):
+# sources (first 16 hex of SHA-256; checked in full against s0_frozen/SHA256SUMS and the r3/r5 sums in the script):
 #   102117B9-DDD2-4597-9BDE-49DD47EBF393 project.json 6f4e44987a360d45 model.step bdf5646481e370ba
 #   3418E167-8524-4831-A809-827B6B0742D0 project.json 78bd5ff4cac763e7 model.step bbc4260cb33c4d67
 #   570B38E2-3C6E-46E0-BCF6-26BE1595D204 project.json 4d60412d56be5596 model.step bdf5646481e370ba
@@ -42,12 +52,13 @@ base his 68BF7B74-3C2A-4ED6-A46D-AC040A9CA649 exit 0 3fd5d1b2388fe949 lattice re
 base his 887AC498-5B5D-4475-B6CB-893DC69B5FD6 exit 0 b457718dfc23ab42 lattice regions emitted: 0 (include 0, skipped faces 0) · repeats 3: identical
 base his 92A8016E-FCCD-421D-B19E-4A1EC81C98A5 exit 0 225865c83c64cb23 lattice regions emitted: 1 (include 1, skipped faces 0) · repeats 3: identical
 base his AA4C7953-3152-4123-BCB5-EF5F8A08ABA3 exit 0 3e6f162cb36212a9 lattice regions emitted: 0 (include 0, skipped faces 0) · repeats 3: identical
-base his A1000001-0000-4000-8000-000000000001 exit 0 43a02161a5bab447 lattice regions emitted: 5 (include 5, skipped faces 0) · repeats 3: identical
-base his A1000001-0000-4000-8000-000000000002 exit 0 15bf9e189a9545fc lattice regions emitted: 0 (include 0, skipped faces 0) · repeats 3: identical
-base his A1000001-0000-4000-8000-000000000003 exit 0 9dba118b4567b44e lattice regions emitted: 0 (include 0, skipped faces 0) · repeats 3: identical
-base his A1000001-0000-4000-8000-000000000004 exit 0 5d7e9c764fb087b1 lattice regions emitted: 2 (include 2, skipped faces 0) · repeats 3: identical
+base A1 A1000001-0000-4000-8000-000000000001 exit 0 43a02161a5bab447 lattice regions emitted: 5 (include 5, skipped faces 0) · repeats 3: identical
+base A1 A1000001-0000-4000-8000-000000000002 exit 0 15bf9e189a9545fc lattice regions emitted: 0 (include 0, skipped faces 0) · repeats 3: identical
+base A1 A1000001-0000-4000-8000-000000000003 exit 0 9dba118b4567b44e lattice regions emitted: 0 (include 0, skipped faces 0) · repeats 3: identical
+base A1 A1000001-0000-4000-8000-000000000004 exit 0 5d7e9c764fb087b1 lattice regions emitted: 2 (include 2, skipped faces 0) · repeats 3: identical
 base r3 A1000001-0000-4000-8000-000000000004 exit 0 25968ec604e0bdce lattice regions emitted: 1 (include 1, skipped faces 0) · repeats 3: identical
 base r5 A1000001-0000-4000-8000-000000000004 exit 0 5d7e9c764fb087b1 lattice regions emitted: 2 (include 2, skipped faces 0) · repeats 3: identical
 control+ r5 A1000001-0000-4000-8000-000000000004 exit 0 31646a7163500d78 lattice regions emitted: 2 (include 2, skipped faces 0) · repeats 3: identical [groupDepthMM 92E96F3A-D8F7-4FB0-AF8D-56230DFB6BC0: 4 -> 5]
 control- r5 A1000001-0000-4000-8000-000000000004 exit 0 5d7e9c764fb087b1 lattice regions emitted: 2 (include 2, skipped faces 0) · repeats 3: identical [flexible face 1000104 weightKg 5 -> 6]
 again r5 A1000001-0000-4000-8000-000000000004 exit 0 5d7e9c764fb087b1 lattice regions emitted: 2 (include 2, skipped faces 0) · repeats 3: identical
+DONE
