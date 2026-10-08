@@ -29,9 +29,27 @@ names its model, and the model's SHA-256 is given so #358 can check it has the s
 
 The band's rule, in terms core can evaluate, is the 2026-10-08 answer on the #354 channel.
 
+## Core findings this round (for #358; no file under core/ was edited)
+
+1. **An invalid include shifts every later region id.** `lattice_role_regions_from_job` skips a
+   geometry `resolve_clearance_manual` calls invalid (run_job.cpp:1019, `if (!g.valid) continue;`).
+   - The run's include list is then shorter than the job's.
+   - Every later include's 1-based id (the plan's `region_id`, `stepped_region_owner`'s answer, the
+     receipts' keys) names the NEXT region.
+   - The app numbers includes in job order without that skip.
+   - The owner bridge (`stepped_region_owners`) returns core's include count, and the bake refuses a
+     reply whose count differs from the job's. The ask: refuse the job, or keep the slot, rather
+     than skip.
+2. **The published beam-network set disagrees with the run.** At 36f5fdde
+   `lattice_beam_network_certified_algorithms()` returns {"stepped", "organic"} ("in ANY
+   configuration"). The run routes `certify_organic_structural` only for organic + structural
+   (run_job.cpp:7581), and refuses a Structural Stepped plan without the key (5161-5183). The app
+   keeps its own {"organic"} and blocks Structural Stepped until the run routes it (K8).
+
 ## Still to come here
 
 - The Default Grade plan jobs for 570B38E2, 3418E167, 102117B9 and 68BF7B74, and the Aesthetic
   Stepped plans. They will carry `stepped_cells` and `slot_origin_mm` and come with core's verdict
   on each.
-- `job_owner_core.json` from the owner-swap parity proof on 68BF7B74.
+- The owner swap's parity proof on 68BF7B74 is in `owner-68BF7B74/`. Its plan job comes from the
+  Aesthetic Stepped plan proof, not from that proof (see its README).
