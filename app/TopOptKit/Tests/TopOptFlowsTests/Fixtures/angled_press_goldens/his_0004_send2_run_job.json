@@ -1,0 +1,303 @@
+{
+  "flexible" : {
+    "beads_per_wall" : 1,
+    "faces" : [
+      {
+        "curve_x" : [
+          [
+            0,
+            0.69999999999999996
+          ],
+          [
+            0.25,
+            0.26249999999999996
+          ],
+          [
+            0.41711858511506344,
+            0
+          ],
+          [
+            1,
+            0.69999999999999996
+          ]
+        ],
+        "curve_y" : [
+          [
+            0,
+            0.29999999999999999
+          ],
+          [
+            0.5,
+            1
+          ],
+          [
+            1,
+            0.29999999999999999
+          ]
+        ],
+        "deepest_squish_mm" : 3,
+        "face_region_id" : 1000103,
+        "mode" : "both",
+        "role" : "loaded",
+        "skin_on" : true,
+        "weight_n" : 98.066499999999991
+      },
+      {
+        "curve_x" : [
+          [
+            0,
+            0.29999999999999999
+          ],
+          [
+            0.25,
+            0.73750000000000004
+          ],
+          [
+            0.5,
+            1
+          ],
+          [
+            1,
+            0.29999999999999999
+          ]
+        ],
+        "curve_y" : [
+          [
+            0,
+            0.29999999999999999
+          ],
+          [
+            0.5,
+            1
+          ],
+          [
+            1,
+            0.29999999999999999
+          ]
+        ],
+        "deepest_squish_mm" : 3,
+        "face_region_id" : 1000104,
+        "mode" : "both",
+        "role" : "loaded",
+        "skin_on" : true,
+        "weight_n" : 98.066499999999991
+      },
+      {
+        "face_region_id" : 3,
+        "role" : "resting",
+        "skin_on" : true
+      },
+      {
+        "curve_x" : [
+          [
+            0,
+            0.29999999999999999
+          ],
+          [
+            0.5,
+            1
+          ],
+          [
+            1,
+            0.29999999999999999
+          ]
+        ],
+        "curve_y" : [
+          [
+            0,
+            0.29999999999999999
+          ],
+          [
+            0.5,
+            1
+          ],
+          [
+            1,
+            0.29999999999999999
+          ]
+        ],
+        "deepest_squish_mm" : 3,
+        "face_region_id" : 5,
+        "mode" : "both",
+        "role" : "loaded",
+        "skin_on" : true,
+        "weight_n" : 98.066499999999991
+      },
+      {
+        "face_region_id" : 0,
+        "role" : "resting",
+        "skin_on" : true
+      },
+      {
+        "face_region_id" : 2,
+        "role" : "resting",
+        "skin_on" : true
+      },
+      {
+        "face_region_id" : 4,
+        "role" : "resting",
+        "skin_on" : true
+      }
+    ],
+    "feel" : "springy",
+    "material_id" : "varioshore_tpu",
+    "min_extrudable_width_mm" : 0.45000000000000001,
+    "nozzle_temp_c" : "auto",
+    "regions" : [
+      {
+        "geometry" : {
+          "depth_mm" : 25,
+          "frame_u" : [
+            -0,
+            1,
+            0
+          ],
+          "frame_w" : [
+            1,
+            0,
+            0
+          ],
+          "half_u_mm" : 50,
+          "half_w_mm" : 50,
+          "normal" : [
+            0,
+            0,
+            -1
+          ],
+          "origin" : [
+            50,
+            50,
+            20
+          ],
+          "outline_uv" : [
+            [
+              [
+                -50,
+                0
+              ],
+              [
+                -50,
+                50
+              ],
+              [
+                50,
+                50
+              ],
+              [
+                50,
+                0
+              ]
+            ]
+          ]
+        },
+        "kind" : "face",
+        "role" : "include"
+      }
+    ],
+    "topology" : "auto"
+  },
+  "loads" : {
+    "build_dir" : [
+      0,
+      0,
+      1
+    ],
+    "face_regions" : [
+      {
+        "add" : [
+          0
+        ],
+        "id" : 0,
+        "name" : "face 0"
+      },
+      {
+        "add" : [
+          1
+        ],
+        "id" : 1,
+        "name" : "face 1"
+      },
+      {
+        "add" : [
+          2
+        ],
+        "id" : 2,
+        "name" : "face 2"
+      },
+      {
+        "add" : [
+          3
+        ],
+        "id" : 3,
+        "name" : "face 3"
+      },
+      {
+        "add" : [
+          4
+        ],
+        "id" : 4,
+        "name" : "face 4"
+      },
+      {
+        "add" : [
+          5
+        ],
+        "id" : 5,
+        "name" : "face 5"
+      },
+      {
+        "add" : [
+          1
+        ],
+        "cuts" : [
+          {
+            "normal" : [
+              1,
+              0,
+              0
+            ],
+            "point" : [
+              50,
+              50,
+              20
+            ],
+            "strict" : false
+          }
+        ],
+        "id" : 1000103,
+        "name" : "top A"
+      },
+      {
+        "add" : [
+          1
+        ],
+        "cuts" : [
+          {
+            "normal" : [
+              -1,
+              0,
+              0
+            ],
+            "point" : [
+              50,
+              50,
+              20
+            ],
+            "strict" : true
+          }
+        ],
+        "id" : 1000104,
+        "name" : "top B"
+      }
+    ]
+  },
+  "material" : "varioshore_tpu",
+  "mode" : "analyze",
+  "model" : "$ROOT\/A1000001-0000-4000-8000-000000000004\/model.stl",
+  "output" : {
+    "mesh_format" : "stl",
+    "mesh_prefix" : "unused",
+    "report" : "report.json"
+  },
+  "resolution" : 64
+}

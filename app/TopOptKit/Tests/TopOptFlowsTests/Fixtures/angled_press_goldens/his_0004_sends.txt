@@ -1,0 +1,3 @@
+# his_0004: the Export step's sends as the project stands (FlexibleCoreHold; 'direct' = nothing held)
+send 1 · Send with Face 5 resting · resting [5] · his_0004_send1_run_job.json
+send 2 · Send with Face 3 resting · resting [3] · his_0004_send2_run_job.json

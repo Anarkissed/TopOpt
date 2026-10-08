@@ -17,10 +17,13 @@
 //   * his pad              FlexibleHisProject.restore(round5Dir, asSaved: true) (memory: judge with
 //                          HIS project restored), C1's pad (FlexibleHisProject.padProject) and the M2
 //                          stand (Fixtures/M2_verticalStand.step).
+//   * the frozen S0 set    (AP0 fix-up) the A1 store's projects and his 'l bracket 3', restored from
+//                          angled_presses/s0_frozen after a SHA-256 check against its SHA256SUMS.
 //
 // Every generated part is written once per process into its own temporary folder, from the same
 // arithmetic every time, so its bytes are the same on every run.
 import XCTest
+import CryptoKit
 import simd
 @testable import TopOptFlows
 @testable import TopOptKit
@@ -200,6 +203,54 @@ enum FlexiblePressFixtures {
         let r = try FlexibleHisProject.restore(FlexibleHisProject.dir, asSaved: true)
         test.addTeardownBlock { r.cleanup() }
         return r
+    }
+
+    // MARK: - the FROZEN S0 set (AP0 fix-up)
+
+    /// The S0 projects frozen beside the stage-job hashes (s0_frozen/README.txt): his7/ and a1/, with
+    /// SHA256SUMS. The A1 store's Flexible projects are restored from HERE, never from the simulator.
+    nonisolated static var frozenDir: URL {
+        FlexibleHisProject.repoRoot.appendingPathComponent(
+            "docs/handoffs/evidence/2026-09-29-flexible-screens/angled_presses/s0_frozen", isDirectory: true)
+    }
+
+    /// The A1 store's project n (1…4): A1000001-0000-4000-8000-00000000000n.
+    nonisolated static func a1Dir(_ n: Int) -> URL {
+        frozenDir.appendingPathComponent("a1/A1000001-0000-4000-8000-00000000000\(n)", isDirectory: true)
+    }
+
+    /// The recorded SHA-256 of a frozen file (its path relative to s0_frozen), from SHA256SUMS.
+    static func frozenSum(_ rel: String) throws -> String {
+        let sums = try String(contentsOf: frozenDir.appendingPathComponent("SHA256SUMS"), encoding: .utf8)
+        let line = try XCTUnwrap(sums.split(separator: "\n").first { $0.hasSuffix("  " + rel) }, "\(rel) is in SHA256SUMS")
+        return String(line.prefix(64))
+    }
+
+    /// Fails unless every file of the frozen project folder `dir` has its recorded SHA-256 (a moved
+    /// input is a different part, so its golden would measure the wrong thing).
+    static func assertFrozen(_ dir: URL) throws {
+        let rel = dir.deletingLastPathComponent().lastPathComponent + "/" + dir.lastPathComponent
+        for f in try FileManager.default.contentsOfDirectory(atPath: dir.path).sorted() {
+            let now = SHA256.hash(data: try Data(contentsOf: dir.appendingPathComponent(f))).map { String(format: "%02x", $0) }.joined()
+            XCTAssertEqual(now, try frozenSum("\(rel)/\(f)"), "★ the frozen input \(rel)/\(f) moved")
+        }
+    }
+
+    /// The A1 store's project n AS SAVED, from the frozen copy, through the app's own restore.
+    static func a1Project(_ n: Int, _ test: XCTestCase) throws -> FlexibleHisProject.Restored {
+        try assertFrozen(a1Dir(n))
+        let r = try FlexibleHisProject.restore(a1Dir(n), asSaved: true)
+        test.addTeardownBlock { r.cleanup() }
+        return r
+    }
+
+    /// His 'l bracket 3' (S0's 92A8016E, a STEP part), frozen. XCTSkip — printed and counted — when OCCT throws.
+    static func lBracketProject(_ test: String) throws -> ProjectModel {
+        let dir = frozenDir.appendingPathComponent("his7/92A8016E-FCCD-421D-B19E-4A1EC81C98A5", isDirectory: true)
+        try assertFrozen(dir)
+        do { return try project(path: dir.appendingPathComponent("model.step").path, name: "l bracket 3") } catch {
+            throw skip(test, "the STEP importer threw on the l bracket: \(error)")
+        }
     }
 
     // MARK: - facts

@@ -2,10 +2,18 @@
 // 01ec5e3c BEFORE any angled-press code exists, so every later batch can prove that existing face presses
 // keep their job bytes and core's frames (spec §14, §15).
 //
-// Run by hand, under deterministic hashing (his projects' jobs carry lattice outlines whose loops come
-// out in HASH order otherwise — memory "stage job outline order is hash order"):
+// Run by hand, under deterministic hashing (the lattice SUBTREES' raw bytes carry UUID-keyed
+// dictionaries, which encode in hash order; every other golden is the same under any seed, measured),
+// naming the base the goldens are of:
 //
-//     RECORD=1 SWIFT_DETERMINISTIC_HASHING=1 swift test --filter FlexibleAngledGoldenRecorder
+//     RECORD=1 SWIFT_DETERMINISTIC_HASHING=1 FLEX_AP_BASE=<sha> swift test --filter FlexibleAngledGoldenRecorder
+//
+// ★ AP0 FIX-UP (verifier, 2026-10-07): no compared line carries core's fingerprint (it is the repo HEAD
+// at build_core.sh time, not core's content: CI and every rebuild would read red) — it is printed and
+// kept in MANIFEST.txt only; probe_refusals_base.json is NEVER overwritten (AP6 reads the base texts; a
+// later core's answers go to probe_answers.json); and the recorder adds (6) every existing send's job
+// of his 0004, his r5 and the A1 store's Flexible projects (frozen), (7) the STEP cube's and his
+// l bracket's frames, (8) core's designs and density / owner / handover fields.
 //
 // It writes to Tests/TopOptFlowsTests/Fixtures/angled_press_goldens/ (FLEX_AP_GOLDEN_DIR reads another
 // copy — the perturbed-golden red run):
@@ -47,6 +55,10 @@ enum FlexibleAngledGoldens {
     static var hashingMode: String {
         "SWIFT_DETERMINISTIC_HASHING=\(ProcessInfo.processInfo.environment["SWIFT_DETERMINISTIC_HASHING"] ?? "unset")"
     }
+
+    /// The commit the goldens are the base OF (FLEX_AP_BASE; the recorder requires it) — never a
+    /// literal, so a re-base at S1 cannot claim 01ec5e3c.
+    static var baseLabel: String { ProcessInfo.processInfo.environment["FLEX_AP_BASE"] ?? "UNLABELLED (set FLEX_AP_BASE)" }
 
     static func read(_ name: String) throws -> String {
         let url = dir.appendingPathComponent(name)
@@ -190,7 +202,40 @@ enum FlexibleAngledGoldens {
         ("lattice_subtree_0004_r5.json", FlexibleHisProject.round5Dir.appendingPathComponent("project.json")),
         ("lattice_subtree_102117B9.json", URL(fileURLWithPath: #filePath).deletingLastPathComponent()
             .appendingPathComponent("Fixtures/102117B9_project.json")),
+        // ★ AP0 fix-up: the A1 store's three Flexible projects (frozen): the M2 stand's face 2, the pad's
+        // five stamped presses in three groups, and the later save of 'Pad split top' (its faces differ)
+        ("lattice_subtree_A1_0002.json", FlexiblePressFixtures.a1Dir(2).appendingPathComponent("project.json")),
+        ("lattice_subtree_A1_0003.json", FlexiblePressFixtures.a1Dir(3).appendingPathComponent("project.json")),
+        ("lattice_subtree_A1_0004.json", FlexiblePressFixtures.a1Dir(4).appendingPathComponent("project.json")),
     ]
+
+    /// ★ AP0 FIX-UP: the WHOLE subtree, in a form no hash seed reaches — compared in every run (CI
+    /// included). JSONEncoder writes a dictionary keyed by UUID as a flat [key, value, key, value, …]
+    /// array in HASH order (groupDepthMM, groupRoles, groupDensities, frozenRegionDensity); each such
+    /// array (even length, every even element a UUID string, not every odd one) becomes an object, and
+    /// everything is written through ONE serializer with sorted keys. An ordered list of UUIDs stays a
+    /// list. Values are untouched: a changed depth is still a changed line.
+    static func canonicalSubtree(_ json: String) throws -> String {
+        func isUUID(_ x: Any) -> Bool { (x as? String).flatMap { UUID(uuidString: $0) } != nil }
+        func canon(_ x: Any) -> Any {
+            if let d = x as? [String: Any] { return d.mapValues(canon) }
+            if let a = x as? [Any] {
+                let evens = stride(from: 0, to: a.count, by: 2).map { a[$0] }
+                let odds = stride(from: 1, to: a.count, by: 2).map { a[$0] }
+                if !a.isEmpty, a.count % 2 == 0, evens.allSatisfy(isUUID), !odds.allSatisfy(isUUID),
+                   Set(evens.compactMap { $0 as? String }).count == evens.count {
+                    var o: [String: Any] = [:]
+                    for (k, v) in zip(evens, odds) { o[k as! String] = canon(v) }
+                    return o
+                }
+                return a.map(canon)
+            }
+            return x
+        }
+        let obj = try JSONSerialization.jsonObject(with: Data(json.utf8), options: [.fragmentsAllowed])
+        let data = try JSONSerialization.data(withJSONObject: canon(obj), options: [.sortedKeys, .prettyPrinted, .withoutEscapingSlashes])
+        return String(decoding: data, as: UTF8.self) + "\n"
+    }
 
     /// The snapshot's `lattice`, decoded by the store's own decoder and re-encoded with the store's
     /// encoder settings (ProjectStore.save: JSONEncoder, .sortedKeys). `mutate` is the red controls' door.
@@ -221,8 +266,44 @@ enum FlexibleAngledGoldens {
     static func vec(_ v: SIMD3<Double>) -> String { "[\(num(v.x)) \(num(v.y)) \(num(v.z))]" }
     static func sha(_ s: String) -> String { SHA256.hash(data: Data(s.utf8)).map { String(format: "%02x", $0) }.joined() }
 
+    /// ★ AP0 FIX-UP: the sampled columns spread over the face in BOTH directions — the first, the last,
+    /// and the column nearest each point of a 5 × 5 lattice over the (iu, iv) range. (A stride over the
+    /// iv-major column list kept iu = 0: 16 of 17 samples sat on one edge, where no sector cut or new X
+    /// axis shows.)
+    static func sampleIndices(_ cols: [FlexColumn]) -> [Int] {
+        guard let iu0 = cols.map(\.iu).min(), let iu1 = cols.map(\.iu).max(),
+              let iv0 = cols.map(\.iv).min(), let iv1 = cols.map(\.iv).max() else { return [] }
+        var picked: Set<Int> = [0, cols.count - 1]
+        for a in 0...4 {
+            for b in 0...4 {
+                let tu = Double(iu0) + Double(iu1 - iu0) * Double(a) / 4
+                let tv = Double(iv0) + Double(iv1 - iv0) * Double(b) / 4
+                var best = 0, bestD = Double.infinity
+                for (k, c) in cols.enumerated() {
+                    let d = (Double(c.iu) - tu) * (Double(c.iu) - tu) + (Double(c.iv) - tv) * (Double(c.iv) - tv)
+                    if d < bestD { bestD = d; best = k }
+                }
+                picked.insert(best)
+            }
+        }
+        return picked.sorted()
+    }
+
+    /// ★ AP0 FIX-UP: one short SHA-256 (12 hex) per ROW of columns (iv), over each column's grid and
+    /// depth bit patterns, 16 rows a line — so S1 can say WHICH rows a moved column is in, not only
+    /// that one moved.
+    static func rowDigestLines(_ cols: [FlexColumn]) -> [String] {
+        var rows: [Int: [String]] = [:]
+        for c in cols {
+            rows[c.iv, default: []].append("\(c.iu) \(hex(c.uMM)) \(hex(c.vMM)) \(hex(c.areaMM2)) \(hex(c.entryT)) \(hex(c.exitT)) \(hex(c.latticeMM)) \(c.exitFace)")
+        }
+        let cells = rows.keys.sorted().map { iv in "\(iv):" + sha(rows[iv]!.joined(separator: "\n")).prefix(12) }
+        return stride(from: 0, to: cells.count, by: 16).map { "rows " + cells[$0..<min($0 + 16, cells.count)].joined(separator: " ") }
+    }
+
     /// One stack's lines: every frame value as its bit pattern; the columns as a count, two SHA-256s
-    /// (the grid: iu iv u v area; the depths: entry exit lattice exitFace) and ≤ 17 sampled columns in full.
+    /// (the grid: iu iv u v area; the depths: entry exit lattice exitFace), one short SHA-256 per row,
+    /// and ≤ 27 sampled columns in full.
     static func stackLines(_ s: FlexStackInfo) -> [String] {
         var l: [String] = []
         l.append("frameValid \(s.frameValid) reason \"\(s.frameReason)\"")
@@ -241,8 +322,9 @@ enum FlexibleAngledGoldens {
         let geom = s.columns.map { "\($0.iu) \($0.iv) \(hex($0.uMM)) \(hex($0.vMM)) \(hex($0.areaMM2))" }.joined(separator: "\n")
         let depth = s.columns.map { "\(hex($0.entryT)) \(hex($0.exitT)) \(hex($0.latticeMM)) \($0.exitFace)" }.joined(separator: "\n")
         l.append("columns \(s.columns.count) sha256-grid \(sha(geom)) sha256-depth \(sha(depth))")
-        let step = max(1, s.columns.count / 16)
-        for (k, c) in s.columns.enumerated() where k % step == 0 || k == s.columns.count - 1 {
+        l += rowDigestLines(s.columns).map { "  " + $0 }
+        for k in sampleIndices(s.columns) {
+            let c = s.columns[k]
             l.append("  col[\(k)] iu \(c.iu) iv \(c.iv) u \(num(c.uMM)) v \(num(c.vMM)) area \(num(c.areaMM2)) "
                      + "entry \(num(c.entryT)) exit \(num(c.exitT)) lattice \(num(c.latticeMM)) exitFace \(c.exitFace)")
         }
@@ -266,7 +348,10 @@ enum FlexibleAngledGoldens {
         var keys = Set(info.regions.map { FlexFaceKey(region: $0.id, rotation: 0) })
         for k in m.loadedKeys { keys.insert(k) }
         let sorted = keys.sorted { ($0.region, $0.rotation) < ($1.region, $1.rotation) }
-        var out = ["# FlexStackInfo golden · \(label) · core \(CoreFingerprint.value)",
+        // ★ AP0 FIX-UP: core's fingerprint is PRINTED, never in the compared text (it is the repo HEAD
+        // when build_core.sh ran — CI and every rebuild at another commit would read every frame red)
+        print("FLEX-AP frames '\(label)' · built against core \(CoreFingerprint.value) (printed, not compared)")
+        var out = ["# FlexStackInfo golden · \(label)",
                    "# scene \(info.nx)x\(info.ny)x\(info.nz) spacing \(num(info.spacing)) origin \(vec(info.origin)) build \(vec(info.buildDir)) latticeVoxels \(info.latticeVoxels)",
                    "# regions \(info.regions.map { "\($0.id)=\($0.faces.map(String.init).joined(separator: "+"))" }.joined(separator: " "))"]
         var first = true
@@ -363,7 +448,7 @@ enum FlexibleAngledGoldens {
     }
 
     static func probeGoldenText(_ a: [String: String?]) throws -> String {
-        var obj: [String: Any] = ["base": "01ec5e3c", "core": CoreFingerprint.value]
+        var obj: [String: Any] = ["base": baseLabel, "core": CoreFingerprint.value]
         for (k, v) in a { obj[k] = v ?? NSNull() }
         let data = try JSONSerialization.data(withJSONObject: obj, options: [.sortedKeys, .prettyPrinted, .withoutEscapingSlashes])
         return String(decoding: data, as: UTF8.self) + "\n"
@@ -375,7 +460,8 @@ enum FlexibleAngledGoldens {
     /// (> 30°) from its own frame, or core's refusal when the face's normals cancel outright.
     static func slabFacts() async throws -> String {
         let s = FlexiblePressFixtures.slab
-        var out = ["# slabs \(s.width) x \(s.depth) x \(s.height) mm, vertical fillets r \(s.radius) mm, \(s.facets) facets per 90° · core \(CoreFingerprint.value)"]
+        print("FLEX-AP slab facts · built against core \(CoreFingerprint.value) (printed, not compared)")
+        var out = ["# slabs \(s.width) x \(s.depth) x \(s.height) mm, vertical fillets r \(s.radius) mm, \(s.facets) facets per 90°"]
         for kind in FlexiblePressFixtures.SlabKind.allCases {
             let path = try FlexiblePressFixtures.slabPath(kind)
             let mesh = try TopOptKit.importMesh(path: path)
@@ -400,6 +486,210 @@ enum FlexibleAngledGoldens {
         }
         return out.joined(separator: "\n") + "\n"
     }
+
+    // MARK: - (6) every existing send (AP0 fix-up)
+
+    /// The projects whose EVERY send is pinned: his 0004 and r5 as saved, and the A1 store's three
+    /// Flexible projects (frozen): the M2 stand's face 2, the pad's five stamped presses in three
+    /// groups, and the later save of 'Pad split top'.
+    static let sendSets = ["his_0004", "his_r5", "A1_0002", "A1_0003", "A1_0004"]
+
+    /// The set's project as saved, its model opened and settled.
+    static func sendSetModel(_ label: String, _ test: XCTestCase) async throws -> (roots: [(path: String, token: String)], m: FlexibleStageModel) {
+        let r: FlexibleHisProject.Restored
+        switch label {
+        case "his_0004": r = try FlexiblePressFixtures.his0004(test)
+        case "his_r5": r = try FlexiblePressFixtures.hisRound5(test)
+        case "A1_0002": r = try FlexiblePressFixtures.a1Project(2, test)
+        case "A1_0003": r = try FlexiblePressFixtures.a1Project(3, test)
+        case "A1_0004": r = try FlexiblePressFixtures.a1Project(4, test)
+        default: throw XCTSkip("no send set \(label)")
+        }
+        let m = FlexibleStageModel(project: r.project, materialsPath: FlexibleHisProject.materialsPath,
+                                   stampsPath: FlexibleHisProject.stampsPath, persist: {})
+        test.addTeardownBlock { @MainActor in await m.waitForIdle() }
+        m.openScene()
+        try await settleAllowingRefusedStacks(m, label)
+        return (rootToken(r), m)
+    }
+
+    /// Settled the way the page settles — every loaded stack built (with its geometry) OR refused by
+    /// core, then no design in flight. (The A1 store's M2 project, as saved, loads 19 faces through its
+    /// main-page groups and core refuses 9 of their stacks — "no column at a 3.410559 mm pitch" — so a
+    /// wait for every stack never ends; the Export step still offers its sends, and those are pinned.)
+    static func settleAllowingRefusedStacks(_ m: FlexibleStageModel, _ what: String) async throws {
+        try await FlexibleHisProject.waitFor(120, "\(what): every loaded stack built or refused") {
+            m.sceneState == .ready
+                && m.loadedKeys.allSatisfy { (m.stacks[$0] != nil && m.geometry[$0] != nil) || m.stackErrors[$0] != nil }
+        }
+        await m.waitForIdle()
+        try await FlexibleHisProject.waitFor(120, "\(what): designs") { !m.readiness.designing && !m.designsInFlight }
+        await m.waitForIdle()
+        let refused = m.loadedKeys.filter { m.stackErrors[$0] != nil }.map(\.region).sorted()
+        print("FLEX-AP \(what): \(m.loadedKeys.count) loaded key(s), core refused \(refused.count) stack(s) \(refused)")
+    }
+
+    /// What the Export step sends for the project as it stands: each FlexibleCoreHold send (its
+    /// resting faces), or — nothing held — the job itself ("direct", resting none).
+    static func sends(_ m: FlexibleStageModel) -> [(title: String, resting: [Int])] {
+        guard let hold = m.coreHold else { return [("direct", [])] }
+        return hold.fixes.compactMap { f in f.scope == nil ? nil : (f.title, f.resting) }
+    }
+
+    /// Send n's (1-based) golden; his r5's first keeps its AP0 name.
+    static func sendFile(_ label: String, _ n: Int) -> String {
+        label == "his_r5" && n == 1 ? "his_r5_held_send_run_job.json" : "\(label)_send\(n)_run_job.json"
+    }
+
+    static func sceneFile(_ label: String) -> String { "\(label)_scene_job.json" }
+
+    /// The set's index: one line per send — its title, its resting faces and the file of its job.
+    static func sendIndex(_ label: String, _ s: [(title: String, resting: [Int])]) -> String {
+        "# \(label): the Export step's sends as the project stands (FlexibleCoreHold; 'direct' = nothing held)\n"
+            + s.enumerated().map { "send \($0.offset + 1) · \($0.element.title) · resting \($0.element.resting) · \(sendFile(label, $0.offset + 1))" }
+                .joined(separator: "\n") + "\n"
+    }
+
+    // MARK: - (7) frames on STEP parts (AP0 fix-up)
+
+    /// Core's 10 mm STEP cube (B-rep faces, tied squares: the principal_2d case) and his 'l bracket 3'
+    /// (frozen S0 92A8016E), nothing pressed — their frames before S1.
+    static func stepFrameModels(_ test: XCTestCase, _ testName: String) async throws -> [(file: String, label: String, m: FlexibleStageModel)] {
+        let cube = try await openModel(test, try FlexiblePressFixtures.stepCubeProject(testName), "the STEP cube")
+        let bracket = try await openModel(test, try FlexiblePressFixtures.lBracketProject(testName), "his l bracket")
+        return [("frames_step_cube.txt", "STEP cube 10 mm (nothing pressed)", cube),
+                ("frames_l_bracket.txt", "his l bracket 3 (nothing pressed)", bracket)]
+    }
+
+    // MARK: - (8) core's designs and fields (AP0 fix-up)
+
+    /// SHA-256 over an array's raw bytes (little-endian bit patterns; an Int owner is 8 bytes).
+    static func bytesSHA<T>(_ xs: [T]) -> String {
+        let d = xs.withUnsafeBufferPointer { Data(buffer: $0) }
+        return SHA256.hash(data: d).map { String(format: "%02x", $0) }.joined()
+    }
+
+    /// One core design (every column's every value as its bit pattern, hashed; the counts, tier,
+    /// ranges and refusal in full; the 2-D samples of the stack's columns in full).
+    static func designLines(_ d: FlexFaceDesignInfo, stack: FlexStackInfo?) -> [String] {
+        func rng(_ r: ClosedRange<Double>?) -> String { r.map { "\(num($0.lowerBound))..\(num($0.upperBound))" } ?? "nil" }
+        func opt(_ x: Double?) -> String { x.map { hex($0) } ?? "nil" }
+        func col(_ c: FlexColumnDesign) -> String {
+            "\(hex(c.s)) \(hex(c.pressureMPa)) \(hex(c.heightMM)) \(hex(c.targetDepthMM)) \(hex(c.targetStrain)) \(c.status) "
+                + "\(c.targetExtrapolated) \(hex(c.targetDensity)) \(opt(c.nearestDepthMM)) \(c.nearestKnown) \(hex(c.clampedDensity)) "
+                + "\(opt(c.clampedDepthMM)) \(hex(c.buildableDensity)) \(hex(c.buildableDepthMM)) \(c.buildableOK) "
+                + "\(c.buildableExtrapolated) \(hex(c.cellMM)) \(hex(c.sigmaMM))"
+        }
+        var l = ["refusal \(d.refusal.map { "\($0.code): \($0.reason)" } ?? "none") · tier \(d.tier.tier) band \(num(d.tier.band)) why \"\(d.tier.why)\"",
+                 "ok \(d.ok) tooFirm \(d.tooFirm) tooSoft \(d.tooSoft) beyondData \(d.beyondData) noLattice \(d.noLattice) "
+                    + "solidUnderMap \(d.solidUnderMap) targetExtrapolated \(d.targetExtrapolated) buildableExtrapolated \(d.buildableExtrapolated) "
+                    + "buildableBeyondData \(d.buildableBeyondData) nearEdge \(d.nearEdge)",
+                 "pressureEven \(num(d.designPressureEvenMPa)) stamp used \(d.designStampUsed) rigidAveraged \(d.designStampRigidAveraged) "
+                    + "offFace \(d.designStampOffFace) \(num(d.designStampOffFaceN)) maxSmoothingChange \(num(d.maxSmoothingChangeMM)) "
+                    + "materialVolume \(num(d.materialVolumeMM3))",
+                 "ranges targetDepth \(rng(d.targetDepthRange)) buildableDepth \(rng(d.buildableDepthRange)) "
+                    + "buildableDensity \(rng(d.buildableDensityRange)) cell \(rng(d.cellRange)) sigma \(rng(d.sigmaRange))",
+                 "columns \(d.columns.count) sha256 \(sha(d.columns.map(col).joined(separator: "\n")))"]
+        let idx: [Int]
+        if let st = stack, st.columns.count == d.columns.count { idx = sampleIndices(st.columns) } else {
+            idx = Array(stride(from: 0, to: d.columns.count, by: max(1, d.columns.count / 8)))
+        }
+        for k in idx where k < d.columns.count { l.append("  col[\(k)] " + col(d.columns[k])) }
+        return l
+    }
+
+    /// One assembled density field: the grid; SHA-256s of the density (Float) and owner bytes; the
+    /// classes (−1 not lattice, 0 lattice under no loaded face, > 0 ρ) and ρ's sum; the owners'
+    /// histogram; one short SHA-256 per z layer (16 a line). `perturbOwner`: the red control's door
+    /// (one lattice voxel's owner + 1).
+    static func fieldLines(_ f: FlexDensityField, perturbOwner: Bool = false) -> [String] {
+        var owner = f.owner
+        if perturbOwner, let i = f.density.indices.first(where: { f.density[$0] > 0 }) { owner[i] += 1 }
+        var notLattice = 0, unowned = 0, dense = 0, sum = 0.0
+        for x in f.density {
+            if x < -0.5 { notLattice += 1 } else if x == 0 { unowned += 1 } else { dense += 1; sum += Double(x) }
+        }
+        var hist: [Int: Int] = [:]
+        for o in owner { hist[o, default: 0] += 1 }
+        let layer = f.nx * f.ny
+        let layers = (0..<f.nz).map { k -> String in
+            let r = (k * layer)..<min((k + 1) * layer, f.density.count)
+            return "\(k):" + sha(bytesSHA(Array(f.density[r])) + bytesSHA(Array(owner[r]))).prefix(12)
+        }
+        var l = ["grid \(f.nx)x\(f.ny)x\(f.nz) spacing \(num(f.spacing)) origin \(vec(f.origin))",
+                 "density sha256 \(bytesSHA(f.density)) owner sha256 \(bytesSHA(owner))",
+                 "voxels notLattice \(notLattice) unowned \(unowned) rho>0 \(dense) sum \(num(sum))",
+                 "owners " + hist.keys.sorted().map { "\($0):\(hist[$0]!)" }.joined(separator: " ")]
+        l += stride(from: 0, to: layers.count, by: 16).map { "layers " + layers[$0..<min($0 + 16, layers.count)].joined(separator: " ") }
+        return l
+    }
+
+    /// ★ The base S1 attributes core's `in_stack` → `stack_owns_projection` change against (spec §0,
+    /// §15.2, §20): for the model's settled designs, (a) core's design of every loaded key; (b) core's
+    /// assembled density field of each squeeze group, keys sorted by region (or core's refusal: a pinch
+    /// is one profile per stack), with core's voxel counts and handovers; (c) the field the app's
+    /// lattice is built from (generateLattice, the combined field kept), or why it is not built.
+    static func fieldsText(_ m: FlexibleStageModel, label: String, perturbOwner: Bool = false) async throws -> String {
+        await m.waitForIdle()
+        let build = m.build
+        let sortedKeys: ([FlexFaceKey]) -> [FlexFaceKey] = { ks in ks.sorted { a, b in (a.region, a.rotation) < (b.region, b.rotation) } }
+        print("FLEX-AP fields '\(label)' · built against core \(CoreFingerprint.value) (printed, not compared)")
+        var out = ["# core's designs and density fields · \(label)",
+                   "# build \(build.topology) beadsPerWall \(build.beadsPerWall) beadWidth \(num(build.beadWidthMM)) · design temp \(m.designTempC.map { num($0) } ?? "-")"]
+        for k in sortedKeys(m.loadedKeys) {
+            out.append("design region \(k.region) rot \(k.rotation) \"\(m.name(k.region))\"")
+            guard let d = m.designs[k] else { out.append("  none"); continue }
+            out += designLines(d, stack: m.stacks[k]).map { "  " + $0 }
+        }
+        var first = true
+        for g in m.squeezeGroups {
+            let keys = sortedKeys(m.loadedKeys.filter { g.regions.contains($0.region) })
+            out.append("group \(g.number) keys \(keys.map { "\($0.region)@\($0.rotation)" }.joined(separator: " ")) · core's assembled field")
+            do {
+                let (f, s) = try await m.workerForTests.withScene { scene -> (FlexDensityField, FlexFieldSliceInfo) in
+                    let f = try scene.densityField(faces: keys.map(\.region), rotations: keys.map(\.rotation), build: build)
+                    let s = try scene.densitySlice(faces: keys.map(\.region), rotations: keys.map(\.rotation), build: build,
+                                                   axis: 2, index: f.nz / 2)
+                    return (f, s)
+                }
+                out += fieldLines(f, perturbOwner: perturbOwner && first).map { "  " + $0 }
+                first = false
+                out.append("  core voxels lattice \(s.latticeVoxels) assigned \(s.assignedVoxels) unassigned \(s.unassignedVoxels)")
+                out.append("  handovers " + (s.handovers.isEmpty ? "none" : s.handovers.map {
+                    "\($0.faceA)|\($0.faceB) overlap \(num($0.overlapMM3)) blended \(num($0.blendedMM3))" }.joined(separator: " · ")))
+            } catch {
+                out.append("  error \"\(error)\"")
+            }
+        }
+        guard m.readiness.isReady else {
+            out.append("app field: not built — blocking: \(m.readiness.blocking.map(\.oneLine))")
+            return out.joined(separator: "\n") + "\n"
+        }
+        m.keepCombinedField = true
+        m.generateLattice()
+        try await FlexibleHisProject.waitFor(180, "\(label): the lattice") { (m.lattice != nil && !m.latticeIsStale) || m.latticeError != nil }
+        await m.waitForIdle()
+        if let e = m.latticeError {
+            out.append("app field: the build failed \"\(e)\"")
+        } else {
+            let f = try XCTUnwrap(m.lastCombinedField, "\(label): the field the lattice was built from")
+            out.append("app field (the lattice is built from it) · groups \(m.squeezeGroups.count) · shared voxels \(m.lattice?.sharedVoxels ?? -1)")
+            out += fieldLines(f, perturbOwner: perturbOwner && first).map { "  " + $0 }
+        }
+        return out.joined(separator: "\n") + "\n"
+    }
+
+    /// The models whose fields are pinned: C1's pad (top pressed 30 kg, bottom resting), his 0004 and r5 as saved.
+    static let fieldSets = ["c1_pad", "his_0004", "his_0004_r5"]
+
+    static func fieldSetModel(_ label: String, _ test: XCTestCase) async throws -> FlexibleStageModel {
+        switch label {
+        case "c1_pad": return try await padModel(test).0
+        case "his_0004": return try await sendSetModel("his_0004", test).m
+        case "his_0004_r5": return try await sendSetModel("his_r5", test).m
+        default: throw XCTSkip("no field set \(label)")
+        }
+    }
 }
 
 /// RECORD=1 only: writes the goldens above. Skipped (and counted) on every other run.
@@ -411,8 +701,9 @@ final class FlexibleAngledGoldenRecorder: XCTestCase {
         guard ProcessInfo.processInfo.environment["RECORD"] == "1" else {
             throw XCTSkip("set RECORD=1 to record the angled-press goldens")
         }
-        print("FLEX-AP RECORD \(G.hashingMode) → \(G.dir.path)")
-        XCTAssertTrue(G.deterministicHashing, "★ record under SWIFT_DETERMINISTIC_HASHING=1 (his jobs carry hash-ordered outlines)")
+        print("FLEX-AP RECORD \(G.hashingMode) base \(G.baseLabel) core \(CoreFingerprint.value) → \(G.dir.path)")
+        XCTAssertTrue(G.deterministicHashing, "★ record under SWIFT_DETERMINISTIC_HASHING=1 (the subtrees' raw bytes carry hash-ordered UUID dictionaries)")
+        XCTAssertNotNil(ProcessInfo.processInfo.environment["FLEX_AP_BASE"], "★ name the base: FLEX_AP_BASE=<sha>")
     }
 
     func testRecord1PadJobs() async throws {
@@ -450,11 +741,26 @@ final class FlexibleAngledGoldenRecorder: XCTestCase {
         try G.write("frames_m2.txt", try await G.frames(m2, label: "M2 stand (top pressed 5 kg, bottom resting)"))
     }
 
+    /// ★ AP0 FIX-UP: probe_refusals_base.json is the BASE core's refusal texts — AP6's injected probe
+    /// reads them after S1, when core accepts both forms — so it is NEVER overwritten. With the base in
+    /// place, this core's answers are compared with it, and written to probe_answers.json only if they differ.
     func testRecord5ProbeRefusals() throws {
         let a = try G.probeAnswers()
         print("FLEX-AP RECORD probe answers: \(a)")
-        XCTAssertNil(a["control"] ?? "missing", "the control parses")
-        try G.write("probe_refusals_base.json", try G.probeGoldenText(a))
+        let base = G.dir.appendingPathComponent("probe_refusals_base.json")
+        guard FileManager.default.fileExists(atPath: base.path) else {
+            XCTAssertNil(a["control"] ?? "missing", "the control parses")
+            try G.write("probe_refusals_base.json", try G.probeGoldenText(a))
+            return
+        }
+        let obj = try XCTUnwrap(try JSONSerialization.jsonObject(with: Data(contentsOf: base)) as? [String: Any])
+        let same = ["control", "tilt", "edge"].allSatisfy { k in (obj[k] as? String) == (a[k] ?? nil) }
+        if same {
+            print("FLEX-AP RECORD probe_refusals_base.json kept: this core gives the base's answers (nothing written)")
+        } else {
+            print("FLEX-AP RECORD probe_refusals_base.json kept (never overwritten); this core's answers → probe_answers.json")
+            try G.write("probe_answers.json", try G.probeGoldenText(a))
+        }
     }
 
     func testRecord6RoundedSlabFacts() async throws {
@@ -463,11 +769,15 @@ final class FlexibleAngledGoldenRecorder: XCTestCase {
 
     func testRecord7Manifest() throws {
         try G.write("MANIFEST.txt", """
-        # Angled presses (task 2026-10-07), batch AP0: the BASE goldens, recorded at 01ec5e3c
-        # (claude/flexible-screens, PR #362) BEFORE any angled-press code, core \(CoreFingerprint.value),
-        # \(G.hashingMode), by FlexibleAngledGoldenRecorder (RECORD=1). Read by FlexibleAngledGoldenTests.
-        # S1 (the #361 sync) re-runs them, REPORTS every difference with the commit that caused it, and
-        # re-records them as the post-S1 base; every later batch must equal that base.
+        # Angled presses (task 2026-10-07), batch AP0: the BASE goldens of \(G.baseLabel)
+        # (claude/flexible-screens, PR #362), recorded BEFORE any angled-press code by
+        # FlexibleAngledGoldenRecorder (RECORD=1, \(G.hashingMode)), built against core \(CoreFingerprint.value).
+        # The core fingerprint is the repo HEAD when build_core.sh ran, so it lives HERE only: no compared golden
+        # line carries it (testNoComparedGoldenCarriesTheCoreFingerprint). Read by FlexibleAngledGoldenTests.
+        # S1 (the #361 sync) re-runs them, REPORTS every difference with the commit that caused it, and re-records
+        # them as the post-S1 base (FLEX_AP_BASE=<the merge>) — except probe_refusals_base.json, which the recorder
+        # never overwrites (AP6 reads the base texts; a later core's differing answers go to probe_answers.json).
+        # Every later batch must equal that base.
         c1_pad_pure_run_job.json          FlexibleJob.runJobJSON(FlexibleStageTests.inputs(settings())) — paths as $REPO
         c1_pad_pure_stamp_run_job.json    the same, face 1 shaped Stamp (thumb, centred, 2 mm pitch)
         c1_pad_model_run_job.json         the app's model over C1's pad: top pressed 30 kg, bottom resting
@@ -475,11 +785,51 @@ final class FlexibleAngledGoldenRecorder: XCTestCase {
         his_r5_held_send_run_job.json     his 0004_r5 AS SAVED: runJobJSON(resting:) of the first FlexibleCoreHold send ($ROOT = the temp store)
         his_r5_held_send.txt              which send that was
         his_r5_scene_job.json             his 0004_r5's scene job
-        lattice_subtree_*.json            the snapshot's `lattice`, decoded and re-encoded (.sortedKeys) — never re-saved
-        frames_*.txt                      core's FlexStackInfo for every declared region (rotation 0) and every pressed key, bit patterns
+        <set>_sends.txt                   every send the Export step offers as the project stands (FlexibleCoreHold, or 'direct'):
+        <set>_send<n>_run_job.json          its job, for his_0004, his_r5 (send 1 = his_r5_held_send_run_job.json),
+        <set>_scene_job.json                A1_0002, A1_0003, A1_0004 (the A1 store's Flexible projects, s0_frozen/a1)
+        lattice_subtree_*.json            the snapshot's `lattice`, decoded and re-encoded (.sortedKeys) — never re-saved;
+                                          compared canonically in every run (UUID-keyed dictionaries as objects), raw under
+                                          SWIFT_DETERMINISTIC_HASHING=1
+        frames_*.txt                      core's FlexStackInfo for every declared region (rotation 0) and every pressed key,
+                                          bit patterns: two SHA-256s over every column, one short SHA-256 per row, ≤ 27 columns
+                                          on a 5 × 5 (iu, iv) lattice in full (C1 pad, his 0004, r5, the 60 mm cube, the M2
+                                          stand, the STEP cube, his l bracket)
+        fields_*.txt                      core's design of every loaded key (every column hashed), core's assembled density
+                                          field of each squeeze group (density / owner SHA-256s, owner histogram, per-layer
+                                          SHA-256s, voxel counts, handovers) or its refusal, and the app's combined field
+                                          (C1 pad, his 0004, his 0004_r5)
         probe_refusals_base.json          core's answer to the probe's control / tilt / edge documents (null = accepted)
         rounded_slab.txt                  the two slabs' pseudo-faces and which wrap (core's normal-spread flag, or its "normals cancel" refusal)
 
         """)
+    }
+
+    /// ★ AP0 FIX-UP: EVERY existing send's job (and the scene job) of his 0004, his r5 and the A1
+    /// store's three Flexible projects — the ruling's "every existing face press is unchanged: job bytes".
+    func testRecord8EverySendsJob() async throws {
+        for label in G.sendSets {
+            let (roots, m) = try await G.sendSetModel(label, self)
+            let s = G.sends(m)
+            print("FLEX-AP RECORD \(label): \(s.count) send(s) \(s.map(\.title))")
+            try G.write("\(label)_sends.txt", G.sendIndex(label, s))
+            for (n, send) in s.enumerated() {
+                try G.write(G.sendFile(label, n + 1), try G.runJob(m, resting: Set(send.resting), roots: roots))
+            }
+            try G.write(G.sceneFile(label), try G.sceneJob(m, roots: roots))
+        }
+    }
+
+    func testRecord9FramesOnStepParts() async throws {
+        for (file, label, m) in try await G.stepFrameModels(self, "FlexibleAngledGoldenRecorder.testRecord9FramesOnStepParts") {
+            try G.write(file, try await G.frames(m, label: label))
+        }
+    }
+
+    func testRecordFieldsAndDesigns() async throws {
+        for label in G.fieldSets {
+            let m = try await G.fieldSetModel(label, self)
+            try G.write("fields_\(label).txt", try await G.fieldsText(m, label: label))
+        }
     }
 }

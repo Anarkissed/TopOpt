@@ -5,17 +5,25 @@
 //
 // Each comparison has its RED control beside it — a pin that can actually SEE the change it guards:
 //   * run-job bytes: one face at +0.001 kg changes exactly ONE line (weight_n), and a one-byte edit
-//     (deepest 4 → 5 mm) is caught as exactly one byte;
+//     (deepest 4 → 5 mm) is caught as exactly one byte; every send of a held project is its own job;
 //   * lattice subtrees: groupColours = [:] instead of nil changes the bytes (the nil rule presses rely on);
+//     the canonical form sees one changed group depth and is blind only to the UUID pairs' ORDER;
 //   * frames: one column's entry + 1 ulp is caught;
+//   * fields: one voxel's owner + 1 is caught;
 //   * the probe: each form is pinned to its OWN base text (the edge is refused for its missing
 //     face_region_id, the tilt for its unknown press_direction — critique core-purity #1);
 //   * stage jobs: a lattice-stage setting the stage job reads changes the bytes, while a Flexible face
 //     weight does NOT — the stage job (and the LatticeJobJSONDump hashes) cannot see lattice.flexible,
 //     so the run-job and subtree goldens carry the Flexible claim.
-// FLEX_AP_MUTATE=weight | other-send | nil-rule | ulp | edge-as-tilt feeds a control's change into the MAIN
-// comparison, to prove that comparison goes RED on it (FLEX_AP_GOLDEN_DIR = a perturbed copy proves the
-// same for every golden file).
+// FLEX_AP_MUTATE=weight | other-send | nil-rule | ulp | edge-as-tilt | send-weight | owner | depth feeds
+// a control's change into the MAIN comparison, to prove that comparison goes RED on it
+// (FLEX_AP_GOLDEN_DIR = a perturbed copy proves the same for every golden file).
+//
+// ★ AP0 FIX-UP (verifier, 2026-10-07): every comparison runs under ANY hash seed — CI's `swift test`
+// sets none — except the subtrees' RAW bytes (UUID-keyed dictionaries encode in hash order; measured:
+// 0004 / r5 differed in 2 of 3 unseeded launches, while his r5's jobs were identical in 3 of 3 and in
+// the verifier's 12 of 12). The subtrees are compared canonically in every run instead. No compared
+// golden carries core's fingerprint (the repo HEAD when build_core.sh ran).
 import XCTest
 import CryptoKit
 import simd
@@ -25,16 +33,6 @@ import simd
 @MainActor
 final class FlexibleAngledGoldenTests: XCTestCase {
     typealias G = FlexibleAngledGoldens
-
-    /// His jobs carry lattice outlines whose loops come out in HASH order unless the process runs
-    /// with SWIFT_DETERMINISTIC_HASHING=1 — without it their bytes measure the hash seed (memory).
-    private func requireDeterministicHashing(_ what: String) throws {
-        print("FLEX-AP \(what): \(G.hashingMode)")
-        guard G.deterministicHashing else {
-            throw FlexiblePressFixtures.skip("FlexibleAngledGoldenTests.\(what)",
-                                             "needs SWIFT_DETERMINISTIC_HASHING=1 (his job's outline loops are in hash order)")
-        }
-    }
 
     // MARK: - job bytes
 
@@ -64,8 +62,10 @@ final class FlexibleAngledGoldenTests: XCTestCase {
     }
 
     /// His round-5 pad AS SAVED: the job of the Export step's first send ("Send Group 1 only").
+    /// ★ AP0 FIX-UP: runs under ANY hash seed (CI's) — its outlines' loop order is fixed at the source
+    /// (LatticeFaceOutline, ruling 1); a launch whose bytes differed would break that ruling, so it FAILS.
     func testHisRound5HeldSendBytesUnchanged() async throws {
-        try requireDeterministicHashing("testHisRound5HeldSendBytesUnchanged")
+        print("FLEX-AP testHisRound5HeldSendBytesUnchanged: \(G.hashingMode)")
         let (r, m, first) = try await G.hisRound5Model(self)
         let recorded = try G.read("his_r5_held_send.txt")
         print("FLEX-AP his r5 held send: [\(first.title)] resting \(first.resting)")
@@ -82,7 +82,7 @@ final class FlexibleAngledGoldenTests: XCTestCase {
         }
     }
 
-    /// The scene jobs (C1's pad; his r5 under deterministic hashing).
+    /// C1's pad's scene job.
     func testSceneJobBytesUnchanged() async throws {
         let (pad, top, _) = try await G.padModel(self)
         let padScene = try G.sceneJob(pad, roots: [G.repo])
@@ -91,26 +91,71 @@ final class FlexibleAngledGoldenTests: XCTestCase {
         pad.rest(top)
         await pad.waitForIdle()
         XCTAssertNotEqual(try G.sceneJob(pad, roots: [G.repo]), padScene, "control: the scene job sees which face is pressed")
+    }
 
-        try requireDeterministicHashing("testSceneJobBytesUnchanged (his r5 part)")
+    /// His r5's scene job (AP0 fix-up: its own test, run under any hash seed).
+    func testHisRound5SceneJobBytesUnchanged() async throws {
+        print("FLEX-AP testHisRound5SceneJobBytesUnchanged: \(G.hashingMode)")
         let (r, m, _) = try await G.hisRound5Model(self)
         try G.assertGolden(try G.sceneJob(m, roots: G.rootToken(r)), "his_r5_scene_job.json")
     }
 
+    /// ★ AP0 FIX-UP: EVERY send the Export step offers today, and the scene job, of his 0004 and r5 as
+    /// saved and of the A1 store's three Flexible projects (frozen; the M2 stand's face 2, the pad's
+    /// five stamped presses in three groups, the later save of 'Pad split top'): the sends are the
+    /// recorded ones, and each one's job bytes are the golden's.
+    func testEveryExistingSendKeepsItsJobBytes() async throws {
+        print("FLEX-AP testEveryExistingSendKeepsItsJobBytes: \(G.hashingMode)")
+        var checked = 0, crossChecked = 0
+        for label in G.sendSets {
+            let (roots, m) = try await G.sendSetModel(label, self)
+            if G.mutation == "send-weight", let k = m.loadedKeys.first {
+                m.edit({ s in if var f = s.face(k.region) { f.weightKg += 0.001; s.setFace(f) } }, recompute: false)
+            }
+            let s = G.sends(m)
+            print("FLEX-AP \(label): \(s.count) send(s) \(s.map { "\($0.title) resting \($0.resting)" })")
+            XCTAssertEqual(G.sendIndex(label, s), try G.read("\(label)_sends.txt"), "\(label): the sends offered are the recorded ones")
+            var jobs: [String] = []
+            for (n, send) in s.enumerated() {
+                let job = try G.runJob(m, resting: Set(send.resting), roots: roots)
+                try G.assertGolden(job, G.sendFile(label, n + 1))
+                jobs.append(job)
+                checked += 1
+            }
+            try G.assertGolden(try G.sceneJob(m, roots: roots), G.sceneFile(label))
+            // ★ RED CONTROL: each send is its own job — send 2's bytes are not send 1's golden
+            if jobs.count > 1 {
+                XCTAssertNotEqual(jobs[1], try G.read(G.sendFile(label, 1)), "control: \(label) send 2 is not send 1's golden")
+                crossChecked += 1
+            }
+        }
+        print("FLEX-AP every existing send: \(checked) job(s) over \(G.sendSets.count) projects; \(crossChecked) cross-send control(s)")
+        XCTAssertGreaterThan(crossChecked, 0, "premise: a held project offers more than one send")
+    }
+
     // MARK: - the saved project
 
-    /// The `lattice` subtree of 0004, 0004_r5 and 102117B9, decoded and re-encoded with the store's
-    /// encoder settings (never re-saved: a save moves savedAt).
-    /// ★ MEASURED: the WHOLE subtree's bytes depend on the hash seed — a UUID-keyed dictionary
-    /// (groupDepthMM, groupRoles) encodes as a [key, value, …] array in hash order, so 0004_r5 (two
-    /// groups) differed run to run without SWIFT_DETERMINISTIC_HASHING=1. The `flexible` block holds only
-    /// arrays and string-keyed dictionaries (sorted), so ITS comparison runs always: both sides through
-    /// one canonical serializer (JSONSerialization, sorted keys) — a `"presses":[]` would show on either.
+    /// The `lattice` subtree of 0004, 0004_r5, 102117B9 and the A1 store's three Flexible projects,
+    /// decoded and re-encoded with the store's encoder settings (never re-saved: a save moves savedAt).
+    /// ★ AP0 FIX-UP: the WHOLE subtree is compared in EVERY run (CI included), canonically: a UUID-keyed
+    /// dictionary (groupDepthMM, groupRoles, …) encodes as a [key, value, …] array in HASH order, so its
+    /// raw bytes are compared only under SWIFT_DETERMINISTIC_HASHING=1; the canonical form makes each such
+    /// array an object and sorts every key (G.canonicalSubtree). The `flexible` block is also compared
+    /// on its own (one canonical serializer — a `"presses":[]` would show on either side).
     func testLatticeSubtreesReEncodeIdentically() throws {
+        let mutate: ((inout LatticeSettings) -> Void)? = G.mutation == "nil-rule" ? { $0.flexible?.groupColours = [:] }
+            : G.mutation == "depth" ? { l in if let k = l.groupDepthMM.keys.min(by: { $0.uuidString < $1.uuidString }) { l.groupDepthMM[k]! += 1 } }
+            : nil
         for s in G.subtreeSources {
-            let now = try G.latticeSubtree(s.url, mutate: G.mutation == "nil-rule" ? { $0.flexible?.groupColours = [:] } : nil)
-            XCTAssertEqual(try G.flexibleBlock(now), try G.flexibleBlock(try G.read(s.name)),
-                           "\(s.name): the flexible block, canonical")
+            let now = try G.latticeSubtree(s.url, mutate: mutate)
+            let golden = try G.read(s.name)
+            XCTAssertEqual(try G.flexibleBlock(now), try G.flexibleBlock(golden), "\(s.name): the flexible block, canonical")
+            let (a, b) = (try G.canonicalSubtree(now), try G.canonicalSubtree(golden))
+            if a != b {
+                let d = G.lineDiff(a, b)
+                print("FLEX-AP SUBTREE \(s.name) canonical: DIFFERS — \(d.count) line(s); first: \(d.prefix(4).map { "line \($0.line): now '\($0.now)' was '\($0.was)'" })")
+            }
+            XCTAssertEqual(a, b, "\(s.name): the whole subtree, canonical")
         }
         // ★ RED CONTROL: an EMPTY optional where nil was — the same nil rule `presses` will rely on
         for s in G.subtreeSources.prefix(2) {
@@ -121,14 +166,31 @@ final class FlexibleAngledGoldenTests: XCTestCase {
             print("FLEX-AP control \(s.name) groupColours [:] → \(G.byteDiff(try G.flexibleBlock(empty), try G.flexibleBlock(try G.read(s.name)))) byte(s) of the flexible block differ")
             XCTAssertNotEqual(try G.flexibleBlock(empty), try G.flexibleBlock(try G.read(s.name)), "control: [:] instead of nil changes \(s.name)")
         }
+        // ★ RED CONTROL: the canonical form sees ONE changed value (his Top group's depth + 1 mm) …
+        let r5 = G.subtreeSources[1], top = Self.r5TopGroup
+        let deeper = try G.latticeSubtree(r5.url) { $0.groupDepthMM[top]! += 1 }
+        let dd = G.lineDiff(try G.canonicalSubtree(deeper), try G.canonicalSubtree(try G.read(r5.name)))
+        print("FLEX-AP control r5 Top depth + 1 mm: \(dd.count) canonical line(s) differ: \(dd.map { "'\($0.was.trimmingCharacters(in: .whitespaces))' → '\($0.now.trimmingCharacters(in: .whitespaces))'" })")
+        XCTAssertEqual(dd.count, 1, "control: one depth is one canonical line")
+        // … and is blind ONLY to the order of the UUID pairs (what the hash seed moves)
+        let raw = try G.read(r5.name)
+        let obj = try XCTUnwrap(try JSONSerialization.jsonObject(with: Data(raw.utf8)) as? [String: Any])
+        let pairs = try XCTUnwrap(obj["groupDepthMM"] as? [Any])
+        XCTAssertGreaterThanOrEqual(pairs.count, 4, "premise: r5 states two group depths")
+        var swapped = obj
+        swapped["groupDepthMM"] = Array(pairs[2...]) + Array(pairs[..<2])
+        let swappedText = String(decoding: try JSONSerialization.data(withJSONObject: swapped, options: [.sortedKeys]), as: UTF8.self)
+        let unswappedText = String(decoding: try JSONSerialization.data(withJSONObject: obj, options: [.sortedKeys]), as: UTF8.self)
+        XCTAssertNotEqual(swappedText, unswappedText, "premise: the swap is a real edit of the bytes")
+        XCTAssertEqual(try G.canonicalSubtree(swappedText), try G.canonicalSubtree(raw), "the pairs' order is all the canonical form forgets")
         // the whole subtree, byte for byte, where the bytes are not the hash seed's
-        print("FLEX-AP testLatticeSubtreesReEncodeIdentically (whole subtree): \(G.hashingMode)")
+        print("FLEX-AP testLatticeSubtreesReEncodeIdentically (raw bytes): \(G.hashingMode)")
         guard G.deterministicHashing else {
-            print("FLEX-AP PART-SKIP FlexibleAngledGoldenTests.testLatticeSubtreesReEncodeIdentically: the whole-subtree bytes need SWIFT_DETERMINISTIC_HASHING=1 (UUID-keyed dictionaries encode in hash order); the flexible blocks were compared")
+            print("FLEX-AP PART-SKIP FlexibleAngledGoldenTests.testLatticeSubtreesReEncodeIdentically: the RAW subtree bytes need SWIFT_DETERMINISTIC_HASHING=1 (UUID-keyed dictionaries encode in hash order); the canonical subtrees and the flexible blocks were compared")
             return
         }
         for s in G.subtreeSources {
-            try G.assertGolden(try G.latticeSubtree(s.url, mutate: G.mutation == "nil-rule" ? { $0.flexible?.groupColours = [:] } : nil), s.name)
+            try G.assertGolden(try G.latticeSubtree(s.url, mutate: mutate), s.name)
         }
     }
 
@@ -163,11 +225,70 @@ final class FlexibleAngledGoldenTests: XCTestCase {
         try G.assertGolden(try await G.frames(m2, label: "M2 stand (top pressed 5 kg, bottom resting)"), "frames_m2.txt")
     }
 
+    /// ★ AP0 FIX-UP: core's STEP cube (B-rep faces, tied squares — what principal_2d decides) and his
+    /// 'l bracket 3' (frozen S0), nothing pressed (STEP: skipped, printed and counted, when OCCT throws).
+    func testFramesAreTheGoldenOnStepParts() async throws {
+        for (file, label, m) in try await G.stepFrameModels(self, "FlexibleAngledGoldenTests.testFramesAreTheGoldenOnStepParts") {
+            try G.assertGolden(try await G.frames(m, label: label), file)
+        }
+    }
+
+    // MARK: - core's designs and fields
+
+    /// ★ AP0 FIX-UP: the base S1 attributes ownership against — core's `in_stack` becomes
+    /// `stack_owns_projection` with #361's addendum (spec §0, §15.2, §20). On C1's pad and his 0004 /
+    /// r5 as saved: core's design of every loaded key, core's assembled field of each squeeze group (or
+    /// its refusal), its voxel counts and handovers, and the field the app's lattice is built from.
+    func testCoreFieldsAndDesignsAreTheGolden() async throws {
+        print("FLEX-AP testCoreFieldsAndDesignsAreTheGolden: \(G.hashingMode)")
+        for label in G.fieldSets {
+            let m = try await G.fieldSetModel(label, self)
+            let text = try await G.fieldsText(m, label: label, perturbOwner: G.mutation == "owner")
+            try G.assertGolden(text, "fields_\(label).txt")
+            // ★ RED CONTROL: ONE voxel's owner + 1 is seen by the digest the golden holds
+            guard let g = m.squeezeGroups.first else { continue }
+            let keys = m.loadedKeys.filter { g.regions.contains($0.region) }.sorted { ($0.region, $0.rotation) < ($1.region, $1.rotation) }
+            let build = m.build
+            guard let f = try? await m.workerForTests.withScene({
+                try $0.densityField(faces: keys.map(\.region), rotations: keys.map(\.rotation), build: build)
+            }) else { continue }
+            let plain = G.fieldLines(f), moved = G.fieldLines(f, perturbOwner: true)
+            XCTAssertTrue(text.contains(plain[1]), "premise: \(label) group \(g.number)'s digest is the golden's")
+            XCTAssertNotEqual(plain, moved, "control: \(label): one voxel's owner is seen")
+            print("FLEX-AP control \(label) one owner + 1: \(zip(plain, moved).filter { $0 != $1 }.count) line(s) differ")
+        }
+    }
+
+    // MARK: - the fingerprint is never compared
+
+    /// ★ AP0 FIX-UP: core's fingerprint is the repo HEAD when build_core.sh ran (CI builds at the PR's
+    /// head; every rebuild at another commit changes it with no change to core), so no golden a test
+    /// compares may carry it — only MANIFEST.txt (and the probe's JSON, whose "core" key no test reads).
+    func testNoComparedGoldenCarriesTheCoreFingerprint() throws {
+        // this build's fingerprint and the one the goldens were recorded against (MANIFEST.txt)
+        let manifest = try G.read("MANIFEST.txt")
+        let recorded = try XCTUnwrap(manifest.components(separatedBy: "built against core ").dropFirst().first
+            .map { tail in String(tail.prefix { c in c.isLetter || c.isNumber }) }, "the manifest names the core the goldens were built against")
+        let prints = Set([CoreFingerprint.value, recorded].filter { $0.count >= 7 })   // ("dev" = no git: nothing to scan for)
+        func carries(_ text: String) -> Bool { prints.contains { text.contains($0) } }
+        let files = try FileManager.default.contentsOfDirectory(atPath: G.dir.path).sorted()
+        var scanned = 0
+        for f in files where f != "MANIFEST.txt" && !f.hasPrefix("probe_") {
+            XCTAssertFalse(carries(try G.read(f)), "\(f) carries a core fingerprint \(prints.sorted())")
+            scanned += 1
+        }
+        print("FLEX-AP fingerprints \(prints.sorted()) (this build's, the goldens'): absent from \(scanned) compared golden(s)")
+        XCTAssertGreaterThan(scanned, 20)
+        // ★ RED CONTROL: the scan sees the header form AP0 first recorded, which carried it
+        XCTAssertTrue(carries("# FlexStackInfo golden · C1 pad (top pressed 30 kg, bottom resting) · core \(recorded)"),
+                      "control: the scan sees a fingerprint in a golden line")
+    }
+
     // MARK: - the probe's base refusals
 
     /// The probe's documents (spec §10) through core's own parser: the control parses, and each angled
     /// form gets ITS OWN recorded base refusal. After S1 core accepts both: S1 flips this test and
-    /// keeps probe_refusals_base.json for AP6's injected-probe test.
+    /// keeps probe_refusals_base.json for AP6's injected-probe test (the recorder never overwrites it).
     func testProbeDocumentsGetTheRecordedBaseRefusals() throws {
         let golden = try G.read("probe_refusals_base.json")
         let obj = try XCTUnwrap(try JSONSerialization.jsonObject(with: Data(golden.utf8)) as? [String: Any])
@@ -190,9 +311,12 @@ final class FlexibleAngledGoldenTests: XCTestCase {
 
     /// ★ POSITIVE CONTROL for the stage hashes: on his r5 a lattice-stage setting the stage job reads
     /// moves its bytes; a Flexible face weight does not — the stage job never reads lattice.flexible
-    /// (previewBakeInputs strips it, RemoteRunner never reads it), so its hashes guard #354's job only.
+    /// (AppModel.makeLatticeRunRequest and RemoteRun.buildJobJSON have no `.flexible`; previewBakeInputs,
+    /// H12, is the octet PREVIEW's trigger, not this job), so its hashes guard #354's job only.
+    /// ★ AP0 FIX-UP: runs under ANY hash seed: the two jobs are built in one process, and the premise
+    /// "the same project twice gives the same bytes" would catch a hash-ordered job.
     func testTheStageJobSeesALatticeSettingButNeverFlexible() throws {
-        try requireDeterministicHashing("testTheStageJobSeesALatticeSettingButNeverFlexible")
+        print("FLEX-AP testTheStageJobSeesALatticeSettingButNeverFlexible: \(G.hashingMode)")
         let r = try FlexiblePressFixtures.hisRound5(self)
         func job() throws -> String {
             let req = try XCTUnwrap(r.app.makeLatticeRunRequest(), "his r5's lattice job")
