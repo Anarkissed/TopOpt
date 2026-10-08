@@ -156,7 +156,8 @@ VoxelGrid block_grid(int nx, int ny, int nz, double h) {
   return g;
 }
 
-void run_one(std::size_t want, double weld_scale, const char* label) {
+void run_one(std::size_t want, double weld_scale, bool per_strut,
+             const char* label) {
   // ★ THE PRODUCTION LOAD PATH, NOT A UNIT FIXTURE (reviewer, 2026-10-02). In the
   // run, `hexm` is solid voxels that are NOT lattice -- the beams carry load BETWEEN
   // solid regions. My previous version set the mask ALL SOLID (copying
@@ -218,9 +219,52 @@ void run_one(std::size_t want, double weld_scale, const char* label) {
     const double dx = s.b.x - s.a.x, dy = s.b.y - s.a.y, dz = s.b.z - s.a.z;
     longest = std::max(longest, std::sqrt(dx * dx + dy * dy + dz * dz));
   }
-  const double piece = rmin > 0.0 ? weld_scale * 2.0 * rmin : 0.0;
+  // ★ GLOBAL vs PER-STRUT WELD PIECE (reviewer, 2026-10-02), measured before either
+  // ships. The run's rule today is ONE piece, 2 x the THINNEST radius in the whole
+  // network, which is why a single 2 mm family doubles the segments of every 9 mm
+  // strut. The per-strut rule cuts each strut to 2 x ITS OWN radius.
+  //
+  // THE REASONING, VERIFIED RATHER THAN TAKEN: a strut A cut into pieces of length
+  // <= 2*r_a puts every point of its axis within r_a of some A endpoint, and the weld
+  // reaches r_a + r_b >= r_a. So a node-on-axis contact welds. The part that makes a
+  // COARSELY cut thick strut safe is that the REACH grows with r_a at the same rate
+  // the piece does -- which is what my first reading of this missed. And for a true
+  // crossing, where neither endpoint sits at the contact, A's nearest endpoint is
+  // within r_a and B's within r_b, so they are exactly r_a + r_b apart: the per-strut
+  // rule is EXACTLY TIGHT there, not merely sufficient. The global rule is strictly
+  // more conservative (<= 2*r_min).
+  //
+  // Sufficiency is a proof; whether the implementation realises it is a measurement.
+  // floating_ends MUST stay 0.
   const auto t_sub0 = std::chrono::steady_clock::now();
-  if (piece > 0.0 && longest > piece) segs = topopt::subdivide_beam_segments(segs, piece);
+  double piece = 0.0;
+  if (per_strut) {
+    // One subdivision pass per distinct radius, each at its own 2*r. Cell radii come
+    // from a handful of bands, so this is a few passes, and it uses the SAME core
+    // function the run uses rather than a reimplementation.
+    std::vector<double> radii;
+    for (const BeamSegment& sg : segs) {
+      bool seen = false;
+      for (double r : radii) if (r == sg.radius_mm) { seen = true; break; }
+      if (!seen) radii.push_back(sg.radius_mm);
+    }
+    std::vector<BeamSegment> out;
+    out.reserve(segs.size() * 4);
+    for (double r : radii) {
+      std::vector<BeamSegment> grp;
+      for (const BeamSegment& sg : segs) if (sg.radius_mm == r) grp.push_back(sg);
+      const double p = weld_scale * 2.0 * r;
+      const std::vector<BeamSegment> sub =
+          (p > 0.0) ? topopt::subdivide_beam_segments(grp, p) : grp;
+      out.insert(out.end(), sub.begin(), sub.end());
+      piece = (piece == 0.0) ? p : std::min(piece, p);   // report the finest used
+    }
+    segs.swap(out);
+  } else {
+    piece = rmin > 0.0 ? weld_scale * 2.0 * rmin : 0.0;
+    if (piece > 0.0 && longest > piece)
+      segs = topopt::subdivide_beam_segments(segs, piece);
+  }
   const double sub_s = std::chrono::duration<double>(
       std::chrono::steady_clock::now() - t_sub0).count();
 
@@ -230,11 +274,12 @@ void run_one(std::size_t want, double weld_scale, const char* label) {
   const double net_s = std::chrono::duration<double>(
       std::chrono::steady_clock::now() - t_net0).count();
 
-  std::printf("%s GEOM | cells PLACED %zu | pocket z %.1f..%.1f mm | hex voxels %zu "
+  std::printf("%s[%s] GEOM | cells PLACED %zu | pocket z %.1f..%.1f mm | hex voxels %zu "
               "(slabs + %d-voxel walls) | weld x%.2f piece %.4f mm | segments %zu -> %zu | "
               "welded %zu | T-ends %zu | floating %zu | subdiv %.2f s | network %.2f s "
               "| peak RSS %.0f MB | load %.2f\n",
-              label, cells.size(), z_lo, z_hi, hex_n, WALL, weld_scale, piece, before,
+              label, per_strut ? "per-strut" : "global", cells.size(), z_lo, z_hi,
+              hex_n, WALL, weld_scale, piece, before,
               segs.size(), seams.welded_nodes, seams.t_junction_ends,
               seams.floating_ends, sub_s, net_s, peak_rss_mb(), load1());
   std::fflush(stdout);
@@ -268,11 +313,12 @@ void run_one(std::size_t want, double weld_scale, const char* label) {
     // zero stress. With the hex mask confined to the two slabs, geometry leaves the
     // beams as the only path between them, so a low dropped fraction plus a low
     // zero-stress fraction plus a non-trivial p99 IS the load going through the beams.
-    std::printf("%s CERT | verdict %s | margin %.4g | p99 %.4g MPa | max %.4g | "
+    std::printf("%s[%s] CERT | verdict %s | margin %.4g | p99 %.4g MPa | max %.4g | "
                 "stat %s | members %zu | dropped %zu (%.3f of length) | "
                 "load_dropped %.4f | zero_stress %.4f | cert_seconds %.1f | "
                 "wall %.1f s | cert_peak_RSS %.0f MB | peak RSS %.0f MB | load %.2f%s%s\n",
-                label, vn, c.margin, c.stress_p99_mpa, c.stress_max_mpa,
+                label, per_strut ? "per-strut" : "global", vn, c.margin,
+                c.stress_p99_mpa, c.stress_max_mpa,
                 c.verdict_statistic.empty() ? "-" : c.verdict_statistic.c_str(),
                 c.members, c.members_dropped, c.dropped_length_fraction,
                 c.worst_load_dropped_fraction, c.zero_stress_fraction, c.seconds, s,
@@ -282,7 +328,8 @@ void run_one(std::size_t want, double weld_scale, const char* label) {
   } catch (const std::exception& e) {
     const double s = std::chrono::duration<double>(
         std::chrono::steady_clock::now() - t0).count();
-    std::printf("%s CERT | THREW after %.1f s: %s\n", label, s,
+    std::printf("%s[%s] CERT | THREW after %.1f s: %s\n", label,
+                per_strut ? "per-strut" : "global", s,
                 std::string(e.what()).substr(0, 200).c_str());
   }
   std::fflush(stdout);
@@ -291,14 +338,15 @@ void run_one(std::size_t want, double weld_scale, const char* label) {
 }  // namespace
 
 int main(int argc, char** argv) {
-  // argv: <cells> [weld_scale]. ONE size per invocation, so a slow size can be given
-  // its own timeout instead of blocking the others.
+  // argv: <cells> [weld_scale] [rule]   rule = global | per-strut | both (default)
   const std::size_t want = argc > 1 ? static_cast<std::size_t>(std::atol(argv[1])) : 500;
   const double weld = argc > 2 ? std::atof(argv[2]) : 1.0;
+  const std::string rule = argc > 3 ? argv[3] : "both";
   std::printf("# stepped beam cost probe. Shared box: wall times are UPPER BOUNDS,\n"
               "# not benchmarks; load1 is on every line. start load %.2f\n", load1());
   char label[64];
   std::snprintf(label, sizeof label, "plan~%zu", want);
-  run_one(want, weld, label);
+  if (rule == "global" || rule == "both") run_one(want, weld, false, label);
+  if (rule == "per-strut" || rule == "both") run_one(want, weld, true, label);
   return 0;
 }

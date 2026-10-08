@@ -424,6 +424,19 @@ const char* lattice_type_readiness_plain(LatticeTypeReadiness r);
 // `id` is the job's topology string. `generatable` and `certifiable` are the two name
 // sets. An id absent from both AND not a known topology name is UnknownId, which is a
 // different answer from NotEither: one is a typo, the other is a type core knows.
+// ── ★ THE IDS CORE HAS PLANNED BUT NOT BUILT (reviewer's ruling, 2026-10-07) ───
+// `gyroid` and `schwarz_d` are the two SHEET types on the go-live list. They are not in
+// LatticeTopology yet, so `lattice_type_readiness` would call them UnknownId -- "not a
+// topology id at all", the answer for a TYPO. That is the wrong answer: core knows these
+// two and has simply not built them, which is exactly what NotEither means. An app that
+// cannot tell "we have not got there yet" from "you misspelled it" shows the user the
+// wrong message.
+//
+// ONE list, shared with the print-tests loader (K4) so a maintainer row naming a planned
+// type is refused by the same set that answers the app. DELETED AT K2, when the sheet
+// types enter the enum and the generatable/certifiable sets answer for them.
+const std::vector<std::string>& lattice_planned_topology_ids();
+
 LatticeTypeReadiness lattice_type_readiness(
     const std::string& id, const std::vector<std::string>& generatable,
     const std::vector<std::string>& certifiable);

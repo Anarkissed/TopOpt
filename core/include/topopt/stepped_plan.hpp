@@ -27,6 +27,7 @@
 // bound is applied on top of it, never instead of it.
 
 #include "topopt/lattice.hpp"  // LatticeTopology
+#include "topopt/clearance.hpp"  // ClearanceGeometry, point_in_clearance_region
 #include <array>
 #include <cstddef>
 #include <string>
@@ -154,7 +155,16 @@ SteppedPlanCheck stepped_validate_plan(LatticeTopology topo,
                                        const std::vector<SteppedPlanRegion>& regions,
                                        double bead_mm, double min_tile_mm = 0.0,
                                        bool apply_prints_open = true,
-                                       SteppedMenu menu = SteppedMenu::AnyStep);
+                                       SteppedMenu menu = SteppedMenu::AnyStep,
+                                       // ★ The include regions, for the STRADDLER rule
+                                       // where two prisms meet: a cross-region overlap is
+                                       // legitimate only where each cell's CENTRE is
+                                       // owned by its own region (stepped_region_owner).
+                                       // Omitted, every cross-region overlap is refused,
+                                       // which is the conservative answer and what a
+                                       // caller with no geometry to ask about should get.
+                                       const std::vector<ClearanceGeometry>* includes =
+                                           nullptr);
 
 // ── ONE PASS PER (REGION, FAMILY), NOT PER DISTINCT SIZE ────────────────────────
 // The dyadic path builds a pass per distinct size on a grid anchored at the SOLVED
@@ -187,5 +197,33 @@ struct SteppedCellGroup {
 // so the emitted file is byte-identical for identical input.
 std::vector<SteppedCellGroup> stepped_group_cells(
     const std::vector<SteppedCell>& cells, const std::vector<SteppedPlanRegion>& regions);
+
+// ── ★ WHICH REGION OWNS A POINT (reviewer's ruling 4, 2026-10-07) ──────────────
+// Core used to give a point inside two include prisms to the FIRST matching region in
+// DECLARATION ORDER, however far its face was (run_job.cpp's per-voxel region ids,
+// fit_cell_field, the void rule, and the any-step base derivation that reads them). That
+// is not a geometric rule: it makes the answer depend on the order the app happened to
+// write the regions in, and the app's own rule -- which core now adopts -- is the nearer
+// FACE PLANE.
+//
+// Among the include regions whose PRISM CONTAINS the point, the owner is the one whose
+// face plane is nearest; an exact tie goes to the lower region id. Never declaration
+// order.
+//
+// CONTAINMENT IS NOT RE-DERIVED HERE. It is `point_in_clearance_region`, the same
+// predicate core already resolves per-voxel membership with -- same lateral bounds, same
+// frame convention, same outline. Only the TIE-BREAK is new, which is the whole of the
+// change. A second containment test that agreed with the first only most of the time is
+// the failure this avoids.
+//
+// Returns a 1-BASED index into `includes` (so it can be compared with a cell's
+// `region_id`), or 0 for NO OWNER -- a point inside no prism belongs to nobody, and
+// callers must treat 0 as "not in any include region" rather than as a region.
+//
+// A region with no face plane (a bolt: |normal| == 0) has no distance to compare, so it
+// cannot win on nearness; among such regions the lower id wins. That case is not in the
+// ruling and nothing in the job schema produces it for a lattice include today, so it is
+// resolved deterministically rather than left to chance.
+int stepped_region_owner(const Vec3& p, const std::vector<ClearanceGeometry>& includes);
 
 }  // namespace topopt
