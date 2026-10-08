@@ -136,6 +136,9 @@ SteppedPlanCheck stepped_validate_plan(LatticeTopology topo,
                                                     apply_prints_open, menu);
   }
 
+  // Hoisted: inside the per-cell loop `menu` is shadowed by that region's size
+  // vector, so the MENU KIND is read here, where the name still means the parameter.
+  const bool own_grid_only = menu == SteppedMenu::Halves;
   std::map<double, std::size_t, std::greater<double>> hist;
 
   // ── ★ OVERLAP IS TESTED EXACTLY, IN WORLD COORDINATES (R5, R3 and a false
@@ -230,18 +233,49 @@ SteppedPlanCheck stepped_validate_plan(LatticeTopology topo,
     const double oy = cell.origin.y - reg.slot_origin.y;
     const double oz = cell.origin.z - reg.slot_origin.z;
     const std::vector<int>& divs = div_of[cell.region_id];
-    const bool ax = aligned_on_some_family(ox, cell.size_mm, reg.base_cell_mm, divs);
-    const bool ay = aligned_on_some_family(oy, cell.size_mm, reg.base_cell_mm, divs);
-    const bool az = aligned_on_some_family(oz, cell.size_mm, reg.base_cell_mm, divs);
-    const bool is_base = std::fabs(cell.size_mm - reg.base_cell_mm) <=
-                         kSteppedMenuSameRel * std::max(1.0, reg.base_cell_mm);
-    if (!is_base && !(ax && ay && az)) {
+    // ── ★ R6: WHICH GRID A CELL MUST LAND ON (#354's brief 2026-10-02; reviewer's
+    // ruling 3, 2026-10-07) ──────────────────────────────────────────────────────
+    // Two things were wrong here. BASE cells were exempt entirely, so a base cell at any
+    // offset was accepted -- and then MOVED by stepped_group_cells to the nearest point
+    // of its own grid, by up to half its size, which the STL shows and no receipt does.
+    // And every other cell was checked only against SOME family that can express its
+    // size, never against its own size's grid.
+    //
+    // DOUBLED is a halving octree: it can only ever place a cell on its OWN size's grid
+    // from the slot origin, so that is what is required, base cells included. R6 (a base
+    // cell 1 mm off) and R6b (an S/2 cell on the S/4 tile) are refused here.
+    //
+    // ANY-STEP may place a k-tile cell at ANY whole tile, so the family disjunction
+    // stands -- R6c and R6d are sound plans and must be accepted, and grouping keeps
+    // their origins. The base exemption is gone under both menus: a base cell is a whole
+    // slot and belongs on the base grid.
+    auto on_own_size_grid = [&](double off) {
+      const double q = off / cell.size_mm;
+      return std::fabs(q - std::floor(q + 0.5)) <= 1e-6;
+    };
+    // A cell on its OWN size's grid is always legitimate -- that is the one grid every
+    // packer can place it on, and for a base cell it is the base grid. Under ANY-STEP a
+    // k-tile cell may additionally sit at any whole tile of a family that can express its
+    // size, so there the family disjunction ADDS permission rather than replacing it.
+    // (It cannot be the only test: `stepped_admitted_divisors` returns an EMPTY list when
+    // the printability rule leaves a region's menu holding nothing but its base, and
+    // asking only the families would then refuse every cell -- which is what the base
+    // exemption this replaces was quietly covering up.)
+    auto aligned = [&](double off) {
+      if (on_own_size_grid(off)) return true;
+      return !own_grid_only &&
+             aligned_on_some_family(off, cell.size_mm, reg.base_cell_mm, divs);
+    };
+    const bool ax = aligned(ox), ay = aligned(oy), az = aligned(oz);
+    if (!(ax && ay && az)) {
       std::snprintf(msg, sizeof msg,
                     "stepped cell %zu in region %d is %.4g mm at offset (%.4g, %.4g, "
-                    "%.4g) from the slot grid, which is not a multiple of its family's "
-                    "tile on %s%s%s",
-                    c, cell.region_id, cell.size_mm, ox, oy, oz, ax ? "" : "x ",
-                    ay ? "" : "y ", az ? "" : "z");
+                    "%.4g) from the slot grid, which is not a multiple of %s on %s%s%s",
+                    c, cell.region_id, cell.size_mm, ox, oy, oz,
+                    own_grid_only ? "its OWN size (the halving octree can place it "
+                                    "nowhere else)"
+                                  : "its family's tile",
+                    ax ? "" : "x ", ay ? "" : "y ", az ? "" : "z");
       out.error = msg;
       return out;
     }
@@ -377,18 +411,62 @@ std::vector<SteppedCellGroup> stepped_group_cells(
   std::unordered_map<int, const SteppedPlanRegion*> by_id;
   for (const SteppedPlanRegion& r : regions) by_id[r.region_id] = &r;
 
-  // key: region id and the size, quantised so floating point cannot split one family
-  std::map<std::pair<int, long long>, std::vector<const SteppedCell*>> bucket;
+  // ── ★ R6: A GROUP IS (REGION, SIZE, PHASE), AND THAT IS WHY NOTHING MOVES ─────
+  // The key was (region, size) alone, and each bucket got ONE grid of that size walked
+  // back from the slot origin. A cell that was not a whole number of its own size from
+  // the slot origin therefore rounded to the nearest grid point -- measured at up to half
+  // its size, and on one of the brief's jobs a 7.25 mm cell landed ON TOP of its
+  // neighbour, covering x 18-20.42 twice and leaving x 25.25-27.67 bare. Any-step packs
+  // produce such cells as a matter of course, because the packer may place a k-tile cell
+  // at ANY whole tile.
+  //
+  // The PHASE -- the cell's offset from the slot origin modulo its own size, per axis --
+  // joins the key. Within one phase bucket every cell is a whole number of sizes from
+  // every other, so the bucket's own minimum corner IS an exact grid origin and every
+  // index maps back to the origin that was SENT. Nothing is re-anchored, which is what
+  // this file's own header always promised ("never a re-anchoring that could move a cell
+  // the maintainer approved").
+  //
+  // Prototyped against the brief's own Python port of this function before being written
+  // here: all seven of its measured cases come back at 0.000e+00 mm of movement, and
+  // core's packed-slot fixture goes from 7,344 once / 3,240 uncovered / 3,240 doubled back
+  // to 13,824 / 0 / 0.
+  //
+  // THE COST is passes: a group is an emission pass, so phases multiply them (a k-tile
+  // cell admits up to k phases per axis). Measured before shipping -- see the handoff.
+  auto phase_key = [](double off, double size) {
+    double q = off / size;
+    q -= std::floor(q);                       // the fractional part, in [0, 1)
+    long long k = std::llround(q * size * 1e6);
+    if (k == std::llround(size * 1e6)) k = 0;  // a hair under a whole step is a whole step
+    return k;
+  };
+  struct GroupKey {
+    int region;
+    long long size, px, py, pz;
+    bool operator<(const GroupKey& o) const {
+      if (region != o.region) return region < o.region;
+      if (size != o.size) return size > o.size;   // size DESCENDING, as before
+      if (px != o.px) return px < o.px;
+      if (py != o.py) return py < o.py;
+      return pz < o.pz;
+    }
+  };
+  std::map<GroupKey, std::vector<const SteppedCell*>> bucket;
   for (const SteppedCell& c : cells) {
-    if (!by_id.count(c.region_id) || !(c.size_mm > 0.0)) continue;
-    bucket[{c.region_id, static_cast<long long>(std::llround(c.size_mm * 1e6))}]
-        .push_back(&c);
+    auto it_r = by_id.find(c.region_id);
+    if (it_r == by_id.end() || !(c.size_mm > 0.0)) continue;
+    const SteppedPlanRegion& rg = *it_r->second;
+    const GroupKey k{c.region_id, static_cast<long long>(std::llround(c.size_mm * 1e6)),
+                     phase_key(c.origin.x - rg.slot_origin.x, c.size_mm),
+                     phase_key(c.origin.y - rg.slot_origin.y, c.size_mm),
+                     phase_key(c.origin.z - rg.slot_origin.z, c.size_mm)};
+    bucket[k].push_back(&c);
   }
 
   std::vector<SteppedCellGroup> out;
   for (auto& kv : bucket) {
-    const SteppedPlanRegion& reg = *by_id[kv.first.first];
-    const double size = static_cast<double>(kv.first.second) * 1e-6;
+    const double size = static_cast<double>(kv.first.size) * 1e-6;
     // The grid origin is the SLOT origin walked back by whole cells to below the group's
     // minimum corner, so every cell lands on a non-negative integer index without the
     // origin ever leaving the family's own tile grid.
@@ -400,14 +478,12 @@ std::vector<SteppedCellGroup> stepped_group_cells(
         hi[a] = std::max(hi[a], p[a] + size);
       }
     }
-    const double slot[3] = {reg.slot_origin.x, reg.slot_origin.y, reg.slot_origin.z};
+    // Every cell in this bucket shares a phase, so the bucket's own minimum corner is a
+    // point of their common grid -- exact, with no walk back and nothing to round.
     double org[3];
-    for (int a = 0; a < 3; ++a) {
-      const double steps = std::floor((lo[a] - slot[a]) / size + 1e-9);
-      org[a] = slot[a] + steps * size;
-    }
+    for (int a = 0; a < 3; ++a) org[a] = lo[a];
     SteppedCellGroup g;
-    g.region_id = kv.first.first;
+    g.region_id = kv.first.region;
     g.size_mm = size;
     g.origin = Vec3{org[0], org[1], org[2]};
     g.nx = std::max(1, static_cast<int>(std::llround((hi[0] - org[0]) / size)));

@@ -1,5 +1,5 @@
 {
- "_comment": "Control for ruling 4: region 2's cell sits where region 1 owns the centre. A real cross-region collision, REFUSED by name.",
+ "_comment": "Control for ruling 4: region 2's cell is on its own grid but its CENTRE (9, 7.5, 9.5) is owned by region 1 -- 7.5 mm from A's plane against 9 from B's. A real cross-region collision, REFUSED by name.",
  "bake_build_orientation": "off",
  "grading": {
   "algorithm": "doubled",
@@ -19,9 +19,9 @@
     "kind": "face",
     "geometry": {
      "origin": [
-      6.0,
+      4.5,
       0.0,
-      8.0
+      6.5
      ],
      "normal": [
       0.0,
@@ -39,8 +39,8 @@
     "geometry": {
      "origin": [
       0.0,
-      6.0,
-      8.0
+      4.5,
+      6.5
      ],
      "normal": [
       1.0,
@@ -67,8 +67,8 @@
    {
     "region_id": 2,
     "origin_mm": [
+     6.0,
      4.5,
-     0.0,
      6.5
     ],
     "size_mm": 6.0

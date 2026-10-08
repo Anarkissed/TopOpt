@@ -85,8 +85,13 @@ int main() {
   // ever became some other refusal, the pair above would stop being a comparison.
   CHECK(has(ab_text, "from the slot grid"),
         "and it is the ALIGNMENT check that refuses it, naming the offset");
-  CHECK(has(ab_text, "3.4"),
-        "which reports the offset from the grid core used (3.4 mm along x)");
+  // The offset it names is the BASE cell's (0.4 mm), not the 1.5 mm cell's (3.4 mm):
+  // since R6 removed the base exemption, the base cell is checked too and is the first
+  // cell in the plan that is off the grid core used. Either number is the same evidence
+  // -- that the ALIGNMENT check is what refuses, measured from the derived origin -- and
+  // this comment is here because the suite caught the change when R6 landed.
+  CHECK(has(ab_text, "0.4"),
+        "which reports the offset from the grid core used (0.4 mm, the base cell's)");
 
   // ── stated, but out of the face plane: refused, and it says which region ────
   std::string off_text;

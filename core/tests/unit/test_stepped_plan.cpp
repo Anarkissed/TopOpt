@@ -214,6 +214,141 @@ static void test_menu_shape() {
 // wrong strut width to every cell -- silently, with a plausible-looking lattice. The
 // cells here are deliberately sent in an order that the sort must change, and each
 // one's rho is a function of its own position so a mispairing cannot look right.
+// ── R6: WHAT GROUPING LAYS IS WHAT THE PLAN SENT ──────────────────────────────
+// `stepped_group_cells` bucketed by (region, size) and gave each bucket ONE grid of that
+// size walked back from the slot origin, then took each cell's index as
+// llround((origin - grid origin)/size). A cell that was not a whole number of its own
+// size from the slot origin was therefore ROUNDED to the nearest grid point -- measured
+// at up to half its size, and the run lays exactly that grid. Nothing refused it and no
+// receipt recorded it; only the STL showed it.
+//
+// Core's own packed-slot fixture has the defect. `test_packed_slot_covers_exactly_once`
+// (left untouched, as the reviewer ruled -- it checks the SENT plan's coverage, which is
+// still a valid property) packs a 12 mm slot with a 9 mm cell at (3, 3, 0) and 37 threes.
+// The 9 sits one quarter-tile in, so it is not on its own 9 mm grid. Sampled on the cells
+// as SENT every point is covered once; sampled on the cells as GROUPED -- which is what
+// the run lays -- #354 measured 7,344 once, 3,240 uncovered and 3,240 DOUBLE covered,
+// with the 9 laid at (0, 0, 0). This test samples the grouped cells, which is the
+// property that was broken.
+static void test_grouped_cells_cover_the_slot_exactly_once() {
+  SteppedPlanRegion reg;
+  reg.region_id = 1;
+  reg.base_cell_mm = 12.0;
+  reg.slot_origin = Vec3{0.0, 0.0, 0.0};
+
+  std::vector<SteppedCell> cells;
+  auto add = [&](double x, double y, double z, double s) {
+    SteppedCell c;
+    c.region_id = 1;
+    c.origin = Vec3{x, y, z};
+    c.size_mm = s;
+    cells.push_back(c); };
+  add(3.0, 3.0, 0.0, 9.0);
+  for (int i = 0; i < 4; ++i)
+    for (int j = 0; j < 4; ++j)
+      for (int k = 0; k < 4; ++k) {
+        const double x = 3.0 * i, y = 3.0 * j, z = 3.0 * k;
+        if (!(x >= 3.0 && y >= 3.0 && z < 9.0)) add(x, y, z, 3.0);
+      }
+  CHECK(cells.size() == 38, "grouped coverage: the fixture is the 9 plus 37 threes");
+
+  const std::vector<SteppedCellGroup> gs = stepped_group_cells(cells, {reg});
+  // Coverage sampled on the GROUPED cells: group origin + index * size, which is exactly
+  // what run_job lays (PR.origin = g.origin, PR.cell_mm = g.size_mm, `latticed` marking
+  // the indices).
+  const double h = 0.5;
+  const int n = static_cast<int>(12.0 / h);
+  long long once = 0, none = 0, doubled = 0;
+  for (int a = 0; a < n; ++a)
+    for (int b = 0; b < n; ++b)
+      for (int c = 0; c < n; ++c) {
+        const double x = h / 2 + a * h, y = h / 2 + b * h, z = h / 2 + c * h;
+        int hits = 0;
+        for (const SteppedCellGroup& g : gs)
+          for (const std::array<int, 3>& ix : g.cells) {
+            const double ox = g.origin.x + ix[0] * g.size_mm;
+            const double oy = g.origin.y + ix[1] * g.size_mm;
+            const double oz = g.origin.z + ix[2] * g.size_mm;
+            if (x >= ox && x < ox + g.size_mm && y >= oy && y < oy + g.size_mm &&
+                z >= oz && z < oz + g.size_mm)
+              ++hits;
+          }
+        if (hits == 1) ++once;
+        else if (hits == 0) ++none;
+        else ++doubled;
+      }
+  CHECK(none == 0, "grouped coverage: no point of the slot is left BARE by what is laid");
+  CHECK(doubled == 0, "grouped coverage: and no point is covered TWICE");
+  CHECK(once == 13824, "grouped coverage: every one of the 13,824 sample points once");
+}
+
+// And the identity directly, for the three placements #354 measured core moving: a base
+// cell 1 mm off its grid (R6), a three-tile cell one tile in (R6c, which core laid ON TOP
+// of its neighbour), and a k-tile cell at the start of the second base slot (R6d, moved
+// 2.9 mm). After grouping, index -> position must give back the origin that was sent.
+static void test_grouping_lays_every_cell_where_it_was_sent() {
+  auto check_one = [](const char* what, Vec3 slot, double base,
+                      const std::vector<std::pair<Vec3, double>>& sent) {
+    SteppedPlanRegion reg;
+    reg.region_id = 1;
+    reg.base_cell_mm = base;
+    reg.slot_origin = slot;
+    std::vector<SteppedCell> cells;
+    for (const auto& s : sent) {
+      SteppedCell c;
+      c.region_id = 1;
+      c.origin = s.first;
+      c.size_mm = s.second;
+      cells.push_back(c);
+    }
+    const std::vector<SteppedCellGroup> gs = stepped_group_cells(cells, {reg});
+    std::size_t laid = 0;
+    double worst = 0.0;
+    for (const SteppedCellGroup& g : gs)
+      for (const std::array<int, 3>& ix : g.cells) {
+        ++laid;
+        const Vec3 at{g.origin.x + ix[0] * g.size_mm, g.origin.y + ix[1] * g.size_mm,
+                      g.origin.z + ix[2] * g.size_mm};
+        // the nearest sent cell of this size, and how far the laid one is from it
+        // ★ THE TOLERANCES, and why they are not 1e-9. stepped_group_cells keys a group
+        // on llround(size * 1e6), so a group's size is its sent size QUANTISED TO A
+        // NANOMETRE: 14.5/6 arrives as 2.4166666666666665 and comes back as 2.416667, a
+        // 3.3e-7 mm difference. A 1e-9 match therefore finds no cell at all and reports
+        // a move of 1e300 -- which is what the first draft of this test did. The bound
+        // below is 1e-5 mm: five orders of magnitude under the movements being tested
+        // (0.75 to 2.9 mm) and 45,000 times under the bead, so it cannot hide a
+        // re-anchoring while tolerating the quantisation.
+        double best = 1e300;
+        for (const auto& s : sent) {
+          if (std::fabs(s.second - g.size_mm) > 2e-6) continue;
+          const double d = std::max(std::max(std::fabs(at.x - s.first.x),
+                                             std::fabs(at.y - s.first.y)),
+                                    std::fabs(at.z - s.first.z));
+          best = std::min(best, d);
+        }
+        worst = std::max(worst, best);
+      }
+    if (laid != sent.size() || !(worst < 1e-5))
+      std::fprintf(stderr, "  [%s] laid %zu of %zu, worst move %.6g mm\n", what, laid,
+                   sent.size(), worst);
+    CHECK(laid == sent.size(), what);
+    CHECK(worst < 1e-5, what);
+  };
+  // R6: a 3 mm BASE cell 1 mm off its own grid in x. Core laid it at 18, 1 mm away.
+  check_one("R6: a base cell off its grid is laid where SENT, not on the grid",
+            Vec3{18.0, 12.0, 8.0}, 3.0, {{Vec3{19.0, 9.0, 8.0}, 3.0}});
+  // R6c: a one-tile cell and a three-tile cell one tile in, on a 14.5 mm base's sixths.
+  // Core laid the big one at 18, on top of the tile.
+  check_one("R6c: a three-tile cell one tile in is laid where SENT, not on its neighbour",
+            Vec3{18.0, 0.0, 8.0}, 14.5,
+            {{Vec3{18.0, 0.0, 8.0}, 14.5 / 6.0},
+             {Vec3{18.0 + 14.5 / 6.0, 0.0, 8.0}, 3.0 * (14.5 / 6.0)}});
+  // R6d: an 8.7 mm cell at the start of the SECOND base slot. Core laid it 2.9 mm on.
+  check_one("R6d: a k-tile cell at the second slot is laid where SENT",
+            Vec3{18.0, 0.0, 8.0}, 14.5,
+            {{Vec3{18.0, 0.0, 8.0 + 14.5}, 3.0 * (14.5 / 5.0)}});
+}
+
 // ── R5, R3 and a FALSE ACCEPTANCE (#354's core brief, 2026-10-02) ──────────────
 // Overlap was decided by a hash of ONE finest tile -- the smallest size on ANY
 // region's menu -- each cell claiming llround(size/finest) slots from slot
@@ -1001,6 +1136,8 @@ int main() {
   test_plan_validation();
   test_depth_projects_the_cube_not_one_corner();
   test_overlap_is_exact_not_a_shared_tile();
+  test_grouped_cells_cover_the_slot_exactly_once();
+  test_grouping_lays_every_cell_where_it_was_sent();
   test_doubled_menu_is_halves_only();
   test_group_keeps_each_cells_own_rho();
   test_outline_beam_width();

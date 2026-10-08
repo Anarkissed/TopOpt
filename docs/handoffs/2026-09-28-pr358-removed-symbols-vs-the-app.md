@@ -407,6 +407,31 @@ exported so #354's R7 can call it through the bridge instead of keeping a Swift 
     int stepped_region_owner(const Vec3& p, const std::vector<ClearanceGeometry>& includes);
     // 1-based index into `includes`, or 0 for NO OWNER.
 
+## MEANING CHANGES, addendum 8 (2026-10-07) — R6: what is accepted is what is laid
+
+From #354's core brief of 2026-10-02 (R6, R6b, R6c, R6d) and the reviewer's ruling 3 of
+2026-10-07.
+
+| what | was | is | app impact |
+|---|---|---|---|
+| a DOUBLED cell not on its own size's grid from the slot origin | ACCEPTED, then LAID somewhere else — up to half its size away, with no receipt recording the move | **REFUSED**, naming the offset and that a halving octree can place it nowhere else | **intended.** R6 (a base cell 1 mm off) and R6b (an S/2 cell on the S/4 tile) are refused. A halving octree cannot produce such a cell, so a plan containing one did not come from one |
+| a base-size cell, either menu | exempt from the alignment check entirely | checked like any other cell | **intended.** A base cell is a whole slot and belongs on the base grid. This is also what made the moves invisible: the app's base cells sit off core's grid by R1's anchor, which is why `slot_origin_mm` landed first |
+| an ANY-STEP k-tile cell at a whole tile that is not a multiple of k tiles | accepted, then MOVED — measured at 1 mm (R6), 2.41667 mm (R6c, landing ON TOP of its neighbour) and 2.9 mm (R6d) | accepted and laid **where sent** | **intended, and it is why any-step packs were coming out wrong.** R6c's lattice covered x 18–20.42 twice and left x 25.25–27.67 bare |
+| core's own packed-slot fixture, sampled on the cells as LAID | 7,344 covered once, 3,240 uncovered, 3,240 covered twice | 13,824 / 0 / 0 | n/a — a core test. `test_packed_slot_covers_exactly_once` is untouched (it checks the SENT plan, still a valid property); a new test beside it samples the grouped cells |
+
+Controls keep their STLs, checked against the hashes #354 recorded:
+`R6_control_on_grid` 1ccf1bdf90a8…, `R6b_control_half_at_21` e630030f9ccf…,
+`R6d_control_first_slot` 5cae340a5661… — byte-identical. And `R6d_anystep_second_slot`'s
+STL no longer equals `R6d_ref_at_25_4`'s, which is the brief's own after-the-fix test.
+
+**The cost, measured.** A group is an emission pass, and the phase join multiplies them.
+On a 37-cell any-step plan with three sizes at mixed phases: passes **3 → 6 (2.0×)**, wall
+time **1.6 s → 1.6–1.7 s (flat)**. On R6c and R6d: **unchanged (1.0×)**. The reviewer's gate
+was "stop if either grows more than 2×"; 2.0× does not exceed it and the wall clock did not
+move, because each pass carries proportionally fewer cells. CAVEAT, stated because it
+bounds the result: his three project plans are not available in this worktree, so the
+37-cell plan is a generated proxy for the gate, not the gate itself.
+
 ### The fingerprint defect, for the record
 
 Not the worktree (`git -C core rev-parse` resolves fine there), and not only the

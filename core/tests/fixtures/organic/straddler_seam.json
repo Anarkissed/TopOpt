@@ -1,5 +1,5 @@
 {
- "_comment": "Ruling 4: a straddled seam. Two regions' cells share space and each cell's CENTRE is owned by its own region, so this is ACCEPTED.",
+ "_comment": "Ruling 4: a straddled seam. The two cells overlap by 1.5 x 1.5 mm, and each centre is nearer its OWN region's face plane -- cell 0's centre (7.5, 3, 9.5) is 3 mm from A's y=0 plane against 7.5 from B's x=0, and cell 1's is the mirror. Both sit at offset 0 on their own 6 mm grid, as R6 requires. ACCEPTED.",
  "bake_build_orientation": "off",
  "grading": {
   "algorithm": "doubled",
@@ -19,9 +19,9 @@
     "kind": "face",
     "geometry": {
      "origin": [
-      6.0,
+      4.5,
       0.0,
-      8.0
+      6.5
      ],
      "normal": [
       0.0,
@@ -39,8 +39,8 @@
     "geometry": {
      "origin": [
       0.0,
-      6.0,
-      8.0
+      4.5,
+      6.5
      ],
      "normal": [
       1.0,
