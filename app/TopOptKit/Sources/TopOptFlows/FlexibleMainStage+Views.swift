@@ -426,6 +426,11 @@ extension FlexibleMainStage {
         return k == .lattice || legendKinds.contains(.lattice)
     }
 
+    /// H14 (S1 verification): the Flexible key's drill-in, for #354's `legendDrilledIn`.
+    public func keyDrilledIn(_ project: ProjectModel, _ stage: WorkspaceStage, mode: LatticeLegendMode) -> Bool {
+        false   // RED stub: the fix follows
+    }
+
     /// H8: a wall the probe found while a Flexible legend is drilled in — read at its rest point
     /// (never handed to the octet's setLatticeProbe).
     public func readLattice(_ project: ProjectModel, mode: LatticeLegendMode, model p: SIMD3<Float>) -> Bool {
