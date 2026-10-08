@@ -2088,6 +2088,12 @@ public enum TopOptKit {
     /// RUNNING it, so the probe is no longer the source of the Structural floor or of that key.
     /// ★ At the #358 sync (23e6154e) core does not yet publish the function, so the constant
     /// stays; swap the moment a sync brings it in.
+    /// ★★ At 36f5fdde core publishes it, and it returns {"stepped", "organic"}
+    /// (lattice_algorithm.cpp:32-42, "in ANY configuration") — but the run still routes the
+    /// beam network only for organic + structural (run_job.cpp:7581), and a Stepped plan under
+    /// Structural is refused without it (5161-5183). Swapping now would lift the Structural
+    /// Stepped block (`LatticeStructuralSteppedGate`) on a claim the run does not keep, so the
+    /// constant stays until core's run routes Stepped (core ask K8).
     public static let latticeBeamNetworkCertifiedAlgorithms: Set<String> = ["organic"]
 
     /// ★ CORE'S FACE-PLANE BASIS (maintainer, 2026-10-01, item b), through core's own
@@ -2108,6 +2114,33 @@ public enum TopOptKit {
         guard v.count == 8 else { return nil }
         return CoreFacePlaneBasis(valid: v[0] != 0, conflict: v[1] != 0,
                                   u: SIMD3(v[2], v[3], v[4]), w: SIMD3(v[5], v[6], v[7]))
+    }
+
+    /// ★★ CORE'S OWNER OF EACH POINT — `stepped_region_owners` (bridge.cpp): core's own
+    /// `stepped_region_owner` over the run's include list, built from `regions` (the job's
+    /// `lattice.regions`, wire dictionaries) as the run builds it. `includes` is how many include
+    /// regions core resolved — when it differs from the job's include count core skipped one, and
+    /// every later id is shifted. nil with `lastCoreRefusal` when core cannot answer.
+    public struct CoreRegionOwners: Equatable, Sendable {
+        public let includes: Int
+        /// one per point: a 1-based include id, 0 = no owner
+        public let owners: [Int]
+        public init(includes: Int, owners: [Int]) { self.includes = includes; self.owners = owners }
+    }
+    public static func steppedRegionOwners(regions: [[String: Any]], points: [SIMD3<Double>]) -> CoreRegionOwners? {
+        guard let data = try? JSONSerialization.data(withJSONObject: regions, options: [.sortedKeys]),
+              let regionsText = String(data: data, encoding: .utf8) else { return nil }
+        var text = latticeProbeBaseJob
+        text.removeLast()
+        text += #", "lattice": {"topology": "octet", "cell_mm": 3.0, "strut_radius_mm": 0.4, "regions": "#
+            + regionsText + "}}"
+        var flat = [Double](); flat.reserveCapacity(3 * points.count)
+        for p in points { flat += [p.x, p.y, p.z] }
+        let raw: [Int] = flat.withUnsafeBufferPointer { fp in
+            Array(topoptbridge.stepped_region_owners(std.string(text), fp.baseAddress, points.count)).map { Int($0) }
+        }
+        guard raw.count == points.count + 1 else { return nil }
+        return CoreRegionOwners(includes: raw[0], owners: Array(raw.dropFirst()))
     }
 
     /// Whether the schema probe proved itself on this build — a key core has always

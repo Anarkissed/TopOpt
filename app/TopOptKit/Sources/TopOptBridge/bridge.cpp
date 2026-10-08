@@ -49,6 +49,7 @@
 #include "topopt/settings.hpp"
 #include "topopt/smooth.hpp"
 #include "topopt/step.hpp"
+#include "topopt/stepped_plan.hpp"
 #include "topopt/stl.hpp"
 #include "topopt/version.hpp"
 #include "topopt/voxel.hpp"
@@ -3387,6 +3388,66 @@ std::vector<double> core_face_plane_basis(double nx, double ny, double nz,
     const topopt::ClearanceGeometry g = topopt::resolve_clearance_manual(m, p);
     return {g.valid ? 1.0 : 0.0, g.frame_conflict ? 1.0 : 0.0,
             g.u.x, g.u.y, g.u.z, g.w.x, g.w.y, g.w.z};
+  });
+}
+
+std::vector<int32_t> stepped_region_owners(const std::string& job_json, const double* xyz,
+                                           std::size_t point_count) {
+  return guarded_empty("stepped_region_owners", [&]() -> std::vector<int32_t> {
+    if (point_count > 0 && xyz == nullptr)
+      throw std::invalid_argument("stepped_region_owners: no points were passed");
+    const topopt::JobDescription job = topopt::parse_job(job_json);
+    // ── THE RUN'S INCLUDE LIST, built as the run builds it ─────────────────────────────
+    // A mirror of lattice_role_regions_from_job (run_job.cpp:939-1023, at 36f5fdde), which
+    // is file-local (core ask V4/K7: export it). Every region is walked, in job order, as
+    // the run walks them, so a frame core refuses is refused here for an exclude too, and
+    // an INVALID geometry is skipped exactly where the run skips it — the include ids are
+    // the run's, not the job's.
+    std::vector<topopt::ClearanceGeometry> includes;
+    for (std::size_t k = 0; k < job.lattice.regions.size(); ++k) {
+      const topopt::JobLatticeRegion& r = job.lattice.regions[k];
+      if (r.kind == "region")
+        throw std::runtime_error(
+            "stepped_region_owners: lattice region " + std::to_string(k + 1) +
+            " is a \"region\" lattice region, which needs the imported model and the run's "
+            "grid to resolve its voxels (run_job.cpp:946-952); the bake's regions are faces");
+      topopt::ManualClearanceGeometry mg;
+      topopt::ClearanceParams p;  // all margins zero: the primitive is the region
+      if (r.kind == "bolt") {
+        mg.kind = topopt::ClearanceKind::Bolt;
+        p.kind = topopt::ClearanceKind::Bolt;
+        mg.axis_point = r.axis_point;
+        mg.axis_dir = r.axis_dir;
+        mg.radius_mm = r.radius_mm;
+        mg.half_length_mm = r.half_length_mm;
+      } else {  // "face" — a bounded slab; the region's own depth is the extent
+        mg.kind = topopt::ClearanceKind::Face;
+        p.kind = topopt::ClearanceKind::Face;
+        p.slab_depth_mm = r.depth_mm;
+        mg.origin = r.origin;
+        mg.normal = r.normal;
+        mg.half_u_mm = r.half_u_mm;
+        mg.half_w_mm = r.half_w_mm;
+        mg.outline_uv = r.outline_uv;
+        mg.frame_u = r.frame_u;
+        mg.frame_w = r.frame_w;
+      }
+      const topopt::ClearanceGeometry g = topopt::resolve_clearance_manual(mg, p);
+      if (g.frame_conflict)
+        throw std::runtime_error(
+            "stepped_region_owners: lattice region " + std::to_string(k + 1) + " (face " +
+            std::to_string(r.face_id) + ") states \"frame_u\"/\"frame_w\" that do not match "
+            "the in-plane basis core derives from its normal (run_job.cpp:1008-1018)");
+      if (!g.valid) continue;  // the run's own skip (run_job.cpp:1019)
+      if (r.role == "include") includes.push_back(g);
+    }
+    // [the run's include count, then one owner per point]
+    std::vector<int32_t> out(point_count + 1, 0);
+    out[0] = static_cast<int32_t>(includes.size());
+    for (std::size_t i = 0; i < point_count; ++i)
+      out[i + 1] = static_cast<int32_t>(topopt::stepped_region_owner(
+          topopt::Vec3{xyz[3 * i], xyz[3 * i + 1], xyz[3 * i + 2]}, includes));
+    return out;
   });
 }
 

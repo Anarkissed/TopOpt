@@ -583,6 +583,8 @@ public struct LatticeSteppedCellWire: Equatable, Sendable {
     /// The grid the cell was packed on (`LatticeSteppedCell.slotOriginMM`). Not a cell key: it
     /// goes on the cell's REGION as `geometry.slot_origin_mm` (`writePlan`).
     public let slotOriginMM: SIMD3<Double>?
+    /// Core's reason when it could not name the bake's owners (`LatticeSteppedCell.ownerRefusal`).
+    public var ownerRefusal: String? = nil
     public init(regionID: Int, originMM: SIMD3<Double>, sizeMM: Double, rho: Double = 0,
                 slotOriginMM: SIMD3<Double>? = nil) {
         self.regionID = regionID; self.originMM = originMM; self.sizeMM = sizeMM; self.rho = rho
@@ -606,8 +608,10 @@ public struct LatticeSteppedCellWire: Equatable, Sendable {
         for (i, r) in regions.enumerated() where r.role == .include { idOf[i] = next; next += 1 }
         return cells.compactMap { c in
             guard let id = idOf[c.region] else { return nil }
-            return LatticeSteppedCellWire(regionID: id, originMM: c.originMM, sizeMM: c.sizeMM, rho: c.rho,
-                                          slotOriginMM: c.slotOriginMM)
+            var w = LatticeSteppedCellWire(regionID: id, originMM: c.originMM, sizeMM: c.sizeMM, rho: c.rho,
+                                           slotOriginMM: c.slotOriginMM)
+            w.ownerRefusal = c.ownerRefusal
+            return w
         }
     }
     /// ★★ WHY A PLAN THE SWITCH WOULD SEND IS WITHHELD (reviewer, 2026-10-08: "Send
@@ -626,6 +630,8 @@ public struct LatticeSteppedCellWire: Equatable, Sendable {
         case noSuchRegion(regionID: Int)
         /// the linked core's schema does not take `slot_origin_mm`
         case slotOriginNotWired
+        /// core could not name the cells' owners (its reason), so the picture is not core's
+        case ownerUnchecked(String)
 
         /// The reason, in plain words, after the banner's "this plan can't go: ".
         public var reason: String {
@@ -638,6 +644,8 @@ public struct LatticeSteppedCellWire: Equatable, Sendable {
                 return "it names region \(id), which the job doesn't have"
             case .slotOriginNotWired:
                 return "this core can't take the grid these cells sit on"
+            case .ownerUnchecked(let why):
+                return "core couldn't say which region owns the cells where walls meet (\(why))"
             }
         }
     }
@@ -653,6 +661,7 @@ public struct LatticeSteppedCellWire: Equatable, Sendable {
         var next = 1
         for r in regions where r.role == .include { includeAt[next] = r; next += 1 }
         var out: [Int: SIMD3<Double>] = [:]
+        if let why = cells.lazy.compactMap(\.ownerRefusal).first { return .failure(.ownerUnchecked(why)) }
         for c in cells {
             guard let so = c.slotOriginMM else { continue }
             guard slotOriginWired else { return .failure(.slotOriginNotWired) }
@@ -730,8 +739,11 @@ public struct LatticeSteppedCellWire: Equatable, Sendable {
     /// on a core whose schema takes the key.
     public static func sendsPlan(algorithm: String, wired: Bool,
                                  enabled: Bool = defaultGradePlansEnabled) -> Bool {
-        wired && enabled && algorithm == "doubled"
+        wired && enabled && (algorithm == "doubled" || (anyStepPlansForTests && algorithm == "stepped"))
     }
+    /// ★ ROUND 5's TEST SWITCH (reviewer, 2026-10-08: "The same proof for Aesthetic Stepped (any-step
+    /// plans)", production OFF): the proof lets a Stepped plan ride its job. Production never sets it.
+    nonisolated(unsafe) public static var anyStepPlansForTests = false
 
     /// ★★ RULING 6 (maintainer, 2026-10-03): "Default Grade and Stepped previews carry one
     /// plain line saying the run currently builds core's own (coarser) layout. Show it only

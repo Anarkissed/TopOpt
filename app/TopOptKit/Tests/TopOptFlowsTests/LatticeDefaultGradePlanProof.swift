@@ -131,11 +131,15 @@ final class LatticeDefaultGradePlanProof: XCTestCase {
         pm.latticePreviewSteppedCells = plan
         let perRegion = Dictionary(grouping: plan, by: \.regionID).mapValues(\.count).sorted { $0.key < $1.key }
         let includeCount = b.regions.filter { $0.role == .include }.count
-        print("DG-PLAN doubled: \(plan.count) cell(s) over \(includeCount) region(s) | \(Self.coreHistogram(plan))")
+        print("DG-PLAN \(pm.lattice.algorithm): \(plan.count) cell(s) over \(includeCount) region(s) | \(Self.coreHistogram(plan))")
         print("DG-PLAN per region: \(perRegion.map { "r\($0.key)=\($0.value)" }.joined(separator: " "))")
 
         // ── the stage job, with and without the plan, from ONE process (no hash-order drift)
         let request = try XCTUnwrap(model.makeLatticeRunRequest(), "no stage job")
+        // ★ round 5 (2026-10-08): Aesthetic Stepped's any-step plan rides behind its own test switch
+        let savedAnyStep = LatticeSteppedCellWire.anyStepPlansForTests
+        LatticeSteppedCellWire.anyStepPlansForTests = env["DG_ANY_STEP"] == "1"
+        defer { LatticeSteppedCellWire.anyStepPlansForTests = savedAnyStep }
         func pretty(_ d: Data) throws -> Data {
             try JSONSerialization.data(withJSONObject: JSONSerialization.jsonObject(with: d), options: [.prettyPrinted, .sortedKeys])
         }
@@ -151,10 +155,32 @@ final class LatticeDefaultGradePlanProof: XCTestCase {
         var a = try XCTUnwrap(JSONSerialization.jsonObject(with: withPlan) as? [String: Any])
         let n = try XCTUnwrap(JSONSerialization.jsonObject(with: noPlan) as? [String: Any])
         var la = try XCTUnwrap(a["lattice"] as? [String: Any])
-        XCTAssertEqual((la["stepped_cells"] as? [Any])?.count, plan.count, "★ the plan rides the job whole")
-        la.removeValue(forKey: "stepped_cells"); a["lattice"] = la
+        if la["stepped_cells"] == nil {
+            // ★ withheld: the job carries no plan core would refuse — say why, in the app's words
+            let lat = try XCTUnwrap(request.lattice)
+            if case .failure(let why) = LatticeSteppedCellWire.slotOrigins(lat.steppedCells, regions: lat.regions,
+                                                                           slotOriginWired: TopOptKit.regionSlotOriginWired) {
+                print("DG-WITHHELD \(why.reason) | \(why)")
+            } else {
+                print("DG-WITHHELD the switch did not send the plan (algorithm \(lat.algorithm), wired \(TopOptKit.steppedCellsWired))")
+            }
+        } else {
+            XCTAssertEqual((la["stepped_cells"] as? [Any])?.count, plan.count, "★ the plan rides the job whole")
+        }
+        la.removeValue(forKey: "stepped_cells")
+        // the planned regions' grids (slot_origin_mm, 2026-10-08) ride with the plan
+        var stamped = 0
+        if var regs = la["regions"] as? [[String: Any]] {
+            for i in regs.indices {
+                guard var g = regs[i]["geometry"] as? [String: Any], g.removeValue(forKey: "slot_origin_mm") != nil else { continue }
+                stamped += 1; regs[i]["geometry"] = g
+            }
+            la["regions"] = regs
+        }
+        a["lattice"] = la
+        print("DG-SLOT-ORIGINS \(stamped) region(s) carry slot_origin_mm")
         XCTAssertEqual(try pretty(JSONSerialization.data(withJSONObject: a)), try pretty(noPlan),
-                       "★ the jobs differ only by the plan")
+                       "★ the jobs differ only by the plan and its regions' grids")
         XCTAssertNil((n["lattice"] as? [String: Any])?["stepped_cells"], "production sends no plan")
         print("DG-JOBS \(out.path) model \(modelName)")
     }

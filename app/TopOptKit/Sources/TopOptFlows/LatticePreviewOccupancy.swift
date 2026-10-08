@@ -641,6 +641,9 @@ public struct LatticeSteppedCell: Equatable, Sendable {
     /// from it (`geometry.slot_origin_mm`, job.cpp:1592-1611). nil ⇒ a hand-built cell; core then
     /// derives the region's own `origin`.
     public var slotOriginMM: SIMD3<Double>? = nil
+    /// ★ Core's reason when it could not name this bake's owners (2026-10-08): the picture then
+    /// used the Swift rule, and the plan is withheld (`LatticeSteppedCellWire.PlanWithheld`).
+    public var ownerRefusal: String? = nil
     public init(region: Int, originMM: SIMD3<Double>, sizeMM: Double, rho: Double = 0,
                 slotOriginMM: SIMD3<Double>? = nil) {
         self.region = region; self.originMM = originMM; self.sizeMM = sizeMM; self.rho = rho
