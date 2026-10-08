@@ -116,3 +116,41 @@ passed FlexibleSqueezeGroupsPressTests.testTheGroupPillSetsAPressOfHisOwn
   FLEX-AP1 review trash: after the re-sync top A loaded 5.0 kg
   FLEX-AP1 review frame of record in the file: [["press": {
   FLEX-AP1 review tilt + straighten: faces [0, 1000104, 1000103, 3, 5] → [0, 1000104, 3, 5, 1000103] · equal false
+
+# (2) MUTATION red runs, after the fix (b64699a2). One temporary build with env-switched mutations (AP1MUT; never committed:
+#     the four files restored with git checkout, rebuilt, `strings` of the test binary shows no AP1MUT), each run against
+#     the test that pins it. The first three are the rules AP1 had right but no test turned red (the verifier's mutations);
+#     the other four re-prove four of the fixes against the fixed code (section 1 proved every fix against AP1 as it was).
+#       unite     — uniteHands without its press block (a linked press stays in the group it was made in)
+#       unlink    — FlexiblePress.adoptWeights without its unlink branch
+#       adoptspec — the adopt skip set as the spec's literal `removedRegions ∪ pressRegions`
+#       pullok    — FlexiblePress.pressed counts a member the group only pulls (role ask), as AP1 did
+#       noindex   — straighten appends the face (setFace), as AP1 did
+#       notrash   — removePress records no removedRegions, as AP1 did
+#       noseal    — tilt does not seal the edit before it, as AP1 did
+AP1MUT=none: Executed 12 tests, with 0 failures (0 unexpected) in 1.070 (1.072) seconds
+AP1MUT=unite: Executed 1 test, with 2 failures (0 unexpected) in 0.982 (0.983) seconds (exit 1)
+         - testALinkedPressSitsInItsHandsGroup: XCTAssertEqual failed: ("Optional(1)") is not equal to ("Optional(2)") - ★ the linked press joined its hand's group
+         - testALinkedPressSitsInItsHandsGroup: XCTAssertEqual failed: ("Optional([])") is not equal to ("Optional([AE000004-0000-4000-8000-000000000001])")
+AP1MUT=unlink: Executed 1 test, with 1 failure (0 unexpected) in 0.059 (0.060) seconds (exit 1)
+         - testAPressWhoseGroupDropsEveryMemberKeepsItsWeightUnlinked: XCTAssertNil failed: "CE8CD7A0-F80B-40E6-8504-CF3CE2D0A813" - ★ unlinked
+AP1MUT=adoptspec: Executed 1 test, with 3 failures (0 unexpected) in 0.105 (0.106) seconds (exit 1)
+         - testAClashFaceKeepsItsLinkThroughTheReSync: XCTAssertEqual failed: ("Optional(TopOptFlows.FlexibleFaceSettings(faceRegionID: 1000103, role: "loaded", rotationDeg: 0, weightKg: 5.0, deepestMM: 4.0, mode: "both", curveX: TopOptKit.
+         - testAClashFaceKeepsItsLinkThroughTheReSync: XCTAssertEqual failed: ("nil") is not equal to ("Optional(92E96F3A-D8F7-4FB0-AF8D-56230DFB6BC0)")
+         - testAClashFaceKeepsItsLinkThroughTheReSync: XCTAssertEqualWithAccuracy failed: ("5.0") is not equal to ("6.0") +/- ("1e-12") - a Top edit still reaches it
+AP1MUT=pullok: Executed 1 test, with 4 failures (0 unexpected) in 0.060 (0.061) seconds (exit 1)
+         - testAGroupThatOnlyPullsItsMembersNeverLinksAPress: XCTAssertEqual failed: ("linked(group: 8134DF56-7814-45DB-8A82-AF1A7D3FA3B5, kg: 9.0)") is not equal to ("ask") - ★ no link to a group that pulls
+         - testAGroupThatOnlyPullsItsMembersNeverLinksAPress: XCTAssertNil failed: "199BE176-1BBB-4B20-B897-AC4FFB00E8C8" - ★ the pad must ask
+         - testAGroupThatOnlyPullsItsMembersNeverLinksAPress: XCTAssertNil failed: "[TopOptFlows.FlexiblePress(id: 199BE176-1BBB-4B20-B897-AC4FFB00E8C8, regions: [3, 2], direction: SIMD3<Double>(-0.7071067811865475, 0.7071067811865475, 0.0)
+         - testAGroupThatOnlyPullsItsMembersNeverLinksAPress: XCTAssertNil failed: "8134DF56-7814-45DB-8A82-AF1A7D3FA3B5" - ★ the re-sync unlinks it
+AP1MUT=noindex: Executed 1 test, with 4 failures (0 unexpected) in 1.037 (1.038) seconds (exit 1)
+         - testTiltThenStraightenLeavesHisSetupAndJobAsTheyWere: XCTAssertEqual failed: ("[0, 1000104, 3, 5, 1000103]") is not equal to ("[0, 1000104, 1000103, 3, 5]") - ★ top A is back where it sat
+         - testTiltThenStraightenLeavesHisSetupAndJobAsTheyWere: XCTAssertEqual failed: ("FlexibleStageSettings(materialID: Optional("varioshore_tpu"), nozzleTempC: nil, topology: "auto", feel: "springy", beadsPerWall: 1, faces: [TopOptFlow
+         - testTiltThenStraightenLeavesHisSetupAndJobAsTheyWere: XCTAssertEqual failed: ("2498832052115567031") is not equal to ("1103318425411569530") - the lattice's key as it was
+         - testTiltThenStraightenLeavesHisSetupAndJobAsTheyWere: failed - his_r5_held_send_run_job.json: 2525 line(s) differ from the golden (first at line 55)
+AP1MUT=notrash: Executed 1 test, with 3 failures (0 unexpected) in 0.104 (0.106) seconds (exit 1)
+         - testRemovingAPressLeavesItsMembersAsHeLeftThem: XCTAssertTrue failed - ★ remembered as deleted, in the trash's own edit
+         - testRemovingAPressLeavesItsMembersAsHeLeftThem: XCTAssertNil failed: "FlexibleFaceSettings(faceRegionID: 1000103, role: "loaded", rotationDeg: 0, weightKg: 5.0, deepestMM: 3.0, mode: "both", curveX: TopOptKit.FlexCurve(x: [0.0, 0
+         - testRemovingAPressLeavesItsMembersAsHeLeftThem: XCTAssertEqual failed: ("FlexibleStageSettings(materialID: Optional("varioshore_tpu"), nozzleTempC: nil, topology: "auto", feel: "springy", beadsPerWall: 1, faces: [TopOptFlows.Flex
+AP1MUT=noseal: Executed 1 test, with 1 failure (0 unexpected) in 0.059 (0.060) seconds (exit 1)
+         - testAPressActionIsItsOwnUndoStepAndTheCardFollowsTheHistory: XCTAssertEqual failed: ("nil") is not equal to ("Optional(12.0)") - ★ … and only the tilt: the press of the top stays

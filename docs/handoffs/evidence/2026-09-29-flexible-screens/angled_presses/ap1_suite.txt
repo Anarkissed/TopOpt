@@ -8,6 +8,11 @@
 # (1) TARGETED SUITE, unseeded (as CI runs it), LatticeStaleTypeTests left out — AP0's filter (every Flexible* class, now incl.
 #     AP1's three; the only tests that source-pin a touched file are FlexibleReadinessTests and FlexibleSettingsRound4Tests,
 #     both Flexible*):
+#     ★ CORRECTION (AP1 review, 2026-10-08): that sentence was wrong. Eight NON-Flexible classes read the whole
+#     Sources/TopOptFlows directory, so every new or changed file: LatticeGradeToSolidBandTests, LatticeIncludeGateTests,
+#     LatticeModeTests, LatticeVariantFaceWallsTests, OrganicCapsuleImpostorTests, OrganicForecastRouteTests,
+#     ProtectFreezeVsSolidityTests, StrutLineWidthTests. They were not in this filter; the verifier ran them at 1f68afd0
+#     (71 tests, 0 failures), and the review's filter holds them (ap1_review_suite.txt: 71 of 71 green).
 #     swift test --skip-build --filter 'TopOptFlowsTests\.(Flexible[A-Za-z0-9]*|ProjectStoreTests|UndoHistoryTests|LatticeSettingsPersistTests|ViewerTests|SmoothingPageRound2Tests|LatticeSimSolveTriggerTests)/'
     Executed 548 tests, with 36 tests skipped and 11 failures (0 unexpected) in 3458.294 (3458.353) seconds
 #   548 = AP0 fix-up's 534 + AP1's 14. The 36 skips are AP0's (10 RECORD=1 recorder tests, 26 evidence / perf probes); no

@@ -1,0 +1,40 @@
+# Angled presses (task 2026-10-07), batch AP1 REVIEW: the stage-job hashes RE-RUN after the review's fix (b64699a2), against
+# the AP0 base (stage_job_hashes_base.txt, 01ec5e3c). The same script (stage_job_hashes.sh, unchanged), the same frozen inputs
+# (checked against s0_frozen/SHA256SUMS before any row: none moved), SWIFT_DETERMINISTIC_HASHING=1, TOPOPT_JOB_REPEAT=3, each
+# project from a fresh copy; the package built at b64699a2 (swift build --build-tests; the mutation build restored and rebuilt,
+# `strings` of the test binary: no AP1MUT).
+# RESULT: all 16 rows identical to the base (13 S0 rows + control+ / control- / again), all 13 source lines identical;
+#   control+ (his Top include depth 4 -> 5 mm) still MOVES the hash (5d7e9c764fb087b1 -> 31646a7163500d78).
+#   As AP0 notes, the stage job cannot see lattice.flexible, so these rows guard #354's job; the Flexible claim rides the
+#   run-job / scene-job / frame / field / subtree goldens (FlexibleAngledGoldenTests, ap1_review_suite.txt).
+# sources (first 16 hex of SHA-256; checked in full against s0_frozen/SHA256SUMS and the r3/r5 sums in the script):
+#   102117B9-DDD2-4597-9BDE-49DD47EBF393 project.json 6f4e44987a360d45 model.step bdf5646481e370ba
+#   3418E167-8524-4831-A809-827B6B0742D0 project.json 78bd5ff4cac763e7 model.step bbc4260cb33c4d67
+#   570B38E2-3C6E-46E0-BCF6-26BE1595D204 project.json 4d60412d56be5596 model.step bdf5646481e370ba
+#   68BF7B74-3C2A-4ED6-A46D-AC040A9CA649 project.json 9a545225979bef8a model.step bdf5646481e370ba
+#   887AC498-5B5D-4475-B6CB-893DC69B5FD6 project.json d010d42cc6904b29 model.stl 64757ac58cbf217e
+#   92A8016E-FCCD-421D-B19E-4A1EC81C98A5 project.json 6e14e93f97da3249 model.step 7f811683d8e009f8
+#   AA4C7953-3152-4123-BCB5-EF5F8A08ABA3 project.json a975ba0f83d9b383 model.step bbc4260cb33c4d67
+#   A1000001-0000-4000-8000-000000000001 project.json 303aabd6e3a2410c model.step bdf5646481e370ba
+#   A1000001-0000-4000-8000-000000000002 project.json db76de22af29e3bb model.step bdf5646481e370ba
+#   A1000001-0000-4000-8000-000000000003 project.json 3dc594ebab8bdbb3 model.stl 53964b38e3354f5a
+#   A1000001-0000-4000-8000-000000000004 project.json f48076b8a45beb15 model.stl 53964b38e3354f5a
+#   his_project_0004 project.json dabdc3db0523c2ec model.stl 53964b38e3354f5a
+#   his_project_0004_r5 project.json 5fb79a0d628011a2 model.stl 53964b38e3354f5a
+base his 102117B9-DDD2-4597-9BDE-49DD47EBF393 exit 0 3f19f920e5c96a5a lattice regions emitted: 177 (include 177, skipped faces 0) · repeats 3: identical
+base his 3418E167-8524-4831-A809-827B6B0742D0 exit 0 169fe967ff734cfa lattice regions emitted: 2 (include 2, skipped faces 0) · repeats 3: identical
+base his 570B38E2-3C6E-46E0-BCF6-26BE1595D204 exit 0 43a0828a8bbb1e1d lattice regions emitted: 2 (include 2, skipped faces 0) · repeats 3: identical
+base his 68BF7B74-3C2A-4ED6-A46D-AC040A9CA649 exit 0 3fd5d1b2388fe949 lattice regions emitted: 5 (include 5, skipped faces 0) · repeats 3: identical
+base his 887AC498-5B5D-4475-B6CB-893DC69B5FD6 exit 0 b457718dfc23ab42 lattice regions emitted: 0 (include 0, skipped faces 0) · repeats 3: identical
+base his 92A8016E-FCCD-421D-B19E-4A1EC81C98A5 exit 0 225865c83c64cb23 lattice regions emitted: 1 (include 1, skipped faces 0) · repeats 3: identical
+base his AA4C7953-3152-4123-BCB5-EF5F8A08ABA3 exit 0 3e6f162cb36212a9 lattice regions emitted: 0 (include 0, skipped faces 0) · repeats 3: identical
+base A1 A1000001-0000-4000-8000-000000000001 exit 0 43a02161a5bab447 lattice regions emitted: 5 (include 5, skipped faces 0) · repeats 3: identical
+base A1 A1000001-0000-4000-8000-000000000002 exit 0 15bf9e189a9545fc lattice regions emitted: 0 (include 0, skipped faces 0) · repeats 3: identical
+base A1 A1000001-0000-4000-8000-000000000003 exit 0 9dba118b4567b44e lattice regions emitted: 0 (include 0, skipped faces 0) · repeats 3: identical
+base A1 A1000001-0000-4000-8000-000000000004 exit 0 5d7e9c764fb087b1 lattice regions emitted: 2 (include 2, skipped faces 0) · repeats 3: identical
+base r3 A1000001-0000-4000-8000-000000000004 exit 0 25968ec604e0bdce lattice regions emitted: 1 (include 1, skipped faces 0) · repeats 3: identical
+base r5 A1000001-0000-4000-8000-000000000004 exit 0 5d7e9c764fb087b1 lattice regions emitted: 2 (include 2, skipped faces 0) · repeats 3: identical
+control+ r5 A1000001-0000-4000-8000-000000000004 exit 0 31646a7163500d78 lattice regions emitted: 2 (include 2, skipped faces 0) · repeats 3: identical [groupDepthMM 92E96F3A-D8F7-4FB0-AF8D-56230DFB6BC0: 4 -> 5]
+control- r5 A1000001-0000-4000-8000-000000000004 exit 0 5d7e9c764fb087b1 lattice regions emitted: 2 (include 2, skipped faces 0) · repeats 3: identical [flexible face 1000104 weightKg 5 -> 6]
+again r5 A1000001-0000-4000-8000-000000000004 exit 0 5d7e9c764fb087b1 lattice regions emitted: 2 (include 2, skipped faces 0) · repeats 3: identical
+DONE
