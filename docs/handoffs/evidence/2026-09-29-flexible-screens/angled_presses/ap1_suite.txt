@@ -1,0 +1,68 @@
+# Angled presses (task 2026-10-07), batch AP1 "The saved press" — the targeted suite, the goldens, the stage hashes and the
+# iOS build, after b64a66c2 (the implementation; 6cc11943 = the tests-first red commit, ap1_red_runs.txt). App only: no core,
+# no bridge, no app project file, no #354/main file (WorkspacePlaceholder, MetalMeshView, LatticeSettings, ProjectModel,
+# DesignSystem, ProjectStore untouched): git diff --stat 1481afcd..b64a66c2 -- core app/TopOpt app/TopOptKit/Sources/TopOptBridge
+# is empty. Debug, swift test --skip-build, this Mac (Xcode 27.0 27A266a). This branch does NOT have #361's addendum (S1 is
+# blocked on the WorkspacePlaceholder conflict), so "the post-S1 base" is still AP0's base (01ec5e3c).
+#
+# (1) TARGETED SUITE, unseeded (as CI runs it), LatticeStaleTypeTests left out — AP0's filter (every Flexible* class, now incl.
+#     AP1's three; the only tests that source-pin a touched file are FlexibleReadinessTests and FlexibleSettingsRound4Tests,
+#     both Flexible*):
+#     swift test --skip-build --filter 'TopOptFlowsTests\.(Flexible[A-Za-z0-9]*|ProjectStoreTests|UndoHistoryTests|LatticeSettingsPersistTests|ViewerTests|SmoothingPageRound2Tests|LatticeSimSolveTriggerTests)/'
+    Executed 548 tests, with 36 tests skipped and 11 failures (0 unexpected) in 3458.294 (3458.353) seconds
+#   548 = AP0 fix-up's 534 + AP1's 14. The 36 skips are AP0's (10 RECORD=1 recorder tests, 26 evidence / perf probes); no
+#   "FLEX-AP SKIP" printed (no STEP skip). The 11 failures are in 3 tests:
+#   - LatticeSimSolveTriggerTests.testTheTriggerRefusesOnAllThreeGrounds (1) — known, pre-existing.
+#   - FlexibleBatchNVerifyTests.testEveryRefineLineIsWholeBesideTheLivePlayAllPicker (8) — the hosted AppKit layout test AP0
+#     already showed failing alone and with AP0's files moved out; re-run ALONE after AP1: the same 8 failures.
+#   - FlexibleBatchNRefineTests.testANewLatticeCancelsTheRefineAndAWaitingSolveGetsCoreBetweenIncrements (2) — WALL-CLOCK
+#     bounds ("5.78 is not less than 5.0 … the waiting solve got core within an increment"; "7.09 < 6.0 … stopped at the next
+#     increment") under machine load (the 15-min load average read 6.93 at 01:17, mid-run). Re-run ALONE: passed (97.4 s); the whole class
+#     FlexibleBatchNRefineTests: 4 of 4 passed. It reads no press (none exists in its project). Not AP1's; timing-sensitive.
+#   AP1's classes and the AP0 goldens in that run:
+#     FlexibleAngledGoldenTests testCoreFieldsAndDesignsAreTheGolden passed (3.240 seconds).
+#     FlexibleAngledGoldenTests testEveryExistingSendKeepsItsJobBytes passed (4.630 seconds).
+#     FlexibleAngledGoldenTests testFacePressFramesAreTheGolden passed (2.337 seconds).
+#     FlexibleAngledGoldenTests testFacePressFramesAreTheGoldenOnTheM2Stand passed (0.856 seconds).
+#     FlexibleAngledGoldenTests testFacePressRunJobBytesUnchanged passed (0.510 seconds).
+#     FlexibleAngledGoldenTests testFramesAreTheGoldenOnStepParts passed (0.547 seconds).
+#     FlexibleAngledGoldenTests testHisRound5HeldSendBytesUnchanged passed (0.763 seconds).
+#     FlexibleAngledGoldenTests testHisRound5SceneJobBytesUnchanged passed (0.581 seconds).
+#     FlexibleAngledGoldenTests testLatticeSubtreesReEncodeIdentically passed (0.020 seconds).
+#     FlexibleAngledGoldenTests testNoComparedGoldenCarriesTheCoreFingerprint passed (0.031 seconds).
+#     FlexibleAngledGoldenTests testProbeDocumentsGetTheRecordedBaseRefusals passed (0.001 seconds).
+#     FlexibleAngledGoldenTests testSceneJobBytesUnchanged passed (0.478 seconds).
+#     FlexibleAngledGoldenTests testTheStageJobSeesALatticeSettingButNeverFlexible passed (0.111 seconds).
+#     FlexiblePressReframeTests testMovingTopsPressToTopBKeepsTheStampOnTheSurfaceAndCurvesOnTheirAxes passed (0.011 seconds).
+#     FlexiblePressReframeTests testTheSameFrameIsUnchangedAndAPressFrameWaitsOnCore passed (0.057 seconds).
+#     FlexiblePressSaveTests testAnAngledPressRoundTripsThroughSaveAndLoad passed (0.019 seconds).
+#     FlexiblePressSaveTests testAPendingPressNeverMakesTheLatticeStale passed (1.347 seconds).
+#     FlexiblePressSaveTests testAPressNeverInventsAWeight passed (0.002 seconds).
+#     FlexiblePressSaveTests testOldProjectsDecodeWithNoPresses passed (0.016 seconds).
+#     FlexiblePressSaveTests testRemovingTheLastPressWritesNil passed (0.001 seconds).
+#     FlexiblePressSaveTests testResetAllClearsPresses passed (0.001 seconds).
+#     FlexiblePressSaveTests testTheMainPageReSyncSkipsAPressMemberAndKeepsItsWeightLinked passed (0.010 seconds).
+#     FlexiblePressSaveTests testTiltAndStraightenMoveOneStructIntact passed (0.009 seconds).
+#     FlexibleSqueezeGroupsPressTests testAGroupWithOnlyPressesIsATabButNotAJobGroup passed (0.949 seconds).
+#     FlexibleSqueezeGroupsPressTests testPressesAreRenumberedMergedAndForcedWithTheirGroup passed (0.000 seconds).
+#     FlexibleSqueezeGroupsPressTests testProjectsWithoutPressesGroupIdentically passed (0.003 seconds).
+#     FlexibleSqueezeGroupsPressTests testTheGroupPillSetsAPressOfHisOwn passed (0.001 seconds).
+#
+# (2) GOLDENS + AP1 under SWIFT_DETERMINISTIC_HASHING=1 (raw subtree bytes included):
+#     swift test --skip-build --filter 'FlexibleAngledGoldenTests|FlexiblePressFixturesTests|FlexibleStageTests|FlexiblePressSaveTests|FlexibleSqueezeGroupsPressTests|FlexiblePressReframeTests'
+    Executed 44 tests, with 0 failures (0 unexpected) in 17.988 (17.992) seconds
+#   42 "FLEX-AP GOLDEN … identical" lines (the golden tests' and AP1's own four comparisons with them), no DIFFERS: every run-job (C1 pad pure / stamp / model, his r5 held send, every existing send
+#   of his 0004, his r5 and the A1 store's three Flexible projects), scene-job, frame (C1 pad, his 0004 / r5, cube, M2, STEP
+#   cube, l bracket), field / design and lattice-subtree golden is the AP0 base's, byte for byte. The ruling's "every existing
+#   face press is unchanged: job bytes and stage hashes identical" holds after AP1.
+#   (FlexibleStageTests.testAProjectThatNeverChoseFlexibleIsByteIdentical passed in both runs.)
+#
+# (3) STAGE-JOB HASHES (stage_job_hashes.sh, unchanged; frozen inputs checked): stage_job_hashes_ap1.txt — 16 of 16 rows and
+#     13 of 13 source lines identical to stage_job_hashes_base.txt; control+ still moves the hash.
+#
+# (4) iOS BUILD.
+#     xcodebuild -project app/TopOpt.xcodeproj -scheme TopOpt -configuration Debug -destination id=147E56A1-C8CA-4B9D-BE6C-CF230589A83A \
+#       -derivedDataPath /Users/nadim/Library/Developer/Xcode/DerivedData/flexA1 build   -> exit 70, unchanged since AP0:
+#       "CoreSimulator is out of date. Current version (1051.55.0) is older than build version (1171.7.0)" — Simulator device
+#       support disabled, the id is not found (a system update for the maintainer, e.g. xcodebuild -runFirstLaunch; not made here).
+#     The same with -destination 'generic/platform=iOS Simulator':  ** BUILD SUCCEEDED ** (49 s; AP1's three new files compiled).
