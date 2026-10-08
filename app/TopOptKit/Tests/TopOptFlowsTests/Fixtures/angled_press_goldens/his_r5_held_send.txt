@@ -1,0 +1,4 @@
+title Send Group 1 only
+resting [3]
+scope Group 1 only
+SWIFT_DETERMINISTIC_HASHING=1

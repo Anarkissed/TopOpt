@@ -1,0 +1,16 @@
+# Angled presses (task 2026-10-07), batch AP0: the BASE goldens, recorded at 01ec5e3c
+# (claude/flexible-screens, PR #362) BEFORE any angled-press code, core 523dd2f90b04,
+# SWIFT_DETERMINISTIC_HASHING=1, by FlexibleAngledGoldenRecorder (RECORD=1). Read by FlexibleAngledGoldenTests.
+# S1 (the #361 sync) re-runs them, REPORTS every difference with the commit that caused it, and
+# re-records them as the post-S1 base; every later batch must equal that base.
+c1_pad_pure_run_job.json          FlexibleJob.runJobJSON(FlexibleStageTests.inputs(settings())) — paths as $REPO
+c1_pad_pure_stamp_run_job.json    the same, face 1 shaped Stamp (thumb, centred, 2 mm pitch)
+c1_pad_model_run_job.json         the app's model over C1's pad: top pressed 30 kg, bottom resting
+c1_pad_model_scene_job.json       that model's scene job
+his_r5_held_send_run_job.json     his 0004_r5 AS SAVED: runJobJSON(resting:) of the first FlexibleCoreHold send ($ROOT = the temp store)
+his_r5_held_send.txt              which send that was
+his_r5_scene_job.json             his 0004_r5's scene job
+lattice_subtree_*.json            the snapshot's `lattice`, decoded and re-encoded (.sortedKeys) — never re-saved
+frames_*.txt                      core's FlexStackInfo for every declared region (rotation 0) and every pressed key, bit patterns
+probe_refusals_base.json          core's answer to the probe's control / tilt / edge documents (null = accepted)
+rounded_slab.txt                  the two slabs' pseudo-faces and which wrap (core's normal-spread flag, or its "normals cancel" refusal)
