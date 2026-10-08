@@ -22,8 +22,8 @@
 //     (d_A = d_B), not where a force balance would put it (core brief: pinch force balance).
 //
 // ★ MEMBERSHIP IS CORE'S in_stack (field.cpp), in Swift: the frame's (u, v) from the stack's own
-// centroid, axes and u/v minimums, the column at ⌊u/pitch⌋, ⌊v/pitch⌋, entry ≤ t ≤ exit, and a
-// sector's cuts tested on the point projected back onto its face.
+// centroid, axes and u/v minimums, the column at ⌊u/pitch⌋, ⌊v/pitch⌋, entry ≤ t ≤ exit; a
+// sector's ownership is core's own verdict (stack_owns_projection, asked once per stack — S1).
 
 import Foundation
 import simd
@@ -45,7 +45,14 @@ public enum FlexibleStackMembership {
         let t = simd_dot(d, st.load)
         if t < col.entryT - 1e-9 || t > col.exitT + 1e-9 { return nil }
         let depth = t - col.entryT
-        if !cuts.isEmpty {
+        // ★ S1 (#361's 254cb137 — the spec's V2): a SECTOR from core is owned by core's own rule, the
+        // voxel's ray cast back onto the footprint (stack_owns_projection), asked once for every voxel
+        // its columns hold (FlexStackInfo.sector) — not the old point-projected-back-by-its-depth test,
+        // which core left (they differ on a curved sector: FlexibleS1VerifyTests).
+        if let verdict = st.sector {
+            guard verdict.owns(p) else { return nil }
+        } else if !cuts.isEmpty {
+            // a hand-built stack (no core, no verdict): the cuts on the point projected back by its depth
             let q = p - st.load * depth
             for cut in cuts {
                 let s = simd_dot(q - cut.point, cut.normal)

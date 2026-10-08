@@ -612,6 +612,32 @@ FlexStack flexible_scene_stack(int64_t scene, int32_t face_region_id, int32_t ro
     o.lattice_mm_mean = st.lattice_mm_mean;
     o.lattice_mm_max = st.lattice_mm_max;
     o.stack_mm_max = st.stack_mm_max;
+    // ★ S1 (#361's 254cb137): a sector's voxels core does not own — its in_stack's column and t
+    // test at each voxel centre, then core's public stack_owns_projection (field.cpp's in_stack).
+    if (!st.cuts.empty() || !st.part_cuts.empty()) {
+      const topopt::VoxelGrid& g = s->grid;
+      o.sector = true;
+      put3(o.grid_origin, g.origin);
+      o.grid_spacing = g.spacing;
+      o.grid_nx = g.nx;
+      o.grid_ny = g.ny;
+      o.grid_nz = g.nz;
+      for (int k = 0; k < g.nz; ++k)
+        for (int j = 0; j < g.ny; ++j)
+          for (int i = 0; i < g.nx; ++i) {
+            const topopt::Vec3 p = g.voxel_center(i, j, k);
+            double u = 0.0, v = 0.0;
+            f.to_uv(p, u, v);
+            const int col = st.column_at(static_cast<int>(std::floor(u / st.pitch_mm)),
+                                         static_cast<int>(std::floor(v / st.pitch_mm)));
+            if (col < 0) continue;
+            const fx::StackColumn& c = st.columns[static_cast<std::size_t>(col)];
+            const double t = (p.x - f.centroid.x) * f.load.x + (p.y - f.centroid.y) * f.load.y +
+                             (p.z - f.centroid.z) * f.load.z;
+            if (t < c.entry_t - 1e-9 || t > c.exit_t + 1e-9) continue;
+            if (!fx::stack_owns_projection(st, p)) o.sector_refused.push_back(static_cast<int32_t>(g.index(i, j, k)));
+          }
+    }
   } catch (const std::exception& e) {
     fail(err, e);
   }
