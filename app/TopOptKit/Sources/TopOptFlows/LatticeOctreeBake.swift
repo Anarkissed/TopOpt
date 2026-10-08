@@ -108,6 +108,8 @@ extension LatticePreviewOccupancy {
     /// texel goes to the cell of core's owner at its middle — no owner, or an owner with no cell
     /// there, and it is empty. false = the Swift rule (`owner(of:)`), for the parity proof only.
     nonisolated(unsafe) static var coreOwnershipEnabled = true
+    /// ★ Core's exact depth rule in `fits` (round 5); false = the voxel test alone (a test's control).
+    nonisolated(unsafe) static var coreDepthRuleEnabled = true
     /// A TEST's stand-in for the bridge (nil = core's own `TopOptKit.steppedRegionOwners`).
     nonisolated(unsafe) static var coreOwnersForTests: (([[String: Any]], [SIMD3<Double>]) -> TopOptKit.CoreRegionOwners?)? = nil
     /// ★★ R7's OWNERSHIP RULE, ONE PURE FUNCTION (reviewer, 2026-10-07: "Core will export
@@ -343,7 +345,12 @@ extension LatticePreviewOccupancy {
             return law.printabilityDensityFloor(lineWidthMM: lineWidthMM, cellMM: r) <= finestRungMaxDensity + 1e-9
         }
         var menu: [Double] = [base]
-        for n in 2...steppedMenuMaxDivisor {
+        // ★★ ONLY THE FAMILIES THE PACKER'S GRID HOLDS (round 5, 2026-10-08; the reviewer's yes to
+        // "the fifths packer"): `packSlot` lays every cell on base/12, which halves, thirds, quarters
+        // and sixths land on and FIFTHS DO NOT — a k·base/5 cell got a rounded span (2.4 → 2 grid
+        // steps) and a sixths start, so core refused it (stepped_plan.cpp's family alignment). Core's
+        // menu still holds fifths (n ≤ 6); a plan need not use every size core admits.
+        for n in 2...steppedMenuMaxDivisor where steppedPackGrid % n == 0 {
             let t = base / Double(n)
             guard t >= floorMM - 1e-9, printsOpen(t) else { continue }
             for k in 1..<n {
@@ -356,6 +363,8 @@ extension LatticePreviewOccupancy {
     /// The largest divisor of the base a Stepped tile may be: sixths. The start grid
     /// inside a base slot is base/12, which every family up to sixths lands on.
     public static let steppedMenuMaxDivisor = 6
+    /// The packer's grid inside a base slot, in steps per base: base/12.
+    public static let steppedPackGrid = 2 * steppedMenuMaxDivisor
 
     public static func octreeCellField(occupancy occ: LatticeVoxelGrid,
                                        demand: LatticeVoxelGrid?,
@@ -673,6 +682,13 @@ extension LatticePreviewOccupancy {
                 func fitsBox(_ lo: SIMD3<Double>, _ S: Double) -> Bool {
                     if dOut(lo + SIMD3<Double>(repeating: 0.5 * S)) < -0.87 * S { return false }
                     if !LatticePreviewOccupancy.boxInsideSlab(lo, S, region: region, axis: axis) { return false }
+                    // core's depth rule, as the placement's `fits` applies it (round 5)
+                    if Self.coreDepthRuleEnabled, region.depthMM > 0 {
+                        let s0 = simd_dot(lo - region.origin, n)
+                        let sHi = s0 + S * (Swift.max(0, n.x) + Swift.max(0, n.y) + Swift.max(0, n.z))
+                        let sMid = s0 + 0.5 * S * (n.x + n.y + n.z)
+                        if sMid < -1e-6 || sMid > region.depthMM + 1e-6 || sHi > region.depthMM + 1e-6 { return false }
+                    }
                     let eps = Swift.min(0.05 * S, 0.2)
                     for cz in 0...1 { for cy in 0...1 { for cx in 0...1 {
                         let corner = lo + SIMD3<Double>(Double(cx), Double(cy), Double(cz)) * S
@@ -907,12 +923,14 @@ extension LatticePreviewOccupancy {
             var lastFail = ""
             var outlineFailed = false
             var slabFailed = false
+            var depthFailed = false
             func fits(_ lo: SIMD3<Double>, _ S: Double, fast: Bool = false) -> (fits: Bool, nearest: Double, farthest: Double) {
                 var nearest = 1e3, farthest = -1e3
                 var ok = true
                 lastFail = ""
                 outlineFailed = false
                 slabFailed = false
+                depthFailed = false
                 let eps = Swift.min(0.05 * S, 0.2)
                 // ★ THE SLAB IN DEPTH (his 2026-09-22 01:07: "the lattice is jutting out of
                 // the rim … something is making the lattice move rather than thin"): a
@@ -923,6 +941,22 @@ extension LatticePreviewOccupancy {
                     lastFail = "slab"
                     slabFailed = true
                     return (false, nearest, farthest)
+                }
+                // ★★ CORE'S DEPTH RULE, EXACTLY (round 5, 2026-10-08; stepped_plan.cpp:283-324, the
+                // reviewer's ruling 1 of 2026-10-05): the cube projected on the unit normal from the
+                // face plane — its CENTRE inside [0, depth] and its FAR side not past the depth, within
+                // 1e-6 mm; the near side may stand in front of the face. The voxel test below let a far
+                // face sit up to ~a voxel past the prism (the occupancy is prism-clipped voxels).
+                if Self.coreDepthRuleEnabled, region.depthMM > 0 {
+                    let s0 = simd_dot(lo - region.origin, n)
+                    let nHi = Swift.max(0, n.x) + Swift.max(0, n.y) + Swift.max(0, n.z)
+                    let sHi = s0 + S * nHi
+                    let sMid = s0 + 0.5 * S * (n.x + n.y + n.z)
+                    if sMid < -1e-6 || sMid > region.depthMM + 1e-6 || sHi > region.depthMM + 1e-6 {
+                        lastFail = "depth"
+                        depthFailed = true
+                        return (false, nearest, farthest)
+                    }
                 }
                 for cz in 0...1 { for cy in 0...1 { for cx in 0...1 {
                     let corner = lo + SIMD3<Double>(Double(cx), Double(cy), Double(cz)) * S
@@ -1171,6 +1205,8 @@ extension LatticePreviewOccupancy {
                 // the depth slab is air, not a plain cell — his "lattice jutting out of
                 // the rim" was this fall-through painting it.
                 if slabFailed { return }
+                // ★ round 5: nor past the prism's depth by core's rule — the same air as the slab
+                if depthFailed { return }
                 if yielded { return }                          // the finest rung: air
                 if outlineFailed {
                     if farthest > 0 { paint(lo, S, finest: true, edge: true, nearest: nearest) }
@@ -1196,7 +1232,7 @@ extension LatticePreviewOccupancy {
             /// hole — the same edge treatment the finest rung always had.
             func packSlot(_ lo0: SIMD3<Double>, _ S0: Double) {
                 let menu = Array(ladder.sizes.dropFirst())
-                let nG = 2 * steppedMenuMaxDivisor
+                let nG = Self.steppedPackGrid
                 let g = S0 / Double(nG)
                 var taken = [Bool](repeating: false, count: nG * nG * nG)
                 func cellIndex(_ i: SIMD3<Int>) -> Int { (i.z * nG + i.y) * nG + i.x }
@@ -1238,7 +1274,7 @@ extension LatticePreviewOccupancy {
                 func familyStep(_ S: Double) -> Int {
                     // the tile this size is a multiple of: base/n for the smallest n
                     // whose tile divides S
-                    for nn in 2...steppedMenuMaxDivisor {
+                    for nn in 2...steppedMenuMaxDivisor where Self.steppedPackGrid % nn == 0 {
                         let t = S0 / Double(nn)
                         let k = S / t
                         if abs(k - k.rounded()) < 1e-6 { return Swift.max(1, Int((t / g).rounded())) }
@@ -1277,7 +1313,7 @@ extension LatticePreviewOccupancy {
                     let dc = dOutFast(lo + SIMD3<Double>(repeating: 0.5 * f))
                     if dc < -0.87 * f { continue }
                     let (ok, nearest, farthest) = fits(lo, f)
-                    if slabFailed { continue }                 // ★ outside the slab is air
+                    if slabFailed || depthFailed { continue }  // ★ outside the slab, or past the depth: air
                     if hasYielded(ladder.region, lo, f) { continue }   // R7: the finest rung yielded
                     if ok || !outlineFailed {
                         paint(lo, f, finest: true, edge: false, nearest: nearest)
