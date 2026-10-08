@@ -195,6 +195,23 @@ struct JobLatticeRegion {
   // failure that is hardest to see. Absent (zero), today's behaviour is unchanged.
   Vec3 frame_u{0.0, 0.0, 0.0};
   Vec3 frame_w{0.0, 0.0, 0.0};
+  // ── ★ THE IN-PLANE SLOT ORIGIN (R1; app brief 2026-10-02, maintainer ruling (b)) ─
+  // The grid the app's octree actually packed on. Its origin is the occupancy origin
+  // minus an in-plane anchor shift that the app SEARCHES for, to fit more base cells
+  // (LatticeOctreeBake.swift:404-431). Core laid the plan from the region's `origin`
+  // and applied no anchor, so on every one of his projects the non-base cells were off
+  // core's grid by ONE constant in-plane vector per region -- 570B38E2 region 1 by
+  // x = 1.6647, z = 0.5443 (mod 2.578), for both cell sizes. `stepped_plan.hpp` has
+  // always said the slot origin carries "the region's anchor shift in-plane"; nothing
+  // on the wire carried one.
+  //
+  // Sent, this IS that grid: alignment, depth, overlap, grouping and laying all measure
+  // from it. Absent, the derived origin stands and nothing moves, so no existing job
+  // changes. It must lie IN THE FACE PLANE -- an anchor shift is in-plane by definition,
+  // and a slot origin off the plane would silently redefine the depth the prism is
+  // measured along.
+  Vec3 slot_origin_mm{0.0, 0.0, 0.0};
+  bool slot_origin_stated = false;
   // ★ WHICH B-REP FACE THIS REGION CAME FROM (task 2026-08-12 §0a). Optional,
   // -1 = "not from a face" (a hand-placed primitive). It exists so the ONE
   // number the user drags can be CHECKED: when a face region names a face that

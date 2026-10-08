@@ -7029,7 +7029,12 @@ LatticeVariantOutcome lattice_one_variant(
             "regions (see job_include_region), so this run cannot say which wall that "
             "cell belongs to and will not guess.");
       }
-      pr.slot_origin = jr->origin;
+      // ★ R1: THE SENT SLOT ORIGIN WINS. Where the app states the grid it packed on,
+      // that grid is what every check and the laying measure from -- alignment, depth,
+      // overlap, grouping (stepped_group_cells walks back from this point) and the
+      // region the run lays. Absent, the region origin stands, which is what every
+      // existing job gets. Its in-plane-ness is settled at parse time (job.cpp).
+      pr.slot_origin = jr->slot_origin_stated ? jr->slot_origin_mm : jr->origin;
       pr.normal = jr->normal;
       pr.depth_mm = jr->depth_mm;
       plan_regions.push_back(pr);
@@ -7070,7 +7075,12 @@ LatticeVariantOutcome lattice_one_variant(
         pr.region_id = include_index;
         auto bi = base_of.find(include_index);
         pr.base_cell_mm = bi != base_of.end() ? bi->second : job.grading.cell_mm;
-        pr.slot_origin = jr.origin;
+        // ★ R1: THE SENT SLOT ORIGIN WINS. Where the app states the grid it packed on,
+        // that grid is what every check and the laying measure from -- alignment, depth,
+        // overlap, grouping (stepped_group_cells walks back from this point) and the
+        // region the run lays. Absent, the region origin stands, which is what every
+        // existing job gets. Its in-plane-ness is settled at parse time (job.cpp).
+        pr.slot_origin = jr.slot_origin_stated ? jr.slot_origin_mm : jr.origin;
         pr.normal = jr.normal;
         pr.depth_mm = jr.depth_mm;
         plan_regions.push_back(pr);

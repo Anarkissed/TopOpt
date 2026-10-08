@@ -358,6 +358,26 @@ Unchanged: a job whose lattice survives the beam. The control fixture
 of its 750 voxels and is still accepted — and the test requires that count to be non-zero,
 so a future change that emptied every lattice could not pass as "it refuses correctly".
 
+## MEANING CHANGES, addendum 6 (2026-10-07) — the in-plane slot origin, as sent
+
+From #354's core brief of 2026-10-02 (R1), the maintainer's ruling (b) and the reviewer's
+ruling of 2026-10-05. A new OPTIONAL key on a face lattice region's geometry:
+`slot_origin_mm`.
+
+| what | was | is | app impact |
+|---|---|---|---|
+| a job stating `lattice.regions[].geometry.slot_origin_mm` | **REFUSED** as an unknown key | accepted; that point is the grid alignment, depth, overlap, grouping and laying all measure from | **this is the key R1 asked for.** The app can stop having its anchor search refused: on every project the non-base cells were off core's grid by one constant in-plane vector per region (570B38E2 region 1: x = 1.6647, z = 0.5443 mod 2.578) |
+| a job NOT stating it | the region `origin` is the slot origin | unchanged — the derived origin still stands | **none.** Proved by a control fixture: the identical plan without the key is still refused, so nothing moved for existing jobs |
+| a stated slot origin with a component along the region normal | n/a (the key did not exist) | **REFUSED at parse time**, naming the region, the key and how far out of plane it stands | **intended.** An anchor shift is in-plane by definition; a normal component would move the plane the prism's depth is measured from and change every containment verdict in silence |
+
+Tested against the UNIT normal, for the reason recorded for `frame_u`: the raw test
+`|d·n| < eps` accepts `|d·n̂| < eps/|n|`, so a SHORT normal is the loose and dangerous
+case, not a long one.
+
+Note for the R6 work that follows: with the slot origin on the wire, the stricter
+base-cell alignment R6 asks for can land without refusing the app's current plans — which
+is why this key goes in first.
+
 ### The fingerprint defect, for the record
 
 Not the worktree (`git -C core rev-parse` resolves fine there), and not only the

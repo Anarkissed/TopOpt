@@ -2126,6 +2126,18 @@ if(OpenCASCADE_FOUND AND Eigen3_FOUND)
     TOPOPT_CLI_EXE="$<TARGET_FILE:topopt_cli>")
   add_test(NAME cli_empty_post_beam_mask COMMAND test_empty_post_beam_mask)
 
+  # ★ R1: the in-plane slot origin as SENT. Three fixtures: the plan validates only
+  # because the grid was stated; the identical plan without the key is refused (the
+  # control, without which a loosened alignment check would look the same); and a slot
+  # origin off the face plane is refused by name.
+  add_executable(test_slot_origin tests/validation/test_slot_origin.cpp)
+  target_link_libraries(test_slot_origin PRIVATE topopt)
+  target_compile_definitions(test_slot_origin PRIVATE
+    ORGANIC_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/organic"
+    CLI_TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}"
+    TOPOPT_CLI_EXE="$<TARGET_FILE:topopt_cli>")
+  add_test(NAME cli_slot_origin COMMAND test_slot_origin)
+
   # ★ Every subcommand that writes a receipt stamps the binary that wrote it
   # (reviewer, 2026-10-01). `analyze` and `lattice-variant` return before main.cpp
   # populates the fingerprint, so their run_info.json carried "unknown". Runs the real
