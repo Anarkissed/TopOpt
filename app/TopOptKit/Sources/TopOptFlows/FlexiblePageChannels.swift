@@ -71,12 +71,14 @@ public enum FlexiblePageChannels {
         // separate squeezes (two groups), never an error; with two or more squeeze groups a
         // pressed face's own part takes its GROUP's colour (FlexibleSqueezeGroups.palette, never
         // purple) — seen until its map quads cover it (the face list's dots carry it after)
+        // ★ ROUND 6 (his img1): `groupColours` false on BOTH pages — a pressed face with no map is the plain
+        // pressed colour; the group's colour is the Settings page's glass (FlexibleGroupWalls) and its dots
         let regions = model.regions
         let groups = model.squeezeGroups
         var regionTint: [(id: Int, tint: SIMD4<Float>)] = []   // later entries win
         for f in model.settings.faces {
             var c = f.isLoaded ? FlexibleColours.loadedFace : FlexibleColours.restingFace
-            if f.isLoaded, groups.count > 1, let g = groups.first(where: { $0.regions.contains(f.faceRegionID) }) {
+            if groupColours, f.isLoaded, groups.count > 1, let g = groups.first(where: { $0.regions.contains(f.faceRegionID) }) {
                 c = FlexibleColours.token(model.groupColour(g), FlexibleColours.loadedFace.w)   // ★ S1: his chosen colour
             }
             regionTint.append((f.faceRegionID, c))

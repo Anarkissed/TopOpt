@@ -299,11 +299,12 @@ public enum FlexibleRowCopy {
     public static let deepestRow = "Deepest squish"
     public static let stampSizeRow = "Width"
     public static let stampLengthRow = "Length"
-    public static let stampTurnRow = "Turn"
+    /// ★ ROUND 6 (his item 2's img2: "Turn" read as the press's angle): it turns the STAMP within its face.
+    public static let stampTurnRow = "Stamp turn"
     public static func curvePointRow(axis: String) -> String { "Point on \(axis.uppercased())" }
-    /// ★ ROUND 6 (item 3): the legend's view rows (TESTS-FIRST STUBS).
-    public static func legendPrismsRow(_ k: Int) -> String { "" }
-    public static let legendGroupsRow = ""
+    /// ★ ROUND 6 (item 3): the legend's view rows, one line each (the swatch and the discs are drawn).
+    public static func legendPrismsRow(_ k: Int) -> String { fit("Prism = squish shown ×\(max(1, k))") }
+    public static let legendGroupsRow = "Groups"
     public static let curvePointTitle = "Squish here"
 
     // MARK: More
@@ -336,7 +337,7 @@ public enum FlexibleRowCopy {
         public static let finish = "The whole part's outside. None: the lattice runs to the surface everywhere. Rim: a solid band along every edge, the faces open. Skin: a thin skin over the lattice with round holes in it. Covered: a solid skin everywhere. Only Covered reaches the solver today; Rim and Skin are drawn by the app (the line under the row says so). Rim's band is 2 mm; Skin is 0.8 mm thick with 3 mm holes (1.5 mm radius) 5 mm apart."
         public static let stamp = "What presses this face: pick one from the list, or import an SVG outline or an image (darker presses harder). Its weight is the face's weight."
         public static let stampSize = "The stamp's real size: type its width or its length, or drag either up or down — the other follows the stamp's own proportions, so its outline is never stretched."
-        public static let stampTurn = "Turns the stamp on the face, in degrees: type an angle, or drag the number up or down (15° a step)."
+        public static let stampTurn = "Turns the stamp within its face, in degrees (it never tilts the press): type an angle, or drag the number up or down (15° a step)."
         public static let stampPress = "Soft spreads the weight evenly under the stamp (a hand, a foot). Rigid sinks evenly, like a flat plate."
         public static let deepest = "How far the softest spot sinks under the full weight. Drag the chip on the part: while you drag, a glass prism shows how deep it goes (drawn ×k, the same exaggeration as the dent). It snaps every 0.5 mm and at the lattice depth, and never goes deeper than the lattice. One drag stops where the drawn prism meets the lattice; let go and drag again to go deeper."
         public static let temperature = "Foaming filaments change softness with nozzle temperature — and not in order. Only the temperatures the filament was tested at are offered; Auto picks one."

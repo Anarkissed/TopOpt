@@ -1,8 +1,16 @@
-// FlexibleGroupColours — each squeeze group's OWN colour, chosen in its folder tab and worn by its
-// faces on the model body, on the Settings page AND the main Flexible page (task
+// FlexibleGroupColours — each squeeze group's OWN colour, chosen in its folder tab (task
 // 2026-09-29-flexible-screens, round 5 batch S1; his img 1: "The different groups should have
 // different coloured faces on the model body, assigned in the settings modal." — and: "This should
 // be in the settings page too").
+// ★ ROUND 6 (his img1 of 2026-10-08: "I am seeing these edges all along the object - even when the heat
+// map is turned off", and his answer: "Settings page only, BUT only when the group is selected or the all
+// groups has been set … a slightly visible wall with a TINT of the group colour"): the colour is no
+// longer worn ON THE BODY anywhere — not by the frames below, not by the digits, not by a map-less pressed
+// face (FlexiblePageChannels `groupColours: false` on both pages). The Settings page shows the OPEN
+// group's GLASS in it instead (FlexibleGroupWalls); the rail, the face list's dots, the player and the
+// legend still wear it. FlexibleGroupFrames and FlexibleGroupNumbers.paint are KEPT as the RED CONTROL's
+// painter (`controlRound5Frames` on both pages — his img1 reproduced first) and keep their pure tests.
+// The notes below describe round 5's frames as they were.
 //
 // ★ THE PALETTE (★ round 5 C5 — his answer "Add more colour tokens"): EIGHT DS tokens
 // (DS.Color.squeezeGroupPalette), never purple (purple is the depth prism) — green, pink, mint, blue,
@@ -162,7 +170,8 @@ extension FlexibleStageModel {
     }
 }
 
-/// ★ S1: the group colour's FRAME round each pressed face's map (see the file comment).
+/// ★ S1: the group colour's FRAME round each pressed face's map (see the file comment). ★ ROUND 6: painted by
+/// the red control only (`controlRound5Frames`) — no page paints it.
 @MainActor
 public enum FlexibleGroupFrames {
 

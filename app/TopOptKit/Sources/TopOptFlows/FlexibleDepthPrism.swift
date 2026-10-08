@@ -20,8 +20,14 @@
 // through every rectangle corner on its sides (so neighbours share every sub-edge, no
 // T-junction), and the skirt stands only where the outline turns. A curved face keeps the
 // per-corner grid (its base must follow the surface).
-// ★ DRAWN ONLY WHILE THE CHIP IS DRAGGED (verification of round 3): at rest a prism × k
-// filled ~90 % of his pad under the face and hid the dent it measures.
+// ★ ROUND 6 (his img3: "When a face … is highlighted, we should automatically be able to see the amount of
+// squish it has been set to") REPLACES round 3's "drawn only while the chip is dragged": the selected
+// pressed face's prism shows AT ONCE, FAINT (alphas set — MetalMeshView's plain pass, no contact wash),
+// joining the chip at its floor to its face; while the chip is dragged, the bright contact look of
+// round 3 (nil alphas). Round 3 had hidden it at rest because a 0.60 prism with contact shading filled
+// ~90 % of his pad and hid the dent it measures; FlexibleRound6Tests measures the faint one on his pad
+// (the dent reads through it). The Prisms view (FlexibleStageViews.prisms) draws every pressed face's,
+// faint, the selected one brighter.
 //
 // ★ THE DRAG. The handle is the shell's own `.slabDepth` ClearanceHandle (normal == load);
 // its value under a MODEL-space ray (the page's projection already includes the settle) is
@@ -242,25 +248,36 @@ enum FlexibleDepthPrism {
         return (clamp(r.mm, latticeMM: limit), r.snapped, r.didSnap)
     }
 
-    /// The prism the Settings page draws: the SELECTED pressed face's (a Stamp face's on its
-    /// stamp's footprint), in the lattice stage's face-prism purple, and ONLY while its chip is
-    /// dragged (`frozenExaggeration` set) — at rest the dent reads alone.
-    /// ★ ROUND 6: a prism at rest is FAINT (per layer; its base and floor compose to about twice this), the
-    /// selected one brighter in the Prisms view; dragged, the contact look (nil alphas).
-    static let restFaceAlpha: Float = 0.07
-    static let restEdgeAlpha: Float = 0.45
-    static let viewSelectedFaceAlpha: Float = 0.12
-    static let viewSelectedEdgeAlpha: Float = 0.65
+    /// ★ ROUND 6: a prism at rest is FAINT (true opacities per layer — its base and floor compose to about twice
+    /// this), the selected one brighter in the Prisms view; dragged, the contact look (nil alphas). Set by
+    /// FlexibleRound6Tests' measurement on his pad (R6-1d: the spec's start, 0.07, read a median 27/255 over the dent).
+    static let restFaceAlpha: Float = 0.05
+    static let restEdgeAlpha: Float = 0.40
+    static let viewSelectedFaceAlpha: Float = 0.09
+    static let viewSelectedEdgeAlpha: Float = 0.60
     /// Test control only (round 6): round 3's rule — the prism only while the chip is dragged.
     @MainActor static var controlOnlyWhileDragging = false
 
+    /// The prisms the Settings page draws, in the lattice stage's face-prism purple (a Stamp face's on its
+    /// stamp's footprint): the SELECTED pressed face's — faint at rest, the contact look while its chip is
+    /// dragged (`frozenExaggeration` set); with the Prisms view, every pressed face's, faint, the selected one
+    /// brighter. A resting face has none.
     @MainActor
     static func renderItems(model: FlexibleStageModel, k: Double, views: FlexibleStageViews = []) -> [ClearanceRenderItem] {
-        guard model.frozenExaggeration != nil,
-              let r = model.selectedRegion, let f = model.settings.face(r), f.isLoaded,
-              let key = model.key(r), let st = model.stacks[key], let g = model.geometry[key], k > 0,
-              let v = volume(region: r, stack: st, centres: g.centres, depthMM: f.deepestMM, k: k,
-                             footprint: model.prismFootprint(r)) else { return [] }
-        return [ClearanceRenderItem(volume: v, selected: true, tint: FlexibleStageStyle.facePrismTint)]
+        let dragging = model.frozenExaggeration != nil
+        let sel = model.selectedRegion.flatMap { model.settings.face($0)?.isLoaded == true ? $0 : nil }
+        guard k > 0, !controlOnlyWhileDragging || dragging else { return [] }   // (RED CONTROL: round 3's rule)
+        let all = views.contains(.prisms) && !controlOnlyWhileDragging
+        let regions = all ? model.settings.loadedFaces.map(\.faceRegionID) : sel.map { [$0] } ?? []
+        return regions.compactMap { r in
+            guard let f = model.settings.face(r), let key = model.key(r), let st = model.stacks[key], let g = model.geometry[key],
+                  let v = volume(region: r, stack: st, centres: g.centres, depthMM: f.deepestMM, k: k,
+                                 footprint: model.prismFootprint(r)) else { return nil }
+            if r == sel, dragging { return ClearanceRenderItem(volume: v, selected: true, tint: FlexibleStageStyle.facePrismTint) }
+            let bright = r == sel && all
+            return ClearanceRenderItem(volume: v, selected: r == sel, tint: FlexibleStageStyle.facePrismTint,
+                                       faceAlpha: bright ? viewSelectedFaceAlpha : restFaceAlpha,
+                                       edgeAlpha: bright ? viewSelectedEdgeAlpha : restEdgeAlpha)
+        }
     }
 }

@@ -1822,6 +1822,9 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     private var clearanceFaceCount = 0
     private var clearanceLineBuffer: MTLBuffer?
     private var clearanceLineCount = 0
+    // Flexible (#362) R6 (A2): an item with its own alphas (FAINT) and a surface-only glass (GLASS, front faces only)
+    private var clearanceFaintBuffer: MTLBuffer?; private var clearanceFaintCount = 0
+    private var clearanceGlassBuffer: MTLBuffer?; private var clearanceGlassCount = 0
 
     static let colorFormat: MTLPixelFormat = .bgra8Unorm
     static let depthFormat: MTLPixelFormat = .depth32Float
@@ -2728,6 +2731,7 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         clearanceFaceBuffer = nil; clearanceFaceCount = 0
         clearanceLineBuffer = nil; clearanceLineCount = 0
         clearanceXrayBuffer = nil; clearanceXrayCount = 0
+        clearanceFaintBuffer = nil; clearanceFaintCount = 0; clearanceGlassBuffer = nil; clearanceGlassCount = 0   // Flexible (#362) R6 (A2)
         guard !items.isEmpty else { return }
 
         // Base clearance red (matches the SwiftUI affix/label tint). ~50% fill (task),
@@ -2742,6 +2746,7 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         // NOTHING. The x-ray buffer re-draws the edges depth-ALWAYS at low alpha,
         // so a buried primitive still reads as a ghost wireframe wherever it is.
         var xray: [Float] = []
+        var faint: [Float] = [], glass: [Float] = [], target = 0   // Flexible (#362) R6 (A2): 0 faces · 1 faint · 2 glass
         func push(_ dst: inout [Float], _ p: SIMD3<Float>, _ c: SIMD4<Float>) {
             dst.append(p.x); dst.append(p.y); dst.append(p.z)
             dst.append(c.x); dst.append(c.y); dst.append(c.z); dst.append(c.w)
@@ -2751,6 +2756,8 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
             SIMD4<Float>(rgb.x * a, rgb.y * a, rgb.z * a, a)
         }
         func tri(_ a: SIMD3<Float>, _ b: SIMD3<Float>, _ c: SIMD3<Float>, _ col: SIMD4<Float>) {
+            if target == 2 { push(&glass, a, col); push(&glass, b, col); push(&glass, c, col); return }
+            if target == 1 { push(&faint, a, col); push(&faint, b, col); push(&faint, c, col); return }
             push(&faces, a, col); push(&faces, b, col); push(&faces, c, col)
         }
         var xcol = SIMD4<Float>()
@@ -2763,11 +2770,16 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         for item in items {
             let selected = item.selected
             let rgb = item.tint ?? baseRGB
-            let faceAlpha: Float = selected ? 0.60 : 0.42
-            let edgeAlpha: Float = selected ? 0.98 : 0.80
-            let fcol = premul(rgb, faceAlpha)
-            let ecol = premul(rgb, edgeAlpha)
-            xcol = premul(rgb, edgeAlpha * 0.35)
+            let faceAlpha: Float = item.faceAlpha ?? (selected ? 0.60 : 0.42)
+            let edgeAlpha: Float = item.edgeAlpha ?? (selected ? 0.98 : 0.80)
+            // Flexible (#362) R6 (A2): an item with its own alphas is FAINT (a surface-only one GLASS), pushed STRAIGHT —
+            // ground_fragment / contact_fragment premultiply again (rgb·a), so `premul` here made a volume rgb·a²
+            let straight = item.faceAlpha != nil || item.edgeAlpha != nil
+            target = item.surfaceOnly ? 2 : (straight ? 1 : 0)
+            func col(_ a: Float) -> SIMD4<Float> { straight ? SIMD4<Float>(rgb, a) : premul(rgb, a) }
+            let fcol = col(faceAlpha)
+            let ecol = col(edgeAlpha)
+            xcol = col(edgeAlpha * 0.35)
             switch item.volume.shape {
             case let .cylinder(axisPoint, axisDir, radius, tLo, tHi):
                 let dir = simd_length(axisDir) > 1e-6 ? simd_normalize(axisDir) : SIMD3<Float>(0, 0, 1)
@@ -2813,7 +2825,7 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
                     let i0 = Int(s.indices[k]), i1 = Int(s.indices[k + 1])
                     let i2 = Int(s.indices[k + 2])
                     tri(s.base[i0], s.base[i1], s.base[i2], fcol)          // the face
-                    tri(s.offset[i2], s.offset[i1], s.offset[i0], fcol)    // its offset
+                    if !item.surfaceOnly { tri(s.offset[i2], s.offset[i1], s.offset[i0], fcol) }   // its offset (R6: never a glass's)
                     k += 3
                 }
                 // The SKIRT rides the boundary — the edges used by exactly one
@@ -2836,6 +2848,7 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
                 for (key, n) in use where n == 1 {
                     guard let (a, b) = edge[key] else { continue }
                     let ia = Int(a), ib = Int(b)
+                    if item.surfaceOnly { seg(s.base[ia], s.base[ib], ecol); continue }   // Flexible (#362) R6 (A2): a glass's outline only
                     tri(s.base[ia], s.base[ib], s.offset[ib], fcol)
                     tri(s.base[ia], s.offset[ib], s.offset[ia], fcol)
                     seg(s.base[ia], s.base[ib], ecol)
@@ -2868,6 +2881,11 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
                 device.makeBuffer(bytes: $0.baseAddress!, length: $0.count, options: [])
             }
         }
+        // Flexible (#362) R6 (A2): the FAINT and GLASS faces (their outlines went to `lines` / `xray` above)
+        clearanceFaintCount = faint.count / 7
+        if clearanceFaintCount > 0 { clearanceFaintBuffer = faint.withUnsafeBytes { device.makeBuffer(bytes: $0.baseAddress!, length: $0.count, options: []) } }
+        clearanceGlassCount = glass.count / 7
+        if clearanceGlassCount > 0 { clearanceGlassBuffer = glass.withUnsafeBytes { device.makeBuffer(bytes: $0.baseAddress!, length: $0.count, options: []) } }
     }
 
     /// Rebuild the per-vertex tint buffer from the selection: each grouped face's
@@ -3552,6 +3570,14 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
                      faceBuffer: clearanceFaceBuffer, faceCount: clearanceFaceCount,
                      lineBuffer: clearanceLineBuffer, lineCount: clearanceLineCount,
                      sceneDepthTex: wantsContact ? sceneDepthTex : nil)
+        // Flexible (#362) R6 (A2): FAINT faces (an item's own alphas) and GLASS faces (front faces only) through the
+        // plain pass — no contact line, no occlusion darkening; the glass culls the faces that look away
+        encodeVolume(enc: enc, mvp: uniforms.mvp, faceBuffer: clearanceFaintBuffer, faceCount: clearanceFaintCount,
+                     lineBuffer: nil, lineCount: 0, sceneDepthTex: nil)
+        enc.setCullMode(.back)
+        encodeVolume(enc: enc, mvp: uniforms.mvp, faceBuffer: clearanceGlassBuffer, faceCount: clearanceGlassCount,
+                     lineBuffer: nil, lineCount: 0, sceneDepthTex: nil)
+        enc.setCullMode(.none)
         // Round-2 L21: the x-ray edge pass — depth-ALWAYS, low alpha — so a primitive
         // buried inside the opaque body (fresh primitives spawn at the model centre)
         // still reads as a ghost wireframe instead of rendering as nothing.

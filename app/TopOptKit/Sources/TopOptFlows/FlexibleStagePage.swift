@@ -98,7 +98,7 @@ public struct FlexibleStagePage: View {
     static func stageKeepOut(_ frames: [String: CGRect]) -> [CGRect] {
         guard let st = frames["stage"] else { return [] }
         let player = frames["playerCapsule"] != nil ? ["playerTopRow", "playerCapsule"] : ["player"]
-        return (["panel", "legend"] + player).compactMap { frames[$0]?.offsetBy(dx: -st.minX, dy: -st.minY) }
+        return (["panel", "legend", "viewButtons"] + player).compactMap { frames[$0]?.offsetBy(dx: -st.minX, dy: -st.minY) }   // ★ R6: the view buttons
     }
     private let ticker = Timer.publish(every: 1.0 / 30.0, on: .main, in: .common).autoconnect()
     static let squishPeriodS = 2.4
@@ -125,13 +125,14 @@ public struct FlexibleStagePage: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
                     .padding(.leading, PageChrome.edge)
                     .padding(.bottom, PageChrome.edge)
-                FlexibleViewColumn(camera: camera)
+                FlexibleViewColumn(camera: camera, model: model)
                 player(in: geo.size)
                 // ★ THE LEGEND SITS ON THE TRAILING EDGE, VERTICALLY CENTRED (round 3, item 7:
                 // "legends never cover buttons" — it covered Generate in the bottom corner),
                 // placed by FlexibleLegendPlacement.legend against the gizmo and the top line
                 // (batch B review: the placement the tests measure is the one the page calls)
-                if dents != nil {
+                // ★ ROUND 6: …and while a view is on (its row), with no dent too — ONE card
+                if FlexibleLegend.shows(hasDent: dents != nil, views: model.views) {
                     legend(in: geo.size)
                 }
                 // ★ THE POP-UP SHOWS THE ISSUE AS IT IS NOW (batch B review) — placed under the
@@ -256,8 +257,9 @@ public struct FlexibleStagePage: View {
                     if proj.projection != q { proj.projection = q }
                 },
                 flexDisplacements: dents, flexScale: dentScale,
-                // ★ ROUND 3 (item 1.1): the selected face's deepest squish as a prism × k
-                clearanceVolumes: FlexibleDepthPrism.renderItems(model: model, k: dentExaggeration),
+                // ★ ROUND 3 (item 1.1): the selected face's deepest squish as a prism × k — ★ ROUND 6: at once
+                // (faint), every pressed face's in the Prisms view, and the open group's glass (FlexibleStageVolumes)
+                clearanceVolumes: FlexibleStageVolumes.items(model: model, k: dentExaggeration, part: project.viewerMesh),
                 // ★ THE DENT READS THROUGH THE PART (maintainer, 2026-09-29): while a dent is
                 // shown the body drops to 30 % and the dented map stays at 100 %.
                 bodyAlpha: xray ? Self.xrayBodyAlpha : (dents != nil ? Self.dentBodyAlpha : 1),
@@ -297,10 +299,11 @@ public struct FlexibleStagePage: View {
     @MainActor static var controlRound5Frames = false
 
     /// The page's tints, composed (lifted out of `refreshChannels` so a test reads EXACTLY the page's).
+    /// ★ ROUND 6 (his img1 and answer): no group colour on the body — no frame, no digit, no tinted map-less
+    /// face; the OPEN group wears its glass instead (FlexibleGroupWalls, through `clearanceVolumes`).
     @MainActor static func composeTints(model: FlexibleStageModel, overlay: FlexibleOverlayMesh?) -> FlexiblePageChannels.Channels {
-        var c = FlexiblePageChannels.channels(model: model, overlay: overlay, xray: true, drawnLattice: nil)
-        // ★ ROUND 5 (S1): each pressed face framed in its squeeze group's colour (FlexibleGroupFrames)
-        FlexibleGroupFrames.paint(&c.tints, overlay: overlay, model: model)
+        var c = FlexiblePageChannels.channels(model: model, overlay: overlay, xray: true, drawnLattice: nil, groupColours: false)
+        if controlRound5Frames { FlexibleGroupFrames.paint(&c.tints, overlay: overlay, model: model) }   // (the red control only)
         return c
     }
 
@@ -530,17 +533,18 @@ public struct FlexibleStagePage: View {
                 .accessibilityIdentifier("flexible-legend-expand")
             } else {
                 FlexibleLegend(model: model, drawnLattice: nil, drilled: legendDrilled,
-                               reading: legendDrilled ? reading : nil)
+                               reading: legendDrilled ? reading : nil, hasDent: dents != nil, k: Int(dentExaggeration.rounded()))
                     .overlay(alignment: .top) {
                         HStack(spacing: 0) {
                             Color.clear
                                 .frame(maxWidth: .infinity).frame(height: FlexibleLegend.tabHeight)
                                 .contentShape(Rectangle())
-                                .onTapGesture { legendDrilled.toggle(); reading = nil }
+                                .onTapGesture { if dents != nil { legendDrilled.toggle(); reading = nil } }   // ★ R6: TAP TO READ only with a dent
                                 .accessibilityElement()
                                 .accessibilityLabel(legendDrilled ? "Stop reading" : "Tap to read")
                                 .accessibilityAddTraits(.isButton)
                                 .accessibilityIdentifier("flexible-settings-legend-tab")
+                                .accessibilityHidden(dents == nil)
                             Button { legendMinimized = true } label: {
                                 Image(systemName: "chevron.up")
                                     .font(.system(size: 11, weight: .bold))
@@ -561,7 +565,8 @@ public struct FlexibleStagePage: View {
             }.allowsHitTesting(false))
         if let measured = frames["legend"]?.size, measured.width > 0, measured.height > 0,
            let r = FlexibleLegendPlacement.legend(size: measured, viewport: size,
-                                                  keepOut: [FlexibleLegendPlacement.gizmoFrame(viewport: size), noticeBand(size)]) {
+                                                  keepOut: [FlexibleLegendPlacement.gizmoFrame(viewport: size), noticeBand(size),
+                                                            FlexibleStageViews.frame(viewport: size)]) {   // ★ R6: the view buttons
             view.position(x: r.midX, y: r.midY)
         } else {
             view.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
@@ -682,6 +687,8 @@ struct FlexibleStageOverlays: View {
                 // and never on the depth chip (it keeps clear of the chip's place: `k`)
                 FlexibleFaceStampHandle(model: model, projection: proj.projection, keepOut: keepOut, k: exaggeration)
             }
+            // ★ ROUND 6 (item 3): the Prisms view's mm tags and the Groups view's number discs
+            FlexibleStageViewTagsLayer(model: model, projection: proj.projection, k: exaggeration > 0 ? exaggeration : 1, keepOut: keepOut)
         }
     }
 
@@ -871,12 +878,16 @@ struct FlexibleLegend: View {
     var drawnLattice: FlexibleGeneratedLattice? = nil
     var drilled = false
     var reading: FlexibleReading? = nil
+    /// ★ ROUND 6: the dent's rows (TAP TO READ, the ramp) only with a dent; the view rows with their view.
+    var hasDent = true
+    /// The page's exaggeration (the Prisms row's "×k").
+    var k = 1
     /// The tab row's height — the only part of the legend that takes a tap (the padding above
     /// the "TAP TO READ" line, the line, and half the gap under it).
     static let tabHeight: CGFloat = DS.Space.ml + 16
 
-    /// ★ ROUND 6 (item 3): whether the page shows the card (TESTS-FIRST STUB: today's rule — a dent only).
-    static func shows(hasDent: Bool, views: FlexibleStageViews) -> Bool { hasDent }
+    /// ★ ROUND 6 (item 3): the page shows the ONE card with a dent, or while a view is on (its row).
+    static func shows(hasDent: Bool, views: FlexibleStageViews) -> Bool { hasDent || !views.isEmpty }
 
     var body: some View {
         let shown = FlexibleShownValues(model: model, drawnLattice: drawnLattice)
@@ -884,36 +895,41 @@ struct FlexibleLegend: View {
             ?? model.selectedRegion.flatMap { model.design($0)?.tier }
         let noNumber = shown.values.values.contains { $0.contains { if case .noNumber = $0 { return true } else { return false } } }
         VStack(alignment: .leading, spacing: 6) {
-            Text(drilled ? "TAP THE PART TO READ" : "TAP TO READ")
-                .font(.system(size: 10, weight: .bold)).tracking(0.7)
-                .foregroundStyle(DS.Color.accent.color)
-                .accessibilityIdentifier("flexible-legend-tab")
-            Text(shown.legendLine).font(.system(size: 12, weight: .semibold)).foregroundStyle(DS.Color.textPrimary.color)
-                .lineLimit(1).minimumScaleFactor(0.8)
-                .accessibilityIdentifier("flexible-legend-line")
-            // ★ BATCH M2 (V12; his round 5: "the graded dent colours should be in both views"): the main
-            // page's ONE smooth ramp (FlexibleMainLegendRow.ramp), never 24 flat blocks
-            FlexibleMainLegendRow.ramp(.dent).frame(width: 216, height: 10)
-            .overlay(alignment: .topLeading) {
-                if let f = reading?.fraction {
-                    Image(systemName: "arrowtriangle.up.fill")
-                        .font(.system(size: 9))
-                        .foregroundStyle(DS.Color.accent.color)
-                        .offset(x: CGFloat(min(1, max(0, f))) * 216 - 4, y: 10)
+            if hasDent {
+                Text(drilled ? "TAP THE PART TO READ" : "TAP TO READ")
+                    .font(.system(size: 10, weight: .bold)).tracking(0.7)
+                    .foregroundStyle(DS.Color.accent.color)
+                    .accessibilityIdentifier("flexible-legend-tab")
+                Text(shown.legendLine).font(.system(size: 12, weight: .semibold)).foregroundStyle(DS.Color.textPrimary.color)
+                    .lineLimit(1).minimumScaleFactor(0.8)
+                    .accessibilityIdentifier("flexible-legend-line")
+                // ★ BATCH M2 (V12; his round 5: "the graded dent colours should be in both views"): the main
+                // page's ONE smooth ramp (FlexibleMainLegendRow.ramp), never 24 flat blocks
+                FlexibleMainLegendRow.ramp(.dent).frame(width: 216, height: 10)
+                .overlay(alignment: .topLeading) {
+                    if let f = reading?.fraction {
+                        Image(systemName: "arrowtriangle.up.fill")
+                            .font(.system(size: 9))
+                            .foregroundStyle(DS.Color.accent.color)
+                            .offset(x: CGFloat(min(1, max(0, f))) * 216 - 4, y: 10)
+                    }
                 }
-            }
-            HStack {
-                Text("0 mm"); Spacer(); Text(String(format: "%.1f mm", shown.maxDepth))
-            }
-            .font(.system(size: 11, weight: .medium)).monospacedDigit()
-            .foregroundStyle(DS.Color.textSecondary.color)
-            if noNumber {
-                HStack(spacing: 6) {
-                    RoundedRectangle(cornerRadius: 2).fill(DS.Color.textQuaternary.color).frame(width: 12, height: 10)
-                    Text("grey · no number").font(.system(size: 11)).foregroundStyle(DS.Color.textTertiary.color)
+                HStack {
+                    Text("0 mm"); Spacer(); Text(String(format: "%.1f mm", shown.maxDepth))
                 }
+                .font(.system(size: 11, weight: .medium)).monospacedDigit()
+                .foregroundStyle(DS.Color.textSecondary.color)
+                if noNumber {
+                    HStack(spacing: 6) {
+                        RoundedRectangle(cornerRadius: 2).fill(DS.Color.textQuaternary.color).frame(width: 12, height: 10)
+                        Text("grey · no number").font(.system(size: 11)).foregroundStyle(DS.Color.textTertiary.color)
+                    }
+                }
+                if let tier { FlexTierBadge(tier: tier) }
             }
-            if let tier { FlexTierBadge(tier: tier) }
+            // ★ ROUND 6 (item 3): the views' rows — one line each
+            if model.views.contains(.prisms) { FlexibleLegendViewRows.prisms(k: k) }
+            if model.views.contains(.groups) { FlexibleLegendViewRows.groups(model: model) }
         }
         .frame(width: 236)
         .padding(DS.Space.ml)

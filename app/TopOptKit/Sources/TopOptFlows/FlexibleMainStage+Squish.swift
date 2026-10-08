@@ -312,7 +312,8 @@ extension FlexibleMainStage {
             // ★ BATCH M: each turn's heat is its own sim's dent, on the page's one scale
             let scale = fe.retained.contains(i) ? scaleMM : (nextScaleMM ?? scaleMM)
             out[fe.fields[i].versionKey] = FlexiblePageChannels.channels(model: m, overlay: overlay, xray: false, drawnLattice: d, heat: heat,
-                                                                        depthScaleMM: scale, mapValues: feMapValues(fe.fields[i], m)).tints
+                                                                        depthScaleMM: scale, mapValues: feMapValues(fe.fields[i], m),
+                                                                        groupColours: false).tints   // ★ R6: no group tint
         }
         return out
     }

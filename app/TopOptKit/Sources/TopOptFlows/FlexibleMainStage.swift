@@ -213,6 +213,8 @@ public final class FlexibleMainStage: ObservableObject {
     var controlColumnHeat = false
     /// Bumped per overlay rebuild (the mesh cache and the pass's FE token follow it).
     var overlaySerial = 0
+    /// ★ ROUND 6: the main page's prisms, and the state they were built for (`volumes`).
+    var volumesCache: (key: String, items: [ClearanceRenderItem])?
     /// The lattice generation the loop started its FE sequence for (from rest).
     var fePlayedGeneration: Int?
     // ★ BATCH G VERIFICATION: the loop starts by (generation, the sequence ASKED FOR) — not by the
@@ -236,10 +238,8 @@ public final class FlexibleMainStage: ObservableObject {
     var controlLoopByGeneration = false
     var controlReadSimsBeforeStart = false
     var controlPlayAllCombo = false
-    /// Test control only (★ the S + M merge): "Play all"'s turns composed WITHOUT the group frames (batch S
-    /// framed the composed tints only, and the renderer swaps a turn's own in — the frames vanished).
-    var controlTurnsWithoutFrames = false
-    /// Test control only (round 6, item 1): round 5's group frames painted on the main page's model.
+    /// Test control only (round 6, item 1 — it retires the S + M merge's `controlTurnsWithoutFrames`): round 5's
+    /// group frames painted on the main page's model, in every view and every Play-all turn.
     var controlRound5Frames = false
     /// ★ the gate: another core solve runs (the Stress view's sim, a topology run) — FlexibleStressSolver.busy
     var squishBusy: (() -> Bool)?
@@ -428,10 +428,51 @@ public final class FlexibleMainStage: ObservableObject {
     public func bodyAlpha(_ project: ProjectModel, on stage: WorkspaceStage) -> Float? {
         owns(project, stage) ? (xray ? FlexibleStagePage.xrayBodyAlpha : 1) : nil
     }
-    /// ★ ROUND 6 (item 3, hook H15): the main page's prisms — [] off the Flexible stage.
-    public func volumes(_ project: ProjectModel, on stage: WorkspaceStage, drilledIn: Bool) -> [ClearanceRenderItem] { [] }
-    /// ★ ROUND 6 (item 3): the main page's [Prisms] — the Prisms view, and the Lattice view (the X-ray) with it.
-    public func togglePrisms() {}
+    /// ★ ROUND 6 (item 3, hook H15 — WorkspacePlaceholder hands it to the viewer on the S1 base): the main
+    /// page's prisms, faint (FlexibleDepthPrism's, at the page's k) — the ACTIVE Selections group's pressed
+    /// faces, or every pressed face while the Prisms view is on; [] off the Flexible stage, under a page, or
+    /// while a legend reads. Cached per state (the workspace's body asks on every pass).
+    public func volumes(_ project: ProjectModel, on stage: WorkspaceStage, drilledIn: Bool) -> [ClearanceRenderItem] {
+        guard !drilledIn, !frozen, let m = current(project, stage) else { return [] }
+        let k = channels.map { $0.exaggeration > 0 ? $0.exaggeration : 1 } ?? 1
+        let active = project.selection.activeGroup
+        let key = "\(k)|\(m.views.rawValue)|\(active.map { "\($0.id)\($0.faces)\($0.regionIDs)" } ?? "-")|\(m.settings.hashValue)|"
+            + "\(m.stacks.count)|\(m.geometry.count)|\(m.stampGrids.count)"
+        if let c = volumesCache, c.key == key { return c.items }
+        var regions: [Int] = []
+        if m.views.contains(.prisms) {
+            regions = m.settings.loadedFaces.map(\.faceRegionID)
+        } else if let g = active {
+            // the group's faces (a region's members too) and its cut sectors; a face it LOADS is linked to it
+            let part = project.viewerMesh, all = m.regions
+            var faces = Set(g.faces.map { Int($0) }), sectors = Set<Int>()
+            for id in g.regionIDs {
+                guard let reg = project.faceRegions.region(id) else { continue }
+                if all.sectors.contains(where: { $0.id == id }) { sectors.insert(FlexibleRegions.wireID(reg)) }
+                else if let part { faces.formUnion(FaceRegionGeometry.members(of: reg, in: part).map { Int($0) }) }
+            }
+            regions = m.settings.loadedFaces.map(\.faceRegionID).filter { r in
+                m.settings.face(r)?.weightFrom == g.id || sectors.contains(r)
+                    || (!FlexibleRegions.isSector(r) && !faces.isDisjoint(with: all.faces(of: r, mesh: part)))
+            }
+        }
+        let items: [ClearanceRenderItem] = regions.compactMap { r in
+            guard let f = m.settings.face(r), let key = m.key(r), let st = m.stacks[key], let g = m.geometry[key],
+                  let v = FlexibleDepthPrism.volume(region: r, stack: st, centres: g.centres, depthMM: f.deepestMM, k: k,
+                                                    footprint: m.prismFootprint(r)) else { return nil }
+            return ClearanceRenderItem(volume: v, selected: false, tint: FlexibleStageStyle.facePrismTint,
+                                       faceAlpha: FlexibleDepthPrism.restFaceAlpha, edgeAlpha: FlexibleDepthPrism.restEdgeAlpha)
+        }
+        volumesCache = (key, items)
+        return items
+    }
+    /// ★ ROUND 6 (item 3): the main page's [Prisms] — the Prisms view, and the Lattice view (the X-ray) with it
+    /// (a view that needs another turns it on itself). The button itself joins the toggles on the S1 base.
+    public func togglePrisms() {
+        guard let m = model else { return }
+        m.toggleView(.prisms)
+        if m.views.contains(.prisms), !latticeShown { latticeOn = true }
+    }
 
     /// The squish player shows only when there is something to squish: a lattice that still
     /// matches the settings, on the visible main page.
@@ -634,10 +675,11 @@ public final class FlexibleMainStage: ObservableObject {
         // ★ BATCH M (M5, M2b): in FE mode the heat IS the sim's dent — at every vertex of the shown
         // group's faces, on ONE scale over the groups of the sequence (Play all's turns compare)
         let feNow = feHeat(m)
+        // ★ ROUND 6 (his img1): no group colour on the main page — no frame, no digit, no tinted map-less face
         var c = FlexiblePageChannels.channels(model: m, overlay: overlay, xray: false, drawnLattice: drawn, heat: heat,
                                               depthScaleMM: feNow?.scaleMM, mapValues: feNow?.first,
-                                              controlColumnColours: controlColumnHeat)
-        FlexibleGroupFrames.paint(&c.tints, overlay: overlay, model: m)   // ★ S1: each face framed in its group's colour
+                                              controlColumnColours: controlColumnHeat, groupColours: false)
+        if controlRound5Frames { FlexibleGroupFrames.paint(&c.tints, overlay: overlay, model: m) }   // (the red control only)
         let shown = FlexibleShownValues(model: m, drawnLattice: drawn)
         dentMaxMM = feNow?.scaleMM ?? shown.maxDepth   // ★ BATCH N VERIFICATION: the sequence AS ON SCREEN
         heatValues = c.mapValues

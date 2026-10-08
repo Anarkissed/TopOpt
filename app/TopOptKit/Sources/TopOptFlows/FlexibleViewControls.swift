@@ -15,11 +15,14 @@ import SwiftUI
 import TopOptDesign
 
 /// The top-right column: the gizmo. ★ ROUND 3 (item 1.4): the X-ray button that sat under it
-/// is gone — the Settings page is always in X-ray (FlexibleStagePage.xray).
+/// is gone — the Settings page is always in X-ray (FlexibleStagePage.xray). ★ ROUND 6 (item 3): the
+/// [Prisms] and [Groups] view buttons under it (FlexibleStageViewButtons).
 struct FlexibleViewColumn: View {
     @ObservedObject var camera: OrbitCameraModel
+    var model: FlexibleStageModel? = nil
 
     var body: some View {
+      ZStack(alignment: .topTrailing) {
         VStack {
             HStack {
                 Spacer()
@@ -31,6 +34,8 @@ struct FlexibleViewColumn: View {
         }
         .padding(.top, PageChrome.gizmoInset)
         .padding(.trailing, PageChrome.gizmoInset)
+        if let model { FlexibleStageViewButtons(model: model) }
+      }
     }
 }
 

@@ -242,7 +242,8 @@ final class FlexibleRound6HostedTests: XCTestCase {
             XCTAssertEqual(it.tint, pink); XCTAssertEqual(it.faceAlpha, FlexibleGroupWalls.faceAlpha); XCTAssertEqual(it.edgeAlpha, FlexibleGroupWalls.edgeAlpha)
             XCTAssertTrue(it.surfaceOnly, "a glass: its base only")
         }
-        XCTAssertEqual(FlexibleGroupWalls.faceAlpha, 0.10); XCTAssertEqual(FlexibleGroupWalls.edgeAlpha, 0.45)
+        // (the alphas themselves are R6-1d's measured values on his pad: FlexibleRound6Tests)
+        XCTAssertLessThan(FlexibleGroupWalls.faceAlpha, FlexibleGroupWalls.openFaceAlpha, "the open group brighter in the Groups view")
         lines.append(".group(2) → \(w.keys.sorted())")
         m.rail = .group(3)
         w = walls()

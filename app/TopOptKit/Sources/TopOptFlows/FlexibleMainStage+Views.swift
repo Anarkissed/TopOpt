@@ -125,7 +125,7 @@ extension FlexibleMainStage {
         // all turn its own below), on the sequence's one scale
         let feRoute = feStressRoute
         let key = "\(generation)|\(h.finalize())|\(showStress ? (feRoute ? fe.token : stressKey) : 0)|\(xray)|\(heat)|\(overlay != nil)|"
-            + feBaseTints.keys.sorted().joined(separator: ",") + "|\(controlStressScaleIsPeak)|\(controlTurnsWithoutFrames)"
+            + feBaseTints.keys.sorted().joined(separator: ",") + "|\(controlStressScaleIsPeak)|\(controlRound5Frames)"
         if key != composedKey {
             composedKey = key
             // ★ BATCH M VERIFICATION: each group's field on ITS OWN scale (its top — FlexibleFEStress.scaleTop);
@@ -142,7 +142,8 @@ extension FlexibleMainStage {
             let first = (fe.shownSequence.first ?? fe.sequence.first).map { fe.fields[$0].versionKey }   // ★ N verification: as on screen
             composed = FlexibleMainTints.compose(base: c.tints, overlay: overlay, part: project.viewerMesh, heat: heat,
                                                  roles: roles, stress: stressOf(first), ghost: xray ? FlexibleColours.ghost : nil)
-            if let m = model { FlexibleGroupFrames.paint(&composed, overlay: overlay, model: m) }   // ★ S1: the group frames in every view (Stress too)
+            // ★ ROUND 6 (his img1): no group frame in any view — round 5's paint is the red control's only
+            if controlRound5Frames, let m = model { FlexibleGroupFrames.paint(&composed, overlay: overlay, model: m) }
             // ★ BATCH G VERIFICATION: "Play all" — each group's own colours, composed the same way; the
             // renderer swaps them in with the group's field (FlexibleFETints)
             var per: [String: [Float]] = [:]
@@ -158,9 +159,9 @@ extension FlexibleMainStage {
                                                         roles: roles, stress: stressOf(id), ghost: xray ? FlexibleColours.ghost : nil)
                 }
             }
-            // ★ S1 (merge): each Play all turn wears the group frames too (the renderer swaps a turn's own
-            // tints in with its field — FlexibleMergeR5SMTests; RED: controlTurnsWithoutFrames)
-            if let m = model, !controlTurnsWithoutFrames {
+            // ★ ROUND 6 (his img1): no Play-all turn wears a group frame either (the renderer swaps a turn's own
+            // tints in with its field) — round 5's paint is the red control's only
+            if let m = model, controlRound5Frames {
                 for id in Array(per.keys) { FlexibleGroupFrames.paint(&per[id], overlay: overlay, model: m) }
             }
             feTintBox.set(per)

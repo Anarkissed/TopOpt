@@ -250,7 +250,10 @@ final class FlexibleRound6Tests: XCTestCase {
         let settle = r.project.force.settleRotation ?? simd_quatf(from: SIMD3<Float>(0, 0, -1), to: SIMD3<Float>(0, -1, 0))
         let o = try XCTUnwrap(FlexiblePageChannels.overlay(model: m))
         m.rail = .group(2)
-        let c = FlexibleStagePage.composeTints(model: m, overlay: o)
+        // the page's composed tints, read as the channels with no group colour (the SAME tints before round 6's
+        // item 1 and after it on his pad — every pressed face has its map — so the nil-alpha hash compares the pass)
+        let c = FlexiblePageChannels.channels(model: m, overlay: o, xray: true, drawnLattice: nil, groupColours: false)
+        XCTAssertEqual(c.tints, FlexibleStagePage.composeTints(model: m, overlay: o).tints, "the page composes exactly these")
         var cache: (key: String, dents: [Float])?
         let sq = FlexibleSettingsSquish.shown(model: m, overlay: o, channels: c, feCache: &cache)
         let sc = Scene(mesh: o.mesh, tints: c.tints, dents: sq.dents, scale: Float(sq.exaggeration), settle: settle)
@@ -292,10 +295,20 @@ final class FlexibleRound6Tests: XCTestCase {
         XCTAssertEqual(Set(walls.map(\.volume.faceID)), [4, 2], "Group 2's two members")
         let base = try render(sc, Self.iso, [], device: device)
         let ids = try faceIDs(sc, Self.iso, device: device)
-        let visible = walls.map { w in ids.filter { $0 == UInt32(w.volume.faceID) }.count }
-        let front = try XCTUnwrap(walls.indices.max { visible[$0] < visible[$1] })
+        // which member faces the camera: its glass's outward normal against the view ray through it
+        let isoProj = CameraProjection(viewProjection: try renderer(sc, Self.iso, device: device).clipFromModel(aspect: 1),
+                                       viewportSize: CGSize(width: Self.size, height: Self.size))
+        func facing(_ w: ClearanceRenderItem) throws -> Float {
+            guard case .shell(let sh) = w.volume.shape, let cn = FlexibleGroupWalls.centroid(sh), let p = isoProj.project(cn.point),
+                  let ray = isoProj.ray(throughViewPoint: p) else { throw XCTSkip("no centroid") }
+            return simd_dot(ray.dir, cn.normal)
+        }
+        let dots = try walls.map(facing)
+        let front = try XCTUnwrap(walls.indices.min { dots[$0] < dots[$1] })
         let frontFace = walls[front].volume.faceID, back = walls[1 - front]
-        XCTAssertEqual(visible[1 - front], 0, "the other member faces away (a box)")
+        note("Group 2 at \(Self.iso.name): face \(frontFace) faces the camera (ray · n \(String(format: "%.2f", dots[front]))), face \(back.volume.faceID) faces away (\(String(format: "%.2f", dots[1 - front])))")
+        XCTAssertLessThan(dots[front], -0.3, "one member faces the camera")
+        XCTAssertGreaterThan(dots[1 - front], 0.3, "the other faces away (a pinch: opposite walls)")
         let lit = try render(sc, Self.iso, walls, device: device)
         let d = Self.delta(base, lit)
         let outline = Self.dilate(Self.delta(base, try render(sc, Self.iso, Self.outlineOnly(walls), device: device)).map { $0 > 0 }, 2)
@@ -398,8 +411,11 @@ final class FlexibleRound6Tests: XCTestCase {
                             FlexibleDepthPrism.viewSelectedFaceAlpha, FlexibleDepthPrism.viewSelectedEdgeAlpha, k))
     }
 
-    /// The dragged prism's render at the iso camera on A1_0003, recorded BEFORE A2 (tests-first commit).
-    static let nilAlphaHash = "234002be542ddd78cf7888995a38592f2f02adfaee7a249724f085c7d422621b"
+    /// The dragged prism's render at the iso camera on A1_0003, recorded BEFORE A2 (MetalMeshView.swift as at the
+    /// tests-first commit, under SWIFT_DETERMINISTIC_HASHING=1). The tests-first commit's 234002be… was the same render
+    /// over the tints WITH round 5's frames (the page's composition then); the scene now reads the channels with no
+    /// group colour, which his pad composes identically before and after item 1.
+    static let nilAlphaHash = "ecb1a3868a761708f533735b474319a9f69e4ac9aeea28ba80190ea68f584ff0"
 
     // MARK: - R6-1f
 
