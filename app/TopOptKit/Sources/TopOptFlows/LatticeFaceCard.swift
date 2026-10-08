@@ -29,6 +29,15 @@ import TopOptKit
 /// One face's answer, before the run.
 public struct LatticeFaceCard: Equatable, Sendable {
 
+    /// ★★ WHOSE NUMBER "CELLS ACROSS" IS (reviewer, 2026-10-08, ruling A, until core's fast layout
+    /// check lands): `.core` — core's own derivation at the declared wall (Fit; no bake cells), shown
+    /// plainly; `.estimate` — core's arithmetic on the bake's MEASURED wall and the bake's cell
+    /// (Stepped, Default Grade), labelled "estimate, core checks it"; `.none` — organic, "—".
+    public enum CellsAcrossSource: String, Equatable, Sendable { case core, estimate, none }
+    public var cellsAcrossSource: CellsAcrossSource = .core
+    /// The label an estimate carries, in the ruling's words.
+    public static let estimateNote = "estimate, core checks it"
+
     /// Certified, buildable-but-out-of-regime, or nothing to lattice.
     public enum Verdict: String, Equatable, Sendable {
         /// A cell exists that both prints and homogenizes across this slab.

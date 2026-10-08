@@ -10308,9 +10308,17 @@ public struct WorkspacePlaceholder: View {
                             }
                             .accessibilityIdentifier(padKey)
                     } else {
-                        Text(row.value)
-                            .font(.system(size: 11, weight: .bold)).monospacedDigit()
-                            .foregroundStyle(DS.Color.textSecondary.color)
+                        VStack(alignment: .trailing, spacing: 1) {
+                            Text(row.value)
+                                .font(.system(size: 11, weight: .bold)).monospacedDigit()
+                                .foregroundStyle(DS.Color.textSecondary.color)
+                            // ★ ruling A: whose number it is, in a few words under it
+                            if let note = row.note {
+                                Text(note)
+                                    .font(.system(size: 9, weight: .semibold))
+                                    .foregroundStyle(DS.Color.textTertiary.color)
+                            }
+                        }
                     }
                 }
             }
@@ -10899,6 +10907,7 @@ public struct WorkspacePlaceholder: View {
         // ★ batch E (#362, ported 2026-10-08): a cut piece holds only its SHARE of its face — the
         // card's held voxels (and so its grams) are the face's, scaled by that share; nil = whole
         let sharesCopy = project.latticeCardHeldShares()
+        let organicCards = project.lattice.algorithm == "organic"
         Task.detached(priority: .userInitiated) {
             guard let preview = try? TopOptKit.faceSlabPreview(
                 stepPath: path, faceIDs: ids, depthsMM: depthsCopy,
@@ -10932,6 +10941,8 @@ public struct WorkspacePlaceholder: View {
                     memberWidthMM: bakedCopy[i]?.measuredWidthMM,
                     cellMM: bakedCopy[i]?.cellMM)
                 card.cellRangeMM = bakedCopy[i]?.cellRangeMM
+                // ★★ ruling A (2026-10-08): whose number the drawer's "Cells across" is
+                card.cellsAcrossSource = organicCards ? .none : (bakedCopy[i] != nil ? .estimate : .core)
                 byKey[keysCopy[i]] = card
             }
             // The group cards keep their UUID key (the group row reads them by

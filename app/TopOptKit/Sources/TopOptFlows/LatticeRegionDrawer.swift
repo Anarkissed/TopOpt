@@ -73,6 +73,9 @@ public struct LatticeDrawerRow: Equatable, Sendable {
     /// ★ A control that must not act (2026-09-05): the Foci row on a wall core found to
     /// CARRY LOAD (its verdict, since 2026-09-29) — shown greyed, taps ignored.
     public var disabled: Bool = false
+    /// ★ A few words under the value saying whose number it is (ruling A, 2026-10-08:
+    /// "estimate, core checks it"); nil = none.
+    public var note: String? = nil
 
     /// The unit the keypad shows for this row — and the unit is part of the
     /// CORRECTNESS, not the styling: "DENSITY 35 mm" is how the wrong-setter bug
@@ -232,8 +235,16 @@ public struct LatticeRegionDrawer: Equatable, Sendable {
         case .outOfRegime:
             // ★ The failure that produced empty lattices for weeks, named before
             // the run: the slab is thinner than the cells the certifier needs.
-            head = Headline(text: String(format: "%.1f cells across", c.cellsPerMember),
-                            verdict: .outOfRegime)
+            // ★★ ruling A (2026-10-08): an estimate says so; organic has no octet count to give
+            switch c.cellsAcrossSource {
+            case .core:
+                head = Headline(text: String(format: "%.1f cells across", c.cellsPerMember), verdict: .outOfRegime)
+            case .estimate:
+                head = Headline(text: String(format: "%.1f cells across (estimate)", c.cellsPerMember),
+                                verdict: .outOfRegime)
+            case .none:
+                head = nil
+            }
         case .noMaterial:
             head = Headline(text: "Holds no material", verdict: .noMaterial)
         case .certified:
@@ -269,7 +280,12 @@ public struct LatticeRegionDrawer: Equatable, Sendable {
             LatticeDrawerRow(label: "Density", value: densityDisplay ?? c.densityText,
                              kind: perRegionDensity ? .density : .fact),
             LatticeDrawerRow(label: "Strut", value: c.strutText),
-            LatticeDrawerRow(label: "Cells across", value: c.cellsText),
+            // ★★ ruling A (2026-10-08): core's count plainly; the bake's estimate labelled; organic "—"
+            { () -> LatticeDrawerRow in
+                var r = LatticeDrawerRow(label: "Cells across", value: c.cellsAcrossSource == .none ? "—" : c.cellsText)
+                if c.cellsAcrossSource == .estimate, c.cellsPerMember > 0 { r.note = LatticeFaceCard.estimateNote }
+                return r
+            }(),
             // ★ HOW FAR THIS SLAB REACHES PAST ITS FACE (maintainer,
             // 2026-08-17). A second CONTROL, in mm like the depth, and the only
             // other one — it grows x and y, never the depth. 0 mm is "exactly the
