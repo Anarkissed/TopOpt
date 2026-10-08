@@ -805,6 +805,10 @@ extension LatticePreviewOccupancy {
             let axis = ladder.axis
             let sBase = ladder.sizes[0]
             let plane = region.origin[axis]
+            // ★ THE GRID `slotLo` LAYS EVERY RUNG ON, as one point: the anchor's in-plane origin,
+            // on the face plane along the axis — the job's `slot_origin_mm` for this region.
+            var slotOrigin = gorigin
+            slotOrigin[axis] = plane
             let f = ladder.sizes.last!
             // In from the outline (mm; < 0 outside) — the exact polygon.
             func dOut(_ p: SIMD3<Double>) -> Double {
@@ -1020,7 +1024,8 @@ extension LatticePreviewOccupancy {
                 stats.paintedByRegion[ladder.region, default: 0] += painted
                 if edge { stats.slotsCut += 1 } else { stats.slotsKept[S, default: 0] += 1 }
                 // The plan: every cell that owns at least one texel, cut or whole.
-                if painted > 0 { cells.append(LatticeSteppedCell(region: ladder.region, originMM: lo, sizeMM: S)) }
+                if painted > 0 { cells.append(LatticeSteppedCell(region: ladder.region, originMM: lo, sizeMM: S,
+                                                                 slotOriginMM: slotOrigin)) }
             }
             func place(_ idx: SIMD3<Int>, level: Int) {
                 let S = ladder.sizes[level]

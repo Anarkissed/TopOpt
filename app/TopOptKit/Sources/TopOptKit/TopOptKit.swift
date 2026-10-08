@@ -2209,6 +2209,22 @@ public enum TopOptKit {
         text += #", "lattice": {"topology": "octet", "cell_mm": 3.0, "strut_radius_mm": 0.4, "regions": [{"role": "include", "kind": "face", "geometry": {"origin": [0, 0, 0], "normal": [0, 0, 1], "half_u_mm": 5, "half_w_mm": 5, "depth_mm": 4, "outline_uv": [[[-5, -5], [5, -5], [5, 5], [-5, 5]]], "frame_u": [0, -1, 0], "frame_w": [1, 0, 0]}}]}}"#
         return jobSchemaError(Data(text.utf8)) == nil
     }()
+    /// ★ THE PLAN'S GRID ON THE WIRE (reviewer, 2026-10-08: "Send slot_origin_mm from the anchor
+    /// search"). A face region may carry `slot_origin_mm`, the grid its stepped cells were packed
+    /// on (core R1, job.cpp:1592-1611); core refuses one standing off the face plane. A WHOLE-JOB
+    /// probe with its CONTROL: the same job without the key must pass, or the verdict is false.
+    public static let regionSlotOriginWired: Bool = {
+        guard jobSchemaError(regionSlotOriginProbeJob("")) == nil else { return false }   // the control
+        return jobSchemaError(regionSlotOriginProbeJob(#", "slot_origin_mm": [1.5, -0.25, 0]"#)) == nil
+    }()
+    /// The probe's document: one include face on z = 0, normal +z, with `extra` in its geometry.
+    public static func regionSlotOriginProbeJob(_ extra: String) -> Data {
+        var text = latticeProbeBaseJob
+        text.removeLast()
+        text += #", "lattice": {"topology": "octet", "cell_mm": 3.0, "strut_radius_mm": 0.4, "regions": [{"role": "include", "kind": "face", "geometry": {"origin": [0, 0, 0], "normal": [0, 0, 1], "half_u_mm": 5, "half_w_mm": 5, "depth_mm": 4"#
+            + extra + #"}}]}}"#
+        return Data(text.utf8)
+    }
     /// ★ Whether the linked core is PR 358 or later — the branch that fixed the sample
     /// cube's collapse under repairs (6d6177c4). Probed by a key that branch added.
     public static let coreCarriesTheSampleRepairFix: Bool = gradingSchemaAccepts(key: "stepped_min_tile_mm")

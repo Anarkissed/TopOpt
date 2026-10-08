@@ -30,6 +30,9 @@ public final class ProjectModel: ObservableObject {
     /// it is derived from the bake, and a stale list on disk would send a run a plan
     /// the preview no longer shows. Empty ⇒ the legacy one-cell-per-region Stepped.
     public var latticePreviewSteppedCells: [LatticeSteppedCellWire] = []
+    /// ★ Why the bake's plan could not go (2026-10-08, the slot origin), checked against the
+    /// scene's regions as the bake hands them over; the job re-checks against its own.
+    public var latticePreviewPlanWithheld: LatticeSteppedCellWire.PlanWithheld? = nil
     /// Stable identity, shared with the project's `RecentProject.id` so
     /// `AppModel.open(_:)` can restore this exact instance from the recents grid.
     public let id: UUID

@@ -168,11 +168,10 @@ public enum RelatticeJobBuilder {
         if lat.algorithm == "organic", TopOptKit.latticeSchemaAccepts(key: "emit_organic_spans") {
             block["emit_organic_spans"] = true
         }
-        // ★ THE PLAN (2026-09-18): the preview's placed cells, verbatim.
-        if let cells = LatticeSteppedCellWire.blockValue(for: lat, wired: steppedCellsWired,
-                                                         enabled: steppedPlans) {
-            block["stepped_cells"] = cells
-        }
+        // ★ THE PLAN (2026-09-18): the preview's placed cells, verbatim, with each planned
+        // region's grid (`slot_origin_mm`, 2026-10-08) — the ONE writer, shared with RemoteRunner.
+        LatticeSteppedCellWire.writePlan(into: &block, for: lat, wired: steppedCellsWired,
+                                         enabled: steppedPlans)
         job["lattice"] = block
         return try JSONSerialization.data(withJSONObject: job,
                                           options: [.sortedKeys])

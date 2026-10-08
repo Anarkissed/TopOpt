@@ -159,7 +159,9 @@ public enum LatticePreviewBanner: Equatable, Sendable {
             if t.contains("shown as the doubled ladder") { return "Lattice preview · stand-in" }
             if t.contains(Self.organicBandNotBuiltSentence) { return Self.organicBandNotBuiltCaption }
             if t.contains(Self.planNotSentSteppedSentence) { return Self.planNotSentSteppedCaption }
-            if t.contains(Self.planNotSentSentence) { return Self.planNotSentCaption }
+            if t.contains(Self.planNotSentSentence) || t.contains(Self.planWithheldSentence) {
+                return Self.planNotSentCaption
+            }
             return "Lattice preview · not the export"
         }
     }
@@ -188,6 +190,9 @@ public enum LatticePreviewBanner: Equatable, Sendable {
     /// preview graded voxels toward the outline with the shape band.
     public static let organicBandNotBuiltCaption = "Band: preview only"
     public static let organicBandNotBuiltSentence = "the run doesn't build this band yet"
+    /// ★★ A PLAN THE SWITCH WOULD SEND, WITHHELD (reviewer, 2026-10-08: the slot origin) — the
+    /// job carries no plan core would refuse, and the preview says why, before a run.
+    public static let planWithheldSentence = "the run builds core's own cell layout — this plan can't go: "
     /// The plan-not-sent line for an algorithm: Stepped's own, else Default Grade's.
     public static func planNotSentLine(algorithm: String) -> (caption: String, sentence: String) {
         algorithm == LatticeCellTransition.stepped.coreAlgorithm
@@ -213,7 +218,9 @@ public enum LatticePreviewBanner: Equatable, Sendable {
                             scene: LatticeSDFPreviewSummary?,
                             // ★ ruling 6's test seams; production reads core's probe and the switch
                             plansWired: Bool? = nil,
-                            plansEnabled: Bool = LatticeSteppedCellWire.defaultGradePlansEnabled)
+                            plansEnabled: Bool = LatticeSteppedCellWire.defaultGradePlansEnabled,
+                            // ★ the plan's own verdict (`LatticeSteppedCellWire.slotOrigins`), nil = none
+                            planWithheld: LatticeSteppedCellWire.PlanWithheld? = nil)
         -> LatticePreviewBanner? {
         guard previewOn else { return nil }
         guard hasModel else {
@@ -305,10 +312,13 @@ public enum LatticePreviewBanner: Equatable, Sendable {
             label += " · " + organicBandNotBuiltSentence
         }
         // ★★ RULING 6: a Default Grade or Stepped plan drawn here that the job does not carry.
+        let wired = plansWired ?? TopOptKit.steppedCellsWired
         if LatticeSteppedCellWire.runBuildsCoresOwnLayout(
-            algorithm: scene.algorithmName, wired: plansWired ?? TopOptKit.steppedCellsWired,
-            enabled: plansEnabled) {
+            algorithm: scene.algorithmName, wired: wired, enabled: plansEnabled) {
             label += " · " + planNotSentLine(algorithm: scene.algorithmName).sentence
+        } else if let planWithheld,
+                  LatticeSteppedCellWire.sendsPlan(algorithm: scene.algorithmName, wired: wired, enabled: plansEnabled) {
+            label += " · " + planWithheldSentence + planWithheld.reason
         }
         // ★ The sentence is `LatticeWallsWithoutShape`'s — the variant notice's, so the two
         // cannot drift (ruling g); a single face now reads "is not shown", not "are".

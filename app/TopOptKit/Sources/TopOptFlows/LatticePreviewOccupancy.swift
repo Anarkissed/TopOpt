@@ -635,8 +635,16 @@ public struct LatticeSteppedCell: Equatable, Sendable {
     /// densest texel of the cell, so the run's strut is never thinner than the
     /// preview's anywhere in the cell. 0 ⇒ not graded (the bake had no demand).
     public var rho: Double = 0
-    public init(region: Int, originMM: SIMD3<Double>, sizeMM: Double, rho: Double = 0) {
+    /// ★ THE GRID THIS CELL WAS PACKED ON (reviewer, 2026-10-08: "Send slot_origin_mm from the
+    /// anchor search"): its region's slot origin — the anchor search's in-plane origin, on the
+    /// face plane along the ladder axis. Core measures every cell's alignment, depth and grouping
+    /// from it (`geometry.slot_origin_mm`, job.cpp:1592-1611). nil ⇒ a hand-built cell; core then
+    /// derives the region's own `origin`.
+    public var slotOriginMM: SIMD3<Double>? = nil
+    public init(region: Int, originMM: SIMD3<Double>, sizeMM: Double, rho: Double = 0,
+                slotOriginMM: SIMD3<Double>? = nil) {
         self.region = region; self.originMM = originMM; self.sizeMM = sizeMM; self.rho = rho
+        self.slotOriginMM = slotOriginMM
     }
 }
 

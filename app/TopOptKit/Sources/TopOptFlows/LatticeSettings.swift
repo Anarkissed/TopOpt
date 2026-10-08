@@ -580,8 +580,13 @@ public struct LatticeSteppedCellWire: Equatable, Sendable {
     public let sizeMM: Double
     /// The drawn relative density (ruling C); written as `rho` when > 0.
     public let rho: Double
-    public init(regionID: Int, originMM: SIMD3<Double>, sizeMM: Double, rho: Double = 0) {
+    /// The grid the cell was packed on (`LatticeSteppedCell.slotOriginMM`). Not a cell key: it
+    /// goes on the cell's REGION as `geometry.slot_origin_mm` (`writePlan`).
+    public let slotOriginMM: SIMD3<Double>?
+    public init(regionID: Int, originMM: SIMD3<Double>, sizeMM: Double, rho: Double = 0,
+                slotOriginMM: SIMD3<Double>? = nil) {
         self.regionID = regionID; self.originMM = originMM; self.sizeMM = sizeMM; self.rho = rho
+        self.slotOriginMM = slotOriginMM
     }
     public var wireDictionary: [String: Any] {
         var d: [String: Any] = ["region_id": regionID,
@@ -601,7 +606,98 @@ public struct LatticeSteppedCellWire: Equatable, Sendable {
         for (i, r) in regions.enumerated() where r.role == .include { idOf[i] = next; next += 1 }
         return cells.compactMap { c in
             guard let id = idOf[c.region] else { return nil }
-            return LatticeSteppedCellWire(regionID: id, originMM: c.originMM, sizeMM: c.sizeMM, rho: c.rho)
+            return LatticeSteppedCellWire(regionID: id, originMM: c.originMM, sizeMM: c.sizeMM, rho: c.rho,
+                                          slotOriginMM: c.slotOriginMM)
+        }
+    }
+    /// ★★ WHY A PLAN THE SWITCH WOULD SEND IS WITHHELD (reviewer, 2026-10-08: "Send
+    /// slot_origin_mm from the anchor search"; the standing rule: "Where core can't, it says so
+    /// BEFORE a run … Never a silent substitute"). Core takes each region's grid as
+    /// `geometry.slot_origin_mm` and refuses the WHOLE job when it stands 1e-6 mm or more off the
+    /// face plane (job.cpp:1592-1611). The bake lays every region's cells on world-axis slots from
+    /// one in-plane anchor, so a facet tilted off its ladder axis has its grid off its own plane:
+    /// that plan is not sent, and the preview says so (core ask K2: the slot origin as a phase).
+    public enum PlanWithheld: Error, Equatable, Sendable {
+        /// a region's grid stands `offsetMM` along its unit normal from its face plane
+        case offPlane(regionID: Int, offsetMM: Double)
+        /// a region's cells were packed on more than one grid
+        case twoGrids(regionID: Int)
+        /// a cell names a region id the job does not declare as an include face
+        case noSuchRegion(regionID: Int)
+        /// the linked core's schema does not take `slot_origin_mm`
+        case slotOriginNotWired
+
+        /// The reason, in plain words, after the banner's "this plan can't go: ".
+        public var reason: String {
+            switch self {
+            case .offPlane(let id, _):
+                return "region \(id)'s face is tilted off the grid these cells sit on, and core can't place them there yet"
+            case .twoGrids(let id):
+                return "region \(id)'s cells sit on two different grids"
+            case .noSuchRegion(let id):
+                return "it names region \(id), which the job doesn't have"
+            case .slotOriginNotWired:
+                return "this core can't take the grid these cells sit on"
+            }
+        }
+    }
+    /// Core's own in-plane test (job.cpp:1603): |(slot origin − origin) · n̂| < 1e-6 mm.
+    public static let slotOriginPlaneToleranceMM = 1e-6
+
+    /// ★ THE PLAN'S SLOT ORIGINS, checked the way core checks them, against the JOB's regions
+    /// (every role, emission order; the k-th include is region id k). A cell without a slot
+    /// origin (hand-built) states none; core derives its region's own `origin`.
+    public static func slotOrigins(_ cells: [LatticeSteppedCellWire], regions: [LatticeRegionSpec],
+                                   slotOriginWired: Bool) -> Result<[Int: SIMD3<Double>], PlanWithheld> {
+        var includeAt: [Int: LatticeRegionSpec] = [:]
+        var next = 1
+        for r in regions where r.role == .include { includeAt[next] = r; next += 1 }
+        var out: [Int: SIMD3<Double>] = [:]
+        for c in cells {
+            guard let so = c.slotOriginMM else { continue }
+            guard slotOriginWired else { return .failure(.slotOriginNotWired) }
+            guard let r = includeAt[c.regionID], r.kind == .face else { return .failure(.noSuchRegion(regionID: c.regionID)) }
+            if let had = out[c.regionID] {
+                if had != so { return .failure(.twoGrids(regionID: c.regionID)) }
+                continue
+            }
+            let ln = simd_length(r.normal)
+            let dn = ln > 0 ? simd_dot(so - r.origin, r.normal / ln) : .infinity
+            guard abs(dn) < slotOriginPlaneToleranceMM else {
+                return .failure(.offPlane(regionID: c.regionID, offsetMM: dn))
+            }
+            out[c.regionID] = so
+        }
+        return .success(out)
+    }
+
+    /// ★ THE ONE PLAN WRITER, shared by both job builders: `lattice.stepped_cells` and each planned
+    /// include face's `geometry.slot_origin_mm`, together or not at all. Call it after
+    /// `block["regions"]` is written. Returns why a plan the switch would send was withheld; nil
+    /// when it was sent or not asked for.
+    @discardableResult
+    public static func writePlan(into block: inout [String: Any], for lat: LatticeSpec, wired: Bool,
+                                 enabled: Bool = defaultGradePlansEnabled,
+                                 slotOriginWired: Bool = TopOptKit.regionSlotOriginWired) -> PlanWithheld? {
+        guard sendsPlan(algorithm: lat.algorithm, wired: wired, enabled: enabled),
+              !lat.steppedCells.isEmpty else { return nil }
+        switch slotOrigins(lat.steppedCells, regions: lat.regions, slotOriginWired: slotOriginWired) {
+        case .failure(let why):
+            NSLog("DIAG stepped plan WITHHELD (\(lat.steppedCells.count) cells): \(why.reason)")
+            return why
+        case .success(let origins):
+            block["stepped_cells"] = lat.steppedCells.map { $0.wireDictionary }
+            guard !origins.isEmpty, var regs = block["regions"] as? [[String: Any]],
+                  regs.count == lat.regions.count else { return nil }
+            var id = 0
+            for (i, r) in lat.regions.enumerated() where r.role == .include {
+                id += 1
+                guard let so = origins[id], var g = regs[i]["geometry"] as? [String: Any] else { continue }
+                g["slot_origin_mm"] = [so.x, so.y, so.z]
+                regs[i]["geometry"] = g
+            }
+            block["regions"] = regs
+            return nil
         }
     }
     /// ★★ RULING 4 (maintainer, 2026-10-02): DEFAULT GRADE PLANS STAY OFF until every project's
@@ -616,11 +712,13 @@ public struct LatticeSteppedCellWire: Equatable, Sendable {
     /// every seam) — only when enabled, only a non-empty plan, and only on a core whose schema
     /// takes the key (`wired`; an unknown key kills the whole job at parse). `enabled` is the
     /// test seam the proof uses; production passes the switch.
+    /// A plan `writePlan` withholds (`PlanWithheld`) has no block value either.
     public static func blockValue(for lat: LatticeSpec, wired: Bool,
-                                  enabled: Bool = defaultGradePlansEnabled) -> [[String: Any]]? {
-        guard sendsPlan(algorithm: lat.algorithm, wired: wired, enabled: enabled),
-              !lat.steppedCells.isEmpty else { return nil }
-        return lat.steppedCells.map { $0.wireDictionary }
+                                  enabled: Bool = defaultGradePlansEnabled,
+                                  slotOriginWired: Bool = TopOptKit.regionSlotOriginWired) -> [[String: Any]]? {
+        var block: [String: Any] = [:]
+        writePlan(into: &block, for: lat, wired: wired, enabled: enabled, slotOriginWired: slotOriginWired)
+        return block["stepped_cells"] as? [[String: Any]]
     }
 
     /// The algorithms whose preview IS a per-region cell plan (the octree bake) —

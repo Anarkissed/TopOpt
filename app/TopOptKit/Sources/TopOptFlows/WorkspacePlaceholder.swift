@@ -834,8 +834,14 @@ public struct WorkspacePlaceholder: View {
                               } : nil,
                           // ★ The bake's plan → the project, for the run (2026-09-18).
                           onLatticeCellsBaked: { cells, regions in
-                              project.latticePreviewSteppedCells =
-                                  LatticeSteppedCellWire.wire(cells, regions: regions)
+                              let wire = LatticeSteppedCellWire.wire(cells, regions: regions)
+                              project.latticePreviewSteppedCells = wire
+                              if case .failure(let why) = LatticeSteppedCellWire.slotOrigins(
+                                  wire, regions: regions, slotOriginWired: TopOptKit.regionSlotOriginWired) {
+                                  project.latticePreviewPlanWithheld = why
+                              } else {
+                                  project.latticePreviewPlanWithheld = nil
+                              }
                           },
                           // ★ §1(b) — DOUBLE TAP = THE ONES LIKE IT.
                           //
@@ -9464,6 +9470,14 @@ public struct WorkspacePlaceholder: View {
         .modifier(WorkspacePanelPlacement(minimized: selectionsCollapsed))
     }
 
+    /// The banner the notice draws: production's switch and probe, the plan's own verdict.
+    private var latticePreviewBanner: LatticePreviewBanner? {
+        LatticePreviewBanner.make(previewOn: showStrutPreview,
+                                  hasModel: viewerMesh != nil,
+                                  scene: strutScene,
+                                  planWithheld: project.latticePreviewPlanWithheld)
+    }
+
     /// The honesty banner for the strut layer — one row, shown only while that
     /// layer is actually up.
     @ViewBuilder private var latticePreviewNotice: some View {
@@ -9472,9 +9486,7 @@ public struct WorkspacePlaceholder: View {
         // there was no scene — and a preview that is on, empty and silent is
         // indistinguishable from a broken one.
         VStack(alignment: .leading, spacing: 0) {
-            if let banner = LatticePreviewBanner.make(previewOn: showStrutPreview,
-                                                      hasModel: viewerMesh != nil,
-                                                      scene: strutScene) {
+            if let banner = latticePreviewBanner {
                 // ★ A CAPTION, AND THE SENTENCE BEHIND (i) (maintainer, 2026-09-06:
                 // the full sentence ran across the iPad and Print Parameters chips).
                 // Capped to the Selections column; an `.empty` reason wraps inside it.
