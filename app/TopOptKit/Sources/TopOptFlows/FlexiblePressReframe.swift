@@ -104,8 +104,7 @@ public enum FlexiblePressReframe {
     /// The same frame returns `f` unchanged, bit for bit.
     public static func reframe(_ f: FlexibleFaceSettings, from: FlexibleFrameRef, to: FlexibleFrameRef,
                                frames: FlexibleFrameSource) throws -> Result {
-        // ★ AP1 TESTS FIRST — RED STUB (the spec's red variant; the next commit replaces it): the inputs are not re-expressed
-        if true { return Result(settings: f, swapped: false, reversedX: false, reversedY: false) }
+        guard from != to else { return Result(settings: f, swapped: false, reversedX: false, reversedY: false) }
         let a = try frames.stack(from), b = try frames.stack(to)
         var out = f
 

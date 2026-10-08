@@ -51,7 +51,7 @@ extension FlexibleStageModel {
         relinkedWeights = [:]
         curvePoint = nil
         frozenExaggeration = nil
-        // ★ AP1 TESTS FIRST — RED STUB (the spec's red variant; the next commit replaces it): the selected press is kept
+        selectedPress = nil   // ★ AP1: the fresh setup has no presses (freshSettings builds none)
         selectedRegion = settings.loadedFaces.first?.faceRegionID ?? settings.faces.first?.faceRegionID
         save()   // one undo step (the project's snapshot history)
     }

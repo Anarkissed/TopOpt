@@ -563,13 +563,11 @@ public final class FlexibleStageModel: ObservableObject {
         // group still holds it; that is his to change there)
         // ★ ANGLED PRESSES (AP1): a press member is never re-pressed or re-rested as a face (a face that
         // is ALSO in a press — a clash, spec §8 — keeps its own link until he resolves it)
-        // ★ AP1 TESTS FIRST — RED STUB (the spec's red variant; the next commit replaces it): no skip of press members
-        let removed = Set(s.removedRegions ?? [])
+        let removed = Set(s.removedRegions ?? []).union(s.pressRegions.subtracting(s.faces.map(\.faceRegionID)))
         let full = loads
         let loads = removed.isEmpty ? loads : FlexibleMainPageLoads(entries: loads.entries.filter { !removed.contains($0.key) })
         let relinked = loads.adopt(into: &s)
-        // ★ AP1 TESTS FIRST — RED STUB (the spec's red variant; the next commit replaces it): linked presses are not re-synced
-        _ = full
+        FlexiblePress.adoptWeights(full, into: &s)   // ★ AP1: linked presses re-sync from their group
         FlexibleSqueezeGroups.uniteHands(&s, loads: loads)
         return relinked
     }

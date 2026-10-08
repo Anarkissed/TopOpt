@@ -62,8 +62,13 @@ extension FlexibleStageModel {
                          kg: Double? = nil) -> UUID? {
         guard !regions.isEmpty else { return nil }
         var f = FlexibleFaceSettings(faceRegionID: regions[0])
-        // ★ AP1 TESTS FIRST — RED STUB (the spec's red variant; the next commit replaces it): a default weight
-        f.weightKg = kg ?? firstGroupForce ?? 10
+        switch newPressWeight(regions: regions, group: group) {
+        case .linked(let g, let w): f.weightKg = w; f.weightFrom = g
+        case .force(let w): f.weightKg = w
+        case .ask:
+            guard let w = kg, w > 0, w.isFinite else { return nil }
+            f.weightKg = w
+        }
         let gid = group ?? FlexibleSqueezeGroups.first
         f.squeezeGroup = gid == FlexibleSqueezeGroups.first ? nil : gid
         let p = FlexiblePress(regions: regions, direction: direction, snap: snap, settings: f)

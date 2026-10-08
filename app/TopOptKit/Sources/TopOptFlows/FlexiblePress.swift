@@ -53,8 +53,7 @@ public struct FlexiblePress: Codable, Equatable, Hashable, Sendable, Identifiabl
                 settings: FlexibleFaceSettings, drawnIn: Int? = nil) {
         self.id = id
         self.regions = regions
-        // ★ AP1 TESTS FIRST — RED STUB (the spec's red variant; the next commit replaces it): the direction stored through Float
-        self.direction = SIMD3<Double>(SIMD3<Float>(direction))
+        self.direction = direction
         self.snap = snap
         var f = settings
         if let r = regions.first { f.faceRegionID = r }
@@ -177,8 +176,7 @@ extension FlexibleStageSettings {
     /// Write the list: nil, never [], when it is empty (an empty list would change the file of a project
     /// that has none — the nil rule the subtree goldens pin).
     public mutating func setPresses(_ list: [FlexiblePress]) {
-        // ★ AP1 TESTS FIRST — RED STUB (the spec's red variant; the next commit replaces it): an empty list is written as []
-        presses = list
+        presses = list.isEmpty ? nil : list
     }
 
     public func press(_ id: UUID) -> FlexiblePress? { presses?.first { $0.id == id } }
@@ -209,9 +207,7 @@ extension FlexibleStageSettings {
     public mutating func tiltFace(_ region: Int, direction: SIMD3<Double>, snap: String?, id: UUID = UUID()) -> UUID? {
         guard let f = face(region), f.isLoaded, pressHolding(region) == nil else { return nil }
         faces.removeAll { $0.faceRegionID == region }
-        // ★ AP1 TESTS FIRST — RED STUB (the spec's red variant; the next commit replaces it): the tilt drops the link and the frame
-        var g = f; g.weightFrom = nil
-        setPress(FlexiblePress(id: id, regions: [region], direction: direction, snap: snap, settings: g))
+        setPress(FlexiblePress(id: id, regions: [region], direction: direction, snap: snap, settings: f, drawnIn: region))
         FlexibleSqueezeGroups.normalise(&self)
         return id
     }

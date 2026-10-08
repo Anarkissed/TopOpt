@@ -96,8 +96,7 @@ public enum FlexibleSqueezeGroups {
     /// "Send Group 3 only" names the tab he sees. The job's one-group rule and core's hold count these:
     /// a press that is not sent never makes the job throw `.squeezeGroups`.
     public static func groups(_ s: FlexibleStageSettings, sent: Set<UUID>) -> [FlexibleSqueezeGroup] {
-        // ★ AP1 TESTS FIRST — RED STUB (the spec's red variant; the next commit replaces it): every group counts, sent or not
-        groups(s)
+        groups(s).filter { !$0.regions.isEmpty || $0.presses.contains(where: sent.contains) }
     }
 
     public static func group(of region: Int, in s: FlexibleStageSettings) -> FlexibleSqueezeGroup? {
@@ -296,8 +295,7 @@ public enum FlexibleSqueezeGroups {
         }
         // ★ AP1: a press LINKED to a main-page Load group that still holds a member is that group's hand
         // (its force goes through the press's members by area); any other press is its own hand
-        // ★ AP1 TESTS FIRST — RED STUB (the spec's red variant; the next commit replaces it): presses are no hand
-        for pid in g.presses where false {
+        for pid in g.presses {
             guard let p = s.press(pid) else { continue }
             if let from = p.settings.weightFrom,
                let e = p.regions.lazy.compactMap({ loads.entry($0) }).first(where: { $0.groupID == from && $0.role != .rests }) {

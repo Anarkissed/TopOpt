@@ -210,7 +210,7 @@ public struct FlexibleStageSettings: Codable, Equatable, Hashable, Sendable {
         c.weightUnit = nil
         // ★ ANGLED PRESSES (AP1): a press core cannot build yet cannot change the lattice — until the
         // bridge builds press stacks (AP9 removes this line, so every press edit re-keys the lattice)
-        // ★ AP1 TESTS FIRST — RED STUB (the spec's red variant; the next commit replaces it): presses are kept in the lattice's key
+        c.presses = nil
         return c
     }
 
