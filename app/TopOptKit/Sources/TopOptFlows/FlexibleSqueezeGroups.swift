@@ -32,10 +32,18 @@ import TopOptKit
 public struct FlexibleSqueezeGroup: Equatable, Identifiable, Sendable {
     /// The stored number (`FlexibleFaceSettings.squeezeGroup`; nil ⇒ 1).
     public let id: Int
-    /// As shown ("Group 2"): its rank among the groups that have a pressed face.
+    /// As shown ("Group 2"): its rank among the groups that have a pressed face (or a press).
     public let number: Int
     /// Its pressed faces (regions), in the settings' order.
     public let regions: [Int]
+    /// ★ ANGLED PRESSES (AP1): its presses (FlexiblePress ids), in the settings' order. A group may hold
+    /// only presses and still be a tab; the job and core's hold count only groups with something SENT
+    /// (`FlexibleSqueezeGroups.groups(_:sent:)`).
+    public let presses: [UUID]
+
+    public init(id: Int, number: Int, regions: [Int], presses: [UUID] = []) {
+        self.id = id; self.number = number; self.regions = regions; self.presses = presses
+    }
 }
 
 /// One squeeze the player can play: a group (its own 3D sim — batch G), or every group one after
@@ -69,21 +77,40 @@ public enum FlexibleSqueezeGroups {
     public static let first = 1
 
     public static func id(_ f: FlexibleFaceSettings) -> Int { f.squeezeGroup ?? first }
+    public static func id(_ p: FlexiblePress) -> Int { p.squeezeGroup }
 
-    /// Every group that has a pressed face, by stored number, numbered 1…N as shown.
+    /// Every group that has a pressed face — ★ AP1: or a press — by stored number, numbered 1…N as
+    /// shown. With no presses this is exactly the faces' groups it always was.
     public static func groups(_ s: FlexibleStageSettings) -> [FlexibleSqueezeGroup] {
         var members: [Int: [Int]] = [:]
+        var pressed: [Int: [UUID]] = [:]
         for f in s.loadedFaces { members[id(f), default: []].append(f.faceRegionID) }
-        return members.keys.sorted().enumerated().map { i, g in
-            FlexibleSqueezeGroup(id: g, number: i + 1, regions: members[g] ?? [])
+        for p in s.presses ?? [] { pressed[id(p), default: []].append(p.id) }
+        return Set(members.keys).union(pressed.keys).sorted().enumerated().map { i, g in
+            FlexibleSqueezeGroup(id: g, number: i + 1, regions: members[g] ?? [], presses: pressed[g] ?? [])
         }
+    }
+
+    /// ★ AP1: the groups with something SENT to core — a pressed face, or a press in `sent` (the presses
+    /// in the job; none until the bridge builds press stacks, AP9). Numbers are the tabs' (`groups`), so
+    /// "Send Group 3 only" names the tab he sees. The job's one-group rule and core's hold count these:
+    /// a press that is not sent never makes the job throw `.squeezeGroups`.
+    public static func groups(_ s: FlexibleStageSettings, sent: Set<UUID>) -> [FlexibleSqueezeGroup] {
+        // ★ AP1 TESTS FIRST — RED STUB (the spec's red variant; the next commit replaces it): every group counts, sent or not
+        groups(s)
     }
 
     public static func group(of region: Int, in s: FlexibleStageSettings) -> FlexibleSqueezeGroup? {
         groups(s).first { $0.regions.contains(region) }
     }
 
+    /// ★ AP1: the group a press is in.
+    public static func group(ofPress press: UUID, in s: FlexibleStageSettings) -> FlexibleSqueezeGroup? {
+        groups(s).first { $0.presses.contains(press) }
+    }
+
     /// Renumber to 1…N in order (group 1 stored as nil); a resting face holds no group.
+    /// ★ AP1: presses are renumbered with the faces (a press is always pressed).
     public static func normalise(_ s: inout FlexibleStageSettings) {
         let order = groups(s).map(\.id)
         var rank: [Int: Int] = [:]
@@ -92,6 +119,13 @@ public enum FlexibleSqueezeGroups {
             guard s.faces[i].isLoaded else { s.faces[i].squeezeGroup = nil; continue }
             let n = rank[id(s.faces[i])] ?? first
             s.faces[i].squeezeGroup = n == first ? nil : n
+        }
+        if var ps = s.presses {
+            for i in ps.indices {
+                let n = rank[id(ps[i])] ?? first
+                ps[i].settings.squeezeGroup = n == first ? nil : n
+            }
+            s.presses = ps
         }
         // ★ ROUND 5 (S1): each group's colour goes with it to its new number — ★ S VERIFICATION: the
         // colour it was SHOWN in (a pick or its old number's default), kept in normal form
@@ -117,7 +151,8 @@ public enum FlexibleSqueezeGroups {
     public static func newGroup(with region: Int, hand: [Int]? = nil, in s: inout FlexibleStageSettings) -> Int? {
         guard let f = s.face(region), f.isLoaded, let g = group(of: region, in: s) else { return nil }
         let moving = Set((hand ?? []) + [region])
-        guard g.regions.contains(where: { !moving.contains($0) }) else { return nil }
+        // ★ AP1: a group that keeps a press is not emptied by the move
+        guard g.regions.contains(where: { !moving.contains($0) }) || !g.presses.isEmpty else { return nil }
         let next = (groups(s).map(\.id).max() ?? first) + 1
         move(region, to: next, hand: hand, in: &s)
         return group(of: region, in: s)?.number
@@ -131,6 +166,11 @@ public enum FlexibleSqueezeGroups {
               let into = gs.first(where: { $0.id != groupID && (target == nil || $0.id == target) }) else { return }
         for i in s.faces.indices where s.faces[i].isLoaded && id(s.faces[i]) == groupID {
             s.faces[i].squeezeGroup = into.id
+        }
+        // ★ AP1: its presses join the same group
+        if var ps = s.presses {
+            for i in ps.indices where id(ps[i]) == groupID { ps[i].settings.squeezeGroup = into.id }
+            s.presses = ps
         }
         normalise(&s)
     }
@@ -161,6 +201,19 @@ public enum FlexibleSqueezeGroups {
                 g.squeezeGroup = gid == first ? nil : gid
                 s.setFace(g)
             }
+        }
+        // ★ AP1: a press LINKED to a main-page Load group is part of that group's hand — it sits in the
+        // group of the hand's first pressed face (one force per hand; a press alone in its hand stays put)
+        if var ps = s.presses {
+            for i in ps.indices {
+                guard let from = ps[i].settings.weightFrom,
+                      let f = s.loadedFaces.first(where: { g in
+                          g.weightFrom == from && loads.entry(g.faceRegionID).map { $0.groupID == from && $0.role == .pressed } == true
+                      }) else { continue }
+                let gid = id(f)
+                ps[i].settings.squeezeGroup = gid == first ? nil : gid
+            }
+            if ps != s.presses { s.presses = ps }
         }
         normalise(&s)
     }
@@ -212,6 +265,12 @@ public enum FlexibleSqueezeGroups {
         public let kg: Double
         /// The group's faces this hand presses.
         public let regions: [Int]
+        /// ★ AP1: the group's presses this hand presses (a press of his own is its own hand).
+        public let presses: [UUID]
+
+        public init(mainGroup: UUID?, kg: Double, regions: [Int], presses: [UUID] = []) {
+            self.mainGroup = mainGroup; self.kg = kg; self.regions = regions; self.presses = presses
+        }
     }
 
     /// The hands of a group: a face linked to a main-page Load group (weightFrom = that group,
@@ -233,6 +292,23 @@ public enum FlexibleSqueezeGroups {
                 }
             } else {
                 out.append(Hand(mainGroup: nil, kg: f.weightKg, regions: [r]))
+            }
+        }
+        // ★ AP1: a press LINKED to a main-page Load group that still holds a member is that group's hand
+        // (its force goes through the press's members by area); any other press is its own hand
+        // ★ AP1 TESTS FIRST — RED STUB (the spec's red variant; the next commit replaces it): presses are no hand
+        for pid in g.presses where false {
+            guard let p = s.press(pid) else { continue }
+            if let from = p.settings.weightFrom,
+               let e = p.regions.lazy.compactMap({ loads.entry($0) }).first(where: { $0.groupID == from && $0.role != .rests }) {
+                if let i = byGroup[from] {
+                    out[i] = Hand(mainGroup: from, kg: out[i].kg, regions: out[i].regions, presses: out[i].presses + [pid])
+                } else {
+                    byGroup[from] = out.count
+                    out.append(Hand(mainGroup: from, kg: liveKg?(from) ?? e.groupKg, regions: [], presses: [pid]))
+                }
+            } else {
+                out.append(Hand(mainGroup: nil, kg: p.settings.weightKg, regions: [], presses: [pid]))
             }
         }
         return out

@@ -28,6 +28,7 @@ extension FlexibleStageModel {
     }
 
     /// ★ S5: a brand-new Flexible setup of THIS part, the main page's loads read in (the unit kept).
+    /// ★ AP1: no presses — it is built new, so its `presses` is nil.
     public func freshSettings() -> FlexibleStageSettings {
         var s = FlexibleStageSettings(materialID: defaultMaterialID)
         s.weightUnit = settings.weightUnit
@@ -50,6 +51,7 @@ extension FlexibleStageModel {
         relinkedWeights = [:]
         curvePoint = nil
         frozenExaggeration = nil
+        // ★ AP1 TESTS FIRST — RED STUB (the spec's red variant; the next commit replaces it): the selected press is kept
         selectedRegion = settings.loadedFaces.first?.faceRegionID ?? settings.faces.first?.faceRegionID
         save()   // one undo step (the project's snapshot history)
     }

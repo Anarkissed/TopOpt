@@ -129,8 +129,9 @@ public struct FlexibleCoreHold: Equatable, Sendable {
 extension FlexibleStageModel {
 
     /// What the pill reads (cheap: the filament, the groups, core's stack conflicts).
+    /// ★ AP1: the groups with something SENT (a press alone in a group is not core's to run yet).
     public var coreHoldKind: FlexibleCoreHold.Kind? {
-        FlexibleCoreHold.kind(calibrateFirst: material?.noPrediction != nil, groups: squeezeGroups.count, pinches: pinches.count)
+        FlexibleCoreHold.kind(calibrateFirst: material?.noPrediction != nil, groups: sentSqueezeGroups.count, pinches: pinches.count)
     }
 
     /// The Export step's hold, in full (read on the tap, never per body pass).
@@ -146,14 +147,14 @@ extension FlexibleStageModel {
         case .squeezeGroups:
             return FlexibleCoreHold(kind: .squeezeGroups, line: FlexibleCoreRun.notSentLine(.squeezeGroups),
                                     why: FlexibleJob.EncodeError.squeezeGroups.description,
-                                    fixes: FlexibleCoreHold.sends(groups: squeezeGroups, pinches: pinches, name: { self.displayName($0) }))
+                                    fixes: FlexibleCoreHold.sends(groups: sentSqueezeGroups, pinches: pinches, name: { self.displayName($0) }))
         case .pinch:
             let p = pinches
             let line = p.count == 1
                 ? "Not sent: core can\u{2019}t press \(displayName(p[0].a)) and \(displayName(p[0].b)) at once"
                 : FlexibleCoreRun.notSentLine(.pinch)
             return FlexibleCoreHold(kind: .pinch, line: line, why: FlexibleJob.EncodeError.pinch.description,
-                                    fixes: FlexibleCoreHold.sends(groups: squeezeGroups, pinches: p, name: { self.displayName($0) }))
+                                    fixes: FlexibleCoreHold.sends(groups: sentSqueezeGroups, pinches: p, name: { self.displayName($0) }))
         }
     }
 }

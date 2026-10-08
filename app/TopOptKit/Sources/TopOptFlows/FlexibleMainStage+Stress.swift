@@ -29,7 +29,7 @@ extension FlexibleMainStage {
         if let g = m.lattice, !m.latticeIsStale {
             return !g.shapeOnly && g.sims.contains { if case .group = $0.kind { return true }; return false }
         }
-        return m.material?.noPrediction == nil && !m.squeezeGroups.isEmpty
+        return m.material?.noPrediction == nil && !m.sentSqueezeGroups.isEmpty   // ★ AP1: something sent
     }
 
     /// One field's stress (cached per field): its node field, its true peak and its colour scale's top.

@@ -185,6 +185,10 @@ public struct FlexibleStageSettings: Codable, Equatable, Hashable, Sendable {
     /// so a deleted face stays deleted. The main-page group itself is untouched. Pressing the face
     /// again takes it off this list. OPTIONAL so old projects decode.
     public var removedRegions: [Int]?
+    /// ★ ANGLED PRESSES (task 2026-10-07, AP1; FlexiblePress): tilted face presses, edges and corners.
+    /// nil — never [] — when there are none (`setPresses`), so a project without presses encodes
+    /// byte-identical. OPTIONAL so old projects decode.
+    public var presses: [FlexiblePress]?
 
     public init(materialID: String? = nil, nozzleTempC: Double? = nil, topology: String = "auto",
                 feel: String = "springy", beadsPerWall: Int = 1,
@@ -204,6 +208,9 @@ public struct FlexibleStageSettings: Codable, Equatable, Hashable, Sendable {
         var c = self
         c.groupColours = nil
         c.weightUnit = nil
+        // ★ ANGLED PRESSES (AP1): a press core cannot build yet cannot change the lattice — until the
+        // bridge builds press stacks (AP9 removes this line, so every press edit re-keys the lattice)
+        // ★ AP1 TESTS FIRST — RED STUB (the spec's red variant; the next commit replaces it): presses are kept in the lattice's key
         return c
     }
 

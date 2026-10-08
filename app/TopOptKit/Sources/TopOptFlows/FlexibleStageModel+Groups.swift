@@ -70,8 +70,9 @@ extension FlexibleStageModel {
     }
 
     /// What the squish player can play: each group (largest face first), and all at once.
+    /// ★ AP1: the groups with something SENT (a press alone in a group plays nothing until core builds it).
     public var sims: [FlexibleSim] {
-        FlexibleSqueezeGroups.sims(squeezeGroups, key: { [weak self] r in self?.key(r) },
+        FlexibleSqueezeGroups.sims(sentSqueezeGroups, key: { [weak self] r in self?.key(r) },
                                    area: { [stacks] k in stacks[k]?.areaMM2 ?? 0 },
                                    name: { [weak self] r in self?.displayName(r) ?? "Face \(r)" })
     }
@@ -111,7 +112,7 @@ extension FlexibleStageModel {
     nonisolated static func groupEstimate(settings: FlexibleStageSettings, designs: [FlexFaceKey: FlexFaceDesignInfo],
                                           segments: [FlexFaceKey: FlexiblePinch.Segments], stacks: [FlexFaceKey: FlexStackInfo],
                                           cuts: [Int: [RegionCut]], law: FlexiblePinch.Law) throws -> [FlexibleGroupEstimate.Miss] {
-        let gs = FlexibleSqueezeGroups.groups(settings)
+        let gs = FlexibleSqueezeGroups.groups(settings, sent: [])   // ★ AP1: a press is not designed until AP9
         guard gs.count > 1 else { return [] }
         let groups = gs.map { g in
             FlexibleGroupEstimate.Group(id: g.id, number: g.number, faces: g.regions.compactMap { r -> FlexibleGroupEstimate.Face? in
@@ -180,12 +181,19 @@ extension FlexibleStageModel {
 
     /// A face of his own that joins a group takes the group's ONE force (a face a main-page Load
     /// group presses keeps the main page's weight — the main page is its one truth).
-    nonisolated static func takeForce(_ force: ClosedRange<Double>?, regions: [Int], in s: inout FlexibleStageSettings) {
+    nonisolated static func takeForce(_ force: ClosedRange<Double>?, regions: [Int], presses: [UUID] = [],
+                                      in s: inout FlexibleStageSettings) {
         guard let f = force, f.upperBound - f.lowerBound < 0.05, f.upperBound > 0 else { return }
         for r in regions {
             guard var face = s.face(r), face.isLoaded, face.weightFrom == nil else { continue }
             face.weightKg = f.upperBound
             s.setFace(face)
+        }
+        // ★ AP1: a press of his own takes it too (a linked press keeps its main-page group's force)
+        for id in presses {
+            guard var p = s.press(id), p.settings.weightFrom == nil else { continue }
+            p.settings.weightKg = f.upperBound
+            s.setPress(p)
         }
     }
 
@@ -227,7 +235,7 @@ extension FlexibleStageModel {
         actionSerial += 1
         edit { s in
             FlexibleSqueezeGroups.remove(group: groupID, into: into.id, in: &s)
-            Self.takeForce(force, regions: from.regions, in: &s)
+            Self.takeForce(force, regions: from.regions, presses: from.presses, in: &s)
         }
     }
 
@@ -245,12 +253,18 @@ extension FlexibleStageModel {
             wroteMain = true
         }
         let own = hands.filter { $0.mainGroup == nil }.flatMap(\.regions)
+        let ownPresses = hands.filter { $0.mainGroup == nil }.flatMap(\.presses)   // ★ AP1
         for r in g.regions { relinkedWeights[r] = nil }
         edit { s in
             for r in own {
                 guard var f = s.face(r) else { continue }
                 f.weightKg = kg; f.weightFrom = nil
                 s.setFace(f)
+            }
+            for id in ownPresses {
+                guard var p = s.press(id) else { continue }
+                p.settings.weightKg = kg; p.settings.weightFrom = nil
+                s.setPress(p)
             }
         }
         if wroteMain { adoptMainPageLoads() } else { project.sealUndoStep() }

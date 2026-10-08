@@ -86,7 +86,8 @@ public enum FlexibleJob {
         guard let material = i.settings.materialID else { throw EncodeError.noFilament }
         guard !i.settings.loadedFaces.isEmpty else { throw EncodeError.noLoadedFace }
         // ★ ROUND 4 (D2): core designs ONE squeeze (core brief: load cases)
-        guard FlexibleSqueezeGroups.groups(i.settings).count <= 1 else { throw EncodeError.squeezeGroups }
+        // ★ AP1: only groups with something SENT count — no press is in the job until AP9 (Inputs.presses)
+        guard FlexibleSqueezeGroups.groups(i.settings, sent: []).count <= 1 else { throw EncodeError.squeezeGroups }
         guard i.pinches.isEmpty else { throw EncodeError.pinch }
         var faces: [[String: Any]] = []
         let finish = i.settings.finishMode

@@ -69,19 +69,8 @@ public struct FlexFaceGeometry {
         let centres = try scene.fromUV(face: k.region, rotation: k.rotation,
                                        st.columns.map { SIMD2($0.uMM, $0.vMM) })
         // the entry along the load of the column nearest (u, v): the edge hugs the face
-        func entry(_ u: Double, _ v: Double) -> Double {
-            guard st.nu > 0, st.nv > 0, st.pitchMM > 0 else { return 0 }
-            let iu = min(st.nu - 1, max(0, Int(u / st.pitchMM))), iv = min(st.nv - 1, max(0, Int(v / st.pitchMM)))
-            var best: (Int, Int)? = nil
-            for r in 0..<max(st.nu, st.nv) {
-                for dv in -r...r { for du in -r...r where abs(du) == r || abs(dv) == r {
-                    let c = st.column(iu + du, iv + dv)
-                    if c >= 0, best == nil || du * du + dv * dv < best!.1 { best = (c, du * du + dv * dv) }
-                } }
-                if best != nil { break }
-            }
-            return best.map { st.columns[$0.0].entryT } ?? 0
-        }
+        // (★ AP1: the same lookup, shared with FlexiblePressReframe — FlexStackInfo.entryT(nearU:v:))
+        func entry(_ u: Double, _ v: Double) -> Double { st.entryT(nearU: u, v: v) }
         let n = 30
         func line(_ uv: (Double) -> (Double, Double)) throws -> [SIMD3<Double>] {
             let pts = (0...n).map { uv(Double($0) / Double(n)) }
@@ -106,6 +95,22 @@ extension FlexStackInfo {
     public func column(_ iu: Int, _ iv: Int) -> Int {
         guard iu >= 0, iv >= 0, iu < nu, iv < nv else { return -1 }
         return cell[iv * nu + iu]
+    }
+
+    /// Core's entry (along the load) of the column nearest (u, v) — the ring search FlexFaceGeometry
+    /// has always used; 0 when the stack has no column.
+    public func entryT(nearU u: Double, v: Double) -> Double {
+        guard nu > 0, nv > 0, pitchMM > 0 else { return 0 }
+        let iu = Swift.min(nu - 1, Swift.max(0, Int(u / pitchMM))), iv = Swift.min(nv - 1, Swift.max(0, Int(v / pitchMM)))
+        var best: (Int, Int)? = nil
+        for r in 0..<Swift.max(nu, nv) {
+            for dv in -r...r { for du in -r...r where abs(du) == r || abs(dv) == r {
+                let c = column(iu + du, iv + dv)
+                if c >= 0, best == nil || du * du + dv * dv < best!.1 { best = (c, du * du + dv * dv) }
+            } }
+            if best != nil { break }
+        }
+        return best.map { columns[$0.0].entryT } ?? 0
     }
 }
 
@@ -133,6 +138,8 @@ public final class FlexibleStageModel: ObservableObject {
     var workerForTests: FlexibleWorker { worker }
     /// ★ BATCH G: the worker the squish sims fetch the scene from (one hop; they run off it).
     var squishWorker: FlexibleWorker { worker }
+    /// ★ ANGLED PRESSES (AP1): the worker FlexiblePressReframe reads core's frames through.
+    var frameWorker: FlexibleWorker { worker }
 
     // what the screens show
     @Published public private(set) var catalogue: [FlexMaterialInfo] = []
@@ -142,6 +149,8 @@ public final class FlexibleStageModel: ObservableObject {
     @Published public private(set) var sceneInfo: FlexibleScene.Info?
     @Published public var tab: Tab = .face { didSet { if oldValue != tab { tabChanged() } } }
     @Published public var selectedRegion: Int? { didSet { if oldValue != selectedRegion { selectionChanged() } } }
+    /// ★ ANGLED PRESSES (AP1): the press whose card is open (FlexiblePress id); nil ⇒ none.
+    @Published public var selectedPress: UUID?
     /// ★ ROUND 5 (S8): the folder tab open on the Settings modal's left rail (FlexibleSettingsRail).
     @Published public var rail: FlexibleRailTab = .group(FlexibleSqueezeGroups.first) { didSet { if oldValue != rail { railChanged() } } }
     /// ★ ROUND 5 (S9): the page's Exit left with nothing changed — the main page does nothing.
@@ -552,9 +561,15 @@ public final class FlexibleStageModel: ObservableObject {
     nonisolated static func adopt(_ loads: FlexibleMainPageLoads, into s: inout FlexibleStageSettings) -> [Int: Double] {
         // ★ ROUND 5 (S6): a face he DELETED stays deleted — the re-sync skips it (the main page's
         // group still holds it; that is his to change there)
+        // ★ ANGLED PRESSES (AP1): a press member is never re-pressed or re-rested as a face (a face that
+        // is ALSO in a press — a clash, spec §8 — keeps its own link until he resolves it)
+        // ★ AP1 TESTS FIRST — RED STUB (the spec's red variant; the next commit replaces it): no skip of press members
         let removed = Set(s.removedRegions ?? [])
+        let full = loads
         let loads = removed.isEmpty ? loads : FlexibleMainPageLoads(entries: loads.entries.filter { !removed.contains($0.key) })
         let relinked = loads.adopt(into: &s)
+        // ★ AP1 TESTS FIRST — RED STUB (the spec's red variant; the next commit replaces it): linked presses are not re-synced
+        _ = full
         FlexibleSqueezeGroups.uniteHands(&s, loads: loads)
         return relinked
     }
@@ -1259,7 +1274,7 @@ public final class FlexibleStageModel: ObservableObject {
         }
         let pinches = FlexibleSqueezeGroups.pinches(conflicts, s)
         // ★ ROUND 4 (D2): what core cannot run yet (core brief) is said, never sent to be refused
-        if FlexibleSqueezeGroups.groups(s).count > 1 { throw FlexibleJob.EncodeError.squeezeGroups }
+        if FlexibleSqueezeGroups.groups(s, sent: sentPresses).count > 1 { throw FlexibleJob.EncodeError.squeezeGroups }
         if !pinches.isEmpty { throw FlexibleJob.EncodeError.pinch }
         let faceCount = max(file.faceCount, (project.viewerMesh?.faceIDs.max().map { Int($0) + 1 }) ?? 0)
         var inputs = FlexibleJob.Inputs(
