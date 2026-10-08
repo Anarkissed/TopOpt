@@ -1429,19 +1429,19 @@ std::vector<double> region_density_field(
         const Vec3 c{grid.origin.x + (i + 0.5) * grid.spacing,
                      grid.origin.y + (j + 0.5) * grid.spacing,
                      grid.origin.z + (k + 0.5) * grid.spacing};
-        for (std::size_t ri = 0; ri < includes.size(); ++ri)
-          if (point_in_clearance_region(includes[ri], c, 0.0)) {
-            out[grid.index(i, j, k)] = cells[ri].stated_relative_density;
-            break;
-          }
+        // the OWNER rule (ruling 4): nearest face plane, tie to the lower id, never declaration order.
+        if (const int ow = stepped_region_owner(c, includes))
+          out[grid.index(i, j, k)] = cells[ow - 1].stated_relative_density;
       }
   return out;
 }
 
 // The per-voxel desired cell the grading law's Fit mode consumes: the derived cell of
 // the include region owning each voxel, 0 elsewhere. Built from the SAME membership
-// test the certification mask uses (`point_in_clearance_region`, first match wins), so
-// the cell a voxel is graded at is the cell derived for the region that voxel is in.
+// test the certification mask uses (`point_in_clearance_region`), resolved by the OWNER
+// rule where prisms overlap (stepped_region_owner: nearest face plane, tie to the lower
+// id), so the cell a voxel is graded at is the cell derived for the region that voxel
+// belongs to -- and not, as it was, for whichever region happened to be declared first.
 std::vector<double> fit_cell_field(const VoxelGrid& grid,
                                    const std::vector<ClearanceGeometry>& includes,
                                    const std::vector<FitRegionCell>& cells) {
@@ -1453,11 +1453,9 @@ std::vector<double> fit_cell_field(const VoxelGrid& grid,
         const Vec3 c{grid.origin.x + (i + 0.5) * grid.spacing,
                      grid.origin.y + (j + 0.5) * grid.spacing,
                      grid.origin.z + (k + 0.5) * grid.spacing};
-        for (std::size_t ri = 0; ri < includes.size(); ++ri)
-          if (point_in_clearance_region(includes[ri], c, 0.0)) {
-            out[grid.index(i, j, k)] = cells[ri].cell_mm;  // 0 when infeasible
-            break;
-          }
+        // the OWNER rule (ruling 4): nearest face plane, tie to the lower id, never declaration order.
+        if (const int ow = stepped_region_owner(c, includes))
+          out[grid.index(i, j, k)] = cells[ow - 1].cell_mm;  // 0 when infeasible
       }
   return out;
 }
@@ -1484,10 +1482,10 @@ void fill_fit_region_voxels(RunInfo& gi, const VoxelGrid& grid,
         const Vec3 c{grid.origin.x + (i + 0.5) * grid.spacing,
                      grid.origin.y + (j + 0.5) * grid.spacing,
                      grid.origin.z + (k + 0.5) * grid.spacing};
-        std::size_t owner = includes.size();
-        for (std::size_t ri = 0; ri < includes.size(); ++ri)
-          if (point_in_clearance_region(includes[ri], c, 0.0)) { owner = ri; break; }
-        if (owner == includes.size()) { ++outside; continue; }
+        // the OWNER rule (ruling 4): nearest face plane, tie to the lower id, never declaration order. A point in no prism has NO owner and is counted outside.
+        const int ow = stepped_region_owner(c, includes);
+        if (ow == 0) { ++outside; continue; }
+        const std::size_t owner = static_cast<std::size_t>(ow - 1);
         RunInfo::GradingFitRegion& R = gi.grading_fit_regions[owner];
         ++R.candidate_voxels;
         if (e < gf.posture.mask.size() && gf.posture.mask[e]) ++R.latticed_voxels;
@@ -5387,16 +5385,13 @@ LatticeVariantOutcome lattice_one_variant(
             continue;
           cand[e] = 1;
           // WHICH declared include region this voxel belongs to (task per-region
-          // retention). 1-based, in the job's own declaration order, so a receipt
-          // row maps back to the region the user selected; FIRST match wins, which
-          // is the same precedence `in_include_region` applies when it short-
-          // circuits. 0 means "no include regions declared" — the whole printed set
-          // is one anonymous group, which is the union reading exactly.
-          for (std::size_t ri = 0; ri < lattice_roles.includes.size(); ++ri)
-            if (point_in_clearance_region(lattice_roles.includes[ri], c, 0.0)) {
-              region_ids[e] = static_cast<int>(ri) + 1;
-              break;
-            }
+          // retention). The id is 1-based in the job's own declaration order, so a
+          // receipt row still maps back to the region the user selected -- but WHICH
+          // region a shared voxel gets is no longer decided by that order. Where prisms
+          // overlap the owner is the region whose FACE PLANE is nearest, with an exact
+          // tie to the lower id (stepped_region_owner, ruling 4, 2026-10-07). 0 means the
+          // voxel is in no include prism at all: no owner, not "region 1".
+          region_ids[e] = stepped_region_owner(c, lattice_roles.includes);
         }
     GradingLawParams gp;
     gp.topology = LatticeTopology::Octet;  // job schema restricts to octet
@@ -6679,11 +6674,8 @@ LatticeVariantOutcome lattice_one_variant(
             const Vec3 c{solved_grid.origin.x + (i + 0.5) * solved_grid.spacing,
                          solved_grid.origin.y + (j + 0.5) * solved_grid.spacing,
                          solved_grid.origin.z + (k + 0.5) * solved_grid.spacing};
-            for (std::size_t ri = 0; ri < lattice_roles.includes.size(); ++ri)
-              if (point_in_clearance_region(lattice_roles.includes[ri], c, 0.0)) {
-                void_region_id[e] = static_cast<int>(ri) + 1;
-                break;
-              }
+            // the OWNER rule (ruling 4): nearest face plane, tie to the lower id, never declaration order.
+            void_region_id[e] = stepped_region_owner(c, lattice_roles.includes);
           }
     }
     // `cell` is the SAME cell `lattice_certification_mask` was keyed with above
@@ -7103,7 +7095,11 @@ LatticeVariantOutcome lattice_one_variant(
     const SteppedPlanCheck chk =
         stepped_validate_plan(lat_topo, job.lattice.stepped_cells, plan_regions,
                               job.grading.min_extrudable_width_mm, tile_floor,
-                              prints_open, plan_menu);
+                              prints_open, plan_menu,
+                              // ★ the include geometry, so a cross-region overlap at a
+                              // mitre can be told from a real collision: each cell's
+                              // centre must be owned by its own region (ruling 4).
+                              &lattice_roles.includes);
     if (!chk.ok)
       throw JobError("lattice \"stepped_cells\": " + chk.error +
                      ". Core validates the plan and does not repack it -- the run lays "
@@ -9398,11 +9394,8 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
             const Vec3 c{design_grid.origin.x + (i + 0.5) * design_grid.spacing,
                          design_grid.origin.y + (j + 0.5) * design_grid.spacing,
                          design_grid.origin.z + (k + 0.5) * design_grid.spacing};
-            for (std::size_t ri = 0; ri < sr.includes.size(); ++ri)
-              if (point_in_clearance_region(sr.includes[ri], c, 0.0)) {
-                ids[e] = static_cast<int>(ri) + 1;
-                break;
-              }
+            // the OWNER rule (ruling 4): nearest face plane, tie to the lower id, never declaration order.
+            ids[e] = stepped_region_owner(c, sr.includes);
           }
       an_ids = ids;
       if (an_alg == LatticeAlgorithm::Stepped)

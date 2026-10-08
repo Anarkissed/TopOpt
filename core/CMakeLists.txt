@@ -2138,6 +2138,18 @@ if(OpenCASCADE_FOUND AND Eigen3_FOUND)
     TOPOPT_CLI_EXE="$<TARGET_FILE:topopt_cli>")
   add_test(NAME cli_slot_origin COMMAND test_slot_origin)
 
+  # ★ Ruling 4: ownership of shared space. Reversing the declaration order must emit a
+  # byte-identical lattice (it did not before: the first-declared region swallowed the
+  # shared volume), and a cross-region overlap is a straddled seam only where each cell's
+  # centre is owned by its own region.
+  add_executable(test_region_ownership tests/validation/test_region_ownership.cpp)
+  target_link_libraries(test_region_ownership PRIVATE topopt)
+  target_compile_definitions(test_region_ownership PRIVATE
+    ORGANIC_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/organic"
+    CLI_TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}"
+    TOPOPT_CLI_EXE="$<TARGET_FILE:topopt_cli>")
+  add_test(NAME cli_region_ownership COMMAND test_region_ownership)
+
   # ★ Every subcommand that writes a receipt stamps the binary that wrote it
   # (reviewer, 2026-10-01). `analyze` and `lattice-variant` return before main.cpp
   # populates the fingerprint, so their run_info.json carried "unknown". Runs the real

@@ -378,6 +378,35 @@ Note for the R6 work that follows: with the slot origin on the wire, the stricte
 base-cell alignment R6 asks for can land without refusing the app's current plans — which
 is why this key goes in first.
 
+## MEANING CHANGES, addendum 7 (2026-10-07) — who owns shared space, and exact overlap
+
+From #354's core brief of 2026-10-02 (R3, R5, R7's note) and the reviewer's ruling 4 of
+2026-10-07.
+
+| what | was | is | app impact |
+|---|---|---|---|
+| a voxel inside TWO include prisms | given to the FIRST matching region in DECLARATION ORDER, however far its face | given to the region whose FACE PLANE is nearest; an exact tie to the lower region id | **core now matches the app's own rule.** Where prisms overlap, the cell/density/void id a voxel is graded at changes, and so does the emitted geometry. Jobs with overlapping prisms change |
+| the same job with its regions declared in the opposite order | a DIFFERENT part (measured: STL `7f602f83…` vs `4c5809b0…`, and one run derived a cell for one region where the other derived two) | **byte-identical** (`9c5e8280…`) | **intended.** The order the app writes regions in is not geometry |
+| two cells that merely TOUCH, in regions whose ladders do not nest | REFUSED as overlapping — 1,458 false collisions on 570B38E2, every one false | accepted | **unblocks the app** (R5) |
+| two cells at the same offset in DIFFERENT regions, far apart in space | REFUSED as overlapping (the hash key had no region id) | accepted (R3) | **unblocks the app** |
+| two cells occupying the EXACT SAME BOX in different regions | **ACCEPTED** — offsets were measured from each region's own slot origin, so their hash keys differed | REFUSED, naming both cells, both regions, the overlap extent and which region owns each centre | **a false ACCEPTANCE closed.** R3's key defect ran both ways, and this direction ships a wrong part |
+| two cells half a cell apart where a region's menu holds only its base | **ACCEPTED** — the hash tile equalled the cell, so one-slot-wide cells rounded apart | REFUSED | **a second false ACCEPTANCE closed** |
+| a cross-region overlap at a mitre, each cell's centre owned by its own region | refused (as any cross-region overlap was, when detected at all) | **ACCEPTED** as a straddled seam; only the owner's lattice is laid in the shared space | **intended** — the app keeps such cells whole, and the stand has 1,367 real overlapping pairs that are NOT seams and stay refused |
+
+**Where no prisms overlap, nothing changes — by construction, not merely by test.** A point
+lies in at most one prism, so "first match" and "nearest face plane" name the same region;
+a point in no prism returned 0 before and returns 0 now. The change can only reach a point
+inside two or more prisms. The suite's existing receipt and STL pins are the empirical
+check on top of that (135/135).
+
+Containment itself is NOT a second implementation: `stepped_region_owner` calls
+`point_in_clearance_region`, the predicate core already resolved per-voxel membership
+with, so there is one containment test and only the tie-break is new. The function is
+exported so #354's R7 can call it through the bridge instead of keeping a Swift copy:
+
+    int stepped_region_owner(const Vec3& p, const std::vector<ClearanceGeometry>& includes);
+    // 1-based index into `includes`, or 0 for NO OWNER.
+
 ### The fingerprint defect, for the record
 
 Not the worktree (`git -C core rev-parse` resolves fine there), and not only the

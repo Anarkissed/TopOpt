@@ -214,6 +214,116 @@ static void test_menu_shape() {
 // wrong strut width to every cell -- silently, with a plausible-looking lattice. The
 // cells here are deliberately sent in an order that the sort must change, and each
 // one's rho is a function of its own position so a mispairing cannot look right.
+// ── R5, R3 and a FALSE ACCEPTANCE (#354's core brief, 2026-10-02) ──────────────
+// Overlap was decided by a hash of ONE finest tile -- the smallest size on ANY
+// region's menu -- each cell claiming llround(size/finest) slots from slot
+// llround(offset/finest). The comment carried the assumption: "every cell is a whole
+// number of those on every axis". Three things go wrong with it.
+//
+//  R5  It holds only if every region's ladder nests in every other's. Where a
+//      size/tile ratio has a fraction above a half, the span rounds UP while the next
+//      cell's start rounds DOWN, so two cells that merely TOUCH share a slot. One of
+//      his projects produced 1,458 such collisions, every one false.
+//  R3  The key is (i, j, k) alone and offsets are measured from each region's OWN slot
+//      origin, so two cells at the same relative offset collide however far apart they
+//      are. The brief's pair is 36 mm apart.
+//  ★   And the same rounding hides REAL overlaps. Where the printability rule leaves a
+//      region's menu holding nothing but its base (it does for every base at a 0.45 mm
+//      bead -- see the menus below), the hash tile EQUALS the cell, so a cell is one
+//      slot wide and two cells half a cell apart round into different slots. Base-size
+//      cells are exempt from the alignment check, so a non-multiple offset is exactly
+//      what the app sends today: two cells overlapping by half their width are
+//      ACCEPTED. A false refusal costs a solve; this one ships a wrong part.
+//
+// So the hash cannot be repaired by changing its tile or its key: it is replaced by an
+// exact test of the cells' boxes, bucketed only to find candidates. Each case below
+// states its own premise, because every one of them would pass vacuously if the menus
+// moved underneath it, and both ways of REFUSING stay tested -- the app reports 1,367
+// REAL cross-region overlapping pairs on the stand, so a fix that simply stopped
+// comparing across regions would pass R3 and ship those.
+static void test_overlap_is_exact_not_a_shared_tile() {
+  auto reg = [](int id, double base, Vec3 at) {
+    SteppedPlanRegion r;
+    r.region_id = id;
+    r.base_cell_mm = base;
+    r.slot_origin = at;
+    return r; };
+  auto cell = [](int id, Vec3 at, double size) {
+    SteppedCell c;
+    c.region_id = id;
+    c.origin = at;
+    c.size_mm = size;
+    return c; };
+  const double bead = 0.45;
+
+  // ── R5: two cells that touch, on their own region's own tile grid ──
+  // prints_open is OFF here for one reason: with it on, a 2.5 or 3.25 mm base admits
+  // NOTHING below itself, and a test of sub-base sizes would have no sizes to use.
+  const SteppedPlanRegion r1 = reg(1, 2.5, Vec3{18.0, 0.0, 8.0});
+  const SteppedPlanRegion r2 = reg(2, 3.25, Vec3{54.0, 0.0, 18.0});
+  const std::vector<double> m1 =
+      topopt::stepped_size_menu(LatticeTopology::Octet, 2.5, bead, 0.0, false);
+  const std::vector<double> m2 =
+      topopt::stepped_size_menu(LatticeTopology::Octet, 3.25, bead, 0.0, false);
+  double finest = 0.0;
+  for (const std::vector<double>* m : {&m1, &m2})
+    for (double s : *m)
+      if (finest <= 0.0 || s < finest) finest = s;
+  const double size = 2.0 * (3.25 / 5.0);   // 1.3 mm: region 2's own family-5 tile, x2
+  bool on_menu = false;
+  for (double s : m2) if (std::fabs(s - size) < 1e-9) on_menu = true;
+  CHECK(on_menu, "R5 premise: 1.3 mm is on region 2's own menu");
+  const double ratio = size / finest;
+  CHECK(std::fabs(ratio - std::floor(ratio + 0.5)) > 0.1,
+        "R5 premise: and it is NOT a whole number of the GLOBAL finest tile, which is "
+        "the condition that rounded a touch into an overlap");
+  const std::vector<SteppedCell> touching{
+      cell(2, Vec3{54.0 + size, 0.0, 18.0}, size),
+      cell(2, Vec3{54.0 + 2.0 * size, 0.0, 18.0}, size)};
+  const SteppedPlanCheck t = stepped_validate_plan(LatticeTopology::Octet, touching,
+                                                   {r1, r2}, bead, 0.0, false);
+  CHECK(t.ok, "R5: two cells that touch on their own grid do not overlap");
+
+  // ── R3: the same relative offset in two regions, 36 mm apart ──
+  const SteppedPlanRegion a = reg(1, 3.0, Vec3{18.0, 0.0, 8.0});
+  const SteppedPlanRegion b = reg(2, 3.0, Vec3{54.0, 0.0, 18.0});
+  CHECK(54.0 - (18.0 + 3.0) > 0.0, "R3 premise: the two cells are disjoint in space");
+  const SteppedPlanCheck far = stepped_validate_plan(
+      LatticeTopology::Octet,
+      {cell(1, Vec3{18.0, 0.0, 8.0}, 3.0), cell(2, Vec3{54.0, 0.0, 18.0}, 3.0)},
+      {a, b}, bead);
+  CHECK(far.ok, "R3: cells 36 mm apart in different regions do not overlap");
+
+  // ── ★ the false acceptance: a base-only menu, so the tile IS the cell ──
+  const std::vector<double> m3 =
+      topopt::stepped_size_menu(LatticeTopology::Octet, 3.0, bead);
+  CHECK(m3.size() == 1 && std::fabs(m3.front() - 3.0) < 1e-9,
+        "premise: at a 0.45 mm bead a 3 mm base admits only itself, so the hash tile "
+        "was the cell");
+  const SteppedPlanCheck hidden = stepped_validate_plan(
+      LatticeTopology::Octet,
+      {cell(1, Vec3{18.0, 0.0, 8.0}, 3.0), cell(1, Vec3{19.5, 0.0, 8.0}, 3.0)},
+      {a}, bead);
+  CHECK(!hidden.ok,
+        "overlap: two base cells half a cell apart DO overlap and must be refused");
+
+  // ── and the refusals that must survive the change ──
+  const SteppedPlanCheck rich = stepped_validate_plan(
+      LatticeTopology::Octet,
+      {cell(1, Vec3{18.0, 0.0, 8.0}, 2.5), cell(1, Vec3{19.0, 0.0, 8.0}, 2.5)},
+      {reg(1, 2.5, Vec3{18.0, 0.0, 8.0})}, bead, 0.0, false);
+  CHECK(!rich.ok, "overlap: a real overlap inside one region is still refused");
+  const SteppedPlanCheck xr = stepped_validate_plan(
+      LatticeTopology::Octet,
+      {cell(1, Vec3{18.0, 0.0, 8.0}, 3.0), cell(2, Vec3{19.5, 0.0, 8.0}, 3.0)},
+      {a, reg(2, 3.0, Vec3{19.5, 0.0, 8.0})}, bead);
+  CHECK(!xr.ok, "overlap: a real overlap ACROSS two regions is still refused");
+  CHECK(xr.error.find("region 1") != std::string::npos &&
+            xr.error.find("region 2") != std::string::npos,
+        "overlap: and a cross-region refusal names BOTH regions, because 'OVERLAPS "
+        "cell 0' alone does not say where to look");
+}
+
 // ── R2 / R2x / R2b: ONE CONTAINMENT RULE FOR EVERY FACE ───────────────────────
 // `origin` is the cell's MINIMUM corner (stepped_plan.hpp). The depth check projected
 // that corner and added the size along the normal, which is the cell's span only when
@@ -890,6 +1000,7 @@ int main() {
   test_menu_shape();
   test_plan_validation();
   test_depth_projects_the_cube_not_one_corner();
+  test_overlap_is_exact_not_a_shared_tile();
   test_doubled_menu_is_halves_only();
   test_group_keeps_each_cells_own_rho();
   test_outline_beam_width();
