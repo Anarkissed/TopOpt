@@ -157,6 +157,7 @@ public enum LatticePreviewBanner: Equatable, Sendable {
         case .drawing(let t):
             if t.hasPrefix("★") { return "★ Preview differs from run" }
             if t.contains("shown as the doubled ladder") { return "Lattice preview · stand-in" }
+            if t.contains(Self.organicBandNotBuiltSentence) { return Self.organicBandNotBuiltCaption }
             if t.contains(Self.planNotSentSteppedSentence) { return Self.planNotSentSteppedCaption }
             if t.contains(Self.planNotSentSentence) { return Self.planNotSentCaption }
             return "Lattice preview · not the export"
@@ -182,6 +183,11 @@ public enum LatticePreviewBanner: Equatable, Sendable {
     public static let planNotSentSteppedSentence =
         "the run currently lays one cell size per region, not the cells shown here — "
         + "and can refuse walls too thin for it"
+    /// ★★ RULING C (reviewer, 2026-10-08): "THE ORGANIC BAND. Keep it in the preview, with the line
+    /// 'the run doesn't build this band yet'. #358 adds it to core." Shown whenever the organic
+    /// preview graded voxels toward the outline with the shape band.
+    public static let organicBandNotBuiltCaption = "Band: preview only"
+    public static let organicBandNotBuiltSentence = "the run doesn't build this band yet"
     /// The plan-not-sent line for an algorithm: Stepped's own, else Default Grade's.
     public static func planNotSentLine(algorithm: String) -> (caption: String, sentence: String) {
         algorithm == LatticeCellTransition.stepped.coreAlgorithm
@@ -294,6 +300,10 @@ public enum LatticePreviewBanner: Equatable, Sendable {
             // lattices on the part preview yet?" — it was, and the tensor never came)
             if let why = scene.organicNotDrawnReason { label += " — " + why }
         }
+        // ★★ RULING C: the organic shape band is drawn here; the run does not build it yet.
+        if scene.organicBandGradedVoxels > 0 {
+            label += " · " + organicBandNotBuiltSentence
+        }
         // ★★ RULING 6: a Default Grade or Stepped plan drawn here that the job does not carry.
         if LatticeSteppedCellWire.runBuildsCoresOwnLayout(
             algorithm: scene.algorithmName, wired: plansWired ?? TopOptKit.steppedCellsWired,
@@ -327,6 +337,8 @@ public struct LatticePreviewSummaryValues: Equatable, Sendable {
     /// Whether the picture on screen IS that algorithm. False adds one sentence to the
     /// banner; it never suppresses the preview. See `LatticePreviewBanner.make`.
     public var algorithmDrawnFaithfully: Bool
+    /// ★ Ruling C's count (the scene's own; settable here for the banner's tests).
+    public var organicBandGradedVoxels: Int = 0
     public init(interiorVoxelCount: Int, previewLabel: String,
                 partInteriorVoxelCount: Int? = nil, skippedFaces: Int = 0,
                 skippedRegionNames: [String] = [],
@@ -372,11 +384,18 @@ public protocol LatticeSDFPreviewSummary {
     /// existing conformer is unchanged and keeps meaning "doubled, faithfully".
     var algorithmName: String { get }
     var algorithmDrawnFaithfully: Bool { get }
+    /// ★ RULING C (2026-10-08): voxels the organic shape band graded in the preview — a band the run
+    /// does not build yet. A requirement (defaulted to 0), so the scene's own count is the one read.
+    var organicBandGradedVoxels: Int { get }
 }
 
 /// Default: nothing to say — so no conformer but the scene has to know about spans.
 public extension LatticeSDFPreviewSummary {
     var organicNotDrawnReason: String? { nil }
+}
+public extension LatticeSDFPreviewSummary {
+    /// Voxels the organic shape band graded in the preview (a band the run does not build yet).
+    var organicBandGradedVoxels: Int { 0 }
 }
 public extension LatticeSDFPreviewSummary {
     var organicSpanSource: (count: Int, lengthMM: Double)? { nil }

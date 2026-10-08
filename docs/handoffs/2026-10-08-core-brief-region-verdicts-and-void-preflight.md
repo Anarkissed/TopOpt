@@ -1,8 +1,12 @@
 # Core brief for #358: per-region verdicts the app can show, and a lattice-void pre-flight
 
-PR #354's app track, round 4 (2026-10-08). Core lines are at 23e6154e, which is the core #354 links.
-Each claim was read by one reader and checked by a second. No file under `core/` was edited. This is a
-DRAFT: it waits on the reviewer's answers to the two questions sent on 2026-10-07.
+PR #354's app track, round 4 (2026-10-08). Core lines are at 23e6154e, which is the core #354 linked
+when this was read. Each claim was read by one reader and checked by a second. No file under `core/` was
+edited.
+
+RULED 2026-10-08, under the maintainer's standing rule: "the app's design is the source of truth. Core
+builds what the app designs. Where core can't, it says so BEFORE a run, through a check the app can
+call. Never a silent substitute."
 
 ## A. One verdict per region, keyed by region, before and after a run
 
@@ -35,14 +39,19 @@ algorithm. The verdict is core's to give; one source."
    - The certificate guard in report.json (`strut_strength.cells_per_member_min` / `out_of_regime`,
      run_job.cpp:3786-3791) says 2.06 cells, OUT OF REGIME.
 
-### Asks
+### Asks (as ruled 2026-10-08)
 
+- **V0 — THE FAST LAYOUT CHECK (the ruling's centre).** Core exports a check the app can call in the
+  background as he edits: the app's plan plus core's own wall measurement → each region's cells across
+  and ONE verdict. The drawer shows "checking…", then core's answer. Until it lands the app shows Fit's
+  exact count (lattice_region_derivation), and for Stepped / Default Grade its measured estimate labelled
+  "estimate, core checks it"; organic "—".
 - **V1.** Add `region_id[]` and `region_out_of_regime[]` to `grading.stepped`, and a row for every
   include, including regions that got no cell, with the reason.
 - **V2.** A per-region cells-across at the run's own cells in the Stage E row, and Stage E taken after
   the domain and the beam.
-- **V3.** ONE per-region verdict. Reconcile Stepped's per-region count with the certificate guard, or
-  say which one governs.
+- **V3.** ONE per-region verdict, and it is the strength-check guard's (ruled). Core writes it on EVERY
+  graded job, so the app does not add `report_region_cells`.
 - **V4.** Export `fill_fit_region_cell`, `lattice_region_thinnest_extent_mm` and `run_stepped_step`
   from run_job.cpp's anonymous namespace (lines 67-7818), so the bridge can call what the run calls.
 - **V5.** A key that carries the app's Aesthetic region floor, if core wants the run to count what the
@@ -75,7 +84,10 @@ preview task: the preview must say what core will refuse, before a run."
   His refusal is 1 voxel of 59,609 (include region 31, face 27, 4.959 mm³). Checking the preview's
   own lattice could miss it or invent others.
 
-### Ask
+### Ask (as ruled 2026-10-08)
+
+The app calls the pre-flight on Save & Exit and shows core's words with the one-tap fix ("Leave Face 27
+solid"). Nothing in the app claims core's verdict before then.
 
 - **P1.** `preflight_lattice_void(job, job_dir, materials, rules)`, beside `preflight_job`
   (job.hpp:1335). It should:
