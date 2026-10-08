@@ -208,9 +208,9 @@ public struct LatticeRegionDrawer: Equatable, Sendable {
         }
         guard latticeReachesTheRun else {
             return LatticeRegionDrawer(
-                headline: Headline(text: "Frozen, not latticed", verdict: .outOfRegime),
+                headline: Headline(text: LatticeSectorOutline.notLatticedWords(protected: held), verdict: .noMaterial),
                 collapsedValue: card?.heldText ?? "—",
-                verdict: .outOfRegime,
+                verdict: .noMaterial,   // ★ batch E: no surface to lattice — never "Out of regime"
                 rows: [LatticeDrawerRow(label: "Depth",
                                         value: String(format: "%.1f mm", depthMM),
                                         modifiable: true),

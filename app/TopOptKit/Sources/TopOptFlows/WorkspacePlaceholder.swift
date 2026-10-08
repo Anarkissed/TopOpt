@@ -10487,7 +10487,7 @@ public struct WorkspacePlaceholder: View {
             // latticing it — core's `lattice.regions` are geometry predicates and
             // a region is a voxel set (PR 331 §6). Three words, not silence.
             if !project.latticeReachesTheRun(ref), role != nil {
-                Text(Self.latticeRegionNotConsumed)
+                Text(LatticeSectorOutline.notLatticedWords(protected: force.isProtected(g.id)))
                     .font(.system(size: 9, weight: .bold))
                     .foregroundStyle(DS.Color.warning.color)
                     .padding(.vertical, 2).padding(.horizontal, 5)
@@ -10530,7 +10530,7 @@ public struct WorkspacePlaceholder: View {
     /// ★ Three words (R7). The region's depth IS consumed — it is PR 331's
     /// per-sector protection depth; what the run cannot consume yet is the
     /// lattice half.
-    static let latticeRegionNotConsumed = "Frozen, not latticed"
+    static let latticeRegionNotConsumed = LatticeSectorOutline.notLatticedWords(protected: true)   // ★ batch E: never "Frozen"
 
     /// PR 331 §5c's small-face policy, applied to this list: a selectable holding
     /// fewer voxels than the sliver floor is dimmed. Faces and regions alike, from
@@ -10896,6 +10896,9 @@ public struct WorkspacePlaceholder: View {
         // bake yet or under an algorithm whose bake does not derive region cells.
         let baked = LatticeRegionCells.selectableCells(project: project, scene: strutScene)
         let bakedCopy = keys.map { baked[$0] }
+        // ★ batch E (#362, ported 2026-10-08): a cut piece holds only its SHARE of its face — the
+        // card's held voxels (and so its grams) are the face's, scaled by that share; nil = whole
+        let sharesCopy = project.latticeCardHeldShares()
         Task.detached(priority: .userInitiated) {
             guard let preview = try? TopOptKit.faceSlabPreview(
                 stepPath: path, faceIDs: ids, depthsMM: depthsCopy,
@@ -10904,7 +10907,8 @@ public struct WorkspacePlaceholder: View {
             for (i, fid) in ids.enumerated() where i < preview.voxels.count {
                 var card = LatticeFaceCardDerivation.card(
                     faceID: fid, depthMM: depthsCopy[i],
-                    heldVoxels: preview.voxels[i], spacingMM: preview.spacingMM,
+                    heldVoxels: LatticeSectorOutline.heldVoxels(preview.voxels[i], share: sharesCopy[keysCopy[i]]),
+                    spacingMM: preview.spacingMM,
                     densityGCM3: densityGCM3, topologyID: topologyID,
                     // ★ THE MODE'S OWN DENSITY, WHICH NO CALL SITE PASSED UNTIL
                     // NOW (task 2026-08-17-lattice-stage-repair §1d). nil is

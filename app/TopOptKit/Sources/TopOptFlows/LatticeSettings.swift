@@ -225,6 +225,8 @@ public struct LatticeRegionSpec: Equatable, Sendable {
     public var syntheticStress: Bool = false
     public var syntheticFoci: Int? = nil
     public var selectableKey: String? = nil
+    /// ★ BATCH E REVIEW: a prism CLIPPED to a split piece (LatticeSectorOutline) — not its face: no `face_id` on the wire, never a face's protection depth.
+    public var sectorPiece: Bool = false
     // ★ THE SLAB (2026-09-21, preview only — see `LatticeWallThickness`): what was asked
     // for, and the answer the scene built. Neither reaches `wireDictionary`.
     public var thickness: LatticeWallThickness? = nil
@@ -347,7 +349,7 @@ public struct LatticeRegionSpec: Equatable, Sendable {
         // The face this region was spawned from (task 2026-08-12 §0a) — core uses
         // it to refuse a job whose protection depth and lattice depth for the same
         // face disagree.
-        if let fid = faceID { entry["face_id"] = fid }
+        if let fid = faceID, !sectorPiece { entry["face_id"] = fid }   // ★ batch E review: a piece is not its face
         // The DIALLED density. Absent means AUTO means core derives, so a project
         // that never touched it produces the identical job (bar R1).
         if let rho = relativeDensity { entry["relative_density"] = rho }

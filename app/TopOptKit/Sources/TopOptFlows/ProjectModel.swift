@@ -2228,7 +2228,7 @@ public final class ProjectModel: ObservableObject {
         return latticeFacePrimitive(faces: members, ref: ref, group: group,
                                     key: rid, role: role,
                                     depthMM: latticeSlabDepthMM(ref, in: group),
-                                    in: mesh)
+                                    in: latticeSectorMesh(rid) ?? mesh)   // ★ batch E: a split piece's own surface
     }
 
     /// A stable NEGATIVE sentinel face key for a manual primitive, so it never
@@ -2469,7 +2469,8 @@ public final class ProjectModel: ObservableObject {
             selectableDensity: lattice.selectableDensity,
             selectableExpandMM: lattice.selectableExpandMM,
             synthetic: latticeSyntheticFlags(),
-            regionMembers: { [weak self] _, rid in self?.latticeRegionMembers(rid) },
+            regionMembers: { [weak self] gid, rid in self?.latticeEmittedRegionMembers(gid, rid) },
+            regionCuts: { [weak self] rid, f in self?.latticeRegionCutSets(rid, face: f) ?? [[]] },   // ★ batch E
             // ★ ruling (g): a region the run cannot consume is counted and NAMED
             droppedRegionName: { [weak self] gid, rid, role, groupRole in
                 self?.latticeDroppedRegionName(group: gid, rid, role: role, groupRole: groupRole) },
@@ -2483,8 +2484,9 @@ public final class ProjectModel: ObservableObject {
 
     /// ★ A face region the lattice CAN consume: a union of WHOLE faces (no cuts, no
     /// parts) — its member faces, each emitted as its own prism under the region's key.
-    /// nil for a cut sector, which is a voxel set the run has no predicate for (PR 331 §6).
+    /// ★ BATCH E (his item 4): a cut sector or a union of pieces is its CLIPPED outlines (LatticeSectorOutline).
     public func latticeRegionMembers(_ rid: RegionID) -> [FaceID]? {
+        if let r = faceRegions.region(rid), !r.cuts.isEmpty || !r.parts.isEmpty { return latticeSectorMembers(rid) }
         guard let mesh = viewerMesh, let r = faceRegions.region(rid),
               r.cuts.isEmpty, r.parts.isEmpty else { return nil }
         let members = FaceRegionGeometry.members(of: r, in: mesh)
