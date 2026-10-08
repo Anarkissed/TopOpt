@@ -426,9 +426,15 @@ extension FlexibleMainStage {
         return k == .lattice || legendKinds.contains(.lattice)
     }
 
-    /// H14 (S1 verification): the Flexible key's drill-in, for #354's `legendDrilledIn`.
+    /// H14 (S1 verification): the Flexible key's drill-in, for #354's `legendDrilledIn` — which is
+    /// the OCTET key's (`showStrutPreview && strutScene != nil`), never mounted on this stage. The
+    /// Flexible key (FlexibleMainLegends, H6) is mounted exactly while the stage owns the page, and
+    /// it hands the mode back (`.groups`) when it goes or when the drilled view is turned off — so it
+    /// is drilled in while the mode is one of its kinds. Then the wall probe (H8), the double tap out
+    /// and #354's drilled-in hides hold here, as they did before #354's gate (they read
+    /// `latticeLegendMode.drilledIn`). An octet colour is the octet key's, under its own gate.
     public func keyDrilledIn(_ project: ProjectModel, _ stage: WorkspaceStage, mode: LatticeLegendMode) -> Bool {
-        false   // RED stub: the fix follows
+        owns(project, stage) && FlexibleReadKind(mode: mode) != nil
     }
 
     /// H8: a wall the probe found while a Flexible legend is drilled in — read at its rest point

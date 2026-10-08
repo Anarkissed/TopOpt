@@ -7581,6 +7581,7 @@ public struct WorkspacePlaceholder: View {
     private var latticeLegendMounted: Bool { showStrutPreview && strutScene != nil }
     private var legendDrilledIn: Bool {
         latticeLegendMounted && !latticeLegendMinimized && latticeLegendMode.drilledIn
+            || flexibleMain.keyDrilledIn(project, stage, mode: latticeLegendMode)   // Flexible (PR #362) H14: the Flexible key is the key on screen there (FlexibleMainStage+Views.swift)
     }
 
     /// ★ The band chips COULD be drawn now: the overlay's own gates (its placement in the body
