@@ -187,6 +187,12 @@ public final class FlexibleStageModel: ObservableObject {
     /// ★ ROUND 3 (item 1.1): the page's exaggeration k, FROZEN while the depth chip is dragged
     /// — the dent, the prism and the chip hold one scale while the finger moves.
     @Published public var frozenExaggeration: Double?
+    /// ★ ROUND 6 (item 3): the page's views — [Prisms] and [Groups] (FlexibleStageViews). Session DISPLAY
+    /// state: never a setting, never the lattice's key, never an action (Exit stays "Exit"); the main page
+    /// reads the same model's.
+    @Published public var views: FlexibleStageViews = []
+    /// Test control only (round 6): a view toggle stored in the settings (the red control of the rule above).
+    var controlViewsInSettings = false
     @Published public private(set) var lastError: String?
     /// The generated lattice (Generate button) and its build state.
     @Published public private(set) var lattice: FlexibleGeneratedLattice?

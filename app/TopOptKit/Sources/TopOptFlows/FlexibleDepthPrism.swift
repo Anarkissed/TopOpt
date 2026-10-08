@@ -245,8 +245,17 @@ enum FlexibleDepthPrism {
     /// The prism the Settings page draws: the SELECTED pressed face's (a Stamp face's on its
     /// stamp's footprint), in the lattice stage's face-prism purple, and ONLY while its chip is
     /// dragged (`frozenExaggeration` set) — at rest the dent reads alone.
+    /// ★ ROUND 6: a prism at rest is FAINT (per layer; its base and floor compose to about twice this), the
+    /// selected one brighter in the Prisms view; dragged, the contact look (nil alphas).
+    static let restFaceAlpha: Float = 0.07
+    static let restEdgeAlpha: Float = 0.45
+    static let viewSelectedFaceAlpha: Float = 0.12
+    static let viewSelectedEdgeAlpha: Float = 0.65
+    /// Test control only (round 6): round 3's rule — the prism only while the chip is dragged.
+    @MainActor static var controlOnlyWhileDragging = false
+
     @MainActor
-    static func renderItems(model: FlexibleStageModel, k: Double) -> [ClearanceRenderItem] {
+    static func renderItems(model: FlexibleStageModel, k: Double, views: FlexibleStageViews = []) -> [ClearanceRenderItem] {
         guard model.frozenExaggeration != nil,
               let r = model.selectedRegion, let f = model.settings.face(r), f.isLoaded,
               let key = model.key(r), let st = model.stacks[key], let g = model.geometry[key], k > 0,

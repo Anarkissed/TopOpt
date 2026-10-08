@@ -225,49 +225,10 @@ final class FlexibleGroupPaletteHostedTests: XCTestCase {
         // the rail: groups 1 and 9 carry their number; 2…8 a plain dot
         let rail = m.squeezeGroups.map { FlexibleGroupNumbers.railNumber($0, in: m.settings) }
         XCTAssertEqual(rail, [1, nil, nil, nil, nil, nil, nil, nil, 9])
-        // the faces: groups 1 and 9 (and only they) carry their number, painted on the heat of each face,
-        // its up the part's up (+Z on this prism) and read from outside
-        let o = try XCTUnwrap(FlexiblePageChannels.overlay(model: m))
-        let base = try XCTUnwrap(FlexiblePageChannels.channels(model: m, overlay: o, xray: true, drawnLattice: nil).tints)
-        var probe = base
-        let lit = FlexibleGroupNumbers.paint(&probe, overlay: o, model: m)
-        XCTAssertGreaterThan(lit, 0, "digits painted")
-        // the PAGES' call — the frames' paint (both pages, every view, every Play-all turn) — paints them
-        var t = base
-        FlexibleGroupFrames.paint(&t, overlay: o, model: m)
-        let (up, fallback) = FlexibleGroupNumbers.upAndFallback(m)
-        XCTAssertGreaterThan(up.z, 0.99, "the prism stands on its bottom: up is +Z")
-        var lines: [String] = []
-        for g in m.squeezeGroups {
-            let r = g.regions[0]
-            let k = try XCTUnwrap(m.key(r)), st = try XCTUnwrap(m.stacks[k])
-            let ax = FlexibleGroupNumbers.axes(st, up: up, fallback: fallback)
-            let cells = FlexibleGroupNumbers.plate(g.number, st, right: ax.right, up: ax.up, squish: m.liveS[k])
-            let upWorld = Double(ax.up.du) * st.xAxis + Double(ax.up.dv) * st.yAxis
-            let rightWorld = Double(ax.right.du) * st.xAxis + Double(ax.right.dv) * st.yAxis
-            let out = -simd_normalize(st.load)
-            XCTAssertGreaterThan(simd_dot(simd_cross(rightWorld, upWorld), out), 0.99, "face \(r): read from outside")
-            if abs(out.z) < 0.1 { XCTAssertGreaterThan(upWorld.z, 0.99, "side face \(r): upright") }
-            XCTAssertNotNil(cells, "face \(r) (\(st.nu) × \(st.nv) columns) has room for its number")
-            // the tints: a numbered group's lit cells wear its colour; an unnumbered group's heat is untouched
-            let start = try XCTUnwrap(o.flatStart[k])
-            let want = FlexibleColours.token(m.groupColour(g), 1)
-            func tint(_ i: Int) -> SIMD4<Float> {
-                let v: Int = (start + i * 6) * 8
-                return SIMD4<Float>(t[v], t[v + 1], t[v + 2], t[v + 3])
-            }
-            let litCells: [Int] = (cells ?? [:]).filter { $0.value }.map { $0.key }
-            let wears: [Bool] = litCells.map { tint($0) == want }
-            if [1, 9].contains(g.number) {
-                XCTAssertFalse(wears.isEmpty); XCTAssertTrue(wears.allSatisfy { $0 }, "Group \(g.number): its digits in its colour")
-            } else {
-                XCTAssertFalse(wears.contains(true), "Group \(g.number) is not numbered")
-            }
-            if [1, 9].contains(g.number) {
-                lines.append("Group \(g.number) face \(r) \(st.nu)×\(st.nv) · up \(ax.up) right \(ax.right) · \(cells?.count ?? 0) plate columns")
-            }
-        }
-        print("FLEX-C5-HOSTED nine groups: shared \(FlexibleGroupNumbers.shared(in: m.settings).sorted()) · rail \(rail) · lit \(lit) · " + lines.joined(separator: " · "))
+        // ★ RE-PINNED (round 6, his img1): the face half — the digits painted on the heat — moved to
+        // FlexibleRound6HostedTests.testPastEightGroupsTheNumberRidesTheWallInTheGroupsView (a disc on the
+        // glass, in the Groups view); the rail half stays here
+        print("FLEX-C5-HOSTED nine groups: shared \(FlexibleGroupNumbers.shared(in: m.settings).sorted()) · rail \(rail)")
         // ★ RED CONTROL: with eight groups nothing is numbered (group 9's face moved into group 8)
         let before = m.settings
         var eight = m.settings
@@ -275,8 +236,7 @@ final class FlexibleGroupPaletteHostedTests: XCTestCase {
         XCTAssertEqual(FlexibleSqueezeGroups.groups(eight).count, 8)
         XCTAssertEqual(FlexibleGroupNumbers.shared(in: eight), [], "control: eight groups, no numbers")
         m.edit({ $0 = eight }, recompute: false)
-        var t8 = try XCTUnwrap(FlexiblePageChannels.channels(model: m, overlay: o, xray: true, drawnLattice: nil).tints)
-        XCTAssertEqual(FlexibleGroupNumbers.paint(&t8, overlay: o, model: m), 0, "control: nothing painted")
+        XCTAssertEqual(m.squeezeGroups.compactMap { FlexibleGroupNumbers.railNumber($0, in: m.settings) }, [], "control: no rail number")
         m.edit({ $0 = before }, recompute: false)
         // the page itself, hosted (the panel's pixels; the discs follow the Metal view's projection)
         // the face card's "Squeeze group" row: nine chips no longer fit beside its words — one menu chip

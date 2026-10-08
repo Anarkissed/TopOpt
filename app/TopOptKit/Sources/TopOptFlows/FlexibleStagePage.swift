@@ -293,12 +293,21 @@ public struct FlexibleStagePage: View {
             ?? FlexibleReading(kind: .dent, value: "—", unit: FlexibleReadKind.dent.nothingHere, fraction: nil, anchor: p)
     }
 
+    /// Test control only (round 6): round 5's group frames painted on the body.
+    @MainActor static var controlRound5Frames = false
+
+    /// The page's tints, composed (lifted out of `refreshChannels` so a test reads EXACTLY the page's).
+    @MainActor static func composeTints(model: FlexibleStageModel, overlay: FlexibleOverlayMesh?) -> FlexiblePageChannels.Channels {
+        var c = FlexiblePageChannels.channels(model: model, overlay: overlay, xray: true, drawnLattice: nil)
+        // ★ ROUND 5 (S1): each pressed face framed in its squeeze group's colour (FlexibleGroupFrames)
+        FlexibleGroupFrames.paint(&c.tints, overlay: overlay, model: model)
+        return c
+    }
+
     /// Per-column colours + the dent (FlexiblePageChannels — the page's one source), then the
     /// player's state and the fix pop-up's rule.
     private func refreshChannels() {
-        var c = FlexiblePageChannels.channels(model: model, overlay: overlay, xray: xray, drawnLattice: nil)
-        // ★ ROUND 5 (S1): each pressed face framed in its squeeze group's colour (FlexibleGroupFrames)
-        FlexibleGroupFrames.paint(&c.tints, overlay: overlay, model: model)
+        var c = Self.composeTints(model: model, overlay: overlay)
         // ★ ROUND 5 (S2): only the SELECTED face's group squishes — its 3D field when current, else
         // its faces' columns (FlexibleSettingsSquish)
         if FlexibleSettingsSquish.overlayEdge(model: model) != overlayEdge { rebuildOverlay(); return }
@@ -865,6 +874,9 @@ struct FlexibleLegend: View {
     /// The tab row's height — the only part of the legend that takes a tap (the padding above
     /// the "TAP TO READ" line, the line, and half the gap under it).
     static let tabHeight: CGFloat = DS.Space.ml + 16
+
+    /// ★ ROUND 6 (item 3): whether the page shows the card (TESTS-FIRST STUB: today's rule — a dent only).
+    static func shows(hasDent: Bool, views: FlexibleStageViews) -> Bool { hasDent }
 
     var body: some View {
         let shown = FlexibleShownValues(model: model, drawnLattice: drawnLattice)

@@ -207,24 +207,8 @@ final class FlexibleDepthPrismTests: XCTestCase {
         XCTAssertGreaterThan(naiveBoundary, perimeter, "control: corners only would wall the T-junctions")
     }
 
-    /// ★ AT REST THE DENT READS ALONE: the prism is drawn only while the chip is dragged.
-    @MainActor
-    func testThePrismIsDrawnOnlyWhileTheChipIsDragged() async throws {
-        var s = FlexibleStageSettings(materialID: "varioshore_tpu")
-        let probe = try FlexibleHisProject.padProject(s)
-        let top = FlexibleHisProject.topFace(try XCTUnwrap(probe.viewerMesh))
-        s.setFace(FlexibleFaceSettings(faceRegionID: top))
-        let m = try await FlexibleHisProject.openedModel(try FlexibleHisProject.padProject(s), test: self)
-        m.selectedRegion = top
-        XCTAssertTrue(FlexibleDepthPrism.renderItems(model: m, k: 4).isEmpty, "at rest: no prism")
-        m.frozenExaggeration = 4
-        XCTAssertEqual(FlexibleDepthPrism.renderItems(model: m, k: 4).count, 1, "dragging: the prism")
-        m.frozenExaggeration = nil
-        // ★ RED CONTROL: the prism itself exists at rest — only the drag rule hides it
-        let key = try XCTUnwrap(m.key(top))
-        XCTAssertNotNil(FlexibleDepthPrism.volume(region: top, stack: try XCTUnwrap(m.stacks[key]),
-                                                  centres: try XCTUnwrap(m.geometry[key]).centres, depthMM: 3, k: 4))
-    }
+    // ★ ROUND 6: testThePrismIsDrawnOnlyWhileTheChipIsDragged is REPLACED (his img3: a selected face shows its
+    // squish at once, faint) by FlexibleRound6HostedTests.testSelectingAPressedFaceShowsItsPrismAndNumberAtOnce.
 
     /// ★ THE FLOOR STAYS INSIDE (the verifier's pad: curves flat at 0.3, deepest 3 mm, the
     /// drawing reaching 0.27 mm): k is capped by k × deepest as well as by the drawing.
@@ -296,7 +280,10 @@ final class FlexibleDepthPrismTests: XCTestCase {
     func testThePageDrawsThePrismAndMountsTheChip() throws {
         let root = FlexibleHisProject.repoRoot.appendingPathComponent("app/TopOptKit/Sources/TopOptFlows")
         let page = try String(contentsOf: root.appendingPathComponent("FlexibleStagePage.swift"), encoding: .utf8)
-        XCTAssertTrue(page.contains("clearanceVolumes: FlexibleDepthPrism.renderItems(model: model"))
+        // ★ RE-PINNED (round 6): the page's ONE clearance list, which draws the prism through renderItems
+        XCTAssertTrue(page.contains("clearanceVolumes: FlexibleStageVolumes.items(model: model"))
+        let volumes = try String(contentsOf: root.appendingPathComponent("FlexibleStageVolumes.swift"), encoding: .utf8)
+        XCTAssertTrue(volumes.contains("FlexibleDepthPrism.renderItems(model: model, k: k, views: model.views)"))
         XCTAssertTrue(page.contains("FlexibleDepthChips("))
     }
 }

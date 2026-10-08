@@ -239,6 +239,8 @@ public final class FlexibleMainStage: ObservableObject {
     /// Test control only (★ the S + M merge): "Play all"'s turns composed WITHOUT the group frames (batch S
     /// framed the composed tints only, and the renderer swaps a turn's own in — the frames vanished).
     var controlTurnsWithoutFrames = false
+    /// Test control only (round 6, item 1): round 5's group frames painted on the main page's model.
+    var controlRound5Frames = false
     /// ★ the gate: another core solve runs (the Stress view's sim, a topology run) — FlexibleStressSolver.busy
     var squishBusy: (() -> Bool)?
     /// The Stress solve waited for a sim (it starts when the sims go idle).
@@ -426,6 +428,10 @@ public final class FlexibleMainStage: ObservableObject {
     public func bodyAlpha(_ project: ProjectModel, on stage: WorkspaceStage) -> Float? {
         owns(project, stage) ? (xray ? FlexibleStagePage.xrayBodyAlpha : 1) : nil
     }
+    /// ★ ROUND 6 (item 3, hook H15): the main page's prisms — [] off the Flexible stage.
+    public func volumes(_ project: ProjectModel, on stage: WorkspaceStage, drilledIn: Bool) -> [ClearanceRenderItem] { [] }
+    /// ★ ROUND 6 (item 3): the main page's [Prisms] — the Prisms view, and the Lattice view (the X-ray) with it.
+    public func togglePrisms() {}
 
     /// The squish player shows only when there is something to squish: a lattice that still
     /// matches the settings, on the visible main page.

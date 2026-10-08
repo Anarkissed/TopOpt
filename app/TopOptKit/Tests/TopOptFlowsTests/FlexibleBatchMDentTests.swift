@@ -211,14 +211,14 @@ final class FlexibleBatchMDentTests: XCTestCase {
             let sim = st.columns.indices.map(col)
             let missing = sim.filter { !$0.isFinite }.count
             // ── M5: continuous ──
-            // ★ MERGE WITH BATCH S: the face's outermost columns are S1's group FRAME (a uniform band in
-            // the group's colour, then a near-black gap — deliberately NOT the heat; D-R5-S1), so the
-            // heat's grading is measured over the heat band; the whole face reads the frame's edge
-            let heatBand = Set(FlexibleGroupFrames.bands(st).enumerated().filter { $0.element == .heat }.map(\.offset))
+            // ★ RE-PINNED (round 6, his img1): the main page wears NO group frame — there is no frame band;
+            // the WHOLE face is the heat, graded edge to edge (the merge with batch S had measured the heat
+            // band inside S1's frame, and pinned the frame's edge as a step)
+            let heatBand = Set(st.columns.indices)
             let a = Self.seamJump(tNow, overlay: overlay, key: key, columns: st.columns.count, only: heatBand)
             let whole = Self.seamJump(tNow, overlay: overlay, key: key, columns: st.columns.count)
-            XCTAssertGreaterThanOrEqual(a.shared, st.columns.count / 2, "\(g): the heat band's shared corners are measured")
-            XCTAssertGreaterThan(whole.jump, 0.05, "\(g): the frame's edge is a step (S1) — the band excluded is the frame")
+            XCTAssertGreaterThanOrEqual(a.shared, st.columns.count / 2, "\(g): the face's shared corners are measured")
+            XCTAssertLessThan(whole.jump, 1e-4, "\(g): no frame's edge — the whole face is graded (round 6)")
             // ── M2: spread out of the stamp (its ring 0–3 mm outside, over under it) ──
             let cov = try XCTUnwrap(m.stampCoverage(face))
             let inside = st.columns.indices.filter { cov[$0] >= 0.5 }
@@ -241,7 +241,7 @@ final class FlexibleBatchMDentTests: XCTestCase {
             let grey = core.filter { !$0.isFinite }.count
             stage.controlColumnHeat = false
             stage.refresh()
-            print(String(format: "FLEX-M MAIN %@ face %d: heat = the sim's dent on %d of %d columns (core's numbers: %d grey 'no number') · step at a shared corner of the heat band %.4f (core's columns %.4f; the whole face with S1's frame %.4f) · ring 0–3 mm %.0f%% of under the stamp (core's %.0f%%) · scale %.2f mm",
+            print(String(format: "FLEX-M MAIN %@ face %d: heat = the sim's dent on %d of %d columns (core's numbers: %d grey 'no number') · step at a shared corner of the heat band %.4f (core's columns %.4f; the whole face, no frame since round 6, %.4f) · ring 0–3 mm %.0f%% of under the stamp (core's %.0f%%) · scale %.2f mm",
                          g, face, st.columns.count - missing, st.columns.count, grey, a.jump, b.jump, whole.jump,
                          100 * mean(sim, ring) / mean(sim, inside), 100 * mean(core, ring) / mean(core, inside), stage.dentMaxMM))
             XCTAssertEqual(missing, 0, "\(g): the sim colours every column of its face")

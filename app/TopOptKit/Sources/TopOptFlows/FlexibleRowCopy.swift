@@ -301,6 +301,9 @@ public enum FlexibleRowCopy {
     public static let stampLengthRow = "Length"
     public static let stampTurnRow = "Turn"
     public static func curvePointRow(axis: String) -> String { "Point on \(axis.uppercased())" }
+    /// ★ ROUND 6 (item 3): the legend's view rows (TESTS-FIRST STUBS).
+    public static func legendPrismsRow(_ k: Int) -> String { "" }
+    public static let legendGroupsRow = ""
     public static let curvePointTitle = "Squish here"
 
     // MARK: More

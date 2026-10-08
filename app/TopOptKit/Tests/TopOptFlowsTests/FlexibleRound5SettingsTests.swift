@@ -199,53 +199,8 @@ final class FlexibleRound5SettingsTests: XCTestCase {
         XCTAssertEqual(m.groupColour(number: 2), DS.Color.accent)
     }
 
-    @MainActor
-    func testEveryPressedFaceIsFramedInItsGroupsColour() async throws {
-        let (_, m) = try await his()
-        m.newGroup(with: 3)   // Face 3 (and its hand) in group 2, orange
-        try await settle(m)
-        let o = try XCTUnwrap(FlexiblePageChannels.overlay(model: m))
-        let c = FlexiblePageChannels.channels(model: m, overlay: o, xray: true, drawnLattice: nil)
-        var t: [Float]? = c.tints
-        FlexibleGroupFrames.paint(&t, overlay: o, model: m)
-        let tints = try XCTUnwrap(t), before = try XCTUnwrap(c.tints)
-        func rgba(_ a: [Float], _ v: Int) -> SIMD4<Float> { SIMD4(a[v * 8], a[v * 8 + 1], a[v * 8 + 2], a[v * 8 + 3]) }
-        var report: [String] = []
-        for g in m.squeezeGroups {
-            let want = FlexibleColours.token(m.groupColour(g), 1)
-            for r in g.regions {
-                let k = try XCTUnwrap(m.key(r)), st = try XCTUnwrap(m.stacks[k]), start = try XCTUnwrap(o.flatStart[k])
-                let bands = FlexibleGroupFrames.bands(st)
-                var frame = 0, gap = 0, heat = 0, heatKept = 0, frameWasHeat = 0
-                for (i, b) in bands.enumerated() {
-                    let v = start + i * 6
-                    switch b {
-                    case .frame:
-                        frame += 1
-                        XCTAssertEqual(rgba(tints, v), want, "\(m.faceName(r)) column \(i): the group colour")
-                        XCTAssertEqual(tints[v * 8 + 5], 1, "opaque")
-                        XCTAssertEqual(tints[v * 8 + 6], 0, "never the ghost")
-                        if rgba(before, v) != want { frameWasHeat += 1 }
-                    case .gap:
-                        gap += 1
-                        XCTAssertEqual(rgba(tints, v), FlexibleGroupFrames.gapColour)
-                    case .heat:
-                        heat += 1
-                        if rgba(tints, v) == rgba(before, v) { heatKept += 1 }
-                    }
-                }
-                report.append("\(m.faceName(r)) (\(FlexibleRowCopy.groupName(g.number))): \(st.nu)×\(st.nv) columns · frame \(frame) · gap \(gap) · heat \(heat) (kept \(heatKept))")
-                XCTAssertGreaterThan(frame, 0); XCTAssertGreaterThan(heat, frame, "the heat keeps the inside")
-                XCTAssertEqual(gap > 0, min(st.nu, st.nv) >= 16, "the dark gap only where the face has room")
-                XCTAssertLessThan(Double(frame + gap), 0.35 * Double(bands.count), "the frame never eats the face's heat")
-                XCTAssertEqual(heatKept, heat, "the inside is the heat map, untouched")
-                // ★ RED CONTROL: the channels alone (round 4) drew the frame's columns in the heat
-                XCTAssertEqual(frameWasHeat, frame, "control: none of these columns wore the group colour before")
-            }
-        }
-        print("FLEX-R5 frames:\n  " + report.joined(separator: "\n  "))
-        XCTAssertEqual(m.squeezeGroups.count, 2)
-    }
+    // ★ ROUND 6: testEveryPressedFaceIsFramedInItsGroupsColour is REPLACED (his item 1: no group colour on the
+    // body; the open group's glass instead) by FlexibleRound6HostedTests.testTheSettingsPageWallsTheOpenGroupOnly.
 
     // MARK: - S6 / S7 deleting a face
 

@@ -64,7 +64,7 @@ public enum FlexiblePageChannels {
     public static func channels(model: FlexibleStageModel, overlay: FlexibleOverlayMesh?, xray: Bool,
                                 drawnLattice: FlexibleGeneratedLattice?, heat: Bool = true,
                                 depthScaleMM: Double? = nil, mapValues: [Float]? = nil,
-                                controlColumnColours: Bool = false) -> Channels {
+                                controlColumnColours: Bool = false, groupColours: Bool = true) -> Channels {
         // part regions: loaded / resting / selected / linked other end — by REGION, so a split
         // sector is tinted on its own side of its cuts (FlexibleRegions).
         // ★ ROUND 4 (D2): no "conflict" tint — two faces on one stack are a pinch (one group) or
