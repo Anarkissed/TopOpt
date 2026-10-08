@@ -1,0 +1,109 @@
+{
+ "_comment": "evidence job, task 2026-09-28-flexible-squish-maths; written by harness/make_evidence.py",
+ "model": "pad_100x100x20.stl",
+ "material": "varioshore_tpu",
+ "mode": "analyze",
+ "resolution": 100,
+ "output": {
+  "report": "report.json",
+  "mesh_format": "stl",
+  "mesh_prefix": "unused"
+ },
+ "loads": {
+  "face_regions": [
+   {
+    "id": 100,
+    "name": "bottom",
+    "add": [
+     0
+    ]
+   },
+   {
+    "id": 101,
+    "name": "top",
+    "add": [
+     1
+    ]
+   },
+   {
+    "id": 102,
+    "name": "front -Y",
+    "add": [
+     2
+    ]
+   },
+   {
+    "id": 103,
+    "name": "right +X",
+    "add": [
+     3
+    ]
+   },
+   {
+    "id": 104,
+    "name": "back +Y",
+    "add": [
+     4
+    ]
+   },
+   {
+    "id": 105,
+    "name": "left -X",
+    "add": [
+     5
+    ]
+   }
+  ]
+ },
+ "flexible": {
+  "material_id": "varioshore_tpu",
+  "nozzle_temp_c": 220,
+  "topology": "auto",
+  "feel": "springy",
+  "beads_per_wall": 1,
+  "min_extrudable_width_mm": 0.42,
+  "faces": [
+   {
+    "face_region_id": 101,
+    "role": "loaded",
+    "weight_n": 294.3,
+    "deepest_squish_mm": 4,
+    "mode": "both",
+    "curve_x": [
+     [
+      0,
+      0.3
+     ],
+     [
+      0.5,
+      1
+     ],
+     [
+      1,
+      0.3
+     ]
+    ],
+    "curve_y": [
+     [
+      0,
+      0.3
+     ],
+     [
+      0.5,
+      1
+     ],
+     [
+      1,
+      0.3
+     ]
+    ],
+    "skin_on": true
+   },
+   {
+    "face_region_id": 100,
+    "role": "resting",
+    "skin_on": true
+   }
+  ]
+ }
+}

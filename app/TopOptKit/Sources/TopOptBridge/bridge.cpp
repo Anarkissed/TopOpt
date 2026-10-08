@@ -4,18 +4,23 @@
 // to BridgeError so nothing throws across the language boundary.
 #include "TopOptBridge.hpp"
 
+#include "topopt/lattice_boundary.hpp"
 #include "topopt/grading.hpp"
 
 #include <algorithm>
 #include <atomic>
 #include <cctype>
+#include <chrono>
 #include <cmath>
+#include <limits>
 #include <cstdio>
 #include <exception>
 #include <functional>
 #include <set>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
+#include <utility>
 #include <vector>
 
 #if defined(__APPLE__)
@@ -24,9 +29,11 @@
 
 #include "topopt/analyze.hpp"
 #include "topopt/build_orientation.hpp"
+#include "topopt/cell_plan.hpp"
 #include "topopt/clearance.hpp"
 #include "topopt/face_overrides.hpp"
 #include "topopt/fea.hpp"
+#include "topopt/lattice_algorithm.hpp"
 #include "topopt/lattice.hpp"
 #include "topopt/lattice_gen.hpp"
 #include "topopt/loadcase.hpp"
@@ -34,6 +41,7 @@
 #include "topopt/job.hpp"
 #include "topopt/materials.hpp"
 #include "topopt/mesh.hpp"
+#include "topopt/organic_lattice.hpp"
 #include "topopt/part.hpp"
 #include "topopt/pipeline.hpp"
 #include "topopt/production.hpp"
@@ -63,6 +71,78 @@ void bridge_log(const std::string& msg) {
   std::fprintf(stderr, "[TopOptBridge] %s\n", msg.c_str());
   std::fflush(stderr);
 #endif
+}
+
+// ── ★★ THE ONE GUARD: NO CORE EXCEPTION EVER CROSSES THE BRIDGE ──────────────────────
+// (maintainer, 2026-10-03.) A C++ exception that reaches Swift traps the process: a
+// saved Simple-cubic project did exactly that once #358 (4764ca7e) made core refuse an
+// unmeasured type (`lattice_cell_bounds` → `lattice_cell_printability_floor_mm` →
+// `lattice_strut_diameter_mm`). So EVERY function this file exports runs its body
+// through `guarded`, and nothing else in this file catches at the boundary:
+//   - a `std::exception` becomes the function's own invalid/error result, carrying
+//     `e.what()` as the reason;
+//   - anything else (an OCCT `Standard_Failure` is NOT a std::exception) becomes the
+//     same result with a generic reason.
+// The reason also lands in `last_refusal()`, thread-local because Swift calls the bridge
+// synchronously on the calling thread, so a function whose result has no reason field
+// still carries core's words: Swift reads them through `bridge_last_refusal()`. A call
+// that returns normally clears it. A catch INSIDE a body that is part of its meaning (a
+// schema probe's refusal IS its answer; "the radius fills the cell" is 1.0; organic's
+// synthesis failing is not fatal to its trace) stays where it is: it is an answer, not
+// a boundary copy.
+std::string& last_refusal() {
+  thread_local std::string why;
+  return why;
+}
+
+template <class Body, class Fail>
+auto guarded(const char* where, Body&& body, Fail&& fail) noexcept
+    -> decltype(body()) {
+  using R = decltype(body());
+  std::string why;
+  try {
+    if constexpr (std::is_void_v<R>) {
+      body();
+      last_refusal().clear();
+      return;
+    } else {
+      R r = body();
+      last_refusal().clear();
+      return r;
+    }
+  } catch (const std::exception& e) {
+    why = e.what();
+  } catch (...) {
+    why = std::string(where) +
+          ": core stopped with an exception that is not a std::exception";
+  }
+  if (why.empty()) why = std::string(where) + ": core refused without a reason";
+  last_refusal() = why;
+  bridge_log(std::string(where) + ": refused: " + why);
+  return fail(why);
+}
+
+// The common shape: an out-param `BridgeError` carries the reason and the result is its
+// type's empty value. Built on `guarded`; not a second guard.
+template <class Body>
+auto guarded_err(const char* where, BridgeError& err, Body&& body) noexcept
+    -> decltype(body()) {
+  using R = decltype(body());
+  return guarded(where, std::forward<Body>(body), [&err](const std::string& why) -> R {
+    err.ok = false;
+    err.message = why;
+    if constexpr (!std::is_void_v<R>) return R{};
+  });
+}
+
+// The other common shape: the result has no reason field, so it is the type's empty
+// value (a sentinel 0, an empty vector) and the reason rides `bridge_last_refusal()`.
+template <class Body>
+auto guarded_empty(const char* where, Body&& body) noexcept -> decltype(body()) {
+  using R = decltype(body());
+  return guarded(where, std::forward<Body>(body), [](const std::string&) -> R {
+    if constexpr (!std::is_void_v<R>) return R{};
+  });
 }
 
 // One-line summary of a voxel grid: dims, spacing, min/max corners (bbox) and
@@ -149,7 +229,16 @@ topopt::TriangleMesh from_imported(const ImportedMesh& mesh) {
                                        mesh.vertices[i + 2]});
   }
   tm.triangles.reserve(mesh.indices.size() / 3);
+  const auto nverts = static_cast<long long>(tm.vertices.size());
   for (std::size_t i = 0; i + 2 < mesh.indices.size(); i += 3) {
+    // ★ An out-of-range corner would make core's writer index past the vertex array:
+    // undefined behaviour, which no guard can catch. Refused here as an exception, so
+    // the exporting function's guard returns it as the reason (round 3 sweep).
+    for (std::size_t k = 0; k < 3; ++k)
+      if (mesh.indices[i + k] < 0 || static_cast<long long>(mesh.indices[i + k]) >= nverts)
+        throw std::invalid_argument(
+            "export: triangle corner " + std::to_string(mesh.indices[i + k]) +
+            " is outside the " + std::to_string(nverts) + " vertices supplied");
     tm.triangles.push_back(
         {mesh.indices[i], mesh.indices[i + 1], mesh.indices[i + 2]});
   }
@@ -635,8 +724,8 @@ topopt::ProductionLoadCase production_loadcase_from_bridge(
 
 std::vector<MaterialInfo> load_materials(const std::string& path,
                                          BridgeError& err) {
-  std::vector<MaterialInfo> out;
-  try {
+  return guarded_err("load_materials", err, [&]() -> std::vector<MaterialInfo> {
+    std::vector<MaterialInfo> out;
     topopt::MaterialLibrary lib = topopt::load_materials_file(path);
     for (const auto& kv : lib) {
       const topopt::Material& m = kv.second;
@@ -644,39 +733,27 @@ std::vector<MaterialInfo> load_materials(const std::string& path,
                                  m.yield_strength_mpa, m.density_g_cm3,
                                  m.z_knockdown, m.poisson, m.family});
     }
-  } catch (const std::exception& e) {
-    err.ok = false;
-    err.message = e.what();
-    out.clear();
-  }
-  return out;
+    return out;
+  });
 }
 
 ImportedMesh import_stl(const std::string& path, BridgeError& err) {
-  try {
+  return guarded_err("import_stl", err, [&]() -> ImportedMesh {
     topopt::StlMesh sm = topopt::read_stl_file(path);
     return to_imported(sm.mesh, nullptr, 0);
-  } catch (const std::exception& e) {
-    err.ok = false;
-    err.message = e.what();
-    return ImportedMesh{};
-  }
+  });
 }
 
 ImportedMesh import_step(const std::string& path, double linear_deflection,
                          BridgeError& err) {
 #ifdef TOPOPT_BRIDGE_HAS_OCCT
-  try {
+  return guarded_err("import_step", err, [&]() -> ImportedMesh {
     topopt::StepTessellation tess;
     if (linear_deflection > 0.0) tess.linear_deflection = linear_deflection;
     topopt::StepModel model = topopt::import_step_file(path, tess);
     return to_imported(model.mesh, &model.triangle_face, model.face_count,
                        &model.faces);
-  } catch (const std::exception& e) {
-    err.ok = false;
-    err.message = e.what();
-    return ImportedMesh{};
-  }
+  });
 #else
   (void)path;
   (void)linear_deflection;
@@ -691,7 +768,7 @@ ImportedMesh import_step(const std::string& path, double linear_deflection,
 
 ImportedMesh import_part(const std::string& path, double linear_deflection,
                          BridgeError& err) {
-  try {
+  return guarded_err("import_part", err, [&]() -> ImportedMesh {
     // Resolve the face-overrides sidecar (handoff 2026-07-24): segment at the
     // user's tuned threshold and append their painted pseudo-faces, so the faces
     // the app draws and picks are EXACTLY the ones a re-import (live tagging, the
@@ -707,16 +784,12 @@ ImportedMesh import_part(const std::string& path, double linear_deflection,
                                    p.model.face_count, &p.model.faces);
     out.pseudo_faces = p.pseudo_faces;
     return out;
-  } catch (const std::exception& e) {
-    err.ok = false;
-    err.message = e.what();
-    return ImportedMesh{};
-  }
+  });
 }
 
 PartDiagnostics inspect_part(const std::string& path, BridgeError& err) {
-  PartDiagnostics d;
-  try {
+  return guarded_err("inspect_part", err, [&]() -> PartDiagnostics {
+    PartDiagnostics d;
     const topopt::PartInspection insp = topopt::inspect_part_file(path);
     d.checked = insp.checked;
     d.acceptable = insp.acceptable;
@@ -749,16 +822,12 @@ PartDiagnostics inspect_part(const std::string& path, BridgeError& err) {
     d.bbox_max[1] = insp.bbox_max.y;
     d.bbox_max[2] = insp.bbox_max.z;
     return d;
-  } catch (const std::exception& e) {
-    err.ok = false;
-    err.message = e.what();
-    return PartDiagnostics{};
-  }
+  });
 }
 
 void write_face_overrides(const std::string& model_path,
                           const FaceOverridesInput& input, BridgeError& err) {
-  try {
+  guarded_err("write_face_overrides", err, [&]() {
     topopt::FaceOverrides ov;
     ov.dihedral_threshold_deg = input.dihedral_deg;
     ov.planar_region_cone_deg = input.cone_deg;
@@ -781,36 +850,25 @@ void write_face_overrides(const std::string& model_path,
       std::remove(path.c_str());  // cleared paint: don't leave a stale sidecar
     else
       topopt::save_face_overrides(path, ov);
-  } catch (const std::exception& e) {
-    err.ok = false;
-    err.message = e.what();
-  }
+  });
 }
 
 void rescale_part(const std::string& in_path, const std::string& out_path,
                   double scale, BridgeError& err) {
-  try {
-    topopt::rescale_part_file(in_path, out_path, scale);
-  } catch (const std::exception& e) {
-    err.ok = false;
-    err.message = e.what();
-  }
+  guarded_err("rescale_part", err,
+              [&]() { topopt::rescale_part_file(in_path, out_path, scale); });
 }
 
 void export_stl(const std::string& path, const ImportedMesh& mesh,
                 BridgeError& err) {
-  try {
-    topopt::write_stl_file(path, from_imported(mesh));
-  } catch (const std::exception& e) {
-    err.ok = false;
-    err.message = e.what();
-  }
+  guarded_err("export_stl", err,
+              [&]() { topopt::write_stl_file(path, from_imported(mesh)); });
 }
 
 VoxelSummary voxelize_mesh(const std::string& path, int resolution,
                            BridgeError& err) {
-  VoxelSummary s;
-  try {
+  return guarded_err("voxelize_mesh", err, [&]() -> VoxelSummary {
+    VoxelSummary s;
     topopt::TriangleMesh mesh = import_any(path);
     topopt::VoxelGrid g = topopt::voxelize(mesh, resolution);
     s.nx = g.nx;
@@ -818,12 +876,8 @@ VoxelSummary voxelize_mesh(const std::string& path, int resolution,
     s.nz = g.nz;
     s.spacing = g.spacing;
     s.solid_voxels = static_cast<int64_t>(g.solid_count());
-  } catch (const std::exception& e) {
-    err.ok = false;
-    err.message = e.what();
-    s = VoxelSummary{};
-  }
-  return s;
+    return s;
+  });
 }
 
 // Handoff 134: no longer OCCT-gated. `import_part_file` serves STEP, STL and
@@ -833,24 +887,20 @@ VoxelSummary voxelize_mesh(const std::string& path, int resolution,
 // message, raised from import_part_file and surfaced through `err`.
 int64_t tag_step_face(const std::string& step_path, int face_id,
                       bool as_fixture, int resolution, BridgeError& err) {
-  try {
+  return guarded_err("tag_step_face", err, [&]() -> int64_t {
     topopt::StepModel model = topopt::import_part_file_resolved(step_path);
     topopt::VoxelGrid g = topopt::voxelize(model.mesh, resolution);
     const topopt::VoxelTag tag =
         as_fixture ? topopt::VoxelTag::Fixture : topopt::VoxelTag::Load;
     return static_cast<int64_t>(topopt::tag_step_face(g, model, face_id, tag));
-  } catch (const std::exception& e) {
-    err.ok = false;
-    err.message = e.what();
-    return 0;
-  }
+  });
 }
 
 // Handoff 134: no longer OCCT-gated — same reasoning as tag_step_face above.
 int64_t mask_step_face(const std::string& step_path, int face_id,
                        int mask_value, int depth_voxels, int resolution,
                        BridgeError& err) {
-  try {
+  return guarded_err("mask_step_face", err, [&]() -> int64_t {
     if (mask_value < 0 || mask_value > 2)
       throw std::invalid_argument(
           "mask_value must be 0 (Active), 1 (FrozenSolid), or 2 (FrozenVoid)");
@@ -860,21 +910,17 @@ int64_t mask_step_face(const std::string& step_path, int face_id,
     const auto mv = static_cast<topopt::MaskValue>(mask_value);
     return static_cast<int64_t>(
         topopt::mask_step_face(g, model, face_id, mv, depth_voxels, mask));
-  } catch (const std::exception& e) {
-    err.ok = false;
-    err.message = e.what();
-    return 0;
-  }
+  });
 }
 
 bool face_slab_preview(const std::string& step_path, FaceSlabPreview& io,
                        int resolution, BridgeError& err) {
-  const std::vector<int32_t>& face_ids = io.face_ids;
-  const std::vector<double>& depths_mm = io.depths_mm;
-  std::vector<int64_t>& voxels_out = io.voxels;
-  voxels_out.clear();
-  io.spacing_mm = 0.0;
-  try {
+  return guarded("face_slab_preview", [&]() -> bool {
+    const std::vector<int32_t>& face_ids = io.face_ids;
+    const std::vector<double>& depths_mm = io.depths_mm;
+    std::vector<int64_t>& voxels_out = io.voxels;
+    voxels_out.clear();
+    io.spacing_mm = 0.0;
     if (face_ids.size() != depths_mm.size())
       throw std::invalid_argument(
           "face_slab_preview: depths_mm must be parallel to face_ids");
@@ -894,12 +940,12 @@ bool face_slab_preview(const std::string& step_path, FaceSlabPreview& io,
           g, model, fid, topopt::MaskValue::FrozenSolid, depth_vox, one)));
     }
     return true;
-  } catch (const std::exception& e) {
+  }, [&](const std::string& why) -> bool {
     err.ok = false;
-    err.message = e.what();
-    voxels_out.clear();
+    err.message = why;
+    io.voxels.clear();
     return false;
-  }
+  });
 }
 
 OptimizeResult run_minimize_plastic(const std::string& stl_path,
@@ -910,8 +956,8 @@ OptimizeResult run_minimize_plastic(const std::string& stl_path,
                                     void* ctx, const bool* cancel_flag,
                                     VariantFn variant_fn, void* variant_ctx,
                                     BridgeError& err) {
-  OptimizeResult result;
-  try {
+  return guarded_err("run_minimize_plastic", err, [&]() -> OptimizeResult {
+    OptimizeResult result;
     bridge_log("selfweight: ENTER res=" + std::to_string(resolution) +
                " path='" + stl_path + "'");
     // Part -> voxel grid.
@@ -1038,13 +1084,8 @@ OptimizeResult run_minimize_plastic(const std::string& stl_path,
     bridge_log("selfweight: minimize_plastic returned variants=" +
                std::to_string(result.variants.size()) +
                " accepted=" + std::to_string(result.accepted_count));
-  } catch (const std::exception& e) {
-    err.ok = false;
-    err.message = e.what();
-    bridge_log(std::string("selfweight: THREW: ") + e.what());
-    return OptimizeResult{};
-  }
-  return result;
+    return result;
+  });
 }
 
 // ── ★ A STANDALONE CERTIFICATION MUST NOT DEPEND ON WHAT SOLVED BEFORE IT ──
@@ -1090,9 +1131,9 @@ AnalyzeResult analyze_selfweight(const std::string& model_path,
                                  const std::string& materials_path,
                                  const std::string& rules_path, int resolution,
                                  double margin_stop, BridgeError& err) {
-  isolate_standalone_certification();
-  AnalyzeResult result;
-  try {
+  return guarded_err("analyze_selfweight", err, [&]() -> AnalyzeResult {
+    isolate_standalone_certification();
+    AnalyzeResult result;
     bridge_log("analyze: ENTER res=" + std::to_string(resolution) + " model='" +
                model_path + "' mesh='" + analyze_mesh_path + "'");
     // Model -> grid; the minimum-x boundary slab is the mount (SAME clamp as
@@ -1218,19 +1259,20 @@ AnalyzeResult analyze_selfweight(const std::string& model_path,
     result.voxel_volume_mm3 = design_grid.voxel_volume();
     result.von_mises_field.assign(a.von_mises_field.begin(),
                                   a.von_mises_field.end());
+    // ★★★ AND THE TENSOR — the input the ORGANIC tracer eigen-decomposes. Core has
+    // computed it all along (`FixedDesignAnalysis::stress_tensor_field`); the analyze
+    // path simply never carried it out, which is the last hop that kept organic off the
+    // lattice STAGE. Six per voxel, Voigt [xx,yy,zz,xy,yz,zx], TRUE shear, MPa.
+    result.stress_tensor_field.assign(a.stress_tensor_field.begin(),
+                                      a.stress_tensor_field.end());
     result.displacement_field.assign(a.displacement_field.begin(),
                                      a.displacement_field.end());
     bridge_log("analyze: verdict=" +
                std::string(a.accepted ? "ACCEPTED" : "REJECTED") + " margin=" +
                std::to_string(a.margin.worst_case) + " minfeat=" +
                std::to_string(a.v3.min_feature_violations));
-  } catch (const std::exception& e) {
-    err.ok = false;
-    err.message = e.what();
-    bridge_log(std::string("analyze: THREW: ") + e.what());
-    return AnalyzeResult{};
-  }
-  return result;
+    return result;
+  });
 }
 
 AnalyzeResult smooth_and_recertify_selfweight(
@@ -1239,8 +1281,8 @@ AnalyzeResult smooth_and_recertify_selfweight(
     const std::string& materials_path, const std::string& rules_path,
     int resolution, double margin_stop, double strength, bool enforce_min_feature,
     const BridgeFreezeRegions& freeze, BridgeError& err) {
-  isolate_standalone_certification();
-  try {
+  return guarded_err("smooth_and_recertify_selfweight", err, [&]() -> AnalyzeResult {
+    isolate_standalone_certification();
     bridge_log("smooth+recertify: ENTER strength=" + std::to_string(strength) +
                " mesh='" + input_mesh_path + "'");
     // The reference grid the smoother's min-feature constraint voxelizes against —
@@ -1331,12 +1373,7 @@ AnalyzeResult smooth_and_recertify_selfweight(
                std::to_string(s.frozen_vertices) + " drift=" +
                std::to_string(s.volume_drift_fraction));
     return result;
-  } catch (const std::exception& e) {
-    err.ok = false;
-    err.message = e.what();
-    bridge_log(std::string("smooth+recertify: THREW: ") + e.what());
-    return AnalyzeResult{};
-  }
+  });
 }
 
 namespace {
@@ -1427,9 +1464,9 @@ AnalyzeResult analyze_loadcase(const std::string& model_path,
                                const std::string& materials_path,
                                const std::string& rules_path, int resolution,
                                const BridgeLoadCase& load_case, BridgeError& err) {
-  isolate_standalone_certification();
-  AnalyzeResult result;
-  try {
+  return guarded_err("analyze_loadcase", err, [&]() -> AnalyzeResult {
+    isolate_standalone_certification();
+    AnalyzeResult result;
     bridge_log("analyze_loadcase: ENTER res=" + std::to_string(resolution) +
                " model='" + model_path + "' mesh='" + analyze_mesh_path + "'");
     topopt::StepModel model = topopt::import_part_file_resolved(model_path);
@@ -1543,6 +1580,12 @@ AnalyzeResult analyze_loadcase(const std::string& model_path,
     result.voxel_volume_mm3 = design_grid.voxel_volume();
     result.von_mises_field.assign(a.von_mises_field.begin(),
                                   a.von_mises_field.end());
+    // ★★★ AND THE TENSOR — the input the ORGANIC tracer eigen-decomposes. Core has
+    // computed it all along (`FixedDesignAnalysis::stress_tensor_field`); the analyze
+    // path simply never carried it out, which is the last hop that kept organic off the
+    // lattice STAGE. Six per voxel, Voigt [xx,yy,zz,xy,yz,zx], TRUE shear, MPa.
+    result.stress_tensor_field.assign(a.stress_tensor_field.begin(),
+                                      a.stress_tensor_field.end());
     result.displacement_field.assign(a.displacement_field.begin(),
                                      a.displacement_field.end());
     bridge_log("analyze_loadcase: verdict=" +
@@ -1550,13 +1593,8 @@ AnalyzeResult analyze_loadcase(const std::string& model_path,
                                             : (a.accepted ? "ACCEPTED" : "REJECTED")) +
                " margin=" + std::to_string(a.margin.worst_case) + " required=" +
                std::to_string(setup.options.margin_stop));
-  } catch (const std::exception& e) {
-    err.ok = false;
-    err.message = e.what();
-    bridge_log(std::string("analyze_loadcase: THREW: ") + e.what());
-    return AnalyzeResult{};
-  }
-  return result;
+    return result;
+  });
 }
 
 // THE LIVE BRUSH PREVIEW — see the header for what it deliberately leaves out
@@ -1567,69 +1605,64 @@ AnalyzeResult analyze_loadcase(const std::string& model_path,
 // after that is this function. Written this way on purpose: two copies of the
 // smoothing call would be two places for the preview the page draws and the
 // preview a test takes to drift apart.
+// Throws through to the exported caller's guard (no catch of its own).
 static BridgeSmoothPreview smooth_brush_preview_impl(
     const topopt::TriangleMesh& input, double strength,
     const BridgeVertexWeights& brush, double import_seconds, BridgeError& err) {
   BridgeSmoothPreview out;
-  try {
-    const auto t0 = std::chrono::steady_clock::now();
-    out.seconds_import = import_seconds;
-    if (!brush.weight.empty() && brush.weight.size() != input.vertices.size()) {
-      err.ok = false;
-      err.message =
-          "smooth preview: the brush has " +
-          std::to_string(brush.weight.size()) + " weights but the mesh has " +
-          std::to_string(input.vertices.size()) +
-          " vertices — refusing rather than weighting the wrong vertices";
-      return BridgeSmoothPreview{};
-    }
-    topopt::SmoothConstraints c;
-    // No freeze REGIONS and no grid: the caller has already resolved the freeze
-    // mask (smooth_freeze_mask) and hands frozen vertices in as weight 0, which
-    // the smoother copies verbatim on the identical code path. Re-resolving the
-    // predicates here would mean importing the model and voxelizing it on every
-    // stroke, which is exactly the cost this seam exists to avoid.
-    c.enforce_min_feature = false;
-    c.min_feature_grid = nullptr;
-    c.vertex_weight = brush.weight;
-    const topopt::SmoothResult sr = topopt::constrained_taubin_smooth(
-        input, topopt::taubin_params_for_strength(strength), c);
-
-    out.total_vertices = static_cast<int64_t>(sr.mesh.vertices.size());
-    out.vertices.reserve(sr.mesh.vertices.size() * 3);
-    for (std::size_t v = 0; v < sr.mesh.vertices.size(); ++v) {
-      const topopt::Vec3& p = sr.mesh.vertices[v];
-      out.vertices.push_back(static_cast<float>(p.x));
-      out.vertices.push_back(static_cast<float>(p.y));
-      out.vertices.push_back(static_cast<float>(p.z));
-      if (v < input.vertices.size()) {
-        const topopt::Vec3& q = input.vertices[v];
-        const double dx = p.x - q.x, dy = p.y - q.y, dz = p.z - q.z;
-        const double d = std::sqrt(dx * dx + dy * dy + dz * dz);
-        if (d > 0.0) ++out.moved_vertices;
-        if (d > out.max_displacement_mm) out.max_displacement_mm = d;
-      }
-    }
-    out.indices.reserve(sr.mesh.triangles.size() * 3);
-    for (const auto& t : sr.mesh.triangles) {
-      out.indices.push_back(static_cast<int32_t>(t[0]));
-      out.indices.push_back(static_cast<int32_t>(t[1]));
-      out.indices.push_back(static_cast<int32_t>(t[2]));
-    }
-    out.seconds_smooth = std::chrono::duration<double>(
-                             std::chrono::steady_clock::now() - t0).count();
-    out.seconds = out.seconds_import + out.seconds_smooth;
-    bridge_log("smooth preview: " + std::to_string(out.total_vertices) +
-               " vertices, moved " + std::to_string(out.moved_vertices) +
-               ", max " + std::to_string(out.max_displacement_mm) + " mm, " +
-               std::to_string(out.seconds) + " s (import " +
-               std::to_string(out.seconds_import) + " s, smooth " +
-               std::to_string(out.seconds_smooth) + " s)");
-  } catch (const std::exception& e) {
+  const auto t0 = std::chrono::steady_clock::now();
+  out.seconds_import = import_seconds;
+  if (!brush.weight.empty() && brush.weight.size() != input.vertices.size()) {
     err.ok = false;
-    err.message = e.what();
+    err.message =
+        "smooth preview: the brush has " +
+        std::to_string(brush.weight.size()) + " weights but the mesh has " +
+        std::to_string(input.vertices.size()) +
+        " vertices — refusing rather than weighting the wrong vertices";
     return BridgeSmoothPreview{};
   }
+  topopt::SmoothConstraints c;
+  // No freeze REGIONS and no grid: the caller has already resolved the freeze
+  // mask (smooth_freeze_mask) and hands frozen vertices in as weight 0, which
+  // the smoother copies verbatim on the identical code path. Re-resolving the
+  // predicates here would mean importing the model and voxelizing it on every
+  // stroke, which is exactly the cost this seam exists to avoid.
+  c.enforce_min_feature = false;
+  c.min_feature_grid = nullptr;
+  c.vertex_weight = brush.weight;
+  const topopt::SmoothResult sr = topopt::constrained_taubin_smooth(
+      input, topopt::taubin_params_for_strength(strength), c);
+
+  out.total_vertices = static_cast<int64_t>(sr.mesh.vertices.size());
+  out.vertices.reserve(sr.mesh.vertices.size() * 3);
+  for (std::size_t v = 0; v < sr.mesh.vertices.size(); ++v) {
+    const topopt::Vec3& p = sr.mesh.vertices[v];
+    out.vertices.push_back(static_cast<float>(p.x));
+    out.vertices.push_back(static_cast<float>(p.y));
+    out.vertices.push_back(static_cast<float>(p.z));
+    if (v < input.vertices.size()) {
+      const topopt::Vec3& q = input.vertices[v];
+      const double dx = p.x - q.x, dy = p.y - q.y, dz = p.z - q.z;
+      const double d = std::sqrt(dx * dx + dy * dy + dz * dz);
+      if (d > 0.0) ++out.moved_vertices;
+      if (d > out.max_displacement_mm) out.max_displacement_mm = d;
+    }
+  }
+  out.indices.reserve(sr.mesh.triangles.size() * 3);
+  for (const auto& t : sr.mesh.triangles) {
+    out.indices.push_back(static_cast<int32_t>(t[0]));
+    out.indices.push_back(static_cast<int32_t>(t[1]));
+    out.indices.push_back(static_cast<int32_t>(t[2]));
+  }
+  out.seconds_smooth = std::chrono::duration<double>(
+                           std::chrono::steady_clock::now() - t0).count();
+  out.seconds = out.seconds_import + out.seconds_smooth;
+  bridge_log("smooth preview: " + std::to_string(out.total_vertices) +
+             " vertices, moved " + std::to_string(out.moved_vertices) +
+             ", max " + std::to_string(out.max_displacement_mm) + " mm, " +
+             std::to_string(out.seconds) + " s (import " +
+             std::to_string(out.seconds_import) + " s, smooth " +
+             std::to_string(out.seconds_smooth) + " s)");
   return out;
 }
 
@@ -1637,20 +1670,14 @@ BridgeSmoothPreview smooth_brush_preview(const std::string& input_mesh_path,
                                          double strength,
                                          const BridgeVertexWeights& brush,
                                          BridgeError& err) {
-  topopt::TriangleMesh input;
-  double import_seconds = 0.0;
-  try {
+  return guarded_err("smooth_brush_preview", err, [&]() -> BridgeSmoothPreview {
     const auto t0 = std::chrono::steady_clock::now();
-    input = import_any(input_mesh_path);
-    import_seconds =
+    const topopt::TriangleMesh input = import_any(input_mesh_path);
+    const double import_seconds =
         std::chrono::duration<double>(std::chrono::steady_clock::now() - t0)
             .count();
-  } catch (const std::exception& e) {
-    err.ok = false;
-    err.message = e.what();
-    return BridgeSmoothPreview{};
-  }
-  return smooth_brush_preview_impl(input, strength, brush, import_seconds, err);
+    return smooth_brush_preview_impl(input, strength, brush, import_seconds, err);
+  });
 }
 
 // ★ THE IN-MEMORY DOOR (task 2026-08-08, S1b). No file is opened.
@@ -1658,6 +1685,7 @@ BridgeSmoothPreview smooth_brush_preview_mesh(const BridgeMeshGeometry& mesh,
                                               double strength,
                                               const BridgeVertexWeights& brush,
                                               BridgeError& err) {
+  return guarded_err("smooth_brush_preview_mesh", err, [&]() -> BridgeSmoothPreview {
   const std::vector<float>& vertices = mesh.vertices;
   const std::vector<int32_t>& indices = mesh.indices;
   if (vertices.size() % 3 != 0 || indices.size() % 3 != 0) {
@@ -1694,6 +1722,7 @@ BridgeSmoothPreview smooth_brush_preview_mesh(const BridgeMeshGeometry& mesh,
   }
   // import_seconds is 0 BY CONSTRUCTION here — nothing was read.
   return smooth_brush_preview_impl(input, strength, brush, 0.0, err);
+  });
 }
 
 BridgeFreezeMask smooth_freeze_mask(const std::string& model_path,
@@ -1702,8 +1731,8 @@ BridgeFreezeMask smooth_freeze_mask(const std::string& model_path,
                                     const BridgeLoadCase& load_case,
                                     const BridgeFreezeRegions& freeze,
                                     BridgeError& err) {
-  BridgeFreezeMask out;
-  try {
+  return guarded_err("smooth_freeze_mask", err, [&]() -> BridgeFreezeMask {
+    BridgeFreezeMask out;
     topopt::StepModel model = topopt::import_part_file_resolved(model_path);
     const topopt::ProductionLoadCase lc =
         production_loadcase_from_bridge(load_case, model);
@@ -1728,13 +1757,8 @@ BridgeFreezeMask smooth_freeze_mask(const std::string& model_path,
     bridge_log("smooth freeze mask: " + std::to_string(out.frozen_count) + "/" +
                std::to_string(out.total_vertices) + " frozen, tol=" +
                std::to_string(out.freeze_tol_mm));
-  } catch (const std::exception& e) {
-    err.ok = false;
-    err.message = e.what();
-    bridge_log(std::string("smooth freeze mask: THREW: ") + e.what());
-    return BridgeFreezeMask{};
-  }
-  return out;
+    return out;
+  });
 }
 
 AnalyzeResult smooth_and_recertify_loadcase(
@@ -1744,13 +1768,15 @@ AnalyzeResult smooth_and_recertify_loadcase(
     int resolution, double strength, bool enforce_min_feature,
     const BridgeLoadCase& load_case, const BridgeFreezeRegions& freeze,
     BridgeError& err) {
-  isolate_standalone_certification();
-  // The uniform seam IS the brush seam with no brush — one implementation, so the
-  // two can never diverge (and PR 200's callers stay byte-identical).
-  return smooth_brush_and_recertify_loadcase(
-      model_path, input_mesh_path, smoothed_out_path, material_name,
-      materials_path, rules_path, resolution, strength, enforce_min_feature,
-      load_case, freeze, BridgeVertexWeights{}, err);
+  return guarded_err("smooth_and_recertify_loadcase", err, [&]() -> AnalyzeResult {
+    isolate_standalone_certification();
+    // The uniform seam IS the brush seam with no brush — one implementation, so the
+    // two can never diverge (and PR 200's callers stay byte-identical).
+    return smooth_brush_and_recertify_loadcase(
+        model_path, input_mesh_path, smoothed_out_path, material_name,
+        materials_path, rules_path, resolution, strength, enforce_min_feature,
+        load_case, freeze, BridgeVertexWeights{}, err);
+  });
 }
 
 AnalyzeResult smooth_brush_and_recertify_loadcase(
@@ -1760,8 +1786,8 @@ AnalyzeResult smooth_brush_and_recertify_loadcase(
     int resolution, double strength, bool enforce_min_feature,
     const BridgeLoadCase& load_case, const BridgeFreezeRegions& freeze,
     const BridgeVertexWeights& brush, BridgeError& err) {
-  isolate_standalone_certification();
-  try {
+  return guarded_err("smooth_brush_and_recertify_loadcase", err, [&]() -> AnalyzeResult {
+    isolate_standalone_certification();
     bridge_log("smooth+recertify(loadcase): ENTER strength=" +
                std::to_string(strength) + " mesh='" + input_mesh_path +
                "' brush=" + std::to_string(brush.weight.size()));
@@ -1858,12 +1884,7 @@ AnalyzeResult smooth_brush_and_recertify_loadcase(
                std::to_string(result.margin_worst_case) + " accepted=" +
                std::to_string(result.accepted ? 1 : 0));
     return result;
-  } catch (const std::exception& e) {
-    err.ok = false;
-    err.message = e.what();
-    bridge_log(std::string("smooth+recertify(loadcase): THREW: ") + e.what());
-    return AnalyzeResult{};
-  }
+  });
 }
 
 LatticeJobResult run_lattice_job(const std::string& job_path,
@@ -1872,8 +1893,8 @@ LatticeJobResult run_lattice_job(const std::string& job_path,
                                  const std::string& materials_path,
                                  const std::string& rules_path,
                                  BridgeError& err) {
-  LatticeJobResult out;
-  try {
+  return guarded_err("run_lattice_job", err, [&]() -> LatticeJobResult {
+    LatticeJobResult out;
     bridge_log("lattice_job: ENTER job='" + job_path + "' out='" + out_dir + "'");
     // ★ CORE'S OWN PARSER, ON THE SAME DOCUMENT THE LAN PATH SENDS. Nothing is
     // re-authored here: the anchors, the loads, the clearances, the protections,
@@ -1910,12 +1931,7 @@ LatticeJobResult run_lattice_job(const std::string& job_path,
                std::to_string(out.mesh_paths.size()) + " solves=" +
                std::to_string(out.analysis_solves));
     return out;
-  } catch (const std::exception& e) {
-    err.ok = false;
-    err.message = e.what();
-    bridge_log(std::string("lattice_job: THREW: ") + e.what());
-    return LatticeJobResult{};
-  }
+  });
 }
 
 OptimizeResult run_minimize_plastic_loadcase(
@@ -1924,13 +1940,13 @@ OptimizeResult run_minimize_plastic_loadcase(
     int resolution, const BridgeLoadCase& load_case, ProgressFn progress,
     void* ctx, const bool* cancel_flag, VariantFn variant_fn, void* variant_ctx,
     BridgeError& err) {
-  // Handoff 134: no longer OCCT-gated. `build_production_loadcase` never used an
-  // OCCT symbol — it needed tag/mask_step_face, which now live in the core's
-  // always-built src/io/face_tag.cpp — so the whole load-case pipeline runs for
-  // an STL/3MF part on a slice without OCCT. `step_path` keeps its name because
-  // it is the wire contract with the Swift side; it is a PART path now.
-  OptimizeResult result;
-  try {
+  return guarded_err("run_minimize_plastic_loadcase", err, [&]() -> OptimizeResult {
+    // Handoff 134: no longer OCCT-gated. `build_production_loadcase` never used an
+    // OCCT symbol — it needed tag/mask_step_face, which now live in the core's
+    // always-built src/io/face_tag.cpp — so the whole load-case pipeline runs for
+    // an STL/3MF part on a slice without OCCT. `step_path` keeps its name because
+    // it is the wire contract with the Swift side; it is a PART path now.
+    OptimizeResult result;
     bridge_log("loadcase: ENTER res=" + std::to_string(resolution) +
                " anchors=" + std::to_string(load_case.anchor_face_ids.size()) +
                " load_groups=" + std::to_string(load_case.load_group_sizes.size()) +
@@ -2086,138 +2102,1156 @@ OptimizeResult run_minimize_plastic_loadcase(
     bridge_log("loadcase: minimize_plastic returned variants=" +
                std::to_string(result.variants.size()) +
                " accepted=" + std::to_string(result.accepted_count));
-  } catch (const std::exception& e) {
-    err.ok = false;
-    err.message = e.what();
-    bridge_log(std::string("loadcase: THREW: ") + e.what());
-    return OptimizeResult{};
-  }
-  return result;
+    return result;
+  });
 }
 
 SmokeResult bridge_smoke(const std::string& materials_path,
                          const std::string& mesh_path) {
-  SmokeResult s;
-  try {
+  return guarded("bridge_smoke", [&]() -> SmokeResult {
+    SmokeResult s;
     topopt::MaterialLibrary lib = topopt::load_materials_file(materials_path);
     topopt::TriangleMesh mesh = import_any(mesh_path);
     s.material_count = static_cast<int32_t>(lib.size());
     s.triangle_count = static_cast<int32_t>(mesh.triangle_count());
     s.watertight = topopt::check_watertight(mesh).watertight;
     s.ok = true;
-  } catch (const std::exception& e) {
+    return s;
+  }, [](const std::string& why) -> SmokeResult {
+    SmokeResult s;
     s.ok = false;
-    s.message = e.what();
-  }
-  return s;
+    s.message = why;
+    return s;
+  });
 }
 
-std::string core_version() { return std::string(topopt::version()); }
+std::string core_version() {
+  return guarded_empty("core_version",
+                       [&]() -> std::string { return std::string(topopt::version()); });
+}
+
+std::string bridge_last_refusal() { return last_refusal(); }
+
+std::string bridge_guard_self_test(int kind) {
+  // Exercises the one guard's three exits for its own test (BridgeGuardTests): 0 = a
+  // normal return, 1 = a std::exception, 2 = an exception that is not one. Returns the
+  // body's answer, or "" with the reason in bridge_last_refusal().
+  return guarded_empty("bridge_guard_self_test", [&]() -> std::string {
+    if (kind == 1) throw std::runtime_error("self-test: a std::exception");
+    if (kind == 2) throw 42;
+    return "answered";
+  });
+}
+
+void state_core_build_identity(const std::string& fingerprint,
+                               const std::string& build_time, BridgeError& err) {
+  guarded_err("state_core_build_identity", err, [&]() {
+    topopt::set_build_identity(fingerprint, build_time);
+  });
+}
+
+std::vector<std::string> core_build_identity() {
+  return guarded_empty("core_build_identity", [&]() -> std::vector<std::string> {
+    const topopt::RunObservability& id = topopt::build_identity();
+    return {id.fingerprint, id.build_time};
+  });
+}
 
 // --- lattice certification limits (handoff 2026-07-29-lattice-mode-ui) --------
 namespace {
-// Map a job-schema topology name to the core certification enum. ONLY names the
-// core library actually covers map — everything else is "not certifiable", which
-// is exactly what the UI needs to grey a preview-only topology. Keyed off core's
-// own lattice_topology_name so it can never drift from the enum.
-bool lattice_topology_from_name(const std::string& name,
-                                topopt::LatticeTopology& out) {
-  // Map a name to the enum ONLY if core carries a validated (certifiable) tensor for
-  // it — the tetragonal variants (bccz/fccz/reentrant) are generate-but-not-certify, so
-  // they never map here and the UI greys them (handoff 2026-07-29-tensor-library-nine).
-  for (topopt::LatticeTopology t :
-       {topopt::LatticeTopology::Octet, topopt::LatticeTopology::SimpleCubic,
-        topopt::LatticeTopology::Bcc, topopt::LatticeTopology::Fcc,
-        topopt::LatticeTopology::Diamond, topopt::LatticeTopology::Kelvin,
-        topopt::LatticeTopology::Rhombic, topopt::LatticeTopology::Bccz,
-        topopt::LatticeTopology::Fccz, topopt::LatticeTopology::Reentrant}) {
-    if (topopt::lattice_topology_certifiable(t) &&
-        name == topopt::lattice_topology_name(t)) {
-      out = t;
-      return true;
-    }
-  }
-  return false;
+// ★★ THE TOPOLOGY A PER-TYPE FUNCTION MAY ANSWER FOR (maintainer, 2026-10-03, with
+// the one guard). Core's own resolver and core's own readiness, never a list here:
+//   - an id core does not know → core's `lattice_topology_from_id` throws its own
+//     "unknown lattice topology" reason;
+//   - a type core knows but does not call LIVE (in both its generatable and its
+//     certifiable sets) → refused with core's readiness words. Its numbers are not
+//     its own yet: #358's R1 refuses the diameter law, the density-from-strut law and
+//     the aesthetic ceiling per type, and the cells-per-member floors still answer
+//     with octet's placeholder for every type (lattice.cpp `(void)topo`), which is
+//     exactly how a borrowed number would reach a Kelvin preview.
+// Called INSIDE a guarded body, so the throw becomes the function's invalid result.
+topopt::LatticeTopology live_topology(const std::string& id) {
+  const topopt::LatticeTopology t = topopt::lattice_topology_from_id(id);
+  // Core's two sets are fixed for the life of the process; read them once (some per-type
+  // functions are called per voxel).
+  static const std::vector<std::string> generatable = topopt::lattice_gen_topology_names();
+  static const std::vector<std::string> certifiable =
+      topopt::lattice_certifiable_topology_names();
+  const topopt::LatticeTypeReadiness r =
+      topopt::lattice_type_readiness(id, generatable, certifiable);
+  if (r != topopt::LatticeTypeReadiness::Live)
+    throw std::invalid_argument(
+        "\"" + id + "\": " + topopt::lattice_type_readiness_plain(r) + " (core: " +
+        topopt::lattice_type_readiness_name(r) + ")");
+  return t;
 }
 }  // namespace
 
-LatticeLimits lattice_limits(const std::string& topology) {
-  LatticeLimits lim;
-  topopt::LatticeTopology topo;
-  if (!lattice_topology_from_name(topology, topo)) {
-    // certifiable stays false, band stays zero — the UI greys this topology.
-    return lim;
+std::vector<double> lattice_member_thickness_mm(int nx, int ny, int nz, double spacing,
+                                                const std::uint8_t* solid,
+                                                std::size_t solid_count,
+                                                int cap_radius_voxels) {
+  return guarded_empty("lattice_member_thickness_mm", [&]() -> std::vector<double> {
+  const std::size_t want =
+      static_cast<std::size_t>(nx) * static_cast<std::size_t>(ny) *
+      static_cast<std::size_t>(nz);
+  if (nx <= 0 || ny <= 0 || nz <= 0) return {};
+  if (!(spacing > 0.0) || cap_radius_voxels <= 0) return {};
+  if (solid == nullptr || solid_count != want) return {};
+
+  topopt::VoxelGrid grid;
+  grid.nx = nx; grid.ny = ny; grid.nz = nz;
+  grid.spacing = spacing;
+  grid.origin = topopt::Vec3{0.0, 0.0, 0.0};   // thickness is translation-invariant
+  grid.tags.resize(want, topopt::VoxelTag::Empty);
+  // The opening is driven by a DENSITY field thresholded at `iso`, not by the tags —
+  // so the occupancy is handed over as 1/0 and cut at 0.5.
+  std::vector<double> density(want, 0.0);
+  for (std::size_t i = 0; i < want; ++i) {
+    const bool s = solid[i] != 0;
+    grid.tags[i] = s ? topopt::VoxelTag::Interior : topopt::VoxelTag::Empty;
+    density[i] = s ? 1.0 : 0.0;
   }
-  lim.certifiable = true;
-  lim.rho_min = topopt::lattice_rho_min(topo);
-  lim.rho_max = topopt::lattice_rho_max(topo);
-  // Forwarded from core's own scale-separation floor. (The earlier stub returned
-  // 0.0 claiming core exposed no accessor; topopt::lattice_cells_per_member_min
-  // exists — the stale claim is fixed, the number is still never invented here.)
-  lim.min_cells_per_member = topopt::lattice_cells_per_member_min(topo);
-  return lim;
+
+  // core refusing → the guard's empty vector; the caller says it has no number
+  return topopt::local_member_thickness_mm(grid, density, 0.5, cap_radius_voxels);
+  });
+}
+
+
+
+// ★★★ ORGANIC'S OWN (SPACING, DENSITY, STRUT) LAW — FORWARDED, NEVER RE-DERIVED.
+//
+// ★ ORGANIC IS NOT AN OCTET AND ITS STRUT IS NOT AN OCTET'S. `t = 2 d sqrt(rho/3pi)`
+// against the octet's measured table: the two disagree by whatever they disagree by, and
+// the preview was reporting the OCTET diameter for an organic lattice — a number
+// describing geometry that is not on screen. Same class as the strut law the app
+// re-derived once and got 1.4-1.7x wrong.
+//
+// ★ AND PRINTABILITY IS THE FLOOR ON THE SEPARATION, NOT THE CEILING. `t` grows WITH
+// `d` at fixed rho (a wider spacing means more material per curve), so the bead puts a
+// LOWER bound on the separation: below `d_print` the curve is thinner than one
+// extrusion and the run cannot lay it.
+double organic_strut_diameter_mm(double spacing_mm, double rho) {
+  return guarded_empty("organic_strut_diameter_mm", [&]() -> double {
+    if (!(spacing_mm > 0.0) || !(rho > 0.0)) return 0.0;
+    return topopt::organic_strut_diameter_for(spacing_mm, rho);
+  });
+}
+
+double organic_spacing_for_mm(double rho, double strut_diameter_mm) {
+  return guarded_empty("organic_spacing_for_mm", [&]() -> double {
+    if (!(rho > 0.0) || !(strut_diameter_mm > 0.0)) return 0.0;
+    return topopt::organic_spacing_for(rho, strut_diameter_mm);
+  });
+}
+
+// The smallest separation whose strut still reaches one extrusion at `rho`. Inverting
+// `t = 2 d sqrt(rho/3pi)` at `t = min_extrudable_width_mm`.
+double organic_min_printable_spacing_mm(double rho, double min_extrudable_width_mm) {
+  return guarded_empty("organic_min_printable_spacing_mm", [&]() -> double {
+    if (!(rho > 0.0) || !(min_extrudable_width_mm > 0.0)) return 0.0;
+    return topopt::organic_spacing_for(rho, min_extrudable_width_mm);
+  });
+}
+
+// Core's own DEFAULT bead for a traced lattice — already max(t, the stated extrusion
+// width), and NOT the nozzle: it puts the densest lattice in the band exactly on the
+// resolution floor, which is the one that actually binds on a real part.
+double organic_default_strut_diameter_mm(double grid_spacing_mm,
+                                         double resolution_floor_voxels, double rho_max,
+                                         double min_extrudable_width_mm) {
+  return guarded_empty("organic_default_strut_diameter_mm", [&]() -> double {
+    return topopt::organic_default_strut_diameter_mm(
+        grid_spacing_mm, resolution_floor_voxels, rho_max, min_extrudable_width_mm);
+  });
+}
+
+// ★★★ THE CENTRELINE FIELD (2026-09-04, "topology / thickness split"). The preview
+// field used to be the SURFACE distance (centreline distance minus the strut radius),
+// so every thickness change re-baked — and, because the picks hashed the strut width,
+// re-TRACED. Now two channels are baked once per topology: the distance to the nearest
+// centreline, and the SURFACE distance (min over spans of centreline − radius). At the
+// baked thickness the march reads the surface channel — exact even where radii vary,
+// which "nearest centreline minus its radius" is not (measured 2026-09-04: 366 voxels
+// off on a three-radius fixture). Under a LIVE override r′ the march reads
+// centreline − r′, exact because every strut then has the same radius. The centreline
+// channel is clamped at `reach` = band + the largest radius and the surface channel at
+// `band`: outside a span's footprint both are lower bounds, never a false hit.
+static void stamp_centreline_span(std::vector<double>& field, std::vector<double>& surface,
+                                  int fnx, int fny, int fnz, double fspacing,
+                                  double fox, double foy, double foz,
+                                  const topopt::Vec3& a, const topopt::Vec3& b,
+                                  double r, double reach) {
+  int i0 = static_cast<int>(std::floor((std::min(a.x, b.x) - reach - fox) / fspacing));
+  int i1 = static_cast<int>(std::ceil((std::max(a.x, b.x) + reach - fox) / fspacing));
+  int j0 = static_cast<int>(std::floor((std::min(a.y, b.y) - reach - foy) / fspacing));
+  int j1 = static_cast<int>(std::ceil((std::max(a.y, b.y) + reach - foy) / fspacing));
+  int k0 = static_cast<int>(std::floor((std::min(a.z, b.z) - reach - foz) / fspacing));
+  int k1 = static_cast<int>(std::ceil((std::max(a.z, b.z) + reach - foz) / fspacing));
+  i0 = std::max(i0, 0); j0 = std::max(j0, 0); k0 = std::max(k0, 0);
+  i1 = std::min(i1, fnx - 1); j1 = std::min(j1, fny - 1); k1 = std::min(k1, fnz - 1);
+  const double bax = b.x - a.x, bay = b.y - a.y, baz = b.z - a.z;
+  const double bb = bax * bax + bay * bay + baz * baz;
+  for (int k = k0; k <= k1; ++k) {
+    const double pz = foz + k * fspacing;
+    for (int j = j0; j <= j1; ++j) {
+      const double py = foy + j * fspacing;
+      const std::size_t row = (static_cast<std::size_t>(k) * fny + j) * fnx;
+      for (int i = i0; i <= i1; ++i) {
+        const double px = fox + i * fspacing;
+        const double pax = px - a.x, pay = py - a.y, paz = pz - a.z;
+        double h = bb > 1e-12 ? (pax * bax + pay * bay + paz * baz) / bb : 0.0;
+        h = h < 0.0 ? 0.0 : (h > 1.0 ? 1.0 : h);
+        const double dx = pax - bax * h, dy = pay - bay * h, dz = paz - baz * h;
+        const double d = std::sqrt(dx * dx + dy * dy + dz * dz);
+        double& slot = field[row + i];
+        if (d < slot) slot = d;
+        double& srf = surface[row + i];
+        if (d - r < srf) srf = d - r;
+      }
+    }
+  }
+}
+
+
+// ★ BAKE A SPAN LIST ALONE — for a cached variant (a beam-lattice 3MF) or a run's
+// emitted spans: no trace, no emission, the same two channels. Layout: [0] 1 = ok,
+// [1] span count, [4] field cell count, [8] reach (mm), [9] band (mm), [16 ..] the
+// centreline distance field, then the SURFACE distance field (both fn doubles).
+std::vector<double> organic_spans_field(const double* spans7, std::size_t span_count,
+                                        int fnx, int fny, int fnz, double fspacing,
+                                        double fox, double foy, double foz, double band_mm) {
+  return guarded("organic_spans_field", [&]() -> std::vector<double> {
+  std::vector<double> out(16, 0.0);
+  if (fnx <= 0 || fny <= 0 || fnz <= 0 || !(fspacing > 0.0) || !(band_mm > 0.0)) return out;
+  const std::size_t fn = static_cast<std::size_t>(fnx) * fny * fnz;
+  double rmax = 0.0;
+  for (std::size_t i = 0; i < span_count; ++i) rmax = std::max(rmax, spans7[7 * i + 6]);
+  const double reach = band_mm + rmax;
+  std::vector<double> field(fn, reach), surface(fn, band_mm);
+  std::size_t stamped = 0;
+  for (std::size_t i = 0; i < span_count; ++i) {
+    const double* q = spans7 + 7 * i;
+    if (!(q[6] > 0.0)) continue;
+    stamp_centreline_span(field, surface, fnx, fny, fnz, fspacing, fox, foy, foz,
+                          topopt::Vec3{q[0], q[1], q[2]}, topopt::Vec3{q[3], q[4], q[5]},
+                          q[6], reach);
+    ++stamped;
+  }
+  out[0] = 1.0; out[1] = static_cast<double>(stamped); out[4] = static_cast<double>(fn); out[8] = reach; out[9] = band_mm;
+  out.insert(out.end(), field.begin(), field.end());
+  out.insert(out.end(), surface.begin(), surface.end());
+  return out;
+  }, [](const std::string&) { return std::vector<double>(16, 0.0); });   // [0] = 0: not baked
+}
+
+// ★★ THE RUN'S CALL, VERBATIM (maintainer, 2026-09-29: "pass core the same tensor the
+// run uses, and take the dead regions from core's report … Preview = run by
+// construction"). run_job.cpp `stress_tensor_for_organic`:
+//     synthesize_focal_stress(grid, candidate, voxel_region_id, cfg, 0.02, out,
+//                             kOrganicSyntheticDeadFloorMPa);
+// The fraction is the run's literal and the absolute floor is CORE'S OWN constant,
+// passed as `dead_floor`. The bridge used to fold an app-side floor into the fraction
+// (`max(fraction, mpa / peak)`), and `(0.005 / peak) · peak` lands one ulp UNDER 0.005
+// for about 3 % of peaks — so a wall at exactly the floor was dead in the run and alive
+// in the preview. Every synthesis in this file goes through here.
+// (OrganicDeadWallParityTests pins this line against run_job.cpp.)
+static topopt::SyntheticStressReport synthesize_as_the_run(
+    const topopt::VoxelGrid& grid, const std::vector<char>& cand, const std::vector<int>& vr,
+    const std::vector<topopt::SyntheticStressRegion>& cfg, std::vector<double>& stress) {
+  return topopt::synthesize_focal_stress(grid, cand, vr, cfg, 0.02, stress, topopt::kOrganicSyntheticDeadFloorMPa);
+}
+
+// Rows of 4 doubles [region_id, face_id, foci, soft_mm] → core's per-region config.
+static std::vector<topopt::SyntheticStressRegion> synthetic_regions_from_rows(
+    const double* synth, std::size_t synth_count) {
+  std::vector<topopt::SyntheticStressRegion> cfg;
+  for (std::size_t k = 0; k + 3 < synth_count; k += 4) {
+    topopt::SyntheticStressRegion r;
+    r.region_id = static_cast<int>(synth[k]);
+    r.face_id = static_cast<int>(synth[k + 1]);
+    r.foci = static_cast<int>(synth[k + 2]);
+    r.soft_mm = synth[k + 3];
+    cfg.push_back(r);
+  }
+  return cfg;
+}
+
+double organic_synthetic_dead_floor_mpa() {
+  return guarded_empty("organic_synthetic_dead_floor_mpa",
+                       [&]() -> double { return topopt::kOrganicSyntheticDeadFloorMPa; });
+}
+
+// ★ CORE'S DEAD-WALL VERDICT, BEFORE THE TRACE (ruling C, 2026-09-29). The preview
+// grades a dead wall at the window's middle BEFORE it traces, so it needs core's
+// verdict first; this is the same call the trace makes (`synthesize_as_the_run`) on
+// the same candidates, ids and tensor, returning only the report. Layout:
+//   [0] ran (1/0)  [1] regions  [2] voxels in regions  [3] fully synthetic
+//   [4] blended  [5] dead threshold (MPa)  [6] peak von Mises  [7] dead floor bound
+//   [8] R = row count, then R rows of 9:
+//       region_id, face_id, foci, soft_mm, voxels, fully_synthetic, blended,
+//       p99_von_mises, whole_region
+std::vector<double> organic_synthetic_report(
+    int nx, int ny, int nz, double spacing, double ox, double oy, double oz,
+    const std::uint8_t* candidate, std::size_t candidate_count,
+    const double* tensor, std::size_t tensor_count,
+    const int* region_id, std::size_t region_id_count,
+    const double* synth, std::size_t synth_count) {
+  return guarded("organic_synthetic_report", [&]() -> std::vector<double> {
+  const std::size_t n = static_cast<std::size_t>(nx) * static_cast<std::size_t>(ny) *
+                        static_cast<std::size_t>(nz);
+  std::vector<double> out(9, 0.0);
+  if (nx <= 0 || ny <= 0 || nz <= 0 || !(spacing > 0.0)) return out;
+  if (candidate == nullptr || candidate_count != n) return out;
+  if (tensor == nullptr || tensor_count != 6 * n) return out;
+  if (region_id == nullptr || region_id_count != n || synth == nullptr || synth_count < 4) return out;
+  topopt::VoxelGrid grid;
+  grid.nx = nx; grid.ny = ny; grid.nz = nz;
+  grid.spacing = spacing;
+  grid.origin = topopt::Vec3{ox, oy, oz};
+  grid.tags.assign(n, topopt::VoxelTag::Empty);   // voxel_count() is tags.size()
+  std::vector<char> cand(n, 0);
+  for (std::size_t i = 0; i < n; ++i) {
+    cand[i] = candidate[i] != 0 ? 1 : 0;
+    if (cand[i]) grid.tags[i] = topopt::VoxelTag::Interior;
+  }
+  std::vector<int> vr(region_id, region_id + n);
+  std::vector<double> stress(tensor, tensor + 6 * n);
+  // core refusing → the guard's 9-double header with [0] = 0 ("did not run")
+  const topopt::SyntheticStressReport rep =
+      synthesize_as_the_run(grid, cand, vr, synthetic_regions_from_rows(synth, synth_count), stress);
+  out[0] = 1.0;
+  out[1] = static_cast<double>(rep.regions);
+  out[2] = static_cast<double>(rep.voxels_in_regions);
+  out[3] = static_cast<double>(rep.voxels_fully_synthetic);
+  out[4] = static_cast<double>(rep.voxels_blended);
+  out[5] = rep.dead_threshold;
+  out[6] = rep.peak_von_mises;
+  out[7] = rep.dead_floor_bound ? 1.0 : 0.0;
+  out[8] = static_cast<double>(rep.per_region.size());
+  for (const topopt::SyntheticStressRegionReport& r : rep.per_region)
+    out.insert(out.end(),
+               {static_cast<double>(r.region_id), static_cast<double>(r.face_id),
+                static_cast<double>(r.foci), r.soft_mm, static_cast<double>(r.voxels),
+                static_cast<double>(r.fully_synthetic), static_cast<double>(r.blended),
+                r.p99_von_mises, r.whole_region ? 1.0 : 0.0});
+  return out;
+  }, [](const std::string&) { return std::vector<double>(9, 0.0); });
+}
+
+// ★★★ THE ORGANIC LATTICE, AS THE PREVIEW NEEDS IT (task 2026-08-22).
+//
+// ★ WHY THE PREVIEW CAN HAVE THIS AT ALL. The standing note said the strut preview
+// could draw only DOUBLED, organic having "no cells at all, only traced curves". The
+// gate was never the curves — it was the INPUT: `trace_organic_lattice` wants the full
+// per-voxel stress TENSOR (6 components, Voigt, MPa), and the preview only ever held
+// the von Mises SCALAR. But the tensor already crosses this bridge for the load-flow
+// overlay (`OptimizeVariant::stress_tensor_field`), so nothing new has to be solved or
+// exported — it only has to be handed to the tracer.
+//
+// ★ CURVES OUT, NOT GEOMETRY. `generate_organic_lattice` sweeps solids and welds them;
+// that is for the exporter. A preview wants CENTRELINES and radii, which the tracer
+// already produced — every polyline segment and every connector, as capsules. The part
+// and region clip is applied by the renderer's own field, exactly as it is for the
+// octet march, so no clip is duplicated here.
+//
+// ★ ONE FLAT ARRAY OUT, header then payload — a POD struct does not survive this
+// boundary and `std::vector` INPUTS do not either (see `lattice_member_thickness_mm`).
+//
+//   [0]  1 = traced, 0 = refused (bad sizes / core threw)
+//   [1]  span count            [2]  curve count        [3]  connector count
+//   [4]  FIELD cell count      [5]  min spacing used   [6]  max spacing used
+//   [7]  degenerate fraction   [8]  band (mm)          [9]  design-grid voxel count n
+//   [10]  traced segment count (curves' segments + connectors)
+//   ★ THE COUNTERS (reviewer, 2026-09-04: "dump these for the cube run" — the grower's
+//   own counters, `OrganicGenStats.growth_*`, and the tracer's stop counters,
+//   `OrganicReport.stop_*`; a preview that shows a shape must also say WHY it stopped):
+//   [11] growth_seeds        [12] growth_curves       [13] growth_steps
+//   [14] growth_blocked      [15] growth_clamped      [16] growth_branches
+//   [17] growth_branch_refused [18] growth_joins      [19] growth_join_refused_span
+//   [20] growth_tip_budget_hit (0/1)   [21..31] on the TRACED report:
+//   [21] stop_left_region    [22] stop_hit_d_test     [23] stop_no_direction
+//   [24] stop_step_budget    [25] stop_turned_too_far [26] stop_self_revisit
+//   [27] seeds_offered       [28] seeds_traced        [29] seeds_too_close
+//   [30] curves_too_short    [31] step_budget_hits
+//   ★ THE LENGTH CENSUS of the EMISSION the preview bakes (OrganicGenStats.census_*;
+//   the same stages the run's receipt names): [32] grown/traced input length,
+//   [33..44] census_len_mm[emitted, node_merge, base_cut, support_prune,
+//   stranded_drop, ground_tie, branch_support, dangling, stranded_drop_2, fill_mat,
+//   finish, written] (−1 = the pass did not run), [45] written components,
+//   [46] 1 = emission ran, [47] RETIRED — NaN, never read (it carried the overhang
+//   fillet's arched-span count; core #358 removed the fillet stage, so the number is
+//   ABSENT, not zero)
+//   ★ [59] 1 = the SYNTHESISED von Mises (n doubles) follows the surface field, before
+//   the spans — what the tracer actually saw, so the stress map can paint it.
+//   ★ THE PHASE CLOCK (2026-09-06: his part sat 12 min 26 s at "Rebuilding the
+//   lattice" and only a `sample` of the process could say where; now the header
+//   says): [56] trace/grow seconds, [57] emission seconds (node merge, base cut,
+//   support raster and arches, ties, finish — the run's own passes), [58] bake
+//   seconds (the capsule stamp into the two fields). Wall clock, this thread.
+//   [48 ..]                    the CENTRELINE distance field, [4] doubles (mm, ≥ 0,
+//                              clamped at [8] = reach = band + largest radius)
+//   [48 + field ..]            per-voxel relative density on the DESIGN grid, n doubles
+//   [48 + field + n ..]        the SURFACE distance field, [4] doubles (min over spans of
+//                              centreline − radius, clamped at the band)
+//   then                       the emitted spans, 7 doubles each (a, b, r)
+std::vector<double> organic_preview_field(
+    int nx, int ny, int nz, double spacing, double ox, double oy, double oz,
+    const std::uint8_t* candidate, std::size_t candidate_count,
+    const double* tensor, std::size_t tensor_count,
+    const double* spacing_mm, std::size_t spacing_count,
+    double min_extrudable_width_mm,
+    double build_x, double build_y, double build_z,
+    double overhang_angle_deg, double rho_min, double rho_max,
+    // ★ THE USER'S OTHER ORGANIC PICKS (maintainer, 2026-09-03: the sample re-traces
+    // with every setting): an explicit strut diameter (0 ⇒ core derives it from the
+    // density band), and GROWN with its layer height (grow == 0 ⇒ traced). Both go to
+    // the same production functions the run uses — trace_organic_lattice /
+    // grow_organic_lattice — nothing preview-only.
+    double strut_diameter_mm, int grow, double layer_height_mm,
+    // ★ WHETHER A CURVE END THAT LEFT THE REGION IS AN ANCHOR — run_job's rule
+    // (`op.anchor_at_region_boundary = shell_is_written`, `outer_finish != "skin"`):
+    // on a BARE lattice there is no shell to land on, the end is not an anchor, and
+    // the dangling-end trim cuts it back to its last connector. A preview that
+    // assumed anchors drew a crisper face than the bare run builds.
+    int anchor_at_boundary,
+    // ★★★ THE TIES (his walk, 2026-09-07: "There are no horizontal struts whatsoever …
+    // none of these vertical struts are connected … That means half the algorithm isn't
+    // running"). He was exactly right. `OrganicParams::transfer_ties` DEFAULTS TO FALSE;
+    // run_job sets it from the job (`op.transfer_ties = jg.organic_transfer_ties`, and
+    // the app's default is ON) and this preview never set it at all — so every grown
+    // picture the app has ever drawn was pillars with nothing across them, while the run
+    // built the cross-members. `tie_swirl` rode along for the same reason.
+    int transfer_ties, double tie_swirl,
+    // ★★★ THE PER-VOXEL BEAD (`op.strut_diameter_field = &bead` in run_job). The run
+    // computes a strut diameter for EVERY candidate from the mass coupling at that
+    // voxel's (spacing, density), floored at the stated minimum extrudable width; the
+    // preview passed only the scalar, so it drew ONE thickness everywhere while the
+    // file varies. Null, or the wrong length, ⇒ the scalar, as core documents.
+    const double* bead_mm, std::size_t bead_count,
+    // ★ 1 = bake what the FILE contains (the emission's post-pass spans: node merge,
+    // base cut, support arches, ties); 0 = bake the TRACED/GROWN curves themselves,
+    // before any repair — the "show without repairs" preview (maintainer,
+    // 2026-09-05). The census still names how many spans the repairs would arch.
+    int emit_repairs,
+    // ★ SYNTHETIC STRESS ON UNLOADED WALLS — core's own function (2026-09-06). See the
+    // header. region_id per voxel (0 = none), synth rows of 4. The dead test takes NO
+    // numbers from the caller: `synthesize_as_the_run` passes the run's own (below).
+    const int* region_id, std::size_t region_id_count,
+    const double* synth, std::size_t synth_count,
+    double seed_ratio, double test_ratio, double min_length_ratio,
+    // The field to bake the traced capsules into: its own grid, which is the REGION's
+    // bbox rather than the part's, so the voxel can be a fraction of the design grid's.
+    int fnx, int fny, int fnz, double fspacing,
+    double fox, double foy, double foz, double band_mm) {
+  return guarded("organic_preview_field", [&]() -> std::vector<double> {
+  const std::size_t n = static_cast<std::size_t>(nx) * static_cast<std::size_t>(ny) *
+                        static_cast<std::size_t>(nz);
+  // ★ 64-double header (was 48): [48..55] the synthetic-stress report, then
+  // out[55] rows of 7 per region BEFORE the field.
+  std::vector<double> out(64, 0.0);
+  if (nx <= 0 || ny <= 0 || nz <= 0 || !(spacing > 0.0)) return out;
+  if (candidate == nullptr || candidate_count != n) return out;
+  if (tensor == nullptr || tensor_count != 6 * n) return out;
+  if (spacing_mm == nullptr || spacing_count != n) return out;
+  if (!(min_extrudable_width_mm > 0.0)) return out;   // §2c: printability is user input
+
+  topopt::VoxelGrid grid;
+  grid.nx = nx; grid.ny = ny; grid.nz = nz;
+  grid.spacing = spacing;
+  grid.origin = topopt::Vec3{ox, oy, oz};
+  grid.tags.assign(n, topopt::VoxelTag::Empty);
+
+  std::vector<char> cand(n, 0);
+  std::vector<double> sep(n, 0.0);
+  bool any = false;
+  for (std::size_t i = 0; i < n; ++i) {
+    // ★ A CANDIDATE NEEDS A SEPARATION. Core throws on a non-positive spacing anywhere
+    // on the candidate set, so a voxel the caller marked but gave no spacing for is
+    // dropped here rather than turned into an exception the UI cannot act on.
+    const bool c = candidate[i] != 0 && spacing_mm[i] > 0.0;
+    cand[i] = c ? 1 : 0;
+    sep[i] = c ? spacing_mm[i] : 0.0;
+    grid.tags[i] = c ? topopt::VoxelTag::Interior : topopt::VoxelTag::Empty;
+    any = any || c;
+  }
+  if (!any) return out;
+
+  std::vector<double> stress(tensor, tensor + 6 * n);
+
+  // ★ SYNTHETIC STRESS ON UNLOADED WALLS — CORE'S OWN FUNCTION, called exactly as the
+  // run calls it (`synthesize_as_the_run`), on the same per-region config the job
+  // carries and on the tensor as given. The app injects nothing and zeroes nothing.
+  topopt::SyntheticStressReport srep;
+  bool synth_ran = false;
+  if (region_id != nullptr && region_id_count == n && synth != nullptr && synth_count >= 4) {
+    std::vector<int> vr(region_id, region_id + n);
+    const std::vector<topopt::SyntheticStressRegion> cfg = synthetic_regions_from_rows(synth, synth_count);
+    try {
+      srep = synthesize_as_the_run(grid, cand, vr, cfg, stress);
+      synth_ran = true;
+    } catch (...) {
+      synth_ran = false;
+    }
+  }
+  std::vector<double> synth_rows;
+  if (synth_ran) {
+    for (const topopt::SyntheticStressRegionReport& r : srep.per_region) {
+      synth_rows.insert(synth_rows.end(),
+                        {static_cast<double>(r.region_id), static_cast<double>(r.face_id),
+                         static_cast<double>(r.foci), r.soft_mm, static_cast<double>(r.voxels),
+                         static_cast<double>(r.fully_synthetic), static_cast<double>(r.blended)});
+    }
+  }
+
+  topopt::OrganicParams p;
+  p.build_dir = topopt::Vec3{build_x, build_y, build_z};
+  p.min_extrudable_width_mm = min_extrudable_width_mm;
+  p.overhang_angle_deg = overhang_angle_deg;
+  p.rho_min = rho_min;
+  p.rho_max = rho_max;
+  p.strut_diameter_mm = strut_diameter_mm > 0.0 ? strut_diameter_mm : 0.0;
+  // ★ A STATED WIDTH IS NOT CALIBRATED (core #358: `op.bead_is_stated =
+  // jg.organic_strut_width_mm > 0`, run_job.cpp). The caller passes the stated width
+  // here and 0 when none was stated, so this is the run's own test. Without it the run
+  // shipped radius = stated/2 while the preview still scaled every radius by the
+  // union calibration's k.
+  p.bead_is_stated = strut_diameter_mm > 0.0;
+  // ★ The run defers only under `organic_calibrate_on_shipped`, which the app never
+  // writes (core's default is false): `op.defer_bead_calibration =
+  // jg.organic_calibrate_on_shipped && !bead_is_stated`.
+  p.defer_bead_calibration = false;
+  p.layer_hint_mm = (grow != 0 && layer_height_mm > 0.0) ? layer_height_mm : 0.0;
+  p.anchor_at_region_boundary = anchor_at_boundary != 0;
+  p.transfer_ties = transfer_ties != 0;
+  // ★ the seeding boost — only what the caller states; core's defaults otherwise
+  if (seed_ratio > 0.0) p.seed_ratio = seed_ratio;
+  if (test_ratio > 0.0) p.test_ratio = test_ratio;
+  if (min_length_ratio > 0.0) p.min_length_ratio = min_length_ratio;
+  p.tie_swirl = tie_swirl;
+  // ★ AND THE RUN'S OWN DENSITY FLOOR: `op.rho_min = max(band_rho_min,
+  // kOrganicVdiDensityFloor)` (run_job.cpp). Passing the band raw let the preview grade
+  // below a density the run will not build.
+  p.rho_min = std::max(p.rho_min, topopt::kOrganicVdiDensityFloor);
+  // ★ the run's per-voxel bead, when the caller computed one (see above). The vector
+  // must outlive the trace, so it is declared here and never reallocated.
+  std::vector<double> bead;
+  if (bead_mm != nullptr && bead_count == n) {
+    bead.assign(bead_mm, bead_mm + n);
+    p.strut_diameter_field = &bead;
+  }
+
+  topopt::OrganicLattice lat;
+  topopt::OrganicGenStats gstats;   // the grower's own counters (run_job: `&oo.growth`)
+  topopt::OrganicGenStats emit_stats;  // the emission's census (what the file is built from)
+  bool emit_ran = false;
+  using phase_clock = std::chrono::steady_clock;
+  auto phase_seconds = [](phase_clock::time_point t0) {
+    return std::chrono::duration<double>(phase_clock::now() - t0).count();
+  };
+  double trace_seconds = 0.0, emit_seconds = 0.0, bake_seconds = 0.0;
+  const phase_clock::time_point trace_t0 = phase_clock::now();
+  // ★ THE SAME BRANCH THE RUN TAKES (run_job.cpp: `oo.lat = jg.organic_growth ?
+  // grow_organic_lattice(...) : trace_organic_lattice(...)`). Core refusing the trace →
+  // the guard's zero header ([0] = 0): the caller says so rather than drawing something.
+  lat = (grow != 0 && layer_height_mm > 0.0)
+            ? topopt::grow_organic_lattice(grid, cand, stress, sep, nullptr, p, &gstats)
+            : topopt::trace_organic_lattice(grid, cand, stress, sep, nullptr, p);
+  trace_seconds = phase_seconds(trace_t0);
+
+  // ── ★★★ THE CAPSULES, BAKED TO A DISTANCE FIELD ─────────────────────────────
+  //
+  // ★ WHY A FIELD AND NOT THE SPANS THEMSELVES. The renderer already sphere-traces
+  // volume textures (the part SDF, the region SDF) and clips against them; a strut
+  // field drops straight into that machinery as one more `max()` term. The
+  // alternative — shipping ~100k centreline segments to the GPU with a uniform-grid
+  // index and marching them in world space — is a second renderer for a picture the
+  // existing one can already draw.
+  //
+  // ★ AND WHY THE BAKE IS HERE RATHER THAN IN SWIFT. It is a SCATTER: every span
+  // stamps its own bounding box. On his part that is ~10^8 distance evaluations, which
+  // is a second of C++ and a minute of Swift. Nothing about it is rendering policy —
+  // it is the distance to a union of capsules.
+  //
+  // ★ THE FIELD IS CLAMPED AT `band_mm`, WHICH IS SAFE IN THE ONE DIRECTION THAT
+  // MATTERS. A clamped value is an UNDER-estimate of the true distance, so a sphere
+  // trace against it takes a shorter step and can never overshoot a strut. It only
+  // costs steps in empty space — and inside a region the curve separation is a few mm,
+  // so almost every point is within the band anyway.
+  const std::size_t fn = static_cast<std::size_t>(fnx) * static_cast<std::size_t>(fny) *
+                         static_cast<std::size_t>(fnz);
+  std::vector<double> field, surface_field;
+  std::size_t span_count = 0;
+  double reach_all = band_mm;
+  // Function scope: the FIELD is optional (a caller may want only the spans) but the
+  // span list is returned either way.
+  std::vector<topopt::OrganicSpan> emitted;
+  if (fnx > 0 && fny > 0 && fnz > 0 && fspacing > 0.0 && band_mm > 0.0 && fn > 0) {
+    auto stamp = [&](const topopt::Vec3& a, const topopt::Vec3& b, double r) {
+      ++span_count;
+      stamp_centreline_span(field, surface_field, fnx, fny, fnz, fspacing, fox, foy, foz,
+                            a, b, r, reach_all);
+    };
+    struct NullSink : topopt::TriangleSink {
+      void add_triangle(const topopt::Vec3&, const topopt::Vec3&,
+                        const topopt::Vec3&) override {}
+    } sink;
+    // ★ THE LAYER HEIGHT THE MACHINE WILL USE (run_job.cpp: `organic.lat.layer_height_mm
+    // = job.loads.layer_height_mm`, set on BOTH paths before emission). Without it the
+    // base trim (`trim_below_base && layer_height_mm > 0`) and the mid-air-start raster
+    // are SKIPPED, and the preview keeps material the file cuts (measured 2026-09-04).
+    lat.layer_height_mm = layer_height_mm > 0.0 ? layer_height_mm : 0.0;
+    // ★ THE BOUNDARY THE PASSES READ (run_job.cpp `lattice_boundary_for`: a voxel base
+    // at iso 0.5 with a 2·cell window, plus the shell where one is written). Without
+    // it the emission's breach checks (`boundary->signed_distance(c) < rmin`) and the
+    // span clip never ran in the preview, and the support pass laid legs the file
+    // cannot contain — measured 2026-09-04: the sample's support stage ADDED 70 % where
+    // core's own run on the cube CUT 42 %. The region's candidate set IS the base here
+    // (the sample's box; a part's declared region); a written shell has no preview
+    // object yet, so a bare job is what this mirrors.
+    topopt::LatticeBoundary boundary;
+    std::vector<double> boundary_density(cand.size(), 0.0);
+    for (std::size_t i = 0; i < cand.size(); ++i) boundary_density[i] = cand[i] ? 1.0 : 0.0;
+    double sep_hi = 0.0;
+    for (std::size_t i = 0; i < sep.size(); ++i)
+      if (cand[i] && sep[i] > sep_hi) sep_hi = sep[i];
+    boundary.set_voxel_base(&grid, &boundary_density, 0.5, 2.0 * (sep_hi > 0.0 ? sep_hi : spacing));
+    const phase_clock::time_point emit_t0 = phase_clock::now();
+    // ★ THE EMISSION IS THE WAIT (measured 2026-09-06 on his part: trace 0.2 s,
+    // emission 186–191 s, stamp 0.3 s). With repairs hidden it is not drawn, so it is
+    // not run: the traced picture lands in seconds, and the census says the emission
+    // did not run rather than pretending. A caller that wants both draws the traced
+    // set first and asks again with repairs on (the two-stage bake).
+    if (emit_repairs != 0) {
+      try {
+        emit_stats = topopt::generate_organic_lattice(lat, sink, &boundary, 8, nullptr, &emitted);   // run_job passes 8
+        emit_ran = true;
+      } catch (...) {
+        emitted.clear();
+      }
+    }
+    emit_seconds = phase_seconds(emit_t0);
+    if (emit_repairs == 0) {
+      // ★ WITHOUT REPAIRS: the curves and connectors as traced, not the emitted set.
+      emitted.clear();
+      for (const topopt::OrganicCurve& c : lat.curves) {
+        for (std::size_t t = 1; t < c.points.size(); ++t)
+          emitted.push_back({c.points[t - 1], c.points[t], c.radius_mm});
+      }
+      for (const topopt::OrganicConnector& cn : lat.connectors)
+        emitted.push_back({cn.a, cn.b, cn.radius_mm > 0.0 ? cn.radius_mm : 0.5 * p.min_extrudable_width_mm});
+    }
+    double rmax = 0.0;
+    for (const topopt::OrganicSpan& sp : emitted) rmax = std::max(rmax, sp.r);
+    reach_all = band_mm + rmax;
+    const phase_clock::time_point bake_t0 = phase_clock::now();
+    field.assign(fn, reach_all);
+    surface_field.assign(fn, band_mm);
+    for (const topopt::OrganicSpan& sp : emitted) {
+      if (!(sp.r > 0.0)) continue;
+      stamp(sp.a, sp.b, sp.r);
+    }
+    bake_seconds = phase_seconds(bake_t0);
+  }
+
+  double lo = 0.0, hi = 0.0;
+  bool first = true;
+  for (std::size_t i = 0; i < lat.spacing_used_mm.size() && i < n; ++i) {
+    const double s = lat.spacing_used_mm[i];
+    if (!(s > 0.0)) continue;
+    if (first) { lo = hi = s; first = false; }
+    else { lo = std::min(lo, s); hi = std::max(hi, s); }
+  }
+
+  out[0] = 1.0;
+  out[1] = static_cast<double>(span_count);   // EMITTED spans, post-clip
+  out[2] = static_cast<double>(lat.curves.size());
+  out[3] = static_cast<double>(lat.connectors.size());
+  out[4] = static_cast<double>(field.size());
+  out[5] = lo;
+  out[6] = hi;
+  out[7] = lat.report.degenerate_fraction;
+  out[8] = reach_all;   // the clamp of BOTH channels
+  out[9] = static_cast<double>(n);
+  // ★ THE TRACED SEGMENT COUNT, so the gap between what was TRACED and what is
+  // EMITTED is a number on the receipt rather than a claim. The four post-trace passes
+  // (node merge, free-end tie, support prune, stranded drop) live in that gap; a
+  // preview that shows the traced set is showing struts the file does not contain.
+  {
+    std::size_t traced = lat.connectors.size();
+    for (const topopt::OrganicCurve& c : lat.curves) {
+      if (c.points.size() > 1) traced += c.points.size() - 1;
+    }
+    out[10] = static_cast<double>(traced);
+  }
+  out[32] = emit_stats.census_grown_len_mm;
+  for (int c = 0; c < topopt::OrganicGenStats::kCensusStages && c < 12; ++c)
+    out[33 + c] = emit_stats.census_len_mm[c];
+  out[45] = static_cast<double>(emit_stats.census_components[topopt::OrganicGenStats::CensusWritten]);
+  out[46] = emit_ran ? 1.0 : 0.0;
+  out[47] = std::numeric_limits<double>::quiet_NaN();   // retired: the fillet stage is gone (#358)
+  out[11] = static_cast<double>(gstats.growth_seeds);
+  out[12] = static_cast<double>(gstats.growth_curves);
+  out[13] = static_cast<double>(gstats.growth_steps);
+  out[14] = static_cast<double>(gstats.growth_blocked);
+  out[15] = static_cast<double>(gstats.growth_clamped);
+  out[16] = static_cast<double>(gstats.growth_branches);
+  out[17] = static_cast<double>(gstats.growth_branch_refused);
+  out[18] = static_cast<double>(gstats.growth_joins);
+  out[19] = static_cast<double>(gstats.growth_join_refused_span);
+  out[20] = gstats.growth_tip_budget_hit ? 1.0 : 0.0;
+  out[21] = static_cast<double>(lat.report.stop_left_region);
+  out[22] = static_cast<double>(lat.report.stop_hit_d_test);
+  out[23] = static_cast<double>(lat.report.stop_no_direction);
+  out[24] = static_cast<double>(lat.report.stop_step_budget);
+  out[25] = static_cast<double>(lat.report.stop_turned_too_far);
+  out[26] = static_cast<double>(lat.report.stop_self_revisit);
+  out[27] = static_cast<double>(lat.report.seeds_offered);
+  out[28] = static_cast<double>(lat.report.seeds_traced);
+  out[29] = static_cast<double>(lat.report.seeds_too_close);
+  out[30] = static_cast<double>(lat.report.curves_too_short);
+  out[31] = static_cast<double>(lat.report.step_budget_hits);
+  out[48] = synth_ran ? 1.0 : 0.0;
+  out[49] = static_cast<double>(srep.regions);
+  out[50] = static_cast<double>(srep.voxels_in_regions);
+  out[51] = static_cast<double>(srep.voxels_fully_synthetic);
+  out[52] = static_cast<double>(srep.voxels_blended);
+  out[53] = srep.dead_threshold;
+  out[54] = srep.peak_von_mises;
+  out[55] = static_cast<double>(synth_rows.size() / 7);
+  out[56] = trace_seconds;
+  out[57] = emit_seconds;
+  out[58] = bake_seconds;
+  out.insert(out.end(), synth_rows.begin(), synth_rows.end());
+  out.insert(out.end(), field.begin(), field.end());
+  if (lat.relative_density.size() == n) {
+    out.insert(out.end(), lat.relative_density.begin(), lat.relative_density.end());
+  } else {
+    out.insert(out.end(), n, 0.0);
+  }
+  out.insert(out.end(), surface_field.begin(), surface_field.end());
+  // ★★★ THE SYNTHESISED VON MISES (his walk, 2026-09-07: "The synthetic stresses do
+  // not seem to exist on the back wall — that, or they are not being visualized").
+  // They existed: core replaced them in `stress` above and the tracer used them. But
+  // the app's stress map is painted from the SOLVE's field, so the synthetic load was
+  // invisible in the one view that exists to show where the part is working. Returning
+  // the field the tracer actually saw is the only way the picture and the trace can
+  // agree about it. Voigt with TRUE shear, core's own convention.
+  if (synth_ran) {
+    out[59] = 1.0;
+    out.reserve(out.size() + n);
+    for (std::size_t i = 0; i < n; ++i) {
+      const double* m = &stress[6 * i];
+      const double a = (m[0] - m[1]) * (m[0] - m[1]) + (m[1] - m[2]) * (m[1] - m[2]) +
+                       (m[2] - m[0]) * (m[2] - m[0]);
+      const double b = 3.0 * (m[3] * m[3] + m[4] * m[4] + m[5] * m[5]);
+      out.push_back(std::sqrt(0.5 * a + b));
+    }
+  }
+  // ★ THE EMITTED SPANS THEMSELVES, LAST — 7 doubles each (a, b, r). The FIELD is what
+  // the march samples; these are for a caller that wants the geometry directly, e.g.
+  // the settings sample, which builds capsules rather than sphere-tracing a volume.
+  // Post-clip, same list the field was stamped from, so the two cannot disagree.
+  for (const topopt::OrganicSpan& sp : emitted) {
+    if (!(sp.r > 0.0)) continue;
+    out.insert(out.end(), {sp.a.x, sp.a.y, sp.a.z, sp.b.x, sp.b.y, sp.b.z, sp.r});
+  }
+  return out;
+  }, [](const std::string&) { return std::vector<double>(64, 0.0); });   // [0] = 0
+}
+
+// ★★ CORE'S OWN CELL-SIZE BAND FOR ORGANIC, READ BY THE PREVIEW (maintainer,
+// 2026-09-06: "auto cell grade looked incredibly sparse — is it using the octet
+// preview settings?" It was: with nothing picked the trace read the octet window).
+// This forwards `organic_recommend_band` — the pure function run_job calls with the
+// same arguments (run_job.cpp `[recommend]`): the tracer's print floor
+// 0.5·bead·√(3π), the solve voxel, `OrganicParams::resolution_floor_voxels`,
+// `kOrganicRecommendCellsAcrossMember`, the look and the steps. Nothing is derived here.
+//
+//   regions: rows of 5 — face_id, depth_mm, extent_short_mm, stress_p50, stress_p99
+//   out: [0] lo_mm [1] hi_mm [2] printability_floor [3] resolution_floor
+//        [4] member_ceiling [5] extent_ceiling [6] collapsed [7] look_cell_mm
+//        [8] grade_ratio [9] candidate count N, then N rows of 3: lo, hi, source
+//        (0 grid, 1 pair, 2 look, 3 look_pair, 4 look_step, 5 other)
+std::vector<double> organic_recommend_band(const double* regions, std::size_t region_count,
+                                           double min_extrudable_width_mm, double voxel_mm,
+                                           double look_cells_across, int steps) {
+  return guarded("organic_recommend_band", [&]() -> std::vector<double> {
+  std::vector<double> out(10, 0.0);
+  if (regions == nullptr || region_count == 0 || !(min_extrudable_width_mm > 0.0) ||
+      !(voxel_mm > 0.0)) return out;
+  std::vector<topopt::OrganicRecommendRegion> rr;
+  for (std::size_t i = 0; i < region_count; ++i) {
+    topopt::OrganicRecommendRegion q;
+    q.face_id = static_cast<int>(regions[5 * i]);
+    q.depth_mm = regions[5 * i + 1];
+    q.extent_short_mm = regions[5 * i + 2];
+    q.stress_p50 = regions[5 * i + 3];
+    q.stress_p99 = regions[5 * i + 4];
+    rr.push_back(q);
+  }
+  // core refusing → the guard's ten zeros, the same answer as the early return above
+  const topopt::OrganicRecommendBand B = topopt::organic_recommend_band(
+      rr, 0.5 * min_extrudable_width_mm * std::sqrt(3.0 * 3.14159265358979323846),
+      voxel_mm, topopt::OrganicParams{}.resolution_floor_voxels,
+      topopt::kOrganicRecommendCellsAcrossMember, look_cells_across, steps);
+  out[0] = B.lo_mm; out[1] = B.hi_mm;
+  out[2] = B.printability_floor_mm; out[3] = B.resolution_floor_mm;
+  out[4] = B.member_ceiling_mm; out[5] = B.extent_ceiling_mm;
+  out[6] = B.collapsed ? 1.0 : 0.0;
+  out[7] = B.look_cell_mm; out[8] = B.grade_ratio;
+  out[9] = static_cast<double>(B.candidates.size());
+  for (const topopt::OrganicRecommendCandidate& c : B.candidates) {
+    double src = 5.0;
+    if (c.source == "grid") src = 0.0;
+    else if (c.source == "pair") src = 1.0;
+    else if (c.source == "look") src = 2.0;
+    else if (c.source == "look_pair") src = 3.0;
+    else if (c.source == "look_step") src = 4.0;
+    out.insert(out.end(), {c.lo, c.hi, src});
+  }
+  return out;
+  }, [](const std::string&) { return std::vector<double>(10, 0.0); });
+}
+
+// ★★ CORE'S OWN DYADIC CELL PLAN, READ BY THE PREVIEW (task item 3: "Is there *NO*
+// way to make the *PREVIEW* lattice grade cell size?").
+//
+// The preview drew ONE cell size for the whole part while a swept run gives every
+// region the coarsest dyadic cell its own member can hold. This forwards
+// `plan_cell_sizes` verbatim — the app decides nothing about which cell goes where,
+// exactly as `lattice_member_thickness_mm` above forwards the width law.
+//
+// ★ THE RETURN IS ONE FLAT ARRAY, header then payload, because the alternative is a
+// POD struct across the Swift/C++ boundary and this file already learned what that
+// costs (`std::vector` INPUTS do not survive it). Layout:
+//
+//     [0] ok            1, or the array is empty
+//     [1..3] nx ny nz   BASE-CELL grid dims (NOT the voxel grid)
+//     [4..6] ox oy oz   base-cell grid origin, model mm
+//     [7] base_cell_mm  S0
+//     [8] max_level     levels run 0..max_level; cell(L) = S0 * 2^L
+//     [9 ..]            one level per base cell, x fastest, -1 = not latticed
+//     [9+N ..]          one reject reason per base cell: 0 latticed / not a
+//                       candidate, 1 MEMBER TOO THIN, 2 STRUT UNPRINTABLE
+//
+// The caller MUST take the origin, dims and S0 from here rather than deriving its
+// own: the whole reason coarse and fine cells meet at shared nodes is that every
+// level-L cell sits on an ALIGNED 2^L block of THIS grid. A base grid half a cell
+// off would put a strut end in the middle of a neighbour's face — a floating end,
+// which is the one thing the dyadic ladder exists to prevent.
+std::vector<double> lattice_cell_size_plan(
+    int nx, int ny, int nz, double spacing, double ox, double oy, double oz,
+    const std::uint8_t* candidate, std::size_t candidate_count,
+    const double* rho, std::size_t rho_count,
+    const double* width, std::size_t width_count,
+    double min_cell_mm, double max_cell_mm, double min_extrudable_width_mm,
+    int cap_radius_voxels, const std::string& topology,
+    const double* desired_cell_mm, std::size_t desired_count,
+    double cells_per_member_floor) {
+  return guarded_empty("lattice_cell_size_plan", [&]() -> std::vector<double> {
+  const std::size_t want =
+      static_cast<std::size_t>(nx) * static_cast<std::size_t>(ny) *
+      static_cast<std::size_t>(nz);
+  if (nx <= 0 || ny <= 0 || nz <= 0) return {};
+  if (!(spacing > 0.0)) return {};
+  if (candidate == nullptr || rho == nullptr || width == nullptr) return {};
+  if (candidate_count != want || rho_count != want || width_count != want) return {};
+  if (!(min_cell_mm > 0.0) || !(max_cell_mm >= min_cell_mm)) return {};
+  if (!(min_extrudable_width_mm > 0.0) || cap_radius_voxels <= 0) return {};
+
+  const topopt::LatticeTopology topo = live_topology(topology);
+
+  topopt::VoxelGrid grid;
+  grid.nx = nx; grid.ny = ny; grid.nz = nz;
+  grid.spacing = spacing;
+  grid.origin = topopt::Vec3{ox, oy, oz};
+  grid.tags.assign(want, topopt::VoxelTag::Empty);
+
+  std::vector<char> cand(want, 0);
+  std::vector<double> rho_v(want, 0.0), width_v(want, 0.0);
+  for (std::size_t i = 0; i < want; ++i) {
+    const bool c = candidate[i] != 0;
+    cand[i] = c ? 1 : 0;
+    grid.tags[i] = c ? topopt::VoxelTag::Interior : topopt::VoxelTag::Empty;
+    rho_v[i] = rho[i];
+    width_v[i] = width[i];
+  }
+
+  topopt::CellPlanParams pp;
+  pp.topology = topo;
+  pp.mode = topopt::CellSizeMode::Swept;
+  pp.min_cell_size_mm = min_cell_mm;
+  pp.max_cell_size_mm = max_cell_mm;
+  pp.min_extrudable_width_mm = min_extrudable_width_mm;
+  pp.thickness_cap_voxels = cap_radius_voxels;
+  // ★★★ THE FLOOR THE PLANNER CULLS BY, AND IT IS THE LAST CONSUMER OF IT
+  // (maintainer, 2026-08-22: "Why is there only lattice in the back of these walls??").
+  //
+  // ★ CORE CULLS A CELL WHOSE MEMBER CANNOT HOLD `N*` OF IT, and with this left at 0
+  // that N* is `lattice_cells_per_member_min(topology)` — the ACCURACY floor of 5 —
+  // however far the stage mode had relaxed. So the app asked for a 4.4 mm cell in his
+  // 11 mm wall, core required 5 x 4.4 = 22.0 mm of member to keep it, and culled the
+  // whole wall to SOLID. The only material that survived was the thick spine behind
+  // it, which is precisely "only lattice in the back".
+  //
+  // ★ THE FLOOR HAD FOUR CONSUMERS AND THIS WAS THE FOURTH: the per-region derivation,
+  // the Auto window's ceiling, the scene's own `minCellsPerMember`, and this. Fixing
+  // the first three moved the numbers the app computes and left the one that decides
+  // what is actually KEPT still dividing by 5.
+  //
+  // 0 keeps the accuracy floor, so every pre-existing caller is unchanged.
+  pp.cells_per_member_floor_override = cells_per_member_floor;
+
+  // ★★ FIT IS THE OTHER PLANNER, AND FOR A THIN WALL IT IS THE RIGHT ONE
+  // (maintainer, 2026-08-20: "I set the cell size to Fit and it still looks like
+  // shit"). Fit picks S = W / N* per declared region — the cell is CHOSEN so exactly
+  // N* fit across the member, so the cells-per-member floor is satisfied BY
+  // CONSTRUCTION and nothing is culled. That is why core is content to refuse Fit
+  // alongside sub-floor retention: Fit does not need it.
+  //
+  // `desired_cell_mm` is grid-indexed — the S_want of the region owning each
+  // candidate voxel, which the caller gets from `lattice_derive_cell_for_member`.
+  // Absent ⇒ the swept planner, exactly as before.
+  // Core refusing the inputs → the guard's empty plan; the caller says it has none.
+  topopt::CellSizePlan plan;
+  const bool fit = desired_cell_mm != nullptr && desired_count == want;
+  if (fit) {
+    pp.mode = topopt::CellSizeMode::Fit;
+    std::vector<double> want_v(desired_cell_mm, desired_cell_mm + want);
+    plan = topopt::plan_cell_sizes_fit(grid, rho_v, cand, width_v, want_v, pp);
+  } else {
+    plan = topopt::plan_cell_sizes(grid, rho_v, cand, width_v, pp);
+  }
+
+  const std::size_t cells =
+      static_cast<std::size_t>(plan.nx) * static_cast<std::size_t>(plan.ny) *
+      static_cast<std::size_t>(plan.nz);
+  if (cells == 0 || plan.level.size() != cells) return {};
+
+  std::vector<double> out;
+  out.reserve(9 + 2 * cells);
+  out.push_back(1.0);
+  out.push_back(static_cast<double>(plan.nx));
+  out.push_back(static_cast<double>(plan.ny));
+  out.push_back(static_cast<double>(plan.nz));
+  out.push_back(plan.origin.x);
+  out.push_back(plan.origin.y);
+  out.push_back(plan.origin.z);
+  out.push_back(plan.base_cell_mm);
+  out.push_back(static_cast<double>(plan.max_level));
+  for (std::size_t i = 0; i < cells; ++i) {
+    out.push_back(static_cast<double>(plan.level[i]));
+  }
+  // …then WHY each rejected cell was rejected, which sub-floor retention needs:
+  // reason 1 (member too thin) is the only one retention may overrule; reason 2
+  // (strut unprintable) is a fact about the printer and is never rescued.
+  for (std::size_t i = 0; i < cells; ++i) {
+    out.push_back(i < plan.reject_reason.size()
+                      ? static_cast<double>(plan.reject_reason[i]) : 0.0);
+  }
+  return out;
+  });
+}
+
+// Core's own sub-floor retention ceiling — the fraction of the part's peak stress a
+// region must stay under before lattice may be kept below the cells-per-member floor.
+// Read, never hardcoded: it is a measured constant and it is core's to move.
+double lattice_subfloor_retention_fraction() {
+  return guarded_empty("lattice_subfloor_retention_fraction", [&]() -> double {
+    return topopt::lattice_subfloor_retention_stress_fraction();
+  });
+}
+
+// Every function below takes a topology id and answers ONLY for a type core calls live
+// (`live_topology`): anything else is the function's invalid result with core's reason —
+// in the struct's `reason` where it has one, and in bridge_last_refusal() always.
+double lattice_aesthetic_density_ceiling(const std::string& topology) {
+  // ★ Core's per-type ceiling (#358). Octet returns EXACTLY octet_aesthetic_density_ceiling()
+  // (core asserts it with ==), so the swap moved no bytes. Any other type: 0 = "none".
+  return guarded_empty("lattice_aesthetic_density_ceiling", [&]() -> double {
+    return topopt::lattice_aesthetic_density_ceiling(live_topology(topology));
+  });
+}
+
+double lattice_strut_diameter_mm(const std::string& topology, double rho,
+                                 double cell_size_mm) {
+  // Core's PER-TYPE law (#358 R1): octet's branch is exactly octet_strut_diameter_mm, and
+  // a type without a measured table refuses — 0 here, "no core number" to the caller.
+  // Inventing one is how the app once ended up with a second law.
+  return guarded_empty("lattice_strut_diameter_mm", [&]() -> double {
+    const topopt::LatticeTopology topo = live_topology(topology);
+    if (!(cell_size_mm > 0.0)) return 0.0;
+    if (!std::isfinite(rho) || rho < 0.0) return 0.0;
+    return topopt::lattice_strut_diameter_mm(topo, rho, cell_size_mm);
+  });
+}
+
+double lattice_min_printable_cell_mm(const std::string& topology,
+                                     double min_extrudable_width_mm,
+                                     double max_relative_density) {
+  // ★★ Q3(i) (reviewer, 2026-10-05): "use core's floor … Read it from core; don't copy the
+  // number." The smallest cell whose strut prints a bead at the densest density the JOB allows,
+  // composed exactly as grade_lattice does it — core has no public function that takes the
+  // cap (#358 D1): the band top capped by `grading.max_relative_density`
+  // (core/src/simp/grading.cpp:184-187), then w / φ(ρ_hi, 1) (grading.cpp:258-260). The swept
+  // plan's per-cell predicate (cell_plan.cpp:197-204) can lay no rung below it. A cap of 0 (not
+  // sent, Allow quilt on) is core's uncapped dense floor, = lattice_cell_bounds' densest.
+  return guarded_empty("lattice_min_printable_cell_mm", [&]() -> double {
+    const topopt::LatticeTopology topo = live_topology(topology);
+    if (!(min_extrudable_width_mm > 0.0)) return 0.0;
+    const double band_top = topopt::lattice_rho_max(topo);
+    const double rho_hi = (max_relative_density > 0.0 && std::isfinite(max_relative_density))
+                              ? std::min(band_top, max_relative_density)
+                              : band_top;
+    const double per_mm = topopt::lattice_strut_diameter_mm(topo, rho_hi, 1.0);
+    return per_mm > 0.0 ? min_extrudable_width_mm / per_mm : 0.0;
+  });
+}
+
+// ★★ THE FORWARD LAW (core reply 5, 2026-09-20: "the aesthetic ceiling is 0.211733,
+// not 0.219 … you invert it, core samples it forward"). `octet_relative_density`
+// depends only on radius/cell, so every cell gives the same number for the same
+// ratio; bisecting the DIAMETER table for it landed 3.5 % high because core's two
+// tables are not exact inverses of each other (core's own round trip at 4 mm:
+// 0.80 → 0.7846). Returns 0 for a topology core has no law for or a bad argument,
+// and 1 when the radius fills the cell solid (core throws for that case).
+double lattice_relative_density(const std::string& topology, double strut_radius_mm,
+                                double cell_size_mm) {
+  return guarded_empty("lattice_relative_density", [&]() -> double {
+    const topopt::LatticeTopology topo = live_topology(topology);
+    if (!(cell_size_mm > 0.0) || !std::isfinite(cell_size_mm) ||
+        !std::isfinite(strut_radius_mm) || !(strut_radius_mm > 0.0))
+      return 0.0;
+    try {
+      return topopt::lattice_density_from_strut(topo, cell_size_mm, strut_radius_mm);
+    } catch (const std::invalid_argument&) {
+      // With the arguments checked above, core's only invalid_argument here is "the
+      // radius fills the cell": an ANSWER (solid), not a refusal.
+      return 1.0;
+    }
+  });
+}
+
+LatticeLimits lattice_limits(const std::string& topology) {
+  return guarded("lattice_limits", [&]() -> LatticeLimits {
+    const topopt::LatticeTopology topo = live_topology(topology);
+    LatticeLimits lim;
+    lim.certifiable = true;
+    lim.rho_min = topopt::lattice_rho_min(topo);
+    lim.rho_max = topopt::lattice_rho_max(topo);
+    // Forwarded from core's own scale-separation floor, never invented here.
+    lim.min_cells_per_member = topopt::lattice_cells_per_member_min(topo);
+    return lim;
+  }, [](const std::string& why) -> LatticeLimits {
+    // certifiable stays false and the band zero — the UI greys the type and says why.
+    LatticeLimits lim;
+    lim.reason = why;
+    return lim;
+  });
 }
 
 LatticeCellBounds lattice_cell_bounds(const std::string& topology,
                                       double min_extrudable_width_mm) {
-  LatticeCellBounds b;
-  topopt::LatticeTopology topo;
-  if (!lattice_topology_from_name(topology, topo)) return b;  // valid stays false
-  if (!(min_extrudable_width_mm > 0.0)) return b;
-  // BOTH numbers are core's, never invented here (bar R6): the printability floor is
-  // core's own one law (topopt::lattice_cell_printability_floor_mm — the same
-  // function the grading law and the dyadic cell plan call), and the cells-per-member
-  // floor is core's scale-separation number. The app's cell-size control reads its
-  // lower bound and its per-member ceiling from these, so a re-measurement in core
-  // moves the UI with no app change.
-  b.printability_floor_mm =
-      topopt::lattice_cell_printability_floor_mm(topo, min_extrudable_width_mm);
-  b.cells_per_member_floor = topopt::lattice_cells_per_member_min(topo);
-  // THE DENSEST-END FLOOR, from core's own strut-diameter law rather than an
-  // app-side mirror of it (task 2026-08-05-lattice-retention-app-control, S3).
-  // The first cut of this derived it in Swift from `LatticeType.strutRadiusMM` and
-  // got 1.64 mm at a 0.45 mm bead where core's own arithmetic gives 1.17 — the app
-  // copy of the octet law is 1.4x off. Reading it here means the control's bound
-  // and core's refusal quote the SAME number by construction.
-  if (topo == topopt::LatticeTopology::Octet) {
+  // ★ #358 (one strut law PER TYPE): the printability floor goes through
+  // `lattice_strut_diameter_mm(topo)`, which REFUSES every type without a measured
+  // table. Uncaught, that throw crossed into Swift and trapped the process on a saved
+  // Simple-cubic project (#362 on #361 421fde3d). Now: valid = false with core's reason.
+  return guarded("lattice_cell_bounds", [&]() -> LatticeCellBounds {
+    LatticeCellBounds b;
+    const topopt::LatticeTopology topo = live_topology(topology);
+    if (!(min_extrudable_width_mm > 0.0)) {
+      b.reason = "lattice_cell_bounds: min_extrudable_width_mm must be > 0";
+      return b;
+    }
+    // BOTH numbers are core's, never invented here (bar R6): the printability floor is
+    // core's own one law (topopt::lattice_cell_printability_floor_mm — the same
+    // function the grading law and the dyadic cell plan call), and the cells-per-member
+    // floor is core's scale-separation number. The app's cell-size control reads its
+    // lower bound and its per-member ceiling from these, so a re-measurement in core
+    // moves the UI with no app change.
+    b.printability_floor_mm =
+        topopt::lattice_cell_printability_floor_mm(topo, min_extrudable_width_mm);
+    b.cells_per_member_floor = topopt::lattice_cells_per_member_min(topo);
+    // THE DENSEST-END FLOOR, from core's own strut-diameter law rather than an
+    // app-side mirror of it (task 2026-08-05-lattice-retention-app-control, S3).
+    // The first cut of this derived it in Swift from `LatticeType.strutRadiusMM` and
+    // got 1.64 mm at a 0.45 mm bead where core's own arithmetic gives 1.17 — the app
+    // copy of the octet law is 1.4x off. Reading it here means the control's bound
+    // and core's refusal quote the SAME number by construction.
     const double phi_hi =
-        topopt::octet_strut_diameter_mm(topopt::lattice_rho_max(topo), 1.0);
+        topopt::lattice_strut_diameter_mm(topo, topopt::lattice_rho_max(topo), 1.0);
     if (phi_hi > 0.0) b.printability_floor_densest_mm = min_extrudable_width_mm / phi_hi;
-  }
-  b.percolation_cells_per_member_floor =
-      topopt::lattice_percolation_cells_per_member_min(topo);
-  b.valid = true;
-  return b;
+    b.percolation_cells_per_member_floor =
+        topopt::lattice_percolation_cells_per_member_min(topo);
+    b.valid = true;
+    return b;
+  }, [](const std::string& why) -> LatticeCellBounds {
+    LatticeCellBounds b;
+    b.reason = why;
+    return b;
+  });
 }
 
 LatticeRegionDerivation lattice_region_derivation(
     const std::string& topology, double member_width_mm,
-    double min_extrudable_width_mm, double stated_relative_density) {
-  LatticeRegionDerivation d;
-  topopt::LatticeTopology topo;
-  if (!lattice_topology_from_name(topology, topo)) return d;
-  if (!(member_width_mm > 0.0) || !(min_extrudable_width_mm > 0.0)) return d;
-  d.valid = true;
-  d.rho_max = topopt::lattice_rho_max(topo);
-  const topopt::LatticeCellDerivation w = topopt::lattice_derive_cell_for_member(
-      topo, member_width_mm, min_extrudable_width_mm);
-  // FEASIBLE is percolation, not accuracy — the same boundary run_job draws, and
-  // for the same reason: buildable-and-uncertifiable is a verdict, not a refusal.
-  d.feasible = w.feasible_percolation;
-  if (!d.feasible) return d;
-  const double n_star = topopt::lattice_cells_per_member_min(topo);
-  d.cell_mm = std::max(member_width_mm / n_star, w.min_printable_cell_mm);
-  const double rho = topopt::lattice_min_density_for_strut(topo, d.cell_mm,
-                                                           min_extrudable_width_mm);
-  d.derived_relative_density = rho >= 0.0 ? rho : d.rho_max;
-  d.relative_density = stated_relative_density > 0.0 ? stated_relative_density
-                                                     : d.derived_relative_density;
-  if (topo == topopt::LatticeTopology::Octet)
-    d.strut_mm = topopt::octet_strut_diameter_mm(d.relative_density, d.cell_mm);
-  d.cells_per_member = member_width_mm / d.cell_mm;
-  d.out_of_regime = d.cells_per_member < n_star;
-  d.prints = d.strut_mm + 1e-12 >= min_extrudable_width_mm;
-  return d;
+    double min_extrudable_width_mm, double stated_relative_density,
+    double cells_per_member_floor, double cell_mm) {
+  // ★ #358: `lattice_derive_cell_for_member` and `lattice_min_density_for_strut` take the
+  // per-type strut law, which refuses a type without a measured table: valid = false
+  // with core's reason, never a C++ throw into Swift.
+  return guarded("lattice_region_derivation", [&]() -> LatticeRegionDerivation {
+    LatticeRegionDerivation d;
+    const topopt::LatticeTopology topo = live_topology(topology);
+    if (!(member_width_mm > 0.0) || !(min_extrudable_width_mm > 0.0)) {
+      d.reason = "lattice_region_derivation: member_width_mm and "
+                 "min_extrudable_width_mm must be > 0";
+      return d;
+    }
+    d.valid = true;
+    d.rho_max = topopt::lattice_rho_max(topo);
+    const topopt::LatticeCellDerivation w = topopt::lattice_derive_cell_for_member(
+        topo, member_width_mm, min_extrudable_width_mm, cells_per_member_floor);
+    // FEASIBLE is percolation, not accuracy — the same boundary run_job draws, and
+    // for the same reason: buildable-and-uncertifiable is a verdict, not a refusal.
+    d.feasible = w.feasible_percolation;
+    if (!d.feasible) return d;
+    // ★★★ THE FLOOR THE CALLER ASKED FOR — NOT ALWAYS THE ACCURACY ONE (maintainer,
+    // 2026-08-22: "the cell size is stuck at 2.2mm which doesn't make sense unless that
+    // wall is only 4.4mm thick?").
+    //
+    // ★ IT WAS 11.0 / 5. This line read `lattice_cells_per_member_min(topo)` — a hard 5,
+    // the ACCURACY floor — no matter what the caller had chosen. On his 11 mm wall that
+    // is exactly the 2.20 mm he measured. Core's own `lattice_derive_cell_for_member`
+    // has taken a floor as a parameter all along; this bridge simply never passed one,
+    // so the aesthetic relaxation reached the per-voxel planner and never reached the
+    // PER-REGION cell that Fit and Stepped are both built from.
+    //
+    // 0 keeps the accuracy floor, so every existing caller is unchanged.
+    const double n_star = cells_per_member_floor > 0.0
+                              ? cells_per_member_floor
+                              : topopt::lattice_cells_per_member_min(topo);
+    // ★ ONE NUMBER, ONE SOURCE (maintainer, 2026-10-03, item 5): a caller that already holds
+    // the cell the preview lays (the bake's, at the measured width) states it, and the density,
+    // strut and cells-across below are core's at THAT cell. 0 = derive it, as before.
+    d.cell_mm = cell_mm > 0.0 ? cell_mm
+                              : std::max(member_width_mm / n_star, w.min_printable_cell_mm);
+    const double rho = topopt::lattice_min_density_for_strut(topo, d.cell_mm,
+                                                             min_extrudable_width_mm);
+    d.derived_relative_density = rho >= 0.0 ? rho : d.rho_max;
+    d.relative_density = stated_relative_density > 0.0 ? stated_relative_density
+                                                       : d.derived_relative_density;
+    d.strut_mm = topopt::lattice_strut_diameter_mm(topo, d.relative_density, d.cell_mm);
+    d.cells_per_member = member_width_mm / d.cell_mm;
+    d.out_of_regime = d.cells_per_member < n_star;
+    d.prints = d.strut_mm + 1e-12 >= min_extrudable_width_mm;
+    return d;
+  }, [](const std::string& why) -> LatticeRegionDerivation {
+    LatticeRegionDerivation d;
+    d.reason = why;
+    return d;
+  });
 }
 
 std::vector<std::string> lattice_certifiable_topologies() {
@@ -2225,7 +3259,9 @@ std::vector<std::string> lattice_certifiable_topologies() {
   // from core so it can never drift from the enum (handoff
   // 2026-07-29-tensor-library-nine widened this from octet-only to the seven cubic
   // topologies; the three tetragonal ones are deliberately absent — not certifiable).
-  return topopt::lattice_certifiable_topology_names();
+  return guarded_empty("lattice_certifiable_topologies", [&]() -> std::vector<std::string> {
+    return topopt::lattice_certifiable_topology_names();
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -2314,24 +3350,56 @@ bool probe_reliable() {
 
 }  // namespace
 
-bool grading_schema_probe_is_reliable() { return probe_reliable(); }
+bool grading_schema_probe_is_reliable() {
+  return guarded("grading_schema_probe_is_reliable", [&]() -> bool { return probe_reliable(); },
+                 [](const std::string&) { return false; });
+}
 
 std::string job_schema_error(const std::string& job_json) {
-  try {
-    topopt::parse_job(job_json);
-    return std::string();
-  } catch (const std::exception& e) {
-    return std::string(e.what());
-  }
+  // The inner catch IS this function's answer (core's refusal, verbatim; "" =
+  // accepted). The guard only covers what is not a std::exception — and its failure
+  // value is a reason, never "", so an unexplained throw can never read as accepted.
+  return guarded("job_schema_error", [&]() -> std::string {
+    try {
+      topopt::parse_job(job_json);
+      return std::string();
+    } catch (const std::exception& e) {
+      return std::string(e.what());
+    }
+  }, [](const std::string& why) { return why; });
+}
+
+std::vector<double> core_face_plane_basis(double nx, double ny, double nz,
+                                          double fux, double fuy, double fuz,
+                                          double fwx, double fwy, double fwz) {
+  return guarded_empty("core_face_plane_basis", [&]() -> std::vector<double> {
+    topopt::ManualClearanceGeometry m;
+    m.kind = topopt::ClearanceKind::Face;
+    m.origin = topopt::Vec3{0.0, 0.0, 0.0};
+    m.normal = topopt::Vec3{nx, ny, nz};
+    m.half_u_mm = 1.0;
+    m.half_w_mm = 1.0;
+    m.frame_u = topopt::Vec3{fux, fuy, fuz};
+    m.frame_w = topopt::Vec3{fwx, fwy, fwz};
+    topopt::ClearanceParams p;
+    p.kind = topopt::ClearanceKind::Face;
+    p.slab_depth_mm = 1.0;
+    const topopt::ClearanceGeometry g = topopt::resolve_clearance_manual(m, p);
+    return {g.valid ? 1.0 : 0.0, g.frame_conflict ? 1.0 : 0.0,
+            g.u.x, g.u.y, g.u.z, g.w.x, g.w.y, g.w.z};
+  });
 }
 
 bool grading_schema_accepts(const std::string& key) {
-  if (key.empty()) return false;
-  if (!probe_reliable()) return false;  // cannot tell => do not emit
-  return !schema_refused_key_by_name(key);
+  return guarded("grading_schema_accepts", [&]() -> bool {
+    if (key.empty()) return false;
+    if (!probe_reliable()) return false;  // cannot tell => do not emit
+    return !schema_refused_key_by_name(key);
+  }, [](const std::string&) { return false; });   // cannot tell => do not emit
 }
 
 bool grading_schema_accepts_cell_mode(const std::string& mode) {
+  return guarded("grading_schema_accepts_cell_mode", [&]() -> bool {
   if (mode.empty()) return false;
   if (!probe_reliable()) return false;  // cannot tell => do not offer
   // "auto" and "fit" REFUSE a target cell alongside them and "swept" needs its two
@@ -2355,12 +3423,48 @@ bool grading_schema_accepts_cell_mode(const std::string& mode) {
     topopt::parse_job(probe_job_json(body, kProbeIncludeRegion));
     return true;
   } catch (const std::exception&) {
-    return false;
+    return false;   // the probe's answer: core refuses this mode
   }
+  }, [](const std::string&) { return false; });   // cannot tell => do not offer
 }
 
 double lattice_subfloor_stress_fraction_default() {
-  return topopt::lattice_subfloor_retention_stress_fraction();
+  return guarded_empty("lattice_subfloor_stress_fraction_default", [&]() -> double {
+    return topopt::lattice_subfloor_retention_stress_fraction();
+  });
+}
+
+namespace {
+std::vector<std::string> split_lines(const std::string& joined) {
+  std::vector<std::string> out;
+  std::string cur;
+  for (char c : joined) {
+    if (c == '\n') { if (!cur.empty()) out.push_back(cur); cur.clear(); }
+    else cur += c;
+  }
+  if (!cur.empty()) out.push_back(cur);
+  return out;
+}
+}  // namespace
+
+int lattice_type_readiness(const std::string& id, const std::string& generatable_lines,
+                           const std::string& certifiable_lines) {
+  return guarded("lattice_type_readiness", [&]() -> int {
+    return static_cast<int>(topopt::lattice_type_readiness(
+        id, split_lines(generatable_lines), split_lines(certifiable_lines)));
+  }, [](const std::string&) {
+    return static_cast<int>(topopt::LatticeTypeReadiness::UnknownId);   // never "live"
+  });
+}
+
+std::string lattice_type_readiness_plain(int readiness) {
+  return guarded_empty("lattice_type_readiness_plain", [&]() -> std::string {
+    using R = topopt::LatticeTypeReadiness;
+    for (R r : {R::Live, R::NotGeneratable, R::NotCertifiable, R::NotEither, R::UnknownId})
+      if (static_cast<int>(r) == readiness)
+        return std::string(topopt::lattice_type_readiness_plain(r));
+    return std::string();
+  });
 }
 
 std::vector<std::string> lattice_generatable_topologies() {
@@ -2370,7 +3474,9 @@ std::vector<std::string> lattice_generatable_topologies() {
   // list remains here: when core grows the enum, this picks it up with zero app
   // changes, and core's enum-probe test (test_lattice_gen) fails if the core list
   // itself ever drifts from the enum.
-  return topopt::lattice_gen_topology_names();
+  return guarded_empty("lattice_generatable_topologies", [&]() -> std::vector<std::string> {
+    return topopt::lattice_gen_topology_names();
+  });
 }
 
 }  // namespace topoptbridge
@@ -2402,23 +3508,89 @@ double demand_reference_impl(const float* vm, std::size_t n, int intent,
 
 double grading_demand_reference(const float* von_mises, std::size_t n, int intent,
                                 double allowable_mpa, double percentile) {
-  return demand_reference_impl(von_mises, n, intent, allowable_mpa, percentile);
+  return guarded_empty("grading_demand_reference", [&]() -> double {
+    return demand_reference_impl(von_mises, n, intent, allowable_mpa, percentile);
+  });
 }
 
 void grading_demand_fraction_into(const float* von_mises, std::size_t n, int intent,
                                   double allowable_mpa, double percentile,
                                   double utilisation_target, float* out) {
-  if (von_mises == nullptr || out == nullptr) return;
-  const double ref =
-      demand_reference_impl(von_mises, n, intent, allowable_mpa, percentile);
-  const topopt::GradingIntent gi = intent == 0 ? topopt::GradingIntent::Structural
-                                               : topopt::GradingIntent::Aesthetic;
-  for (std::size_t i = 0; i < n; ++i) {
-    const double v = std::isfinite(von_mises[i]) ? von_mises[i] : 0.0;
-    // ★ CORE'S OWN FUNCTION. Not a Swift or bridge restatement of it.
-    out[i] = static_cast<float>(
-        topopt::grading_demand_fraction(gi, v, ref, utilisation_target));
-  }
+  guarded_empty("grading_demand_fraction_into", [&]() {
+    if (von_mises == nullptr || out == nullptr) return;
+    const double ref =
+        demand_reference_impl(von_mises, n, intent, allowable_mpa, percentile);
+    const topopt::GradingIntent gi = intent == 0 ? topopt::GradingIntent::Structural
+                                                 : topopt::GradingIntent::Aesthetic;
+    for (std::size_t i = 0; i < n; ++i) {
+      const double v = std::isfinite(von_mises[i]) ? von_mises[i] : 0.0;
+      // ★ CORE'S OWN FUNCTION. Not a Swift or bridge restatement of it.
+      out[i] = static_cast<float>(
+          topopt::grading_demand_fraction(gi, v, ref, utilisation_target));
+    }
+  });
+}
+
+// ── ★ THE AESTHETIC CELLS-PER-MEMBER FLOOR — CORE'S, FORWARDED ────────────────
+// See the header. The app must never derive this: the strut-diameter law was
+// re-derived in Swift once and came out 1.4-1.7x adrift, and this floor decides
+// whether material is latticed at all.
+double lattice_aesthetic_cells_per_member_floor(const std::string& topology,
+                                                double utilisation,
+                                                double error_budget) {
+  // Core answers with octet's measured curve for every type today (`(void)topo`), so a
+  // non-live type is refused here (`live_topology`) rather than handed octet's number.
+  return guarded_empty("lattice_aesthetic_cells_per_member_floor", [&]() -> double {
+    const topopt::LatticeTopology topo = live_topology(topology);
+    const double budget = error_budget > 0.0
+                              ? error_budget
+                              : topopt::kAestheticHomogenisationErrorBudget;
+    return topopt::aesthetic_cells_per_member_floor(topo, utilisation, budget);
+  });
+}
+
+double lattice_aesthetic_cells_per_member_hard_floor(const std::string& topology,
+                                                     bool boundary_finish_written) {
+  return guarded_empty("lattice_aesthetic_cells_per_member_hard_floor", [&]() -> double {
+    return topopt::aesthetic_cells_per_member_hard_floor(live_topology(topology),
+                                                         boundary_finish_written);
+  });
+}
+
+double lattice_aesthetic_error_budget_default() {
+  return guarded_empty("lattice_aesthetic_error_budget_default", [&]() -> double {
+    return topopt::kAestheticHomogenisationErrorBudget;
+  });
+}
+
+std::string lattice_aesthetic_density_meaning() {
+  return guarded_empty("lattice_aesthetic_density_meaning", [&]() -> std::string {
+    return std::string(topopt::kAestheticDensityMeaning);
+  });
+}
+
+std::vector<std::string> lattice_algorithm_names() {
+  return guarded_empty("lattice_algorithm_names", [&]() -> std::vector<std::string> {
+    return topopt::lattice_algorithm_names();
+  });
+}
+
+bool lattice_algorithm_is_known(const std::string& name) {
+  return guarded("lattice_algorithm_is_known", [&]() -> bool {
+    topopt::LatticeAlgorithm a{};
+    return topopt::lattice_algorithm_from_name(name.c_str(), a);
+  }, [](const std::string&) { return false; });
+}
+
+bool lattice_algorithm_allows_structural(const std::string& name) {
+  return guarded("lattice_algorithm_allows_structural", [&]() -> bool {
+    topopt::LatticeAlgorithm a{};
+    // An unknown name gets no permission — the caller must resolve it first.
+    if (!topopt::lattice_algorithm_from_name(name.c_str(), a)) return false;
+    // ★ ORGANIC IS THE ONE core refuses under a structural claim, and the reason is
+    // the certification library's cubic tensor rather than anything about tracing.
+    return a != topopt::LatticeAlgorithm::Organic;
+  }, [](const std::string&) { return false; });
 }
 
 }  // namespace topoptbridge

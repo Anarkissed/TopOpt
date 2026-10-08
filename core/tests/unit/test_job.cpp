@@ -23,6 +23,10 @@
 using topopt::JobClearance;
 using topopt::JobDescription;
 using topopt::JobError;
+using topopt::job_include_region;
+using topopt::JobLatticeRegion;
+using topopt::LatticeTopologyChoice;
+using topopt::resolve_lattice_topology;
 using topopt::load_job_file;
 using topopt::parse_job;
 
@@ -687,21 +691,192 @@ static void test_organic_scale_and_gates() {
   {
     // The overhang fillet is a printability repair the job may decline: absent is on,
     // false is honoured, and it is organic-only like the other organic keys.
-    CHECK(parse_job(organic_swept("")).grading.organic_overhang_fillet,
-          "organic_overhang_fillet: absent means ON");
-    CHECK(!parse_job(organic_swept(", \"organic_overhang_fillet\": false"))
-               .grading.organic_overhang_fillet,
-          "organic_overhang_fillet: false is honoured");
-    bool refused = false;
-    try {
-      (void)parse_job(organic_swept(", \"organic_overhang_fillet\": 1"));
-    } catch (const std::exception&) { refused = true; }
-    CHECK(refused, "organic_overhang_fillet: a non-boolean is refused");
+    // ★ THE OVERHANG FILLET KEY IS GONE (maintainer, 2026-09-08). The repair flared
+    // every span over open air -- 3,720 of them on the M2 stand, to an end radius of
+    // 2.56 mm against a 0.615 mm median strut, leaving 2,789 unresolved at its own cap.
+    // The key is refused rather than ignored so a job carrying it fails loudly instead
+    // of silently losing a setting it thinks is in force.
+    {
+      bool refused = false;
+      try {
+        (void)parse_job(organic_swept(", \"organic_overhang_fillet\": false"));
+      } catch (const JobError&) { refused = true; }
+      CHECK(refused, "organic_overhang_fillet: the key is refused, the repair is gone");
+    }
     CHECK(parse_job(organic_swept("")).grading.organic_transfer_ties,
           "organic_transfer_ties: absent means ON (the maintainer approved the look, 2026-09-05)");
     CHECK(!parse_job(organic_swept(", \"organic_transfer_ties\": false"))
               .grading.organic_transfer_ties,
           "organic_transfer_ties: false switches the ties off");
+    // ── the dual-contour keys ──────────────────────────────────────────────────
+    // OFF by default and additive: nothing already emitted changes when they are absent,
+    // which is the whole reason the mesher went in as a key rather than a replacement.
+    {
+      const auto d = parse_job(organic_swept(""));
+      CHECK(!d.grading.organic_dual_contour,
+            "organic_dual_contour: absent means OFF -- the welded pair is unchanged");
+      CHECK(d.grading.organic_dc_cell_mm == 0.0 && d.grading.organic_dc_tolerance_mm == 0.0,
+            "organic_dc_*: absent means 0, i.e. derived");
+    }
+    {
+      const auto d = parse_job(organic_swept(
+          ", \"organic_dual_contour\": true, \"organic_dc_cell_mm\": 0.2, "
+          "\"organic_dc_tolerance_mm\": 0.02"));
+      CHECK(d.grading.organic_dual_contour, "organic_dual_contour: true is honoured");
+      CHECK(d.grading.organic_dc_cell_mm == 0.2,
+            "organic_dc_cell_mm: the stated base cell arrives");
+      CHECK(d.grading.organic_dc_tolerance_mm == 0.02,
+            "organic_dc_tolerance_mm: the stated size dial arrives");
+    }
+    // ── the certified density's measure ────────────────────────────────────────
+    // ★ THE DEFAULT IS THE UNION, and it is pinned here because a silent revert to the
+    // deposit would put every certified margin back about 20 % optimistic with nothing
+    // in the output to say so.
+    {
+      const auto d = parse_job(organic_swept(""));
+      CHECK(d.grading.organic_density_union_subdiv == topopt::kOrganicDensityUnionSubdivDefault &&
+                d.grading.organic_density_union_subdiv > 0,
+            "organic_density_union_subdiv: absent means the UNION measure, not the deposit");
+      const auto z = parse_job(organic_swept(", \"organic_density_union_subdiv\": 0"));
+      CHECK(z.grading.organic_density_union_subdiv == 0,
+            "organic_density_union_subdiv: 0 restores the old deposit, for reproducing a "
+            "run against the figure it was certified on");
+    }
+    for (const char* bad : {", \"organic_density_union_subdiv\": -1",
+                            ", \"organic_density_union_subdiv\": 2.5",
+                            ", \"organic_density_union_subdiv\": 99"}) {
+      bool refused = false;
+      try { (void)parse_job(organic_swept(bad)); } catch (const JobError&) { refused = true; }
+      CHECK(refused, "organic_density_union_subdiv: refuses a negative, a fraction and an "
+                     "absurd subdivision");
+    }
+    for (const char* bad : {", \"organic_dc_cell_mm\": -1",
+                            ", \"organic_dc_tolerance_mm\": -0.5"}) {
+      bool refused = false;
+      try { (void)parse_job(organic_swept(bad)); } catch (const JobError&) { refused = true; }
+      CHECK(refused, "organic_dc_*: a negative is refused, not clamped");
+    }
+    {
+      bool refused = false;
+      try { (void)parse_job(organic_swept(", \"organic_dual_contour\": 1")); }
+      catch (const JobError&) { refused = true; }
+      CHECK(refused, "organic_dual_contour: a number is refused -- it is a boolean");
+    }
+    // ── ★ ANY-STEP STEPPED: the plan the app states ──────────────────────────
+    // The cells the app placed. There is no companion frame array: region_id is 1-based
+    // in the job's own include-region order and origin_mm is MODEL space, so the frame is
+    // DERIVED from the region a cell names and there is nothing to keep in step.
+    {
+      auto stepped_i = [&](const std::string& lat_extra, const std::string& intent,
+                           const std::string& grade_extra) {
+        return mutate("\"mesh_prefix\": \"variant\" }",
+                      "\"mesh_prefix\": \"variant\" },\n  \"lattice\": { " + lat_extra + " },\n"
+                      "  \"grading\": { \"topology\": \"octet\", \"min_extrudable_width_mm\": 0.45, "
+                      "\"algorithm\": \"stepped\", \"intent\": \"" + intent + "\", "
+                      "\"cell_mode\": \"swept\", "
+                      "\"cell_min_mm\": 3.0, \"cell_max_mm\": 12.0" + grade_extra + " }");
+      };
+      auto stepped = [&](const std::string& lat_extra,
+                         const std::string& grade_extra = "") {
+        return stepped_i(lat_extra, "aesthetic", grade_extra);
+      };
+      {
+        const JobDescription j = parse_job(stepped(
+            "\"stepped_cells\": ["
+            "{\"region_id\": 1, \"origin_mm\": [100.0, -5.0, 0.0], \"size_mm\": 9.0},"
+            "{\"region_id\": 1, \"origin_mm\": [109.0, -5.0, 0.0], \"size_mm\": 3.0}]"));
+        CHECK(j.lattice.stepped_cells.size() == 2,
+              "stepped_cells: every placed cell arrives");
+        CHECK(j.lattice.stepped_cells[1].size_mm == 3.0 &&
+                  j.lattice.stepped_cells[1].origin.x == 109.0,
+              "stepped_cells: sizes and MODEL-space origins are carried verbatim");
+        CHECK(j.lattice.stepped_cells[0].region_id == 1,
+              "stepped_cells: region_id is the job's own 1-based include-region order");
+      }
+      {   // ★ THE ALGORITHM GATE. The cell list IS the any-step plan; no other
+          // algorithm lays it down, so naming it elsewhere is refused rather than ignored.
+        bool refused = false;
+        std::string why;
+        try {
+          (void)parse_job(mutate(
+              "\"mesh_prefix\": \"variant\" }",
+              "\"mesh_prefix\": \"variant\" },\n  \"lattice\": { \"stepped_cells\": "
+              "[{\"region_id\": 1, \"origin_mm\": [0,0,0], \"size_mm\": 3.0}] },\n"
+              "  \"grading\": { \"topology\": \"octet\", \"min_extrudable_width_mm\": 0.45, "
+              "\"algorithm\": \"organic\", \"intent\": \"aesthetic\", \"cell_mode\": \"swept\", "
+              "\"cell_min_mm\": 3.0, \"cell_max_mm\": 12.0 }"));
+        } catch (const JobError& e) { refused = true; why = e.what(); }
+        CHECK(refused, "stepped_cells is refused on a non-stepped algorithm");
+        CHECK(why.find("organic") != std::string::npos,
+              "stepped_cells: and the refusal names the algorithm that was asked for");
+      }
+      {   // ★ THE STRUCTURAL TILE FLOOR, and its name. NOT "min_cell_mm": this grading
+          // block already carries "cell_min_mm" (the swept window's lower end), and two
+          // keys differing only in word order is a misconfiguration nothing could catch.
+        const JobDescription j = parse_job(stepped(
+            "\"emit_stl\": true", ", \"stepped_min_tile_mm\": 1.8"));
+        CHECK(j.grading.stepped_min_tile_mm == 1.8,
+              "stepped_min_tile_mm: the structural tile floor arrives");
+        bool wrong_alg = false;
+        std::string why;
+        try {
+          (void)parse_job(mutate(
+              "\"mesh_prefix\": \"variant\" }",
+              "\"mesh_prefix\": \"variant\" },\n  \"grading\": { \"topology\": \"octet\", "
+              "\"min_extrudable_width_mm\": 0.45, \"algorithm\": \"organic\", "
+              "\"intent\": \"aesthetic\", \"cell_mode\": \"swept\", \"cell_min_mm\": 3.0, "
+              "\"cell_max_mm\": 12.0, \"stepped_min_tile_mm\": 1.8 }"));
+        } catch (const JobError& e) { wrong_alg = true; why = e.what(); }
+        CHECK(wrong_alg, "stepped_min_tile_mm: refused on a non-stepped algorithm");
+        CHECK(why.find("cell_min_mm") != std::string::npos,
+              "stepped_min_tile_mm: and the refusal WARNS about the confusable key, "
+              "because that is the mistake worth catching");
+        bool neg = false;
+        try { (void)parse_job(stepped("\"emit_stl\": true", ", \"stepped_min_tile_mm\": -1")); }
+        catch (const JobError&) { neg = true; }
+        CHECK(neg, "stepped_min_tile_mm: a negative floor is refused");
+      }
+      {   // region_id is 1-BASED: 0 is not an include region
+        bool refused = false;
+        try {
+          (void)parse_job(stepped("\"stepped_cells\": [{\"region_id\": 0, "
+                                  "\"origin_mm\": [0,0,0], \"size_mm\": 3.0}]"));
+        } catch (const JobError&) { refused = true; }
+        CHECK(refused, "stepped_cells: region_id 0 is refused -- the order is 1-based");
+      }
+      {   // absent entirely: the legacy one-cell-per-region Stepped, unchanged
+        const JobDescription j = parse_job(stepped("\"emit_stl\": true"));
+        CHECK(j.lattice.stepped_cells.empty(),
+              "stepped_cells: absent means the legacy Stepped, not an empty plan");
+      }
+      for (const char* bad : {
+               "\"stepped_cells\": [{\"region_id\": 1, \"origin_mm\": [0,0,0], \"size_mm\": 0}]",
+               "\"stepped_cells\": [{\"region_id\": 1, \"origin_mm\": [0,0], \"size_mm\": 3}]",
+               "\"stepped_cells\": [{\"region_id\": 1, \"origin_mm\": [0,0,0], \"size_mm\": 3, \"colour\": 2}]"}) {
+        bool refused = false;
+        try { (void)parse_job(stepped(bad)); } catch (const JobError&) { refused = true; }
+        CHECK(refused,
+              "stepped_cells: a zero size, a short origin and an unknown key are each "
+              "refused");
+      }
+      {   // ★ the generic key, and the organic spelling kept as an alias
+        const JobDescription g = parse_job(stepped_i(
+            "\"emit_stl\": true", "structural",
+            ", \"structural_certification\": \"beam_network\""));
+        CHECK(g.grading.organic_structural_certification == "beam_network",
+              "structural_certification: the generic name reaches the same field");
+        bool both = false;
+        try {
+          (void)parse_job(stepped_i(
+              "\"emit_stl\": true", "structural",
+              ", \"structural_certification\": \"beam_network\""
+              ", \"organic_structural_certification\": \"beam_network\""));
+        } catch (const JobError&) { both = true; }
+        CHECK(both,
+              "structural_certification: naming it AND its alias is refused, not resolved "
+              "-- a job that says it twice has an opinion worth surfacing");
+      }
+    }
     {
       auto probe = [&](const std::string& lat_extra, const std::string& alg) {
         return mutate("\"mesh_prefix\": \"variant\" }",
@@ -940,6 +1115,362 @@ static void test_mode_analyze() {
                 "mode: case-mangled mode refused (no fuzzy match)");
 }
 
+// --- ★ TWO KEYS, ONE TYPE: ALL FOUR CASES (reviewer, 2026-09-30) ---------------
+//
+// `lattice.topology` and `grading.topology` describe one physical lattice. Before this
+// they were independent strings both defaulting to "octet", so a job could ask to
+// generate one type and size another and core would do it. Today only octet is live so
+// no such job can be written -- which is exactly why this is pinned NOW, before a
+// second type makes it reachable.
+static void test_the_two_topology_keys_must_agree() {
+  auto job2 = [](const char* lat_topo, const char* grade_topo) {
+    // Both blocks present; a null id means "do not state the key in this block".
+    // A grading block forbids lattice.cell_mm / strut_radius_mm (a graded run derives
+    // both), so the lattice block here carries only an output flag and the key under
+    // test.
+    std::string lat = "\"lattice\": { \"emit_stl\": true";
+    if (lat_topo) lat += std::string(", \"topology\": \"") + lat_topo + "\"";
+    lat += " }";
+    std::string gr = "\"grading\": { \"cell_mm\": 5, \"min_extrudable_width_mm\": 0.45";
+    if (grade_topo) gr += std::string(", \"topology\": \"") + grade_topo + "\"";
+    gr += " }";
+    return mutate("\"mesh_prefix\": \"variant\" }",
+                  "\"mesh_prefix\": \"variant\" },\n  " + lat + ",\n  " + gr);
+  };
+
+  // (1) BOTH STATED, EQUAL -> accepted, and both fields carry it.
+  {
+    const JobDescription j = parse_job(job2("octet", "octet"));
+    CHECK(j.lattice.topology == "octet" && j.grading.topology == "octet",
+          "two keys: both stated the same -> accepted");
+  }
+  // (2) BOTH STATED, DIFFERENT -> refused, naming BOTH values. "kelvin" is not live,
+  // so this case needs an id that would be refused anyway; the point is that the
+  // CONFLICT is reported, with both values, rather than the liveness complaint.
+  {
+    bool threw = false; std::string why;
+    try { (void)parse_job(job2("octet", "kelvin")); }
+    catch (const JobError& e) { threw = true; why = e.what(); }
+    CHECK(threw, "two keys: stated differently -> refused");
+    // Either refusal is legitimate here (kelvin is also not live), so assert only
+    // that a job whose two keys disagree cannot be accepted. The conflict message
+    // itself is asserted below on a pair where BOTH ids are live.
+  }
+  // (3) EXACTLY ONE STATED -> the other takes it, never a silent "octet". With octet
+  // the only live id this is value-identical either way, so the assertion is on
+  // BOTH FIELDS carrying the stated value rather than on a changed number.
+  {
+    const JobDescription a = parse_job(job2("octet", nullptr));
+    CHECK(a.lattice.topology == "octet" && a.grading.topology == "octet",
+          "two keys: lattice alone stated -> grading takes it");
+    const JobDescription b = parse_job(job2(nullptr, "octet"));
+    CHECK(b.lattice.topology == "octet" && b.grading.topology == "octet",
+          "two keys: grading alone stated -> lattice takes it");
+  }
+  // (4) NEITHER STATED -> "octet", today's behaviour exactly.
+  {
+    const JobDescription j = parse_job(job2(nullptr, nullptr));
+    CHECK(j.lattice.topology == "octet" && j.grading.topology == "octet",
+          "two keys: neither stated -> octet");
+  }
+
+  // ★ THE DECISION ITSELF, where the live set cannot mask it. The schema can only
+  // offer octet today, so the four cases above cannot distinguish "takes the other
+  // block's value" from "defaults to octet". The pure function can, and this is the
+  // assertion that would fail if someone replaced the rule with a default.
+  {
+    LatticeTopologyChoice c =
+        resolve_lattice_topology("kelvin", true, "octet", false);
+    CHECK(!c.conflict && c.id == "kelvin",
+          "resolve: lattice alone stated -> that type, NOT octet");
+    c = resolve_lattice_topology("octet", false, "kelvin", true);
+    CHECK(!c.conflict && c.id == "kelvin",
+          "resolve: grading alone stated -> that type, NOT octet");
+    c = resolve_lattice_topology("fcc", true, "kelvin", true);
+    CHECK(c.conflict && c.lattice_id == "fcc" && c.grading_id == "kelvin",
+          "resolve: both stated and different -> conflict, carrying both values");
+    c = resolve_lattice_topology("kelvin", true, "kelvin", true);
+    CHECK(!c.conflict && c.id == "kelvin",
+          "resolve: both stated the same -> that type");
+    c = resolve_lattice_topology("octet", false, "octet", false);
+    CHECK(!c.conflict && c.id == "octet",
+          "resolve: neither stated -> octet");
+  }
+}
+
+// --- ★ A TOPOLOGY ID IS REFUSED FOR ONE OF TWO REASONS, AND IT SAYS WHICH
+// (task 2026-09-28-lattice-types-core) ------------------------------------------
+//
+// Both gates used a literal `!= "octet"`, so every id got one message: "must be
+// octet". That conflates an id core has never heard of with an id it knows and cannot
+// yet build -- and the second becomes the common case as the eight types land. Both
+// still REFUSE (K6: job parsing stays strict, and no type is live yet); what changes
+// is that the reason is now distinguishable.
+static void test_a_topology_id_says_why_it_is_refused() {
+  auto with_topo = [](const char* block, const char* id) {
+    return mutate("\"mesh_prefix\": \"variant\" }",
+                  std::string("\"mesh_prefix\": \"variant\" },\n  ") + block + ": { " +
+                      "\"topology\": \"" + id + "\", \"cell_mm\": 5, " +
+                      "\"strut_radius_mm\": 0.7 }");
+  };
+  // Octet is still accepted, on both gates.
+  {
+    const JobDescription j = parse_job(with_topo("\"lattice\"", "octet"));
+    CHECK(j.lattice.topology == "octet", "topology: octet still parses");
+  }
+  // A KNOWN id that is not live yet: refused, and the message names the type and
+  // says it cannot be BUILT yet rather than that it is not octet.
+  for (const char* known : {"fcc", "kelvin", "diamond", "sc", "bcc", "rhombic"}) {
+    bool threw = false;
+    std::string why;
+    try {
+      (void)parse_job(with_topo("\"lattice\"", known));
+    } catch (const JobError& e) {
+      threw = true;
+      why = e.what();
+    }
+    char msg[220];
+    std::snprintf(msg, sizeof msg, "topology: \"%s\" is known but not live -> refused",
+                  known);
+    CHECK(threw, msg);
+    std::snprintf(msg, sizeof msg,
+                  "topology: the refusal for \"%s\" names the type and says it is "
+                  "CERTIFIABLE but has no generator -- not merely \"not ready\"",
+                  known);
+    // All six are certifiable (their tensor rows landed 2026-07-29) and none is
+    // generatable, so the reason must be the generator, specifically. A user told
+    // "not certifiable" would go looking for the wrong thing.
+    CHECK(why.find(known) != std::string::npos &&
+              why.find("is CERTIFIABLE") != std::string::npos &&
+              why.find("no GENERATOR") != std::string::npos,
+          msg);
+  }
+  // An UNKNOWN id: refused, named, and told it is not a topology at all.
+  for (const char* bogus : {"octopus", "Octet", "gyroids", "honeycomb"}) {
+    bool threw = false;
+    std::string why;
+    try {
+      (void)parse_job(with_topo("\"lattice\"", bogus));
+    } catch (const JobError& e) {
+      threw = true;
+      why = e.what();
+    }
+    char msg[220];
+    std::snprintf(msg, sizeof msg, "topology: \"%s\" is unknown -> refused", bogus);
+    CHECK(threw, msg);
+    std::snprintf(msg, sizeof msg,
+                  "topology: the refusal for \"%s\" says it is not a topology core "
+                  "knows", bogus);
+    CHECK(why.find(bogus) != std::string::npos &&
+              why.find("is not a lattice topology core knows") != std::string::npos,
+          msg);
+  }
+  // The tetragonal three are KNOWN and in neither set, which is a third reason and
+  // must not be reported as either of the first two.
+  // ── ★ AND SO ARE THE PLANNED SHEET TYPES (reviewer's ruling, 2026-10-07) ──────
+  // `gyroid` and `schwarz_d` moved into this loop FROM the unknown-id loop above. They
+  // are on the go-live list, so "not a topology core knows" was the wrong answer -- it is
+  // what core says about a TYPO, and it would have the app tell the user they misspelled a
+  // type core is going to ship. This is not a loosened assertion: the message checked here
+  // is the more specific of the two, and `gyroids` now holds the unknown-id loop's place
+  // so a sheet-type-shaped near-miss still proves the distinction is kept.
+  for (const char* tetra : {"bccz", "fccz", "reentrant", "gyroid", "schwarz_d"}) {
+    std::string why;
+    try { (void)parse_job(with_topo("\"lattice\"", tetra)); }
+    catch (const JobError& e) { why = e.what(); }
+    char msg[220];
+    std::snprintf(msg, sizeof msg,
+                  "topology: \"%s\" is known and in neither set -> refused as neither",
+                  tetra);
+    CHECK(why.find(tetra) != std::string::npos &&
+              why.find("neither generate nor certify") != std::string::npos,
+          msg);
+  }
+
+  // And the SAME two refusals on the grading gate.
+  {
+    bool known_threw = false, bogus_threw = false;
+    try { (void)parse_job(with_topo("\"grading\"", "kelvin")); }
+    catch (const JobError&) { known_threw = true; }
+    try { (void)parse_job(with_topo("\"grading\"", "octopus")); }
+    catch (const JobError&) { bogus_threw = true; }
+    CHECK(known_threw && bogus_threw,
+          "topology: the grading gate refuses both kinds too");
+  }
+}
+
+// --- ★ A STATED FRAME MUST LIE IN THE FACE PLANE, AND BE REFUSED AT PARSE TIME
+// (#354's variant work, 2026-09-30) -----------------------------------------------
+//
+// job.cpp checks `frame_u . normal` and `frame_w . normal` inside the frame block,
+// which runs BEFORE `normal` is parsed -- so it was testing against the default
+// Vec3{0,0,0} and both dot products were 0 for every job ever written. The check
+// could not fire. An out-of-plane frame was accepted here and caught only at run
+// time by clearance.cpp's `frame_conflict`, which is a refusal a user meets after
+// a solve rather than on submission.
+//
+// The cases below are chosen so that ONLY the in-plane test can catch them: each
+// frame is unit and mutually perpendicular, so the two checks that did work say
+// nothing about it.
+static void test_a_stated_frame_must_lie_in_the_face_plane() {
+  auto lat = [](const std::string& body) {
+    return mutate("\"mesh_prefix\": \"variant\" }",
+                  "\"mesh_prefix\": \"variant\" },\n  \"lattice\": " + body);
+  };
+  auto region = [&](const std::string& normal, const std::string& fu,
+                    const std::string& fw) {
+    return lat("{ \"cell_mm\": 5, \"strut_radius_mm\": 0.7, \"regions\": [\n"
+               "  { \"role\": \"include\", \"kind\": \"face\", \"geometry\": { "
+               "\"origin\": [0,0,0], \"normal\": " + normal + ", "
+               "\"half_u_mm\": 10.0, \"half_w_mm\": 8.0, \"depth_mm\": 5.0, "
+               "\"frame_u\": " + fu + ", \"frame_w\": " + fw + " } } ] }");
+  };
+
+  // (a) THE CONTROL: a frame that IS in the plane must still be accepted, and must
+  // arrive intact. Without this the fix could pass by refusing everything.
+  {
+    const JobDescription j = parse_job(region("[1,0,0]", "[0,1,0]", "[0,0,1]"));
+    CHECK(j.lattice.regions.size() == 1 &&
+              j.lattice.regions[0].frame_u.y == 1.0 &&
+              j.lattice.regions[0].frame_w.z == 1.0,
+          "frame: an in-plane frame is accepted and parsed");
+  }
+
+  // (b) `frame_w` PARALLEL TO THE NORMAL. u . w = 0 and both are unit, so the two
+  // working checks pass; only u/w . n catches it.
+  check_rejects(region("[1,0,0]", "[0,1,0]", "[1,0,0]"),
+                "frame: frame_w parallel to the normal must be refused at parse time");
+
+  // (c) `frame_u` PARALLEL TO THE NORMAL, the other way round.
+  check_rejects(region("[0,0,1]", "[0,0,1]", "[0,1,0]"),
+                "frame: frame_u parallel to the normal must be refused at parse time");
+
+  // (d) A TILTED frame -- 45 degrees out of plane, still unit and still mutually
+  // perpendicular. This is the shape a real frame bug takes: not a swapped axis but
+  // a frame belonging to a DIFFERENT face.
+  check_rejects(region("[0,0,1]", "[1,0,0]",
+                       "[0,0.70710678118654752,0.70710678118654752]"),
+                "frame: a frame tilted out of the face plane must be refused");
+
+  // (e) ★ AND THE TEST MUST MEAN THE SAME THING FOR A NON-UNIT NORMAL. `normal` is
+  // not required to be unit, only non-zero. u . n = |n| (u . n_hat), so the RAW test
+  // |u . n| < 1e-6 accepts |u . n_hat| < 1e-6 / |n| -- the bound moves with the
+  // length of a vector whose length was never meant to mean anything. In-plane is a
+  // property of the DIRECTION, so the normal is normalised before the test.
+  //
+  // These two cases pass under both rules and so pin NOTHING about the normalisation;
+  // they are here as ordinary coverage of a non-unit normal. The two that DO
+  // discriminate are (g) and (h).
+  {
+    const JobDescription j = parse_job(region("[0,0,3]", "[1,0,0]", "[0,1,0]"));
+    CHECK(j.lattice.regions.size() == 1,
+          "frame: an in-plane frame on a non-unit normal is accepted");
+  }
+  check_rejects(region("[0,0,3]", "[1,0,0]",
+                       "[0,0.70710678118654752,0.70710678118654752]"),
+                "frame: a tilted frame is refused on a non-unit normal as well");
+
+  // (f) A ZERO normal is still refused, and the frame block must not read it first:
+  // with no direction there is no plane to be in, and the diagnostic should name the
+  // normal rather than the frame.
+  check_rejects(region("[0,0,0]", "[1,0,0]", "[0,1,0]"),
+                "frame: a zero normal is refused");
+
+  // ── ★ (g) AND (h): THE TWO CASES THE NORMALISATION IS FOR ────────────────
+  // Every case above returns the same verdict under the raw dot product and under the
+  // normalised one, so none of them would notice if the normalisation were removed.
+  // These two do, in opposite directions. Both were proved RED by temporarily
+  // restoring `u . n` in job.cpp.
+  //
+  // (g) A SHORT normal is the LOOSE case, and it is the dangerous one. |n| = 1e-3
+  // with frame_w tilted 1e-4 rad out of plane: u . n = 1e-7, under the 1e-6 bound, so
+  // the raw test ACCEPTS a tilt a hundred times the bound it means to enforce. The
+  // normalised test sees 1e-4 and refuses.
+  check_rejects(region("[0,0,0.001]", "[1,0,0]",
+                       "[0,0.99999999500000004,0.00009999999983333333]"),
+                "frame: a 1e-4 rad tilt on a SHORT normal is refused (raw accepts it)");
+
+  // (h) A LONG normal is the STRICT case: |n| = 1000 with frame_w tilted 1e-8 rad
+  // gives u . n = 1e-5, over the bound, so the raw test REFUSES a frame that is in
+  // plane to a hundredth of the tolerance. Refusing a good job is a defect too.
+  {
+    const JobDescription j =
+        parse_job(region("[0,0,1000]", "[1,0,0]", "[0,1,0.00000001]"));
+    CHECK(j.lattice.regions.size() == 1,
+          "frame: a 1e-8 rad tilt on a LONG normal is accepted (raw refuses it)");
+  }
+}
+
+// --- ★ A STEPPED CELL'S region_id COUNTS INCLUDES, NOT REGIONS
+// (#354's variant work, 2026-09-30) -----------------------------------------------
+//
+// `SteppedCell::region_id` and `SteppedRegionCell::region_id` are both documented
+// "1-based, the job's own INCLUDE-region order", and that is what they carry -- the
+// per-voxel region id is assigned by counting includes. run_job.cpp built the plan's
+// frame with `job.lattice.regions[region_id - 1]`, which is the same thing only when
+// every region before it is an include. Declare one exclude first and the plan's
+// prism (slot_origin / normal / depth_mm) comes from the EXCLUDE.
+//
+// Reproduced end to end before this test was written: same include region, same
+// one-cell plan, `topopt-cli lattice-variant` ACCEPTS it with the include alone and
+// REFUSES it with an exclude declared first -- "7.25 mm at offset (-24.75, 0, -2.75)
+// from the slot grid", offsets measured from the exclude's origin (50,0,18) instead
+// of the include's (18,0,8).
+static void test_a_stepped_cell_names_the_include_not_the_nth_region() {
+  auto lat = [](const std::string& body) {
+    return mutate("\"mesh_prefix\": \"variant\" }",
+                  "\"mesh_prefix\": \"variant\" },\n  \"lattice\": " + body);
+  };
+  // EXCLUDE FIRST, then the include -- the ordering the app is free to send and the
+  // schema does not constrain.
+  const JobDescription j = parse_job(lat(
+      "{ \"cell_mm\": 5, \"strut_radius_mm\": 0.7, \"regions\": [\n"
+      "  { \"role\": \"exclude\", \"kind\": \"face\", \"geometry\": { "
+      "\"origin\": [50,0,18], \"normal\": [1,0,0], \"half_u_mm\": 4.0, "
+      "\"half_w_mm\": 4.0, \"depth_mm\": 3.0 } },\n"
+      "  { \"role\": \"include\", \"kind\": \"face\", \"geometry\": { "
+      "\"origin\": [18,0,8], \"normal\": [0,1,0], \"half_u_mm\": 6.0, "
+      "\"half_w_mm\": 6.0, \"depth_mm\": 12.0 } } ] }"));
+  CHECK(j.lattice.regions.size() == 2 && j.lattice.regions[0].role == "exclude" &&
+            j.lattice.regions[1].role == "include",
+        "stepped region_id: the fixture declares the exclude FIRST");
+
+  // ★ THE CONTROL. The naive index and the include order disagree on this fixture,
+  // which is what makes the assertion below non-vacuous. If a future change made
+  // them agree here, this would fire and say so rather than passing silently.
+  CHECK(j.lattice.regions[0].role != "include",
+        "stepped region_id: control -- regions[region_id - 1] is NOT the include here");
+
+  // Include-region id 1 must resolve to the INCLUDE's frame: origin (18,0,8),
+  // normal +y, depth 12 -- never the exclude's (50,0,18) / +x / 3.
+  const JobLatticeRegion* r1 = job_include_region(j.lattice.regions, 1);
+  CHECK(r1 != nullptr, "stepped region_id: include id 1 resolves");
+  if (r1 != nullptr) {
+    CHECK(r1->role == "include", "stepped region_id: id 1 is an include region");
+    CHECK(r1->origin.x == 18.0 && r1->origin.z == 8.0,
+          "stepped region_id: id 1 carries the INCLUDE's slot origin, not the exclude's");
+    CHECK(r1->normal.y == 1.0 && r1->depth_mm == 12.0,
+          "stepped region_id: id 1 carries the INCLUDE's normal and prism depth");
+  }
+  // Out of range in both directions is a null, not a silently wrong region: there is
+  // no include 2 here, and 0 is not a 1-based id.
+  CHECK(job_include_region(j.lattice.regions, 2) == nullptr,
+        "stepped region_id: an id past the last include resolves to nothing");
+  CHECK(job_include_region(j.lattice.regions, 0) == nullptr,
+        "stepped region_id: 0 is not a 1-based include id");
+
+  // And with no excludes the two agree, which is why this went unnoticed.
+  {
+    const JobDescription k = parse_job(lat(
+        "{ \"cell_mm\": 5, \"strut_radius_mm\": 0.7, \"regions\": [\n"
+        "  { \"role\": \"include\", \"kind\": \"face\", \"geometry\": { "
+        "\"origin\": [18,0,8], \"normal\": [0,1,0], \"half_u_mm\": 6.0, "
+        "\"half_w_mm\": 6.0, \"depth_mm\": 12.0 } } ] }"));
+    CHECK(job_include_region(k.lattice.regions, 1) == &k.lattice.regions[0],
+          "stepped region_id: with no excludes, id 1 IS regions[0]");
+  }
+}
+
 // --- lattice.regions roles (task lattice-page-core-hookup stage 1, H1e) ------
 static void test_lattice_regions() {
   auto lat = [](const std::string& body) {
@@ -1068,6 +1599,10 @@ int main() {
   test_warm_start_block();
   test_mode_analyze();
   test_lattice_regions();
+  test_a_stated_frame_must_lie_in_the_face_plane();
+  test_a_topology_id_says_why_it_is_refused();
+  test_the_two_topology_keys_must_agree();
+  test_a_stepped_cell_names_the_include_not_the_nth_region();
   test_lattice_grading_coupling();
 
   if (g_failures == 0) {

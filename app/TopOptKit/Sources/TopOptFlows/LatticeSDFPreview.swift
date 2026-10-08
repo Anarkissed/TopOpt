@@ -23,6 +23,7 @@
 
 import Foundation
 import simd
+import TopOptKit
 
 /// One strut segment in CENTRED, cell-normalised coordinates: the cell spans
 /// `[-0.5, 0.5]³` and endpoints are the strut ends in that frame. The shader folds a
@@ -145,6 +146,52 @@ public enum LatticePreviewBanner: Equatable, Sendable {
         }
     }
 
+    /// ★ THE CAPTION ON SCREEN (maintainer, 2026-09-06: "a massive squircle of text
+    /// that is over a bunch of other assets … only above the minimized Selections
+    /// window"). Three or four words over the Selections chip; `text` — the whole
+    /// sentence, every counter and reason — sits behind the (i) beside it. An
+    /// `.empty` reason is already one short sentence and is shown as it is.
+    public var caption: String {
+        switch self {
+        case .empty(let t): return t
+        case .drawing(let t):
+            if t.hasPrefix("★") { return "★ Preview differs from run" }
+            if t.contains("shown as the doubled ladder") { return "Lattice preview · stand-in" }
+            if t.contains(Self.planNotSentSteppedSentence) { return Self.planNotSentSteppedCaption }
+            if t.contains(Self.planNotSentSentence) { return Self.planNotSentCaption }
+            return "Lattice preview · not the export"
+        }
+    }
+
+    /// ★★ RULING 6 (2026-10-03): the one plain line while a Default Grade or Stepped plan
+    /// is drawn but not sent. Not "coarser": the line says whose layout it is, not which way
+    /// it differs — the run's own layout is not always coarser, and on 3418E167 (Stepped, no
+    /// plan) core lays none at all: it refuses ("the stepped algorithm derived no region cell",
+    /// frozen CLI 436819f6, 2026-10-05). The full sentence sits behind the (i).
+    public static let planNotSentCaption = "Run builds core's own layout"
+    public static let planNotSentSentence =
+        "the run currently builds core's own cell layout, not the cells shown here — "
+        + "they are not sent to it yet"
+    /// ★★ RULING 1 (reviewer, 2026-10-07): "the Stepped preview's line says plainly that the run
+    /// currently lays one cell size per region and can refuse thin walls" — no composed copy of
+    /// core's rule, no pre-send refusal. No plan reaches a Stepped run (`sendsPlan` is Default
+    /// Grade's only); core lays ONE cell per region, max(W_med/5, w/φ(median ρ))
+    /// (run_job.cpp:4117-4120), and refuses when no region derives one (6459-6474) — his
+    /// 3418E167, after 171 s. Default Grade keeps the line above.
+    public static let planNotSentSteppedCaption = "Run: one cell per region"
+    public static let planNotSentSteppedSentence =
+        "the run currently lays one cell size per region, not the cells shown here — "
+        + "and can refuse walls too thin for it"
+    /// The plan-not-sent line for an algorithm: Stepped's own, else Default Grade's.
+    public static func planNotSentLine(algorithm: String) -> (caption: String, sentence: String) {
+        algorithm == LatticeCellTransition.stepped.coreAlgorithm
+            ? (planNotSentSteppedCaption, planNotSentSteppedSentence)
+            : (planNotSentCaption, planNotSentSentence)
+    }
+    /// The notice's width cap, in points: the Selections chip's column, short of the
+    /// iPad chip that starts ~310 pt from the left edge on the 13-inch iPad.
+    public static let noticeMaxWidthPT: Double = 280
+
     public var isEmpty: Bool {
         if case .empty = self { return true }
         return false
@@ -157,7 +204,11 @@ public enum LatticePreviewBanner: Equatable, Sendable {
     /// "marched": a user who turned a toggle on is owed a sentence they can act on.
     public static func make(previewOn: Bool,
                             hasModel: Bool,
-                            scene: LatticeSDFPreviewSummary?) -> LatticePreviewBanner? {
+                            scene: LatticeSDFPreviewSummary?,
+                            // ★ ruling 6's test seams; production reads core's probe and the switch
+                            plansWired: Bool? = nil,
+                            plansEnabled: Bool = LatticeSteppedCellWire.defaultGradePlansEnabled)
+        -> LatticePreviewBanner? {
         guard previewOn else { return nil }
         guard hasModel else {
             return .empty("No lattice to show — there is no model open yet.")
@@ -179,7 +230,20 @@ public enum LatticePreviewBanner: Equatable, Sendable {
         // a depth set too shallow, or a face whose slab sits outside the solid.
         // Reporting "this part has no inside" for it would be a confident wrong
         // answer, and it is the one the user would act on.
+        // ★ ruling (g): what the emission dropped, said in BOTH branches — never silent.
+        let dropped = LatticeWallsWithoutShape.text(faces: scene.skippedFaces,
+                                                    regions: scene.skippedRegionNames,
+                                                    ending: .notShown)
         guard scene.interiorVoxelCount > 0 else {
+            // The drop first — it has no depth fix. The depth advice only for include walls that
+            // WERE emitted and reached no material: the stage clips an emission with no include
+            // wall to NOTHING (`.latticeNothing`), so every wall may be among the dropped.
+            // Kept near §5c's ~25 words.
+            if let dropped {
+                return .empty("Nothing to lattice — " + dropped
+                              + (scene.hasIncludeRegion
+                                 ? ". The rest reach no material: try a deeper slab." : "."))
+            }
             return .empty("Nothing to lattice — the faces you marked do not reach "
                           + "any material. Try a deeper slab.")
         }
@@ -187,13 +251,59 @@ public enum LatticePreviewBanner: Equatable, Sendable {
         // LESS than was marked, and the whole point of masking the preview is
         // that it stops over-promising — under-promising in silence is the same
         // defect wearing the other sign.
-        if scene.skippedFaces > 0 {
-            return .drawing(scene.previewLabel + " · "
-                            + "\(scene.skippedFaces) marked "
-                            + (scene.skippedFaces == 1 ? "face has" : "faces have")
-                            + " no shape to lattice and are not shown")
+        var label = scene.previewLabel
+        // ★ ORGANIC FROM THE RUN — say where the picture came from, and FAIL LOUDLY
+        // if it is not the object the run certified (§10).
+        if let src = scene.organicSpanSource {
+            label += String(format: " · %d struts from the run's emitted spans", src.count)
         }
-        return .drawing(scene.previewLabel)
+        // ★ THE RECEIPT'S OWN NUMBERS, CARRIED NOT JUDGED (addendum 2026-09-03):
+        // survival, pieces, largest piece, joins refused. Policy stays out.
+        if let r = scene.organicReceiptSummary { label += " · " + r }
+        if let bad = scene.organicReceiptMismatch {
+            label = "★ PREVIEW DOES NOT MATCH THE RUN — " + bad + "  " + label
+        }
+        // ★★★ AND WHICH ALGORITHM THIS PICTURE IS OF (maintainer, 2026-08-21: "connect
+        // the different algorithms"; and 2026-08-19: "the preview needs to work and show
+        // exactly like the algorithm would create the lattice").
+        //
+        // ★ THE MARCHER CAN DRAW EXACTLY ONE OF THE THREE, AND THE REASON IS THE CELL
+        // TEXTURE'S SHAPE, not an oversight. It carries a BASE CELL and an integer
+        // DYADIC LEVEL per cell, and the shader recovers which cell it stands in by
+        // integer division — that encoding is what makes coarse and fine cells share
+        // nodes, and it is exactly what DOUBLED is.
+        //
+        // ★★ STEPPED IS NO LONGER IN THIS SENTENCE (2026-08-22). It was, on the
+        // reasoning that its verbatim cells are arbitrary reals no (base, level) pair
+        // can express — true of that encoding, and the encoding changed: the cell
+        // texture now carries a real SIZE per base cell. Stepped is drawn as itself, so
+        // claiming otherwise here would be the same divergence in the other direction.
+        //
+        // ★ ORGANIC REMAINS. Its curves are traced and baked to a distance field, but
+        // the march does not sample that field yet.
+        //
+        // ★ SO IT SAYS SO. Drawing the doubled ladder under another algorithm's name is
+        // precisely the preview/run divergence this branch has spent a week closing —
+        // but drawing NOTHING would take away the only picture he has of the regions,
+        // the depths and the densities, all of which are algorithm-independent. The
+        // honest middle is to draw it and label it, in one sentence, every frame.
+        if !scene.algorithmDrawnFaithfully, !scene.algorithmName.isEmpty {
+            label += " · shown as the doubled ladder; the run builds the "
+                   + "\(scene.algorithmName) lattice"
+            // ★ AND WHY (maintainer, 2026-09-05: "have you implemented the organic
+            // lattices on the part preview yet?" — it was, and the tensor never came)
+            if let why = scene.organicNotDrawnReason { label += " — " + why }
+        }
+        // ★★ RULING 6: a Default Grade or Stepped plan drawn here that the job does not carry.
+        if LatticeSteppedCellWire.runBuildsCoresOwnLayout(
+            algorithm: scene.algorithmName, wired: plansWired ?? TopOptKit.steppedCellsWired,
+            enabled: plansEnabled) {
+            label += " · " + planNotSentLine(algorithm: scene.algorithmName).sentence
+        }
+        // ★ The sentence is `LatticeWallsWithoutShape`'s — the variant notice's, so the two
+        // cannot drift (ruling g); a single face now reads "is not shown", not "are".
+        if let dropped { return .drawing(label + " · " + dropped) }
+        return .drawing(label)
     }
 }
 
@@ -206,17 +316,45 @@ public struct LatticePreviewSummaryValues: Equatable, Sendable {
     /// with an interior, and no skipped faces.
     public var partInteriorVoxelCount: Int
     public var skippedFaces: Int
+    /// ★ ruling (g): face regions (by name) the emission could not use
+    public var skippedRegionNames: [String]
+    /// An include region was emitted — the stage clips to nothing without one.
+    public var hasIncludeRegion: Bool
+    /// The algorithm the RUN will use, in core's own words ("doubled" / "stepped" /
+    /// "organic"). Empty means "not stated", which core resolves to doubled — and a
+    /// preview of doubled under a job that says doubled needs no caveat.
+    public var algorithmName: String
+    /// Whether the picture on screen IS that algorithm. False adds one sentence to the
+    /// banner; it never suppresses the preview. See `LatticePreviewBanner.make`.
+    public var algorithmDrawnFaithfully: Bool
     public init(interiorVoxelCount: Int, previewLabel: String,
-                partInteriorVoxelCount: Int? = nil, skippedFaces: Int = 0) {
+                partInteriorVoxelCount: Int? = nil, skippedFaces: Int = 0,
+                skippedRegionNames: [String] = [],
+                hasIncludeRegion: Bool = true,
+                algorithmName: String = "",
+                algorithmDrawnFaithfully: Bool = true) {
         self.interiorVoxelCount = interiorVoxelCount
         self.previewLabel = previewLabel
         self.partInteriorVoxelCount = partInteriorVoxelCount ?? interiorVoxelCount
         self.skippedFaces = skippedFaces
+        self.skippedRegionNames = skippedRegionNames
+        self.hasIncludeRegion = hasIncludeRegion
+        self.algorithmName = algorithmName
+        self.algorithmDrawnFaithfully = algorithmDrawnFaithfully
     }
 }
 
 /// What a baked scene can answer for the banner. `LatticeSDFScene` conforms.
 public protocol LatticeSDFPreviewSummary {
+    /// ★ ORGANIC FROM THE RUN (2026-09-02): what the organic field was baked from, and
+    /// the §10 verdict. nil on every summary that is not a scene baked from spans.
+    var organicSpanSource: (count: Int, lengthMM: Double)? { get }
+
+
+    var organicReceiptMismatch: String? { get }
+    var organicReceiptSummary: String? { get }
+    /// ★ Why organic was asked for and not drawn (2026-09-05); nil otherwise.
+    var organicNotDrawnReason: String? { get }
     /// Voxels of the part's own interior in the baked occupancy grid. Zero means the
     /// solid voxelisation found nothing to fill — there is no lattice, at any setting.
     var interiorVoxelCount: Int { get }
@@ -224,7 +362,32 @@ public protocol LatticeSDFPreviewSummary {
     var partInteriorVoxelCount: Int { get }
     /// Faces marked by the user that the emission could not use.
     var skippedFaces: Int { get }
+    /// ★ ruling (g): face regions (by name) the emission could not use — a REQUIREMENT, so
+    /// no conformer can forget it.
+    var skippedRegionNames: [String] { get }
+    /// An include region was emitted (the stage clips to nothing without one) — a REQUIREMENT.
+    var hasIncludeRegion: Bool { get }
     var previewLabel: String { get }
+    /// The algorithm the RUN will use, in core's own words. Defaulted so every
+    /// existing conformer is unchanged and keeps meaning "doubled, faithfully".
+    var algorithmName: String { get }
+    var algorithmDrawnFaithfully: Bool { get }
+}
+
+/// Default: nothing to say — so no conformer but the scene has to know about spans.
+public extension LatticeSDFPreviewSummary {
+    var organicNotDrawnReason: String? { nil }
+}
+public extension LatticeSDFPreviewSummary {
+    var organicSpanSource: (count: Int, lengthMM: Double)? { nil }
+    var organicReceiptMismatch: String? { nil }
+    var organicReceiptSummary: String? { nil }
+}
+
+
+public extension LatticeSDFPreviewSummary {
+    var algorithmName: String { "" }
+    var algorithmDrawnFaithfully: Bool { true }
 }
 
 extension LatticePreviewSummaryValues: LatticeSDFPreviewSummary {}
@@ -243,7 +406,11 @@ public struct LatticeSDFPreview: Equatable, Sendable {
         self.segments = Self.centeredSegments(lattice)
     }
 
-    public init(latticeID: String) { self.init(lattice: LatticeType.named(latticeID)) }
+    /// nil for an id with no strut table (item a, 2026-10-02) — never octet's struts in disguise.
+    public init?(latticeID: String) {
+        guard let lattice = LatticeType.named(latticeID) else { return nil }
+        self.init(lattice: lattice)
+    }
 
     // MARK: honesty (bar P1)
 

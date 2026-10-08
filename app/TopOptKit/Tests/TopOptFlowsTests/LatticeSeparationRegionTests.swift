@@ -194,15 +194,21 @@ final class LatticeSeparationRegionTests: XCTestCase {
                        "the row chip and the drawer headline are the same words")
     }
 
-    /// …and it is not merely unshown: the emitted job carries no region as a
-    /// lattice region, so nothing downstream can act on a choice core cannot read.
-    func testNoRegionIsEverEmittedAsALatticeRegion() {
+    /// ★ RE-PINNED 2026-09-22 (his 2026-09-21: "Keep clear IS off on group C … the two
+    /// latticed walls are ALSO in Group C … there's a bug"; commit 3bc36740 "face regions
+    /// reach the run"). A face REGION's members are emitted as one face prism each under
+    /// the region's own key — the old PR 331 §6 rule ("no region is ever a lattice
+    /// region") is gone. The plain face plus the union's two members ⇒ three prisms.
+    func testARegionsMembersAreEmittedAsFacePrismsUnderTheRegionsKey() {
         let (p, gid, rid) = projectWithARegionAndAFace()
-        p.lattice.selectableRoles[LatticeSelectableRef.region(group: gid, region: rid).key] = .include
+        let ref = LatticeSelectableRef.region(group: gid, region: rid)
+        p.lattice.selectableRoles[ref.key] = .include
         let faceRegions = p.latticeJobRegions().regions
-        XCTAssertEqual(faceRegions.count, 1,
-                       "only the plain FACE becomes a lattice region")
-        XCTAssertEqual(faceRegions.first?.faceID, 1)
+        XCTAssertEqual(faceRegions.count, 3,
+                       "the plain face and the region's two member faces, one prism each")
+        XCTAssertEqual(Set(faceRegions.compactMap(\.faceID)), [1, 3, 8])
+        XCTAssertEqual(faceRegions.filter { $0.selectableKey == ref.key }.count, 2,
+                       "the members ride under the REGION's key, so its depth and expand apply")
         // The protection side DOES carry it — that is PR 331 §6's "a grid split
         // grades what is FROZEN, not what is LATTICED", and it still holds.
         XCTAssertEqual(p.faceProtectionSpecs().regionIDs, [rid])

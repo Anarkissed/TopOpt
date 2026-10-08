@@ -1,0 +1,112 @@
+{
+ "_comment": "Ruling 4: a straddled seam. The two cells overlap by 1.5 x 1.5 mm, and each centre is nearer its OWN region's face plane -- cell 0's centre (7.5, 3, 9.5) is 3 mm from A's y=0 plane against 7.5 from B's x=0, and cell 1's is the mirror. Both sit at offset 0 on their own 6 mm grid, as R6 requires. ACCEPTED.",
+ "bake_build_orientation": "off",
+ "grading": {
+  "algorithm": "doubled",
+  "cell_max_mm": 3.0,
+  "cell_min_mm": 3.0,
+  "cell_mode": "swept",
+  "min_extrudable_width_mm": 0.45,
+  "topology": "octet"
+ },
+ "lattice": {
+  "emit_3mf": false,
+  "emit_stl": true,
+  "min_extrudable_width_mm": 0.45,
+  "regions": [
+   {
+    "role": "include",
+    "kind": "face",
+    "geometry": {
+     "origin": [
+      4.5,
+      0.0,
+      6.5
+     ],
+     "normal": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "half_u_mm": 6.0,
+     "half_w_mm": 6.0,
+     "depth_mm": 12.0
+    }
+   },
+   {
+    "role": "include",
+    "kind": "face",
+    "geometry": {
+     "origin": [
+      0.0,
+      4.5,
+      6.5
+     ],
+     "normal": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "half_u_mm": 6.0,
+     "half_w_mm": 6.0,
+     "depth_mm": 12.0
+    }
+   }
+  ],
+  "skin": "none",
+  "stepped_cells": [
+   {
+    "region_id": 1,
+    "origin_mm": [
+     4.5,
+     0.0,
+     6.5
+    ],
+    "size_mm": 6.0
+   },
+   {
+    "region_id": 2,
+    "origin_mm": [
+     0.0,
+     4.5,
+     6.5
+    ],
+    "size_mm": 6.0
+   }
+  ],
+  "topology": "octet"
+ },
+ "loads": {
+  "anchor_face_ids": [
+   2
+  ],
+  "build_dir": [
+   0,
+   0,
+   1
+  ],
+  "groups": [
+   {
+    "face_ids": [
+     9
+    ],
+    "force": [
+     0.0,
+     0.0,
+     -400.0
+    ]
+   }
+  ],
+  "layer_height_mm": 0.2,
+  "minimize_plastic": true
+ },
+ "material": "PLA",
+ "mode": "lattice_part",
+ "model": "dead_parity_tab.stl",
+ "output": {
+  "mesh_format": "stl",
+  "mesh_prefix": "dp",
+  "report": "report.json"
+ },
+ "resolution": 48
+}

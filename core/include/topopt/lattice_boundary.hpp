@@ -313,4 +313,33 @@ std::vector<char> lattice_certification_mask(const LatticeBoundary& boundary,
                                              double iso, const Vec3& region_origin,
                                              double cell_mm);
 
+// ── ★ ONE DEFINITION OF THE SET A LATTICE IS ACTUALLY BUILT ON (reviewer,
+// 2026-09-30) ───────────────────────────────────────────────────────────────────
+// The certification mask INTERSECTED with the grading law's posture. Both terms are
+// necessary and they exclude different voxels:
+//   - the certification mask drops a voxel whose owning cell cannot overlap the
+//     allowed region, or whose centre is in a keep-out or outside the include union;
+//   - the posture drops a voxel the LAW kept solid (too-thin fallback, a density
+//     outside the certifiable band, or simply not a candidate).
+//
+// This existed only as five lines inline in run_job.cpp's organic block, so the
+// organic size probe — which has to forecast the run — synthesised over the posture
+// ALONE and was working on a strictly larger set than the run. That is the domain
+// half of #354's "the probe and the run disagree on dead walls": the `cand` -> posture
+// move corrected earlier was a no-op, because for organic every candidate voxel is
+// masked; THIS is the term that was missing.
+//
+// `posture_mask` empty means "ungraded": the certification mask is the whole answer,
+// which is what the run does on an ungraded variant. `posture_rejected`, when given,
+// receives |posture \ certification| — the count the run reports as
+// `dropped_by_overlap`: voxels the law posted a lattice on that the shared predicate's
+// cell-overlap proof rejected. They are COUNTED, never hidden.
+std::vector<char> lattice_synthesis_domain(const LatticeBoundary& boundary,
+                                           const VoxelGrid& grid,
+                                           const std::vector<double>& density,
+                                           double iso, const Vec3& region_origin,
+                                           double cell_mm,
+                                           const std::vector<char>& posture_mask,
+                                           long long* posture_rejected = nullptr);
+
 }  // namespace topopt

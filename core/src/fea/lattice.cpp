@@ -434,7 +434,7 @@ double lattice_cell_printability_floor_mm(LatticeTopology topo,
   // The thinnest strut at any cell size occurs at the band's LOW end (diameter is
   // monotone in rho), and diameter is exactly linear in cell size, so the floor is
   // the stated width divided by the diameter at a UNIT cell.
-  const double phi_lo = octet_strut_diameter_mm(lattice_rho_min(topo), 1.0);
+  const double phi_lo = lattice_strut_diameter_mm(topo, lattice_rho_min(topo), 1.0);
   return min_extrudable_width_mm / phi_lo;
 }
 
@@ -454,12 +454,12 @@ double lattice_min_density_for_strut(LatticeTopology topo, double cell_size_mm,
         "lattice_min_density_for_strut: topology has no certifiable band");
 
   // The band floor already prints — nothing lighter is admissible anyway.
-  if (octet_strut_diameter_mm(rho_lo, cell_size_mm) >= min_extrudable_width_mm)
+  if (lattice_strut_diameter_mm(topo, rho_lo, cell_size_mm) >= min_extrudable_width_mm)
     return rho_lo;
   // Not even the band ceiling prints at this cell — there is no in-band answer, and
   // returning the ceiling would be a silent lie about a strut that comes out under
   // one bead. The contract is a negative sentinel the caller must test.
-  if (octet_strut_diameter_mm(rho_hi, cell_size_mm) < min_extrudable_width_mm)
+  if (lattice_strut_diameter_mm(topo, rho_hi, cell_size_mm) < min_extrudable_width_mm)
     return -1.0;
 
   // BISECT on the piecewise-linear measured table. It is monotone non-decreasing in
@@ -471,7 +471,7 @@ double lattice_min_density_for_strut(LatticeTopology topo, double cell_size_mm,
   double lo = rho_lo, hi = rho_hi;
   for (int it = 0; it < 200; ++it) {
     const double mid = 0.5 * (lo + hi);
-    if (octet_strut_diameter_mm(mid, cell_size_mm) >= min_extrudable_width_mm)
+    if (lattice_strut_diameter_mm(topo, mid, cell_size_mm) >= min_extrudable_width_mm)
       hi = mid;
     else
       lo = mid;
@@ -514,7 +514,7 @@ LatticeCellDerivation lattice_derive_cell_for_member(
 
   // The two bounds. phi is monotone in rho, so the band's top gives the smallest
   // printable cell; N* against the measured width gives the largest homogenizable one.
-  const double phi_hi = octet_strut_diameter_mm(d.band_rho_max, 1.0);
+  const double phi_hi = lattice_strut_diameter_mm(topo, d.band_rho_max, 1.0);
   d.min_printable_cell_mm = min_extrudable_width_mm / phi_hi;
   d.min_member_width_mm = d.cells_per_member_floor * d.min_printable_cell_mm;
   // BOTH floors, always — see the declaration. The caller must never have to know
@@ -557,7 +557,8 @@ LatticeCellDerivation lattice_derive_cell_for_member(
   d.densest_cell_size_mm = d.min_printable_cell_mm;
   d.densest_relative_density = lightest_or_ceiling(d.densest_cell_size_mm);
   d.densest_strut_diameter_mm =
-      octet_strut_diameter_mm(d.densest_relative_density, d.densest_cell_size_mm);
+      lattice_strut_diameter_mm(topo, d.densest_relative_density,
+                                d.densest_cell_size_mm);
   d.densest_cells_per_member = member_width_mm / d.densest_cell_size_mm;
 
   // ── COARSEST end: exactly N* cells across, at the lightest density that still
@@ -566,8 +567,8 @@ LatticeCellDerivation lattice_derive_cell_for_member(
   if (std::isfinite(d.max_homogenizable_cell_mm)) {
     d.lightest_cell_size_mm = d.max_homogenizable_cell_mm;
     d.lightest_relative_density = lightest_or_ceiling(d.lightest_cell_size_mm);
-    d.lightest_strut_diameter_mm = octet_strut_diameter_mm(
-        d.lightest_relative_density, d.lightest_cell_size_mm);
+    d.lightest_strut_diameter_mm = lattice_strut_diameter_mm(
+        topo, d.lightest_relative_density, d.lightest_cell_size_mm);
     d.lightest_cells_per_member = member_width_mm / d.lightest_cell_size_mm;
   } else {
     d.lightest_cell_size_mm = d.densest_cell_size_mm;
@@ -624,16 +625,212 @@ CubicTensor lattice_cubic_tensor(LatticeTopology topo, double rho,
   return out;
 }
 
-bool lattice_stated_density_unprintable(double stated_relative_density,
+bool lattice_stated_density_unprintable(LatticeTopology topo,
+                                        double stated_relative_density,
                                         double cell_mm,
                                         double min_extrudable_width_mm) {
   // ★ THE UNREACHABILITY, AND IT IS THE FIRST LINE ON PURPOSE. Nothing below can
   // run for a job that states no density, so no later change to the arithmetic
-  // can make an absent override refusable.
+  // can make an absent override refusable. It is also what keeps this function from
+  // THROWING for a type with no diameter law when nothing was stated: an absent
+  // override is not a question about the type.
   if (!(stated_relative_density > 0.0)) return false;
   if (!(cell_mm > 0.0) || !(min_extrudable_width_mm > 0.0)) return false;
-  const double strut = octet_strut_diameter_mm(stated_relative_density, cell_mm);
+  const double strut =
+      lattice_strut_diameter_mm(topo, stated_relative_density, cell_mm);
   return strut + 1e-12 < min_extrudable_width_mm;
+}
+
+
+// ── ★ ONE PLACE THAT TURNS A JOB'S TOPOLOGY STRING INTO THE ENUM ───────────
+// run_job.cpp hard-codes `LatticeTopology::Octet` in 23 places with the comment "job
+// schema restricts topology to octet" (K0 inventory §3). That comment is true today
+// and stops being true the moment the first type goes live, and every one of those
+// sites is inside an anonymous namespace where no test can reach it. This is the seam:
+// the ids are the ones `lattice_topology_name` emits, so the mapping is that function's
+// inverse and cannot drift from it -- `test_strut_diameter_per_type` asserts the round
+// trip over all ten.
+//
+// An unknown id REFUSES, naming what it was given. It never falls back to octet.
+double lattice_density_from_strut(LatticeTopology topo, double cell_mm,
+                                double strut_radius_mm) {
+  switch (topo) {
+    case LatticeTopology::Octet:
+      return octet_relative_density(cell_mm, strut_radius_mm);
+    case LatticeTopology::SimpleCubic:
+    case LatticeTopology::Bcc:
+    case LatticeTopology::Fcc:
+    case LatticeTopology::Diamond:
+    case LatticeTopology::Kelvin:
+    case LatticeTopology::Rhombic:
+    case LatticeTopology::Bccz:
+    case LatticeTopology::Fccz:
+    case LatticeTopology::Reentrant:
+      break;
+  }
+  throw LatticeDiameterLawNotMeasured(
+      std::string("lattice_density_from_strut: no measured density law for \"") +
+      lattice_topology_name(topo) +
+      "\" yet. This is the (cell, radius) -> rho direction of the same measurement as "
+      "lattice_strut_diameter_mm, and octet's voxelisation is NOT used for another "
+      "type (R1): the type's own cell has to be voxelised and landed first.");
+}
+
+double lattice_aesthetic_density_ceiling(LatticeTopology topo) {
+  switch (topo) {
+    case LatticeTopology::Octet:
+      return octet_aesthetic_density_ceiling();
+    case LatticeTopology::SimpleCubic:
+    case LatticeTopology::Bcc:
+    case LatticeTopology::Fcc:
+    case LatticeTopology::Diamond:
+    case LatticeTopology::Kelvin:
+    case LatticeTopology::Rhombic:
+    case LatticeTopology::Bccz:
+    case LatticeTopology::Fccz:
+    case LatticeTopology::Reentrant:
+      break;
+  }
+  throw LatticeAestheticCeilingNotMeasured(
+      std::string("lattice_aesthetic_density_ceiling: no measured aesthetic density "
+                  "ceiling for \"") +
+      lattice_topology_name(topo) +
+      "\" yet (R11). The ceiling is the same geometry ruling D set for octet -- strut "
+      "diameter at 20 % of the cell -- bisected through THIS type's own measured "
+      "diameter table, so it cannot be stated until that table exists. Octet's "
+      "ceiling is not used for another type.");
+}
+
+LatticeTopologyChoice resolve_lattice_topology(const std::string& lattice_id,
+                                               bool lattice_stated,
+                                               const std::string& grading_id,
+                                               bool grading_stated) {
+  LatticeTopologyChoice out;
+  out.lattice_id = lattice_id;
+  out.grading_id = grading_id;
+  if (lattice_stated && grading_stated) {
+    if (lattice_id == grading_id) {
+      out.id = lattice_id;
+    } else {
+      out.conflict = true;   // the caller refuses, naming both
+    }
+    return out;
+  }
+  if (lattice_stated) { out.id = lattice_id; return out; }
+  if (grading_stated) { out.id = grading_id; return out; }
+  out.id = "octet";          // neither stated: today's behaviour
+  return out;
+}
+
+const char* lattice_type_readiness_name(LatticeTypeReadiness r) {
+  switch (r) {
+    case LatticeTypeReadiness::Live:           return "live";
+    case LatticeTypeReadiness::NotGeneratable: return "certifiable, not yet generatable";
+    case LatticeTypeReadiness::NotCertifiable: return "generatable, not yet certifiable";
+    case LatticeTypeReadiness::NotEither:      return "neither generatable nor certifiable";
+    case LatticeTypeReadiness::UnknownId:      return "not a lattice topology core knows";
+  }
+  return "unknown";
+}
+
+const char* lattice_type_readiness_plain(LatticeTypeReadiness r) {
+  // Maintainer-facing wording, given by the reviewer 2026-09-30. "Strength-checked"
+  // is the plain word for CERTIFIABLE and "buildable" for GENERATABLE, in that order,
+  // because that is the order the picker greys them out in.
+  switch (r) {
+    case LatticeTypeReadiness::Live:           return "Ready to use";
+    case LatticeTypeReadiness::NotGeneratable: return "Strength-checked, but not buildable yet";
+    case LatticeTypeReadiness::NotCertifiable: return "Buildable, but not strength-checked yet";
+    case LatticeTypeReadiness::NotEither:      return "Not buildable or strength-checked yet";
+    case LatticeTypeReadiness::UnknownId:      return "Not a lattice type";
+  }
+  return "Not a lattice type";
+}
+
+const std::vector<std::string>& lattice_planned_topology_ids() {
+  // Deleted at K2: once a type is in the enum, the sets answer for it and a name here
+  // would shadow the real answer.
+  static const std::vector<std::string> planned{"gyroid", "schwarz_d"};
+  return planned;
+}
+
+LatticeTypeReadiness lattice_type_readiness(
+    const std::string& id, const std::vector<std::string>& generatable,
+    const std::vector<std::string>& certifiable) {
+  bool known = false;
+  for (LatticeTopology t : {LatticeTopology::Octet, LatticeTopology::SimpleCubic,
+                            LatticeTopology::Bcc, LatticeTopology::Fcc,
+                            LatticeTopology::Diamond, LatticeTopology::Kelvin,
+                            LatticeTopology::Rhombic, LatticeTopology::Bccz,
+                            LatticeTopology::Fccz, LatticeTopology::Reentrant})
+    if (id == lattice_topology_name(t)) { known = true; break; }
+  // A PLANNED id is one core knows and has not built: not a typo, so not UnknownId.
+  if (!known)
+    for (const std::string& n : lattice_planned_topology_ids())
+      if (id == n) { known = true; break; }
+  bool gen = false, cert = false;
+  for (const std::string& n : generatable) if (n == id) { gen = true; break; }
+  for (const std::string& n : certifiable) if (n == id) { cert = true; break; }
+  // An id in either set is a type core knows, whatever the enum says -- the sets are
+  // built from the enum, and a test may hand in its own.
+  if (!known && !gen && !cert) return LatticeTypeReadiness::UnknownId;
+  if (gen && cert) return LatticeTypeReadiness::Live;
+  if (cert) return LatticeTypeReadiness::NotGeneratable;
+  if (gen) return LatticeTypeReadiness::NotCertifiable;
+  return LatticeTypeReadiness::NotEither;
+}
+
+LatticeTopology lattice_topology_from_id(const std::string& id) {
+  for (LatticeTopology t : {LatticeTopology::Octet, LatticeTopology::SimpleCubic,
+                            LatticeTopology::Bcc, LatticeTopology::Fcc,
+                            LatticeTopology::Diamond, LatticeTopology::Kelvin,
+                            LatticeTopology::Rhombic, LatticeTopology::Bccz,
+                            LatticeTopology::Fccz, LatticeTopology::Reentrant})
+    if (id == lattice_topology_name(t)) return t;
+  throw std::invalid_argument(
+      "lattice_topology_from_id: unknown lattice topology \"" + id +
+      "\". It is not one of the ids lattice_topology_name emits, and there is no "
+      "default: guessing octet would size another type with octet's measured table.");
+}
+
+// ── ★ THE ONE DEFINITION of density -> strut diameter, PER TYPE ─────────────
+// R1 (docs/design/lattice-types/00-decisions.md): a type goes live only when every
+// number it uses is its OWN measurement. This is where that is enforced for the
+// density -> strut-diameter law, because it is the law with the most consumers (44
+// call sites, K0 inventory) and the one whose misuse is invisible: a borrowed diameter
+// does not throw, it prints a strut at the wrong size.
+//
+// Octet returns EXACTLY octet_strut_diameter_mm -- the same double, not an equivalent
+// one -- which is what keeps R9's byte-identity true while every consumer moves onto
+// this function. `test_strut_diameter_per_type` asserts that with `==`, over 180
+// (rho, cell) pairs spanning the measured table and past both of its clamped ends.
+//
+// Every other topology REFUSES, by name. As each type's table is measured it gets a
+// branch here and nowhere else.
+double lattice_strut_diameter_mm(LatticeTopology topo, double rho,
+                                 double cell_size_mm) {
+  switch (topo) {
+    case LatticeTopology::Octet:
+      return octet_strut_diameter_mm(rho, cell_size_mm);
+    case LatticeTopology::SimpleCubic:
+    case LatticeTopology::Bcc:
+    case LatticeTopology::Fcc:
+    case LatticeTopology::Diamond:
+    case LatticeTopology::Kelvin:
+    case LatticeTopology::Rhombic:
+    case LatticeTopology::Bccz:
+    case LatticeTopology::Fccz:
+    case LatticeTopology::Reentrant:
+      break;
+  }
+  // No default: a topology added to the enum without a branch here lands on this
+  // refusal rather than on octet's table, which is the safe direction.
+  throw LatticeDiameterLawNotMeasured(
+      std::string("lattice_strut_diameter_mm: no measured diameter law for \"") +
+      lattice_topology_name(topo) +
+      "\" yet. Octet's measured table is NOT used for another type (R1): the "
+      "density -> strut-diameter law has to be measured for this topology and "
+      "landed in lattice.cpp before it can be generated or sized.");
 }
 
 double octet_relative_density(double cell_mm, double strut_radius_mm) {
