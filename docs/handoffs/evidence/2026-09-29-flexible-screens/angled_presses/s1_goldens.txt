@@ -114,3 +114,24 @@
 #       Executed 6 tests, with 0 failures (0 unexpected) in 2.187 (2.188) seconds
 #     6/6, not 5/5: #354's c4cf899e (in 021b7321) added the sixth, testTheStaleTypePathAsksCoreNothing. The five of
 #     2026-10-03 all pass; no SIGTRAP.
+#
+# (7) THE H-HOOK ANCHORS, RE-GREPPED AFTER THE MERGES (line now ← line at 30198e91; every anchor's text unchanged except H8)
+#   WorkspacePlaceholder.swift — 39 Flexible lines before, 39 after:
+#     @StateObject flexibleMain 115←111 · fullScreenPageUp (+showFlexiblePage) 618←614 · `lattice.flexible == nil` gate 625←621
+#     · showFlexiblePage 674←670 · .onChange(of: showLatticeWizard) Flexible door 731-732←727-728
+#     · H4 MetalMeshView(mesh: flexibleMain.mesh…) 734←730 · H4 vertexTints 755←751 · H4 settleAnimated 786←782
+#     · H7 `if flexibleMain.read(project, mode: latticeLegendMode, face: fid, point: pt) { return true }` 816←812,
+#       followed by #354's `if legendDrilledIn { return true }` 817 (was `if latticeLegendMode.drilledIn { return true }`)
+#     · H8 `onLatticeProbe: legendDrilledIn && flexibleMain.wantsWallProbe(latticeLegendMode)` 831←827 (RE-APPLIED, ruling (i);
+#       was `latticeLegendMode.drilledIn && …`) · H8 readLattice 833←829 · #354's `onLatticeProbeExit: legendDrilledIn` 839
+#     · H4 stressTints 933←929 · H4 flexDisplacements/flexScale 934←930 · H4 bodyAlpha 1035←1031 · H3 flexibleLattice 1160←1156
+#     · H5 FlexibleMainViewToggles 1312←1308 · H6 FlexibleMainLegends 1335←1331 · B1 sim banner 1337←1333
+#     · FlexibleMainPlayerSlot 1365←1361 · onChooseFlexible 1381-1383←1377-1379 · FlexibleStageSheet 1392-1393←1388-1389
+#     · FlexibleStagePage + H2 didExitSettings 1397-1400←1393-1396 · C2 FlexibleExportMount 1403←1399
+#     · FlexibleStageChip 2800-2801←2796-2797 · H9 stage nav 5530, 5652, 5659, 5668, 5695, 5696 ← 5505, 5627, 5634, 5643, 5670, 5671
+#     · H10 FlexibleMainStatusPill 11627←11536
+#   MetalMeshView.swift — 52 Flexible lines before and after, text unchanged; #354 added 3 lines (a finger may always leave
+#     the key: `if let onLatticeProbeExit { onLatticeProbeExit(); return }`), so only the third init's
+#     `flexDisplacements:` line moved, 7089→7092; M4 5241, M6 3520, the third G-buffer writer 4679-4683, flexibleLattice 1563,
+#     stepFlexibleLoop 3284 unchanged.
+#   LatticeSettings.swift — H12 `s.flexible = nil` 1238←1167.
