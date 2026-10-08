@@ -1,0 +1,31 @@
+# Angled presses (task 2026-10-07), batch AP0 — the targeted suite and the iOS build, after 53aabdca (test files and
+# evidence only; no Sources, no core, no #354/main file touched: git diff --stat 01ec5e3c..HEAD -- app/TopOptKit/Sources core
+# app/TopOpt is empty). Debug, swift test --skip-build, this Mac (Xcode 27.0 27A266a, Swift 6.4, macOS 27.0.1).
+#
+# (1) TARGETED SUITE, as CI would run it (SWIFT_DETERMINISTIC_HASHING unset), LatticeStaleTypeTests left out:
+#     swift test --filter 'TopOptFlowsTests\.(Flexible[A-Za-z0-9]*|ProjectStoreTests|UndoHistoryTests|LatticeSettingsPersistTests|ViewerTests|SmoothingPageRound2Tests|LatticeSimSolveTriggerTests)/'
+#     (88 classes; no existing test source-pins a file AP0 touched — the directory scanners read Sources/ and core/ only)
+    Executed 526 tests, with 36 tests skipped and 9 failures (0 unexpected) in 3178.441 (3178.493) seconds
+#   The 2 failing tests:
+#   - LatticeSimSolveTriggerTests.testTheTriggerRefusesOnAllThreeGrounds — known, pre-existing.
+#   - FlexibleBatchNVerifyTests.testEveryRefineLineIsWholeBesideTheLivePlayAllPicker — 8 assertions ("11p Play all live:
+#     'Simulating the squish…' is drawn whole (118.5 of 151.0 pt)" …). NOT AP0: it fails the same way ALONE, and alone
+#     again with AP0's four test files moved out of the package and the bundle rebuilt (8 failures; files restored, tree
+#     clean). It is a hosted AppKit layout test (an NSWindow ordered front, its run loop spun 0.4 s); it passed in the
+#     2026-10-02 targeted run on the same code. Not investigated further here: window-server / display state is the
+#     first suspect (the known intermittent hosted wait is the same family).
+#   The 36 skips: the 7 RECORD=1 recorder tests, 3 AP0 golden tests that need SWIFT_DETERMINISTIC_HASHING=1 (each printed
+#   "FLEX-AP SKIP …"), and 26 evidence / perf probes that skip without their env (as before).
+#
+# (2) AP0's classes under SWIFT_DETERMINISTIC_HASHING=1 (FlexibleAngledGoldenTests, FlexiblePressFixturesTests, FlexibleStageTests):
+    Executed 25 tests, with 0 failures (0 unexpected) in 6.546 (6.549) seconds
+#   (FlexibleStageTests.testAProjectThatNeverChoseFlexibleIsByteIdentical passed in both runs.) STEP skips: 0 — the STEP
+#   cube and the M2 stand imported on this Mac (FlexiblePressFixturesTests, testFacePressFramesAreTheGoldenOnTheM2Stand).
+#
+# (3) iOS BUILD. The given destination is refused by this Mac's tools today:
+#     xcodebuild … -destination id=147E56A1-C8CA-4B9D-BE6C-CF230589A83A … build  -> exit 70, "Unable to find a device matching
+#     the provided destination specifier" after "CoreSimulator is out of date. Current version (1051.55.0) is older than build
+#     version (1171.7.0) … Simulator device support disabled."
+#     The same build for the generic simulator destination:
+#     xcodebuild -project app/TopOpt.xcodeproj -scheme TopOpt -configuration Debug -destination 'generic/platform=iOS Simulator' \
+#       -derivedDataPath ~/Library/Developer/Xcode/DerivedData/flexA1 build  ->  ** BUILD SUCCEEDED ** (1:18)
