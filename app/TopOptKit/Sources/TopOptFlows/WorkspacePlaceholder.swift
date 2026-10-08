@@ -3512,6 +3512,8 @@ public struct WorkspacePlaceholder: View {
         // run); each says why in the stage's words (`project.variantLatticeJobRefusal()`).
         guard LatticeJobIncludeGate.refusal(latticeEnabled: project.lattice.enabled,
                                             regions: emission.regions) == nil else { return nil }
+        // ★★ Structural Stepped (2026-10-08): no document either — the run is blocked, not substituted
+        guard LatticeStructuralSteppedGate.refusal(project.lattice) == nil else { return nil }
         // ★★ THE STAGE'S OWN SPEC (ruling b, 2026-09-30): the SAME builder the optimize request
         // uses (`ProjectModel.latticeRunSpec`) — Auto resolved from these walls and the strut
         // bead exactly as the stage resolves it, the strut width, the preview's placed cells.
@@ -3554,7 +3556,8 @@ public struct WorkspacePlaceholder: View {
         let e = project.variantLatticeJobRegions()
         var pass = LatticeVariantJobPass(
             facesWithoutShape: e.skippedFaces, regionsWithoutShape: e.skippedRegionNames,
-            refusal: LatticeJobIncludeGate.refusal(latticeEnabled: project.lattice.enabled, regions: e.regions))
+            refusal: LatticeJobIncludeGate.refusal(latticeEnabled: project.lattice.enabled, regions: e.regions)
+                ?? LatticeStructuralSteppedGate.refusal(project.lattice))
         guard pass.refusal == nil, showLatticePage, compute.activeRemote != nil,
               latticeVariantContext?.artifacts != nil, let job = relatticeJobJSON(emission: e) else { return pass }
         pass.coreRefusal = job.coreRefusal
@@ -11692,7 +11695,7 @@ public struct WorkspacePlaceholder: View {
     private var latticeOptimizeRefusal: String? {
         LatticeJobIncludeGate.optimizeRefusal(latticeEnabled: project.lattice.enabled,
                                               regions: project.latticeJobRegions().regions)
-            ?? latticeTypeRefusal
+            ?? latticeSettingsRefusal
     }
 
     /// ★ REVIEW 2026-10-01: a saved type core can't run (written by the variant page's old,
@@ -11704,7 +11707,14 @@ public struct WorkspacePlaceholder: View {
     private var latticeTypeRefusal: String? {
         project.lattice.enabled ? LatticeTypeCatalog.selectionRefusal(project.lattice.topologyID) : nil
     }
-    /// The tap on a button greyed by `latticeTypeRefusal`: the Lattice stage's Settings, where the
+    /// ★★ A SETTING CORE CAN'T RUN: the saved type (above), then Structural Stepped (reviewer,
+    /// 2026-10-08: "BLOCK the run (no fallback), saying it waits on core's strength check for mixed
+    /// cell sizes" — `LatticeStructuralSteppedGate`). Both grey Lattice and Optimize, and both taps
+    /// open Settings, where the line says why and the fix is one tap.
+    private var latticeSettingsRefusal: String? {
+        latticeTypeRefusal ?? LatticeStructuralSteppedGate.refusal(project.lattice)
+    }
+    /// The tap on a button greyed by `latticeSettingsRefusal`: the Lattice stage's Settings, where the
     /// Type row says why and the offered chip fixes it. Navigation only — never a type picked.
     private func goToLatticeType() {
         if showLatticePage { closeLatticePage() }
@@ -11714,7 +11724,7 @@ public struct WorkspacePlaceholder: View {
     private static let latticeTypeTapHint = "Opens the lattice settings"
     /// Whether a greyed Lattice or Optimize is greyed by that saved type — then its tap opens Settings.
     private func opensLatticeType(_ ok: Bool, _ summary: String) -> Bool {
-        !ok && summary == latticeTypeRefusal
+        !ok && summary == latticeSettingsRefusal
     }
 
     /// The Optimize sub-label, reflecting the minimize-plastic mode + the load case.
@@ -11843,7 +11853,7 @@ public struct WorkspacePlaceholder: View {
     private var latticeStageRefusal: String? {
         LatticeJobIncludeGate.refusal(latticeEnabled: project.lattice.enabled,
                                       regions: project.latticeJobRegions().regions)
-            ?? latticeTypeRefusal
+            ?? latticeSettingsRefusal
     }
 
     var canLatticeThis: Bool {

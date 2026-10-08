@@ -2401,6 +2401,9 @@ public final class ProjectModel: ObservableObject {
     public func variantLatticeJobRefusal() -> String? {
         LatticeJobIncludeGate.refusal(latticeEnabled: lattice.enabled,
                                       regions: variantLatticeJobRegions().regions)
+            // ★★ Structural Stepped waits on core's strength check (2026-10-08) — blocked, never
+            // run as core's own layout
+            ?? LatticeStructuralSteppedGate.refusal(lattice)
     }
 
     /// A role group's manual primitives with their slab depths resolved through

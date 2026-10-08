@@ -1045,10 +1045,28 @@ public struct LatticeSetupWizard: View {
                     .accessibilityIdentifier("wizard-cell-transition-\(t.rawValue)")
                 }
             }
-            captionLine(model.cellTransition.unavailableReason
-                        ?? (model.cellTransition == .stepped ? "Any printable step, packed to the outline."
-                                                              : "Cells halve on core's ladder."),
-                        info: "grade-style", model.cellTransition.body)
+            if let blocked = LatticeStructuralSteppedGate.refusal(
+                latticeEnabled: true, algorithm: model.cellTransition.coreAlgorithm,
+                stageMode: project.lattice.stageMode) {
+                // ★★ STRUCTURAL STEPPED IS BLOCKED (reviewer, 2026-10-08): the gate's line, and the
+                // fix is the line itself — one tap puts Default Grade back
+                HStack(spacing: DS.Space.xs) {
+                    Button {
+                        model.cellTransition = .defaultGrade
+                        rebuild()
+                    } label: {
+                        Self.tapNote(blocked + " · " + LatticeStructuralSteppedGate.fixLabel)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("wizard-stepped-structural-blocked")
+                    infoButton("grade-style-blocked", LatticeStructuralSteppedGate.detail)
+                }
+            } else {
+                captionLine(model.cellTransition.unavailableReason
+                            ?? (model.cellTransition == .stepped ? "Any printable step, packed to the outline."
+                                                                  : "Cells halve on core's ladder."),
+                            info: "grade-style", model.cellTransition.body)
+            }
 
             // ★★★ GRADE TO SHAPE BAND — directly under the transition it belongs to
             // (his placement, 2026-08-23). It is a property of HOW the cells change
