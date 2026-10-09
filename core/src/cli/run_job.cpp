@@ -7099,9 +7099,18 @@ LatticeVariantOutcome lattice_one_variant(
     // beside the floor; structural drops it, because the certificate solves every strut
     // rather than averaging them and nothing structural depends on a cell looking open.
     const bool prints_open = job.grading.intent == "aesthetic";
-    const double tile_floor = job.grading.stepped_min_tile_mm > 0.0
-                                  ? job.grading.stepped_min_tile_mm
-                                  : job.grading.min_extrudable_width_mm;
+    // ★ D5: THE TILE FLOOR IS THE SMALLEST CELL THAT PRINTS, not the bead. A tile wider
+    // than one bead is not therefore printable: the strut it carries at the densest
+    // density the job allows still has to clear that bead, which is exactly
+    // lattice_min_printable_cell_mm (E1). A doubled job cannot carry
+    // `stepped_min_tile_mm` at all (job.cpp refuses the key), so its floor WAS just over
+    // the bead -- 0.45 mm where the real floor is 2.25 mm at the job's cap.
+    const double printable_floor = lattice_min_printable_cell_mm(
+        lat_topo, job.grading.min_extrudable_width_mm, job.grading.max_relative_density);
+    const double tile_floor = std::max(printable_floor,
+                                       job.grading.stepped_min_tile_mm > 0.0
+                                           ? job.grading.stepped_min_tile_mm
+                                           : 0.0);
     // ★ RULING A: which MENU the plan is validated against. Doubled admits only the
     // halving ladder; any-step admits every k*(S/n). Same validator, same grid, prism
     // and overlap checks -- the menu is the only difference, and it is the difference
@@ -7116,7 +7125,8 @@ LatticeVariantOutcome lattice_one_variant(
                               // ★ the include geometry, so a cross-region overlap at a
                               // mitre can be told from a real collision: each cell's
                               // centre must be owned by its own region (ruling 4).
-                              &lattice_roles.includes);
+                              &lattice_roles.includes,
+                              job.grading.max_relative_density);  // D5: the cap
     if (!chk.ok)
       throw JobError("lattice \"stepped_cells\": " + chk.error +
                      ". Core validates the plan and does not repack it -- the run lays "

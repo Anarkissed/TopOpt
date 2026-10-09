@@ -164,7 +164,11 @@ SteppedPlanCheck stepped_validate_plan(LatticeTopology topo,
                                        // which is the conservative answer and what a
                                        // caller with no geometry to ask about should get.
                                        const std::vector<ClearanceGeometry>* includes =
-                                           nullptr);
+                                           nullptr,
+                                       // ★ D5: the job's density cap, so a cell's own rho
+                                       // can be refused when it exceeds what the job
+                                       // allows. 0 = not sent, and no cap is applied.
+                                       double max_relative_density = 0.0);
 
 // ── ONE PASS PER (REGION, FAMILY), NOT PER DISTINCT SIZE ────────────────────────
 // The dyadic path builds a pass per distinct size on a grid anchored at the SOLVED

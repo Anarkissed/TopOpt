@@ -482,6 +482,84 @@ static void test_overlap_is_exact_not_a_shared_tile() {
 // for doing the one thing that makes them cover their face. So the tilted case below
 // is asserted ACCEPTED while its near side stands 2.12 mm in front of the plane, and
 // it is what distinguishes this rule from any one-sided reading of the interval.
+// ── ★ D5: THE DENSITY THAT CAME WITH THE CELL IS CHECKED, AND THE BASE HAS A FLOOR ──
+// #354's printability brief (D5): a sent cell's rho was checked against NOTHING in the
+// validator -- it never read `cell.rho` -- and the schema admits any (0, 1]. The rho sizes
+// the strut (ruling C), so two things shipped: a strut under the bead, and a density over
+// the cap the job states. And the plan's BASE cell had no floor at all ("the base is always
+// on its own menu"), so a base below the job's tile floor was admitted while every division
+// of it was refused.
+//
+// The numbers here are measured, not assumed: at a 3 mm cell and a 0.45 mm bead, rho 0.10
+// builds a 0.4002 mm strut and rho 0.20 builds 0.5694 mm.
+static void test_plan_cell_density_is_checked_against_bead_and_cap() {
+  const double bead = 0.45;
+  auto reg = [](double base) {
+    SteppedPlanRegion r;
+    r.region_id = 1;
+    r.base_cell_mm = base;
+    r.slot_origin = Vec3{0.0, 0.0, 0.0};
+    return r; };
+  auto cell = [](double size, double rho) {
+    SteppedCell c;
+    c.region_id = 1;
+    c.origin = Vec3{0.0, 0.0, 0.0};
+    c.size_mm = size;
+    c.rho = rho;
+    return c; };
+  auto run = [&](double base, double size, double rho, double min_tile, double cap) {
+    return stepped_validate_plan(LatticeTopology::Octet, {cell(size, rho)}, {reg(base)},
+                                 bead, min_tile, true, SteppedMenu::AnyStep, nullptr, cap); };
+
+  // ── the premise: these two densities really do straddle the bead at this cell ──
+  CHECK(lattice_strut_diameter_mm(LatticeTopology::Octet, 0.10, 3.0) < bead,
+        "D5 premise: rho 0.10 at a 3 mm cell is UNDER the 0.45 mm bead (0.4002 mm)");
+  CHECK(lattice_strut_diameter_mm(LatticeTopology::Octet, 0.20, 3.0) > bead,
+        "D5 premise: and rho 0.20 prints (0.5694 mm)");
+
+  // ── a strut under the bead: refused, with the number ──
+  const SteppedPlanCheck thin = run(3.0, 3.0, 0.10, 0.0, 0.0);
+  CHECK(!thin.ok, "D5: a cell whose own rho builds a strut under the bead is refused");
+  CHECK(thin.error.find("under the") != std::string::npos &&
+            thin.error.find("bead") != std::string::npos,
+        "D5: and the refusal names the bead it fails");
+  CHECK(thin.error.find("region 1") != std::string::npos,
+        "D5: and the region, so a plan with many walls says which");
+  // the control: the SAME cell at a printable density
+  CHECK(run(3.0, 3.0, 0.20, 0.0, 0.0).ok,
+        "D5 control: at a printable density the same cell validates -- so the refusal is "
+        "about the density, not about the cell");
+  // and a cell that sends NO rho is unaffected (every job before ruling C)
+  CHECK(run(3.0, 3.0, 0.0, 0.0, 0.0).ok,
+        "D5: a cell that sends no rho is not judged on one");
+
+  // ── over the job's cap: refused, not clamped ──
+  const SteppedPlanCheck over = run(3.0, 3.0, 0.30, 0.0, 0.15);
+  CHECK(!over.ok, "D5: a density over the job's cap is REFUSED");
+  CHECK(over.error.find("max_relative_density") != std::string::npos &&
+            over.error.find("0.15") != std::string::npos,
+        "D5: and the refusal quotes the cap it exceeds");
+  CHECK(over.error.find("clamped") != std::string::npos,
+        "D5: and says why it is not clamped -- the density sizes the strut");
+  CHECK(run(3.0, 3.0, 0.20, 0.0, 0.25).ok,
+        "D5 control: within the cap, the same cell validates");
+  CHECK(run(3.0, 3.0, 0.30, 0.0, 0.0).ok,
+        "D5: with no cap sent, no cap is applied");
+
+  // ── a base below the tile floor: named, not left to an empty menu ──
+  const SteppedPlanCheck lowbase = run(1.0, 1.0, 0.0, 2.0, 0.0);
+  CHECK(!lowbase.ok, "D5: a region whose BASE is below the tile floor is refused");
+  CHECK(lowbase.error.find("base cell") != std::string::npos &&
+            lowbase.error.find("tile floor") != std::string::npos,
+        "D5: and the refusal names the base and the floor, rather than reporting an empty "
+        "menu and leaving the reader to infer why");
+  CHECK(run(3.0, 3.0, 0.0, 2.0, 0.0).ok,
+        "D5 control: a base above the floor is fine");
+  // a base no wider than the bead cannot hold a strut at all
+  CHECK(!run(0.4, 0.4, 0.0, 0.0, 0.0).ok,
+        "D5: a base no wider than the bead is refused too");
+}
+
 static void test_depth_projects_the_cube_not_one_corner() {
   auto region = [](Vec3 normal, Vec3 face_at) {
     SteppedPlanRegion reg;
@@ -567,8 +645,15 @@ static void test_group_keeps_each_cells_own_rho() {
     c.rho = rho;
     return c; };
   // sent in DESCENDING corner order, which is the reverse of the emission order
+  // ★ D5 (2026-10-09): these densities START AT 0.20, not 0.10. The validator now checks
+  // each cell's own rho against the bead AT ITS OWN SIZE, and 0.10 at a 3 mm cell builds a
+  // 0.4002 mm strut -- measured -- under the 0.45 mm bead. The old values were chosen to be
+  // DISTINGUISHABLE (each a function of the cell's position, so a mispairing cannot look
+  // right), not to be printable, and that property is untouched: 0.20..0.21 are still
+  // distinct per cell and now also print (0.5694 mm at 3 mm). The assertion this fixture
+  // exists for -- that each cell keeps ITS OWN rho through the emission sort -- is unchanged.
   auto rho_for = [](double dx, double dy, double dz) {
-    return 0.10 + 0.01 * (dx / 3.0) + 0.001 * (dy / 3.0) + 0.0001 * (dz / 3.0); };
+    return 0.20 + 0.01 * (dx / 3.0) + 0.001 * (dy / 3.0) + 0.0001 * (dz / 3.0); };
   std::vector<SteppedCell> cells;
   for (int i = 1; i >= 0; --i)
     for (int j = 1; j >= 0; --j)
@@ -1135,6 +1220,7 @@ int main() {
   test_menu_shape();
   test_plan_validation();
   test_depth_projects_the_cube_not_one_corner();
+  test_plan_cell_density_is_checked_against_bead_and_cap();
   test_overlap_is_exact_not_a_shared_tile();
   test_grouped_cells_cover_the_slot_exactly_once();
   test_grouping_lays_every_cell_where_it_was_sent();

@@ -461,6 +461,31 @@ Also recorded, because two of my own assumptions were wrong about it: the diamet
 band top 0.899880 is **completely inert**. Monotonicity in the cap is therefore non-strict,
 and the flat top is pinned by its own check so a future row reports itself.
 
+## MEANING CHANGES, addendum 10 (2026-10-09) — D5: the density that came with the cell
+
+From #354's printability brief (D5) and the reviewer's ruling of 2026-10-08.
+
+| what | was | is | app impact |
+|---|---|---|---|
+| a plan cell's own `rho` | checked against NOTHING in the validator — it never read `cell.rho`; the schema admits any (0, 1] | the strut it builds at **its own size** must clear the bead, or the cell is refused by name with the number | **a plan pairing a size with too light a density is refused.** Measured: rho 0.10 at a 3 mm cell builds a 0.4002 mm strut against a 0.45 mm bead |
+| a plan cell's `rho` above the job's `max_relative_density` | accepted, then clamped downstream | **REFUSED**, quoting the cap | **intended.** The density sizes the strut, so clamping silently prints a cell lighter than the plan asked for |
+| the plan's BASE cell | no floor at all — "the base is always on its own menu" | subject to the same tile floor and bead as every other size | **a region whose base is below the floor is refused, and the refusal NAMES the base and the floor** rather than reporting an empty menu and leaving the cause to be inferred |
+| the doubled tile floor | `stepped_min_tile_mm`, or else **the bead** — and a doubled job cannot carry that key at all, so it was just over the bead (0.45 mm) | `max(lattice_min_printable_cell_mm(topo, w, cap), stated)` — **2.25 mm at the job's cap** | **a capped job's plan is held to the real floor.** Uncapped jobs get 1.173 mm, so all eight of the brief's existing jobs are unaffected |
+| a cell that sends no `rho` | unaffected | unaffected — not judged on a density it did not send | **none** (every job before ruling C) |
+
+NOT SHIPPED, and not from indecision: "apply to a doubled plan the same bound the app applies
+to Default Grade". `prints_open` still hangs on `intent == "aesthetic"`, which a doubled job
+never carries. I searched the app for that bound (`printsOpen`, `minTile`, `ladderSizes`,
+`stepped_size_menu`, the 0.20 ratio) and found nothing, so I have asked rather than guess a
+design rule. Under the standing rule the app's design is the source of truth, and this is the
+app's.
+
+One existing fixture's DATA changed, not its assertions: `test_group_keeps_each_cells_own_rho`
+paired 3 mm cells with rho from 0.10, which the new check correctly refuses (0.4002 mm strut,
+0.45 mm bead). Those values were chosen to be DISTINGUISHABLE — each a function of the cell's
+position, so a mispairing cannot look right — and that property is untouched at 0.20..0.21,
+which also print (0.5694 mm). The measurement is recorded at the fixture.
+
 ### The fingerprint defect, for the record
 
 Not the worktree (`git -C core rev-parse` resolves fine there), and not only the
