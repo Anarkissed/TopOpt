@@ -2845,6 +2845,7 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
                     }
                     k += 3
                 }
+                let sides = target == 1 ? FlexibleFaintEdges.sideVertices(s) : nil   // Flexible (#362) R6 review: a FAINT shell's side edges where its outline turns
                 for (key, n) in use where n == 1 {
                     guard let (a, b) = edge[key] else { continue }
                     let ia = Int(a), ib = Int(b)
@@ -2853,7 +2854,7 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
                     tri(s.base[ia], s.offset[ib], s.offset[ia], fcol)
                     seg(s.base[ia], s.base[ib], ecol)
                     seg(s.offset[ia], s.offset[ib], ecol)
-                    seg(s.base[ia], s.offset[ia], ecol)
+                    if sides?.contains(a) ?? true { seg(s.base[ia], s.offset[ia], ecol) }
                 }
             case .degenerate:
                 // Hollow honesty: a small dashed cross-ring at the face-derived point is

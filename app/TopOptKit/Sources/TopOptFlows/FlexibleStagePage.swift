@@ -88,6 +88,8 @@ public struct FlexibleStagePage: View {
     /// field's mesh displacements (cached per overlay and field), and the group that plays.
     @State private var overlayEdge: Double?
     @State private var feDents: (key: String, dents: [Float])?
+    /// ★ R6 REVIEW: each pressed region's colours as composed (the glass's alpha is its colour's over them).
+    @State private var glassHeat: [Int: [SIMD3<Float>]] = [:]
     @State private var playingNumber: Int?
     @State private var playingFE = false
     private var keepOut: [CGRect] { Self.stageKeepOut(frames) }
@@ -100,8 +102,11 @@ public struct FlexibleStagePage: View {
         let player = frames["playerCapsule"] != nil ? ["playerTopRow", "playerCapsule"] : ["player"]
         return (["panel", "legend", "viewButtons"] + player).compactMap { frames[$0]?.offsetBy(dx: -st.minX, dy: -st.minY) }   // ★ R6: the view buttons
     }
-    /// ★ R6 REVIEW (stub): what the legend keeps clear of.
-    static func legendKeepOut(viewport: CGSize, notice: CGRect) -> [CGRect] { [] }
+    /// ★ R6 REVIEW: what the legend keeps clear of — the gizmo, the top line and the view buttons (lifted so the
+    /// tests read the page's own list: nothing had exercised the buttons in it).
+    static func legendKeepOut(viewport: CGSize, notice: CGRect) -> [CGRect] {
+        [FlexibleLegendPlacement.gizmoFrame(viewport: viewport), notice, FlexibleStageViews.frame(viewport: viewport)]
+    }
     private let ticker = Timer.publish(every: 1.0 / 30.0, on: .main, in: .common).autoconnect()
     static let squishPeriodS = 2.4
 
@@ -261,7 +266,10 @@ public struct FlexibleStagePage: View {
                 flexDisplacements: dents, flexScale: dentScale,
                 // ★ ROUND 3 (item 1.1): the selected face's deepest squish as a prism × k — ★ ROUND 6: at once
                 // (faint), every pressed face's in the Prisms view, and the open group's glass (FlexibleStageVolumes)
-                clearanceVolumes: FlexibleStageVolumes.items(model: model, k: dentExaggeration, part: project.viewerMesh),
+                // ★ R6 REVIEW: ONE k (`prismK`) for the prisms, the chip, the stamp handle, the tags and the legend; the glass
+                // over the page's own heat
+                clearanceVolumes: FlexibleStageVolumes.items(model: model, k: FlexibleStageVolumes.prismK(dentExaggeration), part: project.viewerMesh,
+                                                             heat: glassHeat),
                 // ★ THE DENT READS THROUGH THE PART (maintainer, 2026-09-29): while a dent is
                 // shown the body drops to 30 % and the dented map stays at 100 %.
                 bodyAlpha: xray ? Self.xrayBodyAlpha : (dents != nil ? Self.dentBodyAlpha : 1),
@@ -269,7 +277,7 @@ public struct FlexibleStagePage: View {
                 detentPulse: pulse,
                 // ★ ROUND 4 (D1, img 6): no lattice here — it lives on the main Flexible page
                 flexibleLattice: nil)
-            FlexibleStageOverlays(model: model, proj: proj, exaggeration: dentExaggeration, keepOut: keepOut)
+            FlexibleStageOverlays(model: model, proj: proj, exaggeration: FlexibleStageVolumes.prismK(dentExaggeration), keepOut: keepOut)
             FlexibleReadingCallout(proj: proj, reading: legendDrilled ? reading : nil)
         }
         .coordinateSpace(name: FlexibleStageSpace.name)
@@ -328,6 +336,8 @@ public struct FlexibleStagePage: View {
             if restart, loop.playing { loop.restartFromRest(reduceMotion: reduceMotion) }
         }
         tints = c.tints
+        let heat = FlexibleGroupWalls.heatSamples(tints: c.tints, overlay: overlay, model: model)   // ★ R6 REVIEW
+        if heat != glassHeat { glassHeat = heat }
         dents = c.dents
         dentExaggeration = c.exaggeration
         loop.exaggeration = c.exaggeration   // the renderer's scale is k × amount
@@ -535,7 +545,7 @@ public struct FlexibleStagePage: View {
                 .accessibilityIdentifier("flexible-legend-expand")
             } else {
                 FlexibleLegend(model: model, drawnLattice: nil, drilled: legendDrilled,
-                               reading: legendDrilled ? reading : nil, hasDent: dents != nil, k: Int(dentExaggeration.rounded()))
+                               reading: legendDrilled ? reading : nil, hasDent: dents != nil, k: Int(FlexibleStageVolumes.prismK(dentExaggeration).rounded()))
                     .overlay(alignment: .top) {
                         HStack(spacing: 0) {
                             Color.clear
@@ -567,8 +577,7 @@ public struct FlexibleStagePage: View {
             }.allowsHitTesting(false))
         if let measured = frames["legend"]?.size, measured.width > 0, measured.height > 0,
            let r = FlexibleLegendPlacement.legend(size: measured, viewport: size,
-                                                  keepOut: [FlexibleLegendPlacement.gizmoFrame(viewport: size), noticeBand(size),
-                                                            FlexibleStageViews.frame(viewport: size)]) {   // ★ R6: the view buttons
+                                                  keepOut: Self.legendKeepOut(viewport: size, notice: noticeBand(size))) {   // ★ R6: the view buttons
             view.position(x: r.midX, y: r.midY)
         } else {
             view.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
@@ -690,7 +699,7 @@ struct FlexibleStageOverlays: View {
                 FlexibleFaceStampHandle(model: model, projection: proj.projection, keepOut: keepOut, k: exaggeration)
             }
             // ★ ROUND 6 (item 3): the Prisms view's mm tags and the Groups view's number discs
-            FlexibleStageViewTagsLayer(model: model, projection: proj.projection, k: exaggeration > 0 ? exaggeration : 1, keepOut: keepOut)
+            FlexibleStageViewTagsLayer(model: model, projection: proj.projection, k: FlexibleStageVolumes.prismK(exaggeration), keepOut: keepOut)
         }
     }
 

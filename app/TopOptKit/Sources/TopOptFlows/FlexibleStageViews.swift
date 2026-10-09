@@ -23,14 +23,19 @@ public struct FlexibleStageViews: OptionSet, Hashable, Sendable {
     /// Every group's glass, the open group brighter.
     public static let groups = FlexibleStageViews(rawValue: 1 << 1)
 
-    /// The buttons, in order (icon, label, accessibility id).
+    /// The buttons, in order (icon, label, accessibility id). ★ R6 REVIEW (the verifier: the glyphs did not say what
+    /// they do — stacked layers, an apps grid): [Prisms] is "down to a depth" in the prisms' own purple; [Groups] is
+    /// his first three groups' colours as three dots (`glyphColours`; its SF name is the accessibility fallback only).
     static let buttons: [(view: FlexibleStageViews, icon: String, label: String, id: String)] = [
-        (.prisms, "square.stack.3d.down.forward", "Prisms", "flexible-settings-view-prisms"),
+        (.prisms, "arrow.down.to.line", "Prisms", "flexible-settings-view-prisms"),
         (.groups, "circle.grid.2x2", "Groups", "flexible-settings-view-groups"),
     ]
     static let buttonSize: CGFloat = 40
-    /// ★ R6 REVIEW (stub): the Groups button's glyph — his first three groups' colours.
-    @MainActor static func glyphColours(model: FlexibleStageModel) -> [RGBA] { [] }
+    /// ★ R6 REVIEW: the [Groups] glyph's three dots — his first three groups' colours, the palette's after them.
+    @MainActor static func glyphColours(model: FlexibleStageModel) -> [RGBA] {
+        let gs = model.squeezeGroups.prefix(3).map { model.groupColour($0) }
+        return gs + FlexibleGroupColour.allCases.map(\.rgba).filter { c in !gs.contains { $0 == c } }.prefix(3 - gs.count)
+    }
 
     /// Where the buttons sit in the page's frame: under the gizmo's touch square, trailing on `edge`.
     static func frame(viewport: CGSize) -> CGRect {
@@ -59,7 +64,8 @@ struct FlexibleStageViewButtons: View {
     var body: some View {
         HStack(spacing: DS.Space.s) {
             ForEach(FlexibleStageViews.buttons, id: \.id) { b in
-                FlexibleViewButton(icon: b.icon, label: b.label, on: model.views.contains(b.view)) { model.toggleView(b.view) }
+                let on = model.views.contains(b.view)
+                FlexibleViewButton(icon: b.icon, label: b.label, on: on, action: { model.toggleView(b.view) }, glyph: glyph(b.view, on: on))
                     .accessibilityIdentifier(b.id)
             }
         }
@@ -69,6 +75,23 @@ struct FlexibleStageViewButtons: View {
         .padding(.top, PageChrome.belowGizmo)
         .padding(.trailing, PageChrome.edge)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+    }
+
+    /// ★ R6 REVIEW: what each button shows — the prisms' purple arrow down to a line; his groups' three colours.
+    private func glyph(_ v: FlexibleStageViews, on: Bool) -> AnyView {
+        if v == .groups {
+            let cs = FlexibleStageViews.glyphColours(model: model)
+            return AnyView(ZStack {
+                ForEach(Array(cs.enumerated()), id: \.offset) { i, c in
+                    Circle().fill(c.color).frame(width: 9, height: 9)
+                        .offset(x: [-5.5, 5.5, 0][i % 3], y: [3.5, 3.5, -5.5][i % 3])
+                }
+            }
+            .opacity(on ? 1 : 0.6))
+        }
+        return AnyView(Image(systemName: FlexibleStageViews.buttons.first { $0.view == v }?.icon ?? "questionmark")
+            .font(.system(size: 15, weight: .semibold))
+            .foregroundStyle(on ? FlexibleStageStyle.facePrismKnob.color : DS.Color.textTertiary.color))
     }
 }
 

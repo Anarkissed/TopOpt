@@ -45,12 +45,20 @@ struct FlexibleViewButton: View {
     let label: String
     let on: Bool
     let action: () -> Void
+    /// ★ R6 REVIEW: a glyph of its own in place of the SF symbol (the Settings page's [Prisms] / [Groups]).
+    var glyph: AnyView? = nil
 
     var body: some View {
         Button(action: action) {
-            Image(systemName: icon)
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle((on ? DS.Color.textPrimary : DS.Color.textTertiary).color)
+            Group {
+                if let glyph {
+                    glyph
+                } else {
+                    Image(systemName: icon)
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle((on ? DS.Color.textPrimary : DS.Color.textTertiary).color)
+                }
+            }
                 .frame(width: 40, height: 40)
                 .background(
                     RoundedRectangle(cornerRadius: DS.Radius.pill, style: .continuous)

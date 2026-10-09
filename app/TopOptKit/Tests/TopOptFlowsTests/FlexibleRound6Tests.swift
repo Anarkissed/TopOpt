@@ -582,8 +582,8 @@ final class FlexibleRound6Tests: XCTestCase {
     /// heat-coloured faces; the Groups view looks unchanged" — at one alpha for every colour, his teal Group 3 over the
     /// green heat moved ΔE 3.0, his green Group 1 over the blue top 8.5). His pad, the page's own route (its composed
     /// tints → `heatSamples` → the glass), his img2 and img3 views and the back-right one: every member that faces the
-    /// camera moves ΔE76 ≥ 10 toward its OWN group's colour (median), and more toward it than toward any other group
-    /// shown; and only slightly (median ≤ 32, alpha ≤ the cap: the heat keeps ≥ 55 % of itself).
+    /// camera moves ΔE76 ≥ 10 toward its OWN group's colour (median); two groups shown move their faces in clearly
+    /// different directions (told apart); and only slightly (median ≤ 32, alpha ≤ the cap: the heat keeps ≥ 55 %).
     func testEachGroupsGlassReadsAsItsColourOverTheHeat() async throws {
         let device = try XCTUnwrap(MTLCreateSystemDefaultDevice())
         let r = try FlexiblePressFixtures.a1Project(3, self)
@@ -604,7 +604,7 @@ final class FlexibleRound6Tests: XCTestCase {
         let states: [(String, FlexibleRailTab, FlexibleStageViews)] = [
             ("Group 1 tab", .group(1), []), ("Group 2 tab", .group(2), []), ("Group 3 tab", .group(3), []),
             ("Groups view", .model, [.groups]), ("Groups view, Group 2 open", .group(2), [.groups])]
-        var checked = 0
+        var checked = 0, pairs = 0
         for cam in cams {
             let base = try render(sc, cam, [], device: device)
             let ids = try faceIDs(sc, cam, device: device)
@@ -621,7 +621,7 @@ final class FlexibleRound6Tests: XCTestCase {
                 }
                 let lit = try render(sc, cam, walls, device: device)
                 let outline = try outlineMask(walls, sc, cam, device: device)
-                let tints = Set(walls.compactMap(\.tint).map { SIMD3<Double>($0) })
+                var shifts: [(face: Int, tint: SIMD3<Float>, shift: SIMD3<Double>)] = []
                 for w in walls {
                     guard case .shell(let sh) = w.volume.shape, let cn = FlexibleGroupWalls.centroid(sh), let p = proj.project(cn.point),
                           let ray = proj.ray(throughViewPoint: p), simd_dot(ray.dir, cn.normal) < -0.3 else { continue }
@@ -632,22 +632,29 @@ final class FlexibleRound6Tests: XCTestCase {
                     XCTAssertGreaterThanOrEqual(t.medianDE, 10, "\(cam.name) · \(name) · face \(w.volume.faceID): the glass reads as its colour")
                     XCTAssertLessThanOrEqual(t.medianDE, 32, "\(cam.name) · \(name) · face \(w.volume.faceID): …slightly")
                     XCTAssertGreaterThanOrEqual(t.medianCos, 0.8, "\(cam.name) · \(name) · face \(w.volume.faceID): toward its own colour")
-                    // told apart: the mean change points at its own colour more than at any other shown group's
-                    var shift = SIMD3<Double>.zero, at = SIMD3<Double>.zero
-                    for i in px { let a = Self.lab(base, i); shift += Self.lab(lit, i) - a; at += a }
-                    shift /= Double(px.count); at /= Double(px.count)
-                    func cosTo(_ c: SIMD3<Double>) -> Double { let d = Self.lab(rgb: c) - at; return simd_dot(shift, d) / (simd_length(shift) * simd_length(d) + 1e-9) }
-                    let own = cosTo(SIMD3<Double>(tint))
-                    for other in tints where other != SIMD3<Double>(tint) {
-                        XCTAssertGreaterThan(own, cosTo(other), "\(cam.name) · \(name) · face \(w.volume.faceID): told apart from \(other)")
-                    }
+                    var shift = SIMD3<Double>.zero
+                    for i in px { shift += Self.lab(lit, i) - Self.lab(base, i) }
+                    shifts.append((w.volume.faceID, tint, shift / Double(px.count)))
                     checked += 1
                 }
+                // told apart: two groups' glass moves their faces' colours in clearly different directions (the mean
+                // L*a*b* change of one member against another's, cos < 0.9 — same direction means "the same tint")
+                for (i, a) in shifts.enumerated() { for b in shifts[(i + 1)...] where a.tint != b.tint {
+                    let c = simd_dot(a.shift, b.shift) / (simd_length(a.shift) * simd_length(b.shift) + 1e-9)
+                    note(String(format: "%@ · %@ · faces %d and %d: their changes' cos %.2f", cam.name, name, a.face, b.face, c))
+                    XCTAssertLessThan(c, 0.9, "\(cam.name) · \(name): faces \(a.face) and \(b.face) are told apart")
+                    pairs += 1
+                } }
             }
         }
         m.rail = .group(2)
         XCTAssertGreaterThanOrEqual(checked, 20, "every front-facing member at every camera was measured")
-        note("\(checked) member renders measured")
+        XCTAssertGreaterThanOrEqual(pairs, 6, "the Groups view's pairs were compared")
+        note("\(checked) member renders measured · \(pairs) pairs told apart")
+        // the page hands the glass this heat: taken where it composes its tints, passed with the one list
+        let page = try FlexibleSource.code("FlexibleStagePage.swift")
+        XCTAssertTrue(page.contains("let heat = FlexibleGroupWalls.heatSamples(tints: c.tints, overlay: overlay, model: model)"), "the page samples its heat")
+        XCTAssertTrue(page.contains("heat: glassHeat),"), "…and hands it to the glass")
     }
 
     /// ★ A FAINT PRISM'S SIDE EDGES STAND ONLY WHERE ITS OUTLINE TURNS (the verifier: "faint prisms draw an edge at every

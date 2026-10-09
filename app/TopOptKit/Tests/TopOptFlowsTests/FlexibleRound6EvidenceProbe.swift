@@ -8,6 +8,9 @@
 // dents / lattice layer). HIS pad A1_0003 restored as he saved it (his img1–img4). The chip and the mm tags are
 // SwiftUI on the device: here they are drawn onto the frame at the points the page projects them to (marked).
 // BEFORE = round 5's frames (`controlRound5Frames`). Offscreen frames, not device screenshots.
+// ★ R6 REVIEW: the glass over the page's own heat (FlexibleGroupWalls.heatSamples — its alpha is its colour's over it),
+// ONE k (`prismK`), and the dashed outline of every shown member that faces away (FlexibleStageViewTags.hidden — SwiftUI
+// on the device, drawn here at the points the page projects); the tabs of all three groups and [Rests].
 #if canImport(MetalKit) && canImport(AppKit)
 import XCTest
 import AppKit
@@ -50,7 +53,7 @@ final class FlexibleRound6EvidenceProbe: XCTestCase {
     }
 
     /// Write the frame with `marks` drawn on it (the SwiftUI chip / tags / discs the page places there).
-    func write(_ mr: MeshRenderer, _ name: String, marks: [Mark] = []) throws {
+    func write(_ mr: MeshRenderer, _ name: String, marks: [Mark] = [], dashed: [FlexibleStageViewTags.Hidden] = []) throws {
         guard let dir = Self.dir else { return }
         let bg = DS.Color.background
         let px = try XCTUnwrap(mr.renderOffscreen(size: Self.size, clear: MTLClearColor(red: bg.r, green: bg.g, blue: bg.b, alpha: 1)))
@@ -62,6 +65,16 @@ final class FlexibleRound6EvidenceProbe: XCTestCase {
         ctx.translateBy(x: 0, y: CGFloat(n)); ctx.scaleBy(x: 1, y: -1)   // y down, as the page
         NSGraphicsContext.saveGraphicsState()
         NSGraphicsContext.current = NSGraphicsContext(cgContext: ctx, flipped: true)
+        for h in dashed {   // ★ R6 REVIEW: as FlexibleStageViewTagsLayer strokes them
+            ctx.saveGState()
+            ctx.setStrokeColor(CGColor(red: h.colour.r, green: h.colour.g, blue: h.colour.b, alpha: 1))
+            ctx.setLineWidth(FlexibleStageViewTags.hiddenLineWidth)
+            ctx.setLineCap(.round); ctx.setLineJoin(.round)
+            ctx.setLineDash(phase: 0, lengths: FlexibleStageViewTags.hiddenDash)
+            for loop in h.paths { ctx.addLines(between: loop); ctx.closePath() }
+            ctx.strokePath()
+            ctx.restoreGState()
+        }
         for m in marks {
             let attrs: [NSAttributedString.Key: Any] = [.font: NSFont.monospacedDigitSystemFont(ofSize: 13, weight: .semibold),
                                                         .foregroundColor: NSColor.white]
@@ -107,11 +120,13 @@ final class FlexibleRound6EvidenceProbe: XCTestCase {
             let c = FlexibleStagePage.composeTints(model: m, overlay: o)
             var cache: (key: String, dents: [Float])?
             let sq = FlexibleSettingsSquish.shown(model: m, overlay: o, channels: c, feCache: &cache)
-            let k = sq.exaggeration
-            let items = frames ? [] : FlexibleStageVolumes.items(model: m, k: k, part: part)
-            let mr = try renderer(mesh: o.mesh, tints: c.tints, dents: sq.dents, scale: Float(k), bodyAlpha: FlexibleStagePage.xrayBodyAlpha,
+            let k = FlexibleStageVolumes.prismK(sq.exaggeration)
+            let heat = FlexibleGroupWalls.heatSamples(tints: c.tints, overlay: o, model: m)
+            let items = frames ? [] : FlexibleStageVolumes.items(model: m, k: k, part: part, heat: heat)
+            let mr = try renderer(mesh: o.mesh, tints: c.tints, dents: sq.dents, scale: Float(sq.exaggeration), bodyAlpha: FlexibleStagePage.xrayBodyAlpha,
                                   settle: settle, cam: cam, device: device, items: items)
             let proj = projection(mr)
+            let dashed = frames ? [] : FlexibleStageViewTags.hidden(model: m, projection: proj)
             var marks: [Mark] = []
             if chip, let h = FlexibleDepthChips.handle(model: m, k: k), let p = proj.project(h.anchor), let f = m.selectedRegion.flatMap({ m.settings.face($0) }) {
                 marks.append(Mark(point: p, text: String(format: "↓ %.1f mm", f.deepestMM), fill: FlexibleStageStyle.facePrismKnob))
@@ -121,8 +136,8 @@ final class FlexibleRound6EvidenceProbe: XCTestCase {
                     marks.append(Mark(point: t.point, text: t.text, fill: DS.Surface.panel))
                 }
             }
-            try write(mr, name, marks: marks)
-            print("FLEX-R6-EVIDENCE \(name): rail \(m.rail) · selected \(m.selectedRegion.map(String.init) ?? "—") · views \(m.views.rawValue) · items " +
+            try write(mr, name, marks: marks, dashed: dashed)
+            print("FLEX-R6-EVIDENCE \(name): dashed \(dashed.map(\.id)) · rail \(m.rail) · selected \(m.selectedRegion.map(String.init) ?? "—") · views \(m.views.rawValue) · items " +
                   items.map { "\($0.volume.faceID)\($0.surfaceOnly ? "g" : "p")\($0.faceAlpha.map { String(format: "%.2f", $0) } ?? "nil")" }.joined(separator: ","))
         }
         // img2: Group 2's tab open (face 4 selected — its faint prism too)
@@ -135,6 +150,18 @@ final class FlexibleRound6EvidenceProbe: XCTestCase {
         try settings("R6_S_img3_before_round5_frames_top.png", top, frames: true)
         try settings("R6_S_img3_after_face2_prism_top.png", top, chip: true)
         try settings("R6_S_img3_after_face2_prism_iso.png", iso, chip: true)
+        // ★ R6 REVIEW: each group's tab (nothing selected), and [Rests] (the bottom faces away: dashed)
+        m.selectedRegion = nil
+        for (g, cam) in [(1, iso), (2, iso), (3, iso), (1, top)] {
+            m.rail = .group(g)
+            try settings("R6R_S_group\(g)_tab_\(cam.name == top.name ? "top" : "iso").png", cam)
+        }
+        m.rail = .rests
+        try settings("R6R_S_rests_tab_iso.png", iso)
+        try settings("R6R_S_rests_tab_top.png", top)
+        m.rail = .model
+        m.views = [.groups]
+        try settings("R6R_S_groups_view_none_open_iso.png", iso)
         // the Groups view
         m.rail = .group(2)
         m.views = [.groups]

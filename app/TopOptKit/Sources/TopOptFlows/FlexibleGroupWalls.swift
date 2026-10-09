@@ -18,6 +18,12 @@
 // and back. Every triangle is wound so the renderer's front face is seen from OUTSIDE the part
 // (`frontIsCounterClockwiseFromOutside`, pinned on the GPU by FlexibleRound6Tests). DISPLAY geometry only:
 // never an input to core.
+// ★ R6 REVIEW (the verifier's findings, confirmed on his pad): (1) one alpha for every colour tinted nothing — his teal
+// over the green heat moved ΔE76 3.0 at 0.08 — so each member's glass takes the alpha that moves the colour HE SEES there
+// by about ΔE 20 toward its group's colour (`alphas`, over its own heat — `heatSamples`, the page's composed tints);
+// (2) a member that faces AWAY (his [Rests] bottom from any camera above it) has its fill culled, and its 1 px outline
+// ran along the part's own edges — the page draws it as a bold DASHED line in its colour (`outlines` →
+// FlexibleStageViewTags.hidden), the hidden-line convention, so colours still never mix through the X-ray.
 // ★ PAST EIGHT GROUPS (C5): the digits painted on the heat went with the frames; in the Groups view a
 // group whose colour another group also wears (FlexibleGroupNumbers.shared) shows its number disc on
 // each member's glass (`discs`; FlexibleStageViewTags places them on screen). One group shown: its tab
@@ -32,16 +38,31 @@ enum FlexibleGroupWalls {
 
     /// How far the glass stands proud of its face (mm).
     static let epsMM = 0.3
-    /// The glass's alphas — TRUE opacities (MetalMeshView's GLASS pass pushes them straight): every shown group,
-    /// and the OPEN group while the Groups view is on. Set by FlexibleRound6Tests' measurement on his pad (R6-1d:
-    /// the glass over every heat colour present at a median Δ in [4, 25]/255; the spec's start, 0.10, read 22–24).
-    static let faceAlpha: Float = 0.08
-    static let edgeAlpha: Float = 0.40
-    static let openFaceAlpha: Float = 0.13
-    static let openEdgeAlpha: Float = 0.60
-    /// ★ R6 REVIEW: the most a glass may hide of the heat under it (a tab's; the open group's in the Groups view).
+    /// ★ R6 REVIEW — THE GLASS'S ALPHA IS ITS COLOUR'S OVER ITS OWN HEAT (the verifier, confirmed on his pad: at ONE
+    /// alpha for every colour, 0.08, his teal Group 3 over the green heat moved its face ΔE76 3.0 and his green Group 1
+    /// over the blue top 8.5 — no tint; the Groups view looked unchanged; and no single alpha serves both: teal reads
+    /// ΔE 10 only at 0.28, where green on the blue top is ΔE 40). Each member's glass takes the alpha that moves the
+    /// colour he sees there by about `targetDE` toward its group's colour — "slightly visible … with a TINT" for every
+    /// colour over every heat: alpha = targetDE / the median ΔE between its colour and its face's own heat (the page's
+    /// composed tints, `heatSamples`), within [`minAlpha`, `maxAlpha`]; the OPEN group in the Groups view
+    /// `openTargetDE` (brighter), up to `maxOpenAlpha`. TRUE opacities (MetalMeshView's GLASS pass pushes them
+    /// straight). The renderer's lighting dims a face below its vertex colour, so the screen moves less than the
+    /// estimate (on his pad 0.58–0.86 of it: least for his dark teal over the green heat): 21 is the target that brings
+    /// that worst case to ΔE 12 at the cap. Measured on his pad by FlexibleRound6Tests (R6R-1: ΔE ≥ 10 toward its own
+    /// colour, ≤ 32; the spec's 15 left his teal at 8.8).
+    static let targetDE = 21.0
+    static let openTargetDE = 28.0
+    static let minAlpha: Float = 0.06
+    /// The most a glass may hide of the heat under it (a tab's; the open group's in the Groups view).
     static let maxAlpha: Float = 0.35
     static let maxOpenAlpha: Float = 0.45
+    /// The outline's alphas (every member's, front and back).
+    static let edgeAlpha: Float = 0.40
+    static let openEdgeAlpha: Float = 0.60
+    /// What a member with no heat of its own is seen over (a resting face: the X-ray's ghost on the page's ground).
+    static let backdrop = SIMD3<Float>(Float(DS.Color.background.r), Float(DS.Color.background.g), Float(DS.Color.background.b))
+    /// How many of a region's heat colours `heatSamples` keeps (evenly spaced).
+    static let heatSampleCount = 256
     /// The welding key (mm).
     static let weldMM = 1e-4
     /// The renderer's front face, seen from OUTSIDE the part (Metal's default winding, read in its y-up clip
@@ -147,7 +168,7 @@ enum FlexibleGroupWalls {
         return (SIMD3<Float>(acc / area), SIMD3<Float>(out))
     }
 
-    /// A shown member's outline (model space), its centroid and outward normal (stub).
+    /// ★ R6 REVIEW: a shown member's outline (model space), its centroid and outward normal.
     struct Outline: Equatable {
         let key: String
         let colour: RGBA
@@ -156,8 +177,41 @@ enum FlexibleGroupWalls {
         let point: SIMD3<Float>
         let normal: SIMD3<Float>
     }
-    /// A shell's boundary chained into closed loops (stub).
-    static func loops(_ s: FaceOffsetShell) -> [[SIMD3<Float>]] { [] }
+    /// ★ R6 REVIEW: a shell's boundary (the edges one triangle uses) chained into closed loops, in its base's points —
+    /// the dashed outline of a member that faces away (FlexibleStageViewTags.hidden).
+    static func loops(_ s: FaceOffsetShell) -> [[SIMD3<Float>]] {
+        var use: [UInt64: Int] = [:], dir: [UInt64: (UInt32, UInt32)] = [:]
+        var k = 0
+        while k + 2 < s.indices.count {
+            for e in 0..<3 {
+                let a = s.indices[k + e], b = s.indices[k + (e + 1) % 3]
+                let key = a < b ? (UInt64(a) << 32 | UInt64(b)) : (UInt64(b) << 32 | UInt64(a))
+                use[key, default: 0] += 1
+                dir[key] = (a, b)
+            }
+            k += 3
+        }
+        var next: [UInt32: [UInt32]] = [:]
+        for (key, n) in use where n == 1 { if let (a, b) = dir[key] { next[a, default: []].append(b) } }
+        for a in next.keys { next[a]!.sort() }
+        var out: [[SIMD3<Float>]] = []
+        for start in next.keys.sorted() {
+            while let first = next[start]?.first {
+                next[start]!.removeFirst()
+                var loop: [SIMD3<Float>] = [s.base[Int(start)]]
+                var v = first
+                var guardSteps = use.count + 1
+                while v != start, guardSteps > 0, let n = next[v]?.first {
+                    loop.append(s.base[Int(v)])
+                    next[v]!.removeFirst()
+                    v = n
+                    guardSteps -= 1
+                }
+                if loop.count >= 3 { out.append(loop) }
+            }
+        }
+        return out
+    }
 
     // MARK: - what the page shows (the model's state)
 
@@ -187,13 +241,56 @@ enum FlexibleGroupWalls {
         return out
     }
 
-    /// ★ R6 REVIEW (stub): a member's glass alphas over its heat (today's constants).
+    /// ★ R6 REVIEW: a member's glass alphas over its heat (`heat`: its colours on the page; empty: the `backdrop`).
     nonisolated static func alphas(tint: SIMD3<Float>, heat: [SIMD3<Float>], open: Bool) -> (face: Float, edge: Float) {
-        open ? (openFaceAlpha, openEdgeAlpha) : (faceAlpha, edgeAlpha)
+        let t = lab(tint)
+        let de = (heat.isEmpty ? [backdrop] : heat).map { Double(simd_length(lab($0) - t)) }.sorted()
+        let median = de[de.count / 2]
+        let cap = open ? maxOpenAlpha : maxAlpha
+        let face = median > 1e-6 ? min(cap, max(minAlpha, Float((open ? openTargetDE : targetDE) / median))) : cap
+        return (face, open ? openEdgeAlpha : edgeAlpha)
     }
-    /// ★ R6 REVIEW (stub): each pressed region's colours on the page (its map), sampled.
+
+    /// CIE L*a*b* (D65) of an sRGB colour (0…1) — a glass is judged as a colour change (ΔE76).
+    nonisolated static func lab(_ c: SIMD3<Float>) -> SIMD3<Float> {
+        func lin(_ v: Float) -> Float { v <= 0.04045 ? v / 12.92 : pow((v + 0.055) / 1.055, 2.4) }
+        let r = lin(c.x), g = lin(c.y), b = lin(c.z)
+        let x = (0.4124 * r + 0.3576 * g + 0.1805 * b) / 0.95047
+        let y = 0.2126 * r + 0.7152 * g + 0.0722 * b
+        let z = (0.0193 * r + 0.1192 * g + 0.9505 * b) / 1.08883
+        func f(_ v: Float) -> Float { v > 0.008856 ? cbrt(v) : 7.787 * v + 16 / 116 }
+        return SIMD3(116 * f(y) - 16, 500 * (f(x) - f(y)), 200 * (f(y) - f(z)))
+    }
+
+    /// ★ R6 REVIEW: each pressed region's colours on the page — its map's column quads in the page's composed tints
+    /// (`overlay.flatStart`, six flat vertices per column), at most `heatSampleCount`, evenly spaced. Taken where the
+    /// page composes its tints (FlexibleStagePage.refreshChannels), never per frame.
     @MainActor
-    static func heatSamples(tints: [Float]?, overlay: FlexibleOverlayMesh?, model m: FlexibleStageModel) -> [Int: [SIMD3<Float>]] { [:] }
+    static func heatSamples(tints: [Float]?, overlay: FlexibleOverlayMesh?, model m: FlexibleStageModel) -> [Int: [SIMD3<Float>]] {
+        guard let t = tints, let o = overlay else { return [:] }
+        var out: [Int: [SIMD3<Float>]] = [:]
+        for f in m.settings.loadedFaces {
+            let r = f.faceRegionID
+            guard let key = m.key(r), let start = o.flatStart[key], let n = m.stacks[key]?.columns.count, n > 0 else { continue }
+            let count = 6 * n, step = max(1, count / heatSampleCount)
+            var cs: [SIMD3<Float>] = []
+            var v = start
+            while v < start + count, v * 8 + 2 < t.count {
+                cs.append(SIMD3(t[v * 8], t[v * 8 + 1], t[v * 8 + 2]))
+                v += step
+            }
+            if !cs.isEmpty { out[r] = cs }
+        }
+        return out
+    }
+
+    /// A short signature of `heatSamples` (a cache key: the page asks on every body pass).
+    nonisolated static func signature(_ heat: [Int: [SIMD3<Float>]]) -> String {
+        heat.keys.sorted().map { r -> String in
+            let sum = heat[r]!.reduce(SIMD3<Float>.zero, +)
+            return String(format: "%d:%d:%.4f,%.4f,%.4f", r, heat[r]!.count, sum.x, sum.y, sum.z)
+        }.joined(separator: ";")
+    }
 
     /// Each shown member's glass for MetalMeshView's clearance pass (GLASS: alphas set, surface only).
     /// Cached: the shells per (part, sectors, region); the list per (shown, views).
@@ -206,6 +303,7 @@ enum FlexibleGroupWalls {
         let regions = m.regions
         let scope = "\(mesh.signature.contentHash)|\(regions.key)"
         let key = scope + "|\(views.rawValue)|" + shown.map { "\($0.key):\($0.colour.r),\($0.colour.g),\($0.colour.b):\($0.regions):\($0.open)" }.joined(separator: ";")
+            + "|" + signature(heat)
         if let c = Cache.items, c.key == key { return c.items }
         var out: [ClearanceRenderItem] = []
         for g in shown {
@@ -244,9 +342,26 @@ enum FlexibleGroupWalls {
         return out
     }
 
-    /// Each shown member's outline (stub).
+    /// ★ R6 REVIEW: each shown member's outline loops, centroid and outward normal (cached like the glass).
     @MainActor
-    static func outlines(model m: FlexibleStageModel, views: FlexibleStageViews, mesh: ViewerMesh?) -> [Outline] { [] }
+    static func outlines(model m: FlexibleStageModel, views: FlexibleStageViews, mesh: ViewerMesh?) -> [Outline] {
+        guard let mesh else { return [] }
+        let shown = self.shown(model: m, views: views)
+        guard !shown.isEmpty else { return [] }
+        let regions = m.regions
+        let scope = "\(mesh.signature.contentHash)|\(regions.key)"
+        let key = scope + "|" + shown.map { "\($0.key):\($0.colour.r),\($0.colour.g),\($0.colour.b):\($0.regions)" }.joined(separator: ";")
+        if let c = Cache.outlines, c.key == key { return c.outlines }
+        var out: [Outline] = []
+        for g in shown {
+            for r in g.regions {
+                guard let s = cachedShell(r, scope: scope, regions: regions, mesh: mesh), let c = centroid(s) else { continue }
+                out.append(Outline(key: g.key, colour: g.colour, region: r, loops: loops(s), point: c.point, normal: c.normal))
+            }
+        }
+        Cache.outlines = (key, out)
+        return out
+    }
 
     // MARK: - the cache (main thread)
 
@@ -255,11 +370,12 @@ enum FlexibleGroupWalls {
         static var scope: String?
         static var shells: [Int: FaceOffsetShell] = [:]
         static var items: (key: String, items: [ClearanceRenderItem])?
+        static var outlines: (key: String, outlines: [Outline])?
     }
 
     @MainActor
     private static func cachedShell(_ r: Int, scope: String, regions: FlexibleRegions, mesh: ViewerMesh) -> FaceOffsetShell? {
-        if Cache.scope != scope { Cache.scope = scope; Cache.shells = [:]; Cache.items = nil }
+        if Cache.scope != scope { Cache.scope = scope; Cache.shells = [:]; Cache.items = nil; Cache.outlines = nil }
         if let s = Cache.shells[r] { return s }
         guard let s = shell(region: r, regions: regions, mesh: mesh) else { return nil }
         Cache.shells[r] = s
