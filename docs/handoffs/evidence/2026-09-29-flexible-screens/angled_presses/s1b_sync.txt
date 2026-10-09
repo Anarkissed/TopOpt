@@ -90,8 +90,9 @@
 #   AP's plain-words explanation of a shared surface must catch FlexibleCoreRun's ERROR path, not match a refusal code
 #   (raise it with #361 if a refusal code was meant).
 #   "Existing jobs are unaffected" does NOT follow from (3): the goldens compare job BYTES and never call run_flexible_job.
-#   Checked directly: topopt-cli built from this tree's core (907df081's core/, scratch build), every golden send run with
-#   $ROOT = s0_frozen/a1 — A1_0003 send 1 and his r5 held send ran (exit 0); A1_0002 send 1 and send 2 (the M2 stand) STOP
+#   Checked directly: topopt-cli built from this tree's core (907df081's core/, scratch build), all 14 golden sends run with
+#   $ROOT = s0_frozen/a1 and $REPO = this tree — 12 ran (exit 0: A1_0003 sends 1-3, A1_0004 sends 1-2, the three C1 pad
+#   jobs, his 0004 sends 1-2, his r5 held send and send 2); A1_0002 send 1 and send 2 (the M2 stand) STOP
 #   with "face region 27 has no column at a 3.410559 mm pitch" (exit 1) — NOT A3, and older than this sync (the throw is
 #   faces.cpp:509 at e2652a41 and at 907df081; the scene golden already records region 27's error, frames_m2.txt:814;
 #   the verifier ran e2652a41's core: the same). FlexibleCoreHold still OFFERS those two sends. Out of S1b's scope —
