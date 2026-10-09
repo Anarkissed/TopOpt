@@ -466,6 +466,17 @@ public final class FlexibleMainStage: ObservableObject {
         volumesCache = (key, items)
         return items
     }
+    /// ★ S1b (round 6 item 3, the main page): the ONE k the main page's prisms, their mm tags and the legend's Prisms
+    /// row use — the dent's exaggeration, or 1 while nothing is dented (the prism at its true depth).
+    public var prismK: Double { channels.map { FlexibleStageVolumes.prismK($0.exaggeration) } ?? 1 }
+    /// The Prisms row's "×k".
+    public var prismLegendK: Int { Int(prismK.rounded()) }
+    /// ★ S1b: the legend card carries the Prisms row (STUB — the tests-first commit).
+    public var legendPrismsRow: Bool { false }
+    /// ★ S1b: the main page's read-only mm tags (STUB — the tests-first commit).
+    func prismTags(_ project: ProjectModel, on stage: WorkspaceStage, drilledIn: Bool, viewport: CGSize, keepOut: [CGRect],
+                          projector: (SIMD3<Float>) -> CGPoint?) -> [FlexibleStageViewTags.Tag] { [] }
+
     /// ★ ROUND 6 (item 3): the main page's [Prisms] — the Prisms view, and the Lattice view (the X-ray) with it
     /// (a view that needs another turns it on itself). The button itself joins the toggles on the S1 base.
     public func togglePrisms() {

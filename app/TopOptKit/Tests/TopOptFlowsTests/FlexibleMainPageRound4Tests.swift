@@ -55,12 +55,13 @@ final class FlexibleMainPageRound4Tests: XCTestCase {
     // MARK: img 5 — no X-ray selector; the Lattice view IS the X-ray
 
     func testTheViewRowHasNoXRayButton() throws {
-        XCTAssertEqual(FlexibleMainViewToggles.buttons, 3, "Dent heat · Stress · Lattice")
+        // ★ RE-PINNED (S1b, round 6 item 3 — the main page's [Prisms]): four buttons; still no X-ray
+        XCTAssertEqual(FlexibleMainViewToggles.buttons, 4, "Dent heat · Stress · Lattice · Prisms")
         let code = try FlexibleSource.code("FlexibleMainStatusPill.swift")
         XCTAssertFalse(code.contains("flexible-main-view-xray"), "no X-ray button on the main page")
         XCTAssertFalse(code.contains("label: \"X-ray\""))
         XCTAssertFalse(code.contains("main.xray.toggle()"))
-        for id in ["flexible-main-view-heat", "flexible-main-view-stress", "flexible-main-view-lattice"] {
+        for id in ["flexible-main-view-heat", "flexible-main-view-stress", "flexible-main-view-lattice", "flexible-main-view-prisms"] {
             XCTAssertTrue(code.contains(id), "\(id) stays")
         }
         // the Lattice button asks the stage (it may open Settings), never a bare toggle

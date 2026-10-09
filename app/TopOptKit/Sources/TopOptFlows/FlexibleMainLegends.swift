@@ -79,7 +79,9 @@ public enum FlexibleMainLegendLayout {
     public static let foldedBar = CGSize(width: 18, height: 150)
     public static let foldedSpacing: CGFloat = 30
     public static let foldedEdge: CGFloat = 0
-    public static func cardSize(rows: Int, minimized: Bool) -> CGSize {
+    /// ★ S1b (round 6 item 3): a view's one-line row in the card (the Prisms row) — STUB in the tests-first commit.
+    public static let viewRowHeight: CGFloat = 22
+    public static func cardSize(rows: Int, minimized: Bool, viewRows: Int = 0) -> CGSize {
         let n = CGFloat(Swift.max(1, rows))
         if minimized {
             // n bars, a 30 pt gap after each (the last before the chevron), the chevron, DS.Space.s padding

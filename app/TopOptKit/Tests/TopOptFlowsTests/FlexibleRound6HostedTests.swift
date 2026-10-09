@@ -11,7 +11,10 @@
 //   R6-3c  the view buttons sit under the gizmo, clear of everything, at 11" and 13", both ways;
 //   R6-3d  ONE legend card carries the view rows, one line each;
 //   R6-3f  the main page's prisms (hook H15's list): the active group's, or every one in the Prisms view;
-//   R6-3g  the main page's [Prisms] button — waits on the S1 base (skipped, printed); R6-3h (togglePrisms) runs now.
+//   R6-3g  the main page's [Prisms] button — ★ S1b: un-gated (the S1 base is on this branch); R6-3h (togglePrisms).
+// ★ S1b (2026-10-08, the main-page half of item 3): R6-3j the fourth button IS [Prisms] (clicked, hosted); R6-3k the main
+//   page's ONE legend card carries the Prisms row while it is on (hosted, one line, inside the card); R6-3l selecting a
+//   group on the main page shows its squish AT ONCE — its faint prism and its read-only mm tag, on the hosted page too.
 // ★ R6 REVIEW (the verifier's findings, 2026-10-08): R6R-0 the page's one list carries the glass AND the prisms; R6R-4
 //   with no dent the chip stands on the drawn prism's floor (one k); R6R-2 the tags, discs and dashed outlines are on the
 //   hosted page; R6R-6 a member that faces away is drawn dashed ([Rests] from above).
@@ -553,16 +556,10 @@ final class FlexibleRound6HostedTests: XCTestCase {
     }
 
     // MARK: - R6-3g / R6-3h (the main page's [Prisms] button: step 6, on the S1 base)
-
-    func s1Base() throws {
-        guard try FlexibleSource.code("WorkspacePlaceholder.swift").contains("legendDrilledIn") else {
-            print("FLEX-R6 SKIP \(name): the base is not S1 — the main page's [Prisms] button waits (step 6)")
-            throw XCTSkip("waits on the S1 base")
-        }
-    }
+    // ★ S1b (2026-10-08): UN-GATED — the S1 base is on this branch (e2652a41); R6-3g runs, red until the fourth button.
 
     func testTheFourMainButtonsClearTheNoteLegendAndPlayer() throws {
-        try s1Base()
+        XCTAssertTrue(try FlexibleSource.code("WorkspacePlaceholder.swift").contains("legendDrilledIn"), "premise: the S1 base")
         XCTAssertEqual(FlexibleMainViewToggles.buttons, 4, "Dent heat, Stress, Lattice, Prisms")
         for (tag, size) in Self.sizes {
             let row = FlexibleMainViewToggles.rowFrame(viewport: size)
@@ -585,6 +582,180 @@ final class FlexibleRound6HostedTests: XCTestCase {
         stage.togglePrisms()
         XCTAssertFalse(m.views.contains(.prisms))
         XCTAssertTrue(stage.latticeOn)
+    }
+
+    // MARK: - S1b: the main-page half of item 3 (R6-3j, R6-3k, R6-3l)
+
+    /// A click at `p` (the page's points, y down) through the window (FlexibleMainPageRound4HostedTests' own).
+    func click(_ h: Host, _ p: CGPoint) {
+        let loc = NSPoint(x: p.x, y: h.size.height - p.y)
+        for t in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
+            let e = NSEvent.mouseEvent(with: t, location: loc, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                                       windowNumber: h.window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1)!
+            h.window.sendEvent(e)
+            pump(0.06)
+        }
+    }
+
+    /// ★ R6-3j: THE FOURTH BUTTON IS [Prisms] — clicked on the hosted row: the Prisms view on (every pressed face's
+    /// prism in H15's list) and the Lattice view with it; clicked again: off, the Lattice view as he left it. The
+    /// third is still Lattice. RED before the button: the trailing button is Lattice (the click toggles the lattice
+    /// and no prism view comes on).
+    func testThePrismsButtonIsTheFourthAndShowsEveryPrism() throws {
+        let code = try FlexibleSource.code("FlexibleMainStatusPill.swift")
+        XCTAssertTrue(code.contains("\"flexible-main-view-prisms\""), "the button's accessibility id")
+        XCTAssertTrue(code.contains("main.togglePrisms()"), "it asks the stage (the Lattice view comes with it)")
+        let stage = FlexibleMainStage()
+        let (r, m) = try his(stage)
+        var opened = 0
+        var lines: [String] = []
+        for (tag, size) in [Self.sizes[0], Self.sizes[1]] {
+            let h = host(FlexibleMainViewToggles(main: stage, openSettings: { opened += 1 }), size: size)
+            pump(0.3)
+            let row = FlexibleMainViewToggles.rowFrame(viewport: size)
+            let prisms = CGPoint(x: row.maxX - 20, y: row.midY)                               // the fourth (trailing)
+            let lattice = CGPoint(x: row.minX + 2 * (40 + DS.Space.s) + 20, y: row.midY)      // the third
+            m.views = []
+            stage.latticeOn = false
+            click(h, prisms)
+            XCTAssertTrue(m.views.contains(.prisms), "\(tag): [Prisms] on")
+            XCTAssertTrue(stage.latticeOn, "\(tag): …and the Lattice view (the X-ray) with it")
+            XCTAssertEqual(Set(stage.volumes(r.project, on: .lattice, drilledIn: false).map(\.volume.faceID)), [1, 4, 2, 3, 5],
+                           "\(tag): every pressed face's prism in H15's list")
+            click(h, prisms)
+            XCTAssertFalse(m.views.contains(.prisms), "\(tag): off again")
+            XCTAssertTrue(stage.latticeOn, "\(tag): the Lattice view stays as he left it")
+            // the third is still Lattice: it never touches the Prisms view
+            let before = (stage.latticeOn, opened)
+            click(h, lattice)
+            XCTAssertFalse(m.views.contains(.prisms), "\(tag): Lattice is not Prisms")
+            XCTAssertTrue(stage.latticeOn != before.0 || opened == before.1 + 1, "\(tag): the third button is Lattice (hides it, or opens Settings)")
+            lines.append("\(tag) row \(row.integral)")
+            snapshot(h, "R6_S1b_\(tag)_main_four_buttons.png")
+        }
+        m.views = []
+        print("FLEX-R6-3j " + lines.joined(separator: " · "))
+    }
+
+    /// ★ R6-3k: THE MAIN PAGE'S ONE LEGEND CARD GAINS THE PRISMS ROW while [Prisms] is on — one line, inside the card,
+    /// "Prism = squish shown ×k" at the page's ONE k; with no scale to show, the card still comes, for its row. RED
+    /// before: no row, and no card without a scale.
+    func testTheMainLegendCardCarriesThePrismsRowWhilePrismsIsOn() throws {
+        let legends = try FlexibleSource.code("FlexibleMainLegends.swift")
+        XCTAssertEqual(legends.components(separatedBy: "FlexibleLegendViewRows.prisms(k: main.prismLegendK)").count - 1, 1,
+                       "one Prisms row, in the one card, at the page's k")
+        let rows1 = FlexibleMainLegendLayout.cardSize(rows: 1, minimized: false)
+        let rows1Prisms = FlexibleMainLegendLayout.cardSize(rows: 1, minimized: false, viewRows: 1)
+        XCTAssertEqual(rows1Prisms.height, rows1.height + FlexibleMainLegendLayout.viewRowHeight, accuracy: 0.5, "the row adds one line")
+        XCTAssertGreaterThan(FlexibleMainLegendLayout.viewRowHeight, 0)
+        let stage = FlexibleMainStage()
+        let (_, m) = try his(stage)
+        stage.heat = false
+        stage.stress = false
+        stage.latticeOn = false
+        stage.refresh()
+        XCTAssertEqual(stage.legendKinds, [], "premise: no scale on screen")
+        let v = Self.sizes[0].1
+        m.views = []
+        XCTAssertFalse(stage.legendPrismsRow)
+        XCTAssertNil(stage.legendCard(viewport: v, bottomClearance: 90, chipColumnWidth: 0), "no view, no scale: no card")
+        m.views = [.prisms]
+        XCTAssertTrue(stage.legendPrismsRow, "[Prisms] on: the row")
+        let only = try XCTUnwrap(stage.legendCard(viewport: v, bottomClearance: 90, chipColumnWidth: 0), "[Prisms] with no scale: the card, for its row")
+        XCTAssertTrue(only.expanded)
+        XCTAssertEqual(stage.prismLegendK, Int(stage.prismK.rounded()), "the row's ×k is the prisms' k")
+        XCTAssertLessThanOrEqual(FlexibleRowCopy.legendPrismsRow(stage.prismLegendK).count, FlexibleRowCopy.maxChars)
+        var lines: [String] = []
+        for (tag, size) in [Self.sizes[0], Self.sizes[2]] {
+            m.views = [.prisms]
+            let h = host(FlexibleMainLegends(main: stage, mode: .constant(.groups), projection: nil, settle: simd_quatf(angle: 0, axis: SIMD3(0, 0, 1)),
+                                             bottomClearance: 90, chipColumnWidth: 0), size: size)
+            pump(0.5)
+            let card = try XCTUnwrap(stage.legendCard(viewport: size, bottomClearance: 90, chipColumnWidth: 0), "\(tag): the card")
+            let row = try XCTUnwrap(h.frames.all["legendPrismsRow"], "\(tag): the Prisms row is drawn")
+            XCTAssertLessThanOrEqual(row.height, 22, "\(tag): one line")
+            XCTAssertTrue(card.frame.insetBy(dx: -1, dy: -1).contains(row), "\(tag): inside the one card (\(row) in \(card.frame))")
+            snapshot(h, "R6_S1b_\(tag)_main_legend_prisms_row.png")
+            m.views = []
+            pump(0.5)
+            XCTAssertNil(h.frames.all["legendPrismsRow"].flatMap { $0.width > 1 ? $0 : nil }, "\(tag): [Prisms] off: no row")
+            lines.append("\(tag) card \(card.frame.integral) row \(row.integral)")
+        }
+        print("FLEX-R6-3k " + lines.joined(separator: " · "))
+    }
+
+    /// ★ R6-3l: SELECTING A GROUP ON THE MAIN PAGE SHOWS ITS SQUISH AT ONCE — no refresh, no view switch: its pressed
+    /// faces' faint prisms (H15's list) and a read-only "%.1f mm" tag at each prism's floor; the Prisms view tags every
+    /// uncovered prism, greedy (none overlap), hidden under a keep-out; nothing while a legend reads or off the stage.
+    /// Hosted: the tag is ON the main page (FlexibleMainLegends' layer), where the page projects the floor. RED before:
+    /// no tags.
+    func testSelectingAGroupOnTheMainPageShowsItsSquishAtOnce() throws {
+        let stage = FlexibleMainStage()
+        let (r, m) = try his(stage)
+        let size = CGSize(width: 900, height: 900)
+        let proj = try projection(r.project)
+        func tags(_ drilledIn: Bool = false, on s: WorkspaceStage = .lattice, keepOut: [CGRect] = []) -> [FlexibleStageViewTags.Tag] {
+            stage.prismTags(r.project, on: s, drilledIn: drilledIn, viewport: size, keepOut: keepOut, projector: { proj.project($0) })
+        }
+        print("FLEX-R6-3l main groups: " + r.project.selection.groups.map { "\($0.name) faces \($0.faces) regions \($0.regionIDs.count)" }.joined(separator: " · "))
+        var lines: [String] = []
+        for (name, want) in [("Top", 1), ("Group C", 3)] {
+            guard let g = r.project.selection.groups.first(where: { $0.name == name }) else { XCTFail("his group \(name)"); continue }
+            r.project.selection.setActive(g.id)
+            // AT ONCE: no refresh, no view switch
+            let vols = stage.volumes(r.project, on: .lattice, drilledIn: false)
+            XCTAssertEqual(vols.map(\.volume.faceID), [want], "\(name): face \(want)'s prism")
+            let t = tags()
+            XCTAssertEqual(t.map(\.region), [want], "\(name): face \(want)'s mm tag, at once")
+            let f = try XCTUnwrap(m.settings.face(want))
+            XCTAssertEqual(t.first?.text, String(format: "%.1f mm", f.deepestMM), "\(name): his deepest, read-only")
+            if let v = vols.first, let tag = t.first {
+                let floor = try XCTUnwrap(FlexibleDepthPrism.handle(v.volume)).anchor
+                let p = try XCTUnwrap(proj.project(floor))
+                XCTAssertEqual(tag.point.x, p.x, accuracy: 1e-3, "\(name): at the prism's floor")
+                XCTAssertEqual(tag.point.y, p.y, accuracy: 1e-3)
+                lines.append("\(name) → face \(tag.region) \(tag.text) at \(tag.point)")
+            }
+            XCTAssertEqual(m.views, [], "\(name): selecting never switches views")
+        }
+        // the Prisms view: a tag per uncovered prism, never overlapping, each his deepest
+        m.views = [.prisms]
+        let all = tags()
+        XCTAssertGreaterThanOrEqual(all.count, 2, "the Prisms view's tags (overlaps dropped)")
+        for t in all {
+            XCTAssertEqual(t.text, String(format: "%.1f mm", try XCTUnwrap(m.settings.face(t.region)).deepestMM), "face \(t.region)")
+        }
+        for (i, a) in all.enumerated() { for b in all[(i + 1)...] {
+            XCTAssertFalse(FlexibleStageViewTags.frame(a).intersects(FlexibleStageViewTags.frame(b)), "tags \(a.region) and \(b.region) never overlap")
+        } }
+        if let first = all.first {
+            XCTAssertFalse(tags(keepOut: [FlexibleStageViewTags.frame(first)]).contains { $0.region == first.region }, "a tag under a keep-out hides")
+        }
+        XCTAssertTrue(tags(true).isEmpty, "nothing while a legend reads")
+        XCTAssertTrue(tags(on: .topology).isEmpty, "nothing off the Flexible stage")
+        lines.append("Prisms view → " + all.map { "face \($0.region) \($0.text)" }.joined(separator: ", "))
+        // hosted: the tag is on the main page, where the page projects the floor
+        m.views = []
+        let top = try XCTUnwrap(r.project.selection.groups.first { $0.name == "Top" })
+        r.project.selection.setActive(top.id)
+        let mesh = try XCTUnwrap(r.project.viewerMesh)
+        var cam = OrbitCamera()
+        cam.frame(mesh.bounds)
+        cam.setOrientation(azimuth: .pi / 4, elevation: .pi / 6)
+        let v = Self.sizes[0].1
+        let camera = CameraProjection(camera: cam, viewportSize: v)
+        let settle = r.project.force.settleRotation ?? simd_quatf(from: SIMD3<Float>(0, 0, -1), to: SIMD3<Float>(0, -1, 0))
+        let h = host(FlexibleMainLegends(main: stage, mode: .constant(.groups), projection: camera, settle: settle,
+                                         bottomClearance: 90, chipColumnWidth: 0), size: v)
+        pump(0.5)
+        let mark = try XCTUnwrap(h.frames.marks["tag-1"], "the Top's face 1 tag is ON the main page")
+        let floor = try XCTUnwrap(stage.volumes(r.project, on: .lattice, drilledIn: false).first.flatMap { FlexibleDepthPrism.handle($0.volume) }).anchor
+        let want = try XCTUnwrap(stage.screenPoint(floor))
+        XCTAssertEqual(mark.midX, want.x, accuracy: 1, "at the floor, where the page projects it")
+        XCTAssertEqual(mark.midY, want.y, accuracy: 1)
+        snapshot(h, "R6_S1b_11l_main_top_tag.png")
+        lines.append("hosted tag-1 \(mark.integral)")
+        print("FLEX-R6-3l " + lines.joined(separator: " · "))
     }
 
     // MARK: - R6 REVIEW (the verifier's findings of 2026-10-08)

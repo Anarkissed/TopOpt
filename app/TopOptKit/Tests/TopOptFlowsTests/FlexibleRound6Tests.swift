@@ -7,7 +7,7 @@
 //          or grazing; a nil-alpha item renders bit-identically to its hash before A2;
 //   R6-1f  no page paints round 5's frames outside their control; no page call tints a body by group;
 //   R6-3e  the views are never a setting, never an action, never the lattice's key;
-//   R6-3i  hook H15 (WorkspacePlaceholder) — waits on the S1 base (skipped, printed, until it is there).
+//   R6-3i  hook H15 (WorkspacePlaceholder) — ★ S1b: un-gated, the S1 base is on this branch.
 // ★ R6 REVIEW (the verifier's findings, 2026-10-08): R6R-1 each group's glass reads as ITS colour over the heat (ΔE76 ≥ 10
 //   toward it, told apart, only slightly); R6R-5 a faint prism's side edges only where its outline turns; R6R-3 the
 //   legend keeps clear of the view buttons (the page's own list, a red control); R6R-6a a glass's outline is one closed
@@ -558,15 +558,16 @@ final class FlexibleRound6Tests: XCTestCase {
     // MARK: - R6-3i
 
     /// ★ HOOK H15: the main page's prisms reach #354's clearance list whatever its surrounding condition.
-    /// It goes in on the S1 base only (its anchor sits beside S1's `legendDrilledIn` line).
+    /// ★ S1b (2026-10-08): UN-GATED — the S1 base is on this branch (e2652a41), so the hook is pinned now: ONE
+    /// line, the old `? stageVolumeItems : [],` gone, and `volumes(` asked with #354's own `legendDrilledIn`.
     func testTheWorkspaceHandsTheMainPagesPrismsToTheViewer() throws {
         let ws = try FlexibleSource.code("WorkspacePlaceholder.swift")
-        guard ws.contains("legendDrilledIn") else {
-            print("FLEX-R6 SKIP R6-3i: the base is not S1 (no legendDrilledIn) — hook H15 waits")
-            throw XCTSkip("H15 waits on the S1 base")
-        }
-        XCTAssertTrue(ws.contains("? stageVolumeItems + flexibleMain.volumes(project, on: stage, drilledIn: legendDrilledIn) : flexibleMain.volumes(project, on: stage, drilledIn: legendDrilledIn),"),
-                      "H15: the main page's prisms join the clearance list")
+        XCTAssertTrue(ws.contains("legendDrilledIn"), "premise: the S1 base (#354's legendDrilledIn)")
+        let h15 = "? stageVolumeItems + flexibleMain.volumes(project, on: stage, drilledIn: legendDrilledIn) : flexibleMain.volumes(project, on: stage, drilledIn: legendDrilledIn),"
+        XCTAssertTrue(ws.contains(h15), "H15: the main page's prisms join the clearance list")
+        XCTAssertEqual(ws.components(separatedBy: h15).count - 1, 1, "H15 is one line")
+        XCTAssertFalse(ws.contains("? stageVolumeItems : [],"), "H15 replaces the old line (+1 −1)")
+        XCTAssertEqual(ws.components(separatedBy: "flexibleMain.volumes(").count - 1, 2, "volumes( is asked only on H15's line")
     }
 
     // MARK: - the stamp's turn (his item 2's confusion: "Turn" read as the press's angle)

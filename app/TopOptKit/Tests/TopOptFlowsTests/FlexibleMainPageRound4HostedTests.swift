@@ -80,7 +80,7 @@ final class FlexibleMainPageRound4HostedTests: XCTestCase {
                 XCTAssertEqual(got.count, 2, "the row and the note at \(name)")
                 let drawnRow = got.max { $0.minX < $1.minX } ?? .zero, note = got.min { $0.minX < $1.minX } ?? .zero
                 XCTAssertTrue(row.insetBy(dx: -1, dy: -1).contains(drawnRow), "the three buttons fill their slot at \(name): \(drawnRow) in \(row)")
-                XCTAssertEqual(drawnRow.width, row.width, accuracy: 1, "three 40 pt buttons, no X-ray")
+                XCTAssertEqual(drawnRow.width, row.width, accuracy: 1, "the row's 40 pt buttons fill their slot, no X-ray")
                 XCTAssertTrue(band.insetBy(dx: -1, dy: -1).contains(note), "the \(kind) note inside its band at \(name): \(note) in \(band)")
                 XCTAssertLessThanOrEqual(note.maxX, drawnRow.minX, "left of the buttons at \(name)")
                 XCTAssertEqual(note.midY, drawnRow.midY, accuracy: 1, "on the row's line at \(name)")
@@ -99,7 +99,7 @@ final class FlexibleMainPageRound4HostedTests: XCTestCase {
         let h = host(FlexibleMainViewToggles(main: stage, openSettings: { opened += 1 }), size: size)
         pump(0.3)
         let row = FlexibleMainViewToggles.rowFrame(viewport: size)
-        let lattice = CGPoint(x: row.maxX - 20, y: row.midY)   // the third (trailing) button
+        let lattice = CGPoint(x: row.minX + 2 * (40 + DS.Space.s) + 20, y: row.midY)   // the third button (★ S1b re-pin: [Prisms] trails it now)
         // with a lattice to show: it hides, then shows
         XCTAssertTrue(stage.latticeShown, "premise")
         click(h, lattice)
