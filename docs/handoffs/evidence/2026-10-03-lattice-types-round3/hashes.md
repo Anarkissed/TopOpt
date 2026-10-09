@@ -14,6 +14,10 @@ Made with round 2's `tools/dump_stage_hashes.sh` on snapshot S1-2026-10-02 (`SWI
 | so | the plan's slot origin (`slot_origin_mm`), withheld off-plane | d08fc7a7650675b4 | 6dbb48fab4029f78 | c4ca5d5ac009036d | 2baaf9cbb94027c7 | c89da26e6a71021c | 3e6f162cb36212a9 | b457718dfc23ab42 |
 | go | the Structural Stepped block + the owner is core's (52cbc65e, c8d67dfa) | d08fc7a7650675b4 | 6dbb48fab4029f78 | c4ca5d5ac009036d | 2baaf9cbb94027c7 | c89da26e6a71021c | 3e6f162cb36212a9 | b457718dfc23ab42 |
 | fd | no fifths in the any-step packer; core's depth rule in the bake | d08fc7a7650675b4 | 6dbb48fab4029f78 | c4ca5d5ac009036d | 2baaf9cbb94027c7 | c89da26e6a71021c | 3e6f162cb36212a9 | b457718dfc23ab42 |
+| be | batch E ported (578c89d9) | d08fc7a7650675b4 | 6dbb48fab4029f78 | c4ca5d5ac009036d | 2baaf9cbb94027c7 | c89da26e6a71021c | 3e6f162cb36212a9 | b457718dfc23ab42 |
+| da | drawer A: whose number "Cells across" is (24359a8a) | d08fc7a7650675b4 | 6dbb48fab4029f78 | c4ca5d5ac009036d | 2baaf9cbb94027c7 | c89da26e6a71021c | 3e6f162cb36212a9 | b457718dfc23ab42 |
+| e1 | E1 merged (#358 26a37f64), the bridge calls core's floor; the card at the job's cap (be5fe18a) | d08fc7a7650675b4 | 6dbb48fab4029f78 | c4ca5d5ac009036d | 2baaf9cbb94027c7 | c89da26e6a71021c | 3e6f162cb36212a9 | b457718dfc23ab42 |
+| rg | the Regions task (0f14e82f) | d08fc7a7650675b4 | 6dbb48fab4029f78 | c4ca5d5ac009036d | 2baaf9cbb94027c7 | c89da26e6a71021c | 3e6f162cb36212a9 | b457718dfc23ab42 |
 
 g equals fo on all seven: the guard and the gate move no stage-job bytes.
 
@@ -35,3 +39,7 @@ so equals s9 on all seven. The slot origin rides only with a plan, and productio
 
 go and fd equal so on all seven. The gate refuses on the buttons, not in the job builder. The owner
 swap, the packer's menu and the depth rule shape only the plan, and production sends none.
+
+be, da, e1 and rg all equal fd on all seven. Batch E moves only a project with a cut piece, and none
+of his has one. The drawer, the card's cap and the Regions task are preview, UI or region editing;
+no saved region of his is a union.
