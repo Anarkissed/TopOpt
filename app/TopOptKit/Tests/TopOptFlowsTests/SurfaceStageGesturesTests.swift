@@ -586,12 +586,12 @@ final class SurfaceStageNoRegressionTests: XCTestCase {
         }
     }
 
-    /// ★ THE TRAY STILL CARRIES ALL FIVE TOOLS in their order, each with its icon
+    /// ★ THE TRAY STILL CARRIES ALL ITS TOOLS in their order, each with its icon
     /// and its one-line hint. This task added a button below the divider; it did
-    /// not touch the tool well.
+    /// not touch the tool well. (The Region tool joined last on 2026-10-08, approved.)
     func testTheToolTrayIsUnchanged() {
         XCTAssertEqual(SurfaceTool.allCases,
-                       [.select, .similar, .cut, .union, .pattern])
+                       [.select, .similar, .cut, .union, .pattern, .region])
         for tool in SurfaceTool.allCases {
             XCTAssertFalse(tool.icon.isEmpty, "\(tool.title) has an icon")
             XCTAssertFalse(tool.hint.isEmpty, "\(tool.title) has a hint")

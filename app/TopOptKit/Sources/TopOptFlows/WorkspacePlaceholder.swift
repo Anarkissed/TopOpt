@@ -288,6 +288,8 @@ public struct WorkspacePlaceholder: View {
     /// tap. Looked up later it becomes "the deepest region on this face", which
     /// after a cut is one particular half and not necessarily the one you touched.
     @State private var surfacePatternPiece: RegionID?
+    /// ★★ The Region tool's aim (2026-10-08): the region its verbs act on; nil until a region is tapped.
+    @State private var surfaceRegionAim: RegionID?
     /// ★ THE UNION TOOL ACCUMULATES *REGIONS*, NOT FACES.
     ///
     /// ★ THIS IS WHY MULTI-SELECT COULD NOT REACH TWO. The two halves of a cut face
@@ -773,7 +775,7 @@ public struct WorkspacePlaceholder: View {
                               ? SurfaceTint.pickChains(
                                   surfaceUnion.partialPicks(regions: project.faceRegions),
                                   in: project.faceRegions)
-                              : [],
+                              : (visible.surfaceEditing ? surfaceSelectedUnionLighting?.chains ?? [] : []),
                           xray: surfaceXrayOn,
                           settleRotation: settleQuat,           // D2: settle onto the floor
                           settleAnimated: !reduceMotion,
@@ -5612,6 +5614,7 @@ public struct WorkspacePlaceholder: View {
         surfaceUnion.clear()
         surfacePatternFace = nil
         surfacePatternPiece = nil
+        surfaceRegionAim = nil
         similar.clear()
         surfaceCarried = []
         surfaceRefusal = nil
@@ -6877,6 +6880,13 @@ public struct WorkspacePlaceholder: View {
     /// map cannot tell them apart no matter what colour it holds.
     private var surfaceVertexTints: [Float] {
         guard let mesh = viewerMesh else { return [] }
+        // ★★ a selected union of pieces lights piece by piece (2026-10-08) — `SurfaceTint.unionLighting`
+        if surfaceTool != .union, let ul = surfaceSelectedUnionLighting {
+            return SurfaceTint.buffer(mesh: mesh, groupedFaces: surfaceGroupedFaces,
+                                      regions: project.faceRegions, selected: nil,
+                                      picked: ul.picked, fragmentTested: ul.fragmentTested,
+                                      groupColours: surfaceGroupHues)
+        }
         return SurfaceTint.buffer(mesh: mesh, groupedFaces: surfaceGroupedFaces,
                                   regions: project.faceRegions,
                                   selected: surfaceSelected,
@@ -6965,6 +6975,12 @@ public struct WorkspacePlaceholder: View {
 
     /// The faces the single-plane cut test applies to: the selected region's own,
     /// and only when it IS a cut (a whole region has no plane to test).
+    /// The selected union's piece-by-piece lighting, when it has cut pieces (`SurfaceTint.unionLighting`).
+    private var surfaceSelectedUnionLighting: SurfaceTint.UnionLighting? {
+        guard let mesh = viewerMesh else { return nil }
+        return SurfaceTint.unionLighting(surfaceSelected, regions: project.faceRegions, mesh: mesh)
+    }
+
     private var surfaceSelectedTestedFaces: Set<FaceID> {
         guard let id = surfaceSelected,
               project.faceRegions.region(id)?.isCut == true else { return [] }
@@ -7200,6 +7216,22 @@ public struct WorkspacePlaceholder: View {
         case .pattern:
             surfacePatternFace = faceID
             surfacePatternPiece = surfaceSelected
+
+        case .region:
+            // ★★ THE REGION TOOL (2026-10-08). The first tap aims at the region under the finger (up
+            // through any union, as a selection does); once aimed, a tap adds the face to it or drops
+            // it — the Topology page's add/drop rule (§2c) — or says why it cannot. ✕ releases the aim.
+            // It never makes a region: a face with none says so.
+            if let aim = surfaceRegionAim, project.faceRegions.region(aim) != nil {
+                surfaceRefusal = project.surfaceRegionToggleFace(aim, face: faceID)
+            } else if let hit = surfaceSelected {
+                surfaceRegionAim = hit
+            } else {
+                surfaceRefusal = "No region here yet — Cut, Union or Pattern make one."
+            }
+            // the aim is what lights
+            surfaceSelected = surfaceRegionAim
+            surfaceSelectedFace = nil
         }
     }
 
@@ -7268,6 +7300,7 @@ public struct WorkspacePlaceholder: View {
         surfaceUnion.clear()
         surfacePatternFace = nil
         surfacePatternPiece = nil
+        surfaceRegionAim = nil
         similar.clear()
         guard let mesh = viewerMesh else { return }
 
@@ -7289,7 +7322,8 @@ public struct WorkspacePlaceholder: View {
                 // Aimed at the first, COMMITTED across all — see the confirms,
                 // which read `surfaceCarried`.
                 if let f = carried.first { surfaceEngage(tool, face: f, mesh: mesh) }
-            case .similar:
+            case .similar, .region:
+                // the region tool aims at regions one tap at a time; a similar set is not one
                 break
             }
             return
@@ -8103,6 +8137,11 @@ public struct WorkspacePlaceholder: View {
                             surfacePatternPiece = nil
                         }
                     }
+
+                case .region:
+                    if let aim = surfaceRegionAim, project.faceRegions.region(aim) != nil {
+                        surfaceRegionCluster(aim)
+                    }
                 }
             }
             // ★ KEPT ON SCREEN. Anchored to a point on the model, the cluster can
@@ -8209,10 +8248,75 @@ public struct WorkspacePlaceholder: View {
         case .pattern: model = surfacePatternFace.map {
             FaceRegionGeometry.frame(members: [$0], in: mesh).origin
         }
+        // the Region tool floats over the region it is aimed at
+        case .region:  model = surfaceRegionAim.flatMap { aim in
+            let faces = project.surfaceResolvedFaces(aim)
+            return faces.isEmpty ? nil : FaceRegionGeometry.frame(members: faces, in: mesh).origin
+        }
         }
         guard let m = model else { return nil }
         if surfaceDocksCluster { return .zero }   // docked: the slot is fixed
         return proj.project(settledWorld(SIMD3<Float>(m)))
+    }
+
+    /// ★★ THE REGION TOOL'S CLUSTER (2026-10-08): ✕ releases the aim; the aim in words; ↖ steps up
+    /// to the region it was cut from; Undo split takes its pieces back (a union keeps its parts);
+    /// Dissolve hands its faces back to the group they came from (a union gives its parts back).
+    /// Each verb shows only where it applies, so nothing on it can be refused.
+    @ViewBuilder private func surfaceRegionCluster(_ aim: RegionID) -> some View {
+        let regions = project.faceRegions
+        surfaceClusterButton("xmark", tint: DS.Color.textSecondary) {
+            surfaceRegionAim = nil
+            surfaceSelected = nil
+            surfaceRefusal = nil
+        }
+        .accessibilityLabel("Release the region")
+        surfaceClusterLabel(SurfaceRegionTool.label(aim, regions: regions,
+                                                    resolvedFaces: project.surfaceResolvedFaces(aim).count))
+        if let up = SurfaceRegionTool.parent(of: aim, regions: regions) {
+            surfaceClusterButton("arrow.up.left", tint: DS.Color.textSecondary) {
+                surfaceRegionAim = up
+                surfaceSelected = up
+                surfaceRefusal = nil
+            }
+            .accessibilityLabel("The region it was cut from")
+        }
+        if SurfaceRegionTool.canUndoSplit(aim, regions: regions) {
+            surfaceClusterTextButton("Undo split") {
+                project.surfaceUndoSplit(aim)
+                surfaceSelected = aim
+                surfaceRefusal = nil
+            }
+        }
+        if SurfaceDissolve.refusal(aim, regions: regions) == nil {
+            surfaceClusterTextButton("Dissolve") {
+                if let r = project.surfaceDissolve(aim) {
+                    let name = r.group.flatMap { g in project.selection.groups.first { $0.id == g }?.name }
+                    model.toast = r.faces.isEmpty
+                        ? "Dissolved — its parts are back."
+                        : "Dissolved — its faces are back in \(name ?? "no group")."
+                }
+                surfaceRegionAim = nil
+                surfaceSelected = nil
+                surfaceRefusal = nil
+            }
+        }
+    }
+
+    /// A word in the cluster, for a verb no icon says plainly (Undo split, Dissolve).
+    private func surfaceClusterTextButton(_ title: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .dsStyle(DS.TypeScale.caption)
+                .foregroundStyle(DS.Color.textPrimary.color)
+                .padding(.horizontal, DS.Space.m)
+                .frame(height: 44)
+                .background(Capsule().fill(DS.Color.chipSolid.color)
+                    .overlay(Capsule().strokeBorder(
+                        DS.Color.textPrimary.opacity(0.22).color, lineWidth: 1)))
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("surface-region-\(title.lowercased().replacingOccurrences(of: " ", with: "-"))")
     }
 
     private func surfaceClusterButton(_ icon: String, tint: RGBA,
