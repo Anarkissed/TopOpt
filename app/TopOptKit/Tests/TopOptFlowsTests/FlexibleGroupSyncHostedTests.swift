@@ -152,5 +152,195 @@ final class FlexibleGroupSyncHostedTests: XCTestCase {
         }
         snapshot(h, "I4_13p_settings_rests_ask.png")
     }
+
+    // MARK: - EVIDENCE (opt-in): both pages on his pad, beside his img4
+
+    /// ★ EVIDENCE (FLEX_I4_EVIDENCE_DIR=<dir>): his pad at his 13" portrait.
+    ///   * the MAIN page — the shipping renderer's frame of exactly what FlexibleMainStage hands the viewer (mesh, tints,
+    ///     dents, X-ray, the lattice layer, H15's prisms) under the real Flexible layers, with the Selections list at his
+    ///     img4's place. #354's groupRow cannot be hosted offscreen (WorkspacePlaceholder's stage is its own @State,
+    ///     .topology), so the list is a REPLICA of its rows fed by the hooks' exact expressions — H16
+    ///     `flexibleMain.groupTint(g, project) ?? force.tint(for: g)`, `force.panelKindLabel`, H17's FlexibleGroupCaption;
+    ///     BEFORE (his img4: no H18, S1b's rules) and AFTER, on open (nothing picked), after picking "Group 2 · Face 4",
+    ///     and the solid model;
+    ///   * the SETTINGS page (hosted, the real page): Group 2's tab, Rests, the Pending tab, the ask in face 0's card.
+    func testEvidenceBothPagesOnHisPad() async throws {
+        guard let dir = Self.dir else { throw XCTSkip("FLEX_I4_EVIDENCE_DIR") }
+        let device = try XCTUnwrap(MTLCreateSystemDefaultDevice())
+        var log: [String] = []
+        for (label, migrated) in [("before_his_img4", false), ("after", true)] {
+            FlexibleGroupMigration.controlSkip = !migrated
+            let r = try FlexiblePressFixtures.a1Project(3, self)
+            FlexibleGroupMigration.controlSkip = false
+            let p = r.project
+            let stage = FlexibleMainStage()
+            stage.reduceMotion = { true }
+            stage.controlPrismOnOpen = !migrated
+            stage.controlRoleTints = !migrated
+            let m = stage.model(for: p, materialsPath: FlexibleHisProject.materialsPath, stampsPath: FlexibleHisProject.stampsPath, persist: {})
+            addTeardownBlock { @MainActor in await m.waitForIdle() }
+            m.openScene()
+            try await FlexibleSquishFixture.settle(m, label)
+            stage.didExitSettings()
+            stage.apply(p, owned: true, pageUp: false)
+            let start = Date()
+            while Date().timeIntervalSince(start) < 600 {
+                if m.lattice != nil, !m.latticeBuilding, !m.squish.isEmpty, !m.squish.values.contains(.pending), m.squishSolver.isIdle { break }
+                try await Task.sleep(nanoseconds: 10_000_000)
+            }
+            for _ in 0..<40 { try await Task.sleep(nanoseconds: 10_000_000) }
+            stage.refresh()
+            var states: [(String, () -> Void)] = [("open_lattice", { stage.heat = false; stage.latticeOn = true })]
+            if migrated {
+                states.append(("pick_Group2Face4_lattice", { p.selection.setActive(p.selection.groups.first { $0.name == "Group 2 · Face 4" }!.id); stage.heat = false; stage.latticeOn = true }))
+                states.append(("model_no_role_colour", { stage.heat = false; stage.latticeOn = false }))
+            }
+            for (name, set) in states {
+                set()
+                stage.refresh()
+                log.append(try mainEvidence("I4_13p_main_\(label)_\(name)", stage, m, p, device: device, dir: dir))
+            }
+            // the Settings page (the real page), after only
+            guard migrated else { continue }
+            let size = Self.sizes[0].1
+            for (name, rail) in [("group2", FlexibleRailTab.group(2)), ("rests", .rests)] {
+                m.rail = rail
+                let h = host(FlexibleStagePage(project: p, model: m, onExit: {}), size: size)
+                pump(2.0)
+                snapshot(h, "I4_13p_settings_\(name).png")
+                log.append("I4_13p_settings_\(name): rail \(FlexibleSettingsRailView.tabs(model: m).map { "\($0.title)\($0.detail.map { " (\($0))" } ?? "")" })")
+            }
+            _ = pendingOnTheMainPage(p, m)
+            m.rail = .pending
+            var h = host(FlexibleStagePage(project: p, model: m, onExit: {}), size: size)
+            pump(2.0)
+            snapshot(h, "I4_13p_settings_pending.png")
+            log.append("I4_13p_settings_pending: rail \(FlexibleSettingsRailView.tabs(model: m).map(\.title)) · pending \(m.pendingGroups.map { "\($0.name) \($0.regions)" })")
+            p.performUndo()   // Group D undone
+            m.refreshMainPageLoads()
+            m.select(0)
+            _ = m.press(0)
+            h = host(FlexibleStagePage(project: p, model: m, onExit: {}), size: size)
+            pump(2.0)
+            snapshot(h, "I4_13p_settings_rests_ask.png")
+            log.append("I4_13p_settings_rests_ask: \(m.restsAsk?.line ?? "-")")
+            m.keepResting()
+        }
+        try log.joined(separator: "\n").write(to: dir.appendingPathComponent("I4_evidence_log.txt"), atomically: true, encoding: .utf8)
+        print("FLEX-I4-EVIDENCE\n" + log.joined(separator: "\n"))
+    }
+
+    final class Holder: ObservableObject { @Published var metal: CGImage? }
+
+    /// #354's Selections rows as groupRow draws them, fed by the hooks' exact expressions (see the evidence test).
+    struct SelectionsReplica: View {
+        let project: ProjectModel
+        let stage: FlexibleMainStage
+        var body: some View {
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(spacing: DS.Space.s) {
+                    Image(systemName: "chevron.down").font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(DS.Color.textPrimary.opacity(0.7).color)
+                    Text("Selections").dsStyle(DS.TypeScale.bodyStrong).fontWeight(.bold).foregroundStyle(DS.Color.textPrimary.color)
+                    Spacer()
+                    Text("REPLICA · H16 / H17").font(.system(size: 9, weight: .bold)).foregroundStyle(DS.Color.textTertiary.color)
+                }
+                .padding(.horizontal, DS.Space.l).padding(.vertical, DS.Space.m)
+                ForEach(project.selection.groups) { g in
+                    let active = g.id == project.selection.activeGroupID
+                    let tint = stage.groupTint(g, project) ?? project.force.tint(for: g)   // H16, verbatim
+                    HStack(alignment: .top, spacing: DS.Space.s) {
+                        RoundedRectangle(cornerRadius: 4).fill(tint.color).frame(width: 14, height: 14)
+                            .shadow(color: tint.opacity(0.4).color, radius: 4).padding(.top, 3)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(g.name).font(.system(size: DS.TypeScale.callout.size, weight: .semibold))
+                                .foregroundStyle(DS.Color.textPrimary.color)
+                            Text(project.force.panelKindLabel(for: g.id)).dsStyle(DS.TypeScale.footnote)
+                                .foregroundStyle(DS.Color.textQuaternary.color)
+                            if let c = stage.groupCaption(g, project) { FlexibleGroupCaption(text: c) }   // H17, verbatim
+                        }
+                        Spacer(minLength: 0)
+                        HStack(spacing: DS.Space.s) {
+                            Image(systemName: "eye").font(.system(size: 11, weight: .semibold)).foregroundStyle(DS.Color.textSecondary.color)
+                            Image(systemName: "lock.open").font(.system(size: 11, weight: .semibold)).foregroundStyle(DS.Color.textSecondary.color)
+                        }
+                    }
+                    .padding(.vertical, 11).padding(.leading, DS.Space.l).padding(.trailing, DS.Space.m)
+                    .background(active ? DS.Color.fillSubtle.color : .clear)
+                    .overlay(alignment: .leading) { Rectangle().fill(active ? tint.color : .clear).frame(width: 3) }
+                }
+            }
+            .frame(width: PageChrome.panelWidth, alignment: .leading)
+            .background(RoundedRectangle(cornerRadius: DS.Radius.panel).fill(DS.Surface.panel.color)
+                .overlay(RoundedRectangle(cornerRadius: DS.Radius.panel).strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
+        }
+    }
+
+    struct MainEvidencePage: View {
+        @ObservedObject var holder: Holder
+        let project: ProjectModel
+        let stage: FlexibleMainStage
+        let proj: CameraProjection
+        let settle: simd_quatf
+        static let vp = CGSize(width: 1032, height: 1376)
+        var body: some View {
+            ZStack(alignment: .topLeading) {
+                if let m = holder.metal { Image(decorative: m, scale: 2).resizable().frame(width: Self.vp.width, height: Self.vp.height) }
+                ZStack {
+                    FlexibleMainViewToggles(main: stage, openSettings: {})
+                    FlexibleMainLegends(main: stage, mode: .constant(.groups), projection: proj, settle: settle,
+                                        bottomClearance: 78, chipColumnWidth: 222)
+                    FlexibleMainPlayerSlot(main: stage, bottomClearance: 78, chipColumnWidth: 222)
+                }
+                .safeAreaInset(edge: .top, spacing: 0) { Color.clear.frame(height: 24) }
+                .safeAreaInset(edge: .bottom, spacing: 0) { Color.clear.frame(height: 20) }
+                SelectionsReplica(project: project, stage: stage).offset(x: 20.6, y: 558.7)   // his img4's place
+            }
+            .frame(width: Self.vp.width, height: Self.vp.height)
+            .background(Color.black)
+        }
+    }
+
+    /// One main-page state: the shipping renderer's frame under the Flexible layers and the Selections replica.
+    func mainEvidence(_ name: String, _ stage: FlexibleMainStage, _ m: FlexibleStageModel, _ p: ProjectModel, device: MTLDevice,
+                      dir: URL) throws -> String {
+        let side = 2752, cropW = 2064
+        let mr = try XCTUnwrap(MeshRenderer(device: device, sampleCount: 4))
+        mr.setMesh(try XCTUnwrap(stage.mesh(p, on: .lattice) ?? p.viewerMesh))
+        let settle = p.force.settleRotation ?? simd_quatf(from: SIMD3<Float>(0, 0, -1), to: SIMD3<Float>(0, -1, 0))
+        mr.beginSettle(to: settle, duration: 0)
+        mr.camera.setOrientation(azimuth: .pi / 4, elevation: 0.62)
+        let roles = FlexibleRound6HostedTests.roleTints(p)
+        if let t = stage.tints(p, on: .lattice, roles: roles, stress: nil) { mr.setVertexTints(t) } else { mr.setHighlights(faceTint: roles, activeFaces: []) }
+        mr.setBodyAlpha(stage.bodyAlpha(p, on: .lattice) ?? 1)
+        if let layer = stage.layer(p, stage: .lattice, pageUp: false) { _ = mr.applyFlexibleLattice(layer, device: device) }
+        if let d = stage.dents(p, on: .lattice) { mr.setFlexDisplacements(d) }
+        mr.setFlexScale(Float(stage.channels?.exaggeration ?? 1))
+        let items = stage.volumes(p, on: .lattice, drilledIn: false)
+        mr.setClearanceVolumes(items)
+        let bg = DS.Color.background
+        let px = try XCTUnwrap(mr.renderOffscreen(size: side, clear: MTLClearColor(red: bg.r, green: bg.g, blue: bg.b, alpha: 1)))
+        var rgba = [UInt8](repeating: 255, count: cropW * side * 4)
+        let x0 = (side - cropW) / 2
+        for y in 0..<side { for x in 0..<cropW {
+            let s = (y * side + x + x0) * 4, d = (y * cropW + x) * 4
+            rgba[d] = px[s + 2]; rgba[d + 1] = px[s + 1]; rgba[d + 2] = px[s]
+        } }
+        let ctx = try XCTUnwrap(CGContext(data: &rgba, width: cropW, height: side, bitsPerComponent: 8, bytesPerRow: cropW * 4,
+                                          space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue))
+        let holder = Holder()
+        holder.metal = try XCTUnwrap(ctx.makeImage())
+        let proj = CameraProjection(camera: mr.camera, viewportSize: MainEvidencePage.vp)
+        let h = host(MainEvidencePage(holder: holder, project: p, stage: stage, proj: proj, settle: settle), size: MainEvidencePage.vp)
+        pump(0.8)
+        snapshot(h, "\(name).png")
+        let rows = p.selection.groups.map { g in
+            let t = stage.groupTint(g, p) ?? p.force.tint(for: g)
+            return "\(g.name) \(p.force.panelKindLabel(for: g.id)) " + String(format: "#%02X%02X%02X", Int(t.r * 255), Int(t.g * 255), Int(t.b * 255))
+                + (stage.groupCaption(g, p).map { " · \($0)" } ?? "")
+        }
+        return "\(name): active \(p.selection.activeGroup?.name ?? "-") picked \(stage.sessionPicked) · heat \(stage.heat) lattice \(stage.latticeShown) · prisms "
+            + items.map { "f\($0.volume.faceID)" }.joined(separator: " ") + " · rows: " + rows.joined(separator: " | ")
+    }
 }
 #endif

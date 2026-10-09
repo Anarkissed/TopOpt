@@ -196,7 +196,7 @@ struct FlexibleMainNoteView: View {
 
     private func capsule(_ k: FlexibleMainNote.Kind, showable: Bool) -> some View {
         HStack(spacing: DS.Space.s) {
-            Image(systemName: k == .ready ? "checkmark.circle.fill" : "hourglass")
+            Image(systemName: k == .ready ? "checkmark.circle.fill" : (k == .building ? "hourglass" : "link"))
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle((k == .ready ? FlexibleStageStyle.accentToken : DS.Color.textSecondary).color)
             Text(FlexibleMainNote.line(k))

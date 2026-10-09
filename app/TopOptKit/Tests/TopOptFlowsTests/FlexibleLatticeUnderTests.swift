@@ -51,7 +51,9 @@ final class FlexibleLatticeUnderTests: XCTestCase {
 
     @MainActor
     func testOnHisPadTopBIsSaidAndOneTapLatticesIt() async throws {
-        let his = try FlexibleHisProject.restore(asSaved: true)
+        // ★ ROUND 6 (item 4): his pad as SAVED, before the restore's link — linked, top B joins Top's hand on its side and
+        // Top's lattice role covers it, so there is nothing to say (FlexibleGroupSyncTests' his_0004 row)
+        let his = try FlexibleHisProject.restoreUnlinked(asSaved: true)
         addTeardownBlock { his.cleanup() }
         let p = his.project
         let m = try await FlexibleHisProject.openedModel(p, test: self, timeout: 120)
@@ -120,12 +122,23 @@ final class FlexibleLatticeUnderTests: XCTestCase {
     @MainActor
     func testTheFixturesTapsAreWhatThePageOffers() async throws {
         for dir in [FlexibleHisProject.dir, FlexibleHisProject.round5Dir] {
+            // ★ ROUND 6 (item 4): the offer on his project AS SAVED BEFORE the restore's link (H18) — the fixture replays
+            // it there, before the link (FlexibleHisProject.restore); the linked project's own offer is printed below
+            FlexibleGroupMigration.controlSkip = true
             let saved = try FlexibleHisProject.restore(dir, asSaved: true)
+            FlexibleGroupMigration.controlSkip = false
             addTeardownBlock { saved.cleanup() }
             let m = try await FlexibleHisProject.openedModel(saved.project, test: self, timeout: 120)
             let offered = m.readiness.issues.filter { $0.kind == .noLatticeUnder }
                 .compactMap { i in i.region.flatMap { m.latticeUnderPlan($0) } }
             print("E-FLEX \(dir.lastPathComponent) offers \(offered)")
+            do {
+                let linked = try FlexibleHisProject.restore(dir, asSaved: true)
+                addTeardownBlock { linked.cleanup() }
+                let ml = try await FlexibleHisProject.openedModel(linked.project, test: self, timeout: 120)
+                let now = ml.readiness.issues.filter { $0.kind == .noLatticeUnder }.compactMap { i in i.region.flatMap { ml.latticeUnderPlan($0) } }
+                print("E-FLEX \(dir.lastPathComponent) linked at restore (round 6 item 4) offers \(now)")
+            }
             XCTAssertEqual(offered, FlexibleHisProject.latticeUnderTaps(dir), "★ \(dir.lastPathComponent): the fixture replays the page's offer")
             XCTAssertFalse(offered.isEmpty, "control: his project needs a tap")
             // with the taps: lattice under every column of every pressed face

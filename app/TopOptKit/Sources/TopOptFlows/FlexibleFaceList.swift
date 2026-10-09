@@ -57,7 +57,9 @@ struct FlexibleFaceList: View {
         let groups = model.squeezeGroups
         return ordered.map { f in
             Row(region: f.faceRegionID,
-                line: FlexibleRowCopy.faceRow(name: model.faceName(f.faceRegionID), pressed: f.isLoaded, kg: f.weightKg,
+                // ★ ROUND 6 (item 4): a resting face rests WITH a main-page Anchor — its row names it ("Face 0 · Bottom")
+                line: model.restsGroupName(f.faceRegionID).map { FlexibleRowCopy.restRow(name: model.faceName(f.faceRegionID), group: $0) }
+                    ?? FlexibleRowCopy.faceRow(name: model.faceName(f.faceRegionID), pressed: f.isLoaded, kg: f.weightKg,
                                               unit: model.weightUnit),
                 pressed: f.isLoaded, selected: f.faceRegionID == model.selectedRegion,
                 // ★ ROUND 5 (S1): its group's number always — the dot wears the group's CHOSEN colour

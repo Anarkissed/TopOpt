@@ -117,7 +117,9 @@ extension FlexibleMainStage {
                       stress field: LatticeDemandField?) -> [Float]? {
         guard current(project, stage) != nil, let c = channels else { return nil }
         noteStressField(field)
-        let roles = roles()
+        // ★ ROUND 6 (item 4, his answer of 2026-10-09: "no group or role colour on the main page model"): #354's
+        // Selections role colours are the Selections list's, never the Flexible model's (H4 still hands them over)
+        let roles = controlRoleTints ? roles() : [:]
         var h = Hasher()
         for k in roles.keys.sorted() { h.combine(k); h.combine(roles[k]!) }
         let showStress = stress && stressDrawable

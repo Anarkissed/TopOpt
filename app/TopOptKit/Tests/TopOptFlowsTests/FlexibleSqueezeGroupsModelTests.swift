@@ -99,12 +99,13 @@ final class FlexibleSqueezeGroupsModelTests: XCTestCase {
         m.moveToGroup(5, two.id)
         XCTAssertEqual(m.settings.face(5)?.weightKg ?? 0, 6, accuracy: 1e-9, "face 5 joins group 2 at its 6 kg")
         XCTAssertEqual(m.groupForce(try XCTUnwrap(m.squeezeGroup(of: 5))), 6...6)
-        // top A (the main page's Top) moved in keeps Top's 10 kg: the group says 6–10 kg
+        // ★ RE-PINNED (round 6 item 4 — his answers: a main-page Load group is a squeeze group's hand, the group's number
+        // is its ONE force): top A's hand (the main page's Top) moved in takes the group's 6 kg — the move writes Top
         m.moveToGroup(FlexibleHisProject.topA, try XCTUnwrap(m.squeezeGroup(of: 5)).id)
         let top = try XCTUnwrap(r.project.selection.groups.first { $0.name == "Top" })
-        XCTAssertEqual(r.project.force.kind(for: top.id).weightKg ?? 0, 10, accuracy: 1e-9, "the main page is not written by a move")
+        XCTAssertEqual(r.project.force.kind(for: top.id).weightKg ?? 0, 6, accuracy: 1e-9, "★ the move writes the main page's Top: one force")
         let g = try XCTUnwrap(m.squeezeGroup(of: 5))
-        XCTAssertEqual(m.groupLine(g), "Group 2 · Top A + 2 more · Squeeze 6–10 kg")
+        XCTAssertEqual(m.groupLine(g), "Group 2 · Top A + 2 more · Squeeze 6 kg")
         // ★ RED CONTROL: a move that keeps the face's own weight leaves one group with two forces
         var kept = m.settings
         var f = try XCTUnwrap(kept.face(FlexibleHisProject.topB)); f.squeezeGroup = g.id; kept.setFace(f)

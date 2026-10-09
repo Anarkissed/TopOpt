@@ -211,6 +211,11 @@ public struct FlexibleStageSettings: Codable, Equatable, Hashable, Sendable {
         // ★ ANGLED PRESSES (AP1): a press core cannot build yet cannot change the lattice — until the
         // bridge builds press stacks (AP9 removes this line, so every press edit re-keys the lattice)
         c.presses = nil
+        // ★ ROUND 6 (item 4, one set of groups): a LINK is not physics — which main-page group a face's weight comes
+        // from never re-keys the lattice (its weight, which is, stays)
+        if !FlexibleGroupLinks.controlKeepWeightFrom {
+            c.faces = c.faces.map { f in var f = f; f.weightFrom = nil; return f }
+        }
         return c
     }
 

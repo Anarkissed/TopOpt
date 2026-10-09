@@ -79,7 +79,9 @@ final class FlexibleSqueezeGroupsReviewTests: XCTestCase {
         await m.waitForIdle()
         XCTAssertEqual(r.project.force.kind(for: top.id).weightKg ?? 0, 10, accuracy: 1e-9, "premise: the undo restored Top")
         let staleLine = FlexibleRowCopy.squeeze(FlexibleSqueezeGroups.force(m.squeezeGroups[0], settings: m.settings, loads: cached))
-        XCTAssertEqual(staleLine, "Squeeze 10–12 kg", "control: D2's cache read the undone 12 kg")
+        // ★ ROUND 6 (item 4): every hand of group 1 is a main-page Load group now (H18 links faces 3 and 5 and top B at
+        // restore), so the stale cache reads the undone 12 kg for all of them — not the 10 kg the project holds
+        XCTAssertEqual(staleLine, "Squeeze 12 kg", "control: D2's cache read the undone 12 kg")
         let row = try XCTUnwrap(FlexibleSqueezeGroupRows.rows(model: m).first)
         print("FLEX-REVIEW undo: \(lines(m)) · header \(row.line) [\(row.value)] seed \(row.kg) · first force \(String(describing: m.firstGroupForce))")
         XCTAssertEqual(m.groupForce(m.squeezeGroups[0]), 10...10)
@@ -181,8 +183,16 @@ final class FlexibleSqueezeGroupsReviewTests: XCTestCase {
         var d2b = d2
         _ = presses.adopt(into: &d2b)
         XCTAssertEqual(FlexibleSqueezeGroups.groups(d2b).count, 2, "control: D2's re-press made a group nobody made")
+        // ★ RE-PINNED (round 6 item 4 — his answer: "a main-page Load group = a squeeze group"): pressed again by a Load
+        // group none of whose faces is pressed here, it is that group's OWN squeeze group (deliberately: a group made on
+        // the main page), numbered after group 1; round 4's rule (the control's door) put it in group 1
+        var one = s
+        FlexibleGroupLinks.controlOneSqueezeTag = true
+        _ = FlexibleStageModel.adopt(presses, into: &one)
+        FlexibleGroupLinks.controlOneSqueezeTag = false
+        XCTAssertEqual(FlexibleSqueezeGroups.groups(one).count, 1, "round 4: pressed again, it joined group 1")
         _ = FlexibleStageModel.adopt(presses, into: &s)
-        XCTAssertEqual(FlexibleSqueezeGroups.groups(s).count, 1, "pressed again, it joins group 1")
+        XCTAssertEqual(FlexibleSqueezeGroups.groups(s).map(\.regions), [[8], [7]], "★ its Load group's own squeeze group, after group 1")
     }
 
     // MARK: one face's throw (the pinch segments)

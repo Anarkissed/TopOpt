@@ -333,6 +333,12 @@ public final class FlexibleMainStage: ObservableObject {
         fe = FlexibleFEView(); feMeshCache = [:]; feValueCache = [:]; feStressCache = [:]; fePlayedGeneration = nil
         feStartedKey = nil; fallbackKey = nil; heldForSims = false; fallbackSim = nil; feBaseTints = [:]; feTintBox.set([:])
         seenLoads = nil
+        // ★ ROUND 6 (item 4, his answer of 2026-10-09): nothing is picked when the project opens; a pick is #354's own
+        // write of the selection while the page shows (FlexibleMainStage+Groups.selectionMoved)
+        sessionPicked = false
+        lastSelection = project.selection
+        selectionObservation = project.$selection.dropFirst()
+            .sink { [weak self] s in self?.selectionMoved(s) }
         projectObservation = project.objectWillChange
             .debounce(for: .milliseconds(250), scheduler: RunLoop.main)
             .sink { [weak self] _ in self?.projectChanged() }
@@ -452,7 +458,9 @@ public final class FlexibleMainStage: ObservableObject {
     public func volumes(_ project: ProjectModel, on stage: WorkspaceStage, drilledIn: Bool) -> [ClearanceRenderItem] {
         guard !drilledIn, !frozen, let m = current(project, stage) else { return [] }
         let k = prismK   // ★ S1b: the page's ONE k (the tags and the legend's ×k read it too)
-        let active = project.selection.activeGroup
+        // ★ ROUND 6 (item 4, his answer of 2026-10-09): only a group he PICKED in this session — nothing on open — and
+        // never a Pending group's (FlexibleMainStage+Groups.pickedGroup)
+        let active = pickedGroup(project)
         let key = "\(k)|\(m.views.rawValue)|\(active.map { "\($0.id)\($0.faces)\($0.regionIDs)" } ?? "-")|\(m.settings.hashValue)|"
             + "\(m.stacks.count)|\(m.geometry.count)|\(m.stampGrids.count)"
         if let c = volumesCache, c.key == key { return c.items }
@@ -648,6 +656,8 @@ public final class FlexibleMainStage: ObservableObject {
         let m = ensure(project)
         if isNew { attached &+= 1 }
         guard visible else { return }
+        // ★ ROUND 6 (item 4): the one-time line of what the restore linked (FlexibleGroupMigration), on the first open
+        if let n = FlexibleGroupMigration.takeNote(for: project.id) { note.post(.linked(n)) }
         noteLoads()
         m.openScene()
         refresh()

@@ -172,10 +172,18 @@ extension FlexibleStageModel {
         guard squeezeGroup(of: region)?.id != groupID else { return }
         let force = squeezeGroups.first { $0.id == groupID }.flatMap { groupForce($0) }
         let hand = hand(of: region)
+        let handGroup = settings.face(region)?.weightFrom
         actionSerial += 1
-        edit { s in
-            FlexibleSqueezeGroups.move(region, to: groupID, hand: hand, in: &s)
-            Self.takeForce(force, regions: hand, in: &s)
+        // ★ ROUND 6 (item 4, one set of groups): on both pages — the hand (its main-page Load group) takes the group's
+        // one force, a hand pressing the same way as one already there joins it (one side, its weight shared by area —
+        // his answer), and the hands named here follow (FlexibleGroupSync)
+        syncGroups { w in
+            FlexibleSqueezeGroups.move(region, to: groupID, hand: hand, in: &w.flexible)
+            Self.takeForce(force, regions: hand, in: &w.flexible)
+            if let f = force, f.upperBound - f.lowerBound < 0.05, f.upperBound > 0, let h = handGroup, w.force.kind(for: h).isLoad {
+                w.force.setWeight(h, kg: f.upperBound)
+            }
+            if let g = FlexibleSqueezeGroups.group(of: region, in: w.flexible) { w.mergeSameSide(squeeze: g.id) }
         }
     }
 
@@ -214,7 +222,7 @@ extension FlexibleStageModel {
             s.groupColours = FlexibleSqueezeGroups.canonical(map, groups: FlexibleSqueezeGroups.groups(s))
         }
         actionSerial += 1
-        edit { $0 = s }
+        syncGroups { $0.flexible = s }   // ★ ROUND 6 (item 4): its hand renamed in the same edit ("Group N")
         return n
     }
 
@@ -232,10 +240,18 @@ extension FlexibleStageModel {
         guard gs.count > 1, let from = gs.first(where: { $0.id == groupID }),
               let into = gs.first(where: { $0.id != groupID && (target == nil || $0.id == target) }) else { return }
         let force = groupForce(into)
+        let anchor = into.regions.first ?? from.regions.first
         actionSerial += 1
-        edit { s in
-            FlexibleSqueezeGroups.remove(group: groupID, into: into.id, in: &s)
-            Self.takeForce(force, regions: from.regions, presses: from.presses, in: &s)
+        // ★ ROUND 6 (item 4): on both pages — every hand that moved takes the group's one force, same-way hands join, and
+        // the hands are renamed after the renumber, in ONE undo step (FlexibleGroupSync)
+        syncGroups { w in
+            let moved = w.hands(ofSqueeze: groupID)
+            FlexibleSqueezeGroups.remove(group: groupID, into: into.id, in: &w.flexible)
+            Self.takeForce(force, regions: from.regions, presses: from.presses, in: &w.flexible)
+            if let f = force, f.upperBound - f.lowerBound < 0.05, f.upperBound > 0 {
+                for h in moved where w.force.kind(for: h).isLoad { w.force.setWeight(h, kg: f.upperBound) }
+            }
+            if let r = anchor, let g = FlexibleSqueezeGroups.group(of: r, in: w.flexible) { w.mergeSameSide(squeeze: g.id) }
         }
     }
 

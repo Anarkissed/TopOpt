@@ -266,6 +266,10 @@ public final class FlexibleStageModel: ObservableObject {
     /// ★ ROUND 6 (item 4, one set of groups): [Press it] on a face a main-page Anchor holds asks ONCE first —
     /// "Face 0 rests (main page: Bottom)" [Squeeze it] [Keep it resting] (FlexibleGroupSync).
     @Published public internal(set) var restsAsk: FlexibleRestsAsk?
+    /// ★ ROUND 6 (item 4): the face whose ask was answered [Squeeze it] — its pad's answer presses without asking again.
+    var restsConfirmed: Int?
+    /// ★ ROUND 6 (item 4): the group links' expansion of the part (FlexibleGroupSync.groupExpander), cached.
+    var groupExpanderCache: (key: String, x: FlexibleMainPageLoads.Expander)?
 
     private var pendingStacks: Set<FlexFaceKey> = []
     /// Every bridge call in flight (scene, stacks, drawn maps, the lattice) — awaited by
@@ -529,7 +533,7 @@ public final class FlexibleStageModel: ObservableObject {
     // MARK: the main page's loads (round 3, item 1.2 — FlexibleMainPageLoads)
 
     /// The main page's groups read as Flexible faces (cached per scene open and write-back).
-    @Published public private(set) var mainPageLoads = FlexibleMainPageLoads()
+    @Published public internal(set) var mainPageLoads = FlexibleMainPageLoads()
     /// Faces whose OWN weight a group's replaced this session (region → the old kg): the
     /// panel says so in one line ("Was 7 kg · now Top's weight").
     @Published public internal(set) var relinkedWeights: [Int: Double] = [:]
@@ -576,52 +580,52 @@ public final class FlexibleStageModel: ObservableObject {
         let removed = Set(s.removedRegions ?? []).union(s.pressRegions.subtracting(s.faces.map(\.faceRegionID)))
         let full = loads
         let loads = removed.isEmpty ? loads : FlexibleMainPageLoads(entries: loads.entries.filter { !removed.contains($0.key) })
+        let before = Set(s.loadedFaces.map(\.faceRegionID))
+        let existing = FlexibleSqueezeGroups.groups(s).map(\.id)
         let relinked = loads.adopt(into: &s)
+        // ★ ROUND 6 (item 4, his answer: "a main-page Load group = a squeeze group"): a Load group none of whose faces
+        // was pressed here before arrives as its OWN squeeze group (round 3 put every new face in group 1)
+        if !FlexibleGroupLinks.controlOneSqueezeTag { ownSqueezeTags(&s, before: before, existing: existing) }
         FlexiblePress.adoptWeights(full, into: &s)   // ★ AP1: linked presses re-sync from their group
         FlexibleSqueezeGroups.uniteHands(&s, loads: loads)
         return relinked
     }
 
+    /// ★ ROUND 6 (item 4): each main-page Load group whose pressed faces are ALL new here (none was pressed before the
+    /// adopt) takes a squeeze group of its own — after the groups that `existing` held (group 1 when there were none).
+    nonisolated static func ownSqueezeTags(_ s: inout FlexibleStageSettings, before: Set<Int>, existing: [Int]) {
+        var order: [UUID] = [], byGroup: [UUID: [Int]] = [:]
+        for f in s.loadedFaces where !before.contains(f.faceRegionID) {
+            guard let g = f.weightFrom else { continue }
+            if byGroup[g] == nil { order.append(g) }
+            byGroup[g, default: []].append(f.faceRegionID)
+        }
+        var next = (existing.max() ?? 0) + 1
+        for g in order {
+            if s.loadedFaces.contains(where: { before.contains($0.faceRegionID) && $0.weightFrom == g }) { continue }
+            for r in byGroup[g] ?? [] {
+                guard var f = s.face(r) else { continue }
+                f.squeezeGroup = next == FlexibleSqueezeGroups.first ? nil : next
+                s.setFace(f)
+            }
+            next += 1
+        }
+    }
+
     /// [Press it]: the main page's weight when the face is in a Load group; else `kg` (the
     /// number pad's answer); else — ★ ROUND 4 (D2) — group 1's ONE squeeze force (the face joins
     /// group 1, no pad). false ⇒ a weight must be asked first ("How much weight presses here?").
+    /// ★ ROUND 6 (item 4, one set of groups): on BOTH pages — the face is linked to its hand on the main page (found,
+    /// taken or made), and a face a main-page Anchor holds asks once first (FlexibleGroupSync.pressLinked).
     @discardableResult
     public func press(_ region: Int, kg: Double? = nil) -> Bool {
-        let inherited = mainPageLoads.entry(region).flatMap { $0.role == .pressed ? $0 : nil }
-        let joinKg = inherited == nil && kg == nil ? firstGroupForce : nil
-        guard inherited != nil || (kg ?? joinKg ?? 0) > 0 else { return false }
-        actionSerial += 1
-        edit { s in
-            // ★ ROUND 5 (S6): pressing a deleted face brings it back — as a NEW face
-            if s.isRemoved(region) { s.removedRegions?.removeAll { $0 == region }; if s.removedRegions?.isEmpty == true { s.removedRegions = nil } }
-            var f = s.face(region) ?? FlexibleFaceSettings(faceRegionID: region)
-            f.role = "loaded"
-            f.squeezeGroup = nil   // a newly pressed face joins group 1
-            if let e = inherited, kg == nil { f.weightKg = e.weightKg; f.weightFrom = e.groupID }
-            else if let w = kg ?? joinKg { f.weightKg = w; f.weightFrom = nil }
-            s.setFace(f)
-            FlexibleSqueezeGroups.normalise(&s)
-        }
-        relinkedWeights[region] = nil
-        selectedRegion = region
-        ensureStack(region)
-        return true
+        pressLinked(region, kg: kg, into: nil)
     }
 
-    /// [It rests here] / [Rests]: HIS choice on this page, so it is unlinked (weightFrom nil)
-    /// and no re-sync presses it again — not a write-back, not a re-open (`adopt(into:)`).
+    /// [It rests here] / [Rests]: HIS choice on this page. ★ ROUND 6 (item 4, one set of groups): on BOTH pages — the
+    /// face rests with a main-page Anchor (it leaves a hand it was in), linked (FlexibleGroupSync.restLinked).
     public func rest(_ region: Int) {
-        actionSerial += 1
-        edit { s in
-            if s.isRemoved(region) { s.removedRegions?.removeAll { $0 == region }; if s.removedRegions?.isEmpty == true { s.removedRegions = nil } }
-            var f = s.face(region) ?? FlexibleFaceSettings(faceRegionID: region, role: "resting")
-            f.role = "resting"
-            f.weightFrom = nil
-            s.setFace(f)
-            FlexibleSqueezeGroups.normalise(&s)   // ★ D2: a resting face is in no squeeze group
-        }
-        relinkedWeights[region] = nil
-        selectedRegion = region
+        restLinked(region)
     }
 
     /// A weight typed on the Flexible page. ★ ONE SOURCE OF TRUTH (maintainer): for a face
@@ -662,15 +666,12 @@ public final class FlexibleStageModel: ObservableObject {
     /// stamps, and every per-face copy of core's answers the page keeps (the drawn map, the design,
     /// its words, the pinch halves, the relinked weight, a curve point's ×). Added again, it is a
     /// NEW face: defaults, and the main page's weight if a group presses it.
+    /// ★ ROUND 6 (item 4 — his answer: "deleting a face in Settings also removes it from its main-page group"): the
+    /// face leaves its main-page group too; a group it empties is removed unless it carries keep-clear / protect
+    /// (FlexibleGroupSync.removeLinked).
     @discardableResult
     public func removeFace(_ region: Int) -> Bool {
-        actionSerial += 1
-        let held = !mainPageLoads.canRemove(region)
-        edit { s in
-            s.removeFace(region)
-            if held, !s.isRemoved(region) { s.removedRegions = (s.removedRegions ?? []) + [region] }
-            FlexibleSqueezeGroups.normalise(&s)
-        }
+        removeLinked(region)
         purgeFaceCaches(region)
         if selectedRegion == region { selectedRegion = settings.loadedFaces.first?.faceRegionID ?? settings.faces.first?.faceRegionID }
         return true
@@ -697,7 +698,7 @@ public final class FlexibleStageModel: ObservableObject {
     public func stack(_ region: Int) -> FlexStackInfo? { key(region).flatMap { stacks[$0] } }
     public func design(_ region: Int) -> FlexFaceDesignInfo? { key(region).flatMap { designs[$0] } }
 
-    private func ensureStack(_ region: Int) {
+    func ensureStack(_ region: Int) {
         guard sceneState == .ready, let k = key(region), stacks[k] == nil, !pendingStacks.contains(k),
               stackErrors[k] == nil else { return }   // ★ no blind retry of a face core refused to stack
         pendingStacks.insert(k)

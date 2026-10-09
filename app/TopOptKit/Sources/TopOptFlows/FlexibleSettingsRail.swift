@@ -136,11 +136,10 @@ extension FlexibleStageModel {
     }
 
     /// [Press it] on a group's tab: the face joins THAT group (a main-page face comes with its hand).
+    /// ★ ROUND 6 (item 4): ONE action on both pages (FlexibleGroupSync.pressLinked) — joined to the tab's group at once.
     @discardableResult
     public func press(_ region: Int, kg: Double? = nil, into groupID: Int?) -> Bool {
-        guard press(region, kg: kg) else { return false }
-        if let id = groupID, railGroup(id) != nil, squeezeGroup(of: region)?.id != id { moveToGroup(region, id) }
-        return true
+        pressLinked(region, kg: kg, into: groupID)
     }
 
     /// ★ S3: the selected curve point's squish (mm) typed or scrubbed — its stored y = mm ÷ deepest,
@@ -194,12 +193,16 @@ struct FlexibleSettingsRailView: View {
     @MainActor
     static func tabs(model: FlexibleStageModel) -> [Tab] {
         var out = [Tab(tab: .model, title: FlexibleRowCopy.railModel, detail: nil)]
+        // ★ ROUND 6 (item 4, one set of groups): a group with one hand is named by it ("Top"); several: "Group N"
         for g in model.squeezeGroups {
-            out.append(Tab(tab: .group(g.id), title: FlexibleRowCopy.groupName(g.number),
+            out.append(Tab(tab: .group(g.id), title: model.railTitle(g),
                            detail: FlexibleRowCopy.faceCount(g.regions.count)))
         }
         let rests = model.settings.faces.filter { !$0.isLoaded }.count
         if rests > 0 { out.append(Tab(tab: .rests, title: FlexibleRowCopy.railRests, detail: FlexibleRowCopy.faceCount(rests))) }
+        // ★ ROUND 6 (item 4, his answer): the main page's Pending groups, each with [Squeeze it] [It rests]
+        let pending = model.pendingGroups.count
+        if pending > 0 { out.append(Tab(tab: .pending, title: FlexibleRowCopy.railPending, detail: FlexibleRowCopy.groupCount(pending))) }
         if !model.settings.loadedFaces.isEmpty { out.append(Tab(tab: .newGroup, title: FlexibleRowCopy.railNew, detail: nil)) }
         return out
     }
@@ -253,6 +256,7 @@ struct FlexibleSettingsRailView: View {
         switch t {
         case .group(let id): return model.railGroup(id).map { model.groupColour($0) } ?? DS.Color.strokeStrong
         case .rests: return DS.Color.accentCyan
+        case .pending: return DS.Color.warning
         default: return DS.Color.strokeStrong
         }
     }
@@ -303,7 +307,7 @@ struct FlexibleRailContent: View {
             case .newGroup:
                 FlexibleNewGroupTab(model: model)
             case .pending:
-                EmptyView()
+                FlexiblePendingTab(model: model, padTarget: $padTarget)
             }
         }
         .onAppear {
@@ -355,7 +359,7 @@ struct FlexibleGroupTabHeader: View {
         VStack(alignment: .leading, spacing: DS.Space.xxs) {
             HStack(spacing: DS.Space.s) {
                 Circle().fill(model.groupColour(group).color).frame(width: 12, height: 12)
-                Text(FlexibleRowCopy.groupName(group.number))
+                Text(model.railTitle(group))   // ★ ROUND 6 (item 4): its tab's name — its one hand's, or "Group N"
                     .font(.system(size: 15, weight: .semibold)).foregroundStyle(DS.Color.textPrimary.color)
                     .lineLimit(1)
                     // the name's own frame (the hosted test measures it against the words)
@@ -460,6 +464,69 @@ struct FlexibleRestsTab: View {
             FlexibleFaceList(model: model, padTarget: $padTarget,
                              only: model.settings.faces.filter { !$0.isLoaded }.map(\.faceRegionID), joinGroup: nil)
         }
+    }
+}
+
+/// ★ ROUND 6 (item 4, his answer: "Pending shown in Settings with [Squeeze it] [It rests]"): each main-page group with no
+/// role — its name and faces on one line, the main page's own words under it, then its two fixes. [Squeeze it] asks the
+/// weight on the pad (a new squeeze group has no force yet); [It rests] makes it an Anchor. One tap, one undo step each.
+struct FlexiblePendingTab: View {
+    @ObservedObject var model: FlexibleStageModel
+    @Binding var padTarget: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: DS.Space.xs) {
+            HStack(spacing: DS.Space.s) {
+                Image(systemName: "questionmark.circle").font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(DS.Color.warning.color)
+                Text(FlexibleRowCopy.railPending).font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(DS.Color.textPrimary.color)
+                Spacer()
+                FlexInfoButton(title: FlexibleRowCopy.railPending, text: FlexibleRowCopy.Info.pending, id: "flexible-pending-info")
+            }
+            .frame(minHeight: 36)
+            ForEach(Array(model.pendingGroups.enumerated()), id: \.element.id) { i, g in
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(FlexibleRowCopy.fit("\(g.name) · " + g.regions.map { model.faceName($0) }.joined(separator: " + ")))
+                        .font(.system(size: 14, weight: .semibold)).foregroundStyle(DS.Color.textPrimary.color)
+                        .lineLimit(1).minimumScaleFactor(0.85)
+                    Text(FlexibleRowCopy.pendingLine)
+                        .font(.system(size: 12, weight: .medium)).foregroundStyle(DS.Color.textSecondary.color)
+                        .lineLimit(1)
+                        .background(Self.frame("pendingLine-\(i)"))
+                    HStack(spacing: DS.Space.s) {
+                        Button { padTarget = "pending-\(g.id)" } label: { Self.chip(FlexibleRowCopy.squeezeIt) }
+                            .buttonStyle(.plain).background(Self.frame("pendingSqueeze-\(i)"))
+                            .accessibilityIdentifier("flexible-pending-squeeze-\(i)")
+                        Button { model.restPending(g.id) } label: { Self.chip(FlexibleRowCopy.itRests) }
+                            .buttonStyle(.plain).background(Self.frame("pendingRest-\(i)"))
+                            .accessibilityIdentifier("flexible-pending-rest-\(i)")
+                    }
+                }
+                .padding(.vertical, 6).padding(.horizontal, DS.Space.m)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(DS.Color.fillSubtle.color))
+                .modifier(FlexPadCommit(key: "pending-\(g.id)", padTarget: $padTarget,
+                                        config: .init(title: FlexibleRowCopy.askWeight, unit: model.weightUnit.label, allowsDecimal: true),
+                                        seed: nil) { v in model.squeezePending(g.id, kg: model.weightUnit.toKg(v)) })
+                .accessibilityElement(children: .contain)
+                .accessibilityIdentifier("flexible-pending-\(i)")
+            }
+        }
+    }
+
+    static func chip(_ t: String) -> some View {
+        Text(t).font(.system(size: 13, weight: .semibold)).foregroundStyle(DS.Color.textPrimary.color)
+            .lineLimit(1)
+            .padding(.horizontal, 14).frame(minHeight: 44)
+            .background(Capsule().fill(DS.Color.fillSelected.color))
+            .contentShape(Capsule())
+    }
+
+    static func frame(_ key: String) -> some View {
+        GeometryReader { g in
+            Color.clear.preference(key: FlexibleKeepOutKey.self, value: [key: g.frame(in: .global)])
+        }.allowsHitTesting(false)
     }
 }
 

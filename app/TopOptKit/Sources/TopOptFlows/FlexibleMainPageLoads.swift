@@ -121,17 +121,26 @@ public struct FlexibleMainPageLoads: Equatable {
         return kg / (e.share * factor)
     }
 
-    /// Every region of every Load / Anchor group (see the file comment).
-    /// `load(region)`: core's into-the-face direction when its stack exists; else the face's
-    /// own inward normal is used (R13's frame on a flat face).
-    public static func derive(groups: [SelectionGroup], force: ForceModel, faceRegions: FaceRegionModel,
-                              mesh: ViewerMesh, regions: FlexibleRegions,
-                              load: (Int) -> SIMD3<Double>? = { _ in nil }) -> FlexibleMainPageLoads {
-        let faceArea = FaceRegionGeometry.faceAreas(in: mesh)
-        var sectorsOfFace: [FaceID: [FaceRegion]] = [:]
-        for s in regions.sectors {
-            for f in FaceRegionGeometry.members(of: s, in: mesh) { sectorsOfFace[f, default: []].append(s) }
+    /// ★ ROUND 6 (item 4, one set of groups): what `derive` reads of a group — the Flexible regions it covers, their
+    /// areas and inward normals, the group's mean normal — in ONE place, shared with the group links
+    /// (FlexibleGroupSync), so the links and the loads can never disagree about which faces a group holds.
+    struct Expander {
+        let faceRegions: FaceRegionModel
+        let mesh: ViewerMesh
+        let regions: FlexibleRegions
+        let faceArea: [FaceID: Double]
+        private let sectorsOfFace: [FaceID: [FaceRegion]]
+
+        init(faceRegions: FaceRegionModel, mesh: ViewerMesh, regions: FlexibleRegions) {
+            self.faceRegions = faceRegions; self.mesh = mesh; self.regions = regions
+            faceArea = FaceRegionGeometry.faceAreas(in: mesh)
+            var sof: [FaceID: [FaceRegion]] = [:]
+            for s in regions.sectors {
+                for f in FaceRegionGeometry.members(of: s, in: mesh) { sof[f, default: []].append(s) }
+            }
+            sectorsOfFace = sof
         }
+
         func expand(face f: FaceID) -> [(id: Int, specific: Bool)] {
             let secs = sectorsOfFace[f] ?? []
             return secs.isEmpty ? [(Int(f), false)] : secs.map { (FlexibleRegions.wireID($0), false) }
@@ -141,6 +150,19 @@ public struct FlexibleMainPageLoads: Equatable {
             if reg.isUnionOfParts { return reg.parts.flatMap { expand(region: $0, depth: depth + 1) } }
             if reg.isCut, regions.sectors.contains(where: { $0.id == reg.id }) { return [(FlexibleRegions.wireID(reg), true)] }
             return FaceRegionGeometry.members(of: reg, in: mesh).flatMap { expand(face: $0) }
+        }
+        /// The group's entries as `derive` lists them: its faces, then its regions.
+        func expand(_ g: SelectionGroup) -> [(id: Int, specific: Bool)] {
+            var list: [(id: Int, specific: Bool)] = []
+            for f in g.faces { list += expand(face: f) }
+            for r in g.regionIDs { list += expand(region: r) }
+            return list
+        }
+        /// The Flexible regions a group covers, each once, in order.
+        func members(_ g: SelectionGroup) -> [Int] {
+            var seen = Set<Int>(), out: [Int] = []
+            for e in expand(g) where seen.insert(e.id).inserted { out.append(e.id) }
+            return out
         }
         func area(_ id: Int) -> Double {
             guard let sec = regions.sector(id) else { return faceArea[FaceID(id)] ?? 0 }
@@ -155,7 +177,7 @@ public struct FlexibleMainPageLoads: Equatable {
             }
             return a
         }
-        func inward(_ id: Int) -> SIMD3<Double>? {
+        func inward(_ id: Int, load: (Int) -> SIMD3<Double>?) -> SIMD3<Double>? {
             if let l = load(id), simd_length(l) > 1e-9 { return simd_normalize(l) }
             var acc = SIMD3<Double>.zero
             for f in regions.faces(of: id, mesh: mesh) {
@@ -170,29 +192,42 @@ public struct FlexibleMainPageLoads: Equatable {
             for f in faces { if let n = mesh.faceNormal(f) { acc += SIMD3<Double>(n) } }
             return simd_length(acc) > 1e-9 ? simd_normalize(acc) : nil
         }
+        /// The direction a Load group presses (`derive`'s): gravity, into its faces (push) or out (pull); nil for any other.
+        func direction(_ g: SelectionGroup, force: ForceModel) -> SIMD3<Double>? {
+            switch force.kind(for: g.id).loadDirection {
+            case .gravity?: return SIMD3<Double>(force.gravity ?? SIMD3<Float>(0, 0, -1))
+            case .push?: return groupNormal(g).map { -$0 }
+            case .pull?: return groupNormal(g)
+            case nil: return nil
+            }
+        }
+    }
+
+    /// Every region of every Load / Anchor group (see the file comment).
+    /// `load(region)`: core's into-the-face direction when its stack exists; else the face's
+    /// own inward normal is used (R13's frame on a flat face).
+    public static func derive(groups: [SelectionGroup], force: ForceModel, faceRegions: FaceRegionModel,
+                              mesh: ViewerMesh, regions: FlexibleRegions,
+                              load: (Int) -> SIMD3<Double>? = { _ in nil }) -> FlexibleMainPageLoads {
+        derive(groups: groups, force: force, x: Expander(faceRegions: faceRegions, mesh: mesh, regions: regions), load: load)
+    }
+
+    static func derive(groups: [SelectionGroup], force: ForceModel, x: Expander,
+                       load: (Int) -> SIMD3<Double>? = { _ in nil }) -> FlexibleMainPageLoads {
         var out: [Int: Entry] = [:]
         var specificity: [Int: Bool] = [:]
         for g in groups {
             let kind = force.kind(for: g.id)
             guard kind.isAnchor || kind.isLoad else { continue }
-            var list: [(id: Int, specific: Bool)] = []
-            for f in g.faces { list += expand(face: f) }
-            for r in g.regionIDs { list += expand(region: r) }
+            let list = x.expand(g)
             // one entry per region, the explicit sector winning within the group too
             var seen: [Int: Bool] = [:]
             for e in list { seen[e.id] = (seen[e.id] ?? false) || e.specific }
             let ids = seen.keys.sorted()
-            let areas = Dictionary(uniqueKeysWithValues: ids.map { ($0, area($0)) })
+            let areas = Dictionary(uniqueKeysWithValues: ids.map { ($0, x.area($0)) })
             let total = areas.values.reduce(0, +)
             let kg = kind.weightKg ?? 0
-            let dir: SIMD3<Double>? = {
-                switch kind.loadDirection {
-                case .gravity?: return SIMD3<Double>(force.gravity ?? SIMD3<Float>(0, 0, -1))
-                case .push?: return groupNormal(g).map { -$0 }
-                case .pull?: return groupNormal(g)
-                case nil: return nil
-                }
-            }()
+            let dir = x.direction(g, force: force)
             for id in ids {
                 let specific = seen[id] ?? false
                 // a sector named explicitly wins over the same sector reached through its face
@@ -200,7 +235,7 @@ public struct FlexibleMainPageLoads: Equatable {
                 let share = total > 0 ? (areas[id] ?? 0) / total : 1 / Double(max(1, ids.count))
                 var role: Role = kind.isAnchor ? .rests : .ask
                 var c = 0.0, w = 0.0
-                if kind.isLoad, let d = dir, simd_length(d) > 1e-9, let l = inward(id) {
+                if kind.isLoad, let d = dir, simd_length(d) > 1e-9, let l = x.inward(id, load: load) {
                     c = simd_dot(simd_normalize(d), l)
                     if c >= straightCos { role = .pressed; w = kg * share }
                     else if c > 1e-6 { role = .pressed; w = kg * share * c }
