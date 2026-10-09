@@ -1,0 +1,45 @@
+# Round 6 item 4 (one set of groups): the angled-press goldens RE-BASED at 972022d9 — every difference reported first,
+# each attributed to his answers. RECORD=1 SWIFT_DETERMINISTIC_HASHING=1 FLEX_AP_BASE=972022d9 swift test --skip-build
+# --filter FlexibleAngledGoldenRecorder (core 4c7bb64c9cf1, unchanged). Before re-recording, FlexibleAngledGoldenTests ran
+# against S2's goldens (4c7bb64c): 3 tests red — testEveryExistingSendKeepsItsJobBytes, testFacePressFramesAreTheGolden,
+# testCoreFieldsAndDesignsAreTheGolden — exactly on the files below; every other golden IDENTICAL.
+
+## Identical (byte for byte)
+c1_pad_pure_run_job.json, c1_pad_pure_stamp_run_job.json, c1_pad_model_run_job.json, c1_pad_model_scene_job.json,
+his_r5_held_send_run_job.json, his_r5_send2_run_job.json, his_r5_scene_job.json, his_r5_held_send.txt, his_r5_sends.txt,
+A1_0002_send2_run_job.json, A1_0002_scene_job.json,
+A1_0003_send1/2/3_run_job.json, A1_0003_scene_job.json, A1_0003_sends.txt   (his img4's pad: H18 links, no weight moves)
+A1_0004_send1/2_run_job.json, A1_0004_scene_job.json, A1_0004_sends.txt,
+his_0004_sends.txt (the same two sends), frames_c1_pad / his_0004_r5 / cube60 / m2 / step_cube / l_bracket, fields_c1_pad,
+fields_his_0004_r5, rounded_slab.txt, probe_refusals_base.json,
+lattice_subtree_*.json (all six): the subtree golden DECODES the saved project.json and re-encodes it (it never restores
+it), so H18 cannot reach it; the restore-time change is per face in FlexibleGroupSyncTests' table (i4_suite.txt) and in a
+project's file only after its next save.
+
+## Labels only
+MANIFEST.txt, probe_answers.json: the base label 4c7bb64c → 972022d9 (core 4c7bb64c9cf1 unchanged).
+
+## his 0004 AS SAVED (his_project_0004) — HIS ANSWER: "a group's number is the TOTAL force, shared between same-facing faces
+## by area (10 kg on Top A + Top B = 5 + 5)"
+H18 finds Top B (pressed in Settings group 1 at its own 10 kg, in no main-page group) on the SAME side as Top (the main
+page's Load group pressing Top A, 10 kg gravity), so Top B joins Top: one hand, Top's 10 kg shared by area.
+  his_0004_send1_run_job.json, his_0004_send2_run_job.json — 3 differences each (structural diff):
+    flexible/faces[0] (Top A) weight_n 98.0665 → 49.03325   (10 kg → 5 kg: its area share of Top's 10 kg)
+    flexible/faces[1] (Top B) weight_n 98.0665 → 49.03325   (10 kg → 5 kg)
+    flexible/regions 1 → 2: Top B is now in Top, whose lattice role (include, 4 mm — Top's groupDepthMM) covers it; as
+      saved it had NO lattice under it (batch E's "[Lattice under it]" line). Faces 3 and 5 (their own hands, 10 kg each,
+      the other two walls) and every other byte unchanged.
+  his_0004_scene_job.json — +49 lines: that second include region (Top B's half of the top, 4 mm deep, normal (0,0,−1)).
+  frames_his_0004.txt — the scene's latticeVoxels 26624 → 32768 (Top B's 4 mm slab) and so every region's column
+    lattice fields (each column's path through the new slab); no frame (origin, u, v, normal) moved.
+  fields_his_0004.txt — core's density / owner / handover fields over the same larger lattice (105 lines).
+
+## M2 stand (A1_0002) — HIS ANSWER: "a main-page Load group = a squeeze group (weight = force)"
+H18 gives face 2 (pressed in Settings at his 10 kg, held by Group C — Protect — with face 15 and region 101) its own hand
+("Group 1", push 10 kg; Group C keeps 15 + 101 and its Protect), and Group B (gravity 2.5 kg) — whose faces the open's
+adopt always pressed into Settings' group 1 beside face 2 — arrives as its OWN squeeze group (2). Core holds two groups,
+so the Export step offers each group's send:
+  A1_0002_sends.txt:  send 1 "Send with Face 1, Face 22, Face 25 resting" → "Send Group 1 only" (resting: Group B's 18 faces)
+                      send 2 "Send with Face 2 resting" → "Send Group 2 only" (resting [2]) — its job bytes IDENTICAL
+  A1_0002_send1_run_job.json — 90 differences: face 2 alone is pressed (98.0665 N); Group B's 14 pressed faces (4, 19, 20,
+    21, 27, 41–47, 49, 75, 76) rest in this send (their curves, deepest and weight_n leave the face entries).

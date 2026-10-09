@@ -1,0 +1,139 @@
+== A1_0002: 5 difference(s), unlinked → linked (H18)
+   ~ /loads/face_protections count 3 → 2
+   - /loads/face_protections[1]/face_id
+   + /loads/face_protections[1]/region_id
+   ~ /loads/groups count 1 → 2
+   + /loads/groups[1] {
+    "face_ids" =     (
+        2
+    );
+    force =     (
+        0,
+        "98.06649780273438",
+        0
+    );
+}
+== A1_0003: 5 difference(s), unlinked → linked (H18)
+   ~ /loads/groups count 1 → 5
+   + /loads/groups[1] {
+    "face_ids" =     (
+        3
+    );
+    force =     (
+        "-19.61330032348633",
+        0,
+        0
+    );
+}
+   + /loads/groups[2] {
+    "face_ids" =     (
+        4
+    );
+    force =     (
+        0,
+        "-44.48221588134766",
+        0
+    );
+}
+   + /loads/groups[3] {
+    "face_ids" =     (
+        2
+    );
+    force =     (
+        0,
+        "44.48221588134766",
+        0
+    );
+}
+   + /loads/groups[4] {
+    "face_ids" =     (
+        5
+    );
+    force =     (
+        "19.61330032348633",
+        0,
+        0
+    );
+}
+== A1_0004: 3 difference(s), unlinked → linked (H18)
+   ~ /loads/groups count 1 → 3
+   + /loads/groups[1] {
+    "face_ids" =     (
+        3
+    );
+    force =     (
+        "-29.41995048522949",
+        0,
+        0
+    );
+}
+   + /loads/groups[2] {
+    "face_ids" =     (
+        5
+    );
+    force =     (
+        "29.41995048522949",
+        0,
+        0
+    );
+}
+== r3 (his 0004): 11 difference(s), unlinked → linked (H18)
+   ~ /grading/cell_min_mm: 5 → 1.173173434139347
+   ~ /lattice/regions count 1 → 2
+   + /lattice/regions[1] {
+    geometry =     {
+        "depth_mm" = 4;
+        "frame_u" =         (
+            0,
+            1,
+            0
+        );
+        "frame_w" =         
+   ~ /loads/anchor_face_ids count 1 → 3
+   + /loads/anchor_face_ids[1] 4
+   + /loads/anchor_face_ids[2] 2
+   ~ /loads/groups count 1 → 3
+   ~ /loads/groups[0]/region_ids count 1 → 2
+   + /loads/groups[0]/region_ids[1] 104
+   + /loads/groups[1] {
+    "face_ids" =     (
+        3
+    );
+    force =     (
+        "-98.06649780273438",
+        0,
+        0
+    );
+}
+   + /loads/groups[2] {
+    "face_ids" =     (
+        5
+    );
+    force =     (
+        "98.06649780273438",
+        0,
+        0
+    );
+}
+== r5: 3 difference(s), unlinked → linked (H18)
+   ~ /loads/groups count 1 → 3
+   + /loads/groups[1] {
+    "face_ids" =     (
+        5
+    );
+    force =     (
+        "98.06649780273438",
+        0,
+        0
+    );
+}
+   + /loads/groups[2] {
+    "face_ids" =     (
+        3
+    );
+    force =     (
+        "-29.41995048522949",
+        0,
+        0
+    );
+}

@@ -573,6 +573,54 @@ final class FlexibleGroupSyncTests: XCTestCase {
         }
     }
 
+    // MARK: - the stage jobs, with and without the link (attribution of stage_job_hashes, opt-in)
+
+    /// ★ EVIDENCE (FLEX_I4_EVIDENCE_DIR=<dir>): the lattice-stage job the app submits (makeLatticeRunRequest →
+    /// RemoteRun.buildJobJSON, LatticeJobJSONDump's route) for his five Flexible projects, restored WITH H18 and WITHOUT it
+    /// (the red control's door), and every difference between the two, path by path — the attribution of the stage-job
+    /// hash rows that moved.
+    func testEvidenceStageJobsWithAndWithoutTheLink() throws {
+        guard let dir = ProcessInfo.processInfo.environment["FLEX_I4_EVIDENCE_DIR"].map({ URL(fileURLWithPath: $0, isDirectory: true) })
+        else { throw XCTSkip("FLEX_I4_EVIDENCE_DIR") }
+        func job(_ src: URL, linked: Bool) throws -> Any {
+            FlexibleGroupMigration.controlSkip = !linked
+            defer { FlexibleGroupMigration.controlSkip = false }
+            let r = try FlexibleHisProject.restore(src, asSaved: true)
+            addTeardownBlock { r.cleanup() }
+            let req = try XCTUnwrap(r.app.makeLatticeRunRequest(), "\(src.lastPathComponent): a lattice request")
+            return try JSONSerialization.jsonObject(with: try RemoteRun.buildJobJSON(req))
+        }
+        func diff(_ a: Any, _ b: Any, _ path: String = "") -> [String] {
+            if let x = a as? [String: Any], let y = b as? [String: Any] {
+                return Set(x.keys).union(y.keys).sorted().flatMap { k -> [String] in
+                    guard let p = x[k] else { return ["+ \(path)/\(k)"] }
+                    guard let q = y[k] else { return ["- \(path)/\(k)"] }
+                    return diff(p, q, path + "/" + k)
+                }
+            }
+            if let x = a as? [Any], let y = b as? [Any] {
+                var out = x.count == y.count ? [] : ["~ \(path) count \(x.count) → \(y.count)"]
+                for i in 0..<min(x.count, y.count) { out += diff(x[i], y[i], "\(path)[\(i)]") }
+                if y.count > x.count { for i in x.count..<y.count { out.append("+ \(path)[\(i)] \(String(describing: y[i]).prefix(160))") } }
+                return out
+            }
+            let sa = String(describing: a), sb = String(describing: b)
+            return sa == sb ? [] : ["~ \(path): \(sa.prefix(80)) → \(sb.prefix(80))"]
+        }
+        var lines: [String] = []
+        let sources: [(String, URL)] = [("A1_0002", FlexiblePressFixtures.a1Dir(2)), ("A1_0003", FlexiblePressFixtures.a1Dir(3)),
+                                        ("A1_0004", FlexiblePressFixtures.a1Dir(4)), ("r3 (his 0004)", FlexibleHisProject.dir),
+                                        ("r5", FlexibleHisProject.round5Dir)]
+        for (label, src) in sources {
+            let d = diff(try job(src, linked: false), try job(src, linked: true))
+            lines.append("== \(label): \(d.count) difference(s), unlinked → linked (H18)")
+            lines += d.map { "   " + $0 }
+        }
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try lines.joined(separator: "\n").write(to: dir.appendingPathComponent("i4_stage_job_diffs.txt"), atomically: true, encoding: .utf8)
+        print("FLEX-I4 stage jobs:\n" + lines.joined(separator: "\n"))
+    }
+
     // MARK: - (11) a link alone never stales the lattice
 
     func testALinkAloneNeverStalesTheLattice() throws {
