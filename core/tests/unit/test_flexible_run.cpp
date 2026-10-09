@@ -153,6 +153,34 @@ int main() {
     CHECK(threw, "an outward press is refused, naming the region");
   }
 
+  // FOLLOW-UP (reviewer 2026-10-08). A5: the run's stacks (and its field) as VALUES, for
+  // the app's bit test against its own; the receipt's numbers are these stacks'.
+  CHECK(r.stacks.size() == 1 && r.stacks[0].face_region_id == 101 && r.stacks[0].columns.size() == 50 * 50,
+        "A5: the run returns its stacks, one per loaded press, in job order");
+  CHECK(r.field.density.size() == static_cast<std::size_t>(r.field.nx) * r.field.ny * r.field.nz &&
+            r.field.nx > 0 && r.field.owner_weight.size() == r.field.density.size(),
+        "A5: ... and its density field, with A6's weight and runner-up");
+  // A3 at the job: the whole top and a sector of it, in two presses: refused, naming both.
+  {
+    std::string jt = job("varioshore_tpu", "220", "auto",
+                         "[" + kTop + ",{\"face_region_id\":111,\"press_direction\":[-1,0,-1],\"role\":\"loaded\","
+                                      "\"weight_n\":100,\"deepest_squish_mm\":1,\"mode\":\"both\","
+                                      "\"curve_x\":[[0,1],[1,1]],\"curve_y\":[[0,1],[1,1]],\"skin_on\":true}]");
+    const std::string regs = "{\"id\":103,\"add\":[3]}]";
+    jt.replace(jt.find(regs), regs.size(),
+               "{\"id\":103,\"add\":[3]},{\"id\":111,\"add\":[1],\"cuts\":[{\"point\":[50,0,0],\"normal\":[1,0,0]}]}]");
+    bool threw = false;
+    try {
+      run("shared", jt);
+    } catch (const JobError& e) {
+      const std::string w = e.what();
+      threw = w.find("101") != std::string::npos && w.find("111") != std::string::npos &&
+              w.find("share") != std::string::npos;
+      if (!threw) std::fprintf(stderr, "  (%s)\n", e.what());
+    }
+    CHECK(threw, "A3: a face and its own sector in two presses: refused at the job, naming both");
+  }
+
   // Refusals: named, receipt still written, the drawn map still written.
   r = run("stack", job("varioshore_tpu", "220", "auto",
                        "[" + kTop + ",{\"face_region_id\":100,\"role\":\"loaded\",\"weight_n\":100,"

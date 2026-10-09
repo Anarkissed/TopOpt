@@ -558,6 +558,8 @@ DensityField assemble_density_field(const VoxelGrid& grid, const std::vector<cha
   f.origin = grid.origin;
   f.density.assign(grid.voxel_count(), -1.0);
   f.owner.assign(grid.voxel_count(), -1);
+  f.owner_weight.assign(grid.voxel_count(), 0.0);
+  f.runner_up.assign(grid.voxel_count(), -1);
   const double vv = grid.voxel_volume();
   std::map<std::pair<int, int>, Handover> hv;
   struct Hit {
@@ -597,6 +599,7 @@ DensityField assemble_density_field(const VoxelGrid& grid, const std::vector<cha
         if (hits.size() == 1) {
           f.density[idx] = ca.buildable_density;
           f.owner[idx] = fa;
+          f.owner_weight[idx] = 1.0;
           continue;
         }
         const Hit& B = hits[1];
@@ -616,6 +619,8 @@ DensityField assemble_density_field(const VoxelGrid& grid, const std::vector<cha
         const double w = std::min(1.0, std::max(0.0, 0.5 + across / L));
         f.density[idx] = w * ca.buildable_density + (1.0 - w) * cb.buildable_density;
         f.owner[idx] = w >= 0.5 ? fa : fb;
+        f.owner_weight[idx] = w >= 0.5 ? w : 1.0 - w;
+        f.runner_up[idx] = w >= 0.5 ? fb : fa;
         for (std::size_t x = 0; x < hits.size(); ++x)
           for (std::size_t y = x + 1; y < hits.size(); ++y) {
             int a = stacks[hits[x].s].stack->face_region_id;

@@ -15,5 +15,5 @@ wrote field_xz_density.svg
 wrote field_xz_owner.svg
 wrote run_info.json
 flexible: ran; receipt in /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/flexible-squish-maths-7a3bc8/docs/handoffs/evidence/2026-09-28-flexible-squish-maths/d_cube_top_and_vertical_edge_press/out/run_info.json
-topopt-cli: core 421fde3dca42, built Oct  7 2026 18:25:24
+topopt-cli: core 021b73210598, built Oct  8 2026 15:23:06
 exit code 0

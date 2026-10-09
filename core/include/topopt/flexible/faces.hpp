@@ -28,6 +28,18 @@ inline constexpr double kSideStackDeg = 15.0;
 inline constexpr double kNormalSpreadFlagDeg = 30.0;
 inline constexpr double kSameAxisDeg = 15.0;
 
+// THE PRESS API's version (A7, reviewer 2026-10-08): the wire keys face_region_ids /
+// press_direction, build_press_stack, refuse_shared_footprints, press_unit,
+// stack_owns_projection and DensityField's owner_weight / runner_up. Raised when any of
+// them changes meaning, so the app can refuse a core it was not written against.
+inline constexpr int kPressApiVersion = 1;
+
+// THE ONE NORMALISER of a stated press direction (A10): d / |d|. Every consumer
+// (build_press_stack, face_frame, the receipt) takes its result, so the direction is
+// normalised once, the same way, everywhere. Throws FlexibleError ("press_direction ...")
+// for a zero or non-finite vector.
+Vec3 press_unit(const Vec3& d);
+
 // THE FACE FRAME (R13).
 //   load  = into the part, along the face's area-weighted normal
 //   X     = the principal (longest) axis of the face projected onto the plane ⟂ load
@@ -191,6 +203,18 @@ Stack build_press_stack(const StepModel& model,
 // of the part it lands on. True for a stack without cuts. False when the back-ray misses
 // the footprint (p projects outside it) or lands outside its sector (B5).
 bool stack_owns_projection(const Stack& s, const Vec3& p);
+
+// A3 (reviewer 2026-10-08): two presses may not share any SURFACE. A press is named by
+// `press_id` (its first region) and is the union of `regions`. Refuses, with
+// FlexibleError naming both presses and the regions, any two presses with a region pair
+// whose footprints overlap in AREA on a shared face: a face and its own sector, or two
+// overlapping sectors (each region's triangles clipped by its cuts; the shared area
+// must exceed 1e-6 mm2). Sectors that meet only along a line are not refused.
+struct PressFootprint {
+  int press_id = -1;
+  std::vector<const ResolvedFaceRegion*> regions;
+};
+void refuse_shared_footprints(const TriangleMesh& mesh, const std::vector<PressFootprint>& presses);
 
 // Angle between two load LINES (0..90°): the sign of a direction does not matter.
 double axis_angle_deg(const Vec3& a, const Vec3& b);
