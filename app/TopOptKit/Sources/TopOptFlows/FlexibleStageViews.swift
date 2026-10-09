@@ -29,6 +29,8 @@ public struct FlexibleStageViews: OptionSet, Hashable, Sendable {
         (.groups, "circle.grid.2x2", "Groups", "flexible-settings-view-groups"),
     ]
     static let buttonSize: CGFloat = 40
+    /// ★ R6 REVIEW (stub): the Groups button's glyph — his first three groups' colours.
+    @MainActor static func glyphColours(model: FlexibleStageModel) -> [RGBA] { [] }
 
     /// Where the buttons sit in the page's frame: under the gizmo's touch square, trailing on `edge`.
     static func frame(viewport: CGSize) -> CGRect {

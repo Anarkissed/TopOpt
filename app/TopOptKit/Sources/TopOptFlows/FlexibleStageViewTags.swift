@@ -96,6 +96,25 @@ enum FlexibleStageViewTags {
     }
 }
 
+/// ★ R6 REVIEW (stub): what the layer draws, by name (`tag-<region>`, `disc-<region>`, `hidden-<key>-<region>`), in the
+/// stage's frame — the hosted tests read it.
+struct FlexibleViewMarksKey: PreferenceKey {
+    static var defaultValue: [String: CGRect] = [:]
+    static func reduce(value: inout [String: CGRect], nextValue: () -> [String: CGRect]) { value.merge(nextValue()) { $1 } }
+}
+
+extension FlexibleStageViewTags {
+    /// A shown member that faces AWAY, drawn dashed (stub).
+    struct Hidden: Equatable {
+        let key: String
+        let region: Int
+        let colour: RGBA
+        let paths: [[CGPoint]]
+    }
+    @MainActor
+    static func hidden(model m: FlexibleStageModel, projection: CameraProjection?) -> [Hidden] { [] }
+}
+
 /// The tags and discs, over the part (FlexibleStageOverlays mounts it; it follows the camera).
 struct FlexibleStageViewTagsLayer: View {
     @ObservedObject var model: FlexibleStageModel

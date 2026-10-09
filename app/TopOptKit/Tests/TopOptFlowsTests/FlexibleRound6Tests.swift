@@ -8,6 +8,10 @@
 //   R6-1f  no page paints round 5's frames outside their control; no page call tints a body by group;
 //   R6-3e  the views are never a setting, never an action, never the lattice's key;
 //   R6-3i  hook H15 (WorkspacePlaceholder) — waits on the S1 base (skipped, printed, until it is there).
+// ★ R6 REVIEW (the verifier's findings, 2026-10-08): R6R-1 each group's glass reads as ITS colour over the heat (ΔE76 ≥ 10
+//   toward it, told apart, only slightly); R6R-5 a faint prism's side edges only where its outline turns; R6R-3 the
+//   legend keeps clear of the view buttons (the page's own list, a red control); R6R-6a a glass's outline is one closed
+//   loop per boundary; the Colour and Deepest (i) texts.
 #if canImport(MetalKit)
 import XCTest
 import MetalKit
@@ -248,6 +252,45 @@ final class FlexibleRound6Tests: XCTestCase {
         var description: String { "n \(n) · min \(min) · median \(median) · p90 \(p90) · max \(max)" }
     }
 
+    /// ★ R6 REVIEW: CIE L*a*b* (D65) of an sRGB colour (0…1) — the glass's tint is judged as a COLOUR CHANGE (ΔE76
+    /// toward the group's hue), not as the largest channel step (a dark glass over a bright heat only dims it).
+    nonisolated static func lab(rgb c: SIMD3<Double>) -> SIMD3<Double> {
+        func lin(_ v: Double) -> Double { v <= 0.04045 ? v / 12.92 : pow((v + 0.055) / 1.055, 2.4) }
+        let r = lin(c.x), g = lin(c.y), b = lin(c.z)
+        let x = (0.4124 * r + 0.3576 * g + 0.1805 * b) / 0.95047
+        let y = 0.2126 * r + 0.7152 * g + 0.0722 * b
+        let z = (0.0193 * r + 0.1192 * g + 0.9505 * b) / 1.08883
+        func f(_ t: Double) -> Double { t > 0.008856 ? cbrt(t) : 7.787 * t + 16.0 / 116.0 }
+        return SIMD3(116 * f(y) - 16, 500 * (f(x) - f(y)), 200 * (f(y) - f(z)))
+    }
+    /// A BGRA pixel's L*a*b*.
+    nonisolated static func lab(_ px: [UInt8], _ i: Int) -> SIMD3<Double> {
+        lab(rgb: SIMD3(Double(px[4 * i + 2]), Double(px[4 * i + 1]), Double(px[4 * i])) / 255)
+    }
+
+    /// ★ R6 REVIEW (the verifier's finding: "the Groups view looks unchanged"): how a glass changes its member's pixels —
+    /// ΔE76 (median, p10) and how squarely the change points at the group's own colour (the median cosine between
+    /// Lab(lit) − Lab(base) and Lab(tint) − Lab(base)).
+    struct Tinting: CustomStringConvertible {
+        let n: Int, medianDE: Double, p10DE: Double, medianCos: Double
+        init(base: [UInt8], lit: [UInt8], pixels: [Int], tint: SIMD3<Float>) {
+            let t = FlexibleRound6Tests.lab(rgb: SIMD3<Double>(tint))
+            var de: [Double] = [], cs: [Double] = []
+            for i in pixels {
+                let a = FlexibleRound6Tests.lab(base, i), b = FlexibleRound6Tests.lab(lit, i)
+                let d = b - a, want = t - a
+                de.append(simd_length(d))
+                cs.append(simd_length(d) > 1e-6 && simd_length(want) > 1e-6 ? simd_dot(d, want) / (simd_length(d) * simd_length(want)) : 0)
+            }
+            de.sort(); cs.sort()
+            n = de.count
+            medianDE = de.isEmpty ? 0 : de[de.count / 2]
+            p10DE = de.isEmpty ? 0 : de[de.count / 10]
+            medianCos = cs.isEmpty ? 0 : cs[cs.count / 2]
+        }
+        var description: String { String(format: "n %d · ΔE median %.1f p10 %.1f · toward its colour cos %.2f", n, medianDE, p10DE, medianCos) }
+    }
+
     /// A pixel's heat bucket: its hue sextant, or "dark".
     static func bucket(_ px: [UInt8], _ i: Int) -> String {
         let b = Double(px[4 * i]), g = Double(px[4 * i + 1]), r = Double(px[4 * i + 2])
@@ -313,8 +356,9 @@ final class FlexibleRound6Tests: XCTestCase {
         } else {
             print("FLEX-R6 NOTE R6-1d: the nil-alpha hash is compared under SWIFT_DETERMINISTIC_HASHING=1 only")
         }
-        // ── Group 2 open: its glass on faces 4 and 2
-        let walls = FlexibleGroupWalls.items(model: m, views: [], mesh: part)
+        // ── Group 2 open: its glass on faces 4 and 2 (★ R6 REVIEW: its alphas over the page's own heat, as the page draws it)
+        let heat = FlexibleGroupWalls.heatSamples(tints: c.tints, overlay: o, model: m)
+        let walls = FlexibleGroupWalls.items(model: m, views: [], mesh: part, heat: heat)
         XCTAssertEqual(Set(walls.map(\.volume.faceID)), [4, 2], "Group 2's two members")
         let base = try render(sc, Self.iso, [], device: device)
         let ids = try faceIDs(sc, Self.iso, device: device)
@@ -342,7 +386,8 @@ final class FlexibleRound6Tests: XCTestCase {
             let st = Stats(v)
             note("glass face \(frontFace) over \(b): \(st)")
             XCTAssertGreaterThanOrEqual(st.median, 4, "the glass shows over the \(b) heat")
-            XCTAssertLessThanOrEqual(st.median, 25, "…slightly: the \(b) heat reads through it")
+            // ★ R6 REVIEW: "slightly" is no longer a channel step ≤ 25 (at that bound his teal and green glass moved their
+            // faces ΔE 3–8: no tint) — it is R6R-1's rule: ΔE ≥ 10 toward its own colour, ≤ 32, alpha ≤ the cap
         }
         // nowhere else: a Group 2 pixel is the front member's or an outline's
         let frontMask = Self.dilate(ids.map { $0 == UInt32(frontFace) }, 2)
@@ -359,7 +404,7 @@ final class FlexibleRound6Tests: XCTestCase {
         XCTAssertGreaterThan(backLines, 100, "…and its outline does draw (\(backLines) pixels)")
 
         // ── the Groups view, from above (img3): the bottom (Rests) glass alone changes nothing inside the top
-        let groups = FlexibleGroupWalls.items(model: m, views: [.groups], mesh: part)
+        let groups = FlexibleGroupWalls.items(model: m, views: [.groups], mesh: part, heat: heat)
         let rests = try XCTUnwrap(groups.first { $0.volume.faceID == 0 }, "the Rests glass (face 0)")
         let topIDs = try faceIDs(sc, Self.topCam, device: device)
         let topBase = try render(sc, Self.topCam, [], device: device)
@@ -375,7 +420,7 @@ final class FlexibleRound6Tests: XCTestCase {
         XCTAssertGreaterThan(redFill, 1000, "control: a cull-none glass tints the top from below")
         // ★ RED CONTROL (reversed winding): the top's own glass, wound the other way, draws no fill from above
         m.rail = .group(1)
-        let topWall = try XCTUnwrap(FlexibleGroupWalls.items(model: m, views: [], mesh: part).first { $0.volume.faceID == 1 })
+        let topWall = try XCTUnwrap(FlexibleGroupWalls.items(model: m, views: [], mesh: part, heat: heat).first { $0.volume.faceID == 1 })
         let topOutline = try outlineMask([topWall], sc, Self.topCam, device: device)
         let topD = Self.delta(topBase, try render(sc, Self.topCam, [topWall], device: device))
         let topFill = topD.indices.filter { topIDs[$0] == 1 && !topOutline[$0] }.map { topD[$0] }
@@ -429,9 +474,9 @@ final class FlexibleRound6Tests: XCTestCase {
         note("Prisms view (5) \(Self.iso.name): \(vfill)")
         XCTAssertLessThanOrEqual(vfill.median, 25, "the Prisms view stays faint")
 
-        note(String(format: "alphas: glass %.2f / %.2f, open %.2f / %.2f · prism at rest %.2f / %.2f, selected in the view %.2f / %.2f · k %.1f",
-                            FlexibleGroupWalls.faceAlpha, FlexibleGroupWalls.edgeAlpha, FlexibleGroupWalls.openFaceAlpha,
-                            FlexibleGroupWalls.openEdgeAlpha, FlexibleDepthPrism.restFaceAlpha, FlexibleDepthPrism.restEdgeAlpha,
+        note("alphas: glass " + (walls + groups).map { String(format: "face %d %.2f / %.2f", $0.volume.faceID, $0.faceAlpha ?? -1, $0.edgeAlpha ?? -1) }
+            .joined(separator: ", ") + String(format: " · prism at rest %.2f / %.2f, selected in the view %.2f / %.2f · k %.1f",
+                            FlexibleDepthPrism.restFaceAlpha, FlexibleDepthPrism.restEdgeAlpha,
                             FlexibleDepthPrism.viewSelectedFaceAlpha, FlexibleDepthPrism.viewSelectedEdgeAlpha, k))
     }
 
@@ -529,6 +574,181 @@ final class FlexibleRound6Tests: XCTestCase {
     func testTheStampTurnRowSaysItTurnsTheStamp() {
         XCTAssertEqual(FlexibleRowCopy.stampTurnRow, "Stamp turn")
         XCTAssertLessThanOrEqual(FlexibleRowCopy.stampTurnRow.count, FlexibleRowCopy.maxChars)
+    }
+
+    // MARK: - R6 REVIEW (the verifier's findings of 2026-10-08, confirmed on his pad)
+
+    /// ★ EACH GROUP'S GLASS READS AS ITS COLOUR OVER THE HEAT (the verifier: "Group glass shows no group colour on
+    /// heat-coloured faces; the Groups view looks unchanged" — at one alpha for every colour, his teal Group 3 over the
+    /// green heat moved ΔE 3.0, his green Group 1 over the blue top 8.5). His pad, the page's own route (its composed
+    /// tints → `heatSamples` → the glass), his img2 and img3 views and the back-right one: every member that faces the
+    /// camera moves ΔE76 ≥ 10 toward its OWN group's colour (median), and more toward it than toward any other group
+    /// shown; and only slightly (median ≤ 32, alpha ≤ the cap: the heat keeps ≥ 55 % of itself).
+    func testEachGroupsGlassReadsAsItsColourOverTheHeat() async throws {
+        let device = try XCTUnwrap(MTLCreateSystemDefaultDevice())
+        let r = try FlexiblePressFixtures.a1Project(3, self)
+        let m = try await FlexibleHisProject.openedModel(r.project, test: self, timeout: 120)
+        try await FlexibleSquishFixture.settle(m, "A1_0003")
+        try await FlexibleHisProject.waitFor(60, "the maps") { m.loadedKeys.allSatisfy { m.liveS[$0] != nil } }
+        let part = try XCTUnwrap(r.project.viewerMesh)
+        let settle = r.project.force.settleRotation ?? simd_quatf(from: SIMD3<Float>(0, 0, -1), to: SIMD3<Float>(0, -1, 0))
+        let o = try XCTUnwrap(FlexiblePageChannels.overlay(model: m))
+        let c = FlexibleStagePage.composeTints(model: m, overlay: o)
+        var cache: (key: String, dents: [Float])?
+        let sq = FlexibleSettingsSquish.shown(model: m, overlay: o, channels: c, feCache: &cache)
+        let sc = Scene(mesh: o.mesh, tints: c.tints, dents: sq.dents, scale: Float(sq.exaggeration), settle: settle)
+        let heat = FlexibleGroupWalls.heatSamples(tints: c.tints, overlay: o, model: m)
+        func note(_ l: String) { print("FLEX-R6R-1 " + l) }
+        note("heat samples per region: " + heat.keys.sorted().map { "\($0): \(heat[$0]!.count)" }.joined(separator: ", "))
+        let cams = [Self.iso, Self.topCam, Cam(name: "back-right", azimuth: 3 * .pi / 4, elevation: .pi / 6, zoom: 1)]
+        let states: [(String, FlexibleRailTab, FlexibleStageViews)] = [
+            ("Group 1 tab", .group(1), []), ("Group 2 tab", .group(2), []), ("Group 3 tab", .group(3), []),
+            ("Groups view", .model, [.groups]), ("Groups view, Group 2 open", .group(2), [.groups])]
+        var checked = 0
+        for cam in cams {
+            let base = try render(sc, cam, [], device: device)
+            let ids = try faceIDs(sc, cam, device: device)
+            let proj = CameraProjection(viewProjection: try renderer(sc, cam, device: device).clipFromModel(aspect: 1),
+                                        viewportSize: CGSize(width: Self.size, height: Self.size))
+            for (name, rail, views) in states {
+                m.selectedRegion = nil
+                m.rail = rail
+                let walls = FlexibleGroupWalls.items(model: m, views: views, mesh: part, heat: heat)
+                for w in walls {
+                    let open = views.contains(.groups) && FlexibleGroupWalls.shown(model: m, views: views).contains { $0.open && $0.regions.contains(w.volume.faceID) }
+                    XCTAssertLessThanOrEqual(try XCTUnwrap(w.faceAlpha), open ? FlexibleGroupWalls.maxOpenAlpha : FlexibleGroupWalls.maxAlpha,
+                                             "\(name): face \(w.volume.faceID)'s glass lets the heat read through")
+                }
+                let lit = try render(sc, cam, walls, device: device)
+                let outline = try outlineMask(walls, sc, cam, device: device)
+                let tints = Set(walls.compactMap(\.tint).map { SIMD3<Double>($0) })
+                for w in walls {
+                    guard case .shell(let sh) = w.volume.shape, let cn = FlexibleGroupWalls.centroid(sh), let p = proj.project(cn.point),
+                          let ray = proj.ray(throughViewPoint: p), simd_dot(ray.dir, cn.normal) < -0.3 else { continue }
+                    let px = ids.indices.filter { ids[$0] == UInt32(w.volume.faceID) && !outline[$0] }
+                    guard px.count >= 300, let tint = w.tint else { continue }
+                    let t = Tinting(base: base, lit: lit, pixels: px, tint: tint)
+                    note(String(format: "%@ · %@ · face %d (α %.2f): %@", cam.name, name, w.volume.faceID, w.faceAlpha ?? -1, t.description))
+                    XCTAssertGreaterThanOrEqual(t.medianDE, 10, "\(cam.name) · \(name) · face \(w.volume.faceID): the glass reads as its colour")
+                    XCTAssertLessThanOrEqual(t.medianDE, 32, "\(cam.name) · \(name) · face \(w.volume.faceID): …slightly")
+                    XCTAssertGreaterThanOrEqual(t.medianCos, 0.8, "\(cam.name) · \(name) · face \(w.volume.faceID): toward its own colour")
+                    // told apart: the mean change points at its own colour more than at any other shown group's
+                    var shift = SIMD3<Double>.zero, at = SIMD3<Double>.zero
+                    for i in px { let a = Self.lab(base, i); shift += Self.lab(lit, i) - a; at += a }
+                    shift /= Double(px.count); at /= Double(px.count)
+                    func cosTo(_ c: SIMD3<Double>) -> Double { let d = Self.lab(rgb: c) - at; return simd_dot(shift, d) / (simd_length(shift) * simd_length(d) + 1e-9) }
+                    let own = cosTo(SIMD3<Double>(tint))
+                    for other in tints where other != SIMD3<Double>(tint) {
+                        XCTAssertGreaterThan(own, cosTo(other), "\(cam.name) · \(name) · face \(w.volume.faceID): told apart from \(other)")
+                    }
+                    checked += 1
+                }
+            }
+        }
+        m.rail = .group(2)
+        XCTAssertGreaterThanOrEqual(checked, 20, "every front-facing member at every camera was measured")
+        note("\(checked) member renders measured")
+    }
+
+    /// ★ A FAINT PRISM'S SIDE EDGES STAND ONLY WHERE ITS OUTLINE TURNS (the verifier: "faint prisms draw an edge at every
+    /// stamp-contour vertex, so they look busy" — a vertical barcode). A 30 mm square on a 4 × 4 grid (12 boundary
+    /// points, 4 corners) and a 64-sided disc (every turn 5.6°); the pass reads the rule for its FAINT items only.
+    func testAFaintPrismsSideEdgesStandOnlyWhereItsOutlineTurns() throws {
+        // the square: a 4 × 4 grid of points, two triangles per cell
+        var base: [SIMD3<Float>] = [], idx: [UInt32] = []
+        for j in 0..<4 { for i in 0..<4 { base.append(SIMD3(Float(i) * 10, Float(j) * 10, 0)) } }
+        for j in 0..<3 { for i in 0..<3 {
+            let a = UInt32(j * 4 + i), b = a + 1, c = a + 4, d = a + 5
+            idx += [a, b, d, a, d, c]
+        } }
+        let square = FaceOffsetShell(base: base, offset: base.map { $0 - SIMD3(0, 0, 5) }, indices: idx, reachedDepthMM: 5)
+        let corners: Set<UInt32> = [0, 3, 12, 15]
+        let sq = FlexibleFaintEdges.sideVertices(square)
+        XCTAssertEqual(sq, corners, "the square: its four corners only (\(sq.sorted()))")
+        // the disc: a centre fan over 64 rim points
+        var disc: [SIMD3<Float>] = [.zero], di: [UInt32] = []
+        for i in 0..<64 { let t = Float(i) / 64 * 2 * .pi; disc.append(SIMD3(cos(t), sin(t), 0) * 12) }
+        for i in 0..<64 { di += [0, UInt32(1 + i), UInt32(1 + (i + 1) % 64)] }
+        let round = FaceOffsetShell(base: disc, offset: disc.map { $0 - SIMD3(0, 0, 5) }, indices: di, reachedDepthMM: 5)
+        let rs = FlexibleFaintEdges.sideVertices(round)
+        XCTAssertTrue(rs.isEmpty, "the disc: no side edge (every turn 5.6°), \(rs.count) drawn")
+        // a coarse hexagon turns 60° at every corner: all six stand
+        var hex: [SIMD3<Float>] = [.zero], hi: [UInt32] = []
+        for i in 0..<6 { let t = Float(i) / 6 * 2 * .pi; hex.append(SIMD3(cos(t), sin(t), 0) * 12) }
+        for i in 0..<6 { hi += [0, UInt32(1 + i), UInt32(1 + (i + 1) % 6)] }
+        let h = FlexibleFaintEdges.sideVertices(FaceOffsetShell(base: hex, offset: hex.map { $0 - SIMD3(0, 0, 5) }, indices: hi, reachedDepthMM: 5))
+        XCTAssertEqual(h, Set((1...6).map(UInt32.init)), "the hexagon: every corner")
+        // the pass: a FAINT shell's side edge only where the rule says; a nil-alpha one keeps every one (R6-1d's hash)
+        let pass = try FlexibleSource.code("MetalMeshView.swift")
+        XCTAssertTrue(pass.contains("let sides = target == 1 ? FlexibleFaintEdges.sideVertices(s) : nil"), "the pass reads the rule for faint items")
+        XCTAssertTrue(pass.contains("if sides?.contains(a) ?? true { seg(s.base[ia], s.offset[ia], ecol) }"), "…at each side edge")
+        print("FLEX-R6R-5 square \(sq.sorted()) · disc \(rs.count) · hexagon \(h.sorted())")
+    }
+
+    /// ★ THE (i) TEXTS SAY WHAT ROUND 6 DRAWS (the verifier: the Colour (i) still said the faces "are framed in it",
+    /// the Deepest (i) that the prism shows only "while you drag").
+    func testTheColourAndDeepestInfoSayWhatRoundSixDraws() {
+        let colour = FlexibleRowCopy.Info.colour, deepest = FlexibleRowCopy.Info.deepest
+        XCTAssertFalse(colour.contains("framed"), colour)
+        XCTAssertTrue(colour.contains("glass") && colour.contains("Groups view"), colour)
+        XCTAssertFalse(colour.contains("on the tab and on the faces"), colour)
+        XCTAssertFalse(deepest.contains("while you drag, a glass prism shows"), deepest)
+        XCTAssertTrue(deepest.contains("faint") && deepest.contains("Prisms view"), deepest)
+    }
+
+    /// ★ THE LEGEND KEEPS CLEAR OF THE VIEW BUTTONS (the verifier: nothing exercised it — the centred legend sat
+    /// ~58 pt below them at every size). The page's own list (`legendKeepOut`), a legend tall enough that, centred, it
+    /// would cover the buttons, at 11" and 13" both ways; without the buttons in the list it covers them.
+    func testTheLegendKeepsClearOfTheViewButtons() throws {
+        var lines: [String] = []
+        for (tag, size) in FlexibleGroupPaletteHostedTests.sizes {
+            let buttons = FlexibleStageViews.frame(viewport: size)
+            let notice = FlexibleLegendPlacement.noticeBand(viewport: size, exitRow: CGRect(x: PageChrome.edge, y: PageChrome.edge, width: 226, height: 44))
+            let keep = FlexibleStagePage.legendKeepOut(viewport: size, notice: notice)
+            XCTAssertTrue(keep.contains(buttons), "\(tag): the view buttons are in the legend's keep-out")
+            XCTAssertTrue(keep.contains(FlexibleLegendPlacement.gizmoFrame(viewport: size)), "\(tag): the gizmo")
+            XCTAssertTrue(keep.contains(notice), "\(tag): the top line")
+            let legend = CGSize(width: 268, height: size.height - 2 * (buttons.maxY - 12))
+            let centred = CGRect(x: size.width - PageChrome.edge - legend.width, y: (size.height - legend.height) / 2,
+                                 width: legend.width, height: legend.height)
+            XCTAssertTrue(centred.intersects(buttons), "\(tag): the probe legend, centred, would cover the buttons")
+            let placed = FlexibleLegendPlacement.legend(size: legend, viewport: size, keepOut: keep)
+            XCTAssertNotNil(placed, "\(tag): placed")
+            XCTAssertFalse(placed?.intersects(buttons) ?? true, "\(tag): clear of the buttons (\(String(describing: placed)) vs \(buttons))")
+            // ★ RED CONTROL: the buttons left out of the list
+            let red = FlexibleLegendPlacement.legend(size: legend, viewport: size, keepOut: keep.filter { $0 != buttons })
+            XCTAssertTrue(red?.intersects(buttons) ?? false, "\(tag): control — without the buttons the legend covers them")
+            lines.append("\(tag) buttons \(buttons) · placed \(placed.map { "\($0)" } ?? "—") · control \(red.map { "\($0)" } ?? "—")")
+        }
+        let page = try FlexibleSource.code("FlexibleStagePage.swift")
+        XCTAssertTrue(page.contains("keepOut: Self.legendKeepOut(viewport: size, notice: noticeBand(size)))"), "the page places its legend by this list")
+        print("FLEX-R6R-3\n  " + lines.joined(separator: "\n  "))
+    }
+
+    /// ★ A GLASS'S OUTLINE IS ONE CLOSED LOOP PER BOUNDARY (the dashed line a member that faces away is drawn with):
+    /// the cube top's x ≥ 20 sector (4 corners), the rounded slab's top (68 points).
+    func testAGlassOutlineIsOneClosedLoopPerBoundary() throws {
+        let cube = try XCTUnwrap(try FlexiblePressFixtures.cube60Project().viewerMesh)
+        let top = try XCTUnwrap(Self.faceNormals(cube).first { $0.value.z > 0.99 }?.key)
+        var frm = FaceRegionModel()
+        let whole = frm.union(faces: [FaceID(top)], named: "top")
+        let kids = frm.splitManual(whole, point: SIMD3(20, 30, 60), normal: SIMD3(1, 0, 0))
+        let regions = FlexibleRegions(model: frm, mesh: cube)
+        let sector = FlexibleRegions.wireID(try XCTUnwrap(regions.sectors.first { $0.id == kids.first }))
+        let s = try XCTUnwrap(FlexibleGroupWalls.shell(region: sector, regions: regions, mesh: cube))
+        let loops = FlexibleGroupWalls.loops(s)
+        XCTAssertEqual(loops.count, 1, "one boundary, one loop")
+        let loop = try XCTUnwrap(loops.first)
+        let length = loop.indices.reduce(0.0) { $0 + Double(simd_distance(loop[$1], loop[($1 + 1) % loop.count])) }
+        XCTAssertEqual(length, 2 * (40 + 60), accuracy: 1e-3, "the loop runs the whole outline, closed")
+        for corner in [SIMD3<Float>(20, 0, 60), SIMD3(60, 0, 60), SIMD3(60, 60, 60), SIMD3(20, 60, 60)] {
+            XCTAssertTrue(loop.contains { simd_distance(SIMD3($0.x, $0.y, 60), corner) < 1e-3 }, "corner \(corner)")
+        }
+        let slab = try XCTUnwrap(try FlexiblePressFixtures.roundedSlabProject().viewerMesh)
+        let slabTop = try XCTUnwrap(Self.faceNormals(slab).first { $0.value.z > 0.99 }?.key)
+        let sl = FlexibleGroupWalls.loops(try XCTUnwrap(FlexibleGroupWalls.shell(region: slabTop, regions: FlexibleRegions(model: FaceRegionModel(), mesh: slab), mesh: slab)))
+        XCTAssertEqual(sl.map(\.count), [68], "the slab: one loop of its 68 outline points")
+        print("FLEX-R6R-6a sector loop \(loop.count) points, \(length) mm · slab \(sl.map(\.count))")
     }
 }
 #endif

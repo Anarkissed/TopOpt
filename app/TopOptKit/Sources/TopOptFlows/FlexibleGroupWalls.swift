@@ -39,6 +39,9 @@ enum FlexibleGroupWalls {
     static let edgeAlpha: Float = 0.40
     static let openFaceAlpha: Float = 0.13
     static let openEdgeAlpha: Float = 0.60
+    /// ★ R6 REVIEW: the most a glass may hide of the heat under it (a tab's; the open group's in the Groups view).
+    static let maxAlpha: Float = 0.35
+    static let maxOpenAlpha: Float = 0.45
     /// The welding key (mm).
     static let weldMM = 1e-4
     /// The renderer's front face, seen from OUTSIDE the part (Metal's default winding, read in its y-up clip
@@ -144,6 +147,18 @@ enum FlexibleGroupWalls {
         return (SIMD3<Float>(acc / area), SIMD3<Float>(out))
     }
 
+    /// A shown member's outline (model space), its centroid and outward normal (stub).
+    struct Outline: Equatable {
+        let key: String
+        let colour: RGBA
+        let region: Int
+        let loops: [[SIMD3<Float>]]
+        let point: SIMD3<Float>
+        let normal: SIMD3<Float>
+    }
+    /// A shell's boundary chained into closed loops (stub).
+    static func loops(_ s: FaceOffsetShell) -> [[SIMD3<Float>]] { [] }
+
     // MARK: - what the page shows (the model's state)
 
     /// The groups walled now: the OPEN group (its rail tab; on [Model] the selected pressed face's group;
@@ -172,10 +187,19 @@ enum FlexibleGroupWalls {
         return out
     }
 
+    /// ★ R6 REVIEW (stub): a member's glass alphas over its heat (today's constants).
+    nonisolated static func alphas(tint: SIMD3<Float>, heat: [SIMD3<Float>], open: Bool) -> (face: Float, edge: Float) {
+        open ? (openFaceAlpha, openEdgeAlpha) : (faceAlpha, edgeAlpha)
+    }
+    /// ★ R6 REVIEW (stub): each pressed region's colours on the page (its map), sampled.
+    @MainActor
+    static func heatSamples(tints: [Float]?, overlay: FlexibleOverlayMesh?, model m: FlexibleStageModel) -> [Int: [SIMD3<Float>]] { [:] }
+
     /// Each shown member's glass for MetalMeshView's clearance pass (GLASS: alphas set, surface only).
     /// Cached: the shells per (part, sectors, region); the list per (shown, views).
     @MainActor
-    static func items(model m: FlexibleStageModel, views: FlexibleStageViews, mesh: ViewerMesh?) -> [ClearanceRenderItem] {
+    static func items(model m: FlexibleStageModel, views: FlexibleStageViews, mesh: ViewerMesh?,
+                      heat: [Int: [SIMD3<Float>]] = [:]) -> [ClearanceRenderItem] {
         guard let mesh else { return [] }
         let shown = self.shown(model: m, views: views)
         guard !shown.isEmpty else { return [] }
@@ -189,9 +213,9 @@ enum FlexibleGroupWalls {
             let tint = SIMD3<Float>(Float(g.colour.r), Float(g.colour.g), Float(g.colour.b))
             for r in g.regions {
                 guard let s = cachedShell(r, scope: scope, regions: regions, mesh: mesh) else { continue }
+                let a = alphas(tint: tint, heat: heat[r] ?? [], open: bright)
                 out.append(ClearanceRenderItem(volume: .shell(faceID: r, shell: s), selected: false, tint: tint,
-                                               faceAlpha: bright ? openFaceAlpha : faceAlpha,
-                                               edgeAlpha: bright ? openEdgeAlpha : edgeAlpha, surfaceOnly: true))
+                                               faceAlpha: a.face, edgeAlpha: a.edge, surfaceOnly: true))
             }
         }
         Cache.items = (key, out)
@@ -219,6 +243,10 @@ enum FlexibleGroupWalls {
         }
         return out
     }
+
+    /// Each shown member's outline (stub).
+    @MainActor
+    static func outlines(model m: FlexibleStageModel, views: FlexibleStageViews, mesh: ViewerMesh?) -> [Outline] { [] }
 
     // MARK: - the cache (main thread)
 

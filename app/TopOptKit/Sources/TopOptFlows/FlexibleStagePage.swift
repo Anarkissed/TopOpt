@@ -100,6 +100,8 @@ public struct FlexibleStagePage: View {
         let player = frames["playerCapsule"] != nil ? ["playerTopRow", "playerCapsule"] : ["player"]
         return (["panel", "legend", "viewButtons"] + player).compactMap { frames[$0]?.offsetBy(dx: -st.minX, dy: -st.minY) }   // ★ R6: the view buttons
     }
+    /// ★ R6 REVIEW (stub): what the legend keeps clear of.
+    static func legendKeepOut(viewport: CGSize, notice: CGRect) -> [CGRect] { [] }
     private let ticker = Timer.publish(every: 1.0 / 30.0, on: .main, in: .common).autoconnect()
     static let squishPeriodS = 2.4
 

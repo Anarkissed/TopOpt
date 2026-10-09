@@ -8,6 +8,7 @@
 // Cached per model state: the page's body runs on every model change and every camera move.
 
 import Foundation
+import simd
 import TopOptKit
 
 @MainActor
@@ -15,16 +16,20 @@ enum FlexibleStageVolumes {
 
     private static var cache: (key: String, items: [ClearanceRenderItem])?
 
+    /// ★ R6 REVIEW (stub): the ONE k every prism-drawn thing on the page uses.
+    nonisolated static func prismK(_ dentExaggeration: Double) -> Double { dentExaggeration }
+
     /// The Settings page's clearance volumes: the prisms, then the glass. `k`: the page's exaggeration
     /// (1 while nothing is dented — the prism is then drawn at its true depth).
-    static func items(model: FlexibleStageModel, k: Double, part: ViewerMesh?) -> [ClearanceRenderItem] {
+    static func items(model: FlexibleStageModel, k: Double, part: ViewerMesh?,
+                      heat: [Int: [SIMD3<Float>]] = [:]) -> [ClearanceRenderItem] {
         let k = k > 0 ? k : 1
         let key = "\(k)|\(model.frozenExaggeration ?? -1)|\(model.views.rawValue)|\(model.selectedRegion ?? -1)|\(model.rail)|"
             + "\(model.settings.hashValue)|\(model.stacks.count)|\(model.geometry.count)|\(model.stampGrids.count)|"
             + "\(part?.signature.contentHash ?? 0)|\(model.regions.key)"
         if let c = cache, c.key == key { return c.items }
         let items = FlexibleDepthPrism.renderItems(model: model, k: k, views: model.views)
-            + FlexibleGroupWalls.items(model: model, views: model.views, mesh: part)
+            + FlexibleGroupWalls.items(model: model, views: model.views, mesh: part, heat: heat)
         cache = (key, items)
         return items
     }

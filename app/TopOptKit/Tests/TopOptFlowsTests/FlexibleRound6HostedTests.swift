@@ -11,7 +11,10 @@
 //   R6-3c  the view buttons sit under the gizmo, clear of everything, at 11" and 13", both ways;
 //   R6-3d  ONE legend card carries the view rows, one line each;
 //   R6-3f  the main page's prisms (hook H15's list): the active group's, or every one in the Prisms view;
-//   R6-3g / R6-3h  the main page's [Prisms] button — wait on the S1 base (skipped, printed).
+//   R6-3g  the main page's [Prisms] button — waits on the S1 base (skipped, printed); R6-3h (togglePrisms) runs now.
+// ★ R6 REVIEW (the verifier's findings, 2026-10-08): R6R-0 the page's one list carries the glass AND the prisms; R6R-4
+//   with no dent the chip stands on the drawn prism's floor (one k); R6R-2 the tags, discs and dashed outlines are on the
+//   hosted page; R6R-6 a member that faces away is drawn dashed ([Rests] from above).
 // FLEX_R6_EVIDENCE_DIR=<dir> also writes the hosted pages.
 #if canImport(AppKit) && canImport(MetalKit)
 import XCTest
@@ -33,7 +36,7 @@ final class FlexibleRound6HostedTests: XCTestCase {
 
     // MARK: - hosting (FlexibleGroupPaletteHostedTests' own)
 
-    final class Frames { var all: [String: CGRect] = [:] }
+    final class Frames { var all: [String: CGRect] = [:]; var marks: [String: CGRect] = [:] }
     struct Host { let window: NSWindow; let view: NSView; let size: CGSize; let frames: Frames }
 
     static var dir: URL? { ProcessInfo.processInfo.environment["FLEX_R6_EVIDENCE_DIR"].map { URL(fileURLWithPath: $0, isDirectory: true) } }
@@ -55,7 +58,9 @@ final class FlexibleRound6HostedTests: XCTestCase {
 
     func host<V: View>(_ v: V, size: CGSize) -> Host {
         let frames = Frames()
-        let root = AnyView(v.onPreferenceChange(FlexibleKeepOutKey.self) { frames.all = $0 }.environment(\.colorScheme, .dark))
+        let root = AnyView(v.onPreferenceChange(FlexibleKeepOutKey.self) { frames.all = $0 }
+            .onPreferenceChange(FlexibleViewMarksKey.self) { frames.marks = $0 }   // ★ R6 REVIEW: what the views' layer drew
+            .environment(\.colorScheme, .dark))
         let hv = NSHostingView(rootView: root)
         hv.frame = CGRect(origin: .zero, size: size)
         _ = NSApplication.shared
@@ -238,12 +243,14 @@ final class FlexibleRound6HostedTests: XCTestCase {
         m.rail = .group(2)
         var w = walls()
         XCTAssertEqual(Set(w.keys), [4, 2], ".group(2): its members")
+        // ★ R6 REVIEW: a glass's alphas are its colour's over its own heat (FlexibleGroupWalls.alphas — no heat given here:
+        // the page's backdrop); measured on his pad by FlexibleRound6Tests (R6R-1)
+        let tab = FlexibleGroupWalls.alphas(tint: pink, heat: [], open: false), openTab = FlexibleGroupWalls.alphas(tint: pink, heat: [], open: true)
         for it in w.values {
-            XCTAssertEqual(it.tint, pink); XCTAssertEqual(it.faceAlpha, FlexibleGroupWalls.faceAlpha); XCTAssertEqual(it.edgeAlpha, FlexibleGroupWalls.edgeAlpha)
+            XCTAssertEqual(it.tint, pink); XCTAssertEqual(it.faceAlpha, tab.face); XCTAssertEqual(it.edgeAlpha, tab.edge)
             XCTAssertTrue(it.surfaceOnly, "a glass: its base only")
         }
-        // (the alphas themselves are R6-1d's measured values on his pad: FlexibleRound6Tests)
-        XCTAssertLessThan(FlexibleGroupWalls.faceAlpha, FlexibleGroupWalls.openFaceAlpha, "the open group brighter in the Groups view")
+        XCTAssertLessThan(tab.face, openTab.face, "the open group brighter in the Groups view")
         lines.append(".group(2) → \(w.keys.sorted())")
         m.rail = .group(3)
         w = walls()
@@ -270,10 +277,11 @@ final class FlexibleRound6HostedTests: XCTestCase {
         XCTAssertEqual(Set(w.keys), [1, 4, 2, 3, 5, 0], "the Groups view: every group and Rests")
         for (f, it) in w {
             let open = [4, 2].contains(f)
-            XCTAssertEqual(it.faceAlpha, open ? FlexibleGroupWalls.openFaceAlpha : FlexibleGroupWalls.faceAlpha, "face \(f)")
-            XCTAssertEqual(it.edgeAlpha, open ? FlexibleGroupWalls.openEdgeAlpha : FlexibleGroupWalls.edgeAlpha, "face \(f)")
+            let want = FlexibleGroupWalls.alphas(tint: try XCTUnwrap(it.tint), heat: [], open: open)
+            XCTAssertEqual(it.faceAlpha, want.face, "face \(f)")
+            XCTAssertEqual(it.edgeAlpha, want.edge, "face \(f)")
         }
-        lines.append("the Groups view → \(w.keys.sorted()), open {4, 2} at \(FlexibleGroupWalls.openFaceAlpha)/\(FlexibleGroupWalls.openEdgeAlpha)")
+        lines.append("the Groups view → \(w.keys.sorted()), open {4, 2} at \(openTab.face)/\(openTab.edge)")
         // the page's composed tints: no frame, no gap, no group colour — with a map and without one
         let ink = Self.groupInk(m)
         let o = try XCTUnwrap(FlexiblePageChannels.overlay(model: m))
@@ -397,12 +405,12 @@ final class FlexibleRound6HostedTests: XCTestCase {
     // MARK: - R6-3b
 
     /// A projection of `mesh` at his img2's camera (the renderer's own clip-from-model).
-    func projection(_ project: ProjectModel, size: CGFloat = 900) throws -> CameraProjection {
+    func projection(_ project: ProjectModel, size: CGFloat = 900, elevation: Float = .pi / 6, azimuth: Float = .pi / 4) throws -> CameraProjection {
         let device = try XCTUnwrap(MTLCreateSystemDefaultDevice())
         let mr = try XCTUnwrap(MeshRenderer(device: device, sampleCount: 1))
         mr.setMesh(try XCTUnwrap(project.viewerMesh))
         mr.beginSettle(to: project.force.settleRotation ?? simd_quatf(from: SIMD3<Float>(0, 0, -1), to: SIMD3<Float>(0, -1, 0)), duration: 0)
-        mr.camera.setOrientation(azimuth: .pi / 4, elevation: .pi / 6)
+        mr.camera.setOrientation(azimuth: azimuth, elevation: elevation)
         return CameraProjection(viewProjection: mr.clipFromModel(aspect: 1), viewportSize: CGSize(width: size, height: size))
     }
 
@@ -565,14 +573,164 @@ final class FlexibleRound6HostedTests: XCTestCase {
         }
     }
 
+    /// ★ R6 REVIEW: un-gated — `togglePrisms` is on this base (only its button waits for S1), so it is tested now.
     func testPrismsTurnsTheLatticeViewOnItself() throws {
-        try s1Base()
         let stage = FlexibleMainStage()
         let (_, m) = try his(stage)
         stage.latticeOn = false
         stage.togglePrisms()
         XCTAssertTrue(m.views.contains(.prisms))
         XCTAssertTrue(stage.latticeOn, "[Prisms] turns the Lattice view (the X-ray) on itself")
+        // off again: the Prisms view goes, the Lattice view stays as he left it
+        stage.togglePrisms()
+        XCTAssertFalse(m.views.contains(.prisms))
+        XCTAssertTrue(stage.latticeOn)
+    }
+
+    // MARK: - R6 REVIEW (the verifier's findings of 2026-10-08)
+
+    /// ★ THE PAGE'S ONE LIST CARRIES THE GLASS AND THE PRISMS (the verifier: dropping the walls from
+    /// `FlexibleStageVolumes.items` left every test green — item 1's whole Settings deliverable could vanish).
+    func testThePagesOneListCarriesTheGlassAndThePrisms() throws {
+        let (r, m) = try his()
+        let part = try XCTUnwrap(r.project.viewerMesh)
+        let k = 3.0
+        func split(_ items: [ClearanceRenderItem]) -> (glass: [Int], prisms: [Int]) {
+            (items.filter(\.surfaceOnly).map(\.volume.faceID), items.filter { !$0.surfaceOnly }.map(\.volume.faceID))
+        }
+        m.rail = .group(2)
+        m.selectedRegion = 2
+        var lines: [String] = []
+        for (views, glass, prisms) in [(FlexibleStageViews(), Set([4, 2]), [2]), ([.groups], Set([1, 4, 2, 3, 5, 0]), [2]),
+                                       ([.prisms, .groups], Set([1, 4, 2, 3, 5, 0]), [1, 4, 2, 3, 5]), ([.prisms], Set([4, 2]), [1, 4, 2, 3, 5])] {
+            m.views = views
+            let items = FlexibleStageVolumes.items(model: m, k: k, part: part)
+            let s = split(items)
+            XCTAssertEqual(Set(s.glass), glass, "views \(views.rawValue): the glass")
+            XCTAssertEqual(s.glass.count, glass.count, "views \(views.rawValue): one glass per member")
+            XCTAssertEqual(Set(s.prisms), Set(prisms), "views \(views.rawValue): the prisms")
+            XCTAssertEqual(items, FlexibleDepthPrism.renderItems(model: m, k: k, views: views)
+                           + FlexibleGroupWalls.items(model: m, views: views, mesh: part), "views \(views.rawValue): the prisms, then the glass")
+            lines.append("views \(views.rawValue) → glass \(s.glass) · prisms \(s.prisms)")
+        }
+        m.views = []
+        print("FLEX-R6R-0 " + lines.joined(separator: " · "))
+    }
+
+    /// ★ WITH NO DENT THE CHIP STANDS ON THE DRAWN PRISM'S FLOOR (the verifier: the page's k is 0 while no dent is
+    /// shown; the prism and the tags drew at k 1, the chip and the stamp handle at 0 — the chip sat ON the face while
+    /// the prism ended deepest × 1 inside the part: his img3 again). One k for all of them (`prismK`).
+    func testWithNoDentTheChipStandsOnTheDrawnPrismsFloor() throws {
+        let (r, m) = try his()
+        let part = try XCTUnwrap(r.project.viewerMesh)
+        m.rail = .group(2)
+        m.selectedRegion = 2
+        XCTAssertEqual(FlexibleStageVolumes.prismK(0), 1, "no dent: the prism's true depth")
+        XCTAssertEqual(FlexibleStageVolumes.prismK(4.5), 4.5, "a dent: its exaggeration")
+        let k = FlexibleStageVolumes.prismK(0)
+        let prism = try XCTUnwrap(FlexibleStageVolumes.items(model: m, k: 0, part: part).first { !$0.surfaceOnly && $0.volume.faceID == 2 })
+        let floor = try XCTUnwrap(FlexibleDepthPrism.handle(prism.volume)).anchor
+        let chip = try XCTUnwrap(FlexibleDepthChips.handle(model: m, k: k)).anchor
+        XCTAssertLessThan(simd_distance(chip, floor), 1e-3, "the chip on the drawn prism's floor")
+        // ★ RED CONTROL: the page's raw 0 (before) — the chip off the floor
+        let raw = FlexibleDepthChips.handle(model: m, k: 0)?.anchor
+        let off = raw.map { simd_distance($0, floor) } ?? .infinity
+        XCTAssertGreaterThan(off, 1, "control: at k 0 the chip is \(off) mm off the floor")
+        let page = try FlexibleSource.code("FlexibleStagePage.swift")
+        XCTAssertTrue(page.contains("FlexibleStageOverlays(model: model, proj: proj, exaggeration: FlexibleStageVolumes.prismK(dentExaggeration),"),
+                      "the chips, the stamp handle and the tags read the same k")
+        XCTAssertTrue(page.contains("clearanceVolumes: FlexibleStageVolumes.items(model: model, k: FlexibleStageVolumes.prismK(dentExaggeration),"),
+                      "…as the prisms")
+        XCTAssertTrue(page.contains("k: Int(FlexibleStageVolumes.prismK(dentExaggeration).rounded())"), "…and the legend's ×k")
+        print(String(format: "FLEX-R6R-4 chip → floor %.4f mm · control (k 0) %.2f mm", simd_distance(chip, floor), off))
+    }
+
+    /// ★ THE TAGS, THE DISCS AND THE HIDDEN OUTLINES ARE ON THE PAGE (the verifier: unmounting the layer left every
+    /// test green — they were tested as pure functions only). Hosted, his pad: both views on → the mm tags and the
+    /// dashed outline of every shown member that faces away; [Rests] alone → the bottom's dashed outline (it faces
+    /// away from every camera above it: its glass is culled, his tab looked unchanged); the nine groups → the discs.
+    /// The [Groups] button's glyph is his groups' own colours.
+    func testTheTagsDiscsAndHiddenOutlinesAreOnThePage() throws {
+        let (r, m) = try his()
+        XCTAssertEqual(FlexibleStageViews.glyphColours(model: m).map { [$0.r, $0.g, $0.b] },
+                       m.squeezeGroups.prefix(3).map { m.groupColour($0) }.map { [$0.r, $0.g, $0.b] }, "the [Groups] glyph: his groups' colours")
+        XCTAssertEqual(FlexibleStageViews.buttons.first { $0.view == .prisms }?.icon, "arrow.down.to.line", "[Prisms]: down to a depth")
+        m.select(2)
+        m.views = [.prisms, .groups]
+        let size = Self.sizes[0].1
+        var h = host(FlexibleStagePage(project: r.project, model: m, onExit: {}), size: size)
+        pump(2.5)
+        let tags = h.frames.marks.keys.filter { $0.hasPrefix("tag-") }.sorted()
+        let hidden = h.frames.marks.keys.filter { $0.hasPrefix("hidden-") }.sorted()
+        XCTAssertFalse(tags.isEmpty, "the Prisms view's mm tags are on the page")
+        XCTAssertFalse(tags.contains("tag-2"), "the selected face shows its chip")
+        XCTAssertFalse(hidden.isEmpty, "the Groups view: the members that face away, dashed")
+        snapshot(h, "R6R_11l_views_marks.png")
+        // [Rests] alone: the bottom faces away
+        m.views = []
+        m.selectedRegion = nil
+        m.rail = .rests
+        pump(1.0)
+        let rests = h.frames.marks.keys.filter { $0.hasPrefix("hidden-") }.sorted()
+        XCTAssertEqual(rests, ["hidden-rests-0"], "[Rests]: the bottom's dashed outline")
+        let box = try XCTUnwrap(h.frames.marks["hidden-rests-0"])
+        XCTAssertGreaterThan(box.width * box.height, 100 * 100, "…round the whole bottom (\(box))")
+        snapshot(h, "R6R_11l_rests_tab.png")
+        m.rail = .group(2)
+        // the nine groups: the discs of the shared colour
+        let (pm, dir) = try FlexibleGroupPaletteHostedTests.prismProject()
+        addTeardownBlock { try? FileManager.default.removeItem(at: dir) }
+        let (s, _, _) = try FlexibleGroupPaletteHostedTests.nineGroups(pm)
+        pm.lattice.flexible = s
+        let nine = settledModel(pm)
+        nine.views = [.groups]
+        h = host(FlexibleStagePage(project: pm, model: nine, onExit: {}), size: size)
+        pump(2.5)
+        let discs = h.frames.marks.keys.filter { $0.hasPrefix("disc-") }.sorted()
+        XCTAssertFalse(discs.isEmpty, "the nine groups: the shared colour's discs are on the page")
+        snapshot(h, "R6R_11l_nine_groups_discs.png")
+        print("FLEX-R6R-2 tags \(tags) · hidden \(hidden) · [Rests] \(rests) \(box) · nine groups' discs \(discs)")
+    }
+
+    /// ★ A MEMBER THAT FACES AWAY IS DRAWN DASHED (the verifier: "the Rests tab, and Rests in the Groups view, show
+    /// nothing but a thin outline" — the glass culls a member facing away, so colours never mix through the X-ray, and
+    /// the renderer's 1 px line ran along the part's own edges). His img2 and img3 cameras.
+    func testAMemberThatFacesAwayIsDrawnDashed() throws {
+        let (r, m) = try his()
+        let iso = try projection(r.project)
+        let top = try projection(r.project, elevation: 1.1, azimuth: .pi / 5)
+        func hidden(_ p: CameraProjection) -> [Int: FlexibleStageViewTags.Hidden] {
+            Dictionary(FlexibleStageViewTags.hidden(model: m, projection: p).map { ($0.region, $0) }) { a, _ in a }
+        }
+        func length(_ h: FlexibleStageViewTags.Hidden) -> CGFloat {
+            h.paths.reduce(0) { acc, loop in
+                acc + loop.indices.reduce(0) { $0 + hypot(loop[$1].x - loop[($1 + 1) % loop.count].x, loop[$1].y - loop[($1 + 1) % loop.count].y) }
+            }
+        }
+        var lines: [String] = []
+        m.selectedRegion = nil
+        m.rail = .rests
+        for (name, p) in [("iso (img2)", iso), ("top (img3)", top)] {
+            let h = hidden(p)
+            XCTAssertEqual(Set(h.keys), [0], "\(name) · [Rests]: the bottom, dashed")
+            let rest = try XCTUnwrap(h[0])
+            XCTAssertEqual(rest.key, "rests")
+            XCTAssertEqual(rest.paths.count, 1, "one loop")
+            XCTAssertGreaterThan(length(rest), 600, "\(name): round the whole bottom (\(length(rest)) pt)")
+            lines.append("\(name) [Rests] → face 0, \(Int(length(rest))) pt")
+        }
+        m.rail = .group(2)
+        XCTAssertEqual(Set(hidden(iso).keys), [4], "iso · Group 2: face 4 faces away, face 2 does not")
+        m.rail = .group(1)
+        XCTAssertTrue(hidden(top).isEmpty, "top · Group 1: the top faces the camera")
+        m.rail = .model
+        m.views = [.groups]
+        let all = Set(hidden(iso).keys)
+        XCTAssertEqual(all, [4, 5, 0], "iso · the Groups view: the members that face away")
+        m.views = []
+        XCTAssertTrue(hidden(iso).isEmpty, "[Model], nothing selected: nothing shown")
+        lines.append("Group 2 iso → [4] · Groups view iso → \(all.sorted())")
+        print("FLEX-R6R-6 " + lines.joined(separator: " · "))
     }
 }
 #endif
