@@ -568,6 +568,18 @@ final class FlexibleRound6HostedTests: XCTestCase {
             XCTAssertTrue(keep.contains { $0.contains(row) }, "\(tag): the legends keep out of the four buttons")
             XCTAssertTrue(FlexibleMainPlayerSlot.keepOut(viewport: size).contains { $0.contains(row) }, "\(tag): the player too")
         }
+        // ★ S1b: THE NARROW PAD (iPad mini, 744 × 1133 portrait — FlexibleMainPageRound4VerifyTests' "mini"). Four in a row
+        // leave the "Lattice ready · Show" note 148 pt beside them, under its 180 (that test went red on the fourth button):
+        // there the four wrap two over two, and the note keeps its room on the row's line, clear of the left panel.
+        let mini = CGSize(width: 744, height: 1133)
+        let row = FlexibleMainViewToggles.rowFrame(viewport: mini), note = FlexibleMainViewToggles.noteFrame(viewport: mini)
+        XCTAssertEqual(FlexibleMainViewToggles.columns(viewport: mini), 2, "mini: two over two")
+        XCTAssertEqual(row.width, 2 * 40 + DS.Space.s, "mini: two 40 pt buttons across")
+        XCTAssertEqual(row.height, 2 * 40 + DS.Space.s, "mini: two lines")
+        XCTAssertGreaterThanOrEqual(note.width, FlexibleMainNote.minWidth, "mini: the note keeps its room")
+        XCTAssertFalse(note.intersects(FlexibleMainLegendLayout.leftStrip(viewport: mini)), "mini: clear of the left panel")
+        for (tag, size) in Self.sizes { XCTAssertEqual(FlexibleMainViewToggles.columns(viewport: size), 4, "\(tag): one line of four") }
+        print("FLEX-R6-3g mini row \(row.integral) · note \(note.integral)")
     }
 
     /// ★ R6 REVIEW: un-gated — `togglePrisms` is on this base (only its button waits for S1), so it is tested now.

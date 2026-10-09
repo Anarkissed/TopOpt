@@ -186,6 +186,8 @@ public struct FlexibleMainViewToggles: View {
         let w = CGFloat(buttons) * 40 + CGFloat(buttons - 1) * DS.Space.s
         return CGRect(x: viewport.width - PageChrome.edge - w, y: PageChrome.belowGizmo, width: w, height: 40)
     }
+    /// ★ S1b: the buttons per line (STUB in the tests-first commit: always one line).
+    static func columns(viewport: CGSize) -> Int { buttons }
 }
 
 /// The main page's squish player: bottom-centre, above the bottom bar, clear of the view

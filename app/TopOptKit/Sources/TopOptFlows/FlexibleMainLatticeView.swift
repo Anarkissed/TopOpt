@@ -95,6 +95,8 @@ public final class FlexibleMainNote: ObservableObject {
     /// [Show]'s target), at most 280 wide beside them (narrower where the left panel is near).
     public static let height: CGFloat = 40
     public static let width: CGFloat = 280
+    /// ★ S1b: the narrowest band the note keeps ("Lattice ready · Show", whole) — FlexibleMainPageRound4VerifyTests' 180.
+    public static let minWidth: CGFloat = 180
 }
 
 extension FlexibleMainStage {
