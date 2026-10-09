@@ -1,0 +1,18 @@
+=== ARM 4: IS THE ANSWER CONVERGED IN THE PIECE? plan 2000, both rules, piece x1.0 and x0.5
+=== (weld_scale 0.5 halves the piece => finer mesh. If margin keeps moving, neither rule's
+===  margin is the answer and the piece is a free parameter in the certificate.)
+--- weld_scale 1.0, load 10.42 10.43 9.69
+# stepped beam cost probe. Shared box: wall times are UPPER BOUNDS,
+# not benchmarks; load1 is on every line. start load 10.42
+plan~2000[global] GEOM | cells PLACED 2000 | pocket z 5.1..117.3 mm | hex voxels 44448 (slabs + 2-voxel walls) | weld x1.00 piece 0.3796 mm | segments 48000 -> 286488 | welded 90307 | T-ends 227960 | floating 0 | subdiv 0.00 s | network 0.30 s | peak RSS 107 MB | load 10.42
+plan~2000[global] CERT | verdict CERTIFIED | margin 165.7 | p99 0.3319 MPa | max 1.714 | stat p99 | members 286488 | dropped 0 (0.000 of length) | load_dropped 0.0000 | zero_stress 0.0000 | cert_seconds 50.1 | wall 50.1 s | cert_peak_RSS 7386 MB | peak RSS 7386 MB | load 7.12
+plan~2000[per-strut] GEOM | cells PLACED 2000 | pocket z 5.1..117.3 mm | hex voxels 44448 (slabs + 2-voxel walls) | weld x1.00 piece 0.3796 mm | segments 48000 -> 190776 | welded 57779 | T-ends 161688 | floating 0 | subdiv 0.00 s | network 0.20 s | peak RSS 7386 MB | load 7.12
+plan~2000[per-strut] CERT | verdict CERTIFIED | margin 138.9 | p99 0.3959 MPa | max 4.861 | stat p99 | members 190776 | dropped 0 (0.000 of length) | load_dropped 0.0000 | zero_stress 0.0000 | cert_seconds 47.2 | wall 47.2 s | cert_peak_RSS 7945 MB | peak RSS 7386 MB | load 7.24
+--- weld_scale 0.5, load 7.24 9.20 9.28
+# stepped beam cost probe. Shared box: wall times are UPPER BOUNDS,
+# not benchmarks; load1 is on every line. start load 7.24
+plan~2000[global] GEOM | cells PLACED 2000 | pocket z 5.1..117.3 mm | hex voxels 44448 (slabs + 2-voxel walls) | weld x0.50 piece 0.1898 mm | segments 48000 -> 559776 | welded 169999 | T-ends 385856 | floating 0 | subdiv 0.01 s | network 0.94 s | peak RSS 188 MB | load 7.24
+plan~2000[global] CERT | verdict CERTIFIED | margin 176.1 | p99 0.3123 MPa | max 2.802 | stat p99 | members 559776 | dropped 0 (0.000 of length) | load_dropped 0.0000 | zero_stress 0.0000 | cert_seconds 70.3 | wall 70.3 s | cert_peak_RSS 9588 MB | peak RSS 7191 MB | load 7.38
+plan~2000[per-strut] GEOM | cells PLACED 2000 | pocket z 5.1..117.3 mm | hex voxels 44448 (slabs + 2-voxel walls) | weld x0.50 piece 0.1898 mm | segments 48000 -> 374016 | welded 115694 | T-ends 277612 | floating 0 | subdiv 0.01 s | network 0.52 s | peak RSS 7191 MB | load 7.38
+plan~2000[per-strut] CERT | verdict CERTIFIED | margin 150.5 | p99 0.3655 MPa | max 4.078 | stat p99 | members 374016 | dropped 0 (0.000 of length) | load_dropped 0.0000 | zero_stress 0.0000 | cert_seconds 57.6 | wall 57.6 s | cert_peak_RSS 9588 MB | peak RSS 7191 MB | load 7.32
+CONV_DONE
