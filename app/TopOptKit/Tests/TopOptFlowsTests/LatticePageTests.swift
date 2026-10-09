@@ -86,12 +86,16 @@ final class LatticePageTests: XCTestCase {
         s.minRelativeDensity = 0.2; s.maxRelativeDensity = 0.4
         XCTAssertNil(s.runSpec(), "\(certOnly) certifies but has no generator — no lattice block")
 
-        let b = LatticeBounds.compute(settings: s,
-                                      limits: TopOptKit.latticeLimits(topology: certOnly),
-                                      generatable: false)
-        XCTAssertTrue(b.certifiable)
+        // ★ 2026-10-03 (the one guard): core gives a type it cannot build NO numbers — its
+        // band would sit beside octet's placeholder cells-per-member floor — and says why.
+        let limits = TopOptKit.latticeLimits(topology: certOnly)
+        XCTAssertFalse(limits.certifiable, "★ no numbers for a non-live type")
+        let b = LatticeBounds.compute(settings: s, limits: limits, generatable: false)
+        XCTAssertFalse(b.certifiable)
         XCTAssertFalse(b.generatable)
         XCTAssertFalse(b.runnableAsCertified)
+        XCTAssertTrue(b.topologyReason?.contains(TopOptKit.latticeTypeReadinessPlain(.notGeneratable)) ?? false,
+                      "★ core's words: \(b.topologyReason ?? "nil")")
         XCTAssertNotNil(b.generatableReason, "the gate says WHY")
         XCTAssertTrue(b.generatableReason!.contains("generator"))
     }
@@ -99,23 +103,31 @@ final class LatticePageTests: XCTestCase {
     // MARK: - B0b · per-topology band
 
     func testDensityBandChangesWithSelectionAndMatchesCore() {
-        let certifiable = TopOptKit.latticeCertifiableTopologies
-        XCTAssertGreaterThanOrEqual(certifiable.count, 2,
-                                    "core certifies several topologies — the band must be per-topology")
-        let a = certifiable[0], b = certifiable[1]
-        let la = TopOptKit.latticeLimits(topology: a)
-        let lb = TopOptKit.latticeLimits(topology: b)
-        XCTAssertTrue(la.certifiable && lb.certifiable)
-        XCTAssertTrue(la.rhoMin != lb.rhoMin || la.rhoMax != lb.rhoMax,
-                      "\(a) and \(b) carry different certifiable bands")
-
-        // The DISPLAYED band (LatticeBounds.bandLo/Hi) tracks the selection and
-        // equals core's numbers for that topology.
-        for (id, lim) in [(a, la), (b, lb)] {
+        // ★ 2026-10-03 (the one guard): core gives a band only for a type it calls LIVE; a
+        // certifiable type it cannot build yet gets core's reason and no band (the band would
+        // sit beside octet's placeholder floor). The DISPLAYED band equals core's numbers for
+        // every live type; the per-topology difference is asserted once a second type is live.
+        let live = TopOptKit.latticeCertifiableTopologies.filter {
+            TopOptKit.latticeGeneratableTopologies.contains($0)
+        }
+        XCTAssertFalse(live.isEmpty, "octet is live")
+        for id in live {
+            let lim = TopOptKit.latticeLimits(topology: id)
+            XCTAssertTrue(lim.certifiable && lim.rhoMax > lim.rhoMin, id)
             let s = LatticeSettings(enabled: true, topologyID: id)
             let bounds = LatticeBounds.compute(settings: s, limits: lim, generatable: true)
             XCTAssertEqual(bounds.bandLo, lim.rhoMin, accuracy: 1e-12, id)
             XCTAssertEqual(bounds.bandHi, lim.rhoMax, accuracy: 1e-12, id)
+        }
+        if live.count >= 2 {
+            let la = TopOptKit.latticeLimits(topology: live[0]), lb = TopOptKit.latticeLimits(topology: live[1])
+            XCTAssertTrue(la.rhoMin != lb.rhoMin || la.rhoMax != lb.rhoMax,
+                          "\(live[0]) and \(live[1]) carry different certifiable bands")
+        }
+        for id in TopOptKit.latticeCertifiableTopologies where !live.contains(id) {
+            let lim = TopOptKit.latticeLimits(topology: id)
+            XCTAssertFalse(lim.certifiable, "★ \(id): no band until it is live")
+            XCTAssertNotNil(lim.reason, "★ \(id): core says why")
         }
     }
 
@@ -412,16 +424,37 @@ final class LatticePageTests: XCTestCase {
 
     // MARK: - B7 · no invalid boundary state
 
-    func testBoundaryIsAThreeWayAndSkinWithoutRimIsUnrepresentable() {
-        // The treatment is a 3-case enum mapping 1:1 onto core's job values; no
-        // sequence of taps can reach a fourth state because none exists to reach.
-        XCTAssertEqual(LatticeBoundaryTreatment.allCases.count, 3)
+    /// ★★ FOUR NOW, AND THE FOURTH IS A DIFFERENT AXIS — replaced, not weakened
+    /// (maintainer, 2026-08-19: "It might be worth adding a 'Covered' finish? For
+    /// anyone who doesn't care about seeing the lattice?").
+    ///
+    /// ★ WHAT THE ORIGINAL RULE WAS PROTECTING, and it still holds: the `skin`
+    /// field cannot express "skin without rim", because core's diagrid anchors to
+    /// the rim loops. That invariant is asserted below unchanged.
+    ///
+    /// ★ WHAT CHANGED: `covered` is not a fourth `skin` value. It rides on
+    /// `outer_finish` — a SECOND, independent field core has always had
+    /// (core/src/cli/job.cpp:1433) and the app had never sent. So the skin values
+    /// are still exactly core's three; the enum simply carries one more choice
+    /// that maps somewhere else.
+    func testBoundaryIsAFourWayAndSkinWithoutRimIsUnrepresentable() {
+        XCTAssertEqual(LatticeBoundaryTreatment.allCases.count, 4)
+        // ★ The cover is the ONLY one that sets an outer finish, and it leaves the
+        // skin field alone — the lattice underneath still runs to the edge.
+        XCTAssertEqual(LatticeBoundaryTreatment.covered.jobOuterFinish, "shell")
+        XCTAssertEqual(LatticeBoundaryTreatment.covered.jobSkinValue, "none")
+        for t in LatticeBoundaryTreatment.allCases where t != .covered {
+            XCTAssertNil(t.jobOuterFinish,
+                         "\(t) must not carry an outer finish — only Covered does")
+        }
         XCTAssertEqual(LatticeBoundaryTreatment.none.jobSkinValue, "none")
         XCTAssertEqual(LatticeBoundaryTreatment.rim.jobSkinValue, "rim")
         XCTAssertEqual(LatticeBoundaryTreatment.fullSkin.jobSkinValue, "diagrid",
                        "full skin IS rim + faces in core (the diagrid anchors to rim loops) — skin-without-rim cannot be expressed")
         XCTAssertEqual(Set(LatticeBoundaryTreatment.allCases.map(\.jobSkinValue)),
-                       ["none", "rim", "diagrid"], "exactly core's three skin modes")
+                       ["none", "rim", "diagrid"],
+                       "★ STILL exactly core's three skin modes — Covered adds a "
+                       + "choice on the OTHER axis, not a fourth skin")
 
         // Exhaustive tap walk: from every state, every tap lands in the same 3 states.
         for start in LatticeBoundaryTreatment.allCases {

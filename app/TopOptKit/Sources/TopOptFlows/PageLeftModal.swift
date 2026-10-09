@@ -72,7 +72,13 @@ public struct PageLeftModal: ViewModifier {
     var isLandscape: Bool { canvasWidth > canvasHeight }
 
     var minimizedBottomInset: CGFloat {
-        PageChrome.edge + (minimized && !isLandscape ? Self.minimizedPortraitLift : 0)
+        // ★ THE LIFT IS GONE NOW THAT THE PILL IS NARROW (maintainer, 2026-08-19:
+        // "The selections does not drop all the way to the bottom of the screen").
+        // The 76 pt portrait lift existed because a MINIMIZED panel still carried
+        // the expanded 348 pt width and would have run into the centred bottom
+        // bar. Sized to its content it is a short pill in the left corner, and the
+        // bar it was dodging starts well to the right of it.
+        PageChrome.edge
     }
 
     // ★★ WHICH SPACERS EXIST IS THE WHOLE PLACEMENT — and it is a VALUE, so it can
@@ -111,7 +117,16 @@ public struct PageLeftModal: ViewModifier {
         // sensitive to sizing.
         VStack(spacing: 0) {
             Spacer(minLength: minimized ? 0 : PageChrome.noteTop)
-            content.frame(width: PageChrome.panelWidth, alignment: .leading)
+            // ★ MINIMIZED SIZES TO ITS CONTENT (maintainer, 2026-08-19: "Can you
+            // make the minimized 'Selections' small enough to fit on the left
+            // corner right at the bottom edge while it currently is too wide to
+            // fit in? I figure there's no reason why it can't be less wide when
+            // minimized"). A collapsed header is a chevron, a word and a count;
+            // forcing it to the EXPANDED panel's 348 pt was the whole defect.
+            // `nil` lets the pill measure itself. Expanded is untouched, so the
+            // panel's own width rule is unchanged.
+            content.frame(width: minimized ? nil : PageChrome.panelWidth,
+                          alignment: .leading)
             // ★ ABSENT when minimized — see `hasSpacerBelow`. A zero-minimum
             // spacer here is what centred it the last two times.
             if hasSpacerBelow { Spacer(minLength: PageChrome.edge) }

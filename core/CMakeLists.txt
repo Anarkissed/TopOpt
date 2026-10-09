@@ -99,7 +99,12 @@ add_library(topopt
   src/mesh/surface_operator.cpp
   src/mesh/lattice_gen.cpp
   src/mesh/organic_lattice.cpp
+  src/mesh/lattice_lslt.cpp
+  src/mesh/lattice_union_volume.cpp
+  src/mesh/lattice_dc.cpp
   src/mesh/lattice_boundary.cpp
+  src/mesh/stepped_plan.cpp
+  src/voxel/voxel_sdf.cpp
   src/mesh/lattice_void.cpp
   src/voxel/voxelize.cpp
   src/voxel/clearance.cpp
@@ -324,6 +329,10 @@ target_compile_definitions(test_lattice_gen PRIVATE
   LATTICE_TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
 add_test(NAME lattice_gen COMMAND test_lattice_gen)
 
+add_executable(test_stepped_plan tests/unit/test_stepped_plan.cpp)
+target_link_libraries(test_stepped_plan PRIVATE topopt)
+add_test(NAME stepped_plan COMMAND test_stepped_plan)
+
 # The lattice boundary finish (handoff 2026-07-29-lattice-boundary-finish): the
 # shared boundary predicate, solid-safe clipping (B3 is adversarial against a
 # centreline-clipped variant), overlap activation, the anchored skin/collar, and
@@ -386,6 +395,13 @@ add_test(NAME grading COMMAND test_grading)
 add_executable(test_lattice_refusal tests/unit/test_lattice_refusal.cpp)
 target_link_libraries(test_lattice_refusal PRIVATE topopt)
 add_test(NAME lattice_refusal COMMAND test_lattice_refusal)
+
+# ★ One definition of density -> strut diameter, per type, plus R1's refusal
+# (task 2026-09-28-lattice-types-core). Octet must come through bit-for-bit (R9);
+# every type without a measured table must refuse rather than borrow octet's.
+add_executable(test_strut_diameter_per_type tests/unit/test_strut_diameter_per_type.cpp)
+target_link_libraries(test_strut_diameter_per_type PRIVATE topopt)
+add_test(NAME strut_diameter_per_type COMMAND test_strut_diameter_per_type)
 
 # Harness-side lattice material model C(rho) (multiscale-lattice-feasibility
 # probe, 2026-07-31). The model itself lives in tests/harness/
@@ -1719,6 +1735,12 @@ if(OpenCASCADE_FOUND)
     tests/harness/sector_density_cost_probe.cpp)
   target_link_libraries(sector_density_cost_probe PRIVATE topopt)
 
+  # ★ Sizing the beam-network certificate for any-step Stepped (reviewer,
+  # 2026-10-01). MEASURE ONLY -- nothing here is wired into the run.
+  add_executable(stepped_beam_cost_probe EXCLUDE_FROM_ALL
+                 tests/harness/stepped_beam_cost_probe.cpp)
+  target_link_libraries(stepped_beam_cost_probe PRIVATE topopt)
+
   add_executable(cad_probe EXCLUDE_FROM_ALL tests/harness/cad_probe.cpp)
   target_link_libraries(cad_probe PRIVATE topopt)
 
@@ -2075,6 +2097,71 @@ if(OpenCASCADE_FOUND AND Eigen3_FOUND)
   endif()
   add_test(NAME cli_demo COMMAND test_cli)
 
+  # ★ THE SIZE PROBE AND THE RUN MUST AGREE ABOUT WHICH WALLS ARE DEAD
+  # (#354's audit, 2026-09-29). The domain the synthesis runs over is chosen in
+  # run_job.cpp, inside one of its anonymous namespaces (:67-7774), so no unit test
+  # can name the decision -- run_job.cpp itself IS linked and reachable, via
+  # production_loadcase_from_job, but nothing inside those namespaces is. The only way
+  # to see WHICH domain the probe passes is therefore to run the binary: one `lattice-variant` on a tiny L-prism
+  # fixture (~4 s at resolution 48) writes both organic_probe.json and run_info.json,
+  # and the test compares the dead verdicts AND the numbers behind them.
+  add_executable(test_organic_dead_parity tests/validation/test_organic_dead_parity.cpp)
+  target_link_libraries(test_organic_dead_parity PRIVATE topopt)
+  target_compile_definitions(test_organic_dead_parity PRIVATE
+    ORGANIC_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/organic"
+    CLI_TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}"
+    TOPOPT_CLI_EXE="$<TARGET_FILE:topopt_cli>")
+  add_test(NAME cli_organic_dead_parity COMMAND test_organic_dead_parity)
+
+  # ★ D10/E3: an empty post-beam mask is a REFUSAL, not a finished part. The decision
+  # sits in run_job.cpp's anonymous namespace and what is under test is what a RUN
+  # concludes, so this runs the binary: one job whose lattice the outline beam clears
+  # entirely (must refuse) and its control, whose lattice survives (must still accept
+  # with a NON-EMPTY lattice, so the pair cannot both pass by refusing everything).
+  add_executable(test_empty_post_beam_mask tests/validation/test_empty_post_beam_mask.cpp)
+  target_link_libraries(test_empty_post_beam_mask PRIVATE topopt)
+  target_compile_definitions(test_empty_post_beam_mask PRIVATE
+    ORGANIC_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/organic"
+    CLI_TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}"
+    TOPOPT_CLI_EXE="$<TARGET_FILE:topopt_cli>")
+  add_test(NAME cli_empty_post_beam_mask COMMAND test_empty_post_beam_mask)
+
+  # ★ R1: the in-plane slot origin as SENT. Three fixtures: the plan validates only
+  # because the grid was stated; the identical plan without the key is refused (the
+  # control, without which a loosened alignment check would look the same); and a slot
+  # origin off the face plane is refused by name.
+  add_executable(test_slot_origin tests/validation/test_slot_origin.cpp)
+  target_link_libraries(test_slot_origin PRIVATE topopt)
+  target_compile_definitions(test_slot_origin PRIVATE
+    ORGANIC_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/organic"
+    CLI_TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}"
+    TOPOPT_CLI_EXE="$<TARGET_FILE:topopt_cli>")
+  add_test(NAME cli_slot_origin COMMAND test_slot_origin)
+
+  # ★ Ruling 4: ownership of shared space. Reversing the declaration order must emit a
+  # byte-identical lattice (it did not before: the first-declared region swallowed the
+  # shared volume), and a cross-region overlap is a straddled seam only where each cell's
+  # centre is owned by its own region.
+  add_executable(test_region_ownership tests/validation/test_region_ownership.cpp)
+  target_link_libraries(test_region_ownership PRIVATE topopt)
+  target_compile_definitions(test_region_ownership PRIVATE
+    ORGANIC_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/organic"
+    CLI_TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}"
+    TOPOPT_CLI_EXE="$<TARGET_FILE:topopt_cli>")
+  add_test(NAME cli_region_ownership COMMAND test_region_ownership)
+
+  # ★ Every subcommand that writes a receipt stamps the binary that wrote it
+  # (reviewer, 2026-10-01). `analyze` and `lattice-variant` return before main.cpp
+  # populates the fingerprint, so their run_info.json carried "unknown". Runs the real
+  # binary and compares the receipt against the binary's own --version line.
+  add_executable(test_run_info_fingerprint tests/validation/test_run_info_fingerprint.cpp)
+  target_link_libraries(test_run_info_fingerprint PRIVATE topopt)
+  target_compile_definitions(test_run_info_fingerprint PRIVATE
+    ORGANIC_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/organic"
+    CLI_TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}"
+    TOPOPT_CLI_EXE="$<TARGET_FILE:topopt_cli>")
+  add_test(NAME cli_run_info_fingerprint COMMAND test_run_info_fingerprint)
+
   # Task 2026-08-03-variant-postprocessing-fix (defect 1): design.bin is
   # published AFTER EVERY VARIANT, not once at the end of the ladder. Runs the
   # real topopt-cli as a subprocess and reads the container back at the moment
@@ -2326,3 +2413,6 @@ if(OpenCASCADE_FOUND AND Eigen3_FOUND)
     add_test(NAME threemf_import COMMAND test_3mf_import)
   endif()
 endif()
+
+add_executable(lslt_probe EXCLUDE_FROM_ALL tests/tools/lslt_probe.cpp)
+target_link_libraries(lslt_probe PRIVATE topopt)
