@@ -1,0 +1,80 @@
+# Angled presses / round 6 (task 2026-09-29-flexible-screens), S1b — the sync after S1: merge-only (git merge --no-ff),
+# never rebased, never forced, never pushed. Base e2652a41 (round 6 items 1+3 merged with S1). This Mac, Xcode 27, Debug.
+#
+# (1) THE MERGES, in the order asked (git fetch origin first):
+#   b20f6838  #361 origin/claude/flexible-squish-maths ea325c44 — new: 9d32b381, the C1 addendum follow-up (A3
+#             refuse_shared_footprints: two loaded presses whose footprints share surface are refused by run_flexible_job;
+#             A5 FlexibleRunResult.stacks / .field as values; A6 DensityField.owner_weight / .runner_up; A7 kPressApiVersion = 1
+#             and the receipt's "press_api_version" on an angled press; A10 press_unit, the one normaliser; A12 the public
+#             surface pinned). Its two syncs (67b32137 #358 36f5fdde, ea325c44 #354 06c92c70) were already here.
+#             core/ and docs/ only. No conflict.
+#   53d859f9  #358 origin/claude/raster-receipt-fields 26a37f64 — E1/D1/D2/D11: core's lattice_min_printable_cell_mm takes
+#             the cap; every w/phi(rho_max) path capped by max_relative_density. core/ and docs/ only. No conflict.
+#   907df081  #354 origin/claude/topopt-holes-quilting-298212 725dda46 — 17 commits past 06c92c70 (15 non-merge): the Regions
+#             task, E1 in the bridge, ruling A (cells-across source), the port of batch E, plan rules / slot origin, Structural
+#             Stepped blocked, core's stepped_region_owner, #358 26a37f64 merged. No conflict. Auto-merged:
+#             WorkspacePlaceholder.swift (+163 -17: the Region tool's aim, the selected union's chains, the plan's slot-origin
+#             withholding, the Structural Stepped gate on the variant job, the preview banner), ProjectModel.swift (+121 -19),
+#             LatticeSettings.swift (+128 -10), LatticeRegionDrawer.swift (+19 -3) — NO Flexible hook line among the changed
+#             lines (git diff 53d859f9 907df081, lines matching "Flexib": 0 in each).
+#   origin/main f932266f — "Already up to date" (contained): no merge commit.
+#   The final merge sha: 907df081.
+#
+# (2) CORE: app/scripts/build_core.sh at 907df081, exit 0, 23:29:41 → 23:33 (2026-10-08).
+#   TopOptCore.xcframework  macos-arm64 23:30:53 (6 990 264 B) · ios-arm64-simulator 23:32:04 (7 084 384 B) · ios-arm64
+#   23:33:14 (7 000 640 B) — the slices were 2026-10-02 19:46-19:49 before (this worktree's core was stale since round 5).
+#   9d32b381's markers, strings per slice (1 hit each, every slice): "a surface is pressed by one press" and
+#   "share surface (face region" (the A3 refusal text, faces.cpp) and "press_api_version" (the A7 receipt key, run.cpp).
+#   (kPressApiVersion itself is a constexpr int and leaves no string.)
+#   CoreFingerprint.generated.swift regenerated 23:33, value "907df0816037" (was "523dd2f90b04"); the package test binary
+#   (23:35:33) carries the marker and the fingerprint.
+#
+# (3) THE AP0/S1 GOLDENS AT THE MERGED HEAD, BEFORE ANY RE-RECORD
+#   SWIFT_DETERMINISTIC_HASHING=1 swift test --skip-build --filter 'TopOptFlowsTests\.(FlexibleAngledGoldenTests|FlexiblePressProbeTripwireTests)/'
+#     Executed 14 tests, with 0 failures (0 unexpected) in 13.651 (13.652) seconds — 38 "GOLDEN … identical", 0 DIFFERS
+#   the same unseeded (CI's mode):
+#     Executed 14 tests, with 0 failures (0 unexpected) in 13.512 (13.513) seconds — 32 identical, 0 DIFFERS, 1 PART-SKIP
+#     (the subtrees' RAW bytes need deterministic hashing; canonical subtrees and flexible blocks compared)
+#   FLEX-AP S1 tripwire · core 907df0816037: control accepted · tilt accepted · edge accepted
+#   FLEX-AP S1 tripwire control: press_directionX → job.json: flexible: flexible.faces[0]: unknown key "press_directionX"
+#   EVERY DIFFERENCE: NONE. Every Flexible run job and scene job (C1 pad, his 0004, his r5, A1_0002/3/4), every lattice
+#   subtree, every core frame (C1 pad, his 0004, r5, cube60, M2, the STEP cube, his l bracket) and every core field
+#   (designs, assembled density / owner, handovers) is byte-identical. So:
+#     - #361 9d32b381: A3's refusal refuses none of these jobs (no two presses share surface on any of them); A6's
+#       owner_weight / runner_up are new fields the goldens do not read; A10's press_unit gives the same unit vector.
+#     - #358 26a37f64: no Flexible byte (the Flexible job has no lattice cell floor).
+#     - #354 725dda46: no Flexible byte, no lattice subtree.
+#
+# (4) THE STAGE-JOB HASHES (stage_job_hashes.sh, unchanged; inputs checked against s0_frozen/SHA256SUMS — none moved;
+#   SWIFT_DETERMINISTIC_HASHING=1, TOPOPT_JOB_REPEAT=3): stage_job_hashes_s1b.txt — all 16 rows IDENTICAL to S1's
+#   (stage_job_hashes_s1.txt): 102117B9 d08fc7a7650675b4, 3418E167 c89da26e6a71021c, 570B38E2 2baaf9cbb94027c7, 68BF7B74
+#   6dbb48fab4029f78, 887AC498 b457718dfc23ab42, 92A8016E c4ca5d5ac009036d, AA4C7953 3e6f162cb36212a9, A1…0001
+#   3c1b63cf43a1f590, A1…0002 15bf9e189a9545fc, A1…0003 9dba118b4567b44e, A1…0004 8daeed3065787165, r3 998ddf00e991e860, r5
+#   8daeed3065787165; control+ ff25ee7e926931d6 (still moves), control- 8daeed3065787165 (still does not), again r5 = r5.
+#   (#354's own 725dda46 says the same of its seven: "batch E, drawer A, E1 and the Regions task move no stage-job bytes".)
+#
+# (5) RE-BASED: RECORD=1 SWIFT_DETERMINISTIC_HASHING=1 FLEX_AP_BASE=907df081 swift test --skip-build --filter 'TopOptFlowsTests\.FlexibleAngledGoldenRecorder/'
+#     Executed 10 tests, with 0 failures (0 unexpected) in 12.110 (12.112) seconds
+#   git diff afterwards: MANIFEST.txt (base 11b264e8 → 907df081, core 11b264e8549c → 907df0816037) and probe_answers.json
+#   (base / core labels; control, tilt, edge still null = accepted); every other golden re-written byte-identical.
+#   probe_refusals_base.json kept (never overwritten).
+#
+# (6) THE CONTROLS (swift test --skip-build, unseeded):
+#   --filter 'TopOptFlowsTests\.(LatticeStaleTypeTests|LatticeTypeNoBandTests|LatticeTypeReadinessFromCoreTests|CoreBuildIdentityTests|
+#             FlexibleS1VerifyTests|FlexiblePinchTests|FlexibleGroupFieldPerfTests|FlexibleSqueezeGroupsTests|
+#             FlexibleSqueezeGroupsModelTests|FlexibleFEFieldTests|FlexibleFEVerifyGTests)/'
+#     Executed 56 tests, with 1 test skipped and 0 failures (0 unexpected) in 209.455 (209.461) seconds
+#     (the skip: FlexibleGroupFieldPerfTests.testTheAssemblerAndTheSegmentDesignCost, env-gated perf)
+#   LatticeStaleTypeTests: Executed 6 tests, with 0 failures — 6/6, no SIGTRAP.
+#   Core agreement, unchanged by 9d32b381:
+#     FLEX-PINCH nothing pinched vs core's design: 5760 columns · |Δρ| ≤ 1.6653345369377348e-16 · |Δdepth| ≤ 1.5987211554602254e-14 mm
+#     FLEX-ASSEMBLE app vs core on top A + top B + face 3: 53248 lattice voxels · |Δρ| ≤ 0.0 · owners differ on 0
+#     FLEX-ASSEMBLE control, no blend: |Δρ| ≤ 0.09997618198394775, owners differ on 0
+#     FLEX-S1 CURVED SECTOR x ≥ 3, then x + 2z ≥ 37, sector 1000103: owners differ on 0 (core owns 39655, app 39655), |Δρ| ≤ 0.0;
+#       the old cut test (verdict stripped) — the red control — owners differ on 23
+#   S1's two #354 merge-interaction reds are GREEN now, both fixed by #354 (no #354 test file edited here):
+#     LatticeTypeNoBandTests (4/4): #354's 578c89d9 "Port batch E (#362)" re-pinned the frozen headline to "Not latticed"
+#       (LatticeTypeNoBandTests.swift:81) — batch E's words, now #354's own.
+#     LatticeTypeReadinessFromCoreTests (3/3): #354's f4652834 "Re-pin the readiness test to #358 at 36f5fdde" — gyroid is
+#       core's .notEither (CoreBuildIdentityTests.swift:142).
+#     #361 played no part in either (9d32b381 is core/flexible only).

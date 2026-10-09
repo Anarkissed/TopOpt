@@ -1,5 +1,5 @@
-# Angled presses (task 2026-10-07): the BASE goldens of 11b264e8 (claude/flexible-screens, PR #362),
-# recorded by FlexibleAngledGoldenRecorder (RECORD=1, SWIFT_DETERMINISTIC_HASHING=1), built against core 11b264e8549c.
+# Angled presses (task 2026-10-07): the BASE goldens of 907df081 (claude/flexible-screens, PR #362),
+# recorded by FlexibleAngledGoldenRecorder (RECORD=1, SWIFT_DETERMINISTIC_HASHING=1), built against core 907df0816037.
 # The core fingerprint is the repo HEAD when build_core.sh ran, so it lives HERE only: no compared golden
 # line carries it (testNoComparedGoldenCarriesTheCoreFingerprint). Read by FlexibleAngledGoldenTests.
 # AP0 recorded the first base at 01ec5e3c, BEFORE any angled-press code. S1 (the #361 sync) re-ran them,
