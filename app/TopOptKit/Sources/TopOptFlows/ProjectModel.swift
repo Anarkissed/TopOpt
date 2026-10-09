@@ -302,6 +302,7 @@ public final class ProjectModel: ObservableObject {
         // add/remove list precisely so it CAN be re-evaluated; the one thing that
         // must never happen is absorbing a change silently.
         refreshFaceRegionDrift()
+        FlexibleGroupMigration.migrate(self)   // Flexible (PR #362) H18: the Settings groups linked to these groups, before the undo baseline (FlexibleGroupMigration.swift)
         // Re-seed AFTER restoring the slice: the persisted state is the undo floor, not the empty
         // state the designated init seeded. Runs synchronously before any debounce could fire.
         seedUndoBaseline()

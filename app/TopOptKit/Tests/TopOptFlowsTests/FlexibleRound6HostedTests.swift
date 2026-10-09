@@ -139,6 +139,17 @@ final class FlexibleRound6HostedTests: XCTestCase {
         return out
     }
 
+    /// ★ ROUND 6 ITEM 4: the workspace's `roleTints` as WorkspacePlaceholder builds them (each visible group's
+    /// `force.tint` on every face it contains, opaque; protect's mint-teal after) — what H4 hands `tints(roles:)`.
+    static func roleTints(_ p: ProjectModel) -> [FaceID: SIMD4<Float>] {
+        var out: [FaceID: SIMD4<Float>] = [:]
+        for g in p.selection.groups where !p.groupView.isHidden(g.id) {
+            let c = p.force.tint(for: g)
+            for f in Set(g.faces).union(p.latticeRegionCoveredFaces(g)) { out[f] = SIMD4<Float>(Float(c.r), Float(c.g), Float(c.b), 1) }
+        }
+        return out
+    }
+
     static func inked(_ t: [Float], _ ink: Set<SIMD4<Float>>) -> Int {
         (0..<(t.count / 8)).filter { ink.contains(rgba(t, $0)) }.count
     }
@@ -185,6 +196,12 @@ final class FlexibleRound6HostedTests: XCTestCase {
         XCTAssertGreaterThan(pc.checked, 0, "positive control: his img1's frames")
         XCTAssertEqual(pc.wrong, 0, "positive control: every frame vertex in its group's colour")
         s.controlRound5Frames = false
+        // ★ ROUND 6 ITEM 4 (his answer of 2026-10-09: "no group or role colour on the main page model"): the page hands
+        // the viewer #354's Selections ROLE colours too (H4's `roles: roleTints`) — the widened check passes them as the
+        // workspace does, in every view and turn (its positive control is at the end: a face Flexible does not tint).
+        let roles = Self.roleTints(r.project)
+        let roleInk = Set(roles.values)
+        XCTAssertFalse(roleInk.isEmpty, "premise: his pad's Selections groups have role colours")
         // ── every view, every Play-all turn: no group's ink on the model
         let seq = s.fe.sequence
         XCTAssertGreaterThan(seq.count, 1, "Play all plays every group (\(s.fe.requested))")
@@ -195,13 +212,14 @@ final class FlexibleRound6HostedTests: XCTestCase {
             var turns: [String] = []
             for i in seq {
                 s.loop.shownIndex = i
-                let t = try XCTUnwrap(s.tints(r.project, on: .lattice, roles: [:], stress: nil))
-                let n = Self.inked(t, ink)
-                turns.append("\(s.fe.fields[i].simID) \(n)")
+                let t = try XCTUnwrap(s.tints(r.project, on: .lattice, roles: roles, stress: nil))
+                let n = Self.inked(t, ink), nr = Self.inked(t, roleInk)
+                turns.append("\(s.fe.fields[i].simID) \(n)+\(nr)")
                 XCTAssertEqual(n, 0, "\(name), \(s.fe.fields[i].simID)'s turn: no group colour on the model")
+                XCTAssertEqual(nr, 0, "★ \(name), \(s.fe.fields[i].simID)'s turn: no ROLE colour on the model")
             }
-            let composed = Self.inked(try XCTUnwrap(s.composed), ink)
-            XCTAssertEqual(composed, 0, "\(name): the composed tints")
+            let composed = Self.inked(try XCTUnwrap(s.composed), ink.union(roleInk))
+            XCTAssertEqual(composed, 0, "\(name): the composed tints (group and role colours)")
             lines.append("\(name): inked vertices per turn — " + turns.joined(separator: " · ") + " · composed \(composed)")
         }
         s.stress = false; s.heat = true
@@ -227,6 +245,27 @@ final class FlexibleRound6HostedTests: XCTestCase {
         let pink = FlexibleColours.token(m.groupColour(number: 2), FlexibleColours.loadedFace.w)
         XCTAssertEqual(face0(try XCTUnwrap(red.tints)), [pink], "control: groupColours true tints the map-less face pink")
         lines.append("no map: face 0 \(face0(try XCTUnwrap(s.channels?.tints)) == [FlexibleColours.loadedFace] ? "plain" : "TINTED") (control: pink)")
+        // ── ★ ROUND 6 ITEM 4: the ROLE colours, where they would show — a face Flexible does not tint (face 0 out of
+        // Settings while Bottom still anchors it on the main page), on the solid model (no X-ray ghost over it)
+        m.edit({ st in st.removeFace(0) }, recompute: false)
+        let roles0 = Self.roleTints(r.project), roleInk0 = Set(roles0.values)
+        let anchor = SIMD4<Float>(Float(ForceModel.anchorColor.r), Float(ForceModel.anchorColor.g), Float(ForceModel.anchorColor.b), 1)
+        XCTAssertTrue(roleInk0.contains(anchor), "premise: Bottom's Anchor colour is among the role colours")
+        for (name, lattice, heat) in [("the model", false, false), ("the model, heat on", false, true), ("Lattice", true, false)] {
+            s.latticeOn = lattice; s.heat = heat; s.stress = false
+            // ★ POSITIVE CONTROL: composed as before (H4 + round 5), the Anchor's colour is on face 0
+            s.controlRoleTints = true
+            s.refresh()
+            let roled = try XCTUnwrap(s.tints(r.project, on: .lattice, roles: roles0, stress: nil))
+            let before = face0(roled).contains(anchor)
+            s.controlRoleTints = false
+            s.refresh()
+            let t = try XCTUnwrap(s.tints(r.project, on: .lattice, roles: roles0, stress: nil))
+            lines.append("roles, \(name): face 0 \(face0(t).contains(anchor) ? "WEARS the Anchor colour" : "plain") (control: \(before ? "Anchor green" : "plain")) · \(Self.inked(t, roleInk0)) role-coloured vertices")
+            XCTAssertTrue(face0(t).isDisjoint(with: roleInk0), "★ \(name): no role colour on face 0")
+            XCTAssertEqual(Self.inked(t, roleInk0), 0, "★ \(name): no role colour on the model")
+            if !lattice { XCTAssertTrue(before, "positive control, \(name): the role colours as before reach face 0") }
+        }
         print("FLEX-R6-1a\n  " + lines.joined(separator: "\n  "))
     }
 

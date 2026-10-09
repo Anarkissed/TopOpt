@@ -59,7 +59,9 @@ public enum FlexibleLatticeView {
 /// The one-line note under the view row (his "notification … when it is ready").
 @MainActor
 public final class FlexibleMainNote: ObservableObject {
-    public enum Kind: Equatable, Sendable { case ready, building }
+    /// ★ ROUND 6 (item 4): `linked` — the one-time line of what the restore linked ("Groups 2 and 3 are on the main
+    /// page now"), shown on the project's first Flexible open.
+    public enum Kind: Equatable, Sendable { case ready, building, linked(String) }
     @Published public private(set) var kind: Kind?
     /// How many notes were posted (tests).
     var posts = 0
@@ -89,6 +91,7 @@ public final class FlexibleMainNote: ObservableObject {
         switch k {
         case .ready: return "Lattice ready"
         case .building: return "Still building \u{2014} it shows here when ready"
+        case .linked(let s): return s
         }
     }
     /// The note's size: ★ C2 VERIFICATION — as tall as the row's buttons (the whole note is

@@ -243,6 +243,17 @@ public final class FlexibleMainStage: ObservableObject {
     /// Test control only (round 6, item 1 — it retires the S + M merge's `controlTurnsWithoutFrames`): round 5's
     /// group frames painted on the main page's model, in every view and every Play-all turn.
     var controlRound5Frames = false
+    /// ★ ROUND 6 (item 4 — his answer of 2026-10-09: "no group or role colour on the main page model"), test control
+    /// only: #354's Selections role colours composed onto the model as before (the positive control of R6-1a's widening).
+    var controlRoleTints = false
+    /// ★ ROUND 6 (item 4 — his answer of 2026-10-09: the prism and its mm "ONLY AFTER he picks a group in this session"),
+    /// test control only: the active group's prism shows on open (S1b's rule).
+    var controlPrismOnOpen = false
+    /// ★ ROUND 6 (item 4): he picked a group on the main page in this session (FlexibleMainStage+Groups) — until then no
+    /// group's prism or number is drawn; the selection as last seen, and its observation.
+    public internal(set) var sessionPicked = false
+    var lastSelection: SelectionModel?
+    var selectionObservation: AnyCancellable?
     /// ★ the gate: another core solve runs (the Stress view's sim, a topology run) — FlexibleStressSolver.busy
     var squishBusy: (() -> Bool)?
     /// The Stress solve waited for a sim (it starts when the sims go idle).

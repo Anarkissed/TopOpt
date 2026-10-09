@@ -226,7 +226,7 @@ enum FlexibleGroupWalls {
         case .rests: open = rests.isEmpty ? nil : "rests"
         case .model:
             if let r = m.selectedRegion, m.settings.face(r)?.isLoaded == true, let g = m.squeezeGroup(of: r) { open = "group-\(g.id)" }
-        case .newGroup: open = nil
+        case .newGroup, .pending: open = nil
         }
         let every = views.contains(.groups) || controlEveryGroup
         var out: [Shown] = []

@@ -27,6 +27,8 @@ public enum FlexibleRailTab: Hashable, Sendable {
     case rests
     /// A new group (pick the face that starts it).
     case newGroup
+    /// ★ ROUND 6 (item 4, one set of groups): the main page's Pending groups, each with [Squeeze it] [It rests].
+    case pending
 }
 
 // MARK: - the model's side (the rail follows the selection; the selection follows the rail)
@@ -59,7 +61,7 @@ extension FlexibleStageModel {
     /// group, a merge, [Pressed] on a resting face) — the tab open, the face selected and the group
     /// that plays can never disagree. The [Model] and [+] tabs stay put.
     func syncRail() {
-        if rail == .model || rail == .newGroup { return }
+        if rail == .model || rail == .newGroup || rail == .pending { return }
         let t = railTab(for: selectedRegion)
         if t != rail { rail = t }
     }
@@ -93,7 +95,7 @@ extension FlexibleStageModel {
         case .rests:
             if let r = selectedRegion, settings.face(r)?.isLoaded == false || settings.face(r) == nil { return }
             if let first = settings.faces.first(where: { !$0.isLoaded }) { select(first.faceRegionID) }
-        case .model, .newGroup:
+        case .model, .newGroup, .pending:
             break
         }
     }
@@ -177,6 +179,7 @@ struct FlexibleSettingsRailView: View {
         case .group(let id): return "flexible-rail-group-\(id)"
         case .rests: return "flexible-rail-rests"
         case .newGroup: return "flexible-rail-new"
+        case .pending: return "flexible-rail-pending"
         }
     }
 
@@ -272,6 +275,8 @@ struct FlexibleSettingsRailView: View {
             Circle().fill(DS.Color.accentCyan.color).frame(width: 14, height: 14)
         case .newGroup:
             Image(systemName: "plus").font(.system(size: 14, weight: .bold)).foregroundStyle(DS.Color.accent.color)
+        case .pending:
+            Image(systemName: "questionmark.circle").font(.system(size: 14, weight: .semibold)).foregroundStyle(DS.Color.warning.color)
         }
     }
 }
@@ -297,6 +302,8 @@ struct FlexibleRailContent: View {
                 FlexibleRestsTab(model: model, padTarget: $padTarget)
             case .newGroup:
                 FlexibleNewGroupTab(model: model)
+            case .pending:
+                EmptyView()
             }
         }
         .onAppear {

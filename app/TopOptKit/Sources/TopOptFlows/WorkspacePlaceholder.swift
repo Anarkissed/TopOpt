@@ -9831,7 +9831,7 @@ public struct WorkspacePlaceholder: View {
 
     private func groupRow(_ g: SelectionGroup) -> some View {
         let active = g.id == selection.activeGroupID
-        let tint = force.tint(for: g)
+        let tint = flexibleMain.groupTint(g, project) ?? force.tint(for: g)   // Flexible (PR #362) H16: on the Flexible stage, the squeeze group's colour (Rests cyan)
         return VStack(alignment: .trailing, spacing: 5) {
           HStack(alignment: .top, spacing: DS.Space.s) {
             // Tap the swatch to recolor the group — a row of colour swatches.
@@ -9865,6 +9865,7 @@ public struct WorkspacePlaceholder: View {
                     keepClearAffixToggle(g)
                     protectAffixToggle(g)   // handoff 124 — the Protect affix
                 }
+                if let c = flexibleMain.groupCaption(g, project) { FlexibleGroupCaption(text: c) }   // Flexible (PR #362) H17: "Squeezed with Group 2 · Face 2"
                 if loadGroupMayNotRegister(g), let h = voxelSpacingMM {
                     // Sub-voxel load face (099 D2): the load may tag no voxels at
                     // this resolution, so flag it in plain English. A warning, not a

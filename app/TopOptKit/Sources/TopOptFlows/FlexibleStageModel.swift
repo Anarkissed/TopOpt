@@ -263,6 +263,9 @@ public final class FlexibleStageModel: ObservableObject {
     }
     /// The issue the page opens its pop-up on when it appears (the main page's pill).
     @Published public var pendingFix: FlexibleIssue?
+    /// ★ ROUND 6 (item 4, one set of groups): [Press it] on a face a main-page Anchor holds asks ONCE first —
+    /// "Face 0 rests (main page: Bottom)" [Squeeze it] [Keep it resting] (FlexibleGroupSync).
+    @Published public internal(set) var restsAsk: FlexibleRestsAsk?
 
     private var pendingStacks: Set<FlexFaceKey> = []
     /// Every bridge call in flight (scene, stacks, drawn maps, the lattice) — awaited by
