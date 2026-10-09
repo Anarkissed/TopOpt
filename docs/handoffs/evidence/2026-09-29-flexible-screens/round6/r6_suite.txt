@@ -266,3 +266,12 @@ FLEX-R6-1d alphas: glass 0.08 / 0.40, open 0.13 / 0.60 · prism at rest 0.05 / 0
 #     xcrun simctl install 147E56A1-C8CA-4B9D-BE6C-CF230589A83A …/Debug-iphonesimulator/TopOpt.app -> exit 0 (device Booted; not launched).
 #     The INSTALLED TopOpt.debug.dylib: mtime Oct  8 19:12:20 2026 = the build product's; strings: flexible-settings-view-prisms 1,
 #     flexible-settings-view-groups 1, "Stamp turn" 1, "Prism = squish shown" 1.
+#
+# ★ CORRECTION (round 6 review, 2026-10-08). Section (1)'s "every class that pins a touched file" was NOT the full grep -l
+# union. It missed ClearanceGeometryTests and LatticeSeparationRegionTests (ClearanceGeometry), LatticePreviewConfettiTests,
+# SmoothingUsablePathTests, ViewerProfileTests and SmoothingStrokeCameraTests (MetalMeshView), the probes
+# LatticeHisSteppedBakeProbe, LatticePreviewConfettiEvidenceGen and LatticeQuiltFrameProbe, and RenderQualityEvidenceGen
+# (ClearanceRenderItem). The verifier ran them: 61 tests, 7 skipped, 0 failures. The verifier's full targeted run: 885 tests,
+# 46 skipped, 9 failures, all known (FlexibleBatchNVerifyTests…LivePlayAllPicker ×8, LatticeSimSolveTriggerTests ×1).
+# The review's union is computed mechanically (grep -l on Tests for each touched file name, plus ClearanceRenderItem and
+# setClearanceVolumes): see ../round6_review/r6r_runs.txt section (6).
