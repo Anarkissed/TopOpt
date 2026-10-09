@@ -237,12 +237,18 @@ final class FlexibleMeetReviewTests: XCTestCase {
 
     // MARK: - (5) the 15° rule's margin
 
-    /// ★ FINDING 10. The flat-to-fillet seam angle is the first facet row's (core's STEP mesher, 0.5 rad
-    /// angular deflection), close under 15°. Printed: every seam segment's angle between core's two triangle
-    /// normals, the worst SMOOTH one (< 15°) and the mildest CREASED one, and pinned: each sits at least
-    /// `margin` from 15°, so a mesher change that moves one across shows up red here, by name, before it
-    /// silently turns a fillet into edges. CONTROL (run here): the rule at 14° instead of 15° breaks blends — the
-    /// seams near the threshold carry them.
+    /// ★ FINDING 10. The 15° rule is judged per seam segment from core's two triangle normals, so a seam's verdict
+    /// rests on core's STEP tessellation (0.5 rad angular deflection). Printed: the worst SMOOTH segment (< 15°)
+    /// and the mildest CREASED one on the whole stand, and the worst seam an OFFERED blend rests on (its flats, its
+    /// fillet pieces; the listed-only #206 rests on 4–42 at 14.314°, printed). Pinned:
+    ///   * every offered blend's seams stay at least `blendMargin` under 15° (a coarser tessellation of a fillet —
+    ///     fewer, wider facets — turns its first seam into a crease and the blend into edges: red here, by name);
+    ///   * the stand's closest calls, as measured on 2026-10-09 (worst smooth 14.751° at 58–60, two corner-fillet
+    ///     patches; mildest crease 15.738° at 1–47), may not move towards the rule by more than 0.05° — a mesher
+    ///     change that would flip one is red here before it silently adds or removes a candidate.
+    /// The tests-first run refuted the finding's premise that the blends rest on ~14.3° seams: the 14° rule left
+    /// the 10 blends whole (ap2_review_red_runs.txt). CONTROL (run here): the rule set just under the worst offered
+    /// blend's seam breaks THAT blend — the pin guards the seams the fillets really rest on.
     func testTheTangentRuleMarginOnTheM2() async throws {
         var skips: [String] = []
         guard let step = try await stepModel("M2 stand", "FlexibleMeetReviewTests.testTheTangentRuleMarginOnTheM2",
@@ -253,6 +259,13 @@ final class FlexibleMeetReviewTests: XCTestCase {
         let m = step.1
         let meet = try XCTUnwrap(m.meet)
         let facts = try await m.meetFacts()
+        /// The largest angle (core's triangle normals) over a seam's segments.
+        func worst(_ pair: Pair) -> Double {
+            (meet.seams[pair]?.segments ?? []).compactMap { seg -> Double? in
+                guard seg.triA != seg.triB, let la = facts.triangleLoads[seg.triA], let lb = facts.triangleLoads[seg.triB] else { return nil }
+                return Self.deg(la, lb)
+            }.max() ?? 0
+        }
         var worstSmooth = (deg: 0.0, pair: Pair(0, 0)), mildestCrease = (deg: 180.0, pair: Pair(0, 0))
         var hist = [Int](repeating: 0, count: 8)   // 2.5° bins from 10°
         for (pair, s) in meet.seams where s.kind == .edge {
@@ -265,19 +278,45 @@ final class FlexibleMeetReviewTests: XCTestCase {
                 } else if d > worstSmooth.deg { worstSmooth = (d, pair) }
             }
         }
-        let margin = 0.5
-        print(String(format: "FLEX-AP2R MARGIN M2: worst smooth seam %.3f° (%@), mildest crease %.3f° (%@) · margins %.3f° / %.3f° · "
-                     + "segments per 2.5° from 10°: %@", worstSmooth.deg, "\(worstSmooth.pair)", mildestCrease.deg,
-                     "\(mildestCrease.pair)", 15 - worstSmooth.deg, mildestCrease.deg - 15, "\(hist)"))
-        XCTAssertLessThanOrEqual(worstSmooth.deg, 15 - margin, "★ a smooth seam (\(worstSmooth.pair)) sits within \(margin)° of the rule")
-        XCTAssertGreaterThanOrEqual(mildestCrease.deg, 15 + margin, "★ a crease (\(mildestCrease.pair)) sits within \(margin)° of the rule")
-
-        // ★ CONTROL: at 14° the near-threshold fillet seams turn into creases and blends break
         let c15 = FlexibleEdgeCandidates.make(meet: meet, facts: facts)
-        let c14 = FlexibleEdgeCandidates.make(meet: meet, facts: facts, creaseCos: cos(14 * Double.pi / 180))
-        let b15 = c15.candidates.filter { $0.kind == .blend }.count, b14 = c14.candidates.filter { $0.kind == .blend }.count
-        print("FLEX-AP2R MARGIN control: blends at 15° \(b15), at 14° \(b14)")
-        XCTAssertLessThan(b14, b15, "control: one degree lower, the fillets' first seams crease")
+        let blends = c15.candidates.filter { $0.kind == .blend }
+        /// The worst seam a blend rests on.
+        func restsOn(_ b: FlexibleEdgeCandidates.Candidate) -> (deg: Double, pair: Pair) {
+            var w = (deg: 0.0, pair: Pair(0, 0))
+            for i in 0..<b.members.count {
+                for j in (i + 1)..<b.members.count where meet.touches(b.members[i], b.members[j]) && !c15.creased(Pair(b.members[i], b.members[j])) {
+                    let d = worst(Pair(b.members[i], b.members[j]))
+                    if d > w.deg { w = (d, Pair(b.members[i], b.members[j])) }
+                }
+            }
+            return w
+        }
+        var worstBlend = (deg: 0.0, pair: Pair(0, 0), blend: 0, members: [Int]())
+        var worstAny = (deg: 0.0, pair: Pair(0, 0), blend: 0)
+        for b in blends {
+            let w = restsOn(b)
+            if w.deg > worstAny.deg { worstAny = (w.deg, w.pair, b.number) }
+            if b.offered, w.deg > worstBlend.deg { worstBlend = (w.deg, w.pair, b.number, b.members) }
+        }
+        let blendMargin = 0.5
+        print(String(format: "FLEX-AP2R MARGIN M2: worst smooth seam %.3f° (%@), mildest crease %.3f° (%@) · margins %.3f° / %.3f° · "
+                     + "worst seam an offered blend rests on %.3f° (%@, blend #%d), margin %.3f° · any blend %.3f° (%@, #%d) · "
+                     + "segments per 2.5° from 10°: %@",
+                     worstSmooth.deg, "\(worstSmooth.pair)", mildestCrease.deg, "\(mildestCrease.pair)", 15 - worstSmooth.deg,
+                     mildestCrease.deg - 15, worstBlend.deg, "\(worstBlend.pair)", worstBlend.blend, 15 - worstBlend.deg,
+                     worstAny.deg, "\(worstAny.pair)", worstAny.blend, "\(hist)"))
+        XCTAssertGreaterThan(blends.count, 0, "premise: the stand has blends")
+        XCTAssertLessThanOrEqual(worstBlend.deg, 15 - blendMargin,
+                                 "★ blend #\(worstBlend.blend) rests on a seam (\(worstBlend.pair)) within \(blendMargin)° of the rule")
+        XCTAssertLessThanOrEqual(worstSmooth.deg, 14.751 + 0.05, "★ a smooth seam (\(worstSmooth.pair)) moved towards the rule")
+        XCTAssertGreaterThanOrEqual(mildestCrease.deg, 15.738 - 0.05, "★ a crease (\(mildestCrease.pair)) moved towards the rule")
+
+        // ★ CONTROL: the rule just under the worst offered blend's seam turns that seam into a crease and breaks it
+        let under = FlexibleEdgeCandidates.make(meet: meet, facts: facts, creaseCos: cos((worstBlend.deg - 0.01) * Double.pi / 180))
+        let still = under.candidates.contains { $0.kind == .blend && $0.members == worstBlend.members }
+        print(String(format: "FLEX-AP2R MARGIN control: at %.3f° blend %@ is %@ (blends %d → %d)", worstBlend.deg - 0.01,
+                     "\(worstBlend.members)", still ? "still listed" : "gone", blends.count, under.candidates.filter { $0.kind == .blend }.count))
+        XCTAssertFalse(still, "control: blend \(worstBlend.members) rests on the seam the pin guards")
     }
 
     // MARK: - (6) core's facts come from the scene of the current regions

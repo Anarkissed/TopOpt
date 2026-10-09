@@ -22,7 +22,16 @@
 // faces meet, from the mesh the page already draws, and is checked against core's own adjacency.
 //
 // ★ STABLE. Every output is sorted (pairs, pieces, segments in triangle order, meeting points by position), so the
-// same mesh and regions give the same answer in any process; FlexibleEdgeCandidates numbers by position.
+// same mesh and regions give the same answer in any process; FlexibleEdgeCandidates numbers by position. A polyline
+// is in ONE canonical form (AP2 review): an open line runs from its lower end by position, a closed loop (a bore's
+// rim) starts at its lowest vertex by position, and equal lengths are ordered by position — so a point and its
+// number do not depend on the order the triangles arrive in (his l bracket's bore rims moved 4.4 mm before).
+//
+// ★ A SEAM IN A CUT PLANE (AP2 review). The clip is CLOSED (core's clip_into rule for surfaces), so a seam lying IN
+// a sector's cut plane would pass for the sectors on BOTH sides, though the face lies beside it on one side only:
+// such a segment belongs to a piece only if the triangle that holds it lies on the cut's inner side (its third
+// corner decides) — the piece's own clipped area is beside it. Core's strict voxel-centre sense (RegionCut.strict)
+// is a rule for VOXELS, not for this: it would hand the seam to whichever side is non-strict.
 
 import CoreGraphics
 import Foundation
@@ -152,7 +161,10 @@ public struct FlexibleMeet {
                     guard let px = byID[x], let py = byID[y] else { continue }
                     for s in list {
                         guard let c = Self.clip(s.p, s.q, px.cuts), let d = Self.clip(c.0, c.1, py.cuts),
-                              simd_distance(d.0, d.1) > 0 else { continue }
+                              simd_distance(d.0, d.1) > 0,
+                              // x lies on face fp.a (its side of the seam is triA), y on fp.b (triB)
+                              Self.beside(d.0, d.1, triangle: s.triA, cuts: px.cuts, mesh),
+                              Self.beside(d.0, d.1, triangle: s.triB, cuts: py.cuts, mesh) else { continue }
                         // triA belongs to the pair's lower id
                         let seg = x < y ? Segment(p: d.0, q: d.1, triA: s.triA, triB: s.triB)
                                         : Segment(p: d.0, q: d.1, triA: s.triB, triB: s.triA)
@@ -458,7 +470,11 @@ public struct FlexibleMeet {
     /// An edge pill is wider than tall, along nothing in particular (it sits at the edge's middle).
     public static let pillWidthPt: CGFloat = 64
 
-    /// The spots' handles through the page's projection; a spot behind the camera has none.
+    /// The spots' handles through the page's projection; a spot behind the camera has none. ★ SIZE ONLY (AP2
+    /// review): a handle is a ≥ 44 pt rectangle at its spot. Whether a finger can REACH it on his camera is item
+    /// 2's overlay — visibility, the panels' keep-outs, overlap, the corner tag's 24 pt push along the projected
+    /// halfway, repeat-tap cycling and the always-complete list (r6 §3 "Hit test"); at his img3 camera an
+    /// end-on edge projects to ~20 pt and its two corners overlap, which no fixed rectangle resolves.
     public static func handles(_ spots: [Spot], projection: CameraProjection) -> [Handle] {
         spots.compactMap { s in
             guard let c = projection.project(SIMD3<Float>(Float(s.point.x), Float(s.point.y), Float(s.point.z))) else { return nil }
@@ -469,9 +485,12 @@ public struct FlexibleMeet {
 
     // MARK: - geometry helpers
 
-    /// The arc-length middle of the longest polyline.
+    /// The arc-length middle of the longest polyline (equal lengths: the first by position), walked from its
+    /// canonical start — the same point however its segments were met.
     public static func midpoint(_ polylines: [[SIMD3<Double>]]) -> SIMD3<Double>? {
-        guard let pl = polylines.max(by: { length($0) < length($1) }), pl.count >= 2 else { return polylines.first?.first }
+        guard let first = polylines.map(canonical).sorted(by: longerFirst).first else { return nil }
+        let pl = first
+        guard pl.count >= 2 else { return pl.first }
         let half = length(pl) / 2
         var run = 0.0
         for i in 1..<pl.count {
@@ -487,9 +506,47 @@ public struct FlexibleMeet {
         return (1..<pl.count).reduce(0) { $0 + simd_distance(pl[$1 - 1], pl[$1]) }
     }
 
+    /// ★ A polyline's ONE form (AP2 review): an open line runs from its lower end by position (the 1e-4 mm key);
+    /// a closed loop (first point = last) starts at its lowest vertex and runs towards the lower of that vertex's
+    /// two neighbours.
+    public static func canonical(_ line: [SIMD3<Double>]) -> [SIMD3<Double>] {
+        guard line.count >= 2 else { return line }
+        func less(_ a: SIMD3<Double>, _ b: SIMD3<Double>) -> Bool { qkey(a).lexicographicallyPrecedes(qkey(b)) }
+        if line.count > 3, qkey(line[0]) == qkey(line[line.count - 1]) {
+            var ring = Array(line.dropLast())
+            guard let i = ring.indices.min(by: { less(ring[$0], ring[$1]) }) else { return line }
+            ring = Array(ring[i...] + ring[..<i])
+            if less(ring[ring.count - 1], ring[1]) { ring = [ring[0]] + ring[1...].reversed() }
+            return ring + [ring[0]]
+        }
+        return less(line[line.count - 1], line[0]) ? Array(line.reversed()) : line
+    }
+
+    /// Longest first; lengths equal to 1e-6 mm by their first point's position, then their last point's.
+    public static func longerFirst(_ a: [SIMD3<Double>], _ b: [SIMD3<Double>]) -> Bool {
+        let la = Int64((length(a) / 1e-6).rounded()), lb = Int64((length(b) / 1e-6).rounded())
+        if la != lb { return la > lb }
+        let fa = a.first.map(qkey) ?? [], fb = b.first.map(qkey) ?? []
+        if fa != fb { return fa.lexicographicallyPrecedes(fb) }
+        return (a.last.map(qkey) ?? []).lexicographicallyPrecedes(b.last.map(qkey) ?? [])
+    }
+
     /// Inside every cut, closed (a point on a cut's plane is in).
     static func insideClosed(_ p: SIMD3<Double>, _ cuts: [RegionCut]) -> Bool {
         cuts.allSatisfy { simd_dot(p - $0.point, $0.normal) >= -clipMM }
+    }
+
+    /// ★ Is a piece's own area BESIDE segment [a, b] of its face's triangle `t` (AP2 review)? Yes, unless the
+    /// segment lies IN one of the piece's cut planes and the triangle lies on that cut's outer side (its third
+    /// corner — the centroid — decides): the closed clip keeps an on-plane segment for both sides.
+    static func beside(_ a: SIMD3<Double>, _ b: SIMD3<Double>, triangle t: Int, cuts: [RegionCut], _ mesh: ViewerMesh) -> Bool {
+        for c in cuts {
+            guard abs(simd_dot(a - c.point, c.normal)) <= clipMM, abs(simd_dot(b - c.point, c.normal)) <= clipMM else { continue }
+            let centroid = (position(mesh, mesh.indices[3 * t]) + position(mesh, mesh.indices[3 * t + 1])
+                            + position(mesh, mesh.indices[3 * t + 2])) / 3
+            if !(simd_dot(centroid - c.point, c.normal) > clipMM) { return false }
+        }
+        return true
     }
 
     /// Segment [p, q] clipped to the closed half-spaces of `cuts`; nil when nothing is left.
@@ -552,7 +609,8 @@ public struct FlexibleMeet {
         [Int64((p.x / keyMM).rounded()), Int64((p.y / keyMM).rounded()), Int64((p.z / keyMM).rounded())]
     }
 
-    /// Segments chained into polylines through shared endpoints (by position key), longest first.
+    /// Segments chained into polylines through shared endpoints (by position key), each in its canonical form,
+    /// longest first (equal lengths by position).
     static func chain(_ segs: [Segment]) -> [[SIMD3<Double>]] {
         var ends: [[Int64]: [Int]] = [:]
         for (i, s) in segs.enumerated() {
@@ -582,7 +640,7 @@ public struct FlexibleMeet {
             out.append(walk(from: i))
         }
         for i in 0..<segs.count where !used[i] { out.append(walk(from: i)) }
-        return out.sorted { length($0) > length($1) }
+        return out.map(canonical).sorted(by: longerFirst)
     }
 
     /// Every point where three or more pieces meet: the seams' segment ends, gathered within 1e-3 mm. Ordered by
