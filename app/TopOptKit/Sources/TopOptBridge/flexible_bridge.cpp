@@ -1198,6 +1198,8 @@ FlexRegionFrame flexible_scene_region_frame(int64_t scene, int32_t face_region_i
     o.normal_spread_deg = f.normal_spread_deg;
     o.normal_spread_flag = f.normal_spread_flag;
     o.triangles = static_cast<int32_t>(tris.size());
+    put3(o.x_axis, f.x_axis);   // AP3: core's frame axes, copied
+    put3(o.y_axis, f.y_axis);
   });
   if (!why.empty()) {
     o = FlexRegionFrame{};
@@ -1285,5 +1287,8 @@ FlexPressVerdict flexible_scene_press_verdict(int64_t scene, const std::vector<i
   }
   return o;
 }
+
+// ★ AP3: core's side-stack threshold, for the (i) text only (FlexibleBridge.hpp).
+double flexible_side_stack_deg() { return fx::kSideStackDeg; }
 
 }  // namespace topoptbridge

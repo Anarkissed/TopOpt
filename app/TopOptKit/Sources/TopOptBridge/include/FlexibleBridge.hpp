@@ -674,6 +674,11 @@ struct FlexRegionFrame {
   double normal_spread_deg = 0.0;
   bool normal_spread_flag = false;
   int32_t triangles = 0;
+  // ★ AP3 (the arrow's maths): core's frame axes, copied — X = the principal axis of the region
+  // projected perpendicular to the load (core's stack X for the same inputs), Y = load x X. The degrees
+  // box scrubs from a target toward core's X when the arrow sits on it; nothing is computed here.
+  double x_axis[3] = {1, 0, 0};
+  double y_axis[3] = {0, 1, 0};
 };
 FlexRegionFrame flexible_scene_region_frame(int64_t scene, int32_t face_region_id, int32_t face,
                                             bool has_direction, const std::vector<double>& direction,
@@ -713,5 +718,10 @@ struct FlexPressVerdict {
 FlexPressVerdict flexible_scene_press_verdict(int64_t scene, const std::vector<int32_t>& footprint,
                                               bool has_direction, const std::vector<double>& direction,
                                               BridgeError& err);
+
+// ★ AP3: core's side-stack threshold (fx::kSideStackDeg, 15°) — for the side label's (i) text ONLY.
+// The side VERDICT is never computed from it in the app: it is core's FaceFrame.side for the stated
+// direction (flexible_scene_region_frame with a direction).
+double flexible_side_stack_deg();
 
 }  // namespace topoptbridge

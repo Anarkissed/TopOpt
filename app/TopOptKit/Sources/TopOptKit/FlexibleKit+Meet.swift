@@ -37,12 +37,18 @@ public struct FlexRegionFrame: Equatable, Sendable {
     public let normalSpreadFlag: Bool
     /// The triangles handed to core.
     public let triangles: Int
+    /// ★ AP3: core's frame axes — X, the principal axis of the region projected perpendicular to the load
+    /// (core's stack X for the same inputs), and Y = load × X. Copied, never computed here.
+    public let xAxis: SIMD3<Double>
+    public let yAxis: SIMD3<Double>
 
     public init(valid: Bool, reason: String, load: SIMD3<Double>, centroid: SIMD3<Double>, areaMM2: Double,
-                buildAngleDeg: Double, side: Bool, normalSpreadDeg: Double, normalSpreadFlag: Bool, triangles: Int) {
+                buildAngleDeg: Double, side: Bool, normalSpreadDeg: Double, normalSpreadFlag: Bool, triangles: Int,
+                xAxis: SIMD3<Double> = SIMD3(1, 0, 0), yAxis: SIMD3<Double> = SIMD3(0, 1, 0)) {
         self.valid = valid; self.reason = reason; self.load = load; self.centroid = centroid; self.areaMM2 = areaMM2
         self.buildAngleDeg = buildAngleDeg; self.side = side; self.normalSpreadDeg = normalSpreadDeg
         self.normalSpreadFlag = normalSpreadFlag; self.triangles = triangles
+        self.xAxis = xAxis; self.yAxis = yAxis
     }
 }
 
@@ -99,7 +105,7 @@ extension FlexibleScene {
         return FlexRegionFrame(valid: r.valid, reason: String(r.reason), load: FlexConv.v3(r.load),
                                centroid: FlexConv.v3(r.centroid), areaMM2: r.area_mm2, buildAngleDeg: r.build_angle_deg,
                                side: r.side, normalSpreadDeg: r.normal_spread_deg, normalSpreadFlag: r.normal_spread_flag,
-                               triangles: Int(r.triangles))
+                               triangles: Int(r.triangles), xAxis: FlexConv.v3(r.x_axis), yAxis: FlexConv.v3(r.y_axis))
     }
 
     /// Core's inward normal of each of `triangles` (indices into core's model), with core's face of each.

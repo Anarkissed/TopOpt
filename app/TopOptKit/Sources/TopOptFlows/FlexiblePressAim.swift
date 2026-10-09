@@ -1,0 +1,389 @@
+// FlexiblePressAim — the arrow's maths (task 2026-10-07, angled presses, batch AP3; final spec §6 "The arrow", AS
+// AMENDED by the reviewer's A4 and A8 of 2026-10-08: "a multi-face press never offers a snap to one of its own faces'
+// normals, because core refuses edge-on. Offer only directions core accepts. A single-face press snaps to its normal
+// as 'straighten'." and "build Z covers both straight down and straight up").
+//
+// ★ ONE SOURCE: CORE. Everything here works on core's numbers, handed in by the stage model (FlexibleStageModel+Aim):
+// each member's INWARD NORMAL is core's face_frame_cut load (flexible_scene_region_frame, per region — or per member
+// face of a multi-face region, clipped by its cuts), the fallback axes are core's frame X / Y, build Z is core's own
+// build direction (the scene's `build`), and WHICH targets are offered is core's verdict (build_press_stack through
+// flexible_scene_press_verdict). This file computes INPUTS only: the halfway default (Σ core's per-member inward
+// normals, normalised — never the area-weighted union normal core uses when no direction is stated), the snap of a
+// pointed direction onto a target, the degrees box's great circle, the drag's 1° UI limit and the knob's geometry. No
+// frame, column, design, side verdict or ownership is computed here: the side verdict is core's FaceFrame.side for the
+// stated direction (FlexibleStageModel.pressSide), never an angle compared with 15 in Swift.
+//
+// ★ THE TARGETS (A4/A8), in order — the first wins a tie and a repeat is dropped:
+//   * one region (a tilted face press): its own core normal, [Straighten]; the halfway too when the region spans
+//     2+ faces (each face's core normal, clipped by the region's cuts); then build Z down and up;
+//   * 2+ regions (an edge, a corner): the halfway; then build Z down and up. NEVER a member's own normal: on a box
+//     edge or corner it is exactly edge-on to another member, and core refuses it.
+//   Each is ASKED of core; only what core builds is offered (`FlexiblePressAimSet.offered`).
+// ★ EXACT. A chip tap, a knob within 12° of a target and the degrees box at 0 all store the target's own vector, bit
+// for bit (`on`); a target never carries a negative zero (`canon`), so its bits survive the project file's JSON.
+// ★ THE 1° LIMIT is the app's, not core's: a FREE direction (a drag, the degrees box) holds 1° short of edge-on to
+// every member's core normal ("a press can't pull"); snaps are exempt (each was accepted by core). Core may still
+// refuse a free direction over a curved member (it checks every footprint triangle) — the card then shows core's words.
+import Foundation
+import simd
+
+public enum FlexiblePressAim {
+
+    /// The knob snaps within this many degrees of a target (the gravity gizmo's tolerance).
+    public static let snapToleranceDeg: Double = GravityDirectionGizmo.snapToleranceDegrees
+    /// A FREE direction holds this many degrees short of edge-on to every member (a UI limit, not core's rule).
+    public static let edgeOnMarginDeg: Double = 1
+    /// Looking along the arrow (|view ray · arrow| above this) the knob turns into a screen trackball …
+    public static let trackballDot: Double = 0.9
+    /// … at this many degrees per point of finger travel.
+    public static let trackballDegPerPoint: Double = 0.5
+    /// The degrees box's step (a scrub moves it in whole degrees; the keypad takes any value).
+    public static let boxStepDeg: Double = 1
+
+    // MARK: - the one normaliser and angles
+
+    /// d / |d|, component by component — core's press_unit — or nil for a zero or non-finite vector.
+    public static func unit(_ v: SIMD3<Double>) -> SIMD3<Double>? {
+        let n = (v.x * v.x + v.y * v.y + v.z * v.z).squareRoot()
+        guard n.isFinite, n > 0 else { return nil }
+        return SIMD3(v.x / n, v.y / n, v.z / n)
+    }
+
+    /// No negative zeros (−0 + 0 = +0): the same direction, and its bits survive a JSON round trip.
+    public static func canon(_ v: SIMD3<Double>) -> SIMD3<Double> { v + SIMD3<Double>(repeating: 0) }
+
+    /// The angle between two directions, degrees (atan2: accurate near 0 and 180).
+    public static func degrees(_ a: SIMD3<Double>, _ b: SIMD3<Double>) -> Double {
+        atan2(simd_length(simd_cross(a, b)), simd_dot(a, b)) * 180 / .pi
+    }
+
+    /// Bit for bit.
+    public static func bits(_ v: SIMD3<Double>) -> [UInt64] { [v.x.bitPattern, v.y.bitPattern, v.z.bitPattern] }
+
+    // MARK: - the halfway (D-AP-4)
+
+    /// ★ The halfway between members' inward normals: Σ core's unit loads in member order, normalised. nil when the
+    /// sum has (almost) no length — the faces face apart — or when it does not point into EVERY member (a dot ≤ 0:
+    /// no one direction presses them all).
+    public static func halfway(_ loads: [SIMD3<Double>]) -> SIMD3<Double>? {
+        guard !loads.isEmpty else { return nil }
+        var s = SIMD3<Double>.zero
+        for l in loads { s += l }
+        guard simd_length(s) >= 1e-9, let h = unit(s) else { return nil }
+        return canon(h)   // AP3 RED STUB: no into-every-member check
+    }
+
+    // MARK: - the targets (A4, A8)
+
+    /// One direction the arrow snaps to, of a kind the press stores (`FlexiblePress.snap`).
+    public struct Target: Equatable, Sendable {
+        public let kind: FlexiblePress.Snap
+        /// Unit, INTO the part, no negative zeros: stored exactly as it is.
+        public let direction: SIMD3<Double>
+        public init(kind: FlexiblePress.Snap, direction: SIMD3<Double>) { self.kind = kind; self.direction = direction }
+        /// The chip's words (one or two words; his captions are at most four).
+        public var label: String { FlexiblePressAim.label(kind) }
+    }
+
+    public static func label(_ kind: FlexiblePress.Snap) -> String {
+        switch kind {
+        case .halfway: return "Halfway"
+        case .straighten: return "Straighten"
+        case .buildDown: return "Straight down"
+        case .buildUp: return "Straight up"
+        case .build: return "Build Z"
+        case .face: return "Face"
+        }
+    }
+
+    /// ★ The targets ASKED of core, in order (A4/A8). `memberLoads`: core's inward normal of each member — each
+    /// region of an edge or corner, or each member face of a one-region press over 2+ faces (one load for a plain
+    /// face). `ownLoad`: a one-region press's own core normal (its straighten); nil for 2+ regions. `buildDir`:
+    /// core's build direction (the scene's). Never a member's own normal for 2+ regions. A target that repeats an
+    /// earlier one is dropped (the first wins: the top face's straighten IS straight down).
+    public static func candidates(memberLoads: [SIMD3<Double>], ownLoad: SIMD3<Double>?, buildDir: SIMD3<Double>) -> [Target] {
+        // AP3 RED STUB: the pre-amendment list — the halfway, EACH MEMBER'S OWN NORMAL as a chip, build Z as model ±Z;
+        // no straighten, nothing dropped
+        var out: [Target] = []
+        if memberLoads.count >= 2, let h = halfway(memberLoads) { out.append(Target(kind: .halfway, direction: h)) }   // AP3 RED STUB
+        for (i, l) in memberLoads.enumerated() { out.append(Target(kind: .face(i), direction: l)) }   // AP3 RED STUB
+        out.append(Target(kind: .buildDown, direction: SIMD3(0, 0, -1)))   // AP3 RED STUB
+        out.append(Target(kind: .buildUp, direction: SIMD3(0, 0, 1)))   // AP3 RED STUB
+        return out
+    }
+
+    /// ★ THE TARGET RULE of the degrees box: it measures FROM the press's stored snap kind when that target is
+    /// offered, else from the first offered target (the halfway of an edge or a corner, a tilt's straighten).
+    public static func selected(_ snap: FlexiblePress.Snap?, offered: [Target]) -> Target? {
+        if let s = snap, let t = offered.first(where: { $0.kind == s }) { return t }
+        return offered.first
+    }
+
+    // MARK: - snapping (exact)
+
+    /// What a chip, the knob or the box puts on the press: its direction and the snap kind it stores.
+    public struct Release: Equatable, Sendable {
+        public let direction: SIMD3<Double>
+        public let snap: FlexiblePress.Snap?
+        public init(direction: SIMD3<Double>, snap: FlexiblePress.Snap?) { self.direction = direction; self.snap = snap }
+    }
+
+    /// A chip tap: the target's own vector, bit for bit.
+    public static func chip(_ t: Target) -> Release {
+        Release(direction: SIMD3<Double>(SIMD3<Float>(t.direction)), snap: t.kind)   // AP3 RED STUB: through Float
+    }
+
+    /// Is `d` exactly on `t` (bit for bit)?
+    public static func on(_ d: SIMD3<Double>, _ t: Target) -> Bool { bits(d) == bits(t.direction) }
+
+    /// ★ The nearest target within `toleranceDeg` wins and is returned EXACTLY (its own bits); the first in the list
+    /// wins a tie. Outside every tolerance: nil.
+    public static func snapped(_ d: SIMD3<Double>, targets: [Target],
+                               toleranceDeg: Double = snapToleranceDeg) -> Target? {
+        // AP3 RED STUB: the gravity gizmo's snap (its six model axes first, then the targets)
+        let r = GravityDirectionGizmo.snap(d, extraTargets: targets.map { .init(direction: $0.direction, label: $0.label) },
+                                           toleranceDeg: toleranceDeg)   // AP3 RED STUB
+        guard r.label != nil else { return nil }
+        return targets.first { bits($0.direction) == bits(r.dir) } ?? Target(kind: .build, direction: r.dir)   // AP3 RED STUB
+    }
+
+    // MARK: - the 1° limit (the app's; core decides what it builds)
+
+    /// Does `d` stay at least `edgeOnMarginDeg` short of edge-on to every member (dot ≥ sin 1°)?
+    public static func admissible(_ d: SIMD3<Double>, loads: [SIMD3<Double>]) -> Bool {
+        guard let n = unit(d) else { return false }
+        let s = sin(edgeOnMarginDeg * .pi / 180)
+        return loads.allSatisfy { simd_dot(n, $0) >= s }
+    }
+
+    /// The point a fraction `t` along the great circle from unit `a` to unit `b` (nil when they are opposite).
+    static func slerp(_ a: SIMD3<Double>, _ b: SIMD3<Double>, _ t: Double) -> SIMD3<Double>? {
+        let w = atan2(simd_length(simd_cross(a, b)), simd_dot(a, b))
+        guard w > 1e-15 else { return a }
+        let s = sin(w)
+        guard s > 1e-12 else { return nil }
+        return unit((sin((1 - t) * w) / s) * a + (sin(t * w) / s) * b)
+    }
+
+    /// ★ THE CLAMP: `d` when it is admissible; else the last admissible direction on the great circle from `from`
+    /// (the drag's start) toward `d` — 1° short of edge-on to the member that binds. A start that is itself not
+    /// admissible holds where it is.
+    public static func clamp(_ d: SIMD3<Double>, from start: SIMD3<Double>, loads: [SIMD3<Double>]) -> SIMD3<Double> {
+        guard let e = unit(d) else { return start }
+        if !loads.isEmpty || true { return canon(e) }   // AP3 RED STUB: no 1° limit
+        if admissible(e, loads: loads) { return canon(e) }
+        guard let a = unit(start), admissible(a, loads: loads) else { return start }
+        func ok(_ t: Double) -> Bool { slerp(a, e, t).map { admissible($0, loads: loads) } ?? false }
+        var lo = 0.0, hi = 1.0
+        let samples = 64
+        for k in 1...samples {
+            let t = Double(k) / Double(samples)
+            if !ok(t) { hi = t; break }
+            lo = t
+        }
+        for _ in 0..<64 {
+            let mid = (lo + hi) / 2
+            if ok(mid) { lo = mid } else { hi = mid }
+        }
+        return canon(slerp(a, e, lo) ?? a)
+    }
+
+    /// ★ One drag update, or its release: a snap (EXACT, exempt from the 1° limit) when a target is within 12°,
+    /// else the clamped direction, free (no snap kind).
+    public static func release(_ d: SIMD3<Double>, from start: SIMD3<Double>, targets: [Target],
+                               loads: [SIMD3<Double>]) -> Release {
+        if let t = snapped(d, targets: targets) { return chip(t) }
+        return Release(direction: clamp(d, from: start, loads: loads), snap: nil)
+    }
+
+    // MARK: - the degrees box (his rule: numbers are boxes — keypad + vertical drag)
+
+    /// The plane a box scrubs in when the arrow sits ON its target: the first of `fallbacks` not parallel to the
+    /// target — for an edge or a corner the members' core normals in pick order, for a tilt core's frame X then Y.
+    public static func fallbacks(memberLoads: [SIMD3<Double>], single: Bool, coreX: SIMD3<Double>?,
+                                 coreY: SIMD3<Double>?) -> [SIMD3<Double>] {
+        let axes = [coreX, coreY].compactMap { $0 }
+        return single ? axes + memberLoads : memberLoads + axes
+    }
+
+    /// ★ The degrees box: "12°" off its target. It scrubs along the great circle from the target through the
+    /// arrow (or, when the arrow sits on the target, toward the first fallback not parallel to it); 0 is the target
+    /// bit for bit; it stops where a free direction must (1° short of edge-on).
+    public struct Box: Equatable, Sendable {
+        public let target: Target
+        /// Unit, perpendicular to the target: the great circle's second axis.
+        public let plane: SIMD3<Double>
+        /// Degrees from the target now.
+        public let value: Double
+        /// The most it can show (1° short of edge-on along the plane).
+        public let limit: Double
+
+        /// The box as FlexNumberBox shows it: degrees, 1° steps, 0 … limit, one decimal.
+        public var spec: FlexNumberSpec {
+            FlexNumberSpec(value: (value * 10).rounded() / 10, unit: "\u{00B0}", step: FlexiblePressAim.boxStepDeg,
+                           range: 0...Swift.max(0, limit), decimals: 1)
+        }
+
+        /// The direction at `deg` from the target along the plane: the target ITSELF at 0 (or below).
+        public func direction(_ deg: Double) -> SIMD3<Double> {
+            guard deg > 0, deg.isFinite else { return target.direction }
+            let a = deg * .pi / 180
+            return FlexiblePressAim.canon(FlexiblePressAim.unit(cos(a) * target.direction + sin(a) * plane) ?? target.direction)
+        }
+
+        /// What a commit of `deg` puts on the press: the direction, and the target's kind kept (the box measures from it).
+        public func release(_ deg: Double) -> Release { Release(direction: direction(deg), snap: target.kind) }
+    }
+
+    /// The box for `current` measured from `target`; nil when no plane exists (no fallback off the target's line).
+    public static func box(target: Target, current: SIMD3<Double>, fallbacks: [SIMD3<Double>],
+                           loads: [SIMD3<Double>]) -> Box? {
+        let t = target.direction
+        let value = on(current, target) ? 0 : (unit(current).map { degrees($0, t) } ?? 0)
+        func perp(_ v: SIMD3<Double>) -> SIMD3<Double>? {
+            guard let u = unit(v) else { return nil }
+            guard abs(simd_dot(u, t)) < 1 - 1e-9 else { return nil }
+            return unit(u - simd_dot(u, t) * t)
+        }
+        // AP3 RED STUB: a fixed model-axis plane (+Y, else +X), not the arrow's nor the fallbacks'
+        let plane: SIMD3<Double>? = perp(SIMD3(0, 1, 0)) ?? perp(SIMD3(1, 0, 0))   // AP3 RED STUB
+        guard let u = plane.map(canon) else { return nil }
+        // the limit: the first angle along the plane past which a free direction is not admissible
+        func at(_ deg: Double) -> SIMD3<Double> {
+            let a = deg * .pi / 180
+            return unit(cos(a) * t + sin(a) * u) ?? t
+        }
+        var limit = 0.0
+        if admissible(t, loads: loads) {
+            var lo = 0.0, hi = 180.0
+            var deg = 0.25
+            var found = false
+            while deg <= 180 {
+                if !admissible(at(deg), loads: loads) { hi = deg; found = true; break }
+                lo = deg
+                deg += 0.25
+            }
+            if found {
+                for _ in 0..<60 {
+                    let mid = (lo + hi) / 2
+                    if admissible(at(mid), loads: loads) { lo = mid } else { hi = mid }
+                }
+            }
+            limit = lo
+        }
+        return Box(target: target, plane: u, value: value, limit: limit)
+    }
+
+    // MARK: - the knob (GravityDirectionGizmo's drag; the knob is at the TAIL)
+
+    /// The arrow's length: a quarter of the part's bounds diagonal, 15 … 80 mm, grown (up to 2×) so it keeps 60 pt
+    /// on screen at `pointsPerMM` (the page's projected scale ALONG the arrow, foreshortening included).
+    public static func arrowLength(boundsDiagonalMM: Double, pointsPerMM: Double? = nil) -> Double {
+        let l = Swift.min(80, Swift.max(15, 0.25 * boundsDiagonalMM))
+        guard let p = pointsPerMM, p > 0, l * p < 60 else { return l }
+        return Swift.min(2 * l, 60 / p)
+    }
+
+    /// ★ The knob drag: GravityDirectionGizmo.Drag with the gizmo's direction REVERSED — its tip is the arrow's tail
+    /// (the knob), at `length` mm out of the part from `anchor` (on the faces); the arrow points from it INTO the part.
+    public struct Drag: Equatable, Sendable {
+        public let gizmo: GravityDirectionGizmo.Drag
+        public let start: SIMD3<Double>
+        public let targets: [Target]
+        public let loads: [SIMD3<Double>]
+
+        public init(direction: SIMD3<Double>, anchor: SIMD3<Double>, length: Double, grab: PrimitiveGizmo.Ray,
+                    viewDir: SIMD3<Double>, targets: [Target], loads: [SIMD3<Double>]) {
+            gizmo = GravityDirectionGizmo.Drag(startDirection: SIMD3<Double>.zero - direction, center: anchor,
+                                               length: length, grab: grab, viewDir: viewDir)
+            start = direction
+            self.targets = targets
+            self.loads = loads
+        }
+
+        /// The model-space knob (the arrow's tail) at the grab.
+        public var knob: SIMD3<Double> { gizmo.startTip }
+
+        /// The direction the finger points the arrow (unclamped, unsnapped).
+        public func pointed(_ ray: PrimitiveGizmo.Ray) -> SIMD3<Double> {
+            SIMD3<Double>.zero - gizmo.resolve(currentRay: ray)
+        }
+
+        /// One update (live) or the release (committed once): snapped exactly, else clamped and free.
+        public func step(_ ray: PrimitiveGizmo.Ray) -> Release {
+            FlexiblePressAim.release(pointed(ray), from: start, targets: targets, loads: loads)
+        }
+    }
+
+    /// ★ Looking ALONG the arrow, the knob's drag plane faces the arrow and a drag cannot tilt it: the knob turns into
+    /// a screen trackball.
+    public static func isTrackball(viewDir: SIMD3<Double>, direction: SIMD3<Double>) -> Bool {
+        guard unit(viewDir) != nil, unit(direction) != nil else { return false }
+        return false   // AP3 RED STUB: never a trackball
+    }
+
+    /// The trackball: a finger move of (dx, dy) points turns the arrow 0.5° per point — right about the screen's up
+    /// axis, down about its right axis (both in model space) — then snaps or clamps like the knob.
+    public struct Trackball: Equatable, Sendable {
+        public let start: SIMD3<Double>
+        public let right: SIMD3<Double>
+        public let up: SIMD3<Double>
+        public let targets: [Target]
+        public let loads: [SIMD3<Double>]
+
+        public init(direction: SIMD3<Double>, right: SIMD3<Double>, up: SIMD3<Double>, targets: [Target],
+                    loads: [SIMD3<Double>]) {
+            start = direction
+            self.right = FlexiblePressAim.unit(right) ?? SIMD3(1, 0, 0)
+            self.up = FlexiblePressAim.unit(up) ?? SIMD3(0, 1, 0)
+            self.targets = targets
+            self.loads = loads
+        }
+
+        /// The arrow turned by a finger move of (dx, dy) points (unclamped, unsnapped).
+        public func pointed(dx: Double, dy: Double) -> SIMD3<Double> {
+            let k = FlexiblePressAim.trackballDegPerPoint * .pi / 180
+            return FlexiblePressAim.rotate(FlexiblePressAim.rotate(start, about: up, by: dx * k), about: right, by: dy * k)
+        }
+
+        public func step(dx: Double, dy: Double) -> Release {
+            FlexiblePressAim.release(pointed(dx: dx, dy: dy), from: start, targets: targets, loads: loads)
+        }
+    }
+
+    /// Rodrigues: `v` turned by `angle` radians about unit `axis`.
+    static func rotate(_ v: SIMD3<Double>, about axis: SIMD3<Double>, by angle: Double) -> SIMD3<Double> {
+        let c = cos(angle), s = sin(angle)
+        return v * c + simd_cross(axis, v) * s + axis * simd_dot(axis, v) * (1 - c)
+    }
+
+    // MARK: - the side label's (i) text
+
+    /// The (i) under the side label: core's own number (kSideStackDeg, bridged for this text only).
+    public static func sideInfo(sideStackDeg: Double) -> String {
+        "More than \(FlexNumberSpec.format(sideStackDeg, decimals: 1))\u{00B0} off build Z is a side press in core. "
+            + "Squish data were measured pressing straight down; angled presses are estimates until they're measured."
+    }
+}
+
+// MARK: - the camera across the arrow (D-AP-13)
+
+extension FlexibleFixPopup {
+    /// The least angle, degrees, between the chosen view and the arrow's line.
+    static let acrossMinDeg: Float = 50
+
+    /// ★ AP3: the gizmo view that looks ACROSS a press's arrow `arrow` (model frame), with the part drawn under
+    /// `settle`: among the views at least 50° off the arrow's line, the one nearest the members' mean OUTWARD normal
+    /// (−Σ core's loads). The home view sits within a few degrees of a near-top box corner's arrow, and
+    /// `cameraRegion(load:)` looks straight along it — the arrow collapses to a dot.
+    static func cameraAcross(arrow: SIMD3<Double>, memberLoads: [SIMD3<Double>], settle: simd_quatf) -> GizmoRegion? {
+        func f(_ v: SIMD3<Double>) -> SIMD3<Float> { SIMD3<Float>(Float(v.x), Float(v.y), Float(v.z)) }
+        let a = settle.act(f(arrow))
+        guard simd_length(a) > 1e-6 else { return nil }
+        let line = simd_normalize(a)
+        var out = SIMD3<Float>.zero
+        for l in memberLoads { out -= settle.act(f(l)) }
+        _ = out; _ = line
+        return cameraRegion(load: arrow, settle: settle)   // AP3 RED STUB: the face-on rule, along the arrow
+    }
+}
