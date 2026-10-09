@@ -215,6 +215,8 @@ public final class FlexibleMainStage: ObservableObject {
     var overlaySerial = 0
     /// ★ ROUND 6: the main page's prisms, and the state they were built for (`volumes`).
     var volumesCache: (key: String, items: [ClearanceRenderItem])?
+    /// ★ S1b: the model's views, observed (`ensure`).
+    private var viewsObservation: AnyCancellable?
     /// The lattice generation the loop started its FE sequence for (from rest).
     var fePlayedGeneration: Int?
     // ★ BATCH G VERIFICATION: the loop starts by (generation, the sequence ASKED FOR) — not by the
@@ -323,6 +325,10 @@ public final class FlexibleMainStage: ObservableObject {
         projectObservation = project.objectWillChange
             .debounce(for: .milliseconds(250), scheduler: RunLoop.main)
             .sink { [weak self] _ in self?.projectChanged() }
+        // ★ S1b: the views ([Prisms] here, either view on Settings) redraw what the main page draws from them — H15's
+        // list, the legend card's Prisms row, the button — at once (never the first value: this runs in a view's init)
+        viewsObservation = m.$views.dropFirst().removeDuplicates()
+            .sink { [weak self] _ in self?.objectWillChange.send() }
         return m
     }
 
@@ -434,7 +440,7 @@ public final class FlexibleMainStage: ObservableObject {
     /// while a legend reads. Cached per state (the workspace's body asks on every pass).
     public func volumes(_ project: ProjectModel, on stage: WorkspaceStage, drilledIn: Bool) -> [ClearanceRenderItem] {
         guard !drilledIn, !frozen, let m = current(project, stage) else { return [] }
-        let k = channels.map { $0.exaggeration > 0 ? $0.exaggeration : 1 } ?? 1
+        let k = prismK   // ★ S1b: the page's ONE k (the tags and the legend's ×k read it too)
         let active = project.selection.activeGroup
         let key = "\(k)|\(m.views.rawValue)|\(active.map { "\($0.id)\($0.faces)\($0.regionIDs)" } ?? "-")|\(m.settings.hashValue)|"
             + "\(m.stacks.count)|\(m.geometry.count)|\(m.stampGrids.count)"
@@ -471,11 +477,27 @@ public final class FlexibleMainStage: ObservableObject {
     public var prismK: Double { channels.map { FlexibleStageVolumes.prismK($0.exaggeration) } ?? 1 }
     /// The Prisms row's "×k".
     public var prismLegendK: Int { Int(prismK.rounded()) }
-    /// ★ S1b: the legend card carries the Prisms row (STUB — the tests-first commit).
-    public var legendPrismsRow: Bool { false }
-    /// ★ S1b: the main page's read-only mm tags (STUB — the tests-first commit).
+    /// ★ S1b: the Prisms view is on (the main page's [Prisms]; the model's own `views`, which Settings shares).
+    public var prismsOn: Bool { model?.views.contains(.prisms) == true }
+    /// ★ S1b: the main page's ONE legend card carries the Prisms row while [Prisms] is on.
+    public var legendPrismsRow: Bool { prismsOn }
+    /// ★ S1b (round 6 item 3 — his img3: "When a face … is highlighted, we should automatically be able to see the
+    /// amount of squish it has been set to"): the main page's READ-ONLY "%.1f mm" tags, one per prism H15 draws (the
+    /// active Selections group's pressed faces, or every one in the Prisms view), at the prism's FLOOR — where the
+    /// number belongs, as on Settings — greedy against overlaps (the larger face first), none under a keep-out or off
+    /// screen; [] wherever `volumes` is (off the Flexible stage, under a page, while a legend reads). Never a tap: the
+    /// main page has no chip — the mm is changed in Settings.
     func prismTags(_ project: ProjectModel, on stage: WorkspaceStage, drilledIn: Bool, viewport: CGSize, keepOut: [CGRect],
-                          projector: (SIMD3<Float>) -> CGPoint?) -> [FlexibleStageViewTags.Tag] { [] }
+                   projector: (SIMD3<Float>) -> CGPoint?) -> [FlexibleStageViewTags.Tag] {
+        guard let m = current(project, stage) else { return [] }
+        let cands: [(columns: Int, tag: FlexibleStageViewTags.Tag)] = volumes(project, on: stage, drilledIn: drilledIn).compactMap { item in
+            let r = item.volume.faceID
+            guard let f = m.settings.face(r), let h = FlexibleDepthPrism.handle(item.volume), let p = projector(h.anchor) else { return nil }
+            let columns = m.key(r).flatMap { m.stacks[$0]?.columns.count } ?? 0
+            return (columns, FlexibleStageViewTags.Tag(region: r, text: String(format: "%.1f mm", f.deepestMM), point: p))
+        }
+        return FlexibleStageViewTags.greedy(cands, keepOut: keepOut, viewport: viewport)
+    }
 
     /// ★ ROUND 6 (item 3): the main page's [Prisms] — the Prisms view, and the Lattice view (the X-ray) with it
     /// (a view that needs another turns it on itself). The button itself joins the toggles on the S1 base.

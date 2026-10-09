@@ -18,7 +18,7 @@
 // another stage "Building…" (and a Ready his edits there made stale) takes him to the Lattice
 // stage, where builds start.
 //
-// Also here: the Flexible view toggles (H5 — Dent heat, Stress, Lattice; C2: no X-ray button)
+// Also here: the Flexible view toggles (H5 — Dent heat, Stress, Lattice; C2: no X-ray button; ★ S1b: [Prisms])
 // and the main page's squish player slot.
 
 import SwiftUI
@@ -133,7 +133,8 @@ public struct FlexibleMainViewToggles: View {
 
     static let heatIcon = "thermometer.medium"
     static let stressIcon = "waveform.path.ecg"
-    static let buttons = 3
+    /// ★ S1b (round 6 item 3): Dent heat, Stress, Lattice and [Prisms] (the Settings page's own button and glyph).
+    static let buttons = 4
 
     public var body: some View {
         // the workspace's solver (no publish: its sim's phase arrives on the next run-loop turn)
@@ -159,6 +160,11 @@ public struct FlexibleMainViewToggles: View {
                         main.latticeButtonTapped(openSettings: openSettings)
                     }
                         .accessibilityIdentifier("flexible-main-view-lattice")
+                    // ★ S1b (round 6 item 3 — his img3: "a view that turns on/off ALL squish prisms"): every pressed
+                    // face's prism, faint, with its mm; it turns the Lattice view (the X-ray) on itself
+                    FlexibleViewButton(icon: FlexibleStageViews.prismsIcon, label: "Prisms", on: main.prismsOn,
+                                       action: { main.togglePrisms() }, glyph: FlexibleStageViews.prismsGlyph(on: main.prismsOn))
+                        .accessibilityIdentifier("flexible-main-view-prisms")
                 }
                 .latticeBandChipKeepOut()
             }
@@ -168,7 +174,7 @@ public struct FlexibleMainViewToggles: View {
         }
     }
 
-    /// Where the toggles sit, for the player's and the legends' keep-outs: the row (three 40 pt
+    /// Where the toggles sit, for the player's and the legends' keep-outs: the row (★ S1b: four 40 pt
     /// buttons, `s` apart) AND the note's band beside it (★ C2: reserved, so a note coming and
     /// going never moves a legend; ★ C2 VERIFICATION: on the row's line, so it ends where the row
     /// ends and costs the legends nothing).
@@ -222,6 +228,23 @@ public struct FlexibleMainPlayerSlot: View {
         return k
     }
 
+    /// Where a player of `size` goes: clear of the buttons, the left panel, the chip column and the ONE legend card
+    /// (★ S1b: the card itself — it now comes for [Prisms]' row with no scale, where no kind names it).
+    static func place(main: FlexibleMainStage, viewport v: CGSize, bottomClearance: CGFloat, chipColumnWidth: CGFloat,
+                      size: CGSize) -> CGRect? {
+        FlexibleLegendPlacement.player(viewport: v, bottomClearance: bottomClearance,
+                                       keepOut: keepOut(viewport: v, bottomClearance: bottomClearance, chipColumnWidth: chipColumnWidth,
+                                                        legends: main.legendCard(viewport: v, bottomClearance: bottomClearance,
+                                                                                 chipColumnWidth: chipColumnWidth).map { [$0.frame] } ?? []),
+                                       size: size)
+    }
+    /// ★ S1b: where the player is now (nil while it does not show) — the main page's mm tags keep clear of it.
+    static func frame(main: FlexibleMainStage, viewport v: CGSize, bottomClearance: CGFloat, chipColumnWidth: CGFloat) -> CGRect? {
+        guard main.playerShown else { return nil }
+        return place(main: main, viewport: v, bottomClearance: bottomClearance, chipColumnWidth: chipColumnWidth,
+                     size: FlexibleSquishPlayer.size(picker: main.sims.count > 1, note: main.simNote != nil))
+    }
+
     public var body: some View {
         GeometryReader { g in
             // ★ ROUND 4 (D2): the group picker widens it, a group's miss line heightens it — the
@@ -229,12 +252,8 @@ public struct FlexibleMainPlayerSlot: View {
             let sims = main.sims, note = main.simNote
             let size = FlexibleSquishPlayer.size(picker: sims.count > 1, note: note != nil)
             if main.playerShown,
-               let r = FlexibleLegendPlacement.player(viewport: g.size, bottomClearance: bottomClearance,
-                                                      keepOut: Self.keepOut(viewport: g.size, bottomClearance: bottomClearance,
-                                                                            chipColumnWidth: chipColumnWidth,
-                                                                            legends: main.legendFrames(viewport: g.size, bottomClearance: bottomClearance,
-                                                                                                       chipColumnWidth: chipColumnWidth).values.map(\.frame)),
-                                                      size: size) {
+               let r = Self.place(main: main, viewport: g.size, bottomClearance: bottomClearance, chipColumnWidth: chipColumnWidth,
+                                  size: size) {
                 FlexibleSquishPlayer(loop: main.loop, fullLabel: main.fullLabel, width: r.width,
                                      playAllLive: main.playAllLive, noteFor: { main.simNote(playing: $0) },   // ★ G verification: the playing group
                                      sims: sims, shown: main.shownSimInfo, onPick: { main.pick($0) }, note: note,

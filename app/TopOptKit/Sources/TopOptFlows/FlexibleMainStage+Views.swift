@@ -206,12 +206,17 @@ extension FlexibleMainStage {
     /// button; nil with nothing to show.
     public func legendCard(viewport: CGSize, bottomClearance: CGFloat, chipColumnWidth: CGFloat) -> FlexibleMainLegendLayout.Placed? {
         let kinds = legendKinds
-        guard !kinds.isEmpty else { return nil }
+        // ★ S1b (round 6 item 3): [Prisms]' one line rides the ONE card — which comes for it with no scale too
+        let views = legendPrismsRow ? 1 : 0
+        guard !kinds.isEmpty || views > 0 else { return nil }
         let keep = FlexibleMainLegendLayout.keepOut(viewport: viewport, bottomClearance: bottomClearance,
                                                     chipColumnWidth: chipColumnWidth)
-        // ★ BATCH M VERIFICATION: folded, on the screen's very edge — the octet's minimised key
+        // ★ BATCH M VERIFICATION: folded, on the screen's very edge — the octet's minimised key (a column of the scales'
+        // bars: with no scale there is nothing to fold, so the card stays open for its row)
+        let legendMinimized = self.legendMinimized && !kinds.isEmpty
         return FlexibleMainLegendLayout.placeCard(rows: kinds.count, minimized: legendMinimized, viewport: viewport, keepOut: keep,
-                                                  edge: legendMinimized ? FlexibleMainLegendLayout.foldedEdge : PageChrome.edge)
+                                                  edge: legendMinimized ? FlexibleMainLegendLayout.foldedEdge : PageChrome.edge,
+                                                  viewRows: legendMinimized ? 0 : views)
     }
 
     /// Where the legend is, per kind (the player keeps clear of these): ★ BATCH M (M4) every kind
@@ -237,7 +242,8 @@ extension FlexibleMainStage {
         switch legendKinds.first {
         case .dent: return dentInfo
         case .stress: return stressInfo
-        default: return FlexibleReadKind.lattice.info
+        case .lattice: return FlexibleReadKind.lattice.info
+        case nil: return legendPrismsRow ? FlexibleRowCopy.Info.mainPrisms : FlexibleReadKind.lattice.info   // ★ S1b: [Prisms]' row alone
         }
     }
 

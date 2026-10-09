@@ -209,6 +209,65 @@ final class FlexibleRound6EvidenceProbe: XCTestCase {
         print("FLEX-R6-EVIDENCE main: \(vols.count) prisms in the Prisms view")
     }
 
+    /// ★ S1b (round 6 item 3, the main page, H15 in): what the main Flexible page hands the viewer now — FlexibleMainStage's
+    /// mesh / tints / dents / lattice layer AND its `volumes` (H15's list: the active Selections group's faint prisms, or
+    /// every one with [Prisms]) — with the read-only mm tags drawn where the page projects them (`prismTags`, marked;
+    /// SwiftUI on the device). His A1_0003 (img1–img4) and his round-5 pad, each as saved, after Save & Exit. #354's own
+    /// depth planes (`stageVolumeItems`, the other half of H15's line) are not drawn here. Offscreen frames, not device
+    /// screenshots.
+    func testTheMainPagesPrismsAndTagsOnHisPadAndHisRound5() async throws {
+        guard Self.dir != nil else { throw XCTSkip("FLEX_R6_EVIDENCE_DIR") }
+        let device = try XCTUnwrap(MTLCreateSystemDefaultDevice())
+        let img1 = Cam(name: "img1", azimuth: .pi / 4, elevation: 0.62, zoom: 1)
+        for (label, r) in [("A1_0003", try FlexiblePressFixtures.a1Project(3, self)), ("r5", try FlexiblePressFixtures.hisRound5(self))] {
+            let stage = FlexibleMainStage()
+            stage.reduceMotion = { true }
+            let m = stage.model(for: r.project, materialsPath: FlexibleHisProject.materialsPath, stampsPath: FlexibleHisProject.stampsPath,
+                                persist: {})
+            addTeardownBlock { @MainActor in await m.waitForIdle() }
+            m.openScene()
+            try await FlexibleSquishFixture.settle(m, label)
+            stage.didExitSettings()
+            stage.apply(r.project, owned: true, pageUp: false)
+            try await FlexibleHisProject.waitFor(240, "the lattice (\(label))") { m.lattice != nil && !m.latticeBuilding }
+            stage.refresh()
+            let mesh = try XCTUnwrap(stage.mesh(r.project, on: .lattice))
+            let settle = r.project.force.settleRotation ?? simd_quatf(from: SIMD3<Float>(0, 0, -1), to: SIMD3<Float>(0, -1, 0))
+            func main(_ name: String, latticeOn: Bool) throws {
+                stage.latticeOn = latticeOn
+                stage.refresh()
+                let items = stage.volumes(r.project, on: .lattice, drilledIn: false)
+                let mr = try renderer(mesh: mesh, tints: stage.tints(r.project, on: .lattice, roles: [:], stress: nil),
+                                      dents: stage.dents(r.project, on: .lattice), scale: Float(stage.channels?.exaggeration ?? 1),
+                                      bodyAlpha: stage.bodyAlpha(r.project, on: .lattice) ?? 1, settle: settle, cam: img1, device: device,
+                                      items: items, layer: stage.layer(r.project, stage: .lattice, pageUp: false))
+                let proj = projection(mr)
+                let tags = stage.prismTags(r.project, on: .lattice, drilledIn: false, viewport: proj.viewportSize, keepOut: [],
+                                           projector: { proj.project($0) })
+                try write(mr, name, marks: tags.map { Mark(point: $0.point, text: $0.text, fill: DS.Surface.panel) })
+                print("FLEX-R6-S1b-EVIDENCE \(name): active \(r.project.selection.activeGroup?.name ?? "—") · views \(m.views.rawValue) · "
+                      + "lattice \(stage.latticeShown) · prisms \(items.map(\.volume.faceID)) k \(stage.prismK) · tags "
+                      + tags.map { "face \($0.region) \($0.text)" }.joined(separator: ", "))
+            }
+            m.views = []
+            print("FLEX-R6-S1b-EVIDENCE \(label) groups: " + r.project.selection.groups.map { "\($0.name) faces \($0.faces) regions \($0.regionIDs.count)" }.joined(separator: " · "))
+            // each main-page group that presses something, picked in Selections: its squish at once
+            for g in r.project.selection.groups {
+                r.project.selection.setActive(g.id)
+                guard !stage.volumes(r.project, on: .lattice, drilledIn: false).isEmpty else { continue }
+                let slug = g.name.replacingOccurrences(of: " ", with: "_")
+                try main("R6_S1b_M_\(label)_\(slug)_active_lattice_on.png", latticeOn: true)
+                try main("R6_S1b_M_\(label)_\(slug)_active_lattice_off.png", latticeOn: false)
+            }
+            // [Prisms]: every prism, the Lattice view with it
+            stage.latticeOn = false
+            stage.togglePrisms()
+            try main("R6_S1b_M_\(label)_prisms_view.png", latticeOn: stage.latticeOn)
+            stage.togglePrisms()
+            m.views = []
+        }
+    }
+
     /// ★ THE NINE-GROUP DISCS: the octagonal prism, nine groups (1 and 9 share green), the Groups view.
     func testTheNineGroupDiscs() async throws {
         guard Self.dir != nil else { throw XCTSkip("FLEX_R6_EVIDENCE_DIR") }

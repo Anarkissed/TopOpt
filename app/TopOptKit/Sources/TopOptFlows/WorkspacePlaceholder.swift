@@ -1013,7 +1013,7 @@ public struct WorkspacePlaceholder: View {
                               (showLatticePage
                                || (force.phase == .edit && !fullScreenPageUp))
                               && !legendDrilledIn
-                              ? stageVolumeItems : [],
+                              ? stageVolumeItems + flexibleMain.volumes(project, on: stage, drilledIn: legendDrilledIn) : flexibleMain.volumes(project, on: stage, drilledIn: legendDrilledIn),   // Flexible (PR #362) H15: the main page's faint prisms (the active group's, or the Prisms view's) — [] off the Flexible stage (FlexibleMainStage.volumes)
                           // Strut preview (2026-07-30 alignment handoff, bar A3): while the
                           // raymarched lattice layer is up there is ONE visible object — the
                           // body is not drawn at all (alpha 0), it only keeps serving the

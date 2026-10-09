@@ -116,7 +116,11 @@ final class FlexibleLegendPlacementTests: XCTestCase {
                       "…against the panel, the legend, the top row and the readiness line")
         XCTAssertFalse(page.contains("latticeControls"), "no bottom-right buttons on the Settings page")
         let pill = try FlexibleSource.code("FlexibleMainStatusPill.swift")
-        XCTAssertTrue(pill.contains("FlexibleLegendPlacement.player(viewport: g.size, bottomClearance: bottomClearance,"),
+        // ★ RE-PINNED (S1b): the slot's placement is lifted into `place` (the main page's mm tags keep clear of the same
+        // frame); the body calls it with the view's size
+        XCTAssertTrue(pill.contains("FlexibleLegendPlacement.player(viewport: v, bottomClearance: bottomClearance,"),
                       "the main page computes the player's frame")
+        XCTAssertTrue(pill.contains("let r = Self.place(main: main, viewport: g.size, bottomClearance: bottomClearance, chipColumnWidth: chipColumnWidth,"),
+                      "…in the slot's body, at the view's size")
     }
 }

@@ -31,6 +31,14 @@ public struct FlexibleStageViews: OptionSet, Hashable, Sendable {
         (.groups, "circle.grid.2x2", "Groups", "flexible-settings-view-groups"),
     ]
     static let buttonSize: CGFloat = 40
+    /// [Prisms]' SF symbol (its glyph's, and the accessibility fallback) — ★ S1b: the main page's [Prisms] too.
+    static let prismsIcon = "arrow.down.to.line"
+    /// ★ S1b: [Prisms]' glyph, ONE for both pages — "down to a depth" in the prisms' own purple when on.
+    static func prismsGlyph(on: Bool) -> AnyView {
+        AnyView(Image(systemName: prismsIcon)
+            .font(.system(size: 15, weight: .semibold))
+            .foregroundStyle(on ? FlexibleStageStyle.facePrismKnob.color : DS.Color.textTertiary.color))
+    }
     /// ★ R6 REVIEW: the [Groups] glyph's three dots — his first three groups' colours, the palette's after them.
     @MainActor static func glyphColours(model: FlexibleStageModel) -> [RGBA] {
         let gs = model.squeezeGroups.prefix(3).map { model.groupColour($0) }
@@ -89,9 +97,7 @@ struct FlexibleStageViewButtons: View {
             }
             .opacity(on ? 1 : 0.6))
         }
-        return AnyView(Image(systemName: FlexibleStageViews.buttons.first { $0.view == v }?.icon ?? "questionmark")
-            .font(.system(size: 15, weight: .semibold))
-            .foregroundStyle(on ? FlexibleStageStyle.facePrismKnob.color : DS.Color.textTertiary.color))
+        return FlexibleStageViews.prismsGlyph(on: on)   // ★ S1b: the one [Prisms] glyph (the main page's too)
     }
 }
 

@@ -37,10 +37,16 @@ enum FlexibleStageViewTags {
         let cands: [(columns: Int, tag: Tag)] = floors(model: m, k: k).compactMap { f in
             proj.project(f.anchor).map { (f.columns, Tag(region: f.region, text: f.text, point: $0)) }
         }
+        return greedy(cands, keepOut: keepOut, viewport: proj.viewportSize)
+    }
+
+    /// The tags that show, of `cands`: greedy against overlaps (the larger face — more columns — first, then the lower
+    /// region), none under a keep-out or off screen. ★ S1b: one rule for both pages (the main page's tags too).
+    static func greedy(_ cands: [(columns: Int, tag: Tag)], keepOut: [CGRect], viewport: CGSize) -> [Tag] {
         var out: [Tag] = []
         for c in cands.sorted(by: { $0.columns != $1.columns ? $0.columns > $1.columns : $0.tag.region < $1.tag.region }) {
             let fr = frame(c.tag)
-            guard FlexibleDepthChipLayout.visible(c.tag.point, keepOut: keepOut, viewport: proj.viewportSize),
+            guard FlexibleDepthChipLayout.visible(c.tag.point, keepOut: keepOut, viewport: viewport),
                   !keepOut.contains(where: { $0.intersects(fr) }),
                   !out.contains(where: { frame($0).intersects(fr) }) else { continue }
             out.append(c.tag)

@@ -79,8 +79,11 @@ public enum FlexibleMainLegendLayout {
     public static let foldedBar = CGSize(width: 18, height: 150)
     public static let foldedSpacing: CGFloat = 30
     public static let foldedEdge: CGFloat = 0
-    /// ★ S1b (round 6 item 3): a view's one-line row in the card (the Prisms row) — STUB in the tests-first commit.
-    public static let viewRowHeight: CGFloat = 22
+    /// ★ S1b (round 6 item 3): a view's one-line row in the card (the Prisms row): the card's 12 pt row spacing and
+    /// one 12 pt line, with room to spare.
+    public static let viewRowHeight: CGFloat = 30
+    /// The card with no scale, only view rows: the header (#354's chrome, 41 pt) and its content padding.
+    public static let viewOnlyHeight: CGFloat = 66
     public static func cardSize(rows: Int, minimized: Bool, viewRows: Int = 0) -> CGSize {
         let n = CGFloat(Swift.max(1, rows))
         if minimized {
@@ -88,14 +91,17 @@ public enum FlexibleMainLegendLayout {
             return CGSize(width: n * (foldedBar.width + foldedSpacing) + 12 + 2 * DS.Space.s,
                           height: foldedBar.height + 2 * DS.Space.s)
         }
-        return CGSize(width: width, height: height + (n - 1) * rowHeight)
+        // ★ S1b: [Prisms] adds its one line; with no scale the card is the header and that line
+        let views = CGFloat(Swift.max(0, viewRows)) * viewRowHeight
+        if rows <= 0, viewRows > 0 { return CGSize(width: width, height: viewOnlyHeight + views - DS.Space.m) }
+        return CGSize(width: width, height: height + (n - 1) * rowHeight + views)
     }
 
     /// ★ BATCH M (M4): where the ONE card goes — the trailing edge from the vertical centre out, clear
     /// of every button (the same search as one legend), then a second column; nil when nothing fits.
     public static func placeCard(rows: Int, minimized: Bool, viewport v: CGSize, keepOut: [CGRect],
-                                 edge: CGFloat = PageChrome.edge) -> Placed? {
-        let size = cardSize(rows: rows, minimized: minimized)
+                                 edge: CGFloat = PageChrome.edge, viewRows: Int = 0) -> Placed? {
+        let size = cardSize(rows: rows, minimized: minimized, viewRows: viewRows)
         let gap = FlexibleLegendPlacement.gap
         let blockers = keepOut.map { $0.insetBy(dx: -gap, dy: -gap) }
         for c in 0..<columns {
@@ -190,6 +196,8 @@ public struct FlexibleMainLegends: View {
     }
 
     private var drilled: FlexibleReadKind? { FlexibleReadKind(mode: mode) }
+    /// ★ S1b: the card's header with no scale to read (only [Prisms]' row) — nothing to tap.
+    static let prismsOnlyTab = "SQUISH PRISMS"
 
     public var body: some View {
         // the view a tap comes through, for the readings (no publish)
@@ -199,11 +207,18 @@ public struct FlexibleMainLegends: View {
             GeometryReader { g in
                 // ★ BATCH M (M4, his img 4: "The legends should combine into a singular modal. Please
                 // review the other lattice sections to understand"): ONE card, like the octet's key
-                if !kinds.isEmpty, let p = main.legendCard(viewport: g.size, bottomClearance: bottomClearance, chipColumnWidth: chipColumnWidth) {
+                // ★ S1b: …and [Prisms]' row in it (the card comes for that row even with no scale)
+                if let p = main.legendCard(viewport: g.size, bottomClearance: bottomClearance, chipColumnWidth: chipColumnWidth) {
                     card(kinds, p)
                         .frame(width: p.frame.width, height: p.frame.height, alignment: .top)
                         .position(x: p.frame.midX, y: p.frame.midY)
                 }
+            }
+            // ★ S1b (round 6 item 3): the shown prisms' read-only mm tags, at their floors, clear of the card, the
+            // buttons and the player
+            if let m = main.model {
+                FlexibleMainPrismTagsLayer(main: main, model: m, project: m.project, view: main.viewFrame,
+                                           drilledIn: mode.drilledIn, bottomClearance: bottomClearance, chipColumnWidth: chipColumnWidth)
             }
             callout
         }
@@ -236,10 +251,12 @@ public struct FlexibleMainLegends: View {
     /// whichever is under the finger); the caret folds it to a column of bars (tap to open).
     @ViewBuilder private func card(_ kinds: [FlexibleReadKind], _ p: FlexibleMainLegendLayout.Placed) -> some View {
         if p.expanded {
-            LatticeLegendChrome(tab: drilled != nil ? "TAP THE PART TO READ" : "TAP TO READ", width: p.frame.width,
-                                minimized: $main.legendMinimized, info: main.cardInfo) {
+            LatticeLegendChrome(tab: kinds.isEmpty ? Self.prismsOnlyTab : drilled != nil ? "TAP THE PART TO READ" : "TAP TO READ",
+                                width: p.frame.width, minimized: $main.legendMinimized, info: main.cardInfo) {
                 VStack(alignment: .leading, spacing: 12) {
                     ForEach(kinds) { k in content(k) }
+                    // ★ S1b (round 6 item 3): [Prisms]' one line — the Settings page's own row, at this page's k
+                    if main.legendPrismsRow { FlexibleLegendViewRows.prisms(k: main.prismLegendK) }
                 }
             }
             .overlay(RoundedRectangle(cornerRadius: DS.Radius.panel, style: .continuous)
@@ -420,6 +437,56 @@ struct FlexibleMainLegendRow: View {
             guard let e = main.latticeEnds() else { return ("", "") }
             return (e.lo, e.hi)
         }
+    }
+}
+
+/// ★ S1b (round 6 item 3 — his img3: "When a face … is highlighted, we should automatically be able to see the amount of
+/// squish it has been set to"): the main page's READ-ONLY mm tags (FlexibleMainStage.prismTags) — one per prism H15
+/// draws, at its floor, in the Settings page's tag style; never a tap (the mm is set in Settings). It observes the
+/// project (the active Selections group) and the model (the views), and is handed the camera (`view`), so a group
+/// picked, [Prisms] or a turn of the part re-places the tags at once. In the MTKView's own space (as the callout).
+struct FlexibleMainPrismTagsLayer: View {
+    @ObservedObject var main: FlexibleMainStage
+    @ObservedObject var model: FlexibleStageModel
+    @ObservedObject var project: ProjectModel
+    let view: LatticeBandChipFrame?
+    let drilledIn: Bool
+    let bottomClearance: CGFloat
+    let chipColumnWidth: CGFloat
+
+    var body: some View {
+        let tags = Self.tags(main: main, project: project, view: view, drilledIn: drilledIn,
+                             bottomClearance: bottomClearance, chipColumnWidth: chipColumnWidth)
+        ZStack(alignment: .topLeading) {
+            ForEach(tags, id: \.region) { t in
+                Text(t.text).font(.system(size: 12, weight: .semibold)).monospacedDigit()
+                    .foregroundStyle(DS.Color.textPrimary.color)
+                    .padding(.horizontal, 10).padding(.vertical, 5)
+                    .background(Capsule().fill(DS.Surface.panel.color.opacity(0.85))
+                        .overlay(Capsule().strokeBorder(FlexibleStageStyle.facePrismKnob.color, lineWidth: 1)))
+                    .fixedSize()
+                    .position(t.point)
+                    .accessibilityLabel("Squish \(t.text)")
+                    .accessibilityIdentifier("flexible-main-prism-tag-\(t.region)")
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .ignoresSafeArea()
+        .allowsHitTesting(false)
+        .preference(key: FlexibleViewMarksKey.self,
+                    value: Dictionary(tags.map { ("tag-\($0.region)", FlexibleStageViewTags.frame($0)) }) { a, _ in a })
+    }
+
+    /// The tags on screen: H15's prisms', clear of every button, the legend card and the player.
+    static func tags(main: FlexibleMainStage, project: ProjectModel, view: LatticeBandChipFrame?, drilledIn: Bool,
+                     bottomClearance: CGFloat, chipColumnWidth: CGFloat) -> [FlexibleStageViewTags.Tag] {
+        guard let view else { return [] }
+        let v = view.viewportSize
+        var keep = FlexibleMainLegendLayout.keepOut(viewport: v, bottomClearance: bottomClearance, chipColumnWidth: chipColumnWidth)
+        if let card = main.legendCard(viewport: v, bottomClearance: bottomClearance, chipColumnWidth: chipColumnWidth) { keep.append(card.frame) }
+        if let player = FlexibleMainPlayerSlot.frame(main: main, viewport: v, bottomClearance: bottomClearance,
+                                                     chipColumnWidth: chipColumnWidth) { keep.append(player) }
+        return main.prismTags(project, on: .lattice, drilledIn: drilledIn, viewport: v, keepOut: keep, projector: { view.project($0) })
     }
 }
 
