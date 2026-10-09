@@ -1,3 +1,4 @@
+#include <cstdio>
 #include "topopt/lattice.hpp"
 
 // kUnloadedUtilisationMax — the project's one definition of "this material carries
@@ -425,6 +426,44 @@ double octet_strut_diameter_mm(double rho, double cell_size_mm) {
   return d4 * (cell_size_mm / kOctetDiaCellMm);
 }
 
+double lattice_min_printable_cell_mm(LatticeTopology topo,
+                                     double min_extrudable_width_mm,
+                                     double max_relative_density) {
+  if (!(std::isfinite(min_extrudable_width_mm) && min_extrudable_width_mm > 0.0))
+    throw std::invalid_argument(
+        "lattice_min_printable_cell_mm: min_extrudable_width_mm must be finite and > 0");
+  const double band_top = lattice_rho_max(topo);
+  if (!(band_top > 0.0))
+    throw std::invalid_argument(
+        "lattice_min_printable_cell_mm: " + std::string(lattice_topology_name(topo)) +
+        " has no certifiable density band, so it has no densest printable cell");
+  // A cap of 0 or non-finite is NOT SENT -- the uncapped dense floor, which is what every
+  // path that had no cap parameter was computing.
+  const double rho_hi =
+      (std::isfinite(max_relative_density) && max_relative_density > 0.0)
+          ? std::min(band_top, max_relative_density)
+          : band_top;
+  // ★ A cap under the band's own floor leaves NO admissible density. Evaluating phi there
+  // would read outside the measured table and hand back a cell size derived from a
+  // density core has never measured. Named, not substituted.
+  const double band_lo = lattice_rho_min(topo);
+  if (rho_hi < band_lo) {
+    char msg[256];
+    std::snprintf(msg, sizeof msg,
+                  "lattice_min_printable_cell_mm: a cap of %.6g is below %s's band floor "
+                  "%.6g, so no density this job allows is one core has measured -- there "
+                  "is no smallest printable cell to report",
+                  max_relative_density, lattice_topology_name(topo), band_lo);
+    throw std::invalid_argument(msg);
+  }
+  const double per_mm = lattice_strut_diameter_mm(topo, rho_hi, 1.0);
+  if (!(per_mm > 0.0))
+    throw std::invalid_argument(
+        "lattice_min_printable_cell_mm: the diameter law returned no width at the capped "
+        "band top");
+  return min_extrudable_width_mm / per_mm;
+}
+
 double lattice_cell_printability_floor_mm(LatticeTopology topo,
                                           double min_extrudable_width_mm) {
   if (!(std::isfinite(min_extrudable_width_mm) && min_extrudable_width_mm > 0.0))
@@ -439,7 +478,8 @@ double lattice_cell_printability_floor_mm(LatticeTopology topo,
 }
 
 double lattice_min_density_for_strut(LatticeTopology topo, double cell_size_mm,
-                                     double min_extrudable_width_mm) {
+                                     double min_extrudable_width_mm,
+                                     double max_relative_density) {
   if (!(cell_size_mm > 0.0))
     throw std::invalid_argument(
         "lattice_min_density_for_strut: cell_size_mm must be > 0");
@@ -448,10 +488,24 @@ double lattice_min_density_for_strut(LatticeTopology topo, double cell_size_mm,
         "lattice_min_density_for_strut: min_extrudable_width_mm must be finite "
         "and > 0");
   const double rho_lo = lattice_rho_min(topo);
-  const double rho_hi = lattice_rho_max(topo);
-  if (!(rho_hi > 0.0))
+  const double band_top = lattice_rho_max(topo);
+  if (!(band_top > 0.0))
     throw std::invalid_argument(
         "lattice_min_density_for_strut: topology has no certifiable band");
+  // ★ D1: the ceiling this bisects against is the job's, not the band's. Uncapped it
+  // could return a density the job forbids, which grade_lattice then clamps -- so the
+  // floor it was handed and the floor it applied disagreed. 0 = not sent.
+  const double rho_hi = (std::isfinite(max_relative_density) && max_relative_density > 0.0)
+                            ? std::min(band_top, max_relative_density)
+                            : band_top;
+  if (rho_hi < rho_lo) {
+    char m[224];
+    std::snprintf(m, sizeof m,
+                  "lattice_min_density_for_strut: a cap of %.6g is below %s's band floor "
+                  "%.6g, so no density this job allows is one core has measured",
+                  max_relative_density, lattice_topology_name(topo), rho_lo);
+    throw std::invalid_argument(m);
+  }
 
   // The band floor already prints — nothing lighter is admissible anyway.
   if (lattice_strut_diameter_mm(topo, rho_lo, cell_size_mm) >= min_extrudable_width_mm)
@@ -484,7 +538,8 @@ double lattice_min_density_for_strut(LatticeTopology topo, double cell_size_mm,
 
 LatticeCellDerivation lattice_derive_cell_for_member(
     LatticeTopology topo, double member_width_mm,
-    double min_extrudable_width_mm, double cells_per_member_floor) {
+    double min_extrudable_width_mm, double cells_per_member_floor,
+    double max_relative_density) {
   // NaN fails every comparison, so `> 0.0` rejects it — deliberate: a member width
   // that is not a number must not be silently read as "thick enough".
   if (!(member_width_mm > 0.0))
@@ -514,8 +569,11 @@ LatticeCellDerivation lattice_derive_cell_for_member(
 
   // The two bounds. phi is monotone in rho, so the band's top gives the smallest
   // printable cell; N* against the measured width gives the largest homogenizable one.
-  const double phi_hi = lattice_strut_diameter_mm(topo, d.band_rho_max, 1.0);
-  d.min_printable_cell_mm = min_extrudable_width_mm / phi_hi;
+  // ★ D1: ONE function for the smallest printable cell, and it takes the job's cap.
+  // This was `min_extrudable_width_mm / phi(band_rho_max, 1)` inline -- the UNCAPPED
+  // floor -- so every bound derived below was finer than the job could print.
+  d.min_printable_cell_mm =
+      lattice_min_printable_cell_mm(topo, min_extrudable_width_mm, max_relative_density);
   d.min_member_width_mm = d.cells_per_member_floor * d.min_printable_cell_mm;
   // BOTH floors, always — see the declaration. The caller must never have to know
   // which question it asked in order to read the answer.

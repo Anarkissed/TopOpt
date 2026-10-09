@@ -495,6 +495,31 @@ bool lattice_stated_density_unprintable(LatticeTopology topo,
 // is just min_extrudable_width / (diameter at a unit cell).
 //
 // Throws std::invalid_argument if min_extrudable_width_mm is not finite and > 0.
+// ── ★ THE SMALLEST CELL THAT PRINTS, AT THE DENSITY THE JOB ALLOWS (E1) ───────
+// #354's brief of 2026-10-06 (D1) reported core answering "what is the smallest cell that
+// prints?" with FIVE different numbers on different paths. On octet at a 0.45 mm bead:
+//
+//   w / phi(rho_min)                 4.931378498 mm   the LIGHT floor, below
+//   w / phi(min(rho_max, cap))       2.25 mm          this function -- what grade_lattice
+//                                                     actually applies
+//   w / phi(rho_max)                 1.173173434 mm   the same thing UNCAPPED, which four
+//                                                     other paths computed inline
+//
+// One run reported two of them under one key name: `fit.min_printable_cell_mm` was the
+// capped one while the per-region receipt printed the uncapped 1.173173434. Only
+// `grade_lattice` honoured `max_relative_density`, because only it composed the cap
+// inline; no public function took the cap, so the app composed it in the bridge too
+// (PR #354 1db8bba7, `lattice_min_printable_cell_mm`) rather than read it from core.
+//
+// This is that function, with the app's name and signature so the bridge can delete its
+// copy and call core. `max_relative_density` of 0 or non-finite means NOT SENT, and the
+// answer is core's uncapped dense floor. A cap the band cannot meet is REFUSED rather
+// than quietly evaluated outside the measured band: a cell size derived from a density
+// core never measured is the silent substitute the maintainer's standing rule forbids.
+double lattice_min_printable_cell_mm(LatticeTopology topo,
+                                     double min_extrudable_width_mm,
+                                     double max_relative_density);
+
 double lattice_cell_printability_floor_mm(LatticeTopology topo,
                                           double min_extrudable_width_mm);
 
@@ -617,7 +642,14 @@ struct LatticeCellDerivation {
 // band (lattice_rho_min returns 0 for a non-certifiable topology).
 LatticeCellDerivation lattice_derive_cell_for_member(
     LatticeTopology topo, double member_width_mm,
-    double min_extrudable_width_mm, double cells_per_member_floor = 0.0);
+    double min_extrudable_width_mm, double cells_per_member_floor = 0.0,
+    // ★ D1: THE JOB'S DENSITY CAP. Every bound below hangs off the smallest printable
+    // cell, and that is w/phi(min(rho_max, cap)) -- `lattice_min_printable_cell_mm`. This
+    // function had no cap parameter, so it answered with the UNCAPPED floor
+    // (1.173173434 mm on octet at a 0.45 mm bead against 2.25 at the job's cap) and every
+    // caller through it inherited that. 0 or non-finite means NOT SENT, which is the old
+    // behaviour exactly, so an app call that passes nothing is unchanged.
+    double max_relative_density = 0.0);
 
 // The LIGHTEST relative density in `topo`'s certifiable band whose strut at cell edge
 // `cell_size_mm` is at least `min_extrudable_width_mm` across. Returns the band floor
@@ -627,7 +659,11 @@ LatticeCellDerivation lattice_derive_cell_for_member(
 // octet_strut_diameter_mm(result, cell) >= min width holds by construction wherever
 // the result is non-negative.
 double lattice_min_density_for_strut(LatticeTopology topo, double cell_size_mm,
-                                     double min_extrudable_width_mm);
+                                     double min_extrudable_width_mm,
+                                     // ★ D1: the job's cap. The band ceiling this bisects
+                                     // against is min(rho_max, cap); uncapped it could
+                                     // return a density the job forbids. 0 = not sent.
+                                     double max_relative_density = 0.0);
 
 // The homogenized effective cubic tensor of `topo` at relative density `rho`, scaled
 // to solid Young's modulus `youngs_modulus_solid` (the library is measured at PLA

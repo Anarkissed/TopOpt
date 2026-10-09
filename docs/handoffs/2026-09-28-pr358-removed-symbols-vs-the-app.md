@@ -432,6 +432,35 @@ move, because each pass carries proportionally fewer cells. CAVEAT, stated becau
 bounds the result: his three project plans are not available in this worktree, so the
 37-cell plan is a generated proxy for the gate, not the gate itself.
 
+## MEANING CHANGES, addendum 9 (2026-10-08) — one floor for "the smallest cell that prints"
+
+From #354's printability brief of 2026-10-06 (E1, D1, D2, D11).
+
+Core answered one question with three numbers. On octet at a 0.45 mm bead, measured:
+`w/phi(rho_min)` = **4.931378498** mm (the light floor), `w/phi(min(rho_max, cap))` = **2.25**
+mm (what `grade_lattice` applies), `w/phi(rho_max)` = **1.173173434** mm (what four other
+paths computed inline). One run printed two of them under one key name.
+
+| what | was | is | app impact |
+|---|---|---|---|
+| `lattice_min_printable_cell_mm(topo, w, max_relative_density)` | did not exist in core; the app composed it in the bridge (PR #354 1db8bba7) from `lattice_rho_max` + `lattice_strut_diameter_mm` | **exported**, with the app's exact name and signature | **the bridge can delete its copy and read core.** A cap of 0 or non-finite means NOT SENT, matching the app's semantics |
+| the smallest printable cell on the Fit, Fixed, Swept, region-report, pre-flight, frozen-lattice and swept-frontier paths | the UNCAPPED floor (finer than the job can print) | the floor at the job's cap | **a job with a cap gets different numbers, and they are the ones grade_lattice applies.** `fit.min_printable_cell_mm` and the per-region receipt no longer disagree |
+| `lattice_derive_cell_for_member`, `lattice_min_density_for_strut`, `cell_plan_finest_printable_cell_mm`, `lattice_region_validity` | no cap parameter | a TRAILING, DEFAULTED cap parameter | **none until the app passes one.** All four are called from `bridge.cpp`/Swift; grepped before changing |
+| the swept plan's per-cell predicate | asked whether the BAND's densest density prints | asks whether the densest density **the job allows** prints | **intended** — it admitted rungs whose struts the job can never reach |
+| Fit's derived density when nothing in the band prints at that cell | `lattice_rho_max` — a density the job may forbid | the densest the job allows | **intended** (found by sweeping, not from the brief's list) |
+| `fallback_irrecoverable_by_cell` on uniform and swept | counted against the LIGHT floor: at N* = 5 "beyond rescue" below **24.66 mm** | counted against the dense floor, like Fit: below **11.25 mm** at the cap | **the refusal sentence and the forecast's remedies change.** A 16 mm member was called irrecoverable on uniform while Fit could reach it. Measured on a fixture: 8 of 13,500 rejected voxels are irrecoverable where the light floor called all 13,500 |
+
+NOT DONE, and not mistakable for done: nothing in `core/src` assigns
+`frozen_lattice_min_extrudable_width_mm`, so nothing assigns the new
+`frozen_lattice_max_relative_density` either — that options block is filled by the caller.
+The field is threaded through `lattice_region_validity` and `minimize_plastic`, but the
+frozen-lattice floors stay uncapped until the app sets it.
+
+Also recorded, because two of my own assumptions were wrong about it: the diameter law is
+**clamped above rho 0.60**, the measured table's last row, so a cap anywhere from 0.60 to the
+band top 0.899880 is **completely inert**. Monotonicity in the cap is therefore non-strict,
+and the flat top is pinned by its own check so a future row reports itself.
+
 ### The fingerprint defect, for the record
 
 Not the worktree (`git -C core rev-parse` resolves fine there), and not only the
