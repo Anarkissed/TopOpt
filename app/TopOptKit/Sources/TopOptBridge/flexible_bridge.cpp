@@ -7,6 +7,7 @@
 
 #include "FlexibleBridge.hpp"
 #include "flexible_squish_fe.hpp"  // ★ BATCH G: the squish sim's setup (private)
+#include "bridge_guard.hpp"        // ★ AP2: bridge.cpp's one guard, for the pass-throughs below
 
 #include <algorithm>
 #include <cmath>
@@ -1135,6 +1136,111 @@ int32_t flexible_squish_coarsen(int32_t nx, int32_t ny, int32_t nz) {
 
 bool flexible_squish_set_geneo_for_tests(bool enable) {
   return topopt::fea_set_geneo_twolevel(enable);
+}
+
+// ── ★ ANGLED PRESSES AP2: which faces meet — thin pass-throughs, under bridge.cpp's one guard ────────
+// (FlexibleBridge.hpp). Each copies core's answer; a core throw becomes `err` + the empty value.
+
+FlexFaceAdjacency flexible_scene_face_adjacency(int64_t scene, BridgeError& err) {
+  FlexFaceAdjacency o;
+  const std::string why = bridge_guard_run("flexible_scene_face_adjacency", [&] {
+    auto s = scene_at(scene);
+    std::lock_guard<std::mutex> lock(s->mu);
+    const std::vector<std::vector<int>> adj = topopt::face_adjacency(s->model);
+    o.offsets.push_back(0);
+    for (const auto& n : adj) {
+      for (int g : n) o.neighbours.push_back(g);
+      o.offsets.push_back(static_cast<int32_t>(o.neighbours.size()));
+    }
+  });
+  if (!why.empty()) {
+    o = FlexFaceAdjacency{};
+    err.ok = false;
+    err.message = why;
+  }
+  return o;
+}
+
+FlexRegionFrame flexible_scene_region_frame(int64_t scene, int32_t face_region_id, int32_t face,
+                                            bool has_direction, const std::vector<double>& direction,
+                                            BridgeError& err) {
+  FlexRegionFrame o;
+  const std::string why = bridge_guard_run("flexible_scene_region_frame", [&] {
+    auto s = scene_at(scene);
+    std::lock_guard<std::mutex> lock(s->mu);
+    const topopt::ResolvedFaceRegion& r = region_of(*s, face_region_id);
+    std::vector<int> tris;
+    if (face < 0) {
+      tris = r.member_triangles;
+    } else {
+      for (int t : r.member_triangles)
+        if (t >= 0 && static_cast<std::size_t>(t) < s->model.triangle_face.size() &&
+            s->model.triangle_face[static_cast<std::size_t>(t)] == face)
+          tris.push_back(t);
+    }
+    topopt::Vec3 dir{0, 0, 0};
+    const topopt::Vec3* dp = nullptr;
+    if (has_direction) {
+      if (direction.size() != 3)
+        throw std::invalid_argument("a press direction has 3 components (got " +
+                                    std::to_string(direction.size()) + ")");
+      dir = topopt::Vec3{direction[0], direction[1], direction[2]};
+      dp = &dir;
+    }
+    const fx::FaceFrame f = fx::face_frame_cut(s->model.mesh, tris, r.cuts, 0, s->build, dp);
+    o.valid = f.valid;
+    o.reason = f.reason;
+    put3(o.load, f.load);
+    put3(o.centroid, f.centroid);
+    o.area_mm2 = f.area_mm2;
+    o.build_angle_deg = f.build_angle_deg;
+    o.side = f.side;
+    o.normal_spread_deg = f.normal_spread_deg;
+    o.normal_spread_flag = f.normal_spread_flag;
+    o.triangles = static_cast<int32_t>(tris.size());
+  });
+  if (!why.empty()) {
+    o = FlexRegionFrame{};
+    o.reason = why;
+    err.ok = false;
+    err.message = why;
+  }
+  return o;
+}
+
+FlexTriangleLoads flexible_scene_triangle_loads(int64_t scene, const std::vector<int32_t>& triangles,
+                                                BridgeError& err) {
+  FlexTriangleLoads o;
+  const std::string why = bridge_guard_run("flexible_scene_triangle_loads", [&] {
+    auto s = scene_at(scene);
+    std::lock_guard<std::mutex> lock(s->mu);
+    const std::size_t n = s->model.mesh.triangles.size();
+    o.triangle_count = static_cast<int32_t>(n);
+    o.faces.reserve(triangles.size());
+    o.loads.reserve(triangles.size() * 3);
+    const double nan = std::nan("");
+    for (int32_t t : triangles) {
+      if (t < 0 || static_cast<std::size_t>(t) >= n) {
+        o.faces.push_back(-1);
+        o.loads.insert(o.loads.end(), {nan, nan, nan});
+        continue;
+      }
+      o.faces.push_back(static_cast<std::size_t>(t) < s->model.triangle_face.size()
+                            ? s->model.triangle_face[static_cast<std::size_t>(t)]
+                            : -1);
+      const fx::FaceFrame f = fx::face_frame(s->model.mesh, std::vector<int>{static_cast<int>(t)}, 0, s->build);
+      if (f.valid)
+        o.loads.insert(o.loads.end(), {f.load.x, f.load.y, f.load.z});
+      else
+        o.loads.insert(o.loads.end(), {nan, nan, nan});
+    }
+  });
+  if (!why.empty()) {
+    o = FlexTriangleLoads{};
+    err.ok = false;
+    err.message = why;
+  }
+  return o;
 }
 
 }  // namespace topoptbridge

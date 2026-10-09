@@ -3655,3 +3655,16 @@ bool lattice_algorithm_allows_structural(const std::string& name) {
 }
 
 }  // namespace topoptbridge
+
+// ★ Flexible (PR #362) hook, angled presses AP2: THE ONE GUARD, lent to flexible_bridge.cpp's pass-throughs
+// (bridge_guard.hpp). The body runs under `guarded` itself; this adds no catch of its own.
+#include "bridge_guard.hpp"
+
+namespace topoptbridge {
+
+std::string bridge_guard_run(const char* where, const std::function<void()>& body) noexcept {
+  return guarded(where, [&]() -> std::string { body(); return std::string(); },
+                 [](const std::string& why) { return why; });
+}
+
+}  // namespace topoptbridge
