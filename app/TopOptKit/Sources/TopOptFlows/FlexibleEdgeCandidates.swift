@@ -126,6 +126,11 @@ public struct FlexibleEdgeCandidates {
     /// Core's facts could not be used (FlexibleMeetFacts.mismatch): no candidate is listed until they can.
     public let unread: String?
     let creasedPairs: Set<FlexibleMeet.Pair>
+    /// Face pairs the page's shared-edge map has and core's face_adjacency does not (their candidates are listed,
+    /// never offered), and pairs core has that the page cannot draw (named, never invented). Empty on every
+    /// fixture; AP2 REVIEW RED STUB: not computed.
+    public internal(set) var appOnlyFacePairs: [FlexibleMeet.Pair] = []
+    public internal(set) var coreOnlyFacePairs: [FlexibleMeet.Pair] = []
 
     public var corners: [Candidate] { candidates.filter { $0.kind == .corner } }
     /// Edges and blends.

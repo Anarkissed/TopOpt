@@ -1243,4 +1243,47 @@ FlexTriangleLoads flexible_scene_triangle_loads(int64_t scene, const std::vector
   return o;
 }
 
+// ★ AP2 REVIEW (A4): core's verdict on a press (FlexibleBridge.hpp). Core's FlexibleError from
+// build_press_stack IS the answer (bridge.cpp's rule: "a catch INSIDE a body that is part of its meaning
+// stays where it is"); every other throw crosses the one guard as an error.
+FlexPressVerdict flexible_scene_press_verdict(int64_t scene, const std::vector<int32_t>& footprint,
+                                              bool has_direction, const std::vector<double>& direction,
+                                              BridgeError& err) {
+  FlexPressVerdict o;
+  const std::string why = bridge_guard_run("flexible_scene_press_verdict", [&] {
+    auto s = scene_at(scene);
+    std::lock_guard<std::mutex> lock(s->mu);
+    std::vector<const topopt::ResolvedFaceRegion*> fp;
+    for (int32_t id : footprint) fp.push_back(&region_of(*s, id));
+    topopt::Vec3 dir{0, 0, 0};
+    const topopt::Vec3* dp = nullptr;
+    if (has_direction) {
+      if (direction.size() != 3)
+        throw std::invalid_argument("a press direction has 3 components (got " +
+                                    std::to_string(direction.size()) + ")");
+      dir = topopt::Vec3{direction[0], direction[1], direction[2]};
+      dp = &dir;
+    }
+    try {
+      const fx::Stack st = fx::build_press_stack(s->model, fp, s->regions, s->grid, s->mask, 0, s->build,
+                                                 s->grid.spacing, dp);
+      o.accepted = true;
+      put3(o.load, st.frame.load);
+      o.build_angle_deg = st.frame.build_angle_deg;
+      o.side = st.frame.side;
+      o.columns = static_cast<int32_t>(st.columns.size());
+    } catch (const fx::FlexibleError& e) {
+      o.accepted = false;
+      o.reason = e.what();
+    }
+  });
+  if (!why.empty()) {
+    o = FlexPressVerdict{};
+    o.reason = why;
+    err.ok = false;
+    err.message = why;
+  }
+  return o;
+}
+
 }  // namespace topoptbridge

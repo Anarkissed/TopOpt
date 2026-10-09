@@ -691,4 +691,27 @@ struct FlexTriangleLoads {
 FlexTriangleLoads flexible_scene_triangle_loads(int64_t scene, const std::vector<int32_t>& triangles,
                                                 BridgeError& err);
 
+// ★ AP2 REVIEW (binding amendment A4: "offer only directions core accepts"): CORE'S VERDICT on a press.
+// Runs core's own `build_press_stack(model, footprint, regions, grid, mask, 0, build, grid.spacing, dir)`
+// on the open scene — the footprint's declared regions in the order given, along `direction` when
+// `has_direction` (else the union's inward normal) — and reports whether core BUILDS it. Core's refusal
+// (its FlexibleError: a direction that does not point into the part over EVERY footprint triangle, a
+// footprint that is not connected through face_adjacency, two sectors of one face, no column, a frame
+// whose normals cancel …) is the ANSWER: `accepted == false` with core's words in `reason`, not an
+// error. Anything else (a closed scene, an undeclared region) is an error, through bridge.cpp's one
+// guard. When accepted: core's frame load (the stated direction normalised by core's press_unit, or the
+// union's inward normal), core's build angle and side verdict for it, and the column count. Nothing
+// here is the app's rule: the verdict is the press core would build, asked of core.
+struct FlexPressVerdict {
+  bool accepted = false;
+  std::string reason;
+  double load[3] = {0, 0, -1};
+  double build_angle_deg = 0.0;
+  bool side = false;
+  int32_t columns = 0;
+};
+FlexPressVerdict flexible_scene_press_verdict(int64_t scene, const std::vector<int32_t>& footprint,
+                                              bool has_direction, const std::vector<double>& direction,
+                                              BridgeError& err);
+
 }  // namespace topoptbridge

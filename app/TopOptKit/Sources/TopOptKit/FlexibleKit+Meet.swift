@@ -9,8 +9,12 @@
 //     it), its inward normal or a stated press direction, with core's side verdict and normal spread;
 //   * `triangleLoads(_:)` — core's inward normal of single triangles (face_frame of one triangle), for the
 //     15° rule at a seam (FlexibleEdgeCandidates), with core's face of each so the caller can check that
-//     its mesh's triangle t IS core's triangle t.
-// No frame, normal or adjacency is computed in this file.
+//     its mesh's triangle t IS core's triangle t;
+//   * `pressVerdict(_:direction:)` (AP2 review, binding amendment A4) — whether core's build_press_stack
+//     BUILDS a press over these regions along this direction, and core's words when it refuses: the only
+//     test of "a direction core accepts" (core checks EVERY footprint triangle; a per-member load check
+//     is a coarser Swift copy that disagrees with core on curved members).
+// No frame, normal, adjacency or verdict is computed in this file.
 import Foundation
 import simd
 import TopOptBridge
@@ -39,6 +43,25 @@ public struct FlexRegionFrame: Equatable, Sendable {
         self.valid = valid; self.reason = reason; self.load = load; self.centroid = centroid; self.areaMM2 = areaMM2
         self.buildAngleDeg = buildAngleDeg; self.side = side; self.normalSpreadDeg = normalSpreadDeg
         self.normalSpreadFlag = normalSpreadFlag; self.triangles = triangles
+    }
+}
+
+/// Core's verdict on a press (build_press_stack over the open scene): built, or refused with core's words.
+public struct FlexPressVerdict: Equatable, Sendable {
+    public let accepted: Bool
+    /// Core's words when refused ("press_direction does not point into the part over face region 3 …").
+    public let reason: String
+    /// When accepted: core's frame load — the stated direction normalised by core, or the inward normal.
+    public let load: SIMD3<Double>
+    /// When accepted: core's angle between the load line and build Z, and its side verdict.
+    public let buildAngleDeg: Double
+    public let side: Bool
+    /// When accepted: core's column count.
+    public let columns: Int
+
+    public init(accepted: Bool, reason: String, load: SIMD3<Double>, buildAngleDeg: Double, side: Bool, columns: Int) {
+        self.accepted = accepted; self.reason = reason; self.load = load; self.buildAngleDeg = buildAngleDeg
+        self.side = side; self.columns = columns
     }
 }
 
@@ -92,5 +115,17 @@ extension FlexibleScene {
             loads.append(v.x.isFinite && v.y.isFinite && v.z.isFinite ? v : nil)
         }
         return FlexTriangleLoads(triangleCount: Int(r.triangle_count), faces: f.map { Int($0) }, loads: loads)
+    }
+
+    /// ★ Core's verdict on a press over declared regions `footprint` (in this order), along `direction` when
+    /// given (else the union's inward normal): core's build_press_stack on the open scene. A refusal is an
+    /// answer (`accepted == false`, core's words); a closed scene or an undeclared region throws.
+    public func pressVerdict(_ footprint: [Int], direction: SIMD3<Double>?) throws -> FlexPressVerdict {
+        var err = topoptbridge.BridgeError()
+        let dir = direction.map { [$0.x, $0.y, $0.z] } ?? []
+        let r = topoptbridge.flexible_scene_press_verdict(handle, FlexConv.i(footprint), direction != nil, FlexConv.d(dir), &err)
+        try FlexConv.check(err)
+        return FlexPressVerdict(accepted: r.accepted, reason: String(r.reason), load: FlexConv.v3(r.load),
+                                buildAngleDeg: r.build_angle_deg, side: r.side, columns: Int(r.columns))
     }
 }

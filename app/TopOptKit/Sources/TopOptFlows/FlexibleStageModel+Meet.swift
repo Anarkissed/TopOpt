@@ -23,6 +23,12 @@ final class FlexibleMeetCache {
     var frames: [String: FlexRegionFrame] = [:]
     var factsKey: String?
     var facts: FlexibleMeetFacts?
+    /// Core's press verdicts for the open scene, by footprint + direction bits (AP2 review, A4).
+    var verdicts: [String: FlexPressVerdict] = [:]
+    /// How many times FlexibleMeet was built, and whether the last build ran on the main thread (AP2 review:
+    /// pick mode must never build it there).
+    var builds = 0
+    var lastBuildOnMainThread: Bool?
 
     /// Forget core's answers when the scene they came from is not the open one.
     func follow(scene key: String) {
@@ -32,6 +38,7 @@ final class FlexibleMeetCache {
         frames = [:]
         facts = nil
         factsKey = nil
+        verdicts = [:]
     }
 }
 
@@ -45,9 +52,16 @@ extension FlexibleStageModel {
         let key = "\(mesh.signature.contentHash)|\(mesh.signature.topologyHash)|\(mesh.faceIDs.count)|\(regions.key)"
         if meetCache.geometryKey == key, let g = meetCache.geometry { return g }
         let g = FlexibleMeet(mesh: mesh, regions: regions)
+        meetCache.builds += 1
+        meetCache.lastBuildOnMainThread = Thread.isMainThread
         meetCache.geometryKey = key
         meetCache.geometry = g
         return g
+    }
+
+    /// ★ Which faces meet, built OFF the main actor (AP2 review: a 41 k-triangle part takes a second).
+    public func meetOffMain() async -> FlexibleMeet? {
+        meet   // AP2 REVIEW RED STUB: built on the calling (main) actor
     }
 
     /// The open scene's key, or the refusal a caller shows while it opens.
@@ -112,6 +126,20 @@ extension FlexibleStageModel {
             meetCache.factsKey = fkey
         }
         return facts
+    }
+
+    /// ★ CORE'S VERDICT on a press over `footprint` along `direction` (AP2 review, binding amendment A4: offer only
+    /// directions core accepts).
+    public func pressVerdict(_ footprint: [Int], direction: SIMD3<Double>?) async throws -> FlexPressVerdict {
+        // AP2 REVIEW RED STUB: each member's core load against the direction (a Swift copy of core's rule, per member)
+        var ok = true
+        for r in footprint {
+            let f = try await regionFrame(r)
+            if let d = direction, simd_dot(f.load, d) <= 0 { ok = false }
+        }
+        let d = direction.map { simd_normalize($0) } ?? .zero
+        return FlexPressVerdict(accepted: ok, reason: ok ? "" : "a member faces along the direction", load: d,
+                                buildAngleDeg: 0, side: false, columns: 0)
     }
 
     /// ★ Every edge and corner of the part, numbered (FlexibleEdgeCandidates), from core's facts for the open scene.
