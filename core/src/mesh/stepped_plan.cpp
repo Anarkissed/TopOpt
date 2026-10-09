@@ -590,10 +590,19 @@ int stepped_region_owner(const Vec3& p, const std::vector<ClearanceGeometry>& in
       const Vec3& o = includes[i].origin;
       d = std::fabs(((p.x - o.x) * n.x + (p.y - o.y) * n.y + (p.z - o.z) * n.z) / ln);
     }
-    // STRICT improvement only, and `includes` is walked in ascending id order, so an
-    // exact tie keeps the LOWER id without needing a second comparison.
-    if (owner == 0 || d < best) {
-      owner = static_cast<int>(i) + 1;
+    // ★ K6: the DECLARED id where the caller numbered them, because the built vector is
+    // compacted by the invalid-include skip and a position is then not an id. 0 means
+    // unnumbered, and the positional answer stands.
+    const int id = includes[i].declared_region_id > 0
+                       ? includes[i].declared_region_id
+                       : static_cast<int>(i) + 1;
+    // ★ AND THE TIE-BREAK IS ON THAT ID, not on the position. An earlier cut relied on
+    // `includes` being walked in ascending id order and kept the FIRST on a tie -- which
+    // was the same thing until ids stopped being positions. It is no longer: a caller may
+    // hand the list in any order, and the app computes "the lower region id" from its own
+    // numbering. A test with the ids out of order caught this.
+    if (owner == 0 || d < best || (d == best && id < owner)) {
+      owner = id;
       best = d;
     }
   }

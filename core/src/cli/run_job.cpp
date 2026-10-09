@@ -942,7 +942,11 @@ LatticeRoleRegions lattice_role_regions_from_job(const JobDescription& job,
   LatticeRoleRegions rr;
   std::vector<ResolvedFaceRegion> resolved;
   bool resolved_done = false;
+  // ★ K6: every DECLARED include is numbered, including one that fails to resolve, so
+  // the id survives the skip below.
+  int declared_include = 0;
   for (const JobLatticeRegion& r : job.lattice.regions) {
+    if (r.role == "include") ++declared_include;
     if (r.kind == "region") {
       if (model == nullptr || grid == nullptr)
         throw JobError(
@@ -977,7 +981,8 @@ LatticeRoleRegions lattice_role_regions_from_job(const JobDescription& job,
             " mm). It would lattice nothing and report success; it is refused "
             "instead. Use a coarser depth, a finer resolution, or a region that "
             "reaches part material.");
-      (r.role == "include" ? rr.includes : rr.excludes).push_back(std::move(g));
+      g.declared_region_id = r.role == "include" ? declared_include : 0;
+    (r.role == "include" ? rr.includes : rr.excludes).push_back(std::move(g));
       continue;
     }
     ManualClearanceGeometry mg;

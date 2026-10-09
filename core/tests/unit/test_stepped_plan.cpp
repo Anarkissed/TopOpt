@@ -560,6 +560,63 @@ static void test_plan_cell_density_is_checked_against_bead_and_cap() {
         "D5: a base no wider than the bead is refused too");
 }
 
+// ── ★ K6: THE OWNER IS A DECLARED REGION ID, NOT A POSITION ───────────────────
+// The include builder SKIPS an include that fails to resolve (run_job.cpp
+// `if (!g.valid) continue;`), so the built vector is COMPACTED: once anything is
+// degenerate, a position in it is no longer the declared include number. The app numbers
+// its includes without that skip. `stepped_region_owner` is exported for the app to call,
+// so a positional answer would have the two disagree SILENTLY -- core saying 1 where the
+// app means 2, on the same geometry.
+//
+// Note on reach, because it bounds the claim: a job can rarely produce an invalid include
+// -- parse_job refuses zero extents, and a "region" kind with an empty mask THROWS. The
+// exposure is the exported function and core's own internal consistency, which is why this
+// is tested here rather than through a job. The vector below is what the builder HANDS ON
+// after skipping a degenerate first include: one entry, carrying declared id 2.
+static void test_region_owner_returns_the_declared_id() {
+  auto bolt = [](int declared, Vec3 at, double radius) {
+    ClearanceGeometry g;
+    g.valid = true;
+    g.kind = ClearanceKind::Bolt;
+    g.declared_region_id = declared;
+    g.axis_point = at;
+    g.axis_dir = Vec3{0.0, 0.0, 1.0};
+    g.radius = radius;
+    g.t_lo = -50.0;
+    g.t_hi = 50.0;
+    return g; };
+
+  // One surviving include, which was DECLARED second: the first was degenerate and the
+  // builder dropped it.
+  const std::vector<ClearanceGeometry> after_skip{bolt(2, Vec3{0, 0, 0}, 5.0)};
+  const Vec3 inside{1.0, 1.0, 0.0};
+  CHECK(point_in_clearance_region(after_skip[0], inside, 0.0),
+        "K6 premise: the point really is inside that include");
+  CHECK(stepped_region_owner(inside, after_skip) == 2,
+        "K6: the owner is the DECLARED id 2, not the position 1 -- otherwise core and the "
+        "app disagree silently on the same geometry");
+
+  // A point in nothing still has no owner.
+  CHECK(stepped_region_owner(Vec3{100.0, 100.0, 0.0}, after_skip) == 0,
+        "K6: a point in no prism has no owner, unchanged");
+
+  // An UNNUMBERED list keeps the positional answer, so every pure-header caller that
+  // never set the id is unaffected.
+  std::vector<ClearanceGeometry> unnumbered{bolt(0, Vec3{0, 0, 0}, 5.0)};
+  CHECK(stepped_region_owner(inside, unnumbered) == 1,
+        "K6: an unnumbered list falls back to the position, so existing callers are "
+        "unchanged");
+
+  // And the documented tie-break is now on the DECLARED id too: two bolts have no face
+  // plane, so neither can win on nearness and the LOWER DECLARED id takes it -- which is
+  // not the same as the lower position once a skip has happened.
+  const std::vector<ClearanceGeometry> both{bolt(3, Vec3{0, 0, 0}, 5.0),
+                                            bolt(2, Vec3{0, 0, 0}, 5.0)};
+  CHECK(stepped_region_owner(inside, both) == 2,
+        "K6: with no face plane to compare, the lower DECLARED id wins -- here the SECOND "
+        "entry, so a positional tie-break would have answered 3");
+}
+
 static void test_depth_projects_the_cube_not_one_corner() {
   auto region = [](Vec3 normal, Vec3 face_at) {
     SteppedPlanRegion reg;
@@ -1221,6 +1278,7 @@ int main() {
   test_plan_validation();
   test_depth_projects_the_cube_not_one_corner();
   test_plan_cell_density_is_checked_against_bead_and_cap();
+  test_region_owner_returns_the_declared_id();
   test_overlap_is_exact_not_a_shared_tile();
   test_grouped_cells_cover_the_slot_exactly_once();
   test_grouping_lays_every_cell_where_it_was_sent();

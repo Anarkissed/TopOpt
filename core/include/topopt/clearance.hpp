@@ -293,6 +293,14 @@ struct ClearanceGeometry {
   // geometry is left invalid so the caller refuses rather than silently choosing
   // one of two frames. Distinct from a merely degenerate region, which is a no-op.
   bool frame_conflict = false;
+  // ★ K6 (reviewer, 2026-10-08): WHICH DECLARED REGION THIS IS, 1-based among the job's
+  // INCLUDE regions, counting every declared include whether or not it resolved. The
+  // include builder SKIPS an invalid include (run_job.cpp `if (!g.valid) continue;`), so
+  // a position in the built vector is NOT the declared id once anything is degenerate --
+  // and the app numbers includes without that skip. `stepped_region_owner` returns this,
+  // so the two cannot disagree silently across the bridge. 0 = the caller did not number
+  // them, and the positional answer stands (every pure-header test).
+  int declared_region_id = 0;
   bool valid = false;
 
   // ★ NON-NULL => THIS GEOMETRY IS A VOXEL SET (see the note above). Every
