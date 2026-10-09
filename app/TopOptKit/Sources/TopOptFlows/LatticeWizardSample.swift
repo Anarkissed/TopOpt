@@ -39,10 +39,23 @@ public enum LatticeWizardSample {
     /// The sample's triangle mesh: a rectangular cantilever, subdivided so the
     /// per-vertex stress tint has somewhere to land. `subdiv` cells per axis.
     public static func mesh(subdiv: Int = 12) -> ViewerMesh {
+        box(sx: Float(lengthMM), sy: Float(widthMM), sz: Float(heightMM), subdiv: subdiv)
+    }
+
+    /// ★ THE ORGANIC SAMPLE'S BODY: the PR 353 test cube's own 40 mm box, centred on
+    /// the origin like the span file's grid (`GRID 0 0 0 0.625 64 64 64` ⇒ 0…40 mm), so
+    /// it is placed at the spans' coordinates, not the origin's. Drawn at body alpha 0;
+    /// it exists to clip the march to the part exactly as a run's part does.
+    public static func cube(edgeMM: Double, at origin: SIMD3<Float>, subdiv: Int = 6) -> ViewerMesh {
+        let e = Float(edgeMM)
+        return box(sx: e, sy: e, sz: e, subdiv: subdiv, origin: origin)
+    }
+
+    private static func box(sx: Float, sy: Float, sz: Float, subdiv: Int,
+                            origin: SIMD3<Float>? = nil) -> ViewerMesh {
         let n = max(2, subdiv)
         var pos: [Float] = []
         var idx: [Int32] = []
-        let sx = Float(lengthMM), sy = Float(widthMM), sz = Float(heightMM)
 
         // A subdivided box: six faces, each an n×n grid, so vertices are dense
         // enough for the field to read as a gradient rather than four corners.
@@ -63,7 +76,7 @@ public enum LatticeWizardSample {
             }
         }
         let X = SIMD3<Float>(sx, 0, 0), Y = SIMD3<Float>(0, sy, 0), Z = SIMD3<Float>(0, 0, sz)
-        let o = SIMD3<Float>(-sx / 2, -sy / 2, -sz / 2)
+        let o = origin ?? SIMD3<Float>(-sx / 2, -sy / 2, -sz / 2)
         addFace(origin: o, u: X, v: Y)                    // bottom
         addFace(origin: o + Z, u: Y, v: X)                // top
         addFace(origin: o, u: Z, v: X)                    // front

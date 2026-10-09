@@ -12,12 +12,18 @@
 		A00000000000000000000015 /* TopOptFlows in Frameworks */ = {isa = PBXBuildFile; productRef = A00000000000000000000016 /* TopOptFlows */; };
 		A00000000000000000000018 /* TopOptOCCT in Frameworks */ = {isa = PBXBuildFile; productRef = A00000000000000000000017 /* TopOptOCCT */; };
 		A00000000000000000000021 /* rules.json in Resources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000020 /* rules.json */; };
+		F1E000000000000000000011 /* flexible_materials.json in Resources */ = {isa = PBXBuildFile; fileRef = F1E000000000000000000001 /* flexible_materials.json */; };
+		F1E000000000000000000012 /* flexible_curves in Resources */ = {isa = PBXBuildFile; fileRef = F1E000000000000000000002 /* flexible_curves */; };
+		F1E000000000000000000013 /* stamps.json in Resources */ = {isa = PBXBuildFile; fileRef = F1E000000000000000000003 /* stamps.json */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
 		A00000000000000000000005 /* TopOpt.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = TopOpt.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A00000000000000000000013 /* materials.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; name = materials.json; path = ../core/src/materials/materials.json; sourceTree = SOURCE_ROOT; };
 		A00000000000000000000020 /* rules.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; name = rules.json; path = ../core/src/settings/rules.json; sourceTree = SOURCE_ROOT; };
+		F1E000000000000000000001 /* flexible_materials.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; name = flexible_materials.json; path = ../core/src/materials/flexible_materials.json; sourceTree = SOURCE_ROOT; };
+		F1E000000000000000000002 /* flexible_curves */ = {isa = PBXFileReference; lastKnownFileType = folder; name = flexible_curves; path = ../core/src/materials/flexible_curves; sourceTree = SOURCE_ROOT; };
+		F1E000000000000000000003 /* stamps.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; name = stamps.json; path = ../docs/design/flexibles/data/stamps.json; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -44,6 +50,9 @@
 				A00000000000000000000006 /* TopOpt */,
 				A00000000000000000000013 /* materials.json */,
 				A00000000000000000000020 /* rules.json */,
+				F1E000000000000000000001 /* flexible_materials.json */,
+				F1E000000000000000000002 /* flexible_curves */,
+				F1E000000000000000000003 /* stamps.json */,
 				A00000000000000000000003 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -128,6 +137,9 @@
 			files = (
 				A00000000000000000000014 /* materials.json in Resources */,
 				A00000000000000000000021 /* rules.json in Resources */,
+				F1E000000000000000000011 /* flexible_materials.json in Resources */,
+				F1E000000000000000000012 /* flexible_curves in Resources */,
+				F1E000000000000000000013 /* stamps.json in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

@@ -1,0 +1,11 @@
+# slabs 60.0 x 40.0 x 20.0 mm, vertical fillets r 5.0 mm, 16 facets per 90°
+rounded_slab_60x40x20_r5_16: corner radii [5.0, 5.0, 5.0, 5.0] · pseudoFaces true · triangles 272 · faces 3
+  face 0 triangles 136 area 3828.066283 mm2 wraps YES (normals cancel) · core: face region 0: the face's normals cancel out (no single direction to push along)
+  face 1 triangles 68 area 2378.413725 mm2 load (-0.000000, -0.000000, 1.000000) normalSpread 0.0000° wraps no
+  face 2 triangles 68 area 2378.413725 mm2 load (-0.000000, -0.000000, -1.000000) normalSpread 0.0000° wraps no
+one_fillet_slab_60x40x20_r5_16: corner radii [5.0, 0.0, 0.0, 0.0] · pseudoFaces true · triangles 80 · faces 5
+  face 0 triangles 36 area 1957.016571 mm2 load (-0.554700, -0.832050, -0.000000) normalSpread 90.0000° wraps YES (spread flag)
+  face 1 triangles 20 area 2394.603431 mm2 load (-0.000000, -0.000000, 1.000000) normalSpread 0.0000° wraps no
+  face 2 triangles 20 area 2394.603431 mm2 load (-0.000000, -0.000000, -1.000000) normalSpread 0.0000° wraps no
+  face 3 triangles 2 area 800.000000 mm2 load (1.000000, -0.000000, -0.000000) normalSpread 0.0000° wraps no
+  face 4 triangles 2 area 1200.000000 mm2 load (-0.000000, 1.000000, -0.000000) normalSpread 0.0000° wraps no

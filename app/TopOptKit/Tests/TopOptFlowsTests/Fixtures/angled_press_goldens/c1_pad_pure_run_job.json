@@ -1,0 +1,105 @@
+{
+  "flexible" : {
+    "beads_per_wall" : 1,
+    "faces" : [
+      {
+        "curve_x" : [
+          [
+            0,
+            0.20000000000000001
+          ],
+          [
+            0.40000000000000002,
+            1
+          ],
+          [
+            1,
+            0.29999999999999999
+          ]
+        ],
+        "curve_y" : [
+          [
+            0,
+            1
+          ],
+          [
+            1,
+            0.5
+          ]
+        ],
+        "deepest_squish_mm" : 4,
+        "face_region_id" : 1,
+        "frame_rotation_deg" : 90,
+        "mode" : "both",
+        "role" : "loaded",
+        "skin_on" : true,
+        "weight_n" : 294.1995
+      },
+      {
+        "face_region_id" : 0,
+        "role" : "resting",
+        "skin_on" : true
+      }
+    ],
+    "feel" : "damped",
+    "material_id" : "varioshore_tpu",
+    "min_extrudable_width_mm" : 0.41999999999999998,
+    "nozzle_temp_c" : 220,
+    "topology" : "auto"
+  },
+  "loads" : {
+    "face_regions" : [
+      {
+        "add" : [
+          0
+        ],
+        "id" : 0,
+        "name" : "face 0"
+      },
+      {
+        "add" : [
+          1
+        ],
+        "id" : 1,
+        "name" : "face 1"
+      },
+      {
+        "add" : [
+          2
+        ],
+        "id" : 2,
+        "name" : "face 2"
+      },
+      {
+        "add" : [
+          3
+        ],
+        "id" : 3,
+        "name" : "face 3"
+      },
+      {
+        "add" : [
+          4
+        ],
+        "id" : 4,
+        "name" : "face 4"
+      },
+      {
+        "add" : [
+          5
+        ],
+        "id" : 5,
+        "name" : "face 5"
+      }
+    ]
+  },
+  "material" : "varioshore_tpu",
+  "mode" : "analyze",
+  "model" : "$REPO\/docs\/handoffs\/evidence\/2026-09-28-flexible-squish-maths\/a_pad_centre_soft\/pad_100x100x20.stl",
+  "output" : {
+    "mesh_format" : "stl",
+    "mesh_prefix" : "unused",
+    "report" : "report.json"
+  },
+  "resolution" : 50
+}

@@ -579,8 +579,9 @@ final class SurfaceToolTests: XCTestCase {
     }
 
     func testTheTrayCarriesEveryToolWithSelectFirst() {
+        // ★ + Region, last (the Regions task, approved 2026-10-08): it edits what the others made
         XCTAssertEqual(SurfaceTool.allCases,
-                       [.select, .similar, .cut, .union, .pattern])
+                       [.select, .similar, .cut, .union, .pattern, .region])
         XCTAssertEqual(SurfaceTool.allCases.first, .select, "select leads the tray")
         XCTAssertEqual(SurfaceTool.allCases[1], .similar,
                        "★ Similar is a SELECTION aid, so it sits beside select "

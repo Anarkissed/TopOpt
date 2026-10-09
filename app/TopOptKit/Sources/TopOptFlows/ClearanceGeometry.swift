@@ -239,10 +239,17 @@ public struct ClearanceRenderItem: Equatable, Sendable {
     /// LATTICE-ROLE group's primitives render as regions (indigo family), not as
     /// keep-outs, through the same volume path.
     public let tint: SIMD3<Float>?
-    public init(volume: ClearanceVolume, selected: Bool, tint: SIMD3<Float>? = nil) {
+    /// Flexible (#362) R6 (A1): the item's own alphas (nil: the pass's) — set, it is drawn FAINT
+    /// (no contact line); `surfaceOnly` (a `.shell`): its base triangles only, front faces only.
+    public let faceAlpha: Float?
+    public let edgeAlpha: Float?
+    public let surfaceOnly: Bool
+    public init(volume: ClearanceVolume, selected: Bool, tint: SIMD3<Float>? = nil,
+                faceAlpha: Float? = nil, edgeAlpha: Float? = nil, surfaceOnly: Bool = false) {
         self.volume = volume
         self.selected = selected
         self.tint = tint
+        self.faceAlpha = faceAlpha; self.edgeAlpha = edgeAlpha; self.surfaceOnly = surfaceOnly
     }
 }
 

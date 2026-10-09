@@ -225,21 +225,19 @@ public struct LatticeRetentionControl: Equatable, Sendable {
         // fact it is rather than greying the row in silence.
         var disabled: String? = nil
         if !graded {
-            disabled = "Set Density mode to Auto — retention is part of the grading "
-                     + "law, and a uniform lattice run carries no grading block for "
-                     + "it to ride."
+            // ★★ NAME THE CONTROL THAT IS ON SCREEN (maintainer, 2026-08-20: "then I
+            // change to 'per region' and it says to go back to Auto! What the fuck is
+            // with this shit?"). There is no "Auto" in the Density row — the options
+            // are Sim, Uniform and Per region. This told him to press a button that
+            // does not exist. One sentence, and the sentence names the real chip.
+            disabled = "Set Density to Sim. Retention needs the solve."
         } else if cellMode == .fit {
-            // ★ THE FIT EXCLUSION, IN HIS TERMS. From where he sits these two solve
-            // the same problem — "my regions are too thin, lattice them anyway" — so
-            // the copy says WHICH TO USE WHEN rather than only that they conflict.
-            // Core THROWS on the pair (grading.cpp:66-70) and the app must not let
-            // him author that job.
-            disabled = "Cell size is set to Per region, which already fits a cell to "
-                     + "each region and reports what it emitted below the floor. "
-                     + "Use Per region when your regions differ in thickness; use "
-                     + "this switch when one cell has to serve them all. Only one "
-                     + "of the two can decide a given piece of material, so core "
-                     + "refuses a run that asks for both."
+            // ★★ AND CALL IT WHAT THE CHIP CALLS IT. The cell-size chip says "Fit";
+            // this said "Per region", so the copy referred to a mode he could not
+            // find, in a paragraph he could not parse ("what is with that paragraph
+            // of text?!?!?!"). Two sentences: what to do, and why.
+            disabled = "Fit already sizes a cell to each region, so nothing falls "
+                     + "below the floor. Use this switch with Auto or Swept instead."
         } else if let why = capability.unavailableReason() {
             disabled = why
         }
