@@ -180,6 +180,8 @@ final class FlexiblePressAimTests: XCTestCase {
             XCTAssertEqual(aim.offered.first.map { Self.bits($0.direction) }, Self.bits(h), "\(label): the target IS the halfway")
             let v = try await m.pressVerdict(regions, direction: h)
             XCTAssertTrue(v.accepted, "\(label): core builds the halfway — \(v.reason)")
+            XCTAssertEqual(aim.defaultRelease.map { Self.bits($0.direction) }, Self.bits(h), "\(label): a new press's aim IS the halfway")
+            XCTAssertEqual(aim.defaultRelease?.snap, .halfway)
         }
         Self.say("FLEX-AP3 DEFAULT STEP skips \(skips.count)" + (skips.isEmpty ? "" : " — " + skips.joined(separator: "; ")))
 
@@ -556,6 +558,7 @@ final class FlexiblePressAimTests: XCTestCase {
         XCTAssertEqual(half.kind, .halfway, "the target rule: the first offered")
         XCTAssertEqual(A.selected(.face(f.top), offered: edge.offered)?.kind, .halfway, "a legacy snap: the default")
         let box = try XCTUnwrap(A.box(target: half, current: half.direction, fallbacks: edge.fallbacks, loads: edge.memberLoads))
+        XCTAssertEqual(edge.box(current: half.direction, snap: .halfway), box, "the set's box is the same rule")
         let topLoad = try await cube.regionFrame(f.top).load
         let xLoad = try await cube.regionFrame(f.x).load
         XCTAssertEqual(box.value, 0)
@@ -764,5 +767,45 @@ final class FlexiblePressAimTests: XCTestCase {
         // RED: a direction stored through Float
         let viaFloat = SIMD3<Double>(SIMD3<Float>(aim.offered[0].direction))
         XCTAssertNotEqual(Self.bits(viaFloat), Self.bits(aim.offered[0].direction), "control: through Float it is not the target")
+    }
+
+    // MARK: - (13) a one-region press over 2+ faces
+
+    /// ★ Spec §6 (critique core-purity 7): a ONE-region press whose region spans 2+ faces (a Surface cut of a union,
+    /// "faces 1+3 · A") takes its halfway over its MEMBER FACES, each framed by core with the region's cuts
+    /// (face_frame_cut of that face's triangles, clipped) — 45.00° from each on C1's pad, top + x = 100 side cut at
+    /// y = 50. Its [Straighten] is core's own load of the whole region (area-weighted), offered beside the halfway
+    /// (both built by core). CONTROL (run here): that own load is 11.31° from the top, not 45° — the region's frame is
+    /// not the halfway. (Added in the implementation commit, after the tests-first red run; its control runs here.)
+    func testAMultiFaceRegionsHalfwayRunsOverItsFaces() async throws {
+        let pm = try FlexiblePressFixtures.padProject()
+        let mesh = try XCTUnwrap(pm.viewerMesh)
+        let top = FlexibleSquishFixture.face(mesh, axis: 2, value: 20), side = FlexibleSquishFixture.face(mesh, axis: 0, value: 100)
+        var model = FaceRegionModel()
+        let whole = model.union(faces: [FaceID(top), FaceID(side)], named: "top+side")
+        let kids = model.splitManual(whole, point: SIMD3(50, 50, 10), normal: SIMD3(0, 1, 0))
+        pm.faceRegions = model
+        let m = try await G.openModel(self, pm, "C1 pad, top + side cut at y = 50")
+        let sector = try XCTUnwrap(kids.map { FlexibleRegions.sectorBase + $0 }.first)
+        let faces = m.regions.faces(of: sector, mesh: m.project.viewerMesh)
+        XCTAssertEqual(Set(faces), [top, side], "premise: one region over two faces")
+        let aim = try await m.pressAim([sector])
+        let h = try XCTUnwrap(aim.halfway, aim.why ?? "")
+        var line = "FLEX-AP3 MULTIFACE \(m.name(sector)) faces \(faces):"
+        for f in faces {
+            let load = try await m.regionFrame(sector, face: f).load   // core's, clipped by the region's cuts
+            line += String(format: " face %d %.2f°", f, Self.deg(h, load))
+            XCTAssertEqual(Self.deg(h, load), 45, accuracy: 1e-9, "★ 45.00° from face \(f), core's normal of that face")
+        }
+        let own = try await m.regionFrame(sector).load
+        let topLoad = try await m.regionFrame(sector, face: top).load
+        line += String(format: " · its own core load %.2f° from the top · asked %@ · offered %@", Self.deg(own, topLoad),
+                       aim.asked.map { "\($0.target.label) \($0.accepted ? "built" : "refused")" }.joined(separator: ", "),
+                       aim.offered.map(\.label).joined(separator: ", "))
+        Self.say(line)
+        XCTAssertEqual(aim.offered.map(\.kind), [.straighten, .halfway], "★ its straighten and its halfway, both built")
+        XCTAssertEqual(aim.offered.first.map { Self.bits($0.direction) }, Self.bits(own + SIMD3(repeating: 0)))
+        XCTAssertEqual(Self.deg(own, topLoad), 11.31, accuracy: 0.01, "control: the region's own frame is area-weighted")
+        XCTAssertGreaterThan(Self.deg(own, h), 30, "control: and not the halfway")
     }
 }

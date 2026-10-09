@@ -44,6 +44,18 @@ public struct FlexiblePressAimSet: Equatable, Sendable {
 
     /// ★ The targets OFFERED: exactly those core builds.
     public var offered: [FlexiblePressAim.Target] { asked.filter(\.accepted).map(\.target) }
+
+    /// ★ A NEW press's aim (round 6 item 2's picks, spec §6): the first offered target — the halfway of an edge or a
+    /// corner, a tilt's straighten — exactly, with its kind. nil when core builds none of them (`why` and the asked
+    /// targets' reasons say why, in core's words).
+    public var defaultRelease: FlexiblePressAim.Release? { offered.first.map(FlexiblePressAim.chip) }
+
+    /// The degrees box for a press aimed along `current` whose snap kind is `snap`: measured from the selected target
+    /// (FlexiblePressAim.selected), on core's fallback axes, held 1° short of edge-on to every member.
+    public func box(current: SIMD3<Double>, snap: FlexiblePress.Snap?) -> FlexiblePressAim.Box? {
+        guard let t = FlexiblePressAim.selected(snap, offered: offered) else { return nil }
+        return FlexiblePressAim.box(target: t, current: current, fallbacks: fallbacks, loads: memberLoads)
+    }
 }
 
 extension FlexibleStageModel {
@@ -82,7 +94,7 @@ extension FlexibleStageModel {
                     continue
                 }
                 if axes == nil { axes = (f.xAxis, f.yAxis) }
-                memberLoads.append(f.areaMM2 * f.load)   // AP3 RED STUB: area-weighted (core's no-direction default)
+                memberLoads.append(f.load)
             }
             if why != nil { memberLoads = [] }
         }
@@ -95,7 +107,9 @@ extension FlexibleStageModel {
         for t in candidates {
             // straighten is the plain face press core builds today (no direction); every other target is
             // asked as the press it would be, along its direction
-            asked.append(.init(target: t, accepted: true, reason: ""))   // AP3 RED STUB: offered without asking core
+            let v = try await pressVerdict(t.kind == .straighten ? [first] : regions,
+                                           direction: t.kind == .straighten ? nil : t.direction)
+            asked.append(.init(target: t, accepted: v.accepted, reason: v.accepted ? "" : text(v.reason)))
         }
         let fallbacks = FlexiblePressAim.fallbacks(memberLoads: memberLoads, single: single, coreX: axes?.x, coreY: axes?.y)
         return FlexiblePressAimSet(regions: regions, memberLoads: memberLoads, ownLoad: ownLoad, halfway: halfway,
@@ -106,15 +120,9 @@ extension FlexibleStageModel {
     /// build_angle_deg and side (core's "> kSideStackDeg") for the stated load — from the first member core frames.
     /// nil when core frames none of them. No angle is compared with a threshold in Swift.
     public func pressSide(_ regions: [Int], direction: SIMD3<Double>) async throws -> FlexRegionFrame? {
-        // AP3 RED STUB: a Swift copy of the threshold — the angle to MODEL Z, >= 15
         for r in regions {
             let f = try await regionFrame(r, direction: direction)
-            guard f.valid else { continue }
-            let a = FlexiblePressAim.degrees(FlexiblePressAim.unit(direction) ?? f.load, SIMD3(0, 0, -1))
-            let line = min(a, 180 - a)   // AP3 RED STUB
-            return FlexRegionFrame(valid: f.valid, reason: f.reason, load: f.load, centroid: f.centroid, areaMM2: f.areaMM2,
-                                   buildAngleDeg: line, side: line >= 15, normalSpreadDeg: f.normalSpreadDeg,   // AP3 RED STUB
-                                   normalSpreadFlag: f.normalSpreadFlag, triangles: f.triangles, xAxis: f.xAxis, yAxis: f.yAxis)
+            if f.valid { return f }
         }
         return nil
     }
@@ -126,9 +134,10 @@ extension FlexibleStageModel {
     @discardableResult
     public func aimPress(_ id: UUID, _ r: FlexiblePressAim.Release) -> Bool {
         guard var p = settings.press(id), FlexiblePress.isAimable(r.direction) else { return false }
-        let raw: String? = nil   // AP3 RED STUB: the snap kind dropped, no [Straighten]
+        if r.snap == .straighten, p.kind == .tilted, straighten(id) { return true }
+        let raw = r.snap?.raw
         guard FlexiblePressAim.bits(p.direction) != FlexiblePressAim.bits(r.direction) || p.snap != raw else { return false }
-        guard p.aim(SIMD3<Double>(SIMD3<Float>(r.direction)), snap: raw) else { return false }   // AP3 RED STUB: through Float
+        guard p.aim(r.direction, snap: raw) else { return false }
         project.sealUndoStep()   // its own undo step, as every press action (AP1 review)
         actionSerial += 1
         edit { $0.setPress(p) }

@@ -70,7 +70,8 @@ public enum FlexiblePressAim {
         var s = SIMD3<Double>.zero
         for l in loads { s += l }
         guard simd_length(s) >= 1e-9, let h = unit(s) else { return nil }
-        return canon(h)   // AP3 RED STUB: no into-every-member check
+        guard loads.allSatisfy({ simd_dot(h, $0) > 0 }) else { return nil }
+        return canon(h)
     }
 
     // MARK: - the targets (A4, A8)
@@ -102,14 +103,17 @@ public enum FlexiblePressAim {
     /// core's build direction (the scene's). Never a member's own normal for 2+ regions. A target that repeats an
     /// earlier one is dropped (the first wins: the top face's straighten IS straight down).
     public static func candidates(memberLoads: [SIMD3<Double>], ownLoad: SIMD3<Double>?, buildDir: SIMD3<Double>) -> [Target] {
-        // AP3 RED STUB: the pre-amendment list — the halfway, EACH MEMBER'S OWN NORMAL as a chip, build Z as model ±Z;
-        // no straighten, nothing dropped
         var out: [Target] = []
-        if memberLoads.count >= 2, let h = halfway(memberLoads) { out.append(Target(kind: .halfway, direction: h)) }   // AP3 RED STUB
-        for (i, l) in memberLoads.enumerated() { out.append(Target(kind: .face(i), direction: l)) }   // AP3 RED STUB
-        out.append(Target(kind: .buildDown, direction: SIMD3(0, 0, -1)))   // AP3 RED STUB
-        out.append(Target(kind: .buildUp, direction: SIMD3(0, 0, 1)))   // AP3 RED STUB
-        return out
+        // straighten IS core's load, bit for bit (re-normalising a unit vector can move its last bit)
+        if let own = ownLoad, unit(own) != nil { out.append(Target(kind: .straighten, direction: canon(own))) }
+        if memberLoads.count >= 2, let h = halfway(memberLoads) { out.append(Target(kind: .halfway, direction: h)) }
+        if let b = unit(buildDir) {
+            out.append(Target(kind: .buildDown, direction: canon(SIMD3<Double>.zero - b)))
+            out.append(Target(kind: .buildUp, direction: canon(b)))
+        }
+        var kept: [Target] = []
+        for t in out where !kept.contains(where: { degrees($0.direction, t.direction) < 1e-9 }) { kept.append(t) }
+        return kept
     }
 
     /// ★ THE TARGET RULE of the degrees box: it measures FROM the press's stored snap kind when that target is
@@ -129,9 +133,7 @@ public enum FlexiblePressAim {
     }
 
     /// A chip tap: the target's own vector, bit for bit.
-    public static func chip(_ t: Target) -> Release {
-        Release(direction: SIMD3<Double>(SIMD3<Float>(t.direction)), snap: t.kind)   // AP3 RED STUB: through Float
-    }
+    public static func chip(_ t: Target) -> Release { Release(direction: t.direction, snap: t.kind) }
 
     /// Is `d` exactly on `t` (bit for bit)?
     public static func on(_ d: SIMD3<Double>, _ t: Target) -> Bool { bits(d) == bits(t.direction) }
@@ -140,11 +142,14 @@ public enum FlexiblePressAim {
     /// wins a tie. Outside every tolerance: nil.
     public static func snapped(_ d: SIMD3<Double>, targets: [Target],
                                toleranceDeg: Double = snapToleranceDeg) -> Target? {
-        // AP3 RED STUB: the gravity gizmo's snap (its six model axes first, then the targets)
-        let r = GravityDirectionGizmo.snap(d, extraTargets: targets.map { .init(direction: $0.direction, label: $0.label) },
-                                           toleranceDeg: toleranceDeg)   // AP3 RED STUB
-        guard r.label != nil else { return nil }
-        return targets.first { bits($0.direction) == bits(r.dir) } ?? Target(kind: .build, direction: r.dir)   // AP3 RED STUB
+        guard let n = unit(d) else { return nil }
+        var best: Target? = nil
+        var bestDot = cos(toleranceDeg * .pi / 180)
+        for t in targets {
+            let c = simd_dot(n, t.direction)
+            if c > bestDot { bestDot = c; best = t }
+        }
+        return best
     }
 
     // MARK: - the 1° limit (the app's; core decides what it builds)
@@ -170,7 +175,6 @@ public enum FlexiblePressAim {
     /// admissible holds where it is.
     public static func clamp(_ d: SIMD3<Double>, from start: SIMD3<Double>, loads: [SIMD3<Double>]) -> SIMD3<Double> {
         guard let e = unit(d) else { return start }
-        if !loads.isEmpty || true { return canon(e) }   // AP3 RED STUB: no 1° limit
         if admissible(e, loads: loads) { return canon(e) }
         guard let a = unit(start), admissible(a, loads: loads) else { return start }
         func ok(_ t: Double) -> Bool { slerp(a, e, t).map { admissible($0, loads: loads) } ?? false }
@@ -245,8 +249,8 @@ public enum FlexiblePressAim {
             guard abs(simd_dot(u, t)) < 1 - 1e-9 else { return nil }
             return unit(u - simd_dot(u, t) * t)
         }
-        // AP3 RED STUB: a fixed model-axis plane (+Y, else +X), not the arrow's nor the fallbacks'
-        let plane: SIMD3<Double>? = perp(SIMD3(0, 1, 0)) ?? perp(SIMD3(1, 0, 0))   // AP3 RED STUB
+        var plane: SIMD3<Double>? = value > 1e-9 ? perp(current) : nil
+        if plane == nil { plane = fallbacks.lazy.compactMap(perp).first }
         guard let u = plane.map(canon) else { return nil }
         // the limit: the first angle along the plane past which a free direction is not admissible
         func at(_ deg: Double) -> SIMD3<Double> {
@@ -318,8 +322,8 @@ public enum FlexiblePressAim {
     /// ★ Looking ALONG the arrow, the knob's drag plane faces the arrow and a drag cannot tilt it: the knob turns into
     /// a screen trackball.
     public static func isTrackball(viewDir: SIMD3<Double>, direction: SIMD3<Double>) -> Bool {
-        guard unit(viewDir) != nil, unit(direction) != nil else { return false }
-        return false   // AP3 RED STUB: never a trackball
+        guard let v = unit(viewDir), let d = unit(direction) else { return false }
+        return abs(simd_dot(v, d)) > trackballDot
     }
 
     /// The trackball: a finger move of (dx, dy) points turns the arrow 0.5° per point — right about the screen's up
@@ -383,7 +387,9 @@ extension FlexibleFixPopup {
         let line = simd_normalize(a)
         var out = SIMD3<Float>.zero
         for l in memberLoads { out -= settle.act(f(l)) }
-        _ = out; _ = line
-        return cameraRegion(load: arrow, settle: settle)   // AP3 RED STUB: the face-on rule, along the arrow
+        let mean = simd_length(out) > 1e-6 ? simd_normalize(out) : -line
+        let cosMin = cos(acrossMinDeg * .pi / 180)
+        let across = OrientationGizmo.regions.filter { abs(simd_dot($0.direction, line)) <= cosMin }
+        return across.max { simd_dot($0.direction, mean) < simd_dot($1.direction, mean) }
     }
 }
