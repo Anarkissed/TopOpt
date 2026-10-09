@@ -1,0 +1,40 @@
+// S2 scratch probe (evidence only, never built by the package; compiled by hand: clang++ -std=c++20 -I core/include <this> <libtopopt.a>).
+// K6 (e8a01f7d) changes a run's region id only where they differ (an include that fails to resolve).
+// Mirrors lattice_role_regions_from_job for "face"/"bolt" kinds (as bridge.cpp stepped_region_owners does).
+#include "topopt/job.hpp"
+#include "topopt/clearance.hpp"
+#include <cstdio>
+#include <fstream>
+#include <sstream>
+int main(int argc, char** argv) {
+  for (int a = 1; a < argc; ++a) {
+    std::ifstream f(argv[a]); std::stringstream ss; ss << f.rdbuf();
+    try {
+      const topopt::JobDescription job = topopt::parse_job(ss.str());
+      int declared = 0, valid = 0, region_kind = 0, conflict = 0;
+      for (const auto& r : job.lattice.regions) {
+        if (r.role != "include") continue;
+        ++declared;
+        if (r.kind == "region") { ++region_kind; continue; }
+        topopt::ManualClearanceGeometry mg; topopt::ClearanceParams p;
+        if (r.kind == "bolt") {
+          mg.kind = topopt::ClearanceKind::Bolt; p.kind = topopt::ClearanceKind::Bolt;
+          mg.axis_point = r.axis_point; mg.axis_dir = r.axis_dir; mg.radius_mm = r.radius_mm; mg.half_length_mm = r.half_length_mm;
+        } else {
+          mg.kind = topopt::ClearanceKind::Face; p.kind = topopt::ClearanceKind::Face; p.slab_depth_mm = r.depth_mm;
+          mg.origin = r.origin; mg.normal = r.normal; mg.half_u_mm = r.half_u_mm; mg.half_w_mm = r.half_w_mm;
+          mg.outline_uv = r.outline_uv; mg.frame_u = r.frame_u; mg.frame_w = r.frame_w;
+        }
+        const topopt::ClearanceGeometry g = topopt::resolve_clearance_manual(mg, p);
+        if (g.frame_conflict) ++conflict;
+        if (g.valid) ++valid;
+      }
+      std::printf("%s parsed: includes declared %d, resolve %d, region-kind %d, frame_conflict %d, stepped_cells %zu -> %s\n",
+                  argv[a], declared, valid, region_kind, conflict, job.lattice.stepped_cells.size(),
+                  (declared == valid + region_kind) ? "K6 ids == positions (no change)" : "K6 MOVES ids");
+    } catch (const std::exception& e) {
+      std::printf("%s PARSE REFUSED: %s\n", argv[a], e.what());
+    }
+  }
+  return 0;
+}
