@@ -1493,7 +1493,7 @@ JobDescription parse_job(const std::string& json_text) {
         } else {  // face
           reject_unknown_keys(
               gv, {"origin", "normal", "half_u_mm", "half_w_mm", "depth_mm", "outline_uv",
-                   "frame_u", "frame_w", "slot_origin_mm"},
+                   "frame_u", "frame_w", "slot_origin_mm", "plan_base_cell_mm"},
               "a face lattice region geometry");
           // ── ★ WHICH WALL (reviewer, 2026-09-30) ──────────────────────────
           // The run-time refusal these checks replace named the region -- "lattice
@@ -1596,6 +1596,20 @@ JobDescription parse_job(const std::string& json_text) {
             reg.slot_origin_mm =
                 parse_vec3(*sv, "a face lattice region \"slot_origin_mm\"");
             reg.slot_origin_stated = true;
+          }
+          // ── ★ K1: THE PLAN'S BASE CELL, SENT ──────────────────────────────────
+          // The slot size the app's ladder was built on. Not inferable from the plan: a
+          // region need not contain a base-size cell. Validated here as a positive,
+          // finite length; whether the plan's cells are steps of it is the validator's
+          // question, and whether the region needs one at all is the run's (only a region
+          // the plan places cells in does).
+          if (const JsonValue* pb = find_key(gv, "plan_base_cell_mm")) {
+            reg.plan_base_cell_mm =
+                require_number(*pb, "lattice region plan_base_cell_mm");
+            if (!(std::isfinite(reg.plan_base_cell_mm) && reg.plan_base_cell_mm > 0.0))
+              schema_fail(which + ": a face lattice region \"plan_base_cell_mm\" must be "
+                                  "finite and > 0 (got " +
+                          std::to_string(reg.plan_base_cell_mm) + ")");
           }
           if (const JsonValue* ov = find_key(gv, "outline_uv")) {
             if (ov->type != JsonValue::Type::Array)

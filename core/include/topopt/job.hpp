@@ -212,6 +212,18 @@ struct JobLatticeRegion {
   // measured along.
   Vec3 slot_origin_mm{0.0, 0.0, 0.0};
   bool slot_origin_stated = false;
+  // ── ★ K1 (reviewer, 2026-10-09): THE PLAN'S BASE CELL, SENT NOT INFERRED ──────
+  // The slot size the app's ladder was built on, for this region. It CANNOT be inferred
+  // from the plan: an any-step region -- or a doubled one made only of halves -- need not
+  // contain a base-size cell at all. Measured on 3418E167's Aesthetic Stepped plan: region
+  // 1 sends 3.5 mm and 4.6667 mm cells and the app's base is 7 mm, so "the largest sent
+  // cell" guesses 4.6667 and every check downstream is then run against a ladder the app
+  // never used. That is the silent substitute the standing rule forbids, and an earlier cut
+  // of K1 did exactly it.
+  //
+  // REQUIRED on every region the plan places cells in; a planned region without it is
+  // refused by name. 0 means not sent.
+  double plan_base_cell_mm = 0.0;
   // ★ WHICH B-REP FACE THIS REGION CAME FROM (task 2026-08-12 §0a). Optional,
   // -1 = "not from a face" (a hand-placed primitive). It exists so the ONE
   // number the user drags can be CHECKED: when a face region names a face that

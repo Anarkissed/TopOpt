@@ -1,13 +1,14 @@
 {
- "_comment": "Control for R1: the IDENTICAL plan with no slot_origin_mm. The derived origin stands, the 1.5 mm cell is off its grid, and it must be REFUSED -- which is what makes the accepted case attributable to the key and not to a loosened check.",
+ "_comment": "K1: the base is 7 mm and is SENT. This is 3418E167's real shape -- cells of 3.5 and 4.6667 with a 7 mm base. It is refused (4.6667 needs divisor 3, which prints-open drops at base 7), and the refusal must quote BASE 7: under the old 'largest sent cell' inference it quoted 4.667, which is the ladder the app never used.",
  "bake_build_orientation": "off",
  "grading": {
-  "algorithm": "doubled",
+  "algorithm": "stepped",
   "cell_max_mm": 3.0,
   "cell_min_mm": 3.0,
   "cell_mode": "swept",
   "min_extrudable_width_mm": 0.45,
-  "topology": "octet"
+  "topology": "octet",
+  "intent": "aesthetic"
  },
  "lattice": {
   "emit_3mf": false,
@@ -17,8 +18,8 @@
    {
     "geometry": {
      "depth_mm": 12.0,
-     "half_u_mm": 6.0,
-     "half_w_mm": 6.0,
+     "half_u_mm": 12.0,
+     "half_w_mm": 12.0,
      "normal": [
       0.0,
       1.0,
@@ -29,7 +30,12 @@
       0.0,
       8.0
      ],
-     "plan_base_cell_mm": 3.0
+     "slot_origin_mm": [
+      18.4,
+      0.0,
+      8.4
+     ],
+     "plan_base_cell_mm": 7.0
     },
     "kind": "face",
     "role": "include"
@@ -44,16 +50,16 @@
      0.0,
      8.4
     ],
-    "size_mm": 3.0
+    "size_mm": 3.5
    },
    {
     "region_id": 1,
     "origin_mm": [
-     21.4,
+     18.4,
      0.0,
-     8.4
+     15.4
     ],
-    "size_mm": 1.5
+    "size_mm": 4.666666666666667
    }
   ],
   "topology": "octet"

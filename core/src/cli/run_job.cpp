@@ -7010,89 +7010,63 @@ LatticeVariantOutcome lattice_one_variant(
   // the next push_back, leaving every earlier pass reading freed memory.
   std::deque<std::vector<double>> anystep_rho;
   if (!job.lattice.stepped_cells.empty()) {
-    // ★ THE FRAME IS DERIVED, NOT SENT. A cell names a region by its 1-based
-    // include-region order and states its origin in MODEL space, so the base cell comes
-    // from the stepped step's own answer for that region and the prism from the region's
-    // geometry. Nothing for the app to keep in step, and nothing that can disagree.
+    // ── ★ K1: THE BASE PER REGION IS THE APP'S, FOR BOTH MENUS ──────────────────
+    // (#354's map of 2026-10-08, reviewer's ruling of the same day.) This had TWO paths.
+    // Doubled took the region's LARGEST SENT CELL -- the app's own rule. Any-step took
+    // `R.stepped.cells`, the cell core's stepped step derives from that region's FEA
+    // density and member width. So every app-sent any-step plan was validated against a
+    // number the app never used, and #354 expected "not on that region's menu" on every
+    // project.
+    //
+    // There is now ONE path, and it is the app's: the largest cell the region placed IS
+    // the top of the ladder it halved, so the ladder is checked against the list's own
+    // evidence and core still validates rather than re-plans. A region that placed only
+    // fine cells simply has a lower top, and its cells still have to be steps of it.
+    //
+    // AND IT SEVERS A DEPENDENCY K3 NEEDS. Built from `R.stepped.cells`, the plan could
+    // not be read until core's grading had produced a mask and the stepped step had run
+    // on it -- which is exactly the gating K3 removes. Built from the job, the plan's
+    // frame depends on nothing but the job.
     std::vector<SteppedPlanRegion> plan_regions;
-    for (const SteppedRegionCell& rc : R.stepped.cells) {
-      SteppedPlanRegion pr;
-      pr.region_id = rc.region_id;
-      pr.base_cell_mm = rc.cell_mm;
-      // ★ BY INCLUDE ORDER, NOT BY POSITION (#354, 2026-09-30). `rc.region_id`
-      // counts INCLUDE regions; `regions[region_id - 1]` counted ALL of them, so one
-      // exclude declared first handed this plan the exclude's prism. See
-      // job_include_region().
-      const JobLatticeRegion* jr =
-          job_include_region(job.lattice.regions, rc.region_id);
-      // ★ A CAN'T-HAPPEN STILL REFUSES (reviewer, 2026-09-30). `rc.region_id` comes
-      // from the run's own per-voxel ids, so an id with no include region is not
-      // reachable today. Leaving the frame at zero was still the wrong failure mode:
-      // `depth_mm` 0 means "skip the depth test" in stepped_validate_plan, so a plan
-      // would be validated against a prism that does not exist and pass the one check
-      // that would have caught it. Name the id and the count instead.
-      if (jr == nullptr) {
-        int includes = 0;
-        for (const JobLatticeRegion& q : job.lattice.regions)
-          if (q.role == "include") ++includes;
-        throw JobError(
-            "the stepped step derived a cell for include region " +
-            std::to_string(rc.region_id) + ", but this job declares " +
-            std::to_string(includes) +
-            " include region(s). A region id is a 1-based position among the INCLUDE "
-            "regions (see job_include_region), so this run cannot say which wall that "
-            "cell belongs to and will not guess.");
-      }
-      // ★ R1: THE SENT SLOT ORIGIN WINS. Where the app states the grid it packed on,
-      // that grid is what every check and the laying measure from -- alignment, depth,
-      // overlap, grouping (stepped_group_cells walks back from this point) and the
-      // region the run lays. Absent, the region origin stands, which is what every
-      // existing job gets. Its in-plane-ness is settled at parse time (job.cpp).
-      pr.slot_origin = jr->slot_origin_stated ? jr->slot_origin_mm : jr->origin;
-      // ★ K2: the region's own plane, which DEPTH is measured from -- the slot origin
-      // above is only the grid phase and may stand off the plane on a tilted facet.
-      pr.plane_origin = jr->origin;
-      pr.plane_origin_stated = true;
-      pr.normal = jr->normal;
-      pr.depth_mm = jr->depth_mm;
-      plan_regions.push_back(pr);
-    }
-    // ★ RULING A: DOUBLED SENDS ITS CELLS TOO, and its base is not a per-region answer.
-    // The stepped step derives one cell per region from that region's own FEA density
-    // and member width; the dyadic grade has no such step -- its base is the job's
-    // stated target cell, the top of the halving ladder. So when the stepped step did
-    // not run (which is exactly the doubled case), the frame comes from the declared
-    // regions directly. Include regions only, in the job's own order, which is the
-    // 1-based region_id the cells name.
-    const bool doubled_plan = plan_regions.empty();
-    if (doubled_plan) {
-      // ★ THE BASE IS PER REGION, AND IT COMES OUT OF THE LIST (app, 2026-09-20).
-      // This first took grading.cell_mm, which is ONE number -- and the app's doubled
-      // cells carry a base per region (his stand: 12 mm on one wall, 10.31 on the
-      // other, by the 09-17 rule). A single ladder from one target therefore refused
-      // the 10.31 wall outright.
+    {
+      // ★ K1 CORRECTED (reviewer, 2026-10-09). An earlier cut INFERRED the base as the
+      // region's largest sent cell. That is a silent substitute: a region need not contain
+      // a base-size cell at all. Measured on 3418E167's Aesthetic Stepped plan, region 1
+      // sends only 3.5 mm and 4.6667 mm cells while the app's base is 7 mm -- so the
+      // inference guessed 4.6667 and every menu, alignment and grouping check below ran
+      // against a ladder the app never used. (It also put the sizes a hair off: 3/4 of a
+      // rounded 4.6667 is 3.500025, not the 3.5 the plan sends.)
       //
-      // The base is the region's own LARGEST SENT CELL. Not re-derived from the FEA:
-      // the stepped derivation answers a different question and could disagree with
-      // the base the app actually packed against, which would refuse a plan for
-      // differing from a number the app never used. The largest cell the app placed
-      // IS the top of the ladder it halved, so the ladder is checked against the
-      // list's own evidence and core still validates rather than re-plans. A region
-      // that placed only fine cells simply has a lower top, and its cells still have
-      // to be halvings of it.
-      std::map<int, double> base_of;
-      for (const SteppedCell& c : job.lattice.stepped_cells) {
-        double& b = base_of[c.region_id];
-        if (c.size_mm > b) b = c.size_mm;
-      }
+      // The base now travels on the wire, per region, and a region the plan places cells
+      // in MUST carry it. Refused by name otherwise -- production sends no plans yet, so
+      // nothing in the field breaks, and a plan without it would otherwise be checked
+      // against a guess.
+      std::set<int> planned_regions;
+      for (const SteppedCell& c : job.lattice.stepped_cells)
+        planned_regions.insert(c.region_id);
       int include_index = 0;
       for (const JobLatticeRegion& jr : job.lattice.regions) {
         if (jr.role != "include") continue;
         ++include_index;
         SteppedPlanRegion pr;
         pr.region_id = include_index;
-        auto bi = base_of.find(include_index);
-        pr.base_cell_mm = bi != base_of.end() ? bi->second : job.grading.cell_mm;
+        if (planned_regions.count(include_index) && !(jr.plan_base_cell_mm > 0.0))
+          throw JobError(
+              "lattice region " + std::to_string(include_index) + " (face " +
+              std::to_string(jr.face_id) +
+              ") carries " + std::to_string(std::count_if(
+                                 job.lattice.stepped_cells.begin(),
+                                 job.lattice.stepped_cells.end(),
+                                 [&](const SteppedCell& c) {
+                                   return c.region_id == include_index;
+                                 })) +
+              " planned cell(s) but no \"plan_base_cell_mm\". That is the slot size the "
+              "ladder was built on, and core cannot infer it: a region need not contain a "
+              "base-size cell, so the largest cell sent is a guess and every menu, "
+              "alignment and grouping check would be run against a ladder you never used. "
+              "State it on the region.");
+        pr.base_cell_mm = jr.plan_base_cell_mm > 0.0 ? jr.plan_base_cell_mm
+                                                     : job.grading.cell_mm;
         // ★ R1: THE SENT SLOT ORIGIN WINS. Where the app states the grid it packed on,
         // that grid is what every check and the laying measure from -- alignment, depth,
         // overlap, grouping (stepped_group_cells walks back from this point) and the

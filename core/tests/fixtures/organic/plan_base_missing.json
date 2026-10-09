@@ -1,5 +1,5 @@
 {
- "_comment": "Control for R1: the IDENTICAL plan with no slot_origin_mm. The derived origin stands, the 1.5 mm cell is off its grid, and it must be REFUSED -- which is what makes the accepted case attributable to the key and not to a loosened check.",
+ "_comment": "K1: a planned region with no \"plan_base_cell_mm\". Core cannot infer the base -- a region need not contain a base-size cell -- so this is REFUSED by name rather than checked against a guess.",
  "bake_build_orientation": "off",
  "grading": {
   "algorithm": "doubled",
@@ -29,7 +29,11 @@
       0.0,
       8.0
      ],
-     "plan_base_cell_mm": 3.0
+     "slot_origin_mm": [
+      18.4,
+      0.0,
+      8.4
+     ]
     },
     "kind": "face",
     "role": "include"

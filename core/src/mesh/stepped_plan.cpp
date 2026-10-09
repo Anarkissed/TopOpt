@@ -255,8 +255,16 @@ SteppedPlanCheck stepped_validate_plan(LatticeTopology topo,
     // core could have refused -- a strut under the bead, and a density over the cap the
     // job states -- so both are refused by name, with the number.
     if (cell.rho > 0.0) {
+      // ★ AND THIS TOLERANCE IS MEASURED TOO. His 570B38E2 plan sends cells AT the
+      // aesthetic ceiling, and the value the app computes differs from the cap the same
+      // job states in the EIGHTH decimal: cap 0.21887141535615173 against rho
+      // 0.21887143976494672, a gap of 2.44e-08. A relative 1e-9 bound refused 570B38E2 at
+      // cell 3148 for exceeding its own ceiling by 24 parts per billion. 1e-6 relative
+      // absorbs that by a factor of ~40 and still refuses a real over-cap by orders of
+      // magnitude (0.30 against a 0.15 cap is 1e+0).
+      constexpr double kCapSlackRel = 1e-6;
       if (max_relative_density > 0.0 && std::isfinite(max_relative_density) &&
-          cell.rho > max_relative_density * (1.0 + kSteppedMenuSameRel)) {
+          cell.rho > max_relative_density * (1.0 + kCapSlackRel)) {
         std::snprintf(msg, sizeof msg,
                       "stepped cell %zu in region %d states a density of %.6g, over this "
                       "job's \"max_relative_density\" of %.6g. Refused rather than clamped: "
@@ -272,7 +280,24 @@ SteppedPlanCheck stepped_validate_plan(LatticeTopology topo,
       } catch (const std::exception&) {
         dia = 0.0;                       // no measured law at that density: treated as unprintable
       }
-      if (!(dia >= bead_mm * (1.0 - kSteppedMenuSameRel))) {
+      // ★ THE TOLERANCE IS SIZED FROM MEASUREMENT, not from machine epsilon, and this
+      // matters: a relative 1e-9 bound REFUSED his real 570B38E2 plan at cell 223, whose
+      // strut comes out 0.449979 mm against a 0.450000 mm bead -- 21 NANOMETRES short.
+      // The cause is core's own: it holds TWO measured tables that are not exact inverses
+      // (lattice_strut_diameter_mm forward, lattice_density_from_strut preimage), so a
+      // density the app composed to land exactly ON the floor reads a hair under it here.
+      // Measured at that cell: the app sent rho 0.174384; core's bisection of the forward
+      // table says 0.174398 and its preimage route says 0.162833. The app's value sits
+      // BETWEEN core's own two answers, so no exact comparison can be right for both.
+      //
+      // The two scales are far apart, which is what makes a tolerance honest here:
+      //   the tables' disagreement at that cell   2.1e-05 mm  (21 nm)
+      //   a genuinely unprintable pairing         5.0e-02 mm  (rho 0.10 at a 3 mm cell)
+      // a factor of about 2,300. One micron sits ~50x above the noise and ~50x below the
+      // defect, so it refuses what cannot print and accepts what the app composed at the
+      // floor.
+      constexpr double kBeadSlackMm = 1e-3;
+      if (!(dia >= bead_mm - kBeadSlackMm)) {
         std::snprintf(msg, sizeof msg,
                       "stepped cell %zu in region %d is %.4g mm at a density of %.6g, which "
                       "builds a %.4g mm strut -- under the %.4g mm bead. The strut is sized "
