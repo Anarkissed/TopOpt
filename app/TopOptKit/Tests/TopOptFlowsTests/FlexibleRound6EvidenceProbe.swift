@@ -245,9 +245,31 @@ final class FlexibleRound6EvidenceProbe: XCTestCase {
                 let tags = stage.prismTags(r.project, on: .lattice, drilledIn: false, viewport: proj.viewportSize, keepOut: [],
                                            projector: { proj.project($0) })
                 try write(mr, name, marks: tags.map { Mark(point: $0.point, text: $0.text, fill: DS.Surface.panel) })
+                // ★ how visible the faint prisms are on the main page (round 6's open check): the same frame without
+                // them, the max-channel Δ (0-255) over the pixels they change
+                let bg = DS.Color.background
+                let clear = MTLClearColor(red: bg.r, green: bg.g, blue: bg.b, alpha: 1)
+                let with = try XCTUnwrap(mr.renderOffscreen(size: Self.size, clear: clear))
+                mr.setClearanceVolumes([])
+                let without = try XCTUnwrap(mr.renderOffscreen(size: Self.size, clear: clear))
+                var deltas: [Int] = []
+                for i in stride(from: 0, to: min(with.count, without.count), by: 4) {
+                    let d = (0..<3).map { abs(Int(with[i + $0]) - Int(without[i + $0])) }.max() ?? 0
+                    if d > 2 { deltas.append(d) }
+                }
+                deltas.sort()
+                let q = { (p: Double) -> Int in deltas.isEmpty ? 0 : deltas[min(deltas.count - 1, Int(Double(deltas.count) * p))] }
+                // every shown prism's floor on screen, kept or dropped (greedy: the larger face first)
+                let floors = items.compactMap { it -> String? in
+                    guard let h = FlexibleDepthPrism.handle(it.volume), let p = proj.project(h.anchor) else { return "face \(it.volume.faceID) off screen" }
+                    let kept = tags.contains { $0.region == it.volume.faceID }
+                    return String(format: "face %d at (%.0f, %.0f)%@", it.volume.faceID, p.x, p.y, kept ? "" : " DROPPED (overlaps a larger face's tag)")
+                }
                 print("FLEX-R6-S1b-EVIDENCE \(name): active \(r.project.selection.activeGroup?.name ?? "—") · views \(m.views.rawValue) · "
                       + "lattice \(stage.latticeShown) · prisms \(items.map(\.volume.faceID)) k \(stage.prismK) · tags "
-                      + tags.map { "face \($0.region) \($0.text)" }.joined(separator: ", "))
+                      + tags.map { "face \($0.region) \($0.text)" }.joined(separator: ", ")
+                      + " · floors " + floors.joined(separator: ", ")
+                      + " · prisms' Δ over \(deltas.count) px: median \(q(0.5)) p90 \(q(0.9)) max \(deltas.last ?? 0)")
             }
             m.views = []
             print("FLEX-R6-S1b-EVIDENCE \(label) groups: " + r.project.selection.groups.map { "\($0.name) faces \($0.faces) regions \($0.regionIDs.count)" }.joined(separator: " · "))
