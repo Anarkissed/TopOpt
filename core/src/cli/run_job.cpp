@@ -7044,6 +7044,10 @@ LatticeVariantOutcome lattice_one_variant(
       // region the run lays. Absent, the region origin stands, which is what every
       // existing job gets. Its in-plane-ness is settled at parse time (job.cpp).
       pr.slot_origin = jr->slot_origin_stated ? jr->slot_origin_mm : jr->origin;
+      // ★ K2: the region's own plane, which DEPTH is measured from -- the slot origin
+      // above is only the grid phase and may stand off the plane on a tilted facet.
+      pr.plane_origin = jr->origin;
+      pr.plane_origin_stated = true;
       pr.normal = jr->normal;
       pr.depth_mm = jr->depth_mm;
       plan_regions.push_back(pr);
@@ -7090,6 +7094,10 @@ LatticeVariantOutcome lattice_one_variant(
         // region the run lays. Absent, the region origin stands, which is what every
         // existing job gets. Its in-plane-ness is settled at parse time (job.cpp).
         pr.slot_origin = jr.slot_origin_stated ? jr.slot_origin_mm : jr.origin;
+        // ★ K2: the region's own plane, which DEPTH is measured from -- the slot origin
+        // above is only the grid phase and may stand off the plane on a tilted facet.
+        pr.plane_origin = jr.origin;
+        pr.plane_origin_stated = true;
         pr.normal = jr.normal;
         pr.depth_mm = jr.depth_mm;
         plan_regions.push_back(pr);

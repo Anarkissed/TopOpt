@@ -128,6 +128,23 @@ struct SteppedPlanRegion {
   // cell must lie within it, which is the one containment test that needs no in-plane
   // axis convention. 0 depth => the depth test is skipped.
   Vec3 slot_origin{0, 0, 0};
+  // ── ★ K2 (reviewer, 2026-10-08, correcting the ruling of 2026-10-05) ───────────
+  // THE SLOT ORIGIN IS A GRID PHASE, NOT A PLANE POINT. It was required to lie in the
+  // face plane, which is wrong for a TILTED facet: the app's octree grid there is
+  // world-aligned, so the point it packed from is any point of the region's slot lattice
+  // and generally stands off the plane. Requiring it on the plane would make the app
+  // re-anchor tilted ladders, which changes the preview the maintainer approved.
+  //
+  // So the two jobs the one point used to do are now split: `slot_origin` carries the
+  // PHASE (alignment, overlap and grouping measure from it), and `plane_origin` carries
+  // the region's own face plane, which is what DEPTH is measured from. Moving the slot
+  // origin along the normal now changes the phase and nothing else -- it cannot shift the
+  // prism, which is what it silently did before.
+  //
+  // `plane_origin_stated` false means the slot origin is also the plane point, which is
+  // every caller that has not been taught the difference (and every pure-header test).
+  Vec3 plane_origin{0, 0, 0};
+  bool plane_origin_stated = false;
   Vec3 normal{0, 0, 0};
   double depth_mm = 0.0;
 };

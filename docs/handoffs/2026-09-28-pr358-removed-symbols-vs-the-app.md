@@ -374,6 +374,26 @@ Tested against the UNIT normal, for the reason recorded for `frame_u`: the raw t
 `|d·n| < eps` accepts `|d·n̂| < eps/|n|`, so a SHORT normal is the loose and dangerous
 case, not a long one.
 
+### ★ CORRECTED 2026-10-09 (K2): the slot origin is a grid PHASE, not a plane point
+
+The row above requiring `slot_origin_mm` to lie in the face plane is **withdrawn**. The
+reviewer corrected the ruling it implemented (2026-10-05 -> 2026-10-08): the requirement is
+wrong for a **tilted facet**, whose grid in the app is world-aligned, so the point the app
+packed from legitimately stands off the plane. Forcing it on would make the app re-anchor
+tilted ladders, which changes the preview the maintainer approved. #354 measured the cost of
+the old rule: on 102117B9, 22 of the 23 regions with cells are tilted, and on 68BF7B74 face
+23's three facets stand 13.26, 0.58 and 0.10 mm off their planes — all parse refusals.
+
+| what | was (b6e011d5) | is (K2) | app impact |
+|---|---|---|---|
+| a `slot_origin_mm` with a component along the region normal | **REFUSED at parse**, naming the region and the distance | **accepted** — it is the grid phase | **the refusal is gone.** Tilted facets can send the grid they packed on |
+| what DEPTH is measured from | the slot origin, so moving the phase along the normal silently moved the prism | the region's own plane (`SteppedPlanRegion::plane_origin`) | **intended, and it is the property that makes the split safe:** the phase sets alignment, overlap and grouping; it cannot shift the prism |
+
+Measured on the rebuilt fixture: with the slot origin one base cell inward, cells at y 0..3
+and 0..1.5 of a 12 mm prism are inside when measured from the plane, and project to centres
+of **-1.5 and -2.25** when measured from the slot origin — which is why core refused them
+before K2. One fixture distinguishes the two readings.
+
 Note for the R6 work that follows: with the slot origin on the wire, the stricter
 base-cell alignment R6 asks for can land without refusing the app's current plans — which
 is why this key goes in first.

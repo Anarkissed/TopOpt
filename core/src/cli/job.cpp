@@ -1582,32 +1582,20 @@ JobDescription parse_job(const std::string& json_text) {
                     "and the normal describe different faces");
             }
           }
-          // ── ★ R1: THE IN-PLANE SLOT ORIGIN, CHECKED AGAINST THE FACE PLANE ─────
-          // The anchor shift is in-plane by construction, so a slot origin with a
-          // component along the normal is not an anchor shift -- it moves the plane the
-          // prism's depth is measured from, which would change every cell's containment
-          // verdict without saying so. Tested against the UNIT normal for the reason
-          // spelled out for frame_u above: the raw test |d . n| < eps accepts
-          // |d . n_hat| < eps/|n|, so a SHORT normal is the loose and dangerous case.
+          // ── ★ R1 / K2: THE IN-PLANE SLOT ORIGIN, AS A GRID PHASE ───────────────
+          // This used to refuse a slot origin that did not lie in the face plane, on the
+          // ruling of 2026-10-05. The reviewer corrected that on 2026-10-08: it is wrong
+          // for a TILTED facet, whose grid in the app is world-aligned, so the point it
+          // packed from legitimately stands off the plane. Core takes the point as the
+          // grid PHASE and measures depth from the region's own plane instead
+          // (SteppedPlanRegion::plane_origin), so a component along the normal changes the
+          // phase and cannot move the prism. There is therefore nothing left to check
+          // here: any point of the region's slot lattice is a valid phase, and core cannot
+          // know that lattice independently of this point.
           if (const JsonValue* sv = find_key(gv, "slot_origin_mm")) {
             reg.slot_origin_mm =
                 parse_vec3(*sv, "a face lattice region \"slot_origin_mm\"");
             reg.slot_origin_stated = true;
-            const double ln = std::sqrt(reg.normal.x * reg.normal.x +
-                                        reg.normal.y * reg.normal.y +
-                                        reg.normal.z * reg.normal.z);
-            const Vec3 un{reg.normal.x / ln, reg.normal.y / ln, reg.normal.z / ln};
-            const double dn = (reg.slot_origin_mm.x - reg.origin.x) * un.x +
-                              (reg.slot_origin_mm.y - reg.origin.y) * un.y +
-                              (reg.slot_origin_mm.z - reg.origin.z) * un.z;
-            if (!(std::fabs(dn) < 1e-6))
-              schema_fail(
-                  which + ": a face lattice region's \"slot_origin_mm\" must lie IN the "
-                  "face plane, and this one stands " + std::to_string(dn) +
-                  " mm along the region normal from \"origin\". The slot origin carries "
-                  "the in-plane ANCHOR SHIFT of the grid the cells were packed on; a "
-                  "component along the normal would move the plane the prism's depth is "
-                  "measured from, and every cell's containment verdict with it");
           }
           if (const JsonValue* ov = find_key(gv, "outline_uv")) {
             if (ov->type != JsonValue::Type::Array)

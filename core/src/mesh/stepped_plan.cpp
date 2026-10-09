@@ -344,7 +344,14 @@ SteppedPlanCheck stepped_validate_plan(LatticeTopology topo,
                                   reg.normal.z * reg.normal.z);
       if (nl > 0.0) {
         const double nx = reg.normal.x / nl, ny = reg.normal.y / nl, nz = reg.normal.z / nl;
-        const double s0 = ox * nx + oy * ny + oz * nz;
+        // ★ K2: DEPTH IS MEASURED FROM THE REGION'S OWN PLANE, not from the grid phase.
+        // `ox/oy/oz` above are the offset from the slot origin, which is what alignment
+        // and grouping want; projecting THOSE onto the normal made the prism move with the
+        // phase, so a tilted facet's world-aligned grid shifted its own depth window.
+        const Vec3& pl = reg.plane_origin_stated ? reg.plane_origin : reg.slot_origin;
+        const double px = cell.origin.x - pl.x, py = cell.origin.y - pl.y,
+                     pz = cell.origin.z - pl.z;
+        const double s0 = px * nx + py * ny + pz * nz;
         // ★ PROJECT THE CUBE, NOT ONE CORNER (R2, #354's core brief 2026-10-02).
         // `origin` is the cell's MINIMUM corner, so s0 + size is the cell's far face
         // only when the normal points the way that makes the minimum corner the NEAR
