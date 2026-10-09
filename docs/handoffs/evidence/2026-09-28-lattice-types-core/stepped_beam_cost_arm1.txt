@@ -69,3 +69,46 @@ lattice-only bridge between two solid regions cannot be certified by this instru
 at all, whatever the struts do — a constraint any future Stepped certificate inherits.
 It does not affect a part whose lattice sits in a pocket inside a connected shell,
 which is every real part and why organic certifies.
+
+================================================================================
+CONTEXT THE NUMBERS SHOULD BE JUDGED AGAINST (reviewer, 2026-10-02)
+================================================================================
+
+THE WORKER: 16.0 GB physical (sysctl hw.memsize on this Mac).
+    -> the 8,000-cell certificate's 10,338 MB peak is 64 % OF THE WHOLE MACHINE.
+    That is the number that matters, not the seconds. It leaves ~5.7 GB for the OS,
+    the app, and anything else running — and this box routinely carries two other
+    agents. A plan larger than ~8,000 cells, or one with a finer family than 2 mm,
+    would not fit.
+
+A NORMAL FULL RUN ON THE STAND, for scale: 266 s wall (organic, resolution 128, one
+probe window; measured in this session, 02:18:04 -> 02:22:30, on a loaded box). So the
+certificate at:
+    500 cells    62.8 s   ~24 % of a stand run
+    2,000 cells  64.4 s   ~24 %
+    8,000 cells 192.4 s   ~72 %
+Time is therefore a real but acceptable cost. MEMORY is the one that decides.
+
+NO SIZE EXCEEDED THE 900 s BUDGET (slowest 192.4 s), so the 3,600 s re-run the reviewer
+asked for does not apply. Nothing here is reported as "EXCEEDED".
+
+THE NO-LATTICE CONTROL: ASKED FOR, AND IT DOES NOT APPLY TO THIS ARRANGEMENT.
+The control — same box and slabs, zero cells, expecting the load to find no path —
+tests the SLABS-ONLY geometry, where the beams are the only bridge. That geometry is
+refused before the solve (see the island rule below), so it could never produce the
+control either. The arrangement actually measured is a latticed POCKET in a connected
+solid, whose 2-voxel side walls carry load BY DESIGN: removing the cells there would
+leave a perfectly good load path through the walls and the control would show nothing.
+Stating this rather than leaving it unmentioned, per the reviewer. What stands in its
+place is per-line evidence from the real runs: load_dropped 0.0000, zero_stress 0.0000,
+members_dropped 0, p99 0.31-0.37 MPa — the lattice is carrying, measured, at every size.
+
+A KNOWN LIMIT OF THE INSTRUMENT, to be carried forward:
+A LATTICE-ONLY BRIDGE BETWEEN TWO SOLID BODIES IS REFUSED BEFORE THE SOLVE.
+beam_network.cpp:1121 — "A component is real if a Dirichlet node sits on one of its
+elements." Support is hex connectivity plus Dirichlet; the beams do not count. Two
+solid regions joined only by a lattice leave the far one an unsupported island and
+`kIslandRefuseFraction` stops the run. Any future Stepped certificate inherits this. It
+does not affect a part whose lattice sits in a pocket inside a connected shell — which
+is every real part, and why organic certifies — but it means core cannot today certify
+a design whose load path is lattice-only between two bodies.

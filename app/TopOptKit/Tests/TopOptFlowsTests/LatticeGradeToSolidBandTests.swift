@@ -137,7 +137,7 @@ final class LatticeGradeToSolidBandTests: XCTestCase {
     }
 
     private func quiltActivation(cell: Double, lo: Double, hi: Double) -> Float {
-        let quilt = Swift.min(hi, LatticeType.named("octet").quiltRowDensity(cellMM: cell))
+        let quilt = Swift.min(hi, LatticeType.octet.quiltRowDensity(cellMM: cell))
         return Float((quilt - lo) / (hi - lo))
     }
 
@@ -149,7 +149,7 @@ final class LatticeGradeToSolidBandTests: XCTestCase {
     /// the table is linear in the cell. `quiltDensityCeiling` cannot be that
     /// number: its separation target sits above the table's top and answers 1.
     func testTheQuiltRowDensityIsWhereTheOctetLawSaturates() {
-        let o = LatticeType.named("octet")
+        let o = LatticeType.octet
         for c in [2.58, 3.0, 4.0, 6.0, 12.0] {
             let q = o.quiltRowDensity(cellMM: c)
             XCTAssertEqual(q, 0.60, accuracy: 0.02, "cell \(c) mm: \(q)")
@@ -347,7 +347,7 @@ final class LatticeGradeToSolidBandTests: XCTestCase {
         let f = slabs([(6, 0, 60)], outlineInset: 3.55)
         let stated = 0.21887
         let (baked, _) = try bake(f, band: 5, span: (stated, stated))
-        let quilt = Swift.min(1, LatticeType.named("octet").quiltRowDensity(cellMM: 3))
+        let quilt = Swift.min(1, LatticeType.octet.quiltRowDensity(cellMM: 3))
         XCTAssertGreaterThan(quilt, stated + 0.1, "the quilt must sit well above the stated density — vacuous otherwise")
         XCTAssertEqual(baked.drawnDensityHi, quilt, accuracy: 1e-6,
                        "the field must carry the widened top out for the renderer and the callout")
@@ -473,7 +473,7 @@ final class LatticeGradeToSolidBandTests: XCTestCase {
         XCTAssertTrue(renderer.contains("dyadicSteps: steppedDyadicSteps,")
                       && renderer.contains("finestPrintsOpen: scene.stageMode != .structural,\n                    bandAmount: LatticeSettings.gradeAmount(strength: params.shapeFitGradeStrength),\n")
                       // ★ and (2026-09-28) the band's quilt ceiling: no quilt in the grade band unless Allow quilt
-                      && renderer.contains("bandQuiltCeiling: LatticeType.named(params.latticeID).hasAestheticCeiling && !scene.allowQuilt\n                        ? scene.drawnCeilingRho : 1,\n                    stats: &st)"),
+                      && renderer.contains("bandQuiltCeiling: LatticeType.named(params.latticeID)?.hasAestheticCeiling == true && !scene.allowQuilt\n                        ? scene.drawnCeilingRho : 1,\n                    stats: &st)"),
                       "★ the octree call must pass the step style and the structural floor, or Default Grade takes thirds "
                       + "and Structural keeps the aesthetic quilt bound")
         let wizard = try String(contentsOf: src.appendingPathComponent("LatticeSetupWizard.swift"), encoding: .utf8)

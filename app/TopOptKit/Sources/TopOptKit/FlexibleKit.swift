@@ -201,6 +201,35 @@ public struct FlexStackInfo: Equatable, Sendable {
     public let latticedColumns: Int
     public let latticeMMMin: Double, latticeMMMean: Double, latticeMMMax: Double
     public let stackMMMax: Double
+    /// ★ S1 (#361's 254cb137 — the spec's V2): a SECTOR's ownership is core's own, asked once (see
+    /// FlexSectorVerdict). nil: a stack without cuts (core owns every voxel its columns hold).
+    public var sector: FlexSectorVerdict? = nil
+}
+
+/// ★ S1 (#361's 254cb137 — the spec's V2): core's ownership of a SECTOR stack's voxels. Core's
+/// `in_stack` keeps, of the voxels a sector's columns hold, only those `stack_owns_projection` owns:
+/// the voxel's OWN ray cast back onto the footprint, tested against the cuts of the part it lands on
+/// (it left the old rule — the point projected back by its depth, which the app's port mirrored). Asked
+/// in ONE batch, when the stack is read, for every voxel centre of the scene's grid the columns hold;
+/// `refused` are the voxels core does NOT own (linear grid index, x fastest).
+public struct FlexSectorVerdict: Equatable, Sendable {
+    public let origin: SIMD3<Double>
+    public let spacing: Double
+    public let nx: Int, ny: Int, nz: Int
+    public let refused: Set<Int>
+    public init(origin: SIMD3<Double>, spacing: Double, nx: Int, ny: Int, nz: Int, refused: Set<Int>) {
+        self.origin = origin; self.spacing = spacing; self.nx = nx; self.ny = ny; self.nz = nz; self.refused = refused
+    }
+    /// Core's verdict for the voxel `p` lies in (exact at a voxel centre — where core's field asks; any
+    /// other point takes its voxel's). A point off the grid has no voxel: core owns nothing there.
+    public func owns(_ p: SIMD3<Double>) -> Bool {
+        guard spacing > 0 else { return false }
+        let g = (p - origin) / spacing
+        let fi = g.x.rounded(.down), fj = g.y.rounded(.down), fk = g.z.rounded(.down)
+        guard fi.isFinite, fj.isFinite, fk.isFinite, fi >= 0, fj >= 0, fk >= 0,
+              fi < Double(nx), fj < Double(ny), fk < Double(nz) else { return false }
+        return !refused.contains((Int(fk) * ny + Int(fj)) * nx + Int(fi))
+    }
 }
 
 public struct FlexColumnDesign: Equatable, Sendable {
@@ -681,6 +710,11 @@ public final class FlexibleScene: @unchecked Sendable {
         let eri = Array(s.exit_region_ids), erf = Array(s.exit_region_fractions)
         let ef = (0..<efi.count).map { FlexLink(id: Int(efi[$0]), fraction: eff[$0]) }
         let er = (0..<eri.count).map { FlexLink(id: Int(eri[$0]), fraction: erf[$0]) }
+        // ★ S1 (#361's 254cb137): a sector's ownership, core's verdict for every voxel of the grid
+        let sector: FlexSectorVerdict? = s.sector
+            ? FlexSectorVerdict(origin: FlexConv.v3(s.grid_origin), spacing: s.grid_spacing, nx: Int(s.grid_nx),
+                                ny: Int(s.grid_ny), nz: Int(s.grid_nz), refused: Set(Array(s.sector_refused).map { Int($0) }))
+            : nil
         return FlexStackInfo(
             frameValid: s.frame_valid, frameReason: String(s.frame_reason),
             load: FlexConv.v3(s.load), xAxis: FlexConv.v3(s.x_axis), yAxis: FlexConv.v3(s.y_axis),
@@ -693,7 +727,8 @@ public final class FlexibleScene: @unchecked Sendable {
             columns: cols, exitFaces: ef, exitRegions: er,
             exitUnresolvedFraction: s.exit_unresolved_fraction, footprintAreaMM2: s.footprint_area_mm2,
             latticedColumns: Int(s.latticed_columns), latticeMMMin: s.lattice_mm_min,
-            latticeMMMean: s.lattice_mm_mean, latticeMMMax: s.lattice_mm_max, stackMMMax: s.stack_mm_max)
+            latticeMMMean: s.lattice_mm_mean, latticeMMMax: s.lattice_mm_max, stackMMMax: s.stack_mm_max,
+            sector: sector)
     }
 
     /// Core's `FaceFrame::from_uv` for each (u, v) mm point.

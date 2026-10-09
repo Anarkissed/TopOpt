@@ -54,4 +54,19 @@ public enum LatticePreviewBodyAlpha {
         if nothingToLattice { return 1 }
         return hasIncludeRegion ? 1 : 0
     }
+
+    /// ★★ LATTICE ONLY (hold the preview button 3 s) IS SHOWING only while a lattice is
+    /// actually on screen (his 2026-10-01, Structural: "not able to go to 'Lattice Only'
+    /// view"). The layer is hidden while a bake runs (`layerDrawn` false — every settings
+    /// change) and while the stage's FEA runs (`simRunning` — a Sim project's first solve, or
+    /// after a load-case change), and paints nothing when there is nothing to lattice. The body
+    /// had been dropped regardless, which left an empty stage until the lattice came back.
+    public static func latticeOnlyShowing(viewOn: Bool, layerDrawn: Bool, simRunning: Bool,
+                                          nothingToDraw: Bool) -> Bool {
+        viewOn && layerDrawn && !simRunning && !nothingToDraw
+    }
+
+    /// The body under lattice only: gone while the lattice shows; opaque while it is not
+    /// drawn yet — the part stays on screen until there is a lattice to stand in for it.
+    public static func latticeOnly(showing: Bool) -> Float { showing ? 0 : 1 }
 }

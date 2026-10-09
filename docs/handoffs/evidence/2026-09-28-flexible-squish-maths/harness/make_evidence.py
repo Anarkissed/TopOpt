@@ -170,6 +170,28 @@ def scenario_c():
     return "c_block_top_and_side_handover", (100, 100, 60), job
 
 
+def scenario_d():
+    """C1 addendum (2026-10-07): ANGLED PRESSES. A 60 mm cube pressed on top (straight
+    down) and on its vertical +X/+Y EDGE (one footprint of two faces, along (-1,-1,0)):
+    two stacks 90 degrees apart, so a handover, not a conflict."""
+    job = base_job("cube_60.stl")
+    job["resolution"] = 60
+    job["flexible"] = {
+        "material_id": "varioshore_tpu", "nozzle_temp_c": 220, "topology": "auto", "feel": "springy",
+        "beads_per_wall": 1, "min_extrudable_width_mm": 0.42,
+        "faces": [
+            {"face_region_id": 101, "role": "loaded", "weight_n": round(10 * G, 3), "deepest_squish_mm": 6,
+             "mode": "both", "curve_x": [[0, 0.6], [0.5, 1], [1, 0.6]], "curve_y": [[0, 0.6], [0.5, 1], [1, 0.6]],
+             "skin_on": True},
+            {"face_region_ids": [103, 104], "press_direction": [-1, -1, 0], "role": "loaded",
+             "weight_n": round(15 * G, 3), "deepest_squish_mm": 6, "mode": "centre_edge",
+             "curve_centre_edge": [[0, 0.5], [1, 1]], "skin_on": True},
+            {"face_region_id": 100, "role": "resting", "skin_on": True},
+        ],
+    }
+    return "d_cube_top_and_vertical_edge_press", (60, 60, 60), job
+
+
 def run(cli, name, dims, job, out_root):
     d = os.path.join(out_root, name)
     os.makedirs(d, exist_ok=True)
@@ -234,6 +256,15 @@ def main():
           "(c) the reason names the side stack")
     check(len(rc["handover"]) == 1 and rc["handover"][0]["blended_mm3"] > 0, "(c) a blended handover zone")
     check(s["stack"]["linked_faces"][0]["face_id"] == 5, "(c) the side's other end is the -X face")
+    rc = run(a.cli, *scenario_d(), a.out)
+    e = face(rc, 103)
+    check(e["press"]["footprint_face_region_ids"] == [103, 104] and e["press"]["side"] and
+          abs(e["press"]["build_angle_deg"] - 90) < 1e-6, "(d) the edge press: footprint 103+104, 90 degrees, side")
+    check({l["face_region_id"] for l in e["stack"]["linked_regions"]} == {102, 105},
+          "(d) the edge's other end is the -Y and -X faces")
+    check(len(rc["handover"]) == 1 and rc["handover"][0]["blended_mm3"] > 0 and not rc["conflicts"],
+          "(d) top and edge: one blended handover, no conflict")
+    check(rc["topology"] == "gyroid", "(d) gyroid only (a side press)")
     print("ALL PASS" if ok else "SOME CHECKS FAILED")
     sys.exit(0 if ok else 1)
 

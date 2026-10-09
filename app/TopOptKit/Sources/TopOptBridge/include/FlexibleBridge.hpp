@@ -255,6 +255,15 @@ struct FlexStack {
   int32_t latticed_columns = 0;
   double lattice_mm_min = 0.0, lattice_mm_mean = 0.0, lattice_mm_max = 0.0;
   double stack_mm_max = 0.0;
+  // ★ S1 (#361's 254cb137): a SECTOR's ownership, core's own. `sector`: the stack has cuts. Then
+  // `sector_refused` lists the scene grid's voxels (linear index, x fastest) whose centre the
+  // stack's columns hold (core's in_stack column and t test) but `stack_owns_projection` does
+  // not own — asked here in one batch, for every voxel of the grid. The grid travels with it.
+  bool sector = false;
+  double grid_origin[3] = {0, 0, 0};
+  double grid_spacing = 0.0;
+  int32_t grid_nx = 0, grid_ny = 0, grid_nz = 0;
+  std::vector<int32_t> sector_refused;
 };
 FlexStack flexible_scene_stack(int64_t scene, int32_t face_region_id, int32_t rotation_deg,
                                BridgeError& err);

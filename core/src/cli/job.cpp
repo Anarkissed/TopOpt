@@ -1494,7 +1494,7 @@ JobDescription parse_job(const std::string& json_text) {
         } else {  // face
           reject_unknown_keys(
               gv, {"origin", "normal", "half_u_mm", "half_w_mm", "depth_mm", "outline_uv",
-                   "frame_u", "frame_w"},
+                   "frame_u", "frame_w", "slot_origin_mm"},
               "a face lattice region geometry");
           // ── ★ WHICH WALL (reviewer, 2026-09-30) ──────────────────────────
           // The run-time refusal these checks replace named the region -- "lattice
@@ -1582,6 +1582,33 @@ JobDescription parse_job(const std::string& json_text) {
                     std::to_string(nw) + ") -- an axis out of plane means the frame "
                     "and the normal describe different faces");
             }
+          }
+          // ── ★ R1: THE IN-PLANE SLOT ORIGIN, CHECKED AGAINST THE FACE PLANE ─────
+          // The anchor shift is in-plane by construction, so a slot origin with a
+          // component along the normal is not an anchor shift -- it moves the plane the
+          // prism's depth is measured from, which would change every cell's containment
+          // verdict without saying so. Tested against the UNIT normal for the reason
+          // spelled out for frame_u above: the raw test |d . n| < eps accepts
+          // |d . n_hat| < eps/|n|, so a SHORT normal is the loose and dangerous case.
+          if (const JsonValue* sv = find_key(gv, "slot_origin_mm")) {
+            reg.slot_origin_mm =
+                parse_vec3(*sv, "a face lattice region \"slot_origin_mm\"");
+            reg.slot_origin_stated = true;
+            const double ln = std::sqrt(reg.normal.x * reg.normal.x +
+                                        reg.normal.y * reg.normal.y +
+                                        reg.normal.z * reg.normal.z);
+            const Vec3 un{reg.normal.x / ln, reg.normal.y / ln, reg.normal.z / ln};
+            const double dn = (reg.slot_origin_mm.x - reg.origin.x) * un.x +
+                              (reg.slot_origin_mm.y - reg.origin.y) * un.y +
+                              (reg.slot_origin_mm.z - reg.origin.z) * un.z;
+            if (!(std::fabs(dn) < 1e-6))
+              schema_fail(
+                  which + ": a face lattice region's \"slot_origin_mm\" must lie IN the "
+                  "face plane, and this one stands " + std::to_string(dn) +
+                  " mm along the region normal from \"origin\". The slot origin carries "
+                  "the in-plane ANCHOR SHIFT of the grid the cells were packed on; a "
+                  "component along the normal would move the plane the prism's depth is "
+                  "measured from, and every cell's containment verdict with it");
           }
           if (const JsonValue* ov = find_key(gv, "outline_uv")) {
             if (ov->type != JsonValue::Type::Array)

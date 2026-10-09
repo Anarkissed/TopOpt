@@ -671,7 +671,10 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
     /// of there being one function rather than of two mappings kept in step.
     ///
     /// It only ever read `request`; nothing about a live connection was involved.
-    static func buildJobJSON(_ request: RunRequest) throws -> Data {
+    /// `steppedPlans`: the Default Grade plan switch — production passes
+    /// `LatticeSteppedCellWire.defaultGradePlansEnabled` (off); the CLI proof forces it.
+    static func buildJobJSON(_ request: RunRequest,
+                             steppedPlans: Bool = LatticeSteppedCellWire.defaultGradePlansEnabled) throws -> Data {
         var job: [String: Any] = [
             "model": (request.modelPath as NSString).lastPathComponent,
             "material": request.material,
@@ -818,7 +821,8 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
             }
             // ★ THE PLAN (2026-09-18): the preview's placed cells, verbatim — the ONE
             // encoder, shared with RelatticeRunner.
-            if let cells = LatticeSteppedCellWire.blockValue(for: lat, wired: TopOptKit.steppedCellsWired) {
+            if let cells = LatticeSteppedCellWire.blockValue(for: lat, wired: TopOptKit.steppedCellsWired,
+                                                             enabled: steppedPlans) {
                 block["stepped_cells"] = cells
             }
             job["lattice"] = block

@@ -44,7 +44,7 @@ final class LatticeWizardOneLineCaptionTests: XCTestCase {
         XCTAssertTrue(s.contains("guard offered else { typeReason = LatticeTypeCatalog.reasonLine(e); return }"),
                       "★ a tap on a type not offered never selects — it says why")
         let bcc = LatticeTypeCatalog.entriesFromCore().first { $0.id == "bcc" }!
-        XCTAssertEqual(LatticeTypeCatalog.reasonLine(bcc), "BCC: Core can’t build this type yet.", "…in one sentence")
+        XCTAssertEqual(LatticeTypeCatalog.reasonLine(bcc), "BCC: Strength-checked, but not buildable yet", "…in one sentence (core's words)")
         // only Organic disables the chips outright — except the offered chip that fixes a saved
         // type core can't run (review 2026-10-01, `LatticeStaleTypeTests`)
         XCTAssertTrue(s.contains("let inert = organicOn && !fixesStale") && s.contains(".disabled(inert)"),

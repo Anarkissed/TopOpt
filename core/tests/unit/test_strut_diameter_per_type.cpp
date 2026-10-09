@@ -427,6 +427,35 @@ int main() {
     }
   }
 
+  // ── ★ PLANNED IDS ARE "NOT YET", NOT "NO SUCH THING" ───────────────────────
+  // gyroid and schwarz_d are on the go-live list and not in the enum, so the readiness
+  // answer would otherwise be UnknownId -- the answer for a TYPO. The app would then tell
+  // the user they misspelled a type core is going to ship. NotEither is the honest answer:
+  // core knows it and has not built it.
+  {
+    const std::vector<std::string> gen = lattice_gen_topology_names();
+    const std::vector<std::string> cert = lattice_certifiable_topology_names();
+    for (const std::string& id : lattice_planned_topology_ids()) {
+      CHECK(lattice_type_readiness(id, gen, cert) ==
+                LatticeTypeReadiness::NotEither,
+            "a PLANNED id reads NotEither, not UnknownId");
+      // And it really is absent from both sets -- otherwise this says nothing.
+      bool in_either = false;
+      for (const std::vector<std::string>* s : {&gen, &cert})
+        for (const std::string& n : *s)
+          if (n == id) in_either = true;
+      CHECK(!in_either, "premise: a planned id is in neither live set");
+    }
+    CHECK(lattice_planned_topology_ids().size() == 2,
+          "the planned list is gyroid and schwarz_d today; this fails when one goes live, "
+          "which is the reminder to delete it from the list at K2");
+    // A genuine typo must still be UnknownId, or the distinction is lost.
+    for (const char* typo : {"gyroids", "gyroid ", "schwarz-d", "schwarzd", "octett"})
+      CHECK(lattice_type_readiness(typo, gen, cert) ==
+                LatticeTypeReadiness::UnknownId,
+            "a near-miss of a planned or live id is still UnknownId");
+  }
+
   if (g_failures == 0) {
     std::printf("strut diameter per type: all %d checks passed\n", g_checks);
     return 0;

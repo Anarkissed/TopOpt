@@ -15,7 +15,7 @@ final class LatticePreviewNoticeCaptionTests: XCTestCase {
     }
 
     func testTheCaptionIsFourWordsAndTheSentenceIsUntouched() throws {
-        let b = try banner(label: LatticeSDFPreview(latticeID: "octet").previewLabel)
+        let b = try banner(label: LatticeSDFPreview(lattice: .octet).previewLabel)
         XCTAssertEqual(b.caption, "Lattice preview · not the export")
         XCTAssertEqual(b.text, "LATTICE PREVIEW — live strut geometry, not the exported mesh",
                        "the full sentence is what the (i) shows; it did not move")

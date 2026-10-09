@@ -35,7 +35,12 @@ final class OrganicPreviewBakeInputsTests: XCTestCase {
         XCTAssertEqual(single.organicPreviewSeparationWindowMM.lo, 3.5)
         XCTAssertEqual(single.organicPreviewSeparationWindowMM.hi, 3.5)
         spec.organicPickedGradeMM = []; spec.organicPickedSeparationMM = 3.5
-        XCTAssertEqual(try XCTUnwrap(spec.gradingDictionary())["cell_mm"] as? Double, 3.5)
+        // ★ ruling 5 (2026-10-03): one size rides as the one-size window under swept
+        let one = try XCTUnwrap(spec.gradingDictionary())
+        XCTAssertEqual(one["cell_mode"] as? String, "swept")
+        XCTAssertEqual(one["cell_min_mm"] as? Double, single.organicPreviewSeparationWindowMM.lo)
+        XCTAssertEqual(one["cell_max_mm"] as? Double, single.organicPreviewSeparationWindowMM.hi)
+        XCTAssertNil(one["cell_mm"])
 
         let none = organic()   // nothing picked: the window, as before
         XCTAssertEqual(none.organicPreviewSeparationWindowMM.lo, 4)

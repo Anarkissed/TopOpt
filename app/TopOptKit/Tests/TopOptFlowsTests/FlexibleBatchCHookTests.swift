@@ -31,14 +31,17 @@ final class FlexibleBatchCHookTests: XCTestCase {
             ("B1", "if latticeSimIsRunning, !simBannerDismissed, !flexibleMain.owns(project, stage) { simRunningBanner }"),
             ("H6", "if flexibleMain.owns(project, stage) { FlexibleMainLegends(main: flexibleMain, mode: $latticeLegendMode, projection: projection, settle: settleQuat, bottomClearance: bottomBarClearance, chipColumnWidth: force.gravityIsSet ? (settingsChipWidths.values.max() ?? 0) : 0) }"),
             ("H7", "if flexibleMain.read(project, mode: latticeLegendMode, face: fid, point: pt) { return true }"),
-            ("H8", "onLatticeProbe: latticeLegendMode.drilledIn && flexibleMain.wantsWallProbe(latticeLegendMode)"),
+            // ★ RE-PINNED (S1, the #361 sync — the reviewer's ruling of 2026-10-08 19:13 (i)): H7/H8 ride #354's
+            // `legendDrilledIn` (the key's drill-in only counts while the key is on screen), never a raw
+            // `latticeLegendMode.drilledIn` read (LatticeStructuralViewStateTests: its one raw read is the definition)
+            ("H8", "onLatticeProbe: legendDrilledIn && flexibleMain.wantsWallProbe(latticeLegendMode)"),
             ("H8", "if flexibleMain.readLattice(project, mode: latticeLegendMode, model: model) { return }"),
         ]
         for (h, pin) in pins {
             XCTAssertEqual(ws.components(separatedBy: pin).count - 1, 1, "\(h) must appear exactly once: \(pin)")
         }
         // H7 sits right before the pinned consumption; H8's read before the octet's reading
-        XCTAssertTrue(ws.contains("if flexibleMain.read(project, mode: latticeLegendMode, face: fid, point: pt) { return true }   // Flexible (PR #362) H7: a surface tap reads the drilled-in Flexible legend\n                              if latticeLegendMode.drilledIn { return true }"),
+        XCTAssertTrue(ws.contains("if flexibleMain.read(project, mode: latticeLegendMode, face: fid, point: pt) { return true }   // Flexible (PR #362) H7: a surface tap reads the drilled-in Flexible legend\n                              if legendDrilledIn { return true }"),
                       "H7 comes first, and #354's consumption line stays")
         let h8 = try XCTUnwrap(ws.range(of: "if flexibleMain.readLattice(project, mode: latticeLegendMode, model: model) { return }"))
         XCTAssertTrue(ws[h8.upperBound...].prefix(260).contains("setLatticeProbe(at: model, world: world,"), "H8 reads before setLatticeProbe")
@@ -49,9 +52,12 @@ final class FlexibleBatchCHookTests: XCTestCase {
         XCTAssertTrue(chrome.upperBound < h6.lowerBound && h6.upperBound < bar.lowerBound,
                       "H6 is chrome: inside `else if !fullScreenPageUp` (hidden under a full-screen page), before the bottom bar's scope")
         // the strings other suites pin in the same lines stay
-        XCTAssertTrue(ws.contains("if latticeLegendMode.drilledIn { return true }"))
-        XCTAssertTrue(ws.contains("onLatticeProbe: latticeLegendMode.drilledIn"))
-        XCTAssertTrue(ws.contains("onLatticeProbeExit: latticeLegendMode.drilledIn"))
+        XCTAssertTrue(ws.contains("if legendDrilledIn { return true }"))
+        XCTAssertTrue(ws.contains("onLatticeProbe: legendDrilledIn"))
+        XCTAssertTrue(ws.contains("onLatticeProbeExit: legendDrilledIn"))
+        // ★ S1: the old raw reads are gone from the hooks (#354's pin: one raw read, its definition)
+        XCTAssertEqual(ws.components(separatedBy: "latticeLegendMode.drilledIn").count - 1, 1,
+                       "the one raw `latticeLegendMode.drilledIn` is legendDrilledIn's definition")
         XCTAssertTrue(ws.contains("setLatticeProbe(at: model, world: world,"))
         XCTAssertTrue(ws.contains("!(showStrutPreview && strutScene != nil) {\n                    stressLegend"))
         XCTAssertTrue(ws.contains("latticeLayer: latticeLayerIsDrawn"))

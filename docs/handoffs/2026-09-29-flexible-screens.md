@@ -45,6 +45,9 @@ background limit, and the known headless-GPU process death stopped one part earl
     `LatticeStaleTypeTests` EXCLUDED until that fix reaches this branch through #354 -> #361, then
     re-include it and confirm it passes. On 2026-10-03 the fix was on #354 (`877bdb88`, head
     `efa8f81b`) and not yet in #361 (`421fde3d`); this branch has not merged #354 directly to get it early.
+  - **★ Update (angled presses S1, 2026-10-08): RE-INCLUDED and passing, 6/6.** `877bdb88` reached this
+    branch through #361 `021b7321` (S1's merge `b151dfa7`). The class now has six tests: the five above, plus
+    #354's `c4cf899e` `testTheStaleTypePathAsksCoreNothing`. No SIGTRAP. Evidence: `angled_presses/s1_suite.txt`.
 
 **After the last #358 merge (`523dd2f9`), the targeted suite** (every Flexible class, plus the lattice /
 organic / page / receipt classes that read our hooked files; `LatticeStaleTypeTests` left out, see above):

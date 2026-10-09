@@ -8,7 +8,7 @@ import TopOptKit
 final class LatticeAestheticDensityCeilingTests: XCTestCase {
 
     func testOctetCeilingIsAboutAFifthOfTheCellAtEveryCellSize() {
-        let octet = LatticeType.named("octet")
+        let octet = LatticeType.octet
         var rhos: [Double] = []
         for cell in [1.3, 4.0, 6.0, 10.31, 12.03] {
             let rho = octet.aestheticDensityCeiling(cellMM: cell)
@@ -57,10 +57,10 @@ final class LatticeAestheticDensityCeilingTests: XCTestCase {
 
 extension LatticeAestheticDensityCeilingTests {
     func testOnlyOctetHasTheCeiling() {
-        XCTAssertTrue(LatticeType.named("octet").hasAestheticCeiling)
+        XCTAssertTrue(LatticeType.octet.hasAestheticCeiling)
         for id in ["sc", "bcc", "bccz", "fcc", "fccz", "diamond"] {
-            XCTAssertFalse(LatticeType.named(id).hasAestheticCeiling, id)
-            XCTAssertEqual(LatticeType.named(id).aestheticDensityCeiling(cellMM: 6), 1, id)
+            XCTAssertFalse(LatticeType.named(id)!.hasAestheticCeiling, id)
+            XCTAssertEqual(LatticeType.named(id)!.aestheticDensityCeiling(cellMM: 6), 1, id)
         }
     }
 
@@ -84,7 +84,7 @@ extension LatticeAestheticDensityCeilingTests {
         s.manualStrutThicknessMM = 4.6                     // his 63 % strut on a 12 mm cell
         let limits = TopOptKit.latticeLimits(topology: "octet")
         let held = s.manualThicknessDensity(limits: limits)!
-        XCTAssertLessThanOrEqual(held, LatticeType.named("octet").aestheticDensityCeiling(cellMM: 12) + 1e-9)
+        XCTAssertLessThanOrEqual(held, LatticeType.octet.aestheticDensityCeiling(cellMM: 12) + 1e-9)
         s.allowQuilt = true
         let free = s.manualThicknessDensity(limits: limits)!
         XCTAssertGreaterThan(free, held)

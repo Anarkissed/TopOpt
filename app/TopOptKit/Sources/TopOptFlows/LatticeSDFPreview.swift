@@ -23,6 +23,7 @@
 
 import Foundation
 import simd
+import TopOptKit
 
 /// One strut segment in CENTRED, cell-normalised coordinates: the cell spans
 /// `[-0.5, 0.5]³` and endpoints are the strut ends in that frame. The shader folds a
@@ -156,8 +157,36 @@ public enum LatticePreviewBanner: Equatable, Sendable {
         case .drawing(let t):
             if t.hasPrefix("★") { return "★ Preview differs from run" }
             if t.contains("shown as the doubled ladder") { return "Lattice preview · stand-in" }
+            if t.contains(Self.planNotSentSteppedSentence) { return Self.planNotSentSteppedCaption }
+            if t.contains(Self.planNotSentSentence) { return Self.planNotSentCaption }
             return "Lattice preview · not the export"
         }
+    }
+
+    /// ★★ RULING 6 (2026-10-03): the one plain line while a Default Grade or Stepped plan
+    /// is drawn but not sent. Not "coarser": the line says whose layout it is, not which way
+    /// it differs — the run's own layout is not always coarser, and on 3418E167 (Stepped, no
+    /// plan) core lays none at all: it refuses ("the stepped algorithm derived no region cell",
+    /// frozen CLI 436819f6, 2026-10-05). The full sentence sits behind the (i).
+    public static let planNotSentCaption = "Run builds core's own layout"
+    public static let planNotSentSentence =
+        "the run currently builds core's own cell layout, not the cells shown here — "
+        + "they are not sent to it yet"
+    /// ★★ RULING 1 (reviewer, 2026-10-07): "the Stepped preview's line says plainly that the run
+    /// currently lays one cell size per region and can refuse thin walls" — no composed copy of
+    /// core's rule, no pre-send refusal. No plan reaches a Stepped run (`sendsPlan` is Default
+    /// Grade's only); core lays ONE cell per region, max(W_med/5, w/φ(median ρ))
+    /// (run_job.cpp:4117-4120), and refuses when no region derives one (6459-6474) — his
+    /// 3418E167, after 171 s. Default Grade keeps the line above.
+    public static let planNotSentSteppedCaption = "Run: one cell per region"
+    public static let planNotSentSteppedSentence =
+        "the run currently lays one cell size per region, not the cells shown here — "
+        + "and can refuse walls too thin for it"
+    /// The plan-not-sent line for an algorithm: Stepped's own, else Default Grade's.
+    public static func planNotSentLine(algorithm: String) -> (caption: String, sentence: String) {
+        algorithm == LatticeCellTransition.stepped.coreAlgorithm
+            ? (planNotSentSteppedCaption, planNotSentSteppedSentence)
+            : (planNotSentCaption, planNotSentSentence)
     }
     /// The notice's width cap, in points: the Selections chip's column, short of the
     /// iPad chip that starts ~310 pt from the left edge on the 13-inch iPad.
@@ -175,7 +204,11 @@ public enum LatticePreviewBanner: Equatable, Sendable {
     /// "marched": a user who turned a toggle on is owed a sentence they can act on.
     public static func make(previewOn: Bool,
                             hasModel: Bool,
-                            scene: LatticeSDFPreviewSummary?) -> LatticePreviewBanner? {
+                            scene: LatticeSDFPreviewSummary?,
+                            // ★ ruling 6's test seams; production reads core's probe and the switch
+                            plansWired: Bool? = nil,
+                            plansEnabled: Bool = LatticeSteppedCellWire.defaultGradePlansEnabled)
+        -> LatticePreviewBanner? {
         guard previewOn else { return nil }
         guard hasModel else {
             return .empty("No lattice to show — there is no model open yet.")
@@ -260,6 +293,12 @@ public enum LatticePreviewBanner: Equatable, Sendable {
             // ★ AND WHY (maintainer, 2026-09-05: "have you implemented the organic
             // lattices on the part preview yet?" — it was, and the tensor never came)
             if let why = scene.organicNotDrawnReason { label += " — " + why }
+        }
+        // ★★ RULING 6: a Default Grade or Stepped plan drawn here that the job does not carry.
+        if LatticeSteppedCellWire.runBuildsCoresOwnLayout(
+            algorithm: scene.algorithmName, wired: plansWired ?? TopOptKit.steppedCellsWired,
+            enabled: plansEnabled) {
+            label += " · " + planNotSentLine(algorithm: scene.algorithmName).sentence
         }
         // ★ The sentence is `LatticeWallsWithoutShape`'s — the variant notice's, so the two
         // cannot drift (ruling g); a single face now reads "is not shown", not "are".
@@ -367,7 +406,11 @@ public struct LatticeSDFPreview: Equatable, Sendable {
         self.segments = Self.centeredSegments(lattice)
     }
 
-    public init(latticeID: String) { self.init(lattice: LatticeType.named(latticeID)) }
+    /// nil for an id with no strut table (item a, 2026-10-02) — never octet's struts in disguise.
+    public init?(latticeID: String) {
+        guard let lattice = LatticeType.named(latticeID) else { return nil }
+        self.init(lattice: lattice)
+    }
 
     // MARK: honesty (bar P1)
 

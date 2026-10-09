@@ -31,6 +31,9 @@ final class LatticeRunSpecSharedTests: XCTestCase {
                                  lineWidthMM: p.printParams.strutLineWidthMM, regions: emitted.regions,
                                  minimizePlastic: p.minimizePlastic, layerHeightMM: p.printParams.layerHeightMM)
         s?.steppedCells = p.latticePreviewSteppedCells
+        // ★ 2026-10-08 (item 2): an organic spec carries the rim's floor — the number the
+        // preview draws — so the job's automatic rim is the preview's (77353aec)
+        if s?.algorithm == "organic" { s?.organicRimFloorMM = p.organicFloor.mm }
         return s
     }
 
@@ -41,6 +44,8 @@ final class LatticeRunSpecSharedTests: XCTestCase {
                                   regions: emitted.regions,
                                   layerHeightMM: p.printParams.layerHeightMM)
         s?.steppedCells = p.latticePreviewSteppedCells
+        // ★ 2026-10-08 (item 2): the rim's floor rides every organic spec, stage and variant
+        if s?.algorithm == "organic" { s?.organicRimFloorMM = p.organicFloor.mm }
         return s
     }
 

@@ -31,26 +31,28 @@ final class LatticeTypeCatalogTests: XCTestCase {
         XCTAssertTrue(entry("octet").offered); XCTAssertNil(entry("octet").reason)
         XCTAssertFalse(entry("fcc").offered, "★ built and certified, but its job would be refused")
         XCTAssertEqual(entry("fcc").reason, LatticeTypeCatalog.jobRefused)
-        XCTAssertEqual(entry("kelvin").reason, LatticeTypeCatalog.notCertified)
-        XCTAssertEqual(entry("sc").reason, LatticeTypeCatalog.notBuilt)
-        XCTAssertEqual(entry("gyroid").reason, LatticeTypeCatalog.notBuiltOrCertified)
+        // ★ the words are core's (#358 lattice_type_readiness_plain), for core's verdict on these sets
+        XCTAssertEqual(entry("kelvin").reason, TopOptKit.latticeTypeReadinessPlain(.notCertifiable))
+        XCTAssertEqual(entry("sc").reason, TopOptKit.latticeTypeReadinessPlain(.notGeneratable))
+        XCTAssertEqual(entry("gyroid").reason, TopOptKit.latticeTypeReadinessPlain(.notEither),
+                       "★ a listed type core has no id for gets core's 'neither' line, not 'Not a lattice type'")
         XCTAssertEqual(e.filter(\.offered).map(\.id), ["octet"])
         // a type core adds that the list does not know still shows (after the round's)
         let more = LatticeTypeCatalog.entries(generatable: ["octet", "lattice9"], certifiable: ["octet", "lattice9"], jobAccepts: { _ in true })
         XCTAssertEqual(more.last?.id, "lattice9"); XCTAssertEqual(more.last?.offered, true)
     }
 
-    /// The linked core (19a1443bee65): the octet alone is offered; the six struts are certifiable but
+    /// The linked core (#358 at 23e6154e): the octet alone is offered; the six struts are certifiable but
     /// not built; the sheets and the tetragonal three are neither. The job parser accepts octet only.
     /// When core lights a type this test fails by name — light it up (A2).
     func testTheLinkedCoreOffersTheOctetAlone() {
         let e = LatticeTypeCatalog.entriesFromCore()
         XCTAssertEqual(e.filter(\.offered).map(\.id), ["octet"], "★ a newly offered type: light it up (A2)")
         for id in ["sc", "bcc", "fcc", "diamond", "kelvin", "rhombic"] {
-            XCTAssertEqual(e.first { $0.id == id }?.reason, LatticeTypeCatalog.notBuilt, id)
+            XCTAssertEqual(e.first { $0.id == id }?.reason, "Strength-checked, but not buildable yet", id)
         }
         for id in ["gyroid", "schwarz_d", "bccz", "fccz", "reentrant"] {
-            XCTAssertEqual(e.first { $0.id == id }?.reason, LatticeTypeCatalog.notBuiltOrCertified, id)
+            XCTAssertEqual(e.first { $0.id == id }?.reason, "Not buildable or strength-checked yet", id)
         }
         XCTAssertTrue(TopOptKit.jobSchemaAcceptsTopology("octet"), "the control")
         XCTAssertFalse(TopOptKit.jobSchemaAcceptsTopology("fcc"), "★ core's parser refuses a non-octet id today")

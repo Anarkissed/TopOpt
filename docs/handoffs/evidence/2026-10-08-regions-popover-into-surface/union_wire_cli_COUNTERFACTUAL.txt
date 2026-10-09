@@ -1,0 +1,1 @@
+NOT his job: his 102117B9 stage job (dump t7) with one extra face_regions entry {id 900, name 'Union of 2'} exactly as the app writes a Surface union (no add, no filter, no parts).

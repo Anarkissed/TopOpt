@@ -125,14 +125,14 @@ final class LatticeHisSteppedBakeProbe: XCTestCase {
         mr.latticeLayerHeightMM = pm.printParams.layerHeightMM
         mr.latticeSteppedCellMM = cells
         mr.latticeSteppedShapeFit = lat.gradingMode.fitsShape
-        mr.latticeSteppedDyadicSteps = lat.gradeStepStyle == .dyadic
+        mr.latticeSteppedDyadicSteps = lat.gradeStepsAreHalves   // the app's rule (R4, 2026-10-02)
         mr.latticeSteppedCellStated = stated
         mr.setLatticeScene(s1, token: 1)
         mr.latticeDressingLevel = lat.boundary.previewDressingLevel
         let layer = try XCTUnwrap(mr.latticeLayerForTests)
 
         // ── the explore callout at chosen points (density · strut · cell), as his tap reads it
-        let lt = LatticeType.named(lat.topologyID)
+        let lt = try XCTUnwrap(LatticeType.named(lat.topologyID), "his project is octet")
         for (name, p) in [("face2 wall x100 z30", SIMD3<Double>(100, -43, 30)), ("face2 wall x60 z28", SIMD3<Double>(60, -43, 28)),
                           ("face2 leg z120", SIMD3<Double>(5, -43, 120)), ("face15 wall x100 z30", SIMD3<Double>(100, -2, 30)),
                           ("face23 leg z120", SIMD3<Double>(-5, -22, 120)), ("face23 foot z10", SIMD3<Double>(-8, -22, 10))] {

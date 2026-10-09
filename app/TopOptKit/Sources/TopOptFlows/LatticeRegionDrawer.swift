@@ -189,7 +189,23 @@ public struct LatticeRegionDrawer: Equatable, Sendable {
                             // ★ Core's verdict on the wall in plain words ("Carries
                             // load" / "Barely loaded — a made-up load can be added"),
                             // a FACT row under Foci; nil until a bake has asked core.
-                            wallStress: String? = nil) -> LatticeRegionDrawer {
+                            wallStress: String? = nil,
+                            // ★ Q2 (2026-10-05): a type core does not call live has no band and
+                            // no derived cell, density or strut — core's readiness words lead,
+                            // and those rows show nothing rather than octet's numbers or zeros.
+                            typeRefusal: String? = nil) -> LatticeRegionDrawer {
+        if let t = typeRefusal, latticeReachesTheRun {
+            return LatticeRegionDrawer(
+                headline: Headline(text: t, verdict: .outOfRegime),
+                collapsedValue: "—",
+                verdict: .outOfRegime,
+                rows: [LatticeDrawerRow(label: "Depth", value: String(format: "%.1f mm", depthMM),
+                                        kind: .depth),
+                       LatticeDrawerRow(label: "Hands over", value: card?.heldText ?? "—"),
+                       LatticeDrawerRow(label: "Expand", value: String(format: "%.1f mm", expandMM),
+                                        kind: .expand)],
+                held: held)
+        }
         guard latticeReachesTheRun else {
             return LatticeRegionDrawer(
                 headline: Headline(text: LatticeSectorOutline.notLatticedWords(protected: held), verdict: .noMaterial),

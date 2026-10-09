@@ -113,10 +113,9 @@ bool in_stack(const Stack& s, const Vec3& p, int& col, double& depth) {
   depth = t - c.entry_t;
   // A SECTOR owns only what projects onto its side of its cuts (B5): the column cell a
   // voxel falls in may straddle the cut.
-  if (!s.cuts.empty()) {
-    const Vec3 q = {p.x - s.frame.load.x * depth, p.y - s.frame.load.y * depth, p.z - s.frame.load.z * depth};
-    if (!passes_cuts(s.cuts, q)) return false;
-  }
+  // A SECTOR stack owns only what projects onto its sectors (B5): the voxel's own ray
+  // back along the press, tested against the cuts of the part it lands on.
+  if (!stack_owns_projection(s, p)) return false;
   return true;
 }
 

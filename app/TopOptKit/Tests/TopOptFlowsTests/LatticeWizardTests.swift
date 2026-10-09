@@ -73,8 +73,8 @@ final class LatticeWizardTests: XCTestCase {
     func testTheCellBecomesALatticeByAnimation() {
         var m = LatticeWizardModel()
         XCTAssertEqual(m.stage, .cell, "§2A: the page opens on ONE cell")
-        XCTAssertEqual(LatticeSamplePatch.counts(lattice: m.lattice, cells: 1).struts,
-                       LatticeSamplePatch.counts(lattice: m.lattice, cells: 1).struts)
+        XCTAssertEqual(LatticeSamplePatch.counts(lattice: m.lattice!, cells: 1).struts,
+                       LatticeSamplePatch.counts(lattice: m.lattice!, cells: 1).struts)
         m.enterLattice()
         XCTAssertEqual(m.stage, .lattice)
         XCTAssertEqual(m.playing, .tile,

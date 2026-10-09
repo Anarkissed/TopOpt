@@ -1,0 +1,69 @@
+topopt-cli: core 1d1bde5e2714, built Oct  2 2026 19:01:09
+== R6_base_off_grid exit 0 | [stepped] doubled (halves) plan: 1 cell(s) over 1 region(s) in 1 pass(es) | 3.00=1 |  verdict: ACCEPTED
+== R6_ref_at_18 exit 0 | [stepped] doubled (halves) plan: 1 cell(s) over 1 region(s) in 1 pass(es) | 3.00=1 |  verdict: ACCEPTED
+== R6_control_on_grid exit 0 | [stepped] doubled (halves) plan: 1 cell(s) over 1 region(s) in 1 pass(es) | 3.00=1 |  verdict: ACCEPTED
+== R6_off_grid_plus2 exit 0 | [stepped] doubled (halves) plan: 1 cell(s) over 1 region(s) in 1 pass(es) | 3.00=1 |  verdict: ACCEPTED
+== R6_far_cell exit 0 | [stepped] doubled (halves) plan: 1 cell(s) over 1 region(s) in 1 pass(es) | 3.00=1 |  verdict: ACCEPTED
+== R6b_half_on_quarter_grid exit 0 | [stepped] doubled (halves) plan: 2 cell(s) over 1 region(s) in 2 pass(es) | 3.00=1 1.50=1 |  verdict: ACCEPTED
+== R6b_ref_half_at_22_5 exit 0 | [stepped] doubled (halves) plan: 2 cell(s) over 1 region(s) in 2 pass(es) | 3.00=1 1.50=1 |  verdict: ACCEPTED
+== R6b_control_half_at_21 exit 0 | [stepped] doubled (halves) plan: 2 cell(s) over 1 region(s) in 2 pass(es) | 3.00=1 1.50=1 |  verdict: ACCEPTED
+== R6c_anystep_off_own_grid exit 0 | [stepped] any-step plan: 2 cell(s) over 1 region(s) in 2 pass(es) | 7.25=1 2.42=1 |  verdict: ACCEPTED
+== R6c_control_mirror exit 0 | [stepped] any-step plan: 2 cell(s) over 1 region(s) in 2 pass(es) | 7.25=1 2.42=1 |  verdict: ACCEPTED
+== R6c_ref_big_at_18 exit 0 | [stepped] any-step plan: 1 cell(s) over 1 region(s) in 1 pass(es) | 7.25=1 |  verdict: ACCEPTED
+== R6c_ref_tile_at_18 exit 0 | [stepped] any-step plan: 1 cell(s) over 1 region(s) in 1 pass(es) | 2.42=1 |  verdict: ACCEPTED
+== R6c_ref_tile_at_25_25 exit 0 | [stepped] any-step plan: 1 cell(s) over 1 region(s) in 1 pass(es) | 2.42=1 |  verdict: ACCEPTED
+== R6c_far_tile exit 0 | [stepped] any-step plan: 1 cell(s) over 1 region(s) in 1 pass(es) | 2.42=1 |  verdict: ACCEPTED
+== R6d_anystep_second_slot exit 0 | [stepped] any-step plan: 1 cell(s) over 1 region(s) in 1 pass(es) | 8.70=1 |  verdict: ACCEPTED
+== R6d_ref_at_25_4 exit 0 | [stepped] any-step plan: 1 cell(s) over 1 region(s) in 1 pass(es) | 8.70=1 |  verdict: ACCEPTED
+== R6d_control_first_slot exit 0 | [stepped] any-step plan: 1 cell(s) over 1 region(s) in 1 pass(es) | 8.70=1 |  verdict: ACCEPTED
+== R2x_outside_face_accepted exit 0 | [stepped] doubled (halves) plan: 1 cell(s) over 1 region(s) in 1 pass(es) | 3.00=1 |  verdict: ACCEPTED
+
+## R6: a BASE cell off its own grid (doubled, region 1 slot origin (18,12,8), 3 mm cell)
+R6_base_off_grid             sha256 4dc6d9b062548da8  lattice tris  1432  x [17.5121, 21.4342] y [8.5450, 12.4518] z [7.5660, 11.4550]
+R6_ref_at_18                 sha256 4dc6d9b062548da8  lattice tris  1432  x [17.5121, 21.4342] y [8.5450, 12.4518] z [7.5660, 11.4550]
+R6_control_on_grid           sha256 1ccf1bdf90a8be4f  lattice tris  1432  x [20.5658, 24.3053] y [8.5762, 12.4318] z [7.6265, 11.4318]
+R6_off_grid_plus2            sha256 1ccf1bdf90a8be4f  lattice tris  1432  x [20.5658, 24.3053] y [8.5762, 12.4318] z [7.6265, 11.4318]
+R6_far_cell                  sha256 16b2da255fdb81cb  lattice tris  1432  x [11.5932, 15.5474] y [5.4246, 9.5754] z [1.5932, 5.5754]
+  TRUE  sent x=19 is laid at x=18: STL byte-identical to the cell sent at x=18
+  TRUE  positive control: the on-grid cell sent at x=21 is NOT the x=18 STL
+  TRUE  sent x=20 is laid at x=21 (nearest own-grid point): STL byte-identical to the control
+
+## R6b: a 1.5 mm (S/2) cell on the S/4 family tile, not its own grid (doubled)
+R6b_half_on_quarter_grid     sha256 ea88b5cd0aa0559d  lattice tris  2864  x [17.5121, 24.1417] y [8.5450, 12.4518] z [7.5660, 11.4550]
+R6b_ref_half_at_22_5         sha256 ea88b5cd0aa0559d  lattice tris  2864  x [17.5121, 24.1417] y [8.5450, 12.4518] z [7.5660, 11.4550]
+R6b_control_half_at_21       sha256 e630030f9ccf7694  lattice tris  2864  x [17.5121, 22.7004] y [8.5450, 12.4518] z [7.5660, 11.4550]
+  TRUE  sent x=21.75 is laid at x=22.5: STL byte-identical to the cell sent at x=22.5
+  TRUE  positive control: the 1.5 mm cell sent at x=21 is NOT the x=22.5 STL
+  core-derived any-step base cell (run_info grading.stepped.region_cell_mm[0]): {'R6c_anystep_off_own_grid': 14.5, 'R6d_anystep_second_slot': 14.5}
+
+## R6c: a 3-tile cell at a 1-tile offset (any-step, base 14.5, tile 14.5/6)
+R6c_anystep_off_own_grid     sha256 5704e715dac1e18c  lattice tris  2408  x [17.3430, 25.9041] y [0.0323, 7.8755] z [7.3978, 15.9019]
+R6c_control_mirror           sha256 e9e35fcd675527d0  lattice tris  2408  x [17.3430, 27.8814] y [0.0323, 7.8755] z [7.3978, 15.9019]
+R6c_ref_big_at_18            sha256 5838841329cb557a  lattice tris  1204  x [17.3430, 25.9041] y [0.0970, 7.8755] z [7.3978, 15.9019]
+R6c_ref_tile_at_18           sha256 b3e7a5a98e9d8bde  lattice tris  1204  x [17.7867, 20.6097] y [0.0323, 2.6300] z [7.8897, 10.6318]
+R6c_ref_tile_at_25_25        sha256 b578419f48510523  lattice tris  1204  x [25.0519, 27.8814] y [0.0323, 2.6217] z [7.8214, 10.6298]
+R6c_far_tile                 sha256 bcb206b66caf46b2  lattice tris  1204  x [12.8879, 15.8152] y [0.0657, 2.6672] z [14.9995, 17.8958]
+  TRUE  failing lattice == (7.25 at x18) + (tile at x18), triangle for triangle: the 7.25 was laid ON the tile
+  TRUE  control lattice == (7.25 at x18) + (tile at x25.25): laid where sent
+
+## R6d: an 8.7 mm cell at the START of the second 14.5 mm slot (any-step)
+R6d_anystep_second_slot      sha256 0ce81cc4a25c8139  lattice tris  1204  x [17.2980, 27.3613] y [0.1164, 9.3804] z [24.7169, 34.7998]
+R6d_ref_at_25_4              sha256 0ce81cc4a25c8139  lattice tris  1204  x [17.2980, 27.3613] y [0.1164, 9.3804] z [24.7169, 34.7998]
+R6d_control_first_slot       sha256 5cae340a5661064f  lattice tris  1204  x [17.3283, 27.3932] y [0.1164, 9.3708] z [7.6031, 17.3856]
+  TRUE  sent z=22.5 is laid at z=25.4: STL byte-identical to the cell sent at z=25.4
+  TRUE  positive control: the same cell sent at z=8 (first slot) is NOT the z=25.4 STL
+
+## R2x: a 3 mm cell one layer IN FRONT of the -y face (sent y 12..15; prism y 0..12; part y 0..12)
+R2x_outside_face_accepted    sha256 03dbb1cef7da5cea  lattice tris   612  x [17.5203, 21.4342] y [11.5482, 12.4518] z [7.5847, 11.4518]
+R6_ref_at_18                 sha256 4dc6d9b062548da8  lattice tris  1432  x [17.5121, 21.4342] y [8.5450, 12.4518] z [7.5660, 11.4550]
+  TRUE  R2x lays lattice ONLY in a band round the part face y=12 (every lattice vertex y in [11.5, 12.5])
+R6 base off grid (doubled)         size  3.0000 sent (19.0, 9.0, 8.0) -> laid (18.0, 9.0, 8.0)  moved (-1.0, 0.0, 0.0)
+R6 off grid +2 (doubled)           size  3.0000 sent (20.0, 9.0, 8.0) -> laid (21.0, 9.0, 8.0)  moved (1.0, 0.0, 0.0)
+R6b half on quarter (doubled)      size  3.0000 sent (18.0, 9.0, 8.0) -> laid (18.0, 9.0, 8.0)  moved (0.0, 0.0, 0.0)
+R6b half on quarter (doubled)      size  1.5000 sent (21.75, 10.5, 8.0) -> laid (22.5, 10.5, 8.0)  moved (0.75, 0.0, 0.0)
+R6c 3-tile at 1 tile (any-step)    size  2.4167 sent (18.0, 0.0, 8.0) -> laid (18.0, 0.0, 8.0)  moved (0.0, 0.0, 0.0)
+R6c 3-tile at 1 tile (any-step)    size  7.2500 sent (20.4167, 0.0, 8.0) -> laid (18.0, 0.0, 8.0)  moved (-2.416667, 0.0, 0.0)
+R6d second slot (any-step)         size  8.7000 sent (18.0, 0.0, 22.5) -> laid (18.0, 0.0, 25.4)  moved (0.0, 0.0, 2.9)
+packed slot, SENT cells  (what test_stepped_plan.cpp:739-755 samples): once/uncovered/doubled = (13824, 0, 0)
+packed slot, LAID cells (after stepped_group_cells):                 once/uncovered/doubled = (7344, 3240, 3240)
+the 9 is laid at [(0.0, 0.0, 0.0)]

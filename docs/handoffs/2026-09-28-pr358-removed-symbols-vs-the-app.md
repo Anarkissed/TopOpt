@@ -319,6 +319,119 @@ Nothing removed or renamed in core's public surface except one rename, listed fi
 | the refusal text for an unknown/not-ready topology | `lattice "topology" must be "octet" (got "X")` | names the type AND which half is missing: not a topology at all / certifiable but not generatable / generatable but not certifiable / neither | **none** — grepped PR 354 for the old message text: no matches. The app should now read `lattice_type_readiness_plain()` instead of wording its own |
 | `run_info.json` `fingerprint` / `build_time` on `lattice-variant` and graded `analyze` | `"unknown"` and `""` on every run | the binary's real SHA and build time | **none found** — `git grep` over PR 354's `app/` for `run_info.*fingerprint` / `fingerprint.*run_info` returns nothing; the app checks versions via `--version` and the worker's advertised fingerprint |
 
+## MEANING CHANGES, addendum 4 (2026-10-07) — the plan validator's containment rule
+
+From #354's core brief of 2026-10-02 (R2, R2x, R2b) and the reviewer's ruling of
+2026-10-05. ONE containment rule now applies to every face, axis-aligned or tilted: the
+cell's CENTRE must lie in the region's prism, its FAR side must not pass the depth
+(cube's true projection interval), and its NEAR side MAY stand in front of the face plane.
+
+| what | was | is | app impact |
+|---|---|---|---|
+| a cell in the deepest layer of a region whose normal has a NEGATIVE component | REFUSED, "lies from 12 to 15 mm … outside its 12 mm prism" — the check projected the cell's minimum corner, which on such a face is its deepest point, so every layer read one cell too deep | ACCEPTED | **intended, and it unblocks the app.** 1,467 cells on the stand's -y wall alone were refused this way, every one false, and the check runs after SOLVE 1 so each refusal cost a solve |
+| a cell lying wholly in FRONT of the face plane, outside the prism and outside the part | ACCEPTED and LAID — 612 lattice triangles sitting on the part's face, every vertex at y 11.55–12.45 (R2x) | **REFUSED**, naming the interval, the centre and which clause bound | **intended.** This is a false ACCEPTANCE being closed: core was emitting geometry outside the part. A plan that relied on it was already producing a wrong part |
+| a TILTED facet's cell whose near side starts in front of the plane but whose centre is inside | accepted (the one-corner read happened to allow it) | ACCEPTED — explicitly, by rule | **none, and deliberately so.** The app starts a facet's span in front of the plane BY DESIGN so the cube covers the slant (`LatticeOctreeBake.swift:187-202`); a near-side bound would have refused the stand's 90 face-23 facet cells. Guarded by a 45° test that goes RED if a near-side bound is reintroduced |
+| the depth refusal's wording | reported `s0` and `s0 + size` | reports the projection interval, the centre, and that the centre must be inside while the near side may stand in front | **none** — grepped PR 354's `app/` for the old sentence: no matches |
+
+Net: jobs whose regions have positive axis normals and whose cells sit inside the prism
+are unchanged. Jobs with negative-normal walls or tilted facets change verdict — which is
+the point of the brief. `test_stepped_plan.cpp` had never set `normal` or `depth_mm`, so
+this check was wholly untested before this commit.
+
+## MEANING CHANGES, addendum 5 (2026-10-07) — an empty lattice is a refusal
+
+From #354's core brief of 2026-10-06 (D10/E3) and the reviewer's ruling of 2026-10-07.
+
+| what | was | is | app impact |
+|---|---|---|---|
+| a job whose grade latticed voxels that the outline beam then cleared ENTIRELY, under `doubled` | **ACCEPTED** — "over 0 voxels", `verdict: ACCEPTED`, `interior_volume_mm3` 0, a finished part with no lattice in it | **REFUSED**, naming what the grade latticed, what the beam cleared, the beam's reach and the band that set it | **the app must expect a refusal where it used to get a file.** This is a false ACCEPTANCE being closed: #354 hit it on 3418E167 converted to Doubled. A refusal costs a solve; this was costing a print |
+| the same case under `stepped` | refused, but blamed "0 latticed voxels carrying 0 distinct region ids … 0 region(s) had no measurable member width" and recommended `"algorithm": "doubled"` | refused with the SAME sentence as doubled, naming the beam | **better diagnosis, same verdict.** The old sentence pointed at region ids, which were not the cause, and recommended the path that accepted nothing |
+| any refusal recommending an algorithm | `use "algorithm": "doubled"` | no algorithm is recommended anywhere on this path | **none** — grepped PR 354's `app/` for the old sentence: no matches |
+
+Note on scope: the beam cannot be the cause under `organic`, because `shape_grade` is
+refused at parse time for organic (job.cpp:2115), so organic has no post-BEAM empty mask
+to reach. The check is unconditional regardless, so anything else that empties the mask is
+caught by the same sentence instead of by nothing.
+
+Unchanged: a job whose lattice survives the beam. The control fixture
+(`empty_after_beam_control.json`, a 10 mm band, under the 25 mm bleed threshold) keeps 440
+of its 750 voxels and is still accepted — and the test requires that count to be non-zero,
+so a future change that emptied every lattice could not pass as "it refuses correctly".
+
+## MEANING CHANGES, addendum 6 (2026-10-07) — the in-plane slot origin, as sent
+
+From #354's core brief of 2026-10-02 (R1), the maintainer's ruling (b) and the reviewer's
+ruling of 2026-10-05. A new OPTIONAL key on a face lattice region's geometry:
+`slot_origin_mm`.
+
+| what | was | is | app impact |
+|---|---|---|---|
+| a job stating `lattice.regions[].geometry.slot_origin_mm` | **REFUSED** as an unknown key | accepted; that point is the grid alignment, depth, overlap, grouping and laying all measure from | **this is the key R1 asked for.** The app can stop having its anchor search refused: on every project the non-base cells were off core's grid by one constant in-plane vector per region (570B38E2 region 1: x = 1.6647, z = 0.5443 mod 2.578) |
+| a job NOT stating it | the region `origin` is the slot origin | unchanged — the derived origin still stands | **none.** Proved by a control fixture: the identical plan without the key is still refused, so nothing moved for existing jobs |
+| a stated slot origin with a component along the region normal | n/a (the key did not exist) | **REFUSED at parse time**, naming the region, the key and how far out of plane it stands | **intended.** An anchor shift is in-plane by definition; a normal component would move the plane the prism's depth is measured from and change every containment verdict in silence |
+
+Tested against the UNIT normal, for the reason recorded for `frame_u`: the raw test
+`|d·n| < eps` accepts `|d·n̂| < eps/|n|`, so a SHORT normal is the loose and dangerous
+case, not a long one.
+
+Note for the R6 work that follows: with the slot origin on the wire, the stricter
+base-cell alignment R6 asks for can land without refusing the app's current plans — which
+is why this key goes in first.
+
+## MEANING CHANGES, addendum 7 (2026-10-07) — who owns shared space, and exact overlap
+
+From #354's core brief of 2026-10-02 (R3, R5, R7's note) and the reviewer's ruling 4 of
+2026-10-07.
+
+| what | was | is | app impact |
+|---|---|---|---|
+| a voxel inside TWO include prisms | given to the FIRST matching region in DECLARATION ORDER, however far its face | given to the region whose FACE PLANE is nearest; an exact tie to the lower region id | **core now matches the app's own rule.** Where prisms overlap, the cell/density/void id a voxel is graded at changes, and so does the emitted geometry. Jobs with overlapping prisms change |
+| the same job with its regions declared in the opposite order | a DIFFERENT part (measured: STL `7f602f83…` vs `4c5809b0…`, and one run derived a cell for one region where the other derived two) | **byte-identical** (`9c5e8280…`) | **intended.** The order the app writes regions in is not geometry |
+| two cells that merely TOUCH, in regions whose ladders do not nest | REFUSED as overlapping — 1,458 false collisions on 570B38E2, every one false | accepted | **unblocks the app** (R5) |
+| two cells at the same offset in DIFFERENT regions, far apart in space | REFUSED as overlapping (the hash key had no region id) | accepted (R3) | **unblocks the app** |
+| two cells occupying the EXACT SAME BOX in different regions | **ACCEPTED** — offsets were measured from each region's own slot origin, so their hash keys differed | REFUSED, naming both cells, both regions, the overlap extent and which region owns each centre | **a false ACCEPTANCE closed.** R3's key defect ran both ways, and this direction ships a wrong part |
+| two cells half a cell apart where a region's menu holds only its base | **ACCEPTED** — the hash tile equalled the cell, so one-slot-wide cells rounded apart | REFUSED | **a second false ACCEPTANCE closed** |
+| a cross-region overlap at a mitre, each cell's centre owned by its own region | refused (as any cross-region overlap was, when detected at all) | **ACCEPTED** as a straddled seam; only the owner's lattice is laid in the shared space | **intended** — the app keeps such cells whole, and the stand has 1,367 real overlapping pairs that are NOT seams and stay refused |
+
+**Where no prisms overlap, nothing changes — by construction, not merely by test.** A point
+lies in at most one prism, so "first match" and "nearest face plane" name the same region;
+a point in no prism returned 0 before and returns 0 now. The change can only reach a point
+inside two or more prisms. The suite's existing receipt and STL pins are the empirical
+check on top of that (135/135).
+
+Containment itself is NOT a second implementation: `stepped_region_owner` calls
+`point_in_clearance_region`, the predicate core already resolved per-voxel membership
+with, so there is one containment test and only the tie-break is new. The function is
+exported so #354's R7 can call it through the bridge instead of keeping a Swift copy:
+
+    int stepped_region_owner(const Vec3& p, const std::vector<ClearanceGeometry>& includes);
+    // 1-based index into `includes`, or 0 for NO OWNER.
+
+## MEANING CHANGES, addendum 8 (2026-10-07) — R6: what is accepted is what is laid
+
+From #354's core brief of 2026-10-02 (R6, R6b, R6c, R6d) and the reviewer's ruling 3 of
+2026-10-07.
+
+| what | was | is | app impact |
+|---|---|---|---|
+| a DOUBLED cell not on its own size's grid from the slot origin | ACCEPTED, then LAID somewhere else — up to half its size away, with no receipt recording the move | **REFUSED**, naming the offset and that a halving octree can place it nowhere else | **intended.** R6 (a base cell 1 mm off) and R6b (an S/2 cell on the S/4 tile) are refused. A halving octree cannot produce such a cell, so a plan containing one did not come from one |
+| a base-size cell, either menu | exempt from the alignment check entirely | checked like any other cell | **intended.** A base cell is a whole slot and belongs on the base grid. This is also what made the moves invisible: the app's base cells sit off core's grid by R1's anchor, which is why `slot_origin_mm` landed first |
+| an ANY-STEP k-tile cell at a whole tile that is not a multiple of k tiles | accepted, then MOVED — measured at 1 mm (R6), 2.41667 mm (R6c, landing ON TOP of its neighbour) and 2.9 mm (R6d) | accepted and laid **where sent** | **intended, and it is why any-step packs were coming out wrong.** R6c's lattice covered x 18–20.42 twice and left x 25.25–27.67 bare |
+| core's own packed-slot fixture, sampled on the cells as LAID | 7,344 covered once, 3,240 uncovered, 3,240 covered twice | 13,824 / 0 / 0 | n/a — a core test. `test_packed_slot_covers_exactly_once` is untouched (it checks the SENT plan, still a valid property); a new test beside it samples the grouped cells |
+
+Controls keep their STLs, checked against the hashes #354 recorded:
+`R6_control_on_grid` 1ccf1bdf90a8…, `R6b_control_half_at_21` e630030f9ccf…,
+`R6d_control_first_slot` 5cae340a5661… — byte-identical. And `R6d_anystep_second_slot`'s
+STL no longer equals `R6d_ref_at_25_4`'s, which is the brief's own after-the-fix test.
+
+**The cost, measured.** A group is an emission pass, and the phase join multiplies them.
+On a 37-cell any-step plan with three sizes at mixed phases: passes **3 → 6 (2.0×)**, wall
+time **1.6 s → 1.6–1.7 s (flat)**. On R6c and R6d: **unchanged (1.0×)**. The reviewer's gate
+was "stop if either grows more than 2×"; 2.0× does not exceed it and the wall clock did not
+move, because each pass carries proportionally fewer cells. CAVEAT, stated because it
+bounds the result: his three project plans are not available in this worktree, so the
+37-cell plan is a generated proxy for the gate, not the gate itself.
+
 ### The fingerprint defect, for the record
 
 Not the worktree (`git -C core rev-parse` resolves fine there), and not only the

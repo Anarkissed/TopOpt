@@ -72,6 +72,15 @@ block (600,000 mm³); each voxel follows the nearer loaded face, blended over on
 measured across the boundary (57,588 mm³ in the band). 190 °C carries the note
 "below the manufacturer's range 195-260 °C; tested by iacob2024".
 
+**(d) `d_cube_top_and_vertical_edge_press`** (C1 addendum, angled presses, 2026-10-07)
+— a 60 mm cube pressed on top (10 kg, straight down) and on its vertical +X/+Y EDGE as
+one footprint of two faces, along (−1, −1, 0) (15 kg, centre → edge curve 0.5 → 1).
+The edge press is a side press (90° from Z): 'estimated', gyroid only. Its other end is
+the −Y and −X faces (0.51 / 0.49). The two stacks are 90° apart, so they hand over
+(34,671 mm³ blended) and do not conflict. The edge press's columns run 0.7–84.7 mm
+long; the 762 shorter than 12.7 mm (the footprint's rim, cutting a small corner) squish
+past the tested strain, dark red on its tier map. That is geometry, not a defect.
+
 ## Byte-identity (F11/F13)
 
 See the handoff's F11/F13 section: existing jobs run through the base binary and this

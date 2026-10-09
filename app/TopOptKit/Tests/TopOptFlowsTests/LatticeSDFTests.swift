@@ -14,7 +14,7 @@ final class LatticeSDFTests: XCTestCase {
     // MARK: segment soup
 
     func testOctetSegmentsCoverAndAreFaithful() {
-        let p = LatticeSDFPreview(latticeID: "octet")
+        let p = LatticeSDFPreview(lattice: .octet)
         // Every canonical strut has a copy in the centred soup (faithful geometry).
         XCTAssertGreaterThanOrEqual(p.segments.count, LatticeType.octet.struts.count)
         // All endpoints lie within one padded cell of the origin (bounded soup).
@@ -42,7 +42,7 @@ final class LatticeSDFTests: XCTestCase {
     // MARK: grading map
 
     func testGradingRoundTrips() {
-        let p = LatticeSDFPreview(latticeID: "octet")
+        let p = LatticeSDFPreview(lattice: .octet)
         for rho in [0.05, 0.2, 0.4, 0.6] {
             let rn = Double(p.normalizedRadius(relativeDensity: rho))
             XCTAssertEqual(p.relativeDensity(normalizedRadius: rn), rho, accuracy: 1e-6)
@@ -53,7 +53,7 @@ final class LatticeSDFTests: XCTestCase {
     }
 
     func testAlwaysApproximateAndLabelled() {
-        let p = LatticeSDFPreview(latticeID: "octet")
+        let p = LatticeSDFPreview(lattice: .octet)
         XCTAssertTrue(p.isApproximate)
         XCTAssertTrue(p.previewLabel.lowercased().contains("not the exported"))
     }

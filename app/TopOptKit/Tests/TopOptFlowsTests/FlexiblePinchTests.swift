@@ -154,7 +154,10 @@ final class FlexiblePinchTests: XCTestCase {
         XCTAssertLessThan(same.rho, 1e-5, "the app's assembler is core's rule")
         XCTAssertEqual(same.owners, 0)
         // (his split at x = 50 lies ON a column line — 32 pitches — so the cuts change nothing
-        // here: `testMembershipIsCoresInStackWithItsCuts` holds the cut rule on a straddling cell)
+        // here: `testMembershipIsCoresInStackWithItsCuts` holds the cut rule on a straddling cell.
+        // ★ S1: a sector's stack from core now carries core's own verdict (FlexStackInfo.sector), which
+        // `cuts: []` does not strip; FlexibleS1VerifyTests holds the sector rule on a CURVED sector,
+        // where the old cut test is not core's)
         let noCuts = diff(FlexibleGroupField.assemble(mask: mask, faces: try faces(cuts: false)))
         print("FLEX-ASSEMBLE his split without cuts: owners differ on \(noCuts.owners), |Δρ| ≤ \(noCuts.rho)")
         // ★ RED CONTROL 1: without R11's blend (the nearest face alone) the handovers differ
@@ -172,7 +175,9 @@ final class FlexiblePinchTests: XCTestCase {
         XCTAssertGreaterThan(diff(FlexibleGroupField.assemble(mask: mask, faces: far)).rho, 1e-3, "control: other densities, another field")
     }
 
-    /// Core's in_stack with a sector's cuts, on a cell the cut STRADDLES.
+    /// Core's in_stack with a sector's cuts, on a cell the cut STRADDLES — the HAND-BUILT path (a stack
+    /// with no core verdict: the cuts on the point projected back by its depth, core's rule before
+    /// #361's 254cb137). ★ S1: a stack from core carries core's verdict instead (FlexibleS1VerifyTests).
     func testMembershipIsCoresInStackWithItsCuts() {
         func col(_ i: Int) -> FlexColumn {
             FlexColumn(iu: i, iv: 0, uMM: Double(i) + 0.5, vMM: 0.5, areaMM2: 1, entryT: 0, exitT: 10, latticeMM: 10, exitFace: 0)
