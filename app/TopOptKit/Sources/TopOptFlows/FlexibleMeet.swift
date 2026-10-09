@@ -24,10 +24,6 @@
 // ★ STABLE. Every output is sorted (pairs, pieces, segments in triangle order, meeting points by position), so the
 // same mesh and regions give the same answer in any process; FlexibleEdgeCandidates numbers by position.
 
-// ★★ AP2 TESTS-FIRST STUBS: every rule below marked "RED STUB" is the spec's red variant (index-keyed seams, no
-// sector clipping, no cut line, no blend chain, the area centroid as anchor, handles sized in mm); the next commit
-// replaces each with its rule.
-
 import CoreGraphics
 import Foundation
 import simd
@@ -155,9 +151,8 @@ public struct FlexibleMeet {
                 for y in onFace[fp.b] ?? [] where x != y {
                     guard let px = byID[x], let py = byID[y] else { continue }
                     for s in list {
-                        // ★ AP2 RED STUB: face-level — the whole seam, whatever the pieces' cuts
-                        _ = (px, py)
-                        let d = (s.p, s.q)
+                        guard let c = Self.clip(s.p, s.q, px.cuts), let d = Self.clip(c.0, c.1, py.cuts),
+                              simd_distance(d.0, d.1) > 0 else { continue }
                         // triA belongs to the pair's lower id
                         let seg = x < y ? Segment(p: d.0, q: d.1, triA: s.triA, triB: s.triB)
                                         : Segment(p: d.0, q: d.1, triA: s.triB, triB: s.triA)
@@ -166,17 +161,32 @@ public struct FlexibleMeet {
                 }
             }
         }
-        // two pieces of one face meet along their cuts
+        // two pieces of one face meet along their cuts (only pieces whose kept parts' boxes touch are traced: a face
+        // cut into a grid of fifty cells traces each cell against its few neighbours, not against all fifty)
         var shareFace = Set<Pair>()
         for f in onFace.keys.sorted() {
             let ids = onFace[f] ?? []
             guard ids.count >= 2 else { continue }
+            var box: [Int: (lo: SIMD3<Double>, hi: SIMD3<Double>)] = [:]
+            for id in ids {
+                guard let pc = byID[id] else { continue }
+                for t in byFace[f] ?? [] {
+                    let tri = [Self.position(mesh, mesh.indices[3 * t]), Self.position(mesh, mesh.indices[3 * t + 1]),
+                               Self.position(mesh, mesh.indices[3 * t + 2])]
+                    for q in (pc.cuts.isEmpty ? tri : Self.clipPolygon(tri, pc.cuts)) {
+                        let b = box[id] ?? (q, q)
+                        box[id] = (simd_min(b.lo, q), simd_max(b.hi, q))
+                    }
+                }
+            }
             for i in 0..<ids.count {
                 for j in (i + 1)..<ids.count {
                     guard let px = byID[ids[i]], let py = byID[ids[j]] else { continue }
                     let pair = Pair(px.id, py.id)
                     shareFace.insert(pair)
-                    _ = pair   // ★ AP2 RED STUB: two pieces of one face never meet along their cut
+                    guard let bx = box[px.id], let by = box[py.id],
+                          all(bx.lo .<= by.hi + Self.touchMM), all(by.lo .<= bx.hi + Self.touchMM) else { continue }
+                    for s in Self.cutLine(mesh, triangles: byFace[f] ?? [], px.cuts, py.cuts) { segs[pair, default: []].append(s) }
                 }
             }
         }
@@ -195,8 +205,11 @@ public struct FlexibleMeet {
     static func faceSeams(_ mesh: ViewerMesh, triCount: Int) -> [Pair: [Segment]] {
         struct Key: Hashable { let lo: SIMD3<Int64>; let hi: SIMD3<Int64> }
         struct Use { let face: Int; let tri: Int; let a: UInt32; let b: UInt32 }
-        // ★ AP2 RED STUB: keyed by vertex INDEX (FaceTopology.adjacency's rule)
-        func q(_ i: UInt32) -> SIMD3<Int64> { SIMD3(Int64(i), 0, 0) }
+        func q(_ i: UInt32) -> SIMD3<Int64> {
+            let b = Int(i) * 3
+            return SIMD3(Int64((Double(mesh.positions[b]) / keyMM).rounded()), Int64((Double(mesh.positions[b + 1]) / keyMM).rounded()),
+                         Int64((Double(mesh.positions[b + 2]) / keyMM).rounded()))
+        }
         var uses: [Key: [Use]] = [:]
         var order: [Key] = []
         for t in 0..<triCount {
@@ -276,7 +289,29 @@ public struct FlexibleMeet {
     /// A fillet split along its length is returned whole (each part lies on such a path); the corner patches round it
     /// are not (their path is longer). nil when no such chain joins them. Ordered by distance from `a`, then id.
     public func blendChain(_ a: Int, _ b: Int, smooth: (Pair) -> Bool, curved: (Int) -> Bool) -> [Int]? {
-        nil   // ★ AP2 RED STUB: no chain is ever found
+        guard a != b else { return nil }
+        func distances(from s: Int) -> [Int: Int] {
+            var d: [Int: Int] = [:]
+            var frontier = neighbours(of: s).filter { curved($0) && smooth(Pair(s, $0)) }
+            for c in frontier { d[c] = 1 }
+            var k = 1
+            while !frontier.isEmpty {
+                k += 1
+                var next: [Int] = []
+                for x in frontier {
+                    for y in neighbours(of: x) where curved(y) && d[y] == nil && y != a && y != b && smooth(Pair(x, y)) {
+                        d[y] = k
+                        next.append(y)
+                    }
+                }
+                frontier = next
+            }
+            return d
+        }
+        let da = distances(from: a), db = distances(from: b)
+        let both = da.keys.filter { db[$0] != nil }
+        guard let best = both.map({ da[$0]! + db[$0]! }).min() else { return nil }
+        return both.filter { da[$0]! + db[$0]! == best }.sorted { (da[$0]!, $0) < (da[$1]!, $1) }
     }
 
     // MARK: - triangles
@@ -333,17 +368,23 @@ public struct FlexibleMeet {
     /// the longest edge they share; else where a ray along `direction`, aimed at the regions' area centroid, lands on
     /// their triangles (inside their cuts) — a tilt's footprint, or a fillet's middle. Always ON the faces.
     public func anchor(regions: [Int], direction: SIMD3<Double>) -> SIMD3<Double>? {
-        // ★ AP2 RED STUB: the footprint's area centroid (inside the part for an edge or a corner)
-        var sum = SIMD3<Double>.zero, total = 0.0
-        for r in Set(regions) {
-            for t in memberTriangles(r) {
-                let (a, b, c) = triangle(t)
-                let w = simd_length(simd_cross(b - a, c - a)) / 2
-                sum += (a + b + c) / 3 * w
-                total += w
+        let set = Set(regions)
+        guard !set.isEmpty else { return nil }
+        if set.count >= 3, let c = corners.first(where: { set.isSubset(of: Set($0.regions)) }) { return c.point }
+        if set.count >= 2 {
+            var best: [SIMD3<Double>]? = nil, bestLen = 0.0
+            let rs = Array(set).sorted()
+            for i in 0..<rs.count {
+                for j in (i + 1)..<rs.count {
+                    for pl in sharedEdge(rs[i], rs[j]) {
+                        let l = Self.length(pl)
+                        if l > bestLen { best = pl; bestLen = l }
+                    }
+                }
             }
+            if let best, let m = Self.midpoint([best]) { return m }
         }
-        return total > 0 ? sum / total : nil
+        return rayAnchor(regions: regions, direction: direction)
     }
 
     /// A ray along `direction` through the regions' area centroid, landed on their nearest triangle inside their
@@ -421,10 +462,8 @@ public struct FlexibleMeet {
     public static func handles(_ spots: [Spot], projection: CameraProjection) -> [Handle] {
         spots.compactMap { s in
             guard let c = projection.project(SIMD3<Float>(Float(s.point.x), Float(s.point.y), Float(s.point.z))) else { return nil }
-            // ★ AP2 RED STUB: a 4 mm target, projected (shrinks as he zooms out)
-            let e = projection.project(SIMD3<Float>(Float(s.point.x) + 4, Float(s.point.y), Float(s.point.z))) ?? c
-            let side = 2 * CGFloat(hypot(e.x - c.x, e.y - c.y))
-            return Handle(id: s.id, kind: s.kind, centre: c, target: CGRect(x: c.x - side / 2, y: c.y - side / 2, width: side, height: side))
+            let w = s.kind == .edge ? pillWidthPt : handleTargetPt, h = handleTargetPt
+            return Handle(id: s.id, kind: s.kind, centre: c, target: CGRect(x: c.x - w / 2, y: c.y - h / 2, width: w, height: h))
         }
     }
 

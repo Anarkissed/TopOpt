@@ -10,9 +10,6 @@
 // ★ ONE SOURCE: CORE. Every frame, normal and adjacency here is read through the bridge (FlexibleKit+Meet) from the
 // scene the page opened; the model only decides when to ask and keeps the answers.
 
-// ★★ AP2 TESTS-FIRST STUBS: `regionFrame` is the spec's red variant (the viewer's Float face normal, no sector, no
-// spread) and `meetFacts` reads no seam normal; the next commit asks core for both.
-
 import Foundation
 import simd
 import TopOptKit
@@ -72,16 +69,12 @@ extension FlexibleStageModel {
     /// ★ Core's frame of declared region `region` (or of its member face `face`), along `direction` when given —
     /// face_frame_cut through the open scene; asked once per (region, face, direction bits) per scene.
     public func regionFrame(_ region: Int, face: Int? = nil, direction: SIMD3<Double>? = nil) async throws -> FlexRegionFrame {
-        // ★ AP2 RED STUB: the viewer's Float normal (ViewerMesh.faceNormal), whole faces only
-        _ = try openSceneKey()
-        _ = (face, direction)
-        guard !FlexibleRegions.isSector(region), let n = project.viewerMesh?.faceNormal(Int32(region)) else {
-            return FlexRegionFrame(valid: false, reason: "no viewer normal", load: SIMD3(0, 0, -1), centroid: .zero, areaMM2: 0,
-                                   buildAngleDeg: 0, side: false, normalSpreadDeg: 0, normalSpreadFlag: false, triangles: 0)
-        }
-        let load = -SIMD3<Double>(Double(n.x), Double(n.y), Double(n.z))
-        return FlexRegionFrame(valid: true, reason: "", load: load, centroid: .zero, areaMM2: 0, buildAngleDeg: 0, side: false,
-                               normalSpreadDeg: 0, normalSpreadFlag: false, triangles: 0)
+        let key = try openSceneKey()
+        let k = "\(region)|\(face ?? -1)|" + (direction.map { "\($0.x.bitPattern),\($0.y.bitPattern),\($0.z.bitPattern)" } ?? "-")
+        if let f = meetCache.frames[k] { return f }
+        let f = try await frameWorker.withScene { try $0.regionFrame(region, face: face, direction: direction) }
+        if meetCache.sceneKey == key { meetCache.frames[k] = f }
+        return f
     }
 
     /// ★ Everything FlexibleEdgeCandidates needs from core, for the open scene and the current regions: core's
@@ -98,10 +91,21 @@ extension FlexibleStageModel {
         for p in meet.pieces {
             if let f = try? await regionFrame(p.id) { frames[p.id] = f }
         }
-        // ★ AP2 RED STUB: no seam normal is read from core
-        _ = mesh
-        let mismatch: String? = nil
-        let byTri: [Int: SIMD3<Double>] = [:]
+        let tris = FlexibleMeetFacts.seamTriangles(meet)
+        let loads = try await frameWorker.withScene { try $0.triangleLoads(tris) }
+        var mismatch: String? = nil
+        var byTri: [Int: SIMD3<Double>] = [:]
+        if loads.triangleCount != mesh.triangleCount {
+            mismatch = "core's part has \(loads.triangleCount) triangles, the page draws \(mesh.triangleCount)"
+        } else {
+            for (k, t) in tris.enumerated() {
+                guard t < mesh.faceIDs.count, loads.faces[k] == Int(mesh.faceIDs[t]) else {
+                    mismatch = "triangle \(t) is on face \(loads.faces[k]) in core's part, face \(t < mesh.faceIDs.count ? Int(mesh.faceIDs[t]) : -1) on the page"
+                    break
+                }
+                if let l = loads.loads[k] { byTri[t] = l }
+            }
+        }
         let facts = FlexibleMeetFacts(adjacency: adjacency, frames: frames, triangleLoads: mismatch == nil ? byTri : [:], mismatch: mismatch)
         if meetCache.sceneKey == key {
             meetCache.facts = facts

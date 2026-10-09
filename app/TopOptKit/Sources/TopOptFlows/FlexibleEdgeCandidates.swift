@@ -23,10 +23,6 @@
 // ★ ONE SOURCE: CORE. Every normal, spread and validity used is core's (FlexibleMeetFacts); the app finds where
 // faces meet (FlexibleMeet) and compares core's numbers with the 15° threshold. No frame is computed here.
 
-// ★★ AP2 TESTS-FIRST STUBS: the rules marked "RED STUB" are the spec's red variants (no 15° rule, every meeting
-// point a corner, no blend, nothing refused, numbers in the order the seams are first met); the next commit
-// replaces each with its rule.
-
 import Foundation
 import simd
 import TopOptKit
@@ -58,13 +54,18 @@ public struct FlexibleMeetFacts: Equatable, Sendable {
 extension FlexibleMeet {
     /// ★ Does piece `r` WRAP — core's normal_spread_flag, or no frame from core at all (its normals cancel)?
     public func wraps(_ r: Int, facts: FlexibleMeetFacts) -> Bool {
-        false   // ★ AP2 RED STUB: nothing wraps
+        guard let f = facts.frames[r] else { return true }
+        return !f.valid || f.normalSpreadFlag
     }
 
     /// The seam's segments CREASED under the 15° rule (core's normals of the two triangles; a cut line never is).
     public func creasedSegments(_ pair: Pair, facts: FlexibleMeetFacts,
                                 creaseCos: Double = FlexibleMainPageLoads.straightCos) -> [Segment] {
-        seams[pair]?.segments ?? []   // ★ AP2 RED STUB: no 15° rule — every seam is creased
+        guard let s = seams[pair], s.kind == .edge else { return [] }
+        return s.segments.filter { seg in
+            guard seg.triA != seg.triB, let la = facts.triangleLoads[seg.triA], let lb = facts.triangleLoads[seg.triB] else { return false }
+            return simd_dot(la, lb) <= creaseCos
+        }
     }
 
     /// A seam with more than 1e-3 mm creased.
@@ -87,7 +88,9 @@ extension FlexibleMeet {
     /// The whole chain of curved pieces between flats `a` and `b`, through smooth seams (core's 15° verdict).
     public func blendChain(_ a: Int, _ b: Int, facts: FlexibleMeetFacts,
                            creaseCos: Double = FlexibleMainPageLoads.straightCos) -> [Int]? {
-        nil   // ★ AP2 RED STUB: no chain
+        guard flat(a, facts: facts), flat(b, facts: facts) else { return nil }
+        return blendChain(a, b, smooth: { touches($0.a, $0.b) && !creased($0, facts: facts, creaseCos: creaseCos) },
+                          curved: { curved($0, facts: facts) })
     }
 
     /// Do two pieces lie on one face (sectors)?
@@ -135,19 +138,96 @@ public struct FlexibleEdgeCandidates {
     public static func make(meet: FlexibleMeet, facts: FlexibleMeetFacts,
                             creaseCos: Double = FlexibleMainPageLoads.straightCos,
                             name: (Int) -> String = { "face \($0)" }) -> FlexibleEdgeCandidates {
-        // ★ AP2 RED STUB: every seam an edge (no 15° rule), every meeting point a corner, no blend, nothing refused,
-        // numbered in the order the seams are first met in the triangle list
-        _ = (facts, creaseCos, name)
-        var out: [Candidate] = []
+        if let why = facts.mismatch { return FlexibleEdgeCandidates(candidates: [], unread: why, creasedPairs: []) }
+        typealias Pair = FlexibleMeet.Pair
+        var creased = Set<Pair>()
+        for pair in meet.seams.keys.sorted() where meet.seams[pair]?.kind == .edge && !meet.shareFace(pair.a, pair.b) {
+            if meet.creased(pair, facts: facts, creaseCos: creaseCos) { creased.insert(pair) }
+        }
+
+        func whyNot(_ members: [Int], chain: Set<Int> = []) -> String? {
+            for i in 0..<members.count {
+                for j in (i + 1)..<members.count where meet.shareFace(members[i], members[j]) {
+                    return "\(name(members[i])) and \(name(members[j])) are parts of one face"
+                }
+            }
+            for r in members where !chain.contains(r) {
+                guard let f = facts.frames[r] else { return "\(name(r)) is not framed by core" }
+                if !f.valid { return "\(name(r)): \(f.reason)" }
+                if f.normalSpreadFlag { return "\(name(r)) wraps round the edge" }
+            }
+            return nil
+        }
+
+        struct Raw { let kind: Kind; let members: [Int]; let point: SIMD3<Double>; let polylines: [[SIMD3<Double>]] }
+        var corners: [Raw] = [], edges: [Raw] = []
+
+        // corners: 3+ sides after joining pieces met by a smooth seam or a cut
         for c in meet.corners {
-            out.append(Candidate(number: out.count + 1, kind: .corner, members: c.regions, point: c.point, polylines: [], offered: true, why: nil))
+            var parent: [Int: Int] = Dictionary(uniqueKeysWithValues: c.regions.map { ($0, $0) })
+            func find(_ x: Int) -> Int { var x = x; while parent[x]! != x { x = parent[x]! }; return x }
+            for i in 0..<c.regions.count {
+                for j in (i + 1)..<c.regions.count {
+                    let x = c.regions[i], y = c.regions[j]
+                    guard meet.touches(x, y) || meet.shareFace(x, y) else { continue }
+                    if meet.shareFace(x, y) || !creased.contains(Pair(x, y)) { parent[find(y)] = find(x) }
+                }
+            }
+            guard Set(c.regions.map(find)).count >= 3 else { continue }
+            corners.append(Raw(kind: .corner, members: c.regions, point: c.point, polylines: []))
         }
-        let firstMet = meet.seams.values.sorted { ($0.segments.map { Swift.min($0.triA, $0.triB) }.min() ?? 0) < ($1.segments.map { Swift.min($0.triA, $0.triB) }.min() ?? 0) }
-        for sm in firstMet {
-            guard let mid = FlexibleMeet.midpoint(sm.polylines) else { continue }
-            out.append(Candidate(number: out.count + 1, kind: .edge, members: [sm.pair.a, sm.pair.b], point: mid, polylines: sm.polylines,
-                                 offered: true, why: nil))
+
+        // edges: creased seams
+        for pair in creased.sorted() {
+            let pls = FlexibleMeet.chain(meet.creasedSegments(pair, facts: facts, creaseCos: creaseCos))
+            guard let mid = FlexibleMeet.midpoint(pls) else { continue }
+            edges.append(Raw(kind: .edge, members: [pair.a, pair.b], point: mid, polylines: pls))
         }
-        return FlexibleEdgeCandidates(candidates: out, unread: nil, creasedPairs: Set(meet.seams.keys))
+
+        // blends: two flats ≥ 15° apart joined by a chain of curved pieces through smooth seams
+        let flats = meet.pieces.map(\.id).filter { meet.flat($0, facts: facts) }
+        let curvedSet = Set(meet.pieces.map(\.id).filter { meet.curved($0, facts: facts) })
+        func smooth(_ p: Pair) -> Bool { meet.touches(p.a, p.b) && !creased.contains(p) && !meet.shareFace(p.a, p.b) }
+        for a in flats {
+            // the flats reachable from a through curved pieces and smooth seams
+            var seen = Set<Int>(), todo = meet.neighbours(of: a).filter { curvedSet.contains($0) && smooth(Pair(a, $0)) }
+            var reached = Set<Int>()
+            while let x = todo.popLast() {
+                guard seen.insert(x).inserted else { continue }
+                for y in meet.neighbours(of: x) where smooth(Pair(x, y)) {
+                    if curvedSet.contains(y) { todo.append(y) } else if y > a, meet.flat(y, facts: facts) { reached.insert(y) }
+                }
+            }
+            for b in reached.sorted() {
+                guard let la = facts.frames[a]?.load, let lb = facts.frames[b]?.load, simd_dot(la, lb) <= creaseCos,
+                      let chain = meet.blendChain(a, b, smooth: smooth, curved: { curvedSet.contains($0) }), !chain.isEmpty else { continue }
+                let members = [a] + chain + [b]
+                var pls: [[SIMD3<Double>]] = []
+                for i in 0..<members.count { for j in (i + 1)..<members.count { pls += meet.sharedEdge(members[i], members[j]) } }
+                let h = la + lb
+                let point = (simd_length(h) > 1e-9 ? meet.rayAnchor(regions: chain, direction: h / simd_length(h)) : nil)
+                    ?? FlexibleMeet.midpoint(pls)
+                guard let point else { continue }
+                edges.append(Raw(kind: .blend, members: members, point: point, polylines: pls.sorted { FlexibleMeet.length($0) > FlexibleMeet.length($1) }))
+            }
+        }
+
+        // stable numbers: corners, then edges, by (−z, y, x), then members
+        func key(_ p: SIMD3<Double>) -> [Int64] {
+            [Int64((-p.z / FlexibleMeet.keyMM).rounded()), Int64((p.y / FlexibleMeet.keyMM).rounded()), Int64((p.x / FlexibleMeet.keyMM).rounded())]
+        }
+        func order(_ l: Raw, _ r: Raw) -> Bool {
+            let kl = key(l.point), kr = key(r.point)
+            if kl != kr { return kl.lexicographicallyPrecedes(kr) }
+            return l.members.lexicographicallyPrecedes(r.members)
+        }
+        var out: [Candidate] = []
+        for raw in corners.sorted(by: order) + edges.sorted(by: order) {
+            let chain: Set<Int> = raw.kind == .blend ? Set(raw.members.dropFirst().dropLast()) : []
+            let why = whyNot(raw.members, chain: chain)
+            out.append(Candidate(number: out.count + 1, kind: raw.kind, members: raw.members, point: raw.point,
+                                 polylines: raw.polylines, offered: why == nil, why: why))
+        }
+        return FlexibleEdgeCandidates(candidates: out, unread: nil, creasedPairs: creased)
     }
 }

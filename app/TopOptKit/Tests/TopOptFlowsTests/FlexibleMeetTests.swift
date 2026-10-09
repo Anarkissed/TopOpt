@@ -422,6 +422,10 @@ final class FlexibleMeetTests: XCTestCase {
         for p in ps {
             let facts = try await p.m.meetFacts()
             XCTAssertNil(facts.mismatch, "\(p.label): the viewer mesh is core's model")
+            let t0 = Date()
+            let rebuilt = FlexibleMeet(mesh: p.meet.mesh, regions: p.m.regions)
+            print(String(format: "FLEX-AP2 EDGES %@: FlexibleMeet over %d triangles built in %.1f ms (%d seams)", p.label,
+                         rebuilt.mesh.triangleCount, Date().timeIntervalSince(t0) * 1000, rebuilt.seams.count))
             let c = FlexibleEdgeCandidates.make(meet: p.meet, facts: facts)
             let noRule = FlexibleEdgeCandidates.make(meet: p.meet, facts: facts, creaseCos: 2)
             let smooth = p.meet.seams.values.filter { $0.kind == .edge && !c.creased($0.pair) }.count
