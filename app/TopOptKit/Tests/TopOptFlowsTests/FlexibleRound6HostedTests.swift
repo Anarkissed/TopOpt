@@ -645,6 +645,23 @@ final class FlexibleRound6HostedTests: XCTestCase {
             lines.append("\(tag) row \(row.integral)")
             snapshot(h, "R6_S1b_\(tag)_main_four_buttons.png")
         }
+        // ★ the narrow pad (iPad mini portrait): two over two, as `rowFrame` says — [Prisms] bottom right, Lattice bottom left
+        let mini = CGSize(width: 744, height: 1133)
+        let h = host(FlexibleMainViewToggles(main: stage, openSettings: { opened += 1 }), size: mini)
+        pump(0.3)
+        let row = FlexibleMainViewToggles.rowFrame(viewport: mini)
+        m.views = []
+        stage.latticeOn = false
+        click(h, CGPoint(x: row.maxX - 20, y: row.maxY - 20))
+        XCTAssertTrue(m.views.contains(.prisms), "mini: [Prisms] is bottom right")
+        XCTAssertTrue(stage.latticeOn, "mini: …with the Lattice view")
+        click(h, CGPoint(x: row.maxX - 20, y: row.maxY - 20))
+        let before = (stage.latticeOn, opened)
+        click(h, CGPoint(x: row.minX + 20, y: row.maxY - 20))
+        XCTAssertFalse(m.views.contains(.prisms), "mini: bottom left is not Prisms")
+        XCTAssertTrue(stage.latticeOn != before.0 || opened == before.1 + 1, "mini: bottom left is Lattice")
+        snapshot(h, "R6_S1b_mini_main_buttons_two_over_two.png")
+        lines.append("mini row \(row.integral)")
         m.views = []
         print("FLEX-R6-3j " + lines.joined(separator: " · "))
     }

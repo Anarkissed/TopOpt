@@ -136,6 +136,36 @@ public struct FlexibleMainViewToggles: View {
     /// ★ S1b (round 6 item 3): Dent heat, Stress, Lattice and [Prisms] (the Settings page's own button and glyph).
     static let buttons = 4
 
+    // ★ a thermometer reads "heat" (the stacked-layers glyph did not — batch B review)
+    private var heatButton: some View {
+        FlexibleViewButton(icon: FlexibleMainViewToggles.heatIcon, label: "Dent heat", on: main.heat) { main.toggleHeat() }
+            .accessibilityIdentifier("flexible-main-view-heat")
+    }
+    private var stressButton: some View {
+        FlexibleViewButton(icon: FlexibleMainViewToggles.stressIcon, label: main.stressRunning ? "Simulating…" : "Stress",
+                           on: main.stress) { main.toggleStress() }
+            .overlay {
+                if main.stressRunning, main.stress {
+                    ProgressView().controlSize(.small).tint(DS.Color.textPrimary.color).allowsHitTesting(false)
+                }
+            }
+            .accessibilityIdentifier("flexible-main-view-stress")
+    }
+    // ★ C2: shows / hides the lattice — or, with nothing to show, opens Settings
+    private var latticeButton: some View {
+        FlexibleViewButton(icon: "cube.transparent", label: "Lattice", on: main.latticeShown) {
+            main.latticeButtonTapped(openSettings: openSettings)
+        }
+            .accessibilityIdentifier("flexible-main-view-lattice")
+    }
+    // ★ S1b (round 6 item 3 — his img3: "a view that turns on/off ALL squish prisms"): every pressed face's prism,
+    // faint, with its mm; it turns the Lattice view (the X-ray) on itself
+    private var prismsButton: some View {
+        FlexibleViewButton(icon: FlexibleStageViews.prismsIcon, label: "Prisms", on: main.prismsOn,
+                           action: { main.togglePrisms() }, glyph: FlexibleStageViews.prismsGlyph(on: main.prismsOn))
+            .accessibilityIdentifier("flexible-main-view-prisms")
+    }
+
     public var body: some View {
         // the workspace's solver (no publish: its sim's phase arrives on the next run-loop turn)
         let _ = solver.map { main.attach($0) }
@@ -143,28 +173,16 @@ public struct FlexibleMainViewToggles: View {
             HStack(spacing: DS.Space.s) {
                 // ★ C2: "Lattice ready" — ★ C2 VERIFICATION: beside the row, in the band `frame` holds
                 FlexibleMainNoteView(note: main.note, main: main, maxWidth: Self.noteFrame(viewport: g.size).width)
-                HStack(spacing: DS.Space.s) {
-                    // ★ a thermometer reads "heat" (the stacked-layers glyph did not — batch B review)
-                    FlexibleViewButton(icon: FlexibleMainViewToggles.heatIcon, label: "Dent heat", on: main.heat) { main.toggleHeat() }
-                        .accessibilityIdentifier("flexible-main-view-heat")
-                    FlexibleViewButton(icon: FlexibleMainViewToggles.stressIcon, label: main.stressRunning ? "Simulating…" : "Stress",
-                                       on: main.stress) { main.toggleStress() }
-                        .overlay {
-                            if main.stressRunning, main.stress {
-                                ProgressView().controlSize(.small).tint(DS.Color.textPrimary.color).allowsHitTesting(false)
-                            }
+                // ★ S1b: one line of four — or, on a pad too narrow for the note beside four (the iPad mini), two over two
+                Group {
+                    if Self.columns(viewport: g.size) >= Self.buttons {
+                        HStack(spacing: DS.Space.s) { heatButton; stressButton; latticeButton; prismsButton }
+                    } else {
+                        VStack(alignment: .trailing, spacing: DS.Space.s) {
+                            HStack(spacing: DS.Space.s) { heatButton; stressButton }
+                            HStack(spacing: DS.Space.s) { latticeButton; prismsButton }
                         }
-                        .accessibilityIdentifier("flexible-main-view-stress")
-                    // ★ C2: shows / hides the lattice — or, with nothing to show, opens Settings
-                    FlexibleViewButton(icon: "cube.transparent", label: "Lattice", on: main.latticeShown) {
-                        main.latticeButtonTapped(openSettings: openSettings)
                     }
-                        .accessibilityIdentifier("flexible-main-view-lattice")
-                    // ★ S1b (round 6 item 3 — his img3: "a view that turns on/off ALL squish prisms"): every pressed
-                    // face's prism, faint, with its mm; it turns the Lattice view (the X-ray) on itself
-                    FlexibleViewButton(icon: FlexibleStageViews.prismsIcon, label: "Prisms", on: main.prismsOn,
-                                       action: { main.togglePrisms() }, glyph: FlexibleStageViews.prismsGlyph(on: main.prismsOn))
-                        .accessibilityIdentifier("flexible-main-view-prisms")
                 }
                 .latticeBandChipKeepOut()
             }
@@ -175,19 +193,27 @@ public struct FlexibleMainViewToggles: View {
     }
 
     /// Where the toggles sit, for the player's and the legends' keep-outs: the row (★ S1b: four 40 pt
-    /// buttons, `s` apart) AND the note's band beside it (★ C2: reserved, so a note coming and
+    /// buttons, `s` apart — two over two on a narrow pad) AND the note's band beside it (★ C2: reserved, so a note coming and
     /// going never moves a legend; ★ C2 VERIFICATION: on the row's line, so it ends where the row
     /// ends and costs the legends nothing).
     static func frame(viewport: CGSize) -> CGRect {
         rowFrame(viewport: viewport).union(noteFrame(viewport: viewport))
     }
-    /// The buttons alone.
+    /// The buttons alone (★ S1b: one line of four, or two over two — `columns`).
     static func rowFrame(viewport: CGSize) -> CGRect {
-        let w = CGFloat(buttons) * 40 + CGFloat(buttons - 1) * DS.Space.s
-        return CGRect(x: viewport.width - PageChrome.edge - w, y: PageChrome.belowGizmo, width: w, height: 40)
+        let c = columns(viewport: viewport), r = (buttons + c - 1) / c
+        let w = CGFloat(c) * 40 + CGFloat(c - 1) * DS.Space.s
+        let h = CGFloat(r) * 40 + CGFloat(r - 1) * DS.Space.s
+        return CGRect(x: viewport.width - PageChrome.edge - w, y: PageChrome.belowGizmo, width: w, height: h)
     }
-    /// ★ S1b: the buttons per line (STUB in the tests-first commit: always one line).
-    static func columns(viewport: CGSize) -> Int { buttons }
+    /// ★ S1b: the buttons per line — four, unless four in a line would leave the "Lattice ready · Show" note less than
+    /// its `minWidth` beside them, clear of the left panel (the iPad mini portrait: 148 pt); then two over two.
+    static func columns(viewport: CGSize) -> Int {
+        let line = CGFloat(buttons) * 40 + CGFloat(buttons - 1) * DS.Space.s
+        let room = viewport.width - PageChrome.edge - line - DS.Space.s
+            - (FlexibleMainLegendLayout.leftStrip(viewport: viewport).maxX + DS.Space.s)
+        return room >= FlexibleMainNote.minWidth ? buttons : (buttons + 1) / 2
+    }
 }
 
 /// The main page's squish player: bottom-centre, above the bottom bar, clear of the view
