@@ -78,3 +78,26 @@
 #     LatticeTypeReadinessFromCoreTests (3/3): #354's f4652834 "Re-pin the readiness test to #358 at 36f5fdde" — gyroid is
 #       core's .notEither (CoreBuildIdentityTests.swift:142).
 #     #361 played no part in either (9d32b381 is core/flexible only).
+#
+# (7) S1b VERIFICATION — corrections to (1) and (3) (2026-10-09; each checked here, not taken on report):
+#   A3 IS A THROWN ERROR, NOT A REFUSAL. 9d32b381 raises it in run_flexible_job (core/src/flexible/run.cpp:569-585:
+#   refuse_shared_footprints → FlexibleError → JobError), BEFORE build_stack and before the M13 stage refusals: topopt-cli
+#   exits 1 with no receipt and no refusal_code; through the bridge (flexible_bridge.cpp, flexible_run_job) it is a
+#   BridgeError, and FlexRunInfo.refused stays false. Control, run here on this tree's core: his r5's held send plus
+#   face 1 loaded beside its own sector 1000104 → "presses 1000104 and 1 share surface (face region 1000104 and face
+#   region 1 overlap by 5000 mm2); a surface is pressed by one press: …", exit 1. The pre-sync core (e2652a41, the
+#   verifier's run) answered the same job "REFUSED (one_profile_per_stack)", exit 3. So "(1) … are refused by run_flexible_job" reads: are STOPPED by run_flexible_job with an error. Item 2 /
+#   AP's plain-words explanation of a shared surface must catch FlexibleCoreRun's ERROR path, not match a refusal code
+#   (raise it with #361 if a refusal code was meant).
+#   "Existing jobs are unaffected" does NOT follow from (3): the goldens compare job BYTES and never call run_flexible_job.
+#   Checked directly: topopt-cli built from this tree's core (907df081's core/, scratch build), every golden send run with
+#   $ROOT = s0_frozen/a1 — A1_0003 send 1 and his r5 held send ran (exit 0); A1_0002 send 1 and send 2 (the M2 stand) STOP
+#   with "face region 27 has no column at a 3.410559 mm pitch" (exit 1) — NOT A3, and older than this sync (the throw is
+#   faces.cpp:509 at e2652a41 and at 907df081; the scene golden already records region 27's error, frames_m2.txt:814;
+#   the verifier ran e2652a41's core: the same). FlexibleCoreHold still OFFERS those two sends. Out of S1b's scope —
+#   for the AP / Export owner: hold (or say in plain words) a loaded face whose stack core cannot build, or run every
+#   golden send through FlexibleCore.runJob and assert ran-or-refused-by-code.
+#   #358 MOVED ON after this sync: origin/claude/raster-receipt-fields is e8a01f7d, three past the merged 26a37f64
+#   (1397473a D5, 25c6a551 K2 slot origin as a grid phase, e8a01f7d K6 owner as a declared region id; pushed 2026-10-09
+#   03:22). The next merge-only sync takes them; K2/K6 touch core's owner and slot origin, so the goldens and the 16
+#   stage-job hashes are re-run then.
