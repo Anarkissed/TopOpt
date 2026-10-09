@@ -213,12 +213,14 @@ public struct FlexibleMainLegends: View {
                         .frame(width: p.frame.width, height: p.frame.height, alignment: .top)
                         .position(x: p.frame.midX, y: p.frame.midY)
                 }
-            }
-            // ★ S1b (round 6 item 3): the shown prisms' read-only mm tags, at their floors, clear of the card, the
-            // buttons and the player
-            if let m = main.model {
-                FlexibleMainPrismTagsLayer(main: main, model: m, project: m.project, view: main.viewFrame,
-                                           drilledIn: mode.drilledIn, bottomClearance: bottomClearance, chipColumnWidth: chipColumnWidth)
+                // ★ S1b (round 6 item 3): the shown prisms' read-only mm tags, at their floors, clear of the card, the
+                // buttons and the player — ★ S1b VERIFICATION: handed THIS frame (the chrome's, the safe area) so it keeps
+                // out of them where they are drawn
+                if let m = main.model {
+                    FlexibleMainPrismTagsLayer(main: main, model: m, project: m.project, view: main.viewFrame,
+                                               drilledIn: mode.drilledIn, bottomClearance: bottomClearance, chipColumnWidth: chipColumnWidth,
+                                               chrome: g.frame(in: .global))
+                }
             }
             callout
         }
@@ -453,40 +455,109 @@ struct FlexibleMainPrismTagsLayer: View {
     let drilledIn: Bool
     let bottomClearance: CGFloat
     let chipColumnWidth: CGFloat
+    /// ★ S1b VERIFICATION: the chrome's frame, GLOBAL — the safe area FlexibleMainLegends (and with it the buttons, the
+    /// card and the player) is laid out in. The layer itself ignores the safe area (its points are the MTKView's), so it
+    /// moves its keep-outs into its own space by this (24 pt down at the top on his 13" portrait, 20 pt up at the bottom).
+    var chrome: CGRect? = nil
 
     var body: some View {
-        let tags = Self.tags(main: main, project: project, view: view, drilledIn: drilledIn,
-                             bottomClearance: bottomClearance, chipColumnWidth: chipColumnWidth)
-        ZStack(alignment: .topLeading) {
-            ForEach(tags, id: \.region) { t in
-                Text(t.text).font(.system(size: 12, weight: .semibold)).monospacedDigit()
-                    .foregroundStyle(DS.Color.textPrimary.color)
-                    .padding(.horizontal, 10).padding(.vertical, 5)
-                    .background(Capsule().fill(DS.Surface.panel.color.opacity(0.85))
-                        .overlay(Capsule().strokeBorder(FlexibleStageStyle.facePrismKnob.color, lineWidth: 1)))
-                    .fixedSize()
-                    .position(t.point)
-                    .accessibilityLabel("Squish \(t.text)")
-                    .accessibilityIdentifier("flexible-main-prism-tag-\(t.region)")
+        GeometryReader { full in
+            let o = full.frame(in: .global).origin
+            let local = chrome.map { $0.offsetBy(dx: -o.x, dy: -o.y) }
+            let tags = Self.tags(main: main, project: project, view: view, drilledIn: drilledIn,
+                                 bottomClearance: bottomClearance, chipColumnWidth: chipColumnWidth, chrome: local)
+            ZStack(alignment: .topLeading) {
+                // ★ S1b VERIFICATION (his img3's red line): each tag's leader to its face, under the tags
+                ForEach(tags.filter { $0.leaderEnd != nil }, id: \.region) { t in FlexibleMainTagLeader(tag: t) }
+                ForEach(tags, id: \.region) { t in
+                    Text(t.text).font(.system(size: 12, weight: .semibold)).monospacedDigit()
+                        .foregroundStyle(DS.Color.textPrimary.color)
+                        .lineLimit(1).minimumScaleFactor(0.75)
+                        .padding(.horizontal, 6)
+                        .frame(width: FlexibleStageViewTags.mainSize.width, height: FlexibleStageViewTags.mainSize.height)
+                        .background(Capsule().fill(DS.Surface.panel.color.opacity(0.85))
+                            .overlay(Capsule().strokeBorder(FlexibleStageStyle.facePrismKnob.color, lineWidth: t.bright ? 2 : 1)))
+                        .position(t.point)
+                        .accessibilityLabel("Squish \(t.text)")
+                        .accessibilityIdentifier("flexible-main-prism-tag-\(t.region)")
+                }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .preference(key: FlexibleViewMarksKey.self, value: Self.marks(tags, chrome: local ?? CGRect(origin: .zero, size: full.size)))
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .ignoresSafeArea()
         .allowsHitTesting(false)
-        .preference(key: FlexibleViewMarksKey.self,
-                    value: Dictionary(tags.map { ("tag-\($0.region)", FlexibleStageViewTags.frame($0)) }) { a, _ in a })
     }
 
-    /// The tags on screen: H15's prisms', clear of every button, the legend card and the player.
+    /// What the layer drew, by name (the hosted tests read it): `tag-<r>` (its capsule), `leader-<r>` (the leader's run),
+    /// and `chrome` (the chrome's frame it kept out of, in its own space).
+    static func marks(_ tags: [FlexibleStageViewTags.Tag], chrome: CGRect) -> [String: CGRect] {
+        var out: [String: CGRect] = ["chrome": chrome]
+        for t in tags {
+            out["tag-\(t.region)"] = FlexibleStageViewTags.mainFrame(t.point)
+            if let e = t.leaderEnd {
+                out["leader-\(t.region)"] = CGRect(x: min(t.point.x, e.x), y: min(t.point.y, e.y),
+                                                   width: abs(e.x - t.point.x), height: abs(e.y - t.point.y))
+            }
+        }
+        return out
+    }
+
+    /// ★ S1b VERIFICATION: what the tags keep out of, in the layer's (the MTKView's) space: the main page's buttons, the
+    /// gizmo, the nav column, the bottom bar, the left panel strip, the chip column, the ONE card and the player — each
+    /// laid out in the chrome (`chrome`, the safe area; nil ⇒ the whole viewport) and moved to where it is drawn — and
+    /// the title and stage rows across the top (with the status bar over them).
+    static func keepOut(main: FlexibleMainStage, viewport v: CGSize, bottomClearance: CGFloat, chipColumnWidth: CGFloat,
+                        chrome: CGRect? = nil) -> [CGRect] {
+        let c = chrome ?? CGRect(origin: .zero, size: v)
+        var keep = FlexibleMainLegendLayout.keepOut(viewport: c.size, bottomClearance: bottomClearance, chipColumnWidth: chipColumnWidth)
+        if let card = main.legendCard(viewport: c.size, bottomClearance: bottomClearance, chipColumnWidth: chipColumnWidth) { keep.append(card.frame) }
+        if let player = FlexibleMainPlayerSlot.frame(main: main, viewport: c.size, bottomClearance: bottomClearance,
+                                                     chipColumnWidth: chipColumnWidth) { keep.append(player) }
+        keep = keep.map { $0.offsetBy(dx: c.minX, dy: c.minY) }
+        keep.append(CGRect(x: 0, y: 0, width: v.width, height: c.minY + PageChrome.stageModeChipTop))
+        return keep
+    }
+
+    /// The tags on screen: H15's prisms', clear of every button, the legend card and the player. `chrome`: the chrome's
+    /// frame in the layer's space (nil ⇒ the whole viewport).
     static func tags(main: FlexibleMainStage, project: ProjectModel, view: LatticeBandChipFrame?, drilledIn: Bool,
-                     bottomClearance: CGFloat, chipColumnWidth: CGFloat) -> [FlexibleStageViewTags.Tag] {
+                     bottomClearance: CGFloat, chipColumnWidth: CGFloat, chrome: CGRect? = nil) -> [FlexibleStageViewTags.Tag] {
         guard let view else { return [] }
         let v = view.viewportSize
-        var keep = FlexibleMainLegendLayout.keepOut(viewport: v, bottomClearance: bottomClearance, chipColumnWidth: chipColumnWidth)
-        if let card = main.legendCard(viewport: v, bottomClearance: bottomClearance, chipColumnWidth: chipColumnWidth) { keep.append(card.frame) }
-        if let player = FlexibleMainPlayerSlot.frame(main: main, viewport: v, bottomClearance: bottomClearance,
-                                                     chipColumnWidth: chipColumnWidth) { keep.append(player) }
-        return main.prismTags(project, on: .lattice, drilledIn: drilledIn, viewport: v, keepOut: keep, projector: { view.project($0) })
+        let keep = keepOut(main: main, viewport: v, bottomClearance: bottomClearance, chipColumnWidth: chipColumnWidth, chrome: chrome)
+        return main.prismTags(project, on: .lattice, drilledIn: drilledIn, viewport: v, keepOut: keep, projector: { view.project($0) },
+                              viewDirection: { view.viewDirection(at: $0) })
+    }
+}
+
+/// ★ S1b VERIFICATION (his img3's red line, on the main page): a tag's LEADER — from the tag along its prism's axis to the
+/// face it belongs to, with a dot where it meets the face. Drawn over the part with a dark halo, so it reads over the
+/// lattice where the faint prism cannot be seen; dashed, the dot hollow, when the face turns away (the hidden-line
+/// convention); stopped where the chrome begins.
+struct FlexibleMainTagLeader: View {
+    let tag: FlexibleStageViewTags.Tag
+    static let width: CGFloat = 2
+    static let halo: CGFloat = 4.5
+    static let dot: CGFloat = 9
+
+    var body: some View {
+        if let end = tag.leaderEnd {
+            let knob = FlexibleStageStyle.facePrismKnob.color
+            let line = Path { p in p.move(to: tag.point); p.addLine(to: end) }
+            ZStack(alignment: .topLeading) {
+                line.stroke(Color.black.opacity(0.6), style: StrokeStyle(lineWidth: Self.halo, lineCap: .round))
+                line.stroke(knob, style: StrokeStyle(lineWidth: Self.width, lineCap: .round,
+                                                     dash: tag.away ? FlexibleStageViewTags.hiddenDash : []))
+                if let f = tag.face, hypot(f.x - end.x, f.y - end.y) < 0.5 {
+                    Circle().fill(tag.away ? Color.black.opacity(0.6) : knob)
+                        .overlay(Circle().strokeBorder(tag.away ? knob : Color.black.opacity(0.6), lineWidth: 1.5))
+                        .frame(width: Self.dot, height: Self.dot)
+                        .position(f)
+                }
+            }
+            .accessibilityHidden(true)
+        }
     }
 }
 

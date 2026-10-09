@@ -754,11 +754,16 @@ final class FlexibleRound6HostedTests: XCTestCase {
         for t in all {
             XCTAssertEqual(t.text, String(format: "%.1f mm", try XCTUnwrap(m.settings.face(t.region)).deepestMM), "face \(t.region)")
         }
+        // ★ S1b VERIFICATION: the main page's tags are measured AS DRAWN (FlexibleStageViewTags.mainFrame — Settings' 84 × 44
+        // is a tap target and dropped a tag 18 pt clear of its neighbour)
         for (i, a) in all.enumerated() { for b in all[(i + 1)...] {
-            XCTAssertFalse(FlexibleStageViewTags.frame(a).intersects(FlexibleStageViewTags.frame(b)), "tags \(a.region) and \(b.region) never overlap")
+            XCTAssertFalse(FlexibleStageViewTags.mainFrame(a.point).intersects(FlexibleStageViewTags.mainFrame(b.point)), "tags \(a.region) and \(b.region) never overlap")
         } }
         if let first = all.first {
-            XCTAssertFalse(tags(keepOut: [FlexibleStageViewTags.frame(first)]).contains { $0.region == first.region }, "a tag under a keep-out hides")
+            // ★ S1b VERIFICATION: a floor under a keep-out slides along its prism's axis — never INTO the keep-out
+            let keep = FlexibleStageViewTags.mainFrame(first.point)
+            XCTAssertFalse(tags(keepOut: [keep]).contains { $0.region == first.region && FlexibleStageViewTags.mainFrame($0.point).intersects(keep) },
+                           "a tag never sits under a keep-out")
         }
         XCTAssertTrue(tags(true).isEmpty, "nothing while a legend reads")
         XCTAssertTrue(tags(on: .topology).isEmpty, "nothing off the Flexible stage")

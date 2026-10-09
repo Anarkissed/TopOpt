@@ -445,11 +445,11 @@ public final class FlexibleMainStage: ObservableObject {
         let key = "\(k)|\(m.views.rawValue)|\(active.map { "\($0.id)\($0.faces)\($0.regionIDs)" } ?? "-")|\(m.settings.hashValue)|"
             + "\(m.stacks.count)|\(m.geometry.count)|\(m.stampGrids.count)"
         if let c = volumesCache, c.key == key { return c.items }
-        var regions: [Int] = []
-        if m.views.contains(.prisms) {
-            regions = m.settings.loadedFaces.map(\.faceRegionID)
-        } else if let g = active {
-            // the group's faces (a region's members too) and its cut sectors; a face it LOADS is linked to it
+        let loaded = m.settings.loadedFaces.map(\.faceRegionID)
+        // the active group's pressed faces: its faces (a region's members too) and its cut sectors; a face it LOADS is
+        // linked to it
+        var picked = Set<Int>()
+        if let g = active {
             let part = project.viewerMesh, all = m.regions
             var faces = Set(g.faces.map { Int($0) }), sectors = Set<Int>()
             for id in g.regionIDs {
@@ -457,17 +457,24 @@ public final class FlexibleMainStage: ObservableObject {
                 if all.sectors.contains(where: { $0.id == id }) { sectors.insert(FlexibleRegions.wireID(reg)) }
                 else if let part { faces.formUnion(FaceRegionGeometry.members(of: reg, in: part).map { Int($0) }) }
             }
-            regions = m.settings.loadedFaces.map(\.faceRegionID).filter { r in
+            picked = Set(loaded.filter { r in
                 m.settings.face(r)?.weightFrom == g.id || sectors.contains(r)
                     || (!FlexibleRegions.isSector(r) && !faces.isDisjoint(with: all.faces(of: r, mesh: part)))
-            }
+            })
         }
+        // ★ S1b VERIFICATION (spec §2, the Prisms view: "every pressed face's prism, faint; the selected one brighter"):
+        // under [Prisms] every pressed face, the active group's brighter (Settings' own view-selected alphas); else the
+        // active group's own, faint
+        let prisms = m.views.contains(.prisms)
+        let regions = prisms ? loaded : loaded.filter { picked.contains($0) }
         let items: [ClearanceRenderItem] = regions.compactMap { r in
             guard let f = m.settings.face(r), let key = m.key(r), let st = m.stacks[key], let g = m.geometry[key],
                   let v = FlexibleDepthPrism.volume(region: r, stack: st, centres: g.centres, depthMM: f.deepestMM, k: k,
                                                     footprint: m.prismFootprint(r)) else { return nil }
-            return ClearanceRenderItem(volume: v, selected: false, tint: FlexibleStageStyle.facePrismTint,
-                                       faceAlpha: FlexibleDepthPrism.restFaceAlpha, edgeAlpha: FlexibleDepthPrism.restEdgeAlpha)
+            let bright = prisms && picked.contains(r)
+            return ClearanceRenderItem(volume: v, selected: bright, tint: FlexibleStageStyle.facePrismTint,
+                                       faceAlpha: bright ? FlexibleDepthPrism.viewSelectedFaceAlpha : FlexibleDepthPrism.restFaceAlpha,
+                                       edgeAlpha: bright ? FlexibleDepthPrism.viewSelectedEdgeAlpha : FlexibleDepthPrism.restEdgeAlpha)
         }
         volumesCache = (key, items)
         return items
@@ -487,16 +494,45 @@ public final class FlexibleMainStage: ObservableObject {
     /// number belongs, as on Settings — greedy against overlaps (the larger face first), none under a keep-out or off
     /// screen; [] wherever `volumes` is (off the Flexible stage, under a page, while a legend reads). Never a tap: the
     /// main page has no chip — the mm is changed in Settings.
+    /// ★ S1b VERIFICATION (the verifier, on his pad: in his Lattice view the faint prism cannot be seen, so a side face's
+    /// "24.5 mm" floated over the top face; on his 13" portrait [Prisms] showed 3 of 5 numbers, 1 of 4 on r5): each tag
+    /// carries its FACE and a LEADER to it (FlexibleMainTagLeader), and a floor hidden under a keep-out slides along its
+    /// prism's axis (then beside its face, if the leader reaches it) — FlexibleStageViewTags.placeMain; the active group's
+    /// tags first under [Prisms]. `viewDirection` marks a face that turns away (its leader dashed).
     func prismTags(_ project: ProjectModel, on stage: WorkspaceStage, drilledIn: Bool, viewport: CGSize, keepOut: [CGRect],
-                   projector: (SIMD3<Float>) -> CGPoint?) -> [FlexibleStageViewTags.Tag] {
+                   projector: (SIMD3<Float>) -> CGPoint?,
+                   viewDirection: ((SIMD3<Float>) -> SIMD3<Float>?)? = nil) -> [FlexibleStageViewTags.Tag] {
         guard let m = current(project, stage) else { return [] }
-        let cands: [(columns: Int, tag: FlexibleStageViewTags.Tag)] = volumes(project, on: stage, drilledIn: drilledIn).compactMap { item in
+        let cands: [FlexibleStageViewTags.MainCandidate] = volumes(project, on: stage, drilledIn: drilledIn).compactMap { item in
             let r = item.volume.faceID
-            guard let f = m.settings.face(r), let h = FlexibleDepthPrism.handle(item.volume), let p = projector(h.anchor) else { return nil }
+            guard let f = m.settings.face(r), let h = FlexibleDepthPrism.handle(item.volume) else { return nil }
+            // ★ S1b VERIFICATION: the prism's axis — its floor (the handle's anchor) to its face (the base centre)
+            let axis = h.planeOrigin - h.anchor
+            var along = Self.tagSteps.compactMap { projector(h.anchor + axis * Float($0)) }
+            let axisCount = along.count
+            // a floor hidden all along its axis (under the Selections panel, say): beside its face, while the face shows —
+            // the leader is then a short spoke to the face's dot
+            let face = projector(h.planeOrigin)
+            if let f = face { along += Self.besideFace.map { CGPoint(x: f.x + $0.x, y: f.y + $0.y) } }
+            guard !along.isEmpty else { return nil }
             let columns = m.key(r).flatMap { m.stacks[$0]?.columns.count } ?? 0
-            return (columns, FlexibleStageViewTags.Tag(region: r, text: String(format: "%.1f mm", f.deepestMM), point: p))
+            // the face turns away when the view ray meets its OUTWARD normal (the handle's normal points in)
+            let away = viewDirection.flatMap { $0(h.planeOrigin) }.map { simd_dot($0, -h.planeNormal) > FlexibleStageViewTags.awayDot } ?? false
+            return FlexibleStageViewTags.MainCandidate(region: r, columns: columns, bright: item.selected,
+                                                       text: String(format: "%.1f mm", f.deepestMM), along: along,
+                                                       axisCount: axisCount, face: face, away: away)
         }
-        return FlexibleStageViewTags.greedy(cands, keepOut: keepOut, viewport: viewport)
+        return FlexibleStageViewTags.placeMain(cands, keepOut: keepOut, viewport: viewport)
+    }
+    /// ★ S1b VERIFICATION: where along its prism's axis a tag may sit, in order — the floor (0), toward the face (1), on
+    /// out past it (to 2), then on in past the floor (to −3: a face under the Selections panel keeps its number, on its
+    /// axis, its leader running back to the panel's edge), every eighth.
+    static let tagSteps: [Double] = (0...16).map { Double($0) / 8 } + (1...24).map { -Double($0) / 8 }
+    /// …and, last, beside its face (pt from the face's point): right, left, below, above, then the diagonals, nearest first.
+    static let besideFace: [CGPoint] = [52.0, 80, 112].flatMap { r -> [CGPoint] in
+        let d = r * 0.7071
+        return [CGPoint(x: r, y: 0), CGPoint(x: -r, y: 0), CGPoint(x: 0, y: r * 0.6), CGPoint(x: 0, y: -r * 0.6),
+                CGPoint(x: d, y: d * 0.6), CGPoint(x: -d, y: d * 0.6), CGPoint(x: d, y: -d * 0.6), CGPoint(x: -d, y: -d * 0.6)]
     }
 
     /// ★ ROUND 6 (item 3): the main page's [Prisms] — the Prisms view, and the Lattice view (the X-ray) with it

@@ -24,10 +24,91 @@ enum FlexibleStageViewTags {
         let region: Int
         let text: String
         let point: CGPoint
+        /// ★ S1b VERIFICATION (the main page; his img3's red line): the FACE this number belongs to, on screen — where
+        /// its prism's axis meets the face (the prism's base centre). The tag's leader runs from the tag to it. nil on
+        /// Settings, where the prism itself joins them through the X-ray.
+        var face: CGPoint? = nil
+        /// Where the leader's visible run stops: the face, or where a keep-out begins. nil: no leader.
+        var leaderEnd: CGPoint? = nil
+        /// The face turns away from the camera: its leader dashed and its dot hollow (the hidden-line convention).
+        var away: Bool = false
+        /// Under [Prisms], a face of the active Selections group: its prism brighter, its tag placed first.
+        var bright: Bool = false
     }
 
     /// A tag's hit area (≥ 44 pt tall, as the chip's).
     static let size = CGSize(width: 84, height: 44)
+
+    /// ★ S1b VERIFICATION: the MAIN page's tag AS DRAWN — a fixed capsule ("24.5 mm" in 12 pt semibold digits is ≈ 51 pt
+    /// wide, in a 76 × 26 pt capsule), never a tap. The greedy pass reads it: Settings' 84 × 44 is a TAP target, and on the main
+    /// page it dropped r5's face 3 against a neighbour whose capsule sat 18 pt clear.
+    static let mainSize = CGSize(width: 76, height: 26)
+    /// The gap a main-page tag keeps from another tag and from every keep-out.
+    static let mainGap: CGFloat = 4
+    /// A main-page tag's frame (as drawn) centred on `p`.
+    static func mainFrame(_ p: CGPoint) -> CGRect {
+        CGRect(x: p.x - mainSize.width / 2, y: p.y - mainSize.height / 2, width: mainSize.width, height: mainSize.height)
+    }
+
+    /// ★ S1b VERIFICATION: one main-page candidate — where its tag may sit, in order (its prism's FLOOR first, where the
+    /// number belongs; then along the prism's axis toward its face; then on out past the face), and its face on screen.
+    struct MainCandidate {
+        let region: Int
+        let columns: Int
+        let bright: Bool
+        let text: String
+        let along: [CGPoint]
+        /// `along[..<axisCount]` lie on the prism's axis; the rest beside its face, where the tag is taken only if its
+        /// leader reaches the face.
+        var axisCount: Int
+        let face: CGPoint?
+        let away: Bool
+    }
+
+    /// ★ S1b VERIFICATION (the main page): the tags that show, of `cands`. The active group's first (under [Prisms]), then
+    /// the larger face, then the lower region; each at the first place along its prism's axis whose capsule is on screen,
+    /// clear of every keep-out and of the tags already placed (a floor under the Selections panel slides toward its face —
+    /// on the verifier's 13" portrait two of A1_0003's five floors were under it). The leader keeps the tag tied to its
+    /// face wherever it sits, so nothing points at the wrong face.
+    static func placeMain(_ cands: [MainCandidate], keepOut: [CGRect], viewport: CGSize) -> [Tag] {
+        let screen = CGRect(origin: .zero, size: viewport)
+        let blockers = keepOut.map { $0.insetBy(dx: -mainGap, dy: -mainGap) }
+        let order = cands.sorted { a, b in
+            if a.bright != b.bright { return a.bright }
+            if a.columns != b.columns { return a.columns > b.columns }
+            return a.region < b.region
+        }
+        var out: [Tag] = []
+        for c in order {
+            for (i, p) in c.along.enumerated() {
+                let fr = mainFrame(p)
+                guard screen.contains(fr), !blockers.contains(where: { $0.intersects(fr) }),
+                      !out.contains(where: { mainFrame($0.point).insetBy(dx: -mainGap, dy: -mainGap).intersects(fr) }) else { continue }
+                let end = c.face.flatMap { leaderRun(from: p, to: $0, keepOut: keepOut, viewport: viewport) }
+                // off the axis, only where the leader reaches the face's dot (else nothing ties it to its face)
+                if i >= c.axisCount {
+                    guard let e = end, let f = c.face, hypot(e.x - f.x, e.y - f.y) < 0.5 else { continue }
+                }
+                out.append(Tag(region: c.region, text: c.text, point: p, face: c.face, leaderEnd: end, away: c.away, bright: c.bright))
+                break
+            }
+        }
+        return out
+    }
+
+    /// The leader's visible run from a tag at `p` toward its face `f`: to the face, or to where it first enters a keep-out
+    /// (it is never drawn over the chrome) or leaves the screen; nil when none of it shows outside the tag's capsule.
+    static func leaderRun(from p: CGPoint, to f: CGPoint, keepOut: [CGRect], viewport: CGSize) -> CGPoint? {
+        let screen = CGRect(origin: .zero, size: viewport)
+        let n = max(1, Int((hypot(f.x - p.x, f.y - p.y) / 2).rounded(.up)))
+        var last = p
+        for i in 1...n {
+            let q = i == n ? f : CGPoint(x: p.x + (f.x - p.x) * CGFloat(i) / CGFloat(n), y: p.y + (f.y - p.y) * CGFloat(i) / CGFloat(n))
+            if !screen.contains(q) || keepOut.contains(where: { $0.contains(q) }) { break }
+            last = q
+        }
+        return mainFrame(p).insetBy(dx: -1, dy: -1).contains(last) ? nil : last
+    }
 
     /// The Prisms view's tags on screen: every pressed face but the selected one (its chip), greedy against
     /// overlaps (the larger face first), none under a keep-out or off screen.
@@ -41,7 +122,8 @@ enum FlexibleStageViewTags {
     }
 
     /// The tags that show, of `cands`: greedy against overlaps (the larger face — more columns — first, then the lower
-    /// region), none under a keep-out or off screen. ★ S1b: one rule for both pages (the main page's tags too).
+    /// region), none under a keep-out or off screen. Settings' tags (★ S1b VERIFICATION: the main page's read-only tags
+    /// are placed by `placeMain` — measured as drawn, slid along the prism's axis, joined to the face by a leader).
     static func greedy(_ cands: [(columns: Int, tag: Tag)], keepOut: [CGRect], viewport: CGSize) -> [Tag] {
         var out: [Tag] = []
         for c in cands.sorted(by: { $0.columns != $1.columns ? $0.columns > $1.columns : $0.tag.region < $1.tag.region }) {
