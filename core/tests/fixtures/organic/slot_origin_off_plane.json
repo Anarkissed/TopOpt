@@ -1,5 +1,5 @@
 {
- "_comment": "R1: a slot origin 2 mm along the region normal is not an in-plane anchor shift -- it would move the plane the prism's depth is measured from. Must be REFUSED, naming the region.",
+ "_comment": "K2 (reviewer, 2026-10-08): a slot origin OFF the face plane is a grid PHASE, not an error -- a tilted facet's grid is world-aligned, so the point the app packed from stands off the plane. Depth is measured from the region's own plane instead, so these cells (y 0..3 and 0..1.5 of a 12 mm prism) are INSIDE. Measured from the slot origin, as core did before K2, their centres project to -1.5 and -2.25 and the plan was refused. ACCEPTED.",
  "bake_build_orientation": "off",
  "grading": {
   "algorithm": "doubled",
@@ -31,7 +31,7 @@
      ],
      "slot_origin_mm": [
       18.4,
-      2.0,
+      3.0,
       8.4
      ]
     },

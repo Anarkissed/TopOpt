@@ -374,6 +374,26 @@ Tested against the UNIT normal, for the reason recorded for `frame_u`: the raw t
 `|d·n| < eps` accepts `|d·n̂| < eps/|n|`, so a SHORT normal is the loose and dangerous
 case, not a long one.
 
+### ★ CORRECTED 2026-10-09 (K2): the slot origin is a grid PHASE, not a plane point
+
+The row above requiring `slot_origin_mm` to lie in the face plane is **withdrawn**. The
+reviewer corrected the ruling it implemented (2026-10-05 -> 2026-10-08): the requirement is
+wrong for a **tilted facet**, whose grid in the app is world-aligned, so the point the app
+packed from legitimately stands off the plane. Forcing it on would make the app re-anchor
+tilted ladders, which changes the preview the maintainer approved. #354 measured the cost of
+the old rule: on 102117B9, 22 of the 23 regions with cells are tilted, and on 68BF7B74 face
+23's three facets stand 13.26, 0.58 and 0.10 mm off their planes — all parse refusals.
+
+| what | was (b6e011d5) | is (K2) | app impact |
+|---|---|---|---|
+| a `slot_origin_mm` with a component along the region normal | **REFUSED at parse**, naming the region and the distance | **accepted** — it is the grid phase | **the refusal is gone.** Tilted facets can send the grid they packed on |
+| what DEPTH is measured from | the slot origin, so moving the phase along the normal silently moved the prism | the region's own plane (`SteppedPlanRegion::plane_origin`) | **intended, and it is the property that makes the split safe:** the phase sets alignment, overlap and grouping; it cannot shift the prism |
+
+Measured on the rebuilt fixture: with the slot origin one base cell inward, cells at y 0..3
+and 0..1.5 of a 12 mm prism are inside when measured from the plane, and project to centres
+of **-1.5 and -2.25** when measured from the slot origin — which is why core refused them
+before K2. One fixture distinguishes the two readings.
+
 Note for the R6 work that follows: with the slot origin on the wire, the stricter
 base-cell alignment R6 asks for can land without refusing the app's current plans — which
 is why this key goes in first.
@@ -460,6 +480,31 @@ Also recorded, because two of my own assumptions were wrong about it: the diamet
 **clamped above rho 0.60**, the measured table's last row, so a cap anywhere from 0.60 to the
 band top 0.899880 is **completely inert**. Monotonicity in the cap is therefore non-strict,
 and the flat top is pinned by its own check so a future row reports itself.
+
+## MEANING CHANGES, addendum 10 (2026-10-09) — D5: the density that came with the cell
+
+From #354's printability brief (D5) and the reviewer's ruling of 2026-10-08.
+
+| what | was | is | app impact |
+|---|---|---|---|
+| a plan cell's own `rho` | checked against NOTHING in the validator — it never read `cell.rho`; the schema admits any (0, 1] | the strut it builds at **its own size** must clear the bead, or the cell is refused by name with the number | **a plan pairing a size with too light a density is refused.** Measured: rho 0.10 at a 3 mm cell builds a 0.4002 mm strut against a 0.45 mm bead |
+| a plan cell's `rho` above the job's `max_relative_density` | accepted, then clamped downstream | **REFUSED**, quoting the cap | **intended.** The density sizes the strut, so clamping silently prints a cell lighter than the plan asked for |
+| the plan's BASE cell | no floor at all — "the base is always on its own menu" | subject to the same tile floor and bead as every other size | **a region whose base is below the floor is refused, and the refusal NAMES the base and the floor** rather than reporting an empty menu and leaving the cause to be inferred |
+| the doubled tile floor | `stepped_min_tile_mm`, or else **the bead** — and a doubled job cannot carry that key at all, so it was just over the bead (0.45 mm) | `max(lattice_min_printable_cell_mm(topo, w, cap), stated)` — **2.25 mm at the job's cap** | **a capped job's plan is held to the real floor.** Uncapped jobs get 1.173 mm, so all eight of the brief's existing jobs are unaffected |
+| a cell that sends no `rho` | unaffected | unaffected — not judged on a density it did not send | **none** (every job before ruling C) |
+
+NOT SHIPPED, and not from indecision: "apply to a doubled plan the same bound the app applies
+to Default Grade". `prints_open` still hangs on `intent == "aesthetic"`, which a doubled job
+never carries. I searched the app for that bound (`printsOpen`, `minTile`, `ladderSizes`,
+`stepped_size_menu`, the 0.20 ratio) and found nothing, so I have asked rather than guess a
+design rule. Under the standing rule the app's design is the source of truth, and this is the
+app's.
+
+One existing fixture's DATA changed, not its assertions: `test_group_keeps_each_cells_own_rho`
+paired 3 mm cells with rho from 0.10, which the new check correctly refuses (0.4002 mm strut,
+0.45 mm bead). Those values were chosen to be DISTINGUISHABLE — each a function of the cell's
+position, so a mispairing cannot look right — and that property is untouched at 0.20..0.21,
+which also print (0.5694 mm). The measurement is recorded at the fixture.
 
 ### The fingerprint defect, for the record
 

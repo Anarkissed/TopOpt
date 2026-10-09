@@ -68,7 +68,13 @@ std::vector<double> stepped_size_menu(LatticeTopology topo, double base_cell_mm,
                                       SteppedMenu which) {
   std::vector<double> menu;
   if (!(base_cell_mm > 0.0) || !std::isfinite(base_cell_mm)) return menu;
-  menu.push_back(base_cell_mm);          // the base is always on its own menu
+  // ★ D5: THE BASE GETS THE SAME FLOOR AS EVERY OTHER TILE. This was unconditional --
+  // "the base is always on its own menu" -- so a base cell below the job's own tile floor,
+  // or narrower than the bead it must print, was admitted while every division of it was
+  // refused. A base cell is a whole slot and has to print like any other.
+  if (min_tile_mm > 0.0 && base_cell_mm < min_tile_mm) return menu;   // empty: nothing legal
+  if (base_cell_mm <= bead_mm) return menu;   // the bead does not fit in the cell at all
+  menu.push_back(base_cell_mm);
   // ★ RULING A: under Halves a rung contributes ONLY its own size. Any-step's k*(S/n)
   // is what lets a 9 sit beside an 8; the dyadic ladder has no such sizes, and adding
   // them here would quietly make "doubled" accept an any-step plan.
@@ -118,7 +124,8 @@ SteppedPlanCheck stepped_validate_plan(LatticeTopology topo,
                                        const std::vector<SteppedPlanRegion>& regions,
                                        double bead_mm, double min_tile_mm,
                                        bool apply_prints_open, SteppedMenu menu,
-                                       const std::vector<ClearanceGeometry>* includes) {
+                                       const std::vector<ClearanceGeometry>* includes,
+                                       double max_relative_density) {
   SteppedPlanCheck out;
   out.cells = cells.size();
   out.regions = regions.size();
@@ -214,6 +221,19 @@ SteppedPlanCheck stepped_validate_plan(LatticeTopology topo,
     const SteppedPlanRegion& reg = *it->second;
     const std::vector<double>& menu = menu_of[cell.region_id];
 
+    // ★ D5: AN UNDER-FLOOR BASE IS NAMED, not implied by an empty menu. With the base
+    // now subject to the floor, a region whose base is below it has NO legal size at all,
+    // and "not on that region's menu ... admits 0 size(s)" would describe the symptom
+    // rather than the cause.
+    if (menu.empty()) {
+      std::snprintf(msg, sizeof msg,
+                    "stepped cell %zu names region %d, whose base cell is %.4g mm -- below "
+                    "the tile floor %.4g mm (or no wider than the %.4g mm bead), so NO size "
+                    "is legal in that region and the plan cannot be built there",
+                    c, cell.region_id, reg.base_cell_mm, min_tile_mm, bead_mm);
+      out.error = msg;
+      return out;
+    }
     bool on_menu = false;
     for (double s : menu)
       if (std::fabs(s - cell.size_mm) <= kSteppedMenuSameRel * std::max(1.0, s)) on_menu = true;
@@ -229,6 +249,40 @@ SteppedPlanCheck stepped_validate_plan(LatticeTopology topo,
       return out;
     }
 
+    // ── ★ D5: THE DENSITY THAT CAME WITH THE CELL IS CHECKED, at its OWN size ────
+    // `cell.rho` sizes the strut (ruling C) and was checked against nothing here: the
+    // schema admits (0, 1] and the validator never read it. Two ways that ships a part
+    // core could have refused -- a strut under the bead, and a density over the cap the
+    // job states -- so both are refused by name, with the number.
+    if (cell.rho > 0.0) {
+      if (max_relative_density > 0.0 && std::isfinite(max_relative_density) &&
+          cell.rho > max_relative_density * (1.0 + kSteppedMenuSameRel)) {
+        std::snprintf(msg, sizeof msg,
+                      "stepped cell %zu in region %d states a density of %.6g, over this "
+                      "job's \"max_relative_density\" of %.6g. Refused rather than clamped: "
+                      "the density sizes the strut, so clamping it silently prints a cell "
+                      "lighter than the plan asked for",
+                      c, cell.region_id, cell.rho, max_relative_density);
+        out.error = msg;
+        return out;
+      }
+      double dia = 0.0;
+      try {
+        dia = lattice_strut_diameter_mm(topo, cell.rho, cell.size_mm);
+      } catch (const std::exception&) {
+        dia = 0.0;                       // no measured law at that density: treated as unprintable
+      }
+      if (!(dia >= bead_mm * (1.0 - kSteppedMenuSameRel))) {
+        std::snprintf(msg, sizeof msg,
+                      "stepped cell %zu in region %d is %.4g mm at a density of %.6g, which "
+                      "builds a %.4g mm strut -- under the %.4g mm bead. The strut is sized "
+                      "from the density the cell carries, so this cell cannot be printed at "
+                      "the size and density the plan pairs",
+                      c, cell.region_id, cell.size_mm, cell.rho, dia, bead_mm);
+        out.error = msg;
+        return out;
+      }
+    }
     const double ox = cell.origin.x - reg.slot_origin.x;
     const double oy = cell.origin.y - reg.slot_origin.y;
     const double oz = cell.origin.z - reg.slot_origin.z;
@@ -290,7 +344,14 @@ SteppedPlanCheck stepped_validate_plan(LatticeTopology topo,
                                   reg.normal.z * reg.normal.z);
       if (nl > 0.0) {
         const double nx = reg.normal.x / nl, ny = reg.normal.y / nl, nz = reg.normal.z / nl;
-        const double s0 = ox * nx + oy * ny + oz * nz;
+        // ★ K2: DEPTH IS MEASURED FROM THE REGION'S OWN PLANE, not from the grid phase.
+        // `ox/oy/oz` above are the offset from the slot origin, which is what alignment
+        // and grouping want; projecting THOSE onto the normal made the prism move with the
+        // phase, so a tilted facet's world-aligned grid shifted its own depth window.
+        const Vec3& pl = reg.plane_origin_stated ? reg.plane_origin : reg.slot_origin;
+        const double px = cell.origin.x - pl.x, py = cell.origin.y - pl.y,
+                     pz = cell.origin.z - pl.z;
+        const double s0 = px * nx + py * ny + pz * nz;
         // ★ PROJECT THE CUBE, NOT ONE CORNER (R2, #354's core brief 2026-10-02).
         // `origin` is the cell's MINIMUM corner, so s0 + size is the cell's far face
         // only when the normal points the way that makes the minimum corner the NEAR
@@ -529,10 +590,19 @@ int stepped_region_owner(const Vec3& p, const std::vector<ClearanceGeometry>& in
       const Vec3& o = includes[i].origin;
       d = std::fabs(((p.x - o.x) * n.x + (p.y - o.y) * n.y + (p.z - o.z) * n.z) / ln);
     }
-    // STRICT improvement only, and `includes` is walked in ascending id order, so an
-    // exact tie keeps the LOWER id without needing a second comparison.
-    if (owner == 0 || d < best) {
-      owner = static_cast<int>(i) + 1;
+    // ★ K6: the DECLARED id where the caller numbered them, because the built vector is
+    // compacted by the invalid-include skip and a position is then not an id. 0 means
+    // unnumbered, and the positional answer stands.
+    const int id = includes[i].declared_region_id > 0
+                       ? includes[i].declared_region_id
+                       : static_cast<int>(i) + 1;
+    // ★ AND THE TIE-BREAK IS ON THAT ID, not on the position. An earlier cut relied on
+    // `includes` being walked in ascending id order and kept the FIRST on a tie -- which
+    // was the same thing until ids stopped being positions. It is no longer: a caller may
+    // hand the list in any order, and the app computes "the lower region id" from its own
+    // numbering. A test with the ids out of order caught this.
+    if (owner == 0 || d < best || (d == best && id < owner)) {
+      owner = id;
       best = d;
     }
   }

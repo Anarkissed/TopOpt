@@ -93,16 +93,28 @@ int main() {
   CHECK(has(ab_text, "0.4"),
         "which reports the offset from the grid core used (0.4 mm, the base cell's)");
 
-  // ── stated, but out of the face plane: refused, and it says which region ────
+  // ── ★ K2: STATED OFF THE FACE PLANE IS A PHASE, NOT AN ERROR ────────────────
+  // This block asserted a REFUSAL until 2026-10-09. The reviewer corrected the ruling it
+  // came from (2026-10-05 -> 2026-10-08): requiring the slot origin to lie in the face
+  // plane is wrong for a TILTED facet, whose grid in the app is world-aligned, so the
+  // point it packed from legitimately stands off the plane. Forcing it on would make the
+  // app re-anchor tilted ladders and change the preview the maintainer approved.
+  //
+  // What must hold instead is the property that makes the two jobs separable: the slot
+  // origin sets the PHASE and cannot move the PRISM. The fixture's origin stands one base
+  // cell inward along the normal, and its cells sit at y 0..3 and 0..1.5 of a 12 mm prism
+  // -- inside, measured from the region's own plane. Measured from the slot origin, as
+  // core did before K2, their centres project to -1.5 and -2.25 and the plan was refused.
+  // So this one case distinguishes the two readings on its own.
   std::string off_text;
   const int off_rc = run_job("slot_origin_off_plane", off_text);
-  CHECK(off_rc != 0, "a slot origin off the face plane is REFUSED, not projected onto it");
-  CHECK(has(off_text, "slot_origin_mm"), "the refusal names the key it is refusing");
-  CHECK(has(off_text, "face plane"), "and says what is wrong with it");
-  CHECK(has(off_text, "region"),
-        "and names the region, so a plan with many walls says which one");
-  // The distance is the number to act on -- the fixture states it 2 mm out.
-  CHECK(has(off_text, "2"), "and reports how far along the normal it stands");
+  CHECK(off_rc == 0,
+        "K2: a slot origin off the face plane is a grid PHASE and is accepted");
+  CHECK(off_text.find("face plane") == std::string::npos,
+        "K2: and nothing refuses it for leaving the plane");
+  CHECK(off_text.find("outside its") == std::string::npos,
+        "K2: nor for leaving the prism -- depth is measured from the region's own plane, "
+        "so moving the phase along the normal cannot shift the prism");
 
   std::printf("%s: %d checks, %d failures\n", g_failures == 0 ? "PASS" : "FAIL", g_checks,
               g_failures);
