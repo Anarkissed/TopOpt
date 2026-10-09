@@ -1,0 +1,20 @@
+# 3418E167 stepped (converted to Aesthetic Stepped)
+
+Frozen CLI core 30982e5284b2 (#358 at 36f5fdde).
+
+converted plan-341: (algorithm, stage) ('stepped', 'structural') -> ('stepped', 'aesthetic'), gradeStepStyle 'stepped'
+DG-PROJECT M2 verticalStand THICK (converted: Aesthetic Stepped) algorithm stepped stage Optional(TopOptFlows.LatticeStageMode.aesthetic) step-halves false density sim cells auto
+DG-PLAN stepped: 2902 cell(s) over 2 region(s) | 6.00=237 4.67=683 3.50=387 3.00=1595
+DG-PLAN per region: r1=1070 r2=1832
+DG-SLOT-ORIGINS 2 region(s) carry slot_origin_mm
+DG-JOBS /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-stage-frontend-37bee1/scratch/evidence/plans/3418E167-8524-4831-A809-827B6B0742D0/stepped model model.step
+
+## job_noplan: exit 0 verdict: ACCEPTED
+
+## job_plan: exit 1
+> topopt-cli: lattice "stepped_cells": stepped cell 0 in region 1 is 3.5 mm, which is not on that region's menu (base 8.756 mm at a 0.45 mm bead admits 4 size(s), largest 8.756, finest 2.919). Core validates the plan and does not repack it -- the run lays down the arrangement the preview showed, or it stops here.
+
+## job_plan_spans: exit 1
+> topopt-cli: lattice "stepped_cells": stepped cell 0 in region 1 is 3.5 mm, which is not on that region's menu (base 8.756 mm at a 0.45 mm bead admits 4 size(s), largest 8.756, finest 2.919). Core validates the plan and does not repack it -- the run lays down the arrangement the preview showed, or it stops here.
+
+model model.step sha256 bbc4260cb33c4d67 (not committed)

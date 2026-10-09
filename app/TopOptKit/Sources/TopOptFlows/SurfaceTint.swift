@@ -298,6 +298,35 @@ public enum SurfaceTint {
         }
     }
 
+    /// ★★ A SELECTED UNION OF PIECES, LIT PIECE BY PIECE (2026-10-08). A union's tint lit every face
+    /// it touches WHOLE — right for a union of whole faces, wrong for one made of pieces: a pattern's
+    /// cell on a union (the Regions task) holds only its share of each part, and lit whole it would
+    /// read as the entire union. So a selected union whose leaves include cut pieces is lit the way
+    /// the Union tool lights its picks — whole leaves as picked faces, cut leaves by the shader's
+    /// half-space chains. nil = nothing to test per piece (no union, or every leaf a whole face).
+    /// The shader takes four chains of four planes (`MeshRenderer.setCutPlane`, the Union tool's own
+    /// limit): a fifth piece and beyond is UNDER-lit (reads as unselected); a piece with more than
+    /// four cuts is tested on its first four only, so it can spill past its own edge (OVER-lit).
+    public struct UnionLighting: Equatable, Sendable {
+        public var picked: Set<FaceID>
+        public var fragmentTested: Set<FaceID>
+        public var chains: [[SIMD4<Float>]]
+    }
+    public static func unionLighting(_ selected: RegionID?, regions: FaceRegionModel,
+                                     mesh: ViewerMesh) -> UnionLighting? {
+        guard let id = selected, let r = regions.region(id), r.isUnionOfParts else { return nil }
+        var u = SurfaceUnion()
+        for leaf in regions.resolvedLeaves(id) { u.toggle(leaf) }
+        let partial = u.partialPicks(regions: regions)
+        guard !partial.isEmpty else { return nil }
+        let partialFaces: Set<FaceID> = Set(partial.flatMap { pid in
+            regions.region(pid).map { FaceRegionGeometry.members(of: $0, in: mesh) } ?? []
+        })
+        return UnionLighting(picked: u.wholeFacePicks(regions: regions, mesh: mesh),
+                             fragmentTested: partialFaces,
+                             chains: pickChains(partial, in: regions))
+    }
+
     /// The plane the fragment stage tests, as (normal.xyz, -dot(normal, point)) —
     /// the selected region's OWN last cut. Nil when nothing is cut, and the shader
     /// then draws exactly as it did before this existed.

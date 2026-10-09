@@ -313,19 +313,21 @@ public struct FaceRegionSheet: View {
                         }
                         .buttonStyle(.plain)
                     }
-                    Button {
-                        let members = FaceRegionGeometry.members(of: region, in: mesh)
-                        let back = model.dissolve(region.id, resolvedMembers: members)
-                        selection.removeRegions([region.id])
-                        if let g = selection.activeGroupID { selection.addFaces(back, to: g) }
-                        selected = nil
-                        refresh()
-                        onChange()
-                    } label: {
-                        Text("Dissolve").dsStyle(DS.TypeScale.caption)
-                            .foregroundStyle(DS.Color.textSecondary.color)
+                    // ★★ ONE DISSOLVE (2026-10-08): the faces go back to the group they came from,
+                    // a union's parts come back, nothing is left dangling — `SurfaceDissolve`. A cut
+                    // piece is taken back with Undo split, so it is not offered here.
+                    if SurfaceDissolve.refusal(region.id, regions: model) == nil {
+                        Button {
+                            SurfaceDissolve.apply(region.id, regions: &model, selection: &selection, mesh: mesh)
+                            selected = nil
+                            refresh()
+                            onChange()
+                        } label: {
+                            Text("Dissolve").dsStyle(DS.TypeScale.caption)
+                                .foregroundStyle(DS.Color.textSecondary.color)
+                        }
+                        .buttonStyle(.plain)
                     }
-                    .buttonStyle(.plain)
                     Spacer()
                 }
             }

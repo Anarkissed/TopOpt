@@ -89,7 +89,8 @@ final class LatticeDrawerCellIsTheBakesTests: XCTestCase {
                       "the drawer reads the stepped bake's own inputs (p50, the quilt step)")
         let ws = try src("WorkspacePlaceholder.swift")
         XCTAssertTrue(ws.contains("let baked = LatticeRegionCells.selectableCells(project: project, scene: strutScene)"))
-        XCTAssertTrue(ws.contains("memberWidthMM: bakedCopy[i]?.measuredWidthMM,\n                    cellMM: bakedCopy[i]?.cellMM)"))
+        // (+ the job's cap since the E1 merge, 2026-10-08: the card's floors are the run's)
+        XCTAssertTrue(ws.contains("memberWidthMM: bakedCopy[i]?.measuredWidthMM,\n                    cellMM: bakedCopy[i]?.cellMM,\n                    maxRelativeDensity: capCopy)"))
         XCTAssertTrue(ws.contains("if isLastStage, Self.perRegionCellAlgorithms.contains(project.lattice.algorithm) {\n                    refreshLatticeFaceCards()"),
                       "★ the cards are re-derived when the bake lands")
     }

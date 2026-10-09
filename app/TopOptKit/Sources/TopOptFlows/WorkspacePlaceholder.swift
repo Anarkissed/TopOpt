@@ -289,6 +289,8 @@ public struct WorkspacePlaceholder: View {
     /// tap. Looked up later it becomes "the deepest region on this face", which
     /// after a cut is one particular half and not necessarily the one you touched.
     @State private var surfacePatternPiece: RegionID?
+    /// ★★ The Region tool's aim (2026-10-08): the region its verbs act on; nil until a region is tapped.
+    @State private var surfaceRegionAim: RegionID?
     /// ★ THE UNION TOOL ACCUMULATES *REGIONS*, NOT FACES.
     ///
     /// ★ THIS IS WHY MULTI-SELECT COULD NOT REACH TWO. The two halves of a cut face
@@ -780,7 +782,7 @@ public struct WorkspacePlaceholder: View {
                               ? SurfaceTint.pickChains(
                                   surfaceUnion.partialPicks(regions: project.faceRegions),
                                   in: project.faceRegions)
-                              : [],
+                              : (visible.surfaceEditing ? surfaceSelectedUnionLighting?.chains ?? [] : []),
                           xray: surfaceXrayOn,
                           settleRotation: settleQuat,           // D2: settle onto the floor
                           settleAnimated: !reduceMotion && !flexibleMain.owns(project, stage),   // Flexible H4: a map-mesh swap snaps, never spins
@@ -843,8 +845,14 @@ public struct WorkspacePlaceholder: View {
                               } : nil,
                           // ★ The bake's plan → the project, for the run (2026-09-18).
                           onLatticeCellsBaked: { cells, regions in
-                              project.latticePreviewSteppedCells =
-                                  LatticeSteppedCellWire.wire(cells, regions: regions)
+                              let wire = LatticeSteppedCellWire.wire(cells, regions: regions)
+                              project.latticePreviewSteppedCells = wire
+                              if case .failure(let why) = LatticeSteppedCellWire.slotOrigins(
+                                  wire, regions: regions, slotOriginWired: TopOptKit.regionSlotOriginWired) {
+                                  project.latticePreviewPlanWithheld = why
+                              } else {
+                                  project.latticePreviewPlanWithheld = nil
+                              }
                           },
                           // ★ §1(b) — DOUBLE TAP = THE ONES LIKE IT.
                           //
@@ -3539,6 +3547,8 @@ public struct WorkspacePlaceholder: View {
         // run); each says why in the stage's words (`project.variantLatticeJobRefusal()`).
         guard LatticeJobIncludeGate.refusal(latticeEnabled: project.lattice.enabled,
                                             regions: emission.regions) == nil else { return nil }
+        // ★★ Structural Stepped (2026-10-08): no document either — the run is blocked, not substituted
+        guard LatticeStructuralSteppedGate.refusal(project.lattice) == nil else { return nil }
         // ★★ THE STAGE'S OWN SPEC (ruling b, 2026-09-30): the SAME builder the optimize request
         // uses (`ProjectModel.latticeRunSpec`) — Auto resolved from these walls and the strut
         // bead exactly as the stage resolves it, the strut width, the preview's placed cells.
@@ -3581,7 +3591,8 @@ public struct WorkspacePlaceholder: View {
         let e = project.variantLatticeJobRegions()
         var pass = LatticeVariantJobPass(
             facesWithoutShape: e.skippedFaces, regionsWithoutShape: e.skippedRegionNames,
-            refusal: LatticeJobIncludeGate.refusal(latticeEnabled: project.lattice.enabled, regions: e.regions))
+            refusal: LatticeJobIncludeGate.refusal(latticeEnabled: project.lattice.enabled, regions: e.regions)
+                ?? LatticeStructuralSteppedGate.refusal(project.lattice))
         guard pass.refusal == nil, showLatticePage, compute.activeRemote != nil,
               latticeVariantContext?.artifacts != nil, let job = relatticeJobJSON(emission: e) else { return pass }
         pass.coreRefusal = job.coreRefusal
@@ -5636,6 +5647,7 @@ public struct WorkspacePlaceholder: View {
         surfaceUnion.clear()
         surfacePatternFace = nil
         surfacePatternPiece = nil
+        surfaceRegionAim = nil
         similar.clear()
         surfaceCarried = []
         surfaceRefusal = nil
@@ -6901,6 +6913,13 @@ public struct WorkspacePlaceholder: View {
     /// map cannot tell them apart no matter what colour it holds.
     private var surfaceVertexTints: [Float] {
         guard let mesh = viewerMesh else { return [] }
+        // ★★ a selected union of pieces lights piece by piece (2026-10-08) — `SurfaceTint.unionLighting`
+        if surfaceTool != .union, let ul = surfaceSelectedUnionLighting {
+            return SurfaceTint.buffer(mesh: mesh, groupedFaces: surfaceGroupedFaces,
+                                      regions: project.faceRegions, selected: nil,
+                                      picked: ul.picked, fragmentTested: ul.fragmentTested,
+                                      groupColours: surfaceGroupHues)
+        }
         return SurfaceTint.buffer(mesh: mesh, groupedFaces: surfaceGroupedFaces,
                                   regions: project.faceRegions,
                                   selected: surfaceSelected,
@@ -6989,6 +7008,12 @@ public struct WorkspacePlaceholder: View {
 
     /// The faces the single-plane cut test applies to: the selected region's own,
     /// and only when it IS a cut (a whole region has no plane to test).
+    /// The selected union's piece-by-piece lighting, when it has cut pieces (`SurfaceTint.unionLighting`).
+    private var surfaceSelectedUnionLighting: SurfaceTint.UnionLighting? {
+        guard let mesh = viewerMesh else { return nil }
+        return SurfaceTint.unionLighting(surfaceSelected, regions: project.faceRegions, mesh: mesh)
+    }
+
     private var surfaceSelectedTestedFaces: Set<FaceID> {
         guard let id = surfaceSelected,
               project.faceRegions.region(id)?.isCut == true else { return [] }
@@ -7224,6 +7249,22 @@ public struct WorkspacePlaceholder: View {
         case .pattern:
             surfacePatternFace = faceID
             surfacePatternPiece = surfaceSelected
+
+        case .region:
+            // ★★ THE REGION TOOL (2026-10-08). The first tap aims at the region under the finger (up
+            // through any union, as a selection does); once aimed, a tap adds the face to it or drops
+            // it — the Topology page's add/drop rule (§2c) — or says why it cannot. ✕ releases the aim.
+            // It never makes a region: a face with none says so.
+            if let aim = surfaceRegionAim, project.faceRegions.region(aim) != nil {
+                surfaceRefusal = project.surfaceRegionToggleFace(aim, face: faceID)
+            } else if let hit = surfaceSelected {
+                surfaceRegionAim = hit
+            } else {
+                surfaceRefusal = "No region here yet — Cut, Union or Pattern make one."
+            }
+            // the aim is what lights
+            surfaceSelected = surfaceRegionAim
+            surfaceSelectedFace = nil
         }
     }
 
@@ -7292,6 +7333,7 @@ public struct WorkspacePlaceholder: View {
         surfaceUnion.clear()
         surfacePatternFace = nil
         surfacePatternPiece = nil
+        surfaceRegionAim = nil
         similar.clear()
         guard let mesh = viewerMesh else { return }
 
@@ -7313,7 +7355,8 @@ public struct WorkspacePlaceholder: View {
                 // Aimed at the first, COMMITTED across all — see the confirms,
                 // which read `surfaceCarried`.
                 if let f = carried.first { surfaceEngage(tool, face: f, mesh: mesh) }
-            case .similar:
+            case .similar, .region:
+                // the region tool aims at regions one tap at a time; a similar set is not one
                 break
             }
             return
@@ -8128,6 +8171,11 @@ public struct WorkspacePlaceholder: View {
                             surfacePatternPiece = nil
                         }
                     }
+
+                case .region:
+                    if let aim = surfaceRegionAim, project.faceRegions.region(aim) != nil {
+                        surfaceRegionCluster(aim)
+                    }
                 }
             }
             // ★ KEPT ON SCREEN. Anchored to a point on the model, the cluster can
@@ -8234,10 +8282,75 @@ public struct WorkspacePlaceholder: View {
         case .pattern: model = surfacePatternFace.map {
             FaceRegionGeometry.frame(members: [$0], in: mesh).origin
         }
+        // the Region tool floats over the region it is aimed at
+        case .region:  model = surfaceRegionAim.flatMap { aim in
+            let faces = project.surfaceResolvedFaces(aim)
+            return faces.isEmpty ? nil : FaceRegionGeometry.frame(members: faces, in: mesh).origin
+        }
         }
         guard let m = model else { return nil }
         if surfaceDocksCluster { return .zero }   // docked: the slot is fixed
         return proj.project(settledWorld(SIMD3<Float>(m)))
+    }
+
+    /// ★★ THE REGION TOOL'S CLUSTER (2026-10-08): ✕ releases the aim; the aim in words; ↖ steps up
+    /// to the region it was cut from; Undo split takes its pieces back (a union keeps its parts);
+    /// Dissolve hands its faces back to the group they came from (a union gives its parts back).
+    /// Each verb shows only where it applies, so nothing on it can be refused.
+    @ViewBuilder private func surfaceRegionCluster(_ aim: RegionID) -> some View {
+        let regions = project.faceRegions
+        surfaceClusterButton("xmark", tint: DS.Color.textSecondary) {
+            surfaceRegionAim = nil
+            surfaceSelected = nil
+            surfaceRefusal = nil
+        }
+        .accessibilityLabel("Release the region")
+        surfaceClusterLabel(SurfaceRegionTool.label(aim, regions: regions,
+                                                    resolvedFaces: project.surfaceResolvedFaces(aim).count))
+        if let up = SurfaceRegionTool.parent(of: aim, regions: regions) {
+            surfaceClusterButton("arrow.up.left", tint: DS.Color.textSecondary) {
+                surfaceRegionAim = up
+                surfaceSelected = up
+                surfaceRefusal = nil
+            }
+            .accessibilityLabel("The region it was cut from")
+        }
+        if SurfaceRegionTool.canUndoSplit(aim, regions: regions) {
+            surfaceClusterTextButton("Undo split") {
+                project.surfaceUndoSplit(aim)
+                surfaceSelected = aim
+                surfaceRefusal = nil
+            }
+        }
+        if SurfaceDissolve.refusal(aim, regions: regions) == nil {
+            surfaceClusterTextButton("Dissolve") {
+                if let r = project.surfaceDissolve(aim) {
+                    let name = r.group.flatMap { g in project.selection.groups.first { $0.id == g }?.name }
+                    model.toast = r.faces.isEmpty
+                        ? "Dissolved — its parts are back."
+                        : "Dissolved — its faces are back in \(name ?? "no group")."
+                }
+                surfaceRegionAim = nil
+                surfaceSelected = nil
+                surfaceRefusal = nil
+            }
+        }
+    }
+
+    /// A word in the cluster, for a verb no icon says plainly (Undo split, Dissolve).
+    private func surfaceClusterTextButton(_ title: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .dsStyle(DS.TypeScale.caption)
+                .foregroundStyle(DS.Color.textPrimary.color)
+                .padding(.horizontal, DS.Space.m)
+                .frame(height: 44)
+                .background(Capsule().fill(DS.Color.chipSolid.color)
+                    .overlay(Capsule().strokeBorder(
+                        DS.Color.textPrimary.opacity(0.22).color, lineWidth: 1)))
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("surface-region-\(title.lowercased().replacingOccurrences(of: " ", with: "-"))")
     }
 
     private func surfaceClusterButton(_ icon: String, tint: RGBA,
@@ -9498,6 +9611,14 @@ public struct WorkspacePlaceholder: View {
         .modifier(WorkspacePanelPlacement(minimized: selectionsCollapsed))
     }
 
+    /// The banner the notice draws: production's switch and probe, the plan's own verdict.
+    private var latticePreviewBanner: LatticePreviewBanner? {
+        LatticePreviewBanner.make(previewOn: showStrutPreview,
+                                  hasModel: viewerMesh != nil,
+                                  scene: strutScene,
+                                  planWithheld: project.latticePreviewPlanWithheld)
+    }
+
     /// The honesty banner for the strut layer — one row, shown only while that
     /// layer is actually up.
     @ViewBuilder private var latticePreviewNotice: some View {
@@ -9506,9 +9627,7 @@ public struct WorkspacePlaceholder: View {
         // there was no scene — and a preview that is on, empty and silent is
         // indistinguishable from a broken one.
         VStack(alignment: .leading, spacing: 0) {
-            if let banner = LatticePreviewBanner.make(previewOn: showStrutPreview,
-                                                      hasModel: viewerMesh != nil,
-                                                      scene: strutScene) {
+            if let banner = latticePreviewBanner {
                 // ★ A CAPTION, AND THE SENTENCE BEHIND (i) (maintainer, 2026-09-06:
                 // the full sentence ran across the iPad and Print Parameters chips).
                 // Capped to the Selections column; an `.empty` reason wraps inside it.
@@ -10327,9 +10446,17 @@ public struct WorkspacePlaceholder: View {
                             }
                             .accessibilityIdentifier(padKey)
                     } else {
-                        Text(row.value)
-                            .font(.system(size: 11, weight: .bold)).monospacedDigit()
-                            .foregroundStyle(DS.Color.textSecondary.color)
+                        VStack(alignment: .trailing, spacing: 1) {
+                            Text(row.value)
+                                .font(.system(size: 11, weight: .bold)).monospacedDigit()
+                                .foregroundStyle(DS.Color.textSecondary.color)
+                            // ★ ruling A: whose number it is, in a few words under it
+                            if let note = row.note {
+                                Text(note)
+                                    .font(.system(size: 9, weight: .semibold))
+                                    .foregroundStyle(DS.Color.textTertiary.color)
+                            }
+                        }
                     }
                 }
             }
@@ -10915,6 +11042,14 @@ public struct WorkspacePlaceholder: View {
         // bake yet or under an algorithm whose bake does not derive region cells.
         let baked = LatticeRegionCells.selectableCells(project: project, scene: strutScene)
         let bakedCopy = keys.map { baked[$0] }
+        // ★ batch E (#362, ported 2026-10-08): a cut piece holds only its SHARE of its face — the
+        // card's held voxels (and so its grams) are the face's, scaled by that share; nil = whole
+        let sharesCopy = project.latticeCardHeldShares()
+        let organicCards = project.lattice.algorithm == "organic"
+        // ★ the job's cap (#358 E1/D1): the card's floors are the run's
+        let capCopy = LatticeSettings.jobDensityCap(topologyID: project.lattice.topologyID,
+                                                    allowQuilt: project.lattice.allowQuilt,
+                                                    algorithm: project.lattice.algorithm)
         Task.detached(priority: .userInitiated) {
             guard let preview = try? TopOptKit.faceSlabPreview(
                 stepPath: path, faceIDs: ids, depthsMM: depthsCopy,
@@ -10923,7 +11058,8 @@ public struct WorkspacePlaceholder: View {
             for (i, fid) in ids.enumerated() where i < preview.voxels.count {
                 var card = LatticeFaceCardDerivation.card(
                     faceID: fid, depthMM: depthsCopy[i],
-                    heldVoxels: preview.voxels[i], spacingMM: preview.spacingMM,
+                    heldVoxels: LatticeSectorOutline.heldVoxels(preview.voxels[i], share: sharesCopy[keysCopy[i]]),
+                    spacingMM: preview.spacingMM,
                     densityGCM3: densityGCM3, topologyID: topologyID,
                     // ★ THE MODE'S OWN DENSITY, WHICH NO CALL SITE PASSED UNTIL
                     // NOW (task 2026-08-17-lattice-stage-repair §1d). nil is
@@ -10945,8 +11081,11 @@ public struct WorkspacePlaceholder: View {
                     minExtrudableWidthMM: widthMM,
                     cellsPerMemberFloor: stageFloor,
                     memberWidthMM: bakedCopy[i]?.measuredWidthMM,
-                    cellMM: bakedCopy[i]?.cellMM)
+                    cellMM: bakedCopy[i]?.cellMM,
+                    maxRelativeDensity: capCopy)
                 card.cellRangeMM = bakedCopy[i]?.cellRangeMM
+                // ★★ ruling A (2026-10-08): whose number the drawer's "Cells across" is
+                card.cellsAcrossSource = organicCards ? .none : (bakedCopy[i] != nil ? .estimate : .core)
                 byKey[keysCopy[i]] = card
             }
             // The group cards keep their UUID key (the group row reads them by
@@ -11714,7 +11853,7 @@ public struct WorkspacePlaceholder: View {
     private var latticeOptimizeRefusal: String? {
         LatticeJobIncludeGate.optimizeRefusal(latticeEnabled: project.lattice.enabled,
                                               regions: project.latticeJobRegions().regions)
-            ?? latticeTypeRefusal
+            ?? latticeSettingsRefusal
     }
 
     /// ★ REVIEW 2026-10-01: a saved type core can't run (written by the variant page's old,
@@ -11726,7 +11865,14 @@ public struct WorkspacePlaceholder: View {
     private var latticeTypeRefusal: String? {
         project.lattice.enabled ? LatticeTypeCatalog.selectionRefusal(project.lattice.topologyID) : nil
     }
-    /// The tap on a button greyed by `latticeTypeRefusal`: the Lattice stage's Settings, where the
+    /// ★★ A SETTING CORE CAN'T RUN: the saved type (above), then Structural Stepped (reviewer,
+    /// 2026-10-08: "BLOCK the run (no fallback), saying it waits on core's strength check for mixed
+    /// cell sizes" — `LatticeStructuralSteppedGate`). Both grey Lattice and Optimize, and both taps
+    /// open Settings, where the line says why and the fix is one tap.
+    private var latticeSettingsRefusal: String? {
+        latticeTypeRefusal ?? LatticeStructuralSteppedGate.refusal(project.lattice)
+    }
+    /// The tap on a button greyed by `latticeSettingsRefusal`: the Lattice stage's Settings, where the
     /// Type row says why and the offered chip fixes it. Navigation only — never a type picked.
     private func goToLatticeType() {
         if showLatticePage { closeLatticePage() }
@@ -11736,7 +11882,7 @@ public struct WorkspacePlaceholder: View {
     private static let latticeTypeTapHint = "Opens the lattice settings"
     /// Whether a greyed Lattice or Optimize is greyed by that saved type — then its tap opens Settings.
     private func opensLatticeType(_ ok: Bool, _ summary: String) -> Bool {
-        !ok && summary == latticeTypeRefusal
+        !ok && summary == latticeSettingsRefusal
     }
 
     /// The Optimize sub-label, reflecting the minimize-plastic mode + the load case.
@@ -11865,7 +12011,7 @@ public struct WorkspacePlaceholder: View {
     private var latticeStageRefusal: String? {
         LatticeJobIncludeGate.refusal(latticeEnabled: project.lattice.enabled,
                                       regions: project.latticeJobRegions().regions)
-            ?? latticeTypeRefusal
+            ?? latticeSettingsRefusal
     }
 
     var canLatticeThis: Bool {

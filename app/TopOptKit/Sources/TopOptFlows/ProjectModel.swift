@@ -30,6 +30,9 @@ public final class ProjectModel: ObservableObject {
     /// it is derived from the bake, and a stale list on disk would send a run a plan
     /// the preview no longer shows. Empty ⇒ the legacy one-cell-per-region Stepped.
     public var latticePreviewSteppedCells: [LatticeSteppedCellWire] = []
+    /// ★ Why the bake's plan could not go (2026-10-08, the slot origin), checked against the
+    /// scene's regions as the bake hands them over; the job re-checks against its own.
+    public var latticePreviewPlanWithheld: LatticeSteppedCellWire.PlanWithheld? = nil
     /// Stable identity, shared with the project's `RecentProject.id` so
     /// `AppModel.open(_:)` can restore this exact instance from the recents grid.
     public let id: UUID
@@ -1631,6 +1634,13 @@ public final class ProjectModel: ObservableObject {
         // with the drawing.
         let target = (piece ?? surfaceCutTarget(face: face))
             .flatMap { faceRegions.region($0) }
+        // ★★ A UNION IS DIVIDED WHOLE (2026-10-08): the grid is laid on the tapped face, inside the
+        // union's leaf under the finger, and its cells reach every part (`surfacePatternUnionPricing`)
+        let unionLeaf: FaceRegion? = target.flatMap { t in
+            guard t.isUnionOfParts else { return nil }
+            return faceRegions.resolvedLeaves(t.id).compactMap { faceRegions.region($0) }
+                .first { FaceRegionGeometry.members(of: $0, in: mesh).contains(face) }
+        }
         // ★ AND SAY WHY WHEN IT REFUSES, IN ITS OWN WORDS. The grid used to answer
         // `[]` for every failure and the panel guessed one message — "Too many
         // pieces for this face" — which was wrong for the case that actually bites
@@ -1639,7 +1649,7 @@ public final class ProjectModel: ObservableObject {
         let cells: [FaceRegionGeometry.GridCell]
         switch SurfacePatternAxis.grid(face: face, frame: frame,
                                        columns: columns, rows: rows, in: mesh,
-                                       within: target?.cuts ?? []) {
+                                       within: unionLeaf?.cuts ?? target?.cuts ?? []) {
         case .success(let c):
             cells = c
         case .failure(let refusal):
@@ -1659,12 +1669,43 @@ public final class ProjectModel: ObservableObject {
         // ★ PRICED AT THE RUN'S OWN SPACING, so the panel refuses with the number
         // the run would — the same path the Regions sheet prices against.
         let spacing = surfaceVoxelSpacingMM(mesh)
+        // ★★ a union: every cell priced over EVERY part it reaches, not the tapped face alone (the
+        // defect: one face priced, ✓ enabled, cells holding nothing — SurfaceUnionDefectControlTests)
+        if let t = target, t.isUnionOfParts {
+            let u = surfacePatternUnionPricing(union: t.id, cells: cells, spacingMM: spacing, mesh: mesh)
+            return (cells, FaceRegionModel.checkSliver(cellVoxels: u.perCell, memberVoxels: u.member))
+        }
         let per = FaceRegionGeometry.cellVoxelCounts(members: [face], in: mesh,
                                                      cells: cells, spacingMM: spacing)
         let member = FaceRegionGeometry.memberVoxelEstimate(members: [face], in: mesh,
                                                             spacingMM: spacing)
         let verdict = FaceRegionModel.checkSliver(cellVoxels: per, memberVoxels: member)
         return (cells, verdict)
+    }
+
+    /// ★★ A UNION'S PATTERN, PRICED (2026-10-08). Each leaf the union resolves to is cut by every
+    /// cell (the leaf's own cuts AND the cell's): `perLeaf[leaf][k]` is the surface of leaf ∩ cell k
+    /// in mm², `perCell` the cell's voxels summed over the leaves, `member` the leaves' own voxels.
+    func surfacePatternUnionPricing(union id: RegionID, cells: [FaceRegionGeometry.GridCell],
+                                    spacingMM: Double, mesh: ViewerMesh)
+        -> (perCell: [Int], member: Int, perLeaf: [RegionID: [Double]]) {
+        var areas = [Double](repeating: 0, count: cells.count)
+        var memberArea = 0.0
+        var perLeaf: [RegionID: [Double]] = [:]
+        for leaf in faceRegions.resolvedLeaves(id) {
+            guard let l = faceRegions.region(leaf) else { continue }
+            let members = FaceRegionGeometry.members(of: l, in: mesh)
+            let clipped = cells.map { FaceRegionGeometry.GridCell(i: $0.i, j: $0.j, cuts: l.cuts + $0.cuts, drawn: $0.drawn) }
+            let a = FaceRegionGeometry.cellAreas(members: members, in: mesh, cells: clipped, spacingMM: spacingMM)
+            perLeaf[leaf] = a.perCell
+            for k in areas.indices { areas[k] += a.perCell[k] }
+            let own = FaceRegionGeometry.cellAreas(members: members, in: mesh,
+                                                   cells: [FaceRegionGeometry.GridCell(i: 0, j: 0, cuts: l.cuts)],
+                                                   spacingMM: spacingMM)
+            memberArea += own.perCell.first ?? 0
+        }
+        let voxelArea = Swift.max(spacingMM * spacingMM, 1e-12)
+        return (areas.map { Int(($0 / voxelArea).rounded()) }, Int((memberArea / voxelArea).rounded()), perLeaf)
     }
 
     /// Commit the pattern. Refuses on a failing verdict — the guard is not advisory.
@@ -1684,6 +1725,16 @@ public final class ProjectModel: ObservableObject {
             }
             return rid
         }()
+        // ★★ a union is split WHOLE (2026-10-08): every part cut by the same cells, one union per cell
+        if let u = faceRegions.region(splitTarget), u.isUnionOfParts, let mesh = viewerMesh {
+            let pricing = surfacePatternUnionPricing(union: u.id, cells: p.cells,
+                                                     spacingMM: surfaceVoxelSpacingMM(mesh), mesh: mesh)
+            let kids = faceRegions.splitUnion(u.id, cells: p.cells) { leaf, k in
+                (pricing.perLeaf[leaf]?[k] ?? 0) > 1e-9
+            }
+            if !kids.isEmpty { objectWillChange.send() }
+            return kids
+        }
         let kids = faceRegions.splitGrid(splitTarget, cells: p.cells)
         if !kids.isEmpty { objectWillChange.send() }
         return kids
@@ -1763,7 +1814,7 @@ public final class ProjectModel: ObservableObject {
 
     /// Snapshot what a Surface session can throw away. See `SurfaceScratch`.
     public func surfaceCaptureScratch() -> SurfaceScratch {
-        SurfaceScratch.capture(regions: faceRegions, groups: selection.groups)
+        SurfaceScratch.capture(regions: faceRegions, selection: selection, force: force)
     }
 
     /// Whether anything has been committed since that snapshot.
@@ -1771,27 +1822,70 @@ public final class ProjectModel: ObservableObject {
         s.differs(regions: faceRegions, groups: selection.groups)
     }
 
-    /// ★ PUT IT ALL BACK. Regions AND group membership together — see
-    /// `SurfaceScratch` for why restoring one without the other is worse than
-    /// restoring neither.
+    /// ★ PUT IT ALL BACK. Regions AND the group layer together — see `SurfaceScratch` for why
+    /// restoring one without the other is worse than restoring neither.
     ///
-    /// A group created ENTIRELY during the session had no entry in the snapshot;
-    /// its regions are dropped rather than left pointing at regions that no longer
-    /// exist. A group that existed keeps its faces untouched — no surface tool
-    /// changes those, so they are not the session's to revert.
+    /// ★★ THE WHOLE GROUP LAYER (2026-10-08): every group as captured — faces and regions — the
+    /// active group, and, for a group the session SWEPT, its role, load and protection back from the
+    /// captured force model. A group made during the session is gone with its entries. A live group's
+    /// force entries are never touched (no surface tool writes them).
     public func surfaceRestore(_ s: SurfaceScratch) {
         faceRegions = s.regions
-        for g in selection.groups {
-            selection.setRegions(s.groupRegions[g.id] ?? [], for: g.id)
-        }
-        // Any region the snapshot does not contain cannot be referred to any more.
-        let live = Set(s.regions.regions.map(\.id))
-        for g in selection.groups {
-            let stale = g.regionIDs.filter { !live.contains($0) }
-            if !stale.isEmpty { selection.removeRegions(stale) }
-        }
+        let live = Set(selection.groups.map(\.id))
+        let swept = Set(s.groups.map(\.id)).subtracting(live)
+        selection.restore(groups: s.groups, active: s.activeGroupID)
+        force.restoreEntries(for: swept, from: s.force)
         force.sync(groups: selection.groups)
         objectWillChange.send()
+    }
+
+    /// ★★ THE REGION TOOL'S TAP (2026-10-08): add the face to the aimed region, or drop it — the
+    /// explicit add/remove lists the Topology page's tap writes (task 2026-08-14 §2c), as one undo
+    /// step. Returns the refusal, in words, when the aim is not a whole face region.
+    @discardableResult
+    public func surfaceRegionToggleFace(_ id: RegionID, face: FaceID) -> String? {
+        guard let mesh = viewerMesh else { return "No model open." }
+        switch SurfaceRegionTool.tapEdit(aim: id, face: face, regions: faceRegions, mesh: mesh) {
+        case .refused(let why):
+            return why
+        case .add(let f):
+            sealUndoStep()
+            faceRegions.addFace(f, to: id)
+        case .drop(let f):
+            sealUndoStep()
+            faceRegions.removeFace(f, from: id)
+        }
+        refreshFaceRegionDrift()
+        objectWillChange.send()
+        return nil
+    }
+
+    /// ★★ UNDO SPLIT ON THE SURFACE STAGE (2026-10-08): the aim's split pieces go — a union keeps
+    /// its parts — and every id that went leaves every group, so nothing dangles.
+    @discardableResult
+    public func surfaceUndoSplit(_ id: RegionID) -> [RegionID] {
+        guard SurfaceRegionTool.canUndoSplit(id, regions: faceRegions) else { return [] }
+        sealUndoStep()
+        let before = Set(faceRegions.regions.map(\.id))
+        faceRegions.revertSplit(id)
+        let dropped = before.subtracting(faceRegions.regions.map(\.id)).sorted()
+        selection.removeRegions(dropped)
+        force.sync(groups: selection.groups)
+        objectWillChange.send()
+        return dropped
+    }
+
+    /// ★★ DISSOLVE ON THE SURFACE STAGE (2026-10-08) — `SurfaceDissolve`, as one undo step: the
+    /// faces back to the group they came from, a union's parts back, nothing dangling. nil when the
+    /// region cannot be dissolved (`SurfaceDissolve.refusal` says why).
+    @discardableResult
+    public func surfaceDissolve(_ id: RegionID) -> SurfaceDissolve.Result? {
+        guard let mesh = viewerMesh, SurfaceDissolve.refusal(id, regions: faceRegions) == nil else { return nil }
+        sealUndoStep()
+        let r = SurfaceDissolve.apply(id, regions: &faceRegions, selection: &selection, mesh: mesh)
+        force.sync(groups: selection.groups)
+        objectWillChange.send()
+        return r
     }
 
     // MARK: - ★ WHAT A GROUP ACTUALLY CONTAINS (the one resolver)
@@ -1845,8 +1939,13 @@ public final class ProjectModel: ObservableObject {
         let top = faceRegions.outermostUnion(containing: id)
         guard let r = faceRegions.region(top) else { return [] }
 
-        // A union speaks for its parts.
-        if r.isUnionOfParts { return [top] }
+        // A union speaks for its parts — until a pattern divides it (2026-10-08): then its CELLS
+        // speak for it, as a split face's children do. Its parts hang off it too; they are what it
+        // is, not a split of it.
+        if r.isUnionOfParts {
+            let cells = faceRegions.children(of: top).filter { !r.parts.contains($0.id) }
+            return cells.isEmpty ? [top] : cells.flatMap { surfaceEffectiveRegions(from: $0.id) }
+        }
 
         // A cut or grid split is superseded by its children — they cover the same
         // surface between them, and they are what the user then works with.
@@ -2398,6 +2497,9 @@ public final class ProjectModel: ObservableObject {
     public func variantLatticeJobRefusal() -> String? {
         LatticeJobIncludeGate.refusal(latticeEnabled: lattice.enabled,
                                       regions: variantLatticeJobRegions().regions)
+            // ★★ Structural Stepped waits on core's strength check (2026-10-08) — blocked, never
+            // run as core's own layout
+            ?? LatticeStructuralSteppedGate.refusal(lattice)
     }
 
     /// A role group's manual primitives with their slab depths resolved through

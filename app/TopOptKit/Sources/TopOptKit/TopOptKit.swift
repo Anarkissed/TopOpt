@@ -2024,11 +2024,14 @@ public enum TopOptKit {
         // ★ ONE NUMBER, ONE SOURCE (item 5, 2026-10-05): the cell the preview lays, when the
         // caller has it — core then gives the density, strut and cells-across at THAT cell.
         // 0 = core derives the cell, as before.
-        cellMM: Double = 0) -> LatticeRegionDerivation {
+        cellMM: Double = 0,
+        // ★ THE JOB'S DENSITY CAP (#358 E1/D1, 26a37f64): core derives every floor at
+        // min(rho_max, cap). 0 = not sent, core's uncapped band — the old answer exactly.
+        maxRelativeDensity: Double = 0) -> LatticeRegionDerivation {
         notePerTypeCall(#function, topology)
         let d = topoptbridge.lattice_region_derivation(
             std.string(topology), memberWidthMM, minExtrudableWidthMM,
-            statedRelativeDensity, cellsPerMemberFloor, cellMM)
+            statedRelativeDensity, cellsPerMemberFloor, cellMM, maxRelativeDensity)
         let why = String(d.reason)
         return LatticeRegionDerivation(
             valid: d.valid, feasible: d.feasible, cellMM: d.cell_mm,
@@ -2088,6 +2091,12 @@ public enum TopOptKit {
     /// RUNNING it, so the probe is no longer the source of the Structural floor or of that key.
     /// ★ At the #358 sync (23e6154e) core does not yet publish the function, so the constant
     /// stays; swap the moment a sync brings it in.
+    /// ★★ At 36f5fdde core publishes it, and it returns {"stepped", "organic"}
+    /// (lattice_algorithm.cpp:32-42, "in ANY configuration") — but the run still routes the
+    /// beam network only for organic + structural (run_job.cpp:7581), and a Stepped plan under
+    /// Structural is refused without it (5161-5183). Swapping now would lift the Structural
+    /// Stepped block (`LatticeStructuralSteppedGate`) on a claim the run does not keep, so the
+    /// constant stays until core's run routes Stepped (core ask K8).
     public static let latticeBeamNetworkCertifiedAlgorithms: Set<String> = ["organic"]
 
     /// ★ CORE'S FACE-PLANE BASIS (maintainer, 2026-10-01, item b), through core's own
@@ -2108,6 +2117,33 @@ public enum TopOptKit {
         guard v.count == 8 else { return nil }
         return CoreFacePlaneBasis(valid: v[0] != 0, conflict: v[1] != 0,
                                   u: SIMD3(v[2], v[3], v[4]), w: SIMD3(v[5], v[6], v[7]))
+    }
+
+    /// ★★ CORE'S OWNER OF EACH POINT — `stepped_region_owners` (bridge.cpp): core's own
+    /// `stepped_region_owner` over the run's include list, built from `regions` (the job's
+    /// `lattice.regions`, wire dictionaries) as the run builds it. `includes` is how many include
+    /// regions core resolved — when it differs from the job's include count core skipped one, and
+    /// every later id is shifted. nil with `lastCoreRefusal` when core cannot answer.
+    public struct CoreRegionOwners: Equatable, Sendable {
+        public let includes: Int
+        /// one per point: a 1-based include id, 0 = no owner
+        public let owners: [Int]
+        public init(includes: Int, owners: [Int]) { self.includes = includes; self.owners = owners }
+    }
+    public static func steppedRegionOwners(regions: [[String: Any]], points: [SIMD3<Double>]) -> CoreRegionOwners? {
+        guard let data = try? JSONSerialization.data(withJSONObject: regions, options: [.sortedKeys]),
+              let regionsText = String(data: data, encoding: .utf8) else { return nil }
+        var text = latticeProbeBaseJob
+        text.removeLast()
+        text += #", "lattice": {"topology": "octet", "cell_mm": 3.0, "strut_radius_mm": 0.4, "regions": "#
+            + regionsText + "}}"
+        var flat = [Double](); flat.reserveCapacity(3 * points.count)
+        for p in points { flat += [p.x, p.y, p.z] }
+        let raw: [Int] = flat.withUnsafeBufferPointer { fp in
+            Array(topoptbridge.stepped_region_owners(std.string(text), fp.baseAddress, points.count)).map { Int($0) }
+        }
+        guard raw.count == points.count + 1 else { return nil }
+        return CoreRegionOwners(includes: raw[0], owners: Array(raw.dropFirst()))
     }
 
     /// Whether the schema probe proved itself on this build — a key core has always
@@ -2209,6 +2245,22 @@ public enum TopOptKit {
         text += #", "lattice": {"topology": "octet", "cell_mm": 3.0, "strut_radius_mm": 0.4, "regions": [{"role": "include", "kind": "face", "geometry": {"origin": [0, 0, 0], "normal": [0, 0, 1], "half_u_mm": 5, "half_w_mm": 5, "depth_mm": 4, "outline_uv": [[[-5, -5], [5, -5], [5, 5], [-5, 5]]], "frame_u": [0, -1, 0], "frame_w": [1, 0, 0]}}]}}"#
         return jobSchemaError(Data(text.utf8)) == nil
     }()
+    /// ★ THE PLAN'S GRID ON THE WIRE (reviewer, 2026-10-08: "Send slot_origin_mm from the anchor
+    /// search"). A face region may carry `slot_origin_mm`, the grid its stepped cells were packed
+    /// on (core R1, job.cpp:1592-1611); core refuses one standing off the face plane. A WHOLE-JOB
+    /// probe with its CONTROL: the same job without the key must pass, or the verdict is false.
+    public static let regionSlotOriginWired: Bool = {
+        guard jobSchemaError(regionSlotOriginProbeJob("")) == nil else { return false }   // the control
+        return jobSchemaError(regionSlotOriginProbeJob(#", "slot_origin_mm": [1.5, -0.25, 0]"#)) == nil
+    }()
+    /// The probe's document: one include face on z = 0, normal +z, with `extra` in its geometry.
+    public static func regionSlotOriginProbeJob(_ extra: String) -> Data {
+        var text = latticeProbeBaseJob
+        text.removeLast()
+        text += #", "lattice": {"topology": "octet", "cell_mm": 3.0, "strut_radius_mm": 0.4, "regions": [{"role": "include", "kind": "face", "geometry": {"origin": [0, 0, 0], "normal": [0, 0, 1], "half_u_mm": 5, "half_w_mm": 5, "depth_mm": 4"#
+            + extra + #"}}]}}"#
+        return Data(text.utf8)
+    }
     /// ★ Whether the linked core is PR 358 or later — the branch that fixed the sample
     /// cube's collapse under repairs (6d6177c4). Probed by a key that branch added.
     public static let coreCarriesTheSampleRepairFix: Bool = gradingSchemaAccepts(key: "stepped_min_tile_mm")

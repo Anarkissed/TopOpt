@@ -177,6 +177,14 @@ public struct FaceRegion: Identifiable, Equatable, Sendable, Codable {
     /// never patterned anything stays byte-identical (PR 331's bar R1).
     public var edges: [RegionCut]?
 
+    /// ★★ WHERE EACH PART CAME FROM (the Regions task, 2026-10-08: "Dissolve: the faces go back to
+    /// the group they came from"). The `parentID` each of `parts` had before this union took it,
+    /// aligned with `parts`, so dissolving the union puts every part back where it was — as it was,
+    /// in the group that held it. nil = the union OWNS its parts: a cell a pattern cut from a union
+    /// (its pieces exist only for it), or a union made before this field existed; dissolving such a
+    /// union drops its parts with it. Omitted from the encoding when nil (PR 331's bar R1).
+    public var partParents: [RegionID]?
+
     /// True when this region IS a union of parts rather than a face selection.
     public var isUnionOfParts: Bool { !parts.isEmpty }
 
@@ -188,7 +196,8 @@ public struct FaceRegion: Identifiable, Equatable, Sendable, Codable {
                 filterMatchedAtAuthor: Int = -1, add: [FaceID] = [],
                 remove: [FaceID] = [], cuts: [RegionCut] = [],
                 parentID: RegionID = -1, collapsed: Bool = true,
-                parts: [RegionID] = [], edges: [RegionCut]? = nil) {
+                parts: [RegionID] = [], edges: [RegionCut]? = nil,
+                partParents: [RegionID]? = nil) {
         self.id = id
         self.name = name
         self.filter = filter
@@ -200,6 +209,7 @@ public struct FaceRegion: Identifiable, Equatable, Sendable, Codable {
         self.collapsed = collapsed
         self.parts = parts
         self.edges = edges
+        self.partParents = partParents
     }
 
     // ── Codable, BY HAND, for one reason ──────────────────────────────────
@@ -211,7 +221,7 @@ public struct FaceRegion: Identifiable, Equatable, Sendable, Codable {
 
     private enum CodingKeys: String, CodingKey {
         case id, name, filter, filterMatchedAtAuthor, add, remove, cuts
-        case parentID, collapsed, parts, edges
+        case parentID, collapsed, parts, edges, partParents
     }
 
     public init(from d: Decoder) throws {
@@ -228,6 +238,7 @@ public struct FaceRegion: Identifiable, Equatable, Sendable, Codable {
         collapsed = try c.decodeIfPresent(Bool.self, forKey: .collapsed) ?? true
         parts = try c.decodeIfPresent([RegionID].self, forKey: .parts) ?? []
         edges = try c.decodeIfPresent([RegionCut].self, forKey: .edges)
+        partParents = try c.decodeIfPresent([RegionID].self, forKey: .partParents)
     }
 
     public func encode(to e: Encoder) throws {
@@ -244,6 +255,7 @@ public struct FaceRegion: Identifiable, Equatable, Sendable, Codable {
         // ★ ONLY WHEN IT HOLDS SOMETHING — see the note above.
         if !parts.isEmpty { try c.encode(parts, forKey: .parts) }
         if let edges { try c.encode(edges, forKey: .edges) }
+        if let partParents { try c.encode(partParents, forKey: .partParents) }
     }
 
     /// True when this region is exactly ONE face with no filter and no cut — an
@@ -345,6 +357,16 @@ public struct FaceRegionModel: Equatable, Sendable, Codable {
         -> [FaceID] {
         guard let r = region(id) else { return [] }
         let members = resolvedMembers.isEmpty ? r.add : resolvedMembers
+        // ★★ A UNION THAT TOOK EXISTING PIECES GIVES THEM BACK (2026-10-08). Each part returns under
+        // the parent it had before the union, BEFORE anything is dropped, so the pieces the user made
+        // survive the dissolve exactly as they were. A union that owns its parts (`partParents` nil:
+        // a pattern's cell, or a union older than the field) drops them, as it always did.
+        if let pp = r.partParents {
+            for (k, pid) in r.parts.enumerated() {
+                guard let i = regions.firstIndex(where: { $0.id == pid }), regions[i].parentID == id else { continue }
+                regions[i].parentID = k < pp.count ? pp[k] : -1
+            }
+        }
         var drop: Set<RegionID> = [id]
         var changed = true
         while changed {
@@ -463,8 +485,52 @@ public struct FaceRegionModel: Equatable, Sendable, Codable {
     /// Undo the LAST split of a region: drop its immediate children (and theirs).
     /// Splits are a revertable stack (§4d).
     public mutating func revertSplit(_ id: RegionID) {
-        let kids = children(of: id).map(\.id)
+        // ★ a union's parts hang off it too — they are what it IS, not a split of it (2026-10-08)
+        let own = Set(region(id)?.parts ?? [])
+        let kids = children(of: id).map(\.id).filter { !own.contains($0) }
         for k in kids { _ = dissolve(k) }
+    }
+
+    /// ★★ A PATTERN ON A UNION SPLITS THE WHOLE UNION (the Regions task ruling, 2026-10-08:
+    /// "Pattern on a face inside a union splits the WHOLE union"). Every part the union resolves to
+    /// (its leaves) is cut by the SAME cells — the grid laid on the tapped face, whose half-spaces
+    /// reach across every part — and each cell's pieces across the parts become ONE cell of the
+    /// union: a union of them that owns them (`partParents` nil, so undoing the split drops them),
+    /// or the lone piece when a cell reaches one part. `keep(leaf, k)` says whether leaf ∩ cell k
+    /// holds surface; a piece holding none is never made. The cells hang off the union, which
+    /// collapses to one row, exactly as a split's children hang off a face. Before this, the cells
+    /// copied a union's (empty) faces and resolved to nothing.
+    @discardableResult
+    public mutating func splitUnion(_ id: RegionID, cells: [FaceRegionGeometry.GridCell],
+                                    keep: (RegionID, Int) -> Bool) -> [RegionID] {
+        guard let u = region(id), u.isUnionOfParts, !cells.isEmpty else { return [] }
+        let leaves = resolvedLeaves(id)
+        var out: [RegionID] = []
+        for (k, c) in cells.enumerated() {
+            var pieces: [RegionID] = []
+            for leaf in leaves where keep(leaf, k) {
+                guard let l = region(leaf) else { continue }
+                let pid = nextID
+                nextID += 1
+                regions.append(FaceRegion(id: pid, name: "\(l.name) \(c.i + 1)·\(c.j + 1)",
+                                          filter: l.filter, filterMatchedAtAuthor: l.filterMatchedAtAuthor,
+                                          add: l.add, remove: l.remove, cuts: l.cuts + c.cuts,
+                                          parentID: id, collapsed: true, edges: c.drawn))
+                pieces.append(pid)
+            }
+            guard !pieces.isEmpty else { continue }
+            if pieces.count == 1 { out.append(pieces[0]); continue }
+            let cid = nextID
+            nextID += 1
+            regions.append(FaceRegion(id: cid, name: "\(u.name) \(c.i + 1)·\(c.j + 1)",
+                                      parentID: id, collapsed: true, parts: pieces))
+            for p in pieces {
+                if let i = regions.firstIndex(where: { $0.id == p }) { regions[i].parentID = cid }
+            }
+            out.append(cid)
+        }
+        if !out.isEmpty { setCollapsed(id, true) }
+        return out
     }
 
     // MARK: - union of parts (§6c)
@@ -480,8 +546,10 @@ public struct FaceRegionModel: Equatable, Sendable, Codable {
         guard live.count >= 2 else { return nil }
         let id = nextID
         nextID += 1
+        // ★ each part's parent before the union took it — so a dissolve gives it back (2026-10-08)
+        let parents = live.map { pid in region(pid)?.parentID ?? -1 }
         regions.append(FaceRegion(id: id, name: name, parentID: -1,
-                                  collapsed: true, parts: live))
+                                  collapsed: true, parts: live, partParents: parents))
         // The parts hang off the union, so one operation adds ONE row (§5b).
         for pid in live {
             guard let i = regions.firstIndex(where: { $0.id == pid }) else { continue }
