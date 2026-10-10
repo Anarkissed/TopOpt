@@ -22,8 +22,11 @@ public struct FlexiblePressAimSet: Equatable, Sendable {
     public struct Asked: Equatable, Sendable {
         public let target: FlexiblePressAim.Target
         public let accepted: Bool
-        /// Core's words when refused; "" when accepted.
+        /// Core's words when refused (its region ids renamed), for the (i); "" when accepted.
         public let reason: String
+        /// ★ AP3 REVIEW: the same refusal as ONE plain line of at most 44 characters, in the app's names; "" when
+        /// accepted.
+        public let line: String
     }
 
     public let regions: [Int]
@@ -42,8 +45,33 @@ public struct FlexiblePressAimSet: Equatable, Sendable {
     /// One line when a member has no core normal or the members face apart; nil otherwise.
     public let why: String?
 
+    /// ★ AP3 REVIEW: core's inward normal of EVERY triangle core checks a stated direction against (each member
+    /// region's member faces), deduplicated — the set the knob's clamp and the degrees box's limit hold 1° short
+    /// of edge-on to.
+    public var footprintNormals: [SIMD3<Double>] { memberLoads }   // AP3 REVIEW RED STUB: each member's average
+    /// ★ AP3 REVIEW: core's own sentence behind `why` (renamed), for the (i).
+    public var whyDetail: String? { why }   // AP3 REVIEW RED STUB: no plain line
+
     /// ★ The targets OFFERED: exactly those core builds.
     public var offered: [FlexiblePressAim.Target] { asked.filter(\.accepted).map(\.target) }
+
+    /// ★ AP3 REVIEW (D-AP3-1): the offered target the arrow IS on, bit for bit — what the screen shows as snapped
+    /// (a chip lit, the badge above the knob). The stored snap kind is only the target the box measures FROM.
+    public func on(_ direction: SIMD3<Double>) -> FlexiblePressAim.Target? {
+        offered.first   // AP3 REVIEW RED STUB: the selected target, wherever the arrow is
+    }
+
+    /// The knob's drag for this press: the offered targets, held 1° short of edge-on to the footprint's normals.
+    public func drag(direction: SIMD3<Double>, anchor: SIMD3<Double>, length: Double, grab: PrimitiveGizmo.Ray,
+                     viewDir: SIMD3<Double>) -> FlexiblePressAim.Drag {
+        FlexiblePressAim.Drag(direction: direction, anchor: anchor, length: length, grab: grab, viewDir: viewDir,
+                              targets: offered, loads: footprintNormals)
+    }
+
+    /// The trackball for this press (looking along the arrow), with the same targets and limit as the knob.
+    public func trackball(direction: SIMD3<Double>, right: SIMD3<Double>, up: SIMD3<Double>) -> FlexiblePressAim.Trackball {
+        FlexiblePressAim.Trackball(direction: direction, right: right, up: up, targets: offered, loads: footprintNormals)
+    }
 
     /// ★ A NEW press's aim (round 6 item 2's picks, spec §6): the first offered target — the halfway of an edge or a
     /// corner, a tilt's straighten — exactly, with its kind. nil when core builds none of them (`why` and the asked
@@ -109,11 +137,18 @@ extension FlexibleStageModel {
             // asked as the press it would be, along its direction
             let v = try await pressVerdict(t.kind == .straighten ? [first] : regions,
                                            direction: t.kind == .straighten ? nil : t.direction)
-            asked.append(.init(target: t, accepted: v.accepted, reason: v.accepted ? "" : text(v.reason)))
+            asked.append(.init(target: t, accepted: v.accepted, reason: v.accepted ? "" : text(v.reason),
+                               line: v.accepted ? "" : text(v.reason)))   // AP3 REVIEW RED STUB: core's sentence as the line
         }
         let fallbacks = FlexiblePressAim.fallbacks(memberLoads: memberLoads, single: single, coreX: axes?.x, coreY: axes?.y)
         return FlexiblePressAimSet(regions: regions, memberLoads: memberLoads, ownLoad: ownLoad, halfway: halfway,
                                    buildDir: build, asked: asked, fallbacks: fallbacks, why: why)
+    }
+
+    /// ★ AP3 REVIEW: core's refusal `reason` (a press verdict's words) as ONE plain line of at most 44 characters,
+    /// in the app's names ("Top A", "Face 3"); `text(reason)` is core's own sentence for the (i).
+    public func plainLine(_ reason: String) -> String {
+        text(reason)   // AP3 REVIEW RED STUB: core's sentence as it is
     }
 
     /// ★ CORE'S SIDE VERDICT for pressing `regions` along `direction`: face_frame_cut with press_direction — its
@@ -134,7 +169,7 @@ extension FlexibleStageModel {
     @discardableResult
     public func aimPress(_ id: UUID, _ r: FlexiblePressAim.Release) -> Bool {
         guard var p = settings.press(id), FlexiblePress.isAimable(r.direction) else { return false }
-        if r.snap == .straighten, p.kind == .tilted, straighten(id) { return true }
+        if r.snap == .straighten, p.kind == .tilted, straighten(id) { return true }   // AP3 REVIEW RED STUB: `exact` unread
         let raw = r.snap?.raw
         guard FlexiblePressAim.bits(p.direction) != FlexiblePressAim.bits(r.direction) || p.snap != raw else { return false }
         guard p.aim(r.direction, snap: raw) else { return false }

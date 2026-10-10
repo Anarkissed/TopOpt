@@ -129,11 +129,17 @@ public enum FlexiblePressAim {
     public struct Release: Equatable, Sendable {
         public let direction: SIMD3<Double>
         public let snap: FlexiblePress.Snap?
-        public init(direction: SIMD3<Double>, snap: FlexiblePress.Snap?) { self.direction = direction; self.snap = snap }
+        /// ★ AP3 REVIEW: the direction IS the snap kind's target, bit for bit — a chip, a knob snap, the degrees box
+        /// at 0. false for a free release, and for the box OFF its target (the kind is then only the target it
+        /// measures FROM, D-AP3-1). [Straighten] turns a tilted press back into its face only when exact.
+        public let exact: Bool
+        public init(direction: SIMD3<Double>, snap: FlexiblePress.Snap?, exact: Bool = false) {
+            self.direction = direction; self.snap = snap; self.exact = exact
+        }
     }
 
     /// A chip tap: the target's own vector, bit for bit.
-    public static func chip(_ t: Target) -> Release { Release(direction: t.direction, snap: t.kind) }
+    public static func chip(_ t: Target) -> Release { Release(direction: t.direction, snap: t.kind, exact: true) }
 
     /// Is `d` exactly on `t` (bit for bit)?
     public static func on(_ d: SIMD3<Double>, _ t: Target) -> Bool { bits(d) == bits(t.direction) }
@@ -235,8 +241,12 @@ public enum FlexiblePressAim {
             return FlexiblePressAim.canon(FlexiblePressAim.unit(cos(a) * target.direction + sin(a) * plane) ?? target.direction)
         }
 
-        /// What a commit of `deg` puts on the press: the direction, and the target's kind kept (the box measures from it).
-        public func release(_ deg: Double) -> Release { Release(direction: direction(deg), snap: target.kind) }
+        /// What a commit of `deg` puts on the press: the direction, and the target's kind kept (the box measures from
+        /// it) — EXACT only at 0, where the direction is the target's own bits.
+        public func release(_ deg: Double) -> Release {
+            let d = direction(deg)
+            return Release(direction: d, snap: target.kind, exact: FlexiblePressAim.on(d, target))
+        }
     }
 
     /// The box for `current` measured from `target`; nil when no plane exists (no fallback off the target's line).
@@ -359,6 +369,19 @@ public enum FlexiblePressAim {
     static func rotate(_ v: SIMD3<Double>, about axis: SIMD3<Double>, by angle: Double) -> SIMD3<Double> {
         let c = cos(angle), s = sin(angle)
         return v * c + simd_cross(axis, v) * s + axis * simd_dot(axis, v) * (1 - c)
+    }
+
+    // MARK: - core's refusals in plain words (AP3 REVIEW; his rule: one line, at most 44 characters)
+
+    /// ★ Core's refusal of a press as ONE plain line of at most 44 characters, in the app's names (`name` of a
+    /// region id); core's own sentence stays behind the (i).
+    public static func plainLine(_ reason: String, name: (Int) -> String) -> String {
+        reason   // AP3 REVIEW RED STUB: core's sentence as it is
+    }
+
+    /// ★ Core's refusal to FRAME region `name` (face_frame_cut's reason) as one plain line of at most 44 characters.
+    public static func plainFrameLine(_ reason: String, name: String) -> String {
+        name + ": " + reason   // AP3 REVIEW RED STUB: core's sentence as it is
     }
 
     // MARK: - the side label's (i) text

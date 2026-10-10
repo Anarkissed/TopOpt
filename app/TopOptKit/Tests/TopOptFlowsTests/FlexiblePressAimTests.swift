@@ -408,8 +408,12 @@ final class FlexiblePressAimTests: XCTestCase {
             XCTAssertFalse(aim.offered.isEmpty, "\(label): something is offered")
             for a in aim.asked {
                 let fp = a.target.kind == .straighten ? [regions[0]] : regions
-                let v = try await m.pressVerdict(fp, direction: a.target.kind == .straighten ? nil : a.target.direction)
-                XCTAssertEqual(v.accepted, a.accepted, "\(label) \(a.target.label): the offer IS core's verdict")
+                // ★ AP3 REVIEW: asked exactly as a release STORES it (the direction stated, straighten too) — and
+                // straighten also as the face press it turns back into
+                let stated = try await m.pressVerdict(fp, direction: a.target.direction)
+                var built = stated.accepted
+                if a.target.kind == .straighten { built = try await m.pressVerdict(fp, direction: nil).accepted && built }
+                XCTAssertEqual(built, a.accepted, "\(label) \(a.target.label): the offer IS core's verdict")
                 if a.accepted {
                     offered += 1
                     let fr = try await m.regionFrame(regions[0], direction: a.target.direction)
@@ -422,7 +426,7 @@ final class FlexiblePressAimTests: XCTestCase {
             }
             // the box at its limit, along its plane from the selected target
             if let t = A.selected(nil, offered: aim.offered),
-               let box = A.box(target: t, current: t.direction, fallbacks: aim.fallbacks, loads: aim.memberLoads), box.limit > 0 {
+               let box = aim.box(current: t.direction, snap: t.kind), box.limit > 0 {
                 let d = box.direction(box.limit)
                 let v = try await m.pressVerdict(regions, direction: d)
                 Self.say(String(format: "FLEX-AP3 OFFER %@: %@ · box limit %.4f° from %@ → core %@",
@@ -532,7 +536,7 @@ final class FlexiblePressAimTests: XCTestCase {
             let a = try await slab.pressAim([st, w])
             Self.say("FLEX-AP3 APART rounded slab top + wall \(w): halfway \(a.halfway.map { "\($0)" } ?? "none") · '\(a.why ?? "")' · offered \(a.offered.map(\.label))")
             XCTAssertNil(a.halfway, "★ a member core cannot frame has no halfway")
-            XCTAssertTrue(a.why?.contains("cancel") ?? false, "core's words: \(a.why ?? "")")
+            XCTAssertTrue(a.whyDetail?.contains("cancel") ?? false, "core's words behind the (i): \(a.whyDetail ?? "")")   // AP3 REVIEW: `why` is the plain line
         } else {
             Self.say("FLEX-AP3 APART rounded slab: every piece is framed by core (no wrapped wall in this build)")
         }
