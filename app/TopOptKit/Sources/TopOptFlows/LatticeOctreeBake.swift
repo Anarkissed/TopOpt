@@ -32,6 +32,9 @@ extension LatticePreviewOccupancy {
     public struct OctreeBakeStats {
         public var slotsKept: [Double: Int] = [:]   // cell size → whole cells kept
         public var slotsCut = 0                    // finest slots the outline cuts (attached to the band)
+        /// ★ Pairs of cells of ONE region sharing volume (`LatticeSteppedCell.sameRegionOverlaps`) — must
+        /// be 0; the plan writer withholds a plan that has any (the reviewer, 2026-10-10 20:05).
+        public var sameRegionOverlaps = 0
         public var texelsPainted = 0
         public var pitchMM: Double = 0
         public var seconds: Double = 0
@@ -1599,6 +1602,15 @@ extension LatticePreviewOccupancy {
         out.values = activation
         stats.seconds = Date().timeIntervalSince(t0)
         stats.cellsPlaced = cells.count
+        // ★ THE BAKE'S OWN CHECK: no two cells of one region overlap. Counted and named in the DIAG; the
+        // writer refuses such a plan in words (`PlanWithheld.cellsOverlap`), never sends it.
+        let overlaps = LatticeSteppedCell.sameRegionOverlaps(cells)
+        stats.sameRegionOverlaps = overlaps.count
+        if let o = overlaps.first {
+            NSLog("DIAG octree OVERLAP: \(overlaps.count) same-region cell pair(s); first region \(o.region): "
+                  + "cell \(o.a) (\(cells[o.a].sizeMM) mm) and cell \(o.b) (\(cells[o.b].sizeMM) mm) share "
+                  + String(format: "%.4f x %.4f x %.4f mm", o.extentMM.x, o.extentMM.y, o.extentMM.z))
+        }
         var field = LatticeCellField(field: out, level: outlineMM,
                                 steppedCellMM: size, steppedPhase: phase,
                                 steppedOrigin: origin,
