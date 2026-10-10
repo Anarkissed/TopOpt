@@ -6,7 +6,8 @@
 // offered, else the first offered — the halfway of an edge or a corner, a tilt's straighten), scrubs along the great
 // circle from the target through the arrow (toward the first member's core normal, or core's frame X for a tilt, when
 // the arrow sits on it), shows 0 … its limit (1° short of edge-on), and a commit keeps the target's kind. 0 is the
-// target bit for bit. The press card (AP4/AP5, and round 6 item 2's edges groups) places it on the Aim row beside the
+// target bit for bit — the only commit that is EXACT (AP3 REVIEW: on a tilt the box measures from [Straighten], and
+// only its 0 turns the press back into the face; any other value tilts it). The press card (AP4/AP5, and round 6 item 2's edges groups) places it on the Aim row beside the
 // target chips; nothing here computes a direction of its own.
 import SwiftUI
 

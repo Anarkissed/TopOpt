@@ -22,8 +22,11 @@
 // ★ EXACT. A chip tap, a knob within 12° of a target and the degrees box at 0 all store the target's own vector, bit
 // for bit (`on`); a target never carries a negative zero (`canon`), so its bits survive the project file's JSON.
 // ★ THE 1° LIMIT is the app's, not core's: a FREE direction (a drag, the degrees box) holds 1° short of edge-on to
-// every member's core normal ("a press can't pull"); snaps are exempt (each was accepted by core). Core may still
-// refuse a free direction over a curved member (it checks every footprint triangle) — the card then shows core's words.
+// core's inward normal of EVERY triangle core checks a stated direction against ("a press can't pull";
+// FlexiblePressAimSet.footprintNormals — AP3 REVIEW: each member's average let the M2's curved corners through to
+// directions core refuses). Snaps are exempt (each was accepted by core); a free drag or box that STARTS from a target
+// core built inside the 1° band keeps that target's own margin instead (`margin`), so it moves and never goes further
+// out. Core's refusals read as one plain line in the app's names (`plainLine`), core's sentence behind the (i).
 import Foundation
 import simd
 
@@ -160,11 +163,28 @@ public enum FlexiblePressAim {
 
     // MARK: - the 1° limit (the app's; core decides what it builds)
 
-    /// Does `d` stay at least `edgeOnMarginDeg` short of edge-on to every member (dot ≥ sin 1°)?
-    public static func admissible(_ d: SIMD3<Double>, loads: [SIMD3<Double>]) -> Bool {
+    /// Does `d` stay at least `margin` into every normal (default sin 1°: `edgeOnMarginDeg` short of edge-on)?
+    public static func admissible(_ d: SIMD3<Double>, loads: [SIMD3<Double>], margin: Double? = nil) -> Bool {
         guard let n = unit(d) else { return false }
-        let s = sin(edgeOnMarginDeg * .pi / 180)
+        let s = margin ?? sin(edgeOnMarginDeg * .pi / 180)
         return loads.allSatisfy { simd_dot(n, $0) >= s }
+    }
+
+    /// The least dot of unit `d` with `loads` (+∞ with none); nil when `d` has no direction.
+    public static func minDot(_ d: SIMD3<Double>, loads: [SIMD3<Double>]) -> Double? {
+        guard let n = unit(d) else { return nil }
+        return loads.reduce(Double.infinity) { Swift.min($0, simd_dot(n, $1)) }
+    }
+
+    /// ★ AP3 REVIEW: the margin a free direction keeps when it starts from `a` (where a drag starts, a box's target):
+    /// sin 1° — or, when `a` (a target core built) already sits inside that band, `a`'s OWN margin, so the knob and
+    /// the box move from it (they froze there) and never go further out than it. nil when `a` does not point into
+    /// every normal.
+    public static func margin(from a: SIMD3<Double>, loads: [SIMD3<Double>]) -> Double? {
+        let s = sin(edgeOnMarginDeg * .pi / 180)
+        guard let m = minDot(a, loads: loads) else { return nil }
+        if m >= s { return s }
+        return m > 0 ? m : nil
     }
 
     /// The point a fraction `t` along the great circle from unit `a` to unit `b` (nil when they are opposite).
@@ -177,13 +197,15 @@ public enum FlexiblePressAim {
     }
 
     /// ★ THE CLAMP: `d` when it is admissible; else the last admissible direction on the great circle from `from`
-    /// (the drag's start) toward `d` — 1° short of edge-on to the member that binds. A start that is itself not
-    /// admissible holds where it is.
+    /// (the drag's start) toward `d` — 1° short of edge-on to the normal that binds, or (AP3 REVIEW) the start's own
+    /// margin when the start is a target inside that band. A start that does not point into every normal holds where
+    /// it is.
     public static func clamp(_ d: SIMD3<Double>, from start: SIMD3<Double>, loads: [SIMD3<Double>]) -> SIMD3<Double> {
         guard let e = unit(d) else { return start }
         if admissible(e, loads: loads) { return canon(e) }
-        guard let a = unit(start), admissible(a, loads: loads) else { return start }
-        func ok(_ t: Double) -> Bool { slerp(a, e, t).map { admissible($0, loads: loads) } ?? false }
+        guard let a = unit(start), let m = margin(from: a, loads: loads) else { return start }
+        if admissible(e, loads: loads, margin: m) { return canon(e) }
+        func ok(_ t: Double) -> Bool { slerp(a, e, t).map { admissible($0, loads: loads, margin: m) } ?? false }
         var lo = 0.0, hi = 1.0
         let samples = 64
         for k in 1...samples {
@@ -195,6 +217,7 @@ public enum FlexiblePressAim {
             let mid = (lo + hi) / 2
             if ok(mid) { lo = mid } else { hi = mid }
         }
+        guard lo > 0 else { return start }   // no room toward `d`: it stays where it is
         return canon(slerp(a, e, lo) ?? a)
     }
 
@@ -218,7 +241,8 @@ public enum FlexiblePressAim {
 
     /// ★ The degrees box: "12°" off its target. It scrubs along the great circle from the target through the
     /// arrow (or, when the arrow sits on the target, toward the first fallback not parallel to it); 0 is the target
-    /// bit for bit; it stops where a free direction must (1° short of edge-on).
+    /// bit for bit; it stops where a free direction must (1° short of edge-on, or — AP3 REVIEW — the target's own
+    /// margin when core built it inside that band: its range was 0…0).
     public struct Box: Equatable, Sendable {
         public let target: Target
         /// Unit, perpendicular to the target: the great circle's second axis.
@@ -268,19 +292,20 @@ public enum FlexiblePressAim {
             return unit(cos(a) * t + sin(a) * u) ?? t
         }
         var limit = 0.0
-        if admissible(t, loads: loads) {
+        if let m = margin(from: t, loads: loads) {
+            func ok(_ deg: Double) -> Bool { admissible(at(deg), loads: loads, margin: m) }
             var lo = 0.0, hi = 180.0
             var deg = 0.25
             var found = false
             while deg <= 180 {
-                if !admissible(at(deg), loads: loads) { hi = deg; found = true; break }
+                if !ok(deg) { hi = deg; found = true; break }
                 lo = deg
                 deg += 0.25
             }
             if found {
                 for _ in 0..<60 {
                     let mid = (lo + hi) / 2
-                    if admissible(at(mid), loads: loads) { lo = mid } else { hi = mid }
+                    if ok(mid) { lo = mid } else { hi = mid }
                 }
             }
             limit = lo
@@ -373,15 +398,67 @@ public enum FlexiblePressAim {
 
     // MARK: - core's refusals in plain words (AP3 REVIEW; his rule: one line, at most 44 characters)
 
-    /// ★ Core's refusal of a press as ONE plain line of at most 44 characters, in the app's names (`name` of a
-    /// region id); core's own sentence stays behind the (i).
+    /// ★ Core's refusal of a press (build_press_stack's FlexibleError) as ONE plain line of at most 44 characters, in
+    /// the app's names (`name` of a region id, fitted so the line fits); core's own sentence stays behind the (i).
+    /// A sentence this does not know reads "Core can't build this press".
     public static func plainLine(_ reason: String, name: (Int) -> String) -> String {
-        reason   // AP3 REVIEW RED STUB: core's sentence as it is
+        let ids = regionIDs(reason)
+        let most = FlexibleRowCopy.maxChars
+        func fitted(_ k: Int, _ room: Int) -> String {
+            k < ids.count ? FlexibleRowCopy.fit(name(ids[k]), Swift.max(6, room)) : "a face"
+        }
+        let line: String
+        if reason.contains("does not point into the part") {
+            let head = "Arrow doesn't push into all of "
+            line = head + fitted(0, most - head.count)
+        } else if reason.contains("are not adjacent") {
+            let room = (most - " and  don't touch".count) / 2
+            line = fitted(0, room) + " and " + fitted(1, room) + " don't touch"
+        } else if reason.contains("SAME face") {
+            let room = (most - " and  are parts of one face".count) / 2
+            line = fitted(0, room) + " and " + fitted(1, room) + " are parts of one face"
+        } else if reason.contains("appears twice") {
+            let tail = " is in the press twice"
+            line = fitted(0, most - tail.count) + tail
+        } else if reason.contains("press_direction must be") {
+            line = "The arrow has no direction"
+        } else if reason.contains("needs at least one face region") {
+            line = "The press has no faces"
+        } else if let first = ids.first, let r = reason.range(of: "face region \(first)") {
+            line = plainFrameLine(String(reason[r.upperBound...]), name: name(first))
+        } else {
+            line = "Core can't build this press"
+        }
+        return FlexibleRowCopy.fit(line)
     }
 
-    /// ★ Core's refusal to FRAME region `name` (face_frame_cut's reason) as one plain line of at most 44 characters.
+    /// ★ Core's refusal to FRAME region `name` (face_frame_cut's reason, or build_stack's) as one plain line of at
+    /// most 44 characters.
     public static func plainFrameLine(_ reason: String, name: String) -> String {
-        name + ": " + reason   // AP3 REVIEW RED STUB: core's sentence as it is
+        let tail: String
+        if reason.contains("normals cancel out") {
+            tail = " has no one push direction"
+        } else if reason.contains("cuts leave nothing") {
+            tail = " is cut away to nothing"
+        } else if reason.contains("has no triangles") {
+            tail = " has no surface"
+        } else if reason.contains("no column") {
+            tail = " is too narrow to press"
+        } else if reason.contains("out of range") {
+            tail = " is not on this part"
+        } else {
+            tail = ": core can't frame it"
+        }
+        return FlexibleRowCopy.fit(FlexibleRowCopy.fit(name, FlexibleRowCopy.maxChars - tail.count) + tail)
+    }
+
+    /// Every "face region N" core's sentence names, in order.
+    public static func regionIDs(_ reason: String) -> [Int] {
+        guard let re = try? NSRegularExpression(pattern: "face region (\\d+)") else { return [] }
+        let ns = reason as NSString
+        return re.matches(in: reason, range: NSRange(location: 0, length: ns.length)).compactMap {
+            Int(ns.substring(with: $0.range(at: 1)))
+        }
     }
 
     // MARK: - the side label's (i) text

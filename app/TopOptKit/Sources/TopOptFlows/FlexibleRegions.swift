@@ -63,9 +63,10 @@ public struct FlexibleRegions {
         return "\(base) · \(r.name.isEmpty ? "part \(r.id)" : r.name)"
     }
 
-    /// Core's sentences name regions by id ("face 1000103 …"); show the app's names.
+    /// Core's sentences name regions by id ("face 1000103 …", "face region 1000103 …" — AP3 REVIEW: the press
+    /// verdict's words); show the app's names.
     public func renamed(_ text: String, mesh: ViewerMesh?) -> String {
-        guard let re = try? NSRegularExpression(pattern: "\\bfaces? (\\d+)") else { return text }
+        guard let re = try? NSRegularExpression(pattern: "\\bface(?:s| region)? (\\d+)") else { return text }
         let ns = text as NSString
         var out = text
         for m in re.matches(in: text, range: NSRange(location: 0, length: ns.length)).reversed() {
