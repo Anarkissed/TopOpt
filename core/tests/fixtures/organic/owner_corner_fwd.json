@@ -1,0 +1,91 @@
+{
+ "_comment": "Ruling 4: two include prisms meeting at a corner, with per-region cells so ownership is visible in the GEOMETRY. A shared voxel belongs to the region whose face plane is nearer, so this STL must equal the reversed job's byte for byte.",
+ "bake_build_orientation": "off",
+ "grading": {
+  "algorithm": "stepped",
+  "cell_mode": "fit",
+  "min_extrudable_width_mm": 0.45,
+  "topology": "octet",
+  "intent": "aesthetic"
+ },
+ "lattice": {
+  "emit_3mf": false,
+  "emit_stl": true,
+  "min_extrudable_width_mm": 0.45,
+  "regions": [
+   {
+    "role": "include",
+    "kind": "face",
+    "geometry": {
+     "origin": [
+      6.0,
+      0.0,
+      8.0
+     ],
+     "normal": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "half_u_mm": 6.0,
+     "half_w_mm": 6.0,
+     "depth_mm": 12.0
+    }
+   },
+   {
+    "role": "include",
+    "kind": "face",
+    "geometry": {
+     "origin": [
+      0.0,
+      6.0,
+      8.0
+     ],
+     "normal": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "half_u_mm": 3.0,
+     "half_w_mm": 3.0,
+     "depth_mm": 6.0
+    }
+   }
+  ],
+  "skin": "none",
+  "topology": "octet"
+ },
+ "loads": {
+  "anchor_face_ids": [
+   2
+  ],
+  "build_dir": [
+   0,
+   0,
+   1
+  ],
+  "groups": [
+   {
+    "face_ids": [
+     9
+    ],
+    "force": [
+     0.0,
+     0.0,
+     -400.0
+    ]
+   }
+  ],
+  "layer_height_mm": 0.2,
+  "minimize_plastic": true
+ },
+ "material": "PLA",
+ "mode": "lattice_part",
+ "model": "dead_parity_tab.stl",
+ "output": {
+  "mesh_format": "stl",
+  "mesh_prefix": "dp",
+  "report": "report.json"
+ },
+ "resolution": 48
+}
