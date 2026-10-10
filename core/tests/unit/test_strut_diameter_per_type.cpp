@@ -26,6 +26,7 @@
 //
 // Self-contained CHECK harness (ARCHITECTURE §4).
 
+#include <limits>
 #include "topopt/lattice.hpp"
 #include "topopt/lattice_gen.hpp"
 
@@ -454,6 +455,87 @@ int main() {
       CHECK(lattice_type_readiness(typo, gen, cert) ==
                 LatticeTypeReadiness::UnknownId,
             "a near-miss of a planned or live id is still UnknownId");
+  }
+
+  // ── ★ E1 / D1: ONE FUNCTION FOR "THE SMALLEST CELL THAT PRINTS" ─────────────
+  // #354 reported core answering that question with five numbers on different paths, and
+  // one run printing two of them under one key name. These are the three that matter, on
+  // octet at a 0.45 mm bead, and they are pinned to the digits the brief quoted -- so if
+  // a measured table moves, this says so instead of the app silently getting a different
+  // floor from the one grade_lattice applies.
+  {
+    const double w = 0.45;
+    const LatticeTopology t = LatticeTopology::Octet;
+    const double light = lattice_cell_printability_floor_mm(t, w);
+    const double uncapped = lattice_min_printable_cell_mm(t, w, 0.0);
+    const double at_cap = lattice_min_printable_cell_mm(t, w, octet_aesthetic_density_ceiling());
+    CHECK(std::fabs(light - 4.931378498) < 5e-9,
+          "E1: the LIGHT floor w/phi(rho_min) is 4.931378498 mm");
+    CHECK(std::fabs(uncapped - 1.173173434) < 5e-9,
+          "E1: the UNCAPPED dense floor w/phi(rho_max) is 1.173173434 mm");
+    CHECK(std::fabs(at_cap - 2.25) < 5e-9,
+          "E1: and at the job's cap it is 2.25 mm -- the number grade_lattice applies");
+    // The three are genuinely different answers; that is the whole defect.
+    CHECK(at_cap > uncapped * 1.5 && light > at_cap * 1.5,
+          "E1 premise: the three floors are far apart, so routing a path to the wrong one "
+          "is not a rounding difference");
+
+    // A cap of 0 or non-finite means NOT SENT -- the app's semantics, which core now owns.
+    CHECK(lattice_min_printable_cell_mm(t, w, 0.0) == uncapped,
+          "E1: a cap of 0 is 'not sent' and gives the uncapped floor");
+    CHECK(lattice_min_printable_cell_mm(t, w, -1.0) == uncapped,
+          "E1: so is a negative cap");
+    CHECK(lattice_min_printable_cell_mm(
+              t, w, std::numeric_limits<double>::infinity()) == uncapped,
+          "E1: and a non-finite one");
+    // A cap ABOVE the band top cannot buy a finer cell than the band allows.
+    CHECK(lattice_min_printable_cell_mm(t, w, 0.99) == uncapped,
+          "E1: a cap above the band top is clamped to it");
+
+    // ★ MONOTONE: a tighter cap means a COARSER smallest-printable cell. That is the
+    // property which makes it a floor at all, and it is what a path computing the
+    // UNCAPPED number got wrong -- it reported a cell FINER than the job can print.
+    //
+    // NON-STRICTLY monotone, and the reason is the measured table, not an approximation:
+    // the diameter law is CLAMPED above its last measured row (rho 0.60), so every cap
+    // from 0.60 up gives the same floor. My first draft asserted strict increase and went
+    // red at cap 0.60 against 0.80 -- the table's flat top, which is a fact worth pinning
+    // rather than an assumption worth keeping.
+    double prev = 0.0;
+    for (double cap : {0.90, 0.80, 0.60, 0.55, 0.40, 0.30, 0.25, 0.20, 0.10, 0.06}) {
+      const double cell = lattice_min_printable_cell_mm(t, w, cap);
+      CHECK(cell >= prev, "E1: a tighter cap never gives a FINER printable cell");
+      prev = cell;
+    }
+    // Strictly increasing once below the last measured row, where phi really varies.
+    double below = 0.0;
+    for (double cap : {0.55, 0.40, 0.30, 0.25, 0.20, 0.10, 0.06}) {
+      const double cell = lattice_min_printable_cell_mm(t, w, cap);
+      CHECK(cell > below, "E1: and below rho 0.60 a tighter cap is strictly coarser");
+      below = cell;
+    }
+    // THE FLAT TOP ITSELF, pinned: a cap anywhere from the band floor's top region down to
+    // 0.60 buys nothing, because phi is clamped there. If the table ever gains a row above
+    // 0.60 this check reports it instead of the app silently getting a finer floor.
+    CHECK(lattice_min_printable_cell_mm(t, w, 0.60) ==
+              lattice_min_printable_cell_mm(t, w, 0.90),
+          "E1: caps of 0.60 and 0.90 give the SAME floor -- the diameter law is clamped "
+          "above its last measured row, so a cap up there is inert");
+
+    // A cap under the band's own floor admits no measured density: refused, named.
+    bool threw = false;
+    std::string why;
+    try {
+      (void)lattice_min_printable_cell_mm(t, w, 0.5 * lattice_rho_min(t));
+    } catch (const std::exception& e) { threw = true; why = e.what(); }
+    CHECK(threw, "E1: a cap below the band floor is REFUSED, not evaluated off the table");
+    CHECK(why.find("band floor") != std::string::npos && why.find("octet") != std::string::npos,
+          "E1: and the refusal names the band floor and the type");
+    // And a bead that is not a width at all.
+    bool threw_w = false;
+    try { (void)lattice_min_printable_cell_mm(t, 0.0, 0.2); }
+    catch (const std::exception&) { threw_w = true; }
+    CHECK(threw_w, "E1: a non-positive bead is refused");
   }
 
   if (g_failures == 0) {

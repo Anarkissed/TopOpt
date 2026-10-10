@@ -1445,6 +1445,76 @@ int main() {
           "forecast used to report");
   }
 
+  // ── ★ D2: FIT'S CELL FLOOR IS THE CAPPED ONE, SO IT CANNOT COLLIDE WITH L2 ──
+  // #354's D2: Fit's cell floor was UNCAPPED (w/phi(rho_max)) while the L2 check required
+  // rho <= the CAPPED band top, so any Fit region deriving a cell under the capped floor
+  // was predicted to throw with Allow quilt off -- an extent under N* x 2.25 = 11.25 mm at
+  // N* = 5. With the floor routed through lattice_min_printable_cell_mm the two agree:
+  // Fit can never derive a cell the cap forbids, so the collision cannot arise.
+  {
+    const LatticeTopology t = LatticeTopology::Octet;
+    const double w = 0.45;
+    const double cap = octet_aesthetic_density_ceiling();
+    const double n_star = lattice_cells_per_member_min(t);
+    const LatticeCellDerivation capped =
+        lattice_derive_cell_for_member(t, 11.25, w, 0.0, cap);
+    const LatticeCellDerivation uncapped =
+        lattice_derive_cell_for_member(t, 11.25, w, 0.0, 0.0);
+    CHECK(std::fabs(capped.min_printable_cell_mm - 2.25) < 5e-9,
+          "D2: Fit's smallest printable cell at the job's cap is 2.25 mm");
+    CHECK(std::fabs(uncapped.min_printable_cell_mm - 1.173173434) < 5e-9,
+          "D2 premise: uncapped it is 1.173173434 mm -- the number Fit used to use");
+    // The extent D2 names: exactly N* cells at the capped floor, and nearly twice that
+    // uncapped. The uncapped reading is what let Fit claim a cell the cap forbids.
+    CHECK(std::fabs(capped.cells_per_member_at_finest - n_star) < 1e-6,
+          "D2: an 11.25 mm member is exactly N* cells across at the capped floor");
+    CHECK(uncapped.cells_per_member_at_finest > n_star * 1.8,
+          "D2 premise: uncapped the same member reads far more cells across, which is the "
+          "disagreement with the L2 check");
+    // And the floors the caller reads for its verdict move with it, so a region is judged
+    // against the cell the run can actually lay.
+    CHECK(std::fabs(capped.min_member_width_certifiable_mm - n_star * 2.25) < 1e-6,
+          "D2: and the certifiable member width follows the capped floor");
+  }
+
+  // ── ★ D11: ONE FLOOR FOR "IRRECOVERABLE BY ANY CELL SIZE" ───────────────────
+  // It was the LIGHT floor on uniform and swept and the capped dense floor on Fit. At
+  // N* = 5 and a 0.45 mm bead that is "beyond rescue" below 24.66 mm on one path and below
+  // 11.25 mm on another, for the same part. A 15 mm member is too thin for a 4 mm cell, so
+  // it DOES fall back -- but a finer cell can hold it, so it is NOT irrecoverable, and the
+  // light floor said it was. The refusal sentence and the forecast's remedies read this
+  // count, so the two paths recommended different things about the same wall.
+  {
+    const VoxelGrid blk = solid_block(30, 15, 30, 1.0);
+    const std::vector<double> d = density_of(blk);
+    const std::vector<double> dm(d.size(), 0.0);
+    GradingLawParams up;
+    up.topology = LatticeTopology::Octet;
+    up.min_extrudable_width_mm = 0.45;
+    up.target_cell_size_mm = 4.0;      // 15 mm / 4 mm = 3.75 cells, under N* = 5
+    up.demand_exponent = 1.0;
+    const GradedField U = grade_lattice(blk, d, dm, nullptr, up);
+    CHECK(U.fallback_member_too_thin > 0,
+          "D11 premise: the 15 mm member IS too thin for a 4 mm cell, so it falls back");
+    // MEASURED: the thickest member the law rejected here is 16.0 mm, and the light
+    // floor's threshold is N* x 4.931378 = 24.66 mm -- ABOVE it. So under the light floor
+    // every one of these voxels was called irrecoverable by any cell size. Under the dense
+    // floor (N* x 1.173173 = 5.87 mm) only the genuinely thin ones are: the block's
+    // corners, where the local member is a few millimetres across. The assertion is that
+    // ratio, because "0" would be wrong -- some voxels here really are beyond rescue.
+    CHECK(U.fallback_max_member_width_mm > 15.5 && U.fallback_max_member_width_mm < 16.5,
+          "D11 premise: the thickest rejected member is the block's 16 mm one");
+    CHECK(U.fallback_max_member_width_mm <
+              lattice_cells_per_member_min(LatticeTopology::Octet) *
+                  lattice_cell_printability_floor_mm(LatticeTopology::Octet, 0.45),
+          "D11 premise: and it is UNDER the light floor's threshold, so with that floor "
+          "every rejected voxel would read irrecoverable -- which is what makes this a "
+          "discriminating fixture");
+    CHECK(U.fallback_irrecoverable_by_cell * 100 < U.fallback_member_too_thin,
+          "D11: under the dense floor almost none are irrecoverable (measured 8 of 13,500) "
+          "-- only the corners, where the member really is a few mm across");
+  }
+
   std::fprintf(stderr, "grading: %d checks, %d failures\n", g_checks, g_failures);
   return g_failures == 0 ? 0 : 1;
 }

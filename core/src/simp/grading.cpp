@@ -35,6 +35,14 @@ namespace {
 // across. `floor_mm` is the printability floor: below n_star * floor_mm no LEGAL
 // cell exists for this member at all, so the voxel is irrecoverable by any cell
 // choice and any remedy naming a cell size would be a guess.
+//
+// ★ D11: IT MUST BE THE FINEST CELL ANY MODE CAN REACH -- `abs_floor_mm`, the dense
+// floor at the job's cap -- and the same one on every path. Uniform and swept used to
+// pass the LIGHT floor (w/phi(rho_min), 4.931 mm on octet at a 0.45 mm bead) while Fit
+// passed the capped dense floor (2.25 mm). With N* = 5 that is "irrecoverable" declared
+// below 24.66 mm on one path and below 11.25 mm on another, for the same part: a member
+// of 15 mm was called beyond rescue on uniform while Fit could in fact reach it. The
+// refusal sentence and the forecast's remedies both read this count.
 void note_member_too_thin(GradedField& out, double width_mm, double n_star,
                           double floor_mm) {
   ++out.fallback_member_too_thin;
@@ -280,8 +288,10 @@ GradedField grade_lattice(const VoxelGrid& grid,
   // in the limit — rather than to 0, which would silently emit an under-width strut.
   // The same resolution lattice_derive_cell_for_member applies, for the same reason.
   auto print_rho_floor = [&](double S) {
+    // ★ D1: the job's cap, so the floor handed out is the floor grade_lattice applies.
     const double r = lattice_min_density_for_strut(topo, S,
-                                                   params.min_extrudable_width_mm);
+                                                   params.min_extrudable_width_mm,
+                                                   params.max_relative_density);
     return r >= 0.0 ? r : rho_hi;
   };
   out.cell_size_mm = cell;
@@ -720,7 +730,9 @@ GradedField grade_lattice(const VoxelGrid& grid,
         // the printability floor by construction (`uniform_cell` above), so no
         // voxel can be rejected for an unprintable strut. A receipt reading
         // `unprintable: 0` on this path means "impossible here", not "none today".
-        note_member_too_thin(out, width[e], n_star, floor_mm);
+        // ★ D11: the capped dense floor, the same one Fit passes -- it is the finest
+        // cell any mode can reach, so it is what "irrecoverable by ANY cell" means.
+        note_member_too_thin(out, width[e], n_star, abs_floor_mm);
         continue;
       }
 
@@ -801,6 +813,7 @@ GradedField grade_lattice(const VoxelGrid& grid,
 
     if (s_max > 0.0) {
       CellPlanParams pp;
+      pp.max_relative_density = params.max_relative_density;  // D1: the cap reaches the plan
     // ★ The planner chooses the CELL; relaxing only grade_lattice's post-hoc check
     // would change nothing (measured: +0 voxels). It receives the LOOSEST floor the
     // adaptive rule permits anywhere; each voxel is still held to its OWN requirement
@@ -923,6 +936,7 @@ GradedField grade_lattice(const VoxelGrid& grid,
     }
 
     CellPlanParams pp;
+    pp.max_relative_density = params.max_relative_density;  // D1: the cap reaches the plan
     // ★ The planner chooses the CELL; relaxing only grade_lattice's post-hoc check
     // would change nothing (measured: +0 voxels). It receives the LOOSEST floor the
     // adaptive rule permits anywhere; each voxel is still held to its OWN requirement
@@ -1064,7 +1078,9 @@ GradedField grade_lattice(const VoxelGrid& grid,
           continue;
         }
         ++out.solid_fallback_voxels;
-        note_member_too_thin(out, width[e], n_star, floor_mm);
+        // ★ D11: the capped dense floor, the same one Fit passes -- it is the finest
+        // cell any mode can reach, so it is what "irrecoverable by ANY cell" means.
+        note_member_too_thin(out, width[e], n_star, abs_floor_mm);
         continue;
       }
       const double rho = clamp_rho(e, rho_of(e));

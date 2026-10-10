@@ -943,7 +943,11 @@ LatticeRoleRegions lattice_role_regions_from_job(const JobDescription& job,
   LatticeRoleRegions rr;
   std::vector<ResolvedFaceRegion> resolved;
   bool resolved_done = false;
+  // ★ K6: every DECLARED include is numbered, including one that fails to resolve, so
+  // the id survives the skip below.
+  int declared_include = 0;
   for (const JobLatticeRegion& r : job.lattice.regions) {
+    if (r.role == "include") ++declared_include;
     if (r.kind == "region") {
       if (model == nullptr || grid == nullptr)
         throw JobError(
@@ -978,7 +982,8 @@ LatticeRoleRegions lattice_role_regions_from_job(const JobDescription& job,
             " mm). It would lattice nothing and report success; it is refused "
             "instead. Use a coarser depth, a finer resolution, or a region that "
             "reaches part material.");
-      (r.role == "include" ? rr.includes : rr.excludes).push_back(std::move(g));
+      g.declared_region_id = r.role == "include" ? declared_include : 0;
+    (r.role == "include" ? rr.includes : rr.excludes).push_back(std::move(g));
       continue;
     }
     ManualClearanceGeometry mg;
@@ -1218,9 +1223,14 @@ struct FitRegionCell {
 // r0_density_range.txt.
 void fill_fit_region_cell(FitRegionCell& f, LatticeTopology topo,
                           double min_extrudable_width_mm, double n_star,
-                          double stated_density = 0.0) {
-  const LatticeCellDerivation d =
-      lattice_derive_cell_for_member(topo, f.extent_mm, min_extrudable_width_mm);
+                          double stated_density = 0.0,
+                          // ★ D1: the job's density cap. Fit's cell floor and its derived
+                          // density both hang off the smallest printable cell, and that is
+                          // the capped one -- `fit.min_printable_cell_mm` was the capped
+                          // number while the per-region receipt printed the uncapped one.
+                          double max_relative_density = 0.0) {
+  const LatticeCellDerivation d = lattice_derive_cell_for_member(
+      topo, f.extent_mm, min_extrudable_width_mm, 0.0, max_relative_density);
   f.min_printable_cell_mm = d.min_printable_cell_mm;
   f.min_width_certifiable_mm = d.min_member_width_certifiable_mm;
   f.min_width_buildable_mm = d.min_member_width_buildable_mm;
@@ -1230,9 +1240,16 @@ void fill_fit_region_cell(FitRegionCell& f, LatticeTopology topo,
   f.feasible = d.feasible_percolation;
   if (!f.feasible) return;
   f.cell_mm = std::max(f.extent_mm / n_star, d.min_printable_cell_mm);
-  const double rho =
-      lattice_min_density_for_strut(topo, f.cell_mm, min_extrudable_width_mm);
-  f.derived_relative_density = rho >= 0.0 ? rho : lattice_rho_max(topo);
+  const double rho = lattice_min_density_for_strut(
+      topo, f.cell_mm, min_extrudable_width_mm, max_relative_density);
+  // ★ D1: when nothing in the band prints at this cell the fallback is the densest the
+  // JOB allows, not the band's top -- reporting a density the job forbids is the same
+  // defect one line up.
+  const double band_top_allowed =
+      (std::isfinite(max_relative_density) && max_relative_density > 0.0)
+          ? std::min(lattice_rho_max(topo), max_relative_density)
+          : lattice_rho_max(topo);
+  f.derived_relative_density = rho >= 0.0 ? rho : band_top_allowed;
   f.stated_relative_density = stated_density;
   f.relative_density =
       stated_density > 0.0 ? stated_density : f.derived_relative_density;
@@ -1274,7 +1291,8 @@ std::vector<FitRegionCell> fit_region_cells(const JobDescription& job,
       f.extent_mm =
           region_thinnest_extent_mm(*roles->includes[include_index].mask);
       fill_fit_region_cell(f, topo, min_extrudable_width_mm, n_star,
-                           r.relative_density);
+                           r.relative_density,
+                                                                                                job.grading.max_relative_density);
       out.push_back(f);
       ++include_index;
       continue;
@@ -1309,7 +1327,8 @@ std::vector<FitRegionCell> fit_region_cells(const JobDescription& job,
     f.job_region_index = ri;
     f.extent_mm = lattice_region_thinnest_extent_mm(r);
     fill_fit_region_cell(f, topo, min_extrudable_width_mm, n_star,
-                         r.relative_density);
+                         r.relative_density,
+                                                                                            job.grading.max_relative_density);
     out.push_back(f);
   }
   return out;
@@ -1558,9 +1577,9 @@ double planned_cell_mm(const JobDescription& job, bool swept_light_floor) {
   const double floor_mm = lattice_cell_printability_floor_mm(
       topo, job.grading.min_extrudable_width_mm);
   // S2: the cell below which NO density in the band prints — the bound Fixed applies.
-  const double abs_floor_mm =
-      job.grading.min_extrudable_width_mm /
-      lattice_strut_diameter_mm(topo, lattice_rho_max(topo), 1.0);
+  // ★ D1: ONE function, and it takes the cap. This was the UNCAPPED floor.
+  const double abs_floor_mm = lattice_min_printable_cell_mm(
+      topo, job.grading.min_extrudable_width_mm, job.grading.max_relative_density);
   CellSizeMode mode = CellSizeMode::Fixed;
   if (!resolve_cell_mode(job.grading.cell_mode, mode))
     return floor_mm;  // unknown mode is refused downstream; report the floor
@@ -1587,7 +1606,8 @@ double planned_cell_mm(const JobDescription& job, bool swept_light_floor) {
                  : cell_plan_finest_printable_cell_mm(
                        topo, job.grading.cell_min_mm,
                        job.grading.cell_max_mm,
-                       job.grading.min_extrudable_width_mm);
+                       job.grading.min_extrudable_width_mm,
+                       job.grading.max_relative_density);  // D1: the cap
     case CellSizeMode::Fit: {
       double finest = 0.0;
       for (const FitRegionCell& f :
@@ -6078,8 +6098,9 @@ LatticeVariantOutcome lattice_one_variant(
 
       const double w_min = job.grading.min_extrudable_width_mm;
       const double n_star = lattice_cells_per_member_min(LatticeTopology::Octet);
-      const double phi_hi = lattice_strut_diameter_mm(lat_topo, 
-          lattice_rho_max(LatticeTopology::Octet), 1.0);
+      // ★ D1: phi at the densest density THE JOB allows, not the band's top.
+      const double phi_hi =
+          w_min / lattice_min_printable_cell_mm(lat_topo, w_min, job.grading.max_relative_density);
 
       for (int want : ids_to_report) {
         LatticeGradedReceipt::RegionCellReport rc;
@@ -6110,10 +6131,11 @@ LatticeVariantOutcome lattice_one_variant(
         // 0 when the part carries no demand at all — the same convention the law
         // uses, and the reason retention disarms itself in that case.
         rc.stress_fraction = part_peak > 0.0 ? peak / part_peak : 0.0;
-        rc.at_thinnest =
-            lattice_derive_cell_for_member(LatticeTopology::Octet, tmin, w_min);
-        rc.at_thickest =
-            lattice_derive_cell_for_member(LatticeTopology::Octet, tmax, w_min);
+        // ★ D1: with the job's cap, so the row reports the floor the run applies.
+        rc.at_thinnest = lattice_derive_cell_for_member(
+            LatticeTopology::Octet, tmin, w_min, 0.0, job.grading.max_relative_density);
+        rc.at_thickest = lattice_derive_cell_for_member(
+            LatticeTopology::Octet, tmax, w_min, 0.0, job.grading.max_relative_density);
 
         // ── THE VERDICT, resolved from measurements only, in the order §2 states.
         // A region carrying load is kept solid by the law regardless of geometry,
@@ -6989,91 +7011,73 @@ LatticeVariantOutcome lattice_one_variant(
   // the next push_back, leaving every earlier pass reading freed memory.
   std::deque<std::vector<double>> anystep_rho;
   if (!job.lattice.stepped_cells.empty()) {
-    // ★ THE FRAME IS DERIVED, NOT SENT. A cell names a region by its 1-based
-    // include-region order and states its origin in MODEL space, so the base cell comes
-    // from the stepped step's own answer for that region and the prism from the region's
-    // geometry. Nothing for the app to keep in step, and nothing that can disagree.
+    // ── ★ K1: THE BASE PER REGION IS THE APP'S, FOR BOTH MENUS ──────────────────
+    // (#354's map of 2026-10-08, reviewer's ruling of the same day.) This had TWO paths.
+    // Doubled took the region's LARGEST SENT CELL -- the app's own rule. Any-step took
+    // `R.stepped.cells`, the cell core's stepped step derives from that region's FEA
+    // density and member width. So every app-sent any-step plan was validated against a
+    // number the app never used, and #354 expected "not on that region's menu" on every
+    // project.
+    //
+    // There is now ONE path, and it is the app's: the largest cell the region placed IS
+    // the top of the ladder it halved, so the ladder is checked against the list's own
+    // evidence and core still validates rather than re-plans. A region that placed only
+    // fine cells simply has a lower top, and its cells still have to be steps of it.
+    //
+    // AND IT SEVERS A DEPENDENCY K3 NEEDS. Built from `R.stepped.cells`, the plan could
+    // not be read until core's grading had produced a mask and the stepped step had run
+    // on it -- which is exactly the gating K3 removes. Built from the job, the plan's
+    // frame depends on nothing but the job.
     std::vector<SteppedPlanRegion> plan_regions;
-    for (const SteppedRegionCell& rc : R.stepped.cells) {
-      SteppedPlanRegion pr;
-      pr.region_id = rc.region_id;
-      pr.base_cell_mm = rc.cell_mm;
-      // ★ BY INCLUDE ORDER, NOT BY POSITION (#354, 2026-09-30). `rc.region_id`
-      // counts INCLUDE regions; `regions[region_id - 1]` counted ALL of them, so one
-      // exclude declared first handed this plan the exclude's prism. See
-      // job_include_region().
-      const JobLatticeRegion* jr =
-          job_include_region(job.lattice.regions, rc.region_id);
-      // ★ A CAN'T-HAPPEN STILL REFUSES (reviewer, 2026-09-30). `rc.region_id` comes
-      // from the run's own per-voxel ids, so an id with no include region is not
-      // reachable today. Leaving the frame at zero was still the wrong failure mode:
-      // `depth_mm` 0 means "skip the depth test" in stepped_validate_plan, so a plan
-      // would be validated against a prism that does not exist and pass the one check
-      // that would have caught it. Name the id and the count instead.
-      if (jr == nullptr) {
-        int includes = 0;
-        for (const JobLatticeRegion& q : job.lattice.regions)
-          if (q.role == "include") ++includes;
-        throw JobError(
-            "the stepped step derived a cell for include region " +
-            std::to_string(rc.region_id) + ", but this job declares " +
-            std::to_string(includes) +
-            " include region(s). A region id is a 1-based position among the INCLUDE "
-            "regions (see job_include_region), so this run cannot say which wall that "
-            "cell belongs to and will not guess.");
-      }
-      // ★ R1: THE SENT SLOT ORIGIN WINS. Where the app states the grid it packed on,
-      // that grid is what every check and the laying measure from -- alignment, depth,
-      // overlap, grouping (stepped_group_cells walks back from this point) and the
-      // region the run lays. Absent, the region origin stands, which is what every
-      // existing job gets. Its in-plane-ness is settled at parse time (job.cpp).
-      pr.slot_origin = jr->slot_origin_stated ? jr->slot_origin_mm : jr->origin;
-      pr.normal = jr->normal;
-      pr.depth_mm = jr->depth_mm;
-      plan_regions.push_back(pr);
-    }
-    // ★ RULING A: DOUBLED SENDS ITS CELLS TOO, and its base is not a per-region answer.
-    // The stepped step derives one cell per region from that region's own FEA density
-    // and member width; the dyadic grade has no such step -- its base is the job's
-    // stated target cell, the top of the halving ladder. So when the stepped step did
-    // not run (which is exactly the doubled case), the frame comes from the declared
-    // regions directly. Include regions only, in the job's own order, which is the
-    // 1-based region_id the cells name.
-    const bool doubled_plan = plan_regions.empty();
-    if (doubled_plan) {
-      // ★ THE BASE IS PER REGION, AND IT COMES OUT OF THE LIST (app, 2026-09-20).
-      // This first took grading.cell_mm, which is ONE number -- and the app's doubled
-      // cells carry a base per region (his stand: 12 mm on one wall, 10.31 on the
-      // other, by the 09-17 rule). A single ladder from one target therefore refused
-      // the 10.31 wall outright.
+    {
+      // ★ K1 CORRECTED (reviewer, 2026-10-09). An earlier cut INFERRED the base as the
+      // region's largest sent cell. That is a silent substitute: a region need not contain
+      // a base-size cell at all. Measured on 3418E167's Aesthetic Stepped plan, region 1
+      // sends only 3.5 mm and 4.6667 mm cells while the app's base is 7 mm -- so the
+      // inference guessed 4.6667 and every menu, alignment and grouping check below ran
+      // against a ladder the app never used. (It also put the sizes a hair off: 3/4 of a
+      // rounded 4.6667 is 3.500025, not the 3.5 the plan sends.)
       //
-      // The base is the region's own LARGEST SENT CELL. Not re-derived from the FEA:
-      // the stepped derivation answers a different question and could disagree with
-      // the base the app actually packed against, which would refuse a plan for
-      // differing from a number the app never used. The largest cell the app placed
-      // IS the top of the ladder it halved, so the ladder is checked against the
-      // list's own evidence and core still validates rather than re-plans. A region
-      // that placed only fine cells simply has a lower top, and its cells still have
-      // to be halvings of it.
-      std::map<int, double> base_of;
-      for (const SteppedCell& c : job.lattice.stepped_cells) {
-        double& b = base_of[c.region_id];
-        if (c.size_mm > b) b = c.size_mm;
-      }
+      // The base now travels on the wire, per region, and a region the plan places cells
+      // in MUST carry it. Refused by name otherwise -- production sends no plans yet, so
+      // nothing in the field breaks, and a plan without it would otherwise be checked
+      // against a guess.
+      std::set<int> planned_regions;
+      for (const SteppedCell& c : job.lattice.stepped_cells)
+        planned_regions.insert(c.region_id);
       int include_index = 0;
       for (const JobLatticeRegion& jr : job.lattice.regions) {
         if (jr.role != "include") continue;
         ++include_index;
         SteppedPlanRegion pr;
         pr.region_id = include_index;
-        auto bi = base_of.find(include_index);
-        pr.base_cell_mm = bi != base_of.end() ? bi->second : job.grading.cell_mm;
+        if (planned_regions.count(include_index) && !(jr.plan_base_cell_mm > 0.0))
+          throw JobError(
+              "lattice region " + std::to_string(include_index) + " (face " +
+              std::to_string(jr.face_id) +
+              ") carries " + std::to_string(std::count_if(
+                                 job.lattice.stepped_cells.begin(),
+                                 job.lattice.stepped_cells.end(),
+                                 [&](const SteppedCell& c) {
+                                   return c.region_id == include_index;
+                                 })) +
+              " planned cell(s) but no \"plan_base_cell_mm\". That is the slot size the "
+              "ladder was built on, and core cannot infer it: a region need not contain a "
+              "base-size cell, so the largest cell sent is a guess and every menu, "
+              "alignment and grouping check would be run against a ladder you never used. "
+              "State it on the region.");
+        pr.base_cell_mm = jr.plan_base_cell_mm > 0.0 ? jr.plan_base_cell_mm
+                                                     : job.grading.cell_mm;
         // ★ R1: THE SENT SLOT ORIGIN WINS. Where the app states the grid it packed on,
         // that grid is what every check and the laying measure from -- alignment, depth,
         // overlap, grouping (stepped_group_cells walks back from this point) and the
         // region the run lays. Absent, the region origin stands, which is what every
         // existing job gets. Its in-plane-ness is settled at parse time (job.cpp).
         pr.slot_origin = jr.slot_origin_stated ? jr.slot_origin_mm : jr.origin;
+        // ★ K2: the region's own plane, which DEPTH is measured from -- the slot origin
+        // above is only the grid phase and may stand off the plane on a tilted facet.
+        pr.plane_origin = jr.origin;
+        pr.plane_origin_stated = true;
         pr.normal = jr.normal;
         pr.depth_mm = jr.depth_mm;
         plan_regions.push_back(pr);
@@ -7083,9 +7087,18 @@ LatticeVariantOutcome lattice_one_variant(
     // beside the floor; structural drops it, because the certificate solves every strut
     // rather than averaging them and nothing structural depends on a cell looking open.
     const bool prints_open = job.grading.intent == "aesthetic";
-    const double tile_floor = job.grading.stepped_min_tile_mm > 0.0
-                                  ? job.grading.stepped_min_tile_mm
-                                  : job.grading.min_extrudable_width_mm;
+    // ★ D5: THE TILE FLOOR IS THE SMALLEST CELL THAT PRINTS, not the bead. A tile wider
+    // than one bead is not therefore printable: the strut it carries at the densest
+    // density the job allows still has to clear that bead, which is exactly
+    // lattice_min_printable_cell_mm (E1). A doubled job cannot carry
+    // `stepped_min_tile_mm` at all (job.cpp refuses the key), so its floor WAS just over
+    // the bead -- 0.45 mm where the real floor is 2.25 mm at the job's cap.
+    const double printable_floor = lattice_min_printable_cell_mm(
+        lat_topo, job.grading.min_extrudable_width_mm, job.grading.max_relative_density);
+    const double tile_floor = std::max(printable_floor,
+                                       job.grading.stepped_min_tile_mm > 0.0
+                                           ? job.grading.stepped_min_tile_mm
+                                           : 0.0);
     // ★ RULING A: which MENU the plan is validated against. Doubled admits only the
     // halving ladder; any-step admits every k*(S/n). Same validator, same grid, prism
     // and overlap checks -- the menu is the only difference, and it is the difference
@@ -7100,7 +7113,8 @@ LatticeVariantOutcome lattice_one_variant(
                               // ★ the include geometry, so a cross-region overlap at a
                               // mitre can be told from a real collision: each cell's
                               // centre must be owned by its own region (ruling 4).
-                              &lattice_roles.includes);
+                              &lattice_roles.includes,
+                              job.grading.max_relative_density);  // D5: the cap
     if (!chk.ok)
       throw JobError("lattice \"stepped_cells\": " + chk.error +
                      ". Core validates the plan and does not repack it -- the run lays "
@@ -11334,8 +11348,9 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
       // own gate table.
       std::string swept_unprintable_note;
       if (job.grading.present && pf_mode == CellSizeMode::Swept && w_min_fc > 0.0) {
+        // ★ D1: the swept frontier is the capped floor -- the plan can lay no rung below it.
         const double frontier_mm =
-            w_min_fc / lattice_strut_diameter_mm(topo, lattice_rho_max(topo), 1.0);
+            lattice_min_printable_cell_mm(topo, w_min_fc, job.grading.max_relative_density);
         if (job.grading.cell_max_mm < frontier_mm)
           swept_unprintable_note =
               "\n     ★ AND SEPARATELY: your whole swept window (" +
@@ -11586,8 +11601,8 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
           include_regions > 0 && w_min_fc > 0.0 && !(pf_fit && fit_any_feasible);
       if (pf_decidable) {
         const double perc_floor = lattice_percolation_cells_per_member_min(topo);
-        const LatticeCellDerivation d =
-            lattice_derive_cell_for_member(topo, thinnest_mm, w_min_fc);
+        const LatticeCellDerivation d = lattice_derive_cell_for_member(
+            topo, thinnest_mm, w_min_fc, 0.0, job.grading.max_relative_density);
         // Does the PLANNED cell percolate across the thinnest declared region?
         const double planned_cpm = thinnest_mm / cell_mm;
         const bool planned_percolates = planned_cpm >= perc_floor;
@@ -11613,7 +11628,7 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
               json_num(d.min_member_width_certifiable_mm) +
               " mm for a CERTIFIED one — or use a strut line width of at most " +
               json_num((thinnest_mm / perc_floor) *
-                       lattice_strut_diameter_mm(topo, lattice_rho_max(topo), 1.0)) +
+                       (w_min_fc / lattice_min_printable_cell_mm(topo, w_min_fc, job.grading.max_relative_density))) +
               " mm. Your thinnest region has " + json_num(thinnest_mm) +
               " mm. Both are your call, not this pipeline's.";
           std::string why =
@@ -11701,8 +11716,7 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
           // this message names is a remedy the code path no longer overrides.
           if (job.grading.present)
             why += "     A graded cell is raised only to " +
-                   json_num(w_min_fc / lattice_strut_diameter_mm(topo, 
-                                           lattice_rho_max(topo), 1.0)) +
+                   json_num(lattice_min_printable_cell_mm(topo, w_min_fc, job.grading.max_relative_density)) +
                    " mm (the cell below which no density in the band prints), and "
                    "the density is raised with it so the strut still clears your "
                    "strut line width.\n";

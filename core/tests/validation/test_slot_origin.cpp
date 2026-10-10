@@ -93,16 +93,62 @@ int main() {
   CHECK(has(ab_text, "0.4"),
         "which reports the offset from the grid core used (0.4 mm, the base cell's)");
 
-  // ── stated, but out of the face plane: refused, and it says which region ────
+  // ── ★ K2: STATED OFF THE FACE PLANE IS A PHASE, NOT AN ERROR ────────────────
+  // This block asserted a REFUSAL until 2026-10-09. The reviewer corrected the ruling it
+  // came from (2026-10-05 -> 2026-10-08): requiring the slot origin to lie in the face
+  // plane is wrong for a TILTED facet, whose grid in the app is world-aligned, so the
+  // point it packed from legitimately stands off the plane. Forcing it on would make the
+  // app re-anchor tilted ladders and change the preview the maintainer approved.
+  //
+  // What must hold instead is the property that makes the two jobs separable: the slot
+  // origin sets the PHASE and cannot move the PRISM. The fixture's origin stands one base
+  // cell inward along the normal, and its cells sit at y 0..3 and 0..1.5 of a 12 mm prism
+  // -- inside, measured from the region's own plane. Measured from the slot origin, as
+  // core did before K2, their centres project to -1.5 and -2.25 and the plan was refused.
+  // So this one case distinguishes the two readings on its own.
   std::string off_text;
   const int off_rc = run_job("slot_origin_off_plane", off_text);
-  CHECK(off_rc != 0, "a slot origin off the face plane is REFUSED, not projected onto it");
-  CHECK(has(off_text, "slot_origin_mm"), "the refusal names the key it is refusing");
-  CHECK(has(off_text, "face plane"), "and says what is wrong with it");
-  CHECK(has(off_text, "region"),
-        "and names the region, so a plan with many walls says which one");
-  // The distance is the number to act on -- the fixture states it 2 mm out.
-  CHECK(has(off_text, "2"), "and reports how far along the normal it stands");
+  CHECK(off_rc == 0,
+        "K2: a slot origin off the face plane is a grid PHASE and is accepted");
+  CHECK(off_text.find("face plane") == std::string::npos,
+        "K2: and nothing refuses it for leaving the plane");
+  CHECK(off_text.find("outside its") == std::string::npos,
+        "K2: nor for leaving the prism -- depth is measured from the region's own plane, "
+        "so moving the phase along the normal cannot shift the prism");
+
+  // ── ★ K1: THE PLAN'S BASE CELL TRAVELS ON THE WIRE ──────────────────────────
+  // This file is where the per-region PLAN KEYS are tested through a run, so the base
+  // belongs here beside the slot origin it is sent next to.
+  //
+  // An earlier cut of K1 INFERRED the base as the region's largest sent cell. That is a
+  // silent substitute: a region need not contain a base-size cell. On 3418E167's real
+  // Aesthetic Stepped plan, region 1 sends 3.5 mm and 4.6667 mm cells while the app's base
+  // is 7 mm, so the inference guessed 4.6667 and ran every menu, alignment and grouping
+  // check against a ladder the app never used -- and put the sizes a hair off too, since
+  // three quarters of a rounded 4.6667 is 3.500025 rather than the 3.5 the plan sends.
+  std::string miss_text;
+  CHECK(run_job("plan_base_missing", miss_text) != 0,
+        "K1: a planned region with no plan_base_cell_mm is REFUSED, not guessed at");
+  CHECK(miss_text.find("plan_base_cell_mm") != std::string::npos,
+        "K1: and the refusal names the key it needs");
+  CHECK(miss_text.find("region 1") != std::string::npos,
+        "K1: and the region, so a plan with many walls says which");
+  CHECK(miss_text.find("cannot infer") != std::string::npos,
+        "K1: and says WHY core will not fill it in -- a region need not contain a "
+        "base-size cell");
+
+  // ★ AND THE STATED BASE IS THE ONE USED, proved through the refusal's own words rather
+  // than by an acceptance. This fixture is 3418E167's shape: cells of 3.5 and 4.6667 on a
+  // 7 mm base. It is refused -- 4.6667 needs divisor 3, which the prints-open rule drops at
+  // base 7 -- and the message must quote BASE 7. Under the old inference it quoted 4.667.
+  std::string used_text;
+  CHECK(run_job("plan_base_used", used_text) != 0,
+        "K1 premise: that plan is refused on the menu, which is what makes the message "
+        "readable as evidence");
+  CHECK(used_text.find("base 7 mm") != std::string::npos,
+        "K1: the validator was given the SENT base (7 mm), not the largest sent cell");
+  CHECK(used_text.find("base 4.667 mm") == std::string::npos,
+        "K1: and not the inferred one -- this is the string the old cut produced");
 
   std::printf("%s: %d checks, %d failures\n", g_failures == 0 ? "PASS" : "FAIL", g_checks,
               g_failures);
