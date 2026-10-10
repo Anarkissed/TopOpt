@@ -61,9 +61,16 @@ extension FlexibleStageModel {
     /// group, a merge, [Pressed] on a resting face) — the tab open, the face selected and the group
     /// that plays can never disagree. The [Model] and [+] tabs stay put.
     func syncRail() {
-        if rail == .model || rail == .newGroup || rail == .pending { return }
+        if rail == .pending { leaveAnEmptyPendingTab(); return }
+        if rail == .model || rail == .newGroup { return }
         let t = railTab(for: selectedRegion)
         if t != rail { rail = t }
+    }
+
+    /// ★ ROUND 6 (item 4): the Pending tab with nothing left on it (both fixes used, an undo) falls back to the first group.
+    func leaveAnEmptyPendingTab() {
+        guard rail == .pending, pendingGroups.isEmpty else { return }
+        rail = .group(squeezeGroups.first?.id ?? FlexibleSqueezeGroups.first)
     }
 
     /// The group the tab `.group(id)` shows — nil when that group is gone (the rail falls back).

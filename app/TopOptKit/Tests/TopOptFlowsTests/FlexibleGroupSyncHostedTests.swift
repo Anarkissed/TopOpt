@@ -132,6 +132,12 @@ final class FlexibleGroupSyncHostedTests: XCTestCase {
             snapshot(h, "I4_\(tag)_settings_pending_tab.png")
         }
         print("FLEX-I4 pending tab: " + lines.joined(separator: " · "))
+        // [It rests] used the last Pending group: the tab is left (never an empty Pending tab)
+        let d = try XCTUnwrap(m.pendingGroups.first?.id)
+        m.restPending(d)
+        XCTAssertTrue(m.pendingGroups.isEmpty)
+        XCTAssertNotEqual(m.rail, .pending, "★ no empty Pending tab")
+        XCTAssertFalse(FlexibleSettingsRailView.tabs(model: m).contains { $0.tab == .pending })
     }
 
     // MARK: - the anchored face asks once, in its card

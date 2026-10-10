@@ -400,6 +400,8 @@ extension FlexibleStageModel {
         if let e = entry, e.role == .rests, restsConfirmed != region {
             restsAsk = FlexibleRestsAsk(region: region, anchorName: e.groupName, faceName: displayName(region), kg: kg, into: groupID)
             selectedRegion = region
+            let t = railTab(for: region)   // the card that asks is on screen (its Rests tab)
+            if rail != t { rail = t }
             return true
         }
         let inherited = entry.flatMap { $0.role == .pressed ? $0 : nil }
@@ -580,8 +582,12 @@ extension FlexibleStageModel {
 
     /// A squeeze group's tab title: its one hand's name; with several, "Group N".
     public func railTitle(_ g: FlexibleSqueezeGroup) -> String {
-        let hs = handIDs(g)
-        if hs.count == 1, let n = project.selection.groups.first(where: { $0.id == hs[0] })?.name { return FlexibleRowCopy.fit(n, 14) }
+        let s = settings
+        let hs = handIDs(g, in: s)
+        // its one hand's name only while that hand IS the group (a face of it out of every main-page Load group — moved
+        // into a Pending group on the main page, say — makes it "Group N" again)
+        if hs.count == 1, g.regions.allSatisfy({ s.face($0)?.weightFrom == hs[0] }), g.presses.isEmpty,
+           let n = project.selection.groups.first(where: { $0.id == hs[0] })?.name { return FlexibleRowCopy.fit(n, 14) }
         return FlexibleRowCopy.groupName(g.number)
     }
 

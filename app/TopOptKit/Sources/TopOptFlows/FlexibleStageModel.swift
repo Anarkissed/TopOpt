@@ -566,6 +566,7 @@ public final class FlexibleStageModel: ObservableObject {
     /// (the Settings page's undo / redo restored the project; the cache must follow it).
     public func refreshMainPageLoads() {
         if let loads = deriveMainPageLoads(), loads != mainPageLoads { mainPageLoads = loads }
+        leaveAnEmptyPendingTab()   // ★ ROUND 6 (item 4): an undo can empty the Pending tab
     }
 
     /// ★ D2 REVIEW: the adopt, then the squeeze groups kept whole — a face the main page rests
