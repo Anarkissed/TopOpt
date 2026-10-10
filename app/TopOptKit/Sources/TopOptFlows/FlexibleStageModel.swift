@@ -140,6 +140,8 @@ public final class FlexibleStageModel: ObservableObject {
     var squishWorker: FlexibleWorker { worker }
     /// ★ ANGLED PRESSES (AP1): the worker FlexiblePressReframe reads core's frames through.
     var frameWorker: FlexibleWorker { worker }
+    /// ★ ANGLED PRESSES (AP2): FlexibleMeet and core's answers about it, per mesh and per open scene (+Meet).
+    let meetCache = FlexibleMeetCache()
 
     // what the screens show
     @Published public private(set) var catalogue: [FlexMaterialInfo] = []

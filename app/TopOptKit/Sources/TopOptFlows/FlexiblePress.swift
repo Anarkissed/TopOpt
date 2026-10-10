@@ -49,7 +49,13 @@ public struct FlexiblePress: Codable, Equatable, Hashable, Sendable, Identifiabl
     /// default is the AREA-weighted union normal, not the halfway). Stored exactly as given — never
     /// re-normalised here, so a snap that landed bit-exactly on its target stays there.
     public var direction: SIMD3<Double>
-    /// The snap it was released on: "halfway" | "face:<region>" | "build" | nil (free). See `Snap`.
+    /// ★ THE SNAP KIND (AP3, amended by A4/A8): the target the arrow was last put on — "halfway" (an edge or
+    /// a corner), "straighten" (a 1-region press's own core normal), "build:down" / "build:up" (core's build
+    /// direction, both senses) — or nil (free: a knob drag released away from every target). It stays while
+    /// the degrees box tilts the arrow off it (the box measures FROM it); the arrow is ON it exactly when the
+    /// direction's bits are the target's (`FlexiblePressAim.on`). AP1's "face:<region>" and "build" still
+    /// decode (no migration) but are never offered: a multi-face press never snaps to a member's own normal
+    /// (A4, core refuses edge-on). OPTIONAL, omitted when nil. See `Snap`.
     public var snap: String?
     /// Everything else, as a face press saves it (curves, deepest, shape, stamp, squeeze group, weight
     /// and its link): faceRegionID == regions[0], role "loaded", rotationDeg 0.
@@ -95,14 +101,25 @@ public struct FlexiblePress: Codable, Equatable, Hashable, Sendable, Identifiabl
 
     /// The snap, typed (the stored string is the file's form).
     public enum Snap: Equatable, Hashable, Sendable {
+        /// An edge's or a corner's halfway: Σ core's per-member inward normals, normalised.
         case halfway
+        /// AP1's member-face snap: still decodes, never offered (A4).
         case face(Int)
+        /// AP1's build snap (no sense): still decodes, never offered (A8 names the sense).
         case build
+        /// ★ AP3 (A4): a 1-region press on its own core normal — [Straighten].
+        case straighten
+        /// ★ AP3 (A8): build Z both ways — straight down (−core's build direction) and straight up (+).
+        case buildDown
+        case buildUp
         public init?(_ raw: String?) {
             guard let raw else { return nil }
             switch raw {
             case "halfway": self = .halfway
             case "build": self = .build
+            case "straighten": self = .straighten
+            case "build:down": self = .buildDown
+            case "build:up": self = .buildUp
             default:
                 guard raw.hasPrefix("face:"), let r = Int(raw.dropFirst("face:".count)) else { return nil }
                 self = .face(r)
@@ -113,6 +130,9 @@ public struct FlexiblePress: Codable, Equatable, Hashable, Sendable, Identifiabl
             case .halfway: return "halfway"
             case .build: return "build"
             case .face(let r): return "face:\(r)"
+            case .straighten: return "straighten"
+            case .buildDown: return "build:down"
+            case .buildUp: return "build:up"
             }
         }
     }
@@ -142,7 +162,8 @@ public struct FlexiblePress: Codable, Equatable, Hashable, Sendable, Identifiabl
         switch snapTarget {
         case .halfway?: snap = nil
         case .face(let r)?: if !members.contains(r) { snap = nil }
-        case .build?, nil: break
+        case .straighten?: snap = nil   // AP3: its own normal was the OLD footprint's
+        case .build?, .buildDown?, .buildUp?, nil: break
         }
         return true
     }

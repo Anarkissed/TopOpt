@@ -640,4 +640,88 @@ int32_t flexible_squish_coarsen(int32_t nx, int32_t ny, int32_t nz);
 // configure_production_options leaves it. Returns the previous setting.
 bool flexible_squish_set_geneo_for_tests(bool enable);
 
+// ---------------------------------------------------------------------------
+// ★ ANGLED PRESSES AP2 — WHICH FACES MEET (task 2026-10-07; final spec §5, §6). Three THIN pass-throughs
+// over the open scene's model, each run under bridge.cpp's one guard (bridge_guard.hpp): a core throw
+// fills `err` with core's words and returns the empty value, never crosses into Swift. Nothing here
+// computes a frame, a normal or an adjacency of its own: every number is core's.
+
+// Core's `topopt::face_adjacency(model)` (face_region.hpp): face f touches face g iff a triangle of f
+// and a triangle of g share a WELDED mesh edge. Face f's neighbours (ascending, no self) are
+// neighbours[offsets[f] .. offsets[f+1]); offsets has face_count + 1 entries.
+struct FlexFaceAdjacency {
+  std::vector<int32_t> offsets;
+  std::vector<int32_t> neighbours;
+};
+FlexFaceAdjacency flexible_scene_face_adjacency(int64_t scene, BridgeError& err);
+
+// Core's `face_frame_cut(model.mesh, tris, region.cuts, 0, build, dir)` for a declared face region:
+// `tris` = the region's member triangles, or (face >= 0) only those of B-rep / pseudo face `face` — one
+// member of a multi-face region, still clipped by the region's cuts. With `has_direction` the load IS
+// the stated direction (core normalises it; core refuses a zero one) and build_angle_deg / side are
+// core's for that load; without it the load is the inward normal, bit-identical to the region's stack
+// load (the same call on the same inputs as build_stack). Unlike a stack it needs no column: a region
+// narrower than one pitch is framed. `valid == false` + `reason` is core's verdict (normals cancel, no
+// triangles, the cuts leave nothing); `triangles` counts the triangles handed to core.
+struct FlexRegionFrame {
+  bool valid = false;
+  std::string reason;
+  double load[3] = {0, 0, -1};
+  double centroid[3] = {0, 0, 0};
+  double area_mm2 = 0.0;
+  double build_angle_deg = 0.0;
+  bool side = false;
+  double normal_spread_deg = 0.0;
+  bool normal_spread_flag = false;
+  int32_t triangles = 0;
+  // ★ AP3 (the arrow's maths): core's frame axes, copied — X = the principal axis of the region
+  // projected perpendicular to the load (core's stack X for the same inputs), Y = load x X. The degrees
+  // box scrubs from a target toward core's X when the arrow sits on it; nothing is computed here.
+  double x_axis[3] = {1, 0, 0};
+  double y_axis[3] = {0, 1, 0};
+};
+FlexRegionFrame flexible_scene_region_frame(int64_t scene, int32_t face_region_id, int32_t face,
+                                            bool has_direction, const std::vector<double>& direction,
+                                            BridgeError& err);
+
+// Core's inward normal of each listed triangle of the scene's model: `face_frame(mesh, {t}, 0, build)`'s
+// load (3 doubles per triangle; NaN where core cannot frame it), with core's face of each triangle
+// (`triangle_face`; -1 for an index out of range) and the model's triangle count, so the caller can check
+// that its own mesh's triangle t IS core's triangle t before it uses the answer.
+struct FlexTriangleLoads {
+  int32_t triangle_count = 0;
+  std::vector<int32_t> faces;
+  std::vector<double> loads;
+};
+FlexTriangleLoads flexible_scene_triangle_loads(int64_t scene, const std::vector<int32_t>& triangles,
+                                                BridgeError& err);
+
+// ★ AP2 REVIEW (binding amendment A4: "offer only directions core accepts"): CORE'S VERDICT on a press.
+// Runs core's own `build_press_stack(model, footprint, regions, grid, mask, 0, build, grid.spacing, dir)`
+// on the open scene — the footprint's declared regions in the order given, along `direction` when
+// `has_direction` (else the union's inward normal) — and reports whether core BUILDS it. Core's refusal
+// (its FlexibleError: a direction that does not point into the part over EVERY footprint triangle, a
+// footprint that is not connected through face_adjacency, two sectors of one face, no column, a frame
+// whose normals cancel …) is the ANSWER: `accepted == false` with core's words in `reason`, not an
+// error. Anything else (a closed scene, an undeclared region) is an error, through bridge.cpp's one
+// guard. When accepted: core's frame load (the stated direction normalised by core's press_unit, or the
+// union's inward normal), core's build angle and side verdict for it, and the column count. Nothing
+// here is the app's rule: the verdict is the press core would build, asked of core.
+struct FlexPressVerdict {
+  bool accepted = false;
+  std::string reason;
+  double load[3] = {0, 0, -1};
+  double build_angle_deg = 0.0;
+  bool side = false;
+  int32_t columns = 0;
+};
+FlexPressVerdict flexible_scene_press_verdict(int64_t scene, const std::vector<int32_t>& footprint,
+                                              bool has_direction, const std::vector<double>& direction,
+                                              BridgeError& err);
+
+// ★ AP3: core's side-stack threshold (fx::kSideStackDeg, 15°) — for the side label's (i) text ONLY.
+// The side VERDICT is never computed from it in the app: it is core's FaceFrame.side for the stated
+// direction (flexible_scene_region_frame with a direction).
+double flexible_side_stack_deg();
+
 }  // namespace topoptbridge
