@@ -1890,7 +1890,10 @@ public struct WorkspacePlaceholder: View {
                 // The finest cell that prints at all — the ladder never goes below it.
                 let printable = LatticeAutoPosture.autoWindowMM(
                     regionWidthsMM: [], lineWidthMM: bead,
-                    topology: lat.topologyID)?.min ?? lat.cellMinMM
+                    topology: lat.topologyID,
+                    maxRelativeDensity: LatticeSettings.jobDensityCap(
+                        topologyID: lat.topologyID, allowQuilt: lat.allowQuilt,
+                        algorithm: lat.algorithm))?.min ?? lat.cellMinMM
                 // ★ AND THE RUNGS LAND ON THE THICKNESS THE PART IS MADE OF. See
                 // `ladderBaseCellMM`: the ladder is dyadic, so where it is anchored
                 // decides whether his 22 mm walls get a 4.60 mm cell or a 2.77 mm one.

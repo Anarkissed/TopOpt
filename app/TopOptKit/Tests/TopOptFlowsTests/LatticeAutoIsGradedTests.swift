@@ -35,8 +35,9 @@ final class LatticeAutoIsGradedTests: XCTestCase {
 
     /// ★ THE WINDOW IS DERIVED FROM CORE, and it must actually be able to sweep.
     func testTheDerivedWindowSpansAtLeastOneDoubling() throws {
+        // uncapped (Allow quilt on): this pins the window's own shape; the cap is pinned below
         let w = try XCTUnwrap(LatticeAutoPosture.autoWindowMM(
-            regionWidthsMM: [13, 20], lineWidthMM: 0.42, topology: "octet"))
+            regionWidthsMM: [13, 20], lineWidthMM: 0.42, topology: "octet", maxRelativeDensity: 0))
         XCTAssertGreaterThan(w.min, 0)
         // ★★ THE FINE END MUST BE FINE ENOUGH FOR THE REGIONS TO HOLD IT. Auto's
         // first version used core's `printabilityFloorMM` (4.6026 mm at this bead),
@@ -76,7 +77,7 @@ final class LatticeAutoIsGradedTests: XCTestCase {
     /// ★ NO BEAD, NO WINDOW — the app must not invent a nozzle.
     func testNoLineWidthMeansNoDerivedWindow() {
         XCTAssertNil(LatticeAutoPosture.autoWindowMM(regionWidthsMM: [13],
-                                                     lineWidthMM: 0, topology: "octet"))
+                                                     lineWidthMM: 0, topology: "octet", maxRelativeDensity: 0))
         var s = settings()
         s.cellMinMM = 0; s.cellMaxMM = 0
         let out = LatticeAutoPosture.applied(to: s, includeRegionCount: 1,

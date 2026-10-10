@@ -255,8 +255,9 @@ final class LatticeWizardTests: XCTestCase {
 
         // ★ THE 7 mm REGION §4a WAS WRITTEN FOR. Auto's window must reach fine
         // enough for it, or we are back to the whole-part cell that returned solid.
+        // uncapped (Allow quilt on): at the aesthetic cap no 7 mm region holds 5 printable cells
         let w = LatticeAutoPosture.autoWindowMM(regionWidthsMM: [7, 13, 20],
-                                                lineWidthMM: 0.42, topology: "octet")
+                                                lineWidthMM: 0.42, topology: "octet", maxRelativeDensity: 0)
         let n = TopOptKit.latticeLimits(topology: "octet").minCellsPerMember
         XCTAssertNotNil(w)
         if let w {

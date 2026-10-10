@@ -643,6 +643,8 @@ public struct LatticeSteppedCellWire: Equatable, Sendable {
         case twoBases(regionID: Int)
         /// the linked core's schema does not take `plan_base_cell_mm`
         case planBaseNotWired
+        /// a cell's density is above the cap the job carries (core refuses it, D5)
+        case rhoOverCap(regionID: Int, rho: Double, cap: Double)
 
         /// The reason, in plain words, after the banner's "this plan can't go: ".
         public var reason: String {
@@ -663,6 +665,8 @@ public struct LatticeSteppedCellWire: Equatable, Sendable {
                 return "region \(id)'s cells were stepped from two different cell sizes"
             case .planBaseNotWired:
                 return "this core can't take the cell size each region's cells were stepped from"
+            case .rhoOverCap(let id, let rho, let cap):
+                return String(format: "a cell in region %d is drawn at %.6f, denser than the job's %.6f ceiling", id, rho, cap)
             }
         }
     }
@@ -761,6 +765,14 @@ public struct LatticeSteppedCellWire: Equatable, Sendable {
                                  baseWired: Bool = TopOptKit.regionPlanBaseWired) -> PlanWithheld? {
         guard sendsPlan(algorithm: lat.algorithm, wired: wired, enabled: enabled),
               !lat.steppedCells.isEmpty else { return nil }
+        // ★ "a sent rho never exceeds the cap the job carries" (the reviewer, 2026-10-09 20:51): core
+        // refuses a cell denser than the job's cap (D5), so such a plan is withheld, never trimmed
+        let cap = lat.densityCapWritten
+        if cap > 0, let over = lat.steppedCells.first(where: { $0.rho > cap }) {
+            let why = PlanWithheld.rhoOverCap(regionID: over.regionID, rho: over.rho, cap: cap)
+            NSLog("DIAG stepped plan WITHHELD (\(lat.steppedCells.count) cells): \(why.reason)")
+            return why
+        }
         switch plannedRegions(lat.steppedCells, regions: lat.regions, slotOriginWired: slotOriginWired,
                               slotOriginIsPhase: slotOriginIsPhase, baseWired: baseWired) {
         case .failure(let why):
@@ -1068,6 +1080,14 @@ public struct LatticeSpec: Equatable, Sendable {
     /// Returns nil for a non-graded spec: core's schema REJECTS a grading block's
     /// keys alongside a uniform cell, and retention lives inside grading, so a
     /// uniform run has nowhere to carry it.
+    /// ★ THE CAP THIS JOB WRITES as `grading.max_relative_density` (0 = none): the spec's cap, except
+    /// under organic, at 1 or above, or on a core whose schema lacks the key. ONE value, read by the
+    /// grading block, the stepped tile floor and the plan writer's cap check.
+    public var densityCapWritten: Double {
+        algorithm != "organic" && densityCapRho > 0 && densityCapRho < 1
+            && TopOptKit.gradingSchemaAccepts(key: "max_relative_density") ? densityCapRho : 0
+    }
+
     func gradingDictionary() -> [String: Any]? {
         guard graded else { return nil }
         var grading: [String: Any] = [
@@ -1133,8 +1153,7 @@ public struct LatticeSpec: Equatable, Sendable {
         // accepts it — never a key that would kill the job.
         // The cap this job writes (see THE DENSITY CAP below), decided once: the stepped tile
         // floor reads the same value, so the two keys cannot disagree.
-        let capWritten: Double = algorithm != "organic" && densityCapRho > 0 && densityCapRho < 1
-            && TopOptKit.gradingSchemaAccepts(key: "max_relative_density") ? densityCapRho : 0
+        let capWritten = densityCapWritten
         if algorithm == "stepped" {
             if let m = stageMode, TopOptKit.gradingSchemaAccepts(key: "intent") {
                 grading["intent"] = m == .structural ? "structural" : "aesthetic"

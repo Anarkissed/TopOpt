@@ -398,6 +398,10 @@ extension LatticePreviewOccupancy {
                                        /// be avoided at all costs … unless 'allow quilting' is
                                        /// selected"); the band then grades by smaller cells only.
                                        bandQuiltCeiling: Double = 1,
+                                       /// ★ THE CAP THE JOB WRITES (`grading.max_relative_density`,
+                                       /// `LatticeSettings.jobDensityCap`; 0 = none). Core's printability
+                                       /// floor is taken at it, and no cell is drawn or sent denser.
+                                       densityCap: Double = 0,
                                        stats: inout OctreeBakeStats) -> LatticeCellField? {
         let t0 = Date()
         let voxel = Double(Swift.max(occ.spacing.x, Swift.max(occ.spacing.y, occ.spacing.z)))
@@ -1531,6 +1535,26 @@ extension LatticePreviewOccupancy {
             let u = Swift.max(0, Swift.min(1, (r - densityLo) / (drawnHi - densityLo)))
             return Float(pow(u, 1 / g))
         }
+        // ★★ THE PRINTABILITY FLOOR IS CORE'S, AT THE JOB'S CAP (the reviewer, 2026-10-09 20:51: "Call
+        // core's ceiling through the guarded bridge instead, and pin that a sent rho never exceeds the
+        // cap the job carries"). The app's own 24-step bisection of the diameter table
+        // (`printabilityDensityFloor`) landed 24 ppb over the cap near 2.25 mm; core's
+        // `lattice_min_density_for_strut` bisects against min(rho_max, cap) and cannot. Once per size.
+        var coreFloor: [Float: Double] = [:]
+        func printFloor(_ s: Float, _ lat: LatticeType) -> Double {
+            if let f = coreFloor[s] { return f }
+            let f: Double
+            switch TopOptKit.latticeMinDensityForStrut(topology: latticeID, cellMM: Double(s),
+                                                       minExtrudableWidthMM: lineWidthMM, maxRelativeDensity: densityCap) {
+            case .prints(let rho)?: f = rho
+            // nothing the job allows prints a bead here: the densest it allows, as the run does
+            case .noneUnderTheCap?: f = densityCap > 0 ? densityCap : 1
+            // core refused (a type it does not call live): the drawn law's own floor, capped below
+            case nil: f = lat.printabilityDensityFloor(lineWidthMM: lineWidthMM, cellMM: Double(s))
+            }
+            coreFloor[s] = f
+            return f
+        }
         var solidDepth = [Float](repeating: 0, count: grid.count)
         for i in 0..<grid.count where size[i] > 0 {
             let s = Double(size[i])
@@ -1559,9 +1583,11 @@ extension LatticePreviewOccupancy {
                     if bleed > 0 { solidDepth[i] = Float(band) }
                 }
                 if lineWidthMM > 0 {
-                    r = Swift.max(r, lat.printabilityDensityFloor(lineWidthMM: lineWidthMM, cellMM: s))
+                    r = Swift.max(r, printFloor(size[i], lat))
                 }
             }
+            // ★ never denser than the job allows — drawn or sent
+            if densityCap > 0 { r = Swift.min(r, densityCap) }
             activation[i] = act(Swift.min(r, drawnHi))
             // ruling C: the cell carries its densest texel's ρ
             let ci = Int(cellOf[i])

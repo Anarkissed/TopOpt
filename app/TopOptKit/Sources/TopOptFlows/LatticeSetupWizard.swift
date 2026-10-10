@@ -3039,9 +3039,14 @@ public struct LatticeSetupWizard: View {
         let floor = (project.lattice.stageMode ?? .structural).cellsPerMemberFloor(
             topology: model.topologyID, utilisation: .nan,
             boundaryFinishWritten: model.singleCellMembers)
+        // ★ at the job's cap (the reviewer, 2026-10-09 19:41, item 3): the sample's cell is never
+        // under the run's floor — the live Allow quilt toggle, as the job will write it
         let d = TopOptKit.latticeRegionDerivation(
             topology: model.topologyID, memberWidthMM: member,
-            minExtrudableWidthMM: bead, cellsPerMemberFloor: floor)
+            minExtrudableWidthMM: bead, cellsPerMemberFloor: floor,
+            maxRelativeDensity: LatticeSettings.jobDensityCap(topologyID: model.topologyID,
+                                                              allowQuilt: project.lattice.allowQuilt,
+                                                              algorithm: project.lattice.algorithm))
         guard d.valid, d.cellMM > 0 else { return nil }
         let n = Swift.max(1, (member / d.cellMM).rounded())
         return member / n

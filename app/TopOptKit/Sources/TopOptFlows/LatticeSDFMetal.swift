@@ -3117,6 +3117,8 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
                     // ★ no quilt in the grade band either unless Allow quilt (his 2026-09-28)
                     bandQuiltCeiling: LatticeType.named(params.latticeID)?.hasAestheticCeiling == true && !scene.allowQuilt
                         ? scene.drawnCeilingRho : 1,
+                    // ★ the cap the job writes: core's floor at it, and no cell denser
+                    densityCap: LatticeSettings.jobDensityCap(topologyID: params.latticeID, allowQuilt: scene.allowQuilt),
                     stats: &st) {
                     baked = o
                     octreeCells = o.steppedCells

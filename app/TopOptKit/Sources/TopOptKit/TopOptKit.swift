@@ -1166,6 +1166,21 @@ public enum TopOptKit {
         return v > 0 && v.isFinite ? v : nil
     }
 
+    /// ★★ CORE'S LIGHTEST PRINTABLE DENSITY AT `cellMM`, UNDER THE JOB'S CAP (the reviewer,
+    /// 2026-10-09 20:51: the ceiling from core, and "a sent rho never exceeds the cap the job
+    /// carries"). Core bisects its diameter table against min(rho_max, cap), so the answer never
+    /// exceeds the cap; `maxRelativeDensity` is the cap the job writes (0 = none).
+    /// `.prints(rho)`; `.noneUnderTheCap` when no density the job allows prints a bead at this cell;
+    /// nil when core refuses (`lastCoreRefusal` says why).
+    public enum MinDensityForStrut: Equatable, Sendable { case prints(Double), noneUnderTheCap }
+    public static func latticeMinDensityForStrut(topology: String, cellMM: Double, minExtrudableWidthMM w: Double,
+                                                 maxRelativeDensity cap: Double) -> MinDensityForStrut? {
+        notePerTypeCall(#function, topology)
+        let v = topoptbridge.lattice_min_density_for_strut(std.string(topology), cellMM, w, cap)
+        guard v.isFinite, v != 0 else { return nil }
+        return v > 0 ? .prints(v) : .noneUnderTheCap
+    }
+
     /// ★★ CORE'S AESTHETIC DENSITY CEILING (maintainer, 2026-10-02, ruling 5: R12, one
     /// definition) — octet's 0.218871… on the linked core; nil where core has none for the type.
     /// Since the #358 sync the bridge asks core's per-type `lattice_aesthetic_density_ceiling`

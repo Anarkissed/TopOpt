@@ -3103,6 +3103,21 @@ double lattice_min_printable_cell_mm(const std::string& topology,
   });
 }
 
+double lattice_min_density_for_strut(const std::string& topology, double cell_mm,
+                                     double min_extrudable_width_mm,
+                                     double max_relative_density) {
+  // ★★ THE AESTHETIC CEILING, ONE SOURCE (the reviewer, 2026-10-09 20:51: "Call core's ceiling
+  // through the guarded bridge instead, and pin that a sent rho never exceeds the cap the job
+  // carries"). Core's lightest density whose strut prints a bead at this cell, bisected against
+  // min(rho_max, cap) — so it cannot exceed the cap. The app's own 24-step bisection of the same
+  // table landed 24 ppb over it near 2.25 mm. A negative answer is core's "no density this job
+  // allows prints here"; 0 is a refusal (the guard keeps core's reason).
+  return guarded_empty("lattice_min_density_for_strut", [&]() -> double {
+    return topopt::lattice_min_density_for_strut(live_topology(topology), cell_mm,
+                                                 min_extrudable_width_mm, max_relative_density);
+  });
+}
+
 // ★★ THE FORWARD LAW (core reply 5, 2026-09-20: "the aesthetic ceiling is 0.211733,
 // not 0.219 … you invert it, core samples it forward"). `octet_relative_density`
 // depends only on radius/cell, so every cell gives the same number for the same

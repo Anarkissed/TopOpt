@@ -1184,6 +1184,14 @@ double lattice_strut_diameter_mm(const std::string& topology, double rho,
 double lattice_min_printable_cell_mm(const std::string& topology,
                                      double min_extrudable_width_mm,
                                      double max_relative_density);
+/// ★ CORE'S LIGHTEST PRINTABLE DENSITY AT A CELL, UNDER THE JOB'S CAP: core's
+/// `lattice_min_density_for_strut` — the band floor when it already prints, the lightest density
+/// whose strut is one bead across otherwise, never above min(rho_max, cap) (0 = cap not sent).
+/// Negative = no density the job allows prints at this cell. 0 and `bridge_last_refusal()` when
+/// core refuses (a type it does not call live, a cap below the band floor, a bad argument).
+double lattice_min_density_for_strut(const std::string& topology, double cell_mm,
+                                     double min_extrudable_width_mm,
+                                     double max_relative_density);
 /// ★ CORE'S AESTHETIC DENSITY CEILING for a topology (maintainer, 2026-10-02, ruling 5: R12, one
 /// definition). The linked core carries it for OCTET only, as the inline
 /// `octet_aesthetic_density_ceiling()` (the diameter table's preimage of strut/cell 0.20; core's

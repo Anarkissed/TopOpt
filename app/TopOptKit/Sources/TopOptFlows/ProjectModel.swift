@@ -2762,7 +2762,10 @@ public final class ProjectModel: ObservableObject {
                     resolve: { [weak self] f in self?.resolvedLatticeFace(f) }).regions
             },
             topology: lattice.topologyID,
-            minExtrudableWidthMM: printParams.strutLineWidthMM)
+            minExtrudableWidthMM: printParams.strutLineWidthMM,
+            maxRelativeDensity: LatticeSettings.jobDensityCap(topologyID: lattice.topologyID,
+                                                              allowQuilt: lattice.allowQuilt,
+                                                              algorithm: lattice.algorithm))
     }
 
     // MARK: - lattice page role helpers (handoff 2026-07-30-lattice-page)
