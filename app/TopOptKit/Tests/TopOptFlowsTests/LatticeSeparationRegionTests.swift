@@ -186,11 +186,19 @@ final class LatticeSeparationRegionTests: XCTestCase {
                                          latticeReachesTheRun: false)
         let head = d.headline
         XCTAssertNotNil(head, "a control that silently does nothing is the defect")
-        XCTAssertEqual(head?.text, "Frozen, not latticed")
+        // ★ RE-PINNED 2026-10-01 (batch E, his item 4: "a protected face isn't frozen"): the words
+        // say "Protected" — and only for a protected group (this drawer is `held: true`); never
+        // "Frozen", never "Out of regime". A split piece now REACHES the run (LatticeSectorOutline),
+        // so these words are left for a region with no surface on the model.
+        // ★ RE-PINNED AGAIN (batch E review): two words either way — "Protected, not latticed"
+        // wrapped to two lines in the row's 9 pt capsule, like "Frozen, not latticed" in img 4; the
+        // group's shield already says Protected.
+        XCTAssertEqual(head?.text, "Not latticed")
+        XCTAssertNotEqual(head?.verdict, .outOfRegime)
         XCTAssertLessThanOrEqual(head?.text.split(separator: " ").count ?? 99, 3,
                                  "R7: three words")
         XCTAssertEqual(WorkspacePlaceholder.latticeRegionNotConsumed,
-                       "Frozen, not latticed",
+                       "Not latticed",
                        "the row chip and the drawer headline are the same words")
     }
 

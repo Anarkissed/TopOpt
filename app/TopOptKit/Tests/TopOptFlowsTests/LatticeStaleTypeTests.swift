@@ -81,8 +81,10 @@ final class LatticeStaleTypeTests: XCTestCase {
         let ws = try src("WorkspacePlaceholder.swift")
         XCTAssertTrue(try member(ws, "private var latticeTypeRefusal")
             .contains("project.lattice.enabled ? LatticeTypeCatalog.selectionRefusal(project.lattice.topologyID) : nil"))
-        XCTAssertTrue(try member(ws, "private var latticeOptimizeRefusal").contains("?? latticeTypeRefusal"), "★ Optimize")
-        XCTAssertTrue(try member(ws, "private var latticeStageRefusal").contains("?? latticeTypeRefusal"), "★ Lattice")
+        // ★ (2026-10-08) both read the SETTINGS refusal — the saved type first, then Structural Stepped
+        XCTAssertTrue(try member(ws, "private var latticeSettingsRefusal").contains("latticeTypeRefusal ?? "), "the type comes first")
+        XCTAssertTrue(try member(ws, "private var latticeOptimizeRefusal").contains("?? latticeSettingsRefusal"), "★ Optimize")
+        XCTAssertTrue(try member(ws, "private var latticeStageRefusal").contains("?? latticeSettingsRefusal"), "★ Lattice")
         // every start is behind those two (canOptimize / canLatticeThis), and the sub-line says it
         XCTAssertTrue(try member(ws, "private var canOptimize: Bool").contains("guard latticeOptimizeRefusal == nil else { return false }"))
         XCTAssertTrue(try member(ws, "private var optimizeSummary: String").contains("if let why = latticeOptimizeRefusal { return why }"))
@@ -90,7 +92,7 @@ final class LatticeStaleTypeTests: XCTestCase {
         XCTAssertTrue(try member(ws, "private var latticeThisSummary").contains("if let why = latticeStageRefusal { return why }"))
         // the tap
         XCTAssertEqual(ws.components(separatedBy: "let opensType = opensLatticeType(ok, summary)").count - 1, 2)
-        XCTAssertTrue(try member(ws, "private func opensLatticeType").contains("!ok && summary == latticeTypeRefusal"))
+        XCTAssertTrue(try member(ws, "private func opensLatticeType").contains("!ok && summary == latticeSettingsRefusal"))
         XCTAssertTrue(ws.contains("if ok { requestLatticeRun() } else if marks { goToWallMarking() } else if opensType { goToLatticeType() }"))
         XCTAssertTrue(ws.contains("if ok { requestRun() } else if marks { goToWallMarking() } else if opensType { goToLatticeType() }"))
         XCTAssertEqual(ws.components(separatedBy: ".disabled(!ok && !marks && !opensType)").count - 1, 2, "★ greyed, yet tappable")

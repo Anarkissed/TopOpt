@@ -1317,7 +1317,9 @@ struct LatticeRegionDerivation {
 LatticeRegionDerivation lattice_region_derivation(
     const std::string& topology, double member_width_mm,
     double min_extrudable_width_mm, double stated_relative_density,
-    double cells_per_member_floor, double cell_mm);
+    double cells_per_member_floor, double cell_mm,
+    // ★ the job's density cap (#358 E1/D1): every floor at min(rho_max, cap); 0 = not sent
+    double max_relative_density);
 
 // ★★★ THE ORGANIC LATTICE'S TRACED CENTRELINES, for the preview. See bridge.cpp for
 // the flat layout and for why the tensor — not a scalar — is the input that gates this.
@@ -1458,6 +1460,20 @@ std::string job_schema_error(const std::string& job_json);
 std::vector<double> core_face_plane_basis(double nx, double ny, double nz,
                                           double fux, double fuy, double fuz,
                                           double fwx, double fwy, double fwz);
+
+// ★★ CORE'S OWNER OF EACH POINT (reviewer, 2026-10-08, approved by the maintainer: "Swap R7's
+// owner to core's exported stepped_region_owner through the guarded bridge, with a parity test
+// on 68BF7B74"). `job_json` is a whole job document; core's own parser reads it, and its
+// `lattice.regions` are resolved into the run's include list exactly as the run resolves them
+// (a mirror of the file-local lattice_role_regions_from_job, run_job.cpp:939-1023 at 36f5fdde:
+// face and bolt through `resolve_clearance_manual`, zero margins, the region's own depth; a frame
+// core refuses is a refusal; an INVALID geometry is skipped where the run skips it, so the ids
+// are the run's). `xyz` holds `point_count` points. Returns [include count, owner per point…]:
+// each owner a 1-based include id, 0 = inside no include prism. Empty, with the reason in
+// `bridge_last_refusal`, when core cannot answer (a "region"-kind include needs the model and the
+// run's grid). Never throws.
+std::vector<int32_t> stepped_region_owners(const std::string& job_json, const double* xyz,
+                                           std::size_t point_count);
 
 // Core's OWN default stress-fraction ceiling for sub-floor retention
 // (topopt::lattice_subfloor_retention_stress_fraction(), the number

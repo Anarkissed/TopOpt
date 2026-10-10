@@ -16,10 +16,12 @@ import TopOptKit
 ///    `parts` — so a union-of-parts goes out with no membership, and core refuses any declared
 ///    region that resolves to no faces (core/src/io/face_region.cpp:347-352).
 ///
-/// Each is wrapped in `XCTExpectFailure(strict: true)`: green while the defect stands, RED the day
+/// Each was wrapped in `XCTExpectFailure(strict: true)`: green while the defect stands, RED the day
 /// it is fixed (so the wrapper comes off in the fixing commit). Each has a working twin, so the
-/// failure cannot come from the fixture. NOT FIXED here: the fix touches the face-region emission
-/// (must-not-touch for the task) and needs a ruling on what "pattern inside a union" means.
+/// failure cannot come from the fixture.
+/// ★ DEFECT 1 IS FIXED (the ruling, 2026-10-08: "Pattern on a face inside a union splits the WHOLE
+/// union" — `FaceRegionModel.splitUnion`); its wrapper is off. DEFECT 2 STANDS until #358's parts
+/// list for unions lands ("keep the strict defect controls until then").
 @MainActor
 final class SurfaceUnionDefectControlTests: XCTestCase {
 
@@ -57,8 +59,8 @@ final class SurfaceUnionDefectControlTests: XCTestCase {
         return (rid, a, b)
     }
 
-    /// ★ Defect 1. The twin: patterning a plain one-face region gives cells that hold its face.
-    func testPatterningAFaceInsideAUnionCommitsEmptyCells() throws {
+    /// ★ Defect 1, FIXED. The twin: patterning a plain one-face region gives cells that hold its face.
+    func testPatterningAFaceInsideAUnionCommitsCellsThatHoldTheWholeUnion() throws {
         // twin — a plain region: the split runs and every cell holds the face
         let plain = project()
         let c = try XCTUnwrap(plain.surfaceEnsureRegion(for: 0))
@@ -72,14 +74,11 @@ final class SurfaceUnionDefectControlTests: XCTestCase {
         XCTAssertEqual(p.faceRegions.outermostUnion(containing: a), u,
                        "the stage aims Pattern at the outermost union (WorkspacePlaceholder.swift:7109-7115)")
         let preview = try XCTUnwrap(p.surfacePatternPreview(face: 1, columns: 2, rows: 1, piece: u))
-        XCTAssertTrue(preview.verdict.ok, "the preview, priced on the one tapped face, enables the ✓")
+        XCTAssertTrue(preview.verdict.ok, "the preview, priced over the whole union, enables the ✓")
         let kids = p.commitSurfacePattern(face: 1, columns: 2, rows: 1, piece: u)
         XCTAssertEqual(kids.count, 2, "the split really ran on the union")
-        XCTExpectFailure("DEFECT (2026-10-08): a union's cells copy its add/filter/cuts, not its parts — they hold no face",
-                         strict: true) {
-            for k in kids {
-                XCTAssertFalse(p.surfaceResolvedFaces(k).isEmpty, "★ a pattern cell holds faces")
-            }
+        for k in kids {
+            XCTAssertEqual(p.surfaceResolvedFaces(k), [1, 2], "★ a pattern cell holds every part's face")
         }
         print("UNION-PATTERN cells \(kids) resolve to \(kids.map { p.surfaceResolvedFaces($0) })")
     }

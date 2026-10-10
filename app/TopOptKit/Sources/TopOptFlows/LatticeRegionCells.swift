@@ -67,10 +67,15 @@ public enum LatticeRegionCells {
                 .regionCellsPerMemberFloor(topology: project.lattice.topologyID,
                                            boundaryFinishWritten: project.lattice.singleCellMembers,
                                            algorithm: project.lattice.resolvedAlgorithm)
+            // ★ at the job's cap (#358 E1/D1): the region's cell is never under the run's floor
             let d = TopOptKit.latticeRegionDerivation(topology: project.lattice.topologyID,
                                                       memberWidthMM: w,
                                                       minExtrudableWidthMM: bead,
-                                                      cellsPerMemberFloor: floor)
+                                                      cellsPerMemberFloor: floor,
+                                                      maxRelativeDensity: LatticeSettings.jobDensityCap(
+                                                        topologyID: project.lattice.topologyID,
+                                                        allowQuilt: project.lattice.allowQuilt,
+                                                        algorithm: project.lattice.algorithm))
             guard d.valid, d.cellMM > 0 else { return RegionCell(measuredWidthMM: w, cellMM: 0) }
             // ★★★ THE FIT DEPTH IS THE **MATERIAL'S**, NEVER THE DECLARATION'S
             // (his ruling, 2026-08-24 evening: "I'd rather it never overshoot —

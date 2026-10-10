@@ -819,12 +819,11 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
             if lat.algorithm == "organic", TopOptKit.latticeSchemaAccepts(key: "emit_organic_spans") {
                 block["emit_organic_spans"] = true
             }
-            // ★ THE PLAN (2026-09-18): the preview's placed cells, verbatim — the ONE
-            // encoder, shared with RelatticeRunner.
-            if let cells = LatticeSteppedCellWire.blockValue(for: lat, wired: TopOptKit.steppedCellsWired,
-                                                             enabled: steppedPlans) {
-                block["stepped_cells"] = cells
-            }
+            // ★ THE PLAN (2026-09-18): the preview's placed cells, verbatim, with each planned
+            // region's grid (`slot_origin_mm`, 2026-10-08) — the ONE writer, shared with
+            // RelatticeRunner. A plan core would refuse is withheld, never sent.
+            LatticeSteppedCellWire.writePlan(into: &block, for: lat, wired: TopOptKit.steppedCellsWired,
+                                             enabled: steppedPlans)
             job["lattice"] = block
         }
         // The declared load case is emitted for EVERY model source — STEP B-rep

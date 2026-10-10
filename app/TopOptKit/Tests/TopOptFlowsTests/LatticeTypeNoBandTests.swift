@@ -74,10 +74,11 @@ final class LatticeTypeNoBandTests: XCTestCase {
         let live = LatticeRegionDrawer.make(card: card, depthMM: 12, held: false)
         XCTAssertNotEqual(live.headline?.text, line)
         XCTAssertTrue(live.rows.map(\.label).contains("Cell"))
-        // and a frozen face stays frozen, whatever the type
+        // and a face the run does not lattice says so, whatever the type — batch E's two words (#362
+        // review, ported 2026-10-08: never "Frozen"; the group's shield already says Protected)
         let frozen = LatticeRegionDrawer.make(card: card, depthMM: 12, held: false,
                                               latticeReachesTheRun: false, typeRefusal: line)
-        XCTAssertEqual(frozen.headline?.text, "Frozen, not latticed")
+        XCTAssertEqual(frozen.headline?.text, "Not latticed")
     }
 
     /// Where each band was drawn, the sentence now is — read from the views' own source.

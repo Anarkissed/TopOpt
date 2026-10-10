@@ -10,6 +10,14 @@ Made with round 2's `tools/dump_stage_hashes.sh` on snapshot S1-2026-10-02 (`SWI
 | l6 | ruling 6: the plan-not-sent line (blockValue reads the shared predicate) | 3f19f920e5c96a5a | 6dbb48fab4029f78 | c4ca5d5ac009036d | 2baaf9cbb94027c7 | 7ba46796d87e3b34 | 3e6f162cb36212a9 | b457718dfc23ab42 |
 | t5 | R7 + anchor footprint + Q2 + Q3(i): core's tile floor (67595f19 + this) | 3f19f920e5c96a5a | 6dbb48fab4029f78 | c4ca5d5ac009036d | 2baaf9cbb94027c7 | **c89da26e6a71021c** | 3e6f162cb36212a9 | b457718dfc23ab42 |
 | t7 | R7 step-down + the Stepped line + the organic rim's floor in the job (round 4) | **d08fc7a7650675b4** | 6dbb48fab4029f78 | c4ca5d5ac009036d | 2baaf9cbb94027c7 | c89da26e6a71021c | 3e6f162cb36212a9 | b457718dfc23ab42 |
+| s9 | sync: #358 at 36f5fdde (ce294588) | d08fc7a7650675b4 | 6dbb48fab4029f78 | c4ca5d5ac009036d | 2baaf9cbb94027c7 | c89da26e6a71021c | 3e6f162cb36212a9 | b457718dfc23ab42 |
+| so | the plan's slot origin (`slot_origin_mm`), withheld off-plane | d08fc7a7650675b4 | 6dbb48fab4029f78 | c4ca5d5ac009036d | 2baaf9cbb94027c7 | c89da26e6a71021c | 3e6f162cb36212a9 | b457718dfc23ab42 |
+| go | the Structural Stepped block + the owner is core's (52cbc65e, c8d67dfa) | d08fc7a7650675b4 | 6dbb48fab4029f78 | c4ca5d5ac009036d | 2baaf9cbb94027c7 | c89da26e6a71021c | 3e6f162cb36212a9 | b457718dfc23ab42 |
+| fd | no fifths in the any-step packer; core's depth rule in the bake | d08fc7a7650675b4 | 6dbb48fab4029f78 | c4ca5d5ac009036d | 2baaf9cbb94027c7 | c89da26e6a71021c | 3e6f162cb36212a9 | b457718dfc23ab42 |
+| be | batch E ported (578c89d9) | d08fc7a7650675b4 | 6dbb48fab4029f78 | c4ca5d5ac009036d | 2baaf9cbb94027c7 | c89da26e6a71021c | 3e6f162cb36212a9 | b457718dfc23ab42 |
+| da | drawer A: whose number "Cells across" is (24359a8a) | d08fc7a7650675b4 | 6dbb48fab4029f78 | c4ca5d5ac009036d | 2baaf9cbb94027c7 | c89da26e6a71021c | 3e6f162cb36212a9 | b457718dfc23ab42 |
+| e1 | E1 merged (#358 26a37f64), the bridge calls core's floor; the card at the job's cap (be5fe18a) | d08fc7a7650675b4 | 6dbb48fab4029f78 | c4ca5d5ac009036d | 2baaf9cbb94027c7 | c89da26e6a71021c | 3e6f162cb36212a9 | b457718dfc23ab42 |
+| rg | the Regions task (0f14e82f) | d08fc7a7650675b4 | 6dbb48fab4029f78 | c4ca5d5ac009036d | 2baaf9cbb94027c7 | c89da26e6a71021c | 3e6f162cb36212a9 | b457718dfc23ab42 |
 
 g equals fo on all seven: the guard and the gate move no stage-job bytes.
 
@@ -23,3 +31,15 @@ Stepped job carries one, so the run is unchanged.
 t7 equals t5 on six of seven: the R7 step-down and the Stepped line are preview only. 102117B9 (organic)
 moves in ONE key, `grading.organic_solid_rim_mm` 0.691 → 1.705 mm — the job's automatic rim is now the
 printability floor the preview draws, max(1.535 × bead, one design voxel) (item 2, measured).
+
+s9 equals t7 on all seven: the #358 sync at 36f5fdde moves no stage-job bytes.
+
+so equals s9 on all seven. The slot origin rides only with a plan, and production sends no plan
+(`defaultGradePlansEnabled` is off).
+
+go and fd equal so on all seven. The gate refuses on the buttons, not in the job builder. The owner
+swap, the packer's menu and the depth rule shape only the plan, and production sends none.
+
+be, da, e1 and rg all equal fd on all seven. Batch E moves only a project with a cut piece, and none
+of his has one. The drawer, the card's cap and the Regions task are preview, UI or region editing;
+no saved region of his is a union.

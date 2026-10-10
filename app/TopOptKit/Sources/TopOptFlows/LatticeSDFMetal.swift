@@ -517,6 +517,9 @@ public struct LatticeSDFScene {
     /// What the trace reported, for the banner: curves, connectors and the separation it
     /// actually ACHIEVED (organic's cell size is an output, not an input).
     public let organicSummary: String
+    /// ★ RULING C (2026-10-08): voxels the preview's organic shape band graded — a band the run does
+    /// not build yet (#358 adds it). > 0 puts the banner's line on screen.
+    public let organicBandGradedVoxels: Int
 
     /// ★★ THE STRESS COLOURS, AS A VOLUME (maintainer, 2026-08-18: "Allow the
     /// stress map to *overlay* on the lattice if it is turned on simultaneously. I
@@ -1343,6 +1346,7 @@ public struct LatticeSDFScene {
         var organicSynthFieldOut: StressField? = nil
         var organicBand = 0.0
         var organicSaid = ""
+        var bandGraded = 0
         // ★★★ SPANS FIRST. A span file is the run's own emitted geometry; a trace is a
         // preview-time estimate of it. When the spans are here the estimate is not
         // asked for. Grid: the index's own bounds (the capsules, plus their reach), at
@@ -1747,6 +1751,7 @@ public struct LatticeSDFScene {
                 }
                 fitNote += String(format: " · shape band %.1f mm: %d voxels graded toward the %.2f mm floor",
                                   o.shapeBandMM, graded, floorMM)
+                bandGraded = graded
             }
             // ── ★★★ THE PER-VOXEL BEAD, THE WAY THE RUN BUILDS IT ────────────────
             //
@@ -2038,6 +2043,7 @@ public struct LatticeSDFScene {
                 + "tracing; the run builds the un-staggered weave"
         }
         self.organicSummary = organicSaid
+        self.organicBandGradedVoxels = bandGraded
 
         // ★★ AND WHETHER THAT DEMAND IS A MEASUREMENT (task 2026-08-20). `demand` has
         // TWO sources and they are not interchangeable: an FEA field, or a per-region

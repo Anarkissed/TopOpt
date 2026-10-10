@@ -1,5 +1,6 @@
 import Foundation
 import simd
+import TopOptKit
 
 // ★★★ THE OCTREE BAKE — his rules of 2026-09-14, verbatim:
 //
@@ -56,6 +57,19 @@ extension LatticePreviewOccupancy {
         public var cellsSteppedDown = 0        // yielded cells whose children were tried
         public var cellsDroppedAtFinest = 0    // yielded cells at the region's finest rung (air)
         public var stepDownSlotsRewalked = 0   // level-0 slots the rounds after the first walked again
+        // ★★ CORE'S OWNER (2026-10-08): every ownership decision asks core (`coreOwnershipEnabled`).
+        public var coreOwnerCalls = 0          // batched bridge calls
+        public var coreOwnerPoints = 0         // points asked (after the cache)
+        /// Core's reason when it could not name an owner — the bake then used the Swift rule and the
+        /// plan is withheld (`LatticeSteppedCell.ownerRefusal`). nil = core answered every question.
+        public var coreOwnerRefusal: String? = nil
+        public var yieldedOwner0 = 0           // contested cells whose centre core gives to NO region (ruling a)
+        public var yieldedThirdRegion = 0      // …to a region not contesting it (ruling a)
+        public var sharedTexels = 0            // texels two or more regions' cells claimed (ruling b)
+        public var sharedTexelsToOwner = 0     // …given to core's owner's cell
+        public var sharedTexelsToThird = 0     // …of those, the owner is a third claimant
+        public var sharedTexelsEmptiedOwner0 = 0      // …emptied: core's owner is no region
+        public var sharedTexelsEmptiedOwnerNoCell = 0 // …emptied: the owner region has no cell there
         /// Every in-plane shift's base-cell volume, in search order — the whole search, so a
         /// proof compares all of it and not only the winner.
         public var anchorBaseVolumes: [Double] = []
@@ -85,6 +99,19 @@ extension LatticePreviewOccupancy {
     /// ★★ R7: cells and texels shared by two regions go to the owner of their centre; false =
     /// declaration order, the bake before 2026-10-03 (the proof's "before" arm only).
     nonisolated(unsafe) static var centreOwnershipEnabled = true
+    /// ★★ THE OWNER IS CORE'S (reviewer, 2026-10-08, approved by the maintainer: "Swap R7's owner
+    /// to core's exported stepped_region_owner through the guarded bridge, with a parity test on
+    /// 68BF7B74"; rulings (a) and (b) the same day). Every ownership decision — a contested cell's
+    /// centre, a shared texel's middle — asks core over the job's own regions
+    /// (`TopOptKit.steppedRegionOwners`): (a) a contested cell stays only when core gives its centre
+    /// to its own region — no owner, or a third region, and it yields and steps down; (b) a shared
+    /// texel goes to the cell of core's owner at its middle — no owner, or an owner with no cell
+    /// there, and it is empty. false = the Swift rule (`owner(of:)`), for the parity proof only.
+    nonisolated(unsafe) static var coreOwnershipEnabled = true
+    /// ★ Core's exact depth rule in `fits` (round 5); false = the voxel test alone (a test's control).
+    nonisolated(unsafe) static var coreDepthRuleEnabled = true
+    /// A TEST's stand-in for the bridge (nil = core's own `TopOptKit.steppedRegionOwners`).
+    nonisolated(unsafe) static var coreOwnersForTests: (([[String: Any]], [SIMD3<Double>]) -> TopOptKit.CoreRegionOwners?)? = nil
     /// ★★ R7's OWNERSHIP RULE, ONE PURE FUNCTION (reviewer, 2026-10-07: "Core will export
     /// stepped_region_owner(point, regions) with ownership. At that sync, R7 calls it through the
     /// guarded bridge and your Swift rule goes. Add a parity test"). Everything the bake decides by
@@ -318,7 +345,12 @@ extension LatticePreviewOccupancy {
             return law.printabilityDensityFloor(lineWidthMM: lineWidthMM, cellMM: r) <= finestRungMaxDensity + 1e-9
         }
         var menu: [Double] = [base]
-        for n in 2...steppedMenuMaxDivisor {
+        // ★★ ONLY THE FAMILIES THE PACKER'S GRID HOLDS (round 5, 2026-10-08; the reviewer's yes to
+        // "the fifths packer"): `packSlot` lays every cell on base/12, which halves, thirds, quarters
+        // and sixths land on and FIFTHS DO NOT — a k·base/5 cell got a rounded span (2.4 → 2 grid
+        // steps) and a sixths start, so core refused it (stepped_plan.cpp's family alignment). Core's
+        // menu still holds fifths (n ≤ 6); a plan need not use every size core admits.
+        for n in 2...steppedMenuMaxDivisor where steppedPackGrid % n == 0 {
             let t = base / Double(n)
             guard t >= floorMM - 1e-9, printsOpen(t) else { continue }
             for k in 1..<n {
@@ -331,6 +363,8 @@ extension LatticePreviewOccupancy {
     /// The largest divisor of the base a Stepped tile may be: sixths. The start grid
     /// inside a base slot is base/12, which every family up to sixths lands on.
     public static let steppedMenuMaxDivisor = 6
+    /// The packer's grid inside a base slot, in steps per base: base/12.
+    public static let steppedPackGrid = 2 * steppedMenuMaxDivisor
 
     public static func octreeCellField(occupancy occ: LatticeVoxelGrid,
                                        demand: LatticeVoxelGrid?,
@@ -648,6 +682,13 @@ extension LatticePreviewOccupancy {
                 func fitsBox(_ lo: SIMD3<Double>, _ S: Double) -> Bool {
                     if dOut(lo + SIMD3<Double>(repeating: 0.5 * S)) < -0.87 * S { return false }
                     if !LatticePreviewOccupancy.boxInsideSlab(lo, S, region: region, axis: axis) { return false }
+                    // core's depth rule, as the placement's `fits` applies it (round 5)
+                    if Self.coreDepthRuleEnabled, region.depthMM > 0 {
+                        let s0 = simd_dot(lo - region.origin, n)
+                        let sHi = s0 + S * (Swift.max(0, n.x) + Swift.max(0, n.y) + Swift.max(0, n.z))
+                        let sMid = s0 + 0.5 * S * (n.x + n.y + n.z)
+                        if sMid < -1e-6 || sMid > region.depthMM + 1e-6 || sHi > region.depthMM + 1e-6 { return false }
+                    }
                     let eps = Swift.min(0.05 * S, 0.2)
                     for cz in 0...1 { for cy in 0...1 { for cx in 0...1 {
                         let corner = lo + SIMD3<Double>(Double(cx), Double(cy), Double(cz)) * S
@@ -775,6 +816,49 @@ extension LatticePreviewOccupancy {
         var currentSlot = SlotTag(ladder: -1, idx: SIMD3<Int>(repeating: 0))
         func rank(_ r: Int, _ p: SIMD3<Double>) -> OwnerRank { Self.ownerRank(p, region: r, regions: regions) }
         func outranks(_ a: OwnerRank, _ b: OwnerRank) -> Bool { Self.outranks(a, b) }
+        // ★★ CORE'S OWNER, over the regions as the job sends them (wire dictionaries, seam-grown
+        // outlines and all). Core numbers the INCLUDE regions 1-based in job order; a reply that
+        // resolved a different number of includes is refused here, since every id after a skipped
+        // one would name the wrong region. Points are cached to the nanometre.
+        let includeIndex = regions.indices.filter { regions[$0].role == .include }
+        let wireRegions = Self.centreOwnershipEnabled && Self.coreOwnershipEnabled ? regions.map { $0.wireDictionary } : []
+        struct PointKey: Hashable { let x: Int64; let y: Int64; let z: Int64 }
+        var coreOwnerCache: [PointKey: Int] = [:]          // scene region index, −1 = no owner
+        /// Core's owner of each point (a scene region index, nil = none), or nil when core could not
+        /// answer — then `stats.coreOwnerRefusal` says why, and the caller uses the Swift rule.
+        func coreOwners(_ pts: [SIMD3<Double>]) -> [Int?]? {
+            guard Self.centreOwnershipEnabled, Self.coreOwnershipEnabled, stats.coreOwnerRefusal == nil else { return nil }
+            func key(_ p: SIMD3<Double>) -> PointKey {
+                PointKey(x: Int64((p.x * 1e6).rounded()), y: Int64((p.y * 1e6).rounded()), z: Int64((p.z * 1e6).rounded()))
+            }
+            var ask: [SIMD3<Double>] = [], askKeys: [PointKey] = [], seen = Set<PointKey>()
+            for p in pts { let k = key(p); if coreOwnerCache[k] == nil, seen.insert(k).inserted { ask.append(p); askKeys.append(k) } }
+            if !ask.isEmpty {
+                stats.coreOwnerCalls += 1
+                stats.coreOwnerPoints += ask.count
+                guard let r = (Self.coreOwnersForTests ?? TopOptKit.steppedRegionOwners)(wireRegions, ask) else {
+                    stats.coreOwnerRefusal = TopOptKit.lastCoreRefusal ?? "core gave no answer"
+                    return nil
+                }
+                guard r.includes == includeIndex.count, r.owners.count == ask.count else {
+                    stats.coreOwnerRefusal = "core resolved \(r.includes) include regions, the job declares \(includeIndex.count)"
+                    return nil
+                }
+                for (n, k) in askKeys.enumerated() {
+                    let o = r.owners[n]
+                    coreOwnerCache[k] = o >= 1 && o <= includeIndex.count ? includeIndex[o - 1] : -1
+                }
+            }
+            return pts.map { p in
+                let o = coreOwnerCache[key(p)] ?? -1
+                return o >= 0 ? o : nil
+            }
+        }
+        // ★ ruling (b): a texel two regions' cells claim is decided after painting, by core's owner
+        struct TexelClaim { let region: Int32; let cell: Int32; let finest: Bool; let size: Float
+                            let phase: Float; let origin: SIMD3<Float>; let bandT: Float; let outline: Float }
+        var texelClaims: [Int: [TexelClaim]] = [:]
+        let coreTexels = Self.centreOwnershipEnabled && Self.coreOwnershipEnabled
         // ★★ THE STEP-DOWN (reviewer, 2026-10-07, ruling 6). A cell that yielded is, on the next
         // walk, treated as one that does not fit: its own region tries its next rung there — the
         // dyadic children, or the any-step packer's smaller sizes — and each of those is judged
@@ -805,6 +889,10 @@ extension LatticePreviewOccupancy {
             let axis = ladder.axis
             let sBase = ladder.sizes[0]
             let plane = region.origin[axis]
+            // ★ THE GRID `slotLo` LAYS EVERY RUNG ON, as one point: the anchor's in-plane origin,
+            // on the face plane along the axis — the job's `slot_origin_mm` for this region.
+            var slotOrigin = gorigin
+            slotOrigin[axis] = plane
             let f = ladder.sizes.last!
             // In from the outline (mm; < 0 outside) — the exact polygon.
             func dOut(_ p: SIMD3<Double>) -> Double {
@@ -835,12 +923,14 @@ extension LatticePreviewOccupancy {
             var lastFail = ""
             var outlineFailed = false
             var slabFailed = false
+            var depthFailed = false
             func fits(_ lo: SIMD3<Double>, _ S: Double, fast: Bool = false) -> (fits: Bool, nearest: Double, farthest: Double) {
                 var nearest = 1e3, farthest = -1e3
                 var ok = true
                 lastFail = ""
                 outlineFailed = false
                 slabFailed = false
+                depthFailed = false
                 let eps = Swift.min(0.05 * S, 0.2)
                 // ★ THE SLAB IN DEPTH (his 2026-09-22 01:07: "the lattice is jutting out of
                 // the rim … something is making the lattice move rather than thin"): a
@@ -851,6 +941,22 @@ extension LatticePreviewOccupancy {
                     lastFail = "slab"
                     slabFailed = true
                     return (false, nearest, farthest)
+                }
+                // ★★ CORE'S DEPTH RULE, EXACTLY (round 5, 2026-10-08; stepped_plan.cpp:283-324, the
+                // reviewer's ruling 1 of 2026-10-05): the cube projected on the unit normal from the
+                // face plane — its CENTRE inside [0, depth] and its FAR side not past the depth, within
+                // 1e-6 mm; the near side may stand in front of the face. The voxel test below let a far
+                // face sit up to ~a voxel past the prism (the occupancy is prism-clipped voxels).
+                if Self.coreDepthRuleEnabled, region.depthMM > 0 {
+                    let s0 = simd_dot(lo - region.origin, n)
+                    let nHi = Swift.max(0, n.x) + Swift.max(0, n.y) + Swift.max(0, n.z)
+                    let sHi = s0 + S * nHi
+                    let sMid = s0 + 0.5 * S * (n.x + n.y + n.z)
+                    if sMid < -1e-6 || sMid > region.depthMM + 1e-6 || sHi > region.depthMM + 1e-6 {
+                        lastFail = "depth"
+                        depthFailed = true
+                        return (false, nearest, farthest)
+                    }
                 }
                 for cz in 0...1 { for cy in 0...1 { for cx in 0...1 {
                     let corner = lo + SIMD3<Double>(Double(cx), Double(cy), Double(cz)) * S
@@ -961,15 +1067,24 @@ extension LatticePreviewOccupancy {
                             let cx = gorigin.x + (Double(i) + 0.5) * pitch
                             guard inSlot(cx, 0) else { continue }
                             let idx = (k * gny + j) * gnx + i
+                            var claimOnly = false
                             if owner[idx] >= 0 {
                                 // the same region: its first cell keeps the texel (the packer's
-                                // fill pass relies on it). Another region: the better rank at the
-                                // texel's middle (R7); with R7 off, the first region wins.
-                                guard Self.centreOwnershipEnabled, Int(owner[idx]) != ladder.region,
-                                      outranks(rank(ladder.region, SIMD3<Double>(cx, cy, cz)),
-                                               rank(Int(owner[idx]), SIMD3<Double>(cx, cy, cz)))
-                                else { continue }
-                                stats.texelsReassigned += 1
+                                // fill pass relies on it). Another region: under core's owner the
+                                // claim is recorded and decided after painting (ruling b); else the
+                                // better rank at the texel's middle (R7); with R7 off, the first wins.
+                                if coreTexels, stats.coreOwnerRefusal == nil {
+                                    guard Int(owner[idx]) != ladder.region,
+                                          !(texelClaims[idx]?.contains { Int($0.region) == ladder.region } ?? false)
+                                    else { continue }
+                                    claimOnly = true
+                                } else {
+                                    guard Self.centreOwnershipEnabled, Int(owner[idx]) != ladder.region,
+                                          outranks(rank(ladder.region, SIMD3<Double>(cx, cy, cz)),
+                                                   rank(Int(owner[idx]), SIMD3<Double>(cx, cy, cz)))
+                                    else { continue }
+                                    stats.texelsReassigned += 1
+                                }
                             }
                             var c = SIMD3<Double>(cx, cy, cz)                // the texel's middle
                             // the face-plane texel's test point, just inside the plane
@@ -1003,6 +1118,19 @@ extension LatticePreviewOccupancy {
                             } else {
                                 guard occupied(c) || occupiedNear(c) else { continue }
                             }
+                            let outline = Float(Swift.max(0, Swift.min(1e3, d)))
+                            if claimOnly {
+                                if texelClaims[idx] == nil {
+                                    texelClaims[idx] = [TexelClaim(region: owner[idx], cell: cellOf[idx], finest: isFinest[idx],
+                                                                   size: size[idx], phase: phase[idx], origin: origin[idx],
+                                                                   bandT: bandT[idx], outline: outlineMM[idx])]
+                                }
+                                texelClaims[idx]!.append(TexelClaim(region: Int32(ladder.region), cell: Int32(cells.count),
+                                                                    finest: finest, size: halfRepresentable(Float(S)),
+                                                                    phase: ph, origin: orig, bandT: t, outline: outline))
+                                painted += 1
+                                continue
+                            }
                             owner[idx] = Int32(ladder.region)
                             cellOf[idx] = Int32(cells.count)
                             isFinest[idx] = finest
@@ -1010,7 +1138,7 @@ extension LatticePreviewOccupancy {
                             phase[idx] = ph
                             origin[idx] = orig
                             bandT[idx] = t
-                            outlineMM[idx] = Float(Swift.max(0, Swift.min(1e3, d)))
+                            outlineMM[idx] = outline
                             painted += 1
                         }
                     }
@@ -1020,7 +1148,8 @@ extension LatticePreviewOccupancy {
                 stats.paintedByRegion[ladder.region, default: 0] += painted
                 if edge { stats.slotsCut += 1 } else { stats.slotsKept[S, default: 0] += 1 }
                 // The plan: every cell that owns at least one texel, cut or whole.
-                if painted > 0 { cells.append(LatticeSteppedCell(region: ladder.region, originMM: lo, sizeMM: S)) }
+                if painted > 0 { cells.append(LatticeSteppedCell(region: ladder.region, originMM: lo, sizeMM: S,
+                                                                 slotOriginMM: slotOrigin)) }
             }
             func place(_ idx: SIMD3<Int>, level: Int) {
                 let S = ladder.sizes[level]
@@ -1076,6 +1205,8 @@ extension LatticePreviewOccupancy {
                 // the depth slab is air, not a plain cell — his "lattice jutting out of
                 // the rim" was this fall-through painting it.
                 if slabFailed { return }
+                // ★ round 5: nor past the prism's depth by core's rule — the same air as the slab
+                if depthFailed { return }
                 if yielded { return }                          // the finest rung: air
                 if outlineFailed {
                     if farthest > 0 { paint(lo, S, finest: true, edge: true, nearest: nearest) }
@@ -1101,7 +1232,7 @@ extension LatticePreviewOccupancy {
             /// hole — the same edge treatment the finest rung always had.
             func packSlot(_ lo0: SIMD3<Double>, _ S0: Double) {
                 let menu = Array(ladder.sizes.dropFirst())
-                let nG = 2 * steppedMenuMaxDivisor
+                let nG = Self.steppedPackGrid
                 let g = S0 / Double(nG)
                 var taken = [Bool](repeating: false, count: nG * nG * nG)
                 func cellIndex(_ i: SIMD3<Int>) -> Int { (i.z * nG + i.y) * nG + i.x }
@@ -1143,7 +1274,7 @@ extension LatticePreviewOccupancy {
                 func familyStep(_ S: Double) -> Int {
                     // the tile this size is a multiple of: base/n for the smallest n
                     // whose tile divides S
-                    for nn in 2...steppedMenuMaxDivisor {
+                    for nn in 2...steppedMenuMaxDivisor where Self.steppedPackGrid % nn == 0 {
                         let t = S0 / Double(nn)
                         let k = S / t
                         if abs(k - k.rounded()) < 1e-6 { return Swift.max(1, Int((t / g).rounded())) }
@@ -1182,7 +1313,7 @@ extension LatticePreviewOccupancy {
                     let dc = dOutFast(lo + SIMD3<Double>(repeating: 0.5 * f))
                     if dc < -0.87 * f { continue }
                     let (ok, nearest, farthest) = fits(lo, f)
-                    if slabFailed { continue }                 // ★ outside the slab is air
+                    if slabFailed || depthFailed { continue }  // ★ outside the slab, or past the depth: air
                     if hasYielded(ladder.region, lo, f) { continue }   // R7: the finest rung yielded
                     if ok || !outlineFailed {
                         paint(lo, f, finest: true, edge: false, nearest: nearest)
@@ -1274,13 +1405,26 @@ extension LatticePreviewOccupancy {
                     }}}
                 }
             }
-            for (i, c) in candidates.enumerated() where !contest[i].isEmpty {
-                stats.contestedCells += 1
-                let centre = c.lo + SIMD3<Double>(repeating: 0.5 * c.S)
-                // the owner among the cell's region and its contesters: a region whose prism
-                // CONTAINS the centre; a centre in no such prism has no owner, and the cell stays
-                let among = [c.region] + Set(contest[i].map { candidates[$0].region }).sorted()
-                if let o = Self.owner(of: centre, regions: regions, among: among), o != c.region { accepted[i] = false }
+            let contested = candidates.indices.filter { !contest[$0].isEmpty }
+            stats.contestedCells = contested.count
+            let centres = contested.map { candidates[$0].lo + SIMD3<Double>(repeating: 0.5 * candidates[$0].S) }
+            if let owners = coreOwners(centres) {
+                // ★★ ruling (a): a contested cell stays only when core gives its centre to its OWN
+                // region; no owner, or a third region, and it yields (and steps down)
+                for (n, i) in contested.enumerated() where owners[n] != candidates[i].region {
+                    accepted[i] = false
+                    if let o = owners[n] {
+                        if !contest[i].contains(where: { candidates[$0].region == o }) { stats.yieldedThirdRegion += 1 }
+                    } else { stats.yieldedOwner0 += 1 }
+                }
+            } else {
+                for (n, i) in contested.enumerated() {
+                    let c = candidates[i]
+                    // the Swift rule (the proof's comparison, or core could not answer): the owner
+                    // among the cell's region and its contesters; a centre in none of them, and it stays
+                    let among = [c.region] + Set(contest[i].map { candidates[$0].region }).sorted()
+                    if let o = Self.owner(of: centres[n], regions: regions, among: among), o != c.region { accepted[i] = false }
+                }
             }
             for (i, js) in contest.enumerated() where accepted[i] {
                 stats.straddlerPairs += js.filter { $0 > i && accepted[$0] }.count
@@ -1314,6 +1458,49 @@ extension LatticePreviewOccupancy {
             continue
         }
         break
+        }
+        // ★★ ruling (b): each shared texel follows core's owner at its MIDDLE — that region's cell
+        // if it claimed the texel, else the texel is empty (no owner, or an owner with no cell
+        // there). Core could not answer ⇒ the Swift rank among the claimants, and the plan is withheld.
+        if !texelClaims.isEmpty {
+            let keys = texelClaims.keys.sorted()
+            stats.sharedTexels = keys.count
+            func middle(_ idx: Int) -> SIMD3<Double> {
+                let i = idx % gnx, j = (idx / gnx) % gny, k = idx / (gnx * gny)
+                return gorigin + (SIMD3<Double>(Double(i), Double(j), Double(k)) + 0.5) * pitch
+            }
+            let owners = coreOwners(keys.map(middle))
+            for (n, idx) in keys.enumerated() {
+                let claims = texelClaims[idx]!
+                let win: TexelClaim?
+                if let owners {
+                    if let o = owners[n] {
+                        win = claims.first { Int($0.region) == o }
+                        if win == nil { stats.sharedTexelsEmptiedOwnerNoCell += 1 }
+                    } else { win = nil; stats.sharedTexelsEmptiedOwner0 += 1 }
+                } else {
+                    let p = middle(idx)
+                    win = claims.dropFirst().reduce(claims[0]) { best, c in
+                        outranks(rank(Int(c.region), p), rank(Int(best.region), p)) ? c : best
+                    }
+                }
+                if let w = win {
+                    if owners != nil {
+                        stats.sharedTexelsToOwner += 1
+                        if let k = claims.firstIndex(where: { $0.region == w.region }), k >= 2 { stats.sharedTexelsToThird += 1 }
+                    }
+                    if w.region != owner[idx] { stats.texelsReassigned += 1 }
+                    owner[idx] = w.region; cellOf[idx] = w.cell; isFinest[idx] = w.finest; size[idx] = w.size
+                    phase[idx] = w.phase; origin[idx] = w.origin; bandT[idx] = w.bandT; outlineMM[idx] = w.outline
+                } else {
+                    owner[idx] = -1; cellOf[idx] = -1; isFinest[idx] = false; size[idx] = 0
+                    phase[idx] = 0; origin[idx] = SIMD3<Float>(repeating: 0); bandT[idx] = 1; outlineMM[idx] = 1e3
+                }
+            }
+        }
+        // ★ core could not name the owners: the picture used the Swift rule, so the plan is not core's
+        if let why = stats.coreOwnerRefusal {
+            for i in cells.indices { cells[i].ownerRefusal = why }
         }
         // R7: a plan cell another region's texels all went to is no longer in the plan.
         if Self.centreOwnershipEnabled {

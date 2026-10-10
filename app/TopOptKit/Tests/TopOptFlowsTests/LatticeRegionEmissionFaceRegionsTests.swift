@@ -44,7 +44,9 @@ final class LatticeRegionEmissionFaceRegionsTests: XCTestCase {
             primitives: { _ in [] }, includePrimitives: [],
             faceDepthMM: 4,
             selectableRoles: [excluded: .exclude],
-            regionMembers: { _, rid in rid == 101 ? nil : [30] },   // 101 is a cut sector
+            // 101 reaches nothing (nil members) — ★ batch E: a CUT sector now comes back with its
+            // members, clipped (LatticeSectorOutlineTests); nil is left for a region with no surface
+            regionMembers: { _, rid in rid == 101 ? nil : [30] },
             resolve: { self.plane($0) })
         XCTAssertEqual(r.regions.filter { $0.role == .include }.count, 0)
     }
