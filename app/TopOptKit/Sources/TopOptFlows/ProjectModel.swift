@@ -535,8 +535,12 @@ public final class ProjectModel: ObservableObject {
                 // run's own import, which is the whole reason it survives one.
                 anchorRegions.append(contentsOf: g.regionIDs)
             } else if kind.isLoad {
-                let n = groupNormalModel(g) ?? SIMD3<Float>(0, 0, 1)
-                if let f = force.loadForceVectorModel(g.id, groupNormal: n) {
+                // ★★ ONE DIRECTION, OR NONE (2026-10-09, #362's find): the same verdict the
+                // pre-flight blocks on. A Push or Pull whose faces face opposite ways has no
+                // direction, and it used to be given +Z here — a push on two opposite faces went
+                // out as (0, 0, −F) while the pre-flight, guessing +Y, said OK. Refused, it carries
+                // no load at all, and Optimize is blocked with the reason (`loadGroupDiagnoses`).
+                if case .vector(let f)? = loadDirection(for: g.id) {
                     loads.append(.init(faceIDs: g.faces.map { Int(resolvedRunFaceID($0)) },
                                        force: SIMD3<Double>(f),
                                        regionIDs: g.regionIDs))
@@ -3173,6 +3177,80 @@ public final class ProjectModel: ObservableObject {
     }
 
     /// A group's model-space outward normal (mean of its faces' normals), or nil.
+    /// ★★ A LOAD GROUP'S DIRECTION, OR WHY IT HAS NONE (the reviewer, 2026-10-09, #362's find:
+    /// "refuse or resolve the case in plain words"). ONE verdict for the job (`loadCase`), the
+    /// Optimize pre-flight (`loadGroupDiagnoses`) and the load-path picture.
+    public enum LoadDirectionVerdict: Equatable, Sendable {
+        /// The force vector in the model frame (N).
+        case vector(SIMD3<Float>)
+        /// Why there is none, naming the group.
+        case refused(String)
+    }
+
+    /// How far a Push or Pull group's face normals must agree: the length of their mean, 1 for
+    /// faces that all face one way, 0 for two that face opposite ways. Below this the mean is a
+    /// direction no face has — two opposite faces cancel to nothing, and a bore's faces cancel
+    /// round its axis — so the group is refused rather than pushed somewhere arbitrary. 0.5 is
+    /// the line where the faces agree more than they disagree (a half-cylinder reads 0.64).
+    public static let loadNormalAgreementFloor: Float = 0.5
+
+    /// nil when the group is not a load.
+    public func loadDirection(for id: UUID) -> LoadDirectionVerdict? {
+        guard let g = selection.groups.first(where: { $0.id == id }),
+              case let .load(direction, _) = force.kind(for: id) else { return nil }
+        var n = SIMD3<Float>(0, 0, 1)        // read only by a Push or Pull
+        if direction != .gravity {
+            guard let (mean, agreement) = groupNormalAgreement(g) else {
+                return .refused("“\(g.name)” has no face for \(direction.title) to act on.")
+            }
+            guard agreement >= Self.loadNormalAgreementFloor else {
+                return .refused("“\(g.name)”: its faces face opposite ways, so \(direction.title) has no "
+                                + "single direction. Put them in separate groups, or load it by weight.")
+            }
+            n = mean
+        }
+        guard let f = force.loadForceVectorModel(id, groupNormal: n) else {
+            return .refused("“\(g.name)” has no direction to load.")
+        }
+        return .vector(f)
+    }
+
+    /// ★ The Optimize pre-flight's diagnoses (099 D3), from the SAME verdict the job is built
+    /// from — so the two can no longer disagree. `mayNotRegister` is the view's voxel-footprint test.
+    public func loadGroupDiagnoses(mayNotRegister: (SelectionGroup) -> Bool = { _ in false })
+        -> [LoadGroupDiagnosis] {
+        selection.groups.compactMap { g in
+            guard let verdict = loadDirection(for: g.id) else { return nil }
+            let health: LoadGroupHealth
+            switch verdict {
+            case .refused(let why):
+                health = .noDirection(why)
+            case .vector(let f):
+                health = simd_length(f) < 1e-6 ? .zeroForce : (mayNotRegister(g) ? .mayNotRegister : .ok)
+            }
+            return LoadGroupDiagnosis(label: g.name, health: health)
+        }
+    }
+
+    /// The group's mean face normal and how far its faces agree (|Σ n̂| / count); nil when it
+    /// has no face with a normal.
+    private func groupNormalAgreement(_ g: SelectionGroup) -> (SIMD3<Float>, Float)? {
+        guard let mesh = viewerMesh else { return nil }
+        var acc = SIMD3<Float>.zero
+        var count = 0
+        for f in g.faces { if let nrm = mesh.faceNormal(f) { acc += nrm; count += 1 } }
+        for r in g.regionIDs {
+            guard let region = faceRegions.region(r) else { continue }
+            for f in FaceRegionGeometry.members(of: region, in: mesh) {
+                if let nrm = mesh.faceNormal(f) { acc += nrm; count += 1 }
+            }
+        }
+        guard count > 0 else { return nil }
+        let len = simd_length(acc)
+        guard len > 1e-6 else { return (SIMD3<Float>(0, 0, 0), 0) }
+        return (acc / len, len / Float(count))
+    }
+
     private func groupNormalModel(_ g: SelectionGroup) -> SIMD3<Float>? {
         guard let mesh = viewerMesh else { return nil }
         var acc = SIMD3<Float>.zero

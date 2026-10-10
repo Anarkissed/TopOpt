@@ -581,21 +581,9 @@ public struct WorkspacePlaceholder: View {
     /// zero-force, may-not-register, or ok. Anchors and pending groups are ignored
     /// (only load groups carry a force the run must apply).
     private func loadGroupDiagnoses() -> [LoadGroupDiagnosis] {
-        selection.groups.compactMap { g in
-            let kind = force.kind(for: g.id)
-            guard kind.isLoad else { return nil }
-            let n = groupNormalModel(g) ?? SIMD3<Float>(0, 1, 0)
-            let f = force.loadForceVectorModel(g.id, groupNormal: n) ?? .zero
-            let health: LoadGroupHealth
-            if simd_length(f) < 1e-6 {
-                health = .zeroForce
-            } else if loadGroupMayNotRegister(g) {
-                health = .mayNotRegister
-            } else {
-                health = .ok
-            }
-            return LoadGroupDiagnosis(label: g.name, health: health)
-        }
+        // ★★ THE PROJECT'S VERDICT, the one the job is built from (2026-10-09): this used to guess
+        // +Y for a group with no direction and say OK while the job guessed +Z.
+        project.loadGroupDiagnoses(mayNotRegister: loadGroupMayNotRegister)
     }
 
     public init(model: AppModel, project: ProjectModel) {
@@ -2429,8 +2417,8 @@ public struct WorkspacePlaceholder: View {
     private var loadFlowPairs: [(seed: SIMD3<Float>, dir: SIMD3<Float>)] {
         selection.groups.compactMap { g in
             guard force.kind(for: g.id).isLoad, let c = groupCentroidModel(g) else { return nil }
-            let n = groupNormalModel(g) ?? SIMD3<Float>(0, 1, 0)
-            let f = force.loadForceVectorModel(g.id, groupNormal: n) ?? .zero
+            // the job's own direction; a refused load draws no flow (it carries none)
+            guard case .vector(let f)? = project.loadDirection(for: g.id) else { return (c, .zero) }
             let len = simd_length(f)
             return (c, len > 1e-6 ? f / len : SIMD3<Float>.zero)
         }
@@ -11794,6 +11782,8 @@ public struct WorkspacePlaceholder: View {
         // WHOLE. The page's Optimize reads this same value (`baseCanOptimize`), and every start
         // (`requestRun`, `startRun`, the page's "Optimize again") is gated on it.
         guard latticeOptimizeRefusal == nil else { return false }
+        // ★★ a load with no single direction is refused on the button (2026-10-09)
+        guard loadDirectionRefusal == nil else { return false }
         guard force.canOptimize(in: selection.groups,
                                 minimizePlastic: project.minimizePlastic,
                                 latticeRoleGroups: latticeRoleGroupIDs)
@@ -11852,9 +11842,18 @@ public struct WorkspacePlaceholder: View {
     }
 
     /// The Optimize sub-label, reflecting the minimize-plastic mode + the load case.
+    /// ★★ The first load group with no single direction, in the project's words (2026-10-09).
+    private var loadDirectionRefusal: String? {
+        for g in selection.groups {
+            if case .refused(let why)? = project.loadDirection(for: g.id) { return why }
+        }
+        return nil
+    }
+
     private var optimizeSummary: String {
         if let why = latticeDesignBoxConflict { return why }
         if let why = latticeOptimizeRefusal { return why }
+        if let why = loadDirectionRefusal { return why }
         if force.phase == .setup { return "set gravity first" }
         if force.hasPending(in: selection.groups,
                             latticeRoleGroups: latticeRoleGroupIDs) {
