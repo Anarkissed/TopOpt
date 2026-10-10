@@ -1,0 +1,43 @@
+FlexibleResources: materials core/src/materials/flexible_materials.json · stamps docs/design/flexibles/data/stamps.json
+[r5] restored through AppModel.open (H18 inside):
+  · bottom — faces [0] regions [] — 'Anchor' — colorIndex 3 #354tint #30D158
+  · Top — faces [] regions [103, 105] — '10 kg · gravity' — colorIndex 4 #354tint #BF5AF2 — ACTIVE
+  · Group 1 · Face 5 — faces [5] regions [] — '10 kg · push' — colorIndex 4 #354tint #BF5AF2
+  · sides — faces [4, 2] regions [] — 'Protect' — colorIndex 1 #354tint #0A84FF
+  · Group 2 — faces [3] regions [] — '3.0 kg · push' — colorIndex 4 #354tint #BF5AF2
+  unit kg · phase edit · gravity set true
+0_topology:  · per face {f0=#2DE0C6@0.45,f1=#BF5AF2@0.45,f2=#2DE0C6@0.45,f3=#BF5AF2@0.45,f4=#2DE0C6@0.45,f5=#BF5AF2@0.45} · verts 36 · override nil · #354 faceTints {f0=#2DE0C6,f1=#BF5AF2,f2=#2DE0C6,f3=#BF5AF2,f4=#2DE0C6,f5=#BF5AF2} · tinted verts 36 · ROLE-COLOURED verts 36 · volumes face 0 faint 0 glass 0 line 0 · bodyAlpha 1.0
+nav 'ii Lattice' at (693.0, 41.0, 77.0, 17.0)
+1_flex_first_frame:  · top colours {#F2F2F5:128136} · verts 128136 · override 128136v · #354 faceTints {f0=#2DE0C6,f1=#BF5AF2,f2=#2DE0C6,f3=#BF5AF2,f4=#2DE0C6,f5=#BF5AF2} · tinted verts 128136 · ROLE-COLOURED verts 0 · volumes face 0 faint 0 glass 0 line 0 · bodyAlpha 0.04
+  t+0.37s  · top colours {#F2F2F5:128136} · verts 128136 · override 128136v · #354 faceTints {f0=#2DE0C6,f1=#BF5AF2,f2=#2DE0C6,f3=#BF5AF2,f4=#2DE0C6,f5=#BF5AF2} · tinted verts 128136 · ROLE-COLOURED verts 0 · volumes face 0 faint 0 glass 0 line 0 · bodyAlpha 0.04
+  t+2.77s  · top colours {#F2F2F5:110400,#1554B5:3984,#078BCE:1392,#174FB2:732,#1653B4:672,#1555B5:636} · verts 124992 · override 124992v · #354 faceTints {f0=#2DE0C6,f1=#BF5AF2,f2=#2DE0C6,f3=#BF5AF2,f4=#2DE0C6,f5=#BF5AF2} · tinted verts 124992 · ROLE-COLOURED verts 0 · volumes face 0 faint 0 glass 0 line 0 · bodyAlpha 0.04
+1a_flex_t1s:  · top colours {#F2F2F5:110400,#1554B5:3984,#078BCE:1392,#174FB2:732,#1653B4:672,#1555B5:636} · verts 124992 · override 124992v · #354 faceTints {f0=#2DE0C6,f1=#BF5AF2,f2=#2DE0C6,f3=#BF5AF2,f4=#2DE0C6,f5=#BF5AF2} · tinted verts 124992 · ROLE-COLOURED verts 0 · volumes face 0 faint 0 glass 0 line 0 · bodyAlpha 0.04
+1b_flex_t4s:  · top colours {#F2F2F5:110400,#1554B5:3984,#078BCE:1392,#174FB2:732,#1653B4:672,#1555B5:636} · verts 124992 · override 124992v · #354 faceTints {f0=#2DE0C6,f1=#BF5AF2,f2=#2DE0C6,f3=#BF5AF2,f4=#2DE0C6,f5=#BF5AF2} · tinted verts 124992 · ROLE-COLOURED verts 0 · volumes face 0 faint 0 glass 0 line 0 · bodyAlpha 0.04
+  t+46s  · top colours {#F2F2F5:95424,#1652B4:8166,#1651B3:2916,#0984CA:1854,#1653B4:1806,#1C3CAA:936} · verts 124992 · override 124992v · #354 faceTints {f0=#2DE0C6,f1=#BF5AF2,f2=#2DE0C6,f3=#BF5AF2,f4=#2DE0C6,f5=#BF5AF2} · tinted verts 124992 · ROLE-COLOURED verts 0 · volumes face 0 faint 0 glass 0 line 0 · bodyAlpha 0.04
+  t+52s busy no
+2_flex_t25s:  · top colours {#F2F2F5:95424,#1652B4:8166,#1651B3:2916,#0984CA:1854,#1653B4:1806,#1C3CAA:936} · verts 124992 · override 124992v · #354 faceTints {f0=#2DE0C6,f1=#BF5AF2,f2=#2DE0C6,f3=#BF5AF2,f4=#2DE0C6,f5=#BF5AF2} · tinted verts 124992 · ROLE-COLOURED verts 0 · volumes face 0 faint 0 glass 0 line 0 · bodyAlpha 0.04
+  t+89s  · top colours {#F2F2F5:95424,#1849B0:5322,#1848AF:5154,#1849AF:2904,#0F6BBF:1662,#184AB0:1446} · verts 124992 · override 124992v · #354 faceTints {f0=#2DE0C6,f1=#BF5AF2,f2=#2DE0C6,f3=#BF5AF2,f4=#2DE0C6,f5=#BF5AF2} · tinted verts 124992 · ROLE-COLOURED verts 0 · volumes face 0 faint 0 glass 0 line 0 · bodyAlpha 0.04
+  t+94s busy no
+  t+115s  · top colours {#F2F2F5:120000,#1945AE:1263,#1946AE:972,#1944AD:729,#1A43AD:351,#1944AE:171} · verts 124992 · override 124992v · #354 faceTints {f0=#2DE0C6,f1=#BF5AF2,f2=#2DE0C6,f3=#BF5AF2,f4=#2DE0C6,f5=#BF5AF2} · tinted verts 124992 · ROLE-COLOURED verts 0 · volumes face 0 faint 0 glass 0 line 0 · bodyAlpha 0.04
+  t+120s busy no
+3_flex_settled:  · top colours {#F2F2F5:120000,#1945AE:1263,#1946AE:972,#1944AD:729,#1A43AD:351,#1944AE:171} · verts 124992 · override 124992v · #354 faceTints {f0=#2DE0C6,f1=#BF5AF2,f2=#2DE0C6,f3=#BF5AF2,f4=#2DE0C6,f5=#BF5AF2} · tinted verts 124992 · ROLE-COLOURED verts 0 · volumes face 0 faint 0 glass 0 line 0 · bodyAlpha 0.04
+  · bottom — faces [0] regions [] — 'Anchor' — colorIndex 3 #354tint #30D158
+  · Top — faces [] regions [103, 105] — '10 kg · gravity' — colorIndex 4 #354tint #BF5AF2 — ACTIVE
+  · Group 1 · Face 5 — faces [5] regions [] — '10 kg · push' — colorIndex 4 #354tint #BF5AF2
+  · sides — faces [4, 2] regions [] — 'Protect' — colorIndex 1 #354tint #0A84FF
+  · Group 2 — faces [3] regions [] — '3.0 kg · push' — colorIndex 4 #354tint #BF5AF2
+  unit kg · phase edit · gravity set true
+Selections list: visible 360 pt of 441 pt (all scroll views: (24.0, 618.0, 348.0, 361.0) doc 441)
+3b_flex_settled_list_scrolled_to_end:  · top colours {#F2F2F5:120000,#1945AE:1263,#1946AE:972,#1944AD:729,#1A43AD:351,#1944AE:171} · verts 124992 · override 124992v · #354 faceTints {f0=#2DE0C6,f1=#BF5AF2,f2=#2DE0C6,f3=#BF5AF2,f4=#2DE0C6,f5=#BF5AF2} · tinted verts 124992 · ROLE-COLOURED verts 0 · volumes face 0 faint 0 glass 0 line 0 · bodyAlpha 0.04
+5_settings:  · top colours {#F2F2F5:120000,#1945AE:1263,#1946AE:972,#1944AD:729,#1A43AD:351,#1944AE:171} · verts 124992 · override 124992v · #354 faceTints {f0=#2DE0C6,f1=#BF5AF2,f2=#2DE0C6,f3=#BF5AF2,f4=#2DE0C6,f5=#BF5AF2} · tinted verts 124992 · ROLE-COLOURED verts 0 · volumes face 0 faint 0 glass 0 line 0 · bodyAlpha 0.04
+rail tab 'Top' not on screen
+6_settings_Group1:  · top colours {#F2F2F5:120000,#1945AE:1263,#1946AE:972,#1944AD:729,#1A43AD:351,#1944AE:171} · verts 124992 · override 124992v · #354 faceTints {f0=#2DE0C6,f1=#BF5AF2,f2=#2DE0C6,f3=#BF5AF2,f4=#2DE0C6,f5=#BF5AF2} · tinted verts 124992 · ROLE-COLOURED verts 0 · volumes face 0 faint 0 glass 0 line 0 · bodyAlpha 0.04
+6_settings_Group2:  · top colours {#F2F2F5:120000,#1945AE:1263,#1946AE:972,#1944AD:729,#1A43AD:351,#1944AE:171} · verts 124992 · override 124992v · #354 faceTints {f0=#2DE0C6,f1=#BF5AF2,f2=#2DE0C6,f3=#BF5AF2,f4=#2DE0C6,f5=#BF5AF2} · tinted verts 124992 · ROLE-COLOURED verts 0 · volumes face 0 faint 0 glass 0 line 0 · bodyAlpha 0.04
+6_settings_Rests:  · top colours {#F2F2F5:120000,#1945AE:1263,#1946AE:972,#1944AD:729,#1A43AD:351,#1944AE:171} · verts 124992 · override 124992v · #354 faceTints {f0=#2DE0C6,f1=#BF5AF2,f2=#2DE0C6,f3=#BF5AF2,f4=#2DE0C6,f5=#BF5AF2} · tinted verts 124992 · ROLE-COLOURED verts 0 · volumes face 0 faint 0 glass 0 line 0 · bodyAlpha 0.04
+rail tab 'Pending' not on screen
+back from Settings, NO pick yet:  · top colours {#F2F2F5:120000,#1945AE:1263,#1946AE:972,#1944AD:729,#1A43AD:351,#1944AE:171} · verts 124992 · override 124992v · #354 faceTints {f0=#2DE0C6,f1=#BF5AF2,f2=#2DE0C6,f3=#BF5AF2,f4=#2DE0C6,f5=#BF5AF2} · tinted verts 124992 · ROLE-COLOURED verts 0 · volumes face 0 faint 0 glass 0 line 0 · bodyAlpha 0.04
+7_main_after_settings_exit_no_pick:  · top colours {#F2F2F5:120000,#1945AE:1263,#1946AE:972,#1944AD:729,#1A43AD:351,#1944AE:171} · verts 124992 · override 124992v · #354 faceTints {f0=#2DE0C6,f1=#BF5AF2,f2=#2DE0C6,f3=#BF5AF2,f4=#2DE0C6,f5=#BF5AF2} · tinted verts 124992 · ROLE-COLOURED verts 0 · volumes face 0 faint 0 glass 0 line 0 · bodyAlpha 0.04
+MTKViews: (0.0, 0.0, 1032.0, 1376.0) hidden false renderer true · (0.0, 0.0, 210.0, 210.0) hidden false renderer false
+PRISMS ON, view 0:  · top colours {#F2F2F5:120000,#1945AE:1263,#1946AE:972,#1944AD:729,#1A43AD:351,#1944AE:171} · verts 124992 · override 124992v · #354 faceTints {f0=#2DE0C6,f1=#BF5AF2,f2=#2DE0C6,f3=#BF5AF2,f4=#2DE0C6,f5=#BF5AF2} · tinted verts 124992 · ROLE-COLOURED verts 0 · volumes face 0 faint 15204 glass 0 line 1278 · bodyAlpha 0.04
+9_prisms_on:  · top colours {#F2F2F5:120000,#1945AE:1263,#1946AE:972,#1944AD:729,#1A43AD:351,#1944AE:171} · verts 124992 · override 124992v · #354 faceTints {f0=#2DE0C6,f1=#BF5AF2,f2=#2DE0C6,f3=#BF5AF2,f4=#2DE0C6,f5=#BF5AF2} · tinted verts 124992 · ROLE-COLOURED verts 0 · volumes face 0 faint 15204 glass 0 line 1278 · bodyAlpha 0.04
+PRISMS OFF again (Top active):  · top colours {#F2F2F5:120000,#1945AE:1263,#1946AE:972,#1944AD:729,#1A43AD:351,#1944AE:171} · verts 124992 · override 124992v · #354 faceTints {f0=#2DE0C6,f1=#BF5AF2,f2=#2DE0C6,f3=#BF5AF2,f4=#2DE0C6,f5=#BF5AF2} · tinted verts 124992 · ROLE-COLOURED verts 0 · volumes face 0 faint 0 glass 0 line 0 · bodyAlpha 0.04

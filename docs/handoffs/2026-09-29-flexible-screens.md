@@ -1,6 +1,152 @@
 # Handoff — 2026-09-29-flexible-screens (TRACK app, A1): the Flexible screens
 
-## Round 6 · item 4 — ONE SET OF GROUPS (2026-10-09) (read this first)
+## Round 6 · item 4 — the VERIFICATION's fixes: one set of groups BOTH ways (2026-10-10) (read this first)
+
+The item-4 verification found two blockers and five majors (and minors) in the item-4 build below. Each was confirmed here
+on your projects (the verifier's probes P1–P13 reproduced as tests, each with its red control proven red), and fixed in
+Flexible files only. **No #354 / main file changed: H16, H17 and H18 are the same three lines** (two of their Flexible-side
+functions changed — listed below). **The app was NOT launched**: it is installed on the iPad Pro 13 simulator (147E56A1),
+never opened. The main-page pictures are now the REAL workspace (WorkspacePlaceholder hosted offscreen at your 13"
+portrait, driven by clicks to the Flexible stage — #354's real Selections rows), not the replica of item 4.
+
+**What you will see (changed from item 4):**
+- **A change on the main page reaches Settings, and a reopen never undoes it.** Delete a hand on the main page, clear its
+  role, or move its face into a group with no role: the face leaves Settings (its curves, stamp and shape are kept aside
+  and come back with it when a main-page group presses or rests it again), and the Pending tab lists the group with no
+  role. The link at restore now runs ONCE per project, so the next open brings nothing back.
+- **Opening a project never takes apart what you set.** Where an older project was saved with the two pages disagreeing
+  (Settings pressing a face your Anchor rests, or resting a face your Load presses), nothing moves at open — your Anchor and
+  your Load stay — and Settings asks: the **Pending tab** lists each face, and its card asks too: "Face 0 rests (main page:
+  Bottom)" [Squeeze it] [Keep it resting], "Face 1 is pressed (main page: Top)" [Squeeze it] [It rests]. One tap, one undo
+  step. The first open's line adds "Settings: 2 faces to settle".
+- **A pinch side's weight typed on the main page moves both sides** (your force answer: one number), on any stage, in the
+  same undo step — Topology never sees an unbalanced pinch.
+- **The M2 stand's face 2 keeps its Protect** in its own hand (it had lost it).
+- **Your 0004's Top B is not put under Top's 4 mm lattice at open** (your call — question 2 below): it stays as you saved
+  it (pressed in Settings at its own 10 kg). Press it into group 1 in Settings and it joins Top (10 kg on Top A + Top B =
+  5 + 5).
+- **On Topology** the rows the open linked say **"Linked from Flexible Settings"** until the Flexible page has shown its
+  one-time line ("Groups 2 and 3 are on the main page now"); the line is saved with the project, stays three times as long,
+  is never replaced by "Still building", and a tap ends it.
+- **One unit on both pages.** Your pad was saved with Settings in lb and the main page in kg: Settings now reads kg (the
+  main page's) and either kg/lb toggle switches both (N and kN stay Settings' own) — question 3.
+- **One group's rows together, one colour on every page.** "Group 3 · Face 5" sits right under Group C; a pinch's two rows
+  share one #354 colour on Topology too (both purple there; pink on the Flexible stage as before).
+- **No role mark on the main page's model**: your resting bottom is no longer cyan for good, and a pressed face waiting for
+  its map is not green (your answer of 2026-10-09; the Settings page keeps them).
+- Reset all keeps Group C and "Group 3 · Face 5" one group; a group you name "Group 7" keeps your name; a face a region
+  that cannot split holds is never in two groups (its card says who holds it).
+
+### Each finding → confirmed by → fixed where → pinned by (RED control; tests FIRST: 13 new tests red — 12 with 59 failures, then the live B1 test with 2 — item4_verify/i4v_red_runs.txt)
+
+| finding | confirmed (on his project) | fix | pinned by (red control) |
+|---|---|---|---|
+| **B1** main-page delete / role clear / move never reached Settings; the next restore undid it | P1, P2, P9 reproduced on A1_0003 (save + reopen through `ProjectModel(restoring:)`) | `FlexibleStageModel.parkOrphans` / `unpark` (in the adopt and in the new `FlexibleGroupWatch`); `FlexibleStageSettings.groupLink` — H18 runs once per project | `FlexibleGroupSyncVerifyTests.testAMainPageEditReachesSettingsAndAReopenNeverUndoesIt` (control: round 3's adopt + the eager restore — Settings keeps pressing, the reopen relinks with "Group 3 is on the main page now"); live on Topology, in the delete's own undo step: `…testOnTopologyTheWatchFollowsAMainPageEditInTheSameUndoStep` |
+| **B2** the restore emptied and removed his only Anchor / his gravity Load | P13 + P12 on A1_0003 | `FlexibleGroupWorld.atRestore` (restoreBlock, never remove a group); the disagreement asked in Settings (`disagreements`, the Pending tab, the card) | `…testTheRestoreNeverTakesApartWhatHeSet` (control: Bottom and Top removed); hosted `FlexibleGroupSyncHostedTests.testTheDisagreementsAreAskedOnThePendingTab` (13p: line and two 44 pt fixes inside the panel) |
+| **M3** one pinch side's main-page weight split the force (net 14.36 N in Topology) | P3 | `FlexibleGroupWorld.equaliseHands` — live (`FlexibleGroupWatch`, any stage) and in the adopt (`handsMovedSinceRecorded`) | `…testOnePinchSideWeightOnTheMainPageIsTheGroups` (both routes; control: 6 vs 4.5 kg) |
+| **M4** M2: face 2 lost Group C's Protect | i4_stage_job_diffs (face_protections 3 → 2) | `carried` / `give`: a face leaving a Protect / keep-clear group takes it to a hand of its own | `…testAFaceLeavingAProtectGroupKeepsItsProtect` (control: 2 < 3) |
+| **M5** his 0004: Top's lattice role spread to Top B (grading 5 → 1.17) | i4_stage_job_diffs | at restore no face joins a hand carrying an affix or a lattice role; held as saved, said in the report | `…testHisTopBIsNotPutUnderTopsLatticeAtRestore` (control: 2 regions) |
+| **M6** the line lived in memory, only on the Flexible page | code (a static dictionary, taken only under `guard visible`) | the line saved in `groupLink`; "shown" kept per record outside the project (never an undo step); H17's caption off the Flexible stage until shown | `…testTheLinkLineIsSavedReachesTopologyAndShowsOnce` |
+| **M12** (ux) the real list shows 4 of 6 rows (360 pt cap) | the real workspace: 360 of 557 pt on A1_0003, 360 of 441 pt on r5 | **#354's** — reported below; rows of one group now adjacent; pictures re-shot from the REAL workspace | evidence `workspace/` |
+| **M13** (ux) one group, different names across pages | the real workspace | rows adjacent (done); the naming is **your question 1** | — |
+| **M14** (ux) lb in Settings, kg on the main page | his pad as saved | one unit: the main page's at the link; either toggle switches both | `…testOneUnitOnBothPages` (control: lb beside kg) |
+| m7 Reset all split his Group C + "Group 3 · Face 5" | P5 | the squeeze group each hand was in before the reset (`families`) | `…testResetAllKeepsHisGroupWholeAndHisGroupNNameIsHis` |
+| m8 a "Group 7" he typed was renamed | P10 | `madeHands`: only hands made here, by id | same test (control: renamed by name) |
+| m10 an unsplittable region: a face in two groups | code | `canDetach` before any link; one line in the card | `…testAFaceARegionCannotLetGoOfIsNeverInTwoGroups` (control: two groups) |
+| m15 a pinch's rows orange and purple on Topology | the real Topology | a new hand takes its sibling's #354 colour (else the palette's nearest to its squeeze colour), listed beside it | `…testAPinchsRowsAreOneColourOnTopologyAndSideBySide` (control: two colours) |
+| m17 green / cyan marks on the main page's model | the real workspace (the bottom cyan for good: 49 152 vertices) | `roleMarks: false` on the main page (your 2026-10-09 answer) | R6-1a re-pinned (`FlexibleRound6HostedTests…NoGroupColour…`: positive controls — resting cyan, pressed green — then none) |
+| m18 the line gone in 4 s / replaced by "Still building" | run 2 of the verifier | 3× as long, a tap ends it, never replaced by "Still building" | `…testTheLinkLineIsNotReplacedByStillBuilding` (control: replaced) |
+| m9 / m16 the swatch's palette is dead on the Flexible stage | code | **#354's** (its popover action) — reported below | — |
+| m11 the replica | — | the pictures are the real workspace now | evidence `workspace/` |
+| m19 Settings outlines / curves drawn over the panels | the verifier's screens | out of item 4 — **for the item 1 / 3 owner** | — |
+
+### Hook lines in #354 / main files — UNCHANGED (H16, H17, H18 as in item 4; H15 already in)
+
+| # | file | the line (unchanged) | what changed behind it (Flexible files) |
+|---|---|---|---|
+| H16 | `WorkspacePlaceholder.swift` groupRow | `let tint = flexibleMain.groupTint(g, project) ?? force.tint(for: g)` | nothing |
+| H17 | `WorkspacePlaceholder.swift` groupRow | `if let c = flexibleMain.groupCaption(g, project) { FlexibleGroupCaption(text: c) }` | **off the Flexible stage it now returns "Linked from Flexible Settings"** on a row the restore linked, until the one-time line has been shown (it was nil there) — `FlexibleMainStage+Groups.groupCaption`, `FlexibleGroupMigration.caption` |
+| H18 | `ProjectModel.swift` init(restoring:) | `FlexibleGroupMigration.migrate(self)` | **runs once per project** (returns at once when `lattice.flexible.groupLink` is set); never takes apart what he set |
+
+`git diff d1be6a7a..HEAD` on #354 / main files: none. #354's PUBLIC APIs used, beyond item 4's list:
+`SelectionGroup(id:name:colorIndex:faces:regionIDs:)` through `restore(groups:active:)` (a new hand's colour and place),
+`ForceModel.unit` (read; written by Settings' kg/lb toggle).
+
+### Per project, at the first open with this build (H18 once; `FlexibleGroupSyncTests.testMigrationOnEveryOneOfHisProjects`)
+- **A1_0003 (your img4 pad):** as item 4 — Group C → face 3's push 2 kg; "Group 3 · Face 5" (2 kg) **now right under
+  Group C**; "Group 2 · Face 4" / "Group 2 · Face 2" (4.536 kg, one #354 colour); face 0 linked to Bottom; teal kept; no
+  weight moved; every run job S2's golden. **Settings' weights read kg now** (saved: lb).
+- **His 0004 as saved:** Top A linked to Top; **Top B kept as saved** (10 kg, on no main-page group — question 2); faces 3
+  and 5 their own hands (10 kg, listed under Top); 0 → bottom; "sides" an Anchor (Protect kept). **No weight moved; every
+  run job, scene job, frame and field is S2's golden again, byte for byte.**
+- **0004_r5, A1_0004:** as item 4 (r5's "Group 1 · Face 5" now listed under Top, its group's other hand).
+- **A1_0002 (M2):** face 2 its own hand "Group 1" (10 kg) **+ Protect**; Group C keeps face 15, region 101 and its
+  Protect; Group B its own squeeze group (as item 4); the lattice job's face protections as saved.
+- **102117B9:** untouched.
+
+### Goldens and stage-job hashes (every difference reported first: item4_verify/i4v_goldens.txt, angled_presses/stage_job_hashes_i4v.txt, item4_verify/i4v_stage_job_diffs.txt)
+- **Goldens:** only his 0004's five files moved — back to S2's goldens byte for byte (98.07 N on Top A and Top B, one
+  include region, latticeVoxels 26624). Everything else identical to item 4's. FlexibleAngledGoldenTests 13/13,
+  deterministic and unseeded.
+- **Stage-job hashes:** 8 non-Flexible rows, A1_0004, r5 and both controls identical to item 4's; A1_0002 keeps its saved
+  face protections; A1_0003 the same loads, face 5's beside Group C's; his 0004 no second lattice region (grading
+  cell_min_mm 5 again). control+ moves, control− does not.
+
+### Evidence (`docs/handoffs/evidence/2026-09-29-flexible-screens/round6/item4_verify/`; offscreen — NOT device screenshots)
+- `workspace/` — **the REAL workspace** (FlexibleGroupSyncWorkspaceEvidence, opt-in FLEX_I4V_EVIDENCE_DIR; the verifier's
+  method): #354's real Selections rows over the shipping renderer's frame (`*_COMPOSITE.png`, comp.py), his pad and r5:
+  `A1_0003_0_topology` (the "Linked from Flexible Settings" captions, the pinch's arrows one colour),
+  `A1_0003_1_flex_first_frame` (no mark on the model: every face the plain ghost, #F2F2F5), `A1_0003_3_flex_settled` (4 rows
+  on screen: Bottom, Top, Group C, Group 3 · Face 5 — side by side, "Squeezed with …"), `…_3b_…_scrolled_to_end` (the
+  pinch's two pink rows under the fold), Settings' Top / Group 2 / Group 3 / Rests tabs, a pick of "Group 2 · Face 4",
+  `A1_0003_unlinked_3_flex_settled` (his img4 reproduced: Bottom, Top, Group C pending), r5's Topology / main page /
+  scrolled list / Group 1; the logs read the renderer's tint buffer frame by frame (`ROLE-COLOURED verts 0` from the first
+  frame).
+- `I4V_13p_settings_pending_disagreements.png`, `I4V_13p_settings_face0_card_asks.png` — the two asks on the Pending tab and
+  in face 0's card; `I4_13p/11l/11p_settings_pending_tab.png` — face 5 moved into "Group D" on the main page: Group D on
+  the Pending tab, and Settings' group 3 is now "Group C · 1 face" (it had still counted face 5).
+- **Looked at beside your img4:** the rows are yours (Bottom, Top, Group C) plus your groups from Settings; Group C is no
+  longer "Pending…". **Only 4 of the 6 rows fit #354's 360 pt list** — the pinch's two rows need a scroll (r5: 4 of 5).
+
+### Questions for you (nothing here decides them for good)
+1. **One group, one name.** Your Settings group 3 is your "Group C" on the main page plus a row this code made, "Group 3 ·
+   Face 5". (a) rename your Group C to "Group 3 · Face 3" when its group gains a second row, or (b) let Settings carry your
+   name ("Group C" on the rail, "Group C · Face 5" for the other row)? The squish player's picker says "Group 1" where the
+   rail and the main page say "Top" — it will follow the same answer.
+2. **Your 0004's Top B.** Join it to Top (your "10 kg on Top A + Top B = 5 + 5" — and Top's 4 mm lattice then runs under
+   Top B too), or give Top B its own row on the main page? Until you say, it stays as saved.
+3. **The unit.** On your pad Settings was lb and the main page kg; both read kg now (the main page's). Say if lb should win.
+
+### For #354 (not fixed here — each needs a change in #354's own files)
+- **The Selections list's 360 pt cap**: on your pad 2 of 6 rows (the pinch's two) are under the fold on the Flexible stage
+  (557 pt of rows), on r5 1 of 5 (441 pt) — raise the cap on the Flexible stage, or keep a group's rows compact.
+- **The row swatch's palette on the Flexible stage** writes `selection.setColorIndex`, which H16's squeeze colour hides
+  there (a dead control) — route the pick to the squeeze group's colour on that stage, or hide the popover.
+- (already with #354) one Push group on opposite faces → (0, 0, −F) in `loadCase`.
+
+### Targeted suite, iOS
+- **Targeted suite at 7eb91fc3** (232 classes — item 4's 230 + FlexibleGroupSyncVerifyTests + the opt-in workspace
+  evidence; no #354 file touched, so no new pin class): **1527 tests, 59 skipped, 17 failures in 5 classes, no xctest
+  death.** Known and unchanged: FlexibleBatchNVerifyTests ×8 (the refine line, Xcode 27 text metrics),
+  LatticeSimSolveTriggerTests ×1, #354's LatticeSlotOriginTests ×4. New, traced and re-pinned with attribution (840c04b1),
+  then 21/21 green: FlexibleReadinessTests ×1 (your 0004 as saved reads batch E's "Ready · No lattice under Top B" again —
+  M5) and FlexibleRound5SettingsTests ×3 (Reset all = a brand-new setup but which hands squeeze together — m7).
+  LatticeStaleTypeTests 6/6; FlexibleAngledGoldenTests 13/13; FlexibleRound6HostedTests 17/17. The wall-clock flakes under
+  load did not appear. Raw: item4_verify/i4v_suite.txt, the class list i4v_suite_classes.txt.
+- **iOS:** built at 840c04b1 (`xcodebuild … -derivedDataPath …/flexA1 build`: ** BUILD SUCCEEDED **, 03:16:11 → 03:16:35) and
+  installed on 147E56A1 (booted; **never launched**). Installed `TopOpt.debug.dylib` 77 316 336 B, mtime 03:16:35,
+  cmp-identical to the build; strings: "Linked from Flexible Settings" 1, "Not on the main page yet" 1,
+  "is pressed (main page: " 1, "to settle" 1.
+
+### Not done / open
+- Nothing seen on a device or simulator (installed, never launched).
+- Your questions 1–3 above.
+- A main-page change made in an OLDER build of the app and saved is followed at the next Flexible open (the adopt), not
+  at restore (the link runs once).
+- The item-4 open issues that the verification did not cover stay as listed there (the hand-rule order on the suites'
+  fixture, r5's [Lattice under both], the Pending tab listing only "Pending…" groups — not r5's Protect-only "sides").
+
+## Round 6 · item 4 — ONE SET OF GROUPS (2026-10-09) (★ read the verification's fixes above first)
 
 Your img4: "All set groups should be visible on the main Flexibles screen … any groups already created should already be
 set in the flexible settings when the user starts up. These two boxes should be synced". Your answer: "Yes, one set of

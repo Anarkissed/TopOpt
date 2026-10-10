@@ -1,0 +1,36 @@
+FlexibleResources: materials core/src/materials/flexible_materials.json · stamps docs/design/flexibles/data/stamps.json
+[A1_0003_unlinked] restored through AppModel.open (H18 inside):
+  · Bottom — faces [0] regions [] — 'Anchor' — colorIndex 0 #354tint #30D158
+  · Top — faces [1] regions [] — '10 kg · gravity' — colorIndex 1 #354tint #0A84FF
+  · Group C — faces [3] regions [] — 'Pending…' — colorIndex 2 #354tint #30D158 — ACTIVE
+  unit kg · phase edit · gravity set true
+0_topology:  · per face {f0=#30D158@0.45,f1=#0A84FF@0.45,f2=#000000@0.00,f3=#30D158@0.75,f4=#000000@0.00,f5=#000000@0.00} · verts 36 · override nil · #354 faceTints {f0=#30D158,f1=#0A84FF,f3=#30D158} · tinted verts 18 · ROLE-COLOURED verts 18 · volumes face 0 faint 0 glass 0 line 0 · bodyAlpha 1.0
+nav 'ii Lattice' at (693.0, 41.0, 77.0, 17.0)
+1_flex_first_frame:  · per face {f0=#F2F2F5@1.00,f1=#F2F2F5@1.00,f2=#F2F2F5@1.00,f3=#F2F2F5@1.00,f4=#F2F2F5@1.00,f5=#F2F2F5@1.00} · verts 36 · override 36v · #354 faceTints {f0=#30D158,f1=#0A84FF,f3=#30D158} · tinted verts 36 · ROLE-COLOURED verts 0 · volumes face 0 faint 0 glass 0 line 0 · bodyAlpha 0.04
+  t+2.29s  · top colours {#F2F2F5:49152,#1651B3:720,#135DB9:696,#1650B3:678,#135EB9:600,#135CB8:576} · verts 93696 · override 93696v · #354 faceTints {f0=#30D158,f1=#0A84FF,f3=#30D158} · tinted verts 93696 · ROLE-COLOURED verts 0 · volumes face 0 faint 0 glass 0 line 0 · bodyAlpha 0.04
+1a_flex_t1s:  · top colours {#F2F2F5:49152,#1651B3:720,#135DB9:696,#1650B3:678,#135EB9:600,#135CB8:576} · verts 93696 · override 93696v · #354 faceTints {f0=#30D158,f1=#0A84FF,f3=#30D158} · tinted verts 93696 · ROLE-COLOURED verts 0 · volumes face 0 faint 0 glass 0 line 0 · bodyAlpha 0.04
+1b_flex_t4s:  · top colours {#F2F2F5:49152,#1651B3:720,#135DB9:696,#1650B3:678,#135EB9:600,#135CB8:576} · verts 93696 · override 93696v · #354 faceTints {f0=#30D158,f1=#0A84FF,f3=#30D158} · tinted verts 93696 · ROLE-COLOURED verts 0 · volumes face 0 faint 0 glass 0 line 0 · bodyAlpha 0.04
+  t+43s  · top colours {#F2F2F5:69120,#1260BA:894,#0F6DC0:891,#1164BC:867,#1262BB:738,#0E6FC1:642} · verts 93696 · override 93696v · #354 faceTints {f0=#30D158,f1=#0A84FF,f3=#30D158} · tinted verts 93696 · ROLE-COLOURED verts 0 · volumes face 0 faint 0 glass 0 line 0 · bodyAlpha 0.04
+  t+48s busy yes
+2_flex_t25s:  · top colours {#F2F2F5:69120,#1260BA:894,#0F6DC0:891,#1164BC:867,#1262BB:738,#0E6FC1:642} · verts 93696 · override 93696v · #354 faceTints {f0=#30D158,f1=#0A84FF,f3=#30D158} · tinted verts 93696 · ROLE-COLOURED verts 0 · volumes face 0 faint 0 glass 0 line 0 · bodyAlpha 0.04
+  t+89s  · top colours {#F2F2F5:83712,#F2DA3D:243,#F3DA3D:144,#F4DB3D:138,#FBBD39:138,#F0DA3E:134} · verts 93696 · override 93696v · #354 faceTints {f0=#30D158,f1=#0A84FF,f3=#30D158} · tinted verts 93696 · ROLE-COLOURED verts 0 · volumes face 0 faint 0 glass 0 line 0 · bodyAlpha 0.04
+  t+94s busy no
+  t+116s  · top colours {#F2F2F5:69120,#1166BD:1047,#135CB8:918,#135EB9:891,#1260BA:717,#135DB9:711} · verts 93696 · override 93696v · #354 faceTints {f0=#30D158,f1=#0A84FF,f3=#30D158} · tinted verts 93696 · ROLE-COLOURED verts 0 · volumes face 0 faint 0 glass 0 line 0 · bodyAlpha 0.04
+  t+121s busy no
+3_flex_settled:  · top colours {#F2F2F5:69120,#1166BD:1047,#135CB8:918,#135EB9:891,#1260BA:717,#135DB9:711} · verts 93696 · override 93696v · #354 faceTints {f0=#30D158,f1=#0A84FF,f3=#30D158} · tinted verts 93696 · ROLE-COLOURED verts 0 · volumes face 0 faint 0 glass 0 line 0 · bodyAlpha 0.04
+  · Bottom — faces [0] regions [] — 'Anchor' — colorIndex 0 #354tint #30D158
+  · Top — faces [1] regions [] — '10 kg · gravity' — colorIndex 1 #354tint #0A84FF
+  · Group C — faces [3] regions [] — 'Pending…' — colorIndex 2 #354tint #30D158 — ACTIVE
+  unit kg · phase edit · gravity set true
+Selections list: visible 360 pt of 239 pt (all scroll views: (24.0, 618.0, 348.0, 361.0) doc 239)
+3b_flex_settled_list_scrolled_to_end:  · top colours {#F2F2F5:83712,#09ADCA:177,#0EAEC1:171,#0BADC7:165,#12B0BA:156,#0DAEC3:153} · verts 93696 · override 93696v · #354 faceTints {f0=#30D158,f1=#0A84FF,f3=#30D158} · tinted verts 93696 · ROLE-COLOURED verts 0 · volumes face 0 faint 0 glass 0 line 0 · bodyAlpha 0.04
+5_settings:  · top colours {#F2F2F5:83712,#07ACCE:156,#0BADC6:153,#05ABD1:144,#0FAFBF:129,#27B793:129} · verts 93696 · override 93696v · #354 faceTints {f0=#30D158,f1=#0A84FF,f3=#30D158} · tinted verts 93696 · ROLE-COLOURED verts 0 · volumes face 0 faint 0 glass 0 line 0 · bodyAlpha 0.04
+back from Settings, NO pick yet:  · top colours {#F2F2F5:83712,#07ACCE:156,#0BADC6:153,#05ABD1:144,#0FAFBF:129,#27B793:129} · verts 93696 · override 93696v · #354 faceTints {f0=#30D158,f1=#0A84FF,f3=#30D158} · tinted verts 93696 · ROLE-COLOURED verts 0 · volumes face 0 faint 0 glass 0 line 0 · bodyAlpha 0.04
+7_main_after_settings_exit_no_pick:  · top colours {#F2F2F5:83712,#07ACCE:156,#0BADC6:153,#05ABD1:144,#0FAFBF:129,#27B793:129} · verts 93696 · override 93696v · #354 faceTints {f0=#30D158,f1=#0A84FF,f3=#30D158} · tinted verts 93696 · ROLE-COLOURED verts 0 · volumes face 0 faint 0 glass 0 line 0 · bodyAlpha 0.04
+PICK (after Settings) 'Group C':  · top colours {#F2F2F5:83712,#07ACCE:156,#0BADC6:153,#05ABD1:144,#0FAFBF:129,#27B793:129} · verts 93696 · override 93696v · #354 faceTints {f0=#30D158,f1=#0A84FF,f3=#30D158} · tinted verts 93696 · ROLE-COLOURED verts 0 · volumes face 0 faint 0 glass 0 line 0 · bodyAlpha 0.04
+active now: Group C
+8_pick_GroupC:  · top colours {#F2F2F5:83712,#07ACCE:156,#0BADC6:153,#05ABD1:144,#0FAFBF:129,#27B793:129} · verts 93696 · override 93696v · #354 faceTints {f0=#30D158,f1=#0A84FF,f3=#30D158} · tinted verts 93696 · ROLE-COLOURED verts 0 · volumes face 0 faint 0 glass 0 line 0 · bodyAlpha 0.04
+MTKViews: (0.0, 0.0, 1032.0, 1376.0) hidden false renderer true · (0.0, 0.0, 210.0, 210.0) hidden false renderer false
+PRISMS ON, view 0:  · top colours {#F2F2F5:83712,#FACF3B:168,#FACE3B:159,#C5D349:156,#D5D645:141,#80C85B:126} · verts 93696 · override 93696v · #354 faceTints {f0=#30D158,f1=#0A84FF,f3=#30D158} · tinted verts 93696 · ROLE-COLOURED verts 0 · volumes face 0 faint 18480 glass 0 line 1606 · bodyAlpha 0.04
+9_prisms_on:  · top colours {#F2F2F5:83712,#FACF3B:168,#FACE3B:159,#C5D349:156,#D5D645:141,#80C85B:126} · verts 93696 · override 93696v · #354 faceTints {f0=#30D158,f1=#0A84FF,f3=#30D158} · tinted verts 93696 · ROLE-COLOURED verts 0 · volumes face 0 faint 18480 glass 0 line 1606 · bodyAlpha 0.04
+PRISMS OFF again (Top active):  · top colours {#F2F2F5:83712,#FACF3B:168,#FACE3B:159,#C5D349:156,#D5D645:141,#80C85B:126} · verts 93696 · override 93696v · #354 faceTints {f0=#30D158,f1=#0A84FF,f3=#30D158} · tinted verts 93696 · ROLE-COLOURED verts 0 · volumes face 0 faint 0 glass 0 line 0 · bodyAlpha 0.04
