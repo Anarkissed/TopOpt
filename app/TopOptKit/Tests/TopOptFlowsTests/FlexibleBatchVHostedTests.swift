@@ -531,8 +531,45 @@ final class FlexibleBatchVHostedTests: XCTestCase {
         XCTAssertEqual(clipped.inside["legend"], 0, "…nor the legend")
         XCTAssertGreaterThan(over.inside["panel"] ?? 0, 0, "★ control (no clip): the bottom's dashed outline inside the panel again")
         XCTAssertGreaterThan(over.inside["legend"] ?? 0, 0, "★ control (no clip): …and inside the legend")
+        // ★ THE CLIP CHANGES NOTHING OUTSIDE THE CHROME — only the lines are cut, never the chip, the stamp's handle or the
+        // tags (a first cut masked the whole layer, which put the depth chip's glass in an offscreen pass): Group 3 with face 3
+        // selected (the chip, the stamp, the dashed outline), with the clip and without it, pixel for pixel outside the chrome
+        m.views = []; m.rail = .group(3); m.select(3)
+        pump(1.0)
+        func page(_ overChrome: Bool) throws -> Shot {
+            FlexibleStagePage.controlOverlaysOverChrome = overChrome
+            m.objectWillChange.send()
+            pump(1.2)
+            return try shot(h)
+        }
+        let a = try page(false), a2 = try page(false), b = try page(true)
+        FlexibleStagePage.controlOverlaysOverChrome = false
+        let holes = (Self.chrome + ["player", "playerTopRow", "playerCapsule", "toast"]).compactMap { local(h, $0)?.insetBy(dx: -2, dy: -2) }
+            + [FlexibleLegendPlacement.gizmoFrame(viewport: h.size).insetBy(dx: -2, dy: -2)]
+        let outside = Self.differingOutside(a, b, holes: holes), noise = Self.differingOutside(a, a2, holes: holes)
+        XCTAssertNotNil(h.frames.all["legend"], "premise: the legend shows")
+        XCTAssertEqual(noise, 0, "premise: the page is still between two shots")
+        XCTAssertEqual(outside, 0, "★ outside the chrome the clip changes no pixel (the chip's glass, the stamp, the outline)")
         print("FLEX-BV-2a control 13p [Rests]: clipped panel \(clipped.inside["panel"] ?? -1) legend \(clipped.inside["legend"] ?? -1) · "
-              + "no clip panel \(over.inside["panel"] ?? -1) legend \(over.inside["legend"] ?? -1)")
+              + "no clip panel \(over.inside["panel"] ?? -1) legend \(over.inside["legend"] ?? -1) · Group 3 · face 3 outside the chrome: "
+              + "clip vs none \(outside) px (noise \(noise))")
+    }
+
+
+    /// Pixels outside every rect of `holes` (points, y down) whose largest channel differs by more than `t`.
+    static func differingOutside(_ a: Shot, _ b: Shot, holes: [CGRect], threshold t: Int = 12) -> Int {
+        guard a.w == b.w, a.h == b.h else { return -1 }
+        var n = 0
+        for y in 0..<a.h {
+            for x in 0..<a.w {
+                let i = (y * a.w + x) * 4
+                let d = max(abs(Int(a.px[i]) - Int(b.px[i])), abs(Int(a.px[i + 1]) - Int(b.px[i + 1])), abs(Int(a.px[i + 2]) - Int(b.px[i + 2])))
+                guard d > t else { continue }
+                let p = CGPoint(x: (CGFloat(x) + 0.5) / a.scale, y: (CGFloat(y) + 0.5) / a.scale)
+                if !holes.contains(where: { $0.contains(p) }) { n += 1 }
+            }
+        }
+        return n
     }
 
     // MARK: - V2b: the clip

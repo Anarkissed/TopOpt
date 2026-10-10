@@ -239,6 +239,8 @@ struct FlexibleStageViewTagsLayer: View {
     let projection: CameraProjection?
     let k: Double
     let keepOut: [CGRect]
+    /// ★ BATCH V (m19): what the dashed outlines are cut out of — the whole chrome; nil: nothing (the red control).
+    var clip: [CGRect]? = nil
 
     static let discSize: CGFloat = 22
 
@@ -248,19 +250,22 @@ struct FlexibleStageViewTagsLayer: View {
         let hidden = FlexibleStageViewTags.hidden(model: model, projection: projection)
         ZStack {
             // ★ R6 REVIEW: the shown members that face away, dashed in their colour (under the tags and discs)
-            ForEach(hidden, id: \.id) { h in
-                Path { p in
+            // ★ BATCH V (m19): cut out of the chrome — they ran across the Settings panel and through the legend
+            Canvas { ctx, size in
+                if let clip { FlexibleChromeClip.apply(&ctx, size: size, holes: clip) }
+                for h in hidden {
+                    var p = Path()
                     for loop in h.paths {
                         p.move(to: loop[0])
                         for q in loop.dropFirst() { p.addLine(to: q) }
                         p.closeSubpath()
                     }
+                    ctx.stroke(p, with: .color(h.colour.color), style: StrokeStyle(lineWidth: FlexibleStageViewTags.hiddenLineWidth, lineCap: .round,
+                                                                                    lineJoin: .round, dash: FlexibleStageViewTags.hiddenDash))
                 }
-                .stroke(h.colour.color, style: StrokeStyle(lineWidth: FlexibleStageViewTags.hiddenLineWidth, lineCap: .round,
-                                                           lineJoin: .round, dash: FlexibleStageViewTags.hiddenDash))
-                .allowsHitTesting(false)
-                .accessibilityHidden(true)
             }
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
             ForEach(tags, id: \.region) { t in
                 Button { FlexibleStageViewTags.tap(t, model: model) } label: {
                     Text(t.text).font(.system(size: 12, weight: .semibold)).monospacedDigit()

@@ -325,6 +325,8 @@ struct FlexibleFaceStampHandle: View {
     let keepOut: [CGRect]
     /// The page's exaggeration: where the depth chip sits (the handle keeps clear of it).
     var k: Double = 1
+    /// ★ BATCH V (m19): what the outline is cut out of — the whole chrome; nil: `keepOut`.
+    var clip: [CGRect]? = nil
     /// The stamp's centre when the drag began (nil: not dragging).
     @State private var dragging: SIMD2<Double>?
 
@@ -366,9 +368,7 @@ struct FlexibleFaceStampHandle: View {
         let chip = placed.isEmpty ? nil : FlexibleDepthChips.handle(model: model, k: k).flatMap { projection?.project($0.anchor) }
         ZStack {
             Canvas { ctx, size in
-                var clip = Path(CGRect(origin: .zero, size: size))
-                for r in keepOut { clip.addRect(r) }
-                ctx.clip(to: clip, style: FillStyle(eoFill: true))
+                FlexibleChromeClip.apply(&ctx, size: size, holes: clip ?? keepOut)   // ★ BATCH V (m19)
                 for s in placed {
                     // the leader from a handle kept off the chip to the stamp's centre
                     if let c = screen(world(s.region, s.stamp.centreU, s.stamp.centreV)) {

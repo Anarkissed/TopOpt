@@ -277,14 +277,14 @@ public struct FlexibleStagePage: View {
                 detentPulse: pulse,
                 // ★ ROUND 4 (D1, img 6): no lattice here — it lives on the main Flexible page
                 flexibleLattice: nil)
-            // ★ BATCH V (m19): everything drawn on the part — the curves, the dashed outlines, the stamp, the chips, the tags,
-            // a reading — is cut out of the chrome (the 62 %-opaque panel and legend let it read as drawn OVER them)
+            // ★ BATCH V (m19): the lines drawn on the part — the curves, the dashed outlines, the stamp's outline — are cut out
+            // of the whole chrome (`clip`; the 62 %-opaque panel and legend let them read as drawn OVER them); the chip, the tags,
+            // the discs and a reading keep out of it as views (a mask over the layer took the depth chip's glass with it)
             if !Self.controlNoOverlays {
-                ZStack {
-                    FlexibleStageOverlays(model: model, proj: proj, exaggeration: FlexibleStageVolumes.prismK(dentExaggeration), keepOut: keepOut)
-                    FlexibleReadingCallout(proj: proj, reading: legendDrilled ? reading : nil)
-                }
-                .mask { FlexibleChromeMask(holes: Self.controlOverlaysOverChrome ? [] : Self.chromeClip(frames, viewport: frames["page"]?.size ?? .zero)) }
+                let clip = Self.controlOverlaysOverChrome ? nil : Self.chromeClip(frames, viewport: frames["page"]?.size ?? .zero)
+                FlexibleStageOverlays(model: model, proj: proj, exaggeration: FlexibleStageVolumes.prismK(dentExaggeration), keepOut: keepOut,
+                                      clip: clip)
+                FlexibleReadingCallout(proj: proj, reading: legendDrilled ? reading : nil, clip: clip ?? [])
             }
         }
         .coordinateSpace(name: FlexibleStageSpace.name)
@@ -683,17 +683,16 @@ public struct FlexibleStagePage: View {
     // (the panel: FlexibleSettingsPanel — round 4)
 }
 
-/// ★ BATCH V (m19): the layer of everything drawn on the part, cut out of the chrome — opaque everywhere but the holes
-/// (overlapping holes stay holes: each is cleared, never toggled).
-struct FlexibleChromeMask: View {
-    let holes: [CGRect]
-    var body: some View {
-        Canvas { ctx, size in
-            ctx.fill(Path(CGRect(origin: .zero, size: size)), with: .color(.white))
-            ctx.blendMode = .destinationOut
-            for h in holes where !h.isNull && !h.isEmpty { ctx.fill(Path(h), with: .color(.white)) }
+/// ★ BATCH V (m19): a Canvas's lines cut out of the chrome — everything outside `holes` is drawn (overlapping holes stay
+/// holes: each is cleared from the clip's layer, never toggled as an even-odd fill toggles a hole inside a hole).
+enum FlexibleChromeClip {
+    static func apply(_ ctx: inout GraphicsContext, size: CGSize, holes: [CGRect]) {
+        guard !holes.isEmpty else { return }
+        ctx.clipToLayer { layer in
+            layer.fill(Path(CGRect(origin: .zero, size: size)), with: .color(.white))
+            layer.blendMode = .destinationOut
+            for h in holes where !h.isNull && !h.isEmpty { layer.fill(Path(h), with: .color(.white)) }
         }
-        .allowsHitTesting(false)
     }
 }
 
@@ -714,6 +713,9 @@ struct FlexibleStageOverlays: View {
     var exaggeration: Double = 1
     /// Where a chip cannot be reached (the panel, the legend), in stage points.
     var keepOut: [CGRect] = []
+    /// ★ BATCH V (m19): what the lines drawn on the part are cut out of — the whole chrome (`FlexibleStagePage.chromeClip`);
+    /// nil: the curves and the stamp clip to `keepOut` and the dashed outlines to nothing (the red control).
+    var clip: [CGRect]? = nil
 
     var body: some View {
         ZStack {
@@ -732,16 +734,17 @@ struct FlexibleStageOverlays: View {
                                         onCommit: { model.save() },
                                         // ★ VERIFICATION OF D1: never drawn or touched under the panel,
                                         // the legend or the player (img 6's class, for the curves)
-                                        keepOut: keepOut)
+                                        keepOut: keepOut, clip: clip)
                 }
                 // ★ ROUND 3 (item 1.1): the deepest squish, dragged out as a prism
                 FlexibleDepthChips(model: model, projection: proj.projection, k: exaggeration, keepOut: keepOut)
                 // ★ ROUND 4 (D1): a Stamp face's ONE stamp — never under the panel or the legend,
                 // and never on the depth chip (it keeps clear of the chip's place: `k`)
-                FlexibleFaceStampHandle(model: model, projection: proj.projection, keepOut: keepOut, k: exaggeration)
+                FlexibleFaceStampHandle(model: model, projection: proj.projection, keepOut: keepOut, k: exaggeration, clip: clip)
             }
             // ★ ROUND 6 (item 3): the Prisms view's mm tags and the Groups view's number discs
-            FlexibleStageViewTagsLayer(model: model, projection: proj.projection, k: FlexibleStageVolumes.prismK(exaggeration), keepOut: keepOut)
+            FlexibleStageViewTagsLayer(model: model, projection: proj.projection, k: FlexibleStageVolumes.prismK(exaggeration), keepOut: keepOut,
+                                       clip: clip)
         }
     }
 
@@ -999,9 +1002,11 @@ struct FlexibleLegend: View {
 struct FlexibleReadingCallout: View {
     @ObservedObject var proj: FlexibleProjectionBox
     let reading: FlexibleReading?
+    /// ★ BATCH V (m19): the chrome — a reading whose point lies under it is not drawn there.
+    var clip: [CGRect] = []
 
     var body: some View {
-        if let r = reading, let s = proj.projection?.project(r.anchor) {
+        if let r = reading, let s = proj.projection?.project(r.anchor), !clip.contains(where: { $0.contains(s) }) {
             // ★ the value in the accent blue, in its own squircle (FlexibleReadingTag)
             FlexibleReadingTag(reading: r)
                 .offset(x: s.x + 2, y: s.y - FlexibleReadingTag.halfHeight)

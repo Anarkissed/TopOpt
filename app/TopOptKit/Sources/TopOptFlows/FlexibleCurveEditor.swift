@@ -61,6 +61,8 @@ struct FlexibleCurveEditor: View {
     /// under them (the chrome took the touch anyway): a point under the chrome is hidden, as the
     /// depth chip is, until the part is turned.
     var keepOut: [CGRect] = []
+    /// ★ BATCH V (m19): what the drawing is cut out of — the whole chrome (the pop-up, the top line… too); nil: `keepOut`.
+    var clip: [CGRect]? = nil
     @State private var dragIndex: Int?
     /// Finger − point at the drag's start: the point moves WITH the finger, never jumps to it.
     @State private var grab: CGSize = .zero
@@ -100,9 +102,7 @@ struct FlexibleCurveEditor: View {
         let line: [CGPoint] = ys.enumerated().compactMap { i, y in screen(drawn(Double(i) / Double(Self.sampleCount), y)) }
         ZStack {
             Canvas { ctx, size in
-                var clip = Path(CGRect(origin: .zero, size: size))
-                for r in keepOut { clip.addRect(r) }
-                ctx.clip(to: clip, style: FillStyle(eoFill: true))
+                FlexibleChromeClip.apply(&ctx, size: size, holes: clip ?? keepOut)   // ★ BATCH V (m19)
                 // the face line (squishiest) and the dashed guide (firmest)
                 var base = Path(), top = Path()
                 for (i, t) in stride(from: 0.0, through: 1.0, by: 1.0 / 30).enumerated() {
