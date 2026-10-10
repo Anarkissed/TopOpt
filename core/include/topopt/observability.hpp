@@ -1290,6 +1290,18 @@ struct RunInfo {
   // or left it as air is visible in the receipt rather than only in the mesh.
   std::string stepped_plan_solid_remainder_mm3;
   double stepped_plan_latticed_mm3 = 0.0;
+  // ★ ruling 1's condition (2026-10-10): latticed voxels per region whose relative
+  // density came from core's own grading because the covering cell sent none, e.g.
+  // "r1=0, r2=0". A plan that sends a rho with every cell must show 0 everywhere; a
+  // non-zero entry says core is sizing and certifying that many of the plan's struts
+  // from its own field.
+  std::string stepped_plan_rho_fallback_by_region;
+  // ★ ruling 2 (2026-10-10): per region, the volume its OWN plan cells cover that the
+  // region does not reach -- outside its `outline_uv`, or overhanging its prism. That is
+  // the set the outline clip stops struts from filling. Before the clip those voxels
+  // carried struts AND were certified SOLID by the mask, which is the disagreement bar
+  // B7 exists to stop. "r1=5097.656" in mm3; 0 on a region whose cells all sit inside it.
+  std::string stepped_clip_outside_region_mm3;
   // The outline beam as APPLIED (ruling B): the width core derived from bead and
   // voxel, the bleed the band asked for, and how far in the solid actually reaches.
   // 0 when the shape grade is off, which is when there is no beam.

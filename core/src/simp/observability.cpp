@@ -1374,6 +1374,10 @@ std::string run_info_json(const RunInfo& info) {
           gr += ", \"plan_solid_remainder_mm3\": \"" +
                 info.stepped_plan_solid_remainder_mm3 + "\"";
           gr += ", \"plan_latticed_mm3\": " + fmt(info.stepped_plan_latticed_mm3);
+          gr += ", \"plan_rho_fallback_by_region\": \"" +
+                info.stepped_plan_rho_fallback_by_region + "\"";
+          gr += ", \"clip_outside_region_mm3\": \"" +
+                info.stepped_clip_outside_region_mm3 + "\"";
         }
       }
       // ★ §3: the outline beam as APPLIED. Absent when the shape grade is off.

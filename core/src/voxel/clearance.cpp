@@ -2,6 +2,9 @@
 #include "topopt/clearance.hpp"
 
 #include <cmath>
+#include <algorithm>
+#include <utility>
+#include <limits>
 #include <stdexcept>
 
 namespace topopt {
@@ -102,6 +105,39 @@ bool face_plane_extent(const StepModel& model, int face_id, const Vec3& origin,
 // share, so a frozen mesh vertex and a FrozenVoid voxel agree on the geometry.
 // `tol` is the outward band (mm); the caller passes the voxel-centre eps for the
 // rasterizer and a physical band for the freeze predicate.
+// ── ★ ONE DEFINITION OF THE OUTLINE'S FRAME ───────────────────────────────────
+// The app's pair (a, b) in core's (u, w): the frame bits swap / negate. Both the
+// predicate and the signed distance read the loops through THIS, so the two can
+// never disagree about which axis is which.
+void outline_frame_uv(const ClearanceGeometry& geom, double du, double dw,
+                      double* a, double* b) {
+  *a = du;
+  *b = dw;
+  if (geom.outline_frame & 1) std::swap(*a, *b);
+  if (geom.outline_frame & 2) *a = -*a;
+  if (geom.outline_frame & 4) *b = -*b;
+}
+
+// Even-odd over every loop -- the rule the app's own outline is drawn under, so a
+// hole in the pocket is a hole here too.
+bool outline_inside(const ClearanceGeometry& geom, double du, double dw) {
+  double a = 0.0, b = 0.0;
+  outline_frame_uv(geom, du, dw, &a, &b);
+  bool inside = false;
+  for (const auto& loop : geom.outline_uv) {
+    const std::size_t n = loop.size();
+    if (n < 3) continue;
+    for (std::size_t i = 0, j = n - 1; i < n; j = i++) {
+      const double xi = loop[i][0], yi = loop[i][1], xj = loop[j][0], yj = loop[j][1];
+      if ((yi > b) != (yj > b)) {
+        const double x = xj + (b - yj) * (xi - xj) / (yi - yj);
+        if (a < x) inside = !inside;
+      }
+    }
+  }
+  return inside;
+}
+
 bool region_contains(const ClearanceGeometry& geom, const Vec3& p, double tol) {
   if (!geom.valid) return false;
   // ★ THE ONE BRANCH THAT MAKES A REGION A REGION (task 2026-08-15-lattice-
@@ -139,24 +175,7 @@ bool region_contains(const ClearanceGeometry& geom, const Vec3& p, double tol) {
         dw >= geom.w_lo - tol && dw <= geom.w_hi + tol))
     return false;
   if (geom.outline_uv.empty()) return true;
-  // the app's pair (a, b) in core's (u, w): frame bits swap / negate
-  double a = du, b = dw;
-  if (geom.outline_frame & 1) std::swap(a, b);
-  if (geom.outline_frame & 2) a = -a;
-  if (geom.outline_frame & 4) b = -b;
-  bool inside = false;   // even-odd over every loop
-  for (const auto& loop : geom.outline_uv) {
-    const std::size_t n = loop.size();
-    if (n < 3) continue;
-    for (std::size_t i = 0, j = n - 1; i < n; j = i++) {
-      const double xi = loop[i][0], yi = loop[i][1], xj = loop[j][0], yj = loop[j][1];
-      if ((yi > b) != (yj > b)) {
-        const double x = xj + (b - yj) * (xi - xj) / (yi - yj);
-        if (a < x) inside = !inside;
-      }
-    }
-  }
-  return inside;
+  return outline_inside(geom, du, dw);
 }
 
 }  // namespace
@@ -164,6 +183,47 @@ bool region_contains(const ClearanceGeometry& geom, const Vec3& p, double tol) {
 bool point_in_clearance_region(const ClearanceGeometry& geom, const Vec3& p,
                                double tol) {
   return region_contains(geom, p, tol);
+}
+
+void clearance_outline_frame_uv(const ClearanceGeometry& geom, double du, double dw,
+                                double* a, double* b) {
+  outline_frame_uv(geom, du, dw, a, b);
+}
+
+bool point_in_clearance_outline(const ClearanceGeometry& geom, double du, double dw) {
+  return geom.outline_uv.empty() ? true : outline_inside(geom, du, dw);
+}
+
+// ── ★ K3: the same outline, as an exact signed distance in the face plane ──────
+// Exact: the minimum distance from (a, b) to every loop SEGMENT, signed by the same
+// even-odd test the predicate uses. Exact distance to a polygon is 1-Lipschitz in the
+// in-plane coordinates, so a caller that min()s it with the slab's own depth terms
+// still hands clip_segment a 1-Lipschitz function and the certificate stays sound.
+double clearance_outline_signed_distance(const ClearanceGeometry& geom, double du,
+                                         double dw) {
+  if (geom.outline_uv.empty()) return std::numeric_limits<double>::infinity();
+  double a = 0.0, b = 0.0;
+  outline_frame_uv(geom, du, dw, &a, &b);
+  double best = std::numeric_limits<double>::infinity();
+  for (const auto& loop : geom.outline_uv) {
+    const std::size_t n = loop.size();
+    if (n < 3) continue;
+    for (std::size_t i = 0, j = n - 1; i < n; j = i++) {
+      const double x0 = loop[j][0], y0 = loop[j][1];
+      const double x1 = loop[i][0], y1 = loop[i][1];
+      const double ex = x1 - x0, ey = y1 - y0;
+      const double len2 = ex * ex + ey * ey;
+      double t = 0.0;
+      if (len2 > 0.0) {
+        t = ((a - x0) * ex + (b - y0) * ey) / len2;
+        t = t < 0.0 ? 0.0 : (t > 1.0 ? 1.0 : t);
+      }
+      const double dx = a - (x0 + t * ex), dy = b - (y0 + t * ey);
+      best = std::min(best, std::sqrt(dx * dx + dy * dy));
+    }
+  }
+  if (!std::isfinite(best)) return std::numeric_limits<double>::infinity();
+  return outline_inside(geom, du, dw) ? best : -best;
 }
 
 // ── AUTO path: resolve the predicate from a B-rep / pseudo face. ────────────

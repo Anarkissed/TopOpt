@@ -756,3 +756,114 @@ Two more, from the same day:
 * **A 4-decimal truncation of a sent cell size is a refusal.** 570B38E2's base is
   5.156120181083679; written as 5.1561 its halves land 5e-5 mm off the menu and the run
   refuses on its own plan. Bases travel at full precision or not at all.
+
+## Addendum 13 — ruling 1's condition and ruling 2's outline clip (2026-10-10)
+
+### Ruling 1's condition: one density, with a tripwire on it
+
+> The posture's rho at a voxel must be the SAME number the pass radius field sized that
+> voxel's strut from, including on the fallback. Make it an assertion with a test.
+
+Satisfied by making them the **same code**, not by making two implementations agree. The
+posture build and the pass radius field both call `plan_cell_rho_at` (the covering plan
+cell's rho, or 0) and `plan_strut_rho_at` (that, or the posture's value at the voxel, or
+the band floor). The per-pass rho grid the radius field used to carry is gone.
+
+Three divergences that construction removes:
+
+1. the radius field looked only in **its own group's** grid, so a strut reaching past its
+   cell into another group's cell was sized from the voxel fallback while the posture
+   credited that other cell's rho — one point, two densities. Groups cannot overlap (the
+   validator proves it), so the shared lookup is strictly more correct;
+2. the old fallback `mask ? posture : band_rho_min` already read the plan's own posture
+   after K3's substitution. Making that explicit removes the coincidence;
+3. the **outline beam** zeroes the posture's density and clears the voxel from the mask,
+   but the radius field's cell lookup runs first, so a strut inside the band is still
+   drawn at the cell's rho — **804 voxels on 570B38E2**. The certificate does not credit
+   them (they leave the mask and become companion solid), so it is not a
+   certificate/geometry mismatch; it IS core's rule overriding the app's design, it is
+   reported rather than silent, and the policy is #354's.
+
+**The tripwire.** Over the FINAL mask, every latticed voxel's drawn density must equal its
+certified density, **bit-exactly** — there is no arithmetic between them to justify a
+tolerance, and a tolerance would hide the drift it exists to catch. Proven to fire:
+perturbing the drawn density by a relative 1e-9 makes the run exit 1 with
+
+    region 1: the strut at (18.1250, 0.6250, 8.1250) is DRAWN at relative density
+    0.18000000018000001 and CERTIFIED at 0.17999999999999999
+
+**The receipt**: `plan_rho_fallback_by_region`, e.g. `"r1=0"`. A plan that sends a rho with
+every cell shows 0 on every region; a non-zero entry says core's own grading is sizing and
+certifying that many of the plan's struts.
+
+### Ruling 2: the outline is a clip, in every job that sends one
+
+**Scope (b)**, and my earlier report of the defect was too narrow. `signed_distance` is
+planes ∩ base ∩ ¬keep-outs: the include regions contribute **no signed-distance term at
+all** (the header said so). So it was never "clipped to the rectangle rather than the
+outline" — struts were **not clipped to the include region in any form**, and one could
+run past the region's own rectangle until it met the shell.
+
+**Measured**, on `outline_clip_whole` / `outline_clip_quadrant` — the same region with the
+same 32 cells filling its whole 24 × 24 mm rectangle, the quadrant arm adding one
+`outline_uv` loop that keeps a 12 × 12 mm quarter:
+
+| | whole | quadrant |
+|---|---|---|
+| mask (plan posture) | 3610 vox | 1000 vox (27.7%) |
+| `interior_volume_mm3`, **pre-clip** (f0d8bf27) | 2498.242 | **2502.643 (100.2%)** |
+| `interior_volume_mm3`, with the clip | — | **427.838** |
+
+Pre-clip the quadrant's lattice was 100.2% of the whole rectangle's while its mask was
+27.7% of it: **2074.8 mm³ of struts, 83% of what was written, in voxels the receipt called
+companion solid.** `test_outline_clip` fails 7 of its 17 checks against f0d8bf27.
+
+**The byte-identity bar is structural.** `clip_includes_` is set only by
+`add_include_region`, and only for a geometry whose `outline_uv` is non-empty, so a job
+with no outline cannot reach the term. Measured too: `plan_partial_depth` emits the same
+STL byte for byte before and after, md5 `6588e1651bd046fdfe8008bc1a58d059`.
+
+**The receipt**: `clip_outside_region_mm3`, per region — the volume a region's own plan
+cells cover that the region does not reach. It balances exactly:
+`plan_latticed_mm3 + clip_outside_region_mm3` on the quadrant (1953.125 + 5097.656) equals
+the control's `plan_latticed_mm3` (7050.781) to the last digit, because the plan covers the
+same volume in both arms and the outline only splits it. This is the **cause**, measured in
+one run; a count of struts removed would need two runs and so could not be a receipt.
+
+**Soundness.** Each term is an exact signed distance, `min` with the slab's own depth terms
+and `max` across the include union; a max of 1-Lipschitz functions is 1-Lipschitz and
+`max_i sd_i <= sd_union`, so `clip_segment`'s certificate holds.
+
+**Speed.** The rectangle is an exact UPPER bound on the outline (the polygon is a subset),
+so an include whose bound cannot beat the running max never has its polygon queried, and
+each outline carries a uniform edge index with an exact ring-expansion search. Measured on
+#354's own job documents, 200k `signed_distance` queries over the include regions' bounding
+box, `-O2`, box base (so the figure is the term's own cost and not a shell query's):
+
+| part | includes | outline vertices | per query, no term | per query, with it |
+|---|---|---|---|---|
+| 68BF7B74-dg | 5, all outlined | 187 (largest loop 75) | 0.009 µs | **0.242 µs** |
+| 102117B9-dg | 177, all outlined | 2586 (largest loop 75) | 0.009 µs | **4.264 µs** |
+
+Index build is 0.5 ms for all 177 regions. The cost scales with the number of include
+regions, not with vertices — 102117B9's loops are small (largest 75 points, not the
+10–33k the ruling expected, which is the model's mesh and not the outline). The floor is
+the 177 rectangle bounds themselves.
+
+★ **What is NOT sound, and was tried:** filtering to the includes whose bound is at the
+top. The region with the highest rectangle bound can be the one the point falls OUTSIDE
+the outline of while a region with a slightly lower bound contains it; skipping the second
+returns a value that is too negative and clips struts that belong. Every include is
+bounded; every include whose bound beats the best so far is evaluated.
+
+★ **A mask-backed include takes no clip** — a voxel set has no analytic distance — so its
+struts are bounded by the shell alone, exactly as before. The run says so on a `[clip]`
+line rather than leaving it to be found in a mesh.
+
+### Still blocked on #354
+
+`plan_base_cell_mm` is in **none** of the nine job documents under
+`evidence/2026-10-08-plan-proofs/plans/`, the three `job_plan_k2.json` files included, so
+rulings 3 and 4 cannot be run on the app's own files. Ruling 4 additionally needs a
+`SPANS.txt`: core writes one only under `lattice.emit_organic_spans`, which is the ORGANIC
+span writer, and a Default Grade plan run emits no spans at all.

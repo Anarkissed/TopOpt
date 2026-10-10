@@ -151,6 +151,27 @@ int main() {
   CHECK(!has(part.err + part.out, "outside the certifiable octet band"),
         "the certificate must not be handed a zero density for a voxel the plan latticed");
 
+  // ── RULING 1'S CONDITION: ONE DENSITY, AND THE RECEIPT COUNTS THE FALLBACKS ──
+  // The certificate may never credit a strut other than the one drawn. Core reads both
+  // from one function (`plan_strut_rho_at`) and refuses by name if they ever differ --
+  // bit-exactly, over the FINAL mask. Proven to fire: perturbing the drawn density by a
+  // relative 1e-9 makes the run exit 1 with
+  //     "region 1: the strut at (18.1250, 0.6250, 8.1250) is DRAWN at relative density
+  //      0.18000000018000001 and CERTIFIED at 0.17999999999999999"
+  // so this is a tripwire and not a comment. Here we assert the run does NOT trip, and
+  // that the receipt states the fallback count per region: both fixtures send a rho with
+  // every cell, so core sizes and certifies none of their struts from its own field.
+  CHECK(!has(part.err + part.out, "disagree about one voxel's density"),
+        "the posture and the strut radius must not disagree about any voxel");
+  std::string part_fb, full_fb;
+  CHECK(str_after(part.run_info, "plan_rho_fallback_by_region", &part_fb),
+        "run_info must count, per region, the voxels whose density core supplied");
+  CHECK(str_after(full.run_info, "plan_rho_fallback_by_region", &full_fb),
+        "the control must count them too");
+  CHECK(part_fb == "r1=0" && full_fb == "r1=0",
+        "every cell in these fixtures sends a rho, so no region may fall back to core's "
+        "own grading for a single voxel");
+
   // ── (3) THE RECEIPT STATES THE SOLID REMAINDER PER REGION ───────────────────
   std::string part_rem_s, full_rem_s;
   CHECK(str_after(part.run_info, "plan_solid_remainder_mm3", &part_rem_s),

@@ -4262,6 +4262,16 @@ struct LatticeVariantOutcome {
   // region owns that no plan cell covers. "r1=1234.567, r2=0.000" in mm3.
   std::string plan_solid_remainder_mm3;
   double plan_latticed_mm3 = 0.0;
+  // ★ ruling 1's condition: latticed voxels per region whose density came from core's
+  // own grading because the covering cell sent none. "r1=0, r2=0" on a plan that sent
+  // a rho with every cell.
+  std::string plan_rho_fallback_by_region;
+  // ★ ruling 2: how many include regions the outline clip applies to, and how many it
+  // CANNOT apply to (mask-backed: no analytic distance, so no clip term).
+  long long clip_includes_outlined = 0, clip_includes_mask_backed = 0;
+  // ★ ruling 2: per region, the volume its own plan cells cover that the region does
+  // not reach -- the set the outline clip stops struts from filling. "r1=5097.656".
+  std::string clip_outside_region_mm3;
   double outline_inward_mm = 0.0;
   long long seam_spans_before = 0, seam_spans_after = 0;
   double seam_piece_mm = 0.0, seam_longest_before_mm = 0.0;
@@ -6409,6 +6419,31 @@ LatticeVariantOutcome lattice_one_variant(
       lattice_boundary_for(solved_grid, dens, cell, lattice_kos, lattice_roles,
                            printed_iso, &v.v3.mesh);
 
+  // ── ★ K3 / RULING 2: WHAT THE OUTLINE CLIP APPLIES TO, STATED ────────────────
+  // The clip is scope (b) -- every job whose include carries `outline_uv` -- and it is
+  // armed by the geometry itself inside LatticeBoundary::add_include_region, not by a
+  // caller, so there is no switch here to get wrong. What there IS here is the report:
+  // a mask-backed include has no analytic distance and takes NO clip, so its struts are
+  // bounded by the shell alone exactly as before, and that has to be said rather than
+  // left for someone to notice in a mesh.
+  {
+    std::size_t inc_outlined = 0, inc_rect = 0, inc_mask = 0;
+    for (const ClearanceGeometry& g : lattice_roles.includes) {
+      if (!g.valid) continue;
+      if (g.mask) ++inc_mask;
+      else if (!g.outline_uv.empty()) ++inc_outlined;
+      else ++inc_rect;
+    }
+    if (inc_outlined > 0 || inc_mask > 0)
+      std::fprintf(stderr,
+                   "[clip] include regions: %zu clipped to their own outline, %zu "
+                   "analytic without one (no clip term), %zu mask-backed (no clip term, "
+                   "shell only)\n",
+                   inc_outlined, inc_rect, inc_mask);
+    R.clip_includes_outlined = static_cast<long long>(inc_outlined);
+    R.clip_includes_mask_backed = static_cast<long long>(inc_mask);
+  }
+
   // ── THE certification mask — shared by the export (companion + graded cell
   // activation) and the posture. On a graded run it is intersected with the
   // law's own mask (voxels the law kept solid drop out; law-masked voxels the
@@ -6444,6 +6479,83 @@ LatticeVariantOutcome lattice_one_variant(
   // makes the companion fill the remainder.
   std::vector<std::vector<char>> plan_occ;        // per group, its own cell grid
   std::vector<std::vector<double>> plan_cell_rho;  // the sent rho on the same grid
+  // ── ★ K3, RULING 1'S CONDITION (reviewer, 2026-10-10) ────────────────────────
+  // THE POSTURE CERTIFIES A STRUT AT A DENSITY AND THE RADIUS FIELD DRAWS IT AT ONE,
+  // AND THOSE MUST BE THE SAME NUMBER. The way to guarantee that is not two
+  // implementations that agree: a number re-derived can agree with the law while
+  // disagreeing with the geometry, which is the failure this whole section exists to
+  // make impossible. So there is ONE definition and both callers use it; the assertion
+  // further down is a tripwire ON that definition, not the mechanism that makes two of
+  // them line up.
+  //
+  // `plan_cell_rho_at` is the plan's own answer: the rho of the cell that covers the
+  // point, or 0 where no cell does. The plan's groups cannot overlap -- the validator
+  // proves it -- so at most one can answer, and the search order cannot matter. The
+  // per-group rho grid is built once below rather than scanned per point: a linear scan
+  // of the cell list would be O(voxels x cells), which is 22,344 cells on 102117B9.
+  //
+  // ★ IT DELIBERATELY DOES NOT RESTRICT TO ONE GROUP. The radius field used to look only
+  // in its OWN group's grid, so a strut reaching past its cell into a cell of another
+  // group was sized from the voxel fallback while the posture credited that other cell's
+  // rho. Same point, two densities. The density now belongs to the point.
+  auto plan_cell_rho_at = [&plan_groups, &plan_occ, &plan_cell_rho](const Vec3& p) {
+    for (std::size_t gi = 0; gi < plan_groups.size(); ++gi) {
+      const SteppedCellGroup& g = plan_groups[gi];
+      const int ci = static_cast<int>(std::floor((p.x - g.origin.x) / g.size_mm));
+      const int cj = static_cast<int>(std::floor((p.y - g.origin.y) / g.size_mm));
+      const int ck = static_cast<int>(std::floor((p.z - g.origin.z) / g.size_mm));
+      if (ci < 0 || cj < 0 || ck < 0 || ci >= g.nx || cj >= g.ny || ck >= g.nz) continue;
+      const std::size_t at = (static_cast<std::size_t>(ck) * g.ny + cj) * g.nx + ci;
+      if (plan_occ[gi][at]) return plan_cell_rho[gi][at];
+    }
+    return 0.0;
+  };
+  // ── ★ WHICH REGION'S PLAN CELL COVERS A POINT ────────────────────────────────
+  // The same walk as `plan_cell_rho_at`, answering the other half: the region id the
+  // covering cell was sent under, or 0 where no cell covers. Ruling 2's receipt needs it
+  // -- the volume the outline clip removes struts from is exactly the volume a region's
+  // own plan cell covers but the region does NOT reach.
+  auto plan_cell_region_at = [&plan_groups, &plan_occ](const Vec3& p) {
+    for (std::size_t gi = 0; gi < plan_groups.size(); ++gi) {
+      const SteppedCellGroup& g = plan_groups[gi];
+      const int ci = static_cast<int>(std::floor((p.x - g.origin.x) / g.size_mm));
+      const int cj = static_cast<int>(std::floor((p.y - g.origin.y) / g.size_mm));
+      const int ck = static_cast<int>(std::floor((p.z - g.origin.z) / g.size_mm));
+      if (ci < 0 || cj < 0 || ck < 0 || ci >= g.nx || cj >= g.ny || ck >= g.nz) continue;
+      const std::size_t at = (static_cast<std::size_t>(ck) * g.ny + cj) * g.nx + ci;
+      if (plan_occ[gi][at]) return g.region_id;
+    }
+    return 0;
+  };
+  // Which voxel of the solved grid holds a point (clamped, as every field here does).
+  auto plan_voxel_of = [&solved_grid](const Vec3& p) {
+    auto cl = [](int v, int hi) { return v < 0 ? 0 : (v > hi ? hi : v); };
+    return solved_grid.index(
+        cl(static_cast<int>(std::floor((p.x - solved_grid.origin.x) / solved_grid.spacing)),
+           solved_grid.nx - 1),
+        cl(static_cast<int>(std::floor((p.y - solved_grid.origin.y) / solved_grid.spacing)),
+           solved_grid.ny - 1),
+        cl(static_cast<int>(std::floor((p.z - solved_grid.origin.z) / solved_grid.spacing)),
+           solved_grid.nz - 1));
+  };
+  // ── ★ THE DENSITY A STRUT IS DRAWN AT, ANYWHERE ──────────────────────────────
+  // The plan's cell where one covers the point; off the plan's cells (a strut reaching
+  // past its own cell's box) the posture's value at that voxel, which on a plan job IS
+  // this function's answer at that voxel's centre -- so the fallback is self-consistent
+  // rather than a second rule. Outside the mask it is the band floor, as before; those
+  // voxels are not certified, so no posture value applies to them.
+  auto plan_strut_rho_at = [&plan_cell_rho_at, &plan_voxel_of, &mask, &gf](const Vec3& p) {
+    const double cell = plan_cell_rho_at(p);
+    if (cell > 0.0) return cell;
+    const std::size_t e = plan_voxel_of(p);
+    return (e < mask.size() && mask[e] && e < gf.posture.relative_density.size())
+               ? gf.posture.relative_density[e]
+               : gf.band_rho_min;
+  };
+  // Where the plan left a voxel's density to core's own grading, per voxel -- so the
+  // receipt can count the fallbacks PER REGION rather than leave them silent. A plan
+  // that sent a rho with every cell shows 0 on every region.
+  std::vector<char> plan_rho_from_law_flag;
   if (!plan_groups.empty()) {
     plan_occ.resize(plan_groups.size());
     plan_cell_rho.resize(plan_groups.size());
@@ -6502,6 +6614,7 @@ LatticeVariantOutcome lattice_one_variant(
     // ("the posture the certification consumes is now the TRACED one"): the algorithm
     // that laid the geometry down owns the posture, and nothing downstream branches.
     std::vector<double> plan_rho(solved_grid.voxel_count(), 0.0);
+    plan_rho_from_law_flag.assign(solved_grid.voxel_count(), 0);
     long long plan_rho_from_plan = 0, plan_rho_from_law = 0, plan_rho_absent = 0;
     for (std::size_t e = 0; e < plan_rho.size(); ++e) {
       if (!mask[e]) continue;
@@ -6511,21 +6624,12 @@ LatticeVariantOutcome lattice_one_variant(
       const Vec3 c{solved_grid.origin.x + (i + 0.5) * solved_grid.spacing,
                    solved_grid.origin.y + (j + 0.5) * solved_grid.spacing,
                    solved_grid.origin.z + (k + 0.5) * solved_grid.spacing};
-      double rho = 0.0;
-      for (std::size_t gi = 0; gi < plan_groups.size() && rho <= 0.0; ++gi) {
-        const SteppedCellGroup& g = plan_groups[gi];
-        const int ci = static_cast<int>(std::floor((c.x - g.origin.x) / g.size_mm));
-        const int cj = static_cast<int>(std::floor((c.y - g.origin.y) / g.size_mm));
-        const int ck = static_cast<int>(std::floor((c.z - g.origin.z) / g.size_mm));
-        if (ci < 0 || cj < 0 || ck < 0 || ci >= g.nx || cj >= g.ny || ck >= g.nz) continue;
-        const std::size_t at =
-            (static_cast<std::size_t>(ck) * g.ny + cj) * g.nx + ci;
-        if (plan_occ[gi][at]) rho = plan_cell_rho[gi][at];
-      }
+      const double rho = plan_cell_rho_at(c);   // ★ the ONE definition, above
       if (rho > 0.0) { plan_rho[e] = rho; ++plan_rho_from_plan; continue; }
       if (graded && e < gf.posture.relative_density.size() &&
           gf.posture.relative_density[e] > 0.0) {
         plan_rho[e] = gf.posture.relative_density[e];
+        plan_rho_from_law_flag[e] = 1;
         ++plan_rho_from_law;
         continue;
       }
@@ -6798,7 +6902,7 @@ LatticeVariantOutcome lattice_one_variant(
   if (!plan_groups.empty()) {
     const double vox_mm3 =
         solved_grid.spacing * solved_grid.spacing * solved_grid.spacing;
-    std::map<int, long long> solid_vox, latticed_vox;
+    std::map<int, long long> solid_vox, latticed_vox, law_rho_vox, outside_vox;
     for (int k = 0; k < solved_grid.nz; ++k)
       for (int j = 0; j < solved_grid.ny; ++j)
         for (int i = 0; i < solved_grid.nx; ++i) {
@@ -6808,9 +6912,51 @@ LatticeVariantOutcome lattice_one_variant(
                        solved_grid.origin.y + (j + 0.5) * solved_grid.spacing,
                        solved_grid.origin.z + (k + 0.5) * solved_grid.spacing};
           const int owner = stepped_region_owner(c, lattice_roles.includes);
+          // ── ★ RULING 2'S RECEIPT: WHAT THE OUTLINE CLIP TAKES, PER REGION ──────
+          // A voxel its own region's plan cell covers, but which the region does NOT
+          // reach -- because the outline excludes it, or because the cell overhangs the
+          // prism. Before the clip, struts filled every one of these while the mask
+          // certified them SOLID; measured on outline_clip_quadrant, 2502.64 mm3 of
+          // lattice was drawn where 427.84 mm3 belongs. This is that set, exactly, and
+          // it is the CAUSE rather than a count of the effect -- one run cannot measure
+          // a counterfactual, and a number that needed two runs would not be a receipt.
+          {
+            const int rid = plan_cell_region_at(c);
+            if (rid != 0 && owner != rid) ++outside_vox[rid];
+          }
           if (owner == 0) continue;            // outside every include region
           if (mask[e]) ++latticed_vox[owner];
           else ++solid_vox[owner];
+          if (mask[e] && e < plan_rho_from_law_flag.size() && plan_rho_from_law_flag[e])
+            ++law_rho_vox[owner];
+          // ── ★ THE TRIPWIRE (ruling 1's condition) ──────────────────────────────
+          // The certificate may never credit a strut other than the one drawn. The
+          // posture's density at this voxel and the density the radius field sizes a
+          // strut from AT THIS VOXEL'S CENTRE come from one function, so they are equal
+          // by construction -- and this is the line that notices if a future edit makes
+          // them two functions again. Bit-exact: there is no arithmetic between them to
+          // justify a tolerance, and a tolerance here would hide exactly the drift it
+          // is meant to catch.
+          if (mask[e]) {
+            const double drawn = plan_strut_rho_at(c);
+            const double certified = e < gf.posture.relative_density.size()
+                                         ? gf.posture.relative_density[e]
+                                         : 0.0;
+            if (!(drawn == certified)) {
+              char buf[256];
+              std::snprintf(buf, sizeof buf,
+                            "region %d: the strut at (%.4f, %.4f, %.4f) is DRAWN at "
+                            "relative density %.17g and CERTIFIED at %.17g",
+                            owner, c.x, c.y, c.z, drawn, certified);
+              throw JobError(
+                  std::string("lattice \"stepped_cells\": the posture and the strut "
+                              "radius disagree about one voxel's density, so the "
+                              "certificate would credit a strut other than the one in "
+                              "the file. ") + buf +
+                  ". These are read from one function (plan_strut_rho_at) and must be "
+                  "equal; refusing rather than certifying geometry that was not drawn.");
+            }
+          }
         }
     for (const SteppedPlanRegion& pr : plan_regions) {
       char rbuf[160];
@@ -6819,6 +6965,18 @@ LatticeVariantOutcome lattice_one_variant(
                     static_cast<double>(solid_vox[pr.region_id]) * vox_mm3);
       R.plan_solid_remainder_mm3 += rbuf;
       R.plan_latticed_mm3 += static_cast<double>(latticed_vox[pr.region_id]) * vox_mm3;
+      // ★ RULING 1'S CONDITION: the voxels whose density the plan did NOT supply, per
+      // region. A plan that sent a rho with every cell shows 0 everywhere; a non-zero
+      // entry says core's own grading is sizing and certifying that many of the plan's
+      // struts, which is a thing to know and not a thing to discover from a picture.
+      std::snprintf(rbuf, sizeof rbuf, "%sr%d=%lld",
+                    R.plan_rho_fallback_by_region.empty() ? "" : ", ", pr.region_id,
+                    law_rho_vox[pr.region_id]);
+      R.plan_rho_fallback_by_region += rbuf;
+      std::snprintf(rbuf, sizeof rbuf, "%sr%d=%.3f",
+                    R.clip_outside_region_mm3.empty() ? "" : ", ", pr.region_id,
+                    static_cast<double>(outside_vox[pr.region_id]) * vox_mm3);
+      R.clip_outside_region_mm3 += rbuf;
     }
     std::fprintf(stderr,
                  "[stepped] plan solid remainder per region: %s mm3 | the plan lattices "
@@ -7362,7 +7520,8 @@ LatticeVariantOutcome lattice_one_variant(
   // ★ RULING C: per-pass backing store for the sent densities. A deque, not a vector:
   // the radius lambda holds a pointer into it and a vector would rehome its elements on
   // the next push_back, leaving every earlier pass reading freed memory.
-  std::deque<std::vector<double>> anystep_rho;
+  // (the per-pass rho store that used to live here is gone: the radius field reads
+  //  plan_strut_rho_at, which owns the plan's rho -- ruling 1's condition)
   if (!job.lattice.stepped_cells.empty()) {
     const std::vector<SteppedCellGroup>& groups = plan_groups;   // K3: built above
     anystep_active.resize(groups.size());
@@ -7389,10 +7548,6 @@ LatticeVariantOutcome lattice_one_variant(
       // A cell's own density at its OWN size: the printed diameter is d(rho, cell), so a
       // 9 and a 3 at the same relative density print proportionally different struts.
       sp.radius.uniform_mm = 0.5 * lattice_strut_diameter_mm(lat_topo, gf.band_rho_min, g.size_mm);
-      const VoxelGrid& sgr = solved_grid;
-      const std::vector<char>& mref = mask;
-      const std::vector<double>& rref = gf.posture.relative_density;
-      const double rlo = gf.band_rho_min;
       const double gcell = g.size_mm;
       // ── ★ RULING C: THE DENSITY CAME WITH THE CELL ─────────────────────────────
       // When the job sent a rho per cell, the strut is sized from THAT and core adds no
@@ -7400,55 +7555,17 @@ LatticeVariantOutcome lattice_one_variant(
       // ceiling are the app's arithmetic over its own demand map; core re-deriving them
       // from a field it grades differently is precisely how the two pictures drift. The
       // LAW is still core's (octet_strut_diameter_mm) -- only the density is the app's.
-      // A cell that sent no rho (every job before this ruling) falls back to the voxel
-      // field exactly as before.
-      bool any_rho_sent = false;
-      for (double r : g.rho) if (r > 0.0) { any_rho_sent = true; break; }
-      if (any_rho_sent) {
-        std::vector<double> cell_rho(
-            static_cast<std::size_t>(g.nx) * g.ny * g.nz, 0.0);
-        for (std::size_t ci = 0; ci < g.cells.size() && ci < g.rho.size(); ++ci) {
-          const std::array<int, 3>& c = g.cells[ci];
-          cell_rho[(static_cast<std::size_t>(c[2]) * g.ny + c[1]) * g.nx + c[0]] =
-              g.rho[ci];
-        }
-        anystep_rho.push_back(std::move(cell_rho));
-        const std::vector<double>* rp = &anystep_rho.back();
-        const Vec3 gorg = g.origin;
-        const int gnx = g.nx, gny = g.ny, gnz = g.nz;
-        sp.radius.field = [rp, gorg, gnx, gny, gnz, gcell, lat_topo, &sgr, &mref, &rref,
-                           rlo](Vec3 pt) {
-          const int ci = static_cast<int>(std::floor((pt.x - gorg.x) / gcell));
-          const int cj = static_cast<int>(std::floor((pt.y - gorg.y) / gcell));
-          const int ck = static_cast<int>(std::floor((pt.z - gorg.z) / gcell));
-          if (ci >= 0 && cj >= 0 && ck >= 0 && ci < gnx && cj < gny && ck < gnz) {
-            const double r =
-                (*rp)[(static_cast<std::size_t>(ck) * gny + cj) * gnx + ci];
-            if (r > 0.0) return 0.5 * lattice_strut_diameter_mm(lat_topo, r, gcell);
-          }
-          // Off the plan's own cells (a strut reaching past its cell's box): the voxel
-          // field, as before. Nothing in the plan is sized from here.
-          auto cl = [](int val, int hi) { return val < 0 ? 0 : (val > hi ? hi : val); };
-          const int i = cl(static_cast<int>(std::floor((pt.x - sgr.origin.x) / sgr.spacing)),
-                           sgr.nx - 1);
-          const int j = cl(static_cast<int>(std::floor((pt.y - sgr.origin.y) / sgr.spacing)),
-                           sgr.ny - 1);
-          const int k = cl(static_cast<int>(std::floor((pt.z - sgr.origin.z) / sgr.spacing)),
-                           sgr.nz - 1);
-          const std::size_t e = sgr.index(i, j, k);
-          return 0.5 * lattice_strut_diameter_mm(lat_topo, mref[e] ? rref[e] : rlo, gcell);
-        };
-      } else
-      sp.radius.field = [&sgr, &mref, &rref, gcell, rlo, lat_topo](Vec3 pt) {
-        auto cl = [](int val, int hi) { return val < 0 ? 0 : (val > hi ? hi : val); };
-        const int i = cl(static_cast<int>(std::floor((pt.x - sgr.origin.x) / sgr.spacing)),
-                         sgr.nx - 1);
-        const int j = cl(static_cast<int>(std::floor((pt.y - sgr.origin.y) / sgr.spacing)),
-                         sgr.ny - 1);
-        const int k = cl(static_cast<int>(std::floor((pt.z - sgr.origin.z) / sgr.spacing)),
-                         sgr.nz - 1);
-        const std::size_t e = sgr.index(i, j, k);
-        return 0.5 * lattice_strut_diameter_mm(lat_topo, mref[e] ? rref[e] : rlo, gcell);
+      //
+      // ── ★ AND RULING 1'S CONDITION (reviewer, 2026-10-10) ──────────────────────
+      // This block used to carry its OWN copy of that lookup -- a per-group rho grid, a
+      // per-group index, and its own voxel fallback -- beside the posture's copy a
+      // thousand lines up. Two implementations of one number, with nothing holding them
+      // together. It now calls `plan_strut_rho_at`, which is the same function the
+      // posture was built from, so the strut the certificate credits and the strut the
+      // file carries are sized from one number by construction rather than by agreement.
+      // The assertion over the final mask (above) is the tripwire on that.
+      sp.radius.field = [&plan_strut_rho_at, gcell, lat_topo](Vec3 pt) {
+        return 0.5 * lattice_strut_diameter_mm(lat_topo, plan_strut_rho_at(pt), gcell);
       };
       stepped_passes.push_back(std::move(sp));
       // ★ §3 PARITY: the density and radius this pass ACTUALLY used, recorded as the
@@ -10624,6 +10741,8 @@ LatticeVariantJobResult lattice_variant_job(const JobDescription& job,
       gi.stepped_anystep_histogram = R.anystep_histogram;
       gi.stepped_plan_solid_remainder_mm3 = R.plan_solid_remainder_mm3;
       gi.stepped_plan_latticed_mm3 = R.plan_latticed_mm3;
+      gi.stepped_plan_rho_fallback_by_region = R.plan_rho_fallback_by_region;
+      gi.stepped_clip_outside_region_mm3 = R.clip_outside_region_mm3;
       gi.stepped_seam_spans_before = R.seam_spans_before;
       gi.stepped_seam_spans_after = R.seam_spans_after;
       gi.stepped_seam_piece_mm = R.seam_piece_mm;

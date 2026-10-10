@@ -95,6 +95,10 @@ struct LatticeClipSpan {
   double t1 = 0.0;
 };
 
+// The edge index behind the outline clip; defined in lattice_boundary.cpp, because
+// nothing outside it needs its shape.
+struct LatticeOutlineIndex;
+
 class LatticeBoundary {
  public:
   // ── construction ──────────────────────────────────────────────────────────
@@ -285,6 +289,35 @@ class LatticeBoundary {
   // role interface attributes to face -1, like the voxel base) and NO signed-
   // distance terms — activation + certification mask only.
   std::vector<ClearanceGeometry> includes_;
+  // ── ★ K3 / RULING 2 (reviewer, 2026-10-10): THE OUTLINE IS A CLIP TERM ───────
+  // The comment above says the role regions contribute NO signed-distance term. That
+  // was true, and it was the defect: `point_in_clearance_region` honours `outline_uv`,
+  // so the certification MASK clips to the pocket, while `clip_segment` consulted the
+  // include region not at all -- so a cell the outline cuts had its struts drawn
+  // straight across the cut, and a strut could run past the region's own rectangle to
+  // the shell, in voxels the mask then certified SOLID. One voxel described two ways is
+  // what bar B7 exists to stop.
+  //
+  // So when an include region carries an outline, the include UNION becomes a clip term
+  // as well: max over the includes of each one's own exact signed distance. Scope is the
+  // reviewer's ruling (b) -- every job whose include carries `outline_uv`, not only plan
+  // runs, because the disagreement is in every such job.
+  //
+  // THE BYTE-IDENTITY BAR IS STRUCTURAL, not a promise: this flag is set only by
+  // add_include_region, and only for a geometry whose `outline_uv` is non-empty. A job
+  // with no outline therefore cannot take the term at all.
+  //
+  // Soundness: a max of 1-Lipschitz functions is 1-Lipschitz, and max_i sd_i <= sd_union,
+  // so the min() stays a 1-Lipschitz LOWER bound and clip_segment's certificate holds.
+  // A MASK-BACKED include has no analytic distance and contributes nothing, so it never
+  // clips -- conservative, and the run reports it rather than leaving it silent.
+  bool clip_includes_ = false;
+  // One edge index per include (null where the include carries no outline): the exact
+  // polygon distance is O(edges), and 102117B9's regions run to tens of thousands of
+  // vertices. Built once, in add_include_region. shared_ptr keeps this type copyable,
+  // which lattice_boundary_for's return-by-value relies on, and the index is immutable
+  // once built so sharing it is sharing a read-only structure.
+  std::vector<std::shared_ptr<const LatticeOutlineIndex>> include_outline_index_;
   std::vector<ClearanceGeometry> excludes_;
   std::vector<LatticeBoundaryFace> faces_;
 
