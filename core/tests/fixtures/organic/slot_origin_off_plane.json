@@ -33,7 +33,8 @@
       18.4,
       3.0,
       8.4
-     ]
+     ],
+     "plan_base_cell_mm": 3.0
     },
     "kind": "face",
     "role": "include"

@@ -116,6 +116,40 @@ int main() {
         "K2: nor for leaving the prism -- depth is measured from the region's own plane, "
         "so moving the phase along the normal cannot shift the prism");
 
+  // ── ★ K1: THE PLAN'S BASE CELL TRAVELS ON THE WIRE ──────────────────────────
+  // This file is where the per-region PLAN KEYS are tested through a run, so the base
+  // belongs here beside the slot origin it is sent next to.
+  //
+  // An earlier cut of K1 INFERRED the base as the region's largest sent cell. That is a
+  // silent substitute: a region need not contain a base-size cell. On 3418E167's real
+  // Aesthetic Stepped plan, region 1 sends 3.5 mm and 4.6667 mm cells while the app's base
+  // is 7 mm, so the inference guessed 4.6667 and ran every menu, alignment and grouping
+  // check against a ladder the app never used -- and put the sizes a hair off too, since
+  // three quarters of a rounded 4.6667 is 3.500025 rather than the 3.5 the plan sends.
+  std::string miss_text;
+  CHECK(run_job("plan_base_missing", miss_text) != 0,
+        "K1: a planned region with no plan_base_cell_mm is REFUSED, not guessed at");
+  CHECK(miss_text.find("plan_base_cell_mm") != std::string::npos,
+        "K1: and the refusal names the key it needs");
+  CHECK(miss_text.find("region 1") != std::string::npos,
+        "K1: and the region, so a plan with many walls says which");
+  CHECK(miss_text.find("cannot infer") != std::string::npos,
+        "K1: and says WHY core will not fill it in -- a region need not contain a "
+        "base-size cell");
+
+  // ★ AND THE STATED BASE IS THE ONE USED, proved through the refusal's own words rather
+  // than by an acceptance. This fixture is 3418E167's shape: cells of 3.5 and 4.6667 on a
+  // 7 mm base. It is refused -- 4.6667 needs divisor 3, which the prints-open rule drops at
+  // base 7 -- and the message must quote BASE 7. Under the old inference it quoted 4.667.
+  std::string used_text;
+  CHECK(run_job("plan_base_used", used_text) != 0,
+        "K1 premise: that plan is refused on the menu, which is what makes the message "
+        "readable as evidence");
+  CHECK(used_text.find("base 7 mm") != std::string::npos,
+        "K1: the validator was given the SENT base (7 mm), not the largest sent cell");
+  CHECK(used_text.find("base 4.667 mm") == std::string::npos,
+        "K1: and not the inferred one -- this is the string the old cut produced");
+
   std::printf("%s: %d checks, %d failures\n", g_failures == 0 ? "PASS" : "FAIL", g_checks,
               g_failures);
   return g_failures == 0 ? 0 : 1;
