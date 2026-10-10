@@ -1369,6 +1369,12 @@ std::string run_info_json(const RunInfo& info) {
         if (!info.stepped_anystep_rho_by_size.empty())
           gr += ", \"anystep_rho_radius_by_size\": \"" +
                 info.stepped_anystep_rho_by_size + "\"";
+        // ★ K3 (3): the solid remainder per region, and what the plan latticed.
+        if (!info.stepped_plan_solid_remainder_mm3.empty()) {
+          gr += ", \"plan_solid_remainder_mm3\": \"" +
+                info.stepped_plan_solid_remainder_mm3 + "\"";
+          gr += ", \"plan_latticed_mm3\": " + fmt(info.stepped_plan_latticed_mm3);
+        }
       }
       // ★ §3: the outline beam as APPLIED. Absent when the shape grade is off.
       if (info.lattice_outline_beam_mm > 0.0) {

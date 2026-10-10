@@ -413,16 +413,19 @@ std::vector<LatticeClipSpan> LatticeBoundary::clip_segment(
       kClipTolMm, uncertified_dropped);
 }
 
-std::vector<char> lattice_certification_mask(const LatticeBoundary& boundary,
-                                             const VoxelGrid& grid,
-                                             const std::vector<double>& density,
-                                             double iso, const Vec3& region_origin,
-                                             double cell_mm) {
+std::vector<char> lattice_certification_mask_per_cell(
+    const LatticeBoundary& boundary, const VoxelGrid& grid,
+    const std::vector<double>& density, double iso,
+    const std::function<bool(const Vec3&, Vec3*, double*)>& owning_cell,
+    long long* dropped_by_overlap) {
   if (density.size() != grid.voxel_count())
-    throw std::invalid_argument("lattice_certification_mask: size mismatch");
-  if (!(cell_mm > 0.0))
-    throw std::invalid_argument("lattice_certification_mask: cell_mm must be > 0");
+    throw std::invalid_argument("lattice_certification_mask_per_cell: size mismatch");
+  if (!owning_cell)
+    throw std::invalid_argument(
+        "lattice_certification_mask_per_cell: no owning-cell provider — the caller must "
+        "say which cell of the design covers each voxel; there is no default");
   std::vector<char> mask(grid.voxel_count(), 0);
+  long long dropped = 0;
   for (int k = 0; k < grid.nz; ++k)
     for (int j = 0; j < grid.ny; ++j)
       for (int i = 0; i < grid.nx; ++i) {
@@ -439,16 +442,47 @@ std::vector<char> lattice_certification_mask(const LatticeBoundary& boundary,
         if (boundary.has_include_regions() && !boundary.in_include_region(c, 0.0))
           continue;
         // Owning lattice cell — the SAME activation the generator uses.
+        Vec3 cell_min{0, 0, 0};
+        double cell_mm = 0.0;
+        if (!owning_cell(c, &cell_min, &cell_mm)) continue;  // no cell covers it
+        if (!(cell_mm > 0.0))
+          throw std::invalid_argument(
+              "lattice_certification_mask_per_cell: the owning-cell provider claimed a "
+              "cell covers this voxel but gave it a non-positive edge");
+        if (!boundary.cell_may_overlap(cell_min, cell_mm)) {
+          ++dropped;
+          continue;
+        }
+        mask[e] = 1;
+      }
+  if (dropped_by_overlap != nullptr) *dropped_by_overlap = dropped;
+  return mask;
+}
+
+std::vector<char> lattice_certification_mask(const LatticeBoundary& boundary,
+                                             const VoxelGrid& grid,
+                                             const std::vector<double>& density,
+                                             double iso, const Vec3& region_origin,
+                                             double cell_mm) {
+  if (density.size() != grid.voxel_count())
+    throw std::invalid_argument("lattice_certification_mask: size mismatch");
+  if (!(cell_mm > 0.0))
+    throw std::invalid_argument("lattice_certification_mask: cell_mm must be > 0");
+  // ONE cell, one origin: the graded run's own grid, expressed as the per-cell
+  // predicate's degenerate case so the two paths cannot disagree about anything but
+  // the cell.
+  return lattice_certification_mask_per_cell(
+      boundary, grid, density, iso,
+      [&region_origin, cell_mm](const Vec3& c, Vec3* cell_min, double* ce) {
         const int ci = static_cast<int>(std::floor((c.x - region_origin.x) / cell_mm));
         const int cj = static_cast<int>(std::floor((c.y - region_origin.y) / cell_mm));
         const int ck = static_cast<int>(std::floor((c.z - region_origin.z) / cell_mm));
-        const Vec3 cell_min{region_origin.x + ci * cell_mm,
-                            region_origin.y + cj * cell_mm,
-                            region_origin.z + ck * cell_mm};
-        if (!boundary.cell_may_overlap(cell_min, cell_mm)) continue;
-        mask[e] = 1;
-      }
-  return mask;
+        *cell_min = Vec3{region_origin.x + ci * cell_mm,
+                         region_origin.y + cj * cell_mm,
+                         region_origin.z + ck * cell_mm};
+        *ce = cell_mm;
+        return true;
+      });
 }
 
 std::vector<char> lattice_synthesis_domain(const LatticeBoundary& boundary,

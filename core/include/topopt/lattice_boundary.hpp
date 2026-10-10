@@ -50,6 +50,7 @@
 // kept.
 
 #include <cstddef>
+#include <functional>
 #include <memory>
 #include <vector>
 
@@ -307,6 +308,27 @@ class LatticeBoundary {
 // not inside any EXCLUDE region and (if any include region exists) is inside
 // the include union. Voxels the roles leave out are certified SOLID, exactly
 // like keep-out voxels. Returns grid.voxel_count() flags (1 = latticed).
+// ── ★ K3: THE SAME PREDICATE, ASKED AT THE PLAN'S OWN CELL ────────────────────
+// `lattice_certification_mask` below asks the owning-cell question at ONE cell size
+// anchored on ONE origin, which on a graded run is the law's cell. An app-sent plan
+// has a different cell per region AND per group, so asking the question at the law's
+// number asks it about a grid the plan never used -- the voxels it drops and keeps are
+// then decided by a cell nothing in the design contains. `owning_cell` answers it per
+// voxel instead: given the voxel CENTRE, return false when no cell of the design covers
+// the point (that voxel is certified SOLID, exactly like a keep-out voxel), otherwise
+// fill in that cell's min corner and edge. `dropped_by_overlap`, when given, receives
+// the number of COVERED voxels the cell-overlap proof then rejected -- counted here for
+// the same reason `lattice_synthesis_domain` counts its own: never hidden.
+//
+// `lattice_certification_mask` is now this function with a single-cell provider, so the
+// printed / keep-out / exclude / include precedence has ONE definition and the plan path
+// cannot drift from the graded one.
+std::vector<char> lattice_certification_mask_per_cell(
+    const LatticeBoundary& boundary, const VoxelGrid& grid,
+    const std::vector<double>& density, double iso,
+    const std::function<bool(const Vec3&, Vec3*, double*)>& owning_cell,
+    long long* dropped_by_overlap = nullptr);
+
 std::vector<char> lattice_certification_mask(const LatticeBoundary& boundary,
                                              const VoxelGrid& grid,
                                              const std::vector<double>& density,

@@ -4258,6 +4258,10 @@ struct LatticeVariantOutcome {
   std::string anystep_histogram;
   // ★ §3: "size=rho/radius_mm", descending by size, beside the histogram.
   std::string anystep_rho_by_size;
+  // ★ K3 (3): per include region, the volume the PLAN left solid -- printed voxels the
+  // region owns that no plan cell covers. "r1=1234.567, r2=0.000" in mm3.
+  std::string plan_solid_remainder_mm3;
+  double plan_latticed_mm3 = 0.0;
   double outline_inward_mm = 0.0;
   long long seam_spans_before = 0, seam_spans_after = 0;
   double seam_piece_mm = 0.0, seam_longest_before_mm = 0.0;
@@ -5397,6 +5401,152 @@ LatticeVariantOutcome lattice_one_variant(
   // block below and kept here because STEPPED derives one cell PER REGION and so needs
   // the same membership the law used, not a second reconstruction of it.
   std::vector<int> region_ids_for_stepped;
+  // ── ★ K3: THE PLAN IS READ BEFORE CORE'S OWN LAW DECIDES ANYTHING ───────────
+  // (Reviewer's ruling: on a plan job the plan IS the design.) This work used to sit
+  // AFTER the law's mask, the certification mask and the empty-mask refusal, so core's
+  // own grading gated the plan: on 3418E167 the law left nothing and the run refused
+  // before it had ever looked at the plan. My own D10/E3 commit introduced that ordering
+  // while closing a false acceptance, and under the standing rule it is the wrong way
+  // round for a plan job.
+  //
+  // It can move because K1 severed the dependency: the plan's frame now comes from the
+  // job alone (the sent base), where it used to come from `R.stepped.cells` and so could
+  // not be built until the law had run. Nothing below needs the solve beyond the grid.
+  std::vector<SteppedCellGroup> plan_groups;
+  std::vector<SteppedPlanRegion> plan_regions;
+  SteppedPlanCheck plan_chk;
+  std::vector<char> plan_mask;            // the plan's latticed voxels, K3's own mask
+  if (!job.lattice.stepped_cells.empty()) {
+    // ── ★ K1: THE BASE PER REGION IS THE APP'S, FOR BOTH MENUS ──────────────────
+    // (#354's map of 2026-10-08, reviewer's ruling of the same day.) This had TWO paths.
+    // Doubled took the region's LARGEST SENT CELL -- the app's own rule. Any-step took
+    // `R.stepped.cells`, the cell core's stepped step derives from that region's FEA
+    // density and member width. So every app-sent any-step plan was validated against a
+    // number the app never used, and #354 expected "not on that region's menu" on every
+    // project.
+    //
+    // There is now ONE path, and it is the app's: the largest cell the region placed IS
+    // the top of the ladder it halved, so the ladder is checked against the list's own
+    // evidence and core still validates rather than re-plans. A region that placed only
+    // fine cells simply has a lower top, and its cells still have to be steps of it.
+    //
+    // AND IT SEVERS A DEPENDENCY K3 NEEDS. Built from `R.stepped.cells`, the plan could
+    // not be read until core's grading had produced a mask and the stepped step had run
+    // on it -- which is exactly the gating K3 removes. Built from the job, the plan's
+    // frame depends on nothing but the job.
+    {
+      // ★ K1 CORRECTED (reviewer, 2026-10-09). An earlier cut INFERRED the base as the
+      // region's largest sent cell. That is a silent substitute: a region need not contain
+      // a base-size cell at all. Measured on 3418E167's Aesthetic Stepped plan, region 1
+      // sends only 3.5 mm and 4.6667 mm cells while the app's base is 7 mm -- so the
+      // inference guessed 4.6667 and every menu, alignment and grouping check below ran
+      // against a ladder the app never used. (It also put the sizes a hair off: 3/4 of a
+      // rounded 4.6667 is 3.500025, not the 3.5 the plan sends.)
+      //
+      // The base now travels on the wire, per region, and a region the plan places cells
+      // in MUST carry it. Refused by name otherwise -- production sends no plans yet, so
+      // nothing in the field breaks, and a plan without it would otherwise be checked
+      // against a guess.
+      std::set<int> planned_regions;
+      for (const SteppedCell& c : job.lattice.stepped_cells)
+        planned_regions.insert(c.region_id);
+      int include_index = 0;
+      for (const JobLatticeRegion& jr : job.lattice.regions) {
+        if (jr.role != "include") continue;
+        ++include_index;
+        SteppedPlanRegion pr;
+        pr.region_id = include_index;
+        if (planned_regions.count(include_index) && !(jr.plan_base_cell_mm > 0.0))
+          throw JobError(
+              "lattice region " + std::to_string(include_index) + " (face " +
+              std::to_string(jr.face_id) +
+              ") carries " + std::to_string(std::count_if(
+                                 job.lattice.stepped_cells.begin(),
+                                 job.lattice.stepped_cells.end(),
+                                 [&](const SteppedCell& c) {
+                                   return c.region_id == include_index;
+                                 })) +
+              " planned cell(s) but no \"plan_base_cell_mm\". That is the slot size the "
+              "ladder was built on, and core cannot infer it: a region need not contain a "
+              "base-size cell, so the largest cell sent is a guess and every menu, "
+              "alignment and grouping check would be run against a ladder you never used. "
+              "State it on the region.");
+        pr.base_cell_mm = jr.plan_base_cell_mm > 0.0 ? jr.plan_base_cell_mm
+                                                     : job.grading.cell_mm;
+        // ★ R1: THE SENT SLOT ORIGIN WINS. Where the app states the grid it packed on,
+        // that grid is what every check and the laying measure from -- alignment, depth,
+        // overlap, grouping (stepped_group_cells walks back from this point) and the
+        // region the run lays. Absent, the region origin stands, which is what every
+        // existing job gets. Its in-plane-ness is settled at parse time (job.cpp).
+        pr.slot_origin = jr.slot_origin_stated ? jr.slot_origin_mm : jr.origin;
+        // ★ K2: the region's own plane, which DEPTH is measured from -- the slot origin
+        // above is only the grid phase and may stand off the plane on a tilted facet.
+        pr.plane_origin = jr.origin;
+        pr.plane_origin_stated = true;
+        pr.normal = jr.normal;
+        pr.depth_mm = jr.depth_mm;
+        plan_regions.push_back(pr);
+      }
+    }
+    // ── ★ D5: WHICH PLANS GET THE OPEN BOUND (reviewer's ruling, 2026-10-10) ─────
+    // This was `intent == "aesthetic"` alone, and a DOUBLED job carries no intent at all
+    // (job.cpp refuses the key), so Default Grade plans were checked WITHOUT the bound its
+    // own packer applies. #354's ladder applies it with no intent gate
+    // (LatticeOctreeBake.swift:491-511), so core now does the same for a doubled plan under
+    // either intent.
+    //
+    // Under Stepped it stays aesthetic-only, as before: structural uses the floor alone,
+    // because the beam-network certificate solves every strut rather than averaging them
+    // and nothing structural depends on a cell looking open.
+    const bool prints_open = R.algorithm == LatticeAlgorithm::Doubled
+                                 ? true
+                                 : job.grading.intent == "aesthetic";
+    // ★ D5: THE TILE FLOOR IS THE SMALLEST CELL THAT PRINTS, not the bead. A tile wider
+    // than one bead is not therefore printable: the strut it carries at the densest
+    // density the job allows still has to clear that bead, which is exactly
+    // lattice_min_printable_cell_mm (E1). A doubled job cannot carry
+    // `stepped_min_tile_mm` at all (job.cpp refuses the key), so its floor WAS just over
+    // the bead -- 0.45 mm where the real floor is 2.25 mm at the job's cap.
+    const double printable_floor = lattice_min_printable_cell_mm(
+        lat_topo, job.grading.min_extrudable_width_mm, job.grading.max_relative_density);
+    const double tile_floor = std::max(printable_floor,
+                                       job.grading.stepped_min_tile_mm > 0.0
+                                           ? job.grading.stepped_min_tile_mm
+                                           : 0.0);
+    // ★ RULING A: which MENU the plan is validated against. Doubled admits only the
+    // halving ladder; any-step admits every k*(S/n). Same validator, same grid, prism
+    // and overlap checks -- the menu is the only difference, and it is the difference
+    // that stops a doubled job quietly accepting an any-step plan.
+    const SteppedMenu plan_menu =
+        R.algorithm == LatticeAlgorithm::Doubled ? SteppedMenu::Halves
+                                                 : SteppedMenu::AnyStep;
+    const SteppedPlanCheck chk =
+        stepped_validate_plan(lat_topo, job.lattice.stepped_cells, plan_regions,
+                              job.grading.min_extrudable_width_mm, tile_floor,
+                              prints_open, plan_menu,
+                              // ★ the include geometry, so a cross-region overlap at a
+                              // mitre can be told from a real collision: each cell's
+                              // centre must be owned by its own region (ruling 4).
+                              &lattice_roles.includes,
+                              job.grading.max_relative_density);  // D5: the cap
+    if (!chk.ok)
+      throw JobError("lattice \"stepped_cells\": " + chk.error +
+                     ". Core validates the plan and does not repack it -- the run lays "
+                     "down the arrangement the preview showed, or it stops here.");
+    const std::vector<SteppedCellGroup> groups =
+        stepped_group_cells(job.lattice.stepped_cells, plan_regions);
+    std::fprintf(stderr, "[stepped] %s plan: %zu cell(s) over %zu region(s) in %zu "
+                         "pass(es) | %s\n",
+                 plan_menu == SteppedMenu::Halves ? "doubled (halves)" : "any-step",
+                 chk.cells, chk.regions, groups.size(), chk.histogram_line.c_str());
+    R.anystep_cells = static_cast<long long>(chk.cells);
+    R.anystep_regions = static_cast<long long>(chk.regions);
+    R.anystep_passes = static_cast<long long>(groups.size());
+    R.anystep_histogram = chk.histogram_line;
+    plan_groups = groups;
+    plan_chk = chk;
+  }
+
   if (graded) {
     LatticeBoundary members;
     for (const ClearanceGeometry& g : lattice_kos)
@@ -6270,9 +6420,143 @@ LatticeVariantOutcome lattice_one_variant(
   // behaviour the `if (graded)` guard used to express.
   long long dropped_by_overlap = 0;
   const std::vector<char> kNoPosture;
-  std::vector<char> mask = lattice_synthesis_domain(
-      boundary, solved_grid, dens, printed_iso, solved_grid.origin, cell,
-      graded ? gf.posture.mask : kNoPosture, &dropped_by_overlap);
+  std::vector<char> mask;
+  // ── ★ K3: ON A PLAN JOB THE DESIGN SET IS THE PLAN'S CELLS ───────────────────
+  // (Reviewer's ruling, 2026-10-10: the companion is printed minus the PLAN's cells,
+  // and the certificate's posture comes from the PLAN's mask, never the law's.)
+  //
+  // This one mask is read by the solid companion, the graded-cell activation, the
+  // certification posture, the min-feature pass, the void check and the empty-mask
+  // refusal. On a plan job it used to be the LAW's: core graded the part its own way
+  // and that decided which voxels the companion filled and which the certificate
+  // credited, while the plan decided only where struts went. The two then disagreed in
+  // both directions -- a voxel the plan latticed but the law kept solid got a strut AND
+  // companion solid around it, and a voxel the law latticed but the plan left bare got
+  // neither, which is the partial-depth strip: the plan's cells stop short of the
+  // region's depth, the law latticed the remainder, so the strip came out as air with
+  // the plan's back nodes ending on nothing.
+  //
+  // The predicate is the same one (printed, keep-out, exclude/include precedence, the
+  // cell-overlap proof); only the owning-cell question is answered by the plan, at the
+  // plan's own cell per voxel rather than at the law's single cell -- see
+  // lattice_certification_mask_per_cell. A printed voxel inside the include union that
+  // no plan cell covers is certified SOLID, exactly like a keep-out voxel, which is what
+  // makes the companion fill the remainder.
+  std::vector<std::vector<char>> plan_occ;        // per group, its own cell grid
+  std::vector<std::vector<double>> plan_cell_rho;  // the sent rho on the same grid
+  if (!plan_groups.empty()) {
+    plan_occ.resize(plan_groups.size());
+    plan_cell_rho.resize(plan_groups.size());
+    for (std::size_t gi = 0; gi < plan_groups.size(); ++gi) {
+      const SteppedCellGroup& g = plan_groups[gi];
+      const std::size_t n = static_cast<std::size_t>(g.nx) * g.ny * g.nz;
+      plan_occ[gi].assign(n, 0);
+      plan_cell_rho[gi].assign(n, 0.0);
+      for (std::size_t ci = 0; ci < g.cells.size(); ++ci) {
+        const std::array<int, 3>& c = g.cells[ci];
+        const std::size_t at = (static_cast<std::size_t>(c[2]) * g.ny + c[1]) * g.nx + c[0];
+        plan_occ[gi][at] = 1;
+        if (ci < g.rho.size()) plan_cell_rho[gi][at] = g.rho[ci];
+      }
+    }
+    const std::vector<SteppedCellGroup>& pg = plan_groups;
+    const std::vector<std::vector<char>>& po = plan_occ;
+    mask = lattice_certification_mask_per_cell(
+        boundary, solved_grid, dens, printed_iso,
+        [&pg, &po](const Vec3& c, Vec3* cell_min, double* ce) {
+          for (std::size_t gi = 0; gi < pg.size(); ++gi) {
+            const SteppedCellGroup& g = pg[gi];
+            const int ci = static_cast<int>(std::floor((c.x - g.origin.x) / g.size_mm));
+            const int cj = static_cast<int>(std::floor((c.y - g.origin.y) / g.size_mm));
+            const int ck = static_cast<int>(std::floor((c.z - g.origin.z) / g.size_mm));
+            if (ci < 0 || cj < 0 || ck < 0 || ci >= g.nx || cj >= g.ny || ck >= g.nz)
+              continue;
+            if (!po[gi][(static_cast<std::size_t>(ck) * g.ny + cj) * g.nx + ci])
+              continue;
+            *cell_min = Vec3{g.origin.x + ci * g.size_mm, g.origin.y + cj * g.size_mm,
+                             g.origin.z + ck * g.size_mm};
+            *ce = g.size_mm;
+            return true;
+          }
+          return false;   // no cell of the plan covers it: certified SOLID
+        },
+        &dropped_by_overlap);
+    plan_mask = mask;
+    // ── ★ K3 (2): THE POSTURE IS THE PLAN'S, DENSITY AND ALL ────────────────────
+    // A mask without its density is half a posture. Measured on 570B38E2's Default
+    // Grade plan: with the plan's mask alone the run reached the certificate and
+    // `analyze_fixed_design` refused -- "lattice relative density 0.000000 is outside
+    // the certifiable octet band" -- because the density still came from the LAW, which
+    // had graded none of the voxels the plan latticed. So the certificate was being
+    // asked to credit the plan's struts at the law's density, and where the law kept a
+    // voxel solid that density is 0.
+    //
+    // The plan sends a rho PER CELL (ruling C), and that rho is what sizes the strut the
+    // run actually lays (the pass radius field reads it). The posture now reads the same
+    // number, so the certificate credits the geometry that was emitted rather than a
+    // second opinion about it. A cell that sent no rho -- every job written before that
+    // ruling -- falls back to the law's density for its voxels, exactly as the radius
+    // field does.
+    //
+    // This is the same substitution the organic path makes a few hundred lines below
+    // ("the posture the certification consumes is now the TRACED one"): the algorithm
+    // that laid the geometry down owns the posture, and nothing downstream branches.
+    std::vector<double> plan_rho(solved_grid.voxel_count(), 0.0);
+    long long plan_rho_from_plan = 0, plan_rho_from_law = 0, plan_rho_absent = 0;
+    for (std::size_t e = 0; e < plan_rho.size(); ++e) {
+      if (!mask[e]) continue;
+      const int i = static_cast<int>(e % static_cast<std::size_t>(solved_grid.nx));
+      const int j = static_cast<int>((e / solved_grid.nx) % static_cast<std::size_t>(solved_grid.ny));
+      const int k = static_cast<int>(e / (static_cast<std::size_t>(solved_grid.nx) * solved_grid.ny));
+      const Vec3 c{solved_grid.origin.x + (i + 0.5) * solved_grid.spacing,
+                   solved_grid.origin.y + (j + 0.5) * solved_grid.spacing,
+                   solved_grid.origin.z + (k + 0.5) * solved_grid.spacing};
+      double rho = 0.0;
+      for (std::size_t gi = 0; gi < plan_groups.size() && rho <= 0.0; ++gi) {
+        const SteppedCellGroup& g = plan_groups[gi];
+        const int ci = static_cast<int>(std::floor((c.x - g.origin.x) / g.size_mm));
+        const int cj = static_cast<int>(std::floor((c.y - g.origin.y) / g.size_mm));
+        const int ck = static_cast<int>(std::floor((c.z - g.origin.z) / g.size_mm));
+        if (ci < 0 || cj < 0 || ck < 0 || ci >= g.nx || cj >= g.ny || ck >= g.nz) continue;
+        const std::size_t at =
+            (static_cast<std::size_t>(ck) * g.ny + cj) * g.nx + ci;
+        if (plan_occ[gi][at]) rho = plan_cell_rho[gi][at];
+      }
+      if (rho > 0.0) { plan_rho[e] = rho; ++plan_rho_from_plan; continue; }
+      if (graded && e < gf.posture.relative_density.size() &&
+          gf.posture.relative_density[e] > 0.0) {
+        plan_rho[e] = gf.posture.relative_density[e];
+        ++plan_rho_from_law;
+        continue;
+      }
+      ++plan_rho_absent;
+    }
+    // A can't-happen still refuses, and names what it refuses (the standing rule). A
+    // latticed voxel with no density on either side would reach the certificate as a
+    // zero and be refused there, by a sentence about the octet band that says nothing
+    // about the plan.
+    if (plan_rho_absent > 0)
+      throw JobError(
+          "lattice \"stepped_cells\": " + std::to_string(plan_rho_absent) +
+          " of the " + std::to_string(plan_rho_from_plan + plan_rho_from_law +
+                                      plan_rho_absent) +
+          " voxel(s) this plan lattices have no relative density on either side -- the "
+          "plan sent no \"rho\" for the cell that covers them and core's own grading "
+          "kept them solid, so there is no number to size the strut from or to certify "
+          "it at. Send a \"rho\" with every cell (the app's own demand map is what the "
+          "preview drew the struts from), or state a grading the law can apply here.");
+    gf.posture.mask = plan_mask;
+    gf.posture.relative_density = plan_rho;
+    std::fprintf(stderr,
+                 "[stepped] plan posture: %lld voxel(s) at the plan's own rho, %lld at "
+                 "the law's (cells that sent none), %lld covered voxel(s) dropped by the "
+                 "cell-overlap proof\n",
+                 plan_rho_from_plan, plan_rho_from_law, dropped_by_overlap);
+  } else {
+    mask = lattice_synthesis_domain(
+        boundary, solved_grid, dens, printed_iso, solved_grid.origin, cell,
+        graded ? gf.posture.mask : kNoPosture, &dropped_by_overlap);
+  }
   // ── ★ GRADE TO SOLID AT THE OUTLINE, for organic (see organic_solid_rim_band) ──
   // ★★ THE BAND IS COMPUTED HERE AND APPLIED AFTER THE TRACER (ruling G). It used to be
   // cleared from the mask on this line, which took it out of the tracer's candidates and
@@ -6498,6 +6782,48 @@ LatticeVariantOutcome lattice_one_variant(
     // its buried length, while a strut clipped at the solid's face touches it only at
     // the face. Core's octet certificate ties on contact, so both tie -- but if a
     // future certificate asks for embedment depth, this is the line to revisit.
+  }
+
+  // ── ★ K3 (3): THE SOLID REMAINDER PER REGION, STATED ─────────────────────────
+  // What the plan left solid inside each include region: printed voxels the region owns
+  // that the final mask does not lattice. The partial-depth strip -- cells that stop
+  // short of the region's depth -- is exactly this number, so a run that silently
+  // latticed it, or silently left it as air, is visible in the receipt instead of only
+  // in the mesh. Owner is the K6 rule (nearest face plane, tie to the lower DECLARED
+  // id), so a voxel in two prisms is counted once.
+  //
+  // MEASURED HERE, not at the mask's construction, because the mask is not final until
+  // the outline beam has run: on 570B38E2 the beam turns 804 of the plan's own voxels
+  // solid, and those belong in the remainder.
+  if (!plan_groups.empty()) {
+    const double vox_mm3 =
+        solved_grid.spacing * solved_grid.spacing * solved_grid.spacing;
+    std::map<int, long long> solid_vox, latticed_vox;
+    for (int k = 0; k < solved_grid.nz; ++k)
+      for (int j = 0; j < solved_grid.ny; ++j)
+        for (int i = 0; i < solved_grid.nx; ++i) {
+          const std::size_t e = solved_grid.index(i, j, k);
+          if (!(dens[e] >= printed_iso)) continue;
+          const Vec3 c{solved_grid.origin.x + (i + 0.5) * solved_grid.spacing,
+                       solved_grid.origin.y + (j + 0.5) * solved_grid.spacing,
+                       solved_grid.origin.z + (k + 0.5) * solved_grid.spacing};
+          const int owner = stepped_region_owner(c, lattice_roles.includes);
+          if (owner == 0) continue;            // outside every include region
+          if (mask[e]) ++latticed_vox[owner];
+          else ++solid_vox[owner];
+        }
+    for (const SteppedPlanRegion& pr : plan_regions) {
+      char rbuf[160];
+      std::snprintf(rbuf, sizeof rbuf, "%sr%d=%.3f",
+                    R.plan_solid_remainder_mm3.empty() ? "" : ", ", pr.region_id,
+                    static_cast<double>(solid_vox[pr.region_id]) * vox_mm3);
+      R.plan_solid_remainder_mm3 += rbuf;
+      R.plan_latticed_mm3 += static_cast<double>(latticed_vox[pr.region_id]) * vox_mm3;
+    }
+    std::fprintf(stderr,
+                 "[stepped] plan solid remainder per region: %s mm3 | the plan lattices "
+                 "%.3f mm3\n",
+                 R.plan_solid_remainder_mm3.c_str(), R.plan_latticed_mm3);
   }
 
   // ── ★ D10/E3: AN EMPTY LATTICE IS A REFUSAL, ON EVERY ALGORITHM ──────────────
@@ -7038,133 +7364,7 @@ LatticeVariantOutcome lattice_one_variant(
   // the next push_back, leaving every earlier pass reading freed memory.
   std::deque<std::vector<double>> anystep_rho;
   if (!job.lattice.stepped_cells.empty()) {
-    // ── ★ K1: THE BASE PER REGION IS THE APP'S, FOR BOTH MENUS ──────────────────
-    // (#354's map of 2026-10-08, reviewer's ruling of the same day.) This had TWO paths.
-    // Doubled took the region's LARGEST SENT CELL -- the app's own rule. Any-step took
-    // `R.stepped.cells`, the cell core's stepped step derives from that region's FEA
-    // density and member width. So every app-sent any-step plan was validated against a
-    // number the app never used, and #354 expected "not on that region's menu" on every
-    // project.
-    //
-    // There is now ONE path, and it is the app's: the largest cell the region placed IS
-    // the top of the ladder it halved, so the ladder is checked against the list's own
-    // evidence and core still validates rather than re-plans. A region that placed only
-    // fine cells simply has a lower top, and its cells still have to be steps of it.
-    //
-    // AND IT SEVERS A DEPENDENCY K3 NEEDS. Built from `R.stepped.cells`, the plan could
-    // not be read until core's grading had produced a mask and the stepped step had run
-    // on it -- which is exactly the gating K3 removes. Built from the job, the plan's
-    // frame depends on nothing but the job.
-    std::vector<SteppedPlanRegion> plan_regions;
-    {
-      // ★ K1 CORRECTED (reviewer, 2026-10-09). An earlier cut INFERRED the base as the
-      // region's largest sent cell. That is a silent substitute: a region need not contain
-      // a base-size cell at all. Measured on 3418E167's Aesthetic Stepped plan, region 1
-      // sends only 3.5 mm and 4.6667 mm cells while the app's base is 7 mm -- so the
-      // inference guessed 4.6667 and every menu, alignment and grouping check below ran
-      // against a ladder the app never used. (It also put the sizes a hair off: 3/4 of a
-      // rounded 4.6667 is 3.500025, not the 3.5 the plan sends.)
-      //
-      // The base now travels on the wire, per region, and a region the plan places cells
-      // in MUST carry it. Refused by name otherwise -- production sends no plans yet, so
-      // nothing in the field breaks, and a plan without it would otherwise be checked
-      // against a guess.
-      std::set<int> planned_regions;
-      for (const SteppedCell& c : job.lattice.stepped_cells)
-        planned_regions.insert(c.region_id);
-      int include_index = 0;
-      for (const JobLatticeRegion& jr : job.lattice.regions) {
-        if (jr.role != "include") continue;
-        ++include_index;
-        SteppedPlanRegion pr;
-        pr.region_id = include_index;
-        if (planned_regions.count(include_index) && !(jr.plan_base_cell_mm > 0.0))
-          throw JobError(
-              "lattice region " + std::to_string(include_index) + " (face " +
-              std::to_string(jr.face_id) +
-              ") carries " + std::to_string(std::count_if(
-                                 job.lattice.stepped_cells.begin(),
-                                 job.lattice.stepped_cells.end(),
-                                 [&](const SteppedCell& c) {
-                                   return c.region_id == include_index;
-                                 })) +
-              " planned cell(s) but no \"plan_base_cell_mm\". That is the slot size the "
-              "ladder was built on, and core cannot infer it: a region need not contain a "
-              "base-size cell, so the largest cell sent is a guess and every menu, "
-              "alignment and grouping check would be run against a ladder you never used. "
-              "State it on the region.");
-        pr.base_cell_mm = jr.plan_base_cell_mm > 0.0 ? jr.plan_base_cell_mm
-                                                     : job.grading.cell_mm;
-        // ★ R1: THE SENT SLOT ORIGIN WINS. Where the app states the grid it packed on,
-        // that grid is what every check and the laying measure from -- alignment, depth,
-        // overlap, grouping (stepped_group_cells walks back from this point) and the
-        // region the run lays. Absent, the region origin stands, which is what every
-        // existing job gets. Its in-plane-ness is settled at parse time (job.cpp).
-        pr.slot_origin = jr.slot_origin_stated ? jr.slot_origin_mm : jr.origin;
-        // ★ K2: the region's own plane, which DEPTH is measured from -- the slot origin
-        // above is only the grid phase and may stand off the plane on a tilted facet.
-        pr.plane_origin = jr.origin;
-        pr.plane_origin_stated = true;
-        pr.normal = jr.normal;
-        pr.depth_mm = jr.depth_mm;
-        plan_regions.push_back(pr);
-      }
-    }
-    // ── ★ D5: WHICH PLANS GET THE OPEN BOUND (reviewer's ruling, 2026-10-10) ─────
-    // This was `intent == "aesthetic"` alone, and a DOUBLED job carries no intent at all
-    // (job.cpp refuses the key), so Default Grade plans were checked WITHOUT the bound its
-    // own packer applies. #354's ladder applies it with no intent gate
-    // (LatticeOctreeBake.swift:491-511), so core now does the same for a doubled plan under
-    // either intent.
-    //
-    // Under Stepped it stays aesthetic-only, as before: structural uses the floor alone,
-    // because the beam-network certificate solves every strut rather than averaging them
-    // and nothing structural depends on a cell looking open.
-    const bool prints_open = R.algorithm == LatticeAlgorithm::Doubled
-                                 ? true
-                                 : job.grading.intent == "aesthetic";
-    // ★ D5: THE TILE FLOOR IS THE SMALLEST CELL THAT PRINTS, not the bead. A tile wider
-    // than one bead is not therefore printable: the strut it carries at the densest
-    // density the job allows still has to clear that bead, which is exactly
-    // lattice_min_printable_cell_mm (E1). A doubled job cannot carry
-    // `stepped_min_tile_mm` at all (job.cpp refuses the key), so its floor WAS just over
-    // the bead -- 0.45 mm where the real floor is 2.25 mm at the job's cap.
-    const double printable_floor = lattice_min_printable_cell_mm(
-        lat_topo, job.grading.min_extrudable_width_mm, job.grading.max_relative_density);
-    const double tile_floor = std::max(printable_floor,
-                                       job.grading.stepped_min_tile_mm > 0.0
-                                           ? job.grading.stepped_min_tile_mm
-                                           : 0.0);
-    // ★ RULING A: which MENU the plan is validated against. Doubled admits only the
-    // halving ladder; any-step admits every k*(S/n). Same validator, same grid, prism
-    // and overlap checks -- the menu is the only difference, and it is the difference
-    // that stops a doubled job quietly accepting an any-step plan.
-    const SteppedMenu plan_menu =
-        R.algorithm == LatticeAlgorithm::Doubled ? SteppedMenu::Halves
-                                                 : SteppedMenu::AnyStep;
-    const SteppedPlanCheck chk =
-        stepped_validate_plan(lat_topo, job.lattice.stepped_cells, plan_regions,
-                              job.grading.min_extrudable_width_mm, tile_floor,
-                              prints_open, plan_menu,
-                              // ★ the include geometry, so a cross-region overlap at a
-                              // mitre can be told from a real collision: each cell's
-                              // centre must be owned by its own region (ruling 4).
-                              &lattice_roles.includes,
-                              job.grading.max_relative_density);  // D5: the cap
-    if (!chk.ok)
-      throw JobError("lattice \"stepped_cells\": " + chk.error +
-                     ". Core validates the plan and does not repack it -- the run lays "
-                     "down the arrangement the preview showed, or it stops here.");
-    const std::vector<SteppedCellGroup> groups =
-        stepped_group_cells(job.lattice.stepped_cells, plan_regions);
-    std::fprintf(stderr, "[stepped] %s plan: %zu cell(s) over %zu region(s) in %zu "
-                         "pass(es) | %s\n",
-                 plan_menu == SteppedMenu::Halves ? "doubled (halves)" : "any-step",
-                 chk.cells, chk.regions, groups.size(), chk.histogram_line.c_str());
-    R.anystep_cells = static_cast<long long>(chk.cells);
-    R.anystep_regions = static_cast<long long>(chk.regions);
-    R.anystep_passes = static_cast<long long>(groups.size());
-    R.anystep_histogram = chk.histogram_line;
+    const std::vector<SteppedCellGroup>& groups = plan_groups;   // K3: built above
     anystep_active.resize(groups.size());
     for (std::size_t gi = 0; gi < groups.size(); ++gi) {
       const SteppedCellGroup& g = groups[gi];
@@ -10422,6 +10622,8 @@ LatticeVariantJobResult lattice_variant_job(const JobDescription& job,
       gi.stepped_anystep_regions = R.anystep_regions;
       gi.stepped_anystep_passes = R.anystep_passes;
       gi.stepped_anystep_histogram = R.anystep_histogram;
+      gi.stepped_plan_solid_remainder_mm3 = R.plan_solid_remainder_mm3;
+      gi.stepped_plan_latticed_mm3 = R.plan_latticed_mm3;
       gi.stepped_seam_spans_before = R.seam_spans_before;
       gi.stepped_seam_spans_after = R.seam_spans_after;
       gi.stepped_seam_piece_mm = R.seam_piece_mm;

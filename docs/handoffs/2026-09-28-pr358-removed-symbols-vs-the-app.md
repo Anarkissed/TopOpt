@@ -608,3 +608,151 @@ run_info is written otherwise. My first version of the test used an ungraded ana
 job, wrote no run_info, and failed for the wrong reason — mapping a write site to its
 function is not the same as reaching it. `preflight` writes no run_info at all and is
 unaffected.
+
+## Addendum 12 — K3: on a plan job the PLAN is the design (2026-10-10)
+
+Reviewer's ruling of 2026-10-10: the solid companion is printed minus the **plan's** cells,
+the certificate's posture comes from the **plan's** mask, and the receipt states the solid
+remainder per region in mm³. Each proven on a fixture with a partial-depth prism.
+
+### What the app should know changed
+
+**One new exported function**, additive — nothing removed, nothing renamed:
+
+```cpp
+std::vector<char> lattice_certification_mask_per_cell(
+    const LatticeBoundary& boundary, const VoxelGrid& grid,
+    const std::vector<double>& density, double iso,
+    const std::function<bool(const Vec3&, Vec3*, double*)>& owning_cell,
+    long long* dropped_by_overlap = nullptr);
+```
+
+`lattice_certification_mask` is now this function with a single-cell provider, so the
+printed / keep-out / exclude-beats-include precedence has ONE definition and the plan path
+cannot drift from the graded one. Every existing caller and every existing test is
+unchanged: the wrapper keeps its own argument checks and its own message text.
+
+**Two new receipt keys** in `run_info`'s graded block, emitted only on a plan job:
+
+```json
+"plan_solid_remainder_mm3": "r1=124131.531, r2=79302.950",
+"plan_latticed_mm3": 114015.347
+```
+
+### The defect, measured
+
+The shared mask that drives the companion, the graded-cell activation, the certification
+posture, the min-feature pass, the void check and the empty-mask refusal was the **law's**.
+The plan decided only where struts went. The two then disagreed in both directions: a voxel
+the plan latticed but the law kept solid got a strut AND companion solid around it, and a
+voxel the law latticed but the plan left bare got neither.
+
+That second case is the partial-depth strip. On the new `plan_partial_depth` fixture — a
+12 mm deep region carrying ONE layer of 6 mm cells — the law latticed the uncovered 6 mm
+and the companion did not fill it, so the strip printed as **air** with the plan's back
+nodes ending on nothing.
+
+| | partial | full-depth control | difference |
+|---|---|---|---|
+| plan latticed (mm³) | 976.5625 | 1953.125 | −976.5625 |
+| solid remainder r1 (mm³) | 4960.938 | 3984.375 | +976.563 |
+| companion `solid_region_volume_mm3` | 18789.0625 | 17812.5 | **+976.5625** |
+| the same, at 588672f5 | 15292.96875 | 15292.96875 | **0** |
+
+The pre-K3 binary reports the **same** companion volume for a half-covered region and a
+fully covered one. After K3 the companion grows by exactly the stated remainder, and all
+three measurements agree to the last digit on one voxel basis. `interior_volume_mm3` on the
+partial run moves 327.69 → 329.01, so K3 changed what is SOLID and what is CERTIFIED, not
+where the plan puts lattice.
+
+### A mask is half a posture
+
+With the plan's mask alone, 570B38E2's Default Grade plan reached the certificate and
+`analyze_fixed_design` refused: *"lattice relative density 0.000000 is outside the
+certifiable octet band [0.050470, 0.899880]"*. The density still came from the law, which
+had graded none of the voxels the plan latticed, and where the law keeps a voxel solid that
+density is 0 — so the certificate was being asked to credit the plan's struts at a second
+opinion about them.
+
+The posture now takes each voxel's rho from the covering cell (ruling C's per-cell rho,
+the same number the pass radius field sizes the strut from); a cell that sent no rho falls
+back to the law's density for its voxels, exactly as the radius field does; and a latticed
+voxel with neither is **refused by name** rather than reaching the octet-band sentence,
+which says nothing about the plan. This is the substitution the organic path already makes
+("the posture the certification consumes is now the TRACED one").
+
+### The owning-cell question must be asked at the plan's cell
+
+`lattice_certification_mask` asks it at ONE cell size anchored on ONE origin. A plan has a
+different cell per region **and per group**, so asking at the law's number decides which
+voxels are kept and dropped by a cell nothing in the design contains — a silent substitute.
+Hence the per-cell provider above. On 570B38E2 it drops 0 covered voxels.
+
+### Ordering: the plan's refusal comes first
+
+The validate + group work moved from after the law's mask (below `grade_lattice`, the
+certification mask and the D10/E3 empty-mask refusal) to just above `if (graded)`. It can
+move because K1 severed the dependency — the plan's frame now comes from the job alone,
+where it used to come from `R.stepped.cells` and so could not be built until the law had
+run.
+
+`plan_before_law` is `empty_after_beam`'s job (a 31 mm outline beam that clears every voxel
+the law graded) plus a 4 mm cell on a 6 mm halving ladder. Both are refusals:
+
+* at 588672f5: *"no lattice remains to emit … the outline beam turned 750 voxel(s) solid …
+  narrow the band"* — the invalid cell is never mentioned, and the app is sent to fix a band
+  that is not the problem;
+* now: *"stepped cell 0 in region 1 is 4 mm, which is not on that region's menu (base 6 mm
+  at a 0.45 mm bead admits 2 size(s), largest 6, finest 3)"*.
+
+It still costs a solve. The whole function is post-solve, and validating a plan needs nothing
+but the job, so the pre-run check the app can call (item 2 / K7) is where that belongs.
+
+### The remainder is measured where the mask is FINAL
+
+Not where it is built. On 570B38E2 the outline beam turns **804** of the plan's own voxels
+solid and those belong in the remainder: moving the census below the beam raises r1 from
+115086.472 to 124131.531 and r2 from 56452.275 to 79302.950, a rise of 31,895 mm³ =
+804 × 39.68 mm³ (3.411 mm voxels) exactly.
+
+★ The beam overriding the plan is core's own rule winning over the app's design. It is
+reported, not silent — the beam's voxel count is in the receipt and those voxels land in the
+stated remainder — but whether a plan job should get the beam at all is a question for #354,
+not a thing core should decide quietly.
+
+### STILL OPEN — the outline clip
+
+`point_in_clearance_region` **does** honour `outline_uv` (even-odd over the loops, with the
+app's frame swap/negate), so the MASK already clips to the pocket. But
+`keep_out_signed_distance` for a face slab is the **rectangle** — `u_lo..u_hi`,
+`w_lo..w_hi`, no outline — and that is what `cell_may_overlap` uses for activation, while
+`clip_segment` never consults the include region at all. So for a cell the outline cuts: the
+cell stays active, struts are drawn across the whole cell **including outside the pocket**,
+and the mask then certifies those voxels SOLID. Geometry and mask disagree, which is the
+class bar B7 exists to stop.
+
+The fix is to carry the outline as a clip term — the exact in-plane distance to the polygon,
+`min` with the slab's own `s`, `max` across the include union (a max of 1-Lipschitz terms is
+1-Lipschitz and is a valid lower bound on the union's signed distance, so `clip_segment`'s
+certificate stays sound). No new key, the loops exactly as sent. It sits in `LatticeBoundary`,
+which every lattice job uses, so the scope — plan passes only, or every job carrying
+`outline_uv` — is the reviewer's call and is asked on #358.
+
+### A verification trap worth recording
+
+The control for this work is the binary built at 588672f5, and `test_plan_is_the_design`
+takes `TOPOPT_CLI_OVERRIDE=<path>` so it can be re-run against one. **Copying a different
+binary over the build tree's `topopt-cli` does not work**: macOS kills a signed executable
+whose bytes changed under it ("Killed: 9"), every check then fails for the wrong reason, and
+the run looks like a red control when nothing ran at all. The override takes a PATH and the
+old binary runs from where it was built.
+
+Two more, from the same day:
+* **`make` compares mtimes at one-second granularity.** A rebuild whose source copy landed in
+  the same second as the previous object file is a silent no-op: "Built target", exit 0, and
+  the binary is the old code. Caught by `strings <binary> | grep <a new marker>` and an md5
+  that matched the control exactly. `--version` does not catch it — the fingerprint is the
+  core library's and is identical across both binaries.
+* **A 4-decimal truncation of a sent cell size is a refusal.** 570B38E2's base is
+  5.156120181083679; written as 5.1561 its halves land 5e-5 mm off the menu and the run
+  refuses on its own plan. Bases travel at full precision or not at all.

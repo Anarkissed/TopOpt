@@ -1282,6 +1282,14 @@ struct RunInfo {
   // core derived. Either way the app can check a size at a time rather than by eye.
   // Shape: "9.000=0.2189/0.9852, 3.000=0.1740/0.2611" (size=rho/radius_mm).
   std::string stepped_anystep_rho_by_size;
+  // ── ★ K3 (3): WHAT THE PLAN LEFT SOLID, PER REGION ──────────────────────────
+  // Printed voxels each include region owns that NO plan cell covers, in mm3
+  // ("r1=1234.567, r2=0.000"), beside the volume the plan latticed. On a plan job this
+  // is the solid companion's own set: the partial-depth strip -- cells that stop short
+  // of the region's depth -- is exactly this number, so a run that latticed it anyway
+  // or left it as air is visible in the receipt rather than only in the mesh.
+  std::string stepped_plan_solid_remainder_mm3;
+  double stepped_plan_latticed_mm3 = 0.0;
   // The outline beam as APPLIED (ruling B): the width core derived from bead and
   // voxel, the bleed the band asked for, and how far in the solid actually reaches.
   // 0 when the shape grade is off, which is when there is no beam.
