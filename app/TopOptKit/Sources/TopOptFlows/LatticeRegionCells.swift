@@ -77,6 +77,9 @@ public enum LatticeRegionCells {
                                                         allowQuilt: project.lattice.allowQuilt,
                                                         algorithm: project.lattice.algorithm))
             guard d.valid, d.cellMM > 0 else { return RegionCell(measuredWidthMM: w, cellMM: 0) }
+            // the job's tile floor: core's E1 at the cap the job writes (2.25 mm at a 0.45 mm bead)
+            let tileFloor = LatticeSettings.tileFloorMM(topologyID: project.lattice.topologyID, beadMM: bead,
+                                                        allowQuilt: project.lattice.allowQuilt) ?? 0
             // ★★★ THE FIT DEPTH IS THE **MATERIAL'S**, NEVER THE DECLARATION'S
             // (his ruling, 2026-08-24 evening: "I'd rather it never overshoot —
             // that a 13mm cell never be on a 12mm wall; instead have a 12mm cell
@@ -127,16 +130,35 @@ public enum LatticeRegionCells {
             // strut (12.03 → 6.015 mm cell, 2.26 → 1.13 mm strut). Only when the smaller cell
             // still prints open with a bead-wide strut, so the printability floor can never
             // push it back over the ceiling.
+            var extra = 0
             if quiltStep, Self.stepsAtTheQuilt(project: project, scene: scene, region: ri,
                                                cellMM: effDepth / (n + 1), bead: bead) {
                 n += 1
+                extra = 1
             }
             if quiltStep, let s = scene, ri < s.regionDrawnDensityP90.count, r.role == .include {
                 NSLog("DIAG quiltStep r\(ri) p90 %.3f ceiling %.3f allowQuilt %@ → n %.0f cell %.3f",
                       s.regionDrawnDensityP90[ri], s.drawnCeilingRho, s.allowQuilt ? "yes" : "no", n, effDepth / n)
             }
-            return RegionCell(measuredWidthMM: w, cellMM: effDepth / n)
+            return RegionCell(measuredWidthMM: w, cellMM: Self.wholeCellsAcross(depthMM: effDepth, derivedCellMM: d.cellMM,
+                                                                                tileFloorMM: tileFloor, extraCells: extra))
         }
+    }
+
+    /// The whole-number fit of a region's cell across its wall: the nearest whole number of the cell core
+    /// derived, plus `extraCells` (the quilt step) — then FEWER while a cell would be under the job's tile
+    /// floor (`tileFloorMM`, core's E1 at the job's cap; 0 = none stated).
+    /// ★★ NEVER UNDER THE FLOOR (proof arm 3, 2026-10-10: on 102117B9 the nearest n put 20,986 of 22,210
+    /// plan cells at 2.06 / 2.00 / 1.72 mm under the 2.25 mm floor — 4.12 mm / 2 = 2.06 — where core's
+    /// derivation had asked for ≥ 2.25). A wall thinner than one printable cell gets none (0): no cell,
+    /// never a quilt cell core refuses (D5).
+    nonisolated public static func wholeCellsAcross(depthMM: Double, derivedCellMM: Double, tileFloorMM: Double,
+                                                    extraCells: Int = 0) -> Double {
+        guard depthMM > 0, derivedCellMM > 0 else { return 0 }
+        var n = Swift.max(1, (depthMM / derivedCellMM).rounded()) + Double(extraCells)
+        guard tileFloorMM > 0 else { return depthMM / n }
+        while n > 1, depthMM / n < tileFloorMM - 1e-9 { n -= 1 }
+        return depthMM / n >= tileFloorMM - 1e-9 ? depthMM / n : 0
     }
 
     /// ★★ THE DRAWER'S CELL IS THE BAKE'S (maintainer, 2026-10-03, item 5: "the drawer's 'Cell

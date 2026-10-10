@@ -40,6 +40,8 @@ extension LatticePreviewOccupancy {
         public var secondaryRegions: [Int] = []
         /// Face regions tilted further than `ladderAxisCos` from every axis — they get no cells.
         public var noLadderRegions: [Int] = []
+        /// Face regions whose base cell is under the tile floor (a stated cell can be) — they get no cells.
+        public var baseUnderFloorRegions: [Int] = []
         /// The in-plane anchor chosen for the base slots (mm, subtracted from the
         /// occupancy origin), so the most base-cell volume fits whole.
         public var anchorShiftMM = SIMD3<Double>(repeating: 0)
@@ -449,6 +451,14 @@ extension LatticePreviewOccupancy {
             // own "across a prism" tilt; a face tilted further from every axis keeps none, and
             // the DIAG names it.
             guard a[axis] > Self.ladderAxisCos else { stats.noLadderRegions.append(r); continue }
+            // ★ NO LADDER UNDER THE FLOOR (proof arm 3, 2026-10-10): a base under the job's tile floor (a
+            // stated cell can be one) is a cell core refuses (D5, the base's floor) — no cells, and named
+            // (the job's tile floor alone — `floorMM` also holds the voxel, which bounds the finest rung, not the base)
+            guard !(realFloorMM > 0 && cellMM[r] < realFloorMM - 1e-9) else {
+                stats.baseUnderFloorRegions.append(r)
+                NSLog("DIAG octree region \(r): base %.4f mm is under the %.4f mm tile floor — no cells", cellMM[r], realFloorMM)
+                continue
+            }
             var span = (lo: 0.0, hi: region.depthMM)
             if a[axis] < 0.99, Self.tiltedSpanEnabled {
                 // ★ the prism's real extent along the axis: the outline's corners at the face and
