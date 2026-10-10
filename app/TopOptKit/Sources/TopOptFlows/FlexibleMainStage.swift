@@ -243,6 +243,15 @@ public final class FlexibleMainStage: ObservableObject {
     /// Test control only (round 6, item 1 — it retires the S + M merge's `controlTurnsWithoutFrames`): round 5's
     /// group frames painted on the main page's model, in every view and every Play-all turn.
     var controlRound5Frames = false
+    /// ★ BATCH V (his two view settings, 2026-10-10 — FlexibleMainViewSettings): "Role colours off" and "Prism after a
+    /// pick", per project on this device (`viewStore`), read when the project's model is made (`ensure`).
+    public internal(set) var viewSettings = FlexibleMainViewSettings()
+    var viewStore = FlexibleMainViewSettingsStore.standard
+    /// ★ BATCH V ("Prism after a pick"): he picked a group in this session (FlexibleMainViewSettings) — the selection as
+    /// last seen, and its observation (from the stage's first look at the project on).
+    public internal(set) var sessionPicked = false
+    var lastSelection: SelectionModel?
+    var selectionObservation: AnyCancellable?
     /// ★ the gate: another core solve runs (the Stress view's sim, a topology run) — FlexibleStressSolver.busy
     var squishBusy: (() -> Bool)?
     /// The Stress solve waited for a sim (it starts when the sims go idle).

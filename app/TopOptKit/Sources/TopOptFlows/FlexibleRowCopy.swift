@@ -305,6 +305,9 @@ public enum FlexibleRowCopy {
     /// ★ ROUND 6 (item 3): the legend's view rows, one line each (the swatch and the discs are drawn).
     public static func legendPrismsRow(_ k: Int) -> String { fit("Prism = squish shown ×\(max(1, k))") }
     public static let legendGroupsRow = "Groups"
+    /// ★ BATCH V (his two view settings on the main page, 2026-10-10): one line each, under the view buttons.
+    public static let mainRoleColoursOff = "Role colours off"
+    public static let mainPrismAfterPick = "Prism after a pick"
     public static let curvePointTitle = "Squish here"
 
     // MARK: More

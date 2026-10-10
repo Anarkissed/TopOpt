@@ -277,8 +277,10 @@ public struct FlexibleStagePage: View {
                 detentPulse: pulse,
                 // ★ ROUND 4 (D1, img 6): no lattice here — it lives on the main Flexible page
                 flexibleLattice: nil)
-            FlexibleStageOverlays(model: model, proj: proj, exaggeration: FlexibleStageVolumes.prismK(dentExaggeration), keepOut: keepOut)
-            FlexibleReadingCallout(proj: proj, reading: legendDrilled ? reading : nil)
+            if !Self.controlNoOverlays {
+                FlexibleStageOverlays(model: model, proj: proj, exaggeration: FlexibleStageVolumes.prismK(dentExaggeration), keepOut: keepOut)
+                FlexibleReadingCallout(proj: proj, reading: legendDrilled ? reading : nil)
+            }
         }
         .coordinateSpace(name: FlexibleStageSpace.name)
         .background(GeometryReader { g in
@@ -307,6 +309,15 @@ public struct FlexibleStagePage: View {
 
     /// Test control only (round 6): round 5's group frames painted on the body.
     @MainActor static var controlRound5Frames = false
+
+    /// ★ BATCH V (m19, the item-4 verifier's screens: the dashed group outlines and the curves read OVER the panel and
+    /// the legend), test controls only: the layer of everything drawn on the part left out (the measurement's baseline),
+    /// and that layer drawn over the chrome again (the red control).
+    @MainActor static var controlNoOverlays = false
+    @MainActor static var controlOverlaysOverChrome = false
+
+    /// ★ BATCH V (m19): what nothing drawn on the part may show through, in the stage's frame. ★ STUB.
+    static func chromeClip(_ frames: [String: CGRect], viewport: CGSize) -> [CGRect] { [] }
 
     /// The page's tints, composed (lifted out of `refreshChannels` so a test reads EXACTLY the page's).
     /// ★ ROUND 6 (his img1 and answer): no group colour on the body — no frame, no digit, no tinted map-less

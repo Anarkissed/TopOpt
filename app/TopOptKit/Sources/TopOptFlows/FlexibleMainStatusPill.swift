@@ -199,6 +199,8 @@ public struct FlexibleMainViewToggles: View {
     static func frame(viewport: CGSize) -> CGRect {
         rowFrame(viewport: viewport).union(noteFrame(viewport: viewport))
     }
+    /// ★ BATCH V (his two view settings): where they sit, one line under the buttons, trailing. ★ STUB.
+    static func settingsFrame(viewport: CGSize) -> CGRect { .null }
     /// The buttons alone (★ S1b: one line of four, or two over two — `columns`).
     static func rowFrame(viewport: CGSize) -> CGRect {
         let c = columns(viewport: viewport), r = (buttons + c - 1) / c
