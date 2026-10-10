@@ -26,9 +26,11 @@ case "$conv" in
   convert-stepped-aesthetic) python3 "${0:A:h}/convert_stepped_aesthetic.py" "$work" | tee "$out/converted.txt" ;;
 esac
 anystep=0; [[ "$conv" == convert-stepped-aesthetic || "$conv" == stepped ]] && anystep=1
-( cd "$REPO/app/TopOptKit" && DG_PROJECT_DIR="$work" DG_OUT="$out" DG_ANY_STEP=$anystep swift test --skip-build \
+# RENDERS=1: offscreen frames of the preview through the app's renderer, into $out/renders (round 6)
+rdir=""; [[ -n "${RENDERS:-}" ]] && rdir="$out/renders"
+( cd "$REPO/app/TopOptKit" && DG_PROJECT_DIR="$work" DG_OUT="$out" DG_ANY_STEP=$anystep DG_RENDER_DIR="$rdir" swift test --skip-build \
     --filter LatticeDefaultGradePlanProof > "$out/harness.log" 2>&1 )
-grep -E "DG-PROJECT|DG-PLAN|DG-OUTLINE|DG-JOBS|DG-WITHHELD|DG-SLOT|DG-K2|error:|skipped" "$out/harness.log" | sed 's/^.*\] //'
+grep -E "DG-PROJECT|DG-PLAN|DG-OUTLINE|DG-OVERLAPS|DG-REGIONS|DG-RENDER|DG-JOBS|DG-WITHHELD|DG-SLOT|DG-K2|error:|skipped" "$out/harness.log" | sed 's/^.*\] //'
 fi
 [[ "$phase" == harness ]] && exit 0
 # the third arm: the plan job asking core for what it ships, strut by strut (welded spans), so the
@@ -53,4 +55,14 @@ done
 if [[ -s "$out/job_plan_spans.json" ]]; then
   spans=$(ls "$out"/run_plan_spans/*_SPANS.txt 2>/dev/null | head -1)
   [[ -n "$spans" ]] && python3 "${0:A:h}/compare_plan_spans.py" "$out/job_plan.json" "$spans" | tee "$out/cells_vs_spans.txt"
+  # round 6: WHY a plan cell got no strut (outside outline_uv / past depth / inside the region)
+  [[ -n "$spans" ]] && python3 -I "${0:A:h}/classify_unlaid_cells.py" "$out/job_plan.json" "$spans" | tee "$out/unlaid.txt"
+fi
+# ★ DISK (2026-10-10: the machine hit 100%): keep the verdicts, jobs, logs and summaries; drop the bulky
+# outputs once measured, with their sizes on record. KEEP_BINARIES=1 keeps them.
+if [[ -z "${KEEP_BINARIES:-}" ]]; then
+  setopt local_options null_glob
+  for f in "$out"/run_*/*.stl "$out"/run_*/*.3mf "$out"/run_*/fields.bin "$out"/run_*/*_SPANS.txt "$out"/model.step; do
+    [[ -f "$f" ]] && { echo "dropped ${f#$out/} $(stat -f %z "$f") B" >> "$out/dropped.txt"; rm -f "$f"; }
+  done
 fi

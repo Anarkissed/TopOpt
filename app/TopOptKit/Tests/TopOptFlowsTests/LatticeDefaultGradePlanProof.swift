@@ -206,7 +206,7 @@ final class LatticeDefaultGradePlanProof: XCTestCase {
             print(String(format: "DG-REGIONS voxel=%.3f mm | ", h) + rows.joined(separator: " | "))
         }
         // ★ THE PICTURE (condition 1): the same views, before and after, through the app's own renderer
-        if let dir = env["DG_RENDER_DIR"] {
+        if let dir = env["DG_RENDER_DIR"], !dir.isEmpty {
             try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
             for body in [Float(1), 0] {
                 mr.setBodyAlpha(body)
