@@ -645,6 +645,8 @@ public struct LatticeSteppedCellWire: Equatable, Sendable {
         case planBaseNotWired
         /// a cell's density is above the cap the job carries (core refuses it, D5)
         case rhoOverCap(regionID: Int, rho: Double, cap: Double)
+        /// two cells of one region share volume (`count` pairs in that region)
+        case cellsOverlap(regionID: Int, count: Int)
 
         /// The reason, in plain words, after the banner's "this plan can't go: ".
         public var reason: String {
@@ -665,6 +667,8 @@ public struct LatticeSteppedCellWire: Equatable, Sendable {
                 return "region \(id)'s cells were stepped from two different cell sizes"
             case .planBaseNotWired:
                 return "this core can't take the cell size each region's cells were stepped from"
+            case .cellsOverlap(let id, let count):
+                return "\(count) pair\(count == 1 ? "" : "s") of cells overlap in region \(id)"
             case .rhoOverCap(let id, let rho, let cap):
                 return String(format: "a cell in region %d is drawn at %.6f, denser than the job's %.6f ceiling", id, rho, cap)
             }
@@ -741,6 +745,11 @@ public struct LatticeSteppedCellWire: Equatable, Sendable {
                                       slotOriginIsPhase: Bool = TopOptKit.regionSlotOriginIsPhase,
                                       baseWired: Bool = TopOptKit.regionPlanBaseWired)
         -> Result<[Int: PlannedRegion], PlanWithheld> {
+        // ★ no two cells of one region overlap (the reviewer, 2026-10-10 20:05)
+        let overlaps = LatticeSteppedCell.boxOverlaps(cells.map { (region: $0.regionID, lo: $0.originMM, size: $0.sizeMM) })
+        if let first = overlaps.first {
+            return .failure(.cellsOverlap(regionID: first.region, count: overlaps.filter { $0.region == first.region }.count))
+        }
         let origins: [Int: SIMD3<Double>]
         switch slotOrigins(cells, regions: regions, slotOriginWired: slotOriginWired, slotOriginIsPhase: slotOriginIsPhase) {
         case .failure(let why): return .failure(why)
