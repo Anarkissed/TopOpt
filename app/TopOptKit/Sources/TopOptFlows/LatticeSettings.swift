@@ -585,12 +585,15 @@ public struct LatticeSteppedCellWire: Equatable, Sendable {
     /// The grid the cell was packed on (`LatticeSteppedCell.slotOriginMM`). Not a cell key: it
     /// goes on the cell's REGION as `geometry.slot_origin_mm` (`writePlan`).
     public let slotOriginMM: SIMD3<Double>?
+    /// The slot size the cell's ladder was built on (`LatticeSteppedCell.planBaseCellMM`). Not a
+    /// cell key: it goes on the cell's REGION as `geometry.plan_base_cell_mm` (`writePlan`, K1).
+    public let planBaseCellMM: Double?
     /// Core's reason when it could not name the bake's owners (`LatticeSteppedCell.ownerRefusal`).
     public var ownerRefusal: String? = nil
     public init(regionID: Int, originMM: SIMD3<Double>, sizeMM: Double, rho: Double = 0,
-                slotOriginMM: SIMD3<Double>? = nil) {
+                slotOriginMM: SIMD3<Double>? = nil, planBaseCellMM: Double? = nil) {
         self.regionID = regionID; self.originMM = originMM; self.sizeMM = sizeMM; self.rho = rho
-        self.slotOriginMM = slotOriginMM
+        self.slotOriginMM = slotOriginMM; self.planBaseCellMM = planBaseCellMM
     }
     public var wireDictionary: [String: Any] {
         var d: [String: Any] = ["region_id": regionID,
@@ -611,7 +614,7 @@ public struct LatticeSteppedCellWire: Equatable, Sendable {
         return cells.compactMap { c in
             guard let id = idOf[c.region] else { return nil }
             var w = LatticeSteppedCellWire(regionID: id, originMM: c.originMM, sizeMM: c.sizeMM, rho: c.rho,
-                                           slotOriginMM: c.slotOriginMM)
+                                           slotOriginMM: c.slotOriginMM, planBaseCellMM: c.planBaseCellMM)
             w.ownerRefusal = c.ownerRefusal
             return w
         }
@@ -634,6 +637,12 @@ public struct LatticeSteppedCellWire: Equatable, Sendable {
         case slotOriginNotWired
         /// core could not name the cells' owners (its reason), so the picture is not core's
         case ownerUnchecked(String)
+        /// a planned region's cells do not state the slot size their ladder was built on (K1)
+        case baseNotStated(regionID: Int)
+        /// a region's cells were packed from two ladders with different bases
+        case twoBases(regionID: Int)
+        /// the linked core's schema does not take `plan_base_cell_mm`
+        case planBaseNotWired
 
         /// The reason, in plain words, after the banner's "this plan can't go: ".
         public var reason: String {
@@ -648,6 +657,12 @@ public struct LatticeSteppedCellWire: Equatable, Sendable {
                 return "this core can't take the grid these cells sit on"
             case .ownerUnchecked(let why):
                 return "core couldn't say which region owns the cells where walls meet (\(why))"
+            case .baseNotStated(let id):
+                return "region \(id)'s cells don't say which cell size they were stepped from"
+            case .twoBases(let id):
+                return "region \(id)'s cells were stepped from two different cell sizes"
+            case .planBaseNotWired:
+                return "this core can't take the cell size each region's cells were stepped from"
             }
         }
     }
@@ -657,8 +672,14 @@ public struct LatticeSteppedCellWire: Equatable, Sendable {
     /// ★ THE PLAN'S SLOT ORIGINS, checked the way core checks them, against the JOB's regions
     /// (every role, emission order; the k-th include is region id k). A cell without a slot
     /// origin (hand-built) states none; core derives its region's own `origin`.
+    /// ★ K2 (#358 25c6a551, reviewer 2026-10-09): on a core that takes the slot origin as a grid
+    /// PHASE (`slotOriginIsPhase`), depth is measured from the region's own plane and a grid off a
+    /// tilted facet's plane is accepted — so it is no longer withheld. On an older core the in-plane
+    /// test stands, exactly as that core applies it.
     public static func slotOrigins(_ cells: [LatticeSteppedCellWire], regions: [LatticeRegionSpec],
-                                   slotOriginWired: Bool) -> Result<[Int: SIMD3<Double>], PlanWithheld> {
+                                   slotOriginWired: Bool,
+                                   slotOriginIsPhase: Bool = TopOptKit.regionSlotOriginIsPhase)
+        -> Result<[Int: SIMD3<Double>], PlanWithheld> {
         var includeAt: [Int: LatticeRegionSpec] = [:]
         var next = 1
         for r in regions where r.role == .include { includeAt[next] = r; next += 1 }
@@ -672,42 +693,101 @@ public struct LatticeSteppedCellWire: Equatable, Sendable {
                 if had != so { return .failure(.twoGrids(regionID: c.regionID)) }
                 continue
             }
-            let ln = simd_length(r.normal)
-            let dn = ln > 0 ? simd_dot(so - r.origin, r.normal / ln) : .infinity
-            guard abs(dn) < slotOriginPlaneToleranceMM else {
-                return .failure(.offPlane(regionID: c.regionID, offsetMM: dn))
+            if !slotOriginIsPhase {
+                let ln = simd_length(r.normal)
+                let dn = ln > 0 ? simd_dot(so - r.origin, r.normal / ln) : .infinity
+                guard abs(dn) < slotOriginPlaneToleranceMM else {
+                    return .failure(.offPlane(regionID: c.regionID, offsetMM: dn))
+                }
             }
             out[c.regionID] = so
         }
         return .success(out)
     }
 
-    /// ★ THE ONE PLAN WRITER, shared by both job builders: `lattice.stepped_cells` and each planned
-    /// include face's `geometry.slot_origin_mm`, together or not at all. Call it after
-    /// `block["regions"]` is written. Returns why a plan the switch would send was withheld; nil
-    /// when it was sent or not asked for.
+    /// ★ K1 (#358 664f222c, reviewer 2026-10-09: "Write the slot size each region's ladder was
+    /// built on, for both menus, on every planned region"): each planned region's base, from its
+    /// cells. Core requires it on every region the plan places a cell in (run_job.cpp:7053) and
+    /// cannot infer it, so a planned cell without one withholds the plan, never a guess.
+    public static func planBases(_ cells: [LatticeSteppedCellWire],
+                                 baseWired: Bool) -> Result<[Int: Double], PlanWithheld> {
+        var out: [Int: Double] = [:]
+        for c in cells {
+            guard let b = c.planBaseCellMM, b.isFinite, b > 0 else { return .failure(.baseNotStated(regionID: c.regionID)) }
+            guard baseWired else { return .failure(.planBaseNotWired) }
+            if let had = out[c.regionID] {
+                if had != b { return .failure(.twoBases(regionID: c.regionID)) }
+                continue
+            }
+            out[c.regionID] = b
+        }
+        return .success(out)
+    }
+
+    /// What a planned region carries beside its cells: its grid (absent for a hand-built cell) and
+    /// the base its ladder was built on.
+    public struct PlannedRegion: Equatable, Sendable {
+        public let slotOriginMM: SIMD3<Double>?
+        public let baseCellMM: Double
+    }
+    /// ★ THE ONE CHECK the job writer and the preview's line share: every planned region's grid
+    /// and base, or why the plan cannot go.
+    public static func plannedRegions(_ cells: [LatticeSteppedCellWire], regions: [LatticeRegionSpec],
+                                      slotOriginWired: Bool = TopOptKit.regionSlotOriginWired,
+                                      slotOriginIsPhase: Bool = TopOptKit.regionSlotOriginIsPhase,
+                                      baseWired: Bool = TopOptKit.regionPlanBaseWired)
+        -> Result<[Int: PlannedRegion], PlanWithheld> {
+        let origins: [Int: SIMD3<Double>]
+        switch slotOrigins(cells, regions: regions, slotOriginWired: slotOriginWired, slotOriginIsPhase: slotOriginIsPhase) {
+        case .failure(let why): return .failure(why)
+        case .success(let o): origins = o
+        }
+        switch planBases(cells, baseWired: baseWired) {
+        case .failure(let why): return .failure(why)
+        case .success(let bases):
+            return .success(bases.reduce(into: [:]) { $0[$1.key] = PlannedRegion(slotOriginMM: origins[$1.key], baseCellMM: $1.value) })
+        }
+    }
+
+    /// ★ THE ONE PLAN WRITER, shared by both job builders: `lattice.stepped_cells`, and on each
+    /// planned include face its `geometry.slot_origin_mm` and `geometry.plan_base_cell_mm`, together
+    /// or not at all. Call it after `block["regions"]` is written. Returns why a plan the switch
+    /// would send was withheld; nil when it was sent or not asked for.
     @discardableResult
     public static func writePlan(into block: inout [String: Any], for lat: LatticeSpec, wired: Bool,
                                  enabled: Bool = defaultGradePlansEnabled,
-                                 slotOriginWired: Bool = TopOptKit.regionSlotOriginWired) -> PlanWithheld? {
+                                 slotOriginWired: Bool = TopOptKit.regionSlotOriginWired,
+                                 slotOriginIsPhase: Bool = TopOptKit.regionSlotOriginIsPhase,
+                                 baseWired: Bool = TopOptKit.regionPlanBaseWired) -> PlanWithheld? {
         guard sendsPlan(algorithm: lat.algorithm, wired: wired, enabled: enabled),
               !lat.steppedCells.isEmpty else { return nil }
-        switch slotOrigins(lat.steppedCells, regions: lat.regions, slotOriginWired: slotOriginWired) {
+        switch plannedRegions(lat.steppedCells, regions: lat.regions, slotOriginWired: slotOriginWired,
+                              slotOriginIsPhase: slotOriginIsPhase, baseWired: baseWired) {
         case .failure(let why):
             NSLog("DIAG stepped plan WITHHELD (\(lat.steppedCells.count) cells): \(why.reason)")
             return why
-        case .success(let origins):
-            block["stepped_cells"] = lat.steppedCells.map { $0.wireDictionary }
-            guard !origins.isEmpty, var regs = block["regions"] as? [[String: Any]],
-                  regs.count == lat.regions.count else { return nil }
+        case .success(let planned):
+            guard var regs = block["regions"] as? [[String: Any]], regs.count == lat.regions.count else {
+                NSLog("DIAG stepped plan WITHHELD (\(lat.steppedCells.count) cells): the job's regions are not the plan's")
+                return .noSuchRegion(regionID: planned.keys.min() ?? 1)
+            }
             var id = 0
+            var stamped: Set<Int> = []
             for (i, r) in lat.regions.enumerated() where r.role == .include {
                 id += 1
-                guard let so = origins[id], var g = regs[i]["geometry"] as? [String: Any] else { continue }
-                g["slot_origin_mm"] = [so.x, so.y, so.z]
+                guard let p = planned[id], var g = regs[i]["geometry"] as? [String: Any] else { continue }
+                if let so = p.slotOriginMM { g["slot_origin_mm"] = [so.x, so.y, so.z] }
+                g["plan_base_cell_mm"] = p.baseCellMM
                 regs[i]["geometry"] = g
+                stamped.insert(id)
+            }
+            // a cell naming a region the job does not declare gets no base, and core would refuse it
+            if let missing = planned.keys.filter({ !stamped.contains($0) }).min() {
+                NSLog("DIAG stepped plan WITHHELD (\(lat.steppedCells.count) cells): region \(missing) is not in the job")
+                return .noSuchRegion(regionID: missing)
             }
             block["regions"] = regs
+            block["stepped_cells"] = lat.steppedCells.map { $0.wireDictionary }
             return nil
         }
     }
@@ -727,7 +807,8 @@ public struct LatticeSteppedCellWire: Equatable, Sendable {
     public static func blockValue(for lat: LatticeSpec, wired: Bool,
                                   enabled: Bool = defaultGradePlansEnabled,
                                   slotOriginWired: Bool = TopOptKit.regionSlotOriginWired) -> [[String: Any]]? {
-        var block: [String: Any] = [:]
+        // the regions first, as both job builders write them: the plan stamps its regions
+        var block: [String: Any] = lat.regions.isEmpty ? [:] : ["regions": lat.regions.map { $0.wireDictionary }]
         writePlan(into: &block, for: lat, wired: wired, enabled: enabled, slotOriginWired: slotOriginWired)
         return block["stepped_cells"] as? [[String: Any]]
     }

@@ -1149,7 +1149,7 @@ extension LatticePreviewOccupancy {
                 if edge { stats.slotsCut += 1 } else { stats.slotsKept[S, default: 0] += 1 }
                 // The plan: every cell that owns at least one texel, cut or whole.
                 if painted > 0 { cells.append(LatticeSteppedCell(region: ladder.region, originMM: lo, sizeMM: S,
-                                                                 slotOriginMM: slotOrigin)) }
+                                                                 slotOriginMM: slotOrigin, planBaseCellMM: sBase)) }
             }
             func place(_ idx: SIMD3<Int>, level: Int) {
                 let S = ladder.sizes[level]

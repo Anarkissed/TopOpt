@@ -160,8 +160,7 @@ final class LatticeDefaultGradePlanProof: XCTestCase {
         if la["stepped_cells"] == nil {
             // ★ withheld: the job carries no plan core would refuse — say why, in the app's words
             let lat = try XCTUnwrap(request.lattice)
-            if case .failure(let why) = LatticeSteppedCellWire.slotOrigins(lat.steppedCells, regions: lat.regions,
-                                                                           slotOriginWired: TopOptKit.regionSlotOriginWired) {
+            if case .failure(let why) = LatticeSteppedCellWire.plannedRegions(lat.steppedCells, regions: lat.regions) {
                 print("DG-WITHHELD \(why.reason) | \(why)")
                 // ★ FOR #358's K2 (the reviewer, 2026-10-08: "slot_origin_mm becomes a grid phase, with
                 // depth measured from the region's own plane"): the plan the app withholds, written as
@@ -170,14 +169,19 @@ final class LatticeDefaultGradePlanProof: XCTestCase {
                 var k2 = try XCTUnwrap(JSONSerialization.jsonObject(with: withPlan) as? [String: Any])
                 var lk = try XCTUnwrap(k2["lattice"] as? [String: Any])
                 lk["stepped_cells"] = lat.steppedCells.map { $0.wireDictionary }
-                var grid: [Int: SIMD3<Double>] = [:]
-                for c in lat.steppedCells { if let so = c.slotOriginMM, grid[c.regionID] == nil { grid[c.regionID] = so } }
+                var grid: [Int: SIMD3<Double>] = [:], base: [Int: Double] = [:]
+                for c in lat.steppedCells {
+                    if let so = c.slotOriginMM, grid[c.regionID] == nil { grid[c.regionID] = so }
+                    if let b = c.planBaseCellMM, base[c.regionID] == nil { base[c.regionID] = b }
+                }
                 if var regs = lk["regions"] as? [[String: Any]] {
                     var id = 0
                     for (i, r) in lat.regions.enumerated() where r.role == .include {
                         id += 1
-                        guard let so = grid[id], var g = regs[i]["geometry"] as? [String: Any] else { continue }
-                        g["slot_origin_mm"] = [so.x, so.y, so.z]; regs[i]["geometry"] = g
+                        guard var g = regs[i]["geometry"] as? [String: Any] else { continue }
+                        if let so = grid[id] { g["slot_origin_mm"] = [so.x, so.y, so.z] }
+                        if let b = base[id] { g["plan_base_cell_mm"] = b }
+                        regs[i]["geometry"] = g
                     }
                     lk["regions"] = regs
                 }
@@ -191,17 +195,24 @@ final class LatticeDefaultGradePlanProof: XCTestCase {
             XCTAssertEqual((la["stepped_cells"] as? [Any])?.count, plan.count, "★ the plan rides the job whole")
         }
         la.removeValue(forKey: "stepped_cells")
-        // the planned regions' grids (slot_origin_mm, 2026-10-08) ride with the plan
+        // the planned regions' grids (slot_origin_mm, 2026-10-08) and bases (plan_base_cell_mm, K1,
+        // 2026-10-09) ride with the plan
         var stamped = 0
+        var bases: [String] = []
         if var regs = la["regions"] as? [[String: Any]] {
             for i in regs.indices {
-                guard var g = regs[i]["geometry"] as? [String: Any], g.removeValue(forKey: "slot_origin_mm") != nil else { continue }
-                stamped += 1; regs[i]["geometry"] = g
+                guard var g = regs[i]["geometry"] as? [String: Any] else { continue }
+                if let b = g.removeValue(forKey: "plan_base_cell_mm") as? Double {
+                    bases.append("job region \(i + 1): \(String(format: "%.4f", b)) mm")
+                }
+                if g.removeValue(forKey: "slot_origin_mm") != nil { stamped += 1 }
+                regs[i]["geometry"] = g
             }
             la["regions"] = regs
         }
         a["lattice"] = la
         print("DG-SLOT-ORIGINS \(stamped) region(s) carry slot_origin_mm")
+        print("DG-PLAN-BASES \(bases.count) region(s) carry plan_base_cell_mm | " + bases.joined(separator: "; "))
         XCTAssertEqual(try pretty(JSONSerialization.data(withJSONObject: a)), try pretty(noPlan),
                        "★ the jobs differ only by the plan and its regions' grids")
         XCTAssertNil((n["lattice"] as? [String: Any])?["stepped_cells"], "production sends no plan")

@@ -826,8 +826,7 @@ public struct WorkspacePlaceholder: View {
                           onLatticeCellsBaked: { cells, regions in
                               let wire = LatticeSteppedCellWire.wire(cells, regions: regions)
                               project.latticePreviewSteppedCells = wire
-                              if case .failure(let why) = LatticeSteppedCellWire.slotOrigins(
-                                  wire, regions: regions, slotOriginWired: TopOptKit.regionSlotOriginWired) {
+                              if case .failure(let why) = LatticeSteppedCellWire.plannedRegions(wire, regions: regions) {
                                   project.latticePreviewPlanWithheld = why
                               } else {
                                   project.latticePreviewPlanWithheld = nil

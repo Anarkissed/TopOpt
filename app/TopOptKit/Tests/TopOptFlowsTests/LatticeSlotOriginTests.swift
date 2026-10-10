@@ -6,9 +6,10 @@ import TopOptKit
 /// ★★ REVIEWER, 2026-10-08 (approved by the maintainer): "Send slot_origin_mm from the anchor
 /// search." Core measures every planned cell's alignment, depth, overlap and grouping from its
 /// region's slot origin (stepped_plan.cpp:232-234, 461-463); without one it takes the region's
-/// `origin`, which is not the grid the bake packed on. Core refuses a slot origin standing 1e-6 mm
-/// or more off the face plane (job.cpp:1592-1611), so a plan whose grid is off a tilted facet's
-/// plane is withheld, and the preview says why.
+/// `origin`, which is not the grid the bake packed on. Core at 36f5fdde refused a slot origin
+/// standing 1e-6 mm or more off the face plane, so a plan whose grid was off a tilted facet's plane
+/// was withheld, and the preview said why. Since K2 (#358 25c6a551) it is a grid PHASE, and depth is
+/// measured from the region's own plane: the app sends it (`TopOptKit.regionSlotOriginIsPhase`).
 final class LatticeSlotOriginTests: XCTestCase {
 
     // MARK: the bake
@@ -105,39 +106,48 @@ final class LatticeSlotOriginTests: XCTestCase {
     }
 
     /// ★★ PARITY WITH CORE'S PARSER: the app withholds exactly the slot origins core refuses —
-    /// on the plane, a hair off either side of core's 1e-6, and a tilted facet's world-axis grid
-    /// (the bake's: the anchor in-plane, the plane along the ladder axis).
+    /// on the plane, a hair off either side of 1e-6, and a tilted facet's world-axis grid (the
+    /// bake's: the anchor in-plane, the plane along the ladder axis).
+    /// ★ K2 (#358 25c6a551, the reviewer 2026-10-09): core now takes the slot origin as a grid PHASE
+    /// and measures depth from the region's own plane, so it refuses NONE of these, and the app
+    /// withholds none. The old in-plane rule stays as the CONTROL, for an older core: under it the
+    /// app withholds the tilted grid and the hair-off point, exactly as that core did.
     func testTheAppWithholdsExactlyWhatCoreRefuses() throws {
         XCTAssertTrue(TopOptKit.regionSlotOriginWired, "the linked core takes slot_origin_mm (36f5fdde+)")
+        XCTAssertTrue(TopOptKit.regionSlotOriginIsPhase, "★ the linked core takes it as a phase (K2, 3952c411+)")
         let n18 = simd_normalize(SIMD3<Double>(0.95, 0, -0.31))      // his face 23's foot facet, 18°
         let o = SIMD3<Double>(10, 5, 7)
         var axisGrid = SIMD3<Double>(-2.25, -1.5, -2.75); axisGrid.x = o.x   // the bake's slot origin, axis x
-        let cases: [(String, SIMD3<Double>, SIMD3<Double>)] = [
-            ("in plane", SIMD3(0, 0, 1), SIMD3(1.5, -0.25, 0)),
-            ("2e-6 off", SIMD3(0, 0, 1), SIMD3(1.5, -0.25, 2e-6)),
-            ("5e-7 off", SIMD3(0, 0, 1), SIMD3(1.5, -0.25, 5e-7)),
-            ("short normal, 2e-6 off (unit test, as core)", SIMD3(0, 0, 0.001), SIMD3(3, 4, 2e-6)),
-            ("tilted 18°, the bake's grid", n18, axisGrid),
-            ("tilted 18°, projected onto the plane", n18, axisGrid - simd_dot(axisGrid - o, n18) * n18),
+        let cases: [(String, SIMD3<Double>, SIMD3<Double>, Bool)] = [
+            // name, normal, slot, refused by the OLD in-plane rule
+            ("in plane", SIMD3(0, 0, 1), SIMD3(1.5, -0.25, 0), false),
+            ("2e-6 off", SIMD3(0, 0, 1), SIMD3(1.5, -0.25, 2e-6), true),
+            ("5e-7 off", SIMD3(0, 0, 1), SIMD3(1.5, -0.25, 5e-7), false),
+            ("short normal, 2e-6 off (unit test, as core)", SIMD3(0, 0, 0.001), SIMD3(3, 4, 2e-6), true),
+            ("tilted 18°, the bake's grid", n18, axisGrid, true),
+            ("tilted 18°, projected onto the plane", n18, axisGrid - simd_dot(axisGrid - o, n18) * n18, false),
         ]
         var rows: [String] = []
-        for (name, normal, slot) in cases {
+        for (name, normal, slot, oldRefuses) in cases {
             let origin = normal == n18 ? o : SIMD3<Double>(0, 0, 0)
             let core = coreVerdict(origin: origin, normal: normal, slot: slot)
             let cell = LatticeSteppedCellWire(regionID: 1, originMM: slot, sizeMM: 3, slotOriginMM: slot)
-            let app = LatticeSteppedCellWire.slotOrigins([cell], regions: [tilted(origin, normal)], slotOriginWired: true)
-            let appWithholds: Bool
-            if case .failure(let why) = app {
-                appWithholds = true
-                if case .offPlane = why {} else { XCTFail("\(name): \(why)") }
-            } else { appWithholds = false }
-            if let core { XCTAssertTrue(core.contains("must lie IN the face plane"), "\(name): \(core)") }
-            XCTAssertEqual(appWithholds, core != nil, "★ \(name): app \(app), core \(core ?? "accepts")")
-            rows.append("\(name): core \(core == nil ? "accepts" : "refuses"), app \(appWithholds ? "withholds" : "sends")")
+            func withholds(phase: Bool) -> Bool {
+                if case .failure(let why) = LatticeSteppedCellWire.slotOrigins([cell], regions: [tilted(origin, normal)],
+                                                                               slotOriginWired: true, slotOriginIsPhase: phase) {
+                    if case .offPlane = why {} else { XCTFail("\(name): \(why)") }
+                    return true
+                }
+                return false
+            }
+            let app = withholds(phase: TopOptKit.regionSlotOriginIsPhase)
+            XCTAssertEqual(app, core != nil, "★ \(name): app \(app ? "withholds" : "sends"), core \(core ?? "accepts")")
+            XCTAssertNil(core, "★ K2: core takes \(name) as a phase")
+            // ★ CONTROL: the old rule still tells these apart, so the sweep is not vacuous
+            XCTAssertEqual(withholds(phase: false), oldRefuses, "control, old core: \(name)")
+            rows.append("\(name): core \(core == nil ? "accepts" : "refuses"), app \(app ? "withholds" : "sends"), "
+                        + "old rule \(oldRefuses ? "withheld" : "sent")")
         }
-        // the two that MUST differ, so the sweep is not vacuous
-        XCTAssertNotNil(coreVerdict(origin: o, normal: n18, slot: axisGrid), "★ core refuses the tilted grid")
-        XCTAssertNil(coreVerdict(origin: .zero, normal: SIMD3(0, 0, 1), slot: SIMD3(1.5, -0.25, 0)))
         print("SLOT-ORIGIN parity\n  " + rows.joined(separator: "\n  "))
     }
 
@@ -184,6 +194,9 @@ final class LatticeSlotOriginTests: XCTestCase {
     private func slotKeys(_ lat: [String: Any]) -> [[Double]?] {
         ((lat["regions"] as? [[String: Any]]) ?? []).map { ($0["geometry"] as? [String: Any])?["slot_origin_mm"] as? [Double] }
     }
+    private func baseKeys(_ lat: [String: Any]) -> [Double?] {
+        ((lat["regions"] as? [[String: Any]]) ?? []).map { ($0["geometry"] as? [String: Any])?["plan_base_cell_mm"] as? Double }
+    }
 
     /// ★ The grid goes on the PLANNED include faces only, with the cells; never without the switch;
     /// and a plan with a tilted grid goes out as NO plan at all — never cells without their grid.
@@ -192,24 +205,35 @@ final class LatticeSlotOriginTests: XCTestCase {
         let a = tilted(SIMD3(20, 0, 20), SIMD3(0, 1, 0))
         let b = tilted(SIMD3(0, 20, 20), SIMD3(1, 0, 0))
         let ga = SIMD3<Double>(-1.25, 0, -2), gb = SIMD3<Double>(0, -1.25, -2)
-        let cells = [LatticeSteppedCellWire(regionID: 1, originMM: SIMD3(4.75, 0, 4), sizeMM: 6, slotOriginMM: ga),
-                     LatticeSteppedCellWire(regionID: 1, originMM: SIMD3(1.75, 6, 1), sizeMM: 3, slotOriginMM: ga)]
+        let cells = [LatticeSteppedCellWire(regionID: 1, originMM: SIMD3(4.75, 0, 4), sizeMM: 6, slotOriginMM: ga,
+                                            planBaseCellMM: 12),
+                     LatticeSteppedCellWire(regionID: 1, originMM: SIMD3(1.75, 6, 1), sizeMM: 3, slotOriginMM: ga,
+                                            planBaseCellMM: 12)]
         let on = try latticeBlock(spec(regions: [ex, a, b], cells: cells), plans: true)
         XCTAssertEqual((on["stepped_cells"] as? [[String: Any]])?.count, 2)
         XCTAssertEqual(slotKeys(on), [nil, [-1.25, 0, -2], nil], "★ only region 1 (job index 1) was planned")
+        XCTAssertEqual(baseKeys(on), [nil, 12, nil], "★ K1: the planned region carries its ladder's base")
 
         let off = try latticeBlock(spec(regions: [ex, a, b], cells: cells), plans: false)
         XCTAssertNil(off["stepped_cells"]); XCTAssertEqual(slotKeys(off), [nil, nil, nil], "★ the switch is off")
+        XCTAssertEqual(baseKeys(off), [nil, nil, nil])
 
+        // ★ K2: a tilted facet's grid now goes, as a phase — on the linked core
         var bt = b; bt.normal = simd_normalize(SIMD3(0.95, 0, -0.31))
-        let both = cells + [LatticeSteppedCellWire(regionID: 2, originMM: SIMD3(0, 1.75, 1), sizeMM: 6, slotOriginMM: gb)]
+        let both = cells + [LatticeSteppedCellWire(regionID: 2, originMM: SIMD3(0, 1.75, 1), sizeMM: 6, slotOriginMM: gb,
+                                                   planBaseCellMM: 6)]
         let tiltedJob = try latticeBlock(spec(regions: [ex, a, bt], cells: both), plans: true)
-        XCTAssertNil(tiltedJob["stepped_cells"], "★ withheld whole")
-        XCTAssertEqual(slotKeys(tiltedJob), [nil, nil, nil])
-        var withheldBlock: [String: Any] = [:]
+        XCTAssertEqual((tiltedJob["stepped_cells"] as? [[String: Any]])?.count, 3, "★ K2: sent whole")
+        XCTAssertEqual(slotKeys(tiltedJob), [nil, [-1.25, 0, -2], [0, -1.25, -2]])
+        XCTAssertEqual(baseKeys(tiltedJob), [nil, 12, 6], "★ each region its own ladder's base")
+        // …and on an older core the in-plane rule withholds it whole, as before (the control)
+        var withheldBlock: [String: Any] = ["regions": [ex, a, bt].map { $0.wireDictionary }]
         XCTAssertEqual(LatticeSteppedCellWire.writePlan(into: &withheldBlock, for: spec(regions: [ex, a, bt], cells: both),
-                                                        wired: true, enabled: true),
+                                                        wired: true, enabled: true, slotOriginIsPhase: false),
                        .offPlane(regionID: 2, offsetMM: simd_dot(gb - bt.origin, bt.normal)))
+        XCTAssertNil(withheldBlock["stepped_cells"], "★ withheld whole")
+        XCTAssertEqual(slotKeys(withheldBlock), [nil, nil, nil])
+        XCTAssertEqual(baseKeys(withheldBlock), [nil, nil, nil])
 
         // ★ ONE WRITER: both job builders call it, neither writes the key by hand
         var u = URL(fileURLWithPath: #filePath); for _ in 0..<3 { u.deleteLastPathComponent() }

@@ -2253,6 +2253,20 @@ public enum TopOptKit {
         guard jobSchemaError(regionSlotOriginProbeJob("")) == nil else { return false }   // the control
         return jobSchemaError(regionSlotOriginProbeJob(#", "slot_origin_mm": [1.5, -0.25, 0]"#)) == nil
     }()
+    /// ★ K2 (#358 25c6a551): the slot origin is a grid PHASE — core accepts one standing off the
+    /// face plane and measures depth from the region's own plane. Probed with an off-plane point;
+    /// the CONTROL is the in-plane one, which must pass first. FALSE ⇒ the in-plane test stands.
+    public static let regionSlotOriginIsPhase: Bool = {
+        guard regionSlotOriginWired else { return false }
+        return jobSchemaError(regionSlotOriginProbeJob(#", "slot_origin_mm": [1.5, -0.25, 2.0]"#)) == nil
+    }()
+    /// ★ K1 (#358 664f222c): a face region may carry `plan_base_cell_mm`, the slot size its plan's
+    /// ladder was built on — REQUIRED on every planned region by a core that has it. Whole-job
+    /// probe with its control (the same job without the key).
+    public static let regionPlanBaseWired: Bool = {
+        guard jobSchemaError(regionSlotOriginProbeJob("")) == nil else { return false }   // the control
+        return jobSchemaError(regionSlotOriginProbeJob(#", "plan_base_cell_mm": 6.0"#)) == nil
+    }()
     /// The probe's document: one include face on z = 0, normal +z, with `extra` in its geometry.
     public static func regionSlotOriginProbeJob(_ extra: String) -> Data {
         var text = latticeProbeBaseJob

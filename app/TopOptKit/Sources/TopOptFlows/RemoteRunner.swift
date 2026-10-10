@@ -820,8 +820,9 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
                 block["emit_organic_spans"] = true
             }
             // ★ THE PLAN (2026-09-18): the preview's placed cells, verbatim, with each planned
-            // region's grid (`slot_origin_mm`, 2026-10-08) — the ONE writer, shared with
-            // RelatticeRunner. A plan core would refuse is withheld, never sent.
+            // region's grid (`slot_origin_mm`, 2026-10-08) and ladder base (`plan_base_cell_mm`,
+            // K1) — the ONE writer, shared with RelatticeRunner. A plan core would refuse is
+            // withheld, never sent.
             LatticeSteppedCellWire.writePlan(into: &block, for: lat, wired: TopOptKit.steppedCellsWired,
                                              enabled: steppedPlans)
             job["lattice"] = block

@@ -122,9 +122,15 @@ phase. It stamps every planned region with the bake's grid point (19 regions on 
     > menu (base 8.756 mm at a 0.45 mm bead admits 4 size(s), largest 8.756, finest 2.919). Core
     > validates the plan and does not repack it -- the run lays down the arrangement the preview
     > showed, or it stops here."
-  - The app's region-1 base is 7 mm (4.67 = 2/3·7, 3.5 = 7/2). Core builds the any-step menu on its
-    OWN base for the region (8.756 mm, its FEA cell). This is K1: the any-step base comes from the
-    app's plan.
+  - ★ CORRECTED 2026-10-10. This line first said "the app's region-1 base is 7 mm (4.67 = 2/3·7,
+    3.5 = 7/2)". That was my inference from the cell sizes, and it was WRONG. The bake's own DIAG on
+    this run says `regionCell depth=14.0 … final=14.0` and `quiltStep r0 … n 1 cell 14.000`: region
+    1's base is **14 mm**, so 4.67 = 14/3 (thirds) and 3.5 = 14/4 (quarters). Both tiles print
+    open under either prints-open rule. Region 2's base is 6.
+  - Core builds the any-step menu on its OWN base for the region (8.756 mm, its FEA cell). This is
+    K1: the base comes from the app's plan, now as `geometry.plan_base_cell_mm` on every planned
+    region (#358 664f222c). Core's K1 comment repeats the "base 7"; the 2026-10-10 post on the #354
+    channel corrects it.
   - The no-plan job is ACCEPTED.
 
 ### Where the proofs stand

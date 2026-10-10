@@ -641,13 +641,19 @@ public struct LatticeSteppedCell: Equatable, Sendable {
     /// from it (`geometry.slot_origin_mm`, job.cpp:1592-1611). nil ⇒ a hand-built cell; core then
     /// derives the region's own `origin`.
     public var slotOriginMM: SIMD3<Double>? = nil
+    /// ★ THE SLOT SIZE THIS CELL'S LADDER WAS BUILT ON (K1, reviewer 2026-10-09: "Write the slot
+    /// size each region's ladder was built on, for both menus, on every planned region"): the
+    /// ladder's base, `sizes[0]` — Default Grade halves it, Stepped takes k·base/n from it. Core
+    /// cannot infer it (a region need not hold a base-size cell) and requires it as the region's
+    /// `geometry.plan_base_cell_mm` (run_job.cpp:7053). nil ⇒ a hand-built cell, and no plan goes.
+    public var planBaseCellMM: Double? = nil
     /// ★ Core's reason when it could not name this bake's owners (2026-10-08): the picture then
     /// used the Swift rule, and the plan is withheld (`LatticeSteppedCellWire.PlanWithheld`).
     public var ownerRefusal: String? = nil
     public init(region: Int, originMM: SIMD3<Double>, sizeMM: Double, rho: Double = 0,
-                slotOriginMM: SIMD3<Double>? = nil) {
+                slotOriginMM: SIMD3<Double>? = nil, planBaseCellMM: Double? = nil) {
         self.region = region; self.originMM = originMM; self.sizeMM = sizeMM; self.rho = rho
-        self.slotOriginMM = slotOriginMM
+        self.slotOriginMM = slotOriginMM; self.planBaseCellMM = planBaseCellMM
     }
 }
 
