@@ -48,6 +48,23 @@ inline constexpr int kSteppedMaxHalvings = 8;
 // "Prints open": a bead-wide strut in a tile of this size must not exceed this relative
 // density. The octet law supplies the density; see the note above on the structural case.
 inline constexpr double kSteppedPrintsOpenMaxRho = 0.20;
+
+// ── ★ ONE RULE, ONE PLACE: DOES A CELL OF THIS SIZE PRINT OPEN? ───────────────
+// (Reviewer's ruling, 2026-10-10.) A bead-wide strut in a cell this size must leave the
+// cell mostly air -- at or under kSteppedPrintsOpenMaxRho of it. Core's FORWARD law, so
+// the answer is the one `stepped_admitted_divisors` applies; the app replaces its own two
+// call sites with this through the bridge, and its own 0.20 crossing (2.370917 mm at a
+// 0.45 mm bead) agreed with core's to 9 nm before this existed.
+//
+// The density law reads radius/cell only, so the bound is proportional to the bead: the
+// smallest open cell is 5.268704 x bead, which is exactly
+// `lattice_min_printable_cell_mm(topo, bead, kSteppedPrintsOpenMaxRho)`.
+//
+// A size off the measured table is resolved BY WHICH SIDE it falls on -- a bead-wide strut
+// in a large cell is a low density (open), in a tiny one a high density (not). Swallowing
+// the throw as "not open" is the bug that made a probe of mine report the minimum open
+// cell as 50 mm.
+bool lattice_prints_open(LatticeTopology topo, double cell_size_mm, double bead_mm);
 // Two menu sizes closer than this (relative) are the same size: 2*(S/4) IS S/2, and a
 // menu that listed both would make the packer try one size twice.
 inline constexpr double kSteppedMenuSameRel = 1e-9;

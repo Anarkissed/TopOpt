@@ -1,5 +1,5 @@
 {
- "_comment": "K2 (reviewer, 2026-10-08): a slot origin OFF the face plane is a grid PHASE, not an error -- a tilted facet's grid is world-aligned, so the point the app packed from stands off the plane. Depth is measured from the region's own plane instead, so these cells (y 0..3 and 0..1.5 of a 12 mm prism) are INSIDE. Measured from the slot origin, as core did before K2, their centres project to -1.5 and -2.25 and the plan was refused. ACCEPTED.",
+ "_comment": "K2: a slot origin OFF the face plane is a grid PHASE. It stands one base cell inward along the normal; the cells are inside the 12 mm prism measured from the region's own plane (y 0..6 and 0..3) and would project to centres of -3 and -4.5 measured from the slot origin, which is why core refused them before K2. ACCEPTED.",
  "bake_build_orientation": "off",
  "grading": {
   "algorithm": "doubled",
@@ -17,8 +17,8 @@
    {
     "geometry": {
      "depth_mm": 12.0,
-     "half_u_mm": 6.0,
-     "half_w_mm": 6.0,
+     "half_u_mm": 12.0,
+     "half_w_mm": 12.0,
      "normal": [
       0.0,
       1.0,
@@ -31,10 +31,10 @@
      ],
      "slot_origin_mm": [
       18.4,
-      3.0,
+      6.0,
       8.4
      ],
-     "plan_base_cell_mm": 3.0
+     "plan_base_cell_mm": 6.0
     },
     "kind": "face",
     "role": "include"
@@ -49,16 +49,16 @@
      0.0,
      8.4
     ],
-    "size_mm": 3.0
+    "size_mm": 6.0
    },
    {
     "region_id": 1,
     "origin_mm": [
-     21.4,
+     24.4,
      0.0,
      8.4
     ],
-    "size_mm": 1.5
+    "size_mm": 3.0
    }
   ],
   "topology": "octet"

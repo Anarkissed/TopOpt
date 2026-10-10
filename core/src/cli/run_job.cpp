@@ -1006,7 +1006,15 @@ LatticeRoleRegions lattice_role_regions_from_job(const JobDescription& job,
       mg.frame_u = r.frame_u;      // zero unless the job stated them
       mg.frame_w = r.frame_w;
     }
-    const ClearanceGeometry g = resolve_clearance_manual(mg, p);
+    ClearanceGeometry g = resolve_clearance_manual(mg, p);
+    // ★ K6, COMPLETED (#354 reading 3952c411, 2026-10-10). The declared id was set on the
+    // `kind == "region"` branch ONLY, and this path -- the manual face/bolt path, which
+    // carries every region the app plans -- pushed its geometry with the id still 0. So
+    // `stepped_region_owner` fell back to the POSITION for every FACE include, which is
+    // precisely the defect K6 exists to fix: the built vector is compacted by the skip
+    // below, and the app numbers includes without it. Set here, before that skip, so no
+    // later branch can push an unnumbered geometry.
+    g.declared_region_id = r.role == "include" ? declared_include : 0;
     // ★ A STATED FRAME THAT DISAGREES WITH plane_basis() IS A REFUSAL, and it is
     // raised HERE because this is where the face can be named. Skipping the region
     // would drop it silently -- the outline would be gone and the wall unlatticed,
@@ -1025,6 +1033,26 @@ LatticeRoleRegions lattice_role_regions_from_job(const JobDescription& job,
                              // (parse_job already refused zero extents)
     (r.role == "include" ? rr.includes : rr.excludes).push_back(g);
   }
+  // ── ★ K6: EVERY INCLUDE CARRIES ITS DECLARED NUMBER, CHECKED HERE ────────────
+  // This is the guard that would have caught the defect #354 found by reading. The id was
+  // set on the `kind == "region"` branch only, so the manual face/bolt path -- the one
+  // carrying every region the app plans -- pushed geometries numbered 0, and
+  // `stepped_region_owner` silently fell back to the POSITION, which is the compaction bug
+  // K6 exists to remove. A unit test on the function could not see it, because the test
+  // built its geometries by hand and never came through this builder.
+  //
+  // A branch that forgets to number is now a refusal rather than a silent fallback. It is
+  // a can't-happen today -- an id of 0 would mean this loop pushed an include it never
+  // counted -- and it still refuses, by name, because the failure it replaces was invisible.
+  for (std::size_t i = 0; i < rr.includes.size(); ++i)
+    if (rr.includes[i].declared_region_id <= 0)
+      throw JobError(
+          "internal: include region at position " + std::to_string(i + 1) +
+          " was built without its declared region number. Core resolves which region owns "
+          "a shared voxel by that number (stepped_region_owner), and the built list is "
+          "compacted when an include fails to resolve, so a position is not a number. "
+          "Refusing rather than answering with the position, which is the defect this "
+          "check exists to prevent.");
   return rr;
 }
 
@@ -7082,10 +7110,19 @@ LatticeVariantOutcome lattice_one_variant(
         plan_regions.push_back(pr);
       }
     }
-    // ★ THE BOUND THE JOB'S INTENT ASKS FOR. Aesthetic keeps the 20 % "prints open" rule
-    // beside the floor; structural drops it, because the certificate solves every strut
-    // rather than averaging them and nothing structural depends on a cell looking open.
-    const bool prints_open = job.grading.intent == "aesthetic";
+    // ── ★ D5: WHICH PLANS GET THE OPEN BOUND (reviewer's ruling, 2026-10-10) ─────
+    // This was `intent == "aesthetic"` alone, and a DOUBLED job carries no intent at all
+    // (job.cpp refuses the key), so Default Grade plans were checked WITHOUT the bound its
+    // own packer applies. #354's ladder applies it with no intent gate
+    // (LatticeOctreeBake.swift:491-511), so core now does the same for a doubled plan under
+    // either intent.
+    //
+    // Under Stepped it stays aesthetic-only, as before: structural uses the floor alone,
+    // because the beam-network certificate solves every strut rather than averaging them
+    // and nothing structural depends on a cell looking open.
+    const bool prints_open = R.algorithm == LatticeAlgorithm::Doubled
+                                 ? true
+                                 : job.grading.intent == "aesthetic";
     // ★ D5: THE TILE FLOOR IS THE SMALLEST CELL THAT PRINTS, not the bead. A tile wider
     // than one bead is not therefore printable: the strut it carries at the densest
     // density the job allows still has to clear that bead, which is exactly

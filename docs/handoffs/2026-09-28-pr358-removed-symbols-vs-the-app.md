@@ -541,6 +541,57 @@ Region 2 at base 12 keeps its thirds and its cells (6 and 3) pass, so the rule i
 base-dependent. The maintainer's decision on which rule is physically right now has its
 evidence.
 
+## PRINTS-OPEN: one rule, one place — and a per-cell variant PARKED, not built
+
+Settled 2026-10-10 after a ruling, a stop, and a corrected input. Recorded because the
+reasoning is worth keeping and the parked idea must not be built by accident.
+
+**What was proposed.** Check prints-open PER CELL SIZE and drop the rule that removes a whole
+divisor family because its single tile would be too small. The argument was sound and still
+is: on 3418E167 a 4.6667 mm cell was refused while a 3.5 mm cell passed — **the larger cell
+refused for the smaller tile it was cut from**, which cannot be right as physics.
+
+**Why I stopped instead of building it.** I built it, and five tests went red — one of them
+`test_menus_match_the_previews_live_histogram`, which holds the DIAG line from the preview's
+own packer on a real part (bases 12 and 10.31) and asserts agreement with core **in both
+directions**, with equal set sizes. Measured with the family rule dropped:
+- the preview kept **16** sizes; core offered **24**;
+- the 8 extra were exactly the dropped families' sizes — 10 = 5×(12/6), 2.062 = 10.31/5,
+  2 = 12/6;
+- nothing the preview kept was missing.
+
+So at those bases the app's packer behaves exactly like core's family rule, and dropping it
+would make core offer sizes the app will never produce.
+
+**The contradiction, and its resolution.** The same app had placed 683 cells of 4.6667 mm at
+what #354 then believed was a **7 mm** base — the thirds family, which the family rule drops.
+One rule could not explain both measurements, so I reported both and built neither. #354 then
+corrected itself: **region 1's base is 14 mm**, from the bake's own `regionCell final=14.0`;
+the "7" had been inferred from the cell sizes. At base 14, 4.6667 = 14/3 and 3.5 = 14/4, and
+both tiles print open under either rule. Verified here: base 14's menu is
+`14 11.2 10.5 9.333 8.4 7 5.6 4.667 3.5 2.8` and carries both of region 1's sizes; base 12's
+carries both of region 2's (6 and 3).
+
+**It was a wrong input, not a wrong rule** — twice over, since the same wrong base also made me
+report prints-open as blocking the 3.5 mm cells.
+
+**What shipped instead.** `lattice_prints_open(topo, cell_size_mm, bead_mm)` is exported on
+core's forward law, and core's own two call sites ask it rather than repeating the comparison.
+The app replaces its two call sites with it through the bridge; its independent 0.20 crossing
+(2.370917 mm at a 0.45 mm bead) had agreed with core's to **9 nm** before the function existed.
+The smallest open cell is **5.268704 × bead**, which is exactly
+`lattice_min_printable_cell_mm(topo, bead, kSteppedPrintsOpenMaxRho)` — not a second formula.
+
+**PARKED, DO NOT BUILD:** the per-cell variant. It offers more sizes, so both sides would have
+to change together and only with the maintainer's agreement. The implementation is ~40 lines
+plus five menu expectations, and it would require rewriting a test built from the app's live
+output.
+
+**A probe bug worth remembering.** My first measurement of the open minimum reported 50 mm.
+`lattice_density_from_strut` THROWS off the measured table, and my catch mapped every throw to
+"too dense", so the bisection ran to its upper bound. A throw has to be resolved by **which
+side** it falls on; the exported function does that explicitly.
+
 ### The fingerprint defect, for the record
 
 Not the worktree (`git -C core rev-parse` resolves fine there), and not only the

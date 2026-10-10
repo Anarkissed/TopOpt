@@ -1,5 +1,5 @@
 {
- "_comment": "Control for R1: the IDENTICAL plan with no slot_origin_mm. The derived origin stands, the 1.5 mm cell is off its grid, and it must be REFUSED -- which is what makes the accepted case attributable to the key and not to a loosened check.",
+ "_comment": "Control for R1: the IDENTICAL plan with no slot_origin_mm. The derived origin stands, the cells are off its grid, and it must be REFUSED -- which is what makes the accepted cases attributable to the key and not to a loosened check.",
  "bake_build_orientation": "off",
  "grading": {
   "algorithm": "doubled",
@@ -17,8 +17,8 @@
    {
     "geometry": {
      "depth_mm": 12.0,
-     "half_u_mm": 6.0,
-     "half_w_mm": 6.0,
+     "half_u_mm": 12.0,
+     "half_w_mm": 12.0,
      "normal": [
       0.0,
       1.0,
@@ -29,7 +29,7 @@
       0.0,
       8.0
      ],
-     "plan_base_cell_mm": 3.0
+     "plan_base_cell_mm": 6.0
     },
     "kind": "face",
     "role": "include"
@@ -44,16 +44,16 @@
      0.0,
      8.4
     ],
-    "size_mm": 3.0
+    "size_mm": 6.0
    },
    {
     "region_id": 1,
     "origin_mm": [
-     21.4,
+     24.4,
      0.0,
      8.4
     ],
-    "size_mm": 1.5
+    "size_mm": 3.0
    }
   ],
   "topology": "octet"
