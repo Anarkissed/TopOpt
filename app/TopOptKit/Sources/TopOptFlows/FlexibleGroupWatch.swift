@@ -21,8 +21,11 @@ import Foundation
 final class FlexibleGroupWatch {
     let projectID: UUID
     private weak var project: ProjectModel?
-    /// The roles and weights as last seen (what moved since is "changed").
+    /// The roles and weights as last seen (what moved since is "changed"), and the groups.
     private var lastForce: ForceModel
+    private var lastSelection: SelectionModel
+    /// The expansion (areas, normals, sectors) of the part as it is — rebuilt only when the regions or the mesh change.
+    private var expander: (key: String, x: FlexibleMainPageLoads.Expander)?
     private var subscriptions: [AnyCancellable] = []
     private var scheduled = false
     /// How many times it wrote (tests).
@@ -32,6 +35,7 @@ final class FlexibleGroupWatch {
         projectID = project.id
         self.project = project
         lastForce = project.force
+        lastSelection = project.selection
         subscriptions = [
             project.$force.dropFirst().sink { [weak self] _ in self?.schedule() },
             project.$selection.dropFirst().sink { [weak self] _ in self?.schedule() },
@@ -51,37 +55,58 @@ final class FlexibleGroupWatch {
     /// Follow the main page once (also called directly by tests).
     func follow() {
         guard let p = project else { return }
-        defer { lastForce = p.force }
+        let seenForce = lastForce, seenSelection = lastSelection
+        defer { lastForce = p.force; lastSelection = p.selection }
         guard let stored = p.lattice.flexible, let mesh = p.viewerMesh else { return }
         let s = FlexibleSettingsMigration.migrated(stored)
         let regions = FlexibleRegions(model: p.faceRegions, mesh: mesh)
-        let x = FlexibleMainPageLoads.Expander(faceRegions: p.faceRegions, mesh: mesh, regions: regions)
+        let key = "\(regions.key)|\(p.faceRegions.regions.count)|\(mesh.triangleCount)|\(mesh.positions.count)"
+        let x: FlexibleMainPageLoads.Expander
+        if let e = expander, e.key == key { x = e.x } else {
+            x = FlexibleMainPageLoads.Expander(faceRegions: p.faceRegions, mesh: mesh, regions: regions)
+            expander = (key, x)
+        }
         var w = FlexibleGroupWorld(selection: p.selection, force: p.force, flexible: s, x: x,
                                    latticeRoles: Set(p.lattice.groupRoles.keys))
         // (1) one force per squeeze group
         var changed = Set<UUID>()
         for g in p.selection.groups {
-            guard let now = p.force.kind(for: g.id).weightKg, let was = lastForce.kind(for: g.id).weightKg,
-                  lastForce.kind(for: g.id).isLoad, abs(now - was) > 1e-9 else { continue }
+            guard let now = p.force.kind(for: g.id).weightKg, let was = seenForce.kind(for: g.id).weightKg,
+                  seenForce.kind(for: g.id).isLoad, abs(now - was) > 1e-9 else { continue }
             changed.insert(g.id)
         }
         w.equaliseHands(changed: changed)
         // (2) a face its group let go of: parked; back with its detail when a group holds it with a role again (only
-        // "held or not": a face whose group pulls is the adopt's, which knows core's direction)
+        // "held or not": a face whose group pulls is the adopt's, which knows core's direction). Only when the groups or
+        // a role moved — a weight alone (the scrub) never holds or lets go of a face
         var flex = w.flexible
-        let l = w.loads()
-        let skip = Set(flex.removedRegions ?? []).union(flex.pressRegions)
-        let membership = FlexibleMainPageLoads(entries: l.entries.filter { $0.value.role != .ask })
-        let asks = Set(l.entries.filter { $0.value.role == .ask }.map(\.key))
-        FlexibleStageModel.parkOrphans(&flex, loads: membership, skip: skip.union(asks))
-        FlexibleStageModel.unpark(&flex, loads: membership, skip: skip)
+        if p.selection != seenSelection || Self.roles(p.force, p.selection) != Self.roles(seenForce, p.selection) {
+            let l = w.loads()
+            let skip = Set(flex.removedRegions ?? []).union(flex.pressRegions)
+            let membership = FlexibleMainPageLoads(entries: l.entries.filter { $0.value.role != .ask })
+            let asks = Set(l.entries.filter { $0.value.role == .ask }.map(\.key))
+            FlexibleStageModel.parkOrphans(&flex, loads: membership, skip: skip.union(asks))
+            FlexibleStageModel.unpark(&flex, loads: membership, skip: skip)
+        }
         // (3) one unit: the main page's kg / lbs, where Settings shows kg or lb
-        if p.force.unit != lastForce.unit {
+        if p.force.unit != seenForce.unit {
             let mine = FlexibleWeightUnit(stored: flex.weightUnit)
             if mine == .kg || mine == .lb { flex.weightUnit = p.force.unit == .kg ? nil : FlexibleWeightUnit.lb.rawValue }
         }
         if w.force != p.force { p.force = w.force; writes += 1 }
         if flex != s { p.lattice.flexible = flex; writes += 1 }
+    }
+
+    /// Each group's role, its weight left out (anchor / load and its direction / pending / keep clear).
+    static func roles(_ f: ForceModel, _ s: SelectionModel) -> [String] {
+        s.groups.map { g in
+            switch f.kind(for: g.id) {
+            case .anchor: return "a"
+            case let .load(d, _): return "l\(d.rawValue)"
+            case .pending: return "p"
+            case .clearance: return "c"
+            }
+        }
     }
 }
 

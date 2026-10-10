@@ -121,3 +121,31 @@ Test Case '-[TopOptFlowsTests.FlexibleGroupSyncVerifyTests testTheRestoreNeverTa
 	 Executed 30 tests, with 2 tests skipped and 0 failures (0 unexpected) in 50.826 (50.830) seconds
 	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
 	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.001) seconds
+
+## added before the suite: B1 LIVE on Topology (the watch) — red first (FLEX_I4V_RED=1), then green with the class (12/12)
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.001) seconds
+app/TopOptKit/Tests/TopOptFlowsTests/FlexibleGroupSyncVerifyTests.swift:185: error: -[TopOptFlowsTests.FlexibleGroupSyncVerifyTests testOnTopologyTheWatchFollowsAMainPageEditInTheSameUndoStep] : XCTAssertFalse failed - ★ face 5 left Settings with its hand
+app/TopOptKit/Tests/TopOptFlowsTests/FlexibleGroupSyncVerifyTests.swift:192: error: -[TopOptFlowsTests.FlexibleGroupSyncVerifyTests testOnTopologyTheWatchFollowsAMainPageEditInTheSameUndoStep] : XCTAssertFalse failed - ★ face 3 un-pressed
+Test Case '-[TopOptFlowsTests.FlexibleGroupSyncVerifyTests testOnTopologyTheWatchFollowsAMainPageEditInTheSameUndoStep]' failed (1.634 seconds).
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.001) seconds
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.003) seconds
+testAFaceARegionCannotLetGoOfIsNeverInTwoGroups]' passed (0.014 seconds).
+testAFaceLeavingAProtectGroupKeepsItsProtect]' passed (0.775 seconds).
+testAMainPageEditReachesSettingsAndAReopenNeverUndoesIt]' passed (0.093 seconds).
+testAPinchsRowsAreOneColourOnTopologyAndSideBySide]' passed (0.025 seconds).
+testHisTopBIsNotPutUnderTopsLatticeAtRestore]' passed (0.390 seconds).
+testOnePinchSideWeightOnTheMainPageIsTheGroups]' passed (0.055 seconds).
+testOneUnitOnBothPages]' passed (0.021 seconds).
+testOnTopologyTheWatchFollowsAMainPageEditInTheSameUndoStep]' passed (0.024 seconds).
+testResetAllKeepsHisGroupWholeAndHisGroupNNameIsHis]' passed (0.027 seconds).
+testTheLinkLineIsNotReplacedByStillBuilding]' passed (0.000 seconds).
+testTheLinkLineIsSavedReachesTopologyAndShowsOnce]' passed (1.541 seconds).
+testTheRestoreNeverTakesApartWhatHeSet]' passed (0.031 seconds).
+	 Executed 12 tests, with 0 failures (0 unexpected) in 2.995 (2.997) seconds
+	 Executed 12 tests, with 0 failures (0 unexpected) in 2.995 (2.997) seconds
+	 Executed 12 tests, with 0 failures (0 unexpected) in 2.995 (2.998) seconds
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.001) seconds

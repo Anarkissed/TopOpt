@@ -159,6 +159,47 @@ final class FlexibleGroupSyncVerifyTests: XCTestCase {
         }
     }
 
+    /// ★ B1 LIVE, on Topology (the page's watch — no Flexible page open): a hand deleted there leaves Settings in the SAME
+    /// undo step; Group C's role cleared parks face 3; its role back brings face 3 back with its curve; a weight scrub
+    /// alone never parks anything. RED CONTROL (round 3's rule): Settings keeps pressing.
+    func testOnTopologyTheWatchFollowsAMainPageEditInTheSameUndoStep() async throws {
+        for control in [true, false] {
+            FlexibleGroupLinks.controlKeepOrphans = control || Self.red
+            let p = try his("A1_0003").project
+            var s = try XCTUnwrap(p.lattice.flexible)
+            var f3 = try XCTUnwrap(s.face(3)); f3.deepestMM = 3.25; s.setFace(f3)
+            p.lattice.flexible = s
+            p.sealUndoStep()
+            let stage = FlexibleMainStage()
+            stage.apply(p, owned: false, pageUp: false)   // Topology: the watch only
+            let watch = try XCTUnwrap(stage.groupWatch, "the watch, on Topology")
+            let steps = p.undo.past.count
+            let g = try group(p, "Group 3 · Face 5")
+            p.selection.remove(g.id); p.force.clearKind(g.id); p.force.sync(groups: p.selection.groups)
+            watch.follow()
+            p.sealUndoStep()
+            let faces = T.faces(p)
+            print("FLEX-I4V B1-watch\(control ? " (control)" : ""): \(faces)")
+            if control { XCTAssertTrue(faces.contains { $0.hasPrefix("5 loaded") }, "control: Settings keeps pressing face 5"); continue }
+            try fixed {
+                XCTAssertFalse(faces.contains { $0.hasPrefix("5 ") }, "★ face 5 left Settings with its hand")
+                XCTAssertEqual(p.undo.past.count, steps + 1, "★ one undo step with the delete")
+                p.performUndo()
+                XCTAssertTrue(T.faces(p).contains { $0.hasPrefix("5 loaded") }, "★ one undo brings both back")
+                // Group C's role cleared, then back
+                let c = try group(p, "Group C")
+                p.force.clearKind(c.id); watch.follow()
+                XCTAssertFalse(T.faces(p).contains { $0.hasPrefix("3 ") }, "★ face 3 un-pressed")
+                p.force.makeLoad(c.id); p.force.setDirection(c.id, .push); p.force.setWeight(c.id, kg: 2); watch.follow()
+                XCTAssertEqual(FlexibleSettingsMigration.migrated(try XCTUnwrap(p.lattice.flexible)).face(3)?.deepestMM, 3.25, "★ back with its curve")
+                // a scrub alone parks nothing
+                let before = T.faces(p)
+                p.force.setWeight(c.id, kg: 2.5); watch.follow()
+                XCTAssertEqual(T.faces(p).count, before.count, "a weight alone never parks")
+            }
+        }
+    }
+
     // MARK: - B2: the restore never takes apart what he set; the disagreement is asked in Settings
 
     /// ★ THE VERIFIER'S P13 AND P12, together on his pad saved by round 3's rules: Settings PRESSES face 0 at his own 3 kg
