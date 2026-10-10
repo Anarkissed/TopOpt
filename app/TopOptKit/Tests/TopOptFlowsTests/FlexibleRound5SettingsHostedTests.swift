@@ -175,7 +175,13 @@ final class FlexibleRound5SettingsHostedTests: XCTestCase {
             let fresh = m.freshSettings()
             try click(h, "resetConfirm")
             XCTAssertEqual(m.settings, fresh, "\(tag): reset")
-            XCTAssertNotNil(m.settings.face(FlexibleHisProject.topA), "\(tag): top A back")
+            // ★ RE-PINNED (round 6 item 4 — his answer: the trash takes the face off its main-page group too): a fresh setup
+            // does not bring top A back
+            XCTAssertNil(m.settings.face(FlexibleHisProject.topA), "\(tag): top A stays deleted")
+            // ★ ROUND 6 (item 4): the fresh setup is one squeeze group per main-page hand, so faces 3 and 5 (split by + New
+            // above) now compete — the pop-up says so, on the action that caused it (D2's rule); closed before the rail
+            pump(0.6)
+            if local(h, "fixClose") != nil { try click(h, "fixClose") }
             report.append(String(format: "%@: panel x %.0f–%.0f · rail x %.0f–%.0f · tab x %.0f–%.0f · %d tabs · titles Exit → Save & Exit", tag,
                                  panel.minX, panel.maxX, rail.minX, rail.maxX, scroll.minX, scroll.maxX, tabs.count))
             // the Model tab
@@ -223,7 +229,7 @@ final class FlexibleRound5SettingsHostedTests: XCTestCase {
         let his = try FlexibleHisProject.restore()
         addTeardownBlock { @MainActor in his.cleanup() }
         let m = settledModel(his.project)
-        for r in [2, 4] { _ = m.press(r) }
+        for r in [2, 4] { FlexibleHisProject.pressAnswering(m, r) }   // ★ round 6 item 4: sides rest (an Anchor) — [Squeeze it]
         for r in [3, 5, FlexibleHisProject.topB, 2, 4] { m.newGroup(with: r) }
         XCTAssertTrue(pumpUntil(60) { !m.designsInFlight })
         XCTAssertEqual(m.squeezeGroups.count, 6)

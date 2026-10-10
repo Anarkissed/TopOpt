@@ -107,7 +107,7 @@ final class FlexibleGroupPaletteHostedTests: XCTestCase {
             addTeardownBlock { @MainActor in his.cleanup() }
             let m = settledModel(his.project)
             // batch S's six groups on his pad
-            for r in [2, 4] { _ = m.press(r) }
+            for r in [2, 4] { FlexibleHisProject.pressAnswering(m, r) }   // ★ round 6 item 4: sides rest (an Anchor) — [Squeeze it]
             for r in [3, 5, FlexibleHisProject.topB, 2, 4] { m.newGroup(with: r) }
             XCTAssertTrue(pumpUntil(60) { !m.designsInFlight })
             XCTAssertEqual(m.squeezeGroups.count, 6)

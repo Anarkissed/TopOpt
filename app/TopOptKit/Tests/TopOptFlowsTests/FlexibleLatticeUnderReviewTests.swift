@@ -147,7 +147,9 @@ final class FlexibleLatticeUnderReviewTests: XCTestCase {
     /// pill reads the pinch preview and every column of Top B is latticed.
     @MainActor
     func testHisRound3PadAsSaved() async throws {
-        let r = try FlexibleHisProject.restore(asSaved: true)
+        // ★ ROUND 6 (item 4): his pad as SAVED, before the restore's link — linked (H18), Top B joins Top's hand and Top's
+        // lattice role covers it, so there is nothing to say (FlexibleGroupSyncTests' his_0004 row; FlexibleLatticeUnderTests)
+        let r = try FlexibleHisProject.restoreUnlinked(asSaved: true)
         addTeardownBlock { r.cleanup() }
         let stage = FlexibleMainStage()
         stage.reduceMotion = { true }
@@ -198,7 +200,9 @@ final class FlexibleLatticeUnderReviewTests: XCTestCase {
     /// his project back. CONTROL: before the tap, 192 of 832 columns.
     @MainActor
     func testHisRound5PadAsSavedIsFixedInOneTap() async throws {
-        let r = try FlexibleHisProject.restore(FlexibleHisProject.round5Dir, asSaved: true)
+        // ★ ROUND 6 (item 4): his r5 as SAVED, before the restore's link — linked (H18), faces 3 and 5 are main-page hands,
+        // and the one tap is each hand's Selections "Lattice" chip instead of two new protected groups (batch E's .declare)
+        let r = try FlexibleHisProject.restoreUnlinked(FlexibleHisProject.round5Dir, asSaved: true)
         addTeardownBlock { r.cleanup() }
         let p = r.project
         let m = try await FlexibleHisProject.openedModel(p, test: self, timeout: 120)

@@ -55,10 +55,18 @@ enum FlexibleGroupLinks {
     nonisolated(unsafe) static var controlKeepWeightFrom = false
     /// RED CONTROL: the trash leaves the face in its main-page group (round 5 S6's rule).
     nonisolated(unsafe) static var controlKeepMainGroup = false
+    /// RED CONTROL: a fresh adopt ignores the hands' names (every new Load group its own squeeze group).
+    nonisolated(unsafe) static var controlNoFamilies = false
 
     /// A name THIS code gives a hand ("Group 2", "Group 2 · Face 4") — renamed when its group's number or hands change.
     static func madeHere(_ name: String) -> Bool {
         name.range(of: #"^Group [0-9]+( · .+)?$"#, options: .regularExpression) != nil
+    }
+
+    /// The squeeze group number a hand named here was made for ("Group 2 · Face 4" → 2); nil for any other name.
+    static func family(_ name: String?) -> Int? {
+        guard !controlNoFamilies, let name, madeHere(name) else { return nil }
+        return Int(name.dropFirst("Group ".count).prefix { $0.isNumber })
     }
 }
 
@@ -415,8 +423,11 @@ extension FlexibleStageModel {
             f.squeezeGroup = gid == FlexibleSqueezeGroups.first ? nil : gid
             if let e = inherited { f.weightKg = e.weightKg; f.weightFrom = e.groupID } else { f.weightKg = kgUse ?? f.weightKg; f.weightFrom = nil }
             w.flexible.setFace(f)
-            if inherited != nil {
+            if let e = inherited {
                 FlexibleSqueezeGroups.move(region, to: gid, hand: hand, in: &w.flexible)
+                // pressed on a group's tab, its hand takes that group's one force, and joins a hand on its side there
+                if groupID != nil, let fk = force, w.force.kind(for: e.groupID).isLoad { w.force.setWeight(e.groupID, kg: fk) }
+                if groupID != nil, let g = FlexibleSqueezeGroups.group(of: region, in: w.flexible) { w.mergeSameSide(squeeze: g.id) }
             } else {
                 w.linkPressed(region, squeeze: gid, kg: kgUse ?? f.weightKg)
             }

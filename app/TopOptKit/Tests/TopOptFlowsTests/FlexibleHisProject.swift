@@ -107,6 +107,16 @@ enum FlexibleHisProject {
         return try restore(source, asSaved: asSaved)
     }
 
+    /// ★ ROUND 6 (item 4 — his answer: Anchor = Rests, one set of groups): [Press it] on a face a main-page Anchor holds
+    /// asks once ("Face 0 rests (main page: Bottom)"); the suites that press his bottom or his sides answer [Squeeze it],
+    /// as he would (the face then leaves its Anchor for a hand of its own — before, the main page kept anchoring it).
+    @discardableResult
+    static func pressAnswering(_ m: FlexibleStageModel, _ region: Int) -> Bool {
+        let ok = m.press(region)
+        if m.restsAsk?.region == region { return m.squeezeAnchored() }
+        return ok
+    }
+
     static var materialsPath: String { repoRoot.appendingPathComponent("core/src/materials/flexible_materials.json").path }
     static var stampsPath: String { repoRoot.appendingPathComponent("docs/design/flexibles/data/stamps.json").path }
 

@@ -585,7 +585,10 @@ public final class FlexibleStageModel: ObservableObject {
         let relinked = loads.adopt(into: &s)
         // ★ ROUND 6 (item 4, his answer: "a main-page Load group = a squeeze group"): a Load group none of whose faces
         // was pressed here before arrives as its OWN squeeze group (round 3 put every new face in group 1)
-        if !FlexibleGroupLinks.controlOneSqueezeTag { ownSqueezeTags(&s, before: before, existing: existing) }
+        if !FlexibleGroupLinks.controlOneSqueezeTag {
+            let names = Dictionary(loads.entries.values.map { ($0.groupID, $0.groupName) }, uniquingKeysWith: { a, _ in a })
+            ownSqueezeTags(&s, before: before, existing: existing, names: names)
+        }
         FlexiblePress.adoptWeights(full, into: &s)   // ★ AP1: linked presses re-sync from their group
         FlexibleSqueezeGroups.uniteHands(&s, loads: loads)
         return relinked
@@ -593,17 +596,23 @@ public final class FlexibleStageModel: ObservableObject {
 
     /// ★ ROUND 6 (item 4): each main-page Load group whose pressed faces are ALL new here (none was pressed before the
     /// adopt) takes a squeeze group of its own — after the groups that `existing` held (group 1 when there were none).
-    nonisolated static func ownSqueezeTags(_ s: inout FlexibleStageSettings, before: Set<Int>, existing: [Int]) {
-        var order: [UUID] = [], byGroup: [UUID: [Int]] = [:]
+    /// Hands THIS code named for one squeeze group ("Group 2 · Face 4", "Group 2 · Face 2": a pinch's two sides) arrive
+    /// as ONE group again (a brand-new setup — Reset all — keeps his pinch whole).
+    nonisolated static func ownSqueezeTags(_ s: inout FlexibleStageSettings, before: Set<Int>, existing: [Int],
+                                           names: [UUID: String] = [:]) {
+        var order: [String] = [], byKey: [String: [Int]] = [:], keyOf: [UUID: String] = [:]
         for f in s.loadedFaces where !before.contains(f.faceRegionID) {
             guard let g = f.weightFrom else { continue }
-            if byGroup[g] == nil { order.append(g) }
-            byGroup[g, default: []].append(f.faceRegionID)
+            // a Load group with a face pressed here before keeps it (uniteHands puts the new face with it)
+            if s.loadedFaces.contains(where: { before.contains($0.faceRegionID) && $0.weightFrom == g }) { continue }
+            let key = keyOf[g] ?? FlexibleGroupLinks.family(names[g]).map { "family-\($0)" } ?? g.uuidString
+            keyOf[g] = key
+            if byKey[key] == nil { order.append(key) }
+            byKey[key, default: []].append(f.faceRegionID)
         }
         var next = (existing.max() ?? 0) + 1
-        for g in order {
-            if s.loadedFaces.contains(where: { before.contains($0.faceRegionID) && $0.weightFrom == g }) { continue }
-            for r in byGroup[g] ?? [] {
+        for key in order {
+            for r in byKey[key] ?? [] {
                 guard var f = s.face(r) else { continue }
                 f.squeezeGroup = next == FlexibleSqueezeGroups.first ? nil : next
                 s.setFace(f)

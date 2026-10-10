@@ -42,6 +42,9 @@ struct FlexibleFixPopup: View {
                         .frame(width: 32, height: 32)
                 }
                 .buttonStyle(.plain)
+                .background(GeometryReader { g in   // ★ round 6 item 4: its frame reaches the hosted tests
+                    Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["fixClose": g.frame(in: .global)])
+                }.allowsHitTesting(false))
                 .accessibilityLabel("Close")
                 .accessibilityIdentifier("flexible-fix-close")
             }

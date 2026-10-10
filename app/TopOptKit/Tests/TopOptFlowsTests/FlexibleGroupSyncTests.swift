@@ -27,6 +27,7 @@ final class FlexibleGroupSyncTests: XCTestCase {
         FlexibleGroupLinks.controlOneSqueezeTag = false
         FlexibleGroupLinks.controlKeepWeightFrom = false
         FlexibleGroupLinks.controlKeepMainGroup = false
+        FlexibleGroupLinks.controlNoFamilies = false
         try await super.tearDown()
     }
 
@@ -619,6 +620,27 @@ final class FlexibleGroupSyncTests: XCTestCase {
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         try lines.joined(separator: "\n").write(to: dir.appendingPathComponent("i4_stage_job_diffs.txt"), atomically: true, encoding: .utf8)
         print("FLEX-I4 stage jobs:\n" + lines.joined(separator: "\n"))
+    }
+
+    // MARK: - (13) Reset all keeps a pinch whole
+
+    /// Reset all ("start fully fresh", his round-5 answer) reads the main page again: one squeeze group per main-page Load
+    /// group (his answer) — but the two rows THIS code made for one pinch ("Group 2 · Face 4", "Group 2 · Face 2") arrive
+    /// as ONE group again, so a reset never splits his pinch. RED CONTROL: names ignored — two groups for the two sides.
+    func testResetAllKeepsAPinchWhole() async throws {
+        for control in [true, false] {
+            FlexibleGroupLinks.controlNoFamilies = control
+            let p = try his("A1_0003").project
+            let m = model(p)
+            m.refreshMainPageLoads()
+            m.resetAll()
+            let g4 = m.squeezeGroup(of: 4), g2 = m.squeezeGroup(of: 2)
+            print("FLEX-I4 reset (\(control ? "control" : "families")): \(m.squeezeGroups.map(\.regions)) · main \(Self.rows(p).map(\.name))")
+            if control { XCTAssertNotEqual(g4?.id, g2?.id, "control: names ignored, the pinch's two sides are two groups"); continue }
+            XCTAssertEqual(g4?.id, g2?.id, "★ the pinch is one group again")
+            XCTAssertEqual(Set(g4?.regions ?? []), [4, 2], "faces 4 and 2 only")
+            XCTAssertEqual(Set(m.squeezeGroups.flatMap(\.regions)), [1, 2, 3, 4, 5], "every pressed face back")
+        }
     }
 
     // MARK: - (11) a link alone never stales the lattice

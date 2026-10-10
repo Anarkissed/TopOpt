@@ -45,7 +45,9 @@ extension FlexibleStageModel {
         actionSerial += 1
         let regions = Set(before.faces.map(\.faceRegionID))
         project.sealUndoStep()   // the edits before it are their own step (their save may still be pending)
-        edit { $0 = fresh }
+        // ★ ROUND 6 (item 4): through the group links — the hands named here follow the fresh squeeze groups on the main
+        // page in the same step (FlexibleGroupSync.syncGroups)
+        syncGroups { $0.flexible = fresh }
         for r in regions { purgeFaceCaches(r) }
         refreshMainPageLoads()
         relinkedWeights = [:]
